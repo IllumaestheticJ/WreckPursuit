@@ -184,6 +184,12 @@ pub struct SpinGrip {
     pub fx_slide_from_deg: f32,
     /// Slip angle (degrees) from which the drive floor is fully on.
     pub fx_slide_full_deg: f32,
+    /// 0..=1: how much the combined force is pulled back into the friction ellipse by scaling
+    /// **both** drive and side force (tyre-slip, drift transitions). The spin model alone can
+    /// ask for ~0.96 of the drive peak and nearly the full side force at once (a resultant of
+    /// ~1.3 μ), so lifting frees almost no side grip; with the ellipse a lift hands the drive
+    /// force's share back to cornering, as a real spinning tyre does. 0 (default) = off.
+    pub ellipse: f32,
 }
 
 impl Default for SpinGrip {
@@ -202,6 +208,7 @@ impl Default for SpinGrip {
             fx_slide: 0.958,
             fx_slide_from_deg: 1.0,
             fx_slide_full_deg: 3.0,
+            ellipse: 0.0,
         }
     }
 }
@@ -281,6 +288,21 @@ pub fn combined_forces_spin(
     let fy0 = combined_forces(def, 0.0, alpha, fz, grip).1;
     let fy_w = fy0 * spin_side_weight(m, spin, alpha);
     let fy = if fy_w.abs() > fy.abs() { fy_w } else { fy };
+    let (fx, fy) = if m.ellipse > 0.0 {
+        let mu_x = load_sensitive_mu(def.longitudinal.d, def.load_sensitivity, fz, def.fz0_n);
+        let mu_y = load_sensitive_mu(def.lateral.d, def.load_sensitivity, fz, def.fz0_n);
+        let ex = fx / (mu_x * fz * grip).max(1e-6);
+        let ey = fy / (mu_y * fz * grip).max(1e-6);
+        let e = ex * ex + ey * ey;
+        if e > 1.0 {
+            let k = 1.0 + (1.0 / e.sqrt() - 1.0) * m.ellipse.min(1.0);
+            (fx * k, fy * k)
+        } else {
+            (fx, fy)
+        }
+    } else {
+        (fx, fy)
+    };
     let y = m.fx_yield.clamp(0.0, 1.0);
     if y <= 0.0 {
         return (fx, fy);

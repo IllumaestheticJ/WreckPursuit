@@ -97,6 +97,44 @@ Next: the over-catch on rwd_b and the lift dependence. Candidates: a swing rack 
 as the new-side slide passes ~30° (catch, then hold), and asking the reference what starts the
 swing.
 
+### Round 2: the owner's lift flick (lead: "a brief throttle lift while switching keys")
+
+Default flick of `examples/transition.rs` is now the owner's (`Init::LiftFlick`, lifts 0.15 /
+0.25 / 0.4 s, old key released at once, gap 0.05 / 0.15 / 0.3 s, new key, throttle back on after
+the lift); `INIT=lift_then` = round 1's lift (old key held until the car is ~straight),
+`INIT=switch_end` = old key held through the lift, keys switched at its end; new config
+`drift best · VR` (grip-balance's preset). 27 flicks per row (3 cars × 3 lifts × 3 gaps).
+
+**No configuration swings through on the owner's flick: 0 crossings in all 7** (W, balance new,
+slow weight × plain / VR, drift best · VR), with or without the swing rack and yaw inertia.
+What happens: the lift does start a swing (slide 32° → 24°, yaw rate +30 → 0°/s in 0.15 s), but
+the new key turns the fronts into the old corner and pulls the car back into the old drift.
+Tried, none gives a swing (crossings 0–2 / 27 everywhere):
+- fronts following the travel from the switch (VR, align gain 1, key gain 0, via `SWING_PLAIN`);
+- the grip-balance smart lock without its into-turn cap in a slide (`smart_fade_both`) — the
+  cap does hold the fronts at −10.5° pushing into the old corner, but lifting it is not enough;
+- the spin model's deep-slip fade moved out (`spin_b2` 1.3 / 1.1 / 0.9): spins or no hold;
+- **a friction-ellipse cap on the spin model** (new `spin_ellipse`, default 0 = off): the spin
+  model gives ~0.96 of the drive peak **and** nearly full side force at once (~1.3 μ), so a lift
+  frees only ~10 % more side force — a real spinning tyre shares one friction budget, and that
+  is what makes a lift swing it. With the cap (0.5 / 1.0) the lift works, but the held drift
+  collapses (no hold in 4–7 configs): **our drift hold depends on that excess grip.**
+- switching keys at the end of the lift (`switch_end`): 0–1 / 27.
+
+**Catch (round 1's lift, the only flick that swings):** the swing rack now eases off on the new
+side (`swing_ease_from_deg` / `swing_ease_full_deg`, default 90 = no ease). Easing does not stop
+the swing-back (× 2.5: 9–10 / 18 with any ease, × 3: 5 / 18 with 8 swing-backs). The swing-back
+is the hold: catching means holding a drift on the new side with the key down, and the configs
+that swing (balance new · plain) hold only 1 / 27 of the robustness set; the ones that hold
+(VR, drift best 19–25 / 27) never swing. Slow weight · plain no longer swings at all on the
+merged grip-balance code (round 1's 9 / 18 needed yaw inertia × 2.25).
+
+**Conclusion: the ≥ 80 % target is blocked by the hold / swing conflict in the tyre model, not
+by the catch steering.** The likely real fix is the friction budget: a tyre that holds a powered
+drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a different balance
+(less drive floor, more rear side force share), i.e. a re-tune of the spin model around
+`spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
+
 ### debug_coupe ("slide transition is very violent", owner via lead)
 
 Transition tool with `CARS=<id> INIT=lift` (0.2 / 0.4 s lift, gaps 0.05 / 0.15 / 0.3 s, 6 flicks

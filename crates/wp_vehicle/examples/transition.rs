@@ -97,6 +97,13 @@ enum Init {
     /// reversed (release, `gap`, new key + throttle) when the old-side angle drops below
     /// [`REACT_DEG`] (the car passing straight), at the latest 1.5 s after the lift.
     Lift(f32),
+    /// The owner's flick (reference): throttle off for `.0` s from the flick **while the keys
+    /// are switched** (old countersteer released at once, `gap`, new key), throttle back on
+    /// after the lift.
+    LiftFlick(f32),
+    /// Throttle off for `.0` s with the old key held; the keys are switched (release, `gap`,
+    /// new key) at the end of the lift, throttle back on then.
+    LiftSwitchEnd(f32),
 }
 
 /// `SWING_PLAIN='{…}'`: steering fields merged over the configuration's steering from the
@@ -148,10 +155,16 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             if in_band >= TPS / 2 {
                 flick_at = Some(tick);
                 t.at_flick = old;
-                if init == Init::Reverse {
+                if matches!(init, Init::Reverse | Init::LiftFlick(_)) {
                     reverse_at = Some(tick);
                     swing_steer(true);
                 }
+            }
+        }
+        if let (Some(f), None, Init::LiftSwitchEnd(l)) = (flick_at, reverse_at, init) {
+            if (tick - f) as f32 >= l * TPS as f32 {
+                reverse_at = Some(tick);
+                swing_steer(true);
             }
         }
         if let (Some(f), None, Init::Lift(l)) = (flick_at, reverse_at, init) {
@@ -165,8 +178,8 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             (None, _) => (if entered { 1.0 } else { -1.0 }, 1.0),
             (Some(f), None) => {
                 let l = match init {
-                    Init::Lift(l) => l,
-                    Init::Reverse => 0.0,
+                    Init::Lift(l) | Init::LiftSwitchEnd(l) => l,
+                    Init::Reverse | Init::LiftFlick(_) => 0.0,
                 };
                 let thr = if ((tick - f) as f32) < l * TPS as f32 {
                     0.0
@@ -175,7 +188,13 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 };
                 (1.0, thr)
             }
-            (Some(_), Some(r)) => (if tick - r < gap_t { 0.0 } else { -1.0 }, 1.0),
+            (Some(f), Some(r)) => {
+                let thr = match init {
+                    Init::LiftFlick(l) if ((tick - f) as f32) < l * TPS as f32 => 0.0,
+                    _ => 1.0,
+                };
+                (if tick - r < gap_t { 0.0 } else { -1.0 }, thr)
+            }
         };
         rig.step(
             &VehicleInput {
@@ -300,6 +319,13 @@ fn configs() -> Vec<Config> {
             });
         }
     }
+    // Grip-balance's "drift: best (test)" preset: VR steering + `GripBalance::drift_best()`.
+    v.push(Config {
+        name: "drift best · VR",
+        plain: vr,
+        ride: RideTune::lab_default(),
+        grip: Some(GripBalance::drift_best()),
+    });
     if let Ok(o) = std::env::var("ONLY") {
         v.retain(|c| c.name.contains(o.as_str()));
     }
@@ -313,7 +339,12 @@ fn apply(cfg: &Config) {
     };
     plain::set_override(Some(p));
     ride_lab::set_override(Some(cfg.ride));
-    grip_lab::set_override(cfg.grip);
+    // `GRIP='{…}'`: fields merged over the configuration's grip balance (if it has one).
+    let grip = match (cfg.grip, std::env::var("GRIP")) {
+        (Some(g), Ok(j)) => Some(merged(&g, &j)),
+        (g, _) => g,
+    };
+    grip_lab::set_override(grip);
     let tyre = match std::env::var("TYRE") {
         Ok(j) => merged(&CarTune::spin_candidate(), &j),
         Err(_) => CarTune::spin_candidate(),
@@ -332,7 +363,26 @@ fn inits() -> Vec<Init> {
                 .collect(),
             Err(_) => vec![Init::Lift(0.2), Init::Lift(0.4)],
         },
-        _ => vec![Init::Reverse, Init::Lift(0.2), Init::Lift(0.4)],
+        Ok("lift_then") => vec![Init::Lift(0.2), Init::Lift(0.4)],
+        Ok("switch_end") => vec![
+            Init::LiftSwitchEnd(0.15),
+            Init::LiftSwitchEnd(0.25),
+            Init::LiftSwitchEnd(0.4),
+        ],
+        Ok("all") => vec![
+            Init::Reverse,
+            Init::Lift(0.2),
+            Init::Lift(0.4),
+            Init::LiftFlick(0.15),
+            Init::LiftFlick(0.25),
+            Init::LiftFlick(0.4),
+        ],
+        // Default: the owner's flick (reference: a brief lift while switching keys).
+        _ => vec![
+            Init::LiftFlick(0.15),
+            Init::LiftFlick(0.25),
+            Init::LiftFlick(0.4),
+        ],
     }
 }
 

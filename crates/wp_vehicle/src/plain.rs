@@ -83,6 +83,11 @@ pub struct PlainSteer {
     pub swing_rate: f32,
     /// Yaw rate where the swing rack acts, °/s.
     pub swing_yaw_dps: f32,
+    /// New-side slide (the key countersteering the current slide) where the swing rack starts
+    /// to ease off, degrees: the catch, then a normal rack for the hold (no over-catch).
+    pub swing_ease_from_deg: f32,
+    /// New-side slide where the swing rack is fully off, degrees.
+    pub swing_ease_full_deg: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -116,6 +121,8 @@ impl Default for PlainSteer {
             slide_key_gain: 1.0,
             swing_rate: 1.0,
             swing_yaw_dps: 60.0,
+            swing_ease_from_deg: 90.0,
+            swing_ease_full_deg: 90.0,
         }
     }
 }
@@ -258,7 +265,20 @@ fn with_swing(p: &PlainSteer, inp: &PlainInput) -> PlainSteer {
     if !swinging {
         return *p;
     }
-    let k = k.min(10.0);
+    // Ease off on the new side: the key countersteers the slide when key × body slip < 0
+    // (key + = right; body slip + = moving left of the heading).
+    let new_side = if key * inp.body_slip < 0.0 {
+        inp.body_slip.abs().to_degrees()
+    } else {
+        0.0
+    };
+    let (lo, hi) = (
+        p.swing_ease_from_deg,
+        p.swing_ease_full_deg.max(p.swing_ease_from_deg + 0.1),
+    );
+    let t = ((new_side - lo) / (hi - lo)).clamp(0.0, 1.0);
+    let ease = 1.0 - t * t * (3.0 - 2.0 * t);
+    let k = 1.0 + (k.min(10.0) - 1.0) * ease;
     PlainSteer {
         t_full_s: p.t_full_s / k,
         t_return_s: p.t_return_s / k,
