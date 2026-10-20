@@ -76,8 +76,11 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
 - **Sirens** (`siren.rs`): wail (≈650→1500 Hz, 4.6 s), yelp (same range, 0.33 s), phaser
   (0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in `audio_config.json`. `Auto` wails above
-  16 m/s and yelps below 9 m/s with hysteresis. Phase is computed from ticks, the procedural
-  synth runs the cadence itself phase-locked to it. Horn from `VehicleInput::horn`.
+  16 m/s and yelps below 9 m/s with hysteresis. Sweeps use a smoothstep rise and fall (no
+  corner at the peak or trough). Phase is computed from ticks; the procedural browser synth
+  starts at that phase and then runs the cadence on the audio clock (pitch only, constant
+  amplitude, no re-locking: per-frame re-locks to a jittery sim phase caused pitch hiccups).
+  Horn from `VehicleInput::horn`.
 - **Scanner** (`scanner.rs`): lines queued by `RadioPriority`, released after the tier delay
   (Basic 10 s, Pro 6, Elite 3 — `wp_police` tiers 0/1/2, same numbers as `data/police/tools.toml`; `None` = no scanner), one at a time, stale lines
   dropped, queue capped (lowest priority dropped first). Pursuit/Urgent lines chop lower ones.

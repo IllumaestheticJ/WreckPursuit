@@ -205,7 +205,8 @@ export class VoicePool {
     }
     if (moved(params.pos, l.pos)) this.setPanner(v.panner, params.pos, t, true);
     if (v.src && changed(params.pitch, l.pitch)) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
-    // Sirens follow their own clock and must see every phase; others only on change.
+    // Sirens schedule their pitch curve ahead on each update (their phase moves every frame);
+    // others only on change.
     const synthChanged =
       changed(params.freq_hz, l.freq_hz) || changed(params.pitch, l.pitch) || changed(params.load, l.load) || params.phase !== l.phase;
     if (v.synth && synthChanged) v.synth.update(params, t);

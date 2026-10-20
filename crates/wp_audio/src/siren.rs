@@ -87,13 +87,16 @@ impl SirenCadence {
                 }
             }
             SirenShape::Sweep => {
+                // Smoothstep rise and fall: the pitch eases in and out at both ends, so the
+                // turnarounds are glides. The old ease-out-rise / ease-in-fall had a corner at
+                // the top (pitch fell at full speed straight from the peak) and lingered at the
+                // bottom, which at yelp rate sounded like "ha-ha-ha" rather than a siren.
                 let r = self.rise_frac.clamp(0.01, 0.99);
+                let smooth = |u: f32| u * u * (3.0 - 2.0 * u);
                 if p < r {
-                    let u = p / r;
-                    1.0 - (1.0 - u) * (1.0 - u)
+                    smooth(p / r)
                 } else {
-                    let u = (p - r) / (1.0 - r);
-                    (1.0 - u) * (1.0 - u)
+                    1.0 - smooth((p - r) / (1.0 - r))
                 }
             }
         };
@@ -243,6 +246,48 @@ mod tests {
         assert!((c.freq_at_phase(0.55) - 1500.0).abs() < 1e-3);
         assert!(c.freq_at_phase(0.3) > c.freq_at_phase(0.1), "rising");
         assert!(c.freq_at_phase(0.9) < c.freq_at_phase(0.7), "falling");
+    }
+
+    /// The sweep has no corners: the pitch slope is ~0 on both sides of the peak and the
+    /// trough, and no step between neighbouring ticks is a jump. Guards against the old
+    /// kinked shape (sudden drop from the peak, dwell at the bottom) that made the yelp
+    /// sound like laughing.
+    #[test]
+    fn sweep_turnarounds_are_smooth() {
+        for pattern in [SirenPattern::Wail, SirenPattern::Yelp, SirenPattern::Phaser] {
+            let c = cfg().cadence[&pattern];
+            let span = c.hi_hz - c.lo_hz;
+            let eps = 0.002;
+            let r = c.rise_frac;
+            // One-sided slopes at each turnaround, in units of the mean slope of the faster
+            // half. A corner (the old shape) shows up as ~2; a smooth glide as ~0.
+            let unit = span / r.min(1.0 - r);
+            for turn in [0.0, r] {
+                let before = c.freq_at_phase(turn - eps + 1.0);
+                let at = c.freq_at_phase(turn);
+                let after = c.freq_at_phase(turn + eps);
+                let (s_in, s_out) = ((at - before) / eps / unit, (after - at) / eps / unit);
+                assert!(
+                    s_in.abs() < 0.2 && s_out.abs() < 0.2,
+                    "{pattern:?}: corner at phase {turn}: slopes {s_in} / {s_out}"
+                );
+            }
+            // Largest per-tick change stays within the smoothstep peak slope (1.5x the mean
+            // of the faster half): no steps anywhere in the cycle.
+            let ticks = (c.cycle_s / PHYSICS_DT) as u64;
+            let mut max_step: f32 = 0.0;
+            for t in 0..ticks {
+                let a = c.freq_at_phase(t as f32 / ticks as f32);
+                let b = c.freq_at_phase((t + 1) as f32 / ticks as f32);
+                max_step = max_step.max((b - a).abs());
+            }
+            let fastest_half = r.min(1.0 - r) * ticks as f32;
+            let bound = 1.6 * span / fastest_half;
+            assert!(
+                max_step < bound,
+                "{pattern:?}: step {max_step} Hz/tick vs bound {bound}"
+            );
+        }
     }
 
     #[test]
