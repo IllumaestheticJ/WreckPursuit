@@ -196,7 +196,7 @@ fn angle_around(c: V2, p: V2) -> f32 {
 /// every ~0.5 m, on its centreline and [`PATH_MARGIN_M`] inside each edge.
 fn turning_footprint(map: &CityMap, node: u32) -> Vec<V2> {
     let mut out = Vec::new();
-    for s in &map.segs {
+    for s in map.segs.iter() {
         let SegKind::Connector { node: nd, .. } = s.kind else {
             continue;
         };
@@ -784,7 +784,7 @@ fn dead_end(map: &CityMap, node: u32, c: V3, e: &End) -> Patch {
     let lat_dir = geom::normalize(geom::sub(b, a));
     // Straight run so the U-turn paths (with their half widths) fit inside.
     let mut run = 0.0f32;
-    for s in &map.segs {
+    for s in map.segs.iter() {
         let SegKind::Connector { node: nd, .. } = s.kind else {
             continue;
         };

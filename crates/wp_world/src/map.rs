@@ -2,6 +2,8 @@
 //! connector curves), connector conflict sets, a uniform-grid spatial index, a zone lookup grid
 //! and the [`WorldQuery`] implementation.
 
+use std::sync::Arc;
+
 use wp_contracts::{SignalState, SurfaceType, TimeOfDay, WorldQuery};
 
 use crate::geom::{self, V2, V3};
@@ -170,24 +172,28 @@ impl Grid {
 }
 
 /// Runtime city map.
+///
+/// The network, segments and spatial grids never change after [`CityMap::new`] and are
+/// shared (`Arc`), so cloning a map — and a whole `wp_sim::Sim` for crash-replay snapshots —
+/// copies only the small mutable part.
 #[derive(Debug, Clone)]
 pub struct CityMap {
     /// Source network.
-    pub net: RoadNetwork,
+    pub net: Arc<RoadNetwork>,
     /// Lanes (indices `0..lanes.len()`) followed by connectors.
-    pub segs: Vec<Segment>,
+    pub segs: Arc<Vec<Segment>>,
     /// Arrival info per lane (None = lane does not end at a junction).
-    pub approach: Vec<Option<Approach>>,
+    pub approach: Arc<Vec<Option<Approach>>>,
     /// Drivable lane length per zone, km.
     pub zone_lane_km: Vec<f32>,
     /// Physics ticks (`PHYSICS_DT`) the signal controllers have run.
     pub signal_tick: u64,
     /// Current time of day (mirrors the world clock).
     pub time: TimeOfDay,
-    seg_grid: Grid,
-    ix_grid: Grid,
-    zone_grid: Grid,
-    building_grid: Grid,
+    seg_grid: Arc<Grid>,
+    ix_grid: Arc<Grid>,
+    zone_grid: Arc<Grid>,
+    building_grid: Arc<Grid>,
     /// Covered spans (tunnels) ready for queries.
     pub covers: crate::covered::CoverIndex,
     /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
@@ -350,15 +356,15 @@ impl CityMap {
         }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
-            net,
-            segs,
-            approach,
+            net: Arc::new(net),
+            segs: Arc::new(segs),
+            approach: Arc::new(approach),
             signal_tick: 0,
             time: TimeOfDay::from_hours(12.0),
-            seg_grid,
-            ix_grid,
-            zone_grid,
-            building_grid,
+            seg_grid: Arc::new(seg_grid),
+            ix_grid: Arc::new(ix_grid),
+            zone_grid: Arc::new(zone_grid),
+            building_grid: Arc::new(building_grid),
             covers: crate::covered::CoverIndex::default(),
             covered_los: true,
         };

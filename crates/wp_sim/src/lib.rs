@@ -85,6 +85,7 @@ pub enum VehicleKind {
 pub type ContactFilter = fn(&mut wp_contracts::ContactImpulse);
 
 /// One vehicle slot in the simulation.
+#[derive(Clone)]
 pub struct SimVehicle {
     /// Entity id.
     pub id: EntityId,
@@ -155,6 +156,11 @@ fn ground_pose(
 }
 
 /// A complete simulation instance. Deterministic given the same config, spawns and inputs.
+///
+/// `Clone` is a full snapshot (Rapier sets, lattices, world, police): stepping a clone with
+/// the same inputs gives the same tick hashes as the original (in-memory crash replays,
+/// `wp_wasm::crash_replay`).
+#[derive(Clone)]
 pub struct Sim {
     config: SimConfig,
     tick: u64,
