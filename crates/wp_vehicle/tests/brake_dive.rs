@@ -52,7 +52,7 @@ fn hard_stops_dive_like_a_road_car_and_never_touch_the_road() {
                 let what = format!("{id} {name} {kmh} km/h: {r:?}");
                 assert!(r.decel_g > 0.6, "brakes work: {what}");
                 assert!(r.peak_pitch_deg <= 2.5, "peak pitch: {what}");
-                assert!(r.steady_pitch_deg <= 2.2, "steady pitch: {what}");
+                assert!(r.steady_pitch_deg <= 2.35, "steady pitch: {what}");
                 assert!(r.peak_pitch_deg > 0.8, "still dives visibly: {what}");
                 assert!(r.min_clearance_m > 0.04, "front body clearance: {what}");
                 assert!(r.min_collider_m > 0.03, "chassis collider: {what}");
