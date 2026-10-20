@@ -627,3 +627,13 @@ wp_audio`: all pass (incl. `impacts`). `e2e/audio.mjs`, `audio_samples.mjs`, `au
 bass −17.5 / −14.7 / −12.4 dB; crunch 20 vs 90 km/h −20.5 / −18.2 dB; wall-scrape sparks
 > 5 kHz −60.8 dB vs body −30.5 dB). Not touched here (impacts files belong to
 `lead/audio-impacts`); likely the real-crash traces changed with the round-13 vehicle.
+
+`cargo test --workspace --no-fail-fast` on this merge: 144 test binaries pass; failing, none in
+audio's reach (this branch vs `origin/lead/round12` = `wp_audio` engine.rs / data.rs / config,
+docs, and the kinematic-traffic bridge which reads `&Session` only): simcli `goldens_match`
+(39 scenarios now), `wp_race` race_picker (`loop9_circuit`, `lantern_checkpoint_draws_the_police`),
+`wp_vehicle` `differentials::roster_diff_hashes_are_pinned` and
+`handling_balance::front_drive_cars_understeer_mildly` (junkyard_beater 1.60 deg/g vs ≤ 1.6),
+`wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
+`tests::simcli_golden_replays_play_back_in_the_browser_core` (golden_tbone drift) — neither
+`wp_wasm` test touches audio. These look like round-13 vehicle changes waiting for a `[bless]`.
