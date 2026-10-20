@@ -570,7 +570,12 @@ the other, for 18–40 s. Fix:
 
 P3 and P4 are DNF in every run, with or without police: on the lead tip, racers 1 and 3 never leave
 the grid even at police presence 0 (for N / opponent-pace). `grid_highway_sprint` now passes
-(winner 43.8 s, 4 of 4). Scenarios: 99 of 101 pass; `city_siren_traffic_yields_arcade/_sim` fail
+(winner 43.8 s, 4 of 4). `wp_wasm --lib`: 86 of 86. **New red:** `race_picker::loop9_circuit`
+(green on the lead tip): racer 4 is `Dnf(Retired)` (too damaged) at ≈ 113 s after one hard
+contact, at speed, with no police unit within 60 m in the 3 s samples before. The test accepts
+only the flag, the police or a racing incident. That looks like a knock-on effect in this long
+police race, not a police stall, but it is red on this branch: for L / the lead to decide
+whether a wrecked racer counts as a racing incident there. I didn't change L's test. Scenarios: 99 of 101 pass; `city_siren_traffic_yields_arcade/_sim` fail
 with the same hash on the lead tip. Goldens moved and re-blessed: golden_city_chase (+replay),
 opponent_circuit_8x5, opponent_flee_police, opponent_open_roads_traffic,
 police_tunnel_escape_founders_cut_control, world_traffic_soak_observer.
