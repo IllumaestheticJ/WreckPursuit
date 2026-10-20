@@ -42,9 +42,15 @@ function load(): Record<string, boolean> {
 }
 
 const state: Record<string, boolean> = { ...Object.fromEntries(LAYERS.map((l) => [l.id, l.default])), ...load() };
+/** Layers hidden for now (photo mode) regardless of their saved toggle. */
+let hidden: ReadonlySet<string> = new Set();
 
 export const layers = {
-  on: (id: string): boolean => state[id] ?? false,
+  on: (id: string): boolean => !hidden.has(id) && (state[id] ?? false),
+  /** Hide these layers until the next call (`[]` shows them again); the saved toggles stay. */
+  hide(ids: string[]): void {
+    hidden = new Set(ids);
+  },
   toggle(id: string): void {
     state[id] = !state[id];
     try {

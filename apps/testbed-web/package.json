@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "e2e": "node e2e/run.mjs",
-    "e2e:cameras": "node e2e/cameras.mjs"
+    "e2e:cameras": "node e2e/cameras.mjs",
+    "e2e:photo": "node e2e/photo.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

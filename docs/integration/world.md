@@ -187,6 +187,9 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 - `crates/wp_vehicle/src/lib.rs`: added `Vehicle::set_pose_and_speed(pos, yaw, speed_mps)`
   (Lead: the stub this went into was replaced by 02's real model; the method now lives in `wp_vehicle/src/vehicle.rs`, same signature.)
   (7 lines, `reset` + speed) for LOD promotion — see contract request 1.
+- `apps/testbed-web`: **photo mode** (owner request, 2026-10-20; branch `claude/fervent-cerf-ft2h9h`,
+  not `ws/world`). Testbed-only, no Rust changes. Full notes and the list of touched files are in
+  `docs/integration/testbed.md` → "Photo mode" (C to review).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |

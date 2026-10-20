@@ -204,6 +204,15 @@ export class CameraRig {
 
   /** Orbit camera pinned to a world spot by [`lookFrom`] (does not follow the car). */
   private pinned = false;
+  /** Photo mode owns the mouse: no orbit drag/zoom and no look-around until released. */
+  private inputSuspended = false;
+
+  /** Stop (`true`) or resume reacting to the mouse (photo mode has its own free camera). */
+  suspendInput(on: boolean): void {
+    this.inputSuspended = on;
+    this.orbit.enabled = !on && this.mode === "orbit";
+    if (on) this.dragging = false;
+  }
 
   /** Alias of [`lookFrom`] (city-v2 automation name). */
   lookAt(from: [number, number, number], to: [number, number, number]): void {
@@ -225,7 +234,7 @@ export class CameraRig {
   setMode(mode: CameraMode, target?: THREE.Object3D, orbitOffset: [number, number, number] = [-7, -9, 6]): void {
     this.mode = mode;
     this.pinned = false;
-    this.orbit.enabled = mode === "orbit";
+    this.orbit.enabled = mode === "orbit" && !this.inputSuspended;
     if (mode === "orbit" && target) {
       target.updateWorldMatrix(true, false);
       const p = target.getWorldPosition(new THREE.Vector3());
@@ -528,7 +537,7 @@ export class CameraRig {
     let lastX = 0;
     let lastY = 0;
     dom.addEventListener("pointerdown", (e) => {
-      if (this.mode === "orbit" || e.button !== 0) return;
+      if (this.mode === "orbit" || this.inputSuspended || e.button !== 0) return;
       this.dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;

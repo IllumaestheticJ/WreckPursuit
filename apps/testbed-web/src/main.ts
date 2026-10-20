@@ -19,6 +19,7 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
 import { RealTimeMeter } from "./rtf";
+import { PhotoMode, PHOTO_HIDDEN_LAYERS } from "./photo";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -348,6 +349,34 @@ async function main(): Promise<void> {
     plots.clear();
   };
 
+  // ----- photo mode -----------------------------------------------------------------------
+
+  // Whether the game was already paused when photo mode opened (it stays paused on leaving).
+  let pausedBeforePhoto = false;
+  const photo = new PhotoMode({
+    renderer: scene.renderer,
+    scene: scene.scene,
+    freeze: (on) => {
+      if (on) pausedBeforePhoto = app.paused;
+      // togglePause also holds / resumes a replay at its selected speed.
+      if (app.paused !== (on || pausedBeforePhoto)) togglePause();
+    },
+    replayStep: (ticks) => frameStep(ticks),
+    isReplay,
+    focusRoot: () => app.views.get(app.focus)?.root ?? null,
+    fileStem: () => {
+      const name = isReplay() ? (sim.replayStatus()?.scenario ?? "replay") : (sim.scenario()?.name ?? "drive");
+      return `${name.replace(/[^\w-]+/g, "_")}-t${sim.worldInfo()[W.tick]}`;
+    },
+    setChrome: (visible) => {
+      overlay.style.display = visible ? "" : "none";
+      layers.hide(visible ? [] : PHOTO_HIDDEN_LAYERS);
+      audio.setDucked(!visible);
+      rig.suspendInput(!visible);
+    },
+  });
+  $("photo").onclick = () => photo.enter(rig.camera);
+
   const togglePause = () => {
     app.paused = !app.paused;
     if (isReplay()) sim.replayPlay(app.paused ? 0 : Number(($("rp-speed") as HTMLSelectElement).value));
@@ -380,6 +409,7 @@ async function main(): Promise<void> {
 
   installKeyboard((e) => {
     if (e.repeat) return;
+    if (photo.onKey(e)) return;
     const layer = layers.byKey(e.code);
     if (layer) return layers.toggle(layer.id);
     const n = Number(e.key);
@@ -419,6 +449,10 @@ async function main(): Promise<void> {
       }
       case "KeyF":
         ui.toggleBill();
+        break;
+      case "F3":
+        e.preventDefault();
+        photo.enter(rig.camera);
         break;
       case "F1":
       case "Slash":
@@ -469,13 +503,16 @@ async function main(): Promise<void> {
       app.source = source;
       if (!app.scenario && !app.bench) applyAssistPreset(source);
     }
-    if (!replay && !app.bench) sim.setInput(app.player, input);
+    // Photo mode keeps the input from before it opened (WASD fly the photo camera instead).
+    if (!replay && !app.bench && !photo.active) sim.setInput(app.player, input);
 
     const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
     rtf.push(wallDt, sim.worldInfo()[W.tick], !app.paused && !replay && !app.bench);
+    // Nothing animates while frozen: a paused live session, or anything in photo mode.
+    const still = (app.paused && !replay) || photo.active;
 
     const meta = sim.vehicleMeta();
     syncViews(meta);
@@ -495,7 +532,7 @@ async function main(): Promise<void> {
       if (!view) continue;
       // vehicle_states_prev() lists the same entities in the same (ascending) order.
       const tel = sim.telemetry(id);
-      view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
+      view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, still ? 0 : dt);
       if (id === app.focus) {
         focusTel = tel;
         focusRec = o;
@@ -508,7 +545,7 @@ async function main(): Promise<void> {
     }
     scene.addEvents(events);
     panelEvents(events);
-    stepDebris(app.paused && !replay ? 0 : dt);
+    stepDebris(still ? 0 : dt);
     hud.pushEvents(events, sim.worldInfo()[W.tick]);
     {
       const w = sim.worldInfo();
@@ -529,18 +566,22 @@ async function main(): Promise<void> {
       if (layers.on("telemetry")) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
-    rig.lookBack = isHeld("KeyV");
-    rig.update(
-      focusView?.root ?? null,
-      focusView?.info.body_size_m ?? [2, 4.5, 1.4],
-      focusRec >= 0 ? cur[focusRec + S.speed] : 0,
-      dt,
-      rig.mode === "cinematic" ? nearestPolice(focusView) : null,
-    );
-    audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
+    photo.update(dt, rig.camera);
+    if (!photo.active) {
+      rig.lookBack = isHeld("KeyV");
+      rig.update(
+        focusView?.root ?? null,
+        focusView?.info.body_size_m ?? [2, 4.5, 1.4],
+        focusRec >= 0 ? cur[focusRec + S.speed] : 0,
+        dt,
+        rig.mode === "cinematic" ? nearestPolice(focusView) : null,
+      );
+    }
+    audio.update(photo.active ? photo.camera : rig.camera, events, still ? 0 : dt, app.focus);
 
     const r0 = performance.now();
-    scene.render(rig.camera);
+    if (photo.active) photo.render();
+    else scene.render(rig.camera);
     const r1 = performance.now();
     renderMs += (r1 - r0 - renderMs) * 0.1;
     const p = app.perf;
@@ -699,6 +740,9 @@ async function main(): Promise<void> {
       rig.camera.updateProjectionMatrix();
     },
     toggleLayer: (id: string) => layers.toggle(id),
+    /** Is this debug layer drawn right now (photo mode hides some)? */
+    layersOn: (id: string) => layers.on(id),
+    photo,
     ui,
     runEnd,
     restartRun,

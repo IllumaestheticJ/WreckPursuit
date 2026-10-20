@@ -621,3 +621,52 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+## Photo mode (owner request, 2026-10-20 — built by D's session, for C to review)
+
+**F3**, the **📷 photo** button or gamepad **Start** opens it, in a live session or during a
+replay; **F3 / Esc / Start / B** leaves. `src/photo.ts` (`PhotoMode`), wired in `main.ts`.
+
+- **Freeze:** a live session is paused (`togglePause`); a replay is held at its tick (speed 0) and
+  `,` / `.` (or the ◀ ▶ buttons) step it 4 ticks. Leaving restores exactly the previous state: a
+  game that was paused before stays paused, a playing replay resumes at its speed. While open,
+  `sim.setInput` is not called and the frame loop passes `dt = 0` to the views, debris and audio.
+- **Free camera** (Three world space, its own `PerspectiveCamera`, starts at the game camera's
+  view): WASD/arrows fly along the view, Q/E world down/up, Shift ×4, Alt ×¼, mouse drag looks,
+  wheel = field of view (10–100°), Z/X roll (±45°), **reset camera** puts it 6 m behind the
+  focused car. It is kept within 80 m of the focused car. Gamepad: left stick fly, right stick
+  look, LB/RB down/up, A save, Y hide the panel.
+- **Filters:** a post-process pass after Three's `OutputPass` (so it works on display sRGB
+  values): exposure, contrast, saturation, warmth, fade (lifted blacks), vignette, grain (fixed
+  hash, no time input, so preview = saved image) and a 2.39:1 letterbox; presets 1–7 natural /
+  noir / sepia / golden hour / cold steel / punchy / faded film. The composer renders into a
+  4× MSAA half-float target, so photos keep the antialiasing.
+- **Clean image:** the HUD is DOM (`#overlay`, hidden while open) and never reaches the canvas;
+  the debug layers lattice, stress, tire forces, suspension, slip colouring, contacts, CG/velocity
+  and intents are hidden through `layers.hide()` (new in `settings.ts`: a temporary override,
+  the saved toggles are untouched) and come back on leaving.
+- **Save / copy:** Space/Enter or **💾 save PNG** downloads `wreckpursuit-<scenario>-t<tick>.png`;
+  C or **📋 copy** writes `image/png` to the clipboard (needs https or localhost; otherwise the
+  panel says to use save). Size **screen** or **2× screen** (capped at the GPU's max texture size
+  and 8192 px).
+- **Touch:** the **hide** button hides the panel, the 📷 chip brings it back; drag looks, the
+  sliders set field of view and roll.
+- Automation: `__wp.photo` (`enter(camera)`, `exit()`, `capture(scale)` → `{ blob, width,
+  height }`, `usePreset(id)`, `resetCamera()`, `saved` / `copied` counters), `__wp.layersOn(id)`.
+
+**e2e:** `npm run e2e:photo` (`e2e/photo.mjs`, `SHOTS=dir` keeps the captured PNGs): 22 checks —
+freeze, HUD and debug layers hidden, flying the camera does not drive the car, hide/chip, noir
+is grey, golden hour changes the pixels, 2× capture doubles the size, Space download, C
+clipboard, Esc restores (and keeps a prior pause), replay held / stepped / captured / resumed,
+no page errors.
+
+**Changes outside `src/photo.ts`:** `main.ts` (construct + key/frame-loop wiring, `still`
+flag, `__wp.photo` / `__wp.layersOn`), `settings.ts` (`layers.hide`), `cameras.ts`
+(`CameraRig.suspendInput`: orbit controls and look-drag ignore the mouse while photo mode has
+it), `audio/index.ts` (J: `AudioSystem.setDucked`, fades the mix out while frozen without
+touching the M mute toggle), `hud.ts` (help line), `index.html` (button + panel styles),
+`package.json` (`e2e:photo`).
+
+**Known gaps:** no depth of field; no fly controls on touch screens without a gamepad (look,
+field of view, roll and reset camera only); the free camera can pass through buildings and
+terrain (no collision); police light bars freeze in whatever phase they were in.

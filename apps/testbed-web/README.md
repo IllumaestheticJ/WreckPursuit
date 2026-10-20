@@ -24,7 +24,9 @@ npm run typecheck
 | `src/telemetry.ts` | rolling 10 s canvas plots |
 | `src/input.ts` | keyboard ramps + Gamepad API with deadzones |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
+| `src/photo.ts` | photo mode (F3, live or replay): freeze, free camera, filters, save / copy PNG |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
+| `e2e/photo.mjs` | photo mode check (`npm run e2e:photo`): freeze, free camera, filters, save, clipboard, replay |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 

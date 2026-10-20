@@ -117,7 +117,8 @@ export class Hud {
       `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
       `R reset · O headlights · Q horn · M mute · Tab follow the next car<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
-      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
+      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br>` +
+      `<b>Photo mode</b> F3 or gamepad Start (live or replay): free camera, filters, save / copy PNG — keys listed in its panel<br><br>` +
       `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
       `centre the steering and it straightens up; steer into the turn to hold a drift, ` +
       `countersteer to straighten faster. Strongest on powerful RWD cars; off on wheel.<br><br>` +
