@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::UnitId;
 use crate::graph::{dist, SegmentId};
 use crate::time::SimTime;
+use wp_contracts::EntityId;
 
 /// A unit planning to go faster than this wants to move, m/s.
 pub const WANT_MPS: f32 = 1.5;
@@ -78,6 +79,20 @@ pub const PROGRESS_M: f32 = 20.0;
 pub const MAX_TURNS: u32 = 4;
 /// After [`MAX_TURNS`]: no new turn-round for this long; the unit carries on along its road.
 pub const TURN_HOLD_S: f32 = 30.0;
+/// Standing this long blocked by a slow racer it is not after (nose to nose, each waiting for
+/// the other), a unit backs out of its way, straightening along its lane (opponent-pace: a
+/// responder stood across the Hollins hairpin and the racer behind it waited 40 s), s.
+pub const GIVE_WAY_S: f32 = 2.0;
+/// ... a racer slower than this (it rocks back and forth trying to get round), m/s.
+pub const GIVE_WAY_RACER_MPS: f32 = 3.0;
+/// ... or, blocked by anything, with such a racer standing this close, m.
+pub const GIVE_WAY_NEAR_M: f32 = 15.0;
+/// How far it backs out to give way, m.
+pub const GIVE_WAY_M: f32 = 6.0;
+/// After backing out it waits up to this long for the racer to get past, s.
+pub const GIVE_WAY_HOLD_S: f32 = 8.0;
+/// ... while that racer is still in front of it and this close, m.
+pub const GIVE_WAY_HOLD_M: f32 = 25.0;
 /// Contacts this recent explain a stuck event, s.
 const CONTACT_WINDOW_S: f32 = 2.0;
 /// A world contact point this close to a parked-car / cone footprint is that prop, m.
@@ -231,6 +246,12 @@ pub struct UnstickState {
     /// it despawn out of sight.
     #[serde(default)]
     pub(crate) turn_loop: bool,
+    /// Seconds standing blocked by a slow racer it is not after (see [`GIVE_WAY_S`]).
+    #[serde(default)]
+    pub(crate) give_way_s: f32,
+    /// Gave way to this racer: wait for it to get past, until then.
+    #[serde(default)]
+    pub(crate) give_way_to: Option<(EntityId, SimTime)>,
 }
 
 impl UnstickState {
