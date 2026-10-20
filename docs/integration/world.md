@@ -1262,3 +1262,35 @@ pass, 2 fail — the same 2 as on lead/round12 with identical hashes
 scenarios: ok. `cargo test --workspace --no-fail-fast`: all wp_world tests pass; failures:
 simcli `goldens_match` (33 goldens stale on the base too) and `wp_race`
 `race_picker::loop9_circuit` (fails on the base too), plus the three above.
+
+### Response from D (round 13 addendum) — row 93 "still too many parked cars"
+Row 77's table moved to the low end, with visible empty kerb. Changes in `data/city/parking.json`
+(+ `props::ParkingTable::{empty_stretch_chance, empty_stretch_m}`, serde-defaulted): collectors
+×0.3 (was ×0.5), and after 35 % of clusters a 30–80 m empty stretch instead of the 0–3
+car-length gap. Rules stay keyed to lane kind, speed limit, lane ends, POIs, tunnels and the
+terrain — no road or lane widths — so `lead/city-residential`'s wider roads need no change here
+(the car sits on the parking lane's centreline).
+
+| Port Vesper v2 (seed 1) | lead/round12 | round 13 (row 77) | + row 93 |
+|---|---|---|---|
+| Parked cars | 3,760 | 1,578 (42 %) | **1,219 (32 %)** |
+| Cars per km of kerb (45.7 km) | 82.2 | 34.5 | **26.7** |
+| — collectors (8.7 km) | 81.1 | — | **14.4** |
+| — local streets (37.0 km) | 82.5 | — | **29.5** |
+| Kerb with no car within 10 m (a ≥ 20 m empty stretch) | 7 % | — | **59 %** |
+
+(Counts from `props::tests::vesper_parked_cars_fewer_and_clear_of_junctions`, which now gates
+30–40 % of the old rule and ≥ 50 % empty kerb. No screenshots from this headless session; the
+per-km numbers above are the measure.)
+**Found while re-gating:** `world_traffic_soak_vesper` got 1 civilian collision with the new
+parked layout: a kinematic car stopped 0.3 m into its lane and made a blocked-lane change from
+standstill with its tail still in the junction, clipping a car turning through. Fix
+(`traffic.rs`): no blocked-lane change before the car is a full car length into the lane. Soak
+passes again (0 collisions).
+**Gate (ws/world after row 93):** fmt, clippy `--all-targets -D warnings`, wasm32 build: pass.
+Scenarios: 78 pass, 2 fail (the same Founders Cut pair as on lead/round12, identical hashes).
+`cargo test --workspace`: as in the round-13 gate above, plus `wp_race`
+`race_picker::lantern_checkpoint_draws_the_police`, which passed before row 93: one racer ends
+`Dnf(FinishWindow)` 45 m short of the finish (the test allows only Finished / Captured / Fled).
+Another emergent race outcome from the new kerb layout; request to G to re-measure (or allow
+FinishWindow) against round 13. Contract change requests: none.
