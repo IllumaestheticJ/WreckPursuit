@@ -14,7 +14,7 @@
 //     change drawer are rewritten;
 //   * proxy / box: the city is cut into CHUNK_M chunks, each with its own instanced meshes and
 //     a bounding sphere, so Three frustum-culls whole chunks. A chunk within PROXY_M of the
-//     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (24 triangles).
+//     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (20 triangles).
 //     Switching a chunk's tier only toggles visibility: both instance sets are always current.
 // Cones are one InstancedMesh of small orange cones. A moved prop rewrites only its own
 // instances. Coordinates: sim space (+Z up), parented under SceneView.world.
@@ -29,8 +29,11 @@ import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms,
 const MAX_FULL = 24;
 /** Re-pick the full-mesh set after the camera moved this far, m. */
 const REPICK_M = 12;
-/** Chunk edge, m. */
-const CHUNK_M = 96;
+/** Chunk edge, m. 192 m (was 96): each chunk costs 4 draw calls in the proxy tier and 1 in the
+ * box tier, and 96 m chunks were ~190 draw calls a frame in the chase (browser-perf.md 12b). */
+const CHUNK_M = 192;
+/** Chunks within this distance are always drawn, whatever the fog / draw distance, m. */
+const MIN_DRAW_M = 200;
 /** Chunks nearer than this (camera to chunk sphere) draw proxies, farther ones boxes, m. */
 const PROXY_M = 300;
 /** Bounding-sphere slack for knocked props and the car's own extent, m. */
@@ -72,9 +75,12 @@ function boxCarInfo(half: [number, number, number]): CarModelInfo {
 /** Far tier: a unit-cube car (lower body + cabin, white vertex colour = instance livery). */
 function farCarGeometry(): THREE.BufferGeometry {
   const box = (sx: number, sy: number, sz: number, z: number) => {
-    const g = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed();
-    g.translate(0, 0, z);
-    g.deleteAttribute("uv");
+    // Without the -Z face (BoxGeometry's last 6 vertices once non-indexed): it sits on the road
+    // or on the lower box, never seen. 10 triangles a box instead of 12.
+    const full = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed();
+    full.translate(0, 0, z);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute((full.getAttribute("position").array as Float32Array).slice(0, 30 * 3), 3));
     return g;
   };
   const parts = [box(1, 1, 0.6, -0.2), box(0.86, 0.5, 0.4, 0.3)];
@@ -102,6 +108,8 @@ interface Chunk {
   box: THREE.InstancedMesh;
   sphere: THREE.Sphere;
   near: boolean;
+  /** Within the draw distance (PropView.update `farM`). */
+  shown: boolean;
   dirty: boolean;
 }
 
@@ -114,6 +122,13 @@ export interface PropStats {
   drawnProxy: number;
   drawnBox: number;
   drawnCones: number;
+  /** Parked cars not drawn because their chunk is past the draw distance (fully fogged / beyond
+   * the city's own draw distance; never within 200 m). drawn* + culledFar = parked. */
+  culledFar: number;
+  /** Most full-mesh parked cars at once (graphics quality). */
+  maxFull: number;
+  /** That draw distance, m. */
+  farM: number;
   /** Props within `rangeM` of the camera, and how many of them have a drawn instance. */
   inRange: number;
   drawnInRange: number;
@@ -140,6 +155,9 @@ export class PropView {
   /** Chunks farther than this are not drawn at all (phones only; Infinity = draw every prop,
    * which the desktop keeps so nothing that can be hit is ever invisible). */
   drawM = Infinity;
+  /** Chunks nearer than this draw the low-poly proxy, farther ones the two-box car, m
+   * (graphics quality; PROXY_M by default). */
+  proxyM = PROXY_M;
   /** Parent in sim space (+Z up); add to SceneView.world. */
   readonly group = new THREE.Group();
   private n = 0;
@@ -177,6 +195,13 @@ export class PropView {
   private readonly tail = new THREE.Color(TAIL.off);
   private readonly coneMat = new THREE.MeshStandardMaterial({ color: CONE_RGB, emissive: CONE_GLOW, flatShading: true, roughness: 0.7 });
   private repicks = 0;
+  /** Re-pick scratch: candidate props, their distances (by prop) and the wanted flags. */
+  private readonly pickIdx: number[] = [];
+  private pickDist = new Float32Array(0);
+  private pickWant = new Uint8Array(0);
+  private readonly byPickDist = (a: number, b: number) => this.pickDist[a] - this.pickDist[b];
+  /** Draw distance of the last update (chunks past it hidden), m. */
+  private farM = Infinity;
   private movedWrites = 0;
   private repickWrites = 0;
   private updates = 0;
@@ -196,6 +221,8 @@ export class PropView {
     this.chunkOf = new Int32Array(n).fill(-1);
     this.slot = new Int32Array(n);
     this.fullSlot = new Int32Array(n).fill(-1);
+    this.pickDist = new Float32Array(n);
+    this.pickWant = new Uint8Array(n);
     const byCell = new Map<string, number[]>();
     let firstCar = -1;
     for (let i = 0, o = 0; i < n; i++, o += PROP_STRIDE) {
@@ -263,14 +290,14 @@ export class PropView {
       this.slot[i] = k;
       box.setColorAt(k, this.paint.setHex(styledPaint(parkedPaint(i))));
     });
-    const chunk: Chunk = { props, proxy, box, sphere, near: false, dirty: true };
+    const chunk: Chunk = { props, proxy, box, sphere, near: false, shown: true, dirty: true };
     this.chunks.push(chunk);
     this.showTier(chunk, false);
   }
 
   private showTier(ch: Chunk, near: boolean): void {
     ch.near = near;
-    for (const mesh of ch.proxy.meshes) mesh.visible = near;
+    for (const mesh of ch.proxy.meshes) mesh.visible = near && ch.shown;
     ch.box.visible = !near;
   }
 
@@ -339,8 +366,12 @@ export class PropView {
     }
   }
 
-  /** Per frame: apply `props_moved()` records, pick chunk tiers, re-pick the full-mesh set. */
-  update(moved: Float32Array, camera: THREE.Camera): void {
+  /**
+   * Per frame: apply `props_moved()` records, pick chunk tiers, re-pick the full-mesh set.
+   * `farM`: the city's own cull distance this frame (SceneView.cullDistanceM: draw distance,
+   * fully fogged distance); chunks past it are not drawn (never closer than MIN_DRAW_M).
+   */
+  update(moved: Float32Array, camera: THREE.Camera, farM = Infinity): void {
     if (this.n === 0) return;
     const t0 = performance.now();
     // Three (x, y, z) → sim (x, -z, y): `world` is rotated -90° about X.
@@ -353,11 +384,18 @@ export class PropView {
       this.writeInstance(i);
       this.movedWrites++;
     }
+    const far = Math.max(Math.min(this.drawM, farM), MIN_DRAW_M);
+    this.farM = far;
     for (const ch of this.chunks) {
       const d = ch.sphere.distanceToPoint(this.cam);
-      const near = d < PROXY_M;
+      const near = d < this.proxyM;
       if (near !== ch.near) this.showTier(ch, near);
-      if (!near) ch.box.visible = d <= this.drawM;
+      const shown = d <= far;
+      if (shown !== ch.shown) {
+        ch.shown = shown;
+        for (const mesh of ch.proxy.meshes) mesh.visible = near && shown;
+      }
+      ch.box.visible = !near && shown;
     }
     if (this.full && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
     this.flush();
@@ -373,18 +411,26 @@ export class PropView {
     if (!full) return;
     this.lastPick.copy(this.cam);
     this.repicks++;
-    const near: { i: number; d: number }[] = [];
+    // Candidates within the full-mesh distance, nearest first (scratch arrays, no garbage).
+    const near = this.pickIdx;
+    const dist = this.pickDist;
+    near.length = 0;
     for (let i = 0; i < this.n; i++) {
       if (this.kind[i] === PROP_KIND.cone) continue;
       const d = this.distTo(i);
-      if (d < this.fullLodM) near.push({ i, d });
+      if (d < this.fullLodM) {
+        dist[i] = d;
+        near.push(i);
+      }
     }
-    near.sort((a, b) => a.d - b.d);
-    const want = new Set(near.slice(0, this.maxFull).map((x) => x.i));
+    near.sort(this.byPickDist);
+    if (near.length > this.maxFull) near.length = this.maxFull;
+    const want = this.pickWant;
+    for (const i of near) want[i] = 1;
     // Release full slots no longer wanted (swap-remove keeps the slots dense).
     for (let s = this.fullProps.length - 1; s >= 0; s--) {
       const i = this.fullProps[s];
-      if (want.has(i)) continue;
+      if (want[i]) continue;
       const last = this.fullProps.pop()!;
       this.fullSlot[i] = -1;
       if (last !== i) {
@@ -396,7 +442,8 @@ export class PropView {
       this.writeInstance(i); // back to its chunk
       this.repickWrites++;
     }
-    for (const i of want) {
+    for (const i of near) {
+      want[i] = 0;
       if (this.fullSlot[i] >= 0) continue;
       this.fullSlot[i] = this.fullProps.length;
       this.fullProps.push(i);
@@ -410,7 +457,11 @@ export class PropView {
 
   private distTo(i: number): number {
     const o = i * 7;
-    return Math.hypot(this.pose[o] - this.cam.x, this.pose[o + 1] - this.cam.y, this.pose[o + 2] - this.cam.z);
+    // Not Math.hypot: it allocates its argument list (runs for every prop on each re-pick).
+    const dx = this.pose[o] - this.cam.x;
+    const dy = this.pose[o + 1] - this.cam.y;
+    const dz = this.pose[o + 2] - this.cam.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
   /** Number of props of the session (parked cars + cones). */
@@ -456,6 +507,7 @@ export class PropView {
     let fullInRange = 0;
     let drawnProxy = 0;
     let drawnBox = 0;
+    let culledFar = 0;
     for (let i = 0; i < this.n; i++) {
       const d = this.distTo(i);
       const car = this.kind[i] !== PROP_KIND.cone;
@@ -464,6 +516,7 @@ export class PropView {
         if (this.chunks[this.chunkOf[i]]?.near) drawnProxy++;
         else drawnBox++;
       }
+      if (car && !drawn && this.fullSlot[i] < 0 && this.chunks[this.chunkOf[i]]?.shown === false) culledFar++;
       if (car && d < this.fullLodM) {
         inFullRange++;
         if (this.fullSlot[i] >= 0) fullInFullRange++;
@@ -484,6 +537,9 @@ export class PropView {
       drawnProxy,
       drawnBox,
       drawnCones: this.cones?.count ?? 0,
+      culledFar,
+      maxFull: this.maxFull,
+      farM: this.farM,
       inRange,
       drawnInRange,
       parkedInRange,

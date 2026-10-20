@@ -17,6 +17,7 @@
 // Weather (render/weather.ts) keeps working on top: its wet-road patch sits on the same road
 // materials (only their colours change) and its fog wins whenever it is thicker.
 import * as THREE from "three";
+import { tagFeature } from "../perf";
 import {
   CITY_MATERIAL_COLOURS,
   DISTRICTS,
@@ -71,13 +72,16 @@ export interface StyledScene {
   readonly sun: THREE.DirectionalLight;
   readonly groundMaterial: THREE.MeshStandardMaterial;
   /** Graphics quality (render/quality.ts): the post target uses MSAA only when it allows. */
-  readonly quality: { readonly antialias: boolean; readonly lite: boolean };
+  readonly quality: { readonly antialias: boolean; readonly lite: boolean; readonly lampPoleDrawM: number };
   /** Light-bar glow multiplier for the police helicopters. */
   policeGlow: number;
   /** City draw distance, m (scene.ts; lamp tiles past it are hidden like city tiles). */
   readonly drawDistanceM: number;
   /** Render override (post stack); null = plain renderer.render. */
   renderOverride: ((camera: THREE.Camera) => void) | null;
+  /** Compile override (shader prewarm of `objects`, lit by the scene, for the post stack's HDR
+   * target); null = renderer.compile. */
+  compileOverride: ((camera: THREE.Camera, objects: THREE.Scene) => void) | null;
   readonly signals: { setLampBoost(k: number): void };
 }
 
@@ -350,7 +354,7 @@ interface CityStyle {
   building: THREE.MeshStandardMaterial | null;
   lamps: THREE.Group | null;
   /** Lamp tiles (one group per CITY_TILE_M cell) with their world bounding spheres. */
-  lampTiles: { group: THREE.Group; sphere: THREE.Sphere }[];
+  lampTiles: { group: THREE.Group; poles: THREE.InstancedMesh; sphere: THREE.Sphere }[];
   /** Lamp count (tests, docs). */
   lampCount: number;
   built: boolean;
@@ -449,9 +453,13 @@ export class ArtStyle {
     this.sky.renderOrder = -10;
     this.sky.frustumCulled = false;
     this.sky.visible = false;
-    view.scene.add(this.sky);
+    view.scene.add(tagFeature(this.sky, "sky"));
     this.track(view.groundMaterial, PALETTE.flatGround);
     view.renderOverride = (camera) => this.render(camera);
+    view.compileOverride = (camera, objects) => {
+      if (artStyle.lowpoly) this.post.compile(view.renderer, objects, camera, view.scene);
+      else view.renderer.compile(objects, camera, view.scene);
+    };
     this.set(initial);
   }
 
@@ -542,7 +550,7 @@ export class ArtStyle {
     if (map) {
       c.lamps = this.buildLamps(c.root, map, district);
       c.lamps.visible = artStyle.lowpoly && c.root.visible !== false;
-      this.view.scene.add(c.lamps);
+      this.view.scene.add(tagFeature(c.lamps, "lamps"));
     }
   }
 
@@ -729,7 +737,7 @@ export class ArtStyle {
         tile.add(im);
       }
       group.add(tile);
-      tiles.push({ group: tile, sphere });
+      tiles.push({ group: tile, poles, sphere });
     }
     const c = [...this.cities.values()].find((x) => x.root === root);
     if (c) {
@@ -803,9 +811,14 @@ export class ArtStyle {
     const fog = this.view.scene.fog;
     if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
     camera.getWorldPosition(this.camPos);
+    // Poles end sooner on the lean profiles (graphics quality): far away only the glowing
+    // heads read, and the poles are two thirds of a lamp's triangles.
+    const poleFar = Math.min(far, this.view.quality.lampPoleDrawM);
     let shown = 0;
     for (const t of c.lampTiles) {
-      t.group.visible = t.sphere.center.distanceTo(this.camPos) - t.sphere.radius < far;
+      const d = t.sphere.center.distanceTo(this.camPos) - t.sphere.radius;
+      t.group.visible = d < far;
+      t.poles.visible = d < poleFar;
       if (t.group.visible) shown++;
     }
     this.lampTilesShown = shown;

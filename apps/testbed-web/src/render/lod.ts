@@ -18,6 +18,9 @@ import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
 import { BAR, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
 
+/** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
+const VIEW_LOD_BAND_M = 15;
+
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
 export type LodMode = "view" | DrawMode | "none";
 
@@ -143,7 +146,18 @@ export class LodDirector {
   ): DrawState {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
-    const ready = view?.drawable ?? false;
+    let ready = view?.drawable ?? false;
+    // Distance LOD for views too (browser perf, round 12b): a promoted traffic / police car
+    // beyond the fleet's full-mesh distance (± a hysteresis band) is drawn by the fleet like any
+    // far car (same model, livery and pose) instead of its ~40 panel meshes. Not the camera's
+    // focus car, and only when the fleet can draw it.
+    if (view && ready && model) {
+      const p = view.root.position;
+      const d = dist(p.x, p.y, p.z);
+      const lim = this.fleet.fullLodM;
+      view.lodFar = !view.focused && (view.lodFar ? d > lim - VIEW_LOD_BAND_M : d > lim + VIEW_LOD_BAND_M);
+      if (view.lodFar) ready = false;
+    } else if (view) view.lodFar = false;
     if (view) view.root.visible = ready;
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];

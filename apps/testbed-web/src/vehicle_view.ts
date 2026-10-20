@@ -96,6 +96,9 @@ export class VehicleView {
   readonly background: boolean;
   /** The camera's focus car (set by main.ts every frame). */
   focused = false;
+  /** Far enough that the instanced fleet draws this car instead (render/lod.ts; the root is
+   * hidden and the lattice / panel re-skin is skipped until it comes back). */
+  lodFar = false;
   private readonly lamps: THREE.Mesh[] = [];
   /** Greybox paint (the colour the view was created with). */
   private readonly greyPaint: THREE.Color;
@@ -117,7 +120,7 @@ export class VehicleView {
     this.greyPaint = new THREE.Color(colour);
     this.background = police || this.info.kind === "Traffic";
 
-    const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide, forceSinglePass: true });
     this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
     this.box.position.z = h * 0.55;
     const nose = new THREE.Mesh(
@@ -277,7 +280,9 @@ export class VehicleView {
     const panelsOn = bodyOn && layers.on("panels") && this.panels.ready;
     const latticeOn = layers.on("lattice") || (bodyOn && !layers.on("panels"));
     const stressOn = layers.on("stress");
-    const needNodes = latticeOn || stressOn || (bodyOn && this.skinned) || panelsOn;
+    // Handed to the fleet (far): nothing of the body is drawn, so skip the node fetch and the
+    // panel re-skin; they catch up on the frame it comes back.
+    const needNodes = !this.lodFar && (latticeOn || stressOn || (bodyOn && this.skinned) || panelsOn);
     if (needNodes) {
       // Nodes only move when the car is dented: rebuild the wireframe / skin on change only.
       const fresh = sim.latticeNodes(this.entity);
@@ -302,7 +307,7 @@ export class VehicleView {
         for (const c of w.spin.children) c.visible = ours.includes(c as THREE.Mesh) ? panelsOn : !panelsOn;
       });
     }
-    if (panelsOn) {
+    if (panelsOn && !this.lodFar) {
       const v = tmpV.set(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
       this.panels.update(this.nodes, dt, v);
       this.panels.paint.opacity = latticeOn || stressOn ? 0.35 : 1;

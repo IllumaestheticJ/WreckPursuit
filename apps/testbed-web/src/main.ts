@@ -43,7 +43,7 @@ import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
 import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
-import { FrameProfiler } from "./perf";
+import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
 import * as THREE from "three";
 
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
     | undefined;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
-  scene.world.add(lod.fleet.group);
+  scene.world.add(tagFeature(lod.fleet.group, "fleet"));
   // Phones / tablets draw less traffic (render/quality.ts touch profile).
   lod.trafficDrawM = scene.quality.trafficDrawM;
   lod.fleet.fullLodM = scene.quality.fullLodM;
@@ -147,10 +147,13 @@ async function main(): Promise<void> {
   props.fullLodM = scene.quality.fullLodM;
   props.maxFull = scene.quality.propFullMax;
   props.drawM = scene.quality.propDrawM;
-  scene.world.add(props.group);
+  props.proxyM = scene.quality.propProxyM;
+  scene.signals.drawM = scene.quality.signalDrawM;
+  scene.world.add(tagFeature(props.group, "props"));
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
-  scene.world.add(fx.group);
+  scene.world.add(tagFeature(fx.group, "fx"));
+  scene.prewarmRoots.push(fx.group);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -450,7 +453,7 @@ async function main(): Promise<void> {
             ? (trafficPaint.get(id) ?? TRAFFIC_PALETTE[0])
             : COLOURS[(id - 1) % COLOURS.length];
       const v = new VehicleView(id, colour);
-      scene.world.add(v.root);
+      scene.world.add(tagFeature(v.root, "cars"));
       scene.world.add(v.velocity);
       app.views.set(id, v);
     }
@@ -1032,11 +1035,13 @@ async function main(): Promise<void> {
     if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     prof.lap("input");
-    const t0 = performance.now();
     crash.beforeStep(app.paused);
+    prof.lap("crash");
+    const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
+    prof.lap("sim");
     // Crash replay: leave at the end of its window; live: a new crash, the offer, auto play.
     crash.afterStep();
     if (!sim.crashReplayActive() && !isReplay()) {
@@ -1044,6 +1049,7 @@ async function main(): Promise<void> {
       if (c) crash.onCrash(c);
       crash.liveFrame(sim.worldInfo()[W.tick]);
     }
+    prof.lap("crash");
     replay = isReplay();
     // One world_info() per frame after the step (it was fetched ~7 times a frame).
     const wi = sim.worldInfo();
@@ -1110,7 +1116,9 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
+      prof.lap("ui");
       map.frame(app.player, now);
+      prof.lap("map");
       if (!replay) runEnd.update(sim.runResult(), now);
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
@@ -1165,13 +1173,19 @@ async function main(): Promise<void> {
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
-    props.update(sim.propsMoved(), rig.camera);
-    prof.lap("traffic");
+    prof.lap("fleet");
+    props.update(sim.propsMoved(), rig.camera, scene.cullDistanceM(rig.camera));
+    prof.lap("props");
 
     const inCity = wi[W.city] > 0.5;
     const cityId = inCity ? sim.cityId() : null;
     if (cityId) style.ensureCity(cityId, () => sim.mapStaticJson());
     style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
+    prof.lap("render");
+    // Compile both siren-light variants of any new shader program now, not in the frame the
+    // first siren comes on (SceneView.prewarm). At most once a second; only new materials.
+    scene.prewarmEvery(rig.camera, now);
+    prof.lap("shaders");
     const r0 = performance.now();
     scene.render(rig.camera);
     const r1 = performance.now();
@@ -1216,8 +1230,9 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
-    layout.frame(now);
     prof.lap("ui");
+    layout.frame(now);
+    prof.lap("layout");
     prof.end();
     if (app.bench) benchTick(t1 - t0, r1 - r0);
     requestAnimationFrame(frame);

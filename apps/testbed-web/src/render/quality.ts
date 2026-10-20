@@ -7,12 +7,12 @@
 //         blur behind UI panels (re-blurring the 3D view every frame cost ~90 ms a frame under
 //         SwiftShader; 5000 streaks ~60 ms).
 //   auto  high on a hardware GPU; low on a software rasterizer (SwiftShader, llvmpipe: no
-//         usable GPU, e.g. headless Chromium or a blocklisted driver). Then a governor scales
+//         usable GPU, e.g. headless Chromium or a blocklisted driver; less far geometry, see profileFor). Then a governor scales
 //         the resolution down while frames stay slow (and back up when they are fast again),
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
 //         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance, full
-//         car meshes only within 120 m (at most 24 parked cars), parked cars drawn within 350 m, 20 % rain, governor down to 0.6 px ratio (target 30 fps).
+//         car meshes only within 100 m (at most 8 parked cars), parked cars drawn within 350 m, 20 % rain, governor down to 0.6 px ratio (target 30 fps).
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
@@ -96,16 +96,31 @@ interface Profile {
   propFullMax: number;
   /** Parked cars past this distance (m) are not drawn (render/props.ts). */
   propDrawM: number;
+  /** Parked cars nearer than this (m) use the low-poly proxy, farther ones a two-box car. */
+  propProxyM: number;
+  /** Traffic signal heads within this distance (m) are drawn (signals_view.ts). */
+  signalM: number;
+  /** Street-lamp poles within this distance (m) are drawn; the lit heads go to the draw
+   * distance (render/style.ts). */
+  lampPoleM: number;
 }
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, signalM: 450, lampPoleM: Infinity };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   const low = { ...common, antialias: false, backdropBlur: false, rain: 0.3, scale: 0.5, minScale: 0.5, drawM: 900, adaptive: false };
   if (mode === "high") return high;
   if (mode === "low") return low;
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propFullMax: 24, propDrawM: 350 };
-  return software ? { ...low, minScale: 0.35, adaptive: true } : { ...high, minScale: 0.6, adaptive: true };
+  // Geometry on the software / touch profiles (≤ 0.5× resolution; a software rasterizer pays
+  // ~1 µs per triangle, browser-perf.md round 12b): the full panel mesh is ~3,700 triangles, the
+  // low-poly proxy ~130, the two-box car 24. Past ~100 m a car is ~15 px wide there: full
+  // meshes within 100 m (at most 8 parked), parked proxies within 150 m, signal heads within
+  // 250 m (a lamp is ~2 px there).
+  // Parked cars are drawn within 450 m (350 m on a phone), street-lamp poles within 300 m (the
+  // glowing heads to the draw distance).
+  const lean = { fullLodM: 100, propFullMax: 8, propProxyM: 150, signalM: 250, lampPoleM: 300 };
+  if (touch) return { ...low, ...lean, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, propDrawM: 350 };
+  return software ? { ...low, ...lean, minScale: 0.35, adaptive: true, propDrawM: 450 } : { ...high, minScale: 0.6, adaptive: true };
 }
 
 /** Frame-time thresholds of the governor (ms, smoothed wall frame time). */
@@ -129,6 +144,12 @@ export class Quality {
   readonly propFullMax: number;
   /** Parked car draw distance, m (PropView.drawM). */
   readonly propDrawM: number;
+  /** Parked car proxy distance, m (PropView.proxyM). */
+  readonly propProxyM: number;
+  /** Signal head draw distance, m (SignalView.drawM). */
+  readonly signalDrawM: number;
+  /** Street-lamp pole draw distance, m (render/style.ts). */
+  readonly lampPoleDrawM: number;
   readonly rendererName: string;
   readonly antialias: boolean;
   /** The low profile (no MSAA, reduced resolution): optional art-style effects are skipped
@@ -160,6 +181,9 @@ export class Quality {
     this.fullLodM = this.profile.fullLodM;
     this.propFullMax = this.profile.propFullMax;
     this.propDrawM = this.profile.propDrawM;
+    this.propProxyM = this.profile.propProxyM;
+    this.signalDrawM = this.profile.signalM;
+    this.lampPoleDrawM = this.profile.lampPoleM;
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
     this.drawDistanceM = this.profile.drawM;

@@ -562,9 +562,9 @@ await shot("city_chase_greybox_toggle.png");
   await shot("props_knock.png");
   const st = knock.stats;
   check(
-    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
-      (st.fullInRange === st.parkedInRange || st.fullInRange === 24),
-    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box; ` +
+    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox + st.culledFar === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
+      (st.fullInRange === st.parkedInRange || st.fullInRange === st.maxFull || (st.parkedInRange > st.fullInRange && st.fullInRange === st.drawnFull)),
+    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box (+ ${st.culledFar} past the ${Math.round(st.farM)} m draw distance); ` +
       `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
       `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
       `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,

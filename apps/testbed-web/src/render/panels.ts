@@ -146,8 +146,15 @@ export function panelStates(entity: number): Float32Array {
 
 interface PartRT {
   def: MeshPartJson;
+  /** The part's own mesh: drawn for lenses (their material swaps when broken); for batched parts
+   * kept only as a handle (material, name) and never drawn. */
   mesh: THREE.Mesh;
+  /** Skinned positions (chassis space). For a batched part a view into its batch's buffer. */
   pos: Float32Array;
+  /** Merged draw of all parts with this part's material (null: drawn by `mesh`), and this
+   * part's first index in it. */
+  batch: Batch | null;
+  indexStart: number;
   rest: Float32Array;
   nodes: Uint16Array;
   weights: Float32Array;
@@ -173,6 +180,19 @@ interface PartRT {
 }
 
 const tmpSkin = new THREE.Vector3();
+
+/**
+ * One draw for every body part of a car that shares a material (browser perf, round 12b: a car
+ * was ~37 draw calls, one per part). Parts skin straight into `position` through their `pos`
+ * views; a hidden part (shattered, detached) has its index range collapsed to one vertex.
+ */
+interface Batch {
+  mesh: THREE.Mesh;
+  position: THREE.BufferAttribute;
+  index: THREE.BufferAttribute;
+  /** Re-skinned since the last upload. */
+  dirty: boolean;
+}
 
 /** Element-wise equality of two float arrays. */
 function sameFloats(a: Float32Array, b: Float32Array): boolean {
@@ -254,6 +274,8 @@ export class PanelBody {
   /** Latest panel states (PANEL_STRIDE floats per panel). */
   states: Float32Array = new Float32Array(0);
   private parts: PartRT[] = [];
+  /** Merged per-material draws of the body parts (`Batch`). */
+  private batches: Batch[] = [];
   private readonly regions: string[];
   private restNodes: Float32Array = new Float32Array(0);
   /** Region index of every lattice node. */
@@ -389,7 +411,9 @@ export class PanelBody {
         this.wheelParts[def.wheel].push(m);
         continue;
       }
-      this.root.add(m);
+      // Lenses keep their own mesh (broken lenses swap material); every other body part is
+      // batched per material below.
+      if (def.kind === "light") this.root.add(m);
       const w = new Float32Array(def.skin_weights.length);
       for (let i = 0; i < w.length; i++) w[i] = def.skin_weights[i] / 255;
       const fold = def.fold && def.fold.chords.length > 0 ? def.fold : null;
@@ -398,6 +422,8 @@ export class PanelBody {
         def,
         mesh: m,
         pos,
+        batch: null,
+        indexStart: 0,
         rest,
         nodes: Uint16Array.from(def.skin_nodes),
         weights: w,
@@ -413,18 +439,74 @@ export class PanelBody {
       });
       if (region >= 0 && !this.tri.has(region)) this.tri.set(region, spanTriangle(this.restNodes, nodeRegions, region));
     }
+    this.buildBatches();
     this.ready = true;
     this.update(this.restNodes, 0);
     this.onReady?.();
   }
 
+  /** Merge the non-lens body parts into one mesh per material (see `Batch`). */
+  private buildBatches(): void {
+    const groups = new Map<MeshPartJson["material"], PartRT[]>();
+    for (const p of this.parts) {
+      if (p.def.kind === "light") continue;
+      let g = groups.get(p.def.material);
+      if (!g) groups.set(p.def.material, (g = []));
+      g.push(p);
+    }
+    for (const [material, parts] of groups) {
+      let nv = 0;
+      let ni = 0;
+      for (const p of parts) {
+        nv += p.rest.length / 3;
+        ni += p.def.indices.length;
+      }
+      const pos = new Float32Array(nv * 3);
+      const index = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      let v0 = 0;
+      let i0 = 0;
+      for (const p of parts) {
+        pos.set(p.pos, v0 * 3);
+        p.pos = pos.subarray(v0 * 3, v0 * 3 + p.rest.length);
+        const idx = p.def.indices;
+        for (let k = 0; k < idx.length; k++) index[i0 + k] = idx[k] + v0;
+        p.indexStart = i0;
+        v0 += p.rest.length / 3;
+        i0 += idx.length;
+      }
+      const geom = new THREE.BufferGeometry();
+      const position = new THREE.BufferAttribute(pos, 3);
+      const indexAttr = new THREE.BufferAttribute(index, 1);
+      geom.setAttribute("position", position);
+      geom.setIndex(indexAttr);
+      const mesh = new THREE.Mesh(geom, this.mats[material]);
+      mesh.name = `${this.carId}:${material}`;
+      mesh.frustumCulled = false;
+      if (material === "glass") mesh.renderOrder = 1;
+      this.root.add(mesh);
+      const batch: Batch = { mesh, position, index: indexAttr, dirty: false };
+      for (const p of parts) p.batch = batch;
+      this.batches.push(batch);
+    }
+  }
+
+  /** Stop drawing a part (shattered glass, detached panel). */
+  private hidePart(p: PartRT): void {
+    p.hidden = true;
+    p.mesh.visible = false;
+    const b = p.batch;
+    if (!b) return;
+    // Collapse its triangles onto one vertex (degenerate: nothing rasterised).
+    const idx = b.index.array as Uint16Array | Uint32Array;
+    const first = idx[p.indexStart];
+    idx.fill(first, p.indexStart, p.indexStart + p.def.indices.length);
+    b.index.needsUpdate = true;
+  }
+
   /** Hide a shattered glass region. */
   shatter(region: string): void {
     for (const p of this.parts) {
-      if (p.def.region === region && p.def.kind === "glass") {
-        p.hidden = true;
-        p.mesh.visible = false;
-      }
+      if (p.def.region === region && p.def.kind === "glass") this.hidePart(p);
     }
   }
 
@@ -521,11 +603,17 @@ export class PanelBody {
       p.maxDisp = Math.sqrt(maxDisp);
       p.maxFold = maxFold;
       p.maxPull = maxPull;
-      (p.mesh.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+      if (p.batch) p.batch.dirty = true;
+      else (p.mesh.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
       if (p.def.kind === "light") {
         this.updateLight(p, stateOf);
         if (p.maxDisp > 1e-4) p.mesh.geometry.computeVertexNormals();
       }
+    }
+    for (const b of this.batches) {
+      if (!b.dirty) continue;
+      b.dirty = false;
+      b.position.needsUpdate = true;
     }
   }
 
@@ -634,10 +722,7 @@ export class PanelBody {
 
   private hideRegion(region: number): void {
     for (const p of this.parts) {
-      if (p.region === region) {
-        p.hidden = true;
-        p.mesh.visible = false;
-      }
+      if (p.region === region) this.hidePart(p);
     }
   }
 
@@ -690,8 +775,7 @@ export class PanelBody {
         centroid.z += p.pos[i + 2];
         count++;
       }
-      p.hidden = true;
-      p.mesh.visible = false;
+      this.hidePart(p);
     }
     if (count === 0) return;
     centroid.multiplyScalar(1 / count);
@@ -715,7 +799,12 @@ export class PanelBody {
   }
 }
 
-/** Chord fold values at across coordinate `x`, linear between chords (sorted by `at`). */
+/** Scratch result of `foldAt` (it runs per vertex of every folded part on each re-skin; a new
+ * object per vertex was ~0.5 MB of garbage per frame in a crash, browser-perf.md). */
+const foldScratch: ChordFold = { at: 0, height: 0, extra: 0, pop: 0, u: [0, 0, 0] };
+
+/** Chord fold values at across coordinate `x`, linear between chords (sorted by `at`). The
+ * result is a chord of `cs` or a shared scratch object, valid until the next call. */
 function foldAt(cs: ChordFold[], x: number): ChordFold {
   if (x <= cs[0].at) return cs[0];
   for (let i = 1; i < cs.length; i++) {
@@ -723,7 +812,13 @@ function foldAt(cs: ChordFold[], x: number): ChordFold {
       const a = cs[i - 1];
       const b = cs[i];
       const t = (x - a.at) / Math.max(b.at - a.at, 1e-4);
-      return { at: x, height: a.height + (b.height - a.height) * t, extra: a.extra + (b.extra - a.extra) * t, pop: a.pop + (b.pop - a.pop) * t, u: a.u };
+      const o = foldScratch;
+      o.at = x;
+      o.height = a.height + (b.height - a.height) * t;
+      o.extra = a.extra + (b.extra - a.extra) * t;
+      o.pop = a.pop + (b.pop - a.pop) * t;
+      o.u = a.u;
+      return o;
     }
   }
   return cs[cs.length - 1];

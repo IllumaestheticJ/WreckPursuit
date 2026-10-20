@@ -253,6 +253,8 @@ export class InstancedCar {
   readonly tail: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
   readonly bar: THREE.InstancedMesh | null;
+  /** Every instanced mesh of the car (built once: `put` runs per instance per frame). */
+  readonly meshes: readonly THREE.InstancedMesh[];
   count = 0;
 
   constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null) {
@@ -273,10 +275,7 @@ export class InstancedCar {
     } else {
       this.bar = null;
     }
-  }
-
-  get meshes(): THREE.InstancedMesh[] {
-    return [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
+    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
   }
 
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
