@@ -341,8 +341,10 @@ and it has stood behind it ≥ 1 s:
   it has an entry in that lane's list, so oncoming traffic stops for it like for any car.
 - **Turn around** otherwise (two-way road, ≥ 6 m from the junction ends): `plan_turn` finds a
   U-turn or k-point turn within the paved driving lanes (parking lanes excluded) clear of every
-  nearby car / tracked vehicle / debris; it starts when oncoming traffic can stop for it
-  (`v² / 6 + 25 m` clear) and the lanes crossed have nobody arriving. Kinematic agents follow the
+  nearby car / tracked vehicle / debris; it starts when every oncoming car can stop for it
+  (`(v + 2)² / 6 + 25 m` from its own speed `v`), followers in its own lane can stop at
+  2 m/s² at least 10 m short of its rear (room for the reversing legs), and the lanes crossed
+  have nobody arriving within 40 m. Kinematic agents follow the
   planned legs at ≤ 1.2 m/s (0.7 s between legs, re-checking each leg's sweep); physical agents
   run `TurnDriver` (re-plans before every leg from the measured pose, engages reverse through the
   automatic box). The car holds entries in its own lane (3 m behind it) and the oncoming lane

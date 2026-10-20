@@ -755,3 +755,59 @@ run the full gate there, push your `ws/*` branch, and the lead merges it.
    behaviour is still right and the expectation was too tight; explain which). Don't loosen the
    range to hide a real regression. Re-bless only the goldens your fix changes, in a `[bless]`
    commit with the reason.
+
+### Response from D (round 12)
+**Item 1 — `city_blocked_parked_player_vesper` 0 turn-arounds: fixed in `wp_world`** (`935cfe7`),
+goldens in `[bless]` `8595256`. Scenario file and its ranges unchanged.
+
+*What changed for the scenario.* Traced the queue on lane 446 before/after A's differential
+rework. In both runs the first civilian passes the parked car in the oncoming lane (t ≈ 21 s),
+and the next one (id 483, at t ≈ 75 s) waits its 21.5 s pass budget for an oncoming gap that
+never comes (steady ~5 s stream at ~11 m/s; a pass needs ≈ 150 m clear). Then:
+- *main + ws/world:* turn refused for ~4 s (cars rolling up behind), then a gap and the
+  turn-around starts at **100.7 s**, finishing at 118 s of 120 — it passed by a few seconds.
+- *round 12:* the shifted launch/creep timing of the physical queue cars (real diffs) means
+  four cars roll up behind one after another for **13 s** (any car within 40 m behind moving
+  > 1 m/s refused the turn), after which the oncoming stream (needs `(1.25 × limit)² / 6 + 25`
+  ≈ 81 m) stays closed until the end. 0 turn-arounds.
+So it is not a new bug in the diffs: the turn checks were overly conservative and the scenario
+was riding on a lucky gap. Both checks were treating *every* car as worst-case:
+- **Followers (own lane):** now refuse the turn only if they cannot stop at 2 m/s² short of the
+  turner's rear − 10 m (≈ the room a reversing leg uses; followers already stop ≥ 6 m + 3 m
+  back because of the obstruction gap and the turn's own-lane entry). A car creeping up at
+  3 m/s 30 m back no longer blocks it; a fast one 60 m back now does (the old 40 m window
+  missed it). Lanes crossed keep the 40 m rule.
+- **Oncoming:** each car must be able to stop from its own speed + 2 m/s at 3 m/s² with 25 m to
+  spare (`turn_oncoming_room`), instead of a fixed distance for 1.25 × the limit.
+Pure helpers `turn_follower_stops_short` / `turn_oncoming_room` with unit tests.
+
+*Measured (120 s, round 12 + fix), go-arounds / turn-arounds:* seed 3: 0/2, 5: 0/1, **7: 1/1**,
+9: 0/2, 11: 0/2, 13: 0/2, 15: 0/2, 17: 0/2; 0 collisions, 0 stuck, parked car untouched in
+all. Seed 19 (not in the measured set) resolves with passes only (3 started, 0 turn-arounds) —
+the preferred outcome, so the `turnarounds ≥ 1` row would fail on it; I left the row as is
+because it pins the turn-around path for seed 7. Before the fix, seeds 7 and 19 failed.
+Runs of 150–180 s show `stuck_recycled` 4–5 on some seeds (far end of the queue, kinematic,
+out of sight); unchanged by the fix, so the scenario stays at 120 s.
+
+*Goldens.* Hashes compared scenario by scenario, `lead/round12` vs `lead/round12` + fix:
+exactly 5 move — `city_blocked_parked_player_{vesper,grid}`, `world_traffic_soak_observer`,
+`world_traffic_soak_vesper`, `world_traffic_soak_vesper_observer`; the other 50 are
+bit-identical. Only those 5 re-blessed. **Heads-up:** `lead/round12` itself (before my change)
+already mismatches many goldens in `simcli goldens` — `weather_*` (aquaplane, fog_pursuit,
+wet_brake), `panels_frontal_56_hood`, `golden_city_chase`, `golden_night_pursuit_escape`,
+`opponent_{flee_police,open_roads_traffic}`, `police_sideswipe_patrol_day`,
+`race_city_sprint_police`, `world_traffic_soak` — and `police_sideswipe_patrol_night` fails its
+expectations (0 racer contacts, no pursuit before 13.1 s). Not mine and untouched; they need
+the lead's post-merge bless / an owner's look. (The grid and soak goldens I re-blessed were
+in that stale set too, so blessing them also absorbs that merge drift.)
+
+*Gate.* fmt, `clippy --workspace -D warnings`, wasm32 build of `wp_wasm`: pass.
+`cargo test --workspace --no-fail-fast`: everything passes except three tests that fail
+identically on `lead/round12` without my change — simcli `goldens_match` and
+`all_scenarios_pass_and_are_deterministic_in_process` (the stale goldens /
+`police_sideswipe_patrol_night` above), and `wp_net` `four_clients_three_minutes_in_port_vesper`
+(p0 pursuit ends `Escaped`, expected `Captured`; checked on `aee4916`).
+
+Determinism: both `city_blocked_parked_player_*` pass `simcli determinism`. No new RNG draws,
+f32 only. **Contract change requests:** none.
+
