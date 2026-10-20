@@ -262,3 +262,82 @@ fn dump_junctions() {
         println!("wrote {}", path.display());
     }
 }
+
+/// Playtest #51 ("the painted lines at the traffic lights make the car jump"): the surface a
+/// car drives over at every junction entry, sampled by rays through the `wp_sim` colliders
+/// every 5 cm from 3 m before each arriving lane's end (the stop line) to 3 m after it along
+/// its turning paths, on the lane centre and 0.5 m inside each edge. No step > 1 cm between
+/// samples and no grade change > 4 % within 1 m (at 120 km/h a 4 % kink lifts a car by
+/// 1.3 m/s, well under a launch).
+fn check_stop_lines(name: &str, map: &CityMap) {
+    let mut phys = wp_sim::PhysicsWorld::new();
+    phys.set_city_ground(map);
+    let (mut profiles, mut bad, mut worst_step, mut worst_kink) = (0usize, Vec::new(), 0f32, 0f32);
+    for s in map.segs.iter().filter(|s| s.drivable && s.is_connector()) {
+        let SegKind::Connector { from, .. } = s.kind else {
+            continue;
+        };
+        let lane = &map.segs[from as usize];
+        for lat in [-(s.width * 0.5 - 0.5), 0.0, s.width * 0.5 - 0.5] {
+            // Path: the last 3 m of the lane, then 3 m of the connector.
+            let mut pts: Vec<(V2, f32)> = Vec::new();
+            let mut d = -3.0f32;
+            while d <= 3.0 + 1e-3 {
+                let (p, dir) = if d < 0.0 {
+                    lane.point_at((lane.length + d).max(0.0))
+                } else {
+                    s.point_at(d.min(s.length))
+                };
+                pts.push((geom::add(geom::xy(p), geom::scale(geom::right_of(dir), lat)), p[2]));
+                d += 0.05;
+            }
+            let zs: Vec<Option<f32>> = pts
+                .iter()
+                .map(|(q, z)| {
+                    phys.static_ground_z(*q, z + 1.0, 3.0)
+                        .filter(|h| (h - z).abs() < 0.5)
+                })
+                .collect();
+            if zs.iter().any(|z| z.is_none()) {
+                continue; // a building lot over the path (see the hole test)
+            }
+            let zs: Vec<f32> = zs.into_iter().flatten().collect();
+            profiles += 1;
+            for k in 1..zs.len() {
+                let step = (zs[k] - zs[k - 1]).abs();
+                worst_step = worst_step.max(step);
+                if step > 0.01 && bad.len() < 20 {
+                    bad.push(format!("step {step:.3} m at {:?}", pts[k].0));
+                }
+            }
+            // Grade over 0.5 m windows, compared 1 m apart.
+            for k in 10..zs.len() - 10 {
+                let g1 = (zs[k] - zs[k - 10]) / 0.5;
+                let g2 = (zs[k + 10] - zs[k]) / 0.5;
+                let kink = (g2 - g1).abs();
+                worst_kink = worst_kink.max(kink);
+                if kink > 0.04 && bad.len() < 20 {
+                    bad.push(format!("grade change {:.1} % at {:?}", kink * 100.0, pts[k].0));
+                }
+            }
+        }
+    }
+    println!(
+        "{name}: {profiles} stop-line profiles, worst step {worst_step:.4} m, worst grade change {:.2} %",
+        worst_kink * 100.0
+    );
+    assert!(profiles > 1000, "{name}: {profiles}");
+    assert!(bad.is_empty(), "{name}: {bad:?}");
+}
+
+#[test]
+fn vesper_v2_stop_lines_are_smooth() {
+    let net = wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default());
+    check_stop_lines("vesper_v2", &CityMap::new(net));
+}
+
+#[test]
+fn grid_stop_lines_are_smooth() {
+    let net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default());
+    check_stop_lines("grid", &CityMap::new(net));
+}
