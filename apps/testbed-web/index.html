@@ -59,6 +59,12 @@
       .bind-table td, .bind-table th { padding: 1px 4px; text-align: left; font-weight: normal; }
       .bind-table button.bind { min-width: 72px; }
       .bind-table button.waiting { background: #a60; color: #fff; }
+      /* Per-device input shaping + live test bars (src/ui/controls.ts). */
+      .shape-grid { display: grid; grid-template-columns: max-content 140px 40px; gap: 1px 8px; align-items: center; margin: 4px 0; }
+      .shape-bars { display: grid; grid-template-columns: 64px 220px 40px; gap: 3px 8px; align-items: center; margin: 4px 0; }
+      .shape-bar { position: relative; height: 9px; border-radius: 4px; background: #333; overflow: hidden; }
+      .shape-bar i { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: #3dff8f; }
+      .shape-bar.bipolar::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #888; }
       .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; max-height: calc(100vh - 16px); overflow: auto; z-index: 5; background: rgba(0, 0, 0, 0.92); }
       #controls { position: absolute; bottom: 8px; left: 8px; max-width: 520px; max-height: 45vh; overflow: auto; }
       #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }

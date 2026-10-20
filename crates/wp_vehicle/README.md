@@ -356,6 +356,7 @@ cargo run --release -p wp_vehicle --example bench          # per-car cost
 cargo run --release -p wp_vehicle --example handling       # roster × keyboard/gamepad/wheel handling table
 cargo run --release -p wp_vehicle --example handling -- --causes   # + one-assist-off keyboard variants
 cargo run --release -p wp_vehicle --example diff_demo      # differential numbers per car + per type
+cargo run --release -p wp_vehicle --example parity         # reference-game parity table (owner's keyboard settings, 3 cars, ~3 s); `-- --write` / `just parity` updates docs/reference/wreckfest-parity.md
 ```
 
 `tests/ride.rs` holds the ride / launch ranges (ride frequency and damping, 10 cm and 15 cm

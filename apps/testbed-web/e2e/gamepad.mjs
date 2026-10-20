@@ -94,13 +94,17 @@ const applied = () => page.evaluate(() => {
   return { throttle: t[9], brake: t[10], steer: t[11] };
 });
 // Assist fields that differ between the keyboard and gamepad presets and are not owner overrides.
+// Steering speed sensitivity comes from the device's Settings → Controls profile (keyboard 0.75,
+// gamepad 0.70 by default), not the preset, so it is checked against that profile instead.
 const presetDiff = () => page.evaluate(() => {
   const k = window.__wp.sim.assistPreset("Keyboard");
   const g = window.__wp.sim.assistPreset("Gamepad");
   const cur = window.__wp.sim.assists(window.__wp.app.player);
-  const keys = Object.keys(g).filter((f) => !["abs", "tcs", "esc", "auto_gears"].includes(f) && JSON.stringify(g[f]) !== JSON.stringify(k[f]));
-  const is = (p) => keys.every((f) => JSON.stringify(cur[f]) === JSON.stringify(p[f]));
-  return { keys, gamepad: is(g), keyboard: is(k) };
+  const keys = Object.keys(g).filter((f) => !["abs", "tcs", "esc", "auto_gears", "steer_speed_sensitivity"].includes(f) && JSON.stringify(g[f]) !== JSON.stringify(k[f]));
+  const ctl = window.__wp.deviceControls();
+  const speed = (d) => Math.abs(cur.steer_speed_sensitivity - ctl[d].steerSpeedSensitivity) < 1e-6;
+  const is = (p, d) => speed(d) && keys.every((f) => JSON.stringify(cur[f]) === JSON.stringify(p[f]));
+  return { keys, gamepad: is(g, "gamepad"), keyboard: is(k, "keyboard") };
 });
 
 // Start from a clean binding set.

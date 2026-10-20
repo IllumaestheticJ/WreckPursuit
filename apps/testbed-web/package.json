@@ -26,7 +26,8 @@
     "e2e:touch": "node e2e/touch.mjs",
     "e2e:menu": "node e2e/menu.mjs",
     "profile": "node e2e/frame_profile.mjs",
-    "e2e:presets": "node e2e/presets.mjs"
+    "e2e:presets": "node e2e/presets.mjs",
+    "e2e:controls": "node e2e/controls_settings.mjs"
   },
   "dependencies": {
     "three": "0.180.0",
