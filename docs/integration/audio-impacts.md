@@ -116,6 +116,20 @@ modelled horns), `e2e/race.mjs` ✓. Not green, and not from this branch:
   software-GL frame-rate check (2.0–2.3 fps vs real-time factor ≥ 0.75, also on an idle machine).
   That check never presses a key, so the AudioContext never starts and none of this work runs.
 
+**Round 13 re-base (2026-10-20, after A's vehicle / ride / countersteer work merged):** four
+checks failed on `lead/round12` — 20 km/h louder than expected, bass and crunch ordering, wall
+sparks. Cause: the car's new pitch moved the 20 km/h barrier contact a few cm up, the nearest
+lattice node became the hood's front edge, and the director rang the whole hood plate (and the
+recordings switched to metal dents). Fix in the mapping, not the thresholds:
+`director::struck_surface` — a top panel (hood, trunk, roof) only rings as a plate when struck
+from above (|n_z| ≥ 0.5 in chassis space); a horizontal hit on its edge strikes the bumper (hood
+front half / trunk rear half) or the cabin pillars (roof), for the recorded layers too (test
+`a_horizontal_hit_on_the_hood_edge_strikes_the_bumper`). 20 / 50 / 90 km/h hit RMS is now
+−16.7 / −12.2 / −9.5 dB again. The wall-scrape spark check was an absolute level against the
+body that depended on how far the car slides from the ear (round 13: 71 contact events instead of
+183); it now checks that the synthesis adds the > 5 kHz band over the recordings alone
+(−60.5 vs −67.4 dB) and the spark gain follows the scrape level linearly. WAVs regenerated.
+
 ## Needs
 
 | From | What | Why | Workaround now |

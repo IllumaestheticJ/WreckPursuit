@@ -37,7 +37,7 @@ export class RaceMarker {
   private readonly arch = new THREE.Group();
   private readonly arrow: THREE.Mesh;
   private readonly postMat = new THREE.MeshBasicMaterial({ color: GATE_COLOUR });
-  private readonly beamMat = new THREE.MeshBasicMaterial({ color: GATE_COLOUR, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false });
+  private readonly beamMat = new THREE.MeshBasicMaterial({ color: GATE_COLOUR, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true });
   private readonly posts: THREE.Mesh[] = [];
   private readonly bar: THREE.Mesh;
   private readonly beam: THREE.Mesh;
