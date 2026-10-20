@@ -116,16 +116,36 @@ pub struct RouteDriver {
     pub follower: wp_world::drive::PathFollower,
     /// Target speed, m/s.
     pub target_mps: f32,
+    /// Lateral offset from the route (+ right), m.
+    pub lateral_offset_m: f32,
+    /// Keep distance from vehicles ahead (`follow_route(keep_distance: true)`).
+    pub keep_distance: bool,
     /// Furthest arc length reached, m.
     pub progress_m: f32,
 }
 
 impl RouteDriver {
-    /// Input for this tick (advances the follower's PID by one physics tick).
-    pub fn input(&mut self, state: &wp_contracts::VehicleState) -> VehicleInput {
-        let out = self
-            .follower
-            .follow(state, &self.path, self.target_mps, 0.0, PHYSICS_DT);
+    /// Input for this tick (advances the follower's PID by one physics tick). `obstacles`: the
+    /// vehicles to keep distance from (only used with `keep_distance`).
+    pub fn input(
+        &mut self,
+        state: &wp_contracts::VehicleState,
+        obstacles: &[wp_world::leader::Obstacle],
+    ) -> VehicleInput {
+        let traffic = wp_world::drive::FollowTraffic {
+            obstacles,
+            skip: &[],
+            corridor: wp_world::leader::LeaderParams::CAR,
+            following: wp_world::leader::CarFollowing::PURSUIT,
+        };
+        let out = self.follower.follow_behind(
+            state,
+            &self.path,
+            self.target_mps,
+            self.lateral_offset_m,
+            PHYSICS_DT,
+            self.keep_distance.then_some(&traffic),
+        );
         self.progress_m = self.progress_m.max(out.s);
         // Stopped at the finish (or crawling to it): hold on the handbrake, as traffic does —
         // the follower releases the foot brake near standstill (auto-reverse).
@@ -351,6 +371,8 @@ pub fn build_sim(
         let Driver::FollowRoute {
             route_id,
             target_speed,
+            lateral_offset_m,
+            keep_distance,
         } = &spec.driver
         else {
             routes.push(None);
@@ -398,6 +420,8 @@ pub fn build_sim(
             path,
             follower,
             target_mps: *target_speed,
+            lateral_offset_m: *lateral_offset_m,
+            keep_distance: *keep_distance,
             progress_m: 0.0,
         }));
     }
@@ -440,6 +464,27 @@ pub fn apply_op(
         }
     }
     Ok(())
+}
+
+/// Vehicles a `keep_distance` route driver (scenario entity `idx`) keeps its distance from:
+/// civilian traffic and the other scenario entities (ids offset by 1 << 24 so they never tie
+/// with agent ids).
+fn route_obstacles(
+    sim: &Sim,
+    states: &[(EntityId, wp_contracts::VehicleState)],
+    idx: usize,
+) -> Vec<wp_world::leader::Obstacle> {
+    let mut v: Vec<wp_world::leader::Obstacle> = sim
+        .world()
+        .agents()
+        .map(|a| wp_world::leader::Obstacle::from_agent(&a))
+        .collect();
+    for (k, (id, st)) in states.iter().enumerate() {
+        if k != idx {
+            v.push(wp_world::leader::Obstacle::from_state((1 << 24) + id.0, st));
+        }
+    }
+    v
 }
 
 /// Read-only view handed to [`run_with_hook`] after every tick.
@@ -615,6 +660,9 @@ pub struct WorldSummary {
     /// Civilians that turned around (U-turn / k-point turn, finished) or reversed back to the
     /// last junction because their lane was blocked.
     pub traffic_turnarounds: u64,
+    /// Civilians that pulled over for a siren unit coming up behind them
+    /// (`TrafficStats::siren_yields`, playtest row 62).
+    pub traffic_siren_yields: u64,
     /// City props turned into physics bodies (parked cars, cones).
     pub props: u32,
     /// Static boxes from `barriers`.
@@ -638,6 +686,7 @@ impl WorldSummary {
             "traffic_stuck_recycled" => self.traffic_stuck_recycled as f32,
             "traffic_go_arounds" => self.traffic_go_arounds as f32,
             "traffic_turnarounds" => self.traffic_turnarounds as f32,
+            "traffic_siren_yields" => self.traffic_siren_yields as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
@@ -647,7 +696,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 13] = [
+    pub const METRICS: [&'static str; 14] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -657,6 +706,7 @@ impl WorldSummary {
         "traffic_stuck_recycled",
         "traffic_go_arounds",
         "traffic_turnarounds",
+        "traffic_siren_yields",
         "props",
         "static_boxes",
         "police_units_max",
@@ -714,6 +764,7 @@ impl WorldTracker {
             traffic_stuck_recycled: stats.stuck_recycled,
             traffic_go_arounds: stats.oncoming_passes + stats.go_around_lane_changes,
             traffic_turnarounds: stats.turnarounds_completed + stats.reverses,
+            traffic_siren_yields: stats.siren_yields,
             props: sim.prop_count() as u32,
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
@@ -1137,7 +1188,20 @@ pub fn run_with_hook(
             let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = match routes[idx].as_mut() {
-                    Some(route) => route.input(&states[idx].1),
+                    Some(route) => {
+                        let obstacles = if route.keep_distance {
+                            route_obstacles(&sim, &states, idx)
+                        } else {
+                            Vec::new()
+                        };
+                        let mut input = route.input(&states[idx].1, &obstacles);
+                        // Lights, siren and horn still come from the keyframes.
+                        let key = driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]);
+                        input.siren = key.siren;
+                        input.headlights = key.headlights;
+                        input.horn = key.horn;
+                        input
+                    }
                     None => driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]),
                 };
                 if input != last_inputs[idx] {

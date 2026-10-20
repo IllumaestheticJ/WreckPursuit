@@ -297,8 +297,7 @@ lane it is in. `TrafficStats::{lane_changes, lane_changes_left}`.
 
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
-speed (head-on or crossing); sirens within 60 m → pull 1 m right, slow to 3 m/s at up to
-4 m/s², stop if the siren is within 25 m behind, never enter a junction; debris ahead (`Hazard`,
+speed (head-on or crossing); siren units → see **Yielding to sirens** below; debris ahead (`Hazard`,
 extrapolated along its velocity up to 2 s) → swerve within the lane by up to 1.5 m (planned in
 the lane frame, held until the rear bumper is past) at 60 % of the limit; debris that blocks the
 lane → change to a free neighbour lane (forced MOBIL change, safety still checked) or stop;
@@ -426,6 +425,33 @@ integer ticks: the world counts physics ticks (`World::tick`, signals use it via
 (`TICKS_PER_TRAFFIC_STEP` = 4). `World::state_hash` covers clock, tick and every agent (pinned
 by `determinism_hash`).
 
+### Yielding to sirens (`traffic::siren`, playtest rows 61–62)
+Any tracked vehicle with `siren` on (AI police units via `VehicleInput::siren`, a player cop).
+Per driver, per siren unit within 120 m (one distance test; nothing runs while no siren is on):
+- **Behind**, same direction, moving (or < 30 m back even if slow — a unit stuck behind it):
+  notice after a reaction time (law-abiding 0.5–1.2 s, casual 0.7–1.6, aggressive 1.0–2.0;
+  hash of id + seed), signal, slow (≥ 1 m/s², ≤ comfort decel), move to the kerb inside the lane
+  (body 0.15 m from the lane edge: 0.65 m on a 3.5 m lane; crawl at 2 m/s while still moving
+  sideways), stop. Away from the unit: to the left only if the unit is < 35 m back and > 0.5 m
+  to the right. Multi-lane roads: a forced lane change (safety check unchanged) out of the
+  unit's lane where the next lane has a gap. Wait until the unit has gone past + 2 s, then
+  signal back and merge once nobody is closing in behind. A unit standing still behind for 15 s
+  is given up on (not yielded to again until it moves). Notice range 60 m (slow unit) to 120 m
+  (≥ 15 m/s).
+- **Oncoming** (or a unit stopped facing it < 30 m ahead): to the kerb, slow to 4 m/s.
+- **Stopped** unit within 30 m otherwise: slow to 8 m/s past it (gently: a slow stream past a
+  bust scene would block cars waiting to get round it).
+- **Junction**: within 60 m of its stop line, a driver does not enter a junction a moving unit
+  heads for (within 70–120 m by its speed, or 20 m of the line; a parked unit does not close it) and gives up a permit it can still
+  stop for; cars already inside keep going. Nobody creeps into a junction to make room.
+- Kinematic (far LOD) agents run the same code, so promoted cars are already on the kerb.
+- `TrafficStats::{siren_yields, siren_lane_changes}`; `AgentView::yielding` (snapshot flag
+  `YIELDING`), turn signal towards the kerb / back.
+A unit passes yielding traffic hugging the centre line (≥ 2.6 m corridor between the pulled-over
+cars of both directions). Tests: `tests/siren.rs` (stand-in unit: 6 queued cars passed in
+5.7–6.9 s, moving traffic passed without slowing, siren-off control, multi-lane, stuck/parked
+unit), simcli `city/siren_traffic_*`.
+
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 (`density_scale` 4), noon, aggressive 5 %:
@@ -451,6 +477,11 @@ reverses running (`perf_400_agents_with_blockers_under_budget`, ignored). Per de
 added work is the binding-constraint bookkeeping; manoeuvre checks run only for obstructed cars
 (once per second) and for the few cars in a manoeuvre.
 
+Sirens (round 12b, `SIRENS=8 NO_COLLISIONS=1 cargo run --release -p wp_world --example
+traffic_bench -- 1 400`): 8 siren units at 15 m/s, each 30 m behind a civilian (traffic
+yielding all the time): avg **0.12 ms**, p99 0.32 ms per 60 Hz frame vs 0.054 / 0.12 ms without
+(same run; includes the bench building the units from the agent list every step). Budget 2 ms.
+
 Port Vesper v2, same settings (`CITY=vesper_v2 just traffic-bench`): avg 0.061 ms, p99 0.16 ms
 per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seeds × {0 %, 5 %}
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
@@ -463,6 +494,9 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   recycled when unseen. No protected-left phases yet.
 - Spawning uses one traffic car definition (no per-district vehicle mix yet).
 - Agents do not react to other civilians' hazards (only tracked vehicles and debris).
+- Sirens: pull-overs stay inside the lane (no kerb mounting, no parking-lane use); on
+  multi-lane roads a car leaves the unit's lane only where the next lane has a safe gap, so a
+  unit should ride the lane line; nobody creeps into a junction to make room at a red.
 - Blocked vehicles: no use of shoulders / parking lanes (parked cars live there); passes are
   one car at a time (followers queue up and pass in turn); a k-point turn assumes the road is
   locally straight (it plans in a straight corridor; the physical driver stops a leg early if

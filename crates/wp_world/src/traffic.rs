@@ -44,6 +44,9 @@ use crate::network::{IntersectionControl, LaneKind, TurnKind, ZoneId};
 mod blocked;
 pub use blocked::Wait;
 use blocked::{Manoeuvre, ObsRef};
+pub mod siren;
+use siren::SirenRel;
+pub use siren::{SirenYield, YieldPhase};
 
 /// Civilian car length used for spacing and overlap tests, m.
 pub const CAR_LENGTH_M: f32 = 4.5;
@@ -65,7 +68,8 @@ pub const POPULATE_SIGHT_RADIUS_M: f32 = 150.0;
 /// the active area, to make up for the part in a player's view that cannot be spawned into.
 pub const MAX_SPAWNABLE_BOOST: f32 = 2.0;
 
-/// Siren reaction radius, m.
+/// A car turning around or reversing (it cannot pull over) counts as yielding while a siren unit
+/// is this close, m. Everyone else follows [`siren`].
 pub const SIREN_RADIUS_M: f32 = 60.0;
 
 const NONE: u32 = NO_SEG;
@@ -456,6 +460,12 @@ pub struct TrafficStats {
     /// Turn-arounds finished (the car drove off in the opposing lane).
     #[serde(default)]
     pub turnarounds_completed: u64,
+    /// Civilians that pulled over for a siren unit coming up behind them ([`siren`]).
+    #[serde(default)]
+    pub siren_yields: u64,
+    /// Lane changes made to get out of a siren unit's lane (also counted in `lane_changes`).
+    #[serde(default)]
+    pub siren_lane_changes: u64,
     /// First 64 new overlap pairs: `(traffic step, agent a, agent b)`.
     pub collision_log: Vec<(u64, AgentId, AgentId)>,
 }
@@ -537,6 +547,12 @@ pub struct Agent {
     manoeuvre: Option<Box<Manoeuvre>>,
     /// Connector the agent entered its current lane from (`NO_SEG` if spawned there).
     came_from: SegId,
+    /// Yield to a siren unit coming up behind ([`siren`]).
+    pub siren: SirenYield,
+    /// Reaction time before pulling over for a siren, s ([`siren::reaction_s`]).
+    pub siren_reaction_s: f32,
+    /// Wants a lane change out of a siren unit's lane (multi-lane roads): `Some(to the right)`.
+    siren_lc: Option<bool>,
 }
 
 /// Renderer / netcode view of an agent.
@@ -881,6 +897,15 @@ impl Traffic {
             } else if let Some((to_right, _)) = a.pending_lc {
                 turn_signal = if to_right { 1 } else { -1 };
             }
+            match a.siren.phase {
+                YieldPhase::PullingOver | YieldPhase::Waiting => {
+                    turn_signal = if a.siren.side < 0.0 { -1 } else { 1 };
+                }
+                YieldPhase::MergingBack => {
+                    turn_signal = if a.siren.side < 0.0 { 1 } else { -1 };
+                }
+                _ => {}
+            }
             let mut hazard_lights = a.disabled || a.emergency;
             if let Some(m) = &a.manoeuvre {
                 match m.signal() {
@@ -946,9 +971,13 @@ impl Traffic {
             h.write_u32(a.permit);
             h.write_u32(a.personality as u32);
             h.write_u32(a.lod as u32);
-            // Only agents in a manoeuvre add to the hash (unchanged hashes otherwise).
+            // Only agents in a manoeuvre / yielding to a siren add to the hash (unchanged hashes
+            // otherwise).
             if let Some(m) = &a.manoeuvre {
                 m.hash_into(h);
+            }
+            if a.siren != SirenYield::default() {
+                a.siren.hash_into(h);
             }
         }
         h.write_u64(self.stats.spawned);
@@ -1517,6 +1546,8 @@ impl Traffic {
     }
 
     fn decide(&mut self, map: &CityMap, inp: &TrafficInputs) {
+        // Siren reactions cost nothing while no siren is on.
+        let any_siren = inp.tracked.iter().any(|t| t.siren);
         for i in 0..self.agents.len() {
             let pose = self.poses[i];
             let a = &self.agents[i];
@@ -1573,24 +1604,225 @@ impl Traffic {
                 }
             };
 
-            // Sirens.
-            let mut siren = false;
-            for t in inp.tracked.iter().filter(|t| t.siren) {
-                let r = geom::sub(geom::xy(t.pos), q);
-                let d = geom::len(r);
-                if d < SIREN_RADIUS_M {
-                    siren = true;
-                    v0 = v0.min(3.0);
-                    // Slow down promptly (≈ 4 m/s²) rather than coasting down comfortably.
-                    acc = acc.min(-((v - 3.0) * 1.5).clamp(0.0, 4.0));
-                    if !seg.is_connector() && pass.is_none() {
-                        lat_target = 1.0;
-                    }
-                    if geom::dot(r, pose.f) < 0.0 && d < 25.0 {
-                        acc = acc.min(idm(v, v0, 1.0 + p.min_gap_m, 0.0, &p));
+            // Sirens ([`siren`]): pull over for a unit coming up behind, slow for one coming the
+            // other way, keep out of a junction a unit is heading for.
+            let mut sy = a.siren;
+            let mut oncoming = false;
+            let mut near = false;
+            let mut jsiren = false;
+            let mut siren_lc = None;
+            let mut yield_started = false;
+            if any_siren || sy.phase != YieldPhase::None {
+                // Nearest unit behind: (distance, lateral offset, speed). A driver not yet
+                // yielding only reacts to a moving one.
+                let mut behind: Option<(f32, f32, f32)> = None;
+                for t in inp.tracked.iter().filter(|t| t.siren) {
+                    match siren::classify(t, q, pose.p[2], pose.f) {
+                        Some(
+                            rel @ SirenRel::Behind {
+                                back_m,
+                                lat_m,
+                                speed_mps,
+                            },
+                        ) => {
+                            let fresh = matches!(
+                                sy.phase,
+                                YieldPhase::None | YieldPhase::Noticing | YieldPhase::MergingBack
+                            );
+                            if (!fresh || siren::starts_yield(&rel))
+                                && behind.is_none_or(|b| back_m < b.0)
+                            {
+                                behind = Some((back_m, lat_m, speed_mps));
+                            }
+                        }
+                        Some(SirenRel::Oncoming { .. }) => oncoming = true,
+                        Some(SirenRel::Near) => near = true,
+                        None => {}
                     }
                 }
+                // Gave up on a unit standing behind: not again until it moves or goes.
+                let ignored = sy.phase == YieldPhase::None
+                    && sy.stall_s > siren::STALL_S
+                    && behind.is_some_and(|b| b.2 < siren::MOVING_MPS);
+                if ignored {
+                    behind = None;
+                    near = true;
+                }
+                let next = a.plan[0];
+                // (Only cars near their stop line: the others are not about to enter.)
+                if any_siren
+                    && !seg.is_connector()
+                    && next != NONE
+                    && map.seg(next).is_connector()
+                    && seg.length - a.s < siren::JUNCTION_APPROACH_M
+                {
+                    let (lp, _) = seg.point_at(seg.length);
+                    jsiren = inp
+                        .tracked
+                        .iter()
+                        .any(|t| siren::heads_for_junction(t, geom::xy(lp), lp[2]));
+                }
+                let lane = seg.lane().map(|l| &map.net.lanes[l as usize]);
+                let half_w = lane.map_or(1.75, |l| l.width_m * 0.5);
+                let can_pull = !seg.is_connector() && pass.is_none();
+                let kerb = siren::kerb_offset_m(half_w * 2.0);
+                match behind {
+                    Some((back_u, lat_u, speed_u)) => {
+                        // Away from the unit: to the kerb unless it comes up on the right.
+                        let side = siren::side_for(back_u, lat_u);
+                        match sy.phase {
+                            YieldPhase::None => {
+                                sy = SirenYield {
+                                    phase: YieldPhase::Noticing,
+                                    timer_s: 0.0,
+                                    side,
+                                    stall_s: 0.0,
+                                };
+                            }
+                            YieldPhase::Noticing => {
+                                sy.timer_s += TRAFFIC_DT;
+                                sy.side = side;
+                                if sy.timer_s >= a.siren_reaction_s {
+                                    sy.phase = YieldPhase::PullingOver;
+                                    sy.timer_s = 0.0;
+                                    yield_started = true;
+                                }
+                            }
+                            YieldPhase::PullingOver => {
+                                sy.side = side;
+                                sy.timer_s = 0.0;
+                            }
+                            // The unit turned out to come up on the other side: move over.
+                            YieldPhase::Waiting if side != sy.side => {
+                                sy.phase = YieldPhase::PullingOver;
+                                sy.side = side;
+                                sy.timer_s = 0.0;
+                            }
+                            YieldPhase::Waiting => {
+                                sy.timer_s = 0.0;
+                                // A unit that just stands there behind (it stopped for something
+                                // else): give up on it after a while.
+                                sy.stall_s = if speed_u < 0.5 {
+                                    sy.stall_s + TRAFFIC_DT
+                                } else {
+                                    0.0
+                                };
+                                if sy.stall_s > siren::STALL_S {
+                                    sy.phase = YieldPhase::MergingBack;
+                                }
+                            }
+                            YieldPhase::MergingBack if sy.stall_s <= siren::STALL_S => {
+                                sy.phase = YieldPhase::PullingOver;
+                                sy.timer_s = 0.0;
+                            }
+                            YieldPhase::MergingBack => {}
+                        }
+                        // Multi-lane road, unit in this lane: change out of it if there is room
+                        // (looked for from the moment the driver hears it, while gaps still
+                        // exist; the lane-change safety check is unchanged).
+                        let neighbour = lane.is_some_and(|l| {
+                            [l.left, l.right].into_iter().flatten().any(|n| {
+                                let nl = &map.net.lanes[n as usize];
+                                nl.kind.drivable()
+                                    && !inp.closed.get(n as usize).copied().unwrap_or(false)
+                            })
+                        });
+                        if sy.phase != YieldPhase::None
+                            && neighbour
+                            && back_u < siren::SIDE_RANGE_M * 2.0
+                            && lat_u.abs() < half_w
+                        {
+                            siren_lc = Some(lat_u <= 0.0);
+                        }
+                    }
+                    None => match sy.phase {
+                        YieldPhase::None if !ignored => sy.stall_s = 0.0,
+                        YieldPhase::None => {}
+                        YieldPhase::Noticing => sy = SirenYield::default(),
+                        YieldPhase::PullingOver | YieldPhase::Waiting => {
+                            // The unit has gone past (or switched off): wait, then merge back.
+                            sy.phase = YieldPhase::Waiting;
+                            sy.timer_s += TRAFFIC_DT;
+                            if sy.timer_s >= siren::CLEAR_S {
+                                sy.phase = YieldPhase::MergingBack;
+                                sy.timer_s = 0.0;
+                            }
+                        }
+                        YieldPhase::MergingBack => sy.timer_s += TRAFFIC_DT,
+                    },
+                }
+                let max_decel = p.comfort_decel.clamp(2.5, 3.5);
+                match sy.phase {
+                    YieldPhase::PullingOver | YieldPhase::Waiting if can_pull => {
+                        lat_target = sy.side * kerb;
+                        let sideways = (a.lat - lat_target).abs() > 0.25;
+                        let vt = if sideways {
+                            siren::PULL_OVER_CRAWL_MPS
+                        } else {
+                            0.0
+                        };
+                        v0 = v0.min(siren::PULL_OVER_CRAWL_MPS);
+                        acc = acc.min(siren::approach_speed(v, vt, max_decel, p.max_accel));
+                        if sy.phase == YieldPhase::PullingOver && !sideways && v < 0.3 {
+                            sy.phase = YieldPhase::Waiting;
+                            sy.timer_s = 0.0;
+                        }
+                    }
+                    YieldPhase::MergingBack if can_pull => {
+                        // Back into the lane once nobody is closing in behind.
+                        let own = &self.lists[a.seg as usize];
+                        let pos = self.list_pos[i] as usize;
+                        let closing = own[..pos.min(own.len())]
+                            .iter()
+                            .rev()
+                            .find(|e| !e.ghost)
+                            .is_some_and(|e| {
+                                e.v > 1.0 && a.s - e.s - CAR_LENGTH_M < 4.0 + 1.5 * e.v
+                            });
+                        if closing {
+                            lat_target = sy.side * kerb;
+                            acc = acc.min(siren::approach_speed(v, 0.0, max_decel, p.max_accel));
+                        }
+                        v0 = v0.min(8.0);
+                        if !closing && a.lat.abs() < 0.2 {
+                            sy = SirenYield {
+                                stall_s: sy.stall_s,
+                                ..SirenYield::default()
+                            };
+                        }
+                    }
+                    YieldPhase::MergingBack => {
+                        sy = SirenYield {
+                            stall_s: sy.stall_s,
+                            ..SirenYield::default()
+                        };
+                    }
+                    _ => {}
+                }
+                // Slow past a stopped unit with its lights on.
+                if near && !sy.active() {
+                    v0 = v0.min(siren::NEAR_MPS);
+                    acc = acc.min(siren::approach_speed(
+                        v,
+                        siren::NEAR_MPS,
+                        max_decel,
+                        p.max_accel,
+                    ));
+                }
+                if oncoming && !sy.active() {
+                    if can_pull {
+                        lat_target = kerb;
+                    }
+                    v0 = v0.min(siren::ONCOMING_MPS);
+                    acc = acc.min(siren::approach_speed(
+                        v,
+                        siren::ONCOMING_MPS,
+                        max_decel,
+                        p.max_accel,
+                    ));
+                }
             }
+            let siren = sy.active() || oncoming || near || jsiren;
 
             // Car ahead (a cluster being passed is not a leader).
             let skip_own = pass.map_or(f32::NEG_INFINITY, |b| b.skip_until_s);
@@ -1724,7 +1956,8 @@ impl Traffic {
                 }
                 let w = geom::sub(tv, pose.vel);
                 let ww = geom::dot(w, w);
-                if ww > 25.0 && long > -2.0 {
+                // A siren unit coming past a car that has pulled over / slowed for it is expected.
+                if ww > 25.0 && long > -2.0 && !(t.siren && (sy.active() || oncoming)) {
                     let ts = -geom::dot(r, w) / ww;
                     if ts > 0.0 && ts < 3.0 {
                         let miss = geom::len(geom::add(r, geom::scale(w, ts)));
@@ -1806,12 +2039,12 @@ impl Traffic {
                     // `limit > 0`: at a green (or no signal) a stopped car keeps its permit
                     // (need = 0 would otherwise revoke it every step).
                     if (limit > 0.0 && need <= limit)
-                        || (siren && need <= 5.0)
+                        || ((jsiren || sy.active()) && need <= 5.0)
                         || (self.tv_block[next as usize] && need <= 8.0)
                     {
                         revoke = true;
                     }
-                } else if self.may_enter(map, i, next, d_line, siren) {
+                } else if self.may_enter(map, i, next, d_line, jsiren || sy.active()) {
                     grant = Some(next);
                 }
                 let has = (a.permit == next && !revoke) || grant.is_some();
@@ -1900,6 +2133,11 @@ impl Traffic {
             }
             a.emergency = emergency;
             a.yielding = siren;
+            a.siren = sy;
+            a.siren_lc = siren_lc;
+            if yield_started {
+                self.stats.siren_yields += 1;
+            }
             a.start_wait_s = start_wait;
             a.acc = acc.clamp(-9.0, p.max_accel);
             a.lat_target = lat_target;
@@ -1988,8 +2226,9 @@ impl Traffic {
             if a.disabled || a.permit != NONE || a.ghost.is_some() || a.manoeuvre.is_some() {
                 continue;
             }
-            // Physical agents change lanes only to get around a stationary obstruction.
-            if a.physical.is_some() && !a.go_around {
+            // Physical agents change lanes only to get around a stationary obstruction or out of
+            // a siren unit's lane.
+            if a.physical.is_some() && !a.go_around && a.siren_lc.is_none() {
                 continue;
             }
             let Some(lane) = map.seg(a.seg).lane() else {
@@ -2009,7 +2248,8 @@ impl Traffic {
             });
             // A stationary obstruction ahead (wreck, parked car) forces a change too: MOBIL with
             // the incentive threshold lowered, the safety criterion unchanged.
-            let blocked = debris || a.go_around;
+            // So does a siren unit coming up behind in this lane ([`siren`]).
+            let blocked = debris || a.go_around || a.siren_lc.is_some();
             if !blocked
                 && (a.s < 15.0
                     || d_end < 60.0
@@ -2020,7 +2260,7 @@ impl Traffic {
             {
                 continue;
             }
-            if blocked && (d_end < 15.0 || a.yielding) {
+            if blocked && (d_end < 15.0 || (a.yielding && a.siren_lc.is_none())) {
                 continue;
             }
             let p = a.params;
@@ -2043,6 +2283,10 @@ impl Traffic {
             let mut best: Option<(f32, SegId, f32, bool)> = None;
             for (cand, to_right) in [(l.left, false), (l.right, true)] {
                 let Some(c) = cand else { continue };
+                // Out of a siren unit's lane: only away from the unit.
+                if a.siren_lc.is_some_and(|r| r != to_right) {
+                    continue;
+                }
                 let cl = &map.net.lanes[c as usize];
                 if !cl.kind.drivable() || inp.closed.get(c as usize).copied().unwrap_or(false) {
                     continue;
@@ -2153,7 +2397,9 @@ impl Traffic {
                 };
                 let t = self.step_count;
                 let a = &mut self.agents[i];
-                if a.go_around && !debris {
+                if a.siren_lc.is_some() && !debris {
+                    self.stats.siren_lane_changes += 1;
+                } else if a.go_around && !debris {
                     self.stats.go_around_lane_changes += 1;
                 }
                 a.seg = c;
@@ -2871,6 +3117,9 @@ impl Traffic {
                 obstacle_still_s: 0.0,
                 obs: ObsRef::None,
                 patience_s: blocked::patience(self.seed, id, personality),
+                siren: SirenYield::default(),
+                siren_reaction_s: siren::reaction_s(self.seed, id, personality),
+                siren_lc: None,
                 retry_s: 0.0,
                 go_around: false,
                 manoeuvre: None,
