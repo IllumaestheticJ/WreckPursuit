@@ -614,7 +614,17 @@ see round 8), `arcade_mechanical_min_closing_mps` 11.5, settle. `sim.toml` untou
   dropped), new `arcade_50kmh_hits_never_end_the_car` (8 frontal / 8 side hits),
   `arcade_alignment_is_scaled_and_sim_is_not`; `mode_tables_…` updated. Barrier scenarios
   `frontal_arcade` / `offset_arcade` 80 km/h health ranges raised (0.71 / 0.67 now).
-- Goldens re-blessed in a `[bless]` commit (Arcade damage hashes; reason in its message).
+- Goldens: `[bless]` commit `6378312` re-blesses only the 7 goldens that pass on
+  `lead/round12` and changed with this work (`audio_sideswipe_scrape`, `crash_barrier_frontal`,
+  `crash_head_on`, `golden_barrier_56kmh_arcade`, `golden_tbone`, `panels_frontal_bumper_hang`,
+  `panels_side_swipe_door`) plus the 6 new `damage/` ones. Expectations changed:
+  `crash/head_on` health 0.2–0.8 → 0.6–0.97 (now 0.88/0.89), `golden/tbone` victim
+  components_failed 1–20 → 0–1.
+- **Lead:** 29 goldens already mismatch on `lead/round12` itself, before my work (checked
+  with the base build: `city_*` ×6, `golden_city_chase`, `golden_night_pursuit_escape`,
+  `opponent_*` ×4, `panels_frontal_56_hood`, `police_sideswipe_patrol_*`, `race_*` ×5,
+  `weather_*` ×5, `world_traffic_soak*` ×4). I did not bless them (not my changes to vouch
+  for); `goldens_match` stays red until the lead re-blesses them after merging.
 
 ### Contract change request #10 (new, lead)
 `ModeTable::{alignment_scale: f32, structural_health_scale: f32, failed_steer_ratio: f32}`
