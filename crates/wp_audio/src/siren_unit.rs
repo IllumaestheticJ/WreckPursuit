@@ -35,10 +35,11 @@ use crate::spatial::{distance_gain, len, sub};
 use crate::types::{slot, Bus, Priority, VoiceId};
 use crate::SirenOverride;
 
-/// Voice slot of the whoop chirp one-shot (outside the `SIREN..SIREN + 8` loop range).
-pub const WHOOP_SLOT: u32 = slot::SIREN + 0x10;
+/// Voice slot of the whoop chirp one-shot (outside the `SIREN..SIREN + 8` loop range and
+/// clear of `slot::HORN` = `SIREN + 0x10`).
+pub const WHOOP_SLOT: u32 = slot::SIREN + 0x20;
 /// Voice slot of an air-horn blast one-shot.
-pub const AIRHORN_SLOT: u32 = slot::SIREN + 0x11;
+pub const AIRHORN_SLOT: u32 = slot::SIREN + 0x21;
 /// Cue name of the whoop chirp in a siren pack.
 pub const WHOOP_CUE: &str = "siren/whoop";
 /// Cue name of the air-horn blast in a siren pack.
@@ -714,6 +715,15 @@ mod tests {
         }
         // 10 s at a 1.2 s hold: at most ~8 switches instead of 40.
         assert!((2..=9).contains(&switches), "{switches} switches");
+    }
+
+    #[test]
+    fn one_shot_slots_do_not_collide() {
+        for s in [WHOOP_SLOT, AIRHORN_SLOT] {
+            assert_ne!(s, slot::HORN);
+            assert!(!(slot::SIREN..slot::SIREN + 8).contains(&s));
+            assert!(!slot::is_one_shot(s));
+        }
     }
 
     #[test]

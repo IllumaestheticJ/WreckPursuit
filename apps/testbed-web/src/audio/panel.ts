@@ -147,6 +147,14 @@ export class AudioPanel {
     this.setStatus("click or press a key to start audio");
   }
 
+  /** Append a titled section to the panel body (siren lab). */
+  addSection(title: string, el: HTMLElement): void {
+    const h = document.createElement("div");
+    h.style.marginTop = "6px";
+    h.innerHTML = `<b>${title}</b>`;
+    this.body.append(h, el);
+  }
+
   private applyOpen(): void {
     this.body.style.display = this.settings.open ? "" : "none";
   }

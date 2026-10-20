@@ -66,6 +66,37 @@ export interface DirectorStats {
 export interface FrameOut {
   commands: AudioCommand[];
   stats: DirectorStats;
+  /** Siren v2 acoustics (wp_audio::siren_space::SirenSpaceFrame). */
+  siren?: SirenSpaceFrame;
+}
+
+/** Listener surroundings for the siren effects (wp_audio::siren_space::Room). */
+export interface SirenRoom {
+  slap_left_s: number;
+  slap_right_s: number;
+  slap_gain: [number, number];
+  slap_feedback: number;
+  tunnel: number;
+  rt60_s: number;
+  street_m: number;
+}
+
+/** One playing siren's occlusion / interior muffle (wp_audio::siren_space::VoiceSpace). */
+export interface SirenVoiceSpace {
+  entity: number;
+  pattern: string;
+  occlusion: number;
+  gain: number;
+  lowpass_hz: number;
+  interior: boolean;
+}
+
+/** wp_audio::siren_space::SirenSpaceFrame. */
+export interface SirenSpaceFrame {
+  room: SirenRoom;
+  voices: SirenVoiceSpace[];
+  engine_duck: number;
+  radio_duck: number;
 }
 
 export type CueSource =

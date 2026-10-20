@@ -5,7 +5,7 @@
 //! | function | what |
 //! |---|---|
 //! | `audio_library()` | JSON `{ config, packs }` (the backend needs pack cue definitions) |
-//! | `audio_frame(listener, events_json, focus)` | JSON `{ commands, stats }` for this frame |
+//! | `audio_frame(listener, events_json, focus)` | JSON `{ commands, stats, siren }` for this frame (`siren` = siren v2 acoustics, `wp_audio::SirenSpaceFrame`) |
 //! | `audio_set_siren(entity, mode)` | `""` (default) / `"Off"` / `"Auto"` / `"Wail"` / `"Yelp"` / `"Phaser"` / `"HiLo"` |
 //! | `audio_set_scanner_tier(tier)` | `"None"` / `"Basic"` / `"Pro"` / `"Elite"` (wp_police tiers 0/1/2) |
 //! | `audio_radio(unit, priority, text)` | queue a scanner line (debug until `PoliceEvent::Radio` exists) |
@@ -65,6 +65,8 @@ pub fn audio_library() -> Result<String, JsValue> {
 struct FrameOut<'a> {
     commands: &'a [AudioCommand],
     stats: &'a DirectorStats,
+    /// Siren v2 acoustics for this frame's sirens (occlusion, slap echo, tunnel, ducks).
+    siren: &'a wp_audio::SirenSpaceFrame,
 }
 
 /// Run the director for this frame. `listener` = `[pos xyz, vel xyz, forward xyz, up xyz]`
@@ -95,9 +97,11 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
             let d = a.as_mut().expect("just created");
             let focus = (focus != 0).then_some(EntityId(focus));
             let commands = frame_commands(s, d, lis, focus, &events);
+            let siren = d.siren_space(&lis, &crate::siren_cue::WorldAcoustics(s.sim().world()));
             Ok(json(&FrameOut {
                 commands: &commands,
                 stats: d.stats(),
+                siren: &siren,
             }))
         })
     })
@@ -119,6 +123,8 @@ pub(crate) fn frame_commands(
     let states = sim.vehicle_states();
     let vehicles: BTreeMap<EntityId, &wp_sim::SimVehicle> =
         sim.vehicles().iter().map(|v| (v.id, v)).collect();
+    let positions: BTreeMap<EntityId, [f32; 3]> =
+        states.iter().map(|(id, st)| (*id, st.pos)).collect();
     let mut inputs: Vec<VehicleAudioInput> = Vec::with_capacity(states.len());
     for (id, st) in &states {
         let Some(v) = vehicles.get(id) else {
@@ -133,6 +139,8 @@ pub(crate) fn frame_commands(
                 },
             }
         }
+        // Siren v2: the unit's AI state picks the pattern (read-only; audio never feeds the sim).
+        d.set_siren_cue(*id, crate::siren_cue::vehicle_cue(sim, v, &positions));
         inputs.push(VehicleAudioInput {
             entity: *id,
             car_id: &v.car_id,
