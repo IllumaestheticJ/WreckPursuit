@@ -24,7 +24,8 @@
     "e2e:touch": "node e2e/touch.mjs",
     "e2e:menu": "node e2e/menu.mjs",
     "profile": "node e2e/frame_profile.mjs",
-    "e2e:presets": "node e2e/presets.mjs"
+    "e2e:presets": "node e2e/presets.mjs",
+    "e2e:drift-lab-b": "node e2e/drift_lab_b.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

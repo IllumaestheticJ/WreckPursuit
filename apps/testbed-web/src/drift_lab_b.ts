@@ -88,7 +88,8 @@ function strip(pts: [number, number, number][], off: number, w: number, z: numbe
   const idx: number[] = [];
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = 2 * i;
-    idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    // Counter-clockwise seen from above (+Z), so the strip faces up.
+    idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -168,7 +169,7 @@ export class DriftLabPanel {
     this.root = document.createElement("div");
     this.root.id = "drift-lab-b";
     this.root.style.cssText =
-      "position:absolute;right:12px;top:120px;z-index:30;font:12px/1.35 system-ui,sans-serif;color:#eee;pointer-events:auto;max-width:min(320px,calc(100vw - 24px));display:none";
+      "position:absolute;left:272px;top:196px;z-index:30;font:12px/1.35 system-ui,sans-serif;color:#eee;pointer-events:auto;max-width:min(320px,calc(100vw - 24px));display:none";
     const btn = document.createElement("button");
     btn.textContent = "tune";
     btn.id = "drift-tune";
