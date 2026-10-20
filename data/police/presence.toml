@@ -74,7 +74,7 @@ max_units_by_level = [16, 18, 20, 22, 24, 24]
 despawn_min_m = 150.0
 # A call's unit still farther than redispatch_far_m from the racer redispatch_s after taking
 # it is released and the call dispatched again (the racer turned away from it).
-redispatch_s = 10.0
+redispatch_s = 6.0
 redispatch_far_m = 150.0
 
 # Call taken -> unit assigned, s.

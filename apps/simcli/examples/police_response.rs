@@ -93,7 +93,6 @@ fn run_once(
         .collect();
     let mut rng = wp_math::Rng::new(seed ^ 0xC0FF_EE11);
     // Start on a road near a random node, then chain routes to random far nodes.
-    let start = nodes[rng.below(nodes.len() as u32) as usize];
     let pick_far = |rng: &mut wp_math::Rng, from: [f32; 2]| loop {
         let n = nodes[rng.below(nodes.len() as u32) as usize];
         if (n[0] - from[0]).hypot(n[1] - from[1]) > 400.0 {
@@ -112,12 +111,20 @@ fn run_once(
         }
         None
     };
-    let mut drive = plan(sim, &mut rng, start).expect("a route");
+    // Some nodes (dead ends, one-way stubs) have no route out: try another start.
+    let mut start = nodes[rng.below(nodes.len() as u32) as usize];
+    let mut drive = loop {
+        if let Some(d) = plan(sim, &mut rng, start) {
+            break d;
+        }
+        start = nodes[rng.below(nodes.len() as u32) as usize];
+    };
     let (p, tan) = drive.point_at(0.0);
     sim.place_vehicle(player, p, wp_math::atan2(-tan[0], tan[1]), speed * 0.5)
         .expect("player placed");
     let mut follower = PathFollower::for_vehicle(&car, FollowParams::PURSUIT, speed);
     let mut stuck_s = 0.0f32;
+    let mut since_replace = f32::INFINITY;
 
     let mut rep = RunReport {
         spawn_min_m: f32::MAX,
@@ -143,6 +150,7 @@ fn run_once(
         }
         // The probe's driver sometimes clips a kerb or wall: after 3 s stuck, put the car
         // back on a lane on a new route (a jump of a few metres).
+        since_replace += PHYSICS_DT;
         stuck_s = if st.speed_mps.abs() < 1.0 {
             stuck_s + PHYSICS_DT
         } else {
@@ -153,6 +161,7 @@ fn run_once(
             if let Some(d) = plan(sim, &mut rng, pp) {
                 let (p, tan) = d.point_at(0.0);
                 let _ = sim.place_vehicle(player, p, wp_math::atan2(-tan[0], tan[1]), 5.0);
+                since_replace = 0.0;
                 follower = PathFollower::for_vehicle(&car, FollowParams::PURSUIT, speed);
                 drive = d;
                 if verbose {
@@ -200,10 +209,26 @@ fn run_once(
                     rep.spawn_min_m = rep.spawn_min_m.min(d);
                     rep.spawns_in_sight += los as u32;
                     rep.spawns_in_view += (d < 120.0 || (los && cone)) as u32;
+                    let role = sim
+                        .police()
+                        .units()
+                        .iter()
+                        .find(|u| u.id == unit)
+                        .map(|u| format!("{:?}", u.role))
+                        .unwrap_or_default();
                     println!(
-                        "  {t:6.1} s  spawn unit {} at {d:.0} m, sight {los}, cone {cone}",
+                        "  {t:6.1} s  spawn unit {} ({role}) at {d:.0} m, sight {los}, cone {cone}",
                         unit.0
                     );
+                    if los && verbose {
+                        let body = [pos[0], pos[1], st.pos[2] + 1.0];
+                        println!(
+                            "      player ({:.1}, {:.1}, {:.2}) fwd ({:.2}, {:.2}) v {:.1}; spot ({:.1}, {:.1}); eye los {} cam los {}",
+                            pp[0], pp[1], st.pos[2], fwd[0], fwd[1], st.speed_mps, pos[0], pos[1],
+                            sim.world().line_of_sight(eye, body),
+                            sim.world().line_of_sight(cam, body)
+                        );
+                    }
                 }
                 PoliceEvent::UnitDespawned { unit } => {
                     if let Some(q) = last_pos.get(&unit.0) {
@@ -211,6 +236,12 @@ fn run_once(
                         let los = sees(*q);
                         rep.despawns += 1;
                         rep.despawns_in_sight += (d < 120.0 || los) as u32;
+                        if d < 120.0 || los {
+                            println!(
+                                "  {t:6.1} s  despawn unit {} in sight at {d:.0} m (player re-placed {since_replace:.1} s ago)",
+                                unit.0
+                            );
+                        }
                     }
                 }
                 _ => {}
@@ -321,7 +352,9 @@ fn main() {
         ..RunReport::default()
     };
     let mut censored = 0;
-    for seed in 1..=runs {
+    // `WP_SEED=n`: only that run.
+    let only: Option<u64> = std::env::var("WP_SEED").ok().and_then(|v| v.parse().ok());
+    for seed in (1..=runs).filter(|s| only.is_none_or(|o| o == *s)) {
         println!("run seed {seed}");
         let r = run_once(&city, hour, seed, secs, speed, verbose, unstick);
         for t in &r.trips {

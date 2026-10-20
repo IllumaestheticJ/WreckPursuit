@@ -1344,8 +1344,8 @@ impl PoliceSystem {
 
     /// Whether any racer can see `p`, or is closer than `response.never_closer_m`. Seeing
     /// means line of sight, in any direction and as far as the world allows, from the
-    /// driver's eye or from a chase camera behind and above the car to a car body at `p`
-    /// (taken at the racer's height). Units never appear or vanish where this is true.
+    /// driver's eye or from a chase camera behind and above the car, now or one second on at
+    /// its current velocity, to a car body at `p` (taken at the racer's height). Units never appear or vanish where this is true.
     pub(crate) fn in_racer_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
         /// Driver's eye and chase camera above the racer's chassis, camera distance behind
         /// it, and the height of the car body looked at, m.
@@ -1353,6 +1353,8 @@ impl PoliceSystem {
         const CAM_UP_M: f32 = 2.5;
         const CAM_BACK_M: f32 = 6.0;
         const BODY_UP_M: f32 = 1.0;
+        /// Also check from the racer's position this far ahead, s.
+        const LOOK_AHEAD_S: f32 = 1.0;
         let near = self.cfg.presence.response.never_closer_m;
         self.racers.values().any(|r| {
             let rp = xy(r.pos);
@@ -1364,7 +1366,20 @@ impl PoliceSystem {
             let mut views = vec![[rp[0], rp[1], z + EYE_UP_M]];
             let v = [r.vel[0], r.vel[1]];
             if crate::graph::len(v) > 1.0 {
-                let c = sub(rp, scale(normalize(v), CAM_BACK_M));
+                let back = scale(normalize(v), CAM_BACK_M);
+                let c = sub(rp, back);
+                views.push([c[0], c[1], z + CAM_UP_M]);
+                // And from where it will be a moment later: hidden now but seen a tick later
+                // is pop-in too (a sightline grazing a corner).
+                let ahead = add(rp, scale(v, LOOK_AHEAD_S));
+                views.push([ahead[0], ahead[1], z + EYE_UP_M]);
+                let c = sub(ahead, back);
+                views.push([c[0], c[1], z + CAM_UP_M]);
+            }
+            // Police only know the racer's velocity, not which way it faces (sliding, turning,
+            // stopped): the camera may be on any side.
+            for d in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
+                let c = add(rp, scale(d, CAM_BACK_M));
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
             views.iter().any(|eye| {

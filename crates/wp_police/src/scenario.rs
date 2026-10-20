@@ -853,6 +853,16 @@ pub fn run_scenario_with_hook(
         "call_to_unit_100m_max_s".to_string(),
         responses.iter().copied().fold(-1.0, f32::max),
     );
+    // Share of runs with a call whose first unit got within ON_SCENE_M inside 25 s (lead
+    // round 12b target: ≥ 90 %).
+    m.insert(
+        "call_reached_25s_frac".to_string(),
+        if responses.is_empty() {
+            -1.0
+        } else {
+            responses.iter().filter(|v| **v <= 25.0).count() as f32 / responses.len() as f32
+        },
+    );
     m.insert("calls".to_string(), sum(&|r| r.calls));
     m.insert("responder_spawns".to_string(), sum(&|r| r.responder_spawns));
     m.insert("late_spawns".to_string(), sum(&|r| r.late_spawns));

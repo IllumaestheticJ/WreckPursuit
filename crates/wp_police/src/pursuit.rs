@@ -47,6 +47,13 @@ const RESPOND_REROUTE_M: f32 = 40.0;
 /// A responder this close to the reported racer, with it in sight, follows it, m.
 const RESPOND_FOLLOW_M: f32 = 150.0;
 
+/// A responder this close to its meeting junction holds short of it while the reported racer
+/// is coming to that junction (within [`RESPOND_HOLD_RACER_M`]), m.
+const RESPOND_HOLD_SHORT_M: f32 = 30.0;
+
+/// See [`RESPOND_HOLD_SHORT_M`], m.
+const RESPOND_HOLD_RACER_M: f32 = 250.0;
+
 /// A responder with the reported racer coming head-on this close pulls over and stops, m.
 const RESPOND_YIELD_M: f32 = 70.0;
 
@@ -849,6 +856,25 @@ impl PoliceSystem {
                     }
                     let lim = self.limit_at(self.units[i].body.pos);
                     self.units[i].cmd.speed_mps = lim * p.respond_speed_factor;
+                    // Meeting the racer at a junction means waiting short of it, not driving
+                    // into its path as it arrives (a T-bone at 35 m/s).
+                    if let crate::dispatch::IncidentKind::Report { racer } = inc.kind {
+                        if let Some(r) = self.racers.get(&racer) {
+                            let u = &self.units[i];
+                            let t = &u.cmd.track;
+                            let end = t.point_at(t.length());
+                            let rp = xy(r.pos);
+                            let rv = [r.vel[0], r.vel[1]];
+                            let coming =
+                                dot(rv, sub(end, rp)) > 0.0 && dist(rp, end) < RESPOND_HOLD_RACER_M;
+                            if t.is_drivable()
+                                && t.length() - u.track_s < RESPOND_HOLD_SHORT_M
+                                && coming
+                            {
+                                self.units[i].cmd.speed_mps = 0.0;
+                            }
+                        }
+                    }
                 }
                 Assignment::Intercept { target, .. } => {
                     let Some(rec) = self.racers.get(&target) else {
