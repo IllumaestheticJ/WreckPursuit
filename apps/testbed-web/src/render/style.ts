@@ -28,6 +28,7 @@ import {
   type TimeOfDayLook,
 } from "./palette";
 import { LowPolyPost, type PostParams } from "./post";
+import { CITY_TILE_M } from "./city_tiles";
 
 /** Style ids. */
 export type StyleId = "greybox" | "lowpoly";
@@ -70,9 +71,11 @@ export interface StyledScene {
   readonly sun: THREE.DirectionalLight;
   readonly groundMaterial: THREE.MeshStandardMaterial;
   /** Graphics quality (render/quality.ts): the post target uses MSAA only when it allows. */
-  readonly quality: { readonly antialias: boolean };
+  readonly quality: { readonly antialias: boolean; readonly lite: boolean };
   /** Light-bar glow multiplier for the police helicopters. */
   policeGlow: number;
+  /** City draw distance, m (scene.ts; lamp tiles past it are hidden like city tiles). */
+  readonly drawDistanceM: number;
   /** Render override (post stack); null = plain renderer.render. */
   renderOverride: ((camera: THREE.Camera) => void) | null;
   readonly signals: { setLampBoost(k: number): void };
@@ -346,6 +349,8 @@ interface CityStyle {
   root: THREE.Object3D;
   building: THREE.MeshStandardMaterial | null;
   lamps: THREE.Group | null;
+  /** Lamp tiles (one group per CITY_TILE_M cell) with their world bounding spheres. */
+  lampTiles: { group: THREE.Group; sphere: THREE.Sphere }[];
   /** Lamp count (tests, docs). */
   lampCount: number;
   built: boolean;
@@ -398,6 +403,8 @@ export class ArtStyle {
   private readonly lampHeadMaterials: THREE.MeshBasicMaterial[] = [];
   private look: TimeOfDayLook = timeOfDay(12);
   private lastDt = 0;
+  private readonly camPos = new THREE.Vector3();
+  private lampTilesShown = 0;
   /** Last fog density the style itself asked for (before weather), for automation. */
   baseFogDensity = 0;
   /** Bloom on/off (debug). */
@@ -413,6 +420,9 @@ export class ArtStyle {
     // graphics quality (none in the low profile); `?msaa=0` drops it in any profile.
     const msaa = view.quality.antialias && new URLSearchParams(location.search).get("msaa") !== "0";
     this.post = new LowPolyPost(msaa ? 4 : 0);
+    // The low graphics profile skips bloom (its passes are ~10 % of a software-GL frame); the
+    // tonemap / grade still runs, and the debug toggle can turn bloom back on.
+    this.post.bloomOn = !view.quality.lite;
     this.greyLights = {
       hemiSky: view.hemi.color.clone(),
       hemiGround: view.hemi.groundColor.clone(),
@@ -497,7 +507,7 @@ export class ArtStyle {
   /** A city's glTF scene has loaded (scene.ts onCityLoaded). */
   attachCity(root: THREE.Object3D, cityId: string): void {
     if (this.cities.has(cityId)) return;
-    const c: CityStyle = { id: cityId, root, building: null, lamps: null, lampCount: 0, built: false };
+    const c: CityStyle = { id: cityId, root, building: null, lamps: null, lampTiles: [], lampCount: 0, built: false };
     this.cities.set(cityId, c);
     root.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
@@ -645,9 +655,13 @@ export class ArtStyle {
 
     const count = lamps.length;
     const poleMat = new THREE.MeshStandardMaterial({ color: col(PALETTE.lampPole), roughness: 1, flatShading: true });
-    const poleGeo = new THREE.BoxGeometry(0.16, LAMP_HEIGHT_M, 0.16).translate(0, LAMP_HEIGHT_M / 2, 0);
-    const armGeo = new THREE.BoxGeometry(0.1, 0.1, LAMP_ARM_M).translate(0, LAMP_HEIGHT_M - 0.05, LAMP_ARM_M / 2);
+    // Pole and arm share a material: one merged geometry, one draw per tile.
+    const poleGeo = mergeBoxes([
+      new THREE.BoxGeometry(0.16, LAMP_HEIGHT_M, 0.16).translate(0, LAMP_HEIGHT_M / 2, 0),
+      new THREE.BoxGeometry(0.1, 0.1, LAMP_ARM_M).translate(0, LAMP_HEIGHT_M - 0.05, LAMP_ARM_M / 2),
+    ]);
     const headGeo = new THREE.BoxGeometry(0.34, 0.12, 0.62).translate(0, LAMP_HEIGHT_M - 0.12, LAMP_ARM_M);
+    const poolGeo = new THREE.CircleGeometry(1, 20);
     const headMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true });
     this.lampHeadMaterials.push(headMat);
     const poolMat = new THREE.ShaderMaterial({
@@ -659,43 +673,69 @@ export class ArtStyle {
       fragmentShader: POOL_FS,
     });
     this.poolMaterials.push(poolMat);
-    const poles = new THREE.InstancedMesh(poleGeo, poleMat, Math.max(count, 1));
-    const arms = new THREE.InstancedMesh(armGeo, poleMat, Math.max(count, 1));
-    const heads = new THREE.InstancedMesh(headGeo, headMat, Math.max(count, 1));
-    const pools = new THREE.InstancedMesh(new THREE.CircleGeometry(1, 20), poolMat, Math.max(count, 1));
-    pools.renderOrder = 2;
+    // Lamps in city-tile cells (render/city_tiles.ts size): every cell is its own instanced
+    // meshes with a bounding sphere, so Three frustum-culls them and update() hides cells past
+    // the draw distance. One city-wide InstancedMesh (all lamps, never culled) cost more than
+    // the whole greybox frame under SwiftShader (e2e/art_cost.mjs).
+    const cells = new Map<string, Lamp[]>();
+    for (const l of lamps) {
+      const key = `${Math.floor(l.base.x / CITY_TILE_M)},${Math.floor(l.base.z / CITY_TILE_M)}`;
+      let b = cells.get(key);
+      if (!b) cells.set(key, (b = []));
+      b.push(l);
+    }
     const m = new THREE.Matrix4(), mp = new THREE.Matrix4();
     const sodium = col(PALETTE.lampSodium), led = col(PALETTE.lampLed);
     const up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(), normal = new THREE.Vector3();
-    lamps.forEach((l, i) => {
-      // Pole frame: +Z toward the road, +Y up.
-      side.crossVectors(up, l.toRoad).normalize();
-      m.makeBasis(side, up, l.toRoad).setPosition(l.base);
-      poles.setMatrixAt(i, m);
-      arms.setMatrixAt(i, m);
-      heads.setMatrixAt(i, m);
-      heads.setColorAt(i, l.led ? led : sodium);
-      // Pool: a disc in the road plane under the head (tilted with the grade), 0.1 m up.
-      normal.crossVectors(l.along, l.toRoad).normalize();
-      if (normal.y < 0) normal.negate();
-      // In-plane axes: y toward the road (the pool fades on the sidewalk side), x along it.
-      const y = l.toRoad.clone().addScaledVector(normal, -l.toRoad.dot(normal)).normalize();
-      const x = new THREE.Vector3().crossVectors(y, normal).normalize();
-      const centre = l.base.clone().addScaledVector(l.toRoad, LAMP_ARM_M + 0.8);
-      centre.y -= 0.13; // kerb top → road surface + ~2 cm
-      mp.makeBasis(x.multiplyScalar(LAMP_POOL_RADIUS_M), y.multiplyScalar(LAMP_POOL_RADIUS_M), normal).setPosition(centre);
-      pools.setMatrixAt(i, mp);
-      pools.setColorAt(i, l.led ? led : sodium);
-    });
-    for (const im of [poles, arms, heads, pools]) {
-      im.count = count;
-      im.frustumCulled = false;
-      im.instanceMatrix.needsUpdate = true;
-      if (im.instanceColor) im.instanceColor.needsUpdate = true;
-      group.add(im);
+    const tiles: CityStyle["lampTiles"] = [];
+    for (const key of [...cells.keys()].sort()) {
+      const cell = cells.get(key)!;
+      const n = cell.length;
+      const poles = new THREE.InstancedMesh(poleGeo, poleMat, n);
+      const heads = new THREE.InstancedMesh(headGeo, headMat, n);
+      // Light pools are large additive discs: their fill is most of the lamps' cost on a
+      // software rasterizer, so the low graphics profile goes without them.
+      const pools = this.view.quality.lite ? null : new THREE.InstancedMesh(poolGeo, poolMat, n);
+      if (pools) pools.renderOrder = 2;
+      cell.forEach((l, i) => {
+        // Pole frame: +Z toward the road, +Y up.
+        side.crossVectors(up, l.toRoad).normalize();
+        m.makeBasis(side, up, l.toRoad).setPosition(l.base);
+        poles.setMatrixAt(i, m);
+        heads.setMatrixAt(i, m);
+        heads.setColorAt(i, l.led ? led : sodium);
+        if (!pools) return;
+        // Pool: a disc in the road plane under the head (tilted with the grade), 0.1 m up.
+        normal.crossVectors(l.along, l.toRoad).normalize();
+        if (normal.y < 0) normal.negate();
+        // In-plane axes: y toward the road (the pool fades on the sidewalk side), x along it.
+        const y = l.toRoad.clone().addScaledVector(normal, -l.toRoad.dot(normal)).normalize();
+        const x = new THREE.Vector3().crossVectors(y, normal).normalize();
+        const centre = l.base.clone().addScaledVector(l.toRoad, LAMP_ARM_M + 0.8);
+        centre.y -= 0.13; // kerb top → road surface + ~2 cm
+        mp.makeBasis(x.multiplyScalar(LAMP_POOL_RADIUS_M), y.multiplyScalar(LAMP_POOL_RADIUS_M), normal).setPosition(centre);
+        pools.setMatrixAt(i, mp);
+        pools.setColorAt(i, l.led ? led : sodium);
+      });
+      const tile = new THREE.Group();
+      tile.name = `style-lamps#${key}`;
+      const sphere = new THREE.Sphere();
+      for (const im of pools ? [poles, heads, pools] : [poles, heads]) {
+        im.instanceMatrix.needsUpdate = true;
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
+        im.computeBoundingSphere();
+        if (sphere.isEmpty()) sphere.copy(im.boundingSphere!);
+        else sphere.union(im.boundingSphere!);
+        tile.add(im);
+      }
+      group.add(tile);
+      tiles.push({ group: tile, sphere });
     }
     const c = [...this.cities.values()].find((x) => x.root === root);
-    if (c) c.lampCount = count;
+    if (c) {
+      c.lampTiles = tiles;
+      c.lampCount = count;
+    }
     return group;
   }
 
@@ -708,6 +748,7 @@ export class ArtStyle {
     artStyle.night = night;
     for (const c of this.cities.values()) if (c.lamps) c.lamps.visible = artStyle.lowpoly && c.id === cityId && c.root.parent?.visible !== false;
     if (!artStyle.lowpoly) return;
+    this.cullLamps(cityId, camera);
     const v = this.view;
     const look = (this.look = timeOfDay(hour));
     buildingUniforms.uNight.value = night;
@@ -750,6 +791,31 @@ export class ArtStyle {
     for (const m of this.poolMaterials) m.uniforms.uStrength.value = PALETTE.lampPool * smooth(0.25, 0.75, night);
   }
 
+  /**
+   * Hide lamp tiles past the city's draw distance (as scene.ts culls city tiles: the scene's
+   * draw distance, the camera's far plane, fully fogged distance). Uses last frame's fog.
+   */
+  private cullLamps(cityId: string | null, camera: THREE.Camera): void {
+    const c = cityId ? this.cities.get(cityId) : undefined;
+    if (!c || !c.lamps?.visible) return;
+    let far = this.view.drawDistanceM;
+    if (camera instanceof THREE.PerspectiveCamera) far = Math.min(far, camera.far);
+    const fog = this.view.scene.fog;
+    if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
+    camera.getWorldPosition(this.camPos);
+    let shown = 0;
+    for (const t of c.lampTiles) {
+      t.group.visible = t.sphere.center.distanceTo(this.camPos) - t.sphere.radius < far;
+      if (t.group.visible) shown++;
+    }
+    this.lampTilesShown = shown;
+  }
+
+  /** Lamp tiles of a city: total and within the draw distance at the last frame (automation). */
+  lampTileStats(cityId: string): { tiles: number; shown: number } {
+    return { tiles: this.cities.get(cityId)?.lampTiles.length ?? 0, shown: this.lampTilesShown };
+  }
+
   /** Post parameters for the current frame. */
   private postParams(): PostParams {
     return { threshold: this.look.bloomThreshold, bloom: this.look.bloomStrength, exposure: this.look.exposure };
@@ -761,6 +827,24 @@ export class ArtStyle {
     if (artStyle.lowpoly) this.post.render(r, this.view.scene, camera, this.postParams(), this.lastDt);
     else r.render(this.view.scene, camera);
   }
+}
+
+/** Merge non-indexed copies of box geometries (position + normal) into one geometry. */
+function mergeBoxes(gs: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const parts = gs.map((g) => g.toNonIndexed());
+  const n = parts.reduce((a, g) => a + g.attributes.position.count, 0);
+  const pos = new Float32Array(n * 3);
+  const nor = new Float32Array(n * 3);
+  let o = 0;
+  for (const g of parts) {
+    pos.set(g.attributes.position.array as Float32Array, o * 3);
+    nor.set(g.attributes.normal.array as Float32Array, o * 3);
+    o += g.attributes.position.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  return out;
 }
 
 function smooth(e0: number, e1: number, x: number): number {

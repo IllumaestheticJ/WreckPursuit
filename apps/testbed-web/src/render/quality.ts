@@ -82,6 +82,9 @@ export class Quality {
   readonly software: boolean;
   readonly rendererName: string;
   readonly antialias: boolean;
+  /** The low profile (no MSAA, reduced resolution): optional art-style effects are skipped
+   * (render/style.ts: street-lamp light pools). */
+  readonly lite: boolean;
   /** City draw distance, m (SceneView.drawDistanceM). */
   readonly drawDistanceM: number;
   /** Fraction of the rain streak pool drawn (WeatherView.rainFraction). */
@@ -102,6 +105,7 @@ export class Quality {
     this.software = SOFTWARE_GL.test(this.rendererName);
     this.profile = profileFor(this.mode, this.software);
     this.antialias = this.profile.antialias;
+    this.lite = !this.profile.backdropBlur;
     this.drawDistanceM = this.profile.drawM;
     this.rainFraction = this.profile.rain;
     this.scale = this.profile.scale;
