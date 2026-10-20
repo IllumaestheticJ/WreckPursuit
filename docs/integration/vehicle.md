@@ -977,4 +977,12 @@ anti-stall). Letting the clutch up in 1st at idle on the flat creeps away withou
   parked police car, is wp_police / wp_opponent's call.
 
 **Snapshot** format 7 (handbrake hold + stall flag). **Perf:** unchanged (no new per-tick
-queries). **Goldens:** see the `[bless]` commit.
+queries). **Goldens:** re-recorded in `[bless]` 4b56578 (+ roster diff hash, sperber_32 only).
+
+**Checks (rows 56–72 push):** fmt, clippy `-D warnings`, determinism lint (0 errors), wasm
+build, testbed `tsc` + e2e, native == wasm on the vehicle / golden / sidewalk scenarios, all
+scenarios pass except `city_blocked_parked_player_grid` and `world_traffic_soak_observer`
+(both red before). `cargo test --workspace` red only on: the police chase above (reported),
+and the already-known `rev_matched_downshifts_blip` (J), `grid_highway_sprint` and
+`wp_wasm` `short_sprint_with_ai…` (L/N), plus `simcli` `goldens_match` /
+`all_scenarios…`, which fail only on the two scenario expectations above.
