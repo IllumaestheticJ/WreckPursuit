@@ -18,7 +18,7 @@ use crate::graph::{
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::{
-    compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
+    plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
 };
 use crate::unit::{Assignment, DriveCommand, Tactic, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
@@ -281,7 +281,7 @@ impl PoliceSystem {
             RadioTier::Critical,
             Some(unit),
             format!(
-                "Unit {}: {desc} just blew past me at {:.0} over, I'm on it.",
+                "Unit {}, {desc} just blew past me at {:.0} over, I'm on it.",
                 unit.0,
                 over_mps * 3.6
             ),
@@ -783,7 +783,7 @@ impl PoliceSystem {
             RadioTier::Critical,
             Some(unit),
             format!(
-                "Unit {}: I've been hit! {desc} rammed my unit, assault on an officer.",
+                "Unit {}, I've been hit! {desc} rammed my unit, assault on an officer.",
                 unit.0
             ),
         ));
@@ -968,18 +968,15 @@ impl PoliceSystem {
         self.radio(text);
     }
 
-    /// Spoken description of a racer ("racer #3 northbound in Core").
+    /// Spoken description of a racer ("racer #3 northbound on Harbor Boulevard", "racer #3
+    /// downtown" on unnamed roads; see [`PoliceSystem::place_phrase`]).
     pub(crate) fn racer_desc(&self, racer: EntityId) -> String {
         match self.racers.get(&racer) {
-            Some(r) => {
-                let p = xy(r.pos);
-                format!(
-                    "racer #{} {} in {:?}",
-                    racer.0,
-                    compass([r.vel[0], r.vel[1]]),
-                    self.graph.district_at(p)
-                )
-            }
+            Some(r) => format!(
+                "racer #{} {}",
+                racer.0,
+                self.place_phrase(xy(r.pos), [r.vel[0], r.vel[1]])
+            ),
             None => format!("racer #{}", racer.0),
         }
     }
@@ -1048,33 +1045,74 @@ impl PoliceSystem {
                     &format!("{{units}} responding to {what}."),
                 )
             }
-            Assignment::Pursue { target } => line(
-                RadioTier::Tactical,
-                format!("{callsign} in pursuit of {}.", self.racer_desc(*target)),
-                format!("pursue:{}", target.0),
-                &format!("{{units}} in pursuit of racer #{}.", target.0),
-            ),
-            Assignment::Intercept { target, .. } => line(
-                RadioTier::Tactical,
-                format!(
-                    "{callsign} moving to intercept {}.",
-                    self.racer_desc(*target)
-                ),
-                format!("intercept:{}", target.0),
-                &format!("{{units}} moving to intercept racer #{}.", target.0),
-            ),
-            Assignment::RoadblockAt { segment, .. } => line(
-                RadioTier::Critical,
-                format!("{callsign} setting up roadblock on segment {}.", segment.0),
-                format!("roadblock:{}", segment.0),
-                &format!("{{units}} setting up roadblock on segment {}.", segment.0),
-            ),
-            Assignment::SpikeAt { segment, .. } => line(
-                RadioTier::Critical,
-                format!("{callsign} deploying spikes on segment {}.", segment.0),
-                format!("spikes:{}", segment.0),
-                &format!("{{units}} deploying spikes on segment {}.", segment.0),
-            ),
+            Assignment::Pursue { target } => {
+                // A unit joining from far away gives its ETA (row 79).
+                let eta = self
+                    .racers
+                    .get(target)
+                    .and_then(|r| self.eta_phrase(i, xy(r.pos)))
+                    .map(|e| format!(", {e}"))
+                    .unwrap_or_default();
+                line(
+                    RadioTier::Tactical,
+                    format!(
+                        "{callsign} in pursuit of {}{eta}.",
+                        self.racer_desc(*target)
+                    ),
+                    format!("pursue:{}", target.0),
+                    &format!("{{units}} in pursuit of racer #{}.", target.0),
+                )
+            }
+            Assignment::Intercept { target, point } => {
+                let searching = self
+                    .racers
+                    .get(target)
+                    .is_some_and(|r| r.status == crate::heat::PursuitStatus::Searching);
+                let eta = self
+                    .eta_phrase(i, *point)
+                    .map(|e| format!(", {e}"))
+                    .unwrap_or_default();
+                if searching {
+                    // Sent to the last known position (search points): say where.
+                    line(
+                        RadioTier::Tactical,
+                        format!(
+                            "{callsign}, copy, searching {}{eta}.",
+                            self.place_phrase(*point, [0.0, 0.0])
+                        ),
+                        format!("search:{}", target.0),
+                        &format!("{{units}} searching for racer #{}.", target.0),
+                    )
+                } else {
+                    line(
+                        RadioTier::Tactical,
+                        format!(
+                            "{callsign} moving to intercept {}{eta}.",
+                            self.racer_desc(*target)
+                        ),
+                        format!("intercept:{}", target.0),
+                        &format!("{{units}} moving to intercept racer #{}.", target.0),
+                    )
+                }
+            }
+            Assignment::RoadblockAt { segment, .. } => {
+                let place = self.segment_place(*segment);
+                line(
+                    RadioTier::Critical,
+                    format!("{callsign} setting up a roadblock {place}."),
+                    format!("roadblock:{}", segment.0),
+                    &format!("{{units}} setting up a roadblock {place}."),
+                )
+            }
+            Assignment::SpikeAt { segment, .. } => {
+                let place = self.segment_place(*segment);
+                line(
+                    RadioTier::Critical,
+                    format!("{callsign} deploying spikes {place}."),
+                    format!("spikes:{}", segment.0),
+                    &format!("{{units}} deploying spikes {place}."),
+                )
+            }
             Assignment::HeloTrack { target } => line(
                 RadioTier::Tactical,
                 format!(

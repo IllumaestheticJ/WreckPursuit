@@ -20,6 +20,8 @@
 //! - [`unit`]: unit state and the built-in kinematic driver.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
+//! - [`radio`]: radio pacing (one transmission at a time, gaps by wanted level).
+//! - [`chatter`]: unit-to-unit callouts with call signs and street-name places (row 79).
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
 //! - [`scenario`]: headless scripted scenarios on the procedural city.
 
@@ -27,6 +29,7 @@
 
 pub mod avoid;
 pub mod captain;
+pub mod chatter;
 pub mod city;
 pub mod config;
 pub mod dispatch;
@@ -334,6 +337,8 @@ pub struct PoliceSystem {
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
     pub(crate) radio_director: radio::RadioDirector,
+    /// Unit-to-unit callouts (row 79): observer state, never read by the simulation.
+    pub(crate) chatter: chatter::Chatter,
     pub(crate) captain: CaptainState,
     pub(crate) stats: PoliceStats,
     pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
@@ -378,6 +383,7 @@ impl PoliceSystem {
     /// line of sight uses its buildings.
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
         let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
+        chatter::attach_world(&mut p, world);
         p.set_props(
             world
                 .static_props()
@@ -436,6 +442,7 @@ impl PoliceSystem {
             punctures: BTreeMap::new(),
             radio: VecDeque::new(),
             radio_director: radio::RadioDirector::new(),
+            chatter: chatter::Chatter::default(),
             captain: CaptainState {
                 human: false,
                 priority: None,
@@ -477,11 +484,13 @@ impl PoliceSystem {
         self.rebuild_obstacles();
         self.drive_units(world, dt);
         self.think_accum += dt;
-        if self.think_accum >= 1.0 / self.cfg.pursuit.think_hz {
+        let thought = self.think_accum >= 1.0 / self.cfg.pursuit.think_hz;
+        if thought {
             let tdt = self.think_accum;
             self.think_accum = 0.0;
             self.think(world, tdt);
         }
+        self.chatter_step(world, events, thought);
         self.flush_radio();
         for e in self.pending.drain(..) {
             out.push(SimEvent::Police(e));
@@ -591,7 +600,12 @@ impl PoliceSystem {
     /// Speak what the radio director lets through: event + scanner log.
     fn flush_radio(&mut self) {
         let racers: Vec<[f32; 2]> = self.racers.values().map(|r| [r.pos[0], r.pos[1]]).collect();
-        let any_wanted = self.racers.values().any(|r| r.level > WantedLevel::None);
+        let level = self
+            .racers
+            .values()
+            .map(|r| r.level.number())
+            .max()
+            .unwrap_or(0);
         let units = &self.units;
         let unit_pos = |id: UnitId| {
             units
@@ -601,7 +615,7 @@ impl PoliceSystem {
         };
         let ctx = radio::RadioContext {
             now: self.now,
-            any_wanted,
+            level,
             racers: &racers,
             unit_pos: &unit_pos,
         };
@@ -610,6 +624,8 @@ impl PoliceSystem {
                 time: self.now,
                 unit: line.unit,
                 text: line.text.clone(),
+                tier: line.tier,
+                duration_s: line.duration_s,
             });
             while self.radio.len() > self.cfg.tools.gadgets.radio_log_len {
                 self.radio.pop_front();

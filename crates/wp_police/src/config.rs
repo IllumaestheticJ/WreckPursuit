@@ -789,15 +789,21 @@ impl PoliceConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         let bad = |m: &str| Err(ConfigError::Invalid(m.to_string()));
         let r = &self.radio;
-        if [
-            r.global_gap_s,
-            r.global_gap_calm_s,
-            r.unit_gap_s,
-            r.collapse_window_s,
-            r.earshot_m,
-        ]
-        .iter()
-        .any(|v| !(v.is_finite() && *v >= 0.0))
+        if r.global_gap_s
+            .iter()
+            .chain(r.unit_gap_s.iter())
+            .chain(
+                [
+                    r.global_gap_calm_s,
+                    r.collapse_window_s,
+                    r.earshot_m,
+                    r.min_gap_s,
+                    r.line_pad_s,
+                    r.stale_critical_s,
+                ]
+                .iter(),
+            )
+            .any(|v| !(v.is_finite() && *v >= 0.0))
             || r.stale_s < r.collapse_window_s
         {
             return bad(

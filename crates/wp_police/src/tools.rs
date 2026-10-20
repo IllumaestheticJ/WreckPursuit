@@ -334,6 +334,13 @@ pub struct RadioLine {
     pub unit: Option<UnitId>,
     /// Text.
     pub text: String,
+    /// Pacing tier the line was raised with (row 79).
+    #[serde(default = "crate::radio::default_tier")]
+    pub tier: crate::radio::RadioTier,
+    /// Estimated transmission length, s (the channel was busy this long plus the radio
+    /// config's `min_gap_s`).
+    #[serde(default)]
+    pub duration_s: f32,
 }
 
 /// Helicopter view for renderers / the captain.
