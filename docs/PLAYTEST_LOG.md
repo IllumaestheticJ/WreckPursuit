@@ -124,6 +124,8 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 47 | Some cars are missing sounds (round-12 preview) | J (audio): find which cars/voices are silent; suspect the lead's J + J2 merge of `voices.ts` (resolve() now runs before the engine-instrument check) and per-car pack mapping | dispatched |
 | 48 | Police cars are too fragile | B (damage) + H (police package): Arcade wreck thresholds, police ≥ player sports car | dispatched |
 | 49 | Cars in general are too fragile in Arcade | B (damage): retune `data/modes/arcade.toml` to "punishing but survivable" | dispatched |
+| 50 | Hitting invisible objects (wrecks on an empty road) | lead: parked-car and cone props are physical but never drawn → helper `lead/draw-props` | dispatched |
+| 51 | The painted stop lines at traffic lights make the car jump and crash into the light | helper `lead/fix-junction-holes` (step in the collision surface where the lane meets the junction disc) | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
