@@ -12,8 +12,11 @@
 //!   switchbacks; **Ridge Road** comes back down over the crests; a lot at the knob.
 //! - **Bayview Bluffs** (north-east plateau): **Bluff Road** winds along the edge down to the
 //!   highway.
-//! - **Loop 9**: a 3+3 highway loop with banked sweepers. **Route 40 West** passes under it
-//!   (the loop rises on an overpass) and **Route 40 North** dips under it (underpass).
+//! - **Loop 9**: a divided highway loop with banked sweepers: two one-way 3-lane
+//!   carriageways, shoulders and a concrete median barrier, reached only through six
+//!   interchanges (five diamonds whose crossroad bridges the highway, a half diamond at the
+//!   port; see `divide_loop`). **Route 40 West** passes under it (the loop rises on an
+//!   overpass) and **Route 40 North** dips under it (underpass).
 //!
 //! Elevation: a smooth deterministic heightfield (authored hill, plateau, northward rise,
 //! seeded value noise, sea at the south and east edges). Every road gets a vertical profile
@@ -1771,9 +1774,8 @@ fn profile_ramp(
     let anchors = [(0, 0, z_gore), ((n - 1).saturating_sub(fb), n - 1, z_term)];
     let mut z = profile(&desired, dsr, &anchors, &[], (1, pb), RAMP.grade, kmax);
     // Beside the carriageway the ramp shares its plane exactly (shoulder overlap).
-    for i in 0..=k_par.saturating_sub(4) {
-        z[i] = desired[i];
-    }
+    let same = k_par.saturating_sub(4) + 1;
+    z[..same].copy_from_slice(&desired[..same]);
     // Resample to 6 m for the road spec.
     let res = resample(&path, 6.0);
     let rc = cum2(&res);

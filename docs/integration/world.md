@@ -592,3 +592,51 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+## Lead helper: highway + road markings (branch `claude/festive-dijkstra-5rxjnw`, 2026-10-20)
+Playtest #33 ("the highway needs to feel like an actual highway; road markings everywhere;
+centre dividers and proper on-ramps").
+
+**What exists now**
+- **Loop 9 is a divided highway** (`wp_world::vesper`): two one-way 3-lane carriageways with
+  paved shoulders and a Jersey-profile median barrier, profiled once as a single road so both
+  directions share one profile and bank. Six interchanges replace the seven signalised
+  T-junctions: five diamonds (crossroad bridges both carriageways, signalised terminals 150 m
+  either side, four ramps each) and a half diamond at the port. Ramps leave / join the
+  rightmost lane 300 m from the crossroad through 60 m taper connectors. Numbers and geometry:
+  `crates/wp_world/README.md` → "Port Vesper v2".
+- **Builder:** `ControlHint::Freeway` merge / diverge nodes; `RoadSpec::{shoulder_left_m,
+  shoulder_right_m, median_barrier}`; paving can run through a node while lanes are set back.
+- **Road format v3:** `RoadSurface::median_barrier`. The grid's `.road.bin/.json` were
+  regenerated (lanes unchanged).
+- **Traffic (`traffic.rs`, one rule):** a minor approach at a priority junction whose lane is a
+  highway lane (an on-ramp) yields on the move instead of stopping first. No existing city has
+  such a lane, so grid behaviour is unchanged.
+- **Markings:** `markings::marking_mesh` (render mesh from the same rules as `marking_at`,
+  white + yellow), `markings::must_stop` is public and false for merging ramps. wasm
+  `road_markings(yellow)`; the testbed draws it (`markings_view.ts`) and signal heads no longer
+  draw their own stop line.
+- **Physics (`wp_sim`):** median barrier colliders (`CityColliders::barriers`); test
+  `the_median_barrier_keeps_a_car_on_its_carriageway` (25° swerve at 90 km/h).
+- **Greybox:** highways paved from their surfaces (shoulders included), ramp tapers, the
+  barrier mesh, no parapets on the median side of decks. Both greyboxes regenerated
+  (`vesper_v2.greybox.glb` 6.8 → 7.4 MB, `.b64.txt` 9.1 → 9.9 MB).
+- Screenshots: `docs/media/highway/` (`apps/testbed-web/e2e/highway_shots.mjs`).
+
+**Checks**
+| Check | Result |
+|---|---|
+| `wp_world` (lib, `tests/city_v2.rs`, `tests/world.rs`) | pass; new `loop_is_a_divided_highway_with_ramps`, `mesh_paints_what_marking_at_reports` |
+| 400 agents on Port Vesper, 1 min (`traffic_400_agents_one_minute_on_the_hills_without_collisions`) | 0 civilian collisions |
+| `simcli run apps/simcli/scenarios` | all pass (Loop 9 crest route, hill roads, Vesper soaks) |
+| Goldens | re-blessed: `city_loop_crest_at_limit`, `world_traffic_soak_vesper{,_observer}` (Port Vesper changed); every grid golden unchanged |
+
+**Changes outside `wp_world`** (minimal): `wp_sim/src/physics.rs` (barrier colliders),
+`wp_wasm/src/lib.rs` (`road_markings`), `apps/testbed-web` (markings view, stop lines moved
+out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct update in `osm.rs`).
+
+**Known gaps**
+- The grid city's highway spine is unchanged (one 3+3 road, signals).
+- No gore chevrons / dotted lane-line extensions through tapers; no ramp metering.
+- Police pursuit AI uses the lane graph as before (ramps are ordinary highway lanes to it).
+
+**Contract change requests:** none (no `wp_contracts` change).

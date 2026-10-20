@@ -201,7 +201,9 @@ impl PhysicsWorld {
 
         // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge. Median
         // barriers: 0.5 m wide, 0.81 m tall concrete boxes on the barrier line.
-        let rails: Vec<([f32; 3], [f32; 3], f32, f32, bool)> = wp_world::surface::deck_rails(net)
+        // (from, to, half width, half height, median barrier)
+        type Rail = ([f32; 3], [f32; 3], f32, f32, bool);
+        let rails: Vec<Rail> = wp_world::surface::deck_rails(net)
             .into_iter()
             .map(|(a, b)| (a, b, 0.15, 0.45, false))
             .chain(
