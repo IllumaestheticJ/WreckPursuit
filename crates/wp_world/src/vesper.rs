@@ -1713,6 +1713,40 @@ impl SurfaceGrid {
     }
 }
 
+/// Points covering a lot: its outline every ≤ 2 m and its inside on a ≤ 4 m grid.
+fn lot_probes(o: &Obb) -> Vec<V2> {
+    let r = geom::right_of(o.f);
+    let at = |u: f32, v: f32| geom::add(o.c, geom::add(geom::scale(o.f, u), geom::scale(r, v)));
+    let (nu, nv) = (
+        ((2.0 * o.hl / 2.0).ceil() as usize).max(1),
+        ((2.0 * o.hw / 2.0).ceil() as usize).max(1),
+    );
+    let mut out = Vec::new();
+    for i in 0..=nu {
+        let u = -o.hl + 2.0 * o.hl * i as f32 / nu as f32;
+        out.push(at(u, -o.hw));
+        out.push(at(u, o.hw));
+    }
+    for j in 1..nv {
+        let v = -o.hw + 2.0 * o.hw * j as f32 / nv as f32;
+        out.push(at(-o.hl, v));
+        out.push(at(o.hl, v));
+    }
+    let (gu, gv) = (
+        ((2.0 * o.hl / 4.0).ceil() as usize).max(1),
+        ((2.0 * o.hw / 4.0).ceil() as usize).max(1),
+    );
+    for i in 1..gu {
+        for j in 1..gv {
+            out.push(at(
+                -o.hl + 2.0 * o.hl * i as f32 / gu as f32,
+                -o.hw + 2.0 * o.hw * j as f32 / gv as f32,
+            ));
+        }
+    }
+    out
+}
+
 fn obb_corners(o: &Obb) -> [V2; 4] {
     let r = geom::right_of(o.f);
     let f = geom::scale(o.f, o.hl);
@@ -1769,7 +1803,21 @@ fn buildings(
                 at += lot;
                 let corners = obb_corners(&o);
                 let probes = [corners[0], corners[1], corners[2], corners[3], c];
-                if probes.iter().any(|q| grid.clearance(built, *q) < 3.0) {
+                // The whole footprint stays clear of every road (edges every 2 m, inside on a
+                // 4 m grid: a 42 m warehouse could straddle a street between its corners) and
+                // of every junction's pavement with its flush band.
+                let dense = lot_probes(&o);
+                if dense.iter().any(|q| grid.clearance(built, *q) < 3.0) {
+                    continue;
+                }
+                let reach = o.hl.hypot(o.hw);
+                let on_junction = built.intersections.iter().any(|ix| {
+                    let n = geom::xy(built.nodes[ix.node as usize].pos);
+                    let keep = ix.radius_m + crate::surface::FLUSH_W_M + 4.0;
+                    geom::dist(n, c) < keep + reach
+                        && dense.iter().any(|q| geom::dist(*q, n) < keep)
+                });
+                if on_junction {
                     continue;
                 }
                 // Keep dead-end turnarounds clear (U-turns swing past the road end).
@@ -2094,6 +2142,9 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         net.bounds_max[1].max(MAP_HI[1]),
     ];
     net.terrain = Some(hf);
+    // Sidewalk bands reach set-back facades, past the carve corridor and sometimes below the
+    // lot: keep the ground and the building bases under them.
+    crate::surface::settle_under_sidewalks(&mut net);
     let report = VesperReport {
         crossings,
         skipped_roads: g.skipped,
