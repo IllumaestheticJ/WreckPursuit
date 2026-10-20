@@ -80,7 +80,7 @@ Peak **107 kW @ 5400 rpm**, **218 N·m @ 4000 rpm**. Idle 700 / redline 5500 / l
 
 ## Drivetrain
 
-5-speed manual, open rear differential on a leaf-sprung live axle. Layout **RWD**; front diff: open; rear diff: open. Clutch capacity 1.35 × peak torque = 290 N·m. Shift time 0.35 s.
+5-speed manual, open rear differential on a leaf-sprung live axle. Layout **RWD**; front diff: open; rear diff: open. Clutch capacity 1.35 × peak torque = 290 N·m. Shift time 0.65 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -135,8 +135,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 10.8 s | 179 km/h | 43.0 m | 0.75 g | — |
-| estimate | 10.1 s | 183 km/h | 38.4 m | 0.83 g | 401 |
+| sim | 11.3 s | 179 km/h | 42.7 m | 0.75 g | — |
+| estimate | 10.7 s | 183 km/h | 38.4 m | 0.83 g | 391 |
 
 ## Damage lattice (`data/lattices/furrow_24.json`)
 

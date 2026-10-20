@@ -100,7 +100,12 @@ fn clutch_lsd_adds_controllable_oversteer_on_corner_exit() {
     // +8° rampart, +3° lucciola), stays controllable and costs little exit speed. Its traction
     // gain is covered by `split_mu_open_spins_the_ice_wheel_lsd_drives_off`.
     for id in ["shiro_turbo", "rampart_50", "lucciola_350"] {
-        let c = car(id);
+        let mut c = car(id);
+        // Isolate the diff from the gearbox: the thresholds were measured with 0.22-0.25 s
+        // shifts. Since the stock shift times were re-based (owner row 97, 0.42-0.50 s), an
+        // upshift during the 2 s exit cuts drive for longer and masks the diff (lucciola_350
+        // +1.7° instead of +3°).
+        c.def.drivetrain.shift_time_s = 0.22;
         let run =
             |d| exit_on_circle_with(&c, with_axle(&c, true, d), 20.0, 0.6, 0.6, 2.0, &no_tcs());
         let open = run(AxleDiff::Open);

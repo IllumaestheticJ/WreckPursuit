@@ -52,9 +52,18 @@ struct Raced {
 }
 
 fn run_race(id: &str, max_s: u64) -> Raced {
+    run_race_with(id, max_s, None)
+}
+
+/// [`run_race`] with the scenario's police presence replaced (`Some(0.0)` = no police), for
+/// checks of the AI field's pace that the police (captures, flights) would mask.
+fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
     let mut def = catalog::race(id).unwrap();
     let path = repo().join(format!("apps/simcli/scenarios/race/pick_{id}.ron"));
     let mut sc = load_scenario(&path).unwrap();
+    if presence.is_some() {
+        sc.police_presence = presence;
+    }
     // Tuning knobs (exploration only): another seed / police presence / traffic density.
     if let Some(seed) = std::env::var("WP_RACE_SEED")
         .ok()
@@ -408,14 +417,73 @@ fn hollins_hill_sprint() {
 #[test]
 fn loop9_circuit() {
     let r = run_race("loop9_circuit", 600);
+    let id = r.def.id;
     // One 10.1 km lap of the highway loop through late-night traffic.
-    check(&r, 150.0..420.0, 4);
     assert!(r.route_m > 9000.0);
     // The meet at the Loop 9 grid is hot: the green light calls in a patrol.
     assert!(r
         .signals
         .iter()
         .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })));
+    // Since police round 12b/13 (backup converging, L2+ PIT/rams, pinned captures) the
+    // patrol turns the race into pursuits, and races with police can end in captures (owner
+    // decision), so the number of finishers is the police's call, not a pace measure (the
+    // AI field's pace is checked without police in `loop9_circuit_pace_without_police`).
+    // What must hold: the race is judged to the end, everybody raced, and a racer's race
+    // ends at the flag, by the police, behind the winner's finish window (a racer the police
+    // held up), or in at most one racing incident (DQ).
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    assert!(matches!(
+        r.signals.last(),
+        Some(RaceSignal::RaceFinished { .. })
+    ));
+    // As before round 12b, one racing incident (a DQ) is allowed per race.
+    let dqs = r
+        .results
+        .iter()
+        .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
+        .count();
+    assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    for x in &r.results {
+        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+        assert!(
+            matches!(
+                x.status,
+                RacerStatus::Finished
+                    | RacerStatus::Dq(_)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Captured)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+                    | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+            ),
+            "{id}: {x:?} ended by neither the flag, the police nor a racing incident"
+        );
+    }
+    if let Some(w) = r.results.iter().find(|x| x.status == RacerStatus::Finished) {
+        let t = w.elapsed_s().unwrap();
+        assert!((150.0..420.0).contains(&t), "{id}: winner took {t:.1} s");
+    }
+    eprintln!(
+        "loop9 pursuits: {}, finished: {}/{}",
+        r.pursuits,
+        r.results
+            .iter()
+            .filter(|x| x.status == RacerStatus::Finished)
+            .count(),
+        r.results.len()
+    );
+}
+
+#[test]
+fn loop9_circuit_pace_without_police() {
+    // The same lap with police presence 0: the AI field's pace and racecraft through
+    // late-night traffic (the pre-round-12b expectations of `loop9_circuit`). Round 13
+    // (self-aligning steering, handbrake declutch, ride rework): 6 of 6 finish, winner
+    // 215.6 s (pre-merge base: 5 of 6 + one DQ, winner 218.4 s); after the round-12b/13
+    // merges up to ecf4d7b: 5 of 6 + one DQ (LeftCorridor at gate 34), winner 209.4 s.
+    let r = run_race_with("loop9_circuit", 600, Some(0.0));
+    check(&r, 150.0..420.0, 4);
+    assert_eq!(r.pursuits, 0);
 }
 
 #[test]

@@ -68,6 +68,23 @@ def run_csv(scenario: str, name: str, td: str) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+QUARTER_MILE_M = 402.336
+
+
+def quarter_mile(rows) -> tuple:
+    """Elapsed time (s) and trap speed (km/h) at 402.336 m along +Y from a standing start,
+    linearly interpolated between samples; `(None, None)` if the run is too short."""
+    prev = None
+    for r in rows:
+        t, v, y = float(r["t_s"]), float(r["speed_mps"]), float(r["y"])
+        if prev is not None and y >= QUARTER_MILE_M + prev[3]:
+            t0, v0, y0, _ = prev
+            k = (QUARTER_MILE_M + prev[3] - y0) / max(y - y0, 1e-6)
+            return t0 + k * (t - t0), (v0 + k * (v - v0)) * 3.6
+        prev = (t, v, y, prev[3] if prev else y)
+    return None, None
+
+
 def first_t(rows, v):
     for r in rows:
         if float(r["speed_mps"]) >= v:
@@ -81,6 +98,7 @@ def accel(car: str, td: str) -> dict:
     for k, v in CAPS_MPS.items():
         res["t_" + k] = first_t(rows, v)
     res["t144"] = res["t_day"]
+    res["qm_s"], res["qm_kmh"] = quarter_mile(rows)
     res["v40_kmh"] = max(float(r["speed_mps"]) for r in rows) * 3.6
     # distance/speed traces for the chase model
     res["trace"] = [(float(r["t_s"]), float(r["speed_mps"]), float(r["y"])) for r in rows]

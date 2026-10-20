@@ -4,23 +4,23 @@
 
 | Car | Id | Class | Layout | Mass kg | Power kW | kW/t | 0-100 est. s | Vmax est. km/h | Skidpad est. g | Class idx est. | Dur. | Price | Tire |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Vireo XS | `vireo_xs` | Compact | FWD | 1108 | 103 | 93 | 8.0 | 213 | 0.91 | 474 | 2 | 7,500 | street |
-| Kestrel TS | `kestrel_ts` | Sport | FWD | 1453 | 181 | 125 | 6.6 | 255 | 0.98 | 552 | 3 | 22,000 | sport |
-| Shiro Turbo | `shiro_turbo` | Sport | RWD | 1301 | 182 | 140 | 6.0 | 271 | 1.01 | 591 | 2 | 28,000 | sport |
-| Hakone GT | `hakone_gt` | Sport | RWD | 1599 | 242 | 151 | 5.5 | 289 | 0.98 | 618 | 3 | 48,000 | sport |
-| Rampart 5.0 | `rampart_50` | Muscle | RWD | 1753 | 319 | 182 | 5.4 | 276 | 0.96 | 618 | 3 | 42,000 | sport |
+| Vireo XS | `vireo_xs` | Compact | FWD | 1108 | 103 | 93 | 8.2 | 213 | 0.91 | 468 | 2 | 7,500 | street |
+| Kestrel TS | `kestrel_ts` | Sport | FWD | 1453 | 181 | 125 | 6.9 | 255 | 0.98 | 539 | 3 | 22,000 | sport |
+| Shiro Turbo | `shiro_turbo` | Sport | RWD | 1301 | 182 | 140 | 6.2 | 271 | 1.01 | 582 | 2 | 28,000 | sport |
+| Hakone GT | `hakone_gt` | Sport | RWD | 1599 | 242 | 151 | 5.7 | 289 | 0.98 | 607 | 3 | 48,000 | sport |
+| Rampart 5.0 | `rampart_50` | Muscle | RWD | 1753 | 319 | 182 | 5.6 | 276 | 0.96 | 603 | 3 | 42,000 | sport |
 | Ironside 440 | `ironside_440` | Muscle | RWD | 1695 | 216 | 127 | 7.7 | 220 | 0.71 | 450 | 4 | 38,000 | vintage_bias |
-| Sperber 32 | `sperber_32` | Sport | RWD | 1602 | 248 | 155 | 5.6 | 279 | 0.99 | 613 | 3 | 36,000 | sport |
-| Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.3 | 259 | 0.97 | 620 | 3 | 34,000 | sport |
-| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.4 | 297 | 1.02 | 713 | 1 | 120,000 | sport |
+| Sperber 32 | `sperber_32` | Sport | RWD | 1602 | 248 | 155 | 5.8 | 279 | 0.99 | 602 | 3 | 36,000 | sport |
+| Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 34,000 | sport |
+| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.02 | 692 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
 | Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
 | Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
 | Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 265 | 100 | 7.6 | 224 | 0.81 | 472 | 5 | 48,000 | police_pursuit |
-| Junkyard Beater | `junkyard_beater` | Beater | FWD | 1048 | 65 | 62 | 14.0 | 150 | 0.77 | 326 | 2 | 3,000 | vintage_bias |
-| Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 11.6 | 176 | 0.90 | 388 | 2 | 7,000 | street |
+| Junkyard Beater | `junkyard_beater` | Beater | FWD | 1048 | 65 | 62 | 14.3 | 150 | 0.77 | 324 | 2 | 3,000 | vintage_bias |
+| Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 12.1 | 176 | 0.90 | 381 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
-| Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.1 | 183 | 0.83 | 401 | 4 | 21,000 | street |
+| Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.7 | 183 | 0.83 | 391 | 4 | 21,000 | street |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

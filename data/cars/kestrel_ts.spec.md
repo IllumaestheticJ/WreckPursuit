@@ -81,7 +81,7 @@ Peak **181 kW @ 6000 rpm**, **335 N·m @ 3000 rpm**. Idle 800 / redline 6500 / l
 
 ## Drivetrain
 
-6-speed manual, mild clutch-type front LSD (AWD centre coupling is a mod). Layout **FWD**; front diff: clutch LSD, preload 40 N·m, power ramp 0.30, coast ramp 0.10; rear diff: open. Clutch capacity 1.35 × peak torque = 450 N·m. Shift time 0.25 s.
+6-speed manual, mild clutch-type front LSD (AWD centre coupling is a mod). Layout **FWD**; front diff: clutch LSD, preload 40 N·m, power ramp 0.30, coast ramp 0.10; rear diff: open. Clutch capacity 1.35 × peak torque = 450 N·m. Shift time 0.42 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -137,8 +137,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 7.1 s | 248 km/h | 38.6 m | 0.94 g | — |
-| estimate | 6.6 s | 255 km/h | 35.8 m | 0.98 g | 552 |
+| sim | 7.4 s | 248 km/h | 39.0 m | 0.94 g | — |
+| estimate | 6.9 s | 255 km/h | 35.8 m | 0.98 g | 539 |
 
 ## Damage lattice (`data/lattices/kestrel_ts.json`)
 

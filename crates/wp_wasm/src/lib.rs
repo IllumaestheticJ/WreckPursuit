@@ -48,6 +48,7 @@ pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
+pub mod siren_cue;
 pub mod weather;
 
 #[cfg(test)]

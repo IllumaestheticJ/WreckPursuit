@@ -82,7 +82,7 @@ Peak **182 kW @ 6500 rpm**, **276 N·m @ 5000 rpm**. Idle 850 / redline 7200 / l
 
 ## Drivetrain
 
-6-speed manual, clutch-type 1.5-way rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.45, coast ramp 0.30. Clutch capacity 1.45 × peak torque = 400 N·m. Shift time 0.22 s.
+6-speed manual, clutch-type 1.5-way rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.45, coast ramp 0.30. Clutch capacity 1.45 × peak torque = 400 N·m. Shift time 0.42 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -140,8 +140,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.4 s | 264 km/h | 37.6 m | 0.96 g | — |
-| estimate | 6.0 s | 271 km/h | 34.5 m | 1.01 g | 591 |
+| sim | 6.6 s | 260 km/h | 37.7 m | 0.96 g | — |
+| estimate | 6.2 s | 271 km/h | 34.5 m | 1.01 g | 582 |
 
 ## Damage lattice (`data/lattices/shiro_turbo.json`)
 

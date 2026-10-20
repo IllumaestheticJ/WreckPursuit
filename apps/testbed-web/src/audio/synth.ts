@@ -3,6 +3,7 @@
 // Each synth returns a node graph ending in `output`; the voice pool adds gain, low-pass and
 // panner. Loops follow `update()`; one-shots schedule their whole envelope at creation.
 
+import { sirenV2 } from "./siren";
 import type { VoiceParams } from "./types";
 
 export interface SynthVoice {
@@ -625,7 +626,8 @@ export function makeSynth(
     case "hiss":
       return hiss(ctx, params);
     case "siren":
-      return siren(ctx, params, p);
+      // Siren v2 packs (`driver: 1`) use the horn-speaker synth in siren.ts.
+      return params.driver ? sirenV2(ctx, params, p, t) : siren(ctx, params, p);
     case "impact":
       return impact(ctx, params, p, t);
     case "glass":
