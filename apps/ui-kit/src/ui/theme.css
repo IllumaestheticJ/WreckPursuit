@@ -384,6 +384,32 @@
   mask: repeating-linear-gradient(90deg, #000 0 calc(10% - 2px), transparent calc(10% - 2px) 10%);
 }
 
+/* ---- car stat bars ---- */
+.wp-statbars {
+  display: grid;
+  grid-template-columns: auto minmax(6em, 1fr) auto;
+  gap: 0.3em 0.8em;
+  align-items: center;
+}
+.wp-statbar {
+  display: contents;
+}
+.wp-statbar > span:first-child {
+  font-size: 0.68em;
+  letter-spacing: 0.14em;
+}
+.wp-statbar > span:last-child:not(:first-child) {
+  text-align: right;
+  font-size: 0.9em;
+}
+.wp-statbars--compact {
+  grid-template-columns: minmax(5em, 8em);
+  gap: 0.2em;
+}
+.wp-statbars--compact .wp-meter {
+  height: 0.4em;
+}
+
 /* ---- tables ---- */
 .wp-table {
   width: 100%;

@@ -282,3 +282,15 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    → ESCAPED (escaped) → CAPTURED (bill opened, chase end captured at L3)". The reworked golden
    frontal scenario (4 s, parked car) changed the crash fixtures; the fixture tests now assert
    ranges for it (rear bumper < half the front, heading checked before the hit).
+
+## Lead helper note (2026-10-20) — car stat bars in the garage and market
+
+`data/stats/cars.json` (physics-measured by `simcli car-stats`, see `docs/integration/testbed.md`)
+is read at build time like the car files: `CAR_STATS` in `src/data/catalog.ts`. New kit component
+`CarStatBars` (`src/ui/kit.tsx`, segmented `Meter`s; `compact` = unlabelled bars, numbers in the
+tooltip). Garage: the selected car's panel shows acceleration / top speed / cornering with values
+(labelled "stock figures" when mods are installed; the mod tree keeps the estimator's build
+numbers). Market: an "Accel · Top · Corner" column per listing. Test: every car in `CARS` has stats
+with bars in 0–1. The kit e2e (`npm run e2e`) could not run in this container (Chromium crashed /
+hung on `repairBill` with and without this change); garage and market were checked by hand in
+headless Chromium (renders, no console errors).

@@ -7,6 +7,7 @@ import type { BodyRegion, Component, DamageMode, VehicleClass, VehicleDef } from
 
 const carFiles = import.meta.glob("../../../../data/cars/*.json", { eager: true, import: "default" });
 const modFiles = import.meta.glob("../../../../data/mods/*.json", { eager: true, import: "default" });
+const statFiles = import.meta.glob("../../../../data/stats/cars.json", { eager: true, import: "default" });
 
 /** Every car definition, by id (debug cars included; filter with `isDebugCar`). */
 export const CARS: Record<string, VehicleDef> = Object.fromEntries(
@@ -15,6 +16,23 @@ export const CARS: Record<string, VehicleDef> = Object.fromEntries(
     return [def.id, def];
   }),
 );
+
+/**
+ * A car's menu stats (`simcli::car_stats::CarStatsEntry`): measured on the physics rig
+ * (`simcli car-stats` → `data/stats/cars.json`), stock car, flat dry asphalt. Bars are 0–1 on
+ * fixed scales (0–100 16 → 3.5 s, 140 → 310 km/h, 0.55 → 1.05 g).
+ */
+export interface CarStats {
+  display_name: string;
+  zero_to_100_s: number | null;
+  top_speed_kmh: number;
+  cornering_g: number;
+  bars: { acceleration: number; top_speed: number; cornering: number };
+}
+
+/** Stock stats by car id (empty if the table is missing). */
+export const CAR_STATS: Record<string, CarStats> =
+  (Object.values(statFiles)[0] as { cars?: Record<string, CarStats> } | undefined)?.cars ?? {};
 
 /** The lead's debug cars, hidden from the market. */
 export function isDebugCar(id: string): boolean {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mockGarage, mockShops } from "../mock/mockData";
-import { CARS, MODS, modBlocker, modTree } from "./catalog";
+import { CAR_STATS, CARS, MODS, modBlocker, modTree } from "./catalog";
 import { marketPrice, quoteRepair, salePrice, scrapValue } from "./economy";
 import { bracket, classIndex, estimate, previewBuild, TIRE_GRIP } from "./estimate";
 
@@ -9,6 +9,18 @@ describe("catalog", () => {
     expect(Object.keys(CARS).length).toBeGreaterThanOrEqual(13);
     expect(Object.keys(MODS).length).toBeGreaterThan(80);
     expect(modTree()[0].slot).toBe("Engine");
+  });
+
+  it("has physics-measured stat bars for every car", () => {
+    for (const id of Object.keys(CARS)) {
+      const s = CAR_STATS[id];
+      expect(s, id).toBeDefined();
+      for (const v of Object.values(s.bars)) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+      expect(s.top_speed_kmh).toBeGreaterThan(100);
+    }
   });
 
   it("enforces requirements, class and mode limits", () => {

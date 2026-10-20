@@ -262,3 +262,41 @@ export function useEscape(handler: () => void): void {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 }
+
+/** Car stats as `CarStatBars` reads them (`CarStats` in `data/catalog.ts`). */
+type StatSource = {
+  zero_to_100_s: number | null;
+  top_speed_kmh: number;
+  cornering_g: number;
+  bars: { acceleration: number; top_speed: number; cornering: number };
+};
+
+const STAT_ROWS = [
+  { key: "acceleration", label: "Accel", value: (s: StatSource) => (s.zero_to_100_s === null ? "—" : `${s.zero_to_100_s.toFixed(1)} s`), hint: "0–100 km/h" },
+  { key: "top_speed", label: "Top speed", value: (s: StatSource) => `${Math.round(s.top_speed_kmh)} km/h`, hint: "" },
+  { key: "cornering", label: "Cornering", value: (s: StatSource) => `${s.cornering_g.toFixed(2)} g`, hint: "50 m skidpad" },
+] as const;
+
+/** One-line stat summary (tooltips, screen readers). */
+export function statSummary(s: StatSource): string {
+  return STAT_ROWS.map((r) => `${r.label} ${r.value(s)}${r.hint ? ` (${r.hint})` : ""}`).join(" · ");
+}
+
+/**
+ * Acceleration / top speed / cornering bars, physics-measured. `compact`: three unlabelled bars
+ * in that order (the table header names them), numbers in the tooltip.
+ */
+export function CarStatBars(props: { stats: StatSource; compact?: boolean }) {
+  const s = props.stats;
+  return (
+    <div class={`wp-statbars ${props.compact ? "wp-statbars--compact" : ""}`} title={statSummary(s)}>
+      {STAT_ROWS.map((r) => (
+        <div class="wp-statbar" key={r.key} data-stat={r.key}>
+          {!props.compact && <span class="wp-dim wp-mono wp-upper">{r.label}</span>}
+          <Meter value={s.bars[r.key]} segmented label={`${r.label}: ${r.value(s)}`} />
+          {!props.compact && <span class="wp-mono">{r.value(s)}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}

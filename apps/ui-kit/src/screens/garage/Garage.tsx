@@ -8,9 +8,9 @@ import type { BodyRegion, Component } from "../../generated/contracts";
 import { useSend, useSlice } from "../../model/GameModel";
 import type { GarageCar, RepairChoice } from "../../model/types";
 import { INSURANCE_TIERS, insuranceQuote, quoteRepair, salePrice } from "../../data/economy";
-import { MODS } from "../../data/catalog";
+import { CAR_STATS, MODS } from "../../data/catalog";
 import { DamageSilhouette } from "../hud/DamageSilhouette";
-import { Badge, Button, Meter, Money, Panel, ScreenHead, severityColor, Tabs, useEscape } from "../../ui/kit";
+import { Badge, Button, CarStatBars, Meter, Money, Panel, ScreenHead, severityColor, Tabs, useEscape } from "../../ui/kit";
 import { pct, words } from "../../ui/format";
 import "./garage.css";
 
@@ -108,6 +108,14 @@ function CarDetail({ car, active }: { car: GarageCar; active: boolean }) {
             <div class="wp-mono wp-dim2" style={{ fontSize: "0.85em" }}>
               {car.mods.length ? car.mods.map((m) => MODS[m]?.name ?? m).join(" · ") : "Stock"}
             </div>
+            {CAR_STATS[car.defId] && (
+              <div class="wp-garage-stats">
+                <div class="wp-dim wp-mono wp-upper" style={{ fontSize: "0.68em" }}>
+                  Performance{car.mods.length > 0 ? " · stock figures (mod tree shows the build)" : ""}
+                </div>
+                <CarStatBars stats={CAR_STATS[car.defId]} />
+              </div>
+            )}
             {car.sustainedWhileWanted && car.outstanding.lines.length > 0 && <div class="wp-warn">Some of this damage happened while wanted: insurance will not pay for it.</div>}
             <div class="wp-row">
               <Button variant="primary" disabled={active || !car.drivable || inImpound} onClick={() => send({ type: "garage.setActive", car: car.uid })}>
