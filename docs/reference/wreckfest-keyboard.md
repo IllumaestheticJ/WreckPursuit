@@ -208,9 +208,10 @@ The reference game's car names are kept out of this repo (rule 9); cars are labe
 |---|---|---|---|---|---|---|---|
 | **REF-RWD-A** (#49, clips 4–5) | full-size RWD muscle | 462 hp (345 kW) @ 4800 rpm | 585 lb-ft (793 N·m) @ 3200 rpm | 3018 lb (1369 kg) | 5 | RWD | A, rating 337 |
 | **REF-RWD-B** (#44, clip 2) | midsize RWD sports | 340 hp (254 kW) @ 6400 rpm | 299 lb-ft (405 N·m) @ 4200 rpm | 2308 lb (1047 kg) | 6 | RWD | A, rating 324 |
+| **REF-RWD-D** (clip 1 arena car, same livery as the clip 1 frames) | full-size RWD muscle | 523 hp (390 kW) @ 5800 rpm | 595 lb-ft (807 N·m) @ 3800 rpm | 3600 lb (1633 kg) | 4 | RWD | A, rating 320 |
 | **REF-FWD-C** (#96, clip 3) | compact FWD touring | 162 hp (121 kW) @ 7900 rpm | 132 lb-ft (179 N·m) @ 5800 rpm | 2164 lb (982 kg) | 5 | FWD | C, rating 164 |
 
-Both reference RWD cars sit at about **245–252 W/kg**, and both are light for their class. Our nearest analogues are heavier and less torquey:
+The reference RWD cars sit at about **239–252 W/kg** (REF-RWD-D: 239), and both are light for their class. Our nearest analogues are heavier and less torquey:
 
 | ours | mass | power | torque | W/kg |
 |---|---|---|---|---|
