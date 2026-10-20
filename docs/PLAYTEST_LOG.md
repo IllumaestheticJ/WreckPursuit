@@ -141,6 +141,12 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 64 | Other police units don't spawn / converge during a chase | E (police): backup dispatch to intercept points, out-of-sight spawns up to a per-level cap, search at last-known position | dispatched |
 | 65 | R should reset and repair the car in place, not send it back to the spawn | C (testbed + wp_wasm): upright on the nearest lane, ghost 1 s, repaired outside career; heat/pursuit/race state kept | dispatched |
 | 66 | Cops should route around buildings (not drive into them) | E (police): road-graph pursuit unless clear LOS, static-obstacle feelers, intercept routing; lane paths through lots at Vesper nodes 78/97 = city generator (lead/fix-sidewalk-lots) | dispatched |
+| 67 | Minimap overlaps the controls panel | M (ui) | dispatched |
+| 68 | A proper game menu: pause, main menu, settings (graphics, audio, assists, damage mode, units) | M (ui) | dispatched |
+| 69 | Crash effects: sparks, smoke, glass, skid marks, debris | helper `lead/crash-fx` | dispatched |
+| 70 | Instant crash replay (slow-mo, cinematic cameras) | helper `lead/crash-replay` | dispatched |
+| 71 | Touch controls for phones and tablets | helper `lead/touch-controls` | dispatched |
+| 72 | Handbrake locks the rears but the car won't rotate for quick direction changes | A (vehicle): assists stop resisting yaw while the handbrake is held, sliding lateral force on locked rears, AWD rear decoupling | dispatched |
 | 46 | Intersections still have holes in them (Port Vesper v2) | helper `lead/fix-junction-holes` (wp_world surface junction discs / bend connectors, greybox + colliders) | done on `lead/fix-junction-holes` (not merged): bends and dead ends were only partly paved (grass inside curves, under parking lanes, in U-turn bulbs), junction discs sat 8–15 cm off the road ends, sidewalk corners were 0.5 m staircases. Junctions, bends and dead ends are now exact patches sharing the road ends; enclosed holes Vesper 418 → 12.5 m², grid 191 → 0.5 m²; no ray miss over any junction in either city. Shots `docs/media/junctions/`, details `docs/integration/junctions.md`. Goldens blessed. To playtest |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
