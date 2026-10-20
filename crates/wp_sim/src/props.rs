@@ -86,6 +86,22 @@ impl Props {
         self.active.len()
     }
 
+    /// Indices of props whose grid cell lies within `r` of `pos` (XY), appended to `out` in
+    /// grid order (callers that merge several queries sort and dedup). Props pushed into a new
+    /// cell are re-filed only once they are fixed again, so a recently knocked prop may be
+    /// listed under its old cell: query with a little margin.
+    pub fn near(&self, pos: [f32; 3], r: f32, out: &mut Vec<u32>) {
+        let (x0, y0) = cell(pos[0] - r, pos[1] - r);
+        let (x1, y1) = cell(pos[0] + r, pos[1] + r);
+        for cx in x0..=x1 {
+            for cy in y0..=y1 {
+                if let Some(list) = self.grid.get(&(cx, cy)) {
+                    out.extend_from_slice(list);
+                }
+            }
+        }
+    }
+
     /// Wake props that a mover may reach before the next tick; put back to sleep (fixed) the
     /// ones that are asleep with no mover near. Call once per tick before the physics step.
     pub fn update(&mut self, bodies: &mut RigidBodySet, movers: &[Mover]) {

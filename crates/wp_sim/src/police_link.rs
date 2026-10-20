@@ -18,6 +18,13 @@ use crate::{Sim, VehicleKind};
 /// Vehicle slots kept free for players and racers when spawning police cars.
 pub const POLICE_SLOT_RESERVE: usize = 16;
 
+/// A civilian yielding to a siren below this speed counts as pulled over, m/s.
+const PULLED_OVER_MPS: f32 = 1.0;
+
+/// Parked cars within this distance of a police car are reported as obstacles, m (beyond the
+/// avoidance look-ahead of 90 m plus a prop's grid cell).
+const PARKED_SCAN_RADIUS_M: f32 = 110.0;
+
 /// Police RNG stream offset from the master seed.
 const POLICE_SEED_SALT: u64 = 0x0090_11CE;
 
@@ -68,14 +75,23 @@ impl Sim {
     /// Before the vehicle step: AI police drivers set their cars' inputs.
     pub(crate) fn drive_police_units(&mut self) {
         // Obstacle awareness (E, round 6): every vehicle and kinematic traffic car, so units
-        // follow, wait behind or pass them instead of driving into them.
+        // follow, wait behind or pass them instead of driving into them. A civilian pulled
+        // over for a siren (stopped) is reported like a parked car: units nudge past it.
+        let pulled_over: std::collections::BTreeSet<wp_world::AgentId> = self
+            .world
+            .agents()
+            .filter(|a| a.yielding && a.speed_mps < PULLED_OVER_MPS)
+            .map(|a| a.id)
+            .collect();
         let mut obstacles: Vec<wp_police::ObstacleView> = self
             .vehicles
             .iter()
             .map(|v| {
                 let s = v.vehicle.state();
                 let f = wp_world::drive::forward_of(s.rot);
-                wp_police::ObstacleView::car(Some(v.id), s.pos, s.lin_vel, f)
+                let mut o = wp_police::ObstacleView::car(Some(v.id), s.pos, s.lin_vel, f);
+                o.parked = v.traffic_agent.is_some_and(|a| pulled_over.contains(&a));
+                o
             })
             .collect();
         obstacles.extend(
@@ -87,9 +103,45 @@ impl Sim {
                     // Yaw 0 = +Y, positive turns left.
                     let f = [-sn, cs];
                     let v = [f[0] * a.speed_mps, f[1] * a.speed_mps, 0.0];
-                    wp_police::ObstacleView::car(None, a.pos, v, f)
+                    let mut o = wp_police::ObstacleView::car(None, a.pos, v, f);
+                    o.parked = pulled_over.contains(&a.id);
+                    o
                 }),
         );
+        // Parked cars near police cars, where they really are (knocked ones move): units nudge
+        // past one poking into their lane instead of driving into its bumper.
+        let mut near: Vec<u32> = Vec::new();
+        for v in self.vehicles.iter().filter(|v| v.police_unit.is_some()) {
+            self.props
+                .near(v.vehicle.state().pos, PARKED_SCAN_RADIUS_M, &mut near);
+        }
+        near.sort_unstable();
+        near.dedup();
+        if !near.is_empty() {
+            let props: Vec<&wp_world::StaticProp> = self.world.static_props().collect();
+            for i in near {
+                let Some(prop) = props.get(i as usize) else {
+                    continue;
+                };
+                if prop.kind != wp_world::props::PropKind::ParkedCar {
+                    continue;
+                }
+                let rb = &self.physics.bodies[self.props.bodies[i as usize]];
+                let q = rb.rotation();
+                // Body +Y rotated into world, XY part.
+                let f = [
+                    2.0 * (q.x * q.y - q.w * q.z),
+                    1.0 - 2.0 * (q.x * q.x + q.z * q.z),
+                ];
+                let p = rb.translation();
+                obstacles.push(wp_police::ObstacleView::parked(
+                    [p.x, p.y, p.z],
+                    f,
+                    prop.half_extents[1],
+                    prop.half_extents[0],
+                ));
+            }
+        }
         self.police.set_obstacles(&obstacles);
         for slot in &mut self.vehicles {
             let Some(unit) = slot.police_unit else {
