@@ -17,6 +17,7 @@ use crate::assists::{
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
+use crate::drift::{hold_update, DriftHold};
 use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
@@ -276,9 +277,11 @@ pub struct Vehicle {
     pub(crate) stalled: bool,
     /// Drift-assist tuning (dev override, see [`DriftTuning`]); not in snapshots.
     pub(crate) drift_tuning: DriftTuning,
+    /// Drift hold state (owner row 91, [`crate::drift`]); in snapshots.
+    pub(crate) drift_hold: DriftHold,
     assist_mode: AssistMode,
     body_slip_deg: f32,
-    last_help: f32,
+    envelope_deg: f32,
 }
 
 impl Vehicle {
@@ -394,9 +397,10 @@ impl Vehicle {
             hb_grace: 0.0,
             stalled: false,
             drift_tuning: DriftTuning::default(),
+            drift_hold: DriftHold::default(),
             assist_mode: AssistMode::Off,
             body_slip_deg: 0.0,
-            last_help: 0.0,
+            envelope_deg: 0.0,
             corners,
         };
         v.converter = def
@@ -540,6 +544,7 @@ impl Vehicle {
         self.torque = V3::ZERO;
         self.launch.forget();
         self.hb_grace = 0.0;
+        self.drift_hold = DriftHold::default();
         self.stalled = false;
     }
 
@@ -760,6 +765,7 @@ impl Vehicle {
             ),
             handbrake_hold: self.hb_grace > 0.0,
             tuning: self.drift_tuning,
+            hold_angle: None,
         }
     }
 
@@ -902,12 +908,25 @@ impl Vehicle {
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
         let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
-        // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical otherwise).
-        let thr_target = if st.scale < 1.0 {
-            thr_in * st.scale
-        } else {
-            thr_in
+        // Drift hold (row 91): key into the turn + throttle in a slide holds the angle.
+        let hold = {
+            let pre = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+            let max_steer = self.max_steer();
+            let pulled = input.handbrake > HANDBRAKE_ON;
+            hold_update(
+                &mut self.drift_hold,
+                &pre,
+                assists,
+                thr_in,
+                pulled,
+                max_steer,
+                dt,
+            )
         };
+        // `scale` is exactly 1.0 unless the slide throttle / hold is active (bit-identical
+        // otherwise).
+        let scale = st.scale * hold.throttle_scale;
+        let thr_target = if scale < 1.0 { thr_in * scale } else { thr_in };
         self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
@@ -1125,10 +1144,17 @@ impl Vehicle {
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
 
         // --- Steering ---------------------------------------------------------------------
-        let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
-        self.assist_mode = assist_mode(&steer_in, assists);
+        let steer_in = SteerInput {
+            hold_angle: hold.angle,
+            ..self.steer_input(input.steer, v_fwd, v_left, rear_axle)
+        };
+        self.assist_mode = if hold.mode != AssistMode::Off {
+            hold.mode
+        } else {
+            assist_mode(&steer_in, assists)
+        };
+        self.envelope_deg = hold.envelope_deg;
         self.body_slip_deg = steer_in.body_slip.to_degrees();
-        self.last_help = assists.countersteer_help.clamp(0.0, 1.0);
         let max_steer = self.max_steer();
         self.center_steer = update_center_angle(
             self.center_steer,
@@ -1408,7 +1434,7 @@ impl Vehicle {
             stalled: self.stalled,
             assist_mode: self.assist_mode,
             body_slip_deg: self.body_slip_deg,
-            envelope_deg: self.drift_tuning.envelope_deg * self.last_help,
+            envelope_deg: self.envelope_deg,
         };
     }
 

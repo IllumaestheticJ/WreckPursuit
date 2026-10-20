@@ -1,9 +1,9 @@
 // Drift lab (owner rows 90 / 91 / 98): ?drift=1 opens a flat-world free drive at noon with the
 // painted course and the tuning panel; a slider writes the runtime tuning through wp_wasm and
 // is remembered in wp.driftTuning; the readout shows slide angle and assist mode; F8 hides the
-// panel. Saves a screenshot to e2e/out/drift_lab.png. `node e2e/drift_lab.mjs`
+// panel. Saves a screenshot to <tmpdir>/drift_lab.png. `node e2e/drift_lab.mjs`
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
@@ -60,8 +60,7 @@ await page.keyboard.up("KeyD");
 await page.keyboard.up("KeyW");
 const text = await page.textContent("#drift-panel");
 check(/slide [0-9.]+° · mode \w+ · envelope/.test(text), `readout live (${text.match(/slide[^·]+·[^·]+·[^d]+/)?.[0]})`);
-mkdirSync(join(root, "e2e", "out"), { recursive: true });
-await page.screenshot({ path: join(root, "e2e", "out", "drift_lab.png") });
+await page.screenshot({ path: join(tmpdir(), "drift_lab.png") });
 await page.keyboard.press("F8");
 check(!(await page.locator("#drift-panel").isVisible()), "F8 hides the panel");
 // A reload keeps the tuning.

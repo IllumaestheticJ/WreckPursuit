@@ -29,9 +29,9 @@ const KNOBS: Knob[] = [
   { idx: 2, label: "slew boost", min: 0, max: 10, step: 0.25, show: (v) => `×(1+${v.toFixed(2)}·help)`, hint: "aligning / countersteer rack = max(lock rate, rack speed) × (1 + boost × help)" },
   { idx: 3, label: "save-lock onset", min: 0.005, max: 0.15, step: 0.005, show: (v) => `${(v * DEG).toFixed(1)}°`, hint: "rear-axle slip where the countersteer lock starts opening" },
   { idx: 4, label: "save-lock full", min: 0.02, max: 0.3, step: 0.005, show: (v) => `${(v * DEG).toFixed(1)}°`, hint: "rear-axle slip where it is fully open" },
-  { idx: 5, label: "hold gain", min: 0, max: 3, step: 0.05, show: (v) => v.toFixed(2), hint: "(row 91, not active yet) drift-hold gain" },
+  { idx: 5, label: "hold gain", min: 0, max: 3, step: 0.05, show: (v) => v.toFixed(2), hint: "hold mode: countersteer per rad of slide change (resists the angle growing / shrinking)" },
   { idx: 6, label: "throttle shaping", min: 0, max: 1, step: 0.05, show: (v) => `${(v * 100).toFixed(0)}%`, hint: "(row 98, not active yet) keyboard throttle smoothing with TCS off" },
-  { idx: 7, label: "envelope @100%", min: 10, max: 90, step: 1, show: (v) => `${v.toFixed(0)}°`, hint: "(row 91, not active yet) slide angle the assist helps within" },
+  { idx: 7, label: "envelope @100%", min: 10, max: 90, step: 1, show: (v) => `${v.toFixed(0)}°`, hint: "slide angle the assist helps within at 100 % (× 0.6 + 0.4 × help); past it the hold lets go" },
 ];
 
 const MODES = ["off", "straighten", "catch", "hold", "exceeded"];
@@ -160,7 +160,8 @@ export class DriftLab {
     }
     const [slip, mode, env] = d;
     const m = MODES[Math.round(mode)] ?? "?";
-    const colour = m === "catch" ? "#ff9f43" : m === "straighten" ? "#2ecc71" : m === "exceeded" ? "#ff4136" : "#aaa";
+    const colour =
+      m === "catch" ? "#ff9f43" : m === "straighten" ? "#2ecc71" : m === "hold" ? "#4aa3ff" : m === "exceeded" ? "#ff4136" : "#aaa";
     this.readout.innerHTML =
       `slide <b>${Math.abs(slip).toFixed(1)}°</b> · mode <b style="color:${colour}">${m}</b> · envelope ${env.toFixed(0)}°`;
   }

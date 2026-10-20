@@ -1115,3 +1115,75 @@ wp_vehicle`, wasm build, `tsc`; full gate once the owner is happy).
   `wp_wasm` dependency (workspace crate, wasm-clean), testbed (C's) `src/drift_lab.ts` (new),
   `src/main.ts` (button, `?drift`, frame update), `src/wasm/sim.ts`, `index.html`,
   `e2e/drift_lab.mjs` (new, in `npm run e2e`).
+
+## Owner row 91, step 2 (A, 2026-10-20) — drift "hold" mode
+
+Keyboard / gamepad (`steer_speed_sensitivity > 0`, help > 0; the wheel preset is untouched;
+same in both modes). Intent each tick: keys released → **straighten** (rows 57 / 90); key
+against the slide → **catch** (row 90); key **into** the turn with throttle while the rear
+slides past 0.17 rad (~10°) → **hold** (`wp_vehicle::drift`):
+
+- Steering: front-axle travel + a little bite toward the corner (0.5 × the front tyres' peak
+  slip) + `hold_gain × (β − β*)`, the correction bounded to ±0.06 rad. β* follows β with a
+  1/8 s time constant, so the hold resists quick changes of the slide angle and throttle still
+  grows / shrinks it. The rack moves at the fast catch rate.
+- Throttle (keyboard / gamepad pedal filter only): trimmed by up to 40 % × help while the
+  slide exceeds β*, fading to nothing over the last 40 % of the envelope.
+- Envelope: `envelope_deg × (0.6 + 0.4 × help)` (45° tuning → 37.8° at 60 %, 45° at 100 %),
+  up to +15 % after > 1 s of steady hold. Past it: mode **exceeded**, the assist lets go.
+- Allowed within the 0.5 s handbrake grace (a handbrake flick into a powered drift), never
+  while the handbrake is pulled; no grip added, no yaw torque. Hold state in the snapshot
+  (format 8). Drift lab: hold gain and envelope sliders are now live; the readout shows hold
+  (blue) / exceeded (red).
+
+Measured (`cargo run --release -p wp_vehicle --example drift`, `metrics::drift_run`: 30 m
+circle at 0.6 g, 0.35 s handbrake flick + full throttle into the corner, then 6 s; TCS / ESC
+off). Good = key into the turn, throttle on below 25° / off above (keys) or proportional
+(gamepad); sloppy = key into the turn + full throttle held; naive = keys released, off the
+throttle; lift = good for 2 s, then lift and let go. Before = the same build with the hold
+switched off.
+
+| car | preset | help | good: drift s / sd ° / spun | sloppy: drift s / max ° / spun | naive recovered | lift: max ° / recovered |
+|---|---|---|---|---|---|---|
+| shiro_turbo | keys | 30 % |  1.0 / 10.9 / spun  →  3.7 / 6.0 / no  |  0.9 / 165 / spun  →  4.9 / 26 / no  |  no  →  yes  |  180 / no  →  37 / no  |
+| shiro_turbo | keys | 60 % |  0.6 / 9.1 / spun  →  3.8 / 11.7 / no  |  0.6 / 162 / spun  →  5.4 / 28 / no  |  no  →  yes  |  180 / no  →  24 / yes  |
+| shiro_turbo | keys | 100 % |  0.5 / 9.6 / spun  →  4.0 / 11.1 / no  |  0.5 / 163 / spun  →  5.5 / 28 / no  |  yes  →  yes  |  180 / no  →  25 / yes  |
+| shiro_turbo | gamepad | 30 % |  0.6 / 10.6 / spun  →  5.4 / 3.1 / no  |  0.6 / 180 / spun  →  5.3 / 27 / no  |  no  →  yes  |  180 / no  →  42 / no  |
+| shiro_turbo | gamepad | 60 % |  0.6 / 10.6 / spun  →  5.4 / 3.1 / no  |  0.6 / 180 / spun  →  5.3 / 27 / no  |  no  →  yes  |  180 / no  →  23 / yes  |
+| shiro_turbo | gamepad | 100 % |  0.6 / 10.6 / spun  →  5.4 / 3.3 / no  |  0.6 / 180 / spun  →  5.2 / 27 / no  |  yes  →  yes  |  180 / no  →  23 / yes  |
+| sperber_32 | keys | 30 % |  0.6 / 9.2 / spun  →  3.3 / 8.3 / spun  |  0.6 / 162 / spun  →  6.0 / 28 / no  |  no  →  no  |  180 / no  →  27 / yes  |
+| sperber_32 | keys | 60 % |  0.5 / 8.7 / spun  →  1.9 / 6.5 / no  |  0.5 / 161 / spun  →  6.0 / 30 / no  |  no  →  yes  |  180 / no  →  39 / no  |
+| sperber_32 | keys | 100 % |  0.5 / 8.5 / spun  →  2.8 / 8.2 / spun  |  0.5 / 161 / spun  →  6.0 / 30 / no  |  no  →  yes  |  180 / no  →  35 / no  |
+| sperber_32 | gamepad | 30 % |  0.5 / 9.8 / spun  →  5.8 / 3.4 / no  |  0.5 / 180 / spun  →  6.0 / 28 / no  |  no  →  no  |  180 / no  →  56 / no  |
+| sperber_32 | gamepad | 60 % |  0.5 / 9.8 / spun  →  5.7 / 3.2 / no  |  0.5 / 180 / spun  →  5.9 / 27 / no  |  no  →  yes  |  180 / no  →  26 / yes  |
+| sperber_32 | gamepad | 100 % |  0.5 / 9.8 / spun  →  5.7 / 3.2 / no  |  0.5 / 180 / spun  →  5.8 / 28 / no  |  no  →  yes  |  180 / no  →  26 / yes  |
+| rampart_50 | keys | 30 % |  0.6 / 10.5 / spun  →  1.4 / 10.3 / no  |  0.6 / 154 / spun  →  6.0 / 33 / no  |  no  →  no  |  180 / no  →  54 / no  |
+| rampart_50 | keys | 60 % |  0.7 / 9.8 / spun  →  4.5 / 7.8 / no  |  0.7 / 153 / spun  →  6.0 / 32 / no  |  yes  →  yes  |  180 / no  →  33 / yes  |
+| rampart_50 | keys | 100 % |  1.0 / 12.6 / spun  →  5.0 / 7.5 / no  |  0.9 / 158 / spun  →  5.9 / 31 / no  |  yes  →  yes  |  180 / no  →  25 / yes  |
+| rampart_50 | gamepad | 30 % |  0.7 / 11.4 / spun  →  6.0 / 3.0 / no  |  0.7 / 179 / spun  →  6.0 / 32 / no  |  no  →  no  |  180 / no  →  32 / yes  |
+| rampart_50 | gamepad | 60 % |  0.7 / 11.3 / spun  →  6.0 / 3.0 / no  |  0.7 / 178 / spun  →  6.0 / 31 / no  |  yes  →  yes  |  180 / no  →  27 / yes  |
+| rampart_50 | gamepad | 100 % |  0.7 / 11.3 / spun  →  6.0 / 3.1 / no  |  0.7 / 178 / spun  →  6.0 / 32 / no  |  yes  →  yes  |  180 / no  →  26 / yes  |
+| debug_sedan | keys | 30 % |  1.2 / 2.9 / no  →  0.4 / 1.3 / no  |  1.2 / 20 / no  →  0.4 / 15 / no  |  no  →  yes  |  20 / yes  →  15 / yes  |
+| debug_sedan | keys | 60 % |  2.5 / 6.4 / no  →  0.4 / 2.3 / no  |  1.4 / 27 / no  →  0.4 / 18 / no  |  yes  →  yes  |  29 / no  →  18 / yes  |
+| debug_sedan | keys | 100 % |  2.3 / 8.2 / no  →  0.5 / 2.9 / no  |  1.5 / 31 / no  →  0.5 / 20 / no  |  yes  →  yes  |  34 / no  →  20 / yes  |
+| debug_sedan | gamepad | 30 % |  1.6 / 5.2 / no  →  0.4 / 2.5 / no  |  1.5 / 30 / no  →  0.4 / 19 / no  |  no  →  yes  |  29 / yes  →  19 / yes  |
+| debug_sedan | gamepad | 60 % |  1.6 / 5.2 / no  →  0.4 / 2.5 / no  |  1.5 / 30 / no  →  0.4 / 19 / no  |  yes  →  yes  |  29 / yes  →  19 / yes  |
+| debug_sedan | gamepad | 100 % |  1.6 / 5.2 / no  →  0.4 / 2.5 / no  |  1.5 / 30 / no  →  0.4 / 19 / no  |  yes  →  yes  |  29 / yes  →  19 / yes  |
+| junkyard_beater | keys | 30 % |  1.5 / 4.0 / no  →  0.4 / 2.9 / no  |  1.5 / 27 / no  →  0.4 / 20 / no  |  yes  →  yes  |  27 / yes  →  20 / yes  |
+| junkyard_beater | keys | 60 % |  1.9 / 8.6 / no  →  0.4 / 3.5 / no  |  1.5 / 33 / no  →  0.4 / 22 / no  |  yes  →  yes  |  35 / no  →  22 / yes  |
+| junkyard_beater | keys | 100 % |  1.8 / 9.5 / no  →  0.3 / 3.6 / no  |  1.5 / 35 / no  →  0.3 / 22 / no  |  yes  →  yes  |  42 / no  →  22 / yes  |
+| junkyard_beater | gamepad | 30 % |  1.8 / 5.3 / no  →  0.2 / 1.9 / no  |  1.6 / 26 / no  →  0.2 / 16 / no  |  yes  →  yes  |  27 / yes  →  16 / yes  |
+| junkyard_beater | gamepad | 60 % |  1.9 / 5.5 / no  →  0.2 / 1.8 / no  |  1.6 / 26 / no  →  0.2 / 16 / no  |  yes  →  yes  |  27 / yes  →  16 / yes  |
+| junkyard_beater | gamepad | 100 % |  1.9 / 5.5 / no  →  0.2 / 1.7 / no  |  1.6 / 26 / no  →  0.2 / 15 / no  |  yes  →  yes  |  27 / yes  →  15 / yes  |
+
+**Read:** RWD cars went from spinning within 0.5–1 s in every case to 1.4–6 s held drifts with
+3–12° wobble (keyboard taps are wobblier than the stick). The naive released-keys driver now
+recovers at 60 %+ on all three RWD cars (at 30 % on shiro only), and an abrupt lift snaps (to
+23–56°) and recovers at 60 %+ except sperber on keys (39° / 35°). **Open:**
+(1) the sloppy full-throttle driver no longer spins: the hold settles a held-W drift at
+26–33°, inside the envelope, so the punishment the brief asks for is not there yet for that
+mistake (tunable now: a smaller envelope or hold gain in the drift lab; candidate fix: let
+the trim fade start earlier, or back off on sustained full throttle at > 0.6 × envelope).
+(2) FWD (debug_sedan, junkyard_beater): drifts are shorter with the hold (they straighten),
+as a FWD car pulls out of a slide under power. (3) the keyboard good driver spins in 2 of 18
+RWD cases: its on/off throttle taps cause lift-off snaps.

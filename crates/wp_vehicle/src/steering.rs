@@ -49,6 +49,9 @@ pub struct SteerInput {
     pub handbrake_hold: bool,
     /// Drift / countersteer tuning (dev override; defaults = the shipped constants).
     pub tuning: DriftTuning,
+    /// Drift hold (owner row 91, [`crate::drift`]): the road-wheel centre angle to hold the
+    /// slide with, when the driver holds the key into the turn with throttle on.
+    pub hold_angle: Option<f32>,
 }
 
 /// Runtime tuning of the keyboard / gamepad slide assists (owner rows 90 / 91 / 98, the
@@ -282,6 +285,13 @@ pub fn steer_target(
     );
     let driver_target = -(inp.driver.clamp(-1.0, 1.0) + inp.pull) * lock;
     let help = assists.countersteer_help.clamp(0.0, 1.0);
+    if let Some(angle) = inp.hold_angle {
+        // Drift hold (row 91): the hold logic picked the angle; move there at the fast rate.
+        return SteerTarget {
+            angle: angle.clamp(-max_steer, max_steer),
+            rate_boost: 1.0 + inp.tuning.slew_boost * help,
+        };
+    }
     let aligning =
         help > 0.0 && inp.speed > 3.0 && inp.driver.abs() <= STEER_DEADZONE && !inp.handbrake_hold;
     if !aligning {
@@ -314,6 +324,12 @@ pub const ALIGN_SLIDE_FULL: f32 = 0.08;
 /// `wp_sim` were turned back onto the road that way).
 fn aligning_angle(inp: &SteerInput) -> f32 {
     inp.front_axle_angle * align_slide(inp)
+}
+
+/// How much the rear slides, 0..=1, on the self-aligning countersteer's ramp (rear-axle slip
+/// `align_onset_rad` → `align_full_rad`).
+pub fn align_slide_amount(inp: &SteerInput) -> f32 {
+    align_slide(inp)
 }
 
 /// How much the rear slides for the self-aligning countersteer, 0..=1 (rear-axle slip
@@ -454,6 +470,7 @@ mod tests {
             front_axle_angle: 0.0,
             handbrake_hold: false,
             tuning: DriftTuning::default(),
+            hold_angle: None,
         }
     }
 

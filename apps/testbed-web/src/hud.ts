@@ -120,9 +120,11 @@ export class Hud {
       `M or Tab city map (drag / wheel / arrows / + − / 0 whole city / F follow inside it; driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
-      `<b>Countersteer help</b> (slider, keyboard/gamepad): let go of the steering and the front ` +
-      `wheels follow the car's travel, which catches a slide by itself (0 % off, 50 % default, ` +
-      `100 % fast). It never fights your input, and the handbrake turns the car freely.<br><br>` +
+      `<b>Countersteer help</b> (slider, keyboard/gamepad): in a slide, <i>let go</i> of the steering ` +
+      `and the front wheels follow the car's travel (straighten); press <i>against</i> the slide for a ` +
+      `fast catch; hold the key <i>into</i> the turn with throttle on to hold the drift angle (tap ` +
+      `the throttle: more grows it, lifting shrinks it). Past the slide envelope it lets go and you ` +
+      `can spin. 0 % off, 60 % keyboard default, 100 % fast and widest. Drift lab + tuning: F8.<br><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;
   }

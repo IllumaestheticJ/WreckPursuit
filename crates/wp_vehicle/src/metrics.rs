@@ -1309,3 +1309,152 @@ pub fn slide_catch(
             && speed(&rig) > 5.0,
     }
 }
+
+/// Scripted drift drivers for [`drift_run`] (owner row 91).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DriftDriver {
+    /// Holds the key into the turn and taps the throttle to keep the slide near `target_deg`
+    /// (throttle on below it, off above it).
+    Good {
+        /// Slide angle the driver aims for, degrees.
+        target_deg: f32,
+    },
+    /// Holds the key into the turn and keeps full throttle (a mistake at a big angle).
+    Sloppy,
+    /// Lets go of the steering and keeps the throttle off (the naive "release" driver).
+    Released,
+    /// Drives like [`DriftDriver::Good`] (25°) for `after_s`, then lifts abruptly and lets go
+    /// of the steering.
+    AbruptLift {
+        /// Seconds of holding before the lift.
+        after_s: f32,
+    },
+}
+
+/// Result of [`drift_run`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DriftRun {
+    /// Seconds with the body slip between 10° and 60° (a held drift) while still moving
+    /// faster than 5 m/s.
+    pub drift_s: f32,
+    /// Standard deviation of the slide angle during those seconds, degrees (steadiness).
+    pub slip_sd_deg: f32,
+    /// Largest body slip, degrees.
+    pub max_slip_deg: f32,
+    /// Spun: past 90° of body slip.
+    pub spun: bool,
+    /// Straight and moving at the end (< 15° slip, |yaw rate| < 0.5 rad/s, > 5 m/s).
+    pub recovered: bool,
+}
+
+/// Drift run (owner row 91): settle on a 30 m counter-clockwise circle at 0.6 g, kick the
+/// slide off with a handbrake flick and full throttle while steering in (0.6 s), then let
+/// `driver` drive for 6 s.
+/// `style` = keys (steering ±1 / 0, throttle on / off) or analog (the same targets, smooth).
+pub fn drift_run(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    style: DriverStyle,
+    driver: DriftDriver,
+) -> DriftRun {
+    let radius = 30.0;
+    let mut rig = Rig::new(car);
+    let mut follow = CircleFollower::new(radius);
+    let v = (0.6 * GRAVITY_MPS2 * radius).sqrt();
+    rig.teleport([0.0; 3], 0.0, v, v / radius);
+    let keys = style == DriverStyle::Keyboard;
+    let quantise = |s: f32| match style {
+        DriverStyle::Analog => s,
+        DriverStyle::Keyboard if s > 0.15 => 1.0,
+        DriverStyle::Keyboard if s < -0.15 => -1.0,
+        DriverStyle::Keyboard => 0.0,
+    };
+    for _ in 0..3 * TICKS_PER_S {
+        let (steer, _) = follow.steer(&rig);
+        let (throttle, brake) = hold_speed(&rig, v);
+        rig.step(
+            &VehicleInput {
+                steer: quantise(steer),
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    // Kick: a 0.35 s handbrake flick with full throttle, steering into the (left-hand)
+    // corner, then 0.25 s more throttle.
+    let into = if keys { -1.0 } else { -0.6 };
+    for tick in 0..(0.6 * TICKS_PER_S as f32) as usize {
+        rig.step(
+            &VehicleInput {
+                steer: into,
+                throttle: 1.0,
+                handbrake: if tick < (0.35 * TICKS_PER_S as f32) as usize {
+                    1.0
+                } else {
+                    0.0
+                },
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    let (mut drift, mut sum, mut sum2) = (0usize, 0.0f32, 0.0f32);
+    let mut max_slip = 0.0f32;
+    for tick in 0..6 * TICKS_PER_S {
+        let slip = body_slip_deg(&rig).abs();
+        let t = tick as f32 / TICKS_PER_S as f32;
+        let good = |target: f32| {
+            let thr = if keys {
+                if slip < target {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                (0.5 + 0.08 * (target - slip)).clamp(0.0, 1.0)
+            };
+            (into, thr)
+        };
+        let (steer, throttle) = match driver {
+            DriftDriver::Good { target_deg } => good(target_deg),
+            DriftDriver::Sloppy => (into, 1.0),
+            DriftDriver::Released => (0.0, 0.0),
+            DriftDriver::AbruptLift { after_s } => {
+                if t < after_s {
+                    good(25.0)
+                } else {
+                    (0.0, 0.0)
+                }
+            }
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                ..Default::default()
+            },
+            assists,
+        );
+        let s = body_slip_deg(&rig).abs();
+        max_slip = max_slip.max(s);
+        if (10.0..60.0).contains(&s) && speed(&rig) > 5.0 && max_slip < 90.0 {
+            drift += 1;
+            sum += s;
+            sum2 += s * s;
+        }
+    }
+    let n = drift.max(1) as f32;
+    let mean = sum / n;
+    DriftRun {
+        drift_s: drift as f32 / TICKS_PER_S as f32,
+        slip_sd_deg: (sum2 / n - mean * mean).max(0.0).sqrt(),
+        max_slip_deg: max_slip,
+        spun: max_slip >= 90.0,
+        recovered: max_slip < 90.0
+            && body_slip_deg(&rig).abs() < 15.0
+            && yaw_rate(&rig).abs() < 0.5
+            && speed(&rig) > 5.0,
+    }
+}

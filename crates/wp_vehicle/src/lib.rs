@@ -44,6 +44,7 @@ pub mod assists;
 pub mod body;
 pub mod brakes;
 pub mod diff;
+pub mod drift;
 pub mod drivetrain;
 pub mod engine;
 pub mod ffb;
