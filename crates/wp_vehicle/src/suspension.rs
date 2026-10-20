@@ -142,23 +142,72 @@ pub fn step_strut(
         def.spring_n_per_m * (x.min(def.travel_m) + def.preload_m)
             + bump_stop_force(def.bump_stop_n_per_m, x - def.travel_m, v0)
     };
-    let speed = |x: f32| damper_speed(def, tyre(x) - strut(x));
-    // h(x) = x − x0 − dt·speed(x) is increasing in x: bisect for its root.
-    let h = |x: f32| x - x0 - dt * speed(x);
+    // Local rates (dF/dx) of the tyre and the strut at x, N/m (both ≥ 0).
+    let tyre_rate = |x: f32| match reach {
+        Some(r) if r - x > TYRE_BOTTOM_M => k_tyre * TYRE_RIM_RATE_MULT,
+        Some(r) if r - x > 0.0 => k_tyre,
+        _ => 0.0,
+    };
+    let strut_rate = |x: f32| {
+        let spring = if x < def.travel_m {
+            def.spring_n_per_m
+        } else {
+            0.0
+        };
+        let e = x - def.travel_m;
+        let bump = if e > 0.0 {
+            let extend = (-v0 / BUMP_STOP_HYSTERESIS_MPS).clamp(0.0, 1.0);
+            def.bump_stop_n_per_m
+                * (1.0 + 2.0 * e / BUMP_STOP_PROGRESSION_M)
+                * (1.0 - (1.0 - BUMP_STOP_REBOUND_FRACTION) * extend)
+        } else {
+            0.0
+        };
+        spring + bump
+    };
+    // dv/df of the inverse damper at force f.
+    let damper_slope = |f: f32| {
+        let c = if f > 0.0 {
+            def.damper_bump_ns_per_m
+        } else {
+            def.damper_rebound_ns_per_m
+        }
+        .max(1.0);
+        if f.abs() / c <= DAMPER_KNEE_MPS {
+            1.0 / c
+        } else {
+            1.0 / (c * DAMPER_HIGH_SPEED_RATIO)
+        }
+    };
+    // h(x) = x − x0 − dt·speed(x) with h'(x) ≥ 1: safeguarded Newton (exact within a
+    // linear piece of the curves, so it converges in a few iterations), bisection fallback.
+    let h = |x: f32| x - x0 - dt * damper_speed(def, tyre(x) - strut(x));
     let x = if h(0.0) >= 0.0 {
         0.0 // topped out at full droop
     } else {
         let mut lo = 0.0f32;
         let mut hi = x0.max(reach.unwrap_or(0.0)).max(0.0) + 0.5;
-        for _ in 0..30 {
-            let mid = 0.5 * (lo + hi);
-            if h(mid) > 0.0 {
-                hi = mid;
+        let mut x = x0.clamp(lo, hi);
+        for _ in 0..24 {
+            let f = tyre(x) - strut(x);
+            let hx = x - x0 - dt * damper_speed(def, f);
+            if hx > 0.0 {
+                hi = x;
             } else {
-                lo = mid;
+                lo = x;
+            }
+            let slope = 1.0 + dt * damper_slope(f) * (tyre_rate(x) + strut_rate(x));
+            let mut next = x - hx / slope;
+            if !(next > lo && next < hi) {
+                next = 0.5 * (lo + hi);
+            }
+            let done = (next - x).abs() < 1e-7;
+            x = next;
+            if done {
+                break;
             }
         }
-        0.5 * (lo + hi)
+        x
     };
     let v = if dt > 0.0 { (x - x0) / dt } else { 0.0 };
     StrutStep { x, v, fz: tyre(x) }
