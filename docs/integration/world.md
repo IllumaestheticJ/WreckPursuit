@@ -1026,8 +1026,9 @@ build. One earlier `run.mjs` pass, run while the golden bless was using every co
 "replay after reload" (all 1979 tick hashes matched, final state hash differed) and the scrub
 check; two later runs passed and `simcli replay` verified that same recording. Looks
 load-dependent in the page's record/replay path, not the sim; worth watching.
-Goldens: blessed only the 14 this change moves (list in the `[bless]` commit); 15 others were
-already stale on `lead/round12` and are left for the lead.
+Goldens: the 14 this change moves are blessed in their own `[bless]` commit; the 15 that were
+already stale on `lead/round12` (round-12 merges, not this change) are blessed in a second
+`[bless]` commit at the lead's request. All 61 goldens match; `goldens_match` passes.
 **Open, not fixed here (for D / race owner):** `wp_race` `lantern_checkpoint_draws_the_police`
 (needs 2 of 3 AI racers to finish) fails on this branch. It is a knife-edge test in every
 configuration measured (`WP_RACE_SEED`): pre-pop-in radii 150/400 m pass 2 of 6 seeds
