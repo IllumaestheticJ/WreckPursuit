@@ -1,5 +1,6 @@
 //! Drift Lab B measurement tables (docs/integration/drift-lab-b.md).
 //! `cargo run --release -p wp_vehicle --example drift_lab_b [catch|drift] [car_id ...]`
+//! Env: `GAMEPAD=1` (gamepad preset), `DRIFT_TUNING='{...}'` (constants override).
 
 use wp_contracts::{AssistProfile, LoadedCar};
 use wp_vehicle::drift_lab::{drift_run, kick_catch, CatchDriver, DriftDriver};
@@ -9,16 +10,28 @@ fn car(id: &str) -> LoadedCar {
     wp_contracts::load_car(p).unwrap()
 }
 
+/// Keyboard preset (GAMEPAD=1: gamepad preset), TCS / ESC off, countersteer `help`.
 fn kb(help: f32) -> AssistProfile {
+    let base = if std::env::var("GAMEPAD").is_ok() {
+        AssistProfile::gamepad_default()
+    } else {
+        AssistProfile::keyboard_default()
+    };
     AssistProfile {
         countersteer_help: help,
         tcs: false,
         esc: false,
-        ..AssistProfile::keyboard_default()
+        ..base
     }
 }
 
 fn main() {
+    // DRIFT_TUNING='{"hold_gain":0.8}' overrides constants (missing fields = defaults).
+    if let Ok(j) = std::env::var("DRIFT_TUNING") {
+        wp_vehicle::drift::set_tuning_override(Some(
+            serde_json::from_str(&j).expect("DRIFT_TUNING json"),
+        ));
+    }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args.first().is_some_and(|a| a == "catch" || a == "drift") {
         args.remove(0)
@@ -84,8 +97,10 @@ fn main() {
     }
     if what != "catch" {
         println!("\n## Drift drivers (40 m left-hander at 0.6 g, 6 s, keyboard TCS/ESC off)");
-        println!("| car | help | driver | drift s (mean) | longest s | spins |");
-        println!("|---|---|---|---|---|---|");
+        println!(
+            "| car | help | driver | drift s (mean) | longest s | max slip ° | snap ° | spins |"
+        );
+        println!("|---|---|---|---|---|---|---|---|");
         for id in &args {
             let c = car(id);
             for help in [0.3f32, 0.6, 1.0] {
@@ -94,21 +109,26 @@ fn main() {
                     DriftDriver::Naive,
                     DriftDriver::Sloppy,
                     DriftDriver::AbruptLift,
+                    DriftDriver::Flood,
+                    DriftDriver::FlickLift,
                 ] {
                     let seeds: Vec<u64> = if d == DriftDriver::Sloppy {
-                        (1..=10).collect()
+                        (1..=20).collect()
                     } else {
                         vec![1]
                     };
-                    let (mut t, mut l, mut spins) = (0.0f32, 0.0f32, 0);
+                    let (mut t, mut l, mut spins, mut ms, mut fl) =
+                        (0.0f32, 0.0f32, 0, 0.0f32, 0.0f32);
                     for s in &seeds {
                         let r = drift_run(&c, &kb(help), d, 40.0, 0.6, *s);
                         t += r.drift_s;
                         l = l.max(r.longest_s);
                         spins += r.spun as usize;
+                        ms = ms.max(r.max_slip_deg);
+                        fl = fl.max(r.flip_deg);
                     }
                     println!(
-                        "| {id} | {:.0} % | {d:?} | {:.2} | {l:.2} | {spins}/{} |",
+                        "| {id} | {:.0} % | {d:?} | {:.2} | {l:.2} | {ms:.0} | {fl:.0} | {spins}/{} |",
                         help * 100.0,
                         t / seeds.len() as f32,
                         seeds.len()

@@ -21,6 +21,8 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
 | `brakes.rs` | bias, ABS (~15 Hz release cycle) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
+| `drift.rs` | Drift Lab B (rows 90 / 91): slide onset tuning + runtime override, intent modes (straighten / hold / catch / exceeded), throttle shaping, lift softening, slide-angle envelope; steering angle and throttle only |
+| `drift_lab.rs` | scripted slide drivers for Drift Lab B (`kick_catch`, `drift_run`); tables via `--example drift_lab_b` |
 | `assists.rs` | pedal filters, TCS (throttle cut + brake-based traction control), ESC (lagged ~1°/g reference) |
 | `presets.rs` | one-click `AssistPreset` Rookie / Street / Sim (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
 | `aero.rs` | drag, axle lift/downforce |
@@ -183,6 +185,14 @@ model. A parked car settles with < 1 cm drift and no jitter (tested).
 **Determinism:** no `f32::sin/cos/atan` in sim code (polynomial versions in `math.rs` /
 `wp_math`); glam runs in scalar mode via Rapier's `enhanced-determinism`; no maps iterated, no
 threads. Identical runs give identical hashes (tested here and by `apps/simcli`).
+
+## Drift Lab B (playtest rows 90 / 91)
+
+Fast countersteer (any rack move toward the countersteer side runs at full lock in 0.10 s at
+the 60 % slider; slide onset from rear-axle slip 0.025 → 0.06 rad or its growth rate) and the
+semi-intelligent keyboard drift assist (`drift.rs`, gamepad at half weight, wheel off). Design,
+constants, measurements and what to try: `docs/integration/drift-lab-b.md`. Tests:
+`tests/drift_lab_b.rs`; tables: `cargo run --release -p wp_vehicle --example drift_lab_b`.
 
 ## Ride, kerbs and launches (playtest row 54)
 

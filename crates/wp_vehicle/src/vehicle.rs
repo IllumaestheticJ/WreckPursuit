@@ -267,6 +267,8 @@ pub struct Vehicle {
     pub(crate) stalled: bool,
     /// Drift-assist state ([`crate::drift`]).
     pub(crate) drift: crate::drift::DriftState,
+    /// This tick's drift-assist command (recomputed every step from `drift`).
+    pub(crate) drift_cmd: crate::drift::DriftCommand,
 }
 
 impl Vehicle {
@@ -381,6 +383,7 @@ impl Vehicle {
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
             drift: crate::drift::DriftState::default(),
+            drift_cmd: crate::drift::DriftCommand::default(),
             stalled: false,
             corners,
         };
@@ -515,6 +518,7 @@ impl Vehicle {
         self.launch.forget();
         self.hb_grace = 0.0;
         self.drift = crate::drift::DriftState::default();
+        self.drift_cmd = crate::drift::DriftCommand::default();
         self.stalled = false;
     }
 
@@ -736,6 +740,7 @@ impl Vehicle {
             handbrake_hold: self.hb_grace > 0.0,
             rear_slip_rate: self.drift.rear_slip_rate,
             tuning: crate::drift::tuning(),
+            drift: self.drift_cmd,
         }
     }
 
@@ -878,6 +883,24 @@ impl Vehicle {
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
         self.drift.update_slip(rear_axle, dt);
+        let tuning = crate::drift::tuning();
+        let (cs_side, onset) =
+            crate::steering::onset_of(rear_axle, self.drift.rear_slip_rate, &tuning);
+        self.drift_cmd = self.drift.update(
+            &crate::drift::DriftInputs {
+                driver: input.steer,
+                throttle: thr_in,
+                speed: v_fwd,
+                body_slip: body_slip(v_fwd, v_left),
+                side: cs_side,
+                onset,
+                help: assists.countersteer_help,
+                sensitivity: assists.steer_speed_sensitivity,
+                handbrake_hold: self.hb_grace > 0.0 || input.handbrake > HANDBRAKE_ON,
+            },
+            &tuning,
+            dt,
+        );
         let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
         // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical otherwise).
         let thr_target = if st.scale < 1.0 {
@@ -885,7 +908,19 @@ impl Vehicle {
         } else {
             thr_in
         };
+        // Drift assist throttle shaping (exactly 1.0 when inactive: bit-identical otherwise).
+        let dc = self.drift_cmd;
+        let thr_target = if dc.throttle_scale < 1.0 {
+            thr_target * dc.throttle_scale
+        } else {
+            thr_target
+        };
+        let prev_thr = self.throttle_f;
         self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+        if dc.lift_time_s > 0.0 && self.throttle_f < prev_thr {
+            // Abrupt lift in a slide: softened (a full lift takes `lift_time_s`), not cancelled.
+            self.throttle_f = self.throttle_f.max(prev_thr - dt / dc.lift_time_s);
+        }
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
         // Handbrake hold for the assists (steering alignment, ESC): on while pulled and for
@@ -1096,23 +1131,17 @@ impl Vehicle {
             self.def.steering.rack_speed_rad_per_s,
             dt,
         );
-        let drift_tel = {
-            let (side, onset) = crate::steering::slide_onset(&steer_in);
-            let on = assists.countersteer_help > 0.0
-                && assists.steer_speed_sensitivity > 0.0
-                && v_fwd > 3.0;
-            crate::drift::DriftTelemetry {
-                mode: if on {
-                    crate::drift::intent(input.steer, side, onset)
-                } else {
-                    crate::drift::DriftMode::Off
-                },
-                slide_angle: steer_in.body_slip.abs(),
-                onset,
-                envelope: 0.0,
-                authority: if on { 1.0 } else { 0.0 },
-                throttle_scale: 1.0,
-            }
+        let drift_tel = crate::drift::DriftTelemetry {
+            mode: dc.mode,
+            slide_angle: dc.slide,
+            onset,
+            envelope: dc.envelope,
+            authority: if dc.mode == crate::drift::DriftMode::Off {
+                0.0
+            } else {
+                dc.authority
+            },
+            throttle_scale: dc.throttle_scale,
         };
         let ts = if base_split[0] > 0.0 && self.corners[0].steerable {
             torque_steer(self.wheels[0].drive, self.wheels[1].drive)

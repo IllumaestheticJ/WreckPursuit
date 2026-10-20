@@ -227,13 +227,24 @@ pub enum DriftDriver {
     Good,
     /// Holds the key into the turn and full throttle the whole time.
     Naive,
-    /// Random 0.1–0.4 s key presses (into, released, against) and random throttle taps, from
-    /// a seeded [`Rng`].
+    /// Enters like [`DriftDriver::Naive`], then from 0.8 s on random 0.15–0.5 s segments
+    /// (seeded [`Rng`]): key into the turn + throttle 40 %, released + throttle 20 %, against
+    /// the slide + throttle 20 %, into the turn + lift 20 % — a driver who gets sideways and
+    /// then saws at the keys.
     Sloppy,
     /// Like [`DriftDriver::Good`] for 2 s, then lifts off the throttle at once and keeps the
     /// key into the turn.
     AbruptLift,
+    /// The car is flicked into a big angle (a [`FLICK_RPS`] yaw kick into the turn), then the
+    /// key into the turn and full throttle: floors it at a big angle.
+    Flood,
+    /// The same flick as [`DriftDriver::Flood`], then the keys released and the throttle
+    /// lifted: the contrast case.
+    FlickLift,
 }
+
+/// Yaw kick of [`DriftDriver::Flood`] / [`DriftDriver::FlickLift`], rad/s.
+pub const FLICK_RPS: f32 = 2.0;
 
 /// Result of [`drift_run`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -244,6 +255,9 @@ pub struct DriftRun {
     pub longest_s: f32,
     /// Largest body slip, degrees.
     pub max_slip_deg: f32,
+    /// Largest body slip toward the other side (the tail swinging past straight: a snap),
+    /// degrees.
+    pub flip_deg: f32,
     /// Spun: past 90° of body slip, or travelling backwards.
     pub spun: bool,
     /// Rig state hash at the end.
@@ -260,6 +274,20 @@ pub fn drift_run(
     radius: f32,
     lat_g: f32,
     seed: u64,
+) -> DriftRun {
+    drift_run_with(car, assists, driver, radius, lat_g, seed, |_, _, _| {})
+}
+
+/// [`drift_run`] calling `on_tick(rig, steer, throttle)` after every tick of the drift phase
+/// (traces).
+pub fn drift_run_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: DriftDriver,
+    radius: f32,
+    lat_g: f32,
+    seed: u64,
+    mut on_tick: impl FnMut(&Rig, f32, f32),
 ) -> DriftRun {
     let mut rig = Rig::new(car);
     let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
@@ -293,10 +321,21 @@ pub fn drift_run(
             &settle,
         );
     }
+    if matches!(driver, DriftDriver::Flood | DriftDriver::FlickLift) {
+        let s = rig.state();
+        let fwd = rig.vehicle.chassis().rot * V3::Y;
+        rig.teleport(
+            s.pos,
+            atan2(-fwd.x, fwd.y),
+            s.speed_mps,
+            s.ang_vel[2] + FLICK_RPS,
+        );
+    }
     let mut rng = Rng::new(seed);
     let (mut sloppy_steer, mut sloppy_thr, mut sloppy_left) = (-1.0f32, 1.0f32, 0usize);
     let (mut drift, mut run, mut longest) = (0usize, 0usize, 0usize);
     let mut max_slip = 0.0f32;
+    let mut flip = 0.0f32;
     let mut spun = false;
     let mut steer_key = -1.0f32;
     let mut thr_key = 1.0f32;
@@ -306,7 +345,8 @@ pub fn drift_run(
         let angle = (-s.body_slip).to_degrees();
         // Into the turn = left = −1.
         let (steer, throttle) = match driver {
-            DriftDriver::Naive => (-1.0, 1.0),
+            DriftDriver::Naive | DriftDriver::Flood => (-1.0, 1.0),
+            DriftDriver::FlickLift => (0.0, 0.0),
             DriftDriver::Good | DriftDriver::AbruptLift => {
                 // Hysteresis taps, like a player modulating two keys.
                 if angle > 30.0 {
@@ -325,18 +365,17 @@ pub fn drift_run(
                     (steer_key, thr_key)
                 }
             }
+            DriftDriver::Sloppy if tick < TICKS_PER_S * 8 / 10 => (-1.0, 1.0),
             DriftDriver::Sloppy => {
                 if sloppy_left == 0 {
-                    sloppy_left = (TICKS_PER_S / 10) + (rng.next_f32() * 0.3 * 240.0) as usize;
-                    let r = rng.next_f32();
-                    sloppy_steer = if r < 0.45 {
-                        -1.0
-                    } else if r < 0.75 {
-                        0.0
-                    } else {
-                        1.0
+                    sloppy_left = TICKS_PER_S * 15 / 100
+                        + (rng.next_f32() * 0.35 * TICKS_PER_S as f32) as usize;
+                    (sloppy_steer, sloppy_thr) = match rng.next_f32() {
+                        r if r < 0.4 => (-1.0, 1.0),
+                        r if r < 0.6 => (0.0, 1.0),
+                        r if r < 0.8 => (1.0, 1.0),
+                        _ => (-1.0, 0.0),
                     };
-                    sloppy_thr = if rng.next_f32() < 0.7 { 1.0 } else { 0.0 };
                 }
                 sloppy_left -= 1;
                 (sloppy_steer, sloppy_thr)
@@ -350,9 +389,12 @@ pub fn drift_run(
             },
             assists,
         );
+        on_tick(&rig, steer, throttle);
         let n = slide_state(&rig);
         let a = n.body_slip.to_degrees().abs();
         max_slip = max_slip.max(a);
+        // Left-hander: drifting is body slip < 0; > 0 is the tail past straight.
+        flip = flip.max(n.body_slip.to_degrees());
         if a > 90.0 || n.v_fwd < 0.0 {
             spun = true;
         }
@@ -368,6 +410,7 @@ pub fn drift_run(
         drift_s: drift as f32 * PHYSICS_DT,
         longest_s: longest as f32 * PHYSICS_DT,
         max_slip_deg: max_slip,
+        flip_deg: flip,
         spun,
         hash: rig.state_hash(),
     }

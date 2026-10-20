@@ -11,7 +11,7 @@
 
 use wp_contracts::AssistProfile;
 
-use crate::drift::DriftTuning;
+use crate::drift::{DriftCommand, DriftMode, DriftTuning};
 
 use crate::math::{atan, atan2, lerp, tan};
 
@@ -54,6 +54,9 @@ pub struct SteerInput {
     pub rear_slip_rate: f32,
     /// Drift-assist constants in effect ([`crate::drift::tuning`]).
     pub tuning: DriftTuning,
+    /// This tick's drift-assist command ([`crate::drift::DriftState::update`]); the default
+    /// (mode Off) leaves the steering as in step 1.
+    pub drift: DriftCommand,
 }
 
 /// Fraction of the target slip angle a keyboard (sensitivity 1) asks for at full input: a
@@ -131,12 +134,16 @@ pub fn align_strength(help: f32) -> f32 {
 /// met as it starts instead of once it has built (it was 0.03 → 0.08 rad for the alignment
 /// and 0.06 → 0.16 rad for the lock).
 pub fn slide_onset(inp: &SteerInput) -> (f32, f32) {
-    let t = &inp.tuning;
-    let s = inp.rear_axle_slip;
+    onset_of(inp.rear_axle_slip, inp.rear_slip_rate, &inp.tuning)
+}
+
+/// [`slide_onset`] from rear-axle slip (rad), its filtered rate (rad/s) and the tuning.
+pub fn onset_of(rear_axle_slip: f32, rear_slip_rate: f32, t: &DriftTuning) -> (f32, f32) {
+    let s = rear_axle_slip;
     let ramp = |x: f32, a: f32, b: f32| ((x - a) / (b - a).max(1e-4)).clamp(0.0, 1.0);
     let by_angle = ramp(s.abs(), t.onset_slip_rad, t.onset_full_rad);
     let by_rate = if s.abs() > 0.5 * t.onset_slip_rad {
-        let growth = inp.rear_slip_rate * s.signum();
+        let growth = rear_slip_rate * s.signum();
         ramp(growth, t.onset_rate_rps, 2.0 * t.onset_rate_rps)
     } else {
         0.0
@@ -155,7 +162,8 @@ fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, 
     if assists.steer_speed_sensitivity <= 0.0 || -inp.driver * inp.rear_axle_slip <= 0.0 {
         return lock;
     }
-    let (_, slide) = slide_onset(inp);
+    let (_, onset) = slide_onset(inp);
+    let slide = onset * assist_gate(inp);
     if slide <= 0.0 {
         return lock;
     }
@@ -166,7 +174,13 @@ fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, 
         inp.front_mu,
         inp.front_peak_slip,
     );
-    let needed = (inp.front_axle_angle.abs() + margin).min(max_steer * inp.ratio_scale);
+    // Catch (step 3): a little extra lock past the travel.
+    let extra = if inp.drift.mode == DriftMode::Catch {
+        inp.tuning.catch_extra * inp.front_peak_slip * inp.drift.weight
+    } else {
+        0.0
+    };
+    let needed = (inp.front_axle_angle.abs() + margin + extra).min(max_steer * inp.ratio_scale);
     lock + (needed.max(lock) - lock) * slide
 }
 
@@ -217,6 +231,35 @@ pub fn steer_target(
     let aligning =
         help > 0.0 && inp.speed > 3.0 && inp.driver.abs() <= STEER_DEADZONE && !inp.handbrake_hold;
     let (cs_side, cs_rate) = countersteer_rate(inp, assists, max_steer);
+    let cmd = inp.drift;
+    if !aligning && cmd.mode == DriftMode::Hold && help > 0.0 {
+        // Hold (step 3): the front wheels go to the angle that keeps the captured slide
+        // angle — along the front axle's travel plus a front slip angle into the turn that
+        // shrinks (to a countersteer past the travel) as the slide opens past the held angle
+        // or grows fast. Blended with the plain key target by authority × device weight, and
+        // in from 3° to 7° of slide so the entry still turns in.
+        let (side, _) = slide_onset(inp);
+        let peak = inp.front_peak_slip;
+        let t = &inp.tuning;
+        let alpha = (t.hold_base * peak * inp.driver.abs().min(1.0)
+            - t.hold_gain * peak / 0.1 * (cmd.slide - cmd.hold_angle)
+            - t.hold_damp * cmd.slide_rate)
+            .clamp(-2.0 * peak, 1.5 * peak);
+        let full = max_steer * inp.ratio_scale;
+        let hold = (inp.front_axle_angle - side * alpha).clamp(-full, full);
+        let w = cmd.authority
+            * cmd.weight
+            * cmd.hold_throttle
+            * ((cmd.slide - 0.05) / 0.07).clamp(0.0, 1.0);
+        let angle = (driver_target + (hold - driver_target) * w).clamp(-max_steer, max_steer);
+        let fast = full * help / (CATCH_REF_HELP * t.catch_lock_s.max(1e-3));
+        return SteerTarget {
+            angle,
+            rate_boost: 1.0,
+            cs_rate: cs_rate.max(fast * w),
+            cs_side: angle - current,
+        };
+    }
     if !aligning {
         return SteerTarget {
             angle: driver_target.clamp(-max_steer, max_steer),
@@ -226,7 +269,16 @@ pub fn steer_target(
         };
     }
     let full = max_steer * inp.ratio_scale;
-    let align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
+    let gate = assist_gate(inp);
+    // Straighten (step 3): a little past the travel while the slide angle still grows.
+    let (side, onset) = slide_onset(inp);
+    let extra = side
+        * inp.tuning.straighten_gain
+        * inp.front_peak_slip
+        * (cmd.slide_rate / 0.5).clamp(0.0, 1.0)
+        * onset
+        * cmd.weight;
+    let align = ((aligning_angle(inp) + extra).clamp(-full, full) * align_strength(help)) * gate;
     let angle = (align - inp.pull * lock).clamp(-max_steer, max_steer);
     SteerTarget {
         angle,
@@ -257,7 +309,19 @@ pub fn countersteer_rate(inp: &SteerInput, assists: &AssistProfile, max_steer: f
     let (side, amount) = slide_onset(inp);
     let full = max_steer * inp.ratio_scale;
     let fast = full * help / (CATCH_REF_HELP * inp.tuning.catch_lock_s.max(1e-3));
-    (side, fast * amount)
+    (side, fast * amount * assist_gate(inp))
+}
+
+/// Envelope gate on the steering assists (step 3): the drift command's authority, or 1 with
+/// the intent modes off ([`DriftMode::Off`]). Past the envelope the fast countersteer, the
+/// opened countersteer lock and the self-aligning target all fade out, so a late or wrong
+/// input there is not saved.
+pub fn assist_gate(inp: &SteerInput) -> f32 {
+    if inp.drift.mode == DriftMode::Off {
+        1.0
+    } else {
+        inp.drift.authority.clamp(0.0, 1.0)
+    }
 }
 
 /// Where released keys point the wheels (rad, + = left) before [`align_strength`]: the
@@ -394,6 +458,7 @@ mod tests {
             handbrake_hold: false,
             rear_slip_rate: 0.0,
             tuning: DriftTuning::default(),
+            drift: DriftCommand::default(),
         }
     }
 

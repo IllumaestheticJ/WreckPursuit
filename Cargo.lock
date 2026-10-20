@@ -4412,6 +4412,7 @@ version = "0.1.0"
 dependencies = [
  "rapier3d",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "toml",
  "wp_contracts",

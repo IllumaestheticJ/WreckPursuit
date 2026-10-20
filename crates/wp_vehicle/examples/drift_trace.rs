@@ -1,20 +1,73 @@
-//! Tick trace of a released-keys yaw kick (Drift Lab B debugging).
-//! `cargo run --release -p wp_vehicle --example drift_trace <car> <kmh> <kick> [help] [counter]`
+//! Tick traces for Drift Lab B tuning.
+//! `cargo run --release -p wp_vehicle --example drift_trace -- drift <car> <driver> [help] [seed]`
+//! (driver: good | naive | sloppy | lift) or `-- kick <car> <kmh> <kick> [help] [counter]`.
 
 use wp_contracts::{AssistProfile, VehicleInput};
-use wp_vehicle::drift_lab::slide_state;
+use wp_vehicle::drift_lab::{drift_run_with, slide_state, DriftDriver};
 use wp_vehicle::math::{atan2, V3};
 use wp_vehicle::rig::Rig;
 
+fn line(rig: &Rig, steer: f32, thr: f32, t: usize) {
+    let n = slide_state(rig);
+    let tel = rig.vehicle.telemetry();
+    println!(
+        "t={:5.0}ms beta={:6.1} rear={:6.1} faa={:6.1} steer={:6.1} yaw={:5.2} v={:5.1} in=({steer:+.0},{thr:.0}) thr={:.2} mode={:?} env={:4.1} auth={:.2}",
+        t as f32 / 0.24,
+        n.body_slip.to_degrees(),
+        n.rear_axle_slip.to_degrees(),
+        n.front_axle_angle.to_degrees(),
+        n.steer.to_degrees(),
+        n.yaw_rate,
+        n.v_fwd * 3.6,
+        tel.throttle,
+        tel.drift.mode,
+        tel.drift.envelope.to_degrees(),
+        tel.drift.authority,
+    );
+}
+
 fn main() {
+    // DRIFT_TUNING='{"hold_gain":0.8}' overrides constants (missing fields = defaults).
+    if let Ok(j) = std::env::var("DRIFT_TUNING") {
+        wp_vehicle::drift::set_tuning_override(Some(
+            serde_json::from_str(&j).expect("DRIFT_TUNING json"),
+        ));
+    }
     let a: Vec<String> = std::env::args().skip(1).collect();
-    let id = a.first().cloned().unwrap_or("rampart_50".into());
-    let kmh: f32 = a.get(1).map(|s| s.parse().unwrap()).unwrap_or(100.0);
-    let kick: f32 = a.get(2).map(|s| s.parse().unwrap()).unwrap_or(1.2);
-    let help: f32 = a.get(3).map(|s| s.parse().unwrap()).unwrap_or(0.6);
-    let counter = a.get(4).is_some();
+    let arg = |i: usize, d: &str| a.get(i).cloned().unwrap_or(d.into());
+    let id = arg(1, "rampart_50");
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
     let car = wp_contracts::load_car(p).unwrap();
+    if arg(0, "drift") == "drift" {
+        let driver = match arg(2, "good").as_str() {
+            "naive" => DriftDriver::Naive,
+            "sloppy" => DriftDriver::Sloppy,
+            "lift" => DriftDriver::AbruptLift,
+            "flood" => DriftDriver::Flood,
+            _ => DriftDriver::Good,
+        };
+        let help: f32 = arg(3, "0.6").parse().unwrap();
+        let seed: u64 = arg(4, "1").parse().unwrap();
+        let asst = AssistProfile {
+            countersteer_help: help,
+            tcs: false,
+            esc: false,
+            ..AssistProfile::keyboard_default()
+        };
+        let mut t = 0;
+        let r = drift_run_with(&car, &asst, driver, 40.0, 0.6, seed, |rig, s, th| {
+            if t % 12 == 0 {
+                line(rig, s, th, t);
+            }
+            t += 1;
+        });
+        println!("{r:?}");
+        return;
+    }
+    let kmh: f32 = arg(2, "100").parse().unwrap();
+    let kick: f32 = arg(3, "1.2").parse().unwrap();
+    let help: f32 = arg(4, "0.6").parse().unwrap();
+    let counter = a.get(5).is_some();
     let asst = AssistProfile {
         countersteer_help: help,
         tcs: false,
@@ -51,17 +104,7 @@ fn main() {
             &asst,
         );
         if t % 6 == 0 {
-            let n = slide_state(&rig);
-            println!(
-                "t={:4.0}ms beta={:6.1} rear={:6.1} faa={:6.1} steer={:6.1} yaw={:5.2} v={:5.1}",
-                t as f32 / 0.24,
-                n.body_slip.to_degrees(),
-                n.rear_axle_slip.to_degrees(),
-                n.front_axle_angle.to_degrees(),
-                n.steer.to_degrees(),
-                n.yaw_rate,
-                n.v_fwd * 3.6
-            );
+            line(&rig, steer, 0.3, t);
         }
     }
 }
