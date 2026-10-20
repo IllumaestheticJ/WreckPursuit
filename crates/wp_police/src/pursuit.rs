@@ -825,11 +825,9 @@ impl PoliceSystem {
                         crate::dispatch::IncidentKind::Crash => None,
                     };
                     if let Some((rp, rv)) = follow {
-                        // Following a reported car to see who it is, not chasing it: no siren
-                        // (lights and siren come with a pursuit). With it, the traffic round
-                        // the racer stopped for the siren and held him up (lead
-                        // r13-test-fixes §4: a race stalled at the finish).
-                        self.units[i].cmd.siren = false;
+                        // Following a reported car to see who it is, not chasing it: siren
+                        // quiet (it comes with a pursuit), same driving (`Unit::quiet`).
+                        self.units[i].quiet = true;
                         let u = &self.units[i];
                         // The racer coming straight at it: pull over to the right and stop,
                         // let it pass, then follow (no head-on meeting on a narrow road).
@@ -884,7 +882,7 @@ impl PoliceSystem {
                                 track: t,
                                 speed_mps: 0.0,
                                 cornering_g: p.pursuit_cornering_g,
-                                siren: false,
+                                siren: true,
                                 lane_offset_m: LANE_OFFSET_M,
                             });
                         }
@@ -950,9 +948,8 @@ impl PoliceSystem {
                             lane_offset_m: LANE_OFFSET_M,
                         });
                     }
-                    // On the way to the call (lights and siren; off only while following
-                    // the racer in sight, above).
-                    self.units[i].cmd.siren = true;
+                    // On the way to the call: siren sounding again.
+                    self.units[i].quiet = false;
                     let lim = self.limit_at(self.units[i].body.pos);
                     self.units[i].cmd.speed_mps = lim * p.respond_speed_factor;
                     // Meeting the racer at a junction means waiting short of it, not driving

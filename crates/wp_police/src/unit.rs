@@ -400,6 +400,12 @@ pub struct Unit {
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
+    /// Drives as its command says (lights-and-siren driving if `cmd.siren`) but keeps the
+    /// siren itself off: a responder following the reported racer in sight to see who it is.
+    /// Traffic yields to a siren, and the cars round the racer stopping for it held him up
+    /// (lead r13-test-fixes §4). Cleared by every new assignment.
+    #[serde(default)]
+    pub quiet: bool,
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -456,6 +462,7 @@ impl Unit {
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
             chase_route: None,
+            quiet: false,
         }
     }
 

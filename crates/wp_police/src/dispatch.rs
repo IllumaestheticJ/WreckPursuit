@@ -1092,6 +1092,7 @@ impl PoliceSystem {
             let u = &mut self.units[i];
             u.assignment = a;
             u.assigned = now;
+            u.quiet = false;
             u.cmd = DriveCommand::stop();
             u.track_s = 0.0;
             if matches!(
