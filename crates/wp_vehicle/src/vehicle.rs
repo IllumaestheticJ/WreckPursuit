@@ -12,8 +12,8 @@ use wp_contracts::{
 
 use crate::aero::aero_forces;
 use crate::assists::{
-    btc_rear_authority, esc_reference, filter_pedal, BtcAxle, Esc, Tcs, BTC_MAX_FRAC,
-    TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
+    btc_rear_authority, esc_reference, filter_pedal, throttle_filter_strength, BtcAxle, Esc, Tcs,
+    BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
@@ -24,7 +24,7 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
 use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::slide::{slide_class_with_rear_lock, slide_throttle};
+use crate::slide::slide_class_with_rear_lock;
 use crate::steering::{
     ackermann, assist_mode, body_slip, front_axle_angle, rear_axle_slip, steer_target,
     torque_steer, update_center_angle, AssistMode, DriftTuning, SteerInput, HANDBRAKE_GRACE_S,
@@ -949,7 +949,9 @@ impl Vehicle {
         // Rear-axle slip angle (slide assists): CG-to-rear-axle distance from the car data.
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
-        let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
+        // TCS Off = the throttle the driver presses (owner row 104): no pedal filter, no
+        // slide feathering (removed).
+        let thr_filter = throttle_filter_strength(assists);
         // Drift hold (row 91): key into the turn + throttle in a slide holds the angle.
         let hold = {
             let pre = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
@@ -965,8 +967,7 @@ impl Vehicle {
                 dt,
             )
         };
-        // `scale` is exactly 1.0 unless the slide throttle / hold is active (bit-identical
-        // otherwise).
+        // `scale` is exactly 1.0 unless the drift hold trims (bit-identical otherwise).
         // Keyboard throttle smoothing with TCS off (row 98, [`crate::throttle`]).
         let smoothing = effective_smoothing(assists, self.drift_tuning.throttle_shaping);
         let trim = if smoothing > 0.0 {
@@ -978,10 +979,10 @@ impl Vehicle {
         } else {
             1.0
         };
-        let scale = st.scale * hold.throttle_scale * trim;
+        let scale = hold.throttle_scale * trim;
         let thr_target = if scale < 1.0 { thr_in * scale } else { thr_in };
         let prev_thr = self.throttle_f;
-        self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+        self.throttle_f = filter_pedal(self.throttle_f, thr_target, thr_filter, dt);
         if smoothing > 0.0 {
             let ramp = ramp_time_s(smoothing, self.slide_class, self.gearbox.gear, v_fwd);
             if ramp > 0.0 && self.throttle_f > prev_thr {
@@ -1151,7 +1152,7 @@ impl Vehicle {
                     let fast = if a >= b { l } else { r };
                     let held = self.tcs.brake[fast];
                     // 0 = brakes holding the spin … 1 = brakes saturated / not acting.
-                    let w = if assists.tcs && held > TCS_BRAKE_ACTIVE_NM {
+                    let w = if assists.tcs.is_on() && held > TCS_BRAKE_ACTIVE_NM {
                         let use_frac = held / (BTC_MAX_FRAC * max_brake).max(1.0);
                         ((use_frac - TCS_BRAKE_HANDOFF) / (1.0 - TCS_BRAKE_HANDOFF)).clamp(0.0, 1.0)
                     } else {
@@ -1313,11 +1314,12 @@ impl Vehicle {
         for (b, s) in brake.iter_mut().zip(eff.brake_scale) {
             *b *= s.max(0.0);
         }
-        if assists.abs {
+        {
             let kappas = std::array::from_fn(|i| self.wheels[i].kappa);
             let vxs = std::array::from_fn(|i| self.wheels[i].vx);
             let peaks = std::array::from_fn(|i| self.corners[i].tire.peak_slip_ratio);
-            self.abs.apply(&mut brake, kappas, vxs, peaks, dt);
+            self.abs
+                .apply(assists.abs, &mut brake, kappas, vxs, peaks, dt);
         }
         brake[2] += handbrake * self.def.brakes.handbrake_rear_nm;
         brake[3] += handbrake * self.def.brakes.handbrake_rear_nm;
@@ -1373,9 +1375,13 @@ impl Vehicle {
             }
         }
         let tc_driving = self.throttle_f > 0.05 && self.brake_f < 0.05 && handbrake < 0.1;
-        let tc_brake =
-            self.tcs
-                .update_brakes(assists.tcs, tc_driving, &tc_axles[..n_tc], v_fwd, dt);
+        let tc_brake = self.tcs.update_brakes(
+            assists.tcs.is_on(),
+            tc_driving,
+            &tc_axles[..n_tc],
+            v_fwd,
+            dt,
+        );
         for (i, b) in brake.iter_mut().enumerate() {
             *b += esc_out.brake[i] + tc_brake[i];
             self.wheels[i].brake = *b;

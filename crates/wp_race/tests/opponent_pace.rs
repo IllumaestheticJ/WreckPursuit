@@ -168,10 +168,13 @@ fn assists_override() -> Option<wp_contracts::AssistProfile> {
     let base = wp_contracts::AssistProfile::ai();
     match std::env::var("WP_PACE_ASSISTS").ok()?.as_str() {
         "esc_off" => Some(wp_contracts::AssistProfile { esc: false, ..base }),
-        "tcs_off" => Some(wp_contracts::AssistProfile { tcs: false, ..base }),
+        "tcs_off" => Some(wp_contracts::AssistProfile {
+            tcs: wp_contracts::TcsLevel::Off,
+            ..base
+        }),
         "both_off" => Some(wp_contracts::AssistProfile {
             esc: false,
-            tcs: false,
+            tcs: wp_contracts::TcsLevel::Off,
             ..base
         }),
         _ => None,

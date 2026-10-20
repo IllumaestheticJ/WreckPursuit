@@ -28,7 +28,7 @@ pub const TRIM_MAX: f32 = 0.35;
 /// Smoothing in effect, 0..=1: `tuning`, and 0 with TCS on or on the wheel preset (no
 /// steering speed sensitivity).
 pub fn effective_smoothing(assists: &AssistProfile, tuning: f32) -> f32 {
-    if assists.tcs || assists.steer_speed_sensitivity <= 0.0 {
+    if assists.tcs.is_on() || assists.steer_speed_sensitivity <= 0.0 {
         return 0.0;
     }
     tuning.clamp(0.0, 1.0)
@@ -60,17 +60,21 @@ pub fn traction_trim(s: f32, excess: f32, holding: bool) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wp_contracts::TcsLevel;
 
     #[test]
     fn off_by_default_and_with_tcs() {
         let kb = AssistProfile::keyboard_default();
-        let off = AssistProfile { tcs: false, ..kb };
+        let off = AssistProfile {
+            tcs: TcsLevel::Off,
+            ..kb
+        };
         let d = crate::DriftTuning::default().throttle_shaping;
         assert_eq!(effective_smoothing(&off, d), 0.0, "raw throttle by default");
         assert_eq!(effective_smoothing(&kb, 0.6), 0.0, "TCS on does the job");
         assert_eq!(effective_smoothing(&off, 0.6), 0.6);
         let wheel = AssistProfile {
-            tcs: false,
+            tcs: TcsLevel::Off,
             ..AssistProfile::wheel_default()
         };
         assert_eq!(effective_smoothing(&wheel, 0.6), 0.0);

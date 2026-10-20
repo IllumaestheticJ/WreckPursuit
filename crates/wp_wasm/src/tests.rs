@@ -330,7 +330,7 @@ fn one_click_assist_presets_set_mode_and_assists_together() {
     }
     // Ticking one box afterwards makes it a custom setup.
     let mut a = s.assists(p).unwrap();
-    a.abs = true;
+    a.abs = wp_contracts::AbsLevel::Full;
     s.set_assists(p, a).unwrap();
     assert_eq!(
         AssistPreset::matching(&s.assists(p).unwrap(), s.mode(), InputSource::Keyboard),

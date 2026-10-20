@@ -22,7 +22,7 @@ fn main() {
         .to_vec();
     }
     let a = AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     };

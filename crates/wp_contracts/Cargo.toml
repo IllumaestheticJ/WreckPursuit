@@ -15,6 +15,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
+ron.workspace = true
 
 [[bin]]
 name = "gen-schemas"
