@@ -92,8 +92,10 @@ pub mod slot {
     pub const BODY_RATTLE: u32 = 0x0000_01A1;
     /// Tire squeal loop (paved surfaces).
     pub const SQUEAL: u32 = 0x0000_0200;
-    /// Loose-surface scrub loop (gravel, dirt, grass).
+    /// Loose-surface scrub loop (gravel, dirt).
     pub const SCRUB: u32 = 0x0000_0201;
+    /// Grass scrub loop (a tire sliding on turf).
+    pub const SCRUB_GRASS: u32 = 0x0000_0202;
     /// Surface rolling noise for `SurfaceType` index `i`: `SURFACE + i`.
     pub const SURFACE: u32 = 0x0000_0210;
     /// Siren loop for pattern index `i` (`SirenPattern::index`): `SIREN + i`.

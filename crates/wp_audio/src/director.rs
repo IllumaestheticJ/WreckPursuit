@@ -106,6 +106,7 @@ struct CarAudio {
 struct WorldCues {
     squeal: CueRef,
     scrub: CueRef,
+    scrub_grass: CueRef,
     surfaces: [CueRef; 8],
     thump: CueRef,
     land: CueRef,
@@ -136,6 +137,7 @@ impl WorldCues {
         Self {
             squeal: t.get(pack, cues::SQUEAL, true),
             scrub: t.get(pack, cues::SCRUB, true),
+            scrub_grass: t.get(pack, cues::SCRUB_GRASS, true),
             surfaces: cues::SURFACES.map(|c| t.get(pack, c, true)),
             thump: t.get(pack, cues::THUMP, false),
             land: t.get(pack, cues::LAND, false),
@@ -564,18 +566,23 @@ impl AudioDirector {
             d.load = k;
             out.push(d);
         }
-        if let Some((gain, k)) = to.scrub {
-            let mut d = Desire::new(
-                VoiceId::new(e, slot::SCRUB),
-                Bus::World,
-                car.world.scrub,
-                up(Priority::Low),
-                pos,
-                vel,
-            );
-            d.gain = gain;
-            d.load = k;
-            out.push(d);
+        for (slot_code, cue, scrub) in [
+            (slot::SCRUB, car.world.scrub, to.scrub),
+            (slot::SCRUB_GRASS, car.world.scrub_grass, to.grass_scrub),
+        ] {
+            if let Some((gain, k)) = scrub {
+                let mut d = Desire::new(
+                    VoiceId::new(e, slot_code),
+                    Bus::World,
+                    cue,
+                    up(Priority::Low),
+                    pos,
+                    vel,
+                );
+                d.gain = gain;
+                d.load = k;
+                out.push(d);
+            }
         }
         if let Some((idx, gain, frac)) = to.surface {
             let cue = car.world.surfaces[idx];

@@ -57,8 +57,17 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   rng. Engine sound stops when `Component::Engine` health is 0; radiator damage adds a hiss.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)`; squeal above
   `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of the others),
-  quieter on wet asphalt; gravel/dirt/grass scrub instead. Rolling noise per dominant
-  `SurfaceType` (one loop per surface so changes crossfade), plus `FfbOutput::road_rumble`.
+  quieter on wet asphalt; loose surfaces scrub instead: gravel/dirt on `tire/scrub_loose`
+  (stone crackle, plus a little rattle while rolling straight), grass on its own soft
+  `tire/scrub_grass` loop only while a tire actually slides. Scrub levels follow the slip with
+  a 30 ms attack / 150 ms release (`SCRUB_ATTACK_S` / `SCRUB_RELEASE_S`), so slip flickering
+  around the limit holds one loop instead of stopping and restarting it. Rolling noise per
+  dominant `SurfaceType` (one loop per surface so changes crossfade; a tie keeps the loop
+  already playing, so a car straddling a road edge does not swap loops as a wheel's contact
+  flickers), plus `FfbOutput::road_rumble`. `surface/grass` is a low rustle/rumble (centroid
+  ~0.3 kHz at 10 m/s) whose low-pass tracks speed (`track`). Grass used to share the gravel
+  scrub (crackle, 0.4-3 kHz) at full gain whenever the wheels spun, ~9 dB over the rolling
+  loop and centred at 2.5 kHz.
   Suspension thump on compression rate > `thump_rate_mps`; landing after `land_airtime_s`.
 - **Collisions** (`collision.rs`): the material at a contact is recovered from the lattice
   (nearest node, dominant beam material; glass-region nodes with glass beams are glass). Layers
@@ -149,7 +158,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
+| World | `tire/squeal`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `tire/scrub_grass`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
@@ -157,7 +166,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 `apps/testbed-web/src/audio/synth.ts`): `engine` (h1..h4 harmonic amps at orders ½,1,2,3,
 `noise`, `drive`, `bright`, `off`, `chop_hz`; car adds `cylinders`, `uneven`, `balance`,
 `root_rpm`), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
-`ripple_hz`), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
+`ripple_hz`, `track`: low-pass follows `lowpass_hz × pitch^track`), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).

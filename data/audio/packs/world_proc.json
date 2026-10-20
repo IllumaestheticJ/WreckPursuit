@@ -30,6 +30,20 @@
       "gain": 0.8,
       "looped": true
     },
+    "tire/scrub_grass": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 1100.0,
+            "highpass_hz": 120.0,
+            "rumble": 0.6
+          }
+        }
+      },
+      "gain": 0.45,
+      "looped": true
+    },
     "suspension/thump": {
       "source": {
         "Synth": {
@@ -334,13 +348,14 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 1600.0,
-            "highpass_hz": 200.0,
-            "rumble": 0.3
+            "lowpass_hz": 650.0,
+            "highpass_hz": 45.0,
+            "rumble": 1.5,
+            "track": 1.0
           }
         }
       },
-      "gain": 0.8,
+      "gain": 1.0,
       "looped": true
     },
     "surface/dirt": {

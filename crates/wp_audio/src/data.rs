@@ -38,8 +38,10 @@ pub mod cues {
 
     /// Tire squeal loop on paved surfaces.
     pub const SQUEAL: &str = "tire/squeal";
-    /// Loose-surface scrub loop.
+    /// Loose-surface (gravel, dirt) scrub loop.
     pub const SCRUB: &str = "tire/scrub_loose";
+    /// Grass scrub loop: soft, low turf tearing (no stone crackle).
+    pub const SCRUB_GRASS: &str = "tire/scrub_grass";
     /// Surface rolling loops, indexed like `wp_contracts::SurfaceType` declaration order.
     pub const SURFACES: [&str; 8] = [
         "surface/asphalt",
@@ -93,6 +95,7 @@ pub mod cues {
         let mut v = vec![
             SQUEAL,
             SCRUB,
+            SCRUB_GRASS,
             THUMP,
             LAND,
             THUD,

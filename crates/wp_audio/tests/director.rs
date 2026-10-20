@@ -678,3 +678,104 @@ fn traffic_engines_are_quieter_and_low_priority() {
     assert_eq!(pp, Priority::Normal);
     assert_eq!(tp, Priority::Low);
 }
+
+/// Grass: plain rolling plays only the `surface/grass` loop; a slide whose slip flickers
+/// around the limit (2 frames sliding, 3 gripping) starts the soft grass scrub once and holds
+/// it (no stop/restart churn), never the gravel scrub; it is released once after the slide.
+#[test]
+fn grass_drive_scrubs_softly_once_without_churn() {
+    use wp_contracts::{SurfaceType, WheelState};
+    let (mut dir, mut s) = one_car_dir();
+    let wheel = |slip_angle| WheelState {
+        slip_angle,
+        fz_n: 4000.0,
+        surface: SurfaceType::Grass,
+        contact: true,
+        omega: 45.0,
+        ..Default::default()
+    };
+    let grass_scrub = VoiceId::new(1, slot::SCRUB_GRASS);
+    let mut all = Vec::new();
+    let mut tick = 0;
+    let mut run = |s: &mut VehicleState, frames: u64, slip: &dyn Fn(u64) -> f32| {
+        let mut cmds = Vec::new();
+        for f in 0..frames {
+            s.wheel_states = [wheel(slip(f)); 4];
+            cmds.extend(step(&mut dir, s, tick, &[]));
+            tick += 4;
+        }
+        cmds
+    };
+    let rolling = run(&mut s, 60, &|_| 0.03);
+    assert_eq!(plays(&rolling, "surface/grass"), 1);
+    assert_eq!(
+        plays(&rolling, "tire/scrub_grass"),
+        0,
+        "rolling is not sliding"
+    );
+    assert_eq!(plays(&rolling, "tire/scrub_loose"), 0);
+    let sliding = run(&mut s, 180, &|f| if f % 5 < 2 { 0.3 } else { 0.05 });
+    assert_eq!(plays(&sliding, "tire/scrub_grass"), 1);
+    assert_eq!(
+        plays(&sliding, "tire/scrub_loose"),
+        0,
+        "no gravel crackle on grass"
+    );
+    let stops = |c: &[AudioCommand]| {
+        c.iter()
+            .filter(|c| matches!(c, AudioCommand::Stop { voice, .. } if *voice == grass_scrub))
+            .count()
+    };
+    assert_eq!(stops(&sliding), 0, "held through the flicker");
+    let grip = run(&mut s, 60, &|_| 0.03);
+    assert_eq!(stops(&grip), 1);
+    assert_eq!(plays(&grip, "tire/scrub_grass"), 0);
+    all.extend(rolling);
+    all.extend(sliding);
+    all.extend(grip);
+    // Only the rolling loop and the grass scrub ever play for the tires.
+    for c in &all {
+        if let AudioCommand::Play { cue, .. } = c {
+            assert!(
+                !cue.starts_with("surface/") || cue == "surface/grass",
+                "rolling loop swapped to {cue}"
+            );
+        }
+    }
+}
+
+/// The grass cues of every world pack stay soft: no stone crackle, darker than the gravel
+/// scrub, and the rolling loop darker than asphalt.
+#[test]
+fn grass_cues_are_soft() {
+    use wp_audio::data::{cues, CueSource, PackKind};
+    let lib = lib();
+    let param = |pack: &SamplePack, cue: &str, k: &str| match &pack.cues[cue].source {
+        CueSource::Synth { params, .. } => params.get(k).copied(),
+        CueSource::Samples { .. } => None,
+    };
+    let mut checked = 0;
+    for p in lib.packs.values().filter(|p| p.kind == PackKind::World) {
+        if !matches!(p.cues[cues::SCRUB_GRASS].source, CueSource::Synth { .. }) {
+            continue; // recorded packs are judged by ear
+        }
+        let grass = cues::SURFACES[4];
+        for cue in [cues::SCRUB_GRASS, grass] {
+            assert!(
+                param(p, cue, "crackle").unwrap_or(0.0) == 0.0,
+                "{}: {cue} crackles",
+                p.id
+            );
+        }
+        let lp = |cue| param(p, cue, "lowpass_hz").unwrap_or(2000.0);
+        assert!(lp(cues::SCRUB_GRASS) < 0.5 * lp(cues::SCRUB), "{}", p.id);
+        assert!(lp(grass) < lp(cues::SURFACES[0]), "{}", p.id);
+        assert!(
+            p.cues[cues::SCRUB_GRASS].gain < p.cues[cues::SCRUB].gain,
+            "{}",
+            p.id
+        );
+        checked += 1;
+    }
+    assert!(checked > 0);
+}
