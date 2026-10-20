@@ -125,6 +125,8 @@ pub struct Desire {
     pub load: f32,
     /// Periodic phase 0..1.
     pub phase: f32,
+    /// Timbre blend 0..=1 (see [`VoiceParams::timbre`]).
+    pub timbre: f32,
     /// World position, m.
     pub pos: [f32; 3],
     /// World velocity, m/s.
@@ -153,6 +155,7 @@ impl Desire {
             freq_hz: 0.0,
             load: 0.0,
             phase: 0.0,
+            timbre: 0.0,
             pos,
             vel,
             synth: None,
@@ -228,6 +231,7 @@ impl VoiceMixer {
                 freq_hz: d.freq_hz * sp.doppler,
                 load: d.load,
                 phase: d.phase,
+                timbre: d.timbre,
                 lowpass_hz: sp.lowpass_hz,
                 doppler: sp.doppler,
                 pos: d.pos,

@@ -135,6 +135,10 @@ pub struct VoiceParams {
     pub load: f32,
     /// Cycle phase 0..1 for periodic synths (sirens); 0 otherwise.
     pub phase: f32,
+    /// Cue-specific timbre blend 0..=1 (tire squeal: 0 = cornering slide, 1 = wheelspin /
+    /// lock-up); 0 otherwise.
+    #[serde(default)]
+    pub timbre: f32,
     /// Air-absorption low-pass cutoff from distance, Hz.
     pub lowpass_hz: f32,
     /// Doppler ratio that was folded into `pitch` and `freq_hz` (debug display).

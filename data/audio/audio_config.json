@@ -49,6 +49,8 @@
     "squeal_range": 1.4,
     "squeal_gain": 0.55,
     "wet_squeal_scale": 0.3,
+    "squeal_attack_s": 0.04,
+    "squeal_release_s": 0.15,
     "scrub_gain": 0.5,
     "rumble_speed_ref_mps": 40.0,
     "rumble_gain": 0.35,

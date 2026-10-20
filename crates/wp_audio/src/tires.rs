@@ -31,12 +31,51 @@ pub fn is_loose(s: SurfaceType) -> bool {
     )
 }
 
+/// Slip at which one tire reaches peak grip, used to normalise slip for the squeal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TirePeak {
+    /// Peak slip ratio κ.
+    pub slip_ratio: f32,
+    /// Peak slip angle α, rad.
+    pub slip_angle_rad: f32,
+}
+
+impl TirePeak {
+    /// The mix's fallback peaks (car tire unknown).
+    pub fn from_mix(mix: &TireMix) -> Self {
+        Self {
+            slip_ratio: mix.slip_ratio_peak,
+            slip_angle_rad: mix.slip_angle_peak_rad,
+        }
+    }
+}
+
+/// Normalised slip of one tire: `(κ/κ_peak, α/α_peak)`.
+fn normalised_slip(peak: &TirePeak, slip_ratio: f32, slip_angle: f32) -> (f32, f32) {
+    (
+        slip_ratio / peak.slip_ratio.max(1e-3),
+        slip_angle / peak.slip_angle_rad.max(1e-3),
+    )
+}
+
 /// Combined slip normalised so 1.0 = peak grip: `sqrt((κ/κ_peak)² + (α/α_peak)²)`.
-pub fn combined_slip(mix: &TireMix, slip_ratio: f32, slip_angle: f32) -> f32 {
-    let k = slip_ratio / mix.slip_ratio_peak.max(1e-3);
-    let a = slip_angle / mix.slip_angle_peak_rad.max(1e-3);
+pub fn combined_slip(peak: &TirePeak, slip_ratio: f32, slip_angle: f32) -> f32 {
+    let (k, a) = normalised_slip(peak, slip_ratio, slip_angle);
     (k * k + a * a).sqrt()
 }
+
+/// Move `cur` toward `target` with time constant `tau` (rise and fall differ). `dt <= 0`
+/// (no time base, e.g. a single probe frame) takes the target directly.
+fn follow(cur: f32, target: f32, attack_s: f32, release_s: f32, dt: f32) -> f32 {
+    if dt <= 0.0 {
+        return target;
+    }
+    let tau = if target > cur { attack_s } else { release_s };
+    cur + (target - cur) * clamp01(dt / tau.max(1e-3))
+}
+
+/// Squeal levels below this are silence (the release tail is cut here).
+const SQUEAL_FLOOR: f32 = 0.01;
 
 /// Per-vehicle tire audio state.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -44,14 +83,29 @@ pub struct TireAudioState {
     prev_compression: [f32; 4],
     airtime_s: [f32; 4],
     last_thump_tick: [Option<u64>; 4],
+    squeal_level: f32,
+    squeal_timbre: f32,
     initialized: bool,
+}
+
+/// Tire squeal for one frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Squeal {
+    /// Gain (mix gain × level).
+    pub gain: f32,
+    /// Pitch multiplier on the cue's base frequency.
+    pub pitch: f32,
+    /// Slide intensity 0..=1 (how far past the limit).
+    pub intensity: f32,
+    /// 0 = cornering slide (lateral slip), 1 = wheelspin / lock-up (longitudinal slip).
+    pub timbre: f32,
 }
 
 /// What the tires want this frame (gains before spatialisation).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TireOutput {
-    /// Squeal `(gain, pitch, intensity)`.
-    pub squeal: Option<(f32, f32, f32)>,
+    /// Squeal on hard surfaces.
+    pub squeal: Option<Squeal>,
     /// Loose-surface scrub `(gain, intensity)`.
     pub scrub: Option<(f32, f32)>,
     /// Rolling noise `(surface index, gain, speed fraction)`.
@@ -60,11 +114,14 @@ pub struct TireOutput {
     pub thumps: Vec<(usize, f32, bool)>,
 }
 
-/// Advance tire audio by `dt` (s) at `tick`. `static_load_n` = per-wheel static load of the car
-/// (`m g / 4`), `road_rumble` = `FfbOutput::road_rumble` (0 if unknown).
+/// Advance tire audio by `dt` (s) at `tick`. `peaks` = per-wheel peak slip of the car's tires,
+/// `static_load_n` = per-wheel static load of the car (`m g / 4`), `road_rumble` =
+/// `FfbOutput::road_rumble` (0 if unknown).
+#[allow(clippy::too_many_arguments)]
 pub fn update_tires(
     st: &mut TireAudioState,
     mix: &TireMix,
+    peaks: &[TirePeak; 4],
     s: &VehicleState,
     static_load_n: f32,
     road_rumble: f32,
@@ -79,17 +136,21 @@ pub fn update_tires(
 
     let mut squeal_max = 0.0f32;
     let mut squeal_sum = 0.0f32;
+    let mut long_weighted = 0.0f32;
+    let mut slide_weighted = 0.0f32;
     let mut scrub_max = 0.0f32;
     let mut surf_count = [0u8; 8];
-    for w in s.wheel_states.iter() {
+    for (i, w) in s.wheel_states.iter().enumerate() {
         if !w.contact || w.detached {
             continue;
         }
         surf_count[surface_index(w.surface)] += 1;
-        let slip = combined_slip(mix, w.slip_ratio, w.slip_angle);
+        let (k, a) = normalised_slip(&peaks[i], w.slip_ratio, w.slip_angle);
+        let slip = (k * k + a * a).sqrt();
         let excess = clamp01((slip - mix.squeal_threshold) / mix.squeal_range.max(1e-3));
         let load = (w.fz_n / static_load_n.max(1.0)).clamp(0.0, 2.0).sqrt();
-        // Slip at a near-standstill is numerically noisy and silent in reality.
+        // Slip at a near-standstill is numerically noisy and silent in reality; a spinning
+        // wheel on a stopped car (burnout) is not.
         let moving = clamp01((speed + w.omega.abs() * 0.3) / 3.0);
         let level = excess * load * moving;
         if is_loose(w.surface) {
@@ -103,16 +164,48 @@ pub fn update_tires(
             let l = level * wet;
             squeal_max = squeal_max.max(l);
             squeal_sum += l;
+            // Share of the slip that is longitudinal (spin / lock) for the timbre.
+            let long_share = if slip > 1e-6 {
+                k * k / (slip * slip)
+            } else {
+                0.0
+            };
+            long_weighted += l * long_share;
+            // Contact-patch sliding speed, m/s: |ωr − vx| ≈ |κ|·max(v, 3) plus v·sin α.
+            let slide_long = w.slip_ratio.abs() * speed.max(3.0);
+            let slide_lat = speed * w.slip_angle.abs().min(1.5);
+            slide_weighted += l * (slide_long * slide_long + slide_lat * slide_lat).sqrt();
         }
     }
     // Loudest wheel plus a share of the others: four sliding tires are louder than one.
-    let squeal = clamp01(squeal_max + 0.25 * (squeal_sum - squeal_max));
-    if squeal > 0.0 {
-        out.squeal = Some((
-            mix.squeal_gain * squeal,
-            0.9 + 0.25 * squeal + 0.1 * speed_frac,
-            squeal,
-        ));
+    let target = clamp01(squeal_max + 0.25 * (squeal_sum - squeal_max));
+    let (timbre_target, slide_mps) = if squeal_sum > 1e-6 {
+        (
+            clamp01(long_weighted / squeal_sum),
+            slide_weighted / squeal_sum,
+        )
+    } else {
+        (st.squeal_timbre, 0.0)
+    };
+    st.squeal_level = follow(
+        st.squeal_level,
+        target,
+        mix.squeal_attack_s,
+        mix.squeal_release_s,
+        dt,
+    );
+    st.squeal_timbre = follow(st.squeal_timbre, timbre_target, 0.08, 0.08, dt);
+    if st.squeal_level > SQUEAL_FLOOR {
+        let lvl = st.squeal_level;
+        // Pitch rises a little with how hard the tread is pushed past the limit and with the
+        // sliding speed; spinning / locked tires sit lower and rougher than a cornering howl.
+        let slide = clamp01(slide_mps / 15.0);
+        out.squeal = Some(Squeal {
+            gain: mix.squeal_gain * lvl,
+            pitch: (0.92 + 0.12 * lvl + 0.12 * slide) * (1.0 - 0.18 * st.squeal_timbre),
+            intensity: lvl,
+            timbre: st.squeal_timbre,
+        });
     }
     if scrub_max > 0.0 {
         out.scrub = Some((mix.scrub_gain * scrub_max, scrub_max));
@@ -189,6 +282,8 @@ mod tests {
             squeal_range: 1.2,
             squeal_gain: 0.8,
             wet_squeal_scale: 0.35,
+            squeal_attack_s: 0.04,
+            squeal_release_s: 0.15,
             scrub_gain: 0.7,
             rumble_speed_ref_mps: 35.0,
             rumble_gain: 0.5,
@@ -198,6 +293,10 @@ mod tests {
             land_airtime_s: 0.2,
             thump_debounce_s: 0.12,
         }
+    }
+
+    fn peaks() -> [TirePeak; 4] {
+        [TirePeak::from_mix(&mix()); 4]
     }
 
     fn state(slip_angle: f32, fz: f32, surface: SurfaceType) -> VehicleState {
@@ -223,6 +322,7 @@ mod tests {
         let quiet = update_tires(
             &mut st,
             &m,
+            &peaks(),
             &state(0.05, 3500.0, SurfaceType::Asphalt),
             3500.0,
             0.0,
@@ -233,6 +333,7 @@ mod tests {
         let a = update_tires(
             &mut st,
             &m,
+            &peaks(),
             &state(0.13, 3500.0, SurfaceType::Asphalt),
             3500.0,
             0.0,
@@ -241,10 +342,11 @@ mod tests {
         )
         .squeal
         .unwrap()
-        .0;
+        .gain;
         let b = update_tires(
             &mut st,
             &m,
+            &peaks(),
             &state(0.16, 3500.0, SurfaceType::Asphalt),
             3500.0,
             0.0,
@@ -253,10 +355,11 @@ mod tests {
         )
         .squeal
         .unwrap()
-        .0;
+        .gain;
         let c = update_tires(
             &mut st,
             &m,
+            &peaks(),
             &state(0.13, 7000.0, SurfaceType::Asphalt),
             3500.0,
             0.0,
@@ -265,7 +368,7 @@ mod tests {
         )
         .squeal
         .unwrap()
-        .0;
+        .gain;
         assert!(b > a, "more slip louder");
         assert!(c > a, "more load louder");
     }
@@ -277,6 +380,7 @@ mod tests {
         let o = update_tires(
             &mut st,
             &m,
+            &peaks(),
             &state(0.3, 3500.0, SurfaceType::Gravel),
             3500.0,
             0.0,
@@ -294,9 +398,9 @@ mod tests {
         let mut st = TireAudioState::default();
         let mut s = state(0.0, 3500.0, SurfaceType::Asphalt);
         let dt = 1.0 / 60.0;
-        update_tires(&mut st, &m, &s, 3500.0, 0.0, 0, dt);
+        update_tires(&mut st, &m, &peaks(), &s, 3500.0, 0.0, 0, dt);
         s.wheel_states[0].compression_m += 0.05; // 3 m/s
-        let o = update_tires(&mut st, &m, &s, 3500.0, 0.0, 4, dt);
+        let o = update_tires(&mut st, &m, &peaks(), &s, 3500.0, 0.0, 4, dt);
         assert_eq!(o.thumps.len(), 1);
         assert!(!o.thumps[0].2);
         // Airborne for 0.5 s, then touchdown.
@@ -304,12 +408,102 @@ mod tests {
             w.contact = false;
         }
         for k in 0..30 {
-            update_tires(&mut st, &m, &s, 3500.0, 0.0, 100 + k * 4, dt);
+            update_tires(&mut st, &m, &peaks(), &s, 3500.0, 0.0, 100 + k * 4, dt);
         }
         for w in &mut s.wheel_states {
             w.contact = true;
         }
-        let o = update_tires(&mut st, &m, &s, 3500.0, 0.0, 300, dt);
+        let o = update_tires(&mut st, &m, &peaks(), &s, 3500.0, 0.0, 300, dt);
         assert_eq!(o.thumps.iter().filter(|t| t.2).count(), 4);
+    }
+
+    #[test]
+    fn squeal_follows_each_cars_own_tire_peak() {
+        let m = mix();
+        // 0.13 rad squeals on a 0.12 rad-peak tire but is still below the limit of an
+        // all-terrain tire that peaks at 0.2 rad.
+        let soft = [TirePeak {
+            slip_ratio: 0.13,
+            slip_angle_rad: 0.2,
+        }; 4];
+        let s = state(0.13, 3500.0, SurfaceType::Asphalt);
+        let mut st = TireAudioState::default();
+        assert!(update_tires(&mut st, &m, &peaks(), &s, 3500.0, 0.0, 0, 0.0)
+            .squeal
+            .is_some());
+        let mut st = TireAudioState::default();
+        assert!(update_tires(&mut st, &m, &soft, &s, 3500.0, 0.0, 0, 0.0)
+            .squeal
+            .is_none());
+    }
+
+    #[test]
+    fn squeal_fades_in_and_out_instead_of_switching() {
+        let m = mix();
+        let dt = 1.0 / 60.0;
+        let mut st = TireAudioState::default();
+        let sliding = state(0.25, 3500.0, SurfaceType::Asphalt);
+        let first = update_tires(&mut st, &m, &peaks(), &sliding, 3500.0, 0.0, 0, dt)
+            .squeal
+            .unwrap()
+            .intensity;
+        let mut last = first;
+        for k in 1..30 {
+            last = update_tires(&mut st, &m, &peaks(), &sliding, 3500.0, 0.0, k, dt)
+                .squeal
+                .unwrap()
+                .intensity;
+        }
+        assert!(first < 0.6 * last, "onset ramps: {first} -> {last}");
+        // Grip regained: the squeal dies away over a few frames, then stops.
+        let gripping = state(0.02, 3500.0, SurfaceType::Asphalt);
+        let tail = update_tires(&mut st, &m, &peaks(), &gripping, 3500.0, 0.0, 30, dt).squeal;
+        assert!(tail.is_some_and(|q| q.intensity < last));
+        let mut gone = false;
+        for k in 31..120 {
+            if update_tires(&mut st, &m, &peaks(), &gripping, 3500.0, 0.0, k, dt)
+                .squeal
+                .is_none()
+            {
+                gone = true;
+                break;
+            }
+        }
+        assert!(gone, "release tail ends");
+    }
+
+    #[test]
+    fn wheelspin_squeals_with_spin_timbre_and_cornering_does_not() {
+        let m = mix();
+        let mut st = TireAudioState::default();
+        let corner = update_tires(
+            &mut st,
+            &m,
+            &peaks(),
+            &state(0.25, 3500.0, SurfaceType::Asphalt),
+            3500.0,
+            0.0,
+            0,
+            0.0,
+        )
+        .squeal
+        .unwrap();
+        assert!(corner.timbre < 0.1, "cornering timbre {}", corner.timbre);
+        // Burnout: car stopped, driven wheels spinning.
+        let mut s = state(0.0, 3500.0, SurfaceType::Asphalt);
+        s.lin_vel = [0.0; 3];
+        for w in &mut s.wheel_states[2..] {
+            w.slip_ratio = 4.0;
+            w.omega = 60.0;
+        }
+        for w in &mut s.wheel_states[..2] {
+            w.omega = 0.0;
+        }
+        let mut st = TireAudioState::default();
+        let spin = update_tires(&mut st, &m, &peaks(), &s, 3500.0, 0.0, 0, 0.0)
+            .squeal
+            .unwrap();
+        assert!(spin.timbre > 0.9, "spin timbre {}", spin.timbre);
+        assert!(spin.pitch < corner.pitch, "spin sits lower");
     }
 }

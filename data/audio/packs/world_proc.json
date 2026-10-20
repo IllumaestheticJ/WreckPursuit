@@ -8,8 +8,9 @@
         "Synth": {
           "synth": "squeal",
           "params": {
-            "freq_hz": 1050.0,
-            "wobble_hz": 7.0
+            "freq_hz": 900.0,
+            "jitter": 0.025,
+            "chatter_hz": 22.0
           }
         }
       },
@@ -277,13 +278,15 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 900.0,
+            "lowpass_hz": 2200.0,
             "highpass_hz": 60.0,
-            "rumble": 0.2
+            "bandpass_hz": 850.0,
+            "rumble": 0.25,
+            "track": 0.8
           }
         }
       },
-      "gain": 0.8,
+      "gain": 0.55,
       "looped": true
     },
     "surface/wet_asphalt": {
@@ -291,9 +294,11 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 4500.0,
-            "highpass_hz": 800.0,
-            "rumble": 0.1
+            "lowpass_hz": 5000.0,
+            "highpass_hz": 700.0,
+            "bandpass_hz": 2400.0,
+            "rumble": 0.15,
+            "track": 0.6
           }
         }
       },
@@ -305,13 +310,15 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 1300.0,
+            "lowpass_hz": 2600.0,
             "highpass_hz": 80.0,
-            "rumble": 0.35
+            "bandpass_hz": 1000.0,
+            "rumble": 0.35,
+            "track": 0.8
           }
         }
       },
-      "gain": 0.8,
+      "gain": 0.55,
       "looped": true
     },
     "surface/gravel": {

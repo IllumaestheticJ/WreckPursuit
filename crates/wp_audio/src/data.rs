@@ -189,9 +189,11 @@ pub struct EngineMix {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TireMix {
-    /// Slip ratio treated as "peak" (1.0 in combined slip).
+    /// Slip ratio treated as "peak" (1.0 in combined slip) when the car's tire is unknown;
+    /// registered cars use their own `TireDef::peak_slip_ratio`.
     pub slip_ratio_peak: f32,
-    /// Slip angle treated as "peak", rad.
+    /// Slip angle treated as "peak", rad, when the car's tire is unknown (else
+    /// `TireDef::peak_slip_angle_rad`).
     pub slip_angle_peak_rad: f32,
     /// Combined slip (1 = peak) where squeal starts.
     pub squeal_threshold: f32,
@@ -201,6 +203,11 @@ pub struct TireMix {
     pub squeal_gain: f32,
     /// Squeal multiplier on wet asphalt.
     pub wet_squeal_scale: f32,
+    /// Squeal level rise time constant, s (onset is quick but never a click).
+    pub squeal_attack_s: f32,
+    /// Squeal level fall time constant, s (a slide dies away instead of cutting off, and a
+    /// tire hovering at the threshold does not chatter on and off).
+    pub squeal_release_s: f32,
     /// Loose-surface scrub gain.
     pub scrub_gain: f32,
     /// Speed at which rolling noise reaches full level, m/s.

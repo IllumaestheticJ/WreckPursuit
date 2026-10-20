@@ -144,6 +144,27 @@ https://code.claude.com/docs/en/cloud-environments#network-access.
 5. Car defs point at the `*_rec` packs by default; audio panel gets a "Procedural (fallback)" toggle
    that swaps back to the existing `*_proc` packs.
 
+## Tire sounds pass (fix + more realistic squeal)
+- **Fixes.** Squeal used the config's fixed slip peaks for every car, so loose-peaked tires
+  (all-terrain, vintage bias, ≈ 0.2 rad) squealed in ordinary cornering and stiff ones (drag
+  radial, ≈ 0.08 rad) only well past the limit: each wheel now uses its own `TireDef`
+  `peak_slip_ratio` / `peak_slip_angle_rad` (config peaks = fallback). The squeal switched on
+  and off at the threshold (chatter on a tire hovering at the limit, hard cut on grip regain):
+  it now follows `squeal_attack_s` / `squeal_release_s` (new `TireMix` fields, config 0.04 /
+  0.15 s). Testbed `VoicePool.set` overwrote its "last applied" params every frame, so a value
+  drifting less than 0.4 %/frame (any smooth fade) never reached the synth or voice gain; it now
+  remembers what was actually applied.
+- **Wheelspin / lock-up (playtest #27).** New `VoiceParams::timbre` (serde-default, 0 for every
+  other cue) = longitudinal share of the slip; pitch rises with intensity and contact-patch
+  sliding speed, and sits lower when spinning.
+- **Synth.** `squeal` is now noise through a bank of narrow resonators at inharmonic tread-mode
+  ratios + a sawtooth core, both with random (not sinusoidal) pitch jitter, stick-slip amplitude
+  flutter, a hiss that grows with intensity, and a lower chattering grit layer for spin. Hard
+  surface rolling loops (`asphalt`, `concrete`, `wet_asphalt`) got a tread-noise hump whose
+  filters track speed (`noise` param `track`; resampled white noise alone does not change
+  colour, so the old loops only got louder with speed). Loudness matched to the old synth
+  (offline render RMS).
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|

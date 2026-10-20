@@ -55,9 +55,14 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   throttle. Turbo boost spools with throttle × rpm (whistle loop, one blow-off per lift above
   `blowoff_min_boost`); supercharger whine follows rpm; overrun pops are Poisson via the seeded
   rng. Engine sound stops when `Component::Engine` health is 0; radiator damage adds a hiss.
-- **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)`; squeal above
-  `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of the others),
-  quieter on wet asphalt; gravel/dirt/grass scrub instead. Rolling noise per dominant
+- **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)` with each wheel's
+  own `TireDef` peaks (an all-terrain tire squeals later than a semi-slick; the config peaks
+  are only the fallback); squeal above `squeal_threshold`, scaled by `sqrt(Fz / static Fz)`
+  (loudest wheel + 25 % of the others), quieter on wet asphalt, smoothed with
+  `squeal_attack_s` / `squeal_release_s` so it swells and dies away instead of switching.
+  `VoiceParams::timbre` carries the longitudinal share of the slip (0 = cornering howl,
+  1 = wheelspin / lock-up: lower, rougher, chattering); pitch rises with intensity and the
+  contact-patch sliding speed. Gravel/dirt/grass scrub instead. Rolling noise per dominant
   `SurfaceType` (one loop per surface so changes crossfade), plus `FfbOutput::road_rumble`.
   Suspension thump on compression rate > `thump_rate_mps`; landing after `land_airtime_s`.
 - **Collisions** (`collision.rs`): the material at a contact is recovered from the lattice
@@ -154,7 +159,9 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 `apps/testbed-web/src/audio/synth.ts`): `engine` (h1..h4 harmonic amps at orders ½,1,2,3,
 `noise`, `drive`, `bright`, `off`, `chop_hz`; car adds `cylinders`, `uneven`, `balance`,
 `root_rpm`), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
-`ripple_hz`), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
+`ripple_hz`, `track` = filters follow pitch^track), `whine`/`tone` (`freq_hz`, `noise`),
+`squeal` (`freq_hz`, `jitter`, `chatter_hz`; resonator bank + jittered core + hiss + spin layer
+blended by `load` and `timbre`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).

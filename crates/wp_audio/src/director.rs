@@ -17,7 +17,7 @@ use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
 use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
 use crate::siren::{update_siren, SirenMode, SirenPattern, SirenState};
 use crate::spatial::{dot, len, rotate, sub, world_to_local};
-use crate::tires::{update_tires, TireAudioState};
+use crate::tires::{update_tires, TireAudioState, TirePeak};
 use crate::types::{slot, AudioCommand, Bus, Listener, Priority, VoiceId};
 
 /// Who drives a vehicle (mirrors `wp_sim::VehicleKind`; `wp_audio` does not depend on the sim).
@@ -99,6 +99,8 @@ struct CarAudio {
     world: WorldCues,
     materials: MaterialMap,
     static_load_n: f32,
+    /// Peak slip of each wheel's tire (squeal normalisation).
+    tire_peaks: [TirePeak; 4],
 }
 
 /// Cues of one world pack.
@@ -299,6 +301,13 @@ impl AudioDirector {
             world: WorldCues::new(t, &def.world_pack),
             materials: MaterialMap::from_lattice(&car.lattice, &car.materials),
             static_load_n: car.def.mass_kg * GRAVITY_MPS2 * 0.25,
+            tire_peaks: std::array::from_fn(|i| match car.tires.get(&car.def.wheels[i].tire_id) {
+                Some(t) => TirePeak {
+                    slip_ratio: t.peak_slip_ratio,
+                    slip_angle_rad: t.peak_slip_angle_rad,
+                },
+                None => TirePeak::from_mix(&self.lib.config.tires),
+            }),
             layers,
             def,
         };
@@ -544,13 +553,14 @@ impl AudioDirector {
         let to = update_tires(
             &mut rt.tires,
             &cfg.tires,
+            &car.tire_peaks,
             s,
             car.static_load_n,
             v.road_rumble,
             tick,
             dt,
         );
-        if let Some((gain, pitch, k)) = to.squeal {
+        if let Some(sq) = to.squeal {
             let mut d = Desire::new(
                 VoiceId::new(e, slot::SQUEAL),
                 Bus::World,
@@ -559,9 +569,10 @@ impl AudioDirector {
                 pos,
                 vel,
             );
-            d.gain = gain;
-            d.pitch = pitch;
-            d.load = k;
+            d.gain = sq.gain;
+            d.pitch = sq.pitch;
+            d.load = sq.intensity;
+            d.timbre = sq.timbre;
             out.push(d);
         }
         if let Some((gain, k)) = to.scrub {

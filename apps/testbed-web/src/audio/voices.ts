@@ -198,18 +198,39 @@ export class VoicePool {
     const v = this.voices.get(voiceKey(voice));
     if (!v) return;
     const t = this.ctx.currentTime;
+    // `last` holds what was last *applied*, so a value that drifts slowly (less than EPS per
+    // frame, e.g. a squeal fading in) still lands once it has moved far enough.
     const l = v.last;
-    if (changed(params.gain, l.gain)) v.gain.gain.setTargetAtTime(params.gain, t, 0.02);
+    const applied: VoiceParams = { ...l, phase: params.phase };
+    if (changed(params.gain, l.gain)) {
+      v.gain.gain.setTargetAtTime(params.gain, t, 0.02);
+      applied.gain = params.gain;
+    }
     if (changed(params.lowpass_hz, l.lowpass_hz)) {
       v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
+      applied.lowpass_hz = params.lowpass_hz;
     }
-    if (moved(params.pos, l.pos)) this.setPanner(v.panner, params.pos, t, true);
+    if (moved(params.pos, l.pos)) {
+      this.setPanner(v.panner, params.pos, t, true);
+      applied.pos = params.pos;
+    }
     if (v.src && changed(params.pitch, l.pitch)) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
     // Sirens follow their own clock and must see every phase; others only on change.
     const synthChanged =
-      changed(params.freq_hz, l.freq_hz) || changed(params.pitch, l.pitch) || changed(params.load, l.load) || params.phase !== l.phase;
+      changed(params.freq_hz, l.freq_hz) ||
+      changed(params.pitch, l.pitch) ||
+      changed(params.load, l.load) ||
+      changed(params.timbre ?? 0, l.timbre ?? 0) ||
+      params.phase !== l.phase;
     if (v.synth && synthChanged) v.synth.update(params, t);
-    v.last = params;
+    if (synthChanged || changed(params.pitch, l.pitch)) {
+      applied.pitch = params.pitch;
+      applied.freq_hz = params.freq_hz;
+      applied.load = params.load;
+      applied.timbre = params.timbre;
+      applied.doppler = params.doppler;
+    }
+    v.last = applied;
   }
 
   stop(voice: VoiceId, fadeS: number): void {
@@ -252,7 +273,7 @@ export class VoicePool {
   playLocal(pack: string, cue: string, gain: number): () => void {
     const id: VoiceId = { entity: 0xfffffffe, slot: Math.floor(Math.random() * 0x7fffffff) };
     const def = this.cue(pack, cue);
-    const params: VoiceParams = { gain, pitch: 1, freq_hz: 0, load: 0, phase: 0, lowpass_hz: 18000, doppler: 1, pos: [0, 0, 0] };
+    const params: VoiceParams = { gain, pitch: 1, freq_hz: 0, load: 0, phase: 0, timbre: 0, lowpass_hz: 18000, doppler: 1, pos: [0, 0, 0] };
     this.play(id, "Police", pack, cue, def?.looped ?? false, params, {});
     return () => this.stop(id, 0.15);
   }
