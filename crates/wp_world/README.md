@@ -433,9 +433,10 @@ Per driver, per siren unit within 120 m (one distance test; nothing runs while n
   is given up on (not yielded to again until it moves). Notice range 60 m (slow unit) to 120 m
   (≥ 15 m/s).
 - **Oncoming** (or a unit stopped facing it < 30 m ahead): to the kerb, slow to 4 m/s.
-- **Stopped** unit within 40 m otherwise: slow to 5 m/s past it.
-- **Junction**: within 60 m of its stop line, a driver does not enter a junction a unit heads
-  for (within 70–120 m by its speed, or 20 m of the line) and gives up a permit it can still
+- **Stopped** unit within 30 m otherwise: slow to 8 m/s past it (gently: a slow stream past a
+  bust scene would block cars waiting to get round it).
+- **Junction**: within 60 m of its stop line, a driver does not enter a junction a moving unit
+  heads for (within 70–120 m by its speed, or 20 m of the line; a parked unit does not close it) and gives up a permit it can still
   stop for; cars already inside keep going. Nobody creeps into a junction to make room.
 - Kinematic (far LOD) agents run the same code, so promoted cars are already on the kerb.
 - `TrafficStats::{siren_yields, siren_lane_changes}`; `AgentView::yielding` (snapshot flag

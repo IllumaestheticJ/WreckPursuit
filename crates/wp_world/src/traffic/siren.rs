@@ -36,8 +36,8 @@ pub const BEHIND_RANGE_MAX_M: f32 = 120.0;
 pub const ONCOMING_RANGE_M: f32 = 100.0;
 /// Oncoming cars slow to this speed while a unit comes past, m/s.
 pub const ONCOMING_MPS: f32 = 4.0;
-/// Drivers do not enter a junction while a siren unit heading for it is this close to it (or 6 s
-/// of its travel, up to [`JUNCTION_RANGE_MAX_M`]), m.
+/// Drivers do not enter a junction while a moving siren unit heading for it is this close to it
+/// (or 6 s of its travel, up to [`JUNCTION_RANGE_MAX_M`]), m.
 pub const JUNCTION_RANGE_M: f32 = 70.0;
 /// Only drivers this close to their stop line consider the junction hold, m.
 pub const JUNCTION_APPROACH_M: f32 = 60.0;
@@ -57,9 +57,9 @@ pub const STALL_S: f32 = 15.0;
 /// it, waiting for room), m.
 pub const START_CLOSE_M: f32 = 30.0;
 /// Drivers slow to [`NEAR_MPS`] passing a stopped unit with its lights on this close, m.
-pub const NEAR_M: f32 = 40.0;
+pub const NEAR_M: f32 = 30.0;
 /// Speed past a stopped unit with its lights on, m/s.
-pub const NEAR_MPS: f32 = 5.0;
+pub const NEAR_MPS: f32 = 8.0;
 /// Room kept between the car body and the lane edge when pulled over, m.
 pub const KERB_MARGIN_M: f32 = 0.15;
 /// Crawl speed while still moving sideways onto the kerb, m/s.
@@ -226,14 +226,16 @@ pub fn heads_for_junction(t: &TrackedVehicle, line: V2, z: f32) -> bool {
     let r = geom::sub(line, geom::xy(t.pos));
     let d2 = geom::dot(r, r);
     let speed = geom::len([t.vel[0], t.vel[1]]);
+    // A unit parked at a scene does not close the junction (drivers slow past it instead):
+    // only a moving one does.
+    if speed < MOVING_MPS {
+        return false;
+    }
     let range = (speed * 6.0).clamp(JUNCTION_RANGE_M, JUNCTION_RANGE_MAX_M);
     if d2 > range * range {
         return false;
     }
-    if d2 < 20.0 * 20.0 {
-        return true;
-    }
-    speed >= MOVING_MPS && geom::dot(heading_of(t), r) > 0.0
+    d2 < 20.0 * 20.0 || geom::dot(heading_of(t), r) > 0.0
 }
 
 /// Lateral offset from the lane centre that puts a car's body [`KERB_MARGIN_M`] from the edge
@@ -392,8 +394,13 @@ mod tests {
             line,
             0.0
         ));
-        // Right at the junction, stopped: still hold.
+        // Right at the junction and moving (turning): hold; parked there: no.
         assert!(heads_for_junction(
+            &unit([-5.0, 50.0], [3.0, -3.0], true),
+            line,
+            0.0
+        ));
+        assert!(!heads_for_junction(
             &unit([-5.0, 50.0], [0.0, 0.0], true),
             line,
             0.0
