@@ -4215,6 +4215,7 @@ dependencies = [
  "lint-determinism",
  "serde",
  "serde_json",
+ "simcli",
  "toml",
  "wp_contracts",
  "wp_math",

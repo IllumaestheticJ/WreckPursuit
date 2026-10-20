@@ -108,6 +108,25 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   `SimEvent::GlassShattered` (v0.2.0) shatters at the region's centroid, once per region; after
   the first such event glass is no longer inferred from contacts. `SimEvent::RegionDamaged` on
   outer panels drives a `body/rattle` loop (severity × speed × road texture).
+- **Impact synthesis** (`impact.rs`, owner row 74; details and backend in
+  `apps/testbed-web/src/audio/impacts/README.md`, integration in
+  `docs/integration/audio-impacts.md`): on top of the recorded layers every hit plays one
+  `impact/body` voice per struck vehicle whose synth params come from the physics — excitation
+  strength from the collision energy `½·m_eff·v²` (or the tick's impulse), brightness / contact
+  time from the closing speed, plate modes and ring time of the struck **region** (roof lowest
+  and longest, deadened doors short, plastic bumpers dull; a hard frontal reaches the steel
+  behind the cover), shortened and buzzing on **dented** panels (`RegionDamaged` severity), a
+  mass-dependent chassis thump, and for heavy hits a bass transient + sidechain duck depth.
+  `impact/crunch` (slot `CRUNCH`) is a granular loop per vehicle whose density follows the
+  lattice's plastic power: `AudioDirector::set_plastic_energy(entity, J)` each frame (the wasm
+  bridge reads `DamageModel::total_plastic_energy_j`); without it the hit's collision energy is
+  booked instead. Glass (`GlassShattered` or inferred) adds a `kind = 1` body voice (onset +
+  debris tail, tempered vs laminated). Scrapes carry friction params (`freq_hz` = stick-slip
+  rate from the sliding speed, `force`, `metal`, `sparks` on the world). Horns get `load` = front
+  damage / weak battery; police units with a standard horn use `horn/police`. **Interior
+  camera** (listener inside the focus car's cabin box from the lattice): other vehicles are
+  low-passed to 2.2 kHz and −5 dB, the own horn muffled, impact voices get `interior`. All
+  math is deterministic (`impact::det_log2/det_exp2/det_pow`, basic arithmetic only).
 - **Police events** (`wp_police::PoliceEvent`, decoded from `SimEvent::PoliceEvent`): `Radio`
   lines go to the scanner (priority: Dispatch for dispatch, Pursuit while a pursuit is active,
   else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
@@ -189,7 +208,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
+| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}`; optional `impact/{body,crunch}`, `horn/police` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
@@ -204,6 +223,9 @@ intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).
+Owner row 74 (`src/audio/impacts/`, `src/audio/horn.ts`): `impact_body`, `crunch`,
+`friction`, `disc_horn` (`f1`, `f2`), `air_horn` (`f1`, `f2`, optional `f3`) — parameters in
+`apps/testbed-web/src/audio/impacts/README.md`.
 
 ## Tests
 
@@ -211,6 +233,16 @@ intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz
 cargo test -p wp_audio
 cargo test -p wp_audio --test samples   # recorded files exist, licensed, ≤ 15 MB
 ```
+
+`tests/impacts.rs` (owner row 74): a hit plays one `impact/body` per struck vehicle in the
+same frame, strength / transient / duck grow with speed; both cars ring in a car-to-car crash;
+a dented roof rings shorter and buzzes; the crunch starts the frame the lattice yields and
+stops after the crush (none without deformation, an estimate for unmeasured cars); glass plays
+shatter + tail once; scrapes carry friction params and the stick-slip rate follows the sliding
+speed; horns weaken with front damage and police get the air horn; the interior camera muffles
+other cars and the own horn; the stream is deterministic. Renders + browser checks:
+`cargo run --release -p wp_audio --example impact_trace -- t.json` +
+`node apps/testbed-web/e2e/audio_impacts.mjs t.json` (or no argument).
 
 Unit tests per module plus `tests/director.rs`: shipped data validates (and disk == embedded,
 every car has a def); **command stream determinism** on a real head-on crash with a siren,

@@ -16,6 +16,8 @@ export interface PanelSettings {
   source: SoundSource;
   /** City ambience bed gain (0 = off). */
   ambience: number;
+  /** Impacts & horns: modelled synthesis layered on the recordings (default) or recordings only. */
+  impacts: "synth" | "recorded";
 }
 
 function loadSettings(): PanelSettings {
@@ -27,6 +29,7 @@ function loadSettings(): PanelSettings {
     open: false,
     source: "recorded",
     ambience: 0.5,
+    impacts: "synth",
   };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}");
@@ -46,6 +49,7 @@ export interface PanelHandlers {
   testRadio(priority: RadioPriority): void;
   setSource(source: SoundSource): void;
   setAmbience(gain: number): void;
+  setImpacts(mode: "synth" | "recorded"): void;
 }
 
 export class AudioPanel {
@@ -106,6 +110,12 @@ export class AudioPanel {
     });
     src.id = "audio-source";
     row("sounds", src).append(" ", Object.assign(document.createElement("span"), { className: "dim", textContent: "(procedural = fallback)" }));
+    const imp = this.select(["synth", "recorded"], this.settings.impacts, (v) => {
+      this.settings.impacts = v === "recorded" ? "recorded" : "synth";
+      h.setImpacts(this.settings.impacts);
+    });
+    imp.id = "audio-impacts";
+    row("impacts & horns", imp);
     this.slider("ambience", this.settings.ambience, (v) => {
       this.settings.ambience = v;
       h.setAmbience(v);

@@ -66,6 +66,7 @@ export class AudioSystem {
       testRadio: (p) => this.testRadio(p),
       setSource: (src) => this.setSource(src),
       setAmbience: () => this.restartAmbience(),
+      setImpacts: (m) => this.setImpacts(m),
     });
     (window as unknown as { __wpAudio?: AudioSystem }).__wpAudio = this;
     const kick = () => this.start();
@@ -100,6 +101,7 @@ export class AudioSystem {
     this.mixer = new AudioMixer(this.ctx);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
     this.pool.source = this.panel.settings.source;
+    this.pool.impacts.enabled = this.panel.settings.impacts !== "recorded";
     this.scanner = new ScannerPlayer(this.pool);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
@@ -128,6 +130,23 @@ export class AudioSystem {
   private resetDirector(): void {
     this.safe(() => this.apply(audioBridge.reset()));
   }
+
+  /** Impacts & horns: modelled synthesis on the recordings ("synth", default) or recordings only. */
+  setImpacts(mode: "synth" | "recorded"): void {
+    this.panel.settings.impacts = mode;
+    if (!this.pool) return;
+    this.pool.impacts.enabled = mode !== "recorded";
+    // Held loops (horn, scrapes) restart on their new path.
+    this.resetDirector();
+  }
+
+  /** Impact voices built recently (`wall` = performance.now()), for latency checks. */
+  impactLog(): unknown[] {
+    return this.pool?.impacts.log ?? [];
+  }
+
+  /** `performance.now()` of recent frames whose events held a `Contact` (latency checks). */
+  readonly contactFrames: number[] = [];
 
   /** Current sound source. */
   soundSource(): SoundSource {
@@ -243,6 +262,10 @@ export class AudioSystem {
     let out;
     try {
       const json = typeof events === "string" ? events : events.length ? JSON.stringify(events) : "";
+      if (json.includes('"Contact"')) {
+        this.contactFrames.push(t0);
+        if (this.contactFrames.length > 64) this.contactFrames.shift();
+      }
       out = audioBridge.frame(a, json, focus);
     } catch (e) {
       this.failed = true;
