@@ -229,8 +229,10 @@ fn fit_oscillation(t: &[f32], e: &[f32]) -> Oscillation {
         Some(&(t2, a2)) if a2 * a1 < 0.0 && a2.abs() > a1.abs() * 0.01 => {
             let half = t2 - t1;
             let fd = 0.5 / half;
-            let d = (a1 / a2).abs().ln();
-            let zeta = d / (std::f32::consts::PI.powi(2) + d * d).sqrt();
+            // Measurement-only fit of a recorded run; never part of a simulation step.
+            let d = (a1 / a2).abs().ln(); // det-allow(transcendental): offline curve fit
+            let pi2 = std::f32::consts::PI * std::f32::consts::PI;
+            let zeta = d / (pi2 + d * d).sqrt(); // det-allow(transcendental): offline curve fit
             Oscillation {
                 damped_hz: fd,
                 natural_hz: fd / (1.0 - zeta * zeta).max(1e-3).sqrt(),

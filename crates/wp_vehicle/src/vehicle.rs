@@ -144,6 +144,11 @@ pub(crate) struct Wheel {
     pub alpha: f32,
     pub alpha_lag: f32,
     pub x: f32,
+    /// Where the wheel centre sits relative to the ground contact, as a compression (m): the
+    /// strut compression plus how much more than statically the tyre is squashed. This is
+    /// what `VehicleState::compression_m` reports (a rigid-tyre renderer then never draws the
+    /// wheel into the road); `x` itself is the strut's.
+    pub x_wheel: f32,
     pub vcomp: f32,
     pub contact: bool,
     pub fz: f32,
@@ -372,6 +377,7 @@ impl Vehicle {
         for (w, c) in self.wheels.iter_mut().zip(&self.corners) {
             *w = Wheel {
                 x: c.x_static,
+                x_wheel: c.x_static,
                 r_eff: c.radius,
                 grip: 1.0,
                 ..Wheel::default()
@@ -523,6 +529,7 @@ impl Vehicle {
             w.alpha_lag = ws.slip_angle;
             w.kappa = ws.slip_ratio;
             w.x = ws.compression_m;
+            w.x_wheel = ws.compression_m;
             w.fz = ws.fz_n;
             w.contact = ws.contact;
             w.surface = ws.surface;
@@ -1320,6 +1327,7 @@ impl Vehicle {
             let max = 0.3 + HUB_RADIUS_M;
             w.omega = 0.0;
             w.x = 0.0;
+            w.x_wheel = 0.0;
             match ground.cast(origin, down, max) {
                 Some(hit) => {
                     let vel = ch.velocity_at(hit.point);
@@ -1362,6 +1370,10 @@ impl Vehicle {
         w.x = st.x;
         w.vcomp = st.v;
         w.fz = st.fz;
+        w.x_wheel = match reach {
+            Some(r) if st.fz > 0.0 => r - TYRE_STATIC_DEFLECTION_M,
+            _ => st.x,
+        };
         match hit {
             Some(hit) if st.fz > 0.0 => {
                 w.contact = true;
@@ -1689,7 +1701,7 @@ impl VehicleSim for Vehicle {
             WheelState {
                 omega: w.omega,
                 steer_rad: w.steer,
-                compression_m: w.x,
+                compression_m: w.x_wheel,
                 slip_angle: w.alpha_lag,
                 slip_ratio: w.kappa,
                 fz_n: w.fz,

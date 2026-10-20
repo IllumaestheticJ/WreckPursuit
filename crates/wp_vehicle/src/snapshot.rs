@@ -15,7 +15,8 @@ use crate::math::{Quat, V3};
 use crate::vehicle::{Chassis, Vehicle, Wheel};
 
 /// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
-/// reference yaw rate, playtest row 28) plus the contact launch limiter (playtest row 54).
+/// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
+/// compression (playtest row 54).
 const FORMAT: u8 = 6;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
@@ -161,6 +162,7 @@ impl Vehicle {
                 wh.alpha,
                 wh.alpha_lag,
                 wh.x,
+                wh.x_wheel,
                 wh.vcomp,
                 wh.fz,
                 wh.fx,
@@ -260,7 +262,7 @@ impl Vehicle {
         };
         let mut wheels = self.wheels;
         for wh in &mut wheels {
-            let mut n = [0.0f32; 17];
+            let mut n = [0.0f32; 18];
             for v in &mut n {
                 *v = r.f()?;
             }
@@ -270,18 +272,19 @@ impl Vehicle {
                 alpha: n[2],
                 alpha_lag: n[3],
                 x: n[4],
-                vcomp: n[5],
-                fz: n[6],
-                fx: n[7],
-                fy: n[8],
-                mz: n[9],
-                steer: n[10],
-                vx: n[11],
-                vy: n[12],
-                r_eff: n[13],
-                grip: n[14],
-                drive: n[15],
-                brake: n[16],
+                x_wheel: n[5],
+                vcomp: n[6],
+                fz: n[7],
+                fx: n[8],
+                mz: n[10],
+                fy: n[9],
+                steer: n[11],
+                vx: n[12],
+                vy: n[13],
+                r_eff: n[14],
+                grip: n[15],
+                drive: n[16],
+                brake: n[17],
                 contact: r.b()?,
                 surface: surface_from(r.u8()?)?,
                 point: r.v()?,

@@ -12,8 +12,9 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 |---|---|
 | `vehicle.rs` | `Vehicle` (implements `wp_contracts::VehicleSim`): per-tick orchestration and the sub-stepped drivetrain/wheel solver |
 | `body.rs` | Rapier glue: `build_body`, `write_body` (force/torque), `read_body` (pose/velocities), `place_body` (teleport) |
-| `ground.rs` | `WheelCaster` trait; `RapierGround` (query pipeline) and `FlatGround` |
-| `suspension.rs` | spring + preload, bump/rebound damping, bump stop, anti-roll bars |
+| `ground.rs` | `WheelCaster` trait (ray + tyre-shaped `cast_wheel`); `RapierGround` (query pipeline, static world only, cylinder sweep) and `FlatGround` |
+| `suspension.rs` | spring + preload, digressive bump/rebound damping, progressive bump stop with hysteresis, tyre vertical compliance (massless wheel, implicit strut step), anti-roll bars |
+| `launch.rs` | contact launch limiter: caps the upward speed Rapier's chassis contacts add per impact |
 | `tire.rs` | simplified Magic Formula, load sensitivity, combined slip (normalised slip vector), relaxation length, low-speed guard |
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
@@ -26,6 +27,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |
 | `slide.rs` | slide-control assists for keyboard/gamepad: car slide class, gyro yaw damper, slide throttle |
 | `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, split-µ launch, corner exit, top speed |
+| `ride.rs` | ride / launch tests: axle ride frequency + damping, heave/pitch kick, kerb strike, slide into kerb, crest, side impact |
 | `handling.rs` | driver-facing handling tests through a real `AssistProfile`: ramp steer, constant radius, step steer, slalom, city corner; keyboard tapping / analog drivers |
 | `math.rs` | deterministic `atan`/`atan2`/`tan` (polynomial), glam helpers |
 
@@ -179,6 +181,35 @@ model. A parked car settles with < 1 cm drift and no jitter (tested).
 `wp_math`); glam runs in scalar mode via Rapier's `enhanced-determinism`; no maps iterated, no
 threads. Identical runs give identical hashes (tested here and by `apps/simcli`).
 
+## Ride, kerbs and launches (playtest row 54)
+
+Owner: "the car is too bouncy/light and gets launched too easily". Measured with
+`wp_vehicle::ride` (`cargo run --release -p wp_vehicle --example ride all`); before/after
+tables in `docs/integration/vehicle.md` → round 12b. Causes found and what replaced them:
+
+| Cause | Fix |
+|---|---|
+| Wheel = one ray down from the hub: a kerb was an instant step the moment the hub crossed it | `RapierGround::cast_wheel` also sweeps the tyre as a cylinder (axle-aligned, 80 % of the width) and blends it with the ray (`ground::blend_envelope`): the ray on smooth ground (exact), the sweep where its envelope is clearly higher (an edge ahead or behind), so a kerb lifts the wheel over the tyre's approach distance. The sweep starts 0.3 m higher so a kerb never overlaps its start. GJK against the 10 km ground slab is only cm-accurate, so the lift is solved exactly from the witness point on the tyre circle (`sweep_hit_on_tyre`), and witnesses off the tread are rejected |
+| Rigid, massless tyre: the whole step went straight into the strut and its bump stop | Tyre vertical rate in series (`static corner load / 15 mm`, rim strike past 6 cm, ×8). The wheel stays massless, so tyre force = strut force at every instant: the strut compression is a state solved per tick by backward Euler (`suspension::step_strut`, safeguarded Newton), its speed is the damper speed that balances tyre against spring + bump stop. Road input reaches the damper physically; the tyre soaks up what the strut cannot follow |
+| Linear, undamped bump stop: bottoming out stored energy and sprang the car into the air | Progressive (`k·δ·(1 + δ/2 cm)`) with hysteresis: 40 % of the force while extending |
+| Linear dampers (a kerb strut speed of 5–9 m/s asked for 20+ kN) | Digressive above 0.5 m/s (40 % slope): body motion unchanged, impacts capped |
+| Damping ratio ≈ 0.29 bump / 0.44 rebound (body overshot a crest by 40 %) | Car data: bump ×1.2, rebound ×1.6 (≈ 0.35 / 0.70); five cars that sat on their bump stops at rest got more preload (see `docs/integration/cars.md`) |
+| Probes saw other cars: a torn-off wheel's hub probe starting inside the striker's crushed hull launched the Simulation T-bone victim at 2.2 m/s | Probes see only the static world (`QueryFilterFlags::EXCLUDE_DYNAMIC \| EXCLUDE_KINEMATIC`); other cars, debris and woken props meet the chassis collider |
+| Chassis contact pushes (deep hull interpenetration) | `launch::LaunchGuard`: upward speed contacts add beyond stopping a fall is capped at 0.6 m/s per impact (snapshot format 6) |
+| Chassis restitution 0.1 averaged with the world | `CoefficientCombineRule::Min`: 0 against the static world, 0.1 car-to-car as before |
+| Kerb corners report steep normals: drive/brake forces along them made a ramp | `tyre_normal` leans the tyre force frame back toward the strut axis for normals beyond ~32° |
+
+Checked and **not** a cause: the inertia tensor (radii of gyration 0.55–0.77 m roll,
+1.1–1.7 m pitch/yaw, 75–97 % of a solid box of the body size: not too small), CG heights
+(0.27–0.45 × track), Rapier mass properties (collider density 0, mass from the data).
+
+**Arcade anti-launch** (`assists::anti_launch_force`): while the body rises faster than 0.3 m/s
+with wheels off the ground, an extra pull of up to 0.8 g × (wheels off / 4). Never acts with
+all four wheels down, so grip and handling are untouched. Strength per preset
+(`assists::anti_launch_strength`): keyboard 1, gamepad 0.5, wheel and AI 0 (Simulation stays
+physical). `AssistProfile` has no field for it yet (contract request A-10); it follows
+`countersteer_help` until then.
+
 ## Keyboard/gamepad steering and ESC (playtest row 28)
 
 Owner: "all cars understeer too much". Measured first (`handling` module): the chassis is close
@@ -324,6 +355,11 @@ cargo run --release -p wp_vehicle --example handling -- --causes   # + one-assis
 cargo run --release -p wp_vehicle --example diff_demo      # differential numbers per car + per type
 ```
 
+`tests/ride.rs` holds the ride / launch ranges (ride frequency and damping, 10 cm and 15 cm
+kerbs, rounded and sharp crests, arcade anti-launch, side impact and kerb trip; playtest row
+54). `cargo run --release -p wp_vehicle --example ride [all | car_id ...]` prints the table,
+`--example ride_trace -- <car> <kmh> <kerb_m>` (or `CREST=1`) a per-tick wheel trace.
+
 `tests/handling_balance.rs` holds the per-class understeer-gradient ranges and the "held key
 reaches the grip limit" / "ESC adds no understeer" checks (playtest row 28).
 
@@ -357,9 +393,14 @@ Scenarios live in
 | Vehicle model, **24-car field** (whole roster cycled, varied inputs), dry | 4.6–5.2 µs/car/tick = **0.019–0.021 ms/car/frame**, 0.45–0.50 ms/frame for all 24 | 0.15 ms/car/frame (3.6 ms for 24) |
 | Same, wet road with 4 mm puddles, 4 °C, painted lines | 4.0–4.5 µs/car/tick = 0.016–0.018 ms/car/frame (no measurable weather cost) | — |
 | Vehicle + Rapier step, single car rig | 9.0–9.3 µs/tick = 0.037 ms/frame | — |
+| **Round 12b** (tyre sweep + strut solve): vehicle model / 24-car field | 5.8–5.9 µs/car/tick = 0.023 ms/car/frame (lead/round12 on the same machine: 5.7–6.1) | 0.15 ms/car/frame |
+| **Round 12b**: vehicle + Rapier step, single car rig | 15.7–23 µs/tick = **0.06–0.09 ms/frame** (lead/round12: 10.8 µs = 0.043 ms) | 0.15 ms/car/frame |
 
 `cargo run --release -p wp_vehicle --example bench` (cloud container, 3 runs, 2026-10-19). The
-24-car numbers are vehicle-only (flat-ground probe, no Rapier); about 8× under budget.
+24-car numbers are vehicle-only (flat-ground probe, no Rapier); about 8× under budget. Round
+12b (2026-10-20): the four tyre sweeps (cylinder shape casts) cost ≈ 2.5 µs each against the
+rig's 10 km ground slab; with a half-space ground the rig measured 15.5 µs/tick (suggested to
+the lead, not changed: `wp_sim` parks the slab under hilly cities).
 
 Browser not measured yet (expect ~2×; budget 0.30 ms).
 
@@ -370,7 +411,11 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
 - Springs set ride frequency (body control vs. compliance); **anti-roll bars set balance**:
   stiffer rear ARB → more oversteer/rotation, stiffer front → more understeer.
 - Dampers: bump controls how fast load arrives at a tire (turn-in sharpness), rebound how fast
-  it leaves (lift-off snap). Rebound ≈ 1.5× bump.
+  it leaves (lift-off snap) and how well the body is held after a kerb or crest. Since round
+  12b rebound ≈ 2× bump (damping ratio ≈ 0.35 / 0.70); the data rates are the low-speed
+  rates, the dampers blow off above 0.5 m/s. `axle_ride` in `ride.rs` prints both ratios.
+- `preload_m`: moves the static point down the travel without changing the spring rate or
+  the ride height; keep ≥ ~45 % of the travel left to the bump stop at rest.
 - Tire `lateral.d` sets the skidpad limit; `b` the cornering stiffness (response); `e` the
   post-peak drop (how "edgy" the limit is); `load_sensitivity` how much an overloaded outer
   tire gives back (more = more understeer at the limit); `relaxation_length_m` the response
@@ -389,7 +434,11 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
 
 ## Known gaps
 
-- Probe is a ray, not a swept shape (kerbs/edges are point-sampled); shape-cast later.
+- Wheels have no mass (no wheel hop) and the tyre rate is derived from the static load (no
+  data field); a kerb edge pushes along the strut axis only (no backward "kerb drag"). The
+  tyre sweep sees only the static world, so wheels do not climb other cars or debris.
+- A sharp grade change at speed still flies the softest car (ironside_440 rides at 1.06 Hz):
+  that is its setup, not a launch; rounded crests keep every car down.
 - No engine stall model (anti-stall slip instead); no tire temperature or wear yet
   (`wear_rate` unused); no camber change with suspension travel.
 - AWD on-demand is front-biased only (couples the rear when the front slips).
