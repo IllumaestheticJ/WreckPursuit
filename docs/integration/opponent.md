@@ -285,6 +285,10 @@ trig).
   allows the other racers to flee for heat of their own (at race pace past the live patrols
   they earn it), runs its full minute, and measures the distance racer 1 drives after the
   call (its flight re-plans near the route's end): ≥ 250 m, or ≥ 150 m when caught first.
+- Clippy fixes for warnings that arrived with the round-12 tip merge (not mine; `-D warnings`
+  failed on the merged baseline too): `crates/wp_audio/src/siren.rs` (`12345.678_901` →
+  `12_345.678_901`, inconsistent digit grouping) and `crates/wp_sim/src/lib.rs` test
+  (`b` → `_b`, unused variable).
 
 ### Reports for other workstreams
 - **E (police)**: Hollins picker race, seed 16 (pre-merge physics): a unit `Respond`ing to an
