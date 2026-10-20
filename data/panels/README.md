@@ -59,21 +59,22 @@ body | interior | tire | rim`), `material` (`paint | glass | trim | headlight | 
 liveries), `indices` (CCW from outside), `skin_nodes` (4 lattice node ids per vertex) and
 `skin_weights` (4 per vertex in 1/255, summing to 255).
 
-Format 3 (replaces format 2's `fold_chords` / `fold_weights`): hood, trunk-lid and front-fender
-parts carry `fold` (`car_assets::mesh::FoldBinding`), how the sheet crumples in the renderer —
+Format 3 (replaces format 2's `fold_chords` / `fold_weights`): hood, trunk-lid, front-fender and
+rear-quarter parts carry `fold` (`car_assets::mesh::FoldBinding`), how the sheet crumples in the renderer —
 visual only, the lattice, hull and repair bill never see it:
-- `chords`: lattice node pairs from the fixed end (lid hinge row; fender rear row) to the
-  leading end (latch row; fender nose), sorted along `across` (0 = x for lids, 2 = z for fenders);
+- `chords`: lattice node pairs from the fixed end (lid hinge row; the door-side row of a fender
+  or quarter) to the leading end (latch row; fender nose; quarter tail), sorted along `across`
+  (0 = x for lids, 2 = z for fenders and quarters);
 - `leads`: per chord the three front-structure nodes nearest its leading node (hood: bumper,
-  frame, fenders; trunk: rear bumper, frame, quarters; fenders: bumper, frame). When they moved
+  frame, fenders; trunk: rear bumper, frame, quarters; fenders: bumper, frame; quarters: rear bumper, rear frame). When they moved
   toward the fixed end further than the panel's own leading node, the panel's front is pulled
   back by the difference, so it never floats over a crushed nose. A hanging bumper's nodes are
   rotated back about its mount (the crushed pose it was released in); a detached one's skipped;
-- `gain` (visual crumple gain: hood 1.8, trunk 1.4, fenders 1.5), `max_m` (lid 0.28 m, fender
-  0.12 m), `pop_m` (lids 0.09 m), `dir` (buckle direction: lids up, fenders outward and up);
+- `gain` (visual crumple gain: hood 1.8, trunk 1.4, fenders and quarters 1.5), `max_m` (lid
+  0.28 m, fender / quarter 0.12 m), `pop_m` (lids 0.09 m), `dir` (buckle direction: lids up, fenders and quarters outward and up);
 - `weights`: 3 per vertex in 1/255 — crease shape (lids: main ridge a little behind mid-lid, a
-  valley, a second ridge toward the latch, diagonal, tented at the centre line; fenders: one
-  ridge ahead of the wheel), fixed-edge lift (lids), leading-end follow (0 at the fixed row → 1 at
+  valley, a second ridge toward the latch, diagonal, tented at the centre line; fenders and
+  quarters: one ridge between the wheel and the car's end), fixed-edge lift (lids), leading-end follow (0 at the fixed row → 1 at
   the leading row; its square shapes the latch pop).
 
 Per chord the effective shortening `gain × max(own chord loss, lead push)` (1.5 cm dead zone)
