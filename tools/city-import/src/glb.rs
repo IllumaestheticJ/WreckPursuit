@@ -14,12 +14,14 @@ use wp_world::geom::{self, V2, V3};
 use wp_world::map::CityMap;
 use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
 use wp_world::surface::{
-    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, TriMesh,
+    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk width and kerb height (shared with the physics colliders).
 use wp_world::surface::{KERB_H_M as CURB_M, SIDEWALK_W_M as SIDEWALK_M};
+/// Height of the parking / bus lane tint above the road surface, m.
+const LANE_TINT_DZ_M: f32 = 0.01;
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
@@ -442,16 +444,30 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Pavement: the road surface ribbons, the very triangles `wp_sim` collides with; parking
+    // and bus lanes are tinted 1 cm above them.
+    for s in &net.surfaces {
+        let prim = if s.highway {
+            &mut concrete
+        } else {
+            &mut asphalt
+        };
+        prim.mesh(&surface_ribbon(s));
+    }
     for l in &net.lanes {
-        let half = l.width_m * 0.5;
-        let bank = lane_bank(net, l);
         let prim = match l.kind {
-            LaneKind::Highway => &mut concrete,
             LaneKind::Parking => &mut parking,
             LaneKind::Bus => &mut bus,
-            _ => &mut asphalt,
+            _ => continue,
         };
-        prim.ribbon_banked(&l.polyline, half, half, 0.0, &bank);
+        let bank = lane_bank(net, l);
+        prim.ribbon_banked(
+            &l.polyline,
+            l.width_m * 0.5,
+            l.width_m * 0.5,
+            LANE_TINT_DZ_M,
+            &bank,
+        );
     }
     // Raised sidewalks and kerb faces: the very triangles `wp_sim` collides with.
     let walks = sidewalk_mesh(map);
