@@ -244,9 +244,23 @@ Base: `ws/net` + `origin/lead/round12` (clean merge).
    about 14 m/s, runs wide to the east and wedges at (928.8, -791.0): throttle 0.8, full right lock,
    speed 0, **for the rest of the run**. Racer 0 drives away, gives up at step 3185 about 200 m
    away, and with no unit within `capture.unit_radius_m` (15 m) or in sight the escape timer runs
-   out: `Escaped`. `wp_police` is doing the right thing. The car that used to make this corner now
-   doesn't, which points at A's differential rework (`ws/vehicle`); it matches D's and E's
-   round-12 failures. I didn't bisect it.
+   out: `Escaped`. `wp_police` is doing the right thing.
+   **Bisected** by merging the pre-round-12 `ws/net` tip (`bfec614`) onto each point and running
+   the original, unfixed test:
+   | base + `ws/net` | outcome |
+   |---|---|
+   | `085f62b` (`lead/round12` before `ws/vehicle`) | Captured (passes) |
+   | + `a73e4db` (`data/cars/differentials.toml`) | Captured (passes) |
+   | + `b939176` (differential model, brake-based TC) | Captured; the cop makes the corner. The test fails earlier, though: p1's worst downlink second is 41,233 B/s, over budget. |
+   | + `5114778` (brake-TC feed-forward, throttle-cut hand-off, wolfhound viscous centre) | **Escaped**; the cop wedges at (929.0, -791.0), the exact spot seen on `lead/round12` |
+   | `e7335ce` (all of `ws/vehicle`) | Escaped |
+   **First bad commit: `5114778`** ("wp_vehicle: brake-TC feed-forward + smooth hand-off to
+   the throttle cut ..."). The cop car is `sentinel_cruiser`, so the viscous-centre change in
+   that commit (`sentinel_wolfhound` only) isn't it. What's left is the brake-TC / throttle-cut
+   change in `wp_vehicle/src/{assists,vehicle}.rs`. I didn't split that commit further. To A
+   (FYI, not blocking): with that change a `sentinel_cruiser` braking from about 14 m/s into a
+   right-hand 90° junction under bot inputs (throttle 0.8, full lock) runs wide and stays pinned
+   at 0 m/s against the kerb. Worth a look if it shows up for human drivers too.
    Test changes (`crates/wp_net/tests/vesper_e2e.rs` only; the `Captured` assertion is unchanged):
    - `Unstick`: if the cop presses the throttle at under 0.5 m/s for 1.5 s, it backs out with
      opposite lock for 2.5 s. The brake is held at a standstill, which is wp_vehicle's
