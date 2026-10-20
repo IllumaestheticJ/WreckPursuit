@@ -220,6 +220,34 @@ pub fn car_tune_defaults_json() -> String {
     }))
 }
 
+/// The grip-balance lab override in effect (`null` = the data), JSON.
+#[wasm_bindgen]
+pub fn grip_balance_json() -> String {
+    json(&wp_vehicle::grip_lab::active())
+}
+
+/// `{ "before": <the data as is>, "new": <the lab's new balance> }`, JSON.
+#[wasm_bindgen]
+pub fn grip_balance_defaults_json() -> String {
+    json(&serde_json::json!({
+        "before": wp_vehicle::grip_lab::GripBalance::default(),
+        "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
+    }))
+}
+
+/// Set the grip-balance lab override from JSON (missing fields = the data), or clear it with
+/// `""`. Process-wide, not logged in recordings.
+#[wasm_bindgen]
+pub fn grip_balance_set(json_text: &str) -> Result<(), JsValue> {
+    if json_text.trim().is_empty() {
+        wp_vehicle::grip_lab::set_override(None);
+        return Ok(());
+    }
+    let g: wp_vehicle::grip_lab::GripBalance = serde_json::from_str(json_text).map_err(err)?;
+    wp_vehicle::grip_lab::set_override(Some(g));
+    Ok(())
+}
+
 /// Set the car / tyre lab override from JSON (missing fields = the data), or clear it with `""`.
 /// Process-wide, not logged in recordings.
 #[wasm_bindgen]

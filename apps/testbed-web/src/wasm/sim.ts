@@ -270,6 +270,12 @@ export const sim = {
     JSON.parse(wasm.car_tune_defaults_json()),
   /** Set the car / tyre experiments ("" = the data). */
   carTuneSet: (json: string): void => wasm.car_tune_set(json),
+  /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
+  gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
+  gripBalanceDefaults: (): { before: Record<string, number | boolean | string>; new: Record<string, number | boolean | string> } =>
+    JSON.parse(wasm.grip_balance_defaults_json()),
+  /** Set the grip-balance lab ("" = the data). */
+  gripBalanceSet: (json: string): void => wasm.grip_balance_set(json),
   /** Drift Lab W reference-parity test cars (not in carIds()). */
   parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),
   /** Clutch mode "auto" | "manual" (owner row 59). */
