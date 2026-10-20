@@ -149,6 +149,21 @@ setting survives a reload; countersteer slider disabled; gamepad Start opens, d-
 resumes; Controls opens C's panel and returns; `?menu=1` title screen with dev panels off, Enter
 starts the city chase; no page errors.
 
+**Checks (round 12, this container, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0
+CARGO_PROFILE_TEST_DEBUG=0`):** `cargo fmt --check` ✓, `cargo clippy --workspace -D warnings` ✓,
+wasm32 release build of `wp_wasm` ✓ (packaged with `wasm-bindgen` 0.2.129; no `wasm-pack` here,
+so `npm run e2e` was run directly instead of `just web-e2e`), testbed `tsc` ✓, ui-kit `tsc` +
+vitest 88 / 88 ✓, ui-kit e2e ✓, testbed `npm run e2e`: 126 PASS incl. all 36 menu checks;
+**fails only `perf_check`** (chase / rain real-time factor 0.25, 1.32 M / 1.25 M triangles per
+frame vs the 700 k limit). **Same numbers on the round-12 base** without this branch
+(`frame_profile.mjs chase 12`: base 1,318,895 triangles, RTF 0.270; this branch 1,318,895, RTF
+0.269), so it comes from round 12's merges (parked cars / props or LOD?), not the menu.
+`cargo test --workspace --no-fail-fast`: 141 suites, 952 pass, **4 fail on the base** (this branch
+changes no Rust, data or scenario file): simcli `goldens_match`, wp_race `grid_highway_sprint`,
+wp_sim `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`, wp_wasm
+`race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` (player DNF
+`FinishWindow`). **For the lead.**
+
 ## Needs — data per screen, owner, status
 
 Status: **live** = in the contract and emitted today · **v0.2** = accepted in the v0.2.0 plan ·
