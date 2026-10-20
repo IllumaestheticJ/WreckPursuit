@@ -14,7 +14,7 @@ import { carMeshNow, loadCarMesh } from "./panels";
 import { sim, type CarModelInfo } from "../wasm/sim";
 
 /** Cars nearer than this (to the camera) get the full instanced mesh, m. */
-export const FULL_LOD_M = 250;
+export const FULL_LOD_M = 150;
 /** Full-mesh instances per model per frame (the nearest get them; the rest use the proxy). */
 const MAX_FULL = 192;
 /** Proxy instances per model per frame. */

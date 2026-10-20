@@ -691,7 +691,7 @@ applied:
 | File | Change |
 |---|---|
 | `crates/wp_wasm/src/lod.rs` (new), `lib.rs` | `traffic_draw()`, `police_draw()`, `lod_draw_stride()`, `session_car_models()`, `car_model_info()` (table above). Read-only: hashes and goldens unchanged by these. Native tests: quaternion maths, model list, and **draw poses stay continuous through 15 real promotions/demotions in 12 s of city chase (worst swap 0.06 m, worst tick 0.08 m)**. |
-| `src/render/fleet.ts` (new) | Instanced cars: per model a full mesh (the model's real panel mesh merged at rest: paint with per-instance livery, detail, head/tail lamp markers where `VehicleView` puts them, police light bar) for cars < 250 m from the camera (192 per model), a ~130-triangle proxy beyond (and while a mesh is loading). Shared 8-colour `TRAFFIC_PALETTE` by `variant`. |
+| `src/render/fleet.ts` (new) | Instanced cars: per model a full mesh (the model's real panel mesh merged at rest: paint with per-instance livery, detail, head/tail lamp markers where `VehicleView` puts them, police light bar) for cars < 150 m from the camera (192 per model; promotions happen at 80 m, so the swap is always full mesh → full mesh), a ~130-triangle proxy beyond (and while a mesh is loading). Shared 8-colour `TRAFFIC_PALETTE` by `variant`. |
 | `src/render/lod.ts` (new) | `LodDirector`: per frame, each traffic agent / police unit is drawn by exactly one of its `VehicleView` (once the sim spawned it **and** its mesh is ready) or the fleet, same model / livery / pose — so promotions and demotions swap the drawer on one frame with no gap. `LodLog` records per-frame draw states (missing-mesh frames, swap pose jumps with ±3 frames, appear / vanish distances, placeholder time). |
 | `src/render/panels.ts` | `preloadCarMeshes()`, `carMeshNow()`, `meshTimings`; a preloaded mesh builds in the `PanelBody` constructor (no placeholder frame). |
 | `src/vehicle_view.ts` | `drawable` (mesh ready or panels layer off); while loading, a proxy in the car's livery instead of the debug box / lattice hull; sim-spawned traffic / police (`background`) show per-car debug overlays (tire forces, slip colours, suspension, CG / velocity) only when focused (Tab), so a promotion does not sprout arrows. |
@@ -710,14 +710,15 @@ applied:
 | City chase frame (`chase_perf.mjs`, 20 s) | 899 ms, render 13.8 ms, 541k tris, 622 calls | 920 ms, render 26.6 ms, 627k tris, 470 calls |
 SwiftShader frame time is dominated by rasterising the city and is unchanged; renderer CPU time
 roughly doubles (instance buffers of the full-mesh fleet: up to 192 instances × ~4k triangles per
-model within 250 m). On a real GPU this is a handful of instanced draws; if it shows up in a
-browser profile, lower `FULL_LOD_M` (render/fleet.ts) to ~150 m.
+model within 250 m). `FULL_LOD_M` was then lowered to 150 m (owner's call, 2026-10-20); see the
+follow-up measurement below.
 Follow-up 2026-10-20: with the 320 m sightline the city no longer reached its traffic target
 (`world_traffic_soak_observer`); fixed in `wp_world` without moving the spawn ring (see
 `docs/integration/world.md`, "Follow-up"). `npm run e2e` LOD checks on that build: 0 frames
 without a mesh, swap jump 0.000 m, traffic appears ≥ 322 m / vanishes ≥ 342 m from the player.
 ### Known gaps
-- Proxy → full instanced mesh switches at 250 m from the camera (a small far-LOD change, by design).
+- Proxy → full instanced mesh switches at 150 m from the camera (a small far-LOD change, by design;
+  a 4.5 m car is ~20 px tall there at 1280×720).
 - Damage done while physical is lost on demotion (the instanced mesh is undented); traffic
   demotes 100 m+ away, so it is rarely visible.
 - Kinematic poses are carried forward between traffic steps, not interpolated by the frame's
@@ -729,3 +730,16 @@ build, tsc, `just web-e2e`: all checks pass (LOD: 0 frames without a mesh, 7 swa
 hand-over jump, traffic appears ≥ 327 m / vanishes ≥ 353 m). One earlier run failed the capture /
 "Repair & continue" checks and logged an audio `setValueCurveAtTime` overlap page error; `main`
 fails the same three checks in this container, so they are pre-existing and flaky here (J / lead).
+
+### Follow-up (2026-10-20): `FULL_LOD_M` 250 → 150 m
+Owner's call after the render-cost note above. A/B on the same container (`chase_perf.mjs`, 20 s
+city chase, two runs each; absolute numbers ran higher than the day before, compare within the
+table only):
+
+| `FULL_LOD_M` | triangles | render ms | frame ms |
+|---|---|---|---|
+| 250 m | 667k / 667k | 195 / 179 | 875 / 860 |
+| 150 m | 591k / 603k | 170 / 141 | 828 / 787 |
+
+≈ 10 % fewer triangles, ≈ 5 % faster frames headless. Promotions happen 80 m from the player, so
+the hand-over is still full instanced mesh → full VehicleView.
