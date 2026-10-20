@@ -934,3 +934,12 @@ at 480 m, which is why the active radius is 440 m).
 - Kinematic agents move in 60 Hz traffic steps; `wp_wasm::lod::traffic_draw` carries them
   forward along their heading between steps (read-only), so the browser no longer judders.
   A `World` accessor for "time since the last traffic step" would let it stop recomputing that.
+
+## Lead helper: junction holes (branch `lead/fix-junction-holes`, 2026-10-20, playtest rows 46, 51)
+Changes in your crate are confined to `surface.rs` and the new `surface/nodes.rs`:
+`node_patches` (junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end
+edges), `surface_ribbon`, exact sidewalk corner fills, strip pull-back, and tests. The greybox
+now draws the surface ribbons. Full write-up, numbers and the items left for you (node 81's
+overlapping roads, turning paths through building lots at nodes 78 / 97, junction heights on
+saddles): `docs/integration/junctions.md`. Please merge `lead/fix-junction-holes` into
+`ws/world` once the lead has merged it.

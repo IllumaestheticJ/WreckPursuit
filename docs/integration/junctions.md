@@ -91,7 +91,54 @@ built), close-ups (top, holes, street level) of Vesper bends 145 / 138, dead end
   height (un-embodied physical traffic only).
 
 ## Perf
-PERF_PLACEHOLDER
+City build, Port Vesper v2 (release, native, 4 vCPU; 3 runs each; `cargo test --release -p
+wp_world --lib sidewalk_mesh_timing -- --ignored --nocapture`):
+
+| Step | `lead/round12` | this branch |
+|---|---|---|
+| `road_mesh` | 1.0–1.3 ms (16 082 tris) | 13–19 ms (17 822 tris) |
+| `sidewalk_mesh` | 42–50 ms (28 420 tops + 28 034 kerb tris) | 50–67 ms (28 035 + 31 060) |
+
+The extra time is the turning-path check against the kerb curves (point-in-polygon and radial
+hugging per corner); it runs once at city load (`Sim::set_world`, ≈ 300 ms total), so about
++30 ms native, roughly twice that in the browser. No per-frame cost. Greybox: Vesper
+7.04 → 6.55 MB `.glb` (per-lane ribbons replaced by surface ribbons), grid 0.85 → 0.90 MB.
 
 ## Goldens
-GOLDENS_PLACEHOLDER
+`lead/round12` already mismatches 29 of 61 goldens (merge drift, not touched here). Every
+scenario's full hash list was compared between `lead/round12` and this branch (`simcli
+hashes`): exactly 19 moved, the other 42 are bit-identical. Only those 19 were re-blessed
+(`simcli run <file> --bless`, `[bless]` commit): city/ blocked_parked_player_grid,
+hill_road_ascent, hill_road_descent, sidewalk_mount_15kmh, sidewalk_mount_40kmh; opponent/
+circuit_8x5, flee_police, open_roads_traffic, reverse_grid_2laps; race/ city_sprint_police,
+pick_hollins_sprint, pick_lantern_checkpoint, pick_loop9_circuit, vesper_hollins_sprint;
+soak/ traffic_soak, traffic_soak_vesper, traffic_soak_vesper_observer; weather/ fog_pursuit,
+fog_pursuit_clear. All their expectations pass.
+
+## Gate (this branch)
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check`, `clippy --workspace --all-targets -D warnings` | clean |
+| wasm32 build of `wp_wasm` | ok |
+| `tools/wasm-determinism/compare.sh` | 61 / 61 scenarios native == wasm |
+| `tsc --noEmit` | clean |
+| `just web-e2e` | all checks pass (69 PASS) |
+| `cargo test --workspace --no-fail-fast` | new tests pass; failing, identically on `lead/round12` (checked in a worktree): simcli `goldens_match` (the 29 stale goldens + `soak/traffic_soak_observer` `traffic_agents_min` 310 < 350), `wp_race` `grid_highway_sprint`, `wp_wasm` `race_tests` sprint / capture, `wp_sim` `sidewalk` Port Vesper (the same three 40 km/h 15° drives) |
+
+## Playtest row 51 (stop lines), added on this branch
+"The painted lines at the traffic lights make the car jump": the stop line sits where the lane
+ribbon meets the junction surface — the old flat disc's 8–15 cm step. Now:
+- `city-import` `tests/junction_cover.rs` `*_stop_lines_are_smooth`: rays (3 mm cluster) every
+  5 cm, 3 m either side of every approach's stop line along each turning path, centre and 0.5 m
+  inside each edge: Vesper 3 976 profiles, worst step 3.4 mm, worst grade change 6.9 %
+  (junction 3: a street arriving on a 3.4 % grade next to a highway corner); grid 8 466
+  profiles, 0 / 0.
+- `wp_sim` `tests/stop_lines.rs`: the debug sedan at 120 km/h straight across every Vesper stop
+  line whose profile changes grade by more than 3 % (7 lines): 0.000 s airborne.
+- Excluded, for D: **node 81**. Two roads leave it 6° apart and their ribbons overlap at their
+  own heights for tens of metres (a road-layout issue in `vesper`, not the junction surface);
+  there a car at 120 km/h was airborne 0.23 s.
+
+## Playtest row 52 (sidewalk level with building bases)
+Not on this branch (a separate city-wide change to terrain, lots and building bases); agreed
+with the lead to do it on its own branch.
