@@ -138,6 +138,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 61 | Police should push civilians out of the way when stuck | E (police): low-speed controlled shove after 1.5 s blocked (sirens), civilians yield to sirens (D) | dispatched |
 | 62 | Traffic should get out of the way of police with sirens on | D (traffic AI): signal, slow, pull over, wait, merge back; LOD fleet too | dispatched |
 | 63 | Police are not aggressive enough | E (police): limit-pace chase driving, escalating PIT/ram/box/roadblock tactics by wanted level, flanking, short cooldowns; before/after table | dispatched |
+| 64 | Other police units don't spawn / converge during a chase | E (police): backup dispatch to intercept points, out-of-sight spawns up to a per-level cap, search at last-known position | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
