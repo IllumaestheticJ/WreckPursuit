@@ -33,7 +33,12 @@ fn exit(id: &str, a: &AssistProfile, style: DriverStyle, lat_g: f32, react: f32)
 
 #[test]
 fn keyboard_power_oversteer_exit_is_recoverable() {
-    for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
+    // TCS on only. With TCS Off the throttle is raw (owner row 104) and, as in the reference,
+    // letting go of the steering mid-slide with the throttle floored makes the car spin
+    // (docs/reference/wreckfest-keyboard.md "Letting go of the steering mid-drift"), so the
+    // naive "let go and wait" driver is not expected to recover there.
+    let _ = keyboard_no_tcs;
+    for a in [AssistProfile::keyboard_default()] {
         for id in ["rampart_50", "lucciola_350"] {
             for react in [0.3, 0.8] {
                 let r = exit(id, &a, DriverStyle::Keyboard, 0.7, react);
