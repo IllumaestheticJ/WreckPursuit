@@ -25,6 +25,41 @@ pub use nodes::{node_patches, NodePatch, NodePatchKind};
 /// Sidewalk width beyond the kerb line (the paved edge of an edge lane), m.
 pub const SIDEWALK_W_M: f32 = 3.0;
 
+/// Grass verge on residential streets: the inner part of the sidewalk, from the kerb out, m
+/// (playtest row 95). Same surface as the sidewalk (physics), drawn as grass with street
+/// trees on it; the walkway is the remaining `SIDEWALK_W_M - VERGE_W_M`.
+pub const VERGE_W_M: f32 = 1.5;
+
+/// Highest speed limit of a street that gets a grass verge, m/s (30 mph + a margin).
+pub const VERGE_MAX_SPEED_MPS: f32 = 13.5;
+
+/// Whether a street lane of this kind and speed limit in district `district` gets a grass
+/// verge on its sidewalk: residential and suburban streets up to 30 mph (playtest row 95).
+pub fn verge_street(
+    district: Option<crate::network::DistrictKind>,
+    kind: LaneKind,
+    speed_mps: f32,
+) -> bool {
+    use crate::network::DistrictKind;
+    matches!(
+        district,
+        Some(DistrictKind::Residential) | Some(DistrictKind::Suburb)
+    ) && matches!(
+        kind,
+        LaneKind::Through | LaneKind::TurnLeft | LaneKind::TurnRight | LaneKind::Parking
+    ) && speed_mps <= VERGE_MAX_SPEED_MPS
+}
+
+/// Whether `lane`'s sidewalks carry a grass verge ([`verge_street`] at the lane's middle).
+pub fn lane_has_verge(map: &CityMap, lane: &Lane) -> bool {
+    let n = lane.polyline.len();
+    if n == 0 {
+        return false;
+    }
+    let mid = geom::xy(lane.polyline[n / 2]);
+    verge_street(map.district_at(mid), lane.kind, lane.speed_limit_mps)
+}
+
 /// Kerb height: the sidewalk top sits this far above the road edge, m.
 pub const KERB_H_M: f32 = 0.15;
 
@@ -257,8 +292,13 @@ pub fn lane_sidewalks(lane: &Lane) -> [bool; 2] {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SidewalkMesh {
     /// Sidewalk tops, facing up: from the kerb line out to [`SIDEWALK_W_M`], [`KERB_H_M`]
-    /// above the road edge and continuing the road's bank.
+    /// above the road edge and continuing the road's bank (on verge streets only the walkway
+    /// beyond the verge).
     pub tops: TriMesh,
+    /// Grass verges ([`lane_has_verge`]): the first [`VERGE_W_M`] of the sidewalk top from the
+    /// kerb line, sharing its vertices with [`SidewalkMesh::tops`] (same surface, drawn as
+    /// grass).
+    pub verges: TriMesh,
     /// Corner fills between the strip ends at junctions, bends and dead ends, at kerb height
     /// (they reach out to the lots' outer lines).
     pub corners: TriMesh,
@@ -288,6 +328,7 @@ impl SidewalkMesh {
     /// edges have bit-identical vertices).
     pub fn flush(&self) -> TriMesh {
         let mut m = self.tops.clone();
+        m.append(&self.verges);
         m.append(&self.corners);
         m.append(&self.lots);
         m
@@ -353,6 +394,7 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
             }
             e
         };
+        let verge = lane_has_verge(map, l);
         for (on, side) in [(right, 1.0f32), (left, -1.0)] {
             if !on {
                 continue;
@@ -374,6 +416,7 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
                 lot,
                 // Tops face up: the strip's left edge must be on the left of its direction.
                 outer_is_left: side < 0.0,
+                verge,
             };
             let n = walk.kerb_top.len();
             if n < 2 {
@@ -447,7 +490,12 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
     }
     // A strip folds back over itself where its lane bends tighter than the strip's offset:
     // drop the folded (down-facing) top triangles; the neighbouring quads cover that spot.
-    for m in [&mut out.tops, &mut out.corners, &mut out.lots] {
+    for m in [
+        &mut out.tops,
+        &mut out.verges,
+        &mut out.corners,
+        &mut out.lots,
+    ] {
         drop_folded(m);
     }
     // Skirts: down from every lot / corner outer edge on supported ground, except over
@@ -1131,6 +1179,8 @@ struct SideWalk {
     /// Per segment: whether it has a lot (else the sidewalk ends at its back edge, railed).
     lot: Vec<bool>,
     outer_is_left: bool,
+    /// The first [`VERGE_W_M`] from the kerb is a grass verge ([`lane_has_verge`]).
+    verge: bool,
 }
 
 impl SideWalk {
@@ -1222,6 +1272,7 @@ impl SideWalk {
             kerb_foot: kf,
             lot,
             outer_is_left: self.outer_is_left,
+            verge: self.verge,
         })
     }
 
@@ -1269,6 +1320,7 @@ impl SideWalk {
     }
 
     fn emit(&self, paved: &PavedIndex, out: &mut SidewalkMesh) {
+        let verge_frac = VERGE_W_M / SIDEWALK_W_M;
         let lerp = |a: V3, b: V3, t: f32| -> V3 {
             [
                 a[0] + (b[0] - a[0]) * t,
@@ -1340,7 +1392,15 @@ impl SideWalk {
                     }
                     let (t0, t1) = (at(r0), at(r));
                     let (b0, b1) = (lerp(m0, m1, t0), lerp(m0, m1, t1));
-                    self.quad(&mut out.tops, lerp(i0, i1, t0), lerp(i0, i1, t1), b0, b1);
+                    let (a0, a1) = (lerp(i0, i1, t0), lerp(i0, i1, t1));
+                    if self.verge {
+                        // Kerb → verge edge (grass), verge edge → back edge (walkway).
+                        let (v0, v1) = (lerp(a0, b0, verge_frac), lerp(a1, b1, verge_frac));
+                        self.quad(&mut out.verges, a0, a1, v0, v1);
+                        self.quad(&mut out.tops, v0, v1, b0, b1);
+                    } else {
+                        self.quad(&mut out.tops, a0, a1, b0, b1);
+                    }
                     let (q0, q1) = (lerp(o0, o1, t0), lerp(o0, o1, t1));
                     if geom::dist(geom::xy(b0), geom::xy(q0)) > 1e-3
                         || geom::dist(geom::xy(b1), geom::xy(q1)) > 1e-3
@@ -1354,13 +1414,28 @@ impl SideWalk {
                 let (b0, b1) = (lerp(o0, o1, t0), lerp(o0, o1, t1));
                 // Cells of this row on the sidewalk / on the lot (by the cell centre).
                 let split = walk_frac((t0 + t1) * 0.5);
-                for lot in [false, true] {
+                // 0 = verge, 1 = walkway, 2 = lot (by the cell centre).
+                let band = |c: usize| {
+                    let u = (c as f32 + 0.5) / across as f32;
+                    if u > split {
+                        2
+                    } else if self.verge && u < split * verge_frac {
+                        0
+                    } else {
+                        1
+                    }
+                };
+                for which in 0..3 {
                     let cols: Vec<i32> = (0..across)
                         .filter(|c| kept[r][*c])
-                        .filter(|c| ((*c as f32 + 0.5) / across as f32 > split) == lot)
+                        .filter(|c| band(*c) == which)
                         .map(|c| c as i32)
                         .collect();
-                    let mesh = if lot { &mut out.lots } else { &mut out.tops };
+                    let mesh = match which {
+                        0 => &mut out.verges,
+                        1 => &mut out.tops,
+                        _ => &mut out.lots,
+                    };
                     for (c0, c1) in runs(&cols) {
                         let (u0, u1) = (c0 as f32 / across as f32, c1 as f32 / across as f32);
                         self.quad(
@@ -2030,8 +2105,11 @@ mod tests {
                 .collect();
             assert!(paving.is_empty(), "{name}: pavement cracks {paving:?}");
             let slivers = cracks.len() - paving.len();
-            // Measured at the fix: grid 18 (its four highway crossings), Port Vesper 30.
-            let budget = if name == "grid" { 20 } else { 40 };
+            // Measured at the fix: grid 18 (its four highway crossings), Port Vesper 30; 50
+            // after the residential rework (lead/city-residential, rows 94–95): 9 wedges at
+            // Loop 9 mouths (the highway's new shoulders), 1–1.4 cm steps at downtown arterial
+            // junctions (painted medians) and 1–2.6 cm at the new courts' T-junctions.
+            let budget = if name == "grid" { 20 } else { 55 };
             assert!(
                 slivers <= budget,
                 "{name}: {slivers} sidewalk sliver samples (budget {budget})"

@@ -168,7 +168,7 @@ pub fn capability(car: &LoadedCar, measure: bool) -> CarCapability {
     {
         return *c;
     }
-    let c = CarCapability::measure(car);
+    let c = CarCapability::for_car(car);
     cache.lock().unwrap().push((car.def.id.clone(), c));
     c
 }
@@ -413,8 +413,9 @@ pub fn run(
                     .map(|v| v.vehicle.state());
                 if let Some(st) = st {
                     eprintln!(
-                        "t={:.2} ({:.1},{:.1}) v={:.1} vt={:.1} {:?} {:?} n={:.1}/{:.1}",
-                        sim.tick() / 240,
+                        "t={:.2} s={:.1} ({:.1},{:.1}) v={:.1} vt={:.1} {:?} {:?} n={:.1}/{:.1}",
+                        sim.tick() as f32 / 240.0,
+                        d.s,
                         st.pos[0],
                         st.pos[1],
                         st.speed_mps,
@@ -424,6 +425,15 @@ pub fn run(
                         d.n,
                         d.n_cmd
                     );
+                    if let wp_opponent::SpeedLimit::Obstacle(w) = d.limit {
+                        if let Some(a) = sim.world().agents().find(|a| a.id + 1_000_000 == w) {
+                            let f = wp_world::geom::dir_of_yaw(a.yaw);
+                            eprintln!(
+                                "    civ {} at ({:.1},{:.1}) dir ({:.2},{:.2}) v {:.1} turn {}",
+                                a.id, a.pos[0], a.pos[1], f[0], f[1], a.speed_mps, a.turn_signal
+                            );
+                        }
+                    }
                 }
             }
         }

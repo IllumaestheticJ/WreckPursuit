@@ -57,12 +57,13 @@ impl DriverProfile {
         let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
         DriverParams {
             usage: Usage {
-                lateral: lerp(0.68, 0.93, p.skill),
-                braking: lerp(0.68, 0.92, p.skill),
-                accel: lerp(0.85, 1.0, p.skill),
+                lateral: lerp(0.60, 0.95, p.skill),
+                braking: lerp(0.55, 0.95, p.skill),
+                accel: lerp(0.80, 1.0, p.skill),
             },
             lookahead_per_mps: lerp(0.45, 0.35, p.skill),
             throttle_rate_per_s: lerp(2.0, 8.0, p.skill),
+            early_brake_s: lerp(0.35, 0.0, p.skill),
             brake_error_s: lerp(0.12, 0.0, p.consistency) + lerp(0.03, 0.0, p.skill),
             line_noise_m: lerp(0.6, 0.05, p.consistency),
             pressure_sensitivity: lerp(1.5, 0.2, p.consistency),
@@ -71,7 +72,7 @@ impl DriverProfile {
             side_by_side_s: lerp(0.5, 3.0, p.aggression),
             defends: p.aggression >= 0.3,
             overtake_patience_s: lerp(2.5, 0.6, p.aggression),
-            civilian_margin_m: lerp(1.8, 1.1, p.risk),
+            civilian_margin_m: lerp(1.0, 0.6, p.risk),
             civilian_headway_s: lerp(1.6, 0.9, p.risk),
             flee_wanted_level: 1 + (3.0 * p.risk + 0.5) as u8,
             perception_ahead_m: lerp(60.0, 130.0, p.awareness),
@@ -89,6 +90,9 @@ pub struct DriverParams {
     pub lookahead_per_mps: f32,
     /// Max throttle increase per second (skill: smoother, faster pedal work).
     pub throttle_rate_per_s: f32,
+    /// How much earlier than the profile's braking point the driver brakes, s of travel
+    /// (skill: a beginner lifts early, an expert brakes at the point).
+    pub early_brake_s: f32,
     /// Std-dev of the braking point, expressed in seconds of travel (consistency, skill).
     pub brake_error_s: f32,
     /// Std-dev of the lateral line error, m (consistency).

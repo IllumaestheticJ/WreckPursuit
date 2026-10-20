@@ -197,8 +197,25 @@ menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main 
   fire. While open the menu takes every keydown (capture phase), so no game key leaks through.
 - `controlsOpen()` lets the host's rebinding panel sit on top: the menu hides and comes back when
   the panel closes.
+- **Controls** section (per-device input shaping, `src/menu/controls.ts`): a device cycle
+  (Keyboard / Gamepad / Wheel) picks the profile being edited; sliders for steering dead zone
+  (0–50 %), saturation (50–100 %), sensitivity (100 % = linear) and speed sensitivity, and dead
+  zone + saturation for accelerator, brake and clutch; "Reset device". Stored in
+  `GameSettings.controls` (old stored settings load with the defaults). Defaults: keyboard
+  0 / 100 / 100 / 75 %, gamepad 0 / 100 / 100 / 70 %, wheel 0 / 100 / 100 / 0 %, pedals 0 / 100 %.
+  The math (mirrored in Rust by the measurement suite — keep both in step):
+  `shapeSteer(x) = sign(x)·t^(1 + 2·(1 − sens))`, `t = |x| ≤ dz ? 0 : min(1, (|x| − dz) / max(1e-3, sat − dz))`;
+  `shapePedal` is the same `t` without the exponent. The host applies them after its own device
+  processing and sends `steerSpeedSensitivity` as `AssistProfile.steer_speed_sensitivity` (0 when
+  Steering help is off).
+- Live **test bars** (steering centred, throttle, braking, clutch) show the *processed* input from
+  the optional `host.inputProbe()`, polled every animation frame only while Settings is open
+  (`paintInputBars` in `src/menu/bars.ts`, shared with the testbed panel; each track carries
+  `data-value` for automation). **Test input** toggle: while on, the menu ignores navigation keys
+  (and pad directions) so the arrow keys can be held to watch the bars; Esc (pad B / Start) ends it.
 - Pure parts are unit tested (`src/menu/menu.test.ts`: storage round trip, validation, blocked
-  storage, units, key map, pad edges / repeat).
+  storage, units, key map, pad edges / repeat; `src/menu/controls.test.ts`: shaping defaults are
+  identity, dead zone, saturation, sensitivity exponent, sign, normalisation). `npm test`.
 
 ## Accessibility
 

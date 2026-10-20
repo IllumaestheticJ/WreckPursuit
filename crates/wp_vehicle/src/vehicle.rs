@@ -17,6 +17,7 @@ use crate::assists::{
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
+use crate::drift::{hold_update, DriftHold};
 use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
@@ -25,11 +26,12 @@ use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{slide_class_with_rear_lock, slide_throttle};
 use crate::steering::{
-    ackermann, body_slip, front_axle_angle, rear_axle_slip, steer_target, torque_steer,
-    update_center_angle, SteerInput, HANDBRAKE_GRACE_S,
+    ackermann, assist_mode, body_slip, front_axle_angle, rear_axle_slip, steer_target,
+    torque_steer, update_center_angle, AssistMode, DriftTuning, SteerInput, HANDBRAKE_GRACE_S,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
+use crate::throttle::{effective_smoothing, ramp_time_s, traction_trim};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
     slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
@@ -222,6 +224,14 @@ pub struct Telemetry {
     pub contact_lift_cut_mps: f32,
     /// Engine stalled (manual clutch; press the clutch to re-crank).
     pub stalled: bool,
+    /// What the slide assists are doing (drift lab readout, owner rows 90 / 91).
+    pub assist_mode: AssistMode,
+    /// Body slip angle at the CG, degrees (+ = moving toward the left of the heading).
+    pub body_slip_deg: f32,
+    /// Slide-angle envelope the drift hold helps within, degrees (row 91).
+    pub envelope_deg: f32,
+    /// Keyboard throttle smoothing in effect, 0..=1 (row 98; 0 with TCS on).
+    pub throttle_smoothing: f32,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -267,6 +277,14 @@ pub struct Vehicle {
     pub(crate) hb_grace: f32,
     /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
     pub(crate) stalled: bool,
+    /// Drift-assist tuning (dev override, see [`DriftTuning`]); not in snapshots.
+    pub(crate) drift_tuning: DriftTuning,
+    /// Drift hold state (owner row 91, [`crate::drift`]); in snapshots.
+    pub(crate) drift_hold: DriftHold,
+    assist_mode: AssistMode,
+    body_slip_deg: f32,
+    envelope_deg: f32,
+    throttle_smoothing: f32,
 }
 
 impl Vehicle {
@@ -381,6 +399,12 @@ impl Vehicle {
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
             stalled: false,
+            drift_tuning: DriftTuning::default(),
+            drift_hold: DriftHold::default(),
+            assist_mode: AssistMode::Off,
+            body_slip_deg: 0.0,
+            envelope_deg: 0.0,
+            throttle_smoothing: 0.0,
             corners,
         };
         v.converter = def
@@ -478,6 +502,34 @@ impl Vehicle {
         self.telemetry
     }
 
+    /// Worst driven wheel's slip ratio past its tyre's peak, as a fraction of the peak
+    /// (0 = at or under the peak), from the last tick (throttle smoothing, row 98).
+    fn driven_slip_excess(&self) -> f32 {
+        let driven: &[usize] = match self.def.drivetrain.layout {
+            DriveLayout::Fwd => &[0, 1],
+            DriveLayout::Rwd => &[2, 3],
+            _ => &[0, 1, 2, 3],
+        };
+        driven
+            .iter()
+            .map(|&i| {
+                let peak = self.corners[i].tire.peak_slip_ratio.max(1e-3);
+                (self.wheels[i].kappa.abs() - peak) / peak
+            })
+            .fold(0.0f32, f32::max)
+    }
+
+    /// Set the drift-assist tuning (dev override for the testbed's drift lab; see
+    /// [`DriftTuning`]). Not part of snapshots or replays.
+    pub fn set_drift_tuning(&mut self, tuning: DriftTuning) {
+        self.drift_tuning = tuning;
+    }
+
+    /// Current drift-assist tuning.
+    pub fn drift_tuning(&self) -> DriftTuning {
+        self.drift_tuning
+    }
+
     /// Current gear (-1 reverse, 0 neutral, 1.. forward).
     pub fn gear(&self) -> i8 {
         self.gearbox.gear
@@ -513,6 +565,7 @@ impl Vehicle {
         self.torque = V3::ZERO;
         self.launch.forget();
         self.hb_grace = 0.0;
+        self.drift_hold = DriftHold::default();
         self.stalled = false;
     }
 
@@ -732,6 +785,8 @@ impl Vehicle {
                 self.def.wheels[0].position_m[1] - self.com_local.y,
             ),
             handbrake_hold: self.hb_grace > 0.0,
+            tuning: self.drift_tuning,
+            hold_angle: None,
         }
     }
 
@@ -874,13 +929,45 @@ impl Vehicle {
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
         let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
-        // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical otherwise).
-        let thr_target = if st.scale < 1.0 {
-            thr_in * st.scale
-        } else {
-            thr_in
+        // Drift hold (row 91): key into the turn + throttle in a slide holds the angle.
+        let hold = {
+            let pre = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+            let max_steer = self.max_steer();
+            let pulled = input.handbrake > HANDBRAKE_ON;
+            hold_update(
+                &mut self.drift_hold,
+                &pre,
+                assists,
+                thr_in,
+                pulled,
+                max_steer,
+                dt,
+            )
         };
+        // `scale` is exactly 1.0 unless the slide throttle / hold is active (bit-identical
+        // otherwise).
+        // Keyboard throttle smoothing with TCS off (row 98, [`crate::throttle`]).
+        let smoothing = effective_smoothing(assists, self.drift_tuning.throttle_shaping);
+        let trim = if smoothing > 0.0 {
+            traction_trim(
+                smoothing,
+                self.driven_slip_excess(),
+                hold.mode == AssistMode::Hold,
+            )
+        } else {
+            1.0
+        };
+        let scale = st.scale * hold.throttle_scale * trim;
+        let thr_target = if scale < 1.0 { thr_in * scale } else { thr_in };
+        let prev_thr = self.throttle_f;
         self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+        if smoothing > 0.0 {
+            let ramp = ramp_time_s(smoothing, self.slide_class, self.gearbox.gear, v_fwd);
+            if ramp > 0.0 && self.throttle_f > prev_thr {
+                self.throttle_f = self.throttle_f.min(prev_thr + dt / ramp);
+            }
+        }
+        self.throttle_smoothing = smoothing;
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
         // Handbrake hold for the assists (steering alignment, ESC): on while pulled and for
@@ -1097,7 +1184,17 @@ impl Vehicle {
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
 
         // --- Steering ---------------------------------------------------------------------
-        let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+        let steer_in = SteerInput {
+            hold_angle: hold.angle,
+            ..self.steer_input(input.steer, v_fwd, v_left, rear_axle)
+        };
+        self.assist_mode = if hold.mode != AssistMode::Off {
+            hold.mode
+        } else {
+            assist_mode(&steer_in, assists)
+        };
+        self.envelope_deg = hold.envelope_deg;
+        self.body_slip_deg = steer_in.body_slip.to_degrees();
         let max_steer = self.max_steer();
         self.center_steer = update_center_angle(
             self.center_steer,
@@ -1375,6 +1472,10 @@ impl Vehicle {
             tcs_brake_nm: tc_brake,
             contact_lift_cut_mps: launch_cut,
             stalled: self.stalled,
+            assist_mode: self.assist_mode,
+            body_slip_deg: self.body_slip_deg,
+            envelope_deg: self.envelope_deg,
+            throttle_smoothing: self.throttle_smoothing,
         };
     }
 

@@ -28,6 +28,7 @@ use wp_world::World;
 
 use crate::bridge::CityRace;
 use crate::course::v2;
+use crate::data::RaceData;
 use crate::judge::{RaceJudge, RacePhase};
 use crate::kind::RaceKind;
 use crate::result::DnfReason;
@@ -78,7 +79,7 @@ pub struct AiEntrant {
     pub racer: EntityId,
     /// Driver personality.
     pub profile: DriverProfile,
-    /// Car limits (`CarCapability::measure` in release, `geometry_only` for quick tests).
+    /// Car limits (`CarCapability::for_car`; `geometry_only` for quick unit tests).
     pub capability: CarCapability,
 }
 
@@ -121,6 +122,17 @@ impl AiEntrants {
                 } else {
                     OpposingLanes::ForOvertaking
                 },
+                // Stay inside the judged corridor (leaving it for long is a DQ): its half
+                // width plus the rule margin, less half a metre to spare.
+                max_half_width_m: Some(
+                    race.course.corridor_half_width_m
+                        + RaceData::embedded()
+                            .rules
+                            .for_kind(kind)
+                            .common
+                            .corridor_margin_m
+                        - 0.5,
+                ),
                 ..CorridorOptions::default()
             },
             ..RaceConfig::default()
@@ -134,6 +146,11 @@ impl AiEntrants {
             })
             .collect();
         let ai_route = run_off_route(world, &race.route).unwrap_or_else(|| race.route.clone());
+        // Past the judged finish (on the run-off leg) the cars are done racing.
+        let config = RaceConfig {
+            finish_m: (!race.route.closed_loop).then_some(race.route.length_m),
+            ..config
+        };
         let field = Field::from_route(world, &ai_route, &specs, config);
         let hold = entrants
             .iter()

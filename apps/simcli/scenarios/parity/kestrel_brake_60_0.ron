@@ -1,0 +1,20 @@
+// Parity suite: FWD touring car, 60 mph, brake key (ABS, keyboard brake filter) to a stop.
+// The reference game stops harder (clip 3: ≈1.26 g, so ≈29 m); expect_pending tracks that target.
+(
+    name: "parity_kestrel_brake_60_0",
+    mode: Arcade,
+    seed: 2,
+    assists: custom((abs: true, tcs: false, esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
+    duration_s: 5.0,
+    entities: [
+        (
+            id: "car",
+            car: "kestrel_ts",
+            speed_mps: 26.82,
+            inputs: [(t_s: 0.0, input: (brake: 1.0))],
+        ),
+    ],
+    // Measured 2026-10-20: 38.7 m.
+    expect: [travel_between(from_s: 0.005, to_s: 4.9, min: 33.0, max: 44.0), metric(name: "final_speed_mps", min: -0.3, max: 0.3)],
+    expect_pending: [travel_between(from_s: 0.005, to_s: 4.9, min: 26.0, max: 32.0)],
+)

@@ -24,12 +24,13 @@ npm run typecheck
 | `src/telemetry.ts` | rolling 10 s canvas plots |
 | `src/input.ts` | keyboard ramps + Gamepad API (deadzone + steering curve, analogue pass-through), read through the bindings; release on blur / pad disconnect |
 | `src/bindings.ts` | rebindable actions, defaults, `wp.bindings.v1` load/save, display names, F1 help lines |
-| `src/ui/controls.ts` | controls panel (F9 / “controls” button): rebind keys and pad controls, deadzone / curve, reset to defaults |
+| `src/ui/controls.ts` | controls panel (F9 / “controls” button): rebind keys and pad controls, deadzone / curve, reset to defaults; per-device input shaping sliders + live test bars (same values as the game menu's Settings → Controls) |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `src/render/fx/` | crash effects: sparks, smoke / steam / tyre smoke, glass shards, skid marks, debris chips; `?fx=low\|med\|high`, `__wp.fx.setQuality()` (`docs/integration/crash-fx.md`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 | `e2e/crash_fx.mjs` | crash effects check + `FX_SHOTS=dir` screenshots (run by `e2e/run.mjs` too) |
+| `e2e/controls_settings.mjs` | `npm run e2e:controls`: per-device input shaping — keyboard defaults, AssistProfile speed sensitivity per device (keyboard 0.75 / gamepad 0.70 / wheel 0), persistence, test bars + test mode, saturation / dead zone effect, panel ↔ menu, preset highlight |
 | `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
@@ -55,6 +56,28 @@ Requires Node 22+, `wasm-pack` (`cargo install wasm-pack`) and the `wasm32-unkno
 target (installed by `rust-toolchain.toml`). `src/wasm/pkg/` is generated and gitignored.
 The e2e script uses `playwright-core` with the Chromium at `$CHROMIUM` (default: the
 preinstalled `/opt/pw-browsers/chromium-1194`).
+
+## Input shaping (Settings → Controls)
+
+Per-device profiles (keyboard, gamepad, wheel — a pad whose id mentions "wheel") from the game
+menu's `GameSettings.controls` (ui-kit `src/menu/controls.ts`). `readInput` applies the active
+device's profile after its own processing: keyboard → after the key ramps; pad → after the
+stick deadzone + steering curve. Steering goes through `shapeSteer` (dead zone, saturation,
+sensitivity exponent), each pedal through `shapePedal` (dead zone, saturation).
+
+- `steer_speed_sensitivity` of the player's AssistProfile = the device's speed sensitivity while
+  Steering help is on, 0 while it is off, in both paths of `applyAssistPreset` (named preset and
+  per-box overrides) and in `choosePreset`; re-applied when the settings change or the device
+  switches. Touch keeps `TOUCH_ASSISTS`.
+- Preset highlight (Rookie / Street / Sim): `activePreset()` in main.ts replaces
+  `sim.assistPresetOf` — the same exact comparison of damage mode + AssistProfile, except that
+  `steer_speed_sensitivity` only has to agree on on / off (> 0). Its value is a per-device control
+  setting, not part of a preset, so moving the slider keeps the preset lit.
+- `probeInput()` (input.ts) computes the same processed values from what is physically held now
+  (a raw key set tracked before any menu / panel swallows the keydown, plus the pads), with its own
+  ramps, firing nothing — the test bars of both the menu and the controls panel use it.
+- Automation: `__wp.inputProbe(nowMs?)` (pass a time for a deterministic ramp), `__wp.app.input`
+  (the processed DriverInput sent to the sim), `__wp.deviceControls()`, `__wp.activeDevice()`.
 
 ## Perf (headless Chromium, SwiftShader, real vehicle + damage)
 sim 0.09 / 0.62 / 3.0 ms per 60 Hz frame and render 0.7 / 3.4 / 9.2 ms at 1 / 8 / 24 cars;

@@ -34,6 +34,7 @@ pub mod markings;
 pub mod network;
 pub mod procgen;
 pub mod props;
+pub mod residential;
 pub mod roads;
 pub mod routes;
 pub mod signals;
@@ -139,6 +140,7 @@ fn empty_network() -> RoadNetwork {
         surfaces: Vec::new(),
         terrain: None,
         covered: Vec::new(),
+        decor: Vec::new(),
     }
 }
 
@@ -161,7 +163,12 @@ impl World {
         map.time = cfg.start_time;
         let traffic = Traffic::new(&map, cfg.traffic.clone(), cfg.seed);
         let parked = if cfg.parked_cars {
-            props::parked_cars(&map, cfg.seed)
+            // Kerbside cars (never across a driveway mouth), then the driveway cars
+            // (residential lots, playtest row 95).
+            let mut cars = props::parked_cars(&map, cfg.seed);
+            cars.retain(|c| !residential::blocks_driveway(&map.net, c.pos));
+            cars.extend(residential::driveway_cars(&map, cfg.seed));
+            cars
         } else {
             Vec::new()
         };

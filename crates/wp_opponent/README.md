@@ -12,10 +12,27 @@ gap to the player — pace is car capability × how much of it the driver dares 
 |---|---|---|
 | Corridor | `corridor` | A `wp_world::Route` resampled every 2 m with drivable left/right widths from the lane's same-direction neighbours (parking lanes never), blended through junctions. `OpposingLanes::{Never, ForOvertaking, Always}` decides whether the other direction is usable. |
 | Racing line | `line::RacingLine` | Minimum discrete curvature inside the corridor (half car width + 0.4 m from the edges), projected Gauss–Seidel run coarse-to-fine (strides 16→1). Out-in-out falls out. |
-| Speed profile | `line::SpeedProfile` | `v ≤ √(a_lat/|κ|)`, forward pass (power, falling off to top speed, friction ellipse), backward pass (braking, friction ellipse). Circuits wrap. |
-| Capability | `capability::CarCapability` | Measured once per car with `wp_vehicle::metrics` (skidpad 30 m, 100–0 braking, 0–100, top speed); `damaged()` scales it by `HandlingEffects`. |
+| Speed profile | `line::SpeedProfile` | `v ≤ √(a_lat/|κ|)`, forward pass (`line::drive_accel`: traction-limited to 22 m/s, then power-limited minus drag sized to the top speed; friction ellipse; road grade), backward pass (braking, friction ellipse, grade). Circuits wrap. |
+| Capability | `capability::CarCapability` | Measured with `wp_vehicle::metrics` (skidpad 30 m, 100–0 braking, 0–100, top speed); `for_car` reads the pre-measured `capability_table` (every car in `data/cars`, fingerprinted; falls back to `measure`) — use it in race glue, `geometry_only` is for unit tests. `damaged()` scales it by `HandlingEffects`. |
 | Driver | `profile` | `DriverProfile { skill, aggression, consistency, risk, awareness }` → `DriverParams` (table below). |
 | Race | `field::Field` | Per tick: observe (corridor position, laps, damage, heat, civilian DQ) → perceive (racers, other vehicles, civilians as obstacles in corridor coordinates) → decide (tactics, lateral target with hard side constraints, speed target) → track with `wp_world::drive::DriveController` (machine D's pure pursuit + PID, shared with physical traffic). Decisions at 60 Hz. |
+
+### Driving (playtest row 99, `docs/integration/opponent-pace.md`)
+- **Steering**: pure pursuit from the pose 0.2 s ahead (position + velocity, heading + yaw
+  rate: response lag), lookahead `lookahead_per_mps` + 0.3 s per m/s above 25 m/s, and a
+  curvature feedforward that aims κ·L²/8 inside in tight corners (cars settle wide of a
+  pursuit target there).
+- **Speed**: P control on the target plus the profile's own slope (`v·dv/ds`) as braking
+  feedforward, so braking starts at full strength at the braking point.
+- **Assists**: AI racers drive with `AssistProfile::ai()` (ABS, TCS, ESC, no filtering, 1:1
+  steering — untouched by the keyboard steering helpers). Measured: ESC off makes them spin
+  (Hollins 70 → 115 s, 18 wall hits), TCS off is slower.
+- **Rejoin** only when off the *road* (opposing lanes included) or facing > 60° off, never on
+  the grid's first 30 m; 7 m/s when misaligned up to 17 m/s when pointing along the road.
+- **Recovery**: stuck 2 s → reverse 1.6 s; nose to nose with a standing car in the opposing
+  lanes for 2 s → reverse 3 s; reversing is capped at 3 m/s and stops when anything is close
+  behind; a reversing racer counts as unstable (others give it room). Finished cars of a
+  point-to-point race park 25 m before the corridor ends.
 
 ### Tactics
 - **Follow**: racing line + this braking zone's line noise; time-gap following (gap opened at
@@ -46,8 +63,18 @@ gap to the player — pace is car capability × how much of it the driver dares 
 - **Rejoin** after an off (outside the corridor by 1 m or facing > 60° off): 7 m/s cap, waits for
   cars arriving from behind. **Reverse** when stuck against something for 2 s.
 - **Civilians**: obstacles with a margin that grows with my speed (0.4 m at a crawl, full
-  `civilian_margin_m` at 15 m/s+), crossing traffic extrapolated 3 s, **junction awareness**
-  (stay able to stop before a junction box while a civilian is heading into or is inside it).
+  `civilian_margin_m` at 15 m/s+ — a car in the next lane is not in my way), crossing traffic
+  extrapolated 3 s, passed like anyone (planned 3.5 s ahead at the closing speed, the next
+  lane is enough). Physical traffic and police cars are passed with the same margins.
+  Anything standing still for 8 s counts as **parked** (passable on the opposing lanes where
+  the corridor has them; a car stuck in a traffic deadlock stays put for minutes). Perception
+  covers the whole road, opposing lanes included. **Junction awareness**: my swept strip
+  through the box (my lane band × box length + my car) against each civilian's straight
+  course through it; a civilian blocks only if its window in the strip overlaps mine (from
+  reaching the box, accelerating, to clearing it) within ±0.6 × `civilian_headway_s`. Cars
+  waiting at their own stop line, oncoming cars going straight on (no turn signal) and
+  crossings that are over before I arrive no longer hold racers; a car signalling a turn gets
+  a lane more of strip.
   Touching a civilian while driving into it (throttle on, moving toward it) = `Disqualified`
   (the car then drives on at cool-down pace — a car parked on the road would gridlock
   traffic). A car shoved into a civilian (by police) is not at fault.
@@ -93,9 +120,10 @@ gap to the player — pace is car capability × how much of it the driver dares 
 
 | Param | 0 → 1 | Knob |
 |---|---|---|
-| `usage.lateral` | 0.68 → 0.93 of measured lateral g | skill |
-| `usage.braking` | 0.68 → 0.92 of measured braking | skill |
-| `usage.accel` | 0.85 → 1.0 | skill |
+| `usage.lateral` | 0.60 → 0.95 of measured lateral g | skill |
+| `usage.braking` | 0.55 → 0.95 of measured braking | skill |
+| `usage.accel` | 0.80 → 1.0 | skill |
+| `early_brake_s` | 0.35 → 0 s earlier than the braking point | skill |
 | `lookahead_per_mps` | 0.45 → 0.35 s (pure-pursuit, 5–30 m) | skill |
 | `throttle_rate_per_s` | 2 → 8 | skill |
 | `brake_error_s` (σ) | 0.15 → 0 s (consistency 0.12→0 + skill 0.03→0) | consistency, skill |
@@ -106,12 +134,12 @@ gap to the player — pace is car capability × how much of it the driver dares 
 | `side_by_side_s` | 0.5 → 3.0 s into a braking zone | aggression |
 | `defends` | aggression ≥ 0.3 | aggression |
 | `overtake_patience_s` | 2.5 → 0.6 s | aggression |
-| `civilian_margin_m` | 1.8 → 1.1 m (at speed) | risk |
+| `civilian_margin_m` | 1.0 → 0.6 m (at speed; 0.4 m creeping) | risk |
 | `civilian_headway_s` | 1.6 → 0.9 s | risk |
 | `flee_wanted_level` | 1 → 4 | risk |
 | uses opposing lanes to pass (open roads) | risk ≥ 0.5 | risk |
 | stops for red lights (open roads) | risk < 0.35 | risk |
-| `perception_ahead_m` | 60 → 130 m | awareness |
+| `perception_ahead_m` | 60 → 130 m, never under 1.3× the braking distance + 30 m | awareness |
 | `mirror_range_m` | 12 → 45 m | awareness |
 | junction watch radius | 25 → 45 m | awareness |
 
@@ -161,7 +189,15 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
 - Same seed ⇒ same sim + field hash; different seed ⇒ different field hash.
 - Wanted racer abandons and flees; others keep racing.
 - Open roads + traffic: a wanted-level event read from the sim's event stream makes a racer
-  abandon and drive ≥ 250 m of a flight route ending > 300 m from the police, no contacts.
+  abandon and drive ≥ 250 m in the minute after the call (≥ 150 m when the sim's patrols
+  catch it first) on a flight route ending > 300 m from the police, no contacts. The others
+  may earn heat of their own at race pace past the live patrols and flee for it.
+- Junction gap acceptance unit test: cross traffic arriving together with me holds me; a
+  crossing already through, one arriving well after me, and an oncoming car going straight on
+  do not; one signalling a turn does.
+- `tests/capability_table.rs`: every car in `data/cars` has a table row with a matching
+  fingerprint (debug and release); release: rows within 2 % of a fresh `measure`
+  (`WP_WRITE_CAPS=1` regenerates).
 - Open roads, 25 % traffic, 90 s: no civilian contact, no racer collision, all progress, nobody
   stuck (< 8 s standing with nothing in the way), no queue longer than 90 s.
 - **Live police** (`live_police_chase_ends_in_escape_or_capture_without_stuck_cars`): open
@@ -176,22 +212,29 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
   same sedan, a 0.8-skill driver behind three 0.35s, 4 laps, seeds 1–4 — with slipstream it
   gains places in every seed (finishes 1st/2nd/3rd/2nd), without it finishes last every time;
   zero AI contacts.
-- Ignored sweep `sweep_open_roads_progress` (8 seeds): reading signals raised total open-road
-  progress from 15.9 km to 18.0 km (+13 %), no civilian contact, no AI collision.
+- Ignored sweep `sweep_open_roads_progress` (8 seeds; `WP_SWEEP_SEED=n` for one, with its
+  contacts/DQs): reading signals raised total open-road progress from 15.9 km to 18.0 km
+  (+13 %); row 99 (junction gap acceptance, traffic passing, parked-after-8 s) from 16.9 km
+  to 26.3 km (+55 %), longest wait 66 → 31 s; no civilian contact, no AI collision, nobody
+  stuck in any seed.
+- Pace: `crates/wp_race/tests/opponent_pace.rs` (`pace_sweep`, ignored: every picker race ×
+  skill vs the car's ideal time with loss attribution; `pace_scenarios_hold_their_ranges`,
+  release: the `apps/simcli/scenarios/opponent/pace_*.ron` ranges).
 
 Debugging: `WP_TRACE=<grid index>` prints that racer 4× per second (position, speed, speed
 target, what limits it, tactic, lateral position / command, gap ahead).
 - `determinism_lint`: the workspace lint over this crate.
 
-Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with warnings
-(simcli has no city loading / `follow_route` yet); their race checks are `expect_pending`.
+Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — simcli cannot drive AI
+racers, so their race checks are `expect_pending`; `pace_*.ron` are raced and checked by
+`wp_race`'s `opponent_pace.rs` (see above).
 
 ## Perf (native, release, cloud container 4 vCPU)
 | What | Measured | Budget |
 |---|---|---|
 | `Field::tick`, 8 racers, closed roads | 0.014 ms per 60 Hz frame (0.002 ms/racer) | — (police: 0.5 ms) |
 | same, open roads with 25 % traffic | 0.11 ms per frame | — |
-| `CarCapability::measure` | ~0.3 s per car (cache it) | load time |
+| `CarCapability::measure` | ~0.3 s per car (`for_car` reads the table instead: free) | load time |
 | Whole sim, 8 cars + city + AI | 0.09 ms per physics tick | — |
 
 ## Known gaps
@@ -200,9 +243,14 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
   near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car
   don't catch each other (the pace difference is smaller than the gap). Late-braking passes
   (the other real-world lever) are not implemented.
-- Open-road racing: racers wait out long reds (the arterial corner's red is ~45 s) — correct,
-  but it caps pace; progress ≈ 0.5–0.8 km per 90 s with 25 % traffic. Rare low-speed nudges in
-  jams.
+- Open-road racing: careful drivers (risk < 0.35) wait out long reds; traffic still dominates
+  open-road times (see the pace doc: a civilian rolling road block over both lanes of a
+  divided road cannot be passed legally). Rolling road blocks and world deadlocks (three
+  civilians waiting on each other at an unsignalised junction; a responding police unit
+  standing across a hairpin) still hold racers — reported to D / E.
+- The "ideal" pace reference uses the profile's own acceleration model (mean 0–100 km/h
+  acceleration up to 22 m/s, power-limited above); it is optimistic for slow-revving launches
+  (grid sprint: the AI sits ~0 % over it, i.e. the model, not the AI, is the bound there).
 - A police car parked with its siren on freezes nearby junctions (civilians within 60 m never
   enter them). Racers now pass the pulled-over queue on the opposing lanes, but cross traffic
   stuck inside the box can still hold them for tens of seconds (reported to D / E).

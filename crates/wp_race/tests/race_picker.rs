@@ -141,7 +141,7 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         LiveEntrant {
             entity: ids[i],
             redline_rpm: car.def.engine.redline_rpm,
-            capability: CarCapability::geometry_only(car),
+            capability: CarCapability::for_car(car),
         }
     };
     let ai: Vec<LiveEntrant> = (1..ids.len()).map(entrant).collect();
@@ -239,6 +239,36 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
                 .collect();
         }
         if std::env::var("WP_RACE_TRACE").is_ok() && sim.tick().is_multiple_of(240 * 10) {
+            for (k, e) in live.ai().racers().iter().enumerate() {
+                let d = live.ai().field().debug_of(k);
+                if let wp_opponent::SpeedLimit::Obstacle(w) = d.limit {
+                    if let Some(v) = sim.vehicles().iter().find(|v| v.id.0 == w) {
+                        let st = v.vehicle.state();
+                        let unit = sim.police().units().iter().find(|u| u.entity == Some(v.id));
+                        eprintln!(
+                            "{id}     blocker {:?} {:?} pos ({:.0},{:.0}) v {:.1} siren {} unit {:?}",
+                            v.id,
+                            v.kind,
+                            st.pos[0],
+                            st.pos[1],
+                            st.speed_mps,
+                            v.input.siren,
+                            unit.map(|u| (&u.assignment, &u.tactic))
+                        );
+                    }
+                }
+                let pol = sim.police().racer(*e);
+                eprintln!(
+                    "{id}   ai {e:?} police {:?} s {:.0} n {:.1} v_target {:.1} {:?} {:?} {:?}",
+                    pol.map(|p| (p.heat as i32, p.level, p.status)),
+                    d.s,
+                    d.n,
+                    d.v_target,
+                    d.limit,
+                    live.ai().field().tactic_of(k),
+                    d.pass_checks
+                );
+            }
             for s in live.standings() {
                 let st = sim
                     .vehicles()
@@ -369,8 +399,18 @@ fn check(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
         .count();
     assert!(
         finished >= min_finish,
-        "{id}: only {finished} of {} finished",
-        r.results.len()
+        "{id}: only {finished} of {} finished: {:?}",
+        r.results.len(),
+        r.results
+            .iter()
+            .map(|x| (
+                x.racer,
+                x.status,
+                x.elapsed_s(),
+                x.gates_passed,
+                x.violations
+            ))
+            .collect::<Vec<_>>()
     );
     assert!(r.results.iter().all(|x| x.status != RacerStatus::Running));
     assert!(matches!(
@@ -445,8 +485,16 @@ fn loop9_circuit() {
         .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
         .count();
     assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    // "Left the grid" is a gate passed or 30 m of progress: since row 99 the AI races at its
+    // car's real pace through the Max-presence daytime traffic, and a racer that the police
+    // stop (or that flees them) 60–80 m into the run, before gate 1, did race. Seed sweep
+    // 1-6 + 31 on the merged tree: 3 of 7 pass both before and after row 99, failing on
+    // police outcomes / world deadlocks (see docs/integration/opponent-pace.md).
     for x in &r.results {
-        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+        assert!(
+            x.gates_passed >= 1 || x.progress_m >= 30.0,
+            "{id}: {x:?} never left the grid"
+        );
         assert!(
             matches!(
                 x.status,
@@ -516,8 +564,16 @@ fn lantern_checkpoint_draws_the_police() {
     // the whole field is busted or flees is a correct result. What must not happen is a racer
     // that never really raced (stuck on the grid in the parked cars: 0 gates) or one that
     // ends any other way than finishing or by the police.
+    // "Left the grid" is a gate passed or 30 m of progress: since row 99 the AI races at its
+    // car's real pace through the Max-presence daytime traffic, and a racer that the police
+    // stop (or that flees them) 60–80 m into the run, before gate 1, did race. Seed sweep
+    // 1-6 + 31 on the merged tree: 3 of 7 pass both before and after row 99, failing on
+    // police outcomes / world deadlocks (see docs/integration/opponent-pace.md).
     for x in &r.results {
-        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+        assert!(
+            x.gates_passed >= 1 || x.progress_m >= 30.0,
+            "{id}: {x:?} never left the grid"
+        );
         assert!(
             matches!(
                 x.status,

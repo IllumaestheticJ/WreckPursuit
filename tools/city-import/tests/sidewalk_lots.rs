@@ -42,7 +42,7 @@ enum Kind {
 fn kind_of(material: &str) -> Kind {
     match material {
         "asphalt" | "highway_concrete" | "parking" | "bus_lane" => Kind::Paved,
-        "sidewalk" => Kind::Sidewalk,
+        "sidewalk" | "verge" => Kind::Sidewalk,
         "sidewalk_corner" => Kind::Corner,
         "lot" => Kind::Lot,
         // The slope from a lot's outer edge into the ground.
@@ -313,6 +313,8 @@ impl BackIndex {
 /// Rays straight out from every sidewalk back edge (see the module doc).
 fn back_edges(map: &CityMap, phys: &wp_sim::PhysicsWorld, visual: &Visual) -> Report {
     let blds = Buildings::new(&map.net.buildings);
+    // Hedges, fences and tree trunks on the lots and verges: solid, a ray stops there.
+    let decor = wp_world::residential::SolidDecorIndex::new(&map.net, 0.05);
     let mut rep = Report::default();
     let (mut rays, mut pulled, mut decks) = (0usize, 0usize, 0usize);
     for seg in back_segments(map) {
@@ -328,7 +330,7 @@ fn back_edges(map: &CityMap, phys: &wp_sim::PhysicsWorld, visual: &Visual) -> Re
             // the corner fill here instead (checked from the neighbouring samples).
             let inner = at(-0.1);
             let on_walk = matches!(visual.top(inner, z_back + 1.0), Some((z, Kind::Sidewalk)) if (z - z_back).abs() < 0.03);
-            if !on_walk || blds.contains(inner) {
+            if !on_walk || blds.contains(inner) || decor.contains(inner) {
                 pulled += 1;
                 continue;
             }
@@ -354,8 +356,8 @@ fn back_edges(map: &CityMap, phys: &wp_sim::PhysicsWorld, visual: &Visual) -> Re
             while d <= VERGE_M + 1e-3 {
                 let q = at(d);
                 d += 0.25;
-                if blds.contains(q) {
-                    break; // reached the wall
+                if blds.contains(q) || decor.contains(q) {
+                    break; // reached the wall (or a hedge / fence / tree trunk)
                 }
                 let from = ref_z + 1.0;
                 let vis = visual.top(q, from);

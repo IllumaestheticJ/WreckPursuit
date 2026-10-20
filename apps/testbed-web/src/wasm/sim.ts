@@ -242,6 +242,11 @@ export const sim = {
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
   engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
+  /** Drift-assist tuning (drift lab dev override; 9 values, see wp_wasm DRIFT_TUNING_FIELDS). */
+  setDriftTuning: (entity: number, values: Float32Array): void => wasm.set_drift_tuning(entity, values),
+  driftTuning: (entity: number): number[] => Array.from(wasm.drift_tuning(entity)),
+  /** [body slip °, assist mode (0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded), envelope °, throttle smoothing in effect]. */
+  driftState: (entity: number): number[] => Array.from(wasm.drift_state(entity)),
   /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
   assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
   /** Damage mode + assists of a one-click preset for a driver on `source`. */

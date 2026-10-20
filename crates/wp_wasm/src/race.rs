@@ -317,7 +317,7 @@ impl RaceRun {
             Ok(LiveEntrant {
                 entity: ids[i],
                 redline_rpm: car.def.engine.redline_rpm,
-                capability: CarCapability::geometry_only(car),
+                capability: CarCapability::for_car(car),
             })
         };
         let player = entrant(0)?;

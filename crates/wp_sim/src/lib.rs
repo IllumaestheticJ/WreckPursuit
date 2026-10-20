@@ -202,6 +202,9 @@ pub struct Sim {
         rapier3d::prelude::RigidBodyHandle,
         rapier3d::prelude::ColliderHandle,
     )>,
+    /// The bodies of `resting_props` (raw handle parts), for the per-tick "did one start
+    /// moving" test.
+    resting_bodies: std::collections::BTreeSet<(u32, u32)>,
     /// Weather (`None` = none: dry road, clear air), see [`Sim::set_weather`].
     weather: Option<weather_link::WeatherLink>,
 }
@@ -233,6 +236,7 @@ impl Sim {
             tool_bodies: Vec::new(),
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
+            resting_bodies: Default::default(),
             props_settle_until: 0,
             weather: None,
         }
@@ -362,6 +366,7 @@ impl Sim {
             self.props.add(body, prop.pos, radius);
             if hilly {
                 self.resting_props.push((body, ch));
+                self.resting_bodies.insert(body.into_raw_parts());
             }
         }
         self.props_settle_until = self.tick + PROP_SETTLE_TICKS;
@@ -419,7 +424,24 @@ impl Sim {
             return;
         }
         let bodies = &self.physics.bodies;
+        // Only an awake body can be moving: look among the awake set (the vehicles and the
+        // few props in motion) instead of reading every resting prop's body each tick (~3800
+        // in Port Vesper, ~11 % of the browser sim step). The scan below runs only on a tick
+        // where one of them did start moving, so the result is the same.
+        let moving = |b: &rapier3d::prelude::RigidBodyHandle| {
+            bodies
+                .get(*b)
+                .is_some_and(|rb| !rb.is_sleeping() && rb.linvel().length() > 0.5)
+        };
+        if !self
+            .physics
+            .active_bodies()
+            .any(|b| self.resting_bodies.contains(&b.into_raw_parts()) && moving(&b))
+        {
+            return;
+        }
         let colliders = &mut self.physics.colliders;
+        let resting_bodies = &mut self.resting_bodies;
         self.resting_props.retain(|(b, c)| {
             let awake = bodies
                 .get(*b)
@@ -428,6 +450,7 @@ impl Sim {
                 if let Some(col) = colliders.get_mut(*c) {
                     col.set_collision_groups(rapier3d::prelude::InteractionGroups::all());
                 }
+                resting_bodies.remove(&b.into_raw_parts());
             }
             !awake
         });
@@ -704,6 +727,18 @@ impl Sim {
     /// Set a vehicle's assist profile.
     pub fn set_assists(&mut self, id: EntityId, assists: AssistProfile) -> Result<(), SimError> {
         self.slot_mut(id)?.assists = assists;
+        Ok(())
+    }
+
+    /// Set a vehicle's drift-assist tuning (dev override for the testbed's drift lab, owner
+    /// rows 90 / 91 / 98; see `wp_vehicle::DriftTuning`). Not recorded in replays or
+    /// snapshots: a tuned session does not replay bit-exactly.
+    pub fn set_drift_tuning(
+        &mut self,
+        id: EntityId,
+        tuning: wp_vehicle::DriftTuning,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.vehicle.set_drift_tuning(tuning);
         Ok(())
     }
 

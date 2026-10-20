@@ -644,15 +644,20 @@ impl PoliceSystem {
             .position(|u| u.id == me)
             .unwrap_or(0);
         // Lost inside a tunnel / covered road: hold its portals (PVPD doctrine §5: units go to
-        // the portals, nobody chases inside), each unit the portal nearer to it (sent to the far
-        // one, a unit drives through the tunnel).
+        // both portals, nobody chases inside). Each unit takes the portal on its side (a unit
+        // sent to the far one drove through the tunnel to get there and found him inside:
+        // Founders Cut after the residential courts changed the road graph, lead/city-
+        // residential); equally near: alternate by unit.
         if let Some(k) = self.cover_at(p) {
-            let [a, b] = self.covers[k].outside_portals(PORTAL_HOLD_M);
-            let me_pos = self.units[i].body.pos;
-            let q = if dist(me_pos, a) <= dist(me_pos, b) {
-                a
+            let portals = self.covers[k].outside_portals(PORTAL_HOLD_M);
+            let here = self.units[i].body.pos;
+            let (d0, d1) = (dist(here, portals[0]), dist(here, portals[1]));
+            let q = if (d0 - d1).abs() < 1.0 {
+                portals[ordinal % 2]
+            } else if d0 < d1 {
+                portals[0]
             } else {
-                b
+                portals[1]
             };
             let n = self.graph.nearest_node(q)?;
             return Some((n, self.graph.node(n).pos));
@@ -825,6 +830,9 @@ impl PoliceSystem {
                         crate::dispatch::IncidentKind::Crash => None,
                     };
                     if let Some((rp, rv)) = follow {
+                        // Following a reported car to see who it is, not chasing it: siren
+                        // quiet (it comes with a pursuit), same driving (`Unit::quiet`).
+                        self.units[i].quiet = true;
                         let u = &self.units[i];
                         // The racer coming straight at it: pull over to the right and stop,
                         // let it pass, then follow (no head-on meeting on a narrow road).
@@ -838,8 +846,13 @@ impl PoliceSystem {
                             let room = self.room_behind(i, crate::stuck::YIELD_REVERSE_M);
                             let u = &mut self.units[i];
                             u.unstick.yield_s += tdt;
-                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S && room {
+                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S
+                                && room
+                                && u.unstick.may_turn(now)
+                            {
                                 u.unstick.yield_s = 0.0;
+                                let pos = u.body.pos;
+                                u.unstick.note_turn(pos, now);
                                 let steer = -u.unstick.last_steer.signum();
                                 u.unstick.phase = crate::stuck::Phase::Reverse {
                                     from: u.body.pos,
@@ -940,6 +953,8 @@ impl PoliceSystem {
                             lane_offset_m: LANE_OFFSET_M,
                         });
                     }
+                    // On the way to the call: siren sounding again.
+                    self.units[i].quiet = false;
                     let lim = self.limit_at(self.units[i].body.pos);
                     self.units[i].cmd.speed_mps = lim * p.respond_speed_factor;
                     // Meeting the racer at a junction means waiting short of it, not driving
