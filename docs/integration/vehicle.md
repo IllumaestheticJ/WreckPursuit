@@ -979,6 +979,16 @@ anti-stall). Letting the clutch up in 1st at idle on the flat creeps away withou
 **Snapshot** format 7 (handbrake hold + stall flag). **Perf:** unchanged (no new per-tick
 queries). **Goldens:** re-recorded in `[bless]` 4b56578 (+ roster diff hash, sperber_32 only).
 
+**Engine below idle after a handbrake pull (lead follow-up).** junkyard_beater, keyboard:
+750 rpm (idle 850; 572 with H's lead/round12 data). Not the declutch itself (the hold idles at
+2600+ rpm): after release the scrubbed FWD fronts slowed under the still-rolling car, the
+automatic clutch judged "rolling" from ground speed only, and the coasting downshift's slow
+clutch release bypassed the anti-stall. Now "rolling" is the slower of ground and driven-wheel
+speed, and mid-shift the automatic clutch opens at once off the throttle below 1.2 × idle.
+After: beater 969 / 852 / 995 rpm (keyboard / gamepad / wheel); every car in
+`tests/handbrake.rs` (beater added) holds ≥ idle. The live_police_chase test now passes on
+ws/vehicle too. Goldens: `[bless]` (braking scenarios move).
+
 **Checks (rows 56–72 push):** fmt, clippy `-D warnings`, determinism lint (0 errors), wasm
 build, testbed `tsc` + e2e, native == wasm on the vehicle / golden / sidewalk scenarios, all
 scenarios pass except `city_blocked_parked_player_grid` and `world_traffic_soak_observer`
