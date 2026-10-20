@@ -120,6 +120,11 @@ pub trait NetSim {
     fn police_unit(&self, _id: EntityId) -> Option<UnitId> {
         None
     }
+    /// Whether `p` is inside a tunnel / covered road (`wp_world::World::covered_at`): the
+    /// captain map stops updating a racer there. Default: never.
+    fn covered_at(&self, _p: [f32; 3]) -> bool {
+        false
+    }
 }
 
 /// [`NetSim`] over the real `wp_sim::Sim`.
@@ -531,6 +536,10 @@ impl NetSim for WpSim {
 
     fn police_unit(&self, id: EntityId) -> Option<UnitId> {
         self.slot(id).and_then(|v| v.police_unit)
+    }
+
+    fn covered_at(&self, p: [f32; 3]) -> bool {
+        self.sim.world().covered_at(p).is_some()
     }
 }
 
