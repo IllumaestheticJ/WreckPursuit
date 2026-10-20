@@ -136,3 +136,65 @@ check failed once under that load and passes alone, on this branch and on `lead/
 ## Contract change requests
 
 None beyond the approved amendment.
+
+## Row 117 — 3rd gear held a constant rpm while accelerating (auto clutch), 2026-10-20
+
+**Cause** (`drivetrain::auto_clutch_update`). The automatic clutch counted as "rolling" only
+while the ground-implied gearbox speed was at least 90 % of the launch rpm (idle + throttle ×
+45 % of the idle → redline span). After every shift, in a tall gear at low or moderate speed,
+that test failed. The clutch then dropped back into its centrifugal launch slip and pinned the
+engine at the launch rpm while the car accelerated: a "CVT" feel. The reference's auto clutch is
+fully engaged once moving, so the revs follow road speed and bog in a tall gear rather than
+slip.
+
+**Fix.**
+- An engaged clutch stays engaged in any gear while the ground keeps the gearbox input above
+  1.2 × idle (`AUTO_CLUTCH_HOLD_IDLE_FRAC`, the existing anti-stall line).
+- In 3rd and up (`AUTO_CLUTCH_TALL_GEAR`) the clutch also engages fully (10/s) as soon as it is
+  rolling above that line.
+- Launch slip remains only for pulling away with the clutch open: from rest, after a stop, after
+  a handbrake declutch, or in 1st / 2nd / reverse below the launch band.
+- Anti-stall is unchanged: below 1.2 × idle the clutch slips or opens as before.
+
+I judge "moving" by the ground-implied input rpm (the slower of road speed and the driven
+wheels) instead of a fixed ~8 km/h. That is the same signal the anti-stall already uses, and it
+adapts to the gear.
+
+**Tests** (`crates/wp_vehicle/tests/auto_clutch.rs`, on `rampart_50`, `kestrel_ts` and
+`debug_sedan`):
+- **3rd-gear pull from 40 km/h, full throttle.** The clutch is fully engaged in < 0.2 s, rpm
+  rises monotonically, and the engine stays within 8 % of the road-speed rpm. The old code slipped
+  2.4 s in `rampart_50`.
+- **1st-gear launch from rest.** It still slips up to the launch rpm.
+- **Full-throttle run with the automatic box.** No upshift slips longer than the shift time +
+  0.15 s. The test runs with TCS Full; see the note below.
+- Unit cases are in `drivetrain::tests::auto_clutch_launch_control`.
+
+**Effects / [bless].** Every scenario where an auto-clutch car accelerates in a gear above the
+launch band changes its hashes: 37 golden files (vehicle accel / brake, smoke, race, crash
+run-ups, city / police / traffic, parity). All expectations still pass except one, widened:
+`police_tunnel_escape_founders_cut_control` now captures at 111.7 s (was ~129 s). Police units
+pull through their gears without the slip, and the window starts at 100 s instead of 115 s;
+the scenario's point, captured and never escaped, is unchanged. In the parity table,
+`rampart_50` TCS Full 0–60 mph went 5.81 → 6.04 s: the slip had been acting as a clutch kick in
+2nd, and now the revs follow road speed. TCS Off times are unchanged.
+
+**Still open (reported earlier, not fixed here).** With TCS Off the automatic box upshifts on
+wheelspin, because it judges by driven-wheel speed. At walking pace in 2nd the clutch then
+launch-slips again, which is correct for a car that slow.
+
+**New reds after this change, outside `wp_vehicle` (traced, not fixed here):**
+`wp_race::race_picker::grid_highway_sprint` (2 of 4 finished) and
+`wp_wasm::race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
+(race not over in 120 s). Both pass without the clutch change, and both fail the same way.
+- The clutch change shifts the race (cars are quicker out of corners), so in this run the
+  autopilot car gets wanted and **flees**.
+- The fled car then parks in the racing lane at ~372 m. The opponent AI holds handbrake +
+  brake; its auto-reverse asks for reverse with the clutch held open by the handbrake declutch.
+- A racer behind it brakes to a stop 7 m back and waits forever: no go-around for a stationary
+  racer.
+
+The vehicle is doing what it is told (traced throttle, brake, handbrake, gear, clutch).
+"Fled racer stops instead of driving away" is the same bug as the pre-existing red
+`wp_opponent::race::wanted_ai_racer_flees_police_through_the_city` ("drove only 167 m after the
+call"). Owner: `wp_opponent` (flee driving + passing a stopped racer).

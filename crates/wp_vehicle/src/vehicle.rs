@@ -35,7 +35,8 @@ use crate::suspension::{
 };
 use crate::tire::{
     combined_forces_spin, combined_forces_weighted, load_sensitive_mu, low_speed_lateral,
-    pneumatic_trail, relax, slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    pneumatic_trail, relax, slip_angle, slip_ratio, spin_side_floor, surface_grip, SpinSideFloor,
+    SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
 };
 use crate::TireDb;
 
@@ -53,8 +54,8 @@ pub const HANDBRAKE_ON: f32 = 0.1;
 pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
 /// The automatic clutch opens during a shift, off the throttle, when the driven wheels turn
 /// the clutch slower than this fraction of idle (the same threshold as
-/// `drivetrain::auto_clutch_update`'s "rolling").
-const AUTO_CLUTCH_OPEN_FRAC: f32 = 1.2;
+/// `drivetrain::auto_clutch_update`'s anti-stall line).
+const AUTO_CLUTCH_OPEN_FRAC: f32 = crate::drivetrain::AUTO_CLUTCH_HOLD_IDLE_FRAC;
 /// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
@@ -1177,6 +1178,7 @@ impl Vehicle {
                 self.def.engine.redline_rpm,
                 thr_in,
                 self.launch_torque_ratio,
+                self.gearbox.gear,
                 dt,
             )
         } else {
@@ -1974,7 +1976,15 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = forces(w.kappa, alpha, fz, grip);
-            let fy = fy * side_scale;
+            // Side-force floor under heavy drive wheelspin (shipped default; lab can A/B).
+            let floor = match car_tune {
+                Some(t) => SpinSideFloor {
+                    floor: t.side_floor,
+                    ..SPIN_SIDE_FLOOR
+                },
+                None => SPIN_SIDE_FLOOR,
+            };
+            let fy = spin_side_floor(tire, w.kappa, alpha, fz, grip, fy, &floor) * side_scale;
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,
                 tire.load_sensitivity,

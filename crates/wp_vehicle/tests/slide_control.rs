@@ -38,7 +38,11 @@ fn keyboard_power_oversteer_exit_is_recoverable() {
     // (docs/reference/wreckfest-keyboard.md "Letting go of the steering mid-drift"), so the
     // naive "let go and wait" driver is not expected to recover there.
     let _ = keyboard_no_tcs;
-    for a in [AssistProfile::keyboard_default()] {
+    let tcs_on = AssistProfile {
+        tcs: wp_contracts::TcsLevel::Full,
+        ..AssistProfile::keyboard_default()
+    };
+    for a in [tcs_on] {
         for id in ["rampart_50", "lucciola_350"] {
             for react in [0.3, 0.8] {
                 let r = exit(id, &a, DriverStyle::Keyboard, 0.7, react);
@@ -151,11 +155,13 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // forward gear; a drivetrain change — the pivot aid itself is off on the wheel preset). The
     // wheel preset has countersteer_help 0, so none of the slide code may change a single bit.
     // (With no help the naive driver spins: full sim, no safety net.)
+    // Re-recorded [bless] for the spin side-force floor (a tyre change: these unassisted
+    // exits spin the rears past κ 0.3).
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0x310628402e1e8588_u64),
-        ("rampart_50", 0.7, 0.8, 0x6090d6f8ac1e1867),
-        ("lucciola_350", 0.5, 0.3, 0x5738bd937a260a7a),
-        ("lucciola_350", 0.7, 0.8, 0xf456ccc8a108d183),
+        ("rampart_50", 0.5, 0.3, 0x47b38256dec45911_u64),
+        ("rampart_50", 0.7, 0.8, 0x0a916550690ab69c),
+        ("lucciola_350", 0.5, 0.3, 0xf420a4432bbd3f5d),
+        ("lucciola_350", 0.7, 0.8, 0x2baa1d89911eeb26),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

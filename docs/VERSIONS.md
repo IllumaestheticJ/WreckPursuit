@@ -25,5 +25,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.16 | preview | Brake dive cut (anti-dive geometry + damping on 5 cars), racers on the minimap, AI creeps past parked police, junction permit fix (civilian crash), siren pull-over to the kerb |
 | 0.12.17 | preview | Race grids inside the paved lanes, police give way to racers and look before turning (Hollins hairpin), goldens re-blessed; all race tests green |
 | 0.12.18 | preview | TCS + ABS Off / Half / Full (presets Rookie F/F, Street H/F, Sim Off/Half), TCS Off = raw throttle, handbrake pivot aid (owner-approved, keyboard/gamepad), auto clutch no longer drags below idle when rolling back |
-| 0.12.19 | preview | (next) |
+| 0.12.19 | preview | RWD cars no longer spin off the line on cambered roads (spin side-force floor), auto clutch fully engaged once moving (no constant-rpm slip in tall gears) |
+| 0.12.20 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
