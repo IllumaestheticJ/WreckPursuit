@@ -60,3 +60,32 @@ The lap: a 57 s arena lap ("Madman Stadium", Last Man Standing) in a heavy rear-
 4. Short taps (0.1–0.4 s) are used to adjust the angle. They need to have a visible but small effect.
 5. Handbrake taps of ~0.4 s start drifts; the catch must be quick (row 108).
 6. No brake in this kind of driving, so lift and throttle carry the speed control.
+
+## Clip 2 analysis (2026-10-20, owner race lap)
+
+The lap: a 92 s street-circuit race (lap 1/3) in a lighter rear-drive sports car (#44), arrow keys, Space = handbrake. Gears 1–6, up to ~110 mph.
+
+**Inputs**
+
+| | |
+|---|---|
+| Throttle | held **73 %**; median press 1.0 s, up to 9 s |
+| Brake | 8 % (8 presses, median 0.6 s): used for big stops before tight corners |
+| Left / Right | 26 % / 23 %; **taps dominate**: median 0.18 s (L) / 0.23 s (R), p10 0.08–0.10 s, p90 1.0–1.4 s, longest 2.4 s |
+| Reversals | 60; median 0.30 s; **38 % under 0.2 s** |
+| Throttle while steering | 67 % |
+| Handbrake | 9 uses, median 0.37 s, longest 1.2 s |
+
+**Handbrake hairpin (37.2–40.5 s), step by step**
+
+1. 37.17 s: a **feint**: a 0.3 s Left tap on the throttle.
+2. 37.5 s: **Right + handbrake** (throttle off) for 1.0 s. The car pivots ~150–180° around the hairpin at 1st-gear speed (~5–10 mph). Rotation is free and fast.
+3. 38.5 s: **throttle back on**, still holding Right, while the handbrake is released.
+4. 39.3 s: **Left (opposite lock) + throttle** for ~1 s. This catches the rotation and the car drives out of the hairpin in a short power slide.
+
+**Targets for WreckPursuit keyboard (in addition to clip 1)**
+
+1. **Racing steering is mostly taps of 0.1–0.25 s.** A tap must produce a modest, proportional steer, not a full-lock flick, and not nothing. The keyboard ramp, rack rate and speed-sensitive lock decide this. Compare our lane-change / tap response against "tap 0.2 s at 100 km/h".
+2. **Handbrake + key into the turn = free, fast pivot** (~150–180° in about 1 s at low speed). Throttle back on plus opposite lock **catches immediately** (row 108: no 0.5 s grace).
+3. **The feint (a short opposite tap before the turn-in)** should help load the car into the rotation, as it does physically. No assist should damp it out.
+4. Normal racing uses the brake; drifting arenas don't. Both have to feel good.
