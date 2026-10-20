@@ -24,13 +24,14 @@
   the lattice allows, front doors, rear doors on 4-door lattices, fenders as synthetic groups).
 - **Meshes**: `data/panels/meshes/<car>.json` for all 16 cars, 3.5k–4.6k tris, ~36 parts (one per
   region + glass, lights, mirrors, interior, underbody, wheels), skinned region-aware to the lattice.
-- **Front crumple (playtest row 31, lead feedback round 12b)**: hood, trunk lid and front fenders
-  crumple in the renderer (visual only; lattice, hull, mechanical damage and repair bill
+- **Front and rear crumple (playtest row 31, lead feedback round 12b)**: hood, trunk lid, front
+  fenders and rear quarters crumple in the renderer (visual only; lattice, hull, mechanical damage and repair bill
   unchanged). Mesh format 3 `fold` binding: the panel's leading end follows the crushed front
   structure (bumper, frame, fender noses; a hanging bumper is rotated back to the crushed pose it
   was released in), the shortening × a visual gain (hood 1.8, trunk 1.4, fenders 1.5) becomes a
   fold — two diagonal ridges with a valley, tented at the centre line (lids, ≤ 0.28 m) or an
-  outward buckle ahead of the wheel (fenders, ≤ 0.12 m) — and an unlatched lid pops 9 cm at the
+  outward buckle ahead of the front wheel / behind the rear wheel (fenders and rear quarters,
+  ≤ 0.12 m; quarters follow the crushed rear bumper/frame) — and an unlatched lid pops 9 cm at the
   latch and bows up at the hinge. The renderer keeps the deepest crumple per chord (no spring-back)
   and clears it on repair. 50 km/h Arcade frontal: hood fold 0.21–0.28 m, 2–4 fold lines, nose on
   the crushed front (± 1 cm); see the round 12b section for the full matrix. A parked car is flat.
@@ -113,7 +114,7 @@ release; per car; ms/frame = 4 physics steps):
 | Idle car, panels attached vs none | cloud 4 vCPU | 0.51 vs 0.44 µs/step (0.002 ms/frame) | — | — |
 | 40 km/h side hit + 2 s swing (2.4 s avg), panels vs none | cloud 4 vCPU | 24.7 vs 17.9 µs/step (0.099 vs 0.072 ms/frame) | — | 0.25 ms/car (lattice) |
 | Swing only (3 panels swinging per car, lattice asleep) | cloud 4 vCPU | 2.7 µs/step (0.011 ms/frame) | — | 0.25 ms/car |
-| Panel mesh skinning in JS (≈3k vertices + `panel_states`, per car per frame) | cloud, headless Chromium (SwiftShader) | — | 0.21 ms (round 2 with fold + light checks: 0.15–0.18 ms; round 12b with hood/trunk/fender crumple: 0.22 ms) | — |
+| Panel mesh skinning in JS (≈3k vertices + `panel_states`, per car per frame) | cloud, headless Chromium (SwiftShader) | — | 0.21 ms (round 2 with fold + light checks: 0.15–0.18 ms; round 12b with hood/trunk/fender crumple: 0.22 ms; + rear quarters: 0.27 ms) | — |
 
 Panels add ~0.03 ms/frame per crashing car on top of the lattice and ~0.01 ms/frame per car with
 swinging panels; both inside the 0.25 ms/car lattice budget.
@@ -142,8 +143,9 @@ turned off in the presets, so it is pre-existing on current `main` (C / lead: pl
 - The hood/trunk/fender crumple is visual (renderer): the lattice nodes, hull collider and repair
   bill see the crushed-but-flat panels. The crumple memory catches a panel's own transient crush
   only in rendered frames (a hanging bumper is exact at any frame rate; a bumper that is crushed
-  and torn off between two frames counts only through the frame and fender nodes). Rear quarters
-  do not crumple yet (trunk lid does). Lens breaking is visual too and per lens; the sim's
+  and torn off between two frames counts only through the frame and fender nodes). Hatch and
+  pickup tailgates do not crumple (all their lattice nodes sit on the hinge line); the side
+  panels' outward buckle saturates at 0.11 m from 30 km/h up. Lens breaking is visual too and per lens; the sim's
   `HandlingEffects::lights_broken` (`Component::Lights`) is separate and not drawn yet.
 - A swinging panel is rigid: dents taken before it unlatched stay, new contacts push it about the
   hinge but no longer dent it.
@@ -261,3 +263,30 @@ nose pulled back ≥ 5 cm, both fenders buckle ≥ 4 cm). Tests (`tools/assets/t
 Simulation, at 30 fps), `crumple_does_not_depend_on_frame_rate`, `harder_hits_crumple_more`,
 `a_parked_car_has_a_flat_front`, `the_hood_nose_follows_a_crushed_bumper_and_the_memory_holds_until_repair`,
 `a_hanging_bumper_still_counts_as_crushed`, `an_unlatched_hood_pops_at_the_latch`.
+
+### Follow-up: rear quarters crumple too (owner request, 2026-10-20)
+`RearLeftQuarter` / `RearRightQuarter` get the same crumple binding as the front fenders, mirrored:
+chords run from the rear-door row (fixed) to the tail row (leading) at each height, the tail edge
+follows the rear bumper / rear frame nodes (a hanging rear bumper rotated back), and the quarter
+buckles outward and up behind the rear wheel (gain 1.5, ≤ 0.12 m). All 19 cars have it (the trunk
+lid already crumpled; hatch/pickup tailgates still cannot). Rear-ended by a sedan, Arcade
+(`crumple_matrix` second table; before this change the quarters had no buckle and their tails
+moved only with plain skinning, 3 cm in the 50 km/h shot scenario):
+
+| car | km/h | trunk, rear bumper state | trunk fold / pull | quarter disp (L; R) | quarter fold / pull (L; R) | quarter lines | quarter gap (L; R) | rear bumper disp |
+|---|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 | Attached, Attached | 0.06 / 0.03 | 0.12 / 0.06; 0.12 / 0.06 | 0.11 / 0.07; 0.11 / 0.07 | 1; 1 | -0.01; -0.01 | 0.08 / 0.08 |
+| shiro_turbo | 50 | Attached, HangingByOne | 0.12 / 0.13 | 0.24 / 0.12; 0.24 / 0.12 | 0.11 / 0.22; 0.11 / 0.22 | 1; 1 | -0.02; -0.02 | 0.49 / 0.36 |
+| shiro_turbo | 70 | Unlatched, HangingByOne | 0.16 / 0.13 | 0.30 / 0.16; 0.32 / 0.17 | 0.11 / 0.22; 0.11 / 0.21 | 1; 1 | -0.02; -0.03 | 0.52 / 0.41 |
+| debug_sedan | 30 | Attached, Attached | 0.10 / 0.04 | 0.12 / 0.05; 0.12 / 0.05 | 0.11 / 0.07; 0.11 / 0.07 | 1; 1 | -0.01; -0.02 | 0.09 / 0.08 |
+| debug_sedan | 50 | Attached, Attached | 0.16 / 0.09 | 0.21 / 0.10; 0.22 / 0.10 | 0.11 / 0.19; 0.11 / 0.19 | 1; 1 | -0.01; -0.01 | 0.25 / 0.24 |
+| debug_sedan | 70 | Unlatched, HangingByOne | 0.20 / 0.13 | 0.31 / 0.16; 0.31 / 0.16 | 0.11 / 0.22; 0.11 / 0.22 | 2; 2 | -0.02; -0.02 | 0.56 / 0.43 |
+| sentinel_cruiser | 30 | Attached, Attached | 0.11 / 0.05 | 0.12 / 0.05; 0.12 / 0.05 | 0.11 / 0.08; 0.11 / 0.08 | 1; 1 | -0.01; -0.01 | 0.10 / 0.09 |
+| sentinel_cruiser | 50 | Attached, Attached | 0.17 / 0.12 | 0.21 / 0.10; 0.22 / 0.10 | 0.11 / 0.19; 0.11 / 0.19 | 1; 1 | -0.02; -0.02 | 0.24 / 0.23 |
+| sentinel_cruiser | 70 | Unlatched, HangingByOne | 0.21 / 0.14 | 0.28 / 0.13; 0.28 / 0.14 | 0.11 / 0.21; 0.11 / 0.19 | 2; 2 | -0.02; -0.02 | 0.53 / 0.40 |
+
+New scenario `apps/simcli/scenarios/panels/rear_50_car_arcade.ron` (+ its golden, the only one
+blessed); browser check in `panels_shots.mjs` (both quarters buckle ≥ 5 cm and pull back ≥ 5 cm,
+trunk folds ≥ 8 cm; measured 0.113 / 0.19 / 0.134 m, same as the Rust reference); test
+`rear_quarters_crumple_and_follow_the_crushed_tail` (sedan, cruiser, hatch at 30 fps); shots
+`docs/media/panels/crumple_{before,after}_rear_50_car_{8m,30m}.png`, `rear_50_car_quarters_crumpled.png`.
