@@ -39,6 +39,8 @@ pub struct CityColliders {
     pub rails: usize,
     /// Wall and roof boxes of covered roads (tunnels).
     pub tunnel_boxes: usize,
+    /// Tree trunks, hedges and fences (residential lots, playtest row 95).
+    pub decor: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -308,12 +310,16 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     out.sidewalk_triangles = sidewalk_triangles;
     added.extend(walk_colliders);
 
-    // Buildings: extruded footprints as convex hulls (footprints are convex lots).
+    // Buildings: extruded footprints as convex hulls (footprints are convex lots), pitched
+    // roofs included (a gable or hip house is still convex).
     for b in &net.buildings {
-        let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2);
+        let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2 + 2);
         for q in &b.footprint {
             pts.push(Vector::new(q[0], q[1], b.base_z_m));
             pts.push(Vector::new(q[0], q[1], b.roof_z()));
+        }
+        for r in b.ridge().into_iter().flatten() {
+            pts.push(Vector::new(r[0], r[1], r[2]));
         }
         if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
             added.push(cb.friction(0.6).build());
@@ -389,7 +395,50 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
         }
     }
 
+    // Street and yard furniture: tree trunks, hedges and fences (driveways are flush).
+    for d in &net.decor {
+        if let Some(col) = decor_collider(d) {
+            added.push(col);
+            out.decor += 1;
+        }
+    }
+
     Some((added, out))
+}
+
+/// Static collider of one piece of street / yard furniture: a tree trunk (cylinder up to the
+/// crown, 2.5 m), a hedge or fence (box). `None` for flush decor (driveways).
+pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
+    use wp_world::network::DecorKind;
+    let (s, c) = wp_math::sin_cos(d.yaw * 0.5);
+    let rot = rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c);
+    match d.kind {
+        DecorKind::StreetTree | DecorKind::YardTree => {
+            let h = 2.5f32.min(d.size[2]);
+            // Parry cylinders stand along local Y: rotate +90° about X so it stands on Z.
+            let half = core::f32::consts::FRAC_1_SQRT_2;
+            let up = rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half);
+            Some(
+                ColliderBuilder::cylinder(h * 0.5, wp_world::residential::TRUNK_R_M)
+                    .position(Pose::from_parts(
+                        Vector::new(d.pos[0], d.pos[1], d.pos[2] + h * 0.5 - 0.1),
+                        up,
+                    ))
+                    .friction(0.6)
+                    .build(),
+            )
+        }
+        DecorKind::Hedge | DecorKind::Fence => Some(
+            ColliderBuilder::cuboid(d.size[0] * 0.5, d.size[1] * 0.5, d.size[2] * 0.5 + 0.1)
+                .position(Pose::from_parts(
+                    Vector::new(d.pos[0], d.pos[1], d.pos[2] + d.size[2] * 0.5 - 0.1),
+                    rot,
+                ))
+                .friction(0.6)
+                .build(),
+        ),
+        DecorKind::Driveway => None,
+    }
 }
 
 /// A guard rail along `a → b` (at its foot height): a 0.3 m wide, 0.9 m tall box, its centre
