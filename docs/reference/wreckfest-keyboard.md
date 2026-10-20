@@ -246,3 +246,26 @@ In the reference footage the cars' body roll and pitch build and settle **smooth
 ## Clip 5 note: ABS levels
 
 The owner's clip 5 uses **ABS Half**. WreckPursuit should offer ABS **Off / Half / Full**, alongside TCS Off / Half / Full (assigned to machine A).
+
+## Clip 8: the steering wheel during a drift — the reference steers relative to the slide (2026-10-20)
+
+The owner's hypothesis is that the reference has **no throttle limiting at all, and all stabilisation is in the steering**. The cockpit clip supports the steering half.
+
+Clip 8, 34.15–37.0 s: a left hairpin in 2nd at 30–37 mph, power-sliding (the view swings left with motion blur; tail out to the right). The **Left key is held continuously for 2.9 s** (with throttle, plus 2 handbrake stabs). The cockpit wheel:
+
+| t after Left pressed | Left key | wheel |
+|---|---|---|
+| 0.1 s | held | full left lock (spoke at the top, as at standstill) |
+| 0.5–1.1 s | held | **back near centre** while the car rotates into the slide |
+| 1.5–2.0 s | held | about half left |
+| 2.4–2.8 s | held | **past centre toward the right**, i.e. countersteer |
+| released | — | centre |
+
+So in a slide the reference's front wheels do **not** follow the key: they are pulled toward the direction of travel, and the key only adds an offset. At a standstill (clip 7) the same key gives a plain full lock. This is consistent with **velocity-relative steering**: front-wheel angle (body frame) ≈ −(front-axle slip direction) + key × lock(speed), clamped to the steering lock. Meaning:
+- the key steers relative to where the car is *going*
+- releasing the keys points the wheels along the travel (a natural catch / hold)
+- the counter key goes further into opposite lock
+
+That explains why counter key + full throttle holds a steady drift in clip 1, and why holding the into-turn key mid-slide doesn't spin the car.
+
+Throttle: no visible limiting. Clip 5 floors it from rest (TCS off) and goes straight, and keyboard Test Throttle is raw 0/100 %.
