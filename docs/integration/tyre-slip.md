@@ -36,6 +36,39 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Keys released mid-drift (lead: reference = a slow spin over ~1–2 s)
+
+`tyre_slip -- release` (counter key at 6° + full throttle on the lab circle until 1.5 / 2.5 s,
+then both keys released, throttle held; slide at release / +1 / +2 s, time to |slide| > 90°;
+class: **slow spin** = 0.7–2.5 s (reference), snap < 0.7 s, holds / straightens = no spin in
+3.5 s). Plain steering:
+
+| tyres | rwd_a 1.5 / 2.5 s | rwd_b 1.5 / 2.5 s | rwd_d 1.5 / 2.5 s |
+|---|---|---|---|
+| shipped default | snap / (not drifting) | (not drifting) | (spun before release) |
+| spin model | **holds** 44→42° / holds 47→41° | holds 39→70° / (63°) | **holds** 41→45° / holds 43→43° |
+| spin + drift lock | holds / holds | straightens / (swapped) | holds / holds |
+
+With VR tuned (gain 0.5) + spin model: holds 42→55°, 46→50° (rwd_d, rwd_a).
+
+**The spin model does not match this reference behaviour**: with the keys released the wheels
+return to centre, the fronts sit ~45° past their peak, and the spin model's rear (7–9 kN of side
+force under spin) still out-pulls them, so the car keeps drifting instead of slowly over-rotating.
+In the reference the held counter key holds but releasing it lets the car spin slowly: the rear
+must be strong enough to balance fronts **near zero slip** (counter-lock / VR alignment) but
+weaker than fronts **deep past their peak** (keys released). That points to velocity-relative
+alignment + a *weaker* rear under spin, not the strong rear the spin model uses.
+
+Joint search (`tyre_slip -- joint`, 300 sets: VR on / off + its knobs × spin-model strength ×
+side floor 0.2–0.6; score = 27-case hold + release (slow spin +2, holds / straightens −2, snap
+−1 on rwd_d / rwd_a × 1.5 / 2.5 s) − grip penalty): **no set does both**. Best release (3 / 4 slow
+spins) holds 0 / 27 (spin C 0.97, B2 2.5, floor 0.52, VR off); best compromise 6 / 27 holds with
+2 / 4 slow spins (VR gain 0.29 from 18°, spin B0 3.7 / B2 3.6 / p 8, fx_slide 0.61, floor 0.32;
+grip 10.4 %). The two reference behaviours pull the rear in opposite directions in our model;
+something else must differ (candidates: front tyre behaviour deep past the peak — the reference's
+fronts may lose more at 45° than at ~9°; or the reference's held key keeps the fronts at much
+smaller slip than our fixed lock does).
+
 ## Velocity-relative steering (Drift Lab W step 7) × tyres
 
 Merged lead/drift-lab-w @ c234d260. `tyre_slip -- matrix` with `PLAIN='{…}'` (grip reference
