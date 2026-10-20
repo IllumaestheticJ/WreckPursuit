@@ -335,6 +335,38 @@ pub fn update_engine(
     out
 }
 
+/// Engine LOD: keep at most `max_layers` of `layers` (`(index, gain, pitch)`), the loudest
+/// ones, and move the dropped layers' energy into them (Σ gain² is unchanged, so the car is
+/// as loud; only the timbre blend is coarser). Layers in `sticky` (kept last frame) rank as
+/// if `STICKY` × louder, so near-equal layers do not swap every frame. Returns the kept
+/// layers loudest first.
+pub fn engine_lod(
+    layers: &[(usize, f32, f32)],
+    max_layers: usize,
+    sticky: &[usize],
+) -> Vec<(usize, f32, f32)> {
+    const STICKY: f32 = 1.25;
+    let rank = |l: &(usize, f32, f32)| {
+        if sticky.contains(&l.0) {
+            l.1 * STICKY
+        } else {
+            l.1
+        }
+    };
+    let mut sorted: Vec<(usize, f32, f32)> = layers.to_vec();
+    sorted.sort_by(|a, b| rank(b).total_cmp(&rank(a)).then(a.0.cmp(&b.0)));
+    let total: f32 = sorted.iter().map(|l| l.1 * l.1).sum();
+    sorted.truncate(max_layers.max(1));
+    let kept: f32 = sorted.iter().map(|l| l.1 * l.1).sum();
+    if kept > 1e-12 && total > kept {
+        let k = (total / kept).sqrt();
+        for l in &mut sorted {
+            l.1 *= k;
+        }
+    }
+    sorted
+}
+
 /// One-pole smoothing factor for `dt` and time constant `tau` (rational approximation of
 /// `1 - exp(-dt/tau)`, exact enough for audio and free of transcendental functions).
 pub fn smooth_k(dt: f32, tau: f32) -> f32 {
@@ -455,6 +487,8 @@ mod tests {
             shift_rate_full_rpm_s: 7000.0,
             shift_dip_depth: 0.6,
             blip_load: 0.8,
+            lod_two_layer_m: 40.0,
+            second_layer_cull_scale: 0.25,
         }
     }
 
@@ -620,5 +654,36 @@ mod tests {
             &mut rng,
         );
         assert!(o.blowoff.is_none(), "one blow-off per lift");
+    }
+    #[test]
+    fn lod_keeps_loudest_layers_and_their_energy() {
+        let layers = [(0, 0.2, 1.0), (1, 0.6, 1.1), (2, 0.5, 0.9), (3, 0.1, 1.2)];
+        let e: f32 = layers.iter().map(|l| l.1 * l.1).sum();
+        let one = engine_lod(&layers, 1, &[]);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].0, 1);
+        assert!((one[0].1 * one[0].1 - e).abs() < 1e-5);
+        assert_eq!(one[0].2, 1.1, "pitch of the kept layer is its own");
+        let two = engine_lod(&layers, 2, &[]);
+        assert_eq!(two.iter().map(|l| l.0).collect::<Vec<_>>(), vec![1, 2]);
+        let e2: f32 = two.iter().map(|l| l.1 * l.1).sum();
+        assert!((e2 - e).abs() < 1e-5);
+        // Ratio between kept layers is preserved.
+        assert!((two[0].1 / two[1].1 - 0.6 / 0.5).abs() < 1e-5);
+        // Everything fits: unchanged.
+        assert_eq!(engine_lod(&layers, 4, &[]).len(), 4);
+        // Silent input stays silent (no NaN).
+        let z = engine_lod(&[(0, 0.0, 1.0), (1, 0.0, 1.0)], 1, &[]);
+        assert_eq!(z[0].1, 0.0);
+    }
+
+    #[test]
+    fn lod_is_sticky_near_a_crossover() {
+        // Layer 2 slightly louder, but layer 1 was kept last frame: keep 1.
+        let layers = [(1, 0.50, 1.0), (2, 0.55, 1.0)];
+        assert_eq!(engine_lod(&layers, 1, &[1])[0].0, 1);
+        // Clearly louder: switch.
+        let layers = [(1, 0.40, 1.0), (2, 0.60, 1.0)];
+        assert_eq!(engine_lod(&layers, 1, &[1])[0].0, 2);
     }
 }
