@@ -115,8 +115,10 @@ fn set_state_is_a_close_approximation() {
         .map(|i| (s.pos[i] - truth.pos[i]).powi(2))
         .sum::<f32>()
         .sqrt();
-    // At tick 800 the coupe is in a keyboard power slide with its clutch LSD slipping; the
-    // public state cannot carry the pedal filter, so the slide diverges a little (0.27 m with
-    // the old, effectively locked LSD; 0.76 m with the 1.5-way clutch model; 0.15 m open).
+    // At tick 800 the coupe is in a keyboard power slide with its clutch LSD slipping, turning
+    // at the grip limit (slip-targeted keyboard steering, playtest row 28). The public state
+    // carries no pedal filter, auto-box timer or ESC reference, so the restored car re-ramps
+    // its throttle from 0 and the slide diverges a little (0.27 m on main before the LSD and
+    // steering changes; 0.76 m with the 1.5-way clutch LSD; 0.66 m with both).
     assert!(d < 1.0, "set_state drift after 1 s: {d} m");
 }
