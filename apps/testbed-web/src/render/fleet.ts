@@ -33,6 +33,7 @@ export const HEAD = 0xfff2c0;
 /** Light bar colours (unlit). */
 export const BAR = { off: 0x1a1a24, red: 0xff2040, blue: 0x2060ff } as const;
 
+
 /**
  * Livery in the current art style. Low-poly dark maps the greybox traffic liveries one to one
  * onto `PALETTE.trafficPaints` (same variant → same slot) and police white onto
@@ -57,7 +58,7 @@ export function styledLamp(out: THREE.Color, hex: Hex): THREE.Color {
   switch (hex) {
     case TAIL.off:
       // Unlit lens by day; running lights (a quarter of the brake glow) at night.
-      out.setHex(night > 0.2 ? PALETTE.taillight : 0x5a1414);
+      out.setHex(night > 0.2 ? PALETTE.taillight : UNLIT_TAIL);
       return night > 0.2 ? out.multiplyScalar(PALETTE.brakeGlow * 0.25) : out;
     case TAIL.brake:
       return out.setHex(PALETTE.taillight).multiplyScalar(PALETTE.brakeGlow);
