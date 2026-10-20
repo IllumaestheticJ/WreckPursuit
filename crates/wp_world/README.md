@@ -14,7 +14,8 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
 | `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
-| `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
+| `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building, terrain and tunnel line of sight) |
+| `covered` | Tunnels / covered roads: `CoverShape` (inside test, sightline rules, wall lines, light points), `CoverIndex`; shell dimensions shared with `wp_sim` colliders and the greybox |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
 | `density` | Density model (`f_time`, `f_distance`, district bases) |
@@ -75,7 +76,7 @@ ignored perf run with 12 blockers. `tests/drive.rs` drives the real car (Rapier 
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
-Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 2), then the
+Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 3; v3 added `covered`), then the
 [postcard](https://docs.rs/postcard) encoding of `RoadNetwork`. The `.road.json` debug dump is
 the `serde_json` encoding of the same struct and loads identically (`RoadNetwork::load` picks by
 extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` indices.
@@ -194,7 +195,22 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
   `Knob Observatory Lot`).
 
-950 lanes, 133 junctions (27 signalised), 3346 buildings, 2 grade separations, terrain
+- **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
+  through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
+  ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
+  Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
+  (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
+  Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
+  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
+  shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
+  (mid-tunnel kerb lane), `"<name> exit"`.
+- **Line of sight** (`CityMap::line_of_sight`): blocked from outside a span into it and back;
+  two points inside the same span see each other along a line that stays inside; outside
+  lines are blocked through the shell (walls + deck) and clear above it.
+  `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
+  sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
+
+950 lanes, 133 junctions (27 signalised), 3312 buildings, 2 grade separations, 2 covered roads, terrain
 681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
