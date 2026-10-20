@@ -128,3 +128,119 @@ fn the_automatic_box_still_engages_first_on_the_handbrake_at_a_standstill() {
         assert_eq!(rig.state().gear, 1, "{id}: first engaged on the handbrake");
     }
 }
+
+/// Keyboard preset as the owner drives it (TCS / ESC off, 75 % steering speed sensitivity).
+fn owner_keys() -> AssistProfile {
+    AssistProfile {
+        tcs: false,
+        esc: false,
+        steer_speed_sensitivity: 0.75,
+        ..AssistProfile::keyboard_default()
+    }
+}
+
+#[test]
+fn a_handbrake_stab_on_the_throttle_gives_the_drive_straight_back() {
+    // Owner row 109 / reference clip 5: with the throttle and the key held, a 0.25 s handbrake
+    // stab adds rotation and the drive is back at once when it ends. Measured at 80 km/h:
+    // driven-wheel force positive again 0.07–0.08 s after the release on RWD, at once on FWD
+    // (the engine revs up while the rear axle is freed and goes straight back into the drive).
+    // (Holding the engine at road-speed revs during the stab was tried: 0.18–0.20 s, rejected.)
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::rig::Rig;
+    for id in ["rampart_50", "shiro_turbo", "kestrel_ts"] {
+        let c = car(id);
+        let a = owner_keys();
+        let mut rig = Rig::new(&c);
+        rig.teleport([0.0; 3], 0.0, 80.0 / 3.6, 0.0);
+        for _ in 0..240 {
+            rig.step(
+                &VehicleInput {
+                    throttle: 0.3,
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        for _ in 0..60 {
+            rig.step(
+                &VehicleInput {
+                    steer: -1.0,
+                    throttle: 1.0,
+                    handbrake: 1.0,
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        let rwd = !matches!(c.def.drivetrain.layout, wp_contracts::DriveLayout::Fwd);
+        let mut back = None;
+        for t in 0..60 {
+            rig.step(
+                &VehicleInput {
+                    steer: -1.0,
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+                &a,
+            );
+            let fx = rig.vehicle.telemetry().fx;
+            let drive = if rwd { fx[2] + fx[3] } else { fx[0] + fx[1] };
+            if back.is_none() && drive > 0.0 {
+                back = Some(t as f32 / 240.0);
+            }
+        }
+        let back = back.unwrap_or(f32::INFINITY);
+        assert!(back <= 0.1, "{id}: drive back after {back} s");
+    }
+}
+
+#[test]
+fn a_hairpin_pivot_is_caught_with_throttle_and_opposite_lock() {
+    // Reference clip 2: key into the turn + handbrake 1.0 s off the throttle, then throttle +
+    // opposite lock. Measured at 25 km/h: 52–65° by the release (the reference pivots
+    // 150–180°: see docs/integration/vehicle.md, row 109), the rotation stops 0.22–0.28 s after
+    // the release, body slip after the release ≤ 27°: caught, no donut.
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::rig::Rig;
+    for id in ["shiro_turbo", "rampart_50", "kestrel_ts"] {
+        let c = car(id);
+        let a = owner_keys();
+        let mut rig = Rig::new(&c);
+        rig.teleport([0.0; 3], 0.0, 25.0 / 3.6, 0.0);
+        for _ in 0..120 {
+            let s = rig.state().speed_mps;
+            rig.step(
+                &VehicleInput {
+                    throttle: if s < 25.0 / 3.6 { 0.3 } else { 0.0 },
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        let mut stopped = None;
+        for t in 0..480 {
+            let (steer, hb, thr) = if t < 240 {
+                (1.0, 1.0, 0.0)
+            } else {
+                (-1.0, 0.0, 1.0)
+            };
+            rig.step(
+                &VehicleInput {
+                    steer,
+                    handbrake: hb,
+                    throttle: thr,
+                    ..Default::default()
+                },
+                &a,
+            );
+            // Steering right turns clockwise (yaw rate < 0); caught once it is back to ≥ 0.
+            if t >= 240 && stopped.is_none() && rig.state().ang_vel[2] >= 0.0 {
+                stopped = Some((t - 239) as f32 / 240.0);
+            }
+        }
+        let s = stopped.unwrap_or(f32::INFINITY);
+        assert!(s < 0.5, "{id}: rotation stopped after {s} s");
+        assert!(rig.state().speed_mps > 2.0, "{id}: drives out");
+    }
+}
