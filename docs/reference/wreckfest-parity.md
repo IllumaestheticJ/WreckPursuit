@@ -125,8 +125,8 @@ would expect, but it doesn't close G1.
 |---|---|---|---|---|---|
 | 0–60 mph, s (TCS off) `accel_0_60_s` | rampart_50 | 7.08 | — | — | wp_vehicle (A) |
 | 0–100 mph, s (TCS off) `accel_0_100_s` | rampart_50 | 13.62 | — | — | wp_vehicle (A) |
-| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | rampart_50 | 5.81 | — | — | wp_vehicle (A) |
-| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | rampart_50 | 12.35 | — | — | wp_vehicle (A) |
+| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | rampart_50 | 6.04 | — | — | wp_vehicle (A) |
+| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | rampart_50 | 12.58 | — | — | wp_vehicle (A) |
 | launch: time at slip ratio > 0.2, s (TCS off) `launch_spin_off_s` | rampart_50 | 3.82 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS off) `launch_peak_slip_off` | rampart_50 | 6.07 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS off) `launch_mean_slip_off` | rampart_50 | 2.42 | — | — | wp_vehicle assists (A, row 105) |
@@ -135,15 +135,15 @@ would expect, but it doesn't close G1.
 | feathered launch: peak driven slip ratio (TCS off) `launch_feather_peak_slip_off` | rampart_50 | 5.90 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | rampart_50 | 0.61 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | rampart_50 | 1.04 | — | — | wp_vehicle assists (A, row 105) |
-| launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | rampart_50 | 0.13 | — | — | wp_vehicle assists (A, row 105) |
+| launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | rampart_50 | 0.12 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | rampart_50 | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | rampart_50 | 1.29 | visible wheelspin + smoke in 1st and into 2nd (clip 4, feathered launch) | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | rampart_50 | 1.44 | visible wheelspin + smoke in 1st and into 2nd (clip 4, feathered launch) | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | rampart_50 | 1.19 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | rampart_50 | 0.18 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | rampart_50 | 0.38 | — | — | wp_vehicle assists (A, row 105) |
-| launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | rampart_50 | 0.06 | — | — | wp_vehicle assists (A, row 105) |
+| launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | rampart_50 | 0.05 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | rampart_50 | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | rampart_50 | 0.96 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | rampart_50 | 0.25 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | rampart_50 | 1.61 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | rampart_50 | 3.55 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | rampart_50 | 47.9 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -190,26 +190,26 @@ would expect, but it doesn't close G1.
 | power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | rampart_50 | 179.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: spun `hairpin_g1_spun` | rampart_50 | yes | — | — | wp_vehicle (A) |
 | power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | rampart_50 | -23.6 | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | rampart_50 | 180.0 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | rampart_50 | 179.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | rampart_50 | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | rampart_50 | -21.4 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | rampart_50 | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | rampart_50 | 26 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | rampart_50 | 5 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | rampart_50 | 67 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | rampart_50 | 183 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | rampart_50 | -21.9 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | rampart_50 | 8 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | rampart_50 | 90 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | rampart_50 | 33 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | rampart_50 | 105 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | rampart_50 | 180 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | rampart_50 | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | rampart_50 | 35 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | rampart_50 | 38 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | rampart_50 | 25 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | rampart_50 | 70 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | rampart_50 | 87 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | rampart_50 | 14 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | rampart_50 | 6 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | rampart_50 | 88 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | rampart_50 | 60 | — | — | wp_vehicle drift (Drift Lab C) |
 | 50 mph handbrake 0.3 s, then throttle + 0.35 s counter tap: peak body slip ° `hb_power_slip_deg` | rampart_50 | 180 | — | — | wp_vehicle (A) |
 | … time from throttle-on to straight (< 5° slip), s `hb_power_straight_s` | rampart_50 | n/a | — | — | wp_vehicle (A) |
 | 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | rampart_50 | 16 | — | — | wp_vehicle drift (Drift Lab C) |
-| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | rampart_50 | 14.8 | — | — | wp_vehicle drift (Drift Lab C) |
-| … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | rampart_50 | 0.52 | — | — | wp_vehicle drift (Drift Lab C) |
+| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | rampart_50 | 14.9 | — | — | wp_vehicle drift (Drift Lab C) |
+| … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | rampart_50 | 0.56 | — | — | wp_vehicle drift (Drift Lab C) |
 | … spun within 2 s (no countersteer) `hb_stab_spun` | rampart_50 | yes | — | — | wp_vehicle drift (Drift Lab C) |
 | … control run without stabs spun within 2 s `hb_stab_control_spun` | rampart_50 | no | — | — | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle (2nd, 30 mph): time at 10–50° slip of 4 s `drift_counter_s` | rampart_50 | 0.52 | ≥ 4 (clip 1: held 4.3 s, steady) | -3.48 (-87 %) | wp_vehicle drift (Drift Lab C) |
@@ -239,13 +239,13 @@ would expect, but it doesn't close G1.
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | shiro_turbo | 0.93 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | shiro_turbo | 0.14 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | shiro_turbo | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | shiro_turbo | 1.60 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | shiro_turbo | 0.33 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | shiro_turbo | 1.06 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | shiro_turbo | 0.25 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | shiro_turbo | 0.22 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | shiro_turbo | 0.08 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | shiro_turbo | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | shiro_turbo | 0.97 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | shiro_turbo | 0.25 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | shiro_turbo | 1.16 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | shiro_turbo | 3.45 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | shiro_turbo | 47.1 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -289,32 +289,32 @@ would expect, but it doesn't close G1.
 | lift-off, 60 mph corner (key held): yaw-rate kick °/s `liftoff_60_kick_dps` | shiro_turbo | 2.9 | — | — | wp_vehicle (A) |
 | lift-off, 60 mph corner: peak body slip ° `liftoff_60_slip_deg` | shiro_turbo | 2.3 | — | — | wp_vehicle (A) |
 | lift-off, 60 mph corner: spun `liftoff_60_spun` | shiro_turbo | no | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | shiro_turbo | 179.9 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | shiro_turbo | 180.0 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: spun `hairpin_g1_spun` | shiro_turbo | yes | — | — | wp_vehicle (A) |
 | power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | shiro_turbo | -23.6 | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | shiro_turbo | 179.9 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | shiro_turbo | 93.0 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | shiro_turbo | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | shiro_turbo | -26.6 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | shiro_turbo | 7 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | shiro_turbo | 44 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | shiro_turbo | 9 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | shiro_turbo | 77 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | shiro_turbo | 171 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | shiro_turbo | -19.5 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | shiro_turbo | 9 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | shiro_turbo | 101 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | shiro_turbo | 40 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | shiro_turbo | 110 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | shiro_turbo | 177 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | shiro_turbo | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | shiro_turbo | 38 | 150–180 (clip 2: Right + handbrake 1.0 s at ~5–10 mph) | -111.90 (-75 %) | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | shiro_turbo | 43 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | shiro_turbo | 29 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | shiro_turbo | 71 | 150–180 (clip 2: Right + handbrake 1.0 s at ~5–10 mph) | -78.63 (-52 %) | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | shiro_turbo | 84 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | shiro_turbo | 16 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | shiro_turbo | 7 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | shiro_turbo | 100 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | shiro_turbo | 71 | — | — | wp_vehicle drift (Drift Lab C) |
 | 50 mph handbrake 0.3 s, then throttle + 0.35 s counter tap: peak body slip ° `hb_power_slip_deg` | shiro_turbo | 180 | — | — | wp_vehicle (A) |
 | … time from throttle-on to straight (< 5° slip), s `hb_power_straight_s` | shiro_turbo | n/a | — | — | wp_vehicle (A) |
 | 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | shiro_turbo | 26 | — | — | wp_vehicle drift (Drift Lab C) |
-| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | shiro_turbo | 20.3 | — | — | wp_vehicle drift (Drift Lab C) |
-| … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | shiro_turbo | 0.11 | — | — | wp_vehicle drift (Drift Lab C) |
+| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | shiro_turbo | 20.4 | — | — | wp_vehicle drift (Drift Lab C) |
+| … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | shiro_turbo | 0.10 | — | — | wp_vehicle drift (Drift Lab C) |
 | … spun within 2 s (no countersteer) `hb_stab_spun` | shiro_turbo | yes | — | — | wp_vehicle drift (Drift Lab C) |
 | … control run without stabs spun within 2 s `hb_stab_control_spun` | shiro_turbo | no | — | — | wp_vehicle drift (Drift Lab C) |
-| counter key + full throttle (2nd, 30 mph): time at 10–50° slip of 4 s `drift_counter_s` | shiro_turbo | 0.72 | — | — | wp_vehicle drift (Drift Lab C) |
+| counter key + full throttle (2nd, 30 mph): time at 10–50° slip of 4 s `drift_counter_s` | shiro_turbo | 0.70 | — | — | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle: mean drift angle ° `drift_counter_mean_deg` | shiro_turbo | 30 | — | — | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle: max body slip ° `drift_counter_max_deg` | shiro_turbo | 180 | — | — | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle: spun `drift_counter_spun` | shiro_turbo | yes | — | — | wp_vehicle drift (Drift Lab C) |
@@ -335,19 +335,19 @@ would expect, but it doesn't close G1.
 | launch: peak driven slip ratio (TCS off) `launch_peak_slip_off` | kestrel_ts | 4.60 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS off) `launch_mean_slip_off` | kestrel_ts | 1.51 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS off; target < 3) `launch_yaw_off_deg` | kestrel_ts | 0.2 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS off) `launch_feather_spin_off_s` | kestrel_ts | 3.05 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS off) `launch_feather_spin_off_s` | kestrel_ts | 3.07 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS off) `launch_feather_peak_slip_off` | kestrel_ts | 3.79 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | kestrel_ts | 0.70 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | kestrel_ts | 1.09 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | kestrel_ts | 0.13 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | kestrel_ts | 0.4 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | kestrel_ts | 1.95 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | kestrel_ts | 1.79 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | kestrel_ts | 1.03 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | kestrel_ts | 0.12 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | kestrel_ts | 0.54 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | kestrel_ts | 0.05 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | kestrel_ts | 0.4 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | kestrel_ts | 0.68 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | kestrel_ts | 0.18 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | kestrel_ts | 1.08 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | kestrel_ts | 3.58 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | kestrel_ts | 48.8 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -396,16 +396,16 @@ would expect, but it doesn't close G1.
 | power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | kestrel_ts | 13.7 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | kestrel_ts | 7.6 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | kestrel_ts | no | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | kestrel_ts | 19.4 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | kestrel_ts | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | kestrel_ts | 27 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | kestrel_ts | 4 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | kestrel_ts | 65 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | kestrel_ts | 173 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | kestrel_ts | 19.8 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | kestrel_ts | 8 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | kestrel_ts | 93 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | kestrel_ts | 34 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | kestrel_ts | 104 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | kestrel_ts | 192 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | kestrel_ts | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | kestrel_ts | 34 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | kestrel_ts | 38 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | kestrel_ts | 23 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | kestrel_ts | 70 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | kestrel_ts | 90 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | kestrel_ts | 16 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | kestrel_ts | 5 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | kestrel_ts | 83 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | kestrel_ts | 53 | 30–40 (clip 3: Right + handbrake 0.3 s after braking from 101 to ~65 mph) | +12.66 (+32 %) | wp_vehicle drift (Drift Lab C) |
@@ -427,8 +427,8 @@ would expect, but it doesn't close G1.
 | 2→3 upshift: drive back to 50 %, s (measured) `shift_gap_s` | kestrel_ts | 0.38 | — | — | data/cars (H) |
 | 0–60 mph, s (TCS off) `accel_0_60_s` | parity_rwd_a | 7.20 | — | — | wp_vehicle (A) |
 | 0–100 mph, s (TCS off) `accel_0_100_s` | parity_rwd_a | 11.78 | — | — | wp_vehicle (A) |
-| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | parity_rwd_a | 5.87 | — | — | wp_vehicle (A) |
-| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | parity_rwd_a | 10.44 | — | — | wp_vehicle (A) |
+| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | parity_rwd_a | 6.29 | — | — | wp_vehicle (A) |
+| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | parity_rwd_a | 10.87 | — | — | wp_vehicle (A) |
 | launch: time at slip ratio > 0.2, s (TCS off) `launch_spin_off_s` | parity_rwd_a | 3.92 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS off) `launch_peak_slip_off` | parity_rwd_a | 6.12 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS off) `launch_mean_slip_off` | parity_rwd_a | 2.36 | — | — | wp_vehicle assists (A, row 105) |
@@ -437,15 +437,15 @@ would expect, but it doesn't close G1.
 | feathered launch: peak driven slip ratio (TCS off) `launch_feather_peak_slip_off` | parity_rwd_a | 5.89 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | parity_rwd_a | 1.38 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | parity_rwd_a | 1.26 | — | — | wp_vehicle assists (A, row 105) |
-| launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_rwd_a | 0.24 | — | — | wp_vehicle assists (A, row 105) |
+| launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_rwd_a | 0.23 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | parity_rwd_a | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_a | 2.64 | visible wheelspin + smoke in 1st and into 2nd (clip 4, feathered launch) | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_a | 2.75 | visible wheelspin + smoke in 1st and into 2nd (clip 4, feathered launch) | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | parity_rwd_a | 1.31 | — | — | wp_vehicle assists (A, row 105) |
-| launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | parity_rwd_a | 0.20 | — | — | wp_vehicle assists (A, row 105) |
+| launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | parity_rwd_a | 0.22 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | parity_rwd_a | 1.17 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | parity_rwd_a | 0.06 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | parity_rwd_a | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_a | 1.15 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_a | 1.56 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | parity_rwd_a | 2.25 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | parity_rwd_a | 3.43 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | parity_rwd_a | 46.4 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -491,26 +491,26 @@ would expect, but it doesn't close G1.
 | lift-off, 60 mph corner: spun `liftoff_60_spun` | parity_rwd_a | no | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | parity_rwd_a | 179.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: spun `hairpin_g1_spun` | parity_rwd_a | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_a | -24.3 | — | — | wp_vehicle (A) |
+| power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_a | -24.2 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_rwd_a | 179.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | parity_rwd_a | yes | — | — | wp_vehicle (A) |
 | power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_a | -23.9 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_a | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_a | 34 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_a | 7 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_a | 69 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_a | 169 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_a | 9 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_a | 95 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_a | 38 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_a | 106 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_a | 180 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | parity_rwd_a | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_a | 35 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_a | 38 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_a | 25 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_a | 70 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_a | 86 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_a | 14 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | parity_rwd_a | 6 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | parity_rwd_a | 92 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | parity_rwd_a | 62 | — | — | wp_vehicle drift (Drift Lab C) |
 | 50 mph handbrake 0.3 s, then throttle + 0.35 s counter tap: peak body slip ° `hb_power_slip_deg` | parity_rwd_a | 180 | — | — | wp_vehicle (A) |
 | … time from throttle-on to straight (< 5° slip), s `hb_power_straight_s` | parity_rwd_a | n/a | — | — | wp_vehicle (A) |
 | 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | parity_rwd_a | 14 | ≥ 5 (clip 5: each stab adds rotation (amount not measured)) | in range | wp_vehicle drift (Drift Lab C) |
-| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_a | 12.4 | — | — | wp_vehicle drift (Drift Lab C) |
+| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_a | 12.5 | — | — | wp_vehicle drift (Drift Lab C) |
 | … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | parity_rwd_a | 1.00 | ≤ 0.1 (clip 5: handbrake stabs on the throttle keep the drive (or recover it at once)) | +0.90 (+900 %) | wp_vehicle drift (Drift Lab C) |
 | … spun within 2 s (no countersteer) `hb_stab_spun` | parity_rwd_a | yes | — | — | wp_vehicle drift (Drift Lab C) |
 | … control run without stabs spun within 2 s `hb_stab_control_spun` | parity_rwd_a | no | — | — | wp_vehicle drift (Drift Lab C) |
@@ -528,8 +528,8 @@ would expect, but it doesn't close G1.
 | 2→3 upshift: drive back to 50 %, s (measured) `shift_gap_s` | parity_rwd_a | 0.58 | — | — | data/cars (H) |
 | 0–60 mph, s (TCS off) `accel_0_60_s` | parity_rwd_b | 6.96 | — | — | wp_vehicle (A) |
 | 0–100 mph, s (TCS off) `accel_0_100_s` | parity_rwd_b | 11.60 | — | — | wp_vehicle (A) |
-| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | parity_rwd_b | 6.08 | — | — | wp_vehicle (A) |
-| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | parity_rwd_b | 10.72 | — | — | wp_vehicle (A) |
+| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | parity_rwd_b | 6.33 | — | — | wp_vehicle (A) |
+| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | parity_rwd_b | 10.97 | — | — | wp_vehicle (A) |
 | launch: time at slip ratio > 0.2, s (TCS off) `launch_spin_off_s` | parity_rwd_b | 3.75 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS off) `launch_peak_slip_off` | parity_rwd_b | 5.68 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS off) `launch_mean_slip_off` | parity_rwd_b | 2.06 | — | — | wp_vehicle assists (A, row 105) |
@@ -538,15 +538,15 @@ would expect, but it doesn't close G1.
 | feathered launch: peak driven slip ratio (TCS off) `launch_feather_peak_slip_off` | parity_rwd_b | 5.38 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | parity_rwd_b | 1.16 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | parity_rwd_b | 1.19 | — | — | wp_vehicle assists (A, row 105) |
-| launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_rwd_b | 0.21 | — | — | wp_vehicle assists (A, row 105) |
+| launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_rwd_b | 0.20 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | parity_rwd_b | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_b | 2.14 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_b | 1.69 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | parity_rwd_b | 1.28 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | parity_rwd_b | 0.13 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | parity_rwd_b | 0.63 | — | — | wp_vehicle assists (A, row 105) |
-| launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | parity_rwd_b | 0.08 | — | — | wp_vehicle assists (A, row 105) |
+| launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | parity_rwd_b | 0.07 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | parity_rwd_b | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_b | 1.02 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_b | 0.71 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | parity_rwd_b | 1.74 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | parity_rwd_b | 3.36 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | parity_rwd_b | 45.6 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -595,23 +595,23 @@ would expect, but it doesn't close G1.
 | power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_b | -23.7 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_rwd_b | 179.9 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | parity_rwd_b | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_b | -24.0 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_b | 7 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_b | 49 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_b | 11 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_b | 78 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_b | 173 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_b | -23.6 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_b | 9 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_b | 103 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_b | 43 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_b | 110 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_b | 177 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | parity_rwd_b | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_b | 39 | 150–180 (clip 2: Right + handbrake 1.0 s at ~5–10 mph) | -110.80 (-74 %) | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_b | 43 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_b | 28 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_b | 72 | 150–180 (clip 2: Right + handbrake 1.0 s at ~5–10 mph) | -77.84 (-52 %) | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_b | 85 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_b | 16 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | parity_rwd_b | 7 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | parity_rwd_b | 98 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | parity_rwd_b | 67 | — | — | wp_vehicle drift (Drift Lab C) |
 | 50 mph handbrake 0.3 s, then throttle + 0.35 s counter tap: peak body slip ° `hb_power_slip_deg` | parity_rwd_b | 180 | — | — | wp_vehicle (A) |
 | … time from throttle-on to straight (< 5° slip), s `hb_power_straight_s` | parity_rwd_b | n/a | — | — | wp_vehicle (A) |
 | 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | parity_rwd_b | 11 | — | — | wp_vehicle drift (Drift Lab C) |
-| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_b | 10.9 | — | — | wp_vehicle drift (Drift Lab C) |
+| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_b | 11.0 | — | — | wp_vehicle drift (Drift Lab C) |
 | … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | parity_rwd_b | 1.00 | — | — | wp_vehicle drift (Drift Lab C) |
 | … spun within 2 s (no countersteer) `hb_stab_spun` | parity_rwd_b | yes | — | — | wp_vehicle drift (Drift Lab C) |
 | … control run without stabs spun within 2 s `hb_stab_control_spun` | parity_rwd_b | no | — | — | wp_vehicle drift (Drift Lab C) |
@@ -642,13 +642,13 @@ would expect, but it doesn't close G1.
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | parity_rwd_d | 1.15 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_rwd_d | 0.20 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | parity_rwd_d | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_d | 2.44 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_d | 1.88 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | parity_rwd_d | 1.22 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | parity_rwd_d | 0.74 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | parity_rwd_d | 0.74 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | parity_rwd_d | 0.15 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | parity_rwd_d | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_d | 0.97 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_d | 0.43 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | parity_rwd_d | 2.30 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | parity_rwd_d | 3.52 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | parity_rwd_d | 47.7 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -692,33 +692,33 @@ would expect, but it doesn't close G1.
 | lift-off, 60 mph corner (key held): yaw-rate kick °/s `liftoff_60_kick_dps` | parity_rwd_d | 2.9 | — | — | wp_vehicle (A) |
 | lift-off, 60 mph corner: peak body slip ° `liftoff_60_slip_deg` | parity_rwd_d | 2.3 | — | — | wp_vehicle (A) |
 | lift-off, 60 mph corner: spun `liftoff_60_spun` | parity_rwd_d | no | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | parity_rwd_d | 179.9 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | parity_rwd_d | 179.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: spun `hairpin_g1_spun` | parity_rwd_d | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_d | -24.1 | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_rwd_d | 179.8 | — | — | wp_vehicle (A) |
+| power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_d | -24.2 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_rwd_d | 180.0 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | parity_rwd_d | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_d | -22.0 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_d | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_d | 30 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_d | 5 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_d | 68 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_d | 171 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_d | -22.5 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_d | 8 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_d | 92 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_d | 35 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_d | 105 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_d | 180 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | parity_rwd_d | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_d | 34 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_d | 37 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_d | 25 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_d | 70 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_d | 87 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_d | 14 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | parity_rwd_d | 6 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | parity_rwd_d | 91 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | parity_rwd_d | 62 | — | — | wp_vehicle drift (Drift Lab C) |
 | 50 mph handbrake 0.3 s, then throttle + 0.35 s counter tap: peak body slip ° `hb_power_slip_deg` | parity_rwd_d | 180 | — | — | wp_vehicle (A) |
 | … time from throttle-on to straight (< 5° slip), s `hb_power_straight_s` | parity_rwd_d | n/a | — | — | wp_vehicle (A) |
 | 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | parity_rwd_d | 1 | — | — | wp_vehicle drift (Drift Lab C) |
-| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_d | 4.3 | — | — | wp_vehicle drift (Drift Lab C) |
-| … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | parity_rwd_d | 0.99 | — | — | wp_vehicle drift (Drift Lab C) |
+| … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_d | 4.4 | — | — | wp_vehicle drift (Drift Lab C) |
+| … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | parity_rwd_d | 1.00 | — | — | wp_vehicle drift (Drift Lab C) |
 | … spun within 2 s (no countersteer) `hb_stab_spun` | parity_rwd_d | yes | — | — | wp_vehicle drift (Drift Lab C) |
 | … control run without stabs spun within 2 s `hb_stab_control_spun` | parity_rwd_d | yes | — | — | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle (2nd, 30 mph): time at 10–50° slip of 4 s `drift_counter_s` | parity_rwd_d | 0.45 | ≥ 4 (clip 1: held 4.3 s, steady) | -3.55 (-89 %) | wp_vehicle drift (Drift Lab C) |
-| counter key + full throttle: mean drift angle ° `drift_counter_mean_deg` | parity_rwd_d | 29 | 30–45 (clip 1, 2nd gear 27–47 mph) | -0.65 (-2 %) | wp_vehicle drift (Drift Lab C) |
+| counter key + full throttle: mean drift angle ° `drift_counter_mean_deg` | parity_rwd_d | 29 | 30–45 (clip 1, 2nd gear 27–47 mph) | -0.53 (-2 %) | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle: max body slip ° `drift_counter_max_deg` | parity_rwd_d | 180 | — | — | wp_vehicle drift (Drift Lab C) |
 | counter key + full throttle: spun `drift_counter_spun` | parity_rwd_d | yes | no (clip 1) | differs | wp_vehicle drift (Drift Lab C) |
 | gear 1 top speed at the limiter, mph `gear_1_top_mph` | parity_rwd_d | 59 | — | — | data/cars (H) |
@@ -736,19 +736,19 @@ would expect, but it doesn't close G1.
 | launch: peak driven slip ratio (TCS off) `launch_peak_slip_off` | parity_fwd_c | 3.30 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS off) `launch_mean_slip_off` | parity_fwd_c | 1.35 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS off; target < 3) `launch_yaw_off_deg` | parity_fwd_c | 0.4 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS off) `launch_feather_spin_off_s` | parity_fwd_c | 0.31 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS off) `launch_feather_spin_off_s` | parity_fwd_c | 0.50 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS off) `launch_feather_peak_slip_off` | parity_fwd_c | 1.61 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | parity_fwd_c | 2.74 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | parity_fwd_c | 0.88 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_fwd_c | 0.33 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | parity_fwd_c | 0.4 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_fwd_c | 1.49 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | parity_fwd_c | 0.85 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_fwd_c | 0.15 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | parity_fwd_c | 0.66 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | parity_fwd_c | 2.20 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | parity_fwd_c | 0.31 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | parity_fwd_c | 0.17 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | parity_fwd_c | 0.2 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_fwd_c | 1.10 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_fwd_c | 0.15 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | parity_fwd_c | 0.54 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | parity_fwd_c | 3.40 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | parity_fwd_c | 46.2 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -795,18 +795,18 @@ would expect, but it doesn't close G1.
 | power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | parity_fwd_c | 6.1 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: spun `hairpin_g1_spun` | parity_fwd_c | no | — | — | wp_vehicle (A) |
 | power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_fwd_c | 19.2 | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_fwd_c | 8.1 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_fwd_c | 7.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | parity_fwd_c | no | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_fwd_c | 15.2 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_fwd_c | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_fwd_c | 36 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_fwd_c | 8 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_fwd_c | 67 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_fwd_c | 181 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_fwd_c | 14.6 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_fwd_c | 8 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_fwd_c | 89 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_fwd_c | 40 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_fwd_c | 105 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_fwd_c | 186 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | parity_fwd_c | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_fwd_c | 38 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_fwd_c | 43 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_fwd_c | 27 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_fwd_c | 72 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_fwd_c | 89 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_fwd_c | 14 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | parity_fwd_c | 6 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | parity_fwd_c | 67 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | parity_fwd_c | 40 | 30–40 (clip 3: Right + handbrake 0.3 s after braking from 101 to ~65 mph) | +0.04 (+0 %) | wp_vehicle drift (Drift Lab C) |
@@ -827,25 +827,25 @@ would expect, but it doesn't close G1.
 | 2→3 upshift: drive back to 50 %, s (measured) `shift_gap_s` | parity_fwd_c | 0.40 | — | — | data/cars (H) |
 | 0–60 mph, s (TCS off) `accel_0_60_s` | parity_rwd_a_tuned | 7.43 | — | — | wp_vehicle (A) |
 | 0–100 mph, s (TCS off) `accel_0_100_s` | parity_rwd_a_tuned | 12.10 | — | — | wp_vehicle (A) |
-| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | parity_rwd_a_tuned | 6.40 | — | — | wp_vehicle (A) |
-| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | parity_rwd_a_tuned | 11.06 | — | — | wp_vehicle (A) |
+| 0–60 mph, s (TCS full) `accel_0_60_tcs_s` | parity_rwd_a_tuned | 7.03 | — | — | wp_vehicle (A) |
+| 0–100 mph, s (TCS full) `accel_0_100_tcs_s` | parity_rwd_a_tuned | 11.69 | — | — | wp_vehicle (A) |
 | launch: time at slip ratio > 0.2, s (TCS off) `launch_spin_off_s` | parity_rwd_a_tuned | 3.92 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS off) `launch_peak_slip_off` | parity_rwd_a_tuned | 6.84 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS off) `launch_mean_slip_off` | parity_rwd_a_tuned | 2.79 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS off; target < 3) `launch_yaw_off_deg` | parity_rwd_a_tuned | 0.0 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch (6 taps then hold): time at slip > 0.2, s (TCS off) `launch_feather_spin_off_s` | parity_rwd_a_tuned | 3.82 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS off) `launch_feather_peak_slip_off` | parity_rwd_a_tuned | 6.75 | — | — | wp_vehicle assists (A, row 105) |
-| launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | parity_rwd_a_tuned | 1.20 | — | — | wp_vehicle assists (A, row 105) |
+| launch: time at slip ratio > 0.2, s (TCS half) `launch_spin_half_s` | parity_rwd_a_tuned | 1.30 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS half) `launch_peak_slip_half` | parity_rwd_a_tuned | 1.22 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS half) `launch_mean_slip_half` | parity_rwd_a_tuned | 0.21 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS half; target < 3) `launch_yaw_half_deg` | parity_rwd_a_tuned | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_a_tuned | 2.51 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS half) `launch_feather_spin_half_s` | parity_rwd_a_tuned | 2.13 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS half) `launch_feather_peak_slip_half` | parity_rwd_a_tuned | 1.27 | — | — | wp_vehicle assists (A, row 105) |
 | launch: time at slip ratio > 0.2, s (TCS full) `launch_spin_full_s` | parity_rwd_a_tuned | 0.19 | — | — | wp_vehicle assists (A, row 105) |
 | launch: peak driven slip ratio (TCS full) `launch_peak_slip_full` | parity_rwd_a_tuned | 0.83 | — | — | wp_vehicle assists (A, row 105) |
 | launch: mean driven slip ratio over 4 s (TCS full) `launch_mean_slip_full` | parity_rwd_a_tuned | 0.06 | — | — | wp_vehicle assists (A, row 105) |
 | launch, no steering: largest heading change ° (TCS full; target < 3) `launch_yaw_full_deg` | parity_rwd_a_tuned | 0.0 | — | — | wp_vehicle assists (A, row 105) |
-| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_a_tuned | 0.92 | — | — | wp_vehicle assists (A, row 105) |
+| feathered launch (6 taps then hold): time at slip > 0.2, s (TCS full) `launch_feather_spin_full_s` | parity_rwd_a_tuned | 1.29 | — | — | wp_vehicle assists (A, row 105) |
 | feathered launch: peak driven slip ratio (TCS full) `launch_feather_peak_slip_full` | parity_rwd_a_tuned | 2.29 | — | — | wp_vehicle assists (A, row 105) |
 | 60–0 mph braking time, s (ABS off) `brake_60_0_noabs_s` | parity_rwd_a_tuned | 3.43 | — | — | wp_vehicle brakes / ABS levels (A) |
 | 60–0 mph braking distance, m (ABS off) `brake_60_0_noabs_m` | parity_rwd_a_tuned | 46.3 | — | — | wp_vehicle brakes / ABS levels (A) |
@@ -889,27 +889,27 @@ would expect, but it doesn't close G1.
 | lift-off, 60 mph corner (key held): yaw-rate kick °/s `liftoff_60_kick_dps` | parity_rwd_a_tuned | 2.5 | — | — | wp_vehicle (A) |
 | lift-off, 60 mph corner: peak body slip ° `liftoff_60_slip_deg` | parity_rwd_a_tuned | 1.9 | — | — | wp_vehicle (A) |
 | lift-off, 60 mph corner: spun `liftoff_60_spun` | parity_rwd_a_tuned | no | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | parity_rwd_a_tuned | 179.9 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 1: peak body slip ° `hairpin_g1_slip_deg` | parity_rwd_a_tuned | 179.8 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 1: spun `hairpin_g1_spun` | parity_rwd_a_tuned | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_a_tuned | -24.2 | — | — | wp_vehicle (A) |
-| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_rwd_a_tuned | 179.9 | — | — | wp_vehicle (A) |
+| power-on exit, gear 1: speed gained in 2.5 s, mph `hairpin_g1_gain_mph` | parity_rwd_a_tuned | -24.3 | — | — | wp_vehicle (A) |
+| power-on exit, 20 mph hairpin, gear 2: peak body slip ° `hairpin_g2_slip_deg` | parity_rwd_a_tuned | 180.0 | — | — | wp_vehicle (A) |
 | power-on exit, 20 mph hairpin, gear 2: spun `hairpin_g2_spun` | parity_rwd_a_tuned | yes | — | — | wp_vehicle (A) |
-| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_a_tuned | -22.1 | — | — | wp_vehicle (A) |
-| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_a_tuned | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_a_tuned | 33 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_a_tuned | 6 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_a_tuned | 70 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_a_tuned | 174 | — | — | wp_vehicle drift (Drift Lab C) |
+| power-on exit, gear 2: speed gained in 2.5 s, mph `hairpin_g2_gain_mph` | parity_rwd_a_tuned | -23.3 | — | — | wp_vehicle (A) |
+| handbrake 0.3 s + key at 30 mph: rotation at release ° `hb_0.3_30_release_deg` | parity_rwd_a_tuned | 9 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: rotation 1.5 s after release ° `hb_0.3_30_total_deg` | parity_rwd_a_tuned | 93 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 0.3 s + key at 30 mph: peak body slip ° `hb_0.3_30_slip_deg` | parity_rwd_a_tuned | 36 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation at release ° `hb_1.0_30_release_deg` | parity_rwd_a_tuned | 106 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 30 mph: rotation 1.5 s after release ° `hb_1.0_30_total_deg` | parity_rwd_a_tuned | 180 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 1.0 s + key at 30 mph: peak body slip ° `hb_1.0_30_slip_deg` | parity_rwd_a_tuned | 180 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_a_tuned | 34 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_a_tuned | 38 | — | — | wp_vehicle drift (Drift Lab C) |
-| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_a_tuned | 25 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation at release ° `hb_1.0_10_release_deg` | parity_rwd_a_tuned | 70 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: rotation 1.5 s after release ° `hb_1.0_10_total_deg` | parity_rwd_a_tuned | 87 | — | — | wp_vehicle drift (Drift Lab C) |
+| handbrake 1.0 s + key at 10 mph: peak body slip ° `hb_1.0_10_slip_deg` | parity_rwd_a_tuned | 14 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation at release ° `hb_0.3_65_release_deg` | parity_rwd_a_tuned | 6 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: rotation 1.5 s after release ° `hb_0.3_65_total_deg` | parity_rwd_a_tuned | 86 | — | — | wp_vehicle drift (Drift Lab C) |
 | handbrake 0.3 s + key at 65 mph: peak body slip ° `hb_0.3_65_slip_deg` | parity_rwd_a_tuned | 56 | — | — | wp_vehicle drift (Drift Lab C) |
 | 50 mph handbrake 0.3 s, then throttle + 0.35 s counter tap: peak body slip ° `hb_power_slip_deg` | parity_rwd_a_tuned | 180 | — | — | wp_vehicle (A) |
 | … time from throttle-on to straight (< 5° slip), s `hb_power_straight_s` | parity_rwd_a_tuned | n/a | — | — | wp_vehicle (A) |
-| 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | parity_rwd_a_tuned | 1 | ≥ 5 (clip 5: each stab adds rotation (amount not measured)) | -4.28 (-86 %) | wp_vehicle drift (Drift Lab C) |
+| 50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, ° `hb_stab_extra_deg` | parity_rwd_a_tuned | 1 | ≥ 5 (clip 5: each stab adds rotation (amount not measured)) | -4.17 (-83 %) | wp_vehicle drift (Drift Lab C) |
 | … speed lost vs no stabs at 1.2 s, mph `hb_stab_speed_loss_mph` | parity_rwd_a_tuned | 3.9 | — | — | wp_vehicle drift (Drift Lab C) |
 | … time the drive force is under half in the second after the last stab, s `hb_stab_drive_gap_s` | parity_rwd_a_tuned | 1.00 | ≤ 0.1 (clip 5: handbrake stabs on the throttle keep the drive (or recover it at once)) | +0.90 (+900 %) | wp_vehicle drift (Drift Lab C) |
 | … spun within 2 s (no countersteer) `hb_stab_spun` | parity_rwd_a_tuned | yes | — | — | wp_vehicle drift (Drift Lab C) |

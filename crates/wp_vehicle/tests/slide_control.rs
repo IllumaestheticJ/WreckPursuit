@@ -151,11 +151,13 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // forward gear; a drivetrain change — the pivot aid itself is off on the wheel preset). The
     // wheel preset has countersteer_help 0, so none of the slide code may change a single bit.
     // (With no help the naive driver spins: full sim, no safety net.)
+    // [bless] row 117 (an engaged automatic clutch stays engaged while the ground keeps the
+    // engine above idle: the throttle-on approach no longer slips; a drivetrain change).
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0x310628402e1e8588_u64),
-        ("rampart_50", 0.7, 0.8, 0x6090d6f8ac1e1867),
-        ("lucciola_350", 0.5, 0.3, 0x5738bd937a260a7a),
-        ("lucciola_350", 0.7, 0.8, 0xf456ccc8a108d183),
+        ("rampart_50", 0.5, 0.3, 0xc027d8e34c663514_u64),
+        ("rampart_50", 0.7, 0.8, 0x2c5684cf7ec9747d),
+        ("lucciola_350", 0.5, 0.3, 0xb1843016bc94e898),
+        ("lucciola_350", 0.7, 0.8, 0x57002892081a23f4),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

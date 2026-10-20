@@ -55,8 +55,8 @@ pub const HANDBRAKE_ON: f32 = 0.1;
 pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
 /// The automatic clutch opens during a shift, off the throttle, when the driven wheels turn
 /// the clutch slower than this fraction of idle (the same threshold as
-/// `drivetrain::auto_clutch_update`'s "rolling").
-const AUTO_CLUTCH_OPEN_FRAC: f32 = 1.2;
+/// `drivetrain::auto_clutch_update`'s anti-stall line).
+const AUTO_CLUTCH_OPEN_FRAC: f32 = crate::drivetrain::AUTO_CLUTCH_HOLD_IDLE_FRAC;
 /// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
@@ -1103,6 +1103,7 @@ impl Vehicle {
                 self.def.engine.redline_rpm,
                 thr_in,
                 self.launch_torque_ratio,
+                self.gearbox.gear,
                 dt,
             )
         } else {
