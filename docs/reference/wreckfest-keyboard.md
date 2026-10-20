@@ -287,3 +287,14 @@ Targets for WreckPursuit (lab first, then car data):
 - the same slower build for pitch under braking and throttle
 
 This needs softer roll stiffness (springs + bars) **with** enough travel or ride height to stay off the bump stops, more roll inertia if the body inertia is low, and a slower yaw build.
+
+## Letting go of the steering mid-drift (owner, 2026-10-20)
+
+Owner: **in the reference, releasing the steering keys mid-drift makes the car slowly spin.** It does **not** straighten or hold the drift. Clips agree:
+- **Clip 1, 44.7 s:** after a 4.3 s Left hold (a right-hand drift), the keys are released for 0.8 s with the throttle on. The car keeps rotating, and the tail keeps coming round until Right is pressed at 45.5 s.
+- **Clip 1, 21.5 s:** keys released after a 1.1 s Left hold. The car keeps yawing round at falling speed.
+
+Combined with the clip-8 cockpit finding (the wheel is pulled toward countersteer *while a key is held*), this gives the target behaviour for keyboard:
+- **Key held** (either direction) during a slide: the wheels are pulled toward the travel direction (velocity-relative), plus the key's offset. Holding the key keeps the drift controllable.
+- **No key:** the wheels return to the body's centre at the normal return rate, with **no** automatic countersteer. A powered RWD slide then keeps rotating **slowly** (a gradual over-rotation into a spin over ~1–2 s, not a snap).
+- So the player must keep a key held to keep the drift. Letting go is a mistake that spins you slowly.
