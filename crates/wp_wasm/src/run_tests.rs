@@ -291,3 +291,60 @@ fn replays_and_scripted_sessions_have_no_economy_run() {
     let replay = live.record_stop().unwrap();
     assert!(Session::from_replay(replay).unwrap().run().is_none());
 }
+
+/// P9: a helicopter put up over a pursued racer on Port Vesper tracks it while it drives off
+/// (the browser e2e's flow, natively).
+#[test]
+fn helicopter_tracks_a_racer_driving_off_in_port_vesper() {
+    let mut sc = city_chase_in(
+        "debug_sedan",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = Session::new(sc, false).unwrap();
+    let mut parked = false;
+    for _ in 0..240 * 10 {
+        s.run_ticks(1);
+        if s.debug_park_near_police(PLAYER, 14.0).is_ok() {
+            parked = true;
+            break;
+        }
+    }
+    assert!(parked, "no police car spawned");
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 60.0);
+    let mut unit = None;
+    for _ in 0..240 * 30 {
+        s.run_ticks(1);
+        unit = s
+            .debug_sim_mut()
+            .unwrap()
+            .police_mut()
+            .debug_launch_helicopter(PLAYER, 120.0);
+        if unit.is_some() {
+            break;
+        }
+    }
+    assert!(unit.is_some(), "pursuit never started");
+    let throttle = VehicleInput {
+        throttle: 1.0,
+        ..Default::default()
+    };
+    let mut visual = 0;
+    for k in 0..240 * 20 {
+        s.set_input(PLAYER, throttle).unwrap();
+        s.run_ticks(1);
+        if k % 24 == 0 {
+            let h = crate::police::helicopters(s.sim().police(), &|p, z| {
+                s.sim().world().map().ground_height(p, z)
+            });
+            if h.len() == crate::police::HELO_STRIDE && h[7] == 1.0 {
+                visual += 1;
+            }
+        }
+    }
+    assert!(visual > 100, "visual in {visual} of 200 samples");
+}
