@@ -5,8 +5,8 @@
 
 use wp_contracts::{AssistProfile, LoadedCar};
 use wp_vehicle::drift_lab::{
-    drift_run, hairpin, handbrake_entry, kick_catch, tap_response, transition_run, CatchDriver,
-    DriftDriver,
+    brake_tap, drift_run, fwd_corner, hairpin, handbrake_entry, handbrake_stab, kick_catch,
+    tap_response, transition_run, CatchDriver, DriftDriver,
 };
 
 fn car(id: &str) -> LoadedCar {
@@ -49,6 +49,7 @@ fn main() {
             "handbrake",
             "tap",
             "hairpin",
+            "clips",
         ]
         .contains(&a.as_str())
     }) {
@@ -67,6 +68,9 @@ fn main() {
         .map(String::from)
         .to_vec();
     }
+    if what == "all" || what == "clips" {
+        clips_tables();
+    }
     if what == "all" || what == "tap" {
         tap_table(&args);
     }
@@ -79,7 +83,7 @@ fn main() {
     if what == "all" || what == "transition" {
         transition_table(&args);
     }
-    if ["transition", "handbrake", "tap", "hairpin"].contains(&what.as_str()) {
+    if ["transition", "handbrake", "tap", "hairpin", "clips"].contains(&what.as_str()) {
         return;
     }
     if what != "drift" {
@@ -356,6 +360,64 @@ fn hairpin_table(args: &[String]) {
                     if r.spun { "SPUN" } else { "no" }
                 );
             }
+        }
+    }
+}
+
+/// Owner clips 3 and 5 (fixed car lists: front-drive for clip 3, rear-drive for clip 5).
+fn clips_tables() {
+    println!("\n## Front-drive corner (clip 3): brake 1.3 s from 160 km/h, key into the turn + handbrake 0.3 s, full throttle + 0.35 s opposite tap");
+    println!(
+        "| car | help | turn-in km/h | peak slip ° | throttle → straight s | turned ° | spun |"
+    );
+    println!("|---|---|---|---|---|---|---|");
+    for id in ["kestrel_ts", "debug_sedan", "junkyard_beater"] {
+        let c = car(id);
+        for help in [0.3f32, 0.6, 1.0] {
+            let r = fwd_corner(&c, &kb(help), 160.0 / 3.6);
+            println!(
+                "| {id} | {:.0} % | {:.0} | {:.0} | {} | {:.0} | {} |",
+                help * 100.0,
+                r.turn_in_kmh,
+                r.peak_slip_deg,
+                r.straight_s.map_or("–".to_string(), |t| format!("{t:.2}")),
+                r.turned_deg,
+                if r.spun { "SPUN" } else { "no" }
+            );
+        }
+    }
+    println!("\n## Handbrake stabs on the throttle (clip 5): 80 km/h corner (R84 at 0.6 g), 3 × 0.2 s stabs, then countersteer + throttle");
+    println!("| car | help | slide before ° | max slide in stabs ° | drive back after a stab s (worst) | drift s after (of 3) | spun |");
+    println!("|---|---|---|---|---|---|---|");
+    for id in ["shiro_turbo", "sperber_32", "rampart_50"] {
+        let c = car(id);
+        for help in [0.3f32, 0.6, 1.0] {
+            let r = handbrake_stab(&c, &kb(help), 84.0, 0.6);
+            println!(
+                "| {id} | {:.0} % | {:.0} | {:.0} | {:.2} | {:.2} | {} |",
+                help * 100.0,
+                r.slide_before_deg,
+                r.slide_after_deg,
+                r.drive_back_s,
+                r.drift_s,
+                if r.spun { "SPUN" } else { "no" }
+            );
+        }
+    }
+    println!("\n## Braking with a steering tap (clip 5): full brake from 130 km/h, a left tap 0.2 s in, 60 %");
+    println!("| car | tap s | peak yaw °/s | max slip ° | heading after 2 s ° | spun |");
+    println!("|---|---|---|---|---|---|");
+    for id in ["shiro_turbo", "rampart_50", "kestrel_ts", "debug_sedan"] {
+        let c = car(id);
+        for tap in [0.15f32, 0.3] {
+            let r = brake_tap(&c, &kb(0.6), 130.0 / 3.6, tap);
+            println!(
+                "| {id} | {tap:.2} | {:.1} | {:.1} | {:.1} | {} |",
+                r.peak_yaw_dps,
+                r.max_slip_deg,
+                r.heading_deg,
+                if r.spun { "SPUN" } else { "no" }
+            );
         }
     }
 }

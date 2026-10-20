@@ -9,6 +9,9 @@
 //! | [`handbrake_entry`] | straight at speed, key into the turn + a handbrake tap, then the countersteer key + throttle (row 108): release-to-aligned time, caught or spun |
 //! | [`tap_response`] | straight at speed, one steering-key tap (row 98 / clip 2): peak wheel angle, peak yaw rate, heading change |
 //! | [`hairpin`] | clip 2's handbrake hairpin: feint, key into the turn + handbrake 1 s, throttle, countersteer key + throttle: rotation, catch |
+//! | [`fwd_corner`] | owner clip 3: front-drive braking + handbrake turn-in, then full throttle + a short opposite tap: peak slip, time to straight |
+//! | [`handbrake_stab`] | owner clip 5: handbrake stabs on the throttle in a corner, then countersteer + throttle: rotation added, drive recovery, drift held |
+//! | [`brake_tap`] | owner clip 5: hard braking at speed with a steering tap: peak yaw and slip |
 //! | [`transition_run`] | a left drift, a lift-off swing into a right drift (S-bend, row 107): transition time, overshoot, wobbles, spun or not |
 //!
 //! Definitions (fixed here, independent of the assist's own tuning):
@@ -965,6 +968,280 @@ pub fn hairpin(car: &LoadedCar, assists: &AssistProfile, speed_mps: f32) -> Hair
             _ => None,
         },
         exit_kmh: rig.state().speed_mps * 3.6,
+        spun,
+    }
+}
+
+/// Result of [`fwd_corner`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FwdCorner {
+    /// Speed when the braking ends, km/h.
+    pub turn_in_kmh: f32,
+    /// Largest body slip after the handbrake, degrees.
+    pub peak_slip_deg: f32,
+    /// Time from the throttle going on until the car is straight (body slip < 5°, |yaw| <
+    /// 0.3 rad/s), s (`None`: not within 3 s).
+    pub straight_s: Option<f32>,
+    /// Heading change from the turn-in to the end, degrees.
+    pub turned_deg: f32,
+    /// Spun: past 90° of body slip or backwards.
+    pub spun: bool,
+}
+
+/// Owner clip 3 (front-drive race lap), one corner: straight at `speed_mps`, the brake for
+/// 1.3 s, then the key into a left turn + the handbrake for 0.3 s with the throttle off, then
+/// full throttle with a 0.35 s tap of the opposite key and the keys released, for 3 s.
+pub fn fwd_corner(car: &LoadedCar, assists: &AssistProfile, speed_mps: f32) -> FwdCorner {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    // The automatic box shifts down under braking (a manual player would too).
+    for _ in 0..TICKS_PER_S * 13 / 10 {
+        rig.step(
+            &VehicleInput {
+                brake: 1.0,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let turn_in_kmh = rig.state().speed_mps * 3.6;
+    let h0 = heading(&rig);
+    let (hb, tap) = (TICKS_PER_S * 3 / 10, TICKS_PER_S * 35 / 100);
+    let (mut peak, mut straight, mut spun) = (0.0f32, None, false);
+    let (mut total, mut prev) = (0.0f32, h0);
+    for tick in 0..hb + 3 * TICKS_PER_S {
+        let input = if tick < hb {
+            VehicleInput {
+                steer: -1.0,
+                handbrake: 1.0,
+                ..Default::default()
+            }
+        } else if tick < hb + tap {
+            VehicleInput {
+                steer: 1.0,
+                throttle: 1.0,
+                ..Default::default()
+            }
+        } else {
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            }
+        };
+        rig.step(&input, assists);
+        let h = heading(&rig);
+        let mut d = h - prev;
+        if d > std::f32::consts::PI {
+            d -= std::f32::consts::TAU;
+        } else if d < -std::f32::consts::PI {
+            d += std::f32::consts::TAU;
+        }
+        total += d;
+        prev = h;
+        let n = slide_state(&rig);
+        let deg = n.body_slip.to_degrees().abs();
+        peak = peak.max(deg);
+        if deg > 90.0 || n.v_fwd < 0.0 {
+            spun = true;
+        }
+        if tick >= hb && straight.is_none() && deg < 5.0 && n.yaw_rate.abs() < 0.3 {
+            straight = Some((tick + 1 - hb) as f32 * PHYSICS_DT);
+        }
+    }
+    FwdCorner {
+        turn_in_kmh,
+        peak_slip_deg: peak,
+        straight_s: straight,
+        turned_deg: total.to_degrees(),
+        spun,
+    }
+}
+
+/// Result of [`handbrake_stab`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HandbrakeStab {
+    /// Slide angle before the first stab, degrees.
+    pub slide_before_deg: f32,
+    /// Largest slide angle during the stabs, degrees.
+    pub slide_after_deg: f32,
+    /// Longest time after a stab's release until the clutch is engaged again (> 0.9), s.
+    pub drive_back_s: f32,
+    /// Time drifting (10–50° of slip) in the 3 s after the stabs, s.
+    pub drift_s: f32,
+    /// Spun: past 90° of body slip or backwards.
+    pub spun: bool,
+}
+
+/// Owner clip 5: a left-hand corner of `radius` at `lat_g`, throttle + the key into the
+/// turn, three 0.2 s handbrake stabs 0.4 s apart with the throttle held (the key into the
+/// turn while the slide is under 20°, the countersteer key past it), then the countersteer
+/// key + modulated throttle (off past 32° of slide, on below 25°) for 3 s.
+/// Manual gears: the drift drivers' 2nd ([`DRIFT_GEAR`]).
+pub fn handbrake_stab(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    radius: f32,
+    lat_g: f32,
+) -> HandbrakeStab {
+    let mut rig = settle_on_circle(car, assists, radius, lat_g);
+    let (stab, gap) = (TICKS_PER_S / 5, TICKS_PER_S * 2 / 5);
+    let lead_in = TICKS_PER_S / 2;
+    let stabs_end = lead_in + 3 * (stab + gap);
+    let before = (-slide_state(&rig).body_slip).to_degrees();
+    let (mut after, mut drift, mut spun) = (0.0f32, 0usize, false);
+    let mut thr_key = 1.0f32;
+    let mut released: Option<usize> = None;
+    let mut drive_back = 0.0f32;
+    let mut into = true;
+    for tick in 0..stabs_end + 3 * TICKS_PER_S {
+        let s = slide_state(&rig);
+        let angle = (-s.body_slip).to_degrees();
+        if angle > 32.0 {
+            thr_key = 0.0;
+        } else if angle < 25.0 {
+            thr_key = 1.0;
+        }
+        let in_stab = tick >= lead_in && tick < stabs_end && (tick - lead_in) % (stab + gap) < stab;
+        // During the stabs: the key into the turn while the slide is under 20°, the
+        // countersteer key past it (the rotation is there); throttle held.
+        if angle > 20.0 {
+            into = false;
+        } else if angle < 12.0 {
+            into = true;
+        }
+        let input = if tick < stabs_end {
+            VehicleInput {
+                steer: if into { -1.0 } else { 1.0 },
+                throttle: 1.0,
+                handbrake: if in_stab { 1.0 } else { 0.0 },
+                gear_down: drift_gear_down(&rig, assists),
+                ..Default::default()
+            }
+        } else {
+            VehicleInput {
+                steer: if angle > 5.0 { 1.0 } else { 0.0 },
+                throttle: thr_key,
+                gear_down: drift_gear_down(&rig, assists),
+                ..Default::default()
+            }
+        };
+        rig.step(&input, assists);
+        let n = slide_state(&rig);
+        let deg = n.body_slip.to_degrees().abs();
+        if deg > 90.0 || n.v_fwd < 0.0 {
+            spun = true;
+        }
+        if tick < stabs_end {
+            after = after.max((-n.body_slip).to_degrees());
+            if in_stab {
+                released = None;
+            } else if tick >= lead_in && released.is_none() {
+                released = Some(tick);
+            }
+        }
+        if let Some(t0) = released {
+            if rig.vehicle.telemetry().clutch > 0.9 {
+                drive_back = drive_back.max((tick - t0) as f32 * PHYSICS_DT);
+                released = None;
+            } else if tick >= stabs_end {
+                drive_back = drive_back.max((tick - t0) as f32 * PHYSICS_DT);
+            }
+        }
+        if tick >= stabs_end && !spun && (10.0..=50.0).contains(&deg) {
+            drift += 1;
+        }
+    }
+    HandbrakeStab {
+        slide_before_deg: before,
+        slide_after_deg: after,
+        drive_back_s: drive_back,
+        drift_s: drift as f32 * PHYSICS_DT,
+        spun,
+    }
+}
+
+/// Result of [`brake_tap`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BrakeTap {
+    /// Largest yaw rate, degrees per second.
+    pub peak_yaw_dps: f32,
+    /// Largest body slip, degrees.
+    pub max_slip_deg: f32,
+    /// Heading change after 2 s, degrees.
+    pub heading_deg: f32,
+    /// Spun: past 90° of body slip or backwards.
+    pub spun: bool,
+}
+
+/// Owner clip 5: straight at `speed_mps`, full brake for 2 s with a `tap_s` tap of the left
+/// key 0.2 s in.
+pub fn brake_tap(car: &LoadedCar, assists: &AssistProfile, speed_mps: f32, tap_s: f32) -> BrakeTap {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let h0 = heading(&rig);
+    let (t0, t1) = (
+        TICKS_PER_S / 5,
+        TICKS_PER_S / 5 + (tap_s * TICKS_PER_S as f32) as usize,
+    );
+    let (mut yaw, mut slip, mut spun) = (0.0f32, 0.0f32, false);
+    for tick in 0..2 * TICKS_PER_S {
+        rig.step(
+            &VehicleInput {
+                brake: 1.0,
+                steer: if (t0..t1).contains(&tick) { -1.0 } else { 0.0 },
+                ..Default::default()
+            },
+            &auto,
+        );
+        let n = slide_state(&rig);
+        yaw = yaw.max(n.yaw_rate.abs());
+        slip = slip.max(n.body_slip.abs());
+        if n.body_slip.abs().to_degrees() > 90.0 || n.v_fwd < -0.5 {
+            spun = true;
+        }
+    }
+    BrakeTap {
+        peak_yaw_dps: yaw.to_degrees(),
+        max_slip_deg: slip.to_degrees(),
+        heading_deg: (heading(&rig) - h0).to_degrees(),
         spun,
     }
 }

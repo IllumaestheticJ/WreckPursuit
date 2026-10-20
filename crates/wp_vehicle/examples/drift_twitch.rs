@@ -17,7 +17,7 @@ fn main() {
             serde_json::from_str(&j).expect("DRIFT_TUNING json"),
         ));
     }
-    // RAMP=row90, or RAMP=up,down[,rev] for a custom ramp.
+    // RAMP=main / row90 (a testbed-side ramp on top of the sim's), or RAMP=up,down[,rev].
     let ramp = match std::env::var("RAMP").ok().as_deref() {
         Some("row90") => KeyRamp::ROW90,
         Some(r) if r.contains(',') => {
@@ -28,7 +28,9 @@ fn main() {
                 reverse_from_centre: v.get(2) == Some(&"rev"),
             }
         }
-        _ => KeyRamp::MAIN,
+        Some("main") => KeyRamp::MAIN,
+        // As shipped (Drift Lab C step 6): raw keys, the sim's key ramp.
+        _ => KeyRamp::RAW,
     };
     let mut assists = AssistProfile::keyboard_default();
     if std::env::var("ASSISTS").is_ok_and(|a| a == "off") {

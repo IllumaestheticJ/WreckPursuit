@@ -197,10 +197,26 @@ Checked on the merge commit before any Drift Lab W change (`8074782b`, C + round
 `tests::simcli_golden_replays_play_back_in_the_browser_core` fail there too (goldens, as in
 drift-lab-c.md). `cargo clippy --workspace --all-targets` fails in test code of `wp_audio`
 (`siren.rs:437`, digit grouping) and `wp_sim` (`lib.rs:1277`, unused variable), both from
-round12. `lint-determinism` reports 3 errors, all in `wp_vehicle/src/twitch_lab.rs` (the
-drift-twitch merge), none in this work. Clean here: `cargo fmt --check`, `cargo clippy
+round12. `lint-determinism` reported 3 errors in `wp_vehicle/src/twitch_lab.rs` (the drift-twitch
+merge); fixed by C's 335eeb3, merged here (0 errors). Clean here: `cargo fmt --check`, `cargo clippy
 --workspace -- -D warnings`, `cargo clippy -p wp_vehicle -p wp_wasm --all-targets -- -D
 warnings`, `cargo test -p wp_vehicle`, wasm build + wasm-bindgen, `tsc --noEmit`.
+
+## Merge of lead/drift-lab-c 335eeb3 (raw keys in the sim, clip 3/5 drivers, gate fixes)
+
+- `input.ts`: C's raw keyboard steer (always −1/0/+1) taken; W's `setRawKeyboard` now only
+  turns off the throttle key ramp in the lab.
+- `vehicle.rs`: with plain on, `key_steer` passes the key through (no 6/s ramp; the plain slew
+  is the only smoothing), the drift command is forced to Off (no hold / angle-up / transition /
+  catch / envelope / straighten), no slide throttle, no throttle shaping, no pedal filter, and
+  the rack is `plain::update_center_angle`. Without plain everything is C's code path.
+- `steering.rs`: C's wording of the clippy doc fix taken. `twitch_lab.rs` sin_cos fix: the
+  determinism lint is now at 0 errors.
+- **Known:** `tests/drift_lab_b.rs::handbrake_stabs_add_rotation_and_drive_comes_back` fails
+  after the merge (shiro_turbo: drive back in 0.125 s vs the < 0.1 s limit). It passes on
+  `lead/drift-lab-c` and fails on `lead/drift-lab-c` + `lead/round12` with none of W's commits,
+  so it is a round12 interaction (likely the drivetrain / clutch changes there). Not changed
+  here; reported to the lead.
 
 ## Contract change requests
 

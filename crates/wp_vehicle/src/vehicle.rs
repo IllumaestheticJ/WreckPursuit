@@ -278,6 +278,8 @@ pub struct Vehicle {
     pub(crate) drift_cmd: crate::drift::DriftCommand,
     /// Confirmed-slide gate of the steering assists (row 102).
     pub(crate) slide_gate: crate::steering::SlideGate,
+    /// Keyboard steer input after the key ramp ([`crate::steering::key_steer`]).
+    pub(crate) key_steer: f32,
 }
 
 impl Vehicle {
@@ -394,6 +396,7 @@ impl Vehicle {
             drift: crate::drift::DriftState::default(),
             drift_cmd: crate::drift::DriftCommand::default(),
             slide_gate: crate::steering::SlideGate::default(),
+            key_steer: 0.0,
             stalled: false,
             corners,
         };
@@ -530,6 +533,7 @@ impl Vehicle {
         self.drift = crate::drift::DriftState::default();
         self.drift_cmd = crate::drift::DriftCommand::default();
         self.slide_gate = crate::steering::SlideGate::default();
+        self.key_steer = 0.0;
         self.stalled = false;
     }
 
@@ -943,9 +947,29 @@ impl Vehicle {
             self.slide_gate.confirmed = 1.0;
             self.slide_gate.below_s = 0.0;
         }
+        // Keyboard keys arrive raw; the key ramp is here: grip only — in a confirmed slide, a
+        // lift-off transition or under the handbrake the key acts at once.
+        // Drift Lab W (plain keyboard steering, `crate::plain`): the key reaches the plain
+        // rack as pressed (the rack's constant-rate slew is the only smoothing); no key ramp.
+        let plain = crate::plain::active();
+        self.key_steer = if plain.is_some() {
+            input.steer.clamp(-1.0, 1.0)
+        } else {
+            crate::steering::key_steer(
+                self.key_steer,
+                input.steer.clamp(-1.0, 1.0),
+                assists.steer_speed_sensitivity,
+                self.slide_gate.confirmed > 0.0
+                    || input.handbrake > HANDBRAKE_ON
+                    || self.hb_grace > 0.0
+                    || self.drift_cmd.mode == crate::drift::DriftMode::Transition,
+                dt,
+            )
+        };
+        let steer_cmd = self.key_steer;
         self.drift_cmd = self.drift.update(
             &crate::drift::DriftInputs {
-                driver: input.steer,
+                driver: steer_cmd,
                 throttle: thr_in,
                 speed: v_fwd,
                 body_slip: body_slip(v_fwd, v_left),
@@ -953,10 +977,14 @@ impl Vehicle {
                 onset,
                 help: assists.countersteer_help,
                 sensitivity: assists.steer_speed_sensitivity,
+                rear_drive: {
+                    let sp = self.base_split();
+                    (sp[2] + sp[3]).clamp(0.0, 1.0)
+                },
                 handbrake_hold: crate::drift::handbrake_assist_hold(
                     self.hb_grace,
                     input.handbrake > HANDBRAKE_ON,
-                    input.steer,
+                    steer_cmd,
                     rear_axle,
                 ),
             },
@@ -966,7 +994,6 @@ impl Vehicle {
         // Drift Lab W (plain keyboard steering, `crate::plain`): no drift intent modes, no
         // slide-throttle feathering, no throttle shaping, no pedal filter — the throttle key
         // reaches the engine as pressed (TCS / ESC still apply if the profile turns them on).
-        let plain = crate::plain::active();
         if plain.is_some() {
             self.drift_cmd = crate::drift::DriftCommand {
                 throttle_scale: 1.0,
@@ -977,7 +1004,7 @@ impl Vehicle {
         if plain.is_some() {
             self.throttle_f = thr_in;
         } else {
-            let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
+            let st = slide_throttle(assists, self.slide_class, rear_axle, steer_cmd);
             // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical
             // otherwise).
             let thr_target = if st.scale < 1.0 {
@@ -1219,13 +1246,13 @@ impl Vehicle {
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
 
         // --- Steering ---------------------------------------------------------------------
-        let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+        let steer_in = self.steer_input(steer_cmd, v_fwd, v_left, rear_axle);
         let max_steer = self.max_steer();
         self.center_steer = if let Some(p) = plain {
             crate::plain::update_center_angle(
                 self.center_steer,
                 &crate::plain::PlainInput {
-                    driver: input.steer,
+                    driver: steer_cmd,
                     speed: v_fwd,
                     full_lock: max_steer * steer_in.ratio_scale,
                     pull: steer_in.pull,

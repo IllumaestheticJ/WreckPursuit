@@ -63,6 +63,13 @@ impl KeyRamp {
         down: 6.0,
         reverse_from_centre: false,
     };
+    /// Drift Lab C step 6 (as shipped): the testbed sends the key raw and the sim ramps it
+    /// (`steering::key_steer`, 6/s in and out in grip, at once in a slide).
+    pub const RAW: KeyRamp = KeyRamp {
+        up: f32::INFINITY,
+        down: f32::INFINITY,
+        reverse_from_centre: false,
+    };
     /// Machine A's row 90 (`lead/round12`): reversal from centre, 12/s release.
     pub const ROW90: KeyRamp = KeyRamp {
         up: 4.0,
@@ -87,7 +94,7 @@ impl KeyRamp {
         };
         let d = target - cur;
         let step = rate * dt;
-        if d.abs() <= step {
+        if !step.is_finite() || d.abs() <= step {
             target
         } else {
             cur + d.signum() * step
@@ -148,14 +155,14 @@ impl Case {
             Case::LaneChange { .. } => {
                 let len = self.speed() * 1.6;
                 let t = ((s - start) / len).clamp(0.0, 1.0);
-                let x = -3.5 * 0.5 * (1.0 - (std::f32::consts::PI * t).cos());
+                let x = -3.5 * 0.5 * (1.0 - wp_math::sin_cos(std::f32::consts::PI * t).1);
                 (x, s)
             }
             Case::Slalom => {
                 // Amplitude eased in over the first gate so the path has no kink.
                 let u = ((s - start) / 18.0).clamp(0.0, 1.0);
                 let ease = u * u * (3.0 - 2.0 * u);
-                let x = 1.5 * ease * (std::f32::consts::PI * (s - start) / 18.0).sin();
+                let x = 1.5 * ease * wp_math::sin_cos(std::f32::consts::PI * (s - start) / 18.0).0;
                 (x, s)
             }
             Case::Sweeper => {
@@ -165,7 +172,8 @@ impl Case {
                     let r = 80.0;
                     let a = (s - start) / r;
                     // Left-hand: centre at (−r, start).
-                    (-r + r * a.cos(), start + r * a.sin())
+                    let (sa, ca) = wp_math::sin_cos(a);
+                    (-r + r * ca, start + r * sa)
                 }
             }
             Case::Bump => (0.0, s),
