@@ -1203,7 +1203,7 @@ impl PoliceSystem {
     }
 
     /// Whether another car is closing on unit `i` and would reach it within
-    /// [`TURN_LOOK_S`]: a unit doesn't start turning across the road then (opponent-pace: units
+    /// [`TURN_LOOK_S`]: a unit not chasing anyone doesn't start turning across the road then (opponent-pace: units
     /// turning round on the Hollins hairpin, just after the race leader passed, ended up across
     /// both lanes in front of the next racer).
     fn traffic_closing(&self, i: usize) -> bool {
@@ -1215,7 +1215,7 @@ impl PoliceSystem {
             }
             let r = graph::sub(o.pos, pos);
             let d2 = graph::dot(r, r);
-            if d2 > TURN_LOOK_M * TURN_LOOK_M || d2 < 1e-4 {
+            if !(1e-4..=TURN_LOOK_M * TURN_LOOK_M).contains(&d2) {
                 return false;
             }
             // Closing speed along the line between them, times the distance: c·d.
@@ -1332,7 +1332,10 @@ impl PoliceSystem {
             && now >= u.unstick.swing_ready
             && u.unstick.may_turn(now)
             && graph::dist(pos, [target[0], target[1]]) > 6.0
-            && !self.traffic_closing(i);
+            && (matches!(
+                u.assignment,
+                Assignment::Pursue { .. } | Assignment::Intercept { .. }
+            ) || !self.traffic_closing(i));
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
         let left_t = graph::cross(heading, to_t) > 0.0;
