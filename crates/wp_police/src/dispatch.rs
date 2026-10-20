@@ -19,6 +19,7 @@ use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::{
     compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
+    ToolSite,
 };
 use crate::unit::{Assignment, DriveCommand, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
@@ -999,6 +1000,77 @@ impl PoliceSystem {
             sight_m: site.sight_m,
         });
         Ok(id)
+    }
+
+    fn scenario_site(pos: [f32; 2], dir: [f32; 2]) -> ToolSite {
+        ToolSite {
+            segment: crate::graph::SegmentId(0),
+            from_node: NodeId(0),
+            d_m: 0.0,
+            pos,
+            dir: normalize(dir),
+            sight_m: 0.0,
+            ahead_m: 0.0,
+        }
+    }
+
+    /// Scenario / test placement: a roadblock's barriers across the road at `pos`, facing
+    /// traffic that travels along `dir`, attributed to `racer`. Unlike
+    /// [`PoliceSystem::captain_command`] this bypasses every dispatch rule (pursuit, unlock
+    /// level, cooldown, budget, site planning) and spawns no units, so a scenario can put a
+    /// barricade exactly where a car will hit it, even on the flat world. Expires after the
+    /// configured lifetime like any roadblock; emits `RoadblockPlaced`.
+    pub fn place_roadblock_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
+        let rb = &self.cfg.tools.roadblock;
+        let site = Self::scenario_site(pos, dir);
+        let barriers = roadblock_barriers(
+            &site,
+            rb.barrier_half_extents_m,
+            rb.barrier_mass_kg,
+            ROAD_HALF_WIDTH_M,
+        );
+        let expires = self.now.plus(rb.lifetime_s);
+        let id = ToolId(self.next_tool);
+        self.next_tool += 1;
+        self.roadblocks.push(Roadblock {
+            id,
+            racer,
+            site,
+            units: Vec::new(),
+            barriers,
+            expires,
+        });
+        self.stats.roadblocks += 1;
+        self.pending.push(PoliceEvent::RoadblockPlaced {
+            tool: id,
+            racer,
+            pos: [pos[0], pos[1], 0.0],
+            sight_m: 0.0,
+        });
+        id
+    }
+
+    /// Scenario / test placement: a spike strip across the road at `pos`, perpendicular to
+    /// `dir`, attributed to `racer`, without a deploying unit and bypassing every dispatch rule
+    /// (see [`PoliceSystem::place_roadblock_at`]). Any racer crossing it is spiked. Emits
+    /// `SpikesPlaced`.
+    pub fn place_spikes_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
+        let sc = &self.cfg.tools.spikes;
+        let (length, lifetime) = (sc.length_m, sc.lifetime_s);
+        let site = Self::scenario_site(pos, dir);
+        let id = ToolId(self.next_tool);
+        self.next_tool += 1;
+        let strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        self.pending.push(PoliceEvent::SpikesPlaced {
+            tool: id,
+            racer,
+            a: [strip.a[0], strip.a[1], 0.0],
+            b: [strip.b[0], strip.b[1], 0.0],
+            sight_m: 0.0,
+        });
+        self.spikes.push(strip);
+        self.stats.spikes += 1;
+        id
     }
 
     /// Place a spike strip ahead of `racer` (optionally on a specific road).

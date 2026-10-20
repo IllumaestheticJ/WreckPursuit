@@ -13,6 +13,7 @@
 mod contacts;
 mod physics;
 mod police_link;
+mod police_tools;
 mod props;
 mod systems;
 mod traffic_link;
@@ -20,6 +21,7 @@ mod traffic_link;
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
 pub use physics::{CityColliders, PhysicsWorld, SAFETY_FLOOR_Z};
 pub use police_link::POLICE_SLOT_RESERVE;
+pub use police_tools::{BarrierView, SpikeStripView};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 
@@ -166,6 +168,8 @@ pub struct Sim {
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
+    /// Roadblock barrier bodies (see `police_tools`).
+    tool_bodies: Vec<police_tools::ToolBody>,
     city_colliders: CityColliders,
     /// Tick until which new props settle (their first contacts take a few ticks; drops during
     /// that time are not hits).
@@ -201,6 +205,7 @@ impl Sim {
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
+            tool_bodies: Vec::new(),
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
             props_settle_until: 0,
@@ -421,6 +426,7 @@ impl Sim {
     /// starting heat (`PoliceSystem::for_world(cfg, self.world(), setup)`). Call after
     /// `set_world` (which rebuilds police) and before the first tick so replays match.
     pub fn set_police(&mut self, police: PoliceSystem) {
+        self.clear_police_tools();
         self.police = police;
     }
 
@@ -748,6 +754,7 @@ impl Sim {
             self.police
                 .step(&self.world, &racers, &tick_events, dt, &mut out);
             self.reconcile_police_units();
+            self.sync_police_tools();
         }
         self.last_tick_events = out.len();
         self.events.extend(out);
@@ -843,7 +850,8 @@ impl Sim {
 
     /// Stable hash of the whole simulation state (hash spec v3, see `docs/integration/harness.md`):
     /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), [`World::state_hash`]
-    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), debris count and every debris body position (1e-3 m) in spawn order,
+    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), roadblock
+    /// barrier bodies (count, then tool id + position 1e-3 m each), debris count and every debris body position (1e-3 m) in spawn order,
     /// vehicle count, then every [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
@@ -852,6 +860,13 @@ impl Sim {
         h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
         h.write_u64(self.world.state_hash());
         h.write_u64(self.police.state_hash());
+        h.write_u32(self.tool_bodies.len() as u32);
+        for t in &self.tool_bodies {
+            h.write_u32(t.tool.0);
+            for x in self.physics.bodies[t.body].translation().to_array() {
+                h.write_f32_q(x, 1e3);
+            }
+        }
         h.write_u32(self.debris.len() as u32);
         for d in &self.debris {
             for x in self.physics.bodies[*d].translation().to_array() {
@@ -938,7 +953,7 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
 
 /// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden
 /// must then be re-blessed.
-pub const HASH_SPEC_VERSION: u32 = 3;
+pub const HASH_SPEC_VERSION: u32 = 4;
 
 #[cfg(test)]
 mod tests {
