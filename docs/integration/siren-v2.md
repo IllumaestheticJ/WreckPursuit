@@ -100,6 +100,17 @@
   plays on the Police bus (cue-driven), forced Yelp / Phaser / HiLo / Wail all heard, no stale
   voices after crossfades, 0 rejected curves, no page errors, rack cost and audio frame cost.
 
+## Gate (2026-10-20, this container)
+
+`cargo fmt --check` ✓ · `cargo clippy --workspace -D warnings` ✓ · `cargo build --target
+wasm32-unknown-unknown -p wp_wasm` ✓ · `tsc --noEmit` ✓ · `cargo test --workspace --no-fail-fast`
+✓ except the pre-existing failures listed under Known gaps · `just web-e2e`: `run.mjs` all checks
+pass with `PERF=0`; its `perf_check.mjs` step fails 8 software-GL budgets (real-time factor
+0.69, allocations ~2.5 MB / frame, shader re-resolves) **identically on untouched
+`origin/lead/round12`** (0.69, 2.6 MB) in this container; `race.mjs` all pass (one run timed out
+waiting for sim time while other jobs loaded the machine, passed alone); `siren.mjs` 23/23 pass.
+Also re-run: `e2e/audio.mjs`, `e2e/audio_roster.mjs` (19 cars × 4 roles) all pass.
+
 ## Perf numbers
 
 | Measurement | Machine | Native | Browser | Budget |
