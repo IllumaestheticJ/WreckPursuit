@@ -99,6 +99,8 @@
           <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
           <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
           <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
+          <button id="sc-drift" title="drift lab: open asphalt pad, two 90° corners and a long sweeper, day, no traffic; live slide-assist tuning (F8)">drift lab</button>
+          <button id="sc-tune" title="show / hide the drift lab tuning panel (F8)">tune</button>
         </div>
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
@@ -127,7 +129,7 @@
           <label><input type="checkbox" data-a="esc" />ESC</label>
           <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
           <label title="automatic: the car works the clutch (launch, stall prevention, shifts). manual: your clutch control is used directly; bind it in the controls panel (F9)">clutch <select id="clutch-mode"><option value="auto">automatic</option><option value="manual">manual</option></select></label>
-          <label title="Countersteer help: with the steering released the front wheels follow the car's travel (0 = plain return to centre, 50 = default, 100 = fast, full alignment). Never acts while you steer or during a handbrake turn."
+          <label title="Countersteer help (keyboard / gamepad). In a slide: keys released = the front wheels follow the car's travel (straighten); key against the slide = fast catch at the rack's full speed. 0 = plain return to centre, 100 = fastest. Never acts while you steer into the turn or during a handbrake turn; never adds grip or yaw. Drift lab (F8) has the lab-only hold mode and throttle smoothing (both off by default)."
             >countersteer <input type="range" id="cstr" min="0" max="100" step="5" style="width: 80px" />
             <span id="cstr-val" class="dim">–</span></label
           >

@@ -17,8 +17,8 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
 /// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
 /// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
-/// (owner rows 57 / 72).
-const FORMAT: u8 = 7;
+/// (owner rows 57 / 72). Format 8: plus the drift hold state (owner row 91).
+const FORMAT: u8 = 8;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,6 +236,9 @@ impl Vehicle {
         w.f(self.launch.lift);
         w.f(self.hb_grace);
         w.b(self.stalled);
+        w.f(self.drift_hold.target_slip);
+        w.f(self.drift_hold.steady_s);
+        w.b(self.drift_hold.active);
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -340,6 +343,11 @@ impl Vehicle {
         let lift = r.f()?;
         let hb_grace = r.f()?;
         let stalled = r.b()?;
+        let drift_hold = crate::drift::DriftHold {
+            target_slip: r.f()?,
+            steady_s: r.f()?,
+            active: r.b()?,
+        };
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -381,6 +389,7 @@ impl Vehicle {
         };
         self.hb_grace = hb_grace;
         self.stalled = stalled;
+        self.drift_hold = drift_hold;
         Ok(())
     }
 }

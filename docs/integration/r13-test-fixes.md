@@ -237,6 +237,7 @@ expectation once the unit stops looping.
 - D: `city_siren_traffic_no_siren` civilian collision (red on lead/round12).
 - D, N, E: the lantern deadlock items in section 1 (currently masked in seed 31).
 - lead/opponent-pace: loop9 racer 2 LeftCorridor DQ at gate 34.
+- N: `wp_opponent` `wanted_ai_racer_flees_police_through_the_city` (see Gate).
 
 ## Contract change requests
 None.
@@ -246,6 +247,7 @@ None.
   into a police-free pace test plus a police-design test.
 - `crates/wp_wasm/src/crash_replay_tests.rs` (test only): park the nearest AI racer.
 - `apps/simcli/golden/*`: `[bless]` e612750 and bb87490 (lead-owned goldens).
+- `crates/wp_sim/src/lib.rs` (lead): unused test variable `b` → `_b` (clippy `-D warnings`).
 
 ## Known gaps
 - `grid_highway_sprint` (+ `_is_deterministic`) and `wp_wasm` `short_sprint_with_ai_…` stay
@@ -255,4 +257,28 @@ None.
   apart from a slow AI; the police-free pace test covers that.
 
 ## Gate
-GATE_PLACEHOLDER
+Run on the merged tip (lead/round12 @ ecf4d7b + this branch), with `CARGO_INCREMENTAL=0
+CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`:
+- `cargo fmt --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean after one fix to lead/round12
+  itself. `wp_sim` lib test `ghost_passes_through_cars_but_not_the_world` had an unused `b`
+  (from 8a6997a); renamed `_b`, test still passes.
+- `cargo build --target wasm32-unknown-unknown -p wp_wasm`: OK.
+- `simcli run apps/simcli/scenarios` (release): 85 of 86 pass; red: `city_siren_traffic_no_siren`
+  (D, red on lead/round12). `simcli goldens`: all match except that unblessed scenario.
+- `cargo test --workspace --no-fail-fast` (debug): 146 test binaries OK, 4 red. None of them
+  is caused by this branch, which changes no sim code:
+  - `simcli` `scenarios.rs`: `all_scenarios_pass_and_are_deterministic_in_process` and
+    `goldens_match`, both only `city_siren_traffic_no_siren` (D).
+  - `wp_race` `race_picker::grid_highway_sprint` (E, section 4). `_is_deterministic` passes.
+  - `wp_wasm` `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
+    (E, section 4).
+  - `wp_opponent` `tests/race.rs::wanted_ai_racer_flees_police_through_the_city`
+    (race.rs:331). The flagged racer flees as intended, but a *second* AI racer also ends
+    `Fled`, and the test allows only `Racing` or `Busted` for the others. It's the sim's
+    own round-13 police making another racer wanted. That's by design (captures and flights
+    are allowed), so the test probably should accept `Fled` for the others. Left to N, since
+    it is outside this brief and N owns the flee rules.
+- My tests: `loop9_circuit`, `loop9_circuit_pace_without_police`,
+  `lantern_checkpoint_draws_the_police`, `hollins_hill_sprint`, `wp_wasm` crash replay
+  (4 of 4), `simcli_golden_replays_play_back_in_the_browser_core`: green.
