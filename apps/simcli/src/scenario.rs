@@ -832,6 +832,24 @@ mod tests {
     }
 
     #[test]
+    fn tune_field_parses_defaults_and_round_trips() {
+        let sc = Scenario::from_ron("t", MINIMAL).unwrap();
+        assert!(sc.entities[0].tune.is_stock());
+        assert!(!sc.to_ron().contains("tune"), "stock tune → field omitted");
+        let tuned = MINIMAL.replace(
+            r#"car: "debug_sedan","#,
+            r#"car: "debug_sedan", tune: (suspension: 5, diff: 1),"#,
+        );
+        let sc = Scenario::from_ron("t", &tuned).unwrap();
+        let t = sc.entities[0].tune;
+        assert_eq!(
+            (t.suspension, t.gearing, t.diff, t.brake_balance),
+            (5, 3, 1, 3)
+        );
+        assert_eq!(Scenario::from_ron("t", &sc.to_ron()).unwrap(), sc);
+    }
+
+    #[test]
     fn ron_round_trip() {
         let sc = Scenario::from_ron("t", MINIMAL).unwrap();
         assert_eq!(Scenario::from_ron("t", &sc.to_ron()).unwrap(), sc);
