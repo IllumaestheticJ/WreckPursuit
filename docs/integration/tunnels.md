@@ -116,6 +116,21 @@ still see each other" rule at work.)
 **Release run times:** escape 17 s, control 22 s, drive-throughs ≈ 6 s each (all `slow: true`,
 so debug `cargo test` skips them; the release CI jobs run them).
 
+Screenshots (e2e, SwiftShader, greybox colours): `docs/media/tunnels/founders_cut_north_portal.png`,
+`docs/media/tunnels/hollins_tunnel_inside.png`.
+
+## Gate (2026-10-20, cloud container)
+
+fmt ✓ · `clippy --workspace --all-targets -D warnings` ✓ · wasm build (`wp_wasm`, and
+`npm run wasm`) ✓ · `tsc --noEmit` ✓ · `just web-e2e` (all checks, incl. the new tunnel check:
+680 wall / 696 roof / 216 light vertices, lights emissive) ✓ · `cargo test --workspace`: all
+pass except `simcli --test scenarios` (`goldens_match`, `all_scenarios_pass…`) — **both fail
+identically on the base `origin/lead/round12`**: 11 stale goldens (the same scenarios, same
+first-mismatch ticks and same new hashes on base and branch) and
+`city/blocked_parked_player_vesper.ron`'s `traffic_turnarounds` (actual 0). So this branch
+changes **no golden hash** and has no `[bless]` commit; re-blessing the round-12 goldens is a
+lead-round job.
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |
