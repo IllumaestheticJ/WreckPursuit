@@ -78,7 +78,7 @@ pub struct AiEntrant {
     pub racer: EntityId,
     /// Driver personality.
     pub profile: DriverProfile,
-    /// Car limits (`CarCapability::measure` in release, `geometry_only` for quick tests).
+    /// Car limits (`CarCapability::for_car`; `geometry_only` for quick unit tests).
     pub capability: CarCapability,
 }
 

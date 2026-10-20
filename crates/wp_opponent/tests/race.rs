@@ -305,6 +305,9 @@ fn wanted_ai_racer_flees_police_through_the_city() {
             ),
         ],
         max_s: 80.0,
+        // The minute after the call is measured even when every racer ends up fleeing
+        // (the others can earn heat of their own) and the race is "over" early.
+        run_full: true,
         ..Setup::default()
     };
     let out = common::run(&setup, &wp_opponent::NoPolice, &mut |_, _| {});
@@ -327,10 +330,18 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         "{:?}",
         fled.status
     );
+    // The others keep racing unless they earn heat of their own: at race pace past the
+    // sim's live patrols (red lights, speeding) they can, and then they flee for their own
+    // wanted level (an `Abandoned` event of their own), never for racer 1's.
     for s in st.iter().filter(|s| s.entity != EntityId(1)) {
+        let own_heat = events.iter().any(
+            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level } if *entity == s.entity && *wanted_level >= 1),
+        );
         assert!(
-            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted),
-            "{:?}",
+            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted)
+                || (s.status == RacerStatus::Fled && own_heat),
+            "{:?}: {:?}; events {events:?}",
+            s.entity,
             s.status
         );
     }
@@ -343,10 +354,14 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         d_dest > 300.0,
         "flight destination only {d_dest:.0} m from the unit"
     );
+    // (Or its flight ended early: caught by the sim's patrols, or at the end of the route.)
     let covered = field.debug_of(0).s;
+    let ended = covered > flight.length_m - 20.0 || fled.status == RacerStatus::Busted;
     assert!(
-        covered > 250.0,
-        "covered only {covered:.0} m of the flight route"
+        covered > 250.0 || (ended && covered > 150.0),
+        "covered only {covered:.0} m of the {:.0} m flight route ({:?}; {events:?})",
+        flight.length_m,
+        fled.status
     );
     let hard = out
         .contacts
@@ -476,7 +491,14 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
 fn sweep_open_roads_progress() {
     let mut total = 0.0;
     let mut worst = 0.0f32;
+    // `WP_SWEEP_SEED=n`: only that seed, with its hard contacts and DQs listed.
+    let only: Option<u64> = std::env::var("WP_SWEEP_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok());
     for seed in 1..=8u64 {
+        if only.is_some_and(|o| o != seed) {
+            continue;
+        }
         let setup = Setup {
             seed,
             laps: 1,
@@ -494,11 +516,22 @@ fn sweep_open_roads_progress() {
             .iter()
             .map(|s| s.progress_m as i32)
             .collect();
-        let dq = field
-            .drain_events()
+        let evs = field.drain_events();
+        let dq = evs
             .iter()
             .filter(|e| matches!(e, OpponentEvent::Disqualified { .. }))
             .count();
+        if only.is_some() {
+            for e in evs
+                .iter()
+                .filter(|e| matches!(e, OpponentEvent::Disqualified { .. }))
+            {
+                eprintln!("  {e:?}");
+            }
+            for c in out.contacts.iter().filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS) {
+                eprintln!("  hard contact {c:?}");
+            }
+        }
         let hard = out
             .contacts
             .iter()

@@ -129,8 +129,8 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         entrants.push(AiEntrant {
             racer: *id,
             profile: DriverProfile::default(),
-            // Generic limits keep debug test runs fast; the server measures each car once.
-            capability: CarCapability::geometry_only(car),
+            // The car's real limits (pre-measured table, no rig runs).
+            capability: CarCapability::for_car(car),
         });
     }
     // Open roads (illegal night meet): the AI may only borrow opposing lanes to overtake.

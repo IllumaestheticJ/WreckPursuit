@@ -27,6 +27,7 @@
 #![warn(missing_docs)]
 
 pub mod capability;
+pub mod capability_table;
 pub mod corridor;
 pub mod draft;
 pub mod field;
@@ -44,6 +45,6 @@ pub use field::{
     Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, RED_LIGHT_RISK, YIELD_AFTER_S,
     YIELD_RADIUS_M,
 };
-pub use line::{LineParams, RacingLine, SpeedProfile, Usage};
+pub use line::{drive_accel, LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};
 pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery, SimPolice};
