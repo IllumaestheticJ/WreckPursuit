@@ -170,3 +170,28 @@ With `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`:
   triangles, 22 frames > 250 ms). Same on the untouched base (`origin/lead/round12` in a
   worktree: RTF 0.50, 1.46 M triangles): the round-12b parked cars, see Requests. Desktop
   render settings are unchanged on this branch.
+
+## Follow-up after the round-12b merge (2026-10-20, with M's game menu / HUD layout)
+Lead report: on the merged tree `e2e/touch.mjs` failed 6 of 22. Causes and fixes:
+- **Assists (auto gears / TCS off on touch):** the game menu seeds its settings on first load
+  from the desktop defaults (TCS / auto gears off) and stores them in `wp.assistOverrides`,
+  which then won over the touch defaults. `seed()` now uses the touch defaults on a touch device
+  (auto gears + TCS on); what the player changes in the menu still wins.
+- **Pause / tilt / layout:** the ⏸ button already routes to `menu.openPause()` (via the `pause`
+  action), but the touch layer (z-index 20 at page level) drew *over* the menu (z-index 90
+  inside `#overlay`'s stacking context), and the test's second ⏸ tap was swallowed by
+  `setInputBlocked` — the menu stayed open, so tilt read 0 and the layout checks found the
+  driving controls hidden. Now `TouchControls.setCovered()` hides the whole touch layer while
+  the game menu, controls panel, garage, run-end panel or race picker is up; the e2e taps ⏸
+  (menu opens, controls hidden) then the menu's **Resume** button by touch (game resumes,
+  controls back). M's `layout.ts` needed no change (the touch CSS keeps the minimap top-left).
+
+Gates on the merged tree (+ this fix): `e2e/touch.mjs` 22/22, `e2e/menu.mjs` all pass, `tsc` ✔.
+`e2e/perf_check.mjs` (desktop) fails **on the merged base too** (A/B with this fix stashed:
+chase RTF 0.63, rain 0.59, 23 frames > 250 ms, 2.5–2.8 MB allocated / frame); one run also
+showed an intermittent "6 material version bumps (MeshBasicMaterial)" in steady frames.
+Phone profile on the merged tree (740×360, touch): RTF **0.71** unthrottled / 0.65 at CPU ×2
+(was 0.96 / 0.97 before the merge) with similar triangles (~285 k): render submit 36 ms
+(was 12), SwiftShader raster 164 ms (was ~100), 659 draw calls — the new art / effects pass,
+shared with desktop. **Request (lead / S):** look at the round-12b render-submit and raster
+regression; the touch profile's own settings are unchanged.
