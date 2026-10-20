@@ -86,14 +86,17 @@ full-lock time if it feels too sharp/soft.
 
 ### Step 3 — semi-intelligent assist (row 91)
 
+> The throttle half of step 3 (plateau shaping) was replaced in **step 3b** below: shaping is
+> now opt-in, default off.
+
 **What it does** (`wp_vehicle::drift`, read every tick; keyboard full strength, gamepad half,
 wheel never):
 
 | mode | when | steering | throttle |
 |---|---|---|---|
 | **straighten** | sliding, steering released | wheels to the front axle's travel (× slider strength), a little past it while the slide still grows (*straighten extra*), fast rack | untouched; an abrupt lift is softened |
-| **hold** | sliding, key into the turn | wheels to the travel + a front slip into the turn (*hold into-turn*), less as the slide opens past the held angle (*hold gain*) or grows fast (*hold damping*) | the key becomes a partial throttle (*throttle at hold*) that rises when the slide closes and falls when it opens (*throttle gain*, *throttle shaping* = strength) |
-| **catch** | sliding, key against the slide | fast countersteer + extra lock past the travel (*catch extra lock*) | 60 % (× shaping strength) |
+| **hold** | sliding, key into the turn | wheels to the travel + a front slip into the turn (*hold into-turn*), less as the slide opens past the held angle (*hold gain*) or grows fast (*hold damping*) | superseded by step 3b: raw by default |
+| **catch** | sliding, key against the slide | fast countersteer + extra lock past the travel (*catch extra lock*) | superseded by step 3b: raw by default |
 | **exceeded** | slide angle — or where it is heading in 0.25 s — past the envelope | the assist fades out over 8° (step 1's fast countersteer, the opened lock and the alignment too) and stays off until the slide is 5° back inside | raw |
 
 - **Held angle:** turning into a drift from grip it starts at *hold entry* (18°) so the drift can
@@ -330,11 +333,190 @@ light version does not save them (they spin like the old keyboard did):
 6. Tune panel: *throttle at hold* / *throttle gain* change how much the held key gives;
    *envelope* how far it helps; untick *intent modes* to compare with step 1 only.
 
+### Step 3b — throttle shaping opt-in, no plateau (owner rows 101 / 104)
+
+**Owner feedback:** "in 2nd gear the RPM hangs while drifting" (row 101) — the step-3 shaping
+pinned a held key to a plateau (Hold 0.7 + angle term, Catch 60 %). Owner rule (row 104):
+**TCS off = the driver gets exactly the throttle they press.**
+
+**Changed.**
+- The fixed partial throttles are gone (`throttle_hold`, `throttle_gain`, Catch 60 %).
+- **`throttle_shape` defaults to 0: no throttle shaping and no lift softening at all.** The
+  steering side of step 3 (straighten / hold / catch / envelope) is unchanged.
+- Opt-in (tune panel *throttle shaping (opt-in)* > 0): the key still passes through (full key
+  = full throttle, the revs climb to the limiter); in a slide its rise is rate-limited
+  (*throttle rise* 0.35 s for 0 → 100 %), it is trimmed only within *trim zone* (8°) of the
+  envelope (up to *trim depth* 0.6 at the edge), and abrupt lifts are softened. All fade out
+  past the envelope.
+- Readout: `throttle key N% → engine M% (trim ×k)` — the key, what reaches the engine (after
+  the pedal filter, TCS / ESC and any shaping), and the trim factor.
+- Merged `origin/lead/round12` (machine A's row-90 countersteer is **not** layered under B's
+  steering: `steering.rs` stays B's; A's auto-clutch anti-stall, metrics and goldens came in).
+  Machine A's row-104 code (no slide-throttle feathering, faster keyboard pedal filter) was not
+  on `lead/round12` yet at this merge; until it lands, the old `slide::slide_throttle`
+  feathering (TCS off, help > 0) and the 0.7 keyboard pedal filter still apply on this branch.
+
+**Measured, shaping off (the default), after the merge** — RWD cars, keyboard TCS/ESC off:
+
+| slider | driver | drift s (mean of cars) | longest s (best) | max slip ° | snap ° | spins |
+|---|---|---|---|---|---|---|
+| 30 % | Good | 2.25 | 2.43 | 86 | 1 | 3/3 |
+| 30 % | Naive | 2.22 | 2.37 | 87 | 41 | 3/3 |
+| 30 % | Sloppy | 1.46 | 3.38 | 87 | 87 | 50/60 |
+| 30 % | AbruptLift | 3.47 | 3.49 | 35 | 19 | 0/3 |
+| 30 % | Flood | 0.43 | 0.43 | 86 | 24 | 3/3 |
+| 30 % | FlickLift | 0.62 | 0.67 | 84 | 3 | 3/3 |
+| 60 % | Good | 4.09 | 5.18 | 86 | 1 | 1/3 |
+| 60 % | Naive | 4.37 | 5.18 | 87 | 25 | 2/3 |
+| 60 % | Sloppy | 2.11 | 4.20 | 87 | 87 | 24/60 |
+| 60 % | AbruptLift | 3.60 | 3.84 | 41 | 20 | 0/3 |
+| 60 % | Flood | 0.52 | 0.55 | 85 | 24 | 3/3 |
+| 60 % | FlickLift | 0.69 | 0.90 | 73 | 1 | 0/3 |
+| 100 % | Good | 4.35 | 2.90 | 32 | 2 | 0/3 |
+| 100 % | Naive | 5.24 | 5.35 | 43 | 1 | 0/3 |
+| 100 % | Sloppy | 1.98 | 3.21 | 87 | 82 | 9/60 |
+| 100 % | AbruptLift | 3.53 | 4.22 | 46 | 26 | 0/3 |
+| 100 % | Flood | 5.91 | 5.91 | 45 | 0 | 0/3 |
+| 100 % | FlickLift | 0.55 | 0.65 | 28 | 4 | 0/3 |
+
+Same, shaping on (0.7) for comparison:
+
+| slider | driver | drift s (mean of cars) | longest s (best) | max slip ° | snap ° | spins |
+|---|---|---|---|---|---|---|
+| 30 % | Good | 2.68 | 3.57 | 85 | 19 | 2/3 |
+| 30 % | Naive | 2.85 | 4.13 | 86 | 6 | 3/3 |
+| 30 % | Sloppy | 1.57 | 4.37 | 87 | 87 | 50/60 |
+| 30 % | AbruptLift | 3.06 | 3.33 | 74 | 16 | 1/3 |
+| 30 % | Flood | 0.43 | 0.43 | 86 | 24 | 3/3 |
+| 30 % | FlickLift | 0.62 | 0.67 | 84 | 3 | 3/3 |
+| 60 % | Good | 5.22 | 5.34 | 33 | 1 | 0/3 |
+| 60 % | Naive | 5.22 | 5.34 | 38 | 1 | 0/3 |
+| 60 % | Sloppy | 2.14 | 4.49 | 87 | 87 | 21/60 |
+| 60 % | AbruptLift | 3.79 | 3.95 | 49 | 27 | 0/3 |
+| 60 % | Flood | 0.53 | 0.56 | 86 | 25 | 3/3 |
+| 60 % | FlickLift | 0.70 | 0.92 | 69 | 1 | 0/3 |
+| 100 % | Good | 4.38 | 2.91 | 32 | 2 | 0/3 |
+| 100 % | Naive | 5.24 | 5.35 | 43 | 1 | 0/3 |
+| 100 % | Sloppy | 2.00 | 4.07 | 87 | 87 | 9/60 |
+| 100 % | AbruptLift | 3.39 | 3.89 | 57 | 34 | 0/3 |
+| 100 % | Flood | 5.91 | 5.91 | 45 | 0 | 0/3 |
+| 100 % | FlickLift | 0.55 | 0.65 | 28 | 4 | 0/3 |
+
+- Good driver, shaping off: 4–5 s drifts with no spin at 60 % for shiro_turbo / sperber_32 and
+  at 100 % for all three. **rampart_50 (319 kW) at 60 % spins it after ~3 s**: the scripted lift
+  point (35°) is the 60 % envelope edge and nothing trims the throttle any more — the owner's
+  rule working as intended; a driver lifting earlier, 100 %, or shaping on holds it.
+- Sloppy still spins a defined share; flooring it at a big angle still spins at 30 / 60 %;
+  lifting instead saves it at 60 %.
+- Catch table (steering only, unchanged by this step): released keys 90/90 caught, late key
+  84/90.
+
+<details><summary>Full keyboard table, shaping off (5 cars)</summary>
+
+| car | help | driver | drift s (mean) | longest s | max slip ° | snap ° | spins |
+|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | Good | 2.43 | 2.43 | 84 | 1 | 1/1 |
+| shiro_turbo | 30 % | Naive | 2.37 | 2.37 | 86 | 12 | 1/1 |
+| shiro_turbo | 30 % | Sloppy | 1.38 | 2.30 | 87 | 87 | 16/20 |
+| shiro_turbo | 30 % | AbruptLift | 2.46 | 2.46 | 25 | 4 | 0/1 |
+| shiro_turbo | 30 % | Flood | 0.42 | 0.42 | 86 | 24 | 1/1 |
+| shiro_turbo | 30 % | FlickLift | 0.63 | 0.63 | 83 | 3 | 1/1 |
+| shiro_turbo | 60 % | Good | 5.18 | 5.18 | 44 | 1 | 0/1 |
+| shiro_turbo | 60 % | Naive | 5.18 | 5.18 | 47 | 1 | 0/1 |
+| shiro_turbo | 60 % | Sloppy | 1.96 | 4.20 | 87 | 86 | 6/20 |
+| shiro_turbo | 60 % | AbruptLift | 2.38 | 2.38 | 24 | 4 | 0/1 |
+| shiro_turbo | 60 % | Flood | 0.51 | 0.51 | 85 | 24 | 1/1 |
+| shiro_turbo | 60 % | FlickLift | 0.62 | 0.62 | 23 | 1 | 0/1 |
+| shiro_turbo | 100 % | Good | 3.94 | 2.83 | 31 | 2 | 0/1 |
+| shiro_turbo | 100 % | Naive | 5.18 | 5.18 | 41 | 1 | 0/1 |
+| shiro_turbo | 100 % | Sloppy | 1.83 | 2.23 | 86 | 82 | 2/20 |
+| shiro_turbo | 100 % | AbruptLift | 2.25 | 2.25 | 25 | 3 | 0/1 |
+| shiro_turbo | 100 % | Flood | 5.91 | 5.91 | 41 | 0 | 0/1 |
+| shiro_turbo | 100 % | FlickLift | 0.52 | 0.52 | 24 | 3 | 0/1 |
+| sperber_32 | 30 % | Good | 2.23 | 2.23 | 86 | 1 | 1/1 |
+| sperber_32 | 30 % | Naive | 2.20 | 2.20 | 86 | 20 | 1/1 |
+| sperber_32 | 30 % | Sloppy | 1.72 | 3.38 | 87 | 87 | 18/20 |
+| sperber_32 | 30 % | AbruptLift | 4.58 | 3.49 | 35 | 19 | 0/1 |
+| sperber_32 | 30 % | Flood | 0.43 | 0.43 | 86 | 22 | 1/1 |
+| sperber_32 | 30 % | FlickLift | 0.67 | 0.67 | 84 | 3 | 1/1 |
+| sperber_32 | 60 % | Good | 4.01 | 4.01 | 62 | 1 | 0/1 |
+| sperber_32 | 60 % | Naive | 4.66 | 4.66 | 87 | 1 | 1/1 |
+| sperber_32 | 60 % | Sloppy | 2.45 | 3.53 | 87 | 86 | 9/20 |
+| sperber_32 | 60 % | AbruptLift | 4.91 | 3.84 | 41 | 20 | 0/1 |
+| sperber_32 | 60 % | Flood | 0.55 | 0.55 | 85 | 23 | 1/1 |
+| sperber_32 | 60 % | FlickLift | 0.55 | 0.55 | 22 | 1 | 0/1 |
+| sperber_32 | 100 % | Good | 4.18 | 2.90 | 31 | 1 | 0/1 |
+| sperber_32 | 100 % | Naive | 5.35 | 5.35 | 43 | 1 | 0/1 |
+| sperber_32 | 100 % | Sloppy | 2.20 | 2.45 | 86 | 82 | 3/20 |
+| sperber_32 | 100 % | AbruptLift | 5.08 | 4.22 | 46 | 26 | 0/1 |
+| sperber_32 | 100 % | Flood | 5.91 | 5.91 | 45 | 0 | 0/1 |
+| sperber_32 | 100 % | FlickLift | 0.48 | 0.48 | 22 | 2 | 0/1 |
+| rampart_50 | 30 % | Good | 2.10 | 2.10 | 86 | 1 | 1/1 |
+| rampart_50 | 30 % | Naive | 2.09 | 2.09 | 87 | 41 | 1/1 |
+| rampart_50 | 30 % | Sloppy | 1.28 | 1.88 | 87 | 87 | 16/20 |
+| rampart_50 | 30 % | AbruptLift | 3.36 | 3.36 | 28 | 8 | 0/1 |
+| rampart_50 | 30 % | Flood | 0.43 | 0.43 | 85 | 22 | 1/1 |
+| rampart_50 | 30 % | FlickLift | 0.55 | 0.55 | 84 | 1 | 1/1 |
+| rampart_50 | 60 % | Good | 3.08 | 3.08 | 86 | 1 | 1/1 |
+| rampart_50 | 60 % | Naive | 3.27 | 3.27 | 86 | 25 | 1/1 |
+| rampart_50 | 60 % | Sloppy | 1.91 | 2.75 | 87 | 87 | 9/20 |
+| rampart_50 | 60 % | AbruptLift | 3.52 | 3.52 | 29 | 10 | 0/1 |
+| rampart_50 | 60 % | Flood | 0.51 | 0.51 | 85 | 22 | 1/1 |
+| rampart_50 | 60 % | FlickLift | 0.90 | 0.90 | 73 | 0 | 0/1 |
+| rampart_50 | 100 % | Good | 4.94 | 2.83 | 32 | 1 | 0/1 |
+| rampart_50 | 100 % | Naive | 5.20 | 5.20 | 41 | 1 | 0/1 |
+| rampart_50 | 100 % | Sloppy | 1.91 | 3.21 | 87 | 80 | 4/20 |
+| rampart_50 | 100 % | AbruptLift | 3.26 | 3.26 | 26 | 6 | 0/1 |
+| rampart_50 | 100 % | Flood | 5.91 | 5.91 | 43 | 0 | 0/1 |
+| rampart_50 | 100 % | FlickLift | 0.65 | 0.65 | 28 | 4 | 0/1 |
+| debug_sedan | 30 % | Good | 0.00 | 0.00 | 1 | 1 | 0/1 |
+| debug_sedan | 30 % | Naive | 0.00 | 0.00 | 1 | 1 | 0/1 |
+| debug_sedan | 30 % | Sloppy | 0.07 | 0.76 | 26 | 8 | 0/20 |
+| debug_sedan | 30 % | AbruptLift | 0.00 | 0.00 | 2 | 2 | 0/1 |
+| debug_sedan | 30 % | Flood | 0.45 | 0.45 | 85 | 28 | 1/1 |
+| debug_sedan | 30 % | FlickLift | 0.52 | 0.52 | 84 | 0 | 1/1 |
+| debug_sedan | 60 % | Good | 0.00 | 0.00 | 1 | 1 | 0/1 |
+| debug_sedan | 60 % | Naive | 0.00 | 0.00 | 1 | 1 | 0/1 |
+| debug_sedan | 60 % | Sloppy | 0.02 | 0.22 | 12 | 8 | 0/20 |
+| debug_sedan | 60 % | AbruptLift | 0.00 | 0.00 | 2 | 2 | 0/1 |
+| debug_sedan | 60 % | Flood | 0.53 | 0.53 | 84 | 27 | 1/1 |
+| debug_sedan | 60 % | FlickLift | 0.60 | 0.60 | 84 | 2 | 1/1 |
+| debug_sedan | 100 % | Good | 0.00 | 0.00 | 1 | 1 | 0/1 |
+| debug_sedan | 100 % | Naive | 0.00 | 0.00 | 1 | 1 | 0/1 |
+| debug_sedan | 100 % | Sloppy | 0.02 | 0.21 | 12 | 8 | 0/20 |
+| debug_sedan | 100 % | AbruptLift | 0.00 | 0.00 | 2 | 2 | 0/1 |
+| debug_sedan | 100 % | Flood | 0.88 | 0.88 | 34 | 2 | 0/1 |
+| debug_sedan | 100 % | FlickLift | 0.83 | 0.83 | 34 | 7 | 0/1 |
+| junkyard_beater | 30 % | Good | 0.00 | 0.00 | 2 | 0 | 0/1 |
+| junkyard_beater | 30 % | Naive | 0.00 | 0.00 | 2 | 0 | 0/1 |
+| junkyard_beater | 30 % | Sloppy | 0.53 | 2.93 | 64 | 14 | 0/20 |
+| junkyard_beater | 30 % | AbruptLift | 0.00 | 0.00 | 2 | 2 | 0/1 |
+| junkyard_beater | 30 % | Flood | 0.42 | 0.42 | 86 | 81 | 1/1 |
+| junkyard_beater | 30 % | FlickLift | 0.55 | 0.55 | 85 | 3 | 1/1 |
+| junkyard_beater | 60 % | Good | 0.00 | 0.00 | 2 | 0 | 0/1 |
+| junkyard_beater | 60 % | Naive | 0.00 | 0.00 | 2 | 0 | 0/1 |
+| junkyard_beater | 60 % | Sloppy | 0.27 | 0.81 | 26 | 17 | 0/20 |
+| junkyard_beater | 60 % | AbruptLift | 0.00 | 0.00 | 2 | 2 | 0/1 |
+| junkyard_beater | 60 % | Flood | 0.49 | 0.49 | 86 | 51 | 1/1 |
+| junkyard_beater | 60 % | FlickLift | 0.65 | 0.65 | 85 | 4 | 1/1 |
+| junkyard_beater | 100 % | Good | 0.00 | 0.00 | 2 | 0 | 0/1 |
+| junkyard_beater | 100 % | Naive | 0.00 | 0.00 | 2 | 0 | 0/1 |
+| junkyard_beater | 100 % | Sloppy | 0.25 | 0.82 | 33 | 17 | 0/20 |
+| junkyard_beater | 100 % | AbruptLift | 0.00 | 0.00 | 2 | 2 | 0/1 |
+| junkyard_beater | 100 % | Flood | 1.04 | 1.04 | 33 | 2 | 0/1 |
+| junkyard_beater | 100 % | FlickLift | 0.95 | 0.95 | 34 | 4 | 0/1 |
+
+</details>
+
+**Owner, try:** Drift Lab B as before. Shaping is off: the readout's key % and engine % should
+match (apart from the pedal ramp). To compare, set *throttle shaping (opt-in)* to 0.5–0.7 and
+watch the engine % ramp up after a stab and dip only near the envelope.
+
 ## Known issues seen on the base branch (not from this work)
 
-`cargo test -p wp_vehicle` on untouched `origin/lead/round12` already fails
+Before the step-3b merge, untouched `origin/lead/round12` failed
 `differentials::roster_diff_hashes_are_pinned` and
-`handling_balance::front_drive_cars_understeer_mildly`; left alone (not re-blessed here).
+`handling_balance::front_drive_cars_understeer_mildly`; the current `lead/round12` fixes both.
 
 ## Contract change requests
 
