@@ -189,9 +189,9 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
 - Same seed ⇒ same sim + field hash; different seed ⇒ different field hash.
 - Wanted racer abandons and flees; others keep racing.
 - Open roads + traffic: a wanted-level event read from the sim's event stream makes a racer
-  abandon and drive ≥ 250 m of a flight route ending > 300 m from the police (or ≥ 150 m when
-  the flight ends early: caught by the sim's patrols, or at the route's end), no contacts. The
-  others may earn heat of their own at race pace past the live patrols and flee for it.
+  abandon and drive ≥ 250 m in the minute after the call (≥ 150 m when the sim's patrols
+  catch it first) on a flight route ending > 300 m from the police, no contacts. The others
+  may earn heat of their own at race pace past the live patrols and flee for it.
 - Junction gap acceptance unit test: cross traffic arriving together with me holds me; a
   crossing already through, one arriving well after me, and an oncoming car going straight on
   do not; one signalling a turn does.

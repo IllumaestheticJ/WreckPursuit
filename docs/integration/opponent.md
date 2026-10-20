@@ -274,14 +274,17 @@ trig).
   accessor; `LiveEntrant` doc), tests: `race_picker.rs` / `race_police.rs` /
   `race_vesper.rs` use `CarCapability::for_car` (the picker test mirrors the browser);
   `race_picker.rs` failure messages list every racer's status / violations and
-  `WP_RACE_TRACE` prints each AI car's speed limit, tactic and blocker; `race_police.rs`
-  `WP_RP_TRACE`; new `tests/opponent_pace.rs` (measurement sweep + pace lock-in).
+  `WP_RACE_TRACE` prints each AI car's speed limit, tactic and blocker;
+  `lantern_checkpoint_draws_the_police`'s "never left the grid" is now "a gate passed or 30 m
+  of progress" (a racer stopped by the police 60–80 m in, before gate 1, did race; seed sweep
+  1–6 + 31: 3 of 7 pass both before and after row 99); `race_police.rs` `WP_RP_TRACE`; new
+  `tests/opponent_pace.rs` (measurement sweep + pace lock-in).
 - `crates/wp_wasm/src/race.rs`: picker AI cars use `CarCapability::for_car` (one line).
 - `apps/simcli/scenarios/opponent/pace_*.ron` (10) + their goldens (`[bless]`).
-- `crates/wp_opponent/tests/race.rs`: `wanted_ai_racer_flees_police_through_the_city`
+- `crates/wp_opponent/tests/race.rs` (mine): `wanted_ai_racer_flees_police_through_the_city`
   allows the other racers to flee for heat of their own (at race pace past the live patrols
-  they earn it), runs its full minute, and accepts a flight that ends early (caught, or at its
-  route's end) after ≥ 150 m.
+  they earn it), runs its full minute, and measures the distance racer 1 drives after the
+  call (its flight re-plans near the route's end): ≥ 250 m, or ≥ 150 m when caught first.
 
 ### Reports for other workstreams
 - **E (police)**: Hollins picker race, seed 16 (pre-merge physics): a unit `Respond`ing to an
