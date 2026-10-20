@@ -43,7 +43,7 @@
         metric(name: "best_ratio", min: 0.97, max: 1.10),
         metric(name: "race_time_s", entity: "ai_coupe", min: 8.2, max: 11.1),
         metric(name: "race_time_s", entity: "ai_sedan", min: 11.6, max: 15.7),
-        metric(name: "race_time_s", entity: "ai_coupe_2", min: 9.7, max: 13.2),
-        metric(name: "race_time_s", entity: "ai_sedan_2", min: 12.4, max: 16.8),
+        metric(name: "race_time_s", entity: "ai_coupe_2", min: 9.8, max: 13.2),
+        metric(name: "race_time_s", entity: "ai_sedan_2", min: 12.3, max: 16.7),
     ],
 )

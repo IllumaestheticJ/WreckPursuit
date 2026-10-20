@@ -255,7 +255,7 @@ two-layer crossfade must stay within 2 dB: old 5.0 dB, new 0.03 dB).
 ## Playtest #27 — wheelspin audio (lead follow-up, 2026-10-19)
 
 Spinning driven tyres now have their own loop (`tire/spin`, slot `SPIN` = 0x202; on gravel / dirt
-/ grass `tire/spin_loose`, slot 0x203), separate from cornering squeal and braking skid.
+`tire/spin_loose`, slot 0x203; on grass the soft `tire/scrub_grass` since the grass port below), separate from cornering squeal and braking skid.
 Model in `crates/wp_audio/src/tires.rs` (see the README): per-wheel driving slip ratio and slip
 speed (`ω·r − vx`, recovered exactly from `WheelState::slip_ratio`/`omega` and the car's wheel
 radii), weighted by load and surface, intensity and pitch rising with slip speed; the loudest
@@ -639,3 +639,33 @@ docs, and the kinematic-traffic bridge which reads `&Session` only): simcli `gol
 `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
 `tests::simcli_golden_replays_play_back_in_the_browser_core` (golden_tbone drift) — neither
 `wp_wasm` test touches audio. These look like round-13 vehicle changes waiting for a `[bless]`.
+
+## Sirens sweep smoothly instead of "laughing" (port of 2e64f096 onto round12, 2026-10-20)
+
+Both browser siren voices (`siren.ts` sirenLoop for siren v2 packs, `synth.ts` siren for v1)
+re-locked their cadence to the director's per-frame sim phase whenever it drifted > 5 % of a
+cycle (15 ms on the yelp): frame jitter and a sim slower than real time tripped that
+constantly, so the pitch stepped several times a second. They now start at the director's phase
+and free-run on the audio clock (Doppler is the only per-update input; pitch only, constant
+amplitude), with ≥ 64 curve points per cycle. The sweep shape (`SirenCadence::freq_at_phase`,
+`cadenceFreq`, `sirenFreqAtPhase`, the `e2e/siren.mjs` model) is a smoothstep rise and fall
+(the old ease-out / ease-in shape fell at full speed off the peak and dwelt at the bottom, a
+"ha" contour at yelp rate); `phase_for_freq` inverts it by bisection. Test:
+`siren::tests::sweep_turnarounds_are_smooth`.
+
+## Grass sounds like soft turf (port of 95686da1 onto round12, 2026-10-20)
+
+Grass slides used the gravel scrub (`tire/scrub_loose`: 0.4-3 kHz noise + stone crackle) at full
+gain plus the "rolling stones" term, and round12's grass wheelspin played the gravel roost
+(`tire/spin_loose`, crackle 1.6) — worse now that TCS defaults off. Now (`tires.rs`):
+- grass has its own `tire/scrub_grass` loop (`cues::SCRUB_GRASS`, slot `SCRUB_GRASS` = 0x204 —
+  0x202 is `SPIN` on round12; kept in `wp_audio`, no contract change), lowpass 1.1 kHz, no
+  crackle, cue gain 0.45, fed only by slide (braking slip + slip angle) and wheelspin on turf;
+- scrub levels follow their target with 30 ms attack / 150 ms release (`engine::smooth_k`, not
+  `exp`), released below 0.01, so slip flickering at the limit holds one loop;
+- dominant-surface ties keep the rolling loop already playing (no swaps on a straddled edge);
+- `surface/grass` retuned in `world_proc` and `world_rec` (lp 650 Hz, hp 45 Hz, rumble 1.5,
+  gain 1.0, new noise-synth `track` param: low-pass follows speed, `synth.ts`).
+Tests: `tires` grass rolls without scrub / slides on its own loop, grass wheelspin churns softly
+(no roost), flickering slip holds one smooth scrub, edge straddling keeps one loop;
+`tests/director.rs` grass drive scrubs once without churn, grass cues are soft.

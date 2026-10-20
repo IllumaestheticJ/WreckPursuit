@@ -41,11 +41,14 @@ pub mod cues {
 
     /// Tire squeal loop on paved surfaces.
     pub const SQUEAL: &str = "tire/squeal";
-    /// Loose-surface scrub loop.
+    /// Loose-surface (gravel, dirt) scrub loop.
     pub const SCRUB: &str = "tire/scrub_loose";
+    /// Grass scrub loop: soft, low turf tearing (no stone crackle); slides and wheelspin on grass.
+    pub const SCRUB_GRASS: &str = "tire/scrub_grass";
     /// Driven-wheel spin loop on paved surfaces (launch, burnout, power-on exit).
     pub const SPIN: &str = "tire/spin";
-    /// Driven-wheel spin loop on loose surfaces (gravel roost, dirt / grass churn).
+    /// Driven-wheel spin loop on loose surfaces (gravel roost, dirt churn; grass spin plays
+    /// [`SCRUB_GRASS`]).
     pub const SPIN_LOOSE: &str = "tire/spin_loose";
     /// Surface rolling loops, indexed like `wp_contracts::SurfaceType` declaration order.
     pub const SURFACES: [&str; 8] = [
@@ -111,6 +114,7 @@ pub mod cues {
         let mut v = vec![
             SQUEAL,
             SCRUB,
+            SCRUB_GRASS,
             SPIN,
             SPIN_LOOSE,
             THUMP,

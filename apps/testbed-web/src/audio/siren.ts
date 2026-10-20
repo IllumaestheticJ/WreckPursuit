@@ -7,8 +7,9 @@
 //            soft clipping of the driver stage, PA band-limit low-pass.
 //
 // Cues (data/audio/packs/siren_v2.json, synth "siren" with `driver: 1`): `kind` 0 = cadence
-// loop (wail / yelp / phaser / hi-lo, cadence params from wp_audio), 1 = whoop chirp, 2 = air
-// horn blast. The cadence is scheduled a little ahead with setValueCurveAtTime through
+// loop (wail / yelp / phaser / hi-lo, cadence params from wp_audio; starts at the director's
+// phase, then free-runs on the audio clock, pitch only), 1 = whoop chirp, 2 = air horn blast.
+// The cadence is scheduled a little ahead with setValueCurveAtTime through
 // `CurvePlan`, whose curve starts are integer multiples of the segment from a fixed origin so
 // consecutive curves can never overlap (playtest row 30: accumulated float starts overlapped,
 // the browser threw and the frame loop stopped). Mirrors wp_audio::siren::{CurvePlan,
@@ -29,14 +30,11 @@ export function cadenceFreq(s: Params, phase: number): number {
   if (s.two_tone) {
     x = p < 0.5 ? 1 : 0;
   } else {
+    // Smoothstep rise and fall: glides at both turnarounds (no corner at the peak, no dwell
+    // at the bottom; that shape made the yelp sound like laughing).
     const r = Math.min(0.99, Math.max(0.01, s.rise_frac ?? 0.5));
-    if (p < r) {
-      const u = p / r;
-      x = 1 - (1 - u) * (1 - u);
-    } else {
-      const u = (p - r) / (1 - r);
-      x = (1 - u) * (1 - u);
-    }
+    const ease = (u: number) => u * u * (3 - 2 * u);
+    x = p < r ? ease(p / r) : 1 - ease((p - r) / (1 - r));
   }
   const lo = s.lo_hz ?? 650;
   const hi = s.hi_hz ?? 1600;
@@ -186,10 +184,12 @@ function sirenLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams, t: number):
 
   const cycle = Math.max(0.02, s.cycle_s ?? 1);
   const seg = Math.min(0.1, cycle / 2);
-  const points = Math.max(8, Math.ceil(seg * 400));
-  // Phase clock: phase at audio time τ = phase0 + (τ - t0) / cycle.
-  let t0 = t;
-  let phase0 = p.phase;
+  // ~400 points/s, and at least 64 per cadence cycle so even the 10 Hz phaser sweeps cleanly.
+  const points = Math.max(8, Math.ceil(seg * 400), Math.ceil((64 * seg) / cycle));
+  // Phase clock: phase at audio time τ = phase0 + (τ - t0) / cycle. Seeded once from the
+  // director's phase, then free-running on the audio clock (see `update`).
+  const t0 = t;
+  const phase0 = p.phase;
   // Curves start 2 ms after the initial value so the two can never coincide.
   const plan = new CurvePlan(t + 0.002, seg, 0.001);
   const schedule = (now: number, lookahead: number) => {
@@ -210,16 +210,14 @@ function sirenLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams, t: number):
   return {
     output: fade,
     update(p2, now) {
+      // Only Doppler follows the director per update; the cadence keeps its own clock. It used
+      // to re-lock to the director's phase whenever they disagreed by > 5 % of a cycle, but
+      // that phase comes from sim ticks sampled once per rendered frame: frame jitter, the
+      // fixed-step remainder and a sim slower than real time put it 10-40 ms off the audio
+      // clock all the time. For the yelp (0.3 s cycle, 5 % = 15 ms) that was a phase jump
+      // every few frames, i.e. audible pitch steps several times a second. A pattern change
+      // is a new voice, so the sweep never needs to be sample-locked to the ticks.
       osc.detune.setTargetAtTime(cents(p2.doppler), now, 0.03);
-      // Resync to the director's phase when the local clock drifted > 5 % of a cycle (the sim
-      // ran slower than real time, a stall). Only curves not yet scheduled use the new mapping.
-      const local = phase0 + (now - t0) / cycle;
-      let d = p2.phase - (local - Math.floor(local));
-      d -= Math.round(d);
-      if (Math.abs(d) > 0.05) {
-        t0 = now;
-        phase0 = p2.phase;
-      }
       schedule(now, 0.25);
     },
     scheduleUntil(until) {

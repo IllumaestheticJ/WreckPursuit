@@ -474,7 +474,8 @@ export class VoicePool {
     }
     const pitchMoved = changed(params.pitch, l.pitch);
     if (v.src && pitchMoved) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
-    // Sirens follow their own clock and must see every phase; others only on change.
+    // Sirens schedule their pitch curve ahead on each update (their phase moves every frame);
+    // others only on change.
     const synthChanged =
       changed(params.freq_hz, l.freq_hz) || pitchMoved || changed(params.load, l.load) || params.phase !== l.phase;
     // The modelled engine and clocked synths (impacts, horns) read every frame.
