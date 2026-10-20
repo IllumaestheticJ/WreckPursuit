@@ -50,8 +50,9 @@ pub struct LiveEntrant {
     pub entity: EntityId,
     /// Engine redline, rpm.
     pub redline_rpm: f32,
-    /// Car limits for the AI (`CarCapability::geometry_only` is enough; cheap and
-    /// deterministic).
+    /// Car limits for the AI: `CarCapability::for_car` (the car's measured limits from the
+    /// pre-measured table; cheap and deterministic). `geometry_only` makes every car drive
+    /// like a generic 55 m/s street car (unit tests only).
     pub capability: CarCapability,
 }
 
@@ -251,6 +252,11 @@ impl LiveRace {
     /// Racers in grid order (AI pole first, the player last).
     pub fn racers(&self) -> &[EntityId] {
         &self.order
+    }
+
+    /// The AI field (debug views: `field().debug_of(k)` in AI entrant order).
+    pub fn ai(&self) -> &AiEntrants {
+        &self.ai
     }
 
     /// Whether the AI drives the player's car.

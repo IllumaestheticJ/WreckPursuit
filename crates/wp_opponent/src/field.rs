@@ -64,6 +64,10 @@ pub struct RaceConfig {
     /// tow on straights and pull out with the run it gives. Leave off unless the sim loop
     /// really applies the drag multipliers (otherwise sitting that close only adds risk).
     pub draft: bool,
+    /// Where the judged finish line lies along a point-to-point corridor, m, when the
+    /// corridor runs on past it (run-off): racers beyond it are done racing (they cool down in
+    /// their lane and pass nobody). `None`: the corridor's end is the finish.
+    pub finish_m: Option<f32>,
 }
 
 impl Default for RaceConfig {
@@ -79,6 +83,7 @@ impl Default for RaceConfig {
             corridor: CorridorOptions::default(),
             signals: true,
             draft: false,
+            finish_m: None,
         }
     }
 }
@@ -317,6 +322,12 @@ struct Racer {
     v: f32,
     v_s: f32,
     v_n: f32,
+    /// World velocity (horizontal), m/s.
+    vel: V2,
+    /// Yaw rate, rad/s (+ = turning left).
+    yaw_rate: f32,
+    /// Duration of the current reverse manoeuvre, s.
+    reverse_s: f32,
     hint: usize,
     progress: f32,
     started: bool,
@@ -439,7 +450,31 @@ pub struct Field {
     outputs: Vec<(EntityId, VehicleInput)>,
     finishers: u32,
     contacts: BTreeMap<(EntityId, EntityId), u32>,
+    /// How long each non-racer has been standing still, s (civilian agents by agent id,
+    /// other sim vehicles by entity id + [`STILL_VEHICLE_KEY`]). Kept only near racers.
+    still: BTreeMap<u64, f32>,
 }
+
+impl Racer {
+    /// How far ahead this driver notices cars and civilians, m: the awareness range, but
+    /// never less than 1.3× the braking distance from the present speed plus 30 m (at
+    /// 60 m/s on a highway a stalled car must be seen ~250 m out).
+    fn ahead_m(&self) -> f32 {
+        let v = self.v.max(0.0);
+        let a = self.speed.a_brake.max(3.0);
+        self.params
+            .perception_ahead_m
+            .max(1.3 * v * v / (2.0 * a) + 30.0)
+    }
+}
+
+/// Key offset of sim vehicles in [`Field`]'s standing-still bookkeeping.
+const STILL_VEHICLE_KEY: u64 = 1 << 40;
+
+/// A non-racer that has not moved for this long counts as parked: anyone may go round it,
+/// on the opposing lanes where the corridor has them, s. (A red light is shorter; a car
+/// stuck in a traffic deadlock stays put for minutes.)
+const STILL_PARKED_S: f32 = 8.0;
 
 /// Approximate standard normal from four uniforms (Irwin–Hall; no transcendental functions).
 fn gauss(rng: &mut Rng) -> f32 {
@@ -477,6 +512,16 @@ const SIGNAL_LOOKAHEAD_M: f32 = 150.0;
 /// After waiting this long at a junction for civilians that are standing still (each waiting
 /// for the other), a racer stops counting them and creeps through, s.
 const JUNCTION_DEADLOCK_S: f32 = 3.0;
+/// A civilian agent near the racers (junction awareness).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Civ {
+    id: u32,
+    pos: V2,
+    vel: V2,
+    /// -1 left, 0 off, 1 right.
+    turn_signal: i8,
+}
+
 /// Speed allowed while steering out round a parked car the racer is already stopped behind
 /// (a car must roll to move sideways), m/s.
 const CREEP_MPS: f32 = 2.5;
@@ -536,6 +581,9 @@ impl Field {
                 v: 0.0,
                 v_s: 0.0,
                 v_n: 0.0,
+                vel: [0.0; 2],
+                yaw_rate: 0.0,
+                reverse_s: 1.6,
                 hint: 0,
                 progress: f32::NAN,
                 started: false,
@@ -590,6 +638,7 @@ impl Field {
             outputs: Vec::new(),
             finishers: 0,
             contacts: BTreeMap::new(),
+            still: BTreeMap::new(),
         }
     }
 
@@ -784,6 +833,7 @@ impl Field {
         {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
             self.observe(world, vehicles, police, dt);
+            self.update_still(world, vehicles, dt);
             let snapshot = self.perceive_all(world, vehicles);
             let civs = self.civilians_near(world);
             for k in 0..self.racers.len() {
@@ -804,6 +854,32 @@ impl Field {
         }
         self.tick += 1;
         &self.outputs
+    }
+
+    fn is_still(&self, key: u64) -> bool {
+        self.still.get(&key).is_some_and(|t| *t >= STILL_PARKED_S)
+    }
+
+    /// Standing-still timers of the civilians and other vehicles near any racer.
+    fn update_still(&mut self, world: &World, vehicles: &[VehicleObs], dt: f32) {
+        let near = |p: V2| self.racers.iter().any(|r| geom::dist(r.pos, p) < 200.0);
+        let mut next = BTreeMap::new();
+        for a in world.agents() {
+            if a.speed_mps.abs() < 0.3 && near(geom::xy(a.pos)) {
+                let key = a.id as u64;
+                next.insert(key, self.still.get(&key).copied().unwrap_or(0.0) + dt);
+            }
+        }
+        for v in vehicles {
+            if self.racer_index(v.entity).is_some() {
+                continue;
+            }
+            if v.state.speed_mps.abs() < 0.3 && near(geom::xy(v.state.pos)) {
+                let key = STILL_VEHICLE_KEY + v.entity.0 as u64;
+                next.insert(key, self.still.get(&key).copied().unwrap_or(0.0) + dt);
+            }
+        }
+        self.still = next;
     }
 
     fn racer_index(&self, e: EntityId) -> Option<usize> {
@@ -914,6 +990,8 @@ impl Field {
                 r.v = st.speed_mps;
                 r.v_s = geom::dot(vel, t);
                 r.v_n = geom::dot(vel, geom::right_of(t));
+                r.vel = vel;
+                r.yaw_rate = st.ang_vel[2];
                 let v_long = geom::dot(vel, fwd);
                 let v_lat = geom::dot(vel, geom::right_of(fwd));
                 r.unstable = v_long > 8.0 && v_lat.abs() > 0.2 * v_long;
@@ -1225,11 +1303,7 @@ impl Field {
     /// Step 2 for the shared corridor: every vehicle and nearby civilian as an obstacle.
     fn perceive_all(&mut self, world: &World, vehicles: &[VehicleObs]) -> Vec<Obstacle> {
         let mut out = Vec::new();
-        let range = self
-            .racers
-            .iter()
-            .fold(0.0f32, |m, r| m.max(r.params.perception_ahead_m))
-            + 20.0;
+        let range = self.racers.iter().fold(0.0f32, |m, r| m.max(r.ahead_m())) + 20.0;
         for v in vehicles {
             let who = match self.racer_index(v.entity) {
                 Some(k) => {
@@ -1238,7 +1312,8 @@ impl Field {
                         // A fleeing racer is just another vehicle on the race corridor.
                         Who::Vehicle(r.entity)
                     } else {
-                        let unstable = r.unstable || r.running_wide;
+                        // Sliding, running wide or reversing (it swings out): give it room.
+                        let unstable = r.unstable || r.running_wide || r.tactic == Tactic::Reverse;
                         out.push(Obstacle {
                             who: Who::Racer(k),
                             s: r.s,
@@ -1263,11 +1338,17 @@ impl Field {
             let hint = self.hints.get(&v.entity).copied();
             let cp = self.corridor.project(pos, hint, 60);
             self.hints.insert(v.entity, cp.index);
-            if let Some(o) = vehicle_obstacle(&self.corridor, who, cp, v) {
+            if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
+                o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
                 out.push(o);
             }
         }
         let mut civ = civilians_on(&self.corridor, &self.racers, world, range, false);
+        for o in &mut civ {
+            if let Who::Civilian(id) = o.who {
+                o.parked |= self.is_still(id as u64);
+            }
+        }
         out.append(&mut civ);
         out
     }
@@ -1287,33 +1368,39 @@ impl Field {
                 continue;
             }
             let pos = geom::xy(v.state.pos);
-            if geom::dist(pos, me.pos) > me.params.perception_ahead_m + 20.0 {
+            if geom::dist(pos, me.pos) > me.ahead_m() + 20.0 {
                 continue;
             }
             let cp = corridor.project(pos, Some(me.hint), 80);
-            if let Some(o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
+            if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
+                o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
                 out.push(o);
             }
         }
         let only_me = std::slice::from_ref(me);
-        out.append(&mut civilians_on(
-            corridor,
-            only_me,
-            world,
-            me.params.perception_ahead_m + 20.0,
-            true,
-        ));
+        let mut civ = civilians_on(corridor, only_me, world, me.ahead_m() + 20.0, true);
+        for o in &mut civ {
+            if let Who::Civilian(id) = o.who {
+                o.parked |= self.is_still(id as u64);
+            }
+        }
+        out.append(&mut civ);
         out
     }
 
     /// Step 3 + 4 for racer `k`.
     /// Civilians near any racer, as `(id, position, velocity)` (junction awareness).
-    fn civilians_near(&self, world: &World) -> Vec<(u32, V2, V2)> {
+    fn civilians_near(&self, world: &World) -> Vec<Civ> {
         let mut out = Vec::new();
         for a in world.agents() {
             let p = geom::xy(a.pos);
             if self.racers.iter().any(|r| geom::dist(p, r.pos) < 160.0) {
-                out.push((a.id, p, geom::scale(geom::dir_of_yaw(a.yaw), a.speed_mps)));
+                out.push(Civ {
+                    id: a.id,
+                    pos: p,
+                    vel: geom::scale(geom::dir_of_yaw(a.yaw), a.speed_mps),
+                    turn_signal: a.turn_signal,
+                });
             }
         }
         out
@@ -1345,7 +1432,7 @@ impl Field {
         &mut self,
         k: usize,
         obstacles: &[Obstacle],
-        civs: &[(u32, V2, V2)],
+        civs: &[Civ],
         signal: Option<SignalAhead>,
         dt: f32,
     ) {
@@ -1365,11 +1452,17 @@ impl Field {
             None => (&self.corridor, &self.lines[line_idx].1, &speed),
         };
         let draft = self.config.draft;
+        let finish_m = if flight.is_some() {
+            None
+        } else {
+            self.config.finish_m
+        };
         decide_racer(
             &mut self.racers[k],
             civs,
             signal,
             draft,
+            finish_m,
             k,
             corridor,
             line,
@@ -1422,9 +1515,10 @@ impl Field {
 #[allow(clippy::too_many_arguments)]
 fn decide_racer(
     r: &mut Racer,
-    civs: &[(u32, V2, V2)],
+    civs: &[Civ],
     signal: Option<SignalAhead>,
     draft: bool,
+    finish_m: Option<f32>,
     k: usize,
     corridor: &Corridor,
     line: &RacingLine,
@@ -1457,7 +1551,14 @@ fn decide_racer(
                 ds > -(hl + o.half_len) && ds < 60.0
             }
         });
+        // Done racing (finished, disqualified): cool down in my lane, no passing — a pass on
+        // the opposing lanes in front of a patrol after the flag is a needless violation.
+        let done_racing = matches!(
+            r.status,
+            RacerStatus::Finished { .. } | RacerStatus::Disqualified
+        ) || (!corridor.closed && finish_m.is_some_and(|f| r.progress >= f));
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
+            && !done_racing
             && (r.profile.risk >= 0.5 || parked_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
@@ -1478,7 +1579,7 @@ fn decide_racer(
                 let gap = ds.abs() - hl - o.half_len;
                 Rel { o: *o, ds, gap }
             })
-            .filter(|x| x.ds > -p.mirror_range_m && x.ds < p.perception_ahead_m)
+            .filter(|x| x.ds > -p.mirror_range_m && x.ds < r.ahead_m())
             .collect();
         let is_civ = |o: &Obstacle| matches!(o.who, Who::Civilian(_));
 
@@ -1540,7 +1641,15 @@ fn decide_racer(
             // Off the corridor / facing the wrong way → rejoin.
             let t = corridor.samples[r.hint].tangent;
             let heading_cos = geom::dot(r.fwd, t);
-            let off = r.n < pass_lo - 1.0 || r.n > pass_hi + 1.0;
+            // Off = outside the road itself (opposing lanes included where the corridor
+            // knows them), not merely out of my lane: a car drifting over the centre line
+            // in a hairpin steers back at speed instead of crawling back at rejoin pace.
+            let (road_lo, road_hi) = to_limits(corridor.pass_bounds(r.s));
+            // Grid slots may sit beside the lane (a two-wide grid on a one-lane road): a car
+            // pulling away from one steers in at race pace.
+            let on_grid = r.laps_done == 0 && r.progress < 30.0;
+            let off =
+                !on_grid && (r.n < road_lo.min(pass_lo) - 1.0 || r.n > road_hi.max(pass_hi) + 1.0);
             if r.tactic != Tactic::Reverse
                 && r.tactic != Tactic::Rejoin
                 && (off || heading_cos < 0.5)
@@ -1554,11 +1663,20 @@ fn decide_racer(
             let held_by_car = rel
                 .iter()
                 .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
+            // Nose to nose in the opposing lanes (passed into a lane a car then stopped in,
+            // facing me): nobody can move until I back out into my own lane.
+            let head_on = r.n < lim_lo - 1.0
+                && r.debug.v_target < 0.5
+                && rel.iter().any(|x| {
+                    x.ds > 0.0
+                        && x.gap < 8.0
+                        && x.o.v_s.abs() < 1.0
+                        && !matches!(x.o.who, Who::Racer(_))
+                });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
                 && wants_to_move
-                && !held_by_car
-                && r.throttle > 0.3
+                && ((!held_by_car && r.throttle > 0.3) || head_on)
             {
                 r.stuck_s += dt;
             } else if r.tactic != Tactic::Reverse {
@@ -1568,6 +1686,8 @@ fn decide_racer(
                 r.tactic = Tactic::Reverse;
                 r.tactic_ticks = 0;
                 r.stuck_s = 0.0;
+                // Nose to nose: back out far enough to steer into my own lane.
+                r.reverse_s = if head_on { 3.0 } else { 1.6 };
             }
         }
 
@@ -1591,7 +1711,7 @@ fn decide_racer(
                             // Side by side into the corner for longer than I tolerate while
                             // still behind: back out.
                             let lost = x.ds > 0.0 && r.alongside_s > p.side_by_side_s;
-                            let gone = x.gap > 30.0;
+                            let gone = x.gap > pass_horizon(v, x.o.v_s) + 10.0;
                             // Something coming the other way in my lane: tuck back in.
                             let oncoming = rel.iter().any(|q| {
                                 q.ds > 0.0
@@ -1617,7 +1737,14 @@ fn decide_racer(
                 }
             }
             Tactic::Reverse => {
-                if r.tactic_ticks as f32 * dt > 1.6 {
+                // Never back into anything: stop reversing when something is close behind in
+                // the band I occupy.
+                let blocked_behind = rel.iter().any(|x| {
+                    x.ds < 0.0
+                        && x.gap < 4.0 + 1.0 * (-v).max(0.0)
+                        && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
+                });
+                if r.tactic_ticks as f32 * dt > r.reverse_s || blocked_behind {
                     r.tactic = Tactic::Rejoin;
                     r.tactic_ticks = 0;
                     r.ctrl.resync(0.0);
@@ -1625,7 +1752,10 @@ fn decide_racer(
             }
             Tactic::Rejoin => {
                 let t = corridor.samples[r.hint].tangent;
-                let ok = r.n >= lim_lo - 0.3 && r.n <= lim_hi + 0.3 && geom::dot(r.fwd, t) > 0.94;
+                let (road_lo, road_hi) = to_limits(corridor.pass_bounds(r.s));
+                let ok = r.n >= road_lo.min(lim_lo) - 0.3
+                    && r.n <= road_hi.max(lim_hi) + 0.3
+                    && geom::dot(r.fwd, t) > 0.94;
                 if ok {
                     r.stable_s += dt;
                 } else {
@@ -1670,9 +1800,11 @@ fn decide_racer(
         let mut tuck: Option<f32> = None;
         if r.tactic == Tactic::Follow {
             let band = my_band(r.n, r.n_cmd);
+            // Look for a pass early enough to change lanes without lifting: at least 30 m,
+            // or 3.5 s at the closing speed (a civilian doing 12 m/s on a highway).
             let blocker = rel
                 .iter()
-                .filter(|x| x.ds > 0.0 && x.gap < 30.0)
+                .filter(|x| x.ds > 0.0 && x.gap < pass_horizon(v, x.o.v_s))
                 .filter(|x| overlaps(band, &x.o, margin_for(&x.o), x.gap / (v - x.o.v_s).max(1.0)))
                 .min_by(|a, b| a.ds.total_cmp(&b.ds));
             let held = blocker.is_some_and(|x| {
@@ -1700,10 +1832,12 @@ fn decide_racer(
                 // A run: real closing speed, or (with slipstream) a smaller one built in the
                 // tow right behind it.
                 let tow_run = draft && v - x.o.v_s > 0.8 && x.gap < 12.0;
-                let momentum =
-                    (v - x.o.v_s > 2.5 || tow_run) && x.gap < 30.0 && brake_dist > v * 1.5;
+                let momentum = (v - x.o.v_s > 2.5 || tow_run)
+                    && x.gap < pass_horizon(v, x.o.v_s)
+                    && brake_dist > v * 1.5;
                 if (r.blocked_s > p.overtake_patience_s || momentum)
                     && x.o.v_s > -1.0
+                    && !done_racing
                     && (!start_phase || x.o.parked)
                 {
                     let ctx = PassCtx {
@@ -1768,7 +1902,7 @@ fn decide_racer(
         if r.tactic == Tactic::Overtake {
             if let Some(x) = r.pass_target.and_then(target_rel) {
                 let side = (r.n_goal - x.o.n).signum();
-                let need = hw + x.o.half_w + margin_for(&x.o) + p.overtake_margin_m;
+                let need = hw + x.o.half_w + margin_for(&x.o) + pass_margin(&x.o, &p);
                 let want = x.o.n + side * need;
                 let (lo, hi) = pass_limits(r.s + x.ds.max(0.0));
                 if want < lo - 0.05 || want > hi + 0.05 {
@@ -1818,7 +1952,14 @@ fn decide_racer(
             }
         };
         let rate = match r.tactic {
-            Tactic::Overtake | Tactic::Defend => 1.4 + 1.0 * r.profile.aggression,
+            // Lane changes run a little quicker at speed (up to 1.6×), but taper off above
+            // 30 m/s: a lane change at highway speed while braking hard has to stay gentle or
+            // the car overshoots the target lane.
+            Tactic::Overtake | Tactic::Defend => {
+                (1.4 + 1.0 * r.profile.aggression)
+                    * (v / 15.0).clamp(1.0, 1.6)
+                    * (30.0 / v.max(30.0))
+            }
             Tactic::Park | Tactic::Yield => 0.8,
             _ => 0.9,
         };
@@ -1871,7 +2012,7 @@ fn decide_racer(
         r.n_cmd = n_cmd;
 
         // ---- Longitudinal target ----
-        let mut v_target = v_line(r.s + v * (0.15 + r.brake_err_s));
+        let mut v_target = v_line(r.s + v * (0.15 + p.early_brake_s + r.brake_err_s));
         let mut limit = SpeedLimit::Profile;
         let mut cap_to = |v_target: &mut f32, cap: f32, why: SpeedLimit| {
             if cap < *v_target {
@@ -1883,6 +2024,14 @@ fn decide_racer(
         if r.status == RacerStatus::Fled && fleeing && r.s > corridor.length_m - 15.0 {
             r.tactic = Tactic::Park;
         }
+        // Done with a point-to-point race: pull over before the corridor runs out (past its
+        // end there is only whatever the road leads into — a car park wall, a dead end).
+        if matches!(r.status, RacerStatus::Finished { .. })
+            && !corridor.closed
+            && r.s > corridor.length_m - 25.0
+        {
+            r.tactic = Tactic::Park;
+        }
         // Pulling over for the police: roll on slowly until at the kerb and clear of any
         // junction, then stop there (a car stopped mid-lane blocks everyone behind it).
         let pulling_over = r.tactic == Tactic::Yield && {
@@ -1891,7 +2040,13 @@ fn decide_racer(
             (r.n - lim_hi).abs() > 0.5 || near_junction
         };
         match r.tactic {
-            Tactic::Rejoin => cap_to(&mut v_target, 7.0, SpeedLimit::Mode),
+            // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
+            // corridor and pointing along it.
+            Tactic::Rejoin => {
+                let t = corridor.samples[r.hint].tangent;
+                let aligned = ((geom::dot(r.fwd, t) - 0.9) / 0.1).clamp(0.0, 1.0);
+                cap_to(&mut v_target, 7.0 + 10.0 * aligned, SpeedLimit::Mode)
+            }
             Tactic::Yield if pulling_over => cap_to(&mut v_target, 6.0, SpeedLimit::Mode),
             Tactic::Park | Tactic::Yield => cap_to(
                 &mut v_target,
@@ -1930,7 +2085,9 @@ fn decide_racer(
                 let den = (1.0 - kc * n_path).max(0.2);
                 let k = (kc / den).abs();
                 if k > 1e-4 {
-                    let v_off = (profile.a_lat / k).sqrt();
+                    // 85 % of the grip used on the line: an off-line path is tighter, not
+                    // optimised, and usually has a car beside it to run wide into.
+                    let v_off = (0.85 * profile.a_lat / k).sqrt();
                     let cap = (v_off * v_off + 2.0 * a_brk * x).sqrt();
                     cap_to(&mut v_target, cap, SpeedLimit::Mode);
                 }
@@ -1987,7 +2144,34 @@ fn decide_racer(
                     let cap = (2.0 * a_brk * 0.8 * free).sqrt();
                     cap_to(&mut v_target, cap, SpeedLimit::Signal);
                 }
-                for (id, pos, vel) in civs {
+                // My occupancy of the box: from reaching its entry to clearing its far
+                // side, driving it as I would (accelerating from my speed, no faster than
+                // my line through the box).
+                let a_go = (r.cap.accel_mps2 * p.usage.accel).max(1.0);
+                let t_at = |d: f32| -> f32 {
+                    let u = v.max(0.0);
+                    (-u + (u * u + 2.0 * a_go * d.max(0.0)).sqrt()) / a_go
+                };
+                let box_len = (j_end - j + 1) as f32 * CORRIDOR_STEP_M;
+                let v_box = (j..=j_end)
+                    .map(|q| {
+                        corridor.interp(&profile.v, (i0 as isize + q) as f32 * CORRIDOR_STEP_M)
+                    })
+                    .fold(f32::INFINITY, f32::min)
+                    .max(3.0);
+                let t_in = t_at(d_entry);
+                let clear = d_entry + box_len + 2.0 * hl;
+                let t_out = t_at(clear).max(t_in + (box_len + 2.0 * hl) / v_box);
+                // Crossing gap either side of my pass: 0.96 s (careful) .. 0.54 s (risk-taker).
+                let gap_s = 0.6 * p.civilian_headway_s;
+                // My swept strip through the box, in box coordinates (along `t_dir` from the
+                // box middle, across from the corridor centre): the lane band I occupy now
+                // and where my line takes me, the box length plus my car.
+                let n_line = line_n(r.s + d_entry + 0.5 * box_len);
+                let (n_a, n_b) = (r.n.min(n_line), r.n.max(n_line));
+                let half_along = 0.5 * box_len + hl + 1.0;
+                for c in civs {
+                    let (id, pos, vel) = (&c.id, &c.pos, &c.vel);
                     let to = geom::sub(c_j, *pos);
                     let d = geom::len(to);
                     if d > radius + watch {
@@ -1998,18 +2182,47 @@ fn decide_racer(
                     if speed > 0.5 && geom::dot(geom::scale(*vel, 1.0 / speed), t_dir) > 0.7 {
                         continue;
                     }
-                    // Stopped civilians inside are waiting for me once I'm in the box
-                    // myself (avoid a stand-off); moving ones always count.
-                    // A stopped car in the box that has not moved while I waited is waiting
-                    // for me: stop counting it (no stand-off).
+                    let rel_p = geom::sub(*pos, c_j);
+                    let nrm = geom::right_of(t_dir);
+                    let pa = geom::dot(rel_p, t_dir);
+                    let pl = geom::dot(rel_p, nrm);
+                    // Lateral room: both half widths and half a metre. A car signalling a
+                    // turn may swing across: give it a lane more.
+                    let side = hw + 0.9 + 0.5 + if c.turn_signal != 0 { 3.5 } else { 0.0 };
+                    let (l_lo, l_hi) = (n_a - side, n_b + side);
+                    let in_strip = pa.abs() <= half_along && pl >= l_lo && pl <= l_hi;
+                    // Stopped civilians in my path through the box are waiting for me once
+                    // I'm in the box myself (avoid a stand-off). A stopped car that has not
+                    // moved while I waited is waiting for me: stop counting it.
                     let waited_out = r.junction_wait_s > JUNCTION_DEADLOCK_S;
-                    let inside =
-                        d < radius && (speed > 0.5 || (!in_junction && !protected && !waited_out));
-                    let heading_in = !protected
-                        && speed > 0.5
-                        && geom::dot(*vel, to) > 0.5 * speed * d
-                        && (d - radius) / speed < 4.0;
-                    if inside || heading_in {
+                    let stopped_inside =
+                        speed <= 0.5 && in_strip && !in_junction && !protected && !waited_out;
+                    // A moving civilian: when does its present course enter / leave my strip?
+                    // It only conflicts when that overlaps my own pass through the box, with
+                    // my crossing gap either side. Cross traffic held at its red
+                    // (`protected`) only counts while already moving inside the box.
+                    let conflict = speed > 0.5 && (!protected || d < radius) && {
+                        let ua = geom::dot(*vel, t_dir);
+                        let ul = geom::dot(*vel, nrm);
+                        let mut t0 = f32::NEG_INFINITY;
+                        let mut t1 = f32::INFINITY;
+                        for (p0, u, lo, hi) in
+                            [(pa, ua, -half_along, half_along), (pl, ul, l_lo, l_hi)]
+                        {
+                            if u.abs() < 1e-3 {
+                                if p0 < lo || p0 > hi {
+                                    t0 = f32::INFINITY;
+                                }
+                            } else {
+                                let (x0, x1) = ((lo - p0) / u, (hi - p0) / u);
+                                t0 = t0.max(x0.min(x1));
+                                t1 = t1.min(x0.max(x1));
+                            }
+                        }
+                        let t_c_in = t0.max(0.0);
+                        t1 > t_c_in && t_in - gap_s < t1 && t_c_in < t_out + gap_s
+                    };
+                    if stopped_inside || conflict {
                         if speed <= 0.5 {
                             held_by_stopped = true;
                         }
@@ -2040,16 +2253,16 @@ fn decide_racer(
             let civ = is_civ(o);
             let closing = (v - o.v_s).max(0.5);
             // Arriving fast next to a car: want more lateral room the faster I close.
-            let margin = margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, 1.0);
+            let margin =
+                margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, if civ { 0.5 } else { 1.0 });
             if !overlaps(band, o, margin, x.gap / closing) {
                 continue;
             }
-            // Steering out round a parked car: once the lane I am heading for is clear of
-            // it, creep instead of standing still behind it (a stopped car cannot move
-            // sideways), never closer than the stop gap.
+            // Steering out round a parked car (pulled over, or standing for good): once the
+            // lane I am heading for is clear of it, creep instead of standing still behind it
+            // (a stopped car cannot move sideways), never closer than the stop gap.
             let steering_round = o.parked
-                && r.tactic == Tactic::Overtake
-                && r.pass_target == Some(o.who)
+                && (r.tactic != Tactic::Overtake || r.pass_target == Some(o.who))
                 && !overlaps(my_band(n_cmd, n_cmd), o, margin, 0.0);
             if steering_round && x.gap > CREEP_STOP_GAP_M {
                 let creep = (a_brk * (x.gap - CREEP_STOP_GAP_M)).sqrt().min(CREEP_MPS);
@@ -2139,29 +2352,54 @@ fn decide_racer(
         }
 
         // ---- Controls ----
-        let ld = r.ctrl.lookahead(v);
-        let s_t = r.s + ld;
+        // Steering looks from where the car will be after its response lag (position and
+        // heading 0.2 s on), so lane changes at highway speed don't overshoot and weave; the
+        // lookahead stretches above 25 m/s for the same reason.
+        const STEER_LAG_S: f32 = 0.2;
+        let ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0);
+        let s_t = r.s + ld + v * STEER_LAG_S;
         let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
             pass_limits(s_t)
         } else {
             limits(s_t)
         };
-        let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)))
+        // Curvature feedforward: in a tight corner the car settles wide of a pure-pursuit
+        // target (tyre slip angles, steering response lag), by about κ·L²/8 (L = distance to
+        // the target; measured on the Lantern junction turns, ~1.3 m). Aim that much inside
+        // so the car holds the line instead of running out of the lane at the exit.
+        let l_t = s_t - r.s;
+        let k_mid = line.curvature[corridor.wrap(((r.s + 0.5 * l_t) / CORRIDOR_STEP_M) as isize)];
+        let inside = (k_mid * l_t * l_t / 8.0).clamp(-1.5, 1.5);
+        let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)) + inside)
             .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd));
         let target = corridor.point(s_t, n_t);
-        let mut steer = r.ctrl.steer(r.pos, r.fwd, target);
+        let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
+        let (sn, cs) = wp_math::sin_cos(r.yaw_rate * STEER_LAG_S);
+        let fwd_lag = [r.fwd[0] * cs - r.fwd[1] * sn, r.fwd[0] * sn + r.fwd[1] * cs];
+        let mut steer = r.ctrl.steer(pos_lag, fwd_lag, target);
         steer = (steer - r.effects.steer_pull).clamp(-1.0, 1.0);
         let mut input = VehicleInput {
             headlights: true,
             ..Default::default()
         };
         if r.tactic == Tactic::Reverse {
-            // Brake at a standstill engages reverse; the brake pedal then drives backwards.
-            input.brake = 0.7;
+            // Brake at a standstill engages reverse; the brake pedal then drives backwards
+            // (at most 3 m/s: a reverse is a manoeuvre, not a getaway).
+            input.brake = if r.v < -3.0 { 0.0 } else { 0.7 };
             input.steer = -steer;
             r.throttle = 0.0;
         } else {
-            let mut acc = (2.5 * (v_target - v)).clamp(-12.0, 8.0);
+            // Feedforward of the profile's own slope (`v · dv/ds`) where the profile sets the
+            // pace: the brakes come on at full strength where the profile starts braking,
+            // instead of once the car is already too fast for it.
+            let ahead = r.s + v * (0.15 + p.early_brake_s + r.brake_err_s);
+            let slope = (v_line(ahead + CORRIDOR_STEP_M) - v_line(ahead)) / CORRIDOR_STEP_M;
+            let acc_ff = if limit == SpeedLimit::Profile {
+                (v * slope).min(0.0)
+            } else {
+                0.0
+            };
+            let mut acc = (acc_ff + 2.5 * (v_target - v)).clamp(-12.0, 8.0);
             if decel_demand > 0.5 {
                 acc = acc.min(-1.2 * decel_demand);
             }
@@ -2176,6 +2414,11 @@ fn decide_racer(
             }
             if r.unstable {
                 th = th.min(0.2);
+            }
+            // Creeping (round a standing car, up to a queue): feather the throttle so the
+            // crawl does not overshoot into whatever is a metre away.
+            if v_target < 3.0 && limit != SpeedLimit::Profile {
+                th = th.min(0.25);
             }
             th = th.min(r.throttle + p.throttle_rate_per_s * dt);
             r.throttle = th;
@@ -2196,6 +2439,24 @@ fn decide_racer(
     }
 }
 
+/// Extra lateral room beside a car being passed beyond the normal clearance, m: the
+/// driver's overtake margin for racers (contact is a race incident), a little for anyone
+/// else (civilians, physical traffic, police: passed in the next lane like any driver
+/// does; their clearance is already in the margin).
+fn pass_margin(o: &Obstacle, p: &DriverParams) -> f32 {
+    if !matches!(o.who, Who::Racer(_)) {
+        0.3
+    } else {
+        p.overtake_margin_m
+    }
+}
+
+/// How far ahead a slower car is considered for a pass, m: 30 m, or 3.5 s at the closing
+/// speed when that is more.
+fn pass_horizon(v: f32, v_other: f32) -> f32 {
+    30.0f32.max(3.5 * (v - v_other))
+}
+
 fn who_id(w: Who) -> u32 {
     match w {
         Who::Racer(k) => 100 + k as u32,
@@ -2210,7 +2471,7 @@ fn vehicle_obstacle(
     cp: crate::corridor::CorridorPos,
     v: &VehicleObs,
 ) -> Option<Obstacle> {
-    let (l, r) = c.bounds(cp.s);
+    let (l, r) = c.pass_bounds(cp.s);
     if cp.n < -l - 6.0 || cp.n > r + 6.0 {
         return None;
     }
@@ -2259,7 +2520,9 @@ fn civilians_on(
         }
         let Some((_, hint)) = near else { continue };
         let cp = c.project(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
-        let (l, rr) = c.bounds(cp.s);
+        // The whole road, opposing lanes included: a racer passing over there must see
+        // what stands in them.
+        let (l, rr) = c.pass_bounds(cp.s);
         if cp.n < -l - 4.0 || cp.n > rr + 4.0 {
             continue;
         }
@@ -2362,7 +2625,7 @@ fn plan_pass(
     if ctx.brake_dist < v * 0.6 && target.gap > 2.0 {
         return Err(PassReject::TooLate);
     }
-    let need = hw + o.half_w + ctx.margin + p.overtake_margin_m;
+    let need = hw + o.half_w + ctx.margin + pass_margin(&o, p);
     // Prefer the inside of the next corner (sign of the line curvature ahead, + = right).
     let mut ahead_k = 0.0f32;
     let mut x = 0.0;
@@ -2418,8 +2681,11 @@ fn plan_pass(
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
-            // Oncoming traffic in that lane: it covers the distance too.
-            if q.ds > 0.0 && q.o.v_s < -1.0 && q.ds < pass_dist + (-q.o.v_s) * t_clear + 30.0 {
+            // Oncoming traffic in that lane: it covers the distance too. A car standing in
+            // it anywhere along the pass closes it as well (I would end up nose to nose).
+            let oncoming = q.o.v_s < -1.0 && q.ds < pass_dist + (-q.o.v_s) * t_clear + 30.0;
+            let standing = q.o.v_s.abs() < 1.0 && q.ds < pass_dist + 10.0;
+            if q.ds > 0.0 && (oncoming || standing) {
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
@@ -2549,7 +2815,7 @@ mod tests {
 
     /// One racer of `risk` at y = 70 m doing 15 m/s on a straight with a junction box at
     /// y = 100..120 m; returns its debug after one decision with `signal` and `civs`.
-    fn junction_decision(risk: f32, signal: Option<SignalAhead>, civs: &[(u32, V2, V2)]) -> Debug {
+    fn junction_decision(risk: f32, signal: Option<SignalAhead>, civs: &[Civ]) -> Debug {
         let mut corridor = straight();
         for smp in &mut corridor.samples[50..60] {
             smp.junction = true;
@@ -2604,21 +2870,59 @@ mod tests {
 
     #[test]
     fn lasting_green_ignores_cross_traffic_held_at_its_red() {
-        // A civilian stopped at the edge of the junction box (cross street).
-        let civ = [(7u32, [8.0f32, 110.0f32], [0.0f32, 0.0f32])];
-        let unsignalised = junction_decision(0.4, None, &civ);
+        // A civilian stopped in the junction box, across my path.
+        let waiting = [civ(7, [1.0, 110.0], [0.0, 0.0], 0)];
+        let unsignalised = junction_decision(0.4, None, &waiting);
         assert_eq!(unsignalised.limit, SpeedLimit::Obstacle(1_000_007));
+        // One waiting at its stop line beside my path is no obstacle.
+        let at_line = [civ(7, [8.0, 110.0], [0.0, 0.0], 0)];
+        let beside = junction_decision(0.4, None, &at_line);
+        assert_ne!(beside.limit, SpeedLimit::Obstacle(1_000_007));
         let green = Some(SignalAhead {
             d_entry: 30.0,
             state: SignalState::Green,
             remaining_s: 30.0,
         });
-        let protected = junction_decision(0.4, green, &civ);
+        let protected = junction_decision(0.4, green, &waiting);
         assert_ne!(protected.limit, SpeedLimit::Obstacle(1_000_007));
         // A civilian still moving inside the box counts even on green.
-        let moving = [(7u32, [4.0f32, 110.0f32], [-6.0f32, 0.0f32])];
+        let moving = [civ(7, [4.0, 110.0], [-6.0, 0.0], 0)];
         let busy = junction_decision(0.4, green, &moving);
         assert_eq!(busy.limit, SpeedLimit::Obstacle(1_000_007));
+    }
+
+    fn civ(id: u32, pos: V2, vel: V2, turn_signal: i8) -> Civ {
+        Civ {
+            id,
+            pos,
+            vel,
+            turn_signal,
+        }
+    }
+
+    #[test]
+    fn junction_gap_acceptance_uses_time_windows() {
+        // Me: y = 70 at 15 m/s, box y = 100..120 (about 2–4 s away).
+        // Cross traffic arriving together with me: wait.
+        let together = [civ(7, [-40.0, 110.0], [14.0, 0.0], 0)];
+        let d = junction_decision(0.4, None, &together);
+        assert_eq!(d.limit, SpeedLimit::Obstacle(1_000_007));
+        // Cross traffic that will be long through before I arrive: go.
+        let early = [civ(7, [4.0, 110.0], [14.0, 0.0], 0)];
+        let d = junction_decision(0.4, None, &early);
+        assert_ne!(d.limit, SpeedLimit::Obstacle(1_000_007));
+        // Cross traffic far off, arriving well after I'm through: go.
+        let late = [civ(7, [-60.0, 110.0], [6.0, 0.0], 0)];
+        let d = junction_decision(0.4, None, &late);
+        assert_ne!(d.limit, SpeedLimit::Obstacle(1_000_007));
+        // Oncoming, going straight on in the opposing lane: never in my way.
+        let oncoming = [civ(7, [-3.5, 135.0], [0.0, -12.0], 0)];
+        let d = junction_decision(0.4, None, &oncoming);
+        assert_ne!(d.limit, SpeedLimit::Obstacle(1_000_007));
+        // ...unless it signals a turn (it may cut across me).
+        let turning = [civ(7, [-3.5, 135.0], [0.0, -12.0], -1)];
+        let d = junction_decision(0.4, None, &turning);
+        assert_eq!(d.limit, SpeedLimit::Obstacle(1_000_007));
     }
 
     #[test]
