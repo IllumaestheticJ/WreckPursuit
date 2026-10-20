@@ -79,7 +79,7 @@ The lap: a 92 s street-circuit race (lap 1/3) in a lighter rear-drive sports car
 **Handbrake hairpin (37.2–40.5 s), step by step**
 
 1. 37.17 s: a **feint**: a 0.3 s Left tap on the throttle.
-2. 37.5 s: **Right + handbrake** (throttle off) for 1.0 s. The car pivots ~150–180° around the hairpin at 1st-gear speed (~5–10 mph). Rotation is free and fast.
+2. 37.5 s: **Right + handbrake** (throttle off) for 1.0 s. The car pivots ~150–180° around the hairpin; the speedo reads **~28 mph at handbrake-on**, falling 18 → 10 → 5 mph during the pivot (correction 2026-10-20: the entry is ~45–55 km/h, not 5–10 mph). Rotation is free and fast.
 3. 38.5 s: **throttle back on**, still holding Right, while the handbrake is released.
 4. 39.3 s: **Left (opposite lock) + throttle** for ~1 s. This catches the rotation and the car drives out of the hairpin in a short power slide.
 
