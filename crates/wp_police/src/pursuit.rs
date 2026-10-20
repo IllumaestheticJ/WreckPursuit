@@ -26,7 +26,7 @@ use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
 
 use crate::dispatch::ROAD_HALF_WIDTH_M;
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
-use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
+use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind, SegmentId};
 use crate::heat::{PursuitStatus, RuleInputs, RuleOutcome, WantedLevel};
 use crate::unit::{
     plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv, Tactic,
@@ -429,6 +429,25 @@ impl PoliceSystem {
         (Track::new(pts), turn_around)
     }
 
+    /// Route for unit `i` to a containment post at `point` on segment `s`: via whichever end of
+    /// the segment it reaches sooner, then along the segment.
+    fn post_route(&self, i: usize, s: SegmentId, point: [f32; 2]) -> Track {
+        let u = &self.units[i];
+        let seg = *self.graph.segment(s);
+        let start = self.start_node(u.body.pos, u.body.heading);
+        let time_via = |n: NodeId| {
+            let route = start.and_then(|st| self.graph.shortest_path(st, n));
+            route.map_or(f32::INFINITY, |r| self.graph.route_time_s(&r))
+                + dist(self.graph.node(n).pos, point) / seg.speed_limit_mps.max(1.0)
+        };
+        let end = if time_via(seg.a) <= time_via(seg.b) {
+            seg.a
+        } else {
+            seg.b
+        };
+        self.route_track(i, end, Some(point))
+    }
+
     pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
         let cands: Vec<u32> = (0..self.graph.nodes.len() as u32)
             .filter(|&n| d.is_none_or(|d| self.graph.nodes[n as usize].district == d))
@@ -642,6 +661,61 @@ impl PoliceSystem {
                     let lim = self.limit_at(self.units[i].body.pos);
                     let cap = p.pursuit_cap_mps.get(self.phase);
                     self.units[i].cmd.speed_mps = (lim * p.respond_speed_factor * 1.15).min(cap);
+                }
+                Assignment::Contain {
+                    target,
+                    segment,
+                    point,
+                } => {
+                    if !self.racers.get(&target).is_some_and(|r| r.pursued()) {
+                        self.assign(i, Assignment::Idle);
+                        continue;
+                    }
+                    let u = &self.units[i];
+                    let d = dist(u.body.pos, point);
+                    let parked = !u.cmd.track.is_drivable() && d < 15.0;
+                    let arrived = u.cmd.track.is_drivable()
+                        && (d < 10.0 || u.track_s >= u.cmd.track.length() - 3.0);
+                    if parked || arrived {
+                        // Parked on the escape road, lights on (strategy decides when to go).
+                        let u = &mut self.units[i];
+                        if arrived {
+                            u.cmd = DriveCommand::stop();
+                        }
+                        u.cmd.siren = true;
+                        continue;
+                    }
+                    if !u.cmd.track.is_drivable() {
+                        let t = self.post_route(i, segment, point);
+                        self.units[i].set_command(DriveCommand {
+                            track: t,
+                            speed_mps: 0.0,
+                            cornering_g: p.pursuit_cornering_g,
+                            siren: true,
+                            lane_offset_m: LANE_OFFSET_M,
+                        });
+                    }
+                    let lim = self.limit_at(self.units[i].body.pos);
+                    let cap = p.pursuit_cap_mps.get(self.phase);
+                    self.units[i].cmd.speed_mps = (lim * p.respond_speed_factor * 1.15).min(cap);
+                }
+                Assignment::Search { target, spot } => {
+                    if !self.racers.get(&target).is_some_and(|r| r.pursued()) {
+                        self.assign(i, Assignment::Idle);
+                        continue;
+                    }
+                    if !self.units[i].cmd.track.is_drivable() {
+                        let t = self.route_track(i, spot, None);
+                        self.units[i].set_command(DriveCommand {
+                            track: t,
+                            speed_mps: 0.0,
+                            cornering_g: p.patrol_cornering_g,
+                            siren: false,
+                            lane_offset_m: LANE_OFFSET_M,
+                        });
+                    }
+                    let lim = self.limit_at(self.units[i].body.pos);
+                    self.units[i].cmd.speed_mps = lim * self.cfg.strategy.search.speed_factor;
                 }
                 Assignment::Pursue { .. } => {} // coordinate_pursuits
                 Assignment::HeloTrack { target } => {

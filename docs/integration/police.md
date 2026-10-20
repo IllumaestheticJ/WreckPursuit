@@ -57,7 +57,18 @@
   Budget scenarios: `radio_city_chase.ron`, `radio_calm_patrol.ron` (metrics
   `radio_per_min_pursuit`, `radio_per_min_calm`); `cargo run --release -p wp_police --example
   radio_log -- <scenario>` prints the spoken lines.
-- Data: `data/police/{heat,presence,pursuit,tools,radio}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
+- **Strategic containment & search** (lead helper `lead/police-strategy`, P10;
+  `wp_police::strategy`, `data/police/strategy.toml`, optional in a tables directory): new
+  assignments **`Assignment::Contain { target, segment, point }`** (holding an escape point
+  ahead of the racer, lights on, parked) and **`Assignment::Search { target, spot }`** (checking a
+  hiding spot, no siren). `Assignment::target()` covers both, so they count as committed to the
+  racer. Captain view names: `"contain"`, `"search"`; `unit_order` suggests `Intercept` for both;
+  radar reports `Contain` as pursuit and `Search` as patrol. Queries: `chokepoints()`,
+  `containment_posts() -> Vec<PostView>`, `searches() -> Vec<SearchView>`; stats
+  `containment_posts`, `search_spots_checked`, `search_reacquired` (also scenario metrics).
+  `PoliceConfig::parse_all(.., strategy)` takes the sixth table; `parse` / `parse_with_radio` use
+  the built-in one. No contract change (events and captain commands are unchanged).
+- Data: `data/police/{heat,presence,pursuit,tools,radio,strategy}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
   on D's procedural city (`city: (nx, ny, seed)`, default `ProcGenConfig::small()`).
 
 ## Needs
@@ -130,6 +141,10 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **`crates/wp_wasm/src/police.rs`** (lead helper `lead/police-strategy`, minimal): the HUD's
+  `units_in_pursuit` counts every ground unit committed to the racer (`Assignment::target()`,
+  so containment posts and searchers too); light bars are on for `Contain` (parked at an escape
+  point) and off for `Search` (`assignment_has_siren`, unbound-unit flag 2).
 - **`apps/simcli/scenarios/soak/traffic_soak_observer.ron`** (round 8, at the lead's request):
   `police_cars: true` and its comment. Nothing else changed.
 - **`apps/simcli/examples/police_traffic_contacts.rs`** (round 6): new measurement example
@@ -151,6 +166,9 @@ The reply is `Result<(), CaptainError>` with:
 | `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
+- Containment posts are one parked car in its lane, not a road-wide block; AI-captain
+  roadblocks still go on the predicted path, not on escape points. The search ignores line of
+  sight when picking spots and has no parking-lot / garage POIs to go on.
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).
   It runs wide more often on D's ring road and diagonals, mostly at low speed: the self-wreck
   rate is 0% over 20 Simulation pursuits.
@@ -351,3 +369,36 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Lead helper: strategic containment (P10, `lead/police-strategy`, 2026-10-20)
+
+Police predict where the racer can get to in the next 20–60 s and hold the key escape points
+(bridges, tunnels, causeways, highway ramps) while one or two units stay on its tail; after
+losing it they run a widening search of likely hiding spots. Design and tables: `wp_police`
+README, "Strategic containment & search". Summary:
+- **Escape points from topology** (no bridge/tunnel flags in the road data): a road chain whose
+  blocking adds ≥ 700 m and ≥ 2× its length to the way between its ends, or a highway chain
+  meeting surface streets. Port Vesper v2: 26 crossings + 9 ramps of 235 chains, 8.7 ms to build
+  once (native).
+- **Containment** every 2 s: travel-time forecast from the racer (horizon 20/20/30/45/60 s by
+  level), `tail_units` 1/1/2/2/2 keep chasing, `posts_per_level` 0/1/1/2/3 escape points get the
+  committed unit that arrives ≥ 4 s before the racer could; reinforcements that have to be
+  spawned appear near an unfilled post.
+- **Search** 4 s after contact is lost: one follower keeps to the trail/predicted route, the
+  others check hiding spots (dead ends, local streets, Industrial, ahead of the last heading)
+  inside an area that grows by one racer-second per second.
+
+Tests: `crates/wp_police/tests/strategy.rs` (two islands + one bridge: bridge found, unit parks
+on it with lights on while the tail stays on the racer, search widens and spreads out, escape
+still possible, determinism) plus unit tests in `strategy.rs`. All 14 police scenarios meet
+their ranges with the strategy on and off.
+
+Test change for review: `risk_budget_and_caps_keep_cops_alive` now ranks the reckless vs
+careful pursuit-driving knobs with containment and search **off** (both configs). With them on
+the knobs act on too few chasing unit-seconds to rank (careful/reckless within ±1 % over seeds
+200–203; the harm sum is dominated by ~240 run-wide crashes of all driving). The
+`self_wreck_rate < 10 %` check runs with everything on.
+
+Follow-ups for E (owner of `wp_police`): roadblock tools on escape points (`plan_site` on a
+given chain), a road-wide parked block for single-unit posts, and LOS-aware spot choice.
+Testbed (C/M): `containment_posts()` / `searches()` are ready for a debug or captain map layer.

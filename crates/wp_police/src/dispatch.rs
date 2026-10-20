@@ -284,6 +284,7 @@ impl PoliceSystem {
         self.dispatch_incidents();
         self.maintain_reinforcements(world);
         self.maintain_helicopters();
+        self.plan_strategy(world);
         if !self.captain.human {
             self.ai_captain_tools();
         }
@@ -456,6 +457,29 @@ impl PoliceSystem {
                 format!("{callsign} deploying spikes on segment {}.", segment.0),
                 format!("spikes:{}", segment.0),
                 &format!("{{units}} deploying spikes on segment {}.", segment.0),
+            ),
+            Assignment::Contain { target, .. } => line(
+                RadioTier::Tactical,
+                format!(
+                    "{callsign} moving to block an escape route ahead of racer #{}, {:?}.",
+                    target.0,
+                    self.graph.district_at(u.body.pos)
+                ),
+                format!("contain:{}", target.0),
+                &format!(
+                    "{{units}} blocking escape routes ahead of racer #{}.",
+                    target.0
+                ),
+            ),
+            Assignment::Search { target, .. } => line(
+                RadioTier::Routine,
+                format!(
+                    "{callsign} searching for racer #{}, {:?}.",
+                    target.0,
+                    self.graph.district_at(u.body.pos)
+                ),
+                format!("search:{}", target.0),
+                &format!("{{units}} searching for racer #{}.", target.0),
             ),
             Assignment::HeloTrack { target } => line(
                 RadioTier::Tactical,
@@ -683,9 +707,7 @@ impl PoliceSystem {
         self.units
             .iter()
             .filter(|u| {
-                u.kind == UnitKind::Car
-                    && !u.wrecked
-                    && matches!(u.assignment, Assignment::Pursue { target } | Assignment::Intercept { target, .. } if target == racer)
+                u.kind == UnitKind::Car && !u.wrecked && u.assignment.target() == Some(racer)
             })
             .count() as u32
     }
@@ -758,7 +780,9 @@ impl PoliceSystem {
                     if self.ground_units_alive() >= self.cfg.presence.max_ground_units {
                         continue;
                     }
-                    let Some((pos, heading)) = self.reinforcement_spawn_point(world, target) else {
+                    let near = self.unfilled_post(req.racer);
+                    let Some((pos, heading)) = self.reinforcement_spawn_point(world, target, near)
+                    else {
                         continue;
                     };
                     self.spawn_unit(UnitKind::Car, UnitRole::Reinforcement, pos, heading)
@@ -777,11 +801,13 @@ impl PoliceSystem {
         }
     }
 
-    /// The closest node at least `spawn_min_distance_m` from `target` without line of sight.
+    /// The closest node at least `spawn_min_distance_m` from `target` without line of sight,
+    /// or the one closest to `near` (an unfilled containment post) when given.
     fn reinforcement_spawn_point(
         &self,
         world: &dyn WorldQuery,
         target: [f32; 2],
+        near: Option<[f32; 2]>,
     ) -> Option<([f32; 2], [f32; 2])> {
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
         let mut best: Option<(f32, usize)> = None;
@@ -793,8 +819,9 @@ impl PoliceSystem {
             {
                 continue;
             }
-            if best.is_none_or(|b| d < b.0) {
-                best = Some((d, i));
+            let key = near.map_or(d, |q| dist(n.pos, q));
+            if best.is_none_or(|b| key < b.0) {
+                best = Some((key, i));
             }
         }
         best.map(|(_, i)| {

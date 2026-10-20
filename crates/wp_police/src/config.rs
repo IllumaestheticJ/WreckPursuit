@@ -591,6 +591,102 @@ pub struct ToolsFile {
 }
 
 // ---------------------------------------------------------------------------------------------
+// strategy.toml
+// ---------------------------------------------------------------------------------------------
+
+/// Which roads count as escape points (see [`crate::strategy`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChokepointConfig {
+    /// A road is an escape point when blocking it makes the way between its ends at least
+    /// this much longer, m.
+    pub min_detour_extra_m: f32,
+    /// ... and at least this many times the road's own length.
+    pub min_detour_ratio: f32,
+    /// Detours are searched up to this much further than the road; none found counts as this
+    /// long, m.
+    pub detour_search_m: f32,
+    /// A highway road at a junction with surface streets (an on-ramp) scores at least this, m.
+    pub ramp_score_m: f32,
+}
+
+/// Containment: forecast, posts and tail units.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContainmentConfig {
+    /// Escape points held per racer, per level L1..L5.
+    pub posts_per_level: [u32; 5],
+    /// Units that always stay on the racer's tail, per level L1..L5.
+    pub tail_units: [u32; 5],
+    /// Forecast horizon per level L1..L5, s.
+    pub horizon_s: [f32; 5],
+    /// Racer forecast speed = speed limit × this ...
+    pub racer_limit_factor: f32,
+    /// ... and at least this, m/s.
+    pub racer_min_mps: f32,
+    /// Extra forecast time for a racer turning around, s.
+    pub turnaround_s: f32,
+    /// Below this racer speed nobody leaves for a post, m/s.
+    pub min_racer_speed_mps: f32,
+    /// A unit takes a post only if it arrives this much before the racer could, s.
+    pub arrive_margin_s: f32,
+    /// Escape points the racer reaches sooner than this are left to the tail, s.
+    pub min_racer_eta_s: f32,
+    /// Units park this far into the escape road from the racer's side, m.
+    pub post_offset_m: f32,
+    /// A unit at its post joins the chase once the racer is this close and in sight, m.
+    pub engage_m: f32,
+}
+
+/// Widening search after line of sight is lost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchConfig {
+    /// Seconds without line of sight before units leave the trail to search, s.
+    pub start_after_s: f32,
+    /// Units (closest to the last known position) that keep following the trail instead.
+    pub followers: u32,
+    /// Search area at the start, in racer-seconds of driving from the last known position.
+    pub initial_s: f32,
+    /// Racer-seconds the area grows per second lost.
+    pub spread: f32,
+    /// Assumed speed of a racer looking for a place to hide, m/s.
+    pub search_racer_mps: f32,
+    /// A spot counts as checked this close, m.
+    pub arrive_m: f32,
+    /// Spots searched at the same time are at least this far apart, m.
+    pub spot_spacing_m: f32,
+    /// Score bonus for a dead end.
+    pub dead_end_bonus: f32,
+    /// Score bonus for a local street.
+    pub local_bonus: f32,
+    /// Score bonus for the Industrial district.
+    pub industrial_bonus: f32,
+    /// Extra score for spots at the edge of the search area.
+    pub outward_weight: f32,
+    /// Extra score for spots straight ahead of the racer's last heading.
+    pub ahead_bonus: f32,
+    /// Each this many metres from the unit costs one point of score.
+    pub travel_weight_m: f32,
+    /// Search speed as a fraction of the limit.
+    pub speed_factor: f32,
+}
+
+/// Contents of `data/police/strategy.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrategyFile {
+    /// Containment and search plans are refreshed this often, s.
+    pub replan_s: f32,
+    /// Escape point detection.
+    pub chokepoints: ChokepointConfig,
+    /// Containment.
+    pub containment: ContainmentConfig,
+    /// Search.
+    pub search: SearchConfig,
+}
+
+// ---------------------------------------------------------------------------------------------
 
 /// The complete police tuning.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -605,6 +701,9 @@ pub struct PoliceConfig {
     pub tools: ToolsFile,
     /// `radio.toml` (radio pacing; optional in a tables directory, built-in when missing).
     pub radio: crate::radio::RadioConfig,
+    /// `strategy.toml` (containment and search; optional in a tables directory, built-in when
+    /// missing).
+    pub strategy: StrategyFile,
 }
 
 /// Error loading police tables.
@@ -626,6 +725,7 @@ const BUILTIN_PRESENCE: &str = include_str!("../../../data/police/presence.toml"
 const BUILTIN_PURSUIT: &str = include_str!("../../../data/police/pursuit.toml");
 const BUILTIN_TOOLS: &str = include_str!("../../../data/police/tools.toml");
 const BUILTIN_RADIO: &str = include_str!("../../../data/police/radio.toml");
+const BUILTIN_STRATEGY: &str = include_str!("../../../data/police/strategy.toml");
 
 fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, ConfigError> {
     toml::from_str(text).map_err(|e| ConfigError::Parse(name.to_string(), e))
@@ -633,7 +733,7 @@ fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, 
 
 impl PoliceConfig {
     /// Parse from the four TOML texts (heat, presence, pursuit, tools), with the built-in
-    /// `radio.toml`.
+    /// `radio.toml` and `strategy.toml`.
     pub fn parse(
         heat: &str,
         presence: &str,
@@ -643,7 +743,8 @@ impl PoliceConfig {
         Self::parse_with_radio(heat, presence, pursuit, tools, BUILTIN_RADIO)
     }
 
-    /// Parse from all five TOML texts (heat, presence, pursuit, tools, radio).
+    /// Parse from five TOML texts (heat, presence, pursuit, tools, radio), with the built-in
+    /// `strategy.toml`.
     pub fn parse_with_radio(
         heat: &str,
         presence: &str,
@@ -651,36 +752,52 @@ impl PoliceConfig {
         tools: &str,
         radio: &str,
     ) -> Result<Self, ConfigError> {
+        Self::parse_all(heat, presence, pursuit, tools, radio, BUILTIN_STRATEGY)
+    }
+
+    /// Parse from all six TOML texts (heat, presence, pursuit, tools, radio, strategy).
+    pub fn parse_all(
+        heat: &str,
+        presence: &str,
+        pursuit: &str,
+        tools: &str,
+        radio: &str,
+        strategy: &str,
+    ) -> Result<Self, ConfigError> {
         let cfg = Self {
             heat: parse_one("heat.toml", heat)?,
             presence: parse_one("presence.toml", presence)?,
             pursuit: parse_one("pursuit.toml", pursuit)?,
             tools: parse_one("tools.toml", tools)?,
             radio: parse_one("radio.toml", radio)?,
+            strategy: parse_one("strategy.toml", strategy)?,
         };
         cfg.validate()?;
         Ok(cfg)
     }
 
     /// Load from a directory containing `heat.toml`, `presence.toml`, `pursuit.toml`, `tools.toml`
-    /// and optionally `radio.toml` (the built-in one when missing).
+    /// and optionally `radio.toml` and `strategy.toml` (the built-in ones when missing).
     pub fn load(dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let dir = dir.as_ref();
         let read = |name: &str| {
             let p = dir.join(name);
             std::fs::read_to_string(&p).map_err(|e| ConfigError::Io(p.display().to_string(), e))
         };
-        let radio = if dir.join("radio.toml").exists() {
-            read("radio.toml")?
-        } else {
-            BUILTIN_RADIO.to_string()
+        let optional = |name: &str, builtin: &str| {
+            if dir.join(name).exists() {
+                read(name)
+            } else {
+                Ok(builtin.to_string())
+            }
         };
-        Self::parse_with_radio(
+        Self::parse_all(
             &read("heat.toml")?,
             &read("presence.toml")?,
             &read("pursuit.toml")?,
             &read("tools.toml")?,
-            &radio,
+            &optional("radio.toml", BUILTIN_RADIO)?,
+            &optional("strategy.toml", BUILTIN_STRATEGY)?,
         )
     }
 
@@ -743,6 +860,20 @@ impl PoliceConfig {
             || self.tools.roadblock.units[0] > self.tools.roadblock.units[1]
         {
             return bad("roadblock.units must be [min>=1, max>=min]");
+        }
+        let st = &self.strategy;
+        if st.replan_s <= 0.0
+            || st.containment.racer_min_mps <= 0.0
+            || st.containment.racer_limit_factor <= 0.0
+            || st.search.search_racer_mps <= 0.0
+            || st.search.travel_weight_m <= 0.0
+            || st.search.arrive_m <= 0.0
+            || st.chokepoints.detour_search_m <= 0.0
+        {
+            return bad("strategy: replan, speeds, distances and weights must be > 0");
+        }
+        if st.containment.horizon_s.iter().any(|h| *h <= 0.0) {
+            return bad("strategy.containment.horizon_s must be > 0");
         }
         if self.tools.gadgets.radar_range_m.is_empty()
             || self.tools.gadgets.scanner_delay_s.is_empty()

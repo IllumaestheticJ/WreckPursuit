@@ -17,6 +17,8 @@
 //! - [`heat`]: heat, wanted levels, bounty, escape/capture/safehouse rules.
 //! - [`dispatch`]: patrol pool, incidents, reinforcements, helicopter, AI captain.
 //! - [`pursuit`]: tactics (shadow, box-in, PIT, rolling block, intercept, disengage) and driving.
+//! - [`strategy`]: strategic containment (escape points ahead of the racer) and the widening
+//!   search after losing it.
 //! - [`unit`]: unit state and the built-in kinematic driver.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
@@ -36,6 +38,7 @@ pub mod heat;
 pub mod pursuit;
 pub mod radio;
 pub mod scenario;
+pub mod strategy;
 pub mod time;
 pub mod tools;
 pub mod unit;
@@ -61,6 +64,7 @@ pub use events::{
 pub use graph::{District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use radio::{RadioConfig, RadioStats, RadioTier};
+pub use strategy::{ChokeIndex, ChokeKind, Chokepoint, PostView, SearchView};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
 pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
@@ -173,6 +177,15 @@ pub struct PoliceStats {
     pub traffic_collisions: u32,
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
+    /// Containment posts handed to units.
+    #[serde(default)]
+    pub containment_posts: u32,
+    /// Search spots checked.
+    #[serde(default)]
+    pub search_spots_checked: u32,
+    /// Searches that found the racer again.
+    #[serde(default)]
+    pub search_reacquired: u32,
 }
 
 /// Captain bookkeeping (human or AI).
@@ -237,6 +250,8 @@ pub struct PoliceSystem {
     pub(crate) ext_obstacles_set: bool,
     /// Everything units avoid this tick (rebuilt by `rebuild_obstacles`).
     pub(crate) obstacles: Vec<avoid::Obstacle>,
+    /// Containment and search ([`strategy`]).
+    pub(crate) strategy: strategy::StrategyState,
 }
 
 impl Default for PoliceSystem {
@@ -306,6 +321,7 @@ impl PoliceSystem {
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
             obstacles: Vec::new(),
+            strategy: strategy::StrategyState::default(),
         }
     }
 
@@ -840,9 +856,11 @@ impl PoliceSystem {
             .filter_map(|u| {
                 let state = match u.assignment {
                     Assignment::Patrol { .. } => tools::RadarState::Patrol,
-                    Assignment::Pursue { .. } | Assignment::Intercept { .. } => {
-                        tools::RadarState::Pursuit
-                    }
+                    Assignment::Pursue { .. }
+                    | Assignment::Intercept { .. }
+                    | Assignment::Contain { .. } => tools::RadarState::Pursuit,
+                    // Searching units drive quietly, like a patrol.
+                    Assignment::Search { .. } => tools::RadarState::Patrol,
                     _ => return None,
                 };
                 let d = graph::dist(u.body.pos, p);

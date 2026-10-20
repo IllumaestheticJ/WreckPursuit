@@ -1,0 +1,73 @@
+# Strategic containment (wp_police::strategy). Police predict where a racer can get to in the next
+# 20-60 s, park units on the key escape points (bridges, tunnels, causeways, highway ramps) ahead
+# of the racer while one or two units stay on its tail, and after losing it run a widening
+# search of likely hiding spots. Per-level arrays are indexed L1..L5.
+
+# Containment and search plans are refreshed this often, s (sim time).
+replan_s = 2.0
+
+[chokepoints]
+# A road is an escape point when blocking it makes the way between its two ends at least this
+# much longer (a bridge, a tunnel, a causeway, the only link between districts), m ...
+min_detour_extra_m = 700.0
+# ... and at least this many times the road's own length (a long road with a parallel street
+# is not a chokepoint).
+min_detour_ratio = 2.0
+# Detours are searched up to this much further than the road itself; no detour within it
+# counts as this long, m.
+detour_search_m = 2500.0
+# A highway road at a junction with surface streets (an on-ramp) scores at least this, m.
+ramp_score_m = 600.0
+
+[containment]
+# Escape points held per racer, by level.
+posts_per_level = [0, 1, 1, 2, 3]
+# Units that stay on the racer's tail no matter how many are committed, by level.
+tail_units = [1, 1, 2, 2, 2]
+# How far ahead the police predict where the racer can get, by level, s.
+horizon_s = [20.0, 20.0, 30.0, 45.0, 60.0]
+# Racer travel-time model for the forecast: speed limit x factor, at least min_mps.
+racer_limit_factor = 1.6
+racer_min_mps = 12.0
+# Extra time the forecast gives a racer for turning around, s.
+turnaround_s = 6.0
+# Below this racer speed nobody leaves for a post: everyone converges (box-in, capture), m/s.
+min_racer_speed_mps = 8.0
+# A unit takes a post only if it gets there this much before the racer could, s.
+arrive_margin_s = 4.0
+# Escape points the racer can reach sooner than this are left to the tail units, s.
+min_racer_eta_s = 5.0
+# Units park this far into the escape road from the racer's side, m.
+post_offset_m = 30.0
+# A unit at its post joins the chase once the racer is this close and in sight, m.
+engage_m = 80.0
+
+[search]
+# After line of sight is lost the tail units drive to the last known position for this long,
+# then the units on the racer (except those holding posts) search, s.
+start_after_s = 4.0
+# This many units (the closest to the last known position) keep following the trail and the
+# racer's predicted route instead of searching.
+followers = 1
+# The search area covers what a racer driving search_racer_mps could reach from the last
+# known position in (initial_s + spread x seconds lost): it widens as time passes.
+initial_s = 6.0
+spread = 1.0
+search_racer_mps = 14.0
+# A spot counts as checked when a unit gets this close, m.
+arrive_m = 15.0
+# Units search spots at least this far apart, m.
+spot_spacing_m = 60.0
+# Likely hiding spots: dead ends, local streets, industrial yards (score bonuses).
+dead_end_bonus = 3.0
+local_bonus = 1.0
+industrial_bonus = 1.0
+# Spots near the edge of the search area score up to this much more (the search widens).
+outward_weight = 2.0
+# Spots straight ahead of the racer's last heading score up to this much more (a fleeing
+# driver keeps going), falling to 0 at right angles and behind.
+ahead_bonus = 2.0
+# Each this many metres from the unit costs one point of score.
+travel_weight_m = 300.0
+# Search driving speed as a fraction of the limit (no siren).
+speed_factor = 1.0

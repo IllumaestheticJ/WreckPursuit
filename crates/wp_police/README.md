@@ -27,7 +27,8 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 3. **Driving** (every tick): internally driven units integrate with the built-in kinematic driver.
 4. **Think** (`think_hz`, default 10 Hz): line of sight → rules (heat decay, escape, capture,
    safehouse) → health check (disengage/pull over/wreck) → patrol pool → incidents →
-   reinforcements → helicopter → AI captain tools → tactics and drive commands.
+   reinforcements → helicopter → containment and search → AI captain tools → tactics and drive
+   commands.
 
 ### Heat & wanted levels (`heat.rs`)
 - Heat 0–100, levels L1..L5 at `level_thresholds`.
@@ -61,8 +62,10 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
 
-Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
-`SpikeAt`, `HeloTrack`, `OutOfService`.
+Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`,
+`Contain(target, segment, point)`, `Search(target, spot)`, `RoadblockAt`, `SpikeAt`, `HeloTrack`,
+`OutOfService`. Every assignment with a target (`Assignment::target`) counts as committed to that
+racer (reinforcement deficits, capture credit, release at the end of the pursuit).
 
 ### Pursuit (`pursuit.rs`, `unit.rs`)
 - Pursuers follow the racer's **breadcrumb trail**, which is recorded only while the racer is
@@ -134,6 +137,43 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
 Obstacles: `wp_sim` reports every vehicle (players, racers, physical and kinematic traffic,
 police cars) with `set_obstacles` each tick. Headless, units see the racers and each other.
 
+### Strategic containment & search (`strategy.rs`, `data/police/strategy.toml`)
+Police predict where the racer can get to in the next 20–60 s, hold the key escape points ahead
+of it while one or two units stay on its tail, and after losing it search likely hiding spots
+in an area that widens with time.
+- **Escape points** (`ChokeIndex`, built once per road graph on first use, `chokepoints()`):
+  roads are grouped into chains between junctions/dead ends. A chain is a `Crossing` when
+  blocking it makes the way between its ends ≥ `min_detour_extra_m` (700 m) and ≥
+  `min_detour_ratio` (2×) its length longer: bridges, tunnels, causeways, the only link between
+  districts. The road data has no bridge or tunnel flags; having no short way around is what
+  makes them chokepoints, so topology finds them. Highway chains meeting surface streets are
+  `Ramp`s (score ≥ `ramp_score_m`). Port Vesper v2: 235 chains → 26 crossings + 9 ramps (8.7 ms
+  to build, native); D's small city: 4 + 3.
+- **Containment** (every `replan_s` = 2 s, racer in `Pursuit`): a travel-time forecast from the
+  racer's road position (limit × `racer_limit_factor`, turning around costs `turnaround_s`) up to
+  `horizon_s[level]` (20/20/30/45/60 s) finds the escape points it can reach. The
+  `tail_units[level]` closest units keep chasing; the best `posts_per_level[level]` (0/1/1/2/3)
+  escape points get the committed unit that can be there soonest, if it arrives
+  `arrive_margin_s` before the racer could. It parks `post_offset_m` into the escape road on the
+  racer's side, lights on (`Contain`), and joins the chase when the racer is within `engage_m`
+  in sight. A held post is kept while the racer is about to reach it (or is on it) or while it
+  still ranks among the best 2 × posts; a slow racer (< `min_racer_speed_mps`) gets no new posts.
+  Reinforcements that must be spawned appear near the best unfilled post (still out of sight and
+  ≥ `spawn_min_distance_m` from the racer).
+- **Search** (racer `Searching`): units follow the trail for `start_after_s` (4 s); then the
+  `followers` closest unit keeps to the trail and predicted route and the rest search
+  (`Search`, no siren). The area is what a racer at `search_racer_mps` could reach from the last
+  known position in `initial_s + spread × seconds lost`. Each unit drives to the unchecked node
+  with the best score: dead end / local street / Industrial bonuses, + `outward_weight` near the
+  edge of the area (the search widens), + `ahead_bonus` straight ahead of the racer's last
+  heading, − distance / `travel_weight_m`; simultaneous spots are `spot_spacing_m` apart. When
+  the racer is seen again the searchers go back to intercepting.
+- Queries: `containment_posts()` (`PostView`: racer, unit, chain, kind, point, racer ETA),
+  `searches()` (`SearchView`: origin, current extent, spots checked), `chokepoints()`.
+  Stats / scenario metrics: `containment_posts`, `search_spots_checked`, `search_reacquired`.
+- Radio: "Unit N moving to block an escape route ahead of racer #R" (tactical), "lost visual …
+  all units start a grid search" (tactical, once), "Unit N searching for racer #R" (routine).
+
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
   within 15 m of an intersection, and with approach sight distance ≥ `min_sight_m` (120 m).
@@ -162,6 +202,8 @@ Player chase units get `unit_order()` **suggestions** only.
 | `presence.toml` | Patrols per district × phase, reinforcement response times, report delays, helicopter availability, tool/tactic unlock levels, crash scenes |
 | `pursuit.toml` | Think rate, speed factors and caps, cornering g, LOS range, unit dynamics and crash severity per mode, risk budget, traffic hazards, tactic parameters |
 | `tools.toml` | Roadblock, spike strip and helicopter parameters, radar/scanner tiers, captain hold time |
+| `radio.toml` | Radio pacing (optional in a tables directory) |
+| `strategy.toml` | Escape-point detection, containment forecast/posts/tail per level, widening search (optional in a tables directory) |
 
 The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from disk with
 `PoliceConfig::load(dir)`. A test checks that both copies match.
@@ -191,6 +233,9 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
+| Containment, two islands + one bridge (`tests/strategy.rs`) | The bridge is the only escape point; at L4 a unit parks on it 30 m in from the racer's side, lights on, while ≥ 1 unit stays on the racer |
+| Widening search (same city, racer vanishes at L4) | Search starts 4 s after contact is lost; spots picked after 20 s are > 50 m further out than those in the first 8 s; searchers ≥ 60 m apart; escape after 30 s |
+| Strategy on vs off (`strategy.toml` posts and search disabled), all scenarios | Every expectation holds either way. Night speeder: 0 escapes both, 20 posts, 24 searches re-found the racer; day speeder: 19 posts (median held 28 s) |
 
 | City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
 
@@ -212,9 +257,20 @@ cargo test -p wp_police                          # unit + system tests
 cargo test -p wp_police --test police_scenarios  # scenarios, ratios, determinism
 cargo run --release -p wp_police --bin police-scenario -- crates/wp_police/scenarios/day_core_speeder.ron
 cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tables <dir>]
+cargo test -p wp_police --test strategy           # containment + search on the two-island city
+cargo run --release -p wp_police --example chokepoints   # escape points on the small city and Port Vesper
 ```
 
 ## Known gaps
+- Containment posts are single parked cars in their lane, not a road-wide block; the AI captain's
+  roadblocks still go on the predicted path (`plan_site`), not on escape points.
+- The search ignores line of sight when picking spots (a spot visible from the last known
+  position is still checked) and knows nothing about parking lots or garages (the road network
+  has no such POIs): hiding spots are dead ends, local streets and Industrial yards.
+- `risk_budget_and_caps_keep_cops_alive` ranks the reckless vs careful pursuit-driving knobs
+  with containment and search off: with them on, too few unit-seconds are spent chasing to rank
+  the knobs (careful and reckless within ±1 % over seeds 200–203). `self_wreck_rate` < 10 % is
+  still asserted with everything on.
 - The police graph ignores per-lane turn restrictions. Cameras come from the network's POIs (D
   places one at every third signalised junction). `RoadNetworkQuery` has no signalised-junction
   flag yet, so `from_network` takes the list separately (contract request #7).

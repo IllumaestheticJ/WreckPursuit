@@ -267,6 +267,9 @@ struct RunNumbers {
     near_misses: u32,
     traffic_collisions: u32,
     run_wide: u32,
+    containment_posts: u32,
+    search_spots: u32,
+    search_reacquired: u32,
     pool: [u32; 3],
     max_level: u8,
     /// Radio lines while no racer is wanted / while some racer is in a pursuit.
@@ -515,6 +518,9 @@ fn run_once(
     nums.near_misses = st.near_misses;
     nums.traffic_collisions = st.traffic_collisions;
     nums.run_wide = st.run_wide_crashes;
+    nums.containment_posts = st.containment_posts;
+    nums.search_spots = st.search_spots_checked;
+    nums.search_reacquired = st.search_reacquired;
     for (k, d) in District::ALL.iter().enumerate() {
         nums.pool[k] = police.pool_count(*d);
     }
@@ -617,6 +623,15 @@ pub fn run_scenario_with_hook(
         sum(&|r| r.traffic_collisions),
     );
     m.insert("run_wide_crashes".to_string(), sum(&|r| r.run_wide));
+    m.insert(
+        "containment_posts".to_string(),
+        sum(&|r| r.containment_posts),
+    );
+    m.insert("search_spots_checked".to_string(), sum(&|r| r.search_spots));
+    m.insert(
+        "search_reacquired".to_string(),
+        sum(&|r| r.search_reacquired),
+    );
     m.insert(
         "max_wanted_level".to_string(),
         runs.iter().map(|r| r.max_level).max().unwrap_or(0) as f32,

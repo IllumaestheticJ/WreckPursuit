@@ -70,8 +70,18 @@ fn night_is_slower_than_day_for_pursuit_and_reinforcements() {
 #[test]
 fn risk_budget_and_caps_keep_cops_alive() {
     let sc = load_scenario(&dir().join("self_wreck_sim.ron")).unwrap();
-    let careful = run_scenario(&sc);
-    let mut cfg = wp_police::PoliceConfig::builtin();
+    // The full tables (containment and search on) keep cops alive.
+    assert!(run_scenario(&sc).metric("self_wreck_rate").unwrap() < 0.10);
+    // The ranking below is about the pursuit-driving knobs (risk budget, cornering g, speed
+    // margin, cap), which only act on units in the chase. Containment and search move units
+    // out of the chase in both configs and leave too few chasing unit-seconds to rank them
+    // (seeds 200-203: careful and reckless within +-1%), so both runs here keep every unit
+    // on the chase, as before strategic containment.
+    let mut base = wp_police::PoliceConfig::builtin();
+    base.strategy.containment.posts_per_level = [0; 5];
+    base.strategy.search.start_after_s = 1.0e9;
+    let careful = run_scenario_with(&sc, &base);
+    let mut cfg = base.clone();
     cfg.pursuit.risk.budget = 1.0e9;
     cfg.pursuit.pursuit_cornering_g = 0.92;
     cfg.pursuit.target_speed_margin = 0.6;

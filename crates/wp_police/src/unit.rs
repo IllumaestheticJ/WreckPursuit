@@ -193,6 +193,23 @@ pub enum Assignment {
         /// Strip.
         tool: ToolId,
     },
+    /// Holding an escape point ahead of a racer (strategic containment, [`crate::strategy`]):
+    /// drive to `point` on `segment` and park there with lights on.
+    Contain {
+        /// Racer.
+        target: EntityId,
+        /// Segment of the escape road the unit parks on.
+        segment: SegmentId,
+        /// Parking point, m.
+        point: [f32; 2],
+    },
+    /// Searching a likely hiding spot for a racer that was lost ([`crate::strategy`]).
+    Search {
+        /// Racer.
+        target: EntityId,
+        /// Node being checked.
+        spot: NodeId,
+    },
     /// Helicopter tracking a racer.
     HeloTrack {
         /// Racer.
@@ -213,6 +230,8 @@ impl Assignment {
             Assignment::Intercept { .. } => "intercept",
             Assignment::RoadblockAt { .. } => "roadblock",
             Assignment::SpikeAt { .. } => "spikes",
+            Assignment::Contain { .. } => "contain",
+            Assignment::Search { .. } => "search",
             Assignment::HeloTrack { .. } => "helo-track",
             Assignment::OutOfService => "out-of-service",
         }
@@ -223,6 +242,8 @@ impl Assignment {
         match self {
             Assignment::Pursue { target }
             | Assignment::Intercept { target, .. }
+            | Assignment::Contain { target, .. }
+            | Assignment::Search { target, .. }
             | Assignment::HeloTrack { target } => Some(*target),
             _ => None,
         }

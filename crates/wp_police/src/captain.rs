@@ -257,7 +257,9 @@ impl PoliceSystem {
         let u = &self.units[self.unit_index(unit)?];
         Some(match u.assignment {
             Assignment::Pursue { target } => UnitOrder::Pursue { target },
-            Assignment::Intercept { target, .. } => UnitOrder::Intercept { target },
+            Assignment::Intercept { target, .. }
+            | Assignment::Contain { target, .. }
+            | Assignment::Search { target, .. } => UnitOrder::Intercept { target },
             Assignment::Respond { incident } => UnitOrder::Respond { incident },
             Assignment::OutOfService => UnitOrder::Disengage,
             _ => UnitOrder::Patrol,

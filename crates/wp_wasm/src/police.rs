@@ -73,7 +73,8 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
         .units()
         .iter()
         .filter(|u| {
-            matches!(u.assignment, Assignment::Pursue { target } | Assignment::Intercept { target, .. } if target == racer)
+            // Chasing, intercepting, holding an escape point or searching (not the helicopter).
+            u.kind == UnitKind::Car && u.assignment.target() == Some(racer)
         })
         .count() as u32;
     // Latest finished pursuit of this racer (records are in start order).
@@ -109,8 +110,9 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
 }
 
 /// Whether a sim vehicle's siren and light bar are on. A police car bound to a unit follows
-/// the unit's assignment: on while responding, pursuing, intercepting or parked at a roadblock
-/// / spike strip; off on patrol, idle or out of service. Other vehicles: their input's siren.
+/// the unit's assignment: on while responding, pursuing, intercepting, holding an escape point
+/// or parked at a roadblock / spike strip; off on patrol, idle, searching (quietly) or out of
+/// service. Other vehicles: their input's siren.
 /// Presentation only (sim input and state hashes are untouched).
 pub fn siren_on(sim: &wp_sim::Sim, v: &wp_sim::SimVehicle) -> bool {
     match v.police_unit {
@@ -131,6 +133,7 @@ pub fn assignment_has_siren(a: &Assignment) -> bool {
         Assignment::Respond { .. }
             | Assignment::Pursue { .. }
             | Assignment::Intercept { .. }
+            | Assignment::Contain { .. }
             | Assignment::RoadblockAt { .. }
             | Assignment::SpikeAt { .. }
     )
@@ -141,7 +144,7 @@ pub const UNIT_STRIDE: usize = 6;
 
 /// Police units that are **not** sim vehicles (bound units are drawn from `vehicle_states()`),
 /// 6 floats each: `[x, y, z, yaw, speed_mps, flags]`, flags 1 helicopter, 2 pursuing /
-/// intercepting (lights on). Yaw is about +Z with 0 = +Y.
+/// intercepting / holding an escape point (lights on). Yaw is about +Z with 0 = +Y.
 pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
     let mut out = Vec::new();
     for u in p.units().iter().filter(|u| u.entity.is_none()) {
@@ -149,7 +152,7 @@ pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
         let heli = u.kind == UnitKind::Helicopter;
         let chasing = matches!(
             u.assignment,
-            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+            Assignment::Pursue { .. } | Assignment::Intercept { .. } | Assignment::Contain { .. }
         );
         // Heading (hx, hy) → yaw with 0 = +Y, positive counter-clockwise.
         let yaw = wp_math::atan2(-b.heading[0], b.heading[1]);
