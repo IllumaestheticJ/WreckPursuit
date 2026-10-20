@@ -130,11 +130,53 @@ impl Pose<'_> {
             .find(|s| s.region == region)
             .map(|s| s.state)
     }
+
+    /// Lead node `n` as if its panel were still attached (see [`skin::LeadPos`]): a hanging
+    /// panel's node rotated back by its hang angle about its pivot (the sim captures the hanging
+    /// pose at angle 0, so this is the crushed pose it was released in); `None` once detached.
+    pub fn lead_pos(&self, n: u16) -> Option<[f32; 3]> {
+        let at = self.nodes[n as usize];
+        let region = self.lattice.nodes[n as usize].region;
+        match self.states.iter().find(|s| s.region == region) {
+            Some(s) if s.state == PanelState::Detached => None,
+            Some(s) if s.state == PanelState::HangingByOne => {
+                Some(add(s.pivot, rotate(sub(at, s.pivot), s.axis, -s.angle_rad)))
+            }
+            _ => Some(at),
+        }
+    }
+}
+
+/// Rotate `v` about unit axis `u` by `angle` (Rodrigues; mirrors `wp_damage::panels`).
+fn rotate(v: [f32; 3], u: [f32; 3], angle: f32) -> [f32; 3] {
+    let (s, c) = wp_math::sin_cos(angle);
+    let cr = cross(u, v);
+    let along = dot(u, v) * (1.0 - c);
+    [
+        v[0] * c + cr[0] * s + u[0] * along,
+        v[1] * c + cr[1] * s + u[1] * along,
+        v[2] * c + cr[2] * s + u[2] * along,
+    ]
 }
 
 /// Deformed vertex positions of `part` exactly as the browser draws it (attached parts: plain
 /// skinning + fold; unlatched / hanging panels: dent in the panel's fitted rigid frame).
-pub fn render_part(part: &MeshPart, pose: &Pose) -> Vec<[f32; 3]> {
+/// `memory` is the part's crumple memory ([`skin::FoldMemory`]); pass the same one every frame
+/// (or `None` for a single pose).
+pub fn render_part(
+    part: &MeshPart,
+    pose: &Pose,
+    memory: Option<&mut skin::FoldMemory>,
+) -> Vec<[f32; 3]> {
+    render_detail(part, pose, memory).0
+}
+
+/// [`render_part`] plus, per vertex, the fold's `[rise, leading-end pull-back]` (m).
+pub fn render_detail(
+    part: &MeshPart,
+    pose: &Pose,
+    memory: Option<&mut skin::FoldMemory>,
+) -> (Vec<[f32; 3]>, Vec<[f32; 2]>) {
     let state = part.region.and_then(|r| pose.state_of(r));
     let free = matches!(
         state,
@@ -148,7 +190,6 @@ pub fn render_part(part: &MeshPart, pose: &Pose) -> Vec<[f32; 3]> {
         )),
         _ => None,
     };
-    let unlatched = state == Some(PanelState::Unlatched);
     // Dent in the panel frame: the nodes taken back through the frame.
     let local: Vec<[f32; 3]> = match frame {
         Some(f) => {
@@ -160,14 +201,17 @@ pub fn render_part(part: &MeshPart, pose: &Pose) -> Vec<[f32; 3]> {
         }
         None => pose.nodes.to_vec(),
     };
-    let moved = skin::deform(part, pose.rest, &local, unlatched);
-    match frame {
+    let lead_pos = |n: u16| pose.lead_pos(n);
+    let (moved, detail) =
+        skin::deform_detail(part, pose.rest, &local, pose.nodes, free, &lead_pos, memory);
+    let moved = match frame {
         Some(f) => moved
             .into_iter()
             .map(|p| add(mat_vec(&f.r, p), f.t))
             .collect(),
         None => moved,
-    }
+    };
+    (moved, detail)
 }
 
 /// How one part looks after a hit.
@@ -177,29 +221,31 @@ pub struct PartCrumple {
     pub max_disp_m: f32,
     /// Mean vertex displacement from rest, m.
     pub mean_disp_m: f32,
-    /// Largest rise of the drawn surface above the plain skinned surface (the fold), m.
+    /// Largest fold rise (buckle height along the fold direction), m.
     pub max_fold_m: f32,
+    /// Largest leading-end pull-back toward the fixed end (following the crushed front), m.
+    pub max_pull_m: f32,
     /// Fold lines: ridges along the part's long axis where the surface bends ≥
     /// [`FOLD_LINE_DEG`] more (convex) than at rest, counted on the line with the most.
     pub fold_lines: u32,
-    /// Leading edge behind the front structure: how far (m, along +Y for front parts) the
-    /// part's leading-edge vertices trail the front bumper's top-edge vertices after the hit,
-    /// compared with rest. Positive = the panel floats ahead of a crushed front. 0 for parts
-    /// without a leading edge measure.
+    /// Leading edge vs. the crushed front: how far (m, toward the fixed end is negative) the
+    /// part's leading-edge vertices moved, minus how far the front-structure nodes it follows
+    /// (its fold `leads`, a hanging bumper's taken back to its attached pose) moved, along the
+    /// part's long axis. Positive
+    /// = the panel floats ahead of a crushed front. 0 without a fold binding or while the panel
+    /// hangs off one mount.
     pub lead_gap_m: f32,
 }
 
 /// Bend (degrees, convex) that counts as a fold line in [`PartCrumple::fold_lines`].
 pub const FOLD_LINE_DEG: f32 = 8.0;
 
-/// Measure `part` drawn as `moved` (from [`render_part`]); `flat` is the same part without
-/// its fold (for the fold height), `bumper` the front bumper drawn in the same pose (for the
-/// leading-edge gap; `None` skips it).
+/// Measure `part` drawn as `moved` with fold `detail` (both from [`render_detail`]).
 pub fn measure(
     part: &MeshPart,
     moved: &[[f32; 3]],
-    flat: &[[f32; 3]],
-    bumper: Option<(&MeshPart, &[[f32; 3]])>,
+    detail: &[[f32; 2]],
+    pose: &Pose,
 ) -> PartCrumple {
     let n = part.vertex_count();
     let mut out = PartCrumple::default();
@@ -212,16 +258,11 @@ pub fn measure(
         sum += d;
         out.max_disp_m = out.max_disp_m.max(d);
     }
-    out.max_fold_m = moved
-        .iter()
-        .zip(flat)
-        .map(|(m, f)| len(sub(*m, *f)))
-        .fold(0.0, f32::max);
+    out.max_fold_m = detail.iter().map(|d| d[0]).fold(0.0, f32::max);
+    out.max_pull_m = detail.iter().map(|d| d[1]).fold(0.0, f32::max);
     out.mean_disp_m = sum / n as f32;
     out.fold_lines = fold_lines(part, moved);
-    if let Some((b, bm)) = bumper {
-        out.lead_gap_m = lead_gap(part, moved, b, bm);
-    }
+    out.lead_gap_m = lead_gap(part, moved, pose);
     out
 }
 
@@ -293,30 +334,46 @@ pub fn fold_lines(part: &MeshPart, moved: &[[f32; 3]]) -> u32 {
     best
 }
 
-/// How far the part's front-most vertices trail the bumper's top-rear vertices, relative to
-/// rest (see [`PartCrumple::lead_gap_m`]).
-fn lead_gap(part: &MeshPart, moved: &[[f32; 3]], bumper: &MeshPart, bm: &[[f32; 3]]) -> f32 {
-    let front = |p: &MeshPart, m: &[[f32; 3]]| {
-        let ymax = (0..p.vertex_count())
-            .map(|v| p.vertex(v)[1])
-            .fold(f32::MIN, f32::max);
-        let zmax = (0..p.vertex_count())
-            .map(|v| p.vertex(v)[2])
-            .fold(f32::MIN, f32::max);
-        // Leading edge of a lid: its front row; of the bumper: its top row.
-        let pick: Vec<usize> = (0..p.vertex_count())
-            .filter(|&v| {
-                if std::ptr::eq(p, bumper) {
-                    p.vertex(v)[2] > zmax - 0.03
-                } else {
-                    p.vertex(v)[1] > ymax - 0.03
-                }
-            })
-            .collect();
-        let dy: f32 = pick.iter().map(|&v| m[v][1] - p.vertex(v)[1]).sum();
-        dy / pick.len().max(1) as f32
+/// See [`PartCrumple::lead_gap_m`].
+fn lead_gap(part: &MeshPart, moved: &[[f32; 3]], pose: &Pose) -> f32 {
+    let Some(f) = &part.fold else {
+        return 0.0;
     };
-    front(part, moved) - front(bumper, bm)
+    // A panel hanging off one mount has no leading edge on the structure any more.
+    if part.region.and_then(|r| pose.state_of(r)) == Some(PanelState::HangingByOne) {
+        return 0.0;
+    }
+    // Long axis: the first chord's rest direction (fixed → leading).
+    let [a, b] = f.chords[0];
+    let ru = sub(pose.rest[b as usize], pose.rest[a as usize]);
+    let u = norm(ru);
+    let n = part.vertex_count();
+    let lead_most = (0..n)
+        .map(|v| dot(part.vertex(v), u))
+        .fold(f32::MIN, f32::max);
+    let edge: Vec<usize> = (0..n)
+        .filter(|&v| dot(part.vertex(v), u) > lead_most - 0.03)
+        .collect();
+    let edge_d = edge
+        .iter()
+        .map(|&v| dot(sub(moved[v], part.vertex(v)), u))
+        .sum::<f32>()
+        / edge.len().max(1) as f32;
+    let at: Vec<(usize, [f32; 3])> = f
+        .leads
+        .iter()
+        .flatten()
+        .filter_map(|&l| pose.lead_pos(l).map(|p| (l as usize, p)))
+        .collect();
+    if at.is_empty() {
+        return 0.0;
+    }
+    let lead_d = at
+        .iter()
+        .map(|&(l, p)| dot(sub(p, pose.rest[l]), u))
+        .sum::<f32>()
+        / at.len() as f32;
+    edge_d - lead_d
 }
 
 #[cfg(test)]
@@ -331,7 +388,7 @@ mod tests {
         let moved: Vec<[f32; 3]> = (0..hood.vertex_count())
             .map(|v| {
                 let mut p = hood.vertex(v);
-                p[2] += 0.2 * hood.fold_weights[v * 2] as f32 / 255.0;
+                p[2] += 0.2 * hood.fold.as_ref().unwrap().weights[v * 3] as f32 / 255.0;
                 p
             })
             .collect();
