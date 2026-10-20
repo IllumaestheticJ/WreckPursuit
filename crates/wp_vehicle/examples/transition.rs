@@ -97,6 +97,13 @@ enum Init {
     /// reversed (release, `gap`, new key + throttle) when the old-side angle drops below
     /// [`REACT_DEG`] (the car passing straight), at the latest 1.5 s after the lift.
     Lift(f32),
+    /// The owner's flick (reference): throttle off for `.0` s from the flick **while the keys
+    /// are switched** (old countersteer released at once, `gap`, new key), throttle back on
+    /// after the lift.
+    LiftFlick(f32),
+    /// Throttle off for `.0` s with the old key held; the keys are switched (release, `gap`,
+    /// new key) at the end of the lift, throttle back on then.
+    LiftSwitchEnd(f32),
 }
 
 /// `SWING_PLAIN='{…}'`: steering fields merged over the configuration's steering from the
@@ -148,10 +155,16 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             if in_band >= TPS / 2 {
                 flick_at = Some(tick);
                 t.at_flick = old;
-                if init == Init::Reverse {
+                if matches!(init, Init::Reverse | Init::LiftFlick(_)) {
                     reverse_at = Some(tick);
                     swing_steer(true);
                 }
+            }
+        }
+        if let (Some(f), None, Init::LiftSwitchEnd(l)) = (flick_at, reverse_at, init) {
+            if (tick - f) as f32 >= l * TPS as f32 {
+                reverse_at = Some(tick);
+                swing_steer(true);
             }
         }
         if let (Some(f), None, Init::Lift(l)) = (flick_at, reverse_at, init) {
@@ -165,8 +178,8 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             (None, _) => (if entered { 1.0 } else { -1.0 }, 1.0),
             (Some(f), None) => {
                 let l = match init {
-                    Init::Lift(l) => l,
-                    Init::Reverse => 0.0,
+                    Init::Lift(l) | Init::LiftSwitchEnd(l) => l,
+                    Init::Reverse | Init::LiftFlick(_) => 0.0,
                 };
                 let thr = if ((tick - f) as f32) < l * TPS as f32 {
                     0.0
@@ -175,7 +188,13 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 };
                 (1.0, thr)
             }
-            (Some(_), Some(r)) => (if tick - r < gap_t { 0.0 } else { -1.0 }, 1.0),
+            (Some(f), Some(r)) => {
+                let thr = match init {
+                    Init::LiftFlick(l) if ((tick - f) as f32) < l * TPS as f32 => 0.0,
+                    _ => 1.0,
+                };
+                (if tick - r < gap_t { 0.0 } else { -1.0 }, thr)
+            }
         };
         rig.step(
             &VehicleInput {
@@ -300,6 +319,13 @@ fn configs() -> Vec<Config> {
             });
         }
     }
+    // Grip-balance's "drift: best (test)" preset: VR steering + `GripBalance::drift_best()`.
+    v.push(Config {
+        name: "drift best · VR",
+        plain: vr,
+        ride: RideTune::lab_default(),
+        grip: Some(GripBalance::drift_best()),
+    });
     if let Ok(o) = std::env::var("ONLY") {
         v.retain(|c| c.name.contains(o.as_str()));
     }
@@ -313,7 +339,12 @@ fn apply(cfg: &Config) {
     };
     plain::set_override(Some(p));
     ride_lab::set_override(Some(cfg.ride));
-    grip_lab::set_override(cfg.grip);
+    // `GRIP='{…}'`: fields merged over the configuration's grip balance (if it has one).
+    let grip = match (cfg.grip, std::env::var("GRIP")) {
+        (Some(g), Ok(j)) => Some(merged(&g, &j)),
+        (g, _) => g,
+    };
+    grip_lab::set_override(grip);
     let tyre = match std::env::var("TYRE") {
         Ok(j) => merged(&CarTune::spin_candidate(), &j),
         Err(_) => CarTune::spin_candidate(),
@@ -332,7 +363,26 @@ fn inits() -> Vec<Init> {
                 .collect(),
             Err(_) => vec![Init::Lift(0.2), Init::Lift(0.4)],
         },
-        _ => vec![Init::Reverse, Init::Lift(0.2), Init::Lift(0.4)],
+        Ok("lift_then") => vec![Init::Lift(0.2), Init::Lift(0.4)],
+        Ok("switch_end") => vec![
+            Init::LiftSwitchEnd(0.15),
+            Init::LiftSwitchEnd(0.25),
+            Init::LiftSwitchEnd(0.4),
+        ],
+        Ok("all") => vec![
+            Init::Reverse,
+            Init::Lift(0.2),
+            Init::Lift(0.4),
+            Init::LiftFlick(0.15),
+            Init::LiftFlick(0.25),
+            Init::LiftFlick(0.4),
+        ],
+        // Default: the owner's flick (reference: a brief lift while switching keys).
+        _ => vec![
+            Init::LiftFlick(0.15),
+            Init::LiftFlick(0.25),
+            Init::LiftFlick(0.4),
+        ],
     }
 }
 
@@ -372,7 +422,133 @@ fn trace_hold(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// One v2 candidate's score under one configuration.
+#[derive(Debug, Clone, Copy, Default)]
+struct V2Score {
+    held: usize,
+    caught: usize,
+    flicks: usize,
+    spun: usize,
+    back: usize,
+}
+
+/// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
+/// 0.3 / 0.5 / 0.7 g, full throttle) + lift flicks at the reference gaps (0.05 / 0.15 s ×
+/// lifts 0.15 / 0.25 / 0.4 s × 3 cars), under whatever overrides are active.
+fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
+    use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
+    let a = reference_assists();
+    let mut sc = V2Score::default();
+    for (_, c) in cars {
+        for e in [6.0f32, 12.0, 20.0] {
+            for g in [0.3f32, 0.5, 0.7] {
+                let d = PlainDriver::HoldCounter {
+                    entry_deg: e,
+                    throttle: 1.0,
+                };
+                if plain_hold(c, &a, d, 40.0, g).held {
+                    sc.held += 1;
+                }
+            }
+        }
+        for gap in [0.05f32, 0.15] {
+            for l in [0.15f32, 0.25, 0.4] {
+                sc.flicks += 1;
+                if let Some(t) = flick(c, gap, Init::LiftFlick(l)) {
+                    sc.caught += t.caught as usize;
+                    sc.spun += t.spun as usize;
+                    sc.back += t.swung_back as usize;
+                }
+            }
+        }
+    }
+    sc
+}
+
+/// Small deterministic generator for the search (xorshift).
+struct Xs(u64);
+impl Xs {
+    fn f(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+    }
+    fn range(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + (hi - lo) * self.f()
+    }
+}
+
+/// `v2search`: random search for "spin model v2 (ellipse)" (the spin model with the friction
+/// ellipse on). `N` candidates (default 60), `SEED`, `V2CONFIGS` (config name substrings, comma
+/// separated; default the three below). Prints every candidate's score per config as JSON
+/// lines: `{"config", "held", "caught", "flicks", "spun", "back", "tune"}`; `V2BASE='{…}'`
+/// sets fields every candidate starts from (refine around a winner with `V2SPREAD`, 0..1).
+fn v2search(cars: &[(&str, LoadedCar)]) {
+    let n: usize = std::env::var("N").ok().map_or(60, |v| v.parse().unwrap());
+    let mut rng = Xs(std::env::var("SEED")
+        .ok()
+        .map_or(0x9E37_79B9_7F4A_7C15, |v| v.parse().unwrap()));
+    let names: Vec<String> = std::env::var("V2CONFIGS")
+        .unwrap_or_else(|_| "W defaults · plain,W defaults · VR,drift best · VR".into())
+        .split(',')
+        .map(String::from)
+        .collect();
+    let cfgs: Vec<Config> = configs()
+        .into_iter()
+        .filter(|c| names.iter().any(|n| c.name == n.as_str()))
+        .collect();
+    let base = match std::env::var("V2BASE") {
+        Ok(j) => merged(&CarTune::spin_candidate(), &j),
+        Err(_) => CarTune {
+            spin_ellipse: 1.0,
+            ..CarTune::spin_candidate()
+        },
+    };
+    let spread: f32 = std::env::var("V2SPREAD")
+        .ok()
+        .map_or(1.0, |v| v.parse().unwrap());
+    for i in 0..=n {
+        // Candidate 0 = the base itself.
+        let t = if i == 0 {
+            base
+        } else {
+            let mut pick = |cur: f32, lo: f32, hi: f32| {
+                let r = rng.range(lo, hi);
+                (cur + (r - cur) * spread).clamp(lo, hi)
+            };
+            CarTune {
+                spin_ellipse: pick(base.spin_ellipse, 0.5, 1.0),
+                spin_fx_slide: pick(base.spin_fx_slide, 0.2, 1.0),
+                spin_b0: pick(base.spin_b0, 1.0, 12.0),
+                spin_b2: pick(base.spin_b2, 0.6, 2.5),
+                spin_c: pick(base.spin_c, 0.5, 1.0),
+                spin_p: pick(base.spin_p, 1.0, 8.0).round(),
+                rear_relax: pick(base.rear_relax, 0.6, 2.5),
+                ..base
+            }
+        };
+        for cfg in &cfgs {
+            apply(cfg);
+            car_lab::set_override(Some(t));
+            let sc = v2_score(cars);
+            println!(
+                "{}",
+                serde_json::json!({
+                    "config": cfg.name, "held": sc.held, "caught": sc.caught,
+                    "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
+                })
+            );
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("v2search") {
+        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        v2search(&cars);
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("trace") {
         let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
         trace_hold(&cars);

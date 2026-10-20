@@ -1303,6 +1303,52 @@ fn bleed(id: &str) {
     );
 }
 
+/// `clip1`: tests/tyre_slip.rs's clip-1 hold (parity_rwd_d, plain steering, lab ride,
+/// counter key at 6° + full throttle, 0.6 g) for each tune of `SWEEP='[{…}, …]'` (merged over
+/// the spin model): seconds in 30–45°, last-3 s mean / sd, spun; plus the 27-entry robust count.
+fn clip1() {
+    use wp_vehicle::ride_lab::{self, RideTune};
+    let c = car("parity_rwd_d");
+    let a = reference_assists();
+    plain::set_override(Some(PlainSteer::default()));
+    ride_lab::set_override(Some(RideTune::lab_default()));
+    let sweep: Vec<serde_json::Value> =
+        serde_json::from_str(&std::env::var("SWEEP").unwrap_or_else(|_| "[{}]".into()))
+            .expect("SWEEP json list");
+    std::env::set_var("ROBUST", "full");
+    let set = robust_set();
+    for over in sweep {
+        let mut v = serde_json::to_value(CarTune::spin_candidate()).unwrap();
+        for (k, x) in over.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        let t: CarTune = serde_json::from_value(v).unwrap();
+        car_lab::set_override(Some(t));
+        let mut angles = Vec::new();
+        let (r, _) = plain_drift_run_with(&c, &a, COUNTER6, 40.0, 0.6, |rig, _, _| {
+            angles.push((-slide_state(rig).body_slip).to_degrees())
+        });
+        let band = angles
+            .iter()
+            .take_while(|a| a.abs() < 90.0)
+            .filter(|a| (30.0..=45.0).contains(*a))
+            .count() as f32
+            / 240.0;
+        let late = &angles[angles.len() - 3 * 240..];
+        let m = late.iter().sum::<f32>() / late.len() as f32;
+        let sd = (late.iter().map(|a| (a - m) * (a - m)).sum::<f32>() / late.len() as f32).sqrt();
+        let held = set
+            .iter()
+            .filter(|(c, d, g)| hold_at(c, *d, *g).m.held)
+            .count();
+        println!(
+            "{over} | band {band:.2} s | last 3 s {m:.0}° sd {sd:.1} | spun {} | robust {held}/27",
+            r.spun
+        );
+    }
+    car_lab::set_override(None);
+}
+
 fn trace(id: &str) {
     let c = car(id);
     let a = reference_assists();
@@ -1355,7 +1401,7 @@ fn main() {
     let what = if args.first().is_some_and(|a| {
         [
             "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch", "roster",
-            "vrsearch", "release", "joint", "bleed",
+            "vrsearch", "release", "joint", "bleed", "clip1",
         ]
         .contains(&a.as_str())
     }) {
@@ -1382,6 +1428,7 @@ fn main() {
         "roster" => roster(),
         "release" => release_table(),
         "bleed" => bleed(&args[0]),
+        "clip1" => clip1(),
         "joint" => joint(args[0].parse().unwrap_or(300)),
         "vrsearch" => vrsearch(args[0].parse().unwrap_or(200)),
         _ => table(&args),
