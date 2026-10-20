@@ -15,9 +15,11 @@
  * `onOpenChange(true)`.
  */
 import type { ComponentChildren } from "preact";
-import { render } from "preact";
+import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
 import { DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type GameSettings, type SettingsStorage, type Volumes } from "./settings";
+import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
+import { paintInputBars } from "./bars";
 import "../ui/theme.css";
 import "./menu.css";
 
@@ -47,6 +49,10 @@ export interface GameMenuHost {
   apply(next: GameSettings, prev: GameSettings | null): void;
   /** The menu opened / closed / changed screen (pause the sim and block input while open). */
   onOpenChange?(open: boolean, screen: MenuScreen): void;
+  /** Processed driving input right now (after the device's shaping), for the Controls test
+   * bars; polled every animation frame while the settings screen is open. Must work while
+   * game input is blocked by the menu and must not fire any actions. null = nothing to show. */
+  inputProbe?(): InputProbe | null;
 }
 
 /** Mount options. */
@@ -81,6 +87,11 @@ export class GameMenu {
   private raf = 0;
   private focusId: string | null = null;
   private countersteer: boolean;
+  /** Which device's profile the Controls section edits. */
+  private controlsDevice: ControlDevice = "keyboard";
+  /** "Test input": navigation keys are ignored (except Esc) so driving keys move the bars. */
+  private testInput = false;
+  private lastProbeDevice: ControlDevice | null = null;
   private readonly onKey = (e: KeyboardEvent) => this.key(e);
 
   constructor(
@@ -95,6 +106,32 @@ export class GameMenu {
     this.root.hidden = true;
     parent.appendChild(this.root);
     opts.host.apply(this.settings, null);
+  }
+
+  /** Is "Test input" on (navigation keys ignored except Esc)? */
+  get testingInput(): boolean {
+    return this.testInput;
+  }
+
+  /** Which device the Controls section edits. */
+  get editedDevice(): ControlDevice {
+    return this.controlsDevice;
+  }
+
+  /** Turn "Test input" on or off (Esc also turns it off). */
+  setTestInput(on: boolean): void {
+    if (this.testInput === on) return;
+    this.testInput = on;
+    this.draw();
+    // Nothing keeps focus while testing, so Space / Enter cannot press a button.
+    if (on) (document.activeElement as HTMLElement | null)?.blur?.();
+    else document.getElementById("gm-ctl-test")?.focus();
+  }
+
+  /** Choose the device whose profile the Controls section edits. */
+  editDevice(d: ControlDevice): void {
+    this.controlsDevice = d;
+    this.draw();
   }
 
   /** A screen is showing (the controls panel opened from the menu counts as open). */
@@ -123,6 +160,7 @@ export class GameMenu {
     if (this.screen === "closed") return;
     this.screen = "closed";
     this.suspended = false;
+    this.testInput = false;
     this.detach();
     this.root.hidden = true;
     render(null, this.root);
@@ -150,8 +188,14 @@ export class GameMenu {
 
   private show(screen: Exclude<MenuScreen, "closed">, focus: string | null): void {
     const wasOpen = this.isOpen;
+    if (screen === "settings" && this.screen !== "settings") {
+      // Edit the profile of the device in use.
+      const p = this.probe();
+      if (p) this.controlsDevice = p.device;
+    }
     this.screen = screen;
     this.suspended = false;
+    this.testInput = false;
     this.focusId = focus;
     this.root.hidden = false;
     this.draw();
@@ -197,6 +241,7 @@ export class GameMenu {
       this.focusFirst();
       return;
     }
+    if (this.screen === "settings") this.paintProbe();
     const p = firstPad();
     if (!p) return;
     for (const a of this.pad.update(
@@ -211,6 +256,14 @@ export class GameMenu {
     if (!this.isOpen || this.suspended) return;
     // The game never sees a key while the menu is open.
     e.stopImmediatePropagation();
+    if (this.testInput) {
+      // Test input: driving keys only move the test bars; Esc ends the test.
+      if (e.code === "Escape") {
+        e.preventDefault();
+        this.setTestInput(false);
+      } else if (keyAction(e.code) || e.code === "Tab") e.preventDefault();
+      return;
+    }
     let a = keyAction(e.code);
     if (e.code === "Tab") a = e.shiftKey ? "up" : "down";
     if (!a) return;
@@ -222,6 +275,11 @@ export class GameMenu {
 
   /** Apply one navigation action. */
   nav(a: NavAction): void {
+    if (this.testInput) {
+      // The pad drives the bars; B / Start end the test.
+      if (a === "back" || a === "start") this.setTestInput(false);
+      return;
+    }
     const items = this.items();
     const cur = items.indexOf(document.activeElement as HTMLElement);
     const el = cur >= 0 ? items[cur] : null;
@@ -260,6 +318,27 @@ export class GameMenu {
   private back(): void {
     if (this.screen === "settings") this.show(this.settingsFrom, "gm-settings");
     else if (this.screen === "pause") this.close();
+  }
+
+  private probe(): InputProbe | null {
+    try {
+      return this.opts.host.inputProbe?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Paint the Controls test bars from the host's probe (every frame on the settings screen). */
+  private paintProbe(): void {
+    const box = this.root.querySelector<HTMLElement>(".wp-gm-bars");
+    if (!box) return;
+    const p = this.probe();
+    paintInputBars(box, p);
+    if ((p?.device ?? null) !== this.lastProbeDevice) {
+      this.lastProbeDevice = p?.device ?? null;
+      const inUse = this.root.querySelector<HTMLElement>("#gm-ctl-inuse");
+      if (inUse) inUse.textContent = p ? `in use: ${DEVICE_LABEL[p.device]}` : "no input";
+    }
   }
 
   private items(): HTMLElement[] {
@@ -312,10 +391,15 @@ export class GameMenu {
           countersteer={this.countersteer}
           change={(s) => this.change(s)}
           reset={() => this.change(defaultGameSettings(this.opts.developerDefault ?? true))}
+          device={this.controlsDevice}
+          editDevice={(d) => this.editDevice(d)}
+          testInput={this.testInput}
+          setTestInput={(on) => this.setTestInput(on)}
           back={() => this.back()}
         />
       );
     }
+    this.lastProbeDevice = null;
     render(
       <div class="wp-gm" data-screen={this.screen} onMouseOver={(e) => hoverFocus(e.target as HTMLElement)}>
         {body}
@@ -501,15 +585,15 @@ function Toggle(props: { id: string; label: string; value: boolean; onChange: (v
   );
 }
 
-function Slider(props: { id: string; label: string; value: number; disabled?: boolean; onChange: (v: number) => void }) {
+function Slider(props: { id: string; label: string; value: number; min?: number; max?: number; disabled?: boolean; onChange: (v: number) => void }) {
   return (
     <span class="wp-gm-slider">
       <input
         id={props.id}
         data-nav
         type="range"
-        min={0}
-        max={1}
+        min={props.min ?? 0}
+        max={props.max ?? 1}
         step={0.05}
         value={props.value}
         disabled={props.disabled}
@@ -536,6 +620,10 @@ function SettingsScreen(props: {
   change: (s: GameSettings) => void;
   reset: () => void;
   back: () => void;
+  device: ControlDevice;
+  editDevice: (d: ControlDevice) => void;
+  testInput: boolean;
+  setTestInput: (on: boolean) => void;
 }) {
   const { s, change } = props;
   const assist = (k: keyof GameSettings["assists"], v: boolean | number) => change({ ...s, assists: { ...s.assists, [k]: v } });
@@ -598,6 +686,14 @@ function SettingsScreen(props: {
         <Row label="Countersteer help" hint={props.countersteer ? "Catches slides for you" : "Coming soon (needs a vehicle update)"}>
           <Slider id="gm-cstr" label="Countersteer help" value={s.assists.countersteer} disabled={!props.countersteer} onChange={(v) => assist("countersteer", v)} />
         </Row>
+        <ControlsSection
+          s={s}
+          change={change}
+          device={props.device}
+          editDevice={props.editDevice}
+          testInput={props.testInput}
+          setTestInput={props.setTestInput}
+        />
         <h3>Gameplay</h3>
         <Row label="Damage" hint={s.damageMode === "Simulation" ? "One hard hit at speed is a total loss" : "Punishing but survivable"}>
           <Cycle
@@ -641,5 +737,97 @@ function SettingsScreen(props: {
         </button>
       </div>
     </div>
+  );
+}
+
+// ----- controls (per-device input shaping + test bars) ----------------------------------------
+
+const DEVICE_LABEL: Record<ControlDevice, string> = { keyboard: "Keyboard", gamepad: "Gamepad", wheel: "Wheel" };
+
+/** One slider of the Controls section. */
+interface ControlRow {
+  key: keyof DeviceControls;
+  label: string;
+  hint: string;
+}
+
+const CONTROL_ROWS: ControlRow[] = [
+  { key: "steerDeadzone", label: "Steering dead zone", hint: "Ignore small steering input near centre" },
+  { key: "steerSaturation", label: "Steering saturation", hint: "Full lock is reached at this much input" },
+  { key: "steerSensitivity", label: "Steering sensitivity", hint: "100 % = linear · lower = finer near centre" },
+  { key: "steerSpeedSensitivity", label: "Steering speed sensitivity", hint: "Less steering lock at speed (keyboard default 75 %)" },
+  { key: "throttleSaturation", label: "Accelerator saturation", hint: "Full throttle at this much pedal" },
+  { key: "throttleDeadzone", label: "Accelerator dead zone", hint: "Ignore the first part of the pedal" },
+  { key: "brakeSaturation", label: "Brake saturation", hint: "Full brake at this much pedal" },
+  { key: "brakeDeadzone", label: "Brake dead zone", hint: "Ignore the first part of the pedal" },
+  { key: "clutchSaturation", label: "Clutch saturation", hint: "Clutch fully pressed at this much pedal" },
+  { key: "clutchDeadzone", label: "Clutch dead zone", hint: "Ignore the first part of the pedal" },
+];
+
+const BARS: { ch: "steer" | "throttle" | "brake" | "clutch"; label: string }[] = [
+  { ch: "steer", label: "Steering" },
+  { ch: "throttle", label: "Throttle" },
+  { ch: "brake", label: "Braking" },
+  { ch: "clutch", label: "Clutch" },
+];
+
+/** Settings → Controls: which device to edit, its shaping sliders, test mode and live bars. */
+function ControlsSection(props: {
+  s: GameSettings;
+  change: (s: GameSettings) => void;
+  device: ControlDevice;
+  editDevice: (d: ControlDevice) => void;
+  testInput: boolean;
+  setTestInput: (on: boolean) => void;
+}) {
+  const { s, change, device } = props;
+  const c = s.controls[device];
+  const set = (patch: Partial<DeviceControls>) => change({ ...s, controls: { ...s.controls, [device]: { ...c, ...patch } } });
+  return (
+    <>
+      <h3>Controls</h3>
+      <Row label="Device" hint="Which device's settings you are editing">
+        <Cycle
+          id="gm-ctl-device"
+          label="Controls device"
+          value={device}
+          options={CONTROL_DEVICES.map((d) => ({ id: d, label: DEVICE_LABEL[d] }))}
+          onChange={props.editDevice}
+        />
+      </Row>
+      {CONTROL_ROWS.map((r) => {
+        const hint = r.key === "steerSpeedSensitivity" && !s.assists.steerHelp ? "No effect while Steering help is off" : r.hint;
+        const [min, max] = CONTROL_RANGES[r.key];
+        return (
+          <Row key={r.key} label={r.label} hint={hint}>
+            <Slider id={`gm-ctl-${r.key}`} label={r.label} value={c[r.key]} min={min} max={max} onChange={(v) => set({ [r.key]: v })} />
+          </Row>
+        );
+      })}
+      <Row label="Test input" hint={props.testInput ? "Hold your driving keys or pedals · Esc / B to stop" : "Turn on, then hold driving keys to watch the bars"}>
+        <Toggle id="gm-ctl-test" label="Test input" value={props.testInput} onChange={props.setTestInput} />
+      </Row>
+      <div class={`wp-gm-bars${props.testInput ? " is-testing" : ""}`} aria-label="Processed input">
+        {BARS.map((b) => (
+          <Fragment key={b.ch}>
+            <span>{b.label}</span>
+            <div class={`wp-gm-bar${b.ch === "steer" ? " is-bipolar" : ""}`} data-bar={b.ch}>
+              <i />
+            </div>
+            <b class="wp-mono" data-bar-value={b.ch}>
+              0%
+            </b>
+          </Fragment>
+        ))}
+        <div class="wp-gm-bars-note wp-mono" id="gm-ctl-inuse">
+          …
+        </div>
+      </div>
+      <Row label="Reset device" hint={`Default values for ${DEVICE_LABEL[device]}`}>
+        <button type="button" id="gm-ctl-reset" data-nav class="wp-gm-item is-small" onClick={() => set(defaultDeviceControls(device))}>
+          Reset {DEVICE_LABEL[device]}
+        </button>
+      </Row>
+    </>
   );
 }
