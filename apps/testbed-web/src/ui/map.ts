@@ -31,14 +31,15 @@ export class MapOverlay {
     this.hud.setStatic(id ? sim.mapStaticJson() : null);
   }
 
-  /** One frame (after the sim step). */
-  frame(player: number, nowMs: number): void {
+  /** One frame (after the sim step). `mayRest`: the frame loop is slow (software GL, < 8 fps)
+   * and this frame may skip the minimap redraw (its canvas upload + composite cost ~10 ms there). */
+  frame(player: number, nowMs: number, mayRest = false): void {
     if (!this.city) return;
     const minimap = layers.on("minimap");
     this.hud.setMinimapVisible(minimap);
     this.hud.setSignals(layers.on("mapSignals"));
     // Full map open: every frame (pan / zoom); minimap only: throttled; neither: nothing to draw.
-    if (!this.hud.isOpen && (!minimap || nowMs - this.lastFrame < MINIMAP_EVERY_MS)) return;
+    if (!this.hud.isOpen && (!minimap || mayRest || nowMs - this.lastFrame < MINIMAP_EVERY_MS)) return;
     this.lastFrame = nowMs;
     this.hud.frame(sim.mapDynamic(player), nowMs);
   }

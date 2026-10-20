@@ -138,6 +138,9 @@ await page.evaluate(() => {
 });
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(3200);
+// On a slow software-GL box 3.2 s of wall time can cover less sim time (frames over 250 ms
+// lose time): give the burnout up to 5 s more to reach the count instead of a fixed sleep.
+await page.waitForFunction(() => window.__wp.fx.stats().skidSegments >= 8, null, { timeout: 5000, polling: 100 }).catch(() => {});
 s = await stats();
 check(s.skidSegments >= 8, `burnout lays skid marks (${s.skidSegments} segments)`);
 check(s.smoke >= 10, `burnout makes tyre smoke (${s.smoke} puffs)`);

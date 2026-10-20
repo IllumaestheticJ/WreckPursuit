@@ -66,8 +66,16 @@ function splitGeometry(geo: THREE.BufferGeometry, tileM: number): THREE.BufferGe
 }
 
 /** Tiled city: the tile meshes and their world bounding spheres (for distance culling). */
+/** Greybox layers that are a few pixels at most past a few hundred metres (kerbs ~15 cm high,
+ * the skirts under level lots, sidewalk corner fills): the lean graphics profiles stop drawing
+ * them sooner (SceneView.detailDistanceM). */
+export const CITY_DETAIL = new Set(["kerb", "lot_skirt", "sidewalk_corner"]);
+
 export class CityTiles {
   readonly meshes: THREE.Mesh[] = [];
+  /** Per mesh: a CITY_DETAIL layer. */
+  private readonly detail: boolean[] = [];
+  private lastDetailFar = Infinity;
   private readonly spheres: THREE.Sphere[] = [];
   /** Tiles hidden by the draw distance at the last update. */
   hidden = 0;
@@ -108,6 +116,8 @@ export class CityTiles {
   private add(m: THREE.Mesh): void {
     if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
     this.meshes.push(m);
+    const mat = m.material as THREE.Material;
+    this.detail.push(CITY_DETAIL.has(mat.name));
     this.spheres.push(m.geometry.boundingSphere!.clone().applyMatrix4(m.matrixWorld));
   }
 
@@ -122,17 +132,20 @@ export class CityTiles {
   }
 
   /**
-   * Hide tiles entirely beyond `far` m of the camera (Three world space). Cheap; only redone
-   * when the camera moved more than 10 m or the distance changed.
+   * Hide tiles entirely beyond `far` m of the camera (Three world space), and small detail
+   * layers (CITY_DETAIL: kerbs, lot skirts, corner fills) beyond `detailFar`. Cheap; only redone
+   * when the camera moved more than 10 m or a distance changed.
    */
-  update(camPos: THREE.Vector3, far: number): void {
-    if (Math.abs(far - this.lastFar) < 1 && camPos.distanceToSquared(this.lastCam) < 100) return;
+  update(camPos: THREE.Vector3, far: number, detailFar = Infinity): void {
+    const dFar = Math.min(far, detailFar);
+    if (Math.abs(far - this.lastFar) < 1 && Math.abs(dFar - this.lastDetailFar) < 1 && camPos.distanceToSquared(this.lastCam) < 100) return;
     this.lastFar = far;
+    this.lastDetailFar = dFar;
     this.lastCam.copy(camPos);
     let hidden = 0;
     for (let i = 0; i < this.meshes.length; i++) {
       const s = this.spheres[i];
-      const vis = s.center.distanceTo(camPos) - s.radius < far;
+      const vis = s.center.distanceTo(camPos) - s.radius < (this.detail[i] ? dFar : far);
       this.meshes[i].visible = vis;
       if (!vis) hidden++;
     }
