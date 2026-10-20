@@ -226,7 +226,7 @@ pub struct StaticHit {
     pub pos: [f32; 2],
     /// What it was: `Wall` (building, barrier, rail), `ParkedProp`, `Kerb` or `JunctionStep`.
     pub kind: stuck::StuckCause,
-    /// Unit speed at the contact, m/s.
+    /// Unit speed along its heading at the contact, m/s (negative: backing into it).
     pub speed_mps: f32,
     /// The unit was pursuing or intercepting a racer.
     pub pursuing: bool,
@@ -1152,10 +1152,14 @@ impl PoliceSystem {
     pub fn sync_unit(&mut self, unit: UnitId, s: UnitSync) {
         if let Some(i) = self.unit_index(unit) {
             let u = &mut self.units[i];
-            let speed = (s.vel[0] * s.vel[0] + s.vel[1] * s.vel[1]).sqrt();
+            // Signed: negative while rolling backwards. With an unsigned speed a unit going
+            // backwards "too fast" braked, and in reverse gear the brake pedal drives backwards
+            // (`wp_vehicle` swaps the pedals): a runaway reverse into buildings (row 66).
+            let heading = graph::normalize(s.heading);
+            let speed = s.vel[0] * heading[0] + s.vel[1] * heading[1];
             u.body = UnitBody {
                 pos: xy(s.pos),
-                heading: graph::normalize(s.heading),
+                heading,
                 speed,
                 lat_g: u.body.lat_g,
                 alt_m: s.pos[2],
@@ -1246,9 +1250,12 @@ impl PoliceSystem {
         }
         if let stuck::Phase::Swing { until, steer } = u.unstick.phase {
             if facing < stuck::SWING_DONE_COS && now < until && !disabled {
+                // In reverse the pedals swap: brake drives backwards, throttle brakes.
+                let (throttle, brake) = reverse_pedals(v, 1.0);
                 return Some(VehicleInput {
                     steer,
-                    brake: 1.0,
+                    throttle,
+                    brake,
                     siren,
                     headlights: true,
                     ..Default::default()
@@ -1351,9 +1358,11 @@ impl PoliceSystem {
             if graph::dist(pos, from) < dist_m && now < until && !disabled {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
+                let (throttle, brake) = reverse_pedals(v, 0.6);
                 return Some(VehicleInput {
                     steer,
-                    brake: 0.6,
+                    throttle,
+                    brake,
                     siren,
                     headlights: true,
                     ..Default::default()
@@ -1606,6 +1615,21 @@ const PUSH_DONE_M: f32 = 8.0;
 
 /// A pushing unit aims this far left of its line (nudging the blocker toward the kerb), m.
 const PUSH_SIDE_M: f32 = 0.8;
+
+/// Fastest a unit backs up in a manoeuvre (three-point turn, backing out), m/s.
+const REVERSE_MAX_MPS: f32 = 3.0;
+
+/// Pedals for backing up with `pedal` on the brake (which drives backwards in reverse), easing
+/// off and braking (throttle, in reverse) past [`REVERSE_MAX_MPS`]. `v` is signed.
+fn reverse_pedals(v: f32, pedal: f32) -> (f32, f32) {
+    if v < -REVERSE_MAX_MPS {
+        (0.5, 0.0)
+    } else if v < -0.8 * REVERSE_MAX_MPS {
+        (0.0, 0.0)
+    } else {
+        (0.0, pedal)
+    }
+}
 
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
