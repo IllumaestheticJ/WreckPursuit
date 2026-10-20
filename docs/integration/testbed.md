@@ -633,3 +633,17 @@ cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untou
   spotlight (`SpotLight`, faint additive beam cone, light pool on the road) from night factor
   0.35, dimmed to 45 % while the helicopter has lost visual (it stays on the last known spot).
   `scene.helicoptersShown` / `scene.spotlightsLit` for automation.
+
+## Lead helper note: headless e2e "Target crashed" (2026-10-20)
+
+`just web-e2e` died with `Target crashed` at random points (also on `main`, in the capture
+block, about one run in two). Under gdb (`--renderer-cmd-prefix`) the renderer stops with SIGTRAP,
+which is a Chromium `CHECK`, on the audio output thread in
+`blink::AudioParamHandler::ValuesForFrameRangeImpl` ← `OscillatorHandler` behind a biquad and a
+`PannerNode`, i.e. the siren oscillators' frequency automation. Cause: after a slow main-thread
+frame (SwiftShader frames can take ~1 s) `synth.ts`'s siren restarted its back-to-back
+`setValueCurveAtTime` curves at `ctx.currentTime`, a time the audio thread may already have
+rendered. A page with only the siren scheduling and random 0.2–1.4 s main-thread stalls crashes
+3 runs in 6 (60 s each); restarting the schedule `SIREN_LEAD_S` = 50 ms ahead of `currentTime`
+gives 0 in 4 (linear ramps instead of curves: 0 in 3 too). Real players with slow frames could hit
+it as well, not just CI.

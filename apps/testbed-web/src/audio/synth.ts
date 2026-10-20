@@ -324,6 +324,9 @@ export function sirenFreqAtPhase(s: Params, phase: number): number {
   return lo + (hi - lo) * x;
 }
 
+/** Earliest start of a new siren pitch curve, ahead of the audio clock, s. */
+const SIREN_LEAD_S = 0.05;
+
 /** Siren: runs the cadence locally (phase-locked to the director's phase), scheduling the
  * frequency curve a little ahead so even the 10 Hz phaser sweeps cleanly. */
 function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
@@ -342,7 +345,11 @@ function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   let scheduledUntil = ctx.currentTime;
   let doppler = p.doppler || 1;
   const schedule = (now: number) => {
-    if (scheduledUntil < now) scheduledUntil = now;
+    // After a slow frame the schedule lags the audio clock. Restart it a little ahead of
+    // `currentTime`, never at it: a curve starting where the audio thread has already rendered
+    // trips a CHECK in Chromium's AudioParam timeline and kills the tab (headless e2e, ~1 s
+    // SwiftShader frames; reproduced in isolation, see docs/integration/testbed.md).
+    if (scheduledUntil < now + SIREN_LEAD_S) scheduledUntil = now + SIREN_LEAD_S;
     while (scheduledUntil < now + 0.3) {
       const n = 24;
       const curve = new Float32Array(n);
