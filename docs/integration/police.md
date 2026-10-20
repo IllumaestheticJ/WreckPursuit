@@ -505,7 +505,7 @@ escapes at ≈ 152 s. The control is still captured.
 - `crates/wp_net/tests/vesper_e2e.rs`: pass (104 s).
 - Goldens: generated on `lead/round12` 9409249 and on this branch; the 21 hash files and 2 replays
   that differ were blessed in `3ed3415` (all have physical police in them).
-- `just web-e2e`: WEB_E2E_RESULT
+- `just web-e2e`: 198 checks pass. Failing: `perf_check` on software GL (chase 18 frames over 250 ms, rain 21 frames and 2738 KB/frame; the perf check also failed on the base in the earlier round-13 run, and this container has no GPU — not re-run on 9409249 alone), and `menu.mjs` "countersteer slider disabled until the wasm setter exists": the lead's menu now enables the slider (the setter exists), this branch's testbed diff against the lead does not touch it, so the e2e check needs updating on `lead/round12`. (`just` is not installed here; ran `npm run wasm` + `npm run e2e`.)
 
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
