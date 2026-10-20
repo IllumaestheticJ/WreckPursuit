@@ -1105,8 +1105,14 @@ so this is a finding to hand over, not tuned here.
 
 On `origin/lead/drift-lab-b` (ae313e2, checked in a clean worktree): `cargo test -p simcli
 --test scenarios goldens_match` fails 26 goldens and `wp_race::race_picker::hollins_hill_sprint`
-fails ("only 2 of 4 finished"); `lead/drift-lab-c` shows the same. Goldens are lead-owned
-(`[bless]` commits): not re-blessed here. `cargo test -p wp_vehicle` passes.
+fails ("only 2 of 4 finished"), and so do `race_picker::loop9_circuit`,
+`race_picker::lantern_checkpoint_draws_the_police` and
+`wp_wasm::crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid`.
+`cargo test --workspace` on `lead/drift-lab-c` fails exactly these and nothing else (the
+determinism lint passes). Goldens are lead-owned (`[bless]` commits): not re-blessed here.
+`cargo test -p wp_vehicle` passes. Gate on the final push: `cargo fmt --check`, `cargo clippy
+--workspace -- -D warnings`, `lint-determinism` (0 errors), wasm build, `tsc`, the drift-lab
+e2e: all clean.
 
 ## Contract change requests
 
