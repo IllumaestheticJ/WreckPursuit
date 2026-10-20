@@ -175,6 +175,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   highway loop (filleted control polygon, radius ≥ 420 m sweepers) with 7 signalised
   junctions; Route 40 West (dead-ends at the map edge, passes **under** the loop: overpass)
   and Route 40 North (cut **under** the loop: underpass).
+- **Road names:** `World::vesper` keeps the generator's name per source road
+  (`World::road_names`; presentation only, not in the road format or the state hash), and
+  `World::edge_names()` names every road-graph edge (`RoadEdgeId`) after its road. The police
+  radio uses them for places ("northbound on Harbor Boulevard at Lantern Way", playtest row 79).
+  Cities without names (the grid, loaded `.road.bin`) return empty names.
 - **Terrain:** natural ground = northward rise + authored hill (`bump`) + plateau + two
   octaves of seeded value noise (damped downtown, none on the port flat) + sea at the south and
   east edges.

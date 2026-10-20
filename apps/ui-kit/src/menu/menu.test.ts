@@ -26,6 +26,13 @@ describe("game settings", () => {
     expect(n.assists.abs).toBe(false);
     expect(n.assists.countersteer).toBe(0);
     expect(n.developer).toBe(true);
+    expect(n.radioVoice).toBe(true);
+  });
+  it("keeps the police radio voice switch (row 79)", () => {
+    const base = defaultGameSettings(true);
+    expect(base.radioVoice).toBe(true);
+    expect(normalizeSettings({ radioVoice: false }, base).radioVoice).toBe(false);
+    expect(normalizeSettings({ radioVoice: "no" }, base).radioVoice).toBe(true);
   });
   it("never throws on corrupt or blocked storage", () => {
     const st = memory();

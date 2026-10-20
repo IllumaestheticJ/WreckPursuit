@@ -43,7 +43,7 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   speed `min_racer_speed_mps`. Speeds are the racer's just before the episode's first
   contact (by the time a contact is reported, a head-on hit has stopped the racer, and a patrol
   car nudging a parked racer has shoved it). Then heat rises by `heat`, to at
-  least `min_level` (L2), the radio says "Unit N: I've been hit! … assault on an officer.", and
+  least `min_level` (L2), the radio says "Unit N, I've been hit! … assault on an officer.", and
   the pursuit starts in the same tick with the hit unit (or the closest unit within
   `nearby_units_m` that sees the racer, if the hit unit is out of action), day or night: no
   recognition window. A new assault on the same unit needs `repeat_cooldown_s`; ramming another
@@ -108,6 +108,22 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
+- **One transmission at a time** (playtest row 79): a spoken line holds the channel for its
+  length (`words / words_per_s + line_pad_s`, the audio scanner's numbers) plus `min_gap_s`
+  (2.5 s); waiting lines are a priority queue (tier, cue `prio`, age), lose their slot when a
+  newer line supersedes them ("now level 4" replaces a queued "now level 3") and expire
+  (`stale_s`, `stale_critical_s`, or the cue's own life). Gaps shrink with the wanted level
+  (`global_gap_s` / `unit_gap_s` per L1..L5; L1 keeps the row-6 8 s / 30 s).
+- **Unit-to-unit callouts** (`chatter`, row 79): units call what they see with their call sign
+  and a place on the map — "Unit 6, lost visual. Last seen eastbound on Harbor Boulevard at
+  Lantern Way.", "eyes on him again", "requesting backup", "I'm on his bumper", "going for the
+  PIT" / "he's spun" / "he got away", "boxing him in", "spikes hit", "I'm out of the chase",
+  "he's gone into the Hollins Tunnel"; dispatch summarises level rises (place, units on him, air
+  unit) and closes pursuits with the place. Places: street (+ cross street at junctions) from
+  `World::edge_names` (Port Vesper), tunnel names, district otherwise
+  (`PoliceSystem::place_phrase`). The lost-visual call reads the racer record's `last_known`,
+  the same position search and interception steer to. Observer only: not hashed, no RNG.
+  `chatter_stats()` counts raised callouts. Tests: `tests/radio_chatter.rs`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
 `SpikeAt`, `HeloTrack`, `OutOfService`.

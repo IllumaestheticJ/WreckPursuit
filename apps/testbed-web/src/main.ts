@@ -45,6 +45,7 @@ import { WeatherView } from "./render/weather";
 import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
 import { FrameProfiler } from "./perf";
 import { CrashFx } from "./render/fx";
+import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -120,6 +121,12 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  // Police radio strip (row 79): what the scanner says, in sync with the voice; police events
+  // directly while the audio is not running.
+  const radioStrip = new RadioStrip(overlay);
+  audio.onRadioSay = (unit, text) => {
+    if (!crash.playing) radioStrip.push(unit || null, text);
+  };
   const map = new MapOverlay(overlay);
   const layout = new HudLayout();
   // Game menu (built below, once everything it drives exists) and its current settings.
@@ -340,6 +347,7 @@ async function main(): Promise<void> {
     app.eventCounts = {};
     plots.clear();
     ui.reset();
+    radioStrip.clear();
     map.reset();
     runEnd.reset();
     weather.reset();
@@ -876,6 +884,7 @@ async function main(): Promise<void> {
     const a = sim.assistPreset(app.source === "Touch" ? "Gamepad" : app.source) as unknown as Record<string, unknown>;
     d.assists = { ...d.assists, abs: Boolean(o.abs ?? a.abs), tcs: Boolean(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
     d.volumes = audio.mix();
+    d.radioVoice = audio.radioVoice();
     d.gfx = gfxMode();
     return d;
   };
@@ -892,6 +901,7 @@ async function main(): Promise<void> {
     scene.drawDistanceM = next.drawDistanceM > 0 ? next.drawDistanceM : drawParam > 0 ? drawParam : scene.quality.drawDistanceM;
     weather.rainFraction = scene.quality.rainFraction;
     audio.setMix(next.volumes);
+    audio.setRadioVoice(next.radioVoice);
     map.hud.setUnits(next.units);
     // Assists go through the same overrides as the developer panel's boxes.
     if (!prev || JSON.stringify(prev.assists) !== JSON.stringify(next.assists)) {
@@ -1110,6 +1120,12 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
+      if (!audio.hearsRadio()) {
+        for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
+          const r = ev.Police?.Radio;
+          if (r) radioStrip.push(r.unit, r.text);
+        }
+      }
       map.frame(app.player, now);
       if (!replay) runEnd.update(sim.runResult(), now);
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
@@ -1216,6 +1232,7 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
+    radioStrip.frame(now);
     layout.frame(now);
     prof.lap("ui");
     prof.end();
@@ -1338,6 +1355,8 @@ async function main(): Promise<void> {
     menu,
     /** HUD layout pass (src/ui/layout.ts). */
     layout,
+    /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
+    radioStrip,
     ready: true,
     stopRecording,
     loadReplay,

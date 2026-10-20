@@ -854,8 +854,8 @@ impl PoliceSystem {
             RadioTier::Routine,
             None,
             format!(
-                "Dispatch: collision with injuries, {:?}, need a unit.",
-                district
+                "Dispatch: collision with injuries {}, need a unit.",
+                self.place_phrase(pos, [0.0, 0.0])
             ),
         ));
     }
@@ -1006,8 +1006,8 @@ impl PoliceSystem {
             Assignment::Patrol { .. } => line(
                 RadioTier::Routine,
                 format!(
-                    "{callsign} resuming patrol, {:?}.",
-                    self.graph.district_at(u.body.pos)
+                    "{callsign} resuming patrol {}.",
+                    self.place_phrase(u.body.pos, [0.0, 0.0])
                 ),
                 "patrol".into(),
                 "{units} resuming patrol.",
@@ -1032,9 +1032,9 @@ impl PoliceSystem {
                     .find(|x| x.id == *incident && !x.announced);
                 let text = match fresh {
                     Some(inc) => format!(
-                        "Dispatch: {}, {:?}. {callsign} responding.",
+                        "Dispatch: {}, {}. {callsign} responding.",
                         call_text(inc),
-                        inc.district
+                        self.place_phrase(inc.pos, [0.0, 0.0])
                     ),
                     None => format!("{callsign} responding to {what}."),
                 };
@@ -1349,7 +1349,11 @@ impl PoliceSystem {
                 }
             } else if !inc.announced {
                 // Nobody to send: the call still goes out.
-                let text = format!("Dispatch: {}, {:?}.", call_text(&inc), inc.district);
+                let text = format!(
+                    "Dispatch: {}, {}.",
+                    call_text(&inc),
+                    self.place_phrase(inc.pos, [0.0, 0.0])
+                );
                 self.radio(RadioCue::new(RadioTier::Tactical, None, text));
             }
             self.incidents[k].announced = true;

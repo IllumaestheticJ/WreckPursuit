@@ -38,6 +38,10 @@ export class AudioSystem {
   private focus = 0;
   private lineNo = 0;
   private lastStats: DirectorStats | null = null;
+  /** Scanner tier the director was given last ("None" hears nothing). */
+  private tier = "Pro";
+  /** Shows every line the scanner says (the radio strip, main.ts). */
+  onRadioSay: ((unit: number, text: string) => void) | null = null;
   private stopAmbience: (() => void) | null = null;
   private readonly listenerArr = new Float32Array(12);
   private readonly scratch = Array.from({ length: 7 }, () => new THREE.Vector3());
@@ -58,7 +62,7 @@ export class AudioSystem {
       start: () => this.start(),
       setMaster: (v) => this.mixer?.master.gain.setTargetAtTime(this.muted ? 0 : v, this.ctx!.currentTime, 0.02),
       setBus: (b, v) => this.mixer?.setUserGain(b, v),
-      setTier: (t) => this.safe(() => audioBridge.setScannerTier(t)),
+      setTier: (t) => this.setTier(t),
       setTts: (on) => {
         if (this.scanner) this.scanner.tts = on;
       },
@@ -101,11 +105,13 @@ export class AudioSystem {
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
     this.pool.source = this.panel.settings.source;
     this.scanner = new ScannerPlayer(this.pool);
+    this.scanner.onSay = (unit, text) => this.onRadioSay?.(unit, text);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
     for (const [b, v] of Object.entries(s.buses)) this.mixer.setUserGain(b as Bus, v);
     this.scanner.tts = s.tts;
-    this.safe(() => audioBridge.setScannerTier(s.tier));
+    this.updateVoiceVolume();
+    this.setTier(s.tier);
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
     this.resetDirector();
     this.restartAmbience();
@@ -169,7 +175,38 @@ export class AudioSystem {
       this.mixer.setUserGain("World", v.effects);
       this.mixer.setUserGain("Police", v.police);
     }
+    this.updateVoiceVolume();
     if (ambienceChanged) this.restartAmbience();
+  }
+
+  /** Spoken radio lines follow master × Police bus (speechSynthesis bypasses the mixer). */
+  private updateVoiceVolume(): void {
+    if (!this.scanner) return;
+    const s = this.panel.settings;
+    this.scanner.volume = this.muted ? 0 : s.master * s.buses.Police;
+  }
+
+  /** "Police radio voice" setting: speak radio lines (on) or squelch + text only (off). */
+  setRadioVoice(on: boolean): void {
+    this.panel.setTts(on);
+    if (this.scanner) this.scanner.tts = on;
+  }
+
+  /** Whether radio lines are spoken. */
+  radioVoice(): boolean {
+    return this.panel.settings.tts;
+  }
+
+  /** The scanner hears the police radio now (audio running, a scanner tier): lines reach the
+   * radio strip through RadioSay, in sync with the voice. Otherwise the strip shows police
+   * events directly. */
+  hearsRadio(): boolean {
+    return !this.failed && this.ctx?.state === "running" && !!this.scanner && this.tier !== "None";
+  }
+
+  /** speechSynthesis.speak calls so far (e2e) and whether speech exists in this browser. */
+  speech(): { supported: boolean; attempts: number; voice: boolean } {
+    return { supported: ScannerPlayer.speechSupported(), attempts: this.scanner?.speechAttempts ?? 0, voice: this.radioVoice() };
   }
 
   /** Current player volumes (audio panel settings). */
@@ -180,6 +217,7 @@ export class AudioSystem {
 
   toggleMute(): void {
     this.muted = !this.muted;
+    this.updateVoiceVolume();
     if (this.mixer && this.ctx) {
       this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
     }
@@ -193,6 +231,11 @@ export class AudioSystem {
 
   /** Scanner tier: "None" | "Basic" | "Pro" | "Elite" (wp_police tiers 0/1/2). */
   setTier(tier: string): void {
+    this.tier = tier;
+    if (this.panel.settings.tier !== tier) {
+      this.panel.settings.tier = tier;
+      this.panel.save();
+    }
     this.safe(() => audioBridge.setScannerTier(tier));
   }
 
