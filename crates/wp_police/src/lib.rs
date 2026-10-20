@@ -807,6 +807,19 @@ impl PoliceSystem {
             throttle = 0.0;
             (brake, handbrake) = standstill_hold(v, brake.max(1.0));
         }
+        let free_want = u.cmd.speed_mps.min(u.planned_speed);
+        if let Some(rev) = unstick(
+            &mut u.avoid,
+            v,
+            want,
+            free_want,
+            throttle,
+            steer,
+            disabled,
+            dt,
+        ) {
+            return Some(VehicleInput { siren, ..rev });
+        }
         Some(VehicleInput {
             steer,
             throttle,
@@ -930,6 +943,79 @@ impl PoliceSystem {
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
 
+/// A unit pressing on (throttle, wanting speed) below this speed is not getting anywhere, m/s.
+const WEDGED_MPS: f32 = 0.4;
+/// Pressing on without moving this long means wedged (nose in a kerb, wall or parked car), s.
+const WEDGED_AFTER_S: f32 = 2.0;
+/// How long a wedged unit reverses before trying again, s.
+const REVERSE_OUT_S: f32 = 1.8;
+/// Reverse pedal (the brake pedal: `wp_vehicle` swaps pedals in reverse).
+const REVERSE_PEDAL: f32 = 0.7;
+
+/// Wedge detection and recovery for a bound unit: after [`WEDGED_AFTER_S`] of throttle without
+/// moving (or of waiting nose-to-bumper behind a parked car it has to get around, wanting
+/// `free_want` without the obstacle), back up for [`REVERSE_OUT_S`] with the wheel turned the
+/// other way (the nose swings towards where it wanted to go), then drive on. Returns the input
+/// to use while reversing.
+#[allow(clippy::too_many_arguments)]
+fn unstick(
+    st: &mut avoid::AvoidState,
+    v: f32,
+    want: f32,
+    free_want: f32,
+    throttle: f32,
+    steer: f32,
+    disabled: bool,
+    dt: f32,
+) -> Option<VehicleInput> {
+    if st.reverse_s > 0.0 {
+        st.reverse_s -= dt;
+        return Some(VehicleInput {
+            steer: st.reverse_steer,
+            brake: REVERSE_PEDAL,
+            headlights: true,
+            ..Default::default()
+        });
+    }
+    let pinned = st.pinned && free_want > 1.5;
+    if disabled || (!pinned && (want < 1.5 || throttle < 0.3)) {
+        st.wedged_s = 0.0;
+        return None;
+    }
+    if v.abs() > 2.0 {
+        // Driving freely again.
+        st.wedged_s = 0.0;
+        st.unstick_attempts = 0;
+        return None;
+    }
+    if v.abs() > WEDGED_MPS {
+        st.wedged_s = (st.wedged_s - dt).max(0.0);
+        return None;
+    }
+    st.wedged_s += dt;
+    if st.wedged_s < WEDGED_AFTER_S {
+        return None;
+    }
+    st.wedged_s = 0.0;
+    st.reverse_s = REVERSE_OUT_S;
+    st.unstick_attempts += 1;
+    // Full lock the other way; straight back if it wanted to go straight on (alternate sides
+    // on repeated attempts so a car square against a wall gets an angle).
+    st.reverse_steer = if steer.abs() > 0.1 {
+        -steer.signum()
+    } else if st.unstick_attempts.is_multiple_of(2) {
+        1.0
+    } else {
+        -1.0
+    };
+    Some(VehicleInput {
+        steer: st.reverse_steer,
+        brake: REVERSE_PEDAL,
+        headlights: true,
+        ..Default::default()
+    })
+}
+
 /// Brake and handbrake that keep a car stopped: above walking pace the requested `brake`; at a
 /// standstill a light pedal plus the handbrake, because `wp_vehicle`'s automatic gearbox
 /// engages reverse when the pedal is held past half travel at a standstill.
@@ -984,5 +1070,42 @@ mod tests {
         p.step(&W, &[r], &ev, wp_contracts::PHYSICS_DT, &mut out);
         assert!(p.racer(EntityId(1)).unwrap().heat > 0.0);
         assert!(p.units().is_empty());
+    }
+
+    #[test]
+    fn a_wedged_unit_reverses_out_then_drives_on() {
+        let mut st = avoid::AvoidState::default();
+        let dt = 1.0 / 240.0;
+        // Pressing on (wants 8 m/s, full throttle, steering right) without moving.
+        let mut reversed = None;
+        for k in 0..(240.0 * 3.0) as usize {
+            if let Some(i) = unstick(&mut st, 0.0, 8.0, 8.0, 1.0, 0.4, false, dt) {
+                reversed = Some((k, i));
+                break;
+            }
+        }
+        let (k, i) = reversed.expect("reverses after being wedged");
+        assert!((k as f32 * dt - WEDGED_AFTER_S).abs() < 0.05, "{k}");
+        // Reverse is the brake pedal held at a standstill; the wheel turned the other way.
+        assert!(i.brake > 0.5 && i.throttle == 0.0 && i.steer < 0.0, "{i:?}");
+        assert_eq!(st.unstick_attempts, 1);
+        // Keeps reversing for REVERSE_OUT_S, then hands back.
+        let held = (0..(240.0 * 3.0) as usize)
+            .take_while(|_| unstick(&mut st, -1.0, 8.0, 8.0, 0.0, 0.4, false, dt).is_some())
+            .count();
+        assert!((held as f32 * dt - REVERSE_OUT_S).abs() < 0.05, "{held}");
+        // Driving freely resets the attempts.
+        assert!(unstick(&mut st, 5.0, 8.0, 8.0, 1.0, 0.0, false, dt).is_none());
+        assert_eq!(st.unstick_attempts, 0);
+        // Waiting on purpose (no throttle, nothing wanted) is not being wedged.
+        let mut st = avoid::AvoidState::default();
+        for _ in 0..(240.0 * 5.0) as usize {
+            assert!(unstick(&mut st, 0.0, 0.0, 8.0, 0.0, 0.0, false, dt).is_none());
+        }
+        // ...unless nose-to-bumper with a parked car it must get around.
+        st.pinned = true;
+        let backs_up = (0..(240.0 * 3.0) as usize)
+            .any(|_| unstick(&mut st, 0.0, 0.0, 8.0, 0.0, 0.0, false, dt).is_some());
+        assert!(backs_up);
     }
 }

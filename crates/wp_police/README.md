@@ -111,6 +111,22 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
   `pass_speed_mps` and returns to its lane after the blocker.
 - **Exceptions**: a unit in a `Pit` or `BoxIn` tactic ignores its own target (contact is the point).
   No unit ever overtakes its own target (a stopped target is an arrest).
+- **Parked cars** (reported by `wp_sim` with their live positions) and stopped oncoming cars at
+  the edge of the corridor: the unit **nudges** its lane offset up to `MAX_PARKED_NUDGE_M`
+  (2.6 m) to clear them instead of stopping; a parked car that needs more is passed after
+  `PARKED_PASS_WAIT_S` (1 s), near junctions too. Civilians pulled over for a siren are reported
+  the same way. In the bumper box, cars clear of the planned corridor count only within 1.5 m
+  (the nose sweeping across waiting cars mid-turn).
+- **Queues**: without lights a unit never overtakes a stopped car with another stopped car within
+  10 m ahead of it (a queue) into the oncoming lane; a pass met head-on by a stopped car is given
+  up after 3 s.
+- **Wedged** (bound units, `unstick`): 2 s of throttle without moving → reverse 1.8 s at opposite
+  lock, then drive on (also when nose-to-bumper with a parked car it must get around). After 4
+  attempts without driving freely, a patrol car no racer is within 150 m of is retired.
+- **Routes** have rounded corners (`Track::rounded`, 10 m at the centreline), and patrols pick
+  destinations whose route starts the way the car faces (no U-turns in the street).
+- **Turn signals** (`Unit::turn_signal`): 40 m before a junction where the route turns until 8 m
+  past it, left pulling out to pass, right over its last 10 m; off with lights on.
 - **Traffic rules** (next junction on the track, refreshed at think rate; light from
   `WorldQuery::signal_state_ahead`):
   - *No lights (patrol)*: stop `stop_line_back_m` before a red, and before a yellow when there is

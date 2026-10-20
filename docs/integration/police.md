@@ -28,7 +28,11 @@
     pure-pursuit steer plus PID pedals, called every physics tick after `sync_unit`;
   - `sync_unit(unit, UnitSync { pos, vel, heading, health, effects })`. A unit whose effects show a bent wheel pulls over.
   - **`set_obstacles(&[ObstacleView])`** (round 6): every vehicle units must not drive into, once per
-    tick before `unit_input`. `ObstacleView::car(entity, pos, vel, forward)` builds a car-sized one.
+    tick before `unit_input`. `ObstacleView::car(entity, pos, vel, forward)` builds a car-sized one;
+    `ObstacleView::parked(pos, forward, half_len, half_wid)` (or `parked = true`) a parked car or a
+    civilian pulled over for a siren: units nudge past those within their lane (up to 2.6 m),
+    pass them after 1 s even near junctions, and they never block a spawn or a junction.
+  - **`Unit::turn_signal() -> i8`** (-1 / 0 / 1): indicators for the renderer, off with lights.
     Units follow, wait behind or pass them, and spawn clear of them (`wp_police::avoid`).
 - Unit lifecycle events: `UnitSpawned` / `UnitDespawned`.
 - Queries: `wanted_level`, `racer`, `units`, `incidents`, `pool_count`, `tire_puncture(entity) -> [f32; 4]`,
@@ -154,7 +158,7 @@ The reply is `Result<(), CaptainError>` with:
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).
   It runs wide more often on D's ring road and diagonals, mostly at low speed: the self-wreck
   rate is 0% over 20 Simulation pursuits.
-- Obstacle awareness sees vehicles only, not parked cars or cones (`wp_world` static props).
+- Obstacle awareness sees vehicles and parked cars (from `wp_sim`), not cones.
 - The light used is the one `signal_state_ahead` reports for the unit's current lane (straight
   ahead), so a unit turning at a junction with separate turn phases may read the wrong one.
 - In the police-on soak two police cars touch at 4.5 m/s right after spawn (t = 3.9 s).
@@ -351,3 +355,39 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Lead: stuck-cop fixes (2026-10-20, branch `claude/happy-knuth-g39ogc`)
+Owner playtest rows 34–35. Found with `cargo run --release -p wp_wasm --example cop_stuck_probe`
+(browser city chase, every police car sampled once a second): before, a 4-minute patrol run had
+**all 5 cars stuck for good** (38 s stuck per car-minute). Causes and fixes:
+1. **Parked cars were invisible** to obstacle awareness: cops turned into a street and pushed a
+   kerbside car's bumper at full throttle forever. `wp_sim` now reports parked cars near police
+   cars (live physics positions) as `ObstacleView::parked`; `avoid::parked_nudge` shifts the
+   lane offset up to `MAX_PARKED_NUDGE_M` (2.6 m) to clear one, a car that needs more is a
+   blocker that is passed after `PARKED_PASS_WAIT_S`; nose-to-bumper (`pinned`) the unit backs up
+   first.
+2. **Patrol re-routes started with a U-turn in the street** (the next random destination was
+   behind): the car mounted the kerb into a building. `patrol_dest` draws up to 6 destinations
+   and takes one whose route starts the way the car faces.
+3. **Zero-radius route corners** (tracks through junction centres): right turns swung into the
+   oncoming lanes and met the queue there nose to nose. `Track::rounded` (routes,
+   `ROUTE_CORNER_RADIUS_M` 10 m at the centreline).
+4. **Mid-turn bumper false stops**: the nose sweeps across cars waiting in the other lane of the
+   road being turned into; on track, cars clear of the planned corridor only count within
+   1.5 m of the bumper.
+5. **Standoffs with stopped oncoming cars** (each waiting for the other): they are nudged past
+   like parked cars (never the racer being pursued). A pass met head-on by a stopped car is
+   given up after 3 s (no lights). Without lights a unit no longer overtakes a **queue** (another
+   stopped car within 10 m ahead of the one it would pass) into the oncoming lane.
+6. **Wedged against a wall / kerb**: `unstick` — 2 s of throttle without moving → reverse 1.8 s
+   with opposite lock, then drive on; after 4 attempts without driving freely a patrol car with
+   no racer within 150 m is retired (the pool sends a fresh one).
+7. Pre-existing: a unit near an older leg of a looping trail flipped Intercept ↔ Pursue every
+   think step with an empty track (the join check and the off-trail check projected
+   differently); both use the same projection now.
+
+After: 4-min patrol 0.3 s/car-min, 10-min patrol 0.7, 5-min chase with the player weaving and
+crashing 2.4 (15.7 before; what is left is patrol cars queueing in jams the probe causes).
+`risk_budget_and_caps_keep_cops_alive` no longer ranks a reckless config against the builtin
+tables (both now cause the same harm within noise, ≈ 260 events, nearly all random near
+misses); it bounds the builtin tables' harm instead.

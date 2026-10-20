@@ -26,6 +26,11 @@ use crate::PoliceSystem;
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
 
+/// Reverse-outs after which a patrol car that still cannot get going is retired.
+const STUCK_RETIRE_ATTEMPTS: u32 = 4;
+/// ...but only when no racer is this close (nobody sees it vanish), m.
+const STUCK_RETIRE_UNSEEN_M: f32 = 150.0;
+
 /// Spots tried per pool spawn before giving up until the next think step.
 const SPAWN_TRIES: usize = 8;
 
@@ -332,7 +337,19 @@ impl PoliceSystem {
                 let into = normalize(sub(t.point_at(s), t.point_at(s - 8.0)));
                 let out = normalize(sub(t.point_at(s + 8.0), t.point_at(s)));
                 let turn = crate::graph::dot(into, out) < 0.87;
-                crate::avoid::JunctionAhead { s, light, turn }
+                // +Z up: a positive cross product turns left.
+                let cross = into[0] * out[1] - into[1] * out[0];
+                let turn_dir = match (turn, cross > 0.0) {
+                    (false, _) => 0,
+                    (true, true) => -1,
+                    (true, false) => 1,
+                };
+                crate::avoid::JunctionAhead {
+                    s,
+                    light,
+                    turn,
+                    turn_dir,
+                }
             });
             self.units[i].avoid.junction = junction;
         }
@@ -595,6 +612,19 @@ impl PoliceSystem {
     // -----------------------------------------------------------------------------------------
 
     fn maintain_pool(&mut self) {
+        // A patrol car that keeps wedging itself (reverse-outs that do not free it) is towed
+        // away out of sight; the pool sends a fresh one.
+        let racers: Vec<[f32; 2]> = self.racers.values().map(|r| xy(r.pos)).collect();
+        if let Some(i) = self.units.iter().position(|u| {
+            u.available()
+                && u.entity.is_some()
+                && u.avoid.unstick_attempts >= STUCK_RETIRE_ATTEMPTS
+                && racers
+                    .iter()
+                    .all(|p| dist(*p, u.body.pos) > STUCK_RETIRE_UNSEEN_M)
+        }) {
+            self.despawn(i);
+        }
         for d in District::ALL {
             let target = self.cfg.presence.patrols.get(d).get(self.phase);
             let alive = self.pool_count(d);

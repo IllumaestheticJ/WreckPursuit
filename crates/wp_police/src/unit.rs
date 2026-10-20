@@ -21,6 +21,20 @@ use crate::graph::{
 };
 use crate::time::SimTime;
 
+/// A patrolling unit indicates a turn this far before the junction centre, m.
+pub const TURN_SIGNAL_BEFORE_M: f32 = 40.0;
+/// ...and keeps indicating until this far past it, m.
+const JUNCTION_EXIT_M: f32 = 8.0;
+/// A pass indicates right (pulling back in) over its last this many metres, m.
+const PASS_RETURN_SIGNAL_M: f32 = 10.0;
+
+/// Points per rounded corner in [`Track::rounded`] (minus one).
+const CORNER_STEPS: usize = 6;
+
+/// Corner rounding of police routes (centreline), m: a right turn in the lane
+/// [`LANE_OFFSET_M`] right of it is about 8 m in radius, a left turn about 12 m.
+pub const ROUTE_CORNER_RADIUS_M: f32 = 10.0;
+
 /// A polyline the unit drives along, with cumulative arc length.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Track {
@@ -48,6 +62,44 @@ impl Track {
             cum.push(acc);
         }
         Self { pts, cum }
+    }
+
+    /// Build like [`Track::new`], then round every corner sharper than ~14° into a curve (a
+    /// quadratic Bézier) that leaves the straight `radius_m` before the corner point, less on
+    /// short legs (at most 45 % of either). Routes through junction centres otherwise have
+    /// zero-radius corners a car can only follow by swinging wide into the oncoming lanes.
+    /// Reversals (U-turns) keep their point.
+    pub fn rounded(points: Vec<[f32; 2]>, radius_m: f32) -> Self {
+        let base = Track::new(points);
+        let p = &base.pts;
+        if p.len() < 3 {
+            return base;
+        }
+        let mut out = Vec::with_capacity(p.len() + CORNER_STEPS * 4);
+        out.push(p[0]);
+        for k in 1..p.len() - 1 {
+            let (a, c, b) = (p[k - 1], p[k], p[k + 1]);
+            let ua = normalize(sub(c, a));
+            let ub = normalize(sub(b, c));
+            let turn = dot(ua, ub);
+            if !(-0.7..=0.97).contains(&turn) {
+                out.push(c);
+                continue;
+            }
+            let d = radius_m.min(0.45 * dist(a, c)).min(0.45 * dist(c, b));
+            let p0 = sub(c, scale(ua, d));
+            let p2 = add(c, scale(ub, d));
+            for i in 0..=CORNER_STEPS {
+                let t = i as f32 / CORNER_STEPS as f32;
+                let (w0, w1, w2) = ((1.0 - t) * (1.0 - t), 2.0 * (1.0 - t) * t, t * t);
+                out.push([
+                    w0 * p0[0] + w1 * c[0] + w2 * p2[0],
+                    w0 * p0[1] + w1 * c[1] + w2 * p2[1],
+                ]);
+            }
+        }
+        out.push(p[p.len() - 1]);
+        Track::new(out)
     }
 
     /// Total length, m.
@@ -434,6 +486,33 @@ impl Unit {
         })
     }
 
+    /// Turn signal for the renderer: -1 left, 0 off, 1 right. Off with lights and siren on
+    /// (pursuit, response, tools) and for helicopters. Otherwise the unit indicates
+    /// [`TURN_SIGNAL_BEFORE_M`] before a junction where its route turns (until it is through),
+    /// pulling out to pass a stopped vehicle (left) and pulling back in at the end of the pass
+    /// (right).
+    pub fn turn_signal(&self) -> i8 {
+        if self.kind != UnitKind::Car || self.cmd.siren || !self.cmd.track.is_drivable() {
+            return 0;
+        }
+        if let Some(until) = self.avoid.pass_offset_m.map(|_| self.avoid.pass_until_s) {
+            return if until - self.track_s < PASS_RETURN_SIGNAL_M {
+                1
+            } else {
+                -1
+            };
+        }
+        match self.avoid.junction {
+            Some(j)
+                if j.turn_dir != 0
+                    && (-JUNCTION_EXIT_M..TURN_SIGNAL_BEFORE_M).contains(&(j.s - self.track_s)) =>
+            {
+                j.turn_dir
+            }
+            _ => 0,
+        }
+    }
+
     /// Available for a new job (not busy with a tool, not out of service).
     pub fn available(&self) -> bool {
         !self.wrecked
@@ -796,5 +875,69 @@ mod tests {
             assert!(!r.crashed, "crashed at tick {i} pos {:?}", u.body.pos);
         }
         assert!(u.body.pos[0] > 150.0, "{:?}", u.body.pos);
+    }
+
+    #[test]
+    fn rounded_tracks_have_drivable_corners() {
+        let sharp = l_track();
+        let t = Track::rounded(sharp.pts.clone(), ROUTE_CORNER_RADIUS_M);
+        // Same ends, a little shorter (the corner is cut), no point near the sharp corner.
+        assert_eq!(t.pts.first(), sharp.pts.first());
+        assert_eq!(t.pts.last(), sharp.pts.last());
+        assert!(t.length() < sharp.length() && t.length() > sharp.length() - 10.0);
+        assert!(t.pts.iter().all(|p| dist(*p, [0.0, 200.0]) > 2.0));
+        // The corner radius is now several metres (it was 0), and straights stay straight.
+        let (s, _) = t.project([0.0, 200.0], 195.0, 20.0);
+        assert!(t.radius_at(s, 3.0) > 6.0, "{}", t.radius_at(s, 3.0));
+        assert!(t.radius_at(100.0, 10.0).is_infinite());
+        // Short legs are cut less; a reversal (U-turn) keeps its point.
+        let short = Track::rounded(vec![[0.0, 0.0], [0.0, 6.0], [6.0, 6.0]], 10.0);
+        assert!(short.pts.iter().all(|p| p[1] <= 6.0 && p[0] >= 0.0));
+        let back = Track::rounded(vec![[0.0, 0.0], [0.0, 50.0], [0.0, 10.0]], 10.0);
+        assert!(back.pts.contains(&[0.0, 50.0]));
+    }
+
+    #[test]
+    fn turn_signals_before_turns_and_passes_but_not_with_lights() {
+        let mut u = Unit::new(
+            UnitId(1),
+            UnitKind::Car,
+            UnitRole::Reinforcement,
+            [0.0, 0.0],
+            [0.0, 1.0],
+            1.0,
+        );
+        u.set_command(DriveCommand {
+            track: l_track(),
+            speed_mps: 10.0,
+            cornering_g: 0.4,
+            siren: false,
+            lane_offset_m: LANE_OFFSET_M,
+        });
+        let right_turn = Some(crate::avoid::JunctionAhead {
+            s: 200.0,
+            light: None,
+            turn: true,
+            turn_dir: 1,
+        });
+        u.avoid.junction = right_turn;
+        u.track_s = 100.0;
+        assert_eq!(u.turn_signal(), 0, "too far before the junction");
+        u.track_s = 170.0;
+        assert_eq!(u.turn_signal(), 1);
+        u.track_s = 205.0;
+        assert_eq!(u.turn_signal(), 1, "still in the junction");
+        u.track_s = 215.0;
+        assert_eq!(u.turn_signal(), 0, "through it");
+        // Passing: left while pulling out, right while pulling back in.
+        u.track_s = 50.0;
+        u.avoid.pass_offset_m = Some(-1.75);
+        u.avoid.pass_until_s = 80.0;
+        assert_eq!(u.turn_signal(), -1);
+        u.track_s = 75.0;
+        assert_eq!(u.turn_signal(), 1);
+        // Lights on: no indicators.
+        u.cmd.siren = true;
+        assert_eq!(u.turn_signal(), 0);
     }
 }

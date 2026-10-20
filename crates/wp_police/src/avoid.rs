@@ -3,8 +3,10 @@
 //! Every tick a ground unit looks along its own track for vehicles in its lane corridor
 //! (players, racers, traffic, other units). The nearest one caps the unit's speed so it can
 //! stop [`AvoidConfig::standstill_gap_m`] behind it. A unit stuck behind a stopped vehicle for
-//! a while pulls into the other lane and passes when that lane is clear. Spawning uses
-//! [`spawn_clear`] so units never appear on top of, or right in front of, another vehicle.
+//! a while pulls into the other lane and passes when that lane is clear. A parked car poking
+//! into the lane (kerbside on a curve, knocked askew) is not a reason to stop: the unit nudges
+//! up to [`MAX_PARKED_NUDGE_M`] away from it within its lane. Spawning uses [`spawn_clear`] so
+//! units never appear on top of, or right in front of, another vehicle.
 //!
 //! `wp_sim` reports every vehicle with [`crate::PoliceSystem::set_obstacles`]. Without that
 //! (headless runs) units see the racers and each other.
@@ -37,6 +39,10 @@ pub struct ObstacleView {
     pub half_length_m: f32,
     /// Half width, m.
     pub half_width_m: f32,
+    /// A parked car at the kerb (units nudge past it instead of queueing behind it; it never
+    /// blocks a spawn or a junction).
+    #[serde(default)]
+    pub parked: bool,
 }
 
 impl ObstacleView {
@@ -49,6 +55,20 @@ impl ObstacleView {
             forward,
             half_length_m: 2.3,
             half_width_m: 0.95,
+            parked: false,
+        }
+    }
+
+    /// A parked car (box with these half extents) at `pos`, facing `forward`.
+    pub fn parked(pos: [f32; 3], forward: [f32; 2], half_length_m: f32, half_width_m: f32) -> Self {
+        Self {
+            entity: None,
+            pos,
+            vel: [0.0; 3],
+            forward,
+            half_length_m,
+            half_width_m,
+            parked: true,
         }
     }
 }
@@ -65,6 +85,8 @@ pub(crate) struct Obstacle {
     pub(crate) fwd: [f32; 2],
     pub(crate) half_len: f32,
     pub(crate) half_wid: f32,
+    /// A parked car (see [`ObstacleView::parked`]).
+    pub(crate) parked: bool,
 }
 
 impl Obstacle {
@@ -82,6 +104,7 @@ impl Obstacle {
             fwd: f,
             half_len: v.half_length_m.max(0.1),
             half_wid: v.half_width_m.max(0.1),
+            parked: v.parked,
         }
     }
 
@@ -101,6 +124,7 @@ impl Obstacle {
             fwd: normalize(heading),
             half_len: 2.3,
             half_wid: 0.95,
+            parked: false,
         }
     }
 
@@ -132,6 +156,22 @@ pub struct AvoidState {
     /// What caps the speed right now: a vehicle's entity id, a police unit id, or none.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
+    /// Time spent pressing on without moving (wedged against a kerb, wall or car), s.
+    #[serde(default)]
+    pub wedged_s: f32,
+    /// Reversing out of a wedge for this much longer, s (0 = driving normally).
+    #[serde(default)]
+    pub reverse_s: f32,
+    /// Steering held while reversing out, -1..=1.
+    #[serde(default)]
+    pub reverse_steer: f32,
+    /// Reverse-outs since the unit last drove freely (the dispatcher retires a patrol car that
+    /// cannot free itself).
+    #[serde(default)]
+    pub unstick_attempts: u32,
+    /// Nose within [`PARKED_PINNED_GAP_M`] of a parked car it has to get around (backs up).
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -157,6 +197,11 @@ impl Default for AvoidState {
             yield_s: 0.0,
             unit_wait_s: 0.0,
             blocked_by: None,
+            wedged_s: 0.0,
+            reverse_s: 0.0,
+            reverse_steer: 0.0,
+            unstick_attempts: 0,
+            pinned: false,
         }
     }
 }
@@ -194,6 +239,9 @@ pub struct JunctionAhead {
     /// The track turns there (more than ~30°).
     #[serde(default)]
     pub turn: bool,
+    /// Which way it turns there: -1 left, 0 straight on, 1 right (drives the turn signal).
+    #[serde(default)]
+    pub turn_dir: i8,
 }
 
 /// The nearest vehicle in a lane corridor.
@@ -211,6 +259,10 @@ pub(crate) struct Blocker {
     pub(crate) speed_mps: f32,
     /// Arc length of its far end on the track, m.
     pub(crate) far_s: f32,
+    /// It is a parked car.
+    pub(crate) parked: bool,
+    /// Its heading along the track (1 = same way, -1 = facing the unit).
+    pub(crate) facing: f32,
 }
 
 /// What a unit is, for the scan.
@@ -245,6 +297,8 @@ pub(crate) fn scan(
         return None;
     }
     let reach2 = (horizon_m + 10.0) * (horizon_m + 10.0);
+    // On its track (not turning around or cutting back onto it): the planned path decides.
+    let on_track = dist2(me.pos, lane_point(track, me.track_s, offset_m)) < 2.0 * 2.0;
     let mut best: Option<Blocker> = None;
     for o in obstacles {
         if o.unit == Some(me.unit)
@@ -276,7 +330,13 @@ pub(crate) fn scan(
         let ext_fwd =
             o.half_len * dot(o.fwd, me.heading).abs() + o.half_wid * dot(o.fwd, side).abs();
         let bumper_gap = along - UNIT_HALF_LENGTH_M - ext_fwd;
+        // Mid-turn the nose sweeps across cars waiting beside the path (the other lane of the
+        // road being turned into): on track, those only count right at the bumper.
+        let off_path = on_track
+            && bumper_gap > BUMPER_CONTACT_M
+            && path_clearance(track, me.track_s, horizon_m, offset_m, o) > cfg.lateral_margin_m;
         if bumper
+            && !off_path
             && along > 0.0
             && bumper_gap < cfg.bumper_m
             && dot(rel, side).abs() < UNIT_HALF_WIDTH_M + ext_side + cfg.lateral_margin_m
@@ -288,6 +348,8 @@ pub(crate) fn scan(
                 along_mps: dot(o.vel, me.heading),
                 speed_mps: o.speed(),
                 far_s: me.track_s + along + ext_fwd,
+                parked: o.parked,
+                facing: dot(o.fwd, me.heading),
             };
             if best.is_none_or(|x| b.gap_m < x.gap_m) {
                 best = Some(b);
@@ -319,12 +381,62 @@ pub(crate) fn scan(
             along_mps: dot(o.vel, t),
             speed_mps: o.speed(),
             far_s: s_o + ext_t,
+            parked: o.parked,
+            facing: dot(o.fwd, t),
         };
         if best.is_none_or(|x| b.gap_m < x.gap_m) {
             best = Some(b);
         }
     }
     best
+}
+
+/// A pass met head-on by a stopped car is given up after this long (without lights), s.
+const PASS_ABORT_S: f32 = 3.0;
+/// A stopped vehicle with another stopped one this close ahead of it is in a queue, m.
+const QUEUE_GAP_M: f32 = 10.0;
+
+/// Whether the stopped blocker `b` is the end of a queue (another stopped, moving-type vehicle
+/// within [`QUEUE_GAP_M`] ahead of it in the lane): units without lights wait in queues
+/// instead of overtaking them into the oncoming lane.
+fn in_queue(
+    me: &Me,
+    track: &Track,
+    offset_m: f32,
+    b: &Blocker,
+    obstacles: &[Obstacle],
+    cfg: &AvoidConfig,
+) -> bool {
+    let s = b.far_s + UNIT_HALF_LENGTH_M;
+    let ahead = Me {
+        pos: lane_point(track, s, offset_m),
+        heading: normalize(sub(track.point_at(s + 1.0), track.point_at(s - 1.0))),
+        track_s: s,
+        ..*me
+    };
+    // Only what is beyond the blocker's front (the blocker itself projects there too).
+    let beyond: Vec<Obstacle> = obstacles
+        .iter()
+        .filter(|o| dot(sub(o.pos, ahead.pos), ahead.heading) > 0.0)
+        .copied()
+        .collect();
+    scan(&ahead, track, offset_m, QUEUE_GAP_M, &beyond, cfg, false)
+        .is_some_and(|q| !q.parked && q.speed_mps < cfg.stopped_mps && q.gap_m < QUEUE_GAP_M)
+}
+
+/// Within this bumper gap an obstacle ahead of the body always counts, on the path or not, m.
+const BUMPER_CONTACT_M: f32 = 1.5;
+
+/// Sideways clearance between obstacle `o` and the unit's corridor around the lane `offset_m`
+/// right of the track, where `o` projects onto the track ahead of `track_s` (negative =
+/// overlapping).
+fn path_clearance(track: &Track, track_s: f32, horizon_m: f32, offset_m: f32, o: &Obstacle) -> f32 {
+    let (s_o, _) = track.project_ahead(o.pos, track_s, 2.0, horizon_m + 5.0);
+    let t = normalize(sub(track.point_at(s_o + 1.0), track.point_at(s_o - 1.0)));
+    let n = [t[1], -t[0]];
+    let lat = dot(sub(o.pos, lane_point(track, s_o, offset_m)), n).abs();
+    let ext_n = o.half_len * dot(o.fwd, n).abs() + o.half_wid * dot(o.fwd, t).abs();
+    lat - UNIT_HALF_WIDTH_M - ext_n
 }
 
 /// Highest speed that still stops `standstill_gap_m` behind `b`, m/s.
@@ -362,8 +474,15 @@ pub(crate) fn update(
     if st.pass_offset_m.is_some() && me.track_s > st.pass_until_s {
         st.pass_offset_m = None;
     }
-    let offset = st.pass_offset_m.unwrap_or(base_offset_m);
     let h = horizon(v, cfg);
+    let offset = parked_nudge(
+        me,
+        track,
+        st.pass_offset_m.unwrap_or(base_offset_m),
+        h,
+        obstacles,
+        cfg,
+    );
     let mut blocker = scan(me, track, offset, h, obstacles, cfg, true);
     // Gridlock: units from several directions waiting on each other at a junction. After
     // `gridlock_s` the lower id creeps on past stopped higher-id units (they keep waiting).
@@ -413,11 +532,24 @@ pub(crate) fn update(
     if creeping {
         st.limit_mps = st.limit_mps.min(cfg.pass_creep_mps);
     }
+    st.pinned = blocker.is_some_and(|b| b.parked && b.gap_m < PARKED_PINNED_GAP_M);
     st.blocked_by = blocker.map(|b| match (b.unit, b.entity) {
         (Some(u), _) => BlockedBy::Unit(u),
         (None, Some(e)) => BlockedBy::Vehicle(e),
         (None, None) => BlockedBy::Traffic,
     });
+    // A pass met head-on by a stopped car (it waits for the unit): give it up and go back.
+    let head_on = blocker.is_some_and(|b| {
+        b.unit.is_none() && !b.parked && b.speed_mps < cfg.stopped_mps && b.facing < -0.5
+    }) && v < 0.5;
+    if st.pass_offset_m.is_some() && head_on && !siren && st.pass_offset_m != Some(base_offset_m) {
+        st.blocked_s += dt;
+        if st.blocked_s > PASS_ABORT_S {
+            st.pass_offset_m = None;
+            st.blocked_s = 0.0;
+            return base_offset_m;
+        }
+    }
     if st.pass_offset_m.is_some() {
         // Pulling out from right behind the stopped vehicle: it stays in the bumper box until
         // the car has turned, so creep while there is room.
@@ -427,7 +559,9 @@ pub(crate) fn update(
             0.0
         };
         st.limit_mps = st.limit_mps.max(creep).min(cfg.pass_speed_mps);
-        st.blocked_s = 0.0;
+        if !head_on {
+            st.blocked_s = 0.0;
+        }
         return offset;
     }
     let stuck = blocker.filter(|b| {
@@ -443,7 +577,7 @@ pub(crate) fn update(
     let near_junction = st
         .junction
         .is_some_and(|j| j.s - me.track_s < (b.far_s - me.track_s) + cfg.no_pass_near_junction_m);
-    if !siren && near_junction {
+    if !siren && !b.parked && (near_junction || in_queue(me, track, offset, &b, obstacles, cfg)) {
         st.blocked_s = 0.0;
         return offset;
     }
@@ -453,12 +587,19 @@ pub(crate) fn update(
     } else {
         cfg.pass_wait_s
     };
+    let wait = if b.parked {
+        wait.min(PARKED_PASS_WAIT_S)
+    } else {
+        wait
+    };
     if st.blocked_s < wait {
         return offset;
     }
     // Other lane (or, for a vehicle straddling the centreline, a little further left): clear
-    // past the blocker, and no oncoming vehicle close.
+    // past the blocker, and no oncoming vehicle close. Parked cars at that lane's kerb do not
+    // count: the nudge takes the unit past them once it is over there.
     let need = (b.far_s - me.track_s) + cfg.pass_clear_m;
+    let moving: Vec<Obstacle> = obstacles.iter().filter(|o| !o.parked).copied().collect();
     for shift in [cfg.pass_shift_m, cfg.pass_shift_m + cfg.pass_extra_shift_m] {
         let alt = base_offset_m - shift;
         let clear = match scan(
@@ -466,7 +607,7 @@ pub(crate) fn update(
             track,
             alt,
             need + cfg.oncoming_clear_m,
-            obstacles,
+            &moving,
             cfg,
             false,
         ) {
@@ -483,6 +624,78 @@ pub(crate) fn update(
         }
     }
     offset
+}
+
+/// Largest sideways shift a unit makes within its lane to clear a parked car, m. A parked car
+/// that needs more is a blocker like any other (wait, then pass).
+/// (A full car width: the unit may cross the centreline to get by, like a driver would; an
+/// oncoming car in the shifted corridor still stops it.)
+pub const MAX_PARKED_NUDGE_M: f32 = 2.6;
+/// A parked car blocking the lane is passed after this long, also near a junction (it will
+/// never move), s.
+pub const PARKED_PASS_WAIT_S: f32 = 1.0;
+/// Closer than this to a parked car it cannot steer around, a unit backs up first, m.
+pub const PARKED_PINNED_GAP_M: f32 = 1.5;
+
+/// Lane offset that clears every parked car (or stopped oncoming car) ahead poking into the
+/// corridor around `offset_m`,
+/// shifting by at most [`MAX_PARKED_NUDGE_M`] (a car that needs more is left to the scan).
+pub(crate) fn parked_nudge(
+    me: &Me,
+    track: &Track,
+    offset_m: f32,
+    horizon_m: f32,
+    obstacles: &[Obstacle],
+    cfg: &AvoidConfig,
+) -> f32 {
+    if !track.is_drivable() {
+        return offset_m;
+    }
+    let reach2 = (horizon_m + 10.0) * (horizon_m + 10.0);
+    // Corridor half width, plus a little so the scan does not see it on the boundary.
+    let w = UNIT_HALF_WIDTH_M + cfg.lateral_margin_m + 0.05;
+    let (mut lo, mut hi) = (f32::NEG_INFINITY, f32::INFINITY);
+    // Parked cars, and stopped oncoming cars waiting at the edge of the corridor (they may be
+    // waiting for the unit: edging past breaks the standoff). Never the racer it is after: a
+    // stopped target is an arrest.
+    let waiting = |o: &&Obstacle| {
+        o.parked
+            || (o.unit.is_none()
+                && (o.entity.is_none() || (o.entity != me.target && o.entity != me.ignore))
+                && o.speed() < 0.3
+                && dot(o.fwd, me.heading) < -0.5)
+    };
+    for o in obstacles.iter().filter(waiting) {
+        let rel = sub(o.pos, me.pos);
+        if dot(rel, rel) > reach2 || dot(rel, me.heading) < -(o.half_len + UNIT_HALF_LENGTH_M) {
+            continue;
+        }
+        let (s_o, _) = track.project_ahead(o.pos, me.track_s, 2.0, horizon_m + 5.0);
+        if s_o > me.track_s + horizon_m + o.half_len {
+            continue;
+        }
+        let t = normalize(sub(track.point_at(s_o + 1.0), track.point_at(s_o - 1.0)));
+        let n = [t[1], -t[0]];
+        // Signed offset of its centre from the centreline (+ right) and its half extent across.
+        let lat = dot(sub(o.pos, track.point_at(s_o)), n);
+        let ext_n = o.half_len * dot(o.fwd, n).abs() + o.half_wid * dot(o.fwd, t).abs();
+        if (lat - offset_m).abs() >= ext_n + w {
+            continue; // clear of the corridor
+        }
+        if lat >= offset_m {
+            hi = hi.min(lat - ext_n - w);
+        } else {
+            lo = lo.max(lat + ext_n + w);
+        }
+    }
+    let mut out = offset_m;
+    if hi < out && offset_m - hi <= MAX_PARKED_NUDGE_M {
+        out = hi;
+    }
+    if lo > out && lo - offset_m <= MAX_PARKED_NUDGE_M && lo <= hi {
+        out = lo;
+    }
+    out
 }
 
 /// Speed cap from traffic rules at the next junction, m/s.
@@ -582,7 +795,8 @@ pub(crate) fn must_yield(
     let my_t = to_centre.max(0.0) / v.max(cfg.yield_mps);
     let r2 = cfg.yield_radius_m * cfg.yield_radius_m;
     obstacles.iter().any(|o| {
-        if o.unit == Some(me.unit)
+        if o.parked
+            || o.unit == Some(me.unit)
             || (o.entity.is_some() && (o.entity == me.entity || o.entity == me.ignore))
             || o.unit.is_some_and(|u| u > me.unit)
         {
@@ -615,6 +829,10 @@ pub(crate) fn must_yield(
 pub(crate) fn spawn_clear(pos: [f32; 2], obstacles: &[Obstacle], cfg: &AvoidConfig) -> bool {
     let r2 = cfg.spawn_clear_m * cfg.spawn_clear_m;
     obstacles.iter().all(|o| {
+        // Spawn points are lane centres: kerbside parked cars are beside them, not on them.
+        if o.parked {
+            return true;
+        }
         if dist2(o.pos, pos) < r2 {
             return false;
         }
@@ -767,6 +985,7 @@ mod tests {
             s: 60.0,
             light: Some(Light::Stop),
             turn: false,
+            turn_dir: 0,
         });
         // Patrol stops before the line at a red, and holds once there.
         let far = junction_speed(red, 0.0, 10.0, false, &c);
@@ -781,12 +1000,14 @@ mod tests {
             s: 60.0,
             light: Some(Light::Go),
             turn: false,
+            turn_dir: 0,
         });
         assert!(junction_speed(green, 50.0, 10.0, false, &c).is_infinite());
         let plain = Some(JunctionAhead {
             s: 60.0,
             light: None,
             turn: false,
+            turn_dir: 0,
         });
         let v = junction_speed(plain, 60.0 - c.junction_slow_m, 10.0, false, &c);
         assert!((v - c.yield_mps).abs() < 1e-3, "{v}");
@@ -804,6 +1025,7 @@ mod tests {
                 s: 20.0,
                 light: Some(Light::Stop),
                 turn: false,
+                turn_dir: 0,
             }),
             ..AvoidState::default()
         };
@@ -831,6 +1053,7 @@ mod tests {
             s: 30.0,
             light: None,
             turn: false,
+            turn_dir: 0,
         };
         let plain = Some(junction);
         let m = me(10.0, [1.75, 10.0]);
@@ -888,5 +1111,79 @@ mod tests {
             spawn_clear([30.0, 60.0], &[racer], &c),
             "parallel street is fine"
         );
+    }
+
+    fn kerbside(pos: [f32; 2], fwd: [f32; 2]) -> Obstacle {
+        Obstacle::from_view(&ObstacleView::parked([pos[0], pos[1], 0.0], fwd, 2.25, 0.95))
+    }
+
+    #[test]
+    fn nudges_past_a_parked_car_poking_into_the_lane() {
+        let c = cfg();
+        let m = me(0.0, [1.75, 0.0]);
+        // Angled kerbside car whose corner reaches into the lane (centre 3.2 m right).
+        let obs = [kerbside([3.2, 25.0], normalize([0.3, 1.0]))];
+        let mut st = AvoidState::default();
+        let dt = 1.0 / 240.0;
+        let off = update(&mut st, &m, &straight(), 1.75, 10.0, false, &obs, &c, dt);
+        assert!(off < 1.75 && off > 1.75 - MAX_PARKED_NUDGE_M, "{off}");
+        assert!(st.limit_mps.is_infinite(), "no stopping for it: {st:?}");
+        // Square in the lane: too far to nudge, so it blocks (and is passed after a second,
+        // even near a junction).
+        let obs = [kerbside([1.75, 12.0], [0.0, 1.0])];
+        st.junction = Some(JunctionAhead {
+            s: 25.0,
+            light: None,
+            turn: false,
+            turn_dir: 0,
+        });
+        let mut off = 1.75;
+        for _ in 0..(240.0 * (PARKED_PASS_WAIT_S + 0.5)) as usize {
+            off = update(&mut st, &m, &straight(), 1.75, 0.0, false, &obs, &c, dt);
+        }
+        assert!(off < 0.0, "passes the parked car: {off}");
+        // Parked cars never block a spawn or a junction.
+        assert!(spawn_clear([1.75, 40.0], &[kerbside([4.0, 40.0], [0.0, 1.0])], &c));
+    }
+
+    #[test]
+    fn a_nose_sweeping_past_a_waiting_car_mid_turn_does_not_stop() {
+        let c = cfg();
+        // Right turn: north, then east at y = 100 (lane 1.75 right of the centreline).
+        let t = Track::new(vec![[0.0, 0.0], [0.0, 100.0], [100.0, 100.0]]);
+        let mut m = me(98.0, [1.75, 97.5]);
+        m.heading = normalize([0.7, 0.7]);
+        // A car waiting in the other lane of the road being turned into, ahead of the nose.
+        let waiting = Obstacle::car(
+            Some(EntityId(3)),
+            None,
+            [6.0, 102.2],
+            [0.0, 0.0],
+            [-1.0, 0.0],
+        );
+        assert!(scan(&m, &t, 1.75, 40.0, &[waiting], &c, true).is_none());
+        // Right at the bumper it still counts.
+        let close = Obstacle::car(Some(EntityId(3)), None, [4.2, 100.2], [0.0, 0.0], [-1.0, 0.0]);
+        assert!(scan(&m, &t, 1.75, 40.0, &[close], &c, true).is_some());
+    }
+
+    #[test]
+    fn without_lights_a_unit_queues_instead_of_overtaking_a_queue() {
+        let c = cfg();
+        let m = me(0.0, [1.75, 0.0]);
+        let dt = 1.0 / 240.0;
+        let run = |obs: &[Obstacle], siren: bool| {
+            let mut st = AvoidState::default();
+            let mut off = 1.75;
+            for _ in 0..(240.0 * (c.pass_wait_s + 1.0)) as usize {
+                off = update(&mut st, &m, &straight(), 1.75, 0.0, siren, obs, &c, dt);
+            }
+            off
+        };
+        let lone = [parked(2, [1.75, 9.0])];
+        let queue = [parked(2, [1.75, 9.0]), parked(3, [1.75, 15.5])];
+        assert!(run(&lone, false) < 0.0, "passes a lone stopped car");
+        assert_eq!(run(&queue, false), 1.75, "waits in a queue");
+        assert!(run(&queue, true) < 0.0, "with lights it goes round the queue");
     }
 }

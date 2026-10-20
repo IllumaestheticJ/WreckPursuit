@@ -40,6 +40,9 @@ const STOPPED_RACER_MPS: f32 = 2.0;
 /// A pursuer this close to the racer tracks the racer's end of the breadcrumb trail, m.
 const NEAR_RACER_M: f32 = 40.0;
 
+/// Patrol destinations drawn before accepting one whose route starts with a turn-around.
+const PATROL_DEST_TRIES: usize = 6;
+
 /// Pursuit speed: `min(max(target × (1 + margin), floor), cap)`. The floor (10 m/s) lets units
 /// close on a stopped racer for the arrest.
 pub fn pursuit_speed_cap(target_speed: f32, margin: f32, cap: f32) -> f32 {
@@ -426,7 +429,30 @@ impl PoliceSystem {
         if let Some(p) = final_point {
             pts.push(p);
         }
-        (Track::new(pts), turn_around)
+        (
+            Track::rounded(pts, crate::unit::ROUTE_CORNER_RADIUS_M),
+            turn_around,
+        )
+    }
+
+    /// A random patrol destination in `d` whose route from unit `i` starts the way the car
+    /// faces (a physical car turning around in the street mounts the kerb and wedges itself
+    /// against a building); after [`PATROL_DEST_TRIES`] tries, the first one drawn.
+    pub(crate) fn patrol_dest(
+        &mut self,
+        i: usize,
+        d: Option<crate::graph::District>,
+    ) -> Option<NodeId> {
+        let (pos, heading) = (self.units[i].body.pos, self.units[i].body.heading);
+        let mut first = None;
+        for _ in 0..PATROL_DEST_TRIES {
+            let n = self.random_node_in(d)?;
+            first.get_or_insert(n);
+            if !self.route_from(pos, heading, n, None).1 {
+                return Some(n);
+            }
+        }
+        first
     }
 
     pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
@@ -516,7 +542,7 @@ impl PoliceSystem {
             match assignment {
                 Assignment::Idle => {
                     if let UnitRole::Pool(d) = self.units[i].role {
-                        if let Some(dest) = self.random_node_in(Some(d)) {
+                        if let Some(dest) = self.patrol_dest(i, Some(d)) {
                             self.assign(i, Assignment::Patrol { dest });
                         }
                     }
@@ -532,7 +558,7 @@ impl PoliceSystem {
                                 UnitRole::Pool(d) => Some(d),
                                 _ => None,
                             };
-                            if let Some(next) = self.random_node_in(d) {
+                            if let Some(next) = self.patrol_dest(i, d) {
                                 self.units[i].assignment = Assignment::Patrol { dest: next };
                                 let t = self.route_track(i, next, None);
                                 self.units[i].set_command(DriveCommand {
@@ -609,8 +635,15 @@ impl PoliceSystem {
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
                     if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
+                        // Same projection as coordinate_pursuits' off-trail check (right next
+                        // to the racer: its end of the trail only), or a unit near an older leg
+                        // of a looping trail flips between the two every think step.
+                        let near = rec
+                            .last_known
+                            .is_some_and(|p| dist(p, u.body.pos) < NEAR_RACER_M);
+                        let window = if near { NEAR_RACER_M } else { 200.0 };
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
-                            let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
+                            let (s_u, lat) = tr.project(u.body.pos, racer_s, window);
                             lat < 12.0 && s_u <= racer_s + 5.0
                         });
                         if joins {
