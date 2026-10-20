@@ -45,7 +45,7 @@ wp_vehicle::surface::{conditions_grip, aquaplane_onset_mps, TireWetProfile}   //
 wp_vehicle::ride::{axle_ride, heave_kick, pitch_kick, kerb, slide_into_kerb, crest, side_impact}
 WheelCaster::cast_wheel(&WheelProbe)        // tyre-shaped probe; default = centre ray (old behaviour)
 vehicle.forget_motion()                     // after changing the body velocity directly (launch limiter)
-telemetry().anti_launch_n, telemetry().contact_lift_cut_mps
+telemetry().contact_lift_cut_mps
 rig.kick(dv, dw), rig.apply_impulse_at_point(p, j)
 
 // Tools
@@ -84,7 +84,7 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 | 7 | Optional `VehicleDef::slide_assist: Option<f32>` (0..1, overrides the derived slide class) | per-car tuning knob for the slide-control assists; `VehicleDef` has `deny_unknown_fields`, so today it lives in `wp_vehicle::slide::SLIDE_CLASS_OVERRIDES` keyed by car id | 09 (car data), lead | open, low priority |
 | 8 | `DiffDef` gains `Viscous { nm_per_rads, max_nm }`, `Helical { tbr, tbr_coast, preload_nm }`, `Active { max_nm, preload_nm, accel, decel, slip_gain }`; document `Lsd { preload_nm, ramp_power, ramp_coast }` as a clutch-pack LSD whose ramps are **standard lock fractions** `(T_slow − T_fast)/T_in` (0.45 = TBR 2.6; the old implementation effectively doubled them) and `preload_nm` as the wheel-to-wheel breakaway torque | owner request (playtest 26): realistic diffs per car. Until then `data/cars/differentials.toml` (embedded by `wp_vehicle::diff`) carries them, keyed by car id; field names there match this request | 09 (car data), 08 (diff mods), lead (schema) | open |
 | 9 | `DrivetrainDef::diff_center: Option<CenterDiffDef>` with `Viscous { nm_per_rads, max_nm } / Helical { tbr } / Locked` (`None` = the layout's own split / on-demand coupling) | AWD centre diffs (viscous centre on `sentinel_wolfhound`) | 09, lead | open |
-| 10 | `AssistProfile::anti_launch: f32` (0..=1, `#[serde(default)]`; presets: keyboard 1.0, gamepad 0.5, wheel 0, ai 0) | round 12b: the arcade anti-launch assist (`wp_vehicle::assists::anti_launch_force`) belongs to the assist profile, not the damage mode; until then `assists::anti_launch_strength` derives it from `countersteer_help` (0.6 = full) | lead (contracts), C (testbed assist toggles), F (wire) | open |
+| 10 | ~~`AssistProfile::anti_launch: f32`~~ | withdrawn with the assist (owner rule 2026-10-20: physics identical in Arcade and Simulation) | — | withdrawn |
 | 11 | Optional `TireDef::vertical_rate_n_per_m` (default: static corner load / 15 mm, what `wp_vehicle` uses now) and `TireDef::sidewall_m` (default 0.06, rim strike after it) | round 12b tyre compliance; low-profile vs. truck tyres differ | 09 (tyre data), lead | open, low priority |
 
 ## Changes outside my crates
@@ -723,7 +723,7 @@ vehicle side from the road side.
 Base: `origin/lead/round12` merged into `ws/vehicle`. New measurement module
 `wp_vehicle::ride` + `cargo run --release -p wp_vehicle --example ride [all | car …]` (same
 harness run on `lead/round12` for every "before" number below; per-tick trace:
-`--example ride_trace`). Wheel preset (no driver filtering, no anti-launch) unless marked.
+`--example ride_trace`). Wheel preset (no driver filtering).
 Kerbs are square steps the chassis cannot touch (like city sidewalks: wheels only).
 
 **1. Measurements, 4 reference cars (before → after).**
@@ -740,7 +740,6 @@ Kerbs are square steps the chassis cannot touch (like city sidewalks: wheels onl
 | Same crest, sharp kinks @120: airtime · rise | 0.34 s · 0.25 m → **0.30 · 0.21** | 1.04 · 1.04 → **0.28 · 0.21** | 0.68 · 0.74 → **0.28 · 0.21** | 0.73 · 0.86 → **0.25 · 0.20** | ballistic ≈ 0.4 s minus droop |
 | Side impact (Δv 7 m/s at 0.45 m): roll · peak vz | 2.6° · 0.06 → **2.6° · 0.04** | 3.9° · 0.15 → **4.6° · 0.04** | 3.0° · 0.09 → **2.8° · 0.04** | 3.6° · 0.09 → **3.4° · 0.05** | no wheel lift ✓ both |
 | Slide sideways into 15 cm kerb @35: roll | 6.0° → **6.0°** | 7.5° → **10.1°** | 4.8° → **5.3°** | 5.2° → **6.5°** | trips, does not roll ✓ both |
-| Keyboard preset (arcade anti-launch), sharp crest: airtime · rise | — | — | — | — | hakone 0.26 s · 0.17 m, kestrel 0.23 · 0.17, rampart 0.24 · 0.17, cruiser 0.20 · 0.17 |
 
 Whole roster (17 cars), 15 cm kerb at 60: **13 cars were airborne** (up to 0.28 s and 30 cm,
 junkyard_beater; tansy_13 0.19 s, 23 cm) → 3 (lucciola_350 0.06 s, beater 0.03 s, shiro 0.02
@@ -775,16 +774,26 @@ m/s. `golden_tbone_sim` (Simulation T-bone): victim **peak vz 2.16 m/s, 0.48 m u
 - Checked, **not** a cause: inertia tensor (radii of gyration 0.55–0.77 m roll, 1.1–1.7 m
   pitch/yaw = 75–97 % of a solid box; not too small), CG heights, Rapier mass properties.
 
-**3. Arcade stays lively but planted:** `assists::anti_launch_force` — while the body rises
-faster than 0.3 m/s with wheels off the ground, up to 0.8 g extra pull (× wheels off / 4);
-never with all four wheels down, so grip/handling are untouched. Keyboard 1, gamepad 0.5,
-wheel and AI 0 (Simulation-style physical). Lives in the assist profile path: until contract
-request **#10** (`AssistProfile::anti_launch`) lands it follows `countersteer_help`.
-`Telemetry::anti_launch_n` / `contact_lift_cut_mps` expose both.
+**3. Withdrawn (lead correction, owner rule 2026-10-20):** no Arcade-only anti-launch or
+downforce. An anti-launch assist was built this round and then **removed** (commit "withdraw
+the arcade anti-launch assist"; `[bless]` of `weather_fog_pursuit` / `_clear`, the only goldens
+it touched). Every fix above applies identically in both modes. **Mode audit** (`DamageMode` /
+`ModeTable` uses that could change physics):
+- `wp_vehicle`: none — the crate never reads the damage mode (`HandlingEffects` from damage is
+  the only damage → handling path, and it is mode-agnostic on this side).
+- `wp_sim`: none that changes physics — the mode table goes only to
+  `DamageModel::apply_contacts`, to `VehicleState::mode` (reporting) and to `PoliceSetup::mode`.
+- Outside my crates, for E: `wp_police` keys `contact_health_per_kmps2`, `total_loss_health`
+  and `tactics.disengage_health` on the mode (`config.rs` `PerMode`, `dispatch.rs` 264/1330/1370).
+  Those are kinematic-unit damage/health thresholds (when a unit counts as wrecked or pulls
+  out), not driving physics, but they change police *behaviour* by mode; E/lead to decide
+  whether that is allowed under the rule.
+- The ride table's Simulation T-bone fix (static-only wheel probes) is mode-independent; the
+  T-bone simply crushes deeper in Simulation, which is the damage difference.
 
 **4. Scenarios, tests, goldens.** New `apps/simcli/scenarios/vehicle/kerb_strike_{30,60,60_angled}.ron`
 (ranges: never airborne, no spin, speed kept, no damage). `crates/wp_vehicle/tests/ride.rs`
-(ride frequency/damping, 10/15 cm kerbs, rounded/sharp crests, anti-launch, side hits; ranges
+(ride frequency/damping, 10/15 cm kerbs, rounded/sharp crests, side hits; ranges
 with the measured numbers in comments). Settle time and crests are in `tests/ride.rs`: simcli
 has no ramp geometry or vertical-speed / settle metric yet (request to I below). Goldens and
 the pinned wheel-profile / roster-diff hashes re-recorded in a `[bless]` commit (reason: the
@@ -831,7 +840,7 @@ sweeps cost ≈ 2.5 µs each against the 10 km slab.
   (`SharedShape::halfspace(Z)`): shape casts against the 10 km cuboid cost ≈ 2.5 µs and are only
   cm-accurate; with a half-space the rig measured 15.5 µs/tick instead of ≈ 21. Not done here
   because `PhysicsWorld::set_city_ground` parks the slab by translation (`GROUND_HALF_EXTENTS`).
-- **Lead (contracts):** requests #10 (`AssistProfile::anti_launch`) and #11 (tyre vertical rate)
+- **Lead (contracts):** request #11 (tyre vertical rate; #10 withdrawn)
   in the table above.
 - **D (world) / E (police):** `city_blocked_parked_player_grid` (seed 7) fails here with
   `civilian_collisions` 1: physical civilian 21 hits another civilian at ≈ 9 m/s next to the
@@ -872,3 +881,10 @@ except the two below), goldens after the `[bless]` (hashes all match).
   on `lead/round12` too).
 - `world_traffic_soak_observer` (`traffic_agents_min` 313, want ≥ 350) fails on
   `lead/round12` too (310); it is a `slow` scenario, so only `simcli run` shows it.
+
+**Received after the round-12b work (lead messages, 2026-10-20), not started here:** rows 56
+(handbrake opens the clutch in semi-auto/automatic so the rears lock), 57 (countersteer help as
+a 0–100 % slider with `wp_wasm` set/get and a testbed slider) and 59 (manual clutch: pedal slip,
+stall + re-crank, `set_clutch_mode` in `wp_wasm`). They are new owner requests beyond round 12b
+and 57/59 need `wp_wasm` and `apps/testbed-web` changes; waiting for them to be assigned
+through this doc (a "Lead feedback" section) before starting.
