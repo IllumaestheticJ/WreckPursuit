@@ -17,8 +17,9 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
 /// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
 /// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
-/// (owner rows 57 / 72).
-const FORMAT: u8 = 8;
+/// (owner rows 57 / 72). Format 8: plus the drift-assist state (Drift Lab B). Format 9: plus
+/// the confirmed-slide gate of the steering (row 102).
+const FORMAT: u8 = 9;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,6 +238,7 @@ impl Vehicle {
         w.f(self.hb_grace);
         w.b(self.stalled);
         w.fs(&self.drift.to_array());
+        w.fs(&self.slide_gate.to_array());
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -345,6 +347,10 @@ impl Vehicle {
         for d in &mut drift {
             *d = r.f()?;
         }
+        let mut gate = [0.0f32; crate::steering::SlideGate::LEN];
+        for g in &mut gate {
+            *g = r.f()?;
+        }
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -387,6 +393,7 @@ impl Vehicle {
         self.hb_grace = hb_grace;
         self.stalled = stalled;
         self.drift = crate::drift::DriftState::from_array(drift);
+        self.slide_gate = crate::steering::SlideGate::from_array(gate);
         Ok(())
     }
 }

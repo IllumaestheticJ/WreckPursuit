@@ -315,7 +315,7 @@ export class DriftLabPanel {
     const mode = MODES[r[0] | 0] ?? "?";
     const env = r[3] > 0 ? `${r[3].toFixed(0)}°` : "–";
     this.readout.textContent =
-      `slide ${r[1].toFixed(1)}° · ${mode}\n` + `envelope ${env} · authority ${(r[4] * 100).toFixed(0)}% · throttle ×${r[5].toFixed(2)} · onset ${r[2].toFixed(2)}`;
+      `slide ${r[1].toFixed(1)}° · ${mode} · sliding: ${r[6] > 0.5 ? "yes" : "no"}\n` + `envelope ${env} · authority ${(r[4] * 100).toFixed(0)}% · throttle ×${r[5].toFixed(2)} · onset ${r[2].toFixed(2)}`;
     this.readout.style.whiteSpace = "pre";
     this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "catch" ? "#e0a030" : mode === "straighten" ? "#4090e0" : "#666"}`;
   }

@@ -220,6 +220,9 @@ pub struct Telemetry {
     pub stalled: bool,
     /// Drift assist (Drift Lab B): mode, slide angle, envelope.
     pub drift: crate::drift::DriftTelemetry,
+    /// A slide is confirmed ([`crate::steering::SlideGate`], row 102): the steering's slide
+    /// help is acting. The Drift Lab readout's "sliding: yes / no".
+    pub sliding: bool,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -269,6 +272,8 @@ pub struct Vehicle {
     pub(crate) drift: crate::drift::DriftState,
     /// This tick's drift-assist command (recomputed every step from `drift`).
     pub(crate) drift_cmd: crate::drift::DriftCommand,
+    /// Confirmed-slide gate of the steering assists (row 102).
+    pub(crate) slide_gate: crate::steering::SlideGate,
 }
 
 impl Vehicle {
@@ -384,6 +389,7 @@ impl Vehicle {
             hb_grace: 0.0,
             drift: crate::drift::DriftState::default(),
             drift_cmd: crate::drift::DriftCommand::default(),
+            slide_gate: crate::steering::SlideGate::default(),
             stalled: false,
             corners,
         };
@@ -519,6 +525,7 @@ impl Vehicle {
         self.hb_grace = 0.0;
         self.drift = crate::drift::DriftState::default();
         self.drift_cmd = crate::drift::DriftCommand::default();
+        self.slide_gate = crate::steering::SlideGate::default();
         self.stalled = false;
     }
 
@@ -741,6 +748,8 @@ impl Vehicle {
             rear_slip_rate: self.drift.rear_slip_rate,
             tuning: crate::drift::tuning(),
             drift: self.drift_cmd,
+            slide_gate: self.slide_gate.amount,
+            align_travel: self.slide_gate.travel,
         }
     }
 
@@ -886,6 +895,22 @@ impl Vehicle {
         let tuning = crate::drift::tuning();
         let (cs_side, onset) =
             crate::steering::onset_of(rear_axle, self.drift.rear_slip_rate, &tuning);
+        // Row 102: the onset only counts once the slide is confirmed.
+        // The drift intent modes keep the raw onset (they act from 3–7° of body slip, and a
+        // drift entry with the key held into the turn must not wait for the gate).
+        self.slide_gate.update(
+            rear_axle,
+            front_axle_angle(
+                v_fwd,
+                v_left,
+                ch.ang_vel.dot(up),
+                self.def.wheels[0].position_m[1] - self.com_local.y,
+            ),
+            self.center_steer,
+            v_fwd,
+            &tuning,
+            dt,
+        );
         self.drift_cmd = self.drift.update(
             &crate::drift::DriftInputs {
                 driver: input.steer,
@@ -1134,7 +1159,8 @@ impl Vehicle {
         let drift_tel = crate::drift::DriftTelemetry {
             mode: dc.mode,
             slide_angle: dc.slide,
-            onset,
+            // The steering's onset: gated by the confirmed-slide gate (row 102).
+            onset: onset * self.slide_gate.amount,
             envelope: dc.envelope,
             authority: if dc.mode == crate::drift::DriftMode::Off {
                 0.0
@@ -1412,6 +1438,7 @@ impl Vehicle {
             contact_lift_cut_mps: launch_cut,
             stalled: self.stalled,
             drift: drift_tel,
+            sliding: self.slide_gate.sliding(),
         };
     }
 
