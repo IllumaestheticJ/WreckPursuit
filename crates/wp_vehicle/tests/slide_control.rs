@@ -33,12 +33,7 @@ fn exit(id: &str, a: &AssistProfile, style: DriverStyle, lat_g: f32, react: f32)
 
 #[test]
 fn keyboard_power_oversteer_exit_is_recoverable() {
-    // TCS on only. With TCS Off the throttle is raw (owner row 104) and, as in the reference,
-    // letting go of the steering mid-slide with the throttle floored makes the car spin
-    // (docs/reference/wreckfest-keyboard.md "Letting go of the steering mid-drift"), so the
-    // naive "let go and wait" driver is not expected to recover there.
-    let _ = keyboard_no_tcs;
-    for a in [AssistProfile::keyboard_default()] {
+    for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
         for id in ["rampart_50", "lucciola_350"] {
             for react in [0.3, 0.8] {
                 let r = exit(id, &a, DriverStyle::Keyboard, 0.7, react);
@@ -151,13 +146,13 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // forward gear; a drivetrain change — the pivot aid itself is off on the wheel preset). The
     // wheel preset has countersteer_help 0, so none of the slide code may change a single bit.
     // (With no help the naive driver spins: full sim, no safety net.)
-    // [bless] row 117 (an engaged automatic clutch stays engaged while the ground keeps the
-    // engine above idle: the throttle-on approach no longer slips; a drivetrain change).
+    // Re-recorded [bless] for the spin side-force floor (a tyre change: these unassisted
+    // exits spin the rears past κ 0.3).
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0xc027d8e34c663514_u64),
-        ("rampart_50", 0.7, 0.8, 0x2c5684cf7ec9747d),
-        ("lucciola_350", 0.5, 0.3, 0xb1843016bc94e898),
-        ("lucciola_350", 0.7, 0.8, 0x57002892081a23f4),
+        ("rampart_50", 0.5, 0.3, 0x0a445561173191a8_u64),
+        ("rampart_50", 0.7, 0.8, 0xff1c96c9ca123352),
+        ("lucciola_350", 0.5, 0.3, 0x98462f1e79841819),
+        ("lucciola_350", 0.7, 0.8, 0x089590da6c3f84ed),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

@@ -1,6 +1,6 @@
 # simcli hashes scenario=parity_rampart_counter_drift systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
 240 ba4d3bce36e1d848
 480 6433310965386b2b
-720 37b4dcca8613f74d
-960 553e4211c7726238
-1200 ce44cd41195b805a
+720 c73fe08e4d50d08e
+960 3bccc6d01eff7d60
+1200 a63a3c177ccb72e4
