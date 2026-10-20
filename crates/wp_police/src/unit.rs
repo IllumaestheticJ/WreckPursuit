@@ -20,6 +20,7 @@ use crate::graph::{
     add, cross, dist, dist2, dot, len, lerp2, normalize, scale, sub, District, NodeId, SegmentId,
 };
 use crate::time::SimTime;
+use crate::turn::TurnState;
 
 /// A polyline the unit drives along, with cumulative arc length.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -275,8 +276,11 @@ pub struct UnitBody {
     pub pos: [f32; 2],
     /// Unit heading vector (XY).
     pub heading: [f32; 2],
-    /// Forward speed, m/s.
+    /// Speed, m/s (magnitude, also while reversing).
     pub speed: f32,
+    /// Signed speed along the heading (negative = reversing), m/s.
+    #[serde(default)]
+    pub fwd_speed: f32,
     /// Current lateral acceleration, g.
     pub lat_g: f32,
     /// Altitude, m (helicopters).
@@ -286,7 +290,17 @@ pub struct UnitBody {
 impl UnitBody {
     /// Velocity, m/s.
     pub fn vel(&self) -> [f32; 2] {
-        scale(self.heading, self.speed)
+        scale(self.heading, self.signed_speed())
+    }
+
+    /// Signed speed along the heading, m/s: `speed` with the sign of `fwd_speed` (`speed` is
+    /// the authority; code that only sets `speed` drives forwards).
+    pub fn signed_speed(&self) -> f32 {
+        if self.fwd_speed < 0.0 {
+            -self.speed
+        } else {
+            self.speed
+        }
     }
 }
 
@@ -378,6 +392,12 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Turning around (three-point turn) in progress.
+    #[serde(default)]
+    pub turn: Option<TurnState>,
+    /// No new turn-around before this time (set when a turn gives up).
+    #[serde(default)]
+    pub turn_cooldown_until: SimTime,
 }
 
 impl Unit {
@@ -401,6 +421,7 @@ impl Unit {
                 pos,
                 heading: normalize(heading),
                 speed: 0.0,
+                fwd_speed: 0.0,
                 lat_g: 0.0,
                 alt_m: 0.0,
             },
@@ -423,6 +444,8 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            turn: None,
+            turn_cooldown_until: SimTime::ZERO,
         }
     }
 
@@ -589,6 +612,7 @@ pub fn step_ground(
     let b = &mut u.body;
     if !track.is_drivable() || u.wrecked {
         b.speed = (b.speed - dynm.brake_mps2 * dt).max(0.0);
+        b.fwd_speed = b.speed;
         b.pos = add(b.pos, scale(b.heading, b.speed * dt));
         b.lat_g = 0.0;
         return rep;
@@ -643,6 +667,7 @@ pub fn step_ground(
     let brake = dynm.brake_mps2 * 1.3;
     let dv = (want - b.speed).clamp(-brake * dt, accel * dt);
     b.speed = (b.speed + dv).max(0.0);
+    b.fwd_speed = b.speed;
     let ds = b.speed * dt;
     b.pos = add(b.pos, scale(b.heading, ds));
 
@@ -653,6 +678,7 @@ pub fn step_ground(
         u.health -= dynm.crash_health_per_kmps2.get(env.mode) * impact * impact / 1000.0;
         rep.crashed = true;
         b.speed = 0.0;
+        b.fwd_speed = 0.0;
         b.pos = track.point_at(s);
         if impact > 10.0 {
             // Hard hits bend a wheel.
@@ -678,6 +704,7 @@ pub fn step_ground(
                     );
                 u.health -= dynm.contact_health_per_kmps2.get(env.mode) * v * v / 1000.0;
                 b.speed *= 0.3;
+                b.fwd_speed = b.speed;
             }
         }
     }

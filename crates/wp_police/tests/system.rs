@@ -520,6 +520,19 @@ fn world_city_converts_into_a_routable_police_graph() {
     ));
     let g = wp_police::RoadGraph::from_city(&map);
     assert!(g.segments.len() > 100, "{} segments", g.segments.len());
+    // Turning room: every edge maps to its source road, and the half widths are the paved road
+    // (parking lanes too), at least one 3 m lane each side.
+    let net = wp_world::RoadNetworkIndex::new(&map);
+    let paved = wp_police::city::paved_half_widths(&map, &net);
+    assert!(
+        paved.iter().all(|w| w.is_some()),
+        "every edge matched its road"
+    );
+    assert!(g.segments.iter().all(|s| s.half_width_m >= 3.0));
+    assert!(
+        g.segments.iter().any(|s| s.half_width_m > 3.5),
+        "some roads have parking lanes"
+    );
     for d in District::ALL {
         assert!(g.segments.iter().any(|s| s.district == d), "no {d:?} roads");
     }

@@ -78,7 +78,8 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
   - `RollingBlock`: a unit ahead of the racer slows in front of it.
   - `Shadow`: hold 25–40 m back, 12 m more per extra unit; close to 8 m when the racer stops.
   - `Intercept`: units off the trail or far behind take the lane-legal fastest route to the
-    racer's predicted position 10–20 s out.
+    racer's predicted position 10–20 s out. A unit within 150 m of the first breadcrumb but
+    beyond it (the racer came past it the other way) follows from where it is instead.
 - **Disengage**: health < `disengage_health` (per mode: Arcade 0.15, Simulation 0.4), a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
   or a lost wheel, or a dead engine → pull over. Total loss at `total_loss_health[mode]`.
 
@@ -94,9 +95,38 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
 
 Police keep only the speed planning (corner speeds, caps, tactics).
 
+### Turning around (`turn.rs`)
+A unit whose track starts behind it (a destination back the way it came, a racer in the mirror)
+**turns around on the road it is on** instead of swinging round at full lock (which on a two-lane
+street ran over the far kerb and into parked cars):
+1. **Brake** to a standstill; **wait** while a moving vehicle would reach the turning area within
+   `traffic_gap_s` (pause mid-turn for traffic within half that).
+2. **Forward** leg at full lock, until a wheel would come within `kerb_margin_m` of the paved
+   edge or any part of the body within `obstacle_margin_m` of a vehicle, parked car or cone
+   (bumpers may overhang the kerb). **Reverse** leg at the opposite lock, the same going back.
+   Repeat until facing within `acos(done_cos)` of the route: a U-turn where the road is wide
+   enough, a three-point turn otherwise. Wheels keep their lock until the car has stopped.
+3. Boxed in on lock both ways: back out (or pull forward) straight to make room. Gives up after
+   `max_s` (then no new turn for 6 s).
+
+One state machine for both drivers: the built-in body integrates it (kinematic bicycle about the
+rear axle), physical units get pedals for `wp_vehicle`'s automatic gearbox (brake held at a
+standstill selects reverse; in reverse the pedals swap). Segment half widths are the whole paved
+road, parking lanes included (`RoadGraph::from_city`); parked cars are obstacles of their own.
+
+**Routing** charges a turn-around `penalty_s` (8 s): `route_from` turns back when that plus the
+route from the end of the road behind beats carrying on and going round (and always when the route
+ahead would come straight back along the same road). One-way roads never turn back.
+
+**Pre-emptive turn**: a patrolling (or idle) unit that sees a **wanted** racer behind it within
+recognition range, not coming its way (it passed the other way, or is stopped back there), heads
+for the junction the racer is making for right away: its new route starts behind it, so it turns
+around before the pursuit even starts (recognition takes 2 s at dawn/dusk, 4 s at night). No
+lights until the pursuit starts. `stats().turns_started`, `stats().preempt_turns` count them.
+
 ### Obstacle awareness (`avoid.rs`)
 Every tick each ground unit (physical or headless) looks ahead on its own track:
-- **Lane corridor**: any vehicle whose box overlaps the unit's lane (unit half width + its
+- **Lane corridor**: any vehicle, **parked car or cone** whose box overlaps the unit's lane (unit half width + its
   projected half extent + `lateral_margin_m`) within a speed-dependent horizon
   (`min_horizon_m`..`max_horizon_m`). The nearest one caps the speed so the unit can stop
   `standstill_gap_m` behind it (braking at `decel_mps2` after `reaction_s`); a moving leader is
@@ -109,6 +139,11 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
   `pass_extra_shift_m` further, for a car straddling the centreline) when that lane is clear past
   the blocker and free of oncoming vehicles for `oncoming_clear_m`. It passes at ≤
   `pass_speed_mps` and returns to its lane after the blocker.
+- **Crossing traffic**: a moving vehicle heading across the unit's line (> 30° off it: pulling
+  out, crossing a junction, turning across) is extrapolated `cross_horizon_s` (3 s) ahead. Unless
+  one of the two is through the crossing `cross_gap_s` (1 s) before the other arrives, the unit
+  slows so it can stop `standstill_gap_m` short of the other's path (a unit already in that path
+  keeps going). Between two police units only the higher id slows.
 - **Exceptions**: a unit in a `Pit` or `BoxIn` tactic ignores its own target (contact is the point).
   No unit ever overtakes its own target (a stopped target is an arrest).
 - **Traffic rules** (next junction on the track, refreshed at think rate; light from
@@ -133,6 +168,9 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
 
 Obstacles: `wp_sim` reports every vehicle (players, racers, physical and kinematic traffic,
 police cars) with `set_obstacles` each tick. Headless, units see the racers and each other.
+Parked cars and cones: `PoliceSystem::for_world` takes `World::static_props()`
+(`prop_obstacles`); `set_static_obstacles` replaces them. Each unit keeps those within
+`static_range_m` (80 m), refreshed at think rate. Headless scenarios use the city's parked cars.
 
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
@@ -187,16 +225,19 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Patrol presence (4 phases) | Exact table counts after warm-up |
 | Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
 | Night speeder, 03:00 (8 runs) | Pursuit at 126 s mean; reinforcement 115 s |
-| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
+| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; a reckless config (no budget, high caps) is no safer. Since the turn-around change (2026-10-20) the two have about the same risk events (junction speed rules cap almost every city corner; what is left is traffic-hazard noise) |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
-
 | City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
+| Turn-arounds, physical cars (`cargo run --release -p simcli --example police_turnaround -- 32`: dusk, a patrol car on a two-way street, a wanted racer 35 m behind driving away) | 30 of 30 eligible units start turning before the pursuit starts; all 30 turns finish, 27 facing after the racer; 3 legs / 8.3 s typical (incl. braking from 12 m/s), up to 9 legs between two rows of parked cars; 2 light world contacts (≤ 0.9 m/s), 0 vehicle contacts |
+| Cop self-wreck scenario, run-wide crashes (headless) | 19 in 20 pursuits (239 before the turn-around: the full-lock crawl ran units wide) |
+| City traffic, physical cars, before → after the turn-around change (`police_traffic_contacts`) | Patrol 300 s: traffic overlaps 1 → 0, world contacts > 1 m/s 2 → 0. Pursuit: traffic contacts 1.0 → 0 per 5 min, overlaps caused by a moving unit 4 → 1, world contacts by driving units 9.8 → 5.1 per 5 min (max 10.9 → 6.9 m/s) |
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
-racers on D's small city, with exact building line of sight and obstacle awareness → **0.074 ms per 60 Hz frame** (0.055 before round 6)
+racers on D's small city, with exact building line of sight and obstacle awareness → **0.060 ms per 60 Hz frame** with the
+city's parked cars as obstacles, turn-arounds and crossing prediction (0.068 on the same machine before them; 0.074 measured in round 6, 0.055 before round 6)
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 
@@ -219,8 +260,12 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   places one at every third signalised junction). `RoadNetworkQuery` has no signalised-junction
   flag yet, so `from_network` takes the list separately (contract request #7).
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
-- Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
-  in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
+- Parked cars and cones are taken where the world placed them: one knocked into the road is not
+  seen where it lies (`set_static_obstacles` can refresh them). Passing assumes the other lane
+  exists. Crossing prediction is straight-line (constant velocity, the unit's heading).
+- Turn-arounds take the road as a straight strip from where the turn starts; a unit does not use
+  a side street or a junction mouth to turn in. Between two rows of parked cars a three-point turn
+  can take up to ~9 legs (16 s).
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
 - Captain-command events are emitted on the next `step`.

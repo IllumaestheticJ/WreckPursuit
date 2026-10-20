@@ -20,6 +20,11 @@
 //!   the racer's predicted position 10–20 s out (lane-legal shortest path).
 //! - Disengage — health below `disengage_health[mode]` or a bent wheel / flat: pull over
 //!   (handled in `dispatch`).
+//!
+//! Turning around: any unit whose track starts behind it turns on the spot with a U-turn or a
+//! three-point turn ([`crate::turn`]) instead of swinging round at full lock. A patrolling unit
+//! that sees a wanted racer behind it, going away (it passed the other way, or is parked back
+//! there), turns around and heads after it at once, before the pursuit officially starts.
 
 use crate::radio::{RadioCue, RadioTier};
 use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
@@ -28,6 +33,7 @@ use crate::dispatch::ROAD_HALF_WIDTH_M;
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
 use crate::heat::{PursuitStatus, RuleInputs, RuleOutcome, WantedLevel};
+use crate::turn::{self, TurnState};
 use crate::unit::{
     plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv, Tactic,
     Track, UnitRole, LANE_OFFSET_M,
@@ -40,10 +46,33 @@ const STOPPED_RACER_MPS: f32 = 2.0;
 /// A pursuer this close to the racer tracks the racer's end of the breadcrumb trail, m.
 const NEAR_RACER_M: f32 = 40.0;
 
+/// A pursuer within this distance of the first breadcrumb, but beyond it, drives to it and
+/// follows the trail from there (instead of going to intercept), m.
+const LEAD_IN_M: f32 = 150.0;
+
 /// Pursuit speed: `min(max(target × (1 + margin), floor), cap)`. The floor (10 m/s) lets units
 /// close on a stopped racer for the arrest.
 pub fn pursuit_speed_cap(target_speed: f32, margin: f32, cap: f32) -> f32 {
     (target_speed * (1.0 + margin)).max(10.0).min(cap)
+}
+
+/// Where a unit at `pos` is on a racer's pursuit track (`racer_s` = the racer's arc length,
+/// `last_known` its position): `(s, lateral)`. Right next to the racer it is the racer's end of
+/// the trail, not an older leg of it passing close by (a racer looping a block); otherwise
+/// projected around `hint` (the unit's progress, if it already follows this track) or the racer.
+/// Joining the chase and leaving it for an intercept both use this, so they cannot disagree.
+fn trail_position(
+    track: &Track,
+    racer_s: f32,
+    last_known: Option<[f32; 2]>,
+    pos: [f32; 2],
+    hint: Option<f32>,
+) -> (f32, f32) {
+    if last_known.is_some_and(|p| dist(p, pos) < NEAR_RACER_M) {
+        track.project(pos, racer_s, NEAR_RACER_M)
+    } else {
+        track.project(pos, hint.unwrap_or(racer_s), 200.0)
+    }
 }
 
 /// Shift every point of a track `lateral_m` to the left of its local direction.
@@ -391,6 +420,10 @@ impl PoliceSystem {
 
     /// A road route from `pos` (facing `heading`) to `dest`, and whether it starts with a
     /// turn-around.
+    ///
+    /// Two candidates on a two-way road: on via the end the unit faces, or back via the other
+    /// end after turning around, charged `turn.penalty_s`. The faster one wins (always back when
+    /// the route ahead would only come straight back along the same road).
     pub(crate) fn route_from(
         &self,
         pos: [f32; 2],
@@ -402,26 +435,38 @@ impl PoliceSystem {
             return (Track::default(), false);
         };
         let on_road = self.graph.nearest_on_road(pos);
-        let mut turn_around = false;
         let mut pts = vec![pos];
-        if let Some(route) = self.graph.shortest_path(start, dest) {
-            // Don't drive to the node ahead only to come straight back along the same road:
-            // turn around now instead.
-            let behind = on_road.map(|rp| self.graph.other_end(rp.segment, start));
-            let skip = route.len() >= 2 && Some(route[1]) == behind;
-            turn_around = skip;
+        let ahead = self.graph.shortest_path(start, dest);
+        let back = on_road.and_then(|rp| {
+            let behind = self.graph.other_end(rp.segment, start);
+            if behind == start || !self.graph.can_travel(rp.segment, start) {
+                return None; // one-way: no turning back
+            }
+            let route = self.graph.shortest_path(behind, dest)?;
+            let v = self.graph.segment(rp.segment).speed_limit_mps.max(1.0);
+            let to_end = |n: NodeId| dist(pos, self.graph.node(n).pos) / v;
+            let cost_back =
+                self.cfg.pursuit.turn.penalty_s + to_end(behind) + self.graph.route_time_s(&route);
+            let better = match &ahead {
+                None => true,
+                Some(a) => {
+                    // Driving to the node ahead only to come straight back.
+                    a.get(1) == Some(&behind)
+                        || cost_back < to_end(start) + self.graph.route_time_s(a)
+                }
+            };
+            better.then_some(route)
+        });
+        let turn_around = back.is_some();
+        if let Some(route) = back.or(ahead) {
             // Start on the centreline, not at the body: the lane offset is applied on top, so
             // a unit already in its lane would otherwise be pushed a second lane width right
-            // (into parked cars).
-            if let Some(rp) = on_road.filter(|rp| !skip && rp.dist_m < ROAD_HALF_WIDTH_M) {
+            // (into parked cars). Also when turning back: the unit turns around first
+            // ([`crate::turn`]) and comes out on the other side of the road.
+            if let Some(rp) = on_road.filter(|rp| rp.dist_m < ROAD_HALF_WIDTH_M) {
                 pts[0] = rp.point;
             }
-            pts.extend(
-                route
-                    .iter()
-                    .skip(skip as usize)
-                    .map(|n| self.graph.node(*n).pos),
-            );
+            pts.extend(route.iter().map(|n| self.graph.node(*n).pos));
         }
         if let Some(p) = final_point {
             pts.push(p);
@@ -609,8 +654,9 @@ impl PoliceSystem {
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
                     if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
+                        let last = rec.last_known;
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
-                            let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
+                            let (s_u, lat) = trail_position(&tr, racer_s, last, u.body.pos, None);
                             lat < 12.0 && s_u <= racer_s + 5.0
                         });
                         if joins {
@@ -668,6 +714,7 @@ impl PoliceSystem {
             }
         }
         self.coordinate_pursuits();
+        self.plan_turnarounds();
         // Corner planning and local speed limit (think rate).
         let brake = p.unit.brake_mps2;
         let limits: Vec<f32> = self
@@ -679,6 +726,161 @@ impl PoliceSystem {
             u.limit_mps = lim;
             if u.kind == UnitKind::Car {
                 u.planned_speed = plan_unit_speed(u, brake);
+            }
+        }
+    }
+
+    /// Start a turn-around for every AI ground unit whose track starts behind it, and drop turns
+    /// that are no longer needed (no track, or the way ahead is in front again before the unit
+    /// started turning).
+    fn plan_turnarounds(&mut self) {
+        let tc = self.cfg.pursuit.turn.clone();
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if u.kind != UnitKind::Car || u.player.is_some() || u.wrecked {
+                continue;
+            }
+            if !u.cmd.track.is_drivable() {
+                // Between commands (a new assignment plans its track next think) a turn that
+                // has started is kept, paused; parked jobs end it.
+                let parked = matches!(
+                    u.assignment,
+                    Assignment::RoadblockAt { .. }
+                        | Assignment::SpikeAt { .. }
+                        | Assignment::OutOfService
+                );
+                let started = u.turn.is_some_and(|t| {
+                    !matches!(t.phase, turn::TurnPhase::Brake | turn::TurnPhase::Wait)
+                });
+                if parked || !started {
+                    self.units[i].turn = None;
+                }
+                continue;
+            }
+            // Which way the route goes from here: the track a little ahead of the projection.
+            let tr = &u.cmd.track;
+            let near = tr.point_at(u.track_s + 5.0);
+            let far = tr.point_at(u.track_s + 15.0);
+            let to = sub(far, u.body.pos);
+            if crate::graph::len(to) < 3.0 {
+                continue;
+            }
+            let c = dot(u.body.heading, normalize(to));
+            if u.turn.is_none() && (c >= tc.start_cos || self.now < u.turn_cooldown_until) {
+                continue;
+            }
+            let Some(rp) = self.graph.nearest_on_road(u.body.pos) else {
+                continue;
+            };
+            let seg = *self.graph.segment(rp.segment);
+            let road_dir = normalize(sub(self.graph.node(seg.b).pos, self.graph.node(seg.a).pos));
+            // Face along the road the way the track leaves (a cleaner finish than the chord),
+            // unless the track turns off it right away.
+            let mut goal = normalize(sub(far, near));
+            if goal == [0.0, 0.0] {
+                goal = normalize(to);
+            }
+            if dot(goal, road_dir).abs() > 0.8 {
+                goal = scale(road_dir, dot(goal, road_dir).signum());
+            }
+            if let Some(st) = &mut self.units[i].turn {
+                // Re-planned meanwhile: not needed any more if it has not started, otherwise
+                // aim for the new route.
+                let started = !matches!(st.phase, turn::TurnPhase::Brake | turn::TurnPhase::Wait);
+                if !started && c > 0.3 {
+                    self.units[i].turn = None;
+                } else {
+                    st.goal = goal;
+                }
+                continue;
+            }
+            let hw = self.graph.half_width(rp.segment);
+            let u = &mut self.units[i];
+            let st = TurnState::new(u.body.pos, u.body.heading, goal, rp.point, road_dir, hw);
+            u.turn = Some(st);
+            u.avoid.pass_offset_m = None;
+            u.avoid.blocked_s = 0.0;
+            self.stats.turns_started += 1;
+        }
+    }
+
+    /// Pre-emptive turn-around: a patrolling (or idle) unit that sees a wanted racer behind it
+    /// within recognition range, not coming its way, heads for the junction the racer is making
+    /// for. Its new route starts behind it, so it turns around at once ([`Self::plan_turnarounds`])
+    /// instead of carrying on until the pursuit starts. No lights until it does.
+    pub(crate) fn preempt_turnarounds(&mut self, world: &dyn WorldQuery) {
+        let tc = &self.cfg.pursuit.turn;
+        if !tc.preempt {
+            return;
+        }
+        let start_cos = tc.start_cos;
+        let range = self.cfg.heat.heat.recognition_range_m.get(self.phase);
+        let patrol_g = self.cfg.pursuit.patrol_cornering_g;
+        let wanted: Vec<(EntityId, [f32; 2], [f32; 2])> = self
+            .racers
+            .values()
+            .filter(|r| r.level > WantedLevel::None)
+            .map(|r| (r.entity, xy(r.pos), [r.vel[0], r.vel[1]]))
+            .collect();
+        for (_, rp, rv) in wanted {
+            for i in 0..self.units.len() {
+                let u = &self.units[i];
+                if u.kind != UnitKind::Car
+                    || u.player.is_some()
+                    || u.wrecked
+                    || u.turn.is_some()
+                    || !matches!(u.assignment, Assignment::Idle | Assignment::Patrol { .. })
+                {
+                    continue;
+                }
+                let to = sub(rp, u.body.pos);
+                let d = crate::graph::len(to);
+                if d > range || d < 1.0 {
+                    continue;
+                }
+                // Facing away from the racer, and the racer is not about to come past.
+                let h = u.body.heading;
+                if dot(h, scale(to, 1.0 / d)) >= start_cos || dot(rv, h) > 2.0 {
+                    continue;
+                }
+                if !self.sees(world, u.body.pos, rp) {
+                    continue;
+                }
+                // The end of the racer's road it is heading for (the nearer one if it is
+                // stopped).
+                let Some(road) = self.graph.nearest_on_road(rp) else {
+                    continue;
+                };
+                let seg = *self.graph.segment(road.segment);
+                let (pa, pb) = (self.graph.node(seg.a).pos, self.graph.node(seg.b).pos);
+                let speed = crate::graph::len(rv);
+                let dest = if speed > STOPPED_RACER_MPS {
+                    if dot(rv, sub(pb, pa)) >= 0.0 {
+                        seg.b
+                    } else {
+                        seg.a
+                    }
+                } else if dist(pa, u.body.pos) <= dist(pb, u.body.pos) {
+                    seg.a
+                } else {
+                    seg.b
+                };
+                if u.assignment == (Assignment::Patrol { dest }) {
+                    continue;
+                }
+                let lim = self.limit_at(u.body.pos);
+                let factor = self.cfg.pursuit.patrol_speed_factor;
+                let track = self.route_track(i, dest, None);
+                let u = &mut self.units[i];
+                u.assignment = Assignment::Patrol { dest };
+                u.set_command(DriveCommand {
+                    track,
+                    speed_mps: lim * factor,
+                    cornering_g: patrol_g,
+                    siren: false,
+                    lane_offset_m: LANE_OFFSET_M,
+                });
+                self.stats.preempt_turns += 1;
             }
         }
     }
@@ -731,6 +933,9 @@ impl PoliceSystem {
             );
             // (gap along track, lateral, unit index)
             let mut pursuers: Vec<(f32, f32, usize)> = Vec::new();
+            // Units close to the racer but beyond the first breadcrumb (it came past them the
+            // other way): they follow from where they are instead of going to intercept.
+            let mut lead_in: Vec<usize> = Vec::new();
             for i in 0..self.units.len() {
                 let u = &self.units[i];
                 if u.player.is_some()
@@ -739,21 +944,14 @@ impl PoliceSystem {
                 {
                     continue;
                 }
-                let hint = if u.cmd.track.pts.first() == track.pts.first() {
-                    u.track_s
-                } else {
-                    racer_s
-                };
-                // Right next to the racer: it is the racer's end of the trail, not an older leg
-                // of it that passes close by (a racer looping a block).
-                let near = rec
-                    .last_known
-                    .is_some_and(|p| dist(p, u.body.pos) < NEAR_RACER_M);
-                let (s, lat) = if near {
-                    track.project(u.body.pos, racer_s, NEAR_RACER_M)
-                } else {
-                    track.project(u.body.pos, hint, 200.0)
-                };
+                let hint = (u.cmd.track.pts.first() == track.pts.first()).then_some(u.track_s);
+                let (s, lat) = trail_position(&track, racer_s, rec.last_known, u.body.pos, hint);
+                let to_start = dist(u.body.pos, track.pts[0]);
+                if seen && s < 1.0 && lat > 12.0 && to_start < LEAD_IN_M {
+                    lead_in.push(i);
+                    pursuers.push((racer_s + to_start, 0.0, i));
+                    continue;
+                }
                 pursuers.push((racer_s - s, lat, i));
             }
             pursuers.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
@@ -866,6 +1064,18 @@ impl PoliceSystem {
                         (tr, sp.clamp(0.0, v_r * 1.3 + 5.0))
                     }
                 };
+                let cmd_track = if lead_in.contains(&i) {
+                    // From the unit's spot on the road to the first breadcrumb, then the trail.
+                    let from = self
+                        .graph
+                        .nearest_on_road(self.units[i].body.pos)
+                        .map_or(self.units[i].body.pos, |rp| rp.point);
+                    let mut pts = vec![from];
+                    pts.extend_from_slice(&cmd_track.pts);
+                    Track::new(pts)
+                } else {
+                    cmd_track
+                };
                 let same = self.units[i].cmd.track.pts.first() == cmd_track.pts.first()
                     && self.units[i].tactic == tactic;
                 let u = &mut self.units[i];
@@ -937,6 +1147,21 @@ impl PoliceSystem {
                         u.assignment,
                         Assignment::Pursue { .. } | Assignment::Intercept { .. }
                     );
+                    if u.turn.is_some() && !u.wrecked {
+                        if let Some(c) = self.update_turn(i, dt) {
+                            let u = &mut self.units[i];
+                            let g = u.geometry;
+                            turn::step_kinematic(
+                                &mut u.body,
+                                &c,
+                                g,
+                                cfg.unit.accel_mps2,
+                                cfg.unit.brake_mps2,
+                                dt,
+                            );
+                            continue;
+                        }
+                    }
                     self.update_avoid(i, dt);
                     let rep = step_ground(&mut self.units[i], &env, &cfg, &mut self.rng, dt);
                     self.stats.near_misses += rep.near_miss as u32;
@@ -1027,5 +1252,176 @@ mod tests {
     #[test]
     fn lateral_g_formula() {
         assert!((lateral_g(9.81, 9.81) - 1.0).abs() < 1e-5);
+    }
+
+    use crate::config::PoliceConfig;
+    use crate::graph::{District, RoadClass};
+    use crate::scenario::ScenarioWorld;
+    use crate::unit::Unit;
+    use crate::{PoliceSetup, RacerView};
+    use std::sync::Arc;
+    use wp_contracts::{TimeOfDay, PHYSICS_DT};
+
+    const RACER: EntityId = EntityId(7);
+
+    /// Dusk (recognition takes 2 s) on D's small city with no patrol pool: one unit patrolling
+    /// a straight two-lane street toward its `b` end, and a wanted racer `behind_m` behind it
+    /// moving at `racer_vel_along` m/s along the street (positive = the unit's way).
+    struct Mirror {
+        police: PoliceSystem,
+        world: ScenarioWorld,
+        racer: [f32; 2],
+        racer_vel: [f32; 2],
+        /// Street direction (the unit's initial heading).
+        dir: [f32; 2],
+        half_width: f32,
+    }
+
+    impl Mirror {
+        fn new(behind_m: f32, racer_vel_along: f32) -> Self {
+            let (graph, map) = crate::city::procedural(&crate::city::ProcGenConfig::small());
+            let mut cfg = PoliceConfig::builtin();
+            for d in [
+                &mut cfg.presence.patrols.core,
+                &mut cfg.presence.patrols.suburb,
+                &mut cfg.presence.patrols.industrial,
+            ] {
+                (d.dawn, d.day, d.dusk, d.night) = (0, 0, 0, 0);
+            }
+            let k = graph
+                .segments
+                .iter()
+                .position(|s| s.class == RoadClass::Local && !s.oneway && s.length_m > 100.0)
+                .expect("a long two-way local street");
+            let seg = graph.segments[k];
+            let half_width = graph.half_width(crate::graph::SegmentId(k as u32));
+            let (a, b) = (graph.node(seg.a).pos, graph.node(seg.b).pos);
+            let dir = normalize(sub(b, a));
+            let right = [dir[1], -dir[0]];
+            let at = |t: f32| crate::graph::lerp2(a, b, t);
+            let unit_pos = crate::graph::add(at(0.6), scale(right, LANE_OFFSET_M));
+            let racer = crate::graph::add(
+                crate::graph::add(at(0.6), scale(dir, -behind_m)),
+                scale(right, -LANE_OFFSET_M * racer_vel_along.signum()),
+            );
+            let setup = PoliceSetup {
+                seed: 3,
+                internal_driving: true,
+                hazards: false,
+                ..Default::default()
+            };
+            let mut police = PoliceSystem::with_city(cfg, graph, setup);
+            let id = police.alloc_unit_id();
+            let mut u = Unit::new(
+                id,
+                UnitKind::Car,
+                UnitRole::Pool(District::Suburb),
+                unit_pos,
+                dir,
+                police.cfg.pursuit.risk.budget,
+            );
+            u.assignment = Assignment::Patrol { dest: seg.b };
+            police.units.push(u);
+            let track = police.route_track(0, seg.b, None);
+            police.units[0].set_command(DriveCommand {
+                track,
+                speed_mps: 8.0,
+                cornering_g: 0.35,
+                siren: false,
+                lane_offset_m: LANE_OFFSET_M,
+            });
+            police.set_heat(RACER, 30.0);
+            Self {
+                police,
+                world: ScenarioWorld {
+                    map: Some(Arc::new(map)),
+                    ..ScenarioWorld::clock(TimeOfDay::from_hours(19.0), 0.0)
+                },
+                racer,
+                racer_vel: scale(dir, racer_vel_along),
+                dir,
+                half_width,
+            }
+        }
+
+        /// Step `secs`; returns the largest distance of any wheel from the street's centreline
+        /// while turning (body corners may overhang the kerb by up to 0.9 m).
+        fn run(&mut self, secs: f32) -> f32 {
+            let mut worst: f32 = 0.0;
+            for _ in 0..(secs / PHYSICS_DT) as usize {
+                self.racer = crate::graph::add(self.racer, scale(self.racer_vel, PHYSICS_DT));
+                let view = RacerView {
+                    entity: RACER,
+                    pos: [self.racer[0], self.racer[1], 0.0],
+                    vel: [self.racer_vel[0], self.racer_vel[1], 0.0],
+                };
+                let mut out = Vec::new();
+                self.police
+                    .step(&self.world, &[view], &[], PHYSICS_DT, &mut out);
+                let u = &self.police.units[0];
+                if u.turn.is_some() {
+                    let h = u.body.heading;
+                    let r = [h[1], -h[0]];
+                    let off = |lon: f32, lat: f32| {
+                        let c = crate::graph::add(
+                            crate::graph::add(u.body.pos, scale(h, lon)),
+                            scale(r, lat),
+                        );
+                        self.police.graph.nearest_on_road(c).unwrap().dist_m
+                    };
+                    let half_wb = 0.5 * u.geometry.wheelbase_m;
+                    for (lon, lat) in [(half_wb, 0.8), (-half_wb, 0.8)] {
+                        worst = worst.max(off(lon, lat)).max(off(lon, -lat));
+                    }
+                    for (lon, lat) in [(2.45, 0.95), (-2.45, 0.95)] {
+                        let body = off(lon, lat).max(off(lon, -lat));
+                        assert!(body < self.half_width + 0.9, "body {body} m out");
+                    }
+                }
+            }
+            worst
+        }
+    }
+
+    #[test]
+    fn unit_seeing_a_wanted_racer_behind_turns_around_before_the_pursuit() {
+        // The racer passed the other way and is driving off behind the unit.
+        let mut m = Mirror::new(40.0, -6.0);
+        m.run(1.0);
+        let u = &m.police.units[0];
+        assert_eq!(m.police.stats.preempt_turns, 1);
+        assert!(u.turn.is_some(), "turning");
+        assert!(
+            matches!(u.assignment, Assignment::Patrol { .. }),
+            "before the pursuit (recognition takes 2 s at dusk): {:?}",
+            u.assignment
+        );
+        assert!(!u.cmd.siren, "no lights yet");
+        let worst = m.run(14.0);
+        let u = &m.police.units[0];
+        assert!(u.turn.is_none(), "turn finished: {:?}", u.turn);
+        let to_racer = normalize(sub(m.racer, u.body.pos));
+        assert!(
+            dot(u.body.heading, to_racer) > 0.8 && dot(u.body.heading, m.dir) < -0.8,
+            "faces after the racer: heading {:?}",
+            u.body.heading
+        );
+        let kerb = m.police.cfg.pursuit.turn.kerb_margin_m;
+        assert!(
+            worst < m.half_width - kerb + 0.05,
+            "wheels stayed on the street while turning: {worst} m from the centreline (half \
+             width {})",
+            m.half_width
+        );
+        assert!(matches!(u.assignment, Assignment::Pursue { .. }));
+    }
+
+    #[test]
+    fn no_turn_for_a_racer_coming_up_behind() {
+        // Same place, but the racer is catching up in the unit's direction: it will come past.
+        let mut m = Mirror::new(40.0, 14.0);
+        m.run(1.0);
+        assert_eq!(m.police.stats.preempt_turns, 0);
+        assert!(m.police.units[0].turn.is_none());
     }
 }

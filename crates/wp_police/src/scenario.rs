@@ -330,6 +330,8 @@ fn run_once(
     hook: &mut dyn FnMut(&PoliceSystem, &[SimEvent]),
 ) -> RunNumbers {
     let (graph, map) = crate::city::procedural(&sc.city.procgen());
+    // The city's parked cars, as `PoliceSystem::for_world` would report them.
+    let parked = crate::prop_obstacles(wp_world::props::parked_cars(&map, seed).iter());
     let map = Some(Arc::new(map));
     let setup = PoliceSetup {
         seed,
@@ -338,6 +340,7 @@ fn run_once(
         hazards: true,
     };
     let mut police = PoliceSystem::with_city(cfg.clone(), graph.clone(), setup);
+    police.set_static_obstacles(&parked);
     let mut world = ScenarioWorld {
         time: TimeOfDay::from_hours(sc.time_of_day_h),
         ratio: sc.time_ratio,

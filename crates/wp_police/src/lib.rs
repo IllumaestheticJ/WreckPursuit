@@ -18,6 +18,8 @@
 //! - [`dispatch`]: patrol pool, incidents, reinforcements, helicopter, AI captain.
 //! - [`pursuit`]: tactics (shadow, box-in, PIT, rolling block, intercept, disengage) and driving.
 //! - [`unit`]: unit state and the built-in kinematic driver.
+//! - [`avoid`]: obstacle awareness (vehicles, parked cars, cones, crossing traffic).
+//! - [`turn`]: turning around (U-turns and three-point turns).
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
@@ -38,6 +40,7 @@ pub mod radio;
 pub mod scenario;
 pub mod time;
 pub mod tools;
+pub mod turn;
 pub mod unit;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -68,6 +71,30 @@ pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
 use graph::xy;
 use tools::Puncture;
 use unit::{UnitBody, UnitRole};
+
+/// `wp_world` static props (parked cars, cones) as obstacles for
+/// [`PoliceSystem::set_static_obstacles`].
+pub fn prop_obstacles<'a>(
+    props: impl Iterator<Item = &'a wp_world::StaticProp>,
+) -> Vec<ObstacleView> {
+    props
+        .map(|sp| {
+            // Yaw 0 = +Y, positive turns left.
+            let (sn, cs) = wp_math::sin_cos(sp.yaw);
+            ObstacleView {
+                entity: None,
+                pos: sp.pos,
+                vel: [0.0; 3],
+                forward: [-sn, cs],
+                half_length_m: sp.half_extents[1],
+                half_width_m: sp.half_extents[0],
+            }
+        })
+        .collect()
+}
+
+/// After a turn-around gives up, no new one starts for this long, s.
+const TURN_COOLDOWN_S: f32 = 6.0;
 
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
@@ -173,6 +200,12 @@ pub struct PoliceStats {
     pub traffic_collisions: u32,
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
+    /// Turn-arounds started (U-turns and three-point turns).
+    #[serde(default)]
+    pub turns_started: u32,
+    /// Patrols that saw a wanted racer behind them and turned after it before the pursuit.
+    #[serde(default)]
+    pub preempt_turns: u32,
 }
 
 /// Captain bookkeeping (human or AI).
@@ -237,6 +270,10 @@ pub struct PoliceSystem {
     pub(crate) ext_obstacles_set: bool,
     /// Everything units avoid this tick (rebuilt by `rebuild_obstacles`).
     pub(crate) obstacles: Vec<avoid::Obstacle>,
+    /// Parked cars and cones (from the world, or [`PoliceSystem::set_static_obstacles`]).
+    pub(crate) static_obstacles: Vec<avoid::Obstacle>,
+    /// The static obstacles near each ground unit (refreshed at think rate).
+    pub(crate) near_static: BTreeMap<UnitId, Vec<avoid::Obstacle>>,
 }
 
 impl Default for PoliceSystem {
@@ -259,9 +296,12 @@ impl PoliceSystem {
 
     /// Police on `wp_world`'s city: the road graph is converted with
     /// [`RoadGraph::from_city`]. Pass the same `World` as `world` to [`PoliceSystem::step`] so
-    /// line of sight uses its buildings.
+    /// line of sight uses its buildings. Units also keep clear of the world's parked cars and
+    /// cones (`World::static_props`, see [`prop_obstacles`]).
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
-        Self::with_city(cfg, RoadGraph::from_city(world.map()), setup)
+        let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
+        p.set_static_obstacles(&prop_obstacles(world.static_props()));
+        p
     }
 
     /// Police on a road network.
@@ -306,6 +346,8 @@ impl PoliceSystem {
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
             obstacles: Vec::new(),
+            static_obstacles: Vec::new(),
+            near_static: BTreeMap::new(),
         }
     }
 
@@ -630,6 +672,41 @@ impl PoliceSystem {
         self.rebuild_obstacles();
     }
 
+    /// Report things that never move which units must not drive into: parked cars, cones,
+    /// barriers (velocity ignored). Replaces the previous list; [`PoliceSystem::for_world`]
+    /// already reports the world's static props.
+    pub fn set_static_obstacles(&mut self, props: &[ObstacleView]) {
+        self.static_obstacles = props
+            .iter()
+            .map(|v| avoid::Obstacle {
+                vel: [0.0, 0.0],
+                ..avoid::Obstacle::from_view(v)
+            })
+            .collect();
+        self.near_static.clear();
+    }
+
+    /// For every ground unit, the static obstacles within `static_range_m` (think rate).
+    pub(crate) fn refresh_near_static(&mut self) {
+        self.near_static.clear();
+        if self.static_obstacles.is_empty() {
+            return;
+        }
+        let r = self.cfg.pursuit.avoid.static_range_m;
+        for u in &self.units {
+            if u.kind != UnitKind::Car || u.player.is_some() {
+                continue;
+            }
+            let near: Vec<avoid::Obstacle> = self
+                .static_obstacles
+                .iter()
+                .filter(|o| graph::dist2(o.pos, u.body.pos) < r * r)
+                .copied()
+                .collect();
+            self.near_static.insert(u.id, near);
+        }
+    }
+
     /// Rebuild `obstacles`: `wp_sim`'s list plus internally driven units, or (headless) the
     /// racers and every ground unit.
     pub(crate) fn rebuild_obstacles(&mut self) {
@@ -689,6 +766,10 @@ impl PoliceSystem {
             target: u.assignment.target(),
             skip_higher_units: false,
         };
+        let statics = self
+            .near_static
+            .get(&u.id)
+            .map_or(&[][..], |v| v.as_slice());
         avoid::update(
             &mut u.avoid,
             &me,
@@ -697,9 +778,54 @@ impl PoliceSystem {
             u.body.speed,
             u.cmd.siren,
             &self.obstacles,
+            statics,
             &self.cfg.pursuit.avoid,
             dt,
         )
+    }
+
+    /// Advance unit `i`'s turn-around by one tick: steer and signed speed target. Clears the
+    /// turn (and resyncs the speed controller) when it is over.
+    pub(crate) fn update_turn(&mut self, i: usize, dt: f32) -> Option<turn::TurnControl> {
+        let brake = self.cfg.pursuit.unit.brake_mps2;
+        let u = &mut self.units[i];
+        let st = u.turn.as_mut()?;
+        let me = turn::TurnBody {
+            unit: u.id,
+            entity: u.entity,
+            pos: u.body.pos,
+            heading: u.body.heading,
+            v: u.body.signed_speed(),
+            geometry: u.geometry,
+        };
+        let statics = self
+            .near_static
+            .get(&u.id)
+            .map_or(&[][..], |v| v.as_slice());
+        let c = turn::control(
+            st,
+            &me,
+            &self.obstacles,
+            statics,
+            &self.cfg.pursuit.turn,
+            brake,
+            dt,
+        );
+        if c.done {
+            if st.elapsed_s > self.cfg.pursuit.turn.max_s {
+                // Gave up (boxed in): drive on with the normal controller for a while rather
+                // than start the same turn again.
+                u.turn_cooldown_until = self.now.plus(TURN_COOLDOWN_S);
+            }
+            u.turn = None;
+            let v = u.body.speed;
+            u.controller().resync(v);
+            // Pick the track up again from where the body is now.
+            let (s, _) = u.cmd.track.project(u.body.pos, u.track_s, 30.0);
+            u.track_s = s;
+            return None;
+        }
+        Some(c)
     }
 
     /// Bind a unit to the vehicle entity `wp_sim` spawned for it, with that car's steering
@@ -745,10 +871,12 @@ impl PoliceSystem {
         if let Some(i) = self.unit_index(unit) {
             let u = &mut self.units[i];
             let speed = (s.vel[0] * s.vel[0] + s.vel[1] * s.vel[1]).sqrt();
+            let heading = graph::normalize(s.heading);
             u.body = UnitBody {
                 pos: xy(s.pos),
-                heading: graph::normalize(s.heading),
+                heading,
                 speed,
+                fwd_speed: graph::dot([s.vel[0], s.vel[1]], heading),
                 lat_g: u.body.lat_g,
                 alt_m: s.pos[2],
             };
@@ -785,6 +913,24 @@ impl PoliceSystem {
                 ..Default::default()
             });
         }
+        if u.turn.is_some() {
+            let siren = u.cmd.siren;
+            if let Some(c) = self.update_turn(i, dt) {
+                let u = &mut self.units[i];
+                let st = u.turn.as_mut().expect("turn in progress");
+                let (throttle, brake, handbrake) = turn::pedals(st, u.body.signed_speed(), c.speed);
+                return Some(VehicleInput {
+                    steer: c.steer,
+                    throttle,
+                    brake,
+                    handbrake,
+                    siren,
+                    headlights: true,
+                    ..Default::default()
+                });
+            }
+        }
+        let u = &mut self.units[i];
         let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
         u.track_s = s;
         let offset = self.update_avoid(i, dt);

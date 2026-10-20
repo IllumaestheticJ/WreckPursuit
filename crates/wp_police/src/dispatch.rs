@@ -288,6 +288,8 @@ impl PoliceSystem {
             self.ai_captain_tools();
         }
         self.expire_tools();
+        self.refresh_near_static();
+        self.preempt_turnarounds(world);
         self.plan_units(world, tdt);
         self.refresh_junctions(world);
         self.cleanup_units();

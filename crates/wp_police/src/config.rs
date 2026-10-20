@@ -408,6 +408,38 @@ pub struct PursuitFile {
     pub tactics: TacticConfig,
     /// Obstacle awareness (following, passing, spawn clearance).
     pub avoid: AvoidConfig,
+    /// Turning around (U-turns, three-point turns) when the route starts behind the unit.
+    pub turn: TurnConfig,
+}
+
+/// Turning around (see [`crate::turn`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnConfig {
+    /// Start a turn when the cosine between the heading and the way the route goes is below
+    /// this (-0.2 ≈ more than 100° off).
+    pub start_cos: f32,
+    /// The turn is done when the cosine between the heading and the goal direction is above this.
+    pub done_cos: f32,
+    /// Speed of a forward leg, m/s.
+    pub forward_mps: f32,
+    /// Speed of a reverse leg, m/s.
+    pub reverse_mps: f32,
+    /// Keep the wheels this far inside the edge of the road (the body may overhang it), m.
+    pub kerb_margin_m: f32,
+    /// Keep the body this far from vehicles, parked cars and cones, m.
+    pub obstacle_margin_m: f32,
+    /// Do not start (or pause) while a moving vehicle reaches the turning area within this, s.
+    pub traffic_gap_s: f32,
+    /// A leg ends after this long even if nothing is in the way, s.
+    pub max_leg_s: f32,
+    /// Give up (drive on with the normal controller) after this long, s.
+    pub max_s: f32,
+    /// A unit that sees a wanted racer behind it turns around before the pursuit starts.
+    pub preempt: bool,
+    /// Routing charges a turn-around this much time: a unit turns back when that plus the
+    /// route from the end of its road behind it beats the route from the end ahead, s.
+    pub penalty_s: f32,
 }
 
 /// Obstacle awareness for ground units (see [`crate::avoid`]).
@@ -488,6 +520,12 @@ pub struct AvoidConfig {
     pub spawn_path_s: f32,
     /// Half width of that path, m.
     pub spawn_path_half_width_m: f32,
+    /// Crossing traffic: predict vehicles whose path crosses the unit's this far ahead, s.
+    pub cross_horizon_s: f32,
+    /// ... and slow down unless the unit clears the crossing this much before they arrive, s.
+    pub cross_gap_s: f32,
+    /// Parked cars and cones within this distance are rechecked at think rate, m.
+    pub static_range_m: f32,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -718,6 +756,15 @@ impl PoliceConfig {
         let a = &self.pursuit.avoid;
         if a.decel_mps2 <= 0.0 || a.min_horizon_m <= 0.0 || a.max_horizon_m < a.min_horizon_m {
             return bad("pursuit.avoid: decel and horizons must be positive and ordered");
+        }
+        let tc = &self.pursuit.turn;
+        if tc.forward_mps <= 0.0
+            || tc.reverse_mps <= 0.0
+            || tc.max_leg_s <= 0.0
+            || tc.max_s <= 0.0
+            || tc.start_cos >= tc.done_cos
+        {
+            return bad("pursuit.turn: speeds and times must be positive, start_cos < done_cos");
         }
         let t = &self.heat.heat.level_thresholds;
         if t.windows(2).any(|w| w[0] >= w[1]) || t[0] <= 0.0 || t[4] > self.heat.heat.max_heat {

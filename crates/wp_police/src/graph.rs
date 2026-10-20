@@ -87,7 +87,15 @@ pub struct RoadSegment {
     /// commands name roads by this id.
     #[serde(default)]
     pub edge: Option<u32>,
+    /// Half the drivable width of the road, m: the driving lanes of both directions
+    /// (`from_network`), or the whole paved road with its parking lanes (`from_city`). 0 =
+    /// unknown (hand-built graphs): [`RoadGraph::half_width`] then assumes one lane each way.
+    #[serde(default)]
+    pub half_width_m: f32,
 }
+
+/// Width of one driving lane where the network does not say, m.
+pub const LANE_WIDTH_M: f32 = 3.5;
 
 /// Kind of point of interest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -260,6 +268,7 @@ impl RoadGraph {
             district: self.nodes[a.0 as usize].district,
             oneway,
             edge: None,
+            half_width_m: 0.0,
         });
         self.out[a.0 as usize].push((id, b));
         self.inc[b.0 as usize].push((id, a));
@@ -273,6 +282,17 @@ impl RoadGraph {
     /// Node by id.
     pub fn node(&self, n: NodeId) -> &RoadNode {
         &self.nodes[n.0 as usize]
+    }
+
+    /// Half the drivable width of segment `s` (see [`RoadSegment::half_width_m`]), m; one lane
+    /// each way if unknown.
+    pub fn half_width(&self, s: SegmentId) -> f32 {
+        let w = self.segment(s).half_width_m;
+        if w > 0.0 {
+            w
+        } else {
+            LANE_WIDTH_M
+        }
     }
 
     /// Segment by id.

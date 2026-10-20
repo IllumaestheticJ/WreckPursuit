@@ -144,17 +144,30 @@ The reply is `Result<(), CaptainError>` with:
   - `PursuitRecord::end` replaces `end_s` (the tool was already broken by the `SimTime` change).
 
   Its recorded fixture (`apps/ui-kit/fixtures/runs/police_pursuit`) was not regenerated.
+- **`apps/simcli/examples/police_turnaround.rs`** (2026-10-20): new measurement example (a
+  patrol car turns around for a wanted racer behind it, physical cars). Read-only use of simcli
+  and `wp_sim`.
+- **`apps/simcli/examples/police_traffic_contacts.rs`** (2026-10-20): also counts contacts between
+  driving police cars and the world (parked cars, cones, kerbs, buildings; parked roadblock / spike
+  units excluded).
+- **Goldens re-blessed** (2026-10-20, `[bless]` commit): `golden/city_chase`,
+  `golden/night_pursuit_escape` and `race/city_sprint` have police cars, which now drive
+  differently (turn-arounds, crossing traffic, parked cars). Their expectations all pass.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
+| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.060 ms with the city's parked cars, turn-arounds and crossing prediction (0.068 before them on the same machine; 0.074 in round 6, 0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).
   It runs wide more often on D's ring road and diagonals, mostly at low speed: the self-wreck
   rate is 0% over 20 Simulation pursuits.
-- Obstacle awareness sees vehicles only, not parked cars or cones (`wp_world` static props).
+- Parked cars and cones are taken where the world placed them (`World::static_props` at
+  `for_world`); one knocked into the road is not seen where it lies. `wp_sim` could refresh them
+  with `set_static_obstacles` (not wired; optional).
+- Turn-arounds treat the road as a straight strip and don't use side streets; between two rows of
+  parked cars a three-point turn can take ~9 legs (16 s).
 - The light used is the one `signal_state_ahead` reports for the unit's current lane (straight
   ahead), so a unit turning at a junction with separate turn phases may read the wrong one.
 - In the police-on soak two police cars touch at 4.5 m/s right after spawn (t = 3.9 s).
@@ -351,3 +364,43 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Turn-arounds and smarter obstacle avoidance (2026-10-20, owner request)
+Owner asked: cops facing the wrong way that see you should flip around pre-emptively to
+intercept; routing should stop running into objects and civilians.
+
+**What changed (all in `wp_police` + `data/police/pursuit.toml`, no contract change):**
+- **`turn.rs` (new):** U-turns / three-point turns for any unit whose track starts behind it,
+  replacing the full-lock crawl. Brake, wait for a traffic gap, forward and reverse legs at full
+  lock until a wheel nears the paved edge or the body nears a vehicle / parked car / cone; keep
+  the lock until stopped; back out straight when boxed in on lock; give up after `max_s` (no new
+  turn for 6 s). Physical units get pedals for the automatic gearbox (brake held at a standstill
+  = reverse). New `[turn]` table.
+- **Pre-emptive turn:** a patrolling / idle unit that sees a wanted racer behind it (within
+  recognition range, not coming its way) routes to the junction the racer is making for, so it
+  turns around before the pursuit starts. No lights until the pursuit.
+- **Routing:** `route_from` compares going on (via the end ahead) with turning back (via the end
+  behind + `turn.penalty_s` = 8 s) and takes the faster; routes start on the road centreline.
+  Units within 150 m of the first breadcrumb but beyond it follow from where they are instead of
+  being sent to intercept.
+- **Obstacles:** parked cars and cones (`World::static_props`, `set_static_obstacles`) are in the
+  lane scan and the turn checks; crossing traffic is predicted 3 s ahead (`crossing_speed`).
+  A headless stopped racer without a heading is now a 4.6 m square (its zero heading made the
+  box test meaningless).
+- **Road widths:** `RoadSegment::half_width_m` (new, `serde(default)`); `from_city` sets it to the
+  paved road incl. parking lanes (`city::paved_half_widths`, checked edge ↔ road).
+- **Fixes found on the way:** Intercept ↔ Pursue ping-pong every think near a stopped racer (join
+  and off-trail checks projected differently; now one `trail_position`), and a turned-around unit's
+  track started at its pre-turn spot.
+
+**Measured:** README "Measured behaviour" (physical turn-arounds: 30/30 eligible units start
+turning before the pursuit, all finish, 3 legs / 8.3 s typical; city contacts down in patrol and
+pursuit; headless run-wide crashes 239 → 19 in the self-wreck scenario).
+
+**Test changes:** `risk_budget_and_caps_keep_cops_alive` no longer asserts reckless > careful
+harm: with the turn-around fixed the run-wide crashes that separated them are gone, the remaining
+events are traffic-hazard noise (both ≈ 170 near misses). It now asserts careful ≤ 1.25 × reckless
+and ≤ 2 run-wide crashes per pursuit.
+
+**For the lead:** nothing to wire. Optional: call `set_static_obstacles` from `wp_sim` if props
+can be knocked into the road.

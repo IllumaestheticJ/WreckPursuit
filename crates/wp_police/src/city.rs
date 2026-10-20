@@ -86,6 +86,8 @@ impl RoadGraph {
                 };
                 let s = g.add_segment(from, next, edge.speed_limit_mps, class, oneway);
                 g.segments[s.0 as usize].edge = Some(e);
+                g.segments[s.0 as usize].half_width_m =
+                    0.5 * crate::graph::LANE_WIDTH_M * f32::from(edge.lanes_ab + edge.lanes_ba);
                 from = next;
             }
         }
@@ -117,7 +119,10 @@ impl RoadGraph {
     }
 
     /// Build from a `wp_world` city map: its contract road network
-    /// ([`RoadNetworkIndex`]) plus the map's signalised junctions.
+    /// ([`RoadNetworkIndex`]) plus the map's signalised junctions. Segment half widths are the
+    /// whole paved road, parking lanes included ([`paved_half_widths`]; parked cars are
+    /// obstacles of their own), where the network's driving lanes alone would be too narrow
+    /// for turning around.
     pub fn from_city(map: &CityMap) -> RoadGraph {
         let net = RoadNetworkIndex::new(map);
         let signalised: Vec<u32> = net
@@ -128,8 +133,46 @@ impl RoadGraph {
             .filter(|(_, n)| n.signalised)
             .map(|(i, _)| i as u32)
             .collect();
-        Self::from_network(&net, &signalised)
+        let mut g = Self::from_network(&net, &signalised);
+        let paved = paved_half_widths(map, &net);
+        for seg in &mut g.segments {
+            if let Some(w) = seg
+                .edge
+                .and_then(|e| paved.get(e as usize).copied().flatten())
+            {
+                seg.half_width_m = seg.half_width_m.max(w);
+            }
+        }
+        g
     }
+}
+
+/// Half the paved width (every lane of the road, parking lanes included) per network edge, m.
+///
+/// `RoadNetworkIndex` makes one edge per source road that has driving lanes, in road order;
+/// each edge is checked against its road's end nodes, and `None` is returned where they do not
+/// match (the driving-lane width is kept there).
+pub fn paved_half_widths(map: &CityMap, net: &RoadNetworkIndex) -> Vec<Option<f32>> {
+    let lanes = &map.net.lanes;
+    let n_roads = lanes.iter().map(|l| l.road as usize + 1).max().unwrap_or(0);
+    let mut width = vec![0.0f32; n_roads];
+    let mut drivable: Vec<Option<(u32, u32)>> = vec![None; n_roads];
+    for l in lanes {
+        let r = l.road as usize;
+        width[r] += l.width_m;
+        if l.kind != wp_world::network::LaneKind::Parking && drivable[r].is_none() {
+            drivable[r] = Some((l.from_node, l.to_node));
+        }
+    }
+    let roads: Vec<usize> = (0..n_roads).filter(|&r| drivable[r].is_some()).collect();
+    (0..net.edge_count())
+        .map(|e| {
+            let r = *roads.get(e as usize)?;
+            let edge = net.edge(e);
+            let (a, b) = drivable[r]?;
+            ((a, b) == (edge.a, edge.b)).then_some(0.5 * width[r])
+        })
+        .collect()
 }
 
 /// D's procedural city and its police graph (tests, scenarios, tools).

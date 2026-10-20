@@ -115,3 +115,29 @@ gridlock_s = 2.0
 spawn_clear_m = 25.0
 spawn_path_s = 5.0
 spawn_path_half_width_m = 6.0
+# Crossing traffic (a car pulling out or crossing ahead): slow unless the unit is through the
+# crossing cross_gap_s before it gets there.
+cross_horizon_s = 3.0
+cross_gap_s = 1.0
+# Parked cars and cones near each unit (refreshed at think rate).
+static_range_m = 80.0
+
+# Turning around: a unit whose route starts behind it stops and turns (a U-turn where the road is
+# wide enough, otherwise a three-point turn with reverse legs), keeping its wheels kerb_margin_m
+# inside the paved edge and its body obstacle_margin_m from parked cars, cones and vehicles, and
+# waiting for gaps in traffic (wp_police::turn).
+[turn]
+start_cos = -0.2
+done_cos = 0.9
+forward_mps = 4.0
+reverse_mps = 3.0
+kerb_margin_m = 0.3
+obstacle_margin_m = 0.7
+traffic_gap_s = 3.0
+max_leg_s = 5.0
+max_s = 18.0
+# A unit that sees a wanted racer behind it turns around before the pursuit even starts.
+preempt = true
+# Routing: turn back when the route from the end of the road behind (plus this) is faster than
+# carrying on to the end ahead and going round.
+penalty_s = 8.0

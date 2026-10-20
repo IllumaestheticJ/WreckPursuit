@@ -1,20 +1,27 @@
 //! Obstacle awareness for ground units.
 //!
 //! Every tick a ground unit looks along its own track for vehicles in its lane corridor
-//! (players, racers, traffic, other units). The nearest one caps the unit's speed so it can
-//! stop [`AvoidConfig::standstill_gap_m`] behind it. A unit stuck behind a stopped vehicle for
-//! a while pulls into the other lane and passes when that lane is clear. Spawning uses
-//! [`spawn_clear`] so units never appear on top of, or right in front of, another vehicle.
+//! (players, racers, traffic, other units) and for parked cars and cones. The nearest one caps
+//! the unit's speed so it can stop [`AvoidConfig::standstill_gap_m`] behind it. A unit stuck
+//! behind a stopped vehicle (or a parked car in its way) for a while pulls into the other lane
+//! and passes when that lane is clear. Vehicles whose path *crosses* the unit's (pulling out,
+//! crossing a junction, turning across) are predicted [`AvoidConfig::cross_horizon_s`] ahead:
+//! unless the unit is through the crossing [`AvoidConfig::cross_gap_s`] before they get there,
+//! or they are through before it arrives, it slows to stop short of their path
+//! ([`crossing_speed`]). Spawning uses [`spawn_clear`] so units never appear on top of, or right
+//! in front of, another vehicle.
 //!
 //! `wp_sim` reports every vehicle with [`crate::PoliceSystem::set_obstacles`]. Without that
-//! (headless runs) units see the racers and each other.
+//! (headless runs) units see the racers and each other. Parked cars and cones come from the
+//! world ([`crate::PoliceSystem::for_world`]) or
+//! [`crate::PoliceSystem::set_static_obstacles`].
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{EntityId, SignalState};
 
 use crate::config::AvoidConfig;
 use crate::events::UnitId;
-use crate::graph::{dist2, dot, normalize, sub};
+use crate::graph::{cross, dist2, dot, normalize, sub};
 use crate::unit::{lane_point, Track};
 
 /// Half length of a police car, m (bumper to centre).
@@ -86,6 +93,8 @@ impl Obstacle {
     }
 
     /// A car-sized obstacle from a position and velocity (heading taken from the velocity).
+    /// Without a heading (a stopped racer, headless) it is a 4.6 m square, which covers the car
+    /// whichever way it faces.
     pub(crate) fn car(
         entity: Option<EntityId>,
         unit: Option<UnitId>,
@@ -93,14 +102,16 @@ impl Obstacle {
         vel: [f32; 2],
         heading: [f32; 2],
     ) -> Self {
+        let fwd = normalize(heading);
+        let known = fwd != [0.0, 0.0];
         Self {
             entity,
             unit,
             pos,
             vel,
-            fwd: normalize(heading),
+            fwd: if known { fwd } else { [0.0, 1.0] },
             half_len: 2.3,
-            half_wid: 0.95,
+            half_wid: if known { 0.95 } else { 2.3 },
         }
     }
 
@@ -230,14 +241,17 @@ pub(crate) struct Me {
 }
 
 /// Nearest obstacle within `horizon_m` ahead on `track`, in the corridor around the lane
-/// `offset_m` right of the centreline. `bumper` adds the short check straight ahead of the
-/// body (off when testing whether another lane is free).
+/// `offset_m` right of the centreline, among `obstacles` (vehicles) and `statics` (parked cars,
+/// cones). `bumper` adds the short check straight ahead of the body (off when testing whether
+/// another lane is free).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn scan(
     me: &Me,
     track: &Track,
     offset_m: f32,
     horizon_m: f32,
     obstacles: &[Obstacle],
+    statics: &[Obstacle],
     cfg: &AvoidConfig,
     bumper: bool,
 ) -> Option<Blocker> {
@@ -246,7 +260,7 @@ pub(crate) fn scan(
     }
     let reach2 = (horizon_m + 10.0) * (horizon_m + 10.0);
     let mut best: Option<Blocker> = None;
-    for o in obstacles {
+    for o in obstacles.iter().chain(statics) {
         if o.unit == Some(me.unit)
             || (o.entity.is_some() && (o.entity == me.entity || o.entity == me.ignore))
         {
@@ -346,7 +360,8 @@ pub(crate) fn horizon(v: f32, cfg: &AvoidConfig) -> f32 {
 /// Update `st` for one tick of `dt` and return the lane offset to steer for.
 ///
 /// `base_offset_m` is the command's lane offset, `v` the unit's speed and `siren` whether it
-/// runs lights (it then passes sooner).
+/// runs lights (it then passes sooner). `obstacles` are vehicles, `statics` parked cars and
+/// cones near the unit.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn update(
     st: &mut AvoidState,
@@ -356,6 +371,7 @@ pub(crate) fn update(
     v: f32,
     siren: bool,
     obstacles: &[Obstacle],
+    statics: &[Obstacle],
     cfg: &AvoidConfig,
     dt: f32,
 ) -> f32 {
@@ -364,7 +380,7 @@ pub(crate) fn update(
     }
     let offset = st.pass_offset_m.unwrap_or(base_offset_m);
     let h = horizon(v, cfg);
-    let mut blocker = scan(me, track, offset, h, obstacles, cfg, true);
+    let mut blocker = scan(me, track, offset, h, obstacles, statics, cfg, true);
     // Gridlock: units from several directions waiting on each other at a junction. After
     // `gridlock_s` the lower id creeps on past stopped higher-id units (they keep waiting).
     let on_unit = blocker.is_some_and(|b| b.unit.is_some() && b.speed_mps < 0.5) && v < 0.5;
@@ -375,7 +391,7 @@ pub(crate) fn update(
             skip_higher_units: true,
             ..*me
         };
-        let b2 = scan(&me2, track, offset, h, obstacles, cfg, true);
+        let b2 = scan(&me2, track, offset, h, obstacles, statics, cfg, true);
         if b2 != blocker {
             blocker = b2;
             creeping = true;
@@ -409,7 +425,8 @@ pub(crate) fn update(
     }
     st.limit_mps = blocker
         .map_or(f32::INFINITY, |b| follow_speed(&b, v, cfg))
-        .min(st.junction_limit_mps);
+        .min(st.junction_limit_mps)
+        .min(crossing_speed(me, v, obstacles, cfg));
     if creeping {
         st.limit_mps = st.limit_mps.min(cfg.pass_creep_mps);
     }
@@ -467,6 +484,7 @@ pub(crate) fn update(
             alt,
             need + cfg.oncoming_clear_m,
             obstacles,
+            statics,
             cfg,
             false,
         ) {
@@ -483,6 +501,72 @@ pub(crate) fn update(
         }
     }
     offset
+}
+
+/// Speed cap for vehicles whose path crosses the unit's straight ahead, m/s
+/// (`f32::INFINITY` = none).
+///
+/// Each moving vehicle heading across the unit's line (more than 30° off it; parallel and
+/// oncoming traffic are the lane corridor's business) is extrapolated at constant velocity. Both
+/// occupy the crossing for an interval (body length plus the other's width). If neither is
+/// through it [`AvoidConfig::cross_gap_s`] before the other arrives and they arrive within
+/// [`AvoidConfig::cross_horizon_s`], the unit slows to stop
+/// [`AvoidConfig::standstill_gap_m`] short of their path. A unit already in their path keeps
+/// going (stopping there is worse). Between two police units only the higher id slows.
+pub(crate) fn crossing_speed(me: &Me, v: f32, obstacles: &[Obstacle], cfg: &AvoidConfig) -> f32 {
+    let h = me.heading;
+    // Straight-line prediction: only as far as the unit gets in the horizon, and never far.
+    let reach = (v * cfg.cross_horizon_s + 15.0).min(cfg.max_horizon_m);
+    let v = v.max(0.1);
+    let mut cap = f32::INFINITY;
+    for o in obstacles {
+        // Between two units the lower id goes first (no mutual braking).
+        if o.unit == Some(me.unit)
+            || (o.entity.is_some() && (o.entity == me.entity || o.entity == me.ignore))
+            || o.unit.is_some_and(|u| u > me.unit)
+        {
+            continue;
+        }
+        let so = o.speed();
+        if so < 1.0 {
+            continue;
+        }
+        let od = [o.vel[0] / so, o.vel[1] / so];
+        let den = cross(h, od);
+        if den.abs() < 0.5 {
+            continue;
+        }
+        let rel = sub(o.pos, me.pos);
+        if dot(rel, rel) > (reach + 30.0) * (reach + 30.0) {
+            continue;
+        }
+        // me.pos + h·a = o.pos + od·b: `a` is how far ahead of the unit the crossing is, `b`
+        // how far ahead of the other vehicle.
+        let a = cross(rel, od) / den;
+        let b = cross(rel, h) / den;
+        let pad_me = UNIT_HALF_LENGTH_M + (o.half_wid + cfg.lateral_margin_m) / den.abs();
+        let pad_o = o.half_len + (UNIT_HALF_WIDTH_M + cfg.lateral_margin_m) / den.abs();
+        if a - pad_me < 0.5 || a > reach || b < -pad_o {
+            continue; // in it already, too far, or they are past it
+        }
+        let t_o_in = (b - pad_o).max(0.0) / so;
+        if t_o_in > cfg.cross_horizon_s {
+            continue;
+        }
+        let t_o_out = (b + pad_o) / so;
+        let t_me_in = (a - pad_me) / v;
+        let t_me_out = (a + pad_me) / v;
+        if t_me_out + cfg.cross_gap_s < t_o_in || t_o_out + cfg.cross_gap_s < t_me_in {
+            continue;
+        }
+        let room = a - pad_me - cfg.standstill_gap_m;
+        cap = cap.min(if room > 0.0 {
+            (2.0 * cfg.decel_mps2 * room).sqrt()
+        } else {
+            0.0
+        });
+    }
+    cap
 }
 
 /// Speed cap from traffic rules at the next junction, m/s.
@@ -668,14 +752,14 @@ mod tests {
         // Lane is 1.75 m right of the centreline (x = +1.75 heading +Y).
         let obs = [parked(2, [1.75, 60.0])];
         let m = me(10.0, [1.75, 10.0]);
-        let b = scan(&m, &straight(), 1.75, 80.0, &obs, &c, true).expect("blocker");
+        let b = scan(&m, &straight(), 1.75, 80.0, &obs, &[], &c, true).expect("blocker");
         assert!((b.gap_m - (50.0 - 2.45 - 2.3)).abs() < 0.1, "{b:?}");
         // Close: must stop.
         let near = [parked(2, [1.75, 16.0])];
-        let b = scan(&m, &straight(), 1.75, 80.0, &near, &c, true).unwrap();
+        let b = scan(&m, &straight(), 1.75, 80.0, &near, &[], &c, true).unwrap();
         assert_eq!(follow_speed(&b, 10.0, &c), 0.0);
         // Far: may still drive, but slower than flat out.
-        let b = scan(&m, &straight(), 1.75, 80.0, &obs, &c, true).unwrap();
+        let b = scan(&m, &straight(), 1.75, 80.0, &obs, &[], &c, true).unwrap();
         let v = follow_speed(&b, 15.0, &c);
         assert!(v > 5.0 && v < 25.0, "{v}");
     }
@@ -689,7 +773,7 @@ mod tests {
             parked(3, [1.75, 30.0]),  // behind
             parked(10, [1.75, 55.0]), // itself
         ];
-        assert!(scan(&m, &straight(), 1.75, 80.0, &obs, &c, true).is_none());
+        assert!(scan(&m, &straight(), 1.75, 80.0, &obs, &[], &c, true).is_none());
     }
 
     #[test]
@@ -703,7 +787,7 @@ mod tests {
             [0.0, 12.0],
             [0.0, 1.0],
         )];
-        let b = scan(&m, &straight(), 1.75, 80.0, &lead, &c, true).unwrap();
+        let b = scan(&m, &straight(), 1.75, 80.0, &lead, &[], &c, true).unwrap();
         let v = follow_speed(&b, 12.0, &c);
         assert!(
             v >= 12.0,
@@ -723,7 +807,7 @@ mod tests {
             [0.0, 0.0],
             [1.0, 0.0],
         )];
-        assert!(scan(&m, &straight(), 1.75, 80.0, &obs, &c, true).is_some());
+        assert!(scan(&m, &straight(), 1.75, 80.0, &obs, &[], &c, true).is_some());
     }
 
     #[test]
@@ -736,7 +820,7 @@ mod tests {
         let dt = 1.0 / 240.0;
         let mut off = 1.75;
         for _ in 0..(240.0 * (c.pass_wait_siren_s + 0.5)) as usize {
-            off = update(&mut st, &m, &straight(), 1.75, 0.0, true, &obs, &c, dt);
+            off = update(&mut st, &m, &straight(), 1.75, 0.0, true, &obs, &[], &c, dt);
         }
         assert!(off < 0.0, "should pull into the other lane, offset {off}");
         assert!(st.limit_mps > 0.0);
@@ -754,7 +838,18 @@ mod tests {
         ];
         let mut st = AvoidState::default();
         for _ in 0..(240.0 * (c.pass_wait_siren_s + 0.5)) as usize {
-            off = update(&mut st, &m, &straight(), 1.75, 0.0, true, &obs2, &c, dt);
+            off = update(
+                &mut st,
+                &m,
+                &straight(),
+                1.75,
+                0.0,
+                true,
+                &obs2,
+                &[],
+                &c,
+                dt,
+            );
         }
         assert_eq!(off, 1.75);
         assert_eq!(st.limit_mps, 0.0);
@@ -817,6 +912,7 @@ mod tests {
                 0.0,
                 false,
                 &obs,
+                &[],
                 &c,
                 1.0 / 240.0,
             );
@@ -855,6 +951,7 @@ mod tests {
             5.0,
             false,
             &cross,
+            &[],
             &c,
             1.0 / 240.0,
         );
@@ -888,5 +985,97 @@ mod tests {
             spawn_clear([30.0, 60.0], &[racer], &c),
             "parallel street is fine"
         );
+    }
+
+    #[test]
+    fn slows_for_a_car_crossing_ahead() {
+        let c = cfg();
+        // Unit at 12 m/s heading +Y; a car from the right crossing x = 1.75 at y = 40.
+        let m = me(0.0, [1.75, 0.0]);
+        let crossing = |x: f32, vx: f32| {
+            Obstacle::car(
+                Some(EntityId(5)),
+                None,
+                [x, 40.0],
+                [vx, 0.0],
+                [vx.signum(), 0.0],
+            )
+        };
+        // Both reach the crossing about 3 s from now: slow to stop short of its path.
+        // The cap still lets the unit stop short of its path (like following a leader)...
+        let cap = crossing_speed(&m, 12.0, &[crossing(37.75, -12.0)], &c);
+        let room: f32 =
+            40.0 - UNIT_HALF_LENGTH_M - (0.95 + c.lateral_margin_m) - c.standstill_gap_m;
+        assert!(
+            (cap - (2.0 * c.decel_mps2 * room).sqrt()).abs() < 0.01,
+            "cap {cap}"
+        );
+        // ... and bites once that gets tight: 20 m from the crossing, the car 1.3 s away.
+        let near = me(0.0, [1.75, 20.0]);
+        let cap = crossing_speed(&near, 12.0, &[crossing(17.75, -12.0)], &c);
+        assert!(cap < 12.0, "cap {cap}");
+        // Already past our line, or far away: no reason to slow.
+        assert!(crossing_speed(&m, 12.0, &[crossing(-10.0, -12.0)], &c).is_infinite());
+        assert!(crossing_speed(&m, 12.0, &[crossing(200.0, -12.0)], &c).is_infinite());
+        // We are through long before it gets there.
+        assert!(crossing_speed(&m, 12.0, &[crossing(80.0, -10.0)], &c).is_infinite());
+        // Parallel traffic in the next lane and a parked car are the lane corridor's business.
+        let parallel = Obstacle::car(None, None, [-1.75, 30.0], [0.0, -12.0], [0.0, -1.0]);
+        let parked = Obstacle::car(None, None, [5.0, 40.0], [0.0, 0.0], [1.0, 0.0]);
+        assert!(crossing_speed(&m, 12.0, &[parallel, parked], &c).is_infinite());
+        // A police unit with a higher id waits for us instead (no mutual braking).
+        let unit = Obstacle {
+            unit: Some(UnitId(2)),
+            entity: None,
+            ..crossing(37.75, -12.0)
+        };
+        assert!(crossing_speed(&m, 12.0, &[unit], &c).is_infinite());
+        // Already in its path: keep going.
+        let close = Obstacle::car(
+            Some(EntityId(5)),
+            None,
+            [6.0, 2.0],
+            [-8.0, 0.0],
+            [-1.0, 0.0],
+        );
+        assert!(crossing_speed(&m, 5.0, &[close], &c).is_infinite());
+    }
+
+    #[test]
+    fn parked_cars_and_cones_block_the_lane() {
+        let c = cfg();
+        let m = me(0.0, [1.75, 0.0]);
+        // A parked car poking into the lane 30 m ahead, and a cone 15 m ahead.
+        let parked = Obstacle {
+            vel: [0.0, 0.0],
+            ..Obstacle::car(None, None, [3.2, 30.0], [0.0, 0.0], [0.0, 1.0])
+        };
+        let b = scan(&m, &straight(), 1.75, 80.0, &[], &[parked], &c, true).expect("parked car");
+        assert!(
+            (b.gap_m - (30.0 - 2.45 - 2.3)).abs() < 0.5,
+            "gap {}",
+            b.gap_m
+        );
+        let cone = Obstacle {
+            entity: None,
+            unit: None,
+            pos: [1.75, 15.0],
+            vel: [0.0, 0.0],
+            fwd: [0.0, 1.0],
+            half_len: 0.15,
+            half_wid: 0.15,
+        };
+        let b = scan(&m, &straight(), 1.75, 80.0, &[], &[parked, cone], &c, true).unwrap();
+        assert!(b.gap_m < 13.0, "the cone is nearer: {}", b.gap_m);
+        // Parked properly at the kerb (parking lane centre 4.75 m out): not in the way.
+        let at_kerb = Obstacle::car(None, None, [4.75, 30.0], [0.0, 0.0], [0.0, 1.0]);
+        assert!(scan(&m, &straight(), 1.75, 80.0, &[], &[at_kerb], &c, true).is_none());
+    }
+
+    #[test]
+    fn a_stopped_car_without_a_heading_covers_any_orientation() {
+        let o = Obstacle::car(Some(EntityId(3)), None, [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]);
+        assert_eq!(o.fwd, [0.0, 1.0]);
+        assert_eq!(o.half_wid, o.half_len);
     }
 }
