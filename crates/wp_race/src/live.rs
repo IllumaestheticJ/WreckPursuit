@@ -330,7 +330,8 @@ impl LiveRace {
     }
 
     /// Feed one stepped tick: `samples` for the racers, the tick's sim `events`, and the
-    /// police vehicles currently in the sim (contacts with them are not civilian hits).
+    /// police vehicles currently in the sim (contacts with them are not civilian hits; the
+    /// judge remembers every police id it has seen, see [`RaceJudge::add_police`]).
     pub fn post_step(
         &mut self,
         tick: u64,
@@ -339,7 +340,7 @@ impl LiveRace {
         police: &[EntityId],
     ) -> StepOut {
         self.last_tick = tick;
-        self.judge.set_police(police);
+        self.judge.add_police(police);
         for e in events {
             if let SimEvent::Police(PoliceEvent::PursuitEnded { racer, outcome, .. }) = e {
                 if outcome.is_capture() {
@@ -531,5 +532,27 @@ mod tests {
         let st = live.standings();
         let two = st.iter().find(|s| s.racer == EntityId(2)).unwrap();
         assert_eq!(two.status, RacerStatus::Dnf(DnfReason::Captured));
+
+        // A police unit seen on one tick and despawned (retired) by the tick its contact is
+        // reported: still police, so a contact, not a civilian hit.
+        let unit = EntityId(500);
+        live.post_step(green + 3, &samples, &[], &[unit]);
+        let bump = SimEvent::Contact {
+            a: EntityId(3),
+            b: unit,
+            point: [0.0; 3],
+            normal: [1.0, 0.0, 0.0],
+            impulse_ns: 5000.0,
+            rel_speed: 4.0,
+        };
+        live.post_step(green + 4, &samples, &[bump], &[]);
+        let three = live
+            .judge()
+            .results()
+            .into_iter()
+            .find(|r| r.racer == EntityId(3))
+            .unwrap();
+        assert_eq!(three.civilian_hits, 0);
+        assert_eq!(three.contacts, 1);
     }
 }
