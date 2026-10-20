@@ -7,6 +7,8 @@
  * applies the values (it owns the sim, the renderer and the audio buses).
  */
 
+import { defaultControls, normalizeControls, type ControlDevice, type DeviceControls } from "./controls";
+
 /** Graphics quality levels (the testbed's `render/quality.ts` modes). */
 export type GfxLevel = "auto" | "high" | "low";
 
@@ -60,6 +62,8 @@ export interface GameSettings {
   camera: CameraId;
   /** Show the testbed's developer panels (scenario menu, telemetry, feeds). */
   developer: boolean;
+  /** Input shaping per device (dead zones, saturation, sensitivity; see `controls.ts`). */
+  controls: Record<ControlDevice, DeviceControls>;
 }
 
 /** localStorage key. */
@@ -78,6 +82,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     units: "kmh",
     camera: "",
     developer,
+    controls: defaultControls(),
   };
 }
 
@@ -115,6 +120,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
     units: oneOf(r.units, ["kmh", "mph"] as const, base.units),
     camera: typeof r.camera === "string" && r.camera.length < 32 ? r.camera : base.camera,
     developer: bool(r.developer, base.developer),
+    controls: normalizeControls(r.controls, base.controls),
   };
 }
 
