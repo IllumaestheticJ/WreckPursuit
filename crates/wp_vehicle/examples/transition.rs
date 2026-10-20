@@ -543,7 +543,34 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// `holds`: the held-drift set case by case (`ONLY` config, `TYRE`, `PLAIN` overrides).
+fn holds(cars: &[(&str, LoadedCar)]) {
+    use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
+    let a = reference_assists();
+    for cfg in configs() {
+        apply(&cfg);
+        println!("## {}", cfg.name);
+        for (id, c) in cars {
+            for e in [6.0f32, 12.0, 20.0] {
+                for g in [0.3f32, 0.5, 0.7] {
+                    let d = PlainDriver::HoldCounter {
+                        entry_deg: e,
+                        throttle: 1.0,
+                    };
+                    let m = plain_hold(c, &a, d, 40.0, g);
+                    println!("  {id} {e}° {g} g: {}", m.cell());
+                }
+            }
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("holds") {
+        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        holds(&cars);
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("v2search") {
         let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
         v2search(&cars);
