@@ -62,13 +62,31 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   reinforcement priority (up to `priority_max_reduction` faster response). Night stakes: `payout_scale()`.
 
 ### Presence & dispatch (`dispatch.rs`)
-- Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned;
-  surplus idle units retire when no racer is within 300 m.
-- **Incidents**: civilian reports (dispatched after `report_dispatch_delay_s[phase]`) and crash
-  scenes (`report_crash_scene`, or automatically from contacts), which hold a unit for `crash_scene_s[phase]`.
+- Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned
+  (after the session start, out of every racer's sight); surplus idle units retire once out of
+  sight and ≥ `response.despawn_min_m` away.
+- **Reckless-driving calls** (round 12b, `presence.toml [response]`): a violation no unit saw
+  opens a report (civilian call or traffic camera; later calls move it to the racer's latest
+  position). After `call_delay_s[phase] + district_delay_s[district]` (Core by day: 2 s) dispatch
+  sends an available unit within `radius_m[district]` by road that can reach a junction on the
+  racer's predicted path before it. If there is none, a **responder spawns**:
+  `spawn_min_m..spawn_max_m` (150–350 m, + `spawn_lead_s` of a fast racer's travel) of legal
+  driving from the racer, never closer than `never_closer_m` (120 m), out of every racer's sight
+  (driver's eye and chase camera), clear of other vehicles, facing the racer. Spots that meet the
+  racer on its predicted path come first. Responders drive with lights at
+  `respond_speed_factor` × limit to the meeting junction (refreshed every 3 s). A unit still
+  > `redispatch_far_m` away `redispatch_s` after taking the call is released and the call goes
+  out again. One radio line: "Dispatch: caller reports reckless driver, Core. Unit 6 responding."
+- **Unit cap**: responders and reinforcements only spawn while ground units <
+  `max_units_by_level[highest wanted level]` (and `max_ground_units`).
+- **Despawns**: idle responders and reinforcements drive on and vanish once out of every racer's
+  sight and ≥ `despawn_min_m` away; out-of-service units the same after 20 s (60 s wrecked).
+- **Crash scenes** (`report_crash_scene`, or automatically from contacts) hold the nearest unit
+  for `crash_scene_s[phase]`.
 - **Reinforcements**: each pursued racer wants `units_per_level[level]` ground units. A deficit
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
-  an idle unit within 700 m is committed, or a new unit spawns ≥ `spawn_min_distance_m` away, out of sight.
+  an idle unit within 700 m is committed, or a new unit spawns like a responder (fallback: the
+  nearest node ≥ `spawn_min_distance_m` away, out of sight).
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
   It is kinematic, gives line of sight to every unit, and is **not** a weapon.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
@@ -174,7 +192,7 @@ Player chase units get `unit_order()` **suggestions** only.
 | File | Contents |
 |---|---|
 | `heat.toml` | Level thresholds; violation weights; witness, recognition, decay and escape tables per phase; capture, safehouse and bounty rules |
-| `presence.toml` | Patrols per district × phase, reinforcement response times, report delays, helicopter availability, tool/tactic unlock levels, crash scenes |
+| `presence.toml` | Patrols per district × phase, reinforcement response times, reckless-driving response (`[response]`: call delays, radius, spawn window, unit cap by heat, despawn distance), helicopter availability, tool/tactic unlock levels, crash scenes |
 | `pursuit.toml` | Think rate, speed factors and caps, cornering g, LOS range, unit dynamics and crash severity per mode, risk budget, traffic hazards, tactic parameters |
 | `tools.toml` | Roadblock, spike strip and helicopter parameters, radar/scanner tiers, captain hold time |
 
@@ -201,14 +219,17 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
 | Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 126 s mean; reinforcement 115 s |
-| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
+| Night speeder, 03:00 (8 runs) | Pursuit at 53 s mean (126 s before round 12b's responders); reinforcement 104 s |
+| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each) | Core noon 3.1 s mean / 7.6 s worst; Suburb noon 9.3 / 16.8 s; Core 23:00 12.2 / 38.2 s; Suburb 23:00 21.3 / 55.0 s |
+| Pop-in audit, every scenario | 0 of ~170 mid-session spawns and ~400 despawns in a racer's sight or within 120 m |
+| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; careful units spend their risk budget (809 unit-seconds held to shadowing), an unlimited budget never does |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
 | Sideswipe a paused patrol car at 30 / 50 km/h, noon / 23:00 / 03:00 (3 runs each) | Assault every run, pursuit in the same tick (0.01 s), wanted L2 |
 | 5 km/h parking bump (3 runs) | No assault, no heat, no pursuit |
 
+| Response in the full sim, physical cars (`cargo run --release -p simcli --example police_response -- vesper\|grid <hour> 4 60`) | Port Vesper noon 13.3 s mean / 17.2 s worst, 23:00 28.2 / 34.0 s; grid noon 16.2 s, 23:00 12.8 s; 0 of 15 spawns and 0 of 6 despawns visible to the player (eye or chase camera) |
 | City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
 
 ## Perf
@@ -244,4 +265,9 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   obstacle awareness) also counts. Overflow kinematic units in `wp_sim` (beyond the physical
   slots) can't be hit at all.
 - Captain-command events are emitted on the next `step`.
+- Never-in-view covers patrol refills, responders, reinforcements and despawns. Roadblock and
+  spike units appear where the tool rules put them (≥ 300 m ahead with ≥ 120 m approach sight),
+  so the racer can see them appear; a helicopter vanishes 15 s after going out of service.
+- Racers' sight is checked at their own height for both ends: on a steep hill a spot below a
+  crest may count as visible (conservative) or a spot above as hidden.
 - No JSON Schema for `data/police/*.toml`; validation lives in `PoliceConfig::validate` plus serde `deny_unknown_fields`.
