@@ -351,6 +351,10 @@ per modelled car with its events and per-frame state; blow-off / shift cut / hea
 synth; mods change it; focus + 6 nearest with hysteresis; back to layers; deterministic) and
 `engine_model` unit tests.
 
+Renders differ slightly run to run (the per-frame parameters reach the audio thread by message,
+so a frame can land one 128-frame block later; the synthesizer's own noise is seeded): e.g.
+the WOT p90 pitch error moves by ~0.05 %, a pop more or less. The checks have margins for it.
+
 **Budget:** player + 6 nearby (7 engines, mixed cars) in one worklet: **0.68 ms of render time
 per 128-frame block** (offline render minus an empty render, median of 3; budget 1.5 ms),
 headless Chromium in this container. Main thread: one `postMessage` per frame (the 24-car
@@ -369,6 +373,23 @@ setting, camera mode → interior), `panel.ts` (engines selector), `bridge.ts`
 (`setEngineModel`). Outside my folders: `apps/testbed-web/src/main.ts` (passes `rig.mode` to
 `audio.update`, one argument), `crates/wp_wasm/src/audio.rs` (`audio_set_engine_model`, career
 mods → `set_engine_tune`), `e2e/audio_samples.mjs` (selects layers for its recorded-engine check).
+
+**Checks run (on `ws/audio` = `lead/round12` + this work):** `cargo fmt --check`, `cargo clippy
+--workspace --all-targets -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`npm run wasm`, `tsc`: clean. `e2e/audio.mjs`, `audio_samples.mjs`, `audio_roster.mjs`,
+`audio_engine.mjs`: all pass. `just web-e2e`: everything passes except `perf_check.mjs`'s
+software-GL thresholds, which swing run to run on this 4-core container (chase 10 → 13 frames
+over 250 ms against ≤ 12, rain 20–27) and never start audio (no input → no AudioContext;
+`audio.update` returns at its first line), so they measure the same code as the base;
+`PERF=0 just web-e2e` (run, weather, gamepad, reset, race): all pass. `cargo test --workspace
+--no-fail-fast`: 141 test binaries pass; 3 fail, all outside audio's reach (`cargo tree -i
+wp_audio` = `wp_wasm`, `testbed-native` only; this branch changes only audio files vs
+`origin/lead/round12`): simcli `goldens_match` (18 scenarios: city ×3, golden city_chase /
+night_pursuit_escape, panels ×3, police sideswipe, race ×4, weather ×5 — the base mismatch
+reported in round 12b, now 18), `wp_race --test race_picker` (`loop9_circuit` winner fled,
+`lantern_checkpoint` never finished) and `wp_opponent --test race`
+(`live_police_chase_ends_in_escape_or_capture_without_stuck_cars`: racer 3 waited 102 s) — the
+same race / chase scenarios whose goldens moved.
 
 **Known gaps:** browser-only (a native backend would port the worklet); far cars keep the
 layers; the boost is still the audio estimate (A-5); interior filtering covers the modelled
