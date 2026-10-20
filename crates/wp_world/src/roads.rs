@@ -131,14 +131,40 @@ impl RoadGraphView {
             } else {
                 RoadClass::Local
             };
-            // Centreline: node centres plus the interior bends of the first lane (offset by
-            // half a road width at most; exact geometry lives in the lanes).
-            let mut polyline = vec![geom::xy(net.nodes[a as usize].pos)];
-            let pl = &first.polyline;
-            for p in pl.iter().take(pl.len() - 1).skip(1) {
-                polyline.push(geom::xy(*p));
-            }
-            polyline.push(geom::xy(net.nodes[b as usize].pos));
+            // Centreline: node centres plus the interior bends of the road's surface centreline
+            // (exact geometry lives in the lanes). Networks without surfaces use the first
+            // lane's bends, which sit up to half a road width off the centre. Consumers offset
+            // from this line to find a lane (police drive half a lane right of it), so on
+            // curved roads it must be the real centre, not a lane.
+            let (pa, pb) = (
+                geom::xy(net.nodes[a as usize].pos),
+                geom::xy(net.nodes[b as usize].pos),
+            );
+            let mut bends: Vec<V2> = match net.surfaces.iter().find(|s| s.road == first.road) {
+                Some(surf) if surf.centre.len() >= 2 => {
+                    let c = &surf.centre;
+                    let mut v: Vec<V2> = c[1..c.len() - 1].iter().map(|p| geom::xy(*p)).collect();
+                    // The surface runs along the road's own a → b, which may be this edge's b → a.
+                    let (c0, c1) = (geom::xy(c[0]), geom::xy(c[c.len() - 1]));
+                    if geom::dist(c0, pa) + geom::dist(c1, pb)
+                        > geom::dist(c0, pb) + geom::dist(c1, pa)
+                    {
+                        v.reverse();
+                    }
+                    v
+                }
+                _ => {
+                    let pl = &first.polyline;
+                    pl.iter()
+                        .take(pl.len() - 1)
+                        .skip(1)
+                        .map(|p| geom::xy(*p))
+                        .collect()
+                }
+            };
+            let mut polyline = vec![pa];
+            polyline.append(&mut bends);
+            polyline.push(pb);
             let length_m = polyline.windows(2).map(|w| geom::dist(w[0], w[1])).sum();
             let (mp, _) = {
                 let pts: Vec<[f32; 3]> = polyline.iter().map(|p| [p[0], p[1], 0.0]).collect();
