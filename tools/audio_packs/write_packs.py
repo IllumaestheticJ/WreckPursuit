@@ -24,6 +24,8 @@ def save(p):
 # over the idle -> 90 % redline sweep, player role, recorded vs procedural) and set so the
 # recorded engine sits ~1 dB under the procedural one.
 LEVEL_DB = {"engine_rec_i4": 15.8, "engine_rec_turbo": 15.8, "engine_rec_i6": 11.7, "engine_rec_v6": 13.0, "engine_rec_v8": 9.1}
+# Recorded horn loops vs the procedural horn (measured as LEVEL_DB, e2e/audio_roster.mjs horn checks).
+HORN_GAIN = round(10 ** (7.0 / 20), 3)  # +7 dB
 def level(id_, gain): return round(gain * 10 ** (LEVEL_DB.get(id_, 0.0) / 20), 3)
 
 def engine(id_, proc, files_pack, layers, desc, whistle_gain=None):
@@ -85,8 +87,11 @@ c["debris/part_tear"] = samples(H, "part_tear_", H, False)
 c["debris/wheel_off"] = samples(H, "wheel_off_", H, False)
 c["mech/engine_fail"] = samples(H, "engine_fail", H, False)
 c["mech/steam_hiss"] = samples(H, "steam_hiss", H, True, 0.6)
-c["horn/standard"] = samples(H, "horn.ogg", H, True)
-c["horn/truck"] = samples(H, "horn_truck", H, True)
+# Horn: steady sustain loops (horn_sustain.py) that stop with the button (release_s, owner #58).
+c["horn/standard"] = dict(samples(H, "horn.ogg", H, True, HORN_GAIN), release_s=0.03)
+c["horn/truck"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
+# Police air horn (owner row 74): modelled by default; the recorded fallback reuses the truck horn.
+c["horn/police"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
 c["drivetrain/shift"] = samples(H, "shift_", H, False, 0.7)
 c["ambient/city_night"] = samples(H, "city_night", H, True, 1.0)
 w["cues"] = dict(sorted(c.items()))

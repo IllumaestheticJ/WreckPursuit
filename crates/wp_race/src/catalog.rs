@@ -15,6 +15,8 @@ use wp_opponent::DriverProfile;
 use wp_world::World;
 
 use crate::bridge::{course_from_route, CityRace};
+use crate::course::{v2, Course, GridLayout};
+use crate::RaceData;
 
 /// Corridor margin added to half the widest carriageway, m (same as the city sprints).
 pub const CORRIDOR_MARGIN_M: f32 = 3.0;
@@ -352,7 +354,71 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
     for g in &mut course.gates {
         g.width_m = g.width_m.max(span);
     }
+    course.grid_layout = street_grid_layout(world, &course, def);
     Some(CityRace { route, course })
+}
+
+/// Half a car's width plus a little clearance, m: a grid slot this close to a parking lane
+/// starts in it (or scrapes the parked cars on the way out).
+const GRID_CAR_HALF_WIDTH_M: f32 = 1.0;
+
+/// How far ahead of each grid slot the run-up must be clear of parking lanes, m.
+const GRID_RUN_UP_M: f32 = 30.0;
+
+/// The grid layout for this course when the race kind's layout does not fit the start street
+/// (`None` = the kind's layout fits). The picker's grids are centred on the route's lane; on a
+/// one-lane-each-way street with parking on both sides a two-wide grid puts its outer column
+/// in the parking lane, nose to tail with the parked cars (the Lantern Row checkpoint run:
+/// two of four cars never left the grid once parked cars became physics bodies). Such a field
+/// lines up single file in the route's lane instead, at the kind's row gap. Checked against the
+/// parking *lanes*, not the parked cars themselves, so it does not depend on which slots the
+/// city's seed happens to fill.
+pub fn street_grid_layout(world: &World, course: &Course, def: &RaceDef) -> Option<GridLayout> {
+    let rules = RaceData::embedded().rules.for_kind(def.kind);
+    let layout = rules.kind_rules.grid;
+    let row_gap_m = match layout {
+        GridLayout::SingleFile { .. } => return None,
+        GridLayout::Staggered { row_gap_m, .. } => row_gap_m,
+        GridLayout::SideBySide { .. } => 8.0,
+    };
+    let cap = (rules.kind_rules.max_racers as usize).max(def.entrants());
+    let slots = course.grid(layout, cap);
+    let blocked = slots.iter().take(def.entrants()).any(|slot| {
+        (0..=(GRID_RUN_UP_M as i32))
+            .step_by(5)
+            .map(|k| v2::add(v2::xy(slot.pos), v2::scale(slot.dir, k as f32)))
+            .any(|p| in_parking_lane(world, p, slot.dir))
+    });
+    blocked.then_some(GridLayout::SingleFile { gap_m: row_gap_m })
+}
+
+/// A car at `p` heading along `dir` overlaps a parking lane running alongside it.
+fn in_parking_lane(world: &World, p: [f32; 2], dir: [f32; 2]) -> bool {
+    use wp_world::network::LaneKind;
+    world
+        .network()
+        .lanes
+        .iter()
+        .filter(|l| l.kind == LaneKind::Parking)
+        .any(|l| {
+            let reach = l.width_m * 0.5 + GRID_CAR_HALF_WIDTH_M;
+            l.polyline.windows(2).any(|w| {
+                let (a, b) = (v2::xy(w[0]), v2::xy(w[1]));
+                let ab = v2::sub(b, a);
+                let len = v2::len(ab);
+                if len < 1e-3 {
+                    return false;
+                }
+                let t = v2::scale(ab, 1.0 / len);
+                // Alongside only: a cross street's parking lane is not in the grid's way.
+                if v2::dot(t, dir).abs() < 0.7 {
+                    return false;
+                }
+                let along = v2::dot(v2::sub(p, a), t).clamp(0.0, len);
+                let q = v2::add(a, v2::scale(t, along));
+                v2::len(v2::sub(p, q)) < reach
+            })
+        })
 }
 
 /// Where the meet happens (the grid's pole position), for meet heat and patrol reports.

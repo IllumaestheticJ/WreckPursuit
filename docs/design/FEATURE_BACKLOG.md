@@ -25,7 +25,7 @@ Priority:
 | B05 | Disconnect-while-wanted = capture after a 60 s grace | 07, 18 | Without it, quitting is the best escape and pursuits stop meaning anything. |
 | B06 | Junkyard beater car file (`junkyard_beater`) | 09 | The economy floor references a car that does not exist. |
 | B07 | Garage test lot (drive, crash test, compare before/after mods) | 04, 16 | Mods and repairs need somewhere to be felt (design overview §4). |
-| B08 | Onboarding flow from GDD §9 (cold open, junkyard, first meet, first heat) | 15, 16 | First-session retention; the systems exist but nothing strings them together. |
+| B08 | Onboarding flow from GDD §9 (intro crash, junkyard car, first race, first police chase, garage) | 22 (machine S, `ws/onboarding`), with 15, 16 | First-session retention; the systems exist but nothing strings them together. **Assigned:** `prompts/22_onboarding_flow.md`. |
 | B09 | Shipped telemetry overlay + input display | 04, 16 | Serious players expect it, and testers' bug reports need it. |
 | B10 | Assist presets (Rookie / Street / Sim) in settings | 16, 02 | One-click entry for new players without merging assists into damage mode (GDD §6). |
 | B11 | Anti-cheat baseline: input-plausibility checks on the server | 07 | Server authority covers physics, not inhuman inputs; needed before any public test. |

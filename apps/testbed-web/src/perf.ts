@@ -5,7 +5,7 @@
 
 /** Frame-loop sections, in loop order. "render" is the CPU side of the WebGL submit only;
  * SwiftShader / GPU raster shows up as the wall frame time minus the sum of the sections. */
-export const SECTIONS = ["input", "sim", "views", "events", "traffic", "weather", "camera", "audio", "ui", "render"] as const;
+export const SECTIONS = ["input", "sim", "views", "events", "fx", "traffic", "weather", "camera", "audio", "ui", "render"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export class FrameProfiler {

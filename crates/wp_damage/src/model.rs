@@ -293,10 +293,14 @@ pub(crate) struct ComponentState {
 }
 
 /// Damage state for one vehicle. Implements [`DamageSim`].
+///
+/// The lattice definition, materials and node → beam index never change after
+/// [`DamageModel::new`] and are shared (`Arc`), so a clone (crash-replay snapshots) copies
+/// only the dynamic state.
 #[derive(Debug, Clone)]
 pub struct DamageModel {
-    pub(crate) def: LatticeDef,
-    pub(crate) materials: BTreeMap<String, MaterialDef>,
+    pub(crate) def: std::sync::Arc<LatticeDef>,
+    pub(crate) materials: std::sync::Arc<BTreeMap<String, MaterialDef>>,
     pub(crate) tuning: DamageTuning,
     pub(crate) entity: EntityId,
     pub(crate) seed: u64,
@@ -315,7 +319,7 @@ pub struct DamageModel {
     pub(crate) detached: Vec<bool>,
     pub(crate) node_region: Vec<BodyRegion>,
     pub(crate) intrusion_dir: Vec<V3>,
-    pub(crate) node_beams: Vec<Vec<u32>>,
+    pub(crate) node_beams: std::sync::Arc<Vec<Vec<u32>>>,
     pub(crate) bounds_lo: V3,
     pub(crate) bounds_hi: V3,
     pub(crate) lattice_mass_kg: f32,
@@ -550,8 +554,8 @@ impl DamageModel {
         let steer_pull_bias = sign * rng.range_f32(0.7, 1.3);
 
         let mut model = Self {
-            def: lattice.clone(),
-            materials: materials.clone(),
+            def: std::sync::Arc::new(lattice.clone()),
+            materials: std::sync::Arc::new(materials.clone()),
             tuning,
             entity: EntityId(0),
             seed,
@@ -567,7 +571,7 @@ impl DamageModel {
             detached: vec![false; n],
             node_region: lattice.nodes.iter().map(|n| n.region).collect(),
             intrusion_dir,
-            node_beams,
+            node_beams: std::sync::Arc::new(node_beams),
             bounds_lo,
             bounds_hi,
             lattice_mass_kg,

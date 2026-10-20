@@ -1,7 +1,9 @@
 //! Playtest #20 ("I can fall into the sidewalk"): cars driven up the kerb and along the
 //! sidewalk stay on the sidewalk's visual surface — in every Port Vesper v2 district, on
 //! ramps up to bridge decks, at junction corners, and on the 12×12 grid — at 15 and 40 km/h
-//! and two approach angles.
+//! and two approach angles. Playtest #52 ("the sidewalk should be at the same height as the
+//! base of the buildings — otherwise it drops wheels too easily"): cars driven across the
+//! sidewalk's back edge onto the level lot behind it, and along the lot, never drop a wheel.
 //!
 //! The visual surface is `wp_world::surface::sidewalk_mesh` (exactly the triangles the
 //! greybox draws; `tools/city-import/tests/surface_match.rs` checks greybox == physics) over
@@ -14,7 +16,7 @@ use wp_contracts::{load_car, load_mode_table, LoadedCar, TimeOfDay, VehicleInput
 use wp_sim::{Sim, SimConfig};
 use wp_world::geom::{self, V2, V3};
 use wp_world::network::{LaneKind, RoadNetwork};
-use wp_world::surface::{sidewalk_mesh, TriMesh, KERB_H_M, SIDEWALK_W_M};
+use wp_world::surface::{lot_width_m, sidewalk_mesh, TriMesh, KERB_H_M, SIDEWALK_W_M};
 use wp_world::{CityMap, TrafficConfig, World, WorldConfig};
 
 fn data(path: &str) -> String {
@@ -311,13 +313,32 @@ struct Drive {
     on_sidewalk: bool,
     /// Where the lowest hub was (time s, wheel, hub position).
     min_at: (f32, usize, V3),
+    /// Lowest speed after the spawn settled, m/s (far below the drive speed: the car hit
+    /// something beside the sidewalk, e.g. a building wall).
+    min_speed_mps: f32,
 }
 
 /// Drive onto the sidewalk of `c` at `speed` m/s, approaching at `angle` rad, then along it
 /// (centre 1.5 m beyond the kerb) until 3 s after the approach should have reached it.
 fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angle: f32) -> Drive {
+    drive_to(sim, map, walks, c, speed, angle, SIDEWALK_W_M * 0.5, 1.0)
+}
+
+/// [`drive`] holding the car's centre `beyond` metres past the kerb line (on the lot when
+/// past the sidewalk); it ends "on the sidewalk" within `tol` metres of that line.
+#[allow(clippy::too_many_arguments)]
+fn drive_to(
+    sim: &mut Sim,
+    map: &CityMap,
+    walks: &Walks,
+    c: &Case,
+    speed: f32,
+    angle: f32,
+    beyond: f32,
+    tol: f32,
+) -> Drive {
     let (sin, _) = wp_math::sin_cos(angle);
-    let seconds = (c.half + SIDEWALK_W_M * 0.5) / (speed * sin) + 3.0;
+    let seconds = (c.half + beyond) / (speed * sin) + 3.0;
     let rest = rest_height();
     // Start on the lane centre, heading `angle` towards the sidewalk side.
     let lane_yaw = wp_math::atan2(-c.dir[0], c.dir[1]);
@@ -329,7 +350,7 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         .unwrap();
     sim.place_on_ground(id, xy, yaw, speed, Some(c.start[2]))
         .unwrap();
-    let target_lat = c.side * (c.half + SIDEWALK_W_M * 0.5);
+    let target_lat = c.side * (c.half + beyond);
     let kerb_lat = c.half;
     let mut steering = false;
     let mut airborne = 0.0f32;
@@ -339,6 +360,7 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         end_clearance: 0.0,
         on_sidewalk: false,
         min_at: (0.0, 0, [0.0; 3]),
+        min_speed_mps: f32::INFINITY,
     };
     let ticks = (seconds * 240.0) as usize;
     for t in 0..ticks {
@@ -358,7 +380,10 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         }
         let steer = if steering {
             // +1 steers right: steer towards the target line, damped by the lateral speed.
-            (-0.25 * (lat - target_lat) - 1.2 * v_lat / st.speed_mps.max(2.0)).clamp(-0.5, 0.5)
+            // The damping must straighten a 15° / 40 km/h approach within the sidewalk's 3 m:
+            // buildings stand ~1 m past its outer edge, and a car still angled in noses into
+            // them (round 12's slip-target steering turns in more gently than the old lock).
+            (-0.25 * (lat - target_lat) - 2.5 * v_lat / st.speed_mps.max(2.0)).clamp(-0.5, 0.5)
         } else {
             0.0
         };
@@ -383,6 +408,7 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         let p = [st.pos[0], st.pos[1]];
         // Skip the settling of the spawn drop.
         if t > 60 {
+            out.min_speed_mps = out.min_speed_mps.min(st.speed_mps);
             for (wi, h) in hubs(&st).into_iter().enumerate() {
                 if !st.wheel_states[wi].contact {
                     continue;
@@ -410,7 +436,7 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         }
         if t + 1 == ticks {
             let lat = lane_frame(c.lane, p).0;
-            out.on_sidewalk = (lat * c.side - c.half - SIDEWALK_W_M * 0.5).abs() < 1.0;
+            out.on_sidewalk = (lat * c.side - c.half - beyond).abs() < tol;
             if let Some(top) = walks.top(p, st.pos[2] - rest) {
                 out.end_clearance = st.pos[2] - top - rest;
             } else {
@@ -465,7 +491,7 @@ fn vesper_cases(map: &CityMap, len: f32) -> Vec<Case> {
 
 fn run_cases(name: &str, net: &RoadNetwork, cases: &[Case]) {
     let map = CityMap::new(net.clone());
-    let walks = Walks::new(&sidewalk_mesh(&map).tops);
+    let walks = Walks::new(&sidewalk_mesh(&map).flush());
     let mut s = sim(net);
     let mut worst = f32::INFINITY;
     let mut fails = Vec::new();
@@ -504,6 +530,123 @@ fn run_cases(name: &str, net: &RoadNetwork, cases: &[Case]) {
     );
 }
 
+/// Stretches of `cases` whose lot is clear of buildings for `len` m (a car can drive along it).
+fn clear_lots(net: &RoadNetwork, cases: Vec<Case>, len: f32) -> Vec<Case> {
+    let lot = lot_width_m(net);
+    cases
+        .into_iter()
+        .filter(|c| {
+            let r = geom::right_of(c.dir);
+            (0..=(len as usize)).all(|k| {
+                let along = geom::add(geom::xy(c.start), geom::scale(c.dir, k as f32));
+                (0..=4).all(|j| {
+                    let lat = c.half + SIDEWALK_W_M + lot * j as f32 / 4.0 + 0.5;
+                    let q = geom::add(along, geom::scale(r, c.side * lat));
+                    !net.buildings
+                        .iter()
+                        .any(|b| geom::point_in_polygon(q, &b.footprint))
+                })
+            })
+        })
+        .collect()
+}
+
+/// Drive up the kerb, across the sidewalk's back edge and along the middle of the lot behind
+/// it, at 15 and 40 km/h and two angles each: no tire below the drawn surface, never
+/// airborne, ending on the lot.
+fn run_lot_cases(name: &str, net: &RoadNetwork, cases: &[Case]) {
+    let map = CityMap::new(net.clone());
+    let walks = Walks::new(&sidewalk_mesh(&map).flush());
+    let lot = lot_width_m(net);
+    let beyond = SIDEWALK_W_M + lot * 0.5;
+    let mut s = sim(net);
+    let mut worst = f32::INFINITY;
+    let mut fails = Vec::new();
+    for c in cases {
+        for (speed, kmh) in [(15.0f32 / 3.6, 15), (40.0 / 3.6, 40)] {
+            // Steeper than the sidewalk drives: the lot is further out, and the stretch must
+            // hold the whole approach.
+            let angles: [f32; 2] = if kmh == 15 {
+                [15.0, 30.0]
+            } else {
+                [12.0, 18.0]
+            };
+            for deg in angles {
+                // Anywhere on the lot at the end.
+                let tol = lot * 0.5;
+                let d = drive_to(
+                    &mut s,
+                    &map,
+                    &walks,
+                    c,
+                    speed,
+                    deg.to_radians(),
+                    beyond,
+                    tol,
+                );
+                worst = worst.min(d.min_clearance);
+                let ok = d.min_clearance > -0.03
+                    && d.max_airborne_s < 0.15
+                    && d.on_sidewalk
+                    && d.end_clearance.abs() < 0.06;
+                if !ok {
+                    fails.push(format!(
+                        "{name} {} at ({:.1}, {:.1}) {kmh} km/h {deg}°: {d:?}",
+                        c.label, c.start[0], c.start[1]
+                    ));
+                }
+            }
+        }
+    }
+    println!(
+        "{name}: {} drives onto the lot, lowest tire {:+.3} m vs the visual surface",
+        cases.len() * 4,
+        worst
+    );
+    for f in &fails {
+        println!("{f}");
+    }
+    assert!(
+        fails.is_empty(),
+        "{name}: {} drives dropped a wheel or missed the lot",
+        fails.len()
+    );
+}
+
+#[test]
+fn vesper_v2_cars_drive_across_the_sidewalk_onto_the_lot() {
+    // Straight stretches with no building on the lot (frontage lots end at the facades, 1.5 m
+    // behind the sidewalk), spread over the city.
+    let all: Vec<Case> = stretches(vesper(), 80.0)
+        .into_iter()
+        .map(|(_, mut c)| {
+            c.label = "verge";
+            c
+        })
+        .collect();
+    let clear = clear_lots(vesper(), all, 80.0);
+    let step = (clear.len() / 12).max(1);
+    let cases: Vec<Case> = clear.into_iter().step_by(step).collect();
+    assert!(cases.len() >= 8, "only {} cases", cases.len());
+    run_lot_cases("vesper_v2", vesper(), &cases);
+}
+
+#[test]
+fn grid_cars_drive_across_the_sidewalk_onto_the_lot() {
+    let cases: Vec<Case> = stretches(grid(), 80.0)
+        .into_iter()
+        .enumerate()
+        .filter(|(k, _)| k % 20 == 0)
+        .map(|(_, (_, mut c))| {
+            c.label = "grid";
+            c
+        })
+        .collect();
+    let cases = clear_lots(grid(), cases, 80.0);
+    assert!(cases.len() >= 4, "only {} cases", cases.len());
+    run_lot_cases("grid", grid(), &cases);
+}
+
 #[test]
 fn vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk() {
     let map = CityMap::new(vesper().clone());
@@ -534,7 +677,7 @@ fn kerb_step_is_the_visual_kerb() {
     let net = grid();
     let s = sim(net);
     let map = CityMap::new(net.clone());
-    let walks = Walks::new(&sidewalk_mesh(&map).tops);
+    let walks = Walks::new(&sidewalk_mesh(&map).flush());
     let (_, c) = stretches(net, 30.0)[0];
     let r = geom::right_of(c.dir);
     let at = |lat: f32| {

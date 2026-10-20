@@ -85,6 +85,7 @@ pub enum VehicleKind {
 pub type ContactFilter = fn(&mut wp_contracts::ContactImpulse);
 
 /// One vehicle slot in the simulation.
+#[derive(Clone)]
 pub struct SimVehicle {
     /// Entity id.
     pub id: EntityId,
@@ -155,6 +156,11 @@ fn ground_pose(
 }
 
 /// A complete simulation instance. Deterministic given the same config, spawns and inputs.
+///
+/// `Clone` is a full snapshot (Rapier sets, lattices, world, police): stepping a clone with
+/// the same inputs gives the same tick hashes as the original (in-memory crash replays,
+/// `wp_wasm::crash_replay`).
+#[derive(Clone)]
 pub struct Sim {
     config: SimConfig,
     tick: u64,
@@ -495,6 +501,23 @@ impl Sim {
     /// settling after a hit); the rest are fixed until something comes near.
     pub fn active_prop_count(&self) -> usize {
         self.props.active_count()
+    }
+
+    /// World pose of city prop `i` (index into `world().static_props()`, the order
+    /// [`Sim::set_world`] created them in): box centre, m, and rotation `[x, y, z, w]`. On
+    /// hilly cities this is the body as seated on the ground, not the raw prop position.
+    /// Read-only (renderers).
+    pub fn prop_pose(&self, i: usize) -> Option<([f32; 3], [f32; 4])> {
+        let rb = self.physics.bodies.get(*self.props.bodies.get(i)?)?;
+        let r = *rb.rotation();
+        Some((rb.translation().to_array(), [r.x, r.y, r.z, r.w]))
+    }
+
+    /// Indices of the props currently dynamic (near a mover, or knocked and not yet asleep),
+    /// ascending. Every other prop is fixed and has not moved since it last was in this list.
+    /// Read-only (renderers).
+    pub fn active_props(&self) -> impl Iterator<Item = usize> + '_ {
+        self.props.active()
     }
 
     /// Number of detached-part debris bodies in the world.

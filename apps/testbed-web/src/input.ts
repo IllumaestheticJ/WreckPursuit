@@ -10,7 +10,7 @@
 import type { DriverInput } from "./wasm/sim";
 import { ACTIONS, loadBindings, type ActionId, type Bindings, type PadControl } from "./bindings";
 
-export type InputSource = "Keyboard" | "Gamepad";
+export type InputSource = "Keyboard" | "Gamepad" | "Touch";
 
 const held = new Set<string>();
 const pressedEdges = new Set<string>();
@@ -106,7 +106,7 @@ const DZ_TRIGGER = 0.05;
 /** Analogue value above which a pad control counts as pressed (edges, held actions, rebinding). */
 export const PAD_PRESS = 0.5;
 
-const kb = { steer: 0, throttle: 0, brake: 0 };
+const kb = { steer: 0, throttle: 0, brake: 0, clutch: 0 };
 let padPrev: Partial<Record<ActionId, boolean>> = {};
 let source: InputSource = "Keyboard";
 let headlights = false;
@@ -131,24 +131,32 @@ function ramp(cur: number, target: number, up: number, down: number, dt: number)
   return Math.abs(d) <= step ? target : cur + Math.sign(d) * step;
 }
 
-/** The first connected gamepad, if any. */
-export function firstPad(): Gamepad | null {
+/** Every connected gamepad / wheel (a wheel's pedals can be a separate device). */
+export function allPads(): Gamepad[] {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  return Array.from(pads).find((p): p is Gamepad => !!p && p.connected) ?? null;
+  return Array.from(pads).filter((p): p is Gamepad => !!p && p.connected);
 }
 
-/** Raw 0..1 value of one pad control (axis directions clamp at 0). */
+/** The first connected gamepad, if any. */
+export const firstPad = (): Gamepad | null => allPads()[0] ?? null;
+
+/** Raw 0..1 value of one pad control (stick directions clamp at 0; pedals use the full range). */
 export function padValue(pad: Gamepad, c: PadControl): number {
   if ("button" in c) return pad.buttons[c.button]?.value ?? 0;
-  return Math.max(0, (pad.axes[c.axis] ?? 0) * c.dir);
+  const a = pad.axes[c.axis] ?? 0;
+  if (c.full) return Math.min(1, Math.max(0, (a * c.dir + 1) / 2));
+  return Math.max(0, a * c.dir);
 }
 
-/** Largest deadzoned value of an action's pad controls. */
-function padAction(pad: Gamepad, id: ActionId): number {
+/** Largest deadzoned value of an action's controls over every connected pad. Bindings are not
+ * tied to one device, so a wheel's clutch pedal and a pad's stick can drive together. */
+function padAction(pads: Gamepad[], id: ActionId): number {
   let v = 0;
-  for (const c of bindings.pad[id]) {
-    const dz = "button" in c ? DZ_TRIGGER : bindings.padDeadzone;
-    v = Math.max(v, deadzone(padValue(pad, c), dz));
+  for (const pad of pads) {
+    for (const c of bindings.pad[id]) {
+      const dz = "axis" in c && !c.full ? bindings.padDeadzone : DZ_TRIGGER;
+      v = Math.max(v, deadzone(padValue(pad, c), dz));
+    }
   }
   return v;
 }
@@ -161,16 +169,26 @@ export const actionHeld = (id: ActionId): boolean => !blocked && (keyAction(id) 
 
 const NEUTRAL: DriverInput = { steer: 0, throttle: 0, brake: 0, handbrake: 0, clutch: 0, gearUp: false, gearDown: false, horn: false, headlights: false };
 
-interface PadRead {
+/** One frame of an analogue device (gamepad, touch controls). */
+export interface AnalogRead {
   input: DriverInput;
   active: boolean;
   /** Edge actions pressed this frame (other than gears, which go into the input). */
   edges: ActionId[];
 }
+type PadRead = AnalogRead;
+
+/** Touch controls (src/touch.ts) register here; read every frame like the gamepad. */
+let touchReader: ((dt: number) => AnalogRead | null) | null = null;
+
+/** Hook an extra analogue device into `readInput` (touch controls). */
+export function setTouchReader(fn: ((dt: number) => AnalogRead | null) | null): void {
+  touchReader = fn;
+}
 
 function readGamepad(): PadRead | null {
-  const pad = firstPad();
-  if (!pad) {
+  const pads = allPads();
+  if (!pads.length) {
     if (Object.keys(padHeld).length) releasePad();
     return null;
   }
@@ -178,7 +196,7 @@ function readGamepad(): PadRead | null {
   const edges: ActionId[] = [];
   const now: Partial<Record<ActionId, boolean>> = {};
   for (const a of ACTIONS) {
-    const v = padAction(pad, a.id);
+    const v = padAction(pads, a.id);
     values[a.id] = v;
     now[a.id] = v > PAD_PRESS;
     if (a.kind === "edge" && now[a.id] && !padPrev[a.id] && a.id !== "gearUp" && a.id !== "gearDown") edges.push(a.id);
@@ -190,7 +208,7 @@ function readGamepad(): PadRead | null {
     throttle: values.throttle ?? 0,
     brake: values.brake ?? 0,
     handbrake: now.handbrake ? 1 : 0,
-    clutch: 0,
+    clutch: values.clutch ?? 0,
     gearUp: rising("gearUp"),
     gearDown: rising("gearDown"),
     horn: !!now.horn,
@@ -198,7 +216,7 @@ function readGamepad(): PadRead | null {
   };
   padPrev = now;
   padHeld = values;
-  const active = Object.values(values).some((v) => (v ?? 0) > 0) || pad.buttons.some((b) => b.pressed);
+  const active = Object.values(values).some((v) => (v ?? 0) > 0) || pads.some((p) => p.buttons.some((b) => b.pressed));
   return { input, active, edges };
 }
 
@@ -207,24 +225,27 @@ function readGamepad(): PadRead | null {
  * arrive through `installKeyboard`'s callback). */
 export function readInput(dt: number): { input: DriverInput; source: InputSource; edges: ActionId[] } {
   const pad = readGamepad();
+  const touch = touchReader?.(dt) ?? null;
   if (blocked) {
     pressedEdges.clear();
-    kb.steer = kb.throttle = kb.brake = 0;
+    kb.steer = kb.throttle = kb.brake = kb.clutch = 0;
     return { input: { ...NEUTRAL, headlights }, source, edges: [] };
   }
   const left = keyAction("steerLeft") ? 1 : 0;
   const right = keyAction("steerRight") ? 1 : 0;
-  const keyActive = left || right || keyAction("throttle") || keyAction("brake") || keyAction("handbrake");
+  const keyActive = left || right || keyAction("throttle") || keyAction("brake") || keyAction("handbrake") || keyAction("clutch");
   kb.steer = ramp(kb.steer, right - left, 4.0, 6.0, dt);
   // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
   kb.throttle = ramp(kb.throttle, keyAction("throttle") ? 1 : 0, 12.0, 12.0, dt);
   kb.brake = ramp(kb.brake, keyAction("brake") ? 1 : 0, 6.0, 10.0, dt);
+  // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
+  kb.clutch = ramp(kb.clutch, keyAction("clutch") ? 1 : 0, 10.0, 3.5, dt);
   const keyboard: DriverInput = {
     steer: kb.steer,
     throttle: kb.throttle,
     brake: kb.brake,
     handbrake: keyAction("handbrake") ? 1 : 0,
-    clutch: 0,
+    clutch: kb.clutch,
     gearUp: keyEdge("gearUp"),
     gearDown: keyEdge("gearDown"),
     horn: keyAction("horn"),
@@ -232,11 +253,21 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
   };
   pressedEdges.clear();
   if (pad?.active) source = "Gamepad";
+  else if (touch?.active) source = "Touch";
   else if (keyActive) source = "Keyboard";
-  const edges = pad?.edges ?? [];
+  const edges = touch?.edges.length ? [...(pad?.edges ?? []), ...touch.edges] : (pad?.edges ?? []);
+  if (source === "Touch" && touch) {
+    // Touch values go to the sim as read, like the pad's; keyboard gears / horn still work.
+    const input = { ...touch.input, headlights };
+    input.gearUp ||= keyboard.gearUp;
+    input.gearDown ||= keyboard.gearDown;
+    input.horn ||= keyboard.horn;
+    return { input, source, edges };
+  }
   if (source === "Gamepad" && pad) {
     const input = pad.input;
-    // Keyboard gear edges and horn still work alongside a pad.
+    // Keyboard gear edges, horn and clutch still work alongside a pad.
+    input.clutch = Math.max(input.clutch, keyboard.clutch);
     input.gearUp ||= keyboard.gearUp;
     input.gearDown ||= keyboard.gearDown;
     input.horn ||= keyboard.horn;

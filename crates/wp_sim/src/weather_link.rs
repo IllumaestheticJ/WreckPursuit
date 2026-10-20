@@ -27,6 +27,7 @@ pub const WEATHER_CELL_M: f32 = 8.0;
 pub const WEATHER_GRID_MARGIN_M: f32 = 50.0;
 
 /// Weather owned by the sim.
+#[derive(Clone)]
 pub(crate) struct WeatherLink {
     cfg: WeatherConfig,
     weather: WeatherSim,

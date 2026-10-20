@@ -13,6 +13,7 @@
 // is already in that frame.
 import * as THREE from "three";
 import { sim } from "../wasm/sim";
+import { PALETTE } from "./palette";
 
 /** Floats per panel in wasm `panel_states()` (mirrors crates/wp_wasm PANEL_STRIDE). */
 export const PANEL_STRIDE = 10;
@@ -31,30 +32,62 @@ export interface MeshPartJson {
   indices: number[];
   skin_nodes: number[];
   skin_weights: number[];
-  /** Hood / trunk lid: lattice node pairs hinge row → latch row, sorted by rest x (format 2). */
-  fold_chords?: [number, number][];
-  /** 2 per vertex in 1/255: crease shape, rear-edge lift (format 2). */
-  fold_weights?: number[];
+  /** Hood / trunk lid / front fender crumple (format 3; tools/assets `FoldBinding`). */
+  fold?: FoldJson;
 }
 
-/** Lost chord length a lid absorbs before it buckles, m (mirrors tools/assets FOLD_DEAD_ZONE_M). */
+/**
+ * How a sheet panel crumples (tools/assets/src/mesh.rs `FoldBinding`, visual only): chords from
+ * the fixed end (hinge row, fender rear row) to the leading end; the leading end follows the
+ * crushed front structure (`leads`), the shortening becomes a fold along `dir`.
+ */
+export interface FoldJson {
+  chords: [number, number][];
+  /** Per chord: three front-structure nodes the leading end follows. */
+  leads: [number, number, number][];
+  /** Axis the chords spread along: 0 = x (lids), 2 = z (fenders). */
+  across: number;
+  dir: [number, number, number];
+  /** Visual gain on the shortening (own chord loss or lead push, whichever is larger). */
+  gain: number;
+  max_m: number;
+  /** Leading-edge pop once unlatched / hanging, m. */
+  pop_m: number;
+  /** 3 per vertex in 1/255: crease, fixed-end lift, leading-end follow. */
+  weights: number[];
+}
+
+/** Lost chord length a panel absorbs before it buckles, m (mirrors tools/assets FOLD_DEAD_ZONE_M). */
 const FOLD_DEAD_ZONE_M = 0.015;
-/** Largest fold height, m (FOLD_MAX_M). */
-const FOLD_MAX_M = 0.3;
-/** Rear-edge lift of an unlatched lid, share of the fold height (FOLD_REAR_LIFT). */
+/** Share of the single-tent height each lid ridge gets (FOLD_SPLIT). */
+const FOLD_SPLIT = 0.7;
+/** Fixed-edge lift of an unlatched lid, share of the fold height (FOLD_REAR_LIFT). */
 const FOLD_REAR_LIFT = 0.45;
+/** Largest leading-end pull-back, share of the chord length (FOLD_PULL_MAX). */
+const FOLD_PULL_MAX = 0.5;
+/** A node this close to rest (m) counts as at rest: the crumple memory clears (FOLD_REST_EPS_M). */
+const FOLD_REST_EPS_M = 1e-3;
 /** A light lens breaks once one of its vertices is pushed this far (m) by the crush. */
 const LIGHT_BREAK_M = 0.05;
 
 /**
- * Fold height (m) of a lid whose hinge→latch chord measured `rest` and now measures `now`: an
- * inextensible strip pushed together rises into a tent (mirrors tools/assets `fold_height`).
+ * Fold height (m, uncapped) of a sheet whose chord measured `rest` and is effectively `lost`
+ * shorter: an inextensible strip pushed together rises into a tent (tools/assets `fold_height`).
  */
-export function foldHeight(rest: number, now: number): number {
+export function foldHeight(rest: number, lost: number): number {
   if (rest <= 1e-3) return 0;
-  const lost = Math.max(0, rest - now - FOLD_DEAD_ZONE_M);
-  const k = 1 - Math.min(lost / rest, 0.5);
-  return Math.min(0.5 * rest * Math.sqrt(1 - k * k), FOLD_MAX_M);
+  const l = Math.max(0, lost - FOLD_DEAD_ZONE_M);
+  const k = 1 - Math.min(l / rest, 0.5);
+  return 0.5 * rest * Math.sqrt(1 - k * k);
+}
+
+/** One chord's fold in the current pose (tools/assets `ChordFold`). */
+interface ChordFold {
+  at: number;
+  height: number;
+  extra: number;
+  pop: number;
+  u: [number, number, number];
 }
 
 /** data/panels/meshes/<car>.json (`CarMesh`). */
@@ -121,19 +154,25 @@ interface PartRT {
   /** Index into `info.regions`, -1 for wheel parts. */
   region: number;
   hidden: boolean;
-  /** Fold chords (node pairs) with their rest x, and per-vertex crease / rear-lift weights. */
-  fold: { a: number; b: number; x: number }[];
+  /** Crumple binding (null: the part does not fold) and its per-vertex weights (0..1). */
+  fold: FoldJson | null;
   foldW: Float32Array;
+  /**
+   * Crumple memory: per chord the largest effective shortening and leading-end pull-back seen
+   * (m). Sheet metal does not spring back; cleared once the car is back at rest (repaired).
+   */
+  foldMem: Float32Array;
   /** Light lenses: broken (crushed or their bumper hangs), drawn dark without glow. */
   broken: boolean;
   /** Largest vertex displacement from rest at the last update, m (lights: break check; tests). */
   maxDisp: number;
   /** Largest fold rise at the last update, m (tests). */
   maxFold: number;
+  /** Largest leading-end pull-back at the last update, m (tests). */
+  maxPull: number;
 }
 
 const tmpSkin = new THREE.Vector3();
-const NO_HEIGHTS: { x: number; h: number }[] = [];
 
 /** Element-wise equality of two float arrays. */
 function sameFloats(a: Float32Array, b: Float32Array): boolean {
@@ -227,6 +266,8 @@ export class PanelBody {
   private readonly spawned = new Set<number>();
   private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
   private onReady: (() => void) | null = null;
+  /** Greybox material values, saved the first time a style is applied. */
+  private greyLook: Map<THREE.Material, { color: THREE.Color; roughness: number; metalness: number; opacity: number }> | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
   private readonly stateOf = new Map<number, number>();
@@ -279,6 +320,43 @@ export class PanelBody {
     else this.onReady = fn;
   }
 
+  /**
+   * Art style (render/style.ts): low-poly dark takes paint, glass, trim, tire, rim and interior
+   * colours from the palette and makes every part matte; greybox restores the values above.
+   * Head/tail lamps are the VehicleView's shared materials and are styled there.
+   */
+  applyStyle(lowpoly: boolean, paint: THREE.Color): void {
+    if (!this.greyLook) {
+      this.greyLook = new Map();
+      for (const [k, m] of Object.entries(this.mats)) {
+        if (!(m instanceof THREE.MeshStandardMaterial) || k === "headlight" || k === "taillight") continue;
+        this.greyLook.set(m, { color: m.color.clone(), roughness: m.roughness, metalness: m.metalness, opacity: m.opacity });
+      }
+      const b = this.brokenLamp as THREE.MeshStandardMaterial;
+      this.greyLook.set(b, { color: b.color.clone(), roughness: b.roughness, metalness: b.metalness, opacity: b.opacity });
+    }
+    const lp: Partial<Record<MeshPartJson["material"], number>> = {
+      glass: PALETTE.glass,
+      trim: PALETTE.trim,
+      rubber: PALETTE.tire,
+      metal: PALETTE.rim,
+      interior: PALETTE.interior,
+    };
+    for (const [k, m] of Object.entries(this.mats) as [MeshPartJson["material"], THREE.Material][]) {
+      const g = this.greyLook.get(m);
+      if (!g || !(m instanceof THREE.MeshStandardMaterial)) continue;
+      if (k === "paint") m.color.copy(lowpoly ? paint : g.color);
+      else m.color.copy(lowpoly && lp[k] !== undefined ? new THREE.Color(lp[k]) : g.color);
+      m.roughness = lowpoly ? (k === "glass" ? 0.35 : 0.85) : g.roughness;
+      m.metalness = lowpoly ? (k === "paint" ? 0.15 : 0) : g.metalness;
+      // Low-poly glass is darker and less see-through (picker: near-opaque blue-black).
+      if (k === "glass") m.opacity = lowpoly ? 0.82 : g.opacity;
+    }
+    const b = this.brokenLamp as THREE.MeshStandardMaterial;
+    const bg = this.greyLook.get(b)!;
+    b.color.copy(lowpoly ? new THREE.Color(PALETTE.brokenLight) : bg.color);
+  }
+
   /** Paint material (livery colour). */
   get paint(): THREE.MeshStandardMaterial {
     return this.mats.paint as THREE.MeshStandardMaterial;
@@ -314,8 +392,8 @@ export class PanelBody {
       this.root.add(m);
       const w = new Float32Array(def.skin_weights.length);
       for (let i = 0; i < w.length; i++) w[i] = def.skin_weights[i] / 255;
-      const fold = (def.fold_chords ?? []).map(([a, b]) => ({ a, b, x: this.restNodes[b * 3] }));
-      const foldW = Float32Array.from(def.fold_weights ?? [], (x) => x / 255);
+      const fold = def.fold && def.fold.chords.length > 0 ? def.fold : null;
+      const foldW = Float32Array.from(fold?.weights ?? [], (x) => x / 255);
       this.parts.push({
         def,
         mesh: m,
@@ -327,9 +405,11 @@ export class PanelBody {
         hidden: false,
         fold,
         foldW,
+        foldMem: new Float32Array((fold?.chords.length ?? 0) * 2),
         broken: false,
         maxDisp: 0,
         maxFold: 0,
+        maxPull: 0,
       });
       if (region >= 0 && !this.tri.has(region)) this.tri.set(region, spanTriangle(this.restNodes, nodeRegions, region));
     }
@@ -384,15 +464,12 @@ export class PanelBody {
       const f = p.region >= 0 ? this.frames.get(p.region) : undefined;
       const { rest, pos, nodes: ids, weights } = p;
       const nv = rest.length / 3;
-      // Lid fold: height per chord from its lost length (rigid frames keep lengths, so the
-      // current nodes are fine for swinging lids too).
-      const heights = p.fold.length === 0 ? NO_HEIGHTS : p.fold.map((c) => ({
-        x: c.x,
-        h: foldHeight(nodeDist(rn, rn, c.a, c.b), nodeDist(nodes, nodes, c.a, c.b)),
-      }));
-      const rearLift = stateOf.get(p.region) === PANEL_STATE.unlatched ? FOLD_REAR_LIFT : 0;
+      const state = stateOf.get(p.region);
+      const free = state === PANEL_STATE.unlatched || state === PANEL_STATE.hanging;
+      const chords = p.fold ? this.chordFolds(p, nodes, f, free, stateOf) : null;
       let maxDisp = 0;
       let maxFold = 0;
+      let maxPull = 0;
       for (let v = 0; v < nv; v++) {
         let dx = 0;
         let dy = 0;
@@ -413,11 +490,20 @@ export class PanelBody {
             dz += w * (nodes[i + 2] - rn[i + 2]);
           }
         }
-        if (heights.length > 0) {
-          // Buckle up (+Z of the lid's rest pose): crease shape plus, unlatched, the rear edge.
-          const rise = heightAt(heights, rest[v * 3]) * (p.foldW[v * 2] + rearLift * p.foldW[v * 2 + 1]);
-          dz += rise;
+        if (chords && p.fold) {
+          // Buckle along the fold direction (crease, plus the fixed edge once free, plus the
+          // leading-edge pop) and pull the leading end back with the crushed front.
+          const c = foldAt(chords, rest[v * 3 + p.fold.across]);
+          const w = p.foldW;
+          const lead = w[v * 3 + 2];
+          const rise = c.height * (w[v * 3] + (free ? FOLD_REAR_LIFT * w[v * 3 + 1] : 0)) + c.pop * lead * lead;
+          const pull = c.extra * lead;
+          const dir = p.fold.dir;
+          dx += dir[0] * rise - c.u[0] * pull;
+          dy += dir[1] * rise - c.u[1] * pull;
+          dz += dir[2] * rise - c.u[2] * pull;
           if (rise > maxFold) maxFold = rise;
+          if (pull > maxPull) maxPull = pull;
         }
         if (f) {
           tmp.set(rest[v * 3] + dx, rest[v * 3 + 1] + dy, rest[v * 3 + 2] + dz).applyMatrix3(f.r).add(f.t);
@@ -434,12 +520,87 @@ export class PanelBody {
       }
       p.maxDisp = Math.sqrt(maxDisp);
       p.maxFold = maxFold;
+      p.maxPull = maxPull;
       (p.mesh.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
       if (p.def.kind === "light") {
         this.updateLight(p, stateOf);
         if (p.maxDisp > 1e-4) p.mesh.geometry.computeVertexNormals();
       }
     }
+  }
+
+  /**
+   * Fold values per chord of a crumpling part (mirrors tools/assets `skin::chord_folds`): the
+   * larger of the own chord loss (panel frame) and the lead push (chassis space, a hanging
+   * bumper's nodes taken back to their attached pose), times the visual gain, ratcheted in the
+   * part's crumple memory.
+   */
+  private chordFolds(p: PartRT, nodes: Float32Array, f: Frame | undefined, free: boolean, stateOf: Map<number, number>): ChordFold[] {
+    const fold = p.fold!;
+    const rn = this.restNodes;
+    const tmp = new THREE.Vector3();
+    // Node `i` in the panel's own frame (chassis space when attached).
+    const local = (i: number): [number, number, number] => {
+      if (!f) return [nodes[i * 3], nodes[i * 3 + 1], nodes[i * 3 + 2]];
+      tmp.set(nodes[i * 3] - f.t.x, nodes[i * 3 + 1] - f.t.y, nodes[i * 3 + 2] - f.t.z).applyMatrix3(f.rt);
+      return [tmp.x, tmp.y, tmp.z];
+    };
+    const off = (i: number) => Math.hypot(nodes[i * 3] - rn[i * 3], nodes[i * 3 + 1] - rn[i * 3 + 1], nodes[i * 3 + 2] - rn[i * 3 + 2]);
+    const atRest = fold.chords.every(([a, b]) => off(a) <= FOLD_REST_EPS_M && off(b) <= FOLD_REST_EPS_M) && fold.leads.every((l) => l.every((i) => off(i) <= FOLD_REST_EPS_M));
+    if (atRest) p.foldMem.fill(0);
+    // Lead node as if its panel were still attached: a hanging panel's node rotated back by its
+    // hang angle about its pivot (the sim captures the hanging pose at angle 0, so this is the
+    // crushed pose it was released in); null once its panel fell off (tools/assets `lead_pos`).
+    const leadPos = (i: number): [number, number, number] | null => {
+      const r = this.nodeRegions[i];
+      const st = stateOf.get(r);
+      if (st === PANEL_STATE.detached) return null;
+      const at: [number, number, number] = [nodes[i * 3], nodes[i * 3 + 1], nodes[i * 3 + 2]];
+      if (st !== PANEL_STATE.hanging) return at;
+      for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) {
+        if (this.states[k] !== r) continue;
+        const s = this.states;
+        const pivot = new THREE.Vector3(s[k + 4], s[k + 5], s[k + 6]);
+        const axis = new THREE.Vector3(s[k + 7], s[k + 8], s[k + 9]);
+        const v = new THREE.Vector3(...at).sub(pivot).applyAxisAngle(axis, -s[k + 2]).add(pivot);
+        return [v.x, v.y, v.z];
+      }
+      return at;
+    };
+    return fold.chords.map(([a, b], c) => {
+      const ru = [rn[b * 3] - rn[a * 3], rn[b * 3 + 1] - rn[a * 3 + 1], rn[b * 3 + 2] - rn[a * 3 + 2]];
+      const la = Math.max(Math.hypot(ru[0], ru[1], ru[2]), 1e-4);
+      const u: [number, number, number] = [ru[0] / la, ru[1] / la, ru[2] / la];
+      const la_ = local(a);
+      const lb = local(b);
+      const own = la - Math.hypot(lb[0] - la_[0], lb[1] - la_[1], lb[2] - la_[2]);
+      let pushLatch = 0;
+      for (let k = 0; k < 3; k++) pushLatch -= (lb[k] - rn[b * 3 + k] - (la_[k] - rn[a * 3 + k])) * u[k];
+      const dl = [0, 0, 0];
+      let n = 0;
+      for (const l of fold.leads[c]) {
+        const at = leadPos(l);
+        if (!at) continue;
+        for (let k = 0; k < 3; k++) dl[k] += at[k] - rn[l * 3 + k];
+        n++;
+      }
+      let pushLead = pushLatch;
+      if (n > 0) {
+        pushLead = 0;
+        for (let k = 0; k < 3; k++) pushLead -= (dl[k] / n - (nodes[a * 3 + k] - rn[a * 3 + k])) * u[k];
+      }
+      const eff = Math.max(fold.gain * Math.max(own, pushLead), p.foldMem[c * 2]);
+      const extra = Math.max(pushLead - pushLatch, 0, p.foldMem[c * 2 + 1]);
+      p.foldMem[c * 2] = eff;
+      p.foldMem[c * 2 + 1] = extra;
+      return {
+        at: rn[b * 3 + fold.across],
+        height: Math.min(FOLD_SPLIT * foldHeight(la, eff), fold.max_m),
+        extra: Math.min(extra, FOLD_PULL_MAX * la),
+        pop: free ? fold.pop_m : 0,
+        u,
+      };
+    });
   }
 
   /**
@@ -458,10 +619,10 @@ export class PanelBody {
     }
   }
 
-  /** Per-part motion at the last update (tests): largest displacement and fold rise, m. */
-  partMotion(name: string): { disp: number; fold: number; broken: boolean } | null {
+  /** Per-part motion at the last update (tests): largest displacement, fold rise and leading-end pull-back, m. */
+  partMotion(name: string): { disp: number; fold: number; pull: number; broken: boolean } | null {
     const p = this.parts.find((q) => q.def.name === name);
-    return p ? { disp: p.maxDisp, fold: p.maxFold, broken: p.broken } : null;
+    return p ? { disp: p.maxDisp, fold: p.maxFold, pull: p.maxPull, broken: p.broken } : null;
   }
 
   /** Light lenses: name, broken, and whether they show the shared head/tail material. */
@@ -478,6 +639,31 @@ export class PanelBody {
         p.mesh.visible = false;
       }
     }
+  }
+
+  /**
+   * Centre (chassis space, current dented shape) of `region`'s parts (any region: `null`) made
+   * of `material` (`glass`, `headlight`, `taillight`), written to `out`. False when the mesh has
+   * none (or is not loaded). Used by the crash effects (render/fx) to burst shards there.
+   */
+  materialCentre(region: string | null, material: MeshPartJson["material"], out: THREE.Vector3): boolean {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    let n = 0;
+    for (const p of this.parts) {
+      if ((region !== null && p.def.region !== region) || p.def.material !== material) continue;
+      const pos = p.pos;
+      for (let i = 0; i < pos.length; i += 3) {
+        x += pos[i];
+        y += pos[i + 1];
+        z += pos[i + 2];
+      }
+      n += pos.length / 3;
+    }
+    if (n === 0) return false;
+    out.set(x / n, y / n, z / n);
+    return true;
   }
 
   /** Move a detached region's parts out of the car into world-space debris. */
@@ -529,21 +715,18 @@ export class PanelBody {
   }
 }
 
-/** Distance between node `a` of `pa` and node `b` of `pb` (xyz per node). */
-function nodeDist(pa: Float32Array, pb: Float32Array, a: number, b: number): number {
-  return Math.hypot(pa[a * 3] - pb[b * 3], pa[a * 3 + 1] - pb[b * 3 + 1], pa[a * 3 + 2] - pb[b * 3 + 2]);
-}
-
-/** Fold height at rest x, linear across x between chords (sorted by x). */
-function heightAt(hs: { x: number; h: number }[], x: number): number {
-  if (x <= hs[0].x) return hs[0].h;
-  for (let i = 1; i < hs.length; i++) {
-    if (x <= hs[i].x) {
-      const t = (x - hs[i - 1].x) / Math.max(hs[i].x - hs[i - 1].x, 1e-4);
-      return hs[i - 1].h + (hs[i].h - hs[i - 1].h) * t;
+/** Chord fold values at across coordinate `x`, linear between chords (sorted by `at`). */
+function foldAt(cs: ChordFold[], x: number): ChordFold {
+  if (x <= cs[0].at) return cs[0];
+  for (let i = 1; i < cs.length; i++) {
+    if (x <= cs[i].at) {
+      const a = cs[i - 1];
+      const b = cs[i];
+      const t = (x - a.at) / Math.max(b.at - a.at, 1e-4);
+      return { at: x, height: a.height + (b.height - a.height) * t, extra: a.extra + (b.extra - a.extra) * t, pop: a.pop + (b.pop - a.pop) * t, u: a.u };
     }
   }
-  return hs[hs.length - 1].h;
+  return cs[cs.length - 1];
 }
 
 /** Three nodes of `region` spanning the largest triangle (rest pose). */

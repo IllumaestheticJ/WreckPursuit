@@ -24,7 +24,10 @@ Depends on `wp_contracts`, `wp_math`, and read-only on `wp_world` (routes, POIs,
 | `TimeAttack` | single-file grid | best **own** elapsed time | each racer's clock starts at their own start-line crossing |
 
 Every kind is a rule object (`RulesTable::for_kind` → `RaceRules`): start-grid layout, min/max
-racers, time limit, finish window after the winner, plus shared tolerances.
+racers, time limit, finish window after the winner, plus shared tolerances. A course can
+override the grid layout (`Course::grid_layout`): `catalog::plan_course` lines the field up
+single file in the route's lane when a slot of the kind's two-wide grid (or its first 30 m)
+would overlap a parking lane, so nobody starts in the parked cars on a narrow street.
 
 ### Judging (server side)
 

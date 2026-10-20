@@ -279,7 +279,7 @@
     "horn/standard": {
       "source": {
         "Synth": {
-          "synth": "horn",
+          "synth": "disc_horn",
           "params": {
             "f1": 420.0,
             "f2": 500.0
@@ -287,20 +287,23 @@
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "release_s": 0.03
     },
     "horn/truck": {
       "source": {
         "Synth": {
-          "synth": "horn",
+          "synth": "air_horn",
           "params": {
-            "f1": 310.0,
-            "f2": 370.0
+            "f1": 220.0,
+            "f2": 277.0,
+            "f3": 330.0
           }
         }
       },
       "gain": 0.9,
-      "looped": true
+      "looped": true,
+      "release_s": 0.03
     },
     "surface/asphalt": {
       "source": {
@@ -449,6 +452,42 @@
       },
       "gain": 0.7,
       "looped": true
+    },
+    "horn/police": {
+      "source": {
+        "Synth": {
+          "synth": "air_horn",
+          "params": {
+            "f1": 311.0,
+            "f2": 370.0
+          }
+        }
+      },
+      "gain": 0.9,
+      "looped": true,
+      "release_s": 0.03
+    },
+    "impact/body": {
+      "source": {
+        "Synth": {
+          "synth": "impact_body",
+          "params": {}
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 1.8
+    },
+    "impact/crunch": {
+      "source": {
+        "Synth": {
+          "synth": "crunch",
+          "params": {}
+        }
+      },
+      "gain": 0.9,
+      "looped": true,
+      "release_s": 0.06
     }
   }
 }

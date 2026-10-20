@@ -87,3 +87,24 @@ hidden (`body.demo`), a start menu (city chase / rainy night / races / free driv
 quick play runs outside the career, first-time assists auto gears + TCS. Reference page:
 `tools/demo/index.demo.html` (re-point its `assets/main-*.js` / `*.css` tags to the new build's
 names when refreshing). Refresh the demo only from a green `main`, not from round previews.
+
+## Two tracks (owner decision 2026-10-20: faster feedback)
+- **Preview track (fast):** whenever a branch is ready (its own session ran the full gate on it),
+  merge it into the round branch, run `tools/quick_gate.sh` (compile, changed crates' tests and
+  their scenarios, wasm + tsc) plus the browser smoke drive, and republish the **preview** link.
+  Target: minutes, not hours. Failures found here go straight back to the owning session.
+- **Main track (safe):** the full gate (fmt, clippy -D warnings, cargo test --workspace, all
+  scenarios, goldens + [bless], native-vs-wasm, web-e2e, tsc) on a batch, at most a couple of
+  times a day; only a green full gate moves `main`, the main testbed link and the public demo.
+- Scheduled rounds: do the preview track every time something is ready; run the main track when
+  the round branch has been quiet (no new merges) for ~1 h or once a day.
+- Lesson (2026-10-20): a branch whose session had pushed only docs at merge time "merged" as a
+  no-op, and the preview went out without its code (parked cars). Always `git fetch` right
+  before merging, check `git merge-base --is-ancestor origin/<branch> HEAD` after, and verify the
+  feature in the browser smoke (count it), not just "page loads".
+- Versions: every preview publish bumps `0.ROUND.PREVIEW` — add a row to docs/VERSIONS.md, set
+  the badge in the staged index.html (`<div id="wp-version">`), and state the version in the
+  owner report. A green main gets `0.ROUND.0`.
+- Extra prompts for the owner's own chat instances live in `prompts/extra/` (branches
+  lead/photo-mode, lead/assist-presets, lead/onboarding, lead/roadblocks, lead/engine-decision,
+  lead/more-cars). Treat those branches like any lead helper branch on the preview track.

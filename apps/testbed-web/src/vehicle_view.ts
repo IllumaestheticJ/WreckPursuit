@@ -8,7 +8,9 @@ import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody } from "./render/panels";
-import { proxyGeoms } from "./render/fleet";
+import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
+import { PALETTE, sirenLightIntensity } from "./render/palette";
+import { proxyGeoms, styledPaint } from "./render/fleet";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -95,15 +97,24 @@ export class VehicleView {
   /** The camera's focus car (set by main.ts every frame). */
   focused = false;
   private readonly lamps: THREE.Mesh[] = [];
+  /** Greybox paint (the colour the view was created with). */
+  private readonly greyPaint: THREE.Color;
+  /** Art-style version last applied (render/style.ts `artStyle`). */
+  private styleVersion = -1;
+  /** Headlight pool on the road ahead (low-poly dark at night). */
+  private readonly headPool: THREE.Mesh;
   /** Wheel children currently shown for the panel mesh (true) or the debug wheel (false). */
   private wheelPartsShown: boolean | null = null;
   /** Low-poly stand-in (render/fleet.ts proxy) shown while the panel mesh is still loading. */
   private readonly proxy: THREE.Group;
+  /** The proxy's paint material (recoloured by the art style). */
+  private readonly proxyPaint: THREE.MeshStandardMaterial;
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
     const police = this.info.kind === "Police";
+    this.greyPaint = new THREE.Color(colour);
     this.background = police || this.info.kind === "Traffic";
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
@@ -210,14 +221,21 @@ export class VehicleView {
       this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
     }
 
+    // Headlight pool: on the road just ahead of the front bumper.
+    const wheel0 = this.info.wheels[0];
+    this.headPool = makeHeadlightPool(w * 2.6, 18);
+    this.headPool.position.set(0, l / 2 - 0.2, wheel0 ? wheel0.position_m[2] - wheel0.radius_m + 0.04 : 0.04);
+    this.headPool.visible = false;
+    this.root.add(this.headPool);
+
     // Stand-in until the panel mesh arrives (normally never seen: meshes are preloaded at
     // session start, render/fleet.ts): the far-LOD proxy in this car's livery.
     this.proxy = new THREE.Group();
     {
       const g = proxyGeoms({ car_id: this.info.car_id, body_size_m: this.info.body_size_m, wheels: this.info.wheels });
-      const paint = new THREE.MeshStandardMaterial({ color: colour, vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 });
+      this.proxyPaint = new THREE.MeshStandardMaterial({ color: colour, vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 });
       const detail = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 });
-      this.proxy.add(new THREE.Mesh(g.paint, paint), new THREE.Mesh(g.detail, detail), new THREE.Mesh(g.tail, this.tailMat));
+      this.proxy.add(new THREE.Mesh(g.paint, this.proxyPaint), new THREE.Mesh(g.detail, detail), new THREE.Mesh(g.tail, this.tailMat));
       this.proxy.visible = false;
       this.root.add(this.proxy);
     }
@@ -411,9 +429,19 @@ export class VehicleView {
 
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */
   setMeta(flags: number, timeS: number): void {
+    if (this.styleVersion !== artStyle.version) this.applyStyle();
+    const lowpoly = artStyle.lowpoly;
     const headlights = (flags & META_FLAG.headlights) !== 0;
+    const brake = (flags & META_FLAG.brake) !== 0;
     this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
-    this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    this.tailMat.emissive.setHex(brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    // Low-poly dark: HDR lamp glow so lit lenses reach the bloom pass (running tail lights at
+    // a quarter of the brake glow, which is already ×4 in the hex above).
+    this.headMat.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
+    this.tailMat.emissiveIntensity = lowpoly ? PALETTE.brakeGlow : 1;
+    const pool = lowpoly && headlights && artStyle.night > 0.2;
+    this.headPool.visible = pool;
+    if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * Math.min(1, (artStyle.night - 0.2) * 2.5);
     if (!this.lightBar) return;
     const siren = (flags & META_FLAG.siren) !== 0;
     // Alternating red/blue at 2.5 Hz with a double strobe on each side.
@@ -423,14 +451,47 @@ export class VehicleView {
     const blueOn = siren && phase >= 0.5 && strobe;
     this.barRed!.emissive.setHex(redOn ? 0xff2040 : 0x000000);
     this.barBlue!.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
+    // The brightest thing in the frame at night (palette.ts policeRedGlow / policeBlueGlow).
+    const redGlow = lowpoly ? PALETTE.policeRedGlow : 1;
+    const blueGlow = lowpoly ? PALETTE.policeBlueGlow : 1;
+    this.barRed!.emissiveIntensity = redGlow;
+    this.barBlue!.emissiveIntensity = blueGlow;
+    // The scene's one shared siren light (SceneView.setSiren) takes colour and strength from
+    // the side that is lit; low-poly dark scales it with the palette glow.
     this.sirenOn = siren;
-    this.sirenColour = redOn ? 0xff2040 : 0x2060ff;
-    this.sirenIntensity = redOn || blueOn ? 25 : 0;
+    this.sirenColour = redOn ? (lowpoly ? PALETTE.policeRed : 0xff2040) : lowpoly ? PALETTE.policeBlue : 0x2060ff;
+    this.sirenIntensity = redOn || blueOn ? (lowpoly ? sirenLightIntensity(redOn ? redGlow : blueGlow) : 25) : 0;
   }
 
   /** Where the siren light sits (sim space, the scene's `world` group): above the roof. */
   sirenPosition(out: THREE.Vector3): THREE.Vector3 {
     return out.set(0, 0, this.info.body_size_m[2] + 0.6).applyQuaternion(this.root.quaternion).add(this.root.position);
+  }
+
+  /** Re-colour for the current art style (paint, lamp lenses, light bar, flat shading). */
+  private applyStyle(): void {
+    this.styleVersion = artStyle.version;
+    const lowpoly = artStyle.lowpoly;
+    const kind = this.info.kind === "Police" ? "police" : this.info.kind === "Traffic" ? "traffic" : "player";
+    // Traffic and police keep the livery the instanced fleet gave them (render/fleet.ts
+    // styledPaint), so a promotion swaps the drawer without a recolour.
+    const paint = !lowpoly
+      ? this.greyPaint
+      : new THREE.Color(kind === "player" ? vehiclePaint(kind, this.entity) : styledPaint(this.greyPaint.getHex(), kind === "police"));
+    const bodyMat = this.box.material as THREE.MeshStandardMaterial;
+    bodyMat.color.copy(paint);
+    bodyMat.flatShading = lowpoly;
+    bodyMat.needsUpdate = true;
+    this.panels.applyStyle(lowpoly, paint);
+    this.proxyPaint.color.copy(paint);
+    this.proxyPaint.roughness = lowpoly ? 1 : 0.55;
+    this.proxyPaint.metalness = lowpoly ? 0 : 0.25;
+    this.headMat.color.setHex(lowpoly ? PALETTE.headlight : 0xfff6d0);
+    this.tailMat.color.setHex(lowpoly ? 0x5a1414 : 0x550000);
+    if (this.barRed && this.barBlue) {
+      this.barRed.color.setHex(lowpoly ? 0x5a1418 : 0x661018);
+      this.barBlue.color.setHex(lowpoly ? 0x141e5a : 0x102266);
+    }
   }
 
   dispose(): void {

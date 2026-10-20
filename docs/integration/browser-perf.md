@@ -176,5 +176,17 @@ heads only.
 - **R (panels):** a crashed car with hanging panels re-skins every frame (legit), allocating
   ~150 KB/frame in `fitFrame` / fold heights; scratch matrices would halve it.
 
-## Gates (2026-10-20, cloud container)
-See the commit message of the final commit for the run; summary filled in below.
+## Gates (2026-10-20, cloud container, after merging `origin/lead/round12` @ 11cbf48)
+- `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`: pass.
+- `cargo build --target wasm32-unknown-unknown -p wp_wasm`: pass.
+- `tools/wasm-determinism/compare.sh`: **native == wasm on all 61 scenarios**.
+- `tsc --noEmit`: pass. `just web-e2e` (`e2e/run.mjs`, incl. weather and the new perf check):
+  **73 / 73 pass**; perf check: chase RTF 0.918 in that run (0.951 in the standalone profile;
+  ≥ 0.75 floor, the 0.95 target is borderline on the merged round-12 content with ~18 meshed
+  cars), rain 0.979.
+- `cargo test --workspace`: everything passes **except `simcli goldens_match`** (police
+  sideswipe night, the four race picks, five weather scenarios, …). This branch has **no diff to
+  `origin/lead/round12` in `crates/`, `apps/simcli/`, `data/`, `tools/` or `Cargo.*`**, so the
+  failure is on `lead/round12` itself (goldens not re-blessed after its own merges); nothing in
+  this pass can move a hash. Not re-blessed here (owner rule: goldens must not move from this
+  branch). Lead: re-bless on round 12 with a `[bless]` commit after checking the moves.

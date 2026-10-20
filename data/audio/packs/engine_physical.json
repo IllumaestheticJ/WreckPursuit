@@ -1,0 +1,17 @@
+{
+  "id": "engine_physical",
+  "kind": "Model",
+  "description": "Physically modelled engine (apps/testbed-web/src/audio/engine_worklet.ts): per-cylinder firing pulses, header / tailpipe waveguides, muffler, intake, valvetrain, gear whine, turbo and overrun crackle, driven every frame by VoiceParams::engine. The cue gain sets its level against the layer packs.",
+  "cues": {
+    "engine/physical": {
+      "source": {
+        "Synth": {
+          "synth": "engine_physical",
+          "params": {}
+        }
+      },
+      "gain": 2.2,
+      "looped": true
+    }
+  }
+}

@@ -14,9 +14,11 @@ use wp_contracts::{HandlingEffects, SurfaceType};
 use crate::math::{Quat, V3};
 use crate::vehicle::{Chassis, Vehicle, Wheel};
 
-/// Format 5: format 4 (brake-TC state, differential rework) plus the ESC reference yaw rate
-/// after the TCS cut (playtest row 28).
-const FORMAT: u8 = 5;
+/// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
+/// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
+/// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
+/// (owner rows 57 / 72).
+const FORMAT: u8 = 7;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +163,7 @@ impl Vehicle {
                 wh.alpha,
                 wh.alpha_lag,
                 wh.x,
+                wh.x_wheel,
                 wh.vcomp,
                 wh.fz,
                 wh.fx,
@@ -228,6 +231,11 @@ impl Vehicle {
         w.fs(&[e.gearbox_health, e.fuel_leak_rate]);
         w.b(e.engine_dead);
         w.b(e.lights_broken);
+        w.b(self.launch.prev_vz.is_some());
+        w.f(self.launch.prev_vz.unwrap_or(0.0));
+        w.f(self.launch.lift);
+        w.f(self.hb_grace);
+        w.b(self.stalled);
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -257,7 +265,7 @@ impl Vehicle {
         };
         let mut wheels = self.wheels;
         for wh in &mut wheels {
-            let mut n = [0.0f32; 17];
+            let mut n = [0.0f32; 18];
             for v in &mut n {
                 *v = r.f()?;
             }
@@ -267,18 +275,19 @@ impl Vehicle {
                 alpha: n[2],
                 alpha_lag: n[3],
                 x: n[4],
-                vcomp: n[5],
-                fz: n[6],
-                fx: n[7],
-                fy: n[8],
-                mz: n[9],
-                steer: n[10],
-                vx: n[11],
-                vy: n[12],
-                r_eff: n[13],
-                grip: n[14],
-                drive: n[15],
-                brake: n[16],
+                x_wheel: n[5],
+                vcomp: n[6],
+                fz: n[7],
+                fx: n[8],
+                mz: n[10],
+                fy: n[9],
+                steer: n[11],
+                vx: n[12],
+                vy: n[13],
+                r_eff: n[14],
+                grip: n[15],
+                drive: n[16],
+                brake: n[17],
                 contact: r.b()?,
                 surface: surface_from(r.u8()?)?,
                 point: r.v()?,
@@ -326,6 +335,11 @@ impl Vehicle {
         e.fuel_leak_rate = r.f()?;
         e.engine_dead = r.b()?;
         e.lights_broken = r.b()?;
+        let has_prev = r.b()?;
+        let prev_vz = r.f()?;
+        let lift = r.f()?;
+        let hb_grace = r.f()?;
+        let stalled = r.b()?;
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -361,6 +375,12 @@ impl Vehicle {
         self.force = force;
         self.torque = torque;
         self.effects = e;
+        self.launch = crate::launch::LaunchGuard {
+            prev_vz: has_prev.then_some(prev_vz),
+            lift,
+        };
+        self.hb_grace = hb_grace;
+        self.stalled = stalled;
         Ok(())
     }
 }

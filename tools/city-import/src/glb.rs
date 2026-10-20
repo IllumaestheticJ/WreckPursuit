@@ -11,16 +11,15 @@
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
-use wp_world::map::{CityMap, SegKind};
+use wp_world::map::CityMap;
 use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
 use wp_world::surface::{
-    is_elevated, junction_paved_radii, junction_polygon, lane_bank, sidewalk_mesh, surface_edges,
-    TriMesh,
+    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
-/// Sidewalk width and kerb height (shared with the physics colliders).
-use wp_world::surface::{KERB_H_M as CURB_M, SIDEWALK_W_M as SIDEWALK_M};
+/// Height of the parking / bus lane tint above the road surface, m.
+const LANE_TINT_DZ_M: f32 = 0.01;
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
@@ -411,6 +410,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut parking = Prim::new("parking", [0.26, 0.26, 0.27, 1.0]);
     let mut bus = Prim::new("bus_lane", [0.35, 0.16, 0.14, 1.0]);
     let mut sidewalk = Prim::new("sidewalk", [0.62, 0.61, 0.58, 1.0]);
+    let mut corner = Prim::new("sidewalk_corner", [0.62, 0.61, 0.58, 1.0]);
+    // Level lots behind the sidewalks and the skirts beyond them (same colour; separate
+    // materials so tools can tell the flush lot from the slope down to the ground).
+    let mut lot = Prim::new("lot", [0.50, 0.52, 0.44, 1.0]);
+    let mut lot_skirt = Prim::new("lot_skirt", [0.50, 0.52, 0.44, 1.0]);
     let mut kerb = Prim::new("kerb", [0.70, 0.69, 0.66, 1.0]);
     let mut buildings = Prim::new("building", [0.75, 0.74, 0.72, 1.0]);
     let mut wall = Prim::new("retaining_wall", [0.52, 0.50, 0.46, 1.0]);
@@ -443,33 +447,46 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Pavement: the road surface ribbons, the very triangles `wp_sim` collides with; parking
+    // and bus lanes are tinted 1 cm above them.
+    for s in &net.surfaces {
+        let prim = if s.highway {
+            &mut concrete
+        } else {
+            &mut asphalt
+        };
+        prim.mesh(&surface_ribbon(s));
+    }
     for l in &net.lanes {
-        let half = l.width_m * 0.5;
-        let bank = lane_bank(net, l);
         let prim = match l.kind {
-            LaneKind::Highway => &mut concrete,
             LaneKind::Parking => &mut parking,
             LaneKind::Bus => &mut bus,
-            _ => &mut asphalt,
+            _ => continue,
         };
-        prim.ribbon_banked(&l.polyline, half, half, 0.0, &bank);
+        let bank = lane_bank(net, l);
+        prim.ribbon_banked(
+            &l.polyline,
+            l.width_m * 0.5,
+            l.width_m * 0.5,
+            LANE_TINT_DZ_M,
+            &bank,
+        );
     }
-    // Raised sidewalks and kerb faces: the very triangles `wp_sim` collides with.
+    // Raised sidewalks, their lots and skirts and the kerb faces: the very triangles `wp_sim`
+    // collides with.
     let walks = sidewalk_mesh(map);
     sidewalk.mesh(&walks.tops);
+    corner.mesh(&walks.corners);
+    lot.mesh(&walks.lots);
+    lot_skirt.mesh(&walks.skirts);
     kerb.mesh(&walks.kerbs);
-    // Junction boxes (16-gons) and bend connectors.
-    let radii = junction_paved_radii(net);
-    for (ix, r) in net.intersections.iter().zip(&radii) {
-        let c = net.nodes[ix.node as usize].pos;
-        let poly = junction_polygon(geom::xy(c), *r);
-        asphalt.polygon(&poly, c[2] - 0.01);
-    }
-    for s in &map.segs {
-        if let SegKind::Connector { node, .. } = s.kind {
-            if net.nodes[node as usize].intersection.is_none() {
-                asphalt.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005);
-            }
+    // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
+    // `wp_sim` collides with.
+    for p in node_patches(map) {
+        if p.highway {
+            concrete.mesh(&p.mesh);
+        } else {
+            asphalt.mesh(&p.mesh);
         }
     }
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
@@ -480,14 +497,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             let (l, r) = surface_edges(s);
             let n = s.centre.len();
             let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
-            // Retaining walls on the outer kerb line (sidewalk roads) or the paved edge.
-            let out = if s.highway { 0.3 } else { SIDEWALK_M };
+            // Retaining walls 0.3 m outside a highway's paved edge (sidewalk roads: under the
+            // skirt feet and bare sidewalk edges, below).
             for (side, edge) in [(-1.0f32, &l), (1.0, &r)] {
-                let line = geom::offset_polyline(edge, side * out);
+                if !s.highway {
+                    continue;
+                }
+                let line = geom::offset_polyline(edge, side * 0.3);
                 let top: Vec<V3> = line
                     .iter()
                     .zip(edge.iter())
-                    .map(|(p, e)| [p[0], p[1], e[2] + if s.highway { 0.0 } else { CURB_M }])
+                    .map(|(p, e)| [p[0], p[1], e[2]])
                     .collect();
                 let bottom: Vec<f32> = top
                     .iter()
@@ -548,6 +568,34 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
+    // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
+    // physics terrain the skirts end on.
+    if let Some(t) = terrain {
+        let ground_z = |q: V2| t.height_at(q);
+        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+            let bottom: Vec<f32> = line
+                .iter()
+                .map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]))
+                .collect();
+            wall.curtain(&line, &bottom, true);
+        }
+        // The guard rail `wp_sim` puts just outside a lot-less sidewalk edge: 0.3 m wide,
+        // 0.9 m tall (both faces and the top).
+        for (a, b) in &walks.bare_backs {
+            let d = geom::normalize(geom::sub(geom::xy(*b), geom::xy(*a)));
+            let r = geom::right_of(d);
+            let at = |p: &V3, off: f32, dz: f32| {
+                let q = geom::add(geom::xy(*p), geom::scale(r, off));
+                [q[0], q[1], p[2] + dz]
+            };
+            let (i0, i1) = (at(a, 0.0, 0.9), at(b, 0.0, 0.9));
+            let (o0, o1) = (at(a, 0.3, 0.9), at(b, 0.3, 0.9));
+            bridge.curtain(&[i1, i0], &[b[2], a[2]], true);
+            bridge.curtain(&[o0, o1], &[a[2] - 0.2, b[2] - 0.2], true);
+            bridge.quad(i0, o0, o1, i1, [0.0, 0.0, 1.0]);
+        }
+    }
     for b in &net.buildings {
         buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
     }
@@ -566,6 +614,9 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         parking,
         bus,
         sidewalk,
+        corner,
+        lot,
+        lot_skirt,
         kerb,
         buildings,
         wall,
@@ -653,6 +704,19 @@ fn render_cover(
             [0.0, 0.0, -1.0],
         );
     }
+}
+
+/// Consecutive segments `(a, b)` (the next starting exactly where one ends) joined into
+/// polylines, in order.
+fn chain_segments<'a>(segs: impl Iterator<Item = &'a (V3, V3)>) -> Vec<Vec<V3>> {
+    let mut out: Vec<Vec<V3>> = Vec::new();
+    for (a, b) in segs {
+        match out.last_mut() {
+            Some(line) if line.last() == Some(a) => line.push(*b),
+            _ => out.push(vec![*a, *b]),
+        }
+    }
+    out
 }
 
 /// Split a primitive into pieces of at most 65 535 vertices (16-bit indices), keeping

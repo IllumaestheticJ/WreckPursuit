@@ -542,3 +542,14 @@ Requests (outside my folders):
 - **Testbed e2e (C / lead):** optional extra check in `e2e/run.mjs` career block: after buying
   the beater, `view().cars[0].sale_price < fresh.cash - bought.cash`.
 
+
+Checks run (2026-10-20): `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`
+clean; wasm build + `npm run wasm` OK; `tsc --noEmit` clean in `apps/ui-kit` and
+`apps/testbed-web`; `just web-e2e` (`run.mjs` + `race.mjs`) all checks pass. `cargo test
+--workspace --no-fail-fast`: everything in `wp_economy` / `wp_wasm::career` passes; red outside
+my crates, from sim behaviour on the `lead/round12` base (my diff touches no sim, physics, AI or
+data file they read): `simcli` `goldens_match` (5 city scenarios: hashes diverge from tick 240),
+`wp_race --test race_picker` `grid_highway_sprint`, `wp_sim --test sidewalk` (1 test),
+`wp_wasm` `race_tests::{short_sprint_with_ai_runs_to_results_and_pays_through_the_economy
+(player DNF FinishWindow), a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel
+(never captured)}`. For the lead / owners of those crates.

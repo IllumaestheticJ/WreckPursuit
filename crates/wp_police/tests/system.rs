@@ -40,6 +40,10 @@ impl Harness {
     }
 
     fn with_mode(hour: f32, seed: u64, mode: DamageMode) -> Self {
+        Self::with_config(hour, seed, mode, PoliceConfig::builtin())
+    }
+
+    fn with_config(hour: f32, seed: u64, mode: DamageMode, cfg: PoliceConfig) -> Self {
         let (graph, map) = city().clone();
         // Racer path: from the middle of a Core arterial, straight-most continuation.
         let seg = graph
@@ -59,7 +63,7 @@ impl Harness {
             hazards: false,
         };
         Self {
-            police: PoliceSystem::with_city(PoliceConfig::builtin(), graph, setup),
+            police: PoliceSystem::with_city(cfg, graph, setup),
             world: ScenarioWorld {
                 map: Some(map),
                 ..ScenarioWorld::clock(TimeOfDay::from_hours(hour), 0.0)
@@ -816,4 +820,393 @@ fn assault_counts_once_per_episode_and_not_for_police_contact_tactics() {
     h.run(PHYSICS_DT, &[ram]);
     assert_eq!(h.police.stats().assaults, 2, "a second unit rammed");
     assert!(h.police.racer(RACER).unwrap().heat >= heat + 19.0);
+}
+
+/// Reckless driving nobody saw, as `wp_world` reports it: a speeding violation at the racer.
+fn speeding_at(h: &Harness) -> SimEvent {
+    let v = h.racer_view();
+    SimEvent::TrafficViolation {
+        vehicle: RACER,
+        kind: ViolationKind::Speeding { over_mps: 8.0 },
+        pos: v.pos,
+    }
+}
+
+/// Drive the racer at 20 m/s for `secs`, reporting it every 0.25 s.
+fn drive_reported(h: &mut Harness, secs: f32) {
+    h.speed = 20.0;
+    for _ in 0..(secs / 0.25) as usize {
+        let ev = speeding_at(h);
+        h.run(0.25, &[ev]);
+    }
+}
+
+/// Lead feedback round 12b: with no unit close enough, a reckless-driving call spawns a
+/// responder out of the racer's sight, at least `never_closer_m` away and within the spawn
+/// window by road, already answering the call; the call and the unit go out as one line.
+#[test]
+fn reckless_call_with_no_unit_close_spawns_a_hidden_responder() {
+    let mut cfg = PoliceConfig::builtin();
+    cfg.presence.response.radius_m = wp_police::config::DistrictTable {
+        core: 0.0,
+        suburb: 0.0,
+        industrial: 0.0,
+    };
+    let rs = cfg.presence.response.clone();
+    let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
+    h.run(0.5, &[]);
+    let mut spawn = None;
+    for _ in 0..80 {
+        drive_reported(&mut h, 0.25);
+        let st = h.police.stats();
+        if let Some(sp) = st
+            .spawns
+            .iter()
+            .find(|s| s.role == wp_police::UnitRole::Responder)
+        {
+            spawn = Some((*sp, h.racer_view()));
+            break;
+        }
+    }
+    let (sp, racer) = spawn.expect("no responder spawned within 20 s of the call");
+    assert!(!h.police.stats().calls.is_empty());
+    assert!(sp.nearest_racer_m >= rs.never_closer_m, "{sp:?}");
+    assert!(!sp.in_sight, "{sp:?}");
+    // Legal driving distance to the racer (via the spawn's nearest junction).
+    let (graph, _) = city();
+    let to_racer = graph.distances_to([racer.pos[0], racer.pos[1]]);
+    let n = graph.nearest_node(sp.pos).unwrap();
+    let d = to_racer[n.0 as usize] + dist(sp.pos, graph.node(n).pos);
+    let max = rs.spawn_max_m + 20.0 * rs.spawn_lead_s;
+    assert!(
+        d >= rs.spawn_min_m - 40.0 && d <= max + 40.0,
+        "road distance {d} outside {}..{max}",
+        rs.spawn_min_m
+    );
+    let u = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.id == sp.unit)
+        .expect("responder exists");
+    assert!(
+        matches!(u.assignment, Assignment::Respond { .. }),
+        "{:?}",
+        u.assignment
+    );
+    // One radio line for the call and the unit sent, spoken within the radio gap.
+    drive_reported(&mut h, 20.0);
+    let lines: Vec<&String> = h
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            PoliceEvent::Radio { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    let call = format!("Unit {} responding.", sp.unit.0);
+    assert!(
+        lines.iter().any(
+            |t| t.starts_with("Dispatch: caller reports reckless driver") && t.ends_with(&call)
+        ),
+        "{lines:?}"
+    );
+}
+
+/// Responders and reinforcements wait for room under the wanted-level unit cap: with the cap
+/// at zero extra units, the call goes to an existing unit instead.
+#[test]
+fn unit_cap_holds_responders_back() {
+    let mut cfg = PoliceConfig::builtin();
+    cfg.presence.response.radius_m = wp_police::config::DistrictTable {
+        core: 0.0,
+        suburb: 0.0,
+        industrial: 0.0,
+    };
+    cfg.presence.response.max_units_by_level = [0; 6];
+    let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
+    h.run(0.5, &[]);
+    let alive = h.police.units().len();
+    drive_reported(&mut h, 20.0);
+    let st = h.police.stats();
+    assert!(!st.calls.is_empty());
+    assert!(
+        st.spawns
+            .iter()
+            .all(|s| s.role != wp_police::UnitRole::Responder),
+        "{:?}",
+        st.spawns
+    );
+    assert!(h.police.units().len() <= alive);
+    // An existing unit was sent (the call goes out with it).
+    assert!(
+        h.events.iter().any(|e| matches!(
+            e,
+            PoliceEvent::Radio { text, .. } if text.contains("responding")
+        )),
+        "nobody answered the call: {:?}",
+        h.events
+    );
+}
+
+/// Un-sticking (lead round 12b): a physical unit that wants to drive but doesn't move is
+/// logged as stuck with the cause of its last contact (here a wall ahead), backs out with the
+/// brake (auto-reverse), re-routes around the segment on a repeat, and is despawned once it
+/// has been stuck for `stuck::GIVE_UP_S` out of every racer's sight.
+#[test]
+fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
+    use wp_police::stuck::{StuckCause, UnstickStep};
+    let mut h = Harness::new(12.0, 7);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(950);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let wall = SimEvent::Contact {
+        a: entity,
+        b: wp_contracts::WORLD_ENTITY,
+        point: [pos[0] + heading[0] * 2.3, pos[1] + heading[1] * 2.3, 1.2],
+        normal: [heading[0], heading[1], 0.0],
+        impulse_ns: 900.0,
+        rel_speed: 3.0,
+    };
+    let mut reversed = false;
+    let mut gone_at = None;
+    for tick in 0..(16.0 / PHYSICS_DT) as u32 {
+        let t = tick as f32 * PHYSICS_DT;
+        if h.police.units().iter().all(|u| u.id != id) {
+            gone_at = Some(t);
+            break;
+        }
+        // Pinned: the body never moves, whatever the input.
+        h.police.sync_unit(
+            id,
+            UnitSync {
+                pos: [pos[0], pos[1], 0.5],
+                vel: [0.0; 3],
+                heading,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        if let Some(inp) = h.police.unit_input(id, PHYSICS_DT) {
+            reversed |= inp.brake > 0.5 && inp.throttle == 0.0 && t > 2.0;
+        }
+        let ev = if tick % 120 == 0 {
+            vec![wall.clone()]
+        } else {
+            Vec::new()
+        };
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &ev, PHYSICS_DT, &mut out);
+    }
+    let log: Vec<_> = h
+        .police
+        .stats()
+        .stuck
+        .iter()
+        .filter(|s| s.unit == id)
+        .copied()
+        .collect();
+    assert!(!log.is_empty(), "never detected as stuck");
+    assert_eq!(log[0].cause, StuckCause::Wall, "{log:?}");
+    assert_eq!(log[0].step, UnstickStep::Reverse, "{log:?}");
+    assert!(
+        log.iter().any(|s| s.step == UnstickStep::Reroute),
+        "{log:?}"
+    );
+    assert!(
+        log.iter().any(|s| s.step == UnstickStep::Respawn),
+        "{log:?}"
+    );
+    assert!(reversed, "never backed out");
+    let gone = gone_at.expect("stuck unit never despawned");
+    assert!(gone < 12.0, "despawned at {gone} s");
+}
+
+/// Units on `RACER` (pursuing or intercepting ground cars).
+fn units_on_racer(h: &Harness) -> Vec<wp_police::UnitId> {
+    h.police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && !u.wrecked && u.assignment.target() == Some(RACER))
+        .map(|u| u.id)
+        .collect()
+}
+
+/// Start a pursuit of the harness racer at `heat` (driving at 20 m/s).
+fn pursued_at(hour: f32, seed: u64, heat: f32) -> Harness {
+    let mut h = Harness::new(hour, seed);
+    h.speed = 20.0;
+    h.run(1.0, &[]);
+    h.police.set_heat(RACER, heat);
+    assert!(
+        h.police.begin_pursuit(RACER).is_some(),
+        "no unit to start it"
+    );
+    h
+}
+
+/// Owner playtest row 64: once a pursuit is on, idle and patrolling units nearby join it at
+/// once (driving to the racer's predicted position) and the level's cap (L1 2, L2 4, L3 6)
+/// is reached, never passed.
+#[test]
+fn pursuit_draws_backup_at_once_up_to_the_level_cap() {
+    let caps = PoliceConfig::builtin()
+        .presence
+        .reinforcement
+        .units_per_level;
+    for (heat, level) in [(20.0, 1usize), (40.0, 2), (60.0, 3)] {
+        let mut h = pursued_at(12.0, 3, heat);
+        h.run(0.5, &[]);
+        let early = units_on_racer(&h).len();
+        assert!(early >= 2, "L{level}: only {early} unit(s) within 0.5 s");
+        let mut most = 0;
+        for _ in 0..30 {
+            h.police.set_heat(RACER, heat);
+            h.run(1.0, &[]);
+            most = most.max(units_on_racer(&h).len());
+        }
+        assert!(
+            most <= caps[level - 1] as usize,
+            "L{level}: {most} units > cap {}",
+            caps[level - 1]
+        );
+        assert!(h.police.stats().backup_joins >= 1, "L{level}: no backup");
+        if level >= 2 {
+            assert!(most >= 3, "L{level}: at most {most} units on the racer");
+        }
+    }
+}
+
+/// Owner playtest row 63: tactics escalate with the wanted level. L1 tails and boxes but never
+/// PITs or rams; from L2 the lead unit PITs or rams the racer's rear quarter; from L3 hard rams
+/// and side slams are on the table too.
+#[test]
+fn contact_tactics_escalate_with_the_wanted_level() {
+    let mut seen: Vec<std::collections::BTreeSet<String>> = Vec::new();
+    for heat in [20.0, 40.0, 60.0] {
+        let mut h = pursued_at(12.0, 5, heat);
+        h.speed = 12.0;
+        let mut tactics = std::collections::BTreeSet::new();
+        for _ in 0..(60.0 / 0.25) as usize {
+            h.police.set_heat(RACER, heat);
+            h.run(0.25, &[]);
+            for u in h.police.units() {
+                if u.assignment == (Assignment::Pursue { target: RACER }) {
+                    tactics.insert(format!("{:?}", u.tactic));
+                }
+            }
+        }
+        seen.push(tactics);
+    }
+    let contact = |s: &std::collections::BTreeSet<String>| {
+        s.iter().any(|t| t == "Pit" || t.starts_with("Ram"))
+    };
+    assert!(!contact(&seen[0]), "L1 used contact tactics: {:?}", seen[0]);
+    assert!(
+        contact(&seen[1]),
+        "L2 never went for contact: {:?}",
+        seen[1]
+    );
+    assert!(
+        !seen[1].contains("Ram(Hard)"),
+        "L2 used a hard ram: {:?}",
+        seen[1]
+    );
+    assert!(
+        contact(&seen[2]),
+        "L3 never went for contact: {:?}",
+        seen[2]
+    );
+}
+
+/// Owner playtest row 61: a unit with lights on, blocked by a stopped civilian car it can't
+/// pass, shoves it at low speed after `push_after_s`; the shove raises no heat. A push that
+/// moves nothing falls back to backing out.
+#[test]
+fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
+    let av = PoliceConfig::builtin().pursuit.avoid;
+    let mut h = pursued_at(12.0, 7, 40.0);
+    let id = units_on_racer(&h)[0];
+    let entity = EntityId(951);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    let (pos, heading) = (u.body.pos, u.body.heading);
+    let civ = EntityId(990);
+    let civ_pos = [pos[0] + heading[0] * 4.5, pos[1] + heading[1] * 4.5, 0.5];
+    let heat0 = h.police.racer(RACER).unwrap().heat;
+    let mut pushed_at = None;
+    let mut shoved = false;
+    let mut reversed = false;
+    for tick in 0..(8.0 / PHYSICS_DT) as u32 {
+        let t = tick as f32 * PHYSICS_DT;
+        h.police.sync_unit(
+            id,
+            UnitSync {
+                pos: [pos[0], pos[1], 0.5],
+                vel: [0.0; 3],
+                heading,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        let r = h.racer_view();
+        h.police.set_obstacles(&[
+            // Stopped across the road (no way past).
+            wp_police::ObstacleView {
+                half_length_m: 6.0,
+                ..wp_police::ObstacleView::car(
+                    Some(civ),
+                    civ_pos,
+                    [0.0; 3],
+                    [-heading[1], heading[0]],
+                )
+            },
+            wp_police::ObstacleView::car(Some(RACER), r.pos, r.vel, [0.0, 1.0]),
+        ]);
+        if let Some(inp) = h.police.unit_input(id, PHYSICS_DT) {
+            if h.police.stats().pushes > 0 && pushed_at.is_none() {
+                pushed_at = Some(t);
+            }
+            shoved |= pushed_at.is_some() && inp.throttle > 0.0;
+            reversed |= pushed_at.is_some() && inp.brake > 0.5 && inp.throttle == 0.0;
+        }
+        // The pushing car touching the civilian: not the racer's doing.
+        let ev = if pushed_at.is_some() && tick % 60 == 0 {
+            vec![SimEvent::Contact {
+                a: entity,
+                b: civ,
+                point: civ_pos,
+                normal: [heading[0], heading[1], 0.0],
+                impulse_ns: 400.0,
+                rel_speed: 1.0,
+            }]
+        } else {
+            Vec::new()
+        };
+        let mut out = Vec::new();
+        h.police.set_heat(RACER, heat0);
+        h.police.step(&h.world, &[r], &ev, PHYSICS_DT, &mut out);
+        assert!(h.police.racer(RACER).unwrap().heat <= heat0 + 1.0);
+    }
+    let at = pushed_at.expect("never pushed");
+    assert!(
+        at >= av.push_after_s - 0.1 && at <= av.push_after_s + 1.5,
+        "pushed at {at} s"
+    );
+    assert!(h.police.stats().pushes >= 1);
+    assert!(shoved, "the push never drove forward");
+    assert!(reversed, "a push that moved nothing never backed out");
 }

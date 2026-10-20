@@ -4215,6 +4215,7 @@ dependencies = [
  "lint-determinism",
  "serde",
  "serde_json",
+ "simcli",
  "toml",
  "wp_contracts",
  "wp_math",
@@ -4422,6 +4423,7 @@ name = "wp_wasm"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "rapier3d",
  "serde",
  "serde_json",
  "simcli",
@@ -4436,6 +4438,7 @@ dependencies = [
  "wp_police",
  "wp_race",
  "wp_sim",
+ "wp_vehicle",
  "wp_weather",
  "wp_world",
 ]

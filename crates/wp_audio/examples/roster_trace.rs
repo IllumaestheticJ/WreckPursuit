@@ -19,6 +19,18 @@ fn main() {
             cases.push((car, kind, dist, roster::run_case(car, kind, dist)));
         }
     }
-    std::fs::write(&path, roster::render_json(&cases)).expect("write json");
+    // Horn held 2.0 s: a standard horn and a truck horn (owner report #58).
+    let horns: Vec<_> = ["tansy_13", "hauler_1500"]
+        .iter()
+        .map(|id| {
+            let car = cars.iter().find(|c| c.def.id == *id).expect("roster car");
+            (
+                car,
+                roster::HORN_HOLD_S,
+                roster::run_horn(car, wp_audio::DriverKind::Player, roster::HORN_HOLD_S, 0.8),
+            )
+        })
+        .collect();
+    std::fs::write(&path, roster::render_json(&cases, &horns)).expect("write json");
     println!("{} cases -> {path}", cases.len());
 }

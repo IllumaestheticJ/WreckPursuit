@@ -39,6 +39,24 @@ in `types::slot`.
 `max_voices` and each bus's limit play; one-shots still sounding hold their slot until their
 `duration_s` ends. The focused car's engine is `Critical` and never loses its slot.
 
+**Engine LOD** (playtest #47, a crowd silenced cars): every car but the focus keeps its two
+loudest engine layers within `engine.lod_two_layer_m` (40 m) and one beyond, with the dropped
+layers' energy moved into the kept ones (`engine::engine_lod`; loudness unchanged, sticky near a
+crossover); its second layer scores × `engine.second_layer_cull_scale` (`Desire::cull_scale`),
+so every car's main layer is kept before another car's second one.
+
+**Body-less vehicles:** `kinematic::cruise_state(def, pos, yaw, speed)` builds a plausible
+`VehicleState` (cruising gear and rpm from the car's gearing, rolling wheels) so kinematic
+traffic and police units on `wp_police`'s internal driving can be fed to the director.
+
+**Pack level:** the director folds each cue's `gain` into the gains it sends. Recorded engine
+packs carry a level boost on their layer cues (`tools/audio_packs/write_packs.py` `LEVEL_DB`,
+matched to the procedural fallback); a backend that plays a stand-in cue (the fallback) must
+use that cue's own gain (the Web Audio pool rescales by `fallback.gain / cue.gain`).
+
+**Release:** a cue may set `release_s` (pack JSON); its voice's `Stop` then fades over that
+instead of `audio_config.stop_fade_s`. The horn uses 0.03 s so it ends with the button.
+
 **Determinism:** time comes from ticks only (`AudioFrame::tick`), every map is a `BTreeMap`,
 ordering is total and tie-broken by `VoiceId`, randomness (cosmetic pitch variation, overrun
 pops) is a seeded `wp_math::Rng`, trig goes through `wp_math::sin_cos`, no other transcendental
@@ -46,6 +64,36 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 
 ## Models
 
+- **Modelled engine** (`engine_model.rs`, row 73 "simulate accurate engine sounds"; the default
+  for the player car): when the backend runs its engine synthesizer it calls
+  `set_engine_model(EngineModelMode::Physical)`; the focus car and the
+  `engine.physical_max_others` (6) nearest cars within `engine.physical_radius_m` (60 m; sticky:
+  a voiced car ranks 20 % closer and stays to 1.25 × the radius) then get **one** voice,
+  `engine_physical` / `engine/physical` (slot `ENGINE_PHYSICAL`), instead of layers, limiter,
+  turbo, supercharger, blow-off and pop voices; every other car keeps the layers.
+  - Static, in the `Play`'s `synth` map: `EngineVoiceSpec::to_synth_params` — every combustion
+    event of the 720° cycle (crank angle `a<i>`, exhaust bank `b<i>`, header length `h<i>`,
+    fixed strength trim `k<i>`) from cylinders / layout / firing feel (I4 1-3-4-2 even, I6 even,
+    cross-plane V8 1-8-4-3-6-5-7-2 with odd cylinders on bank 0 → each bank fires 90-180-270-180°,
+    flat-plane V8 alternating banks → each bank an even 180°, odd-fire V6 90/150°, boxer rumble =
+    unequal header lengths, rotary = one event per rotor per output revolution), dual or single
+    exhaust (V8+ outside trucks / compacts run one pipe per bank), tailpipe length, muffler
+    damping and chamber resonance by class, intake / mechanical / whine levels, differential mesh
+    frequency per m/s (final drive, wheel radius), overrun crackle tendency, turbo / supercharger,
+    idle / redline / limiter rpm.
+  - Installed mods (`set_engine_tune(entity, EngineTune::from_mods(ids))`, filled by the wasm
+    bridge from a career run's car): `engine_exhaust_1` (cat-back) / `_2` (header-back) = louder,
+    less muffler, more crackle, equal-length headers; `engine_intake_*` = more induction;
+    `fi_turbo_*` / `fi_supercharger_*` = the kit's whistle / whine; `engine_v8_swap` = a
+    cross-plane V8.
+  - Per frame, `VoiceParams::engine` (`EngineFrame`): crank rpm, applied throttle, pedal, gear,
+    road speed, boost (the layer model's spool estimate), engine component health, blow-off
+    counter. Load is the voice's `load` (the same smoothed load with shift dips / blips).
+  - The synthesis itself is the browser's (`apps/testbed-web/src/audio/engine_worklet.ts`, see
+    that file and `docs/integration/audio.md`): pulses per event → per-bank header waveguide →
+    collector or dual pipes → muffler → tailpipe waveguide → open-end radiation, plus intake,
+    valvetrain, gear and diff whine, turbo / blow-off / supercharger, crackle (overrun, limiter
+    fuel cut, misfires below 70 % engine health: `misfire_probability`), interior / exterior.
 - **Engine** (`engine.rs`): per-car `EngineAudioDef` (cylinders, layout, firing feel,
   induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Inputs per frame:
   the crank rpm (`VehicleState::engine_rpm`, never a wheel-derived speed), the pedal and the
@@ -90,6 +138,25 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   `SimEvent::GlassShattered` (v0.2.0) shatters at the region's centroid, once per region; after
   the first such event glass is no longer inferred from contacts. `SimEvent::RegionDamaged` on
   outer panels drives a `body/rattle` loop (severity × speed × road texture).
+- **Impact synthesis** (`impact.rs`, owner row 74; details and backend in
+  `apps/testbed-web/src/audio/impacts/README.md`, integration in
+  `docs/integration/audio-impacts.md`): on top of the recorded layers every hit plays one
+  `impact/body` voice per struck vehicle whose synth params come from the physics — excitation
+  strength from the collision energy `½·m_eff·v²` (or the tick's impulse), brightness / contact
+  time from the closing speed, plate modes and ring time of the struck **region** (roof lowest
+  and longest, deadened doors short, plastic bumpers dull; a hard frontal reaches the steel
+  behind the cover), shortened and buzzing on **dented** panels (`RegionDamaged` severity), a
+  mass-dependent chassis thump, and for heavy hits a bass transient + sidechain duck depth.
+  `impact/crunch` (slot `CRUNCH`) is a granular loop per vehicle whose density follows the
+  lattice's plastic power: `AudioDirector::set_plastic_energy(entity, J)` each frame (the wasm
+  bridge reads `DamageModel::total_plastic_energy_j`); without it the hit's collision energy is
+  booked instead. Glass (`GlassShattered` or inferred) adds a `kind = 1` body voice (onset +
+  debris tail, tempered vs laminated). Scrapes carry friction params (`freq_hz` = stick-slip
+  rate from the sliding speed, `force`, `metal`, `sparks` on the world). Horns get `load` = front
+  damage / weak battery; police units with a standard horn use `horn/police`. **Interior
+  camera** (listener inside the focus car's cabin box from the lattice): other vehicles are
+  low-passed to 2.2 kHz and −5 dB, the own horn muffled, impact voices get `interior`. All
+  math is deterministic (`impact::det_log2/det_exp2/det_pow`, basic arithmetic only).
 - **Police events** (`wp_police::PoliceEvent`, decoded from `SimEvent::PoliceEvent`): `Radio`
   lines go to the scanner (priority: Dispatch for dispatch, Pursuit while a pursuit is active,
   else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
@@ -171,7 +238,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
+| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}`; optional `impact/{body,crunch}`, `horn/police` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
@@ -186,13 +253,41 @@ intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).
+Owner row 74 (`src/audio/impacts/`, `src/audio/horn.ts`): `impact_body`, `crunch`,
+`friction`, `disc_horn` (`f1`, `f2`), `air_horn` (`f1`, `f2`, optional `f3`) — parameters in
+`apps/testbed-web/src/audio/impacts/README.md`.
 
 ## Tests
 
 ```
 cargo test -p wp_audio
 cargo test -p wp_audio --test samples   # recorded files exist, licensed, ≤ 15 MB
+cargo test -p wp_audio --test engine_physical
+node apps/testbed-web/e2e/audio_engine.mjs   # renders + spectra + budget (see below)
 ```
+
+`tests/engine_physical.rs` (row 73): every sweep car as the focus gets exactly one
+`engine/physical` voice (no layers / limiter / turbo / pop voices) with its firing events, and
+the scripted rpm / throttle / gear / speed / health in every frame; a turbo lift fires the
+blow-off counter; a shift carries the cut; exhaust / turbo mods change the description; the
+modelled set is the focus + 6 nearest within 60 m with hysteresis, and back to layers stops
+them; deterministic. `engine_model` unit tests: firing frequency (four-stroke, rotary), bank
+intervals (cross-plane 90/180/270/180, flat-plane 180), inline even and single-bank, odd-fire,
+boxer header lengths, mods, synth-map round trip, misfire curve.
+`examples/engine_sweeps.rs` writes the WOT / lift / shift / rpm-steps / damaged sweeps for an
+I4, I6, cross-plane V8, flat-plane V8 and turbo I4; `apps/testbed-web/e2e/audio_engine.mjs`
+renders them through the real voice pool + worklet, writes `docs/media/audio/*.wav|png` and
+checks pitch (≤ 1 %), harmonic structure, crackle / blow-off / limiter / misfires, clicks,
+denormals, level vs layers, interior vs exterior and the 1.5 ms budget.
+`tests/impacts.rs` (owner row 74): a hit plays one `impact/body` per struck vehicle in the
+same frame, strength / transient / duck grow with speed; both cars ring in a car-to-car crash;
+a dented roof rings shorter and buzzes; the crunch starts the frame the lattice yields and
+stops after the crush (none without deformation, an estimate for unmeasured cars); glass plays
+shatter + tail once; scrapes carry friction params and the stick-slip rate follows the sliding
+speed; horns weaken with front damage and police get the air horn; the interior camera muffles
+other cars and the own horn; the stream is deterministic. Renders + browser checks:
+`cargo run --release -p wp_audio --example impact_trace -- t.json` +
+`node apps/testbed-web/e2e/audio_impacts.mjs t.json` (or no argument).
 
 Unit tests per module plus `tests/director.rs`: shipped data validates (and disk == embedded,
 every car has a def); **command stream determinism** on a real head-on crash with a siren,
@@ -214,7 +309,13 @@ off-load; every layer audible and only leading near its root; turbo cars blow of
 `tests/wheelspin.rs` (playtest #27): a standstill burnout and full-throttle launches with TCS
 off (RWD V8, RWD turbo, FWD sedan) and a TCS launch — the spin loop is ≥ 0.2 after 0.1 s of
 hard spin (slip ratio ≥ 0.5, ≥ 3 m/s), silent after 0.5 s of grip, pitch rises with slip speed,
-and straight-line spin does not squeal. Same signals as a table/CSV (`--burnout` for the
+and straight-line spin does not squeal. `tests/roster.rs` (playtest #47): every car in `data/cars` as player, AI racer, police unit
+and traffic gets an audible engine, squeal, wheelspin and (police) siren; a 24-car crowd keeps
+every engine to 140 m with the LOD's layer counts; the LOD keeps loudness; kinematic cruise
+states are heard. The same scenarios rendered through the browser's voice pool, recorded and
+procedural: `cargo run -p wp_audio --example roster_trace -- r.json` +
+`node apps/testbed-web/e2e/audio_roster.mjs r.json --verbose` (or no argument: it builds the
+trace). Same signals as a table/CSV (`--burnout` for the
 wheelspin script) and the command stream for an offline browser render:
 
 ```
@@ -234,8 +335,13 @@ nodes) for material lookup.
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
-- No occlusion (buildings) or interior/exterior filtering yet; no reverb zones (tunnels).
+- No occlusion (buildings); no reverb zones (tunnels). Interior / exterior filtering exists for
+  the modelled engine only (tyres, wind and impacts are not muffled in the cockpit yet).
+- The modelled engine is browser-only (AudioWorklet); a native backend would port
+  `engine_worklet.ts`. Far cars (beyond the 6 nearest / 60 m) keep the layers.
 - No music system; the Music bus exists so the scanner can duck it.
+- Kinematic traffic and body-less police units are heard only once the wasm bridge feeds
+  `kinematic::cruise_state` inputs (request R12b-1 in `docs/integration/audio.md`).
 - TTS (`speechSynthesis`) bypasses the Web Audio radio EQ (browser limitation); recorded line
   packs will go through it.
 - The applied throttle reaches audio through the wasm bridge (`Telemetry::throttle`); a

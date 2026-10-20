@@ -35,6 +35,9 @@ pub mod cues {
     pub const SUPERCHARGER_WHINE: &str = "supercharger/whine";
     /// Overrun exhaust pop one-shot.
     pub const EXHAUST_POP: &str = "exhaust/pop";
+    /// The physically modelled engine (one looped voice per car, `Model` pack): firing
+    /// pulses, exhaust waveguides, intake, mechanical noise, turbo, crackle.
+    pub const ENGINE_PHYSICAL: &str = "engine/physical";
 
     /// Tire squeal loop on paved surfaces.
     pub const SQUEAL: &str = "tire/squeal";
@@ -95,6 +98,13 @@ pub mod cues {
     pub const SHIFT: &str = "drivetrain/shift";
     /// Optional city ambience loop (World packs; played by the backend, not the director).
     pub const AMBIENT_CITY_NIGHT: &str = "ambient/city_night";
+    /// Optional synthesised body-panel impact (modal bank, thump, transient, glass tail); one
+    /// per hit on top of the recorded layers (`wp_audio::impact`).
+    pub const IMPACT_BODY: &str = "impact/body";
+    /// Optional granular crunch loop that follows the lattice's deformation power.
+    pub const IMPACT_CRUNCH: &str = "impact/crunch";
+    /// Optional police air horn (police units on cars whose horn is `horn/standard`).
+    pub const HORN_POLICE: &str = "horn/police";
 
     /// Every cue a `World` pack must define.
     pub fn world() -> Vec<&'static str> {
@@ -134,9 +144,30 @@ pub mod cues {
 }
 
 /// Synth names the procedural backend implements (`apps/testbed-web/src/audio/synth.ts`).
-pub const KNOWN_SYNTHS: [&str; 16] = [
-    "engine", "noise", "tone", "siren", "horn", "impact", "glass", "thump", "squeal", "whine",
-    "blowoff", "pop", "squelch", "clatter", "hiss", "spin",
+pub const KNOWN_SYNTHS: [&str; 22] = [
+    "engine",
+    "noise",
+    "tone",
+    "siren",
+    "horn",
+    "impact",
+    "glass",
+    "thump",
+    "squeal",
+    "whine",
+    "blowoff",
+    "pop",
+    "squelch",
+    "clatter",
+    "hiss",
+    "spin",
+    "engine_physical",
+    // Owner row 74 (`src/audio/impacts/`, `src/audio/horn.ts`).
+    "impact_body",
+    "crunch",
+    "friction",
+    "disc_horn",
+    "air_horn",
 ];
 
 // ----- config ------------------------------------------------------------------------------
@@ -214,6 +245,22 @@ pub struct EngineMix {
     /// Culling score multiplier of a non-focus car's second engine layer: every car's main
     /// layer is kept before another car's second layer.
     pub second_layer_cull_scale: f32,
+    /// Physically modelled engine (when the backend enables it): besides the focus car, this
+    /// many of the nearest cars get the model; every other car keeps the layers.
+    #[serde(default = "default_physical_max_others")]
+    pub physical_max_others: usize,
+    /// Physically modelled engine: only cars closer than this get it (others keep the
+    /// layers), m. A car keeps the model out to 1.25 × this.
+    #[serde(default = "default_physical_radius_m")]
+    pub physical_radius_m: f32,
+}
+
+fn default_physical_max_others() -> usize {
+    6
+}
+
+fn default_physical_radius_m() -> f32 {
+    60.0
 }
 
 /// Tire, surface and suspension tuning.
@@ -348,6 +395,9 @@ pub struct AudioConfig {
     pub sirens: SirenConfig,
     /// Radio scanner.
     pub scanner: ScannerConfig,
+    /// Physically driven impact / crunch / scrape synthesis (optional, defaults in code).
+    #[serde(default)]
+    pub impact_synth: crate::impact::ImpactSynthConfig,
 }
 
 // ----- cars --------------------------------------------------------------------------------
@@ -534,6 +584,9 @@ pub enum PackKind {
     Siren,
     /// Scanner squelch and static.
     Radio,
+    /// Procedural models driven by per-frame state instead of layers or samples (the
+    /// physically modelled engine, `engine/physical`).
+    Model,
 }
 
 /// The rpm a layer was recorded / tuned at.
@@ -606,6 +659,10 @@ pub struct CueDef {
     /// Speed the loop was recorded at (surface loops), m/s; pitch = speed / root.
     #[serde(default)]
     pub root_speed_mps: Option<f32>,
+    /// Fade when the voice stops, s (default: `audio_config.stop_fade_s`). Short for sounds
+    /// that must end with their button, e.g. the horn (owner report #58).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_s: Option<f32>,
 }
 
 /// A sample pack (`data/audio/packs/<id>.json`).
@@ -805,6 +862,7 @@ impl AudioLibrary {
                 PackKind::World => cues::world(),
                 PackKind::Siren => cues::SIREN.to_vec(),
                 PackKind::Radio => cues::RADIO.to_vec(),
+                PackKind::Model => vec![cues::ENGINE_PHYSICAL],
             };
             for c in required {
                 if !p.cues.contains_key(c) {

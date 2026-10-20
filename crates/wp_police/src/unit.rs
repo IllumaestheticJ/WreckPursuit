@@ -240,6 +240,19 @@ pub enum Tactic {
     Pit,
     /// Slow down in front of the racer.
     RollingBlock,
+    /// Deliberate contact (wanted level 2+): a rear-quarter shunt, a side slam or a hard ram.
+    Ram(RamKind),
+}
+
+/// How a ramming unit hits the racer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RamKind {
+    /// Nose into the racer's rear quarter (L2+).
+    RearQuarter,
+    /// Alongside, steer into its flank (L3+).
+    Side,
+    /// Straight into its tail at a closing speed (L3+).
+    Hard,
 }
 
 /// Box-in slot relative to the racer.
@@ -260,6 +273,9 @@ pub enum UnitRole {
     Pool(District),
     /// Spawned reinforcement.
     Reinforcement,
+    /// Spawned to answer a reckless-driving call (no unit was close enough); despawns out of
+    /// sight once the call is over.
+    Responder,
     /// Parked roadblock / spike unit.
     Tool,
     /// Helicopter.
@@ -275,7 +291,7 @@ pub struct UnitBody {
     pub pos: [f32; 2],
     /// Unit heading vector (XY).
     pub heading: [f32; 2],
-    /// Forward speed, m/s.
+    /// Speed along the heading, m/s (negative while rolling backwards).
     pub speed: f32,
     /// Current lateral acceleration, g.
     pub lat_g: f32,
@@ -378,6 +394,21 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Stuck detection and recovery (physical units, [`crate::stuck`]).
+    #[serde(default)]
+    pub unstick: crate::stuck::UnstickState,
+    /// Road route a pursuer is following to the racer (out of its sight), if any.
+    #[serde(default)]
+    pub chase_route: Option<ChaseRoute>,
+}
+
+/// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChaseRoute {
+    /// Junction the racer was heading for when the route was planned.
+    pub node: NodeId,
+    /// When it was planned.
+    pub at: SimTime,
 }
 
 impl Unit {
@@ -423,6 +454,8 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            unstick: crate::stuck::UnstickState::default(),
+            chase_route: None,
         }
     }
 

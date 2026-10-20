@@ -13,6 +13,7 @@ export type ActionId =
   | "steerRight"
   | "throttle"
   | "brake"
+  | "clutch"
   | "handbrake"
   | "gearUp"
   | "gearDown"
@@ -27,7 +28,8 @@ export type ActionId =
   | "help"
   | "controls"
   | "mute"
-  | "repairBill";
+  | "repairBill"
+  | "replayCrash";
 
 /** How an action is read: `analog` 0..1 every frame, `held` on/off every frame, `edge` once
  * per press. */
@@ -40,8 +42,10 @@ export interface ActionDef {
   kind: ActionKind;
 }
 
-/** A gamepad control: a button (value 0..1, triggers are analogue) or one direction of an axis. */
-export type PadControl = { button: number } | { axis: number; dir: 1 | -1 };
+/** A gamepad / wheel control: a button (value 0..1, triggers are analogue), one direction of a
+ * centred axis (stick: 0 at rest, 1 at full deflection in `dir`), or a full-range pedal axis
+ * (`full`: rests at one end, `-dir`, and reads 1 at the other end; wheel pedals). */
+export type PadControl = { button: number } | { axis: number; dir: 1 | -1; full?: boolean };
 
 /** The full binding set, as saved. */
 export interface Bindings {
@@ -62,6 +66,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "steerRight", label: "steer right", kind: "analog" },
   { id: "throttle", label: "throttle", kind: "analog" },
   { id: "brake", label: "brake", kind: "analog" },
+  { id: "clutch", label: "clutch (used with clutch: manual)", kind: "analog" },
   { id: "handbrake", label: "handbrake", kind: "held" },
   { id: "gearUp", label: "shift up", kind: "edge" },
   { id: "gearDown", label: "shift down", kind: "edge" },
@@ -77,9 +82,12 @@ export const ACTIONS: ActionDef[] = [
   { id: "controls", label: "controls (this panel)", kind: "edge" },
   { id: "mute", label: "audio mute", kind: "edge" },
   { id: "repairBill", label: "repair bill", kind: "edge" },
+  { id: "replayCrash", label: "crash replay: play / skip", kind: "edge" },
 ];
 
-/** Defaults. Look-back keeps V (driving); audio mute moved to F8 so the two no longer share V. */
+/** Defaults. Look-back keeps V (driving); audio mute moved to F8 so the two no longer share V.
+ * The clutch starts unbound on every device: every letter key is already a game or debug-layer
+ * key, and on a pad the triggers / shoulders are taken; the player binds it in the panel. */
 export function defaultBindings(): Bindings {
   return {
     keys: {
@@ -87,6 +95,7 @@ export function defaultBindings(): Bindings {
       steerRight: ["KeyD", "ArrowRight"],
       throttle: ["KeyW", "ArrowUp"],
       brake: ["KeyS", "ArrowDown"],
+      clutch: [],
       handbrake: ["Space"],
       gearUp: ["ShiftLeft", "ShiftRight"],
       gearDown: ["ControlLeft", "ControlRight"],
@@ -102,6 +111,7 @@ export function defaultBindings(): Bindings {
       controls: ["F9"],
       mute: ["F8"],
       repairBill: ["KeyF"],
+      replayCrash: ["Enter", "NumpadEnter"],
     },
     // Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 View, 9 Menu, 10 L3, 11 R3,
     // 12–15 d-pad up/down/left/right.
@@ -110,6 +120,7 @@ export function defaultBindings(): Bindings {
       steerRight: [{ axis: 0, dir: 1 }],
       throttle: [{ button: 7 }],
       brake: [{ button: 6 }],
+      clutch: [],
       handbrake: [{ button: 0 }, { button: 2 }],
       gearUp: [{ button: 5 }],
       gearDown: [{ button: 4 }],
@@ -125,6 +136,8 @@ export function defaultBindings(): Bindings {
       controls: [],
       mute: [],
       repairBill: [],
+      // D-pad up: R2 / RT is the throttle, and one control never drives two actions.
+      replayCrash: [{ button: 12 }],
     },
     padDeadzone: 0.12,
     padCurve: 1.0,
@@ -138,10 +151,12 @@ const isPadControl = (c: unknown): c is PadControl => {
   const o = c as Record<string, unknown>;
   if (!o || typeof o !== "object") return false;
   if (Number.isInteger(o.button)) return (o.button as number) >= 0;
-  return Number.isInteger(o.axis) && (o.dir === 1 || o.dir === -1);
+  return Number.isInteger(o.axis) && (o.dir === 1 || o.dir === -1) && (o.full === undefined || typeof o.full === "boolean");
 };
 
-/** Read saved bindings over the defaults. Unknown or malformed entries fall back to defaults. */
+/** Read saved bindings over the defaults. Unknown or malformed entries fall back to defaults, and
+ * actions added since the save was written (e.g. `clutch`, round 12c) take their defaults, so
+ * older `wp.bindings.v1` saves migrate in place. */
 export function loadBindings(): Bindings {
   const b = defaultBindings();
   let saved: Partial<Bindings> | null = null;
@@ -182,7 +197,7 @@ export function clearSavedBindings(): void {
 
 /** Same gamepad control? */
 export const samePad = (a: PadControl, b: PadControl): boolean =>
-  "button" in a ? "button" in b && a.button === b.button : "axis" in b && a.axis === b.axis && a.dir === b.dir;
+  "button" in a ? "button" in b && a.button === b.button : "axis" in b && a.axis === b.axis && (a.dir === b.dir || !!a.full || !!b.full);
 
 /** Set slot `slot` of `action` on `device` to `value` (null clears it). The same key or control
  * is removed from every other action first, so one input never drives two actions. Returns the
@@ -259,6 +274,7 @@ const PAD_AXES = ["LS", "LS", "RS", "RS"];
 /** Short display name of a gamepad control (standard mapping names, Xbox labels). */
 export function padName(c: PadControl): string {
   if ("button" in c) return PAD_BUTTONS[c.button] ?? `button ${c.button}`;
+  if (c.full) return `pedal axis ${c.axis}`;
   const stick = PAD_AXES[c.axis];
   if (!stick) return `axis ${c.axis} ${c.dir > 0 ? "+" : "−"}`;
   const horiz = c.axis % 2 === 0;
