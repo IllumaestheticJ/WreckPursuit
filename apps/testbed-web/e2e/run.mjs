@@ -20,7 +20,7 @@ const root = join(here, "..");
 const PORT = 5199;
 const URL = `http://localhost:${PORT}/`;
 const shots = process.env.SHOTS;
-if (shots) mkdirSync(shots, { recursive: true });
+if (shots) for (const d of ["", "signals", "tunnels"]) mkdirSync(join(shots, d), { recursive: true });
 
 const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
 const stopServer = () => server.kill("SIGTERM");
@@ -303,6 +303,35 @@ check(
   v2.id === "vesper_v2" && v2.z > 4 && v2.z < 30,
   `city free drive in ${v2.id}: greybox loaded, car at (${v2.x.toFixed(0)}, ${v2.y.toFixed(0)}, ${v2.z.toFixed(1)}) m`,
 );
+// Tunnels (backlog B04): the Hollins Tunnel and Founders Cut are in the greybox — walls, roof
+// deck and emissive ceiling lights — and draw from the portal and inside the tube.
+{
+  const tunnel = await page.evaluate(() => {
+    const out = { tunnel_wall: 0, tunnel_roof: 0, tunnel_light: 0, emissive: 0 };
+    window.__wp.scene.cities.get("vesper_v2").traverse((o) => {
+      const name = o.material?.name;
+      if (name in out) {
+        out[name] += o.geometry.attributes.position.count;
+        if (name === "tunnel_light") out.emissive = Math.max(out.emissive, o.material.emissive?.r ?? 0);
+      }
+    });
+    return out;
+  });
+  check(
+    tunnel.tunnel_wall > 100 && tunnel.tunnel_roof > 100 && tunnel.tunnel_light > 100 && tunnel.emissive > 0.5,
+    `tunnels in the greybox: ${tunnel.tunnel_wall} wall, ${tunnel.tunnel_roof} roof, ${tunnel.tunnel_light} light vertices (lights emissive ${tunnel.emissive.toFixed(2)})`,
+  );
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = "hidden"));
+  for (const [name, from, to] of [
+    ["tunnels/founders_cut_north_portal.png", [409, 1335, 27], [416, 1245, 18]],
+    ["tunnels/hollins_tunnel_inside.png", [-850, 1388, 51.5], [-1000, 1396, 56]],
+  ]) {
+    await page.evaluate(([f, t]) => window.__wp.lookFrom(f, t), [from, to]);
+    await page.waitForTimeout(1500);
+    await shot(name);
+  }
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
+}
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 // Waits for the state the check needs (no fixed sleep): under SwiftShader the city runs well below
 // real time, so a wall-clock wait is either too short (flaky) or wastes minutes. Violations are
