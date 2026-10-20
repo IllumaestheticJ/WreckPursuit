@@ -963,7 +963,8 @@ impl PoliceSystem {
                     {
                         // Wanted level 3+: also ahead of the racer on its line, going its
                         // way: it joins as a rolling block.
-                        let ahead_ok = rec.level.number() >= self.cfg.presence.unlocks.rolling_block_level
+                        let ahead_ok = rec.level.number()
+                            >= self.cfg.presence.unlocks.rolling_block_level
                             && dot(u.body.heading, normalize([rec.vel[0], rec.vel[1]])) > 0.7;
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
@@ -1008,12 +1009,14 @@ impl PoliceSystem {
                     // Wanted level 3+: an interceptor that got to a junction on the racer's
                     // path first parks across it (track ends there) until the racer arrives.
                     let u = &self.units[i];
-                    if rec.level.number() >= p.chase.junction_block_level && u.cmd.track.is_drivable()
+                    if rec.level.number() >= p.chase.junction_block_level
+                        && u.cmd.track.is_drivable()
                     {
                         let end = u.cmd.track.point_at(u.cmd.track.length());
                         let rv = [rec.vel[0], rec.vel[1]];
                         let d_racer = dist(rp, end);
-                        let coming = dot(rv, sub(end, rp)) > 0.0 && d_racer < 250.0 && d_racer > 12.0;
+                        let coming =
+                            dot(rv, sub(end, rp)) > 0.0 && d_racer < 250.0 && d_racer > 12.0;
                         if coming && dist(u.body.pos, end) < 35.0 {
                             if !matches!(u.tactic, Tactic::RollingBlock) {
                                 // Reuse RollingBlock as the "blocking" marker for views.
@@ -1266,8 +1269,7 @@ impl PoliceSystem {
                     Tactic::BoxIn(
                         [BoxSlot::Rear, BoxSlot::FrontLeft, BoxSlot::FrontRight][k.min(2)],
                     )
-                } else if gap < -5.0 && level >= unlocks.rolling_block_level && has_budget && seen
-                {
+                } else if gap < -5.0 && level >= unlocks.rolling_block_level && has_budget && seen {
                     Tactic::RollingBlock
                 } else {
                     let rank = behind_rank;
@@ -1294,11 +1296,19 @@ impl PoliceSystem {
                 let mut routed = false;
                 let (cmd_track, speed) = match tactic {
                     Tactic::Shadow => {
-                        let mid = (ch.shadow_min_m[li] + ch.shadow_max_m[li]) * 0.5
-                            + 8.0 * shadow_rank;
+                        let mid =
+                            (ch.shadow_min_m[li] + ch.shadow_max_m[li]) * 0.5 + 8.0 * shadow_rank;
                         shadow_rank += 1.0;
-                        // Close in for the arrest when the racer stops.
-                        let want_gap = if v_r < 3.0 && seen { 6.0 } else { mid };
+                        // Close in for the arrest when the racer stops (by straight-line
+                        // distance: a unit on the cross street can project right next to it
+                        // on the trail).
+                        let arrest = v_r < 3.0 && seen;
+                        let want_gap = if arrest { 6.0 } else { mid };
+                        let gap = if arrest {
+                            gap.max(dist(u.body.pos, rp))
+                        } else {
+                            gap
+                        };
                         // Far behind: close the gap at up to the pursuit cap, braking in time
                         // to arrive at the shadow gap.
                         let excess = gap - want_gap;
@@ -1348,10 +1358,7 @@ impl PoliceSystem {
                                 if slam {
                                     (side * 0.8, v_r + ch.ram_closing_mps[1])
                                 } else {
-                                    (
-                                        side * ch.flank_offset_m,
-                                        v_r + (0.8 * gap).clamp(-3.0, 6.0),
-                                    )
+                                    (side * ch.flank_offset_m, v_r + (0.8 * gap).clamp(-3.0, 6.0))
                                 }
                             }
                         };
@@ -1423,9 +1430,14 @@ impl PoliceSystem {
         } else {
             rec.last_known_vel
         };
-        let node = self
-            .start_node(rp, v)
-            .or_else(|| self.graph.nearest_node(rp));
+        let stopped = crate::graph::len(v) < STOPPED_RACER_MPS;
+        // A stopped racer: to the end of its road nearer the unit, then right up to it.
+        let node = if stopped {
+            self.meet_point(i, rp, [0.0, 0.0]).map(|(n, _)| n)
+        } else {
+            self.start_node(rp, v)
+        }
+        .or_else(|| self.graph.nearest_node(rp));
         let Some(node) = node else {
             return track.clone();
         };
@@ -1433,6 +1445,11 @@ impl PoliceSystem {
             if c.node == node && now.since(c.at) < CHASE_ROUTE_REFRESH_S {
                 return self.units[i].cmd.track.clone();
             }
+        }
+        if stopped {
+            let t = self.route_track(i, node, Some(rp));
+            self.units[i].chase_route = Some(crate::unit::ChaseRoute { node, at: now });
+            return t;
         }
         let mut t = self.route_track(i, node, None);
         // Then the racer's predicted path beyond that junction (no stop at the route's end).

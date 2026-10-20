@@ -773,6 +773,11 @@ impl PoliceSystem {
         Some(unit)
     }
 
+    /// Every racer's police record, ascending by entity.
+    pub fn racers_iter(&self) -> impl Iterator<Item = &RacerRecord> {
+        self.racers.values()
+    }
+
     /// Full police record of a racer.
     pub fn racer(&self, racer: EntityId) -> Option<&RacerRecord> {
         self.racers.get(&racer)
@@ -1028,6 +1033,16 @@ impl PoliceSystem {
                 .racers
                 .values()
                 .all(|r| graph::dist2(xy(r.pos), pos) > GHOST_PASS_M * GHOST_PASS_M);
+        // Closing on a stopped racer it can see coming (arrest).
+        let arrest = match self.units[i].assignment {
+            Assignment::Pursue { target } | Assignment::Intercept { target, .. } => {
+                self.racers.get(&target).is_some_and(|r| {
+                    r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < 9.0
+                        && graph::dist2(xy(r.pos), pos) < ARREST_CLOSE_M * ARREST_CLOSE_M
+                })
+            }
+            _ => false,
+        };
         let u = &mut self.units[i];
         let me = avoid::Me {
             unit: u.id,
@@ -1040,6 +1055,7 @@ impl PoliceSystem {
             skip_higher_units: false,
             chase,
             pass_ghosts,
+            arrest,
         };
         avoid::update(
             &mut u.avoid,
@@ -1517,6 +1533,9 @@ impl PoliceSystem {
         h.finish()
     }
 }
+
+/// A pursuer this close to a stopped racer ignores other stopped police cars, m.
+const ARREST_CLOSE_M: f32 = 45.0;
 
 /// A chasing unit this far from every racer ignores kinematic (collider-less) traffic, m.
 const GHOST_PASS_M: f32 = 150.0;

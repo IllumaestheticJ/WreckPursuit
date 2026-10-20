@@ -779,7 +779,11 @@ impl PoliceSystem {
         // A unit chasing this racer that drives into it (closing from behind or the side) hit
         // the racer, not the other way round.
         if u.assignment.target() == Some(racer) {
-            let rv = self.prev_vel.get(&racer).copied().unwrap_or(self.racers[&racer].vel);
+            let rv = self
+                .prev_vel
+                .get(&racer)
+                .copied()
+                .unwrap_or(self.racers[&racer].vel);
             let to_racer = crate::graph::sub(xy(self.racers[&racer].pos), u.body.pos);
             let closing = crate::graph::dot(crate::graph::sub(uv, [rv[0], rv[1]]), to_racer);
             if closing > 0.0 {
@@ -1994,6 +1998,11 @@ impl PoliceSystem {
                 },
             );
             self.stats.backup_joins += 1;
+            // Reinforcement delay for backup: pursuit start → unit committed.
+            let since = self.racers[&racer]
+                .pursuit_started
+                .map_or(0.0, |t| self.now.since(t));
+            self.stats.reinforcement_delays_s.push(since);
             joined += 1;
         }
         joined

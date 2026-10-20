@@ -177,8 +177,12 @@ pub fn feel(
         out.limit_mps = (2.0 * cfg.wall_decel_mps2 * room).sqrt();
     }
     let side_reach = reach * 0.7;
-    let dl = walls.ray(front, rot(1.0), side_reach).unwrap_or(f32::INFINITY);
-    let dr = walls.ray(front, rot(-1.0), side_reach).unwrap_or(f32::INFINITY);
+    let dl = walls
+        .ray(front, rot(1.0), side_reach)
+        .unwrap_or(f32::INFINITY);
+    let dr = walls
+        .ray(front, rot(-1.0), side_reach)
+        .unwrap_or(f32::INFINITY);
     // A wall closing in on one side (within SCRAPE_LATERAL_M of the bumper's line, ahead):
     // away from it, harder the nearer it is. Symmetric streets and wide roads: nothing.
     let near = dl.min(dr);
@@ -218,13 +222,16 @@ mod tests {
         let f = feel(&w, [0.0, 2.7], [0.0, 1.0], 20.0, &cfg);
         assert!(f.limit_mps < 20.0, "{f:?}");
         // Passing it close on the right: shift left (negative).
-        let f = feel(&w, [-7.0, 12.0], [0.0, 1.0], 15.0, &cfg);
+        let f = feel(&w, [-7.0, 24.0], [0.0, 1.0], 15.0, &cfg);
         assert!(f.shift_m < 0.0, "{f:?}");
         // Open road: nothing.
         let f = feel(&w, [40.0, 0.0], [0.0, 1.0], 15.0, &cfg);
         assert_eq!(f, WallFeel::default());
         // A tunnel corridor along +y: driving down the middle sees nothing ahead.
-        let t = WallIndex::new(WallIndex::from_corridor(&[[100.0, 0.0], [100.0, 200.0]], 5.0));
+        let t = WallIndex::new(WallIndex::from_corridor(
+            &[[100.0, 0.0], [100.0, 200.0]],
+            5.0,
+        ));
         let f = feel(&t, [100.0, 20.0], [0.0, 1.0], 20.0, &cfg);
         assert!(f.limit_mps.is_infinite(), "{f:?}");
     }

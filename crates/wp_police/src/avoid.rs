@@ -245,6 +245,9 @@ pub(crate) struct Me {
     pub(crate) chase: bool,
     /// Ignore ghost traffic (a chasing unit far from every racer: it has no collider there).
     pub(crate) pass_ghosts: bool,
+    /// Closing in on a stopped racer for the arrest: other stopped police cars don't hold it
+    /// back (no stand-off between units 20 m short of the capture radius).
+    pub(crate) arrest: bool,
 }
 
 /// Nearest obstacle within `horizon_m` ahead on `track`, in the corridor around the lane
@@ -268,6 +271,7 @@ pub(crate) fn scan(
         if o.unit == Some(me.unit)
             || (o.entity.is_some() && (o.entity == me.entity || o.entity == me.ignore))
             || (me.pass_ghosts && o.ghost)
+            || (me.arrest && o.unit.is_some() && o.speed() < 0.5)
         {
             continue;
         }
@@ -590,7 +594,11 @@ pub(crate) fn junction_speed(
 /// Speed cap at the next junction for a pursuing / intercepting unit (row 63): it runs reds
 /// and crosses at `chase_red_mps` / `chase_junction_mps` (`chase_turn_mps` turning), braking
 /// for it at `chase_decel_mps2`, m/s.
-pub(crate) fn chase_junction_speed(j: Option<JunctionAhead>, track_s: f32, cfg: &AvoidConfig) -> f32 {
+pub(crate) fn chase_junction_speed(
+    j: Option<JunctionAhead>,
+    track_s: f32,
+    cfg: &AvoidConfig,
+) -> f32 {
     let Some(j) = j else {
         return f32::INFINITY;
     };
@@ -716,6 +724,7 @@ mod tests {
             skip_higher_units: false,
             chase: false,
             pass_ghosts: false,
+            arrest: false,
         }
     }
 
@@ -953,5 +962,27 @@ mod tests {
             spawn_clear([30.0, 60.0], &[racer], &c),
             "parallel street is fine"
         );
+    }
+
+    /// Row 63: a pursuing unit takes junctions much faster than a unit merely running lights,
+    /// and runs reds at `chase_red_mps`.
+    #[test]
+    fn chase_junction_speeds() {
+        let c = cfg();
+        let red = Some(JunctionAhead {
+            s: 60.0,
+            light: Some(Light::Stop),
+            turn: false,
+        });
+        let at = 60.0 - c.junction_slow_m;
+        assert!((chase_junction_speed(red, at, &c) - c.chase_red_mps).abs() < 1e-3);
+        assert!(chase_junction_speed(red, at, &c) > junction_speed(red, at, 20.0, true, &c));
+        let turn = Some(JunctionAhead {
+            s: 60.0,
+            light: None,
+            turn: true,
+        });
+        assert!((chase_junction_speed(turn, at, &c) - c.chase_turn_mps).abs() < 1e-3);
+        assert!(chase_junction_speed(None, 0.0, &c).is_infinite());
     }
 }

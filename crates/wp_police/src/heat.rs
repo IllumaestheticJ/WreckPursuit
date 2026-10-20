@@ -461,6 +461,7 @@ mod tests {
         r.add_heat(15.0, &c);
         r.start_pursuit(SimTime::ZERO);
         for i in 0..200 {
+            r.pos = [i as f32 * 0.3, 0.0, 0.0];
             assert!(r
                 .update(&inputs(true, 5.0, 3.0, i as f32 * 0.1), dt, &c)
                 .is_none());
@@ -533,5 +534,38 @@ mod tests {
         b.heat_seconds += 30.0;
         assert!(b.bounty(&c) > b0);
         assert!(b.priority(&c) > 0.0 && b.priority(&c) <= 1.0);
+    }
+
+    /// Owner playtest row 63: a racer boxed in and rocking back and forth (never stopped
+    /// for 4 s straight) with a unit close is captured once it has stayed within
+    /// `pinned_radius_m` for `pinned_time_s`; one that drives away is not.
+    #[test]
+    fn pinned_racer_is_captured() {
+        let c = cfg();
+        let mut r = RacerRecord::new(EntityId(1));
+        r.add_heat(40.0, &c);
+        r.start_pursuit(SimTime::ZERO);
+        let dt = 0.1;
+        let mut out = None;
+        for k in 0..((c.capture.pinned_time_s + 1.0) / dt) as usize {
+            // 3 m/s back and forth over 2 m.
+            let x = if (k / 7) % 2 == 0 {
+                (k % 7) as f32 * 0.3
+            } else {
+                2.0 - (k % 7) as f32 * 0.3
+            };
+            r.pos = [x, 0.0, 0.0];
+            out = out.or(r.update(&inputs(true, 5.0, 3.0, k as f32 * dt), dt, &c));
+        }
+        assert_eq!(out, Some(RuleOutcome::Captured));
+        let mut r = RacerRecord::new(EntityId(1));
+        r.add_heat(40.0, &c);
+        r.start_pursuit(SimTime::ZERO);
+        let mut out = None;
+        for k in 0..((c.capture.pinned_time_s + 1.0) / dt) as usize {
+            r.pos = [k as f32 * 0.3, 0.0, 0.0];
+            out = out.or(r.update(&inputs(true, 5.0, 3.0, k as f32 * dt), dt, &c));
+        }
+        assert_eq!(out, None);
     }
 }
