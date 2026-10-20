@@ -112,7 +112,7 @@ What the police do at each wanted level:
 | L5 | 90 | 6 | everything | 60–150 s |
 
 Rules that make the chase fair:
-- Pursuers never drive faster than you + 10 %, and never above **115 km/h at night** (144 km/h by day).
+- Pursuers never drive faster than you + 10 %, and never above **173 km/h at night** (216 km/h by day).
 - They spend a *risk budget*: hard cornering, near misses and contact cost budget; when it runs
   out they ease off.
 - Police cars take damage like yours. A unit that drops to 40 % health disengages.

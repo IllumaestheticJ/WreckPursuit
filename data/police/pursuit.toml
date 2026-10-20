@@ -10,11 +10,13 @@ patrol_cornering_g = 0.35
 pursuit_cornering_g = 0.65
 shadow_cornering_g = 0.45
 
+# Raised ×1.5 (2026-10-20) when the police cars got the street-spec power rebalance: at
+# 40 m/s every street-spec racer outran the cap in 7-12 s and could not be caught on a straight.
 [pursuit_cap_mps]
-dawn = 36.0
-day = 40.0
-dusk = 36.0
-night = 32.0
+dawn = 54.0
+day = 60.0
+dusk = 54.0
+night = 48.0
 
 # Ground unit line-of-sight range (headlights at night).
 [los_range_m]

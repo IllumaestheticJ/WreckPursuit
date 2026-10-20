@@ -60,6 +60,19 @@
 - Data: `data/police/{heat,presence,pursuit,tools,radio}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
   on D's procedural city (`city: (nx, ny, seed)`, default `ProcGenConfig::small()`).
 
+## Changed by other sessions (owner request)
+
+- **2026-10-20, workstream 09 (cars), owner request "raise the police speed caps too":**
+  `data/police/pursuit.toml [pursuit_cap_mps]` ×1.5: day 40 → 60, dawn/dusk 36 → 54, night
+  32 → 48 m/s (144 → 216 / 130 → 194 / 115 → 173 km/h). The police cars got the street-spec
+  power rebalance (Wolfhound 240, Cruiser 235, Bastion 200 W/kg; see `cars.md`), and at 40 m/s
+  every street-spec racer outran the cap in 7-12 s. All `wp_police`, `wp_sim`, `simcli`,
+  `wp_opponent` and `wp_race` tests and goldens pass unchanged: no golden pursuit goes above 40 m/s.
+  **Not changed, your call:** `[unit] accel_mps2 = 4.0` also limits the AI's speed-reference ramp
+  in `unit_input`. The street-spec cars pull ≈ 5-7 m/s² below 100 km/h at full throttle, so AI
+  units still launch slower than their car can. Raising it changes the kinematic driver too
+  (self-wreck metrics).
+
 ## Needs
 | From | What | Workaround now |
 |---|---|---|

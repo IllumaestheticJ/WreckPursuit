@@ -5,8 +5,8 @@ Through the full `wp_sim` via `apps/simcli` (scenario format v2, temp dir,
 nothing written to the repo):
 
 **Straight-line acceleration** — every car, full throttle from rest for 40 s on the flat (Arcade, metric-style assists: ABS + TCS, automatic gears). Reports the times to 100 km/h
-   and to each `wp_police` pursuit speed cap (`data/police/pursuit.toml`: night 32, dawn/dusk
-   36, day 40 m/s), the 80 → 144 km/h rolling time, 0-160 km/h (≈ 0-100 mph, the figure the
+   and to each `wp_police` pursuit speed cap (read from `data/police/pursuit.toml`), the
+   80 km/h → day-cap rolling time, 0-160 km/h (≈ 0-100 mph, the figure the
    feel references are compared on) and the speed reached. `--chase` adds a
    straight-line chase: target 30 m ahead, both leaving a corner at 15 m/s with full throttle;
    the cruiser's speed is limited like `wp_police` limits it (`min(target·1.1, cap)`, here the
@@ -37,8 +37,27 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 EXE = os.path.join(REPO, "target", "release", "simcli")
 DATA = os.path.join(REPO, "data")
 
-CAPS_MPS = {"night": 32.0, "dawn/dusk": 36.0, "day": 40.0}
-MARGIN = 0.10  # pursuit.toml target_speed_margin
+
+
+def read_pursuit_toml() -> tuple[dict, float]:
+    """`[pursuit_cap_mps]` (night, dawn/dusk, day) and `target_speed_margin` from
+    `data/police/pursuit.toml` (plain line parsing: the tools stay on Python 3.9 stdlib)."""
+    caps, margin, section = {}, None, ""
+    with open(os.path.join(DATA, "police", "pursuit.toml")) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line.startswith("["):
+                section = line.strip("[]")
+            elif "=" in line:
+                k, v = (x.strip() for x in line.split("=", 1))
+                if section == "pursuit_cap_mps":
+                    caps[k] = float(v)
+                elif section == "" and k == "target_speed_margin":
+                    margin = float(v)
+    return {"night": caps["night"], "dawn/dusk": caps["dawn"], "day": caps["day"]}, margin
+
+
+CAPS_MPS, MARGIN = read_pursuit_toml()
 
 ACCEL = """(
     name: "accel_{car}",
@@ -89,7 +108,7 @@ def accel(car: str, td: str) -> dict:
     return res
 
 
-def chase(cop: dict, tgt: dict, cap: float = 40.0, gap0: float = 30.0, v0: float = 15.0,
+def chase(cop: dict, tgt: dict, cap: float = CAPS_MPS["day"], gap0: float = 30.0, v0: float = 15.0,
           max_target_travel: float = 400.0, margin: float | None = MARGIN):
     """Straight-line chase from the two cars' full-throttle traces (both start at v0)."""
     def from_v0(tr):
@@ -125,8 +144,10 @@ def main(argv: list[str]) -> int:
         cars = all_cars()
         res = dict(zip(cars, ex.map(lambda c: accel(c, td), cars)))
         f = lambda x: f"{x:6.2f}" if x is not None else "   n/a"  # noqa: E731
-        print(f"{'car':20s} {'0-100':>6s} {'0-115':>6s} {'0-130':>6s} {'0-144':>6s} "
-              f"{'80-144':>6s} {'0-160':>6s} {'v@40s':>6s}" + (f" {'+10%':>7s} {'cap':>7s}" if "--chase" in argv else ""))
+        caps = [f"0-{CAPS_MPS[k] * 3.6:.0f}" for k in ("night", "dawn/dusk", "day")]
+        print(f"caps (pursuit.toml): {caps[2]} day, {caps[1]} dawn/dusk, {caps[0]} night km/h")
+        print(f"{'car':20s} {'0-100':>6s} {caps[0]:>6s} {caps[1]:>6s} {caps[2]:>6s} "
+              f"{'80-cap':>6s} {'0-160':>6s} {'v@40s':>6s}" + (f" {'+10%':>7s} {'cap':>7s}" if "--chase" in argv else ""))
         for c in cars:
             r = res[c]
             roll = r["t144"] - r["t80"] if r["t144"] and r["t80"] else None

@@ -65,6 +65,18 @@ engine `why`. Curb mass is trimmed ≈ 5 %. Source of truth: `roster_inputs.py`
   `wp_wasm`, `cargo test --workspace --release --no-fail-fast`. The only failures were the 3
   above, all now passing. No simcli golden changed.
 
+## Police speed caps raised (2026-10-20, owner request)
+
+`data/police/pursuit.toml [pursuit_cap_mps]` ×1.5: day 40 → 60, dawn/dusk 36 → 54, night
+32 → 48 m/s. The owner asked for it; it is recorded in `police.md` ("Changed by other sessions")
+because the file is E's. `pursuit_probe.py` now reads the caps and margin from that file
+instead of a hard-coded copy. Chase model (`--chase`, day cap, +10 % margin), what changed:
+the cruiser now also catches the Ironside, and the Wolfhound now catches the Kestrel,
+Ironside, Bastion and the debug coupe (the Rampart and Cruiser only with the margin rule
+ignored). The sport cars and the exotic still escape a straight drag race from a 30 m head
+start: with equal power that is a matter of tactics, not the cap. Tests and goldens unchanged.
+`docs/design/DEMO_GREYBOX.md`'s player-facing cap line is updated (173 / 216 km/h).
+
 ## Street-spec rebalance, police cars (2026-10-20, follow-up)
 
 The owner asked for the same treatment on the police cars. Same method: curb mass trimmed ≈ 5 %
