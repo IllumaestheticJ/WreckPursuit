@@ -271,6 +271,7 @@ export const sim = {
     spin: Record<string, number | boolean>;
     spin_lock: Record<string, number | boolean>;
     spin_vr_plain: Record<string, number>;
+    transition_plain: Record<string, number>;
   } =>
     JSON.parse(wasm.car_tune_defaults_json()),
   /** Set the car / tyre experiments ("" = the data). */

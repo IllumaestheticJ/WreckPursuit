@@ -45,6 +45,8 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
   t_align_s: { label: "VR: slide align time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "velocity-relative steering: in a slide the wheels move at least full lock in this time" },
   slide_key_gain: { label: "VR: key in slide ×", min: 0, max: 1, step: 0.05, hint: "velocity-relative steering: the key's offset from the travel in a full slide, × lock(speed)" },
+  swing_rate: { label: "swing rack ×", min: 1, max: 4, step: 0.1, hint: "drift transitions (tyre-slip): while the car swings (yaw rate past the threshold) and the key is held against the rotation or released, every rack rate is this many times faster; 1 = off" },
+  swing_yaw_dps: { label: "swing from yaw", min: 30, max: 200, step: 5, unit: "°/s", hint: "yaw rate where the swing rack acts (a held drift turns at ~30°/s, a swing through at 100–140°/s)" },
   self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released: the rack returns toward the front axle's travel instead of the centre (A/B; default 0)" },
 };
 
@@ -593,9 +595,30 @@ export class DriftLabWPanel {
         saveGrip(gd.slow_weight);
         this.build();
       };
+      // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
+      const trans = document.createElement("button");
+      trans.textContent = "transition: swing rack (test)";
+      trans.title =
+        "tyre-slip test preset for drift transitions: balance new + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
+      trans.onclick = () => {
+        saveGrip(gd.new);
+        const rd = this.sim.rideTuneDefaults();
+        const ride = JSON.stringify({ ...rd.lab, yaw_inertia: 1.5 });
+        const tyres = JSON.stringify(this.sim.carTuneDefaults().spin);
+        this.sim.rideTuneSet(ride);
+        this.sim.carTuneSet(tyres);
+        try {
+          localStorage.setItem(RIDE_STORE, ride);
+          localStorage.setItem(CAR_STORE, tyres);
+        } catch {
+          /* ignore */
+        }
+        this.save(this.sim.carTuneDefaults().transition_plain);
+        this.restart(this.car);
+      };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, forSlow, step2, lockOnly);
+      abRow.append(ab, forSlow, step2, lockOnly, trans);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

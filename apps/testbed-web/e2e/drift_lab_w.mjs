@@ -67,6 +67,10 @@ check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_f
 await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
 const sl = await page.evaluate(() => window.__wp.sim.carTune());
 check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
+await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
+await page.waitForTimeout(300);
+const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
+check(Math.abs(tr.plain.swing_rate - 2.5) < 1e-6 && Math.abs(tr.ride.yaw_inertia - 1.5) < 1e-6 && tr.grip.lock_mode === "smart", `transition preset ${JSON.stringify(tr)}`);
 await page.locator("#drift-lab-w button", { hasText: "drift: spin + VR (test)" }).click();
 const svr = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
 check(svr.car.spin_model === true && svr.plain.velocity_relative === true && Math.abs(svr.plain.align_gain - 0.5) < 1e-6, `drift: spin + VR preset ${JSON.stringify(svr)}`);

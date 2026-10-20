@@ -1358,6 +1358,7 @@ impl Vehicle {
                     pull: steer_in.pull,
                     front_axle_angle: steer_in.front_axle_angle,
                     body_slip: steer_in.body_slip,
+                    yaw_rate: self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
                 },
                 &p,
                 dt,

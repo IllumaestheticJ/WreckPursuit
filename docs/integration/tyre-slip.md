@@ -36,6 +36,67 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Drift transitions (lead, Drift Lab W step 14: "hard to catch drift transitions")
+
+Tool: `cargo run --release -p wp_vehicle --example transition [-- cases]` (env `ONLY`, `INIT`,
+`LIFTS`, `PLAIN`, `SWING_PLAIN`, `TYRE`, `YAW_INERTIA`, `TRACE`; see the file header). Driver:
+40 m left circle at 0.5 g; into-turn key + throttle to 12°, then countersteer key + throttle;
+the flick waits until the drift has been in 30–45° for 0.5 s (cars that never get there =
+"no hold"). Swing start: **reverse** = the lead's literal flick (release, gap, opposite key,
+throttle held), or **lift L** = throttle off for L s with the old key held, keys reversed
+(release, gap, new key + throttle) when the old-side angle drops below 5°. Gaps 0.05 / 0.15 /
+0.3 s, cars rwd_d / rwd_a / rwd_b. Caught = crossed, no spin, no swing back, ≥ half the
+remaining 4 s in 10–50° on the new side.
+
+**Baseline: 0 caught in every configuration.** Two separate problems:
+
+1. **Starting the swing.** The opposite key with the throttle held never swings any of our
+   cars (all 6 configs, 0 crossings): the fronts turn into the old corner, slide at ~40° of
+   front slip and the old drift slowly deepens. Physically the front can only push the nose
+   further into the old turn; the swing needs the rear to win, and it does only when the
+   countersteer lines the fronts up with the travel (front slip ≈ 0) and the throttle is lifted.
+   That happens on **balance new · plain** (0.2–0.4 s lift: crosses in 0.67–0.82 s, the
+   reference's 0.5–0.8 s). The VR steering configs and slow weight hold the old drift so firmly
+   (front slip −2…−5°, rear 44° at κ 0.5–1.5) that a 0.2–1.0 s lift does not start a swing
+   (slow weight with plain steering crosses only with yaw inertia × 1.5 on top).
+   Making the rear trade drive grip for side grip (`spin_fx_yield` 0.5 / 1.0) does not help.
+   **Question for the owner / lead: what starts the reference's swing with the throttle held?**
+   Our physics needs a lift (or more lock than the travel angle).
+2. **Catching it.** Once swinging the yaw rate reaches 130–140°/s. The rack reversal (return
+   0.33 s + full 0.28 s ≈ 0.45 s to the new full lock) arrives when the new side is already at
+   45°+, the fronts are still behind the travel, and the car spins (peak 87°, all gaps alike).
+   Faster rack everywhere breaks the held drift before the flick (no hold); yaw inertia alone,
+   rear relaxation × 2 / × 4: no catches.
+
+**New knob — swing rack** (`PlainSteer::swing_rate` / `swing_yaw_dps`, default 1 = off,
+bit-identical): while the yaw rate is past the threshold and the key is held against the
+rotation (or released, the reversal gap), every rack rate is × `swing_rate`. A held drift turns
+at ~30°/s, so it is untouched (robust set: 1 / 27 → 1 / 27 with balance new · plain, same as
+without). Lift-started flicks (0.2 / 0.4 s), 18 per row:
+
+| config | swing rack | yaw inertia | caught | spun | swung back | swing s | peak ° median / max |
+|---|---|---|---|---|---|---|---|
+| balance new · plain | off | 1.0 | 0 | 15 | 3 | 0.82 | 87 / 87 |
+| balance new · plain | off | 1.5 | 0 | 16 | 0 | 0.91 | 87 / 87 |
+| balance new · plain | × 2.5 from 80°/s | 1.0 | 0 (no hold) | — | — | — | — |
+| balance new · plain | × 2.0 from 100°/s | 1.0 | 2 | 5 | 3 | 0.82 | 78 / 87 |
+| **balance new · plain** | **× 2.5 from 80°/s** | **1.5** | **10** | 3 | 4 | 0.91 | 47 / 87 |
+| balance new · plain | × 3.0 from 80°/s | 1.5 | 5 | 1 | 8 | 0.91 | 41 / 87 |
+| slow weight · plain (ride yaw 1.5) | × 2.5 from 80°/s | × 1.5 more | 9 | 1 | 0 | 1.89 | 63 / 87 |
+| VR configs | any | any | 0–1 (no swing) | | | | |
+
+A knife edge in the rack factor: × 2 spins, × 3 over-catches (swings back). In the best set the
+reference's gaps (0.05 / 0.15 s) catch 8 / 12 (rwd_d and rwd_a every time; rwd_b swings back),
+the 0.3 s gap (longer than the clip's) spins. Settle ~0.7 s, new-side peak 40–49° when caught.
+
+**Preset "transition: swing rack (test)"** in the W panel (grip balance row): balance new +
+lab ride with yaw inertia × 1.5 + plain steering with the swing rack × 2.5 from 80°/s
+(`CarTune::transition_plain()`) + spin model tyres. e2e checks it.
+
+Next: the over-catch on rwd_b and the lift dependence. Candidates: a swing rack that eases off
+as the new-side slide passes ~30° (catch, then hold), and asking the reference what starts the
+swing.
+
 ## Grip-balance × spin model (grip-balance's ask, lead/grip-balance @ c7cf0209)
 
 `cargo run --release -p wp_vehicle --example grip_balance -- robust` on their branch (spin model
