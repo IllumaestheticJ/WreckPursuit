@@ -21,8 +21,12 @@
 // the main thread / in Node with `null` it just returns the DSP class (offline renders, tests).
 // Audio never feeds the simulation; the synthesizer's randomness is its own (seeded per car).
 
-/** Engines one worklet node can play (player + 6 nearby + 1 spare for fades). */
-export const ENGINE_SLOTS = 8;
+/**
+ * Engines one worklet node can hold: the director models at most 7 at a time; the rest are
+ * spares for voices still fading out when the director re-plays (a reset or source switch
+ * re-plays every loop at once). Idle slots cost nothing.
+ */
+export const ENGINE_SLOTS = 16;
 
 /** Per-slot fields of the frame block posted every frame (`EngineSynthHost.flush`). */
 export const EF = {
@@ -71,7 +75,7 @@ export type EngineDspCtor = new (sampleRate: number, spec: Record<string, number
  */
 export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: EngineDspCtor } {
   const TAU = 2 * Math.PI;
-  const SLOTS = 8;
+  const SLOTS = 16;
   const FIELDS = 12;
   // Field indices (EF).
   const ACTIVE = 0,

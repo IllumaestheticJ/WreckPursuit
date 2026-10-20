@@ -334,6 +334,24 @@ await page.evaluate((SR) => {
     return { pcm: btoa(bin), wallMs, blocks: Math.ceil(L.length / 128), counters, refused: pool.engineHost?.stats.refused ?? 0 };
   };
 
+  /**
+   * Seven modelled engines, then every one re-played at once (what a director reset or a
+   * sound-source switch does) twice: no refused slot, seven engines playing.
+   */
+  window.slotChurn = async (lib, cs) => {
+    const ctx = new OfflineAudioContext(2, SR, SR);
+    const pool = new WPA.VoicePool(ctx, new WPA.AudioMixer(ctx), lib);
+    pool.engineHost = await WPA.EngineSynthHost.create(ctx);
+    for (let round = 0; round < 3; round++) {
+      cs.forEach((c, i) => {
+        const p = c.frames[0].commands.find((k) => "Play" in k && k.Play.cue === "engine/physical").Play;
+        pool.play({ entity: 1 + i, slot: p.voice.slot }, p.bus, p.pack, p.cue, p.looped, p.params, p.synth);
+      });
+      pool.collect();
+    }
+    return { refused: pool.engineHost.stats.refused, playing: pool.engineHost.playing };
+  };
+
   /** Draw a spectrogram (log frequency) with the expected firing frequency; returns a JPEG data URL. */
   window.drawSpectrogram = (sg, fire, title) => {
     const W = sg.cols.length;
@@ -585,6 +603,8 @@ check(sportyPops >= 2 * sportyLifts, `overrun crackle: ${sportyPops} pops over $
   const best = Math.min(...runs.map((r) => r.ms));
   const msPerBlock = median(runs.map((r) => r.ms));
   check(runs.every((r) => r.refused === 0), "seven engines get seven worklet slots");
+  const churn = await page.evaluate(async ({ lib, cs }) => window.slotChurn(lib, cs), { lib: trace.library, cs: seven });
+  check(churn.refused === 0 && churn.playing === 7, `all seven engines re-played twice at once (reset / source switch): ${churn.playing} playing, ${churn.refused} refused`);
   check(msPerBlock <= 1.5, `budget: 7 modelled engines cost ${msPerBlock.toFixed(3)} ms per 128-frame block (median of 3, best ${best.toFixed(3)}; budget 1.5 ms)`);
   report.push({ car: "7 engines", sweep: "budget", what: "player + 6 nearby", msPerBlock, best });
 }

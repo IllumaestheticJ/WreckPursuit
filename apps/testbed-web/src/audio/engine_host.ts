@@ -67,14 +67,23 @@ export class EngineSynthHost {
 
   /**
    * A synth voice for `entity`'s engine with the car's static description `spec` (the
-   * `synth` map of the Play: wp_audio::engine_model::EngineVoiceSpec). Null when every slot is
-   * busy (the director caps the modelled cars below the slot count, so this means a burst of
-   * fades; the voice then stays silent until the director re-plays it).
+   * `synth` map of the Play: wp_audio::engine_model::EngineVoiceSpec). A slot still fading
+   * out is taken over when none is free; null only if every slot holds a live engine (the
+   * director models at most 7, so that means a bug).
    */
   acquire(entity: number, spec: Record<string, number>, p: VoiceParams): SynthVoice | null {
     const t = this.ctx.currentTime;
     let idx = this.slots.findIndex((s) => s.entity === 0 && s.freeAt <= t);
     if (idx < 0) idx = this.slots.findIndex((s) => s.releasing && s.freeAt <= t);
+    if (idx < 0) {
+      // Every slot busy: take over the fade-out that ends first (cut a little short).
+      let best = -1;
+      for (let i = 0; i < this.slots.length; i++) {
+        const s = this.slots[i];
+        if (s.releasing && (best < 0 || s.freeAt < this.slots[best].freeAt)) best = i;
+      }
+      idx = best;
+    }
     if (idx < 0) {
       this.stats.refused++;
       return null;
