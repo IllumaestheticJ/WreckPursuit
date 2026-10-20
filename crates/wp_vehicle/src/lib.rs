@@ -52,6 +52,7 @@ pub mod drift_lab_w;
 pub mod drivetrain;
 pub mod engine;
 pub mod ffb;
+pub mod grip_lab;
 pub mod ground;
 pub mod handling;
 pub mod launch;

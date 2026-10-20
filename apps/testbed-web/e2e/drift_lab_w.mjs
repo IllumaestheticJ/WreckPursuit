@@ -80,6 +80,33 @@ await spinBox.check();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === true, "spin model checkbox → on");
 await spinBox.uncheck();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "spin model checkbox → off");
+// Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
+check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
+const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();
+check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
+await page.locator("#drift-w-balance-ab").click();
+check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
+check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
+await page.locator("#drift-w-balance-ab").click();
+check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
+const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
+check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: softer RWD tyres, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
+check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
+await page.locator("#drift-lab-w button", { hasText: "for slow weight" }).click();
+check((await abText()) === "balance: for slow weight" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `slow-weight balance preset: "${await abText()}"`);
+await page.locator("#drift-lab-w button", { hasText: "lock only (step 1)" }).click();
+check((await abText()) === "balance: lock only" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `lock only preset: "${await abText()}"`);
+await page.locator("#drift-w-balance-ab").click(); // lock only → new
+await page.evaluate(() => {
+  const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
+  const s = inputs.find((i) => i.parentElement.textContent.includes("rear grip (μ)"));
+  s.value = "0.9";
+  s.dispatchEvent(new Event("input"));
+});
+check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
+await page.locator("#drift-w-balance-ab").click(); // custom → new
+check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
@@ -176,6 +203,7 @@ const freeDrive = async () => {
 await freeDrive();
 check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
 check((await page.evaluate(() => window.__wp.sim.plainSteer())) === null, "free drive: plain steering off");
+check((await page.evaluate(() => window.__wp.sim.gripBalance())) === null, "free drive: grip balance off");
 check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
 // The career garage can sit over free drive on load; the button's own click handler is
 // what the owner hits from the testbed panel.
