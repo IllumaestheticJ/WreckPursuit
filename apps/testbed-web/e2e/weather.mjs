@@ -62,6 +62,8 @@ const state = () =>
       hud: document.getElementById("weather-hud")?.textContent ?? "",
       hudShown: document.getElementById("weather-hud")?.style.display !== "none",
       fog: s.fog ? s.fog.density : 0,
+      // The art style's own distance fog (low-poly dark, render/style.ts); weather adds to it.
+      baseFog: w.style.id === "lowpoly" ? w.style.baseFogDensity : 0,
       rain: s.children.some((o) => o.isLineSegments && o.geometry.isInstancedBufferGeometry && o.visible && o.geometry.instanceCount > 0),
       spray: s.children.some((o) => o.isPoints && o.visible),
       wipers: document.getElementById("wipers")?.style.display !== "none",
@@ -178,7 +180,7 @@ await page.waitForTimeout(500);
 const simDry = await timeSim();
 console.log(`PERF weather sim (wasm, flat world, 1 car + 2 km grid): ${simRain.toFixed(3)} ms per 60 Hz frame in rain vs ${simDry.toFixed(3)} ms without weather`);
 st = await state();
-check(st.info[0] === 0 && !st.rain && !st.hudShown && st.fog === 0, "weather off: no rain, no fog, no weather HUD");
+check(st.info[0] === 0 && !st.rain && !st.hudShown && st.fog === st.baseFog, `weather off: no rain, no weather fog (style fog ${st.baseFog.toFixed(4)}), no weather HUD`);
 // 5. Fog: visibility drives the scene fog.
 await page.evaluate(() => window.__wp.setWeather("fog"));
 await page.waitForFunction(() => window.__wp.sim.scenario().weather?.kind === "Fog", null, { timeout: 30000 });

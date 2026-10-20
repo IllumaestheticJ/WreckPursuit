@@ -35,8 +35,8 @@ export class SceneView {
   readonly quality = new Quality();
   readonly scene = new THREE.Scene();
   readonly world = new THREE.Group();
-  private readonly hemi: THREE.HemisphereLight;
-  private readonly sun: THREE.DirectionalLight;
+  readonly hemi: THREE.HemisphereLight;
+  readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
   private nextContact = 0;
@@ -52,6 +52,11 @@ export class SceneView {
   drawDistanceM = Infinity;
   private readonly camPos = new THREE.Vector3();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Light-bar glow multiplier for the police helicopters (art style). */
+  policeGlow = 1;
+  /** Replaces renderer.render in render() (art style post stack); null = plain render. The
+   * city-tile update runs before it either way. */
+  renderOverride: ((camera: THREE.Camera) => void) | null = null;
 
   private debugGrid!: THREE.GridHelper;
   /** The one siren point light (browser perf pass): every point light costs every lit pixel,
@@ -63,11 +68,16 @@ export class SceneView {
   /** The flat world's ground material (the weather view makes it wet-capable). */
   readonly groundMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f44 });
   /** Called once with each city's glTF scene when it has loaded (wet road materials). */
-  onCityLoaded: ((root: THREE.Object3D) => void) | null = null;
+  onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
 
-  constructor(parent: HTMLElement) {
+  /**
+   * `postAA: true` when the art style's post stack does the antialiasing (its own MSAA target,
+   * only if the graphics quality allows MSAA): the canvas is then created without MSAA, which
+   * saves resolving a second multisampled buffer every frame.
+   */
+  constructor(parent: HTMLElement, opts: { postAA?: boolean } = {}) {
     // MSAA, resolution and draw distance come from the graphics quality (render/quality.ts).
-    this.renderer = new THREE.WebGLRenderer({ antialias: this.quality.antialias, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: this.quality.antialias && !opts.postAA, preserveDrawingBuffer: true });
     this.quality.attach(this.renderer);
     const draw = Number(new URLSearchParams(location.search).get("draw"));
     this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
@@ -144,7 +154,7 @@ export class SceneView {
       });
       holder.add(gltf.scene);
       this.cityTiles.set(cityId, new CityTiles(gltf.scene));
-      this.onCityLoaded?.(gltf.scene);
+      this.onCityLoaded?.(gltf.scene, cityId);
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
@@ -182,6 +192,7 @@ export class SceneView {
       const phase = (timeS * 2.5 + n * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
       u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+      u.red.emissiveIntensity = u.blue.emissiveIntensity = this.policeGlow;
       n++;
     }
     this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
@@ -310,6 +321,7 @@ export class SceneView {
       else if (fog instanceof THREE.Fog) far = Math.min(far, fog.far);
       tiles.update(this.camPos, far);
     }
-    this.renderer.render(this.scene, camera);
+    if (this.renderOverride) this.renderOverride(camera);
+    else this.renderer.render(this.scene, camera);
   }
 }

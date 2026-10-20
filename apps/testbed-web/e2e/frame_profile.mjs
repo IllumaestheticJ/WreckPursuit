@@ -92,7 +92,9 @@ await page.evaluate(() => {
   for (const k of Object.keys(window.__wasmCalls)) delete window.__wasmCalls[k];
   wp.app.prof.resetAcc();
   window.__probe = { tick0: wp.sim.worldInfo()[0], t0: performance.now(), calls: 0, tris: 0, n: 0, voices0: window.__wpAudio?.pool?.created ?? 0 };
-  // Draw calls / triangles of every rendered frame (renderer.info resets per render).
+  // Draw calls / triangles of every rendered frame (renderer.info resets per render). The
+  // low-poly post stack (render/post.ts) calls render() several times a frame: every call
+  // adds its draws, but only the main scene's render counts as a frame.
   const r = wp.scene.renderer;
   const orig = r.render.bind(r);
   r.render = (s, c) => {
@@ -100,7 +102,7 @@ await page.evaluate(() => {
     const p = window.__probe;
     p.calls += r.info.render.calls;
     p.tris += r.info.render.triangles;
-    p.n++;
+    if (s === wp.scene.scene) p.n++;
   };
   window.__probe.restore = () => (r.render = orig);
   // Wall frame intervals (rAF), for the distribution: frames over 250 ms lose sim time.
@@ -142,7 +144,7 @@ const r = await page.evaluate(() => {
   const ts = [];
   for (let i = 0; i < 4; i++) {
     const t0 = performance.now();
-    ren.render(wp.scene.scene, wp.rig.camera);
+    wp.scene.render(wp.rig.camera); // through the art style's post stack when it is on
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     ts.push(performance.now() - t0);
   }
@@ -157,7 +159,7 @@ const r = await page.evaluate(() => {
   });
   const ver = () => [...mats].reduce((a, m) => a + m.version, 0);
   const v0 = ver();
-  for (let i = 0; i < 3; i++) ren.render(wp.scene.scene, wp.rig.camera);
+  for (let i = 0; i < 3; i++) wp.scene.render(wp.rig.camera);
   // (Optional chaining: the same script also profiles the pre-pass build for before/after.)
   const city = wp.scene.cityStats?.(wp.rig.camera) ?? { tiles: 0, drawn: 0 };
   const structure = {
@@ -170,6 +172,7 @@ const r = await page.evaluate(() => {
   };
   wp.app.paused = false;
   return {
+    style: wp.style?.id ?? "greybox",
     frames,
     wallS: wall,
     fps: frames / wall,

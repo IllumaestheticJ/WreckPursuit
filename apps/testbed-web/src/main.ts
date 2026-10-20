@@ -4,7 +4,8 @@
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
+// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
+// ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
@@ -32,6 +33,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
+import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
 import { FrameProfiler } from "./perf";
 import * as THREE from "three";
 
@@ -96,7 +98,13 @@ const app: AppState = {
 async function main(): Promise<void> {
   await loadWasm();
   const overlay = $("overlay");
-  const scene = new SceneView(document.body);
+  // Art style (machine S): low-poly dark by default; the selector / ?style= switch to greybox.
+  const STYLE_KEY = "wp.testbed.style.v1";
+  const initialStyle: StyleId = (params.get("style") ?? store.get(STYLE_KEY)) === "greybox" ? "greybox" : "lowpoly";
+  // The low-poly post stack renders into its own MSAA target (when the graphics quality allows
+  // MSAA): no multisampled canvas needed (greybox picked later in the session then draws
+  // without antialiasing).
+  const scene = new SceneView(document.body, { postAA: initialStyle === "lowpoly" });
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
@@ -129,7 +137,20 @@ async function main(): Promise<void> {
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
   weather.rainFraction = scene.quality.rainFraction;
   weather.attachMaterial(scene.groundMaterial);
-  scene.onCityLoaded = (root) => weather.attachCity(root);
+  const styleSel = $("style") as HTMLSelectElement;
+  for (const [id, label] of Object.entries(STYLE_LABELS)) styleSel.add(new Option(label, id));
+  const style = new ArtStyle(scene, initialStyle);
+  styleSel.value = style.id;
+  const setStyle = (id: StyleId) => {
+    style.set(id);
+    styleSel.value = id;
+    store.set(STYLE_KEY, id);
+  };
+  styleSel.onchange = () => setStyle(styleSel.value as StyleId);
+  scene.onCityLoaded = (root, cityId) => {
+    weather.attachCity(root);
+    style.attachCity(root, cityId);
+  };
   const weatherSel = $("weather") as HTMLSelectElement;
   for (const [id, label] of sim.weatherChoices()) weatherSel.add(new Option(label, id));
   const weatherParam = params.get("weather");
@@ -921,6 +942,10 @@ async function main(): Promise<void> {
     props.update(sim.propsMoved(), rig.camera);
     prof.lap("traffic");
 
+    const inCity = wi[W.city] > 0.5;
+    const cityId = inCity ? sim.cityId() : null;
+    if (cityId) style.ensureCity(cityId, () => sim.mapStaticJson());
+    style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
     const r0 = performance.now();
     scene.render(rig.camera);
     const r1 = performance.now();
@@ -1080,6 +1105,10 @@ async function main(): Promise<void> {
     startCityChase,
     startBench,
     weather,
+    /** Art style (render/style.ts): `style.id`, `style.baseFogDensity`, `style.lampCount(city)`. */
+    style,
+    /** Switch the art style ("greybox" | "lowpoly"; automation, docs shots). */
+    setStyle,
     /** Pick a weather choice and restart the session with it (automation, docs shots). */
     setWeather: (choice: string) => {
       weatherSel.value = choice;
