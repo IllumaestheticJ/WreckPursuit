@@ -21,6 +21,15 @@ byte-identical and their `validation_results.json` entries are unchanged.
 Barrier sweep: 8/8 for all four (see the two rule changes below). Nameplate check: 81 files, 0
 problems. `smoke_sim.py`: 21 cars × 2 modes deterministic.
 
+Pursuit (`pursuit_probe.py --chase`, Arcade, day cap): the Sentinel Cruiser catches the
+Marten (11.0 s with the +10 % margin / 7.8 s cap only), the Brigand (11.0 / 7.3 s) and the
+Tumbril (13.1 / 4.9 s; it never reaches 144 km/h). The Talus (0-144 km/h 9.97 s) escapes both
+the Cruiser and the Wolfhound (10.63 s), like the other sport cars.
+
+Checks (round 9): `cargo fmt --check`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`cargo test --release` for wp_contracts, wp_damage, car-assets, wp_audio, wp_economy, simcli and
+wp_wasm: all pass.
+
 How they differ from the existing cars:
 - **Marten vs Vireo** (both 90s FF hatches): broad 2.0 torque from 3000 rpm instead of the
   Vireo's high-rev cam step; quicker (8.6 vs 9.4 s) and pricier (9 500 vs 7 500), softer front /
