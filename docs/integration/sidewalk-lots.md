@@ -84,7 +84,21 @@ Shots (`docs/media/sidewalks/`, before | after, `node e2e/sidewalk_shots.mjs <ci
 | existing `wp_sim` sidewalk drives (kerb mounts) | | pass (Vesper lowest tire −0.028 m) |
 
 ## Perf
-PERF_PLACEHOLDER
+Release, native, cloud container (4 vCPU), 3 runs each against a worktree of the base:
+
+| What | `lead/fix-junction-holes` | this branch |
+|---|---|---|
+| `sidewalk_mesh`, Port Vesper (`cargo test --release -p wp_world --lib sidewalk_mesh_timing -- --ignored --nocapture`) | 43–62 ms (28 035 tops + 31 060 kerb tris) | 93–118 ms (25 108 tops + 6.5 k corners + 24.4 k lots + 22.6 k skirts + 31 586 kerbs): pull-back 23, emit 28, corners 13, skirts 16 ms |
+| City build (`cargo run --release -p simcli --example city_frame_cost`, "build") | 263–269 ms | 349–366 ms |
+| City chase frame, all systems (same example, 6 interleaved runs) | 1.00–1.28 ms (median 1.07) | 1.12–1.44 ms (median 1.34) |
+| Same, this branch without the new lot / skirt / rail colliders | — | median 1.28 ms (the new colliders cost nothing measurable) |
+
+The build cost runs once at city load (`Sim::set_world`; roughly twice that in the browser). The
+chase frame differs from the base because the chase plays out differently in the changed city
+(terrain, buildings): per-system rows ("police off", "world off", "vehicles off") are equal or
+faster on this branch, and removing the new colliders does not bring it back; it is noisy
+(±0.15 ms run to run) and well inside the budgets. Greybox: Port Vesper 6.55 → 7.53 MB `.glb`
+(8.74 → 10.04 MB `.b64.txt`), grid 0.90 → 1.10 MB.
 
 ## Goldens
 Every scenario's hash list compared with `lead/fix-junction-holes` (`simcli hashes`): 19 move,
@@ -98,7 +112,15 @@ set is identical to the base: only `soak/traffic_soak_observer` fails (traffic_a
 < 350, also on the base, hashes unmoved; another session is on it).
 
 ## Gate (this branch)
-GATE_PLACEHOLDER
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo run -p lint-determinism` | 0 errors |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | ok |
+| `tools/wasm-determinism/compare.sh` | 61 / 61 scenarios native == wasm |
+| `tsc --noEmit` (after `npm run wasm`) | clean |
+| `npm run e2e` (= `just web-e2e`) | all checks pass (69 PASS) |
+| `cargo test --workspace --no-fail-fast` (debug, `CARGO_INCREMENTAL=0`, no debug info) | new and touched tests pass (incl. the `wp_sim` Port Vesper kerb-mount drives that failed on the base); failing as on the base: simcli `goldens_match` (9 stale goldens, all also stale on the base: none of them moved by this branch), `wp_race` `grid_highway_sprint`, `wp_wasm` `race_tests` sprint / capture (other sessions are on these) |
 
 ## Known gaps (for D)
 - The drawn terrain is the 10 m min-filtered mesh (unchanged): past the skirts the physics
