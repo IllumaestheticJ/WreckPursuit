@@ -52,6 +52,12 @@ struct Transition {
     caught: bool,
     spun: bool,
     swung_back: bool,
+    /// Largest |yaw rate| from the flick on, °/s.
+    peak_yaw: f32,
+    /// Largest |yaw acceleration| from the flick on (0.05 s average), °/s².
+    peak_yaw_acc: f32,
+    /// Largest |roll rate| from the flick on (0.05 s average), °/s.
+    peak_roll_rate: f32,
 }
 
 fn car(id: &str) -> LoadedCar {
@@ -59,6 +65,15 @@ fn car(id: &str) -> LoadedCar {
     let mut c = load_any_car(&data, id).unwrap();
     if let Ok(k) = std::env::var("YAW_INERTIA") {
         c.def.inertia_kgm2[2] *= k.parse::<f32>().expect("YAW_INERTIA");
+    }
+    // Data experiments: anti-roll bar rates, N/m (`FRONT_ARB`, `REAR_ARB`).
+    for (var, range) in [("FRONT_ARB", 0..2), ("REAR_ARB", 2..4)] {
+        if let Ok(v) = std::env::var(var) {
+            let v: f32 = v.parse().expect(var);
+            for i in range {
+                c.def.suspension[i].arb_n_per_m = v;
+            }
+        }
     }
     c
 }
@@ -115,6 +130,8 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
     let mut t = Transition::default();
     let mut crossed_at: Option<usize> = None;
     let mut b_log: Vec<f32> = Vec::new();
+    let mut yaw_hist: Vec<f32> = Vec::new();
+    let mut roll_hist: Vec<f32> = Vec::new();
     let gap_t = (gap * TPS as f32).round() as usize;
     let after = 4 * TPS;
     let mut tick = 0usize;
@@ -177,6 +194,19 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 let n = slide_state(&rig);
                 let b = n.body_slip.to_degrees();
                 let k = tick - f;
+                let yaw = n.yaw_rate.to_degrees();
+                t.peak_yaw = t.peak_yaw.max(yaw.abs());
+                yaw_hist.push(yaw);
+                roll_hist.push(wp_vehicle::drift_lab_w::body_roll(&rig).to_degrees());
+                if roll_hist.len() > 12 {
+                    let r =
+                        (roll_hist[roll_hist.len() - 1] - roll_hist[roll_hist.len() - 13]) / 0.05;
+                    t.peak_roll_rate = t.peak_roll_rate.max(r.abs());
+                }
+                if yaw_hist.len() > 12 {
+                    let acc = (yaw - yaw_hist[yaw_hist.len() - 13]) / 0.05;
+                    t.peak_yaw_acc = t.peak_yaw_acc.max(acc.abs());
+                }
                 if std::env::var("TRACE").is_ok() && k.is_multiple_of(24) {
                     let w = &rig.state().wheel_states;
                     eprintln!(
@@ -349,10 +379,14 @@ fn main() {
         return;
     }
     let cases = std::env::args().nth(1).as_deref() == Some("cases");
-    let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+    let ids: Vec<String> = match std::env::var("CARS") {
+        Ok(l) => l.split(',').map(String::from).collect(),
+        Err(_) => CARS.iter().map(|s| s.to_string()).collect(),
+    };
+    let cars: Vec<(&str, LoadedCar)> = ids.iter().map(|id| (id.as_str(), car(id))).collect();
     if !cases {
-        println!("| config | caught / flicks | no hold | spun | swung back | swing s (median) | peak ° (median / max) | settle s (median) |");
-        println!("|---|---|---|---|---|---|---|---|");
+        println!("| config | caught / flicks | no hold | spun | swung back | swing s (median) | peak ° (median / max) | settle s (median) | peak yaw °/s (median) | peak yaw acc °/s² (median) | peak roll rate °/s (median) |");
+        println!("|---|---|---|---|---|---|---|---|---|---|---|");
     }
     for cfg in configs() {
         apply(&cfg);
@@ -417,11 +451,14 @@ fn main() {
         let pmax = peaks.iter().copied().fold(0.0f32, f32::max);
         let settle = med(all.iter().filter_map(|t| t.settle_s).collect());
         println!(
-            "| {} | **{caught} / {n}** | {no_hold} | {spun} | {back} | {} | {} / {pmax:.0} | {} |",
+            "| {} | **{caught} / {n}** | {no_hold} | {spun} | {back} | {} | {} / {pmax:.0} | {} | {} | {} | {} |",
             cfg.name,
             fmt_opt(swing),
             med(peaks).map_or("—".into(), |v| format!("{v:.0}")),
-            fmt_opt(settle)
+            fmt_opt(settle),
+            med(all.iter().map(|t| t.peak_yaw).collect()).map_or("—".into(), |v| format!("{v:.0}")),
+            med(all.iter().map(|t| t.peak_yaw_acc).collect()).map_or("—".into(), |v| format!("{v:.0}")),
+            med(all.iter().map(|t| t.peak_roll_rate).collect()).map_or("—".into(), |v| format!("{v:.0}")),
         );
     }
 }

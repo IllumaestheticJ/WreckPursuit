@@ -97,6 +97,31 @@ Next: the over-catch on rwd_b and the lift dependence. Candidates: a swing rack 
 as the new-side slide passes ~30° (catch, then hold), and asking the reference what starts the
 swing.
 
+### debug_coupe ("slide transition is very violent", owner via lead)
+
+Transition tool with `CARS=<id> INIT=lift` (0.2 / 0.4 s lift, gaps 0.05 / 0.15 / 0.3 s, 6 flicks
+per row), medians of the swing: peak yaw rate / peak yaw acceleration (0.05 s) / peak roll rate.
+
+| config | debug_coupe | rampart_50 | parity_rwd_a |
+|---|---|---|---|
+| W defaults · plain | no hold | 140 °/s / 326 °/s² / 22 °/s (spins) | no hold |
+| W defaults · VR | 122 / 314 / 14 (3 spin) | 54 / 42 / 4 (no swing) | 120 / 276 / 15 (3 spin) |
+| balance new · plain | no hold | no hold | 141 / 317 / 18 (spins) |
+| slow weight · plain | 115 / 263 / 17 (spins) | 120 / 208 / 18 (spins) | 36 / 31 / 4 (no swing) |
+| slow weight · VR | 52 / 53 / 5 (no swing) | 53 / 36 / 4 | 94 / 187 / 17 (3 spin) |
+
+**On this driver debug_coupe's swing is not more violent than the muscle cars'** (same 115–140°/s
+yaw, 260–330°/s² yaw acceleration once a swing starts); every car that swings spins without the
+swing rack. Its data does differ: anti-roll bars 26 000 / 14 000 N/m vs 12 800 / 600 (rampart)
+— the rear 23× stiffer; springs ~15 % stiffer; quicker steering (ratio 13 vs 15.7, lock 0.62 vs
+0.66 rad); 0.18 s shifts vs 0.5 s; yaw inertia ratio Izz / (m·a·b) 1.03 vs 1.11; front weight
+0.52 vs 0.54. The lab ride scales the bars × 0.25 (slow weight: × 0), and `REAR_ARB=600
+FRONT_ARB=12800` or `REAR_ARB=5000` change the swing by < 3 % — not the cause here. It also
+fails to settle a 30–45° drift on two configs (no hold), so its held drift is touchier.
+Needed from the owner: which preset / steering, and whether the violence is the yaw snap, the
+roll, or a gear change mid-swing (its 0.18 s shifts with automatic gears would put torque
+steps into the swing; this driver holds 2nd).
+
 ## Grip-balance × spin model (grip-balance's ask, lead/grip-balance @ c7cf0209)
 
 `cargo run --release -p wp_vehicle --example grip_balance -- robust` on their branch (spin model
