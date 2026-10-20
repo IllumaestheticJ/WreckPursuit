@@ -43,6 +43,7 @@ pub mod aero;
 pub mod assists;
 pub mod body;
 pub mod brakes;
+pub mod car_lab;
 pub mod diff;
 pub mod drift;
 pub mod drift_lab;

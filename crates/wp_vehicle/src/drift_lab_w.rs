@@ -232,6 +232,19 @@ pub fn plain_drift_run(
     radius: f32,
     lat_g: f32,
 ) -> (crate::drift_lab::DriftRun, f32) {
+    plain_drift_run_with(car, assists, driver, radius, lat_g, |_, _, _| {})
+}
+
+/// [`plain_drift_run`] calling `on_tick(rig, steer, throttle)` after every tick of the drift
+/// phase (traces).
+pub fn plain_drift_run_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: PlainDriver,
+    radius: f32,
+    lat_g: f32,
+    mut on_tick: impl FnMut(&crate::rig::Rig, f32, f32),
+) -> (crate::drift_lab::DriftRun, f32) {
     use crate::drift_lab::{settle_on_circle, slide_state, DriftRun, DRIFT_GEAR};
     use wp_contracts::{VehicleInput, PHYSICS_DT};
     const TPS: usize = 240;
@@ -285,6 +298,7 @@ pub fn plain_drift_run(
             },
             assists,
         );
+        on_tick(&rig, steer, throttle);
         let n = slide_state(&rig);
         let a = n.body_slip.to_degrees().abs();
         max_slip = max_slip.max(a);
@@ -457,3 +471,60 @@ pub const LANE_CHANGE_KEYS: [(f32, f32); 3] = [(-1.0, 0.3), (1.0, 0.45), (-1.0, 
 /// right 1.0 s, release 0.2 s, left 0.6 s.
 pub const S_BEND_KEYS: [(f32, f32); 5] =
     [(-1.0, 0.6), (0.0, 0.2), (1.0, 1.0), (0.0, 0.2), (-1.0, 0.6)];
+
+/// Largest body slip in the keyboard lane change at 100 km/h ([`LANE_CHANGE_KEYS`]), degrees
+/// (grip-driving sanity: a lane change should stay in grip, a few degrees).
+pub fn lane_change_slip(car: &LoadedCar, assists: &AssistProfile) -> f32 {
+    use crate::drift_lab::slide_state;
+    use wp_contracts::VehicleInput;
+    const TPS: usize = 240;
+    let speed = 100.0 / 3.6;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    let hold = |rig: &crate::rig::Rig| {
+        let err = speed - rig.state().speed_mps;
+        (
+            (0.25 + 0.35 * err).clamp(0.0, 1.0),
+            if err < -1.0 {
+                (-0.2 * err).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+        )
+    };
+    for _ in 0..2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let script: Vec<f32> = LANE_CHANGE_KEYS
+        .iter()
+        .flat_map(|&(k, s)| std::iter::repeat_n(k, (s * TPS as f32) as usize))
+        .collect();
+    let mut max_slip = 0.0f32;
+    for tick in 0..script.len() + 2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        let steer = script.get(tick).copied().unwrap_or(0.0);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+        max_slip = max_slip.max(slide_state(&rig).body_slip.to_degrees().abs());
+    }
+    max_slip
+}

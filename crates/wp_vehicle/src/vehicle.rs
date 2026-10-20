@@ -31,8 +31,8 @@ use crate::steering::{
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
 use crate::tire::{
-    combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
-    slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    combined_forces_weighted, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax,
+    slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
 };
 use crate::TireDb;
 
@@ -790,8 +790,20 @@ impl Vehicle {
         ))
     }
 
+    /// The rear axle's differential (Drift Lab W's `car_lab` can lock it).
+    fn rear_diff(&self) -> AxleDiff {
+        match crate::car_lab::active() {
+            Some(t) if t.rear_locked => AxleDiff::Locked,
+            _ => self.diffs.rear,
+        }
+    }
+
     fn max_steer(&self) -> f32 {
-        self.corners[0].max_steer.max(self.corners[1].max_steer)
+        let m = self.corners[0].max_steer.max(self.corners[1].max_steer);
+        match crate::car_lab::active() {
+            Some(t) => m * t.lock.clamp(0.3, 2.0),
+            None => m,
+        }
     }
 
     /// Peak slip angle of wheel `i`'s tire, rad.
@@ -862,7 +874,8 @@ impl Vehicle {
         if self.effects.engine_dead || self.fuel <= 0.0 {
             0.0
         } else {
-            (self.effects.power_scale * (1.0 - self.heat)).max(0.0)
+            let lab = crate::car_lab::active().map_or(1.0, |t| t.torque.max(0.0));
+            (self.effects.power_scale * (1.0 - self.heat) * lab).max(0.0)
         }
     }
 
@@ -1218,7 +1231,7 @@ impl Vehicle {
             front_mu,
             dt,
         );
-        if self.diffs.rear == AxleDiff::Locked && base_split[2] > 0.0 && base_split[3] > 0.0 {
+        if self.rear_diff() == AxleDiff::Locked && base_split[2] > 0.0 && base_split[3] > 0.0 {
             // A locked rear shares a single-wheel brake between both rears (no yaw moment):
             // ESC brakes the front wheel on the same side instead.
             for (rear, front) in [(2usize, 0usize), (3, 1)] {
@@ -1407,7 +1420,7 @@ impl Vehicle {
             (
                 2,
                 3,
-                self.diffs.rear,
+                self.rear_diff(),
                 self.def.track_rear_m,
                 self.def.brakes.max_torque_rear_nm,
             ),
@@ -1540,6 +1553,13 @@ impl Vehicle {
         }
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
+        }
+        if let Some(t) = crate::car_lab::active() {
+            if t.yaw_damping > 0.0 {
+                // Diagnostic yaw damper (not physical): −k·m·L²·r about the body's up axis.
+                let r = ch.ang_vel.dot(up);
+                torque -= up * (t.yaw_damping * self.def.mass_kg * wheelbase * wheelbase * r);
+            }
         }
         self.force = force;
         self.torque = torque;
@@ -1761,6 +1781,8 @@ impl Vehicle {
         }
         let x_diff = self.solve_diffs(&mut drive, wheel_side, reflected, split, s_sum, kin, h);
 
+        // Drift Lab W car / tyre lab override (`crate::car_lab`); `None` = the data.
+        let car_tune = crate::car_lab::active();
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -1787,11 +1809,25 @@ impl Vehicle {
                 w.alpha_lag = 0.0;
                 continue;
             }
+            let tuned;
+            let (tire, w_lat): (&wp_contracts::TireDef, f32) = match car_tune {
+                Some(t) => {
+                    tuned = t.tire_for(&c.tire, i);
+                    let w_lat = if t.combined_applies(i) {
+                        t.lat_under_spin.clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    (&tuned, w_lat)
+                }
+                None => (&c.tire, 1.0),
+            };
             w.alpha = slip_angle(w.vx, w.vy);
-            w.alpha_lag = relax(w.alpha_lag, w.alpha, w.vx, c.tire.relaxation_length_m, h);
+            w.alpha_lag = relax(w.alpha_lag, w.alpha, w.vx, tire.relaxation_length_m, h);
             let (vx, r, fz, grip, alpha) = (w.vx, w.r_eff, w.fz, w.grip, w.alpha_lag);
-            let fx_at =
-                |om: f32| combined_forces(&c.tire, slip_ratio(om, r, vx), alpha, fz, grip).0;
+            let fx_at = |om: f32| {
+                combined_forces_weighted(tire, slip_ratio(om, r, vx), alpha, fz, grip, w_lat).0
+            };
             let fx0 = fx_at(w.omega);
             let eps = 0.002 * vx.abs().max(SLIP_RATIO_V_MIN) / r;
             let k = ((fx_at(w.omega + eps) - fx_at(w.omega - eps)) / (2.0 * eps)).max(0.0);
@@ -1805,15 +1841,15 @@ impl Vehicle {
             };
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
-            let (fx, fy) = combined_forces(&c.tire, w.kappa, alpha, fz, grip);
+            let (fx, fy) = combined_forces_weighted(tire, w.kappa, alpha, fz, grip, w_lat);
             let mu_y = load_sensitive_mu(
-                c.tire.lateral.d,
-                c.tire.load_sensitivity,
+                tire.lateral.d,
+                tire.load_sensitivity,
                 fz.max(1.0),
-                c.tire.fz0_n,
+                tire.fz0_n,
             );
             w.fy = low_speed_lateral(fy, vx, w.vy, fz, mu_y * grip);
-            w.fx = fx - c.tire.rolling_resistance * fz * (vx / 0.5).clamp(-1.0, 1.0);
+            w.fx = fx - tire.rolling_resistance * fz * (vx / 0.5).clamp(-1.0, 1.0);
         }
 
         // Engine side.
@@ -1929,7 +1965,7 @@ impl Vehicle {
         }
 
         // Axles: both sides must be connected (a lost wheel or a declutched axle has no diff).
-        for (k, (l, r, d)) in [(0usize, 1usize, self.diffs.front), (2, 3, self.diffs.rear)]
+        for (k, (l, r, d)) in [(0usize, 1usize, self.diffs.front), (2, 3, self.rear_diff())]
             .into_iter()
             .enumerate()
         {

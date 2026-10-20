@@ -67,6 +67,32 @@ pub fn combined_forces(def: &TireDef, kappa: f32, alpha: f32, fz: f32, grip: f32
     (fx, fy)
 }
 
+/// [`combined_forces`] with longitudinal slip counting only `w` (0..=1) against the
+/// **lateral** force (Drift Lab W's `crate::car_lab::CarTune::lat_under_spin`); the
+/// longitudinal force is exactly [`combined_forces`]'. `w = 1` gives the same forces.
+pub fn combined_forces_weighted(
+    def: &TireDef,
+    kappa: f32,
+    alpha: f32,
+    fz: f32,
+    grip: f32,
+    w: f32,
+) -> (f32, f32) {
+    let (fx, fy) = combined_forces(def, kappa, alpha, fz, grip);
+    if fz <= 0.0 || w >= 1.0 {
+        return (fx, fy);
+    }
+    let sx = w.max(0.0) * kappa / def.peak_slip_ratio;
+    let sy = alpha / def.peak_slip_angle_rad;
+    let s = (sx * sx + sy * sy).sqrt();
+    if s < 1e-7 {
+        return (fx, 0.0);
+    }
+    let mu_y = load_sensitive_mu(def.lateral.d, def.load_sensitivity, fz, def.fz0_n);
+    let fy = -mu_y * fz * grip * mf_shape(&def.lateral, s * def.peak_slip_angle_rad) * (sy / s);
+    (fx, fy)
+}
+
 /// Pneumatic trail for the aligning torque, m: 4 cm at zero slip, falling to 0 at peak slip.
 pub fn pneumatic_trail(def: &TireDef, alpha: f32) -> f32 {
     0.04 * (1.0 - alpha.abs() / def.peak_slip_angle_rad).max(0.0)
@@ -122,6 +148,22 @@ mod tests {
         }
         assert!((best.0 - t.peak_slip_angle_rad).abs() < 0.02, "{best:?}");
         assert!((best.1 / t.fz0_n - t.lateral.d).abs() < 0.02);
+    }
+
+    #[test]
+    fn weighted_combined_slip_matches_at_one_and_keeps_side_force_below() {
+        let t = street();
+        for (k, a) in [(0.0f32, 0.05f32), (0.3, 0.2), (1.5, 0.5), (-0.4, -0.1)] {
+            assert_eq!(
+                combined_forces_weighted(&t, k, a, t.fz0_n, 1.0, 1.0),
+                combined_forces(&t, k, a, t.fz0_n, 1.0)
+            );
+        }
+        // Spinning (kappa 1.0) at 20°: less weight on the spin = more side force, same drive.
+        let (fx1, fy1) = combined_forces_weighted(&t, 1.0, 0.35, t.fz0_n, 1.0, 1.0);
+        let (fx0, fy0) = combined_forces_weighted(&t, 1.0, 0.35, t.fz0_n, 1.0, 0.2);
+        assert_eq!(fx0, fx1);
+        assert!(fy0.abs() > 1.5 * fy1.abs(), "{fy0} vs {fy1}");
     }
 
     #[test]

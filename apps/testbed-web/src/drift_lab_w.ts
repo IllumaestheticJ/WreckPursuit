@@ -54,7 +54,17 @@ const RIDE_FIELDS: Record<string, { label: string; min: number; max: number; ste
   pitch_centre_m: { label: "pitch centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where drive / brake forces act on the body (anti-dive / anti-squat feel)" },
 };
 
+const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit?: string; hint: string }> = {
+  lat_under_spin: { label: "side grip under spin", min: 0, max: 1, step: 0.05, hint: "how much wheelspin costs a tyre's side force (1 = the data's friction ellipse; lower = a spinning rear keeps more side grip). Drive force unchanged" },
+  rear_peak_slip: { label: "rear peak slip ×", min: 0.5, max: 3, step: 0.05, hint: "rear tyres' lateral peak slip angle (curve stretched: later, softer peak)" },
+  front_peak_slip: { label: "front peak slip ×", min: 0.5, max: 3, step: 0.05, hint: "front tyres' lateral peak slip angle" },
+  lock: { label: "steering lock ×", min: 0.6, max: 1.6, step: 0.05, hint: "× the car's max steer angle" },
+  torque: { label: "engine torque ×", min: 0.3, max: 1.5, step: 0.05, hint: "engine torque scale" },
+  yaw_damping: { label: "yaw damping (diag)", min: 0, max: 2, step: 0.05, unit: "/s", hint: "NOT physical: a yaw damping torque −k·m·L²·r, to see how much damping a held drift needs" },
+};
+
 const STORE = "wp.driftLabW.steer";
+const CAR_STORE = "wp.driftLabW.car";
 const RIDE_STORE = "wp.driftLabW.ride";
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
@@ -146,10 +156,22 @@ export class DriftLabWPanel {
       } catch {
         this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().lab));
       }
+      let carTune = "";
+      try {
+        carTune = localStorage.getItem(CAR_STORE) ?? "";
+      } catch {
+        /* storage blocked: data */
+      }
+      try {
+        this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().data));
+      } catch {
+        this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().data));
+      }
       this.build();
     } else {
       this.sim.plainSteerSet("");
       this.sim.rideTuneSet("");
+      this.sim.carTuneSet("");
     }
   }
 
@@ -263,7 +285,7 @@ export class DriftLabWPanel {
       }
       const rideBtns = document.createElement("div");
       rideBtns.style.cssText = "display:flex;gap:6px;margin-top:4px";
-      for (const [label, which] of [["lab default", "lab"], ["car data", "data"]] as const) {
+      for (const [label, which] of [["lab default", "lab"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
         b.title = which === "lab" ? "calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)" : "no scaling: the car files as they are";
@@ -280,6 +302,69 @@ export class DriftLabWPanel {
         rideBtns.appendChild(b);
       }
       this.body.appendChild(rideBtns);
+    }
+    // Car / tyre experiments (wp_vehicle::car_lab).
+    {
+      const h = document.createElement("div");
+      h.textContent = "car / tyre experiments (lab override)";
+      h.style.cssText = "margin:8px 0 2px;color:#9cf";
+      this.body.appendChild(h);
+      const cd = this.sim.carTuneDefaults();
+      const ct = this.sim.carTune() ?? cd.data;
+      const saveCar = (t: Record<string, number | boolean>) => {
+        const text = JSON.stringify(t);
+        this.sim.carTuneSet(text);
+        try {
+          localStorage.setItem(CAR_STORE, text);
+        } catch {
+          /* ignore */
+        }
+      };
+      for (const [key, f] of Object.entries(CAR_FIELDS)) {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = String(f.min);
+        input.max = String(f.max);
+        input.step = String(f.step);
+        input.value = String(ct[key] ?? cd.data[key]);
+        const val = document.createElement("span");
+        const show = () => {
+          val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
+          val.style.color = Math.abs(Number(input.value) - Number(cd.data[key])) > 1e-6 ? "#ffd27a" : "";
+        };
+        show();
+        input.oninput = () => {
+          show();
+          saveCar({ ...(this.sim.carTune() ?? cd.data), [key]: Number(input.value) });
+        };
+        row(f.label, f.hint, input, val);
+      }
+      for (const [key, label, hint] of [
+        ["rear_locked", "rear diff locked", "lock the rear differential (else the car's own)"],
+        ["combined_rear_only", "side grip: rear only", "side grip under spin applies to the rear tyres only (else all four)"],
+      ] as const) {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = Boolean(ct[key] ?? cd.data[key]);
+        input.onchange = () => saveCar({ ...(this.sim.carTune() ?? cd.data), [key]: input.checked });
+        row(label, hint, input, document.createElement("span"));
+      }
+      const btns = document.createElement("div");
+      btns.style.cssText = "display:flex;gap:6px;margin-top:4px";
+      for (const [label, which, hint] of [
+        ["tyre data", "data", "no change: the car and tyre files as they are"],
+        ["drift candidate", "candidate", "best held-countersteer set so far (side grip 0.15, lock 0.9, yaw damping 0.2 — the damper is not physical)"],
+      ] as const) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.title = hint;
+        b.onclick = () => {
+          saveCar(this.sim.carTuneDefaults()[which]);
+          this.build();
+        };
+        btns.appendChild(b);
+      }
+      this.body.appendChild(btns);
     }
     const curve = document.createElement("div");
     curve.id = "drift-lab-w-curve";
@@ -302,7 +387,7 @@ export class DriftLabWPanel {
     const copy = document.createElement("button");
     copy.textContent = "copy JSON";
     copy.title = "copy the steering + suspension constants (paste them into the owner's notes)";
-    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify({ steer: this.sim.plainSteer(), ride: this.sim.rideTune() }, null, 1));
+    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify({ steer: this.sim.plainSteer(), ride: this.sim.rideTune(), car: this.sim.carTune() }, null, 1));
     actions.append(reset, copy);
     this.body.appendChild(actions);
   }

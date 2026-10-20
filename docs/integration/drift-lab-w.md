@@ -180,6 +180,12 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
 
 ## Files
 
+Step 4 adds: `crates/wp_vehicle/src/car_lab.rs`, `tire.rs` (`combined_forces_weighted`),
+`vehicle.rs` (tuned tyres / weighted combined slip in the substep, lock, rear diff, torque,
+diagnostic yaw damper), `drift_lab_w.rs` (`plain_drift_run_with`, `lane_change_slip`),
+`examples/drift_lab_w.rs` (`carlab`, `ptrace`, `YAW_INERTIA`, `CARLAB` / `CARLAB_ONLY`),
+`tests/drift_lab_w_car.rs`, wasm `car_tune_*`, panel section, e2e checks.
+
 Step 3 adds: `crates/wp_vehicle/src/ride_lab.rs` (override + roll / pitch model), `ride.rs`
 (`roll_kick`), `vehicle.rs` (scaled struts / bars, force application heights),
 `drift_lab_w.rs` (`roll_run`, `LANE_CHANGE_KEYS`, `S_BEND_KEYS`), `crates/wp_wasm/src/drift_lab.rs`
@@ -217,7 +223,7 @@ rampart_50 → parity_rwd_a / d, lucciola_350 → parity_rwd_b, kestrel_ts → p
 Regression test: `wp_wasm` `data::parity_session_tests::parity_cars_start_a_free_drive_session`
 (it reproduces the exact browser error with a panel file removed). Browser check:
 `npm run build && npm run e2e:drift-lab-w` (`e2e/drift_lab_w.mjs`, against `vite preview`):
-19 / 19 pass. It checks the lab, the default car and title, plain steering and ride defaults,
+19 / 19 pass (22 / 22 after step 4's car / tyre checks). It checks the lab, the default car and title, plain steering and ride defaults,
 the assists, the sliders, that a held key reaches full rack, the readout, the selector for every
 parity car, and no page errors.
 
@@ -317,6 +323,79 @@ muscle cars (0.43–0.62 → 0.63–0.65 s), and the roll is ~20–35 % bigger (
 drift results (plain drivers with `RIDE_LAB=1`: same spins). The bars change the handling balance
 (less front roll stiffness = less understeer): for the car data owner to weigh. Values to route:
 the scales above, or per car the absolute rates they give.
+
+## Step 4 — car / tyre experiments: what would hold "counter key + full throttle"
+
+Lab-only override `crates/wp_vehicle/src/car_lab.rs` (`CarTune`; process-wide like the others,
+bit-identical when off: the C test values are unchanged to the last digit). Panel section "car /
+tyre experiments" (starts at the data; *drift candidate* / *tyre data* buttons). wasm:
+`car_tune_json()`, `car_tune_defaults_json()`, `car_tune_set(json)`. Knobs:
+
+- **side grip under spin** (`lat_under_spin`, 1 = data): how much a tyre's longitudinal slip
+  counts against its *lateral* force in the combined-slip model (rear only by default). Drive
+  force unchanged (`tire::combined_forces_weighted`; = `combined_forces` at 1).
+- **rear / front peak slip ×**: the lateral curve stretched along the slip axis (peak slip
+  angle × k, Magic Formula B ÷ k).
+- **steering lock ×**, **rear diff locked**, **engine torque ×**.
+- **yaw damping (diag)**: *not physical*, a yaw torque −k·m·L²·r. It measures how much damping
+  a held drift needs.
+- Offline only (example env `YAW_INERTIA=1.3`): yaw inertia × k.
+
+Why it spins (trace, `… --example drift_lab_w -- ptrace`, parity_rwd_d, counter key at 6° + full
+throttle, data): the rear wheels spin at once (slip ratio ≈ 1 by 0.35 s, up to 10 later; 807 N·m
+in 2nd asks ≈ 12 kN of rear drive vs ≈ 10 kN of rear grip). In the combined-slip model the rear
+force then points mostly forward, so rear **side** force falls to 1.5–3 kN. Meanwhile the fronts,
+even at full counter lock, never get past the front axle's travel (the travel runs away
+faster), so their ≈ 6 kN keeps pushing the nose *into* the turn. With rear side grip kept
+(`lat_under_spin` 0.25 + lock 1.3) the held key **does** catch the slide, then over-corrects:
+the car swings through and spins the other way. There is no damping from the saturated rear.
+
+**Single knobs** (parity_rwd_d, plain steering, lab ride default; drift = 6 s on the 40 m
+circle, `drift s / mean ° / sd ° / spun`; sanity = 0.25 s tap at 100 km/h heading / slip,
+keyboard lane change max slip, 0.6 s handbrake at 40 km/h pivot / caught):
+
+| knobs | counter 6° + full throttle | counter 12° | tapper | tap 100 | lane change slip | handbrake |
+|---|---|---|---|---|---|---|
+| data | 0.5 / 28 / 11.6 / spun | 0.5 / 28 / 11.6 / spun | 0.5 / spun | 17.3° / 3.4° | 3.7° | 25° / spun |
+| side grip under spin 0.5 | 0.6 / spun | 0.6 / spun | 0.6 / spun | 16.3 / 3.2 | 3.4 | 24 / spun |
+| side grip under spin 0.25 | 1.5 / 25 / 9.1 / spun | 1.2 / spun | **4.2 / 20 / 6.2 / held** | 16.1 / 3.2 | 3.4 | 22 / spun |
+| side grip under spin 0 | no slide at all | no slide | no slide | 16.3 / 3.2 | 3.4 | 17 / caught |
+| rear peak slip × 1.5 / × 2 | spun | spun | spun | 32.8 / 7.0 · 37.8 / 11.5 | 6.5 · 8.8 | spun |
+| lock × 1.3 (≈ 50°) | spun | spun | spun | 15.6 / 3.0 | 3.4 | spun |
+| rear diff locked | spun | spun | spun | 16.5 / 3.2 | 3.7 | spun |
+| torque × 0.7 | 1.0 / spun | 0.7 / spun | 3.3 / spun | 17.2 / 3.3 | 3.8 | spun |
+| yaw inertia × 1.3 / × 1.6 (offline) | spun | spun | spun | 17.7 / 3.2 | 4.1 | spun |
+| yaw damping 0.5 /s (diag) | 2.1 / spun | 1.6 / spun | 5.5 / 27 / 4.8 / held | 11.1 / 1.7 | 1.9 | 19 / no |
+| yaw damping 1.5 /s (diag) | **3.7 / 19 / 4.8 / held** | 3.7 / 17 / 3.9 / held | 4.9 / held | 8.2 / 0.7 | 1.0 | 12 / caught |
+
+**Combinations** (grid of side grip 0.15 / 0.25 / 0.35 × lock 0.75 / 0.9 / 1.0 × yaw damping
+0 / 0.2, plus rear peak slip and yaw inertia): the held counter key only stops spinning with
+**side grip under spin ≈ 0.15 + yaw damping 0.2**. Best set (`CarTune::drift_candidate()`,
+the panel's *drift candidate*): side grip 0.15, lock × 0.9, yaw damping 0.2 /s:
+
+| | counter 6° + full throttle | counter 12° | tapper | tap 100 | lane change slip | handbrake 0.6 s |
+|---|---|---|---|---|---|---|
+| drift candidate | **4.7 s / 25° / sd 9.7 / held** | 4.8 / 28 / 11.0 / held | 5.1 / 19 / 2.3 / held | 13.3° / 2.4° (data 17.3) | 2.5° | 19° / caught |
+
+Rear peak slip × 2–3 on top makes it worse (grip driving gets loose). Yaw inertia doesn't help:
+it slows the slide down but doesn't damp it. Test: `tests/drift_lab_w_car.rs` (the data spins,
+the candidate holds > 3.5 s at 15–40°).
+
+**Conclusions for A (tyre / car data owner):**
+1. Two things are missing at once: **rear side force under wheelspin** (our friction ellipse
+   gives a spinning rear almost no side grip) and **yaw damping in a slide** (once the rear is
+   saturated nothing resists yaw rate). Fix one without the other and the held key either
+   still spins (side grip only) or the car can't slide at all (side grip 0).
+2. The physical source of the damping is still open. Our rear force is flat past ≈ 6° of slip
+   in a slide, so it can't damp. Something has to make it grow with slip angle or yaw rate. A
+   later / wider peak does that but ruins grip driving here. Candidates to try in the tyre
+   model: a combined-slip shape where side force keeps rising with slip angle at high slip ratio
+   (not just a smaller longitudinal weight), and a tyre lag / relaxation that doesn't
+   destabilise.
+3. Steering lock, diff locking, torque and yaw inertia are not the lever (none helps alone;
+   lock × 0.9 is a small refinement with the candidate).
+4. The candidate is still **not steady** (slide angle sd ≈ 10° vs clip 1's "steady for several
+   seconds"), and it trims tap response by ~25 %.
 
 ## Contract change requests
 

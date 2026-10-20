@@ -199,3 +199,33 @@ pub fn ride_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
         ])
     })
 }
+
+// --- Drift Lab W car / tyre experiments (wp_vehicle::car_lab) -----------------------------
+
+/// The car / tyre lab override in effect (`null` = the data), JSON.
+#[wasm_bindgen]
+pub fn car_tune_json() -> String {
+    json(&wp_vehicle::car_lab::active())
+}
+
+/// `{ "data": <no change>, "candidate": <best drift-hold set so far> }`, JSON.
+#[wasm_bindgen]
+pub fn car_tune_defaults_json() -> String {
+    json(&serde_json::json!({
+        "data": wp_vehicle::car_lab::CarTune::default(),
+        "candidate": wp_vehicle::car_lab::CarTune::drift_candidate(),
+    }))
+}
+
+/// Set the car / tyre lab override from JSON (missing fields = the data), or clear it with `""`.
+/// Process-wide, not logged in recordings.
+#[wasm_bindgen]
+pub fn car_tune_set(tune_json: &str) -> Result<(), JsValue> {
+    if tune_json.trim().is_empty() {
+        wp_vehicle::car_lab::set_override(None);
+        return Ok(());
+    }
+    let t: wp_vehicle::car_lab::CarTune = serde_json::from_str(tune_json).map_err(err)?;
+    wp_vehicle::car_lab::set_override(Some(t));
+    Ok(())
+}

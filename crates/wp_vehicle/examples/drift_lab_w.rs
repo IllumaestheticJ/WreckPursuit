@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use wp_contracts::LoadedCar;
+use wp_vehicle::car_lab::{self, CarTune};
 use wp_vehicle::drift_lab::{
     drift_run, drift_run_with, hairpin, slide_state, tap_response, DriftDriver,
 };
@@ -22,7 +23,12 @@ use wp_vehicle::ride_lab::{self, RideTune};
 
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
-    load_any_car(&data, id).unwrap()
+    let mut c = load_any_car(&data, id).unwrap();
+    // YAW_INERTIA=1.3: offline experiment, the car's yaw inertia × this (set before spawn).
+    if let Ok(k) = std::env::var("YAW_INERTIA") {
+        c.def.inertia_kgm2[2] *= k.parse::<f32>().expect("YAW_INERTIA number");
+    }
+    c
 }
 
 fn main() {
@@ -55,6 +61,8 @@ fn main() {
             "plain",
             "sweep",
             "ride",
+            "carlab",
+            "ptrace",
             "tap",
             "handbrake",
             "hairpin",
@@ -77,6 +85,14 @@ fn main() {
     }
     if what == "all" || what == "plain" {
         plain_table(&args);
+    }
+    if what == "ptrace" {
+        ptrace(args.first().map_or("parity_rwd_d", String::as_str));
+        return;
+    }
+    if what == "carlab" {
+        carlab_table(&args);
+        return;
     }
     if what == "ride" {
         ride_table(&args);
@@ -477,4 +493,182 @@ fn ride_table(args: &[String]) {
         }
     }
     ride_lab::set_override(None);
+}
+
+/// Car / tyre knob sets for `carlab` (`CARLAB='{...}'` adds one, or replaces the list with
+/// `CARLAB_ONLY=1`).
+fn carlab_configs() -> Vec<(String, CarTune)> {
+    let d = CarTune::default();
+    let mut v: Vec<(String, CarTune)> = vec![
+        ("data".into(), d),
+        (
+            "side grip under spin 0.5".into(),
+            CarTune {
+                lat_under_spin: 0.5,
+                ..d
+            },
+        ),
+        (
+            "side grip under spin 0.25".into(),
+            CarTune {
+                lat_under_spin: 0.25,
+                ..d
+            },
+        ),
+        (
+            "side grip under spin 0".into(),
+            CarTune {
+                lat_under_spin: 0.0,
+                ..d
+            },
+        ),
+        (
+            "rear peak slip × 1.5".into(),
+            CarTune {
+                rear_peak_slip: 1.5,
+                ..d
+            },
+        ),
+        (
+            "rear peak slip × 2".into(),
+            CarTune {
+                rear_peak_slip: 2.0,
+                ..d
+            },
+        ),
+        ("lock × 1.3 (≈50°)".into(), CarTune { lock: 1.3, ..d }),
+        (
+            "rear diff locked".into(),
+            CarTune {
+                rear_locked: true,
+                ..d
+            },
+        ),
+        ("torque × 0.7".into(), CarTune { torque: 0.7, ..d }),
+        (
+            "yaw damping 0.5 /s (diag)".into(),
+            CarTune {
+                yaw_damping: 0.5,
+                ..d
+            },
+        ),
+        (
+            "yaw damping 1.5 /s (diag)".into(),
+            CarTune {
+                yaw_damping: 1.5,
+                ..d
+            },
+        ),
+    ];
+    if let Ok(j) = std::env::var("CARLAB") {
+        let t: CarTune = serde_json::from_str(&j).expect("CARLAB json");
+        if std::env::var("CARLAB_ONLY").is_ok() {
+            v = vec![("data".into(), d)];
+        }
+        v.push((format!("CARLAB {j}"), t));
+    }
+    v
+}
+
+fn carlab_table(args: &[String]) {
+    let ids: Vec<String> = if args.is_empty() || args.len() > 3 {
+        vec!["parity_rwd_d".into()]
+    } else {
+        args.to_vec()
+    };
+    println!("\n## Car / tyre lab: drift hold (6 s, 40 m circle, 2nd) + sanity");
+    println!("| car | knobs | counter 6° + full thr: drift s / mean ° / sd ° / spun | counter 12° + full thr | tapper | tap 100 km/h 0.25 s: heading ° / slip ° | lane change: slip ° | handbrake 40 km/h 0.6 s: pivot ° / caught |");
+    println!("|---|---|---|---|---|---|---|---|");
+    let a = reference_assists();
+    for id in &ids {
+        let c = car(id);
+        for (name, t) in carlab_configs() {
+            car_lab::set_override(Some(t));
+            let cell = |d: PlainDriver| {
+                let (r, _) = plain_drift_run(&c, &a, d, 40.0, 0.6);
+                format!(
+                    "{:.1} / {:.0} / {:.1} / {}",
+                    r.drift_s,
+                    r.mean_deg,
+                    r.sd_deg,
+                    if r.spun { "SPUN" } else { "no" }
+                )
+            };
+            let c6 = cell(PlainDriver::HoldCounter {
+                entry_deg: 6.0,
+                throttle: 1.0,
+            });
+            let c12 = cell(PlainDriver::HoldCounter {
+                entry_deg: 12.0,
+                throttle: 1.0,
+            });
+            let tp = cell(PlainDriver::Tapper {
+                entry_deg: 6.0,
+                target_deg: 30.0,
+            });
+            let tap = tap_response(&c, &a, 100.0 / 3.6, 0.25);
+            let lc = wp_vehicle::drift_lab_w::lane_change_slip(&c, &a);
+            let hb = handbrake_pivot(&c, &a, 40.0 / 3.6, 0.6);
+            println!(
+                "| {id} | {name} | {c6} | {c12} | {tp} | {:.1} / {:.1} | {lc:.1} | {:.0} / {} |",
+                tap.heading_deg,
+                tap.max_slip_deg,
+                hb.pivot_deg,
+                if hb.spun {
+                    "spun"
+                } else if hb.catch_s.is_some() {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
+        }
+    }
+    car_lab::set_override(None);
+}
+
+/// `ptrace [car]`: counter key at 6° + full throttle, every 0.05 s, with tyre forces
+/// (`CARLAB='{...}'` applies a car / tyre override).
+fn ptrace(id: &str) {
+    if let Ok(j) = std::env::var("CARLAB") {
+        car_lab::set_override(Some(serde_json::from_str(&j).expect("CARLAB json")));
+    }
+    let c = car(id);
+    let a = reference_assists();
+    let mut tick = 0usize;
+    println!("t | key | wheel ° | front trav ° | slip ° | yaw °/s | km/h | Fy F kN | Fy R kN | Fx R kN | kappa RL/RR | alpha R °");
+    let (r, _) = wp_vehicle::drift_lab_w::plain_drift_run_with(
+        &c,
+        &a,
+        PlainDriver::HoldCounter {
+            entry_deg: 6.0,
+            throttle: 1.0,
+        },
+        40.0,
+        0.6,
+        |rig, steer, _| {
+            if tick.is_multiple_of(12) && tick < 480 {
+                let s = slide_state(rig);
+                let st = rig.state();
+                let w = &st.wheel_states;
+                println!(
+                    "{:.2} | {steer:+.0} | {:+.1} | {:+.1} | {:+.1} | {:+.0} | {:.0} | {:+.1} | {:+.1} | {:+.1} | {:.2}/{:.2} | {:+.1}",
+                    tick as f32 / 240.0,
+                    s.steer.to_degrees(),
+                    s.front_axle_angle.to_degrees(),
+                    s.body_slip.to_degrees(),
+                    s.yaw_rate.to_degrees(),
+                    s.v_fwd * 3.6,
+                    (w[0].fy_n + w[1].fy_n) / 1000.0,
+                    (w[2].fy_n + w[3].fy_n) / 1000.0,
+                    (w[2].fx_n + w[3].fx_n) / 1000.0,
+                    w[2].slip_ratio,
+                    w[3].slip_ratio,
+                    (0.5 * (w[2].slip_angle + w[3].slip_angle)).to_degrees(),
+                );
+            }
+            tick += 1;
+        },
+    );
+    println!("{r:?}");
 }
