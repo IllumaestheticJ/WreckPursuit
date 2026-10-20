@@ -212,6 +212,18 @@ pub enum PlainDriver {
         /// Throttle after the entry, 0..=1 (a diagnostic; the keyboard has only 0 / 1).
         throttle: f32,
     },
+    /// Reference clip 8: from `entry_deg` on, the key **into** the turn stays held with full
+    /// throttle (the owner held it 2.9 s through a hairpin power slide; it must not spin).
+    IntoTurnHeld {
+        /// Slide angle where the driver keeps holding (no change of key), degrees.
+        entry_deg: f32,
+    },
+    /// From `entry_deg` on, both steering keys released, full throttle (the slide should hold,
+    /// then straighten).
+    Released {
+        /// Slide angle where the keys are released, degrees.
+        entry_deg: f32,
+    },
     /// A keyboard drifter steering with taps (clips 1–2): the countersteer key while the slide
     /// is past `target_deg` or growing faster than 15°/s, released otherwise, and the key into
     /// the turn below `target_deg − 15°`; full throttle, lifted while past `target_deg + 10°`.
@@ -251,6 +263,8 @@ pub struct HoldMetrics {
     pub held: bool,
     /// Length of the run, s.
     pub run_s: f32,
+    /// Intended-side angle at the end of the run (or at the spin), degrees.
+    pub end_deg: f32,
 }
 
 impl HoldMetrics {
@@ -299,6 +313,12 @@ impl HoldMetrics {
             spun,
             held: !spun && swaps == 0 && drift_s >= 0.5 * run_s,
             run_s,
+            end_deg: a
+                .iter()
+                .take_while(|x| x.abs() < 90.0)
+                .last()
+                .copied()
+                .unwrap_or(0.0),
         }
     }
 
@@ -380,9 +400,10 @@ pub fn plain_drift_run_with(
         let rate = (angle - prev_angle) / PHYSICS_DT;
         prev_angle = angle;
         let entry = match driver {
-            PlainDriver::HoldCounter { entry_deg, .. } | PlainDriver::Tapper { entry_deg, .. } => {
-                entry_deg
-            }
+            PlainDriver::HoldCounter { entry_deg, .. }
+            | PlainDriver::Tapper { entry_deg, .. }
+            | PlainDriver::IntoTurnHeld { entry_deg }
+            | PlainDriver::Released { entry_deg } => entry_deg,
         };
         entered |= angle > entry;
         let (steer, throttle) = if !entered {
@@ -390,6 +411,8 @@ pub fn plain_drift_run_with(
         } else {
             match driver {
                 PlainDriver::HoldCounter { throttle, .. } => (1.0, throttle),
+                PlainDriver::IntoTurnHeld { .. } => (-1.0, 1.0),
+                PlainDriver::Released { .. } => (0.0, 1.0),
                 PlainDriver::Tapper { target_deg, .. } => {
                     let steer = if angle > target_deg || rate > 15.0 {
                         1.0
@@ -649,6 +672,40 @@ pub fn lane_change_slip(car: &LoadedCar, assists: &AssistProfile) -> f32 {
         max_slip = max_slip.max(slide_state(&rig).body_slip.to_degrees().abs());
     }
     max_slip
+}
+
+/// Straight launch (owner: "spins off the line"; reference clip 5 goes dead straight): rest →
+/// full throttle for 3 s, steer 0, on a road cross-slope of `slope_deg` (sideways gravity
+/// g·sin θ added each tick; 0 = flat). Largest heading change, degrees (target < 3). Same
+/// definition as `lead/tyre-slip`'s `tests/tyre_slip.rs::launch_yaw`.
+pub fn launch_yaw(car: &LoadedCar, assists: &AssistProfile, slope_deg: f32) -> f32 {
+    use crate::math::{atan2, sin, V3};
+    use crate::rig::Rig;
+    use wp_contracts::VehicleInput;
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, 0.0, 0.0);
+    for _ in 0..120 {
+        rig.step(&VehicleInput::default(), assists);
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y).to_degrees()
+    };
+    let h0 = heading(&rig);
+    let side_dv = 9.81 * sin(slope_deg.to_radians()) / 240.0;
+    let mut yaw = 0.0f32;
+    for _ in 0..3 * 240 {
+        rig.kick([side_dv, 0.0, 0.0], [0.0; 3]);
+        rig.step(
+            &VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+            assists,
+        );
+        yaw = yaw.max((heading(&rig) - h0).abs());
+    }
+    yaw
 }
 
 #[cfg(test)]
