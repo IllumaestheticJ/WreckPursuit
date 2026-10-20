@@ -1,8 +1,9 @@
 // Debug layer toggles and other per-viewer settings, persisted in localStorage.
 // To add a debug layer: add an entry to LAYERS (key + label + default), then read
 // `layers.on("<id>")` where you draw it. The help overlay and hotkeys pick it up automatically.
-// Keys 1–8 are camera angles (cameras.ts), V is audio mute, M / Tab open the city map and `
-// follows the next car: keep layer keys off them.
+// Keys 1–8 are camera angles (cameras.ts) and the player actions (driving, camera cycle /
+// look-back, map, pause, mute, ...) are rebindable (bindings.ts; their defaults include V, M,
+// Tab, ` and F8/F9): keep layer keys off the defaults. A bound action wins over a layer key.
 
 export interface LayerDef {
   id: string;

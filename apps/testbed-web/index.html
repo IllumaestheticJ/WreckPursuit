@@ -38,6 +38,11 @@
       .comps .bar { width: 80px; }
       .inputs { }
       .telemetry { position: absolute; bottom: 8px; left: 552px; padding: 0; }
+      .controls-panel { max-width: 720px; z-index: 6; }
+      .bind-table { border-collapse: collapse; margin: 6px 0; }
+      .bind-table td, .bind-table th { padding: 1px 4px; text-align: left; font-weight: normal; }
+      .bind-table button.bind { min-width: 72px; }
+      .bind-table button.waiting { background: #a60; color: #fff; }
       .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; max-height: calc(100vh - 16px); overflow: auto; z-index: 5; background: rgba(0, 0, 0, 0.92); }
       #controls { position: absolute; bottom: 8px; left: 8px; max-width: 520px; max-height: 45vh; overflow: auto; }
       #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -74,6 +79,7 @@
           <button id="sc-chase" title="city at night (map below), police, traffic, you start speeding">city chase</button>
           <button id="sc-chase-rain" title="the city chase in a night downpour on a soaked road">rainy night</button>
           <label title="free drive / city chase use your career car, its damage and mods, and the result goes into the career"><input type="checkbox" id="career" checked />career</label>
+          <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
           <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
           <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
         </div>

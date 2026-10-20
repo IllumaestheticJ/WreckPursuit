@@ -77,6 +77,8 @@ export interface HudFrame {
   viewsMs: number;
   /** Real-time factor: sim seconds per wall second (1 = real time). */
   rtf: number;
+  /** Graphics quality label (render/quality.ts). */
+  gfx?: string;
   tick: number;
   hours: number;
   hash: string;
@@ -113,16 +115,21 @@ export class Hud {
     this.feed = el("div", "panel feed", right);
     this.inputs = el("div", "panel inputs", left);
     this.help = el("div", "panel help hidden", root);
+    this.setControlsHelp([]);
+  }
+
+  /** Rebuild the help overlay with the current bindings (one line per action). */
+  setControlsHelp(bindingLines: string[]): void {
     this.help.innerHTML =
-      `<b>WreckPursuit testbed — keys</b><br>` +
-      `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
-      `R reset · O headlights · Q horn · V mute · \` (backquote) follow the next car<br>` +
-      `M or Tab city map (drag / wheel / arrows / + − / 0 whole city / F follow inside it; driving input is paused while it is open)<br>` +
+      `<b>WreckPursuit testbed — controls</b> <span class="dim">(change them in the controls panel: F9 by default, or the “controls” button)</span><br>` +
+      `<div class="help-binds">${bindingLines.join("<br>")}</div>` +
+      `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
-      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
+      `. frame step (replay) · [ / ] replay speed<br><br>` +
       `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
       `centre the steering and it straightens up; steer into the turn to hold a drift, ` +
       `countersteer to straighten faster. Strongest on powerful RWD cars; off on wheel.<br><br>` +
+      `<b>Debug layers</b><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;
   }
@@ -171,6 +178,7 @@ export class Hud {
       (f.rtf < RTF_WARN
         ? `<div class="rtf-warn">⚠ slow motion: ${f.rtf.toFixed(2)}× real time (browser can't keep up)</div>`
         : `<div class="dim">real time ${f.rtf.toFixed(2)}×</div>`) +
+      (f.gfx ? `<div class="dim">gfx ${f.gfx}</div>` : "") +
       `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
       `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
 

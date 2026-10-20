@@ -206,6 +206,14 @@ pub struct EngineMix {
     pub shift_dip_depth: f32,
     /// Downshift blip: rpm rising fast with the throttle closed raises the load to this.
     pub blip_load: f32,
+    /// Engine LOD for every car except the focus: closer than this it keeps its two loudest
+    /// layers (the crossfade pair), farther only the loudest one; the dropped layers' energy
+    /// moves into the kept ones, so loudness is unchanged. Saves Engine-bus voices so a crowd
+    /// of cars is not starved by the voice limit (playtest #47), m.
+    pub lod_two_layer_m: f32,
+    /// Culling score multiplier of a non-focus car's second engine layer: every car's main
+    /// layer is kept before another car's second layer.
+    pub second_layer_cull_scale: f32,
 }
 
 /// Tire, surface and suspension tuning.

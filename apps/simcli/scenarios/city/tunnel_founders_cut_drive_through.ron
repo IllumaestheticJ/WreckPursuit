@@ -1,0 +1,33 @@
+// Port Vesper v2: the Uptown Connector northbound through Founders Cut — down a ≈ 5 % ramp
+// into the 250 m covered trench (road 7 m below the plaza), out up the north ramp — at the
+// 40 mph limit. Expect: no contact with the walls or deck, no airborne time over the sag and
+// crest at the ramps, the car stays on the road and arrives undamaged.
+(
+    name: "city_tunnel_founders_cut_drive_through",
+    seed: 42,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 23.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    parked_cars: false,
+    police_cars: false,
+    assists: ai,
+    slow: true,
+    entities: [
+        (
+            id: "car",
+            car: "debug_sedan",
+            driver: follow_route(route_id: "Founders Cut entry -> Founders Cut exit", target_speed: 17.88),
+        ),
+    ],
+    duration_s: 40.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.05),
+        metric(name: "max_speed_mps", min: 15.0, max: 19.0),
+        metric(name: "crush_depth_m", min: 0.0, max: 0.02),
+        metric(name: "path_length_m", min: 380.0, max: 500.0),
+        total_loss(expected: false),
+    ],
+)

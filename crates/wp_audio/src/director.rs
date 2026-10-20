@@ -13,7 +13,8 @@ use wp_police::PoliceEvent;
 use crate::collision::{impact_gain, impact_layers, pair_key, ImpactLayer, MaterialMap, PairState};
 use crate::data::{cues, AudioLibrary, CarAudioDef};
 use crate::engine::{
-    engine_synth, update_engine, EngineAudioState, EngineInput, EngineLayers, EngineLimits,
+    engine_lod, engine_synth, update_engine, EngineAudioState, EngineInput, EngineLayers,
+    EngineLimits,
 };
 use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
 use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
@@ -180,6 +181,8 @@ struct VehicleRuntime {
     broken_glass: BTreeSet<BodyRegion>,
     /// Worst `RegionDamaged` severity among body panels (drives the rattle loop).
     panel_damage: f32,
+    /// Engine layers kept by the LOD last frame (layer indices), for its hysteresis.
+    engine_lod: Vec<usize>,
 }
 
 /// Testbed / gameplay override of a vehicle's siren.
@@ -397,7 +400,14 @@ impl AudioDirector {
                 unregistered += 1;
                 continue;
             }
-            self.vehicle_desires(v, frame.focus == Some(v.entity), tick, dt, &mut desires);
+            self.vehicle_desires(
+                v,
+                frame.focus == Some(v.entity),
+                frame.listener.pos,
+                tick,
+                dt,
+                &mut desires,
+            );
         }
         self.event_desires(frame.events, &by_id, tick, &mut desires);
         self.scrape_desires(&by_id, tick, &mut desires);
@@ -425,6 +435,7 @@ impl AudioDirector {
         &mut self,
         v: &VehicleAudioInput,
         focus: bool,
+        listener_pos: [f32; 3],
         tick: u64,
         dt: f32,
         out: &mut Vec<Desire>,
@@ -476,7 +487,24 @@ impl AudioDirector {
             } else {
                 1.0
             };
-            for (i, gain, pitch) in &eo.layers {
+            // Engine LOD (playtest #47): the focus car keeps every layer; other cars keep the
+            // crossfade pair near the listener and one layer farther out, and their second
+            // layer yields to every other car's main layer when voices run out.
+            let layers = if focus {
+                eo.layers.clone()
+            } else {
+                let d = [
+                    pos[0] - listener_pos[0],
+                    pos[1] - listener_pos[1],
+                    pos[2] - listener_pos[2],
+                ];
+                let near = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                    < cfg.engine.lod_two_layer_m * cfg.engine.lod_two_layer_m;
+                let kept = engine_lod(&eo.layers, if near { 2 } else { 1 }, &rt.engine_lod);
+                rt.engine_lod = kept.iter().map(|l| l.0).collect();
+                kept
+            };
+            for (rank, (i, gain, pitch)) in layers.iter().enumerate() {
                 let l = &car.layers.layers[*i];
                 let mut d = Desire::new(
                     VoiceId::new(e, slot::ENGINE_LAYER + l.index as u32),
@@ -491,6 +519,9 @@ impl AudioDirector {
                 d.freq_hz = eo.firing_hz;
                 d.load = eo.load;
                 d.synth = Some(engine_synth(&car.def.engine, l.root_rpm));
+                if !focus && rank > 0 {
+                    d.cull_scale = cfg.engine.second_layer_cull_scale;
+                }
                 out.push(d);
             }
             if eo.limiter > 1e-3 {

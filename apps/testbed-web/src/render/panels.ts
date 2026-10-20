@@ -12,7 +12,6 @@
 // Coordinates: chassis space (+X right, +Y forward, +Z up), metres. The parent VehicleView root
 // is already in that frame.
 import * as THREE from "three";
-import * as wasm from "../wasm/pkg/wp_wasm.js";
 import { sim } from "../wasm/sim";
 
 /** Floats per panel in wasm `panel_states()` (mirrors crates/wp_wasm PANEL_STRIDE). */
@@ -105,10 +104,8 @@ export function preloadCarMeshes(carIds: string[]): Promise<void> {
 
 /** Panel states of an entity, PANEL_STRIDE floats per panel (empty if the build or scenario has none). */
 export function panelStates(entity: number): Float32Array {
-  const fn = (wasm as unknown as { panel_states?: (e: number) => Float32Array }).panel_states;
-  if (typeof fn !== "function") return new Float32Array(0);
   try {
-    return fn(entity);
+    return sim.panelStates(entity);
   } catch {
     return new Float32Array(0);
   }
@@ -133,6 +130,16 @@ interface PartRT {
   maxDisp: number;
   /** Largest fold rise at the last update, m (tests). */
   maxFold: number;
+}
+
+const tmpSkin = new THREE.Vector3();
+const NO_HEIGHTS: { x: number; h: number }[] = [];
+
+/** Element-wise equality of two float arrays. */
+function sameFloats(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /** Rigid frame of a free panel: x' = R x + t. */
@@ -198,6 +205,9 @@ export function debrisCount(): number {
 
 /** All per-panel meshes of one vehicle. Empty (ready = false) until the mesh file loads. */
 export class PanelBody {
+  /** Re-skins done since the page loaded, all cars (perf checks: should not grow while nothing
+   * dents). */
+  static reskins = 0;
   readonly root = new THREE.Group();
   ready = false;
   /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
@@ -217,6 +227,9 @@ export class PanelBody {
   private readonly spawned = new Set<number>();
   private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
   private onReady: (() => void) | null = null;
+  /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
+  private skinnedNodes: Float32Array | null = null;
+  private readonly stateOf = new Map<number, number>();
   private disposed = false;
 
   constructor(
@@ -231,7 +244,10 @@ export class PanelBody {
       new THREE.MeshStandardMaterial({ flatShading: true, side: THREE.DoubleSide, ...o });
     this.mats = {
       paint: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
-      glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.38, metalness: 0.1, roughness: 0.1, depthWrite: false }),
+      // forceSinglePass: a transparent DoubleSide material is otherwise drawn twice per part
+      // (back faces, then front) and Three flips `side`, bumping the material version, so it
+      // re-resolved the shader program for every glass part every frame (browser perf pass).
+      glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.38, metalness: 0.1, roughness: 0.1, depthWrite: false, forceSinglePass: true }),
       trim: std({ color: 0x1b1b1d, roughness: 0.9 }),
       headlight,
       taillight,
@@ -338,7 +354,12 @@ export class PanelBody {
    */
   update(nodes: Float32Array, dt: number, worldVel?: THREE.Vector3): void {
     if (!this.ready) return;
-    this.states = panelStates(this.entity);
+    const states = panelStates(this.entity);
+    // Same nodes and panel states as the last re-skin: every vertex would come out the same.
+    if (nodes === this.skinnedNodes && sameFloats(states, this.states)) return;
+    this.skinnedNodes = nodes;
+    this.states = states;
+    PanelBody.reskins++;
     this.frames.clear();
     for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) {
       const region = this.states[k];
@@ -353,9 +374,10 @@ export class PanelBody {
       }
     }
     const rn = this.restNodes;
-    const tmp = new THREE.Vector3();
+    const tmp = tmpSkin;
     // Panel state per region index (absent = no panel there, i.e. fixed structure).
-    const stateOf = new Map<number, number>();
+    const stateOf = this.stateOf;
+    stateOf.clear();
     for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) stateOf.set(this.states[k], this.states[k + 1]);
     for (const p of this.parts) {
       if (p.hidden) continue;
@@ -364,7 +386,7 @@ export class PanelBody {
       const nv = rest.length / 3;
       // Lid fold: height per chord from its lost length (rigid frames keep lengths, so the
       // current nodes are fine for swinging lids too).
-      const heights = p.fold.map((c) => ({
+      const heights = p.fold.length === 0 ? NO_HEIGHTS : p.fold.map((c) => ({
         x: c.x,
         h: foldHeight(nodeDist(rn, rn, c.a, c.b), nodeDist(nodes, nodes, c.a, c.b)),
       }));

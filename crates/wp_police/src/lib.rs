@@ -41,7 +41,7 @@ pub mod time;
 pub mod tools;
 pub mod unit;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{
@@ -72,6 +72,12 @@ use unit::UnitBody;
 
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
+
+/// Eye (or sightline target) height for a vehicle whose chassis is at height `z`, m:
+/// [`EYE_HEIGHT_M`] on flat ground, following the car up on terrain.
+pub(crate) fn eye_height_at(z: f32) -> f32 {
+    EYE_HEIGHT_M + (z - 1.0).max(0.0)
+}
 
 /// What the police system sees of a racer each tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -328,6 +334,9 @@ pub struct PoliceSystem {
     /// Racer–unit contact episodes (assault detection).
     pub(crate) contact_episodes: BTreeMap<(UnitId, EntityId), dispatch::ContactEpisode>,
     pub(crate) pending: Vec<PoliceEvent>,
+    /// Racers whose driver dropped out (disconnect grace, `wp_net`): their heat, wanted level
+    /// and pursuit are frozen until released or captured ([`PoliceSystem::set_racer_held`]).
+    pub(crate) held: BTreeSet<EntityId>,
     /// Vehicles reported by `wp_sim` ([`PoliceSystem::set_obstacles`]).
     pub(crate) ext_obstacles: Vec<avoid::Obstacle>,
     /// Whether `wp_sim` reports obstacles (then racers and bound units come from that list).
@@ -432,6 +441,7 @@ impl PoliceSystem {
             contact_cooldown: BTreeMap::new(),
             contact_episodes: BTreeMap::new(),
             pending: Vec::new(),
+            held: BTreeSet::new(),
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
             obstacles: Vec::new(),
@@ -551,9 +561,11 @@ impl PoliceSystem {
         b: [f32; 2],
         bz: f32,
     ) -> bool {
-        let eye = |z: f32| EYE_HEIGHT_M + (z - 1.0).max(0.0);
         self.graph.line_of_sight(a, b)
-            && world.line_of_sight([a[0], a[1], eye(az)], [b[0], b[1], eye(bz)])
+            && world.line_of_sight(
+                [a[0], a[1], eye_height_at(az)],
+                [b[0], b[1], eye_height_at(bz)],
+            )
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
@@ -615,6 +627,52 @@ impl PoliceSystem {
     /// Current wanted level of a racer.
     pub fn wanted_level(&self, racer: EntityId) -> WantedLevel {
         self.racers.get(&racer).map(|r| r.level).unwrap_or_default()
+    }
+
+    /// True when a racer is wanted (level above None) or in an active pursuit (including
+    /// the search phase). Used by `wp_net` to decide whether a disconnect gets the capture
+    /// grace.
+    pub fn is_wanted_or_pursued(&self, racer: EntityId) -> bool {
+        self.racers
+            .get(&racer)
+            .is_some_and(|r| r.level > WantedLevel::None || r.pursued())
+    }
+
+    /// Freeze (`held = true`) or release a racer's police state. While held, the racer's
+    /// heat, wanted level, bounty and pursuit status do not change: no escape timer, no
+    /// safehouse dwell, no capture rule, no heat decay, no new pursuit. Units keep driving.
+    /// `wp_net` holds a wanted racer whose player disconnected, so a reconnect resumes the
+    /// same pursuit and sitting out the escape timer offline is not an escape.
+    pub fn set_racer_held(&mut self, racer: EntityId, held: bool) {
+        if held {
+            self.held.insert(racer);
+        } else {
+            self.held.remove(&racer);
+        }
+    }
+
+    /// True while [`PoliceSystem::set_racer_held`] holds a racer.
+    pub fn is_racer_held(&self, racer: EntityId) -> bool {
+        self.held.contains(&racer)
+    }
+
+    /// End a wanted racer's pursuit as [`PursuitOutcome::Captured`] because its driver
+    /// abandoned it (disconnect grace ran out, or the player quit). The capturer is the
+    /// nearest in-service ground unit assigned to the racer, `None` if no unit was on it;
+    /// the other assigned units are assists. Emits `PursuitEnded` and the level reset like a
+    /// normal capture (drained on the next [`PoliceSystem::step`]) and releases the hold.
+    /// Returns the wanted level at the capture and the capturer, or `None` (nothing done)
+    /// when the racer is unknown or neither wanted nor pursued.
+    pub fn capture_abandoned(&mut self, racer: EntityId) -> Option<(WantedLevel, Option<UnitId>)> {
+        if !self.is_wanted_or_pursued(racer) {
+            return None;
+        }
+        self.held.remove(&racer);
+        let level = self.racers[&racer].level;
+        let credit = self.pursuing_credit(racer);
+        let capturer = credit.0;
+        self.end_pursuit_credited(racer, PursuitOutcome::Captured, credit);
+        Some((level, capturer))
     }
 
     /// Full police record of a racer.
@@ -1235,5 +1293,80 @@ mod tests {
         p.step(&W, &[r], &ev, wp_contracts::PHYSICS_DT, &mut out);
         assert!(p.racer(EntityId(1)).unwrap().heat > 0.0);
         assert!(p.units().is_empty());
+    }
+
+    /// Flat, empty, always-visible world (no city).
+    struct OpenWorld;
+    impl WorldQuery for OpenWorld {
+        fn surface_at(&self, _p: [f32; 3]) -> wp_contracts::SurfaceType {
+            wp_contracts::SurfaceType::Asphalt
+        }
+        fn speed_limit_at(&self, _p: [f32; 3]) -> Option<f32> {
+            None
+        }
+        fn signal_state_ahead(
+            &self,
+            _p: [f32; 3],
+            _h: [f32; 3],
+        ) -> Option<wp_contracts::SignalState> {
+            None
+        }
+        fn time_of_day(&self) -> wp_contracts::TimeOfDay {
+            wp_contracts::TimeOfDay::from_hours(12.0)
+        }
+        fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
+            true
+        }
+    }
+
+    /// B05 hooks for `wp_net`: a held racer's heat does not decay; `capture_abandoned` ends
+    /// it as `Captured` with no capturer when no unit is on it, and clears the heat.
+    #[test]
+    fn held_racer_is_frozen_and_capture_abandoned_ends_as_captured() {
+        let racer = EntityId(1);
+        let view = RacerView {
+            entity: racer,
+            pos: [0.0; 3],
+            vel: [0.0; 3],
+        };
+        let mut p = PoliceSystem::new();
+        let mut out = Vec::new();
+        p.step(&OpenWorld, &[view], &[], wp_contracts::PHYSICS_DT, &mut out);
+        assert!(p.capture_abandoned(racer).is_none(), "not wanted: nothing");
+        p.set_heat(racer, 55.0);
+        assert!(p.is_wanted_or_pursued(racer));
+        let level = p.wanted_level(racer);
+        let heat = p.racer(racer).unwrap().heat;
+
+        p.set_racer_held(racer, true);
+        for _ in 0..240 * 30 {
+            p.step(&OpenWorld, &[view], &[], wp_contracts::PHYSICS_DT, &mut out);
+        }
+        assert_eq!(p.racer(racer).unwrap().heat, heat, "no decay while held");
+
+        // Released, unseen heat decays again.
+        p.set_racer_held(racer, false);
+        for _ in 0..240 * 5 {
+            p.step(&OpenWorld, &[view], &[], wp_contracts::PHYSICS_DT, &mut out);
+        }
+        assert!(p.racer(racer).unwrap().heat < heat, "decays when released");
+
+        p.set_racer_held(racer, true);
+        let level_now = p.wanted_level(racer);
+        assert!(level_now <= level);
+        out.clear();
+        assert_eq!(p.capture_abandoned(racer), Some((level_now, None)));
+        assert!(!p.is_racer_held(racer));
+        p.step(&OpenWorld, &[view], &[], wp_contracts::PHYSICS_DT, &mut out);
+        assert!(out.iter().any(|e| matches!(
+            e,
+            SimEvent::Police(PoliceEvent::PursuitEnded {
+                racer: r,
+                outcome: PursuitOutcome::Captured,
+                capturer: None,
+                ..
+            }) if *r == racer
+        )));
+        assert_eq!(p.wanted_level(racer), WantedLevel::None);
     }
 }

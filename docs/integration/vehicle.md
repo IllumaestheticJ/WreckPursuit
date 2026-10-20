@@ -683,3 +683,29 @@ wasm, 45/45), `npm run wasm && npm run e2e` (all 29 checks; the first run lost t
   preset now gets a smaller angle at speed (it already got 25–100 % before). AI/traffic/police
   set `AssistProfile::ai()` and are unaffected by the lock change (the ESC change applies).
 - H (cars): no data change needed; numbers in `docs/integration/cars.md`.
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: cars too bouncy / light, launched too easily
+Base: `origin/lead/round12` (not main; it has your diffs, the handling-balance helper's understeer
+tuning, and the sidewalk-collider fix). Owner: "the car is currently too bouncy/light and gets
+launched too easily." Related geometry bugs are being fixed elsewhere (junction stop-line step,
+row 51; sidewalk back-edge drop, row 52, both on `lead/fix-junction-holes`), so separate the
+vehicle side from the road side.
+1. Measure on `lead/round12`, for 4 cars (sports, sedan, muscle, police cruiser): body
+   bounce after a 10 cm kerb at 30/60 km/h (overshoots, settle time), heave/pitch natural
+   frequencies and damping ratios, airtime and peak height over a 3 % crest at 120 km/h,
+   and the vertical/roll velocity a car gets from a side impact or a kerb strike at speed.
+   Compare to real-car targets (ride ~1.2–1.8 Hz, damping ratio ~0.3–0.5 bump / higher
+   rebound; a kerb strike should not launch a car off the ground at 60 km/h).
+2. Fix the causes, not just the symptom: damper bump/rebound split and rebound strength,
+   bump stops (progressive, not a hard spring), tyre vertical stiffness/damping, the chassis
+   mass/inertia and CoG height used by Rapier (check the inertia tensor isn't too small, which
+   makes cars flip/spin light), collision restitution of chassis vs static world (should be
+   ~0), contact softness for kerbs, and clamping of contact impulses' vertical component
+   from thin kerb/step edges (no "launch ramps" from a 10–15 cm kerb).
+3. ~~Arcade-only anti-launch assist~~ — withdrawn (owner rule 2026-10-20, CLAUDE.md): physics is
+   identical in Arcade and Simulation; only damage differs. Every fix applies to both. Also audit
+   wp_vehicle / wp_sim for anything keyed on DamageMode that changes physics and remove it.
+4. Scenarios with expected ranges (kerb strike, crest jump, settle time); goldens in a
+   [bless] commit with the reason. Coordinate with the handling-balance numbers so understeer
+   doesn't regress.
+

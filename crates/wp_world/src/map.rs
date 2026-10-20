@@ -188,6 +188,11 @@ pub struct CityMap {
     ix_grid: Grid,
     zone_grid: Grid,
     building_grid: Grid,
+    /// Covered spans (tunnels) ready for queries.
+    pub covers: crate::covered::CoverIndex,
+    /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
+    /// for tunnel scenarios: the geometry stays, only sightlines ignore it).
+    pub covered_los: bool,
 }
 
 impl CityMap {
@@ -354,7 +359,10 @@ impl CityMap {
             ix_grid,
             zone_grid,
             building_grid,
+            covers: crate::covered::CoverIndex::default(),
+            covered_los: true,
         };
+        map.covers = crate::covered::CoverIndex::new(&map.net.covered);
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
             let s = &map.segs[i];
@@ -673,8 +681,13 @@ impl CityMap {
     /// Buildings are extruded footprints from the ground to their height; the segment is
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
-    /// every 8 m; ends excluded). Roads, parked cars and traffic do not occlude.
+    /// every 8 m; ends excluded). Covered spans (tunnels) block sightlines in and out of them
+    /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off. Roads, parked cars and
+    /// traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
+        if self.covered_los && self.covers.blocks(a, b) {
+            return false;
+        }
         if let Some(t) = &self.net.terrain {
             let len = geom::dist(geom::xy(a), geom::xy(b));
             let n = (len / 8.0).ceil() as u32;
@@ -702,6 +715,14 @@ impl CityMap {
             let bld = &self.net.buildings[i as usize];
             bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.roof_z())
         })
+    }
+}
+
+impl CityMap {
+    /// Index into [`RoadNetwork::covered`] of the tunnel / covered road containing `p`, if any
+    /// (independent of [`CityMap::covered_los`]).
+    pub fn covered_at(&self, p: V3) -> Option<usize> {
+        self.covers.covered_at(p)
     }
 }
 

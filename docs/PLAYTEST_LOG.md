@@ -121,6 +121,16 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 44 | Police spawn too far away; spawn them in response to reckless-driving calls | E (police): dispatch-driven spawning out of sight, 10–25 s response | dispatched |
 | 45 | Still falling into sidewalks (on the round-12 preview) | helper `lead/fix-sidewalk-fall` (merged into `lead/round12` 2026-10-20, after the preview was built) | fixed on `lead/round12`; next preview / link |
 | 46 | Intersections still have holes in them (Port Vesper v2) | helper `lead/fix-junction-holes` (wp_world surface junction discs / bend connectors, greybox + colliders) | dispatched |
+| 47 | Some cars are missing sounds (round-12 preview) | J (audio): find which cars/voices are silent; suspect the lead's J + J2 merge of `voices.ts` (resolve() now runs before the engine-instrument check) and per-car pack mapping | dispatched |
+| 48 | Police cars are too fragile | B (damage) + H (police package): Arcade wreck thresholds, police ≥ player sports car | dispatched |
+| 49 | Cars in general are too fragile in Arcade | B (damage): retune `data/modes/arcade.toml` to "punishing but survivable" | dispatched |
+| 50 | Hitting invisible objects (wrecks on an empty road) | lead: parked-car and cone props are physical but never drawn → helper `lead/draw-props` | dispatched |
+| 51 | The painted stop lines at traffic lights make the car jump and crash into the light | helper `lead/fix-junction-holes` (step in the collision surface where the lane meets the junction disc) | dispatched |
+| 52 | The sidewalk should be at the same height as the base of the buildings | helper `lead/fix-junction-holes` (building base meets the sidewalk top along frontages; plinths on slopes) | dispatched |
+| 53 | Hood doesn't crumple enough | R (panels): stronger visual buckling (fold lines, tenting, latch kink), visual only | dispatched |
+| 54 | Cars are too bouncy / light and get launched too easily | A (vehicle): damping, bump stops, inertia, restitution, kerb-strike impulses; arcade anti-launch assist | dispatched |
+| 55 | Police don't respond / spawn close enough, or get lost / damaged on the way | E (police): per-unit response log (spawn distance, route, failure cause), re-route / respawn out of sight; durability = B row 48 | dispatched (with row 44) |
+| 56 | Semi-auto (and auto): holding the handbrake also opens the clutch so the rear wheels lock | A (vehicle): auto-clutch decouples while the handbrake is held, smooth re-engage, no stall; both modes | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the

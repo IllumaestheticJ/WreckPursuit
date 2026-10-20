@@ -8,7 +8,8 @@
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
-// within 300 m), and (optionally) perf at 1/8/24 cars.
+// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
+// (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +22,7 @@ const root = join(here, "..");
 const PORT = 5199;
 const URL = `http://localhost:${PORT}/`;
 const shots = process.env.SHOTS;
-if (shots) mkdirSync(shots, { recursive: true });
+if (shots) for (const d of ["", "signals", "tunnels"]) mkdirSync(join(shots, d), { recursive: true });
 
 const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
 const stopServer = () => server.kill("SIGTERM");
@@ -255,10 +256,12 @@ for (const [hour, label] of [
     drawn: window.__wp.scene.signals.drawnStates(),
     visible: window.__wp.scene.signals.group.visible,
   }));
+  // Only heads near the camera are drawn (SIGNAL_DRAW_M, browser perf pass); 255 = not drawn.
+  const shown = drawn.drawn.filter((c) => c !== 255).length;
   const lit = drawn.drawn.filter((c) => c >= 1 && c <= 3).length;
   check(
-    framed.n > 8 && drawn.visible && lit === framed.n,
-    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${framed.n} heads drawn, ${lit} lit, framed head ${framed.head}`,
+    shown > 8 && drawn.visible && lit === shown && drawn.drawn[framed.head] !== 255,
+    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${shown} of ${framed.n} heads drawn (near the camera), ${lit} lit, framed head ${framed.head}`,
   );
 }
 {
@@ -268,7 +271,10 @@ for (const [hour, label] of [
       (b) => {
         const now = window.__wp.scene.signals.drawnStates();
         const sim = Array.from(window.__wp.sim.signalStates());
-        return now.some((c, i) => c !== b[i]) && now.every((c, i) => c === sim[i]) ? now.filter((c, i) => c !== b[i]).length : false;
+        const drawn = (c, i) => c !== 255 && b[i] !== 255;
+        return now.some((c, i) => drawn(c, i) && c !== b[i]) && now.every((c, i) => c === 255 || c === sim[i])
+          ? now.filter((c, i) => drawn(c, i) && c !== b[i]).length
+          : false;
       },
       before,
       // Port Vesper under SwiftShader runs well below real time; a full signal cycle needs
@@ -304,6 +310,35 @@ check(
   v2.id === "vesper_v2" && v2.z > 4 && v2.z < 30,
   `city free drive in ${v2.id}: greybox loaded, car at (${v2.x.toFixed(0)}, ${v2.y.toFixed(0)}, ${v2.z.toFixed(1)}) m`,
 );
+// Tunnels (backlog B04): the Hollins Tunnel and Founders Cut are in the greybox — walls, roof
+// deck and emissive ceiling lights — and draw from the portal and inside the tube.
+{
+  const tunnel = await page.evaluate(() => {
+    const out = { tunnel_wall: 0, tunnel_roof: 0, tunnel_light: 0, emissive: 0 };
+    window.__wp.scene.cities.get("vesper_v2").traverse((o) => {
+      const name = o.material?.name;
+      if (name in out) {
+        out[name] += o.geometry.attributes.position.count;
+        if (name === "tunnel_light") out.emissive = Math.max(out.emissive, o.material.emissive?.r ?? 0);
+      }
+    });
+    return out;
+  });
+  check(
+    tunnel.tunnel_wall > 100 && tunnel.tunnel_roof > 100 && tunnel.tunnel_light > 100 && tunnel.emissive > 0.5,
+    `tunnels in the greybox: ${tunnel.tunnel_wall} wall, ${tunnel.tunnel_roof} roof, ${tunnel.tunnel_light} light vertices (lights emissive ${tunnel.emissive.toFixed(2)})`,
+  );
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = "hidden"));
+  for (const [name, from, to] of [
+    ["tunnels/founders_cut_north_portal.png", [409, 1335, 27], [416, 1245, 18]],
+    ["tunnels/hollins_tunnel_inside.png", [-850, 1388, 51.5], [-1000, 1396, 56]],
+  ]) {
+    await page.evaluate(([f, t]) => window.__wp.lookFrom(f, t), [from, to]);
+    await page.waitForTimeout(1500);
+    await shot(name);
+  }
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
+}
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 // Waits for the state the check needs (no fixed sleep): under SwiftShader the city runs well below
 // real time, so a wall-clock wait is either too short (flaky) or wastes minutes. Violations are
@@ -610,7 +645,7 @@ check(
   });
   await shot("career_garage_after_bust.png");
   check(
-    parked && busted && stored.version === 1 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
+    parked && busted && stored.version === 2 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
     `career: busted → garage, saved (v${stored.version}): captures ${stored.captures}, car ${JSON.stringify(stored.location)}`,
   );
 
@@ -713,5 +748,24 @@ const wx = spawnSync("node", [join(here, "weather.mjs")], {
 });
 process.stdout.write(wx.stdout);
 check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
+
+// 7. Browser perf (browser perf pass): city chase + rainy-night chase at 1280×720 must keep
+// near real time and stay within generous draw-call / triangle / allocation budgets
+// (e2e/perf_check.mjs; PERF=0 skips it).
+if (process.env.PERF !== "0") {
+  const perf = spawnSync("node", [join(here, "perf_check.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+  process.stdout.write(perf.stdout);
+  check(perf.status === 0, `perf checks (e2e/perf_check.mjs)${perf.status === 0 ? "" : ": " + (perf.stderr || "").trim().split("\n").pop()}`);
+}
+// 8. Gamepad + rebindable controls (e2e/gamepad.mjs, its own server and browser): fake pad
+// drives and steers, assists follow the device, disconnect releases, rebind survives a reload,
+// input latency one frame.
+const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, GAMEPAD_SHOTS: shots ?? "" },
+});
+process.stdout.write(gp.stdout);
+check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);
