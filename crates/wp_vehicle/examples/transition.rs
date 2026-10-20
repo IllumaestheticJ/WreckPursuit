@@ -531,12 +531,34 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
         for cfg in &cfgs {
             apply(cfg);
             car_lab::set_override(Some(t));
+            // V2STEER=1: also vary the VR steering of VR configurations (around the config's).
+            let steer = if std::env::var("V2STEER").is_ok() && cfg.plain.velocity_relative && i > 0
+            {
+                let b = plain::active().unwrap();
+                let mut pick = |cur: f32, lo: f32, hi: f32| {
+                    let r = rng.range(lo, hi);
+                    (cur + (r - cur) * spread).clamp(lo, hi)
+                };
+                let p = PlainSteer {
+                    align_gain: pick(b.align_gain, 0.2, 1.0),
+                    align_from_deg: pick(b.align_from_deg, 2.0, 15.0),
+                    align_full_deg: pick(b.align_full_deg, 8.0, 30.0),
+                    t_align_s: pick(b.t_align_s, 0.1, 0.5),
+                    slide_key_gain: pick(b.slide_key_gain, 0.0, 1.0),
+                    ..b
+                };
+                plain::set_override(Some(p));
+                Some(p)
+            } else {
+                None
+            };
             let sc = v2_score(cars);
             println!(
                 "{}",
                 serde_json::json!({
                     "config": cfg.name, "held": sc.held, "caught": sc.caught,
                     "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
+                    "steer": steer,
                 })
             );
         }
