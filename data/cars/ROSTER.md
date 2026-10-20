@@ -21,6 +21,10 @@
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 11.6 | 176 | 0.90 | 388 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
 | Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.1 | 183 | 0.83 | 401 | 4 | 21,000 | street |
+| Marten 2.0 | `marten_20` | Compact | FWD | 1114 | 112 | 101 | 7.8 | 210 | 0.91 | 477 | 2 | 9,500 | street |
+| Brigand 400 | `brigand_400` | Muscle | RWD | 1990 | 176 | 88 | 9.1 | 202 | 0.69 | 403 | 4 | 23,500 | vintage_bias |
+| Talus 2.0T | `talus_20t` | Sport | AWD 45/55 | 1386 | 206 | 149 | 5.3 | 246 | 0.99 | 618 | 3 | 38,000 | sport |
+| Tumbril 2.0 | `tumbril_20` | Truck | FWD | 1845 | 85 | 46 | 15.6 | 147 | 0.78 | 315 | 3 | 20,000 | street |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

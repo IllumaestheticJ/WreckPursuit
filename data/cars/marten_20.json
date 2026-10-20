@@ -1,0 +1,158 @@
+{
+  "id": "marten_20",
+  "display_name": "Marten 2.0",
+  "class": "Compact",
+  "analog_of": "early-90s European FF hot hatch, 2.0 L 16-valve naturally aspirated I4",
+  "body_size_m": [1.7, 4.05, 1.4],
+  "mass_kg": 1114.5,
+  "front_weight_frac": 0.62,
+  "wheelbase_m": 2.47,
+  "track_front_m": 1.43,
+  "track_rear_m": 1.42,
+  "cg_height_m": 0.49,
+  "inertia_kgm2": [360.0, 1530.0, 1650.0],
+  "drag_cd_a_m2": 0.68,
+  "lift_front": 0.1,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 120],
+      [1500, 135],
+      [2000, 148],
+      [2500, 158],
+      [3000, 166],
+      [3500, 172],
+      [4000, 177],
+      [4600, 180],
+      [5000, 179],
+      [5500, 177],
+      [6000, 175],
+      [6500, 165],
+      [6800, 152],
+      [7100, 135]
+    ],
+    "idle_rpm": 850.0,
+    "redline_rpm": 6800.0,
+    "rev_limit_rpm": 7100.0,
+    "inertia_kgm2": 0.12,
+    "engine_brake_nm": 22.0
+  },
+  "drivetrain": {
+    "layout": "Fwd",
+    "gear_ratios": [3.45, 2.13, 1.48, 1.12, 0.89],
+    "final_drive": 3.94,
+    "reverse_ratio": 3.39,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 250.0,
+    "shift_time_s": 0.25
+  },
+  "wheels": [
+    {
+      "position_m": [-0.715, 1.235, 0.279],
+      "radius_m": 0.279,
+      "width_m": 0.195,
+      "mass_kg": 18.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.582,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [0.715, 1.235, 0.279],
+      "radius_m": 0.279,
+      "width_m": 0.195,
+      "mass_kg": 18.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.582,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [-0.71, -1.235, 0.279],
+      "radius_m": 0.279,
+      "width_m": 0.195,
+      "mass_kg": 16.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.71, -1.235, 0.279],
+      "radius_m": 0.279,
+      "width_m": 0.195,
+      "mass_kg": 16.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 33100.0,
+      "damper_bump_ns_per_m": 1980.0,
+      "damper_rebound_ns_per_m": 2970.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 2900.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 33100.0,
+      "damper_bump_ns_per_m": 1980.0,
+      "damper_rebound_ns_per_m": 2970.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 2900.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 23700.0,
+      "damper_bump_ns_per_m": 1290.0,
+      "damper_rebound_ns_per_m": 1940.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 12300.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 23700.0,
+      "damper_bump_ns_per_m": 1290.0,
+      "damper_rebound_ns_per_m": 1940.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 12300.0,
+      "bump_stop_n_per_m": 150000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2000.0,
+    "max_torque_rear_nm": 670.0,
+    "bias_front": 0.602,
+    "handbrake_rear_nm": 610.0
+  },
+  "steering": {
+    "ratio": 15.5,
+    "rack_speed_rad_per_s": 1.5,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "marten_20",
+  "base_price": 9500,
+  "durability_class": 2,
+  "fuel_capacity_l": 55.0
+}
