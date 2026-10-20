@@ -162,10 +162,17 @@ skips that one field for the same reason. e2e: `npm run e2e:controls`.
 | `just parity` (8 cars, ~250 manoeuvres) | cloud container, 1 core | 7.3 s release | — | < 2 min |
 
 ## Known gaps
-- `e2e/run.mjs` → `perf_check.mjs` failed in the helper's run (real-time factor 0.6–0.78, needs ≥ 0.9),
-  with the machine at load ≈ 17 on 4 cores while other builds ran. It is unconfirmed whether
-  the per-frame shaping costs anything measurable (a few small objects in `readInput`).
-  Re-run perf on a quiet machine before merging to main.
+- **Gate (2026-10-20, `lead/wf-parity` @ merge of the UI work + `lead/round12`):** fmt ok; clippy
+  `-D warnings` clean except `wp_audio/src/siren.rs:437` (digit grouping, already on
+  `lead/round12`, not touched here); wasm build ok; tsc ok (both apps); ui-kit vitest 96/96;
+  e2e `controls_settings`, `menu`, `presets`, `gamepad` pass. Red, and the same on `lead/round12`:
+  - `cargo test --workspace`: simcli `city_siren_traffic_no_siren` (known, D) and five
+    `damage_arcade_*` golden hash mismatches. This branch changes no simulation code.
+  - `e2e/run.mjs` → `perf_check`: steady allocation 620–730 KB/frame here against 670–690 KB
+    on `lead/round12`, run on the same machine (budget ≤ 200). The real-time factor and long
+    frames are borderline on software GL.
+  - `reset.mjs` failed once inside the full run and passed twice on its own (flaky under
+    load).
 - TCS Half isn't measurable yet (WP-1).
 - The countersteer drift row uses a script equal to Drift Lab C's "Naive" driver, not the lab's
   own code (not merged).
