@@ -811,3 +811,78 @@ identically on `lead/round12` without my change — simcli `goldens_match` and
 Determinism: both `city_blocked_parked_player_*` pass `simcli determinism`. No new RNG draws,
 f32 only. **Contract change requests:** none.
 
+## Lead helper: sidewalk fix (branch `lead/fix-sidewalk-fall`, 2026-10-19)
+Playtest #20 ("I can fall into the sidewalk"). Built on `main`. D: the changes in your crate
+are confined to `surface.rs` (listed below); please merge `lead/fix-sidewalk-fall` into
+`ws/world` when convenient.
+**What was wrong** (reproduced with `tools/city-import/tests/surface_match.rs`: greybox vs
+`wp_sim` colliders, ≈ 550 k / 615 k downward rays)
+1. **No sidewalk or kerb colliders at all.** The greybox draws 3 m sidewalks 0.15 m above
+   the road edge; physics had only the road ribbon, then the terrain (Port Vesper: carved
+   12 cm *below* the road → a wheel sank 0.27 m into every sidewalk) or the slab (grid:
+   0.15 m). On fills and deck approaches, where the terrain is natural, the visual sidewalk
+   floated over ground up to 21 m below: driving onto it was a fall through the world.
+   294 k (Vesper) / 246 k (grid) samples disagreed.
+2. **Holes at every junction mouth.** The paved junction disc had the junction's
+   `radius_m` (e.g. 9 m) while the trimmed road ribbons' corners sit at `sqrt(d² + w²)`
+   (11.4 m): an unpaved crescent up to ~1.7 m deep at each corner of each mouth (Vesper:
+   wheels dropped 12–22 cm onto terrain while turning; grid: grass drawn there). The disc
+   16-gon also had its corners (not edges) on the circle.
+3. **Pits at junction corners and bends.** No sidewalk between the sidewalk ends of two
+   streets (a 15 / 27 cm deep notch whose far side is the next sidewalk's edge, which stopped
+   cars cutting the corner dead) and gaps up to 14 m on the outside of Vesper's bends.
+4. Sidewalks ran onto the crossing road at tight / skewed corners (3.7 k junction-area
+   samples): a 15 cm step inside the junction.
+**Fix**
+- `wp_world::surface` (one geometry for physics and greybox): `sidewalk_mesh` (strips +
+  kerb faces along every non-highway edge lane, trimmed off pavement in 0.5 m cells; corner,
+  T and bend fills at kerb height with kerb faces), `lane_bank` / `lane_sidewalks` (moved from
+  the greybox), `junction_polygon` (edges touch the circle), `junction_paved_radii` (reach
+  every ribbon corner; `radius_m` and junction logic untouched), `SIDEWALK_W_M` = 3.0,
+  `KERB_H_M` = 0.15, `TriMesh::{quad, strip_vertical, append}`, unit tests
+  `sidewalks_stay_off_the_roadway` (every lane and turning path, both cities) and
+  `kerb_faces_and_tops_meet_and_face_out`.
+- `wp_sim`: `set_city_ground` runs for every city and adds the sidewalk mesh (256 m tiles,
+  `SIDEWALK_GROUP`); a car upright on its wheels has its chassis ignore that group (the box
+  floor is at kerb height and snagged on internal triangle edges while straddling a kerb;
+  wheels do the climbing); `place_on_ground` lifts onto a sidewalk top; `static_ground_z`.
+- `tools/city-import`: the greybox draws `sidewalk_mesh` and `junction_polygon` (vertices
+  deduplicated); `data/city/*.greybox.{glb,b64.txt}` regenerated (grid 0.47 → 0.85 MB, Vesper
+  6.81 → 7.04 MB).
+**Checks (this branch)**
+| Check | Before | After |
+| Sweep, visual vs physics (`surface_match`, 3 cm; kerb line 16 cm) | 294 k / 246 k of 555 k / 616 k off | 0 / 0 |
+| 96 kerb mounts, 15 / 40 km/h × 2 angles, every Vesper district + fill/deck approaches + grid (`wp_sim/tests/sidewalk.rs`) — lowest tire vs visual surface | −0.34 m (Vesper), −0.15 m (grid) | −0.023 m, −0.006 m; never airborne; all end on the sidewalk |
+| simcli `city/sidewalk_mount_15kmh`, `_40kmh` (mount + drive along; `min_z_m`, `max_airborne_s`) | FAIL: walkers at 2.38 / 2.38 (top 2.65) | PASS: 2.65, never airborne |
+| Roadway points under a sidewalk (lanes + turning paths) | — | 0 (both cities) |
+| All 47 scenarios' expectations | pass | pass (same pending set) |
+| `cargo test --workspace` | — | 791 passed, 0 failed |
+| fmt, clippy `-D warnings`, wasm32 build of `wp_wasm`, `lint-determinism` | — | clean (0 errors) |
+| Native vs wasm (`tools/wasm-determinism/compare.sh`, all 47 scenarios) | — | identical |
+| `tsc --noEmit` | — | clean |
+| `web-e2e` | `main`: 2 of 4 runs pass | 0 of 4 pass: the same 3 checks fail on `main` (below) |
+**Goldens:** re-blessed in a `[bless]` commit — 17 city scenarios (grid and Vesper: new
+sidewalk colliders, bigger junction discs, chassis filter) + the 2 new ones; all non-city
+goldens unchanged.
+**Perf (release, cloud container)**: city chase frame (`city_frame_cost`, all systems)
+1.01–1.25 ms vs 1.03–1.12 ms on `main` (noise); city build 280–310 ms vs 215–230 ms
+(`sidewalk_mesh` ≈ 46 ms + the extra trimesh BVH).
+**Known gaps / follow-ups (D)**
+- The render terrain is the 10 m min-filtered mesh: on steep cuts and hillsides physics
+  terrain is up to 10.6 m *above* what is drawn (an invisible slope, never a hole; sweep
+  `Terrain` range). Drawing the fine heightfield near roads would fix it.
+- `CityMap::ground_height` / `MapGround` (un-embodied physical traffic) don't know the
+  sidewalks.
+- Corner fills/trims follow pavement in 0.5 m steps (jagged kerb at corners; a sidewalk edge
+  can overhang the outer rim of a junction disc by ≤ 0.35 m, never a lane).
+- An upright car's chassis passes through kerbs (no kerb tripping); the wheels see them.
+- A Parry heightfield ray exactly on certain grid lines (e.g. y = 45.000) misses the terrain
+  (measure zero; the sweep jitters its grid).
+- **`web-e2e` flake, also on `main` (lead / C / J):** "capture ends the run", "Repair &
+  continue" and "no page errors" (`NotSupportedError: setValueCurveAtTime … overlaps`,
+  `apps/testbed-web/src/audio/synth.ts` siren scheduler) fail together in about half the
+  runs on `main` and in all 4 runs on this branch. Instrumented runs of both show the same
+  scene tick for tick: the patrol car stops ≈ 7 m short of the parked player (headless
+  Chromium runs the sim at ≈ 60 ticks/s), no arrest within the 240 s wait, and the siren keeps
+  scheduling until the audio error. Natively (`Session`, Port Vesper chase) the same setup
+  arrests in 9.6 s on this branch. Not fixed here (outside this change).
