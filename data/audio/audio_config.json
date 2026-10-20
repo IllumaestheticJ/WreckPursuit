@@ -152,7 +152,7 @@
         "occluded_gain": 0.35,
         "occluded_lowpass_hz": 900.0,
         "occlusion_tau_s": 0.2,
-        "interior_radius_m": 2.2,
+        "interior_radius_m": 0.7,
         "interior_gain": 0.5,
         "interior_lowpass_hz": 1500.0,
         "probe_max_m": 40.0,

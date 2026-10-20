@@ -59,7 +59,8 @@ pub struct SpaceConfig {
     pub occluded_lowpass_hz: f32,
     /// Smoothing time constant of occlusion changes, s.
     pub occlusion_tau_s: f32,
-    /// Camera within this distance of the focus car's origin = interior camera, m.
+    /// Camera within this horizontal distance of the focus car's light bar = interior camera, m
+    /// (cockpit eye ≈ 0.4 m; the hood camera ≈ 0.9 m is outside and stays unmuffled).
     pub interior_radius_m: f32,
     /// Gain multiplier of the own siren heard from inside.
     pub interior_gain: f32,
@@ -98,7 +99,7 @@ impl Default for SpaceConfig {
             occluded_gain: 0.35,
             occluded_lowpass_hz: 900.0,
             occlusion_tau_s: 0.2,
-            interior_radius_m: 2.2,
+            interior_radius_m: 0.7,
             interior_gain: 0.5,
             interior_lowpass_hz: 1500.0,
             probe_max_m: 40.0,
@@ -260,7 +261,10 @@ impl SpaceState {
         // Right = forward × up (+Z up, right-handed).
         let right = [flat[1], -flat[0], 0.0];
         let left = [-right[0], -right[1], 0.0];
-        if self.frames % cfg.probe_every_frames.max(1) as u64 == 0 {
+        if self
+            .frames
+            .is_multiple_of(cfg.probe_every_frames.max(1) as u64)
+        {
             self.walls = [
                 probe(q, lp, left, cfg.probe_max_m, cfg.probe_steps),
                 probe(q, lp, right, cfg.probe_max_m, cfg.probe_steps),
@@ -567,6 +571,9 @@ mod tests {
         assert!(f.voices[0].interior);
         assert!(f.voices[0].lowpass_hz <= cfg.interior_lowpass_hz);
         assert!((f.voices[0].gain - cfg.interior_gain).abs() < 1e-6);
+        // Hood camera (≈ 0.9 m ahead of the origin, above the hood): outside, not muffled.
+        let f = st.update(&cfg, &listener([0.0, 0.9, 1.6]), &s, Some(7), 2, &q);
+        assert!(!f.voices[0].interior);
         // Same position but not the focus car: not interior.
         let f = st.update(&cfg, &listener([0.0, 0.0, 0.9]), &s, Some(8), 4, &q);
         assert!(!f.voices[0].interior);

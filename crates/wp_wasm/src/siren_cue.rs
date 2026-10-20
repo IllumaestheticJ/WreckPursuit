@@ -128,4 +128,67 @@ mod tests {
         wrecked.wrecked = true;
         assert_eq!(unit_cue(&wrecked, &near), SirenCue::Off);
     }
+
+    /// The real city answers the siren's questions: listeners in streets find facades on
+    /// both sides (slap echo), buildings between listener and siren occlude it, and the whole
+    /// acoustic pass stays cheap.
+    #[test]
+    fn city_streets_echo_and_buildings_occlude() {
+        use crate::scenario::free_drive;
+        use crate::session::Session;
+        use wp_audio::siren_space::{SirenSource, SpaceConfig, SpaceState};
+        use wp_audio::{Listener, SirenPattern};
+        use wp_contracts::DamageMode;
+
+        let s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false)
+            .expect("city session");
+        let q = WorldAcoustics(s.sim().world());
+        let cfg = SpaceConfig::default();
+        let start = s.sim().vehicle_states()[0].1.pos;
+        let ear = |x: f32, y: f32| [start[0] + x, start[1] + y, start[2] + 1.5];
+        let (mut street, mut canyon, mut occluded, mut samples) = (0, 0, 0, 0);
+        let mut worst_ms: f64 = 0.0; // det-allow(f64): test timing only
+        for gx in -10..=10 {
+            for gy in -10..=10 {
+                let p = ear(gx as f32 * 20.0, gy as f32 * 20.0);
+                // Skip points inside a building.
+                if !q.clear(p, [p[0] + 0.5, p[1], p[2]]) || !q.clear(p, [p[0], p[1] + 0.5, p[2]]) {
+                    continue;
+                }
+                samples += 1;
+                let src = SirenSource {
+                    entity: 1,
+                    pattern: SirenPattern::Wail,
+                    pos: [p[0] + 90.0, p[1] + 70.0, p[2]],
+                    gain: 0.3,
+                };
+                let lis = Listener {
+                    pos: p,
+                    ..Default::default()
+                };
+                let mut st = SpaceState::default();
+                let t = std::time::Instant::now();
+                let f = st.update(&cfg, &lis, &[src, src, src, src], None, 0, &q);
+                worst_ms = worst_ms.max(t.elapsed().as_secs_f64() * 1e3);
+                if f.room.slap_gain[0] > 0.0 || f.room.slap_gain[1] > 0.0 {
+                    street += 1;
+                }
+                if f.room.street_m > 0.0 {
+                    canyon += 1;
+                }
+                if f.voices[0].occlusion > 0.6 {
+                    occluded += 1;
+                }
+            }
+        }
+        eprintln!(
+            "{samples} listeners: {street} near a facade, {canyon} between two, {occluded} \
+             with the siren behind buildings; worst full pass {worst_ms:.3} ms"
+        );
+        assert!(samples > 100, "{samples}");
+        assert!(street > samples / 10, "facades found: {street}/{samples}");
+        assert!(canyon > 0, "street canyons found");
+        assert!(occluded > samples / 10, "occluded: {occluded}/{samples}");
+        assert!(occluded < samples, "not everything is occluded");
+    }
 }

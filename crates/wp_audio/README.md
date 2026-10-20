@@ -111,10 +111,21 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 - **Police events** (`wp_police::PoliceEvent`, decoded from `SimEvent::PoliceEvent`): `Radio`
   lines go to the scanner (priority: Dispatch for dispatch, Pursuit while a pursuit is active,
   else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
-- **Sirens** (`siren.rs`): wail (≈650→1500 Hz, 4.6 s), yelp (same range, 0.33 s), phaser
-  (0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in `audio_config.json`. `Auto` wails above
-  16 m/s and yelps below 9 m/s with hysteresis. Phase is computed from ticks, the procedural
-  synth runs the cadence itself phase-locked to it. Horn from `VehicleInput::horn`.
+- **Sirens** (`siren.rs`): wail (650→1600 Hz, 4 s cycle, 2.4 s rise), yelp (same range, 0.3 s),
+  phaser (750→1700 Hz, 0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in
+  `audio_config.json`. Phase is computed from ticks, the synth runs the cadence itself
+  phase-locked to it (`CurvePlan`: back-to-back pitch curves that cannot overlap, row 30).
+  Horn from `VehicleInput::horn`.
+- **Siren v2** (`siren_unit.rs`, `siren_space.rs`, playtest row 82; full notes in
+  `docs/integration/siren-v2.md`): the bridge sets each police car's `SirenCue` (from its AI
+  assignment, read-only) → patrol off, respond / far pursuit wail (hi-lo with `two_tone`), close
+  pursuit yelp, junction phaser, blocked yelp + air-horn bursts; a whoop when a chase starts or
+  a unit gets blocked; ≥ 1.2 s pattern hold, phase-matched switches (crossfaded by the pack's
+  `release_s`); per-unit pitch/rate spread so units beat; at most `max_sirens` (4) loops, loudest
+  at the listener + the focus car. `AudioDirector::siren_space(listener, &dyn AcousticQuery)`
+  adds occlusion (3 rays), interior muffle, street slap-echo delays (facade probe), tunnel
+  reverb level and an engine duck. Without a cue (player police car, overrides) the old `Auto`
+  / fixed behaviour applies.
 - **Scanner** (`scanner.rs`): lines queued by `RadioPriority`, released after the tier delay
   (Basic 10 s, Pro 6, Elite 3 — `wp_police` tiers 0/1/2, same numbers as `data/police/tools.toml`; `None` = no scanner), one at a time, stale lines
   dropped, queue capped (lowest priority dropped first). Pursuit/Urgent lines chop lower ones.
@@ -190,7 +201,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
 | World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
-| Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
+| Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase`; optional one-shots `siren/whoop`, `siren/airhorn` (siren v2) |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
 **Procedural synths** (`Synth { synth, params }`, implemented in
@@ -201,7 +212,8 @@ instrument — gain `sqrt(Σ gain²)`, timbre blended by energy — because sepa
 same firing frequency interfere; sample layers stay separate voices), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
 `ripple_hz`), `spin` (`freq_hz`, `chirp_hz`, `hiss`; `pitch` = slip speed, `load` =
 intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
-(`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
+(`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director; `driver: 1` = the siren
+v2 horn-speaker synth in `siren.ts`, `kind` 0 loop / 1 whoop / 2 air horn, `bright`), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).
 
@@ -258,7 +270,8 @@ nodes) for material lookup.
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
-- No occlusion (buildings) or interior/exterior filtering yet; no reverb zones (tunnels).
+- Occlusion, interior muffle, street echo and tunnel reverb exist for **sirens only**
+  (`siren_space.rs`); engines, tires and impacts are not occluded yet.
 - No music system; the Music bus exists so the scanner can duck it.
 - Kinematic traffic and body-less police units are heard only once the wasm bridge feeds
   `kinematic::cruise_state` inputs (request R12b-1 in `docs/integration/audio.md`).

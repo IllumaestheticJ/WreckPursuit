@@ -68,6 +68,8 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 | A-6 | `VehicleInput::siren_pattern: u8` (0 = auto, 1 wail, 2 yelp, 3 phaser, 4 hi-lo) | police players/AI choose patterns and it must replicate | 06, 07, 04 | requested |
 
 ## Changes outside my crates
+**Siren v2 (lead helper, `lead/siren-v2`, playtest row 82):** police-state siren cues, whoop / air horn, horn-speaker synth, occlusion / street echo / tunnel, siren limit and lab — new files `siren_unit.rs`, `siren_space.rs`, `wp_wasm/src/siren_cue.rs`, `testbed-web/src/audio/siren*.ts`; small hooks in `director.rs` (siren block), `data.rs` (`SirenConfig::v2`), `voices.ts` (`router`), `synth.ts` (`case "siren"`), `index.ts`, `panel.ts`, `types.ts`. Details and merge notes: `docs/integration/siren-v2.md`.
+
 **By the lead (`lead/demo-endrun`, 2026-10-19):** `frame_commands` takes a police car's siren from `wp_wasm::police::siren_on` (the unit's assignment: respond / pursue / intercept / roadblock / spikes = on, patrol / idle / out of service = off) instead of the raw input bit, so sirens follow pursuit state; `vehicle_meta` flag 1 (light bars) uses the same rule. The sim input (and traffic yielding) is unchanged.
 
 - `Cargo.toml` (root): `crates/wp_audio` workspace member + `wp_audio` workspace dependency.
