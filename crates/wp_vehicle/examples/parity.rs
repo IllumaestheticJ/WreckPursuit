@@ -958,7 +958,7 @@ fn apply_tune(car: &LoadedCar, t: Tune) -> LoadedCar {
             ramp_power: accel,
             ramp_coast: decel,
         },
-        _ => d.drivetrain.diff_rear.clone(),
+        _ => d.drivetrain.diff_rear,
     };
     let lsd = |pre: f32, power: f32, coast: f32| DiffDef::Lsd {
         preload_nm: pre,
