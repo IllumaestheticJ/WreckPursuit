@@ -294,7 +294,8 @@ pursuit started with the new `PoliceSystem::begin_pursuit`. It backs out when bl
 three tries with no police car within 20 m, is put 15 m further along its route (as a player
 would steer round a jam); it never stops on purpose. 8 seeds × 180 s per level; a run ends at
 the first capture or escape. "Before" = `lead/round12` + only the measurement hooks
-(`begin_pursuit`, `PoliceStats::static_hits`), same seeds, same harness.
+(`begin_pursuit`, `PoliceStats::static_hits`), same seeds, same harness. "After" = commit
+`e4f8b56` (the later tunnel-portal tweak only changes searches for a racer lost in a tunnel).
 `cargo run --release -p simcli --example police_chase -- vesper 12 8 180 24 123`.
 
 *Row 64, backup converging (done).*
@@ -312,22 +313,22 @@ the first capture or escape. "Before" = `lead/round12` + only the measurement ho
   interceptors spread over the junctions around it (nearest, the next ones on the path it was
   taking, the roads out of the first), moving on every 10 s. Prediction while unseen uses the
   velocity at the last sighting (it used the racer's real velocity). A racer lost **inside a
-  tunnel** is searched for at the tunnel's two portals (doctrine §5), so tunnels still break
-  contact (Founders Cut below).
+  tunnel** is searched for at its portals, each unit at the one nearer to it (doctrine §5), so
+  tunnels still break contact (Founders Cut below).
 
 Units in service within 300 m of the racer (mean over runs still going), 24 m/s racer:
 
 | t (s) | 0 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | L1 before | 1.8 | 1.2 | 0.9 | 1.2 | 1.2 | 1.2 | 1.5 | 1.5 | 1.5 | 2.0 | 2.0 | 2.0 | 2.0 |
-| L1 after | 1.8 | 1.5 | 1.5 | 1.3 | 2.0 | 2.2 | 2.5 | 2.8 | 3.0 | 1.5 | 2.5 | 3.0 | 3.0 |
+| L1 after | 1.8 | 1.5 | 1.5 | 1.4 | 2.0 | 2.0 | – | – | – | – | – | – | – |
 | L2 before | 1.8 | 1.2 | 0.9 | 1.1 | 1.3 | 1.4 | 1.7 | 2.0 | 2.0 | 3.0 | 2.5 | 3.0 | 3.0 |
-| L2 after | 1.8 | 2.4 | 2.3 | 1.6 | 2.6 | 2.7 | 3.3 | 4.7 | 6.0 | 6.0 | 6.5 | 4.5 | 4.5 |
+| L2 after | 1.8 | 2.4 | 2.1 | 1.7 | 2.3 | 2.5 | 2.0 | 3.0 | 3.5 | 3.0 | 5.0 | 4.0 | 4.0 |
 | L3 before | 1.8 | 1.2 | 0.9 | 1.2 | 1.4 | 1.4 | 1.6 | 2.0 | 2.1 | 1.8 | 2.5 | 2.3 | 2.3 |
-| L3 after | 1.8 | 3.4 | 3.7 | 3.6 | 2.8 | 4.0 | 3.7 | 3.0 | 2.7 | 2.0 | 3.0 | 2.0 | 2.5 |
+| L3 after | 1.8 | 3.4 | 3.3 | 3.2 | 3.7 | 3.4 | 3.0 | 4.0 | 5.0 | 2.5 | 2.5 | 2.5 | 4.0 |
 
-Before, the racer usually escaped by 40–80 s with one or two cars anywhere near; after, L2/L3
-have 2–4 cars within 300 m from 10 s and up to 6 at L2. Late columns average only the few runs
+Before, the racer usually escaped by 40–80 s with one or two cars anywhere near; after, L3 has
+3–5 cars within 300 m from 10 s, L2 2–5 (all L1 runs had ended by 60 s: 5 captures, 3 escapes). Late columns average only the few runs
 still going (most end in a capture), so they are noisy. Pursuits that start with nobody but the
 first cruiser nearby (seed-dependent) fill slowest. Reckless-driving response (row 44/55) is not
 worse: `police_response` noon, 10 runs: call → car within 100 m mean 12.5 s (was 13.8 s),
@@ -362,25 +363,26 @@ Racer at 24 m/s (86 km/h), 8 runs × 180 s per level:
 | Level | | First contact, mean s (runs with one) | Contacts / pursuit-min | PIT attempts | Rams | Captured in 3 min | Escaped |
 |---|---|---|---|---|---|---|---|
 | L1 | before | – (0 of 8) | 0.00 | 0 | 0 | **1 of 8** (83 s) | 6 |
-| L1 | after | 76.2 (1 of 8) | 0.22 | 0 | 0 | **3 of 8** (51 s) | 5 |
+| L1 | after | 10.2 (2 of 8) | 1.70 | 0 | 0 | **5 of 8** (33 s) | 3 |
 | L2 | before | 29.2 (1 of 8) | 0.09 | 0 | 0 | **1 of 8** (83 s) | 6 |
-| L2 | after | 31.7 (5 of 8) | 1.20 | 1 | 0 | **7 of 8** (68 s) | 1 |
+| L2 | after | 52.0 (4 of 8) | 1.10 | 0 | 0 | **6 of 8** (60 s) | 2 |
 | L3 | before | 110.3 (3 of 8) | 0.31 | 0 | 0 | **2 of 8** (112 s) | 1 |
-| L3 | after | 24.3 (6 of 8) | 1.76 | 0 | 1 | **6 of 8** (64 s) | 1 |
+| L3 | after | 19.4 (6 of 8) | 1.32 | 0 | 0 | **6 of 8** (38 s) | **0** |
 
 Racer at 16 m/s (58 km/h), same seeds:
 
 | Level | | First contact | Contacts / pursuit-min | PIT attempts | Rams | Captured in 3 min | Escaped |
 |---|---|---|---|---|---|---|---|
 | L1 | before | – (0 of 8) | 0.00 | 0 | 0 | 1 of 8 (59 s) | 7 |
-| L1 | after | 68.3 (4 of 8) | 0.50 | 0 | 0 | 6 of 8 (50 s) | 1 |
+| L1 | after | 77.9 (3 of 8) | 0.56 | 0 | 0 | 4 of 8 (38 s) | 3 |
 | L2 | before | 80.9 (2 of 8) | 0.63 | 0 | 0 | 1 of 8 (59 s) | 6 |
-| L2 | after | 37.0 (3 of 8) | 1.29 | 6 | 1 | 6 of 8 (49 s) | 1 |
+| L2 | after | 33.4 (3 of 8) | 1.86 | 1 | 1 | 6 of 8 (49 s) | 2 |
 | L3 | before | 68.5 (3 of 8) | 0.49 | 0 | 0 | 2 of 8 (85 s) | 1 |
-| L3 | after | 21.9 (5 of 8) | 2.11 | 0 | 1 | **8 of 8** (46 s) | 0 |
+| L3 | after | 18.6 (3 of 8) | 1.02 | 0 | 0 | **8 of 8** (74 s) | 0 |
 
-PIT success (racer turned > 60° or below 4 m/s within 3 s of the contact) was 0 of 7: the PIT
-lines up and touches, but the scripted racer's follower straightens out. Most captures are box-ins,
+PIT success (racer turned > 60° or below 4 m/s within 3 s of the contact) was 0 of 1 here (0 of
+7 in an earlier build): the PIT lines up and touches, but the scripted racer's follower
+straightens out. Most captures are box-ins,
 junction blocks and pins after the racer is slowed by traffic or a corner; a 24 m/s racer on
 Port Vesper's curvy roads rarely lets the lead cruiser within 35 m on a straight. Capture times
 are from the pursuit start. Contacts count episodes between the racer and any police car (L1
@@ -389,21 +391,23 @@ contacts are tailing bumps and box-ins).
 *Row 61, push-through (done).* A unit with lights on, stopped behind a civilian or parked car
 (not the racer, not another unit) for 1.5 s with no way past (the pass check failed or the pass
 is pinned), shoves it at 3.5 m/s (13 km/h) aiming 0.8 m left, for up to 3 s; if it moved less
-than 1.5 m it backs out / re-routes / respawns like any stuck unit. Push contacts are plain
+than 1.5 m it backs out / re-routes / respawns like any stuck unit. The shove aims straight
+ahead (aiming at the unit's freshly re-planned route swung responders across the road and
+stalled `wp_race` `grid_highway_sprint` and `wp_wasm` `short_sprint…` behind them). Push contacts are plain
 low-speed contacts: no heat for the racer, no crash-scene incident (below 8 m/s), no assault
 (the racer isn't involved). `PoliceStats::pushes` counts them.
 Units with lights on stopped behind a civilian or parked car, same chase runs (24 m/s racer):
 
 | Level | Longest single wait, before → after | Mean of each run's longest wait | Pushes (8 runs, after) |
 |---|---|---|---|
-| L1 | 34.0 s → **23.3 s** | 11.6 s → 10.4 s | 49 |
-| L2 | 80.0 s → **16.5 s** | 27.6 s → 9.4 s | 88 |
-| L3 | 155.9 s → **23.6 s** | 84.5 s → 10.5 s | 91 |
+| L1 | 34.0 s → **12.6 s** | 11.6 s → 7.3 s | 18 |
+| L2 | 80.0 s → **14.0 s** | 27.6 s → 9.0 s | 64 |
+| L3 | 155.9 s → **42.9 s** | 84.5 s → 12.3 s | 79 |
 
 Before, a cruiser could sit behind a parked car or a stopped civilian for minutes. The total
-seconds spent waiting per pursuit-minute went up (15 / 39 / 93 → 31 / 59 / 54 unit-s) because
-3–6 cars now chase through traffic instead of 1–2, but no wait runs long. Remaining long waits
-are push → back out → re-route cycles behind a car that won't move (e.g. one wedged at a kerb).
+seconds spent waiting per pursuit-minute went up at L1/L2 (15 / 39 / 93 → 27 / 50 / 57 unit-s)
+because 3–6 cars now chase through traffic instead of 1–2, but waits are short. The 42.9 s one
+is push → back out → re-route cycles behind a car that won't move (wedged at a kerb).
 
 *Row 66, routing round buildings (done, partly effective).*
 - Pursuers drive the racer's own line only within 70 m **with line of sight**; otherwise they
@@ -418,34 +422,36 @@ are push → back out → re-route cycles behind a car that won't move (e.g. one
   otherwise stop and three-point, or carry on to a junction. Reverse manoeuvres capped at 3 m/s.
 - **Bug fixed**: a physical unit's speed was synced unsigned. A unit rolling backwards "too
   fast" braked, and in reverse gear `wp_vehicle` swaps the pedals, so the brake drove it
-  backwards: units ran backwards at up to 21 m/s into buildings. Speed is now signed along the
-  heading.
+  backwards: units ran backwards at up to 21 m/s into buildings. Speed is now negative when
+  rolling backwards faster than 1 m/s (fully signed, it changed standstill creeping and a patrol
+  stopped across the race highway in `grid_highway_sprint`).
 
 Building / tunnel-wall contacts (a tall static contact within 1.5 m of a footprint or tunnel
 wall) per pursuit-minute, all pursuing units, at ≥ 3 m/s (all speeds in brackets):
 
 | Level | Before (slow police) | After, feelers **off** | After |
 |---|---|---|---|
-| L1 | 0.12 (1.74) | 0.35 (0.58) | **0.22 (0.65)** |
-| L2 | 0.28 (1.77) | 1.61 (2.98) | **1.09 (2.61)** |
-| L3 | 0.05 (1.50) | 2.82 (5.31) | **1.86 (5.20)** |
+| L1 | 0.12 (1.74) | 0.62 (0.83) | **0.42 (0.42)** |
+| L2 | 0.28 (1.77) | 0.88 (1.08) | **0.49 (0.73)** |
+| L3 | 0.05 (1.50) | 2.70 (4.26) | **1.93 (4.37)** |
 
-The feelers and routing cut fast building hits by about a third against the same aggressive
-driving, and the all-speed count at L1 is down from 1.74 to 0.65, but at L2/L3 police now hit
-buildings more often than the old police, which drove at 0.65 g, were 25–40 m back, and mostly
-lost the racer within a minute (shorter, slower pursuits with 1–2 cars against longer ones with
-3–6 at the limit). The remaining hits are corners taken at 9–15 m/s in a slide (rays follow the
-heading, not the slide) and contacts in pile-ups at the racer. Next steps if the owner wants fewer:
-cast the centre feeler along the velocity as well, and lower chase cornering for units
-more than 100 m behind. Parked-car contacts went up (0.0–0.2 → 4–8 per pursuit-minute): that
-is the push-through and the closer squeeze past parked cars at the kerb.
+All-speed building contacts are down at L1/L2 (1.74 → 0.42, 1.77 → 0.73) and the feelers cut
+fast hits by 30–45 % against the same aggressive driving, but fast hits at L2/L3 are still above
+the old police, which drove at 0.65 g, were 25–40 m back, and mostly lost the racer within a
+minute (shorter, slower pursuits with 1–2 cars against longer ones with 3–6 at the limit). The
+remaining fast hits are corners taken at 9–15 m/s in a slide (the rays follow the heading, not
+the slide) and pile-ups at the racer. Next steps if the owner wants fewer: cast the centre
+feeler along the velocity too, and lower chase cornering for units more than 100 m behind.
+Parked-car contacts went up (0.0–0.2 → 4–9 per pursuit-minute): that is the push-through and
+the closer squeeze past parked cars at the kerb.
 
 *Founders Cut tunnel scenarios (re-aimed, lead request).* With faster, converging police the
 racer reaches L4 (30 s escape time) just before the Cut and searching units drove into the Cut
 and found him (captured 138.6 s). With units now holding a tunnel's portals when the racer is
-lost inside, both scenarios pass **unchanged**: `tunnel_escape_founders_cut` lost at ≈ 100 s,
-**Escaped 130.4 s** (units ≈ 145 m away at the portals); the control (`covered_los: false`) is
-**Captured 134.9 s** with the helicopter overhead the whole time. The control's window now starts
+lost inside (each unit the portal nearer to it: sent to the far one, a unit drove through the
+tunnel and found him), both scenarios pass: `tunnel_escape_founders_cut` lost at ≈ 101 s,
+**Escaped 131.2 s** (nearest unit ≈ 130 m away at a portal); the control (`covered_los: false`)
+is **Captured 129.3 s** with the helicopter overhead the whole time. The control's window now starts
 at 115 s (was 130 s; police arrive sooner). Comments updated in both files.
 
 *Notes for other workstreams.*

@@ -20,11 +20,11 @@
 //
 // Round 13 (rows 63 / 64, faster police that converge and search): pursuit heat now takes him
 // to L4 (30 s escape time) at ≈ 97 s, just before the Cut, and searching units used to drive
-// into the Cut and find him at ≈ 127 s (captured 138.6 s). Searching units now hold both
-// portals of a covered road the racer was lost in (PVPD doctrine §5: nobody chases inside), so
-// he escapes at 130.4 s after 30 s unseen, units ≈ 145 m away at the portals. Measured
-// (round 13, racer target 25 m/s): lost at ≈ 100 s, Escaped 130.4 s; control Captured 134.9 s,
-// never unseen long. Re-aim with `examples/probe_tunnel_chase.rs`.
+// into the Cut and find him at ≈ 127 s (captured 138.6 s). Searching units now hold the portal
+// nearer to them when the racer is lost inside a covered road (PVPD doctrine §5: nobody chases
+// inside), so he escapes after 30 s unseen with the nearest unit ≈ 130 m away at a portal.
+// Measured (round 13, racer target 25 m/s): lost at ≈ 101 s, Escaped 131.2 s; control Captured
+// 129.3 s, never unseen long. Re-aim with `examples/probe_tunnel_chase.rs`.
 (
     name: "police_tunnel_escape_founders_cut",
     seed: 51,
