@@ -294,9 +294,9 @@ check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`)
   const w = await page.evaluate(() => {
     const s = window.__wp.sim;
     const p = window.__wp.app.player;
-    return { plain: s.plainSteer() !== null, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
+    return { plain: s.plainSteer() !== null, grip: s.gripBalance()?.lock_mode, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
   });
-  check(w.plain && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
+  check(w.plain && w.grip === "smart" && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
 }
 check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
 // The career garage can sit over free drive on load; the button's own click handler is

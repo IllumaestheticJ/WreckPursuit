@@ -657,3 +657,33 @@ assists), so the cause was traced before blessing:
   match W's blessed hashes exactly. The probe fix is the only cause, and it is intended
   (round12 7a1f3f75, already blessed there).
 - After `--bless`: only those 8 files changed; goldens 109/109; `cargo test -p simcli` green.
+
+## Merge: W steps 9–10 (ff030d25) + tyre-slip 67f9be27
+
+- **Scope:** W's `lab_scope` now covers the grip lab too (`lab_scope::grip`). With "use W
+  handling everywhere" on, only the player's car gets the balance; AI, police and traffic keep
+  stock tyres. The testbed's `setHandling` sets the balance (saved, or "new") and clears it.
+- **Defaults** (lead's call): balance "new" + W's countersteer limit 0.25° + W's medium-weight
+  ride. Medium weight passed the lead's check against the lab ride (`RIDE=medium` in the
+  grip_balance example):
+
+| test (RWD parity d / rampart_50) | lab ride | medium weight |
+|---|---|---|
+| held key 60 mph: body slip, spin? | 5.0° / 5.0°, no spin | 4.8° / 4.8°, no spin |
+| tap 0.4 s yaw at 60 mph, °/s | 25.2 / 26.8 | 24.9 / 26.6 |
+| mid-corner lift 60 mph: slip before → after | 5.7 → 5.9° / 5.9 → 5.9° | 6.4 → 8.6° / 6.0 → 10.4° |
+| handbrake 40 km/h | caught | caught |
+
+  The drift-hold columns of the `regress` table read SPUN on both rides, and also with the
+  countersteer limit off, so that predates this merge ("drift: best" is the hold preset).
+  The A/B buttons stay: W's handling before/new and ride buttons, and the balance before/new
+  button.
+- **Gate:** fmt, clippy, determinism lint, wasm, tsc, e2e:drift-lab-w 79/79, simcli goldens
+  109/109 (no re-bless needed: steps 9–10 and tyre-slip are lab-only).
+- **Red in `cargo test -p wp_vehicle`:** `drift_lab_b` (2, already known), `slide_control`
+  self-aligning wobble (already known), and W's new
+  `drift_lab_w_snap::countersteer_limit_stops_the_snap_back_and_keeps_the_hold`. That one
+  passes only on W's base. With the probe tilt fix and spin b0 7.5, "new" still fixes the
+  snap-back (no spin, against 85° and a spin before), but slip overshoot is 27.5° against
+  the test's < 25°. Turning either change back alone breaks the "before" half instead. It is
+  a knife-edge test; W should re-tune it on this base.
