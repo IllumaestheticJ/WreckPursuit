@@ -140,7 +140,8 @@ await touch("touchEnd", []);
 await frames(2);
 check(bh.brake > 0.9 && bh.handbrake === 1, `brake pedal + handbrake (brake ${bh.brake.toFixed(2)}, handbrake ${bh.handbrake})`);
 
-// 5. Edge buttons: camera cycles; map opens (driving controls hide) and closes; pause.
+// 5. Edge buttons: camera cycles; map opens (driving controls hide) and closes; pause opens the
+// pause menu, Resume (tapped) resumes.
 const tap = async (sel) => {
   const r = await rect(sel);
   await touch("touchStart", [{ id: 9, x: r.x + r.w / 2, y: r.y + r.h / 2 }]);
@@ -166,11 +167,21 @@ const mapOpen = await page.evaluate(() => ({ open: window.__wp.map.isOpen, noDri
 await tap('#wp-touch [data-touch="map"]');
 const mapClosed = await page.evaluate(() => window.__wp.map.isOpen);
 check(mapOpen.open && mapOpen.noDrive && !mapClosed, `map button opens the map (driving controls hidden) and closes it`);
+// Pause opens the game menu's pause screen (the touch layer hides under it); its Resume button,
+// tapped, resumes the game and brings the controls back.
 await tap('#wp-touch [data-touch="pause"]');
-const paused = await page.evaluate(() => window.__wp.app.paused);
-await tap('#wp-touch [data-touch="pause"]');
-const unpaused = await page.evaluate(() => !window.__wp.app.paused);
-check(paused && unpaused, `pause button pauses and resumes`);
+const paused = await page.evaluate(() => ({
+  paused: window.__wp.app.paused,
+  menu: window.__wp.menu?.isOpen ?? false,
+  covered: getComputedStyle(document.getElementById("wp-touch")).display === "none",
+}));
+await tap("#gm-resume");
+const resumed = await page.evaluate(() => ({
+  paused: window.__wp.app.paused,
+  menu: window.__wp.menu?.isOpen ?? false,
+  covered: getComputedStyle(document.getElementById("wp-touch")).display === "none",
+}));
+check(paused.paused && paused.menu && paused.covered && !resumed.paused && !resumed.menu && !resumed.covered, `pause button opens the pause menu (controls hidden), tapping Resume resumes (${JSON.stringify({ paused, resumed })})`);
 
 // 6. Tilt: no orientation events → falls back to buttons; with events it steers.
 const fell = await page.evaluate(async () => {

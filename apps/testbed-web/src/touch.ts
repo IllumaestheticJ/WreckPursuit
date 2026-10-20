@@ -128,6 +128,7 @@ html.wp-touch, html.wp-touch body { touch-action: none; overscroll-behavior: non
 #wp-touch .row .tc.mode { width: auto; padding: 0 8px; font-size: 12px; }
 #wp-touch.no-drive .steer, #wp-touch.no-drive .pedal, #wp-touch.no-drive .hbrake, #wp-touch.no-drive .row.side { display: none; }
 #wp-touch.tilt .steer { display: none; }
+#wp-touch.covered { display: none; }
 #wp-touch .tiltmark { position: absolute; left: calc(var(--sl) + var(--pad)); bottom: calc(var(--sb) + var(--pad)); padding: 6px 10px; border-radius: 10px;
   background: rgba(12, 14, 20, 0.42); pointer-events: none; font-size: 12px; }
 #wp-touch:not(.tilt) .tiltmark, #wp-touch.no-drive .tiltmark { display: none; }
@@ -310,6 +311,14 @@ export class TouchControls {
     this.driving = on;
     this.root.classList.toggle("no-drive", !on);
     if (!on) this.releaseAll();
+  }
+
+  /** Hide every control (a menu or full-screen panel owns the screen; the touch layer sits
+   * above the testbed overlay). Releases everything held. */
+  setCovered(on: boolean): void {
+    if (on === this.root.classList.contains("covered")) return;
+    this.root.classList.toggle("covered", on);
+    if (on) this.releaseAll();
   }
 
   /** Listen for steering-mode changes (settings UI). */

@@ -870,7 +870,9 @@ async function main(): Promise<void> {
   const seed = (): GameSettings => {
     const d = defaultGameSettings(devDefault);
     if (hasStoredSettings()) return d;
-    const o = assistOverrides();
+    // A touch device starts with the touch assists (auto gears, TCS, steer help), not the
+    // desktop "off" defaults; the menu then stores them as this browser's choice.
+    const o = touch?.visible ? { ...assistOverrides(), tcs: true, auto_gears: true, ...savedAssistOverrides() } : assistOverrides();
     const a = sim.assistPreset(app.source === "Touch" ? "Gamepad" : app.source) as unknown as Record<string, unknown>;
     d.assists = { ...d.assists, abs: Boolean(o.abs ?? a.abs), tcs: Boolean(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
     d.volumes = audio.mix();
@@ -1015,6 +1017,9 @@ async function main(): Promise<void> {
     prof.begin();
     let replay = isReplay();
 
+    // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
+    // map + pause while paused or with the full map open.
+    touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || runEnd.open || !!raceView.cards);
     touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
