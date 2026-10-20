@@ -144,8 +144,10 @@ purist" presets are bit-identical to the plain model (tested against pinned hash
   the front axle's direction of travel (`front_axle_angle`, within the car's lock) instead of
   the centre, at up to `1 + 4h` × the rack speed. `align_strength(h) = 1 − (1 − h)²`: 0 % =
   plain return to centre, 25 % = 0.44, 50 % = 0.75 with a 3× rack, 100 % = full alignment
-  with a 5× rack. Driving straight the target is ~0; in a slide it is the countersteer that
-  cancels the front slip angle. It **never** acts while the driver steers, nor while the
+  with a 5× rack. The front axle's travel is used only as the rear slides (rear-axle slip
+  0.03 → 0.08 rad blend); while the tyres grip the target is the centre (aligning to the
+  front axle's travel there would hold any yaw, e.g. after a kerb kick). In a slide it is
+  the countersteer that cancels the front slip angle. It **never** acts while the driver steers, nor while the
   handbrake is held and for 0.5 s after (`HANDBRAKE_GRACE_S`), and no assist adds yaw torque
   (the gyro is gone).
 - *Countersteer lock* (part of the speed-sensitive lock, any preset with sensitivity > 0):

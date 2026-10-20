@@ -948,5 +948,33 @@ anti-stall). Letting the clutch up in 1st at idle on the flat creeps away withou
   `engine_stalled(entity)` for a HUD "STALLED — press clutch" hint. The clutch value already
   rides in `set_input` (packed slot 4, 0 = up, 1 = pressed).
 
+**Follow-up fixes (same day, from the workspace run):**
+- *Released keys while gripping.* Aligning to the front axle's travel holds whatever yaw the
+  car has (in grip that travel *is* the cornering steer angle), so a kerb kick kept turning
+  the car: `wp_sim` `tests/sidewalk.rs` drives at 8–10° were turned back onto the road (14 of
+  28 grid drives, plus Port Vesper). Now the wheels go to the front axle's travel only as the
+  rear slides (rear-axle slip 0.03 → 0.08 rad, `ALIGN_SLIDE_START/FULL`) and to the centre
+  while the tyres grip. Release-the-keys exits over a wider grid (lat 0.5–0.8 g × reaction
+  0.2–1.2 s, 44 per car, rampart / lucciola / hakone / sperber): keyboard TCS/ESC off
+  27/31/39/35 vs 23/32/38/37 before; gamepad 7/14/21/28 vs 8/14/21/28; keyboard with TCS 44/44.
+  (Tried and rejected: aligning to the CG's travel in grip — lucciola 32 → 10.)
+- *Handbrake at a standstill.* The declutch kept the gear always, so the AI crawl (handbrake +
+  a touch of throttle engages first, `wp_world::manoeuvre::Crawl`) could not leave reverse:
+  `wp_world` `turn_driver_turns_a_real_car_around…` stuck. The gear is now kept only above
+  1 m/s (`HB_KEEP_GEAR_MPS`). Test: `tests/handbrake.rs::the_automatic_box_still_engages_first…`.
+- *Outside my crates (minimal):* `crates/wp_sim/tests/sidewalk.rs` scripted driver's lateral
+  damping 1.2 → 1.5. With the wheels centring after the kerb the car keeps more of its
+  approach and the old gain swung it back across the 3 m sidewalk at 40 km/h / 15° (2 grid
+  drives ended with two wheels on the road). Lowest-tyre results unchanged (−0.006 / −0.022 m).
+- **Lead / D / E — still red, not a vehicle bug:** `wp_opponent` `tests/race.rs::
+  live_police_chase_ends_in_escape_or_capture_without_stuck_cars` (racer 3 waited 104 s).
+  Trigger: the cruiser's `handbrake_rear_nm` 1440 → 2390 (needed: at 1440 its rears do not
+  lock and a handbrake turn reaches only 65°). The chase plays out differently: police unit
+  entity 9 (`sentinel_cruiser`) stops in the road on its standstill hold at t≈50 s next to the
+  yielding racer 2 and stays there (brake 0.4 + handbrake 1, siren off from ~116 s) to the
+  end, even after racer 2 runs again; racer 3 sits behind it as `Obstacle(9)` from ~45 s.
+  The car does what it is told; whether the unit should leave the scene, or the racer pass a
+  parked police car, is wp_police / wp_opponent's call.
+
 **Snapshot** format 7 (handbrake hold + stall flag). **Perf:** unchanged (no new per-tick
 queries). **Goldens:** see the `[bless]` commit.
