@@ -473,3 +473,22 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 Requests: contract #9 (lead); 08 — store `FullDamageSnapshot` for garage/impound until #9;
 H — optional move of the police package to the new flags; R — panel state in the extension if
 hanging/unlatched panels must survive a save.
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: cars too fragile in Arcade, police too
+Base: `origin/lead/round12` (not main; it has R's panels, A's diffs and this round's merges).
+Owner, playing the round-12 preview in Arcade: "police cars are too fragile" and "cars in general
+are too fragile in arcade mode". Row 10 (permanent damage after one hit) was fixed earlier; this
+is about how fast cars become undrivable / wrecked and how much handling they lose.
+1. Measure first, on `lead/round12`, Arcade: hits to "wrecked"/undrivable and to noticeable
+   handling loss for (a) a player sports car and (b) `sentinel_cruiser`, at 30 / 50 / 70 / 90 km/h,
+   frontal, side-swipe, T-bone and police PIT. Put the table in this doc.
+2. Retune `data/modes/arcade.toml` (and the police package if needed, coordinate with H via
+   docs/integration/cars.md) to the CLAUDE.md semantics "punishing but survivable; one hard hit
+   degrades, several end the car": sideswipes and 30–50 km/h hits never end a car; a hard
+   70–90 km/h frontal degrades clearly but stays drivable; ~3–4 hard hits end it. Police cars
+   at least as tough as the player's sports car (they ram for a living). Simulation mode must
+   not change.
+3. Visual dents should still read strongly (R's panels) — tune mechanical/handling damage and
+   wreck thresholds, not the visible deformation.
+4. Scenarios with expected ranges for the above; goldens in a [bless] commit with the reason.
+
