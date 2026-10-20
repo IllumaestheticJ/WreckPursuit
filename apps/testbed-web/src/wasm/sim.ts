@@ -236,6 +236,13 @@ export const sim = {
   /** Countersteer help slider, 0..100 % (owner row 57). */
   setCountersteer: (entity: number, percent: number): void => wasm.set_countersteer(entity, percent),
   countersteer: (entity: number): number => wasm.countersteer(entity),
+  /** Drift Lab B: drift-assist constants in effect / shipped defaults (wp_vehicle::drift::DriftTuning). */
+  driftTuning: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_json()),
+  driftTuningDefaults: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_defaults_json()),
+  /** Set the runtime override from JSON ("" = defaults). */
+  driftTuningSet: (json: string): void => wasm.drift_tuning_set(json),
+  /** [mode, slide_deg, onset, envelope_deg, authority, throttle_scale]; mode 0 off … 5 exceeded. */
+  driftReadout: (entity: number): Float32Array => wasm.drift_readout(entity),
   /** Clutch mode "auto" | "manual" (owner row 59). */
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
