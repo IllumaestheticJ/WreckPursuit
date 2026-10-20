@@ -265,6 +265,7 @@ export const sim = {
     data: Record<string, number | boolean>;
     spin_damper: Record<string, number | boolean>;
     spin: Record<string, number | boolean>;
+    spin_lock: Record<string, number | boolean>;
   } =>
     JSON.parse(wasm.car_tune_defaults_json()),
   /** Set the car / tyre experiments ("" = the data). */

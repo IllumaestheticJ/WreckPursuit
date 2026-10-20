@@ -64,6 +64,9 @@ check((await page.evaluate(() => window.__wp.sim.carTune().yaw_damping)) === 0, 
 await page.locator("#drift-lab-w button", { hasText: "spin model" }).click();
 const spin = await page.evaluate(() => window.__wp.sim.carTune());
 check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_fx_slide - 0.958) < 1e-4, `spin model preset ${JSON.stringify(spin)}`);
+await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
+const sl = await page.evaluate(() => window.__wp.sim.carTune());
+check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "tyre data turns the spin model off");
 // Steering slider → override.

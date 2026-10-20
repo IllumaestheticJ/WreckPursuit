@@ -1266,6 +1266,16 @@ impl Vehicle {
         // --- Steering ---------------------------------------------------------------------
         let steer_in = self.steer_input(steer_cmd, v_fwd, v_left, rear_axle);
         let max_steer = self.max_steer();
+        // Tyre-slip lab: drift-only lock extension (extra lock once the body slip is past
+        // `drift_lock_from_deg`, ramped over 10°, as drift cars with extended lock). Off = 0.
+        let max_steer = match crate::car_lab::active() {
+            Some(t) if t.drift_lock_extra != 0.0 => {
+                let slip = body_slip(v_fwd, v_left).abs().to_degrees();
+                let x = ((slip - t.drift_lock_from_deg) / 10.0).clamp(0.0, 1.0);
+                max_steer * (1.0 + t.drift_lock_extra.clamp(-0.7, 1.0) * x * x * (3.0 - 2.0 * x))
+            }
+            _ => max_steer,
+        };
         self.center_steer = if let Some(p) = plain {
             crate::plain::update_center_angle(
                 self.center_steer,
@@ -1857,6 +1867,7 @@ impl Vehicle {
                 }
                 None => (&c.tire, 1.0, None),
             };
+            let side_scale = car_tune.map_or(1.0, |t| t.side_scale(i, w.alpha_lag));
             // Tyre-slip A/B: the spin-weighted combined-slip model replaces the ellipse.
             let forces = |kappa: f32, alpha: f32, fz: f32, grip: f32| match &spin {
                 Some(m) => combined_forces_spin(tire, kappa, alpha, fz, grip, Some(m)),
@@ -1880,6 +1891,7 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = forces(w.kappa, alpha, fz, grip);
+            let fy = fy * side_scale;
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,
                 tire.load_sensitivity,

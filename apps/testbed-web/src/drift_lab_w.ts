@@ -67,6 +67,12 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
   spin_fx_slide: { label: "spin model: drive grip spinning", min: 0, max: 1, step: 0.01, hint: "fraction of peak drive force a spinning tyre keeps (0 = the tyre data's curve, ~0.55)" },
   spin_fx_slide_from_deg: { label: "spin model: drive grip from", min: 0, max: 30, step: 0.5, unit: "°", hint: "slip angle where the spinning drive-grip floor starts (straight-line launches below it keep the tyre data's curve)" },
   spin_fx_slide_full_deg: { label: "spin model: drive grip full at", min: 0, max: 45, step: 0.5, unit: "°", hint: "slip angle where the drive-grip floor is fully on" },
+  drift_lock_extra: { label: "drift lock ±", min: -0.7, max: 1, step: 0.01, hint: "extra (or, negative, less) steering lock once the body slip passes 'drift lock from' (ramped over 10°); grip driving below it is unchanged. 0 = off" },
+  drift_lock_from_deg: { label: "drift lock from", min: 0, max: 45, step: 0.5, unit: "°", hint: "body slip where the drift lock change starts" },
+  front_deep_falloff: { label: "front deep-slip falloff", min: 0, max: 0.9, step: 0.01, hint: "fraction of front side force lost at large front slip angles (between the two angles below); grip driving untouched. 0 = off" },
+  front_deep_from_deg: { label: "front falloff from", min: 0, max: 40, step: 0.5, unit: "°", hint: "front slip angle where the falloff starts" },
+  front_deep_full_deg: { label: "front falloff full at", min: 1, max: 60, step: 0.5, unit: "°", hint: "front slip angle where the falloff is complete" },
+  front_lat_c: { label: "front MF C", min: 0, max: 2, step: 0.01, hint: "front tyres' lateral shape factor C (0 = data; higher = steeper falloff past the peak; cornering stiffness kept). Changes grip driving" },
   rack_compliance: { label: "rack compliance", min: 0, max: 80, step: 1, unit: "°/kN·m", hint: "compliant rack / column: road wheels yield to the front tyres' steering-axis moment (aligning + caster trail × side force) by this many degrees per kN·m (0 = rigid rack, the data)" },
   rack_compliance_tau_s: { label: "rack compliance lag", min: 0.01, max: 0.5, step: 0.01, unit: "s", hint: "lag of the rack compliance (column / hands)" },
   spin_fx_yield: { label: "spin model: ellipse cap", min: 0, max: 1, step: 0.05, hint: "how much drive force yields to stay inside the friction ellipse (0 = MF-style, no cap; 1 = hard cap)" },
@@ -390,6 +396,7 @@ export class DriftLabWPanel {
         ["tyre data", "data", "no change: the car and tyre files as they are"],
         ["spin grip + damper (test)", "spin_damper", "step-4 test set (side grip under spin 0.15, lock 0.9, yaw damping 0.2; the damper is not physical). It does NOT hold the drift: the car swings through to the other side"],
         ["spin model", "spin", "tyre-slip spin model on the rears, no damper (holds ~41–44° on the lab's standard entry; tuned to a knife edge)"],
+        ["spin + drift lock", "spin_lock", "tyre-slip step 3: spin model + 50 % less counter-lock past 20° of slip + front deep-slip falloff (holds 15 / 27 entries, as a slow 27–54° swing)"],
       ] as const) {
         const b = document.createElement("button");
         b.textContent = label;

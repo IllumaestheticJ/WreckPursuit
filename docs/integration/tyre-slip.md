@@ -27,10 +27,93 @@ power-on straightening or the handbrake pivot.
    suite's own counter-drift driver goes 0.55 → 2.20 s. Step 1 missed gate (c) (TCS-off
    0–60 −32 %); **step 2 fixes it**: the drive floor fades in with slip angle, launches are
    the data's to within 1 %.
+6. **Step 3 (lock / entry / front):** less counter-lock in the drift widens the basin
+   (3° → 10–20°); with a front deep-slip falloff it holds **14 / 27** grip-neutral (≤ 7 %),
+   22 / 27 only with grip changes up to 51 %. Holds are a slow 27–54° cycle, not steady.
+   Target (≥ 20 / 27, grip ≤ 5 %) not met. Preset *spin + drift lock*.
 5. **Step 2 phase plane:** the data has only a saddle (β ≈ 36°); the spin model creates a
    stable equilibrium at β ≈ 45°, r ≈ 25 °/s whose basin ends at β ≈ 37°, set by the
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
+
+## Step 3 (lead: lock / entry side, inertia, front large-slip; target ≥ 20 / 27 held, grip ≤ 5 %)
+
+New lab knobs (`CarTune`, panel "car / tyre experiments", all off by default):
+`drift_lock_extra` / `drift_lock_from_deg` (steering lock × (1 + extra) once the body slip
+passes the start, smoothstep over 10°; negative = less counter-lock in the drift; grip
+driving below the start unchanged), `front_lat_c` (front MF C, B scaled to keep B·C·D),
+`front_deep_falloff` / `front_deep_from_deg` / `front_deep_full_deg` (front side force × (1 −
+falloff) between the two slip angles; grip driving untouched), and offline `IZZ=k` (yaw
+inertia × k, harness env). Panel preset **spin + drift lock** = `CarTune::spin_lock_candidate`.
+`vehicle.rs`: the drift-lock factor on `max_steer` in the steering block, the front side
+scale in the tyre substep (both lab-only, off = unchanged).
+
+Measure: `cargo run --release -p wp_vehicle --example tyre_slip -- matrix` (`MATRIX='[[name,
+CarTune], …]'`): **held / 27** (HoldMetrics, the full set rwd_d / a / b × 6 / 12 / 20° ×
+0.3 / 0.5 / 0.7 g), cases with ≥ 2 s in 30–45°, **grip** = largest |Δ| vs the data on
+parity_rwd_d (taps 0.1 / 0.2 / 0.4 s at 60, 0.1 / 0.2 s at 100, 0.1 s at 140 km/h, lane-change
+slip), **basin** = phase-plane edge → stable equilibrium at r = +20 °/s (each probe pins
+β, r for 0.1 s under the config, then measures dr/dt).
+
+| config (all with the spin model unless noted) | held / 27 (≥ 2 s band) | grip max |Δ| | basin edge → eq (width) |
+|---|---|---|---|
+| data (ellipse) | 0 (0) | — | 37 → none |
+| spin model (step 2) | 2 (2) | 8.6 % (lane change, less slip) | 39 → 42 (3°) |
+| (a) lock × 1.1 / 1.2 / 1.3 / 1.5 | 0 (0) | 8.6 → 24 % | none |
+| (a) drift lock +15 % (from 10 / 15 / 25°) | 0 | 8.6 % | 53 → 54 (1°) |
+| (a) drift lock +30 % / +50 % | 0 | 8.6 % | none |
+| (a) lock × 0.9 / 0.8 / 0.7 / 0.6 | 0 | 7.7 / 15 / 23 / 33 % (tap @140) | 34→42 (8) / 29→44 (15) / 25→44 (19) / 21→41 (20) |
+| (a) drift lock −10 / −20 / −30 / −40 % from 10° | 0 | 8.6 % | 34→42 (8) / 29→44 (15) / 25→44 (19) / 21→41 (20) |
+| (b) yaw inertia × 0.85 / 0.92 / 1.1 (data Izz 3326 kg·m²) | 0 / 0 / 0 | 10–11 % | 42→46 (4) / 41→42 (1) / none |
+| (b) rear relaxation × 0.5 / × 2 | 1 / 2 | 8.4 / 1.6 % | 40→44 (4) / 39→45 (6) |
+| (c) front C 1.15 / 1.25 / 1.3 (flatter) | 0 | 25 / 18 / 8.5 % | 2 / 1 / 1° |
+| (c) front C 1.6 (steeper) | 3 (3) | 40 % | 39 → 42 (3°) |
+| search (lock 0.86, drift lock −24 % from 12°, front C 1.74, rear relax 0.72) | **22 (10)** | 51 % | 23 → 41 (18°) |
+| **step-3 preset** (drift lock −50 % from 20°, front falloff 13 % 17→42°, rear relax 1.48, spin re-tuned) | **14 (11)** | 7.0 % (lane change) | 26 → 36 (10°) |
+
+Findings:
+
+1. **More lock makes it worse, less counter-lock widens the basin**, exactly as the phase
+   plane predicts: the basin's lower edge is the front flip angle (≈ the counter-lock), the
+   equilibrium sits at ~42–45° set by the rear. More lock pushes the edge past the
+   equilibrium (no basin); 20–40 % less lock (either way) widens it to 15–20°.
+2. **A wide basin alone is not enough**: with less lock the fronts keep pushing the nose in
+   longer on entry (yaw 98 °/s), so the car over-rotates past the top of the basin. Holding
+   needs both: less lock in the drift (wide bottom) *and* a front that gives up side force
+   deep in the slide (catches over-rotation): a **steeper** front post-peak curve or a deep-slip
+   falloff, not a flatter one. A flatter front (C 1.15–1.3) is worse.
+3. Yaw inertia (± 10–15 %) and rear relaxation are second-order (≤ 2 / 27).
+4. **Grip-neutral best: 14–15 / 27** (11 with ≥ 2 s in band), grip within ~6–7 %, launches /
+   braking / circle within 1 %, FWD unchanged. The 22 / 27 set needs a base lock × 0.86 and front
+   C 1.74, which change grip driving by up to 51 % (lane-change slip). **Target (≥ 20 / 27 with
+   grip ≤ 5 %) not met.**
+5. **Not steady:** the step-3 holds are a slow limit cycle, slide 27 ↔ 54° with speed 40 ↔ 60
+   km/h, period ~3 s (standard entry: 4.4 s drift, 2.3 s in band, last 3 s 39° sd 7.9), where the
+   step-2 spin model is steady (44° sd 0.6) but on only 2 / 27. The cycle is the speed–slide
+   coupling: slide grows → car slows → κ rises → rear grip falls → … No knob here damped it.
+6. The preset's −50 % drift lock means the road wheels sit at ~17° of counter-lock in a held
+   drift (vs ~33°). That is visible and may not match the reference; owner to judge in the
+   lab.
+
+Parity suite, data → step-3 preset (normal steering path):
+
+| metric | parity_rwd_d | parity_rwd_a | parity_rwd_b | parity_fwd_c | kestrel_ts |
+|---|---|---|---|---|---|
+| `accel_0_60_s` (TCS off) | 7.47 → 7.50 | 7.28 → 7.28 | 7.05 → 7.05 | 7.99 → 7.99 | 7.94 → 7.94 |
+| `accel_0_60_tcs_s` | 5.59 → 5.60 | 5.87 → 5.89 | 6.08 → 6.08 | 7.00 → 6.98 | 7.36 → 7.33 |
+| `circle_30_yaw_dps` | 33.7 → 33.8 | 34.7 → 34.8 | 36.8 → 36.9 | 35.9 → 35.9 | 37.4 → 37.4 |
+| `tap_0.2_100_offset_m` | 16.39 → 16.23 | 16.68 → 16.80 | 17.24 → 17.70 | 14.96 → 14.97 | 15.93 → 16.00 |
+| `liftoff_60_slip_deg` | 2.2 → 2.5 | 2.3 → 2.5 | 2.4 → 2.6 | 6.2 → 6.1 | 2.4 → 2.5 |
+| `brake_60_0_s` | 2.80 → 2.80 | 2.73 → 2.73 | 2.69 → 2.69 | 2.80 → 2.80 | 2.90 → 2.90 |
+| `hb_power_slip_deg` | 124 → 25 | 180 → 24 | 180 → 20 | 15 → 15 | 17 → 17 |
+| `drift_counter_s` / spun (G1, suite driver) | 0.55 yes → **2.99 no** | 0.61 yes → **3.20 no** | 0.60 yes → **3.34 no** | — | — |
+| `hb_stab_drive_gap_s` (G8) | 0.81 → 0.06 | 0.92 → 0.16 | 0.89 → 0.11 | 0.05 → 0.04 | 0.04 → 0.04 |
+| `hb_1.0_10_release_deg` (G3) | 29 → 28 | 35 → 35 | 39 → 39 | 38 → 37 | 33 → 33 |
+
+Next levers (not tried, outside tyre / lock): damping the slow speed–slide cycle (e.g. an
+engine / limiter torque characteristic, or the rear's spin weighting depending on wheel speed
+rather than slip ratio), and a counter-lock that tracks the front axle's travel (the plain
+rack's `self_align` only acts with keys released).
 
 ## Step 2 (lead: robustness, launch fix, phase plane)
 
@@ -318,7 +401,7 @@ fmt, `cargo clippy --workspace -- -D warnings`, `cargo clippy -p wp_vehicle -p w
 --all-targets -- -D warnings`: clean. `cargo test -p wp_vehicle --no-fail-fast`: all pass
 except `drift_lab_b::handbrake_stabs_add_rotation_and_drive_comes_back`, the known
 base-branch failure (drift-lab-w.md). lint-determinism: 0 errors. wasm build + wasm-bindgen
-0.2.129, `tsc --noEmit`: clean. `npm run build && npm run e2e:drift-lab-w`: 24 / 24 pass (step 2: 26 / 26).
+0.2.129, `tsc --noEmit`: clean. `npm run build && npm run e2e:drift-lab-w`: 24 / 24 pass (step 2: 26 / 26; step 3: 27 / 27). Step 3 gate: same results as step 2.
 
 ## Contract change requests
 

@@ -79,6 +79,24 @@ pub struct CarTune {
     /// The compliant rack only yields toward the centre (never past the key's position, as
     /// at a lock stop / the driver holding the key's angle).
     pub rack_yield_to_centre_only: bool,
+    /// Drift-only lock extension (tyre-slip step 3): extra steering lock, as a fraction of
+    /// the car's lock, available once the body slip passes [`CarTune::drift_lock_from_deg`]
+    /// (ramped over the next 10°). 0 = off.
+    pub drift_lock_extra: f32,
+    /// Body slip where the drift-only lock extension starts, degrees.
+    pub drift_lock_from_deg: f32,
+    /// Front tyres' lateral Magic Formula `C` override (0 = data). Lower = flatter past the
+    /// peak (asymptote `sin(C·π/2)` of the peak: 1.4 → 0.81, 1.2 → 0.95); B is scaled so the
+    /// cornering stiffness B·C·D is unchanged.
+    pub front_lat_c: f32,
+    /// Front tyres' deep-slip falloff (tyre-slip step 3): fraction of side force lost at large
+    /// slip angles, ramped (smoothstep) from `front_deep_from_deg` to `front_deep_full_deg`.
+    /// Leaves grip driving (slip below the start) untouched. 0 = off.
+    pub front_deep_falloff: f32,
+    /// Slip angle where the front deep-slip falloff starts, degrees.
+    pub front_deep_from_deg: f32,
+    /// Slip angle where the front deep-slip falloff is complete, degrees.
+    pub front_deep_full_deg: f32,
 }
 
 impl Default for CarTune {
@@ -109,6 +127,12 @@ impl Default for CarTune {
             rack_compliance: 0.0,
             rack_compliance_tau_s: 0.05,
             rack_yield_to_centre_only: false,
+            drift_lock_extra: 0.0,
+            drift_lock_from_deg: 15.0,
+            front_lat_c: 0.0,
+            front_deep_falloff: 0.0,
+            front_deep_from_deg: 8.0,
+            front_deep_full_deg: 20.0,
         }
     }
 }
@@ -138,6 +162,31 @@ impl CarTune {
         }
     }
 
+    /// Tyre-slip step 3 set: the spin model (re-tuned) + a drift-only lock reduction (−50 %
+    /// counter-lock once the body slip passes 20°) + a front deep-slip falloff (−13 % side
+    /// force from 17° to 42° of front slip) + rear relaxation × 1.5. Base lock unchanged, so
+    /// grip driving stays within ~6 %. Holds 15 / 27 of the robustness set (data 0 / 27) but
+    /// as a slow 27–54° oscillation, not steady (docs/integration/tyre-slip.md, step 3).
+    pub fn spin_lock_candidate() -> Self {
+        Self {
+            spin_model: true,
+            spin_b0: 6.45,
+            spin_b2: 1.98,
+            spin_c: 0.82,
+            spin_p: 7.0,
+            spin_fx_slide: 1.0,
+            spin_fx_slide_from_deg: 3.1,
+            spin_fx_slide_full_deg: 3.3,
+            rear_relax: 1.48,
+            drift_lock_extra: -0.5,
+            drift_lock_from_deg: 20.3,
+            front_deep_falloff: 0.13,
+            front_deep_from_deg: 17.4,
+            front_deep_full_deg: 42.0,
+            ..Self::default()
+        }
+    }
+
     /// Whether corner `i` (0 FL, 1 FR, 2 RL, 3 RR) uses [`CarTune::lat_under_spin`].
     pub fn combined_applies(&self, i: usize) -> bool {
         !self.combined_rear_only || i >= 2
@@ -158,6 +207,20 @@ impl CarTune {
         })
     }
 
+    /// Side force scale of corner `i` at slip angle `alpha` (rad) from the front deep-slip
+    /// falloff (1 = none).
+    pub fn side_scale(&self, i: usize, alpha: f32) -> f32 {
+        if i >= 2 || self.front_deep_falloff <= 0.0 {
+            return 1.0;
+        }
+        let (a0, a1) = (
+            self.front_deep_from_deg,
+            self.front_deep_full_deg.max(self.front_deep_from_deg + 0.1),
+        );
+        let x = ((alpha.abs().to_degrees() - a0) / (a1 - a0)).clamp(0.0, 1.0);
+        1.0 - self.front_deep_falloff.clamp(0.0, 0.9) * x * x * (3.0 - 2.0 * x)
+    }
+
     /// `tire` with the peak slip angle scale of corner `i`.
     pub fn tire_for(&self, tire: &TireDef, i: usize) -> TireDef {
         let mut t = tire.clone();
@@ -172,6 +235,11 @@ impl CarTune {
         t.lateral.b /= k;
         if i >= 2 {
             t.relaxation_length_m *= self.rear_relax.clamp(0.05, 10.0);
+        } else if self.front_lat_c > 0.0 {
+            // Keep the cornering stiffness B·C·D (grip driving) while flattening the tail.
+            let c = self.front_lat_c.clamp(1.0, 2.0);
+            t.lateral.b *= t.lateral.c / c;
+            t.lateral.c = c;
         }
         t
     }
