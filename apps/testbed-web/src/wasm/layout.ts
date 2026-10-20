@@ -96,6 +96,13 @@ export const AGENT_FLAG = {
   aggressive: 64,
 } as const;
 
+/** Floats per record in traffic_draw() / police_draw() (crates/wp_wasm/src/lod.rs). */
+export const DRAW_STRIDE = 10;
+/** Offsets inside a draw record: id (agent / unit), entity (0 = none), pos xyz, rot quaternion xyzw, flags. */
+export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9 } as const;
+/** police_draw() flag bits. */
+export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2 } as const;
+
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;
 

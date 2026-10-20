@@ -25,6 +25,20 @@ export interface WheelInfo {
   tire_id: string;
 }
 
+/** session_car_models() JSON (crates/wp_wasm/src/lod.rs `SessionModels`). */
+export interface SessionModels {
+  cars: string[];
+  traffic: string | null;
+  police: string | null;
+}
+
+/** car_model_info(car_id) JSON. */
+export interface CarModelInfo {
+  car_id: string;
+  body_size_m: [number, number, number];
+  wheels: VehicleInfo["wheels"];
+}
+
 /** vehicle_info(entity) JSON. */
 export interface VehicleInfo {
   entity: number;
@@ -187,6 +201,14 @@ export const sim = {
   /** Wanted level / heat for a racer, or null when the session has no police. */
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
+  /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags. */
+  trafficDraw: (): Float32Array => wasm.traffic_draw(),
+  /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D). */
+  policeDraw: (): Float32Array => wasm.police_draw(),
+  /** Car models this session can show: every id, plus the traffic and police models (or null). */
+  sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
+  /** Body size and wheels of a car model (no vehicle needed). */
+  carModelInfo: (carId: string): CarModelInfo => JSON.parse(wasm.car_model_info(carId)),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
   mapStaticJson: (): string => wasm.map_static_json(),
