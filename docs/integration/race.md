@@ -419,3 +419,61 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    `race_vesper_hollins_sprint` (`[bless]`). FYI for N: the AI follows at ~1 s over a blind
    crest and cannot avoid a car braking just past it; worth a crest-aware following gap.
    Loop 9 (highway) not done this round.
+
+
+## Lead gate (round 12, `lead/round12`, 2026-10-20) — three race tests red after the merges
+
+### Round 12 — done on `ws/race` (merged `origin/lead/round12`)
+
+| Test | Cause | Whose | Done |
+|---|---|---|---|
+| `wp_wasm` `race_tests::a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel` ("never captured") | The test parked the player next to a patrol and held **`brake: 1.0`** to stay put. Since this round a held brake at a standstill engages auto-reverse, so the player reversed away at ~20 m/s (speed −19.7 from t≈8 s), the pursuit went to Searching and then Wanted, no capture. It also relied on a patrol spawning near the grid and boxing the player in, which E is retuning on `ws/police`. | test (mine) | **Fixed.** The test now forces the capture through E's public `PoliceSystem::capture_abandoned` hook (round 12, B05): the player is made wanted mid-race (debug heat 30), `capture_abandoned` ends the pursuit as `Captured` with the same `PursuitEnded` event and level reset the capture rule produces, and the test checks `DNF Captured` + the end-of-run hand-off. No patrol AI or timing involved. The expectations are unchanged. |
+| `wp_race` `tests/race_picker.rs::grid_highway_sprint` ("only 2 of 4 finished") | **Patrol / civilian deadlock in a junction box on the race route (not race code).** Seed 7, junction at (0, 55): at t≈30 s patrol unit `EntityId(6)` (eastbound, turning left onto the highway) stops at (−1.7, 51.6) inside the box (input steer 1.0, brake 0.4, siren off) facing southbound civilian agent 47, which has already entered the box at (−1.9, 58.1). Each waits for the other for ~40 s (t≈30–70) until agent 47's blocked-vehicle manoeuvre starts. Meanwhile the northbound civilians (agents 6, 9) won't enter the occupied box, even through a full green (t≈62–82). The racers queue behind them: P3 stops at (9.3, 29.9) from t≈45 to t≈90 and P4 at (9.3, 14) from t≈50 to t≈90, and both run out of the finish window (`Dnf(FinishWindow)`). No contacts, no damage, no parked-car or prop involvement: the result is identical with `WP_RACE_NOPARK=1`, and with traffic off all four finish in 22.6–31.9 s. Before the merge (same seed) the same patrol waited on a side street 55 m west and never entered this junction: 4/4 finished, winner 57.7 s. | **E** (unit yields forever to a civilian already in the box) + **D** (civilians in or approaching an occupied box wait indefinitely); FYI **N** | **Not fixed. Reported, expectations unchanged.** The deadlock is a real bug a player would hit in this race at this seed, so I did not move the race seed or relax the 3-of-4 rule to step around it. Sweep of scenario seeds 1–12 on the merged branch: 11 of 12 have ≥ 3 finishers, so the race pipeline itself is fine. Seed 5 has one `Dnf(Captured)` (E's new aggression, plausible for a street race). Seed 7, the picker's seed, is the deadlock. |
+| `wp_wasm` `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` (rows assertion, line ~136) | Same race (grid sprint, seed 7) and the same deadlock: identical rows (Tito 48.5 s, Vic 65.7 s, You + Juno `DNF FinishWindow`). | E + D | Not fixed. Same as above. It goes green when the deadlock is fixed. |
+
+Found while checking the other picker races on the merged branch:
+
+| Test | Cause | Whose | Done |
+|---|---|---|---|
+| `tests/race_picker.rs::lantern_checkpoint_draws_the_police` (still passed, 2 of 4 finished, needs ≥ 2) | **Grid in the parking lane.** The downtown run starts on a one-lane-each-way street with parking on both sides. The two-wide grid (columns ±2.5 m around the route's lane at x = −1.75) put its left column at x = −4.25, inside the parking lane at x = −4.8. Since parked cars became physics bodies, Dez and the player drove into the parked car at (−4.8, 218.5) and never left the grid (0 gates, 38 contacts). With `WP_RACE_NOPARK=1` all 4 finished. | race setup (mine) | **Fixed.** `catalog::plan_course` checks the start street (`street_grid_layout`): if any slot of the kind's grid, or its first 30 m, comes within a car's half-width of a parking lane running alongside, the course gets `grid_layout = SingleFile` at the kind's row gap (8 m) in the route's lane. It checks the parking *lanes*, so it does not depend on which slots the seed fills. `Course::grid_layout` (new, `serde(default)`) is used by the judge. Only `lantern_checkpoint` changes: `pick_lantern_checkpoint.ron` regenerated, the other three picker grids are unchanged. New checks: `race_picker.rs` asserts no parked car lies within a car's width of any slot's first 30 m, for every picker race (it fails without the fix: "grid slot 1 at [-4.25, 237.0] runs into a parked car at [-4.75, 218.5]"), and the unit test `a_course_grid_layout_overrides_the_kind_grid`. Result now: every car leaves the grid; 2 finish (58.6 s, 60.7 s) and 2 flee the police at gate 4 of 6 (`Dnf(Fled)`, 8 pursuits). That is E's new police aggression in an illegal-daytime Max-presence race: plausible, and inside the test's existing range. |
+
+**Repro for E / D:** `cargo test --release -p wp_race --test race_picker grid_highway_sprint -- --nocapture --exact`
+(`WP_RACE_TRACE=1` prints the standings every 10 s, `WP_RACE_SEED=n` changes the seed). The deadlock
+sits at junction (0, 55) of the 12×12 procedural grid (city seed 1, scenario seed 7) from t≈30 s to t≈70 s.
+
+**FYI N (AI racers vs. a stuck queue):** behind the frozen queue the AI racers never pass. P3 (at
+x = 9.3, middle lane x≈5.5 free) holds behind agent 6 with pass checks "lane taken ahead" (39). P4
+holds behind agent 23 with "target busy passing someone" (842 evaluations). Agent 23 is stopped, so
+my guess (not verified) is that D's new blocked-vehicle state makes it look like it is passing, and
+the racer waits for it indefinitely. A
+racer stuck behind a civilian that has not moved for many seconds should probably be allowed to
+pass it. That would make street races robust to queues like this, but it is N's code.
+
+**Note for the lead:** with the deadlock fixed upstream, both sprint tests should pass unchanged. If
+the gate has to go green first, parking (`#[ignore]`) those two tests with a pointer here is your
+call. I have not done it.
+
+**Checks (round 12, cloud container, after merging `origin/lead/round12` at 375bf89):**
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+  `cargo build --target wasm32-unknown-unknown -p wp_wasm` all pass.
+- `cargo test --workspace --release --no-fail-fast` (env `CARGO_INCREMENTAL=0 CARGO_PROFILE_*_DEBUG=0`):
+  - race: everything passes except the two grid-sprint tests (E/D deadlock above).
+  - simcli: the five `race_*` goldens I re-blessed match.
+  - Still failing, all **pre-existing on a clean `origin/lead/round12`** (checked in a separate
+    worktree; my diff against it touches only race files): simcli `goldens_match` (about 30 non-race
+    goldens not re-blessed after the round 12b merges), `all_scenarios…` (`police/tunnel_escape_founders_cut`
+    escape timing, `soak/traffic_soak_observer` 310 agents vs ≥ 350), `wp_vehicle`
+    `front_drive_cars_understeer_mildly` (junkyard_beater 1.71 deg/g vs ≤ 1.6), and `wp_sim`
+    `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`. FYI lead / A / D / E / I.
+- `e2e/race.mjs`: all race checks pass (in the browser all four finished the grid sprint, winner
+  48.9 s, payout settled, no page errors).
+- `e2e/run.mjs`: 51 checks passed and none failed up to and including the weather section. Then
+  the process was killed (exit 137 during a container worker restart), so the remaining sections
+  did not run this round.
+- `just` is not installed in the container; I ran its `web-e2e` steps by hand (`npm run wasm` after
+  `cargo install wasm-pack`, then the two e2e scripts).
+
+### Changes outside my crates (round 12)
+- `crates/wp_wasm/src/race_tests.rs`: the capture test (authorized glue).
+- `apps/simcli/scenarios/race/pick_lantern_checkpoint.ron`: regenerated.
+- `apps/simcli/golden/race_*`: five goldens, `[bless]`.
