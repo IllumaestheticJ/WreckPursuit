@@ -88,6 +88,13 @@ every prop within 150 m of the camera is drawn, parked cars within 150 m use the
 all 256 full slots are in use), and a knocked parked car's drawn pose (read back from the
 instance matrix) is within 0.2 m of `prop_pose()` on every frame while it moves.
 
+## Gate notes (2026-10-20)
+fmt, clippy `-D warnings`, wasm build, `tsc` pass. `cargo test --workspace`: everything passes
+except `simcli` `goldens_match`, which fails **identically on `origin/lead/round12`** (the same 20
+scenarios, the same first-mismatch ticks and hashes; city / police / race / weather goldens are
+stale on the base). This branch does not move the sim; the goldens need a `[bless]` on the base
+by whoever changed the city sim (not done here).
+
 ## Changes outside my crates
 - `crates/wp_sim/src/lib.rs`, `props.rs`: `Sim::prop_pose`, `Sim::active_props`, `Props::active`
   (read-only accessors; no sim behaviour, determinism or golden change).
