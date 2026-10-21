@@ -110,7 +110,8 @@ export class SceneView {
       let gltf;
       try {
         gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
-      } catch {
+      } catch (glbErr) {
+        console.warn(`greybox ${cityId}.greybox.glb failed, trying the base64 copy`, glbErr);
         const b64 = await (await fetch(`data/city/${cityId}.greybox.b64.txt`)).text();
         const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
         gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");

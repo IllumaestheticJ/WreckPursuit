@@ -246,7 +246,7 @@ and ownership in `metro/mod.rs` and `docs/integration/city-v3.md`.
   (cut-and-cover: trench + solid walls, roof and cover plug), Founders Cut and the Lantern
   Underpass. Six divided highways (Loop 9, Route 40 West / North, Crosstown Expressway,
   Airport Expressway, Port Connector) with a full cloverleaf, a stack, three trumpets, seven
-  diamonds, a parclo and a half diamond; ≈ 6.8 k lanes, 1.2 k junctions (≈ 430 signalised),
+  diamonds, a parclo and a half diamond; 6818 lanes, 1198 junctions (430 signalised),
   23 km of highway, 56 ramps, 134 grade separations.
 - **Sites:** Vesper International (two runways, terminal, piers + jet bridges, control tower,
   hangars, parked aircraft) and Northfield Airfield (`metro/airport/`); the container terminal
@@ -256,7 +256,7 @@ and ownership in `metro/mod.rs` and `docs/integration/city-v3.md`.
   garages, surface lots and the Starlite Drive-In (`metro/parking*`); Lantern Tower, the
   Unfinished Exchange (a jump over a missing span), the Canal Flats earthworks and the
   Eastgate block (`metro/construction.rs`).
-- **Buildings** (`metro/buildings/`): ≈ 12.8 k district-specific buildings (towers on
+- **Buildings** (`metro/buildings/`): 12 722 district-specific buildings (towers on
   podiums downtown, offices, warehouses, row houses, suburban houses) with lot walls, fences
   and hedges, and the landmark complexes (Vesper Bowl, City Hall, Calder Power Station, the
   steel mill, the observatory, two malls, the lighthouse).
@@ -264,7 +264,7 @@ and ownership in `metro/mod.rs` and `docs/integration/city-v3.md`.
   the bluff crest, highway guard rails, sound walls and fences, map-edge walls and road-closed
   portals where Route 40 leaves the map, forest with solid undergrowth edges, parks, street
   trees, lamps, poles and street furniture.
-- **Features** (format v4): ≈ 110 k scenery / structure features (≈ 55 k solid). Solid ones
+- **Features** (format v4): 99 557 scenery / structure features. Solid ones
   are static colliders in `wp_sim` (compound per 256 m tile); boxes and cylinders are drawn
   instanced by the testbed (`city_features()`), prisms are in the greybox.
 

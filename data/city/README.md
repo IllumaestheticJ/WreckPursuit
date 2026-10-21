@@ -19,5 +19,14 @@ Format spec: `crates/wp_world/README.md`. Coordinates: metres, +X east, +Y north
   "vesper_v2", seed: 1)`, so `vesper_v2.road.bin` (2.3 MB, mostly terrain) is written locally
   but not committed. A test fails if the greybox is stale.
 
+- `vesper_v3.greybox.{glb,b64.txt}` — Port Vesper v3 (in development; the full 8 × 7 km city
+  with the river, highway network, airport, docks, rail and scenery; `wp_world::metro`),
+  regenerate with `just city-v3` (`gen-city --preset vesper_v3`). Generated in memory by
+  `World::metro` / scenario `city: preset(name: "vesper_v3", seed: 1)`; `vesper_v3.road.bin`
+  (≈ 13 MB) is written locally but not committed. Box and cylinder features (trees, lamps,
+  containers, parked cars, ...) are not in the greybox: the testbed draws them instanced
+  from wasm `city_features()`. No stale-data test while v3 is in development: regenerate
+  the greybox when the city changes (it is ≈ 29 MB + 38 MB base64).
+
 Imported OSM cities carry an ODbL attribution in the file; see
 `tools/city-import/README.md` before committing or shipping one.
