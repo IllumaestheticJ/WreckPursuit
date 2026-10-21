@@ -94,9 +94,10 @@ export class VehicleView {
     this.nose = nose;
     this.root.add(this.box, nose);
 
-    // Head- and tail-lights (emissive, brighter with headlights on / when braking).
-    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000 });
-    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000 });
+    // Head- and tail-lights (emissive, brighter with headlights on / when braking). Shared with
+    // the panel meshes, which carry no normals: flat shading, both sides.
+    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
+    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) {
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), this.headMat);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
