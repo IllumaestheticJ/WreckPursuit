@@ -78,6 +78,14 @@ All modules are merged and every workspace test passes (`cargo test --workspace`
 | scenery (`metro/scenery/`) | water-edge barriers, bluff crest wall, highway guard rails / sound walls / fences, map-edge walls and Route 40 road-closed portals, forests with solid undergrowth edges, parks, street trees / lamps / poles / furniture kept ≥ 1.8 m off every lane and turning path |
 | plumbing | feature colliders (compound per 256 m tile), prisms in the greybox, wasm `city_features()`, instanced rendering in the testbed (`;` toggles, 1.5 km draw distance, `?featureDist=`) |
 
+## Visual clearance
+`tools/city-import/tests/greybox_clearance.rs` drives a ray along every lane at 1.2 m and
+3 m and fails on any blocking render geometry: greybox walls, bridge decks / piers, buildings,
+feature prisms and (v3) every box / cylinder feature. Exceptions: tree canopies and the
+road-closed portals within 30 m of the map edge. Bridge piers are never placed on paving or
+junction boxes under a deck (they move to the next clear centreline point), and rail track
+on a road at its own height is laid flush in the paving (street running).
+
 ## How to run
 - Tests: `cargo test -p wp_world` (v3 suites: `metro::*` lib tests, `tests/city_v3_{roads,rail,parking}.rs`).
 - Drive checks (not in the golden library while v3 changes):
@@ -103,5 +111,8 @@ None (v3 lives entirely in `wp_world` and the renderer/physics plumbing).
   airport traffic, interior navigation for AI in garages, race routes using the new landmarks.
 - Lot side/rear fences are trimmed to the buildings budget, so some short stretches behind
   houses stay open; the swing bridge rail deck is drivable from its level crossings.
+- Port Vesper v2 (not v3): one lot's building at (-1125..-1089, -896..-865) stands over two
+  lanes of roads 173 / 177; found by `tools/city-import/tests/greybox_clearance.rs`, which
+  therefore checks only bridges and walls for v2.
 - POI snapping: `SH06 Knob Observatory Lot` snaps to the westbound lot lane, so routes ending
   there may loop the lot.

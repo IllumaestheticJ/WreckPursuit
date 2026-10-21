@@ -442,8 +442,17 @@ pub fn build_lines(
                 break;
             }
         }
+        // Never lay track inside a road's clearance envelope (a road running along or onto
+        // the line at about its height): level crossings get planks instead, and roads well
+        // above or below (grade separations) are outside the height band.
+        let in_road = |i: usize| {
+            let j = (i + 1).min(n - 1);
+            let (p, q) = (geom::xy(a.pts[i]), geom::xy(a.pts[j]));
+            let z = a.pts[i][2];
+            p != q && paving.hits(&strip(p, q, a.half_span_m()), 0.0, z, z)
+        };
         let active: Vec<bool> = (0..n)
-            .map(|i| i <= last && !in_level(a.cum[i], 0.5))
+            .map(|i| i <= last && !in_level(a.cum[i], 0.5) && !in_road(i))
             .collect();
         for off in a.track_offsets() {
             let line = offset_line(a, off);
@@ -481,6 +490,36 @@ pub fn build_lines(
                     buffer_stop(out, paving, line[0], d);
                 }
             }
+        }
+
+        // Street running: where the line runs on a road at its own height, the track is set
+        // flush into the paving (concrete panels at road height) instead of a ballast bed.
+        for i in 0..n.saturating_sub(1) {
+            if i >= last || in_level(a.cum[i], 0.5) || !(in_road(i) || in_road(i + 1)) {
+                continue;
+            }
+            let (pa, pb) = (a.pts[i], a.pts[i + 1]);
+            let road_z = |p: V3| {
+                ctx.roads
+                    .built
+                    .surfaces
+                    .iter()
+                    .map(|s| crate::surface::height_under(s, geom::xy(p)))
+                    .filter(|(d, z)| *d < 15.0 && (z - p[2]).abs() < 4.0)
+                    .min_by(|x, y| x.0.total_cmp(&y.0))
+                    .map_or(p[2], |(_, z)| z)
+            };
+            out.add(piece(
+                FeatureKind::RailTrack,
+                Material::DarkConcrete,
+                [pa[0], pa[1], road_z(pa)],
+                [pb[0], pb[1], road_z(pb)],
+                a.half_span_m() * 2.0,
+                -0.12,
+                0.02,
+                0.0,
+                false,
+            ));
         }
 
         // Crossing planks (flush with the road) and gates.

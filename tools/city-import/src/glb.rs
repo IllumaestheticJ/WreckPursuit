@@ -20,7 +20,9 @@ use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
 use wp_world::network::{DistrictKind, FeatureShape, Lane, LaneKind, RoadNetwork};
 pub use wp_world::palette::{material_name, material_rgba, MATERIALS};
-use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
+use wp_world::surface::{
+    height_under, inside_other_paving, is_elevated, median_barriers, surface_edges,
+};
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk width, m.
@@ -602,6 +604,69 @@ fn coarse_blocks(t: &Heightfield, net: &RoadNetwork, cx: u32, cy: u32, step: f32
     near.iter().map(|n| !n).collect()
 }
 
+/// Road surfaces and junction discs indexed by 64 m cell, to find paving under a point.
+struct PavingIndex {
+    cells: std::collections::BTreeMap<(i32, i32), Vec<usize>>,
+}
+
+impl PavingIndex {
+    const CELL_M: f32 = 64.0;
+
+    fn new(net: &RoadNetwork) -> Self {
+        let mut cells: std::collections::BTreeMap<(i32, i32), Vec<usize>> = Default::default();
+        for (si, s) in net.surfaces.iter().enumerate() {
+            let w = s.left_m.max(s.right_m) + 2.0;
+            let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+            for p in &s.centre {
+                lo = [lo[0].min(p[0] - w), lo[1].min(p[1] - w)];
+                hi = [hi[0].max(p[0] + w), hi[1].max(p[1] + w)];
+            }
+            let c = |v: f32| (v / Self::CELL_M).floor() as i32;
+            for i in c(lo[0])..=c(hi[0]) {
+                for j in c(lo[1])..=c(hi[1]) {
+                    cells.entry((i, j)).or_default().push(si);
+                }
+            }
+        }
+        Self { cells }
+    }
+
+    /// Whether another road's paving (grown by `margin` m) or a junction box lies under `q`
+    /// more than 2 m below `top`.
+    fn lower_paving_at(&self, net: &RoadNetwork, si: usize, q: V2, top: f32, margin: f32) -> bool {
+        let key = (
+            (q[0] / Self::CELL_M).floor() as i32,
+            (q[1] / Self::CELL_M).floor() as i32,
+        );
+        let on_surface = self.cells.get(&key).is_some_and(|list| {
+            list.iter().any(|&oi| {
+                let o = &net.surfaces[oi];
+                if oi == si || o.centre.len() < 2 {
+                    return false;
+                }
+                let cum = geom::cumulative(&o.centre);
+                let pr = geom::project(&o.centre, &cum, q);
+                let half = if pr.lateral < 0.0 {
+                    o.left_m
+                } else {
+                    o.right_m
+                };
+                pr.s > -margin
+                    && pr.s < cum[cum.len() - 1] + margin
+                    && pr.lateral.abs() < half + margin
+                    && height_under(o, q).1 < top - 2.0
+            })
+        });
+        on_surface
+            || net.intersections.iter().any(|it| {
+                let n = &net.nodes[it.node as usize];
+                it.radius_m > 0.0
+                    && geom::dist(geom::xy(n.pos), q) < it.radius_m + margin
+                    && n.pos[2] < top - 2.0
+            })
+    }
+}
+
 /// Build the greybox primitives for a city.
 pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let net = &map.net;
@@ -724,6 +789,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         barrier_mesh(&mut barrier, line);
     }
     let near_barrier = BarrierIndex::new(&barriers);
+    let paving = PavingIndex::new(net);
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
     // bridge decks with parapets and piers.
     if let Some(t) = terrain {
@@ -780,7 +846,6 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     bridge.curtain(&top, &[seg[0][2], seg[1][2]], side > 0.0);
                 }
                 if cum[k] >= next_pier {
-                    next_pier = cum[k] + 30.0;
                     let c = geom::xy(s.centre[k]);
                     let (d, _) = (geom::normalize(geom::sub(geom::xy(s.centre[k + 1]), c)), 0);
                     let r = geom::right_of(d);
@@ -799,6 +864,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     } else {
                         fp
                     };
+                    // Never stand a pier on a road passing under the deck: try again at the
+                    // next centreline point (piers end up either side of the lower road).
+                    let top = s.centre[k][2] - 1.2;
+                    let probes = fp.iter().copied().chain([c]);
+                    if probes
+                        .clone()
+                        .any(|q| paving.lower_paving_at(net, si, q, top, 1.5))
+                    {
+                        continue;
+                    }
+                    next_pier = cum[k] + 30.0;
                     let base = fp
                         .iter()
                         .map(|q| ground_z(*q))
