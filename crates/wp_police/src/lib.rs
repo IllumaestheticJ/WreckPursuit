@@ -18,6 +18,7 @@
 //! - [`dispatch`]: patrol pool, incidents, reinforcements, helicopter, AI captain.
 //! - [`pursuit`]: tactics (shadow, box-in, PIT, rolling block, intercept, disengage) and driving.
 //! - [`unit`]: unit state and the built-in kinematic driver.
+//! - [`helo`]: the helicopter's flight model, behaviour and spotlight.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
@@ -33,6 +34,7 @@ pub mod dispatch;
 pub mod events;
 pub mod graph;
 pub mod heat;
+pub mod helo;
 pub mod pro;
 pub mod pursuit;
 pub mod radio;
@@ -60,7 +62,7 @@ pub use events::{
     DisableCause, IncidentId, PoliceEvent, PoliceEventExt, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 pub use graph::{District, RoadGraph};
-pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
+pub use heat::{BountyAward, BountyReason, BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use radio::{RadioConfig, RadioStats, RadioTier};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
@@ -160,6 +162,10 @@ pub struct PoliceStats {
     pub spikes: u32,
     /// Spike hits.
     pub spike_hits: u32,
+    /// Spike strips dodged by their target.
+    pub spikes_dodged: u32,
+    /// Roadblocks dodged by their target.
+    pub roadblocks_dodged: u32,
     /// PIT attempts.
     pub pit_attempts: u32,
     /// Helicopter launches.
@@ -232,6 +238,8 @@ pub struct PoliceSystem {
     pub(crate) stats: PoliceStats,
     pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
     pub(crate) pending: Vec<PoliceEvent>,
+    /// Bounty bonuses earned during the latest step.
+    pub(crate) bounty_awards: Vec<BountyAward>,
     /// Vehicles reported by `wp_sim` ([`PoliceSystem::set_obstacles`]).
     pub(crate) ext_obstacles: Vec<avoid::Obstacle>,
     /// Whether `wp_sim` reports obstacles (then racers and bound units come from that list).
@@ -311,6 +319,7 @@ impl PoliceSystem {
             stats: PoliceStats::default(),
             contact_cooldown: BTreeMap::new(),
             pending: Vec::new(),
+            bounty_awards: Vec::new(),
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
             obstacles: Vec::new(),
@@ -332,6 +341,7 @@ impl PoliceSystem {
     ) {
         self.tick += 1;
         self.now = self.now.plus(dt);
+        self.bounty_awards.clear();
         self.phase = world.time_of_day().phase();
         self.sync_racers(racers);
         self.process_events(world, events);
@@ -350,7 +360,6 @@ impl PoliceSystem {
     }
 
     fn sync_racers(&mut self, racers: &[RacerView]) {
-        let now = self.now;
         for r in racers {
             let rec = self
                 .racers
@@ -359,22 +368,100 @@ impl PoliceSystem {
             rec.pos = r.pos;
             rec.vel = r.vel;
             let p = xy(r.pos);
-            // Spike strips.
             if let Some(prev) = self.prev_pos.get(&r.entity).copied() {
-                for s in &self.spikes {
-                    let wheels = s.wheels_crossing(prev, p, 0.8);
-                    if wheels.iter().any(|w| *w) {
-                        self.punctures.entry(r.entity).or_default().hit(wheels, now);
-                        self.stats.spike_hits += 1;
-                        self.pending.push(PoliceEvent::SpikeHit {
-                            vehicle: r.entity,
-                            wheels,
-                        });
-                    }
-                }
+                self.check_spikes(r.entity, prev, p);
+                self.check_roadblocks(r, prev, p);
             }
             self.prev_pos.insert(r.entity, p);
         }
+    }
+
+    /// Spike strips: punctures for any racer driving over one, and for the strip's target a
+    /// dodge bonus when it crosses the strip's road with no wheel on the strip.
+    fn check_spikes(&mut self, racer: EntityId, prev: [f32; 2], p: [f32; 2]) {
+        let now = self.now;
+        let margin = self.cfg.tools.spikes.dodge_margin_m;
+        for k in 0..self.spikes.len() {
+            let s = &self.spikes[k];
+            let wheels = s.wheels_crossing(prev, p, 0.8);
+            let hit = wheels.iter().any(|w| *w);
+            if hit {
+                self.punctures.entry(racer).or_default().hit(wheels, now);
+                self.stats.spike_hits += 1;
+                self.pending.push(PoliceEvent::SpikeHit {
+                    vehicle: racer,
+                    wheels,
+                });
+            }
+            let s = &mut self.spikes[k];
+            if s.racer != racer || s.resolved {
+                continue;
+            }
+            if hit {
+                s.resolved = true;
+            } else if s
+                .site
+                .crossed(prev, p, dispatch::ROAD_HALF_WIDTH_M + margin)
+            {
+                s.resolved = true;
+                self.stats.spikes_dodged += 1;
+                self.award_bounty(racer, BountyReason::SpikesDodged);
+                self.radio(radio::RadioCue::new(
+                    RadioTier::Tactical,
+                    self.spikes[k].unit,
+                    "Suspect avoided the spikes!".to_string(),
+                ));
+            }
+        }
+    }
+
+    /// Roadblocks: the target crossing the roadblock line at speed without touching its units
+    /// earns a dodge bonus. Barriers knocked aside slow the car below the dodge speed.
+    fn check_roadblocks(&mut self, r: &RacerView, prev: [f32; 2], p: [f32; 2]) {
+        let rb_cfg = &self.cfg.tools.roadblock;
+        let (margin, min_speed) = (rb_cfg.dodge_margin_m, rb_cfg.dodge_min_speed_mps);
+        let speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+        for k in 0..self.roadblocks.len() {
+            let rb = &self.roadblocks[k];
+            if rb.racer != r.entity
+                || rb.resolved
+                || !rb
+                    .site
+                    .crossed(prev, p, dispatch::ROAD_HALF_WIDTH_M + margin)
+            {
+                continue;
+            }
+            let touched = rb.units.iter().any(|uid| {
+                self.unit_index(*uid)
+                    .is_some_and(|i| self.units[i].racer_contact)
+            });
+            let unit = rb.units.first().copied();
+            self.roadblocks[k].resolved = true;
+            if !touched && speed >= min_speed {
+                self.stats.roadblocks_dodged += 1;
+                self.award_bounty(r.entity, BountyReason::RoadblockDodged);
+                self.radio(radio::RadioCue::new(
+                    RadioTier::Tactical,
+                    unit,
+                    "Suspect got through the roadblock!".to_string(),
+                ));
+            }
+        }
+    }
+
+    /// Count a bounty bonus in `racer`'s ledger and report it in [`PoliceSystem::bounty_awards`].
+    pub(crate) fn award_bounty(&mut self, racer: EntityId, reason: BountyReason) {
+        let cfg = &self.cfg.heat;
+        let Some(rec) = self.racers.get_mut(&racer) else {
+            return;
+        };
+        let amount = rec.bounty.record(reason, cfg);
+        self.bounty_awards.push(BountyAward {
+            racer,
+            reason,
+            amount,
+            time: self.now,
+        });
     }
 
     fn process_events(&mut self, world: &dyn WorldQuery, events: &[SimEvent]) {
@@ -542,6 +629,12 @@ impl PoliceSystem {
             .get(&racer)
             .map(|r| r.bounty)
             .unwrap_or_default()
+    }
+
+    /// Bounty bonuses earned during the latest [`PoliceSystem::step`] (cops disabled or wrecked,
+    /// roadblocks and spike strips dodged), for HUD call-outs and the economy.
+    pub fn bounty_awards(&self) -> &[BountyAward] {
+        &self.bounty_awards
     }
 
     /// Restore a persisted bounty ledger (call before the racer's first step).
@@ -1005,26 +1098,28 @@ impl PoliceSystem {
         self.radio.iter()
     }
 
-    /// Helicopters on station.
+    /// Helicopters in the air (on station or flying home).
     pub fn helicopters(&self) -> Vec<HeloView> {
+        let cfg = &self.cfg.tools.helicopter;
         self.units
             .iter()
-            .filter_map(|u| match (u.kind, &u.assignment) {
-                (UnitKind::Helicopter, Assignment::HeloTrack { target }) => {
-                    let aim = self
-                        .racers
-                        .get(target)
-                        .and_then(|r| r.last_known)
-                        .unwrap_or(u.body.pos);
-                    Some(HeloView {
-                        unit: u.id,
-                        pos: [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                        spotlight_target: [aim[0], aim[1], 0.0],
-                        cone_half_angle_rad: self.cfg.tools.helicopter.spotlight_half_angle_rad,
-                        target: *target,
-                    })
-                }
-                _ => None,
+            .filter_map(|u| {
+                let st = u.helo.as_ref().filter(|st| st.airborne())?;
+                Some(HeloView {
+                    unit: u.id,
+                    pos: [u.body.pos[0], u.body.pos[1], u.body.alt_m],
+                    vel: [st.vel[0], st.vel[1], st.climb_mps],
+                    heading: u.body.heading,
+                    bank_rad: st.bank_rad,
+                    pitch_rad: st.pitch_rad,
+                    phase: st.phase,
+                    spotlight_on: st.spotlight_on(),
+                    spotlight_target: [st.spot[0], st.spot[1], 0.0],
+                    cone_half_angle_rad: cfg.spotlight_half_angle_rad,
+                    visual: st.visual,
+                    fuel: (st.fuel_s / cfg.endurance_s.max(1.0)).clamp(0.0, 1.0),
+                    target: st.target,
+                })
             })
             .collect()
     }

@@ -8,10 +8,11 @@ use wp_contracts::{
 use wp_police::captain::{CaptainCommand, CaptainError, UnitOrder};
 
 use wp_police::graph::{dist, District, RoadClass, RoadGraph, RoadPath};
+use wp_police::helo::HeloPhase;
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{
-    Assignment, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
-    PursuitStatus, RacerView, SteerGeometry, UnitKind, UnitSync, WantedLevel,
+    Assignment, BountyAward, BountyReason, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem,
+    PursuitOutcome, PursuitStatus, RacerView, SteerGeometry, UnitKind, UnitSync, WantedLevel,
 };
 
 const RACER: EntityId = EntityId(7);
@@ -23,6 +24,9 @@ struct Harness {
     path: RoadPath,
     s: f32,
     speed: f32,
+    /// Racer drives this far left of the path centreline, m.
+    lateral: f32,
+    awards: Vec<BountyAward>,
 }
 
 /// D's small procedural city and its police graph, built once per test binary.
@@ -68,12 +72,15 @@ impl Harness {
             path,
             s: 0.0,
             speed: 0.0,
+            lateral: 0.0,
+            awards: Vec::new(),
         }
     }
 
     fn racer_view(&self) -> RacerView {
         let p = self.path.point_at(self.s).unwrap();
         let d = self.path.dir_at(self.s).unwrap();
+        let p = [p[0] - d[1] * self.lateral, p[1] + d[0] * self.lateral];
         RacerView {
             entity: RACER,
             pos: [p[0], p[1], 0.0],
@@ -96,6 +103,7 @@ impl Harness {
                 SimEvent::Police(p) => Some(p.clone()),
                 _ => None,
             }));
+            self.awards.extend_from_slice(self.police.bounty_awards());
         }
     }
 
@@ -213,6 +221,8 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
             .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER)),
         "no spike hit"
     );
+    // Hit, not dodged: no bonus.
+    assert_eq!(h.police.bounty_record(RACER).spikes_dodged, 0);
     let p1 = h.police.tire_puncture(RACER);
     assert!(p1.iter().any(|x| *x > 0.0 && *x < 1.0), "{p1:?}");
     h.run(6.0, &[]);
@@ -614,4 +624,192 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
         }
     }
     assert!(captured, "parked racer never captured");
+}
+
+/// Pursued racer at `heat`, driving at `speed`, with a human captain (tools only on request).
+fn pursued(heat: f32, speed: f32, seed: u64) -> Harness {
+    let mut h = Harness::new(12.0, seed);
+    h.police.set_human_captain(true);
+    h.speed = speed;
+    h.run(1.0, &[]);
+    h.police.set_heat(RACER, heat);
+    h.run(10.0, &[]);
+    assert!(h.police.racer(RACER).unwrap().pursued());
+    h
+}
+
+/// Request `cmd` until a valid site comes up as the racer drives on.
+fn place_tool(h: &mut Harness, cmd: CaptainCommand) {
+    for _ in 0..60 {
+        h.run(0.5, &[]);
+        match h.police.captain_command(cmd.clone()) {
+            Ok(()) => return,
+            Err(CaptainError::Site(_)) => {}
+            Err(e) => panic!("{e:?}"),
+        }
+    }
+    panic!("no site for {cmd:?}");
+}
+
+#[test]
+fn dodging_spikes_earns_bounty() {
+    let mut h = pursued(45.0, 20.0, 3);
+    place_tool(
+        &mut h,
+        CaptainCommand::RequestSpikes {
+            target: RACER,
+            road: None,
+        },
+    );
+    let strip = h.police.spike_strips()[0].clone();
+    let before = h.police.bounty(RACER);
+    // Swerve onto the verge, clear of the 7 m strip (wheels at 6.2..7.8 m).
+    h.lateral = 7.0;
+    h.run(strip.site.ahead_m / h.speed + 2.0, &[]);
+    assert!(
+        !h.events
+            .iter()
+            .any(|e| matches!(e, PoliceEvent::SpikeHit { .. })),
+        "drove over the strip"
+    );
+    assert_eq!(h.police.tire_puncture(RACER), [0.0; 4]);
+    let rec = h.police.bounty_record(RACER);
+    assert_eq!(rec.spikes_dodged, 1);
+    let award = h
+        .awards
+        .iter()
+        .find(|a| a.reason == BountyReason::SpikesDodged)
+        .expect("award reported");
+    assert_eq!(award.racer, RACER);
+    let cfg = PoliceConfig::builtin();
+    assert_eq!(award.amount, cfg.heat.bounty.per_spike_dodged);
+    assert!(h.police.bounty(RACER) >= before + award.amount);
+    // Counted once.
+    h.run(5.0, &[]);
+    assert_eq!(h.police.bounty_record(RACER).spikes_dodged, 1);
+}
+
+#[test]
+fn dodging_a_roadblock_at_speed_earns_bounty_and_crawling_through_does_not() {
+    let run = |speed: f32| {
+        let mut h = pursued(75.0, 20.0, 5);
+        place_tool(
+            &mut h,
+            CaptainCommand::RequestRoadblock {
+                target: RACER,
+                road: None,
+            },
+        );
+        let rb = h.police.roadblocks()[0].clone();
+        // Round the parked units on the verge.
+        h.lateral = 7.5;
+        let to_site = rb.site.ahead_m - 30.0;
+        h.run(to_site / h.speed, &[]);
+        h.speed = speed;
+        h.run(60.0 / speed + 1.0, &[]);
+        h
+    };
+    let fast = run(20.0);
+    assert_eq!(fast.police.bounty_record(RACER).roadblocks_dodged, 1);
+    assert!(fast
+        .awards
+        .iter()
+        .any(|a| a.reason == BountyReason::RoadblockDodged && a.racer == RACER));
+    let slow = run(4.0);
+    assert_eq!(slow.police.bounty_record(RACER).roadblocks_dodged, 0);
+}
+
+#[test]
+fn wrecking_a_cop_pays_the_disable_and_wreck_bonuses_once() {
+    let mut h = pursued(30.0, 15.0, 9);
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.kind == UnitKind::Car && u.assignment.target() == Some(RACER))
+        .map(|u| u.id)
+        .expect("a pursuer");
+    // Ram it: contact, then the sim reports a total loss.
+    let entity = EntityId(900);
+    h.police
+        .bind_unit_entity(unit, entity, SteerGeometry::default());
+    let contact = SimEvent::Contact {
+        a: entity,
+        b: RACER,
+        point: [0.0, 0.0, 0.5],
+        normal: [1.0, 0.0, 0.0],
+        rel_speed: 15.0,
+        impulse_ns: 20000.0,
+    };
+    h.run(0.2, &[contact]);
+    h.run(0.5, &[SimEvent::TotalLoss { vehicle: entity }]);
+    let rec = h.police.bounty_record(RACER);
+    assert_eq!((rec.cops_disabled, rec.cops_wrecked), (1, 1));
+    let cfg = PoliceConfig::builtin();
+    let paid: f32 = h
+        .awards
+        .iter()
+        .filter(|a| {
+            matches!(
+                a.reason,
+                BountyReason::CopDisabled | BountyReason::CopWrecked
+            )
+        })
+        .map(|a| a.amount)
+        .sum();
+    assert_eq!(
+        paid,
+        cfg.heat.bounty.per_cop_disabled + cfg.heat.bounty.per_cop_wrecked
+    );
+    h.run(2.0, &[]);
+    assert_eq!(h.police.bounty_record(RACER).cops_wrecked, 1);
+}
+
+#[test]
+fn helicopter_flies_out_tracks_and_goes_home() {
+    let mut h = pursued(30.0, 12.0, 11);
+    h.police
+        .captain_command(CaptainCommand::RequestHelicopter { target: RACER })
+        .or_else(|e| match e {
+            // The roll may find it unavailable; this seed must not.
+            CaptainError::Unavailable => panic!("unavailable"),
+            e => Err(e),
+        })
+        .unwrap();
+    let cfg = PoliceConfig::builtin().tools.helicopter;
+    let mut tracked = false;
+    let mut max_speed = 0.0f32;
+    for _ in 0..240 {
+        h.run(0.5, &[]);
+        if let Some(v) = h.police.helicopters().first() {
+            let s = (v.vel[0] * v.vel[0] + v.vel[1] * v.vel[1]).sqrt();
+            max_speed = max_speed.max(s);
+            if v.phase == HeloPhase::Track && v.visual {
+                tracked = true;
+                break;
+            }
+        }
+    }
+    assert!(tracked, "{:?}", h.police.helicopters());
+    assert!(max_speed <= cfg.speed_mps * 1.001);
+    let v = h.police.helicopters()[0];
+    assert!(v.spotlight_on && v.fuel < 1.0 && v.pos[2] > cfg.launch_climb_m);
+    // Called off: it flies home, lands and is removed.
+    h.police
+        .captain_command(CaptainCommand::CallOff { target: RACER })
+        .unwrap();
+    h.run(1.0, &[]);
+    assert_eq!(h.police.helicopters()[0].phase, HeloPhase::Return);
+    for _ in 0..120 {
+        h.run(1.0, &[]);
+        if h.police.helicopters().is_empty() {
+            break;
+        }
+    }
+    assert!(h.police.helicopters().is_empty(), "never landed");
+    assert!(!h
+        .police
+        .units()
+        .iter()
+        .any(|u| u.kind == UnitKind::Helicopter));
 }

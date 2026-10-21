@@ -82,7 +82,14 @@ heat_scale_on_enter = 0.25
 [bounty]
 per_heat_second = 2.0
 per_race_won_wanted = 500.0
+# A unit taken out of the chase by racer contact (pulled over or wrecked)...
 per_cop_disabled = 250.0
+# ...plus this when it is a total loss.
+per_cop_wrecked = 400.0
+# Getting past a roadblock at speed without touching its units.
+per_roadblock_dodged = 600.0
+# Crossing a spike strip's road with every tire intact.
+per_spike_dodged = 300.0
 max_priority_bounty = 20000.0
 
 # Race payout / stake multiplier by phase (night pays more).

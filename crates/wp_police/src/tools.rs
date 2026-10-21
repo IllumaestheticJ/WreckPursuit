@@ -13,7 +13,7 @@ use wp_contracts::EntityId;
 
 use crate::events::{ToolId, UnitId};
 use crate::graph::{
-    add, cross, dist, len, perp_left, scale, sub, NodeId, RoadClass, RoadGraph, SegmentId,
+    add, cross, dist, dot, len, perp_left, scale, sub, NodeId, RoadClass, RoadGraph, SegmentId,
 };
 use crate::time::SimTime;
 
@@ -37,6 +37,18 @@ pub struct ToolSite {
     pub sight_m: f32,
     /// Distance ahead of the racer along its predicted path, m.
     pub ahead_m: f32,
+}
+
+impl ToolSite {
+    /// Whether a move `p0 → p1` in the approach direction crosses the line across the road
+    /// through the site, out to `half_width_m` either side of the centre.
+    pub fn crossed(&self, p0: [f32; 2], p1: [f32; 2], half_width_m: f32) -> bool {
+        if dot(sub(p1, p0), self.dir) <= 0.0 {
+            return false;
+        }
+        let half = scale(perp_left(self.dir), half_width_m);
+        segments_intersect(p0, p1, add(self.pos, half), sub(self.pos, half))
+    }
 }
 
 /// Placement constraints.
@@ -153,6 +165,9 @@ pub struct Roadblock {
     pub barriers: Vec<StaticCollider>,
     /// Removed at.
     pub expires: SimTime,
+    /// The target has passed it (dodged or not); no further bounty check.
+    #[serde(default)]
+    pub resolved: bool,
 }
 
 /// A spike strip: a line across the road.
@@ -172,6 +187,9 @@ pub struct SpikeStrip {
     pub unit: Option<UnitId>,
     /// Removed at.
     pub expires: SimTime,
+    /// The target has crossed it (hit or dodged); no further bounty check.
+    #[serde(default)]
+    pub resolved: bool,
 }
 
 impl SpikeStrip {
@@ -193,6 +211,7 @@ impl SpikeStrip {
             b: sub(site.pos, half),
             unit,
             expires,
+            resolved: false,
         }
     }
 
@@ -336,18 +355,34 @@ pub struct RadioLine {
     pub text: String,
 }
 
-/// Helicopter view for renderers / the captain.
+/// Helicopter view for renderers / the captain (every helicopter in the air).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct HeloView {
     /// Helicopter unit.
     pub unit: UnitId,
     /// World position, m.
     pub pos: [f32; 3],
+    /// World velocity, m/s.
+    pub vel: [f32; 3],
+    /// Nose direction (XY unit vector).
+    pub heading: [f32; 2],
+    /// Roll, rad (+ right side down).
+    pub bank_rad: f32,
+    /// Pitch, rad (+ nose up).
+    pub pitch_rad: f32,
+    /// Behaviour phase.
+    pub phase: crate::helo::HeloPhase,
+    /// Spotlight on.
+    pub spotlight_on: bool,
     /// Spotlight aim point (ground), m.
     pub spotlight_target: [f32; 3],
     /// Spotlight cone half angle, rad.
     pub cone_half_angle_rad: f32,
-    /// Racer being tracked.
+    /// Has visual on its target.
+    pub visual: bool,
+    /// Fuel left, 0..=1.
+    pub fuel: f32,
+    /// Racer it was launched on.
     pub target: EntityId,
 }
 

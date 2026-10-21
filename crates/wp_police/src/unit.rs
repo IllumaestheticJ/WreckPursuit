@@ -363,6 +363,10 @@ pub struct Unit {
     pub racer_contact: bool,
     /// Total loss.
     pub wrecked: bool,
+    /// Racer already paid `CopDisabled` bounty for taking this unit out (pull-over after
+    /// contact); a later total loss only adds the wreck bonus.
+    #[serde(default)]
+    pub disabled_by: Option<EntityId>,
     /// Sim time when the current assignment began.
     pub assigned: SimTime,
     /// A captain order overrides the AI until this time.
@@ -391,6 +395,9 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// Flight and behaviour state of a helicopter (`crate::helo`); `None` for cars.
+    #[serde(default)]
+    pub helo: Option<crate::helo::HeloState>,
 }
 
 impl Unit {
@@ -429,6 +436,7 @@ impl Unit {
             effects: HandlingEffects::NEUTRAL,
             racer_contact: false,
             wrecked: false,
+            disabled_by: None,
             assigned: SimTime::ZERO,
             captain_hold_until: SimTime::ZERO,
             pit_ready: SimTime::ZERO,
@@ -440,6 +448,7 @@ impl Unit {
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            helo: None,
         }
     }
 
@@ -709,20 +718,6 @@ pub fn powu(x: f32, n: u32) -> f32 {
         r *= x;
     }
     r
-}
-
-/// Advance a helicopter toward `target` (XY) by `dt`.
-pub fn step_helo(u: &mut Unit, target: [f32; 2], speed: f32, altitude: f32, dt: f32) {
-    let b = &mut u.body;
-    let to = sub(target, b.pos);
-    let d = len(to);
-    let v = speed.min(d / dt.max(1e-3));
-    if d > 1e-3 {
-        b.heading = scale(to, 1.0 / d);
-    }
-    b.speed = v;
-    b.pos = add(b.pos, scale(b.heading, v * dt));
-    b.alt_m += (altitude - b.alt_m).clamp(-8.0 * dt, 8.0 * dt);
 }
 
 /// Steering geometry of the vehicle a [`DriveCommand`] is turned into input for.

@@ -34,6 +34,25 @@
 - Queries: `wanted_level`, `racer`, `units`, `incidents`, `pool_count`, `tire_puncture(entity) -> [f32; 4]`,
   `static_colliders()`, `spike_strips()`, `roadblocks()`, `helicopters()`, `now() -> SimTime`, `state_hash()`, `stats()`.
 - Bounty (for prompt 08): `bounty`, `bounty_record`, `set_bounty_record`, `record_race_won`, `payout_scale`.
+  - **Bounty bonuses** (2026-10-21): `bounty_awards() -> &[BountyAward { racer, reason, amount, time }]`
+    lists the bonuses earned during the latest `step` (cleared at the start of each step; read it
+    after every step). `BountyReason::{CopDisabled, CopWrecked, RoadblockDodged, SpikesDodged}`,
+    priced by `heat.toml [bounty] per_cop_disabled / per_cop_wrecked / per_roadblock_dodged /
+    per_spike_dodged`. `CopDisabled` now also pays when a unit **pulls over** after racer contact
+    (it used to need a total loss); a later total loss adds only `CopWrecked`. Dodges: the
+    tool's target crosses the line through the site (road half width + `dodge_margin_m`) with no
+    wheel on the strip / without touching a roadblock unit and at ≥ `dodge_min_speed_mps`.
+    `BountyRecord` gained `cops_wrecked`, `roadblocks_dodged`, `spikes_dodged` (`serde(default)`,
+    old saved ledgers load).
+- **Helicopter game model** (2026-10-21, module `wp_police::helo`): the helicopter is a point-mass
+  flight model (accel / speed / yaw / climb limits, bank and pitch from the acceleration) with
+  behaviour phases Launch → Transit → Track (orbit a slow car, trail a fast one) → Search (beam
+  sweeps a growing circle) → Return (call-off or **bingo fuel**) → Landed (removed). At night it
+  only sees what its slewing spotlight is on. It is always flown by `wp_police`, even with
+  `internal_driving: false`. `helicopters()` lists every helicopter in the air; `HeloView` gained
+  `vel, heading, bank_rad, pitch_rad, phase, spotlight_on, visual, fuel` (renderer: tilt the
+  model by bank/pitch, draw the beam only when `spotlight_on`). `tools.toml [helicopter]`
+  replaced `max_track_s` with `endurance_s` / `reserve_s` and added the flight and behaviour keys.
 - Player chase units (for prompt 07): `add_player_unit(player, entity, pos, heading)` and `unit_order(unit)` (suggestion only).
 - Captain API (for prompt 07): `captain_command(CaptainCommand) -> Result<(), CaptainError>`,
   `captain_view()`, `set_human_captain(bool)`. Roads are named by **`RoadEdgeId`** (D's edge index).
@@ -109,6 +128,8 @@
 | 5 | Shared road-network trait = D's `RoadGraphView` (+ `RoadEdgeId`) | One road model | 05, 06 | Landed in v0.3.0 (`RoadNetworkQuery`); police build from it (round 8) |
 | 7 | `RoadNetworkQuery::node_signalised(n: u32) -> bool` (additive) | Police stop at red lights only at signalised junctions and must know which ones are; the trait lacks it, so `RoadGraph::from_network` takes the list separately | 05 (implements, already has `RoadNode::signalised`), 06 | Proposed (round 8) |
 | 6 | JSON Schema for `data/police/*.toml` | Data validation parity | Lead | Optional, later |
+| 8 | `PoliceEvent::BountyAward { racer: EntityId, reason: u8, amount: f32 }` (additive) | HUD call-outs ("+600 roadblock dodged") and economy without polling `bounty_awards()`; until then wp_sim reads `PoliceSystem::bounty_awards()` after each step | 04, 07, 08, lead (wp_sim) | Proposed (2026-10-21) |
+| 9 | `PoliceEvent::HeloLaunched` stays; add `HeloReturned { unit }` (additive) | Audio / HUD know when air support leaves (bingo fuel, call-off) | J (audio), 04 | Proposed (2026-10-21) |
 
 ### Final `PoliceEvent` variant list (contract v0.3.0)
 Kind codes are stable (`wp_police::events::kind`). `UnitId(u32)`, `ToolId(u32)` and

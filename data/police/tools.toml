@@ -15,6 +15,10 @@ lifetime_s = 90.0
 # Never on highways when the wanted level is above this.
 highway_max_level = 3
 max_active = 1
+# Bounty dodge: the line across the road (plus this margin past each edge) crossed at speed
+# without touching a roadblock unit.
+dodge_margin_m = 4.0
+dodge_min_speed_mps = 8.0
 [roadblock.cooldown_s]
 dawn = 60.0
 day = 40.0
@@ -29,6 +33,8 @@ length_m = 7.0
 deflate_s = 5.0
 lifetime_s = 60.0
 max_active = 2
+# Bounty dodge: the strip's road (plus this margin past each edge) crossed with no wheel hit.
+dodge_margin_m = 4.0
 [spikes.cooldown_s]
 dawn = 30.0
 day = 20.0
@@ -36,15 +42,42 @@ dusk = 30.0
 night = 45.0
 
 [helicopter]
+# Flight model (wp_police::helo): point mass with sim-cade limits. Fast racers on open roads
+# can out-run it; it cannot follow through tunnels or under tall buildings.
 speed_mps = 55.0
+accel_mps2 = 4.5
+yaw_rate_rad_s = 0.7
+climb_mps = 8.0
+attitude_tau_s = 0.6
 altitude_m = 120.0
+launch_climb_m = 40.0
+# Behaviour: orbit a slow target, trail a fast one, search a growing circle when visual is lost.
+orbit_radius_m = 150.0
+orbit_speed_mps = 25.0
+orbit_max_target_mps = 18.0
+trail_distance_m = 120.0
+lead_s = 2.0
+search_after_s = 4.0
+search_growth_mps = 6.0
+search_max_radius_m = 400.0
+search_sweep_rad_s = 0.8
+# Fuel: returns ("bingo") when what is left only covers the flight home plus the reserve.
+endurance_s = 360.0
+reserve_s = 30.0
+landing_radius_m = 25.0
 spotlight_half_angle_rad = 0.35
-max_track_s = 240.0
+spotlight_slew_rad_s = 0.5
 [helicopter.los_range_m]
 dawn = 450.0
 day = 500.0
 dusk = 450.0
 night = 350.0
+# At night the helicopter only sees what its spotlight is on.
+[helicopter.spotlight_required]
+dawn = false
+day = false
+dusk = false
+night = true
 
 [gadgets]
 # Index = tier (0 = basic).

@@ -15,7 +15,7 @@ use crate::events::{
 use crate::graph::{
     add, dist, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
 };
-use crate::heat::{PursuitStatus, WantedLevel};
+use crate::heat::{BountyReason, PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::{
     compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
@@ -877,6 +877,11 @@ impl PoliceSystem {
             self.helo_requests.remove(k);
             let pad = self.helipad();
             let i = self.spawn_unit(UnitKind::Helicopter, UnitRole::Helicopter, pad, [0.0, 1.0]);
+            self.units[i].helo = Some(crate::helo::HeloState::new(
+                req.racer,
+                pad,
+                &self.cfg.tools.helicopter,
+            ));
             self.stats.helo_launches += 1;
             let id = self.units[i].id;
             self.pending.push(PoliceEvent::HeloLaunched {
@@ -885,13 +890,23 @@ impl PoliceSystem {
             });
             self.assign(i, Assignment::HeloTrack { target: req.racer });
         }
-        // Helicopters return when the pursuit ends or they run out of time on station.
-        let max_track = self.cfg.tools.helicopter.max_track_s;
+        // Helicopters return when the pursuit ends or at bingo fuel (helo::step flies them home).
         for i in 0..self.units.len() {
             let u = &self.units[i];
             if let Assignment::HeloTrack { target } = u.assignment {
                 let done = !self.racers.get(&target).is_some_and(|r| r.pursued());
-                if done || now.since(u.assigned) > max_track {
+                let bingo = u
+                    .helo
+                    .is_some_and(|st| st.bingo(u.body.pos, &self.cfg.tools.helicopter));
+                if bingo && !done {
+                    let callsign = format!("Air {}", u.id.0);
+                    self.radio(RadioCue::new(
+                        RadioTier::Tactical,
+                        Some(u.id),
+                        format!("{callsign}: bingo fuel, returning to base."),
+                    ));
+                }
+                if done || bingo {
                     self.assign(i, Assignment::OutOfService);
                 }
             }
@@ -988,6 +1003,7 @@ impl PoliceSystem {
             units,
             barriers,
             expires: now.plus(lifetime),
+            resolved: false,
         });
         self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
@@ -1136,10 +1152,11 @@ impl PoliceSystem {
                     DisableCause::SelfCrash
                 };
                 let contact_racer = if u.racer_contact {
-                    u.assignment.target()
+                    u.assignment.target().or(u.disabled_by)
                 } else {
                     None
                 };
+                let already_disabled = u.disabled_by.is_some();
                 let id = u.id;
                 if u.engaged {
                     match cause {
@@ -1148,11 +1165,10 @@ impl PoliceSystem {
                     }
                 }
                 if let Some(racer) = contact_racer {
-                    let heat = self.cfg.heat.clone();
-                    if let Some(r) = self.racers.get_mut(&racer) {
-                        r.bounty.cops_disabled += 1;
-                        r.add_heat(heat.heat.cop_disabled_heat, &heat);
+                    if !already_disabled {
+                        self.cop_disabled_by(racer);
                     }
+                    self.award_bounty(racer, BountyReason::CopWrecked);
                 }
                 self.units[i].wrecked = true;
                 self.pending
@@ -1173,6 +1189,16 @@ impl PoliceSystem {
             let bent = u.must_pull_over(&self.cfg.pursuit);
             if damaged || bent {
                 let id = u.id;
+                // Taken out of the chase by the racer: bounty now, the wreck bonus if it dies.
+                let by = if u.racer_contact {
+                    u.assignment.target()
+                } else {
+                    None
+                };
+                if let Some(racer) = by {
+                    self.units[i].disabled_by = Some(racer);
+                    self.cop_disabled_by(racer);
+                }
                 let cause = if bent {
                     DisableCause::BentWheel
                 } else {
@@ -1186,6 +1212,15 @@ impl PoliceSystem {
         }
     }
 
+    /// A unit was taken out of the chase by `racer`: heat and the `CopDisabled` bonus.
+    fn cop_disabled_by(&mut self, racer: EntityId) {
+        let heat = &self.cfg.heat;
+        if let Some(r) = self.racers.get_mut(&racer) {
+            r.add_heat(heat.heat.cop_disabled_heat, heat);
+        }
+        self.award_bounty(racer, BountyReason::CopDisabled);
+    }
+
     fn cleanup_units(&mut self) {
         let now = self.now;
         let racers: Vec<[f32; 2]> = self.racers.values().map(|r| xy(r.pos)).collect();
@@ -1196,7 +1231,10 @@ impl PoliceSystem {
             let far = racers.iter().all(|p| dist(*p, u.body.pos) > 250.0);
             let remove = match (&u.assignment, u.role) {
                 (_, UnitRole::Player) => false,
-                (Assignment::OutOfService, UnitRole::Helicopter) => age > 15.0,
+                // Removed once landed (fallback: a helicopter that never gets home).
+                (Assignment::OutOfService, UnitRole::Helicopter) => {
+                    u.helo.is_none_or(|st| !st.airborne()) || age > 600.0
+                }
                 (Assignment::OutOfService, _) => age > if u.wrecked { 60.0 } else { 20.0 } && far,
                 (Assignment::Idle, UnitRole::Reinforcement) => far || age > 30.0,
                 _ => false,

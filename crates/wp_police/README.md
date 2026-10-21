@@ -42,7 +42,13 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   heat is multiplied by `heat_scale_on_enter`.
 - **Capture**: speed < `stop_speed_mps` for `stop_time_s` with a unit within `unit_radius_m`, or
   `TotalLoss` while wanted. Heat resets to 0.
-- **Bounty** = `per_heat_second × ∫heat/100 dt + per_race_won_wanted × races + per_cop_disabled × cops`.
+- **Bounty** = `per_heat_second × ∫heat/100 dt + per_race_won_wanted × races` plus lump-sum
+  **bonuses** (`BountyReason`, reported per step by `bounty_awards()`):
+  - `per_cop_disabled`: a unit pulls over or is wrecked after contact with the racer (also adds
+    `cop_disabled_heat`); `per_cop_wrecked` on top when it is a total loss (paid once per unit);
+  - `per_roadblock_dodged`: the roadblock's target crosses its line (road half width +
+    `dodge_margin_m`) at ≥ `dodge_min_speed_mps` without touching a roadblock unit;
+  - `per_spike_dodged`: the strip's target crosses its road with no wheel on the strip.
   `BountyRecord` is persisted by prompt 08 (`bounty_record` / `set_bounty_record`). It sets
   reinforcement priority (up to `priority_max_reduction` faster response). Night stakes: `payout_scale()`.
 
@@ -55,7 +61,23 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
   an idle unit within 700 m is committed, or a new unit spawns ≥ `spawn_min_distance_m` away, out of sight.
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
-  It is kinematic, gives line of sight to every unit, and is **not** a weapon.
+  It gives line of sight to every unit and is **not** a weapon. Its game model is `helo.rs`
+  (below).
+
+### Helicopter (`helo.rs`, `tools.toml [helicopter]`)
+- **Flight model**: point mass asking for a horizontal velocity, reaching it at most
+  `accel_mps2` (≈ g·tan(max bank)) and never above `speed_mps` (55 m/s: a car above ~200 km/h on
+  an open road out-runs it). Nose turns at `yaw_rate_rad_s`, altitude at `climb_mps`; bank and
+  pitch follow the acceleration actually used (lag `attitude_tau_s`) for the renderer.
+- **Behaviour**: `Launch` (climb `launch_climb_m` off the pad) → `Transit` (to the last known
+  position, led by `lead_s`) → `Track` (orbit at `orbit_radius_m` / `orbit_speed_mps`, or trail
+  `trail_distance_m` behind a car faster than `orbit_max_target_mps`) → `Search` after
+  `search_after_s` without visual (orbit the last known position while the beam sweeps a circle
+  growing at `search_growth_mps`; ground sightings move it) → `Return` on call-off / pursuit end
+  or **bingo fuel** (fuel `endurance_s` left ≤ time home + `reserve_s`) → `Landed` (removed).
+- **Visual**: range `los_range_m[phase]`, line of sight from altitude (tall buildings, tunnels),
+  and where `spotlight_required[phase]` (night) the spotlight's ground circle on the car. The
+  beam slews at `spotlight_slew_rad_s`: a hard direction change or a dash under cover breaks it.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
   `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
@@ -292,4 +314,10 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
 - Captain-command events are emitted on the next `step`.
+- Helicopter: flat terrain (no ground or building clearance check; it flies at `altitude_m`
+  above the origin), no wind or weather effects, no refuel-and-relaunch cycle (a landed
+  helicopter is removed; the next request launches a fresh one), and racers cannot damage it.
+- Bounty bonuses are not yet a contract event (request #8); `wp_sim`/economy must read
+  `bounty_awards()` after each step. A roadblock dodge cannot tell barrier hits from a clean
+  pass except through the speed floor (barrier contacts are with the static world).
 - No JSON Schema for `data/police/*.toml`; validation lives in `PoliceConfig::validate` plus serde `deny_unknown_fields`.

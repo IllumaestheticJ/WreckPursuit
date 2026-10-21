@@ -48,8 +48,17 @@ pub struct BountyRecord {
     pub heat_seconds: f32,
     /// Races won while wanted.
     pub races_won_wanted: u32,
-    /// Police units disabled.
+    /// Police units taken out of the chase by racer contact (pulled over or wrecked).
     pub cops_disabled: u32,
+    /// Of those, units wrecked (total loss).
+    #[serde(default)]
+    pub cops_wrecked: u32,
+    /// Roadblocks got past at speed without touching their units.
+    #[serde(default)]
+    pub roadblocks_dodged: u32,
+    /// Spike strips crossed with every tire intact.
+    #[serde(default)]
+    pub spikes_dodged: u32,
 }
 
 impl BountyRecord {
@@ -59,12 +68,64 @@ impl BountyRecord {
         self.heat_seconds * b.per_heat_second
             + self.races_won_wanted as f32 * b.per_race_won_wanted
             + self.cops_disabled as f32 * b.per_cop_disabled
+            + self.cops_wrecked as f32 * b.per_cop_wrecked
+            + self.roadblocks_dodged as f32 * b.per_roadblock_dodged
+            + self.spikes_dodged as f32 * b.per_spike_dodged
+    }
+
+    /// Count one bonus in the ledger and return what it is worth.
+    pub fn record(&mut self, reason: BountyReason, cfg: &HeatFile) -> f32 {
+        let b = &cfg.bounty;
+        match reason {
+            BountyReason::CopDisabled => {
+                self.cops_disabled += 1;
+                b.per_cop_disabled
+            }
+            BountyReason::CopWrecked => {
+                self.cops_wrecked += 1;
+                b.per_cop_wrecked
+            }
+            BountyReason::RoadblockDodged => {
+                self.roadblocks_dodged += 1;
+                b.per_roadblock_dodged
+            }
+            BountyReason::SpikesDodged => {
+                self.spikes_dodged += 1;
+                b.per_spike_dodged
+            }
+        }
     }
 
     /// Reinforcement priority 0..=1 (1 at `max_priority_bounty`).
     pub fn priority(&self, cfg: &HeatFile) -> f32 {
         (self.bounty(cfg) / cfg.bounty.max_priority_bounty.max(1.0)).clamp(0.0, 1.0)
     }
+}
+
+/// Why a racer earned a lump-sum bounty bonus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BountyReason {
+    /// A pursuing unit pulled over or was wrecked after contact with the racer.
+    CopDisabled,
+    /// ...and it was a total loss (paid on top of `CopDisabled`).
+    CopWrecked,
+    /// Got past a roadblock at speed without touching its units.
+    RoadblockDodged,
+    /// Crossed a spike strip's road with every tire intact.
+    SpikesDodged,
+}
+
+/// One bounty bonus, for HUD call-outs and the economy (`PoliceSystem::bounty_awards`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BountyAward {
+    /// Racer.
+    pub racer: EntityId,
+    /// What for.
+    pub reason: BountyReason,
+    /// Bounty added.
+    pub amount: f32,
+    /// Sim time.
+    pub time: SimTime,
 }
 
 /// Heat for one violation before the witness factor.
@@ -496,5 +557,42 @@ mod tests {
         b.heat_seconds += 30.0;
         assert!(b.bounty(&c) > b0);
         assert!(b.priority(&c) > 0.0 && b.priority(&c) <= 1.0);
+    }
+
+    #[test]
+    fn bonuses_are_counted_and_priced_from_the_table() {
+        let c = cfg();
+        let mut b = BountyRecord::default();
+        let b0 = b.bounty(&c);
+        let mut paid = 0.0;
+        for reason in [
+            BountyReason::CopDisabled,
+            BountyReason::CopWrecked,
+            BountyReason::RoadblockDodged,
+            BountyReason::SpikesDodged,
+        ] {
+            paid += b.record(reason, &c);
+        }
+        assert_eq!(
+            (
+                b.cops_disabled,
+                b.cops_wrecked,
+                b.roadblocks_dodged,
+                b.spikes_dodged
+            ),
+            (1, 1, 1, 1)
+        );
+        let bc = &c.bounty;
+        let want = bc.per_cop_disabled
+            + bc.per_cop_wrecked
+            + bc.per_roadblock_dodged
+            + bc.per_spike_dodged;
+        assert_eq!(paid, want);
+        assert!((b.bounty(&c) - b0 - want).abs() < 1e-3);
+        // Ledgers saved before the bonus fields existed still load.
+        let old: BountyRecord =
+            serde_json::from_str(r#"{"heat_seconds":1.0,"races_won_wanted":2,"cops_disabled":3}"#)
+                .unwrap();
+        assert_eq!((old.cops_disabled, old.cops_wrecked), (3, 0));
     }
 }

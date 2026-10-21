@@ -189,8 +189,14 @@ pub struct BountyConfig {
     pub per_heat_second: f32,
     /// Bounty per race won while wanted.
     pub per_race_won_wanted: f32,
-    /// Bounty per police unit disabled.
+    /// Bounty per police unit taken out of the chase by racer contact (pulled over or wrecked).
     pub per_cop_disabled: f32,
+    /// Bonus on top of `per_cop_disabled` when the unit is wrecked (total loss).
+    pub per_cop_wrecked: f32,
+    /// Bonus for getting past a roadblock at speed without touching its units.
+    pub per_roadblock_dodged: f32,
+    /// Bonus for crossing a spike strip's road without a punctured wheel.
+    pub per_spike_dodged: f32,
     /// Multiplier on race payouts / stakes by phase (night pays more).
     pub payout_scale: PhaseTable<f32>,
     /// Bounty at which a racer gets maximum reinforcement priority.
@@ -524,6 +530,10 @@ pub struct RoadblockConfig {
     pub cooldown_s: PhaseTable<f32>,
     /// Max roadblocks active at once.
     pub max_active: u32,
+    /// The roadblock line counts as crossed this far beyond the road edge (shoulders, verges), m.
+    pub dodge_margin_m: f32,
+    /// A crossing below this speed is a crawl-through, not a dodge, m/s.
+    pub dodge_min_speed_mps: f32,
 }
 
 /// Spike strip tool.
@@ -546,22 +556,60 @@ pub struct SpikeConfig {
     pub cooldown_s: PhaseTable<f32>,
     /// Max strips active at once.
     pub max_active: u32,
+    /// The strip's road counts as crossed this far beyond the road edge, m.
+    pub dodge_margin_m: f32,
 }
 
-/// Helicopter entity.
+/// Helicopter game model (`crate::helo`): flight limits, behaviour and spotlight.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeloConfig {
-    /// Cruise speed, m/s.
+    /// Maximum horizontal speed, m/s.
     pub speed_mps: f32,
-    /// Altitude, m.
+    /// Maximum horizontal acceleration (≈ g·tan(max bank)), m/s².
+    pub accel_mps2: f32,
+    /// Maximum yaw rate, rad/s.
+    pub yaw_rate_rad_s: f32,
+    /// Maximum climb / descent rate, m/s.
+    pub climb_mps: f32,
+    /// Time constant of bank and pitch following the acceleration, s.
+    pub attitude_tau_s: f32,
+    /// Cruise and tracking altitude above ground, m.
     pub altitude_m: f32,
+    /// Vertical climb out of the pad before transit, m.
+    pub launch_climb_m: f32,
+    /// Orbit radius around a slow target, m.
+    pub orbit_radius_m: f32,
+    /// Ground speed along the orbit, m/s.
+    pub orbit_speed_mps: f32,
+    /// Above this target speed the helicopter trails instead of orbiting, m/s.
+    pub orbit_max_target_mps: f32,
+    /// Trail distance behind a fast target, m.
+    pub trail_distance_m: f32,
+    /// Seconds of target motion the flight path leads by.
+    pub lead_s: f32,
+    /// Without visual for this long the helicopter starts a search pattern, s.
+    pub search_after_s: f32,
+    /// Growth of the search circle, m/s.
+    pub search_growth_mps: f32,
+    /// Largest search circle, m.
+    pub search_max_radius_m: f32,
+    /// Sweep rate of the spotlight around the search circle, rad/s.
+    pub search_sweep_rad_s: f32,
+    /// Fuel from launch, s of flight.
+    pub endurance_s: f32,
+    /// Fuel kept for the flight home on top of the transit time ("bingo"), s.
+    pub reserve_s: f32,
+    /// Within this distance of the pad a returning helicopter descends and lands, m.
+    pub landing_radius_m: f32,
     /// Horizontal range within which the helicopter keeps visual, m.
     pub los_range_m: PhaseTable<f32>,
+    /// Whether visual needs the spotlight on the target (night), per phase.
+    pub spotlight_required: PhaseTable<bool>,
     /// Spotlight cone half angle, rad.
     pub spotlight_half_angle_rad: f32,
-    /// Max time on a single track before returning to refuel, s.
-    pub max_track_s: f32,
+    /// Spotlight slew rate, rad/s (ground speed of the beam = rate × slant range).
+    pub spotlight_slew_rad_s: f32,
 }
 
 /// Racer-side gadgets.

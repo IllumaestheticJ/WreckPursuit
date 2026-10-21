@@ -28,9 +28,10 @@ use crate::dispatch::ROAD_HALF_WIDTH_M;
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
 use crate::heat::{PursuitStatus, RuleInputs, RuleOutcome, WantedLevel};
+use crate::helo::HeloTarget;
 use crate::unit::{
-    plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv, Tactic,
-    Track, UnitRole, LANE_OFFSET_M,
+    plan_unit_speed, step_ground, Assignment, BoxSlot, DriveCommand, DriveEnv, Tactic, Track,
+    UnitRole, LANE_OFFSET_M,
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
@@ -74,6 +75,7 @@ impl PoliceSystem {
         let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
         let helo_range = self.cfg.tools.helicopter.los_range_m.get(self.phase);
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
+        let mut helo_visual: Vec<(UnitId, bool)> = Vec::new();
         for id in ids {
             let p = xy(self.racers[&id].pos);
             let mut o = RacerObs {
@@ -104,16 +106,23 @@ impl PoliceSystem {
                         }
                     }
                     UnitKind::Helicopter => {
-                        if matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
-                            && d <= helo_range
-                            // Looking down from altitude: only tall buildings block.
-                            && world.line_of_sight(
-                                [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                                [p[0], p[1], crate::EYE_HEIGHT_M],
-                            )
+                        let Some(st) = u.helo.as_ref() else {
+                            continue;
+                        };
+                        if !matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
+                            || d > helo_range
                         {
-                            o.seen = true;
+                            continue;
                         }
+                        // Looking down from altitude: only tall buildings block.
+                        let los = world.line_of_sight(
+                            [u.body.pos[0], u.body.pos[1], u.body.alt_m],
+                            [p[0], p[1], crate::EYE_HEIGHT_M],
+                        );
+                        let visual =
+                            st.can_see(&u.body, p, los, self.phase, &self.cfg.tools.helicopter);
+                        helo_visual.push((u.id, visual));
+                        o.seen |= visual;
                     }
                 }
             }
@@ -132,6 +141,14 @@ impl PoliceSystem {
                     let len = trail.length();
                     trail.trim_before(len, 1500.0);
                 }
+            }
+        }
+        // A helicopter with no sighting this step has lost visual.
+        let now = self.now;
+        for u in &mut self.units {
+            if let Some(st) = u.helo.as_mut() {
+                let visual = helo_visual.iter().any(|(id, v)| *id == u.id && *v);
+                st.set_visual(visual, now);
             }
         }
     }
@@ -644,20 +661,7 @@ impl PoliceSystem {
                     self.units[i].cmd.speed_mps = (lim * p.respond_speed_factor * 1.15).min(cap);
                 }
                 Assignment::Pursue { .. } => {} // coordinate_pursuits
-                Assignment::HeloTrack { target } => {
-                    let aim = self
-                        .racers
-                        .get(&target)
-                        .and_then(|r| r.last_known)
-                        .unwrap_or(self.units[i].body.pos);
-                    self.units[i].cmd = DriveCommand {
-                        track: Track::new(vec![aim]),
-                        speed_mps: self.cfg.tools.helicopter.speed_mps,
-                        cornering_g: 1.0,
-                        siren: false,
-                        lane_offset_m: 0.0,
-                    };
-                }
+                Assignment::HeloTrack { .. } => {} // flown by helo::step
                 Assignment::RoadblockAt { .. }
                 | Assignment::SpikeAt { .. }
                 | Assignment::OutOfService => {
@@ -903,25 +907,37 @@ impl PoliceSystem {
         let phase = self.phase;
         let mode = self.setup.mode;
         let hazards = self.setup.hazards;
+        let now = self.now;
         for i in 0..self.units.len() {
             let u = &self.units[i];
-            if !u.internal || u.player.is_some() {
+            // Helicopters have no body in wp_sim: always flown here.
+            if u.kind == UnitKind::Car && (!u.internal || u.player.is_some()) {
                 continue;
             }
             match u.kind {
                 UnitKind::Helicopter => {
-                    let target = u.cmd.track.pts.first().copied().unwrap_or(u.body.pos);
-                    let speed = if u.assignment == Assignment::OutOfService {
-                        helo.speed_mps
-                    } else {
-                        u.cmd.speed_mps
+                    let target = match (&u.assignment, &u.helo) {
+                        (Assignment::HeloTrack { target }, Some(st)) => {
+                            self.racers.get(target).map(|r| {
+                                if st.visual {
+                                    HeloTarget {
+                                        pos: xy(r.pos),
+                                        vel: [r.vel[0], r.vel[1]],
+                                    }
+                                } else {
+                                    HeloTarget {
+                                        pos: r.last_known.unwrap_or(st.spot),
+                                        vel: [0.0, 0.0],
+                                    }
+                                }
+                            })
+                        }
+                        _ => None,
                     };
-                    let target = if u.assignment == Assignment::OutOfService {
-                        crate::graph::add(u.body.pos, scale(u.body.heading, 100.0))
-                    } else {
-                        target
-                    };
-                    step_helo(&mut self.units[i], target, speed, helo.altitude_m, dt);
+                    let u = &mut self.units[i];
+                    if let Some(st) = u.helo.as_mut() {
+                        crate::helo::step(&mut u.body, st, target, now, &helo, dt);
+                    }
                 }
                 UnitKind::Car => {
                     if u.wrecked && u.body.speed == 0.0 {
