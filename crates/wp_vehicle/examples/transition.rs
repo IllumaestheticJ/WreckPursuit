@@ -531,19 +531,68 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
         for cfg in &cfgs {
             apply(cfg);
             car_lab::set_override(Some(t));
+            // V2STEER=1: also vary the VR steering of VR configurations (around the config's).
+            let steer = if std::env::var("V2STEER").is_ok() && cfg.plain.velocity_relative && i > 0
+            {
+                let b = plain::active().unwrap();
+                let mut pick = |cur: f32, lo: f32, hi: f32| {
+                    let r = rng.range(lo, hi);
+                    (cur + (r - cur) * spread).clamp(lo, hi)
+                };
+                let p = PlainSteer {
+                    align_gain: pick(b.align_gain, 0.2, 1.0),
+                    align_from_deg: pick(b.align_from_deg, 2.0, 15.0),
+                    align_full_deg: pick(b.align_full_deg, 8.0, 30.0),
+                    t_align_s: pick(b.t_align_s, 0.1, 0.5),
+                    slide_key_gain: pick(b.slide_key_gain, 0.0, 1.0),
+                    ..b
+                };
+                plain::set_override(Some(p));
+                Some(p)
+            } else {
+                None
+            };
             let sc = v2_score(cars);
             println!(
                 "{}",
                 serde_json::json!({
                     "config": cfg.name, "held": sc.held, "caught": sc.caught,
                     "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
+                    "steer": steer,
                 })
             );
         }
     }
 }
 
+/// `holds`: the held-drift set case by case (`ONLY` config, `TYRE`, `PLAIN` overrides).
+fn holds(cars: &[(&str, LoadedCar)]) {
+    use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
+    let a = reference_assists();
+    for cfg in configs() {
+        apply(&cfg);
+        println!("## {}", cfg.name);
+        for (id, c) in cars {
+            for e in [6.0f32, 12.0, 20.0] {
+                for g in [0.3f32, 0.5, 0.7] {
+                    let d = PlainDriver::HoldCounter {
+                        entry_deg: e,
+                        throttle: 1.0,
+                    };
+                    let m = plain_hold(c, &a, d, 40.0, g);
+                    println!("  {id} {e}° {g} g: {}", m.cell());
+                }
+            }
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("holds") {
+        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        holds(&cars);
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("v2search") {
         let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
         v2search(&cars);
