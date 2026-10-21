@@ -33,10 +33,29 @@ export interface Volumes {
   ambience: number;
 }
 
+/** TCS / ABS level (the reference game's Off / Half / Full; contract `TcsLevel` / `AbsLevel`). */
+export type AssistLevel = "Off" | "Half" | "Full";
+
+/** The levels in menu order. */
+export const ASSIST_LEVELS: readonly AssistLevel[] = ["Off", "Half", "Full"];
+
+/** An assist level from untrusted data: a level name (any case), or a legacy bool (true → Full,
+ * false → Off, as the contract reads saves from before the levels); anything else → `d`. */
+export function assistLevel(v: unknown, d: AssistLevel): AssistLevel {
+  if (typeof v === "boolean") return v ? "Full" : "Off";
+  if (typeof v === "string") {
+    const hit = ASSIST_LEVELS.find((l) => l.toLowerCase() === v.trim().toLowerCase());
+    if (hit) return hit;
+  }
+  return d;
+}
+
 /** Driving assists the menu exposes (independent of the damage mode). */
 export interface AssistSettings {
-  abs: boolean;
-  tcs: boolean;
+  /** Anti-lock brakes level. */
+  abs: AssistLevel;
+  /** Traction control level (Off = the throttle you press). */
+  tcs: AssistLevel;
   esc: boolean;
   autoGears: boolean;
   /** Speed-sensitive steering (the input-device preset's value, or 0 when off). */
@@ -77,7 +96,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     drawDistanceM: 0,
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
     radioVoice: true,
-    assists: { abs: true, tcs: false, esc: false, autoGears: false, steerHelp: true, countersteer: 0.5 },
+    assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0.5 },
     damageMode: "Arcade",
     units: "kmh",
     camera: "",
@@ -109,8 +128,8 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
     },
     radioVoice: bool(r.radioVoice, base.radioVoice),
     assists: {
-      abs: bool(a.abs, base.assists.abs),
-      tcs: bool(a.tcs, base.assists.tcs),
+      abs: assistLevel(a.abs, base.assists.abs),
+      tcs: assistLevel(a.tcs, base.assists.tcs),
       esc: bool(a.esc, base.assists.esc),
       autoGears: bool(a.autoGears, base.assists.autoGears),
       steerHelp: bool(a.steerHelp, base.assists.steerHelp),

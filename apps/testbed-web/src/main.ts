@@ -3,15 +3,16 @@
 //
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
-// stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
+// stored replay, ?city=vesper_v2 / ?city=procedural_12x12 starts free drive in that city (without
+// it free drive starts on the flat world; the selector defaults to vesper_v2), ?chase=1 starts the
+// city chase (in the ?city= map when given; ?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 // ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
-import { loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
+import { assistLevel, loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
@@ -25,6 +26,7 @@ import {
   readInput,
   setDeviceControls,
   setInputBlocked,
+  setRawThrottle,
   toggleHeadlights,
   type InputSource,
 } from "./input";
@@ -358,7 +360,12 @@ async function main(): Promise<void> {
   });
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
-  if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
+  if (cityParam && CITY_IDS.includes(cityParam)) {
+    citySel.value = cityParam;
+    // `?city=<id>` starts free drive in that city: selecting the map alone left the "city" box
+    // unticked, so the page opened on the flat world and the city never loaded.
+    ($("city") as HTMLInputElement).checked = true;
+  }
 
   // ----- session management --------------------------------------------------------------
 
@@ -616,17 +623,22 @@ async function main(): Promise<void> {
   // The countersteer slider (owner row 57) is stored there too, as a number 0..1
   // (`countersteer_help`).
   const ASSIST_KEY = "wp.assistOverrides";
-  const savedAssistOverrides = (): Record<string, boolean | number> => {
+  // `abs` / `tcs` are levels ("Off" / "Half" / "Full"); an older browser may still hold a bool,
+  // which reads as Full / Off (here and in the sim).
+  type Overrides = Record<string, boolean | number | string>;
+  const savedAssistOverrides = (): Overrides => {
     try {
-      return JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean | number>;
+      const o = JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Overrides;
+      for (const k of ["abs", "tcs"]) if (k in o) o[k] = assistLevel(o[k]);
+      return o;
     } catch {
       return {};
     }
   };
-  const assistOverrides = (): Record<string, boolean | number> => ({ tcs: false, esc: false, auto_gears: false, ...savedAssistOverrides() });
+  const assistOverrides = (): Overrides => ({ tcs: "Off", esc: false, auto_gears: false, ...savedAssistOverrides() });
   /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
    * traction control and stronger steer help; boxes the viewer ticked still win. */
-  const TOUCH_ASSISTS: Record<string, unknown> = { tcs: true, auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
+  const TOUCH_ASSISTS: Record<string, unknown> = { tcs: "Full", auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
   // One-click presets (Rookie / Street / Sim, GDD §6): damage mode + assists together. The
   // chosen preset is remembered per viewer and replaces the per-box overrides; ticking a box
   // afterwards turns it into a custom setup (the preset is forgotten, the box is remembered).
@@ -702,7 +714,7 @@ async function main(): Promise<void> {
     if (menu) {
       tellMenu({
         damageMode: p.mode as GameSettings["damageMode"],
-        assists: { ...menu.settings.assists, abs: Boolean(a.abs), tcs: Boolean(a.tcs), esc: Boolean(a.esc), autoGears: Boolean(a.auto_gears), steerHelp: Number(a.steer_speed_sensitivity) > 0 },
+        assists: { ...menu.settings.assists, abs: assistLevel(a.abs), tcs: assistLevel(a.tcs), esc: Boolean(a.esc), autoGears: Boolean(a.auto_gears), steerHelp: Number(a.steer_speed_sensitivity) > 0 },
       });
     }
     ($("mode") as HTMLSelectElement).value = p.mode;
@@ -744,6 +756,11 @@ async function main(): Promise<void> {
     document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
+    document.querySelectorAll<HTMLSelectElement>("#assist-row select.assist-level").forEach((sel) => {
+      sel.value = assistLevel(a[sel.dataset.a!]);
+    });
+    // TCS Off = raw throttle key (row 104).
+    setRawThrottle(assistLevel(a.tcs) === "Off");
     clutchSel.value = a.auto_clutch === false ? "manual" : "auto";
     const pct = Math.round(Number(a.countersteer_help ?? 0) * 100);
     ($("cstr") as HTMLInputElement).value = String(pct);
@@ -851,6 +868,13 @@ async function main(): Promise<void> {
     o.countersteer_help = pct / 100;
     store.set(ASSIST_KEY, JSON.stringify(o));
   };
+  /** Leaving a preset for a custom setup: remember the preset's assist choices as overrides. */
+  const rememberPresetBoxes = (o: Overrides, a: Record<string, unknown>) => {
+    o.abs = assistLevel(a.abs);
+    o.tcs = assistLevel(a.tcs);
+    o.esc = Boolean(a.esc);
+    o.auto_gears = Boolean(a.auto_gears);
+  };
   document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
     cb.onchange = () => {
       if (isReplay()) return;
@@ -859,13 +883,32 @@ async function main(): Promise<void> {
       sim.setAssists(app.player, a as never);
       // A hand-picked box turns the preset into a custom setup: remember the current boxes.
       const o = assistOverrides();
-      if (storedPreset()) for (const k of ["abs", "tcs", "esc", "auto_gears"]) o[k] = Boolean(a[k]);
+      if (storedPreset()) rememberPresetBoxes(o, a);
       o[cb.dataset.a!] = cb.checked;
       store.set(ASSIST_KEY, JSON.stringify(o));
-      const key = ({ abs: "abs", tcs: "tcs", esc: "esc", auto_gears: "autoGears" } as const)[cb.dataset.a as "abs" | "tcs" | "esc" | "auto_gears"];
+      const key = ({ esc: "esc", auto_gears: "autoGears" } as const)[cb.dataset.a as "esc" | "auto_gears"];
       if (menu && key) tellMenu({ assists: { ...menu.settings.assists, [key]: cb.checked } });
       store.set(PRESET_KEY, "");
       syncPresetButtons();
+    };
+  });
+  // TCS / ABS level selectors (Off / Half / Full, owner rows 104/105): same flow as the boxes.
+  document.querySelectorAll<HTMLSelectElement>("#assist-row select.assist-level").forEach((sel) => {
+    sel.onchange = () => {
+      if (isReplay()) return;
+      sel.blur(); // hand the keys back to the game
+      const k = sel.dataset.a as "abs" | "tcs";
+      const level = assistLevel(sel.value);
+      const a = sim.assists(app.player) as unknown as Record<string, unknown>;
+      a[k] = level;
+      sim.setAssists(app.player, a as never);
+      const o = assistOverrides();
+      if (storedPreset()) rememberPresetBoxes(o, a);
+      o[k] = level;
+      store.set(ASSIST_KEY, JSON.stringify(o));
+      if (menu) tellMenu({ assists: { ...menu.settings.assists, [k]: level } });
+      store.set(PRESET_KEY, "");
+      syncAssistBoxes();
     };
   });
   clutchSel.onchange = () => {
@@ -1050,9 +1093,9 @@ async function main(): Promise<void> {
     if (hasStoredSettings()) return d;
     // A touch device starts with the touch assists (auto gears, TCS, steer help), not the
     // desktop "off" defaults; the menu then stores them as this browser's choice.
-    const o = touch?.visible ? { ...assistOverrides(), tcs: true, auto_gears: true, ...savedAssistOverrides() } : assistOverrides();
+    const o = touch?.visible ? { ...assistOverrides(), tcs: "Full", auto_gears: true, ...savedAssistOverrides() } : assistOverrides();
     const a = sim.assistPreset(app.source === "Touch" ? "Gamepad" : app.source) as unknown as Record<string, unknown>;
-    d.assists = { ...d.assists, abs: Boolean(o.abs ?? a.abs), tcs: Boolean(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
+    d.assists = { ...d.assists, abs: assistLevel(o.abs ?? a.abs), tcs: assistLevel(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
     d.volumes = audio.mix();
     d.radioVoice = audio.radioVoice();
     d.gfx = gfxMode();
@@ -1077,7 +1120,7 @@ async function main(): Promise<void> {
     map.hud.setUnits(next.units);
     // Assists go through the same overrides as the developer panel's boxes.
     if (!prev || JSON.stringify(prev.assists) !== JSON.stringify(next.assists)) {
-      const o = assistOverrides() as Record<string, boolean>;
+      const o = assistOverrides();
       Object.assign(o, { abs: next.assists.abs, tcs: next.assists.tcs, esc: next.assists.esc, auto_gears: next.assists.autoGears, steer_help: next.assists.steerHelp });
       store.set(ASSIST_KEY, JSON.stringify(o));
       if (prev && !panelToMenu) {

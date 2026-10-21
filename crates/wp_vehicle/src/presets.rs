@@ -4,9 +4,13 @@
 //!
 //! | Preset | Damage mode | Assists |
 //! |---|---|---|
-//! | Rookie | Arcade | ABS, TCS, ESC, countersteer help, speed-sensitive steering, auto gears |
-//! | Street | Arcade | ABS + TCS; ESC off, no countersteer help |
-//! | Sim | Simulation | everything off, manual gears |
+//! | Rookie | Arcade | ABS Full, TCS Full, ESC, countersteer help, speed-sensitive steering, auto gears |
+//! | Street | Arcade | ABS Full + TCS Half; ESC off, no countersteer help |
+//! | Sim | Simulation | ABS Half, TCS Off, ESC off, manual gears |
+//!
+//! TCS / ABS levels follow the reference game's Off / Half / Full (owner rows 104/105,
+//! `docs/reference/wreckfest-keyboard.md`): Street keeps a little wheelspin to slide with, Sim
+//! is the owner's own reference setup (TCS Off, ABS Half).
 //!
 //! Input shaping that makes a device usable at all is kept from
 //! [`AssistProfile::for_source`] instead of being treated as an assist: keyboard pedal filters
@@ -16,7 +20,7 @@
 //! The GDD asks for "ESC low" in Street; `AssistProfile::esc` is a switch, so Street leaves it
 //! off until the contract has an ESC strength (requested in `docs/integration/police.md`).
 
-use wp_contracts::{AssistProfile, DamageMode, InputSource};
+use wp_contracts::{AbsLevel, AssistProfile, DamageMode, InputSource, TcsLevel};
 
 /// A one-click assist preset.
 /// (No serde derive: `wp_vehicle` has no serde dependency; front ends pass [`AssistPreset::name`].)
@@ -78,8 +82,8 @@ impl AssistPreset {
             p
         };
         let off = AssistProfile {
-            abs: false,
-            tcs: false,
+            abs: AbsLevel::Off,
+            tcs: TcsLevel::Off,
             esc: false,
             steer_speed_sensitivity: 0.0,
             countersteer_help: 0.0,
@@ -90,8 +94,8 @@ impl AssistPreset {
         };
         match self {
             AssistPreset::Rookie => shaping(AssistProfile {
-                abs: true,
-                tcs: true,
+                abs: AbsLevel::Full,
+                tcs: TcsLevel::Full,
                 esc: true,
                 steer_speed_sensitivity: device.steer_speed_sensitivity.max(0.7),
                 countersteer_help: device.countersteer_help.max(0.6),
@@ -101,12 +105,15 @@ impl AssistPreset {
                 ..off
             }),
             AssistPreset::Street => shaping(AssistProfile {
-                abs: true,
-                tcs: true,
+                abs: AbsLevel::Full,
+                tcs: TcsLevel::Half,
                 auto_gears: device.auto_gears,
                 ..off
             }),
-            AssistPreset::Sim => shaping(off),
+            AssistPreset::Sim => shaping(AssistProfile {
+                abs: AbsLevel::Half,
+                ..off
+            }),
         }
     }
 
@@ -138,17 +145,28 @@ mod tests {
         for s in SOURCES {
             let r = AssistPreset::Rookie.assists(s);
             assert!(
-                r.abs && r.tcs && r.esc && r.auto_gears && r.countersteer_help > 0.0,
+                r.abs == AbsLevel::Full
+                    && r.tcs == TcsLevel::Full
+                    && r.esc
+                    && r.auto_gears
+                    && r.countersteer_help > 0.0,
                 "{s:?}"
             );
             let st = AssistPreset::Street.assists(s);
             assert!(
-                st.abs && st.tcs && !st.esc && st.countersteer_help == 0.0,
+                st.abs == AbsLevel::Full
+                    && st.tcs == TcsLevel::Half
+                    && !st.esc
+                    && st.countersteer_help == 0.0,
                 "{s:?}"
             );
             let sim = AssistPreset::Sim.assists(s);
             assert!(
-                !sim.abs && !sim.tcs && !sim.esc && !sim.auto_gears && sim.countersteer_help == 0.0
+                sim.abs == AbsLevel::Half
+                    && sim.tcs == TcsLevel::Off
+                    && !sim.esc
+                    && !sim.auto_gears
+                    && sim.countersteer_help == 0.0
             );
             assert!(sim.auto_clutch);
         }
@@ -162,6 +180,10 @@ mod tests {
     fn keyboard_keeps_filtered_input_pads_and_wheels_are_raw_in_sim() {
         let kb = AssistPreset::Sim.assists(InputSource::Keyboard);
         assert!(kb.throttle_filter > 0.0 && kb.steer_speed_sensitivity > 0.0);
+        // Sim has TCS Off, so the keyboard throttle filter is inert: raw throttle (row 104).
+        assert_eq!(crate::assists::throttle_filter_strength(&kb), 0.0);
+        let street = AssistPreset::Street.assists(InputSource::Keyboard);
+        assert!(crate::assists::throttle_filter_strength(&street) > 0.0);
         let wheel = AssistPreset::Sim.assists(InputSource::Wheel);
         assert_eq!(
             (wheel.throttle_filter, wheel.steer_speed_sensitivity),

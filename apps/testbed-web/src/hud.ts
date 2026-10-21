@@ -8,6 +8,11 @@ import { CAMERA_HELP } from "./cameras";
 import { heat, healthColour } from "./vehicle_view";
 import { RTF_WARN } from "./rtf";
 
+/** HUD tag for a TCS / ABS level: "TCS" at Full, "TCS HALF", "TCS OFF". */
+export function levelTag(name: string, level: string): string {
+  return level === "Full" ? name : `${name} ${level.toUpperCase()}`;
+}
+
 /** Region energy (J) shown as fully red in the silhouette / panel. */
 const ENERGY_RED = 5000;
 
@@ -181,7 +186,7 @@ export class Hud {
       `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a
-        ? `<div>${badge(a.abs, "ABS")}${badge(a.tcs, "TCS")}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
+        ? `<div>${badge(a.abs !== "Off", levelTag("ABS", a.abs))}${badge(a.tcs !== "Off", levelTag("TCS", a.tcs))}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
           `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}${badge(a.auto_clutch, a.auto_clutch ? "A-CLU" : "M-CLU")}</div>`
         : "") +
       `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · views ${f.viewsMs.toFixed(1)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +

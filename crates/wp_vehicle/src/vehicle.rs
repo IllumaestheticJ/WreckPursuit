@@ -12,8 +12,8 @@ use wp_contracts::{
 
 use crate::aero::aero_forces;
 use crate::assists::{
-    btc_rear_authority, esc_reference, filter_pedal, BtcAxle, Esc, Tcs, BTC_MAX_FRAC,
-    TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
+    btc_rear_authority, esc_reference, filter_pedal, throttle_filter_strength, BtcAxle, Esc, Tcs,
+    BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
@@ -24,7 +24,8 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
 use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::slide::{slide_class_with_rear_lock, slide_throttle};
+use crate::pivot::pivot_yaw_accel;
+use crate::slide::slide_class_with_rear_lock;
 use crate::steering::{
     ackermann, assist_mode, body_slip, front_axle_angle, rear_axle_slip, steer_target,
     torque_steer, update_center_angle, AssistMode, DriftTuning, SteerInput, HANDBRAKE_GRACE_S,
@@ -36,7 +37,7 @@ use crate::suspension::{
 use crate::throttle::{effective_smoothing, ramp_time_s, traction_trim};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
-    slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    slip_ratio, spin_side_floor, surface_grip, SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
 };
 use crate::TireDb;
 
@@ -54,8 +55,8 @@ pub const HANDBRAKE_ON: f32 = 0.1;
 pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
 /// The automatic clutch opens during a shift, off the throttle, when the driven wheels turn
 /// the clutch slower than this fraction of idle (the same threshold as
-/// `drivetrain::auto_clutch_update`'s "rolling").
-const AUTO_CLUTCH_OPEN_FRAC: f32 = 1.2;
+/// `drivetrain::auto_clutch_update`'s anti-stall line).
+const AUTO_CLUTCH_OPEN_FRAC: f32 = crate::drivetrain::AUTO_CLUTCH_HOLD_IDLE_FRAC;
 /// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
@@ -289,6 +290,8 @@ pub struct Vehicle {
     pub(crate) drift_tuning: DriftTuning,
     /// Drift hold state (owner row 91, [`crate::drift`]); in snapshots.
     pub(crate) drift_hold: DriftHold,
+    /// How long the handbrake has been pulled, s (pivot aid build-up, row 109); in snapshots.
+    pub(crate) hb_held_s: f32,
     assist_mode: AssistMode,
     body_slip_deg: f32,
     envelope_deg: f32,
@@ -410,6 +413,7 @@ impl Vehicle {
             stalled: false,
             drift_tuning: DriftTuning::default(),
             drift_hold: DriftHold::default(),
+            hb_held_s: 0.0,
             assist_mode: AssistMode::Off,
             body_slip_deg: 0.0,
             envelope_deg: 0.0,
@@ -587,6 +591,7 @@ impl Vehicle {
         self.launch.forget();
         self.hb_grace = 0.0;
         self.drift_hold = DriftHold::default();
+        self.hb_held_s = 0.0;
         self.stalled = false;
     }
 
@@ -822,6 +827,11 @@ impl Vehicle {
         self.corners[0].max_steer.max(self.corners[1].max_steer)
     }
 
+    /// Vertical tyre loads (FL, FR, RL, RR), N, from the last step (tests and traces).
+    pub fn wheel_loads(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.wheels[i].fz)
+    }
+
     /// Peak slip angle of wheel `i`'s tire, rad.
     pub fn tire_peak_slip(&self, i: usize) -> f32 {
         self.corners[i].tire.peak_slip_angle_rad
@@ -949,7 +959,9 @@ impl Vehicle {
         // Rear-axle slip angle (slide assists): CG-to-rear-axle distance from the car data.
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
-        let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
+        // TCS Off = the throttle the driver presses (owner row 104): no pedal filter, no
+        // slide feathering (removed).
+        let thr_filter = throttle_filter_strength(assists);
         // Drift hold (row 91): key into the turn + throttle in a slide holds the angle.
         let hold = {
             let pre = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
@@ -965,8 +977,7 @@ impl Vehicle {
                 dt,
             )
         };
-        // `scale` is exactly 1.0 unless the slide throttle / hold is active (bit-identical
-        // otherwise).
+        // `scale` is exactly 1.0 unless the drift hold trims (bit-identical otherwise).
         // Keyboard throttle smoothing with TCS off (row 98, [`crate::throttle`]).
         let smoothing = effective_smoothing(assists, self.drift_tuning.throttle_shaping);
         let trim = if smoothing > 0.0 {
@@ -978,10 +989,10 @@ impl Vehicle {
         } else {
             1.0
         };
-        let scale = st.scale * hold.throttle_scale * trim;
+        let scale = hold.throttle_scale * trim;
         let thr_target = if scale < 1.0 { thr_in * scale } else { thr_in };
         let prev_thr = self.throttle_f;
-        self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+        self.throttle_f = filter_pedal(self.throttle_f, thr_target, thr_filter, dt);
         if smoothing > 0.0 {
             let ramp = ramp_time_s(smoothing, self.slide_class, self.gearbox.gear, v_fwd);
             if ramp > 0.0 && self.throttle_f > prev_thr {
@@ -1052,14 +1063,17 @@ impl Vehicle {
             // Just after a handbrake declutch the driven wheels may still be stopped (locked
             // rears): re-engage only once they have spun back up, so the engine is not dragged
             // below idle.
-            (ratio_now * axle_omega).abs() * RPM_PER_RADPS
+            (ratio_now * axle_omega).max(0.0) * RPM_PER_RADPS
         } else {
             // The slower of ground speed and the driven wheels: wheelspin does not count, and
             // driven wheels slowed under the car (scrubbed in a big slide, braked) open the
             // clutch before they drag the engine below idle.
-            let ground = (ratio_now * v_fwd / self.corners[driven_corner].radius).abs();
-            ground.min((ratio_now * axle_omega).abs()) * RPM_PER_RADPS
+            let ground = ratio_now * v_fwd / self.corners[driven_corner].radius;
+            ground.min(ratio_now * axle_omega).max(0.0) * RPM_PER_RADPS
         };
+        // (Signed: wheels turning against the selected gear, e.g. a car rolling backwards in a
+        // forward gear after a spin, are not "rolling" — the clutch must not drag the engine
+        // backwards. Reverse has a negative ratio, so reversing counts as rolling.)
         self.clutch = if self.converter.is_some() {
             // Torque-converter automatic: the converter replaces the launch clutch; the clutch
             // value is the lock-up clutch's availability. Shifts happen under power (the
@@ -1094,6 +1108,7 @@ impl Vehicle {
                 self.def.engine.redline_rpm,
                 thr_in,
                 self.launch_torque_ratio,
+                self.gearbox.gear,
                 dt,
             )
         } else {
@@ -1151,7 +1166,7 @@ impl Vehicle {
                     let fast = if a >= b { l } else { r };
                     let held = self.tcs.brake[fast];
                     // 0 = brakes holding the spin … 1 = brakes saturated / not acting.
-                    let w = if assists.tcs && held > TCS_BRAKE_ACTIVE_NM {
+                    let w = if assists.tcs.is_on() && held > TCS_BRAKE_ACTIVE_NM {
                         let use_frac = held / (BTC_MAX_FRAC * max_brake).max(1.0);
                         ((use_frac - TCS_BRAKE_HANDOFF) / (1.0 - TCS_BRAKE_HANDOFF)).clamp(0.0, 1.0)
                     } else {
@@ -1313,11 +1328,12 @@ impl Vehicle {
         for (b, s) in brake.iter_mut().zip(eff.brake_scale) {
             *b *= s.max(0.0);
         }
-        if assists.abs {
+        {
             let kappas = std::array::from_fn(|i| self.wheels[i].kappa);
             let vxs = std::array::from_fn(|i| self.wheels[i].vx);
             let peaks = std::array::from_fn(|i| self.corners[i].tire.peak_slip_ratio);
-            self.abs.apply(&mut brake, kappas, vxs, peaks, dt);
+            self.abs
+                .apply(assists.abs, &mut brake, kappas, vxs, peaks, dt);
         }
         brake[2] += handbrake * self.def.brakes.handbrake_rear_nm;
         brake[3] += handbrake * self.def.brakes.handbrake_rear_nm;
@@ -1373,9 +1389,13 @@ impl Vehicle {
             }
         }
         let tc_driving = self.throttle_f > 0.05 && self.brake_f < 0.05 && handbrake < 0.1;
-        let tc_brake =
-            self.tcs
-                .update_brakes(assists.tcs, tc_driving, &tc_axles[..n_tc], v_fwd, dt);
+        let tc_brake = self.tcs.update_brakes(
+            assists.tcs.is_on(),
+            tc_driving,
+            &tc_axles[..n_tc],
+            v_fwd,
+            dt,
+        );
         for (i, b) in brake.iter_mut().enumerate() {
             *b += esc_out.brake[i] + tc_brake[i];
             self.wheels[i].brake = *b;
@@ -1457,6 +1477,24 @@ impl Vehicle {
         }
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
+        }
+        // Handbrake pivot aid (row 109, owner-approved yaw-torque exception, `crate::pivot`).
+        self.hb_held_s = if handbrake > HANDBRAKE_ON {
+            self.hb_held_s + dt
+        } else {
+            0.0
+        };
+        let pivot = pivot_yaw_accel(
+            &self.drift_tuning,
+            assists,
+            handbrake,
+            self.hb_held_s,
+            input.steer,
+            v_fwd,
+            yaw_rate,
+        );
+        if pivot != 0.0 {
+            torque += up * (self.def.inertia_kgm2[2] * pivot);
         }
         self.force = force;
         self.torque = torque;
@@ -1739,6 +1777,8 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = combined_forces(&c.tire, w.kappa, alpha, fz, grip);
+            // Side-force floor under heavy drive wheelspin (straight launches on cambered roads).
+            let fy = spin_side_floor(&c.tire, w.kappa, alpha, fz, grip, fy, &SPIN_SIDE_FLOOR);
             let mu_y = load_sensitive_mu(
                 c.tire.lateral.d,
                 c.tire.load_sensitivity,

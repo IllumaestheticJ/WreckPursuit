@@ -24,5 +24,12 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.15 | preview | Physics cost back down (sim-perf), wider roads + residential districts, police turn-round loop fix, police roadblocks + spike strips (physical), reference-style controls settings + parity suite, vehicle drift lab (assists off by default) |
 | 0.12.16 | preview | Brake dive cut (anti-dive geometry + damping on 5 cars), racers on the minimap, AI creeps past parked police, junction permit fix (civilian crash), siren pull-over to the kerb |
 | 0.12.17 | preview | Race grids inside the paved lanes, police give way to racers and look before turning (Hollins hairpin), goldens re-blessed; all race tests green |
-| 0.12.18 | preview | (next) |
+| 0.12.18 | preview | TCS + ABS Off / Half / Full (presets Rookie F/F, Street H/F, Sim Off/Half), TCS Off = raw throttle, handbrake pivot aid (owner-approved, keyboard/gamepad), auto clutch no longer drags below idle when rolling back |
+| 0.12.19 | preview | RWD cars no longer spin off the line on cambered roads (spin side-force floor), auto clutch fully engaged once moving (no constant-rpm slip in tall gears) |
+| 0.12.20 | preview | Ground-probe tilt fix: tyre loads no longer chatter in corners (steadier grip everywhere) |
+| 0.12.21 | preview | AI racers: fleeing cars pull over to the kerb (no in-lane deadlocks), low-speed junction line fix, hill starts, AI never triggers the handbrake pivot aid; pace ranges re-measured |
+| 0.12.22 | preview | Police: parked cops U-turn forward to give chase, no turning across oncoming racers, deadlock breaking (Loop 9 / Hollins), reverse-hold braking fix; sirens play real recordings |
+| 0.12.23 | preview | Hollins race: busted racers pull off instead of freezing in the hairpin, no stopping in tight bends; asphalt tyre roar instead of hiss |
+| 0.12.24 | preview | AI racers pass cars that are out of the race and never stop to yield in a hairpin (Hollins seed 6 finishes); solid terrain matches drawn terrain (no invisible hillside); engine sound rework (recorded layers at their real firing frequency) |
+| 0.12.25 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

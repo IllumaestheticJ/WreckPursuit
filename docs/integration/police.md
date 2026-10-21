@@ -580,6 +580,108 @@ with the same hash on the lead tip. Goldens moved and re-blessed: golden_city_ch
 opponent_circuit_8x5, opponent_flee_police, opponent_open_roads_traffic,
 police_tunnel_escape_founders_cut_control, world_traffic_soak_observer.
 
+*Lead items (opponent-pace / round 12 vehicle merge): Loop 9 DQ, Hollins deadlocks, passby turn.*
+- **Loop 9 LeftCorridor DQ.** A unit was given a racer to chase while that racer was coming at
+  it. Its new route lay behind it, so it arced across the road at walking pace into the field,
+  the racer hit it and left the corridor. Now a unit whose way lies behind it holds straight in
+  its lane while a car in front of it closes within 4 s (for a pursuer: a racer). It doesn't
+  start a turn-round then either. A pursuer whose target comes straight at it waits for it to go
+  by.
+- **Hollins deadlocks.** (1) A unit without lights never passed a stopped car near a junction
+  (the red-light-queue rule), even a car that was waiting for it. After 12 s it passes anyway
+  (`avoid::QUEUE_DEADLOCK_S`). (2) Last resort: a unit that gave up and has stood within 3 m of
+  one spot for 30 s with a racer within 20 m despawns even in view
+  (`PoliceStats::deadlock_despawns`; owner row 78 allows a quick visible police reset, spawns
+  still never happen in view).
+- **Holding still in reverse.** The new waits braked with the brake pedal, which in reverse
+  drives the car backwards: a unit backing up while it held accelerated away (`wp_wasm` capture
+  tests). `hold_pedals` brakes with the throttle when rolling backwards. Other police cars no
+  longer count as closing traffic.
+- **`wp_sim police_passby` (Vesper, parked cop: facing the player 5.4 s after the pass, bound
+  4 s).** Since round 12's vehicle changes, reverse takes about 1 s to engage from a standstill,
+  and the full-lock reverse arc turned only 0.9 rad in 3 s. A standing unit with room for the
+  turning circle now U-turns forward. The three-point reverse swing stays for narrow streets.
+  Passes (3 of 3).
+
+| | lead/round12 bcc57094 | this branch on bcc57094 | lead/round12 0bc27d29 | this branch on 0bc27d29 |
+|---|---|---|---|---|
+| Loop 9 seeds 1–6, LeftCorridor DQs | 6 (one per seed, opponent-pace's report) | 0 | — | 1 (seed 4; also on 0bc27d29) |
+| Hollins seeds 1–8 finishers / races that never end | 19 / 2 (opponent-pace's report) | 24 / 1 | 20 / 1 | 18 / 1 |
+
+0bc27d29 brought in opponent-pace's new capability table and pace changes, and they move these
+seed-by-seed results a lot. On that tip this branch and the lead tip are about level on Hollins.
+Seed 6 never ending is a fled racer parked in the first hairpin with the field behind it (police
+are only at the tail of that queue). The default `loop9_circuit` seed panicked in `wp_opponent/src/corridor.rs:243`; fixed below. Gate on 0bc27d29 + this
+branch: fmt / clippy clean; `wp_police`, `wp_sim`, `wp_wasm --lib` (86) pass; `wp_race` 6 of 7
+(`loop9_circuit`, above); 109 of 109 scenarios; goldens re-blessed (14 files, listed in the
+`[bless]` commit).
+
+*Loop 9 panic in `wp_opponent` (lead, after merging 6e0ac42a).* `loop9_circuit` (default
+seed) panicked at `crates/wp_opponent/src/corridor.rs:243` (`pieces.last().unwrap()`). A fleeing
+racer's `plan_flight` asked `wp_world::World::plan_route` for a destination back down the same
+2.8 km segment. `plan_route` returned a one-segment route whose end (s = 40 m) projects behind its
+start (s = 1535 m), so every corridor piece was empty. No police behaviour hands the racer AI a
+route: the police only decide which racer flees from where. The round-13 hold-in-lane change put
+a racer on that segment at that moment, and the empty-route case was latent in `wp_opponent`
+and `wp_world`. **Change outside my crates (`wp_opponent`, minimal):** `Corridor::try_from_route`
+returns `None` for a route with no length (no segments, or every piece empty), and
+`plan_flight` uses it and tries the next destination. `Corridor::from_route` keeps its contract
+(`expect`). New unit test `corridor::tests::a_route_with_no_length_builds_no_corridor`. For D:
+`plan_route` to a point behind the start on the same one-way segment should loop round, not
+return that segment alone.
+
+After the fix, on lead/round12 + this branch:
+
+| | default | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| `loop9_circuit` | pass | pass | pass | pass | pass (1 DQ) | pass | pass | pass | pass |
+| `hollins_hill_sprint` finishers | 4 | 4 | 4 | 1 | 1 | 1 | 0 (never ends) | 4 | 3 |
+
+`wp_race` (release) 7 of 7 race_picker tests and all other suites pass; `wp_opponent` (release)
+passes; clippy and fmt are clean; `simcli goldens` 0 mismatches. Hollins seeds 3–6 fail the
+test's "at least 3 of 4" check (the default seed passes). Seed 6 is the fled-racer hairpin
+block described above.
+
+*Hollins police seeds 3–6 (lead, after preview 0.12.22).* On lead/round12 0bc27d29 (before
+this branch's last merges) seeds 3–6 already failed the "≥ 3 of 4" check: 0 (never ends) / 1 /
+1 / 2 finishers. The common case: a racer stands nose to nose with a pursuing unit in the first
+hairpin, the pinned capture busts it, and it then stays where it stopped, mid-hairpin, with the
+field queued behind it. **Changes outside my crates (`wp_opponent`, minimal):**
+- A parked or yielding car that wants to roll on (to the kerb, clear of a junction) could never
+  pull away from rest: `Park`/`Yield` always held the handbrake with zero throttle below
+  1.5 m/s. It now holds only when its target speed is a crawl.
+- A car out of the race (busted, retired, fled) doesn't stop in a bend tighter than 35 m radius
+  (`PARK_MIN_RADIUS_M`). It rolls on at 6 m/s to a straighter bit first.
+
+Police side: the deadlock last resort treated a unit that kept backing out of a racer's way
+(6 m) and nosing back in as moving. "Standing" now means within 8 m of where it stopped
+(`stuck::STAND_M`).
+
+| Hollins finishers | default | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| lead/round12 0bc27d29 | 4 | 4 | 4 | 0 (never ends) | 1 | 1 | 2 | 4 | 4 |
+| before this fix (9899d87c) | 4 | 4 | 4 | 1 | 1 | 1 | 0 (never ends) | 4 | 3 |
+| after | 4 | 4 | 4 | 3 | 3 | 3 | 0 (never ends) | 4 | 3 |
+
+Seed 6 still never ends. The busted racer now rolls on, but every bend there is tight, so it
+crawls ahead of the field for about a minute. Later two more racers are captured, and the last
+one is left behind a captured car at (−770, 1063). For N: a field should be able to pass a slow
+out-of-race car, or a busted racer should leave the road (verge, lay-by). Gate on this commit:
+fmt / clippy clean; `wp_race` (release, all suites incl. race_picker 7/7) and `wp_opponent`
+pass; Loop 9 default + seeds 1–8 pass (1 DQ on seed 4, as on 0bc27d29); `wp_police`, `wp_sim`,
+`wp_wasm --lib` (86) pass; 109 of 109 scenarios; goldens: `opponent_circuit_8x5` and
+`police_tunnel_escape_founders_cut_control` re-blessed, 0 other mismatches.
+
+*City-chase vehicle count, browser smoke (lead: 11 at 8c353f75 vs 17 at 9899d87c).* Not a
+behaviour change. Native `wp_wasm` Session, Vesper city chase, throttle held: the vehicle list at
+12 s of sim time is identical with and without the two changes (17 vehicles: player, 6 police,
+10 traffic; 0 deadlock despawns, 0 give-ways). The count grows with sim time (6 at 4 s, 10 at 8 s,
+16 at 10 s, 17 at 12 s) as traffic is promoted near the player. In the browser, `step()` runs at
+most 60 ticks (0.25 s) per frame; under SwiftShader the page ran about 3 fps (36 frames in 13 s,
+24 of them over 250 ms), so 12 s of wall time is only about 8 s of sim time. Two runs at
+8c353f75 gave 15 and 13 vehicles. A smoke check that counts vehicles should wait for a sim time,
+not a wall time.
+
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
 pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit

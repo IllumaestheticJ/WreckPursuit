@@ -17,7 +17,7 @@
 //! sensitivity 75 % (`steer_speed_sensitivity` 0.75; see `docs/integration/wf-parity.md` for
 //! the mapping). Keys go through a copy of the testbed's keyboard layer
 //! (`apps/testbed-web/src/input.ts`): ramps updated once per 60 Hz frame (steer 4/s, throttle
-//! 12/s, brake 6/s in, 10/s out) and the per-device controls shaping (dead zone, saturation,
+//! 12/s — raw with TCS Off, owner row 104 — brake 6/s in, 10/s out) and the per-device controls shaping (dead zone, saturation,
 //! sensitivity; the owner's values are the identity). Where a manoeuvre needs a constant speed
 //! the throttle comes from an analogue cruise controller instead of the key (said in the row).
 //!
@@ -29,7 +29,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use wp_contracts::{AssistProfile, DriveLayout, LoadedCar, VehicleInput, PHYSICS_DT};
+use wp_contracts::{
+    AbsLevel, AssistProfile, DriveLayout, LoadedCar, TcsLevel, VehicleInput, PHYSICS_DT,
+};
 use wp_vehicle::math::{atan2, V3};
 use wp_vehicle::rig::Rig;
 
@@ -139,6 +141,8 @@ struct Keyboard {
     steer: f32,
     throttle: f32,
     brake: f32,
+    /// TCS Off: the throttle key is raw (no ramp), as in `input.ts` (owner row 104).
+    raw_throttle: bool,
     frame: VehicleInput,
     tick: u64,
 }
@@ -150,6 +154,7 @@ impl Keyboard {
             steer: 0.0,
             throttle: 0.0,
             brake: 0.0,
+            raw_throttle: false,
             frame: VehicleInput::default(),
             tick: 0,
         }
@@ -162,6 +167,7 @@ impl Keyboard {
             self.steer = ramp(self.steer, target, 4.0, 6.0, dt);
             self.throttle = match k.cruise {
                 Some(v) => v,
+                None if self.raw_throttle => k.throttle as i32 as f32,
                 None => ramp(self.throttle, k.throttle as i32 as f32, 12.0, 12.0, dt),
             };
             self.brake = ramp(self.brake, k.brake as i32 as f32, 6.0, 10.0, dt);
@@ -183,9 +189,9 @@ impl Keyboard {
 }
 
 /// The owner's assists: keyboard preset, manual gears, ABS on, ESC off, TCS as given.
-fn owner_assists(tcs: bool) -> AssistProfile {
+fn owner_assists(tcs: TcsLevel) -> AssistProfile {
     AssistProfile {
-        abs: true,
+        abs: wp_contracts::AbsLevel::Full,
         tcs,
         esc: false,
         auto_gears: false,
@@ -221,7 +227,7 @@ struct Run {
 }
 
 impl Run {
-    fn new(car: &LoadedCar, tcs: bool) -> Self {
+    fn new(car: &LoadedCar, tcs: TcsLevel) -> Self {
         let rig = Rig::new(car);
         let gears = car.def.drivetrain.gear_ratios.len() as i8;
         Self {
@@ -237,7 +243,7 @@ impl Run {
     }
 
     /// Rolling straight along +Y at `speed`.
-    fn rolling(car: &LoadedCar, tcs: bool, speed: f32) -> Self {
+    fn rolling(car: &LoadedCar, tcs: TcsLevel, speed: f32) -> Self {
         let mut r = Self::new(car, tcs);
         r.rig.teleport([0.0; 3], 0.0, speed, 0.0);
         r
@@ -329,6 +335,7 @@ impl Run {
     }
 
     fn step(&mut self, k: &Keys) {
+        self.kb.raw_throttle = !self.assists.tcs.is_on();
         let input = self.kb.input(k);
         self.rig.step(&input, &self.assists);
         let f = self.rig.vehicle.chassis().rot * V3::Y;
@@ -355,7 +362,7 @@ fn ticks(s: f32) -> usize {
 // ----- manoeuvres ------------------------------------------------------------------------
 
 /// Standing start, throttle key held, manual upshifts at the redline: times to 60 / 100 mph.
-fn accel(car: &LoadedCar, tcs: bool) -> (Option<f32>, Option<f32>) {
+fn accel(car: &LoadedCar, tcs: TcsLevel) -> (Option<f32>, Option<f32>) {
     let mut r = Run::new(car, tcs);
     let (mut t60, mut t100) = (None, None);
     for _ in 0..ticks(40.0) {
@@ -377,11 +384,11 @@ fn accel(car: &LoadedCar, tcs: bool) -> (Option<f32>, Option<f32>) {
 }
 
 /// Launch wheelspin: standing start for 4 s, throttle key held (or feathered: six taps of
-/// 0.2 s on / 0.15 s off, then held). Returns (time with driven slip ratio > 0.2, s; peak
-/// driven slip ratio; speed at 4 s, mph).
-fn launch(car: &LoadedCar, tcs: bool, feather: bool) -> (f32, f32, f32) {
+/// 0.2 s on / 0.15 s off, then held), no steering. Returns (time with driven slip ratio > 0.2,
+/// s; peak driven slip ratio; mean driven slip ratio over the 4 s; largest |heading change| °).
+fn launch(car: &LoadedCar, tcs: TcsLevel, feather: bool) -> (f32, f32, f32, f32) {
     let mut r = Run::new(car, tcs);
-    let (mut spin, mut peak) = (0.0f32, 0.0f32);
+    let (mut spin, mut peak, mut yaw, mut sum) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     for tick in 0..ticks(4.0) {
         let t = tick as f32 * PHYSICS_DT;
         let on = if feather && t < 2.1 {
@@ -397,16 +404,18 @@ fn launch(car: &LoadedCar, tcs: bool, feather: bool) -> (f32, f32, f32) {
         r.step(&k);
         let s = r.driven_slip();
         peak = peak.max(s);
+        sum += s;
+        yaw = yaw.max(r.heading_deg().abs());
         if s > 0.2 {
             spin += PHYSICS_DT;
         }
     }
-    (spin, peak, r.speed() / MPH)
+    (spin, peak, sum / ticks(4.0) as f32, yaw)
 }
 
-/// 60–0 mph on the brake key, ABS on or off: (time s, distance m).
-fn braking(car: &LoadedCar, abs: bool) -> (f32, f32) {
-    let mut r = Run::rolling(car, false, 60.0 * MPH);
+/// 60–0 mph on the brake key at ABS `abs`: (time s, distance m).
+fn braking(car: &LoadedCar, abs: AbsLevel) -> (f32, f32) {
+    let mut r = Run::rolling(car, TcsLevel::Off, 60.0 * MPH);
     r.assists.abs = abs;
     let p0 = r.pos();
     let t0 = r.t();
@@ -430,7 +439,7 @@ fn braking(car: &LoadedCar, abs: bool) -> (f32, f32) {
 /// 2 s. Returns (|yaw rate| °/s, radius m, |body slip| °).
 fn circle(car: &LoadedCar, mph: f32) -> (f32, f32, f32) {
     let target = mph * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     let (mut yaw, mut slip, mut v, mut n) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     for tick in 0..ticks(6.0) {
         let (cruise, brake) = r.cruise(target);
@@ -456,7 +465,7 @@ fn circle(car: &LoadedCar, mph: f32) -> (f32, f32, f32) {
 /// after 2 s, °).
 fn tap(car: &LoadedCar, mph: f32, tap_s: f32) -> (f32, f32, f32) {
     let target = mph * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     for _ in 0..ticks(0.5) {
         let (cruise, brake) = r.cruise(target);
         r.step(&Keys {
@@ -490,7 +499,7 @@ fn tap(car: &LoadedCar, mph: f32, tap_s: f32) -> (f32, f32, f32) {
 /// in 1 s after the lift minus the steady value, °/s; peak |body slip| °; spun).
 fn lift_off(car: &LoadedCar) -> (f32, f32, bool) {
     let target = 60.0 * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     let mut steady = 0.0f32;
     for tick in 0..ticks(4.0) {
         let (cruise, brake) = r.cruise(target);
@@ -524,7 +533,7 @@ fn lift_off(car: &LoadedCar) -> (f32, f32, bool) {
 /// (no countersteer) for 1.5 s. Returns (peak |body slip| °, spun, speed gain mph).
 fn hairpin_exit(car: &LoadedCar, gear: i8) -> (f32, bool, f32) {
     let target = 20.0 * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     for _ in 0..ticks(2.0) {
         let (cruise, brake) = r.cruise(target);
         let mut k = Keys {
@@ -555,7 +564,7 @@ fn hairpin_exit(car: &LoadedCar, gear: i8) -> (f32, bool, f32) {
 /// handbrake release °, total rotation 1.5 s after the release °, peak |body slip| °).
 fn handbrake(car: &LoadedCar, mph: f32, hb_s: f32) -> (f32, f32, f32) {
     let target = mph * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     for _ in 0..ticks(1.0) {
         let (cruise, brake) = r.cruise(target);
         r.step(&Keys {
@@ -587,7 +596,7 @@ fn handbrake(car: &LoadedCar, mph: f32, hb_s: f32) -> (f32, f32, f32) {
 /// throttle-on until |body slip| stays under 5° for 0.25 s, s).
 fn hb_power_straighten(car: &LoadedCar) -> (f32, Option<f32>) {
     let target = 50.0 * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     for _ in 0..ticks(1.0) {
         let (cruise, brake) = r.cruise(target);
         r.step(&Keys {
@@ -633,7 +642,7 @@ fn hb_power_straighten(car: &LoadedCar) -> (f32, Option<f32>) {
 /// |slip| while drifting °; max |slip| °; spun).
 fn counter_drift(car: &LoadedCar) -> (f32, f32, f32, bool) {
     let target = 30.0 * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     for _ in 0..ticks(1.0) {
         let (cruise, brake) = r.cruise(target);
         let mut k = Keys {
@@ -684,8 +693,8 @@ fn counter_drift(car: &LoadedCar) -> (f32, f32, f32, bool) {
 
 /// Braking from 80 mph on the brake key with a 0.2 s right tap 0.3 s in (clip 5: ABS + rear
 /// bias stays controllable). Returns (peak |body slip| °, spun, heading change at the stop °).
-fn brake_tap(car: &LoadedCar, abs: bool) -> (f32, bool, f32) {
-    let mut r = Run::rolling(car, false, 80.0 * MPH);
+fn brake_tap(car: &LoadedCar, abs: AbsLevel) -> (f32, bool, f32) {
+    let mut r = Run::rolling(car, TcsLevel::Off, 80.0 * MPH);
     r.assists.abs = abs;
     let (mut slip, mut spun) = (0.0f32, false);
     for tick in 0..ticks(10.0) {
@@ -711,7 +720,7 @@ fn brake_tap(car: &LoadedCar, abs: bool) -> (f32, bool, f32) {
 /// rows), not the stabs; rotation and speed are read just after the last stab.
 fn hb_stabs(car: &LoadedCar, stabs: bool) -> (f32, f32, f32, bool) {
     let target = 50.0 * MPH;
-    let mut r = Run::rolling(car, false, target);
+    let mut r = Run::rolling(car, TcsLevel::Off, target);
     for _ in 0..ticks(1.0) {
         let (cruise, brake) = r.cruise(target);
         let mut k = Keys {
@@ -763,7 +772,7 @@ fn driven_fx(r: &Run) -> f32 {
 /// Upshift 2→3 at full throttle: time from the key press until the driven wheels' summed
 /// longitudinal force is back to half its pre-shift value, s.
 fn shift_gap(car: &LoadedCar) -> Option<f32> {
-    let mut r = Run::new(car, true);
+    let mut r = Run::new(car, TcsLevel::Full);
     // (press time, pre-shift force, force has dipped under half yet)
     let mut pressed: Option<(f32, f32, bool)> = None;
     for _ in 0..ticks(30.0) {
@@ -809,7 +818,7 @@ fn gear_top_speeds(car: &LoadedCar) -> Vec<f32> {
 
 /// Full throttle on a long straight (TCS on, manual upshifts at the redline): top speed mph.
 fn top_speed(car: &LoadedCar) -> f32 {
-    let mut r = Run::new(car, true);
+    let mut r = Run::new(car, TcsLevel::Full);
     let mut best = 0.0f32;
     let mut last_gain_t = 0.0;
     for _ in 0..ticks(90.0) {
@@ -1085,105 +1094,87 @@ fn rows_for(id: &str, car: &LoadedCar) -> Vec<Row> {
         out: Vec::new(),
         car: id.to_string(),
     };
-    let (t60, t100) = accel(car, false);
+    let (t60, t100) = accel(car, TcsLevel::Off);
     rows.num("accel_0_60_s", "0–60 mph, s (TCS off)", t60, 2, A);
     rows.num("accel_0_100_s", "0–100 mph, s (TCS off)", t100, 2, A);
-    let (t60f, t100f) = accel(car, true);
+    let (t60f, t100f) = accel(car, TcsLevel::Full);
     rows.num("accel_0_60_tcs_s", "0–60 mph, s (TCS full)", t60f, 2, A);
     rows.num("accel_0_100_tcs_s", "0–100 mph, s (TCS full)", t100f, 2, A);
 
-    for (tcs, name) in [(Some(false), "off"), (None, "half"), (Some(true), "full")] {
-        match tcs {
-            Some(on) => {
-                let (spin, peak, _) = launch(car, on, false);
-                rows.num(
-                    &format!("launch_spin_{name}_s"),
-                    &format!("launch: time at slip ratio > 0.2, s (TCS {name})"),
-                    Some(spin),
-                    2,
-                    TCS,
-                );
-                rows.num(
-                    &format!("launch_peak_slip_{name}"),
-                    &format!("launch: peak driven slip ratio (TCS {name})"),
-                    Some(peak),
-                    2,
-                    TCS,
-                );
-                let (fspin, fpeak, _) = launch(car, on, true);
-                rows.num(
-                    &format!("launch_feather_spin_{name}_s"),
-                    &format!(
-                        "feathered launch (6 taps then hold): time at slip > 0.2, s (TCS {name})"
-                    ),
-                    Some(fspin),
-                    2,
-                    TCS,
-                );
-                rows.num(
-                    &format!("launch_feather_peak_slip_{name}"),
-                    &format!("feathered launch: peak driven slip ratio (TCS {name})"),
-                    Some(fpeak),
-                    2,
-                    TCS,
-                );
-            }
-            None => {
-                let msg = "n/a — no TCS level yet (bool `tcs`; TcsLevel is row 105)".to_string();
-                rows.text(
-                    "launch_spin_half_s",
-                    "launch: time at slip ratio > 0.2, s (TCS half)",
-                    msg.clone(),
-                    TCS,
-                );
-                rows.text(
-                    "launch_feather_spin_half_s",
-                    "feathered launch: time at slip > 0.2, s (TCS half)",
-                    msg,
-                    TCS,
-                );
-            }
-        }
+    for level in TcsLevel::ALL {
+        let name = level.name().to_lowercase();
+        let (spin, peak, mean, yaw) = launch(car, level, false);
+        rows.num(
+            &format!("launch_spin_{name}_s"),
+            &format!("launch: time at slip ratio > 0.2, s (TCS {name})"),
+            Some(spin),
+            2,
+            TCS,
+        );
+        rows.num(
+            &format!("launch_peak_slip_{name}"),
+            &format!("launch: peak driven slip ratio (TCS {name})"),
+            Some(peak),
+            2,
+            TCS,
+        );
+        rows.num(
+            &format!("launch_mean_slip_{name}"),
+            &format!("launch: mean driven slip ratio over 4 s (TCS {name})"),
+            Some(mean),
+            2,
+            TCS,
+        );
+        rows.num(
+            &format!("launch_yaw_{name}_deg"),
+            &format!("launch, no steering: largest heading change ° (TCS {name}; target < 3)"),
+            Some(yaw),
+            1,
+            TCS,
+        );
+        let (fspin, fpeak, _, _) = launch(car, level, true);
+        rows.num(
+            &format!("launch_feather_spin_{name}_s"),
+            &format!("feathered launch (6 taps then hold): time at slip > 0.2, s (TCS {name})"),
+            Some(fspin),
+            2,
+            TCS,
+        );
+        rows.num(
+            &format!("launch_feather_peak_slip_{name}"),
+            &format!("feathered launch: peak driven slip ratio (TCS {name})"),
+            Some(fpeak),
+            2,
+            TCS,
+        );
     }
 
-    let (bt, bd) = braking(car, true);
-    rows.num(
-        "brake_60_0_s",
-        "60–0 mph braking time, s (ABS full)",
-        Some(bt),
-        2,
-        A,
-    );
-    rows.num(
-        "brake_60_0_m",
-        "60–0 mph braking distance, m (ABS full)",
-        Some(bd),
-        1,
-        A,
-    );
-    let (bt0, bd0) = braking(car, false);
-    rows.num(
-        "brake_60_0_noabs_s",
-        "60–0 mph braking time, s (ABS off)",
-        Some(bt0),
-        2,
-        ABS,
-    );
-    rows.num(
-        "brake_60_0_noabs_m",
-        "60–0 mph braking distance, m (ABS off)",
-        Some(bd0),
-        1,
-        ABS,
-    );
-    rows.text(
-        "brake_60_0_abs_half_s",
-        "60–0 mph braking time, s (ABS half)",
-        "n/a — no ABS level yet (bool `abs`)".into(),
-        ABS,
-    );
-    for abs in [true, false] {
-        let name = if abs { "full" } else { "off" };
+    for level in AbsLevel::ALL {
+        let name = level.name().to_lowercase();
+        // Row ids kept from the bool era for Full / Off.
+        let suffix = match level {
+            AbsLevel::Full => String::new(),
+            AbsLevel::Off => "_noabs".to_string(),
+            AbsLevel::Half => "_abs_half".to_string(),
+        };
+        let (bt, bd) = braking(car, level);
+        rows.num(
+            &format!("brake_60_0{suffix}_s"),
+            &format!("60–0 mph braking time, s (ABS {name})"),
+            Some(bt),
+            2,
+            if level == AbsLevel::Full { A } else { ABS },
+        );
+        rows.num(
+            &format!("brake_60_0{suffix}_m"),
+            &format!("60–0 mph braking distance, m (ABS {name})"),
+            Some(bd),
+            1,
+            if level == AbsLevel::Full { A } else { ABS },
+        );
+    }
+    for abs in [AbsLevel::Full, AbsLevel::Half, AbsLevel::Off] {
+        let name = abs.name().to_lowercase();
         let (slip, spun, stop) = brake_tap(car, abs);
         rows.num(
             &format!("brake_tap_80_{name}_slip_deg"),

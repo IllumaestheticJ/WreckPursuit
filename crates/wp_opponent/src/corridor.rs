@@ -169,10 +169,21 @@ struct Piece {
 }
 
 impl Corridor {
-    /// Build the corridor of a `wp_world` route.
+    /// Build the corridor of a `wp_world` route. Panics on a route with no length (see
+    /// [`Corridor::try_from_route`]).
     pub fn from_route(map: &CityMap, route: &Route, opts: &CorridorOptions) -> Self {
+        Self::try_from_route(map, route, opts).expect("route with no length")
+    }
+
+    /// Build the corridor of a `wp_world` route, or `None` when the route has no length to
+    /// drive: no segments, or a one-segment route whose destination projects behind its start
+    /// (`wp_world::World::plan_route` returns that for a destination back down the same long
+    /// segment; a racer's flight planner hit it on Loop 9 and panicked).
+    pub fn try_from_route(map: &CityMap, route: &Route, opts: &CorridorOptions) -> Option<Self> {
         let n = route.segs.len();
-        assert!(n > 0, "empty route");
+        if n == 0 || route.polyline.is_empty() {
+            return None;
+        }
         let first = map.seg(route.segs[0]);
         let last = map.seg(route.segs[n - 1]);
         let s_start = first
@@ -198,6 +209,9 @@ impl Corridor {
             })
             .filter(|p| p.b - p.a > 1e-3)
             .collect();
+        if pieces.is_empty() {
+            return None;
+        }
         // Extents per lane piece (connectors get NaN and are blended afterwards).
         // (pos, tangent, left, left_pass, right, junction)
         let mut pts: Vec<(V3, V2, f32, f32, f32, bool)> = Vec::new();
@@ -310,13 +324,13 @@ impl Corridor {
             (samples.len().saturating_sub(1)) as f32 * CORRIDOR_STEP_M
         };
         junction_lanes.retain(|(i, _)| *i < samples.len());
-        Self {
+        Some(Self {
             samples,
             closed,
             length_m,
             opposing: opts.opposing,
             junction_lanes,
-        }
+        })
     }
 
     /// The next junction entry at or after sample `i0` within `steps` samples: `(samples
@@ -495,6 +509,32 @@ impl Corridor {
         }
     }
 
+    /// [`Corridor::project`], except that on an open course a point before the start or past
+    /// the end keeps its distance beyond it along the end tangent (`s` < 0 or > `length_m`)
+    /// instead of landing on it. Cars on a grid behind the start line, or behind a flight
+    /// route that starts at the racer, are behind one another, not level.
+    pub fn project_unclamped(&self, p: V2, hint: Option<usize>, window: usize) -> CorridorPos {
+        let mut cp = self.project(p, hint, window);
+        cp.s = self.unclamped_s(p, &cp);
+        cp
+    }
+
+    /// The arc length of `p` (projected as `cp`) without the clamp at the ends of an open
+    /// course; `cp.s` on circuits and inside the course.
+    pub fn unclamped_s(&self, p: V2, cp: &CorridorPos) -> f32 {
+        if self.closed {
+            return cp.s;
+        }
+        let c = &self.samples[cp.index];
+        let along = geom::dot(geom::sub(p, geom::xy(c.pos)), c.tangent);
+        let s = cp.index as f32 * CORRIDOR_STEP_M + along;
+        if s < 0.0 || s > self.length_m {
+            s
+        } else {
+            cp.s
+        }
+    }
+
     /// Signed centreline curvature at `s` (1/m, + = turning right), from the tangents of the
     /// samples around it (±3 samples).
     pub fn centre_curvature(&self, s: f32) -> f32 {
@@ -559,6 +599,47 @@ mod tests {
             closed,
             junction_lanes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_route_with_no_length_builds_no_corridor() {
+        // One segment whose destination lies behind the start (what `plan_route` returned for
+        // a flight destination back down the same long segment): every piece is empty.
+        let world = wp_world::World::procedural(
+            &wp_world::procgen::ProcGenConfig::default(),
+            wp_world::WorldConfig::default(),
+        );
+        let map = world.map();
+        let (id, seg) = map
+            .segs
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.lane().is_some() && s.length > 50.0)
+            .expect("a long lane");
+        let (a, _) = seg.point_at(seg.length * 0.8);
+        let (b, _) = seg.point_at(seg.length * 0.2);
+        let route = Route {
+            segs: vec![id as u32],
+            lanes: Vec::new(),
+            polyline: vec![a, b],
+            checkpoints: Vec::new(),
+            length_m: 0.0,
+            closed_loop: false,
+        };
+        let opts = CorridorOptions::default();
+        assert!(Corridor::try_from_route(map, &route, &opts).is_none());
+        let empty = Route {
+            segs: Vec::new(),
+            polyline: Vec::new(),
+            ..route.clone()
+        };
+        assert!(Corridor::try_from_route(map, &empty, &opts).is_none());
+        // Forwards along the same segment it builds.
+        let fwd = Route {
+            polyline: vec![b, a],
+            ..route
+        };
+        assert!(Corridor::try_from_route(map, &fwd, &opts).is_some_and(|c| c.len() > 1));
     }
 
     #[test]

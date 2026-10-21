@@ -21,7 +21,7 @@ fn car(id: &str) -> LoadedCar {
 /// Keyboard assists with TCS and ESC off: the case the slide help exists for.
 fn keyboard_no_tcs() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     }
@@ -33,7 +33,16 @@ fn exit(id: &str, a: &AssistProfile, style: DriverStyle, lat_g: f32, react: f32)
 
 #[test]
 fn keyboard_power_oversteer_exit_is_recoverable() {
-    for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
+    // TCS on only. With TCS Off the throttle is raw (owner row 104) and, as in the reference,
+    // letting go of the steering mid-slide with the throttle floored makes the car spin
+    // (docs/reference/wreckfest-keyboard.md "Letting go of the steering mid-drift"), so the
+    // naive "let go and wait" driver is not expected to recover there.
+    let _ = keyboard_no_tcs;
+    let tcs_on = AssistProfile {
+        tcs: wp_contracts::TcsLevel::Full,
+        ..AssistProfile::keyboard_default()
+    };
+    for a in [tcs_on] {
         for id in ["rampart_50", "lucciola_350"] {
             for react in [0.3, 0.8] {
                 let r = exit(id, &a, DriverStyle::Keyboard, 0.7, react);
@@ -141,13 +150,21 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // [bless] on ws/vehicle (2026-10-19) when the differential model replaced the old LSD
     // (a drivetrain change, not a slide-code change), and again [bless] in round 12b (ride
     // rework: tyre compliance, dampers, car damper data; a suspension change, not a slide-code
-    // change). The wheel preset has countersteer_help 0, so none of the slide code may change a
-    // single bit. (With no help the naive driver spins: full sim, no safety net.)
+    // change), and again [bless] for row 109 (the automatic clutch no longer counts wheels
+    // turning against the selected gear as "rolling": these spins end rolling backwards in a
+    // forward gear; a drivetrain change — the pivot aid itself is off on the wheel preset). The
+    // wheel preset has countersteer_help 0, so none of the slide code may change a single bit.
+    // (With no help the naive driver spins: full sim, no safety net.)
+    // Re-recorded [bless] for the spin side-force floor (a tyre change: these unassisted
+    // exits spin the rears past κ 0.3).
+    // Re-recorded [bless] for the ground-probe tilt fix (`ground::discount_tilt`: a rolled
+    // body's probe cylinder no longer hands smooth road to the sweep; a ground-contact change,
+    // not a slide-code change).
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0x9f758e911a35d298_u64),
-        ("rampart_50", 0.7, 0.8, 0x6090d6f8ac1e1867),
-        ("lucciola_350", 0.5, 0.3, 0xb0b0eb7b8b321b3b),
-        ("lucciola_350", 0.7, 0.8, 0x6ef3f84e1ecb1aa5),
+        ("rampart_50", 0.5, 0.3, 0x8a3f232189b4d668_u64),
+        ("rampart_50", 0.7, 0.8, 0x07e331d34bf80532),
+        ("lucciola_350", 0.5, 0.3, 0x32b14ede541264cc),
+        ("lucciola_350", 0.7, 0.8, 0x036113d85f8d3256),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

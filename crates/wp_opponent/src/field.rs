@@ -284,6 +284,9 @@ struct Obstacle {
     /// Its heading along the corridor (cosine to the corridor direction; −1 = facing me
     /// head on).
     facing: f32,
+    /// A racer out of the race (fled, busted, retired) driving or standing on the road: not
+    /// racing anyone, so anyone may go round it when it is slower than they are.
+    out_of_race: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -321,6 +324,9 @@ struct Racer {
     pos: V2,
     fwd: V2,
     s: f32,
+    /// `s` without the clamp at the ends of an open course (negative on a grid behind the
+    /// start line): where cars are relative to each other.
+    s_rel: f32,
     n: f32,
     v: f32,
     v_s: f32,
@@ -460,6 +466,11 @@ pub struct Field {
 }
 
 impl Racer {
+    /// Still racing on the race corridor: not fleeing (own route), busted or retired.
+    fn in_race(&self) -> bool {
+        self.flight.is_none() && !matches!(self.status, RacerStatus::Busted | RacerStatus::Retired)
+    }
+
     /// How far ahead this driver notices cars and civilians, m: the awareness range, but
     /// never less than 1.3× the braking distance from the present speed plus 30 m (at
     /// 60 m/s on a highway a stalled car must be seen ~250 m out).
@@ -536,6 +547,10 @@ pub const YIELD_AFTER_S: f32 = 2.0;
 const FLIGHT_THREAT_M: f32 = 35.0;
 /// Route stretch checked for police ahead, m.
 const FLIGHT_LOOKAHEAD_M: f32 = 160.0;
+/// A car out of the race doesn't stop where the road bends tighter than this (it rolls on to
+/// a straighter bit first): nobody can get past a car stopped in a hairpin, m.
+const PARK_MIN_RADIUS_M: f32 = 35.0;
+
 /// Minimum time between flight re-plans, s.
 const FLIGHT_REPLAN_S: f32 = 6.0;
 /// Drivers below this risk stop for red lights on open roads; the others go through a red
@@ -561,6 +576,9 @@ struct Civ {
 const CREEP_MPS: f32 = 2.5;
 /// Gap a creeping racer always keeps to the parked car it is steering round, m.
 const CREEP_STOP_GAP_M: f32 = 1.0;
+/// Lateral clearance to a parked car's body that lets a creeping racer roll on alongside it
+/// inside the stop gap, m.
+const CREEP_CLEAR_M: f32 = 0.15;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -611,6 +629,7 @@ impl Field {
                 pos: [0.0; 2],
                 fwd: [0.0, 1.0],
                 s: 0.0,
+                s_rel: 0.0,
                 n: 0.0,
                 v: 0.0,
                 v_s: 0.0,
@@ -913,7 +932,12 @@ impl Field {
             }
         }
         for v in vehicles {
-            if self.racer_index(v.entity).is_some() {
+            // Racers still in the race are tracked by the field itself; one out of it
+            // (fleeing, busted, retired) is just another car that may stand in the road.
+            if self
+                .racer_index(v.entity)
+                .is_some_and(|k| self.racers[k].in_race())
+            {
                 continue;
             }
             let p = geom::xy(v.state.pos);
@@ -1027,6 +1051,7 @@ impl Field {
                 r.pos = pos;
                 r.fwd = fwd;
                 r.s = cp.s;
+                r.s_rel = corridor.unclamped_s(pos, &cp);
                 r.n = cp.n;
                 r.hint = cp.index;
                 r.v = st.speed_mps;
@@ -1350,15 +1375,17 @@ impl Field {
             let who = match self.racer_index(v.entity) {
                 Some(k) => {
                     let r = &self.racers[k];
-                    if r.flight.is_some() {
-                        // A fleeing racer is just another vehicle on the race corridor.
+                    if !r.in_race() {
+                        // A fleeing, busted or retired racer is just another vehicle on the
+                        // race corridor (parked once it has stood still long enough: a car
+                        // busted on a hairpin is passed like any car stopped there).
                         Who::Vehicle(r.entity)
                     } else {
                         // Sliding, running wide or reversing (it swings out): give it room.
                         let unstable = r.unstable || r.running_wide || r.tactic == Tactic::Reverse;
                         out.push(Obstacle {
                             who: Who::Racer(k),
-                            s: r.s,
+                            s: r.s_rel,
                             n: r.n,
                             v_s: r.v_s,
                             v_n: r.v_n,
@@ -1368,6 +1395,7 @@ impl Field {
                             passing: r.tactic == Tactic::Overtake,
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
                             facing: 1.0,
+                            out_of_race: false,
                         });
                         continue;
                     }
@@ -1379,10 +1407,13 @@ impl Field {
                 continue;
             }
             let hint = self.hints.get(&v.entity).copied();
-            let cp = self.corridor.project(pos, hint, 60);
+            let cp = self.corridor.project_unclamped(pos, hint, 60);
             self.hints.insert(v.entity, cp.index);
             if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.out_of_race = self
+                    .racer_index(v.entity)
+                    .is_some_and(|k| !self.racers[k].in_race());
                 out.push(o);
             }
         }
@@ -1414,9 +1445,12 @@ impl Field {
             if geom::dist(pos, me.pos) > me.ahead_m() + 20.0 {
                 continue;
             }
-            let cp = corridor.project(pos, Some(me.hint), 80);
+            let cp = corridor.project_unclamped(pos, Some(me.hint), 80);
             if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.out_of_race = self
+                    .racer_index(v.entity)
+                    .is_some_and(|k| !self.racers[k].in_race());
                 out.push(o);
             }
         }
@@ -1590,7 +1624,7 @@ fn decide_racer(
         // to get round a pulled-over racer just ahead.
         let parked_ahead = obstacles.iter().any(|o| {
             o.parked && o.who != Who::Racer(k) && {
-                let ds = corridor.delta_s(r.s, o.s);
+                let ds = corridor.delta_s(r.s_rel, o.s);
                 ds > -(hl + o.half_len) && ds < 60.0
             }
         });
@@ -1604,13 +1638,21 @@ fn decide_racer(
         // that just turned round, a slow climber) that has held me up for 4 s: even a careful
         // driver goes round it on the opposing lanes when the pass checks find them clear.
         let crawl_mps = (0.7 * corridor.interp(&profile.v, r.s + 30.0)).max(6.0);
-        let crawler_ahead = r.blocked_s > 4.0
-            && obstacles.iter().any(|o| {
-                !matches!(o.who, Who::Racer(_)) && o.v_s > 0.5 && o.v_s < crawl_mps && {
-                    let ds = corridor.delta_s(r.s, o.s);
-                    ds > 0.0 && ds < 40.0
+        // A racer out of the race (fled, busted, retired, rolling on to a place to stop) is
+        // gone round as soon as it holds me up at all (Hollins, police seed 6: the field crawled
+        // behind a fled racer through the hairpins for a minute and got caught there).
+        let crawler_ahead = obstacles.iter().any(|o| {
+            let ds = corridor.delta_s(r.s_rel, o.s);
+            ds > 0.0
+                && ds < 40.0
+                && !matches!(o.who, Who::Racer(_))
+                && o.v_s > 0.5
+                && if o.out_of_race {
+                    r.blocked_s > 1.5 && o.v_s < 0.9 * corridor.interp(&profile.v, o.s)
+                } else {
+                    r.blocked_s > 4.0 && o.v_s < crawl_mps
                 }
-            });
+        });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
             && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
@@ -1629,7 +1671,7 @@ fn decide_racer(
             .iter()
             .filter(|o| o.who != me_who && !matches!(o.who, Who::Vehicle(e) if e == r.entity))
             .map(|o| {
-                let ds = corridor.delta_s(r.s, o.s);
+                let ds = corridor.delta_s(r.s_rel, o.s);
                 let gap = ds.abs() - hl - o.half_len;
                 Rel { o: *o, ds, gap }
             })
@@ -1729,10 +1771,19 @@ fn decide_racer(
                         && !matches!(x.o.who, Who::Racer(_))
                         && (r.n < lim_lo - 1.0 || x.o.facing < -0.3)
                 });
+            // Nose up to a parked car (closer than the creep stop gap allows a car to steer out
+            // round it): back out a little first (Hollins, police seed 6: the last racer stopped
+            // 0.9 m behind a busted car and waited there for the rest of the race).
+            let nosed_up = rel.iter().any(|x| {
+                x.ds > 0.0
+                    && x.o.parked
+                    && x.gap < CREEP_STOP_GAP_M + 0.5
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w
+            });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
                 && wants_to_move
-                && ((!held_by_car && r.throttle > 0.3) || head_on)
+                && ((!held_by_car && r.throttle > 0.3) || head_on || nosed_up)
             {
                 r.stuck_s += dt;
             } else if r.tactic != Tactic::Reverse {
@@ -1742,8 +1793,9 @@ fn decide_racer(
                 r.tactic = Tactic::Reverse;
                 r.tactic_ticks = 0;
                 r.stuck_s = 0.0;
-                // Nose to nose: back out far enough to steer into my own lane.
-                r.reverse_s = if head_on { 3.0 } else { 1.6 };
+                // Nose to nose, or nosed up to a parked car: back out far enough to steer
+                // round it (a car needs ~5 m of travel to move 1.5 m sideways).
+                r.reverse_s = if head_on || nosed_up { 3.0 } else { 1.6 };
             }
         }
 
@@ -2099,13 +2151,31 @@ fn decide_racer(
         {
             r.tactic = Tactic::Park;
         }
-        // Pulling over for the police: roll on slowly until at the kerb and clear of any
-        // junction, then stop there (a car stopped mid-lane blocks everyone behind it).
-        let pulling_over = r.tactic == Tactic::Yield && {
-            let i0 = (r.s / CORRIDOR_STEP_M) as isize;
-            let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
-            (r.n - lim_hi).abs() > 0.5 || near_junction
-        };
+        // Pulling over for the police, or out of the race (busted, retired, fled): roll on slowly
+        // until at the kerb and clear of any junction, then stop there (a car stopped
+        // mid-lane blocks everyone behind it — Hollins: a racer busted on a hairpin held the
+        // rest of the field until the finish window closed).
+        let out_of_race = matches!(
+            r.status,
+            RacerStatus::Busted | RacerStatus::Retired | RacerStatus::Fled
+        );
+        let pulling_over = (r.tactic == Tactic::Yield || (r.tactic == Tactic::Park && out_of_race))
+            && {
+                let i0 = (r.s / CORRIDOR_STEP_M) as isize;
+                let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
+                // Out of the race, not in a tight bend either: there is no room to pass a car
+                // stopped in a hairpin (Hollins, police seeds 3-6: a racer busted in the first
+                // hairpin held the field for the rest of the race).
+                // Same for a car pulling over for the police: stopped in a hairpin it closes
+                // the road while the unit takes its time (Hollins, police seed 6: a racer
+                // yielding mid-hairpin held the two behind it for a minute until they were
+                // caught too).
+                let in_bend = (out_of_race || r.tactic == Tactic::Yield)
+                    && (-5..=10).any(|j| {
+                        line.curvature[corridor.wrap(i0 + j)].abs() > 1.0 / PARK_MIN_RADIUS_M
+                    });
+                (r.n - lim_hi).abs() > 0.5 || near_junction || in_bend
+            };
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
             // corridor and pointing along it.
@@ -2114,7 +2184,9 @@ fn decide_racer(
                 let aligned = ((geom::dot(r.fwd, t) - 0.9) / 0.1).clamp(0.0, 1.0);
                 cap_to(&mut v_target, 7.0 + 10.0 * aligned, SpeedLimit::Mode)
             }
-            Tactic::Yield if pulling_over => cap_to(&mut v_target, 6.0, SpeedLimit::Mode),
+            Tactic::Yield | Tactic::Park if pulling_over => {
+                cap_to(&mut v_target, 6.0, SpeedLimit::Mode)
+            }
             Tactic::Park | Tactic::Yield => cap_to(
                 &mut v_target,
                 (v - 3.0 * dt * 4.0).max(0.0),
@@ -2336,6 +2408,17 @@ fn decide_racer(
                 cap_to(&mut v_target, creep, SpeedLimit::Obstacle(who_id(o.who)));
                 continue;
             }
+            // Already clear of its body, only inside the margin, and steering further away:
+            // keep creeping alongside it (rolling is what moves me sideways; going forward
+            // cannot touch it). Otherwise a car stopped at the stop gap stays there.
+            if steering_round && !overlaps(my_band(r.n, r.n), o, CREEP_CLEAR_M, 0.0) {
+                cap_to(
+                    &mut v_target,
+                    CREEP_MPS,
+                    SpeedLimit::Obstacle(who_id(o.who)),
+                );
+                continue;
+            }
             let in_corner = r.in_brake_zone
                 || line.curvature[corridor.wrap((r.s / CORRIDOR_STEP_M) as isize)].abs()
                     > 1.0 / 80.0;
@@ -2423,8 +2506,15 @@ fn decide_racer(
         // heading 0.2 s on), so lane changes at highway speed don't overshoot and weave; the
         // lookahead stretches above 25 m/s for the same reason.
         const STEER_LAG_S: f32 = 0.2;
-        let ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0);
-        let s_t = r.s + ld + v * STEER_LAG_S;
+        let mut ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0) + v * STEER_LAG_S;
+        // Held up and slowing (a car or a light ahead): aim no further than where I stop.
+        // A target around the next corner turns the car in early, across the inside lane —
+        // queued at a junction that is the oncoming lane (Lantern Row, round-12 tip: a racer
+        // braking behind a queue ended nose to nose with a stopped oncoming car).
+        if matches!(limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal) && v_target < v - 0.5 {
+            ld = ld.min(1.5 + v * v / (2.0 * a_brk));
+        }
+        let s_t = r.s + ld;
         let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
             pass_limits(s_t)
         } else {
@@ -2470,12 +2560,17 @@ fn decide_racer(
             if decel_demand > 0.5 {
                 acc = acc.min(-1.2 * decel_demand);
             }
-            let hold = matches!(r.tactic, Tactic::Park | Tactic::Yield) && v < 0.6;
+            // A parked / yielding car rolling on to the kerb or out of a bend (`v_target` above
+            // a crawl) must be able to pull away from rest: holding it there kept a racer
+            // busted in a Hollins hairpin standing in the field's way for the rest of the race.
+            let park_hold = matches!(r.tactic, Tactic::Park | Tactic::Yield) && v_target < 0.3;
+            let hold = park_hold && v < 0.6;
             let (mut th, br) = r.ctrl.pedals(v, acc, dt, hold);
             // The controller releases the brake pedal near a standstill (a held brake there
             // selects reverse): a car told to stop holds on the handbrake instead of idling
             // forward into whatever it stopped for.
-            if v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield)) {
+            let holding = v < 1.5 && (v_target < 0.3 || park_hold);
+            if holding {
                 input.handbrake = 1.0;
                 th = 0.0;
             }
@@ -2483,15 +2578,19 @@ fn decide_racer(
                 th = th.min(0.2);
             }
             // Creeping (round a standing car, up to a queue): feather the throttle so the
-            // crawl does not overshoot into whatever is a metre away.
+            // crawl does not overshoot into whatever is a metre away — but enough to pull
+            // away from rest on a steep hill (Hollins hairpins).
             if v_target < 3.0 && limit != SpeedLimit::Profile {
-                th = th.min(0.25);
+                th = th.min(if v.abs() < 0.5 { 0.45 } else { 0.25 });
             }
             th = th.min(r.throttle + p.throttle_rate_per_s * dt);
             r.throttle = th;
             input.throttle = th;
             input.brake = br;
-            input.steer = steer;
+            // Wheels straight while standing on the handbrake: handbrake + steer is the
+            // keyboard / gamepad pivot aid (wp_vehicle::pivot), which turns a car the AI
+            // drives with a player's assists (autopilot) on the spot — about 60° in 3 s.
+            input.steer = if holding && v.abs() < 0.3 { 0.0 } else { steer };
         }
         r.input = input;
         r.debug = Debug {
@@ -2566,6 +2665,7 @@ fn vehicle_obstacle(
         passing: false,
         parked: false,
         facing: geom::dot(fwd, t),
+        out_of_race: false,
     })
 }
 
@@ -2590,7 +2690,9 @@ fn civilians_on(
             }
         }
         let Some((_, hint)) = near else { continue };
-        let cp = c.project(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
+        // Beyond the ends of an open course (a grid behind the start line, a flight route that
+        // starts at the racer) a car keeps its distance instead of landing on the end.
+        let cp = c.project_unclamped(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
         // The whole road, opposing lanes included: a racer passing over there must see
         // what stands in them.
         let (l, rr) = c.pass_bounds(cp.s);
@@ -2616,6 +2718,7 @@ fn civilians_on(
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
             facing: geom::dot(f, t),
+            out_of_race: false,
         });
     }
     out
@@ -2759,19 +2862,31 @@ fn plan_pass(
             if !in_lane {
                 continue;
             }
-            if q.ds > 0.0 && q.ds < target.ds + 2.0 * hl + 6.0 {
+            // Round a parked car at a crawl only what stands beside it closes that lane: a car
+            // standing further up it (the unit that caught a busted racer) is dodged by tucking
+            // back in behind the parked one (Hollins, police seed 6).
+            let beside = if o.parked {
+                target.ds + hl + o.half_len + 1.5
+            } else {
+                target.ds + 2.0 * hl + 6.0
+            };
+            if q.ds > 0.0 && q.ds < beside {
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
             // Oncoming traffic in that lane: it covers the distance too. A car standing in
             // it anywhere along the pass closes it as well (I would end up nose to nose).
             let oncoming = q.o.v_s < -1.0 && q.ds < pass_dist + (-q.o.v_s) * t_clear + 30.0;
-            let standing = q.o.v_s.abs() < 1.0 && q.ds < pass_dist + 10.0;
+            let standing =
+                q.o.v_s.abs() < 1.0 && q.ds < if o.parked { beside } else { pass_dist + 10.0 };
             if q.ds > 0.0 && (oncoming || standing) {
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
-            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 {
+            // A car right behind me in line is following me whichever way I go: pulling out
+            // does not cut it off.
+            let in_line = (q.o.n - r.n).abs() < hw + q.o.half_w - 0.5;
+            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 && !in_line {
                 why = PassReject::LaneBehind;
                 continue 'side;
             }
@@ -2809,7 +2924,9 @@ fn plan_flight(world: &World, r: &Racer, config: &RaceConfig, police_at: &[V2]) 
         if route.polyline.len() < 2 {
             return None;
         }
-        let c = Corridor::from_route(world.map(), &route, &config.corridor);
+        // A route with no length (destination behind on the same segment) plans nothing:
+        // try the next destination.
+        let c = Corridor::try_from_route(world.map(), &route, &config.corridor)?;
         (c.len() >= 25).then_some(c)
     })?;
     let line = RacingLine::constant(&corridor, 0.0);
@@ -2847,6 +2964,7 @@ mod tests {
             passing: false,
             parked: true,
             facing: -1.0,
+            out_of_race: false,
         }
     }
 

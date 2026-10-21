@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultGameSettings, loadGameSettings, normalizeSettings, saveGameSettings, SETTINGS_KEY, speedIn, type SettingsStorage } from "./settings";
+import { assistLevel, defaultGameSettings, loadGameSettings, normalizeSettings, saveGameSettings, SETTINGS_KEY, speedIn, type SettingsStorage } from "./settings";
 import { keyAction, PadNav, REPEAT_DELAY_MS, REPEAT_EVERY_MS, stepIndex } from "./nav";
 
 const memory = (): SettingsStorage & { data: Map<string, string> } => {
@@ -15,6 +15,18 @@ describe("game settings", () => {
     expect(saveGameSettings(s, st)).toBe(true);
     expect(loadGameSettings(defaultGameSettings(true), st)).toEqual(s);
   });
+  it("reads TCS / ABS levels, legacy bools and junk", () => {
+    const base = defaultGameSettings(true);
+    expect(base.assists.abs).toBe("Full");
+    expect(base.assists.tcs).toBe("Off");
+    const legacy = normalizeSettings({ assists: { abs: true, tcs: true } }, base);
+    expect([legacy.assists.abs, legacy.assists.tcs]).toEqual(["Full", "Full"]);
+    const half = normalizeSettings({ assists: { abs: "half", tcs: "Half" } }, base);
+    expect([half.assists.abs, half.assists.tcs]).toEqual(["Half", "Half"]);
+    const junk = normalizeSettings({ assists: { abs: "max", tcs: 3 } }, base);
+    expect([junk.assists.abs, junk.assists.tcs]).toEqual(["Full", "Off"]);
+    expect(assistLevel(false, "Full")).toBe("Off");
+  });
   it("falls back field by field on bad data", () => {
     const base = defaultGameSettings(true);
     const n = normalizeSettings({ gfx: "ultra", units: "mph", drawDistanceM: 123, volumes: { master: 7, engine: "loud" }, assists: { abs: false, countersteer: -1 } }, base);
@@ -23,7 +35,7 @@ describe("game settings", () => {
     expect(n.drawDistanceM).toBe(0);
     expect(n.volumes.master).toBe(1);
     expect(n.volumes.engine).toBe(base.volumes.engine);
-    expect(n.assists.abs).toBe(false);
+    expect(n.assists.abs).toBe("Off");
     expect(n.assists.countersteer).toBe(0);
     expect(n.developer).toBe(true);
     expect(n.radioVoice).toBe(true);

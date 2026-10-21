@@ -1316,3 +1316,22 @@ of the control: physical cars more than 0.8 m wide within 8 m of a turn exit 7 �
 `simcli run apps/simcli/scenarios/city/siren_traffic_no_siren.ron` (seed 2, agent 41, ~9 s in).
 The control's golden hash moved with the merge (not with my edit); left for the lead's bless.
 Scenarios on the merged tree (release): all 86 pass.
+
+## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
+**Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
+the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
+collided with the raw 5 m heightfield: off the roads ground stood up to 11.3 m above what was
+drawn (invisible hillside).
+**Fix.**
+- `wp_world::terrain::Heightfield::lowered_coarse` (the drawn terrain, shared with
+  `city-import`; the shipped greybox is byte-identical) and `height_on_triangles` (cell
+  triangles split along the (i, j)–(i+1, j+1) diagonal, like the greybox and Rapier tiles).
+- `wp_world::surface::collision_terrain` → `CityMap::ground` (`Arc`): the drawn terrain on the
+  5 m grid, except along at-grade roads, junctions and bends (paved + sidewalk + lot + skirt +
+  2.5 m), which keep the fine heights the lots and skirts are laid on. Decks and tunnels are not
+  at grade.
+- `wp_sim::city_ground_colliders` (server and client prediction) builds the heightfield tiles
+  from `CityMap::ground`; `CityMap::ground_height` falls back to it off the roads.
+**Gate.** `wp_sim/tests/city_v2.rs::solid_terrain_is_the_drawn_terrain` (158k off-road ray
+casts ≤ 1 mm from the drawn terrain; fails on the old colliders). Also on
+`claude/lucid-cori-8sjuzz` for `main`.

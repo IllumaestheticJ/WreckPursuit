@@ -287,3 +287,40 @@ Targets for WreckPursuit (lab first, then car data):
 - the same slower build for pitch under braking and throttle
 
 This needs softer roll stiffness (springs + bars) **with** enough travel or ride height to stay off the bump stops, more roll inertia if the body inertia is low, and a slower yaw build.
+
+## Letting go of the steering mid-drift (owner, 2026-10-20)
+
+Owner: **in the reference, releasing the steering keys mid-drift makes the car slowly spin.** It does **not** straighten or hold the drift. Clips agree:
+- **Clip 1, 44.7 s:** after a 4.3 s Left hold (a right-hand drift), the keys are released for 0.8 s with the throttle on. The car keeps rotating, and the tail keeps coming round until Right is pressed at 45.5 s.
+- **Clip 1, 21.5 s:** keys released after a 1.1 s Left hold. The car keeps yawing round at falling speed.
+
+Combined with the clip-8 cockpit finding (the wheel is pulled toward countersteer *while a key is held*), this gives the target behaviour for keyboard:
+- **Key held** (either direction) during a slide: the wheels are pulled toward the travel direction (velocity-relative), plus the key's offset. Holding the key keeps the drift controllable.
+- **No key:** the wheels return to the body's centre at the normal return rate, with **no** automatic countersteer. A powered RWD slide then keeps rotating **slowly** (a gradual over-rotation into a spin over ~1–2 s, not a snap).
+- So the player must keep a key held to keep the drift. Letting go is a mistake that spins you slowly.
+
+## Grip-driving balance: ours understeers far too much (owner, 2026-10-20)
+
+Owner: our cars "still understeer a ton when not drifting". What the reference clips show in normal grip cornering:
+- **Short taps (0.1–0.25 s) turn the car in promptly.** The nose follows the key at once; there's no "push wide, then bite".
+- **Lifting at turn-in rotates the car** (clip 3 FWD and clips 2/4 RWD), and power in a corner brings the tail round on RWD.
+- **Clip 8 (cockpit, ~96 mph):** a held key takes the wheel to about the same visible angle as at a standstill, and the car turns hard at that speed. Speed sensitivity doesn't appear to cut the road-wheel lock much. Our default "rack" mode cuts lock to 63 % at 100 km/h and 43 % at 150, which on its own produces strong understeer at speed.
+
+Targets:
+- near-neutral steady-state balance (understeer gradient ≈ 0–1 deg/g in a 60 m circle at 60 and 100 km/h, measured with the parity suite)
+- a lift-off yaw kick at turn-in
+- RWD power-on oversteer
+- tap response matching the reference (heading change starting within ~0.15 s)
+
+Suspects, in order:
+1. the rack-side speed sensitivity (try "tyre" mode or a much gentler curve)
+2. front vs rear tyre peak grip / cornering stiffness and load sensitivity
+3. the roll-stiffness split, since lab bars ×0.25 and data ARB front/rear bias both matter
+4. max lock
+5. static weight distribution and CoG height in the car data
+
+## Drift transitions start with a throttle lift (owner, 2026-10-20)
+
+To switch a drift from one side to the other, the owner **lifts the throttle briefly** while switching keys. Not a handbrake tap, and not a full-throttle steering flip. Target for WreckPursuit:
+- a 0.15–0.4 s lift plus the key reversal swings the car through in ~0.5–0.8 s
+- opposite key + throttle back on catches it on the new side with no spin and no swing-back

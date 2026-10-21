@@ -302,6 +302,29 @@ for (const [hour, label] of [
   const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
   check(hidden && help.includes("traffic signals"), "9 hides the signals layer; F1 help lists it");
 }
+// `?city=<id>` opens free drive in that city with its greybox (it used to only pick the selector
+// entry, so the link opened on the flat world). Separate page: the main one keeps its session.
+{
+  const p2 = await context.newPage();
+  p2.on("pageerror", (e) => errors.push(String(e)));
+  await p2.goto(`${URL}?city=procedural_12x12`);
+  await p2.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
+  const meshes = await p2
+    .waitForFunction(
+      () => {
+        let n = 0;
+        window.__wp.scene.cities.get("procedural_12x12")?.traverse((o) => o.isMesh && n++);
+        return n;
+      },
+      null,
+      { timeout: 30000 },
+    )
+    .then((h) => h.jsonValue())
+    .catch(() => 0);
+  const id = await p2.evaluate(() => window.__wp.sim.cityId());
+  check(id === "procedural_12x12" && meshes > 0, `?city=procedural_12x12 opens free drive in ${id || "(flat world)"}, ${meshes} greybox meshes`);
+  await p2.close();
+}
 // The default city is Port Vesper v2: its greybox loads and the car sits on the terrain.
 await page.waitForFunction(() => (window.__wp.scene.cities.get("vesper_v2")?.children.length ?? 0) > 0, null, {
   timeout: 30000,

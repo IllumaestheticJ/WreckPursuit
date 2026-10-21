@@ -216,9 +216,11 @@ function Speedo({ hud, units }: { hud: HudState; units: "metric" | "imperial" })
 
 function AssistBadges({ hud }: { hud: HudState }) {
   const a = hud.assists;
+  // TCS / ABS show their level (Off / Half / Full); a legacy bool reads as Full / Off.
+  const lvl = (v: unknown) => (v === true ? "Full" : v === false ? "Off" : String(v));
   const items: [string, boolean][] = [
-    ["ABS", a.abs],
-    ["TCS", a.tcs],
+    [lvl(a.abs) === "Full" ? "ABS" : `ABS ${lvl(a.abs).toUpperCase()}`, lvl(a.abs) !== "Off"],
+    [lvl(a.tcs) === "Full" ? "TCS" : `TCS ${lvl(a.tcs).toUpperCase()}`, lvl(a.tcs) !== "Off"],
     ["ESC", a.esc],
     ["STEER", a.countersteer_help > 0 || a.steer_speed_sensitivity > 0],
     ["AUTO", a.auto_gears],

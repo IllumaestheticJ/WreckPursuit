@@ -398,6 +398,11 @@ impl RaceRun {
         &self.live
     }
 
+    /// The player's throttle while held on the grid (revs on the line during the countdown).
+    pub fn set_grid_throttle(&mut self, throttle: f32) {
+        self.live.set_grid_throttle(throttle);
+    }
+
     /// Inputs for this tick (AI cars, the player's grid hold), before `Sim::step_fixed`.
     pub fn pre_step(&mut self, sim: &Sim) -> Vec<(EntityId, VehicleInput)> {
         let obs: Vec<VehicleObs> = sim

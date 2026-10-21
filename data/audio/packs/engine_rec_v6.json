@@ -1,46 +1,41 @@
 {
   "id": "engine_rec_v6",
   "kind": "Engine",
-  "description": "Recorded six: loops cut from a public-domain car recording (domasx2, CC0) at four pitches; off-throttle layers are low-passed copies.",
+  "description": "Recorded six: a six-cylinder idle loop (domasx2, CC0) and the engine_rec_i4 loops above it, each anchored at its measured firing frequency (the pitch follows the six's firing frequency).",
   "fallback": "engine_proc_v6",
   "engine_layers": [
     {
       "cue": "engine/idle",
-      "anchor": "Idle",
-      "throttle": "Both"
-    },
-    {
-      "cue": "engine/low_on",
       "anchor": {
-        "RedlineFrac": 0.3
+        "FiringHz": 42.8
       },
-      "throttle": "On"
+      "throttle": "Both"
     },
     {
       "cue": "engine/mid_on",
       "anchor": {
-        "RedlineFrac": 0.55
+        "FiringHz": 87.2
       },
       "throttle": "On"
     },
     {
       "cue": "engine/high_on",
       "anchor": {
-        "RedlineFrac": 0.85
+        "FiringHz": 165.6
       },
       "throttle": "On"
     },
     {
       "cue": "engine/low_off",
       "anchor": {
-        "RedlineFrac": 0.35
+        "FiringHz": 87.2
       },
       "throttle": "Off"
     },
     {
       "cue": "engine/high_off",
       "anchor": {
-        "RedlineFrac": 0.78
+        "FiringHz": 165.6
       },
       "throttle": "Off"
     }
@@ -50,22 +45,22 @@
       "source": {
         "Samples": {
           "files": [
-            "high_off.ogg"
+            "../engine_rec_i4/high_off.ogg"
           ]
         }
       },
-      "gain": 3.573,
+      "gain": 4.933,
       "looped": true
     },
     "engine/high_on": {
       "source": {
         "Samples": {
           "files": [
-            "high_on.ogg"
+            "../engine_rec_i4/high_on.ogg"
           ]
         }
       },
-      "gain": 4.467,
+      "gain": 6.166,
       "looped": true
     },
     "engine/idle": {
@@ -76,7 +71,7 @@
           ]
         }
       },
-      "gain": 4.467,
+      "gain": 6.166,
       "looped": true
     },
     "engine/limiter": {
@@ -103,33 +98,22 @@
       "source": {
         "Samples": {
           "files": [
-            "low_off.ogg"
+            "../engine_rec_i4/mid_off.ogg"
           ]
         }
       },
-      "gain": 3.573,
-      "looped": true
-    },
-    "engine/low_on": {
-      "source": {
-        "Samples": {
-          "files": [
-            "low_on.ogg"
-          ]
-        }
-      },
-      "gain": 4.467,
+      "gain": 4.933,
       "looped": true
     },
     "engine/mid_on": {
       "source": {
         "Samples": {
           "files": [
-            "mid_on.ogg"
+            "../engine_rec_i4/mid_on.ogg"
           ]
         }
       },
-      "gain": 4.467,
+      "gain": 6.166,
       "looped": true
     },
     "exhaust/pop": {

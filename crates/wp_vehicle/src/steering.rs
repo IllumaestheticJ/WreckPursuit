@@ -84,7 +84,17 @@ pub struct DriftTuning {
     /// Drift "hold" mode (row 91, [`crate::drift`]) on. Default off (the owner rejected the
     /// key-into-the-turn hold, rows 106 / 111): a lab-only option.
     pub hold_enabled: bool,
+    /// Handbrake pivot aid (row 109, [`crate::pivot`]; owner-approved exception to the
+    /// no-yaw-torque rule): yaw acceleration at full key + handbrake, rad/s². 0 = off.
+    pub hb_pivot_accel: f32,
+    /// Yaw rate (rad/s) toward the key at which the pivot aid has faded out.
+    pub hb_pivot_cap: f32,
 }
+
+/// Default handbrake pivot aid strength, rad/s² (see [`crate::pivot`]).
+pub const HB_PIVOT_ACCEL: f32 = 7.0;
+/// Default yaw-rate cap of the pivot aid, rad/s.
+pub const HB_PIVOT_CAP: f32 = 3.0;
 
 impl Default for DriftTuning {
     fn default() -> Self {
@@ -98,6 +108,8 @@ impl Default for DriftTuning {
             throttle_shaping: 0.0,
             envelope_deg: 45.0,
             hold_enabled: false,
+            hb_pivot_accel: HB_PIVOT_ACCEL,
+            hb_pivot_cap: HB_PIVOT_CAP,
         }
     }
 }

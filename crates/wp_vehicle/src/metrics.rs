@@ -27,8 +27,8 @@ const TICKS_PER_S: usize = 240;
 /// filtering, 1:1 steering (so the controllers command road-wheel angle directly).
 pub fn metric_assists() -> AssistProfile {
     AssistProfile {
-        abs: true,
-        tcs: true,
+        abs: wp_contracts::AbsLevel::Full,
+        tcs: wp_contracts::TcsLevel::Full,
         esc: false,
         steer_speed_sensitivity: 0.0,
         countersteer_help: 0.0,
@@ -41,7 +41,7 @@ pub fn metric_assists() -> AssistProfile {
 
 fn no_tcs() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..metric_assists()
     }
 }

@@ -18,7 +18,7 @@ fn car(id: &str) -> LoadedCar {
 
 fn no_tcs() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..metric_assists()
     }
 }
@@ -327,12 +327,14 @@ fn roster_diff_hashes_are_pinned() {
     // released-key steering; handbrake data), and for owner row 92: lindwurm_4t / junkyard_beater
     // suspension data, and sperber_32 (AWD: the TCS-braked ice wheel drags backwards, so
     // anti-dive jacks); the other three are unchanged.
+    // Re-recorded [bless] for the spin side-force floor (the split-µ launch spins the
+    // low-µ wheel past κ 0.3).
     let pinned: [(&str, u64); 6] = [
-        ("shiro_turbo", 0xa1a8378f86d4297c),
-        ("hakone_gt", 0x93c112e33a42e872),
-        ("sperber_32", 0x4c645c669f1424b1),
+        ("shiro_turbo", 0x0a67863c34295311),
+        ("hakone_gt", 0x2796f7f441945760),
+        ("sperber_32", 0xea36fd40ac4ad9eb),
         ("lindwurm_4t", 0xf2c2302ee4933a70),
-        ("sentinel_wolfhound", 0x3d93cffb67dcee15),
+        ("sentinel_wolfhound", 0x592b053674d3f09d),
         ("junkyard_beater", 0xb3fb3f7abfb495dd),
     ];
     let mut got = Vec::new();
