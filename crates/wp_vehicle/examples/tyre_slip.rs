@@ -1388,6 +1388,17 @@ fn trace(id: &str) {
 }
 
 fn main() {
+    // GRIP=drift_best | new: grip-balance's lab balance on for the whole run (presets that
+    // rely on it, e.g. "spin model v2 (ellipse)").
+    match std::env::var("GRIP").as_deref() {
+        Ok("drift_best") => wp_vehicle::grip_lab::set_override(Some(
+            wp_vehicle::grip_lab::GripBalance::drift_best(),
+        )),
+        Ok("new") => wp_vehicle::grip_lab::set_override(Some(
+            wp_vehicle::grip_lab::GripBalance::lab_default(),
+        )),
+        _ => {}
+    }
     // PLAIN='{"velocity_relative":true}': Drift Lab W's plain steering constants (missing
     // fields = defaults).
     let plain_env: PlainSteer = std::env::var("PLAIN").map_or(PlainSteer::default(), |j| {

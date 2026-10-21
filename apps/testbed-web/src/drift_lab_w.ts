@@ -720,9 +720,27 @@ export class DriftLabWPanel {
         this.save(this.sim.carTuneDefaults().transition_plain);
         this.restart(this.car);
       };
+      // Spin model v2 (tyre-slip): friction-ellipse spin model for lift-flick transitions.
+      const v2 = document.createElement("button");
+      v2.textContent = "spin model v2 (ellipse)";
+      v2.title =
+        "tyre-slip A/B: the spin model kept inside the friction ellipse, so a brief throttle lift while switching keys swings the car through (lift flicks caught 12 / 18 at the reference gaps; v1: 0). Holds fewer full-throttle drifts than v1 (7 / 27 vs 18). Sets tyres + VR steering + the 'drift: best' balance";
+      v2.onclick = () => {
+        const d = this.sim.carTuneDefaults();
+        const tyres = JSON.stringify(d.spin_v2);
+        this.sim.carTuneSet(tyres);
+        try {
+          localStorage.setItem(CAR_STORE, tyres);
+        } catch {
+          /* ignore */
+        }
+        saveGrip(gd.drift_best);
+        this.save(d.spin_v2_plain);
+        this.build();
+      };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, forSlow, driftBest, step2, lockOnly, trans);
+      abRow.append(ab, forSlow, driftBest, step2, lockOnly, trans, v2);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

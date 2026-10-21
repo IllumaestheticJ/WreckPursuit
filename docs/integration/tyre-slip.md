@@ -135,6 +135,29 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Spin model v2 (ellipse) — lead's go-ahead, A/B preset next to v1
+
+`CarTune::spin_v2_candidate()` (+ `CarTune::spin_v2_plain()` steering, with
+`GripBalance::drift_best()`): the spin model with the friction ellipse at 0.68 so a lift frees
+side grip. Found with `examples/transition.rs v2search` (≈ 1 300 candidates: 960 wide over
+ellipse / drive floor / b0 / b2 / c / p / rear relax × W·plain, W·VR, drift best·VR; then
+refines with the VR steering and drift lock / front falloff / rear peak slip). W panel button
+"spin model v2 (ellipse)" (grip-balance row) sets tyres + steering + drift best; e2e checks it.
+
+| measure (drift best · VR unless noted) | v1 spin model | **v2 ellipse** | target |
+|---|---|---|---|
+| owner's lift flick caught, reference gaps 0.05 / 0.15 s (18) | 0 | **12 (67 %)**, 0 spins, 0 swing-backs | ≥ 60 % ✓ |
+| owner's lift flick, all gaps incl. 0.3 s, of flicks from a held drift | 0 | 18 / 18 | |
+| held-drift set (counter key at 6 / 12 / 20° × 0.3–0.7 g × rwd_d / a / b) | 18 / 27 | **7 / 27** | ≥ 15 ✗ |
+| keys released mid-drift (6 cases) | 6 hold | 1 slow spin (reference), 3 hold | kept / better |
+| straight launches (6) | 5 / 6 | 5 / 6 | unchanged ✓ |
+| grip max Δ vs the data tyres (lane change) | 16.3 % | 13.0 % | unchanged ✓ |
+
+**The held-drift target is not met.** The trade-off held in every search: the best candidates are
+7 held / 12 caught or 10 held / 6 caught; the swing rack lifts holds to 11 but then no flick
+swings. With the ellipse a full-throttle hold has less side grip at the rear, so the deep
+entries (20°) and rwd_b's spin or swap in the first 2 s. v1 stays the default.
+
 ### Re-tune after the round12 / grip-balance merge (93b9a13d)
 
 The probe tilt fix (on by default) moved the knife-edge clip-1 hold into a spin

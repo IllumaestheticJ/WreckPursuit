@@ -232,7 +232,7 @@ pub fn car_tune_json() -> String {
     json(&wp_vehicle::car_lab::active())
 }
 
-/// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset> }`, JSON.
+/// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset>, "spin_v2": <spin model v2 (ellipse)>, "spin_v2_plain": <its steering> }`, JSON.
 #[wasm_bindgen]
 pub fn car_tune_defaults_json() -> String {
     json(&serde_json::json!({
@@ -242,6 +242,8 @@ pub fn car_tune_defaults_json() -> String {
         "spin_lock": wp_vehicle::car_lab::CarTune::spin_lock_candidate(),
         "spin_vr_plain": wp_vehicle::car_lab::CarTune::spin_vr_plain(),
         "transition_plain": wp_vehicle::car_lab::CarTune::transition_plain(),
+        "spin_v2": wp_vehicle::car_lab::CarTune::spin_v2_candidate(),
+        "spin_v2_plain": wp_vehicle::car_lab::CarTune::spin_v2_plain(),
     }))
 }
 
