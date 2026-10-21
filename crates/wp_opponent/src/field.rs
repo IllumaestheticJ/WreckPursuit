@@ -624,6 +624,8 @@ const PASS_LANE_STEP_M: f32 = 3.5;
 const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
 /// How far up a junction's arms civilians coming to it are looked for, m.
 const JUNCTION_ARM_LOOK_M: f32 = 60.0;
+/// Margin over my own time through a junction before a civilian heading to it gets there, s.
+const JUNCTION_GAP_S: f32 = 1.5;
 
 /// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
@@ -1830,9 +1832,61 @@ fn decide_racer(
                     r.blocked_s > 4.0 && o.v_s < crawl_mps
                 }
         });
+        // A non-racer standing in my way (a civilian at a light, a stalled car) that has held me
+        // up for a second: street racers go round it on the opposing lanes like round a parked
+        // car, when the pass checks find them clear (main's Lantern downtown: the field sat 20 s
+        // behind a civilian stopped at a light until it counted as parked).
+        let standing_ahead = r.blocked_s > 1.0
+            && obstacles.iter().any(|o| {
+                let ds = corridor.delta_s(r.s_rel, o.s);
+                ds > 0.0
+                    && ds < 40.0
+                    && !matches!(o.who, Who::Racer(_))
+                    && o.v_s.abs() < 0.5
+                    && (o.n - r.n).abs() < hw + o.half_w + 0.5
+            });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead);
+            && (p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead || standing_ahead);
+        // The next junction (within 120 m) has nobody coming to it: a pass on the opposing side
+        // may go into it (risk check, as for the whole-road line).
+        // (The cars queued in my own lane ahead are the ones being passed, not traffic coming
+        // to the junction: a civilian stopped at the line would otherwise block its own pass.)
+        let junction_clear = {
+            let (own_lo, own_hi) = corridor.bounds(r.s);
+            let queued: Vec<u32> = obstacles
+                .iter()
+                .filter_map(|o| match o.who {
+                    Who::Civilian(id)
+                        if o.n > -own_lo - 0.5
+                            && o.n < own_hi + 0.5
+                            && corridor.delta_s(r.s_rel, o.s) > 0.0
+                            && corridor.delta_s(r.s_rel, o.s) < 120.0
+                            && o.v_s > -0.5 =>
+                    {
+                        Some(id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            let others: Vec<Civ> = civs
+                .iter()
+                .filter(|c| !queued.contains(&c.id))
+                .copied()
+                .collect();
+            let i0 = (r.s / CORRIDOR_STEP_M).floor() as isize;
+            let steps = (120.0 / CORRIDOR_STEP_M) as isize;
+            (0..steps)
+                .find(|&j| corridor.sample(i0 + j).junction)
+                .is_none_or(|j| {
+                    // From where I am (often standing behind the car I am passing),
+                    // accelerating as I would: to the junction and through it.
+                    let d = j as f32 * CORRIDOR_STEP_M + 20.0;
+                    let a = (r.cap.accel_mps2 * p.usage.accel).max(1.0);
+                    let t_clear = (-v + (v * v + 2.0 * a * d).sqrt()) / a + 0.5;
+                    junction_arms_empty(geom::xy(corridor.sample(i0 + j).pos), &others, t_clear)
+                })
+        };
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1997,6 +2051,20 @@ fn decide_racer(
             }
         }
 
+        // A red (or one turning red) at the next junction when I get there: nobody may be out
+        // on the opposing side then — a racer stopping for it there stands nose to nose with
+        // the queue coming the other way (main's Lantern downtown seed 7: the leader stopped
+        // for a red mid-pass on the opposing side and the whole field stood for 2 minutes).
+        let red_ahead = signal.is_some_and(|g| {
+            let t = g.d_entry / v.max(4.0);
+            g.d_entry < 150.0
+                && match g.state {
+                    SignalState::Red => g.remaining_s > t - 1.0,
+                    SignalState::Yellow => true,
+                    SignalState::Green => g.remaining_s < t + 2.0,
+                    SignalState::Off => false,
+                }
+        });
         // Pass-target bookkeeping.
         let target_rel = |w: Who| rel.iter().find(|x| x.o.who == w);
         match r.tactic {
@@ -2037,7 +2105,14 @@ fn decide_racer(
                                     r.n_goal,
                                     hw,
                                 );
-                            too_late || lost || gone || stale || oncoming || junction
+                            // Out on the opposing side, still behind, a red coming: tuck back in.
+                            let red = x.ds > 0.0
+                                && red_ahead
+                                && r.n - hw
+                                    < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m
+                                && signal
+                                    .is_some_and(|g| g.d_entry < brake_dist.max(v * 2.0) + 30.0);
+                            too_late || lost || gone || stale || oncoming || junction || red
                         }
                     }
                     None => true,
@@ -2163,7 +2238,10 @@ fn decide_racer(
                 if (r.blocked_s > p.overtake_patience_s || momentum || weave)
                     && x.o.v_s > -1.0
                     && !done_racing
-                    && (!start_phase || x.o.parked)
+                    // Start discipline is about the field: a civilian stopped in my lane
+                    // (at a light) is gone round as usual (main's Lantern downtown: the
+                    // field sat 20 s behind one just after the start).
+                    && (!start_phase || x.o.parked || !matches!(x.o.who, Who::Racer(_)))
                 {
                     let ctx = PassCtx {
                         corridor,
@@ -2173,6 +2251,8 @@ fn decide_racer(
                         v,
                         margin: margin_for(&x.o),
                         draft,
+                        junction_clear,
+                        red_ahead,
                     };
                     let plan = plan_pass(r, x, &rel, &ctx, &pass_limits);
                     let slot = match plan {
@@ -3118,7 +3198,8 @@ fn wide_line_clear(
             let back = (WIDE_JUNCTION_CLEAR_M / CORRIDOR_STEP_M).ceil() as isize;
             if let Some(j) = (-back..=back).find(|&j| corridor.sample(i + j).junction) {
                 let at = geom::xy(corridor.sample(i + j).pos);
-                if !junction_arms_empty(at, civs) {
+                let t_clear = (x + j as f32 * CORRIDOR_STEP_M + 20.0) / v;
+                if !junction_arms_empty(at, civs, t_clear) {
                     return false;
                 }
                 // Anything else (police, parked or physical cars) standing at it.
@@ -3146,22 +3227,23 @@ fn wide_line_clear(
     true
 }
 
-/// Whether nobody is coming to the junction at `at`: no civilian within
-/// [`JUNCTION_ARM_LOOK_M`] heading towards it, and none standing within 25 m of it (waiting at
-/// its line, or inside it).
-fn junction_arms_empty(at: V2, civs: &[Civ]) -> bool {
+/// Whether I can be through the junction at `at` before anyone else gets there, needing
+/// `t_clear` s to reach it and get clear: a gap check, not "nobody about" (busy downtown junctions
+/// are never empty). A civilian inside the box (within 12 m) closes it; one standing further out
+/// is waiting at its line and does not; one heading to it closes it if it arrives within
+/// `t_clear` + [`JUNCTION_GAP_S`].
+fn junction_arms_empty(at: V2, civs: &[Civ], t_clear: f32) -> bool {
     !civs.iter().any(|c| {
         let to = geom::sub(at, c.pos);
         let d = geom::len(to);
         if d > JUNCTION_ARM_LOOK_M {
             return false;
         }
-        let speed = geom::len(c.vel);
-        if speed < 0.5 {
-            d < 25.0
-        } else {
-            geom::dot(c.vel, to) > 0.0 || d < 12.0
+        if d < 12.0 {
+            return true;
         }
+        let speed = geom::len(c.vel);
+        speed >= 0.5 && geom::dot(c.vel, to) > 0.0 && d / speed < t_clear + JUNCTION_GAP_S
     })
 }
 
@@ -3187,6 +3269,10 @@ struct PassCtx<'a> {
     margin: f32,
     /// The sim applies slipstream.
     draft: bool,
+    /// The next junction has nobody coming to it ([`junction_arms_empty`]).
+    junction_clear: bool,
+    /// The next junction's light is red (or turning red) when I get there.
+    red_ahead: bool,
 }
 
 /// Lateral limits `(lo, hi)` for passing `o`: a little nearer the road edges when it is a
@@ -3291,7 +3377,9 @@ fn plan_pass(
         // gridlocked in a junction for the rest of the race).
         // (Looking 40 m past the pass: a pass that ends just short of a junction stalls there
         // when the queue it was passing stops at the junction — Lantern s95 seed 4.)
-        if !o.parked && opposing_through_junction(ctx.corridor, r.s, pass_dist + 40.0, n_pass, hw) {
+        if (ctx.red_ahead || (!o.parked && !ctx.junction_clear))
+            && opposing_through_junction(ctx.corridor, r.s, pass_dist + 40.0, n_pass, hw)
+        {
             why = PassReject::LaneAhead;
             continue 'side;
         }

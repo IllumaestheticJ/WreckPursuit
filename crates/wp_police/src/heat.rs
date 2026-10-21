@@ -104,6 +104,11 @@ pub struct RuleInputs {
     pub seen: bool,
     /// Distance to the nearest ground unit, m (`f32::INFINITY` if none).
     pub nearest_unit_m: f32,
+    /// Distance to the nearest ground unit chasing this racer (`Pursue` / `Intercept` on it),
+    /// m. The pinned rule counts only those: one unit stopped for its own target is not
+    /// pinning the queue behind that target (Hollins hairpin: a cop holding for a racer
+    /// head-on had all three queued racers arrested).
+    pub nearest_chaser_m: f32,
     /// Racer is inside a safehouse POI.
     pub in_safehouse: bool,
     /// Racer speed, m/s.
@@ -295,7 +300,7 @@ impl RacerRecord {
             }
             // Pinned: boxed in and rocking back and forth, never getting away.
             let p = [self.pos[0], self.pos[1]];
-            let close = inp.nearest_unit_m <= cfg.capture.pinned_unit_radius_m;
+            let close = inp.nearest_chaser_m <= cfg.capture.pinned_unit_radius_m;
             match self.pin_anchor {
                 Some(a)
                     if close
@@ -349,6 +354,7 @@ mod tests {
         RuleInputs {
             seen,
             nearest_unit_m: nearest,
+            nearest_chaser_m: nearest,
             in_safehouse: false,
             speed_mps: speed,
             district: District::Core,

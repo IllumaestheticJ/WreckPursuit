@@ -320,7 +320,7 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
-      this.cityTiles.set(cityId, new CityTiles(gltf.scene));
+      this.cityTiles.set(cityId, new CityTiles(gltf.scene, this.quality.cityTileM));
       this.onCityLoaded?.(gltf.scene, cityId);
       this.warmLightVariants();
     } catch (e) {
@@ -647,6 +647,10 @@ export class SceneView {
     if (tiles) {
       camera.getWorldPosition(this.camPos);
       tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
+    }
+    if (this.markings.tileCount > 0) {
+      camera.getWorldPosition(this.camPos);
+      this.markings.update(this.camPos, this.cullDistanceM(camera));
     }
     // Three bakes the number of visible point lights into every lit shader, so the shared siren
     // light turning on (first police lights) used to recompile every lit material mid-chase

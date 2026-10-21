@@ -250,6 +250,9 @@ pub struct PoliceStats {
     pub pursuits: Vec<PursuitRecord>,
     /// Reinforcement request → unit committed, s.
     pub reinforcement_delays_s: Vec<f32>,
+    /// Per pursuit: pursuit start → the first backup unit committed, s.
+    #[serde(default)]
+    pub first_backup_delays_s: Vec<f32>,
     /// Units that ever pursued.
     pub units_engaged: u32,
     /// Units total-lost without racer contact.
@@ -310,6 +313,9 @@ pub struct PoliceStats {
     pub resets: Vec<ResetRecord>,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
+    /// Chasing units that routed around a traffic jam they stood in (row 86).
+    #[serde(default)]
+    pub jam_reroutes: u32,
     /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
     /// call was handed back (siren off) and they despawn out of sight.
     #[serde(default)]
@@ -408,6 +414,8 @@ pub(crate) struct RacerObs {
     pub(crate) witness: Option<UnitId>,
     /// Nearest ground unit distance, m.
     pub(crate) nearest_unit_m: f32,
+    /// Nearest ground unit chasing this racer, m.
+    pub(crate) nearest_chaser_m: f32,
 }
 
 /// Police state for one instance.
@@ -429,6 +437,14 @@ pub struct PoliceSystem {
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
     /// Seconds each racer has been speeding in a unit's sight (radar hold).
     pub(crate) radar_over: BTreeMap<EntityId, f32>,
+    /// When each racer last had a unit sent to wait ahead of it (see
+    /// [`dispatch::AMBUSH_EVERY_S`]).
+    pub(crate) last_ambush: BTreeMap<EntityId, SimTime>,
+    /// The pursuit start each racer's first backup was logged for (see
+    /// `PoliceStats::first_backup_delays_s`).
+    pub(crate) first_backup: BTreeMap<EntityId, SimTime>,
+    /// Units booking a racer they captured, until when (see `pursuit::ARREST_BUSY_S`).
+    pub(crate) arresting: BTreeMap<UnitId, SimTime>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
@@ -584,6 +600,9 @@ impl PoliceSystem {
             phase: DayPhase::Day,
             warmed_up: false,
             racers: BTreeMap::new(),
+            last_ambush: BTreeMap::new(),
+            first_backup: BTreeMap::new(),
+            arresting: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
             radar_over: BTreeMap::new(),
@@ -1486,6 +1505,47 @@ impl PoliceSystem {
                     && graph::dot(d, d) < TURN_LOOK_M * TURN_LOOK_M
             })
         });
+        // Waiting for it head-on while standing in its line (a single-carriageway hairpin,
+        // Hollins): pull aside out of the line at a crawl instead of stalling in front of it,
+        // so it can pass (and the field behind it is not stopped by a parked police car).
+        let aside = if target_head_on {
+            u.assignment
+                .target()
+                .and_then(|e| self.racers.get(&e))
+                .and_then(|r| {
+                    let rv = [r.vel[0], r.vel[1]];
+                    let rd = graph::normalize(rv);
+                    let off = graph::cross(rd, graph::sub(pos, [r.pos[0], r.pos[1]]));
+                    (off.abs() < HEAD_ON_PATH_M).then(|| {
+                        // Further out on the side it already leans to (its right when dead on).
+                        let side = if off.abs() > 0.3 {
+                            off.signum()
+                        } else {
+                            graph::cross(rd, graph::perp_left(heading)).signum()
+                        };
+                        let out = graph::scale(graph::perp_left(rd), side * HEAD_ON_PATH_M);
+                        graph::add(graph::add(pos, graph::scale(heading, 6.0)), out)
+                    })
+                })
+        } else {
+            None
+        };
+        if let (Some(to), false) = (aside, disabled) {
+            let left = graph::cross(heading, graph::sub(to, pos)) > 0.0;
+            let (throttle, brake) = if v < HEAD_ON_ASIDE_MPS {
+                (0.3, 0.0)
+            } else {
+                (0.0, 0.4)
+            };
+            return VehicleInput {
+                steer: if left { -1.0 } else { 1.0 },
+                throttle,
+                brake,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            };
+        }
         if (target_head_on || facing < stuck::SWING_BEHIND_COS)
             && !disabled
             && matches!(u.unstick.phase, stuck::Phase::Drive)
@@ -2107,6 +2167,11 @@ fn hold_pedals(v: f32) -> (f32, f32, f32) {
         (0.0, STANDSTILL_BRAKE, 1.0)
     }
 }
+
+/// A unit closer than this to the line of its target coming at it head-on pulls aside, m.
+const HEAD_ON_PATH_M: f32 = 6.0;
+/// ... at this crawl, m/s.
+const HEAD_ON_ASIDE_MPS: f32 = 2.5;
 
 /// Throttle at full lock in a forward U-turn below [`stuck::UTURN_MPS`] − 1 m/s.
 const UTURN_THROTTLE: f32 = 0.9;

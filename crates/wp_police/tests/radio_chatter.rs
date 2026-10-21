@@ -263,7 +263,7 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
             .units()
             .iter()
             .filter_map(|u| match u.assignment {
-                Assignment::Intercept { target, point } if target == RACER => Some(point),
+                Assignment::Intercept { target, point, .. } if target == RACER => Some(point),
                 _ => None,
             })
             .collect();

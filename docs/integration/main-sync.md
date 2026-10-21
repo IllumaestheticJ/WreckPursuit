@@ -138,6 +138,34 @@ on the final tip (below).
 
 (final list below, with the gate)
 
+## Render budget (after the gate; lead's follow-up)
+`node e2e/perf_check.mjs` (software GL in this container, Port Vesper chase, `style=lowpoly`).
+Draw calls swing ±15 between runs (car and prop views), so two runs each:
+
+| Profile | Before (`9a4272f8`) | After |
+|---|---|---|
+| chase 1280×720 | 417–428 k triangles, 327–344 draw calls | 362–364 k, 370–377 |
+| rain 1280×720 | 398–408 k, 307–322 | 330–332 k, 324–327 |
+| phone 740×360 | 385–387 k, 322–325 draw calls | 358–369 k, 272–287 draw calls |
+
+Budgets: ≤ 400 k triangles; < 300 draw calls on the phone (< 600 desktop). The frame-time and
+allocation checks still fail under software GL, as on round 12 (environment, not touched).
+- **Road markings** (`markings_view.ts`): ~94 k triangles as two whole-city meshes with frustum
+  culling off, so every triangle was drawn every frame. Now tiled like the city (one
+  vertex-coloured mesh per tile, white and yellow merged: one draw each), frustum-culled and
+  hidden past the city draw distance (where the road under them is not drawn either). No
+  small-detail cut-off: distant dashes still show from the air. A/B with
+  `e2e/highway_shots.mjs`: the 8 Port Vesper shots are pixel-identical; the grid shots differ
+  only where live traffic had moved.
+- **Touch profile city tiles 640 m** (`Quality.cityTileM`, was 320 m): with the 600 m draw
+  distance ~10 tiles of every city material were in view, one draw call each (city draws on
+  the phone 123 → 84). Instanced trees / fences / hedges / driveways keep their 640 m tiles
+  (`Math.max(INSTANCE_TILE_M, tileM)`): 1280 m ones cost +80 k triangles.
+- **Grid greybox** (`city-import` `glb.rs`): on flat terrain the skirt-foot wall curtains stand
+  on the ground and were buried whole: not emitted there any more (bare sidewalk backs keep
+  theirs). Port Vesper's greybox is unchanged; the perf chase runs on Port Vesper, so this one
+  does not show in the table (grid only).
+
 ## Gate (final, `bb2208ed`, published as preview 0.12.32)
 `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, exit codes:
 
