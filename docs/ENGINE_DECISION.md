@@ -211,3 +211,13 @@ Goal: answer "can Godot carry this game?" with numbers, not opinions.
 If (1), (2) and (4) pass and (3) is close, commit to Godot. If (3) is far off, repeat step 3 only
 in Unreal before deciding; the bridge and damage steps there would cost more and are not the
 uncertain part.
+
+## Update 2026-10-21: a fourth option is being tried
+
+We are also testing **our own engine**: the Rust core plus a renderer we write ourselves on
+wgpu. The first piece, `crates/wp_render`, draws the real per-panel car meshes deforming from
+the lattice, with wheels, barriers and a chase camera, in a native window
+(`cargo run --release -p testbed-native --features gpu -- --gpu`). It can also write headless
+screenshots. It answers spike steps 1 and 2 for this option at zero bridge cost. Step 3 (the
+night city block) is the open question here too: the city, lighting and shadows are not drawn
+yet. See `crates/wp_render/README.md` for what exists and what doesn't.
