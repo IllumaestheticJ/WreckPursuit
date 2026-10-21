@@ -689,10 +689,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     }
     // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
     // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
-    // physics terrain the skirts end on.
+    // physics terrain the skirts end on. On flat terrain (main's grid) a skirt foot stands on
+    // the ground, so its curtain would be buried whole: only the bare backs get one there
+    // (render budget: ~10 draw calls and 6k triangles a frame on the grid).
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
-        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+        let feet: &[(V3, V3)] = if wp_world::surface::has_relief(net) {
+            &walks.skirt_feet
+        } else {
+            &[]
+        };
+        for line in chain_segments(feet.iter().chain(&walks.bare_backs)) {
             let bottom: Vec<f32> = line
                 .iter()
                 .map(|p| (ground_z(geom::xy(*p)) - foot_m).min(p[2]))
