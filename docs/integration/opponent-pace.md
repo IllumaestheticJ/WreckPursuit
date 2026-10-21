@@ -626,3 +626,28 @@ race_picker with police, seeds 1–8 (`WP_RACE_SEED`), before = 4cddb03d, after 
 | loop9_circuit | after | 48 | 35 | 0 | 13 | 0 | 8/8 |
 | lantern_checkpoint_draws_the_police | before | 32 | 0 | 20 | 11 | 1 (running) | 7/8 |
 | lantern_checkpoint_draws_the_police | after | 32 | 2 | 16 | 13 | 1 (window) | 7/8 |
+
+## Racers never give up (owner, 2026-10-21) — replaces the L1–L2 plan above
+
+In a race a pursued racer never abandons it or pulls over, at any wanted level, whatever its skill
+or risk: it keeps racing and evading until the police actually capture it (police-side capture
+rules) or it is wrecked / DNF'd. Racers already out of the race (finished, disqualified) still pull
+over. `RaceConfig::allow_abandon` now means "may give up" and defaults to off; the flee machinery
+stays (its tests turn it on). race_picker::hollins_hill_sprint requires a winner again.
+
+race_picker with police, seeds 1–8, before = lead/round12 e6165f7f (pursued racers yield / flee),
+after = this tip:
+
+| race | run | cars | finished | captured | fled | other | test passes |
+|---|---|---|---|---|---|---|---|
+| hollins_hill_sprint | before | 32 | 5 | 24 | 2 | 1 running | 7/8 (relaxed check) |
+| hollins_hill_sprint | after | 32 | 3 | 27 | 0 | 2 running | 3/8 (winner required) |
+| loop9_circuit | before | 48 | 23 | 11 | 12 | 2 window | 8/8 |
+| loop9_circuit | after | 48 | 48 | 0 | 0 | 0 | 8/8 |
+| lantern_checkpoint_draws_the_police | before | 32 | 0 | 18 | 13 | 1 running | 7/8 |
+| lantern_checkpoint_draws_the_police | after | 32 | 5 | 27 | 0 | 0 | 8/8 |
+
+Hollins per seed (after): one finisher on seeds 3, 4, 7 (the default seed passes); the police
+genuinely capture all four on seeds 1, 2, 6; on seeds 5 and 8 the last racer is still racing
+(23 m/s, 69 m from the line on seed 8) when the test's 200 s run limit ends it — held up by box-ins
+in the first hairpin earlier, not a deadlock.
