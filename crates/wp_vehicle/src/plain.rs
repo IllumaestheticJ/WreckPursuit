@@ -451,8 +451,14 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     let p = &with_over_rate(p, inp);
     let lock = drift_lock(inp.full_lock * p.lock_frac(inp.speed), inp, p);
     // Past this tick's lock (a transition or the drift lock extension just ended): back inside
-    // it at the return rate first, so the rack never jumps.
-    if current.abs() > lock + 1e-6 {
+    // it at the return rate first, so the rack never jumps. Gated (grip-balance, unify
+    // 2026-10-21, until W reworks it): only within the transition arming window of a lift or a
+    // key reversal. Outside it the block held the wheels past a shrinking smart / slide lock
+    // and regressed the tapper (rwd_b spins), the snap-back (3.3° → 5.5°) and spin_model_holds.
+    let armed = p.trans_follow
+        && p.trans_arm_s > 0.0
+        && (inp.since_lift_s <= p.trans_arm_s || inp.since_reversal_s <= p.trans_arm_s);
+    if armed && current.abs() > lock + 1e-6 {
         let rate = inp.full_lock.max(lock) / p.t_return_s.max(0.01);
         let a = current - current.signum() * rate * dt;
         return if a.abs() < lock {

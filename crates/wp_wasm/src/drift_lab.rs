@@ -73,9 +73,9 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 //
 // | function | what |
 // |---|---|
-// | `plain_steer_json()` | the plain steering constants in effect (`null` = plain off), JSON |
-// | `plain_steer_defaults_json()` | the defaults (`wp_vehicle::plain::PlainSteer`), JSON |
-// | `plain_steer_set(json)` | turn plain steering on with these constants (`""` = off); missing fields take the default |
+// | `plain_steer_json()` | the plain steering a player's car drives with (override or shipped; `null` = off / legacy), JSON |
+// | `plain_steer_defaults_json()` | the shipped steering (`wp_vehicle::lab_scope::shipped_plain`), JSON |
+// | `plain_steer_set(json)` | set the plain steering override (`""` = the shipped steering); missing fields take `PlainSteer::default` |
 // | `plain_readout(entity)` | `[steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg]` (see `plain_readout`) |
 // | `parity_car_ids()` | JSON array of the parity test cars (not in `car_ids()`) |
 
@@ -86,14 +86,15 @@ pub fn plain_steer_json() -> String {
     json(&wp_vehicle::lab_scope::plain(true))
 }
 
-/// The default plain steering constants, JSON.
+/// The shipped plain steering constants (`wp_vehicle::lab_scope::shipped_plain`), JSON.
 #[wasm_bindgen]
 pub fn plain_steer_defaults_json() -> String {
-    json(&wp_vehicle::plain::PlainSteer::default())
+    json(&wp_vehicle::lab_scope::shipped_plain())
 }
 
-/// Turn the plain keyboard steering profile on with the constants in `json` (missing fields
-/// take the default), or off with `""`. Process-wide, not logged in recordings.
+/// Set the plain keyboard steering override from `json` (missing fields take
+/// `PlainSteer::default`), or clear it with `""` (= the shipped steering; turn it off with
+/// `lab_scope_set_plain_off`). Process-wide, not logged in recordings.
 #[wasm_bindgen]
 pub fn plain_steer_set(steer_json: &str) -> Result<(), JsValue> {
     if steer_json.trim().is_empty() {

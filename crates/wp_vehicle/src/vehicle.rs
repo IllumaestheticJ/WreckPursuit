@@ -260,6 +260,8 @@ pub struct Vehicle {
     /// last lifted (< 0.5) mid-slide (|body slip| > 10°) / since the steer key last reversed, and the last held key's sign.
     since_lift_s: f32,
     since_reversal_s: f32,
+    /// |Body slip| at the last steering-key reversal, rad (grip lab's transition release).
+    reversal_slip: f32,
     last_key_sign: f32,
     /// Tyre-slip lab (`crate::car_lab::CarTune::rack_compliance`): road-wheel angle the
     /// compliant rack / column yields to the front tyres' steering-axis moment, rad. 0 when off.
@@ -401,6 +403,7 @@ impl Vehicle {
             center_steer: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            reversal_slip: 0.0,
             last_key_sign: 0.0,
             rack_yield: 0.0,
             slide_class: slide_class_with_rear_lock(def, diffs.rear.power_lock()),
@@ -574,6 +577,7 @@ impl Vehicle {
         self.center_steer = 0.0;
         self.since_lift_s = 1.0e3;
         self.since_reversal_s = 1.0e3;
+        self.reversal_slip = 0.0;
         self.last_key_sign = 0.0;
         self.throttle_f = 0.0;
         self.brake_f = 0.0;
@@ -846,6 +850,37 @@ impl Vehicle {
             eff.steer_pull,
             &p,
         ))
+    }
+
+    /// Number of floats in [`Vehicle::plain_state`].
+    pub(crate) const PLAIN_STATE_LEN: usize = 8;
+
+    /// The plain steering's tick-to-tick state, for snapshots.
+    pub(crate) fn plain_state(&self) -> [f32; Self::PLAIN_STATE_LEN] {
+        [
+            self.since_lift_s,
+            self.since_reversal_s,
+            self.reversal_slip,
+            self.last_key_sign,
+            self.rack_yield,
+            self.lab_slip_prev,
+            self.lab_slip_rate,
+            self.lab_counter_s,
+        ]
+    }
+
+    /// Restore [`Vehicle::plain_state`].
+    pub(crate) fn set_plain_state(&mut self, a: [f32; Self::PLAIN_STATE_LEN]) {
+        [
+            self.since_lift_s,
+            self.since_reversal_s,
+            self.reversal_slip,
+            self.last_key_sign,
+            self.rack_yield,
+            self.lab_slip_prev,
+            self.lab_slip_rate,
+            self.lab_counter_s,
+        ] = a;
     }
 
     /// Mark this vehicle as player-driven (`true`, the default) or AI-driven (`false`). Only
@@ -1135,6 +1170,9 @@ impl Vehicle {
                 0.0
             };
             let reversed = key != 0.0 && self.last_key_sign != 0.0 && key != self.last_key_sign;
+            if reversed {
+                self.reversal_slip = body_slip(v_fwd, v_left).abs();
+            }
             self.since_reversal_s = if reversed {
                 0.0
             } else {
@@ -1435,6 +1473,7 @@ impl Vehicle {
                         counter_s,
                         since_lift_s: self.since_lift_s,
                         since_reversal_s: self.since_reversal_s,
+                        reversal_slip: self.reversal_slip,
                     },
                 )
             });

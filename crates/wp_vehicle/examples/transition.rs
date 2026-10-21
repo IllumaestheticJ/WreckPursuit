@@ -808,6 +808,9 @@ fn holds(cars: &[(&str, LoadedCar)]) {
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     if std::env::args().nth(1).as_deref() == Some("holds") {
         let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
         holds(&cars);

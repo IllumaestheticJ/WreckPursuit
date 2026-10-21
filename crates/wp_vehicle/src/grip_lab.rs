@@ -169,6 +169,11 @@ pub struct GripBalance {
     /// reversal). Off by default: a lift with the counter key held is W's snap-back exit,
     /// which the cut must keep (with it on, the snap-back overshoot is 3° → 42°).
     pub slide_lock_release_on_lift: bool,
+    /// The transition release opens only on a key reversal made with at least this much body
+    /// slip, °: a swing out of a held drift (30–45°), not the entry into one (into-turn key →
+    /// countersteer at a small, growing slip; tyre-slip, rampart_50 2026-10-21). 0 = any
+    /// reversal.
+    pub slide_lock_release_from_deg: f32,
     /// Apply the lab-only per-car fixes ([`car_fix`]): car-data proposals for the car-data
     /// owner, tried in the lab first (lead-approved 2026-10-21).
     pub car_fixes: bool,
@@ -226,6 +231,7 @@ impl Default for GripBalance {
             slide_lock_to_deg: 0.0,
             slide_lock_release_s: 0.0,
             slide_lock_release_on_lift: false,
+            slide_lock_release_from_deg: 0.0,
             car_fixes: false,
         }
     }
@@ -278,6 +284,7 @@ impl GripBalance {
             // ... and for 0.75 s after a steering-key reversal (a transition's new-side
             // countersteer may reach the travel angle; not on a lift: W's snap-back exit).
             slide_lock_release_s: 0.75,
+            slide_lock_release_from_deg: 25.0,
             car_fixes: false,
             ..Self::default()
         }
@@ -525,7 +532,15 @@ impl GripBalance {
             counter_s,
             since_lift_s,
             since_reversal_s,
+            reversal_slip,
         } = slide;
+        // Only a reversal out of a developed slide opens the release (not a drift's entry).
+        let since_reversal_s =
+            if reversal_slip.to_degrees() + 1e-4 >= self.slide_lock_release_from_deg {
+                since_reversal_s
+            } else {
+                1.0e3
+            };
         let since_release_s = if self.slide_lock_release_on_lift {
             since_lift_s.min(since_reversal_s)
         } else {
@@ -617,6 +632,8 @@ pub struct LockSlide {
     pub since_lift_s: f32,
     /// Time since the last steering-key reversal, s (large = none recent).
     pub since_reversal_s: f32,
+    /// |Body slip| at the last steering-key reversal, rad.
+    pub reversal_slip: f32,
 }
 
 /// A lab-only per-car fix ([`car_fix`]): scales on the car data, applied by the vehicle while
@@ -856,6 +873,7 @@ mod tests {
                     counter_s: 0.8,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -874,6 +892,7 @@ mod tests {
                     counter_s: 0.8,
                     since_lift_s: 1.0e3,
                     since_reversal_s: since,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap()
@@ -893,6 +912,7 @@ mod tests {
                     counter_s: 0.1,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -910,6 +930,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -933,7 +954,8 @@ mod tests {
                     slip_rate: 0.0,
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
-                    since_reversal_s: 1.0e3
+                    since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 }
             ),
             None
@@ -953,6 +975,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -971,6 +994,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap()
@@ -991,6 +1015,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -1008,6 +1033,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -1030,6 +1056,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
