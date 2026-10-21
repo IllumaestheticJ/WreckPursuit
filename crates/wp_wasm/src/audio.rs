@@ -390,8 +390,11 @@ mod tests {
         let mut d = AudioDirector::new(AudioLibrary::embedded().unwrap(), AUDIO_SEED);
         let (mut police_siren_on, mut siren_voice, mut traffic_engine) = (false, false, false);
         let mut police_ids = std::collections::BTreeSet::new();
-        // Both show up about 17 s in (seed 1); 30 s of sim time leaves margin.
-        for _ in 0..60 * 30 {
+        // Both show up about 17 s in (seed 1). Since police round 12c (rows 80 / 89: units see
+        // 380 m by day) a patrol far off witnesses the first speeding, which is not enough for
+        // a wanted level, so no call goes out; the siren comes with the next unseen violation's
+        // responder, about 35 s in. 60 s of sim time leaves margin.
+        for _ in 0..60 * 60 {
             s.set_input(
                 player,
                 VehicleInput {

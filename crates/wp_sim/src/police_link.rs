@@ -233,6 +233,19 @@ impl Sim {
             }
         }
 
+        // Units the police system reset in place (owner row 78): to the new spot, upright,
+        // damage kept, a ghost for a moment so it cannot land stuck in the cars round it.
+        for r in self.police.take_unit_resets() {
+            let Some(id) = r.entity else {
+                continue;
+            };
+            let yaw = wp_math::atan2(-r.heading[0], r.heading[1]);
+            if self.place_on_ground(id, r.pos, yaw, 0.0, None).is_ok() {
+                let ticks = (r.ghost_s / wp_contracts::PHYSICS_DT).round() as u32;
+                let _ = self.set_ghost(id, ticks);
+            }
+        }
+
         for slot in &self.vehicles {
             let Some(unit) = slot.police_unit else {
                 continue;

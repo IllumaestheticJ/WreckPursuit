@@ -300,6 +300,10 @@ pub struct PoliceStats {
     /// (row 80).
     #[serde(default)]
     pub witnessed_pursuits: u32,
+    /// Resets in place (owner row 78): un-wrecked units that stood stuck and snapped to a clear
+    /// spot in their lane ([`stuck::RESET_ACTIVE_S`]).
+    #[serde(default)]
+    pub resets: Vec<ResetRecord>,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
     /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
@@ -338,6 +342,40 @@ pub struct PoliceStats {
     pub junction_blocks: u32,
     /// Every unit sent to a reckless-driving call: how far, how long, how it ended.
     pub responses: Vec<ResponseRecord>,
+}
+
+/// One reset in place ([`PoliceStats::resets`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ResetRecord {
+    /// Unit.
+    pub unit: UnitId,
+    /// When.
+    pub at: SimTime,
+    /// Where it stood, m.
+    pub from: [f32; 2],
+    /// Where it was placed, m.
+    pub to: [f32; 2],
+    /// On a pursuit or search at the time.
+    pub active: bool,
+    /// A racer could see it (the reset waited [`stuck::RESET_VIEW_DELAY_S`]).
+    pub in_view: bool,
+}
+
+/// A unit placed somewhere new by the police system (reset in place, row 78). `wp_sim` moves
+/// the unit's car there, upright, and makes it a ghost for `ghost_s`
+/// ([`PoliceSystem::take_unit_resets`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitReset {
+    /// Unit.
+    pub unit: UnitId,
+    /// Its vehicle (`None`: driven headless, already moved).
+    pub entity: Option<EntityId>,
+    /// New position, m.
+    pub pos: [f32; 2],
+    /// New heading (XY unit vector).
+    pub heading: [f32; 2],
+    /// No-collision window, s.
+    pub ghost_s: f32,
 }
 
 /// Captain bookkeeping (human or AI).
@@ -430,6 +468,8 @@ pub struct PoliceSystem {
     pub(crate) feelers: bool,
     /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
     pub(crate) covers: Vec<walls::CoverSpan>,
+    /// Resets in place not yet taken by `wp_sim` ([`PoliceSystem::take_unit_resets`]).
+    pub(crate) resets: Vec<UnitReset>,
 }
 
 impl Default for PoliceSystem {
@@ -568,6 +608,7 @@ impl PoliceSystem {
             walls: std::sync::Arc::new(walls::WallIndex::default()),
             feelers: true,
             covers: Vec::new(),
+            resets: Vec::new(),
         }
     }
 
@@ -848,6 +889,12 @@ impl PoliceSystem {
     /// All units, ascending by id.
     pub fn units(&self) -> &[Unit] {
         &self.units
+    }
+
+    /// Units reset in place since the last call (row 78), in reset order. `wp_sim` places each
+    /// unit's car at the new pose and makes it a ghost for `ghost_s`.
+    pub fn take_unit_resets(&mut self) -> Vec<UnitReset> {
+        std::mem::take(&mut self.resets)
     }
 
     /// Open incidents.

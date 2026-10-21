@@ -325,7 +325,14 @@ impl PoliceSystem {
             format!("Dispatch: 10-80, all units, pursuit of {desc}."),
         ));
         if let Some(i) = self.unit_index(unit) {
-            if self.units[i].player.is_none() {
+            // A unit already on another racer's pursuit stays on it (a pack of racers past
+            // one unit flipped it to each new one in turn, and it stood in the road, Loop 9
+            // round 12c); backup for this one comes from the reinforcement step.
+            let busy = self.units[i]
+                .assignment
+                .target()
+                .is_some_and(|t| t != racer && self.racers.get(&t).is_some_and(|r| r.pursued()));
+            if self.units[i].player.is_none() && !busy {
                 self.units[i].racer_contact = false;
                 self.assign(i, Assignment::Pursue { target: racer });
             }
