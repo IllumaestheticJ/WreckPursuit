@@ -39,6 +39,7 @@ pub mod terrain;
 pub mod traffic;
 pub mod vesper;
 pub mod violations;
+pub mod yards;
 
 use std::path::Path;
 
@@ -50,7 +51,7 @@ use wp_math::StateHasher;
 
 pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
 pub use map::{CityMap, SegId};
-pub use network::{RoadError, RoadNetwork};
+pub use network::{Fence, FenceKind, RoadError, RoadNetwork};
 pub use props::{PropKind, StaticProp};
 pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
@@ -130,6 +131,7 @@ fn empty_network() -> RoadNetwork {
         zones: Vec::new(),
         pois: Vec::new(),
         buildings: Vec::new(),
+        fences: Vec::new(),
         surfaces: Vec::new(),
         terrain: None,
     }

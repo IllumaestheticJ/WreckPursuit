@@ -15,7 +15,7 @@
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
-use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
+use wp_world::network::{DistrictKind, FenceKind, Lane, LaneKind, RoadNetwork};
 use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
 use wp_world::terrain::Heightfield;
 
@@ -184,6 +184,43 @@ impl Prim {
                 base + 2 * t[0] + 1,
                 base + 2 * t[1] + 1,
                 base + 2 * t[2] + 1,
+            ]);
+        }
+    }
+
+    /// Thin wall from ground point `a` to `b` (`half` thickness either side), `h` tall, its
+    /// base sunk `sink` below the ground; top and base follow the slope. No bottom face.
+    fn wall_block(&mut self, a: V3, b: V3, half: f32, h: f32, sink: f32) {
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        if len < 0.05 {
+            return;
+        }
+        let r = [d[1] / len * half, -d[0] / len * half];
+        let base = self.positions.len() as u32;
+        // a-left bottom/top, a-right bottom/top, then the same at b.
+        for p in [a, b] {
+            for side in [-1.0f32, 1.0] {
+                let q = [p[0] + r[0] * side, p[1] + r[1] * side];
+                self.vert([q[0], q[1], p[2] - sink], [0.0, 0.0, 1.0]);
+                self.vert([q[0], q[1], p[2] + h], [0.0, 0.0, 1.0]);
+            }
+        }
+        // Right, left, top, end a, end b (counter-clockwise from outside).
+        for [p, q, r, s] in [
+            [2, 6, 7, 3],
+            [0, 1, 5, 4],
+            [1, 3, 7, 5],
+            [0, 2, 3, 1],
+            [6, 4, 5, 7],
+        ] {
+            self.indices.extend_from_slice(&[
+                base + p,
+                base + q,
+                base + r,
+                base + p,
+                base + r,
+                base + s,
             ]);
         }
     }
@@ -510,6 +547,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut water = Prim::new("water", [0.16, 0.30, 0.45, 1.0]);
     let mut taper = Prim::new("ramp_taper", [0.42, 0.42, 0.40, 1.0]);
     let mut barrier = Prim::new("median_barrier", [0.66, 0.65, 0.62, 1.0]);
+    let mut fences: Vec<Prim> = FenceKind::ALL
+        .iter()
+        .map(|k| {
+            let color = match k {
+                FenceKind::Wood => [0.55, 0.42, 0.30, 1.0],
+                FenceKind::Masonry => [0.72, 0.66, 0.56, 1.0],
+                FenceKind::Hedge => [0.22, 0.38, 0.20, 1.0],
+            };
+            Prim::new(&format!("fence_{k:?}").to_lowercase(), color)
+        })
+        .collect();
     let mut ground: Vec<Prim> = DistrictKind::ALL
         .iter()
         .map(|k| Prim::smooth(&format!("ground_{k:?}").to_lowercase(), district_color(*k)))
@@ -703,10 +751,23 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     for b in &net.buildings {
         buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
     }
+    // Fences: a block per straight span (as physics builds them), following the ground and
+    // sunk 0.2 m into it.
+    for f in &net.fences {
+        let prim = &mut fences[FenceKind::ALL
+            .iter()
+            .position(|k| *k == f.kind)
+            .unwrap_or(0)];
+        let half = f.kind.thickness_m() * 0.5;
+        for (a, b) in wp_world::yards::fence_spans(f, 0.15) {
+            prim.wall_block(a, b, half, f.height_m, 0.2);
+        }
+    }
     let mut out = vec![
         asphalt, concrete, parking, bus, sidewalk, kerb, buildings, wall, bridge, rock, seabed,
         water, taper, barrier,
     ];
+    out.extend(fences);
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
     out

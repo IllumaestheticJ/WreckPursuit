@@ -37,6 +37,8 @@ pub struct CityColliders {
     pub rails: usize,
     /// Median barrier boxes between divided-highway carriageways.
     pub barriers: usize,
+    /// Yard fence / garden wall / hedge boxes (`RoadNetwork::fences`, one per straight span).
+    pub fences: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -94,8 +96,8 @@ impl PhysicsWorld {
     /// Replace the flat ground slab by the city's own ground (cities with terrain, e.g.
     /// Port Vesper v2): a terrain heightfield, one triangle mesh of every paved surface
     /// (banked ribbons, junction discs, bend connectors), a static collider per building
-    /// (not on flat ground: the grid city), guard rails along bridge decks and median
-    /// barriers. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
+    /// (not on flat ground: the grid city), guard rails along bridge decks, median
+    /// barriers and yard fences. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
     /// inserted in a fixed order and registered with the broad phase immediately, so ground
     /// probes see them on the next tick without a physics step. Call once, before the first
     /// tick (scenario setup).
@@ -242,6 +244,38 @@ impl PhysicsWorld {
                 out.barriers += 1;
             } else {
                 out.rails += 1;
+            }
+        }
+
+        // Yard fences, garden walls and hedges: one box per straight span (pieces merge while
+        // the ground stays within 0.15 m of the span), yawed along it and pitched to the
+        // ground's slope, at least 0.3 m thick so a fast car cannot step through a timber
+        // fence in one tick.
+        for f in &net.fences {
+            let half_w = (f.kind.thickness_m() * 0.5).max(0.15);
+            let half_h = f.height_m * 0.5;
+            for (a, b) in wp_world::yards::fence_spans(f, 0.15) {
+                let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let run = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                if run < 0.05 {
+                    continue;
+                }
+                let len = (run * run + d[2] * d[2]).sqrt();
+                let (sz, cz) = wp_math::sin_cos(wp_math::atan2(-d[0], d[1]) * 0.5);
+                let (sx, cx) = wp_math::sin_cos(wp_math::atan2(d[2], run) * 0.5);
+                // Yaw about +Z, then pitch about the box's own +X (raises its +Y end).
+                let rot = rapier3d::math::Rotation::from_xyzw(cz * sx, sz * sx, cx * sz, cz * cx);
+                let mid = Vector::new(
+                    (a[0] + b[0]) * 0.5,
+                    (a[1] + b[1]) * 0.5,
+                    (a[2] + b[2]) * 0.5 + half_h,
+                );
+                let col = ColliderBuilder::cuboid(half_w, len * 0.5 + 0.05, half_h)
+                    .position(Pose::from_parts(mid, rot))
+                    .friction(0.6)
+                    .build();
+                added.push(self.colliders.insert(col));
+                out.fences += 1;
             }
         }
 

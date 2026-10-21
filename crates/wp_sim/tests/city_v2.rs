@@ -1,7 +1,7 @@
 //! Port Vesper v2 in the sim loop: terrain, road, building and deck-rail colliders replace the
 //! flat slab; cars spawned anywhere settle on the surface under them (hill road, banked
-//! highway, bridge deck, the road under it, a junction, open terrain), parked cars rest asleep
-//! and the run is deterministic.
+//! highway, bridge deck, the road under it, a junction, open terrain), parked cars rest asleep,
+//! median barriers and yard fences stop cars, and the run is deterministic.
 
 use std::sync::OnceLock;
 
@@ -102,6 +102,7 @@ fn city_ground_colliders_are_built() {
     assert!(c.buildings > 2000, "{c:?}");
     assert!(c.rails > 10, "{c:?}");
     assert!(c.barriers > 900, "{c:?}");
+    assert!(c.fences > 3000, "{c:?}");
     assert!(s.has_terrain());
     // A flat city keeps the slab.
     assert_eq!(
@@ -202,6 +203,90 @@ fn the_median_barrier_keeps_a_car_on_its_carriageway() {
         assert!(pr.lateral > 0.0, "crossed the median: {pr:?}");
     }
     assert!(hit, "no contact with the barrier");
+}
+
+/// A car driven off the street at a backyard fence is stopped by it.
+#[test]
+fn a_yard_fence_stops_a_car() {
+    use wp_world::geom;
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let n = net();
+    let t = n.terrain.as_ref().unwrap();
+    let blocked = |a: [f32; 2], b: [f32; 2], skip: usize| {
+        n.buildings.iter().any(|bd| {
+            let fp = &bd.footprint;
+            (0..fp.len()).any(|i| geom::segments_intersect(a, b, fp[i], fp[(i + 1) % fp.len()]))
+                || geom::point_in_polygon(b, fp)
+        }) || n.fences.iter().enumerate().any(|(k, f)| {
+            k != skip
+                && f.line
+                    .windows(2)
+                    .any(|w| geom::segment_distance(a, b, geom::xy(w[0]), geom::xy(w[1])) < 1.5)
+        })
+    };
+    // A wooden fence with 15 m of open, level lawn in front of its middle.
+    let (k, mid, normal) = n
+        .fences
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.kind == wp_world::FenceKind::Wood)
+        .find_map(|(k, f)| {
+            let (a, b) = (geom::xy(f.line[0]), geom::xy(*f.line.last().unwrap()));
+            if geom::dist(a, b) < 12.0 {
+                return None;
+            }
+            let m = geom::scale(geom::add(a, b), 0.5);
+            let r = geom::right_of(geom::normalize(geom::sub(b, a)));
+            [1.0f32, -1.0].into_iter().find_map(|side| {
+                let nrm = geom::scale(r, side);
+                let start = geom::add(m, geom::scale(nrm, 15.0));
+                let level = (t.height_at(start) - t.height_at(m)).abs() < 0.4;
+                let lane = near_lane(start);
+                (level && !lane && t.height_at(start) > 1.0 && !blocked(start, m, k))
+                    .then_some((k, m, nrm))
+            })
+        })
+        .expect("an open fence");
+    let start = geom::add(mid, geom::scale(normal, 15.0));
+    let yaw = geom::yaw_of(geom::scale(normal, -1.0));
+    let mut s = sim(true);
+    let id = s
+        .spawn_vehicle(&car, [start[0], start[1], 0.0], yaw)
+        .unwrap();
+    s.place_on_ground(id, start, yaw, 11.0, None).unwrap();
+    let ahead = |p: [f32; 3]| geom::dot(geom::sub([p[0], p[1]], mid), normal);
+    let mut hit = false;
+    for _ in 0..(3.0 * 240.0) as usize {
+        s.set_input(
+            id,
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.step_fixed();
+        hit |= s
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, wp_contracts::SimEvent::Contact { .. }));
+        let p = s.vehicle_states()[0].1.pos;
+        assert!(ahead(p) > 0.0, "drove through fence {k} at {mid:?}: {p:?}");
+    }
+    assert!(hit, "no contact with fence {k}");
+}
+
+/// No lane within 6 m of `p` (keeps the test car off the street).
+fn near_lane(p: [f32; 2]) -> bool {
+    net().lanes.iter().any(|l| {
+        l.polyline.windows(2).any(|w| {
+            wp_world::geom::point_segment_distance(
+                p,
+                wp_world::geom::xy(w[0]),
+                wp_world::geom::xy(w[1]),
+            ) < 6.0
+        })
+    })
 }
 
 #[test]

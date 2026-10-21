@@ -19,7 +19,8 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
 /// v2 (city v2): road surfaces, terrain heightfield, building base heights.
 /// v3: `RoadSurface::median_barrier` (divided highways).
-pub const ROAD_FORMAT_VERSION: u32 = 3;
+/// v4: `RoadNetwork::fences` (fenced backyards and perimeter walls).
+pub const ROAD_FORMAT_VERSION: u32 = 4;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -63,6 +64,9 @@ pub struct RoadNetwork {
     pub pois: Vec<Poi>,
     /// Building footprints for the greybox mesh and line-of-sight.
     pub buildings: Vec<Building>,
+    /// Yard fences, garden walls and hedges between lots (static obstacles: they block cars,
+    /// not line of sight). See [`crate::yards`].
+    pub fences: Vec<Fence>,
     /// Paved surface of every source road (one per road, in road order): what physics and the
     /// greybox draw. Lane polylines lie on these surfaces.
     pub surfaces: Vec<RoadSurface>,
@@ -332,6 +336,42 @@ impl Building {
     }
 }
 
+/// What a [`Fence`] is built from (look, thickness).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FenceKind {
+    /// Timber privacy fence (the common US backyard fence).
+    Wood,
+    /// Masonry wall: concrete block (Sun Belt subdivisions) or brick (garden walls).
+    Masonry,
+    /// Clipped hedge.
+    Hedge,
+}
+
+impl FenceKind {
+    /// Every kind, in declaration order.
+    pub const ALL: [FenceKind; 3] = [FenceKind::Wood, FenceKind::Masonry, FenceKind::Hedge];
+
+    /// Thickness of the drawn fence, m.
+    pub fn thickness_m(self) -> f32 {
+        match self {
+            FenceKind::Wood => 0.1,
+            FenceKind::Masonry => 0.2,
+            FenceKind::Hedge => 0.9,
+        }
+    }
+}
+
+/// A fence, wall or hedge standing on the ground along a polyline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Fence {
+    /// Material.
+    pub kind: FenceKind,
+    /// Base points on the ground (≥ 2), m; the fence top is `z + height_m`.
+    pub line: Vec<[f32; 3]>,
+    /// Height above the ground, m.
+    pub height_m: f32,
+}
+
 /// Errors loading or validating a road network.
 #[derive(Debug, Error)]
 pub enum RoadError {
@@ -507,6 +547,11 @@ impl RoadNetwork {
         for (i, s) in self.surfaces.iter().enumerate() {
             if s.centre.len() < 2 || s.bank.len() != s.centre.len() {
                 return bad(format!("surface {i}: bad centreline / bank"));
+            }
+        }
+        for (i, f) in self.fences.iter().enumerate() {
+            if f.line.len() < 2 || f.height_m <= 0.0 {
+                return bad(format!("fence {i}: needs >= 2 points and a height"));
             }
         }
         if let Some(t) = &self.terrain {

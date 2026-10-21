@@ -35,6 +35,7 @@ use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
 use crate::surface::is_elevated;
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
+use crate::yards::{yard_fences, FenceStyle, LotSite, YardParams};
 
 /// City id of this preset (file stem for its data files).
 pub const CITY_ID: &str = "vesper_v2";
@@ -283,6 +284,9 @@ pub struct VesperReport {
     pub road_speeds: Vec<f32>,
     /// Grade cap per source road.
     pub road_grades: Vec<f32>,
+    /// One point in the back yard of every fenced lot (4 m behind the house), for
+    /// reachability checks.
+    pub backyards: Vec<V2>,
 }
 
 struct Gen {
@@ -2405,7 +2409,7 @@ fn buildings(
     zones: &[Zone],
     hf: &Heightfield,
     dead_ends: &[V2],
-) -> Vec<Building> {
+) -> Vec<(Building, LotSite, DistrictKind)> {
     let grid = SurfaceGrid::new(built);
     let mut placed: Vec<Obb> = Vec::new();
     let mut bgrid: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
@@ -2488,17 +2492,58 @@ fn buildings(
                     fp.reverse();
                 }
                 let base = zmin - 0.3;
-                out.push(Building {
+                let building = Building {
                     footprint: fp,
                     height_m: storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0) + (zmax - base),
                     base_z_m: base,
-                });
+                };
+                // Side-yard gates stand a little behind the front of the house.
+                let site = LotSite {
+                    corners,
+                    centre: c,
+                    inward: n,
+                    gate: geom::add(p, geom::scale(n, front + GATE_BEHIND_FRONT_M)),
+                    yard: None,
+                };
+                out.push((building, site, kind));
                 bgrid.entry(k).or_default().push(placed.len());
                 placed.push(o);
             }
         }
     }
     out
+}
+
+/// Side-yard gate line behind the front wall of a house, m.
+const GATE_BEHIND_FRONT_M: f32 = 2.0;
+
+/// Back / side yard fence style of a house in `kind`, or `None` (no yard). After US and
+/// European suburbs: timber privacy fences are the norm, Sun Belt subdivisions build concrete
+/// block walls, older districts have brick garden walls and hedges; 1.8 m (6 ft) is the usual
+/// side / rear yard limit.
+fn yard_style(rng: &mut Rng, kind: DistrictKind) -> Option<FenceStyle> {
+    let (wood, masonry) = match kind {
+        DistrictKind::Suburb => (0.65, 0.25),
+        DistrictKind::Residential => (0.5, 0.3),
+        _ => return None,
+    };
+    let r = rng.next_f32();
+    Some(if r < wood {
+        FenceStyle {
+            kind: FenceKind::Wood,
+            height_m: 1.8,
+        }
+    } else if r < wood + masonry {
+        FenceStyle {
+            kind: FenceKind::Masonry,
+            height_m: 1.8,
+        }
+    } else {
+        FenceStyle {
+            kind: FenceKind::Hedge,
+            height_m: 2.1,
+        }
+    })
 }
 
 fn signed_area(p: &[V2]) -> f32 {
@@ -2654,7 +2699,42 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .filter(|n| degree[*n] == 1)
         .map(|n| g.nodes[n].pos)
         .collect();
-    let buildings = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
+    let placed = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
+    // Fenced backyards behind every house (own RNG stream: building placement is unchanged).
+    let mut yard_rng = Rng::new(cfg.seed ^ 0x9a2d_f3e5);
+    let sites: Vec<LotSite> = placed
+        .iter()
+        .map(|(_, s, kind)| LotSite {
+            yard: yard_style(&mut yard_rng, *kind),
+            ..*s
+        })
+        .collect();
+    let junctions: Vec<(V2, f32)> = built
+        .intersections
+        .iter()
+        .map(|ix| (geom::xy(built.nodes[ix.node as usize].pos), ix.radius_m))
+        .collect();
+    let fences = yard_fences(
+        &sites,
+        &built.surfaces,
+        &junctions,
+        &dead_ends,
+        &hf,
+        &YardParams::default(),
+    );
+    let backyards: Vec<V2> = sites
+        .iter()
+        .filter(|s| s.yard.is_some())
+        .map(|s| {
+            let depth = s
+                .corners
+                .iter()
+                .map(|q| geom::dot(geom::sub(*q, s.centre), s.inward))
+                .fold(0.0, f32::max);
+            geom::add(s.centre, geom::scale(s.inward, depth + 4.0))
+        })
+        .collect();
+    let buildings: Vec<Building> = placed.into_iter().map(|(b, _, _)| b).collect();
 
     // POIs. The first race grid is the city-chase / free-drive spawn.
     let mut pois = Vec::new();
@@ -2812,6 +2892,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         net.bounds_max[1].max(MAP_HI[1]),
     ];
     net.terrain = Some(hf);
+    net.fences = fences;
     let report = VesperReport {
         crossings,
         skipped_roads: g.skipped,
@@ -2821,6 +2902,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         road_names: infos.iter().map(|i| i.name).collect(),
         road_speeds: infos.iter().map(|i| i.speed).collect(),
         road_grades: infos.iter().map(|i| i.grade).collect(),
+        backyards,
     };
     (net, report)
 }
@@ -3158,6 +3240,148 @@ mod tests {
                 assert!(b.base_z_m <= t.height_at(*q) + 0.01);
             }
             assert!(b.roof_z() > b.base_z_m + 3.0);
+        }
+    }
+
+    /// Share of `probes` a car can drive to from any road on a 1 m grid: buildings, water and
+    /// (if `fences`) fences grown by a car's half width block; flood fill from paved cells.
+    fn reachable_share(net: &RoadNetwork, probes: &[V2], fences: bool) -> f32 {
+        const HALF_CAR: f32 = 0.9;
+        let t = net.terrain.as_ref().unwrap();
+        let (lo, hi) = (MAP_LO, MAP_HI);
+        let nx = (hi[0] - lo[0]) as usize + 1;
+        let ny = (hi[1] - lo[1]) as usize + 1;
+        // 0 free, 1 blocked, 2 road, 3 reached.
+        let mut g = vec![0u8; nx * ny];
+        let at = |p: V2| -> Option<usize> {
+            let (i, j) = ((p[0] - lo[0]).floor(), (p[1] - lo[1]).floor());
+            (i >= 0.0 && j >= 0.0 && (i as usize) < nx && (j as usize) < ny)
+                .then(|| j as usize * nx + i as usize)
+        };
+        let centre = |k: usize| [lo[0] + (k % nx) as f32 + 0.5, lo[1] + (k / nx) as f32 + 0.5];
+        let mark = |a: V2, b: V2, r: f32, v: u8, g: &mut Vec<u8>, keep: &dyn Fn(V2) -> bool| {
+            let (x0, x1) = (a[0].min(b[0]) - r, a[0].max(b[0]) + r);
+            let (y0, y1) = (a[1].min(b[1]) - r, a[1].max(b[1]) + r);
+            let mut y = y0.floor();
+            while y <= y1 {
+                let mut x = x0.floor();
+                while x <= x1 {
+                    let q = [x + 0.5, y + 0.5];
+                    if let Some(k) = at(q) {
+                        if geom::point_segment_distance(q, a, b) <= r && keep(q) {
+                            g[k] = v;
+                        }
+                    }
+                    x += 1.0;
+                }
+                y += 1.0;
+            }
+        };
+        for (k, v) in g.iter_mut().enumerate() {
+            if t.height_at(centre(k)) < 0.0 {
+                *v = 1;
+            }
+        }
+        for b in &net.buildings {
+            let fp = &b.footprint;
+            for i in 0..fp.len() {
+                let (a, c) = (fp[i], fp[(i + 1) % fp.len()]);
+                mark(a, fp[0], 0.0, 1, &mut g, &|_| true);
+                mark(a, c, 0.5, 1, &mut g, &|_| true);
+            }
+            // Fill: every cell whose centre is inside the footprint.
+            let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+            for q in fp {
+                (x0, y0, x1, y1) = (x0.min(q[0]), y0.min(q[1]), x1.max(q[0]), y1.max(q[1]));
+            }
+            mark([x0, y0], [x1, y1], 1.5, 1, &mut g, &|q| {
+                geom::point_in_polygon(q, fp)
+            });
+        }
+        if fences {
+            for f in &net.fences {
+                for w in f.line.windows(2) {
+                    let r = f.kind.thickness_m() * 0.5 + HALF_CAR;
+                    mark(geom::xy(w[0]), geom::xy(w[1]), r, 1, &mut g, &|_| true);
+                }
+            }
+        }
+        for s in &net.surfaces {
+            for w in s.centre.windows(2) {
+                let r = s.left_m.min(s.right_m);
+                mark(geom::xy(w[0]), geom::xy(w[1]), r, 2, &mut g, &|_| true);
+            }
+        }
+        let mut queue: Vec<usize> = (0..g.len()).filter(|k| g[*k] == 2).collect();
+        for k in &queue {
+            g[*k] = 3;
+        }
+        while let Some(k) = queue.pop() {
+            let (i, j) = (k % nx, k / nx);
+            let mut visit = |n: usize| {
+                if g[n] == 0 {
+                    g[n] = 3;
+                    queue.push(n);
+                }
+            };
+            if i > 0 {
+                visit(k - 1);
+            }
+            if i + 1 < nx {
+                visit(k + 1);
+            }
+            if j > 0 {
+                visit(k - nx);
+            }
+            if j + 1 < ny {
+                visit(k + nx);
+            }
+        }
+        let cells: Vec<u8> = probes.iter().filter_map(|p| at(*p)).map(|k| g[k]).collect();
+        let open = cells.iter().filter(|v| **v != 1).count();
+        let reached = cells.iter().filter(|v| **v == 3).count();
+        reached as f32 / open.max(1) as f32
+    }
+
+    /// The point of the yards: a car that leaves the street cannot get behind the houses.
+    /// Without fences almost every back yard is a short drive off the road.
+    #[test]
+    fn backyards_are_out_of_reach() {
+        let (net, report) = city();
+        assert!(
+            report.backyards.len() > 800,
+            "{} yards",
+            report.backyards.len()
+        );
+        let before = reachable_share(net, &report.backyards, false);
+        let after = reachable_share(net, &report.backyards, true);
+        eprintln!(
+            "{} yards, {} fences, {:.0} km; back yards reachable: {:.1} % without fences, \
+             {:.1} % with",
+            report.backyards.len(),
+            net.fences.len(),
+            crate::yards::fence_length_m(&net.fences) / 1000.0,
+            before * 100.0,
+            after * 100.0
+        );
+        assert!(before > 0.8, "{before}");
+        assert!(after < 0.02, "{after}");
+    }
+
+    #[test]
+    fn fences_keep_off_roads_and_stand_on_the_ground() {
+        let (net, _) = city();
+        let t = net.terrain.as_ref().unwrap();
+        let map = crate::CityMap::new(net.clone());
+        assert!(!net.fences.is_empty());
+        for f in &net.fences {
+            for q in &f.line {
+                assert!((t.height_at(geom::xy(*q)) - q[2]).abs() < 1e-3);
+                assert!(
+                    map.locate(*q, None, 2.0, false, true).is_none(),
+                    "fence on a lane or junction at {q:?}"
+                );
+            }
         }
     }
 }

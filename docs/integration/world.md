@@ -84,6 +84,13 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
   on centre/lane/edge lines, separators, stop lines and zebra crosswalks; `marking_at(&map, p)
   -> Option<MarkingKind>` + public geometry constants for the renderer (C).
 - `RoadNetworkIndex` (contract `RoadNetworkQuery`): grid-indexed `nearest_on_road` (0.6 µs).
+- **Fenced yards** (road format v4, `wp_world::yards`): `RoadNetwork::fences: Vec<Fence { kind:
+  Wood | Masonry | Hedge, line, height_m }>`; Port Vesper fences the back and side yards of
+  every Residential / Suburb house and walls lots off from roads they back onto, so hiding
+  behind houses / cutting through backyards is no longer possible (back yards reachable by car:
+  99.3 % → 0.5 %). `yards::fence_spans(&fence, tol)` gives the straight spans physics and the
+  greybox build. Fences are not line-of-sight occluders. Police / racer AI that drives off-road
+  should treat them like buildings.
 - `wp_world::geom::{atan, atan2}` re-export `wp_math::{atan, atan2}` (moved in v0.2.0).
 
 ## Needs
@@ -179,6 +186,12 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 `ZoneId(u32)` alongside.
 
 ## Changes outside my crates
+- `crates/wp_sim/src/physics.rs` (lead): `set_city_ground` adds a static box per fence span
+  (yawed and pitched to the ground, ≥ 0.3 m thick); `CityColliders::fences` counts them.
+  `crates/wp_sim/tests/city_v2.rs`: fence collider count + `a_yard_fence_stops_a_car`.
+- `tools/city-import/src/glb.rs`: greybox draws fences (`fence_wood`, `fence_masonry`,
+  `fence_hedge` primitives); `data/city/*` regenerated (format v4; Vesper greybox
+  7.4 → 9.6 MB).
 - `apps/simcli/golden/*`: re-blessed city goldens for `PaintedLine` (round 8, see gate note).
 - `Cargo.toml` (workspace): added member `tools/city-import`.
 - `Cargo.lock`: `postcard` (wp_world), `osmpbf` (city-import only).

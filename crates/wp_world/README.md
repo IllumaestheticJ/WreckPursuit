@@ -21,6 +21,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `violations` | Speeding / red light / wrong way / reckless / collision detection |
 | `routes` | Lane-legal race routes, circuits, checkpoints, closures |
 | `props` | Parked cars and cones (static colliders) |
+| `yards` | Lots, fenced back / side yards and perimeter walls behind houses (`yard_fences`, `fence_spans`) |
 | `clock` | `WorldClock`, `sun_direction` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
@@ -67,7 +68,7 @@ physical cars stay on the road); routes, circuits and closures; parked cars.
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
-Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 2), then the
+Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 4), then the
 [postcard](https://docs.rs/postcard) encoding of `RoadNetwork`. The `.road.json` debug dump is
 the `serde_json` encoding of the same struct and loads identically (`RoadNetwork::load` picks by
 extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` indices.
@@ -95,6 +96,10 @@ extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` 
   `name`, `pos`, `heading_rad` (yaw, 0 = +Y), nearest `lane`.
 - `buildings[]`: `footprint` polygon, `base_z_m` (lowest ground under it), `height_m` (roof =
   `base_z_m + height_m`).
+- `fences[]` (v4): yard fences, garden walls and hedges: `kind` = `Wood | Masonry | Hedge`
+  (drawn 0.1 / 0.2 / 0.9 m thick), `line` (ground points, ≥ 2, straight in plan, ≤ 6 m apart),
+  `height_m`. Static obstacles for cars (`wp_sim` builds one box per straight span,
+  `yards::fence_spans`); they do **not** block line of sight.
 - `surfaces[]` (v2): the paved ribbon of each source road between its junction setbacks:
   `road`, trimmed `centre` polyline (3D), `bank[]` per point (cross slope, dz per metre to the
   right; lanes lie on `centre.z + bank · lateral`), `left_m`/`right_m` paved widths (lanes +
@@ -220,6 +225,23 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 - **Lots:** buildings along every street side (district-sized lots), clear of all roads and
   dead-end turnarounds, skipped on > 8 m of slope or water; walls start at the lowest ground
   under the footprint.
+- **Yards** (`yards`): Residential and Suburb houses get fenced back and side yards so a car
+  that leaves the street reaches a front lawn but not the ground behind the houses. Modelled
+  on how real subdivisions are cut up: lots meet back to back and side by side with nothing
+  left over, front yards are open, side / rear yards are fenced on the lot line at about
+  1.8 m (the usual 6 ft side / rear limit in US codes; often one wall shared by two
+  neighbours, concrete block in Sun Belt subdivisions such as Phoenix), and where the backs of
+  lots face a road there is a perimeter wall along it. Lots are Voronoi cells of the building
+  centres, cut by every road edge 3.5 m outside the pavement (behind the sidewalk), by
+  junction boxes and 9 m dead-end turnaround bulbs, and by a gate line 2 m behind each house
+  front. Shared lot lines are fenced once; road-facing edges become 2 m masonry perimeter
+  walls; otherwise the lot's style (Suburb: 65 % timber, 25 % block, 10 % hedge; Residential:
+  50 / 30 / 20 %, own RNG stream, so building placement is unchanged). Pieces within 3.2 m of
+  pavement, inside their own house or on ground below 0.5 m are dropped. Port Vesper: 2691
+  fenced lots, 11.6 k fences, ≈ 204 km, ≈ 13.8 k collider boxes; ≈ 50 ms of generation
+  (release). `backyards_are_out_of_reach` flood-fills a 1 m grid from every road with a car's
+  half width around fences and buildings: **99.3 %** of back yards were reachable before,
+  **0.5 %** now (gate ≤ 2 %).
 - **POIs:** race grids `Lantern Run` (first: free drive / city chase spawn), `Loop 9 sprint`,
   `Hollins Ascent`, `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
@@ -404,6 +426,11 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 - Spawning uses one traffic car definition (no per-district vehicle mix yet).
 - Agents do not react to other civilians' hazards (only tracked vehicles and debris).
 - Sightline rule is distance-only (no building occlusion).
+- Yard fences are unbreakable static boxes (a real timber fence gives way to a car); a few
+  lots (≈ 0.5 % on Port Vesper, mostly at oddly shaped warped-grid corners) stay reachable.
+  Fences do not block line of sight. Only Port Vesper generates them (the flat grid city's
+  buildings are not colliders at all; OSM imports have none). Commercial, industrial and port
+  lots are not fenced.
 - Lane change across a solid line / bus lane rules not modelled; buses not simulated.
 - Elevation: kinematic agents follow the lanes' 3D polylines; un-embodied physical agents
   probe `surface::MapGround` (roads + terrain). Agent views carry yaw only (no pitch/roll on

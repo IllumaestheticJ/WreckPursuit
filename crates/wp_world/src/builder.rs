@@ -298,6 +298,7 @@ impl Built {
             zones,
             pois,
             buildings,
+            fences: Vec::new(),
             surfaces: self.surfaces,
             terrain: None,
         }
