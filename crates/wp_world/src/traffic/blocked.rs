@@ -525,6 +525,21 @@ impl Traffic {
         !self.blocked_lanes.is_empty() && self.blocked_lanes.contains_key(&lane)
     }
 
+    /// Whether the exit of junction connector `conn` is held by a wreck: the first car on the
+    /// target lane is disabled and stands where the box rule wants room (owner row 85: a
+    /// wreck just past a junction held the car at the line behind it for a minute, waiting
+    /// for room that never came).
+    pub(super) fn exit_wrecked(&self, map: &CityMap, conn: SegId) -> bool {
+        let Some(&target) = map.seg(conn).next.first() else {
+            return false;
+        };
+        self.lists[target as usize].first().is_some_and(|e| {
+            !e.ghost
+                && self.agents[e.agent as usize].disabled
+                && e.s - HALF_L < 2.0 * (CAR_LENGTH_M + 2.0)
+        })
+    }
+
     /// How a stationary tracked vehicle `long` metres ahead of agent `i` (in its path) holds it
     /// up: at the stop line / in the junction (`Line`), queued behind a waiting car (`Queue`) or
     /// standing in the lane (`Obstructed`).
@@ -671,9 +686,6 @@ impl Traffic {
     /// while it may go: it takes another exit if there is one (owner row 85: queues waited for
     /// minutes behind a police car parked in the junction).
     fn reroute_around_box(&mut self, map: &CityMap, inp: &TrafficInputs) {
-        if self.tv_block_list.is_empty() {
-            return;
-        }
         for i in 0..self.agents.len() {
             let a = &self.agents[i];
             if !(a.id as u64 + self.step_count).is_multiple_of(15)
@@ -689,8 +701,8 @@ impl Traffic {
             let sg = map.seg(a.seg);
             if c == NONE
                 || sg.is_connector()
-                || !self.tv_block[c as usize]
                 || sg.length - a.s > CAR_LENGTH_M + 4.0
+                || !(self.tv_block[c as usize] || self.exit_wrecked(map, c))
             {
                 continue;
             }

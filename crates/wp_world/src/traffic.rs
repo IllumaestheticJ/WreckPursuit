@@ -2536,12 +2536,15 @@ impl Traffic {
             // junction (a pursuit scene in the box), outside red: after a while that is an
             // obstruction, so the queue behind turns around / backs out and the lane is marked
             // blocked for the cars upstream (owner row 85).
+            // Same for a wreck standing just past the junction on its exit (the box rule
+            // holds it for room that never comes).
             let box_blocked = cls == Wait::Line
                 && !seg.is_connector()
                 && !siren
                 && a.plan[0] != NONE
-                && self.tv_block[a.plan[0] as usize]
-                && !self.tv_block_moving[a.plan[0] as usize]
+                && ((self.tv_block[a.plan[0] as usize]
+                    && !self.tv_block_moving[a.plan[0] as usize])
+                    || self.exit_wrecked(map, a.plan[0]))
                 && seg.length - a.s < CAR_LENGTH_M + 4.0
                 && a.jam_s > blocked::TRACKED_AT_LINE_S;
             let (cls, still) = if box_blocked {
@@ -2882,7 +2885,7 @@ impl Traffic {
             if !cs.drivable
                 || closed.get(to as usize).copied().unwrap_or(false)
                 || self.lane_blocked(to)
-                || (avoid_tv_block && self.tv_block[c as usize])
+                || (avoid_tv_block && (self.tv_block[c as usize] || self.exit_wrecked(map, c)))
             {
                 continue;
             }
