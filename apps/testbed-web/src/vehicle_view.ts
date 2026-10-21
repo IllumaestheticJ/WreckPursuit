@@ -10,7 +10,7 @@ import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody, loadCarMesh } from "./render/panels";
 import type { CarMeshJson } from "./render/panels";
 import { hasPoliceLivery, setupPoliceLook } from "./render/livery";
-import { LightRig, patternFor, phaseFor } from "./render/police_units";
+import { LightRig, patternFor, phaseFor, wigwag } from "./render/police_units";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -20,6 +20,8 @@ const SLIP_RED = 0.15;
 const STRAIN_RED = 0.05;
 
 const tmpColor = new THREE.Color();
+/** Head-lamp lens base colour. */
+const HEAD_LENS = new THREE.Color(0xfff6d0);
 
 /** Blue→green→yellow→red ramp for t in 0..1. */
 export function heat(t: number, out = tmpColor): THREE.Color {
@@ -34,6 +36,7 @@ export function healthColour(h: number, out = tmpColor): THREE.Color {
 
 interface WheelView {
   pivot: THREE.Group; // positioned at the hub, rotated by steer
+  camber: THREE.Group; // child of pivot: visual camber of the non-spinning wheel parts
   spin: THREE.Group; // rotated about X by the accumulated wheel angle
   tire: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
@@ -79,8 +82,16 @@ export class VehicleView {
   private readonly sirenLightR: THREE.PointLight | null = null;
   /** Police light rig on the panel mesh's light-bar lenses (render/police_units.ts), once loaded. */
   private rig: LightRig | null = null;
+  /** Head lamps, left / right (separate so police cars can wig-wag them). */
   private readonly headMat: THREE.MeshStandardMaterial;
+  private readonly headMatR: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
+  /** Head lamps currently wig-wagging (lens colours modulated). */
+  private wigwagging = false;
+  /** Police model (bar / siren / wig-wag). */
+  private readonly police: boolean;
+  /** Stable id for unit numbers and flash phase: the wp_police unit id, else the entity. */
+  readonly unitId: number;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   private readonly lamps: THREE.Mesh[] = [];
@@ -90,6 +101,10 @@ export class VehicleView {
     const [w, l, h] = this.info.body_size_m;
     // Police units, and police models driven by anyone else (free drive): bar + siren lights.
     const police = this.info.kind === "Police" || this.info.car_id.startsWith("sentinel_");
+    this.police = police;
+    // Sim police cars carry their wp_police unit id (vehicle_info), so a unit keeps its number
+    // and flash phase when it is promoted from a non-sim unit (police_units()) to a sim vehicle.
+    this.unitId = this.info.police_unit ?? entity;
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
     this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
@@ -104,10 +119,12 @@ export class VehicleView {
 
     // Head- and tail-lights (emissive, brighter with headlights on / when braking). Shared with
     // the panel meshes, which carry no normals: flat shading, both sides.
-    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
-    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
+    this.headMat = new THREE.MeshStandardMaterial({ color: HEAD_LENS, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
+    this.headMatR = this.headMat.clone();
+    // Tail-lamp base colour bright enough to read as red in daylight from the chase cam.
+    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x8a0a0a, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) {
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), this.headMat);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), sx < 0 ? this.headMat : this.headMatR);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.12), this.tailMat);
       tail.position.set(sx * (w / 2 - 0.25), -l / 2 - 0.01, h * 0.5);
@@ -185,6 +202,8 @@ export class VehicleView {
       );
       spin.add(tire, spoke);
       pivot.add(spin);
+      const camber = new THREE.Group();
+      pivot.add(camber);
       const fx = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, 0x33ff66);
       const fy = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xff3366);
       for (const a of [fx, fy]) {
@@ -198,20 +217,22 @@ export class VehicleView {
       susp.renderOrder = 4;
       this.root.add(susp);
       this.root.add(pivot);
-      this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
+      this.wheels.push({ pivot, camber, spin, tire, material, angle: 0, fx, fy, susp });
     }
 
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
-    this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
+    this.panels = new PanelBody(entity, this.info.car_id, colour, { left: this.headMat, right: this.headMatR }, this.tailMat);
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
       // Police models (livery scheme in the mesh file) get livery, decals and the flashing bar
       // whoever drives them; only Police-kind vehicles have the siren point lights.
       void loadCarMesh(this.info.car_id).then((m) => m && hasPoliceLivery(m) && this.setupPolice(m));
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
-      // Foundation hook: calipers / uprights steer + follow compression but do not spin; camber is visual.
+      // Calipers / uprights steer + follow compression but do not spin; camber is visual and
+      // the same for the spinning parts and the pivot parts (so calipers stay on the disc).
       this.wheels.forEach((w, i) => {
-        this.panels.pivotParts[i].forEach((m) => w.pivot.add(m));
+        this.panels.pivotParts[i].forEach((m) => w.camber.add(m));
+        w.camber.rotation.y = this.panels.camberRad[i];
         w.spin.rotation.order = "YXZ";
         w.spin.rotation.y = this.panels.camberRad[i];
       });
@@ -222,7 +243,7 @@ export class VehicleView {
       const box = new THREE.Box3();
       this.panels.root.traverse((o) => {
         const m = o as THREE.Mesh;
-        if (!m.isMesh || !m.geometry) return;
+        if (!m.isMesh || !m.geometry || m.name === "underglow_pool") return;
         m.geometry.computeBoundingBox();
         const b = m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld).applyMatrix4(inv);
         box.union(b);
@@ -401,10 +422,35 @@ export class VehicleView {
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */
   setMeta(flags: number, timeS: number): void {
     const headlights = (flags & META_FLAG.headlights) !== 0;
-    this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
-    this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
     const siren = (flags & META_FLAG.siren) !== 0;
+    const head = new THREE.Color(0xfff2c0);
+    if (this.police && siren) {
+      // Wig-wag head lamps (P-HEADLAMP-WW, ≤ 2 Hz): alternate sides; the dim side keeps a low
+      // glow when the headlights are on.
+      const ww = wigwag(timeS, phaseFor(this.unitId));
+      const base = headlights ? 0.12 : 0;
+      const l = Math.max(base, ww.left);
+      const r = Math.max(base, ww.right);
+      this.headMat.emissive.copy(head).multiplyScalar(l);
+      this.headMatR.emissive.copy(head).multiplyScalar(r);
+      // Darken the lens of the off side too, so the alternation reads in daylight.
+      this.headMat.color.copy(HEAD_LENS).multiplyScalar(0.3 + 0.7 * l);
+      this.headMatR.color.copy(HEAD_LENS).multiplyScalar(0.3 + 0.7 * r);
+      this.wigwagging = true;
+    } else {
+      this.headMat.emissive.copy(head).multiplyScalar(headlights ? 1 : 0);
+      this.headMatR.emissive.copy(this.headMat.emissive);
+      if (this.wigwagging) {
+        this.headMat.color.copy(HEAD_LENS);
+        this.headMatR.color.copy(HEAD_LENS);
+        this.wigwagging = false;
+      }
+    }
+    this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    // Underglow (tuners that have it) only with the headlights on (night / dusk).
+    this.panels.setUnderglow(headlights);
     if (this.rig) {
+      this.rig.pattern = patternFor(this.info.car_id);
       this.rig.update(timeS, siren);
       if (this.lightBar) this.lightBar.visible = !this.panels.root.visible;
       return;
@@ -423,26 +469,19 @@ export class VehicleView {
 
   /** Police panel mesh: livery + unit decals, and flash the mesh's light bar instead of the box bar. */
   private setupPolice(mesh: CarMeshJson): void {
-    setupPoliceLook(this.panels, mesh, this.entity);
+    setupPoliceLook(this.panels, mesh, this.unitId);
     const { left, right } = this.panels.lightbarAnchors;
     if (!left && !right) return;
     const up = new THREE.Vector3(0, 0, 0.25);
     if (this.sirenLight) this.sirenLight.position.copy(left ?? right!).add(up);
     if (this.sirenLightR) this.sirenLightR.position.copy(right ?? left!).add(up);
-    const amber: THREE.MeshStandardMaterial[] = [];
-    this.panels.root.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      const m = mesh.material as THREE.MeshStandardMaterial | undefined;
-      const isAmber = o.name === "traffic_advisor_cells" || o.name.endsWith("_amber");
-      if (mesh.isMesh && m && isAmber && !amber.includes(m)) amber.push(m);
-    });
     this.rig = new LightRig(
       this.panels.lightbarMaterials.left,
       this.panels.lightbarMaterials.right,
-      amber,
+      this.panels.amberMaterials,
       { left: this.sirenLight, right: this.sirenLightR },
       patternFor(this.info.car_id),
-      phaseFor(this.entity),
+      phaseFor(this.unitId),
     );
   }
 

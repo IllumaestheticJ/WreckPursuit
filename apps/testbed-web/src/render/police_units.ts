@@ -2,8 +2,10 @@
 //
 // - Flash patterns as data (`PATTERNS`), shared by sim police cars (vehicle_view.ts) and the
 //   non-sim units drawn here. Lens meshes may strobe fast; the world-lighting point lights
-//   follow a slower envelope (≤ 3 Hz with ~40 ms ramps, WCAG 2.3.1). `?flash=slow` swaps every
-//   pattern for `P-SLOW` (reduced flashing).
+//   follow a slower envelope (≤ 3 Hz with ~40 ms ramps, WCAG 2.3.1). `?flash=slow` or the
+//   "reduced flashing" setting (F6, settings.ts) swaps every pattern for `P-SLOW`.
+// - Wig-wag headlamps (`wigwag`, P-HEADLAMP-WW): left / right head lamps alternate at 2 Hz
+//   (1 Hz with reduced flashing) while the siren is on.
 // - `LightRig` drives one car's lens materials (left / right sides independently, clear
 //   takedowns, amber advisors) and its two point lights (red left, blue right).
 // - `PoliceUnitsView` draws police_units() (units that are not sim vehicles) with the real
@@ -17,6 +19,7 @@ import { sim } from "../wasm/sim";
 import type { CarMeshJson, LightbarSide, MaterialJson } from "./panels";
 import { loadCarMesh } from "./panels";
 import { applyUnitDecals, hash32, liveryBaseColour, liveryTexture } from "./livery";
+import { layers } from "../settings";
 
 // ------------------------------------------------------------------------------------------
 // Flash patterns
@@ -70,17 +73,29 @@ export function patternFor(carId: string, parked = false): string {
   return parked ? "P-LED-SIM" : "P-LED-QUAD";
 }
 
-let reduced: boolean | null = null;
-/** `?flash=slow` in the URL: reduced flashing (P-SLOW everywhere). */
+let reducedUrl: boolean | null = null;
+/** Reduced flashing (P-SLOW everywhere): `?flash=slow` in the URL or the settings toggle (F6). */
 export function reducedFlashing(): boolean {
-  if (reduced === null) {
+  if (reducedUrl === null) {
     try {
-      reduced = new URLSearchParams(globalThis.location?.search ?? "").get("flash") === "slow";
+      reducedUrl = new URLSearchParams(globalThis.location?.search ?? "").get("flash") === "slow";
     } catch {
-      reduced = false;
+      reducedUrl = false;
     }
   }
-  return reduced;
+  return reducedUrl || layers.on("reducedFlashing");
+}
+
+/**
+ * Wig-wag head-lamp levels (P-HEADLAMP-WW) at time `t` (s) with phase offset `phase` (0..1):
+ * left / right alternate, 2 Hz per lamp (1 Hz with reduced flashing), ~40 ms ramps.
+ */
+export function wigwag(t: number, phase: number): { left: number; right: number } {
+  const period = reducedFlashing() ? 1.0 : 0.5;
+  const ph = (((t + phase * period) % period) + period) % period;
+  const half = period / 2;
+  const wins = (a: number): [number, number][] => [[a + 0.02 * period, a + half - 0.02 * period]];
+  return { left: windowLevel(wins(0), ph, true), right: windowLevel(wins(half), ph, true) };
 }
 
 /** Stable phase offset (s) for a unit / entity id, de-syncs a convoy. */
@@ -208,7 +223,7 @@ function staticMaterials(): Partial<Record<MaterialJson, THREE.Material>> {
     glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.45, metalness: 0.1, roughness: 0.1, depthWrite: false }),
     trim: std({ color: 0x1b1b1d, roughness: 0.9 }),
     headlight: std({ color: 0xfff6d0, emissive: 0x302a18 }),
-    taillight: std({ color: 0x550000, emissive: 0x200000 }),
+    taillight: std({ color: 0x8a0a0a, emissive: 0x200000 }),
     rubber: std({ color: 0x141414, roughness: 0.95 }),
     metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
     interior: std({ color: 0x2b2724, roughness: 1 }),
@@ -219,6 +234,9 @@ function staticMaterials(): Partial<Record<MaterialJson, THREE.Material>> {
     emissive_amber: std({ color: 0xc87a10, emissive: 0x2a1600, roughness: 0.4 }),
     grille: std({ color: 0x0d0e10, roughness: 0.8 }),
     exhaust: std({ color: 0xb9b2a6, metalness: 0.9, roughness: 0.25 }),
+    rim: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
+    spring: std({ color: 0x3a3c40, metalness: 0.3, roughness: 0.5 }),
+    accent: std({ color: 0x8a1020, metalness: 0.25, roughness: 0.55 }),
   };
 }
 
