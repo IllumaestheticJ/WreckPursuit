@@ -334,6 +334,18 @@ pub struct BountyRules {
     pub cop_share: f32,
     /// Share of the capture reward paid to each assisting cop.
     pub assist_share: f32,
+    /// Bounty and rep per mid-pursuit bonus (wrecking cops, dodging roadblocks and spikes).
+    pub bonus: BTreeMap<crate::pursuit::BonusKind, BonusRule>,
+}
+
+/// What one bounty bonus is worth (before the day-phase bounty multiplier).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BonusRule {
+    /// Bounty added.
+    pub bounty: u32,
+    /// Rep gained.
+    pub rep: i64,
 }
 
 /// One informant tier.
@@ -835,6 +847,11 @@ impl Economy {
         )?;
         require_frac("stakes.bounty.cop_share", s.bounty.cop_share)?;
         require_frac("stakes.bounty.assist_share", s.bounty.assist_share)?;
+        require_keys(
+            "stakes.bounty.bonus",
+            &s.bounty.bonus,
+            &crate::pursuit::BonusKind::ALL,
+        )?;
         let kind_keys: Vec<String> = wp_contracts::RaceKind::KEYS
             .iter()
             .map(|k| k.to_string())

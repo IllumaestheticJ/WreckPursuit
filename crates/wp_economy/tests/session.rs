@@ -16,9 +16,10 @@ use wp_contracts::{
 };
 use wp_economy::repair::reference_estimate;
 use wp_economy::{
-    CarFate, CarLocation, CarStatus, CarUid, DamageReport, Economy, EconomyError, EconomySession,
-    EventReason, PlayerAccount, PoliceSignal, PursuitEnd, PursuitSettlement, RaceResult, RaceSetup,
-    RaceType, RepairOption, RepairPolicy, SessionConfig, ShopContext,
+    BonusKind, BountyBonus, CarFate, CarLocation, CarStatus, CarUid, DamageReport, Economy,
+    EconomyError, EconomySession, EventReason, PlayerAccount, PoliceSignal, PursuitEnd,
+    PursuitSettlement, RaceResult, RaceSetup, RaceType, RepairOption, RepairPolicy, SessionConfig,
+    ShopContext,
 };
 use wp_math::Rng;
 use wp_police::scenario::ScenarioWorld;
@@ -609,4 +610,71 @@ fn unretrieved_car_is_auctioned_when_the_countdown_ends() {
     assert!(ev
         .iter()
         .any(|x| matches!(x.reason, EventReason::CarAuctioned { .. })));
+}
+
+#[test]
+fn bounty_bonuses_settle_with_the_run() {
+    let e = econ();
+    let mode = DamageMode::Arcade;
+    let bonus = |kind| BountyBonus { racer: RACER, kind };
+    let kinds = [
+        BonusKind::CopDisabled,
+        BonusKind::CopWrecked,
+        BonusKind::RoadblockDodged,
+        BonusKind::SpikesDodged,
+    ];
+    // Escape at night with every bonus: escape bounty plus the bonuses, night-scaled.
+    let (mut a, car) = account_with_sedan(&e, 20_000);
+    let mut s = session_for(mode, &a, car);
+    s.set_day_phase(DayPhase::Night);
+    for k in kinds {
+        s.observe_bonus(bonus(k));
+    }
+    // Another player's / an unbound vehicle's bonus is not ours.
+    s.observe_bonus(BountyBonus {
+        racer: EntityId(99),
+        kind: BonusKind::RoadblockDodged,
+    });
+    replay(&mut s, &fixture("escape_scripted"));
+    let r = s.finish(&e, &mut a, &[], &mut Rng::new(1)).unwrap();
+    assert_eq!(r.bonuses.len(), 4);
+    let night = e.stakes.day_phase[&DayPhase::Night].bounty;
+    let rules = &e.stakes.bounty.bonus;
+    let bonus_bounty: i64 = kinds
+        .iter()
+        .map(|k| (rules[k].bounty as f32 * night).round() as i64)
+        .sum();
+    let bonus_rep: i64 = kinds.iter().map(|k| rules[k].rep).sum();
+    let escape = (e.stakes.bounty.escape[&WantedLevel::L2] as f32 * night).round() as i64;
+    assert_eq!(r.bounty_delta, bonus_bounty + escape);
+    assert_eq!(a.bounty as i64, r.bounty_delta);
+    assert!(r.rep_delta >= bonus_rep);
+    // Recorded as ordinary bounty gains, no cash.
+    let gains: Vec<_> = r
+        .events
+        .iter()
+        .filter(|ev| ev.reason == EventReason::BountyGained)
+        .collect();
+    assert_eq!(gains.len(), 4);
+    assert!(gains.iter().all(|ev| ev.cash_delta == 0));
+    assert_eq!(r.cash_after, 20_000);
+    // Settled once.
+    let again = s.finish(&e, &mut a, &[], &mut Rng::new(1)).unwrap();
+    assert!(again.bonuses.is_empty());
+
+    // Captured afterwards: the bonuses raise the bail, then the capture clears the bounty.
+    let bail_with = |with: bool| {
+        let (mut a, car) = account_with_sedan(&e, 50_000);
+        let mut s = session_for(mode, &a, car);
+        if with {
+            for k in kinds {
+                s.observe_bonus(bonus(k));
+            }
+        }
+        replay(&mut s, &fixture("capture_stationary"));
+        let r = s.finish(&e, &mut a, &[], &mut Rng::new(1)).unwrap();
+        assert_eq!(a.bounty, 0);
+        r.bail
+    };
+    assert!(bail_with(true) > bail_with(false));
 }

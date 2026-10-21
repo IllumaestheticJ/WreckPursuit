@@ -187,6 +187,21 @@ L3 = 80
 L4 = 150
 L5 = 300
 
+# Mid-pursuit bonuses credited by wp_police (wp_sim converts BountyReason -> BonusKind).
+# Bounty is scaled by the day phase's bounty multiplier, like an escape.
+[bounty.bonus.CopDisabled]
+bounty = 150
+rep = 15
+[bounty.bonus.CopWrecked]     # on top of CopDisabled
+bounty = 250
+rep = 25
+[bounty.bonus.RoadblockDodged]
+bounty = 400
+rep = 40
+[bounty.bonus.SpikesDodged]
+bounty = 200
+rep = 20
+
 [bounty.cop_base_reward]
 None = 0
 L1 = 200

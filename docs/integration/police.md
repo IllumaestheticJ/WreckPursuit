@@ -44,6 +44,9 @@
     wheel on the strip / without touching a roadblock unit and at ≥ `dodge_min_speed_mps`.
     `BountyRecord` gained `cops_wrecked`, `roadblocks_dodged`, `spikes_dodged` (`serde(default)`,
     old saved ledgers load).
+    **Wired:** `wp_sim` collects them every tick (`Sim::drain_bounty_awards()`), and
+    `wp_sim::economy_bonus` turns each into `wp_economy::BountyBonus` for
+    `EconomySession::observe_bonus`.
 - **Helicopter game model** (2026-10-21, module `wp_police::helo`): the helicopter is a point-mass
   flight model (accel / speed / yaw / climb limits, bank and pitch from the acceleration) with
   behaviour phases Launch → Transit → Track (orbit a slow car, trail a fast one) → Search (beam
@@ -128,7 +131,7 @@
 | 5 | Shared road-network trait = D's `RoadGraphView` (+ `RoadEdgeId`) | One road model | 05, 06 | Landed in v0.3.0 (`RoadNetworkQuery`); police build from it (round 8) |
 | 7 | `RoadNetworkQuery::node_signalised(n: u32) -> bool` (additive) | Police stop at red lights only at signalised junctions and must know which ones are; the trait lacks it, so `RoadGraph::from_network` takes the list separately | 05 (implements, already has `RoadNode::signalised`), 06 | Proposed (round 8) |
 | 6 | JSON Schema for `data/police/*.toml` | Data validation parity | Lead | Optional, later |
-| 8 | `PoliceEvent::BountyAward { racer: EntityId, reason: u8, amount: f32 }` (additive) | HUD call-outs ("+600 roadblock dodged") and economy without polling `bounty_awards()`; until then wp_sim reads `PoliceSystem::bounty_awards()` after each step | 04, 07, 08, lead (wp_sim) | Proposed (2026-10-21) |
+| 8 | `PoliceEvent::BountyAward { racer: EntityId, reason: u8, amount: f32 }` (additive) | Lets net/HUD see bonuses in the event stream; until then wp_sim collects `PoliceSystem::bounty_awards()` per tick into `Sim::drain_bounty_awards()` | 04, 07, 08, lead (wp_sim) | Proposed (2026-10-21) |
 | 9 | `PoliceEvent::HeloLaunched` stays; add `HeloReturned { unit }` (additive) | Audio / HUD know when air support leaves (bingo fuel, call-off) | J (audio), 04 | Proposed (2026-10-21) |
 
 ### Final `PoliceEvent` variant list (contract v0.3.0)

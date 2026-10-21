@@ -55,6 +55,39 @@ pub const POLICE_KIND_WANTED_LEVEL: u16 = 2;
 /// `wp_police::events::kind::PURSUIT_ENDED`).
 pub const POLICE_KIND_PURSUIT_ENDED: u16 = 4;
 
+/// A mid-pursuit stunt the police credit to a racer's bounty (from `wp_police`'s
+/// `BountyReason`; `wp_sim` converts them, the economy does not depend on `wp_police`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum BonusKind {
+    /// A pursuing unit pulled over or was wrecked after contact with the racer.
+    CopDisabled,
+    /// ...and it was a total loss (paid on top of `CopDisabled`).
+    CopWrecked,
+    /// Got past a roadblock at speed without touching its units.
+    RoadblockDodged,
+    /// Crossed a spike strip's road with every tire intact.
+    SpikesDodged,
+}
+
+impl BonusKind {
+    /// Every kind (for table validation).
+    pub const ALL: [BonusKind; 4] = [
+        BonusKind::CopDisabled,
+        BonusKind::CopWrecked,
+        BonusKind::RoadblockDodged,
+        BonusKind::SpikesDodged,
+    ];
+}
+
+/// One bounty bonus earned by a racer vehicle during the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BountyBonus {
+    /// Racer vehicle.
+    pub racer: EntityId,
+    /// What for.
+    pub kind: BonusKind,
+}
+
 /// A pursuit that ended, with what the economy needs to settle it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PursuitResolution {

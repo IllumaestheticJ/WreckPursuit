@@ -17,6 +17,7 @@ use crate::ledger::{
     transact, CarLocation, CarUid, CopXpReason, Delta, EconResult, EventReason, Money,
     PlayerAccount, Txn, ViolationCounts,
 };
+use crate::pursuit::BonusKind;
 
 /// Everything the economy needs to know about a capture (from `wp_police`'s capture event).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -259,6 +260,31 @@ impl Economy {
             let h = &mut tx.acct.heat_history;
             h.escapes += 1;
             h.max_wanted = h.max_wanted.max(level);
+            Ok(())
+        })
+    }
+
+    /// Apply a mid-pursuit bounty bonus (cop disabled or wrecked, roadblock or spikes dodged):
+    /// bounty and rep from `stakes.bounty.bonus`, bounty scaled by `phase_bounty` like an
+    /// escape. Recorded as `EventReason::BountyGained`.
+    pub fn handle_bounty_bonus(
+        &self,
+        acct: &mut PlayerAccount,
+        kind: BonusKind,
+        phase_bounty: f32,
+    ) -> EconResult<()> {
+        let rule = self.stakes.bounty.bonus[&kind];
+        let bounty = money(rule.bounty as f32 * phase_bounty);
+        transact(acct, |tx| {
+            tx.note(
+                EventReason::BountyGained,
+                None,
+                Delta {
+                    rep: rule.rep,
+                    bounty,
+                    ..Delta::default()
+                },
+            );
             Ok(())
         })
     }

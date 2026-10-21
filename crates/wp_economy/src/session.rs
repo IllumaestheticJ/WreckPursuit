@@ -8,7 +8,7 @@
 //!    [`PursuitTracker`]), and
 //! 2. at the end of the run, given each car's `DamageReport`, settles everything on the
 //!    player's account in one all-or-nothing step ([`EconomySession::finish`]): damage
-//!    (towing), race payouts, pursuit captures (fine, bail, impound / seizure / destruction)
+//!    (towing), race payouts, bounty bonuses, pursuit captures (fine, bail, impound / seizure / destruction)
 //!    and escapes (bounty), then the repair bill.
 //!
 //! The result ([`RunResult`]) carries every number the end-of-run screen needs plus the ledger
@@ -46,7 +46,7 @@ use crate::error::EconomyError;
 use crate::ledger::{CarLocation, CarUid, EconomyEvent, EventReason, Money, PlayerAccount};
 use crate::payouts::{RaceResult, RaceSettlement, RaceSetup};
 use crate::pursuit::{
-    PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker,
+    BountyBonus, PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker,
 };
 use crate::repair::{DamageReport, RepairOption, RepairOrder, RepairQuote, ShopContext};
 
@@ -159,8 +159,11 @@ pub struct RunResult {
     pub repairs_paid: Money,
     /// Rep change over the run.
     pub rep_delta: i64,
-    /// Bounty change over the run (escapes add, a capture clears).
+    /// Bounty change over the run (escapes and bonuses add, a capture clears).
     pub bounty_delta: i64,
+    /// Mid-pursuit bounty bonuses settled, in the order they were earned.
+    #[serde(default)]
+    pub bonuses: Vec<BountyBonus>,
     /// Each race settled, in the order given.
     pub races: Vec<RaceSettlement>,
     /// Each pursuit ending settled, in the order it happened.
@@ -179,6 +182,7 @@ pub struct EconomySession {
     bindings: BTreeMap<EntityId, Binding>,
     pending: Vec<PendingPursuit>,
     races: Vec<(EntityId, RaceSetup, RaceResult)>,
+    bonuses: Vec<(BountyBonus, DayPhase)>,
     ever_wanted: BTreeSet<EntityId>,
     total_loss: BTreeSet<EntityId>,
     towed: BTreeSet<EntityId>,
@@ -192,6 +196,7 @@ impl EconomySession {
             bindings: BTreeMap::new(),
             pending: Vec::new(),
             races: Vec::new(),
+            bonuses: Vec::new(),
             ever_wanted: BTreeSet::new(),
             total_loss: BTreeSet::new(),
             towed: BTreeSet::new(),
@@ -258,6 +263,13 @@ impl EconomySession {
         }
     }
 
+    /// Record a mid-pursuit bounty bonus (from `wp_sim::Sim::drain_bounty_bonuses`), settled
+    /// at [`EconomySession::finish`] with the day phase it was earned in. Unbound vehicles are
+    /// ignored there like everything else.
+    pub fn observe_bonus(&mut self, bonus: BountyBonus) {
+        self.bonuses.push((bonus, self.config.phase));
+    }
+
     /// Record a finished race for a vehicle (server-validated result; the buy-in was charged
     /// by `Economy::enter_race` at the start).
     pub fn add_race_result(&mut self, vehicle: EntityId, setup: RaceSetup, result: RaceResult) {
@@ -301,8 +313,8 @@ impl EconomySession {
     ///
     /// Order: (1) each `DamageReport` is recorded (`wanted_during_session` and `total_loss` are
     /// OR-ed with what the session saw; towing charged for a marked or uncaptured
-    /// total-loss car), (2) race results, (3) pursuit endings in the order they happened
-    /// (captures impound / seize / destroy the car), (4) the repair bill of each damaged car
+    /// total-loss car), (2) race results, (3) bounty bonuses, (4) pursuit endings in the order they happened
+    /// (captures impound / seize / destroy the car), (5) the repair bill of each damaged car
     /// still in the garage (quoted, and paid under [`RepairPolicy::PayIfAffordable`]).
     ///
     /// `reports` may include cars that were not bound (garage-only runs); reports for cars of
@@ -353,7 +365,21 @@ impl EconomySession {
             events.extend(ev);
         }
 
-        // (3) pursuits
+        // (3) bounty bonuses, before the pursuits they were earned in (a capture then clears
+        // them with the rest of the bounty, and bail grows with them)
+        let mut bonuses = Vec::new();
+        for (b, phase) in self
+            .bonuses
+            .iter()
+            .filter(|(b, _)| mine.contains_key(&b.racer))
+        {
+            let mult = econ.stakes.day_phase[phase].bounty;
+            let ((), ev) = econ.handle_bounty_bonus(&mut work, b.kind, mult)?;
+            bonuses.push(*b);
+            events.extend(ev);
+        }
+
+        // (4) pursuits
         let mut pursuits = Vec::new();
         for p in self
             .pending
@@ -377,7 +403,7 @@ impl EconomySession {
             events.extend(ev);
         }
 
-        // (4) repairs and per-car results
+        // (5) repairs and per-car results
         let mut cars: Vec<CarUid> = mine.values().copied().collect();
         for r in reports {
             if !cars.contains(&r.car) {
@@ -471,6 +497,7 @@ impl EconomySession {
             repairs_paid: -sum(&|r| matches!(r, EventReason::RepairPaid { .. })),
             rep_delta: events.iter().map(|e| e.rep_delta).sum(),
             bounty_delta: events.iter().map(|e| e.bounty_delta).sum(),
+            bonuses,
             races,
             pursuits,
             cars: car_results,
@@ -480,6 +507,7 @@ impl EconomySession {
         // Commit: account first, then drop what was settled from the session.
         *acct = work;
         self.races.retain(|(v, ..)| !mine.contains_key(v));
+        self.bonuses.retain(|(b, _)| !mine.contains_key(&b.racer));
         self.pending
             .retain(|p| !mine.contains_key(&p.resolution.racer));
         for v in mine.keys() {

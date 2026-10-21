@@ -127,6 +127,10 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
 - Pound: retrieval = base fee + per-day fee by class; after 10 days the car is auctioned (the
   owner gets 10 % of value minus fees).
 - Escapes add bounty and rep by level (× day-phase bounty multiplier).
+- Mid-pursuit bonuses (`EconomySession::observe_bonus`, from `wp_police` via `wp_sim::economy_bonus`):
+  cop disabled / wrecked, roadblock / spikes dodged add `stakes.toml [bounty.bonus.*]` bounty
+  (× day-phase bounty multiplier) and rep, recorded as `BountyGained`; settled before the run's
+  pursuits, so a capture clears them and bail grows with them.
 - Cop side: XP for captures/assists/clean minutes, losses for civilian hits, self-wrecks and
   overspending prompt 06's risk budget; cash reward = base by level + 25 % of the racer's
   bounty (assists 30 % of that). `cop_level(xp)` from thresholds.

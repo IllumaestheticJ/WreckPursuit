@@ -317,7 +317,7 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 - Helicopter: flat terrain (no ground or building clearance check; it flies at `altitude_m`
   above the origin), no wind or weather effects, no refuel-and-relaunch cycle (a landed
   helicopter is removed; the next request launches a fresh one), and racers cannot damage it.
-- Bounty bonuses are not yet a contract event (request #8); `wp_sim`/economy must read
-  `bounty_awards()` after each step. A roadblock dodge cannot tell barrier hits from a clean
+- Bounty bonuses are not yet a contract event (request #8): `wp_sim` collects
+  `bounty_awards()` per tick (`Sim::drain_bounty_awards`), so net clients don't see them yet. A roadblock dodge cannot tell barrier hits from a clean
   pass except through the speed floor (barrier contacts are with the static world).
 - No JSON Schema for `data/police/*.toml`; validation lives in `PoliceConfig::validate` plus serde `deny_unknown_fields`.

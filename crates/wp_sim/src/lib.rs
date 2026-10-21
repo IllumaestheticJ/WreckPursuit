@@ -19,7 +19,7 @@ mod traffic_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
 pub use physics::{CityColliders, PhysicsWorld, SAFETY_FLOOR_Z};
-pub use police_link::POLICE_SLOT_RESERVE;
+pub use police_link::{economy_bonus, POLICE_SLOT_RESERVE};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 
@@ -156,6 +156,8 @@ pub struct Sim {
     police: PoliceSystem,
     vehicles: Vec<SimVehicle>,
     events: Vec<SimEvent>,
+    /// Police bounty bonuses since the last [`Sim::drain_bounty_awards`].
+    bounty_awards: Vec<wp_police::BountyAward>,
     systems: Systems,
     last_tick_events: usize,
     static_boxes: usize,
@@ -192,6 +194,7 @@ impl Sim {
             next_entity: 1,
             vehicles: Vec::new(),
             events: Vec::new(),
+            bounty_awards: Vec::new(),
             systems: Systems::ALL,
             last_tick_events: 0,
             static_boxes: 0,
@@ -763,6 +766,8 @@ impl Sim {
             let tick_events = out.clone();
             self.police
                 .step(&self.world, &racers, &tick_events, dt, &mut out);
+            self.bounty_awards
+                .extend_from_slice(self.police.bounty_awards());
             self.reconcile_police_units();
         }
         self.last_tick_events = out.len();
@@ -1282,6 +1287,30 @@ mod tests {
             "police cars never move"
         );
         assert_eq!(sim.state_hash(), police_city_run(2400).state_hash());
+    }
+
+    #[test]
+    fn bounty_awards_drain_and_map_to_economy_bonuses() {
+        use wp_economy::BonusKind as E;
+        use wp_police::BountyReason as P;
+        let mut sim = police_city_run(240);
+        // No pursuit yet: nothing earned, and a drain leaves nothing behind.
+        assert!(sim.drain_bounty_awards().is_empty());
+        for (reason, kind) in [
+            (P::CopDisabled, E::CopDisabled),
+            (P::CopWrecked, E::CopWrecked),
+            (P::RoadblockDodged, E::RoadblockDodged),
+            (P::SpikesDodged, E::SpikesDodged),
+        ] {
+            let award = wp_police::BountyAward {
+                racer: EntityId(5),
+                reason,
+                amount: 100.0,
+                time: wp_police::SimTime::ZERO,
+            };
+            let b = economy_bonus(&award);
+            assert_eq!((b.racer, b.kind), (EntityId(5), kind));
+        }
     }
 
     #[test]

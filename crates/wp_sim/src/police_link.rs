@@ -21,7 +21,32 @@ pub const POLICE_SLOT_RESERVE: usize = 16;
 /// Police RNG stream offset from the master seed.
 const POLICE_SEED_SALT: u64 = 0x0090_11CE;
 
+/// The economy's view of a police bounty award (`EconomySession::observe_bonus`). The police
+/// amount stays police-side (reinforcement priority); the economy prices the bonus itself.
+pub fn economy_bonus(a: &wp_police::BountyAward) -> wp_economy::BountyBonus {
+    use wp_economy::BonusKind as E;
+    use wp_police::BountyReason as P;
+    let kind = match a.reason {
+        P::CopDisabled => E::CopDisabled,
+        P::CopWrecked => E::CopWrecked,
+        P::RoadblockDodged => E::RoadblockDodged,
+        P::SpikesDodged => E::SpikesDodged,
+    };
+    wp_economy::BountyBonus {
+        racer: a.racer,
+        kind,
+    }
+}
+
 impl Sim {
+    /// Take the police bounty bonuses (cops disabled or wrecked, roadblocks and spikes dodged)
+    /// earned since the last drain, in tick order. Drain them alongside
+    /// [`Sim::drain_events`]: show them on the HUD and feed [`economy_bonus`] of each to
+    /// `wp_economy::EconomySession::observe_bonus`.
+    pub fn drain_bounty_awards(&mut self) -> Vec<wp_police::BountyAward> {
+        std::mem::take(&mut self.bounty_awards)
+    }
+
     /// Rebuild the police system on the current world's road network (called by
     /// [`Sim::set_world`]). Units drive kinematically until bound to a vehicle.
     pub(crate) fn rebuild_police(&mut self) {
