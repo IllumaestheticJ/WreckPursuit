@@ -623,7 +623,7 @@ pub fn run_one(
                 })
                 .map(|u| {
                     format!(
-                        "u{} {} {:?} v{:.1} cmd{:.1} lim{:.1} jl{:.1} wall{:.1} by{:?} pos({:.0},{:.0}) trk{:?}",
+                        "u{} {} {:?} v{:.1} cmd{:.1} lim{:.1} jl{:.1} wall{:.1} by{:?} pos({:.0},{:.0}) br{} sw{} rev{} pro{:?} trk{:?}",
                         u.id.0,
                         u.assignment.name(),
                         u.tactic,
@@ -635,6 +635,10 @@ pub fn run_one(
                         u.avoid.blocked_by,
                         u.body.pos[0],
                         u.body.pos[1],
+                        u.branch,
+                        u.unstick.swinging(),
+                        u.unstick.reversing(),
+                        u.pro_dbg,
                         u.cmd
                             .track
                             .pts
