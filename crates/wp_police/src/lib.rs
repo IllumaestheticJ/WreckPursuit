@@ -250,6 +250,9 @@ pub struct PoliceStats {
     pub pursuits: Vec<PursuitRecord>,
     /// Reinforcement request → unit committed, s.
     pub reinforcement_delays_s: Vec<f32>,
+    /// Per pursuit: pursuit start → the first backup unit committed, s.
+    #[serde(default)]
+    pub first_backup_delays_s: Vec<f32>,
     /// Units that ever pursued.
     pub units_engaged: u32,
     /// Units total-lost without racer contact.
@@ -310,6 +313,9 @@ pub struct PoliceStats {
     pub resets: Vec<ResetRecord>,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
+    /// Chasing units that routed around a traffic jam they stood in (row 86).
+    #[serde(default)]
+    pub jam_reroutes: u32,
     /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
     /// call was handed back (siren off) and they despawn out of sight.
     #[serde(default)]
@@ -408,6 +414,8 @@ pub(crate) struct RacerObs {
     pub(crate) witness: Option<UnitId>,
     /// Nearest ground unit distance, m.
     pub(crate) nearest_unit_m: f32,
+    /// Nearest ground unit chasing this racer, m.
+    pub(crate) nearest_chaser_m: f32,
 }
 
 /// Police state for one instance.
@@ -429,6 +437,14 @@ pub struct PoliceSystem {
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
     /// Seconds each racer has been speeding in a unit's sight (radar hold).
     pub(crate) radar_over: BTreeMap<EntityId, f32>,
+    /// When each racer last had a unit sent to wait ahead of it (see
+    /// [`dispatch::AMBUSH_EVERY_S`]).
+    pub(crate) last_ambush: BTreeMap<EntityId, SimTime>,
+    /// The pursuit start each racer's first backup was logged for (see
+    /// `PoliceStats::first_backup_delays_s`).
+    pub(crate) first_backup: BTreeMap<EntityId, SimTime>,
+    /// Units booking a racer they captured, until when (see `pursuit::ARREST_BUSY_S`).
+    pub(crate) arresting: BTreeMap<UnitId, SimTime>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
@@ -584,6 +600,9 @@ impl PoliceSystem {
             phase: DayPhase::Day,
             warmed_up: false,
             racers: BTreeMap::new(),
+            last_ambush: BTreeMap::new(),
+            first_backup: BTreeMap::new(),
+            arresting: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
             radar_over: BTreeMap::new(),

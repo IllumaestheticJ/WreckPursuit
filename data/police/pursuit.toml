@@ -141,8 +141,8 @@ yield_max_siren_s = 3.0
 gridlock_s = 2.0
 # Pursuing / intercepting units drive at the limit: through junctions fast, reds barely
 # slowed, a short look for cross traffic, and quick passes.
-chase_junction_mps = 18.0
-chase_red_mps = 13.0
+chase_junction_mps = 24.0
+chase_red_mps = 17.0
 chase_turn_mps = 9.0
 chase_yield_max_s = 0.6
 chase_decel_mps2 = 7.5

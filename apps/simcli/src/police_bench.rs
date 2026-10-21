@@ -286,6 +286,12 @@ pub struct RunMetrics {
     pub pit_successes: u32,
     /// Mean in-service police cars within 300 m during the pursuit (sampled at 1 Hz).
     pub units_near_mean: f32,
+    /// Keep-up: distance to the nearest unit chasing the evader (`Pursue` / `Intercept`),
+    /// sampled at 1 Hz while police see it (`Pursuit` status), m.
+    pub lead_gaps_m: Vec<f32>,
+    /// Keep-up: the nearest chasing unit's speed over the evader's, sampled at 1 Hz while
+    /// police see it and it drives faster than [`PACE_MIN_MPS`] (1.0 = matching it).
+    pub pace: Vec<f32>,
     /// Most police cars within 300 m at once.
     pub units_near_max: u32,
     /// Police cars within 300 m at 15 / 30 / 60 / 120 s after the pursuit start (`None` once
@@ -493,6 +499,8 @@ pub fn run_one(
         pit_attempts: 0,
         pit_successes: 0,
         units_near_mean: 0.0,
+        lead_gaps_m: Vec::new(),
+        pace: Vec::new(),
         units_near_max: 0,
         units_near_at: [None; 4],
         police_static_crashes: 0,
@@ -595,6 +603,48 @@ pub fn run_one(
                 .map(|c| wp_world::geom::dist([c.pos[0], c.pos[1]], [my.pos[0], my.pos[1]]))
                 .fold(f32::INFINITY, f32::min);
             let status = sim.police().racer(me).map(|r| (r.status, r.level.number()));
+            // The nearest unit chasing the evader and what caps its speed.
+            let chaser = sim
+                .police()
+                .units()
+                .iter()
+                .filter(|u| {
+                    matches!(
+                        u.assignment,
+                        Assignment::Pursue { target } | Assignment::Intercept { target, .. }
+                            if target == me
+                    )
+                })
+                .min_by(|a, b| {
+                    let d = |u: &&wp_police::unit::Unit| {
+                        wp_world::geom::dist(u.body.pos, [my.pos[0], my.pos[1]])
+                    };
+                    d(a).total_cmp(&d(b))
+                })
+                .map(|u| {
+                    format!(
+                        "u{} {} {:?} v{:.1} cmd{:.1} lim{:.1} jl{:.1} wall{:.1} by{:?} pos({:.0},{:.0}) trk{:?}",
+                        u.id.0,
+                        u.assignment.name(),
+                        u.tactic,
+                        u.body.speed,
+                        u.cmd.speed_mps,
+                        u.avoid.limit_mps,
+                        u.avoid.junction_limit_mps,
+                        u.avoid.wall.limit_mps,
+                        u.avoid.blocked_by,
+                        u.body.pos[0],
+                        u.body.pos[1],
+                        u.cmd
+                            .track
+                            .pts
+                            .iter()
+                            .take(4)
+                            .map(|p| [p[0] as i32, p[1] as i32])
+                            .collect::<Vec<_>>()
+                    )
+                });
+            eprintln!("    chaser {chaser:?}");
             eprintln!(
                 "t={t:5.0} pos=({:7.1},{:7.1}) v={:4.1} in=(s{:+.2} t{:.2} b{:.2}) mode={:?} known={} cop={near:5.0} {status:?} rev={} {:?}",
                 my.pos[0],
@@ -645,6 +695,29 @@ pub fn run_one(
         // 1 Hz samples of units around, during the pursuit.
         if let Some(ps) = m.pursuit_start_s {
             if tick % 240 == 0 && m.pursuit_end_s.is_none() {
+                let seen = pol
+                    .racer(me)
+                    .is_some_and(|r| r.status == PursuitStatus::Pursuit);
+                let chaser = pol
+                    .units()
+                    .iter()
+                    .filter(|u| {
+                        u.kind == UnitKind::Car
+                            && !u.wrecked
+                            && matches!(
+                                u.assignment,
+                                Assignment::Pursue { target } | Assignment::Intercept { target, .. }
+                                    if target == me
+                            )
+                    })
+                    .map(|u| (wp_world::geom::dist(u.body.pos, mp), u.body.speed))
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                if let (true, Some((d, v))) = (seen, chaser) {
+                    m.lead_gaps_m.push(d);
+                    if my.speed_mps > PACE_MIN_MPS {
+                        m.pace.push(v / my.speed_mps);
+                    }
+                }
                 let n = cars_near(AROUND_M);
                 near_sum += n as f32;
                 near_samples += 1;
@@ -809,6 +882,10 @@ pub struct CellSummary {
     pub los_frac: f32,
     /// Mean police cars within 300 m during pursuits.
     pub units_near_mean: f32,
+    /// Median distance to the nearest chasing unit while in sight (all samples), m.
+    pub lead_gap_med_m: Option<f32>,
+    /// Median nearest-chaser speed over the evader's while it is fast (all samples).
+    pub pace_med: Option<f32>,
     /// Capture rate (captured / runs).
     pub capture_rate: f32,
     /// Median capture time after the pursuit start, s.
@@ -889,6 +966,12 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
         } else {
             engaged.iter().map(|r| r.units_near_mean).sum::<f32>() / engaged.len() as f32
         },
+        lead_gap_med_m: median(
+            runs.iter()
+                .flat_map(|r| r.lead_gaps_m.iter().copied())
+                .collect(),
+        ),
+        pace_med: median(runs.iter().flat_map(|r| r.pace.iter().copied()).collect()),
         capture_rate: runs.iter().filter(|r| r.end.captured()).count() as f32 / n,
         capture_med_s: median(
             runs.iter()
@@ -957,8 +1040,11 @@ fn pct(x: f32) -> String {
     format!("{:.0}%", x * 100.0)
 }
 
+/// Pace is sampled only while the evader is faster than this, m/s (~90 km/h).
+pub const PACE_MIN_MPS: f32 = 25.0;
+
 /// Column headers of [`table`].
-const HEADER: [&str; 17] = [
+const HEADER: [&str; 19] = [
     "cell",
     "runs",
     "engaged",
@@ -970,6 +1056,8 @@ const HEADER: [&str; 17] = [
     "PIT ok/att",
     "LOS",
     "units≤300m",
+    "lead m",
+    "pace",
     "capture",
     "capture s",
     "escape",
@@ -978,7 +1066,7 @@ const HEADER: [&str; 17] = [
     "stuck/min",
 ];
 
-fn row(s: &CellSummary) -> [String; 17] {
+fn row(s: &CellSummary) -> [String; 19] {
     [
         s.label.clone(),
         s.runs.to_string(),
@@ -991,6 +1079,8 @@ fn row(s: &CellSummary) -> [String; 17] {
         format!("{}/{}", s.pit_successes, s.pit_attempts),
         pct(s.los_frac),
         format!("{:.1}", s.units_near_mean),
+        opt(s.lead_gap_med_m),
+        s.pace_med.map_or("—".to_string(), |p| format!("{p:.2}")),
         pct(s.capture_rate),
         opt(s.capture_med_s),
         pct(s.escape_rate),
@@ -1002,7 +1092,7 @@ fn row(s: &CellSummary) -> [String; 17] {
 
 /// Plain-text table (terminal).
 pub fn table(rows: &[CellSummary]) -> String {
-    let body: Vec<[String; 17]> = rows.iter().map(row).collect();
+    let body: Vec<[String; 19]> = rows.iter().map(row).collect();
     let mut w = HEADER.map(|h| h.chars().count());
     for r in &body {
         for (k, c) in r.iter().enumerate() {
