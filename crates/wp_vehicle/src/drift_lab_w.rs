@@ -1177,6 +1177,9 @@ pub struct Flick {
     pub caught: bool,
     /// Spun (|slip| ≥ 90° or travelling backwards).
     pub spun: bool,
+    /// Time from the sign change until the new-side slide stays within ±8° of its mean over
+    /// the last 1 s (tyre-slip's settle), s; `None` = not settled 0.5 s before the end.
+    pub settle_s: Option<f32>,
 }
 
 /// The owner's lift-flick (reference clip 1; tyre-slip's transition harness, `Init::LiftFlick`):
@@ -1196,8 +1199,10 @@ pub fn lift_flick(car: &LoadedCar, assists: &AssistProfile, lift_s: f32, gap_s: 
         peak_deg: 0.0,
         caught: false,
         spun: false,
+        settle_s: None,
     };
     let (mut entered, mut in_band, mut flick_at) = (false, 0usize, None::<usize>);
+    let mut log: Vec<f32> = Vec::new();
     let (lift_t, gap_t, after) = (
         (lift_s * TPS as f32) as usize,
         (gap_s * TPS as f32) as usize,
@@ -1253,6 +1258,7 @@ pub fn lift_flick(car: &LoadedCar, assists: &AssistProfile, lift_s: f32, gap_s: 
             out.real_swing = n.yaw_rate < 0.0 && n.v_fwd * 3.6 >= 25.0;
         }
         if crossed.is_some() {
+            log.push(b);
             out.peak_deg = out.peak_deg.max(b);
             back |= b <= -10.0;
             if (10.0..=50.0).contains(&b) {
@@ -1266,6 +1272,19 @@ pub fn lift_flick(car: &LoadedCar, assists: &AssistProfile, lift_s: f32, gap_s: 
     if let Some(cx) = crossed {
         let remaining = after.saturating_sub(cx).max(1);
         out.caught = out.real_swing && !out.spun && !back && in_new * 2 >= remaining;
+        let n = log.len();
+        let last = &log[n.saturating_sub(TPS)..];
+        let mean = last.iter().sum::<f32>() / last.len().max(1) as f32;
+        let mut settle = n;
+        for i in (0..n).rev() {
+            if (log[i] - mean).abs() > 8.0 {
+                break;
+            }
+            settle = i;
+        }
+        if settle < n.saturating_sub(TPS / 2) && !out.spun {
+            out.settle_s = Some(settle as f32 / TPS as f32);
+        }
     }
     out
 }
