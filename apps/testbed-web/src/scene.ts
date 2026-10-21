@@ -7,9 +7,10 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE, POLICE_UNIT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, INTENT_STRIDE, POLICE_UNIT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { TrafficRenderer, trafficStride } from "./render/traffic";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
@@ -25,6 +26,10 @@ const MAX_AGENTS = 1024;
 /** Traffic car box size [w, l, h], m. */
 const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
 const tmpAgentColour = new THREE.Color();
+const tmpAgentMatrix = new THREE.Matrix4();
+const tmpAgentQuat = new THREE.Quaternion();
+const tmpAgentPos = new THREE.Vector3();
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -46,6 +51,8 @@ export class SceneView {
   );
 
   private debugGrid!: THREE.GridHelper;
+  /** Styled instanced traffic (render/traffic.ts); the grey boxes above are its fallback. */
+  readonly traffic = new TrafficRenderer();
   /** Traffic signal heads and stop lines (signals_view.ts). */
   readonly signals = new SignalView();
 
@@ -87,7 +94,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group);
+    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.traffic.group);
   }
 
   /**
@@ -175,21 +182,27 @@ export class SceneView {
 
   /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags, agentId, model] per agent, layout.ts AG). */
   updateAgents(agents: Float32Array, skipPhysical = false): void {
-    const total = agents.length / AGENT_STRIDE;
+    const stride = trafficStride();
+    const total = Math.floor(agents.length / stride);
     const show = layers.on("traffic");
+    // Styled meshes once loaded; the grey boxes stay as the fallback.
+    this.traffic.group.visible = show && this.traffic.ready;
+    if (this.traffic.group.visible) {
+      this.agentMesh.visible = false;
+      this.traffic.update(agents, stride, skipPhysical, performance.now());
+      return;
+    }
     this.agentMesh.visible = show && total > 0;
     if (!this.agentMesh.visible) return;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const zAxis = new THREE.Vector3(0, 0, 1);
     let n = 0;
     for (let a = 0; a < total && n < MAX_AGENTS; a++) {
-      const o = a * AGENT_STRIDE;
+      const o = a * stride;
       if (skipPhysical && agents[o + 4] & AGENT_FLAG.physical) continue;
       const i = n++;
-      q.setFromAxisAngle(zAxis, agents[o + 3]);
-      m.compose(new THREE.Vector3(agents[o], agents[o + 1], agents[o + 2] + 0.7), q, AGENT_SCALE);
-      this.agentMesh.setMatrixAt(i, m);
+      tmpAgentQuat.setFromAxisAngle(Z_AXIS, agents[o + 3]);
+      tmpAgentPos.set(agents[o], agents[o + 1], agents[o + 2] + 0.7);
+      tmpAgentMatrix.compose(tmpAgentPos, tmpAgentQuat, AGENT_SCALE);
+      this.agentMesh.setMatrixAt(i, tmpAgentMatrix);
       const flags = agents[o + 4];
       const c =
         flags & AGENT_FLAG.yielding
@@ -211,6 +224,7 @@ export class SceneView {
     (this.scene.background as THREE.Color).copy(DAY_SKY).lerp(NIGHT_SKY, night);
     this.hemi.intensity = 2.0 * (1 - 0.8 * night);
     this.sun.intensity = 1.5 * (1 - night);
+    this.traffic.setNight(night);
   }
 
   setBarriers(list: Barrier[]): void {
@@ -294,6 +308,7 @@ export class SceneView {
   }
 
   render(camera: THREE.Camera): void {
+    this.traffic.setCamera(camera);
     this.renderer.render(this.scene, camera);
   }
 }
