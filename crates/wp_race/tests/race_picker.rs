@@ -479,7 +479,11 @@ fn hollins_hill_sprint() {
     // With the police patrolling the hill a racer may be caught or flee legitimately (owner
     // decision, as in `loop9_circuit`; `WP_RACE_SEED=6`: two racers out to the police in the
     // first 45 s), so police outcomes count with the finishers. What still fails: a race
-    // that never ends (a deadlock), no winner, a wreck.
+    // that never ends (a deadlock), no winner, a wreck. Since the owner's "racers never give
+    // up" rule (2026-10-21, wp_opponent `RaceConfig::allow_abandon` off) a pursued racer keeps
+    // racing at any wanted level, so only real captures take racers out and a winner is
+    // required again (E had relaxed this in 6e63486d while pursued racers yielded at L1).
+    // Seeds 1-8: see docs/integration/opponent-pace.md.
     check_with_police(&r, 40.0..110.0, 3);
 }
 
@@ -488,6 +492,15 @@ fn hollins_hill_sprint() {
 /// winner's window stretches to 180 s when the police took someone out (the chase holds the
 /// field up). The race must still end with a winner and nobody wrecked.
 fn check_with_police(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
+    check_with_police_inner(r, winner_s, min_finish, false);
+}
+
+fn check_with_police_inner(
+    r: &Raced,
+    winner_s: std::ops::Range<f32>,
+    min_finish: usize,
+    all_out_ok: bool,
+) {
     use wp_race::DnfReason;
     let id = r.def.id;
     assert!(r.finished_tick.is_some(), "{id}: never finished");
@@ -511,6 +524,15 @@ fn check_with_police(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usiz
         .iter()
         .filter(|x| x.status == RacerStatus::Finished)
         .count();
+    assert!(
+        r.results
+            .iter()
+            .all(|x| x.status != RacerStatus::Dnf(DnfReason::TotalLoss)),
+        "{id}: a car was wrecked"
+    );
+    if all_out_ok && police_out == r.results.len() {
+        return;
+    }
     let winner = r
         .results
         .iter()

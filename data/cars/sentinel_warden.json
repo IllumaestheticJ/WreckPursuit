@@ -1,0 +1,168 @@
+{
+  "id": "sentinel_warden",
+  "display_name": "Sentinel Warden",
+  "class": "PoliceCruiser",
+  "analog_of": "late-80s American full-size body-on-frame RWD police sedan, 5.7 L pushrod V8 police package, 4-speed automatic, boxy three-box body",
+  "body_size_m": [1.98, 5.4, 1.43],
+  "mass_kg": 1872.6,
+  "front_weight_frac": 0.56,
+  "wheelbase_m": 2.9,
+  "track_front_m": 1.575,
+  "track_rear_m": 1.585,
+  "cg_height_m": 0.55,
+  "inertia_kgm2": [760.0, 4630.0, 5010.0],
+  "drag_cd_a_m2": 1.013,
+  "lift_front": 0.12,
+  "lift_rear": 0.14,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 290],
+      [1200, 340],
+      [1600, 380],
+      [2000, 400],
+      [2400, 410],
+      [2800, 412],
+      [3200, 405],
+      [3600, 392],
+      [4000, 370],
+      [4400, 330],
+      [4800, 290],
+      [5000, 265],
+      [5200, 240]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 5000.0,
+    "rev_limit_rpm": 5200.0,
+    "inertia_kgm2": 0.26,
+    "engine_brake_nm": 49.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.06, 1.63, 1.0, 0.7],
+    "final_drive": 3.42,
+    "reverse_ratio": 2.29,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 60.0,
+        "ramp_power": 0.4,
+        "ramp_coast": 0.2
+      }
+    },
+    "clutch_max_nm": 660.0,
+    "shift_time_s": 0.4,
+    "torque_converter": {
+      "stall_rpm": 2000.0,
+      "stall_torque_ratio": 2.0,
+      "coupling_rpm": 2400.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-0.787, 1.45, 0.338],
+      "radius_m": 0.338,
+      "width_m": 0.225,
+      "mass_kg": 32.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.566,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0052,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [0.787, 1.45, 0.338],
+      "radius_m": 0.338,
+      "width_m": 0.225,
+      "mass_kg": 32.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.566,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0052,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [-0.792, -1.45, 0.338],
+      "radius_m": 0.338,
+      "width_m": 0.225,
+      "mass_kg": 48.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.792, -1.45, 0.338],
+      "radius_m": 0.338,
+      "width_m": 0.225,
+      "mass_kg": 48.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 32800.0,
+      "damper_bump_ns_per_m": 2250.0,
+      "damper_rebound_ns_per_m": 3380.0,
+      "travel_m": 0.2,
+      "preload_m": 0.02,
+      "arb_n_per_m": 13300.0,
+      "bump_stop_n_per_m": 220000.0
+    },
+    {
+      "spring_n_per_m": 32800.0,
+      "damper_bump_ns_per_m": 2250.0,
+      "damper_rebound_ns_per_m": 3380.0,
+      "travel_m": 0.2,
+      "preload_m": 0.02,
+      "arb_n_per_m": 13300.0,
+      "bump_stop_n_per_m": 220000.0
+    },
+    {
+      "spring_n_per_m": 30200.0,
+      "damper_bump_ns_per_m": 1860.0,
+      "damper_rebound_ns_per_m": 2790.0,
+      "travel_m": 0.21,
+      "preload_m": 0.02,
+      "arb_n_per_m": 700.0,
+      "bump_stop_n_per_m": 220000.0
+    },
+    {
+      "spring_n_per_m": 30200.0,
+      "damper_bump_ns_per_m": 1860.0,
+      "damper_rebound_ns_per_m": 2790.0,
+      "travel_m": 0.21,
+      "preload_m": 0.02,
+      "arb_n_per_m": 700.0,
+      "bump_stop_n_per_m": 220000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 3970.0,
+    "max_torque_rear_nm": 1080.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1120.0
+  },
+  "steering": {
+    "ratio": 15.5,
+    "rack_speed_rad_per_s": 1.1,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "sentinel_warden",
+  "base_price": 26000,
+  "durability_class": 4,
+  "fuel_capacity_l": 87.0
+}

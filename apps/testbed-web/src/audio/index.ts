@@ -13,6 +13,7 @@ import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
 import { ScannerPlayer } from "./scanner";
 import { EngineSynthHost } from "./engine_host";
+import { renderFlap } from "./flat_tyre";
 import { CurvePlan, renderSiren, sirenStats } from "./siren";
 import { SirenLab } from "./siren_lab";
 import { SirenRack } from "./siren_rack";
@@ -48,6 +49,8 @@ export class AudioSystem {
   readonly sirenStats = sirenStats;
   readonly renderSiren = renderSiren;
   readonly SirenCurvePlan = CurvePlan;
+  /** Offline render of the flat-tyre flap at a wheel rate (e2e). */
+  readonly renderFlap = renderFlap;
   private lib: AudioLibrary | null = null;
   private panel: AudioPanel;
   private lastPos: THREE.Vector3 | null = null;

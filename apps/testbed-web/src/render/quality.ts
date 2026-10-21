@@ -11,14 +11,17 @@
 //         the resolution down while frames stay slow (and back up when they are fast again),
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
-//         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance, full
-//         car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m, promoted
-//         cars past 60 m drawn by the fleet, 20 % rain, governor down to 0.3× (target 30 fps).
+//         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance,
+//         mid-LOD car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m,
+//         promoted traffic / police always drawn by the fleet (only the player and AI racers
+//         keep their full per-panel view), 20 % rain, governor down to 0.3× (target 30 fps).
+// Car LOD on every profile: see VIEW_DRAW_M below.
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
 // profile and high otherwise) is separate: the crash effects (render/fx) read it at start and
 // `CrashFx.setQuality()` changes it live (settings screen).
+import { CITY_TILE_M } from "./city_tiles";
 import type * as THREE from "three";
 import { store } from "../settings";
 import { prefersTouch } from "../touch";
@@ -108,16 +111,26 @@ interface Profile {
   signalM: number;
   /** Small city detail (kerbs, lot skirts, corner fills) within this distance (m). */
   cityDetailM: number;
+  /** City tile edge, m (CityTiles, MarkingsView): bigger tiles, fewer draw calls. */
+  cityTileM: number;
 }
 
+/**
+ * Car LOD (every profile): the player and AI racers always draw their full detailed per-panel
+ * view; promoted traffic / police cars draw theirs within VIEW_DRAW_M of the camera (the cars
+ * you see crumple; handed to the instanced fleet past VIEW_DRAW_M + render/lod.ts
+ * VIEW_LOD_BAND_M, back within VIEW_DRAW_M), touch: never (the phone is draw-call bound).
+ * Everything the fleet / parked props draw uses the mid-LOD mesh within `fullLodM` and the
+ * low proxy beyond. */
+const VIEW_DRAW_M = 30;
+
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity, signalM: 450, cityDetailM: Infinity };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: VIEW_DRAW_M, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
-  // car meshes and lamps matter more than pixels). Full car meshes within 150 m, traffic and
-  // parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no invisible
-  // collisions), street lamps within 450 m, promoted traffic / police past 80 m drawn by the
-  // fleet.
+  // car meshes and lamps matter more than pixels). Mid-LOD car meshes within 120 m (proxies
+  // beyond), parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no
+  // invisible collisions), street lamps within 450 m.
   const low = {
     ...common,
     antialias: false,
@@ -128,10 +141,9 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
     drawM: 900,
     adaptive: false,
     trafficM: 600,
-    fullLodM: 150,
+    fullLodM: 120,
     propProxyM: 150,
     lampDrawM: 450,
-    viewDrawM: 80,
     // Signal heads within 250 m (a lamp is ~2 px there), kerbs / lot skirts / corner fills
     // within 250 m (city_tiles.ts CITY_DETAIL).
     signalM: 250,
@@ -139,7 +151,10 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   };
   if (mode === "high") return high;
   if (mode === "low") return low;
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60 };
+  // Touch: 640 m city tiles (render budget, lead/main-sync): with the 600 m draw distance a
+  // 320 m tile grid put ~10 tiles of every city material in view (one draw call each); the
+  // phone is draw-call bound (budget 300) and has triangle headroom, so fewer, bigger tiles.
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 0, cityTileM: 2 * CITY_TILE_M };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
   // resizes the canvas and the post targets, a long hitch under a software rasterizer. Rain at
   // 20 % there (30 % cost ~25 ms a frame, browser-perf.md round 12b).
@@ -177,6 +192,8 @@ export class Quality {
   signalDrawM: number;
   /** Small city detail distance, m (SceneView.detailDistanceM). */
   cityDetailM: number;
+  /** City tile edge, m, for cities loaded from now on (a loaded city keeps its tiles). */
+  cityTileM: number;
   /** Called after `setMode` changed the profile (main re-applies the LOD distances). */
   onChange: (() => void) | null = null;
   readonly rendererName: string;
@@ -208,6 +225,7 @@ export class Quality {
     this.profile = profileFor(this.mode, this.software, this.touch);
     this.trafficDrawM = this.fullLodM = this.propFullMax = this.propDrawM = this.propProxyM = this.lampDrawM = this.viewDrawM = 0;
     this.signalDrawM = this.cityDetailM = 0;
+    this.cityTileM = CITY_TILE_M;
     this.applyLod();
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
@@ -228,6 +246,7 @@ export class Quality {
     this.viewDrawM = this.profile.viewDrawM;
     this.signalDrawM = this.profile.signalM;
     this.cityDetailM = this.profile.cityDetailM;
+    this.cityTileM = this.profile.cityTileM;
   }
 
   /** Native pixel ratio cap. */

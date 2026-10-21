@@ -6,6 +6,8 @@
 import * as THREE from "three";
 import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { setCarEnvironment } from "./render/panels";
 import type { Barrier, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
@@ -216,6 +218,13 @@ export class SceneView {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
+    // Image-based lighting for the car materials (detailed-car-models), so metallic paint,
+    // chrome and bare metal read as metal instead of black: they only reflect an environment,
+    // never the direct lights. Car materials only (render/panels.ts applyCarEnv), not
+    // `scene.environment`, which would relight the whole city.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    setCarEnvironment(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
+    pmrem.dispose();
 
     this.scene.background = DAY_SKY.clone();
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x333333, 2.0);
@@ -311,7 +320,7 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
-      this.cityTiles.set(cityId, new CityTiles(gltf.scene));
+      this.cityTiles.set(cityId, new CityTiles(gltf.scene, this.quality.cityTileM));
       this.onCityLoaded?.(gltf.scene, cityId);
       this.warmLightVariants();
     } catch (e) {
@@ -638,6 +647,10 @@ export class SceneView {
     if (tiles) {
       camera.getWorldPosition(this.camPos);
       tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
+    }
+    if (this.markings.tileCount > 0) {
+      camera.getWorldPosition(this.camPos);
+      this.markings.update(this.camPos, this.cullDistanceM(camera));
     }
     // Three bakes the number of visible point lights into every lit shader, so the shared siren
     // light turning on (first police lights) used to recompile every lit material mid-chase

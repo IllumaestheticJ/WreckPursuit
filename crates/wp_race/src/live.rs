@@ -66,7 +66,8 @@ pub struct StepOut {
     /// Heat to add per racer (the stake's heat for illegal races, at the green light).
     pub add_heat: Vec<(EntityId, f32)>,
     /// Racers that stayed off the course too long: move each car to the reset pose (on the
-    /// route, at rest) and call [`LiveRace::relocate`].
+    /// route, at rest) and call [`LiveRace::relocate`]. Empty while the judge's reset option
+    /// is off (it is, for picker races).
     pub resets: Vec<CourseReset>,
 }
 
@@ -161,9 +162,9 @@ impl LiveRace {
             data.rules.for_kind(def.kind),
             race.course.clone(),
         );
-        // A picker race puts a car that wanders off the route back on it (the glue moves the
-        // car: `StepOut::resets`) rather than disqualifying it.
-        judge.set_reset_off_course(true);
+        // Off route is never a DQ and never a reset in a picker race (owner, 2026-10-21): take
+        // any line, the gates still have to be driven through in order. The judge's reset
+        // option stays off, so `StepOut::resets` is always empty here.
         let mut order = Vec::new();
         for e in ai.iter().chain(std::iter::once(&player)) {
             judge

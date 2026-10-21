@@ -6,7 +6,8 @@ Parity-only cars with the owner's reference-car numbers (docs/reference/wreckfes
 suspension, brakes, geometry, lattice) comes from the nearest roster car, scaled with mass so
 ride frequencies and brake decel stay as in the template. Analogue names only (rule 9). They
 are NOT in the player roster: data/cars/parity/ is not scanned by the roster loaders.
-Also copies the template's panel spec and render mesh to data/panels/{,meshes/}<id>.json.
+Also copies the template's panel spec, render mesh and mid-LOD mesh to
+data/panels/{,meshes/,meshes/mid/}<id>.json.
 
 Run from the repo root: python3 tools/parity/build_parity_cars.py
 """
@@ -112,10 +113,11 @@ def build(spec):
 
 
 def copy_panels(spec):
-    """Panel spec + render mesh of the template car under the parity id (the browser loads
-    data/panels/<car>.json for damage panels and data/panels/meshes/<car>.json for the body).
+    """Panel spec + render mesh + mid-LOD mesh of the template car under the parity id (the
+    browser loads data/panels/<car>.json for damage panels, data/panels/meshes/<car>.json for
+    the body and data/panels/meshes/mid/<car>.json for instanced far cars).
     Same lattice, so the template's node indices are valid as they are."""
-    for sub in ("", "meshes"):
+    for sub in ("", "meshes", os.path.join("meshes", "mid")):
         src = os.path.join(ROOT, "data", "panels", sub, spec["template"] + ".json")
         dst = os.path.join(ROOT, "data", "panels", sub, spec["id"] + ".json")
         with open(src) as f:

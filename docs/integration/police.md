@@ -1246,8 +1246,80 @@ Red on plain `lead/main-sync` too, not police (left to main-sync):
   on phone, 2.3 fps): main's heavier city geometry. `siren.mjs` audio frame 5–7 ms with sirens
   on this container (1.6 ms in another run): load-dependent. The siren mode-change check was a
   test bug (forcing the pattern the unit already played) and is fixed here.
+- After merging main-sync's newer tip (ead38c0f), also red on plain main-sync d1a3f64f:
+  wp_race `hollins_hill_sprint` (a responding unit stops head-on in the hairpin to let its
+  target pass; the queue behind it is arrested while stopped), wp_wasm `run_tests` ×2 (the
+  "parked" player reverses away with the brake held, so nothing is captured) and
+  `race_tests::short_sprint…`, wp_opponent `capability_table` (car data re-measure).
 - 44 goldens mismatch identically on main-sync (same list with or without this branch); only
   the four police ones above are blessed here.
+
+### Keep-up round 2: corner exits and turn-round (2026-10-21)
+16 seeds × 12 cells each:
+
+| | lead m | pace | capture | capture s | escape | crash/min | civ/min | stuck/min |
+|---|---|---|---|---|---|---|---|---|
+| baseline d3c7408c | 62 | 0.68 | 79 % | 54 | 14 % | 1.00 | 0.29 | 3.59 |
+| + turning-round fix (6f5b0f24) | 60 | 0.78 | 82 % | 61 | 14 % | 1.05 | 0.34 | 3.33 |
+| + turn_around_mps 4 -> 6 (not kept) | 62 | 0.76 | 81 % | 56 | 13 % | 1.26 | 0.37 | 3.44 |
+
+- **Kept:** the pro driver's 4 m/s "turning round" crawl fired whenever the lane point 8 m on
+  was > 70° off the nose, i.e. at the apex of every right-angle corner; it now also needs the
+  car to point away from the road where it is. Pace 0.68 → 0.78.
+- **Not kept:** a faster turn-round crawl (6 m/s): no gain, +20 % crashes.
+- Traces (`WP_BENCH_TRACE`, new `branch` / `pro_dbg` tags): the nearest pursuer far behind
+  (> 40 m) is slow mostly in the plain drive with no limit in force: genuine turn-rounds at
+  the 4 m/s crawl (≈ 40 % of those), corner speeds and acceleration lag; push-throughs and
+  U-turns make up most of the rest. Lead gap stays ≈ 60 m: the next lever is the
+  turn-round itself (a quicker manoeuvre, not a higher crawl speed) and prediction.
+
+### Lead's main-sync blockers (2026-10-21, on main-sync cd6cd320)
+- **wp_wasm `run_tests` ×2** (nothing settled in 60 s): not police routing. The test held a
+  full brake on the "parked" racer; at a standstill that auto-reverses, and on main's grid the
+  racer backed away down a diagonal avenue at 17 m/s (the units on diagonal headings were
+  chasing it). The tests now hold half brake, like `career_tests::brake_until_settled`.
+- **wp_race `hollins_hill_sprint`** (all four `Dnf(Captured)`): partly police, partly
+  legitimate. Police side: a responding unit held head-on in the single-lane hairpin for its
+  target; the target stopped in front of it and was arrested, then the same unit arrested
+  the racers queued behind, one after another (the 30 m pinned rule took them too). Fixed:
+  the capturer is busy booking for `ARREST_BUSY_S` (30 s; no other capture, no new
+  pursuit/intercept) and the pinned rule needs a unit chasing that racer. Legitimate side:
+  with opponent-pace phase 3 every racer speeds and runs reds past the hill's patrols in the
+  first 20 s (3 + 3 witnessed violations, L1) and a pursued L1 AI racer yields at 6 m/s, so
+  the police can still take out the whole field. The test now accepts that (race ended,
+  nobody wrecked); other police races still need a winner.
+
+### Keep-up and predict (owner: "cops can't keep up", "don't predict fast enough") — 2026-10-21
+Measured with `simcli police-bench`, which now has two keep-up columns (`lead m`: distance
+to the nearest chasing unit while police see the evader; `pace`: that unit's speed ÷ the
+evader's while the evader is above 90 km/h). 16 seeds × 12 cells = 192 runs each:
+
+| | lead m | pace | capture | capture s | escape | crash/min | civ/min | stuck/min |
+|---|---|---|---|---|---|---|---|---|
+| before (a0678db4) | 61 | 0.68 | 85 % | 60 | 10 % | 1.06 | 0.34 | 3.27 |
+| after (this push) | 62 | 0.66 | 81 % | 53 | 12 % | 1.00 | 0.28 | 3.03 |
+
+By cell: rain pace 0.39 → 0.67, day 0.41 → 0.36; everything else within noise (8-seed runs
+of the same config swing pace by ±0.1). **Keep-up did not move.** What changed:
+- **PR #33 ported** (backup waits past a junction on the racer's path, facing its way, and
+  joins as it comes level: no 180). Gated to a racer police can see, one new ambush per racer
+  per 45 s (back-to-back ambushes kept a fast racer in sight forever), joins once level.
+- **Chase junction speeds** 18 → 24 m/s straight, 13 → 17 at reds (28/20 doubled headless
+  self-wrecks in `self_wreck_sim`, the < 10 % spec bar).
+- **Row 86 (first part):** a chasing unit held under 3 m/s behind civilian traffic for 3 s
+  routes around that road segment (test `chasing_unit_stuck_in_a_civilian_queue_routes_around_it`).
+  A right-shoulder pass was tried and dropped: it drove a unit into a wall.
+- Pursuit caps 40/36/32 → 52/48/46 m/s: no measurable effect, not kept.
+- Headless run-wide crash only when over the grip (units "crashed" at 5 m/s at main's ramp
+  terminals); a patrol in a nose-to-nose unit deadlock may turn round.
+- Night/day test now compares the first backup per pursuit (`first_backup_s`): the old mean
+  over every join mostly measured how late into long chases units still joined.
+
+Where keep-up is lost (traces with `WP_BENCH_TRACE`): when the evader is fast the nearest
+chaser is usually coming out of a turn-round, a ram or a turn at 3–10 m/s; rain queues held
+interceptors 10–20 s (row 86 above). Next: corner-exit acceleration and turn-round time
+for physical units (pro driver), and predicting where the racer goes (the ambush only covers
+backup).
 
 ### Rows 84, 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)

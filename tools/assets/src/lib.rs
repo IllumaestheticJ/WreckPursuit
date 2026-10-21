@@ -5,17 +5,29 @@
 //! - a procedural low-poly mesh `data/panels/meshes/<car>.json` ([`mesh::CarMesh`],
 //!   `gen-car-mesh`): one part per body region plus glass, lights, mirrors, a minimal
 //!   interior and wheels, skinned to the lattice by [`skin::bind_skin`] (`bind-skin`),
+//! - its mid level of detail `data/panels/meshes/mid/<car>.json` ([`mesh::generate_mid`],
+//!   also `gen-car-mesh`; unskinned, for the browser's instanced far cars),
 //! - checked by [`validate::validate`] (`validate-car-asset`).
+//!
+//! The body shape, details, wheels and mechanical parts of each car come from its
+//! [`style::CarStyle`] ([`style::style_for`]): per-car style modules in [`styles`], the
+//! loft in [`profile`] / [`mesh`], primitives in [`builder`], wheels in [`wheels`] and
+//! engine / suspension / brakes in [`mechanical`].
 //!
 //! See `README.md` for the file formats and commands.
 
 #![warn(missing_docs)]
 
+pub mod builder;
 pub mod crumple;
+pub mod mechanical;
 pub mod mesh;
 pub mod profile;
 pub mod skin;
+pub mod style;
+pub mod styles;
 pub mod validate;
+pub mod wheels;
 
 use std::path::{Path, PathBuf};
 
@@ -56,6 +68,12 @@ pub fn mesh_path(root: &Path, id: &str) -> PathBuf {
     root.join(format!("data/panels/meshes/{id}.json"))
 }
 
+/// Path of a car's mid-LOD mesh ([`mesh::Lod::Mid`]). A subfolder, so tools that list
+/// `data/panels/meshes/*.json` keep seeing exactly one (full) mesh per car.
+pub fn mid_mesh_path(root: &Path, id: &str) -> PathBuf {
+    root.join(format!("data/panels/meshes/mid/{id}.json"))
+}
+
 /// The generated panel spec for a car (what `gen-panels` writes).
 pub fn derive_panels(car: &LoadedCar) -> PanelSpec {
     PanelSpec::derive(
@@ -80,6 +98,12 @@ pub fn build_mesh(car: &LoadedCar) -> mesh::CarMesh {
     let mut m = mesh::generate(&car.def, &car.lattice);
     skin::bind_skin(&car.lattice, &mut m);
     m
+}
+
+/// The generated mid-LOD mesh for a car (what `gen-car-mesh` writes next to the full one; not
+/// skinned).
+pub fn build_mid_mesh(car: &LoadedCar) -> mesh::CarMesh {
+    mesh::generate_mid(&car.def, &car.lattice)
 }
 
 /// Load a mesh file.

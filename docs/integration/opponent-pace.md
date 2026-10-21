@@ -529,3 +529,125 @@ across the junction box stops facing it; the racer backs out within ~5 s) — mo
 junctions sooner, none is a side-road car meeting a racer on the wrong side. Passes/km:
 grid highway 3.3–4.3 per seed for the field, Lantern 0.2 (the planner moves cars before a pass
 is needed; completed passes stay rare).
+
+## Main's maps (lead/main-sync bb2208ed) — 2026-10-21
+
+**Divided highways.** On main's grid highway and Loop 9 the corridor has no passing room beyond
+my own carriageway anywhere (`left_pass_m == left_m` on every sample; opposing lanes are only the
+same road's, and only when my leftmost lane has no median / kerb on its left). So the whole-road
+line, opposing-side passes and the gap planner never cross a median or use the far carriageway.
+**Ramps / merges.** The gap planner only takes a lane that exists for the next 4 s of travel and
+only below 35 m/s; grid highway / Loop 9 results are identical to main-sync (table).
+
+**Lantern downtown (new red).** Two behaviour fixes:
+- A civilian stopped in my lane (at a light) is gone round as usual during start discipline, and
+  any standing non-racer that holds me 1 s lets me use the opposing lanes (pass checks permitting).
+  The junction look-ahead became a gap check (a civilian heading in closes the junction only if
+  it arrives within my time to reach and clear it, accelerating as I would, + 1.5 s; standing at
+  its own line does not; in the box does; the cars I am passing do not).
+- Never stand at a red on the opposing side: no opposing-side pass into a junction whose light
+  is red (or turning red) on arrival; out there and still behind with a red coming → tuck back in.
+  (Seed 7: the leader stopped for a red mid-pass on the opposing side, nose to nose with the
+  oncoming queue, for 2 minutes — no car finished.)
+
+What is left over the old lock is red-light queues with no safe way past. At the first light
+(leader, s95): pass rejected 702× on the junction gap (cross traffic arriving in 1.4–5 s against
+~4.5 s needed) and 168× on the oncoming queue standing 36 m ahead in the opposing lane.
+Lock-in re-ranged for lantern_checkpoint_s50 / s95 by the rule after the fixes.
+
+Seeds 1–8, before = lead/main-sync bb2208ed, after = this tip:
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev | nose-to-nose | of which opposing |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | before | 25/32 | 80.3 | 11 | 0.2 | 0 | 188 | 20 | 12 |
+| lantern_checkpoint | 0.5 | after | 29/32 | 82.0 | 14 | 0.0 | 0 | 101 | 25 | 5 |
+| lantern_checkpoint | 0.95 | before | 25/32 | 85.1 | 10 | 0.0 | 7 | 175 | 20 | 10 |
+| lantern_checkpoint | 0.95 | after | 30/32 | 76.1 | 15 | 0.0 | 0 | 52 | 17 | 7 |
+| grid_highway_sprint | 0.5 | before | 32/32 | 44.4 | 0 | 2.7 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | after | 32/32 | 44.4 | 0 | 2.7 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | before | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | after | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | before | 32/32 | 67.0 | 47 | 0.0 | 16 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | after | 32/32 | 67.0 | 47 | 0.0 | 16 | 0 | 0 | 0 |
+| hollins_sprint | 0.95 | before | 32/32 | 62.3 | 46 | 0.0 | 8 | 8 | 0 | 0 |
+| hollins_sprint | 0.95 | after | 32/32 | 62.4 | 45 | 0.0 | 8 | 8 | 0 | 0 |
+| city_sprint | 0.5 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.5 | after | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | after | 32/32 | 10.9 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | before | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | after | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
+| loop9_circuit | 0.95 | after | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
+
+Capability table regenerated on main's handling (lead's request): only `brake_g` moved, 1–8 %
+lower on every car (main's front brake bias); lateral grip, acceleration and top speed unchanged.
+Merged lead/round12 66904248 (no table change). Final seeds 1–8 table on this tip (after = with
+the new table; the earlier "after" rows above are without it):
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev | nose-to-nose | of which opposing |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | before | 25/32 | 80.3 | 11 | 0.2 | 0 | 188 | 20 | 12 |
+| lantern_checkpoint | 0.5 | after | 28/32 | 80.3 | 13 | 0.0 | 0 | 72 | 19 | 1 |
+| lantern_checkpoint | 0.95 | before | 25/32 | 85.1 | 10 | 0.0 | 7 | 175 | 20 | 10 |
+| lantern_checkpoint | 0.95 | after | 30/32 | 75.8 | 14 | 0.2 | 0 | 53 | 14 | 3 |
+| grid_highway_sprint | 0.5 | before | 32/32 | 44.4 | 0 | 2.7 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | after | 32/32 | 43.9 | 0 | 2.1 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | before | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | after | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | before | 32/32 | 67.0 | 47 | 0.0 | 16 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | after | 32/32 | 66.8 | 49 | 0.0 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.95 | before | 32/32 | 62.3 | 46 | 0.0 | 8 | 8 | 0 | 0 |
+| hollins_sprint | 0.95 | after | 32/32 | 62.3 | 45 | 0.0 | 8 | 8 | 0 | 0 |
+| city_sprint | 0.5 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.5 | after | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | after | 32/32 | 10.9 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | before | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | after | 48/48 | 205.0 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
+| loop9_circuit | 0.95 | after | 48/48 | 199.8 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+
+## Racers keep racing at L1–L2 (2026-10-21)
+
+Street racers do not pull over for a single unit mid-race. A racer still in the race ignores the
+pull-over at L1, and at L2 unless it is careful (personality `risk` < `RED_LIGHT_RISK`), and
+yields from L3 — or once pinned: crawling under 1.5 m/s for 3 s with a chasing unit within 10 m.
+Finished / disqualified racers pull over as before; abandoning the race (`flee_wanted_level`)
+is unchanged. No police-side change.
+
+race_picker with police, seeds 1–8 (`WP_RACE_SEED`), before = 4cddb03d, after = this tip:
+
+| race | run | cars | finished | captured | fled | other | test passes |
+|---|---|---|---|---|---|---|---|
+| hollins_hill_sprint | before | 32 | 1 | 27 | 1 | 3 (2 running, 1 window) | 1/8 |
+| hollins_hill_sprint | after | 32 | 11 | 21 | 0 | 0 | 7/8 |
+| loop9_circuit | before | 48 | 22 | 11 | 13 | 2 (window) | 8/8 |
+| loop9_circuit | after | 48 | 35 | 0 | 13 | 0 | 8/8 |
+| lantern_checkpoint_draws_the_police | before | 32 | 0 | 20 | 11 | 1 (running) | 7/8 |
+| lantern_checkpoint_draws_the_police | after | 32 | 2 | 16 | 13 | 1 (window) | 7/8 |
+
+## Racers never give up (owner, 2026-10-21) — replaces the L1–L2 plan above
+
+In a race a pursued racer never abandons it or pulls over, at any wanted level, whatever its skill
+or risk: it keeps racing and evading until the police actually capture it (police-side capture
+rules) or it is wrecked / DNF'd. Racers already out of the race (finished, disqualified) still pull
+over. `RaceConfig::allow_abandon` now means "may give up" and defaults to off; the flee machinery
+stays (its tests turn it on). race_picker::hollins_hill_sprint requires a winner again.
+
+race_picker with police, seeds 1–8, before = lead/round12 e6165f7f (pursued racers yield / flee),
+after = this tip:
+
+| race | run | cars | finished | captured | fled | other | test passes |
+|---|---|---|---|---|---|---|---|
+| hollins_hill_sprint | before | 32 | 5 | 24 | 2 | 1 running | 7/8 (relaxed check) |
+| hollins_hill_sprint | after | 32 | 3 | 27 | 0 | 2 running | 3/8 (winner required) |
+| loop9_circuit | before | 48 | 23 | 11 | 12 | 2 window | 8/8 |
+| loop9_circuit | after | 48 | 48 | 0 | 0 | 0 | 8/8 |
+| lantern_checkpoint_draws_the_police | before | 32 | 0 | 18 | 13 | 1 running | 7/8 |
+| lantern_checkpoint_draws_the_police | after | 32 | 5 | 27 | 0 | 0 | 8/8 |
+
+Hollins per seed (after): one finisher on seeds 3, 4, 7 (the default seed passes); the police
+genuinely capture all four on seeds 1, 2, 6; on seeds 5 and 8 the last racer is still racing
+(23 m/s, 69 m from the line on seed 8) when the test's 200 s run limit ends it — held up by box-ins
+in the first hairpin earlier, not a deadlock.

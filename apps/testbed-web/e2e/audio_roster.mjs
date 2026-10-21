@@ -345,7 +345,12 @@ for (const h of trace.horns ?? []) {
 // Recordings arriving mid-drive: one car per engine pack, player role. Fetches are held until
 // 1.0 s into the render, then the render waits (suspended) for every file to decode.
 const perPack = new Map();
-trace.cases.forEach((c, i) => c.role === "player" && !perPack.has(c.engine_pack) && perPack.set(c.engine_pack, i));
+// Only packs that play recordings can upgrade (police cars are on the procedural engine_proc_v8 /
+// v6 since owner feedback on 0.12.34).
+const recordedPack = (id) => Object.values(trace.library.packs[id]?.cues ?? {}).some((c) => "Samples" in c.source);
+trace.cases.forEach(
+  (c, i) => c.role === "player" && recordedPack(c.engine_pack) && !perPack.has(c.engine_pack) && perPack.set(c.engine_pack, i),
+);
 await page.evaluate(() => {
   const realFetch = window.fetch.bind(window);
   window.gate = { open: false, waiters: [] };

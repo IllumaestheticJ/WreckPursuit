@@ -5,10 +5,13 @@
 mod crash;
 
 use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
-use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, TRI_BUDGET};
+use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, MESH_FORMAT, MID_TRI_BUDGET, TRI_BUDGET};
+use car_assets::profile::BodyProfile;
 use car_assets::skin::{deform_detail, FoldMemory};
+use car_assets::style::style_for;
 use car_assets::{
-    build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    build_mesh, build_mid_mesh, car_ids, load_car, load_mesh, mesh_path, mid_mesh_path, panel_path,
+    repo_root, validate::validate,
 };
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
@@ -31,6 +34,103 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
             "{id}: data/panels/meshes is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
         );
         assert!((TRI_BUDGET.0..=TRI_BUDGET.1).contains(&fresh.tri_count));
+    }
+}
+
+/// Every car has an up-to-date mid LOD (`data/panels/meshes/mid/<car>.json`) within
+/// [`MID_TRI_BUDGET`] that paints exactly like its full mesh (same atlas, livery hint, tints,
+/// format) and keeps the body panels, glass, lights and wheels.
+#[test]
+fn every_car_has_an_up_to_date_mid_lod() {
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let full = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let on_disk = load_mesh(&mid_mesh_path(&root, &id)).unwrap();
+        let fresh = build_mid_mesh(&car);
+        assert!(
+            fresh == on_disk,
+            "{id}: data/panels/meshes/mid is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
+        );
+        let m = &fresh;
+        assert_eq!(m.id, id);
+        assert_eq!(m.format, MESH_FORMAT, "{id}");
+        assert_eq!(m.lattice_id, full.lattice_id, "{id}");
+        assert_eq!(m.atlas, full.atlas, "{id}: mid atlas differs");
+        assert_eq!(m.livery, full.livery, "{id}: mid livery differs");
+        assert_eq!(m.wheel_camber_deg, full.wheel_camber_deg, "{id}");
+        for (slot, rgb) in &m.tints {
+            assert_eq!(full.tints.get(slot), Some(rgb), "{id}: mid tint {slot:?}");
+        }
+        let tris: u32 = m.parts.iter().map(|p| p.tri_count() as u32).sum();
+        assert_eq!(tris, m.tri_count, "{id}");
+        assert!(
+            (MID_TRI_BUDGET.0..=MID_TRI_BUDGET.1).contains(&m.tri_count),
+            "{id}: mid LOD {} tris outside {MID_TRI_BUDGET:?}",
+            m.tri_count
+        );
+        assert!(
+            m.tri_count * 2 <= full.tri_count + 1000,
+            "{id}: mid LOD barely smaller"
+        );
+        // Every exterior panel, glass and light of the full mesh is in the mid LOD, and every
+        // mid part comes from the full mesh with the same kind and material.
+        for p in &full.parts {
+            let outside = matches!(
+                p.kind,
+                PartKind::Panel | PartKind::Glass | PartKind::Light | PartKind::Tire
+            );
+            if outside {
+                assert!(
+                    m.parts.iter().any(|q| q.name == p.name),
+                    "{id}: mid LOD lost {}",
+                    p.name
+                );
+            }
+        }
+        for q in &m.parts {
+            let p = full.parts.iter().find(|p| p.name == q.name);
+            assert!(
+                p.is_some_and(|p| p.kind == q.kind
+                    && p.material == q.material
+                    && p.wheel == q.wheel),
+                "{id}: mid part {} not in the full mesh",
+                q.name
+            );
+            assert!(
+                q.skin_nodes.is_empty() && q.fold.is_none(),
+                "{id}: mid LOD is not skinned"
+            );
+            assert_eq!(q.uvs.len() * 3, q.positions_mm.len() * 2, "{id}/{}", q.name);
+        }
+    }
+}
+
+/// Format 4 = detailed-car-models' format 2 + round 12's format 3 (see `MESH_FORMAT`); every
+/// mesh on disk is format 4 and the panels that buckle carry a fold binding.
+#[test]
+fn meshes_are_format_4_with_fold_bindings() {
+    assert_eq!(MESH_FORMAT, 4);
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        assert_eq!(mesh.format, 4, "{id}");
+        assert!(
+            mesh.atlas.is_some(),
+            "{id}: format-4 meshes carry the livery atlas"
+        );
+        let hood = mesh.parts.iter().find(|p| p.name == "hood");
+        assert!(
+            hood.is_some_and(|h| h.fold.is_some()),
+            "{id}: hood without a fold binding"
+        );
+        for name in ["fender_fl", "fender_fr"] {
+            let part = mesh.parts.iter().find(|p| p.name == name);
+            assert!(
+                part.is_some_and(|p| p.fold.is_some()),
+                "{id}/{name}: no fold binding"
+            );
+        }
     }
 }
 
@@ -82,6 +182,11 @@ fn skinned_vertices_follow_their_region_nodes() {
     }
 }
 
+/// Hinged panel meshes start at their hinge line. Doors use the lattice hinge. The hood's
+/// rear edge and the trunk lid's front edge follow the car's *visual* cabin placement
+/// (`BodyStyle::cabin_shift_m` / `hood_length` move the windshield base and the rear-glass
+/// base on purpose, see PLAN.md "Foundation API"), so they are checked against the styled
+/// profile, and the visual edge may sit at most 0.6 m from the lattice hinge.
 #[test]
 fn hinged_parts_start_at_their_hinge_line() {
     let root = repo_root();
@@ -89,8 +194,20 @@ fn hinged_parts_start_at_their_hinge_line() {
         let car = load_car(&root, &id).unwrap();
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let style = style_for(&car.def);
+        let prof = BodyProfile::styled(&car.def, &car.lattice, &style.body);
         for p in spec.panels.iter().filter(|p| p.kind.is_hinged()) {
-            let hinge_y = car.lattice.nodes[p.hinge_nodes[0] as usize].pos_m[1];
+            let lattice_hinge_y = car.lattice.nodes[p.hinge_nodes[0] as usize].pos_m[1];
+            let hinge_y = match p.region {
+                BodyRegion::Hood => lattice_hinge_y + (prof.y_fw - prof.lattice_y_fw),
+                BodyRegion::Trunk => lattice_hinge_y + (prof.y_deck - prof.lattice_y_deck),
+                _ => lattice_hinge_y,
+            };
+            assert!(
+                (hinge_y - lattice_hinge_y).abs() <= 0.6,
+                "{id}/{}: visual hinge {hinge_y} too far from the lattice hinge {lattice_hinge_y}",
+                p.name
+            );
             let part = mesh
                 .parts
                 .iter()
@@ -109,6 +226,82 @@ fn hinged_parts_start_at_their_hinge_line() {
                 "{id}/{}: mesh edge y {edge} vs hinge y {hinge_y}",
                 p.name
             );
+        }
+    }
+}
+
+/// Style knobs at the ends of (and past) their documented ranges never panic the profile or
+/// the generator, on every car's lattice.
+#[test]
+fn style_knob_extremes_never_panic() {
+    use car_assets::mesh::generate_styled;
+    use car_assets::style::{BodyStyle, Silhouette};
+    let root = repo_root();
+    let silhouettes = [
+        Silhouette::Notchback,
+        Silhouette::Fastback,
+        Silhouette::Hatch,
+        Silhouette::Wedge,
+        Silhouette::Suv,
+    ];
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let base = style_for(&car.def);
+        let mut variants: Vec<BodyStyle> = Vec::new();
+        for &sil in &silhouettes {
+            for &shift in &[-0.8f32, -0.6, 0.0, 0.6, 0.8] {
+                for &(ws, rg, hood) in &[
+                    (Some(30.0f32), Some(15.0f32), Some(0.4f32)),
+                    (Some(75.0), Some(85.0), Some(3.5)),
+                    (Some(72.0), Some(80.0), None),
+                    (None, Some(90.0), Some(1.0)),
+                ] {
+                    variants.push(BodyStyle {
+                        silhouette: sil,
+                        cabin_shift_m: shift,
+                        windshield_rake_deg: ws,
+                        rear_glass_rake_deg: rg,
+                        hood_length: hood,
+                        roof_len_trim: if shift > 0.0 { 0.15 } else { -0.25 },
+                        roof_dz: if shift > 0.0 { -0.12 } else { 0.10 },
+                        ..base.body.clone()
+                    });
+                }
+            }
+        }
+        variants.push(BodyStyle {
+            nose_h: Some(0.0),
+            belt_dz: 0.3,
+            ride_dz: -0.3,
+            crease_z: 2.0,
+            sill_tuck: 1.0,
+            shoulder_round: 1.0,
+            tumblehome: Some(1.0),
+            glass_inset: 1.0,
+            overhang_trim: (-1.0, -1.0),
+            tail_round: 2.0,
+            ..base.body.clone()
+        });
+        for (i, body) in variants.into_iter().enumerate() {
+            let p = BodyProfile::styled(&car.def, &car.lattice, &body);
+            let (r0, r1, _, _) = p.roof;
+            assert!(
+                r0 < r1 && r1 < p.y_fw,
+                "{id} variant {i}: roof {r0}..{r1}, fw {}",
+                p.y_fw
+            );
+            for y in [p.y_tail, p.y_deck, r0, r1, p.y_fw, p.y_bf, p.y_nose] {
+                let _ = p.ring(y);
+            }
+        }
+        // Full generation at the two cabin-shift ends (the slow part: once per car).
+        for shift in [-0.6f32, 0.6] {
+            let mut st = base.clone();
+            st.body.cabin_shift_m = shift;
+            st.body.rear_glass_rake_deg = Some(85.0);
+            st.body.hood_length = Some(0.5);
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
         }
     }
 }
@@ -411,6 +604,18 @@ fn an_unlatched_hood_pops_at_the_latch() {
     }
 }
 
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
 /// First mesh part a ray from `o` along `d` hits (body parts only), or None.
 fn first_hit(mesh: &car_assets::mesh::CarMesh, o: [f32; 3], d: [f32; 3]) -> Option<String> {
     let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -457,10 +662,11 @@ fn lights_sit_outside_the_shell() {
     let root = repo_root();
     for id in car_ids(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        // Head / tail lamps (style kits add fog lamps, DRLs, markers etc. in other regions).
         let lights: Vec<_> = mesh
             .parts
             .iter()
-            .filter(|p| p.kind == PartKind::Light)
+            .filter(|p| car_assets::skin::is_end_lamp(p))
             .collect();
         assert_eq!(lights.len(), 4, "{id}: two head- and two taillights");
         for l in lights {
@@ -479,13 +685,49 @@ fn lights_sit_outside_the_shell() {
                 [0.0, 1.0, 0.0]
             };
             let y = if front { hi[1] + 3.0 } else { lo[1] - 3.0 };
-            // Rays from outside at the centre and near the four corners of the lens face.
-            for (fx, fz) in [(0.5, 0.5), (0.1, 0.1), (0.9, 0.1), (0.1, 0.9), (0.9, 0.9)] {
-                let x = lo[0] + fx * (hi[0] - lo[0]);
-                let z = lo[2] + fz * (hi[2] - lo[2]);
-                let hit = first_hit(&mesh, [x, y, z], dir);
-                assert_eq!(hit.as_deref(), Some(l.name.as_str()), "{id}/{}", l.name);
+            // Style kits shape the lenses (round / quad / strip lamps with bezels and rings), so
+            // rays go through the centroids of the lens's outward-facing triangles: the body
+            // shell (panel / body parts) covers at most a tenth of them (a lamp corner swept
+            // round the bumper wrap, tansy_13), and at least half are seen directly.
+            let (mut faces, mut seen) = (0, 0);
+            let mut hidden = Vec::new();
+            for t in l.indices.chunks(3) {
+                let (a, b, c) = (
+                    l.vertex(t[0] as usize),
+                    l.vertex(t[1] as usize),
+                    l.vertex(t[2] as usize),
+                );
+                let n = cross3(sub3(b, a), sub3(c, a));
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                if len < 1e-9 || n[1] / len * -dir[1] < 0.7 {
+                    continue;
+                }
+                faces += 1;
+                let cx = (a[0] + b[0] + c[0]) / 3.0;
+                let cz = (a[2] + b[2] + c[2]) / 3.0;
+                let hit = first_hit(&mesh, [cx, y, cz], dir);
+                if hit.as_deref() == Some(l.name.as_str()) {
+                    seen += 1;
+                }
+                let shell = hit
+                    .as_deref()
+                    .and_then(|h| mesh.parts.iter().find(|p| p.name == h));
+                if shell.is_some_and(|p| matches!(p.kind, PartKind::Panel | PartKind::Body)) {
+                    hidden.push(hit);
+                }
             }
+            assert!(faces > 0, "{id}/{}: no outward lens face", l.name);
+            assert!(
+                hidden.len() * 10 <= faces,
+                "{id}/{}: {} of {faces} lens faces under the body shell: {hidden:?}",
+                l.name,
+                hidden.len()
+            );
+            assert!(
+                seen * 2 >= faces,
+                "{id}/{}: only {seen} of {faces} lens faces visible",
+                l.name
+            );
             // Proud of the body, facing out.
             assert!(
                 l.material == car_assets::mesh::MaterialSlot::Headlight
@@ -508,7 +750,11 @@ fn lights_move_with_the_front_and_rear_structure() {
         let car = load_car(&root, id).unwrap();
         let mesh = load_mesh(&mesh_path(&root, id)).unwrap();
         let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
-        for l in mesh.parts.iter().filter(|p| p.kind == PartKind::Light) {
+        for l in mesh
+            .parts
+            .iter()
+            .filter(|p| car_assets::skin::is_end_lamp(p))
+        {
             let regions = car_assets::skin::light_regions(car_assets::skin::part_centre(l));
             // Bound only to its end of the car, and to the bumper (the first thing a hit crushes).
             assert!(l

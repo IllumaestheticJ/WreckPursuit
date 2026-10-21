@@ -599,3 +599,17 @@ the track".
   `race_picker::grid_highway_sprint` (2 of 4 finish: one racer `Dnf(Fled)`) and
   `wp_wasm race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
   ("race not over in 120 s"), both on the grid highway sprint.
+
+## Off route: no reset either (owner, 2026-10-21; supersedes row 120's reset)
+
+Owner: "don't DQ for going off route", then chose "never a DQ and never a reset, as long as you
+pass every checkpoint" over row 120's reset onto the track.
+
+- `LiveRace` (picker races, browser) no longer calls `RaceJudge::set_reset_off_course(true)`;
+  the option stays in the judge, off by default and unit-tested, so `StepOut::resets` is
+  always empty for picker races. Gates still count only in order and forwards; a car that never
+  rejoins runs out the finish window (DNF).
+- Follow-up if the owner keeps it this way: `wp_wasm` (C) can drop `RaceRun::{resets,
+  take_resets}`, `Session::reset_onto_course` and the reset loop after the race step; then
+  `wp_race` can drop the reset option, `CourseReset`, `StepOut::resets` and
+  `corridor_grace_s`. The player's own reset (`ResetAt`) is unaffected.

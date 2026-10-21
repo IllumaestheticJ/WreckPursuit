@@ -61,7 +61,7 @@ await page.evaluate(() => {
   const wp = window.__wp;
   wp.app.paused = true;
   const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  const AG = 5;
+  const AG = 7; // traffic_agents(): [x, y, z, yaw, flags, agentId, model]
   window.__lodShots = {
     async step(ticks) {
       wp.sim.step(ticks / 240);

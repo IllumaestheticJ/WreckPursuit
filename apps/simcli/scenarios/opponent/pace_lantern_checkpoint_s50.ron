@@ -76,10 +76,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 2.2),
-        metric(name: "race_time_s", entity: "ai_juno", min: 65.5, max: 92.5),
-        metric(name: "race_time_s", entity: "ai_dez", min: 80.4, max: 113.5),
-        metric(name: "race_time_s", entity: "ai_tito", min: 81.8, max: 115.5),
-        metric(name: "race_time_s", entity: "player", min: 83.1, max: 117.4),
+        metric(name: "best_ratio", min: 0.97, max: 2.27),
+        metric(name: "race_time_s", entity: "ai_juno", min: 67.8, max: 95.8),
+        metric(name: "race_time_s", entity: "ai_dez", min: 77.7, max: 109.8),
+        metric(name: "race_time_s", entity: "ai_tito", min: 88.8, max: 125.3),
+        metric(name: "race_time_s", entity: "player", min: 110.0, max: 155.3),
     ],
 )
