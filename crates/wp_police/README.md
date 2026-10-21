@@ -190,7 +190,9 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
     junction (red-light queues).
   - *Lights on*: may run reds and exceed limits, but crosses junctions at `siren_junction_mps`
     (`siren_red_mps` against a red, giving way to cross traffic for up to `yield_max_siren_s`) and
-    turns at `siren_turn_mps`.
+    turns at `siren_turn_mps`. A unit in an active pursuit (`Pursue`) goes straight through a
+    green or unsignalised junction at `pursuit_junction_mps` (20 m/s) instead; reds and turns
+    are capped as above.
 - **Holding still**: at a zero cap, and when parked (tool units, no track), a physical unit holds
   brake 0.4 plus the handbrake. Full pedal at a standstill would engage `wp_vehicle`'s
   automatic reverse.
@@ -295,7 +297,8 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
 - Pro driving (P8): the racing line only sees vehicles within `traffic_clear_m` ahead; a car
   alongside in the next own-direction lane is not in the line's room. Junction caps
-  (`siren_junction_mps` 11 m/s) still hold pursuits back at every junction. Turning round in a
+  still hold pursuits back: 20 m/s straight on (`pursuit_junction_mps`), 6 m/s through turns
+  and reds. Turning round in a
   junction is a full-lock crawl, which can touch a kerb on narrow roads.
 - Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
   in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.

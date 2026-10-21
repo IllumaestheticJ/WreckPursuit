@@ -557,3 +557,105 @@ fn police_drive_clean_in_the_wet() {
         assert!(wet.best() < dry.best() * 1.35, "{label}: wet far too slow");
     }
 }
+
+/// Measurement (not a gate): a race-AI racer at wanted level 3 flees physical police through
+/// the procedural city with traffic, over several seeds. Prints per seed how the chase ended,
+/// how long it lasted and the nearest pursuer's mean gap while in pursuit, plus the share of
+/// pursuing-unit time spent faster than 11 m/s within 15 m of a junction node. Used to tune
+/// `pursuit_junction_mps`:
+/// `cargo test --release -p wp_opponent --test police_pace -- --ignored --nocapture chase_report`
+#[test]
+#[ignore]
+fn chase_report() {
+    use wp_police::Assignment;
+    let mut totals = (0u32, 0u32, 0.0f32, 0.0f32);
+    for seed in 1..=6u64 {
+        let setup = common::Setup {
+            seed,
+            laps: 2,
+            drivers: vec![ace(), DriverProfile::default()],
+            closed_roads: false,
+            traffic: 0.25,
+            grid: GridLayout::SingleFile,
+            sim_police: Some("sentinel_cruiser".into()),
+            heat: vec![(EntityId(1), 55.0)],
+            run_full: true,
+            max_s: 150.0,
+            ..common::Setup::default()
+        };
+        let racer = EntityId(1);
+        let (mut pursued_s, mut gap_sum, mut gap_n) = (0.0f32, 0.0f32, 0u32);
+        let (mut near_jct, mut fast_jct) = (0u32, 0u32);
+        let mut ended: Option<f32> = None;
+        let mut was = false;
+        let out = common::run(&setup, &NoPolice, &mut |sim, _| {
+            let t = sim.tick() as f32 / 240.0;
+            let Some(rec) = sim.police().racer(racer) else {
+                return;
+            };
+            let now = rec.pursued();
+            if was && !now && ended.is_none() {
+                ended = Some(t);
+            }
+            was |= now;
+            if !now {
+                return;
+            }
+            pursued_s += 1.0 / 240.0;
+            let rp = sim
+                .vehicles()
+                .iter()
+                .find(|v| v.id == racer)
+                .map(|v| v.vehicle.state().pos);
+            let mut best = f32::INFINITY;
+            for u in sim.police().units() {
+                if !matches!(u.assignment, Assignment::Pursue { target } if target == racer) {
+                    continue;
+                }
+                if let Some(rp) = rp {
+                    let d =
+                        ((u.body.pos[0] - rp[0]).powi(2) + (u.body.pos[1] - rp[1]).powi(2)).sqrt();
+                    best = best.min(d);
+                }
+                if u.avoid
+                    .junction
+                    .is_some_and(|j| (j.s - u.track_s).abs() < 15.0)
+                {
+                    near_jct += 1;
+                    fast_jct += (u.body.speed > 11.0) as u32;
+                }
+            }
+            if best.is_finite() {
+                gap_sum += best;
+                gap_n += 1;
+            }
+        });
+        let outcome = out
+            .police_events
+            .iter()
+            .find_map(|e| match e {
+                wp_police::PoliceEvent::PursuitEnded {
+                    racer: r, outcome, ..
+                } if *r == racer => Some(format!("{outcome:?}")),
+                _ => None,
+            })
+            .unwrap_or_else(|| "still running".into());
+        let gap = gap_sum / gap_n.max(1) as f32;
+        eprintln!(
+            "seed {seed}: {outcome} at {} s, pursued {pursued_s:.0} s, nearest pursuer {gap:.0} m, \
+             {fast_jct}/{near_jct} junction ticks above 11 m/s",
+            ended.map_or("-".into(), |t| format!("{t:.0}"))
+        );
+        totals.0 += outcome.starts_with("Captured") as u32;
+        totals.1 += 1;
+        totals.2 += pursued_s;
+        totals.3 += gap;
+    }
+    eprintln!(
+        "chase report: {}/{} captured, mean pursued {:.0} s, mean nearest-pursuer gap {:.0} m",
+        totals.0,
+        totals.1,
+        totals.2 / totals.1 as f32,
+        totals.3 / totals.1 as f32
+    );
+}

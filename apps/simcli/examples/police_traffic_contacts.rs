@@ -40,6 +40,8 @@ struct Tally {
     overlaps_police_stopped: u32,
     /// Police car hits on the static world (walls, kerbs, buildings), `[lights off, on]`.
     wall_hits: [u32; 2],
+    /// How the racer's pursuits ended (`PursuitOutcome` name → count).
+    outcomes: BTreeMap<String, u32>,
     max_rel_mps: f32,
     sim_s: f32,
     pursued_s: f32,
@@ -153,6 +155,16 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
             .map(|v| v.id)
             .collect();
         for e in sim.drain_events() {
+            if let SimEvent::Police(wp_police::PoliceEvent::PursuitEnded {
+                racer: r,
+                outcome,
+                ..
+            }) = &e
+            {
+                if *r == racer {
+                    *t.outcomes.entry(format!("{outcome:?}")).or_insert(0) += 1;
+                }
+            }
             let SimEvent::Contact {
                 a, b, rel_speed, ..
             } = e
@@ -280,6 +292,7 @@ fn main() {
             per5(t.wall_hits[i])
         );
     }
+    println!("  pursuit outcomes: {:?}", t.outcomes);
     println!(
         "  overlaps with the police car stopped (traffic drove into it): {}; max contact rel speed {:.1} m/s",
         t.overlaps_police_stopped, t.max_rel_mps

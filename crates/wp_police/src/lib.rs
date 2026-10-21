@@ -696,6 +696,7 @@ impl PoliceSystem {
             ignore,
             target: u.assignment.target(),
             skip_higher_units: false,
+            pursuing: matches!(u.assignment, Assignment::Pursue { .. }),
         };
         avoid::update(
             &mut u.avoid,

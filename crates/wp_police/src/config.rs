@@ -468,6 +468,9 @@ pub struct AvoidConfig {
     pub siren_turn_mps: f32,
     /// With lights: speed through a junction, m/s.
     pub siren_junction_mps: f32,
+    /// In an active pursuit: speed straight through a junction with no red against it, m/s
+    /// (reds keep `siren_red_mps`, turns `siren_turn_mps`).
+    pub pursuit_junction_mps: f32,
     /// With lights: speed through a junction against a red, m/s.
     pub siren_red_mps: f32,
     /// Give way: check cross traffic within this distance of the junction centre, m.

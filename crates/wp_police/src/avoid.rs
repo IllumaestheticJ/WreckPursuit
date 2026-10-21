@@ -227,6 +227,9 @@ pub(crate) struct Me {
     pub(crate) target: Option<EntityId>,
     /// Gridlock breaker: ignore stopped police units with a higher id that cross or face us.
     pub(crate) skip_higher_units: bool,
+    /// In an active pursuit (`Assignment::Pursue`): crosses junctions at
+    /// `pursuit_junction_mps` instead of `siren_junction_mps`.
+    pub(crate) pursuing: bool,
 }
 
 /// Nearest obstacle within `horizon_m` ahead on `track`, in the corridor around the lane
@@ -381,7 +384,7 @@ pub(crate) fn update(
             creeping = true;
         }
     }
-    st.junction_limit_mps = junction_speed(st.junction, me.track_s, v, siren, cfg);
+    st.junction_limit_mps = junction_speed(st.junction, me.track_s, v, siren, me.pursuing, cfg);
     // Give way to cross traffic: a patrol at an unsignalised junction, a unit with lights at a
     // red. A unit waits at most `yield_max_s` (`yield_max_siren_s` with lights), then goes.
     let give_way = st.junction.is_some_and(|j| match j.light {
@@ -489,12 +492,15 @@ pub(crate) fn update(
 ///
 /// Without lights a unit stops at a red (and at a yellow it can stop for) and slows to
 /// `yield_mps` through an unsignalised junction. With lights it may run reds and ignore limits,
-/// but crosses every junction at `siren_junction_mps` (`siren_red_mps` against a red).
+/// but crosses every junction at `siren_junction_mps` (`siren_red_mps` against a red, the
+/// turn cap when turning). In an active pursuit (`pursuing`) straight through a junction it
+/// has no red at it keeps `pursuit_junction_mps` instead.
 pub(crate) fn junction_speed(
     j: Option<JunctionAhead>,
     track_s: f32,
     v: f32,
     siren: bool,
+    pursuing: bool,
     cfg: &AvoidConfig,
 ) -> f32 {
     let Some(j) = j else {
@@ -523,6 +529,8 @@ pub(crate) fn junction_speed(
     if siren {
         return approach(if j.light == Some(Light::Stop) {
             cfg.siren_red_mps
+        } else if pursuing {
+            cfg.pursuit_junction_mps
         } else {
             cfg.siren_junction_mps
         })
@@ -651,6 +659,7 @@ mod tests {
             ignore: None,
             target: None,
             skip_higher_units: false,
+            pursuing: false,
         }
     }
 
@@ -769,12 +778,15 @@ mod tests {
             turn: false,
         });
         // Patrol stops before the line at a red, and holds once there.
-        let far = junction_speed(red, 0.0, 10.0, false, &c);
+        let far = junction_speed(red, 0.0, 10.0, false, false, &c);
         assert!(far > 5.0 && far < 30.0, "{far}");
         let at_line = 60.0 - c.stop_line_back_m - UNIT_HALF_LENGTH_M - 0.4;
-        assert_eq!(junction_speed(red, at_line, 0.0, false, &c), 0.0);
+        assert_eq!(junction_speed(red, at_line, 0.0, false, false, &c), 0.0);
         // With lights it runs the red, slowly.
-        let v = junction_speed(red, 60.0 - c.junction_slow_m, 20.0, true, &c);
+        let v = junction_speed(red, 60.0 - c.junction_slow_m, 20.0, true, false, &c);
+        assert!((v - c.siren_red_mps).abs() < 1e-3, "{v}");
+        // ... also in a pursuit.
+        let v = junction_speed(red, 60.0 - c.junction_slow_m, 20.0, true, true, &c);
         assert!((v - c.siren_red_mps).abs() < 1e-3, "{v}");
         // Green: no cap. Unsignalised: yield speed at the junction.
         let green = Some(JunctionAhead {
@@ -782,16 +794,30 @@ mod tests {
             light: Some(Light::Go),
             turn: false,
         });
-        assert!(junction_speed(green, 50.0, 10.0, false, &c).is_infinite());
+        assert!(junction_speed(green, 50.0, 10.0, false, false, &c).is_infinite());
         let plain = Some(JunctionAhead {
             s: 60.0,
             light: None,
             turn: false,
         });
-        let v = junction_speed(plain, 60.0 - c.junction_slow_m, 10.0, false, &c);
+        let v = junction_speed(plain, 60.0 - c.junction_slow_m, 10.0, false, false, &c);
         assert!((v - c.yield_mps).abs() < 1e-3, "{v}");
+        // With lights: `siren_junction_mps`; in a pursuit, the higher `pursuit_junction_mps`
+        // (green or unsignalised, straight on). Turns keep the turn cap.
+        let v = junction_speed(plain, 60.0 - c.junction_slow_m, 20.0, true, false, &c);
+        assert!((v - c.siren_junction_mps).abs() < 1e-3, "{v}");
+        let v = junction_speed(green, 60.0 - c.junction_slow_m, 20.0, true, true, &c);
+        assert!((v - c.pursuit_junction_mps).abs() < 1e-3, "{v}");
+        assert!(c.pursuit_junction_mps > c.siren_junction_mps);
+        let turn = Some(JunctionAhead {
+            s: 60.0,
+            light: Some(Light::Go),
+            turn: true,
+        });
+        let v = junction_speed(turn, 60.0 - c.junction_slow_m, 20.0, true, true, &c);
+        assert!((v - c.siren_turn_mps).abs() < 1e-3, "{v}");
         // Past the junction: no cap.
-        assert!(junction_speed(red, 75.0, 10.0, false, &c).is_infinite());
+        assert!(junction_speed(red, 75.0, 10.0, false, false, &c).is_infinite());
     }
 
     #[test]
