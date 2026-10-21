@@ -1252,6 +1252,24 @@ impl Traffic {
             }
             l = map.net.lanes[c as usize].left;
         }
+        // The lane on the right too: the reversing leg swings the rear into it (owner row 85
+        // re-gate on main's Vesper: a U-turn from the left lane of a two-lane direction clipped
+        // a car coming up on the right).
+        if let Some(r) = map
+            .seg(a.seg)
+            .lane()
+            .and_then(|c| map.net.lanes[c as usize].right)
+        {
+            let rs = map.seg(r);
+            let sc = rs.project(q).s;
+            if self.lists[r as usize].iter().any(|e| {
+                e.agent as usize != i
+                    && ((e.s < sc - CAR_LENGTH_M && e.v > 1.0 && e.s > sc - 40.0)
+                        || (e.s - sc).abs() < CAR_LENGTH_M + 2.0)
+            }) {
+                return false;
+            }
+        }
         if inp.tracked.iter().any(|t| {
             geom::dist(geom::xy(t.pos), q) < 50.0 && (t.vel[0].abs() + t.vel[1].abs()) > 1.0
         }) {
