@@ -502,7 +502,11 @@ fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
                 eprintln!(
                     "  {} {mph} mph {}: peak body slip {peak:.1}°{}",
                     c.def.id,
-                    if mid { "mid-corner lift" } else { "lift at turn-in" },
+                    if mid {
+                        "mid-corner lift"
+                    } else {
+                        "lift at turn-in"
+                    },
                     if spun { " SPUN" } else { "" }
                 );
             }
