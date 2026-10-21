@@ -632,14 +632,21 @@ pub fn plan_unit_speed(u: &Unit, brake_mps2: f32) -> f32 {
         u.cmd.cornering_g,
         brake_mps2,
     );
-    if u.cmd.track.is_drivable() {
-        let ahead = u.cmd.track.point_at(u.track_s + 8.0);
-        let to = sub(ahead, u.body.pos);
-        if len(to) > 1.0 && dot(normalize(to), u.body.heading) < 0.3 {
-            v = v.min(4.0);
-        }
+    if facing_away_from_track(u) {
+        v = v.min(4.0);
     }
     v
+}
+
+/// Whether `u` faces away from its track (the track 8 m ahead lies more than ~73° off its
+/// heading): it is turning round to start on it, crawling ([`plan_unit_speed`]).
+pub fn facing_away_from_track(u: &Unit) -> bool {
+    if !u.cmd.track.is_drivable() {
+        return false;
+    }
+    let ahead = u.cmd.track.point_at(u.track_s + 8.0);
+    let to = sub(ahead, u.body.pos);
+    len(to) > 1.0 && dot(normalize(to), u.body.heading) < 0.3
 }
 
 /// What happened to a ground unit during one built-in driver step.
@@ -742,8 +749,10 @@ pub fn step_ground(
     b.pos = add(b.pos, scale(b.heading, ds));
 
     // Ran wide: hit the kerb / building.
-    // Behind the start of the track (turning around) is not running wide.
-    if u.on_track && s > 1.0 && lateral > dynm.crash_offset_m && b.speed > 5.0 {
+    // Beside or behind the start of the track (turning round onto it: the turn circle swings
+    // up to two turning radii out, while the projection creeps a few metres along) is not
+    // running wide.
+    if u.on_track && s > dynm.crash_offset_m && lateral > dynm.crash_offset_m && b.speed > 5.0 {
         let impact = b.speed * 0.6;
         u.health -= dynm.crash_health_per_kmps2.get(env.mode) * impact * impact / 1000.0;
         rep.crashed = true;

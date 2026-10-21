@@ -1085,7 +1085,10 @@ impl PoliceSystem {
                     self.units[i].tactic = Tactic::Shadow;
                     let u = &self.units[i];
                     let held_for = now.since(u.assigned);
-                    let stale = held_for > 0.0 && held_for % 3.0 < tdt;
+                    // Not while turning round onto its route (see `Respond`).
+                    let stale = held_for > 0.0
+                        && held_for % 3.0 < tdt
+                        && !crate::unit::facing_away_from_track(u);
                     if !u.cmd.track.is_drivable()
                         || u.track_s > u.cmd.track.length() - 10.0
                         || stale
