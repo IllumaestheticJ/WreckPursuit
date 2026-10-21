@@ -658,6 +658,16 @@ impl Session {
         Ok(&mut self.sim)
     }
 
+    /// Drift Lab W "use W handling everywhere": tag vehicle `id` for the lab overrides
+    /// (`wp_sim::Sim::set_lab_tagged`). Not a logged op, and allowed in playback too: the
+    /// testbed tags the player at every session start (live or replay), so a recording made
+    /// with W handling plays back with it (the overrides themselves are never recorded).
+    pub fn set_lab_tagged(&mut self, id: EntityId, on: bool) -> Result<(), String> {
+        self.sim
+            .set_lab_tagged(id, on)
+            .map_err(|e| format!("{e:?}"))
+    }
+
     /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes
     /// made here are not in the replay log.
     pub fn debug_sim_mut(&mut self) -> Result<&mut Sim, String> {

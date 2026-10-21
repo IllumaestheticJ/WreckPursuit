@@ -6,7 +6,7 @@
 //! `cargo run --release -p wp_vehicle --example grip_balance [all|circle|ug|tap|lift|power|regress|sweep|trace] [car_id ...]`
 //!
 //! Env: `GRIP='{...}'` the grip-balance lab set (missing fields = the data); `GRIP=new` the lab
-//! default (the "new" button); unset = the data ("before"). `PLAIN='{...}'` steering
+//! default (the "new" button); unset = the data ("before"); `GRIP=grip` the "balance: grip" preset. `PLAIN='{...}'` steering
 //! constants. `AB=1` prints every table for both "before" and "new".
 
 use std::path::PathBuf;
@@ -345,6 +345,7 @@ fn set_grip(g: Option<GripBalance>) {
 fn configs() -> Vec<(String, Option<GripBalance>)> {
     match std::env::var("GRIP").as_deref() {
         Ok("new") => vec![("new".into(), Some(GripBalance::lab_default()))],
+        Ok("grip") => vec![("grip".into(), Some(GripBalance::grip()))],
         Ok(j) if j.starts_with('[') => {
             let v: Vec<GripBalance> = serde_json::from_str(j).expect("GRIP json list");
             v.into_iter()
@@ -359,6 +360,7 @@ fn configs() -> Vec<(String, Option<GripBalance>)> {
         Err(_) if std::env::var("AB").is_ok() => vec![
             ("before".into(), None),
             ("new".into(), Some(GripBalance::lab_default())),
+            ("grip".into(), Some(GripBalance::grip())),
         ],
         Err(_) => vec![("before".into(), None)],
     }
@@ -370,12 +372,16 @@ fn main() {
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),
         Err(_) => plain::set_override(Some(PlainSteer::default())),
     }
-    // RIDE=data: the suspension data instead of the lab's ride default (comparison only).
+    // RIDE=data|slow|medium: the suspension data or a W ride preset instead of the lab's ride
+    // default (comparison only).
     if std::env::var("RIDE").as_deref() == Ok("data") {
         ride_lab::set_override(None);
     } else if std::env::var("RIDE").as_deref() == Ok("slow") {
         // Drift Lab W's "slow weight (clip 4)" preset.
         ride_lab::set_override(Some(RideTune::slow_weight()));
+    } else if std::env::var("RIDE").as_deref() == Ok("medium") {
+        // Drift Lab W step 10's "medium weight" ride (W's "new" default).
+        ride_lab::set_override(Some(RideTune::medium_weight()));
     } else {
         ride_lab::set_override(Some(RideTune::lab_default()));
     }
@@ -389,7 +395,7 @@ fn main() {
     let what = if args.first().is_some_and(|a| {
         [
             "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
-            "robust", "ltrace", "chatter", "pull",
+            "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score",
         ]
         .contains(&a.as_str())
     }) {
@@ -435,6 +441,15 @@ fn main() {
         trace(args.first().map_or("parity_rwd_d", String::as_str));
         return;
     }
+    if what == "score" {
+        for (name, g) in configs() {
+            set_grip(g);
+            for id in &args {
+                println!("{name} {}", score_line(id));
+            }
+        }
+        return;
+    }
     for (name, g) in configs() {
         set_grip(g);
         println!("\n# balance: {name} {g:?}");
@@ -453,9 +468,233 @@ fn main() {
         if what == "all" || what == "regress" {
             regress_table(&args);
         }
+        if what == "all" || what == "slipg" || what == "grip" {
+            slipg_table(&args);
+        }
+        if what == "all" || what == "c60" || what == "grip" {
+            c60_table(&args);
+        }
+        if what == "all" || what == "snap" {
+            snap_table();
+        }
         if what == "all" || what == "robust" {
             println!("\n## Drift robustness (tyre-slip set: rwd_d / a / b × counter key at 6 / 12 / 20° × 0.3 / 0.5 / 0.7 g): held {} / 27", robust());
         }
+    }
+}
+
+/// Body slip (°, + = tail out) against lateral g: constant `kmh`, the left key ramped slowly
+/// 0 → full over 12 s (a fractional key). Mean body slip in 0.1 g bins from 0.3 g, the peak
+/// lateral g and the slip there (the "grip-drivable below the limit" check, lead 2026-10-20).
+#[derive(Debug, Clone)]
+struct SlipCurve {
+    bins: Vec<(f32, f32)>,
+    max_g: f32,
+    slip_at_max: f32,
+    spun: bool,
+}
+
+fn slip_curve(c: &LoadedCar, kmh: f32) -> SlipCurve {
+    let v = kmh / 3.6;
+    let mut rig = rolling(c, v);
+    let a = reference_assists();
+    let mut pts: Vec<(f32, f32)> = Vec::new();
+    let mut spun = false;
+    let n = 12 * TPS;
+    for tick in 0..n {
+        let (throttle, brake) = hold_speed(&rig, v);
+        rig.step(
+            &VehicleInput {
+                steer: -(tick as f32 / n as f32),
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &a,
+        );
+        let s = sample(&rig);
+        if s.slip_deg.abs() > 30.0 || s.v < 3.0 {
+            spun = true;
+            break;
+        }
+        pts.push((s.ay_g, -s.slip_deg));
+    }
+    let bins = [0.3f32, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95]
+        .iter()
+        .filter_map(|&g| {
+            let sel: Vec<f32> = pts
+                .iter()
+                .filter(|p| (p.0 - g).abs() < 0.025)
+                .map(|p| p.1)
+                .collect();
+            (!sel.is_empty()).then(|| (g, sel.iter().sum::<f32>() / sel.len() as f32))
+        })
+        .collect();
+    let (max_g, slip_at_max) =
+        pts.iter().fold(
+            (0.0f32, 0.0f32),
+            |m, p| if p.0 > m.0 { (p.0, p.1) } else { m },
+        );
+    SlipCurve {
+        bins,
+        max_g,
+        slip_at_max,
+        spun,
+    }
+}
+
+fn slipg_table(ids: &[String]) {
+    println!("\n## Body slip ° (+ = tail out) vs lateral g, slow key ramp at constant speed");
+    for kmh in [60.0f32, 100.0] {
+        println!("\n### {kmh:.0} km/h");
+        println!("| car | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.85 | 0.9 | 0.95 | peak g / slip |");
+        println!("|---|---|---|---|---|---|---|---|---|---|---|");
+        for id in ids {
+            let r = slip_curve(&car(id), kmh);
+            let cells: Vec<String> = [0.3f32, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95]
+                .iter()
+                .map(|g| {
+                    r.bins
+                        .iter()
+                        .find(|b| (b.0 - g).abs() < 1e-3)
+                        .map_or("–".into(), |b| format!("{:.1}", b.1))
+                })
+                .collect();
+            println!(
+                "| {id} | {} | {:.2} g / {:.1}°{} |",
+                cells.join(" | "),
+                r.max_g,
+                r.slip_at_max,
+                if r.spun { " SPUN" } else { "" }
+            );
+        }
+    }
+}
+
+/// 60 m circle, speed ramped up (20 → 110 km/h over 36 s, the cruise controller): a yaw-rate
+/// driver holds the radius with a fractional key. Body slip at 0.5 / 0.7 / 0.85 g, the peak
+/// lateral g and how the car leaves the circle: "push" (key at full lock, the radius grows,
+/// slip small), "rotate" (slip grows past 6° and is held / caught by the driver), "spin".
+fn circle60(c: &LoadedCar) -> String {
+    const R: f32 = 60.0;
+    let mut rig = rolling(c, 20.0 / 3.6);
+    // Automatic gears: the speed ramp spans several gears.
+    let a = wp_contracts::AssistProfile {
+        auto_gears: true,
+        ..reference_assists()
+    };
+    let mut steer = 0.0f32;
+    let mut v_end = 0.0f32;
+    let mut pts: Vec<(f32, f32)> = Vec::new();
+    let (mut sat, mut outcome) = (0usize, "held to 110 km/h");
+    let mut max_slip = 0.0f32;
+    for tick in 0..36 * TPS {
+        let v_target = (20.0 + 90.0 * tick as f32 / (36 * TPS) as f32) / 3.6;
+        let s = sample(&rig);
+        let r_target = s.v.max(1.0) / R;
+        // Yaw-rate driver (left turn = negative key): integral on the yaw-rate error.
+        let err = r_target - s.yaw_dps.to_radians();
+        steer = (steer - 3.0 * err / TPS as f32 - 0.004 * err).clamp(-1.0, 1.0);
+        let (throttle, brake) = hold_speed(&rig, v_target);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &a,
+        );
+        let s = sample(&rig);
+        v_end = s.v;
+        max_slip = max_slip.max(-s.slip_deg);
+        if -s.slip_deg > 45.0 || s.v < 3.0 {
+            outcome = "spin";
+            break;
+        }
+        if tick > 2 * TPS {
+            pts.push((s.ay_g, -s.slip_deg));
+        }
+        sat = if steer <= -0.999 { sat + 1 } else { 0 };
+        if sat > TPS {
+            outcome = "push";
+            break;
+        }
+    }
+    if outcome != "spin" && max_slip > 6.0 {
+        outcome = "rotate";
+    }
+    let at = |g: f32| {
+        let sel: Vec<f32> = pts
+            .iter()
+            .filter(|p| (p.0 - g).abs() < 0.025)
+            .map(|p| p.1)
+            .collect();
+        if sel.is_empty() {
+            "–".to_string()
+        } else {
+            format!("{:.1}", sel.iter().sum::<f32>() / sel.len() as f32)
+        }
+    };
+    let max_g = pts.iter().fold(0.0f32, |m, p| m.max(p.0));
+    format!(
+        "{} / {} / {} | {max_g:.2} g | max slip {max_slip:.1}° | {outcome} at {:.0} km/h",
+        at(0.5),
+        at(0.7),
+        at(0.85),
+        v_end * 3.6
+    )
+}
+
+/// One-line grip score per car for knob sweeps (`score`): body slip at 0.6 g and the peak at
+/// 60 / 100 km/h, the 60 m circle exit, and the 0.4 s tap yaw at 60 mph.
+fn score_line(id: &str) -> String {
+    let c = car(id);
+    let pick = |r: &SlipCurve, g: f32| {
+        r.bins
+            .iter()
+            .find(|b| (b.0 - g).abs() < 1e-3)
+            .map_or(f32::NAN, |b| b.1)
+    };
+    let a = slip_curve(&c, 60.0);
+    let b = slip_curve(&c, 100.0);
+    format!(
+        "{id}: 60k 0.6g {:.1} 0.8g {:.1} pk {:.2}g/{:.1}{} | 100k 0.6g {:.1} 0.8g {:.1} pk {:.2}g/{:.1}{} | c60 {}",
+        pick(&a, 0.6),
+        pick(&a, 0.8),
+        a.max_g,
+        a.slip_at_max,
+        if a.spun { " SPUN" } else { "" },
+        pick(&b, 0.6),
+        pick(&b, 0.8),
+        b.max_g,
+        b.slip_at_max,
+        if b.spun { " SPUN" } else { "" },
+        circle60(&c)
+    )
+}
+
+fn c60_table(ids: &[String]) {
+    println!("\n## 60 m circle, speed ramped 20 → 110 km/h (yaw-rate driver, fractional key)");
+    println!("| car | slip ° at 0.5 / 0.7 / 0.85 g | peak g | max slip | exit |");
+    println!("|---|---|---|---|---|");
+    for id in ids {
+        println!("| {id} | {} |", circle60(&car(id)));
+    }
+}
+
+fn snap_table() {
+    use wp_vehicle::drift_lab_w::{snap_back, SnapExit};
+    let a = reference_assists();
+    println!("\n## Snap-back (W step 10: counter key held, throttle lifted out of a 40° hold)");
+    println!("| car | reached | slip overshoot ° | yaw overshoot | spun |");
+    println!("|---|---|---|---|---|");
+    for id in ["parity_rwd_d", "parity_rwd_b"] {
+        let b = snap_back(&car(id), &a, SnapExit::CounterLift);
+        println!(
+            "| {id} | {} | {:.1} | {:.2} | {} |",
+            b.reached, b.slip_overshoot_deg, b.yaw_overshoot, b.spun
+        );
     }
 }
 

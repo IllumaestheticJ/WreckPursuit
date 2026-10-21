@@ -41,6 +41,7 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
+  counter_margin_deg: { label: "countersteer limit", min: 0, max: 5, step: 0.05, unit: "°", hint: "step 10 snap-back: in a slide a held counter key points the wheels at most this far past the front axle's travel, so the lock unwinds as the slide closes (0 = off, the 'before'; default 0.25°)" },
   sens_exponent: { label: "sens. exponent", min: 1, max: 4, step: 0.5, hint: "lock = 1 / (1 + s·(v / ref)^exp); 2 = like the angle a constant-g corner needs" },
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
   t_align_s: { label: "VR: slide align time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "velocity-relative steering: in a slide the wheels move at least full lock in this time" },
@@ -103,8 +104,11 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
   hb_pivot_accel: { label: "handbrake pivot aid", min: 0, max: 15, step: 0.5, unit: "rad/s²", hint: "round12 row 109: yaw acceleration added while the handbrake AND a steer key are held (builds over 0.4 s, full ≤ 55 km/h, gone at 75 km/h); 0 = off, pure tyre physics" },
   hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
 };
-const RIDE_STORE = "wp.driftLabW.ride";
-const GRIP_STORE = "wp.driftLabW.grip";
+// v2: step 10's default ride became medium weight (an older saved ride must not override it).
+const RIDE_STORE = "wp.driftLabW.ride.v2";
+const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
+// v2: "new" became "balance: grip" (an older saved "new" must not override it).
+const GRIP_STORE = "wp.driftLabW.grip.v2";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
  * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
 const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
@@ -160,6 +164,8 @@ export class DriftLabWPanel {
   private readonly readout: HTMLDivElement;
   private readonly course: THREE.Group;
   private active = false;
+  private handling = false;
+  private readonly badge: HTMLDivElement;
   private shown = false;
   private open = true;
   /** The lab's current car id (set by the session start). */
@@ -193,10 +199,39 @@ export class DriftLabWPanel {
     this.body.style.cssText = "background:rgba(0,0,0,.72);padding:8px;border-radius:6px;margin-top:4px;max-height:60vh;overflow:auto";
     this.root.append(btn, this.readout, this.body);
     parent.appendChild(this.root);
+    // Outside the lab: a small tag while the W profile drives the player's car.
+    this.badge = document.createElement("div");
+    this.badge.id = "drift-lab-w-badge";
+    this.badge.textContent = "W handling";
+    this.badge.title = `${DRIFT_LAB_W_TITLE} handling on your car ("use W handling everywhere" in the lab panel)`;
+    this.badge.style.cssText =
+      "position:absolute;left:12px;bottom:12px;z-index:30;font:11px system-ui,sans-serif;color:#cfe8ff;background:rgba(0,0,0,.55);border-left:3px solid #40a0e0;padding:2px 6px;border-radius:4px;pointer-events:none;display:none";
+    parent.appendChild(this.badge);
   }
 
-  /** Whether the lab session is running: plain steering + raw keys on, course shown. */
-  setActive(on: boolean): void {
+  /** "Use W handling everywhere" (lead): keep the W steering / tyre / suspension / pivot
+   * profile on the player's car outside the lab (free drive, city chase, races). Saved per
+   * viewer; default ON in the W build. */
+  everywhere(): boolean {
+    try {
+      return localStorage.getItem(EVERYWHERE_STORE) !== "0";
+    } catch {
+      return true;
+    }
+  }
+
+  /** Whether the W handling profile is on for this session (in the lab, or everywhere). */
+  handlingOn(): boolean {
+    return this.handling;
+  }
+
+  /** A session started. `on` = it is the lab session (panel, course, reference assists);
+   * `otherLab` = another drift lab owns the drift tuning (no W handling there). With
+   * "use W handling everywhere" on, every other session keeps the W profile on the player's
+   * car only (AI, police and traffic stay stock: `wp_vehicle::lab_scope`). */
+  setActive(on: boolean, otherLab = false): void {
+    this.setHandling(on || (this.everywhere() && !otherLab));
+    this.badge.style.display = this.handling && !on ? "block" : "none";
     if (on === this.active) {
       if (on) this.build();
       return;
@@ -206,62 +241,81 @@ export class DriftLabWPanel {
     if (on && !this.shown) this.world.add(this.course);
     if (!on && this.shown) this.world.remove(this.course);
     this.shown = on;
-    setRawKeyboard(on);
     if (on) this.prevTitle = document.title;
     document.title = on ? DRIFT_LAB_W_TITLE : this.prevTitle;
-    if (on) {
-      let saved = "";
-      try {
-        saved = localStorage.getItem(STORE) ?? "";
-      } catch {
-        /* storage blocked: defaults */
-      }
-      try {
-        this.sim.plainSteerSet(saved || JSON.stringify(this.sim.plainSteerDefaults()));
-      } catch {
-        this.sim.plainSteerSet(JSON.stringify(this.sim.plainSteerDefaults()));
-      }
-      let ride = "";
-      try {
-        ride = localStorage.getItem(RIDE_STORE) ?? "";
-      } catch {
-        /* storage blocked: defaults */
-      }
-      try {
-        this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().lab));
-      } catch {
-        this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().lab));
-      }
-      let carTune = "";
-      try {
-        carTune = localStorage.getItem(CAR_STORE) ?? "";
-      } catch {
-        /* storage blocked: data */
-      }
-      try {
-        this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().spin));
-      } catch {
-        this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
-      }
-      this.applyPivot();
-      let grip = "";
-      try {
-        grip = localStorage.getItem(GRIP_STORE) ?? "";
-      } catch {
-        /* storage blocked: the new balance */
-      }
-      try {
-        this.sim.gripBalanceSet(grip || JSON.stringify(this.sim.gripBalanceDefaults().new));
-      } catch {
-        this.sim.gripBalanceSet(JSON.stringify(this.sim.gripBalanceDefaults().new));
-      }
-      this.build();
-    } else {
+    if (on) this.build();
+  }
+
+  /** Turn the W profile on / off: the lab overrides (saved panel values), raw keys, and the
+   * player's car tagged as the only car they apply to. */
+  private setHandling(on: boolean): void {
+    const was = this.handling;
+    this.handling = on;
+    if (!on) {
+      // Only undo what W set (another lab may own the drift tuning now).
+      if (!was) return;
+      setRawKeyboard(false);
+      this.sim.labScopeSetTaggedOnly(false);
       this.sim.driftTuningSet("");
       this.sim.plainSteerSet("");
       this.sim.rideTuneSet("");
       this.sim.carTuneSet("");
       this.sim.gripBalanceSet("");
+      return;
+    }
+    let saved = "";
+    try {
+      saved = localStorage.getItem(STORE) ?? "";
+    } catch {
+      /* storage blocked: defaults */
+    }
+    try {
+      this.sim.plainSteerSet(saved || JSON.stringify(this.sim.plainSteerDefaults()));
+    } catch {
+      this.sim.plainSteerSet(JSON.stringify(this.sim.plainSteerDefaults()));
+    }
+    let ride = "";
+    try {
+      ride = localStorage.getItem(RIDE_STORE) ?? "";
+    } catch {
+      /* storage blocked: defaults */
+    }
+    try {
+      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
+    } catch {
+      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
+    }
+    let carTune = "";
+    try {
+      carTune = localStorage.getItem(CAR_STORE) ?? "";
+    } catch {
+      /* storage blocked: data */
+    }
+    try {
+      this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().spin));
+    } catch {
+      this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
+    }
+    this.applyPivot();
+    let grip = "";
+    try {
+      grip = localStorage.getItem(GRIP_STORE) ?? "";
+    } catch {
+      /* storage blocked: the new balance */
+    }
+    try {
+      this.sim.gripBalanceSet(grip || JSON.stringify(this.sim.gripBalanceDefaults().new));
+    } catch {
+      this.sim.gripBalanceSet(JSON.stringify(this.sim.gripBalanceDefaults().new));
+    }
+    setRawKeyboard(true);
+    // Only the player's car: AI racers, police and traffic keep the stock handling.
+    this.sim.labScopeSetTaggedOnly(true);
+    try {
+      this.sim.setLabTagged(this.player(), true);
+    } catch (e) {
+      // Replays / non-live sessions: the overrides then reach nobody (tagged-only, no tag).
+      console.warn("W handling: cannot tag the player", e);
     }
   }
 
@@ -382,6 +436,60 @@ export class DriftLabWPanel {
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
     }
+    // Step 10 A/B (lead): "before" = steps 1–9 (no countersteer limit, lab ride) vs "new" =
+    // the default (countersteer limit 0.25°, medium weight). Tyres stay as set below.
+    {
+      const ab = document.createElement("div");
+      ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
+      const lbl = document.createElement("span");
+      lbl.textContent = "handling A/B:";
+      ab.appendChild(lbl);
+      for (const [label, id, margin, ride] of [
+        ["before", "drift-lab-w-before", 0, "lab"],
+        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "medium_weight"],
+      ] as const) {
+        const b = document.createElement("button");
+        b.id = id;
+        b.textContent = label;
+        b.title =
+          label === "before"
+            ? "steps 1–9: no countersteer limit (lifting off with the counter key held snaps the car back and can spin it), step-3 lab ride"
+            : "step 10 default: countersteer limit 0.25° past the travel (progressive recovery) + medium weight (slower weight transfer, keeps the hold)";
+        b.onclick = () => {
+          this.save({ ...(this.sim.plainSteer() ?? defaults), counter_margin_deg: margin });
+          const text = JSON.stringify(this.sim.rideTuneDefaults()[ride]);
+          this.sim.rideTuneSet(text);
+          try {
+            localStorage.setItem(RIDE_STORE, text);
+          } catch {
+            /* ignore */
+          }
+          this.restart(this.car);
+        };
+        ab.appendChild(b);
+      }
+      this.body.appendChild(ab);
+    }
+    // "Use W handling everywhere" (lead): free drive, city chase and races keep this profile.
+    {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = "drift-lab-w-everywhere";
+      input.checked = this.everywhere();
+      input.onchange = () => {
+        try {
+          localStorage.setItem(EVERYWHERE_STORE, input.checked ? "1" : "0");
+        } catch {
+          /* ignore */
+        }
+      };
+      row(
+        "use W handling everywhere",
+        "free drive, city chase and races use this steering / tyre / suspension / handbrake profile on your car (AI, police and traffic stay stock); takes effect on the next session",
+        input,
+        document.createElement("span"),
+      );
+    }
     // Velocity-relative steering (clip 8 cockpit): A/B, default off (step 7: it over-catches).
     {
       const input = document.createElement("input");
@@ -499,7 +607,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - rd.lab[key]) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - rd.medium_weight[key]) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -534,12 +642,14 @@ export class DriftLabWPanel {
         };
         row("keep ride height", "raise the spring preload so softer springs keep the data's static ride height (off the bump stops)", input, document.createElement("span"));
       }
-      for (const [label, which] of [["lab default", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
+      for (const [label, which] of [["medium weight (new)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
         b.title =
-          which === "lab"
-            ? "calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"
+          which === "medium_weight"
+            ? "step 10 default: slower weight transfer that keeps the held drift (springs 0.7, bars 0.15, dampers 1.6 / 2.1, ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6). Restarts the car"
+            : which === "lab"
+            ? "step 3 default: calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"
             : which === "slow_weight"
               ? "reference clip 4: roll builds over ~0.6 s to ~6°, no overshoot (soft springs, ride height kept, more travel and inertia). Breaks the spin model's knife-edge held drift. Restarts the car"
               : "no scaling: the car files as they are";
@@ -662,11 +772,18 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
-      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
+      ab.textContent = `balance: ${isNew ? "grip (new)" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
+      ab.title = "A/B: before = the tyre data and the plain lock; grip (new) = the smart lock + RWD tyres near the data below the limit (body slip < 1° to 0.6 g) with the looseness at the limit (rear μ 0.96, flatter rear past the peak) + rear downforce: grip-drivable, steps out 4–6° at the limit";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
         saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
+        this.build();
+      };
+      const step14 = document.createElement("button");
+      step14.textContent = "step 14 (old new)";
+      step14.title = "the step-14 default: smart lock + softer RWD tyres (cornering stiffness × 0.6 / × 0.45) + rear downforce: looser everywhere, slides even in gentle corners";
+      step14.onclick = () => {
+        saveGrip(gd.step14);
         this.build();
       };
       const lockOnly = document.createElement("button");
@@ -703,9 +820,9 @@ export class DriftLabWPanel {
       const trans = document.createElement("button");
       trans.textContent = "transition: swing rack (test)";
       trans.title =
-        "tyre-slip test preset for drift transitions: balance new + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
+        "tyre-slip test preset for drift transitions: balance step 14 + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
       trans.onclick = () => {
-        saveGrip(gd.new);
+        saveGrip(gd.step14);
         const rd = this.sim.rideTuneDefaults();
         const ride = JSON.stringify({ ...rd.lab, yaw_inertia: 1.5 });
         const tyres = JSON.stringify(this.sim.carTuneDefaults().spin);
@@ -740,7 +857,7 @@ export class DriftLabWPanel {
       };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, forSlow, driftBest, step2, lockOnly, trans, v2);
+      abRow.append(ab, step14, forSlow, driftBest, step2, lockOnly, trans, v2);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

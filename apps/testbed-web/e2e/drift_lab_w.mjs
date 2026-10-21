@@ -49,7 +49,12 @@ check(!sc.traffic_cars && !sc.police_cars, "no traffic, no police");
 const plain = await page.evaluate(() => window.__wp.sim.plainSteer());
 check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return_s - 0.33) < 1e-6, `plain steering on ${JSON.stringify(plain)}`);
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
-check(ride && Math.abs(ride.arb - 0.25) < 1e-6, `ride lab default ${JSON.stringify(ride)}`);
+check(ride && Math.abs(ride.arb - 0.15) < 1e-6 && Math.abs(ride.spring - 0.7) < 1e-6, `ride default = medium weight (step 10) ${JSON.stringify(ride)}`);
+{
+  const g0 = await page.evaluate(() => window.__wp.sim.gripBalance());
+  check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_mu - 0.96) < 1e-6, `grip balance default = grip ${JSON.stringify(g0)}`);
+}
+check(Math.abs(plain.counter_margin_deg - 0.25) < 1e-6, `countersteer limit 0.25° by default (${plain.counter_margin_deg})`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
 check((a.tcs === "Off" || a.tcs === false) && !a.esc && !a.auto_gears && a.auto_clutch === true, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears} auto clutch ${a.auto_clutch}`);
 check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
@@ -73,7 +78,7 @@ check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.68) < 1e-6 
 await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
 await page.waitForTimeout(300);
 const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
-check(Math.abs(tr.plain.swing_rate - 2.5) < 1e-6 && Math.abs(tr.ride.yaw_inertia - 1.5) < 1e-6 && tr.grip.lock_mode === "smart", `transition preset ${JSON.stringify(tr)}`);
+check(Math.abs(tr.plain.swing_rate - 2.5) < 1e-6 && Math.abs(tr.ride.yaw_inertia - 1.5) < 1e-6 && tr.grip.lock_mode === "smart" && Math.abs(tr.grip.rear_stiffness - 0.45) < 1e-6, `transition preset (balance step 14) ${JSON.stringify(tr)}`);
 await page.locator("#drift-lab-w button", { hasText: "drift: spin + VR (test)" }).click();
 const svr = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
 check(svr.car.spin_model === true && svr.plain.velocity_relative === true && Math.abs(svr.plain.align_gain - 0.5) < 1e-6, `drift: spin + VR preset ${JSON.stringify(svr)}`);
@@ -90,14 +95,19 @@ check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === fals
 // Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
 const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();
-check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
+// The transition preset above left balance step 14: A/B goes back to new.
+check((await abText()) === "balance: step 14", `after the transition preset: "${await abText()}"`);
+await page.locator("#drift-w-balance-ab").click();
+check((await abText()) === "balance: grip (new)", `A/B button reads "${await abText()}" (balance: grip (new))`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
-check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: softer RWD tyres, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+check(Math.abs(gNew.rear_stiffness - 0.8) < 1e-6 && Math.abs(gNew.rear_mu - 0.96) < 1e-6 && Math.abs(gNew.rear_lat_c - 1.0) < 1e-6 && gNew.tyres_rwd_only === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new = balance: grip (RWD tyres near the data, rear μ 0.96, flatter past the peak, rear downforce) ${JSON.stringify(gNew)}`);
+await page.locator("#drift-lab-w button", { hasText: "step 14 (old new)" }).click();
+check((await abText()) === "balance: step 14" && Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) - 0.45) < 1e-6, `step 14 preset: "${await abText()}"`);
 await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
 await page.locator("#drift-w-drift-best").click();
@@ -120,7 +130,7 @@ await page.evaluate(() => {
 });
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
 await page.locator("#drift-w-balance-ab").click(); // custom → new
-check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
+check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.96) < 1e-6 && (await abText()) === "balance: grip (new)", "A/B restores the new balance (grip)");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
@@ -153,7 +163,20 @@ check(sw.keep_ride_height === true && Math.abs(sw.roll_inertia - 2.4) < 1e-6 && 
 check(await page.locator("#drift-lab-w-keep-height").isChecked(), "keep ride height ticked by the preset");
 await page.locator("#drift-lab-w button", { hasText: "lab default" }).click();
 await page.waitForTimeout(1500);
-check(Math.abs((await page.evaluate(() => window.__wp.sim.rideTune().arb)) - 0.25) < 1e-6, "lab default ride restored");
+check(Math.abs((await page.evaluate(() => window.__wp.sim.rideTune().arb)) - 0.25) < 1e-6, "lab default ride (before) set");
+// Step 10 A/B: "before" (no countersteer limit, lab ride) vs "new" (limit 0.25°, medium weight).
+await page.locator("#drift-lab-w-before").click();
+await page.waitForTimeout(1500);
+{
+  const b = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
+  check(b[0] === 0 && Math.abs(b[1] - 0.9) < 1e-6, `"before" → limit off, lab ride (${b})`);
+}
+await page.locator("#drift-lab-w-new").click();
+await page.waitForTimeout(1500);
+{
+  const n = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
+  check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 0.7) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, medium weight (${n})`);
+}
 // Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
 check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");
 await page.locator("#drift-lab-w-vr").check();
@@ -278,8 +301,15 @@ const freeDrive = async () => {
 };
 await freeDrive();
 check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
-check((await page.evaluate(() => window.__wp.sim.plainSteer())) === null, "free drive: plain steering off");
-check((await page.evaluate(() => window.__wp.sim.gripBalance())) === null, "free drive: grip balance off");
+// "Use W handling everywhere" (default ON): free drive keeps the W profile on the player only.
+{
+  const w = await page.evaluate(() => {
+    const s = window.__wp.sim;
+    const p = window.__wp.app.player;
+    return { plain: s.plainSteer() !== null, grip: s.gripBalance()?.lock_mode, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
+  });
+  check(w.plain && w.grip === "smart" && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
+}
 check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
 // The career garage can sit over free drive on load; the button's own click handler is
 // what the owner hits from the testbed panel.
@@ -293,6 +323,7 @@ await page.waitForTimeout(500);
 const visible = await page.evaluate(() => document.body.innerText);
 check(!/drift lab c/i.test(visible) && (await page.getByText(/drift lab c/i).count()) === 0, "no visible 'Drift Lab C' anywhere (incl. shadow roots)");
 check(/Drift Lab W · plain steering/.test(await page.locator("#drift-lab-w").innerText()), "button → W readout");
+check(await page.locator("#drift-lab-w-everywhere").isChecked(), "panel: 'use W handling everywhere' on by default");
 // The start menu's entry: "Drift Lab W" (no "Drift Lab C" entry) launches W.
 await freeDrive();
 await page.evaluate(() => window.__wp.menu.openMain());
@@ -305,6 +336,47 @@ await page.getByText("Drift Lab W", { exact: true }).first().click();
 await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
 sc = await sim();
 check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `menu → ${sc.name} / ${sc.entities?.[0]?.car}`);
+// City chase with "use W handling everywhere" on: the player's car runs the W profile, the
+// police / traffic cars do not; off → stock handling.
+const chase = async () => {
+  await page.goto(`http://localhost:${PORT}/?chase=1`);
+  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "city_chase", null, { timeout: 90000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  return page.evaluate(() => {
+    const s = window.__wp.sim;
+    const p = window.__wp.app.player;
+    const others = s.entities().filter((e) => e !== p);
+    return {
+      name: s.scenario().name,
+      plain: s.plainSteer() !== null,
+      spin: s.carTune()?.spin_model === true,
+      only: s.labScopeTaggedOnly(),
+      tagged: s.labTagged(p),
+      others: others.length,
+      othersTagged: others.filter((e) => s.labTagged(e)).length,
+      badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display,
+    };
+  });
+};
+{
+  const c = await chase();
+  check(c.name === "city_chase" && c.plain && c.spin && c.only && c.tagged, `start chase → W profile active on the player (${JSON.stringify(c)})`);
+  check(c.badge !== "none", "chase: 'W handling' tag shown");
+  await page.evaluate(() => localStorage.setItem("wp.driftLabW.everywhere", "0"));
+  const off = await chase();
+  check(off.name === "city_chase" && !off.plain && !off.only && !off.tagged && off.badge === "none", `toggle off → stock handling in the chase (${JSON.stringify(off)})`);
+  await page.evaluate(() => localStorage.removeItem("wp.driftLabW.everywhere"));
+  // A street race: the AI racers keep the stock handling, the player gets W.
+  await page.goto(`http://localhost:${PORT}/?race=grid_highway_sprint`);
+  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name.startsWith("race_"), null, { timeout: 90000 }).catch(() => {});
+  const r = await page.evaluate(() => {
+    const s = window.__wp.sim;
+    const p = window.__wp.app.player;
+    const others = s.entities().filter((e) => e !== p);
+    return { name: s.scenario().name, tagged: s.labTagged(p), only: s.labScopeTaggedOnly(), others: others.length, othersTagged: others.filter((e) => s.labTagged(e)).length };
+  });
+  check(r.name.startsWith("race_") && r.tagged && r.only && r.others > 0 && r.othersTagged === 0, `race: W on the player, ${r.others} AI racers stock (${JSON.stringify(r)})`);
+}
 check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 await browser.close();
 server.kill("SIGTERM");

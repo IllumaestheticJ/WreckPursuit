@@ -827,6 +827,181 @@ pub fn step_steer_roll(
     }
 }
 
+/// How the driver leaves the drift in a [`snap_back`] run (lead: snap-back metric).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapExit {
+    /// Countersteer out: the counter key stays held and the throttle is lifted; the key is let
+    /// go once the slide is under [`SNAP_KEY_OFF_DEG`].
+    CounterLift,
+    /// Key released, throttle kept ("letting go of the steering mid-drift").
+    Release,
+    /// Key released and throttle lifted (drive out straight).
+    ReleaseLift,
+}
+
+impl SnapExit {
+    /// All exits, for tables.
+    pub const ALL: [SnapExit; 3] = [
+        SnapExit::CounterLift,
+        SnapExit::Release,
+        SnapExit::ReleaseLift,
+    ];
+
+    /// Short name for tables.
+    pub fn name(self) -> &'static str {
+        match self {
+            SnapExit::CounterLift => "counter+lift",
+            SnapExit::Release => "release",
+            SnapExit::ReleaseLift => "release+lift",
+        }
+    }
+}
+
+/// [`SnapExit::CounterLift`]: the counter key is let go once the slide is under this, degrees
+/// (a driver unwinding the lock as the car straightens; the rack still takes `t_return_s`).
+pub const SNAP_KEY_OFF_DEG: f32 = 15.0;
+
+/// Snap-back measurement ([`snap_back`]): how violently the car comes back when the driver
+/// leaves a held 30–40° drift. Left-hand drift: the drift's yaw is + (left); the snap-back is
+/// yaw toward the right (−) and body slip to the other side (+).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapBack {
+    /// A 30–45° hold was reached (else the other fields are zero).
+    pub reached: bool,
+    /// Slide angle when the driver left the drift, degrees.
+    pub exit_deg: f32,
+    /// Largest yaw acceleration after the exit, rad/s² (any direction; 40 ms difference).
+    pub peak_yaw_acc: f32,
+    /// Largest yaw rate toward the right (against the drift's rotation), rad/s: the swing
+    /// past straight. 0 = never rotates the other way.
+    pub yaw_overshoot: f32,
+    /// Largest body slip to the other side, degrees (the tail swinging out the other way).
+    pub slip_overshoot_deg: f32,
+    /// Time from the exit until the slide is under 3° and the yaw rate under 0.3 rad/s for
+    /// 0.25 s, s (`f32::INFINITY` = not within the 3 s window).
+    pub settle_s: f32,
+    /// Spun (over 90° or travelling backwards) after the exit.
+    pub spun: bool,
+}
+
+/// Snap-back run (lead, 2026-10-20: "measure peak yaw acceleration and yaw-rate overshoot when
+/// countersteering out of a 30–40° drift and on key release"): 0.6 g on a 40 m left-hander, key
+/// into the turn + full throttle to 6°, then the counter key + full throttle (the owner's hold)
+/// until the slide has been inside 30–45° (clip 1's band) for 0.5 s (at most 6 s), then `exit`
+/// for 3 s.
+pub fn snap_back(car: &LoadedCar, assists: &AssistProfile, exit: SnapExit) -> SnapBack {
+    snap_back_with(car, assists, exit, |_, _, _| {})
+}
+
+/// [`snap_back`] with `on_tick(rig, steer, throttle)` called after every tick of the exit.
+pub fn snap_back_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    exit: SnapExit,
+    mut on_tick: impl FnMut(&crate::rig::Rig, f32, f32),
+) -> SnapBack {
+    use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    const LAG: usize = 10;
+    let mut rig = settle_on_circle(car, assists, 40.0, 0.6);
+    let gear = |rig: &crate::rig::Rig| !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR;
+    let (mut entered, mut in_band) = (false, 0usize);
+    let mut reached = false;
+    for _ in 0..6 * TPS {
+        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        entered |= angle > 6.0;
+        let (steer, throttle) = if entered { (1.0, 1.0) } else { (-1.0, 1.0) };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: gear(&rig),
+                ..Default::default()
+            },
+            assists,
+        );
+        let s = slide_state(&rig);
+        let a = (-s.body_slip).to_degrees();
+        if s.body_slip.to_degrees().abs() > 90.0 || s.v_fwd < 0.0 {
+            break;
+        }
+        in_band = if (30.0..=45.0).contains(&a) {
+            in_band + 1
+        } else {
+            0
+        };
+        if in_band >= TPS / 2 {
+            reached = true;
+            break;
+        }
+    }
+    let none = SnapBack {
+        reached: false,
+        exit_deg: 0.0,
+        peak_yaw_acc: 0.0,
+        yaw_overshoot: 0.0,
+        slip_overshoot_deg: 0.0,
+        settle_s: 0.0,
+        spun: false,
+    };
+    if !reached {
+        return none;
+    }
+    let exit_deg = (-slide_state(&rig).body_slip).to_degrees();
+    let mut rates = vec![slide_state(&rig).yaw_rate];
+    let (mut acc, mut over, mut slip_over) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut calm, mut settle, mut spun, mut key_off) = (0usize, None, false, false);
+    for t in 0..3 * TPS {
+        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        key_off |= angle < SNAP_KEY_OFF_DEG;
+        let (steer, throttle) = match exit {
+            SnapExit::CounterLift => (if key_off { 0.0 } else { 1.0 }, 0.0),
+            SnapExit::Release => (0.0, 1.0),
+            SnapExit::ReleaseLift => (0.0, 0.0),
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: gear(&rig),
+                ..Default::default()
+            },
+            assists,
+        );
+        on_tick(&rig, steer, throttle);
+        let s = slide_state(&rig);
+        if s.body_slip.to_degrees().abs() > 90.0 || s.v_fwd < 0.0 {
+            spun = true;
+            break;
+        }
+        rates.push(s.yaw_rate);
+        if rates.len() > LAG {
+            let d = rates[rates.len() - 1] - rates[rates.len() - 1 - LAG];
+            acc = acc.max(d.abs() / (LAG as f32 * PHYSICS_DT));
+        }
+        over = over.max(-s.yaw_rate);
+        slip_over = slip_over.max(s.body_slip.to_degrees());
+        calm = if s.body_slip.to_degrees().abs() < 3.0 && s.yaw_rate.abs() < 0.3 {
+            calm + 1
+        } else {
+            0
+        };
+        if settle.is_none() && calm >= TPS / 4 {
+            settle = Some((t + 1 - TPS / 4) as f32 / TPS as f32);
+        }
+    }
+    SnapBack {
+        reached,
+        exit_deg,
+        peak_yaw_acc: acc,
+        yaw_overshoot: over,
+        slip_overshoot_deg: slip_over,
+        settle_s: settle.unwrap_or(f32::INFINITY),
+        spun,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
