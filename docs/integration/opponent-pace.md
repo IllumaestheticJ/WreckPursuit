@@ -412,3 +412,28 @@ summed over the whole field, on the grid highway only). Opposing lanes are used 
 (hairpins) and where blocked; on the grid highway and Lantern the field loses 30–70 s per car
 behind civilians and each other. `passes/km` now counts every completed overtake
 (`Field::passes_by`), not only racer position changes.
+
+## Street racing phase 2 — whole-road line (2026-10-21)
+
+Per car width a second line is optimised over the whole road (own lanes + opposing, 0.6 m more
+from the far edge) with its own speed profile. A racer in Follow takes it while
+`wide_line_clear` finds the opposing side clear out past the next braking zone (oncoming cars
+by where they will be), never within 30 m of a junction (side-road traffic is not in view until
+it is in the way), and drops it as soon as a car or a light ahead sets its speed. Passes also
+check for an opposing-side junction 40 m past the pass.
+
+Seeds 1–8 (32 cars per row) vs the pre-street-racing tip:
+
+| race | skill | finishers | mean s | opposing | walls |
+|---|---|---|---|---|---|
+| lantern_checkpoint | 0.50 | 30 → 28 | 84.9 → 78.4 | 9 → 9 % | 0 → 0 |
+| lantern_checkpoint | 0.95 | 32 → 32 | 78.0 → 74.9 | 10 → 9 % | 0 → 0 |
+| hollins_sprint | 0.50 | 32 → 32 | 67.1 → 67.7 | 18 → 41 % | 4 → 14 (taps) |
+| hollins_sprint | 0.95 | 32 → 32 | 64.1 → 62.5 | 20 → 41 % | 17 → 8 |
+
+Lantern s50 DNFs are the give-way junction (the same seeds lose cars with the line forced off).
+Tried and dropped on the way (each made a seed worse): following the line into a queue (stopped
+on the opposing side → gridlock), edge margin on both edges (Hollins −0.5–1.3 s per car), the
+line through empty junctions (a civilian turning in met a racer nose to nose). Lock-in:
+lantern_checkpoint_s50 re-ranged (faster, rejoins 8–18 → 1–2 per car, no walls).
+Next: weaving through traffic and the skill / risk spread.
