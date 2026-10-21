@@ -390,7 +390,7 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Patrol presence (4 phases) | Exact table counts after warm-up |
 | Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
 | Night speeder, 03:00 (8 runs) | Pursuit at 51 s mean (126 s before round 12b's responders); reinforcement 102 s |
-| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each) | Core noon 3.2 s mean / 7.6 s worst; Suburb noon 9.3 / 16.8 s; Core 23:00 7.1 / 17.6 s; Suburb 23:00 19.3 s mean, 6 of 8 within 25 s (one run: the racer loops the city edge and U-turns) |
+| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each; 6×6 grid with the highway ramps, 2026-10-21) | Core noon 6.2 s mean / 14.3 s worst; Suburb noon 17.4 / 35.5 s, 3 of 5 calls within 25 s (**fails** its 15 s / 25 s targets, see integration doc 2026-10-21); Core 23:00 10.4 / 18.1 s; Suburb 23:00 16.4 s mean, 6 of 8 within 25 s |
 | Pop-in audit, every scenario | 0 of 105 mid-session spawns and 0 of 333 despawns in a racer's view cone / sight or within 120 m |
 | Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; careful units spend their risk budget (809 unit-seconds held to shadowing), an unlimited budget never does |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |

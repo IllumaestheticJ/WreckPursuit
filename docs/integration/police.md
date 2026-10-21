@@ -1121,3 +1121,87 @@ Checks: `e2e:presets`, `e2e:touch`, `tsc`, fmt, clippy, wasm build pass. Fail id
 exists" (the setter exists now); `wp_vehicle` `roster_diff_hashes_are_pinned`,
 `front_drive_cars_understeer_mildly`; `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
 `simcli_golden_replays_play_back_in_the_browser_core`; 52 simcli goldens on the round-12 tip of 2026-10-20 (same set with and without this merge; `ws/police` before it: 19; none re-blessed here).
+
+## Police on main's 6×6 grid after the highway port (2026-10-21, `side/police-tune`)
+
+Base: `side/police-tune` @ 4bb05c8e (round 12 + main, highway port). `wp_police` source was
+identical to the pre-port release `e55d7342`; only the road network changed (main's
+half-diamond ramps on the small grid). Main itself has no `response_*` scenarios, and these
+scenarios run units on the built-in kinematic driver (`internal_driving: true`), so the
+pro-driver / lane-driver split in `unit_input` (main-merge.md "Police driving") plays no part
+in them; responders stay on the lane driver in `wp_sim` (unchanged here).
+
+**Root causes (measured with per-run traces, scratch diagnostics not committed)**
+1. *Racers now use the viaduct.* A Core racer spends most of a response run on the highway
+   (night core seed 300: 53 of 61 s; before the port 0-7 s). The carriageway is one-way and
+   built from 20-40 m pieces; `racer_meets` stopped after 10 legs (~300 m) at bend nodes in
+   mid-deck that no responder can reach, so no meeting was ever found and responders
+   chased from behind.
+2. *Meetings timed at the racer's speed at the report.* A speeder reported while braking for a
+   junction (10.9 m/s) then ran at 35.8 m/s and reached the chosen junction in 5.7 s instead of
+   the predicted 10.4 s (night core 307): responders picked that way were late by construction.
+3. *Built-in driver turn-rounds.* A unit turning round onto a new route swings up to two
+   turning radii beside the start of its track; the run-wide check only exempted the first
+   metre, so it "crashed" (health, reset at 0 m/s) as it accelerated out, and the 3-s re-plan
+   could give it a route the other way: 6-7 s circling in a junction (day suburb 304).
+4. *Redispatch churn feeds night backup.* A responder still > 150 m away 6 s after the call
+   was released even while heading for a junction ahead of the racer; a new one spawned and
+   the released ones stayed nearby idle, joining the pursuit at once as backup at night.
+
+**Changes** (3 commits, `wp_police` only)
+- `RoadGraph::predict_path_to_junction`; `racer_meets` / `respond_meet_point` use it,
+  `racer_meets` skips one-way bend nodes (10 meetings counted over the rest).
+- `RacerRecord::recent_top_mps` / `expected_speed` (decays 1.5 m/s per s) for meeting times.
+- `PoliceSystem::meets_first` (shared); redispatch only releases a far unit that can no longer
+  meet the racer first.
+- `unit::facing_away_from_track`; no run-wide crash within `crash_offset_m` of the track
+  start; responders and interceptors skip the 3-s re-plan while turning round.
+
+Tried and dropped (each made other scenarios worse or did nothing): spawn candidates measured
+along the meeting route / ahead on the racer's carriageway (all such spots on the straight
+viaduct are in the racer's view, so the no-pop-in rule correctly rejects them); spawning facing
+the meeting route; responder "don't flip to a turn-round route" hysteresis (day suburb 304 →
+never reached, night core 303 10 → 30 s); timing meetings from the report's age (night suburb
+304 21 → 34 s); a heading-aware `meets_first` with a 5 s turn-round cost (no change, ratio
+2.50 → 2.03).
+
+**Numbers (before = 4bb05c8e, after = this branch)**
+
+| Check | Before | After | Target |
+|---|---|---|---|
+| reinforcement night/day (`night_core_speeder` / `day_core_speeder`) | 54.4 / 33.2 s = **1.64** | 45.6 / 18.2 s = **2.50** | ≥ 2 |
+| `response_night_core` mean / worst / ≤ 25 s | 18.2 / 39.7 s / 6 of 8 | **10.4 / 18.1 s / 8 of 8** | ≤ 15 / ≤ 25 / ≥ 7 of 8 |
+| `response_day_suburb` mean / worst / ≤ 25 s (5 runs with a call) | 18.2 / 39.6 s / 3 of 5 | 17.4 / 35.5 s / 3 of 5 (**still fails**) | ≤ 15 / ≤ 25 / ≥ 7 of 8 |
+| `response_night_suburb` mean / ≤ 25 s | 19.1 s / 6 of 8 (worst 61) | 16.4 s / 6 of 8 (worst 38.4) | ≤ 30 / ≥ 6 of 8 |
+| `response_day_core` mean / worst | 6.3 / 14.3 s | 6.2 / 14.3 s | ≤ 10 / ≤ 15 |
+| `radio_city_chase` calm lines/min (4 runs; 12 runs) | 4.2 | 4.09; 4.83 | 5.0 (was 4.0) |
+| Hollins sprint winner (`hollins_hill_sprint`, with police) | 79.46 s | 79.46 s | ≤ 110 s |
+
+**`radio_city_chase` calm budget stays 5.0/min** (17a48e8f). Calm time in that scenario is only
+the gaps between chases, 58.7 s over the 4 runs after these fixes, so a single line moves the
+rate by ~1/min; 4 lines give 4.09/min, 12 runs 4.83/min. Getting under 4.0 would mean cutting
+"resuming patrol" wrap-ups that belong to the chases. The calm-patrol budget (4/min) is checked
+by `radio_calm_patrol.ron`, which passes.
+
+**Still failing: `response_day_suburb` — needs an owner / E decision.** The two bad runs are
+not dispatch timing:
+- seed 301 (30.2 s): a patrol recognises the racer at 218 m (day range 250 m), which starts a
+  pursuit and moots the call. That unit is ahead of the racer coming head-on, so the shadow gap
+  rule holds it at 0 m/s (a deliberate round-12 behaviour); at 153 m the racer turns off at the
+  junction 98 m short of it, and the interceptors then aim 10-20 s ahead of a 2× racer.
+- seed 304 (35.5 s): the call goes to a Core patrol 365 m away facing the wrong way; it turns
+  round, then the racer turns twice and the meeting junction moves each time (each turn-round
+  is ~6 s at a 4 m/s crawl).
+Options: (a) accept Suburb noon at ~17 s mean / 3 of 5 and widen that scenario's targets (the
+night Suburb scenario already uses 30 s / 6 of 8); (b) let a pursuer ahead of a head-on racer
+keep closing instead of holding (changes chase behaviour and moves the chase goldens);
+(c) a real three-point-turn model in the built-in driver (makes every scenario re-aim). I did
+not loosen the target or change seeds.
+
+**Gate (this worktree, own target dir).** `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets -D warnings`: pass. `cargo test -p wp_police`: lib 70/70, system 21/21,
+radio_chatter 5/5, police_scenarios 2/3 (`all_police_scenarios_pass_and_are_deterministic`
+fails on `response_day_suburb` only). `wp_race --test race_picker` 7/7, `wp_opponent` all,
+`wp_net --test vesper_e2e` 1/1, `wp_sim --test police_passby` 3/3,
+`simcli --test scenarios all_scenarios_pass_and_are_deterministic_in_process` pass. Goldens not
+run or blessed; chase goldens with kinematic police units may move.
