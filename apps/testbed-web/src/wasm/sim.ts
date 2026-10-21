@@ -229,6 +229,8 @@ export const sim = {
   step: (dt: number): number => wasm.step(dt),
   setDamageMode: (mode: string): void => wasm.set_damage_mode(mode),
   carIds: (): string[] => JSON.parse(wasm.car_ids()),
+  /** Menu stat bars for every car (`wp_wasm::car_stats_json`, no session needed). */
+  carStats: (): CarStatsTable => JSON.parse(wasm.car_stats_json()),
   spawn: (carId: string, pos: [number, number, number], yaw: number): number =>
     wasm.spawn_vehicle(carId, new Float32Array(pos), yaw),
   setInput: (entity: number, input: DriverInput): boolean => wasm.set_input(entity, packInput(input)),
@@ -272,6 +274,8 @@ export const sim = {
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
+  /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */
+  roadMarkings: (yellow: boolean): Float32Array => wasm.road_markings(yellow),
   /** One state byte per signal head (layout.ts SIGNAL), same order as signalHeads(). */
   signalStates: (): Uint8Array => wasm.signal_states(),
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
@@ -413,6 +417,21 @@ export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+
+/** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
+export interface CarStatsTable {
+  scales: { zero_to_100_s: [number, number]; top_speed_kmh: [number, number]; cornering_g: [number, number]; skidpad_radius_m: number };
+  cars: Record<
+    string,
+    {
+      display_name: string;
+      zero_to_100_s: number | null;
+      top_speed_kmh: number;
+      cornering_g: number;
+      bars: { acceleration: number; top_speed: number; cornering: number };
+    }
+  >;
+}
 
 /** `wp_wasm::garage::LiveBill` (typed in apps/ui-kit/src/live/bill.ts as LiveBillJson). */
 export type LiveBill = import("../../../ui-kit/src/live/bill").LiveBillJson;

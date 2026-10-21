@@ -711,3 +711,59 @@ soft-constraint plasticity and parry's `TriMesh::compute_pseudo_normals` call th
 non-FMA variant per CPU. The vehicle scenarios above don't depend on it (the forced non-FMA run
 matched), and native == wasm holds, but if a future cross-machine mismatch involves joints or
 trimesh setup, look there first.
+
+## Merge of `main` into `ws/harness` (2026-10-21, PR #17)
+
+Owner instruction: resolve the conflicts on `ws/harness` and **keep main's highway layout**
+(grid viaduct with diamond ramps, Loop 9 as a divided highway with interchanges).
+
+**Layout.** Main's procgen / Vesper road plans win. Round 12's road surfaces (node patches,
+sidewalks, residential courts, decor, covered roads) are laid on top of them. Where the two
+clashed:
+- **Highway shoulders** (`wp_world::builder`): round 12's generic 3 m highway shoulder is not
+  added to the paved width of roads that set their own (`RoadSpec::shoulder_left_m` /
+  `shoulder_right_m`: main's carriageways and ramps). Without this, every carriageway was 3 m
+  wider each side and the median barrier sat inside the opposite carriageway. Junction
+  setbacks keep the generic shoulder, so main's spine-end junctions stay at 30 m (with 20 m,
+  three-lane turns collided in `tests/blocked.rs`).
+- **Hollins Tunnel**: one tube over both Loop 9 carriageways. The centreline runs midway
+  between them and the half width reaches the far paved edges. Per-carriageway tubes 14 m apart
+  overlapped, and the backfill over one buried the other.
+- **Founders Cut**: 105 m (was 250 m), north portal at (419.5, 1110). Its 7 m dip had pulled the
+  Uptown diamond's inner terminal down to z 16.3, so main's bridge over Loop 9 needed a 19.5 %
+  grade. The Uptown Connector now matches main (10.0 %, crest 0.18 g). The design floor in
+  `covered_roads_block_sight_in_and_out` moved from 200 m to 100 m; the road between the
+  junctions is only 377 m long and has to fit both 7 m ramps.
+- **Grid ramp terminals**: `TERMINAL_X_M` 22 → 21 m. Round 12's 3 m arterial median widened the
+  grid junctions (radius 9 → 10.5 m), so the block between a terminal and the next junction fell
+  to 12 m, below `default_city_shape`'s two-car minimum.
+- **Freeway merges / diverges** (radius-0 junctions) in `surface::nodes`: they are paved the way
+  main paves them (the carriageways run through; only the ramp's taper connectors are added).
+  They are flagged `overlapping_ends` (the ramp ribbon lies on the carriageway at its own bank,
+  up to 13 cm off on Loop 9's 6 % sweepers) and are not counted against the cap. Ends that only
+  touch (two carriageways sharing the median edge) no longer count as overlapping. A highway
+  kerb corner sharper than 75° is filleted instead of left as a sharp point.
+- **Deck rails** (`surface::rail_piece`, used by physics and the greybox): a ramp edge leaving
+  the carriageway gets its rail from where it leaves the carriageway's paving. Before, a 6 m
+  rail piece stood across the outer lane at every grid viaduct merge.
+- **Flat terrain**: main gave the grid a flat heightfield. `RoadNetwork::relief()` (terrain with
+  relief only) now decides round 12's lot width, wedges and slope support, so the grid keeps
+  its 9 m flat-city lots.
+- **Traffic LOD**: on demotion a car keeps up to a lane width of lateral offset (was ±1.5 m), so
+  a car demoted mid lane change on main's 3.7 m highway lanes carries on into the lane
+  instead of jumping 1.6 m.
+
+**Other merges.**
+- Road format v5 (main's `median_barrier` after round 12's v4).
+- Police: round 12's stuck-recovery phases plus main's pro driver (`pro_input`, used while the
+  siren is on).
+- Race: main's "leaving the route is never a DQ". The AI entrants' corridor gets a fixed
+  `AI_CORRIDOR_MARGIN_M`.
+- Steering: round 12's self-aligning steering is kept, because the owner removed the yaw gyro.
+  Main's high-speed catch fix (4a4efba1) is built on the gyro, so it does not carry over; see
+  the open question on the PR.
+- Test expectations adjusted for main's layout: `city_v2` accepts the painted centre line under
+  the Route 40 West probe; `spawns_respect_sightline_and_active_area` waits 12 s (was 10 s) so
+  cars can finish a ramp-terminal junction before the old area must be empty.
+- Regenerated with the tools (`just city`, `just city-v2`, `just car-stats`); goldens
+  re-blessed in a `[bless]` commit.

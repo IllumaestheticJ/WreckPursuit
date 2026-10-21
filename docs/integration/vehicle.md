@@ -424,6 +424,35 @@ before/after numbers, and contract request 7 for the optional per-car knob.
   `tools/specsheet/roster_inputs.py` + 5 `data/cars` files (item 6).
 
 
+## High-speed catches: tail-happy / snap oversteer (owner playtest 2026-10-20)
+
+Owner: "car is way too tail happy at speed and incredibly hard to catch a slide without snap
+oversteering at speed." Fixed in `wp_vehicle` only (`steering.rs`, `slide.rs`, `vehicle.rs`);
+no contract or car-data change. Model and before/after table: README → "High-speed catches".
+
+- Root cause is the keyboard/gamepad steering help, not the tire/chassis model: steady state
+  every car is front-limited, and a proportional (wheel) countersteer catches cleanly. A full key
+  at 140 km/h gave 4× the road-wheel angle the front can use; the countersteer help aimed 35%
+  past the slide, handed the driver's full lock back before the car was straight, and the gyro
+  switched off exactly when the car swung back through straight.
+- Changes: assisted lock capped at the grip lock (`steering::grip_lock`); above 110 km/h
+  (`slide::highway_amount`, from 60 km/h) the driver trim drops to 30%, countersteer gets the
+  full help on any preset, and held keys into the new slide are not treated as a flick;
+  countersteer help stays on to straight (`slide::catch_amount`); gyro also damps a fast
+  slide-angle swing at highway speed.
+- Result (keyboard TCS/ESC off, 150 km/h kick): snap-back after a catch 13–18° → 1–4°;
+  key released 0.25 s late 14–19° → 6–9° (no longer more than the slide itself). Gamepad full
+  stick 11° → 3–7°. Side effect: less understeer on a held key (steady yaw rate +5–30%).
+- Wheel / AI presets bit-identical (`wheel_profile_is_bit_identical_to_the_plain_model`).
+- New: `metrics::catch_snap_back`, `examples/hs_stability.rs`, test
+  `keyboard_catch_at_speed_does_not_snap_back` (fails on the old code).
+- `tests/snapshot.rs::set_state_is_a_close_approximation` tolerance 0.5 → 0.75 m: the coupe
+  now carries more speed through that window and sits at the slide threshold (0.27 → 0.60 m).
+- Goldens re-blessed in a `[bless]` commit: regression_grid_24, smoke_coupe_circle,
+  smoke_subset_systems, vehicle_coupe_slalom (keyboard/gamepad-driven; their range checks pass).
+- Outside my crates: `apps/simcli/golden/*` (bless), `docs/PLAYTEST_LOG.md` row 36.
+
+
 ## Lead feedback (round 8, 2026-10-19)
 
 Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.

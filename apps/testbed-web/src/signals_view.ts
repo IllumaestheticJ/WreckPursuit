@@ -1,5 +1,6 @@
 // Traffic signals: one mast-arm head over each signalised approach (at the stop line) plus a
-// far-side pedestal head across the junction, and a white stop line. Static geometry comes from
+// far-side pedestal head across the junction (the stop line is part of the road markings,
+// markings_view.ts). Static geometry comes from
 // signal_heads() once per session; per-frame states from signal_states() (one byte per head)
 // only recolour lamps whose state changed. One InstancedMesh per part keeps it to a handful of
 // draw calls for the whole city. Only heads within SIGNAL_DRAW_M of the camera are packed into
@@ -103,12 +104,6 @@ export class SignalView {
       new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.8 }),
       inst,
     );
-    const stopMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.9 });
-    // Painted on the asphalt: draw over the road instead of z-fighting with it.
-    stopMat.polygonOffset = true;
-    stopMat.polygonOffsetFactor = -3;
-    stopMat.polygonOffsetUnits = -12;
-    const stops = instanced(new THREE.BoxGeometry(1, 0.45, 0.02), stopMat, n);
     const lampGeo = new THREE.SphereGeometry(0.13, 10, 8);
     this.lamps = [0, 1, 2].map(() => {
       const m = instanced(lampGeo.clone(), new THREE.MeshBasicMaterial({ toneMapped: false }), inst);
@@ -143,11 +138,6 @@ export class SignalView {
       q.setFromAxisAngle(zAxis, yaw);
       const poleR = right + POLE_CURB_GAP;
 
-      // Stop line across the approach's lanes.
-      const mid = (left + right) / 2;
-      m4.compose(v.set(x + rx * mid, y + ry * mid, z + 0.012), q, s.set(right - left, 1, 1));
-      stops.setMatrixAt(h, m4);
-
       // Near side: tall pole at the right curb, arm over the lanes, head at the lane centre.
       m4.compose(v.set(x + rx * poleR, y + ry * poleR, z), q, s.set(1, 1, NEAR_POLE_H));
       poles.setMatrixAt(h * 2, m4);
@@ -165,10 +155,10 @@ export class SignalView {
       poles.setMatrixAt(h * 2 + 1, m4);
       this.placeHead(housings, h * 2 + 1, px, py, pz + FAR_POLE_H - 0.45, fx, fy, q, m4, one);
     }
-    this.parts = [poles, arms, housings, stops];
+    this.parts = [poles, arms, housings];
     this.group.add(...this.parts, ...this.lamps, this.glow);
     this.fullPerInstance = [poles, housings, ...this.lamps].map((m) => (m.instanceMatrix.array as Float32Array).slice());
-    this.fullPerHead = [arms, stops].map((m) => (m.instanceMatrix.array as Float32Array).slice());
+    this.fullPerHead = [arms].map((m) => (m.instanceMatrix.array as Float32Array).slice());
     // Nothing is drawn until the first update() picks the heads near the camera.
     for (const m of [...this.parts, ...this.lamps, this.glow]) m.count = 0;
   }
@@ -187,7 +177,7 @@ export class SignalView {
     this.slotOf.fill(-1);
     near.forEach((h, s) => (this.slotOf[h] = s));
     this.near = near;
-    const [poles, arms, housings, stops] = this.parts;
+    const [poles, arms, housings] = this.parts;
     [poles, housings, ...this.lamps].forEach((m, k) => {
       const src = this.fullPerInstance[k];
       const dst = m.instanceMatrix.array as Float32Array;
@@ -195,7 +185,7 @@ export class SignalView {
       m.count = near.length * HEADS_PER_APPROACH;
       m.instanceMatrix.needsUpdate = true;
     });
-    [arms, stops].forEach((m, k) => {
+    [arms].forEach((m, k) => {
       const src = this.fullPerHead[k];
       const dst = m.instanceMatrix.array as Float32Array;
       near.forEach((h, s) => dst.set(src.subarray(h * 16, (h + 1) * 16), s * 16));

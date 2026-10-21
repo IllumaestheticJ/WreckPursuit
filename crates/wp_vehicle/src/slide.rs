@@ -28,8 +28,9 @@ pub const CLASS_FLOOR: f32 = 0.25;
 /// until the contract gains an optional field (vehicle.md, contract request 7).
 pub const SLIDE_CLASS_OVERRIDES: &[(&str, f32)] = &[];
 
-/// Rear-slip angle (rad) where the slide assists start / are fully on.
-const SLIDE_START: f32 = 0.06;
+/// Rear-slip angle (rad) where the slide assists start.
+pub const SLIDE_START: f32 = 0.06;
+/// Rear-slip angle (rad) where the slide assists are fully on.
 const SLIDE_FULL: f32 = 0.16;
 /// Peak engine power from the torque curve, W.
 pub fn peak_power_w(def: &VehicleDef) -> f32 {

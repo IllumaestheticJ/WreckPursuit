@@ -22,7 +22,8 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// v4 (residential streets, playtest rows 94–95): building kind and roof
 /// ([`Building::kind`], [`Building::roof`], [`Building::roof_rise_m`]) and street / yard
 /// furniture ([`RoadNetwork::decor`]).
-pub const ROAD_FORMAT_VERSION: u32 = 4;
+/// v5 (divided highways): `RoadSurface::median_barrier`.
+pub const ROAD_FORMAT_VERSION: u32 = 5;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -137,6 +138,9 @@ pub struct RoadSurface {
     pub highway: bool,
     /// Kerb + sidewalk on the left / right edge.
     pub sidewalk: [bool; 2],
+    /// A concrete median barrier runs along the left paved edge (one carriageway of a
+    /// divided highway carries it; [`crate::surface::median_barriers`] gives its line).
+    pub median_barrier: bool,
 }
 
 impl RoadSurface {
@@ -517,6 +521,15 @@ pub enum RoadError {
 }
 
 impl RoadNetwork {
+    /// The terrain when it has relief (hills, embankments); `None` for a city without terrain
+    /// or with a flat one (the grid city's, under its viaduct). Sidewalk lots, wedges and
+    /// slope support follow the flat-city rules then.
+    pub fn relief(&self) -> Option<&crate::terrain::Heightfield> {
+        self.terrain
+            .as_ref()
+            .filter(|t| t.z.iter().any(|z| *z != t.z[0]))
+    }
+
     /// Ground height at `p` (terrain, or 0 without one). Roads are not included; see
     /// `CityMap::surface_height`.
     pub fn ground_z(&self, p: [f32; 2]) -> f32 {

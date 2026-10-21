@@ -9,6 +9,8 @@
 //!   with different seeds and start points are added up until `secs` seconds of active pursuit.
 //!
 //! Incidents (once per pair per 2 s), split by whether the police car had its lights on:
+//! - **wall hits**: contacts of a police car with the static world (walls, kerbs, buildings;
+//!   lead P8 pro driving);
 //! - **contacts**: Rapier contacts between a police car and a physical traffic car (traffic is
 //!   physical only near a player);
 //! - **overlaps**: a police car's footprint overlapping a kinematic traffic car's (they would have
@@ -36,6 +38,8 @@ struct Tally {
     overlaps: [u32; 2],
     /// Overlaps with the police car stopped (traffic drove into it).
     overlaps_police_stopped: u32,
+    /// Police car hits on the static world (walls, kerbs, buildings), `[lights off, on]`.
+    wall_hits: [u32; 2],
     max_rel_mps: f32,
     sim_s: f32,
     pursued_s: f32,
@@ -115,6 +119,22 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
         }
         sim.step_fixed();
         t.sim_s += PHYSICS_DT;
+        if let Ok(spec) = std::env::var("WP_TRACE_COP") {
+            let mut it = spec.split(',');
+            let (sd, ent): (u64, u32) = (
+                it.next().unwrap().parse().unwrap(),
+                it.next().unwrap().parse().unwrap(),
+            );
+            if sd == seed && tick % 24 == 0 {
+                if let Some(v) = sim.vehicles().iter().find(|v| v.id.0 == ent) {
+                    let st = v.vehicle.state();
+                    let u = sim.police().units().iter().find(|u| u.entity == Some(v.id));
+                    if let Some(u) = u {
+                        eprintln!("TRACE t={:.1} pos=({:.1},{:.1}) v={:.1} in={:.2}/{:.2}/{:.2}/{:.1} plan={:.1} lim={:.1} cmd={:.1} {} lane={:.1} s={:.0}/{:.0}", t_of(tick), st.pos[0], st.pos[1], st.speed_mps, v.input.steer, v.input.throttle, v.input.brake, v.input.handbrake, u.planned_speed, u.avoid.limit_mps, u.cmd.speed_mps, u.assignment.name(), u.cmd.lane_offset_m, u.track_s, u.cmd.track.length());
+                    }
+                }
+            }
+        }
         // Police cars: entity → (lights on, position, forward, speed).
         let cops: BTreeMap<EntityId, (bool, [f32; 3], [f32; 2], f32)> = sim
             .vehicles()
@@ -139,6 +159,28 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
             else {
                 continue;
             };
+            let wall = match (cops.get(&a), cops.get(&b)) {
+                (Some(c), None) if b == wp_contracts::WORLD_ENTITY => Some((a, c)),
+                (None, Some(c)) if a == wp_contracts::WORLD_ENTITY => Some((b, c)),
+                _ => None,
+            };
+            if let Some((cop_id, c)) = wall {
+                let key = (cop_id.0, u32::MAX);
+                if last_contact.get(&key).is_none_or(|l| tick - l > gap) {
+                    t.wall_hits[c.0 as usize] += 1;
+                    println!(
+                        "  seed {seed} t={:.1} s  wall hit police {} at ({:.0},{:.0}) v {:.1} lights {}",
+                        t_of(tick),
+                        cop_id.0,
+                        c.1[0],
+                        c.1[1],
+                        c.3,
+                        c.0
+                    );
+                }
+                last_contact.insert(key, tick);
+                continue;
+            }
             let cop = match (cops.get(&a), cops.get(&b)) {
                 (Some(c), None) if traffic.contains(&b) => c,
                 (None, Some(c)) if traffic.contains(&a) => c,
@@ -229,11 +271,13 @@ fn main() {
     );
     for (name, i) in [("lights off", 0), ("lights on ", 1)] {
         println!(
-            "  {name}: {} contacts ({:.1} per 5 min) + {} kinematic overlaps ({:.1} per 5 min)",
+            "  {name}: {} contacts ({:.1} per 5 min) + {} kinematic overlaps ({:.1} per 5 min), {} wall hits ({:.1} per 5 min)",
             t.contacts[i],
             per5(t.contacts[i]),
             t.overlaps[i],
-            per5(t.overlaps[i])
+            per5(t.overlaps[i]),
+            t.wall_hits[i],
+            per5(t.wall_hits[i])
         );
     }
     println!(

@@ -108,8 +108,10 @@ extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` 
   `base_z_m + height_m`).
 - `surfaces[]` (v2): the paved ribbon of each source road between its junction setbacks:
   `road`, trimmed `centre` polyline (3D), `bank[]` per point (cross slope, dz per metre to the
-  right; lanes lie on `centre.z + bank · lateral`), `left_m`/`right_m` paved widths,
-  `highway`, `sidewalk`. Physics and the greybox draw these.
+  right; lanes lie on `centre.z + bank · lateral`), `left_m`/`right_m` paved widths (lanes +
+  parking + shoulders), `highway`, `sidewalk`, and (v3) `median_barrier`: a concrete barrier
+  runs along the left paved edge (`surface::median_barriers`). Physics and the greybox draw
+  these.
 - `terrain` (v2): `Option<Heightfield>` — `origin`, `cell_m`, `nx`, `ny`, row-major heights
   (bilinear between vertices). `None` = flat ground at z = 0 (the procedural grid, imports).
 
@@ -137,6 +139,13 @@ lines or crosswalks. Each lane owns its half of a shared line, so answers do not
 query order. Lanes more than 3 m above or below the queried z are ignored (grade
 separation). About 4 % of road samples are paint on Port Vesper v2 (`painted_share_is_plausible` gates 2–15 % on the 6×6 city).
 
+`marking_mesh(&map)` turns the same rules into a render mesh (white + yellow paint, 2 cm above
+the banked surface); the testbed draws it through wasm `road_markings(yellow)` (Port Vesper
+v2: ≈ 91 k triangles, two draw calls). Centre lines and the left (median-side) edge line of a
+one-way highway are yellow; merging freeway ramps get no stop line.
+`mesh_paints_what_marking_at_reports` checks that > 98 % of the mesh's triangles sit over a
+`marking_at` hit of the right colour.
+
 ### Builder rules (procgen and OSM share them)
 - Cross-sections (`BuildOptions`, playtest row 94): lanes 3.5 m (highway 3.7 m, alley 3.0 m),
   parking strip 2.5 m; highways get a 3 m paved median and 3 m outer shoulders, two-way
@@ -150,14 +159,31 @@ separation). About 4 % of road samples are paint on Port Vesper v2 (`painted_sha
   middle Straight; bus lanes Straight+Right. Left turns map left-aligned, others right-aligned.
 - Control: signals when every road is collector or above, at 5+-way junctions, or when tagged;
   priority (higher class has right of way) when classes differ; all-way stop otherwise.
+- Freeway merge / diverge (`ControlHint::Freeway`, three one-way roads): lanes set back
+  `FREEWAY_SETBACK_M` (30 m) so the ramp lane tapers along a 60 m connector, the main road's
+  paving runs through (no junction disc: radius 0), main lanes continue left-aligned and the
+  ramp joins / leaves the rightmost lane (a diverge's rightmost lane is an option lane).
+  Control is priority with the main road major; a minor *highway* lane (an on-ramp) yields on
+  the move in `traffic.rs` instead of stopping first.
 - Signal plan: opposite approaches share a phase; green 14–30 s by class; yellow
   `clamp(1 + v / 6.1, 3, 5)` s (ITE); all-red 1.5 s (2 s above 20 m/s).
 
 ## Procedural city (`gen-city --grid 12x12 --seed N`)
 Grid of streets at 110 m centred on the origin. Rows/columns 2 and 9 are 2+2 arterials
 (40 mph), the two central rows/columns collectors (30 mph, parking), the rest local streets
-(25 mph, parking). A 3+3 highway spine (55 mph) runs north–south between the central columns
-and crosses only arterial/collector rows at signals; other rows end at it. Two 3+3 diagonal
+(25 mph, parking). The highway spine (55 mph) runs north–south between the central columns:
+a divided viaduct (two one-way 3-lane carriageways, shoulders, median barrier) that leaves
+the ring road at grade at each end (signalised T), climbs over 200 m (≤ 6 %) after a 115 m
+flat run and bridges the arterial/collector rows with 7.5 m clearance; other rows end at the
+columns beside it. The first and last crossing rows get ramps: 45 mph ramps that leave /
+join the carriageways 280 m away and meet the row at stop-controlled terminals 22 m either
+side of the centreline (`ControlHint::RampTerminal`: the street keeps priority, the off-ramp
+stops and yields). Every grid gets the half diamond facing the ring (an exit for traffic
+heading away from the ring, an entry towards it: 4 ramps); where the next block in is long
+enough as well (the 12×12 city) each row gets a full diamond (8 ramps). The ground is
+a flat heightfield 12 cm under the streets, so `wp_sim` builds the road mesh (the viaduct is a
+real bridge) and the greybox draws piers and parapets; buildings still do not block cars on
+flat ground. Two 3+3 diagonal
 arterials with kerbside bus lanes (35 mph) run corner to corner through grid nodes (6-way
 signalised junctions) and stop at the highway block. An octagonal 2+2 ring road (45 mph)
 collects every street end (priority T-junctions with local streets). Mid-block alleys
@@ -167,7 +193,7 @@ Suburb north/west). Buildings on lots (Core 5–8 storeys, Commercial 2–4, Res
 courtyards, warehouses in the bands). Green-wave offsets along arterial rows (eastbound),
 columns (northbound) and diagonals at 90 % of the limit. POIs: 2 police stations + helipad,
 3 garages, 4 safehouse candidates, 3 race grids (highway, arterial, ring). The 12×12 city has
-1734 lanes, 224 junctions (58 signalised), 1144 buildings, ~104 drivable lane-km.
+1742 lanes, 232 junctions (54 signalised, 8 freeway merges / diverges), 1703 buildings.
 
 ## Port Vesper v2 (`vesper::generate`, `World::vesper`, `gen-city --preset vesper_v2`)
 After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m terrain cells.
@@ -176,10 +202,23 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   the quay; Canal Flats industrial grid; organic districts as warped grids with curved edges,
   dropped edges and cul-de-sacs (Larkspur west, Mercer north, Eastgate east, Bayview on the
   north-east plateau); Hollins Drive (6 switchbacks up Hollins Knob, ≈ 110 m), Ridge Road back
-  down over the crests, the Knob lot; Bluff Road along the plateau edge; Loop 9, a 3+3
-  highway loop (filleted control polygon, radius ≥ 420 m sweepers) with 7 signalised
-  junctions; Route 40 West (dead-ends at the map edge, passes **under** the loop: overpass)
-  and Route 40 North (cut **under** the loop: underpass).
+  down over the crests, the Knob lot; Bluff Road along the plateau edge; Loop 9, a divided
+  highway loop (filleted control polygon, radius ≥ 420 m sweepers; see below) with six
+  interchanges and no at-grade junction; Route 40 West (dead-ends at the map edge, passes
+  **under** the loop: overpass) and Route 40 North (cut **under** the loop: underpass).
+- **Loop 9:** profiled as one road (so both directions share one vertical profile and bank),
+  then split into two one-way 3-lane carriageways 7.05 m either side of the centreline: 1.5 m
+  paved median shoulders up to a Jersey-profile concrete barrier on the centreline (0.6 m base,
+  0.81 m tall; `wp_sim` builds 0.5 × 0.81 m box colliders along it), 2.5 m outer shoulders.
+  **Interchanges:** five diamonds (Harbor Boulevard west and east, Lantern Way, Bluff Road,
+  Uptown Connector) and a half diamond at the port (inner carriageway only). Each diamond's
+  crossroad (2+2, 10 % grade cap) bridges both carriageways with 7.5 m clearance between two
+  signalised terminals 150 m either side; four one-way 45 mph ramps per diamond leave / join
+  the carriageways 300 m up / downstream of the crossroad. A ramp shares the carriageway's
+  plane for its first 90 m (30 m taper + parallel lane beside the shoulder), then S-curves to
+  its terminal under an 8 % cap; a second profiling pass holds every terminal within reach of
+  its ramps' gores. Interchange crossroads take the old junctions' local roads (Terminal
+  Avenue no longer reaches the loop; the port is served by the half diamond).
 - **Road names:** `World::vesper` keeps the generator's name per source road
   (`World::road_names`; presentation only, not in the road format or the state hash), and
   `World::edge_names()` names every road-graph edge (`RoadEdgeId`) after its road. The police
@@ -208,10 +247,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `Knob Observatory Lot`).
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
-  through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
+  through the northern shoulder of Hollins Heights, 391 m, one tube over both carriageways, road profile unchanged (it already
   ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
-  Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
-  (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
+  Uptown Connector dropped 7 m below the lowest natural ground into a 105 m covered trench
+  (an internal profile anchor; ramps ≈ 5 %; 250 m before the merge with main, now ending
+  ≈ 140 m short of the Uptown diamond so its bridge over Loop 9 stays at 10 %), ground backfilled level with the plaza deck.
   Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
   (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
   shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
@@ -222,7 +262,9 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
   sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
 
-950 lanes, 133 junctions (27 signalised), 3312 buildings, 2 grade separations, 2 covered roads, terrain
+1150 lanes, 182 junctions (31 signalised, 22 freeway merges / diverges), 3796 buildings, 2 covered roads,
+14 grade separations (Route 40 West / North and five crossroads, each over or under both
+carriageways), 22 ramps, ≈ 10 km of median barrier, terrain
 681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
@@ -535,6 +577,14 @@ per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seed
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 
 ## Known gaps
+- Grid cities smaller than 12×12 have half diamonds only (their inner blocks are too short
+  for the other half): from the city you can join the highway towards the ring and leave it
+  coming from the ring, plus the ring junctions at both ends.
+- The single-car rig (`wp_vehicle::rig`, client prediction and `tests/drive.rs`) drives on a
+  flat slab, so it does not see the grid's viaduct either (as on Port Vesper's hills).
+- No painted gore chevrons or dotted lane-line extensions across freeway tapers; the taper
+  connectors themselves read as `Concrete` in `surface_at` (other connectors read `Asphalt`).
+  Taper connectors follow the paving's height (graded, banked) rather than a straight line.
 - Physical agents are `wp_vehicle` instances, but `wp_sim` does not yet create rigid bodies /
   damage models for them (needs `LodChange` handling in the sim loop, see
   `docs/integration/world.md`). Until then physical traffic cannot be hit.

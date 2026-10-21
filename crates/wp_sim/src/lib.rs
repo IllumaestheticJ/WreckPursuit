@@ -187,6 +187,7 @@ pub struct Sim {
     props: props::Props,
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
+    police_car_limits: Option<wp_police::pro::CarLimits>,
     traffic_car: Option<LoadedCar>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
@@ -229,6 +230,7 @@ impl Sim {
             props: props::Props::default(),
             contact_filter: None,
             police_car: None,
+            police_car_limits: None,
             traffic_car: None,
             record_contacts: false,
             applied_contacts: Vec::new(),
@@ -721,6 +723,20 @@ impl Sim {
     /// Set the input a vehicle uses from the next tick on.
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<(), SimError> {
         self.slot_mut(id)?.input = input;
+        Ok(())
+    }
+
+    /// Set the road conditions under one vehicle's wheels by hand (wet road tests and tools
+    /// until world weather drives every car; `wp_vehicle::Vehicle::set_surface_conditions`).
+    /// Not recorded in replays.
+    pub fn set_surface_conditions(
+        &mut self,
+        id: EntityId,
+        conditions: [wp_vehicle::surface::SurfaceConditions; 4],
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?
+            .vehicle
+            .set_surface_conditions(conditions);
         Ok(())
     }
 

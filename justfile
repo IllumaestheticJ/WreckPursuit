@@ -73,6 +73,10 @@ traffic-bench minutes="2":
 lattices:
     cargo run -p wp_damage --bin gen-lattice -- --debug
 
+# Measure every car's menu stats (0-100, top speed, skidpad) into data/stats/cars.json.
+car-stats:
+    cargo run --release -p simcli -- car-stats
+
 # Crash-barrier calibration table for a car (default debug_sedan).
 barrier car="debug_sedan":
     cargo run --release -p wp_damage --bin damage-barrier -- --sweep {{car}}

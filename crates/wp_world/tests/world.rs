@@ -466,10 +466,11 @@ fn spawns_respect_sightline_and_active_area() {
             }
         }
     }
-    // Teleport far away: the old area empties (nobody sees it), the new one fills.
+    // Teleport far away: the old area empties (nobody sees it), the new one fills. Agents
+    // finish the junction they are in first (main's ramp terminals sit 21 m from the spine).
     let far = player([0.0, 650.0, 0.0], [1.0, 0.0], 0.0);
     w.set_tracked_vehicles(&[far]);
-    run(&mut w, 10.0, &mut ev);
+    run(&mut w, 12.0, &mut ev);
     let near_old = w
         .agents()
         .filter(|a| geom::dist(geom::xy(a.pos), [0.0, -330.0]) < 200.0)

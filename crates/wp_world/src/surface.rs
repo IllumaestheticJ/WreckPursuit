@@ -9,6 +9,7 @@
 //!   to the ground beyond — the greybox draws exactly these triangles and `wp_sim` collides
 //!   with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
+//! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
@@ -89,9 +90,9 @@ pub const LOT_MAX_DROP_M: f32 = 1.0;
 pub const LOT_MAX_RISE_M: f32 = 0.08;
 
 /// Width of the level lot behind every sidewalk of `net`, m ([`LOT_W_M`], or [`FLAT_LOT_W_M`]
-/// without terrain).
+/// without terrain relief, [`RoadNetwork::relief`]).
 pub fn lot_width_m(net: &RoadNetwork) -> f32 {
-    if net.terrain.is_some() {
+    if net.relief().is_some() {
         LOT_W_M
     } else {
         FLAT_LOT_W_M
@@ -163,6 +164,24 @@ pub fn surface_edges(s: &RoadSurface) -> (Vec<V3>, Vec<V3>) {
         right[k][2] = s.z_at(k, s.right_m);
     }
     (left, right)
+}
+
+/// Distance from `q` to `s`'s centreline (clamped to its ends) and the height of the banked
+/// surface under `q` (nearest centreline point).
+pub fn height_under(s: &RoadSurface, q: V2) -> (f32, f32) {
+    let cum = geom::cumulative(&s.centre);
+    let n = s.centre.len();
+    let pr = geom::project(&s.centre, &cum, q);
+    let t = pr.s.clamp(0.0, cum[n - 1]);
+    let (c, _) = geom::point_at(&s.centre, &cum, t);
+    let i = cum.partition_point(|x| *x <= t).clamp(1, n - 1);
+    let span = (cum[i] - cum[i - 1]).max(1e-6);
+    let f = ((t - cum[i - 1]) / span).clamp(0.0, 1.0);
+    let bank = match s.bank.len() {
+        0 => 0.0,
+        _ => s.bank[i - 1] + (s.bank[i] - s.bank[i - 1]) * f,
+    };
+    (pr.dist, c[2] + bank * pr.lateral)
 }
 
 /// Sides of a junction disc polygon.
@@ -355,19 +374,19 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
     // Whether the ground under `p` holds a lot at height `p.z` (no terrain: always): not far
     // below it (a deck) nor poking up through it (an uncarved slope).
     let supported = |p: V3| {
-        net.terrain.as_ref().is_none_or(|t| {
+        net.relief().is_none_or(|t| {
             let drop = p[2] - t.height_at(geom::xy(p));
             (-LOT_MAX_RISE_M..=LOT_MAX_DROP_M).contains(&drop)
         })
     };
     let geo = WalkGeometry {
         lot_w,
-        max_pull_back: if net.terrain.is_some() {
+        max_pull_back: if net.relief().is_some() {
             MAX_WEDGE_PULL_BACK_M
         } else {
             MAX_PULL_BACK_M + lot_w
         },
-        wedges: net.terrain.is_some(),
+        wedges: net.relief().is_some(),
     };
     let patches = node_patches(map);
     let paved = PavedIndex::new(&road_mesh_with(map, &patches));
@@ -1699,16 +1718,96 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     };
     let ground = |q: V2| t.height_at(q);
     let mut out = Vec::new();
-    for s in &net.surfaces {
+    for (si, s) in net.surfaces.iter().enumerate() {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                out.push((l[k], l[k + 1]));
-                out.push((r[k], r[k + 1]));
+                for e in [&l, &r] {
+                    out.extend(rail_piece(net, si, e[k], e[k + 1]));
+                }
             }
         }
     }
     out
+}
+
+/// The part of the edge segment `a → b` of surface `si` that needs a deck rail: none when it
+/// lies on another surface's paving (a ramp edge on the carriageway it leaves), clipped to
+/// where it leaves that paving when only one end does (not across the carriageway's lanes).
+pub fn rail_piece(net: &RoadNetwork, si: usize, a: V3, b: V3) -> Option<(V3, V3)> {
+    match (
+        inside_other_paving(net, si, a),
+        inside_other_paving(net, si, b),
+    ) {
+        (false, false) => Some((a, b)),
+        (true, true) => None,
+        (true, false) => Some((paving_exit(net, si, a, b), b)),
+        (false, true) => Some((a, paving_exit(net, si, b, a))),
+    }
+}
+
+/// Where the segment `inside → outside` leaves the paving of the surfaces other than `si`
+/// (bisected to ~5 cm).
+fn paving_exit(net: &RoadNetwork, si: usize, inside: V3, outside: V3) -> V3 {
+    let lerp = |t: f32| {
+        [
+            inside[0] + (outside[0] - inside[0]) * t,
+            inside[1] + (outside[1] - inside[1]) * t,
+            inside[2] + (outside[2] - inside[2]) * t,
+        ]
+    };
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..8 {
+        let mid = 0.5 * (lo + hi);
+        if inside_other_paving(net, si, lerp(mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lerp(hi)
+}
+
+/// Whether `p` lies on the paving of a surface other than `si`, at its level (a ramp edge
+/// inside the carriageway it leaves, for example: no rail there).
+pub fn inside_other_paving(net: &RoadNetwork, si: usize, p: V3) -> bool {
+    let q = geom::xy(p);
+    net.surfaces.iter().enumerate().any(|(oi, o)| {
+        if oi == si || o.centre.len() < 2 {
+            return false;
+        }
+        let w = o.left_m.max(o.right_m);
+        // Cheap reject on the end points' bounding box.
+        let (a, b) = (
+            geom::xy(o.centre[0]),
+            geom::xy(o.centre[o.centre.len() - 1]),
+        );
+        let reach = geom::dist(a, b) * 0.5 + w + 400.0;
+        if geom::dist(q, geom::scale(geom::add(a, b), 0.5)) > reach {
+            return false;
+        }
+        let cum = geom::cumulative(&o.centre);
+        let pr = geom::project(&o.centre, &cum, q);
+        let inside = if pr.lateral < 0.0 {
+            -pr.lateral < o.left_m - 0.3
+        } else {
+            pr.lateral < o.right_m - 0.3
+        };
+        pr.s > 0.0 && pr.s < cum[cum.len() - 1] && inside && {
+            let (_, z) = height_under(o, q);
+            (z - p[2]).abs() < 1.0
+        }
+    })
+}
+
+/// Median barrier polylines (at road height, along the left paved edge of every surface
+/// flagged [`RoadSurface::median_barrier`]).
+pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
+    net.surfaces
+        .iter()
+        .filter(|s| s.median_barrier && s.centre.len() >= 2)
+        .map(|s| surface_edges(s).0)
+        .collect()
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable
@@ -1997,10 +2096,16 @@ mod tests {
             let walk_m = walks.flush();
             let (road, walk) = (PavedIndex::new(&road_m), PavedIndex::new(&walk_m));
             // Known exceptions, counted and capped: corners filled in cells and junctions whose
-            // ribbon ends overlap.
+            // ribbon ends overlap. Freeway merges and diverges (radius-0 junctions) always
+            // overlap (the ramp ribbon lies on the carriageway) and are not counted.
+            let is_merge = |node: u32| {
+                map.net.nodes[node as usize]
+                    .intersection
+                    .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0)
+            };
             let overlapping: Vec<u32> = patches
                 .iter()
-                .filter(|p| p.overlapping_ends)
+                .filter(|p| p.overlapping_ends && !is_merge(p.node))
                 .map(|p| p.node)
                 .collect();
             println!(

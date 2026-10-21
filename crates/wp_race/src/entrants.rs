@@ -28,10 +28,13 @@ use wp_world::World;
 
 use crate::bridge::CityRace;
 use crate::course::v2;
-use crate::data::RaceData;
 use crate::judge::{RaceJudge, RacePhase};
 use crate::kind::RaceKind;
 use crate::result::DnfReason;
+
+/// How far past the course's half width an AI racer's corridor reaches, m (the old judge
+/// margin of 2 m less half a metre to spare).
+const AI_CORRIDOR_MARGIN_M: f32 = 1.5;
 
 /// The AI corridor runs this far past a point-to-point finish line, m. `wp_opponent` parks
 /// at the end of its corridor; without run-off it would stop short of the judge's finish gate.
@@ -122,17 +125,9 @@ impl AiEntrants {
                 } else {
                     OpposingLanes::ForOvertaking
                 },
-                // Stay inside the judged corridor (leaving it for long is a DQ): its half
-                // width plus the rule margin, less half a metre to spare.
-                max_half_width_m: Some(
-                    race.course.corridor_half_width_m
-                        + RaceData::embedded()
-                            .rules
-                            .for_kind(kind)
-                            .common
-                            .corridor_margin_m
-                        - 0.5,
-                ),
+                // Stay near the course: its half width plus AI_CORRIDOR_MARGIN_M. Leaving it is
+                // no longer a DQ (owner call), but the gates are on it.
+                max_half_width_m: Some(race.course.corridor_half_width_m + AI_CORRIDOR_MARGIN_M),
                 ..CorridorOptions::default()
             },
             ..RaceConfig::default()

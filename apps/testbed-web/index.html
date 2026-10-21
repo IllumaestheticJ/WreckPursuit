@@ -73,6 +73,13 @@
       #controls button.preset[aria-pressed="true"] { background: #2a6; color: #fff; border-color: #2a6; }
       #controls input[type="number"] { width: 50px; }
       #rp-scrub { flex: 1; min-width: 160px; }
+      #controls .row.car-stats { display: grid; grid-template-columns: auto 1fr auto; gap: 1px 8px; max-width: 360px; }
+      .car-stats-name { grid-column: 1 / -1; color: #fff; }
+      .car-stat { display: contents; }
+      .car-stat-track { position: relative; height: 8px; align-self: center; background: #222; border: 1px solid #444; }
+      .car-stat-track i { position: absolute; top: 0; bottom: 0; left: 0; background: #ffdc00; transition: width 0.2s; }
+      .car-stat-value { text-align: right; color: #ccc; }
+      @media (prefers-reduced-motion: reduce) { .car-stat-track i { transition: none; } }
       #sc-result .pass { color: #2ecc40; }
       #sc-result .fail { color: #ff4136; }
       #sc-result .pending { color: #aaa; }
@@ -128,6 +135,7 @@
           <button class="preset" data-p="Sim" aria-pressed="false" title="Simulation damage, assists off, manual gears">Sim</button>
           <span id="preset-state" class="dim"></span>
         </div>
+        <div class="row hidden" id="car-stats"></div>
         <div class="row" id="assist-row">
           assists
           <label><input type="checkbox" data-a="abs" />ABS</label>

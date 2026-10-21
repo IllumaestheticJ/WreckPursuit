@@ -23,6 +23,7 @@ USAGE:
   simcli fuzz [--minutes M | --cases N] [--seed S] [--case-seconds S] [--max-vehicles N] [--out DIR]
   simcli --fuzz --minutes 5                                       (alias of `fuzz`)
   simcli bundle [--data DIR]                                      data root as JSON (WASM runner)
+  simcli car-stats [--check] [--data DIR]                         measure every car, write stats/cars.json
 
 LIST is comma-separated from vehicle,damage,world,police,net (or `all`).
 Exit codes: 0 pass, 1 expectation/golden/determinism/fuzz failure, 2 usage or load error.";
@@ -134,7 +135,7 @@ fn main() -> ExitCode {
     let cmd = match raw.first().map(String::as_str) {
         Some(
             c @ ("run" | "hashes" | "determinism" | "replay" | "goldens" | "fuzz" | "bundle"
-            | "help"),
+            | "car-stats" | "help"),
         ) => {
             let c = c.to_string();
             raw.remove(0);
@@ -155,6 +156,7 @@ fn main() -> ExitCode {
         "goldens" => cmd_goldens(&args),
         "fuzz" => cmd_fuzz(&args),
         "bundle" => cmd_bundle(&args),
+        "car-stats" => cmd_car_stats(&args),
         _ => {
             println!("{USAGE}");
             Ok(true)
@@ -435,5 +437,64 @@ fn cmd_bundle(args: &Args) -> Result<bool, String> {
         "{}",
         serde_json::to_string(&bundle).expect("bundle serializes")
     );
+    Ok(true)
+}
+
+/// `car-stats`: measure every car (one thread per car) and write `stats/cars.json`, or with
+/// `--check` compare against the stored table. `Ok(false)` = the table is out of date.
+fn cmd_car_stats(args: &Args) -> Result<bool, String> {
+    let root = data_root(args);
+    let data = FsData::new(&root);
+    let ids = simcli::data::car_ids(&root);
+    let rows: Vec<_> = std::thread::scope(|s| {
+        let handles: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                let data = &data;
+                s.spawn(move || simcli::car_stats::measure_car(data, id))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("measurement thread"))
+            .collect()
+    });
+    let mut cars = std::collections::BTreeMap::new();
+    for (id, row) in ids.iter().zip(rows) {
+        let row = row.map_err(|e| e.to_string())?;
+        println!(
+            "{id:20} 0-100 {:>5} s  top {:>5.1} km/h  {:.3} g  bars {:.2} / {:.2} / {:.2}",
+            row.zero_to_100_s
+                .map_or("-".to_string(), |t| format!("{t:.2}")),
+            row.top_speed_kmh,
+            row.cornering_g,
+            row.bars.acceleration,
+            row.bars.top_speed,
+            row.bars.cornering
+        );
+        cars.insert(id.clone(), row);
+    }
+    let fresh = simcli::car_stats::table(cars);
+    let path = root.join(simcli::car_stats::TABLE_PATH);
+    if args.has("--check") {
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let diff = simcli::car_stats::compare(&simcli::car_stats::parse(&text)?, &fresh);
+        for d in &diff {
+            println!("  stale: {d}");
+        }
+        if diff.is_empty() {
+            println!("{} is current", path.display());
+        } else {
+            println!("run `just car-stats` to update {}", path.display());
+        }
+        return Ok(diff.is_empty());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, simcli::car_stats::to_json(&fresh))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("wrote {}", path.display());
     Ok(true)
 }

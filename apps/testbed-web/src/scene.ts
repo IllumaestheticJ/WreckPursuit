@@ -12,6 +12,7 @@ import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { CityTiles } from "./render/city_tiles";
 import { Quality } from "./render/quality";
+import { MarkingsView } from "./markings_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
@@ -89,6 +90,8 @@ export class SceneView {
   readonly groundMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f44 });
   /** Called once with each city's glTF scene when it has loaded (wet road materials). */
   onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
+  /** Painted road markings (markings_view.ts). */
+  readonly markings = new MarkingsView();
 
   /**
    * `postAA: true` when the art style's post stack does the antialiasing (its own MSAA target,
@@ -127,7 +130,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
-    this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.sirenLight);
+    this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.sirenLight, this.markings.group);
     // The first contact marker exists from the start (hidden), so its shader programs are
     // prewarmed instead of compiled in the frame of the first contact (browser-perf.md 12b).
     const first = this.newContactMarker();
@@ -180,6 +183,7 @@ export class SceneView {
         lot_skirt: 1,
         asphalt: 1,
         highway_concrete: 1,
+        ramp_taper: 2,
       };
       gltf.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;

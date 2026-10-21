@@ -116,13 +116,19 @@ fn terrain_blocks_line_of_sight_across_the_hill() {
 fn queries_respect_grade_separation_and_terrain() {
     let w = world(1, 0.0);
     let map = w.map();
-    // Route 40 West passes under the Loop near x = -1517, y = 91.
-    let p = [-1517.0, 91.0];
+    // Route 40 West passes under the Loop near x = -1517, y = 91 (probe the inner
+    // carriageway, 7 m east of the median).
+    let p = [-1510.0, 92.0];
     let low = map.ground_height(p, Some(-100.0));
     let high = map.ground_height(p, Some(1000.0));
     assert!(high - low > 6.5, "deck {high} over road {low}");
-    // The lower road is asphalt, the deck above it highway concrete.
-    assert_eq!(map.surface_at([p[0], p[1], low]), SurfaceType::Asphalt);
+    // The lower road is asphalt (the probe sits on its painted centre line), the deck above
+    // it highway concrete.
+    let under = map.surface_at([p[0], p[1], low]);
+    assert!(
+        matches!(under, SurfaceType::Asphalt | SurfaceType::PaintedLine),
+        "{under:?}"
+    );
     assert_eq!(map.surface_at([p[0], p[1], high]), SurfaceType::Concrete);
     // Off-road ground height comes from the terrain.
     let knob = map.ground_height([-1000.0, 1000.0], None);
