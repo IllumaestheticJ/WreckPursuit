@@ -334,11 +334,15 @@ struct VehicleInfo {
     /// `wp_police` unit id of a sim police vehicle (the `unit_id` of `police_units()`), so a
     /// unit keeps its number when it becomes a sim vehicle; `None` for other vehicles.
     police_unit: Option<u32>,
+    /// `wp_world` agent id of promoted traffic (the `agent_id` of `traffic_agents()`), so the
+    /// physical car can be painted like its instanced twin; `None` for other vehicles.
+    traffic_agent: Option<u32>,
 }
 
 /// Static info JSON for a vehicle: scenario name, dimensions, wheels, CG (chassis space),
 /// lattice sizes, the name tables for region / component / surface indices and, for sim police
-/// vehicles, their `wp_police` unit id (`police_unit`).
+/// vehicles, their `wp_police` unit id (`police_unit`); for promoted traffic, its `wp_world`
+/// agent id (`traffic_agent`).
 #[wasm_bindgen]
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
@@ -406,6 +410,9 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .vehicle(EntityId(entity))
                 .and_then(|v| v.police_unit)
                 .map(|u| u.0),
+            traffic_agent: s
+                .vehicle(EntityId(entity))
+                .and_then(|v| v.traffic_agent),
         }))
     })
 }

@@ -12,6 +12,7 @@ import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, panelEvents, stepDebris } from "./render/panels";
+import { trafficPaint } from "./render/traffic";
 import { CameraRig, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
@@ -145,6 +146,14 @@ async function main(): Promise<void> {
       const colour =
         kind === VEHICLE_KIND.police ? 0xe9ebf0 : kind === VEHICLE_KIND.traffic ? 0x7a8a99 : COLOURS[(id - 1) % COLOURS.length];
       const v = new VehicleView(id, colour);
+      // Promoted traffic keeps the paint of its instanced twin (same car id, variant and agent id).
+      const agent = v.info.traffic_agent;
+      if (kind === VEHICLE_KIND.traffic && agent != null) {
+        const p = trafficPaint(v.info.car_id, (meta[o + 2] >> 8) & 0xff, agent);
+        v.panels.paint.color.setHex(p.color);
+        v.panels.paint.metalness = p.metalness;
+        v.panels.paint.roughness = p.roughness;
+      }
       scene.world.add(v.root);
       scene.world.add(v.velocity);
       app.views.set(id, v);

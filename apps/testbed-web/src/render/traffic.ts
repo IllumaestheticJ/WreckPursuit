@@ -55,7 +55,7 @@ export function trafficStride(): number {
 /** Instances per model and LOD (= scene.ts MAX_AGENTS). */
 const MAX_INSTANCES = 1024;
 /** Full mesh closer than this (m), hull beyond. */
-const LOD_NEAR_M = 55;
+const LOD_NEAR_M = 90;
 /** Props (signs, racks) are drawn closer than this (m). */
 const PROP_FAR_M = 160;
 /** Agents farther than this (m) are not drawn. */
@@ -497,7 +497,8 @@ function buildHull(mesh: CarMeshJson, def: CarDefJson | null, lo: THREE.Vector3,
   const len = hi.y - lo.y;
   interface Slice { zLo: number; zTop: number; hw: number; rw: number; glass: number }
   const sl: Slice[] = Array.from({ length: N }, () => ({ zLo: Infinity, zTop: -Infinity, hw: 0, rw: 0, glass: Infinity }));
-  const body = mesh.parts.filter((q) => q.wheel == null && (q.kind === "panel" || q.kind === "body" || q.kind === "glass"));
+  // Only the lofted shell: trim, mirrors, wipers and racks would spike the slice tops.
+  const body = mesh.parts.filter((q) => q.wheel == null && (q.kind === "panel" || q.kind === "glass"));
   for (const part of body) {
     const q = part.positions_mm;
     for (let i = 0; i < q.length; i += 3) {
@@ -518,6 +519,12 @@ function buildHull(mesh: CarMeshJson, def: CarDefJson | null, lo: THREE.Vector3,
       const k = Math.min(N - 1, Math.max(0, Math.floor(((q[i + 1] * 1e-3 - lo.y) / len) * N)));
       if (q[i + 2] * 1e-3 > sl[k].zTop - 0.06) sl[k].rw = Math.max(sl[k].rw, Math.abs(q[i] * 1e-3));
     }
+  }
+  // Smooth slice tops / glass lines with their neighbours (one slice can catch a pillar edge).
+  const raw = sl.map((a) => ({ ...a }));
+  for (let k = 1; k < N - 1; k++) {
+    const t = [raw[k - 1].zTop, raw[k].zTop, raw[k + 1].zTop].sort((a, b) => a - b)[1];
+    sl[k].zTop = Math.min(raw[k].zTop, Math.max(t, 0.5 * (raw[k - 1].zTop + raw[k + 1].zTop)));
   }
   const g = new GeoBuilder();
   const paint = SURF.paint!;
