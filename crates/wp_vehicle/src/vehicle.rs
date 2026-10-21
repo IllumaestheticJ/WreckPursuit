@@ -1272,11 +1272,12 @@ impl Vehicle {
         let hb_keep_gear = hb_declutch && v_fwd.abs() > HB_KEEP_GEAR_MPS;
         if assists.auto_gears && !hb_keep_gear {
             // Sliding (the box holds its gear): body slip, or a driven wheel in contact
-            // spinning past its tyre's peak slip ratio (last tick).
+            // spinning past its tyre's peak slip ratio (last tick). Drive slip only: a wheel
+            // locking under the brakes is not wheelspin.
             let spinning = (0..4).any(|i| {
                 base_split[i] > 0.0
                     && self.wheels[i].contact
-                    && self.wheels[i].kappa.abs()
+                    && self.wheels[i].kappa
                         > crate::drivetrain::schedule::SLIDE_HOLD_SPIN
                             * self.corners[i].tire.peak_slip_ratio
             });
