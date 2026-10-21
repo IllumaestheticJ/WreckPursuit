@@ -202,6 +202,10 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
    key as the car straightens. "before": the car snaps back the other way and often spins.
    "new" (the default): it comes back progressively. Also check that the hold still holds and
    that turn-in still bites. The *countersteer limit* slider tunes it (0 = before).
+13. **Catching over-rotations (step 11), "catch A/B" buttons.** Commit to a drift too hard
+   (the key into the turn + full throttle until it swings past 50°), then counter key. "new"
+   (default): more counter lock and a faster rack while it over-rotates, so it comes back sooner.
+   Check that the snap-back (lift with the counter key held) is still calm.
 12. **W handling everywhere** (checkbox, on by default): free drive, the city chase and races use
    this profile on your car, shown by the "W handling" tag. Untick it for the stock handling.
 
@@ -1034,6 +1038,62 @@ e2e drift_lab_w: 60 checks.
     0.214 vs 0.204.
 
 
+
+## Step 11 — catching over-rotations (owner: "more steering lock so we can catch over-rotations a little easier")
+
+**What changed in the plain rack** (`PlainSteer`, all lab-only, A/B in the panel):
+
+1. **Directional countersteer limit** (`counter_closing_only`, default on). The step-10 limit
+   (wheels ≤ 0.25° past the front axle's travel) holds while the slide closes or stays. It lets
+   go while the car over-rotates (slide growth past `over_from_dps` = 15°/s, from half that), so
+   a held counter key can reach full lock and beyond the travel.
+   - The slide growth is d|rear-axle slip|/dt from `drift::DriftState` (already in snapshots),
+     passed in as `PlainInput::slide_growth`.
+2. **Drift lock extension** (`drift_lock_extra`, default 0.4): with the counter key held while
+   over-rotating, the counter lock may reach full lock × 1.4, at any speed.
+   - Faded in from 40° to 50° of body slip, and with slide growth from 15°/s (full at 30°/s).
+   - Grip driving, a held ~35° drift and the key into the turn are unchanged.
+3. **Over-rotation rack** (`over_rate`, default ×2): the rack moves twice as fast toward the
+   counter lock while over-rotating past 40°.
+
+**Tuning notes** (`--example drift_lab_w catch`, variants via `PLAINS`):
+
+- With the extension faded in from 15–25° (the lead's first idea), it acted in every normal
+  drift. It over-caught (swung 30–46° to the other side) and worsened snap-back (3 spins).
+- Applied only while over-rotating, it no longer over-catches. From 40° it also leaves the
+  snap-back exit alone.
+- The ×2 rack faded in from 15° broke the tapping hold (3/5); from 40° the hold stays 5/5.
+- The directional limit alone changes neither catch nor snap (the limit rarely binds while
+  over-rotating, since the travel angle is large then).
+
+**Measured** on the panel's default tyres (spin model, grip-balance "grip", medium weight).
+Over-rotation catch: 60 m, 0.7 g, key into the turn + full throttle until the slide passes 40°
+or 50°, then counter key + half throttle. Caught = no spin, peak < 70°, back under 45° within
+1.5 s, < 15° to the other side.
+
+| variant | caught 40° | caught 50° | snap counter+lift: yaw acc / over / slip over (spins) | tapping hold held | per car (40° / 50°: catch s, peak °, overcatch °) |
+|---|---|---|---|---|---|
+| before (limit always, no extra lock) | 1/5 | 3/5 | 4.7 / 1.63 / 32° (0) | 5/5 | parity_rwd_a: ✗ 1.95s 73° 0° / ✗ 1.82s 74° 0° · snap 39°; parity_rwd_b: ✓1.48s 59° 0° / ✓1.17s 57° 0° · snap 8°; parity_rwd_d: ✗ 2.08s 77° 0° / ✗ 1.93s 78° 0° · snap 44°; debug_coupe: ✗ 1.70s 65° 0° / ✓1.49s 65° 0° · snap 28°; rampart_50: ✗ 1.63s 62° 0° / ✓1.40s 63° 0° · snap 42° |
+| W default | 5/5 | 3/5 | 4.7 / 1.63 / 35° (0) | 5/5 | parity_rwd_a: ✓1.38s 59° 0° / ✗ 1.62s 70° 0° · snap 37°; parity_rwd_b: ✓1.34s 57° 0° / ✓1.15s 57° 0° · snap 7°; parity_rwd_d: ✓1.48s 61° 0° / ✗ 1.77s 73° 0° · snap 43°; debug_coupe: ✓1.35s 57° 0° / ✓1.45s 64° 0° · snap 38°; rampart_50: ✓1.10s 54° 0° / ✓1.38s 63° 0° · snap 50° |
+
+- **40° push: 5/5 caught (before 1/5).** Peaks 54–61° (before 59–77°); back under 45° 0.2–0.6 s
+  sooner.
+- **50° push: 3/5 both.** rwd_a and rwd_d peak 4–5° lower but still above 70°.
+- **Snap-back (counter + lift):** no spins either way. Peak yaw acceleration and yaw overshoot
+  are the same (4.7 rad/s², 1.63 rad/s). Slip to the other side averages 35° (before 32°):
+  rampart_50 50° vs 42°, debug_coupe 38° vs 28°, the others 1–2° less.
+- **Tapping hold:** held 5/5 both.
+
+**Panel:**
+- "catch A/B: before / new" buttons (`#drift-lab-w-catch-before` / `-new`). "before" turns
+  the directional limit, the extra lock and the fast rack off.
+- Sliders: *catch: extra lock*, *catch: rack speed ×*, *catch: over-rotation from*.
+
+**Tests:**
+- `tests/drift_lab_w_catch.rs`, on rwd_a and rwd_d at the 40° push: before not caught, peak > 68°;
+  new caught, peak ≥ 8° lower; snap: no spin, yaw overshoot and acceleration within 5 % of before.
+- `plain` unit test `over_rotation_gets_full_lock_and_the_drift_lock_extension`.
+- e2e drift_lab_w: 85 checks.
 
 ## Contract change requests
 
