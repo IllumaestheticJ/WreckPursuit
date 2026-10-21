@@ -10,7 +10,8 @@
 //!
 //! Runs on the shipped handling (`wp_vehicle::lab_scope`, the rig marked player-driven) with
 //! the lab's reference assists (TCS / ESC off). `cargo run --release -p wp_vehicle --example
-//! entry_hold [-- car …]`.
+//! entry_hold [-- car …]`; `PLAIN='{…}'` / `GRIP='{…}'` = fields over the shipped plain
+//! steering / grip balance (A/B).
 
 use std::path::PathBuf;
 
@@ -37,6 +38,15 @@ enum Hold {
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
     load_any_car(&data, id).unwrap()
+}
+
+fn merged<T: serde::Serialize + serde::de::DeserializeOwned>(base: &T, json: &str) -> T {
+    let mut v = serde_json::to_value(base).unwrap();
+    let patch: serde_json::Value = serde_json::from_str(json).expect("json");
+    for (k, x) in patch.as_object().expect("object") {
+        v[k] = x.clone();
+    }
+    serde_json::from_value(v).expect("fields")
 }
 
 fn run(c: &LoadedCar, entry: Entry, hold: Hold, lat_g: f32) -> HoldMetrics {
@@ -92,6 +102,16 @@ fn run(c: &LoadedCar, entry: Entry, hold: Hold, lat_g: f32) -> HoldMetrics {
 }
 
 fn main() {
+    // PLAIN='{…}' / GRIP='{…}': fields over the shipped plain steering / grip balance (A/B).
+    if let Ok(j) = std::env::var("PLAIN") {
+        wp_vehicle::plain::set_override(Some(merged(&wp_vehicle::lab_scope::shipped_plain(), &j)));
+    }
+    if let Ok(j) = std::env::var("GRIP") {
+        wp_vehicle::grip_lab::set_override(Some(merged(
+            &wp_vehicle::grip_lab::GripBalance::shipped(),
+            &j,
+        )));
+    }
     let ids: Vec<String> = {
         let a: Vec<String> = std::env::args().skip(1).collect();
         if a.is_empty() {

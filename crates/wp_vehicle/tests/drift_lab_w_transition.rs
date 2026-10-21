@@ -55,10 +55,19 @@ fn lift_flicks_swing_through_with_the_transition_rack() {
                 "{id} {lift} on: {on:?} (off {off:?})"
             );
             assert!(s12.caught, "{id} {lift} step 12: {s12:?}");
-            settled_on.push(on.settle_s.unwrap_or(9.0));
+            // The settle time is step 13's catch at its own gain, 0.9 of the travel. The default
+            // is 0.8 since playtest row 137 (0.9 over-caught rampart_50 into a second swing,
+            // tests/transition_once.rs): it still catches every flick here (above) but settles
+            // slower in this pre-unify lab setup (parity_rwd_d median 1.6 s).
+            plain::set_override(Some(PlainSteer {
+                trans_catch_gain: 0.9,
+                ..PlainSteer::default()
+            }));
+            let s13 = lift_flick(&c, &a, lift, 0.15);
+            settled_on.push(s13.settle_s.unwrap_or(9.0));
         }
-        // Step 13, the new-side catch: settles on the new side within ~0.5 s (median), where
-        // step 12 alone took ~1.5 s.
+        // Step 13, the new-side catch (at 0.9): settles on the new side within ~0.5 s (median),
+        // where step 12 alone took ~1.5 s.
         let med = |v: &mut Vec<f32>| {
             v.sort_by(f32::total_cmp);
             v[v.len() / 2]

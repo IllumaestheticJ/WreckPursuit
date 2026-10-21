@@ -173,7 +173,7 @@ pub struct PlainSteer {
     /// New-side catch (lead, step 13: settle within 0.5 s of the crossing): in the same armed
     /// within `trans_catch_window_s` of the slide crossing from one side to the other (a
     /// flick), a **countersteer** key while the slide still grows (below `trans_catch_max_deg`) (faster than `trans_catch_growth_dps`) points the wheels at
-    /// `trans_catch_gain` × the front axle's travel plus this, degrees (default 0.9 × travel +
+    /// `trans_catch_gain` × the front axle's travel plus this, degrees (default 0.8 × travel +
     /// 0°: aiming past it over-catches and swings back), at the
     /// transition rack's speed — the fronts then pull against the swing's rotation at once instead
     /// of lagging the travel at the plain rack rate. Faded in with body slip by
@@ -248,7 +248,10 @@ impl Default for PlainSteer {
             trans_t_s: 0.1,
             trans_arm_s: 1.5,
             trans_catch_deg: 0.0,
-            trans_catch_gain: 0.9,
+            // 0.9 until playtest row 137: it over-caught rampart_50 into a second swing
+            // (tests/transition_once.rs). 0.8, not lower: 0.7 still caught only 19 / 27 of the
+            // transition bench's flicks (0.8: 27 / 27, 0.9: 27 / 27).
+            trans_catch_gain: 0.8,
             trans_catch_growth_dps: 7.5,
             trans_catch_max_deg: 45.0,
             trans_catch_window_s: 1.0,
