@@ -425,8 +425,8 @@ impl GripBalance {
 
     /// Smart lock at `speed` (m/s), rad: `L · a / v² + peak × (1 + margin)`, capped at
     /// `plain_lock` (the plain profile's lock at this speed). `None` unless
-    /// [`LockMode::Smart`]. `toward_slide` (the wheels point, or the key asks for, the side the
-    /// car slides to) and `body_slip` (rad) bring the plain lock back for countersteer (see
+    /// [`LockMode::Smart`]. In `slide` ([`LockSlide`]), `toward_slide` (the wheels point, or the
+    /// key asks for, the side the car slides to) and `body_slip` (rad) bring the plain lock back for countersteer (see
     /// [`GripBalance::smart_slide_from_deg`]), so a drift steers exactly as without it.
     /// `slip_rate` (rad/s, rate of |body slip|, − = closing) and `counter_s` (how long the
     /// countersteer key has been held, s) feed the slide lock ([`GripBalance::slide_closing_dps`],
@@ -437,11 +437,14 @@ impl GripBalance {
         wheelbase: f32,
         front_peak_slip: f32,
         plain_lock: f32,
-        toward_slide: bool,
-        body_slip: f32,
-        slip_rate: f32,
-        counter_s: f32,
+        slide: LockSlide,
     ) -> Option<f32> {
+        let LockSlide {
+            toward_slide,
+            body_slip,
+            slip_rate,
+            counter_s,
+        } = slide;
         if self.lock_mode != LockMode::Smart {
             return None;
         }
@@ -487,6 +490,19 @@ impl GripBalance {
         };
         Some(smart + (target - smart) * x * x * (3.0 - 2.0 * x))
     }
+}
+
+/// The slide inputs of [`GripBalance::smart_lock`].
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LockSlide {
+    /// The wheels point, or the key asks for, the side the car slides to (countersteer).
+    pub toward_slide: bool,
+    /// Body slip, rad.
+    pub body_slip: f32,
+    /// Rate of |body slip|, rad/s (− = the slide closing).
+    pub slip_rate: f32,
+    /// How long the countersteer key has been held, s.
+    pub counter_s: f32,
 }
 
 /// A lab-only per-car fix ([`car_fix`]): scales on the car data, applied by the vehicle while
@@ -706,15 +722,48 @@ mod tests {
         // (past 0.5 s + the 0.3 s phase-in); a fresh tap keeps the plain lock.
         let n = GripBalance::lab_default();
         let deep = n
-            .smart_lock(15.0, 2.7, 0.109, 0.6, true, 40f32.to_radians(), 0.0, 0.8)
+            .smart_lock(
+                15.0,
+                2.7,
+                0.109,
+                0.6,
+                LockSlide {
+                    toward_slide: true,
+                    body_slip: 40f32.to_radians(),
+                    slip_rate: 0.0,
+                    counter_s: 0.8,
+                },
+            )
             .unwrap();
         assert!((deep - 0.3).abs() < 1e-4, "{deep}");
         let tap = n
-            .smart_lock(15.0, 2.7, 0.109, 0.6, true, 40f32.to_radians(), 0.0, 0.1)
+            .smart_lock(
+                15.0,
+                2.7,
+                0.109,
+                0.6,
+                LockSlide {
+                    toward_slide: true,
+                    body_slip: 40f32.to_radians(),
+                    slip_rate: 0.0,
+                    counter_s: 0.1,
+                },
+            )
             .unwrap();
         assert!((tap - 0.6).abs() < 1e-4, "{tap}");
         let into = n
-            .smart_lock(15.0, 2.7, 0.109, 0.6, false, 40f32.to_radians(), 0.0, 0.0)
+            .smart_lock(
+                15.0,
+                2.7,
+                0.109,
+                0.6,
+                LockSlide {
+                    toward_slide: false,
+                    body_slip: 40f32.to_radians(),
+                    slip_rate: 0.0,
+                    counter_s: 0.0,
+                },
+            )
             .unwrap();
         assert!(into < 0.3, "{into}");
         f.apply_tire(&mut r, 0, &DriveLayout::Fwd);
@@ -725,29 +774,84 @@ mod tests {
         assert!(n.margin_at(130.0 / 3.6).abs() < 1e-4);
         assert!((n.margin_at(200.0 / 3.6) - 0.3).abs() < 1e-6);
         assert_eq!(
-            d.smart_lock(30.0, 2.7, 0.109, 0.66, false, 0.0, 0.0, 0.0),
+            d.smart_lock(
+                30.0,
+                2.7,
+                0.109,
+                0.66,
+                LockSlide {
+                    toward_slide: false,
+                    body_slip: 0.0,
+                    slip_rate: 0.0,
+                    counter_s: 0.0
+                }
+            ),
             None
         );
         let s = GripBalance::lab_default();
         // Parking speed: the car's full lock.
         let lock = s
-            .smart_lock(2.0, 2.7, 0.109, 0.66, false, 0.0, 0.0, 0.0)
+            .smart_lock(
+                2.0,
+                2.7,
+                0.109,
+                0.66,
+                LockSlide {
+                    toward_slide: false,
+                    body_slip: 0.0,
+                    slip_rate: 0.0,
+                    counter_s: 0.0,
+                },
+            )
             .unwrap();
         assert!((lock - 0.66).abs() < 1e-6);
         // 60 mph: ≈ 1.5° of geometry (0.7 g) + 0.7 × 6.2° of tyre ≈ 5.9°.
         let lock = s
-            .smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.0, 0.0, 0.0)
+            .smart_lock(
+                26.8,
+                2.7,
+                0.109,
+                0.66,
+                LockSlide {
+                    toward_slide: false,
+                    body_slip: 0.0,
+                    slip_rate: 0.0,
+                    counter_s: 0.0,
+                },
+            )
             .unwrap()
             .to_degrees();
         assert!((5.5..7.5).contains(&lock), "{lock}");
         // Countersteer in a 17° slide (below the slide lock's 20°): the plain lock again; into
         // the turn: still limited ...
         let ctr = s
-            .smart_lock(26.8, 2.7, 0.109, 0.66, true, 0.30, 0.0, 0.0)
+            .smart_lock(
+                26.8,
+                2.7,
+                0.109,
+                0.66,
+                LockSlide {
+                    toward_slide: true,
+                    body_slip: 0.30,
+                    slip_rate: 0.0,
+                    counter_s: 0.0,
+                },
+            )
             .unwrap();
         assert!((ctr - 0.66).abs() < 1e-6);
         let into = s
-            .smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.30, 0.0, 0.0)
+            .smart_lock(
+                26.8,
+                2.7,
+                0.109,
+                0.66,
+                LockSlide {
+                    toward_slide: false,
+                    body_slip: 0.30,
+                    slip_rate: 0.0,
+                    counter_s: 0.0,
+                },
+            )
             .unwrap();
         assert!(into.to_degrees() < 7.5);
         // ... unless the fade applies both ways.
@@ -756,7 +860,18 @@ mod tests {
             ..s
         };
         let into = both
-            .smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.35, 0.0, 0.0)
+            .smart_lock(
+                26.8,
+                2.7,
+                0.109,
+                0.66,
+                LockSlide {
+                    toward_slide: false,
+                    body_slip: 0.35,
+                    slip_rate: 0.0,
+                    counter_s: 0.0,
+                },
+            )
             .unwrap();
         assert!((into - 0.66).abs() < 1e-6);
     }

@@ -1394,10 +1394,12 @@ impl Vehicle {
                     wheelbase,
                     self.front_peak_slip(),
                     full_lock * p.lock_frac(v_fwd),
-                    toward_slide,
-                    steer_in.body_slip,
-                    slip_rate,
-                    counter_s,
+                    crate::grip_lab::LockSlide {
+                        toward_slide,
+                        body_slip: steer_in.body_slip,
+                        slip_rate,
+                        counter_s,
+                    },
                 )
             });
             // Angle-rate timing: the plain rack as it is, capped at the smart lock below.
