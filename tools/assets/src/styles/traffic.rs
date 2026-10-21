@@ -283,12 +283,32 @@ fn sedan_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let wf = p.half_width(p.y_nose);
     // Lamps: slim, wide, swept to the corner.
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(t, k, p, -(wf - 0.01), -0.42, zn - 0.10, zn - 0.025, 0.012, 0.03);
+        front_box(
+            t,
+            k,
+            p,
+            -(wf - 0.01),
+            -0.42,
+            zn - 0.10,
+            zn - 0.025,
+            0.012,
+            0.03,
+        );
     });
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(t, k, p, -(wt - 0.005), -0.40, zt - 0.14, zt - 0.03, 0.012, 0.03);
+        rear_box(
+            t,
+            k,
+            p,
+            -(wt - 0.005),
+            -0.40,
+            zt - 0.14,
+            zt - 0.03,
+            0.012,
+            0.03,
+        );
     });
     // Grille: upper slot between the lamps, wide lower intake, fog lamps.
     let g = key("grille_upper", R::FrontBumper, M::Grille);
@@ -328,11 +348,31 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         front_box(t, k, p, -(wf - 0.12), -0.37, l0, l1, 0.008, 0.03);
     });
     let amber = light("corner_lamp_l", R::FrontLeftFender, M::EmissiveAmber);
-    front_box(b, &amber, p, -(wf - 0.005), -(wf - 0.11), l0, l1, 0.008, 0.03);
+    front_box(
+        b,
+        &amber,
+        p,
+        -(wf - 0.005),
+        -(wf - 0.11),
+        l0,
+        l1,
+        0.008,
+        0.03,
+    );
     mirror(b, &amber);
     // Lamp bezels (chrome) around head + corner lamps.
     let bez = key("lamp_bezel_l", R::FrontLeftFender, M::Chrome);
-    front_box(b, &bez, p, -(wf - 0.002), -0.355, l0 - 0.012, l1 + 0.012, 0.004, 0.03);
+    front_box(
+        b,
+        &bez,
+        p,
+        -(wf - 0.002),
+        -0.355,
+        l0 - 0.012,
+        l1 + 0.012,
+        0.004,
+        0.03,
+    );
     mirror(b, &bez);
     grille(b, p, 0.34, l0, l1, 3, M::Chrome);
     // Black bumper bars with a chrome top strip, wrapping round the corners.
@@ -343,7 +383,17 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let wt = p.half_width(p.y_tail);
     // Full-width tail band: lamps outboard, dark garnish between them.
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(t, k, p, -(wt - 0.01), -0.22, zt - 0.17, zt - 0.04, 0.01, 0.03);
+        rear_box(
+            t,
+            k,
+            p,
+            -(wt - 0.01),
+            -0.22,
+            zt - 0.17,
+            zt - 0.04,
+            0.01,
+            0.03,
+        );
     });
     let gar = key("tail_garnish", R::Trunk, M::Trim);
     rear_box(b, &gar, p, -0.22, 0.22, zt - 0.15, zt - 0.06, 0.008, 0.03);
@@ -366,8 +416,24 @@ fn beater_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let ya = p.y_fw + 0.25;
     let xa = p.half_width(ya) - 0.10;
     let za = p.belt(ya);
-    b.cylinder(&ant, [xa, ya, za], [xa, ya - 0.06, za + 0.62], 0.005, 0.003, 4, false);
-    b.cylinder(&ant, [xa, ya, za - 0.005], [xa, ya, za + 0.02], 0.016, 0.012, 6, true);
+    b.cylinder(
+        &ant,
+        [xa, ya, za],
+        [xa, ya - 0.06, za + 0.62],
+        0.005,
+        0.003,
+        4,
+        false,
+    );
+    b.cylinder(
+        &ant,
+        [xa, ya, za - 0.005],
+        [xa, ya, za + 0.02],
+        0.016,
+        0.012,
+        6,
+        true,
+    );
 }
 
 /// tansy_13: teardrop lamps, smile intake, tall tail lamps, hatch spoiler, rear wiper, black
@@ -377,14 +443,44 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zn = p.belt(p.y_nose);
     let wf = p.half_width(p.y_nose);
     reshape_pair(b, p, "headlight", |t, p, k| {
-        front_box(t, k, p, -(wf - 0.005), -0.30, zn - 0.12, zn - 0.03, 0.012, 0.035);
+        front_box(
+            t,
+            k,
+            p,
+            -(wf - 0.005),
+            -0.30,
+            zn - 0.12,
+            zn - 0.03,
+            0.012,
+            0.035,
+        );
         // Teardrop tail: a narrower box sweeping up the fender corner.
-        front_box(t, k, p, -(wf + 0.01), -(wf - 0.10), zn - 0.05, zn + 0.0, 0.006, 0.05);
+        front_box(
+            t,
+            k,
+            p,
+            -(wf + 0.01),
+            -(wf - 0.10),
+            zn - 0.05,
+            zn + 0.0,
+            0.006,
+            0.05,
+        );
     });
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(t, k, p, -(wt - 0.005), -(wt - 0.17), zt - 0.22, zt + 0.06, 0.012, 0.03);
+        rear_box(
+            t,
+            k,
+            p,
+            -(wt - 0.005),
+            -(wt - 0.17),
+            zt - 0.22,
+            zt + 0.06,
+            0.012,
+            0.03,
+        );
     });
     let slot = key("grille_upper", R::FrontBumper, M::Grille);
     front_box(b, &slot, p, -0.24, 0.24, zn - 0.10, zn - 0.05, 0.006, 0.03);
@@ -401,7 +497,12 @@ fn supermini_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let sp = key("hatch_spoiler", R::Roof, M::Paint);
     let (r0, _, rz, _) = p.roof;
     let hw = p.roof_half_w(r0) - 0.04;
-    b.beveled_box(&sp, [-hw, r0 - 0.16, rz - 0.02], [hw, r0 + 0.06, rz + 0.025], 0.012);
+    b.beveled_box(
+        &sp,
+        [-hw, r0 - 0.16, rz - 0.02],
+        [hw, r0 + 0.06, rz + 0.025],
+        0.012,
+    );
     let wip = key("rear_wiper", R::Trunk, M::Trim);
     let yw = p.y_deck + 0.10;
     let zw = p.top(yw) + 0.012;
@@ -428,7 +529,17 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         front_box(t, k, p, -(wf - 0.10), -0.45, l0, l1, 0.008, 0.03);
     });
     let amber = light("corner_lamp_l", R::FrontLeftFender, M::EmissiveAmber);
-    front_box(b, &amber, p, -(wf - 0.003), -(wf - 0.09), l0, l1, 0.008, 0.03);
+    front_box(
+        b,
+        &amber,
+        p,
+        -(wf - 0.003),
+        -(wf - 0.09),
+        l0,
+        l1,
+        0.008,
+        0.03,
+    );
     mirror(b, &amber);
     grille(b, p, 0.43, l0 - 0.01, l1 + 0.01, 2, M::Chrome);
     bumper(b, p, true, 0.42, 0.60, 0.09, M::Chrome, None);
@@ -438,7 +549,17 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(t, k, p, -(wt - 0.005), -(wt - 0.11), zt - 0.36, zt - 0.06, 0.012, 0.03);
+        rear_box(
+            t,
+            k,
+            p,
+            -(wt - 0.005),
+            -(wt - 0.11),
+            zt - 0.36,
+            zt - 0.06,
+            0.012,
+            0.03,
+        );
     });
     tailgate_handle(b, p, zt - 0.10);
     step_bumper(b, p, 0.38, 0.54, 0.13, M::Chrome, false);
@@ -476,7 +597,17 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zt = p.belt(p.y_tail);
     let wt = p.half_width(p.y_tail);
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(t, k, p, -(wt - 0.005), -(wt - 0.12), zt - 0.42, zt - 0.04, 0.012, 0.03);
+        rear_box(
+            t,
+            k,
+            p,
+            -(wt - 0.005),
+            -(wt - 0.12),
+            zt - 0.42,
+            zt - 0.04,
+            0.012,
+            0.03,
+        );
     });
     tailgate_handle(b, p, zt - 0.10);
     step_bumper(b, p, 0.42, 0.62, 0.14, M::Chrome, true);
@@ -495,7 +626,11 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let yc = p.roof.1 - 0.05;
     let zc = p.top_point(yc, 0.0).0[2];
     for x in [-0.25f32, 0.0, 0.25] {
-        b.cuboid(&cl, [x - 0.035, yc - 0.03, zc - 0.01], [x + 0.035, yc + 0.01, zc + 0.022]);
+        b.cuboid(
+            &cl,
+            [x - 0.035, yc - 0.03, zc - 0.01],
+            [x + 0.035, yc + 0.01, zc + 0.022],
+        );
     }
     handles(b, p, M::Chrome, true);
     side_markers(b, p, p.z_bumper_top.0 + 0.06);
@@ -519,14 +654,34 @@ fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let zt = p.top(p.y_tail + 0.05);
     let wt = p.half_width(p.y_tail);
     reshape_pair(b, p, "taillight", |t, p, k| {
-        rear_box(t, k, p, -(wt - 0.005), -(wt - 0.10), 0.95, 1.40, 0.012, 0.03);
+        rear_box(
+            t,
+            k,
+            p,
+            -(wt - 0.005),
+            -(wt - 0.10),
+            0.95,
+            1.40,
+            0.012,
+            0.03,
+        );
     });
     // Barn doors: centre seam, hinges, handle.
     let seam = key("barn_seam", R::Trunk, M::Trim);
     rear_box(b, &seam, p, -0.006, 0.006, 0.72, zt - 0.10, 0.004, 0.02);
     let hinge = key("barn_hinge_l", R::Trunk, M::Trim);
     for z in [0.95f32, 1.70] {
-        rear_box(b, &hinge, p, -(wt - 0.005), -(wt - 0.06), z - 0.05, z + 0.05, 0.02, 0.01);
+        rear_box(
+            b,
+            &hinge,
+            p,
+            -(wt - 0.005),
+            -(wt - 0.06),
+            z - 0.05,
+            z + 0.05,
+            0.02,
+            0.01,
+        );
     }
     mirror(b, &hinge);
     let hd = key("barn_handle", R::Trunk, M::Chrome);
@@ -536,7 +691,11 @@ fn van_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let ym = p.y_tail + 0.06;
     for x in [-0.25f32, 0.0, 0.25] {
         let z = p.top_point(ym, x).0[2];
-        b.cuboid(&ml, [x - 0.03, ym - 0.06, z - 0.02], [x + 0.03, ym - 0.03, z + 0.02]);
+        b.cuboid(
+            &ml,
+            [x - 0.03, ym - 0.06, z - 0.02],
+            [x + 0.03, ym - 0.03, z + 0.02],
+        );
     }
     step_bumper(b, p, 0.40, 0.56, 0.22, M::Trim, false);
     plate_rear(b, p, 0.58);
@@ -845,7 +1004,15 @@ fn reshape_pair(
 
 /// Grille between the head lamps: dark mesh box, a frame (`frame` material) and `slats`
 /// horizontal bars.
-fn grille(b: &mut Builder, p: &BodyProfile, half: f32, z0: f32, z1: f32, slats: usize, frame: MaterialSlot) {
+fn grille(
+    b: &mut Builder,
+    p: &BodyProfile,
+    half: f32,
+    z0: f32,
+    z1: f32,
+    slats: usize,
+    frame: MaterialSlot,
+) {
     let g = key("grille", R::FrontBumper, M::Grille);
     front_box(b, &g, p, -half, half, z0, z1, 0.004, 0.03);
     let f = key("grille_frame", R::FrontBumper, frame);
@@ -913,7 +1080,15 @@ fn bumper(
     mirror(b, &kw);
     if let Some(sm) = strip {
         let ks = key(&format!("{name}_strip"), region, sm);
-        face(b, &ks, -(w - 0.12), w - 0.12, z1 - 0.012, z1 + 0.004, out + 0.004);
+        face(
+            b,
+            &ks,
+            -(w - 0.12),
+            w - 0.12,
+            z1 - 0.012,
+            z1 + 0.004,
+            out + 0.004,
+        );
     }
 }
 
@@ -957,7 +1132,17 @@ fn handles(b: &mut Builder, p: &BodyProfile, mat: MaterialSlot, crew_cab: bool) 
     for (i, (r, y_rear)) in doors.into_iter().enumerate() {
         let y = y_rear + 0.17;
         let k = key(&format!("door_handle_{i}_l"), r, mat);
-        side_box(b, &k, p, y - 0.07, y + 0.07, z - 0.014, z + 0.016, 0.014, 0.004);
+        side_box(
+            b,
+            &k,
+            p,
+            y - 0.07,
+            y + 0.07,
+            z - 0.014,
+            z + 0.016,
+            0.014,
+            0.004,
+        );
         mirror(b, &k);
     }
 }
@@ -966,11 +1151,31 @@ fn handles(b: &mut Builder, p: &BodyProfile, mat: MaterialSlot, crew_cab: bool) 
 fn side_markers(b: &mut Builder, p: &BodyProfile, z: f32) {
     let yf = p.y_nose - 0.22;
     let kf = light("side_marker_front_l", R::FrontLeftFender, M::EmissiveAmber);
-    side_box(b, &kf, p, yf - 0.05, yf + 0.03, z - 0.02, z + 0.02, 0.008, 0.004);
+    side_box(
+        b,
+        &kf,
+        p,
+        yf - 0.05,
+        yf + 0.03,
+        z - 0.02,
+        z + 0.02,
+        0.008,
+        0.004,
+    );
     mirror(b, &kf);
     let yr = p.y_tail + 0.22;
     let kr = light("side_marker_rear_l", R::RearLeftQuarter, M::Taillight);
-    side_box(b, &kr, p, yr - 0.03, yr + 0.05, z - 0.02, z + 0.02, 0.008, 0.004);
+    side_box(
+        b,
+        &kr,
+        p,
+        yr - 0.03,
+        yr + 0.05,
+        z - 0.02,
+        z + 0.02,
+        0.008,
+        0.004,
+    );
     mirror(b, &kr);
 }
 
@@ -1008,7 +1213,11 @@ fn third_brake_lamp(b: &mut Builder, p: &BodyProfile, half: f32) {
     let k = light("brake_lamp_c", R::Trunk, M::Taillight);
     let y = p.y_deck + 0.04;
     let z = p.top(y);
-    b.cuboid(&k, [-half, y - 0.025, z - 0.01], [half, y + 0.015, z + 0.03]);
+    b.cuboid(
+        &k,
+        [-half, y - 0.025, z - 0.01],
+        [half, y + 0.015, z + 0.03],
+    );
 }
 
 /// Shark-fin antenna on the roof's rear edge.
@@ -1075,7 +1284,11 @@ fn black_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f
     let (s, _) = p.side_point(y, zb - 0.02);
     let x0 = s[0];
     let k = PartKey::body("door_mirror_l", R::LeftDoorF, PartKind::Mirror, M::Trim);
-    b.cuboid(&k, [x0 - arm, y - 0.03, zb + 0.0], [x0 + 0.01, y + 0.02, zb + 0.03]);
+    b.cuboid(
+        &k,
+        [x0 - arm, y - 0.03, zb + 0.0],
+        [x0 + 0.01, y + 0.02, zb + 0.03],
+    );
     b.beveled_box(
         &k,
         [x0 - arm - size.0 + 0.02, y - size.1 * 0.5, zb + 0.01],
@@ -1095,13 +1308,22 @@ fn tall_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f3
     let k = PartKey::body("door_mirror_l", R::LeftDoorF, PartKind::Mirror, M::Trim);
     let xh = x0 - arm;
     for dz in [0.0f32, size.2 - 0.05] {
-        b.cuboid(&k, [xh, y - 0.015, zb + dz], [x0 + 0.01, y + 0.015, zb + dz + 0.025]);
+        b.cuboid(
+            &k,
+            [xh, y - 0.015, zb + dz],
+            [x0 + 0.01, y + 0.015, zb + dz + 0.025],
+        );
     }
     let lo = [xh - size.0, y - size.1 * 0.5, zb - 0.02];
     let hi = [xh, y + size.1 * 0.5, zb - 0.02 + size.2];
     b.cuboid(&k, lo, hi);
     mirror(b, &k);
-    let g = PartKey::body("door_mirror_glass_l", R::LeftDoorF, PartKind::Mirror, M::Chrome);
+    let g = PartKey::body(
+        "door_mirror_glass_l",
+        R::LeftDoorF,
+        PartKind::Mirror,
+        M::Chrome,
+    );
     b.cuboid(
         &g,
         [lo[0] + 0.012, lo[1] - 0.004, lo[2] + 0.012],
@@ -1148,8 +1370,24 @@ fn step_bumper(
         rear_box(b, &h, p, -0.04, 0.04, z0 - 0.08, z0 - 0.01, out + 0.12, 0.0);
         let ball = key("hitch_ball", R::RearBumper, M::Chrome);
         let y = tail_y(p, 0.0) - out - 0.08;
-        b.cylinder(&ball, [0.0, y, z0 - 0.01], [0.0, y, z0 + 0.03], 0.012, 0.012, 6, false);
-        b.cylinder(&ball, [0.0, y, z0 + 0.03], [0.0, y, z0 + 0.08], 0.026, 0.0, 8, true);
+        b.cylinder(
+            &ball,
+            [0.0, y, z0 - 0.01],
+            [0.0, y, z0 + 0.03],
+            0.012,
+            0.012,
+            6,
+            false,
+        );
+        b.cylinder(
+            &ball,
+            [0.0, y, z0 + 0.03],
+            [0.0, y, z0 + 0.08],
+            0.026,
+            0.0,
+            8,
+            true,
+        );
     }
 }
 
@@ -1206,14 +1444,34 @@ fn sliding_door_track(b: &mut Builder, p: &BodyProfile) {
     let (rh, re) = p.rear_door.unwrap_or((p.y_fd_rear, p.y_fd_rear - 1.0));
     let z = p.z_belt + 0.16;
     let k = key("door_track_l", R::Cabin, M::Trim);
-    side_box(b, &k, p, re - 1.2, re - 0.03, z - 0.018, z + 0.018, 0.02, 0.004);
+    side_box(
+        b,
+        &k,
+        p,
+        re - 1.2,
+        re - 0.03,
+        z - 0.018,
+        z + 0.018,
+        0.02,
+        0.004,
+    );
     b.mirror_part("door_track_l", &k.mirrored());
     b.set_geometry("door_track_l", Vec::new(), Vec::new(), Vec::new());
     // Slider handle (right side).
     let h = key("slider_handle_l", R::LeftDoorR, M::Trim);
     let yh = rh - 0.12;
     let zh = p.z_belt - 0.10;
-    side_box(b, &h, p, yh - 0.08, yh + 0.08, zh - 0.015, zh + 0.015, 0.016, 0.004);
+    side_box(
+        b,
+        &h,
+        p,
+        yh - 0.08,
+        yh + 0.08,
+        zh - 0.015,
+        zh + 0.015,
+        0.016,
+        0.004,
+    );
     b.mirror_part("slider_handle_l", &h.mirrored());
     b.set_geometry("slider_handle_l", Vec::new(), Vec::new(), Vec::new());
 }
