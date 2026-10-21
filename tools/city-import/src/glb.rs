@@ -29,6 +29,11 @@ const SIDEWALK_M: f32 = 3.0;
 const CURB_M: f32 = 0.15;
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
+/// Terrain area above which far-from-road render terrain is drawn at twice the spacing
+/// (`coarse_blocks`; Port Vesper v3), m². Smaller maps keep their exact output.
+const BIG_MAP_M2: f32 = 25.0e6;
+/// Render terrain stays at full resolution within this distance of a road's paved edge, m.
+const COARSE_ROAD_CLEARANCE_M: f32 = 60.0;
 /// Sea level drawn as water, m.
 const SEA_Z: f32 = 0.25;
 
@@ -456,14 +461,31 @@ fn render_terrain(
         let l = (dx * dx + dy * dy + 1.0).sqrt();
         [-dx / l, -dy / l, 1.0 / l]
     };
+    // Big maps: 2 × 2 render cells far from every road become one block (see
+    // `coarse_blocks`); small maps (v2, the grid) keep every cell, byte for byte.
+    let coarse = coarse_blocks(t, net, cx, cy, step);
+    let is_coarse = |bi: i64, bj: i64| -> bool {
+        let (nbx, nby) = ((cx - 1) / 2, (cy - 1) / 2);
+        bi >= 0
+            && bj >= 0
+            && (bi as u32) < nbx
+            && (bj as u32) < nby
+            && coarse[(bj as u32 * nbx + bi as u32) as usize]
+    };
     // Per primitive, coarse vertex → local index (shared between the cells it touches).
     let n_prims = ground.len() + 2;
     let mut local: Vec<Vec<u32>> = vec![vec![u32::MAX; (cx * cy) as usize]; n_prims];
+    let idx = |a: u32, b: u32| (b * cx + a) as usize;
     for j in 0..cy - 1 {
         for i in 0..cx - 1 {
-            let idx = |a: u32, b: u32| (b * cx + a) as usize;
-            let v = [idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)];
-            let ij = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
+            let (bi, bj) = ((i / 2) as i64, (j / 2) as i64);
+            let block = is_coarse(bi, bj);
+            if block && (i % 2 == 1 || j % 2 == 1) {
+                continue; // drawn with its block's lower-left cell
+            }
+            let s = if block { 2 } else { 1 };
+            let ij = [(i, j), (i + s, j), (i + s, j + s), (i, j + s)];
+            let v: Vec<usize> = ij.iter().map(|(a, b)| idx(*a, *b)).collect();
             let p: Vec<V3> = v.iter().map(|q| [pos[*q][0], pos[*q][1], z[*q]]).collect();
             let centre = [(p[0][0] + p[2][0]) * 0.5, (p[0][1] + p[2][1]) * 0.5];
             let zmax = p.iter().map(|q| q[2]).fold(f32::NEG_INFINITY, f32::max);
@@ -483,18 +505,101 @@ fn render_terrain(
             } else {
                 &mut ground[which]
             };
-            let mut ids = [0u32; 4];
-            for c in 0..4 {
-                let slot = &mut local[which][v[c]];
+            let mut id_of = |a: u32, b: u32| -> u32 {
+                let q = idx(a, b);
+                let slot = &mut local[which][q];
                 if *slot == u32::MAX {
-                    *slot = prim.vert(p[c], normal(ij[c].0, ij[c].1));
+                    *slot = prim.vert([pos[q][0], pos[q][1], z[q]], normal(a, b));
                 }
-                ids[c] = *slot;
+                *slot
+            };
+            if !block {
+                let ids: Vec<u32> = ij.iter().map(|(a, b)| id_of(*a, *b)).collect();
+                prim.indices
+                    .extend_from_slice(&[ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]]);
+                continue;
             }
-            prim.indices
-                .extend_from_slice(&[ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]]);
+            // A block: its corners, plus the midpoint of every edge shared with a block that
+            // is not coarse (fine cells there use that vertex: no T-junction cracks), fanned
+            // around the block's centre vertex when any midpoint is needed.
+            let mid = [
+                (!is_coarse(bi, bj - 1)).then_some((i + 1, j)),
+                (!is_coarse(bi + 1, bj)).then_some((i + 2, j + 1)),
+                (!is_coarse(bi, bj + 1)).then_some((i + 1, j + 2)),
+                (!is_coarse(bi - 1, bj)).then_some((i, j + 1)),
+            ];
+            let mut ring: Vec<(u32, u32)> = Vec::with_capacity(8);
+            for k in 0..4 {
+                ring.push(ij[k]);
+                if let Some(m) = mid[k] {
+                    ring.push(m);
+                }
+            }
+            let ids: Vec<u32> = ring.iter().map(|(a, b)| id_of(*a, *b)).collect();
+            if ids.len() == 4 {
+                prim.indices
+                    .extend_from_slice(&[ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]]);
+            } else {
+                let c = id_of(i + 1, j + 1);
+                for k in 0..ids.len() {
+                    prim.indices
+                        .extend_from_slice(&[c, ids[k], ids[(k + 1) % ids.len()]]);
+                }
+            }
         }
     }
+}
+
+/// Render terrain blocks (2 × 2 cells of the render grid, `step` m each) drawn as one quad:
+/// only on big maps (terrain area over [`BIG_MAP_M2`]) and only where no road surface is
+/// within [`COARSE_ROAD_CLEARANCE_M`]. Row-major over `((cx - 1) / 2) × ((cy - 1) / 2)` blocks;
+/// all `false` on small maps.
+fn coarse_blocks(t: &Heightfield, net: &RoadNetwork, cx: u32, cy: u32, step: f32) -> Vec<bool> {
+    let (nbx, nby) = ((cx - 1) / 2, (cy - 1) / 2);
+    let lo = t.origin;
+    let hi = t.max_corner();
+    if (hi[0] - lo[0]) * (hi[1] - lo[1]) <= BIG_MAP_M2 {
+        return vec![false; (nbx * nby) as usize];
+    }
+    let block_m = 2.0 * step;
+    let mut near = vec![false; (nbx * nby) as usize];
+    let mut mark = |p: V2, r: f32| {
+        let rb = (r / block_m).ceil() as i64 + 1;
+        let bi = ((p[0] - lo[0]) / block_m).floor() as i64;
+        let bj = ((p[1] - lo[1]) / block_m).floor() as i64;
+        for dj in -rb..=rb {
+            for di in -rb..=rb {
+                let (a, b) = (bi + di, bj + dj);
+                if a < 0 || b < 0 || a >= nbx as i64 || b >= nby as i64 {
+                    continue;
+                }
+                // Nearest point of the block's square to p.
+                let x0 = lo[0] + a as f32 * block_m;
+                let y0 = lo[1] + b as f32 * block_m;
+                let dx = (x0 - p[0]).max(p[0] - (x0 + block_m)).max(0.0);
+                let dy = (y0 - p[1]).max(p[1] - (y0 + block_m)).max(0.0);
+                if dx * dx + dy * dy <= r * r {
+                    near[(b as u32 * nbx + a as u32) as usize] = true;
+                }
+            }
+        }
+    };
+    for s in &net.surfaces {
+        let r = COARSE_ROAD_CLEARANCE_M + s.left_m.max(s.right_m);
+        for w in s.centre.windows(2) {
+            let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+            let n = (geom::dist(a, b) / 8.0).ceil().max(1.0) as usize;
+            for k in 0..=n {
+                let f = k as f32 / n as f32;
+                mark([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], r);
+            }
+        }
+    }
+    for ix in &net.intersections {
+        let c = net.nodes[ix.node as usize].pos;
+        mark(geom::xy(c), COARSE_ROAD_CLEARANCE_M + ix.radius_m);
+    }
+    near.iter().map(|n| !n).collect()
 }
 
 /// Build the greybox primitives for a city.
@@ -972,6 +1077,65 @@ mod tests {
         assert_eq!(steel.color, material_rgba(Material::Steel));
         assert!(prims.iter().any(|p| p.material == "feature_red"));
         assert!(!prims.iter().any(|p| p.material == "feature_blue"));
+    }
+
+    #[test]
+    fn big_maps_coarsen_terrain_far_from_roads_without_cracks() {
+        let mut net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig {
+            nx: 4,
+            ny: 4,
+            ..Default::default()
+        });
+        net.zones.clear();
+        let run = |net: &RoadNetwork| {
+            let t = net.terrain.as_ref().unwrap();
+            let mut ground: Vec<Prim> = DistrictKind::ALL
+                .iter()
+                .map(|k| Prim::smooth(&format!("{k:?}"), [1.0; 4]))
+                .collect();
+            let (mut rock, mut sea) = (Prim::smooth("r", [1.0; 4]), Prim::smooth("s", [1.0; 4]));
+            render_terrain(t, net, &mut ground, &mut rock, &mut sea);
+            let g = ground.swap_remove(DistrictKind::Suburb as usize);
+            assert!(rock.indices.is_empty() && sea.indices.is_empty());
+            g
+        };
+        // 6 × 6 km of flat ground at 5 m (a "big map"), the grid's roads in the middle.
+        net.terrain = Some(Heightfield::flat(
+            [-3000.0, -3000.0],
+            [3000.0, 3000.0],
+            5.0,
+            5.0,
+        ));
+        let big = run(&net);
+        // Same ground at 3 × 3 km (not big): every 10 m render cell is drawn.
+        net.terrain = Some(Heightfield::flat(
+            [-1500.0, -1500.0],
+            [1500.0, 1500.0],
+            5.0,
+            5.0,
+        ));
+        let small = run(&net);
+        assert_eq!(small.indices.len() / 6, 300 * 300);
+        // Far from the roads the big map uses 20 m quads: well under 4 × the small one's cells.
+        let fine_tris = 2 * 600 * 600;
+        let tris = big.indices.len() / 3;
+        assert!(tris < fine_tris / 2, "{tris} triangles vs {fine_tris} fine");
+        // Watertight: every edge is shared by two triangles, except on the map border.
+        let mut edges: std::collections::BTreeMap<(u32, u32), u32> = Default::default();
+        for t in big.indices.chunks(3) {
+            for k in 0..3 {
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                *edges.entry((a.min(b), a.max(b))).or_default() += 1;
+            }
+        }
+        for ((a, b), n) in edges {
+            let (p, q) = (big.positions[a as usize], big.positions[b as usize]);
+            let border = |c: usize| (p[c].abs() > 2999.0 && q[c].abs() > 2999.0) && p[c] == q[c];
+            assert!(
+                n == 2 || (n == 1 && (border(0) || border(1))),
+                "edge {p:?} - {q:?} used {n} times"
+            );
+        }
     }
 
     #[test]
