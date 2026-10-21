@@ -372,3 +372,16 @@ g, over-asks at speed), drifts > 1 m wide, the off-line cap brakes mid-bend and 
 lets go. Needs a speed-dependent lateral capability (next item). Lock-in until then:
 `finishers` min 5, no ai_mara time (lead's call, 2026-10-21); restore min 6 with the fix. If the
 owner picks rear ×0.55 over ×0.45, re-measure this case on it.
+
+### Loop 9 s95 hakone_gt — fixed (2026-10-21)
+
+Not a capability over-ask: a constant-speed steer-ramp probe (AI assists) shows steady lateral
+grip *rising* with speed for the aero cars (hakone_gt 0.90 g at 20 m/s, 1.29 g at 50 m/s;
+kestrel / lindwurm flat ~0.94 g). The trace at 10 Hz: a 2 m drift off the line at 60 m/s made
+the off-line cap ask for 48 m/s, the speed controller (`2.5 · Δv`, clamp −12) went to full brake,
+the car yawed *against* its steering under the full brake, the steering correction built too
+slowly and it spun. Fix: slowing for the off-line cap trail-brakes (at most 40 % of the car's
+brake decel) instead of braking flat out; every other limit is unchanged. Loop 9 s95: 6/6
+finish, hakone_gt fastest (186.0 s, ratio 1.141, no walls); the other races move by under 1 s
+(Loop 9 s95 −3–4 s per car). The lock-in for loop9_circuit_s95 is back to finishers 6 with an
+ai_mara time.
