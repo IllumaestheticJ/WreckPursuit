@@ -114,6 +114,11 @@ pub const TV_SWEEP_MPS: f32 = 2.5;
 /// still one collision in [`TrafficStats::civilian_collisions`] (cars that bump, part and
 /// bump again counted twice).
 pub const RETOUCH_STEPS: u64 = 120;
+/// A unit beside a car that is merging back after a siren yield counts as standing (the car
+/// creeps on past it along the kerb) below this speed, m/s; a moving one is waited for.
+pub const BESIDE_STANDING_MPS: f32 = 1.0;
+/// ... and only with at least this much room between the two bodies' sides, m.
+pub const BESIDE_CLEAR_M: f32 = 0.5;
 /// A driver held at its stop line by a siren unit heading for the junction goes anyway after
 /// this long (the unit is milling about a scene rather than coming through), s.
 pub const SIREN_JUNCTION_HOLD_MAX_S: f32 = 8.0;
@@ -2137,22 +2142,36 @@ impl Traffic {
                             });
                         // Not while a unit stands beside it: moving back to the lane centre
                         // would swing into it (it gave up on a unit stopped alongside).
-                        let beside = inp.tracked.iter().any(|t| {
-                            let r = geom::sub(geom::xy(t.pos), q);
-                            let long = geom::dot(r, pose.f);
-                            (t.pos[2] - pose.p[2]).abs() < 4.0
-                                && long > -CAR_LENGTH_M - 1.0
-                                && long < CAR_LENGTH_M + 1.0
-                                && geom::dot(r, right).abs() < CAR_WIDTH_M + 1.2
-                        });
-                        if closing {
+                        // `Some(pass)` for a unit beside the car: `pass` when every such unit
+                        // stands with room to creep past it.
+                        let beside = inp
+                            .tracked
+                            .iter()
+                            .filter(|t| {
+                                let r = geom::sub(geom::xy(t.pos), q);
+                                let long = geom::dot(r, pose.f);
+                                (t.pos[2] - pose.p[2]).abs() < 4.0
+                                    && long > -CAR_LENGTH_M - 1.0
+                                    && long < CAR_LENGTH_M + 1.0
+                                    && geom::dot(r, right).abs() < CAR_WIDTH_M + 1.2
+                            })
+                            .map(|t| {
+                                let lat_gap = geom::dot(geom::sub(geom::xy(t.pos), q), right).abs();
+                                geom::len(geom::xy(t.vel)) < BESIDE_STANDING_MPS
+                                    && lat_gap >= CAR_WIDTH_M + BESIDE_CLEAR_M
+                            })
+                            .reduce(|x, y| x && y);
+                        let at_kerb = (a.lat - sy.side * kerb).abs() < 0.2;
+                        if closing || (beside.is_some() && !(beside == Some(true) && at_kerb)) {
                             lat_target = sy.side * kerb;
                             acc = acc.min(siren::approach_speed(v, 0.0, max_decel, p.max_accel));
-                        } else if beside {
-                            // Drive on along the kerb, clear of the unit, and merge back past it.
+                        } else if beside.is_some() {
+                            // A unit standing alongside (a scene): creep on along the kerb and
+                            // merge back past it instead of waiting for it (owner row 85).
                             lat_target = sy.side * kerb;
                             v0 = v0.min(5.0);
                         }
+                        let beside = beside.is_some();
                         v0 = v0.min(8.0);
                         if !closing && !beside && a.lat.abs() < 0.2 {
                             sy = SirenYield {
