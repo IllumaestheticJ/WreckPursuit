@@ -134,6 +134,10 @@ pub struct CarPace {
     /// Of those, the ones out on the opposing lanes (a racer met on the wrong side of the road
     /// by a car coming the other way or out of a side road).
     pub head_on_opposing: u32,
+    /// The judge's contact counts: (civilians / traffic, all cars).
+    pub contacts: (u32, u32),
+    /// Completed passes made between two cars (lane-splitting).
+    pub splits: u32,
     /// Judge status.
     pub status: String,
 }
@@ -669,6 +673,8 @@ pub fn race_pace_in(
                     / (race.route.length_m * laps as f32 / 1000.0).max(0.1),
                 head_on: (head_on[k].0, head_on[k].1),
                 head_on_opposing: head_on_opp[k],
+                contacts: (r.civilian_hits, r.contacts),
+                splits: ai.field().splits_by(k) as u32,
                 status: format!("{:?}", r.status),
             }
         })
@@ -710,7 +716,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -726,6 +732,9 @@ fn pace_sweep() {
                     c.head_on.0,
                     c.head_on.1,
                     c.head_on_opposing,
+                    c.contacts.0,
+                    c.contacts.1,
+                    c.splits,
                     c.status,
                     lost.join(", ")
                 );
