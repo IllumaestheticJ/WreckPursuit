@@ -20,7 +20,7 @@ use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{gyro_yaw_torque, slide_class, slide_throttle, GyroInput};
 use crate::steering::{
-    ackermann, body_slip, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
+    ackermann, body_slip, grip_lock, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
@@ -844,6 +844,12 @@ impl Vehicle {
             slide_class: self.slide_class,
             pull: eff.steer_pull,
             ratio_scale: eff.steer_ratio_scale.max(0.05),
+            grip_lock: grip_lock(
+                wheelbase,
+                self.corners[0].tire.lateral.d,
+                self.corners[0].tire.peak_slip_angle_rad,
+                v_fwd,
+            ),
         };
         let max_steer = self.corners[0].max_steer.max(self.corners[1].max_steer);
         self.center_steer = update_center_angle(
