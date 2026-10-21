@@ -131,6 +131,17 @@ fn swing_steer(on: bool) {
     }
 }
 
+/// How the flick driver enters the held drift (`ENTRY`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Entry {
+    /// Key into the turn + full throttle (default).
+    Power,
+    /// Key into the turn + handbrake, no throttle, for 0.4 s, then full throttle.
+    Handbrake,
+    /// Key into the turn with the throttle lifted for 0.4 s, then full throttle.
+    Lift,
+}
+
 /// Old-side angle where a lifting driver reverses the keys, °.
 const REACT_DEG: f32 = 5.0;
 
@@ -142,6 +153,15 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
     // 30–45° hold first).
     let env_f = |k: &str, d: f32| std::env::var(k).ok().map_or(d, |v| v.parse().expect(k));
     let mut rig = settle_on_circle(c, &a, env_f("RADIUS", 40.0), env_f("LATG", 0.5));
+    // `HOLD_GEAR`: the gear the driver holds through the drift (default 2nd, the lab's).
+    let hold_gear: i8 = std::env::var("HOLD_GEAR")
+        .ok()
+        .map_or(DRIFT_GEAR, |v| v.parse().expect("HOLD_GEAR"));
+    let entry = match std::env::var("ENTRY").as_deref() {
+        Ok("handbrake") => Entry::Handbrake,
+        Ok("lift") => Entry::Lift,
+        _ => Entry::Power,
+    };
     let flick_deg = std::env::var("FLICK_DEG")
         .ok()
         .map(|v| v.parse::<f32>().expect("FLICK_DEG"));
@@ -195,7 +215,18 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             }
         }
         let (steer, throttle) = match (flick_at, reverse_at) {
-            (None, _) => (if entered { 1.0 } else { -1.0 }, 1.0),
+            (None, _) if entered => (1.0, 1.0),
+            // Entry (lead: low-power cars cannot break the rear loose on power alone):
+            // `ENTRY=handbrake` = the key into the turn with the handbrake and no throttle for
+            // the first 0.4 s, `ENTRY=lift` = the key with the throttle lifted for 0.4 s; then
+            // full throttle until the slide passes 12°. Default `power`: full throttle.
+            (None, _) => {
+                let early = tick < (0.4 * TPS as f32) as usize;
+                match entry {
+                    Entry::Handbrake | Entry::Lift if early => (-1.0, 0.0),
+                    _ => (-1.0, 1.0),
+                }
+            }
             (Some(f), None) => {
                 let l = match init {
                     Init::Lift(l) | Init::LiftSwitchEnd(l) => l,
@@ -216,11 +247,21 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 (if tick - r < gap_t { 0.0 } else { -1.0 }, thr)
             }
         };
+        let handbrake = if flick_at.is_none()
+            && !entered
+            && entry == Entry::Handbrake
+            && tick < (0.4 * TPS as f32) as usize
+        {
+            1.0
+        } else {
+            0.0
+        };
         rig.step(
             &VehicleInput {
                 steer,
                 throttle,
-                gear_down: !a.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                handbrake,
+                gear_down: !a.auto_gears && rig.vehicle.gear() > hold_gear,
                 ..Default::default()
             },
             &a,

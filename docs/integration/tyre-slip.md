@@ -135,6 +135,30 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Candidate B as the default spin model; lift / handbrake entries (lead, 2026-10-21)
+
+`CarTune::spin_candidate()` is candidate B (commit 683bdf52); the previous set is
+`CarTune::spin_step22()`. Grip-balance takes it into the unify build. On the panel default
+(firm ride + balance new) the clip-1 hold test sits at ~40° (5.0 s in band, sd 1.6), where the
+step-20 set sat at the 45° edge. W's `drift_lab_w_snap` ("before" half: steps 1–9 steering on
+the new tyres) and `drift_lab_w_catch` (rwd_d's key-tapping snap entry misses the band) move
+with B; reported to grip-balance / W.
+
+Transition harness entries for low-power cars: `ENTRY=handbrake` (key + handbrake, no throttle,
+0.4 s) or `ENTRY=lift` (key, throttle lifted 0.4 s), then full throttle; `HOLD_GEAR` = the gear
+held through the drift (default 2). shiro_turbo / lucciola_350 (B tyres, step 22 · plain):
+
+| entry | shiro_turbo | lucciola_350 |
+|---|---|---|
+| power, 2nd (default) | no hold | no hold |
+| lift, 2nd | no hold | no hold |
+| handbrake, 2nd | no hold | hold 31° at 35 km/h → flick, no crossing |
+| handbrake, 1st | hold 33° at 36 km/h → flick, no crossing | hold 31° at 33 km/h → flick, no crossing |
+
+With 1st gear + the handbrake both enter and hold a drift, but at 33–36 km/h the lift flick
+does not swing them through (no real crossing). parity_rwd_a: power entry 6 / 6, handbrake
+entry 2 / 6 (2 swing-backs, it enters slower and deeper).
+
 ### New-side settle, tyre side (lead, on drift-lab-w 1451d264: W's transition rack + catch)
 
 `transition v2search` with `V2SETTLE=1` (only the spin weighting `spin_b0/b2/c/p`, `rear_relax`,
