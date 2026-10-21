@@ -318,6 +318,10 @@ struct Racer {
     cap_now: CarCapability,
     line_idx: usize,
     speed: SpeedProfile,
+    /// Speed profile on the whole-road line (`Field::wide_lines`), if there is one.
+    wide_speed: Option<SpeedProfile>,
+    /// Following the whole-road line right now.
+    wide_on: bool,
     ctrl: DriveController,
     rng: Rng,
     status: RacerStatus,
@@ -458,6 +462,10 @@ pub struct Standing {
 pub struct Field {
     corridor: Corridor,
     lines: Vec<(u32, RacingLine)>,
+    /// Per entry of `lines`: the same car width's line over the whole road (my lanes and the
+    /// opposing ones), where the corridor has opposing lanes to use. Followed while the road
+    /// ahead is clear ([`wide_line_clear`]).
+    wide_lines: Vec<Option<RacingLine>>,
     racers: Vec<Racer>,
     config: RaceConfig,
     tick: u64,
@@ -592,6 +600,20 @@ impl Field {
     pub fn new(corridor: Corridor, specs: &[RacerSpec], config: RaceConfig) -> Self {
         let mut master = Rng::new(config.seed ^ 0x0BB0_57E5_u64);
         let mut lines: Vec<(u32, RacingLine)> = Vec::new();
+        let mut wide_lines: Vec<Option<RacingLine>> = Vec::new();
+        // The road including the opposing lanes, where the corridor may use them.
+        let wide_corridor = (corridor.opposing == OpposingLanes::ForOvertaking
+            && corridor
+                .samples
+                .iter()
+                .any(|c| c.left_pass_m > c.left_m + 1.0))
+        .then(|| {
+            let mut w = corridor.clone();
+            for c in &mut w.samples {
+                c.left_m = c.left_pass_m;
+            }
+            w
+        });
         let mut racers = Vec::with_capacity(specs.len());
         for spec in specs {
             let key = (spec.capability.width_m * 100.0).round() as u32;
@@ -600,6 +622,11 @@ impl Field {
                 None => {
                     let half = spec.capability.width_m * 0.5;
                     lines.push((key, RacingLine::optimise(&corridor, half, &config.line)));
+                    wide_lines.push(
+                        wide_corridor
+                            .as_ref()
+                            .map(|w| RacingLine::optimise(w, half, &config.line)),
+                    );
                     lines.len() - 1
                 }
             };
@@ -611,6 +638,9 @@ impl Field {
                 &params.usage,
                 f32::INFINITY,
             );
+            let wide_speed = wide_lines[line_idx].as_ref().map(|w| {
+                SpeedProfile::build(&corridor, w, &spec.capability, &params.usage, f32::INFINITY)
+            });
             let gains = DriveGains {
                 lookahead_per_mps: params.lookahead_per_mps,
                 lookahead_max_m: 30.0,
@@ -624,6 +654,8 @@ impl Field {
                 cap_now: spec.capability,
                 line_idx,
                 speed,
+                wide_speed,
+                wide_on: false,
                 ctrl: DriveController::new(
                     gains,
                     spec.capability.wheelbase_m,
@@ -691,6 +723,7 @@ impl Field {
         Self {
             corridor,
             lines,
+            wide_lines,
             racers,
             config,
             tick: 0,
@@ -1138,6 +1171,9 @@ impl Field {
                         &r.params.usage,
                         r.v_cap,
                     );
+                    // Cooling down after the flag: my own lanes only.
+                    r.wide_speed = None;
+                    r.wide_on = false;
                 }
             }
             // Damage awareness.
@@ -1176,6 +1212,17 @@ impl Field {
                         &r.params.usage,
                         v_cap,
                     );
+                    if r.wide_speed.is_some() {
+                        r.wide_speed = self.wide_lines[r.line_idx].as_ref().map(|w| {
+                            SpeedProfile::build(
+                                &self.corridor,
+                                w,
+                                &r.cap_now,
+                                &r.params.usage,
+                                v_cap,
+                            )
+                        });
+                    }
                 }
             }
             let wrecked = e.engine_dead || e.wheel_lost.iter().any(|w| *w) || st.health < 0.12;
@@ -1532,7 +1579,12 @@ impl Field {
                 a_brake: 0.0,
             },
         );
+        let wide_speed = self.racers[k].wide_speed.take();
         let line_idx = self.racers[k].line_idx;
+        let wide = match (&flight, &self.wide_lines[line_idx], &wide_speed) {
+            (None, Some(l), Some(p)) => Some((l, p)),
+            _ => None,
+        };
         let (corridor, line, profile): (&Corridor, &RacingLine, &SpeedProfile) = match &flight {
             Some(f) => (&f.corridor, &f.line, &f.profile),
             None => (&self.corridor, &self.lines[line_idx].1, &speed),
@@ -1553,11 +1605,13 @@ impl Field {
             corridor,
             line,
             profile,
+            wide,
             flight.is_some(),
             obstacles,
             dt,
         );
         self.racers[k].speed = speed;
+        self.racers[k].wide_speed = wide_speed;
         self.racers[k].flight = flight;
         if let Some(who) = self.racers[k].last_pass.take() {
             let other = match who {
@@ -1609,6 +1663,7 @@ fn decide_racer(
     corridor: &Corridor,
     line: &RacingLine,
     profile: &SpeedProfile,
+    wide: Option<(&RacingLine, &SpeedProfile)>,
     fleeing: bool,
     obstacles: &[Obstacle],
     dt: f32,
@@ -1618,6 +1673,29 @@ fn decide_racer(
         let hw = 0.5 * r.cap.width_m;
         let hl = 0.5 * r.cap.length_m;
         let v = r.v.max(0.0);
+        // Street racing: the whole road when it is clear. Follow the line over my lanes and
+        // the opposing ones (apexes, chicanes, empty junctions) while nothing is in its way on
+        // the opposing side or in a junction it crosses, out to past the next braking zone;
+        // back to my own lanes as soon as something is.
+        let finished_or_dq = matches!(
+            r.status,
+            RacerStatus::Finished { .. } | RacerStatus::Disqualified
+        );
+        r.wide_on = match wide {
+            Some((wl, wp)) if !fleeing && !finished_or_dq && r.flight.is_none() => {
+                let a_brk = wp.a_brake.max(3.0);
+                let horizon = (v * v / (2.0 * a_brk) + 1.5 * v + 30.0).min(250.0);
+                let may_start = matches!(r.tactic, Tactic::Follow);
+                (r.wide_on || may_start)
+                    && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, horizon)
+            }
+            _ => false,
+        };
+        let wide_now = r.wide_on;
+        let (line, profile) = match wide {
+            Some((wl, wp)) if wide_now => (wl, wp),
+            _ => (line, profile),
+        };
         let line_n = |s: f32| corridor.interp(&line.offset, s);
         let to_limits = |(l, rr): (f32, f32)| {
             let lo = -l + hw + 0.25;
@@ -1628,7 +1706,13 @@ fn decide_racer(
                 (0.5 * (lo + hi), 0.5 * (lo + hi))
             }
         };
-        let limits = |s: f32| to_limits(corridor.bounds(s));
+        let limits = |s: f32| {
+            if wide_now {
+                to_limits(corridor.pass_bounds(s))
+            } else {
+                to_limits(corridor.bounds(s))
+            }
+        };
         // Overtaking may use the opposing lanes on open roads: risk-takers always, everyone
         // to get round a pulled-over racer just ahead.
         let parked_ahead = obstacles.iter().any(|o| {
@@ -2111,6 +2195,11 @@ fn decide_racer(
                     * (30.0 / v.max(30.0))
             }
             Tactic::Park | Tactic::Yield => 0.8,
+            // On the whole-road line: keep up with it as it swings across the road.
+            Tactic::Follow if follow_w > 0.0 && r.wide_on => {
+                let slope = (line_n(r.s + 2.0) - line_n(r.s)) / 2.0;
+                (1.2 * slope.abs() * v).max(0.9)
+            }
             _ => 0.9,
         };
         if r.n_cmd.is_nan() {
@@ -2800,6 +2889,54 @@ enum PassReject {
     LaneAhead = 5,
     LaneBehind = 6,
     TargetBusy = 7,
+}
+
+/// Whether the whole-road line `wide` is clear for racer `r` over the next `horizon` metres:
+/// wherever it puts my body on the opposing lanes, nothing will be there when I get there
+/// (oncoming cars by where they will have got to), and no junction it takes me through on the
+/// opposing side has anyone near it (the side roads' traffic waits in the box: a risk check,
+/// not a ban — an empty junction may be cut).
+fn wide_line_clear(
+    corridor: &Corridor,
+    wide: &RacingLine,
+    r: &Racer,
+    me: Who,
+    obstacles: &[Obstacle],
+    horizon: f32,
+) -> bool {
+    let hw = 0.5 * r.cap.width_m;
+    let hl = 0.5 * r.cap.length_m;
+    let v = r.v.max(5.0);
+    let others: Vec<(&Obstacle, f32)> = obstacles
+        .iter()
+        .filter(|o| o.who != me && !matches!(o.who, Who::Vehicle(e) if e == r.entity))
+        .map(|o| (o, corridor.delta_s(r.s_rel, o.s)))
+        .filter(|(_, ds)| *ds > -10.0 && *ds < horizon + 120.0)
+        .collect();
+    let mut x = 0.0;
+    while x <= horizon {
+        let s = r.s + x;
+        let c = corridor.sample((s / CORRIDOR_STEP_M).floor() as isize);
+        let n_w = corridor.interp(&wide.offset, s);
+        if n_w - hw < -c.left_m - 0.1 {
+            let t = x / v;
+            for (o, ds) in &others {
+                // Where it will be when I get here (oncoming cars close the distance).
+                let ds_then = ds + o.v_s * t;
+                let margin = 6.0 + 0.25 * (v - o.v_s).max(0.0);
+                if (ds_then - x).abs() < hl + o.half_len + margin
+                    && (o.n - n_w).abs() < hw + o.half_w + 0.8
+                {
+                    return false;
+                }
+                if c.junction && (ds - x).abs() < 30.0 && !matches!(o.who, Who::Racer(_)) {
+                    return false;
+                }
+            }
+        }
+        x += 2.0 * CORRIDOR_STEP_M;
+    }
+    true
 }
 
 /// Whether a car at lateral offset `n` (half width `hw`) is out on the opposing lanes (left of
