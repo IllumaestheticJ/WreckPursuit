@@ -87,6 +87,15 @@ pub struct RoadSegment {
     /// commands name roads by this id.
     #[serde(default)]
     pub edge: Option<u32>,
+    /// Drivable lanes in the `a → b` direction (0 = unknown: hand-built graphs).
+    #[serde(default)]
+    pub lanes_fwd: u8,
+    /// Drivable lanes in the `b → a` direction (0 on one-way roads and when unknown).
+    #[serde(default)]
+    pub lanes_back: u8,
+    /// Lane width, m (0 = unknown).
+    #[serde(default)]
+    pub lane_width_m: f32,
 }
 
 /// Kind of point of interest.
@@ -260,6 +269,9 @@ impl RoadGraph {
             district: self.nodes[a.0 as usize].district,
             oneway,
             edge: None,
+            lanes_fwd: 0,
+            lanes_back: 0,
+            lane_width_m: 0.0,
         });
         self.out[a.0 as usize].push((id, b));
         self.inc[b.0 as usize].push((id, a));

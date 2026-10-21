@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mockGarage, mockShops } from "../mock/mockData";
-import { CARS, MODS, modBlocker, modTree } from "./catalog";
+import { CAR_STATS, CARS, MODS, modBlocker, modTree } from "./catalog";
 import { marketPrice, quoteRepair, salePrice, scrapValue } from "./economy";
 import { bracket, classIndex, estimate, previewBuild, TIRE_GRIP } from "./estimate";
 
@@ -9,6 +9,18 @@ describe("catalog", () => {
     expect(Object.keys(CARS).length).toBeGreaterThanOrEqual(13);
     expect(Object.keys(MODS).length).toBeGreaterThan(80);
     expect(modTree()[0].slot).toBe("Engine");
+  });
+
+  it("has physics-measured stat bars for every car", () => {
+    for (const id of Object.keys(CARS)) {
+      const s = CAR_STATS[id];
+      expect(s, id).toBeDefined();
+      for (const v of Object.values(s.bars)) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+      expect(s.top_speed_kmh).toBeGreaterThan(100);
+    }
   });
 
   it("enforces requirements, class and mode limits", () => {
@@ -91,5 +103,31 @@ describe("pricing", () => {
     expect(marketPrice(28000, "Sport", "Used")).toBe(25000); // 22 400 clamped to the Sport band
     expect(marketPrice(7500, "Compact", "New")).toBe(9000);
     expect(salePrice({ ...shiro, totalLoss: false })).toBeLessThan(shiro.basePrice);
+  });
+});
+
+describe("build stats", () => {
+  it("stock builds are the measured table; mods move the bars", async () => {
+    const { buildStats, barsFor } = await import("./stats");
+    const stock = buildStats("kestrel_ts", [])!;
+    expect(stock.source).toBe("measured");
+    expect(stock.stats).toEqual(CAR_STATS.kestrel_ts);
+    // Same build as wp_wasm's build_stats test, measured on the rig at 6.54 s / 256 km/h /
+    // 1.047 g (stock 7.08 / 248 / 0.93): the estimate must land near the physics.
+    const b = buildStats("kestrel_ts", ["engine_intake_1", "engine_ecu_2", "tires_semi_slick"])!;
+    expect(b.source).toBe("estimated");
+    expect(b.stats.zero_to_100_s!).toBeLessThan(stock.stats.zero_to_100_s!);
+    expect(b.stats.zero_to_100_s!).toBeGreaterThan(6.54 * 0.92);
+    expect(b.stats.zero_to_100_s!).toBeLessThan(6.54 * 1.08);
+    expect(b.stats.top_speed_kmh).toBeGreaterThan(248);
+    expect(b.stats.cornering_g).toBeGreaterThan(1.047 * 0.92);
+    expect(b.stats.cornering_g).toBeLessThan(1.047 * 1.08);
+    expect(b.stats.bars.cornering).toBeGreaterThan(stock.stats.bars.cornering);
+    // The kit's scale placement matches the table's (wp_vehicle::stats).
+    const s = CAR_STATS.lindwurm_4t;
+    const bars = barsFor(s);
+    for (const k of ["acceleration", "top_speed", "cornering"] as const) expect(Math.abs(bars[k] - s.bars[k])).toBeLessThan(0.002);
+    // A provider-measured build wins.
+    expect(buildStats("kestrel_ts", ["tires_semi_slick"], CAR_STATS.vireo_xs)!.source).toBe("measured");
   });
 });
