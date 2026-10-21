@@ -97,7 +97,10 @@ wrecksDrawn / wreckReskins` for automation. wasm: a wreck's entity id
 
 e2e (`e2e/run.mjs`, "Props"): the existing 43 km/h knock in the city chase must now also dent
 the car (health < 1) and draw the dent (own panel mesh loaded, largest drawn vertex offset
-> 5 mm). E2E_RESULT
+> 5 mm). Result (cloud container, headless Chromium, city chase): parked car #810 knocked at
+43 km/h → health 0.923, own panel mesh drawn, largest drawn vertex offset 0.189 m, drawn vs sim
+pose ≤ 0.000 m every frame; 2,126 parked cars still each drawn exactly once; `parked_wrecks()`
+< 0.001 ms. Whole `run.mjs` main section: 46/46 PASS.
 
 ## 2. Traffic turn signals
 
@@ -159,7 +162,34 @@ own lamp meshes (we have the helper's `VehicleView` lamps).
   the wreck is never dropped).
 
 ## Perf numbers
-PERF_TABLE
+Native, release, cloud container (4 vCPU, load ≈ 2), `cargo run --release -p wp_sim --example
+parked_damage_cost [arcade|sim]`: 24 debug sedans at 50 km/h, each into its own parked car and
+clipping the next (48 parked, 24 dented in the same second, the worst case), per 60 Hz frame
+(4 ticks), dents on vs off (off = plain shoved boxes, as before):
+
+| Measurement | Arcade | Simulation | Budget |
+|---|---|---|---|
+| 24 cars + 24 fresh dents, mean frame | 12.4 ms (off 6.6) | 15.0 ms (off 7.0) | — (crash spike) |
+| worst frame | 79 ms (off 38) | 80 ms (off 39) | — |
+| one awake dented parked lattice | ≈ 0.73 ms/frame for ≈ 1.3 s | ≈ 0.99 ms/frame | same as a driven car resolving a crash (`wp_damage` README: 1.0 ms/frame); budget 0.25 ms/car/frame is the amortised figure |
+| asleep dented parked car | 0 (not stepped) | 0 | — |
+| 24 cars driving past 408 parked cars, none hit | 1.98 ms (off 2.43 / 2.18) | 1.72 ms (off 1.64 / 1.72) | within run-to-run noise |
+| traffic turn signals (`traffic_bench`, 400 agents) | 0.238 ms/frame (before 0.228) | — | 2 ms |
+
+So dents cost nothing until a parked car is hit, then exactly what a driven car's lattice
+costs while it resolves the crash, and nothing again once it settles. A first version cloned the
+whole parked car model every tick (+0.3 ms/frame with 400 woken parked cars); fixed before merge.
+
+Browser: `PropView.update()` 0.185 ms mean / 3.5 ms worst frame (the worst is the frame a
+dented car's panel mesh is built); `parked_wrecks()` < 0.001 ms. Indicator lamps: +2 draw calls
+per traffic instance set.
+
+`e2e/perf_check.mjs` on this container (software GL, 3–4 fps) fails 10 checks; **`origin/lead/round12`
+fails 9 of the same 10 on the same container** (real-time factor, frames over 250 ms,
+allocations, phone draw calls). The extra one is the phone real-time factor at 0.892 vs base 0.902
+(noise level). Differences vs base: phone 348 vs 338 draw calls (indicator lamps; base already
+over the 300 limit), allocations chase 794 vs 847, rain 819 vs 835, phone 821 vs 700 KB/frame.
+`e2e/reset.mjs` failed once under load (ghost blink) and passes on a quiet machine.
 
 ## Contract change requests
 | # | Change | Why | Who is affected | Status |
