@@ -595,6 +595,9 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
+/// Lateral step between the pass positions tried beside a car (about a lane), m.
+const PASS_LANE_STEP_M: f32 = 3.5;
+
 /// The whole-road line never puts me on the opposing side this close to a junction, m.
 const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
 
@@ -1802,7 +1805,7 @@ fn decide_racer(
         });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
+            && (p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1924,11 +1927,14 @@ fn decide_racer(
             // Nose up to a parked car (closer than the creep stop gap allows a car to steer out
             // round it): back out a little first (Hollins, police seed 6: the last racer stopped
             // 0.9 m behind a busted car and waited there for the rest of the race).
+            // A racer out of the race standing there is as good as parked (Loop 9 with police:
+            // a racer nosed up to a captured one waited behind it for the rest of the race).
             let nosed_up = rel.iter().any(|x| {
+                let standing_out = x.o.out_of_race && x.o.v_s.abs() < 0.5;
                 x.ds > 0.0
-                    && x.o.parked
-                    && x.gap < CREEP_STOP_GAP_M + 0.5
-                    && (x.o.n - r.n).abs() < hw + x.o.half_w
+                    && (x.o.parked || standing_out)
+                    && x.gap < CREEP_STOP_GAP_M + if standing_out { 1.5 } else { 0.5 }
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w + if standing_out { 0.5 } else { 0.0 }
             });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
@@ -2123,7 +2129,10 @@ fn decide_racer(
                 let momentum = (v - x.o.v_s > 2.5 || tow_run)
                     && x.gap < pass_horizon(v, x.o.v_s)
                     && brake_dist > v * 1.5;
-                if (r.blocked_s > p.overtake_patience_s || momentum)
+                // Street racing: a civilian ahead is gone round, not queued behind — look for
+                // a gap as soon as I am closing on it.
+                let weave = is_civ(&x.o) && v - x.o.v_s > 1.0;
+                if (r.blocked_s > p.overtake_patience_s || momentum || weave)
                     && x.o.v_s > -1.0
                     && !done_racing
                     && (!start_phase || x.o.parked)
@@ -3119,8 +3128,15 @@ fn plan_pass(
         [-1.0, 1.0]
     };
     let mut why = PassReject::NoRoom;
-    'side: for side in sides {
-        let n_pass = o.n + side * need;
+    // Right beside it first (preferred side, then the other), then a lane and two lanes
+    // further out: on a multi-lane road the lane next to it may hold a car abreast of it while
+    // the one beyond is empty (grid highway: passes were refused "lane ahead" with a free lane
+    // two over).
+    let candidates = [0.0f32, PASS_LANE_STEP_M, 2.0 * PASS_LANE_STEP_M]
+        .into_iter()
+        .flat_map(|extra| sides.map(|side| (side, extra)));
+    'side: for (side, extra) in candidates {
+        let n_pass = o.n + side * (need + extra);
         if alongside_towards(n_pass) {
             why = PassReject::TargetBusy;
             continue 'side;
@@ -3193,8 +3209,10 @@ fn plan_pass(
             }
             // A car right behind me in line is following me whichever way I go: pulling out
             // does not cut it off.
+            // (Only a car that is closing on me: one behind going no faster cannot run into
+            // me when I move over.)
             let in_line = (q.o.n - r.n).abs() < hw + q.o.half_w - 0.5;
-            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 && !in_line {
+            if q.ds <= 0.0 && (q.gap < 3.0 || (q.gap < 12.0 && q.o.v_s > v + 0.5)) && !in_line {
                 why = PassReject::LaneBehind;
                 continue 'side;
             }
