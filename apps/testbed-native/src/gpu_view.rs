@@ -16,17 +16,25 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 use wp_contracts::VehicleInput;
 use wp_render::gpu::{wgpu, Offscreen, Renderer};
-use wp_render::{CarMeshLibrary, ChaseCamera, Scene, StaticBox};
+use wp_render::{CarMeshLibrary, ChaseCamera, CityMesh, Scene, StaticBox};
 use wp_wasm::session::Session;
 
-use crate::{new_session, PLAYER};
+use crate::{new_session, session_in_city, PLAYER};
 
 /// Colour of scenario barriers (linear RGB).
 const BARRIER_COLOR: [f32; 3] = [0.55, 0.52, 0.45];
 
-/// A scene for `session`'s cars plus its scenario barriers.
+/// A scene for `session`'s cars, its city greybox (`data/city/<id>.greybox.glb`, as the browser
+/// loads it) and its scenario barriers.
 fn scene_for(session: &Session) -> Scene {
     let mut scene = Scene::new(CarMeshLibrary::repo_default());
+    if session.has_city() {
+        let id = &session.sim().world().network().id;
+        match CityMesh::load_repo(id) {
+            Ok(city) => scene.set_city(Some(Arc::new(city))),
+            Err(e) => eprintln!("city greybox not drawn: {e}"),
+        }
+    }
     let boxes: Vec<StaticBox> = session
         .scenario()
         .barriers
@@ -48,16 +56,23 @@ pub struct ShotArgs {
     pub out: PathBuf,
     /// simcli scenario (`.ron`); free drive when absent.
     pub scenario: Option<PathBuf>,
+    /// City of the free drive (`--city`), when there is no scenario.
+    pub city: Option<String>,
     /// Simulated time before the picture, s.
     pub seconds: f32,
     /// Image size.
     pub size: (u32, u32),
     /// Camera orbit about the followed car, degrees.
     pub orbit_deg: f32,
+    /// Camera height above the car (`--height`), m; the chase default when absent.
+    pub height_m: Option<f32>,
+    /// Camera distance behind the car (`--distance`), m; the chase default when absent.
+    pub distance_m: Option<f32>,
 }
 
 impl ShotArgs {
-    /// Parse `--shot OUT [--scenario PATH] [--seconds S] [--size WxH] [--orbit DEG]`.
+    /// Parse `--shot OUT [--scenario PATH | --city ID] [--seconds S] [--size WxH] [--orbit DEG]
+    /// [--height M] [--distance M]`.
     pub fn parse(args: &[String]) -> Option<Result<Self, String>> {
         let at = args.iter().position(|a| a == "--shot")?;
         let value = |flag: &str| {
@@ -80,6 +95,7 @@ impl ShotArgs {
             Ok(ShotArgs {
                 out: out.into(),
                 scenario: value("--scenario").map(PathBuf::from),
+                city: city_arg(args),
                 seconds: match value("--seconds") {
                     Some(s) => s.parse().map_err(|_| "--seconds")?,
                     None => 2.0,
@@ -89,6 +105,12 @@ impl ShotArgs {
                     Some(s) => s.parse().map_err(|_| "--orbit")?,
                     None => 0.0,
                 },
+                height_m: value("--height")
+                    .map(|s| s.parse().map_err(|_| "--height"))
+                    .transpose()?,
+                distance_m: value("--distance")
+                    .map(|s| s.parse().map_err(|_| "--distance"))
+                    .transpose()?,
             })
         })())
     }
@@ -102,11 +124,20 @@ pub fn shot(args: &ShotArgs) -> Result<(), String> {
                 std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
             Session::new(wp_wasm::scenario::from_ron(&text)?, true)?
         }
-        None => new_session(),
+        None => match &args.city {
+            Some(id) => session_in_city(id),
+            None => new_session(),
+        },
     };
     let mut scene = scene_for(&session);
     let mut camera = ChaseCamera::default();
     camera.orbit = args.orbit_deg.to_radians();
+    if let Some(h) = args.height_m {
+        camera.height = h;
+    }
+    if let Some(d) = args.distance_m {
+        camera.distance = d;
+    }
     let mut offscreen = Offscreen::new(args.size.0, args.size.1)?;
     let dt = 1.0 / 60.0;
     let frames = (args.seconds / dt).round().max(1.0) as u32;
@@ -168,9 +199,18 @@ struct App {
     wheel: Option<crate::ffb::Wheel>,
 }
 
-/// Open the 3D window and run until closed.
-pub fn run_window() {
-    let session = new_session();
+/// Value of `--city ID` (`vesper_v2`, `procedural_12x12`), if given.
+pub fn city_arg(args: &[String]) -> Option<String> {
+    let i = args.iter().position(|a| a == "--city")?;
+    args.get(i + 1).cloned()
+}
+
+/// Open the 3D window (free drive, in `city` when given) and run until closed.
+pub fn run_window(city: Option<&str>) {
+    let session = match city {
+        Some(id) => session_in_city(id),
+        None => new_session(),
+    };
     let scene = scene_for(&session);
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App {
