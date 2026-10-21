@@ -180,6 +180,9 @@ pub fn scenario_states(sim: &Sim, ids: &[EntityId]) -> Vec<(EntityId, wp_contrac
 pub const POLICE_CAR: &str = "sentinel_cruiser";
 /// Car model for physical (near-player) traffic in city scenarios.
 pub const TRAFFIC_CAR: &str = "debug_sedan";
+/// Car model whose lattice dents parked cars (`Sim::set_parked_car`); the same model as
+/// traffic, so the testbed draws parked cars with the traffic mesh.
+pub const PARKED_CAR: &str = TRAFFIC_CAR;
 
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
@@ -361,6 +364,13 @@ pub fn build_sim(
         }
         None => false,
     };
+    // Parked cars dent with the traffic car's lattice (the testbed draws them with its mesh).
+    for p in &sc.parked {
+        sim.add_parked_car(p.pos, p.yaw);
+    }
+    if sim.prop_count() > 0 {
+        sim.set_parked_car(load_car(data, PARKED_CAR)?);
+    }
     // Weather after the city (the wetness grid covers its road network).
     if let Some(w) = &sc.weather {
         sim.set_weather(w.config(sc.seed));
@@ -715,6 +725,19 @@ pub struct WorldSummary {
     pub spike_strips_max: u32,
     /// Farthest any roadblock barrier was pushed from where it was placed, m (shows a hit).
     pub barrier_displaced_max_m: f32,
+    /// Parked cars hit hard enough to dent (promoted to a damage lattice).
+    pub parked_dented: u32,
+    /// Deepest dent on any parked car at the end (`DamageModel::structural_crush_m`, as the
+    /// per-entity `crush_depth_m`), m.
+    pub parked_crush_max_m: f32,
+    /// Lowest health of any dented parked car at the end (1 when none was dented).
+    pub parked_health_min: f32,
+    /// Glass regions shattered on parked cars.
+    pub parked_glass_shattered: u32,
+    /// Parts torn off parked cars.
+    pub parked_parts_detached: u32,
+    /// Farthest any parked car was shoved from where it was parked, m.
+    pub parked_moved_max_m: f32,
 }
 
 impl WorldSummary {
@@ -738,12 +761,18 @@ impl WorldSummary {
             "roadblock_barriers_max" => self.roadblock_barriers_max as f32,
             "spike_strips_max" => self.spike_strips_max as f32,
             "barrier_displaced_max_m" => self.barrier_displaced_max_m,
+            "parked_dented" => self.parked_dented as f32,
+            "parked_crush_max_m" => self.parked_crush_max_m,
+            "parked_health_min" => self.parked_health_min,
+            "parked_glass_shattered" => self.parked_glass_shattered as f32,
+            "parked_parts_detached" => self.parked_parts_detached as f32,
+            "parked_moved_max_m" => self.parked_moved_max_m,
             _ => return None,
         })
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 17] = [
+    pub const METRICS: [&'static str; 23] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -761,6 +790,12 @@ impl WorldSummary {
         "roadblock_barriers_max",
         "spike_strips_max",
         "barrier_displaced_max_m",
+        "parked_dented",
+        "parked_crush_max_m",
+        "parked_health_min",
+        "parked_glass_shattered",
+        "parked_parts_detached",
+        "parked_moved_max_m",
     ];
 }
 
@@ -777,6 +812,9 @@ struct WorldTracker {
     /// First-seen position of every barrier: `(tool, index within tool) -> pos`.
     barrier_start: BTreeMap<(u32, u32), [f32; 3]>,
     barrier_displaced_max: f32,
+    /// Where each parked car stood at the first tick (filled lazily, parked props only).
+    parked_start: Vec<[f32; 3]>,
+    parked_moved_max: f32,
 }
 
 fn moving_frac(world: &wp_world::World) -> f32 {
@@ -798,6 +836,24 @@ impl WorldTracker {
             let start = *self.barrier_start.entry((b.tool, *i)).or_insert(b.pos);
             *i += 1;
             self.barrier_displaced_max = self.barrier_displaced_max.max(dist(start, b.pos));
+        }
+    }
+
+    /// Farthest shove of any parked car: checks only the props that are dynamic now (the
+    /// others have not moved since they last were).
+    fn parked(&mut self, sim: &Sim) {
+        if self.parked_start.len() != sim.prop_count() {
+            self.parked_start = (0..sim.prop_count())
+                .map(|i| sim.prop_pose(i).map_or([0.0; 3], |p| p.0))
+                .collect();
+        }
+        for i in sim.active_props() {
+            if sim.prop_kind(i) != Some(wp_world::props::PropKind::ParkedCar) {
+                continue;
+            }
+            if let Some((p, _)) = sim.prop_pose(i) {
+                self.parked_moved_max = self.parked_moved_max.max(dist(self.parked_start[i], p));
+            }
         }
     }
 
@@ -840,6 +896,20 @@ impl WorldTracker {
             roadblock_barriers_max: self.barriers_max,
             spike_strips_max: self.spikes_max,
             barrier_displaced_max_m: self.barrier_displaced_max,
+            parked_dented: sim.parked_wrecks().len() as u32,
+            parked_crush_max_m: sim
+                .parked_wrecks()
+                .iter()
+                .map(|w| w.damage.structural_crush_m())
+                .fold(0.0, f32::max),
+            parked_health_min: sim
+                .parked_wrecks()
+                .iter()
+                .map(|w| w.damage.health())
+                .fold(1.0, f32::min),
+            parked_glass_shattered: sim.parked_stats().glass_shattered,
+            parked_parts_detached: sim.parked_stats().parts_detached,
+            parked_moved_max_m: self.parked_moved_max,
         }
     }
 }
@@ -1511,6 +1581,7 @@ pub fn run_with_hook(
         }
         // Police tools exist on any world (`roadblock_at` / `spikes_at` work on the flat one).
         world_tr.police_tools(&sim);
+        world_tr.parked(&sim);
 
         // Hashes.
         let checkpoint = now.is_multiple_of(sc.hash_every) || now == ticks;

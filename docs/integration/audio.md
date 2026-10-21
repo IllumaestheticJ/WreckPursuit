@@ -963,7 +963,7 @@ validation numbers in the commit message).
 ## Realistic tire squeal (port of serene-johnson 5f241294 onto round12, 2026-10-21)
 
 Owner playtest "Fix tire sounds and make them more realistic" (row 33 on the serene-johnson
-branch's numbering; row 127 here). Round12 had already solved half of it in parallel, so only
+branch's numbering; row 128 here). Round12 had already solved half of it in parallel, so only
 the missing parts were ported (branch `triage/squeal-port`):
 - **Ported — per-tire slip peaks.** Squeal (and loose scrub) normalise slip by each wheel's
   own `TireDef::{peak_slip_ratio, peak_slip_angle_rad}` (`tires::TirePeak`, resolved in

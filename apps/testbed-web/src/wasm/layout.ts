@@ -111,7 +111,7 @@ export const META_STRIDE = 3;
 /** vehicle_meta() kinds (`wp_sim::VehicleKind`). */
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
-export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8, turnLeft: 16, turnRight: 32 } as const;
 
 /** Floats per record in police_tools(): [kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]. */
 export const TOOL_STRIDE = 11;
@@ -163,6 +163,11 @@ export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
+/** Floats per record in parked_wrecks() (crates/wp_wasm/src/props.rs). */
+export const WRECK_STRIDE = 12;
+/** Offsets inside one parked_wrecks() record: prop index, lattice awake (0/1), health, shattered
+ * glass regions, chassis → prop-body scale xyz and origin xyz (body = chassis ⊙ scale + origin). */
+export const WK = { prop: 0, awake: 1, health: 2, shattered: 3, scale: 4, origin: 7 } as const;
 
 /** Wheel-centre height in chassis space for a reported compression (matches wp_vehicle: the
  * hub sits at `position_m` at the static compression; playtest row 92 — drawing it at half

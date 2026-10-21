@@ -315,12 +315,21 @@ impl Session {
             .map_or(&[], |e| e.mods.as_slice())
     }
 
-    /// Resolved car of any sim vehicle.
+    /// Resolved car of any sim vehicle (a modded scenario car resolves to its build), or of a
+    /// dented parked car by its `wp_sim::PARKED_ENTITY_BASE` id.
     pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
         if let Some(car) = self.modded.get(&id) {
             return Some(car);
         }
+        if let Some(w) = self.parked_wreck(id) {
+            return self.cars.get(&w.car_id);
+        }
         self.vehicle(id).and_then(|v| self.cars.get(&v.car_id))
+    }
+
+    /// A dented parked car by its `wp_sim::PARKED_ENTITY_BASE` id.
+    pub fn parked_wreck(&self, id: EntityId) -> Option<&wp_sim::ParkedWreck> {
+        wp_sim::prop_of_entity(id).and_then(|i| self.sim.parked_wreck(i))
     }
 
     /// Per-vehicle extras.
@@ -328,13 +337,19 @@ impl Session {
         self.extras.get(&id)
     }
 
-    /// Load the car of every sim vehicle not seen before (the sim may spawn police units and
-    /// physical traffic on its own).
+    /// Load the car of every sim vehicle and dented parked car not seen before (the sim may
+    /// spawn police units and physical traffic, and promote hit parked cars, on its own).
     fn sync_cars(&mut self) {
-        for v in self.sim.vehicles() {
-            if !self.cars.contains_key(&v.car_id) {
-                if let Ok(car) = simcli::data::load_car(mem_data(), &v.car_id) {
-                    self.cars.insert(v.car_id.clone(), car);
+        let ids = self
+            .sim
+            .vehicles()
+            .iter()
+            .map(|v| &v.car_id)
+            .chain(self.sim.parked_wrecks().iter().map(|w| &w.car_id));
+        for car_id in ids {
+            if !self.cars.contains_key(car_id) {
+                if let Ok(car) = simcli::data::load_car(mem_data(), car_id) {
+                    self.cars.insert(car_id.clone(), car);
                 }
             }
         }

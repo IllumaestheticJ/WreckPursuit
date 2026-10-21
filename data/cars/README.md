@@ -86,5 +86,13 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 them as a delivery van: cheap, slow, validated like the rest.
 There is no `Van`/`Civilian` class yet, so the vans and pickup use `Truck` (requested in
 `docs/integration/cars.md`).
+| `marten_20` | Marten 2.0 | Compact | early-90s FF 2.0 16V NA hot hatch — torquey alternative to the Vireo |
+| `brigand_400` | Brigand 400 | Muscle | mid-70s 6.6 L V8 full-size four-door, live axle, LSD, period brakes |
+| `talus_20t` | Talus 2.0T | Sport | late-90s AWD 2.0 T rally-homologation saloon, fixed 45/55 split, front + rear LSD |
+| `tumbril_20` | Tumbril 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody — delivery / traffic |
+
+The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
+There is no `Van`/`Civilian` class yet, so the vans and the pickup use `Truck` (requested in
+`docs/integration/cars.md`). The last four were added in round 9.
 
 Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

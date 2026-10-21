@@ -1185,6 +1185,13 @@ export class PanelBody {
     return this.parts.map((p) => p.def.name);
   }
 
+  /** Largest vertex displacement of any part at the last update (tests: is the car dented), m. */
+  maxDisp(): number {
+    let m = 0;
+    for (const p of this.parts) m = Math.max(m, p.maxDisp);
+    return m;
+  }
+
   /** Light lenses: name, broken, and whether they show the shared head/tail material. */
   lights(): { name: string; broken: boolean; material: THREE.Material; visible: boolean }[] {
     return this.parts

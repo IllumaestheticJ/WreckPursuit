@@ -63,6 +63,19 @@ every contact. Disabling the vehicle system (`set_systems`) also disables the ch
   surface within 3 cm (worst today: −2.3 cm Vesper, −0.6 cm grid; −34 cm / −15 cm without the
   colliders). simcli `city/sidewalk_mount_{15,40}kmh`.
 
+## Parked-car damage (owner playtest 2026-10-21, `parked.rs`)
+City parked cars (and `Sim::add_parked_car`) are props: a fixed box until something comes
+near, then a dynamic one. One that takes a hit the lattice would feel (≥ 50 N·s from a moving
+body at ≥ 1 m/s in one tick) is promoted: it gets the `Sim::set_parked_car` model's
+`DamageModel` (simcli: the traffic car) and the session's mode table, its own contacts each
+tick it is touched or its lattice is awake, a collider rebuilt from the dented hull (flat
+4-corner floor), and debris for torn parts. Untouched parked cars cost nothing; at most
+`MAX_PARKED_WRECKS` (48) per session. Its damage events stay out of the event stream (police,
+economy and net key events by vehicle); read `parked_wrecks()` / `parked_stats()`. A dented
+car's lattice answers `node_positions(PARKED_ENTITY_BASE + prop)`. A shoved prop wakes its
+neighbours like a vehicle. Perf and scenarios: `docs/integration/parked-signals.md`
+(`cargo run --release -p wp_sim --example parked_damage_cost`).
+
 ## Known gaps
 - Traffic AI does not slow in rain or fog yet (needs a `wp_world` hook, request W-D1 in
   `docs/integration/world.md`); police speed caps ignore weather (E, weather.md step 4).

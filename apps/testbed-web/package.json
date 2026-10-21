@@ -33,7 +33,8 @@
     "e2e:presets": "node e2e/presets.mjs",
     "e2e:controls": "node e2e/controls_settings.mjs",
     "e2e:police": "node e2e/police_tools.mjs",
-    "e2e:brake-dive": "node e2e/brake_dive.mjs"
+    "e2e:brake-dive": "node e2e/brake_dive.mjs",
+    "e2e:signals": "node e2e/signals.mjs"
   },
   "dependencies": {
     "three": "0.180.0",
