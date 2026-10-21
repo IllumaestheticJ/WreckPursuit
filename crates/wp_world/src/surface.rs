@@ -65,7 +65,7 @@ pub fn lane_has_verge(map: &CityMap, lane: &Lane) -> bool {
 /// Kerb height: the sidewalk top sits this far above the road edge, m.
 pub const KERB_H_M: f32 = 0.15;
 
-/// Level lot behind every sidewalk in a city with terrain, m: flush with the sidewalk's back
+/// Level lot behind every sidewalk in a hilly city ([`has_relief`]), m: flush with the sidewalk's back
 /// edge, out past the building line (Port Vesper's facades stand 1.5 m behind the sidewalk)
 /// and wide enough for a ≥ 3 m verge where no building stands (playtest #52).
 pub const LOT_W_M: f32 = 3.5;
@@ -91,13 +91,26 @@ pub const LOT_MAX_DROP_M: f32 = 1.0;
 pub const LOT_MAX_RISE_M: f32 = 0.08;
 
 /// Width of the level lot behind every sidewalk of `net`, m ([`LOT_W_M`], or [`FLAT_LOT_W_M`]
-/// without terrain).
+/// in a flat city: see [`has_relief`]).
 pub fn lot_width_m(net: &RoadNetwork) -> f32 {
-    if net.terrain.is_some() {
+    if has_relief(net) {
         LOT_W_M
     } else {
         FLAT_LOT_W_M
     }
+}
+
+/// Whether `net` has terrain with relief (Port Vesper's hills), as opposed to no terrain or a
+/// flat one. The procedural grid has a flat terrain just under its streets since main's
+/// highway viaduct (so `wp_sim` builds its road mesh and the viaduct is a bridge); its
+/// sidewalks and lots stay the flat city's ([`FLAT_LOT_W_M`] lots, no wedges), which its
+/// houses are laid out for.
+pub fn has_relief(net: &RoadNetwork) -> bool {
+    net.terrain.as_ref().is_some_and(|t| {
+        let lo = t.z.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = t.z.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        hi - lo > 0.05
+    })
 }
 
 /// Indexed triangle mesh, world space (+Z up), counter-clockwise seen from above.
@@ -281,6 +294,83 @@ fn road_mesh_with(map: &CityMap, patches: &[NodePatch]) -> TriMesh {
     m
 }
 
+/// Whether node `n` is a freeway merge / diverge (a radius-0 junction).
+pub fn is_freeway_node(net: &RoadNetwork, n: u32) -> bool {
+    net.nodes[n as usize]
+        .intersection
+        .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0)
+}
+
+/// Height of the paving under `q` at a freeway merge / diverge: the banked surface of the
+/// candidate road (`roads`, every road with a lane at the node) whose centreline is nearest,
+/// among those within 3 m of `z_hint`. The rule [`CityMap`] uses for the taper connectors'
+/// own heights, so the [`taper_ribbons`] lie exactly under them.
+pub fn freeway_paving_z(net: &RoadNetwork, roads: &[usize], q: V2, z_hint: f32) -> Option<f32> {
+    roads
+        .iter()
+        .filter_map(|r| net.surfaces.get(*r))
+        .map(|s| height_under(s, q))
+        .filter(|(_, z)| (z - z_hint).abs() < 3.0)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, z)| z)
+}
+
+/// Paving under the ramp tapers through freeway merges and diverges (main's divided
+/// highways), per node: a ribbon the connector's width under every connector at a radius-0
+/// junction that joins roads with different lane counts (ramp lane ↔ carriageway lane). This
+/// is such a node's whole [`NodePatch`]: every ribbon is paved right up to the node (the
+/// carriageway runs through, the ramp starts on its plane), so only the gore wedge between
+/// the ramp ribbon and the carriageway ribbon, where the taper sweeps across it, needs
+/// paving. Every vertex lies on the paving under it ([`freeway_paving_z`]): on the
+/// carriageway or the ramp the ribbon is flush with it. Folded triangles are left out.
+pub fn taper_ribbons(map: &CityMap) -> BTreeMap<u32, TriMesh> {
+    let net = &map.net;
+    let mut lanes_per_road = vec![0u32; net.surfaces.len()];
+    let mut node_roads: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for l in &net.lanes {
+        if let Some(n) = lanes_per_road.get_mut(l.road as usize) {
+            *n += 1;
+        }
+        for n in [l.from_node, l.to_node] {
+            if is_freeway_node(net, n) {
+                let list = node_roads.entry(n).or_default();
+                if !list.contains(&(l.road as usize)) {
+                    list.push(l.road as usize);
+                }
+            }
+        }
+    }
+    let mut out: BTreeMap<u32, TriMesh> = BTreeMap::new();
+    for s in map.segs.iter() {
+        let SegKind::Connector { node, from, to, .. } = s.kind else {
+            continue;
+        };
+        let Some(roads) = node_roads.get(&node) else {
+            continue;
+        };
+        let count = |l: u32| lanes_per_road.get(net.lanes[l as usize].road as usize);
+        if count(from) == count(to) {
+            continue;
+        }
+        let half = s.width * 0.5;
+        let mut l = geom::offset_polyline(&s.pts, -half);
+        let mut r = geom::offset_polyline(&s.pts, half);
+        for (k, c) in s.pts.iter().enumerate() {
+            for e in [&mut l[k], &mut r[k]] {
+                e[2] = freeway_paving_z(net, roads, geom::xy(*e), c[2]).unwrap_or(c[2]);
+            }
+        }
+        let mut t = TriMesh::default();
+        t.strip(&l, &r);
+        t.indices.retain(|tri| {
+            let [a, b, c] = tri.map(|i| geom::xy(t.positions[i as usize]));
+            geom::cross(geom::sub(b, a), geom::sub(c, a)) > 0.0
+        });
+        out.entry(node).or_default().append(&t);
+    }
+    out
+}
+
 /// Cross slope of `lane` at each polyline point (dz per metre to the right of the lane's
 /// direction), from its road surface; empty when the lane does not follow the surface point
 /// for point (OSM imports, flat cities: no bank).
@@ -380,14 +470,15 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
             (-LOT_MAX_RISE_M..=LOT_MAX_DROP_M).contains(&drop)
         })
     };
+    let relief = has_relief(net);
     let geo = WalkGeometry {
         lot_w,
-        max_pull_back: if net.terrain.is_some() {
+        max_pull_back: if relief {
             MAX_WEDGE_PULL_BACK_M
         } else {
             MAX_PULL_BACK_M + lot_w
         },
-        wedges: net.terrain.is_some(),
+        wedges: relief,
     };
     let patches = node_patches(map);
     let paved = PavedIndex::new(&road_mesh_with(map, &patches));
@@ -1711,8 +1802,8 @@ pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f
 }
 
 /// Guard-rail lines `(a, b)` (at road height) along both edges of every bridge-deck stretch:
-/// surface segments whose whole cross-section is more than 1.5 m above the terrain. Empty
-/// without terrain.
+/// surface segments whose whole cross-section is more than 1.5 m above the terrain, except
+/// edges with a sidewalk and edges lying on other paving (see below). Empty without terrain.
 pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     let Some(t) = &net.terrain else {
         return Vec::new();
@@ -1723,9 +1814,19 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                for e in [&l, &r] {
-                    if !inside_other_paving(net, si, e[k])
-                        || !inside_other_paving(net, si, e[k + 1])
+                // A segment with either end on another road's paving at its level (a ramp
+                // edge entering the carriageway it joins, the carriageway edge the ramp lane
+                // crosses) gets no rail: it stood up to 2.3 m inside the carriageway, across
+                // the taper the cars drive (round 12's junction-cover physics check).
+                //
+                // An edge with a sidewalk gets no rail either (main's interchange crossroads
+                // bridge the divided highway with their sidewalks): the sidewalk's back edge
+                // has the guard rail there ([`SidewalkMesh::bare_backs`]); one at the kerb
+                // stopped cars mounting the sidewalk.
+                for (e, side) in [(&l, 0), (&r, 1)] {
+                    if !s.sidewalk[side]
+                        && !inside_other_paving(net, si, e[k])
+                        && !inside_other_paving(net, si, e[k + 1])
                     {
                         out.push((e[k], e[k + 1]));
                     }
@@ -2159,10 +2260,20 @@ mod tests {
             let walk_m = walks.flush();
             let (road, walk) = (PavedIndex::new(&road_m), PavedIndex::new(&walk_m));
             // Known exceptions, counted and capped: corners filled in cells and junctions whose
-            // ribbon ends overlap.
+            // ribbon ends overlap. Freeway merges / diverges (radius-0 junctions, main's divided
+            // highways, which this check predates) are not counted: there every ribbon is
+            // paved up to the node and the ramp's lies on the carriageway's plane, so their
+            // ends overlap by design. Like every overlapping node they stay out of the crack
+            // samples below; `node_patches_pave_every_turning_path` and the physics / visual
+            // surface match cover them.
+            let freeway = |node: u32| {
+                map.net.nodes[node as usize]
+                    .intersection
+                    .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0)
+            };
             let overlapping: Vec<u32> = patches
                 .iter()
-                .filter(|p| p.overlapping_ends)
+                .filter(|p| p.overlapping_ends && !freeway(p.node))
                 .map(|p| p.node)
                 .collect();
             println!(

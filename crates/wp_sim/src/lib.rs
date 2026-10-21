@@ -552,6 +552,13 @@ impl Sim {
         self.physics.static_ground_z(xy, from_z, max_m)
     }
 
+    /// Height of the drivable ground (road, sidewalk and terrain colliders; never buildings,
+    /// rails, decor or bodies) below `(xy, from_z)`, at most `max_m` down. See
+    /// [`PhysicsWorld::drivable_ground_z`].
+    pub fn drivable_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
+        self.physics.drivable_ground_z(xy, from_z, max_m)
+    }
+
     /// Whether the current city has terrain (hills, decks): spawns are then placed on the
     /// ground under them and pitched to its slope.
     pub fn has_terrain(&self) -> bool {

@@ -320,6 +320,30 @@ fn same_lane_group(map: &CityMap, cur: (SegId, f32), next: (SegId, f32), p: V3) 
     next
 }
 
+/// The other lanes of `seg`'s road in its direction (left and right neighbours, nearest
+/// first), as lane segments; empty for a connector.
+fn parallel_lanes(map: &CityMap, seg: SegId) -> Vec<SegId> {
+    let SegKind::Lane { lane } = map.seg(seg).kind else {
+        return Vec::new();
+    };
+    let lanes = &map.net.lanes;
+    let mut out = Vec::new();
+    for side in [false, true] {
+        let mut l = Some(lane);
+        while let Some(x) = l {
+            l = if side {
+                lanes[x as usize].right
+            } else {
+                lanes[x as usize].left
+            };
+            if let Some(y) = l {
+                out.push(y as SegId);
+            }
+        }
+    }
+    out
+}
+
 /// Closed circuit visiting the polygon vertices in order and returning to the first.
 pub fn plan_circuit(map: &CityMap, polygon: &[V2]) -> Option<Route> {
     if polygon.len() < 2 {
@@ -329,10 +353,22 @@ pub fn plan_circuit(map: &CityMap, polygon: &[V2]) -> Option<Route> {
     let pos = |i: usize| -> V3 { [polygon[i % n][0], polygon[i % n][1], 0.0] };
     let heading = |i: usize| geom::normalize(geom::sub(polygon[(i + 1) % n], polygon[i % n]));
     let first = nearest_lane(map, pos(0), Some(heading(0)))?;
+    let leg = |cur: (SegId, f32), next: (SegId, f32)| -> Option<Vec<SegId>> {
+        if cur.0 == next.0 && next.1 < cur.1 {
+            // Same lane but behind us: go round the block.
+            let s = map.seg(cur.0);
+            let via = *s.next.first()?;
+            let mut p = vec![cur.0];
+            p.extend(shortest_path(map, (via, 0.0), next)?);
+            Some(p)
+        } else {
+            shortest_path(map, cur, next)
+        }
+    };
     let mut segs: Vec<SegId> = Vec::new();
     let mut cur = first;
     for i in 1..=n {
-        let next = if i == n {
+        let mut next = if i == n {
             first
         } else {
             same_lane_group(
@@ -342,15 +378,28 @@ pub fn plan_circuit(map: &CityMap, polygon: &[V2]) -> Option<Route> {
                 pos(i),
             )
         };
-        let mut part = if cur.0 == next.0 && next.1 < cur.1 {
-            // Same lane but behind us: go round the block.
-            let s = map.seg(cur.0);
-            let via = *s.next.first()?;
-            let mut p = vec![cur.0];
-            p.extend(shortest_path(map, (via, 0.0), next)?);
-            p
-        } else {
-            shortest_path(map, cur, next)?
+        let mut part = match leg(cur, next) {
+            Some(p) => p,
+            // The lane it snapped to cannot be reached without a lane change (a divided
+            // highway's carriageways run lane-locked from piece to piece: the rightmost lane
+            // only ever leads to the next rightmost lane): the reachable lane beside it with
+            // the shortest path.
+            None if i < n => {
+                let (alt, p) = parallel_lanes(map, next.0)
+                    .into_iter()
+                    .filter_map(|l| {
+                        let s = map.seg(l);
+                        let at = (l, s.project(geom::xy(pos(i))).s.clamp(0.0, s.length));
+                        leg(cur, at).map(|p| (at, p))
+                    })
+                    .min_by(|a, b| {
+                        let len = |p: &[SegId]| p.iter().map(|x| map.seg(*x).length).sum::<f32>();
+                        len(&a.1).total_cmp(&len(&b.1)).then(a.0 .0.cmp(&b.0 .0))
+                    })?;
+                next = alt;
+                p
+            }
+            None => return None,
         };
         if !segs.is_empty() {
             part.remove(0);

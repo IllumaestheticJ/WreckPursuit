@@ -631,11 +631,20 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     if near_barrier.near(geom::xy(seg[0])) && near_barrier.near(geom::xy(seg[1])) {
                         continue;
                     }
-                    if inside_other_paving(net, si, seg[0]) && inside_other_paving(net, si, seg[1])
-                    {
+                    let (in0, in1) = (
+                        inside_other_paving(net, si, seg[0]),
+                        inside_other_paving(net, si, seg[1]),
+                    );
+                    if in0 && in1 {
                         continue;
                     }
                     bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
+                    // Parapet: where `wp_world::surface::deck_rails` puts the guard rail `wp_sim`
+                    // collides with (not where either end lies on other paving, not along a
+                    // sidewalk, whose back edge has the rail).
+                    if s.sidewalk[usize::from(side > 0.0)] || in0 || in1 {
+                        continue;
+                    }
                     let top = [
                         [seg[0][0], seg[0][1], seg[0][2] + 0.9],
                         [seg[1][0], seg[1][1], seg[1][2] + 0.9],

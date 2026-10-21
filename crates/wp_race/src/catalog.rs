@@ -226,7 +226,10 @@ const LOOP9: &[[f32; 2]] = &[
     [-578.0, -1072.0],
     [621.0, -1053.0],
     [1525.0, -343.0],
-    [1530.0, 600.0],
+    // On the outer carriageway past the Bluff Road interchange's merge gore (was
+    // [1530, 600], on the gore itself: since the divided highway, release merge, it snapped
+    // to the on-ramp beside the carriageway).
+    [1524.2, 700.0],
     [1091.0, 1358.0],
 ];
 
@@ -297,9 +300,12 @@ pub fn races() -> Vec<RaceDef> {
             legality: Legality::Street,
             time_of_day_h: 23.0,
             traffic_density: 0.3,
+            // 747 m up the northbound carriageway onto the viaduct: since main's divided
+            // highway the "Highway sprint" POI is at the south ring (y -724), so the finish
+            // moved from y 400 to y 23 to keep the short drag (release merge).
             course: CourseSpec::PoiToPoint {
                 start: "Highway sprint",
-                finish: [9.2, 400.0, 0.0],
+                finish: [9.2, 23.3, 7.9],
             },
             length_hint_m: 747.0,
             ai: &[VIC, JUNO, TITO],

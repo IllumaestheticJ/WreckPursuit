@@ -75,10 +75,12 @@ fn cars_stay_on_the_ground_across_stop_lines_at_120_kmh() {
     let (mut drives, mut fails, mut worst_air) = (0, Vec::new(), 0.0f32);
     let mut seen = std::collections::BTreeSet::new();
     // No ribbon ends overlap any more (Port Vesper node 81's cul-de-sac used to leave 6° off
-    // a street: `docs/integration/sidewalk-lots.md`), so every approach is driven.
+    // a street: `docs/integration/sidewalk-lots.md`), so every approach is driven. Freeway
+    // merges / diverges (radius-0 junctions, main's Loop 9 ramps) overlap by design (the ramp's
+    // ribbon lies on the carriageway): not counted, and their approaches are driven too.
     let overlapping: Vec<u32> = wp_world::surface::node_patches(&map)
         .iter()
-        .filter(|p| p.overlapping_ends)
+        .filter(|p| p.overlapping_ends && !wp_world::surface::is_freeway_node(&map.net, p.node))
         .map(|p| p.node)
         .collect();
     assert!(

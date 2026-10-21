@@ -568,6 +568,28 @@ pub fn driveway_top(d: &Decor) -> f32 {
 pub fn driveway_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
     let mut rng = Rng::new(seed ^ 0xD71E_3A55);
     let mut out = Vec::new();
+    // Solid furniture (fences, hedges, tree trunks): a car standing in one is left out (a
+    // driveway can end beside a side fence; release merge, `wp_sim` parked_ground).
+    let mut solid = ObbIndex::default();
+    for d in &map.net.decor {
+        let c = [d.pos[0], d.pos[1]];
+        let f = geom::dir_of_yaw(d.yaw);
+        match d.kind {
+            DecorKind::Hedge | DecorKind::Fence => solid.insert(Obb {
+                c,
+                f,
+                hl: d.size[1] * 0.5,
+                hw: d.size[0] * 0.5,
+            }),
+            DecorKind::StreetTree | DecorKind::YardTree => solid.insert(Obb {
+                c,
+                f,
+                hl: TRUNK_R_M,
+                hw: TRUNK_R_M,
+            }),
+            DecorKind::Driveway => {}
+        }
+    }
     for d in &map.net.decor {
         if d.kind != DecorKind::Driveway {
             continue;
@@ -581,6 +603,15 @@ pub fn driveway_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
         let p = geom::add([d.pos[0], d.pos[1]], geom::scale(dir, v));
         let z = driveway_top(d);
         let nose_in = rng.chance(0.7);
+        let body = Obb {
+            c: p,
+            f: dir,
+            hl: 2.25,
+            hw: 0.95,
+        };
+        if solid.clashes(&body) {
+            continue;
+        }
         out.push(StaticProp {
             kind: PropKind::ParkedCar,
             pos: [p[0], p[1], z + 0.75],

@@ -255,13 +255,9 @@ impl CityMap {
                 if !roads.is_empty() {
                     let n = pts.len();
                     for p in pts.iter_mut().take(n - 1).skip(1) {
-                        let best = roads
-                            .iter()
-                            .filter_map(|r| net.surfaces.get(*r))
-                            .map(|s| crate::surface::height_under(s, geom::xy(*p)))
-                            .filter(|(_, z)| (z - p[2]).abs() < 3.0)
-                            .min_by(|a, b| a.0.total_cmp(&b.0));
-                        if let Some((_, z)) = best {
+                        if let Some(z) =
+                            crate::surface::freeway_paving_z(&net, roads, geom::xy(*p), p[2])
+                        {
                             p[2] = z;
                         }
                     }

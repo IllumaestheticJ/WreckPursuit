@@ -52,9 +52,17 @@ const RAMP_PARALLEL_M: f32 = 90.0;
 /// Ramp lane centre beside a carriageway (from the carriageway centreline), m.
 const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
 /// Ramp terminal junctions on a crossing row, from the highway centreline, m.
-const TERMINAL_X_M: f32 = 22.0;
+///
+/// 21 m (main had 22 m): with round 12's painted median on two-way arterials (3 m) the
+/// crossing rows' junction setbacks grew by 1.5 m at each end, and the street block between
+/// the first column off the highway (±55 m) and the terminal came out exactly 12 m long, the
+/// shortest lane `default_city_shape` allows. The ramp's inner paved edge stays 3.4 m clear of
+/// the carriageway's outer shoulder.
+const TERMINAL_X_M: f32 = 21.0;
 /// Flat run of a ramp into its terminal junction, m.
 const TERMINAL_FLAT_M: f32 = 15.0;
+/// Lot clearance from a block corner at a junction on a diagonal (see `residential_blocks`), m.
+const DIAGONAL_CORNER_CLEAR_M: f32 = 30.0;
 /// Ramp speed limit, m/s.
 const RAMP_SPEED: f32 = 20.1168; // 45 mph
 
@@ -1028,6 +1036,25 @@ fn residential_blocks(
         }
         // Edges: (street line point, outward unit, along unit, edge length, street class).
         let (x0, x1, y0, y1) = (xs[i], xs[i + 1], ys[j], ys[j + 1]);
+        // Lots keep this far from the block corner at each end of an edge: 14 m, or
+        // `DIAGONAL_CORNER_CLEAR_M` at a junction on a diagonal (six roads, ~27 m box: the
+        // turning paths there swept over a lot's front fence; release merge, junction_cover).
+        let n = ys.len();
+        let on_diagonal = |ci: usize, cj: usize| xs.len() == n && (ci == cj || ci + cj == n - 1);
+        let clear = |ci: usize, cj: usize| {
+            if on_diagonal(ci, cj) {
+                DIAGONAL_CORNER_CLEAR_M
+            } else {
+                14.0
+            }
+        };
+        // (start, end) corner clearance of each edge below.
+        let edge_clear = [
+            (clear(i, j), clear(i + 1, j)),
+            (clear(i + 1, j + 1), clear(i, j + 1)),
+            (clear(i + 1, j), clear(i + 1, j + 1)),
+            (clear(i, j + 1), clear(i, j)),
+        ];
         let edges = [
             (
                 [x0, y0 + back(row_class[j])],
@@ -1058,16 +1085,18 @@ fn residential_blocks(
                 col_class[i],
             ),
         ];
-        for (start, out, along, len, class) in edges {
+        for ((start, out, along, len, class), (clear_a, clear_b)) in
+            edges.into_iter().zip(edge_clear)
+        {
             let mut mouths: Vec<f32> = Vec::new();
-            let mut u = 14.0;
+            let mut u = clear_a;
             let mut first = true;
             loop {
                 let shop =
                     first && shops < 2 && kind == DistrictKind::Residential && rng.chance(0.08);
                 first = false;
                 let (lk, w) = residential::next_lot(&mut rng, kind, shop);
-                if u + w > len - 14.0 {
+                if u + w > len - clear_b {
                     break;
                 }
                 let centre = u + w * 0.5;

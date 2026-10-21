@@ -73,6 +73,13 @@ fn rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
 
 /// Deepest sink of every parked car (worst point each), worst first.
 fn sinks(sim: &Sim) -> Vec<Sink> {
+    sinks_with(sim, false)
+}
+
+/// [`sinks`]; with `against_walls`, a point whose probe starts inside a solid (a knocked car
+/// resting against a house wall: the contact leaves its corner a few cm inside) is measured
+/// against the drivable ground under it instead of reading as a 1 m sink.
+fn sinks_with(sim: &Sim, against_walls: bool) -> Vec<Sink> {
     let mut out = Vec::new();
     for i in 0..sim.prop_count() {
         if sim.prop_kind(i) != Some(PropKind::ParkedCar) {
@@ -101,9 +108,15 @@ fn sinks(sim: &Sim) -> Vec<Sink> {
             let w = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
             // From 1 m above the point down 2 m: the surface the car stands on (not a deck far
             // above or below it).
-            let Some(surface) = sim.static_ground_z([w[0], w[1]], w[2] + 1.0, 2.0) else {
+            let Some(mut surface) = sim.static_ground_z([w[0], w[1]], w[2] + 1.0, 2.0) else {
                 continue;
             };
+            if against_walls && surface >= w[2] + 1.0 - 1e-3 {
+                let Some(g) = sim.drivable_ground_z([w[0], w[1]], w[2] + 1.0, 2.0) else {
+                    continue;
+                };
+                surface = g;
+            }
             let s = Sink {
                 prop: i,
                 xy: [w[0], w[1]],
@@ -300,7 +313,9 @@ fn knocked_parked_cars_settle_on_the_ground() {
     for _ in 0..240 * 3 {
         sim.step_fixed();
     }
-    let all = sinks(&sim);
+    // Against walls: since the release merge the cars nearest the Hollins Ascent include a
+    // driveway car, which the striker shoves into the corner of its house.
+    let all = sinks_with(&sim, true);
     let dented = sim.parked_wrecks().len();
     let worst = all
         .iter()

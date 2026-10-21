@@ -123,6 +123,7 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
     let net = &map.net;
     let per = ends_per_node(net);
     let radii = super::junction_paved_radii(net);
+    let mut tapers = super::taper_ribbons(map);
     let mut out = Vec::new();
     for (node, ends) in per.iter().enumerate() {
         if ends.is_empty() {
@@ -131,6 +132,20 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
         let nd = &net.nodes[node];
         let c = nd.pos;
         let highway = ends.iter().all(|e| e.highway);
+        if super::is_freeway_node(net, node as u32) {
+            // A freeway merge / diverge: the ribbons are paved up to the node and overlap
+            // there by design (the ramp's lies on the carriageway's plane); its pavement is
+            // the taper paving through the gore ([`super::taper_ribbons`]). No kerbs.
+            out.push(NodePatch {
+                node: node as u32,
+                kind: NodePatchKind::Junction,
+                highway,
+                overlapping_ends: true,
+                mesh: tapers.remove(&(node as u32)).unwrap_or_default(),
+                rims: Vec::new(),
+            });
+            continue;
+        }
         let patch = match (nd.intersection, ends.len()) {
             (None, 1) => Some(dead_end(map, node as u32, c, &ends[0])),
             // A bend is a two-road junction (same kerb curves, same turning-path check); the
@@ -234,9 +249,12 @@ fn merge_spans(c2: V2, ends: &[End]) -> Vec<(End, Vec<End>)> {
         angle_around(c2, geom::xy(a.cw)).total_cmp(&angle_around(c2, geom::xy(b.cw)))
     });
     let mut merged: Vec<(End, Vec<End>)> = Vec::new();
+    // Two ribbons sharing an edge (the carriageways of a divided highway leaving one node
+    // either side of the barrier line) touch at a common corner: adjacent, not overlapping.
+    let touching = |last: &End, e: &End| geom::dist(geom::xy(last.ccw), geom::xy(e.cw)) < 0.01;
     for e in by_cw {
         if let Some((last, members)) = merged.last_mut() {
-            if rel(last.cw, e.cw) <= rel(last.cw, last.ccw) {
+            if rel(last.cw, e.cw) <= rel(last.cw, last.ccw) && !touching(last, &e) {
                 if rel(last.cw, e.ccw) > rel(last.cw, last.ccw) {
                     last.ccw = e.ccw;
                     last.out_ccw = e.out_ccw;
@@ -251,7 +269,7 @@ fn merge_spans(c2: V2, ends: &[End]) -> Vec<(End, Vec<End>)> {
     // The last span may wrap past 0 into the first.
     while merged.len() > 1 {
         let (first, last) = (merged[0].0, merged[merged.len() - 1].0);
-        if rel(last.cw, first.cw) > rel(last.cw, last.ccw) {
+        if rel(last.cw, first.cw) > rel(last.cw, last.ccw) || touching(&last, &first) {
             break;
         }
         let (_, last_members) = merged.pop().unwrap_or((last, Vec::new()));
@@ -435,8 +453,26 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
         if s < -0.05 && u < -0.05 && cos_beta > -0.966 && gap < std::f32::consts::PI {
             let k = geom::add(p, geom::scale(a.out, s));
             if a.highway || b.highway {
-                // No kerb on a highway edge: pave up to where the edges meet.
-                return vec![k];
+                // No kerb on a highway edge: pave up to where the edges meet, but not into
+                // the needle tip of a narrow wedge (Port Vesper's Bluff Road reaches its
+                // diamond terminal right beside the off-ramp: a bare slot under 30 cm wide
+                // between two pavements). The tip is paved over up to where the wedge is
+                // `MIN_SLOT_M` wide, or up to the nearer ribbon corner.
+                let beta = wp_math::atan2(den.abs(), cos_beta);
+                let (sh, _) = wp_math::sin_cos(beta * 0.5);
+                let t = (MIN_SLOT_M / (2.0 * sh.max(1e-3))).min(-s).min(-u);
+                let close = |x: V2, y: V2| geom::dist(x, y) < 0.01;
+                if t < 0.01 {
+                    return vec![k];
+                }
+                let (pa, pb) = (
+                    geom::add(k, geom::scale(a.out, t)),
+                    geom::add(k, geom::scale(b.out, t)),
+                );
+                return [pa, pb]
+                    .into_iter()
+                    .filter(|x| !close(*x, p) && !close(*x, q))
+                    .collect();
             }
             // Interior angle β at k; the fillet's deepest point lies t·(1 − sin β/2)/cos β/2
             // past k, the sidewalk's outer corner W / sin β/2: keep the fillet within 60 % of
@@ -479,6 +515,10 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
     }
     centre_arc(c, p, q, gap)
 }
+
+/// Narrowest bare slot left between two pavements where a kerbless highway edge meets
+/// another road's edge in front of a junction, m (see [`kerb_curve`]).
+const MIN_SLOT_M: f32 = 0.35;
 
 /// Interior points of an arc around `c` from `p` to `q` (counter-clockwise, `gap` radians),
 /// its radius going from |p| to |q|, in steps of at most 7.5°.

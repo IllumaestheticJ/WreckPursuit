@@ -575,12 +575,24 @@ mod tests {
         assert!(json.len() < 1_500_000, "{} bytes", json.len());
     }
 
+    /// The grid is flat except main's highway viaduct (2026-10-21): every deck piece is a
+    /// highway (the carriageways and their ramps), and every other road is at grade.
     #[test]
-    fn grid_static_map_is_flat() {
+    fn grid_static_map_is_flat_but_the_viaduct() {
         let s = chase("procedural_12x12");
         let m = map_static(s.sim().world().map());
         assert!(m.roads.len() > 50);
-        assert!(m.roads.iter().all(|r| r.layer == 0));
+        assert!(m.roads.iter().any(|r| r.layer == 1), "no viaduct deck");
+        assert!(m
+            .roads
+            .iter()
+            .filter(|r| r.layer == 1)
+            .all(|r| r.class == 0));
+        assert!(m
+            .roads
+            .iter()
+            .filter(|r| r.class != 0)
+            .all(|r| r.layer == 0));
     }
 
     #[test]

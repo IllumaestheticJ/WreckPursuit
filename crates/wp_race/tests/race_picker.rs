@@ -450,7 +450,7 @@ fn check(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
 #[test]
 fn grid_highway_sprint() {
     let r = run_race("grid_highway_sprint", 150);
-    // 747 m up a signalled highway with thin traffic.
+    // 747 m up the divided highway onto its viaduct with thin traffic.
     check(&r, 15.0..60.0, 3);
 }
 

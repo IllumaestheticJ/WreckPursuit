@@ -481,10 +481,17 @@ pub fn median_width(class: RoadClass, lanes_fwd: u8, lanes_bwd: u8, opt: &BuildO
     }
 }
 
-/// Paved shoulder outside the rightmost lane of each direction, m (highways).
-pub fn shoulder_width(class: RoadClass, opt: &BuildOptions) -> f32 {
+/// Paved shoulder outside the rightmost lane of each direction, m (two-way highways).
+///
+/// One-way highway roads (the carriageways of a divided highway and their ramps) get no
+/// automatic shoulder: their generator sets the median-side and outer shoulders explicitly
+/// ([`RoadSpec::shoulder_left_m`] / [`RoadSpec::shoulder_right_m`]) and offsets the
+/// carriageway centrelines so that the two carriageways' paving meets at the barrier. An
+/// automatic shoulder on both sides as well would make them overlap by 6 m and widen every
+/// ramp's junction setback.
+pub fn shoulder_width(class: RoadClass, lanes_bwd: u8, opt: &BuildOptions) -> f32 {
     match class {
-        RoadClass::Highway => opt.highway_shoulder_m,
+        RoadClass::Highway if lanes_bwd > 0 => opt.highway_shoulder_m,
         _ => 0.0,
     }
 }
@@ -500,7 +507,7 @@ pub fn half_width_of(
 ) -> f32 {
     let w = lane_width(class, opt);
     let p = if parking { opt.parking_width_m } else { 0.0 };
-    let edge = shoulder_width(class, opt);
+    let edge = shoulder_width(class, lanes_bwd, opt);
     if lanes_bwd == 0 {
         lanes_fwd as f32 * w * 0.5 + p + edge
     } else {
@@ -514,6 +521,67 @@ pub fn half_width_of(
 /// Half width of the side of the road a lane group occupies (max of both sides), m.
 fn half_width(r: &RoadSpec, opt: &BuildOptions) -> f32 {
     half_width_of(r.class, r.lanes_fwd, r.lanes_bwd, r.parking, opt)
+}
+
+/// Distance along a road from a shared node within which [`node_half_widths`] looks for the
+/// road's lateral offset, m (the divided highways fan out within 8 m of the node).
+const SHARED_NODE_REACH_M: f32 = 30.0;
+
+/// Half width of each road at a junction node, as the setbacks of the roads beside it see it.
+///
+/// Normally a road's [`half_width`]. Two one-way highway roads that leave the node in about
+/// the same direction (within 45°) are the carriageways of a divided highway sharing one node
+/// (the procedural grid's highway meets the ring road this way and fans out to
+/// ±`CARRIAGEWAY_OFFSET_M` within 8 m, leaving the node ~33° apart): each one occupies
+/// the side of the node it fans out to, so its width there is its half width plus its
+/// largest lateral offset from the node's line within [`SHARED_NODE_REACH_M`] plus its
+/// explicit shoulder. Without it the crossing road's lanes started inside the outer
+/// carriageway lane and the right turn off it had to curl back (civilian collisions at the
+/// ring T-junction).
+///
+/// Also returns, per incidence, whether it is such a shared carriageway.
+fn node_half_widths(
+    node: &NodeSpec,
+    list: &[Incidence],
+    roads: &[RoadSpec],
+    pts: &[Vec<V3>],
+    hw: &[f32],
+) -> (Vec<f32>, Vec<bool>) {
+    let carriageway = |x: &Incidence| {
+        let r = &roads[x.road];
+        r.class == RoadClass::Highway && r.lanes_bwd == 0
+    };
+    list.iter()
+        .enumerate()
+        .map(|(k, x)| {
+            let shared = carriageway(x)
+                && list.iter().enumerate().any(|(o, y)| {
+                    o != k && carriageway(y) && geom::dot(x.dir_out, y.dir_out) > 0.7
+                });
+            if !shared {
+                return (hw[x.road], false);
+            }
+            let p = &pts[x.road];
+            let mut from_node: Vec<V3> = p.clone();
+            if !x.at_a {
+                from_node.reverse();
+            }
+            let cum = geom::cumulative(&from_node);
+            let offset = from_node
+                .iter()
+                .zip(&cum)
+                .take_while(|(_, c)| **c <= SHARED_NODE_REACH_M)
+                .map(|(q, _)| geom::cross(x.dir_out, geom::sub(geom::xy(*q), node.pos)).abs())
+                .fold(0.0f32, f32::max);
+            // Its paved extent: the explicit (median / outer) shoulder too, so the crossing
+            // road's sidewalk corner clears the carriageway's paving.
+            let r = &roads[x.road];
+            (
+                hw[x.road] + offset + r.shoulder_left_m.max(r.shoulder_right_m),
+                true,
+            )
+        })
+        .unzip()
 }
 
 /// Build the lane graph.
@@ -585,8 +653,9 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             continue;
         }
         if deg >= 3 {
+            let (hw_at, shared) = node_half_widths(&nodes[ni], list, roads, &pts, &hw);
             for i in 0..deg {
-                sb[i] = hw[list[i].road] + opt.crosswalk_m;
+                sb[i] = hw_at[i] + opt.crosswalk_m;
             }
             for i in 0..deg {
                 let j = (i + 1) % deg;
@@ -596,7 +665,12 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 if s < 0.2 {
                     continue; // ≥ ~168° apart: no overlap on this side
                 }
-                let (hi, hj) = (hw[list[i].road], hw[list[j].road]);
+                if shared[i] && shared[j] {
+                    // Two carriageways of one divided highway fanning apart: they lie on
+                    // either side of the barrier, so neither sets the other back.
+                    continue;
+                }
+                let (hi, hj) = (hw_at[i], hw_at[j]);
                 let d_i = (hj + hi * c) / s;
                 let d_j = (hi + hj * c) / s;
                 sb[i] = sb[i].max(d_i + opt.crosswalk_m);
@@ -666,7 +740,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         let w = lane_width(r.class, opt);
         let one_way = r.lanes_bwd == 0;
         let park = if r.parking { opt.parking_width_m } else { 0.0 };
-        let shoulder = shoulder_width(r.class, opt);
+        let shoulder = shoulder_width(r.class, r.lanes_bwd, opt);
         // Centreline to each direction's inner lane edge.
         let inner = median_width(r.class, r.lanes_fwd, r.lanes_bwd, opt) * 0.5;
         let (left_m, right_m) = if one_way {
