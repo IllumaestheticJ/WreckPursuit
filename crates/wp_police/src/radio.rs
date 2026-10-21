@@ -477,9 +477,18 @@ impl RadioDirector {
     }
 }
 
+/// A grouped line lists at most this many call signs; more are said as a count.
+pub const MAX_LISTED_CALLSIGNS: usize = 4;
+
 /// "Unit 4", "Unit 5", "Unit 7" → "Units 4, 5 and 7"; mixed kinds keep full call signs
-/// ("Unit 4 and Air 9").
+/// ("Unit 4 and Air 9"); more than [`MAX_LISTED_CALLSIGNS`]: "13 units".
 pub fn join_callsigns(signs: &[String]) -> String {
+    // More than a handful: say the count. "Units 1, 2, …, 13 resuming patrol" took ≈ 25 s of air
+    // time and held critical traffic (the pursuit call, lost visual) back that long (main's
+    // rebuilt grid, radio_chatter test).
+    if signs.len() > MAX_LISTED_CALLSIGNS {
+        return format!("{} units", signs.len());
+    }
     let split: Vec<(&str, &str)> = signs
         .iter()
         .map(|s| s.split_once(' ').unwrap_or((s.as_str(), "")))

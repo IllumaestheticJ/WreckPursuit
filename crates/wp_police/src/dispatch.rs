@@ -789,6 +789,10 @@ impl PoliceSystem {
             .avoid
             .junction
             .is_some_and(|j| j.s - u.track_s < stuck::RESET_JUNCTION_M);
+        let deadlock = self.deadlocked(i);
+        if deadlock && u.unstick.stand_s >= stuck::RESET_DEADLOCK_S {
+            return Some(false);
+        }
         if red || (at_junction && u.unstick.first.is_none()) {
             return None;
         }
@@ -817,12 +821,48 @@ impl PoliceSystem {
         (u.unstick.stand_s >= need).then_some(active)
     }
 
+    /// Whether unit `i` stands in a two-unit deadlock it should give way in: nose to nose
+    /// with another standing unit (main's ramp terminals) or each waiting for the other. The
+    /// one less busy (not chasing; else the higher id) gives way.
+    fn deadlocked(&self, i: usize) -> bool {
+        use crate::stuck;
+        let u = &self.units[i];
+        match u.avoid.blocked_by {
+            Some(crate::avoid::BlockedBy::Unit(other)) => {
+                self.unit_index(other).is_some_and(|j| {
+                    let o = &self.units[j];
+                    let o_active = matches!(
+                        o.assignment,
+                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                    );
+                    let me_active = matches!(
+                        u.assignment,
+                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                    );
+                    // Nose to nose (or it waits on this one): the other's passing attempt
+                    // flips its own `blocked_by` on and off, so facing decides.
+                    let facing = o.body.heading[0] * u.body.heading[0]
+                        + o.body.heading[1] * u.body.heading[1]
+                        < -0.5;
+                    let waits_on_me =
+                        o.avoid.blocked_by == Some(crate::avoid::BlockedBy::Unit(u.id));
+                    (facing || waits_on_me)
+                        && o.body.speed.abs() < stuck::SLOW_MPS
+                        && (o_active, o.id) > (me_active, u.id)
+                })
+            }
+            _ => false,
+        }
+    }
+
     /// The nearest clear spot in unit `i`'s lane along its route within
     /// [`crate::stuck::RESET_RADIUS_M`]: (route position, point, heading). Uses the
     /// obstacles as last rebuilt.
     fn reset_spot(&self, i: usize) -> Option<(f32, [f32; 2], [f32; 2])> {
         use crate::stuck;
         let u = &self.units[i];
+        // Giving way in a deadlock: only past the other unit (a spot behind still faces it).
+        let ahead_only = self.deadlocked(i);
         let tr = &u.cmd.track;
         let len = tr.length();
         let (id, entity) = (u.id, u.entity);
@@ -838,7 +878,7 @@ impl PoliceSystem {
             let n = (k + 1) / 2;
             let d = if k % 2 == 1 { n } else { -n } as f32 * stuck::RESET_STEP_M;
             let s = u.track_s + d;
-            if s < 0.0 || s > len {
+            if s < 0.0 || s > len || (ahead_only && d <= 0.0) {
                 continue;
             }
             let pos = crate::unit::lane_point(tr, s, u.cmd.lane_offset_m);
@@ -1407,10 +1447,17 @@ impl PoliceSystem {
         if self.units[i].assignment == a {
             return;
         }
+        // A unit's first patrol is not "resuming" anything: no line (13 units "resuming
+        // patrol" at the start held the channel for ≈ 25 s).
+        let first_patrol =
+            matches!(a, Assignment::Patrol { .. } | Assignment::Idle) && !self.units[i].had_job;
         let text = self.radio_text(i, &a);
         let now = self.now;
         {
             let u = &mut self.units[i];
+            if !matches!(a, Assignment::Patrol { .. } | Assignment::Idle) {
+                u.had_job = true;
+            }
             u.assignment = a;
             u.assigned = now;
             u.quiet = false;
@@ -1425,7 +1472,9 @@ impl PoliceSystem {
                 self.stats.units_engaged += 1;
             }
         }
-        self.radio(text);
+        if !first_patrol {
+            self.radio(text);
+        }
     }
 
     /// Spoken description of a racer ("racer #3 northbound on Harbor Boulevard", "racer #3

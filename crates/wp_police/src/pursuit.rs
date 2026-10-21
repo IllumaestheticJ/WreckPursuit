@@ -1680,6 +1680,18 @@ impl PoliceSystem {
                     );
                     self.update_avoid(i, dt);
                     let rep = step_ground(&mut self.units[i], &env, &cfg, &mut self.rng, dt);
+                    // Standing time (reset in place, row 78), as physical units count it in
+                    // `unit_input`.
+                    let u = &mut self.units[i];
+                    match u.unstick.stand_at {
+                        Some(p) if dist(p, u.body.pos) < crate::stuck::STAND_M => {
+                            u.unstick.stand_s += dt
+                        }
+                        _ => {
+                            u.unstick.stand_at = Some(u.body.pos);
+                            u.unstick.stand_s = 0.0;
+                        }
+                    }
                     self.stats.near_misses += rep.near_miss as u32;
                     self.stats.traffic_collisions += rep.traffic_collision as u32;
                     self.stats.run_wide_crashes += rep.crashed as u32;
@@ -1767,6 +1779,22 @@ mod tests {
         let map = std::sync::Arc::new(wp_world::CityMap::new(net));
         let mut cfg = crate::PoliceConfig::builtin();
         cfg.presence.max_ground_units = 0;
+        // No patrols either (they come from the pool table, not the cap): with round 12c's
+        // 380 m day sight a ground unit saw the racer under the deck.
+        let none = crate::config::PhaseTable {
+            dawn: 0,
+            day: 0,
+            dusk: 0,
+            night: 0,
+        };
+        cfg.presence.patrols = crate::config::DistrictTable {
+            core: none,
+            suburb: none,
+            industrial: none,
+        };
+        // No roadblock or spikes either (their tool units also see 380 m by day).
+        cfg.presence.unlocks.spikes_level = 99;
+        cfg.presence.unlocks.roadblock_level = 99;
         cfg.presence.helicopter.launch_s.day = 0.5;
         cfg.tools.helicopter.speed_mps = 400.0;
         let police = PoliceSystem::with_city(

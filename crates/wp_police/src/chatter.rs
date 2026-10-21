@@ -49,6 +49,8 @@ use crate::PoliceSystem;
 
 /// Searching this long before a unit calls "lost visual" (line-of-sight flicker stays quiet), s.
 pub const LOST_CONFIRM_S: f32 = 1.5;
+/// Lost this long, the lost-visual call goes out even within [`SIGHT_CALL_GAP_S`], s.
+pub const LOST_SUSTAINED_S: f32 = 4.5;
 /// At most one lost-visual / eyes-on call per racer per this long, s.
 pub const SIGHT_CALL_GAP_S: f32 = 10.0;
 /// A pursuer this close behind the racer is "on his bumper", m.
@@ -667,12 +669,15 @@ impl PoliceSystem {
                     c.last_sight_call
                         .is_none_or(|t| now.since(t) >= SIGHT_CALL_GAP_S)
                 };
-                // Lost visual, confirmed.
+                // Lost visual, confirmed. A loss that lasts [`LOST_SUSTAINED_S`] is called even
+                // inside the gap (on main's rebuilt grid, interceptors on a parallel road saw the
+                // racer on and off; the flicker used up the gap and the real loss was called
+                // 11.5 s late, a moment before the escape).
+                let lost_for = c.searching_since.map_or(0.0, |t| now.since(t));
                 if status == PursuitStatus::Searching
                     && !c.lost_called
-                    && c.searching_since
-                        .is_some_and(|t| now.since(t) >= LOST_CONFIRM_S)
-                    && quiet(c)
+                    && lost_for >= LOST_CONFIRM_S
+                    && (quiet(c) || lost_for >= LOST_SUSTAINED_S)
                 {
                     c.lost_called = true;
                     c.last_sight_call = Some(now);

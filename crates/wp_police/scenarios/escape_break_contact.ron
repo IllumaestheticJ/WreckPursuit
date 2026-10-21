@@ -2,6 +2,11 @@
 // of sight behind buildings and escapes after escape_time(level, Dusk). Violations are off so the
 // chase stays below the helicopter's wanted level (with a helicopter overhead, escapes are rare by
 // design).
+// Re-aimed after main's rebuilt grid (#19-#27: a divided highway viaduct along x = 0 with diamond
+// ramps). A racer roaming Core or Suburb was never out of sight for the 10.8 s escape time in
+// 600 s, at any dusk sight range tried (200 m and 320 m), so pursuit heat took it to the
+// helicopter's level. It now starts in, and keeps to, the Industrial district (warehouses
+// block sight): 1-2 escapes in 3 runs on seeds 600-602.
 (
     name: "police_escape_break_contact",
     seed: 600,
@@ -9,7 +14,7 @@
     duration_s: 300.0,
     runs: 3,
     stop_after_first_pursuit: true,
-    racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: false)],
+    racers: [(district: Industrial, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: true)],
     expect: [
         (metric: "escapes", min: 1.0, max: 3.0),
     ],
