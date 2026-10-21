@@ -19,7 +19,7 @@ pub mod tire;
 
 use wp_contracts::WheelDef;
 
-use crate::mechanical::spec::{self, BrakeSpec, Susp, TireKind, WheelSpec};
+use crate::mechanical::spec::{self, BrakeSpec, CarSpec, Susp, TireKind, WheelSpec};
 use crate::mesh::MeshPart;
 use crate::style::WheelStyle;
 
@@ -74,9 +74,10 @@ pub fn knuckle_in(width: f32) -> f32 {
 }
 
 impl WheelGeom {
-    /// Resolve the geometry of wheel `index` from its definition and the style.
-    pub fn new(index: u8, w: &WheelDef, style: &WheelStyle) -> WheelGeom {
-        let car = spec::spec_for_wheel(index as usize, w);
+    /// Resolve the geometry of wheel `index` from its definition, the style and the car's
+    /// resolved spec ([`crate::mechanical::car_spec`]).
+    pub fn new(index: u8, w: &WheelDef, style: &WheelStyle, car: &CarSpec) -> WheelGeom {
+        let car = *car;
         let radius = w.radius_m;
         let width = w.width_m;
         let ws = spec::apply_wheel(car.wheel, style, radius, width);

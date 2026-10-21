@@ -9,7 +9,7 @@
 //!
 //! Parts: `susp_front` / `susp_rear` (dark: arms, damper bodies, mounts, leaves, diff),
 //! `susp_front_metal` / `susp_rear_metal` (links, rods, shafts, axle), `susp_front_spring` /
-//! `susp_rear_spring` (coil springs: metal, caliper tint for coilovers / painted springs, dark
+//! `susp_rear_spring` (coil springs: metal, `spring` slot for coilovers / painted springs, dark
 //! when rusty), `frame_rail_l` / `frame_rail_r`, `driveline`.
 
 use wp_contracts::{BodyRegion, VehicleDef};
@@ -40,7 +40,7 @@ impl Axle {
         let spring_mat = if s.rusty {
             MaterialSlot::Engine
         } else if s.tinted_springs {
-            MaterialSlot::Caliper
+            MaterialSlot::Spring
         } else {
             MaterialSlot::Exhaust
         };

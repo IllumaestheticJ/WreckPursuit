@@ -83,8 +83,10 @@ pub struct BodyStyle {
     pub silhouette: Silhouette,
 
     // --- Cabin placement (visual; the lattice is not changed) ---
-    /// Moves windshield base, roof and rear-glass base along +Y (forward). Range −0.55…+0.20.
-    /// Mid-engine cars want ≈ +0.15…+0.20, long-hood muscle −0.25…−0.45. The hood / trunk
+    /// Moves windshield base, roof and rear-glass base along +Y (forward). Range −0.60…+0.60
+    /// ([`crate::profile::CABIN_SHIFT_RANGE`]). Mid-engine cab-forward cars want ≈ +0.3…+0.5
+    /// (roof centre ≈ 42–46 % of the length from the nose), long-hood muscle −0.25…−0.45. The
+    /// windshield base never passes 0.30 m behind the hood's front edge. The hood / trunk
     /// mesh then no longer starts exactly at the lattice hinge (it pivots on the lattice hinge
     /// nodes, offset by this amount).
     pub cabin_shift_m: f32,
@@ -534,8 +536,13 @@ pub struct WheelStyle {
     pub lugs: u8,
     /// Bolt circle radius, m.
     pub pcd_r_m: f32,
-    /// Rim material (`Metal`, `Chrome`, `Trim` for black, `Carbon` …).
+    /// Rim material (`Metal`, `Chrome`, `Trim` for black, `Carbon` …). `Metal` rims and
+    /// plastic hubcaps are drawn in the `rim` slot, so [`WheelStyle::rim_rgb`] can tint them
+    /// without touching discs or hardware.
     pub rim_material: MaterialSlot,
+    /// Rim / hubcap colour (sRGB) written as `tints.rim` (gold, bronze, white …). `None` = the
+    /// renderer's metal colour.
+    pub rim_rgb: Option<[u8; 3]>,
     /// Sidewall height / section width. `None` = from the rim radius.
     pub tire_aspect: Option<f32>,
     /// Visual front camber, degrees (+ = top leans in). Range −1…6.
@@ -558,6 +565,7 @@ impl Default for WheelStyle {
             lugs: 5,
             pcd_r_m: 0.057,
             rim_material: MaterialSlot::Metal,
+            rim_rgb: None,
             tire_aspect: None,
             front_camber_deg: 0.0,
             rear_camber_deg: 0.0,
@@ -699,6 +707,16 @@ pub enum ExhaustKind {
     Centre,
     /// Side pipes under the doors.
     SidePipes,
+    /// Four tips in a row in the centre of the valance (90s mid-engine exotic).
+    CentreQuad,
+    /// Four big tips high in the centre of a mesh rear panel (supercar).
+    HighCentre,
+    /// One tip per side, turned down under the valance.
+    DualDown,
+    /// Single exit behind the right rear wheel (trucks, SUVs).
+    SideExit,
+    /// Bare bent pipe under the rear bumper, no tip.
+    Bare,
 }
 
 /// Engine, suspension, brakes and exhaust.
@@ -810,6 +828,12 @@ pub struct CarStyle {
     /// Budget tier. Set by [`style_for`] from the module that styled the car
     /// (performance / police → Hero, traffic → Traffic, class default → by class).
     pub tier: Tier,
+    /// Second paint colour (sRGB) for details in the `accent` slot (stripes, accent bars),
+    /// written as `tints.accent`. `None` = the renderer's default accent (dark red).
+    pub accent_rgb: Option<[u8; 3]>,
+    /// Underglow colour (sRGB). `Some` adds emissive strips under both sills (`underglow`
+    /// slot, `tints.underglow`), lit by the renderer only while the headlights are on.
+    pub underglow_rgb: Option<[u8; 3]>,
 }
 
 impl CarStyle {
@@ -823,6 +847,8 @@ impl CarStyle {
             livery: None,
             tints: Vec::new(),
             tier: Tier::Hero,
+            accent_rgb: None,
+            underglow_rgb: None,
         }
     }
 }

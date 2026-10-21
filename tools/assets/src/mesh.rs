@@ -129,6 +129,16 @@ pub enum MaterialSlot {
     Grille,
     /// Exhaust tips (polished, heat tint).
     Exhaust,
+    /// Rim / hubcap finish (defaults to the `metal` colour; tinted per car by
+    /// `WheelStyle::rim_rgb` → `tints.rim`).
+    Rim,
+    /// Coil springs (tinted by `MechStyle::spring_rgb`, else the caliper tint → `tints.spring`).
+    Spring,
+    /// Second paint colour for stripes / accent bars (`CarStyle::accent_rgb` → `tints.accent`).
+    Accent,
+    /// Emissive underglow strip (`CarStyle::underglow_rgb` → `tints.underglow`); the renderer
+    /// lights it only while the headlights are on.
+    Underglow,
 }
 
 impl MaterialSlot {
@@ -570,7 +580,10 @@ pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle)
 
     loft(&p, &win, &ys, &rings, &mut b);
     end_caps(&p, &ys, &rings, &mut b);
-    underbody(&p, &ys, &rings, &mut b);
+    underbody(&p, def, &ys, &rings, &mut b);
+    if style.underglow_rgb.is_some() {
+        underglow(&p, &mut b);
+    }
     lights_and_mirrors(&p, &mut b);
     interior(&p, &mut b);
     hood_scoop(&p, &mut b);
@@ -578,7 +591,8 @@ pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle)
     for d in &style.details {
         emit_detail(&ctx, d, &mut b);
     }
-    crate::mechanical::parts(def, &p, &style.mechanical, &mut b);
+    let car_spec = crate::mechanical::car_spec(def, &style.mechanical, style.tier);
+    crate::mechanical::parts_with_spec(def, &p, &car_spec, &mut b);
 
     let atlas = LiveryAtlas {
         y: [p.y_tail, p.y_nose],
@@ -599,7 +613,7 @@ pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle)
     parts.sort_by(|a, b| a.name.cmp(&b.name));
     let mut camber = [0.0f32; 4];
     for (i, w) in def.wheels.iter().enumerate() {
-        let g = WheelGeom::new(i as u8, w, &style.wheel);
+        let g = WheelGeom::new(i as u8, w, &style.wheel, &car_spec);
         camber[i] = if w.position_m[1] >= 0.0 {
             style.wheel.front_camber_deg
         } else {
@@ -615,6 +629,21 @@ pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle)
     let mut tints: BTreeMap<MaterialSlot, [u8; 3]> = BTreeMap::new();
     if let Some(c) = style.mechanical.caliper_rgb {
         tints.insert(MaterialSlot::Caliper, c);
+    }
+    // Springs: their own colour, else the caliper tint (the pre-`spring`-slot look).
+    if let Some(c) = style.mechanical.spring_rgb.or(style.mechanical.caliper_rgb) {
+        if parts.iter().any(|q| q.material == MaterialSlot::Spring) {
+            tints.insert(MaterialSlot::Spring, c);
+        }
+    }
+    if let Some(c) = style.wheel.rim_rgb {
+        tints.insert(MaterialSlot::Rim, c);
+    }
+    if let Some(c) = style.accent_rgb {
+        tints.insert(MaterialSlot::Accent, c);
+    }
+    if let Some(c) = style.underglow_rgb {
+        tints.insert(MaterialSlot::Underglow, c);
     }
     for &(slot, c) in &style.tints {
         tints.insert(slot, c);
@@ -734,15 +763,37 @@ fn end_caps(p: &BodyProfile, ys: &[f32], rings: &[Vec<RingPt>], b: &mut Builder)
 }
 
 /// Underbody: one strip across every station (kept below an open pickup bed's floor).
-fn underbody(p: &BodyProfile, ys: &[f32], rings: &[Vec<RingPt>], b: &mut Builder) {
+/// Between the wheel arches the ring's underside point is lifted onto the arch; the plate
+/// stays at floor height there instead, narrowed to inside the wheels, so it never covers
+/// the engine bay (visible with the hood open or gone).
+fn underbody(
+    p: &BodyProfile,
+    def: &VehicleDef,
+    ys: &[f32],
+    rings: &[Vec<RingPt>],
+    b: &mut Builder,
+) {
     let key = PartKey::body(
         "underbody",
         BodyRegion::Cabin,
         PartKind::Body,
         MaterialSlot::Trim,
     );
+    // Inner half width between the tires of the axle whose arch covers `y`.
+    let inner = |y: f32| -> Option<f32> {
+        def.wheels
+            .iter()
+            .zip(&p.arches)
+            .filter(|(_, a)| (y - a.0).abs() < a.2)
+            .map(|(w, _)| w.position_m[0].abs() - 0.5 * w.width_m - 0.03)
+            .reduce(f32::min)
+    };
     let under = |s: usize| {
         let mut q = rings[s][0].p;
+        if let Some(xi) = inner(q[1]) {
+            q[2] = p.sill(q[1]);
+            q[0] = -(-q[0]).min(xi.max(0.2));
+        }
         if let Some((y0, y1, floor)) = p.bed {
             if q[1] >= y0 && q[1] <= y1 {
                 q[2] = q[2].min(floor - 0.03);
@@ -754,6 +805,45 @@ fn underbody(p: &BodyProfile, ys: &[f32], rings: &[Vec<RingPt>], b: &mut Builder
         let a = under(s);
         let c = under(s + 1);
         b.poly(&key, &[a, [-a[0], a[1], a[2]], [-c[0], c[1], c[2]], c]);
+    }
+}
+
+/// Underglow: a thin emissive strip under each sill between the arches, facing down
+/// (`underglow` slot; the renderer lights it with the headlights).
+fn underglow(p: &BodyProfile, b: &mut Builder) {
+    let (front, rear) = p
+        .arches
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(f, r), &(wy, _, ar)| {
+            if wy >= 0.0 {
+                (f.min(wy - ar), r)
+            } else {
+                (f, r.max(wy + ar))
+            }
+        });
+    if front == f32::MAX || rear == f32::MIN || front - rear < 0.4 {
+        return;
+    }
+    let (y0, y1) = (rear + 0.08, front - 0.08);
+    for right in [false, true] {
+        let sx = if right { 1.0 } else { -1.0 };
+        let region = if right {
+            BodyRegion::FrameRight
+        } else {
+            BodyRegion::FrameLeft
+        };
+        let side = if right { "r" } else { "l" };
+        let key = PartKey::body(
+            &format!("underglow_{side}"),
+            region,
+            PartKind::Detail,
+            MaterialSlot::Underglow,
+        );
+        let ym = 0.5 * (y0 + y1);
+        let x_out = p.half_width(ym) - 0.10;
+        let z = p.sill(ym) - 0.004;
+        let (xa, xb) = (sx * (x_out - 0.05), sx * x_out);
+        b.cuboid(&key, [xa.min(xb), y0, z - 0.012], [xa.max(xb), y1, z]);
     }
 }
 

@@ -9,7 +9,8 @@
 //!
 //! Parts per wheel: `wheel_xx_rim` (rim material), `wheel_xx_rim_bright` (lug nuts, polished
 //! lips, trim rings, chrome caps), `wheel_xx_rim_dark` (vent holes, slots, windows),
-//! `wheel_xx_rim_cap` (plastic hubcap) — only the ones a design uses.
+//! `wheel_xx_rim_cap` (plastic hubcap) — only the ones a design uses. Metal rims and hubcaps
+//! are drawn in the `rim` slot (tinted per car by `WheelStyle::rim_rgb`).
 
 use crate::builder::{Builder, PartKey};
 use crate::mechanical::prim::{hub_lathe, hub_pt, sc_deg};
@@ -340,7 +341,13 @@ pub fn rim(g: &WheelGeom, b: &mut Builder) {
     let n = g.lathe_n();
     let mk =
         |suffix: &str, m: MaterialSlot| PartKey::wheel(&g.name(suffix), g.index, PartKind::Rim, m);
-    let rim_key = mk("rim", w.material);
+    // Painted / alloy rims and plastic hubcaps use the per-car tintable `rim` slot.
+    let body_mat = if w.material == MaterialSlot::Metal {
+        MaterialSlot::Rim
+    } else {
+        w.material
+    };
+    let rim_key = mk("rim", body_mat);
     let bright = if w.bright == w.material {
         rim_key.clone()
     } else {
@@ -350,7 +357,7 @@ pub fn rim(g: &WheelGeom, b: &mut Builder) {
         rim: rim_key,
         bright,
         dark: mk("rim_dark", MaterialSlot::Grille),
-        cap: mk("rim_cap", MaterialSlot::Metal),
+        cap: mk("rim_cap", MaterialSlot::Rim),
     };
     let rim_r = g.rim_radius;
     let polished_lip = matches!(w.rim, RimKind::Mesh | RimKind::SlotMag | RimKind::DogDish);

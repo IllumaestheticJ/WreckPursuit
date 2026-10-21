@@ -8,7 +8,7 @@
 //! fallback for unknown ids), so a style module that only picks a rim kind still gets the
 //! right rim size, brakes, engine and suspension for its car.
 
-use wp_contracts::{VehicleClass, VehicleDef, WheelDef};
+use wp_contracts::{VehicleClass, VehicleDef};
 
 use crate::mesh::MaterialSlot;
 use crate::style::{
@@ -974,10 +974,20 @@ pub fn apply_mech(def: &VehicleDef, mut s: CarSpec, m: &MechStyle) -> CarSpec {
                 ExhaustKind::Quad => Tips::Quad,
                 ExhaustKind::Centre => Tips::Centre,
                 ExhaustKind::SidePipes => Tips::SidePipes,
+                ExhaustKind::CentreQuad => Tips::CentreQuad,
+                ExhaustKind::HighCentre => Tips::HighCentre,
+                ExhaustKind::DualDown => Tips::DualDown,
+                ExhaustKind::SideExit => Tips::SideRight,
+                ExhaustKind::Bare => Tips::Bare,
             };
             s.exhaust.dual = matches!(
                 e,
-                ExhaustKind::Dual | ExhaustKind::Quad | ExhaustKind::SidePipes
+                ExhaustKind::Dual
+                    | ExhaustKind::Quad
+                    | ExhaustKind::SidePipes
+                    | ExhaustKind::CentreQuad
+                    | ExhaustKind::HighCentre
+                    | ExhaustKind::DualDown
             );
         }
     }
@@ -1078,53 +1088,4 @@ pub fn segments(hero: bool, st: &WheelStyle) -> usize {
     } else {
         16
     }
-}
-
-/// The current car, so per-wheel calls (which only see a [`WheelDef`]) can find its spec.
-/// Set by [`crate::mechanical::parts`], which the generator calls before the wheel loop.
-#[derive(Debug, Clone)]
-pub struct Current {
-    /// Hub positions of the car's wheels (to recognise them).
-    pub hubs: Vec<[f32; 3]>,
-    /// Radii of the car's wheels.
-    pub radii: Vec<f32>,
-    /// Resolved spec (mech overrides applied; wheel overrides are per call).
-    pub spec: CarSpec,
-}
-
-thread_local! {
-    static CURRENT: std::cell::RefCell<Option<Current>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Remember the car being generated.
-pub fn set_current(def: &VehicleDef, spec: CarSpec) {
-    let cur = Current {
-        hubs: def.wheels.iter().map(|w| w.position_m).collect(),
-        radii: def.wheels.iter().map(|w| w.radius_m).collect(),
-        spec,
-    };
-    CURRENT.with(|c| *c.borrow_mut() = Some(cur));
-}
-
-/// Spec of the car wheel `w` (index `i`) belongs to: the current car when it matches, else a
-/// generic spec from the wheel alone (street tire → compact, all-terrain → truck …).
-pub fn spec_for_wheel(i: usize, w: &WheelDef) -> CarSpec {
-    let found = CURRENT.with(|c| {
-        c.borrow().as_ref().and_then(|cur| {
-            (cur.hubs.get(i) == Some(&w.position_m) && cur.radii.get(i) == Some(&w.radius_m))
-                .then_some(cur.spec)
-        })
-    });
-    found.unwrap_or_else(|| {
-        let class = match TireKind::from_id(&w.tire_id) {
-            TireKind::AllTerrain => VehicleClass::Truck,
-            TireKind::Pursuit => VehicleClass::PoliceCruiser,
-            TireKind::VintageBias | TireKind::DragRadial => VehicleClass::Muscle,
-            TireKind::Street => VehicleClass::Compact,
-            _ => VehicleClass::Sport,
-        };
-        let mut s = class_spec(class);
-        s.wheel.rim_r = s.wheel.rim_r.min(0.8 * w.radius_m);
-        s
-    })
 }
