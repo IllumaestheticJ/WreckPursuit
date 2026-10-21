@@ -13,6 +13,9 @@ cargo run -p testbed-native --features ffb -- --headless      # FFB without a wi
 
 - `window`: winit 0.30 + softbuffer (CPU framebuffer, no GPU), top-down view following the car,
   10 m grid, steered wheels, rack-torque bar (magenta) and speed bar.
+- `gpu`: 3D view through our own renderer (`crates/wp_render`): `-- --gpu` opens a wgpu window
+  with the real car meshes deforming, `-- --shot out.png [--scenario x.ron]` writes a headless
+  screenshot. See `crates/wp_render/README.md`.
 - `ffb`: raw `sdl2-sys` haptic API (the safe wrapper only does rumble): haptic device 0, one
   infinite constant-force effect on the steering axis, level = torque / 20 N·m; joystick axis 0
   is read as steering. Needs `libSDL2` at link time.

@@ -204,6 +204,9 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 - `crates/wp_vehicle/src/lib.rs`: added `Vehicle::set_pose_and_speed(pos, yaw, speed_mps)`
   (Lead: the stub this went into was replaced by 02's real model; the method now lives in `wp_vehicle/src/vehicle.rs`, same signature.)
   (7 lines, `reset` + speed) for LOD promotion — see contract request 1.
+- `apps/testbed-web`: **photo mode** (owner request, 2026-10-20; branch `claude/fervent-cerf-ft2h9h`,
+  not `ws/world`). Testbed-only, no Rust changes. Full notes and the list of touched files are in
+  `docs/integration/testbed.md` → "Photo mode" (C to review).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -1349,3 +1352,15 @@ never above a road, tunnels included (closest 0.14 m below); off-road heightfiel
 p50 0.05 / p95 0.21 / p99 0.60 m (max 7.0 m on hillsides right beside cuttings, −2.2 m on
 sharp ridges; physics follows the drawn mesh in both). Greybox regenerated (9.09 MB, +5 KB).
 
+## Lead helper note (P9 helicopter, 2026-10-20; merged 2026-10-21 by `triage/helicopter`)
+
+`CityMap::line_of_sight` now treats **bridge decks** as occluders: `surface::deck_slabs(net)` —
+surface centreline pieces whose whole cross-section is ≥ `DECK_COVER_CLEARANCE_M` (3 m) above
+the terrain at both ends — each a thin plane over the paved width (bank ignored), indexed in a
+32 m grid like buildings; `DeckSlab::blocks(p, q)` solves the single crossing in closed form.
+Effect: a helicopter cannot see a car under Port Vesper's overpass or in the underpass; cars on
+the deck stay visible. Ground-level sight lines are unaffected (horizontal rays under a deck do not
+cross its plane). Tests: `surface::tests::*` (slab geometry), `vesper::tests::overpass_decks_hide_the_road_below_from_the_air`.
+Decks are separate from round 12's covered spans (`covered.rs`: tunnels and the Founders Cut
+trench, switchable with `covered_los`); `deck_slabs` is not affected by `covered_los`. The slab
+list and its grid are `Arc`-shared like the other grids (cheap `CityMap` clones).

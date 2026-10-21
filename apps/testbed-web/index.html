@@ -76,6 +76,17 @@
       #sc-result .pass { color: #2ecc40; }
       #sc-result .fail { color: #ff4136; }
       #sc-result .pending { color: #aaa; }
+      .mod-shop { position: absolute; top: 8px; right: 8px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; z-index: 4; background: rgba(0, 0, 0, 0.85); }
+      .mod-shop-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+      .mod-shop-head b { flex: 1; color: #fff; }
+      .mod-shop button { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; margin: 1px 2px 1px 0; cursor: pointer; }
+      .mod-shop button:hover { background: #333; }
+      .mod-shop button.mod.shows { border-color: #7a6a20; }
+      .mod-shop button.mod.on { background: #2a6; border-color: #2a6; color: #fff; }
+      .mod-shop-fitted { margin: 2px 0 4px; }
+      .mod-shop-status.bad { color: #ff8060; margin-bottom: 4px; }
+      .mod-slot { margin: 4px 0; }
+      .mod-slot-name { color: #ffdc00; }
       /* Races (workstream 15): picker, HUD, countdown, results (src/ui/race.tsx). */
       .wp-race-picker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; pointer-events: auto; z-index: 80; }
       .wp-race-cards { display: grid; gap: 0.6em; }
@@ -88,6 +99,19 @@
       .wp-race-countdown { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); font: 900 96px/1 system-ui, sans-serif; color: #ffd23f; text-shadow: 0 4px 12px #000; pointer-events: none; }
       .wp-race-go { color: #2ee59d; }
       .wp-race-results { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; pointer-events: auto; z-index: 75; }
+      #photo-panel { position: fixed; top: 8px; right: 8px; width: 300px; max-height: calc(100vh - 16px); overflow: auto; z-index: 10; }
+      #photo-panel .row { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      #photo-panel button, #photo-panel select { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; }
+      #photo-panel button:hover { background: #333; }
+      #photo-panel button.on { background: #2a6; color: #fff; border-color: #2a6; }
+      #photo-panel .ph-presets { display: flex; flex-wrap: wrap; gap: 3px; margin: 5px 0; }
+      #photo-panel .ph-grid label { display: grid; grid-template-columns: 96px 1fr 40px; align-items: center; }
+      #photo-panel .ph-grid input { width: 100%; accent-color: #2a6; }
+      #photo-panel .ph-grid output { text-align: right; color: #aaa; }
+      #photo-panel .ph-status { min-height: 1.35em; color: #9fd; }
+      #photo-chip { position: fixed; top: 8px; right: 8px; z-index: 10; font: 12px monospace; background: rgba(0, 0, 0, 0.6); color: #ddd; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; }
+      #photo-panel .ph-letterbox { vertical-align: middle; margin: 0 2px 0 0; }
+      @media (max-width: 520px) { #photo-panel { left: 8px; width: auto; max-height: 45vh; top: auto; bottom: 8px; } }
       #error { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); color: #f66; white-space: pre; }
     </style>
   </head>
@@ -105,10 +129,12 @@
           <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
           <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
           <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
+          <button id="photo" title="pause, free camera, filters, save or copy the image (also from replays)">📷 photo (F7)</button>
         </div>
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
           car <select id="car"></select>
+          <button id="mods-btn" title="install mods on this car: wheels, tires, aero, body kits, cages… (you see them on the car)">mods</button>
           <label title="free drive in the selected city with traffic"><input type="checkbox" id="city" />city</label>
           <select id="city-map" title="city for free drive and city chase">
             <option value="vesper_v2">Port Vesper v2 (hills, curves)</option>
@@ -166,6 +192,7 @@
         <div class="row dim" id="rp-status">no replay loaded</div>
         <div id="sc-result"></div>
       </div>
+      <div id="mod-shop"></div>
       <div id="error"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>

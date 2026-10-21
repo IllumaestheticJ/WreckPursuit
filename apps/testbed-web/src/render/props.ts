@@ -178,6 +178,45 @@ export interface PropStats {
   wreckReskins: number;
 }
 
+/**
+ * A new geometry object over `src`'s attributes and index (no copy: same arrays, same GPU
+ * buffers), so a mesh gets vertex-array state of its own. Disposing it releases its state and
+ * the shared buffers, so views are disposed only together with their source.
+ */
+function geometryView(src: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  for (const name of Object.keys(src.attributes)) g.setAttribute(name, src.attributes[name]);
+  g.setIndex(src.index);
+  for (const gr of src.groups) g.addGroup(gr.start, gr.count, gr.materialIndex);
+  g.setDrawRange(src.drawRange.start, src.drawRange.count);
+  if (src.boundingSphere) g.boundingSphere = src.boundingSphere.clone();
+  if (src.boundingBox) g.boundingBox = src.boundingBox.clone();
+  return g;
+}
+
+/**
+ * Parked cars (not cones, not dented ones) within `maxD` of the camera (sim space): their distance into `dist`,
+ * their index appended to `near` (`PropView.repick`). A standalone loop over typed arrays:
+ * inside the method, each per-prop distance came back from a call as a boxed number
+ * (~12 KB a frame at 3–4 fps, allocation pass 2026-10-20).
+ */
+function nearCars(pose: Float32Array, kind: Uint8Array, wrecked: Uint8Array, n: number, cx: number, cy: number, cz: number, maxD: number, dist: Float32Array, near: number[]): void {
+  for (let i = 0; i < n; i++) {
+    // Cones, and parked cars replaced by their dented vehicle (drawn by its own panel mesh).
+    if (kind[i] === PROP_KIND.cone || wrecked[i]) continue;
+    const o = i * 7;
+    // Not Math.hypot: it allocates its argument list.
+    const dx = pose[o] - cx;
+    const dy = pose[o + 1] - cy;
+    const dz = pose[o + 2] - cz;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < maxD) {
+      dist[i] = d;
+      near.push(i);
+    }
+  }
+}
+
 export class PropView {
   /** Full panel-mesh distance, m (graphics quality; lower on phones). */
   fullLodM = FULL_LOD_M;
@@ -316,9 +355,15 @@ export class PropView {
 
   private addChunk(props: number[], mats: FleetMaterials): void {
     const c = this.chunks.length;
-    // Instances share one geometry set per tier; each chunk's meshes only own their instances.
-    const proxy = new InstancedCar(this.proxyGeo!, props.length, mats, null);
-    const box = new THREE.InstancedMesh(this.farGeo!, mats.paint, props.length);
+    // Instances share one geometry set per tier (the same vertex buffers); each chunk's meshes
+    // only own their instances. Each mesh still gets its own geometry *object* (`geometryView`):
+    // Three keys its vertex-array state by geometry + program, so meshes drawing one geometry
+    // object with different instance matrices re-bound every attribute and allocated a new
+    // attribute cache on each draw (~15 KB a frame, allocation pass 2026-10-20).
+    const pg = this.proxyGeo!;
+    const views = { paint: geometryView(pg.paint), detail: geometryView(pg.detail), tail: geometryView(pg.tail), head: geometryView(pg.head), indL: geometryView(pg.indL), indR: geometryView(pg.indR) };
+    const proxy = new InstancedCar(views, props.length, mats, null);
+    const box = new THREE.InstancedMesh(geometryView(this.farGeo!), mats.paint, props.length);
     const pts = props.map((i) => new THREE.Vector3(this.pose[i * 7], this.pose[i * 7 + 1], this.pose[i * 7 + 2]));
     const sphere = new THREE.Sphere().setFromPoints(pts);
     sphere.radius += SPHERE_PAD_M;
@@ -549,14 +594,7 @@ export class PropView {
     const near = this.pickIdx;
     const dist = this.pickDist;
     near.length = 0;
-    for (let i = 0; i < this.n; i++) {
-      if (this.kind[i] === PROP_KIND.cone || this.wrecked[i]) continue;
-      const d = this.distTo(i);
-      if (d < this.fullLodM) {
-        dist[i] = d;
-        near.push(i);
-      }
-    }
+    nearCars(this.pose, this.kind, this.wrecked, this.n, this.cam.x, this.cam.y, this.cam.z, this.fullLodM, dist, near);
     near.sort(this.byPickDist);
     if (near.length > this.maxFull) near.length = this.maxFull;
     const want = this.pickWant;
@@ -715,10 +753,15 @@ export class PropView {
     }
     this.wrecks.clear();
     this.wreckReskins = 0;
-    // Chunks share geometry: remove their meshes, dispose the shared geometry once.
-    for (const ch of this.chunks) for (const mesh of [...ch.proxy.meshes, ch.box]) mesh.removeFromParent();
+    // Chunks share vertex buffers: remove their meshes and dispose their geometry views (vertex
+    // array state; the shared buffers go with the source geometries just after).
+    for (const ch of this.chunks)
+      for (const mesh of [...ch.proxy.meshes, ch.box]) {
+        mesh.removeFromParent();
+        mesh.geometry.dispose();
+      }
     this.chunks = [];
-    if (this.proxyGeo) for (const g of [this.proxyGeo.paint, this.proxyGeo.detail, this.proxyGeo.tail, this.proxyGeo.head]) g.dispose();
+    if (this.proxyGeo) for (const g of [this.proxyGeo.paint, this.proxyGeo.detail, this.proxyGeo.tail, this.proxyGeo.head, this.proxyGeo.indL, this.proxyGeo.indR]) g.dispose();
     this.proxyGeo = null;
     this.farGeo?.dispose();
     this.farGeo = null;

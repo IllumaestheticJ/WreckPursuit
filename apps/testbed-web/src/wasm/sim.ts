@@ -2,6 +2,7 @@
 // JSON only for rare structured data.
 import initWasm, * as wasm from "./pkg/wp_wasm.js";
 import type { PoliceStatus } from "../police";
+import type { BuildVisuals } from "../render/mod_parts";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
 /** Result of `resetInPlace`. */
@@ -123,7 +124,7 @@ export interface Scenario {
   mode: "Arcade" | "Simulation";
   duration_s: number;
   barriers?: Barrier[];
-  entities: { id: string; car: string; pos: number[]; yaw: number }[];
+  entities: { id: string; car: string; pos: number[]; yaw: number; mods?: string[] }[];
   [k: string]: unknown;
 }
 
@@ -203,6 +204,20 @@ export interface CrashTuning {
   cooldown_ticks: number;
 }
 
+/** One entry of `mod_catalog_json(car)`: `wp_economy::ModDef` plus the parts it draws. */
+export interface ModEntry {
+  id: string;
+  name: string;
+  slot: string;
+  line: string;
+  tier: number;
+  price: number;
+  requires?: string[];
+  tradeoff: string;
+  /** `[PartKind, style]` pairs (`wp_economy::visuals::mod_parts`); empty = nothing visible. */
+  parts: [string, string][];
+}
+
 /** SimEvent as decoded by events_decode (serde externally tagged). */
 export type SimEvent = Record<string, Record<string, unknown>>;
 
@@ -249,6 +264,18 @@ export const sim = {
   step: (dt: number): number => wasm.step(dt),
   setDamageMode: (mode: string): void => wasm.set_damage_mode(mode),
   carIds: (): string[] => JSON.parse(wasm.car_ids()),
+  /** Mods the car's class may fit, with the parts each draws (no session needed). */
+  modCatalog: (car: string): ModEntry[] => JSON.parse(wasm.mod_catalog_json(car)),
+  /** What a mod set looks like on a car; throws the economy's reason for an illegal set. */
+  buildVisuals: (car: string, mods: string[]): BuildVisuals => JSON.parse(wasm.build_visuals_json(car, JSON.stringify(mods))),
+  /** Parts of a live entity's installed mods (scenario `mods`); null if unavailable. */
+  entityVisuals: (entity: number): BuildVisuals | null => {
+    try {
+      return JSON.parse(wasm.entity_visuals_json(entity)) as BuildVisuals;
+    } catch {
+      return null;
+    }
+  },
   spawn: (carId: string, pos: [number, number, number], yaw: number): number =>
     wasm.spawn_vehicle(carId, new Float32Array(pos), yaw),
   setInput: (entity: number, input: DriverInput): boolean => wasm.set_input(entity, packInput(input)),
@@ -387,6 +414,8 @@ export const sim = {
   sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
   /** Body size and wheels of a car model (no vehicle needed). */
   carModelInfo: (carId: string): CarModelInfo => JSON.parse(wasm.car_model_info(carId)),
+  /** Tracking helicopters: [x, y, z, aimX, aimY, aimZ, coneHalfAngle, flags (1 visual)] each. */
+  policeHelicopters: (): Float32Array => wasm.police_helicopters(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
   mapStaticJson: (): string => wasm.map_static_json(),
@@ -499,6 +528,8 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
+  debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
 };
 
 import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";

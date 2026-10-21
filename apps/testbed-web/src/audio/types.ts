@@ -30,6 +30,8 @@ export interface VoiceParams {
   freq_hz: number;
   load: number;
   phase: number;
+  /** Cue-specific blend 0..1 (tire squeal: 0 = cornering slide, 1 = braking lock-up); absent = 0. */
+  timbre?: number;
   lowpass_hz: number;
   doppler: number;
   pos: [number, number, number];

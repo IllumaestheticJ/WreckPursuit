@@ -52,6 +52,8 @@ export interface ModDef {
   modes?: DamageMode[];
   effects: ModEffect[];
   tradeoff: string;
+  /** Visible parts beyond the effects (`wp_economy::visuals::VisualPart`). */
+  visuals?: { part: string; style: string }[];
 }
 
 /** Every mod, by id. */

@@ -27,6 +27,7 @@
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
+//! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -42,6 +43,7 @@ pub mod drift_lab;
 pub mod garage;
 pub mod lod;
 pub mod map;
+pub mod mod_visuals;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -821,6 +823,17 @@ pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
     get(|s| map::map_dynamic_for(s, EntityId(player)))
 }
 
+/// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
+/// cone_half_angle_rad, flags]` (1 = has visual). For the spotlight; the airframe itself comes
+/// through `police_draw()` (flag 1).
+#[wasm_bindgen]
+pub fn police_helicopters() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let world = s.sim().world();
+        police::helicopters(s.sim().police(), &|p, z| world.map().ground_height(p, z))
+    })
+}
+
 /// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
 /// `Captured`, `CapturedTotalLoss`, `TotalLoss`), bounty payout, fines, bail, impound decision
 /// and fee, G's repair quote, cash before and after, and this settlement's ledger lines.
@@ -969,6 +982,20 @@ pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
             .police_mut()
             .set_heat(EntityId(entity), heat);
         Ok(())
+    })
+}
+
+/// Debug / e2e: put a police helicopter on `entity` now, `offset_m` from it at altitude
+/// (`PoliceSystem::debug_launch_helicopter`). Returns the unit id, or an error unless the racer
+/// is pursued. Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_launch_helicopter(entity: u32, offset_m: f32) -> Result<u32, JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .police_mut()
+            .debug_launch_helicopter(EntityId(entity), offset_m)
+            .map(|u| u.0)
+            .ok_or_else(|| "racer is not pursued".to_string())
     })
 }
 

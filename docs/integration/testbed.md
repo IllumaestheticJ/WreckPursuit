@@ -16,6 +16,8 @@ Screenshots: `docs/media/` (`drive_chase.png`, `debug_layers_orbit.png`, `camera
 `replay.png`, `scenario_barrier.png`, `scenario_head_on.png`, `city_traffic.png`,
 `bench_24.png`, `native_testbed.png`). Regenerate with `SHOTS=../../docs/media npm run e2e`.
 
+- **Mod visuals:** mod shop (`ui/modShop.ts`) and parts on the car (`render/mod_parts.ts`) — see `docs/integration/mod-visuals.md`.
+
 ## How it fits together
 
 ```
@@ -952,3 +954,85 @@ the hand-over is still full instanced mesh → full VehicleView.
 Gate at 150 m (rebased on the lead's density follow-up): wasm build, tsc, `npm run e2e` all pass
 (LOD: 0 frames without a mesh, 3 swaps with 0.000 m hand-over jump, traffic appears ≥ 321 m /
 vanishes ≥ 373 m from the player; weather and race e2e also pass).
+## Photo mode (owner request, 2026-10-20 — built by D's session, for C to review)
+
+**F7**, the **📷 photo** button opens it, in a live session or during a
+replay; **F7 / Esc / Start / B** leaves. (Ported in the 2026-10-21 branch triage: F3 became the
+camera cycle and gamepad Start the pause menu, so photo mode moved to F7 and Start no longer
+enters it.) `src/photo.ts` (`PhotoMode`), wired in `main.ts`.
+
+- **Freeze:** a live session is paused (`togglePause`); a replay is held at its tick (speed 0) and
+  `,` / `.` (or the ◀ ▶ buttons) step it 4 ticks. Leaving restores exactly the previous state: a
+  game that was paused before stays paused, a playing replay resumes at its speed. While open,
+  `sim.setInput` is not called and the frame loop passes `dt = 0` to the views, debris and audio.
+- **Free camera** (Three world space, its own `PerspectiveCamera`, starts at the game camera's
+  view): WASD/arrows fly along the view, Q/E world down/up, Shift ×4, Alt ×¼, mouse drag looks,
+  wheel = field of view (10–100°), Z/X roll (±45°), **reset camera** puts it 6 m behind the
+  focused car. It is kept within 80 m of the focused car. Gamepad: left stick fly, right stick
+  look, LB/RB down/up, A save, Y hide the panel.
+- **Filters:** a post-process pass after Three's `OutputPass` (so it works on display sRGB
+  values): exposure, contrast, saturation, warmth, fade (lifted blacks), vignette, grain (fixed
+  hash, no time input, so preview = saved image) and a 2.39:1 letterbox; presets 1–7 natural /
+  noir / sepia / golden hour / cold steel / punchy / faded film. The composer renders into a
+  4× MSAA half-float target, so photos keep the antialiasing.
+- **Clean image:** the HUD is DOM (`#overlay`, hidden while open) and never reaches the canvas;
+  the debug layers lattice, stress, tire forces, suspension, slip colouring, contacts, CG/velocity
+  and intents are hidden through `layers.hide()` (new in `settings.ts`: a temporary override,
+  the saved toggles are untouched) and come back on leaving.
+- **Save / copy:** Space/Enter or **💾 save PNG** downloads `wreckpursuit-<scenario>-t<tick>.png`;
+  C or **📋 copy** writes `image/png` to the clipboard (needs https or localhost; otherwise the
+  panel says to use save). Size **screen** or **2× screen** (capped at the GPU's max texture size
+  and 8192 px).
+- **Touch:** the **hide** button hides the panel, the 📷 chip brings it back; drag looks, the
+  sliders set field of view and roll.
+- Automation: `__wp.photo` (`enter(camera)`, `exit()`, `capture(scale)` → `{ blob, width,
+  height }`, `usePreset(id)`, `resetCamera()`, `saved` / `copied` counters), `__wp.layersOn(id)`.
+
+**e2e:** `npm run e2e:photo` (`e2e/photo.mjs`, `SHOTS=dir` keeps the captured PNGs): 22 checks —
+freeze, HUD and debug layers hidden, flying the camera does not drive the car, hide/chip, noir
+is grey, golden hour changes the pixels, 2× capture doubles the size, Space download, C
+clipboard, Esc restores (and keeps a prior pause), replay held / stepped / captured / resumed,
+no page errors.
+
+**Changes outside `src/photo.ts`:** `main.ts` (construct + key/frame-loop wiring, `still`
+flag, `__wp.photo` / `__wp.layersOn`), `settings.ts` (`layers.hide`), `cameras.ts`
+(`CameraRig.suspendInput`: orbit controls and look-drag ignore the mouse while photo mode has
+it), `audio/index.ts` (J: `AudioSystem.setDucked`, fades the mix out while frozen without
+touching the M mute toggle), `hud.ts` (help line), `index.html` (button + panel styles),
+`package.json` (`e2e:photo`).
+
+**Known gaps:** no depth of field; no fly controls on touch screens without a gamepad (look,
+field of view, roll and reset camera only); the free camera can pass through buildings and
+terrain (no collision); police light bars freeze in whatever phase they were in.
+
+## Lead helper note (P9 helicopter, 2026-10-20; merged 2026-10-21 by `triage/helicopter`)
+
+- `wp_wasm::police_helicopters()` → 8 floats per tracking helicopter `[x, y, z, aimX, aimY,
+  aimZ, coneHalfAngle, flags]` (flag 1 = has visual). Airframes come from round 12's
+  `police_draw()` (flag 1); the helicopter position in both is ground + `alt_m`.
+- `scene.ts`: round 12's `updateHelicopters(policeDraw, …)` draws an airframe (fuselage, boom,
+  skids, spinning main and tail rotor, blinking beacon, the red / blue light bar flashing while
+  pursuing) instead of the scaled box; the branch's second drawing path through
+  `police_units()` was dropped. `updateHelicopterBeams` adds a night spotlight (faint additive
+  beam cone + light pool on the road) from night factor 0.35, dimmed to 45 % while the
+  helicopter has lost visual (it stays on the last known spot). The branch's real
+  `THREE.SpotLight` was dropped in the merge: a light that switches on mid-chase recompiles every
+  lit shader and every light costs every lit pixel (the `sirenLight` rule); the pool opacity went
+  0.12 → 0.18 to make up for it. One beam exists from the start (hidden, in `prewarmRoots`).
+  `scene.helicoptersShown` / `scene.spotlightsLit` for automation; `e2e/run.mjs` and
+  `e2e/helicopter.mjs` check it.
+
+## Lead helper note: headless e2e "Target crashed" (2026-10-20)
+
+`just web-e2e` died with `Target crashed` at random points (also on `main`, in the capture
+block, about one run in two). Under gdb (`--renderer-cmd-prefix`) the renderer stops with SIGTRAP,
+which is a Chromium `CHECK`, on the audio output thread in
+`blink::AudioParamHandler::ValuesForFrameRangeImpl` ← `OscillatorHandler` behind a biquad and a
+`PannerNode`, i.e. the siren oscillators' frequency automation. Cause: after a slow main-thread
+frame (SwiftShader frames can take ~1 s) `synth.ts`'s siren restarted its back-to-back
+`setValueCurveAtTime` curves at `ctx.currentTime`, a time the audio thread may already have
+rendered. A page with only the siren scheduling and random 0.2–1.4 s main-thread stalls crashes
+3 runs in 6 (60 s each); restarting the schedule `SIREN_LEAD_S` = 50 ms ahead of `currentTime`
+gives 0 in 4 (linear ramps instead of curves: 0 in 3 too). Real players with slow frames could hit
+it as well, not just CI. (Merge note: the fix is in the v1 `synth.ts` siren; the v2 `siren.ts`
+`CurvePlan` never back-dates a curve before `now` but does not keep a 50 ms lead either.)

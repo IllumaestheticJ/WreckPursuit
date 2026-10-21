@@ -57,6 +57,13 @@ pub const WANTED_ROLE_SWITCH_REFUSED: &str =
 /// Net ticks between bit-exact own-vehicle snapshots (12 → 5 Hz).
 pub const OWN_FULL_EVERY_NET_TICKS: u64 = 12;
 
+/// Most typed game events kept for a disconnected player and sent when they reconnect
+/// (oldest dropped first; matches the client's `MAX_PENDING_EVENTS`).
+pub const MAX_MISSED_EVENTS: usize = 512;
+
+/// Events per [`ServerMsg::Events`] message when the missed backlog is sent on reconnect.
+const MISSED_EVENTS_PER_MSG: usize = 64;
+
 /// Input of a disconnected player's car while it is moving: full brake.
 const HOLD_BRAKE: VehicleInput = VehicleInput {
     steer: 0.0,
@@ -337,6 +344,9 @@ struct Player {
     wanted_hold: bool,
     /// Input for the held car while disconnected (brake to a stop, then hold it there).
     hold_input: VehicleInput,
+    /// Typed game events for this player while disconnected (`(tick, event)`, oldest first,
+    /// at most [`MAX_MISSED_EVENTS`]), sent on reconnect.
+    missed_events: VecDeque<(u64, SimEvent)>,
     view: View,
     input_rate: RateWindow,
     lattice_rate: RateWindow,
@@ -808,6 +818,7 @@ impl<S: NetSim> ServerInstance<S> {
                 disconnected_at: None,
                 wanted_hold: false,
                 hold_input: HOLD_BRAKE,
+                missed_events: VecDeque::new(),
                 view: View::default(),
                 input_rate: RateWindow::default(),
                 lattice_rate: RateWindow::default(),
@@ -844,6 +855,37 @@ impl<S: NetSim> ServerInstance<S> {
                 self.send(pid, &ServerMsg::RaceUpdate(info));
             }
         }
+        self.send_missed_events(pid);
+    }
+
+    /// Send the events a player missed while disconnected (a pursuit that ended, wanted
+    /// levels, race results, their own ledger lines), in order, after the welcome.
+    fn send_missed_events(&mut self, pid: PlayerId) {
+        let missed: Vec<(u64, SimEvent)> =
+            std::mem::take(&mut self.players.get_mut(&pid).expect("player").missed_events).into();
+        for chunk in missed.chunks(MISSED_EVENTS_PER_MSG) {
+            let tick = chunk.last().map_or(0, |(t, _)| *t);
+            let events: Vec<SimEvent> = chunk.iter().map(|(_, e)| e.clone()).collect();
+            self.stats.events_sent += events.len() as u64;
+            self.send(pid, &ServerMsg::Events { tick, events });
+        }
+    }
+
+    /// This tick's typed events that `pid` should see: police radio only for police roles
+    /// (`radio` false drops it, e.g. for the missed backlog, where old chatter is noise),
+    /// economy events only for the account's owner.
+    fn events_for(&self, pid: PlayerId, radio: bool) -> Vec<(u64, SimEvent)> {
+        let role = self.roles.role(pid).unwrap_or(Role::Spectator);
+        let police_role = matches!(role, Role::PoliceChase | Role::PoliceCaptain);
+        self.pending_events
+            .iter()
+            .filter(|(_, e)| match e {
+                SimEvent::Police(PoliceEvent::Radio { .. }) => radio && police_role,
+                SimEvent::Economy(ev) => ev.account == self.economy_key(pid),
+                _ => true,
+            })
+            .cloned()
+            .collect()
     }
 
     fn welcome(&mut self, pid: PlayerId) {
@@ -1641,6 +1683,14 @@ impl<S: NetSim> ServerInstance<S> {
         for pid in ids {
             if self.players[&pid].conn.is_some() {
                 self.client_output(pid, tick, &states);
+            } else {
+                // Reconnecting: keep what they would have seen for when they are back.
+                let events = self.events_for(pid, false);
+                let missed = &mut self.players.get_mut(&pid).expect("player").missed_events;
+                missed.extend(events);
+                while missed.len() > MAX_MISSED_EVENTS {
+                    missed.pop_front();
+                }
             }
             let v = &mut self.players.get_mut(&pid).expect("player").view;
             v.bytes_window.push_back(v.bytes_this_tick);
@@ -1899,16 +1949,10 @@ impl<S: NetSim> ServerInstance<S> {
         }
 
         // 1b. Typed game events this client should see.
-        let police_role = matches!(role, Role::PoliceChase | Role::PoliceCaptain);
         let events: Vec<SimEvent> = self
-            .pending_events
-            .iter()
-            .filter(|(_, e)| match e {
-                SimEvent::Police(PoliceEvent::Radio { .. }) => police_role,
-                SimEvent::Economy(ev) => ev.account == self.economy_key(pid),
-                _ => true,
-            })
-            .map(|(_, e)| e.clone())
+            .events_for(pid, true)
+            .into_iter()
+            .map(|(_, e)| e)
             .collect();
         if !events.is_empty() {
             let newest = self.pending_events.last().map_or(tick, |(t, _)| *t);

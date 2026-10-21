@@ -68,6 +68,10 @@ export const getDeviceControls = (): Record<ControlDevice, DeviceControls> => de
  * the event, and never cleared by blocking: the test bars read these. */
 const rawHeld = new Set<string>();
 
+/** Is this key code held right now (game input not blocked)? Photo mode flies its free camera
+ * with fixed keys (WASD, Q/E, Shift/Alt) rather than the rebindable driving actions. */
+export const isHeld = (code: string): boolean => !blocked && held.has(code);
+
 /** `onKey` gets every game keydown (not repeats' edges; check `e.repeat`). */
 export function installKeyboard(onKey: (e: KeyboardEvent) => void): void {
   // First listener of all (window, capture): the raw key state for `probeInput`.

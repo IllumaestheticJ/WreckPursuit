@@ -24,6 +24,15 @@ pub const CORRIDOR_MARGIN_M: f32 = 3.0;
 /// Matches `rules.toml [common] corridor_margin_m`: gates span the corridor plus this, m.
 pub const GATE_CORRIDOR_MARGIN_M: f32 = 2.0;
 
+/// Extra half-width each gate gets past the corridor (plus its margin), m. Gates that only
+/// spanned the corridor were too easy to clip past on a corner or a wide line (owner feedback:
+/// "the race gates are too small"); a wider gate never credits a car that skipped it, since
+/// only the next gate counts and it must be crossed forwards.
+pub const GATE_SLACK_M: f32 = 5.0;
+
+/// Narrowest gate on a picker course, m (one-lane-each-way streets).
+pub const MIN_GATE_WIDTH_M: f32 = 26.0;
+
 /// Which city a race runs in (the testbed's city ids).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaceCity {
@@ -349,8 +358,9 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
     // A street race uses every lane: a checkpoint is passed anywhere inside the legal corridor
     // (half-width + the rules' 2 m margin), not only across the planned lane's carriageway.
     // Without this an AI overtaking in the outer lane of Loop 9 misses a gate and is never
-    // credited with the lap.
-    let span = 2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M);
+    // credited with the lap. Gates reach `GATE_SLACK_M` past that so a wide line still counts.
+    let span = (2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M + GATE_SLACK_M))
+        .max(MIN_GATE_WIDTH_M);
     for g in &mut course.gates {
         g.width_m = g.width_m.max(span);
     }

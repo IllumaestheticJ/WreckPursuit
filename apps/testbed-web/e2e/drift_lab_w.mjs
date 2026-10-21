@@ -2,7 +2,7 @@
 // pad with the parity car and the tune panel open; the panel changes the debug overrides; a held
 // key moves the rack at the plain rate; every parity car starts from the car selector. Then the
 // game itself: free drive, chase and races run the shipped handling (steering aids on the
-// player's car only), F7 / ?tune=1 show the hidden panel, no separate lab entry points.
+// player's car only), F10 / ?tune=1 show the hidden panel, no separate lab entry points.
 // `npm run build && node e2e/drift_lab_w.mjs` (PREVIEW=0: against `vite` dev instead of the
 // built site; SHOT=path.png saves a screenshot).
 import { spawn } from "node:child_process";
@@ -326,7 +326,7 @@ for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo"
 }
 // Unify (lead, 2026-10-21): the W handling is the game's handling. Free drive, city chase and
 // races run it with no panel and no saved overrides: shipped physics on every car, the plain
-// steering on the player's car only. The tune panel is hidden (F7 / ?tune=1).
+// steering on the player's car only. The tune panel is hidden (F10 / ?tune=1).
 const freeDrive = async (q = "") => {
   await page.goto(`http://localhost:${PORT}/${q}`);
   await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
@@ -364,10 +364,10 @@ const handling = () =>
   await page.evaluate(() => {
     if (window.__wp.menu?.isOpen) window.__wp.menu.close();
   });
-  await page.keyboard.press("F7");
-  check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "F7 shows the tune panel");
-  await page.keyboard.press("F7");
-  check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "none", "F7 hides it again");
+  await page.keyboard.press("F10");
+  check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "F10 shows the tune panel");
+  await page.keyboard.press("F10");
+  check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "none", "F10 hides it again");
 }
 await freeDrive("?tune=1");
 check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "?tune=1 shows the tune panel");
