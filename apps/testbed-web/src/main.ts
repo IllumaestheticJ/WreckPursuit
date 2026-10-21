@@ -133,6 +133,7 @@ async function main(): Promise<void> {
     void scene.setCity(cityId || null);
     if (cityId && CITY_IDS.includes(cityId)) citySel.value = cityId;
     scene.signals.setHeads(sim.signalHeads());
+    scene.markings.set(sim.roadMarkings(false), sim.roadMarkings(true));
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);

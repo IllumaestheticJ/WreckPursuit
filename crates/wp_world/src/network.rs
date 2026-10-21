@@ -18,7 +18,8 @@ use thiserror::Error;
 pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
 /// v2 (city v2): road surfaces, terrain heightfield, building base heights.
-pub const ROAD_FORMAT_VERSION: u32 = 2;
+/// v3: `RoadSurface::median_barrier` (divided highways).
+pub const ROAD_FORMAT_VERSION: u32 = 3;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -89,6 +90,9 @@ pub struct RoadSurface {
     pub highway: bool,
     /// Kerb + sidewalk on the left / right edge.
     pub sidewalk: [bool; 2],
+    /// A concrete median barrier runs along the left paved edge (one carriageway of a
+    /// divided highway carries it; [`crate::surface::median_barriers`] gives its line).
+    pub median_barrier: bool,
 }
 
 impl RoadSurface {

@@ -427,7 +427,7 @@ no contract or car-data change. Model and before/after table: README → "High-s
   now carries more speed through that window and sits at the slide threshold (0.27 → 0.60 m).
 - Goldens re-blessed in a `[bless]` commit: regression_grid_24, smoke_coupe_circle,
   smoke_subset_systems, vehicle_coupe_slalom (keyboard/gamepad-driven; their range checks pass).
-- Outside my crates: `apps/simcli/golden/*` (bless), `docs/PLAYTEST_LOG.md` row 33.
+- Outside my crates: `apps/simcli/golden/*` (bless), `docs/PLAYTEST_LOG.md` row 36.
 
 
 ## Lead feedback (round 8, 2026-10-19)
