@@ -669,3 +669,43 @@ gain plus the "rolling stones" term, and round12's grass wheelspin played the gr
 Tests: `tires` grass rolls without scrub / slides on its own loop, grass wheelspin churns softly
 (no roost), flickering slip holds one smooth scrub, edge straddling keeps one loop;
 `tests/director.rs` grass drive scrubs once without churn, grass cues are soft.
+
+## Asphalt sounds like tyre roar, not hiss (lead/round12, 2026-10-21)
+
+Measured on a scripted drive (hakone_gt on the flat `wp_vehicle` rig, `world_rec` — what the
+cars use; its rolling loops are synths, only `tire/squeal` is a recording): launch, cruise
+50 km/h, accelerate, cruise 100, ABS stop to 40, moderate and hard corners at ~57 km/h, stop.
+Director commands rendered offline in headless Chromium through the real `VoicePool` /
+`AudioMixer`. Root causes:
+- `surface/asphalt` (`world_proc` / `world_rec`): white noise through one 12 dB/oct low-pass at
+  900 Hz — a third of its energy at 0.8-3 kHz, centroid 0.69 kHz at *every* speed (the pitch
+  only changed the playback rate of white noise, i.e. nothing). Concrete the same at 1.3 kHz
+  (56 % at 0.8-3 kHz); `surface/wet_asphalt` was a 0.8-4.5 kHz hiss band, 32 % > 4 kHz and 6 dB
+  louder than dry.
+- `tires.rs`: the squeal had no attack / release, so ABS cycling around the slip peak stopped
+  and restarted the squeal recording every 50-100 ms (17 starts in one stop from 100 km/h);
+  the rolling loop restarted at a standstill as FFB rumble flickered.
+- `synth.ts` spin: the smoke hiss (2.5 kHz band) played at 30 % even for a light launch chirp.
+Changes: noise synth gets optional `lp_stages` (2 = 24 dB/oct), `peak_db`, `ripple_depth`
+(softened slab-joint pulse); asphalt = lp 750 Hz × pitch^1.25, two stages, +4 dB at 320 Hz,
+rumble 0.4; wet = lp 1.7 kHz × pitch, hp 120 Hz, two stages, gain 0.6; concrete = lp 900 Hz ×
+pitch^1.25, two stages, +3 dB at 850 Hz, joint pulse 2.6 Hz × pitch at depth 0.15 (both packs).
+Squeal level and rolling gain follow their targets with the scrub's 30 ms / 150 ms
+(`SQUEAL_FLOOR` 0.01, `ROLLING_FLOOR` 0.004); spin hiss scales with `load`. No contract change;
+audio only (no sim hash / golden affected).
+
+Rolling loop alone, in the drive (RMS dBFS / spectral centroid / % energy > 4 kHz):
+
+| | 50 km/h before | 50 after | 100 km/h before | 100 after |
+|---|---|---|---|---|
+| asphalt | −41.5 / 693 Hz / 0.2 % | −41.1 / 399 Hz / 0.0 % | −36.6 / 696 Hz / 0.2 % | −35.3 / 542 Hz / 0.0 % |
+| (asphalt 0.8-3 kHz share) | 33 % | 2 % | 34 % | 19 % |
+| wet asphalt | −34.8 / 3311 Hz / 31.5 % | −40.9 / 915 Hz / 0.0 % | −29.8 / 3359 Hz / 32.9 % | −35.1 / 1205 Hz / 0.1 % |
+| concrete | −39.9 / 982 Hz / 0.5 % | −42.0 / 538 Hz / 0.0 % | −35.0 / 993 Hz / 0.6 % | −35.4 / 732 Hz / 0.0 % |
+
+World bus, asphalt drive: `tire/squeal` starts 17 → 2 (ABS stop, hard corner), surface-loop
+starts 3 → 1; the ABS stop's 95th-percentile 10 ms level jump 8.2 → 6.0 dB. Tests:
+`tires::tests::{asphalt_cruise_rolls_without_squeal_or_spin, abs_cycling_holds_one_squeal,
+rolling_loop_fades_out_once_at_a_stop}`, `tests/director.rs`
+`asphalt_drive_rolls_quietly_and_squeals_once_under_abs`, `asphalt_cues_roar_instead_of_hissing`
+(modelled spectrum of every world pack's paved synth loops).

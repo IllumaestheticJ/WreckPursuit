@@ -40,6 +40,14 @@ pub const SCRUB_ATTACK_S: f32 = 0.03;
 pub const SCRUB_RELEASE_S: f32 = 0.15;
 /// Below this smoothed level a scrub loop is released.
 pub const SCRUB_FLOOR: f32 = 0.01;
+/// Below this smoothed level the squeal loop is released. The squeal level follows its target
+/// with the scrub attack / release: ABS cycling around the slip peak (every ~50-100 ms) used to
+/// stop and restart the squeal recording a dozen times in one stop, each restart a fresh
+/// fade-in of its bright attack (heard as hissy chirping).
+pub const SQUEAL_FLOOR: f32 = 0.01;
+/// Below this smoothed gain the rolling loop is released (smoothed the same way, so FFB
+/// rumble flickering near a standstill does not stop and restart it).
+pub const ROLLING_FLOOR: f32 = 0.004;
 
 /// One-pole follower toward `target` with separate attack / release time constants
 /// (`engine::smooth_k`, no `exp`: bit-identical on every target). `dt <= 0` jumps straight to
@@ -93,6 +101,10 @@ pub struct TireAudioState {
     spin: [f32; 2],
     /// Smoothed scrub levels: `[gravel/dirt, grass]`.
     scrub_level: [f32; 2],
+    /// Smoothed squeal level (paved surfaces).
+    squeal_level: f32,
+    /// Smoothed rolling-noise gain.
+    rolling_gain: f32,
     /// Dominant surface index last frame (tie-break toward it).
     surface: Option<usize>,
 }
@@ -209,8 +221,10 @@ pub fn update_tires(
         }
     }
     // Loudest wheel plus a share of the others: four sliding tires are louder than one.
-    let squeal = clamp01(squeal_max + 0.25 * (squeal_sum - squeal_max));
-    if squeal > 0.0 {
+    let target = clamp01(squeal_max + 0.25 * (squeal_sum - squeal_max));
+    st.squeal_level = follow(st.squeal_level, target, dt);
+    let squeal = st.squeal_level;
+    if squeal >= SQUEAL_FLOOR {
         out.squeal = Some((
             mix.squeal_gain * squeal,
             0.9 + 0.25 * squeal + 0.1 * speed_frac,
@@ -271,10 +285,14 @@ pub fn update_tires(
     }
     st.surface = best.map(|(i, _)| i);
     if let Some((idx, _)) = best {
-        let gain = mix.rumble_gain * speed_frac + mix.ffb_rumble_weight * clamp01(road_rumble);
-        if gain > 0.0 {
-            out.surface = Some((idx, gain, speed_frac));
+        let target = mix.rumble_gain * speed_frac + mix.ffb_rumble_weight * clamp01(road_rumble);
+        st.rolling_gain = follow(st.rolling_gain, target, dt);
+        if st.rolling_gain >= ROLLING_FLOOR {
+            out.surface = Some((idx, st.rolling_gain, speed_frac));
         }
+    } else {
+        // Airborne: no rolling noise; land into a fresh fade-in.
+        st.rolling_gain = 0.0;
     }
 
     // Suspension.
@@ -674,6 +692,119 @@ mod tests {
             }
         }
         assert!(off_at.is_some_and(|f| f <= 45), "{off_at:?}");
+    }
+
+    /// Straight asphalt cruise at 50 and 100 km/h with the tiny slip a rolling tire really has
+    /// (κ ≈ 0.002 driving, α ≈ 0.003 rad): the rolling loop alone, louder at 100; no squeal,
+    /// no spin.
+    #[test]
+    fn asphalt_cruise_rolls_without_squeal_or_spin() {
+        let m = mix();
+        let mut gains = Vec::new();
+        for kmh in [50.0f32, 100.0] {
+            let v = kmh / 3.6;
+            let w = WheelState {
+                omega: v * 1.002 / 0.33,
+                slip_ratio: 0.002,
+                slip_angle: 0.003,
+                fz_n: 3500.0,
+                surface: SurfaceType::Asphalt,
+                contact: true,
+                ..Default::default()
+            };
+            let s = VehicleState {
+                lin_vel: [0.0, v, 0.0],
+                wheel_states: [w; 4],
+                ..Default::default()
+            };
+            let mut st = TireAudioState::default();
+            for k in 0..120u64 {
+                let o = update_tires(&mut st, &m, &s, 3500.0, R, 0.02, k * 4, 1.0 / 60.0);
+                assert!(
+                    o.squeal.is_none() && o.spin.is_none() && o.scrub.is_none(),
+                    "{kmh} km/h frame {k}: {o:?}"
+                );
+                let (idx, g, _) = o.surface.expect("rolling loop");
+                assert_eq!(idx, surface_index(SurfaceType::Asphalt));
+                if k == 119 {
+                    gains.push(g);
+                }
+            }
+        }
+        assert!(gains[1] > 1.5 * gains[0], "louder with speed: {gains:?}");
+    }
+
+    /// ABS braking: the slip ratio cycles around the peak every few frames. The squeal starts
+    /// once and holds (no stop/restart of the loop), then is released once after the stop.
+    #[test]
+    fn abs_cycling_holds_one_squeal() {
+        let m = mix();
+        let mut st = TireAudioState::default();
+        let dt = 1.0 / 60.0;
+        let braking = |slip_ratio| {
+            let w = WheelState {
+                omega: 40.0,
+                slip_ratio,
+                fz_n: 4500.0,
+                surface: SurfaceType::Asphalt,
+                contact: true,
+                ..Default::default()
+            };
+            VehicleState {
+                lin_vel: [0.0, 15.0, 0.0],
+                wheel_states: [w; 4],
+                ..Default::default()
+            }
+        };
+        let mut on = None;
+        for k in 0..120u64 {
+            // ABS: 3 frames past the peak, 3 frames released.
+            let sr = if k % 6 < 3 { -0.2 } else { -0.03 };
+            let o = update_tires(&mut st, &m, &braking(sr), 3500.0, R, 0.0, k * 4, dt);
+            match (on, o.squeal) {
+                (None, Some(_)) => on = Some(k),
+                (Some(_), None) => panic!("squeal dropped out at frame {k}"),
+                _ => {}
+            }
+        }
+        assert!(on.is_some_and(|k| k <= 2), "squeal starts at once: {on:?}");
+        let mut off = 0;
+        let mut prev = true;
+        for k in 120..180u64 {
+            let o = update_tires(&mut st, &m, &braking(-0.01), 3500.0, R, 0.0, k * 4, dt);
+            let now = o.squeal.is_some();
+            if prev && !now {
+                off += 1;
+            }
+            assert!(!now || prev, "squeal restarted at {k}");
+            prev = now;
+        }
+        assert_eq!(off, 1, "released once");
+    }
+
+    /// Creeping to a stop with the FFB rumble flickering: the rolling loop fades out once
+    /// instead of stopping and restarting.
+    #[test]
+    fn rolling_loop_fades_out_once_at_a_stop() {
+        let m = mix();
+        let mut st = TireAudioState::default();
+        let mut s = state(0.0, 3500.0, SurfaceType::Asphalt);
+        let mut transitions = 0;
+        let mut prev = None;
+        for k in 0..180u64 {
+            let v = (8.0 - k as f32 * 0.1).max(0.0);
+            s.lin_vel = [0.0, v, 0.0];
+            // Suspension chatter while creeping, none once stopped.
+            let rumble = if k % 4 == 0 && v > 0.0 { 0.03 } else { 0.0 };
+            let o = update_tires(&mut st, &m, &s, 3500.0, R, rumble, k * 4, 1.0 / 60.0);
+            let now = o.surface.is_some();
+            if prev.is_some_and(|p| p != now) {
+                transitions += 1;
+            }
+            prev = Some(now);
+        }
+        assert_eq!(prev, Some(false), "silent at rest");
+        assert_eq!(transitions, 1, "one fade-out, no churn");
     }
 
     #[test]
