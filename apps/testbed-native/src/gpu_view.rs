@@ -19,7 +19,7 @@ use wp_render::gpu::{wgpu, Offscreen, Renderer};
 use wp_render::{CarMeshLibrary, ChaseCamera, CityMesh, Scene, StaticBox};
 use wp_wasm::session::Session;
 
-use crate::{new_session, session_in_city, PLAYER};
+use crate::PLAYER;
 
 /// Colour of scenario barriers (linear RGB).
 const BARRIER_COLOR: [f32; 3] = [0.55, 0.52, 0.45];
@@ -56,8 +56,8 @@ pub struct ShotArgs {
     pub out: PathBuf,
     /// simcli scenario (`.ron`); free drive when absent.
     pub scenario: Option<PathBuf>,
-    /// City of the free drive (`--city`), when there is no scenario.
-    pub city: Option<String>,
+    /// Free drive settings, when there is no scenario.
+    pub drive: FreeDrive,
     /// Simulated time before the picture, s.
     pub seconds: f32,
     /// Image size.
@@ -71,7 +71,7 @@ pub struct ShotArgs {
 }
 
 impl ShotArgs {
-    /// Parse `--shot OUT [--scenario PATH | --city ID] [--seconds S] [--size WxH] [--orbit DEG]
+    /// Parse `--shot OUT [--scenario PATH | --city ID --hour H] [--seconds S] [--size WxH] [--orbit DEG]
     /// [--height M] [--distance M]`.
     pub fn parse(args: &[String]) -> Option<Result<Self, String>> {
         let at = args.iter().position(|a| a == "--shot")?;
@@ -95,7 +95,7 @@ impl ShotArgs {
             Ok(ShotArgs {
                 out: out.into(),
                 scenario: value("--scenario").map(PathBuf::from),
-                city: city_arg(args),
+                drive: FreeDrive::parse(args)?,
                 seconds: match value("--seconds") {
                     Some(s) => s.parse().map_err(|_| "--seconds")?,
                     None => 2.0,
@@ -124,10 +124,7 @@ pub fn shot(args: &ShotArgs) -> Result<(), String> {
                 std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
             Session::new(wp_wasm::scenario::from_ron(&text)?, true)?
         }
-        None => match &args.city {
-            Some(id) => session_in_city(id),
-            None => new_session(),
-        },
+        None => args.drive.session(),
     };
     let mut scene = scene_for(&session);
     let mut camera = ChaseCamera::default();
@@ -199,18 +196,48 @@ struct App {
     wheel: Option<crate::ffb::Wheel>,
 }
 
-/// Value of `--city ID` (`vesper_v2`, `procedural_12x12`), if given.
-pub fn city_arg(args: &[String]) -> Option<String> {
-    let i = args.iter().position(|a| a == "--city")?;
-    args.get(i + 1).cloned()
+/// A free drive: one `debug_sedan` (Arcade) in a city or on the flat world, at a time of day.
+#[derive(Debug, Clone, Default)]
+pub struct FreeDrive {
+    /// `--city ID`: `vesper_v2` or `procedural_12x12` (anything else is the flat world),
+    /// starting on its first race grid. Same sessions as the browser's city picker.
+    pub city: Option<String>,
+    /// `--hour H`: starting time of day, 0..24 (the clock then runs at 10× as usual).
+    pub hour: Option<f32>,
 }
 
-/// Open the 3D window (free drive, in `city` when given) and run until closed.
-pub fn run_window(city: Option<&str>) {
-    let session = match city {
-        Some(id) => session_in_city(id),
-        None => new_session(),
-    };
+impl FreeDrive {
+    /// Parse `--city ID` and `--hour H`.
+    pub fn parse(args: &[String]) -> Result<Self, String> {
+        let value = |flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+        };
+        Ok(Self {
+            city: value("--city").cloned(),
+            hour: value("--hour")
+                .map(|s| s.parse::<f32>().map_err(|_| "--hour takes 0..24"))
+                .transpose()?
+                .map(|h| h.rem_euclid(24.0)),
+        })
+    }
+
+    /// Start the session.
+    pub fn session(&self) -> Session {
+        let city = wp_wasm::scenario::city_spec(self.city.as_deref().unwrap_or("flat"));
+        let mut sc =
+            wp_wasm::scenario::free_drive_in("debug_sedan", wp_contracts::DamageMode::Arcade, city);
+        if let Some(h) = self.hour {
+            sc.time_of_day_h = h;
+        }
+        Session::new(sc, false).expect("embedded data is valid")
+    }
+}
+
+/// Open the 3D window on a free drive and run until closed.
+pub fn run_window(drive: &FreeDrive) {
+    let session = drive.session();
     let scene = scene_for(&session);
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App {

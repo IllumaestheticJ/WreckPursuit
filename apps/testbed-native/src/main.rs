@@ -6,8 +6,8 @@
 //! - default build: headless smoke run (drives a scripted lap, prints FFB samples). CI builds
 //!   only this.
 //! - `--features window`: winit + softbuffer window, top-down car box, keyboard driving.
-//! - `--features gpu`: `--gpu [--city ID]` opens a 3D window drawn by our own renderer
-//!   (`wp_render`); `--shot out.png [--scenario x.ron | --city ID] [--seconds S] [--size WxH]
+//! - `--features gpu`: `--gpu [--city ID] [--hour H]` opens a 3D window drawn by our own
+//!   renderer (`wp_render`); `--shot out.png [--scenario x.ron | --city ID --hour H] [--seconds S] [--size WxH]
 //!   [--orbit DEG] [--height M] [--distance M]` renders one frame headlessly (any Vulkan/Metal/DX12 adapter, software ones
 //!   included). `ID` is `vesper_v2` or `procedural_12x12`.
 //! - `--features ffb`: sends `FfbOutput::rack_torque_nm` as a constant force to the first SDL2
@@ -39,22 +39,7 @@ pub fn new_session() -> Session {
     .expect("embedded data is valid")
 }
 
-/// Free drive in a city (`vesper_v2`, `procedural_12x12`; anything else is the flat world),
-/// starting on its first race grid when it has one. Same session as the browser's city picker.
-#[cfg_attr(not(feature = "gpu"), allow(dead_code))]
-pub fn session_in_city(city_id: &str) -> Session {
-    Session::new(
-        wp_wasm::scenario::free_drive_in(
-            "debug_sedan",
-            DamageMode::Arcade,
-            wp_wasm::scenario::city_spec(city_id),
-        ),
-        false,
-    )
-    .expect("embedded data is valid")
-}
-
-/// The player entity of [`new_session`] and [`session_in_city`].
+/// The player entity of [`new_session`] (and of the gpu view's free drives).
 pub const PLAYER: EntityId = EntityId(1);
 
 fn headless() {
@@ -101,7 +86,13 @@ fn main() {
             return;
         }
         if args.iter().any(|a| a == "--gpu") {
-            gpu_view::run_window(gpu_view::city_arg(&args).as_deref());
+            match gpu_view::FreeDrive::parse(&args) {
+                Ok(drive) => gpu_view::run_window(&drive),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
             return;
         }
     }
