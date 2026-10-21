@@ -235,18 +235,26 @@ function engine(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
 /** Filtered noise loop: rolling surfaces, scrub, scrapes. `track` > 0 makes the low-pass
  * follow the voice pitch (speed / root for rolling surfaces): `lowpass_hz × pitch^track`, so a
  * surface darkens as the car slows instead of only getting quieter. (Playback rate alone does
- * nothing audible to white noise.) */
+ * nothing audible to white noise.)
+ *
+ * Optional shaping (absent = the original single 12 dB/oct low-pass, +9 dB peak, square AM):
+ * - `lp_stages` 2: a second low-pass in series (24 dB/oct). White noise through one 12 dB/oct
+ *   pole keeps a third of its energy above the cut-off, which is what made asphalt hiss.
+ * - `peak_db`: gain of the `bandpass_hz` peak (default 9 dB).
+ * - `ripple_depth` 0..1: AM depth of `ripple_hz` (default 0.5, square); when set, the square
+ *   is softened by a 30 Hz low-pass so slab joints pulse instead of clicking. */
 function noiseLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   const out = gain(ctx, 1);
   const src = noise(ctx);
   const hp = filter(ctx, "highpass", s.highpass_hz ?? 60);
   const lpBase = s.lowpass_hz ?? 2000;
-  const lp = filter(ctx, "lowpass", lpBase);
-  src.connect(hp).connect(lp);
-  let tail: AudioNode = lp;
+  const lps = [filter(ctx, "lowpass", lpBase)];
+  if ((s.lp_stages ?? 1) >= 2) lps.push(filter(ctx, "lowpass", lpBase));
+  let tail: AudioNode = src.connect(hp);
+  for (const f of lps) tail = tail.connect(f);
   if (s.bandpass_hz) {
     const bp = filter(ctx, "peaking", s.bandpass_hz, 2);
-    bp.gain.value = 9;
+    bp.gain.value = s.peak_db ?? 9;
     tail.connect(bp);
     tail = bp;
   }
@@ -255,9 +263,12 @@ function noiseLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice
   const sources: AudioScheduledSourceNode[] = [src];
   let ripple: OscillatorNode | null = null;
   if (s.ripple_hz) {
-    am.gain.value = 0.5;
+    const depth = Math.min(1, Math.max(0, s.ripple_depth ?? 0.5));
+    am.gain.value = 1 - depth;
     ripple = osc(ctx, "square", s.ripple_hz);
-    ripple.connect(gain(ctx, 0.5)).connect(am.gain);
+    let mod: AudioNode = ripple;
+    if (s.ripple_depth !== undefined) mod = mod.connect(filter(ctx, "lowpass", 30));
+    mod.connect(gain(ctx, depth)).connect(am.gain);
     sources.push(ripple);
   }
   if (s.rumble) {
@@ -276,7 +287,7 @@ function noiseLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice
     update(p2, t) {
       const rate = Math.min(3, Math.max(0.3, p2.pitch));
       smooth(src.playbackRate, rate, t);
-      if (s.track) smooth(lp.frequency, clampF(lpBase * Math.pow(rate, s.track)), t, 0.05);
+      if (s.track) for (const f of lps) smooth(f.frequency, clampF(lpBase * Math.pow(rate, s.track)), t, 0.05);
       if (ripple && s.ripple_hz) smooth(ripple.frequency, s.ripple_hz * rate, t);
     },
     stop: (t) => stopAll(sources, t),
@@ -367,7 +378,8 @@ function spin(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
       smooth(bp.frequency, clampF(base * 1.3 * pitch), t);
       smooth(chirp.frequency, chirpHz * pitch, t);
       smooth(og.gain, 0.25 + 0.5 * p2.load, t);
-      smooth(ng.gain, (s.hiss ?? 0.7) * (0.3 + 0.7 * p2.load), t);
+      // Smoke hiss only with real spin: a light chirp at launch (low load) is the howl alone.
+      smooth(ng.gain, (s.hiss ?? 0.7) * p2.load, t);
     },
     stop: (t) => stopAll([o, chirp, nz], t),
   };

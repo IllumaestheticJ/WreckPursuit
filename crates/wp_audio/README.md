@@ -127,6 +127,19 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   `surface/grass` is a low rustle/rumble (lp 650 Hz, hp 45 Hz, rumble 1.5) whose low-pass
   tracks speed (`track`). Grass used to share the gravel scrub (crackle, 0.4-3 kHz) at full
   gain whenever a tire slid, ~9 dB over the rolling loop.
+  **Paved rolling loops are tyre roar, not hiss**: `surface/asphalt` is white noise through a
+  two-stage (24 dB/oct, `lp_stages: 2`) low-pass at 750 Hz × pitch^1.25 with a +4 dB body at
+  320 Hz and a little sub rumble, so it rises in level *and* brightness with speed (rendered:
+  centroid ~0.40 kHz at 50 km/h, ~0.54 kHz at 100, < 0.1 % of the energy above 4 kHz). The old
+  single 12 dB/oct pole at 900 Hz kept a third of the energy at 0.8-3 kHz at every speed
+  (centroid ~0.69 kHz regardless of speed: heard as hiss). `surface/wet_asphalt` adds spray
+  brightness (lp 1.7 kHz, hp 120 Hz, two stages, gain 0.6) instead of the old 0.8-4.5 kHz hiss
+  band (32 % > 4 kHz, 6 dB louder than dry); `surface/concrete` is a little brighter than
+  asphalt (lp 900 Hz, +3 dB at 850 Hz) with a soft slab-joint pulse (`ripple_depth` 0.15).
+  The **squeal** level and the **rolling gain** follow their targets with the same 30 ms / 150 ms
+  attack / release as the scrub (released below `SQUEAL_FLOOR` / `ROLLING_FLOOR`): ABS cycling
+  around the slip peak used to stop and restart the squeal recording every 50-100 ms (17 starts
+  in one stop from 100 km/h), and FFB rumble flicker restarted the rolling loop at a standstill.
   Suspension thump on compression rate > `thump_rate_mps`; landing after `land_airtime_s`.
   **Wheelspin** (playtest #27) is its own loop, `tire/spin` (paved) / `tire/spin_loose`
   (gravel / dirt roost; spin on grass plays the soft `tire/scrub_grass` instead): per wheel the driving slip ratio above `spin_ratio_onset` times the slip speed
@@ -278,8 +291,11 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 `root_rpm`; the backend plays all `engine`-synth layers and the limiter of one car as **one**
 instrument — gain `sqrt(Σ gain²)`, timbre blended by energy — because separate synths at the
 same firing frequency interfere; sample layers stay separate voices), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
-`ripple_hz`, `track`: low-pass follows `lowpass_hz × pitch^track`), `spin` (`freq_hz`, `chirp_hz`, `hiss`; `pitch` = slip speed, `load` =
-intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
+`ripple_hz`, `track`: low-pass follows `lowpass_hz × pitch^track`; optional `lp_stages` 2 = a
+second low-pass in series, 24 dB/oct; `peak_db` = gain of the `bandpass_hz` peak, default 9;
+`ripple_depth` = AM depth, default 0.5 square, when set softened by a 30 Hz low-pass), `spin`
+(`freq_hz`, `chirp_hz`, `hiss` — the smoke hiss scales with `load`, so a light chirp is the
+howl alone; `pitch` = slip speed, `load` = intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director; `driver: 1` = the siren
 v2 horn-speaker synth in `siren.ts`, `kind` 0 loop / 1 whoop / 2 air horn, `bright`), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
@@ -327,7 +343,14 @@ respects limits** (40 screaming cars + crash events: global and per-bus limits h
 frame, the stream is well-formed — no double plays, no set/stop of unknown voices — and the
 focused engine is never culled); **engine layer selection monotone in rpm** for every car
 (band position and dominant layer never go down, weights energy-preserving); reset on time
-going backwards; the crate passes `lint-determinism`.
+going backwards; the crate passes `lint-determinism`; **asphalt**: a director drive cruising at
+50 / 100 km/h plays only `surface/asphalt` (once, louder and higher-pitched at 100, no squeal /
+spin) and ABS braking plays the squeal once with no stop; every world pack's paved synth loops
+pass a modelled-spectrum check (`asphalt_cues_roar_instead_of_hissing`: asphalt < 10 % of its
+power above 1 kHz at 50 km/h, < 0.5 % above 4 kHz at 140 km/h, brighter with speed; concrete a
+little brighter; wet distinct but < 2 % above 4 kHz and no louder than dry). `tires` unit tests:
+asphalt cruise rolls without squeal or spin, ABS cycling holds one squeal, the rolling loop
+fades out once at a stop.
 
 `tests/engine_shift.rs` (owner playtest #19, "2nd gear onwards doesn't sound right") drives five
 cars — I4 sedan, V8 muscle car, turbo clutch car, turbo DCT, converter automatic — on the flat
