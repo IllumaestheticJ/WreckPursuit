@@ -151,8 +151,21 @@ Status 2026-10-20: **`world_rec` shipped** (the network now reaches kenney.nl an
   highest-revving four). V8 recordings top out at ≈ 3350 rpm, so V8s near the limiter play the
   top layer pitched up to 1.6× — the main candidate for a better source.
 
-Still procedural: turbo whistle, blow-off, supercharger whine, radio, surfaces, suspension,
-plastic scrape, body rattle.
+### Recorded forced induction (2026-10-20, follow-up 2)
+- In all three engine packs: `turbo/whistle` (2 loops), `supercharger/whine` (2 loops),
+  `turbo/blowoff` (5 one-shots). The engine and siren packs no longer contain any synth cue.
+- Whistle: the turbo dyno pull has a continuous tone gliding 5.1 → 10.5 kHz and holding 10.5 kHz
+  at full boost; its ratio to the firing frequency drifts 21× → 28×, so it is the compressor, not
+  an engine harmonic. Tracked, flattened to 7 kHz (the director plays pitch 0.6–1.5 with boost,
+  so full boost = the recorded 10.5 kHz) and band-isolated (engine below 1 kHz −145 dB).
+- Supercharger: centrifugal-supercharger whine bursts (partials 1.7–2.3 kHz), band-isolated and
+  shifted ×0.65 so pitch 1 sits near the synth's 1400 Hz. No shipped car has a supercharger.
+- Blow-off: no CC0 blow-off-valve recording exists (the one "spool and blow-off" file is too
+  weak); five pneumatic valve releases low-passed at 5 kHz stand in.
+- New `build.py` options: `track_hz`/`flatten_hz`, `resample`, `band_hz`/`air`, `lowpass_hz`.
+- 6 new sources, CC0 pages checked. e2e: 132 files decode, 0 fallbacks after loading.
+
+Still procedural: radio, surfaces, suspension, plastic scrape, body rattle.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -172,8 +185,9 @@ plastic scrape, body rattle.
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
-- Engines, sirens, collisions, glass, debris, scrapes, squeal and horns are recorded; radio,
-  surfaces and forced-induction sounds are procedural placeholders. V8s above ≈ 3350 rpm are
+- Engines (incl. turbo/supercharger/blow-off), sirens, collisions, glass, debris, scrapes, squeal
+  and horns are recorded; radio and surfaces are procedural placeholders. Blow-off is an air-valve
+  stand-in. V8s above ≈ 3350 rpm are
   pitch-stretched recordings.
 - Recorded cut points and gains come from onset/decay/pitch analysis, not listening; tune by ear in
   `tools/audio-packs/<pack>.json`.

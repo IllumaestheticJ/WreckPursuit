@@ -108,17 +108,20 @@ Shipped recorded packs (all CC0, built reproducibly by `tools/audio-packs/build.
 | Pack | Used by | What is recorded (falls back to) |
 |---|---|---|
 | `world_rec` | every car | impacts (thud, plastic, panel dent, structural crunch, glass, cast clank), debris, tire bursts, engine failure, metal scrape / tire squeal / steam / horn loops (`world_proc`) |
-| `engine_rec_i4` | inline fours | idle, 4 on-load + 2 overrun layers, limiter, exhaust pops (`engine_proc_i4`) |
-| `engine_rec_v8` | V8s | idle, 4 on + 2 off layers (top layer ≈ 3350 rpm), limiter, pops (`engine_proc_v8`) |
-| `engine_rec_i6` | inline sixes and V6s | turbo six dyno pull: idle, 5 on + 2 off layers, limiter, pops (`engine_proc_i6`) |
+| `engine_rec_i4` | inline fours | idle, 4 on-load + 2 overrun layers, limiter, exhaust pops, turbo whistle, blow-off, supercharger whine (`engine_proc_i4`) |
+| `engine_rec_v8` | V8s | idle, 4 on + 2 off layers (top layer ≈ 3350 rpm), limiter, pops, forced-induction cues (`engine_proc_v8`) |
+| `engine_rec_i6` | inline sixes and V6s | turbo six dyno pull: idle, 5 on + 2 off layers, limiter, pops, forced-induction cues (`engine_proc_i6`) |
 | `siren_rec` | police | wail / yelp / phaser / hi-lo, whole cadence cycles from phase 0 (`siren_proc`) |
 
 Engine layers are cut where the recording passes the layer's rpm and resampled to a constant
 rpm (firing frequency tracked by `tools/audio-packs/pitch.py`), looped over whole engine
 cycles. The siren cadences in `audio_config.json` are measured from the `siren_rec` files and
 the backend starts a recorded siren loop at `phase × cycle_s`, so recording, director phase and
-fallback synth agree. Still procedural: turbo whistle, blow-off, supercharger whine, radio,
-surfaces, suspension, plastic scrape, body rattle.
+fallback synth agree. Turbo whistle = the dyno car's compressor tone (tracked, flattened to
+7 kHz at pitch 1 so full boost plays the recorded 10.5 kHz, band-isolated from the engine);
+supercharger whine = a centrifugal supercharger's 1.7–2.3 kHz partials, band-isolated; blow-off
+= pneumatic valve releases low-passed at 5 kHz (no CC0 blow-off-valve recording exists). Still
+procedural: radio, surfaces, suspension, plastic scrape, body rattle.
 
 ```jsonc
 {
@@ -203,7 +206,8 @@ nodes) for material lookup.
 
 - Recorded cuts were picked from pitch/onset analysis, not by ear (see
   `tools/audio-packs/README.md`). V8 recordings top out near 3350 rpm, so V8s near the limiter
-  play the top layer pitched up to ~1.6×. Turbo/blow-off/supercharger, radio and surfaces are
+  play the top layer pitched up to ~1.6×. Blow-off is a stand-in (air valve releases); no shipped
+  car has a supercharger yet, so the whine is only exercised by its loader. Radio and surfaces are
   still procedural.
 
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
