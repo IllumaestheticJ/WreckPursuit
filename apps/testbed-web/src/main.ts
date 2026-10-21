@@ -1248,7 +1248,8 @@ async function main(): Promise<void> {
     layout.update();
   };
   /** Something else owns the screen or the Esc key right now. */
-  const canOpenMenu = () => !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !runEnd.open && !raceView.cards && !isReplay();
+  // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
+  const canOpenMenu = () => !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !runEnd.open && !raceView.cards && !isReplay();
   let menuPausedBefore = false;
   let menuShown = false;
   menu = mountGameMenu(overlay, {

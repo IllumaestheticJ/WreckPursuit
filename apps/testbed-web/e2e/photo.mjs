@@ -160,13 +160,14 @@ check(!d.active && !d.paused && d.overlay === "" && !d.panel && d.tick > c.tick,
 const restored = await page.evaluate(() => ["tireForces", "cgVelocity", "contacts"].map((id) => window.__wp.layersOn(id)));
 check(restored.every(Boolean), "debug layers restored on leaving");
 
-// A paused game stays paused after photo mode.
-await page.keyboard.press("KeyP");
+// A paused game stays paused after photo mode. (P opens the pause menu since round 12, so the
+// session is paused directly here.)
+await page.evaluate(() => (window.__wp.app.paused = true));
 await page.keyboard.press("F7");
 await page.keyboard.press("Escape");
 const e = await snap();
 check(e.paused && !e.active, "a game paused before photo mode is still paused after it");
-await page.keyboard.press("KeyP");
+await page.evaluate(() => (window.__wp.app.paused = false));
 
 // ----- replay -------------------------------------------------------------------------------
 await page.evaluate(() => window.__wp.startFreeDrive("lindwurm_4t", "Arcade", false, 18));
