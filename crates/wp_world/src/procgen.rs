@@ -4,20 +4,70 @@
 //!
 //! Layout (12×12, 110 m spacing): grid streets centred on the origin; rows/columns 2 and 9
 //! are 2+2 arterials, the two central rows/columns are collectors, the rest are local streets
-//! with kerbside parking. The highway runs between the two central columns and only crosses
-//! arterial/collector rows (signalised); other rows end at it. Diagonals (square grids only)
-//! run corner to corner through grid nodes with a kerbside bus lane. The ring road joins every
-//! street end; its junctions with local streets are priority-controlled.
+//! with kerbside parking. The highway runs between the two central columns: a divided viaduct
+//! (two one-way 3-lane carriageways, shoulders and a median barrier) that rises from the ring
+//! road at each end and bridges the arterial/collector rows; other rows end at the columns
+//! beside it. Ramps reach the first and last crossing rows: half diamonds facing the ring on
+//! every grid, full diamonds where the next block in is long enough too (the 12×12 city). Diagonals (square grids only) run corner
+//! to corner through grid nodes with a kerbside bus lane. The ring road joins every street
+//! end; its junctions with local streets are priority-controlled. The ground is a flat
+//! heightfield just under the streets, so the viaduct is a real bridge in physics too.
 
 use std::collections::BTreeMap;
 
 use wp_math::Rng;
 
-use crate::builder::{self, mph, BuildOptions, NodeSpec, RoadClass, RoadSpec};
+use crate::builder::{self, mph, BuildOptions, ControlHint, NodeSpec, RoadClass, RoadSpec};
 use crate::density::default_density_base;
-use crate::geom::{self, V2};
+use crate::geom::{self, V2, V3};
 use crate::network::*;
 use crate::signals;
+use crate::terrain::{smoothstep, Heightfield};
+use crate::vesper::{CARVE_BELOW_M, CROSSING_CLEARANCE_M};
+
+/// Highway lane width, m (`BuildOptions::highway_lane_width_m`).
+const HW_LANE_M: f32 = 3.7;
+/// Paved median shoulder between a carriageway's left lane and the barrier, m.
+const MEDIAN_SHOULDER_M: f32 = 1.5;
+/// Paved outer shoulder, m.
+const OUTER_SHOULDER_M: f32 = 2.5;
+/// Carriageway centreline offset from the highway centreline (the barrier), m.
+const CARRIAGEWAY_OFFSET_M: f32 = MEDIAN_SHOULDER_M + 1.5 * HW_LANE_M;
+/// Viaduct surface height over the streets it bridges, m.
+const VIADUCT_Z: f32 = CROSSING_CLEARANCE_M + 0.4;
+/// Flat run at each end of the highway from the ring junction, m: the end ramps' gores and
+/// tapers stay at grade, the climb starts beyond them.
+const END_FLAT_M: f32 = 115.0;
+/// Climb from the ring to viaduct height (smoothstep; ≤ 6 % grade), m.
+const CLIMB_M: f32 = 200.0;
+/// Carriageways fan out from the shared ring node to their offset within this distance (inside
+/// the junction setback), m.
+const FAN_M: f32 = 8.0;
+/// Gore (diverge / merge node) distance from the crossing row a ramp serves, m.
+const RAMP_SPAN_M: f32 = 280.0;
+/// Ramp length from its gore beside the carriageway (taper + parallel lane), m.
+const RAMP_PARALLEL_M: f32 = 90.0;
+/// Ramp lane centre beside a carriageway (from the carriageway centreline), m.
+const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
+/// Ramp terminal junctions on a crossing row, from the highway centreline, m.
+const TERMINAL_X_M: f32 = 22.0;
+/// Flat run of a ramp into its terminal junction, m.
+const TERMINAL_FLAT_M: f32 = 15.0;
+/// Ramp speed limit, m/s.
+const RAMP_SPEED: f32 = 20.1168; // 45 mph
+
+/// One highway ramp in the grid city.
+#[derive(Debug, Clone, Copy)]
+struct GridRamp {
+    /// +1 northbound carriageway (east of the centreline), -1 southbound (west).
+    side: f32,
+    /// Leaves the carriageway (off-ramp) rather than joins it.
+    off: bool,
+    /// Crossing row it serves, y.
+    row_y: f32,
+    /// Gore y on the carriageway.
+    gore_y: f32,
+}
 
 /// Procedural city parameters.
 #[derive(Debug, Clone, PartialEq)]
@@ -196,6 +246,69 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
     let col_class: Vec<RoadClass> = (0..nx).map(|i| class_of(i, nx)).collect();
     let crossing_row = |j: usize| row_class[j] != RoadClass::Local;
 
+    // Highway plan: ends on the ring road, viaduct height profile and ramps.
+    let rr = xs[nx - 1].max(ys[ny - 1]) + cfg.ring_margin_m;
+    let (y_s, y_n) = (-rr, rr);
+    let hw_z = |y: f32| {
+        let d = (y - y_s).min(y_n - y);
+        VIADUCT_Z * smoothstep(END_FLAT_M, END_FLAT_M + CLIMB_M, d)
+    };
+    let hw_x = |y: f32, side: f32| {
+        let d = (y - y_s).min(y_n - y);
+        hx + side * CARRIAGEWAY_OFFSET_M * smoothstep(0.0, FAN_M, d)
+    };
+    let mut cross_ys: Vec<f32> = (0..ny)
+        .filter(|j| crossing_row(*j))
+        .map(|j| ys[j])
+        .collect();
+    cross_ys.sort_by(f32::total_cmp);
+    let mut ramps: Vec<GridRamp> = Vec::new();
+    // Ramps at the first and last crossing rows: the outer half of each diamond (towards the
+    // ring) whenever that block is long enough, the inner half too where the next block in is
+    // (the 12×12 city: full diamonds).
+    if let (Some(&y1), Some(&yk)) = (cross_ys.first(), cross_ys.last()) {
+        let outer = RAMP_SPAN_M + 70.0;
+        let inner = RAMP_SPAN_M + 40.0;
+        let full = cross_ys.len() >= 2
+            && cross_ys[1] - y1 >= inner
+            && yk - cross_ys[cross_ys.len() - 2] >= inner;
+        let mut plan: Vec<(f32, bool, f32, f32)> = Vec::new();
+        if y1 - y_s >= outer && y_n - yk >= outer {
+            // Southern row: northbound exit / southbound entry towards the ring, then (full
+            // diamond) southbound exit / northbound entry from the next block north; the
+            // northern row mirrored.
+            plan.extend([
+                (1.0, true, y1, y1 - RAMP_SPAN_M),
+                (-1.0, false, y1, y1 - RAMP_SPAN_M),
+            ]);
+            if full {
+                plan.extend([
+                    (-1.0, true, y1, y1 + RAMP_SPAN_M),
+                    (1.0, false, y1, y1 + RAMP_SPAN_M),
+                ]);
+            }
+            plan.extend([
+                (-1.0, true, yk, yk + RAMP_SPAN_M),
+                (1.0, false, yk, yk + RAMP_SPAN_M),
+            ]);
+            if full {
+                plan.extend([
+                    (1.0, true, yk, yk - RAMP_SPAN_M),
+                    (-1.0, false, yk, yk - RAMP_SPAN_M),
+                ]);
+            }
+        }
+        for (side, off, row_y, gore_y) in plan {
+            ramps.push(GridRamp {
+                side,
+                off,
+                row_y,
+                gore_y,
+            });
+        }
+    }
+    let terminal_x = |side: f32| hx + side * TERMINAL_X_M;
+
     let mut reg = Reg::default();
     let mut roads: Vec<RoadSpec> = Vec::new();
     // Ring connection requests: (from node, direction, style).
@@ -219,8 +332,11 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
     for (j, &y) in ys.iter().enumerate() {
         let st = style_for(row_class[j]);
         let mut pts: Vec<V2> = xs.iter().map(|&x| [x, y]).collect();
-        if crossing_row(j) {
-            pts.push([hx, y]);
+        // Crossing rows pass under the viaduct; ramp terminals split them beside it.
+        for side in [-1.0f32, 1.0] {
+            if ramps.iter().any(|r| r.row_y == y && r.side == side) {
+                pts.push([terminal_x(side), y]);
+            }
         }
         pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
         for w in pts.windows(2) {
@@ -256,21 +372,143 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         let (na, nb) = (reg.node([xs[a.0], a.2]), reg.node([xs[a.1], a.2]));
         roads.push(road(na, nb, style_for(RoadClass::Alley)));
     }
-    // Highway spine.
+    // Highway: two one-way carriageways from the ring node at each end, split at the gores.
     let hw_st = style_for(RoadClass::Highway);
-    let mut hw_pts: Vec<V2> = (0..ny)
-        .filter(|j| crossing_row(*j))
-        .map(|j| [hx, ys[j]])
-        .collect();
-    hw_pts.sort_by(|a, b| a[1].total_cmp(&b[1]));
-    hw_pts.dedup_by(|a, b| (a[1] - b[1]).abs() < 0.05);
-    let hw_first_road = roads.len();
-    for w in hw_pts.windows(2) {
-        let (a, b) = (reg.node(w[0]), reg.node(w[1]));
-        roads.push(road(a, b, hw_st));
+    let ring_s = reg.node([hx, y_s]);
+    let ring_n = reg.node([hx, y_n]);
+    let mut gore_node: Vec<usize> = Vec::with_capacity(ramps.len());
+    for r in &ramps {
+        let n = reg.node([hw_x(r.gore_y, r.side), r.gore_y]);
+        reg.nodes[n].z = hw_z(r.gore_y);
+        reg.nodes[n].control = Some(ControlHint::Freeway);
+        gore_node.push(n);
     }
-    ring_links.push((reg.node(hw_pts[0]), [0.0, -1.0], hw_st));
-    ring_links.push((reg.node(hw_pts[hw_pts.len() - 1]), [0.0, 1.0], hw_st));
+    let hw_first_road = roads.len();
+    for side in [1.0f32, -1.0] {
+        // Cuts in travel order (northbound south → north).
+        let mut cuts: Vec<(f32, usize)> = vec![(y_s, ring_s), (y_n, ring_n)];
+        for (r, n) in ramps.iter().zip(&gore_node) {
+            if r.side == side {
+                cuts.push((r.gore_y, *n));
+            }
+        }
+        cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if side < 0.0 {
+            cuts.reverse();
+        }
+        for w in cuts.windows(2) {
+            let ((ya, a), (yb, b)) = (w[0], w[1]);
+            let n = ((yb - ya).abs() / 10.0).ceil().max(1.0) as usize;
+            let mut ys_s: Vec<f32> = (0..=n)
+                .map(|k| ya + (yb - ya) * k as f32 / n as f32)
+                .collect();
+            // Fine samples through the fan-out at the ring.
+            for end in [y_s, y_n] {
+                for k in 1..8 {
+                    let y = end + (if end < 0.0 { 1.0 } else { -1.0 }) * k as f32;
+                    if (y - ya) * (y - yb) < 0.0 {
+                        ys_s.push(y);
+                    }
+                }
+            }
+            ys_s.sort_by(|p, q| {
+                if side > 0.0 {
+                    p.total_cmp(q)
+                } else {
+                    q.total_cmp(p)
+                }
+            });
+            ys_s.dedup_by(|p, q| (*p - *q).abs() < 0.5);
+            let pts: Vec<V3> = ys_s
+                .iter()
+                .map(|y| [hw_x(*y, side), *y, hw_z(*y)])
+                .collect();
+            let mut r = road(a, b, hw_st);
+            r.lanes_bwd = 0;
+            r.via = pts[1..pts.len() - 1].iter().map(|p| [p[0], p[1]]).collect();
+            r.via_z = pts[1..pts.len() - 1].iter().map(|p| p[2]).collect();
+            r.shoulder_left_m = MEDIAN_SHOULDER_M;
+            r.shoulder_right_m = OUTER_SHOULDER_M;
+            r.median_barrier = side > 0.0;
+            roads.push(r);
+        }
+    }
+    // Ramps: beside the carriageway on its plane for the first 90 m, then an S-curve to the
+    // terminal on the crossing row, arriving (or leaving) along the highway.
+    for (r, &g) in ramps.iter().zip(&gore_node) {
+        let term = reg.node([terminal_x(r.side), r.row_y]);
+        reg.nodes[term].control = Some(ControlHint::RampTerminal);
+        let away = if r.off { r.side } else { -r.side };
+        let mut path: Vec<V3> = Vec::new();
+        let mut u = 0.0;
+        while u <= RAMP_PARALLEL_M + 1e-3 {
+            let y = r.gore_y + away * u;
+            let x = hw_x(y, r.side)
+                + r.side * RAMP_LANE_OFFSET_M * smoothstep(0.0, builder::FREEWAY_SETBACK_M, u);
+            path.push([x, y, hw_z(y)]);
+            u += 6.0;
+        }
+        let p0 = path[path.len() - 1];
+        let slope0 = (p0[2] - path[path.len() - 2][2]) / 6.0;
+        let t_end = [terminal_x(r.side), r.row_y];
+        let chord = geom::dist([p0[0], p0[1]], t_end);
+        let k = 0.4 * chord;
+        let (c0, c3) = ([p0[0], p0[1]], t_end);
+        let c1 = [c0[0], c0[1] + away * k];
+        let c2 = [c3[0], c3[1] - away * k];
+        let n = ((chord / 3.0).ceil() as usize).max(8);
+        let bez: Vec<V2> = (1..=n)
+            .map(|i| {
+                let t = i as f32 / n as f32;
+                let w = 1.0 - t;
+                let f = |a: f32, b: f32, c: f32, d: f32| {
+                    w * w * w * a + 3.0 * w * w * t * b + 3.0 * w * t * t * c + t * t * t * d
+                };
+                [f(c0[0], c1[0], c2[0], c3[0]), f(c0[1], c1[1], c2[1], c3[1])]
+            })
+            .collect();
+        // Heights: cubic Hermite from the carriageway's height and grade to the flat terminal.
+        let mut cum = vec![0.0f32];
+        let mut prev = c0;
+        for q in &bez {
+            cum.push(cum[cum.len() - 1] + geom::dist(prev, *q));
+            prev = *q;
+        }
+        let len = (cum[cum.len() - 1] - TERMINAL_FLAT_M).max(1.0);
+        for (q, c) in bez.iter().zip(&cum[1..]) {
+            let t = (c / len).min(1.0);
+            let (t2, t3) = (t * t, t * t * t);
+            let z = (2.0 * t3 - 3.0 * t2 + 1.0) * p0[2] + (t3 - 2.0 * t2 + t) * len * slope0;
+            path.push([q[0], q[1], z]);
+        }
+        // Thin to about 6 m spacing (keep both ends).
+        let mut thin: Vec<V3> = vec![path[0]];
+        let mut acc = 0.0;
+        for w in path.windows(2) {
+            acc += geom::dist([w[0][0], w[0][1]], [w[1][0], w[1][1]]);
+            if acc >= 5.9 {
+                thin.push(w[1]);
+                acc = 0.0;
+            }
+        }
+        if thin.len() > 1
+            && geom::dist([thin[thin.len() - 1][0], thin[thin.len() - 1][1]], t_end) < 2.0
+        {
+            thin.pop();
+        }
+        let (a, b) = if r.off { (g, term) } else { (term, g) };
+        if !r.off {
+            thin.reverse();
+        }
+        let interior = &thin[1..];
+        let mut rs = RoadSpec::new(a, b, RoadClass::Highway, 1, 0);
+        rs.speed_mps = RAMP_SPEED;
+        rs.via = interior.iter().map(|p| [p[0], p[1]]).collect();
+        rs.via_z = interior.iter().map(|p| p[2]).collect();
+        rs.shoulder_left_m = 0.6;
+        rs.shoulder_right_m = 1.5;
+        roads.push(rs);
+    }
     // Diagonals.
     let mut diag_st = style_for(RoadClass::Arterial);
     diag_st.lanes = 3;
@@ -299,7 +537,6 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         }
     }
     // Ring road.
-    let rr = xs[nx - 1].max(ys[ny - 1]) + cfg.ring_margin_m;
     let c = cfg.ring_chamfer_m;
     let octagon: Vec<V2> = vec![
         [rr, -rr + c],
@@ -311,8 +548,8 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         [-rr + c, -rr],
         [rr - c, -rr],
     ];
-    let mut ring_nodes: Vec<usize> = Vec::new();
-    let mut hits: Vec<V2> = Vec::new();
+    let mut ring_nodes: Vec<usize> = vec![ring_s, ring_n];
+    let mut hits: Vec<V2> = vec![[hx, y_s], [hx, y_n]];
     for (from, d, st) in &ring_links {
         let p = reg.nodes[*from].pos;
         if let Some(hit) = ray_polygon(p, *d, &octagon) {
@@ -418,7 +655,7 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
             let mx = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             mn < w && mx > -w
         };
-        if band(&|p| p[0] - hx, 15.0) {
+        if band(&|p| p[0] - hx, TERMINAL_X_M + 8.0) {
             return true;
         }
         if diagonals
@@ -649,6 +886,14 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         buildings,
     );
     apply_green_waves(&mut net, &xs, &ys, &row_class, &col_class, diagonals);
+    // Flat ground just under the streets: the viaduct is a bridge, the rest is at grade.
+    let (lo, hi) = (net.bounds_min, net.bounds_max);
+    net.terrain = Some(Heightfield::flat(
+        [lo[0] - 50.0, lo[1] - 50.0],
+        [hi[0] + 50.0, hi[1] + 50.0],
+        10.0,
+        -CARVE_BELOW_M,
+    ));
     net
 }
 
@@ -780,6 +1025,108 @@ mod tests {
         }
         assert!(!net.signals.is_empty());
         assert!(net.lanes.len() < 800, "{}", net.lanes.len());
+    }
+
+    #[test]
+    fn highway_is_a_divided_viaduct_with_ramps() {
+        use crate::map::{CityMap, SegKind};
+        for (n, ramps_expected) in [(12usize, 8usize), (7, 4), (6, 4)] {
+            let net = generate(&ProcGenConfig {
+                nx: n,
+                ny: n,
+                ..Default::default()
+            });
+            let map = CityMap::new(net.clone());
+            assert!(net.terrain.is_some());
+            let hw: Vec<&Lane> = net
+                .lanes
+                .iter()
+                .filter(|l| l.kind == LaneKind::Highway)
+                .collect();
+            // Ramps are the one-lane highway roads.
+            let mut ramp_roads: Vec<u32> = hw
+                .iter()
+                .filter(|l| l.speed_limit_mps < mph(50.0))
+                .map(|l| l.road)
+                .collect();
+            ramp_roads.sort_unstable();
+            ramp_roads.dedup();
+            assert_eq!(ramp_roads.len(), ramps_expected, "{n}x{n}");
+            // One way, three lanes per carriageway; no signal or stop on the main line.
+            for (i, l) in net.lanes.iter().enumerate() {
+                if l.kind != LaneKind::Highway || ramp_roads.contains(&l.road) {
+                    continue;
+                }
+                assert!(l.index_from_left < 3);
+                match map.lane_control(i as LaneId) {
+                    None => {}
+                    Some((IntersectionControl::Priority, ap, _)) => assert!(ap.major),
+                    // The ring road junction at each end.
+                    Some((IntersectionControl::Signal { .. }, _, _)) => {
+                        let end = l.polyline[l.polyline.len() - 1];
+                        assert!(end[2].abs() < 0.05, "signal on the viaduct at {end:?}");
+                    }
+                    Some(c) => panic!("highway lane {i} ends at {:?}", c.0),
+                }
+            }
+            // The viaduct bridges every street it crosses with full clearance.
+            let mut over = 0;
+            for l in &net.lanes {
+                if l.kind == LaneKind::Highway || l.kind == LaneKind::Parking {
+                    continue;
+                }
+                let cum = geom::cumulative(&l.polyline);
+                let len = cum[cum.len() - 1];
+                for k in 0..=(len / 2.0) as usize {
+                    let (p, _) = geom::point_at(&l.polyline, &cum, k as f32 * 2.0);
+                    let high = map.ground_height(geom::xy(p), Some(100.0));
+                    if high - p[2] > 1.0 {
+                        assert!(high - p[2] > 7.0, "clearance {} at {p:?}", high - p[2]);
+                        over += 1;
+                    }
+                }
+            }
+            assert!(over > 0, "{n}x{n}: nothing under the viaduct");
+            // Grades and the median barrier.
+            for l in &hw {
+                for w in l.polyline.windows(2) {
+                    let d = geom::dist(geom::xy(w[0]), geom::xy(w[1])).max(0.5);
+                    assert!(
+                        ((w[1][2] - w[0][2]) / d).abs() < 0.085,
+                        "grade at {:?}",
+                        w[0]
+                    );
+                }
+            }
+            let barrier: f32 = crate::surface::median_barriers(&net)
+                .iter()
+                .map(|l| *geom::cumulative(l).last().unwrap())
+                .sum();
+            assert!(barrier > 600.0, "{n}x{n}: barrier {barrier} m");
+            // Taper connectors lie on the paving.
+            for s in &map.segs {
+                let SegKind::Connector { node, .. } = s.kind else {
+                    continue;
+                };
+                let Some(ix) = net.nodes[node as usize].intersection else {
+                    continue;
+                };
+                if net.intersections[ix as usize].radius_m > 0.0 {
+                    continue;
+                }
+                for p in &s.pts {
+                    let z = net
+                        .surfaces
+                        .iter()
+                        .map(|sf| crate::surface::height_under(sf, geom::xy(*p)))
+                        .filter(|(d, z)| *d < 8.0 && (z - p[2]).abs() < 3.0)
+                        .min_by(|a, b| a.0.total_cmp(&b.0))
+                        .map(|x| x.1)
+                        .unwrap();
+                    assert!((z - p[2]).abs() < 0.05, "taper {} m off the road", z - p[2]);
+                }
+            }
+        }
     }
 
     #[test]

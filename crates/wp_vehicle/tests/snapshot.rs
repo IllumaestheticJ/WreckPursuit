@@ -115,5 +115,9 @@ fn set_state_is_a_close_approximation() {
         .map(|i| (s.pos[i] - truth.pos[i]).powi(2))
         .sum::<f32>()
         .sqrt();
-    assert!(d < 0.5, "set_state drift after 1 s: {d} m");
+    // 0.75 m: with the grip-limited keyboard lock (playtest "snap oversteer at speed") the
+    // coupe carries ~14 m/s instead of ~11.5 m/s through this window and sits at the slide
+    // assists' threshold, where the state `set_state` cannot carry (wheel spin, tire lag)
+    // matters more (0.27 → 0.60 m).
+    assert!(d < 0.75, "set_state drift after 1 s: {d} m");
 }

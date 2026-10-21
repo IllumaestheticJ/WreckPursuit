@@ -9,7 +9,7 @@ UI is done the moment the sim exposes the data:
 |---|---|
 | Race | **HUD** (speed / rpm / gear, damage silhouette by `BodyRegion`, component list, heat & wanted meter, minimap, scanner alerts, race position / checkpoints / gaps, assist badges) · **Replay controls** |
 | Menus | Main menu · Pause · **Settings** (full input remapping with keyboard / gamepad / wheel binding flow, assist matrix, damage mode, accessibility: colour-blind palettes, UI scale, reduce motion; rumble / FFB / audio) |
-| Garage | **Garage** (car list, condition, repair / choose items / drive damaged / scrap with an itemised bill, insurance) · **Mod tree** (slots, lines, tiers, requirements, performance-vs-durability before/after, class index) · Market (buy / sell) |
+| Garage | **Garage** (car list, condition, physics-measured stat bars, repair / choose items / drive damaged / scrap with an itemised bill, insurance) · **Mod tree** (slots, lines, tiers, requirements, performance-vs-durability before/after, class index) · Market (buy / sell, accel / top speed / cornering bars per listing) |
 | Street | Race lobby / meet (asymmetric roles) · Results + payout breakdown · Impound · Crews & territory map |
 | Police | Police career (rank, unlocks, orders feed) · **Captain map** (2D canvas: roads, units, incidents, heat map, command radial, drag-to-assign) · Scanner feed |
 
@@ -27,7 +27,9 @@ npm run typecheck
 npm run e2e         # builds, serves, visits every screen in headless Chromium, screenshots → e2e/out/
 ```
 
-Demo URL parameters: `?screen=garage&run=golden_tbone&t=5&palette=deuteranopia&scale=1.25&paused=1&chrome=0`.
+Demo URL parameters: `?screen=garage&run=golden_tbone&t=5&palette=deuteranopia&scale=1.25&paused=1&chrome=0`
+(`&measure=0` keeps estimated stat bars for modded cars instead of measuring them in the wasm worker;
+measuring needs `npm run wasm` in `apps/testbed-web` first).
 Press <kbd>`</kbd> to hide/show the demo sidebar. `window.wpModel` is the live mock model.
 
 ## Why Preact

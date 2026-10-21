@@ -35,6 +35,8 @@ pub struct CityColliders {
     pub buildings: usize,
     /// Guard-rail boxes along bridge decks.
     pub rails: usize,
+    /// Median barrier boxes between divided-highway carriageways.
+    pub barriers: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -90,9 +92,10 @@ impl PhysicsWorld {
     }
 
     /// Replace the flat ground slab by the city's own ground (cities with terrain, e.g.
-    /// Port Vesper v2): a terrain heightfield ([`wp_world::surface::collision_terrain`]), one triangle mesh of every paved surface
-    /// (banked ribbons, junction discs, bend connectors), a static collider per building and
-    /// guard rails along bridge decks. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
+    /// Port Vesper v2): a terrain heightfield ([`wp_world::surface::collision_terrain`]), one
+    /// triangle mesh of every paved surface (banked ribbons, junction discs, bend connectors),
+    /// a static collider per building (not on flat ground: the grid city), guard rails along
+    /// bridge decks and median barriers. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
     /// inserted in a fixed order and registered with the broad phase immediately, so ground
     /// probes see them on the next tick without a physics step. Call once, before the first
     /// tick (scenario setup).
@@ -186,8 +189,11 @@ impl PhysicsWorld {
             }
         }
 
-        // Buildings: extruded footprints as convex hulls (footprints are convex lots).
-        for b in &net.buildings {
+        // Buildings: extruded footprints as convex hulls (footprints are convex lots). A city
+        // on flat ground (the procedural grid, whose terrain only exists so its highway
+        // viaduct is a real bridge) keeps its old behaviour: buildings do not block cars.
+        let flat_ground = t.z.iter().all(|z| *z == t.z[0]);
+        for b in net.buildings.iter().filter(|_| !flat_ground) {
             let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2);
             for q in &b.footprint {
                 pts.push(Vector::new(q[0], q[1], b.base_z_m));
@@ -199,8 +205,21 @@ impl PhysicsWorld {
             }
         }
 
-        // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge.
-        for (a, b) in wp_world::surface::deck_rails(net) {
+        // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge. Median
+        // barriers: 0.5 m wide, 0.81 m tall concrete boxes on the barrier line.
+        // (from, to, half width, half height, median barrier)
+        type Rail = ([f32; 3], [f32; 3], f32, f32, bool);
+        let rails: Vec<Rail> = wp_world::surface::deck_rails(net)
+            .into_iter()
+            .map(|(a, b)| (a, b, 0.15, 0.45, false))
+            .chain(
+                wp_world::surface::median_barriers(net)
+                    .iter()
+                    .flat_map(|l| l.windows(2).map(|w| (w[0], w[1], 0.25, 0.405, true)))
+                    .collect::<Vec<_>>(),
+            )
+            .collect();
+        for (a, b, half_w, half_h, barrier) in rails {
             let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
             let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
             if len < 0.05 {
@@ -211,9 +230,9 @@ impl PhysicsWorld {
             let mid = Vector::new(
                 (a[0] + b[0]) * 0.5,
                 (a[1] + b[1]) * 0.5,
-                (a[2] + b[2]) * 0.5 + 0.45,
+                (a[2] + b[2]) * 0.5 + half_h,
             );
-            let col = ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
+            let col = ColliderBuilder::cuboid(half_w, len * 0.5 + 0.05, half_h + d[2].abs() * 0.5)
                 .position(Pose::from_parts(
                     mid,
                     rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
@@ -221,7 +240,11 @@ impl PhysicsWorld {
                 .friction(0.4)
                 .build();
             added.push(self.colliders.insert(col));
-            out.rails += 1;
+            if barrier {
+                out.barriers += 1;
+            } else {
+                out.rails += 1;
+            }
         }
 
         for h in added {

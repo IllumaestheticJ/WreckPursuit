@@ -6,7 +6,9 @@
 //! throttle still down. It never countersteers by itself.
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::metrics::{high_speed_catch, power_oversteer_exit, DriverStyle, SlideExit};
+use wp_vehicle::metrics::{
+    catch_snap_back, high_speed_catch, power_oversteer_exit, DriverStyle, SlideExit,
+};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -120,6 +122,42 @@ fn keyboard_catches_a_slide_above_100_kmh() {
                     a.tcs
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn keyboard_catch_at_speed_does_not_snap_back() {
+    // Owner playtest 2026-10-20: "way too tail happy at speed and incredibly hard to catch a
+    // slide without snap oversteering". Yaw kick at 110 / 150 km/h, countersteer key held
+    // until nearly straight. Before the fix every case snapped back further than the slide it
+    // caught (150 km/h, prompt release: lindwurm 10° → 14°, sedan 12° → 18°); now the swing
+    // back is well under the slide, and even a key held 0.25 s too long no longer overshoots.
+    // Driver: full key / full stick (see `metrics::catch_snap_back`).
+    for id in ["lindwurm_4t", "rampart_50", "debug_sedan"] {
+        for kmh in [110.0, 150.0] {
+            let c = car(id);
+            let prompt = catch_snap_back(&c, &keyboard_no_tcs(), kmh / 3.6, 1.4, 0.0);
+            assert!(
+                prompt.snap_deg < 0.7 * prompt.first_deg && prompt.final_deg.abs() < 2.0,
+                "{id} {kmh} km/h, prompt release: {prompt:?}"
+            );
+            let late = catch_snap_back(&c, &keyboard_no_tcs(), kmh / 3.6, 1.4, 0.25);
+            assert!(
+                late.snap_deg <= late.first_deg + 0.5 && late.final_deg.abs() < 2.0,
+                "{id} {kmh} km/h, late release: {late:?}"
+            );
+            // Gamepad, full stick (the help is weaker, so this snapped back hardest: 15° → 22°
+            // on the lindwurm at 150 km/h).
+            let gamepad = AssistProfile {
+                tcs: false,
+                ..AssistProfile::gamepad_default()
+            };
+            let stick = catch_snap_back(&c, &gamepad, kmh / 3.6, 1.4, 0.0);
+            assert!(
+                stick.snap_deg < 0.7 * stick.first_deg && stick.final_deg.abs() < 2.0,
+                "{id} {kmh} km/h, gamepad: {stick:?}"
+            );
         }
     }
 }

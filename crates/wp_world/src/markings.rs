@@ -16,10 +16,15 @@
 //! Alleys and parking strips carry no markings; highways get centre, lane and edge lines.
 //! A line straddling two lanes is split between them (each lane owns its half), so the
 //! answer does not depend on which lane a query hits first.
+//!
+//! [`marking_mesh`] turns the same rules into a render mesh (white and yellow paint) lying on
+//! the banked road surface, so what is drawn is exactly what [`marking_at`] reports. Centre
+//! lines and the left edge line of a one-way highway (the median side) are yellow.
 
-use crate::geom::{self, V3};
+use crate::geom::{self, V2, V3};
 use crate::map::{CityMap, SegKind};
-use crate::network::{IntersectionControl, Lane, LaneId, LaneKind};
+use crate::network::{IntersectionControl, Lane, LaneId, LaneKind, RoadSurface};
+use crate::surface::TriMesh;
 
 /// Width of each of the two centre lines, m.
 pub const CENTRE_LINE_W: f32 = 0.12;
@@ -43,6 +48,9 @@ pub const CROSSWALK_FROM_M: f32 = 0.2;
 pub const CROSSWALK_TO_M: f32 = 1.8;
 /// Zebra bar width (and gap) across the lane, m.
 pub const ZEBRA_BAR_M: f32 = 0.5;
+
+/// Height of the render mesh's paint above the road surface, m.
+pub const MESH_LIFT_M: f32 = 0.02;
 
 /// Wheels further than this above or below a lane are on another level (grade separation).
 const LEVEL_TOL_M: f32 = 3.0;
@@ -196,6 +204,199 @@ fn lane_marking(
     None
 }
 
+/// Render mesh of every painted marking, split by paint colour.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MarkingMesh {
+    /// Lane, edge, separator and stop lines and crosswalks.
+    pub white: TriMesh,
+    /// Centre lines and the median-side edge line of one-way highways.
+    pub yellow: TriMesh,
+}
+
+/// Height of `s`'s banked surface under `q` (nearest centreline point).
+fn surface_z(s: &RoadSurface, cum: &[f32], q: V2) -> f32 {
+    let pr = geom::project(&s.centre, cum, q);
+    let n = s.centre.len();
+    let t = pr.s.clamp(0.0, cum[n - 1]);
+    let (c, _) = geom::point_at(&s.centre, cum, t);
+    let i = cum.partition_point(|x| *x <= t).clamp(1, n - 1);
+    let span = (cum[i] - cum[i - 1]).max(1e-6);
+    let f = ((t - cum[i - 1]) / span).clamp(0.0, 1.0);
+    let bank = s.bank[i - 1] + (s.bank[i] - s.bank[i - 1]) * f;
+    c[2] + bank * pr.lateral
+}
+
+/// Paints bands along one lane: arc range × lateral range (m right of the lane centre).
+struct LanePainter<'a> {
+    pts: &'a [V3],
+    cum: &'a [f32],
+    surface: Option<(&'a RoadSurface, Vec<f32>)>,
+}
+
+impl LanePainter<'_> {
+    fn z(&self, q: V2, fallback: f32) -> f32 {
+        let z = match &self.surface {
+            Some((s, cum)) => surface_z(s, cum, q),
+            None => fallback,
+        };
+        z + MESH_LIFT_M
+    }
+
+    /// Point `d` m right of the lane at arc length `s`; beyond either end the end tangent
+    /// is extended.
+    fn at(&self, s: f32, d: f32) -> V3 {
+        let len = self.cum[self.cum.len() - 1];
+        let (c, t) = geom::point_at(self.pts, self.cum, s.clamp(0.0, len));
+        let extra = if s > len {
+            s - len
+        } else if s < 0.0 {
+            s
+        } else {
+            0.0
+        };
+        let r = geom::right_of(t);
+        let q = [
+            c[0] + t[0] * extra + r[0] * d,
+            c[1] + t[1] * extra + r[1] * d,
+        ];
+        [q[0], q[1], self.z(q, c[2])]
+    }
+
+    fn band(&self, m: &mut TriMesh, s0: f32, s1: f32, d0: f32, d1: f32) {
+        if s1 - s0 < 0.01 {
+            return;
+        }
+        let mut ss = vec![s0];
+        ss.extend(
+            self.cum
+                .iter()
+                .copied()
+                .filter(|c| *c > s0 + 0.05 && *c < s1 - 0.05),
+        );
+        ss.push(s1);
+        // Long straight runs still follow the surface's grade and bank.
+        let mut fine = vec![ss[0]];
+        for w in ss.windows(2) {
+            let n = ((w[1] - w[0]) / 8.0).ceil().max(1.0) as usize;
+            for k in 1..=n {
+                fine.push(w[0] + (w[1] - w[0]) * k as f32 / n as f32);
+            }
+        }
+        let left: Vec<V3> = fine.iter().map(|s| self.at(*s, d0)).collect();
+        let right: Vec<V3> = fine.iter().map(|s| self.at(*s, d1)).collect();
+        m.strip(&left, &right);
+    }
+
+    fn dashed(&self, m: &mut TriMesh, len: f32, d0: f32, d1: f32) {
+        let period = DASH_M + DASH_GAP_M;
+        let mut s = 0.0;
+        while s < len {
+            self.band(m, s, (s + DASH_M).min(len), d0, d1);
+            s += period;
+        }
+    }
+
+    /// Zebra bars across the lane between arc lengths `s0 < s1` (outside the lane's ends).
+    fn zebra(&self, m: &mut TriMesh, s0: f32, s1: f32, half: f32) {
+        let mut x = 0.0;
+        while x < 2.0 * half - 1e-3 {
+            if zebra(x + 1e-3) {
+                let d0 = x - half;
+                let d1 = (x + ZEBRA_BAR_M).min(2.0 * half) - half;
+                let left = [self.at(s0, d0), self.at(s1, d0)];
+                let right = [self.at(s0, d1), self.at(s1, d1)];
+                m.strip(&left, &right);
+            }
+            x += ZEBRA_BAR_M;
+        }
+    }
+}
+
+/// Render mesh of the city's painted markings, following the rules in the module table.
+pub fn marking_mesh(map: &CityMap) -> MarkingMesh {
+    let mut out = MarkingMesh::default();
+    for i in 0..map.net.lanes.len() {
+        paint_lane(map, i, &mut out);
+    }
+    out
+}
+
+/// Add lane `i`'s markings to `out`.
+fn paint_lane(map: &CityMap, i: usize, out: &mut MarkingMesh) {
+    let net = &map.net;
+    let l = &net.lanes[i];
+    {
+        if matches!(l.kind, LaneKind::Parking | LaneKind::Alley) || l.polyline.len() < 2 {
+            return;
+        }
+        let id = i as LaneId;
+        let seg = &map.segs[i];
+        let len = seg.length;
+        let half = seg.width * 0.5;
+        let surface = net
+            .surfaces
+            .get(l.road as usize)
+            .filter(|s| s.road == l.road && s.centre.len() >= 2)
+            .map(|s| (s, geom::cumulative(&s.centre)));
+        let p = LanePainter {
+            pts: &seg.pts,
+            cum: &seg.cum,
+            surface,
+        };
+        let w = &mut out.white;
+        if must_stop(map, id) {
+            p.band(w, len - STOP_LINE_W, len, -half, half);
+        }
+        if end_has_crosswalk(map, id) {
+            p.zebra(w, len + CROSSWALK_FROM_M, len + CROSSWALK_TO_M, half);
+        }
+        if start_has_crosswalk(map, l) {
+            p.zebra(w, -CROSSWALK_TO_M, -CROSSWALK_FROM_M, half);
+        }
+        let solid_to = if must_stop(map, id) {
+            len - STOP_LINE_W
+        } else {
+            len
+        };
+        // Right boundary: shared lines are drawn whole by the lane on their left.
+        if l.edge_right {
+            p.band(w, 0.0, solid_to, half - EDGE_LINE_W, half);
+        } else {
+            match l.right {
+                Some(r)
+                    if net.lanes[r as usize].kind == LaneKind::Bus || l.kind == LaneKind::Bus =>
+                {
+                    let h = SEPARATOR_W * 0.5;
+                    p.band(w, 0.0, solid_to, half - h, half + h);
+                }
+                Some(_) => {
+                    let h = LANE_LINE_W * 0.5;
+                    p.dashed(w, solid_to, half - h, half + h);
+                }
+                None => p.band(w, 0.0, solid_to, half - SEPARATOR_W * 0.5, half),
+            }
+        }
+        // Left boundary.
+        if l.edge_left {
+            let m = if l.kind == LaneKind::Highway {
+                &mut out.yellow
+            } else {
+                &mut out.white
+            };
+            p.band(m, 0.0, solid_to, -half, -half + EDGE_LINE_W);
+        } else if l.left.is_none() {
+            let g = CENTRE_GAP_W * 0.5;
+            p.band(
+                &mut out.yellow,
+                0.0,
+                solid_to,
+                -half + g,
+                -half + g + CENTRE_LINE_W,
+            );
+        }
+    }
+}
+
 /// Dash pattern from the lane start.
 fn dash(s: f32) -> bool {
     let period = DASH_M + DASH_GAP_M;
@@ -207,12 +408,15 @@ fn zebra(x: f32) -> bool {
     ((x / ZEBRA_BAR_M).floor() as i32).rem_euclid(2) == 0
 }
 
-/// Lane `id` must stop at its end (signal, all-way stop, minor approach at a priority junction).
-fn must_stop(map: &CityMap, id: LaneId) -> bool {
+/// Lane `id` must stop at its end (signal, all-way stop, minor approach at a priority
+/// junction other than a freeway on-ramp, which merges).
+pub fn must_stop(map: &CityMap, id: LaneId) -> bool {
     match map.lane_control(id) {
         Some((IntersectionControl::Signal { .. }, _, _))
         | Some((IntersectionControl::AllWayStop, _, _)) => true,
-        Some((IntersectionControl::Priority, ap, _)) => !ap.major,
+        Some((IntersectionControl::Priority, ap, _)) => {
+            !ap.major && map.net.intersections[ap.intersection as usize].radius_m > 0.0
+        }
         _ => false,
     }
 }
@@ -539,6 +743,41 @@ mod tests {
             all * 1e6,
             paint * 1e6
         );
+    }
+
+    #[test]
+    fn mesh_paints_what_marking_at_reports() {
+        let map = small_map();
+        let mesh = marking_mesh(&map);
+        assert!(mesh.white.indices.len() > 1000 && mesh.yellow.indices.len() > 100);
+        for (m, yellow) in [(&mesh.white, false), (&mesh.yellow, true)] {
+            let mut hit = 0;
+            let mut n = 0;
+            for t in &m.indices {
+                let p: Vec<V3> = t.iter().map(|i| m.positions[*i as usize]).collect();
+                let c = [
+                    (p[0][0] + p[1][0] + p[2][0]) / 3.0,
+                    (p[0][1] + p[1][1] + p[2][1]) / 3.0,
+                    (p[0][2] + p[1][2] + p[2][2]) / 3.0 - MESH_LIFT_M,
+                ];
+                n += 1;
+                match marking_at(&map, c) {
+                    Some(MarkingKind::CentreLine | MarkingKind::EdgeLine) if yellow => hit += 1,
+                    Some(MarkingKind::CentreLine) => {}
+                    Some(_) if !yellow => hit += 1,
+                    _ => {}
+                }
+                // Every mark lies just above its road (streets at 0, the highway viaduct and
+                // its ramps above them).
+                let g = map.ground_height([c[0], c[1]], Some(c[2]));
+                assert!((c[2] - g).abs() < 0.02, "paint at z {} over road {g}", c[2]);
+            }
+            let share = hit as f32 / n as f32;
+            assert!(
+                share > 0.98,
+                "yellow {yellow}: {hit}/{n} triangles over a marking"
+            );
+        }
     }
 
     #[test]

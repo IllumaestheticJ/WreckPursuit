@@ -116,8 +116,9 @@ fn terrain_blocks_line_of_sight_across_the_hill() {
 fn queries_respect_grade_separation_and_terrain() {
     let w = world(1, 0.0);
     let map = w.map();
-    // Route 40 West passes under the Loop near x = -1517, y = 91.
-    let p = [-1517.0, 91.0];
+    // Route 40 West passes under the Loop near x = -1517, y = 91 (probe the inner
+    // carriageway, 7 m east of the median).
+    let p = [-1510.0, 92.0];
     let low = map.ground_height(p, Some(-100.0));
     let high = map.ground_height(p, Some(1000.0));
     assert!(high - low > 6.5, "deck {high} over road {low}");

@@ -25,6 +25,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |
 | `slide.rs` | slide-control assists for keyboard/gamepad: car slide class, gyro yaw damper, slide throttle |
 | `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, top speed |
+| `stats.rs` | menu stat bars: `CarStats::measure` (0–100, top speed, 50 m skidpad g) and `bars()` on fixed 0–1 scales (16 → 3.5 s, 140 → 310 km/h, 0.55 → 1.05 g); table in `data/stats/cars.json` (`just car-stats`) |
 | `math.rs` | deterministic `atan`/`atan2`/`tan` (polynomial), glam helpers |
 
 **Chassis = one Rapier dynamic body.** Mass, CG (`front_weight_frac`, `cg_height_m`) and
@@ -169,6 +170,46 @@ recovered already and still does (worst 6–13°). Gamepad's help is light (0.3)
 full throttle and a centred stick hold a 25–46° power drift instead of straightening, but
 nothing spins. FWD/AWD cars are unchanged in practice (worst slip ≤ 4° before and after).
 
+**High-speed catches** (`steering.rs`, `slide.rs`; owner playtest 2026-10-20: "way too tail
+happy at speed and incredibly hard to catch a slide without snap oversteering"). The plain
+model was not the cause: steady state every car is front-limited (at 140 km/h the Lindwurm
+peaks at 0.92 g with 5° front / 2.7° rear slip), and a wheel driver whose countersteer follows
+the slip angle catches a 19° slide at 150 km/h with ≤ 4° swing back. The keyboard/gamepad
+steering was:
+1. *Too much lock at speed.* A full key at 140 km/h gave 12.6° of road-wheel angle; the front
+   tires stop adding cornering force at ~3°. Every full key at speed (turn-in, lane change,
+   countersteer) was a yaw kick. Now the assisted lock is capped at the **grip lock**
+   `atan(L·μ·g/v²) + 1.0 × front peak slip angle` (`steering::grip_lock`; 7.3° at 140 km/h),
+   blended in by `steer_speed_sensitivity` (keyboard 1, gamepad 0.7; wheel 0 = untouched). The
+   save-the-car lock still opens past it to countersteer a slide.
+2. *Over-countersteer.* For a 12° slide the help aimed at the rear-axle slip plus 35% of the
+   driver's lock (16°). Above 110 km/h ([`slide::highway_amount`], fading in from 60 km/h) the
+   driver trim drops to 30% of that, and a countersteer input gets the full help on any preset.
+3. *Help handed back too early.* The help faded with the slide (out below 0.06 rad rear slip),
+   so the driver's full countersteer lock came back while the car was still swinging back.
+   While the driver countersteers it now stays on down to straight (`slide::catch_amount`).
+4. *No damping at the crossing.* The gyro was gated on rear slip > 0.06 rad, so it switched off
+   exactly as the car swung through straight at its fastest (−1.2 rad/s in the trace). At highway
+   speed it also acts on a fast slide-angle rate (0.25 → 0.6 rad/s), at full gain, so the swing
+   is damped instead of carried into a slide the other way. Below 60 km/h nothing changed for the
+   gyro, so flicks and drifts stay as they were.
+
+`cargo run --release -p wp_vehicle --example hs_stability` (keyboard TCS/ESC off; yaw kick 1.4
+rad/s, countersteer key held until < 3° slip; `metrics::catch_snap_back`). Each cell is
+"slide / snap-back the other way", before → after:
+
+| Car | 110 km/h | 150 km/h | 150 km/h, key released 0.25 s late | lane change at 140 km/h, peak slip |
+|---|---|---|---|---|
+| lindwurm_4t | 7/9° → 7/1° | 10/14° → 9/2° | 10/18° → 9/8° | 12° → 8° |
+| debug_sedan | 9/13° → 9/2° | 12/18° → 11/4° | 12/19° → 11/9° | 13° → 8° |
+| rampart_50 | 7/7° → 7/1° | 9/13° → 8/1° | 9/14° → 8/6° | 8° → 6° |
+| lindwurm_4t, gamepad full stick | 11/7° → 10/3° | 15/11° → 12/5° | 15/22° → 12/15° | — |
+
+Side effect: less understeer on a held full key (the front no longer scrubs past its peak):
+steady yaw rate after 2 s of full key is 5–30% higher at 50–140 km/h on every car tried,
+turn-in over the first 0.3 s is unchanged. The power-exit / catch sweep of the 2026-10-19 slide
+work (`examples/slide`) is unchanged (within ±2°), and the wheel preset is bit-identical.
+
 **Low-speed guards:** slip ratio and slip angle use `max(|vx|, 3 m/s)` denominators, slip
 angle has a relaxation-length lag, and below 1 m/s the lateral force blends into a viscous
 model. A parked car settles with < 1 cm drift and no jitter (tested).
@@ -238,6 +279,8 @@ rewind. Not covered: contacts with anything but the ground (other cars, boxes, c
 cargo test -p wp_vehicle                                   # unit + behaviour + metric ranges
 cargo run --release -p wp_vehicle --example metrics        # print metrics for every car
 cargo run --release -p wp_vehicle --example bench          # per-car cost
+cargo run --release -p wp_vehicle --example slide          # power-oversteer exits / catches
+cargo run --release -p wp_vehicle --example hs_stability   # high-speed lane change, turn-in, catch snap-back
 ```
 
 `tests/metrics.rs` asserts the prompt-02 ranges; `tests/behaviour.rs` covers parked

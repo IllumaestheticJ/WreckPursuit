@@ -4,7 +4,9 @@
 // 05/06). The city and traffic are real (procedural 8×8); police is still pending.
 (
     name: "golden_night_pursuit_escape",
-    seed: 106,
+    // Traffic seed: with 106 a civilian sat in the racer's lane after the highway viaduct
+    // changed the network (the cruise driver does not steer around traffic).
+    seed: 107,
     city: procedural(seed: 7, blocks_x: 8, blocks_y: 8, block_m: 120.0),
     time_of_day_h: 23.0,
     mode: Arcade,

@@ -14,7 +14,7 @@ Depends on `wp_contracts`, `wp_math`, and read-only on `wp_world` (routes, POIs,
 
 | Kind | Course | Win condition | Special rules |
 |---|---|---|---|
-| `Sprint` | fixed corridor, ordered gates | first across the last gate | corridor DQ |
+| `Sprint` | fixed corridor, ordered gates | first across the last gate | leaving the route is not a DQ; gates must be passed in order |
 | `Circuit { laps }` | closed loop, gate 0 = start/finish | first to complete `laps` | best lap tracked |
 | `Outrun { lead_m }` | open world (course = start line only) | lead by `lead_m` measured **along the leader's own trail** (breadcrumbs every 2 m; straight line if the chaser left the trail), else leader at the time limit | lead changes when the chaser is `overtake_margin_m` ahead along the leader's heading; opponent DNF/DQ → survivor wins |
 | `Checkpoint` | open route, ordered gates, any path | first through every gate; time limit | no corridor |
@@ -43,9 +43,10 @@ Lobby ──start(tick)──► Countdown (3 s) ──► Running ──nobody 
 - **DNF:** total loss (`SimEvent::TotalLoss`), police capture (`dnf(.., Captured)` from the
   server), time limit, finish window, retire/disconnect, cargo destroyed, lost outrun, fled
   from the police (AI entrants, reported by `entrants`).
-- **DQ:** outside the corridor (`corridor_half_width + 2 m`) for more than 3 s (shortcuts),
-  jump start, implausible movement (faster than 110 m/s between samples — teleport/anti-cheat),
-  marshal. `relocate()` lets the server reset a car without tripping the teleport check.
+- **DQ:** jump start, implausible movement (faster than 110 m/s between samples — teleport/anti-cheat),
+  marshal. Leaving the route is never a DQ (owner call, 2026-10-20): the gates still have to be
+  passed in order, so a shortcut that skips one gains nothing. `relocate()` lets the server
+  reset a car without tripping the teleport check.
 - **Clean race:** finished, no contact above 2 500 N·s (racers, walls, police), no civilian hit
   above 400 N·s, no `Collision` violation. Speeding alone does not break it.
 - **Ranking** is a total order (`RacerResult::rank_key`): finishers by elapsed time → running/DNF
