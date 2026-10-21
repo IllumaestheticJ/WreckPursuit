@@ -1505,6 +1505,47 @@ impl PoliceSystem {
                     && graph::dot(d, d) < TURN_LOOK_M * TURN_LOOK_M
             })
         });
+        // Waiting for it head-on while standing in its line (a single-carriageway hairpin,
+        // Hollins): pull aside out of the line at a crawl instead of stalling in front of it,
+        // so it can pass (and the field behind it is not stopped by a parked police car).
+        let aside = if target_head_on {
+            u.assignment
+                .target()
+                .and_then(|e| self.racers.get(&e))
+                .and_then(|r| {
+                    let rv = [r.vel[0], r.vel[1]];
+                    let rd = graph::normalize(rv);
+                    let off = graph::cross(rd, graph::sub(pos, [r.pos[0], r.pos[1]]));
+                    (off.abs() < HEAD_ON_PATH_M).then(|| {
+                        // Further out on the side it already leans to (its right when dead on).
+                        let side = if off.abs() > 0.3 {
+                            off.signum()
+                        } else {
+                            graph::cross(rd, graph::perp_left(heading)).signum()
+                        };
+                        let out = graph::scale(graph::perp_left(rd), side * HEAD_ON_PATH_M);
+                        graph::add(graph::add(pos, graph::scale(heading, 6.0)), out)
+                    })
+                })
+        } else {
+            None
+        };
+        if let (Some(to), false) = (aside, disabled) {
+            let left = graph::cross(heading, graph::sub(to, pos)) > 0.0;
+            let (throttle, brake) = if v < HEAD_ON_ASIDE_MPS {
+                (0.3, 0.0)
+            } else {
+                (0.0, 0.4)
+            };
+            return VehicleInput {
+                steer: if left { -1.0 } else { 1.0 },
+                throttle,
+                brake,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            };
+        }
         if (target_head_on || facing < stuck::SWING_BEHIND_COS)
             && !disabled
             && matches!(u.unstick.phase, stuck::Phase::Drive)
@@ -2126,6 +2167,11 @@ fn hold_pedals(v: f32) -> (f32, f32, f32) {
         (0.0, STANDSTILL_BRAKE, 1.0)
     }
 }
+
+/// A unit closer than this to the line of its target coming at it head-on pulls aside, m.
+const HEAD_ON_PATH_M: f32 = 6.0;
+/// ... at this crawl, m/s.
+const HEAD_ON_ASIDE_MPS: f32 = 2.5;
 
 /// Throttle at full lock in a forward U-turn below [`stuck::UTURN_MPS`] − 1 m/s.
 const UTURN_THROTTLE: f32 = 0.9;
