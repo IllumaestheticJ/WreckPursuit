@@ -537,7 +537,8 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
 - *Spawning*: never behind a stopped car within 60 m (into a queue); at most one car per 20 m
   of lane at the daytime peak, scaled with the time-of-day factor. Unseen cars standing 30 s
   outside a red light are recycled (`TrafficConfig::jam_recycle_s`), also inside a junction box.
-  Wrecks shoved > 2.5 m off their lane are not obstacles in it.
+  A wreck shoved out of its lane is re-filed under the lane it now lies in (any road); one on a
+  sidewalk or lot (> 3.5 m off any lane) is not an obstacle in the lane.
 
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation

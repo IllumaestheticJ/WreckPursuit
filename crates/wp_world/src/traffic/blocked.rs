@@ -772,8 +772,43 @@ impl Traffic {
         }
     }
 
+    /// Wrecks shoved out of their lane (into the next lane, or onto another road at a junction)
+    /// are moved, in the lane lists, to the lane they now lie in, so the cars there see them
+    /// (owner row 85 re-gate: cars drove into wrecks still registered on another road).
+    fn relocate_wrecks(&mut self, map: &CityMap) {
+        for i in 0..self.agents.len() {
+            let a = &self.agents[i];
+            if !a.disabled || a.manoeuvre.is_some() || a.lat.abs() < 1.75 {
+                continue;
+            }
+            let (p, _) = self.pose_of(map, a);
+            // The lane it lies in, on any road (lanes only; a wreck on a sidewalk or lot finds
+            // none and is left where it is: off its lane, it is not an obstacle there).
+            let Some(loc) = map.locate(p, None, 0.5, true, false) else {
+                continue;
+            };
+            if loc.seg != a.seg {
+                let plan0 = self.choose_next(map, loc.seg, &[]);
+                let plan1 = if plan0 != NONE {
+                    map.seg(plan0).next[0]
+                } else {
+                    NONE
+                };
+                let a = &mut self.agents[i];
+                a.seg = loc.seg;
+                a.s = loc.s;
+                a.lat = loc.lateral;
+                a.lat_target = loc.lateral;
+                a.ghost = None;
+                a.permit = NONE;
+                a.plan = [plan0, plan1];
+            }
+        }
+    }
+
     /// Start go-arounds / turn-arounds for agents that have waited long enough.
     pub(super) fn resolve_blocks(&mut self, map: &CityMap, inp: &TrafficInputs) {
+        self.relocate_wrecks(map);
         self.abort_stalled_manoeuvres(map, inp);
         if !self.blocked_lanes.is_empty() {
             self.reroute(map, inp);

@@ -84,7 +84,7 @@ pub const SIREN_JUNCTION_HOLD_MAX_S: f32 = 8.0;
 
 /// A wreck further than this from its lane's centre line is off the road (sidewalk, lot) and
 /// not an obstacle in the lane, m.
-pub const OFF_LANE_WRECK_M: f32 = 2.5;
+pub const OFF_LANE_WRECK_M: f32 = 3.5;
 
 /// No spawn behind a (nearly) stopped car closer than this ahead (spawning into a queue), m.
 pub const SPAWN_QUEUE_LOOK_M: f32 = 60.0;
