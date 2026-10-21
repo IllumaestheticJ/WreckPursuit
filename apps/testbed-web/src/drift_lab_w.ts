@@ -41,6 +41,9 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
+  drift_lock_extra: { label: "catch: extra lock", min: 0, max: 0.6, step: 0.05, scale: 100, unit: "%", hint: "step 11 over-rotation catch: with the counter key held while the car over-rotates past 40–50° of slip, the counter lock may reach full lock × (1 + this) (default 40 %; grip driving and a held drift unchanged)" },
+  over_rate: { label: "catch: rack speed ×", min: 1, max: 3, step: 0.1, hint: "step 11: the rack moves this many times faster toward the counter lock while over-rotating past 40° (1 = off; default 2)" },
+  over_from_dps: { label: "catch: over-rotation from", min: 5, max: 40, step: 1, unit: "°/s", hint: "step 11: slide growth that counts as over-rotating (the countersteer limit lets go, the extra lock and fast rack come in; default 15°/s)" },
   counter_margin_deg: { label: "countersteer limit", min: 0, max: 5, step: 0.05, unit: "°", hint: "step 10 snap-back: in a slide a held counter key points the wheels at most this far past the front axle's travel, so the lock unwinds as the slide closes (0 = off, the 'before'; default 0.25°)" },
   sens_exponent: { label: "sens. exponent", min: 1, max: 4, step: 0.5, hint: "lock = 1 / (1 + s·(v / ref)^exp); 2 = like the angle a constant-g corner needs" },
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
@@ -52,8 +55,8 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
 };
 
 const RIDE_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit?: string; hint: string }> = {
-  spring: { label: "springs ×", min: 0.5, max: 1.5, step: 0.05, hint: "spring rate scale, all corners (below ~0.85 some cars sit near the bump stops)" },
-  arb: { label: "anti-roll bars ×", min: 0, max: 1.5, step: 0.05, hint: "anti-roll bar scale, both axles (front / rear balance kept)" },
+  spring: { label: "springs ×", min: 0.5, max: 3, step: 0.05, hint: "spring rate scale, all corners (below ~0.85 some cars sit near the bump stops)" },
+  arb: { label: "anti-roll bars ×", min: 0, max: 3, step: 0.05, hint: "anti-roll bar scale, both axles (front / rear balance kept)" },
   damper_bump: { label: "dampers bump ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, compression" },
   damper_rebound: { label: "dampers rebound ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, extension" },
   roll_centre_m: { label: "roll centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where the tyres' side force acts on the body (0 = contact patch, the data); higher = less roll" },
@@ -105,9 +108,11 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
   hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
 };
 // v2: step 10's default ride became medium weight (an older saved ride must not override it).
-const RIDE_STORE = "wp.driftLabW.ride.v2";
+// v3: step 20's default ride became "firm" (an older saved ride must not override it).
+const RIDE_STORE = "wp.driftLabW.ride.v3";
 const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
-const GRIP_STORE = "wp.driftLabW.grip";
+// v3: the default balance is "new" (step 14) again; v2 builds saved "balance: grip" as their default.
+const GRIP_STORE = "wp.driftLabW.grip.v3";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
  * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
 const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
@@ -285,9 +290,9 @@ export class DriftLabWPanel {
       /* storage blocked: defaults */
     }
     try {
-      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
+      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().firm));
     } catch {
-      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
+      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().firm));
     }
     let carTune = "";
     try {
@@ -440,6 +445,33 @@ export class DriftLabWPanel {
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
     }
+    // Step 11 A/B (owner: catch over-rotations): "catch: before" = the step-10 limit at every
+    // slide rate, no extra lock, no fast rack; "catch: new" = directional limit + extra lock +
+    // fast rack (the default).
+    {
+      const ab = document.createElement("div");
+      ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
+      const lbl = document.createElement("span");
+      lbl.textContent = "catch A/B:";
+      ab.appendChild(lbl);
+      for (const [label, id, on] of [
+        ["before", "drift-lab-w-catch-before", false],
+        ["new", "drift-lab-w-catch-new", true],
+      ] as const) {
+        const b = document.createElement("button");
+        b.id = id;
+        b.textContent = label;
+        b.title = on
+          ? "step 11 default: the countersteer limit lets go while the car over-rotates, extra counter lock (× 1.4) and a faster rack past 40° of slip — over-rotations are easier to catch"
+          : "step 10: the countersteer limit at every slide rate, no extra lock, no fast rack";
+        b.onclick = () => {
+          this.save({ ...(this.sim.plainSteer() ?? defaults), counter_closing_only: on } as unknown as Record<string, number>);
+          this.build();
+        };
+        ab.appendChild(b);
+      }
+      this.body.appendChild(ab);
+    }
     // Step 10 A/B (lead): "before" = steps 1–9 (no countersteer limit, lab ride) vs "new" =
     // the default (countersteer limit 0.25°, medium weight). Tyres stay as set below.
     {
@@ -450,7 +482,7 @@ export class DriftLabWPanel {
       ab.appendChild(lbl);
       for (const [label, id, margin, ride] of [
         ["before", "drift-lab-w-before", 0, "lab"],
-        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "medium_weight"],
+        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "firm"],
       ] as const) {
         const b = document.createElement("button");
         b.id = id;
@@ -458,7 +490,7 @@ export class DriftLabWPanel {
         b.title =
           label === "before"
             ? "steps 1–9: no countersteer limit (lifting off with the counter key held snaps the car back and can spin it), step-3 lab ride"
-            : "step 10 default: countersteer limit 0.25° past the travel (progressive recovery) + medium weight (slower weight transfer, keeps the hold)";
+            : "default: countersteer limit 0.25° past the travel (progressive recovery) + the firm ride (step 20: springs / bars × 1.5, slow weight transfer through the dampers)";
         b.onclick = () => {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_margin_deg: margin });
           const text = JSON.stringify(this.sim.rideTuneDefaults()[ride]);
@@ -611,7 +643,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - rd.medium_weight[key]) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - rd.firm[key]) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -646,11 +678,13 @@ export class DriftLabWPanel {
         };
         row("keep ride height", "raise the spring preload so softer springs keep the data's static ride height (off the bump stops)", input, document.createElement("span"));
       }
-      for (const [label, which] of [["medium weight (new)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
+      for (const [label, which] of [["firm (new)", "firm"], ["medium weight (step 10)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
         b.title =
-          which === "medium_weight"
+          which === "firm"
+            ? "step 20 default (owner: springs and bars up feel better in grip cornering): medium weight with springs / bars × 1.5 and dampers × 1.5 (2.4 / 3.2); soft bars let a lift while steering step the rear out. Restarts the car"
+            : which === "medium_weight"
             ? "step 10 default: slower weight transfer that keeps the held drift (springs 0.7, bars 0.15, dampers 1.6 / 2.1, ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6). Restarts the car"
             : which === "lab"
             ? "step 3 default: calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"
@@ -776,11 +810,18 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.grip) ? "grip (test)" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
-      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
+      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.grip) ? "grip (test)" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
+      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + RWD rear near the data (× 0.9, flatter past the peak: no step-out on a lift while steering, over-rotations catchable) + rear downforce + held-key slide lock (step 20)";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
         saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
+        this.build();
+      };
+      const step14 = document.createElement("button");
+      step14.textContent = "balance: step 14";
+      step14.title = "the step 14–19 default: softer RWD tyres (cornering stiffness × 0.6 / × 0.45): looser below the limit, steps out on a lift while steering";
+      step14.onclick = () => {
+        saveGrip(gd.step14);
         this.build();
       };
       const gripBtn = document.createElement("button");
@@ -825,9 +866,9 @@ export class DriftLabWPanel {
       const trans = document.createElement("button");
       trans.textContent = "transition: swing rack (test)";
       trans.title =
-        "tyre-slip test preset for drift transitions: balance new + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
+        "tyre-slip test preset for drift transitions: balance step 14 + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
       trans.onclick = () => {
-        saveGrip(gd.new);
+        saveGrip(gd.step14);
         const rd = this.sim.rideTuneDefaults();
         const ride = JSON.stringify({ ...rd.lab, yaw_inertia: 1.5 });
         const tyres = JSON.stringify(this.sim.carTuneDefaults().spin);
@@ -862,7 +903,7 @@ export class DriftLabWPanel {
       };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, gripBtn, forSlow, driftBest, step2, lockOnly, trans, v2);
+      abRow.append(ab, step14, gripBtn, forSlow, driftBest, step2, lockOnly, trans, v2);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

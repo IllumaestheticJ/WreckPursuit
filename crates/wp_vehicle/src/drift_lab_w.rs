@@ -1020,6 +1020,146 @@ pub fn snap_back_with(
     }
 }
 
+/// Over-rotation catch ([`over_rotation_catch`], owner step 18: "more steering lock so we can
+/// catch over-rotations a little easier").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverCatch {
+    /// The push past the target angle happened.
+    pub reached: bool,
+    /// Slide angle when the counter key went down, degrees.
+    pub start_deg: f32,
+    /// Largest slide angle after that, degrees.
+    pub peak_deg: f32,
+    /// No spin, a peak under 70°, back under 45° within 1.5 s, and no swing more than 15° to
+    /// the other side.
+    pub caught: bool,
+    /// Time from the counter key to under 45°, s (`f32::INFINITY` = never).
+    pub catch_s: f32,
+    /// Largest slide to the other side after the catch, degrees.
+    pub overcatch_deg: f32,
+    /// Spun (over 90° or travelling backwards).
+    pub spun: bool,
+}
+
+/// Over-rotation catch run: 0.7 g on a 60 m left-hander, the key into the turn + full throttle
+/// (a fast, committed entry that over-rotates) until the slide passes `push_deg` (at most 3 s),
+/// then the counter key with half throttle until the slide is back under 35°, then the
+/// key-tapping hold ([`snap_back`]'s driver), for 3 s. Caught = no spin, the slide peaks under
+/// 70°, is back under 45° within 1.5 s and swings no more than 15° to the other side.
+pub fn over_rotation_catch(car: &LoadedCar, assists: &AssistProfile, push_deg: f32) -> OverCatch {
+    over_rotation_catch_with(car, assists, push_deg, CatchKey::Held)
+}
+
+/// How the driver works the counter key in [`over_rotation_catch_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatchKey {
+    /// Counter key held (half throttle) until the slide is back under 35°, then tapping.
+    Held,
+    /// Tapping from the start: the key-tapping hold driver (counter key while the slide is
+    /// over 35° or growing faster than 15°/s; throttle off over 45°).
+    Tapping,
+}
+
+/// [`over_rotation_catch`] with the catch driver `key`.
+pub fn over_rotation_catch_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    push_deg: f32,
+    key: CatchKey,
+) -> OverCatch {
+    use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = settle_on_circle(car, assists, 60.0, 0.7);
+    let gear = |rig: &crate::rig::Rig| !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR;
+    let angle_of = |rig: &crate::rig::Rig| (-slide_state(rig).body_slip).to_degrees();
+    let gone = |rig: &crate::rig::Rig| {
+        let s = slide_state(rig);
+        s.body_slip.to_degrees().abs() > 90.0 || s.v_fwd < 0.0
+    };
+    let tap = |angle: f32, rate: f32| {
+        let steer = if angle > 35.0 || rate > 15.0 {
+            1.0
+        } else if angle < 20.0 {
+            -1.0
+        } else {
+            0.0
+        };
+        (steer, if angle > 45.0 { 0.0 } else { 1.0 })
+    };
+    let step = |rig: &mut crate::rig::Rig, steer: f32, throttle: f32| {
+        let g = gear(rig);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: g,
+                ..Default::default()
+            },
+            assists,
+        );
+    };
+    let none = OverCatch {
+        reached: false,
+        start_deg: 0.0,
+        peak_deg: 0.0,
+        caught: false,
+        catch_s: f32::INFINITY,
+        overcatch_deg: 0.0,
+        spun: false,
+    };
+    // Push: key into the turn + full throttle past the target.
+    let mut pushed = false;
+    for _ in 0..3 * TPS {
+        step(&mut rig, -1.0, 1.0);
+        if gone(&rig) {
+            return OverCatch { spun: true, ..none };
+        }
+        if angle_of(&rig) > push_deg {
+            pushed = true;
+            break;
+        }
+    }
+    if !pushed {
+        return none;
+    }
+    // Catch.
+    let start_deg = angle_of(&rig);
+    let (mut peak, mut over, mut catch_s, mut spun) = (start_deg, 0.0f32, f32::INFINITY, false);
+    let mut catching = true;
+    let mut prev = start_deg;
+    for t in 0..3 * TPS {
+        let a = angle_of(&rig);
+        let rate = (a - prev) / PHYSICS_DT;
+        prev = a;
+        catching &= a > 35.0 && key == CatchKey::Held;
+        let (st, th) = if catching { (1.0, 0.5) } else { tap(a, rate) };
+        step(&mut rig, st, th);
+        if gone(&rig) {
+            spun = true;
+            break;
+        }
+        let a = angle_of(&rig);
+        peak = peak.max(a);
+        // Back under 45° once the slide is closing (past its peak).
+        if a < 45.0 && a < peak - 2.0 && catch_s.is_infinite() {
+            catch_s = (t + 1) as f32 / TPS as f32;
+        }
+        if catch_s.is_finite() {
+            over = over.max(-a);
+        }
+    }
+    OverCatch {
+        reached: true,
+        start_deg,
+        peak_deg: peak,
+        caught: !spun && peak < 70.0 && catch_s <= 1.5 && over <= 15.0,
+        catch_s,
+        overcatch_deg: over,
+        spun,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

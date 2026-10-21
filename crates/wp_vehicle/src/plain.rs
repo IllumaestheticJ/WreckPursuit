@@ -100,6 +100,31 @@ pub struct PlainSteer {
     pub swing_ease_from_deg: f32,
     /// New-side slide where the swing rack is fully off, degrees.
     pub swing_ease_full_deg: f32,
+    /// Owner step 18 ("catch over-rotations a little easier"): the countersteer limit
+    /// ([`PlainSteer::counter_margin_deg`]) is directional — it holds while the slide closes or
+    /// stays (the snap-back case) and lets go while the car over-rotates (the slide growing
+    /// faster than `over_from_dps`, from half that), so a held counter key may go to full lock
+    /// and past the travel; the drift lock extension and over-rotation rack also need it.
+    /// Off = the step-10 limit at every slide rate, no extension, no fast rack (the "before").
+    pub counter_closing_only: bool,
+    /// Drift lock extension (owner step 18): in a slide with the counter key held, the counter
+    /// lock may reach the car's full lock × (1 + this), at every speed (no speed curve),
+    /// faded in with body slip between `drift_lock_from_deg` and `drift_lock_full_deg` (past
+    /// a normal drift's angle) and only while the car over-rotates (slide growth from
+    /// `over_from_dps`, full at twice that). Grip driving, a held drift and the key into the
+    /// turn are unchanged. 0 = off. Default 0.4 (full lock × 1.4).
+    pub drift_lock_extra: f32,
+    /// Body slip, degrees, where the drift lock extension starts.
+    pub drift_lock_from_deg: f32,
+    /// Body slip, degrees, from which the drift lock extension is full.
+    pub drift_lock_full_deg: f32,
+    /// Over-rotation rack (owner step 18, optional): while the counter key is held, the slide
+    /// grows faster than `over_from_dps` and the body slip is past `drift_lock_from_deg`, the
+    /// rack moves this many times faster. 1 = off.
+    pub over_rate: f32,
+    /// Slide growth, °/s, where the over-rotation rack acts and the drift lock extension starts
+    /// (full at twice this).
+    pub over_from_dps: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -138,6 +163,12 @@ impl Default for PlainSteer {
             counter_full_deg: 8.0,
             swing_ease_from_deg: 90.0,
             swing_ease_full_deg: 90.0,
+            counter_closing_only: true,
+            drift_lock_extra: 0.4,
+            drift_lock_from_deg: 40.0,
+            drift_lock_full_deg: 50.0,
+            over_rate: 2.0,
+            over_from_dps: 15.0,
         }
     }
 }
@@ -264,6 +295,9 @@ pub struct PlainInput {
     pub body_slip: f32,
     /// Yaw rate, rad/s (+ = left; the swing rack, [`PlainSteer::swing_rate`]).
     pub yaw_rate: f32,
+    /// How fast the slide angle grows, rad/s (+ = opening / over-rotating, − = closing): the
+    /// directional countersteer limit and the over-rotation rack (owner step 18).
+    pub slide_growth: f32,
 }
 
 /// `p` with the swing rack applied for `inp` (see [`PlainSteer::swing_rate`]): all rack
@@ -324,7 +358,8 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     if p.velocity_relative {
         return velocity_relative_angle(current, inp, p, dt);
     }
-    let lock = inp.full_lock * p.lock_frac(inp.speed);
+    let p = &with_over_rate(p, inp);
+    let lock = drift_lock(inp.full_lock * p.lock_frac(inp.speed), inp, p);
     let rack = rack_of(current, lock, inp.pull);
     let key = inp.driver.clamp(-1.0, 1.0);
     let target = if key.abs() <= crate::steering::STEER_DEADZONE
@@ -345,6 +380,62 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
 /// [`PlainSteer::counter_margin_deg`]: the rack target (−1..=1, + = right) limited so a held
 /// countersteer key points the wheels at most the margin past the front axle's travel in a
 /// slide. Unchanged when the limit is off, in grip, below 3 m/s or with the key released.
+/// Smoothstep of `x` between `lo` and `hi`, 0..=1.
+fn smooth(x: f32, lo: f32, hi: f32) -> f32 {
+    let t = ((x - lo) / (hi - lo).max(1e-3)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Whether the held key countersteers the slide (key + = right; body slip + = moving left).
+fn countering(inp: &PlainInput) -> bool {
+    inp.driver.abs() > crate::steering::STEER_DEADZONE && inp.driver * inp.body_slip < 0.0
+}
+
+/// [`PlainSteer::drift_lock_extra`]: the lock for this tick, extended toward full lock ×
+/// (1 + extra) in a slide with the counter key held; `lock` otherwise.
+fn drift_lock(lock: f32, inp: &PlainInput, p: &PlainSteer) -> f32 {
+    if p.drift_lock_extra <= 0.0
+        || !p.counter_closing_only
+        || inp.speed.abs() < 3.0
+        || !countering(inp)
+    {
+        return lock;
+    }
+    let mut fade = smooth(
+        inp.body_slip.abs().to_degrees(),
+        p.drift_lock_from_deg,
+        p.drift_lock_full_deg,
+    );
+    // Only while the car over-rotates (the slide opening): on the way back the extra lock
+    // would over-catch.
+    // Only while the car over-rotates (the slide opening faster than `over_from_dps`, full
+    // at twice that): a held drift or the way back keeps the plain lock (it would over-catch
+    // and make the snap-back worse).
+    let from = p.over_from_dps.max(0.1);
+    fade *= smooth(inp.slide_growth.to_degrees(), from, 2.0 * from);
+    let ext = inp.full_lock * (1.0 + p.drift_lock_extra.min(1.0));
+    lock + fade * (ext - lock).max(0.0)
+}
+
+/// [`PlainSteer::over_rate`]: faster rack times while the counter key is held and the slide
+/// grows past `over_from_dps`.
+fn with_over_rate(p: &PlainSteer, inp: &PlainInput) -> PlainSteer {
+    if p.over_rate <= 1.0
+        || !p.counter_closing_only
+        || !countering(inp)
+        || inp.slide_growth.to_degrees() < p.over_from_dps
+        || inp.body_slip.abs().to_degrees() < p.drift_lock_from_deg
+    {
+        return *p;
+    }
+    let k = p.over_rate.min(10.0);
+    PlainSteer {
+        t_full_s: p.t_full_s / k,
+        t_return_s: p.t_return_s / k,
+        ..*p
+    }
+}
+
 fn counter_limited(target: f32, inp: &PlainInput, p: &PlainSteer, lock: f32) -> f32 {
     if p.counter_margin_deg <= 0.0
         || inp.speed.abs() < 3.0
@@ -359,7 +450,12 @@ fn counter_limited(target: f32, inp: &PlainInput, p: &PlainSteer, lock: f32) -> 
         p.counter_full_deg.max(p.counter_from_deg + 0.1),
     );
     let t = ((a - lo) / (hi - lo)).clamp(0.0, 1.0);
-    let fade = t * t * (3.0 - 2.0 * t);
+    let mut fade = t * t * (3.0 - 2.0 * t);
+    // Step 18: directional — off while the car over-rotates (the key may go to full lock).
+    if p.counter_closing_only {
+        let from = p.over_from_dps.max(0.1);
+        fade *= 1.0 - smooth(inp.slide_growth.to_degrees(), 0.5 * from, from);
+    }
     if fade <= 0.0 {
         return target;
     }
@@ -510,6 +606,7 @@ mod tests {
             front_axle_angle: 0.0,
             body_slip: 0.0,
             yaw_rate: 0.0,
+            slide_growth: 0.0,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -560,6 +657,7 @@ mod tests {
             front_axle_angle: 0.3,
             body_slip: 1f32.to_radians(),
             yaw_rate: 0.0,
+            slide_growth: 0.0,
         };
         assert!((run(&grip) + 0.6 * p.lock_frac(15.0)).abs() < 1e-5);
         // Slide (20°), keys released: the wheels go back to the body's centre (no automatic
@@ -610,6 +708,7 @@ mod tests {
             front_axle_angle: 0.2,
             body_slip: 0.0,
             yaw_rate: 0.0,
+            slide_growth: 0.0,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -631,6 +730,7 @@ mod tests {
             front_axle_angle: 0.0,
             body_slip: 0.0,
             yaw_rate: -120f32.to_radians(), // swinging right; the left key opposes it
+            slide_growth: 0.0,
         };
         let step = |p: &PlainSteer, inp: &PlainInput| {
             let mut a = -0.6;
@@ -655,11 +755,13 @@ mod tests {
         // A held drift's ~30°/s rotation, or a key with the rotation: unchanged.
         let slow = PlainInput {
             yaw_rate: -30f32.to_radians(),
+            slide_growth: 0.0,
             ..base
         };
         assert_eq!(step(&on, &slow), step(&off, &slow));
         let with = PlainInput {
             yaw_rate: 120f32.to_radians(),
+            slide_growth: 0.0,
             ..base
         };
         assert_eq!(step(&on, &with), step(&off, &with));
@@ -667,7 +769,10 @@ mod tests {
 
     #[test]
     fn countersteer_limit_follows_the_travel_in_a_slide_only() {
-        let p = PlainSteer::default();
+        let p = PlainSteer {
+            drift_lock_extra: 0.0,
+            ..PlainSteer::default()
+        };
         let off = PlainSteer {
             counter_margin_deg: 0.0,
             ..p
@@ -682,6 +787,7 @@ mod tests {
             front_axle_angle: -20f32.to_radians(),
             body_slip: -30f32.to_radians(),
             yaw_rate: 0.0,
+            slide_growth: -0.5, // closing (the snap-back case)
         };
         let run = |inp: &PlainInput, p: &PlainSteer| {
             let mut a = 0.0;
@@ -714,5 +820,78 @@ mod tests {
             ..slide
         };
         assert_eq!(run(&rel, &p), 0.0);
+    }
+
+    #[test]
+    fn over_rotation_gets_full_lock_and_the_drift_lock_extension() {
+        let p = PlainSteer::default();
+        // Left-hand slide at 55° of body slip (past a normal drift), front axle travelling 20°
+        // right, counter key.
+        let slide = PlainInput {
+            driver: 1.0,
+            speed: 12.0,
+            full_lock: 0.6,
+            pull: 0.0,
+            front_axle_angle: -20f32.to_radians(),
+            body_slip: -55f32.to_radians(),
+            yaw_rate: 0.0,
+            slide_growth: 1.0, // over-rotating (57°/s)
+        };
+        let lock_at = |p: &PlainSteer| 0.6 * p.lock_frac(12.0);
+        let run = |inp: &PlainInput, p: &PlainSteer| {
+            let mut a = 0.0;
+            for _ in 0..480 {
+                a = update_center_angle(a, inp, p, DT);
+            }
+            a
+        };
+        // Over-rotating: no countersteer limit; past 50° of slip the lock is full × 1.4.
+        let ext = -0.6 * (1.0 + p.drift_lock_extra);
+        assert!((run(&slide, &p) - ext).abs() < 1e-4, "{}", run(&slide, &p));
+        // Closing: limited to the travel + margin again.
+        let closing = PlainInput {
+            slide_growth: -0.5,
+            ..slide
+        };
+        let limit = -(20.0 + p.counter_margin_deg).to_radians();
+        assert!((run(&closing, &p) - limit).abs() < 1e-4);
+        // The "before" (limit at every rate, no extension): limited while over-rotating too.
+        let before = PlainSteer {
+            counter_closing_only: false,
+            drift_lock_extra: 0.0,
+            ..p
+        };
+        assert!((run(&slide, &before) - limit).abs() < 1e-4);
+        // A normal drift angle (30°), grip (1°) and the key into the turn: no extension.
+        let drift = PlainInput {
+            body_slip: -30f32.to_radians(),
+            ..slide
+        };
+        assert!((run(&drift, &p) + lock_at(&p)).abs() < 1e-5);
+        let lock = lock_at(&p);
+        let grip = PlainInput {
+            body_slip: -1f32.to_radians(),
+            ..slide
+        };
+        assert!((run(&grip, &p) + lock).abs() < 1e-5);
+        let into = PlainInput {
+            driver: -1.0,
+            ..slide
+        };
+        assert!((run(&into, &p) - lock).abs() < 1e-5);
+        // Over-rotation rack (default × 2): faster toward the counter lock in the first 0.1 s.
+        let fast = p;
+        let p = PlainSteer {
+            over_rate: 1.0,
+            ..p
+        };
+        let early = |p: &PlainSteer| {
+            let mut a = 0.0;
+            for _ in 0..24 {
+                a = update_center_angle(a, &slide, p, DT);
+            }
+            a
+        };
+        assert!(early(&fast) < early(&p) - 0.05);
     }
 }
