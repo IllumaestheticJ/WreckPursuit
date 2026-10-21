@@ -38,5 +38,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.28 | preview | New careers start with $150 000 for testing (?cash=market for the real $4 500); game data embedded compressed (wasm 10.7 MB) |
 | 0.12.29 | preview | Parked cars sit on the ground (hillside driveways around Hollins were up to 0.76 m in the terrain), knocked cars no longer sink; new cars' meshes regenerated |
 | 0.12.30 | preview | ONE VERSION: the owner's handling (reference step-14 balance, springs/bars ×1.5, step-22 tyres) on every car; over-rotation catch, transition + settle steering, held-key fix on the player car; auto gearbox holds gear while sliding; hidden tune panel (?tune=1) with reset-all, copy-tune and rear ×0.50 / ×0.55 presets |
-| 0.12.31 | preview | (next) |
+| 0.12.31 | preview | Photo mode (F7: free camera, filters, save PNG), realistic tyre squeal, mod shop with parts drawn on the car, police helicopter (bridges block its view, radio), race gates wider + off-course reset, audio pauses with the game; tune panel moved to F10 |
+| 0.12.32 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
