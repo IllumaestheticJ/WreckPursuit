@@ -60,6 +60,7 @@ fn main() {
             speed_mps: 30.0,
             police_heat: 0.0,
             assists: None,
+            tune: Default::default(),
             driver: Driver::Scripted,
             inputs: Vec::new(),
         }],

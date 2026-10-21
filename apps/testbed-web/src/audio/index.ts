@@ -130,7 +130,7 @@ export class AudioSystem {
       return;
     }
     this.ctx = new AudioContext({ latencyHint: "interactive" });
-    this.mixer = new AudioMixer(this.ctx);
+    this.mixer = new AudioMixer(this.ctx, this.lib.config.master);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
     this.pool.source = this.panel.settings.source;
     this.sirens = new SirenRack(this.ctx, this.mixer, this.lib);
@@ -273,11 +273,15 @@ export class AudioSystem {
     if (ambienceChanged) this.restartAmbience();
   }
 
-  /** Spoken radio lines follow master × Police bus (speechSynthesis bypasses the mixer). */
+  /**
+   * Spoken radio lines follow master × Police bus × the Police bus's headroom trim
+   * (speechSynthesis bypasses the mixer; the trim keeps the voice where it sat against the mix).
+   */
   private updateVoiceVolume(): void {
     if (!this.scanner) return;
     const s = this.panel.settings;
-    this.scanner.volume = this.muted ? 0 : s.master * s.buses.Police;
+    const trim = 10 ** ((this.mixer?.settings.bus_gain_db.Police ?? 0) / 20);
+    this.scanner.volume = this.muted ? 0 : s.master * s.buses.Police * trim;
   }
 
   /** "Police radio voice" setting: speak radio lines (on) or squelch + text only (off). */

@@ -809,4 +809,145 @@ files), `tools/audio_packs/{build_packs,write_packs}.py`. Not touched: tyre / su
 - Mix headroom (pre-existing): one V8 at WOT 6 m away already puts 1.3 % (before) / 1.7 %
   (after) of samples into the master soft clip after the master compressor (−10 dB threshold,
   Chrome's automatic make-up gain). Lowering `engine.gain` or raising the master threshold would
-  give the mix room; not changed here (shared mixer, affects every bus).
+  give the mix room; not changed here (shared mixer, affects every bus). **Fixed:** see "Mix
+  headroom" below.
+
+## Mix headroom (2026-10-21) — branch `fix/mix-headroom` from `lead/round12`
+
+Follow-up of the last "engine sounds are bad" bullet: a single V8 at WOT behind the chase camera
+drove the master into its soft clip, and a chase did much worse.
+
+**Measured** with `e2e/audio_mix.mjs` (new): director scenes from `examples/mix_trace.rs` (new)
+rendered offline in headless Chromium through the whole testbed mixer — every bus, siren rack
+(with the director's siren-space frames), scanner squelch / static, the city ambience bed at the
+panel default 0.5, the engine worklet, the master stage — at the default master volume 0.8.
+Scenes: `v8_wot` (player `rampart_50`, cross-plane V8, idle then WOT through the gears, chase
+camera 6 m), `chase` (player at WOT; three `sentinel_cruiser` units with sirens: two 10 / 18 m
+behind, one oncoming pass-by in the other lane at t = 9 s; a 2 s cornering squeal; a big hit from
+a following unit at t = 12 s — 24 kN·s contact, 45 kJ plastic, glass; two pursuit radio lines;
+a 1 s lift), `cruise` (light part throttle), `idle`. Loudness = BS.1770 K-weighted (short-term
+3 s windows; integrated with gating), true peak = 4× oversampled; compressor reduction =
+`DynamicsCompressorNode.reduction` sampled every frame (first 2 s skipped: the meter starts at
+−10 dB in silence, no gain applied).
+
+**Root cause** (`apps/testbed-web/src/audio/voices.ts` at a446bcf8):
+1. No headroom anywhere in the gain structure (l.67: `user → side → duck → master` at unity,
+   l.43: master 0.8): the sources are calibrated hot against each other (engine pack level
+   15.8 dB, `engine_physical` cue gain 5.4 × `engine.gain` 0.55, siren pack +7.5 dB, impacts),
+   so the engine bus alone reached −0.6 dBFS (peak) / −7.7 LUFS with one V8, and the big hit
+   +9.1 dBFS on the World bus. The mix sat at −9.4 LUFS integrated, ~6 dB over a sensible
+   −16 … −14 LUFS for a busy chase.
+2. The master compressor could not catch it (l.46–47: threshold −10 dB, ratio 6 and the default
+   30 dB knee — which in the WebKit / Blink kernel lies entirely *above* the threshold, so at
+   0 dBFS it was barely compressing: 0.2–0.7 dB median / p95), while its automatic make-up gain
+   (+0.34 dB with those settings; it cannot be switched off) lifted everything under threshold.
+   The soft clip (l.57: linear to 0.7, ceiling 0.99) did the limiting: 0.26 % of samples with
+   one cross-plane V8, 2.2 % with the flat-plane V8, 0.65–1.3 % in a chase, true peak +0.2 dBTP.
+3. The engine worklet's voice limit had 0.2 dB of headroom for the loudest V8 (`engine_worklet.ts`
+   l.106 `OUT_GAIN = 1.8` into the ±0.8 knee at l.742: flat-plane V8 WOT peaks 0.78).
+
+**Changes**
+- `data/audio/audio_config.json` → new `master` section (`wp_audio::MasterMix`, `data.rs`):
+  `bus_gain_db` −6 dB on every bus (equal: the balance stays in the sources), compressor
+  −8 dB threshold / 6 dB knee / 4:1 / 3 ms attack / 0.3 s release (a peak catcher: the knee ends at
+  −2 dBFS, normal content stays under it), `trim_db` 0, soft clip `clip_knee` 0.7 /
+  `clip_ceiling` 0.89 (−1 dBFS; was 0.99). `AudioLibrary::validate` checks it
+  (`MasterMix::validate`: Web Audio ranges, knee ends ≤ 0 dBFS, bus trims ≤ 0 dB, ceiling
+  ≤ −1 dBFS).
+- `voices.ts` `AudioMixer(ctx, settings?)`: per-bus `trim` node after the duck (its output
+  feeds the master; `busOut(bus)` for taps); the compressor from the settings, exposed as
+  `comp`; a post gain that divides out the compressor's make-up gain —
+  `compressorMakeupGain(threshold, knee, ratio)` is a float-for-float port of the WebKit / Blink
+  `DynamicsCompressorKernel` static curve (`(1 / curve(0 dBFS))^0.6`; Chromium, Firefox and Safari
+  share that kernel) — so below threshold the master stage is unity (measured 0.00 dB, was
+  +0.34); `softClipCurve(knee, ceiling)`; `DEFAULT_MASTER` mirrors the file (the e2e fails on
+  drift). `index.ts` passes `lib.config.master`, and scales the speechSynthesis radio voice
+  (which bypasses Web Audio) by the Police trim so it keeps its place against the mix.
+- `engine_worklet.ts`: `OUT_GAIN` split into `OUT_DRIVE` 0.9 (into the voice limit) ×
+  `OUT_MAKEUP` 2.0 (after it): identical output level (cue gains / roster balance untouched), and
+  the loudest WOT pull now peaks 6 dB under the limit's knee (0.39 into it), like the master.
+  Per-car worklet peaks along a WOT pull: debug_sedan 0.24, sperber_32 0.37, shiro_turbo 0.42,
+  rampart_50 0.58, lucciola_350 0.78 (output units; the knee is now at 1.6).
+- No sound design changed: every bus moved by the same −6 dB. The one element that clearly
+  overdrives is the big hit (World bus +9 dBFS before, +2.4 dBFS now into the master); it is now
+  caught by the compressor (4–6 dB for ~0.3 s, on top of the impact sidechain that already ducks
+  Engine / Police / Music) instead of the clipper.
+
+**Before → after** (default master 0.8; `v8_wot`, `chase`, `cruise`, `idle` with `rampart_50`;
+"V8 fp" = the same scenes with `--player lucciola_350`, the loudest engine):
+
+| Scene | Soft clip | Peak / true peak | Short-term LUFS max / median (integrated) | Comp. reduction median / p95 / max |
+|---|---|---|---|---|
+| v8_wot | 0.262 % → 0 % | −0.9 / −0.9 → −6.4 / −6.4 dBFS | −8.6 / −9.7 (−9.4) → −14.8 / −16.0 (−15.6) | 0.2 / 0.3 / 0.4 → 0.0 / 0.1 / 0.2 dB |
+| v8_wot, V8 fp | 2.203 % → 0 % | −0.2 / −0.2 → −4.7 / −4.7 | −6.2 / −7.5 (−7.8) → −12.4 / −13.6 (−14.0) | 0.4 / 0.6 / 0.7 → 0.2 / 0.7 / 1.1 |
+| chase | 0.645 % → 0 % | −0.1 / +0.3 → −2.2 / −2.0 | −8.7 / −9.5 (−9.4) → −15.0 / −15.7 (−15.6) | 0.3 / 0.7 / 2.2 → 0.1 / 1.2 / 5.3 |
+| chase, V8 fp | 1.334 % → 0 % | −0.1 / +0.2 → −2.0 / −2.0 | −7.6 / −8.2 (−8.3) → −13.8 / −14.4 (−14.4) | 0.4 / 0.8 / 2.3 → 0.3 / 1.6 / 5.5 |
+| cruise | 0 → 0 | −7.0 / −6.9 → −15.6 / −15.6 | −21.8 / −23.0 (−22.8) → −28.3 / −29.3 (−29.1) | 0 → 0 |
+| idle | 0 → 0 | −17.8 / −17.8 → −24.1 / −24.1 | −28.6 / −30.6 (−30.6) → −35.0 / −36.9 (−37.0) | 0 → 0 |
+
+Chase repeat runs (the impact recording is picked at random): true peak −1.7 … −2.7 dBTP,
+compressor max 4.0–5.8 dB, soft clip 0–0.001 %. The compressor acts only around the hit
+(4–5 dB at t = 12 s, ≤ 1 dB elsewhere): no pumping. Cruise / idle keep their distance to the
+chase (13.4 → 13.5 dB integrated).
+
+**Balance** (integrated LUFS of each bus, relative to the Engine bus):
+
+| | World | Police |
+|---|---|---|
+| chase, bus outputs before the master (one render, tapped) | −10.6 → −10.5 dB | −5.3 → −5.3 dB |
+| chase, each bus solo through the master stage | −10.9 → −11.4 dB | −5.2 → −5.3 dB |
+| v8_wot / cruise / idle, before the master (World vs Engine) | −17.9 / −3.8 / +6.7 → −17.8 / −3.7 / +6.6 dB | — |
+
+(Ui / Music are silent in these scenes.) The solo World figure moves 0.5 dB because the
+compressor now catches the hit instead of the clipper.
+
+WAVs (16-bit stereo, master output), scratchpad
+`/tmp/claude-0/-home-user-WreckPursuit/b05f7884-58e0-503c-a480-88c77db4a181/scratchpad/mix/wav/`:
+`{before,after}_{v8_wot,chase,cruise,idle}.wav`, `{before,after}_chase_solo_{Engine,World,Police}.wav`,
+`{before,after}_lucciola_{v8_wot,chase}.wav` (not committed).
+
+**Regression check:** `node e2e/audio_mix.mjs` (`npm run e2e:audio-mix`; generates the trace with
+`cargo run --release -p wp_audio --example mix_trace` when `--trace` is omitted): chase ≤ 0.05 %
+soft clip, true peak ≤ −1 dBTP, compressor reduction p95 ≤ 2.5 dB and max ≤ 9 dB, short-term max
+within −18 … −12 LUFS; `v8_wot` no soft clip and p95 ≤ 1 dB; cruise / idle no soft clip, no
+compression, ≥ −40 LUFS; master stage unity (±0.25 dB) for a −30 dBFS sine; `DEFAULT_MASTER` =
+the file. The old mixer fails it (chase 0.645 % soft clip, +0.3 dBTP, −8.7 LUFS; unity +0.34 dB;
+`--src <old src/audio>` renders another copy of the backend). `wp_audio`:
+`data::tests::shipped_master_stage_keeps_headroom_and_balance`,
+`master_validation_rejects_a_hot_or_incomplete_stage`.
+
+**Assertions changed:** `e2e/audio_engine.mjs` part 2b keeps its numeric check (no sample of a WOT
+pull above 0.8 at the worklet output), only its meaning and message change: with `OUT_MAKEUP` 2 the
+voice limit starts at 1.6, so ≤ 0.8 now means "6 dB under the soft limit". No other e2e level
+assertion needed a change: `audio.mjs`, `audio_engine.mjs` (`--no-media`), `audio_samples.mjs`,
+`audio_roster.mjs`, `siren_samples.mjs`, `audio_impacts.mjs` (`--no-wav`) pass as they are (their
+checks are relative, or floors the −6 dB still clears). `docs/media/audio/` was not regenerated
+(those renders are now 6 dB hotter than the game plays them; timbre unchanged).
+
+**Validation:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test -p wp_audio` (all), `cargo test -p wp_wasm --lib audio` (2/2), `cargo build --target
+wasm32-unknown-unknown -p wp_wasm`, `npm run typecheck` (pkg rebuilt from a release wasm build +
+wasm-bindgen 0.2.129: the copied pkg predated the engine fix and still referenced the removed
+V6 / V8 loops), the e2e scripts above and `audio_mix.mjs`: pass. Audio is presentation only:
+no simulation crate changed (`wp_audio` is not reachable from `wp_sim`); the director's command
+streams for all four scenes are byte-identical before and after.
+
+**Shared files touched:** `voices.ts` (`AudioMixer` only), `types.ts` (`MasterMix`), `index.ts`
+(two lines), `engine_worklet.ts` (output scale), `data.rs` (`MasterMix`), `lib.rs` (re-export),
+`audio_config.json` (`master`), `package.json` (`e2e:audio-mix`).
+
+**Open / needs a listen:**
+- The whole game is ~6 dB quieter at the same master volume (busy chase −15 LUFS short-term, a
+  single V8 −15 … −12, cruise −28, idle −35). Players who had turned the master down may want it
+  up; the default 0.8 was kept (it is the user's setting, stored in localStorage). At master 1.0
+  (+1.9 dB) the chase measures −13.4 LUFS short-term max, true peak −1.6 … −2.0 dBTP, soft clip
+  ≤ 0.001 %, compressor p95 2.2 / max 6.7 dB (flat-plane V8: −12.4 LUFS, −2.0 dBTP): louder and
+  more compressed, still clean.
+- The big hit is the hottest element (+2.4 dBFS into the master); the compressor takes 4–6 dB
+  off for ~0.3 s. Listen for the engine dipping after crashes (it already ducks by the impact
+  sidechain); a softer impact level (`impacts.impact_gain` / `impact_synth`) would be a
+  sound-design call.
+- Cruise and idle are quiet (−29 / −37 LUFS integrated) — the same distance to the chase as
+  before; whether idle should come up is a balance question, not headroom.
+- speechSynthesis voice volume now follows the Police trim (−6 dB); TTS loudness is OS-dependent.
+

@@ -882,9 +882,29 @@ pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
 /// Returns the entity ids (player first).
 #[wasm_bindgen]
 pub fn race_start(id: &str, car: &str, mode: &str, autopilot: bool) -> Result<Vec<u32>, JsValue> {
+    race_start_tuned(id, car, mode, autopilot, "")
+}
+
+/// [`race_start`] with the player's free car tune (`wp_vehicle::CarTune` JSON, e.g.
+/// `{"suspension":5,"gearing":4}`; empty = stock) on the player entity.
+#[wasm_bindgen]
+pub fn race_start_tuned(
+    id: &str,
+    car: &str,
+    mode: &str,
+    autopilot: bool,
+    tune_json: &str,
+) -> Result<Vec<u32>, JsValue> {
     let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
-    let sc =
+    let mut sc =
         race::race_scenario(&def, car, parse_mode(mode).map_err(err)?, autopilot).map_err(err)?;
+    if !tune_json.is_empty() {
+        let tune: wp_vehicle::CarTune =
+            serde_json::from_str(tune_json).map_err(|e| err(format!("bad tune: {e}")))?;
+        if let Some(player) = sc.entities.first_mut() {
+            player.tune = tune;
+        }
+    }
     Ok(install(Session::new(sc, false).map_err(err)?))
 }
 

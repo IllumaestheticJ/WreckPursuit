@@ -672,6 +672,16 @@ pass; Loop 9 default + seeds 1–8 pass (1 DQ on seed 4, as on 0bc27d29); `wp_po
 `wp_wasm --lib` (86) pass; 109 of 109 scenarios; goldens: `opponent_circuit_8x5` and
 `police_tunnel_escape_founders_cut_control` re-blessed, 0 other mismatches.
 
+*City-chase vehicle count, browser smoke (lead: 11 at 8c353f75 vs 17 at 9899d87c).* Not a
+behaviour change. Native `wp_wasm` Session, Vesper city chase, throttle held: the vehicle list at
+12 s of sim time is identical with and without the two changes (17 vehicles: player, 6 police,
+10 traffic; 0 deadlock despawns, 0 give-ways). The count grows with sim time (6 at 4 s, 10 at 8 s,
+16 at 10 s, 17 at 12 s) as traffic is promoted near the player. In the browser, `step()` runs at
+most 60 ticks (0.25 s) per frame; under SwiftShader the page ran about 3 fps (36 frames in 13 s,
+24 of them over 250 ms), so 12 s of wall time is only about 8 s of sim time. Two runs at
+8c353f75 gave 15 and 13 vehicles. A smoke check that counts vehicles should wait for a sim time,
+not a wall time.
+
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
 pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit

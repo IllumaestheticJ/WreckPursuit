@@ -13,6 +13,7 @@ import {
   type AudioLibrary,
   type Bus,
   type CueDef,
+  type MasterMix,
   type SampleStatus,
   type SoundSource,
   type VoiceId,
@@ -24,48 +25,137 @@ interface BusNodes {
   /** Impact sidechain: a big crash briefly ducks the other buses (owner row 74). */
   side: GainNode;
   duck: GainNode;
+  /** Fixed headroom trim (`MasterMix::bus_gain_db`); its output feeds the master. */
+  trim: GainNode;
 }
 
 /** Buses an impact's sidechain ducks (the impact itself plays on World). */
 const SIDECHAIN_BUSES: Bus[] = ["Engine", "Police", "Music"];
 
-/** Mixer buses with per-bus user gain (debug sliders) and a duck stage driven by the director. */
+/**
+ * Shipped master stage (mirror of `data/audio/audio_config.json` → `master`; used when a caller
+ * has no library at hand; e2e/audio_mix.mjs fails if the two drift apart).
+ */
+export const DEFAULT_MASTER: MasterMix = {
+  bus_gain_db: { Engine: -6, World: -6, Police: -6, Ui: -6, Music: -6 },
+  compressor: { threshold_db: -8, knee_db: 6, ratio: 4, attack_s: 0.003, release_s: 0.3 },
+  trim_db: 0,
+  clip_knee: 0.7,
+  clip_ceiling: 0.89,
+};
+
+const dbToLin = (db: number) => 10 ** (db / 20);
+const linToDb = (x: number) => 20 * Math.log10(x);
+
+/**
+ * The automatic make-up gain a DynamicsCompressorNode applies with these settings (linear).
+ * Web Audio leaves it unspecified and it cannot be switched off; Chromium, Firefox and Safari
+ * all run the same compressor kernel (WebKit's DynamicsCompressorKernel), which scales its
+ * output by `(1 / curve(0 dBFS)) ^ 0.6`, where `curve` is the static compression curve: a
+ * soft knee `thr + (1 − e^(−k·(x − thr))) / k` from the threshold to threshold + knee (k chosen
+ * so the knee ends at slope 1 / ratio), then a constant ratio. Ported from that kernel
+ * (`kneeCurve`, `saturate`, `kAtSlope`, `updateStaticCurveParameters`), float for float.
+ * A gentle `threshold −10 dB / knee 30 dB` gives +0.34 dB, a hard `−24 / 0 / 12` gives +12 dB:
+ * every signal below threshold got that much louder, and pushed the next stage harder.
+ */
+export function compressorMakeupGain(thresholdDb: number, kneeDb: number, ratio: number): number {
+  const linThr = dbToLin(thresholdDb);
+  const knee = (x: number, k: number) => (x < linThr ? x : linThr + (1 - Math.exp(-k * (x - linThr))) / k);
+  const slopeAt = (x: number, k: number) => {
+    if (x < linThr) return 1;
+    const x2 = x * 1.001;
+    return (linToDb(knee(x2, k)) - linToDb(knee(x, k))) / (linToDb(x2) - linToDb(x));
+  };
+  // kAtSlope: bisect k (geometric mean) so the knee's slope at its end is 1 / ratio.
+  const xKnee = dbToLin(thresholdDb + kneeDb);
+  let minK = 0.1;
+  let maxK = 10000;
+  let k = 5;
+  for (let i = 0; i < 15; i++) {
+    if (slopeAt(xKnee, k) < 1 / ratio) maxK = k;
+    else minK = k;
+    k = Math.sqrt(minK * maxK);
+  }
+  const kneeThrDb = thresholdDb + kneeDb;
+  const yKneeThrDb = linToDb(knee(dbToLin(kneeThrDb), k));
+  // saturate(1, k): the curve's output for a full-scale input.
+  const full = 1 < dbToLin(kneeThrDb) ? knee(1, k) : dbToLin(yKneeThrDb + (0 - kneeThrDb) / ratio);
+  return (1 / full) ** 0.6;
+}
+
+/**
+ * Soft clip transfer curve for a WaveShaper fed through a 0.5 pre-gain (curve input ±1 = signal
+ * ±2): identity below `knee`, then a tanh knee that approaches `ceiling` and never reaches it.
+ */
+export function softClipCurve(knee: number, ceiling: number, n = 4096): Float32Array<ArrayBuffer> {
+  const c = new Float32Array(n);
+  const w = Math.max(ceiling - knee, 1e-3);
+  for (let i = 0; i < n; i++) {
+    const x = ((i / (n - 1)) * 2 - 1) * 2;
+    const a = Math.abs(x);
+    c[i] = a < knee ? x : Math.sign(x) * (knee + w * Math.tanh((a - knee) / w));
+  }
+  return c;
+}
+
+/**
+ * Mixer buses with per-bus user gain (debug sliders / game menu), a duck stage driven by the
+ * director and a fixed headroom trim, summed into the master stage.
+ *
+ * Gain staging (docs/integration/audio.md "Mix headroom"): sources are calibrated against each
+ * other (engine pack levels, cue gains); the bus trims give the sum its headroom, so a busy
+ * chase peaks a few dB under full scale with the user's master at its default 0.8. The master
+ * compressor only catches peaks (crash transients, several sirens at once) and its automatic
+ * make-up gain is divided out, so below threshold the master stage is unity gain. The tanh soft
+ * clip after it is a safety net that keeps sample peaks under `clip_ceiling` (−1 dBFS).
+ */
 export class AudioMixer {
   readonly master: GainNode;
   readonly buses: Record<Bus, BusNodes>;
+  /** Master compressor (e2e reads its `reduction`). */
+  readonly comp: DynamicsCompressorNode;
   /** Radio EQ input (band-limited, slightly driven) feeding the Police bus. */
   readonly radioIn: AudioNode;
   /** Last node before the destination (offline renders tap it). */
   readonly out: AudioNode;
+  /** Master stage settings in use. */
+  readonly settings: MasterMix;
 
-  constructor(readonly ctx: AudioContext) {
+  constructor(
+    readonly ctx: AudioContext,
+    settings?: MasterMix,
+  ) {
+    const m = (this.settings = settings ?? DEFAULT_MASTER);
     this.master = ctx.createGain();
     this.master.gain.value = 0.8;
-    // Gentle limiter so a 24-car pile-up cannot clip.
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -10;
-    comp.ratio.value = 6;
-    // Safety soft clip after it (owner row 74): a big crash's transient can still overshoot the
-    // compressor's attack; tanh keeps the output under full scale instead of hard clipping.
-    // Identity below 0.7, a tanh knee to 0.99 above (input range ±2 via the 0.5 pre-gain).
+    const comp = (this.comp = ctx.createDynamicsCompressor());
+    comp.threshold.value = m.compressor.threshold_db;
+    comp.knee.value = m.compressor.knee_db;
+    comp.ratio.value = m.compressor.ratio;
+    comp.attack.value = m.compressor.attack_s;
+    comp.release.value = m.compressor.release_s;
+    // Undo the compressor's automatic make-up gain (read back the clamped AudioParam values),
+    // then the final trim.
+    const post = ctx.createGain();
+    post.gain.value = dbToLin(m.trim_db) / compressorMakeupGain(comp.threshold.value, comp.knee.value, comp.ratio.value);
+    // Safety soft clip (owner row 74): a crash transient can still overshoot the compressor's
+    // attack; tanh keeps it under the ceiling instead of hard clipping. Input range ±2 via the
+    // 0.5 pre-gain.
     const pre = ctx.createGain();
     pre.gain.value = 0.5;
     const clip = ctx.createWaveShaper();
-    const cc = new Float32Array(4096);
-    for (let i = 0; i < cc.length; i++) {
-      const x = ((i / (cc.length - 1)) * 2 - 1) * 2;
-      cc[i] = Math.abs(x) < 0.7 ? x : Math.sign(x) * (0.7 + 0.29 * Math.tanh((Math.abs(x) - 0.7) / 0.29));
-    }
-    clip.curve = cc;
-    this.master.connect(comp).connect(pre).connect(clip).connect(ctx.destination);
+    clip.curve = softClipCurve(m.clip_knee, m.clip_ceiling);
+    this.master.connect(comp).connect(post).connect(pre).connect(clip).connect(ctx.destination);
     this.out = clip;
     const buses = {} as Record<Bus, BusNodes>;
     for (const b of BUSES) {
       const user = ctx.createGain();
       const side = ctx.createGain();
       const duck = ctx.createGain();
-      user.connect(side).connect(duck).connect(this.master);
-      buses[b] = { user, side, duck };
+      const trim = ctx.createGain();
+      trim.gain.value = dbToLin(m.bus_gain_db[b] ?? 0);
+      user.connect(side).connect(duck).connect(trim).connect(this.master);
+      buses[b] = { user, side, duck, trim };
     }
     this.buses = buses;
     const hp = ctx.createBiquadFilter();
@@ -87,6 +177,11 @@ export class AudioMixer {
     drive.curve = curve;
     hp.connect(lp).connect(mid).connect(drive).connect(buses.Police.user);
     this.radioIn = hp;
+  }
+
+  /** A bus's output where it enters the master stage (offline renders tap it). */
+  busOut(bus: Bus): AudioNode {
+    return this.buses[bus].trim;
   }
 
   input(bus: Bus): AudioNode {

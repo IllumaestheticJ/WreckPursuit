@@ -29,6 +29,8 @@ pub use police_tools::{BarrierView, SpikeStripView};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
+/// The free per-car tune, re-exported for spawners ([`Sim::spawn_vehicle_tuned`]).
+pub use wp_vehicle::CarTune;
 
 use rapier3d::prelude::QueryFilter;
 use thiserror::Error;
@@ -39,7 +41,7 @@ use wp_contracts::{
 use wp_damage::DamageModel;
 use wp_math::{FixedStep, Rng, StateHasher};
 use wp_police::PoliceSystem;
-use wp_vehicle::{RapierGround, Vehicle, VehicleBody};
+use wp_vehicle::{RapierGround, Vehicle, VehicleBody, VehicleExtras};
 use wp_world::World;
 
 /// Errors from simulation control calls.
@@ -93,6 +95,8 @@ pub struct SimVehicle {
     pub id: EntityId,
     /// Car id (`VehicleDef::id`).
     pub car_id: String,
+    /// The tune the car was built with ([`Sim::spawn_vehicle_tuned`]; stock otherwise).
+    pub tune: CarTune,
     /// Vehicle dynamics.
     pub vehicle: Vehicle,
     /// Damage model.
@@ -267,12 +271,34 @@ impl Sim {
         pos: [f32; 3],
         yaw: f32,
     ) -> Result<EntityId, SimError> {
+        self.spawn_vehicle_tuned(car, pos, yaw, CarTune::STOCK)
+    }
+
+    /// [`Sim::spawn_vehicle`] with the player's free tune applied to the car first
+    /// (`wp_vehicle::tune`; a stock tune builds exactly the car file).
+    pub fn spawn_vehicle_tuned(
+        &mut self,
+        car: &LoadedCar,
+        pos: [f32; 3],
+        yaw: f32,
+        tune: CarTune,
+    ) -> Result<EntityId, SimError> {
         if self.vehicles.len() >= MAX_VEHICLES {
             return Err(SimError::TooManyVehicles);
         }
         let id = EntityId(self.next_entity);
         self.next_entity += 1;
-        let mut vehicle = Vehicle::new(&car.def, &car.tires, pos, yaw);
+        let tune = tune.clamped();
+        let mut vehicle = if tune.is_stock() {
+            Vehicle::new(&car.def, &car.tires, pos, yaw)
+        } else {
+            let (def, diffs) = wp_vehicle::tune::tuned(&car.def, tune);
+            let extras = VehicleExtras {
+                diffs: Some(diffs),
+                ..VehicleExtras::default()
+            };
+            Vehicle::with_extras(&def, &car.tires, pos, yaw, extras)
+        };
         vehicle.set_entity(id);
         let body = vehicle.build_body(&mut self.physics.bodies, &mut self.physics.colliders);
         self.physics.bodies[body.body].set_enabled(self.systems.vehicle);
@@ -288,6 +314,7 @@ impl Sim {
         self.vehicles.push(SimVehicle {
             id,
             car_id: car.def.id.clone(),
+            tune,
             body,
             vehicle,
             damage,
@@ -1233,6 +1260,76 @@ mod tests {
         }
         let state = sim.vehicle_states()[0].1.clone();
         (sim.state_hash(), state)
+    }
+
+    /// A stock tune spawns exactly the car file; a tuned spawn carries the tuned definition and
+    /// differential, and drives differently.
+    #[test]
+    fn tuned_spawn_applies_the_tune() {
+        let car = wp_contracts::load_car(data("cars/rampart_50.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let drive = |tune: CarTune| {
+            let mut sim = Sim::new(SimConfig {
+                seed: 7,
+                mode: mode.clone(),
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let id = sim.spawn_vehicle_tuned(&car, [0.0; 3], 0.0, tune).unwrap();
+            sim.set_input(
+                id,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for _ in 0..480 {
+                sim.step_fixed();
+            }
+            let v = &sim.vehicles()[0];
+            (
+                v.tune,
+                v.vehicle.def().clone(),
+                *v.vehicle.diffs(),
+                sim.state_hash(),
+            )
+        };
+        let mut plain = Sim::new(SimConfig {
+            seed: 7,
+            mode: mode.clone(),
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let id = plain.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        plain
+            .set_input(
+                id,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for _ in 0..480 {
+            plain.step_fixed();
+        }
+        let (t, def, _, hash) = drive(CarTune::STOCK);
+        assert_eq!(t, CarTune::STOCK);
+        assert_eq!(def, car.def);
+        assert_eq!(hash, plain.state_hash());
+
+        let owner = CarTune {
+            suspension: 5,
+            gearing: 5,
+            diff: 5,
+            brake_balance: 2,
+        };
+        let (t, def, diffs, tuned_hash) = drive(owner);
+        assert_eq!(t, owner);
+        assert!(def.drivetrain.final_drive < car.def.drivetrain.final_drive);
+        assert_eq!(diffs.rear, wp_vehicle::AxleDiff::Locked);
+        assert_ne!(tuned_hash, hash);
     }
 
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.

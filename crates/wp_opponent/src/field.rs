@@ -324,6 +324,9 @@ struct Racer {
     pos: V2,
     fwd: V2,
     s: f32,
+    /// `s` without the clamp at the ends of an open course (negative on a grid behind the
+    /// start line): where cars are relative to each other.
+    s_rel: f32,
     n: f32,
     v: f32,
     v_s: f32,
@@ -573,6 +576,9 @@ struct Civ {
 const CREEP_MPS: f32 = 2.5;
 /// Gap a creeping racer always keeps to the parked car it is steering round, m.
 const CREEP_STOP_GAP_M: f32 = 1.0;
+/// Lateral clearance to a parked car's body that lets a creeping racer roll on alongside it
+/// inside the stop gap, m.
+const CREEP_CLEAR_M: f32 = 0.15;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -623,6 +629,7 @@ impl Field {
                 pos: [0.0; 2],
                 fwd: [0.0, 1.0],
                 s: 0.0,
+                s_rel: 0.0,
                 n: 0.0,
                 v: 0.0,
                 v_s: 0.0,
@@ -1044,6 +1051,7 @@ impl Field {
                 r.pos = pos;
                 r.fwd = fwd;
                 r.s = cp.s;
+                r.s_rel = corridor.unclamped_s(pos, &cp);
                 r.n = cp.n;
                 r.hint = cp.index;
                 r.v = st.speed_mps;
@@ -1377,7 +1385,7 @@ impl Field {
                         let unstable = r.unstable || r.running_wide || r.tactic == Tactic::Reverse;
                         out.push(Obstacle {
                             who: Who::Racer(k),
-                            s: r.s,
+                            s: r.s_rel,
                             n: r.n,
                             v_s: r.v_s,
                             v_n: r.v_n,
@@ -1399,7 +1407,7 @@ impl Field {
                 continue;
             }
             let hint = self.hints.get(&v.entity).copied();
-            let cp = self.corridor.project(pos, hint, 60);
+            let cp = self.corridor.project_unclamped(pos, hint, 60);
             self.hints.insert(v.entity, cp.index);
             if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
@@ -1437,7 +1445,7 @@ impl Field {
             if geom::dist(pos, me.pos) > me.ahead_m() + 20.0 {
                 continue;
             }
-            let cp = corridor.project(pos, Some(me.hint), 80);
+            let cp = corridor.project_unclamped(pos, Some(me.hint), 80);
             if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
                 o.out_of_race = self
@@ -1616,7 +1624,7 @@ fn decide_racer(
         // to get round a pulled-over racer just ahead.
         let parked_ahead = obstacles.iter().any(|o| {
             o.parked && o.who != Who::Racer(k) && {
-                let ds = corridor.delta_s(r.s, o.s);
+                let ds = corridor.delta_s(r.s_rel, o.s);
                 ds > -(hl + o.half_len) && ds < 60.0
             }
         });
@@ -1634,7 +1642,7 @@ fn decide_racer(
         // gone round as soon as it holds me up at all (Hollins, police seed 6: the field crawled
         // behind a fled racer through the hairpins for a minute and got caught there).
         let crawler_ahead = obstacles.iter().any(|o| {
-            let ds = corridor.delta_s(r.s, o.s);
+            let ds = corridor.delta_s(r.s_rel, o.s);
             ds > 0.0
                 && ds < 40.0
                 && !matches!(o.who, Who::Racer(_))
@@ -1663,7 +1671,7 @@ fn decide_racer(
             .iter()
             .filter(|o| o.who != me_who && !matches!(o.who, Who::Vehicle(e) if e == r.entity))
             .map(|o| {
-                let ds = corridor.delta_s(r.s, o.s);
+                let ds = corridor.delta_s(r.s_rel, o.s);
                 let gap = ds.abs() - hl - o.half_len;
                 Rel { o: *o, ds, gap }
             })
@@ -2400,6 +2408,17 @@ fn decide_racer(
                 cap_to(&mut v_target, creep, SpeedLimit::Obstacle(who_id(o.who)));
                 continue;
             }
+            // Already clear of its body, only inside the margin, and steering further away:
+            // keep creeping alongside it (rolling is what moves me sideways; going forward
+            // cannot touch it). Otherwise a car stopped at the stop gap stays there.
+            if steering_round && !overlaps(my_band(r.n, r.n), o, CREEP_CLEAR_M, 0.0) {
+                cap_to(
+                    &mut v_target,
+                    CREEP_MPS,
+                    SpeedLimit::Obstacle(who_id(o.who)),
+                );
+                continue;
+            }
             let in_corner = r.in_brake_zone
                 || line.curvature[corridor.wrap((r.s / CORRIDOR_STEP_M) as isize)].abs()
                     > 1.0 / 80.0;
@@ -2671,7 +2690,9 @@ fn civilians_on(
             }
         }
         let Some((_, hint)) = near else { continue };
-        let cp = c.project(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
+        // Beyond the ends of an open course (a grid behind the start line, a flight route that
+        // starts at the racer) a car keeps its distance instead of landing on the end.
+        let cp = c.project_unclamped(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
         // The whole road, opposing lanes included: a racer passing over there must see
         // what stands in them.
         let (l, rr) = c.pass_bounds(cp.s);
@@ -2862,7 +2883,10 @@ fn plan_pass(
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
-            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 {
+            // A car right behind me in line is following me whichever way I go: pulling out
+            // does not cut it off.
+            let in_line = (q.o.n - r.n).abs() < hw + q.o.half_w - 0.5;
+            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 && !in_line {
                 why = PassReject::LaneBehind;
                 continue 'side;
             }
