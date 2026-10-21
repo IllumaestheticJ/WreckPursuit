@@ -112,6 +112,9 @@
   drive on, and `live_police_chase…` passes **at 6.0 too**. Tests: 2 in `avoid.rs`, 1 in
   `pursuit.rs` (reroute + back-out on a 3 × 3 grid). The kinematic driver (headless doctrine
   scenarios) also reroutes but turns on the spot (no back-out).
+  Goldens re-blessed (`[bless]` commit): `opponent_{circuit_8x5, flee_police,
+  reverse_grid_2laps}` and `world_traffic_soak{,_observer,_vesper}`. Their hashes diverge 25-70 s
+  in, i.e. units that used to sit stuck now reroute. Every scenario's range expectations pass.
 
 ## Needs
 | From | What | Workaround now |
