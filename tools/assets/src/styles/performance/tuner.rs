@@ -32,9 +32,9 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
         hood_bulge_w: 0.45,
         hood_scoop: HoodScoop::Scoop,
         hood_scoop_h: 0.07,
-        windshield_rake_deg: Some(59.0),
+        windshield_rake_deg: Some(56.0),
         a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(58.0),
+        rear_glass_rake_deg: Some(52.0),
         tumblehome: Some(0.13),
         crease_z: 0.60,
         crease_depth: 0.010,
@@ -45,6 +45,7 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
         ride_dz: -0.02,
         ducktail_h: 0.015,
         belt_kick: 0.01,
+        roof_len_trim: 0.12,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(kestrel_kit));
@@ -123,9 +124,9 @@ fn kestrel_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Rear: tall pedestal wing, round-element tails, mud flaps.
     k.wing(Wing {
-        lead: 0.34,
-        chord: 0.22,
-        height: 0.16,
+        lead: 0.36,
+        chord: 0.24,
+        height: 0.19,
         half_span: 0.70,
         thick: 0.035,
         aoa_deg: 8.0,
@@ -219,9 +220,9 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
         nose_plan_round: 0.30,
         tail_plan_round: 0.22,
         hood_crown: 0.015,
-        windshield_rake_deg: Some(61.0),
+        windshield_rake_deg: Some(58.0),
         a_pillar_rake_deg: 9.0,
-        rear_glass_rake_deg: Some(66.0),
+        rear_glass_rake_deg: Some(58.0),
         tumblehome: Some(0.14),
         crease_z: 0.58,
         crease_depth: 0.010,
@@ -234,6 +235,7 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
         ducktail_h: 0.010,
         overhang_trim: (0.04, 0.0),
         belt_kick: 0.02,
+        roof_len_trim: 0.15,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(shiro_kit));
@@ -435,9 +437,9 @@ pub fn hakone(def: &VehicleDef) -> CarStyle {
         hood_crown: 0.025,
         hood_bulge_h: 0.015,
         hood_bulge_w: 0.60,
-        windshield_rake_deg: Some(63.0),
+        windshield_rake_deg: Some(60.0),
         a_pillar_rake_deg: 12.0,
-        roof_len_trim: -0.08,
+        roof_len_trim: 0.05,
         tumblehome: Some(0.20),
         crease_z: 0.50,
         crease_depth: 0.0,
@@ -617,9 +619,9 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
         hood_crown: 0.015,
         hood_bulge_h: 0.020,
         hood_bulge_w: 0.35,
-        windshield_rake_deg: Some(60.0),
+        windshield_rake_deg: Some(57.0),
         a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(60.0),
+        rear_glass_rake_deg: Some(52.0),
         roof_dz: -0.01,
         tumblehome: Some(0.15),
         crease_z: 0.62,
@@ -630,6 +632,7 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
         ride_dz: -0.015,
         ducktail_h: 0.020,
         belt_kick: 0.03,
+        roof_len_trim: 0.12,
         ..BodyStyle::preset(Silhouette::Notchback)
     });
     s.details.push(kit_detail(sperber_kit));
@@ -866,9 +869,9 @@ pub fn debug_coupe(def: &VehicleDef) -> CarStyle {
         hood_crown: 0.020,
         hood_bulge_h: 0.015,
         hood_bulge_w: 0.40,
-        windshield_rake_deg: Some(63.0),
+        windshield_rake_deg: Some(60.0),
         a_pillar_rake_deg: 10.0,
-        roof_len_trim: -0.05,
+        roof_len_trim: 0.05,
         roof_dz: -0.02,
         tumblehome: Some(0.18),
         crease_z: 0.60,

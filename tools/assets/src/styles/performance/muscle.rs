@@ -196,7 +196,9 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         }
     }
     let kr = dkey("reverse_lamps", BodyRegion::Trunk, M::Headlight);
-    k.rear_box(&kr, -0.12, 0.12, pz0 + 0.03, pz1 - 0.03, 0.02, 0.004);
+    for x in [-0.09, 0.05] {
+        k.rear_box(&kr, x, x + 0.04, pz0 + 0.03, pz1 - 0.03, 0.02, 0.004);
+    }
 
     // --- Sides: chrome rocker strip, black hockey-stick stripe, vinyl roof.
     let (yf, _, rf) = k.arch(true);
