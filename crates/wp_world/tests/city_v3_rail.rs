@@ -433,6 +433,9 @@ fn level_crossings_have_gates_and_fence_gaps() {
                         continue;
                     }
                     crossings += 1;
+                    if s.highway {
+                        println!("{}: at-grade crossing with a highway at {a0:?}", l.name);
+                    }
                     // Gate posts (solid furniture) within 25 m, none on the paving.
                     let gates = r
                         .features
@@ -446,10 +449,14 @@ fn level_crossings_have_gates_and_fence_gaps() {
         }
     }
     assert!(crossings >= 3, "only {crossings} level crossings");
-    // Fences never touch paving (the gaps are where the roads cross).
+    // Fences never touch paving at their height (the gaps are where the roads cross; a
+    // fence may stand under a ramp or bridge high above it).
     for f in r.features.iter().filter(|f| f.kind == FeatureKind::Fence) {
-        let (fp, _, _) = extent(f);
-        for (q, _, _) in &pav {
+        let (fp, z0, z1) = extent(f);
+        for (q, qlo, qhi) in &pav {
+            if z1 < qlo - 0.3 || z0 > qhi + 4.0 {
+                continue;
+            }
             assert!(
                 !convex_overlap(&fp, q, 0.05),
                 "fence on paving at {:?}",
@@ -494,11 +501,16 @@ fn sites_have_their_content() {
     // way from the gate to the turntable.
     let rh = r.plan.site("roundhouse").unwrap();
     let gate = rh.gates[0].pos;
-    let c = [-2300.0f32, 380.0];
+    // Turntable 20 m from the site centre, away from the gate; stop at its kerb ring.
+    let centre = ground::bounds(&rh.polygon);
+    let centre = geom::scale(geom::add(centre.0, centre.1), 0.5);
+    let u = geom::normalize(geom::sub(gate, centre));
+    let t = [centre[0] - u[0] * 20.0, centre[1] - u[1] * 20.0];
+    let c = [t[0] + u[0] * 17.0, t[1] + u[1] * 17.0];
     let solids: Vec<(Vec<V2>, f32, f32)> =
         r.features.iter().filter(|f| f.solid).map(extent).collect();
     for k in 0..=40 {
-        let p = wp_world::metro::ctx::lerp2(gate, c, k as f32 / 40.0 * 0.85);
+        let p = wp_world::metro::ctx::lerp2(gate, c, k as f32 / 40.0);
         let car = wp_world::metro::ctx::obb(p, [1.0, 2.2], 0.0);
         let z = rh.pad_z.unwrap();
         assert!(

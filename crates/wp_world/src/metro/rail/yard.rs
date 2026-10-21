@@ -239,11 +239,11 @@ pub fn build_yard(
             // Buffer stops where a siding stops at a road.
             if r0 > 0 {
                 let d = geom::normalize(geom::sub(geom::xy(pts[r0]), geom::xy(pts[r0 + 1])));
-                buffer_stop(out, pts[r0], d);
+                buffer_stop(out, paving, pts[r0], d);
             }
             if r1 + 1 < pts.len() {
                 let d = geom::normalize(geom::sub(geom::xy(pts[r1]), geom::xy(pts[r1 - 1])));
-                buffer_stop(out, pts[r1], d);
+                buffer_stop(out, paving, pts[r1], d);
             }
             if to.is_some() {
                 continue;
@@ -329,9 +329,28 @@ pub fn build_yard(
             .collect();
         let (pts, active) = sampled(pts, paving);
         lay_track(out, &pts, &active);
-        // Planks where the lead crosses a road; fences on both sides between the sites.
+        // Planks where the lead crosses a street (never a highway: the lead stops at
+        // buffer stops either side of one); fences on both sides between the sites.
+        let hw: Vec<bool> = (0..pts.len())
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1).min(pts.len() - 1)]);
+                let fp = strip(geom::xy(a), geom::xy(b), BALLAST_HALF_M);
+                paving.hits_highway(&fp, 2.0, a[2] - 1.5, a[2] + 3.0)
+            })
+            .collect();
+        let hw_near = |i: usize| (i.saturating_sub(2)..(i + 3).min(pts.len())).any(|j| hw[j]);
+        for (r0, r1) in runs(&active) {
+            if r0 > 0 && hw_near(r0 - 1) {
+                let d = geom::normalize(geom::sub(geom::xy(pts[r0]), geom::xy(pts[r0 + 1])));
+                buffer_stop(out, paving, pts[r0], d);
+            }
+            if r1 + 1 < pts.len() && hw_near(r1 + 1) {
+                let d = geom::normalize(geom::sub(geom::xy(pts[r1]), geom::xy(pts[r1 - 1])));
+                buffer_stop(out, paving, pts[r1], d);
+            }
+        }
         for i in 0..pts.len() - 1 {
-            if !active[i] || !active[i + 1] {
+            if (!active[i] || !active[i + 1]) && !hw_near(i) && !hw_near(i + 1) {
                 let (a, b) = (pts[i], pts[i + 1]);
                 let z = ctx.ground_z(geom::xy(a)).max(ctx.ground_z(geom::xy(b)));
                 out.add(piece(
