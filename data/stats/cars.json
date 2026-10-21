@@ -15,6 +15,39 @@
     "skidpad_radius_m": 50.0
   },
   "cars": {
+    "arashi_t4": {
+      "display_name": "Arashi T4",
+      "zero_to_100_s": 5.63,
+      "top_speed_kmh": 248.1,
+      "cornering_g": 0.957,
+      "bars": {
+        "acceleration": 0.83,
+        "top_speed": 0.636,
+        "cornering": 0.813
+      }
+    },
+    "brigand_400": {
+      "display_name": "Brigand 400",
+      "zero_to_100_s": 9.8,
+      "top_speed_kmh": 196.9,
+      "cornering_g": 0.59,
+      "bars": {
+        "acceleration": 0.496,
+        "top_speed": 0.335,
+        "cornering": 0.08
+      }
+    },
+    "bulwark_400": {
+      "display_name": "Bulwark 400",
+      "zero_to_100_s": 7.91,
+      "top_speed_kmh": 201.3,
+      "cornering_g": 0.711,
+      "bars": {
+        "acceleration": 0.647,
+        "top_speed": 0.361,
+        "cornering": 0.322
+      }
+    },
     "debug_coupe": {
       "display_name": "Debug Coupe",
       "zero_to_100_s": 5.17,
@@ -136,6 +169,17 @@
         "cornering": 0.841
       }
     },
+    "marten_20": {
+      "display_name": "Marten 2.0",
+      "zero_to_100_s": 8.78,
+      "top_speed_kmh": 205.7,
+      "cornering_g": 0.855,
+      "bars": {
+        "acceleration": 0.578,
+        "top_speed": 0.387,
+        "cornering": 0.61
+      }
+    },
     "rampart_50": {
       "display_name": "Rampart 5.0",
       "zero_to_100_s": 6.18,
@@ -145,6 +189,17 @@
         "acceleration": 0.786,
         "top_speed": 0.758,
         "cornering": 0.641
+      }
+    },
+    "satchel_20": {
+      "display_name": "Satchel 2.0",
+      "zero_to_100_s": 18.48,
+      "top_speed_kmh": 146.6,
+      "cornering_g": 0.702,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.039,
+        "cornering": 0.304
       }
     },
     "sentinel_bastion": {
@@ -202,6 +257,28 @@
         "cornering": 0.751
       }
     },
+    "stoat_16v": {
+      "display_name": "Stoat 16V",
+      "zero_to_100_s": 9.03,
+      "top_speed_kmh": 204.5,
+      "cornering_g": 0.844,
+      "bars": {
+        "acceleration": 0.558,
+        "top_speed": 0.38,
+        "cornering": 0.588
+      }
+    },
+    "talus_20t": {
+      "display_name": "Talus 2.0T",
+      "zero_to_100_s": 5.5,
+      "top_speed_kmh": 240.2,
+      "cornering_g": 0.927,
+      "bars": {
+        "acceleration": 0.84,
+        "top_speed": 0.59,
+        "cornering": 0.754
+      }
+    },
     "tansy_13": {
       "display_name": "Tansy 1.3",
       "zero_to_100_s": 13.72,
@@ -211,6 +288,17 @@
         "acceleration": 0.182,
         "top_speed": 0.132,
         "cornering": 0.448
+      }
+    },
+    "tumbril_20": {
+      "display_name": "Tumbril 2.0",
+      "zero_to_100_s": 17.6,
+      "top_speed_kmh": 141.7,
+      "cornering_g": 0.713,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.01,
+        "cornering": 0.325
       }
     },
     "vireo_xs": {
