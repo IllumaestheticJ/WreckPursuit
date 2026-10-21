@@ -135,6 +135,28 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Option (b): front grip falloff at deep front slip (lead, 2026-10-21)
+
+`CarTune::front_deep_falloff` (existing knob: front side force × (1 − falloff) faded in from
+`front_deep_from_deg` to `front_deep_full_deg` of front slip angle). Step 20 · plain, real-swing
+metric (held / 27 · lift-off fails / 18 · real swings caught / 18):
+
+| falloff | v1 | v2 preset |
+|---|---|---|
+| 0 (off) | 26 · 0 · 0 | 25 · 0 · 0 |
+| 0.2 / 0.4 / 0.6, 25 → 45° | 26 · 0 · 0 | 25 · 0 · 0 |
+| 0.75 / 0.9, 20 → 35° | 26 · 0 · 0 | 24 · 0 · 0 |
+| 0.9 / 0.95, 25 → 40°; 0.9, 30 → 45° | 26 · 0 · 0 | 25 · 0 · 0 |
+
+The gates hold (held ≥ 24, lift-off 0 everywhere; turn-in front slip is far below 20°). No
+flick reaches 10° on the new side yet, **but at ≥ 0.9 the swing starts for real** (trace, v1,
+rwd_d, 0.15 s lift, 0.05 s gap): yaw +29 → −6°/s within 0.4 s of the lift, −44°/s at 0.8 s, the
+slide −37° → +2° at ~1.15 s while the car accelerates 56 → 80 km/h; then the new countersteer,
+held at ~9° by the lock, cannot catch it and it swings back (yaw +66°/s at 2.0 s, back to −36°).
+Without the falloff the yaw never reverses. So (b) supplies the start of the swing and
+the catch needs W's countersteer lock (a): measure the combination when it lands (falloff 0.9,
+20 → 35° is the candidate).
+
 ### Correction (2026-10-21): v2's "caught" lift flicks were not transitions
 
 Tracing the "caught" v2 flicks: after the lift the car keeps rotating the **old** way (yaw
