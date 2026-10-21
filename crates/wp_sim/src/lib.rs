@@ -144,9 +144,6 @@ pub const GHOST_MAX_OVERSTAY_TICKS: u32 = 3 * 240;
 /// Gap left under a new prop in hilly cities, m.
 const PROP_HOVER_M: f32 = 0.04;
 
-/// Props settle for this many ticks (1 s) after `set_world` before motion counts as a hit.
-const PROP_SETTLE_TICKS: u64 = 240;
-
 /// Pose on the city's drivable ground at `xy` facing `yaw`: height from the road nearest
 /// `near_z` (or the terrain), rotation pitched and rolled to the surface normal (sampled a
 /// metre around).
@@ -206,9 +203,6 @@ pub struct Sim {
     /// Roadblock barrier bodies (see `police_tools`).
     tool_bodies: Vec<police_tools::ToolBody>,
     city_colliders: CityColliders,
-    /// Tick until which new props settle (their first contacts take a few ticks; drops during
-    /// that time are not hits).
-    props_settle_until: u64,
     /// Hilly cities: props still resting (not colliding with terrain), in creation order.
     resting_props: Vec<(
         rapier3d::prelude::RigidBodyHandle,
@@ -250,7 +244,6 @@ impl Sim {
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
             resting_bodies: Default::default(),
-            props_settle_until: 0,
             weather: None,
         }
     }
@@ -354,10 +347,32 @@ impl Sim {
         self.city_colliders = self.physics.set_city_ground(world.map());
         self.world = world;
         let props: Vec<wp_world::props::StaticProp> = self.world.static_props().copied().collect();
-        for prop in &props {
-            self.insert_prop(prop);
+        if self.has_terrain() {
+            // Seat every parked car on the ground colliders under its wheels and drop the spots
+            // where a car cannot stand (owner bug 0.12.26: parked cars in the ground on Hollins
+            // Drive); the world keeps exactly the cars the sim has.
+            let mut kept = Vec::new();
+            for prop in &props {
+                if prop.kind != wp_world::props::PropKind::ParkedCar {
+                    self.insert_prop(prop, None);
+                    continue;
+                }
+                if let Some(pose) = self.seat_parked_car(prop) {
+                    self.insert_prop(prop, Some(pose));
+                    let t = pose.translation;
+                    kept.push(wp_world::props::StaticProp {
+                        pos: [t.x, t.y, t.z],
+                        ..*prop
+                    });
+                }
+            }
+            // `static_props()` is parked cars then cones: the kept cars replace the first part.
+            self.world.set_parked_cars(kept);
+        } else {
+            for prop in &props {
+                self.insert_prop(prop, None);
+            }
         }
-        self.props_settle_until = self.tick + PROP_SETTLE_TICKS;
         self.rebuild_police();
         self.rebuild_weather();
     }
@@ -376,12 +391,23 @@ impl Sim {
             half_extents: parked::PARKED_CAR_HALF_EXTENTS,
             mass_kg: parked::PARKED_CAR_MASS_KG,
         };
-        self.insert_prop(&prop);
+        let seated = if self.has_terrain() {
+            self.seat_parked_car(&prop)
+        } else {
+            None
+        };
+        self.insert_prop(&prop, seated);
         self.props.len() - 1
     }
 
-    /// One prop as a fixed Rapier box (see [`Sim::set_world`]).
-    fn insert_prop(&mut self, prop: &wp_world::props::StaticProp) {
+    /// One prop as a fixed Rapier box (see [`Sim::set_world`]), at `seated` if given (a parked
+    /// car seated on the ground colliders), else at its laid-out position (on a city with
+    /// terrain: on the ground under it, pitched to the road).
+    fn insert_prop(
+        &mut self,
+        prop: &wp_world::props::StaticProp,
+        seated: Option<rapier3d::prelude::Pose>,
+    ) {
         use rapier3d::math::Rotation;
         use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
         let hilly = self.world.network().terrain.is_some();
@@ -390,7 +416,9 @@ impl Sim {
             Vector::from_array(prop.pos),
             Rotation::from_xyzw(0.0, 0.0, s, c),
         );
-        if hilly {
+        if let Some(p) = seated {
+            pose = p;
+        } else if hilly {
             // Flush with the (sloped, banked) surface under it and asleep until something
             // hits it: thousands of parked cars otherwise keep settling on the road mesh.
             let (pos, rot) = ground_pose(
@@ -476,43 +504,38 @@ impl Sim {
             .count()
     }
 
-    /// Props set in motion (hit, pushed: faster than 0.5 m/s, well above the settling jitter
-    /// on the road mesh) collide with the terrain again, so a parked car
-    /// knocked off the road lands on the ground. In creation order: deterministic.
+    /// Props that turned dynamic (a vehicle or debris is near, `props.rs`) collide with the
+    /// terrain again, so a parked car knocked off the road lands on the ground instead of
+    /// sinking into it. Earlier this waited for the prop to move faster than 0.5 m/s after a
+    /// 1 s settle window, and a car knocked inside that window (or pushed slowly) kept no
+    /// terrain contacts and was shoved into the hillside (owner bug 0.12.26). Only the few
+    /// dynamic props are checked; in creation order: deterministic.
     fn wake_resting_props(&mut self) {
-        if self.resting_props.is_empty() || self.tick < self.props_settle_until {
+        if self.resting_props.is_empty() {
             return;
         }
-        let bodies = &self.physics.bodies;
-        // Only an awake body can be moving: look among the awake set (the vehicles and the
-        // few props in motion) instead of reading every resting prop's body each tick (~3800
-        // in Port Vesper, ~11 % of the browser sim step). The scan below runs only on a tick
-        // where one of them did start moving, so the result is the same.
-        let moving = |b: &rapier3d::prelude::RigidBodyHandle| {
-            bodies
-                .get(*b)
-                .is_some_and(|rb| !rb.is_sleeping() && rb.linvel().length() > 0.5)
-        };
-        if !self
-            .physics
-            .active_bodies()
-            .any(|b| self.resting_bodies.contains(&b.into_raw_parts()) && moving(&b))
-        {
+        let woken: Vec<(u32, u32)> = self
+            .props
+            .active()
+            .map(|i| self.props.bodies[i].into_raw_parts())
+            .filter(|b| self.resting_bodies.contains(b))
+            .collect();
+        if woken.is_empty() {
             return;
+        }
+        for b in &woken {
+            self.resting_bodies.remove(b);
         }
         let colliders = &mut self.physics.colliders;
-        let resting_bodies = &mut self.resting_bodies;
+        let resting_bodies = &self.resting_bodies;
         self.resting_props.retain(|(b, c)| {
-            let awake = bodies
-                .get(*b)
-                .is_some_and(|rb| !rb.is_sleeping() && rb.linvel().length() > 0.5);
-            if awake {
-                if let Some(col) = colliders.get_mut(*c) {
-                    col.set_collision_groups(rapier3d::prelude::InteractionGroups::all());
-                }
-                resting_bodies.remove(&b.into_raw_parts());
+            if resting_bodies.contains(&b.into_raw_parts()) {
+                return true;
             }
-            !awake
+            if let Some(col) = colliders.get_mut(*c) {
+                col.set_collision_groups(rapier3d::prelude::InteractionGroups::all());
+            }
+            false
         });
     }
 
