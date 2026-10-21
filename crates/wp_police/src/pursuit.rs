@@ -948,11 +948,12 @@ impl PoliceSystem {
                         // intercept. Driving to where it was only ends in a stern chase.
                         crate::dispatch::IncidentKind::Report { racer } => {
                             let held_for = now.since(u.assigned);
-                            // Not in the middle of turning round onto its route: a new meeting
-                            // point the other way flips it back (circling in the junction).
-                            let stale = held_for > 0.0
-                                && held_for % 3.0 < tdt
-                                && !crate::unit::facing_away_from_track(u);
+                            // Not in the middle of a turn-round (`crate::turn`): the route is
+                            // planned from the heading, which half way round points anywhere
+                            // (into the side road it is turning in), and a route that way
+                            // abandons the turn for a detour.
+                            let stale =
+                                held_for > 0.0 && held_for % 3.0 < tdt && !u.turning_round();
                             let goal = if !t.is_drivable() || u.track_s > t.length() - 10.0 || stale
                             {
                                 let (v, speed) =
@@ -975,13 +976,17 @@ impl PoliceSystem {
                     };
                     if let Some((dest, fin)) = reroute {
                         let t = self.route_track(i, dest, fin);
-                        self.units[i].set_command(DriveCommand {
-                            track: t,
-                            speed_mps: 0.0,
-                            cornering_g: p.patrol_cornering_g,
-                            siren: true,
-                            lane_offset_m: LANE_OFFSET_M,
-                        });
+                        // A re-plan never undoes half a turn-round (`crate::turn`); the
+                        // current route stays until the turn is done.
+                        if crate::turn::accepts_replan(&self.units[i], &t) {
+                            self.units[i].set_command(DriveCommand {
+                                track: t,
+                                speed_mps: 0.0,
+                                cornering_g: p.patrol_cornering_g,
+                                siren: true,
+                                lane_offset_m: LANE_OFFSET_M,
+                            });
+                        }
                     }
                     // On the way to the call: siren sounding again.
                     self.units[i].quiet = false;
@@ -1094,10 +1099,8 @@ impl PoliceSystem {
                     self.units[i].tactic = Tactic::Shadow;
                     let u = &self.units[i];
                     let held_for = now.since(u.assigned);
-                    // Not while turning round onto its route (see `Respond`).
-                    let stale = held_for > 0.0
-                        && held_for % 3.0 < tdt
-                        && !crate::unit::facing_away_from_track(u);
+                    // Not in the middle of a turn-round (see `Respond`).
+                    let stale = held_for > 0.0 && held_for % 3.0 < tdt && !u.turning_round();
                     if !u.cmd.track.is_drivable()
                         || u.track_s > u.cmd.track.length() - 10.0
                         || stale
@@ -1120,6 +1123,11 @@ impl PoliceSystem {
                                 && self.route_from(u.body.pos, u.body.heading, node, fin).1;
                             if !same && !flip {
                                 let t = self.route_track(i, node, fin);
+                                // Not one that undoes half a turn-round (see `Respond`).
+                                if !crate::turn::accepts_replan(&self.units[i], &t) {
+                                    self.units[i].cmd.speed_mps = intercept_speed;
+                                    continue;
+                                }
                                 self.units[i].assignment = Assignment::Intercept { target, point };
                                 self.units[i].set_command(DriveCommand {
                                     track: t,
@@ -1688,5 +1696,42 @@ mod tests {
     #[test]
     fn lateral_g_formula() {
         assert!((lateral_g(9.81, 9.81) - 1.0).abs() < 1e-5);
+    }
+
+    /// A unit on a road A-B-C going away from A, routed back to A round a loop A-F-D-E-C.
+    fn loop_city(oneway: bool) -> PoliceSystem {
+        use crate::graph::{District, RoadClass, RoadGraph};
+        let mut g = RoadGraph::new();
+        let at = |g: &mut RoadGraph, x: f32, y: f32| g.add_node([x, y], District::Core);
+        let a = at(&mut g, 0.0, 0.0);
+        let b = at(&mut g, 0.0, 100.0);
+        let c = at(&mut g, 0.0, 200.0);
+        let d = at(&mut g, 100.0, 100.0);
+        let e = at(&mut g, 100.0, 200.0);
+        let f = at(&mut g, 100.0, 0.0);
+        g.add_segment(a, b, 14.0, RoadClass::Highway, oneway);
+        g.add_segment(b, c, 14.0, RoadClass::Highway, oneway);
+        for (p, q) in [(c, e), (e, d), (d, f), (f, a), (b, d)] {
+            g.add_segment(p, q, 14.0, RoadClass::Local, false);
+        }
+        PoliceSystem::with_city(
+            crate::PoliceConfig::builtin(),
+            g,
+            crate::PoliceSetup::default(),
+        )
+    }
+
+    #[test]
+    fn one_way_routes_never_start_with_a_turn_round() {
+        // Turn-round manoeuvre (`crate::turn`): on a one-way carriageway the route goes on to
+        // the next junction instead of turning on the deck.
+        let pos = [0.0, 50.0];
+        let (t, turn) = loop_city(true).route_from(pos, [0.0, 1.0], NodeId(0), None);
+        assert!(!turn);
+        assert_eq!(t.point_at(50.0), [0.0, 100.0], "on to the junction ahead");
+        // The same road two-way: straight back (a turn-round first).
+        let (t, turn) = loop_city(false).route_from(pos, [0.0, 1.0], NodeId(0), None);
+        assert!(turn);
+        assert!(t.length() < 60.0, "{}", t.length());
     }
 }
