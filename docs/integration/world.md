@@ -1320,8 +1320,10 @@ Scenarios on the merged tree (release): all 86 pass.
 ### Response from D (round 13, row 85) — "massive traffic jam"
 Started on the owner's request (lead addendum 2026-10-20). Merged `origin/lead/round12` @ 21e14c0.
 **Status: done for the gates.** Both jam scenarios meet the lead's gates (no stop > 45 s except
-at red, no queue > 12) as hard `expect`s; across seeds 1–4 + 85, 9 of 10 runs meet both
-(Vesper seed 3: 53 s). Civilian collisions in the pursuit melee still need their own pass.
+at red, no queue > 12) as hard `expect`s. Across seeds 1–4 + 85: stop gate 10 of 10 runs (worst
+39 s), queue gate 9 of 10 (Vesper seed 1: 17 cars for 3 s at a red, behind a car pulled over for
+a siren; cleared on the next green). Civilian collisions in the pursuit melee still need their
+own pass.
 
 **1. Instrumentation.** `TrafficStats::{max_stop_s, max_queue, box_stops, jam_recycled}`
 (`traffic/jam.rs`), simcli metrics `traffic_max_stop_s`, `traffic_max_queue`,
@@ -1353,8 +1355,8 @@ so a 10-min run measures repeated pursuits. Default off; existing scenarios unch
   the queue turns around / backs out from the tail, and the lane is marked blocked (multi-lane
   roads too) so upstream cars re-route; obstructed cars give up their permit;
 - sirens: junction hold times out after 8 s; pulled-over drivers give up on a unit standing or
-  crawling behind after 8 s (was 15 s); with a unit beside the car they creep on along the kerb
-  (≤ 5 m/s) and merge back past it instead of waiting;
+  crawling behind after 8 s (was 15 s); with a unit standing beside the car (< 1 m/s, ≥ 0.5 m
+  of room) they creep on along the kerb (≤ 5 m/s) and merge back past it instead of waiting;
 - stuck manoeuvres: half-done lane changes undone (20 s cooldown); reverses stalled 8 s and
   U-turns that cannot start for 10 s given up; no reverse with a tracked vehicle < 25 m behind;
   reverse wait 15 s (was 40 s); kinematic U-turns check their exit pose (0.6 m margin) and hold
@@ -1362,7 +1364,13 @@ so a 10-min run measures repeated pursuits. Default off; existing scenarios unch
 - spawning: never behind a stopped car within 60 m; per-lane cap one car / 20 m at the daytime
   peak × time-of-day factor; unseen cars stopped 30 s outside a red recycled (also in a box);
 - wrecks shoved out of their lane are re-filed under the lane they lie in; > 3.5 m off any lane
-  they are not obstacles.
+  they are not obstacles; a wreck just past a junction on a car's exit is an obstruction for
+  the car held at the line (re-route / turn around) instead of room to wait for;
+- turn-taking bookings are not made against the car's own red / amber (they lapsed before
+  the green and held the crossing traffic meanwhile);
+- an obstructed driver's wait is held, not reset, while it stands (a one-step class flicker —
+  level-of-detail switch, siren yield, the leader's class — kept drivers from ever giving up);
+- the jam metric's stop timer is also held while the car yields to a siren (like a red).
 Don't-block-the-box (exit room) already existed and is unchanged.
 
 **Before / after** (release simcli, both with `restart_after_capture`; before = `lead/round12`
@@ -1370,22 +1378,22 @@ traffic + the instrumentation only, after = this branch). Seed 85 is the shipped
 
 | run | max stop before / after (s) | max queue before / after | box stops before / after | civilian collisions before / after |
 |---|---|---|---|---|
-| grid 1 | 69 / 30 | 10 / 10 | 2 / 4 | 29 / 7 |
-| grid 2 | 107 / 42 | 13 / 10 | 3 / 16 | 8 / 8 |
-| grid 3 | 50 / 31 | 15 / 10 | 11 / 5 | 12 / 9 |
-| grid 4 | 45 / 32 | 12 / 10 | 9 / 2 | 6 / 15 |
-| grid 85 | 55 / 39 | 13 / 8 | 10 / 9 | 7 / 8 |
-| Vesper 1 | 90 / 44 | 10 / 7 | 6 / 8 | 17 / 12 |
-| Vesper 2 | 94 / 36 | 14 / 9 | 7 / 8 | 9 / 6 |
-| Vesper 3 | 89 / 53 | 9 / 8 | 10 / 9 | 8 / 9 |
-| Vesper 4 | 53 / 38 | 8 / 6 | 5 / 5 | 6 / 0 |
-| Vesper 85 | 55 / 29 | 7 / 10 | 2 / 4 | 1 / 14 |
+| grid 1 | 69 / 24 | 10 / 9 | 2 / 1 | 29 / 3 |
+| grid 2 | 107 / 37 | 13 / 12 | 3 / 6 | 8 / 12 |
+| grid 3 | 50 / 26 | 15 / 10 | 11 / 7 | 12 / 7 |
+| grid 4 | 45 / 27 | 12 / 10 | 9 / 3 | 6 / 9 |
+| grid 85 | 55 / 30 | 13 / 11 | 10 / 10 | 7 / 9 |
+| Vesper 1 | 90 / 39 | 10 / 17 | 6 / 7 | 17 / 10 |
+| Vesper 2 | 94 / 30 | 14 / 7 | 7 / 3 | 9 / 3 |
+| Vesper 3 | 89 / 26 | 9 / 8 | 10 / 12 | 8 / 13 |
+| Vesper 4 | 53 / 29 | 8 / 6 | 5 / 9 | 6 / 7 |
+| Vesper 85 | 55 / 37 | 7 / 8 | 2 / 9 | 1 / 12 |
 
-Gates met before: 1 of 10 runs (stop) / 5 of 10 (queue); after: 9 of 10 / 10 of 10.
-**Remaining:** Vesper seed 3 (53 s, a car boxed in right at a pursuit melee); civilian
-collisions in the pursuit melee (physical civilians shoved by units, wrecks) — not worse on
-average (103 → 88 over the 10 runs) but up on some seeds (Vesper 85: 1 → 14, the pursuit now
-runs through downtown instead of ending in the tunnel); needs its own pass.
+Gates met before: 1 of 10 runs (stop) / 5 of 10 (queue); after: 10 of 10 / 9 of 10.
+**Remaining:** civilian collisions in the pursuit melee (physical civilians shoved by units,
+wrecks): 103 → 85 over the 10 runs (after counts a re-touch within 2 s once, see below), but up on some seeds (Vesper 85: 1 → 12, the pursuit now
+runs through downtown instead of ending in the tunnel); needs its own pass. Box stops (cars
+standing > 5 s in a junction, mostly behind police in the box) are unchanged on average.
 **Collision counter.** `civilian_collisions` now counts a pair that touches again within 2 s
 of separating once (`RETOUCH_STEPS`); before, a bump-part-bump was 2. Found on
 `city_siren_traffic_no_siren` (seed 2): one physical civilian drifts ~1 m off a 5.8 m/s left

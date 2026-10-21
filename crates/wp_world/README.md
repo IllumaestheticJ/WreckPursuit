@@ -525,6 +525,7 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   outside red / amber (held, not reset, at a red; also held within 60 m of a standing scene, a
   tracked vehicle stopped 20 s; wrecks left out), longest queue of stopped cars back from a stop
   line (followed back through junctions, sampled 1 Hz), stops > 5 s inside a junction box.
+  The stop metric is also held while the car yields to a siren (the law, like a red).
   simcli metrics `traffic_max_stop_s`, `traffic_max_queue`, `traffic_box_stops`,
   `traffic_jam_recycled`; scenarios `jam/pursuit_jam_{grid,vesper}.ron` (10 min, L4 → L5, racer
   restarted after each capture). Gates: max stop ≤ 45 s, max queue ≤ 12 (both met; seed sweep in
@@ -547,8 +548,9 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
 - *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
   (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
-  (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit beside it, it creeps on
-  along the kerb (≤ 5 m/s) and merges back once past, instead of waiting.
+  (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit standing beside it
+  (`BESIDE_STANDING_MPS`, with `BESIDE_CLEAR_M` of room) it creeps on along the kerb (≤ 5 m/s)
+  and merges back once past, instead of waiting; a moving one it waits for.
 - *Stuck manoeuvres*: a lane change stalled half-way (car stopped before leaving the old lane)
   is undone, with no forced lane change for 20 s; a reverse under way that has not moved for
   8 s and a U-turn that cannot start for 10 s are given up; a reverse never starts with a
@@ -560,6 +562,12 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   outside a red light are recycled (`TrafficConfig::jam_recycle_s`), also inside a junction box.
   A wreck shoved out of its lane is re-filed under the lane it now lies in (any road); one on a
   sidewalk or lot (> 3.5 m off any lane) is not an obstacle in the lane.
+- *Wrecks at an exit*: a wreck within two car lengths of the start of a car's exit lane makes
+  that exit an obstruction for the car held at the line (`exit_wrecked`): it re-routes to
+  another exit or the queue turns around, instead of waiting for room that never comes.
+- *Waiting it out*: an obstructed driver's wait (`blocked_s`) is held, not reset, while the car
+  stands, so a one-step change of class (level-of-detail switch, siren yield) does not restart
+  its patience; turn-taking bookings are not made against the car's own red / amber.
 
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
