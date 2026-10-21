@@ -608,10 +608,12 @@ const BUILDERS: Record<string, Builder> = {
 
 /** Outer radius of the stock rim part (where the tire's sidewall opening is), m. */
 function stockRimRadius(mesh: CarMeshJson, wheel: number): number {
-  const rim = mesh.parts.find((p) => p.wheel === wheel && p.kind === "rim");
-  if (!rim) return 0;
+  // Format-4 wheels have several rim parts (rim, rim_dark, rim_bright): the largest radius.
   let r = 0;
-  for (let i = 0; i < rim.positions_mm.length; i += 3) r = Math.max(r, Math.hypot(rim.positions_mm[i + 1], rim.positions_mm[i + 2]));
+  for (const rim of mesh.parts) {
+    if (rim.wheel !== wheel || rim.kind !== "rim") continue;
+    for (let i = 0; i < rim.positions_mm.length; i += 3) r = Math.max(r, Math.hypot(rim.positions_mm[i + 1], rim.positions_mm[i + 2]));
+  }
   return r * 1e-3;
 }
 
@@ -677,7 +679,7 @@ function treadGeo(tire: string, r: number, width: number, s: number): { geo: Geo
     case "drag_radial":
       return [ring(r * 0.84, "stripe"), ring(r * 0.74, "stripe")];
     case "sport":
-      return [ring(r * 0.86, "caliper")];
+      return [ring(r * 0.86, "caliperSport")];
     default:
       return [];
   }
@@ -924,7 +926,8 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
     };
     if (rimStyle) {
       // The stock rim goes; the new design takes its place.
-      for (let k = panels.wheelParts[i].length - 1; k >= 0; k--) if (panels.wheelParts[i][k].name.endsWith("_rim")) panels.wheelParts[i].splice(k, 1)[0].removeFromParent();
+      // (`_rim`, and format 4's `_rim_dark` / `_rim_bright` pieces.)
+      for (let k = panels.wheelParts[i].length - 1; k >= 0; k--) if (/_rim($|_)/.test(panels.wheelParts[i][k].name)) panels.wheelParts[i].splice(k, 1)[0].removeFromParent();
       rimGeo(rimStyle, rimR, s, wv.width_m).forEach((r, k) => addWheel(r.geo, r.material, `mod_rim_${rimStyle}_${i}_${k}`));
       drawn.add("Rims");
     }
@@ -933,6 +936,9 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
     if (tread.length) drawn.add("Tires");
     if (brake) {
       const race = brake === "race";
+      // The stock disc and caliper (format-4 meshes) make way for the kit.
+      for (const list of [panels.wheelParts[i], panels.hubParts[i]])
+        for (let k = list.length - 1; k >= 0; k--) if (/_(disc|caliper)($|_)/.test(list[k].name) && !list[k].name.startsWith("mod_")) list.splice(k, 1)[0].removeFromParent();
       const discR = rimR * (race ? 0.86 : 0.8);
       const disc = new Geo().add(new THREE.CylinderGeometry(discR, discR, 0.028, 24).rotateZ(Math.PI / 2), new THREE.Matrix4().makeTranslation(s * 0.005, 0, 0));
       const bell = new Geo().add(new THREE.CylinderGeometry(discR * 0.45, discR * 0.45, 0.04, 12).rotateZ(Math.PI / 2), new THREE.Matrix4().makeTranslation(s * 0.012, 0, 0));
@@ -944,7 +950,7 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
       const m = new THREE.Matrix4()
         .makeTranslation(s * 0.028, Math.cos(a) * discR * 0.86, Math.sin(a) * discR * 0.86)
         .multiply(new THREE.Matrix4().makeRotationX(a - Math.PI / 2));
-      addWheel(new Geo().add(cal, m), race ? "caliperRace" : "caliper", `mod_caliper_${i}`, true);
+      addWheel(new Geo().add(cal, m), race ? "caliperRace" : "caliperSport", `mod_caliper_${i}`, true);
       drawn.add("BrakeKit");
     }
   });
@@ -957,7 +963,8 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
   }
   for (const [kind, region] of [["HoodPanel", "Hood"], ["TrunkPanel", "Trunk"]] as const) {
     if (!byStyle(kind)) continue;
-    panels.setPartMaterial((def) => def.region === region && def.material === "paint" && def.kind === "panel", "carbon");
+    // Format-4 body panels are `livery` (paint colour unless a livery texture is set).
+    panels.setPartMaterial((def) => def.region === region && (def.material === "paint" || def.material === "livery") && def.kind === "panel", "carbon");
     drawn.add(kind);
   }
   if (byStyle("WindowTint")) {
@@ -976,7 +983,8 @@ export function fitBuild(panels: PanelBody, build: BuildVisuals, wheels: WheelIn
   // paint batch (mod pieces are batched apart, so they carry no vinyl).
   panels.rebatch();
   const vinyl = byStyle("Vinyl");
-  const paintBatch = panels.batchMesh("paint");
+  // Format-4 body panels are batched as `livery`; older meshes as `paint`.
+  const paintBatch = panels.batchMesh("livery") ?? panels.batchMesh("paint");
   if (vinyl && VINYL_ID[vinyl] && paintBatch) {
     const overlay = new THREE.Mesh(paintBatch.geometry, vinylMaterial(vinyl, all));
     overlay.name = `${paintBatch.name}_vinyl`;

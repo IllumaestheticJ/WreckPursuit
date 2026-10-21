@@ -7,7 +7,9 @@ import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
-import { PanelBody, carMeshNow } from "./render/panels";
+import { PanelBody, carMeshNow, type CarMeshJson } from "./render/panels";
+import { hasPoliceLivery, setupPoliceLook } from "./render/livery";
+import { LightRig, patternFor, phaseFor, wigwag } from "./render/lights";
 import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
@@ -21,6 +23,10 @@ const SLIP_RED = 0.15;
 const STRAIN_RED = 0.05;
 
 const tmpColor = new THREE.Color();
+/** Lit head-lamp emissive (greybox). */
+const HEAD_GLOW = new THREE.Color(0xfff2c0);
+/** Head-lamp lens base colour (greybox). */
+const HEAD_LENS = 0xfff6d0;
 // Per-frame scratch (VehicleView.update runs for every car every frame: no allocation).
 const tmpQa = new THREE.Quaternion();
 const tmpQb = new THREE.Quaternion();
@@ -67,6 +73,8 @@ export function healthColour(h: number, out = tmpColor): THREE.Color {
 
 interface WheelView {
   pivot: THREE.Group; // positioned at the hub, rotated by steer
+  /** Child of pivot: the mesh's visual camber for the non-spinning wheel parts (calipers). */
+  camber: THREE.Group;
   spin: THREE.Group; // rotated about X by the accumulated wheel angle
   tire: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
@@ -126,8 +134,20 @@ export class VehicleView {
   sirenOn = false;
   sirenColour = 0x2060ff;
   sirenIntensity = 0;
+  /** Head lamps, left / right (separate so police cars can wig-wag them). */
   private readonly headMat: THREE.MeshStandardMaterial;
+  private readonly headMatR: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
+  /** Head lamps currently wig-wagging (lens colours modulated). */
+  private wigwagging = false;
+  /** Police light kit (bar, siren, wig-wag): police units and police models driven by anyone
+   * (free drive in a `sentinel_*` car). */
+  private readonly lightKit: boolean;
+  /** Stable id for unit numbers and flash phase: the wp_police unit id, else the entity (the
+   * fleet draws an unbound unit with the same id, so a promotion keeps its phase). */
+  readonly unitId: number;
+  /** Light rig on the panel mesh's light-bar lenses (render/lights.ts), once loaded. */
+  private rig: LightRig | null = null;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   /** Installed mods' parts (scenario `mods`, `entity_visuals_json`); null for stock cars. */
@@ -168,9 +188,11 @@ export class VehicleView {
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
-    const police = this.info.kind === "Police";
+    const police = this.info.kind === "Police" || this.info.car_id.startsWith("sentinel_");
+    this.lightKit = police;
+    this.unitId = this.info.police_unit ?? entity;
     this.greyPaint = new THREE.Color(colour);
-    this.background = police || this.info.kind === "Traffic";
+    this.background = this.info.kind === "Police" || this.info.kind === "Traffic";
 
     // forceSinglePass: transparent + DoubleSide would re-resolve the program twice per frame.
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide, forceSinglePass: true });
@@ -181,11 +203,14 @@ export class VehicleView {
     this.nose = nose;
     this.root.add(this.box, nose);
 
-    // Head- and tail-lights (emissive, brighter with headlights on / when braking).
-    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000 });
-    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000 });
+    // Head- and tail-lights (emissive, brighter with headlights on / when braking). Shared with
+    // the panel meshes' lamp parts, some of which are batched without normals: flat shading,
+    // both sides.
+    this.headMat = new THREE.MeshStandardMaterial({ color: HEAD_LENS, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
+    this.headMatR = this.headMat.clone();
+    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) {
-      const head = new THREE.Mesh(box(0.3, 0.05, 0.14), this.headMat);
+      const head = new THREE.Mesh(box(0.3, 0.05, 0.14), sx < 0 ? this.headMat : this.headMatR);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
       const tail = new THREE.Mesh(box(0.3, 0.05, 0.12), this.tailMat);
       tail.position.set(sx * (w / 2 - 0.25), -l / 2 - 0.01, h * 0.5);
@@ -223,8 +248,10 @@ export class VehicleView {
       const spoke = new THREE.Mesh(box(wi.width_m * 1.05, wi.radius_m * 1.6, 0.06), SHARED.spoke);
       spin.add(tire, spoke);
       pivot.add(spin);
+      const camber = new THREE.Group();
+      pivot.add(camber);
       this.root.add(pivot);
-      this.wheels.push({ pivot, spin, tire, material, angle: 0, fx: null, fy: null, susp: null });
+      this.wheels.push({ pivot, camber, spin, tire, material, angle: 0, fx: null, fy: null, susp: null });
     }
 
     // Headlight pool: on the road just ahead of the front bumper.
@@ -258,7 +285,8 @@ export class VehicleView {
     }
 
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
-    this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
+    // Traffic / police keep the livery the fleet drew them in (no factory paint tint).
+    this.panels = new PanelBody(entity, this.info.car_id, colour, { left: this.headMat, right: this.headMatR }, this.tailMat, { keepPaint: this.background });
     this.root.add(this.panels.root);
     // Sim-spawned traffic / police are stock; scenario cars may carry mods.
     const build = this.background ? null : sim.entityVisuals(entity);
@@ -272,8 +300,19 @@ export class VehicleView {
         // Smoked lamp covers (re-applied by applyStyle).
         this.styleVersion = -1;
       }
+      // Police models (livery scheme in the mesh file) get livery, unit decals and the flashing
+      // mesh light bar whoever drives them.
+      const mesh = this.panels.mesh;
+      if (this.lightKit && mesh && hasPoliceLivery(mesh)) this.setupPolice(mesh);
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
-      this.wheels.forEach((w, i) => this.panels.hubParts[i].forEach((m) => w.pivot.add(m)));
+      // Calipers / uprights steer and follow compression but do not spin; camber is visual and
+      // the same for the spinning and the steering parts (so calipers stay on the disc).
+      this.wheels.forEach((w, i) => {
+        this.panels.hubParts[i].forEach((m) => w.camber.add(m));
+        w.camber.rotation.y = this.panels.camberRad[i];
+        w.spin.rotation.order = "YXZ";
+        w.spin.rotation.y = this.panels.camberRad[i];
+      });
       this.wheelPartsShown = null;
       const ind = this.indicatorGeoms();
       this.indL.geometry.dispose();
@@ -550,17 +589,57 @@ export class VehicleView {
     const lowpoly = artStyle.lowpoly;
     const headlights = (flags & META_FLAG.headlights) !== 0;
     const brake = (flags & META_FLAG.brake) !== 0;
-    this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
+    const siren = (flags & META_FLAG.siren) !== 0;
+    if (this.lightKit && siren) {
+      // Wig-wag head lamps (P-HEADLAMP-WW, ≤ 2 Hz): alternate sides; the dim side keeps a low
+      // glow when the headlights are on, and its lens darkens so the alternation reads by day.
+      const ww = wigwag(timeS, phaseFor(this.unitId));
+      const base = headlights ? 0.12 : 0;
+      const l = Math.max(base, ww.left);
+      const r = Math.max(base, ww.right);
+      const lens = this.headLensHex();
+      this.headMat.emissive.copy(HEAD_GLOW).multiplyScalar(l);
+      this.headMatR.emissive.copy(HEAD_GLOW).multiplyScalar(r);
+      this.headMat.color.setHex(lens).multiplyScalar(0.3 + 0.7 * l);
+      this.headMatR.color.setHex(lens).multiplyScalar(0.3 + 0.7 * r);
+      this.wigwagging = true;
+    } else {
+      this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
+      this.headMatR.emissive.copy(this.headMat.emissive);
+      if (this.wigwagging) {
+        this.headMat.color.setHex(this.headLensHex());
+        this.headMatR.color.copy(this.headMat.color);
+        this.wigwagging = false;
+      }
+    }
     this.tailMat.emissive.setHex(brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
     // Low-poly dark: HDR lamp glow so lit lenses reach the bloom pass (running tail lights at
     // a quarter of the brake glow, which is already ×4 in the hex above).
-    this.headMat.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
+    this.headMat.emissiveIntensity = this.headMatR.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
     this.tailMat.emissiveIntensity = lowpoly ? PALETTE.brakeGlow : 1;
     const pool = lowpoly && headlights && artStyle.night > 0.2;
     this.headPool.visible = pool;
     if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * Math.min(1, (artStyle.night - 0.2) * 2.5);
+    // Underglow (tuners that have it) only with the headlights on (night / dusk).
+    this.panels.setUnderglow(headlights);
+    if (this.rig) {
+      // The panel mesh's light bar (render/lights.ts pattern, per-unit phase); the box bar
+      // only stands in while the panel mesh is hidden.
+      const redGlow = lowpoly ? PALETTE.policeRedGlow : 1;
+      this.rig.pattern = patternFor(this.info.car_id);
+      this.rig.glow = 2.2 * redGlow;
+      this.rig.update(timeS, siren);
+      if (this.lightBar) this.lightBar.visible = !this.panels.root.visible;
+      // The scene's one siren light follows the brighter side of the pattern's envelope.
+      const { L, R } = this.rig.light;
+      const red = L >= R;
+      const k = Math.max(L, R);
+      this.sirenOn = siren;
+      this.sirenColour = red ? (lowpoly ? PALETTE.policeRed : 0xff2040) : lowpoly ? PALETTE.policeBlue : 0x2060ff;
+      this.sirenIntensity = k > 0 ? (lowpoly ? sirenLightIntensity(red ? PALETTE.policeRedGlow : PALETTE.policeBlueGlow) : 25) * k : 0;
+      return;
+    }
     if (!this.lightBar) return;
-    const siren = (flags & META_FLAG.siren) !== 0;
     // Alternating red/blue at 2.5 Hz with a double strobe on each side.
     const phase = (timeS * 2.5) % 1;
     const strobe = (phase % 0.5) < 0.12 || ((phase % 0.5) > 0.2 && (phase % 0.5) < 0.32);
@@ -607,9 +686,35 @@ export class VehicleView {
     return indicatorMarkers(this.info, fr?.front ?? l / 2, fr?.rear ?? -l / 2);
   }
 
-  /** Where the siren light sits (sim space, the scene's `world` group): above the roof. */
+  /** Where the siren light sits (sim space, the scene's `world` group): above the light bar
+   * (the panel mesh's lens centre), else above the roof. */
   sirenPosition(out: THREE.Vector3): THREE.Vector3 {
-    return out.set(0, 0, this.info.body_size_m[2] + 0.6).applyQuaternion(this.root.quaternion).add(this.root.position);
+    const { left, right } = this.panels.lightbarAnchors;
+    const a = this.rig ? (left ?? right) : null;
+    if (a && right && left) out.copy(left).add(right).multiplyScalar(0.5).z += 0.25;
+    else if (a) out.copy(a).z += 0.25;
+    else out.set(0, 0, this.info.body_size_m[2] + 0.6);
+    return out.applyQuaternion(this.root.quaternion).add(this.root.position);
+  }
+
+  /** Police panel mesh: livery + unit decals, and flash the mesh's light bar instead of the box bar. */
+  private setupPolice(mesh: CarMeshJson): void {
+    setupPoliceLook(this.panels, mesh, this.unitId);
+    const { left, right } = this.panels.lightbarAnchors;
+    if (!left && !right) return;
+    this.rig = new LightRig(
+      this.panels.lightbarMaterials.left,
+      this.panels.lightbarMaterials.right,
+      this.panels.amberMaterials,
+      patternFor(this.info.car_id),
+      phaseFor(this.unitId),
+    );
+  }
+
+  /** Head-lamp lens colour in the current art style (smoked by a lights mod). */
+  private headLensHex(): number {
+    const smoked = this.fitted?.lamps;
+    return smoked ? smoked.head : artStyle.lowpoly ? PALETTE.headlight : HEAD_LENS;
   }
 
   /** Re-colour for the current art style (paint, lamp lenses, light bar, flat shading). */
@@ -631,7 +736,8 @@ export class VehicleView {
     this.proxyPaint.roughness = lowpoly ? 1 : 0.55;
     this.proxyPaint.metalness = lowpoly ? 0 : 0.25;
     const smoked = this.fitted?.lamps;
-    this.headMat.color.setHex(smoked ? smoked.head : lowpoly ? PALETTE.headlight : 0xfff6d0);
+    this.headMat.color.setHex(smoked ? smoked.head : lowpoly ? PALETTE.headlight : HEAD_LENS);
+    this.headMatR.color.copy(this.headMat.color);
     this.tailMat.color.setHex(smoked ? smoked.tail : lowpoly ? 0x5a1414 : 0x550000);
     if (this.barRed && this.barBlue) {
       this.barRed.color.setHex(lowpoly ? 0x5a1418 : 0x661018);

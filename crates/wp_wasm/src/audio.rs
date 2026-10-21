@@ -171,6 +171,15 @@ pub(crate) fn frame_commands(
         d.set_siren_cue(*id, crate::siren_cue::vehicle_cue(sim, v, &positions));
         // Lattice deformation energy: the crunch follows its growth (owner row 74).
         d.set_plastic_energy(*id, v.damage.total_plastic_energy_j());
+        // Punctured tyres (playtest row 132): damage deflation and spike strips, as the sim
+        // combines them for handling.
+        let mut deflation = wp_contracts::DamageSim::handling_effects(&v.damage).tire_puncture;
+        for (t, sp) in deflation.iter_mut().zip(sim.spike_puncture(*id)) {
+            *t = t.max(sp);
+        }
+        d.set_tire_deflation(*id, deflation);
+        // Rim on the road (grip-balance, 0.12.40): grinds only while the rim touches down.
+        d.set_rim_contact(*id, Some(v.vehicle.rim_contact()));
         inputs.push(VehicleAudioInput {
             entity: *id,
             car_id: &v.car_id,

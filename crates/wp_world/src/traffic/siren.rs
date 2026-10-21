@@ -53,9 +53,10 @@ pub const CLEAR_S: f32 = 2.0;
 /// A unit a driver has pulled over for keeps it there while it is this close behind, even when
 /// it slows down or stops (it is waiting for room to get past), m.
 pub const HOLD_RANGE_M: f32 = 40.0;
-/// A pulled-over driver gives up on a unit that has stood still behind it this long, s (and
-/// does not pull over for it again until it moves).
-pub const STALL_S: f32 = 15.0;
+/// A pulled-over driver gives up on a unit that has stood or crawled (< [`MOVING_MPS`]) behind
+/// it this long, s, and does not pull over for it again until it moves (owner row 85: 8 s,
+/// was 15 s; a unit that never passes must not hold traffic).
+pub const STALL_S: f32 = 8.0;
 /// A slow or stopped unit this close behind still makes a driver pull over (a unit stuck behind
 /// it, waiting for room), m.
 pub const START_CLOSE_M: f32 = 30.0;

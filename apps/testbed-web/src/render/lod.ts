@@ -8,6 +8,13 @@
 //   * the instanced fleet (render/fleet.ts) otherwise: same model, same livery, same pose.
 // So a promotion or demotion swaps the drawer on one frame with no gap, jump or recolour.
 //
+// Models: a draw record's `model` picks the car model it is drawn as — traffic
+// `SessionModels.traffic_models[model]`, police `SessionModels.police_models[model]` (the
+// `car_mix` fleets); -1 / an empty list falls back to the single `traffic` / `police` model.
+// Each model has its own instance sets in the fleet, and the sim promotes the agent / unit to a
+// vehicle of the same model, so the swap keeps the body. Police light bars flash from the
+// model's pattern with a per-unit phase (render/lights.ts), the same as the promoted car's rig.
+//
 // `LodLog` records each car's draw state per frame for automation (e2e/run.mjs,
 // e2e/lod_shots.mjs): frames where a car had no proper mesh, the pose jump on every swap with
 // a few frames either side, and how far from the player cars appear and vanish.
@@ -16,10 +23,12 @@ import { D, DRAW_STRIDE, AGENT_FLAG, META_FLAG, POLICE_DRAW_FLAG } from "../wasm
 import type { SessionModels } from "../wasm/sim";
 import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
-import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn, type DrawMode } from "./fleet";
+import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn, type DrawMode, type FleetModel } from "./fleet";
+import { unitLevels } from "./lights";
 
-/** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
-const VIEW_LOD_BAND_M = 15;
+/** Hysteresis of the view → fleet hand-off (`LodDirector.viewDrawM`): a promoted car goes to
+ * the fleet past `viewDrawM + VIEW_LOD_BAND_M` and comes back to its view within `viewDrawM`, m. */
+export const VIEW_LOD_BAND_M = 10;
 
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
 /** `culled`: instanced traffic past [`LodDirector.trafficDrawM`], not drawn by design (not a
@@ -95,10 +104,56 @@ function barOf(flags: number, t: number, i: number): number {
   return (t * 2.5 + i * 0.17) % 1 < 0.5 ? BAR.red : BAR.blue;
 }
 
+/** Model of a draw record: `list[model]`, else the session's single model (`fallback`). */
+export function recordModel(list: readonly string[] | undefined, model: number, fallback: string | null): string | null {
+  const i = Math.round(model);
+  return (list && i >= 0 && i < list.length ? list[i] : null) ?? fallback;
+}
+
 export class LodDirector {
   readonly fleet = new Fleet();
   readonly log = new LodLog();
-  models: SessionModels = { cars: [], traffic: null, police: null };
+  private sessionModels: SessionModels = { cars: [], traffic: null, police: null };
+  /** Fleet model per draw-record `model` index (traffic / police), resolved once per session;
+   * index `list.length` holds the fallback model (record `model` −1). */
+  private tModels: (FleetModel | null | undefined)[] = [];
+  private pModels: (FleetModel | null | undefined)[] = [];
+  /** Lens levels scratch (render/lights.ts unitLevels). */
+  private readonly lens = new Float32Array(6);
+
+  /** The session's car models (sim.sessionCarModels(); set at session start). */
+  get models(): SessionModels {
+    return this.sessionModels;
+  }
+  set models(m: SessionModels) {
+    this.sessionModels = m;
+    this.tModels = [];
+    this.pModels = [];
+  }
+
+  /** Fleet model of a traffic draw record's `model` (null: the session has no traffic model). */
+  private trafficModel(model: number): FleetModel | null {
+    const list = this.sessionModels.traffic_models ?? [];
+    const i = model >= 0 && model < list.length ? Math.round(model) : list.length;
+    let m = this.tModels[i];
+    if (m === undefined) {
+      const id = recordModel(list, model, this.sessionModels.traffic);
+      this.tModels[i] = m = id ? this.fleet.model(id) : null;
+    }
+    return m;
+  }
+
+  /** Fleet model of a police draw record's `model` (null: the session has no police model). */
+  private policeModel(model: number): FleetModel | null {
+    const list = this.sessionModels.police_models ?? [];
+    const i = model >= 0 && model < list.length ? Math.round(model) : list.length;
+    let m = this.pModels[i];
+    if (m === undefined) {
+      const id = recordModel(list, model, this.sessionModels.police);
+      this.pModels[i] = m = id ? this.fleet.model(id, true) : null;
+    }
+    return m;
+  }
   /** Draw states of the last frame (pooled: valid until the next update). */
   readonly states: DrawState[] = [];
   private readonly pool: DrawState[] = [];
@@ -115,10 +170,14 @@ export class LodDirector {
    * sim vehicles are always drawn. */
   trafficDrawM = Infinity;
   /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
-   * the fleet (one instanced draw for all of them) instead of their own view (~40 draw calls
-   * each, per panel). Low / touch graphics profiles only; the player and AI racers always use
-   * their view. 10 m of hysteresis so a car on the boundary does not flip drawers every frame. */
+   * the fleet (one instanced draw for all of them, mid-LOD mesh) instead of their own view
+   * (full detailed mesh, ~40 draw calls each, per panel, skinned to the lattice: dents and
+   * crumple show). Every graphics profile sets it (render/quality.ts: ~30 m; 0 on touch =
+   * always the fleet); the player and AI racers always use their view. `VIEW_LOD_BAND_M` of
+   * hysteresis so a car on the boundary does not flip drawers every frame. */
   viewDrawM = Infinity;
+  /** `fleet.generation` the model caches were resolved for. */
+  private fleetGen = -1;
   /** Entities currently handed to the fleet by `viewDrawM`. */
   private readonly farViews = new Set<number>();
   private readonly cam = new THREE.Vector3();
@@ -167,7 +226,12 @@ export class LodDirector {
     const probe = this.indicatorProbe;
     if (probe) this.indicatorRows.length = 0;
     const showTraffic = layers.on("traffic");
-    const tModel = this.models.traffic ? this.fleet.model(this.models.traffic) : null;
+    // Fleet models are cleared on an art-style change: resolve them again.
+    if (this.fleet.generation !== this.fleetGen) {
+      this.fleetGen = this.fleet.generation;
+      this.tModels = [];
+      this.pModels = [];
+    }
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
       const entity = traffic[o + D.entity];
       const flags = traffic[o + D.flags];
@@ -180,7 +244,8 @@ export class LodDirector {
         view.setIndicators(ind);
       }
       const far = !view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
-      const s = this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null, ind);
+      const tModel = showTraffic && !far ? this.trafficModel(traffic[o + D.model]) : null;
+      const s = this.draw(key, entity, view, traffic, o, tModel, trafficPaint(flags), tailOf(flags, timeS), null, ind);
       // Past the traffic draw distance (main's long highway roads keep cars alive out there).
       if (far && s.mode === "none") s.mode = "culled";
       states.push(s);
@@ -191,7 +256,6 @@ export class LodDirector {
       }
     }
 
-    const pModel = this.models.police ? this.fleet.model(this.models.police, true) : null;
     let unit = 0;
     for (let o = 0; o < police.length; o += DRAW_STRIDE, unit++) {
       const flags = police[o + D.flags];
@@ -199,7 +263,13 @@ export class LodDirector {
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      states.push(this.draw(keyOf(this.pKeys, "p", police[o + D.id]), entity, view, police, o, pModel, POLICE_PAINT, TAIL.off, barOf(flags, timeS, unit)));
+      const pModel = this.policeModel(police[o + D.model]);
+      const id = police[o + D.id];
+      // Mesh light-bar lenses flash from the model's pattern (the box bar of the proxy / older
+      // meshes alternates red / blue); livery schemes paint their plain paint parts in the base.
+      const lens = pModel?.lensed ? unitLevels(pModel.info.car_id, id, timeS, (flags & POLICE_DRAW_FLAG.chasing) !== 0, this.lens) : null;
+      const paint = pModel?.liveryBase ?? POLICE_PAINT;
+      states.push(this.draw(keyOf(this.pKeys, "p", id), entity, view, police, o, pModel, paint, TAIL.off, barOf(flags, timeS, unit), 0, lens));
     }
 
     // Player, AI racers and scenario cars: always their own view.
@@ -242,11 +312,12 @@ export class LodDirector {
     view: VehicleView | undefined,
     rec: Float32Array,
     o: number,
-    model: ReturnType<Fleet["model"]> | null,
+    model: FleetModel | null,
     paint: number,
     tail: number,
     bar: number | null,
     ind = 0,
+    lens: ArrayLike<number> | null = null,
   ): DrawState {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
@@ -254,13 +325,14 @@ export class LodDirector {
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
-    // Low / touch profiles (`viewDrawM`): a promoted traffic / police car farther than that is
-    // drawn by the fleet (one instanced draw for all) instead of its own view; 10 m of
-    // hysteresis. `lodFar` also lets the view skip its lattice fetch and re-skin meanwhile.
+    // `viewDrawM`: a promoted traffic / police car farther than that is drawn by the fleet (one
+    // instanced draw for all, mid LOD) instead of its own view; VIEW_LOD_BAND_M of hysteresis;
+    // 0 (touch) = always the fleet. `lodFar` also lets the view skip its lattice fetch and
+    // re-skin meanwhile.
     if (view && ready && model && Number.isFinite(this.viewDrawM)) {
       const p = view.root.position;
       const dv = this.dist(p.x, p.y, p.z);
-      view.lodFar = view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + 10;
+      view.lodFar = this.viewDrawM <= 0 || (view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + VIEW_LOD_BAND_M);
       if (view.lodFar) ready = false;
     } else if (view) view.lodFar = false;
     if (view) view.root.visible = ready;
@@ -275,7 +347,7 @@ export class LodDirector {
     let mode: LodMode = "none";
     let fallback = false;
     if (model) {
-      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar, ind);
+      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar, ind, lens);
       fallback = mode === "proxy" && d < this.fleet.fullLodM && !model.full;
     }
     const s = this.next(key, mode, fallback, entity, d);

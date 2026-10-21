@@ -128,12 +128,20 @@ for (const c of trace.cases) {
       const q = 128 / SR;
       const plays = [];
       const errs = [];
+      const engineVoices = new Set();
       frames.forEach((f, k) => {
         const t = Math.max(q, Math.round(f.t / q) * q);
         ctx.suspend(t).then(() => {
           try {
             // Same order as the game's AudioSystem.apply (index.ts).
             for (const cmd of f.commands) {
+              // Siren checks only: the car's engine (procedural for police since 0.12.34) is not
+              // played, so the play counters and the render hold the siren alone.
+              const v = cmd.Play?.voice ?? cmd.Set?.voice ?? cmd.Stop?.voice;
+              if (cmd.Play?.bus === "Engine" || (v && engineVoices.has(`${v.entity}:${v.slot}`))) {
+                if (cmd.Play) engineVoices.add(`${v.entity}:${v.slot}`);
+                continue;
+              }
               if (cmd.Play) {
                 const p = cmd.Play;
                 rack.noteVoice(p.voice, p.pack);

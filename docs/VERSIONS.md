@@ -43,5 +43,12 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.33 | preview | Render budget back under limits: road markings tiled + culled (one draw per tile), 640 m city tiles on phones, buried grid wall curtains dropped (chase 425k → 363k triangles, phone 323 → 280 draw calls) |
 | 0.12.34 | preview | Police: arresting unit busy 30 s (no chain arrests), pinned capture needs a chasing unit, head-on waiting unit creeps aside, backup waits ahead facing the racer, faster chase junctions, stuck units route round traffic; AI racers pass civilians stopped at Lantern Row lights, junction gap check, never stand at a red on the opposing side |
 | 0.12.35 | preview | AI racers never give up in a race (owner rule): no yielding or pulling over at any wanted level; a race ends only on a real capture, wreck or DNF |
-| 0.12.36 | preview | (next) |
+| 0.12.36 | preview | Police audio: police engines procedural (no 2.3x sped-up recordings, no layer flipping), siren junction cue calmer (3 s minimum pattern hold); spikes: recorded blow-out per tyre, flat-tyre flap loop, rim grind, scanner line |
+| 0.12.37 | preview | Police keep-up: pro driver no longer crawls at 4 m/s through every right-angle corner apex (pace vs racer 0.68 → 0.78) |
+| 0.12.38 | preview | Detailed car models for every car (styles, liveries, decals, light rigs), 3 new cars (Fulmine V10, Sentinel Warden, Sentinel Vigil), mixed-model traffic and police, car LOD (hero / mid / fleet); races: going off route is never a DQ or reset, checkpoints in order |
+| 0.12.39 | preview | Big engines (V8 / inline-6, 13 cars incl. police) on the generated engine instead of 4-cylinder recordings sped up 1.8–3.4x (owner: generated sound now); 4-cylinders keep recordings |
+| 0.12.40 | preview | Spikes: a flat corner visibly drops (60–85 mm at full deflation; suspension uses the deflated radius), fully flat wheels run on the rim (low grip, pull to the flat side) |
+| 0.12.41 | preview ([link](https://claude.ai/artifact/R3vr7NVghCGvdvN4TDzZCA)) | Traffic no longer panics and slams the brakes when the player (or a racer) passes in the next lane or comes the other way; AI racers fleeing the police use every lane (they sat on the green line on Loop 9) |
+| 0.12.42 | preview | One combined build on the main preview link: 0.12.41's calm traffic + fleeing racers on every lane, plus rim grind on the real rim-contact flag and the lane-split rule (skilled racers thread side-by-side traffic when the gap fits) |
+| 0.12.43 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

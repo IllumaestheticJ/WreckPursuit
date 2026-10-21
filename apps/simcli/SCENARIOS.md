@@ -25,6 +25,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     parked_cars: true,               // parked cars along parking lanes, as physics bodies (default true)
     police_cars: true,               // AI police units patrolling the city (default true)
     covered_los: true,               // tunnels / covered roads block line of sight (default true; false = A/B control)
+    car_mix: false,                  // mixed fleets: 5 police models keyed by heat + 7 traffic models (default false)
     slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
@@ -207,7 +208,7 @@ after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_rec
 `traffic_go_arounds` (civilians that got around a stationary vehicle: oncoming-lane passes plus
 lane changes made for it), `traffic_turnarounds` (civilians that turned around or reversed back
 to the last junction because their lane was blocked), `traffic_siren_yields` (civilians that
-pulled over for a siren unit coming up behind them), `props`
+pulled over for a siren unit coming up behind them), `traffic_max_stop_s` (longest a civilian stood still outside a red / amber light, s), `traffic_max_queue` (longest queue of stopped civilians back from a stop line, followed back through junctions; sampled each second), `traffic_box_stops` (civilians that stood > 5 s inside a junction box), `traffic_jam_recycled` (unseen civilians recycled after standing still 30 s outside a red light) (jam diagnostics, owner row 85), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
 units alive at once), `police_units_final`, `roadblock_barriers_max` (most roadblock barrier bodies at once),
 `spike_strips_max`, `barrier_displaced_max_m` (furthest any barrier body was pushed from

@@ -32,6 +32,42 @@ use crate::manoeuvre::{
     CRAWL_MPS,
 };
 
+/// A lane change whose car has stood still this long before leaving its old lane is undone, s.
+pub const STALLED_LANE_CHANGE_S: f32 = 3.0;
+/// After an undone lane change, no forced lane change for this long (the obstruction logic turns
+/// the car around or backs it out instead), s.
+pub const STALLED_LANE_CHANGE_RETRY_S: f32 = 20.0;
+/// Whether the pose a kinematic car takes when it leaves turn `plan` (same spot, lined up with
+/// lane `opp`) is clear of `obstacles`.
+fn turn_end_clear(
+    map: &CityMap,
+    opp: SegId,
+    shape: &CarShape,
+    plan: &TurnPlan,
+    obstacles: &[Obb],
+) -> bool {
+    let Some(last) = plan.legs.len().checked_sub(1) else {
+        return true;
+    };
+    let (r_end, f_end) = plan.pose(last, plan.legs[last].length_m);
+    let c_end = shape.centre(r_end, f_end);
+    let os = map.seg(opp);
+    let pr = os.project(c_end);
+    let (lp, lt) = os.point_at(pr.s.clamp(0.0, os.length));
+    let c_lane = geom::add(geom::xy(lp), geom::scale(geom::right_of(lt), pr.lateral));
+    // Margin: a queued car behind may still creep up half a metre during a long turn.
+    let b = car_box(c_lane, lt, 0.6);
+    !obstacles.iter().any(|o| geom::obb_overlap(&b, o))
+}
+
+/// A wreck further left of its lane than this is beyond the oncoming lane (off the road), m.
+pub const OFF_ROAD_STRAY_M: f32 = 5.5;
+/// A tracked vehicle standing still inside the junction box longer than this is an obstruction,
+/// not a car waiting its turn, s.
+pub const TRACKED_IN_BOX_S: f32 = 3.0;
+/// A tracked vehicle standing still at the stop line longer than this, while the lane is not red
+/// or amber, is an obstruction, s (a turn or an all-way stop takes a few seconds).
+pub const TRACKED_AT_LINE_S: f32 = 6.0;
 /// Extra standstill distance kept behind a stationary obstruction (wreck, parked car, debris),
 /// so there is room to pull out around it, m.
 pub const OBSTACLE_GAP_M: f32 = 6.0;
@@ -190,8 +226,19 @@ pub(super) struct Reverse {
     drv: Option<ReverseDriver>,
 }
 
-/// A car waiting this long for room to reverse into gives up, s.
-const REVERSE_WAIT_MAX_S: f32 = 40.0;
+/// A car waiting this long for room to reverse into gives up, s (owner row 85: was 40 s).
+const REVERSE_WAIT_MAX_S: f32 = 15.0;
+/// A reverse under way that has not moved for this long (a car pulled up behind) is given up:
+/// the car drives on as before and tries again later, s.
+pub const REVERSE_STALL_S: f32 = 8.0;
+/// No reverse is started with a tracked vehicle closer than this behind, m.
+pub const REVERSE_TRACKED_CLEAR_M: f32 = 25.0;
+/// A U-turn that has not moved for this long is given up (see [`REVERSE_STALL_S`]), s.
+pub const TURN_STALL_S: f32 = 10.0;
+/// A car turning around holds its own lane this far behind it, m.
+pub const TURN_OWN_HOLD_M: f32 = 8.0;
+/// After giving up a junction permit for an obstruction, no new permit for this long, s.
+pub const PERMIT_BLOCK_S: f32 = 10.0;
 
 /// A manoeuvre in progress.
 #[derive(Debug, Clone, PartialEq)]
@@ -450,6 +497,11 @@ impl Traffic {
             next.insert(t.entity.0, still);
         }
         self.tracked_still = next;
+        self.scenes = tracked
+            .iter()
+            .filter(|t| self.tracked_still_s(t.entity.0) >= super::jam::SCENE_STILL_S)
+            .map(|t| geom::xy(t.pos))
+            .collect();
     }
 
     pub(super) fn tracked_still_s(&self, entity: u32) -> f32 {
@@ -473,19 +525,63 @@ impl Traffic {
         !self.blocked_lanes.is_empty() && self.blocked_lanes.contains_key(&lane)
     }
 
+    /// Whether the exit of junction connector `conn` is held by a wreck: the first car on the
+    /// target lane is disabled and stands where the box rule wants room (owner row 85: a
+    /// wreck just past a junction held the car at the line behind it for a minute, waiting
+    /// for room that never came).
+    pub(super) fn exit_wrecked(&self, map: &CityMap, conn: SegId) -> bool {
+        let Some(&target) = map.seg(conn).next.first() else {
+            return false;
+        };
+        self.lists[target as usize].first().is_some_and(|e| {
+            !e.ghost
+                && self.agents[e.agent as usize].disabled
+                && e.s - HALF_L < 2.0 * (CAR_LENGTH_M + 2.0)
+        })
+    }
+
     /// How a stationary tracked vehicle `long` metres ahead of agent `i` (in its path) holds it
     /// up: at the stop line / in the junction (`Line`), queued behind a waiting car (`Queue`) or
     /// standing in the lane (`Obstructed`).
-    pub(super) fn classify_tracked(&self, map: &CityMap, i: usize, long: f32) -> Wait {
+    ///
+    /// A tracked vehicle at the line only counts as waiting there for so long (owner row 85: a
+    /// police car stopped at or in a junction during a pursuit held whole queues for minutes):
+    /// in the junction box after [`TRACKED_IN_BOX_S`], at the line after [`TRACKED_AT_LINE_S`]
+    /// unless this lane shows red or amber, it is an obstruction (go around / turn around).
+    pub(super) fn classify_tracked(
+        &self,
+        map: &CityMap,
+        i: usize,
+        long: f32,
+        still_s: f32,
+    ) -> Wait {
         let a = &self.agents[i];
         let seg = map.seg(a.seg);
         if seg.is_connector() {
-            return Wait::Line;
+            // In the junction itself: waiting for it to move on, until it plainly does not.
+            return if still_s < TRACKED_IN_BOX_S {
+                Wait::Line
+            } else {
+                Wait::Obstructed
+            };
         }
         let d_end = seg.length - a.s;
         let next_conn = a.plan[0] != NONE && map.seg(a.plan[0]).is_connector();
-        if long - HALF_L > d_end - 2.0 || (next_conn && d_end - long < 15.0) {
-            return Wait::Line;
+        let in_box = long - HALF_L > d_end - 2.0;
+        if in_box || (next_conn && d_end - long < 15.0) {
+            let red = seg
+                .lane()
+                .and_then(|l| map.lane_signal(l))
+                .is_some_and(|(st, _)| matches!(st, SignalState::Red | SignalState::Yellow));
+            let waited = if in_box {
+                TRACKED_IN_BOX_S
+            } else {
+                TRACKED_AT_LINE_S
+            };
+            if red || still_s < waited {
+                return Wait::Line;
+            }
+            return Wait::Obstructed;
         }
         let st = a.s + long;
         if let Some(e) = self.lists[a.seg as usize]
@@ -514,6 +610,10 @@ impl Traffic {
         let mut out = Vec::new();
         for (i, a) in self.agents.iter().enumerate() {
             if a.manoeuvre.is_some() || a.lat > -STRAY_INTRUSION_LAT_M {
+                continue;
+            }
+            // A wreck shoved beyond the oncoming lane is off the road, not in it.
+            if a.disabled && a.lat < -(OFF_ROAD_STRAY_M) {
                 continue;
             }
             let opp = self.opposite[a.seg as usize];
@@ -581,11 +681,151 @@ impl Traffic {
         }
     }
 
+    /// Re-plan the front car at a stop line whose turn through the junction a stationary tracked
+    /// vehicle (a police car at a scene, a stopped racer) has blocked for [`TRACKED_IN_BOX_S`]
+    /// while it may go: it takes another exit if there is one (owner row 85: queues waited for
+    /// minutes behind a police car parked in the junction).
+    fn reroute_around_box(&mut self, map: &CityMap, inp: &TrafficInputs) {
+        for i in 0..self.agents.len() {
+            let a = &self.agents[i];
+            if !(a.id as u64 + self.step_count).is_multiple_of(15)
+                || a.disabled
+                || a.manoeuvre.is_some()
+                || a.permit != NONE
+                || a.v > 0.5
+                || a.jam_s < TRACKED_IN_BOX_S
+            {
+                continue;
+            }
+            let c = a.plan[0];
+            let sg = map.seg(a.seg);
+            if c == NONE
+                || sg.is_connector()
+                || sg.length - a.s > CAR_LENGTH_M + 4.0
+                || !(self.tv_block[c as usize] || self.exit_wrecked(map, c))
+            {
+                continue;
+            }
+            let seg = a.seg;
+            let n = self.choose_next_avoiding(map, seg, inp.closed, true);
+            if n != NONE && n != c {
+                let a = &mut self.agents[i];
+                a.plan = [n, map.seg(n).next[0]];
+                self.stats.reroutes += 1;
+            }
+        }
+    }
+
+    /// Give up reverses that stopped moving ([`REVERSE_STALL_S`]), and undo lane changes that
+    /// stalled half-way: the car stopped (the new lane is blocked too)
+    /// before its body left the old lane, and a car only moves sideways while rolling. It goes
+    /// back to the lane it is physically in, so the obstruction logic can deal with it (owner
+    /// row 85: such cars stood for minutes, excluded from turning around by the open change).
+    fn abort_stalled_manoeuvres(&mut self, map: &CityMap, inp: &TrafficInputs) {
+        for i in 0..self.agents.len() {
+            // How long a manoeuvre has not moved (physical cars in one skip the stop timers).
+            {
+                let a = &mut self.agents[i];
+                if a.manoeuvre.is_some() && a.v < 0.3 {
+                    a.man_still_s += TRAFFIC_DT;
+                } else {
+                    a.man_still_s = 0.0;
+                }
+            }
+            // Reverses under way that stopped moving.
+            let stalled_reverse = matches!(
+                self.agents[i].manoeuvre.as_deref(),
+                Some(Manoeuvre::Reverse(Reverse {
+                    waiting_s: None,
+                    ..
+                }))
+            ) && self.agents[i].man_still_s > REVERSE_STALL_S;
+            // U-turns that cannot start (or, for a physical car, go on): something stays in
+            // the sweep. A kinematic car that has not moved yet can give up without a jump.
+            let stalled_turn = match self.agents[i].manoeuvre.as_deref() {
+                Some(Manoeuvre::Turn(t)) => {
+                    self.agents[i].man_still_s > TURN_STALL_S
+                        && t.kin.as_ref().is_none_or(|k| k.leg == 0 && k.u == 0.0)
+                }
+                _ => false,
+            };
+            if stalled_reverse || stalled_turn {
+                let a = &mut self.agents[i];
+                a.manoeuvre = None;
+                a.lat_target = 0.0;
+                a.retry_s = 5.0;
+                a.blocked_s = 0.0;
+                continue;
+            }
+            let a = &self.agents[i];
+            let Some((gseg, _)) = a.ghost else { continue };
+            if a.v > 0.3 || a.lat.abs() < 1.4 || a.stuck_s < STALLED_LANE_CHANGE_S {
+                continue;
+            }
+            let (p, _) = self.pose_of(map, a);
+            let pr = map.seg(gseg).project(geom::xy(p));
+            let plan0 = self.choose_next(map, gseg, inp.closed);
+            let plan1 = if plan0 != NONE {
+                map.seg(plan0).next[0]
+            } else {
+                NONE
+            };
+            let a = &mut self.agents[i];
+            a.seg = gseg;
+            a.s = pr.s.clamp(0.0, map.seg(gseg).length);
+            a.lat = pr.lateral;
+            a.lat_target = 0.0;
+            a.ghost = None;
+            a.plan = [plan0, plan1];
+            a.permit = NONE;
+            a.blocked_s = 0.0;
+            a.go_around = false;
+            a.lc_block_until = self.step_count + (STALLED_LANE_CHANGE_RETRY_S / TRAFFIC_DT) as u64;
+        }
+    }
+
+    /// Wrecks shoved out of their lane (into the next lane, or onto another road at a junction)
+    /// are moved, in the lane lists, to the lane they now lie in, so the cars there see them
+    /// (owner row 85 re-gate: cars drove into wrecks still registered on another road).
+    fn relocate_wrecks(&mut self, map: &CityMap) {
+        for i in 0..self.agents.len() {
+            let a = &self.agents[i];
+            if !a.disabled || a.manoeuvre.is_some() || a.lat.abs() < 1.75 {
+                continue;
+            }
+            let (p, _) = self.pose_of(map, a);
+            // The lane it lies in, on any road (lanes only; a wreck on a sidewalk or lot finds
+            // none and is left where it is: off its lane, it is not an obstacle there).
+            let Some(loc) = map.locate(p, None, 0.5, true, false) else {
+                continue;
+            };
+            if loc.seg != a.seg {
+                let plan0 = self.choose_next(map, loc.seg, &[]);
+                let plan1 = if plan0 != NONE {
+                    map.seg(plan0).next[0]
+                } else {
+                    NONE
+                };
+                let a = &mut self.agents[i];
+                a.seg = loc.seg;
+                a.s = loc.s;
+                a.lat = loc.lateral;
+                a.lat_target = loc.lateral;
+                a.ghost = None;
+                a.permit = NONE;
+                a.plan = [plan0, plan1];
+            }
+        }
+    }
+
     /// Start go-arounds / turn-arounds for agents that have waited long enough.
     pub(super) fn resolve_blocks(&mut self, map: &CityMap, inp: &TrafficInputs) {
+        self.relocate_wrecks(map);
+        self.abort_stalled_manoeuvres(map, inp);
         if !self.blocked_lanes.is_empty() {
             self.reroute(map, inp);
         }
+        self.reroute_around_box(map, inp);
         for i in 0..self.agents.len() {
             let a = &self.agents[i];
             if a.wait != Wait::Obstructed
@@ -595,16 +835,29 @@ impl Traffic {
                 || a.blocked_s < SETTLE_S
                 || a.obstacle_still_s < a.patience_s
                 || a.retry_s > 0.0
-                || a.permit != NONE
                 || a.ghost.is_some()
             {
                 continue;
             }
+            // Holding a junction permit with the obstruction between it and the line (it got
+            // the green, then a police car stopped in front): it will not use the permit, so
+            // give it up and deal with the obstruction (owner row 85: such cars held queues for
+            // minutes).
+            if a.permit != NONE && !map.seg(a.seg).is_connector() {
+                let (c, id) = (a.permit, a.id);
+                if self.reservations[c as usize] == id {
+                    self.reservations[c as usize] = NONE;
+                }
+                self.agents[i].permit = NONE;
+                self.agents[i].permit_block_until =
+                    self.step_count + (PERMIT_BLOCK_S / TRAFFIC_DT) as u64;
+            }
+            let a = &self.agents[i];
             let seg_lane = map.seg(a.seg).lane();
             self.agents[i].retry_s = 1.0;
             let Some(lane) = seg_lane else {
                 // Stuck in a junction connector behind the queue: back out of it.
-                self.try_reverse(map, i);
+                self.try_reverse(map, inp, i);
                 continue;
             };
             let a = &self.agents[i];
@@ -614,7 +867,8 @@ impl Traffic {
                     && !inp.closed.get(c as usize).copied().unwrap_or(false)
             });
             // Multi-lane roads: the forced lane change (MOBIL) gets the first chance.
-            if side_lane && a.blocked_s < a.patience_s + 8.0 {
+            if side_lane && a.blocked_s < a.patience_s + 8.0 && self.step_count >= a.lc_block_until
+            {
                 continue;
             }
             let waited = a.blocked_s;
@@ -625,8 +879,14 @@ impl Traffic {
                 PassTry::NoGap => {}
                 // No way past in this lane: tell the others (they re-route), then turn or back out.
                 PassTry::Impossible => {
-                    if !side_lane {
-                        let seg = self.agents[i].seg;
+                    // Multi-lane roads too once it is plain the lane change will not come
+                    // (obstruction at the stop line, a pursuit scene in the junction, or a long
+                    // wait): upstream cars then re-route instead of joining the queue (owner
+                    // row 85).
+                    let a = &self.agents[i];
+                    let at_line = map.seg(a.seg).length - a.s < CAR_LENGTH_M + 4.0;
+                    if !side_lane || at_line || waited > patience + 15.0 {
+                        let seg = a.seg;
                         self.mark_blocked(seg);
                     }
                 }
@@ -634,7 +894,7 @@ impl Traffic {
             if self.try_turn(map, inp, i) {
                 continue;
             }
-            self.try_reverse(map, i);
+            self.try_reverse(map, inp, i);
         }
     }
 
@@ -946,7 +1206,7 @@ impl Traffic {
         let Some(road) = self.corridor_at(map, i) else {
             return false;
         };
-        let shape = match (&a.physical, &self.car) {
+        let shape = match (&a.physical, self.car_of(a.id)) {
             (Some(_), Some((def, _))) => CarShape::from_def(def),
             _ => CarShape::CIVILIAN,
         };
@@ -958,6 +1218,12 @@ impl Traffic {
         let Some(plan) = plan_turn(&shape, &road, &obstacles, rear, pose.f, goal) else {
             return false;
         };
+        // A kinematic car leaves the turn lined up with its new lane (same spot, lane heading):
+        // that pose must be clear too, or the nose swings into a car waiting close behind
+        // (owner row 85 re-gate).
+        if a.physical.is_none() && !turn_end_clear(map, opp, &shape, &plan, &obstacles) {
+            return false;
+        }
         // Oncoming traffic must be able to stop for the turning car; cars in the lanes crossed
         // must not be about to arrive.
         let s_m = map.seg(opp).project(q).s;
@@ -986,13 +1252,34 @@ impl Traffic {
             }
             l = map.net.lanes[c as usize].left;
         }
+        // The lane on the right too: the reversing leg swings the rear into it (owner row 85
+        // re-gate on main's Vesper: a U-turn from the left lane of a two-lane direction clipped
+        // a car coming up on the right).
+        if let Some(r) = map
+            .seg(a.seg)
+            .lane()
+            .and_then(|c| map.net.lanes[c as usize].right)
+        {
+            let rs = map.seg(r);
+            let sc = rs.project(q).s;
+            if self.lists[r as usize].iter().any(|e| {
+                e.agent as usize != i
+                    && ((e.s < sc - CAR_LENGTH_M && e.v > 1.0 && e.s > sc - 40.0)
+                        || (e.s - sc).abs() < CAR_LENGTH_M + 2.0)
+            }) {
+                return false;
+            }
+        }
         if inp.tracked.iter().any(|t| {
             geom::dist(geom::xy(t.pos), q) < 50.0 && (t.vel[0].abs() + t.vel[1].abs()) > 1.0
         }) {
             return false;
         }
         let opp_s = (s_m - 4.0).max(0.0);
-        let own_s = a.s - 3.0;
+        // Followers hold this far back: the turn can end with the nose swung back over the
+        // own lane, level with a car that stopped closer (owner row 85 re-gate: a finished
+        // U-turn touched the car waiting behind it). Was 3 m.
+        let own_s = a.s - TURN_OWN_HOLD_M;
         let z = pose.p[2];
         let (kin, drv) = if a.physical.is_some() {
             (None, Some(TurnDriver::new(shape, road, goal, obstacles)))
@@ -1030,7 +1317,29 @@ impl Traffic {
     }
 
     /// Try to start reversing back through the junction to the previous lane.
-    fn try_reverse(&mut self, map: &CityMap, i: usize) -> bool {
+    /// Gap to the nearest tracked vehicle (police unit, player) behind agent `i` in its path, m.
+    fn tracked_gap_behind(&self, inp: &TrafficInputs, i: usize) -> f32 {
+        let pose = self.poses[i];
+        let q = geom::xy(pose.p);
+        let right = geom::right_of(pose.f);
+        inp.tracked
+            .iter()
+            .filter(|t| (t.pos[2] - pose.p[2]).abs() < 4.0)
+            .filter_map(|t| {
+                let r = geom::sub(geom::xy(t.pos), q);
+                let long = geom::dot(r, pose.f);
+                (long < 0.0 && geom::dot(r, right).abs() < CAR_WIDTH_M + 0.5)
+                    .then_some(-long - CAR_LENGTH_M)
+            })
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    fn try_reverse(&mut self, map: &CityMap, inp: &TrafficInputs, i: usize) -> bool {
+        // Never back towards a police car or the player behind (owner row 85 regression: a
+        // civilian reversed into a siren unit coming through the queue).
+        if self.tracked_gap_behind(inp, i) < REVERSE_TRACKED_CLEAR_M {
+            return false;
+        }
         let a = &self.agents[i];
         let lane = a.seg;
         let ls = map.seg(lane);
@@ -1068,7 +1377,7 @@ impl Traffic {
             return false;
         }
         let drv = if a.physical.is_some() {
-            let shape = match &self.car {
+            let shape = match self.car_of(a.id) {
                 Some((def, _)) => CarShape::from_def(def),
                 None => CarShape::CIVILIAN,
             };
@@ -1286,7 +1595,9 @@ impl Traffic {
                         k.wait_s += 0.5;
                         if k.wait_s > 12.0 {
                             let (r, f) = k.plan.pose(k.leg, 0.0);
-                            if let Some(p) = plan_turn(&shape, &t.road, &obstacles, r, f, t.goal) {
+                            if let Some(p) = plan_turn(&shape, &t.road, &obstacles, r, f, t.goal)
+                                .filter(|p| turn_end_clear(map, t.opp, &shape, p, &obstacles))
+                            {
                                 k.plan = p;
                                 k.leg = 0;
                                 k.u = 0.0;
@@ -1346,6 +1657,7 @@ impl Traffic {
         };
         let in_lane = a.seg == lane && lane != via;
         gap = gap.min(behind(a.seg, a.s, 0.0));
+        gap = gap.min(self.tracked_gap_behind(inp, i));
         if in_lane {
             gap = gap.min(behind(via, a.s + map.seg(via).length, 0.0));
         }

@@ -1,0 +1,169 @@
+{
+  "id": "fulmine_v10",
+  "display_name": "Fulmine V10",
+  "class": "Exotic",
+  "analog_of": "2010s Italian mid-engine supercar, 5.2 L naturally aspirated V10, permanent AWD, 7-speed dual-clutch",
+  "body_size_m": [1.95, 4.46, 1.17],
+  "mass_kg": 1634.1,
+  "front_weight_frac": 0.42,
+  "wheelbase_m": 2.65,
+  "track_front_m": 1.67,
+  "track_rear_m": 1.64,
+  "cg_height_m": 0.42,
+  "inertia_kgm2": [550.0, 2170.0, 2420.0],
+  "drag_cd_a_m2": 0.673,
+  "lift_front": -0.08,
+  "lift_rear": -0.16,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 300],
+      [2000, 380],
+      [3000, 440],
+      [4000, 495],
+      [4500, 515],
+      [5000, 530],
+      [5500, 545],
+      [6000, 555],
+      [6500, 560],
+      [7000, 555],
+      [7500, 543],
+      [8000, 527],
+      [8250, 520],
+      [8500, 500],
+      [8700, 470]
+    ],
+    "idle_rpm": 1000.0,
+    "redline_rpm": 8500.0,
+    "rev_limit_rpm": 8700.0,
+    "inertia_kgm2": 0.15,
+    "engine_brake_nm": 56.0
+  },
+  "drivetrain": {
+    "layout": {
+      "Awd": {
+        "front_split": 0.3
+      }
+    },
+    "gear_ratios": [3.13, 2.19, 1.68, 1.34, 1.1, 0.92, 0.79],
+    "final_drive": 4.11,
+    "reverse_ratio": 2.9,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 60.0,
+        "ramp_power": 0.45,
+        "ramp_coast": 0.3
+      }
+    },
+    "clutch_max_nm": 780.0,
+    "shift_time_s": 0.15
+  },
+  "wheels": [
+    {
+      "position_m": [-0.835, 1.325, 0.33],
+      "radius_m": 0.33,
+      "width_m": 0.245,
+      "mass_kg": 22.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.571,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [0.835, 1.325, 0.33],
+      "radius_m": 0.33,
+      "width_m": 0.245,
+      "mass_kg": 22.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.571,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [-0.82, -1.325, 0.347],
+      "radius_m": 0.347,
+      "width_m": 0.305,
+      "mass_kg": 26.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0279,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.82, -1.325, 0.347],
+      "radius_m": 0.347,
+      "width_m": 0.305,
+      "mass_kg": 26.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0279,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 53300.0,
+      "damper_bump_ns_per_m": 2650.0,
+      "damper_rebound_ns_per_m": 3980.0,
+      "travel_m": 0.11,
+      "preload_m": 0.02,
+      "arb_n_per_m": 9500.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 53300.0,
+      "damper_bump_ns_per_m": 2650.0,
+      "damper_rebound_ns_per_m": 3980.0,
+      "travel_m": 0.11,
+      "preload_m": 0.02,
+      "arb_n_per_m": 9500.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 89500.0,
+      "damper_bump_ns_per_m": 4050.0,
+      "damper_rebound_ns_per_m": 6080.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 89500.0,
+      "damper_bump_ns_per_m": 4050.0,
+      "damper_rebound_ns_per_m": 6080.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2750.0,
+    "max_torque_rear_nm": 1680.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1340.0
+  },
+  "steering": {
+    "ratio": 15.0,
+    "rack_speed_rad_per_s": 1.7,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "fulmine_v10",
+  "base_price": 125000,
+  "durability_class": 3,
+  "fuel_capacity_l": 83.0
+}

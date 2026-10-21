@@ -119,6 +119,15 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   supercharger whine follows rpm; overrun pops are Poisson via the seeded rng. Inputs are
   NaN-safe and decaying state is flushed to 0 below 1e-6 (no denormals). Engine sound stops
   when `Component::Engine` health is 0; radiator damage adds a hiss.
+- **Punctured tyres** (`flat_tyre.rs`, playtest row 132): on `PoliceEvent::SpikeHit` a loud
+  recorded blow-out (`tire/burst` in `world_rec`: CC0 balloon pop pitched down + air rush,
+  `tools/audio_packs/build_tyre.py`) per punctured wheel at `Critical` priority, plus a scanner
+  line ("Spikes hit! …"). The bridge feeds per-wheel deflation (`set_tire_deflation`, damage +
+  spikes as the sim combines them): each wheel ≥ 0.25 deflated plays `tire/flat_flap` (synth
+  `flap`, one slap per revolution: `freq_hz` = wheel rev/s); a wheel whose rim is on the road
+  (`set_rim_contact` ← `wp_vehicle::Vehicle::rim_contact`, false over bumps and jumps; deflation
+  ≥ 0.9 when unknown, e.g. net clients) grinds (recorded `scrape/metal`, pitched by wheel speed). Tuning:
+  `audio_config.json` → `flat_tyre`.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)` with each wheel's
   own `TireDef` peaks (`TirePeak`, resolved at `register_car`; an all-terrain tire squeals
   later than a semi-slick; the `TireMix` peaks are only the fallback for an unknown tire);
@@ -438,6 +447,15 @@ nodes) for material lookup.
 
 ## Known gaps
 
+- **Six- and eight-cylinder engines are procedural** (owner decision on 0.12.36, "generated
+  sound now"): the recorded `engine_rec_v8` / `_v6` / `_i6` packs are inline-4 loops (plus a short
+  six idle), so at redline they would play up to 3.4× fast and "sing". A car plays its recorded
+  pack only if no loop exceeds 1.6× at redline (`tools/audio_packs/write_packs.py` applies it,
+  `tests/samples.rs::engines_play_recordings_exactly_when_they_are_not_sped_up` enforces it);
+  today that is every inline-4 / turbo-4, and every 6 / 8-cylinder car (13 incl. police) is on
+  `engine_proc_*`. Real multi-rpm six / V8 recordings (on / off loops at 3+ rpm points up to
+  ~400 Hz firing) would move them back to recordings automatically. For those cars the audio
+  panel's recorded / procedural switch plays the same engine.
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.

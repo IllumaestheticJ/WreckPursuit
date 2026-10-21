@@ -13,6 +13,7 @@
     "e2e": "node e2e/run.mjs && node e2e/race.mjs && node e2e/countersteer.mjs && node e2e/radio.mjs && node e2e/siren.mjs && node e2e/tune.mjs",
     "e2e:radio": "node e2e/radio.mjs",
     "e2e:siren": "node e2e/siren.mjs",
+    "e2e:spikes": "node e2e/spikes.mjs",
     "e2e:cameras": "node e2e/cameras.mjs",
     "e2e:photo": "node e2e/photo.mjs",
     "e2e:audio-samples": "node e2e/audio_samples.mjs",

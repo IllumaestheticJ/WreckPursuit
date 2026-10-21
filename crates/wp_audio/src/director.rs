@@ -155,6 +155,8 @@ struct WorldCues {
     engine_fail: CueRef,
     steam: CueRef,
     tire_burst: CueRef,
+    /// Flat-tyre flap loop (`tire/flat_flap`, playtest row 132).
+    flat_flap: CueRef,
     rattle: CueRef,
     /// Optional gear-shift clunk (`drivetrain/shift`); silent when the pack lacks it.
     shift: CueRef,
@@ -194,6 +196,7 @@ impl WorldCues {
             engine_fail: t.get(pack, cues::ENGINE_FAIL, false),
             steam: t.get(pack, cues::STEAM_HISS, true),
             tire_burst: t.get(pack, cues::TIRE_BURST, false),
+            flat_flap: t.get(pack, crate::flat_tyre::FLAP_CUE, true),
             rattle: t.get(pack, cues::BODY_RATTLE, true),
             shift: t.get(pack, cues::SHIFT, false),
             body: t.get(pack, cues::IMPACT_BODY, false),
@@ -313,6 +316,12 @@ pub struct AudioDirector {
     /// Total plastic energy per vehicle given by the caller this frame
     /// ([`AudioDirector::set_plastic_energy`]), J.
     plastic_in: BTreeMap<EntityId, f32>,
+    /// Per-wheel tyre deflation given by the caller ([`AudioDirector::set_tire_deflation`]).
+    tire_deflation: BTreeMap<EntityId, [f32; 4]>,
+    /// Per-wheel rim-on-the-road flags given by the caller ([`AudioDirector::set_rim_contact`]).
+    rim_contact: BTreeMap<EntityId, [bool; 4]>,
+    /// Spike-hit radio lines spoken (picks the next line text).
+    spike_lines: u32,
     /// Vehicle whose cabin the listener is in this frame (interior camera).
     interior: Option<EntityId>,
 }
@@ -355,6 +364,9 @@ impl AudioDirector {
             tuned_specs: BTreeMap::new(),
             physical_cue,
             plastic_in: BTreeMap::new(),
+            tire_deflation: BTreeMap::new(),
+            rim_contact: BTreeMap::new(),
+            spike_lines: 0,
             interior: None,
         }
     }
@@ -541,6 +553,31 @@ impl AudioDirector {
         }
     }
 
+    /// Per-wheel tyre deflation (FL, FR, RL, RR; 0 inflated ..= 1 flat) of a vehicle, from
+    /// `HandlingEffects::tire_puncture`: deflated wheels flap at wheel rate, flat ones grind on
+    /// their rims ([`crate::flat_tyre`]). Kept until changed; all zero removes it.
+    pub fn set_tire_deflation(&mut self, entity: EntityId, deflation: [f32; 4]) {
+        if deflation.iter().all(|d| *d <= 0.0 || !d.is_finite()) {
+            self.tire_deflation.remove(&entity);
+        } else {
+            self.tire_deflation.insert(entity, deflation);
+        }
+    }
+
+    /// Which wheels run on their rims right now (`wp_vehicle::Vehicle::rim_contact`, FL, FR, RL,
+    /// RR): those grind. `None` = unknown (e.g. a net client): deflation ≥ `flat_tyre.rim_deflation`
+    /// decides instead.
+    pub fn set_rim_contact(&mut self, entity: EntityId, rim: Option<[bool; 4]>) {
+        match rim {
+            Some(r) => {
+                self.rim_contact.insert(entity, r);
+            }
+            None => {
+                self.rim_contact.remove(&entity);
+            }
+        }
+    }
+
     /// Vehicle whose cabin the listener was in last frame (interior camera), if any.
     pub fn interior(&self) -> Option<EntityId> {
         self.interior
@@ -559,6 +596,8 @@ impl AudioDirector {
         self.pairs.clear();
         self.pursuits.clear();
         self.sirens.clear();
+        self.tire_deflation.clear();
+        self.rim_contact.clear();
         self.last_tick = None;
         self.one_shot_seq = 0;
         self.rng = Rng::new(self.seed);
@@ -1081,6 +1120,41 @@ impl AudioDirector {
                 out,
             );
         }
+        // Punctured tyres (playtest row 132): flap per deflated wheel, rim grind when flat.
+        if let Some(defl) = self.tire_deflation.get(&v.entity).copied() {
+            let rim = self.rim_contact.get(&v.entity).copied();
+            for w in crate::flat_tyre::wheels(&cfg.flat_tyre, s, defl, rim, car.wheel_radius_m) {
+                let i = w.wheel as u32;
+                if let Some((gain, rev_hz, d)) = w.flap {
+                    let mut f = Desire::new(
+                        VoiceId::new(e, crate::flat_tyre::FLAP_SLOT + i),
+                        Bus::World,
+                        car.world.flat_flap,
+                        up(Priority::Normal),
+                        pos,
+                        vel,
+                    );
+                    f.gain = gain;
+                    f.freq_hz = rev_hz;
+                    f.load = d;
+                    out.push(f);
+                }
+                if let Some((gain, pitch)) = w.rim {
+                    let mut r = Desire::new(
+                        VoiceId::new(e, crate::flat_tyre::RIM_SLOT + i),
+                        Bus::World,
+                        car.world.scrape_metal,
+                        up(Priority::Normal),
+                        pos,
+                        vel,
+                    );
+                    r.gain = gain;
+                    r.pitch = pitch;
+                    r.load = 1.0;
+                    out.push(r);
+                }
+            }
+        }
         let world_thump = car.world.thump;
         let world_land = car.world.land;
         for (wheel, gain, landing) in thumps {
@@ -1522,8 +1596,27 @@ impl AudioDirector {
                 self.pursuits.remove(&racer);
             }
             PoliceEvent::SpikeHit { vehicle, wheels } => {
-                for _ in wheels.iter().filter(|w| **w) {
-                    self.vehicle_one_shot(by_id, vehicle, |w| w.tire_burst, 1.0, out);
+                // Playtest row 132: a loud recorded blow-out per punctured wheel, never culled.
+                let ft = self.lib.config.flat_tyre.clone();
+                let hits = wheels.iter().filter(|w| **w).count();
+                for _ in 0..hits {
+                    let n = out.len();
+                    self.vehicle_one_shot(by_id, vehicle, |w| w.tire_burst, ft.pop_gain, out);
+                    if let Some(d) = out.get_mut(n) {
+                        d.priority = Priority::Critical;
+                    }
+                }
+                if ft.radio_line && hits > 0 && by_id.contains_key(&vehicle) {
+                    self.spike_lines = self.spike_lines.wrapping_add(1);
+                    let text = crate::flat_tyre::RADIO_LINES
+                        [self.spike_lines as usize % crate::flat_tyre::RADIO_LINES.len()];
+                    let line = RadioLine {
+                        unit: 0,
+                        text: text.to_string(),
+                        priority: RadioPriority::Pursuit,
+                        emitted_tick: tick,
+                    };
+                    self.scanner.push(&self.lib.config.scanner, line);
                 }
             }
             _ => {}

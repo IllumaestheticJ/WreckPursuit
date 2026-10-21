@@ -1320,6 +1320,158 @@ of the control: physical cars more than 0.8 m wide within 8 m of a turn exit 7 �
 The control's golden hash moved with the merge (not with my edit); left for the lead's bless.
 Scenarios on the merged tree (release): all 86 pass.
 
+### Response from D (round 13, row 85) — "massive traffic jam"
+Started on the owner's request (lead addendum 2026-10-20). Merged `origin/lead/round12` @ 21e14c0.
+**Status:** on the pre-main maps both jam scenarios met the lead's gates (no stop > 45 s except
+at red, no queue > 12). **On main's maps (after the 9a4272f8 merge) Vesper meets them, the grid
+does not** — see "Row 85 on main's maps" below. Pre-main, across seeds 1–4 + 85: stop gate 10 of 10 runs (worst
+39 s), queue gate 9 of 10 (Vesper seed 1: 17 cars for 3 s at a red, behind a car pulled over for
+a siren; cleared on the next green). Civilian collisions in the pursuit melee still need their
+own pass.
+
+**1. Instrumentation.** `TrafficStats::{max_stop_s, max_queue, box_stops, jam_recycled}`
+(`traffic/jam.rs`), simcli metrics `traffic_max_stop_s`, `traffic_max_queue`,
+`traffic_box_stops`, `traffic_jam_recycled` (`apps/simcli/src/run.rs`, `SCENARIOS.md`).
+Stop time is held (not reset) at red / amber and, for the metric only, within 60 m of a
+*standing scene* (a tracked vehicle stopped ≥ 20 s); wrecks are left out. Queue = stopped cars
+back from a stop line, followed back through junctions, sampled 1 Hz. Scenarios
+`jam/pursuit_jam_grid.ron` (12×12 grid, Safehouse 3 → Safehouse 2) and
+`jam/pursuit_jam_vesper.ron` (Lantern Run → Founders Cut lay-by): noon, racer at heat 70 (L4,
+pursuit takes it to L5), city police on, 10 min, `restart_after_capture: true`.
+
+**Capture scenes (simcli).** In simcli a captured racer used to stand in the road for the rest
+of the run with 5–20 units around it — a scene that does not exist in the game (a capture ends
+the run, `RunEnd::Captured`) and accounted for most of the long stops. New scenario flag
+`restart_after_capture` (`apps/simcli/src/scenario.rs`, `run.rs`): on `PursuitEnded`
+Captured / CapturedTotalLoss the racer is put back at its route start with the scenario's heat,
+so a 10-min run measures repeated pursuits. Default off; existing scenarios unchanged.
+
+**2–5. Fixes in wp_world** (details in `crates/wp_world/README.md`, "Jams"):
+- reservations rebuilt every step (stale ones from despawned / re-routed / turned-around cars
+  were the biggest single cause: whole junctions held for minutes);
+- a stationary tracked vehicle in a crossing path blocks only the paths it stands in (moving
+  > 2.5 m/s it still holds crossing traffic); same for wrecks;
+- stale arrivals (stopped at the line 4 s without a permit) no longer make others yield;
+  all-way stop first-to-stop loses priority after 8 s; turn-taking booking after 20 s at the
+  line; permits dropped when stopped > 6 m short of the line;
+- police at / in the junction: a tracked vehicle stopped at the line 6 s (not red) or in the box
+  3 s, or a box path blocked by one for 6 s, is an obstruction → re-route to another exit, else
+  the queue turns around / backs out from the tail, and the lane is marked blocked (multi-lane
+  roads too) so upstream cars re-route; obstructed cars give up their permit;
+- sirens: junction hold times out after 8 s; pulled-over drivers give up on a unit standing or
+  crawling behind after 8 s (was 15 s); with a unit standing beside the car (< 1 m/s, ≥ 0.5 m
+  of room) they creep on along the kerb (≤ 5 m/s) and merge back past it instead of waiting;
+- stuck manoeuvres: half-done lane changes undone (20 s cooldown); reverses stalled 8 s and
+  U-turns that cannot start for 10 s given up; no reverse with a tracked vehicle < 25 m behind;
+  reverse wait 15 s (was 40 s); kinematic U-turns check their exit pose (0.6 m margin) and hold
+  their lane 8 m back (was 3 m);
+- spawning: never behind a stopped car within 60 m; per-lane cap one car / 20 m at the daytime
+  peak × time-of-day factor; unseen cars stopped 30 s outside a red recycled (also in a box);
+- wrecks shoved out of their lane are re-filed under the lane they lie in; > 3.5 m off any lane
+  they are not obstacles; a wreck just past a junction on a car's exit is an obstruction for
+  the car held at the line (re-route / turn around) instead of room to wait for;
+- turn-taking bookings are not made against the car's own red / amber (they lapsed before
+  the green and held the crossing traffic meanwhile);
+- an obstructed driver's wait is held, not reset, while it stands (a one-step class flicker —
+  level-of-detail switch, siren yield, the leader's class — kept drivers from ever giving up);
+- the jam metric's stop timer is also held while the car yields to a siren (like a red).
+Don't-block-the-box (exit room) already existed and is unchanged.
+
+**Before / after** (release simcli, both with `restart_after_capture`; before = `lead/round12`
+traffic + the instrumentation only, after = this branch). Seed 85 is the shipped scenario.
+
+| run | max stop before / after (s) | max queue before / after | box stops before / after | civilian collisions before / after |
+|---|---|---|---|---|
+| grid 1 | 69 / 24 | 10 / 9 | 2 / 1 | 29 / 3 |
+| grid 2 | 107 / 37 | 13 / 12 | 3 / 6 | 8 / 12 |
+| grid 3 | 50 / 26 | 15 / 10 | 11 / 7 | 12 / 7 |
+| grid 4 | 45 / 27 | 12 / 10 | 9 / 3 | 6 / 9 |
+| grid 85 | 55 / 30 | 13 / 11 | 10 / 10 | 7 / 9 |
+| Vesper 1 | 90 / 39 | 10 / 17 | 6 / 7 | 17 / 10 |
+| Vesper 2 | 94 / 30 | 14 / 7 | 7 / 3 | 9 / 3 |
+| Vesper 3 | 89 / 26 | 9 / 8 | 10 / 12 | 8 / 13 |
+| Vesper 4 | 53 / 29 | 8 / 6 | 5 / 9 | 6 / 7 |
+| Vesper 85 | 55 / 37 | 7 / 8 | 2 / 9 | 1 / 12 |
+
+Gates met before: 1 of 10 runs (stop) / 5 of 10 (queue); after: 10 of 10 / 9 of 10.
+**Remaining:** civilian collisions in the pursuit melee (physical civilians shoved by units,
+wrecks): 103 → 85 over the 10 runs (after counts a re-touch within 2 s once, see below), but up on some seeds (Vesper 85: 1 → 12, the pursuit now
+runs through downtown instead of ending in the tunnel); needs its own pass. Box stops (cars
+standing > 5 s in a junction, mostly behind police in the box) are unchanged on average.
+**Collision counter.** `civilian_collisions` now counts a pair that touches again within 2 s
+of separating once (`RETOUCH_STEPS`); before, a bump-part-bump was 2. Found on
+`city_siren_traffic_no_siren` (seed 2): one physical civilian drifts ~1 m off a 5.8 m/s left
+turn (the vehicle-side tracking issue noted in that scenario) and brushes a car on a path that
+is > 2.4 m away and so not a junction conflict; it was counted twice and failed the ≤ 1 gate.
+Sim hashes are unchanged by this. Over seeds 1–9 that scenario has 4 collisions on this branch
+and 4 on the lead tip (on different seeds).
+**Goldens** re-blessed (`[bless]` commit) for the row-85 traffic changes: city / siren /
+blocked / opponent / race / weather scenarios that run civilian traffic.
+**Changes outside wp_world:** `apps/simcli/src/run.rs` (4 metrics, `restart_after_capture`),
+`apps/simcli/src/scenario.rs`, `src/fuzz.rs` and `examples/city_frame_cost.rs` (the flag),
+`apps/simcli/SCENARIOS.md`, `apps/simcli/golden/*` (bless),
+`apps/simcli/scenarios/jam/*.ron`; `crates/wp_wasm/src/scenario.rs` one-line
+`restart_after_capture: false` so the shared scenario struct still builds. Contract change
+requests: none.
+### Row 85 on main's maps (merge of lead/round12 9a4272f8)
+Merged `origin/lead/round12` @ 9a4272f8 (main's rebuilt grid and Vesper, E's police,
+opponent-pace racers, brake bias). Conflicts: `apps/simcli/src/run.rs` (kept `cars` for
+`restart_after_capture` and the lead's `modded`), 24 golden hash files (re-blessed on the
+merged tip). `apps/simcli/src/police_bench.rs`: `restart_after_capture: false` for the new
+`Scenario` field (minimal compile fix).
+**Fixes found on the new maps** (all wp_world):
+- *Sneaker*: a left-turner waiting at the line with its permit keeps it through amber / red;
+  standing still it "could stop" at any decel, so the amber stopping check revoked the permit
+  the step after it was given and it sat out the next cycle too. Main's short greens (~14 s on
+  some approaches) made this the main grid jam.
+- *Booking without room*: a car starving behind a short block (22 m on main's grid) may book
+  its turn before the exit has room, so the room that comes free is its, not the other
+  approaches'. While it waits for room behind a red-light queue the booking does not lapse;
+  any other hold lapses it after 40 s (`BOOK_ROOM_MAX_S`).
+- *U-turns* also wait for the lane on their right (the reversing leg swings into it):
+  `world_traffic_soak_vesper` had one collision on main's Vesper.
+**Before / after on main's maps** (release simcli, 10 runs; before = this merge with the
+row-85 traffic rules taken out, instrumentation and capture restart kept; the before's
+metric holds only for `yielding`, it had no siren junction-hold timer to read):
+
+| run | max stop before / after (s) | max queue before / after |
+|---|---|---|
+| grid 1 | 53 / 52 | 12 / 8 |
+| grid 2 | 57 / 118 | 13 / 15 |
+| grid 3 | 143 / 37 | 17 / 9 |
+| grid 4 | 228 / 59 | 13 / 8 |
+| grid 85 | 66 / 27 | 18 / 15 |
+| Vesper 1 | 48 / 58 | 8 / 6 |
+| Vesper 2 | 79 / 29 | 8 / 6 |
+| Vesper 3 | 39 / 26 | 8 / 9 |
+| Vesper 4 | 46 / 26 | 9 / 7 |
+| Vesper 85 | 50 / 33 | 8 / 6 |
+
+**Vesper** (the shipped `jam/pursuit_jam_vesper.ron`, hard gates): stop gate met on 4 of 5
+seeds (seed 1: 58 s), queue 5 of 5 (before: 1 of 5 / 5 of 5).
+**Grid: not met on main's grid**; `jam/pursuit_jam_grid.ron` gates moved back to
+`expect_pending` (seed 85: stop 27 s passes, queue 15 fails — a red-light queue at a ~46 s red).
+Over the 5 grid seeds: stop gate 0 → 2 met, worst 228 → 118 s; queue gate 1 → 3 met. What is left
+is network capacity under a pursuit: 22 m blocks between a priority junction and a signal whose
+approach gets ~14 s of green per ~60 s cycle, with units crossing it with sirens (the front car
+is held by the siren hold or by units in the crossing paths, and the queue spills back through
+the short blocks; seed 2's 118 s car is behind such a block). Proposed next step (not done): give
+main's grid signals longer / actuated greens on short-block approaches (`procgen.rs` signal
+plans), and let the siren junction hold count per junction rather than per unit.
+**opponent-pace lantern_checkpoint** (`wp_race/tests/opponent_pace.rs`, release, on the
+9a4272f8 merge): still red, but the jam fixes help a lot — best ratio s50 2.678 → 2.246
+(want ≤ 2.2), s95 2.999 → 2.209 (want ≤ 1.98); race times 96–139 s → 79–96 s (before = the
+same tree with the row-85 traffic rules taken out).
+**Merge of lead/round12 5b9ab4f7** (E's police, never-give-up, detailed cars + LOD, audio):
+conflicts only where both sides added fields (`Traffic::{overlap_ended, cars}`,
+`Scenario::{restart_after_capture, car_mix}` in `fuzz.rs` and `wp_wasm/src/scenario.rs`).
+Goldens re-blessed only where ws/world's traffic moves them, by blessing lead/round12 alone and
+the merged tip and comparing: ws/world only — `jam_pursuit_{grid,vesper}`; both ws/world and
+E (merged value differs from round12 alone, so this bless supersedes E's on a merge) —
+`golden_city_chase`, `golden_night_pursuit_escape` (+ replays), `opponent_flee_police`,
+`race_city_sprint_police`, `weather_fog_pursuit{,_clear}`, `world_traffic_soak{,_observer}`;
+E only, left for E — `opponent_circuit_8x5`, `race_lantern_checkpoint`.
+
 ## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
 **Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
 the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
@@ -1463,3 +1615,13 @@ cross its plane). Tests: `surface::tests::*` (slab geometry), `vesper::tests::ov
 Decks are separate from round 12's covered spans (`covered.rs`: tunnels and the Founders Cut
 trench, switchable with `covered_los`); `deck_slabs` is not affected by `covered_los`. The slab
 list and its grid are `Arc`-shared like the other grids (cheap `CityMap` clones).
+
+## Playtest row 134 (lead): traffic no longer panics when the player is near
+
+`traffic.rs` emergency stop on a tracked vehicle: was "closest approach within 3 m in the next
+3 s", which a player passing in the next lane (same direction or oncoming, ~2.7–3.3 m over)
+kept setting off. Now the closest approach must overlap the agent's body side to side
+(half widths + `EMERGENCY_SIDE_MARGIN_M` 0.4 m, and within a car length along it), look-ahead
+`EMERGENCY_HORIZON_S` 2.5 s. Tests: `tests/player_nearby.rs` (two same-world runs, with and
+without the player, compare the chosen agent): oncoming 636 → 0 panic ticks, overtaking 40 → 0;
+a car in its lane head-on still triggers it.

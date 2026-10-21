@@ -155,8 +155,15 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
     }
     for car in lib.cars.values() {
         for pack in [&car.engine_pack, &car.world_pack] {
+            let recorded = pack.ends_with("_rec") || pack.contains("_rec_");
+            // The one exception (owner decision on 0.12.36, "generated sound now"): a car whose
+            // recorded engine twin would pitch a loop above MAX_RECORDED_PITCH at redline uses
+            // the procedural twin until a recording covers its rev range.
+            let sped_up_exception = pack == &car.engine_pack
+                && recorded_twin_top_pitch(&lib, &car.id, pack)
+                    .is_some_and(|p| p > MAX_RECORDED_PITCH);
             assert!(
-                pack.ends_with("_rec") || pack.contains("_rec_"),
+                recorded || sped_up_exception,
                 "cars/{}: {pack} is not a recorded pack",
                 car.id
             );
@@ -365,5 +372,78 @@ fn validate_rejects_recorded_layers_without_a_firing_frequency() {
             "{bad:?}: {errs:?}"
         );
         lib.packs.get_mut("engine_rec_v8").unwrap().engine_layers[1].anchor = keep;
+    }
+}
+
+/// Highest playback-rate ratio a recorded engine layer may reach within a car's rev range before
+/// it sounds sped up ("singing", owner feedback on preview 0.12.34).
+const MAX_RECORDED_PITCH: f32 = 1.6;
+
+/// Idle and redline rpm of a car (`data/cars/<id>.json`).
+fn car_rpm(car_id: &str) -> (f32, f32) {
+    let path = audio_dir().join(format!("../cars/{car_id}.json"));
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let e = &v["engine"];
+    (
+        e["idle_rpm"].as_f64().unwrap() as f32,
+        e["redline_rpm"].as_f64().unwrap() as f32,
+    )
+}
+
+/// Playback-rate ratio of `pack`'s highest recorded layer at the car's redline.
+fn top_pitch(lib: &AudioLibrary, car_id: &str, pack: &str) -> Option<f32> {
+    let p = lib.packs.get(pack)?;
+    let (idle, redline) = car_rpm(car_id);
+    let layers =
+        wp_audio::engine::EngineLayers::resolve(p, &lib.cars[car_id].engine, idle, redline);
+    let top = layers
+        .layers
+        .iter()
+        .map(|l| l.root_rpm)
+        .fold(0.0f32, f32::max);
+    (top > 0.0).then(|| redline / top)
+}
+
+/// For a car on a procedural engine pack `engine_proc_*`, the top layer pitch its recorded twin
+/// (`engine_rec_*`; `engine_rec_turbo` for a turbo inline-4) would reach at redline. `None` if
+/// there is no twin.
+fn recorded_twin_top_pitch(lib: &AudioLibrary, car_id: &str, pack: &str) -> Option<f32> {
+    let kind = pack.strip_prefix("engine_proc_")?;
+    let twin = if kind == "i4" && lib.cars[car_id].engine.turbo {
+        "engine_rec_turbo".to_string()
+    } else {
+        format!("engine_rec_{kind}")
+    };
+    top_pitch(lib, car_id, &twin)
+}
+
+#[test]
+fn engines_play_recordings_exactly_when_they_are_not_sped_up() {
+    // Owner on 0.12.34: "police car audio pitch is wrong, some of it sounds like it's singing";
+    // decision on 0.12.36: "generated sound now" for every car whose recording would be sped up.
+    // Recorded engine pack ⇔ its top loop stays ≤ MAX_RECORDED_PITCH at redline.
+    let lib = AudioLibrary::load_dir(audio_dir()).unwrap();
+    for car in lib.cars.values() {
+        let pack = &lib.packs[&car.engine_pack];
+        let recorded = pack
+            .cues
+            .values()
+            .any(|c| matches!(c.source, CueSource::Samples { .. }));
+        if recorded {
+            let ratio = top_pitch(&lib, &car.id, &car.engine_pack).unwrap();
+            assert!(
+                ratio <= MAX_RECORDED_PITCH,
+                "cars/{}: {} pitches its top loop {ratio:.2}x at redline (max {MAX_RECORDED_PITCH}): use the procedural twin",
+                car.id,
+                car.engine_pack
+            );
+        } else if let Some(ratio) = recorded_twin_top_pitch(&lib, &car.id, &car.engine_pack) {
+            assert!(
+                ratio > MAX_RECORDED_PITCH,
+                "cars/{}: its recorded twin fits ({ratio:.2}x ≤ {MAX_RECORDED_PITCH}); use the recording",
+                car.id
+            );
+        }
     }
 }

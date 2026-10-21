@@ -48,6 +48,7 @@ fn main() {
         police_cars: true,
         covered_los: true,
         police_presence: Some(1.0),
+        car_mix: false,
         systems: None,
         barriers: Vec::new(),
         parked: Vec::new(),
@@ -72,6 +73,7 @@ fn main() {
         hash_every: 240,
         expect: Vec::new(),
         expect_pending: Vec::new(),
+        restart_after_capture: false,
         panels: false,
         slow: false,
     };

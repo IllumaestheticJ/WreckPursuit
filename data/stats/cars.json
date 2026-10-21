@@ -81,6 +81,17 @@
         "cornering": 0.22
       }
     },
+    "fulmine_v10": {
+      "display_name": "Fulmine V10",
+      "zero_to_100_s": 3.57,
+      "top_speed_kmh": 333.6,
+      "cornering_g": 0.981,
+      "bars": {
+        "acceleration": 0.995,
+        "top_speed": 1.0,
+        "cornering": 0.861
+      }
+    },
     "furrow_24": {
       "display_name": "Furrow 2.4",
       "zero_to_100_s": 11.17,
@@ -222,6 +233,28 @@
         "acceleration": 0.772,
         "top_speed": 0.681,
         "cornering": 0.608
+      }
+    },
+    "sentinel_vigil": {
+      "display_name": "Sentinel Vigil",
+      "zero_to_100_s": 5.7,
+      "top_speed_kmh": 269.9,
+      "cornering_g": 0.871,
+      "bars": {
+        "acceleration": 0.824,
+        "top_speed": 0.764,
+        "cornering": 0.643
+      }
+    },
+    "sentinel_warden": {
+      "display_name": "Sentinel Warden",
+      "zero_to_100_s": 8.73,
+      "top_speed_kmh": 197.5,
+      "cornering_g": 0.82,
+      "bars": {
+        "acceleration": 0.581,
+        "top_speed": 0.338,
+        "cornering": 0.54
       }
     },
     "sentinel_wolfhound": {

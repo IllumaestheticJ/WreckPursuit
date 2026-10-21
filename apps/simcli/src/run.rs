@@ -184,6 +184,54 @@ pub const TRAFFIC_CAR: &str = "debug_sedan";
 /// traffic, so the testbed draws parked cars with the traffic mesh.
 pub const PARKED_CAR: &str = TRAFFIC_CAR;
 
+/// `car_mix` police fleet: `(car, min level, max level, measured limits)`. Limits are
+/// `[skidpad g, 100-0 m, 0-100 s, vmax km/h]` from `data/cars/VALIDATION.md` (sim-measured,
+/// `tools/specsheet/collect_results.py`); `None` = `pursuit.toml`'s defaults (the cruiser's).
+/// Patrols picked while nobody is wanted count as level 1.
+pub const CAR_MIX_POLICE: &[(&str, u8, u8, Option<[f32; 4]>)] = &[
+    ("sentinel_warden", 1, 2, Some([0.81, 40.1, 8.8, 202.0])),
+    ("sentinel_cruiser", 1, 2, None),
+    ("sentinel_bastion", 2, 3, Some([0.72, 42.7, 7.97, 214.0])),
+    ("sentinel_wolfhound", 3, 5, Some([0.85, 39.6, 5.54, 244.0])),
+    ("sentinel_vigil", 4, 5, Some([0.87, 38.2, 5.74, 275.0])),
+];
+
+/// `car_mix` physical traffic models, in model-index order (agent `id` drives
+/// `CAR_MIX_TRAFFIC[wp_world::traffic::traffic_model_index(id, len)]`).
+pub const CAR_MIX_TRAFFIC: &[&str] = &[
+    "debug_sedan",
+    "junkyard_beater",
+    "tansy_13",
+    "furrow_24",
+    "hauler_1500",
+    "drayman_cargo",
+    "vireo_xs",
+];
+
+/// Load the `car_mix` police fleet ([`CAR_MIX_POLICE`]).
+pub fn car_mix_police(data: &dyn DataSource) -> Result<Vec<wp_sim::PoliceModel>, RunError> {
+    CAR_MIX_POLICE
+        .iter()
+        .map(|(id, lo, hi, limits)| {
+            let m = wp_sim::PoliceModel::new(load_car(data, id)?, *lo, *hi);
+            Ok(match limits {
+                Some([g, stop, t, vmax]) => m.with_limits(wp_police::pro::CarLimits::from_metrics(
+                    *g, *stop, *t, *vmax,
+                )),
+                None => m,
+            })
+        })
+        .collect()
+}
+
+/// Load the `car_mix` traffic models ([`CAR_MIX_TRAFFIC`]).
+pub fn car_mix_traffic(data: &dyn DataSource) -> Result<Vec<wp_contracts::LoadedCar>, RunError> {
+    CAR_MIX_TRAFFIC
+        .iter()
+        .map(|id| load_car(data, id))
+        .collect()
+}
+
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     let density = sc.traffic_density.unwrap_or(1.0);
@@ -357,6 +405,9 @@ pub fn build_sim(
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
+                if sc.car_mix {
+                    sim.set_police_cars(car_mix_police(data)?);
+                }
             } else {
                 let quiet = Scenario {
                     police_presence: Some(0.0),
@@ -365,7 +416,11 @@ pub fn build_sim(
                 sim.set_police(police_for_city(&quiet, sim.world(), &ids));
             }
             if sc.traffic_cars {
-                sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+                if sc.car_mix {
+                    sim.set_traffic_cars(car_mix_traffic(data)?);
+                } else {
+                    sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+                }
             }
             true
         }
@@ -718,6 +773,16 @@ pub struct WorldSummary {
     /// Civilians that pulled over for a siren unit coming up behind them
     /// (`TrafficStats::siren_yields`, playtest row 62).
     pub traffic_siren_yields: u64,
+    /// Longest a civilian stood still outside a red / amber light, s
+    /// (`TrafficStats::max_stop_s`, owner row 85).
+    pub traffic_max_stop_s: f32,
+    /// Longest queue of stopped civilians back from a stop line (`TrafficStats::max_queue`).
+    pub traffic_max_queue: u32,
+    /// Times a civilian stood > 5 s inside a junction box (`TrafficStats::box_stops`).
+    pub traffic_box_stops: u64,
+    /// Unseen civilians recycled after standing still 30 s outside a red light
+    /// (`TrafficStats::jam_recycled`).
+    pub traffic_jam_recycled: u64,
     /// City props turned into physics bodies (parked cars, cones).
     pub props: u32,
     /// Static boxes from `barriers`.
@@ -761,6 +826,10 @@ impl WorldSummary {
             "traffic_go_arounds" => self.traffic_go_arounds as f32,
             "traffic_turnarounds" => self.traffic_turnarounds as f32,
             "traffic_siren_yields" => self.traffic_siren_yields as f32,
+            "traffic_max_stop_s" => self.traffic_max_stop_s,
+            "traffic_max_queue" => self.traffic_max_queue as f32,
+            "traffic_box_stops" => self.traffic_box_stops as f32,
+            "traffic_jam_recycled" => self.traffic_jam_recycled as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
@@ -779,7 +848,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 23] = [
+    pub const METRICS: [&'static str; 27] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -790,6 +859,10 @@ impl WorldSummary {
         "traffic_go_arounds",
         "traffic_turnarounds",
         "traffic_siren_yields",
+        "traffic_max_stop_s",
+        "traffic_max_queue",
+        "traffic_box_stops",
+        "traffic_jam_recycled",
         "props",
         "static_boxes",
         "police_units_max",
@@ -896,6 +969,10 @@ impl WorldTracker {
             traffic_go_arounds: stats.oncoming_passes + stats.go_around_lane_changes,
             traffic_turnarounds: stats.turnarounds_completed + stats.reverses,
             traffic_siren_yields: stats.siren_yields,
+            traffic_max_stop_s: stats.max_stop_s,
+            traffic_max_queue: stats.max_queue,
+            traffic_box_stops: stats.box_stops,
+            traffic_jam_recycled: stats.jam_recycled,
             props: sim.prop_count() as u32,
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
@@ -1280,7 +1357,7 @@ pub fn run_with_hook(
     let BuiltSim {
         mut sim,
         ids,
-        cars: _,
+        cars,
         modded: _,
         selection,
         warnings,
@@ -1386,6 +1463,8 @@ pub fn run_with_hook(
     let mut events_total = 0u64;
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
+    // Captured route drivers to restart next tick (`restart_after_capture`).
+    let mut restarts: Vec<EntityId> = Vec::new();
     // (tick, racer, outcome) of every PursuitEnded, in order.
     let mut pursuit_ends: Vec<(u64, EntityId, wp_contracts::PursuitOutcome)> = Vec::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
@@ -1424,6 +1503,25 @@ pub fn run_with_hook(
                 track_cursor += 1;
             }
         } else {
+            // `restart_after_capture`: a captured route driver starts its run again.
+            for racer in std::mem::take(&mut restarts) {
+                let Some(idx) = ids.iter().position(|i| *i == racer) else {
+                    continue;
+                };
+                let spec = &sc.entities[idx];
+                if let Some(route) = routes[idx].as_mut() {
+                    let (p0, d0) = route.path.point_at(0.0);
+                    let yaw = wp_world::geom::yaw_of(d0);
+                    sim.place_on_ground(racer, [p0[0], p0[1]], yaw, spec.speed_mps, Some(p0[2]))?;
+                    route.follower = wp_world::drive::PathFollower::for_vehicle(
+                        &cars[&spec.car].def,
+                        wp_world::drive::FollowParams::PURSUIT,
+                        spec.speed_mps,
+                    );
+                    route.progress_m = 0.0;
+                    sim.police_mut().set_heat(racer, spec.police_heat);
+                }
+            }
             let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = match routes[idx].as_mut() {
@@ -1472,6 +1570,15 @@ pub fn run_with_hook(
                     police_first.entry(p.kind()).or_insert(now);
                     if let wp_contracts::PoliceEvent::PursuitEnded { racer, outcome, .. } = p {
                         pursuit_ends.push((now, *racer, *outcome));
+                        if sc.restart_after_capture
+                            && matches!(
+                                outcome,
+                                wp_contracts::PursuitOutcome::Captured
+                                    | wp_contracts::PursuitOutcome::CapturedTotalLoss
+                            )
+                        {
+                            restarts.push(*racer);
+                        }
                     }
                 }
                 SimEvent::ComponentFailed { vehicle, component } => {

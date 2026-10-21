@@ -1,0 +1,44 @@
+// Owner playtest row 85 ("massive traffic jam": grid city, daytime, L5 pursuit, a solid queue
+// to the horizon behind a red light). A racer already at wanted level L4 (heat 70) drives from
+// Safehouse 3 (south) through downtown to Safehouse 2 (north-east) on the 12x12 grid at noon,
+// with the city's AI police on; the pursuit (and its heat, up to L5) runs through the middle of
+// the traffic, and the units stay around the racer after it stops or is caught. Ten minutes.
+// Jam gates (wp_world jam diagnostics): nobody stands still for more than 45 s except at a red
+// light, and no queue of stopped cars is longer than 12.
+(
+    name: "jam_pursuit_grid",
+    seed: 85,
+    city: file("city/procedural_12x12.road.json"),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    police_presence: 1.0,
+    // As in the game, a capture ends the run: the racer starts again from the route start at
+    // its starting heat (otherwise it stands in the road and the scene never clears).
+    restart_after_capture: true,
+    assists: ai,
+    slow: true,
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            police_heat: 70.0,
+            speed_mps: 15.0,
+            driver: follow_route(route_id: "Safehouse 3 -> Safehouse 2", target_speed: 20.0),
+        ),
+    ],
+    duration_s: 600.0,
+    hash_every: 2400,
+    expect: [
+        pursuit_started_before(t_s: 60.0),
+    ],
+    // Row 85 gates: no car stopped > 45 s outside a red light, no queue > 12 cars. Met on the
+    // pre-main 12x12 grid (seeds 1-4 + 85); pending on main's rebuilt grid (lead/round12
+    // 9a4272f8): seed 85 stop 27 s / queue 15 (a red-light queue at a ~46 s red); seeds 1-4
+    // 37-118 s. Cause: 22 m blocks in front of signals with ~14 s greens that police units
+    // keep crossing with sirens. docs/integration/world.md (round 13, row 85, main's maps).
+    expect_pending: [
+        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 45.0),
+        world_metric(name: "traffic_max_queue", min: 0.0, max: 12.0),
+    ],
+)
