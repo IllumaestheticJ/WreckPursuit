@@ -925,6 +925,16 @@ impl Vehicle {
         i
     }
 
+    /// The brake data with the grip balance's front bias change
+    /// ([`crate::grip_lab::GripBalance::brake_bias_front_add`]).
+    fn brake_def(&self) -> wp_contracts::BrakeDef {
+        let mut b = self.def.brakes.clone();
+        if let Some(g) = crate::lab_scope::grip() {
+            b.bias_front = (b.bias_front + g.brake_bias_front_add).clamp(0.0, 1.0);
+        }
+        b
+    }
+
     /// The rear axle's differential (Drift Lab W's `car_lab` can lock it).
     fn rear_diff(&self) -> AxleDiff {
         match crate::lab_scope::car() {
@@ -1736,7 +1746,7 @@ impl Vehicle {
         }
 
         // --- Brakes -----------------------------------------------------------------------
-        let mut brake = service_torques(&self.def.brakes, self.brake_f);
+        let mut brake = service_torques(&self.brake_def(), self.brake_f);
         for (b, s) in brake.iter_mut().zip(eff.brake_scale) {
             *b *= s.max(0.0);
         }
@@ -1996,7 +2006,7 @@ impl Vehicle {
         dt: f32,
     ) {
         // The pedal's brake torque on this wheel (ABS release cycles only dip it briefly).
-        let service = service_torques(&self.def.brakes, self.brake_f)[i];
+        let service = service_torques(&self.brake_def(), self.brake_f)[i];
         let c = &self.corners[i];
         let lost = self.effects.wheel_lost[i];
         let w = &mut self.wheels[i];
