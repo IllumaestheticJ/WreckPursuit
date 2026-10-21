@@ -570,7 +570,12 @@ fn police_drive_clean_in_the_wet() {
 fn chase_report() {
     use wp_police::Assignment;
     let mut totals = (0u32, 0u32, 0.0f32, 0.0f32, 0u32);
-    for seed in 1..=6u64 {
+    // WP_CHASE_SEEDS=<n>: more seeds (default 6).
+    let seeds: u64 = std::env::var("WP_CHASE_SEEDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6);
+    for seed in 1..=seeds {
         let setup = common::Setup {
             seed,
             laps: 2,
