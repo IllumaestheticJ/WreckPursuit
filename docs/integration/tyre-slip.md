@@ -135,6 +135,33 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Step 23 "spinning on throttle / when holding a drift" (lead, 2026-10-21) — tyre side
+
+`transition poweron` (harness drivers, `PlainSteer::default`, TCS off / raw throttle): power-on in
+2nd / 3rd from 30 / 45 / 60 km/h straight and with the left key held 1 s first (corner), plus the
+held-drift set. Sets: **ref** = grip-balance 7d6b66c9 (step-14 balance, medium ride, spin b0 7.5),
+**step23** (balance new, firm ride, b0 7.5), **B** (balance new, firm ride, candidate B), and two
+mixes. Corner power-on with full lock + full throttle spins in every set (it is a hard input);
+straight power-on never spins.
+
+| set | rampart_50: corner spins / 6 · s to 20° / to spin · held / 9 (spun) | parity_rwd_a | parity_rwd_b | parity_rwd_d |
+|---|---|---|---|---|
+| ref 7d6b66c9 | 3 · 0.77 / 1.36 · 4 (3 spun) | 5 · 0.68 / 0.99 · 9 | 3 · 0.67 / 1.08 · 6 | 5 · 0.65 / 1.06 · 9 |
+| step23 | 3 · 1.33 / 1.83 · 5 (0) | 5 · 0.80 / 1.27 · 9 | 3 · 0.93 / 1.34 · 8 | 3 · 0.85 / 1.32 · 9 |
+| B | 3 · 1.05 / 1.56 · 7 (0) | 6 · 1.16 / 1.67 · 9 | 3 · 0.90 / 1.18 · 8 | 5 · 1.62 / 1.18 · 9 |
+| medium ride + balance new | 3 · 0.85 / 1.33 · 7 | 6 · 0.78 / 1.25 · 9 | 5 · 0.67 / 1.20 · 7 | 6 · 0.95 / 1.46 · 9 |
+| firm ride + step-14 balance | 3 · 1.30 / 1.88 · 3 | 3 · 0.73 / 1.10 · 9 | 3 · 0.89 / 1.38 · 6 | 3 · 0.79 / 1.31 · 9 |
+
+shiro_turbo: 0 spins in every set (worst slip 6–9°). **In this harness step 23 is calmer than
+the owner's reference**, not spinnier: it takes ~0.15–0.55 s longer to reach 20° and to spin,
+and no held drift spins (ref: rampart 3). Turning off W's steering features (transition rack,
+catch, over-rotation rack, countersteer limit) changes nothing here. So the owner's step-23 spins
+are not reproduced by the tyre / ride / balance / steering sets — the likely sources are outside
+this harness: the live-driven player path (grip-balance 29f42858 "player steering aids only for
+live-driven cars"), the owner's assist settings (auto clutch / gears, TCS), or the shipped unify
+values (`lab_scope::shipped_plain`). Needs a repro on the live wp_sim path with the owner's
+assists.
+
 ### Candidate B as the default spin model; lift / handbrake entries (lead, 2026-10-21)
 
 `CarTune::spin_candidate()` is candidate B (commit 683bdf52); the previous set is

@@ -848,7 +848,205 @@ fn holds(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// One power-on run: straight at `kmh` with cruise throttle in `gear` (auto gears to reach it,
+/// then held), optionally the left key held 1 s first (in a corner), then full throttle for
+/// 2.5 s with the key still held (corner) or none (straight). Returns (spun, peak |body slip| °).
+/// Spun = |body slip| ≥ 45° or travelling backwards.
+fn power_on(c: &LoadedCar, kmh: f32, gear: i8, corner: bool) -> (bool, f32, Option<f32>, f32) {
+    use wp_vehicle::rig::Rig;
+    let a = reference_assists();
+    let v = kmh / 3.6;
+    let hold = |rig: &Rig| {
+        let err = v - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    let mut rig = Rig::new(c);
+    rig.teleport([0.0; 3], 0.0, v, 0.0);
+    // Settle 1.5 s at speed, stepping to the gear.
+    for _ in 0..(3 * TPS / 2) {
+        let (throttle, brake) = hold(&rig);
+        let g = rig.vehicle.gear();
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                gear_up: g < gear,
+                gear_down: g > gear,
+                ..Default::default()
+            },
+            &a,
+        );
+    }
+    let steer = if corner { -1.0 } else { 0.0 };
+    if corner {
+        for _ in 0..TPS {
+            let (throttle, brake) = hold(&rig);
+            rig.step(
+                &VehicleInput {
+                    steer,
+                    throttle,
+                    brake,
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+    }
+    let (mut spun, mut peak) = (false, 0.0f32);
+    let (mut t20, mut t_spin) = (None, 9.0f32);
+    for tick in 0..(5 * TPS / 2) {
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle: 1.0,
+                ..Default::default()
+            },
+            &a,
+        );
+        let s = slide_state(&rig);
+        let b = s.body_slip.to_degrees().abs();
+        peak = peak.max(b);
+        if t20.is_none() && b >= 20.0 {
+            t20 = Some(tick as f32 / TPS as f32);
+        }
+        if b >= 45.0 || s.v_fwd < 0.0 {
+            spun = true;
+            t_spin = tick as f32 / TPS as f32;
+            break;
+        }
+    }
+    (spun, peak, t20, t_spin)
+}
+
+/// `poweron`: the owner's "spinning on throttle / when holding a drift" (lead, step 23) — power-on
+/// (TCS off, raw throttle; 2nd / 3rd from 30 / 45 / 60 km/h; straight and with the key held in
+/// a corner) and the held-drift set, per car, for: `ref` (grip-balance 7d6b66c9: step-14 balance,
+/// medium ride, spin model b0 7.5), `step23` (balance new, firm ride, b0 7.5) and `B` (balance
+/// new, firm ride, candidate B). `CARS` overrides the car list; `PLAIN` merges steering fields.
+fn poweron_table() {
+    use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
+    let ids: Vec<String> = match std::env::var("CARS") {
+        Ok(l) => l.split(',').map(String::from).collect(),
+        Err(_) => [
+            "rampart_50",
+            "parity_rwd_a",
+            "parity_rwd_b",
+            "parity_rwd_d",
+            "shiro_turbo",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect(),
+    };
+    let sets: Vec<(&str, RideTune, GripBalance, CarTune)> = vec![
+        (
+            "ref 7d6b66c9",
+            RideTune::medium_weight(),
+            GripBalance::step14(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "step23",
+            RideTune::firm(),
+            GripBalance::lab_default(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "B",
+            RideTune::firm(),
+            GripBalance::lab_default(),
+            CarTune::spin_candidate(),
+        ),
+        (
+            "ref ride + new balance",
+            RideTune::medium_weight(),
+            GripBalance::lab_default(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "firm ride + step-14 balance",
+            RideTune::firm(),
+            GripBalance::step14(),
+            CarTune::spin_step22(),
+        ),
+    ];
+    let sets: Vec<_> = match std::env::var("SETS") {
+        Ok(f) => sets.into_iter().filter(|s| s.0 == f.as_str()).collect(),
+        Err(_) => sets,
+    };
+    let p = match std::env::var("PLAIN") {
+        Ok(j) => merged(&PlainSteer::default(), &j),
+        Err(_) => PlainSteer::default(),
+    };
+    println!("| set | car | power-on spins / 12 (straight / corner) | corner: median s to 20° slip / to spin | worst peak slip ° (straight / corner) | held drift / 9 (spun) |");
+    println!("|---|---|---|---|---|---|");
+    let a = reference_assists();
+    for (name, ride, grip, tyre) in &sets {
+        plain::set_override(Some(p));
+        ride_lab::set_override(Some(*ride));
+        grip_lab::set_override(Some(*grip));
+        car_lab::set_override(Some(*tyre));
+        for id in &ids {
+            let c = car(id);
+            let (mut ss, mut sc, mut ps, mut pc) = (0, 0, 0.0f32, 0.0f32);
+            let (mut t20s, mut tsp) = (Vec::new(), Vec::new());
+            for gear in [2i8, 3] {
+                for kmh in [30.0f32, 45.0, 60.0] {
+                    let (s1, p1, _, _) = power_on(&c, kmh, gear, false);
+                    let (s2, p2, t20, ts) = power_on(&c, kmh, gear, true);
+                    ss += s1 as usize;
+                    sc += s2 as usize;
+                    ps = ps.max(p1);
+                    pc = pc.max(p2);
+                    if let Some(t) = t20 {
+                        t20s.push(t);
+                    }
+                    if s2 {
+                        tsp.push(ts);
+                    }
+                }
+            }
+            let med = |mut v: Vec<f32>| {
+                v.sort_by(|a, b| a.total_cmp(b));
+                v.get(v.len() / 2)
+                    .map_or("—".to_string(), |x| format!("{x:.2}"))
+            };
+            let (mut held, mut spun) = (0, 0);
+            for e in [6.0f32, 12.0, 20.0] {
+                for g in [0.3f32, 0.5, 0.7] {
+                    let m = plain_hold(
+                        &c,
+                        &a,
+                        PlainDriver::HoldCounter {
+                            entry_deg: e,
+                            throttle: 1.0,
+                        },
+                        40.0,
+                        g,
+                    );
+                    held += m.held as usize;
+                    spun += m.spun as usize;
+                }
+            }
+            println!(
+                "| {name} | {id} | {} ({ss} / {sc}) | {} / {} | {ps:.0} / {pc:.0} | {held} ({spun} spun) |",
+                ss + sc,
+                med(t20s),
+                med(tsp)
+            );
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("poweron") {
+        poweron_table();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("holds") {
         let ids: Vec<String> = match std::env::var("CARS") {
             Ok(l) => l.split(',').map(String::from).collect(),
