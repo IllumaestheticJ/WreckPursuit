@@ -159,11 +159,30 @@ impl CarTune {
         }
     }
 
-    /// Tyre-slip workstream's spin-model set (docs/integration/tyre-slip.md): the spin-weighted
-    /// combined slip on the rears, no yaw damper, steering / ride as they are. On parity_rwd_d
-    /// with the lab driver (counter key at 6° + full throttle, 0.6 g entry) it holds ~41–44° for
-    /// 5 s; it is **tuned to a knife edge** (other entries and nearby values still spin).
+    /// Tyre-slip workstream's spin-model set (docs/integration/tyre-slip.md, "New-side settle,
+    /// tyre side", candidate B): the spin-weighted combined slip on the rears, re-tuned for the
+    /// new-side settle of a lift-flick transition on the step-22 lab (W's transition rack +
+    /// catch): spin weighting b0 8.45 / b2 1.86 / c 0.91 / p 5, rear relaxation × 1.26, rear peak
+    /// slip × 1.04. Held-drift set 26 / 27 (was 25), lift flicks 18 / 18 caught, settle 0.33 s
+    /// (was 0.45), crossing 0.81 s (was 0.82), lift-off 0; rampart_50 holds 8 / 9 (was 3).
+    /// [`CarTune::spin_step22`] is the set before it.
     pub fn spin_candidate() -> Self {
+        Self {
+            spin_model: true,
+            spin_b0: 8.45,
+            spin_b2: 1.86,
+            spin_c: 0.91,
+            spin_p: 5.0,
+            rear_relax: 1.26,
+            rear_peak_slip: 1.04,
+            ..Self::default()
+        }
+    }
+
+    /// The spin-model set up to step 22 (the `SpinGrip` defaults: b0 7.5, b2 1.627, c 0.85,
+    /// p 8, rear relaxation and peak slip as the data) — kept for A/B against
+    /// [`CarTune::spin_candidate`].
+    pub fn spin_step22() -> Self {
         Self {
             spin_model: true,
             ..Self::default()
