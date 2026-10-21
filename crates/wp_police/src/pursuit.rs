@@ -131,6 +131,10 @@ impl PoliceSystem {
         let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
         let helo_range = self.cfg.tools.helicopter.los_range_m.get(self.phase);
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
+        for s in self.helo_sight.values_mut() {
+            s.los = false;
+        }
+        let mut helo_los: Vec<UnitId> = Vec::new();
         for id in ids {
             let p = xy(self.racers[&id].pos);
             let pz = self.racers[&id].pos[2];
@@ -164,16 +168,18 @@ impl PoliceSystem {
                     UnitKind::Helicopter => {
                         if matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
                             && d <= helo_range
-                            // Looking down from altitude: only tall buildings, high ground
-                            // and covered roads (tunnels) block. The target point follows the
-                            // car up on terrain like the ground units' eyes do (a fixed
-                            // 1.3 m point sits underground on Port Vesper v2's hills).
+                            // Looking down from altitude: only tall buildings, high ground,
+                            // covered roads (tunnels) and bridge decks (underpasses) block.
+                            // The target point follows the car up on terrain like the ground
+                            // units' eyes do (a fixed 1.3 m point sits underground on Port
+                            // Vesper v2's hills).
                             && world.line_of_sight(
                                 [u.body.pos[0], u.body.pos[1], u.body.alt_m],
                                 [p[0], p[1], crate::eye_height_at(pz)],
                             )
                         {
                             o.seen = true;
+                            helo_los.push(u.id);
                         }
                     }
                 }
@@ -182,6 +188,19 @@ impl PoliceSystem {
                 o.seen = true;
                 o.witnessed = true;
             }
+            for &h in &helo_los {
+                self.helo_sight
+                    .entry(h)
+                    .or_insert(crate::dispatch::HeloSight {
+                        los: false,
+                        visual: false,
+                        acquired: false,
+                        last_los: self.now,
+                        next_report: self.now,
+                    })
+                    .los = true;
+            }
+            helo_los.clear();
             self.obs.insert(id, o);
             // Breadcrumbs only while seen.
             if o.seen && self.racers[&id].pursued() {
@@ -1646,6 +1665,118 @@ pub fn lateral_g(v_mps: f32, r_m: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Port Vesper, police with no ground units (nothing can capture a parked racer) and a
+    /// helicopter that launches at once and flies fast, so the test is about sight only.
+    fn vesper_helo_police() -> (
+        PoliceSystem,
+        crate::scenario::ScenarioWorld,
+        wp_world::vesper::VesperReport,
+        std::sync::Arc<wp_world::CityMap>,
+    ) {
+        use wp_world::vesper::{generate_with_report, VesperConfig};
+        let (net, rep) = generate_with_report(&VesperConfig::default());
+        let map = std::sync::Arc::new(wp_world::CityMap::new(net));
+        let mut cfg = crate::PoliceConfig::builtin();
+        cfg.presence.max_ground_units = 0;
+        cfg.presence.helicopter.launch_s.day = 0.5;
+        cfg.tools.helicopter.speed_mps = 400.0;
+        let police = PoliceSystem::with_city(
+            cfg,
+            crate::graph::RoadGraph::from_city(&map),
+            crate::PoliceSetup {
+                seed: 4,
+                ..Default::default()
+            },
+        );
+        let world = crate::scenario::ScenarioWorld {
+            map: Some(map.clone()),
+            ..crate::scenario::ScenarioWorld::clock(wp_contracts::TimeOfDay::from_hours(12.0), 0.0)
+        };
+        (police, world, rep, map)
+    }
+
+    #[test]
+    fn helicopter_joins_at_level_3_keeps_visual_and_loses_it_under_an_overpass() {
+        // Both grade separations: the overpass and the underpass (in a cutting).
+        for crossing in 0..2 {
+            helicopter_over_crossing(crossing);
+        }
+    }
+
+    fn helicopter_over_crossing(crossing: usize) {
+        let (mut p, world, rep, map) = vesper_helo_police();
+        let racer = EntityId(3);
+        // A point under the deck and one 80 m along the road below, out in the open.
+        let c = rep.crossings[crossing];
+        let s = &map.net.surfaces[c.lower];
+        let k = (0..s.centre.len())
+            .min_by(|&a, &b| dist(xy(s.centre[a]), c.pos).total_cmp(&dist(xy(s.centre[b]), c.pos)))
+            .unwrap();
+        let under = s.centre[k];
+        let open = (0..s.centre.len())
+            .map(|j| s.centre[j])
+            .find(|q| (dist(xy(*q), c.pos) - 80.0).abs() < 6.0)
+            .expect("lower road runs 80 m past the crossing");
+        let view = |q: [f32; 3]| crate::RacerView {
+            entity: racer,
+            pos: [q[0], q[1], q[2] + 0.5],
+            vel: [0.0, 12.0, 0.0],
+        };
+        let mut out = Vec::new();
+        let mut run = |p: &mut PoliceSystem, at: [f32; 3], secs: f32| {
+            for _ in 0..(secs / wp_contracts::PHYSICS_DT) as usize {
+                p.step(&world, &[view(at)], &[], wp_contracts::PHYSICS_DT, &mut out);
+            }
+        };
+        run(&mut p, open, 0.5);
+        // Wanted level 2 with a pursuit on: no helicopter.
+        p.set_heat(racer, 30.0);
+        assert_eq!(p.wanted_level(racer), WantedLevel::L2);
+        p.start_pursuit(racer, UnitId(999));
+        run(&mut p, open, 3.0);
+        assert!(p.helicopters().is_empty());
+        // Level 3: the AI captain calls it in; it flies over and has visual.
+        p.set_heat(racer, 60.0);
+        assert_eq!(p.wanted_level(racer), WantedLevel::L3);
+        run(&mut p, open, 6.0);
+        let h = p.helicopters();
+        assert_eq!(h.len(), 1, "{:?}", p.stats());
+        assert!(h[0].has_visual);
+        assert!(
+            dist(xy(h[0].pos), xy(open)) < 30.0,
+            "overhead: {:?}",
+            h[0].pos
+        );
+        let said = |p: &PoliceSystem, what: &str| p.radio_log().any(|l| l.text.contains(what));
+        let log = |p: &PoliceSystem| p.radio_log().map(|l| l.text.clone()).collect::<Vec<_>>();
+        // The radio speaks one line at a time, so the helicopter's lines may wait for the
+        // channel (the level-3 call is still on the air); critical lines are never dropped.
+        // `go(p, at, secs, what)`: `secs` at `at`, then on until `what` is said (<= 20 s).
+        let mut go = |p: &mut PoliceSystem, at: [f32; 3], secs: f32, what: &str| {
+            run(p, at, secs);
+            let mut t = 0.0;
+            while !said(p, what) && t < 20.0 {
+                run(p, at, 0.25);
+                t += 0.25;
+            }
+            assert!(said(p, what), "{what:?} never said: {:?}", log(p));
+        };
+        go(&mut p, open, 0.0, "eyes on racer #3");
+        // It keeps the racer's last known position fresh for the ground units.
+        let last = p.racer(racer).unwrap().last_known.unwrap();
+        assert!(dist(last, xy(open)) < 1.0);
+        // Under the deck: visual lost after the grace time, the radio says so, the last
+        // known position stays out in the open, the spotlight stays there.
+        go(&mut p, under, 5.0, "lost visual on racer #3");
+        let h = p.helicopters();
+        assert!(!h[0].has_visual);
+        assert!(dist(p.racer(racer).unwrap().last_known.unwrap(), xy(open)) < 1.0);
+        assert!(p.racer(racer).unwrap().los_lost_s > 3.0);
+        // Out again: reacquired.
+        go(&mut p, open, 2.0, "reacquired");
+        assert!(p.helicopters()[0].has_visual);
+    }
 
     #[test]
     fn cap_is_target_plus_margin_bounded() {

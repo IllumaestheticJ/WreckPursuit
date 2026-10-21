@@ -206,6 +206,9 @@ pub struct CityMap {
     /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
     /// for tunnel scenarios: the geometry stays, only sightlines ignore it).
     pub covered_los: bool,
+    /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_slabs`]).
+    decks: Arc<Vec<crate::surface::DeckSlab>>,
+    deck_grid: Arc<Grid>,
 }
 
 impl CityMap {
@@ -363,6 +366,17 @@ impl CityMap {
             let (blo, bhi) = bbox2(&b.footprint);
             building_grid.insert_box(blo, bhi, i as u32);
         }
+        let decks = crate::surface::deck_slabs(&net);
+        let mut deck_grid = Grid::new(lo, hi);
+        for (i, d) in decks.iter().enumerate() {
+            let pad = d.left_m.max(d.right_m);
+            let (a, b) = (geom::xy(d.a), geom::xy(d.b));
+            deck_grid.insert_box(
+                [a[0].min(b[0]) - pad, a[1].min(b[1]) - pad],
+                [a[0].max(b[0]) + pad, a[1].max(b[1]) + pad],
+                i as u32,
+            );
+        }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
             net: Arc::new(net),
@@ -377,6 +391,8 @@ impl CityMap {
             building_grid: Arc::new(building_grid),
             covers: crate::covered::CoverIndex::default(),
             covered_los: true,
+            decks: Arc::new(decks),
+            deck_grid: Arc::new(deck_grid),
         };
         map.covers = crate::covered::CoverIndex::new(&map.net.covered);
         // Drivable lane-km per zone (sampled every 10 m).
@@ -761,8 +777,9 @@ impl CityMap {
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
     /// every 8 m; ends excluded). Covered spans (tunnels) block sightlines in and out of them
-    /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off. Roads, parked cars and
-    /// traffic do not occlude.
+    /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off, and bridge decks with room
+    /// for a car under them ([`crate::surface::deck_slabs`]) block too: from the air, the road
+    /// under an overpass is hidden. Other road surfaces, parked cars and traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
         if self.covered_los && self.covers.blocks(a, b) {
             return false;
@@ -778,10 +795,24 @@ impl CityMap {
                 }
             }
         }
+        let mut cells = Vec::new();
+        if !self.decks.is_empty() {
+            self.deck_grid
+                .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
+            let mut cands: Vec<u32> = cells
+                .iter()
+                .flat_map(|c| self.deck_grid.cells[*c].iter().copied())
+                .collect();
+            cands.sort_unstable();
+            cands.dedup();
+            if cands.iter().any(|&i| self.decks[i as usize].blocks(a, b)) {
+                return false;
+            }
+        }
         if self.net.buildings.is_empty() {
             return true;
         }
-        let mut cells = Vec::new();
+        cells.clear();
         self.building_grid
             .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
         let mut cands: Vec<u32> = cells
@@ -794,6 +825,11 @@ impl CityMap {
             let bld = &self.net.buildings[i as usize];
             bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.roof_z())
         })
+    }
+
+    /// Bridge-deck pieces that occlude line of sight (empty without terrain).
+    pub fn decks(&self) -> &[crate::surface::DeckSlab] {
+        &self.decks
     }
 }
 

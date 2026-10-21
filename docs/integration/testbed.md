@@ -1004,3 +1004,35 @@ touching the M mute toggle), `hud.ts` (help line), `index.html` (button + panel 
 **Known gaps:** no depth of field; no fly controls on touch screens without a gamepad (look,
 field of view, roll and reset camera only); the free camera can pass through buildings and
 terrain (no collision); police light bars freeze in whatever phase they were in.
+
+## Lead helper note (P9 helicopter, 2026-10-20; merged 2026-10-21 by `triage/helicopter`)
+
+- `wp_wasm::police_helicopters()` → 8 floats per tracking helicopter `[x, y, z, aimX, aimY,
+  aimZ, coneHalfAngle, flags]` (flag 1 = has visual). Airframes come from round 12's
+  `police_draw()` (flag 1); the helicopter position in both is ground + `alt_m`.
+- `scene.ts`: round 12's `updateHelicopters(policeDraw, …)` draws an airframe (fuselage, boom,
+  skids, spinning main and tail rotor, blinking beacon, the red / blue light bar flashing while
+  pursuing) instead of the scaled box; the branch's second drawing path through
+  `police_units()` was dropped. `updateHelicopterBeams` adds a night spotlight (faint additive
+  beam cone + light pool on the road) from night factor 0.35, dimmed to 45 % while the
+  helicopter has lost visual (it stays on the last known spot). The branch's real
+  `THREE.SpotLight` was dropped in the merge: a light that switches on mid-chase recompiles every
+  lit shader and every light costs every lit pixel (the `sirenLight` rule); the pool opacity went
+  0.12 → 0.18 to make up for it. One beam exists from the start (hidden, in `prewarmRoots`).
+  `scene.helicoptersShown` / `scene.spotlightsLit` for automation; `e2e/run.mjs` and
+  `e2e/helicopter.mjs` check it.
+
+## Lead helper note: headless e2e "Target crashed" (2026-10-20)
+
+`just web-e2e` died with `Target crashed` at random points (also on `main`, in the capture
+block, about one run in two). Under gdb (`--renderer-cmd-prefix`) the renderer stops with SIGTRAP,
+which is a Chromium `CHECK`, on the audio output thread in
+`blink::AudioParamHandler::ValuesForFrameRangeImpl` ← `OscillatorHandler` behind a biquad and a
+`PannerNode`, i.e. the siren oscillators' frequency automation. Cause: after a slow main-thread
+frame (SwiftShader frames can take ~1 s) `synth.ts`'s siren restarted its back-to-back
+`setValueCurveAtTime` curves at `ctx.currentTime`, a time the audio thread may already have
+rendered. A page with only the siren scheduling and random 0.2–1.4 s main-thread stalls crashes
+3 runs in 6 (60 s each); restarting the schedule `SIREN_LEAD_S` = 50 ms ahead of `currentTime`
+gives 0 in 4 (linear ramps instead of curves: 0 in 3 too). Real players with slow frames could hit
+it as well, not just CI. (Merge note: the fix is in the v1 `synth.ts` siren; the v2 `siren.ts`
+`CurvePlan` never back-dates a curve before `now` but does not keep a 50 ms lead either.)

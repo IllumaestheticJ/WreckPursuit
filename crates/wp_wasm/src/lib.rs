@@ -909,6 +909,17 @@ pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
     get(|s| map::map_dynamic_for(s, EntityId(player)))
 }
 
+/// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
+/// cone_half_angle_rad, flags]` (1 = has visual). For the spotlight; the airframe itself comes
+/// through `police_draw()` (flag 1).
+#[wasm_bindgen]
+pub fn police_helicopters() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let world = s.sim().world();
+        police::helicopters(s.sim().police(), &|p, z| world.map().ground_height(p, z))
+    })
+}
+
 /// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
 /// `Captured`, `CapturedTotalLoss`, `TotalLoss`), bounty payout, fines, bail, impound decision
 /// and fee, G's repair quote, cash before and after, and this settlement's ledger lines.
@@ -1057,6 +1068,20 @@ pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
             .police_mut()
             .set_heat(EntityId(entity), heat);
         Ok(())
+    })
+}
+
+/// Debug / e2e: put a police helicopter on `entity` now, `offset_m` from it at altitude
+/// (`PoliceSystem::debug_launch_helicopter`). Returns the unit id, or an error unless the racer
+/// is pursued. Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_launch_helicopter(entity: u32, offset_m: f32) -> Result<u32, JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .police_mut()
+            .debug_launch_helicopter(EntityId(entity), offset_m)
+            .map(|u| u.0)
+            .ok_or_else(|| "racer is not pursued".to_string())
     })
 }
 
