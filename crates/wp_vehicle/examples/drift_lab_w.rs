@@ -65,6 +65,8 @@ fn main() {
             "weight",
             "snap",
             "snapsweep",
+            "catch",
+            "catchwindow",
             "vr",
             "sens",
             "ptrace",
@@ -109,6 +111,14 @@ fn main() {
     }
     if what == "snap" {
         snap_table(&args);
+        return;
+    }
+    if what == "catchwindow" {
+        catch_window(&args);
+        return;
+    }
+    if what == "catch" {
+        catch_table(&args);
         return;
     }
     if what == "snapsweep" {
@@ -953,6 +963,188 @@ fn snap_table(args: &[String]) {
 
 /// Snap-back candidates (lead: slide-only rack behaviour, front falloff, rear relaxation, yaw
 /// inertia) against the W default: snap-back, the drift hold, and turn-in.
+/// Over-rotation catch (owner step 18) under the W default and `PLAIN` variants (JSON list in
+/// `PLAINS`, e.g. `[{"counter_closing_only":false},{"drift_lock_extra":0.3}]`): catches per
+/// car × push angle, plus snap-back and the tapping hold, on the panel's default tyres.
+/// Catch window (lead): the largest over-rotation (push angle, 35–75° in 5° steps) caught,
+/// counter key held vs tapping, before vs the W default; plus turn-in (tap / step steer).
+fn catch_window(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{over_rotation_catch_with, step_steer_roll, CatchKey};
+    use wp_vehicle::grip_lab::{self, GripBalance};
+    let ids: Vec<String> = if args.is_empty() {
+        ["parity_rwd_d", "parity_rwd_a", "parity_rwd_b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        args.to_vec()
+    };
+    car_lab::set_override(Some(CarTune::spin_candidate()));
+    ride_lab::set_override(Some(RideTune::medium_weight()));
+    grip_lab::set_override(Some(GripBalance::grip()));
+    let a = reference_assists();
+    let before = PlainSteer {
+        counter_closing_only: false,
+        ..PlainSteer::default()
+    };
+    println!("\n## Catch window: largest push caught (60 m, 0.7 g; caught pushes listed)");
+    println!("| car | variant | key held | tapping | turn-in: tap 0.15 s @100 heading ° / step heading start s |");
+    println!("|---|---|---|---|---|");
+    for id in &ids {
+        for (name, p) in [("before", before), ("W default", PlainSteer::default())] {
+            plain::set_override(Some(p));
+            let c = car(id);
+            let mut cells = Vec::new();
+            for k in [CatchKey::Held, CatchKey::Tapping] {
+                let mut caught = Vec::new();
+                let mut largest = 0.0f32;
+                for push in (7..=15).map(|i| i as f32 * 5.0) {
+                    let r = over_rotation_catch_with(&c, &a, push, k);
+                    if r.reached && r.caught {
+                        caught.push(format!("{push:.0}"));
+                        largest = largest.max(push);
+                    }
+                }
+                cells.push(format!("**{largest:.0}°** ({})", caught.join(",")));
+            }
+            let tap = tap_response(&c, &a, 100.0 / 3.6, 0.15);
+            let st = step_steer_roll(&c, &a, 80.0 / 3.6, 1.5);
+            println!(
+                "| {id} | {name} | {} | {} | {:.1} / {:.2} |",
+                cells[0], cells[1], tap.heading_deg, st.heading_start_s
+            );
+        }
+    }
+    car_lab::set_override(None);
+    ride_lab::set_override(None);
+    grip_lab::set_override(None);
+    plain::set_override(Some(PlainSteer::default()));
+}
+
+fn catch_table(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{over_rotation_catch, plain_hold, snap_back, SnapExit};
+    use wp_vehicle::grip_lab::{self, GripBalance};
+    let ids: Vec<String> = if args.is_empty() {
+        [
+            "parity_rwd_a",
+            "parity_rwd_b",
+            "parity_rwd_d",
+            "debug_coupe",
+            "rampart_50",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    } else {
+        args.to_vec()
+    };
+    let mut variants: Vec<(String, PlainSteer)> = vec![
+        (
+            "before (limit always, no extra lock)".into(),
+            PlainSteer {
+                counter_closing_only: false,
+                drift_lock_extra: 0.0,
+                over_rate: 1.0,
+                ..PlainSteer::default()
+            },
+        ),
+        ("W default".into(), PlainSteer::default()),
+    ];
+    if let Ok(j) = std::env::var("PLAINS") {
+        let list: Vec<serde_json::Value> = serde_json::from_str(&j).expect("PLAINS json list");
+        for v in list {
+            let mut base = serde_json::to_value(PlainSteer::default()).unwrap();
+            for (k, x) in v.as_object().unwrap() {
+                base[k] = x.clone();
+            }
+            variants.push((v.to_string(), serde_json::from_value(base).unwrap()));
+        }
+    }
+    car_lab::set_override(Some(CarTune::spin_candidate()));
+    ride_lab::set_override(Some(RideTune::medium_weight()));
+    grip_lab::set_override(Some(GripBalance::grip()));
+    let a = reference_assists();
+    println!("\n## Over-rotation catch (60 m, 0.7 g: key into the turn + full throttle past 40 / 50°, then counter key + half throttle)");
+    println!("| variant | caught 40° | caught 50° | snap counter+lift: yaw acc / over / slip over (spins) | tapping hold held | per car (40° / 50°: catch s, peak °, overcatch °) |");
+    println!("|---|---|---|---|---|---|");
+    for (name, p) in &variants {
+        plain::set_override(Some(*p));
+        let (mut c50, mut c60, mut n50, mut n60, mut held, mut spins) = (0, 0, 0, 0, 0, 0);
+        let (mut acc, mut over, mut slip, mut ns) = (0.0f32, 0.0f32, 0.0f32, 0);
+        let mut per = Vec::new();
+        for id in &ids {
+            let c = car(id);
+            let mut cell = Vec::new();
+            for (push, cnt, n) in [(40.0, &mut c50, &mut n50), (50.0, &mut c60, &mut n60)] {
+                let r = over_rotation_catch(&c, &a, push);
+                if r.reached {
+                    *n += 1;
+                    if r.caught {
+                        *cnt += 1;
+                    }
+                    cell.push(format!(
+                        "{}{:.2}s {:.0}° {:.0}°",
+                        if r.caught {
+                            "✓"
+                        } else if r.spun {
+                            "spin "
+                        } else {
+                            "✗ "
+                        },
+                        r.catch_s,
+                        r.peak_deg,
+                        r.overcatch_deg
+                    ));
+                } else {
+                    cell.push("—".into());
+                }
+            }
+            let sb = snap_back(&c, &a, SnapExit::CounterLift);
+            per.push(format!(
+                "{id}: {} · snap {:.0}°{}",
+                cell.join(" / "),
+                sb.slip_overshoot_deg,
+                if sb.spun { " spun" } else { "" }
+            ));
+            if sb.reached {
+                acc += sb.peak_yaw_acc;
+                over += sb.yaw_overshoot;
+                slip += sb.slip_overshoot_deg;
+                ns += 1;
+                if sb.spun {
+                    spins += 1;
+                }
+            }
+            let h = plain_hold(
+                &c,
+                &a,
+                PlainDriver::Tapper {
+                    entry_deg: 6.0,
+                    target_deg: 35.0,
+                },
+                40.0,
+                0.6,
+            );
+            if h.held {
+                held += 1;
+            }
+        }
+        let n = ns.max(1) as f32;
+        println!(
+            "| {name} | {c50}/{n50} | {c60}/{n60} | {:.1} / {:.2} / {:.0}° ({spins}) | {held}/{} | {} |",
+            acc / n,
+            over / n,
+            slip / n,
+            ids.len(),
+            per.join("; ")
+        );
+    }
+    car_lab::set_override(None);
+    ride_lab::set_override(None);
+    grip_lab::set_override(None);
+    plain::set_override(Some(PlainSteer::default()));
+}
+
 fn snap_sweep(args: &[String]) {
     use wp_vehicle::drift_lab_w::{plain_hold, snap_back, step_steer_roll, SnapExit};
     use wp_vehicle::grip_lab::{self, GripBalance};
@@ -979,7 +1171,7 @@ fn snap_sweep(args: &[String]) {
     let spin = CarTune::spin_candidate();
     let lab = RideTune::lab_default();
     let mid = RideTune::medium_weight();
-    let gnew = Some(GripBalance::lab_default());
+    let gnew = Some(GripBalance::grip());
     type Cfg = (String, PlainSteer, CarTune, RideTune, Option<GripBalance>);
     let mut configs: Vec<Cfg> = vec![
         (

@@ -1425,6 +1425,8 @@ impl Vehicle {
                     front_axle_angle: steer_in.front_axle_angle,
                     body_slip: steer_in.body_slip,
                     yaw_rate: self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
+                    // d|rear-axle slip|/dt (filtered, `crate::drift`): + = over-rotating.
+                    slide_growth: rear_axle.signum() * self.drift.rear_slip_rate,
                 },
                 &p,
                 dt,

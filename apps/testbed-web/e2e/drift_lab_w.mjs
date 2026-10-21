@@ -177,6 +177,17 @@ await page.waitForTimeout(1500);
   const n = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
   check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 0.7) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, medium weight (${n})`);
 }
+// Step 11 catch A/B (owner: catch over-rotations): default new, "before" turns the directional
+// limit / extra lock / fast rack off.
+{
+  const ps = () => page.evaluate(() => window.__wp.sim.plainSteer());
+  const d = await ps();
+  check(d.counter_closing_only === true && Math.abs(d.drift_lock_extra - 0.4) < 1e-6 && Math.abs(d.over_rate - 2) < 1e-6, `catch default: directional limit, extra lock 40 %, rack × 2 (${d.counter_closing_only}, ${d.drift_lock_extra}, ${d.over_rate})`);
+  await page.locator("#drift-lab-w-catch-before").click();
+  check((await ps()).counter_closing_only === false, '"catch: before" → off');
+  await page.locator("#drift-lab-w-catch-new").click();
+  check((await ps()).counter_closing_only === true, '"catch: new" → on');
+}
 // Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
 check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");
 await page.locator("#drift-lab-w-vr").check();

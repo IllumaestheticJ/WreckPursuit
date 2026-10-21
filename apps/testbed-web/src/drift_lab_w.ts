@@ -41,6 +41,9 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
+  drift_lock_extra: { label: "catch: extra lock", min: 0, max: 0.6, step: 0.05, scale: 100, unit: "%", hint: "step 11 over-rotation catch: with the counter key held while the car over-rotates past 40–50° of slip, the counter lock may reach full lock × (1 + this) (default 40 %; grip driving and a held drift unchanged)" },
+  over_rate: { label: "catch: rack speed ×", min: 1, max: 3, step: 0.1, hint: "step 11: the rack moves this many times faster toward the counter lock while over-rotating past 40° (1 = off; default 2)" },
+  over_from_dps: { label: "catch: over-rotation from", min: 5, max: 40, step: 1, unit: "°/s", hint: "step 11: slide growth that counts as over-rotating (the countersteer limit lets go, the extra lock and fast rack come in; default 15°/s)" },
   counter_margin_deg: { label: "countersteer limit", min: 0, max: 5, step: 0.05, unit: "°", hint: "step 10 snap-back: in a slide a held counter key points the wheels at most this far past the front axle's travel, so the lock unwinds as the slide closes (0 = off, the 'before'; default 0.25°)" },
   sens_exponent: { label: "sens. exponent", min: 1, max: 4, step: 0.5, hint: "lock = 1 / (1 + s·(v / ref)^exp); 2 = like the angle a constant-g corner needs" },
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
@@ -107,7 +110,8 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
 // v2: step 10's default ride became medium weight (an older saved ride must not override it).
 const RIDE_STORE = "wp.driftLabW.ride.v2";
 const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
-const GRIP_STORE = "wp.driftLabW.grip";
+// v3: the default balance is "new" (step 14) again; v2 builds saved "balance: grip" as their default.
+const GRIP_STORE = "wp.driftLabW.grip.v3";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
  * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
 const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
@@ -439,6 +443,33 @@ export class DriftLabWPanel {
       if (current) sel.value = current;
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
+    }
+    // Step 11 A/B (owner: catch over-rotations): "catch: before" = the step-10 limit at every
+    // slide rate, no extra lock, no fast rack; "catch: new" = directional limit + extra lock +
+    // fast rack (the default).
+    {
+      const ab = document.createElement("div");
+      ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
+      const lbl = document.createElement("span");
+      lbl.textContent = "catch A/B:";
+      ab.appendChild(lbl);
+      for (const [label, id, on] of [
+        ["before", "drift-lab-w-catch-before", false],
+        ["new", "drift-lab-w-catch-new", true],
+      ] as const) {
+        const b = document.createElement("button");
+        b.id = id;
+        b.textContent = label;
+        b.title = on
+          ? "step 11 default: the countersteer limit lets go while the car over-rotates, extra counter lock (× 1.4) and a faster rack past 40° of slip — over-rotations are easier to catch"
+          : "step 10: the countersteer limit at every slide rate, no extra lock, no fast rack";
+        b.onclick = () => {
+          this.save({ ...(this.sim.plainSteer() ?? defaults), counter_closing_only: on } as unknown as Record<string, number>);
+          this.build();
+        };
+        ab.appendChild(b);
+      }
+      this.body.appendChild(ab);
     }
     // Step 10 A/B (lead): "before" = steps 1–9 (no countersteer limit, lab ride) vs "new" =
     // the default (countersteer limit 0.25°, medium weight). Tyres stay as set below.
