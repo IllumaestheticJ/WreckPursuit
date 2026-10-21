@@ -179,7 +179,14 @@ Status 2026-10-20: **`world_rec` shipped** (the network now reaches kenney.nl an
 - 21 new sources, CC0 pages checked. e2e: 164 files decode; the scanner's squelch/static play
   recorded.
 
-Still procedural: plastic scrape, body rattle (no usable CC0 recordings picked yet).
+### Recorded plastic scrape and body rattle (2026-10-21, follow-up 4)
+- `scrape/plastic`: two 2.3–2.5 s loops, each joined from 3–4 real drag strokes (plastic chairs
+  dragged across concrete and stone) with the new `join` variant option — single strokes last
+  only 0.6–1.1 s. Joined levels stay within ±2–5 dB.
+- `body/rattle`: a truck rattle recording (high-band rattle modulated at 6–11 Hz, close to the
+  synth's 11 Hz) and a military-truck interior, high-passed at 300–400 Hz to drop road/engine.
+- 5 new sources, CC0 pages checked. e2e: 169 files decode, 0 fallbacks.
+- **Every shipped cue is now recorded**; the `*_proc` packs remain only as `fallback_pack`.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -200,8 +207,7 @@ Still procedural: plastic scrape, body rattle (no usable CC0 recordings picked y
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
 - Engines (incl. turbo/supercharger/blow-off), sirens, collisions, glass, debris, scrapes, squeal
-  horns, radio, surfaces and suspension are recorded; plastic scrape and body rattle are
-  procedural placeholders. Blow-off is an air-valve stand-in; surface root speeds are estimates. V8s above ≈ 3350 rpm are
+  horns, radio, surfaces, suspension, plastic scrape and body rattle are all recorded. Blow-off is an air-valve stand-in; surface root speeds are estimates. V8s above ≈ 3350 rpm are
   pitch-stretched recordings.
 - Recorded cut points and gains come from onset/decay/pitch analysis, not listening; tune by ear in
   `tools/audio-packs/<pack>.json`.

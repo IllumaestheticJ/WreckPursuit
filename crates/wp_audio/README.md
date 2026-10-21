@@ -107,7 +107,7 @@ Shipped recorded packs (all CC0, built reproducibly by `tools/audio-packs/build.
 
 | Pack | Used by | What is recorded (falls back to) |
 |---|---|---|
-| `world_rec` | every car | impacts (thud, plastic, panel dent, structural crunch, glass, cast clank), debris, tire bursts, engine failure, suspension thump / landing, metal scrape / tire squeal / loose scrub / steam / horn loops, rolling loops for all 8 surfaces (`world_proc`) |
+| `world_rec` | every car | impacts (thud, plastic, panel dent, structural crunch, glass, cast clank), debris, tire bursts, engine failure, suspension thump / landing, metal and plastic scrape / body rattle / tire squeal / loose scrub / steam / horn loops, rolling loops for all 8 surfaces (`world_proc`) |
 | `radio_rec` | scanner | key-up and end-of-transmission squelches, static bed (`radio_proc`) |
 | `engine_rec_i4` | inline fours | idle, 4 on-load + 2 overrun layers, limiter, exhaust pops, turbo whistle, blow-off, supercharger whine (`engine_proc_i4`) |
 | `engine_rec_v8` | V8s | idle, 4 on + 2 off layers (top layer ≈ 3350 rpm), limiter, pops, forced-induction cues (`engine_proc_v8`) |
@@ -123,7 +123,8 @@ fallback synth agree. Turbo whistle = the dyno car's compressor tone (tracked, f
 supercharger whine = a centrifugal supercharger's 1.7–2.3 kHz partials, band-isolated; blow-off
 = pneumatic valve releases low-passed at 5 kHz (no CC0 blow-off-valve recording exists). Surface loops
 carry `root_speed_mps` (estimated speed of the recording), so they play at `speed / root`.
-Still procedural: plastic scrape, body rattle.
+Every shipped cue is recorded; the `*_proc` synths only play while a file loads or if it cannot
+decode.
 
 ```jsonc
 {
@@ -210,8 +211,8 @@ nodes) for material lookup.
   `tools/audio-packs/README.md`). V8 recordings top out near 3350 rpm, so V8s near the limiter
   play the top layer pitched up to ~1.6×. Blow-off is a stand-in (air valve releases); no shipped
   car has a supercharger yet, so the whine is only exercised by its loader. Surface-loop root speeds
-  are estimates (no speed data in the recordings). Plastic scrape and body rattle are still
-  procedural.
+  are estimates (no speed data in the recordings). Plastic scrape is plastic chairs dragged on
+  concrete/stone (the closest CC0 material to a bumper on asphalt).
 
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
