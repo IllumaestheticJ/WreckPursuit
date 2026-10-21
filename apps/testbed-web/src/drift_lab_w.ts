@@ -794,7 +794,7 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.shipped);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "shipped" : sameGrip(gt, gd.owner_ref) ? "owner ref" : sameGrip(gt, gd.new) ? "step 20" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.grip) ? "grip (test)" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
+      ab.textContent = `balance: ${isNew ? "shipped" : sameGrip(gt, { ...gd.shipped, rear_stiffness: 0.5 }) ? "rear ×0.50" : sameGrip(gt, { ...gd.shipped, rear_stiffness: 0.55 }) ? "rear ×0.55" : sameGrip(gt, gd.owner_ref) ? "owner ref" : sameGrip(gt, gd.new) ? "step 20" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.grip) ? "grip (test)" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
       ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + RWD rear near the data (× 0.9, flatter past the peak: no step-out on a lift while steering, over-rotations catchable) + rear downforce + held-key slide lock (step 20)";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
@@ -808,6 +808,20 @@ export class DriftLabWPanel {
         saveGrip(gd.step14);
         this.build();
       };
+      // The owner's rear A/B (lead, 2026-10-21): the shipped step-14 rear (× 0.45) is slightly
+      // loose at steady state on every RWD car; × 0.50 / × 0.55 are the candidates.
+      const rearBtns: HTMLButtonElement[] = [];
+      for (const k of [0.5, 0.55]) {
+        const b = document.createElement("button");
+        b.id = `drift-w-rear-${Math.round(k * 100)}`;
+        b.textContent = `rear ×${k.toFixed(2)}`;
+        b.title = `the shipped balance with the RWD rear cornering stiffness × ${k.toFixed(2)} instead of × 0.45 (less loose at steady state; the owner's A/B)`;
+        b.onclick = () => {
+          saveGrip({ ...gd.shipped, rear_stiffness: k });
+          this.build();
+        };
+        rearBtns.push(b);
+      }
       const gripBtn = document.createElement("button");
       gripBtn.id = "drift-w-balance-grip";
       gripBtn.textContent = "balance: grip (test)";
@@ -886,7 +900,7 @@ export class DriftLabWPanel {
       };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, step14, gripBtn, forSlow, driftBest, step2, lockOnly, trans, v2);
+      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, trans, v2);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

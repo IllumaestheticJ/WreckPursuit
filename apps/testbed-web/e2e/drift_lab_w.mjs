@@ -116,6 +116,12 @@ await page.locator("#drift-w-balance-grip").click();
   const gg = await page.evaluate(() => window.__wp.sim.gripBalance());
   check((await abText()) === "balance: grip (test)" && Math.abs(gg.rear_stiffness - 0.8) < 1e-6 && Math.abs(gg.rear_mu - 0.96) < 1e-6 && Math.abs(gg.rear_lat_c - 1.0) < 1e-6, `grip (test) preset: "${await abText()}" ${JSON.stringify(gg)}`);
 }
+// The owner's rear A/B presets (lead, 2026-10-21).
+for (const [id, k] of [["drift-w-rear-50", 0.5], ["drift-w-rear-55", 0.55]]) {
+  await page.locator(`#${id}`).click();
+  const g = await page.evaluate(() => window.__wp.sim.gripBalance());
+  check(Math.abs(g.rear_stiffness - k) < 1e-6 && Math.abs(g.front_stiffness - 0.6) < 1e-6 && (await abText()) === `balance: rear ×${k.toFixed(2)}`, `rear ×${k} preset: "${await abText()}"`);
+}
 await page.locator("#drift-lab-w").getByRole("button", { name: "step 2", exact: true }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
 await page.locator("#drift-w-drift-best").click();

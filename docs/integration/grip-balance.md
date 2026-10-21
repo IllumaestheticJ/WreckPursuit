@@ -1174,3 +1174,67 @@ a second time (debug only).
   owner's reference assists, the panel open.
 - Drift Labs B / C removed: `drift_lab_b.ts`, `e2e/drift_lab_b.mjs`, `e2e/drift_lab.mjs`. The
   course is in `src/test_pad.ts`. Their Rust tests are `#[ignore]`d with a pointer here.
+
+### TODO (lead, 2026-10-21): the owner's rear A/B
+
+The owner's step-14 rear (cornering stiffness × 0.45 against the front's × 0.6) makes every RWD
+car slightly loose at steady state, AI, police and trucks included. Wheel preset, 80 km/h:
+−0.34 (shiro) to −0.74 (sperber) deg/g, sentinel_bastion −0.71, debug_coupe skidpad −0.75.
+
+The front / rear bar split does not change it: front ×1.4 moves the gradients by about
+0.02 deg/g (`examples/bar_split`). The rear stiffness does, and it is knife-edge sensitive:
+
+| rear stiffness | result |
+|---|---|
+| × 0.52 | 9 cars still out of range |
+| × 0.55 | everything in range except hauler 2.43 and junkyard (FWD) 1.75 |
+| × 0.60 | RWD ~0.7 deg/g, trucks 3+ |
+
+**The decision so far.** The lead shipped × 0.45 (the owner's) and added the panel presets
+"rear ×0.50" and "rear ×0.55". The owner chooses by feel, then revisit.
+
+**Tests re-ranged** with the reason "owner-chosen balance (row 126); revisit after the owner's
+×0.45 / 0.50 / 0.55 A/B":
+
+| test | was | now (measured) |
+|---|---|---|
+| RWD near neutral | 0..0.6 | −0.95..0.6 |
+| heavy cars push | 0.35..2.3 | −0.9..2.3 |
+| FWD | ≤ 1.6 | ≤ 2.0 (junkyard 1.75) |
+| debug_coupe skidpad | > 0 | > −1.0 |
+| power-oversteer onset | must exist | optional (the fronts slide with the rears; curvature 1.8 checked) |
+| cambered-road launch yaw | < 3° | < 5.5° (worst ironside 4.7°) |
+| LSD power oversteer | LSD ≥ open + 2° | LSD ≥ open − 1° (shiro 3.3 → 3.0°, rampart 5.1 → 4.3°) |
+| split-µ locked vs LSD | locked ≥ LSD | locked ≥ 0.95 × LSD (18.4 vs 19.0 m) |
+| helical | < 2 × open | < 3.5 × open and < ½ clutch (4.1 vs 1.3 m) |
+| helical with TCS | > 2.5 × | > 2.0 × (9.1 m) |
+| vireo split-µ open ice slip | > 25 | > 20 m/s (23.7) |
+
+**Re-ranged for the owner-chosen ride:**
+
+| test | was | now (measured) |
+|---|---|---|
+| bump damping | ≤ 0.45 | ≤ 0.48 (lucciola 0.46) |
+| heave frequency | ≤ 2.0 Hz | ≤ 2.4 Hz (hakone 2.30) |
+| 10 cm kerb wheel lift | < 0.02 s | < 0.073 s (hakone 0.058) |
+| 15 cm city kerb airborne, non-reference cars | ≤ 0.08 s | ≤ 0.13 s (lucciola 0.104) |
+| ABS Half vs Full ordering | 0.1 m | 0.5 m |
+
+### AI / police pace (race_picker, release; harness drivers keep the normal steering)
+
+The race tests drive the player's seat with the AI. The unify gives a Player-kind car the
+keyboard aids, so the race tests and opponent_pace now set `Sim::set_player_steering(.., Some(false))`
+on every seat. The testbed's `&autopilot=1` race does the same.
+
+| race | pre-unify b3e23c95 | unify × 0.45 | unify × 0.55 |
+|---|---|---|---|
+| grid_highway winner | 62.6 s | 60.1 s | 60.3 s |
+| hollins (police) | 68.9 s | 69.0 s | 69.1 s |
+| hollins (no police) | 84.6 s | 90.0 s | 129.0 s (winner 119.4 s: red) |
+| lantern (police) | 65.8 s, 3 pursuits, 1/4 ended by police | 58.4 s, 4 pursuits, 2/4 | 70.1 s, 4 pursuits, 4/4 |
+| loop9 (no police) | 204.7 s | 214.7 s | 211.5 s |
+| loop9 (police) | 6 pursuits, 0/6 finished | 10 pursuits, never finished (red) | 11 pursuits, 0/6 finished |
+| police tests (wp_police, police_assault / passby, wp_opponent race) | green | green | green |
+
+The police-race outcomes are chaotic: the loop9 test notes that 3 of 7 seeds pass, before and
+after row 99. Each setting has one red race test.
