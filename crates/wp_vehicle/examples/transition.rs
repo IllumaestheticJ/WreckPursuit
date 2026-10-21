@@ -147,7 +147,7 @@ const REACT_DEG: f32 = 5.0;
 
 /// Run one flick from a held left drift. `None` = the drift never held 30–45° for 0.5 s.
 fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
-    let a = reference_assists();
+    let a = harness_assists();
     // Diagnostic (lead option 3): `RADIUS` / `LATG` for the settle circle (default 40 m,
     // 0.5 g), `FLICK_DEG` = flick as soon as the old-side slide first reaches it (no settled
     // 30–45° hold first).
@@ -398,6 +398,32 @@ fn configs() -> Vec<Config> {
             grip: Some(GripBalance::grip()),
         });
     }
+    // The owner's target (lead, 2026-10-21): grip-balance 7d6b66c9 — step-14 balance, the medium
+    // ride — with springs / bars × 1.5; plain steering. `· plain` with W's features as they are,
+    // `· no W` with the transition rack / catch / over-rotation rack / countersteer limit off.
+    let owner_ride = RideTune {
+        spring: 1.5,
+        arb: 1.5,
+        ..RideTune::medium_weight()
+    };
+    v.push(Config {
+        name: "owner · plain",
+        plain: p,
+        ride: owner_ride,
+        grip: Some(GripBalance::step14()),
+    });
+    v.push(Config {
+        name: "owner · no W",
+        plain: PlainSteer {
+            trans_follow: false,
+            trans_catch_gain: 0.0,
+            over_rate: 1.0,
+            counter_margin_deg: 0.0,
+            ..p
+        },
+        ride: owner_ride,
+        grip: Some(GripBalance::step14()),
+    });
     // Grip-balance's "drift: best (test)" preset: VR steering + `GripBalance::drift_best()`.
     v.push(Config {
         name: "drift best · VR",
@@ -471,7 +497,7 @@ fn fmt_opt(x: Option<f32>) -> String {
 
 /// `trace`: the old-side angle every 0.25 s of a held drift (no flick), per config and car.
 fn trace_hold(cars: &[(&str, LoadedCar)]) {
-    let a = reference_assists();
+    let a = harness_assists();
     for cfg in configs() {
         apply(&cfg);
         for (id, c) in cars {
@@ -508,7 +534,7 @@ fn trace_hold(cars: &[(&str, LoadedCar)]) {
 /// spin), out of 6, and the worst peak body slip.
 fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
     use wp_vehicle::rig::Rig;
-    let a = reference_assists();
+    let a = harness_assists();
     let hold = |rig: &Rig, v: f32| {
         let err = v - rig.state().speed_mps;
         if err > -1.0 {
@@ -618,7 +644,7 @@ struct V2Score {
 /// lifts 0.15 / 0.25 / 0.4 s × 3 cars), under whatever overrides are active.
 fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
     use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
-    let a = reference_assists();
+    let a = harness_assists();
     let mut sc = V2Score::default();
     for (_, c) in cars {
         let (lf, lw) = lift_corner_fails(c);
@@ -829,7 +855,7 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
 /// `holds`: the held-drift set case by case (`ONLY` config, `TYRE`, `PLAIN` overrides).
 fn holds(cars: &[(&str, LoadedCar)]) {
     use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
-    let a = reference_assists();
+    let a = harness_assists();
     for cfg in configs() {
         apply(&cfg);
         println!("## {}", cfg.name);
@@ -852,6 +878,20 @@ fn holds(cars: &[(&str, LoadedCar)]) {
 /// then held), optionally the left key held 1 s first (in a corner), then full throttle for
 /// 2.5 s with the key still held (corner) or none (straight). Returns (spun, peak |body slip| °).
 /// Spun = |body slip| ≥ 45° or travelling backwards.
+/// The harness's assists: the lab reference (TCS off, manual gears, auto clutch), or with
+/// `MANUAL_CLUTCH=1` the owner's manual clutch held engaged (lead, step 23).
+fn harness_assists() -> wp_contracts::AssistProfile {
+    let a = reference_assists();
+    if std::env::var("MANUAL_CLUTCH").is_ok() {
+        wp_contracts::AssistProfile {
+            auto_clutch: false,
+            ..a
+        }
+    } else {
+        a
+    }
+}
+
 /// The assist profile of the power-on / held tables: the lab's reference (manual gears, auto
 /// clutch), or with `OWNER=1` the owner's (lead, step 23: TCS off, **manual clutch, auto
 /// gears**).
@@ -988,6 +1028,26 @@ fn poweron_table() {
             "B",
             RideTune::firm(),
             GripBalance::lab_default(),
+            CarTune::spin_candidate(),
+        ),
+        (
+            "owner 7d6b66c9 + 1.5/1.5",
+            RideTune {
+                spring: 1.5,
+                arb: 1.5,
+                ..RideTune::medium_weight()
+            },
+            GripBalance::step14(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "owner + B tyres",
+            RideTune {
+                spring: 1.5,
+                arb: 1.5,
+                ..RideTune::medium_weight()
+            },
+            GripBalance::step14(),
             CarTune::spin_candidate(),
         ),
         (
@@ -1133,7 +1193,7 @@ fn manual_drift(
     let a = wp_contracts::AssistProfile {
         auto_gears: false,
         auto_clutch: std::env::var("AUTO_CLUTCH").is_ok(),
-        ..reference_assists()
+        ..harness_assists()
     };
     let mut rig = settle_on_circle(c, &a, 40.0, lat_g);
     let start_gear: i8 = if shift == Shift::DownAtEntry { 3 } else { 2 };
