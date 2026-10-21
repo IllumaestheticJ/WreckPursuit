@@ -147,13 +147,26 @@ fn before(w: &World, seed: u64) -> Ctx<'_> {
     ctx
 }
 
-/// Run buildings; returns (context, features before, seconds).
+/// CPU time of this thread, s (Linux; wall clock elsewhere is not comparable under load).
+fn cpu_s() -> Option<f32> {
+    let s = std::fs::read_to_string("/proc/thread-self/schedstat").ok()?;
+    let ns: f64 = s.split_whitespace().next()?.parse().ok()?;
+    Some((ns * 1e-9) as f32)
+}
+
+/// Run buildings; returns (context, features before, seconds: thread CPU time if
+/// available, else wall clock).
 fn after(w: &World, seed: u64) -> (Ctx<'_>, usize, f32) {
     let mut ctx = before(w, seed);
     let n0 = ctx.features.len();
     let t = Instant::now();
+    let c = cpu_s();
     generate(&mut ctx);
-    (ctx, n0, t.elapsed().as_secs_f32())
+    let secs = match (c, cpu_s()) {
+        (Some(a), Some(b)) => b - a,
+        _ => t.elapsed().as_secs_f32(),
+    };
+    (ctx, n0, secs)
 }
 
 fn centroid(p: &[V2]) -> V2 {
@@ -353,7 +366,10 @@ fn dense_grid_counts_and_timing() {
     let w = grid_world(1);
     let (ctx, n0, secs) = after(&w, 1);
     report(&ctx, n0, secs, "synthetic 120 m grid");
-    eprintln!("budget (row group, spread): {:?}", lots::budget(&before(&w, 1)));
+    eprintln!(
+        "budget (row group, spread): {:?}",
+        lots::budget(&before(&w, 1))
+    );
     let pre = before(&w, 1);
     for b in &ctx.buildings {
         assert!(convex_ccw(&b.footprint));

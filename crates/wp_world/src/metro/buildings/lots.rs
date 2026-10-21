@@ -1097,7 +1097,8 @@ impl Placed {
 }
 
 /// A boundary line of a run: `out` points away from the lots (side / rear lines are
-/// emitted only where the land beyond is open), `gaps` are gate openings.
+/// emitted only where the land beyond is open), `gaps` are gate openings, `street_wall`
+/// marks lines behind street-wall lots (lowest priority when the budget is short).
 #[derive(Debug, Clone)]
 pub struct Deferred {
     a: V2,
@@ -1105,6 +1106,7 @@ pub struct Deferred {
     spec: FenceSpec,
     out: V2,
     gaps: Vec<V2>,
+    street_wall: bool,
 }
 
 /// Merges consecutive collinear line segments of one style into one long line.
@@ -1136,6 +1138,7 @@ impl Sink {
                     spec: seg.spec,
                     out: seg.out,
                     gaps: Vec::new(),
+                    street_wall: seg.street_wall,
                 });
             }
             done.push(cur);
@@ -1208,6 +1211,7 @@ impl Run {
                     spec: r,
                     out: geom::scale(p.frame.t, side),
                     gaps: Vec::new(),
+                    street_wall: !p.front,
                 });
             }
         }
@@ -1252,6 +1256,7 @@ impl Run {
                     spec,
                     out: geom::scale(n.frame.n, -1.0),
                     gaps,
+                    street_wall: false,
                 };
                 self.front.push(seg, &mut self.fronts);
             }
@@ -1265,6 +1270,7 @@ impl Run {
                     spec,
                     out: n.frame.n,
                     gaps: Vec::new(),
+                    street_wall: !n.front,
                 };
                 self.rear.push(seg, &mut self.deferred);
             }
@@ -1292,35 +1298,48 @@ impl Run {
 }
 
 /// Emit the queued side / rear lot lines, leaving out the stretches whose far side is
-/// another lot, a site, a building or water (that side is closed already).
-pub fn emit_deferred(ctx: &mut Ctx, claims: &Claims, lines: &[Deferred]) {
+/// another lot, a site, a building or water (that side is closed already). Lines behind
+/// detached lots go first; lines behind street-wall lots (whose frontage is already nearly
+/// closed) only while fewer than `budget` features have been added.
+pub fn emit_deferred(ctx: &mut Ctx, claims: &Claims, lines: &[Deferred], budget: usize) {
+    let n0 = ctx.features.len();
+    for pass in [false, true] {
+        for l in lines.iter().filter(|l| l.street_wall == pass) {
+            if pass && ctx.features.len() - n0 >= budget {
+                return;
+            }
+            emit_open(ctx, claims, l);
+        }
+    }
+}
+
+/// Emit the open stretches of one deferred line.
+fn emit_open(ctx: &mut Ctx, claims: &Claims, l: &Deferred) {
     let closed = |ctx: &Ctx, q: V2| {
         claims.at(q) || matches!(ctx.occ_at(q), Occ::Site | Occ::Building | Occ::Water)
     };
-    for l in lines {
-        let len = geom::dist(l.a, l.b);
-        if len < 1.0 {
-            continue;
-        }
-        let n = (len / 4.0).ceil() as usize;
-        let mut start: Option<usize> = None;
-        for k in 0..=n {
-            let open = k < n && {
-                let m = super::super::ctx::lerp2(l.a, l.b, (k as f32 + 0.5) / n as f32);
-                ![1.2f32, 3.5]
-                    .iter()
-                    .any(|d| closed(ctx, geom::add(m, geom::scale(l.out, *d))))
-            };
-            match (open, start) {
-                (true, None) => start = Some(k),
-                (false, Some(s0)) => {
-                    let a = super::super::ctx::lerp2(l.a, l.b, s0 as f32 / n as f32);
-                    let b = super::super::ctx::lerp2(l.a, l.b, k as f32 / n as f32);
-                    emit_line(ctx, a, b, l.spec, &[], 0.0, &LOT_LINE_BLOCKED);
-                    start = None;
-                }
-                _ => {}
+    let len = geom::dist(l.a, l.b);
+    if len < 1.0 {
+        return;
+    }
+    let n = (len / 4.0).ceil() as usize;
+    let mut start: Option<usize> = None;
+    for k in 0..=n {
+        let open = k < n && {
+            let m = super::super::ctx::lerp2(l.a, l.b, (k as f32 + 0.5) / n as f32);
+            ![1.2f32, 3.5]
+                .iter()
+                .any(|d| closed(ctx, geom::add(m, geom::scale(l.out, *d))))
+        };
+        match (open, start) {
+            (true, None) => start = Some(k),
+            (false, Some(s0)) => {
+                let a = super::super::ctx::lerp2(l.a, l.b, s0 as f32 / n as f32);
+                let b = super::super::ctx::lerp2(l.a, l.b, k as f32 / n as f32);
+                emit_line(ctx, a, b, l.spec, &[], 0.0, &LOT_LINE_BLOCKED);
+                start = None;
             }
+            _ => {}
         }
     }
 }
@@ -1328,10 +1347,12 @@ pub fn emit_deferred(ctx: &mut Ctx, claims: &Claims, lines: &[Deferred]) {
 /// Deepest back yard, m.
 const MAX_YARD_DEPTH_M: f32 = 60.0;
 
-/// How deep a lot in `frame` (frontage `f`) may reach: half way to the road behind the
-/// block, or up to whatever else is there (another lot, a site, water), capped at
-/// [`MAX_YARD_DEPTH_M`]; measured on three rays.
-fn reach(ctx: &Ctx, claims: &Claims, frame: &Frame, f: f32) -> f32 {
+/// How deep a lot in `frame` (frontage `f`, template depth `d0`) may reach: half way to
+/// the road behind the block, or up to whatever else is there (another lot, a site, water),
+/// capped at [`MAX_YARD_DEPTH_M`]; measured on three rays. The yard stops growing where a
+/// road runs beside it (within 22 m of either side), so corner lots do not eat the frontage
+/// of the cross street.
+fn reach(ctx: &Ctx, claims: &Claims, frame: &Frame, f: f32, d0: f32) -> f32 {
     let mut best = MAX_YARD_DEPTH_M;
     for u in [-f * 0.5 + 1.0, 0.0, f * 0.5 - 1.0] {
         let mut v = 2.0;
@@ -1350,6 +1371,17 @@ fn reach(ctx: &Ctx, claims: &Claims, frame: &Frame, f: f32) -> f32 {
         let r = if road { d * 0.5 - 0.5 } else { d - 1.5 };
         best = best.min(r);
     }
+    let mut v = d0;
+    while v < best {
+        for k in [6.0, 14.0, 22.0] {
+            for u in [-f * 0.5 - k, f * 0.5 + k] {
+                if matches!(ctx.occ_at(frame.at(u, v)), Occ::Road | Occ::Verge) {
+                    return (v - 2.0).max(d0);
+                }
+            }
+        }
+        v += 4.0;
+    }
     best
 }
 
@@ -1363,52 +1395,89 @@ fn try_place(
     frame: &Frame,
     lot: &Lot,
     max_slope: f32,
+    prefer: Option<f32>,
 ) -> Option<Placed> {
-    let deep = reach(ctx, claims, frame, lot.frontage);
-    for k in [0.0, 1.0, 0.7, 0.5] {
-        let l = if k == 0.0 {
-            if deep <= lot.depth + 1.0 {
-                continue;
-            }
-            let mut l = lot.clone();
+    let area_of = |l: &Lot| {
+        let f = l.frontage;
+        frame.poly(&rect(-f * 0.5 + 0.4, f * 0.5 - 0.4, 0.4, l.depth - 0.4))
+    };
+    let clear = |ctx: &Ctx, claims: &Claims, area: &[V2]| {
+        if claims.any(area) || !ctx.free(area, 0.0) {
+            return false;
+        }
+        let (lo, hi) = ctx.ground_range(area);
+        hi - lo <= max_slope && lo >= plan::WATER_Z + 0.4
+    };
+    // Cheap rejection: a few points of the shallowest variant must be free (every
+    // variant keeps the frontage).
+    let f = lot.frontage;
+    let dmin = (lot.depth * 0.5).max(6.0);
+    for (u, v) in [
+        (-f * 0.5 + 1.0, 1.0),
+        (0.0, 1.0),
+        (f * 0.5 - 1.0, 1.0),
+        (-f * 0.5 + 1.0, dmin - 1.0),
+        (0.0, dmin * 0.5),
+        (f * 0.5 - 1.0, dmin - 1.0),
+    ] {
+        let q = frame.at(u, v);
+        if ctx.occ_at(q) != Occ::Free || claims.at(q) {
+            return None;
+        }
+    }
+    // The template depth first (cheapest to reject); if it fits, try the deeper yard.
+    let mut choice: Option<(Lot, Vec<V2>)> = None;
+    let area = area_of(lot);
+    if clear(ctx, claims, &area) {
+        // Keep the run's rear line straight where possible; otherwise 5 m steps.
+        let reachable = reach(ctx, claims, frame, lot.frontage, lot.depth);
+        let deep = match prefer {
+            Some(rd) if rd <= reachable => rd,
+            _ => (reachable / 5.0).floor() * 5.0,
+        };
+        let mut l = lot.clone();
+        if deep > lot.depth + 1.0 {
             l.depth = deep;
-            l
-        } else if k == 1.0 {
-            lot.clone()
-        } else {
+            let a2 = area_of(&l);
+            if clear(ctx, claims, &a2) {
+                choice = Some((l, a2));
+            }
+        }
+        if choice.is_none() {
+            choice = Some((lot.clone(), area));
+        }
+    } else {
+        for k in [0.7, 0.5] {
             match lot.scaled(k) {
-                Some(l) if l.depth >= 12.0 => l,
+                Some(l) if l.depth >= 12.0 => {
+                    let a = area_of(&l);
+                    if clear(ctx, claims, &a) {
+                        choice = Some((l, a));
+                        break;
+                    }
+                }
                 _ => break,
             }
-        };
-        let f = l.frontage;
-        let area = frame.poly(&rect(-f * 0.5 + 0.4, f * 0.5 - 0.4, 0.4, l.depth - 0.4));
-        if claims.any(&area) || !ctx.free(&area, 0.0) {
-            continue;
         }
-        let (lo, hi) = ctx.ground_range(&area);
-        if hi - lo > max_slope || lo < plan::WATER_Z + 0.4 {
-            continue;
-        }
-        if !commit(ctx, frame, &l.parts, Mode::Lot) {
-            continue;
-        }
-        claims.mark(&area);
-        let (u0, u1, back) = l.mass_extent();
-        return Some(Placed {
-            frame: *frame,
-            f,
-            fence_v: l.fence_v,
-            mass_u: (u0, u1),
-            mass_back: back,
-            rear_v: l.depth - 0.5,
-            closer: l.closer,
-            rear: l.rear,
-            gate: l.gate,
-            front: l.front,
-        });
     }
-    None
+    let (l, area) = choice?;
+    if !commit(ctx, frame, &l.parts, Mode::Lot) {
+        return None;
+    }
+    claims.mark(&area);
+    let (u0, u1, back) = l.mass_extent();
+    Some(Placed {
+        frame: *frame,
+        f: l.frontage,
+        fence_v: l.fence_v,
+        mass_u: (u0, u1),
+        mass_back: back,
+        rear_v: l.depth - 0.5,
+        closer: l.closer,
+        rear: l.rear,
+        gate: l.gate,
+        front: l.front,
+    })
 }
 
 /// Distance from the road centreline to the lot front line on one side of `s`, m.
@@ -1564,7 +1633,9 @@ pub fn walk(
                         continue;
                     }
                     let frame = lot_frame(s, &cum, side, at, lot.frontage);
-                    if let Some(p) = try_place(ctx, claims, &frame, &lot, style.max_slope()) {
+                    if let Some(p) =
+                        try_place(ctx, claims, &frame, &lot, style.max_slope(), run.depth())
+                    {
                         run.push(ctx, p);
                         placed_f = Some(lot.frontage);
                         break;
@@ -1637,7 +1708,7 @@ pub fn place_special(
         let s = &roads.built.surfaces[si];
         let cum = geom::cumulative(&s.centre);
         let fr = lot_frame(s, &cum, side as f32, at, f);
-        if let Some(p) = try_place(ctx, claims, &fr, lot, 6.0) {
+        if let Some(p) = try_place(ctx, claims, &fr, lot, 6.0, None) {
             let mut run = Run::default();
             run.push(ctx, p);
             run.flush(ctx);

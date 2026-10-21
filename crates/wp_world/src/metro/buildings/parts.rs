@@ -601,11 +601,11 @@ pub const LOT_LINE_BLOCKED: [Occ; 6] = [
 pub const SITE_LINE_BLOCKED: [Occ; 4] = [Occ::Water, Occ::Building, Occ::Verge, Occ::Road];
 
 /// Longest single boundary piece, m.
-const MAX_PIECE_M: f32 = 48.0;
+const MAX_PIECE_M: f32 = 80.0;
 /// Most ground rise along one boundary piece (taller pieces step down a slope), m.
-const MAX_PIECE_RISE_M: f32 = 2.0;
+const MAX_PIECE_RISE_M: f32 = 3.0;
 
-/// Emit a boundary line `a → b` as ground-following boxes (≤ 48 m, ≤ 2 m of ground rise
+/// Emit a boundary line `a → b` as ground-following boxes (≤ 80 m, ≤ 3 m of ground rise
 /// each), leaving openings of half width `gap_m` around each point of `gaps` near the line;
 /// pieces whose (end-trimmed) footprint is within 0.35 m of a `blocked` cell are skipped.
 /// Returns the number of pieces placed.

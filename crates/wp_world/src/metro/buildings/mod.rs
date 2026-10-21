@@ -33,6 +33,10 @@ use super::ground::{bounds, Earthwork, Natural};
 use super::plan::Plan;
 use crate::geom::V2;
 
+/// Feature budget of this module: lot lines behind street-wall lots are left out beyond it
+/// (everything else is always placed).
+pub const FEATURE_BUDGET: usize = 18_000;
+
 /// RNG salt of this module.
 pub const SALT: u64 = 0xB1;
 
@@ -105,6 +109,7 @@ fn specials() -> Vec<(lots::Lot, &'static str, V2, bool)> {
 /// Place this module's content.
 pub fn generate(ctx: &mut Ctx) {
     let mut rng = ctx.rng(SALT);
+    let n0 = ctx.features.len();
     landmarks::generate(ctx, &mut rng);
     let mut claims = lots::Claims::new();
     let mut deferred = Vec::new();
@@ -121,7 +126,8 @@ pub fn generate(ctx: &mut Ctx) {
         ..Default::default()
     };
     lots::walk(ctx, &mut rng, &mut claims, &mut st, &mut deferred);
-    lots::emit_deferred(ctx, &claims, &deferred);
+    let used = ctx.features.len() - n0;
+    lots::emit_deferred(ctx, &claims, &deferred, FEATURE_BUDGET.saturating_sub(used));
 }
 
 #[cfg(test)]
