@@ -642,7 +642,11 @@ loop, the substep tyre selection and the probe width. Its bar scales multiply on
 
 ## Contract change requests
 
-None.
+- **`WheelState::rim_contact: bool`** (playtest row 132). A fully flat tyre in ground
+  contact runs on its rim (`wp_vehicle::vehicle::Vehicle::rim_contact`, puncture ≥ 0.9).
+  Until it is in the contract, the browser reads it from the `tire_rim_contact()` wasm
+  export (4 floats per vehicle, the `tire_punctures()` order). Snapshots and netcode clients
+  can derive it from the puncture plus wheel contact in the meantime.
 
 ## Golden bless after the W re-merge (93b9a13d)
 
@@ -1266,3 +1270,34 @@ Web e2e:
   draw calls) are also red on lead/round12. The crash_fx smoke check failed only inside the
   combined run and passes 14 / 14 standalone, twice.
 - round12's own `run.mjs` additionally fails two replay verifications that pass here.
+
+## Spike ride drop: punctured tyres sit lower and run on the rim (playtest row 132)
+
+- A tyre at deflation `p` (spikes or crash damage, the worse of the two) has its rolling
+  radius **and** its suspension ground probe shrunk to `radius × (1 − 0.3 p)`
+  (`FLAT_DROP_FRAC`), so its corner of the body sits lower.
+- At `p ≥ 0.9` (`RIM_FROM`) the wheel is on its rim:
+  - grip × 0.35 (`RIM_GRIP`); below that, grip is × (1 − 0.5 p), as before;
+  - rolling resistance × (1 + 4 p);
+  - `Vehicle::rim_contact()` is true while the wheel touches the ground, for the audio and
+    the renderer (the `tire_rim_contact()` wasm export, `sim.tireRimContact()` in TS).
+- Physics, so it is the same in both damage modes.
+- **Ramp:** the vehicle adds no ramp of its own. `wp_police` already deflates over
+  `deflate_s = 5.0` s (`data/police/tools.toml`, linear). To get the 0.5–1.5 s in the row,
+  change that data value (police owner's call). The ride follows `p` directly.
+- **Tests:** `crates/wp_vehicle/tests/puncture.rs`.
+  - Static corner drop at full flat, per car (FL / RR). Tyre radius loss in brackets:
+    - debug_sedan: 70.9 / 71.3 mm (97.5)
+    - hakone_gt: 77.6 / 63.7 mm (93.6 / 92.4)
+    - rampart_50: 82.2 / 71.7 mm (99.9 / 102.3)
+    - vireo_xs: 57.1 / 73.8 mm (86.7)
+  - Before this change the drop was 0 mm on every corner: the probe used the full radius.
+  - The corner drops 65–85 % of the radius loss because the body pivots on the other three
+    wheels. Half deflation gives about half the drop.
+  - Driving straight at 20 m/s with 0.4 throttle and no steering, over 4 s:
+    - FL flat pulls 1.67° left;
+    - FR flat pulls 1.91° right;
+    - the healthy car drifts −0.18°;
+    - the car keeps 21.0 of 22.2 m/s and does not spin.
+- **[bless]:** spike_strip and panels_frontal_56_hood (crash punctures) moved with this
+  change. Others were also re-blessed in the same pass; see the commit.
