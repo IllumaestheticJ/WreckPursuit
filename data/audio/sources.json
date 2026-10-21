@@ -763,5 +763,27 @@
   "title": "Radio Noise 1",
   "author": "Kresiek The Furry",
   "licence": "CC0 1.0"
+ },
+ {
+  "file": "packs/world_rec/tire_burst_1.ogg",
+  "source": "balloon",
+  "original": "balloon_pop.flac",
+  "processing": "mono, pop at ×0.55 + ×0.275 (−4.4 dB) for body, + steam_hiss.ogg tail (bart, CC0) as the air rush, peak −1 dBFS",
+  "seconds": 0.9,
+  "page": "https://opengameart.org/content/balloon-sounds",
+  "title": "Balloon Sounds",
+  "author": "AntumDeluge",
+  "licence": "CC0 1.0"
+ },
+ {
+  "file": "packs/world_rec/tire_burst_2.ogg",
+  "source": "balloon",
+  "original": "balloon_pop.flac",
+  "processing": "mono, pop at ×0.65 + ×0.325 (−4.4 dB) for body, + steam_hiss.ogg tail (bart, CC0) as the air rush, peak −1 dBFS",
+  "seconds": 0.9,
+  "page": "https://opengameart.org/content/balloon-sounds",
+  "title": "Balloon Sounds",
+  "author": "AntumDeluge",
+  "licence": "CC0 1.0"
  }
 ]

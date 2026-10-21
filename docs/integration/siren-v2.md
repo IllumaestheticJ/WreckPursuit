@@ -205,3 +205,32 @@ V8 / six recording set.
 
 **A/B in game:** audio panel → sounds `recorded` / `procedural` (procedural = every car on its
 procedural twin, i.e. what police now play).
+
+## Follow-up: spike hits heard (playtest row 132)
+
+Lead: "an audible cue when spikes hit the target" — `SpikeHit` played only the procedural
+`tire/burst` (160 Hz, 0.25 s), lost among other thumps.
+
+- **Blow-out pop, recorded (CC0):** `world_rec` `tire/burst` = `tire_burst_{1,2}.ogg`, built by
+  `tools/audio_packs/build_tyre.py` from AntumDeluge's "Balloon Sounds" balloon pop
+  (opengameart, CC0): pitched down ×0.55 / ×0.65 with an octave-lower layer for body, plus a
+  0.5 s air rush from the pack's own steam hiss (bart, CC0); peak −1 dBFS, 0.9 s, 12 KB each.
+  One per punctured wheel, `Critical` (never culled), gain `flat_tyre.pop_gain` 1.6.
+  (Wikimedia Commons and freesound are not reachable from the sandbox; opengameart had no tyre
+  blow-out recording.)
+- **Flap loop:** each wheel ≥ 0.25 deflated plays `tire/flat_flap` (new synth `flap`,
+  `apps/testbed-web/src/audio/flat_tyre.ts`): a pulse-train envelope at the wheel's revolution
+  rate gating a band-passed rubber slap and a 72 Hz thump, so the rate follows wheel speed
+  without re-pitching and turns into a thrum at speed. Looser tyre = duller slap.
+- **Rim grind:** ≥ 0.9 deflated (until `wp_vehicle`'s rim-contact flag lands) plays the
+  recorded `scrape/metal` loop per wheel, pitched and levelled by wheel speed.
+- **Radio:** one of three scanner lines ("Spikes hit! Suspect's tyres are out." …) per spike hit,
+  through the existing scanner queue (Pursuit priority).
+- **Deflation source:** the bridge (`wp_wasm/src/audio.rs`) passes damage deflation max spike
+  deflation per wheel, exactly as the sim combines them for handling; reinflating (repair)
+  stops the loops.
+- **Tests:** `crates/wp_audio/src/flat_tyre.rs` (rates, thresholds, slots),
+  `crates/wp_audio/tests/flat_tyre.rs` (pop per wheel from `world_rec`, `Critical`, loud; radio
+  line; flap at the wheel's rev rate; rim only when flat; loops stop on repair),
+  `apps/testbed-web/e2e/spikes.mjs` (flap slap rate = 3 / 9 rev/s measured from the render;
+  recorded pops decode, loud bang over a quieter air rush).

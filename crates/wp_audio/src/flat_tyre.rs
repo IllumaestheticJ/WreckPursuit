@@ -101,7 +101,7 @@ pub fn wheels(
             d,
         ));
         let rim = (d >= cfg.rim_deflation)
-            .then(|| (cfg.rim_gain * (0.25 + 0.75 * speed), 0.7 + 0.6 * speed));
+            .then_some((cfg.rim_gain * (0.25 + 0.75 * speed), 0.7 + 0.6 * speed));
         out.push(WheelFlat {
             wheel: i,
             flap,
@@ -114,7 +114,7 @@ pub fn wheels(
 /// Scanner lines for a spike hit (picked by the hit count, deterministic).
 pub const RADIO_LINES: [&str; 3] = [
     "Spikes hit! Suspect's tyres are out.",
-    "Good hit on the strip, he's running on rims.",
+    "Good hit on the spikes, he's running on rims.",
     "Spikes got him, tyres are going flat.",
 ];
 

@@ -96,6 +96,8 @@ c["horn/truck"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0
 c["horn/police"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
 c["drivetrain/shift"] = samples(H, "shift_", H, False, 0.7)
 c["ambient/city_night"] = samples(H, "city_night", H, True, 1.0)
+# Tyre blow-out (playtest row 132, build_tyre.py): recorded balloon pop pitched down + air rush.
+c["tire/burst"] = samples(H, "tire_burst_", H, False, 1.0)
 w["cues"] = dict(sorted(c.items()))
 save(w)
 
