@@ -8,14 +8,18 @@
 //! piers. Highways are paved from their road surfaces (lanes plus shoulders) with ramp taper
 //! connectors through freeway merges and diverges, and a concrete (Jersey-profile) median
 //! barrier between divided carriageways. Painted markings are not in the greybox: the
-//! testbed draws them from `wp_world::markings::marking_mesh` at run time. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
+//! testbed draws them from `wp_world::markings::marking_mesh` at run time. Prism features
+//! (road format v4) are extruded into one `feature_<material>` primitive per material
+//! ([`feature_prims`], colours from [`material_rgba`]); box and cylinder features are drawn
+//! instanced by the testbed instead. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
 //! rotation, so triangle winding is preserved). Units are metres. Primitives with more than
 //! 65 535 vertices are split so every index buffer is 16-bit.
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
-use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
+use wp_world::network::{DistrictKind, FeatureShape, Lane, LaneKind, RoadNetwork};
+pub use wp_world::palette::{material_name, material_rgba, MATERIALS};
 use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
 use wp_world::terrain::Heightfield;
 
@@ -708,8 +712,34 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         water, taper, barrier,
     ];
     out.extend(ground);
+    out.extend(feature_prims(net));
     out.retain(|p| !p.indices.is_empty());
     out
+}
+
+/// Prism features (solid or not), extruded, one primitive `feature_<material>` per
+/// [`wp_world::network::Material`] in material order, coloured by [`material_rgba`]. Box and
+/// cylinder features are not in the greybox: the testbed draws them instanced from
+/// `wp_wasm::city_features`.
+pub fn feature_prims(net: &RoadNetwork) -> Vec<Prim> {
+    let mut prims: Vec<Prim> = MATERIALS
+        .iter()
+        .map(|m| Prim::new(&format!("feature_{}", material_name(*m)), material_rgba(*m)))
+        .collect();
+    for f in &net.features {
+        if let FeatureShape::Prism {
+            footprint,
+            base_z,
+            top_z,
+        } = &f.shape
+        {
+            if footprint.len() >= 3 && top_z > base_z {
+                prims[f.material as usize].prism(footprint, *base_z, *top_z);
+            }
+        }
+    }
+    prims.retain(|p| !p.indices.is_empty());
+    prims
 }
 
 /// Split a primitive into pieces of at most 65 535 vertices (16-bit indices), keeping
@@ -894,6 +924,54 @@ mod tests {
             })
             .sum();
         assert!((area - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn prism_features_get_one_primitive_per_material() {
+        use wp_world::network::{Feature, FeatureKind, Material};
+        let mut net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig {
+            nx: 4,
+            ny: 4,
+            ..Default::default()
+        });
+        let before = build_greybox(&CityMap::new(net.clone())).len();
+        let prism = |material, x: f32| Feature {
+            kind: FeatureKind::Hangar,
+            material,
+            shape: FeatureShape::Prism {
+                footprint: vec![[x, 0.0], [x + 10.0, 0.0], [x + 10.0, 8.0], [x, 8.0]],
+                base_z: 0.0,
+                top_z: 6.0,
+            },
+            solid: x > 0.0,
+        };
+        net.features = vec![
+            prism(Material::Steel, 0.0),
+            prism(Material::Steel, 20.0),
+            prism(Material::Red, 40.0),
+            // Boxes are not in the greybox.
+            wp_world::metro::ctx::box_on(
+                FeatureKind::Container,
+                Material::Blue,
+                [0.0, 50.0],
+                0.0,
+                [2.4, 6.0, 2.6],
+                0.0,
+                true,
+            ),
+        ];
+        let prims = build_greybox(&CityMap::new(net));
+        assert_eq!(prims.len(), before + 2);
+        let steel = prims
+            .iter()
+            .find(|p| p.material == "feature_steel")
+            .unwrap();
+        // Two boxes: 8 corners each, 4 walls (2 triangles) + roof (2 triangles).
+        assert_eq!(steel.positions.len(), 16);
+        assert_eq!(steel.indices.len(), 2 * (4 * 6 + 6));
+        assert_eq!(steel.color, material_rgba(Material::Steel));
+        assert!(prims.iter().any(|p| p.material == "feature_red"));
+        assert!(!prims.iter().any(|p| p.material == "feature_blue"));
     }
 
     #[test]
