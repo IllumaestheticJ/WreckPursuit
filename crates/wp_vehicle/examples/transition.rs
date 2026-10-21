@@ -17,7 +17,8 @@
 //!   the remaining time in 10–50°;
 //! - `spun`: |b| ≥ 90° or travelling backwards.
 //!
-//! Configurations: `W defaults` (plain steering, lab ride, spin model tyres), `balance new`
+//! Configurations (ride: the panel default `RideTune::firm()`, step 20; the slow-weight
+//! config keeps its own): `W defaults` (plain steering, spin model tyres), `balance new`
 //! (+ `GripBalance::lab_default()`), `slow weight` (`RideTune::slow_weight()` +
 //! `GripBalance::for_slow_weight()`), each with the plain steering and with the VR steering
 //! of the "drift: spin + VR (test)" preset. Env overrides on top of every configuration
@@ -295,10 +296,10 @@ fn configs() -> Vec<Config> {
     let vr = CarTune::spin_vr_plain();
     let p = PlainSteer::default();
     let base = [
-        ("W defaults", RideTune::lab_default(), None),
+        ("W defaults", RideTune::firm(), None),
         (
             "balance new",
-            RideTune::lab_default(),
+            RideTune::firm(),
             Some(GripBalance::lab_default()),
         ),
         (
@@ -319,11 +320,21 @@ fn configs() -> Vec<Config> {
             });
         }
     }
+    // Grip-balance's default "balance: grip" (`GripBalance::grip()`), both steerings.
+    for (steer_name, steer) in [("plain", p), ("VR", vr)] {
+        let full: &'static str = Box::leak(format!("balance grip · {steer_name}").into_boxed_str());
+        v.push(Config {
+            name: full,
+            plain: steer,
+            ride: RideTune::firm(),
+            grip: Some(GripBalance::grip()),
+        });
+    }
     // Grip-balance's "drift: best (test)" preset: VR steering + `GripBalance::drift_best()`.
     v.push(Config {
         name: "drift best · VR",
         plain: vr,
-        ride: RideTune::lab_default(),
+        ride: RideTune::firm(),
         grip: Some(GripBalance::drift_best()),
     });
     if let Ok(o) = std::env::var("ONLY") {
@@ -422,6 +433,92 @@ fn trace_hold(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// Lift-off in a normal corner (owner: "no side grip and step out, even when steering and
+/// lifting off"): must **not** step out. At 40 / 60 / 80 mph: (a) lift at turn-in — the left
+/// key + throttle 0 from straight cruise, 1.5 s; (b) lift mid-corner — key held 3 s at cruise,
+/// then throttle 0 for 1.5 s. Returns the number of runs whose body slip passes 8° (or that
+/// spin), out of 6, and the worst peak body slip.
+fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
+    use wp_vehicle::rig::Rig;
+    let a = reference_assists();
+    let hold = |rig: &Rig, v: f32| {
+        let err = v - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    let rolling = |v: f32| {
+        let mut rig = Rig::new(c);
+        rig.teleport([0.0; 3], 0.0, v, 0.0);
+        let auto = wp_contracts::AssistProfile {
+            auto_gears: true,
+            ..a
+        };
+        for _ in 0..TPS {
+            let (throttle, brake) = hold(&rig, v);
+            rig.step(
+                &VehicleInput {
+                    throttle,
+                    brake,
+                    ..Default::default()
+                },
+                &auto,
+            );
+        }
+        rig
+    };
+    let (mut fails, mut worst) = (0usize, 0.0f32);
+    for mph in [40.0f32, 60.0, 80.0] {
+        let v = mph * 0.44704;
+        for mid in [false, true] {
+            let mut rig = rolling(v);
+            let lift_at = if mid { 3 * TPS } else { 0 };
+            let mut peak = 0.0f32;
+            let mut spun = false;
+            for tick in 0..lift_at + 3 * TPS / 2 {
+                let (throttle, brake) = if tick >= lift_at {
+                    (0.0, 0.0)
+                } else {
+                    hold(&rig, v)
+                };
+                rig.step(
+                    &VehicleInput {
+                        steer: -1.0,
+                        throttle,
+                        brake,
+                        ..Default::default()
+                    },
+                    &a,
+                );
+                let st = slide_state(&rig);
+                if tick >= lift_at {
+                    peak = peak.max(-st.body_slip.to_degrees());
+                    spun |= st.v_fwd < 0.0;
+                }
+            }
+            worst = worst.max(peak);
+            if std::env::var("LIFTV").is_ok() {
+                eprintln!(
+                    "  {} {mph} mph {}: peak body slip {peak:.1}°{}",
+                    c.def.id,
+                    if mid {
+                        "mid-corner lift"
+                    } else {
+                        "lift at turn-in"
+                    },
+                    if spun { " SPUN" } else { "" }
+                );
+            }
+            if peak > 8.0 || spun {
+                fails += 1;
+            }
+        }
+    }
+    (fails, worst)
+}
+
 /// One v2 candidate's score under one configuration.
 #[derive(Debug, Clone, Copy, Default)]
 struct V2Score {
@@ -430,6 +527,12 @@ struct V2Score {
     flicks: usize,
     spun: usize,
     back: usize,
+    /// Held-set cases that swung through to the other side (W's over-catch) / spun.
+    hold_swapped: usize,
+    hold_spun: usize,
+    /// Lift-off in a normal corner that stepped out (fail case), of 6 per car; worst slip °.
+    lift_fails: usize,
+    lift_worst: f32,
 }
 
 /// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
@@ -440,14 +543,24 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
     let a = reference_assists();
     let mut sc = V2Score::default();
     for (_, c) in cars {
+        let (lf, lw) = lift_corner_fails(c);
+        sc.lift_fails += lf;
+        sc.lift_worst = sc.lift_worst.max(lw);
         for e in [6.0f32, 12.0, 20.0] {
             for g in [0.3f32, 0.5, 0.7] {
                 let d = PlainDriver::HoldCounter {
                     entry_deg: e,
                     throttle: 1.0,
                 };
-                if plain_hold(c, &a, d, 40.0, g).held {
+                let m = plain_hold(c, &a, d, 40.0, g);
+                if m.held {
                     sc.held += 1;
+                }
+                if m.side_swaps > 0 {
+                    sc.hold_swapped += 1;
+                }
+                if m.spun {
+                    sc.hold_spun += 1;
                 }
             }
         }
@@ -528,6 +641,24 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                 ..base
             }
         };
+        // V2EXTRA=1: also the drift lock, the front deep-slip falloff and the rear peak slip.
+        let t = if std::env::var("V2EXTRA").is_ok() && i > 0 {
+            let mut pick = |cur: f32, lo: f32, hi: f32| {
+                let r = rng.range(lo, hi);
+                (cur + (r - cur) * spread.max(0.6)).clamp(lo, hi)
+            };
+            CarTune {
+                drift_lock_extra: pick(t.drift_lock_extra, -0.6, 0.6),
+                drift_lock_from_deg: pick(t.drift_lock_from_deg, 10.0, 35.0),
+                front_deep_falloff: pick(t.front_deep_falloff, 0.0, 0.3),
+                front_deep_from_deg: pick(t.front_deep_from_deg, 8.0, 25.0),
+                front_deep_full_deg: pick(t.front_deep_full_deg, 30.0, 60.0),
+                rear_peak_slip: pick(t.rear_peak_slip, 0.7, 1.6),
+                ..t
+            }
+        } else {
+            t
+        };
         for cfg in &cfgs {
             apply(cfg);
             car_lab::set_override(Some(t));
@@ -549,6 +680,17 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                 };
                 plain::set_override(Some(p));
                 Some(p)
+            } else if std::env::var("V2STEER").is_ok() && i > 0 {
+                // Plain steering: the swing rack (off at 1).
+                let b = plain::active().unwrap();
+                let on = rng.f() < 0.5;
+                let p = PlainSteer {
+                    swing_rate: if on { rng.range(1.0, 3.0) } else { 1.0 },
+                    swing_yaw_dps: rng.range(60.0, 120.0),
+                    ..b
+                };
+                plain::set_override(Some(p));
+                Some(p)
             } else {
                 None
             };
@@ -558,6 +700,8 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                 serde_json::json!({
                     "config": cfg.name, "held": sc.held, "caught": sc.caught,
                     "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
+                    "hold_swapped": sc.hold_swapped, "hold_spun": sc.hold_spun,
+                    "lift_fails": sc.lift_fails, "lift_worst": sc.lift_worst,
                     "steer": steer,
                 })
             );

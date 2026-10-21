@@ -126,6 +126,22 @@ impl RideTune {
         }
     }
 
+    /// "Firm" (owner, step 18: "when I turned springs and bars up it feels better under grip
+    /// cornering … even better at 1.5 and 1.5"; grip-balance step 20): W's medium weight with
+    /// springs and anti-roll bars × 1.5 and dampers × 1.5 on top of its 1.6 / 2.1 (bump 2.4,
+    /// rebound 3.2), so the weight transfer stays slow through the dampers and roll inertia
+    /// (roll rise ~0.4 s) instead of soft bars. The soft bars (× 0.15) let a lift while
+    /// steering step the rear out (docs/integration/grip-balance.md, "Lift-off").
+    pub fn firm() -> Self {
+        Self {
+            spring: 1.5,
+            arb: 1.5,
+            damper_bump: 2.4,
+            damper_rebound: 3.2,
+            ..Self::medium_weight()
+        }
+    }
+
     /// `def` scaled ([`RideTune::scaled`]) for a corner carrying `corner_load_n` at rest:
     /// travel × [`RideTune::travel`] and, with [`RideTune::keep_ride_height`], the preload
     /// raised so the static compression stays as in the data.

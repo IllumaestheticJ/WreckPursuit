@@ -135,6 +135,102 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Robust swing-rack trigger (lead) — and what it showed
+
+New default-off knobs: `PlainSteer::swing_arm_s` (the swing rack acts only within this time
+of a throttle lift **in a slide**, |body slip| > 10°) and `swing_arm_on_reversal` (also on a key
+reversal); the vehicle keeps the two timers (`since_lift_s`, `since_reversal_s`, plain steering
+only). A lift counts only mid-slide: the held-set cases approach at part throttle, which
+otherwise armed the rack through the entry.
+
+Yaw-threshold sweep, v2 tyres on step 20 · plain, swing × 2.08 (cells: held / 27 · lift flicks
+caught / 18 · lift-off fails / 18):
+
+| arming \ threshold °/s | 60 | 70 | 78 | 82 | 86 | 90 | 100 | 120 |
+|---|---|---|---|---|---|---|---|---|
+| none (the shipped preset) | 12 · 0 · 0 | 12 · 0 · 0 | 20 · 6 · 0 | 20 · 16 · 0 | **25 · 13 · 0** | 25 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 |
+| key reversal 0.5 s | same as none (a held-set entry *is* a key reversal) |
+| **lift in a slide, 0.5–2 s, × 2.08 / × 2.5** | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 |
+
+The knife edge is gone for the hold (26 / 27 at every threshold), but lift-armed results equal
+**no swing rack at all** (held 26, caught 9). Per case: the always-armed rack's 13 vs 9 came from
+the **hold before the flick** (old-side slide 39° instead of 43° when the flick starts), not
+from the catch, and every crossing takes **≈ 3.0 s** from the flick to 10° on the new side —
+a slow drift across, not the reference's 0.5–0.8 s swing. So the remaining transition problem
+is the swing itself (the rear regains too little grip on a 0.15–0.4 s lift), which the steering
+cannot fix; the v2 "caught" count should be read together with the swing time.
+
+### Spin model v2 re-tuned on the step-20 default (lead go-ahead, 2026-10-21)
+
+Harness aligned with the panel default (all `examples/transition.rs` configs now ride on
+`RideTune::firm()`, the step-20 default; slow weight keeps its own). That was the 9.0–9.3° vs
+7° lift-off difference: my configs still had `RideTune::lab_default()` (bars × 0.25). With the
+firm ride my lift-off check reads 0 / 18 step-outs, worst 7.0°, same as grip-balance's.
+
+`v2search` (648 runs, step 20 · plain first, step 20 · VR second; plain candidates may also
+vary the swing rack). **New v2** = `CarTune::spin_v2_candidate()` (ellipse 0.70, drive floor
+0.35, b0 7.15, b2 1.41, c 0.78, p 5, rear relax 0.73) + `CarTune::spin_v2_plain()` (plain
+steering, swing rack × 2.08 from 86°/s). The W button now keeps the selected balance and ride.
+
+| step 20 (balance new, firm ride) | v1 · plain | **v2 · plain (preset)** | target |
+|---|---|---|---|
+| held-drift set (27) | 26 (1 swap) | **25** (1 swap) | ≥ 24 ✓ |
+| owner's lift flick caught, reference gaps (18) | 0 | **13** (72 %), 0 spins, 0 swing-backs | ≥ 11 ✓ |
+| lift-off in a normal corner, > 8° (18) | 0 (worst 7.0°) | **0** (worst 7.0°) | 0 ✓ |
+| straight launches (6) | 6 (worst 2.9°) | 6 (worst 2.0°) | as before ✓ |
+| grip max Δ vs data tyres (lane change) | 6.3 % | 7.1 % | |
+| keys released (6, tyre_slip's lab ride) | 2 slow spins | 3 slow spins | kept ✓ |
+
+**Caveat — the swing rack's yaw threshold is a knife edge.** Rate is forgiving (× 1.7: 25 / 12,
+× 2.4: 22 / 18), but the threshold is not: 82°/s → held 20, 90°/s → caught 9, 70°/s → held 12.
+A held-drift entry rotates almost as fast as a swing, so a yaw-rate trigger can barely tell
+them apart. A sturdier trigger (e.g. only after a throttle lift or a key reversal within the
+last ~0.5 s) is the proposed next step. Without the swing rack: held 26, caught 9.
+
+The VR column's best: held 20, caught 12 (no candidate reached 24 held with VR).
+
+### v2 status (paused, lead 2026-10-21)
+
+v2 stays the self-contained "drift best" A/B preset (its button sets `GripBalance::drift_best()`).
+Re-tuning is paused until grip-balance's combined build lands (stiffer ride ~1.5 / 1.5 bars,
+lift-off fix, W's catch, held-key fix); then re-run `transition v2search` against that default.
+State at pause (VR steering; held / lift flicks at the reference gaps / lift-off step-outs):
+
+| balance | v1 | v2 |
+|---|---|---|
+| step 14 (with the held-key slide lock) | 14/27 (0 swaps) · 0/18 · 11/18 | 0/27 (11 swaps) · 0/18 · 11/18 |
+| drift best | 25/27 · 0/18 · 7/18 | 7/27 · 12/18 · 7/18 |
+| no balance (W defaults · plain) | 3/27 · 0/18 · 0/18 | 0/27 · 0/18 · 0/18 |
+
+Lift-off step-outs come from the balances' softer rear (same with v1 / v2, plain / VR); worst
+is the lift at turn-in (step 14: rwd_b 16–19°, rwd_d / a 9–13°). Search on step 14 · VR before
+the slide lock: best 12/27 · 6/18 or 1/27 · 8/18. Tools: `transition v2search` (V2BASE,
+V2SPREAD, V2STEER, V2EXTRA, V2CONFIGS; JSON lines incl. `hold_swapped`, `lift_fails`),
+`transition holds`, `LIFTV=1` per-case lift-off.
+
+### Spin model v2 (ellipse) — lead's go-ahead, A/B preset next to v1
+
+`CarTune::spin_v2_candidate()` (+ `CarTune::spin_v2_plain()` steering, with
+`GripBalance::drift_best()`): the spin model with the friction ellipse at 0.68 so a lift frees
+side grip. Found with `examples/transition.rs v2search` (≈ 1 300 candidates: 960 wide over
+ellipse / drive floor / b0 / b2 / c / p / rear relax × W·plain, W·VR, drift best·VR; then
+refines with the VR steering and drift lock / front falloff / rear peak slip). W panel button
+"spin model v2 (ellipse)" (grip-balance row) sets tyres + steering + drift best; e2e checks it.
+
+| measure (drift best · VR unless noted) | v1 spin model | **v2 ellipse** | target |
+|---|---|---|---|
+| owner's lift flick caught, reference gaps 0.05 / 0.15 s (18) | 0 | **12 (67 %)**, 0 spins, 0 swing-backs | ≥ 60 % ✓ |
+| owner's lift flick, all gaps incl. 0.3 s, of flicks from a held drift | 0 | 18 / 18 | |
+| held-drift set (counter key at 6 / 12 / 20° × 0.3–0.7 g × rwd_d / a / b) | 18 / 27 | **7 / 27** | ≥ 15 ✗ |
+| keys released mid-drift (6 cases) | 6 hold | 1 slow spin (reference), 3 hold | kept / better |
+| straight launches (6) | 5 / 6 | 5 / 6 | unchanged ✓ |
+| grip max Δ vs the data tyres (lane change) | 16.3 % | 13.0 % | unchanged ✓ |
+
+**The held-drift target is not met.** The trade-off held in every search: the best candidates are
+7 held / 12 caught or 10 held / 6 caught; the swing rack lifts holds to 11 but then no flick
+swings. With the ellipse a full-throttle hold has less side grip at the rear, so the deep
+entries (20°) and rwd_b's spin or swap in the first 2 s. v1 stays the default.
+
 ### Re-tune after the round12 / grip-balance merge (93b9a13d)
 
 The probe tilt fix (on by default) moved the knife-edge clip-1 hold into a spin

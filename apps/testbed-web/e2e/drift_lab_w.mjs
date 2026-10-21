@@ -49,10 +49,10 @@ check(!sc.traffic_cars && !sc.police_cars, "no traffic, no police");
 const plain = await page.evaluate(() => window.__wp.sim.plainSteer());
 check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return_s - 0.33) < 1e-6, `plain steering on ${JSON.stringify(plain)}`);
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
-check(ride && Math.abs(ride.arb - 0.15) < 1e-6 && Math.abs(ride.spring - 0.7) < 1e-6, `ride default = medium weight (step 10) ${JSON.stringify(ride)}`);
+check(ride && Math.abs(ride.arb - 1.5) < 1e-6 && Math.abs(ride.spring - 1.5) < 1e-6 && Math.abs(ride.damper_rebound - 3.2) < 1e-6, `ride default = firm (step 20) ${JSON.stringify(ride)}`);
 {
   const g0 = await page.evaluate(() => window.__wp.sim.gripBalance());
-  check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_mu - 0.96) < 1e-6, `grip balance default = grip ${JSON.stringify(g0)}`);
+  check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_stiffness - 0.9) < 1e-6 && Math.abs(g0.rear_lat_c - 1.2) < 1e-6, `grip balance default = new (step 20) ${JSON.stringify(g0)}`);
 }
 check(Math.abs(plain.counter_margin_deg - 0.25) < 1e-6, `countersteer limit 0.25° by default (${plain.counter_margin_deg})`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
@@ -66,12 +66,15 @@ const cand = await page.evaluate(() => window.__wp.sim.carTune());
 check(Math.abs(cand.lat_under_spin - 0.15) < 1e-6 && Math.abs(cand.yaw_damping - 0.2) < 1e-6, `spin grip + damper ${JSON.stringify(cand)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().yaw_damping)) === 0, "car data restores");
-await page.locator("#drift-lab-w button", { hasText: "spin model" }).click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "spin model", exact: true }).click();
 const spin = await page.evaluate(() => window.__wp.sim.carTune());
 check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_fx_slide - 0.958) < 1e-4, `spin model preset ${JSON.stringify(spin)}`);
 await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
 const sl = await page.evaluate(() => window.__wp.sim.carTune());
 check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
+await page.locator("#drift-lab-w button", { hasText: "spin model v2 (ellipse)" }).click();
+const v2 = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
+check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.7) < 1e-6 && Math.abs(v2.plain.swing_rate - 2.08) < 1e-6, `spin model v2 preset ${JSON.stringify(v2)}`);
 await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
 await page.waitForTimeout(300);
 const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
@@ -95,16 +98,22 @@ const abText = async () => (await page.locator("#drift-w-balance-ab").innerText(
 // The transition preset above left balance step 14: A/B goes back to new.
 check((await abText()) === "balance: step 14", `after the transition preset: "${await abText()}"`);
 await page.locator("#drift-w-balance-ab").click();
-check((await abText()) === "balance: grip (new)", `A/B button reads "${await abText()}" (balance: grip (new))`);
+check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
-check(Math.abs(gNew.rear_stiffness - 0.8) < 1e-6 && Math.abs(gNew.rear_mu - 0.96) < 1e-6 && Math.abs(gNew.rear_lat_c - 1.0) < 1e-6 && gNew.tyres_rwd_only === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new = balance: grip (RWD tyres near the data, rear μ 0.96, flatter past the peak, rear downforce) ${JSON.stringify(gNew)}`);
-await page.locator("#drift-lab-w button", { hasText: "step 14 (old new)" }).click();
+check(Math.abs(gNew.rear_stiffness - 0.9) < 1e-6 && Math.abs(gNew.rear_lat_c - 1.2) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: RWD rear near the data, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+await page.locator("#drift-lab-w button", { hasText: "balance: step 14" }).click();
 check((await abText()) === "balance: step 14" && Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) - 0.45) < 1e-6, `step 14 preset: "${await abText()}"`);
+await page.locator("#drift-w-balance-ab").click();
+await page.locator("#drift-w-balance-grip").click();
+{
+  const gg = await page.evaluate(() => window.__wp.sim.gripBalance());
+  check((await abText()) === "balance: grip (test)" && Math.abs(gg.rear_stiffness - 0.8) < 1e-6 && Math.abs(gg.rear_mu - 0.96) < 1e-6 && Math.abs(gg.rear_lat_c - 1.0) < 1e-6, `grip (test) preset: "${await abText()}" ${JSON.stringify(gg)}`);
+}
 await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
 await page.locator("#drift-w-drift-best").click();
@@ -127,7 +136,7 @@ await page.evaluate(() => {
 });
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
 await page.locator("#drift-w-balance-ab").click(); // custom → new
-check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.96) < 1e-6 && (await abText()) === "balance: grip (new)", "A/B restores the new balance (grip)");
+check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
@@ -161,7 +170,7 @@ check(await page.locator("#drift-lab-w-keep-height").isChecked(), "keep ride hei
 await page.locator("#drift-lab-w button", { hasText: "lab default" }).click();
 await page.waitForTimeout(1500);
 check(Math.abs((await page.evaluate(() => window.__wp.sim.rideTune().arb)) - 0.25) < 1e-6, "lab default ride (before) set");
-// Step 10 A/B: "before" (no countersteer limit, lab ride) vs "new" (limit 0.25°, medium weight).
+// Step 10 A/B: "before" (no countersteer limit, lab ride) vs "new" (limit 0.25°, the firm ride since step 20).
 await page.locator("#drift-lab-w-before").click();
 await page.waitForTimeout(1500);
 {
@@ -172,7 +181,7 @@ await page.locator("#drift-lab-w-new").click();
 await page.waitForTimeout(1500);
 {
   const n = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
-  check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 0.7) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, medium weight (${n})`);
+  check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 1.5) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, firm ride (${n})`);
 }
 // Step 11 catch A/B (owner: catch over-rotations): default new, "before" turns the directional
 // limit / extra lock / fast rack off.
@@ -293,7 +302,7 @@ await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car =
 await page.waitForTimeout(1500);
 const ld = await launch();
 console.log(`INFO  launch on the tyre data (owner's bug): yaw ${ld.maxYaw.toFixed(1)}° at ${ld.kmh.toFixed(0)} km/h`);
-await page.locator("#drift-lab-w button", { hasText: "spin model" }).first().click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "spin model", exact: true }).first().click();
 // Every parity car starts from the selector.
 for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo", "parity_rwd_d"]) {
   await page.selectOption("#drift-lab-w select", car);

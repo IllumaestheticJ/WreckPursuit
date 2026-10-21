@@ -752,3 +752,255 @@ The step-14 set is one click away ("step 14 (old new)"); the transition preset k
 since it was measured on it. The panel's saved balance moved to a new storage key, so a saved
 step 14 does not override the new default. W's steering-lock change (directional
 countersteer limit + slide lock) is not pushed yet; merge it and re-check this table.
+
+## Feel references: shiro_turbo and rampart_50 (owner, step 18)
+
+Owner: "shiro turbo cornering feels pretty good", "rampart feels pretty good for the most part".
+Lead: use both as anchors, keep them within ~10 %, and fix the cars that don't feel right
+(debug_coupe "violent" transitions, parity_rwd_d/a, lucciola_350, the FWD cars).
+
+**Decision: the default stays step 14 ("new").** "Balance: grip" (above) moves the anchors well
+past 10 %: shiro 1.3° → 0.3° of body slip at 0.6 g, its 0.4 s tap 37.8 → 32.9 °/s (−13 %).
+Rampart's power-on goes 4.6° → 27.5°. So grip is now a test preset ("balance: grip (test)"),
+and the default adds only FWD-only knobs (below). RWD and AWD cars are bit-identical to the
+step-18 build.
+
+`grip_balance feel` measures each car (medium ride, step 14):
+- body slip vs lateral g at 60 / 100 km/h (0.5 / 0.6 / 0.7 / 0.8 g · peak g / slip);
+- 0.2 / 0.4 s taps at 60 mph (peak yaw);
+- turn-in yaw at 0.6 s with the key held at 60 mph;
+- the mid-corner lift yaw rise and the power-on slip at 35 mph;
+- the 100 km/h keyboard lane change (peak body slip);
+- a 60 mph keyboard slalom (full key alternating every 0.6 s): peak yaw acceleration, peak slip,
+  peak roll and roll rate.
+
+"Distance" is the RMS over all of these from the nearer anchor. Each term is normalised: 1° of
+slip, 10 % of yaw rate / roll, 3 °/s of lift yaw, 1.5° of lane-change slip. `cars` prints the
+data columns.
+
+| car | layout, mass, front % | Izz/m | front roll stiffness % | roll Hz / °/g (medium) | N·m/t | 60 km/h slip at 0.5/0.6/0.7/0.8 g | tap 0.2/0.4 s | lift rise | power-on | lane | slalom yaw acc / roll rate | **distance (step 18 → now)** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **shiro_turbo** | RWD 1301 kg 55 % | 1.66 | 55 | 1.30 / 5.1 | 212 | 1.0 / 1.3 / 1.8 / 2.9 | 29.4 / 37.8 | +9.6 | 3.7° | 8.4 | 4.9 / 16 | anchor |
+| **rampart_50** | RWD 1753 kg 54 % | 2.04 | 52 | 1.06 / 6.9 | 302 | 1.1 / 1.6 / 2.1 / 3.6 | 26.6 / 35.7 | +6.4 | 4.6° | 8.2 | 4.3 / 18 | anchor |
+| hakone_gt | RWD 1599 kg 53 % | 1.78 | 53 | 1.26 / 5.2 | 272 | 1.2 / 1.6 / 2.1 / 3.5 | 29.2 / 38.1 | +9.9 | 4.3° | 9.6 | 4.8 / 16 | 0.28 |
+| debug_coupe | RWD 1500 kg 52 % | 1.80 | 51 | 1.37 / 4.2 | 340 | 1.1 / 1.4 / 1.9 / 2.5 | 29.0 / 38.0 | +11.6 | 4.3° | 8.8 | 4.8 / 15 | 0.43 |
+| sperber_32 | RWD 1602 kg 51 % | 1.75 | 50 | 1.25 / 5.2 | 228 | 1.2 / 1.6 / 2.1 / 5.0 | 30.5 / 39.2 | +3.5 | 6.5° | 11.6 | 4.9 / 19 | 0.87 |
+| lucciola_350 | RWD 1344 kg 42 % | 1.35 | 38 | 1.52 / 3.4 | 270 | 1.4 / 1.8 / 2.3 / 4.8 | 33.6 / 42.9 | +15.1 | 6.9° | 13.0 | 5.4 / 19 | 1.40 |
+| parity_rwd_a | RWD 1369 kg 54 % | 2.04 | 52 | 1.06 / 6.9 | 579 | 1.0 / 1.4 / 1.8 / 3.1 | 26.1 / 35.0 | +8.4 | 71° SPUN | 7.4 | 4.3 / 18 | 1.74 |
+| parity_rwd_d | RWD 1633 kg 54 % | 2.04 | 52 | 1.06 / 6.9 | 494 | 1.1 / 1.5 / 2.0 / 3.4 | 24.9 / 33.2 | +5.8 | 68° SPUN | 7.7 | 4.3 / 17 | 1.76 |
+| vireo_xs | FWD 1108 kg 62 % | 1.56 | 54 | 1.04 / 8.0 | 137 | 0.0 / 1.0 / 1.3 (step 18) → 0.5 / 0.8 / 2.7 / 3.1 | 27.7 / 28.1 → 32.1 / 32.9 | +7.7 → +14.3 | 0.7° → 3.5° | 4.2 → 7.9 | 6.6 / 35 → 6.0 / 24 | 2.56 → **1.05** |
+| kestrel_ts | FWD 1453 kg 61 % | 1.87 | 58 | 0.99 / 8.3 | 231 | −0.4 / −0.1 / 0.1 → 0.2 / 0.3 / 0.9 / 1.4 | 26.2 / 27.2 → 29.6 / 31.3 | +3.9 → +3.2 | 0.7° → 1.2° | 2.9 → 5.6 | 6.0 / 37 → 5.6 / 28 | 3.04 → **1.65** |
+| tansy_13 | FWD 1058 kg 62 % | 1.35 | 59 | 0.80 / 13.1 | 114 | → 0.8 / 1.6 / 1.9 / 2.2 | → 33.6 / 33.9 | → +11.1 | → 1.9° | 5.2 → 10.1 | → 5.4 / 29 | 2.89 → **1.79** |
+| parity_fwd_c | FWD 982 kg 61 % | 1.87 | 58 | 0.99 / 8.3 | 182 | −0.5 / −0.5 / −0.1 → 0.0 / 0.1 / 0.3 / 1.0 | 26.2 / 27.9 → 29.6 / 31.9 | +5.0 → +6.3 | 0° → 0.9° | 2.9 → 5.5 | 6.2 / 39 → 5.8 / 30 | 3.31 → **1.92** |
+| junkyard_beater | FWD 1048 kg 60 % | 1.63 | 60 | 0.69 / 18.4 (vintage bias tyres) | 118 | → 3.0 / 3.2 / – / – | → 29.5 / 34.4 | → +15.6 | → 3.0° | 8.6 → 16.6 | → 4.3 / 20 | 1.74 → 1.97 |
+
+**Furthest from the shiro / rampart shape (step 18):** parity_fwd_c 3.3, kestrel_ts 3.0, tansy_13
+2.9, vireo_xs 2.6, parity_rwd_d / a 1.75, junkyard_beater 1.7, lucciola_350 1.4, sperber_32 0.9.
+Closest: debug_coupe 0.4, hakone_gt 0.3.
+
+**What differs, and the fixes:**
+- **FWD cars** (default knobs, new): no lift-off rotation (turn-in yaw 22 vs 35 °/s, lane-change
+  slip 3 vs 8°) and ~2× the slalom roll rate (35–39 vs 16–18 °/s; roll 8 °/g at 1.0 Hz vs the
+  anchors' 5–7 °/g). The RWD-only tyre knobs never reached them. New FWD-only lab knobs
+  (`fwd_rear_mu`, `fwd_rear_stiffness`, `fwd_rear_arb`) are in the "new" default at 0.97 / 0.7 /
+  2.0: distance 2.6–3.3 → 1.05–1.9, roll rate 37 → 24–30 °/s, turn-in 22 → 27–30 °/s. That was
+  the best worst case of a 45-set FWD sweep. Rear μ 0.95 / stiffness 0.6 / bar ×4 brings kestrel
+  and parity_fwd_c to 0.8–0.9, but junkyard_beater (21° lane change) and tansy_13 (14°) get
+  too loose, so the light FWD cars limit how far a shared knob can go. junkyard_beater is a
+  soft, low-grip beater on purpose and stays the furthest FWD car. The handbrake test at
+  40 km/h already spun vireo / tansy / junkyard at step 18; with the FWD knobs kestrel spins it
+  too (parity_fwd_c is still caught).
+- **parity_rwd_a / d**: the same chassis as rampart_50 (geometry, bars, Izz/m), with 1.6–1.9× its
+  torque per tonne. Everything matches rampart except power-on at 35 mph, which spins them
+  (68–71°). Torque × 0.6 (rampart's N·m/t) gives distance 0.26–0.50. They are the
+  reference-parity cars, so no data change is proposed. Their power-on spin is their character
+  (TCS covers it).
+- **lucciola_350**: rear-heavy (42 % front), the lowest Izz/m (1.35) and a rear-biased roll
+  stiffness (38 % front: rear springs 66.8 vs front 41.4 kN/m, no rear bar). It slides 13° in
+  the lane change and 13.5° in the slalom. **Car-data proposal for A:** rear springs × 0.65
+  (66.8 → 43.4 kN/m) and yaw inertia × 1.2 (`inertia_kgm2[2]` 1820 → 2180 kg·m²). Distance 1.40 → 0.68, lane change 13 → 10.6°, slalom yaw acc 5.4 → 4.7
+  (yaw × 1.4 gives 0.62, but a mid-engined analog should keep a low Izz).
+- **debug_coupe**: close to the anchors on every grip metric (0.43). Its outliers are roll
+  (4.5° vs 5.4–6.4°) and the bars: 26 / 14 kN/m, both 2× shiro's, with a 54 % rear bar share,
+  plus quicker steering (13 vs 15–16). Stiff bars give quick, small roll and abrupt load
+  transfer, the likeliest source of "violent" transitions. **Car-data proposal for A:** both
+  bars × 0.5 (26 → 13, 14 → 7 kN/m): distance 0.29, roll matches the anchors, lane change 8.9°.
+  The keyboard path does not use the steering ratio (the rack is road-wheel angle), so 13.0
+  only matters on a wheel / pad.
+- **sperber_32** (not on the list, 0.87): the 0.8 g slip jumps to 5.0° and the lane change is
+  11.6°. Worth a look by A.
+
+Data proposals are for machine A (car data owner); nothing in `data/` is changed here. The
+example's `ARB_F/ARB_R/SPRING_F/SPRING_R/TORQUE/YAW_INERTIA` overrides reproduce them.
+
+Lab car fixes (lead-approved for the lab, 2026-10-21): `GripBalance::car_fixes` (on in "new"
+and "grip") applies `grip_lab::car_fix`: debug_coupe bars × 0.5, lucciola_350 rear springs × 0.65
+(preload raised, ride height kept) + yaw inertia × 1.2. Measured through the lab path:
+debug_coupe 0.43 → 0.29, lucciola_350 1.40 → 0.82 (0.68 when the rear sags instead of keeping
+ride height; A can pick either when changing the data). The panel has a "per-car fixes (lab)"
+checkbox. The yaw inertia applies when the car restarts or is tagged. Still **proposals for A**:
+`data/` is not edited.
+
+## Held-key hold (owner's clip-1 technique) — over-catch fix
+
+W found that with "new", the counter key **held** + full throttle (the owner's clip-1 technique)
+swings through or spins on every parity RWD, while a key-tapping driver holds. The reference
+holds a held key. `grip_balance score` now has a "held key" column (counter key at 6°, full
+throttle, 40 m / 0.6 g entry; direction-aware, a swap fails), and `robust` is the 27-case set.
+
+Root cause: the countersteer lock. At full counter lock the slide first grows to ~50°, then the
+fronts bite and the car swings through (or the speed bleeds off and it spins). Experiments
+(medium ride, spin model):
+- W's countersteer limit (0 / 0.25 / 1 / 2 / 4°): no change (0 / 27 on "new").
+- Probe tilt fix off: no change (1 / 27).
+- The smart lock's slide fade (where the plain lock comes back, both-ways fade, angle rate): ≤ 1.
+- Smart lock forced equal to the plain lock: back to 4 (= "before"). The smart lock only matters
+  through how much lock it gives.
+- **More** drift lock (`drift_lock_extra` +0.2 … +0.6): 0 / 27 everywhere.
+- **Less** drift lock (−0.2 … −0.35 from 15–20°): "new" 8–9, "grip" 9–10.
+
+So the held key over-catches with full lock. But a key-tapping driver *needs* the full lock for
+its catches:
+- A permanent cut (× 0.75 from 20°) gave 10 / 27, but the tapper's time in 30–45° fell from
+  3.3–4.5 s to 0.9–2.7 s.
+- A cut only while the slide closes (`slide_closing_dps`) kept the tapper (17.5 s total) but
+  held 0 / 27.
+
+The difference between the two drivers is how long the countersteer key stays down. Fix in the
+balance: `GripBalance::slide_lock` × **0.5**, phased in over 10° from **15°** of body slip, and
+only once the countersteer key has been held **0.5 s** (`slide_lock_after_s`, phased in over
+0.3 s). Quick catching taps keep the full lock; a held key gets less. On in "new" and "grip". It
+acts only on countersteer past 15° of slip, so grip driving is untouched: the `feel` table for
+all 13 cars is identical before / after, except the two cars with lab fixes. The 36-set sweep
+(lock × 0.4–0.75, from 10–20°, after 0–1.2 s) has a plateau at 0.5–0.6 / 10–15° / 0.5 s
+(18–20 / 27 on both rides).
+
+| test (medium ride) | new before → after | grip before → after |
+|---|---|---|
+| held key, parity_rwd_d | 1.1 s drift / SPUN → 3.3 s, 35°, **held** | 1.2 s / SPUN → 5.1 s, 40°, **held** |
+| held key, parity_rwd_a | 1.1 s / SPUN → 3.3 s, 36°, **held** | 1.2 s / SPUN → 5.5 s, 40°, **held** |
+| held key, parity_rwd_b | 0.9 s / SWAPPED → 4.7 s, 36°, **held** | 1.5 s / SWAPPED → 5.4 s, 38°, **held** |
+| held key, rampart_50 | 1.0 s / SPUN → 3.4 s, 33°, **held** | 1.1 s / SPUN → 5.2 s, 39°, **held** |
+| tapper (35° target), band s, rwd_d / a / b / rampart | 3.3 / 3.7 / 3.1 / 3.4 → 3.6 / 5.0 / 3.3 / 4.3 | → 5.1 / 5.1 / 5.0 / 4.8 |
+| robust set, 27 (plain steering), medium / lab ride | 0 / 1 → **19 / 18** | 1 / 1 → **22 / 20** |
+| robust set with tyre-slip VR steering | 16 → 18 | 15 → 22 |
+| snap-back (rwd_d / rwd_b): slip overshoot | 44.8° / 5.8° → 3.7° / 0.9° | — |
+| grip below the limit (body slip vs g, taps, lane change, slalom; 13 cars) | identical | identical |
+
+"Before" (no balance) stays at 4 / 27. shiro_turbo never reaches the 6° entry on a held key
+with full throttle at 40 m / 0.6 g (not enough power), so it has no hold in either case.
+
+Coordination with W's "more steering lock to catch over-rotations": extra lock on a held key at
+a steady angle over-catches (+0.2 … +0.6 drift lock: 0 / 27). A lock extension should go to
+catching taps / a growing slide, which is what this slide lock leaves alone (the first 0.5 s
+of a countersteer press keeps the full lock).
+
+**`spin_model_holds_the_clip_1_drift_where_the_ellipse_spins` (tyre_slip.rs)**: not the same
+root cause, and **green on lead/grip-balance** (b00b20f1 and after). It uses no grip balance. It
+passes here since tyre-slip's spin b0 6.99 → 7.5 (82066a3a), with W's countersteer limit on
+or off. With the probe tilt fix off it fails (2.2 s in band), so it sits on the probe fix's knife
+edge. The 0.8–1.3 s red is on bases without b0 7.5 (e.g. W's a0e1600f is built on 93b9a13d,
+which predates it).
+
+**Spin model v2 (ellipse)** (tyre-slip's preset) was tuned on the `drift_best` balance, and its
+button sets that balance. Held set, medium ride, its own VR steering: drift_best 9 / 27 (tyre-slip
+reports 7), "new" 4, "grip" 1. It needs its own balance, which the button gives it.
+
+
+## Lift-off: no step-out while steering (step 20) — merged with W step 11 and the firm ride
+
+Owner (step 18, "grip" default): "both rampart and parity rwd feel like they have no side grip
+and step out, even when steering and lifting off the throttle." Owner, ride: "when I turned
+springs and bars up it feels better under grip cornering … even better at 1.5 and 1.5". Lead:
+steer + lift at normal loads must not step the rear out (near "before": slip ≲ 3–6°, a mild yaw
+rise); keep W's catch window and the held-key set; ride 1.5 / 1.5; sliders to 3.0.
+
+**Test** (`grip_balance liftcheck`, a hard pass / fail now in the score; tyre-slip's fail case):
+the left key held, throttle 0, (a) at turn-in from a straight cruise and (b) mid-corner after
+3 s at cruise, at 40 / 60 / 80 mph. Cells give peak body slip at turn-in / mid-corner and the
+mid-corner yaw rise. Fail = > 8° or a spin.
+
+| car | ride · balance | 40 mph | 60 mph | 80 mph | worst | result |
+|---|---|---|---|---|---|---|
+| rampart_50 | medium · before | 0.7° / 0.5° +6.6 | 3.1° / 2.6° +5.2 | 4.8° / 3.3° +3.7 | 4.8° | pass |
+| rampart_50 | medium · step14 | 14.7° / 13.5° +7.0 | 17.4° / 10.3° +6.4 | 14.7° / 8.0° +8.2 | 17.4° | **FAIL ×6** |
+| rampart_50 | medium · grip | 12.7° / 12.9° +11.8 | 14.6° / 13.3° +19.2 | 12.2° / 6.7° +0.0 | 14.6° | **FAIL ×5** |
+| rampart_50 | firm · step14 | 7.9° / 4.8° +8.7 | 11.5° / 6.2° +7.2 | 11.9° / 6.4° +8.0 | 11.9° | **FAIL ×2** |
+| rampart_50 | firm · grip | 6.9° / 4.0° +8.6 | 9.9° / 4.7° +4.8 | 9.4° / 4.8° +7.4 | 9.9° | **FAIL ×2** |
+| rampart_50 | firm · new | 2.1° / 1.4° +4.9 | 4.7° / 2.9° +4.0 | 5.4° / 3.0° +2.6 | 5.4° | pass |
+| parity_rwd_d | medium · before | 0.7° / 0.6° +6.8 | 2.9° / 2.4° +5.6 | 4.9° / 3.1° +3.8 | 4.9° | pass |
+| parity_rwd_d | medium · step14 | 14.5° / 13.7° +13.0 | 15.9° / 10.0° +5.8 | 14.3° / 8.9° +11.4 | 15.9° | **FAIL ×6** |
+| parity_rwd_d | medium · grip | 12.8° / 14.5° +15.8 | 14.3° / 13.0° +20.8 | 11.7° / 6.7° +0.0 | 14.5° | **FAIL ×5** |
+| parity_rwd_d | firm · step14 | 7.8° / 4.8° +8.2 | 11.2° / 6.2° +6.8 | 11.6° / 6.4° +7.3 | 11.6° | **FAIL ×2** |
+| parity_rwd_d | firm · grip | 6.7° / 4.2° +8.0 | 9.5° / 4.7° +5.0 | 9.1° / 4.8° +7.4 | 9.5° | **FAIL ×2** |
+| parity_rwd_d | firm · new | 2.0° / 1.4° +5.8 | 4.5° / 2.9° +3.9 | 5.3° / 2.9° +2.9 | 5.3° | pass |
+| parity_rwd_a | medium · before | 0.7° / 0.6° +7.7 | 3.0° / 2.3° +1.9 | 4.7° / 3.4° +4.4 | 4.7° | pass |
+| parity_rwd_a | medium · step14 | 14.5° / 8.3° +2.7 | 15.4° / 10.4° +8.4 | 12.8° / 8.8° +13.0 | 15.4° | **FAIL ×6** |
+| parity_rwd_a | medium · grip | 12.3° / 14.2° +14.2 | 13.3° / 12.8° +12.3 | 10.5° / 5.7° +4.1 | 14.2° | **FAIL ×5** |
+| parity_rwd_a | firm · step14 | 7.6° / 4.8° +8.4 | 10.9° / 6.1° +7.0 | 11.0° / 6.2° +6.4 | 11.0° | **FAIL ×2** |
+| parity_rwd_a | firm · grip | 6.6° / 4.1° +8.2 | 9.2° / 4.7° +5.6 | 8.5° / 4.7° +6.5 | 9.2° | **FAIL ×2** |
+| parity_rwd_a | firm · new | 1.9° / 1.4° +6.1 | 4.4° / 2.8° +4.0 | 4.9° / 2.8° +3.3 | 4.9° | pass |
+| parity_rwd_b | medium · before | 2.6° / 2.8° +12.9 | 5.5° / 3.4° +6.2 | 8.7° / 3.8° +5.6 | 8.7° | **FAIL ×1** |
+| parity_rwd_b | medium · step14 | 25.3° / 19.5° +21.5 | 25.8° / 14.3° +14.5 | 17.9° / 10.3° +11.6 | 25.8° | **FAIL ×6** |
+| parity_rwd_b | medium · grip | 25.3° / 17.6° +11.5 | 21.7° / 16.0° +9.8 | 15.0° / 8.7° +10.7 | 25.3° | **FAIL ×6** |
+| parity_rwd_b | firm · step14 | 12.6° / 8.0° +11.9 | 15.4° / 8.5° +9.6 | 14.0° / 7.3° +6.2 | 15.4° | **FAIL ×5** |
+| parity_rwd_b | firm · grip | 13.8° / 10.3° +15.0 | 14.9° / 8.1° +9.0 | 12.0° / 6.4° +7.5 | 14.9° | **FAIL ×5** |
+| parity_rwd_b | firm · new | 5.0° / 3.7° +8.8 | 7.0° / 4.6° +7.3 | 6.6° / 3.9° +5.8 | 7.0° | pass |
+| shiro_turbo | medium · before | 0.9° / 0.2° +10.4 | 3.1° / 1.8° +4.4 | 5.0° / 2.9° +6.4 | 5.0° | pass |
+| shiro_turbo | medium · step14 | 16.1° / 12.4° +16.4 | 15.9° / 9.2° +9.6 | 12.7° / 8.1° +10.1 | 16.1° | **FAIL ×6** |
+| shiro_turbo | medium · grip | 15.5° / 11.7° +10.6 | 14.3° / 7.6° +6.4 | 9.9° / 6.5° +12.9 | 15.5° | **FAIL ×4** |
+| shiro_turbo | firm · step14 | 8.1° / 4.8° +8.3 | 11.2° / 6.2° +7.2 | 11.1° / 6.2° +5.0 | 11.2° | **FAIL ×3** |
+| shiro_turbo | firm · grip | 7.3° / 4.2° +8.3 | 9.5° / 4.8° +6.2 | 8.5° / 4.8° +5.9 | 9.5° | **FAIL ×2** |
+| shiro_turbo | firm · new | 2.2° / 1.4° +5.7 | 4.5° / 2.8° +3.8 | 4.9° / 2.8° +3.4 | 4.9° | pass |
+
+**Cause.** Two things combine:
+- The soft RWD rear tyres (cornering stiffness × 0.45 in step 14, × 0.8 + μ 0.96 + C 1.0 in
+  grip). Plain lock with those tyres fails; the smart lock with the data tyres passes.
+- W's soft medium-weight bars (× 0.15). With bars ≥ 1.0 the step-out halves. Above that,
+  springs / bars barely matter (0.95 / 1.0 to 2.0 / 2.0: step 14 11.9 → 11.6°).
+
+**Fix ("new", step 20; step 14 one click away as "balance: step 14"):**
+- RWD front cornering stiffness × 0.6 (the smart lock's size and turn-in);
+- RWD rear × 0.9 with a slightly flatter side force past the peak (shape C 1.2, cornering
+  stiffness kept). The flatter tail keeps over-rotations catchable; the near-data stiffness stops
+  the lift step-out. Found in a 24-set sweep scored on lift fails, W's catch, the held-key set and
+  the shiro / rampart feel;
+- FWD: the data tyres with the rear bar × 2. On the firm ride the soft-ride FWD rear (0.97 / 0.7)
+  stepped out on kestrel_ts;
+- the default ride is **"firm"** (`RideTune::firm`): medium weight with springs / bars × 1.5 and
+  dampers × 1.5 (2.4 / 3.2). The panel's springs / bars sliders go to 3.0. The saved ride key is
+  bumped (v3), and the grip key too (v3: the v2 builds saved "grip" as the default).
+
+**Held key + W's catch, together.** W's step 11 adds countersteer lock while the slide still grows
+past 40° (× 1.4, rack × 2). My held-key cut (× 0.5 after a 0.5 s hold past 15°) multiplied on
+top and cancelled the catch (drift_lab_w_catch failed; rwd_d peaked at 61°, not caught). The cut
+now lets go while the slide grows (`slide_lock_growth_dps` 15, W's `over_from_dps`) and above
+40° of slip (`slide_lock_to_deg`, fading over 10°). A normal held drift (30–40°) gets the cut;
+an over-rotation gets W's extension.
+
+**All on one build (firm ride, "new"):**
+
+| requirement | result |
+|---|---|
+| steer + lift, no step-out: rampart_50 / parity_rwd_d / a / b / shiro | **pass** on all 5, worst 4.9–7.0° (before: 4.0–5.9°), yaw rise +2.6 … +8.8 °/s |
+| … the other 9 cars (FWD, debug_coupe, lucciola, hakone, sperber) | pass, worst 3.4–7.9° |
+| W's catch (`over_rotation_catch`): rwd_d / rwd_a | caught at 35 / 40 / 45 / 55° (W's window: 40°) |
+| … rwd_b, rampart_50 | caught at 35 / 40° (at 45–55° the test's entry never reaches the push) |
+| drift_lab_w_catch, drift_lab_w_snap, tyre_slip tests | pass |
+| held-key set (27, plain / VR steering) | **26 / 26** (step 14 on the firm ride: 24 / 25; medium step 14 before the fix: 0) |
+| held key + tapper, rwd_d / a / b | all hold (3.4–4.6 s in band); rampart_50 held key swaps on this entry, its tapper holds |
+| snap-back overshoot rwd_d / b | 3.3° / 1.0° |
+| roll (80 km/h step steer) | rise 0.35–0.40 s, peak 2.3–2.8° (medium step 14: 0.45–0.52 s, 5.2–6.3°) |
+
+**What does not stay the same: the feel.** The lead's (d) "grip feel unchanged except for the
+ride" conflicts with (c). The step-out came from the same soft rear tyres that gave step 14 /
+grip their below-limit slip. On the firm ride with "new":
+- body slip at 0.6 g at 60 km/h ≈ 0° (step 14: 1.3–1.6°);
+- the 0.4 s tap at 60 mph is 26–29 °/s (step 14: 33–38);
+- lane-change slip 3° (step 14: 8°);
+- roll 2.3–2.8° (step 14 on medium weight: 5–6°).
+
+Distance from the step-18 shiro / rampart feel is 2.3–2.4 (step 14 on the firm ride: ~1.3), and
+most of it is roll and slip: the planted, stiffer car the owner asked for. It is not the
+step-18 feel. If the owner wants more rotation back, "balance: step 14" + the firm ride is one
+click away (it still steps out on a lift: 14 / 30 fails).

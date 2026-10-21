@@ -224,6 +224,39 @@ impl CarTune {
         }
     }
 
+    /// "Spin model v2 (ellipse)" (tyre-slip, drift transitions; lab A/B next to
+    /// [`CarTune::spin_candidate`]): the spin model with its combined force pulled back into
+    /// the friction ellipse (`spin_ellipse` 0.7), so a throttle lift hands the drive force's
+    /// share of the grip back to cornering and the owner's lift flick swings the car through.
+    /// Tuned on the step-20 lab default (`GripBalance::lab_default()`, `RideTune::firm()`)
+    /// with [`CarTune::spin_v2_plain`] (examples/transition.rs `v2search`): held-drift set
+    /// 25 / 27 (v1 26), lift flicks caught 13 / 18 at the reference gaps (v1 0), lift-off in a
+    /// normal corner 0 / 18 step-outs (docs/integration/tyre-slip.md, "Spin model v2").
+    pub fn spin_v2_candidate() -> Self {
+        Self {
+            spin_model: true,
+            spin_ellipse: 0.7,
+            spin_fx_slide: 0.35,
+            spin_b0: 7.15,
+            spin_b2: 1.41,
+            spin_c: 0.78,
+            spin_p: 5.0,
+            rear_relax: 0.73,
+            ..Self::default()
+        }
+    }
+
+    /// The steering of the "spin model v2 (ellipse)" preset: the plain profile with the swing
+    /// rack × 2.08 from 86°/s of yaw (the threshold is sensitive: 82°/s loses holds, 90°/s
+    /// loses catches; docs/integration/tyre-slip.md).
+    pub fn spin_v2_plain() -> crate::plain::PlainSteer {
+        crate::plain::PlainSteer {
+            swing_rate: 2.08,
+            swing_yaw_dps: 86.0,
+            ..crate::plain::PlainSteer::default()
+        }
+    }
+
     /// Whether corner `i` (0 FL, 1 FR, 2 RL, 3 RR) uses [`CarTune::lat_under_spin`].
     pub fn combined_applies(&self, i: usize) -> bool {
         !self.combined_rear_only || i >= 2

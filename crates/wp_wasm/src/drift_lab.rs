@@ -186,6 +186,7 @@ pub fn ride_tune_defaults_json() -> String {
         "lab": wp_vehicle::ride_lab::RideTune::lab_default(),
         "slow_weight": wp_vehicle::ride_lab::RideTune::slow_weight(),
         "medium_weight": wp_vehicle::ride_lab::RideTune::medium_weight(),
+        "firm": wp_vehicle::ride_lab::RideTune::firm(),
     }))
 }
 
@@ -235,7 +236,7 @@ pub fn car_tune_json() -> String {
     json(&wp_vehicle::car_lab::active())
 }
 
-/// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset> }`, JSON.
+/// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset>, "spin_v2": <spin model v2 (ellipse)>, "spin_v2_plain": <its steering> }`, JSON.
 #[wasm_bindgen]
 pub fn car_tune_defaults_json() -> String {
     json(&serde_json::json!({
@@ -245,6 +246,8 @@ pub fn car_tune_defaults_json() -> String {
         "spin_lock": wp_vehicle::car_lab::CarTune::spin_lock_candidate(),
         "spin_vr_plain": wp_vehicle::car_lab::CarTune::spin_vr_plain(),
         "transition_plain": wp_vehicle::car_lab::CarTune::transition_plain(),
+        "spin_v2": wp_vehicle::car_lab::CarTune::spin_v2_candidate(),
+        "spin_v2_plain": wp_vehicle::car_lab::CarTune::spin_v2_plain(),
     }))
 }
 
@@ -261,10 +264,11 @@ pub fn grip_balance_json() -> String {
 pub fn grip_balance_defaults_json() -> String {
     json(&serde_json::json!({
         "before": wp_vehicle::grip_lab::GripBalance::default(),
-        // "new" = "balance: grip" since the lead's grip-drivable rework (2026-10-21); the
-        // step-14 "new" stays as "step14".
-        "new": wp_vehicle::grip_lab::GripBalance::grip(),
-        "step14": wp_vehicle::grip_lab::GripBalance::lab_default(),
+        // "new" = the lab default (step 20: no step-out on a lift while steering, firm ride);
+        // "step14" = the step-14 … 19 default; "grip" = the grip-drivable rework (test).
+        "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
+        "grip": wp_vehicle::grip_lab::GripBalance::grip(),
+        "step14": wp_vehicle::grip_lab::GripBalance::step14(),
         "step2": wp_vehicle::grip_lab::GripBalance::step2(),
         "slow_weight": wp_vehicle::grip_lab::GripBalance::for_slow_weight(),
         "drift_best": wp_vehicle::grip_lab::GripBalance::drift_best(),
