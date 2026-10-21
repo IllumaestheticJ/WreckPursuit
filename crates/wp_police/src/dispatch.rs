@@ -36,7 +36,7 @@ const AMBUSH_SETTLE_S: f32 = 3.0;
 /// Farthest wait point along the racer's predicted path, m.
 const AMBUSH_MAX_AHEAD_M: f32 = 900.0;
 /// The wait point is this far into the racer's road past the junction the unit turns in at, m.
-const AMBUSH_INTO_LEG_M: f32 = 25.0;
+pub(crate) const AMBUSH_INTO_LEG_M: f32 = 25.0;
 /// Spawn nodes are at most this far from the wait point, m.
 const AMBUSH_SPAWN_RADIUS_M: f32 = 400.0;
 /// Spawn nodes tried per wait point, closest first.
@@ -45,6 +45,16 @@ const AMBUSH_SPAWN_CANDIDATES: usize = 6;
 const AMBUSH_PACE_MARGIN: f32 = 1.3;
 /// Time added per junction on an ambush route (slowing for the turn), s.
 const AMBUSH_JUNCTION_S: f32 = 3.0;
+
+/// A spot to wait for a racer at (see `PoliceSystem::ambush_waits`).
+struct AmbushWait {
+    /// Junction the unit turns in at.
+    junction: NodeId,
+    /// Wait point, [`AMBUSH_INTO_LEG_M`] past `junction` on the racer's road, m.
+    wait: [f32; 2],
+    /// When the racer gets there at its current speed, s from now.
+    racer_eta: f32,
+}
 
 /// A reinforcement spawn that waits for the racer ahead of it (see `PoliceSystem::ambush_plan`).
 struct AmbushPlan {
@@ -781,14 +791,25 @@ impl PoliceSystem {
             let Some(target) = self.racers.get(&req.racer).and_then(|r| r.last_known) else {
                 continue;
             };
+            let vel = self.racers[&req.racer].vel;
+            let vel = [vel[0], vel[1]];
             let i = match self.nearest_available(target, 700.0) {
-                Some(i) => i,
+                Some(i) => {
+                    // A unit already on the road also sets up ahead if it can get there in time.
+                    if let Some((wait, track)) = self.ambush_route(i, target, vel) {
+                        self.stats
+                            .reinforcement_delays_s
+                            .push(now.since(req.requested));
+                        self.start_ambush(i, req.racer, wait, track);
+                        continue;
+                    }
+                    i
+                }
                 None => {
                     if self.ground_units_alive() >= self.cfg.presence.max_ground_units {
                         continue;
                     }
-                    let vel = self.racers[&req.racer].vel;
-                    if let Some(plan) = self.ambush_plan(world, target, [vel[0], vel[1]]) {
+                    if let Some(plan) = self.ambush_plan(world, target, vel) {
                         let i = self.spawn_unit(
                             UnitKind::Car,
                             UnitRole::Reinforcement,
@@ -798,24 +819,9 @@ impl PoliceSystem {
                         self.stats
                             .reinforcement_delays_s
                             .push(now.since(req.requested));
-                        self.assign(
-                            i,
-                            Assignment::Intercept {
-                                target: req.racer,
-                                point: plan.wait,
-                                ambush: true,
-                            },
-                        );
-                        // Start driving right away (before `wp_sim` gives it a body), the way
+                        // Starts driving right away (before `wp_sim` gives it a body), the way
                         // it faces.
-                        let cornering_g = self.cfg.pursuit.pursuit_cornering_g;
-                        self.units[i].set_command(DriveCommand {
-                            track: plan.track,
-                            speed_mps: 0.0,
-                            cornering_g,
-                            siren: true,
-                            lane_offset_m: LANE_OFFSET_M,
-                        });
+                        self.start_ambush(i, req.racer, plan.wait, plan.track);
                         continue;
                     }
                     let Some((pos, heading)) = self.reinforcement_spawn_point(world, target) else {
@@ -838,26 +844,37 @@ impl PoliceSystem {
         }
     }
 
-    /// Where a fresh reinforcement should wait for a moving racer, if anywhere: a spot just
-    /// past a junction on the racer's predicted path, reached from a side road the racer cannot
-    /// see, so the unit arrives facing the racer's direction of travel and joins the chase as
-    /// the racer comes by instead of turning around behind it. Spawns at least
-    /// `spawn_min_distance_m` from the racer, out of its sight, and only where the unit can
-    /// reach the wait point [`AMBUSH_SETTLE_S`] before the racer does.
-    fn ambush_plan(
-        &self,
-        world: &dyn WorldQuery,
-        racer: [f32; 2],
-        vel: [f32; 2],
-    ) -> Option<AmbushPlan> {
+    /// Send unit `i` to wait for `racer` at `wait` along `track`, lights on.
+    fn start_ambush(&mut self, i: usize, racer: EntityId, wait: [f32; 2], track: Track) {
+        self.assign(
+            i,
+            Assignment::Intercept {
+                target: racer,
+                point: wait,
+                ambush: true,
+            },
+        );
+        let cornering_g = self.cfg.pursuit.pursuit_cornering_g;
+        self.units[i].set_command(DriveCommand {
+            track,
+            speed_mps: 0.0,
+            cornering_g,
+            siren: true,
+            lane_offset_m: LANE_OFFSET_M,
+        });
+    }
+
+    /// Candidate ambush wait points for a racer at `racer` moving at `vel`, nearest first: just
+    /// past each junction on its predicted path, ≥ [`AMBUSH_MIN_LEAD_S`] of its travel ahead,
+    /// not already taken by another ambusher. Also returns every node on the racer's road, which
+    /// a unit must not drive along to get in place (it would be seen, or come at the racer
+    /// head-on). Empty for a stopped racer.
+    fn ambush_waits(&self, racer: [f32; 2], vel: [f32; 2]) -> (Vec<AmbushWait>, Vec<NodeId>) {
         let speed = (vel[0] * vel[0] + vel[1] * vel[1]).sqrt();
         if speed < crate::pursuit::STOPPED_RACER_MPS {
-            return None;
+            return (Vec::new(), Vec::new());
         }
-        let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
         let path = self.graph.predict_path(racer, vel, AMBUSH_MAX_AHEAD_M);
-        // Every node on the racer's road: the unit must not drive along it to get in place
-        // (it would be seen, or come at the racer head-on).
         let mut on_path: Vec<NodeId> = Vec::new();
         for leg in &path.legs {
             on_path.push(leg.from_node);
@@ -876,6 +893,7 @@ impl PoliceSystem {
                 _ => None,
             })
             .collect();
+        let mut waits = Vec::new();
         let mut leg_start = 0.0;
         for (k, leg) in path.legs.iter().enumerate() {
             let s0 = leg_start;
@@ -888,7 +906,6 @@ impl PoliceSystem {
             if racer_eta < AMBUSH_MIN_LEAD_S {
                 continue;
             }
-            let junction = leg.from_node;
             let wait = add(
                 leg.from,
                 scale(normalize(sub(leg.to, leg.from)), AMBUSH_INTO_LEG_M),
@@ -899,6 +916,30 @@ impl PoliceSystem {
             {
                 continue;
             }
+            waits.push(AmbushWait {
+                junction: leg.from_node,
+                wait,
+                racer_eta,
+            });
+        }
+        (waits, on_path)
+    }
+
+    /// Where a fresh reinforcement should wait for a moving racer, if anywhere (see
+    /// [`Self::ambush_waits`]): it spawns on a side road the racer cannot see and drives in, so
+    /// it arrives facing the racer's direction of travel and joins the chase as the racer comes
+    /// by instead of turning around behind it. Spawns at least `spawn_min_distance_m` from the
+    /// racer, and only where the unit can reach the wait point [`AMBUSH_SETTLE_S`] before the
+    /// racer does.
+    fn ambush_plan(
+        &self,
+        world: &dyn WorldQuery,
+        racer: [f32; 2],
+        vel: [f32; 2],
+    ) -> Option<AmbushPlan> {
+        let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
+        let (waits, on_path) = self.ambush_waits(racer, vel);
+        for w in waits {
             // Closest side-road nodes first (index breaks ties: deterministic).
             let mut cands: Vec<(f32, usize)> = self
                 .graph
@@ -907,23 +948,23 @@ impl PoliceSystem {
                 .enumerate()
                 .filter(|(n, node)| {
                     !on_path.contains(&NodeId(*n as u32))
-                        && dist(node.pos, wait) <= AMBUSH_SPAWN_RADIUS_M
+                        && dist(node.pos, w.wait) <= AMBUSH_SPAWN_RADIUS_M
                         && dist(node.pos, racer) >= min_d
                 })
-                .map(|(n, node)| (dist(node.pos, wait), n))
+                .map(|(n, node)| (dist(node.pos, w.wait), n))
                 .collect();
             cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             // Of the spots that make it in time, take the quickest to get into place.
             let mut best: Option<(f32, AmbushPlan)> = None;
             for &(_, n) in cands.iter().take(AMBUSH_SPAWN_CANDIDATES) {
-                let Some(route) = self.graph.shortest_path(NodeId(n as u32), junction) else {
+                let Some(route) = self.graph.shortest_path(NodeId(n as u32), w.junction) else {
                     continue;
                 };
                 if route.len() < 2 || route[..route.len() - 1].iter().any(|r| on_path.contains(r)) {
                     continue;
                 }
                 let unit_eta = self.route_time_s(&route) + AMBUSH_SETTLE_S;
-                if unit_eta > racer_eta || best.as_ref().is_some_and(|b| unit_eta >= b.0) {
+                if unit_eta > w.racer_eta || best.as_ref().is_some_and(|b| unit_eta >= b.0) {
                     continue;
                 }
                 let start = self.graph.node(route[0]).pos;
@@ -938,17 +979,58 @@ impl PoliceSystem {
                 // The track runs on the centreline; the drive command adds the lane offset.
                 let mut pts: Vec<[f32; 2]> =
                     route.iter().map(|r| self.graph.node(*r).pos).collect();
-                pts.push(wait);
+                pts.push(w.wait);
                 let plan = AmbushPlan {
                     pos,
                     heading,
-                    wait,
+                    wait: w.wait,
                     track: Track::new(pts),
                 };
                 best = Some((unit_eta, plan));
             }
             if let Some((_, plan)) = best {
                 return Some(plan);
+            }
+        }
+        None
+    }
+
+    /// Wait point and track for unit `i` (already on the road) to set up ahead of a racer at
+    /// `racer` moving at `vel` (see [`Self::ambush_waits`]), if it can get there
+    /// [`AMBUSH_SETTLE_S`] before the racer without driving along the racer's road.
+    fn ambush_route(&self, i: usize, racer: [f32; 2], vel: [f32; 2]) -> Option<([f32; 2], Track)> {
+        let (waits, on_path) = self.ambush_waits(racer, vel);
+        let u = &self.units[i];
+        let (pos, heading) = (u.body.pos, u.body.heading);
+        // A unit on the racer's road itself would meet it head-on or be seen getting there.
+        let rp = self.graph.nearest_on_road(pos)?;
+        let seg = self.graph.segment(rp.segment);
+        if on_path.contains(&seg.a) && on_path.contains(&seg.b) {
+            return None;
+        }
+        let start = self.start_node(pos, heading)?;
+        let to_start = sub(self.graph.node(start).pos, pos);
+        let cap = self.cfg.pursuit.pursuit_cap_mps.get(self.phase);
+        let v = (seg.speed_limit_mps * self.cfg.pursuit.respond_speed_factor * 1.15)
+            .min(cap)
+            .max(1.0);
+        let mut lead_in = dist(pos, self.graph.node(start).pos) / v * AMBUSH_PACE_MARGIN;
+        if crate::graph::dot(to_start, heading) < 0.0 {
+            lead_in += AMBUSH_JUNCTION_S; // turning around first
+        }
+        for w in waits {
+            let Some(route) = self.graph.shortest_path(start, w.junction) else {
+                continue;
+            };
+            if route[..route.len() - 1].iter().any(|r| on_path.contains(r)) {
+                continue;
+            }
+            if lead_in + self.route_time_s(&route) + AMBUSH_SETTLE_S > w.racer_eta {
+                continue;
+            }
+            let (track, _) = self.route_from(pos, heading, w.junction, Some(w.wait));
+            if track.is_drivable() {
+                return Some((w.wait, track));
             }
         }
         None

@@ -620,22 +620,16 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
     assert!(captured, "parked racer never captured");
 }
 
-#[test]
-fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
-    // No patrol pool: every AI reinforcement has to be spawned. A player chase car tails the
-    // racer to keep the pursuit going.
-    let mut cfg = PoliceConfig::builtin();
-    let none = wp_police::config::PhaseTable {
-        dawn: 0,
-        day: 0,
-        dusk: 0,
-        night: 0,
-    };
-    cfg.presence.patrols = wp_police::config::DistrictTable {
-        core: none,
-        suburb: none,
-        industrial: none,
-    };
+/// Chase a racer at 18 m/s for 100 s with a player chase car tailing it (keeps the pursuit
+/// going). Returns the role of every unit seen waiting ahead (`Intercept { ambush: true }`), and
+/// for each of those that joined the chase, its heading · the racer's direction of travel at the
+/// unit's spot on the racer's path.
+fn ambush_chase(
+    cfg: PoliceConfig,
+) -> (
+    std::collections::BTreeMap<wp_police::UnitId, wp_police::unit::UnitRole>,
+    std::collections::BTreeMap<wp_police::UnitId, f32>,
+) {
     let mut h = Harness::with_config(12.0, 5, DamageMode::Arcade, cfg);
     h.speed = 18.0;
     h.s = 40.0;
@@ -650,8 +644,7 @@ fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
         .police
         .add_player_unit(PlayerId(1), EntityId(900), [p[0], p[1], 0.0], d);
     h.police.set_heat(RACER, 80.0);
-    // Units seen waiting ahead, and their heading · racer direction when they joined.
-    let mut ambushers = std::collections::BTreeSet::new();
+    let mut ambushers = std::collections::BTreeMap::new();
     let mut joined_facing = std::collections::BTreeMap::new();
     for _ in 0..400 {
         let (p, d) = tail(&h);
@@ -666,13 +659,23 @@ fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
             },
         );
         h.run(0.25, &[]);
-        let dir = h.path.dir_at(h.s).unwrap();
         for u in h.police.units() {
             match u.assignment {
                 Assignment::Intercept { ambush: true, .. } => {
-                    ambushers.insert(u.id);
+                    ambushers.insert(u.id, u.role);
                 }
-                Assignment::Pursue { .. } if ambushers.contains(&u.id) => {
+                Assignment::Pursue { .. } if ambushers.contains_key(&u.id) => {
+                    // The racer's direction of travel where the unit is (it may wait past a turn).
+                    let mut best = (f32::INFINITY, h.s);
+                    let mut s = (h.s - 100.0).max(0.0);
+                    while s < (h.s + 300.0).min(h.path.length()) {
+                        let d = dist(h.path.point_at(s).unwrap(), u.body.pos);
+                        if d < best.0 {
+                            best = (d, s);
+                        }
+                        s += 1.0;
+                    }
+                    let dir = h.path.dir_at(best.1).unwrap();
                     let facing = u.body.heading[0] * dir[0] + u.body.heading[1] * dir[1];
                     joined_facing.entry(u.id).or_insert(facing);
                 }
@@ -681,12 +684,53 @@ fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
         }
     }
     assert!(h.police.racer(RACER).unwrap().pursued());
+    (ambushers, joined_facing)
+}
+
+#[test]
+fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
+    // No patrol pool: every AI reinforcement has to be spawned.
+    let mut cfg = PoliceConfig::builtin();
+    let none = wp_police::config::PhaseTable {
+        dawn: 0,
+        day: 0,
+        dusk: 0,
+        night: 0,
+    };
+    cfg.presence.patrols = wp_police::config::DistrictTable {
+        core: none,
+        suburb: none,
+        industrial: none,
+    };
+    let (ambushers, joined_facing) = ambush_chase(cfg);
     assert!(
         !ambushers.is_empty(),
         "no reinforcement was spawned to wait ahead"
     );
     assert!(!joined_facing.is_empty(), "no ambusher joined the chase");
     // Joined pointing the racer's way: no turn-around behind it.
+    assert!(
+        joined_facing.values().all(|c| *c > 0.5),
+        "heading·racer dir at join: {joined_facing:?}"
+    );
+}
+
+#[test]
+fn nearby_patrols_sent_as_backup_also_wait_ahead() {
+    let (ambushers, joined_facing) = ambush_chase(PoliceConfig::builtin());
+    let pool: Vec<_> = ambushers
+        .iter()
+        .filter(|(_, r)| matches!(r, wp_police::unit::UnitRole::Pool(_)))
+        .map(|(id, _)| *id)
+        .collect();
+    assert!(
+        !pool.is_empty(),
+        "no patrol unit set up ahead: {ambushers:?}"
+    );
+    assert!(
+        pool.iter().any(|id| joined_facing.contains_key(id)),
+        "no patrol ambusher joined: {joined_facing:?}"
+    );
     assert!(
         joined_facing.values().all(|c| *c > 0.5),
         "heading·racer dir at join: {joined_facing:?}"

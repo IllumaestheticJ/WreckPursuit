@@ -401,3 +401,15 @@ once passed.
 - Test: `tests/system.rs::spawned_reinforcements_wait_ahead_facing_the_racers_way` (no patrol pool;
   every ambusher that joins faces the racer's direction, heading · travel > 0.5).
 - Outside my crate: none (the new field is matched with `..` everywhere else).
+
+### Follow-up: nearby patrols set up ahead too (owner request, 2026-10-21)
+
+- An idle patrol / reinforcement committed as backup (within 700 m) now also gets an ambush when it
+  can make one in time (`dispatch::ambush_route`): it routes from its current position and heading
+  (`start_node`, +3 s if it must turn around first) to the same wait points
+  (`dispatch::ambush_waits`, shared with the spawn search). Skipped when the unit is on the
+  racer's road itself or its route would use it; then it intercepts as before.
+- Ambushers join `Pursue` only once ≥ 5 m past their junction and facing within ~45° of the
+  racer's line (one joined while still turning in from its side road).
+- Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
+  patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).
