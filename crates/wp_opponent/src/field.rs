@@ -2161,7 +2161,14 @@ fn decide_racer(
         // ~100 m and move into it early, instead of driving up to the car in mine and waiting
         // for a pass. A lane counts only if moving over is safe now (nothing alongside on the
         // way, nothing closing from behind in it).
-        if r.tactic == Tactic::Follow && !done_racing && !start_phase && !fleeing {
+        // Straights only: weaving into a bend takes me off my line where the off-line cap
+        // would have to brake mid-corner.
+        if r.tactic == Tactic::Follow
+            && !done_racing
+            && !start_phase
+            && !fleeing
+            && brake_dist > 2.5 * v.max(8.0)
+        {
             let room = |c: f32| -> f32 {
                 rel.iter()
                     .filter(|q| q.ds > 0.0 && (q.o.n - c).abs() < hw + q.o.half_w + 0.3)
@@ -2181,7 +2188,9 @@ fn decide_racer(
             // no other lane of mine: the opposing one is for passes and the whole-road line,
             // which check for oncoming traffic).
             let own = |s: f32| to_limits(corridor.bounds(s));
-            let (o_lo, o_hi) = [0.0, 30.0, 60.0]
+            // (Out to 4 s of travel at speed: a lane that ends a second ahead at 65 m/s is no
+            // lane — Loop 9 s95, a racer weaved into one and spun off where it merged.)
+            let (o_lo, o_hi) = [0.0, 30.0, 60.0, 2.0 * v, 4.0 * v]
                 .iter()
                 .map(|x| own(r.s + x))
                 .fold((f32::NEG_INFINITY, f32::INFINITY), |(a, b), (l, h)| {
