@@ -45,7 +45,10 @@
     // street-spec police (2026-10-21: faster cruiser, ×1.5 pursuit caps, physical_accel 6.0),
     // where seed 12's control run saw a pursuit: seeds 1-20 at dy 0 → 1-4, 11, 14, 18, 19 pass
     // both; only seed 3 also passes at dy = ±10, and at seed 3 heat 2.5-4.5 passes (3.75 kept).
-    seed: 3,
+    // Re-aimed once more after merging main's "backup waits ahead" police change, where seed 3's
+    // control run saw a pursuit: seeds 1-20 at dy 0 → 2, 4, 11, 14, 15 pass both; seed 2 also
+    // passes at dy = +10 (not -10), and at seed 2 heat 2.5-4.5 passes (3.75 kept).
+    seed: 2,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,
     mode: Arcade,

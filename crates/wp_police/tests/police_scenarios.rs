@@ -72,16 +72,19 @@ fn risk_budget_and_caps_keep_cops_alive() {
     let sc = load_scenario(&dir().join("self_wreck_sim.ron")).unwrap();
     let careful = run_scenario(&sc);
     let mut cfg = wp_police::PoliceConfig::builtin();
+    // Well past the shipped tuning on every knob: the default day cap is already 60 m/s, so
+    // a reckless cap at that value changes nothing and the two configs only differ by noise.
     cfg.pursuit.risk.budget = 1.0e9;
-    cfg.pursuit.pursuit_cornering_g = 0.92;
-    cfg.pursuit.target_speed_margin = 0.6;
-    cfg.pursuit.pursuit_cap_mps.day = 60.0;
+    cfg.pursuit.pursuit_cornering_g = 1.2;
+    cfg.pursuit.target_speed_margin = 1.5;
+    cfg.pursuit.pursuit_cap_mps.day = 80.0;
     let reckless = run_scenario_with(&sc, &cfg);
     // Every risk event counts: since units keep their distance to the vehicle ahead (round 6)
     // wrecks and traffic collisions alone are single digits for both configs, too few to rank.
     let harm = |s: &PoliceRunSummary| {
         [
             "self_wrecks",
+            "contact_wrecks",
             "traffic_collisions",
             "run_wide_crashes",
             "near_misses",

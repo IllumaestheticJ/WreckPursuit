@@ -1,4 +1,5 @@
-// Loop 9 interchanges, median barrier and road markings screenshots (headless Chromium).
+// Loop 9 interchanges, median barrier, road markings and ramp gores screenshots (headless
+// Chromium).
 // Usage (after `npm run wasm`): node e2e/highway_shots.mjs [outDir]  (default docs/media/highway)
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -63,6 +64,8 @@ await shoot([
   ["interchange_bluff_road.png", [1250, 650, 140], [1510, 300, 10]],
   ["off_ramp_gore.png", [-1513.5, -95, 9.5], [-1506, -280, 4]],
   ["on_ramp_merge.png", [1524, -270, 4.5], [1531, -100, 2]],
+  ["off_ramp_chevrons.png", [1535.5, 82, 9.5], [1540, 108, 5.5]],
+  ["on_ramp_chevrons.png", [1526.5, -283, 5.5], [1531, -252, 1.5]],
   ["crossroad_bridge.png", [-1380, -470, 9], [-1600, -485, 8]],
   ["median_barrier.png", [36, 1373.5, 25.2], [200, 1386.5, 23.6]],
   ["port_half_diamond.png", [700, -880, 90], [920, -1040, 2]],
@@ -74,6 +77,8 @@ await shoot([
   ["grid_interchange.png", [160, -620, 95], [0, -385, 0]],
   ["grid_viaduct.png", [48, -455, 10], [2, -320, 7]],
   ["grid_on_viaduct.png", [9.6, -300, 9.5], [9.6, 0, 8.6]],
+  ["grid_taper_dotted.png", [12.5, -700, 5], [15, -610, 0]],
+  ["grid_gore_chevrons.png", [11.5, -572, 7.5], [14.5, -530, 3]],
 ]);
 if (errors.length) console.log("page errors:", errors);
 await browser.close();
