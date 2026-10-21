@@ -563,8 +563,14 @@ mod tests {
             "peak_slip_angle_rad":0.109,"peak_slip_ratio":0.101,"surface_multipliers":{},"wear_rate":0}"#,
         )
         .unwrap();
-        GripBalance::lab_default().apply_tire(&mut t, 2, &DriveLayout::Fwd);
-        assert_eq!(t.lateral.b, 17.0);
+        // "new" on a front-drive car: only its FWD rear knobs (stiffness × 0.7), not the RWD
+        // tyre scales; on a rear-drive car: the RWD rear stiffness × 0.45.
+        let mut fwd = t.clone();
+        GripBalance::lab_default().apply_tire(&mut fwd, 2, &DriveLayout::Fwd);
+        assert!((fwd.lateral.b - 17.0 * 0.7).abs() < 1e-4);
+        let mut front = t.clone();
+        GripBalance::lab_default().apply_tire(&mut front, 0, &DriveLayout::Fwd);
+        assert_eq!(front.lateral.b, 17.0);
         GripBalance::lab_default().apply_tire(&mut t, 2, &DriveLayout::Rwd);
         assert!((t.lateral.b - 17.0 * 0.45).abs() < 1e-4);
         // The FWD knobs touch front-drive rears only.

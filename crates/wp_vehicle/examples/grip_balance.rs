@@ -718,7 +718,7 @@ fn slalom(c: &LoadedCar, mph: f32) -> (f32, f32, bool, f32, f32) {
     let (mut prev, mut peak_acc, mut peak_slip, mut spun) = (0.0f32, 0.0f32, 0.0f32, false);
     let (mut prev_roll, mut peak_roll, mut peak_roll_rate) = (0.0f32, 0.0f32, 0.0f32);
     for tick in 0..(36 * TPS) / 10 {
-        let side = if (tick / (TPS * 6 / 10)) % 2 == 0 {
+        let side = if (tick / (TPS * 6 / 10)).is_multiple_of(2) {
             -1.0
         } else {
             1.0
