@@ -517,6 +517,14 @@ export const sim = {
   raceCourse: (): Float32Array => wasm.race_course(),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
+  /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
+  garages: (): GarageSite[] => JSON.parse(wasm.garages_json()),
+  /** The open garage visit (the car stopped inside a garage), or null. */
+  garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
+  /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
+  garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
+  /** "Leave" the open visit without repairing. */
+  garageLeave: (): void => wasm.garage_leave(),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
@@ -555,6 +563,8 @@ export const sim = {
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
   debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
+  /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
+  debugPlace: (entity: number, x: number, y: number, yaw: number, speedMps: number): void => wasm.debug_place(entity, x, y, yaw, speedMps),
 };
 
 import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
@@ -563,6 +573,8 @@ export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
+import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

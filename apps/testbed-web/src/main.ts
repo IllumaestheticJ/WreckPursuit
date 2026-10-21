@@ -61,6 +61,7 @@ import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
+import { GarageVisitView } from "./ui/garageVisit";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
@@ -384,6 +385,15 @@ async function main(): Promise<void> {
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
   });
+  // Garage visit panel (lead): stop inside a repair shop's ring → quote + "Repair" / "Leave".
+  const garageVisitEl = document.createElement("div");
+  garageVisitEl.id = "ui-garage-visit";
+  garageVisitEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(garageVisitEl);
+  const garageView = new GarageVisitView(garageVisitEl, {
+    repair: () => sim.garageRepair(),
+    leave: () => sim.garageLeave(),
+  });
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
   let statTable: CarStatsTable | null = null;
   try {
@@ -461,6 +471,7 @@ async function main(): Promise<void> {
     radioStrip.clear();
     map.reset();
     runEnd.reset();
+    garageView.reset();
     weather.reset();
     // Every model the session can show (player, traffic, police) starts loading now, so cars
     // that appear later never wait for their mesh (playtest row 25).
@@ -478,6 +489,7 @@ async function main(): Promise<void> {
     // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
     // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
     driftLabW.setActive(sc.name === DRIFT_LAB_W);
+    scene.setGarages(sim.garages());
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -1536,7 +1548,10 @@ async function main(): Promise<void> {
       prof.lap("ui");
       map.frame(app.player, now, hudRest);
       prof.lap("map");
-      if (!replay) runEnd.update(sim.runResult(), now);
+      if (!replay) {
+        runEnd.update(sim.runResult(), now);
+        garageView.update(sim.garageVisit(), now);
+      }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
         const seq = runEnd.report?.seq ?? 0;
@@ -1837,6 +1852,7 @@ async function main(): Promise<void> {
     photo,
     ui,
     runEnd,
+    garageView,
     restartRun,
     /** Mod shop (src/ui/modShop.ts). */
     modShop,
