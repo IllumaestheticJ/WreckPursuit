@@ -10,14 +10,15 @@
 //! - **Midtown**: wide one-way pairs (3-lane one-way avenues alternating direction) on a
 //!   140 m grid, two-way cross streets.
 //! - **Uptown**: 100 × 130 m grid continuing Lantern Row's columns, Founders Parkway.
-//! - **Old Harbor**: tight 80 m cobbled grid between Kettle Street and Harbor Boulevard.
-//! - **Mercer**: dense 90 m grid with parking, Mercer Street.
+//! - **Old Harbor**: tight 90–110 m cobbled grid between Kettle Street and Harbor Boulevard.
+//! - **Mercer**: dense 120 m grid, parking on the cross streets, Mercer Street.
 //! - **Eastgate**: 110 m grid climbing the bluff (steep cross streets).
 //! - **Larkspur, Southmoor, Northfield, South Shore, Westridge Woods**: warped organic
 //!   grids with dropped edges and cul-de-sacs.
 //! - **Westline Yards, Canal Flats, Westline Outskirts**: 260–300 m industrial blocks with
 //!   service roads; **Gantry Row / terminal**: port roads.
-//! - **Hollins Heights**: contour roads, Hollins Drive (switchbacks to the Knob), Skyline
+//! - **Hollins Heights**: contour roads, Hollins Drive (≈ 4 km, 11 hairpins to the Knob
+//!   Observatory Lot, which also ends Skyline Drive), Skyline
 //!   Drive through Westridge Woods, Bluff Road along the cliff.
 
 use wp_math::Rng;
@@ -140,7 +141,7 @@ impl Lay {
     }
 
     /// Organic warped grid: jittered vertices, bent edges, dropped edges, cul-de-sacs.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
     fn organic(
         &mut self,
         x0: f32,

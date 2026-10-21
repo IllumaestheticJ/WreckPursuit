@@ -422,6 +422,7 @@ impl Graph {
     }
 
     /// The cleanup loop (see the module docs).
+    #[allow(clippy::needless_range_loop)]
     fn cleanup(&mut self) {
         for _round in 0..12 {
             let mut changed = false;

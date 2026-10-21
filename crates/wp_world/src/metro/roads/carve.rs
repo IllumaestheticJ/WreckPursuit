@@ -8,8 +8,16 @@
 //! the natural ground (cuts, underpasses, cut-and-cover tunnels) the carve is a narrow
 //! trench: full strength only 1 m beyond the paving and one cell of blend, so tunnel covers
 //! (features) can close it.
+//!
+//! Site interiors (the plan's site polygons, levelled by the modules' earthworks) are not
+//! blended toward nearby roads: only the full-strength corridor of a road actually running
+//! there (a gate access end) lowers them.
+//!
+//! Gate aprons: the few vertices within [`APRON_M`] of a reached site gate are kept at
+//! [`CARVE_BELOW_M`] under the access road's end, so driveways that start at the street
+//! surface meet the ground there (a nearby junction disc would otherwise dig them out).
 
-use super::super::ground::Ground;
+use super::super::ground::{bounds, inside, Ground};
 use super::{RoadInfo, CARVE_BELOW_M};
 use crate::builder::{Built, NodeSpec};
 use crate::geom::{self, V2};
@@ -19,14 +27,42 @@ use crate::terrain::smoothstep;
 /// Full-strength carve corridor beyond the paved edge, m.
 pub const SHOULDER_M: f32 = 7.5;
 
-/// Carve `ground.hf` in place (see the module docs).
-pub fn carve(ground: &mut Ground, built: &Built, nodes: &[NodeSpec], _info: &[RoadInfo]) {
+/// Radius of a gate apron, m.
+pub const APRON_M: f32 = 4.5;
+
+/// Carve `ground.hf` in place (see the module docs). `aprons` are the reached gates with
+/// the access road's height at the gate.
+pub fn carve(
+    ground: &mut Ground,
+    built: &Built,
+    nodes: &[NodeSpec],
+    _info: &[RoadInfo],
+    aprons: &[(V2, f32)],
+    sites: &[Vec<V2>],
+) {
     let hf = &mut ground.hf;
     let nv = hf.z.len();
     let natural = hf.z.clone();
     let cell = hf.cell_m;
     let (nx, ny) = (hf.nx as i64, hf.ny as i64);
     let origin = hf.origin;
+    // Vertices inside a site.
+    let mut in_site = vec![false; nv];
+    for poly in sites {
+        let (lo, hi) = bounds(poly);
+        let i0 = (((lo[0] - origin[0]) / cell).floor() as i64).clamp(0, nx - 1);
+        let i1 = (((hi[0] - origin[0]) / cell).ceil() as i64).clamp(0, nx - 1);
+        let j0 = (((lo[1] - origin[1]) / cell).floor() as i64).clamp(0, ny - 1);
+        let j1 = (((hi[1] - origin[1]) / cell).ceil() as i64).clamp(0, ny - 1);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let p = [origin[0] + i as f32 * cell, origin[1] + j as f32 * cell];
+                if inside(poly, p) {
+                    in_site[(j * nx + i) as usize] = true;
+                }
+            }
+        }
+    }
     let nat_at = |p: V2| -> f32 {
         let fx = ((p[0] - origin[0]) / cell).clamp(0.0, (nx - 1) as f32);
         let fy = ((p[1] - origin[1]) / cell).clamp(0.0, (ny - 1) as f32);
@@ -312,12 +348,30 @@ pub fn carve(ground: &mut Ground, built: &Built, nodes: &[NodeSpec], _info: &[Ro
     for v in 0..nv {
         hf.z[v] = if core_min[v].is_finite() {
             core_min[v]
+        } else if in_site[v] {
+            natural[v]
         } else if acc_w[v] <= 1.0 {
             natural[v] + acc_wt[v] - acc_w[v] * natural[v]
         } else {
             acc_wt[v] / acc_w[v]
         };
         hf.z[v] = hf.z[v].min(under[v]);
-        hf.z[v] = (hf.z[v] * 1000.0).round() / 1000.0;
+    }
+    for &(g, z) in aprons {
+        let r = (APRON_M / cell).ceil() as i64;
+        let ci = ((g[0] - origin[0]) / cell).round() as i64;
+        let cj = ((g[1] - origin[1]) / cell).round() as i64;
+        for j in (cj - r).max(0)..=(cj + r).min(ny - 1) {
+            for i in (ci - r).max(0)..=(ci + r).min(nx - 1) {
+                let p = [origin[0] + i as f32 * cell, origin[1] + j as f32 * cell];
+                if geom::dist(p, g) <= APRON_M {
+                    let v = (j * nx + i) as usize;
+                    hf.z[v] = hf.z[v].max(z - CARVE_BELOW_M);
+                }
+            }
+        }
+    }
+    for v in hf.z.iter_mut() {
+        *v = (*v * 1000.0).round() / 1000.0;
     }
 }

@@ -1140,7 +1140,30 @@ impl ProfIndex {
     }
 }
 
+/// A highway crossing made while profiling: `(own s, prof id, other s, point, upper?)`.
+type HwCrossing = (f32, usize, f32, V2, bool);
+
+/// Height of the nearest road surface centreline point within 4 m of `p` (plan view).
+fn surface_z_near(built: &Built, p: V2) -> Option<f32> {
+    let mut best: Option<(f32, f32)> = None;
+    for s in &built.surfaces {
+        for w in s.centre.windows(2) {
+            let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+            let ab = geom::sub(b, a);
+            let l2 = geom::dot(ab, ab).max(1e-6);
+            let t = (geom::dot(geom::sub(p, a), ab) / l2).clamp(0.0, 1.0);
+            let q = geom::add(a, geom::scale(ab, t));
+            let d = geom::dist(p, q);
+            if d < 4.0 && best.is_none_or(|x| d < x.0) {
+                best = Some((d, w[0][2] + (w[1][2] - w[0][2]) * t));
+            }
+        }
+    }
+    best.map(|b| b.1)
+}
+
 /// Bounds over a sample range from a crossing.
+#[allow(clippy::too_many_arguments)]
 fn add_bound(
     lo: &mut [f32],
     hi: &mut [f32],
@@ -1316,6 +1339,18 @@ fn profile_streets(
             g: gr,
         });
     }
+    // Gate ends sit exactly on the (levelled) site ground: driveways start there.
+    let mut pinned: Vec<Option<f32>> = vec![None; nn];
+    for e in &g.edges {
+        if e.gate.is_some() {
+            pinned[e.b] = Some(gnd.z(g.nodes[e.b].pos).max(plan::WATER_Z + 1.0));
+        }
+    }
+    for (zn, p) in z.iter_mut().zip(&pinned) {
+        if let Some(v) = p {
+            *zn = *v;
+        }
+    }
     for _ in 0..300 {
         let mut moved = false;
         for e in &envs {
@@ -1338,6 +1373,11 @@ fn profile_streets(
                     z[n] = u;
                     moved = true;
                 }
+            }
+        }
+        for (zn, p) in z.iter_mut().zip(&pinned) {
+            if let Some(v) = p {
+                *zn = *v;
             }
         }
         if !moved {
@@ -1474,10 +1514,9 @@ fn profile_highway(
     }
     // Gate ends at the ground.
     if hw.end_gate.is_some() {
-        for i in n.saturating_sub(8)..n {
-            lo[i] = raw[i];
-            hi[i] = raw[i];
-        }
+        let k = n.saturating_sub(8);
+        lo[k..n].copy_from_slice(&raw[k..n]);
+        hi[k..n].copy_from_slice(&raw[k..n]);
     }
     let total = hw.total();
     let ctot = cyclic.then_some(total);
@@ -1867,7 +1906,7 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
             }
         }
         // Highways in order: Crosstown, spurs, then Loop 9 (over the Crosstown).
-        let mut hw_cross: Vec<(usize, Vec<(f32, usize, f32, V2, bool)>)> = Vec::new();
+        let mut hw_cross: Vec<(usize, Vec<HwCrossing>)> = Vec::new();
         let mut hw_ids = vec![usize::MAX; hws.len()];
         let n_street_profs = idx.profs.len();
         for h in [
@@ -2554,7 +2593,18 @@ fn assemble(
     let crossings = find_crossings(&built, &specs);
     // Carve and structures.
     let natural = ground.hf.clone();
-    carve::carve(ground, &built, &nodes.specs, &info);
+    let aprons: Vec<(V2, f32)> = gate_reach
+        .iter()
+        .filter_map(|gr| {
+            let n = gr.node?;
+            let site = plan.sites.iter().find(|s| s.id == gr.site)?;
+            let gp = site.gates[gr.gate].pos;
+            let z = surface_z_near(&built, gp).unwrap_or(nodes.specs[n].z);
+            Some((gp, z))
+        })
+        .collect();
+    let site_polys: Vec<Vec<V2>> = plan.sites.iter().map(|s| s.polygon.clone()).collect();
+    carve::carve(ground, &built, &nodes.specs, &info, &aprons, &site_polys);
     let features = structures::features(
         plan, &ground.hf, &natural, &built, &specs, &info, &names, hws, &crossings, &mut notes,
     );
