@@ -1322,8 +1322,9 @@ Scenarios on the merged tree (release): all 86 pass.
 
 ### Response from D (round 13, row 85) — "massive traffic jam"
 Started on the owner's request (lead addendum 2026-10-20). Merged `origin/lead/round12` @ 21e14c0.
-**Status: done for the gates.** Both jam scenarios meet the lead's gates (no stop > 45 s except
-at red, no queue > 12) as hard `expect`s. Across seeds 1–4 + 85: stop gate 10 of 10 runs (worst
+**Status:** on the pre-main maps both jam scenarios met the lead's gates (no stop > 45 s except
+at red, no queue > 12). **On main's maps (after the 9a4272f8 merge) Vesper meets them, the grid
+does not** — see "Row 85 on main's maps" below. Pre-main, across seeds 1–4 + 85: stop gate 10 of 10 runs (worst
 39 s), queue gate 9 of 10 (Vesper seed 1: 17 cars for 3 s at a red, behind a car pulled over for
 a siren; cleared on the next green). Civilian collisions in the pursuit melee still need their
 own pass.
@@ -1412,6 +1413,53 @@ blocked / opponent / race / weather scenarios that run civilian traffic.
 `apps/simcli/scenarios/jam/*.ron`; `crates/wp_wasm/src/scenario.rs` one-line
 `restart_after_capture: false` so the shared scenario struct still builds. Contract change
 requests: none.
+### Row 85 on main's maps (merge of lead/round12 9a4272f8)
+Merged `origin/lead/round12` @ 9a4272f8 (main's rebuilt grid and Vesper, E's police,
+opponent-pace racers, brake bias). Conflicts: `apps/simcli/src/run.rs` (kept `cars` for
+`restart_after_capture` and the lead's `modded`), 24 golden hash files (re-blessed on the
+merged tip). `apps/simcli/src/police_bench.rs`: `restart_after_capture: false` for the new
+`Scenario` field (minimal compile fix).
+**Fixes found on the new maps** (all wp_world):
+- *Sneaker*: a left-turner waiting at the line with its permit keeps it through amber / red;
+  standing still it "could stop" at any decel, so the amber stopping check revoked the permit
+  the step after it was given and it sat out the next cycle too. Main's short greens (~14 s on
+  some approaches) made this the main grid jam.
+- *Booking without room*: a car starving behind a short block (22 m on main's grid) may book
+  its turn before the exit has room, so the room that comes free is its, not the other
+  approaches'. While it waits for room behind a red-light queue the booking does not lapse;
+  any other hold lapses it after 40 s (`BOOK_ROOM_MAX_S`).
+- *U-turns* also wait for the lane on their right (the reversing leg swings into it):
+  `world_traffic_soak_vesper` had one collision on main's Vesper.
+**Before / after on main's maps** (release simcli, 10 runs; before = this merge with the
+row-85 traffic rules taken out, instrumentation and capture restart kept; the before's
+metric holds only for `yielding`, it had no siren junction-hold timer to read):
+
+| run | max stop before / after (s) | max queue before / after |
+|---|---|---|
+| grid 1 | 53 / 52 | 12 / 8 |
+| grid 2 | 57 / 118 | 13 / 15 |
+| grid 3 | 143 / 37 | 17 / 9 |
+| grid 4 | 228 / 59 | 13 / 8 |
+| grid 85 | 66 / 27 | 18 / 15 |
+| Vesper 1 | 48 / 58 | 8 / 6 |
+| Vesper 2 | 79 / 29 | 8 / 6 |
+| Vesper 3 | 39 / 26 | 8 / 9 |
+| Vesper 4 | 46 / 26 | 9 / 7 |
+| Vesper 85 | 50 / 33 | 8 / 6 |
+
+**Vesper** (the shipped `jam/pursuit_jam_vesper.ron`, hard gates): stop gate met on 4 of 5
+seeds (seed 1: 58 s), queue 5 of 5 (before: 1 of 5 / 5 of 5).
+**Grid: not met on main's grid**; `jam/pursuit_jam_grid.ron` gates moved back to
+`expect_pending` (seed 85: stop 27 s passes, queue 15 fails — a red-light queue at a ~46 s red).
+Over the 5 grid seeds: stop gate 0 → 2 met, worst 228 → 118 s; queue gate 1 → 3 met. What is left
+is network capacity under a pursuit: 22 m blocks between a priority junction and a signal whose
+approach gets ~14 s of green per ~60 s cycle, with units crossing it with sirens (the front car
+is held by the siren hold or by units in the crossing paths, and the queue spills back through
+the short blocks; seed 2's 118 s car is behind such a block). Proposed next step (not done): give
+main's grid signals longer / actuated greens on short-block approaches (`procgen.rs` signal
+plans), and let the siren junction hold count per junction rather than per unit.
+**opponent-pace lantern_checkpoint**: see the gate below.
+
 ## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
 **Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
 the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
