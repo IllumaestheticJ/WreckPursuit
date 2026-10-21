@@ -26,6 +26,7 @@
 //! - [`session`] — end-of-run glue for `wp_sim`: sim events + damage reports → one settled
 //!   [`RunResult`].
 //! - [`career`] — scripted multi-night career simulation used for tuning.
+//! - [`visuals`] — what a build looks like: the parts its mods bolt on, for the renderer.
 
 #![warn(missing_docs)]
 
@@ -43,6 +44,7 @@ pub mod repair;
 pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
+pub mod visuals;
 
 pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundStatus};
 pub use data::{DataSources, Economy};
@@ -65,4 +67,5 @@ pub use session::{
     Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
     SessionConfig,
 };
+pub use visuals::{BuildVisuals, PartKind, PartVisual, VisualPart, WheelVisual};
 pub use wp_contracts::{AccountId, WantedLevel};

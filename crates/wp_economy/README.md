@@ -166,6 +166,17 @@ same line at an equal or higher tier, so upgrading a prerequisite never strands 
 - `Tool { kind, tier }` — radar detector, scanner, run-flat, reinforced cooling, fake plates,
   nitrous → `ToolLoadout`.
 
+**What a build looks like** (`visuals`, `Economy::build_visuals`): every mod that changes
+something you could see on a real car says so, and a build resolves to `BuildVisuals` — the parts
+to draw (`PartKind` + style + the body regions it is mounted on, so the renderer binds it to that
+region's lattice nodes: it dents, swings and detaches with that panel), per-wheel tire width /
+radius / compound from the *modified* `VehicleDef`, and the ride-height change. Parts come from
+`Cosmetic` effects and `wheels.tire_id` automatically, and from a mod's optional
+`"visuals": [{"part": "RearWing", "style": "gt"}]` list for parts whose effects are numbers
+(aero, brake kits, cages, bars, exhaust, intercooler, supercharger, carbon panels). Styles are
+validated at load; a test fails if any mod in a visible slot (wheels, tires, aero, body, hood,
+roof, paint, vinyls) draws nothing. The browser draws them in `apps/testbed-web/src/render/mod_parts.ts`.
+
 Every durability mod documents its trade-off in `tradeoff` (e.g. roll cage: +28 kg high in the
 cabin, raises the CG; reinforced front bumper: +20 kg in the nose, more understeer).
 
