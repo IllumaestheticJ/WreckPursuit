@@ -17,6 +17,7 @@ cargo run -p simcli -- determinism apps/simcli/scenarios          # 2× in-proce
 cargo run -p simcli -- hashes X.ron                               # hashes.txt to stdout
 cargo run -p simcli -- --fuzz --minutes 5 [--seed S]              # soak; repro → out/fuzz/*.ron
 cargo run -p simcli -- bundle > bundle.json                       # data root for the WASM runner
+cargo run --release -p simcli -- car-stats [--check]              # menu stat bars → data/stats/cars.json
 ```
 
 `simcli <file.ron>` without a subcommand means `run`. `--data DIR` picks the data root (default
@@ -48,6 +49,10 @@ cargo test -p simcli
 Runs every scenario (expectations + in-process determinism), the fresh-process check, golden
 comparison, output files, `--compare`, replay divergence reporting, the CI bless guard and a short
 fuzz. `cargo test --workspace` therefore fails when a change alters any golden.
+
+`tests/car_stats.rs` re-measures every car (about 2 s) and fails when `data/stats/cars.json` (the
+car picker's stat bars) drifts from the physics by more than 0.1 s 0–100, 2 km/h or 0.01 g, or a
+car is added / removed / renamed: run `just car-stats` and commit the table.
 
 ## Perf (harness overhead)
 

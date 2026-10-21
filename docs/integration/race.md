@@ -192,7 +192,7 @@ release is fine.
 | File | Change | Why |
 |---|---|---|
 | `Cargo.toml` (root) | `crates/wp_race` workspace member + `wp_race` workspace dependency | new crate |
-| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint, city sprint with police (round 6b) | scenario tests live there per `CLAUDE.md` |
+| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, off-route sprint (no DQ), city sprint, city sprint with police (round 6b) | scenario tests live there per `CLAUDE.md` |
 | `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; re-blessed for v0.2.0 physics; `race_city_sprint_police` added in round 6b) | `goldens_match` requires one per scenario |
 
 No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_opponent`, `wp_police`, `wp_sim` or
