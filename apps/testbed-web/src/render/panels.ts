@@ -20,12 +20,30 @@ export const PANEL_STRIDE = 10;
 /** Panel state codes (mirrors wp_damage::PanelState::code). */
 export const PANEL_STATE = { attached: 0, unlatched: 1, hanging: 2, detached: 3 } as const;
 
-/** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). */
+/** Materials of the mesh files (tools/assets) plus the ones mod parts use (render/mod_parts.ts). */
+export type PartMaterial =
+  | "paint"
+  | "glass"
+  | "trim"
+  | "headlight"
+  | "taillight"
+  | "rubber"
+  | "metal"
+  | "interior"
+  | "carbon"
+  | "chrome"
+  | "steel"
+  | "caliper"
+  | "caliperRace"
+  | "stripe";
+
+/** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). Mod parts
+ * (render/mod_parts.ts) use the same shape with kind "mod". */
 export interface MeshPartJson {
   name: string;
   region: string | null;
-  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim";
-  material: "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior";
+  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim" | "mod";
+  material: PartMaterial;
   wheel?: number | null;
   positions_mm: number[];
   uvs: number[];
@@ -147,16 +165,26 @@ export class PanelBody {
   ready = false;
   /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
   readonly wheelParts: THREE.Mesh[][] = [[], [], [], []];
+  /** Non-spinning parts per wheel index, hub space (brake calipers; parented under the steered
+   * hub, not the spinning wheel). */
+  readonly hubParts: THREE.Mesh[][] = [[], [], [], []];
+  /** The loaded mesh file (null until ready). */
+  mesh: CarMeshJson | null = null;
   /** Latest panel states (PANEL_STRIDE floats per panel). */
   states: Float32Array = new Float32Array(0);
   private parts: PartRT[] = [];
-  private readonly regions: string[];
-  private restNodes: Float32Array = new Float32Array(0);
+  /** Region names of the car (`vehicle_info.regions`; index = region code). */
+  readonly regions: string[];
+  /** Lattice rest nodes, chassis space (xyz per node). */
+  restNodes: Float32Array = new Float32Array(0);
+  /** Region code per lattice node. */
+  nodeRegions: Uint8Array = new Uint8Array(0);
   /** Region index → three node ids spanning the panel (frame fit), for panel regions. */
   private readonly tri = new Map<number, [number, number, number]>();
   private readonly frames = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
-  private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
+  /** One material per kind, shared by every part of this car. */
+  readonly mats: Record<PartMaterial, THREE.Material>;
   private onReady: (() => void) | null = null;
 
   constructor(
@@ -178,9 +206,17 @@ export class PanelBody {
       rubber: std({ color: 0x141414, roughness: 0.95 }),
       metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
       interior: std({ color: 0x2b2724, roughness: 1 }),
+      carbon: std({ color: 0x1c1d20, metalness: 0.35, roughness: 0.3 }),
+      chrome: std({ color: 0xd8dde2, metalness: 0.95, roughness: 0.12 }),
+      steel: std({ color: 0x2a2c2e, metalness: 0.6, roughness: 0.55 }),
+      caliper: std({ color: 0xc8161d, metalness: 0.2, roughness: 0.45 }),
+      caliperRace: std({ color: 0xe0a812, metalness: 0.3, roughness: 0.4 }),
+      stripe: std({ color: 0xf2f2f2, roughness: 0.5 }),
     };
     bodies.set(entity, this);
-    void loadCarMesh(carId).then((m) => m && this.build(m));
+    // A body disposed before its mesh arrived (session restarted) must not skin itself to the
+    // new session's lattice.
+    void loadCarMesh(carId).then((m) => m && bodies.get(entity) === this && this.build(m));
   }
 
   /** Called once the mesh has loaded (immediately if it already has). */
@@ -195,37 +231,51 @@ export class PanelBody {
   }
 
   private build(mesh: CarMeshJson): void {
+    this.mesh = mesh;
     this.restNodes = sim.latticeRest(this.entity);
-    const nodeRegions = sim.latticeRegions(this.entity);
-    for (const def of mesh.parts) {
-      const n = def.positions_mm.length / 3;
-      const rest = new Float32Array(n * 3);
-      for (let i = 0; i < n * 3; i++) rest[i] = def.positions_mm[i] * 1e-3;
-      const geom = new THREE.BufferGeometry();
-      const pos = rest.slice();
-      geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      const uv = new Float32Array(def.uvs.length);
-      for (let i = 0; i < uv.length; i++) uv[i] = def.uvs[i] / 65535;
-      geom.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-      geom.setIndex(def.indices);
-      const m = new THREE.Mesh(geom, this.mats[def.material]);
-      m.name = def.name;
-      m.frustumCulled = false;
-      if (def.material === "glass") m.renderOrder = 1;
-      const region = def.region ? this.regions.indexOf(def.region) : -1;
-      if (def.wheel != null) {
-        this.wheelParts[def.wheel].push(m);
-        continue;
-      }
-      this.root.add(m);
-      const w = new Float32Array(def.skin_weights.length);
-      for (let i = 0; i < w.length; i++) w[i] = def.skin_weights[i] / 255;
-      this.parts.push({ def, mesh: m, pos, rest, nodes: Uint16Array.from(def.skin_nodes), weights: w, region, hidden: false });
-      if (region >= 0 && !this.tri.has(region)) this.tri.set(region, spanTriangle(this.restNodes, nodeRegions, region));
-    }
+    this.nodeRegions = sim.latticeRegions(this.entity);
+    for (const def of mesh.parts) this.addPart(def);
     this.ready = true;
     this.update(this.restNodes, 0);
     this.onReady?.();
+  }
+
+  /**
+   * Add one part (a mesh-file part, or a mod part from render/mod_parts.ts). Body parts are
+   * skinned to `skin_nodes` and follow dents, hinges and detachment of their region; wheel
+   * parts (`wheel` set) go to `wheelParts`, hub space. Returns the mesh.
+   */
+  addPart(def: MeshPartJson): THREE.Mesh {
+    const n = def.positions_mm.length / 3;
+    const rest = new Float32Array(n * 3);
+    for (let i = 0; i < n * 3; i++) rest[i] = def.positions_mm[i] * 1e-3;
+    const geom = new THREE.BufferGeometry();
+    const pos = rest.slice();
+    geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const uv = new Float32Array(def.uvs.length);
+    for (let i = 0; i < uv.length; i++) uv[i] = def.uvs[i] / 65535;
+    geom.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    geom.setIndex(def.indices);
+    const m = new THREE.Mesh(geom, this.mats[def.material]);
+    m.name = def.name;
+    m.frustumCulled = false;
+    if (def.material === "glass") m.renderOrder = 1;
+    const region = def.region ? this.regions.indexOf(def.region) : -1;
+    if (def.wheel != null) {
+      this.wheelParts[def.wheel].push(m);
+      return m;
+    }
+    this.root.add(m);
+    const w = new Float32Array(def.skin_weights.length);
+    for (let i = 0; i < w.length; i++) w[i] = def.skin_weights[i] / 255;
+    this.parts.push({ def, mesh: m, pos, rest, nodes: Uint16Array.from(def.skin_nodes), weights: w, region, hidden: false });
+    if (region >= 0 && !this.tri.has(region)) this.tri.set(region, spanTriangle(this.restNodes, this.nodeRegions, region));
+    return m;
+  }
+
+  /** Body part meshes (not wheels) with their mesh-file definition. */
+  bodyParts(): { def: MeshPartJson; mesh: THREE.Mesh }[] {
+    return this.parts.map((p) => ({ def: p.def, mesh: p.mesh }));
   }
 
   /** Hide a shattered glass region. */

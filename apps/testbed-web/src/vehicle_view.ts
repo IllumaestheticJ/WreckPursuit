@@ -8,6 +8,7 @@ import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody } from "./render/panels";
+import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -77,6 +78,10 @@ export class VehicleView {
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   private readonly lamps: THREE.Mesh[] = [];
+  /** Installed mods' parts (scenario `mods`, `entity_visuals_json`); null for stock cars. */
+  readonly build: BuildVisuals | null;
+  /** What was fitted on the panel mesh once it loaded. */
+  fitted: FittedBuild | null = null;
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
@@ -192,8 +197,17 @@ export class VehicleView {
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
     this.root.add(this.panels.root);
+    const build = police || this.info.kind === "Traffic" ? null : sim.entityVisuals(entity);
+    this.build = build && (build.parts.length > 0 || build.mods.length > 0) ? build : null;
     this.panels.whenReady(() => {
+      // Mod parts first, so their wheel pieces are parented with the stock ones below.
+      if (this.build) {
+        this.fitted = fitBuild(this.panels, this.build, this.info.wheels, { head: this.headMat, tail: this.tailMat });
+        // Springs move the body relative to the wheels (the sim's wheels stay on the road).
+        this.panels.root.position.z = this.build.ride_height_m;
+      }
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
+      this.wheels.forEach((w, i) => this.panels.hubParts[i].forEach((m) => w.pivot.add(m)));
       // The panel body is longer than the debug box: move the lamp markers onto its nose and
       // tail so head and brake lights show (the mesh's own light parts sit inside the shell).
       this.root.updateWorldMatrix(true, true);
@@ -262,6 +276,7 @@ export class VehicleView {
         const ours = this.panels.wheelParts.some((p) => p.includes(c as THREE.Mesh));
         c.visible = ours ? panelsOn : !panelsOn;
       }
+    for (const hub of this.panels.hubParts) for (const m of hub) m.visible = panelsOn;
     if (panelsOn) {
       const v = new THREE.Vector3(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
       this.panels.update(this.nodes, dt, v);

@@ -24,9 +24,12 @@ npm run typecheck
 | `src/telemetry.ts` | rolling 10 s canvas plots |
 | `src/input.ts` | keyboard ramps + Gamepad API with deadzones |
 | `src/ui/carStats.ts` | stat bars under the car picker (acceleration, top speed, cornering) from `sim.carStats()` (`data/stats/cars.json`, measured on the physics rig); options carry the numbers as tooltips |
+| `src/ui/modShop.ts` | "mods" button: install mods on the car (catalog from `sim.modCatalog`, checked by `sim.buildVisuals`); each change respawns with the build as the player's scenario `mods`; builds saved per car (`wp.builds`), `?mods=a,b` |
+| `src/render/mod_parts.ts` | draws a build's parts (`entity_visuals_json`): wings, splitters, kits, cages, bars, rims, tread, brakes, paint finish, vinyls; fitted by ray-probing the panel mesh and skinned to the mount region's lattice nodes (dent / hinge / detach with it) |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
+| `e2e/mods_shots.mjs` | modified-car screenshots (stock / street / widebody / protection builds; `node e2e/mods_shots.mjs [dir]`, `ONLY=street`, `CAR=…`) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
 Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2

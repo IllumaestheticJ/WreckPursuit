@@ -4,7 +4,8 @@
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase.
+// city chase, ?mods=wheels_forged,aero_wing_1 installs mods on the player car (else the build
+// saved for that car in the mod shop).
 import { loadWasm, sim, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
@@ -19,6 +20,7 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
 import { CarStatBars, statLine } from "./ui/carStats";
+import { ModShop } from "./ui/modShop";
 import { RealTimeMeter } from "./rtf";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -104,6 +106,33 @@ async function main(): Promise<void> {
     console.warn("car stats unavailable", e);
   }
   const carStats = statTable ? new CarStatBars($("car-stats"), statTable) : null;
+  // Mod shop: every change respawns the session with the build on the player car.
+  let urlMods: string[] | null = params.get("mods")?.split(",").filter(Boolean) ?? null;
+  const modsFor = (car: string) => {
+    const m = modShop.modsFor(car, urlMods);
+    urlMods = null;
+    return m;
+  };
+  const withMods = (json: string, mods: string[]) => {
+    if (mods.length === 0) return json;
+    const sc = JSON.parse(json) as { entities: { mods?: string[] }[] };
+    sc.entities[0].mods = mods;
+    return JSON.stringify(sc);
+  };
+  const modShop = new ModShop(
+    $("mod-shop"),
+    (mods) => {
+      const sc = sim.scenario();
+      const car = sc.entities[0]?.car ?? DEFAULT_CAR;
+      if (sc.name === "city_chase") startCityChase(car, sc.mode, mods);
+      else startFreeDrive(car, sc.mode, undefined, undefined, mods);
+    },
+    (open) => {
+      // Walk round the car while shopping; back to the viewer's angle after.
+      if (open) rig.setMode("orbit", app.views.get(app.player)?.root);
+      else rig.setMode(rig.preferred, app.views.get(app.player)?.root);
+    },
+  );
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -138,6 +167,7 @@ async function main(): Promise<void> {
     const first = app.views.get(app.player);
     if (first) ($("car") as HTMLSelectElement).value = first.info.car_id;
     carStats?.show(($("car") as HTMLSelectElement).value);
+    if (first) modShop.show(first.info.car_id, sc.entities[0]?.mods ?? []);
     if (app.scenarioFile) ($("sc-select") as HTMLSelectElement).value = app.scenarioFile;
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -177,12 +207,13 @@ async function main(): Promise<void> {
     mode = ($("mode") as HTMLSelectElement).value,
     city = ($("city") as HTMLInputElement).checked,
     hour?: number,
+    mods = modsFor(car),
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    let json = city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false);
+    let json = withMods(city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false), mods);
     // Optional start hour (automation: day/night screenshots).
     if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
     sim.init(1, json, false);
@@ -195,12 +226,13 @@ async function main(): Promise<void> {
   const startCityChase = (
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
+    mods = modsFor(car),
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(0, sim.cityChaseCityJson(car, mode, citySel.value), false);
+    sim.init(0, withMods(sim.cityChaseCityJson(car, mode, citySel.value), mods), false);
     rebuildViews();
     applyAssistPreset(app.source);
     // Back to the viewer's own angle (near chase unless they picked another one).
@@ -211,14 +243,20 @@ async function main(): Promise<void> {
   const restartRun = () => {
     const sc = sim.scenario();
     const car = sc.entities[0]?.car;
-    if (sc.name === "city_chase") startCityChase(car, sc.mode);
-    else startFreeDrive(car, sc.mode);
+    const mods = sc.entities[0]?.mods ?? [];
+    if (sc.name === "city_chase") startCityChase(car, sc.mode, mods);
+    else startFreeDrive(car, sc.mode, undefined, undefined, mods);
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
     const text = await (await fetch(`scenarios/${file}`)).text();
     let json = sim.scenarioFromRon(text);
     if (speedKmh && speedKmh > 0) json = sim.scenarioWithSpeed(json, speedKmh / 3.6);
+    runScenarioJson(json, file);
+  };
+
+  /** Run a scenario given as simcli v2 JSON (automation: e.g. a crash test with `mods`). */
+  const runScenarioJson = (json: string, file: string | null = null) => {
     app.scenarioFile = file;
     app.result = null;
     app.bench = null;
@@ -308,6 +346,7 @@ async function main(): Promise<void> {
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
   $("sc-chase").onclick = () => startCityChase();
+  $("mods-btn").onclick = () => modShop.toggle();
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
@@ -703,6 +742,7 @@ async function main(): Promise<void> {
     stopRecording,
     loadReplay,
     runScenario,
+    runScenarioJson,
     startFreeDrive,
     startCityChase,
     startBench,
@@ -717,9 +757,11 @@ async function main(): Promise<void> {
       rig.camera.updateProjectionMatrix();
     },
     toggleLayer: (id: string) => layers.toggle(id),
+    layers,
     ui,
     runEnd,
     restartRun,
+    modShop,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
   requestAnimationFrame(frame);

@@ -2,6 +2,7 @@
 // JSON only for rare structured data.
 import initWasm, * as wasm from "./pkg/wp_wasm.js";
 import type { PoliceStatus } from "../police";
+import type { BuildVisuals } from "../render/mod_parts";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
 export interface DriverInput {
@@ -77,7 +78,7 @@ export interface Scenario {
   mode: "Arcade" | "Simulation";
   duration_s: number;
   barriers?: Barrier[];
-  entities: { id: string; car: string; pos: number[]; yaw: number }[];
+  entities: { id: string; car: string; pos: number[]; yaw: number; mods?: string[] }[];
   [k: string]: unknown;
 }
 
@@ -121,6 +122,20 @@ export interface ReplayStatus {
   hash_spec: number;
 }
 
+/** One entry of `mod_catalog_json(car)`: `wp_economy::ModDef` plus the parts it draws. */
+export interface ModEntry {
+  id: string;
+  name: string;
+  slot: string;
+  line: string;
+  tier: number;
+  price: number;
+  requires?: string[];
+  tradeoff: string;
+  /** `[PartKind, style]` pairs (`wp_economy::visuals::mod_parts`); empty = nothing visible. */
+  parts: [string, string][];
+}
+
 /** SimEvent as decoded by events_decode (serde externally tagged). */
 export type SimEvent = Record<string, Record<string, unknown>>;
 
@@ -149,6 +164,18 @@ export const sim = {
   step: (dt: number): number => wasm.step(dt),
   setDamageMode: (mode: string): void => wasm.set_damage_mode(mode),
   carIds: (): string[] => JSON.parse(wasm.car_ids()),
+  /** Mods the car's class may fit, with the parts each draws (no session needed). */
+  modCatalog: (car: string): ModEntry[] => JSON.parse(wasm.mod_catalog_json(car)),
+  /** What a mod set looks like on a car; throws the economy's reason for an illegal set. */
+  buildVisuals: (car: string, mods: string[]): BuildVisuals => JSON.parse(wasm.build_visuals_json(car, JSON.stringify(mods))),
+  /** Parts of a live entity's installed mods (scenario `mods`); null if unavailable. */
+  entityVisuals: (entity: number): BuildVisuals | null => {
+    try {
+      return JSON.parse(wasm.entity_visuals_json(entity)) as BuildVisuals;
+    } catch {
+      return null;
+    }
+  },
   /** Menu stat bars for every car (`wp_wasm::car_stats_json`, no session needed). */
   carStats: (): CarStatsTable => JSON.parse(wasm.car_stats_json()),
   spawn: (carId: string, pos: [number, number, number], yaw: number): number =>
