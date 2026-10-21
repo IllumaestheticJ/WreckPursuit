@@ -491,17 +491,14 @@ fn hollins_hill_sprint() {
 /// [`check`] for a race with police on the course: racers the police caught or chased off
 /// (`Dnf(Captured)` / `Dnf(Fled)`) count with the finishers towards `min_finish`, and the
 /// winner's window stretches to 180 s when the police took someone out (the chase holds the
-/// field up). The race must still end with a winner and nobody wrecked.
-fn check_with_police(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
-    check_with_police_inner(r, winner_s, min_finish, false);
-}
-
-/// [`check_with_police`] that also accepts a race in which the police took every racer out
-/// (all `Dnf(Captured)` / `Dnf(Fled)`): it must still have ended, with nobody wrecked.
+/// field up). The race must still end with a winner and nobody wrecked — unless `all_out_ok`
+/// and the police took every racer out (all `Dnf(Captured)` / `Dnf(Fled)`): then it must still
+/// have ended, with nobody wrecked.
 fn check_with_police_all_out_ok(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
     check_with_police_inner(r, winner_s, min_finish, true);
 }
 
+/// [`check_with_police_all_out_ok`] with the all-out case switchable.
 fn check_with_police_inner(
     r: &Raced,
     winner_s: std::ops::Range<f32>,
