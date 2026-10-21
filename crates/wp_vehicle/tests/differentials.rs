@@ -329,13 +329,16 @@ fn roster_diff_hashes_are_pinned() {
     // anti-dive jacks); the other three are unchanged.
     // Re-recorded [bless] for the spin side-force floor (the split-µ launch spins the
     // low-µ wheel past κ 0.3).
+    // Re-recorded [bless] for the unify (lead, 2026-10-21): every car drives the shipped
+    // handling (spin-model tyres, firm ride, grip balance; `wp_vehicle::lab_scope`), a tyre /
+    // suspension change, not a differential change.
     let pinned: [(&str, u64); 6] = [
-        ("shiro_turbo", 0x0a67863c34295311),
-        ("hakone_gt", 0x2796f7f441945760),
-        ("sperber_32", 0xea36fd40ac4ad9eb),
-        ("lindwurm_4t", 0xf2c2302ee4933a70),
-        ("sentinel_wolfhound", 0x592b053674d3f09d),
-        ("junkyard_beater", 0xb3fb3f7abfb495dd),
+        ("shiro_turbo", 0xe974f5f344cafa5d),
+        ("hakone_gt", 0xa25a3d864692febf),
+        ("sperber_32", 0x6ec7597bb0be13fd),
+        ("lindwurm_4t", 0xb45c6bdf70787af1),
+        ("sentinel_wolfhound", 0x592531355613677e),
+        ("junkyard_beater", 0x5fed6421f8a26534),
     ];
     let mut got = Vec::new();
     for (id, _) in pinned {

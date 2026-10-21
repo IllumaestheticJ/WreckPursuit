@@ -10,6 +10,9 @@ use wp_vehicle::plain::{self, PlainSteer};
 
 #[test]
 fn held_countersteer_does_not_hold_on_data_nor_with_the_spin_grip_damper_set() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let c = load_any_car(&data, "parity_rwd_d").unwrap();
     let a = reference_assists();

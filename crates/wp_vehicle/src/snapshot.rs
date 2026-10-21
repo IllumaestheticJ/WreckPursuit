@@ -21,8 +21,10 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// the drift side and lift-off transition flag (Drift Lab C, row 107). Format 10: plus the
 /// confirmed-slide gate of the steering (row 102). Format 11: plus the keyboard key ramp
 /// (keys arrive raw, Drift Lab C step 6). Format 12: plus the handbrake-held time (pivot aid,
-/// owner row 109; round12 used 9 for that on A's lineage).
-const FORMAT: u8 = 12;
+/// owner row 109; round12 used 9 for that on A's lineage). Format 13: plus the plain keyboard
+/// steering state (lift / reversal / slide-crossing timers, last key and slide side, slip rate
+/// and countersteer timers, rack yield), now part of the shipped player handling (unify, 2026-10-21).
+const FORMAT: u8 = 13;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,6 +246,7 @@ impl Vehicle {
         w.fs(&self.slide_gate.to_array());
         w.f(self.key_steer);
         w.f(self.hb_held_s);
+        w.fs(&self.plain_state());
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -358,6 +361,10 @@ impl Vehicle {
         }
         let key_steer = r.f()?;
         let hb_held_s = r.f()?;
+        let mut plain = [0.0f32; Vehicle::PLAIN_STATE_LEN];
+        for p in &mut plain {
+            *p = r.f()?;
+        }
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -403,6 +410,7 @@ impl Vehicle {
         self.slide_gate = crate::steering::SlideGate::from_array(gate);
         self.key_steer = key_steer;
         self.hb_held_s = hb_held_s;
+        self.set_plain_state(plain);
         Ok(())
     }
 }

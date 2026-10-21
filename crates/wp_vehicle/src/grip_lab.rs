@@ -169,6 +169,12 @@ pub struct GripBalance {
     /// reversal). Off by default: a lift with the counter key held is W's snap-back exit,
     /// which the cut must keep (with it on, the snap-back overshoot is 3° → 42°).
     pub slide_lock_release_on_lift: bool,
+    /// The transition release opens only on a key reversal made with at least this much body
+    /// slip, °: a swing out of a drift, not the entry into one (into-turn key → countersteer at
+    /// a small, growing slip; tyre-slip, rampart_50 2026-10-21). 10 in the lab default: with
+    /// tyres B rampart_50's flick reversals come at 10–15° (15+ catches 2 / 9 of its flicks,
+    /// 10 catches 7 / 9) and its entry holds either way. 0 = any reversal.
+    pub slide_lock_release_from_deg: f32,
     /// Apply the lab-only per-car fixes ([`car_fix`]): car-data proposals for the car-data
     /// owner, tried in the lab first (lead-approved 2026-10-21).
     pub car_fixes: bool,
@@ -226,6 +232,7 @@ impl Default for GripBalance {
             slide_lock_to_deg: 0.0,
             slide_lock_release_s: 0.0,
             slide_lock_release_on_lift: false,
+            slide_lock_release_from_deg: 0.0,
             car_fixes: false,
         }
     }
@@ -242,7 +249,8 @@ impl GripBalance {
     ///   step the rear out (owner, step 18) and over-rotations stay catchable;
     /// - rear downforce C·A 0.8 m², the probe tilt fix;
     /// - front-drive cars: the data tyres with the rear anti-roll bar × 2;
-    /// - the held-key slide lock and the lab car fixes.
+    /// - the held-key slide lock. The lab car fixes are in `data/cars` now (unify), so
+    ///   `car_fixes` is off.
     ///
     /// Tuned on the "firm" ride (`ride_lab::RideTune::firm`): with W's soft medium-weight bars
     /// (× 0.15) the rear still steps out on a lift.
@@ -277,9 +285,18 @@ impl GripBalance {
             // ... and for 0.75 s after a steering-key reversal (a transition's new-side
             // countersteer may reach the travel angle; not on a lift: W's snap-back exit).
             slide_lock_release_s: 0.75,
-            car_fixes: true,
+            slide_lock_release_from_deg: 10.0,
+            car_fixes: false,
             ..Self::default()
         }
+    }
+
+    /// The shipped balance (unify, 2026-10-21): [`GripBalance::lab_default`]. Its car fixes
+    /// (`car_fixes` off there now) live in `data/cars` (debug_coupe bars × 0.5; lucciola_350 rear
+    /// springs × 0.65 with the ride height kept, yaw inertia × 1.2). Every vehicle
+    /// (`crate::lab_scope`).
+    pub fn shipped() -> Self {
+        Self::lab_default()
     }
 
     /// The step-14 … step-19 "new" (one click away, "balance: step 14"): the smart lock, RWD
@@ -318,7 +335,7 @@ impl GripBalance {
             // ... except while the slide still grows (W's over-rotation catch, step 11).
             slide_lock_growth_dps: 15.0,
             slide_lock_to_deg: 40.0,
-            car_fixes: true,
+            car_fixes: false,
             ..Self::default()
         }
     }
@@ -516,7 +533,15 @@ impl GripBalance {
             counter_s,
             since_lift_s,
             since_reversal_s,
+            reversal_slip,
         } = slide;
+        // Only a reversal out of a developed slide opens the release (not a drift's entry).
+        let since_reversal_s =
+            if reversal_slip.to_degrees() + 1e-4 >= self.slide_lock_release_from_deg {
+                since_reversal_s
+            } else {
+                1.0e3
+            };
         let since_release_s = if self.slide_lock_release_on_lift {
             since_lift_s.min(since_reversal_s)
         } else {
@@ -608,6 +633,8 @@ pub struct LockSlide {
     pub since_lift_s: f32,
     /// Time since the last steering-key reversal, s (large = none recent).
     pub since_reversal_s: f32,
+    /// |Body slip| at the last steering-key reversal, rad.
+    pub reversal_slip: f32,
 }
 
 /// A lab-only per-car fix ([`car_fix`]): scales on the car data, applied by the vehicle while
@@ -827,9 +854,15 @@ mod tests {
         assert_eq!(r.lateral.d, t.lateral.d);
         f.apply_tire(&mut r, 2, &DriveLayout::Fwd);
         assert!((r.lateral.d - 0.9 * t.lateral.d).abs() < 1e-6);
-        // Per-car fixes: only the listed cars, only with `car_fixes`.
-        assert!(GripBalance::lab_default().fix_for("debug_coupe").is_some());
-        assert!(GripBalance::lab_default().fix_for("shiro_turbo").is_none());
+        // Per-car fixes: only the listed cars, only with `car_fixes` (off in the lab default:
+        // the fixes are in data/cars since the unify).
+        let fixes = GripBalance {
+            car_fixes: true,
+            ..GripBalance::lab_default()
+        };
+        assert!(GripBalance::lab_default().fix_for("debug_coupe").is_none());
+        assert!(fixes.fix_for("debug_coupe").is_some());
+        assert!(fixes.fix_for("shiro_turbo").is_none());
         assert!(GripBalance::default().fix_for("debug_coupe").is_none());
         // The held-key slide lock: countersteer deep in a slide, once the key is held 0.8 s
         // (past 0.5 s + the 0.3 s phase-in); a fresh tap keeps the plain lock.
@@ -847,6 +880,7 @@ mod tests {
                     counter_s: 0.8,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -865,6 +899,7 @@ mod tests {
                     counter_s: 0.8,
                     since_lift_s: 1.0e3,
                     since_reversal_s: since,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap()
@@ -884,6 +919,7 @@ mod tests {
                     counter_s: 0.1,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -901,6 +937,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -924,7 +961,8 @@ mod tests {
                     slip_rate: 0.0,
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
-                    since_reversal_s: 1.0e3
+                    since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 }
             ),
             None
@@ -944,6 +982,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -962,6 +1001,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap()
@@ -982,6 +1022,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -999,6 +1040,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();
@@ -1021,6 +1063,7 @@ mod tests {
                     counter_s: 0.0,
                     since_lift_s: 1.0e3,
                     since_reversal_s: 1.0e3,
+                    reversal_slip: 1.0,
                 },
             )
             .unwrap();

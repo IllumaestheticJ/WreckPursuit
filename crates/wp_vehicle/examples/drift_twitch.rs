@@ -12,6 +12,9 @@ fn car(id: &str) -> LoadedCar {
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     if let Ok(j) = std::env::var("DRIFT_TUNING") {
         wp_vehicle::drift::set_tuning_override(Some(
             serde_json::from_str(&j).expect("DRIFT_TUNING json"),

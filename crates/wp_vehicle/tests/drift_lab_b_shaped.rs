@@ -7,6 +7,7 @@ use wp_vehicle::drift::{set_tuning_override, DriftTuning};
 use wp_vehicle::drift_lab::{drift_run, DriftDriver};
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn shaping_holds_the_powerful_car_and_flooring_still_spins() {
     let p = format!(
         "{}/../../data/cars/rampart_50.json",

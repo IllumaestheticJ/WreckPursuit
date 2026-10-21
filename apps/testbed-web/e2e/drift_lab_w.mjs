@@ -1,6 +1,8 @@
-// Drift Lab W (lead/drift-lab-w): ?drift=w opens the lab with the parity car, plain steering and
-// the lab's ride tuning; the tune panel changes the overrides; a held key moves the rack at the
-// plain rate; every parity car starts (car, panels, mesh) from the car selector.
+// The handling test pad + tune panel (unify, 2026-10-21; was Drift Lab W): ?drift=w opens the
+// pad with the parity car and the tune panel open; the panel changes the debug overrides; a held
+// key moves the rack at the plain rate; every parity car starts from the car selector. Then the
+// game itself: free drive, chase and races run the shipped handling (steering aids on the
+// player's car only), F7 / ?tune=1 show the hidden panel, no separate lab entry points.
 // `npm run build && node e2e/drift_lab_w.mjs` (PREVIEW=0: against `vite` dev instead of the
 // built site; SHOT=path.png saves a screenshot).
 import { spawn } from "node:child_process";
@@ -316,56 +318,21 @@ for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo"
   sc = await sim();
   check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === car, `selector → ${car}`);
 }
-// From free drive, the testbed's "drift lab W" button lands in W (not the old lab C).
-const freeDrive = async () => {
-  await page.goto(`http://localhost:${PORT}/`);
+// Unify (lead, 2026-10-21): the W handling is the game's handling. Free drive, city chase and
+// races run it with no panel and no saved overrides: shipped physics on every car, the plain
+// steering on the player's car only. The tune panel is hidden (F7 / ?tune=1).
+const freeDrive = async (q = "") => {
+  await page.goto(`http://localhost:${PORT}/${q}`);
   await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
   await page.keyboard.press("Escape").catch(() => {});
 };
+await page.evaluate(() => {
+  for (const k of Object.keys(localStorage)) if (k.startsWith("wp.tune.")) localStorage.removeItem(k);
+});
 await freeDrive();
 check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
-// "Use W handling everywhere" (default ON): free drive keeps the W profile on the player only.
-{
-  const w = await page.evaluate(() => {
-    const s = window.__wp.sim;
-    const p = window.__wp.app.player;
-    return { plain: s.plainSteer() !== null, grip: s.gripBalance()?.lock_mode, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
-  });
-  check(w.plain && w.grip === "smart" && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
-}
-check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
-// The career garage can sit over free drive on load; the button's own click handler is
-// what the owner hits from the testbed panel.
-await page.evaluate(() => document.getElementById("sc-drift-w").click());
-await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
-sc = await sim();
-check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `button → ${sc.name} / ${sc.entities?.[0]?.car}`);
-check((await page.evaluate(() => window.__wp.sim.plainSteer())) !== null, "button → plain steering on");
-check((await page.title()) === "Drift Lab W", `button → title "${await page.title()}"`);
-await page.waitForTimeout(500);
-const visible = await page.evaluate(() => document.body.innerText);
-check(!/drift lab c/i.test(visible) && (await page.getByText(/drift lab c/i).count()) === 0, "no visible 'Drift Lab C' anywhere (incl. shadow roots)");
-check(/Drift Lab W · plain steering/.test(await page.locator("#drift-lab-w").innerText()), "button → W readout");
-check(await page.locator("#drift-lab-w-everywhere").isChecked(), "panel: 'use W handling everywhere' on by default");
-// The start menu's entry: "Drift Lab W" (no "Drift Lab C" entry) launches W.
-await freeDrive();
-await page.evaluate(() => window.__wp.menu.openMain());
-await page.getByText("Drift Lab W", { exact: true }).first().waitFor({ timeout: 10000 }).catch(() => {});
-// The menu renders in a shadow root: locators pierce it, body.innerText does not.
-const wEntries = await page.getByText("Drift Lab W", { exact: true }).count();
-const cEntries = await page.getByText(/drift lab c/i).count();
-check(wEntries > 0 && cEntries === 0, `menu lists Drift Lab W (${wEntries}), no Drift Lab C (${cEntries})`);
-await page.getByText("Drift Lab W", { exact: true }).first().click();
-await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
-sc = await sim();
-check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `menu → ${sc.name} / ${sc.entities?.[0]?.car}`);
-// City chase with "use W handling everywhere" on: the player's car runs the W profile, the
-// police / traffic cars do not; off → stock handling.
-const chase = async () => {
-  await page.goto(`http://localhost:${PORT}/?chase=1`);
-  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "city_chase", null, { timeout: 90000 }).catch(() => {});
-  await page.waitForTimeout(3000);
-  return page.evaluate(() => {
+const handling = () =>
+  page.evaluate(() => {
     const s = window.__wp.sim;
     const p = window.__wp.app.player;
     const others = s.entities().filter((e) => e !== p);
@@ -373,32 +340,67 @@ const chase = async () => {
       name: s.scenario().name,
       plain: s.plainSteer() !== null,
       spin: s.carTune()?.spin_model === true,
-      only: s.labScopeTaggedOnly(),
-      tagged: s.labTagged(p),
+      grip: s.gripBalance()?.lock_mode,
+      firm: Math.abs((s.rideTune()?.spring ?? 0) - 1.5) < 1e-6,
+      player: s.playerInput(p),
       others: others.length,
-      othersTagged: others.filter((e) => s.labTagged(e)).length,
-      badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display,
+      othersPlayer: others.filter((e) => s.playerInput(e)).length,
+      panel: getComputedStyle(document.getElementById("drift-lab-w")).display,
+      title: document.title,
     };
   });
-};
 {
-  const c = await chase();
-  check(c.name === "city_chase" && c.plain && c.spin && c.only && c.tagged, `start chase → W profile active on the player (${JSON.stringify(c)})`);
-  check(c.badge !== "none", "chase: 'W handling' tag shown");
-  await page.evaluate(() => localStorage.setItem("wp.driftLabW.everywhere", "0"));
-  const off = await chase();
-  check(off.name === "city_chase" && !off.plain && !off.only && !off.tagged && off.badge === "none", `toggle off → stock handling in the chase (${JSON.stringify(off)})`);
-  await page.evaluate(() => localStorage.removeItem("wp.driftLabW.everywhere"));
-  // A street race: the AI racers keep the stock handling, the player gets W.
+  const w = await handling();
+  check(w.plain && w.spin && w.grip === "smart" && w.firm && w.player, `free drive: shipped handling, player steering aids (${JSON.stringify(w)})`);
+  check(w.panel === "none" && w.title !== "Drift Lab W", `free drive: tune panel hidden (${w.panel})`);
+  check((await page.locator("#sc-drift-w").count()) === 0, "no separate drift lab W button");
+  await page.keyboard.press("F7");
+  check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "F7 shows the tune panel");
+  await page.keyboard.press("F7");
+  check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "none", "F7 hides it again");
+}
+await freeDrive("?tune=1");
+check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "?tune=1 shows the tune panel");
+check((await sim()).name !== "drift_lab_w", "?tune=1 keeps the session (no separate lab)");
+{
+  // The pre-unify A/B checkbox: legacy = the old stock path; back off = shipped.
+  await page.evaluate(() => {
+    const b = document.getElementById("drift-lab-w-legacy");
+    if (b && !b.checked) b.click();
+  });
+  const legacy = await page.evaluate(() => ({ l: window.__wp.sim.labScopeLegacy(), car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
+  check(legacy.l && legacy.car === null && legacy.plain === null, `pre-unify A/B on: data tyres, no plain steering (${JSON.stringify(legacy)})`);
+  await page.evaluate(() => document.getElementById("drift-lab-w-legacy").click());
+  check((await page.evaluate(() => window.__wp.sim.labScopeLegacy())) === false, "pre-unify A/B off again");
+}
+// The start menu has no Drift Lab W / C entry any more.
+await freeDrive();
+await page.evaluate(() => window.__wp.menu.openMain());
+await page.getByText("Free drive", { exact: true }).first().waitFor({ timeout: 10000 }).catch(() => {});
+{
+  const wEntries = await page.getByText("Drift Lab W", { exact: true }).count();
+  const cEntries = await page.getByText(/drift lab c/i).count();
+  check(wEntries === 0 && cEntries === 0, `menu: no Drift Lab W (${wEntries}) / C (${cEntries}) entries`);
+}
+// City chase: the same physics on every car; the steering aids only on the player's car.
+{
+  await page.goto(`http://localhost:${PORT}/?chase=1`);
+  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "city_chase", null, { timeout: 90000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  const c = await handling();
+  check(c.name === "city_chase" && c.plain && c.spin && c.firm && c.player, `chase: shipped handling on the player (${JSON.stringify(c)})`);
+  check(c.others === 0 || c.othersPlayer === 0, `chase: ${c.others} police / traffic cars without the player steering aids (${c.othersPlayer})`);
+  // A street race: AI racers drive the same physics with their own steering.
   await page.goto(`http://localhost:${PORT}/?race=grid_highway_sprint`);
   await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name.startsWith("race_"), null, { timeout: 90000 }).catch(() => {});
-  const r = await page.evaluate(() => {
-    const s = window.__wp.sim;
-    const p = window.__wp.app.player;
-    const others = s.entities().filter((e) => e !== p);
-    return { name: s.scenario().name, tagged: s.labTagged(p), only: s.labScopeTaggedOnly(), others: others.length, othersTagged: others.filter((e) => s.labTagged(e)).length };
-  });
-  check(r.name.startsWith("race_") && r.tagged && r.only && r.others > 0 && r.othersTagged === 0, `race: W on the player, ${r.others} AI racers stock (${JSON.stringify(r)})`);
+  await page.waitForTimeout(1500);
+  const r = await handling();
+  check(r.name.startsWith("race_") && r.player && r.others > 0, `race: player steering aids on the player (${JSON.stringify(r)})`);
+  // The racers are marked AI when the race starts (the countdown); before that they are spawned
+  // as player-kind. Report, then check after a few seconds.
+  await page.waitForTimeout(6000);
+  const r2 = await handling();
+  check(r2.othersPlayer === 0, `race: ${r2.others} AI racers without the player steering aids (${r2.othersPlayer})`);
 }
 check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 await browser.close();

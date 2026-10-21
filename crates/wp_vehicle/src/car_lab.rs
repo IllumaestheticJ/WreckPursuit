@@ -159,6 +159,12 @@ impl CarTune {
         }
     }
 
+    /// The shipped tyres (unify, 2026-10-21): Drift Lab W's step-23 "spin" set
+    /// ([`CarTune::spin_candidate`]) for every vehicle (`crate::lab_scope`).
+    pub fn shipped() -> Self {
+        Self::spin_candidate()
+    }
+
     /// Tyre-slip workstream's spin-model set (docs/integration/tyre-slip.md, "New-side settle,
     /// tyre side", candidate B): the spin-weighted combined slip on the rears, re-tuned for the
     /// new-side settle of a lift-flick transition on the step-22 lab (W's transition rack +

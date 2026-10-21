@@ -110,6 +110,8 @@ pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
         speed_mps: 0.0,
         police_heat: 0.0,
         assists: None,
+        player_steering: None,
+        tune: Default::default(),
         driver: Driver::Scripted,
         inputs: Vec::new(),
     }

@@ -20,7 +20,7 @@ use wp_vehicle::drift_lab_w::{
 };
 use wp_vehicle::grip_lab::{self, GripBalance};
 use wp_vehicle::math::{atan2, V3};
-use wp_vehicle::plain::{self, PlainSteer};
+use wp_vehicle::plain;
 use wp_vehicle::ride_lab::{self, RideTune};
 use wp_vehicle::rig::Rig;
 
@@ -386,26 +386,33 @@ fn configs() -> Vec<(String, Option<GripBalance>)> {
             Some(serde_json::from_str(j).expect("GRIP json")),
         )],
         Err(_) if std::env::var("AB").is_ok() => vec![
-            ("before".into(), None),
+            ("before".into(), Some(GripBalance::default())),
             ("new".into(), Some(GripBalance::lab_default())),
             ("grip".into(), Some(GripBalance::grip())),
         ],
-        Err(_) => vec![("before".into(), None)],
+        // "before" = the data balance (an explicit no-op override; `None` would be the shipped
+        // balance since the unify, `wp_vehicle::lab_scope`).
+        Err(_) => vec![("before".into(), Some(GripBalance::default()))],
     }
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     // The Drift Lab W defaults (what the owner drives).
     match std::env::var("PLAIN").as_deref() {
         // PLAIN=v2: tyre-slip's "spin model v2 (ellipse)" steering.
         Ok("v2") => plain::set_override(Some(CarTune::spin_v2_plain())),
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),
-        Err(_) => plain::set_override(Some(PlainSteer::default())),
+        // The shipped steering (W's defaults with the catch gain 0.7, `lab_scope`).
+        Err(_) => plain::set_override(Some(wp_vehicle::lab_scope::shipped_plain())),
     }
     // RIDE=data|slow|medium: the suspension data or a W ride preset instead of the lab's ride
     // default (comparison only).
     if std::env::var("RIDE").as_deref() == Ok("data") {
-        ride_lab::set_override(None);
+        // The data (an explicit no-op override; `None` is the shipped firm ride now).
+        ride_lab::set_override(Some(RideTune::default()));
     } else if std::env::var("RIDE").as_deref() == Ok("slow") {
         // Drift Lab W's "slow weight (clip 4)" preset.
         ride_lab::set_override(Some(RideTune::slow_weight()));

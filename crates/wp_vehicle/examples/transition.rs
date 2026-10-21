@@ -997,7 +997,7 @@ fn power_on(c: &LoadedCar, kmh: f32, gear: i8, corner: bool) -> (bool, f32, Opti
 /// medium ride, spin model b0 7.5), `step23` (balance new, firm ride, b0 7.5) and `B` (balance
 /// new, firm ride, candidate B). `CARS` overrides the car list; `PLAIN` merges steering fields.
 fn poweron_table() {
-    use wp_vehicle::drift_lab_w::{plain_drift_run_with, HoldMetrics, PlainDriver};
+    use wp_vehicle::drift_lab_w::{plain_drift_run_with, plain_hold, HoldMetrics, PlainDriver};
     let ids: Vec<String> = match std::env::var("CARS") {
         Ok(l) => l.split(',').map(String::from).collect(),
         Err(_) => [
@@ -1071,11 +1071,138 @@ fn poweron_table() {
         Ok(j) => merged(&PlainSteer::default(), &j),
         Err(_) => PlainSteer::default(),
     };
-    println!("| set | car | power-on spins / 12 (straight / corner) | corner: median s to 20° slip / to spin | worst peak slip ° (straight / corner) | held drift / 9 (spun) | power-on gear changes | held-drift gear changes: first few |");
-    println!("|---|---|---|---|---|---|---|---|");
+    // BISECT=1 (grip-balance, unify): from the owner's "feels good" anchor (lead/grip-balance
+    // 7d6b66c9: medium ride, step-14 balance without the held-key cut, step-22 tyres, W step-10
+    // steering) one change per row to the shipped unify set.
+    let mut sets: Vec<(String, RideTune, GripBalance, CarTune, PlainSteer)> = sets
+        .into_iter()
+        .map(|(n, r, g, t)| (n.to_string(), r, g, t, p))
+        .collect();
+    if std::env::var("BISECT").is_ok() {
+        let plain_anchor = PlainSteer {
+            counter_closing_only: false,
+            drift_lock_extra: 0.0,
+            over_rate: 1.0,
+            trans_follow: false,
+            trans_catch_gain: 0.0,
+            ..PlainSteer::default()
+        };
+        let grip_anchor = GripBalance {
+            fwd_rear_mu: 1.0,
+            fwd_rear_stiffness: 1.0,
+            fwd_rear_arb: 1.0,
+            slide_lock: 1.0,
+            ..GripBalance::step14()
+        };
+        let cut = |g: GripBalance| GripBalance {
+            slide_lock: 0.5,
+            slide_lock_from_deg: 15.0,
+            slide_lock_after_s: 0.5,
+            slide_lock_growth_dps: 15.0,
+            slide_lock_to_deg: 40.0,
+            ..g
+        };
+        let new_no_cut = GripBalance {
+            slide_lock: 1.0,
+            slide_lock_release_s: 0.0,
+            ..GripBalance::lab_default()
+        };
+        let catch_ext = PlainSteer {
+            counter_closing_only: true,
+            drift_lock_extra: 0.4,
+            over_rate: 2.0,
+            ..plain_anchor
+        };
+        let medium = RideTune::medium_weight();
+        let firm = RideTune::firm();
+        let t22 = CarTune::spin_step22();
+        let shipped = wp_vehicle::lab_scope::shipped_plain();
+        sets = vec![
+            (
+                "0 anchor 7d6b66c9".into(),
+                medium,
+                grip_anchor,
+                t22,
+                plain_anchor,
+            ),
+            ("1 + firm ride".into(), firm, grip_anchor, t22, plain_anchor),
+            (
+                "2 + step-20 balance".into(),
+                firm,
+                new_no_cut,
+                t22,
+                plain_anchor,
+            ),
+            (
+                "3 + held-key cut".into(),
+                firm,
+                cut(new_no_cut),
+                t22,
+                plain_anchor,
+            ),
+            (
+                "4 + reversal release".into(),
+                firm,
+                GripBalance::lab_default(),
+                t22,
+                plain_anchor,
+            ),
+            (
+                "5 + catch ext (W 11)".into(),
+                firm,
+                GripBalance::lab_default(),
+                t22,
+                catch_ext,
+            ),
+            (
+                "6 + transition rack / catch (W 12-13)".into(),
+                firm,
+                GripBalance::lab_default(),
+                t22,
+                shipped,
+            ),
+            (
+                "7 + tyres B = shipped".into(),
+                firm,
+                GripBalance::lab_default(),
+                CarTune::spin_candidate(),
+                shipped,
+            ),
+            (
+                "a anchor + step-20 balance only".into(),
+                medium,
+                new_no_cut,
+                t22,
+                plain_anchor,
+            ),
+            (
+                "b anchor + held-key cut only".into(),
+                medium,
+                cut(grip_anchor),
+                t22,
+                plain_anchor,
+            ),
+            (
+                "c anchor + tyres B only".into(),
+                medium,
+                grip_anchor,
+                CarTune::spin_candidate(),
+                plain_anchor,
+            ),
+            (
+                "d anchor + W steering only".into(),
+                medium,
+                grip_anchor,
+                t22,
+                shipped,
+            ),
+        ];
+    }
+    println!("| set | car | power-on spins / 12 (straight / corner) | corner: median s to 20° slip / to spin | worst peak slip ° (straight / corner) | held drift / 9 (spun) | power-on gear changes | held-drift gear changes: first few | (BISECT: tapper held (spun) · into-turn held spun · released spun) |");
+    println!("|---|---|---|---|---|---|---|---|---|");
     let a = owner_assists();
-    for (name, ride, grip, tyre) in &sets {
-        plain::set_override(Some(p));
+    for (name, ride, grip, tyre, p) in &sets {
+        plain::set_override(Some(*p));
         ride_lab::set_override(Some(*ride));
         grip_lab::set_override(Some(*grip));
         car_lab::set_override(Some(*tyre));
@@ -1148,8 +1275,33 @@ fn poweron_table() {
                     spun += m.spun as usize;
                 }
             }
+            // BISECT: the other plain drivers (spins count; the tapper also held).
+            let mut extra = String::new();
+            if std::env::var("BISECT").is_ok() {
+                let tally = |mk: &dyn Fn(f32) -> PlainDriver| {
+                    let (mut h, mut sp) = (0, 0);
+                    for e in [6.0f32, 12.0, 20.0] {
+                        for g in [0.3f32, 0.5, 0.7] {
+                            let m = plain_hold(&c, &a, mk(e), 40.0, g);
+                            h += m.held as usize;
+                            sp += m.spun as usize;
+                        }
+                    }
+                    (h, sp)
+                };
+                let t = tally(&|e| PlainDriver::Tapper {
+                    entry_deg: e,
+                    target_deg: 35.0,
+                });
+                let i = tally(&|e| PlainDriver::IntoTurnHeld { entry_deg: e });
+                let r = tally(&|e| PlainDriver::Released { entry_deg: e });
+                extra = format!(
+                    " {} held ({} spun) | {} spun | {} spun |",
+                    t.0, t.1, i.1, r.1
+                );
+            }
             println!(
-                "| {name} | {id} | {} ({ss} / {sc}) | {} / {} | {ps:.0} / {pc:.0} | {held} ({spun} spun) | {} | {held_shifts}: {} |",
+                "| {name} | {id} | {} ({ss} / {sc}) | {} / {} | {ps:.0} / {pc:.0} | {held} ({spun} spun) | {} | {held_shifts}: {} |{extra}",
                 ss + sc,
                 med(t20s),
                 med(tsp),
@@ -1346,6 +1498,9 @@ fn manual_table() {
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     if std::env::args().nth(1).as_deref() == Some("manual") {
         manual_table();
         return;

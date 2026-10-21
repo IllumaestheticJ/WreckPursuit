@@ -10,6 +10,18 @@ export type RepairItem = { Region: string } | { Component: string } | { Detached
 /** `wp_economy::RepairOption` serde form. */
 export type RepairOption = "RepairAll" | "Scrap" | { RepairSelected: RepairItem[] };
 
+/** `wp_economy::CarTune` (= `wp_vehicle::CarTune`): the free tune, each slider 1..=5, 3 = stock. */
+export interface CarTune {
+  /** 1 soft … 5 stiff. */
+  suspension: number;
+  /** 1 short … 5 long. */
+  gearing: number;
+  /** 1 open … 3 stock … 5 locked. */
+  diff: number;
+  /** 1 rear … 5 front. */
+  brake_balance: number;
+}
+
 /** `career::StatsView`. */
 export interface StatsView {
   class_index: number;
@@ -79,6 +91,8 @@ export interface CarView {
   paid: number;
   scrap_value: number;
   mods: { id: string; name: string; slot: string }[];
+  /** The free tune, applied when the next run spawns the car. */
+  tune: CarTune;
   insurance: string | null;
   premium_per_day: number | null;
   repair_all: RepairQuote | null;
@@ -205,6 +219,8 @@ export interface CareerApi {
   setActive(uid: number): CareerView;
   install(uid: number, modId: string): CareerView;
   uninstall(uid: number, modId: string): CareerView;
+  /** Set the car's free tune (no money). */
+  setTune(uid: number, tune: CarTune): CareerView;
   repair(uid: number, req: ShopRequest): CareerView;
   release(uid: number): CareerView;
   insure(uid: number, tier: string): CareerView;

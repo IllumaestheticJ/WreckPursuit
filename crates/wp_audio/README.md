@@ -221,7 +221,7 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 
 | File | What |
 |---|---|
-| `data/audio/audio_config.json` | all tuning: voice limits, priority weights, spatial model, engine/tire/impact/siren/scanner mix |
+| `data/audio/audio_config.json` | all tuning: voice limits, priority weights, spatial model, engine/tire/impact/siren/scanner mix, `master` stage (below) |
 | `data/audio/cars/<car_id>.json` | `CarAudioDef`: engine description, engine pack, world pack, horn cue, optional siren |
 | `data/audio/packs/<id>.json` | sample packs (below) |
 
@@ -230,6 +230,17 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 fallback cue (same name) when the player picks "procedural" or a file has not loaded. Licences and
 sources: `data/audio/LICENSES.md`; tooling: `tools/audio_packs/`. Optional World-pack cues:
 `drivetrain/shift` (one-shot on gear change, director) and `ambient/city_night` (backend loop).
+
+**Master stage** (`master` → `MasterMix`, validated by `AudioLibrary::validate`): the director
+ignores it; it travels with the library to the browser's `AudioMixer`. Each bus enters the
+master sum through a fixed headroom trim (`bus_gain_db`, −6 dB on every bus: equal trims keep
+the sources' calibrated balance), then the user's master volume, a `DynamicsCompressorNode`
+peak catcher (`compressor`: −8 dB threshold, 6 dB knee above it, 4:1, 3 ms / 0.3 s; the
+backend divides out the node's automatic make-up gain, so below threshold the stage is unity),
+`trim_db` and a tanh soft clip (linear to `clip_knee` 0.7, never above `clip_ceiling` 0.89 =
+−1 dBFS). Validation: compressor parameters inside the Web Audio ranges, knee ending at or under
+full scale, every bus trimmed by ≤ 0 dB, ceiling ≤ −1 dBFS. Rationale and before / after
+measurements: `docs/integration/audio.md` "Mix headroom".
 
 Cars without a file get `CarAudioDef::fallback` (I4, or V8 for muscle/trucks; sirens on police
 classes) so a new car is never silent, but the tests require a file for every shipped car.
@@ -323,7 +334,20 @@ cargo test -p wp_audio
 cargo test -p wp_audio --test samples   # recorded files exist, licensed, ≤ 15 MB
 cargo test -p wp_audio --test engine_physical
 node apps/testbed-web/e2e/audio_engine.mjs   # renders + spectra + budget (see below)
+node apps/testbed-web/e2e/audio_mix.mjs      # master-mix headroom (see below)
 ```
+
+Mix headroom: `data::tests::shipped_master_stage_keeps_headroom_and_balance` (shipped `master`
+validates, equal bus trims ≤ −3 dB, knee ending under full scale, ceiling ≤ −1 dBFS, file = code
+defaults) and `master_validation_rejects_a_hot_or_incomplete_stage`. `examples/mix_trace.rs`
+writes four director scenes (one V8 at WOT behind the chase camera; a busy chase: player V8 at
+WOT, three police units with sirens incl. an oncoming pass-by, a cornering squeal, a big hit,
+two pursuit radio lines; a light cruise; idle) for `e2e/audio_mix.mjs`, which renders them
+through the whole browser mixer (siren rack, scanner, ambience bed, engine worklet, master
+stage) and fails if the chase puts > 0.05 % of samples into the soft clip, its true peak
+exceeds −1 dBTP, the compressor reduces > 2.5 dB at p95 or > 9 dB at most, its short-term
+loudness leaves −18 … −12 LUFS, the single V8 touches the soft clip, or the master stage is not
+unity below threshold.
 
 `tests/engine_physical.rs` (row 73): every sweep car as the focus gets exactly one
 `engine/physical` voice (no layers / limiter / turbo / pop voices) with its firing events, and
@@ -397,7 +421,7 @@ off throttle, through the director: each audible recorded layer's pitch × its a
 `validate_rejects_recorded_layers_without_a_firing_frequency`; `engine` unit tests
 `firing_hz_anchor_roots_at_the_cars_firing_frequency`, `layers_do_not_churn_along_an_rpm_sweep`
 (plus the existing equal-power `weights_are_energy_preserving`); `e2e/audio_engine.mjs` part 2b
-(the worklet DSP in Node per car: no soft-limit samples on a WOT pull, detrended level ripple
+(the worklet DSP in Node per car: a WOT pull keeps 6 dB under the voice's soft limit, detrended level ripple
 ≤ 1.5 dB, firing order within 7 dB of the strongest partial, median spectral flatness ≥ −22 dB).
 
 ## Perf

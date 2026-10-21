@@ -7,7 +7,8 @@
 //! | `drift_tuning_json()` | the constants in effect (override or defaults), JSON |
 //! | `drift_tuning_defaults_json()` | the shipped defaults, JSON |
 //! | `drift_tuning_set(json)` | set the runtime override (`""` clears it); unknown fields are ignored, missing ones take the default |
-//! | `lab_scope_set_tagged_only(on)` / `set_lab_tagged(entity, on)` | "use W handling everywhere": the lab overrides on the tagged (player) car only |
+//! | `lab_scope_set_legacy(on)` / `lab_scope_set_plain_off(on)` | lab A/B: the pre-unify stock handling / the plain steering off for the player too (`wp_vehicle::lab_scope`) |
+//! | `refresh_body_inertia(entity)` / `player_input(entity)` | re-apply a car's body inertia after a ride override / whether it gets the player steering aids |
 //! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle, held_deg, sliding]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded · 6 transition; `key_throttle` = the driver's throttle input, `engine_throttle` = what reaches the engine (after shaping, pedal filter, TCS / ESC), `held_deg` = the slide angle Hold / AngleUp keeps, `sliding` 1 = a slide is confirmed (the steering's slide help is on, row 102) |
 //!
 //! The override is process-wide and not logged in recordings (a developer tool; see
@@ -72,26 +73,28 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 //
 // | function | what |
 // |---|---|
-// | `plain_steer_json()` | the plain steering constants in effect (`null` = plain off), JSON |
-// | `plain_steer_defaults_json()` | the defaults (`wp_vehicle::plain::PlainSteer`), JSON |
-// | `plain_steer_set(json)` | turn plain steering on with these constants (`""` = off); missing fields take the default |
+// | `plain_steer_json()` | the plain steering a player's car drives with (override or shipped; `null` = off / legacy), JSON |
+// | `plain_steer_defaults_json()` | the shipped steering (`wp_vehicle::lab_scope::shipped_plain`), JSON |
+// | `plain_steer_set(json)` | set the plain steering override (`""` = the shipped steering); missing fields take `PlainSteer::default` |
 // | `plain_readout(entity)` | `[steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg]` (see `plain_readout`) |
 // | `parity_car_ids()` | JSON array of the parity test cars (not in `car_ids()`) |
 
-/// The plain steering constants in effect (`null` when plain steering is off), JSON.
+/// The plain steering constants a player's car drives with (the lab override, else the
+/// shipped default; `null` when plain steering is off or in legacy mode), JSON.
 #[wasm_bindgen]
 pub fn plain_steer_json() -> String {
-    json(&wp_vehicle::plain::active())
+    json(&wp_vehicle::lab_scope::plain(Some(true)))
 }
 
-/// The default plain steering constants, JSON.
+/// The shipped plain steering constants (`wp_vehicle::lab_scope::shipped_plain`), JSON.
 #[wasm_bindgen]
 pub fn plain_steer_defaults_json() -> String {
-    json(&wp_vehicle::plain::PlainSteer::default())
+    json(&wp_vehicle::lab_scope::shipped_plain())
 }
 
-/// Turn the plain keyboard steering profile on with the constants in `json` (missing fields
-/// take the default), or off with `""`. Process-wide, not logged in recordings.
+/// Set the plain keyboard steering override from `json` (missing fields take
+/// `PlainSteer::default`), or clear it with `""` (= the shipped steering; turn it off with
+/// `lab_scope_set_plain_off`). Process-wide, not logged in recordings.
 #[wasm_bindgen]
 pub fn plain_steer_set(steer_json: &str) -> Result<(), JsValue> {
     if steer_json.trim().is_empty() {
@@ -171,10 +174,11 @@ pub fn parity_car_ids() -> String {
 
 // --- Drift Lab W ride tuning (wp_vehicle::ride_lab) --------------------------------------
 
-/// The ride tuning override in effect (`null` = the car data as is), JSON.
+/// The ride tuning in effect (the lab override, else the shipped firm ride; `null` = the car
+/// data as is, legacy mode only), JSON.
 #[wasm_bindgen]
 pub fn ride_tune_json() -> String {
-    json(&wp_vehicle::ride_lab::active())
+    json(&wp_vehicle::lab_scope::ride())
 }
 
 /// `{ "data": <no scaling>, "lab": <step 3 default, the "before">, "slow_weight": <clip-4
@@ -230,10 +234,11 @@ pub fn ride_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 
 // --- Drift Lab W car / tyre experiments (wp_vehicle::car_lab) -----------------------------
 
-/// The car / tyre lab override in effect (`null` = the data), JSON.
+/// The car / tyre tuning in effect (the lab override, else the shipped tyres; `null` = the
+/// data, legacy mode only), JSON.
 #[wasm_bindgen]
 pub fn car_tune_json() -> String {
-    json(&wp_vehicle::car_lab::active())
+    json(&wp_vehicle::lab_scope::car())
 }
 
 /// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset>, "spin_v2": <spin model v2 (ellipse)>, "spin_v2_plain": <its steering> }`, JSON.
@@ -251,10 +256,11 @@ pub fn car_tune_defaults_json() -> String {
     }))
 }
 
-/// The grip-balance lab override in effect (`null` = the data), JSON.
+/// The grip balance in effect (the lab override, else the shipped balance; `null` = the data,
+/// legacy mode only), JSON.
 #[wasm_bindgen]
 pub fn grip_balance_json() -> String {
-    json(&wp_vehicle::grip_lab::active())
+    json(&wp_vehicle::lab_scope::grip())
 }
 
 /// `{ "before": <the data as is>, "new": <the lab's new balance>, "step2": <step 2's set>,
@@ -302,34 +308,46 @@ pub fn car_tune_set(tune_json: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-/// "Use W handling everywhere" (Drift Lab W): `true` limits the lab overrides (plain
-/// steering, ride, car / tyre, drift tuning) to tagged vehicles ([`set_lab_tagged`]), so AI
-/// racers, police and traffic keep the stock handling; `false` (the default) applies them to
-/// every vehicle (`wp_vehicle::lab_scope`).
+/// Lab A/B: `true` = the pre-unify stock handling (data tyres and ride, no plain steering)
+/// where no lab override is set; `false` (the default) = the shipped handling
+/// (`wp_vehicle::lab_scope`).
 #[wasm_bindgen]
-pub fn lab_scope_set_tagged_only(on: bool) {
-    wp_vehicle::lab_scope::set_tagged_only(on);
+pub fn lab_scope_set_legacy(on: bool) {
+    wp_vehicle::lab_scope::set_legacy(on);
 }
 
-/// Whether the lab overrides are limited to tagged vehicles.
+/// Whether the pre-unify stock handling is in effect.
 #[wasm_bindgen]
-pub fn lab_scope_tagged_only() -> bool {
-    wp_vehicle::lab_scope::tagged_only()
+pub fn lab_scope_legacy() -> bool {
+    wp_vehicle::lab_scope::legacy()
 }
 
-/// Tag (or untag) a vehicle for the lab overrides (re-applies its body inertia). Not in the
-/// replay log; the testbed tags the player at every session start, replays included.
+/// Lab A/B: `true` turns the plain keyboard steering off for player cars too.
 #[wasm_bindgen]
-pub fn set_lab_tagged(entity: u32, on: bool) -> Result<(), JsValue> {
-    with(|s| s.set_lab_tagged(EntityId(entity), on))
+pub fn lab_scope_set_plain_off(on: bool) {
+    wp_vehicle::lab_scope::set_plain_off(on);
 }
 
-/// Whether a vehicle is tagged for the lab overrides.
+/// Whether the plain steering is turned off for player cars.
 #[wasm_bindgen]
-pub fn lab_tagged(entity: u32) -> Result<bool, JsValue> {
+pub fn lab_scope_plain_off() -> bool {
+    wp_vehicle::lab_scope::plain_off()
+}
+
+/// Re-apply a vehicle's body inertia after a ride override (the ride's inertia scales). Not in
+/// the replay log.
+#[wasm_bindgen]
+pub fn refresh_body_inertia(entity: u32) -> Result<(), JsValue> {
+    with(|s| s.refresh_body_inertia(EntityId(entity)))
+}
+
+/// Whether a vehicle gets the player steering aids (a player's car; AI racers, police and
+/// traffic do not).
+#[wasm_bindgen]
+pub fn player_input(entity: u32) -> Result<bool, JsValue> {
     with(|s| {
         s.vehicle(EntityId(entity))
-            .map(|v| v.vehicle.lab_tagged())
+            .map(|v| v.vehicle.player_input())
             .ok_or_else(|| format!("unknown entity {entity}"))
     })
 }

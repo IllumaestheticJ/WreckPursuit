@@ -1388,6 +1388,9 @@ fn trace(id: &str) {
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     // GRIP=drift_best | new | grip: grip-balance's lab balance on for the whole run (presets that
     // rely on it, e.g. "spin model v2 (ellipse)").
     match std::env::var("GRIP").as_deref() {

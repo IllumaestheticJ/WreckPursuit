@@ -1036,3 +1036,67 @@ Nothing crosses even with the cut off (`slide_lock` 1), W's countersteer limit o
 15°. So on this base, steering lock is not the only block: the old-side drift does not rotate
 through after a reversal. The release window is in place for W's geometry and tyre-slip's yaw
 reversal to land on; on its own it changes no gate.
+
+## Unify: one handling for the game (lead, 2026-10-21)
+
+The lead asked for one version: Drift Lab W stops being a separate build, and its step-23
+handling becomes the game's handling. Done on `lead/grip-balance`. This session can only push
+that branch, so the requested `lead/unify` branch was not created.
+
+### What is the default now (`wp_vehicle::lab_scope`)
+
+With no lab override set:
+
+| part | every car (player, AI racers, police, traffic) | player cars only |
+|---|---|---|
+| tyres | `CarTune::shipped()` = the spin model (`spin_candidate`) | |
+| ride | `RideTune::firm()` (medium weight + springs / bars × 1.5, dampers × 2.4 / 3.2) | |
+| balance | `GripBalance::shipped()` = `lab_default()` (step 20+: RWD front stiffness × 0.6, rear × 0.9 / C 1.2, rear downforce 0.8, probe tilt fix, FWD rear bar × 2) | smart lock, held-key slide lock + release |
+| steering | the normal steering model (AI keep their own steering) | `PlainSteer::default()`: plain rack, countersteer limit, catch, transition rack |
+| per-car fixes | in `data/cars` now (below) | |
+
+- **Player flag.** `Vehicle::set_player_input` replaces the old lab tag. It defaults to
+  `true`. `wp_sim` sets it every tick from `VehicleKind`, so it is `false` for `AiRacer`,
+  `Police` and `Traffic`. A player in a police seat counts as `Player`.
+- **Removed.** `lab_scope::set_tagged_only` and `Sim::set_lab_tagged` are gone; the physics
+  never depends on the tag.
+- **Lab switches.** These stay process-wide and are not recorded:
+  - the lab overrides (`*::set_override`);
+  - `lab_scope::set_legacy(true)`: the pre-unify stock path, for A/B;
+  - `lab_scope::set_plain_off(true)`: plain steering off for players too.
+- **Determinism.** With nothing set, the defaults are constants, so the sim is deterministic
+  across native and wasm.
+- **Gap: wheel input.** A steering-wheel player is also `Player`, so the plain steering
+  applies to them too. The lead asked for keyboard/gamepad; a device field would need a
+  contract change.
+
+### Per-car fixes moved into `data/cars` (lead-authorized)
+
+- **debug_coupe:** `arb_n_per_m` × 0.5 on all four corners (26000 → 13000 front, 14000 → 7000
+  rear).
+- **lucciola_350:**
+  - rear `spring_n_per_m` 66800 → 43420 (× 0.65);
+  - rear `preload_m` 0.02 → 0.0508, which keeps the static compression of 0.0373 m at
+    3825 N per rear corner;
+  - `inertia_kgm2[2]` 1820 → 2184 (× 1.2).
+
+`GripBalance::lab_default()` and `step14()` now have `car_fixes: false`, so the fixes are not
+applied twice. The panel's "per-car fixes again (×2)" checkbox applies them a second time, for
+debug only.
+
+### Testbed
+
+- **No separate lab.** The Drift Lab W menu entry and the "drift lab W" button are gone.
+  Every session applies the tune panel's saved debug overrides; if none are saved, it gets
+  the shipped handling. Every session also gets raw keys for the plain steering.
+- **Tune panel.** Hidden by default; F7 toggles it and `?tune=1` opens it.
+  - Saved values moved to new `wp.tune.*.v1` keys, so values saved by old W builds never
+    override the shipped handling.
+  - A "pre-unify handling (A/B)" checkbox switches the legacy path.
+  - The old "use W handling everywhere" checkbox and the "W handling" badge are gone.
+- **Test pad.** `?drift=w` (and the old `?drift=b|c` links) opens the test pad with the panel
+  open: the course, the parity cars and the owner's reference assists.
+- **Drift Labs B / C** are removed:
+  - files: `drift_lab_b.ts`, `e2e/drift_lab_b.mjs`, `e2e/drift_lab.mjs` (it used `?drift=1`);
+  - the course moved to `src/test_pad.ts`;
+  - their Rust tests are `#[ignore]`d with a pointer here (see the gate below).

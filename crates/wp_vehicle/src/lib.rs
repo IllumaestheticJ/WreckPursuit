@@ -71,6 +71,7 @@ pub mod steering;
 pub mod surface;
 pub mod suspension;
 pub mod tire;
+pub mod tune;
 pub mod twitch_lab;
 pub mod vehicle;
 
@@ -85,6 +86,7 @@ pub use snapshot::{SnapshotError, VehicleSnapshot};
 
 pub use surface::{ConditionsSource, SurfaceConditions, TireWetProfile};
 pub use tire::TireForces;
+pub use tune::CarTune;
 pub use vehicle::{Chassis, Telemetry, Vehicle, VehicleExtras};
 pub use wp_contracts::AssistProfile;
 

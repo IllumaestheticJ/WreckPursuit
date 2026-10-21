@@ -32,6 +32,9 @@ fn car(id: &str) -> LoadedCar {
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     match std::env::var("PLAIN").as_deref() {
         Ok("off") => plain::set_override(None),
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),

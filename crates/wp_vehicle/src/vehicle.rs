@@ -260,6 +260,8 @@ pub struct Vehicle {
     /// last lifted (< 0.5) mid-slide (|body slip| > 10°) / since the steer key last reversed, and the last held key's sign.
     since_lift_s: f32,
     since_reversal_s: f32,
+    /// |Body slip| at the last steering-key reversal, rad (grip lab's transition release).
+    reversal_slip: f32,
     last_key_sign: f32,
     /// Time since the body slip crossed from one side (≥ 10°) to the other (≥ 10°), s (plain
     /// steering only; the new-side catch, `plain::PlainSteer::trans_catch_gain`).
@@ -305,9 +307,11 @@ pub struct Vehicle {
     pub(crate) key_steer: f32,
     /// How long the handbrake has been pulled, s (pivot aid build-up, row 109); in snapshots.
     pub(crate) hb_held_s: f32,
-    /// Drift Lab W "use W handling everywhere": the lab overrides apply to this vehicle when
-    /// they are limited to tagged vehicles ([`crate::lab_scope`]). Lab-only; not in snapshots.
-    pub(crate) lab_tagged: bool,
+    /// Driven by a player's keyboard / gamepad: `Some(true)` = the plain steering aids apply,
+    /// `Some(false)` = AI / harness driver, `None` (a bare vehicle or rig) = only a lab
+    /// override's ([`crate::lab_scope::plain`]). `wp_sim` sets it every tick from the vehicle
+    /// kind; not in snapshots.
+    pub(crate) player_input: Option<bool>,
     /// Grip-balance lab: |body slip| last tick (rad) and its filtered rate (rad/s, − = the
     /// slide closing), for the directional slide lock (`grip_lab::GripBalance::slide_closing_dps`).
     /// Lab-only steering input: not in snapshots.
@@ -405,6 +409,7 @@ impl Vehicle {
             center_steer: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            reversal_slip: 0.0,
             last_key_sign: 0.0,
             since_cross_s: 1.0e3,
             last_slide_side: 0.0,
@@ -442,7 +447,7 @@ impl Vehicle {
             key_steer: 0.0,
             stalled: false,
             hb_held_s: 0.0,
-            lab_tagged: false,
+            player_input: None,
             lab_slip_prev: 0.0,
             lab_slip_rate: 0.0,
             lab_counter_s: 0.0,
@@ -580,6 +585,7 @@ impl Vehicle {
         self.center_steer = 0.0;
         self.since_lift_s = 1.0e3;
         self.since_reversal_s = 1.0e3;
+        self.reversal_slip = 0.0;
         self.last_key_sign = 0.0;
         self.since_cross_s = 1.0e3;
         self.last_slide_side = 0.0;
@@ -825,7 +831,7 @@ impl Vehicle {
                 rear_axle,
             ),
             rear_slip_rate: self.drift.rear_slip_rate,
-            tuning: crate::lab_scope::drift(self.lab_tagged),
+            tuning: crate::lab_scope::drift(),
             drift: self.drift_cmd,
             slide_gate: self.slide_gate.amount,
             align_travel: self.slide_gate.travel,
@@ -843,7 +849,7 @@ impl Vehicle {
     /// `(rack −1..=1 (+ = right), lock fraction at the current speed)`, or `None` when the
     /// plain profile is off.
     pub fn plain_readout(&self) -> Option<(f32, f32)> {
-        let p = crate::lab_scope::plain(self.lab_tagged)?;
+        let p = crate::lab_scope::plain(self.player_input)?;
         let ch = &self.chassis;
         let v_fwd = ch.lin_vel.dot(ch.rot * V3::Y);
         let eff = self.effects;
@@ -856,30 +862,64 @@ impl Vehicle {
         ))
     }
 
-    /// Tag this vehicle for the Drift Lab W overrides ([`crate::lab_scope`]): with
-    /// [`crate::lab_scope::set_tagged_only`] on, only tagged vehicles get them. The body's
-    /// inertia ([`Vehicle::body_inertia`]) follows on the next body build, or set it with
-    /// [`Vehicle::apply_body_inertia`].
-    pub fn set_lab_tagged(&mut self, on: bool) {
-        self.lab_tagged = on;
+    /// Number of floats in [`Vehicle::plain_state`].
+    pub(crate) const PLAIN_STATE_LEN: usize = 10;
+
+    /// The plain steering's tick-to-tick state, for snapshots.
+    pub(crate) fn plain_state(&self) -> [f32; Self::PLAIN_STATE_LEN] {
+        [
+            self.since_lift_s,
+            self.since_reversal_s,
+            self.reversal_slip,
+            self.last_key_sign,
+            self.rack_yield,
+            self.lab_slip_prev,
+            self.lab_slip_rate,
+            self.lab_counter_s,
+            self.since_cross_s,
+            self.last_slide_side,
+        ]
     }
 
-    /// Whether this vehicle is tagged for the Drift Lab W overrides.
-    pub fn lab_tagged(&self) -> bool {
-        self.lab_tagged
+    /// Restore [`Vehicle::plain_state`].
+    pub(crate) fn set_plain_state(&mut self, a: [f32; Self::PLAIN_STATE_LEN]) {
+        [
+            self.since_lift_s,
+            self.since_reversal_s,
+            self.reversal_slip,
+            self.last_key_sign,
+            self.rack_yield,
+            self.lab_slip_prev,
+            self.lab_slip_rate,
+            self.lab_counter_s,
+            self.since_cross_s,
+            self.last_slide_side,
+        ] = a;
+    }
+
+    /// Mark this vehicle as player-driven (`true`) or AI-driven (`false`). Only
+    /// player-driven vehicles get the plain keyboard steering aids ([`crate::lab_scope::plain`]);
+    /// the physics is the same for both.
+    pub fn set_player_input(&mut self, on: bool) {
+        self.player_input = Some(on);
+    }
+
+    /// Whether this vehicle is marked player-driven ([`Vehicle::set_player_input`]; a vehicle
+    /// nobody marked, a bare rig, reads `false` and gets the plain steering only from a lab
+    /// override).
+    pub fn player_input(&self) -> bool {
+        self.player_input == Some(true)
     }
 
     /// Body inertia [roll, pitch, yaw], kg·m²: the car data's, scaled by the ride lab when its
     /// override applies to this vehicle.
     pub fn body_inertia(&self) -> [f32; 3] {
-        let mut i = match crate::lab_scope::ride(self.lab_tagged) {
+        let mut i = match crate::lab_scope::ride() {
             Some(t) => t.inertia(self.def.inertia_kgm2),
             None => self.def.inertia_kgm2,
         };
         // Grip-balance lab: the per-car fix (`grip_lab::car_fix`).
-        if let Some(f) =
-            crate::lab_scope::grip(self.lab_tagged).and_then(|g| g.fix_for(&self.def.id))
-        {
+        if let Some(f) = crate::lab_scope::grip().and_then(|g| g.fix_for(&self.def.id)) {
             i[2] *= f.yaw_inertia.clamp(0.2, 5.0);
         }
         i
@@ -887,7 +927,7 @@ impl Vehicle {
 
     /// The rear axle's differential (Drift Lab W's `car_lab` can lock it).
     fn rear_diff(&self) -> AxleDiff {
-        match crate::lab_scope::car(self.lab_tagged) {
+        match crate::lab_scope::car() {
             Some(t) if t.rear_locked => AxleDiff::Locked,
             Some(t) if t.rear_open => AxleDiff::Open,
             _ => self.diffs.rear,
@@ -896,7 +936,7 @@ impl Vehicle {
 
     fn max_steer(&self) -> f32 {
         let m = self.corners[0].max_steer.max(self.corners[1].max_steer);
-        match crate::lab_scope::car(self.lab_tagged) {
+        match crate::lab_scope::car() {
             Some(t) => m * t.lock.clamp(0.3, 2.0),
             None => m,
         }
@@ -906,10 +946,10 @@ impl Vehicle {
     /// slip scale, grip lab's cornering stiffness scale).
     fn front_peak_slip(&self) -> f32 {
         let mut p = self.corners[0].tire.peak_slip_angle_rad;
-        if let Some(t) = crate::lab_scope::car(self.lab_tagged) {
+        if let Some(t) = crate::lab_scope::car() {
             p *= t.front_peak_slip.clamp(0.2, 5.0);
         }
-        if let Some(g) = crate::lab_scope::grip(self.lab_tagged) {
+        if let Some(g) = crate::lab_scope::grip() {
             p /= g.front_stiffness.clamp(0.2, 5.0);
         }
         p
@@ -988,7 +1028,7 @@ impl Vehicle {
         if self.effects.engine_dead || self.fuel <= 0.0 {
             0.0
         } else {
-            let lab = crate::lab_scope::car(self.lab_tagged).map_or(1.0, |t| t.torque.max(0.0));
+            let lab = crate::lab_scope::car().map_or(1.0, |t| t.torque.max(0.0));
             (self.effects.power_scale * (1.0 - self.heat) * lab).max(0.0)
         }
     }
@@ -1049,7 +1089,7 @@ impl Vehicle {
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
         self.drift.update_slip(rear_axle, dt);
-        let tuning = crate::lab_scope::drift(self.lab_tagged);
+        let tuning = crate::lab_scope::drift();
         let (cs_side, onset) =
             crate::steering::onset_of(rear_axle, self.drift.rear_slip_rate, &tuning);
         // Row 102: the onset only counts once the slide is confirmed.
@@ -1078,7 +1118,7 @@ impl Vehicle {
         // lift-off transition or under the handbrake the key acts at once.
         // Drift Lab W (plain keyboard steering, `crate::plain`): the key reaches the plain
         // rack as pressed (the rack's constant-rate slew is the only smoothing); no key ramp.
-        let plain = crate::lab_scope::plain(self.lab_tagged);
+        let plain = crate::lab_scope::plain(self.player_input);
         self.key_steer = if plain.is_some() {
             input.steer.clamp(-1.0, 1.0)
         } else {
@@ -1144,6 +1184,9 @@ impl Vehicle {
                 0.0
             };
             let reversed = key != 0.0 && self.last_key_sign != 0.0 && key != self.last_key_sign;
+            if reversed {
+                self.reversal_slip = body_slip(v_fwd, v_left).abs();
+            }
             self.since_reversal_s = if reversed {
                 0.0
             } else {
@@ -1413,7 +1456,7 @@ impl Vehicle {
         let max_steer = self.max_steer();
         // Tyre-slip lab: drift-only lock extension (extra lock once the body slip is past
         // `drift_lock_from_deg`, ramped over 10°, as drift cars with extended lock). Off = 0.
-        let max_steer = match crate::lab_scope::car(self.lab_tagged) {
+        let max_steer = match crate::lab_scope::car() {
             Some(t) if t.drift_lock_extra != 0.0 => {
                 let slip = body_slip(v_fwd, v_left).abs().to_degrees();
                 let x = ((slip - t.drift_lock_from_deg) / 10.0).clamp(0.0, 1.0);
@@ -1445,7 +1488,7 @@ impl Vehicle {
                 0.0
             };
             let counter_s = self.lab_counter_s;
-            let smart = crate::lab_scope::grip(self.lab_tagged).and_then(|g| {
+            let smart = crate::lab_scope::grip().and_then(|g| {
                 g.smart_lock(
                     v_fwd,
                     wheelbase,
@@ -1458,12 +1501,12 @@ impl Vehicle {
                         counter_s,
                         since_lift_s: self.since_lift_s,
                         since_reversal_s: self.since_reversal_s,
+                        reversal_slip: self.reversal_slip,
                     },
                 )
             });
             // Angle-rate timing: the plain rack as it is, capped at the smart lock below.
-            let angle_rate =
-                crate::lab_scope::grip(self.lab_tagged).is_some_and(|g| g.smart_angle_rate);
+            let angle_rate = crate::lab_scope::grip().is_some_and(|g| g.smart_angle_rate);
             let (p, full_lock) = match smart {
                 Some(l) if !angle_rate => (
                     crate::plain::PlainSteer {
@@ -1498,7 +1541,7 @@ impl Vehicle {
                 _ => a,
             };
             // Grip-balance lab: the track cap (fronts kept at their peak slip).
-            let a = match crate::lab_scope::grip(self.lab_tagged) {
+            let a = match crate::lab_scope::grip() {
                 Some(g) if smart.is_some() => g.track_cap(
                     a,
                     steer_in.front_axle_angle,
@@ -1549,7 +1592,7 @@ impl Vehicle {
         // axis (aligning moment + caster trail × side force, as in force feedback; last tick's
         // forces) turns the road wheels by `compliance × moment` through a first-order lag, so
         // the wheels yield toward the front axle's travel. Off (0) = rigid rack.
-        self.rack_yield = match crate::lab_scope::car(self.lab_tagged) {
+        self.rack_yield = match crate::lab_scope::car() {
             Some(t) if t.rack_compliance > 0.0 => {
                 let axis: f32 = (0..2)
                     .filter(|&i| self.corners[i].steerable)
@@ -1608,8 +1651,8 @@ impl Vehicle {
                 self.conditions[i] = SurfaceConditions::from_local(&local);
             }
         }
-        let arb_scale = crate::lab_scope::ride(self.lab_tagged).map_or(1.0, |t| t.arb.max(0.0));
-        let grip_lab = crate::lab_scope::grip(self.lab_tagged);
+        let arb_scale = crate::lab_scope::ride().map_or(1.0, |t| t.arb.max(0.0));
+        let grip_lab = crate::lab_scope::grip();
         for (l, r) in [(0usize, 1usize), (2, 3)] {
             let axle_scale = grip_lab.map_or(1.0, |g| {
                 let fix = g.fix_for(&self.def.id).map_or(1.0, |f| {
@@ -1777,7 +1820,7 @@ impl Vehicle {
         // --- Chassis force & torque ------------------------------------------------------
         // Drift Lab W ride tuning: heights above the contact patch where the lateral /
         // longitudinal tyre forces act (roll / pitch centre); `None` = the contact patch.
-        let centres = crate::lab_scope::ride(self.lab_tagged).map(|t| {
+        let centres = crate::lab_scope::ride().map(|t| {
             let h = self.def.cg_height_m.max(0.0);
             (
                 t.roll_centre_m.clamp(0.0, h),
@@ -1787,8 +1830,7 @@ impl Vehicle {
         let mut force = V3::ZERO;
         let mut torque = V3::ZERO;
         // Tyre-slip A/B (`crate::car_lab`): self-aligning moments on the body as well.
-        let aligning_on_body =
-            crate::lab_scope::car(self.lab_tagged).is_some_and(|t| t.aligning_on_body);
+        let aligning_on_body = crate::lab_scope::car().is_some_and(|t| t.aligning_on_body);
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -1827,8 +1869,8 @@ impl Vehicle {
             }
         }
         // Grip-balance lab: extra downforce per axle (C·A, m²), 0 = the data.
-        let (df_front, df_rear) = crate::lab_scope::grip(self.lab_tagged)
-            .map_or((0.0, 0.0), |g| (g.front_downforce, g.rear_downforce));
+        let (df_front, df_rear) =
+            crate::lab_scope::grip().map_or((0.0, 0.0), |g| (g.front_downforce, g.rear_downforce));
         let aero = aero_forces(
             ch.lin_vel,
             fwd,
@@ -1850,7 +1892,7 @@ impl Vehicle {
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
         }
-        if let Some(t) = crate::lab_scope::car(self.lab_tagged) {
+        if let Some(t) = crate::lab_scope::car() {
             if t.yaw_damping > 0.0 {
                 // Diagnostic yaw damper (not physical): −k·m·L²·r about the body's up axis.
                 let r = ch.ang_vel.dot(up);
@@ -1864,7 +1906,7 @@ impl Vehicle {
             0.0
         };
         let pivot = pivot_yaw_accel(
-            &crate::lab_scope::drift(self.lab_tagged),
+            &crate::lab_scope::drift(),
             assists,
             handbrake,
             self.hb_held_s,
@@ -1963,7 +2005,7 @@ impl Vehicle {
         }
         // Drift Lab W ride tuning: travel scale (the static compression is kept, see
         // `ride_lab::RideTune::scaled_at`).
-        let travel = match crate::lab_scope::ride(self.lab_tagged) {
+        let travel = match crate::lab_scope::ride() {
             Some(t) => c.susp.travel_m * t.travel.clamp(0.5, 3.0),
             None => c.susp.travel_m,
         };
@@ -1978,8 +2020,7 @@ impl Vehicle {
             radius: c.radius,
             half_width: c.half_width
                 * PROBE_WIDTH_FRAC
-                * crate::lab_scope::grip(self.lab_tagged)
-                    .map_or(1.0, |g| g.probe_width.clamp(0.0, 1.5)),
+                * crate::lab_scope::grip().map_or(1.0, |g| g.probe_width.clamp(0.0, 1.5)),
             rot: ch.rot * yaw_quat(w.steer - std::f32::consts::FRAC_PI_2),
         };
         // Rigid-tyre compression plus the tyre's static deflection (data radius = loaded).
@@ -1988,14 +2029,14 @@ impl Vehicle {
         // Drift Lab W ride tuning (lab override): scaled springs / dampers.
         // Grip-balance lab: the per-car rear spring fix (`grip_lab::car_fix`), ride height kept.
         let spring_fix = if i >= 2 {
-            crate::lab_scope::grip(self.lab_tagged)
+            crate::lab_scope::grip()
                 .and_then(|g| g.fix_for(&self.def.id))
                 .map(|f| f.spring_rear)
                 .filter(|k| *k != 1.0)
         } else {
             None
         };
-        let st = match (crate::lab_scope::ride(self.lab_tagged), spring_fix) {
+        let st = match (crate::lab_scope::ride(), spring_fix) {
             (None, None) => step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt),
             (ride, fix) => {
                 let load = crate::ride_lab::corner_load(&self.def, i);
@@ -2142,9 +2183,9 @@ impl Vehicle {
         let x_diff = self.solve_diffs(&mut drive, wheel_side, reflected, split, s_sum, kin, h);
 
         // Drift Lab W car / tyre lab override (`crate::car_lab`); `None` = the data.
-        let car_tune = crate::lab_scope::car(self.lab_tagged);
+        let car_tune = crate::lab_scope::car();
         // Grip-balance lab (`crate::grip_lab`): front / rear tyre scales on top; `None` = data.
-        let grip_tune = crate::lab_scope::grip(self.lab_tagged).filter(|g| g.changes_tyres());
+        let grip_tune = crate::lab_scope::grip().filter(|g| g.changes_tyres());
         let layout = self.def.drivetrain.layout;
         for i in 0..4 {
             let c = &self.corners[i];

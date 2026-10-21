@@ -34,6 +34,9 @@ fn kb(help: f32) -> AssistProfile {
 }
 
 fn main() {
+    // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
+    // `wp_vehicle::lab_scope`).
+    wp_vehicle::lab_scope::set_legacy(true);
     // DRIFT_TUNING='{"hold_gain":0.8}' overrides constants (missing fields = defaults).
     if let Ok(j) = std::env::var("DRIFT_TUNING") {
         wp_vehicle::drift::set_tuning_override(Some(

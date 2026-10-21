@@ -99,7 +99,6 @@
           speed <input id="sc-speed" type="number" min="5" max="250" step="5" value="56" /> km/h
           <button id="sc-run">run</button>
           <button id="sc-free">free drive</button>
-          <button id="sc-drift-w" title="Drift Lab W: plain keyboard steering (raw keys, constant-rate rack), reference-parity cars (default parity_rwd_d), TCS / ESC off, manual; open pad, 90° corners and a sweeper; 'tune' panel">drift lab W</button>
           <button id="sc-chase" title="city at night (map below), police, traffic, you start speeding">city chase</button>
           <button id="sc-chase-rain" title="the city chase in a night downpour on a soaked road">rainy night</button>
           <label title="free drive / city chase use your career car, its damage and mods, and the result goes into the career"><input type="checkbox" id="career" checked />career</label>
@@ -119,6 +118,9 @@
           weather <select id="weather" title="restarts the session with this weather (the scenario's own weather on 'scenario')"><option value="auto">scenario</option></select>
           bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
           <span id="bench-out" class="dim"></span>
+        </div>
+        <div class="row" id="tune-row" title="free car tune for the selected car outside the career (career runs use the tune saved in the garage); 3 = stock, applies from the next start">
+          car tune
         </div>
         <div class="row" id="preset-row" title="one click: damage mode + assists together (GDD §6); any box below can still be changed">
           preset

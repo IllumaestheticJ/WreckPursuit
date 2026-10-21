@@ -136,7 +136,7 @@ export class Hud {
       `<b>Countersteer help</b> (slider, keyboard/gamepad): in a slide, <i>let go</i> of the steering ` +
       `and the front wheels follow the car's travel (straighten); press <i>against</i> the slide for a ` +
       `fast catch (0 % off, 100 % fastest). It never fights your input, and the handbrake turns the ` +
-      `car freely. Drift Lab W: the "drift lab W" button (or ?drift=w).<br><br>` +
+      `car freely. Handling tune panel (debug): F7 or ?tune=1; test pad: ?drift=w.<br><br>` +
       `<b>Debug layers</b><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;

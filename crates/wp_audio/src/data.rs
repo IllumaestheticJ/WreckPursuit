@@ -414,7 +414,131 @@ pub struct AudioConfig {
     /// Physically driven impact / crunch / scrape synthesis (optional, defaults in code).
     #[serde(default)]
     pub impact_synth: crate::impact::ImpactSynthConfig,
+    /// Master stage gain staging the backend builds (optional, defaults in code).
+    #[serde(default)]
+    pub master: MasterMix,
 }
+
+/// Master stage of the backend mixer (`audio_config.json` → `master`): where each bus enters
+/// the master sum, the master compressor, a final trim and the safety soft clip. The director
+/// does not use it; it travels with the library to the browser (`AudioMixer` in
+/// `apps/testbed-web/src/audio/voices.ts`). Gain staging rationale and measurements:
+/// `docs/integration/audio.md` "Mix headroom".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MasterMix {
+    /// Fixed headroom trim of each bus where it enters the master sum, dB (after the user's
+    /// bus slider and the director's ducks). Equal trims keep the sources' calibrated balance.
+    pub bus_gain_db: BTreeMap<Bus, f32>,
+    /// Master compressor (a Web Audio `DynamicsCompressorNode`; the backend divides out its
+    /// automatic make-up gain, so below threshold the stage is unity gain).
+    pub compressor: MasterCompressor,
+    /// Gain after the compressor, dB.
+    pub trim_db: f32,
+    /// Soft clip: linear below this output level (full scale = 1).
+    pub clip_knee: f32,
+    /// Soft clip: level the tanh knee approaches and never exceeds (full scale = 1).
+    pub clip_ceiling: f32,
+}
+
+impl Default for MasterMix {
+    fn default() -> Self {
+        Self {
+            bus_gain_db: Bus::ALL.iter().map(|b| (*b, -6.0)).collect(),
+            compressor: MasterCompressor::default(),
+            trim_db: 0.0,
+            clip_knee: 0.7,
+            clip_ceiling: 0.89,
+        }
+    }
+}
+
+/// Master compressor settings (`DynamicsCompressorNode` parameters, same units and ranges).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MasterCompressor {
+    /// Threshold, dBFS (−100..=0). The knee runs from here to `threshold_db + knee_db`.
+    pub threshold_db: f32,
+    /// Knee width above the threshold, dB (0..=40).
+    pub knee_db: f32,
+    /// Ratio above the knee (1..=20).
+    pub ratio: f32,
+    /// Attack, s (0..=1).
+    pub attack_s: f32,
+    /// Release, s (0..=1).
+    pub release_s: f32,
+}
+
+impl Default for MasterCompressor {
+    fn default() -> Self {
+        Self {
+            threshold_db: -8.0,
+            knee_db: 6.0,
+            ratio: 4.0,
+            attack_s: 0.003,
+            release_s: 0.3,
+        }
+    }
+}
+
+impl MasterMix {
+    /// Problems with these settings (empty = valid): `DynamicsCompressorNode` ranges, a knee
+    /// that ends at or below full scale (the compressor must act before the clip does), every
+    /// bus trimmed by at most 0 dB, and a soft clip that keeps sample peaks at or under −1 dBFS.
+    pub fn validate(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        let c = &self.compressor;
+        let range = |errs: &mut Vec<String>, name: &str, v: f32, lo: f32, hi: f32| {
+            if !(lo..=hi).contains(&v) {
+                errs.push(format!(
+                    "audio_config: master.{name} {v} outside {lo}..={hi}"
+                ));
+            }
+        };
+        range(
+            &mut errs,
+            "compressor.threshold_db",
+            c.threshold_db,
+            -100.0,
+            0.0,
+        );
+        range(&mut errs, "compressor.knee_db", c.knee_db, 0.0, 40.0);
+        range(&mut errs, "compressor.ratio", c.ratio, 1.0, 20.0);
+        range(&mut errs, "compressor.attack_s", c.attack_s, 0.0, 1.0);
+        range(&mut errs, "compressor.release_s", c.release_s, 0.0, 1.0);
+        range(&mut errs, "trim_db", self.trim_db, -24.0, 12.0);
+        range(&mut errs, "clip_knee", self.clip_knee, 0.1, 0.95);
+        range(
+            &mut errs,
+            "clip_ceiling",
+            self.clip_ceiling,
+            0.1,
+            MAX_CLIP_CEILING,
+        );
+        for b in Bus::ALL {
+            match self.bus_gain_db.get(&b) {
+                Some(g) => range(&mut errs, &format!("bus_gain_db.{b:?}"), *g, -40.0, 0.0),
+                None => errs.push(format!("audio_config: master.bus_gain_db missing {b:?}")),
+            }
+        }
+        if c.threshold_db + c.knee_db > 0.0 {
+            errs.push(format!(
+                "audio_config: master.compressor knee ends above full scale ({} + {} dB > 0)",
+                c.threshold_db, c.knee_db
+            ));
+        }
+        if self.clip_knee >= self.clip_ceiling {
+            errs.push(format!(
+                "audio_config: master.clip_knee {} must be below clip_ceiling {}",
+                self.clip_knee, self.clip_ceiling
+            ));
+        }
+        errs
+    }
+}
+
+/// Highest allowed soft-clip ceiling: −1 dBFS (true-peak target of the mix).
+pub const MAX_CLIP_CEILING: f32 = 0.8913;
 
 // ----- cars --------------------------------------------------------------------------------
 
@@ -1003,6 +1127,7 @@ impl AudioLibrary {
                 errs.push(format!("audio_config: sirens.cadence missing {pattern:?}"));
             }
         }
+        errs.extend(self.config.master.validate());
         errs
     }
 }
@@ -1014,5 +1139,74 @@ fn check_id(kind: &str, stem: &str, id: &str) -> Result<(), AudioDataError> {
         Err(AudioDataError(format!(
             "{kind}/{stem}.json: id {id:?} must equal the file stem"
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shipped master stage is valid and trims every bus alike: the balance between engine,
+    /// tyres / impacts, sirens / radio and UI lives in the sources' calibrated levels, the bus
+    /// trims only make headroom (docs/integration/audio.md "Mix headroom").
+    #[test]
+    fn shipped_master_stage_keeps_headroom_and_balance() {
+        let lib = AudioLibrary::embedded().expect("audio data");
+        let m = &lib.config.master;
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let gains: Vec<f32> = Bus::ALL.iter().map(|b| m.bus_gain_db[b]).collect();
+        assert!(
+            gains.iter().all(|g| (g - gains[0]).abs() < 1e-6),
+            "bus trims differ: {gains:?}"
+        );
+        // Headroom: the buses enter the master at least 3 dB down, and the compressor's knee
+        // ends under full scale with the soft clip's ceiling at −1 dBFS or lower.
+        assert!(
+            gains[0] <= -3.0,
+            "bus trim {} dB leaves no headroom",
+            gains[0]
+        );
+        assert!(m.compressor.threshold_db + m.compressor.knee_db <= 0.0);
+        assert!(m.clip_ceiling <= MAX_CLIP_CEILING);
+        // The file says what the code defaults say (the browser falls back to the same values).
+        assert_eq!(*m, MasterMix::default());
+    }
+
+    #[test]
+    fn master_validation_rejects_a_hot_or_incomplete_stage() {
+        let ok = MasterMix::default();
+        assert!(ok.validate().is_empty());
+        let mut knee_over = ok.clone();
+        knee_over.compressor.threshold_db = -4.0;
+        knee_over.compressor.knee_db = 10.0;
+        assert!(knee_over
+            .validate()
+            .iter()
+            .any(|e| e.contains("full scale")));
+        let mut boost = ok.clone();
+        boost.bus_gain_db.insert(Bus::Engine, 3.0);
+        assert!(boost
+            .validate()
+            .iter()
+            .any(|e| e.contains("bus_gain_db.Engine")));
+        let mut missing = ok.clone();
+        missing.bus_gain_db.remove(&Bus::Police);
+        assert!(missing
+            .validate()
+            .iter()
+            .any(|e| e.contains("missing Police")));
+        let mut ceiling = ok.clone();
+        ceiling.clip_ceiling = 0.99;
+        assert!(ceiling
+            .validate()
+            .iter()
+            .any(|e| e.contains("clip_ceiling")));
+        let mut inverted = ok;
+        inverted.clip_knee = 0.9;
+        inverted.clip_ceiling = 0.85;
+        assert!(inverted
+            .validate()
+            .iter()
+            .any(|e| e.contains("below clip_ceiling")));
     }
 }

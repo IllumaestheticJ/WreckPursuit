@@ -23,6 +23,9 @@ fn car(id: &str) -> LoadedCar {
 
 #[test]
 fn lift_flicks_swing_through_with_the_transition_rack() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     let a = reference_assists();
     car_lab::set_override(Some(CarTune::spin_candidate()));
     grip_lab::set_override(Some(GripBalance::lab_default()));
