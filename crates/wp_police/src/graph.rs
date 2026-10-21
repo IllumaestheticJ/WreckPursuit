@@ -208,6 +208,110 @@ impl RoadPath {
     }
 }
 
+/// [`RoadGraph::road_span_at`] considers segments up to this much farther from the car than
+/// the nearest one, m.
+pub const ROAD_SPAN_SLACK_M: f32 = 2.0;
+
+/// Most road pieces in a [`RoadSpan`]: the car's own segment and up to seven meeting it at
+/// its ends.
+pub const ROAD_SPAN_PIECES: usize = 8;
+
+/// The paved surface of one straight road segment: a rectangle along `axis` from `origin`,
+/// `len_m` long, reaching `left_m` / `right_m` either side of the centreline.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RoadRect {
+    /// Segment start on the centreline, m.
+    pub origin: [f32; 2],
+    /// Unit direction of the centreline (the segment's `a → b`).
+    pub axis: [f32; 2],
+    /// Segment length, m.
+    pub len_m: f32,
+    /// Surface to the left of `axis`, m.
+    pub left_m: f32,
+    /// Surface to the right of `axis`, m.
+    pub right_m: f32,
+}
+
+impl RoadRect {
+    /// Signed distance of `p` left of the centreline, m (negative = right).
+    pub fn lateral(&self, p: [f32; 2]) -> f32 {
+        cross(self.axis, sub(p, self.origin))
+    }
+
+    /// Distance from `p` to this piece of road (its ends reaching on as in
+    /// [`RoadRect::contains`]), m; 0 on it.
+    pub fn distance_to(&self, p: [f32; 2]) -> f32 {
+        let d = sub(p, self.origin);
+        let along = dot(self.axis, d);
+        let lat = cross(self.axis, d);
+        let reach = self.left_m.max(self.right_m);
+        let dx = (-reach - along).max(along - self.len_m - reach).max(0.0);
+        let dy = (lat - self.left_m).max(-self.right_m - lat).max(0.0);
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    /// Whether `p` is on this piece of road with `margin` to spare from its kerbs. Each end
+    /// reaches on by the road's half width, which fills the junction box and the outside of
+    /// a bend where the next piece starts.
+    pub fn contains(&self, p: [f32; 2], margin: f32) -> bool {
+        let d = sub(p, self.origin);
+        let along = dot(self.axis, d);
+        let lat = cross(self.axis, d);
+        let reach = self.left_m.max(self.right_m);
+        along >= -reach
+            && along <= self.len_m + reach
+            && lat <= self.left_m - margin
+            && lat >= -self.right_m + margin
+    }
+}
+
+/// The road surface round a car ([`RoadGraph::road_span_at`]): the segment it is on plus
+/// the segments meeting that one at either end (a junction's side roads, the next piece of a
+/// bend), each as a [`RoadRect`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RoadSpan {
+    /// The segment the car is on.
+    pub own: RoadRect,
+    /// Segments meeting it, in segment-id order.
+    pub others: [Option<RoadRect>; ROAD_SPAN_PIECES - 1],
+    /// The car's segment is one-way along `own.axis` (a highway carriageway).
+    pub oneway: bool,
+}
+
+impl RoadSpan {
+    /// A lone straight road (no side roads), for tests and hand-built cases.
+    pub fn straight(origin: [f32; 2], axis: [f32; 2], left_m: f32, right_m: f32) -> Self {
+        Self {
+            own: RoadRect {
+                origin: sub(origin, scale(axis, 1000.0)),
+                axis,
+                len_m: 2000.0,
+                left_m,
+                right_m,
+            },
+            others: [None; ROAD_SPAN_PIECES - 1],
+            oneway: false,
+        }
+    }
+
+    /// Signed distance of `p` left of the car's road centreline, m (negative = right).
+    pub fn lateral(&self, p: [f32; 2]) -> f32 {
+        self.own.lateral(p)
+    }
+
+    /// Whether `p` is on any piece of the surface with `margin` to spare from the kerbs.
+    pub fn contains(&self, p: [f32; 2], margin: f32) -> bool {
+        self.own.contains(p, margin) || self.others.iter().flatten().any(|r| r.contains(p, margin))
+    }
+
+    /// Add a piece (dropped when full).
+    pub fn add_piece(&mut self, r: RoadRect) {
+        if let Some(slot) = self.others.iter_mut().find(|x| x.is_none()) {
+            *slot = Some(r);
+        }
+    }
+}
+
 /// Cosine of the heading change below which two consecutive segments count as "straight"
 /// for sight distance (≈ 8°).
 pub const STRAIGHT_COS: f32 = 0.990;
@@ -637,6 +741,81 @@ impl RoadGraph {
             via = ps;
         }
         sight.min(cap_m)
+    }
+
+    /// The road surface round a car at `pos` facing `heading`, for the built-in driver's
+    /// turn-round manoeuvre ([`crate::turn`]).
+    ///
+    /// The car's segment is, among the segments at most [`ROAD_SPAN_SLACK_M`] farther from
+    /// `pos` than the nearest one, the one most nearly along `heading` (ties: the closer one),
+    /// so that in a junction the cross road is not mistaken for the road the car is on. The
+    /// segments meeting it at either end are added (in id order), so a car near a junction
+    /// may turn using the side road. Widths follow `wp_world`'s road builder: a two-way
+    /// road's centreline is the divider (the `a → b` lanes on its right, the `b → a` lanes
+    /// on its left), a one-way carriageway's is its middle. Parking strips (parked cars),
+    /// medians and shoulders are not in the police graph, so each piece is its lanes only.
+    /// Unknown lane data (hand-built graphs) gives [`crate::dispatch::ROAD_HALF_WIDTH_M`]
+    /// each side.
+    pub fn road_span_at(&self, pos: [f32; 2], heading: [f32; 2]) -> Option<RoadSpan> {
+        let near = self.nearest_on_road(pos)?;
+        // (-|cos|, distance, segment) of the best candidate so far.
+        let mut best: Option<(f32, f32, usize)> = None;
+        for (i, seg) in self.segments.iter().enumerate() {
+            let a = self.node(seg.a).pos;
+            let b = self.node(seg.b).pos;
+            let (_, q) = closest_on_segment(a, b, pos);
+            let d = dist(pos, q);
+            if d > near.dist_m + ROAD_SPAN_SLACK_M || dist2(a, b) < 1e-6 {
+                continue;
+            }
+            let along = -dot(normalize(sub(b, a)), heading).abs();
+            let better =
+                best.is_none_or(|(ba, bd, _)| along < ba - 0.05 || (along <= ba + 0.05 && d < bd));
+            if better {
+                best = Some((along, d, i));
+            }
+        }
+        let own = best.map_or(near.segment.0 as usize, |(_, _, i)| i);
+        let seg = &self.segments[own];
+        let mut span = RoadSpan {
+            own: self.road_rect(own),
+            others: [None; ROAD_SPAN_PIECES - 1],
+            oneway: seg.oneway,
+        };
+        for (i, other) in self.segments.iter().enumerate() {
+            let touches =
+                other.a == seg.a || other.a == seg.b || other.b == seg.a || other.b == seg.b;
+            if i != own && touches && dist2(self.node(other.a).pos, self.node(other.b).pos) >= 1e-6
+            {
+                span.add_piece(self.road_rect(i));
+            }
+        }
+        Some(span)
+    }
+
+    /// The paved rectangle of segment `i` (see [`RoadGraph::road_span_at`] for the widths).
+    fn road_rect(&self, i: usize) -> RoadRect {
+        let seg = &self.segments[i];
+        let a = self.node(seg.a).pos;
+        let b = self.node(seg.b).pos;
+        let w = seg.lane_width_m;
+        let known = w > 0.0 && (seg.lanes_fwd > 0 || seg.lanes_back > 0);
+        let (left_m, right_m) = if !known {
+            let h = crate::dispatch::ROAD_HALF_WIDTH_M;
+            (h, h)
+        } else if seg.oneway {
+            let h = seg.lanes_fwd.max(seg.lanes_back) as f32 * w * 0.5;
+            (h, h)
+        } else {
+            (seg.lanes_back as f32 * w, seg.lanes_fwd as f32 * w)
+        };
+        RoadRect {
+            origin: a,
+            axis: normalize(sub(b, a)),
+            len_m: dist(a, b),
+            left_m,
+            right_m,
+        }
     }
 
     /// POIs of a kind.
