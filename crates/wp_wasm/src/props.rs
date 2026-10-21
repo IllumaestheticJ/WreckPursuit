@@ -240,8 +240,8 @@ mod tests {
             .find(|r| r[0] as usize == target)
             .expect("the knocked parked car was promoted");
         assert!(rec[2] < 1.0, "health {}", rec[2]);
-        for k in 4..7 {
-            assert!((0.9..1.1).contains(&rec[k]), "scale {}", rec[k]);
+        for s in &rec[4..7] {
+            assert!((0.9..1.1).contains(s), "scale {s}");
         }
         // Its entity id reads like a vehicle's: car model and a dented lattice.
         let id = wp_contracts::EntityId(wp_sim::PARKED_ENTITY_BASE + target as u32);
