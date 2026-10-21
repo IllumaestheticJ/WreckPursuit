@@ -603,6 +603,9 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
+/// Gap planner: city speeds only. At circuit speeds (Loop 9, 50-67 m/s) a weave off the line
+/// cost time and, on seeds 3, a car (into the next bend off its line), m/s.
+const WEAVE_MAX_MPS: f32 = 35.0;
 /// Gap planner: how far ahead lanes are compared, m.
 const WEAVE_RANGE_M: f32 = 100.0;
 /// Gap planner: time over which a car's speed counts towards the room in its lane, s.
@@ -2167,6 +2170,7 @@ fn decide_racer(
             && !done_racing
             && !start_phase
             && !fleeing
+            && v < WEAVE_MAX_MPS
             && brake_dist > 2.5 * v.max(8.0)
         {
             let room = |c: f32| -> f32 {
