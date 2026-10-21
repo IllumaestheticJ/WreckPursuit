@@ -1163,6 +1163,19 @@ Per car, panel default: swing from the lift (median / fastest), caught.
 - **Remaining gap:** ~1.0 s vs the reference's 0.5–0.8 s. The rest is the car (the rear past its
   peak, yaw inertia): see tyre-slip's levers.
 
+**On tyre-slip's harness** (`transition -- v2search`, N=0, "balance new · plain", v1 spin
+tyres; 18 owner lift-flicks, real swings):
+
+| | held / 27 | caught / 18 | swing back | median crossing | lift-off fails | held-key swaps |
+|---|---|---|---|---|---|---|
+| rack off | 25 | 0 | 0 | — | 0 | 2 |
+| **rack on** | 25 | **17** | 0 | 0.82 s (0.68–0.96) | 0 | 2 |
+| rack on + grip-balance 22582eb3 (cut released 0.75 s after a key reversal) | 25 | **18** | 0 | 0.82 s | 0 | 2 |
+| rack on + tyre-slip's front falloff 0.9 (20→35°) | 25 | 12 | 6 | 0.82 s | 0 | 2 |
+
+"fast" (crossing 0.5–0.8 s and settled within 0.5 s) stays 0: the settle takes longer. The front
+falloff makes it swing back, so it does not combine with the rack.
+
 **Gates** (panel default: firm, grip "new", spin model):
 - **Held-key set (grip-balance `robust`):** 27 / 27 with and without the rack.
 - **Catch window, snap-back, turn-in:** identical with the rack on or off (catchwindow / snapsweep

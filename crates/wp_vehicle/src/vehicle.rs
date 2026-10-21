@@ -1433,6 +1433,8 @@ impl Vehicle {
                         body_slip: steer_in.body_slip,
                         slip_rate,
                         counter_s,
+                        since_lift_s: self.since_lift_s,
+                        since_reversal_s: self.since_reversal_s,
                     },
                 )
             });
