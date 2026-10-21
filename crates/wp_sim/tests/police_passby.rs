@@ -32,7 +32,8 @@ fn vesper() -> &'static RoadNetwork {
 }
 
 /// City at `hour` with police cars and no traffic or parked cars, run until a police car is
-/// driving its patrol with ≥ 60 m left on its road segment (so the pass happens on a straight).
+/// driving its patrol with ≥ 60 m left on its road segment and ≥ 15 m behind it (so the pass
+/// happens on a straight).
 fn city_with_patrol(city: City, hour: f32) -> (Sim, EntityId) {
     let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
@@ -74,7 +75,11 @@ fn city_with_patrol(city: City, hour: f32) -> (Sim, EntityId) {
             let f = [-yaw.sin(), yaw.cos()];
             let toward_b = (b[0] - a[0]) * f[0] + (b[1] - a[1]) * f[1] > 0.0;
             let left = if toward_b { 1.0 - rp.t } else { rp.t } * seg.length_m;
-            left > 60.0
+            // And out of the junction it came through: since main's ramps and terminals joined
+            // the police road graph, Port Vesper's first such patrol car was 1 m from the centre
+            // of a downtown junction, and the parked variant turned round inside the box.
+            let done = seg.length_m - left;
+            left > 60.0 && done > 15.0
         });
         if let Some((cop, _)) = found {
             let id = cop.id;
