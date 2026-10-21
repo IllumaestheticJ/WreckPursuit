@@ -21,12 +21,14 @@ pub mod car_mesh;
 pub mod city;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+pub mod lighting;
 pub mod scene;
 pub mod skin;
 
 pub use camera::{CameraView, ChaseCamera};
 pub use car_mesh::{CarMesh, CarMeshLibrary};
 pub use city::CityMesh;
+pub use lighting::{Lighting, SpotLight};
 pub use scene::{CarView, Scene, StaticBox};
 pub use skin::{SkinnedBody, StaticMesh};
 
@@ -40,6 +42,8 @@ pub enum Shade {
     Emissive = 1,
     /// Ground plane with a procedural metre grid.
     Ground = 2,
+    /// Building walls: like [`Shade::Lit`], plus procedurally lit windows at night.
+    Building = 3,
 }
 
 /// One vertex as uploaded to the GPU (44 bytes). With a zero [`Vertex::normal`] the normal is

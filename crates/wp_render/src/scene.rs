@@ -1,6 +1,6 @@
 //! The renderer-side picture of a [`Sim`]: one [`CarView`] per vehicle (skinned body, wheel
 //! poses, chassis transform), the city greybox, boxes for traffic that is not a physics vehicle,
-//! and static boxes. Pure CPU; the GPU layer only uploads what this
+//! static boxes, and the lighting of the world clock with headlight spots. Pure CPU; the GPU layer only uploads what this
 //! produces. Reading the sim never changes it.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +13,7 @@ use wp_sim::Sim;
 
 use crate::car_mesh::CarMeshLibrary;
 use crate::city::CityMesh;
+use crate::lighting::{Lighting, SpotLight, MAX_SPOT_LIGHTS};
 use crate::skin::{material_look, wheel_meshes, SkinnedBody, StaticMesh};
 use crate::{Shade, Vertex};
 
@@ -59,6 +60,10 @@ pub struct CarView {
     pub body_revision: u64,
     /// Wheel poses FL, FR, RL, RR.
     pub wheels: [WheelPose; 4],
+    /// Left and right headlight positions, chassis space (front corners of the lattice).
+    pub headlight_mounts: [Vec3; 2],
+    /// Headlights on (the driver's input, or automatically at night like the traffic AI).
+    pub headlights_on: bool,
     spin: [f32; 4],
     last_nodes: Vec<[f32; 3]>,
     last_panels: Vec<PanelStatus>,
@@ -76,7 +81,12 @@ pub struct Scene {
     city: Option<Arc<CityMesh>>,
     city_revision: u64,
     traffic: StaticMesh,
+    lighting: Lighting,
+    lights: Vec<SpotLight>,
 }
+
+/// Night factor above which every car drives with headlights on (the traffic AI's rule).
+const AUTO_HEADLIGHTS_NIGHT: f32 = 0.5;
 
 /// Traffic box size `[width, length, height]`, m (as the browser).
 const TRAFFIC_BOX_M: [f32; 3] = [1.8, 4.4, 1.4];
@@ -116,7 +126,32 @@ impl Scene {
             city: None,
             city_revision: 0,
             traffic: StaticMesh::default(),
+            lighting: Lighting::default(),
+            lights: Vec::new(),
         }
+    }
+
+    /// Sun or moon, sky and fog for the sim's time of day (updated by [`Self::sync`]).
+    pub fn lighting(&self) -> &Lighting {
+        &self.lighting
+    }
+
+    /// Every headlight in the scene (updated by [`Self::sync`]).
+    pub fn lights(&self) -> &[SpotLight] {
+        &self.lights
+    }
+
+    /// The (at most [`MAX_SPOT_LIGHTS`]) lights nearest `eye`, nearest first. Ties keep scene
+    /// order, so the choice is stable from frame to frame.
+    pub fn lights_near(&self, eye: Vec3) -> Vec<SpotLight> {
+        let mut lights = self.lights.clone();
+        lights.sort_by(|a, b| {
+            let da = Vec3::from(a.pos).distance_squared(eye);
+            let db = Vec3::from(b.pos).distance_squared(eye);
+            da.total_cmp(&db)
+        });
+        lights.truncate(MAX_SPOT_LIGHTS);
+        lights
     }
 
     /// Show `city` (or none: the flat world).
@@ -166,6 +201,9 @@ impl Scene {
 
     /// Bring every car up to date with `sim`. `frame_dt` (s) only advances wheel spin angles.
     pub fn sync(&mut self, sim: &Sim, frame_dt: f32) {
+        self.lighting = Lighting::for_time(sim.world().clock.time);
+        let auto_headlights = self.lighting.night > AUTO_HEADLIGHTS_NIGHT;
+        self.lights.clear();
         self.traffic.vertices.clear();
         self.traffic.indices.clear();
         let half = Vec3::from(TRAFFIC_BOX_M) * 0.5;
@@ -183,6 +221,16 @@ impl Scene {
             let centre = Vec3::new(a.pos[0], a.pos[1], a.pos[2] + half.z);
             let to_world = Mat4::from_rotation_translation(Quat::from_rotation_z(a.yaw), centre);
             push_box(&mut self.traffic, to_world, half, color);
+            if auto_headlights {
+                let forward = to_world.transform_vector3(Vec3::Y).to_array();
+                for x in [-0.6, 0.6] {
+                    let at = Vec3::new(x, half.y, -0.2);
+                    self.lights.push(SpotLight::headlight(
+                        to_world.transform_point3(at).to_array(),
+                        forward,
+                    ));
+                }
+            }
         }
 
         let states: BTreeMap<EntityId, _> = sim.vehicle_states().into_iter().collect();
@@ -218,6 +266,8 @@ impl Scene {
                             to_chassis: Mat4::IDENTITY,
                             visible: false,
                         }; 4],
+                        headlight_mounts: headlight_mounts(lattice),
+                        headlights_on: false,
                         spin: [0.0; 4],
                         last_nodes: Vec::new(),
                         last_panels: Vec::new(),
@@ -231,6 +281,16 @@ impl Scene {
             car.speed_mps = st.speed_mps;
             car.to_world =
                 Mat4::from_rotation_translation(Quat::from_array(st.rot), Vec3::from(st.pos));
+            car.headlights_on = v.input.headlights || auto_headlights;
+            if car.headlights_on {
+                let forward = car.to_world.transform_vector3(Vec3::Y).to_array();
+                for m in car.headlight_mounts {
+                    self.lights.push(SpotLight::headlight(
+                        car.to_world.transform_point3(m).to_array(),
+                        forward,
+                    ));
+                }
+            }
 
             let Ok(nodes) = sim.node_positions(v.id) else {
                 continue;
@@ -281,6 +341,22 @@ impl Scene {
     pub fn wheel_meshes(&self, car_id: &str) -> Option<&Arc<[StaticMesh; 4]>> {
         self.wheel_meshes.get(car_id)
     }
+}
+
+/// Headlight positions from the lattice's rest bounds: the front face, 70 % of the way out to
+/// each side, a third of the way up.
+fn headlight_mounts(lattice: &wp_contracts::LatticeDef) -> [Vec3; 2] {
+    let mut lo = Vec3::splat(f32::INFINITY);
+    let mut hi = Vec3::splat(f32::NEG_INFINITY);
+    for n in &lattice.nodes {
+        lo = lo.min(Vec3::from(n.pos_m));
+        hi = hi.max(Vec3::from(n.pos_m));
+    }
+    let z = lo.z + (hi.z - lo.z) / 3.0;
+    [
+        Vec3::new(lo.x * 0.7, hi.y, z),
+        Vec3::new(hi.x * 0.7, hi.y, z),
+    ]
 }
 
 /// Append a box with half extents `half`, transformed by `to_world`.

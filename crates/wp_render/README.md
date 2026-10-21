@@ -15,6 +15,7 @@ eventually serve the browser too).
 | `skin` | `SkinnedBody`: lattice → vertices (port of `testbed-web/src/render/panels.ts`, incl. rigid-frame fit for free panels); wheel meshes | no |
 | `scene` | `Scene::sync(&Sim, dt)`: one `CarView` per vehicle (body, wheel poses, chassis transform), boxes for abstract traffic, static boxes; `Scene::set_city` | no |
 | `camera` | `ChaseCamera` (lagged heading, speed pull-back, orbit), `CameraView::view_proj` | no |
+| `lighting` | `Lighting::for_time`: sun or moon, sky, fog and a night factor from the world clock; `SpotLight` headlights | no |
 | `gpu` (feature `gpu`) | `Renderer` (one WGSL shader; opaque pipelines per decal layer + blended glass; 4× MSAA; reversed-Z float depth), `Offscreen` + `write_png` | yes |
 
 Rendering only **reads** the sim. Nothing flows back, so frame time and floating-point on this
@@ -28,6 +29,8 @@ panels or glass changed.
 cargo run --release -p testbed-native --features gpu -- --gpu
 # ... in a city (free drive on its first race grid, with traffic): vesper_v2 or procedural_12x12
 cargo run --release -p testbed-native --features gpu -- --gpu --city vesper_v2
+# ... at night (any hour 0..24; the clock then runs at 10× real time as usual)
+cargo run --release -p testbed-native --features gpu -- --gpu --city vesper_v2 --hour 23
 # add a wheel:      --features gpu,ffb
 
 # Headless screenshot (any adapter; in a container install mesa-vulkan-drivers for lavapipe)
@@ -38,7 +41,7 @@ cargo run --release -p testbed-native --features gpu -- \
   --shot city.png --city vesper_v2 --seconds 4 --height 80 --distance 90 --orbit 150
 ```
 
-`--shot OUT [--scenario X.ron | --city ID] [--seconds S] [--size WxH] [--orbit DEG]
+`--shot OUT [--scenario X.ron | --city ID --hour H] [--seconds S] [--size WxH] [--orbit DEG]
 [--height M] [--distance M]` runs the scenario (or a free drive with light throttle) at 60 fps,
 follows the first car and writes one PNG. It also prints the average scene-sync cost.
 
@@ -62,11 +65,34 @@ Screenshots: `docs/media/wp_render/city_procedural.png` (12×12 grid from above,
 `city_vesper_street.png` (Port Vesper street level), `city_vesper_air.png` (Vesper hills and
 terrain from above).
 
+### Time of day
+
+`Scene::sync` reads the world clock (`sim.world().clock`) and builds `Lighting::for_time`:
+
+- **Key light:** the sun follows `wp_world::sun_direction`, warming toward the horizon. Below
+  it a dim blue moon, opposite the sun, takes over.
+- **Sky, ambient and fog** fade from day to night colours with the sun's height, with an
+  orange tint around sunset and sunrise. The clear colour is the fog colour, so the horizon
+  matches.
+- **Headlights:** every car with `VehicleInput::headlights` set has two spot lights at the
+  front corners of its lattice. Police set it all day. At night (night factor > 0.5) every car
+  and every abstract traffic box has them on, the same rule the traffic AI uses. The shader
+  takes the 32 lights nearest the camera and scales them down in daylight. The lamp meshes
+  themselves are emissive and always glow.
+- **Buildings:** walls get a procedural window grid (3.2 m × 3.5 m panes, darker glass). At
+  night about 40 % glow warm, chosen by an integer hash per pane and wall. Walls carry exact
+  face normals from the loader so the pattern stays stable at city-scale coordinates.
+
+Screenshots: `night_vesper_street.png`, `night_vesper_headlights.png` (from above: the beams on
+the road), `night_procedural_air.png` (grid city at 01:00, traffic headlights),
+`dusk_vesper.png` (18:12).
+
 ## Tests
 
 ```sh
 cargo test -p wp_render            # CPU only: mesh files parse, skinning, free-panel rigidity, scene sync, camera,
-                                   # both city greyboxes load and cover their road networks, traffic boxes, reversed Z
+                                   # both city greyboxes load and cover their road networks, traffic boxes, reversed Z,
+                                   # day/dusk/night lighting, headlights on at night and with driver input, light cap
 cargo clippy -p wp_render --features gpu -- -D warnings
 ```
 
@@ -98,14 +124,15 @@ be set. Real-GPU frame times wait for a machine with a GPU.
 - **City cost:** no frustum culling or LOD. All of Vesper (372k triangles) is drawn every
   frame. Fine for a desktop GPU in principle, but not measured on one yet. The far plane is
   1.5 km and fog hides it.
-- **Time of day:** every scene is drawn in afternoon light, including night scenarios.
 - **Interpolation:** draws the latest sim state, not the interpolated one between ticks
   (the browser does interpolate). Fine at 240 Hz sim / 60 Hz frames, visible on high-refresh
   screens.
 - **Detached panels and debris:** detached regions just vanish (the browser throws them as
   visual debris; Rapier debris bodies aren't exposed to renderers yet).
-- **Lighting:** one sun, hemisphere ambient, fog. No shadows, no headlight or streetlight
-  lights, no night, no wet roads.
+- **Lighting:** no shadows, no street lights, no wet roads. Only the 32 headlights nearest
+  the camera light the scene. Headlights don't change with damage (a smashed front still
+  lights the road). Night scenarios in cities without a committed greybox (e.g.
+  `golden/night_pursuit_escape.ron`, an 8×8 city) show cars and grid only.
 - **No HUD or text.** Police light bars, traffic, signals and the browser's debug layers are
   not drawn either.
 - **Wheel height** uses the browser's approximation (static hub height + compression about

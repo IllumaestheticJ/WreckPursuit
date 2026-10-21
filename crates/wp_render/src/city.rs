@@ -98,21 +98,34 @@ impl CityMesh {
                     return Err(format!("{name}: index out of range"));
                 }
 
+                let shade = if name == "building" {
+                    Shade::Building
+                } else {
+                    Shade::Lit
+                };
+                let mut vertices: Vec<Vertex> = positions
+                    .iter()
+                    .enumerate()
+                    .map(|(k, g)| Vertex {
+                        pos: to_world(*g),
+                        color,
+                        shade: shade as u32 as f32,
+                        normal: normals.as_ref().map_or([0.0; 3], |n| to_world(n[k])),
+                    })
+                    .collect();
+                let mut indices = indices;
+                if shade == Shade::Building {
+                    (vertices, indices) = with_face_normals(&vertices, &indices);
+                }
+                for v in &vertices {
+                    for (a, c) in v.pos.iter().enumerate() {
+                        out.bounds.0[a] = out.bounds.0[a].min(*c);
+                        out.bounds.1[a] = out.bounds.1[a].max(*c);
+                    }
+                }
                 let layer = &mut out.layers[decal_layer(name)];
                 let base = layer.vertices.len() as u32;
-                for (k, g) in positions.iter().enumerate() {
-                    let p = to_world(*g);
-                    for (a, v) in p.iter().enumerate() {
-                        out.bounds.0[a] = out.bounds.0[a].min(*v);
-                        out.bounds.1[a] = out.bounds.1[a].max(*v);
-                    }
-                    layer.vertices.push(Vertex {
-                        pos: p,
-                        color,
-                        shade: Shade::Lit as u32 as f32,
-                        normal: normals.as_ref().map_or([0.0; 3], |n| to_world(n[k])),
-                    });
-                }
+                layer.vertices.extend(vertices);
                 layer.indices.extend(indices.iter().map(|i| base + i));
             }
         }
@@ -126,6 +139,26 @@ impl CityMesh {
     pub fn triangle_count(&self) -> usize {
         self.layers.iter().map(|l| l.indices.len() / 3).sum()
     }
+}
+
+/// Unshare vertices so every triangle carries its exact face normal. Building walls need it:
+/// the window pattern is laid out along the wall's direction, and a normal derived per pixel
+/// from screen-space derivatives is too noisy for that at city-scale coordinates.
+fn with_face_normals(vertices: &[Vertex], indices: &[u32]) -> (Vec<Vertex>, Vec<u32>) {
+    let mut out = Vec::with_capacity(indices.len());
+    for tri in indices.chunks_exact(3) {
+        let p = [0, 1, 2].map(|k| glam::Vec3::from(vertices[tri[k] as usize].pos));
+        let n = (p[1] - p[0])
+            .cross(p[2] - p[0])
+            .normalize_or_zero()
+            .to_array();
+        out.extend(tri.iter().map(|&i| Vertex {
+            normal: n,
+            ..vertices[i as usize]
+        }));
+    }
+    let indices = (0..out.len() as u32).collect();
+    (out, indices)
 }
 
 /// glTF (+Y up) → world (+Z up).

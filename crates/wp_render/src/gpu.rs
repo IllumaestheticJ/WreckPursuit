@@ -18,6 +18,7 @@ use wp_contracts::EntityId;
 
 use crate::camera::CameraView;
 use crate::city::DECAL_LAYERS;
+use crate::lighting::MAX_SPOT_LIGHTS;
 use crate::scene::Scene;
 use crate::skin::StaticMesh;
 use crate::{Shade, Vertex};
@@ -32,37 +33,6 @@ const GROUND_HALF_M: f32 = 2000.0;
 /// the browser. Without a city the ground is the z = 0 driving plane.
 const CITY_GROUND_Z: f32 = -0.2;
 
-/// Sun, sky and fog. Linear RGB.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Lighting {
-    /// Direction toward the sun (normalised on upload).
-    pub sun_dir: [f32; 3],
-    /// Sun colour × intensity.
-    pub sun_color: [f32; 3],
-    /// Ambient from above.
-    pub sky_color: [f32; 3],
-    /// Ambient from below.
-    pub ground_color: [f32; 3],
-    /// Fog and clear colour.
-    pub fog_color: [f32; 3],
-    /// Fog density, 1/m.
-    pub fog_density: f32,
-}
-
-impl Default for Lighting {
-    /// Late afternoon.
-    fn default() -> Self {
-        Self {
-            sun_dir: [0.45, -0.35, 0.82],
-            sun_color: [1.6, 1.45, 1.25],
-            sky_color: [0.32, 0.40, 0.52],
-            ground_color: [0.12, 0.11, 0.10],
-            fog_color: [0.55, 0.62, 0.70],
-            fog_density: 0.0025,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 struct GlobalsRaw {
@@ -73,6 +43,21 @@ struct GlobalsRaw {
     sky_color: [f32; 4],
     ground_color: [f32; 4],
     fog: [f32; 4],
+    /// x: night factor, y: number of spot lights used.
+    night: [f32; 4],
+    lights: [SpotRaw; MAX_SPOT_LIGHTS],
+}
+
+/// One spot light as the shader reads it.
+#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct SpotRaw {
+    /// xyz position, w range (m).
+    pos_range: [f32; 4],
+    /// xyz direction, w cosine of the outer cone.
+    dir_outer: [f32; 4],
+    /// rgb colour, w cosine of the inner cone.
+    color_inner: [f32; 4],
 }
 
 /// A mesh on the GPU.
@@ -150,7 +135,8 @@ enum DrawMesh {
     Wheel(String, usize),
 }
 
-/// Draws a [`Scene`] into any colour target of the format given at creation.
+/// Draws a [`Scene`] (lit by [`Scene::lighting`] and its nearest headlights) into any colour
+/// target of the format given at creation.
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -172,8 +158,6 @@ pub struct Renderer {
     cars: BTreeMap<EntityId, GpuCar>,
     wheels: BTreeMap<String, Vec<Option<GpuMesh>>>,
     targets: Option<Targets>,
-    /// Sun, sky and fog used by the next [`Renderer::render`].
-    pub lighting: Lighting,
 }
 
 impl Renderer {
@@ -332,7 +316,6 @@ impl Renderer {
             cars: BTreeMap::new(),
             wheels: BTreeMap::new(),
             targets: None,
-            lighting: Lighting::default(),
         }
     }
 
@@ -353,7 +336,16 @@ impl Renderer {
         self.ensure_targets(size);
         self.upload_scene(scene);
 
-        let l = self.lighting;
+        let l = *scene.lighting();
+        let mut lights = [SpotRaw::default(); MAX_SPOT_LIGHTS];
+        let near = scene.lights_near(camera.eye);
+        for (raw, s) in lights.iter_mut().zip(&near) {
+            *raw = SpotRaw {
+                pos_range: [s.pos[0], s.pos[1], s.pos[2], s.range_m],
+                dir_outer: [s.dir[0], s.dir[1], s.dir[2], s.cos_outer],
+                color_inner: [s.color[0], s.color[1], s.color[2], s.cos_inner],
+            };
+        }
         let sun = Vec3::from(l.sun_dir).normalize_or(Vec3::Z);
         let globals = GlobalsRaw {
             view_proj: camera
@@ -370,6 +362,8 @@ impl Renderer {
                 l.fog_color[2],
                 l.fog_density,
             ],
+            night: [l.night, near.len() as f32, 0.0, 0.0],
+            lights,
         };
         self.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));

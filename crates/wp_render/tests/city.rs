@@ -69,10 +69,12 @@ fn procedural_city_greybox_loads() {
 #[test]
 fn vesper_greybox_loads_with_smooth_terrain() {
     let city = check_city("vesper_v2");
-    // Terrain is smooth-shaded: it carries unit normals, mostly pointing up.
+    // Terrain is smooth-shaded: it carries unit normals, mostly pointing up. (Building walls
+    // carry face normals too; leave them out.)
     let normals: Vec<Vec3> = city.layers[0]
         .vertices
         .iter()
+        .filter(|v| v.shade != wp_render::Shade::Building as u32 as f32)
         .map(|v| Vec3::from(v.normal))
         .filter(|n| *n != Vec3::ZERO)
         .collect();
