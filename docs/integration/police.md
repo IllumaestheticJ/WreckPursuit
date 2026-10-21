@@ -141,6 +141,19 @@
   -285…-250; -10 is the middle of the first. `race_city_sprint` (340 m floor) passes at 6.0;
   the opponent live chase and all doctrine tests pass. The 11 police-spawning goldens were
   re-blessed (`[bless]` commit).
+- **2026-10-21, merging main (P8 pro driver, #26 highway network) into the street-spec PR:**
+  - Lit units drive with `pro::ProDriver` on the car's own limits, so `physical_accel_mps2` and
+    the reroute back-out now apply to `lane_input` only (no lights).
+  - `police_pace::police_drive_clean_in_the_wet` failed with the street-spec cruiser (458 kW,
+    888 N·m): 2-4 grazes (≈ 220 N·s) on one arterial-square wall, on the exit of the same
+    corner. The car pushed wide under the pro driver's `exit_throttle_min` 0.3, a pedal floor,
+    so it means ≈ 65 % more torque than on the old 535 N·m car. With main's old car the test
+    was clean in 5/5 perturbed runs. With the new car at 0.3 it grazed in 7/9; at **0.2** it
+    was clean in 10/10, and dry pace is still ahead of the race AI (-3.2 % arterial square,
+    -10 % Hollins Drive). `[pro] exit_throttle_min` is now 0.2, and `default_limits` holds
+    the new measured cruiser (0.84 g / 0.99 g / 4.95 m/s² / 82.3 m/s).
+  - `golden_city_chase`: main re-aimed it to the same start (x = 275, y = -10) for the
+    highway network. Re-checked at 6.0: -35…+10 all pursue; pursuit at 16.2 s.
 
 ## Needs
 | From | What | Workaround now |

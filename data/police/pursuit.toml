@@ -139,8 +139,9 @@ spawn_path_half_width_m = 6.0
 # damage x confidence), late braking, slide control. Patrol keeps its lane, patrol_cornering_g and
 # unit.brake_mps2; obstacle awareness and junction rules above still cap the speed.
 [pro]
-# Sentinel Cruiser, measured (skidpad g, 100-0 decel g, 0-100 mean accel, top speed).
-default_limits = { lat_g = 0.83, brake_g = 0.98, accel_mps2 = 4.35, top_speed_mps = 72.4 }
+# Sentinel Cruiser, measured (skidpad g, 100-0 decel g, 0-100 mean accel, top speed), street
+# spec (2026-10-21; was 0.83 / 0.98 / 4.35 / 72.4 before the power rebalance).
+default_limits = { lat_g = 0.84, brake_g = 0.99, accel_mps2 = 4.95, top_speed_mps = 82.3 }
 lat_usage = 0.95
 brake_usage = 0.92
 window_m = 220.0
@@ -164,7 +165,10 @@ slip_deadband_rad = 0.05
 countersteer_gain = 0.8
 slide_slip_rad = 0.12
 slide_throttle = 0.25
-exit_throttle_min = 0.3
+# 0.3 → 0.2 (2026-10-21): the floor is pedal, not force, and the street-spec cruiser (888 N·m)
+# pushed wide at 0.3 out of wet corners (police_pace::police_drive_clean_in_the_wet grazed the
+# wall in 7 of 9 perturbed runs; clean in all at 0.2, dry pace still ahead of the race AI).
+exit_throttle_min = 0.2
 confidence_drop = 0.05
 confidence_min = 0.8
 confidence_regain_per_s = 0.02

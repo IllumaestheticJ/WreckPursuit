@@ -338,6 +338,10 @@ struct Racer {
     /// Reversing to get room to steer round a stopped car (backs out further).
     backing_out: bool,
     stuck_s: f32,
+    /// Seconds standing nose to tail with a parked racer (too close to steer round it).
+    boxed_s: f32,
+    /// Duration of the current reverse manoeuvre, s.
+    reverse_s: f32,
     stable_s: f32,
     defended: bool,
     in_brake_zone: bool,
@@ -577,6 +581,8 @@ impl Field {
                 stalled_by: None,
                 backing_out: false,
                 stuck_s: 0.0,
+                boxed_s: 0.0,
+                reverse_s: 1.6,
                 stable_s: 0.0,
                 defended: false,
                 in_brake_zone: false,
@@ -821,7 +827,8 @@ impl Field {
                     Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
                 };
                 let signal = self.signal_ahead(k, world);
-                self.decide(k, &obstacles, &civs, signal, dt);
+                let priority = self.priority_ahead(k, world);
+                self.decide(k, &obstacles, &civs, signal, priority, dt);
             }
             self.outputs = self.racers.iter().map(|r| (r.entity, r.input)).collect();
         } else {
@@ -1339,15 +1346,45 @@ impl Field {
 
     /// Step 3 + 4 for racer `k`.
     /// Civilians near any racer, as `(id, position, velocity)` (junction awareness).
+    /// Only civilians on the racer's own level count: traffic on a bridge overhead (or the
+    /// road under one) never enters the racer's junctions.
     fn civilians_near(&self, world: &World) -> Vec<(u32, V2, V2)> {
         let mut out = Vec::new();
+        let level = |r: &Racer| {
+            let c = r.flight.as_ref().map_or(&self.corridor, |f| &f.corridor);
+            c.samples[r.hint.min(c.samples.len() - 1)].pos[2]
+        };
         for a in world.agents() {
             let p = geom::xy(a.pos);
-            if self.racers.iter().any(|r| geom::dist(p, r.pos) < 160.0) {
+            if self
+                .racers
+                .iter()
+                .any(|r| geom::dist(p, r.pos) < 160.0 && (a.pos[2] - level(r)).abs() < 4.0)
+            {
                 out.push((a.id, p, geom::scale(geom::dir_of_yaw(a.yaw), a.speed_mps)));
             }
         }
         out
+    }
+
+    /// Entry distance of the next junction on racer `k`'s track when it is a priority
+    /// junction and the racer arrives on the major road (civilians stopped on the minor
+    /// approaches are waiting for it).
+    fn priority_ahead(&self, k: usize, world: &World) -> Option<f32> {
+        let r = &self.racers[k];
+        let corridor = match &r.flight {
+            Some(f) => &f.corridor,
+            None => &self.corridor,
+        };
+        let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
+        let steps = (SIGNAL_LOOKAHEAD_M / CORRIDOR_STEP_M) as usize;
+        let (ahead, lane) = corridor.next_junction_lane(i0, steps)?;
+        match world.map().lane_control(lane)? {
+            (wp_world::network::IntersectionControl::Priority, ap, _) if ap.major => {
+                Some(ahead as f32 * CORRIDOR_STEP_M)
+            }
+            _ => None,
+        }
     }
 
     /// Signal state of the next junction entry on racer `k`'s track (None: unsignalised,
@@ -1378,6 +1415,7 @@ impl Field {
         obstacles: &[Obstacle],
         civs: &[(u32, V2, V2)],
         signal: Option<SignalAhead>,
+        priority: Option<f32>,
         dt: f32,
     ) {
         // Take the racer's own track data out while it is mutated.
@@ -1400,6 +1438,7 @@ impl Field {
             &mut self.racers[k],
             civs,
             signal,
+            priority,
             draft,
             k,
             corridor,
@@ -1455,6 +1494,7 @@ fn decide_racer(
     r: &mut Racer,
     civs: &[(u32, V2, V2)],
     signal: Option<SignalAhead>,
+    priority: Option<f32>,
     draft: bool,
     k: usize,
     corridor: &Corridor,
@@ -1624,10 +1664,27 @@ fn decide_racer(
             } else if r.tactic != Tactic::Reverse {
                 r.stuck_s = 0.0;
             }
-            if r.stuck_s > 2.0 {
+            // Stopped right behind a parked (busted, retired, pulled-over) racer: a standing car
+            // cannot steer out round it from there, so back off to make room.
+            let boxed = rel.iter().any(|x| {
+                x.ds > 0.0
+                    && x.gap < CREEP_STOP_GAP_M + 0.5
+                    && x.o.parked
+                    && matches!(x.o.who, Who::Racer(_))
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w
+            });
+            if r.tactic != Tactic::Reverse && boxed && v.abs() < 0.3 {
+                r.boxed_s += dt;
+            } else {
+                r.boxed_s = 0.0;
+            }
+            if r.stuck_s > 2.0 || r.boxed_s > 3.0 {
+                // Boxed in: back off a car length or so, enough to steer out round it.
+                r.reverse_s = if r.boxed_s > 3.0 { 3.5 } else { 1.6 };
                 r.tactic = Tactic::Reverse;
                 r.tactic_ticks = 0;
                 r.stuck_s = 0.0;
+                r.boxed_s = 0.0;
                 r.backing_out = too_close_to_turn;
             }
         }
@@ -1679,7 +1736,7 @@ fn decide_racer(
             }
             Tactic::Reverse => {
                 // Backing away from a stopped car to steer round it: until there is room to
-                // turn out.
+                // turn out. Otherwise a fixed back-off (`reverse_s`).
                 let t = r.tactic_ticks as f32 * dt;
                 let room = rel
                     .iter()
@@ -1690,7 +1747,7 @@ fn decide_racer(
                 let done = if r.backing_out {
                     room > TURN_OUT_ROOM_M || t > 5.0
                 } else {
-                    t > 1.6
+                    t > r.reverse_s
                 };
                 if done {
                     r.tactic = Tactic::Rejoin;
@@ -2062,6 +2119,10 @@ fn decide_racer(
                 let can_stop = stop_dist < d_entry - 2.0;
                 let protected =
                     sig.is_some_and(|g| g.state == SignalState::Green && g.remaining_s > t_through);
+                // On the major road of a priority junction: civilians stopped at its minor
+                // approaches are giving way to me.
+                let has_way = !in_junction
+                    && priority.is_some_and(|d| (d - d_entry).abs() <= 2.5 * CORRIDOR_STEP_M);
                 let red_on_arrival = sig.is_some_and(|g| match g.state {
                     SignalState::Red => g.remaining_s > t_arrive - 0.5,
                     SignalState::Yellow => can_stop,
@@ -2090,9 +2151,13 @@ fn decide_racer(
                     // A stopped car in the box that has not moved while I waited is waiting
                     // for me: stop counting it (no stand-off).
                     let waited_out = r.junction_wait_s > JUNCTION_DEADLOCK_S;
-                    let inside =
-                        d < radius && (speed > 0.5 || (!in_junction && !protected && !waited_out));
+                    let inside = d < radius
+                        && (speed > 0.5 || (!in_junction && !protected && !has_way && !waited_out));
+                    // With the right of way, only a civilian too close to stop before the box
+                    // (about 4 m/s² of braking) is a threat; the rest give way.
+                    let committed = speed * speed / (2.0 * 4.0) > d - radius - 1.0;
                     let heading_in = !protected
+                        && (!has_way || committed)
                         && speed > 0.5
                         && geom::dot(*vel, to) > 0.5 * speed * d
                         && (d - radius) / speed < 4.0;
@@ -2703,7 +2768,7 @@ mod tests {
             &[],
             &NoPolice,
         );
-        f.decide(0, &[], civs, signal, 4.0 * PHYSICS_DT);
+        f.decide(0, &[], civs, signal, None, 4.0 * PHYSICS_DT);
         f.debug_of(0)
     }
 

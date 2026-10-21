@@ -139,12 +139,12 @@ pub struct ProParams {
 impl Default for ProParams {
     fn default() -> Self {
         Self {
-            // Sentinel Cruiser, measured (`wp_opponent::CarCapability::measure`).
+            // Sentinel Cruiser (street spec), measured (`wp_opponent::CarCapability::measure`).
             default_limits: CarLimits {
-                lat_g: 0.83,
-                brake_g: 0.98,
-                accel_mps2: 4.35,
-                top_speed_mps: 72.4,
+                lat_g: 0.84,
+                brake_g: 0.99,
+                accel_mps2: 4.95,
+                top_speed_mps: 82.3,
             },
             lat_usage: 0.95,
             brake_usage: 0.92,
@@ -169,7 +169,7 @@ impl Default for ProParams {
             countersteer_gain: 0.8,
             slide_slip_rad: 0.12,
             slide_throttle: 0.25,
-            exit_throttle_min: 0.3,
+            exit_throttle_min: 0.2,
             confidence_drop: 0.05,
             confidence_min: 0.8,
             confidence_regain_per_s: 0.02,
