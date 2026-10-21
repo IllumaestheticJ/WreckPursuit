@@ -1192,6 +1192,71 @@ falloff makes it swing back, so it does not combine with the rack.
   *key offset*.
 - e2e drift_lab_w: 90.
 
+## Step 13 — the new-side catch: settling a lift-flick within ~0.5 s (lead)
+
+**Problem** (trace, rwd_d, step 12): the swing crosses at −100°/s of yaw. The new countersteer
+then creeps from −10° to +20° at the plain rack rate (0.3 s), with the fronts 8–14° short of the
+travel, so they push the rotation on. The slide overshoots to ~54°, then step 11's extra lock
+(43°) arrives late. Settle (±8° of the final mean) takes ~1.5 s.
+
+**Fix:** the new-side catch (`PlainSteer::trans_catch_gain` 0.9, `trans_catch_deg` 0,
+`trans_catch_growth_dps` 7.5, `trans_catch_max_deg` 30).
+- **When:** a countersteer key in the armed window (now 1.5 s) of a lift **and** a key reversal
+  (a flick), while the new slide still grows and is below 30°.
+- **What:** the wheels aim at 0.9 × the front axle's travel at the transition rack's speed
+  (45° per 0.1 s). Faded in by body slip 3→8°.
+- **Arming:**
+  - lift only: arms in the snap-back exit too (slip overshoot 5° → 38°);
+  - lift or reversal: arms in every drift entry (held 25 → 3–9);
+  - lift and reversal, without the 30° ceiling: also fires in a tapped drift (snap regressed).
+  - The ceiling keeps the catch to a slide just come through zero.
+
+**Sweep** (tyre-slip harness, v2search "balance new · plain", 18 flicks):
+
+| | caught | swing back | fast (0.5–0.8 s cross + settle ≤ 0.5 s) |
+|---|---|---|---|
+| step 12 (no catch) | 18 | 0 | 0 |
+| aim 1.0 × travel + 0° | 14 | 4 | 4 |
+| + 3° / 6° past the travel | 4 / 2 | 14 / 16 | 0 |
+| aim 0.9 (window 1 s) | 16 | 2 | 7 |
+| aim 0.9, window 1.25–2 s | 18 | 0 | 8 |
+| **default** (+ lift and reversal arming, 30° ceiling) | **18** | 0 | **5** |
+
+Held 25 / 27, lift-off fails 0, held-key swaps 2 throughout. Median crossing 0.82 s.
+
+**Per car** (`transition -- cases`, panel default "balance new · plain", firm, 9 lift-flicks each):
+
+```
+catch off (step 12)
+  parity_rwd_a  caught 9/9 swing 1.07 peak 51.00 settle med 1.42 (≤0.5 s: 0)
+  parity_rwd_b  caught 9/9 swing 0.95 peak 71.00 settle med 2.02 (≤0.5 s: 0)
+  parity_rwd_d  caught 9/9 swing 1.08 peak 54.00 settle med 1.52 (≤0.5 s: 0)
+  rampart_50    caught 0/9 swing — peak — settle med — (≤0.5 s: 0)
+  debug_coupe   caught 9/9 swing 1.04 peak 57.00 settle med 1.69 (≤0.5 s: 0)
+catch on (step 13)
+  parity_rwd_a  caught 9/9 swing 1.07 peak 41.00 settle med 0.49 (≤0.5 s: 5)
+  parity_rwd_b  caught 9/9 swing 0.95 peak 48.00 settle med 1.48 (≤0.5 s: 1)
+  parity_rwd_d  caught 9/9 swing 1.08 peak 42.00 settle med 0.43 (≤0.5 s: 6)
+  rampart_50    caught 0/9 swing — peak — settle med — (≤0.5 s: 0)
+  debug_coupe   caught 9/9 swing 1.04 peak 43.00 settle med 0.42 (≤0.5 s: 6)
+```
+
+- Settle: rwd_a 1.42 → 0.49 s, rwd_d 1.52 → 0.43 s, debug_coupe 1.69 → 0.42 s, rwd_b 2.02 →
+  1.48 s. New-side peaks drop 12–23°.
+- rampart_50 no longer reaches the held 30–45° drift before the flick, with the catch on or off.
+  That's a base change since step 12 (9 / 9 then), reported to grip-balance / tyre-slip.
+
+**Gates** (panel default):
+- **Held-key robust:** 27 / 27.
+- **Catch window, snap-back (counter+lift 4–8° to the other side, settle 2.1–2.6 s), turn-in:**
+  identical to step 12.
+
+**Tests and panel:**
+- `tests/drift_lab_w_transition.rs` adds the settle: median ≤ 0.6 s with the catch, ≥ 1.0 s
+  without, on rwd_d / a.
+- `plain` unit test `new_side_catch_aims_at_the_travel_only_after_a_flick`.
+- Panel slider *transition: new-side catch* (% of travel).
+
 ## Contract change requests
 
 None (`AssistProfile` unchanged; the lab's settings live in `wp_vehicle::plain::PlainSteer`).
