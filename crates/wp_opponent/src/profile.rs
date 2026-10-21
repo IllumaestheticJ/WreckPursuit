@@ -15,7 +15,9 @@ use crate::line::Usage;
 pub struct DriverProfile {
     /// Pace and precision: share of the car's grip/braking used, lookahead quality.
     pub skill: f32,
-    /// Willingness to attack: following distance, overtake margin, defending, side-by-side.
+    /// Willingness to attack: following distance, overtake margin, defending, side-by-side,
+    /// and how far ahead (and how well) the driver plans a route round traffic, police and
+    /// players before slowing for them.
     pub aggression: f32,
     /// Repeatability: braking-point and line noise, mistakes under pressure.
     pub consistency: f32,
@@ -71,6 +73,11 @@ impl DriverProfile {
             side_by_side_s: lerp(0.5, 3.0, p.aggression),
             defends: p.aggression >= 0.3,
             overtake_patience_s: lerp(2.5, 0.6, p.aggression),
+            plan_ahead_m: lerp(35.0, 140.0, p.aggression),
+            plan_horizon_s: lerp(1.2, 4.0, p.aggression),
+            plan_step_m: lerp(0.9, 0.25, p.aggression),
+            evade_rate_mps: lerp(1.3, 2.6, p.aggression),
+            oncoming_buffer_s: lerp(2.5, 1.0, p.aggression),
             civilian_margin_m: lerp(1.8, 1.1, p.risk),
             civilian_headway_s: lerp(1.6, 0.9, p.risk),
             flee_wanted_level: 1 + (3.0 * p.risk + 0.5) as u8,
@@ -106,6 +113,19 @@ pub struct DriverParams {
     pub defends: bool,
     /// Time stuck behind a slower car before an overtake is considered, s (aggression).
     pub overtake_patience_s: f32,
+    /// Range ahead in which traffic, police and players are planned around instead of braked
+    /// for, m (aggression).
+    pub plan_ahead_m: f32,
+    /// How far into the future the route round them is checked against everyone's predicted
+    /// motion, s (aggression).
+    pub plan_horizon_s: f32,
+    /// Spacing of the lateral positions the planner tries, m (aggression: finer = finds
+    /// narrower gaps).
+    pub plan_step_m: f32,
+    /// Lateral speed of an evasive move, m/s (aggression).
+    pub evade_rate_mps: f32,
+    /// Extra time an evasive line must stay clear of oncoming cars, s (aggression).
+    pub oncoming_buffer_s: f32,
     /// Lateral clearance to civilians, m (risk).
     pub civilian_margin_m: f32,
     /// Time gap to civilians ahead, s (risk).
@@ -141,6 +161,10 @@ mod tests {
         assert!(hi.headway_s < lo.headway_s);
         assert!(hi.overtake_margin_m < lo.overtake_margin_m);
         assert!(!lo.defends && hi.defends);
+        // Aggression: plans further ahead, further into the future, more finely.
+        assert!(hi.plan_ahead_m > lo.plan_ahead_m);
+        assert!(hi.plan_horizon_s > lo.plan_horizon_s);
+        assert!(hi.plan_step_m < lo.plan_step_m);
     }
 
     #[test]

@@ -44,6 +44,12 @@ All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md
   `RacingLine`, `SpeedProfile`.
 - `AI_CONTACT_IMPULSE_NS = 400.0` (racer–racer collision threshold used by tests).
 
+- **Route planning round traffic, police and players** (2026-10-21): new `Tactic::Evade`;
+  new `DriverParams::{plan_ahead_m, plan_horizon_s, plan_step_m, evade_rate_mps,
+  oncoming_buffer_s}`, all driven by `DriverProfile::aggression` (the aggression slider sets how
+  far ahead and how well the AI plans before it slows). Racers brake for a non-racer only when
+  no lateral line stays clear of everyone's predicted motion. No contract changes.
+
 ## Needs
 1. **Lead (`wp_sim`)**: drive AI racers in the loop. Per tick before `step_fixed`: build
    `VehicleObs` from `sim.vehicles()` (state, `damage.handling_effects()`, `def().body_size_m`),
