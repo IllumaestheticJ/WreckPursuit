@@ -138,5 +138,27 @@ on the final tip (below).
 
 (final list below, with the gate)
 
-## Gate
-(final, below)
+## Gate (final, `bb2208ed`, published as preview 0.12.32)
+`CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, exit codes:
+
+| Step | Exit | Notes |
+|---|---|---|
+| `cargo fmt --all -- --check` | 0 | |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | 0 | |
+| `cargo run -p lint-determinism` | 0 | 74 findings, 0 errors |
+| `cargo test --workspace --no-fail-fast` | 101 | 3 known reds below; `goldens_match` green |
+| `cargo test --release -p wp_race --test opponent_pace pace_scenarios` | 101 | Lantern only (below) |
+| testbed `npm run wasm`, `tsc --noEmit` | 0, 0 | |
+| testbed `npm run e2e` | 1 | 217 PASS; only `e2e/perf_check.mjs` |
+
+Known reds, with owners:
+- **E (police):** `wp_wasm run_tests::capture_bills_holds_the_car_and_repair_continue_restores_it`,
+  `run_tests::restart_keeps_the_account` (units never reach a racer parked on a grid street of
+  main's map; green on round 12 alone); `wp_race race_picker::hollins_hill_sprint` (all four
+  racers Captured).
+- **opponent-pace:** `opponent_pace lantern_checkpoint_s50/s95` (racers queue behind civilians at
+  main's Lantern Row signals; times ~2× the lock). Red before the 70ab9d0 merge too.
+- **testbed perf (software GL in this container):** frame time / allocation budgets fail on
+  round 12 too; new here: 440 k triangles / frame in the chase (budget 400 k) and 323 draw calls
+  on the phone profile (budget 300), from main's road markings and median barriers.
