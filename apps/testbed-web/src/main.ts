@@ -9,8 +9,9 @@
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
-// ?drift=w[&car=<id>] opens Drift Lab W (plain keyboard steering, reference-parity cars);
-// ?drift=c (or b) the old lab C (with its drift assists).
+// ?drift=w[&car=<id>] opens the handling test pad (the old Drift Lab W pad: course,
+// reference-parity cars) with the tune panel; ?tune=1 (or F7) shows the hidden handling tune
+// panel in any session (debug overrides on top of the shipped handling).
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 import { assistLevel, loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
@@ -49,7 +50,6 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
-import { DRIFT_LAB, DriftLabPanel, driftLabScenario } from "./drift_lab_b";
 import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
@@ -196,7 +196,6 @@ async function main(): Promise<void> {
   scene.quality.onChange = applyLod;
   scene.world.add(tagFeature(props.group, "props"));
   // Drift Lab C: course paint + the tune panel / readout (shown only in the lab session).
-  const driftLab = new DriftLabPanel(overlay, sim, scene.world, () => app.player);
   // Drift Lab W: plain keyboard steering, reference-parity cars (restarts with the chosen car).
   const driftLabW = new DriftLabWPanel(overlay, sim, scene.world, () => app.player, (car) => startDriftLabW(car));
   // Spike strips on the road (playtest row 88).
@@ -419,11 +418,10 @@ async function main(): Promise<void> {
     app.focus = app.player;
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
-    // drift_lab_b: recordings / sessions from before Drift Lab C.
-    driftLab.setActive(sc.name === DRIFT_LAB || sc.name === "drift_lab_b");
     if (sc.name === DRIFT_LAB_W) driftLabW.car = sc.entities?.[0]?.car ?? DRIFT_LAB_W_CAR;
-    // W handling also outside the lab when "use W handling everywhere" is on (not in lab C).
-    driftLabW.setActive(sc.name === DRIFT_LAB_W, sc.name === DRIFT_LAB || sc.name === "drift_lab_b");
+    // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
+    // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
+    driftLabW.setActive(sc.name === DRIFT_LAB_W);
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -558,20 +556,9 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
   };
 
-  /** Drift Lab C (lead/drift-lab-c, built on Drift Lab B): open pad, 90° corners and a sweeper, no traffic or
-   * police, daytime; the "tune" panel and the drift readout come up with it. */
-  const startDriftLabB = (car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR, mode = ($("mode") as HTMLSelectElement).value) => {
-    app.scenarioFile = null;
-    app.scenario = null;
-    app.result = null;
-    app.bench = null;
-    sim.init(1, driftLabScenario(sim.freeDriveJson(car, mode, false)), false);
-    rebuildViews();
-    applyAssistPreset(app.source);
-  };
-
-  /** Drift Lab W (lead/drift-lab-w): Drift Lab C's course with plain keyboard steering (raw
-   * keys, constant-rate rack), TCS / ESC off, manual gears; default car = parity_rwd_d. */
+  /** The handling test pad (?drift=w; was Drift Lab W): the course, the reference-parity cars and
+   * the owner's reference assists (TCS / ESC off, manual gears), with the tune panel open. The
+   * handling is the game's; default car = parity_rwd_d. */
   const startDriftLabW = (car = DRIFT_LAB_W_CAR, mode = ($("mode") as HTMLSelectElement).value) => {
     app.scenarioFile = null;
     app.scenario = null;
@@ -851,7 +838,6 @@ async function main(): Promise<void> {
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
   // Drift Lab W (the old lab C, with its drift assists, stays reachable via ?drift=c only).
-  $("sc-drift-w").onclick = () => startDriftLabW();
   $("sc-chase").onclick = () => startCityChase();
   $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
   /** Restart whatever is running with the selected weather (weather is part of the scenario,
@@ -1193,7 +1179,6 @@ async function main(): Promise<void> {
         if (choice === "chase") startCityChase();
         else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
-        else if (choice === "driftLabW") startDriftLabW();
         else if (choice === "races") raceView.openPicker();
         else openGarage();
       },
@@ -1256,16 +1241,23 @@ async function main(): Promise<void> {
   } else if (params.get("race")) {
     startRace(params.get("race")!, DEFAULT_CAR);
   } else if (params.get("drift") === "w") {
-    // ?drift=w[&car=parity_rwd_a] opens Drift Lab W (plain steering, parity cars).
+    // ?drift=w[&car=parity_rwd_a]: the handling test pad with the tune panel open.
     startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
   } else if (params.get("drift") === "c" || params.get("drift") === "b") {
-    // ?drift=c[&car=shiro_turbo] opens Drift Lab C (?drift=b: the same lab, old links).
-    startDriftLabB(params.get("car") ?? DEFAULT_CAR);
+    // Old Drift Lab B / C links (the labs are gone, unify 2026-10-21): the test pad.
+    startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
+  // The hidden handling tune panel: ?tune=1, or F7 in any session.
+  if (params.get("tune") === "1") driftLabW.show(true);
+  window.addEventListener("keydown", (e) => {
+    if (e.code !== "F7" || e.repeat) return;
+    e.preventDefault();
+    driftLabW.toggle();
+  });
   if (params.get("bench")) startBench(Number(params.get("bench")));
   // First frame only once the session's car meshes are in (bounded: a slow or missing file
   // falls back to the proxy and swaps in when it arrives).
@@ -1535,7 +1527,6 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
-    driftLab.frame();
     driftLabW.frame();
     radioStrip.frame(now);
     prof.lap("ui");
@@ -1673,10 +1664,9 @@ async function main(): Promise<void> {
     loadReplay,
     runScenario,
     startFreeDrive,
-    startDriftLabB,
     startDriftLabW,
-    /** Drift Lab C tune panel / readout. */
-    driftLab,
+    /** The hidden handling tune panel (F7 / ?tune=1). */
+    tunePanel: driftLabW,
     startCityChase,
     startBench,
     weather,

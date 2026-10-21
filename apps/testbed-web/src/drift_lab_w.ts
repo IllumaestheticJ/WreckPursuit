@@ -1,11 +1,18 @@
-// Drift Lab W (lead/drift-lab-w): deliberately PLAIN keyboard driving, to A/B against the
+// The hidden handling tune panel (F7, ?tune=1, or ?drift=w for the test pad). Unify (lead,
+// 2026-10-21): Drift Lab W's step-23 handling is the game's handling now (wp_vehicle::lab_scope:
+// spin-model tyres, firm ride and the grip balance on every car; the plain keyboard steering on
+// player cars). This panel only sets debug overrides on top, saved per viewer; "defaults" and
+// empty saves mean the shipped handling. The test pad (?drift=w) keeps Drift Lab W's course,
+// reference-parity cars and the owner's reference assists.
+//
+// Drift Lab W (lead/drift-lab-w) was deliberately PLAIN keyboard driving, to A/B against the
 // reference (docs/reference/wreckfest-keyboard.md). Keys reach the sim raw (−1 / 0 / +1,
 // throttle 0 / 1); the rack slews at a constant rate (wp_vehicle::plain: full lock in t_full,
 // back to centre in t_return, lock shrinking with speed by the speed-sensitivity curve). No
 // drift intent modes, no throttle shaping, TCS / ESC off, manual gears. Same course as Drift
 // Lab C. The four reference-parity test cars (data/cars/parity/) are selectable here only.
 import type * as THREE from "three";
-import { buildCourse } from "./drift_lab_b";
+import { buildCourse } from "./test_pad";
 import { setRawKeyboard } from "./input";
 import { assistLevel, type AssistLevel, type sim as Sim } from "./wasm/sim";
 
@@ -96,25 +103,26 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
   yaw_damping: { label: "yaw damping (diag)", min: 0, max: 2, step: 0.05, unit: "/s", hint: "NOT physical: a yaw damping torque −k·m·L²·r, to see how much damping a held drift needs" },
 };
 
-const STORE = "wp.driftLabW.steer";
+// Unify: new store names, so values saved by the old Drift Lab W builds never override the
+// shipped handling (empty = the shipped default).
+const STORE = "wp.tune.steer.v1";
 // v2: the lab's default became the spin model (launches straight on the map's road crown); an
 // older saved "tyre data" must not override it.
-const CAR_STORE = "wp.driftLabW.car.v2";
+const CAR_STORE = "wp.tune.car.v1";
 // TCS / ABS levels (round12 Off / Half / Full). The old "1" / "0" TCS checkbox value still reads.
 const TCS_STORE = "wp.driftLabW.tcs";
 const ABS_STORE = "wp.driftLabW.abs";
 // Handbrake pivot aid knobs (round12 row 109: `hb_pivot_accel` / `hb_pivot_cap` of the drift tuning).
-const PIVOT_STORE = "wp.driftLabW.pivot";
+const PIVOT_STORE = "wp.tune.pivot.v1";
 const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit: string; hint: string }> = {
   hb_pivot_accel: { label: "handbrake pivot aid", min: 0, max: 15, step: 0.5, unit: "rad/s²", hint: "round12 row 109: yaw acceleration added while the handbrake AND a steer key are held (builds over 0.4 s, full ≤ 55 km/h, gone at 75 km/h); 0 = off, pure tyre physics" },
   hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
 };
 // v2: step 10's default ride became medium weight (an older saved ride must not override it).
 // v3: step 20's default ride became "firm" (an older saved ride must not override it).
-const RIDE_STORE = "wp.driftLabW.ride.v3";
-const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
+const RIDE_STORE = "wp.tune.ride.v1";
 // v3: the default balance is "new" (step 14) again; v2 builds saved "balance: grip" as their default.
-const GRIP_STORE = "wp.driftLabW.grip.v3";
+const GRIP_STORE = "wp.tune.grip.v1";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
  * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
 const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
@@ -174,9 +182,10 @@ export class DriftLabWPanel {
   private readonly body: HTMLDivElement;
   private readonly readout: HTMLDivElement;
   private readonly course: THREE.Group;
+  /** The test pad session (?drift=w): course, parity cars, reference assists. */
   private active = false;
-  private handling = false;
-  private readonly badge: HTMLDivElement;
+  /** The panel is on screen (F7 / ?tune=1 / the pad). */
+  private visible = false;
   private shown = false;
   private open = true;
   /** The lab's current car id (set by the session start). */
@@ -210,123 +219,74 @@ export class DriftLabWPanel {
     this.body.style.cssText = "background:rgba(0,0,0,.72);padding:8px;border-radius:6px;margin-top:4px;max-height:60vh;overflow:auto";
     this.root.append(btn, this.readout, this.body);
     parent.appendChild(this.root);
-    // Outside the lab: a small tag while the W profile drives the player's car.
-    this.badge = document.createElement("div");
-    this.badge.id = "drift-lab-w-badge";
-    this.badge.textContent = "W handling";
-    this.badge.title = `${DRIFT_LAB_W_TITLE} handling on your car ("use W handling everywhere" in the lab panel)`;
-    this.badge.style.cssText =
-      "position:absolute;left:12px;bottom:12px;z-index:30;font:11px system-ui,sans-serif;color:#cfe8ff;background:rgba(0,0,0,.55);border-left:3px solid #40a0e0;padding:2px 6px;border-radius:4px;pointer-events:none;display:none";
-    parent.appendChild(this.badge);
   }
 
-  /** "Use W handling everywhere" (lead): keep the W steering / tyre / suspension / pivot
-   * profile on the player's car outside the lab (free drive, city chase, races). Saved per
-   * viewer; default ON in the W build. */
-  everywhere(): boolean {
-    try {
-      return localStorage.getItem(EVERYWHERE_STORE) !== "0";
-    } catch {
-      return true;
-    }
+  /** Whether the panel is on screen. */
+  isVisible(): boolean {
+    return this.visible;
   }
 
-  /** Whether the W handling profile is on for this session (in the lab, or everywhere). */
-  handlingOn(): boolean {
-    return this.handling;
-  }
-
-  /** A session started. `on` = it is the lab session (panel, course, reference assists);
-   * `otherLab` = another drift lab owns the drift tuning (no W handling there). With
-   * "use W handling everywhere" on, every other session keeps the W profile on the player's
-   * car only (AI, police and traffic stay stock: `wp_vehicle::lab_scope`). */
-  setActive(on: boolean, otherLab = false): void {
-    this.setHandling(on || (this.everywhere() && !otherLab));
-    this.badge.style.display = this.handling && !on ? "block" : "none";
-    if (on === this.active) {
-      if (on) this.build();
-      return;
-    }
-    this.active = on;
+  /** Show or hide the panel (F7, ?tune=1). */
+  show(on: boolean): void {
+    this.visible = on;
     this.root.style.display = on ? "block" : "none";
-    if (on && !this.shown) this.world.add(this.course);
-    if (!on && this.shown) this.world.remove(this.course);
-    this.shown = on;
-    if (on) this.prevTitle = document.title;
-    document.title = on ? DRIFT_LAB_W_TITLE : this.prevTitle;
     if (on) this.build();
   }
 
-  /** Turn the W profile on / off: the lab overrides (saved panel values), raw keys, and the
-   * player's car tagged as the only car they apply to. */
-  private setHandling(on: boolean): void {
-    const was = this.handling;
-    this.handling = on;
-    if (!on) {
-      // Only undo what W set (another lab may own the drift tuning now).
-      if (!was) return;
-      setRawKeyboard(false);
-      this.sim.labScopeSetTaggedOnly(false);
-      this.sim.driftTuningSet("");
-      this.sim.plainSteerSet("");
-      this.sim.rideTuneSet("");
-      this.sim.carTuneSet("");
-      this.sim.gripBalanceSet("");
+  /** Toggle the panel (F7). */
+  toggle(): void {
+    this.show(!this.visible);
+  }
+
+  /** A session started; `pad` = it is the test pad session (course, parity cars, the owner's
+   * reference assists). Every session gets the saved debug overrides (none = the shipped
+   * handling) and raw keys for the plain steering. */
+  setActive(pad: boolean): void {
+    this.applyOverrides();
+    if (pad && !this.visible) this.show(true);
+    if (pad === this.active) {
+      if (this.visible) this.build();
       return;
     }
-    let saved = "";
-    try {
-      saved = localStorage.getItem(STORE) ?? "";
-    } catch {
-      /* storage blocked: defaults */
-    }
-    try {
-      this.sim.plainSteerSet(saved || JSON.stringify(this.sim.plainSteerDefaults()));
-    } catch {
-      this.sim.plainSteerSet(JSON.stringify(this.sim.plainSteerDefaults()));
-    }
-    let ride = "";
-    try {
-      ride = localStorage.getItem(RIDE_STORE) ?? "";
-    } catch {
-      /* storage blocked: defaults */
-    }
-    try {
-      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().firm));
-    } catch {
-      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().firm));
-    }
-    let carTune = "";
-    try {
-      carTune = localStorage.getItem(CAR_STORE) ?? "";
-    } catch {
-      /* storage blocked: data */
-    }
-    try {
-      this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().spin));
-    } catch {
-      this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
-    }
-    this.applyPivot();
-    let grip = "";
-    try {
-      grip = localStorage.getItem(GRIP_STORE) ?? "";
-    } catch {
-      /* storage blocked: the new balance */
-    }
-    try {
-      this.sim.gripBalanceSet(grip || JSON.stringify(this.sim.gripBalanceDefaults().new));
-    } catch {
-      this.sim.gripBalanceSet(JSON.stringify(this.sim.gripBalanceDefaults().new));
-    }
+    this.active = pad;
+    if (pad && !this.shown) this.world.add(this.course);
+    if (!pad && this.shown) this.world.remove(this.course);
+    this.shown = pad;
+    if (pad) this.prevTitle = document.title;
+    document.title = pad ? DRIFT_LAB_W_TITLE : this.prevTitle;
+    if (this.visible) this.build();
+  }
+
+  /** The saved debug overrides (each empty = the shipped default) and raw keyboard keys (the
+   * plain steering reads the keys raw). */
+  private applyOverrides(): void {
+    const get = (k: string): string => {
+      try {
+        return localStorage.getItem(k) ?? "";
+      } catch {
+        return "";
+      }
+    };
+    const set = (f: (t: string) => void, text: string) => {
+      try {
+        f(text);
+      } catch {
+        f("");
+      }
+    };
+    set((t) => this.sim.plainSteerSet(t), get(STORE));
+    set((t) => this.sim.rideTuneSet(t), get(RIDE_STORE));
+    set((t) => this.sim.carTuneSet(t), get(CAR_STORE));
+    set((t) => this.sim.gripBalanceSet(t), get(GRIP_STORE));
+    const pivot = this.pivot();
+    if (Object.keys(pivot).length > 0) this.applyPivot(pivot);
+    else this.sim.driftTuningSet("");
     setRawKeyboard(true);
-    // Only the player's car: AI racers, police and traffic keep the stock handling.
-    this.sim.labScopeSetTaggedOnly(true);
     try {
-      this.sim.setLabTagged(this.player(), true);
-    } catch (e) {
-      // Replays / non-live sessions: the overrides then reach nobody (tagged-only, no tag).
-      console.warn("W handling: cannot tag the player", e);
+      // A saved ride override may change the body inertia (the body was built at spawn).
+      this.sim.refreshBodyInertia(this.player());
+    } catch {
+      /* replays / no player */
     }
   }
 
@@ -524,22 +484,24 @@ export class DriftLabWPanel {
       }
       this.body.appendChild(ab);
     }
-    // "Use W handling everywhere" (lead): free drive, city chase and races keep this profile.
+    // Unify A/B: the shipped handling vs the pre-unify stock path (data tyres and ride, no
+    // plain steering) on every car without an override.
     {
       const input = document.createElement("input");
       input.type = "checkbox";
-      input.id = "drift-lab-w-everywhere";
-      input.checked = this.everywhere();
+      input.id = "drift-lab-w-legacy";
+      input.checked = this.sim.labScopeLegacy();
       input.onchange = () => {
+        this.sim.labScopeSetLegacy(input.checked);
         try {
-          localStorage.setItem(EVERYWHERE_STORE, input.checked ? "1" : "0");
+          this.sim.refreshBodyInertia(this.player());
         } catch {
-          /* ignore */
+          /* no player */
         }
       };
       row(
-        "use W handling everywhere",
-        "free drive, city chase and races use this steering / tyre / suspension / handbrake profile on your car (AI, police and traffic stay stock); takes effect on the next session",
+        "pre-unify handling (A/B)",
+        "debug: the old stock handling (tyre data, data ride, normal steering model) wherever no override is set; not saved",
         input,
         document.createElement("span"),
       );
@@ -957,7 +919,7 @@ export class DriftLabWPanel {
       }
       for (const [key, label, hint] of [
         ["probe_tilt_fix", "wheel probe tilt fix", "the ground probe no longer touches on its edge on smooth road when the body rolls: removes the tick-to-tick tyre load chatter in corners (kerbs unchanged); proposed as the default"],
-        ["car_fixes", "per-car fixes (lab)", "lab-only car-data proposals: debug_coupe anti-roll bars × 0.5, lucciola_350 rear springs × 0.65 + yaw inertia × 1.2 (inertia applies when the car restarts)"],
+        ["car_fixes", "per-car fixes again (×2)", "the per-car fixes are in data/cars now (debug_coupe bars × 0.5, lucciola_350 rear springs × 0.65 + yaw inertia × 1.2); this applies them a second time on top (debug only; inertia when the car restarts)"],
         ["tyres_rwd_only", "tyre scales: RWD cars only", "the front / rear tyre scales apply to rear-drive cars only (front-drive cars keep their tyres); the lock and bars apply to all"],
         ["smart_angle_rate", "smart lock: plain wheel speed", "the wheels move at the plain rack's speed and stop at the smart lock (a 0.1 s tap turns them as far as before); off = full smart lock in the rack's 0.28 s"],
         ["smart_fade_both", "smart lock off in slides (both ways)", "the plain lock comes back with body slip for the into-turn side too (else only for countersteer)"],
@@ -1006,7 +968,7 @@ export class DriftLabWPanel {
 
   /** Update the readout (cheap: one small typed array). */
   frame(): void {
-    if (!this.active) return;
+    if (!this.visible) return;
     let r: Float32Array;
     try {
       r = this.sim.plainReadout(this.player());

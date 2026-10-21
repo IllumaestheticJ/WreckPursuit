@@ -38,7 +38,7 @@ impl Vehicle {
     }
 
     /// Re-apply [`Vehicle::body_inertia`] to an existing chassis body (after
-    /// [`Vehicle::set_lab_tagged`] or a ride-lab inertia change).
+    /// a ride-lab inertia change).
     pub fn apply_body_inertia(&self, rb: &mut RigidBody) {
         rb.set_additional_mass_properties(self.body_mass_properties(), true);
     }

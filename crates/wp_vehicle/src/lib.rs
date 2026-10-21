@@ -71,8 +71,8 @@ pub mod steering;
 pub mod surface;
 pub mod suspension;
 pub mod tire;
-pub mod twitch_lab;
 pub mod tune;
+pub mod twitch_lab;
 pub mod vehicle;
 
 use std::collections::BTreeMap;

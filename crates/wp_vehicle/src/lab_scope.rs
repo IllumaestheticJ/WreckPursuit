@@ -1,80 +1,88 @@
-//! Which vehicles the Drift Lab W overrides apply to ([`crate::plain`], [`crate::ride_lab`],
-//! [`crate::car_lab`], [`crate::grip_lab`], the [`crate::drift`] tuning override).
+//! The shipped handling and the lab overrides on top of it ([`crate::plain`],
+//! [`crate::ride_lab`], [`crate::car_lab`], [`crate::grip_lab`], the [`crate::drift`] tuning).
 //!
-//! By default an override applies to every vehicle in the process (the lab pad has one car;
-//! the unit tests drive one rig). The testbed's "use W handling everywhere" toggle (lead,
-//! 2026-10-20) keeps the W profile on the **player's** car in free drive, city chases and
-//! races, so it switches to [`set_tagged_only`]`(true)` and tags the player's vehicle
-//! ([`crate::vehicle::Vehicle::set_lab_tagged`]): AI racers, police and traffic keep the stock
-//! handling.
+//! **Unify (lead, 2026-10-21):** Drift Lab W's step-23 handling is the game's handling. With
+//! no lab override set, every vehicle gets:
 //!
-//! Lab-only, like the overrides themselves: not in the car data, replays, snapshots or
-//! netcode. With the overrides off, nothing here changes a step.
+//! - the spin-model tyres ([`crate::car_lab::CarTune::shipped`]),
+//! - the firm ride ([`crate::ride_lab::RideTune::firm`]),
+//! - the step-20+ grip balance ([`crate::grip_lab::GripBalance::shipped`]).
+//!
+//! AI racers, police and traffic get these too. The owner rule is one physics for every car.
+//! The per-car fixes now live in `data/cars`.
+//!
+//! The plain keyboard steering ([`crate::plain::PlainSteer::default`]) is a **player input**
+//! aid. With it come the smart lock, the countersteer limit, the catch, the held-key release
+//! and the transition rack. It applies only to vehicles flagged as player-driven
+//! ([`crate::vehicle::Vehicle::set_player_input`]; `wp_sim` clears the flag for AI racers,
+//! police and traffic). AI keep their own steering.
+//!
+//! The lab overrides (the hidden tuning panel, the measurement examples) replace a default
+//! process-wide. [`set_legacy`]`(true)` brings back the pre-unify stock path (no plain
+//! steering, data tyres and ride) for A/B comparisons. Neither is in replays, snapshots or
+//! netcode. With no override set, the defaults are constants, so the sim stays deterministic.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static TAGGED_ONLY: AtomicBool = AtomicBool::new(false);
+static LEGACY: AtomicBool = AtomicBool::new(false);
+static PLAIN_OFF: AtomicBool = AtomicBool::new(false);
 
-/// Limit the lab overrides to tagged vehicles (`true`) or apply them to all (`false`, the
-/// default).
-pub fn set_tagged_only(on: bool) {
-    TAGGED_ONLY.store(on, Ordering::Relaxed);
+/// Use the pre-unify stock handling where no override is set (`true`), or the shipped
+/// handling (`false`, the default). Lab A/B and the legacy tests only.
+pub fn set_legacy(on: bool) {
+    LEGACY.store(on, Ordering::Relaxed);
 }
 
-/// Whether the lab overrides apply only to tagged vehicles.
-pub fn tagged_only() -> bool {
-    TAGGED_ONLY.load(Ordering::Relaxed)
+/// Whether the pre-unify stock handling is in effect ([`set_legacy`]).
+pub fn legacy() -> bool {
+    LEGACY.load(Ordering::Relaxed)
 }
 
-/// Whether the lab overrides apply to a vehicle whose tag is `tagged`.
-pub fn applies(tagged: bool) -> bool {
-    tagged || !tagged_only()
+/// Turn the plain steering off for player cars too (`true`): the normal steering model, as
+/// for AI. Lab A/B only; default `false`.
+pub fn set_plain_off(on: bool) {
+    PLAIN_OFF.store(on, Ordering::Relaxed);
 }
 
-/// The plain steering override ([`crate::plain::active`]) for a vehicle tagged `tagged`.
-pub fn plain(tagged: bool) -> Option<crate::plain::PlainSteer> {
-    if applies(tagged) {
-        crate::plain::active()
-    } else {
-        None
+/// Whether the plain steering is turned off ([`set_plain_off`]).
+pub fn plain_off() -> bool {
+    PLAIN_OFF.load(Ordering::Relaxed)
+}
+
+/// The plain steering for a vehicle whose player-input flag is `player`: the lab override,
+/// else the shipped [`crate::plain::PlainSteer::default`]. `None` for AI-driven vehicles,
+/// with [`set_plain_off`], or in [`legacy`] mode without an override.
+pub fn plain(player: bool) -> Option<crate::plain::PlainSteer> {
+    if !player || plain_off() {
+        return None;
     }
+    crate::plain::active().or_else(|| (!legacy()).then(crate::plain::PlainSteer::default))
 }
 
-/// The ride override ([`crate::ride_lab::active`]) for a vehicle tagged `tagged`.
-pub fn ride(tagged: bool) -> Option<crate::ride_lab::RideTune> {
-    if applies(tagged) {
-        crate::ride_lab::active()
-    } else {
-        None
-    }
+/// The ride tuning (every vehicle): the lab override, else the shipped
+/// [`crate::ride_lab::RideTune::firm`] (`None` = the data as is, [`legacy`] only).
+pub fn ride(_player: bool) -> Option<crate::ride_lab::RideTune> {
+    crate::ride_lab::active().or_else(|| (!legacy()).then(crate::ride_lab::RideTune::firm))
 }
 
-/// The car / tyre override ([`crate::car_lab::active`]) for a vehicle tagged `tagged`.
-pub fn car(tagged: bool) -> Option<crate::car_lab::CarTune> {
-    if applies(tagged) {
-        crate::car_lab::active()
-    } else {
-        None
-    }
+/// The car / tyre tuning (every vehicle): the lab override, else the shipped
+/// [`crate::car_lab::CarTune::shipped`] (`None` = the data as is, [`legacy`] only).
+pub fn car(_player: bool) -> Option<crate::car_lab::CarTune> {
+    crate::car_lab::active().or_else(|| (!legacy()).then(crate::car_lab::CarTune::shipped))
 }
 
-/// The grip-balance override ([`crate::grip_lab::active`]) for a vehicle tagged `tagged`.
-pub fn grip(tagged: bool) -> Option<crate::grip_lab::GripBalance> {
-    if applies(tagged) {
-        crate::grip_lab::active()
-    } else {
-        None
-    }
+/// The grip balance (every vehicle): the lab override, else the shipped
+/// [`crate::grip_lab::GripBalance::shipped`] (`None` = the data as is, [`legacy`] only). Its
+/// steering parts (smart lock, slide lock) only act through the plain steering, so only on
+/// player cars.
+pub fn grip(_player: bool) -> Option<crate::grip_lab::GripBalance> {
+    crate::grip_lab::active().or_else(|| (!legacy()).then(crate::grip_lab::GripBalance::shipped))
 }
 
-/// The drift tuning ([`crate::drift::tuning`]) for a vehicle tagged `tagged`: the shipped
-/// defaults for a vehicle the override does not apply to.
-pub fn drift(tagged: bool) -> crate::drift::DriftTuning {
-    if applies(tagged) {
-        crate::drift::tuning()
-    } else {
-        crate::drift::DriftTuning::default()
-    }
+/// The drift tuning ([`crate::drift::tuning`]): the override, else the defaults. Every
+/// vehicle.
+pub fn drift(_player: bool) -> crate::drift::DriftTuning {
+    crate::drift::tuning()
 }
 
 #[cfg(test)]
@@ -82,13 +90,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn untagged_vehicles_only_drop_out_in_tagged_mode() {
-        // (Process-wide; the lib's other unit tests never turn tagged-only on.)
-        assert!(applies(false) && applies(true));
-        set_tagged_only(true);
-        let (untagged, tagged) = (applies(false), applies(true));
-        set_tagged_only(false);
-        assert!(!untagged && tagged);
-        assert!(applies(false));
+    fn shipped_defaults_and_player_only_steering() {
+        // (Process-wide; the lib's other unit tests never turn legacy or plain-off on.)
+        assert!(plain(true).is_some() && plain(false).is_none());
+        assert_eq!(ride(false), Some(crate::ride_lab::RideTune::firm()));
+        assert_eq!(car(false), Some(crate::car_lab::CarTune::shipped()));
+        assert_eq!(grip(false), Some(crate::grip_lab::GripBalance::shipped()));
     }
 }

@@ -242,7 +242,8 @@ impl GripBalance {
     ///   step the rear out (owner, step 18) and over-rotations stay catchable;
     /// - rear downforce C·A 0.8 m², the probe tilt fix;
     /// - front-drive cars: the data tyres with the rear anti-roll bar × 2;
-    /// - the held-key slide lock and the lab car fixes.
+    /// - the held-key slide lock. The lab car fixes are in `data/cars` now (unify), so
+    ///   `car_fixes` is off.
     ///
     /// Tuned on the "firm" ride (`ride_lab::RideTune::firm`): with W's soft medium-weight bars
     /// (× 0.15) the rear still steps out on a lift.
@@ -277,9 +278,17 @@ impl GripBalance {
             // ... and for 0.75 s after a steering-key reversal (a transition's new-side
             // countersteer may reach the travel angle; not on a lift: W's snap-back exit).
             slide_lock_release_s: 0.75,
-            car_fixes: true,
+            car_fixes: false,
             ..Self::default()
         }
+    }
+
+    /// The shipped balance (unify, 2026-10-21): [`GripBalance::lab_default`]. Its car fixes
+    /// (`car_fixes` off there now) live in `data/cars` (debug_coupe bars × 0.5; lucciola_350 rear
+    /// springs × 0.65 with the ride height kept, yaw inertia × 1.2). Every vehicle
+    /// (`crate::lab_scope`).
+    pub fn shipped() -> Self {
+        Self::lab_default()
     }
 
     /// The step-14 … step-19 "new" (one click away, "balance: step 14"): the smart lock, RWD
@@ -318,7 +327,7 @@ impl GripBalance {
             // ... except while the slide still grows (W's over-rotation catch, step 11).
             slide_lock_growth_dps: 15.0,
             slide_lock_to_deg: 40.0,
-            car_fixes: true,
+            car_fixes: false,
             ..Self::default()
         }
     }

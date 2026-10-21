@@ -261,18 +261,22 @@ export const sim = {
   driftTuningDefaults: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_defaults_json()),
   /** Set the runtime override from JSON ("" = defaults). */
   driftTuningSet: (json: string): void => wasm.drift_tuning_set(json),
-  /** Drift Lab W "use W handling everywhere": lab overrides on tagged vehicles only (wp_vehicle::lab_scope). */
-  labScopeSetTaggedOnly: (on: boolean): void => wasm.lab_scope_set_tagged_only(on),
-  labScopeTaggedOnly: (): boolean => wasm.lab_scope_tagged_only(),
-  /** Tag a vehicle for the lab overrides (re-applies its body inertia; live sessions only). */
-  setLabTagged: (entity: number, on: boolean): void => wasm.set_lab_tagged(entity, on),
-  labTagged: (entity: number): boolean => wasm.lab_tagged(entity),
+  /** Unify A/B (wp_vehicle::lab_scope): the pre-unify stock handling where no override is set. */
+  labScopeSetLegacy: (on: boolean): void => wasm.lab_scope_set_legacy(on),
+  labScopeLegacy: (): boolean => wasm.lab_scope_legacy(),
+  /** Unify A/B: plain steering off for player cars too. */
+  labScopeSetPlainOff: (on: boolean): void => wasm.lab_scope_set_plain_off(on),
+  labScopePlainOff: (): boolean => wasm.lab_scope_plain_off(),
+  /** Re-apply a vehicle's body inertia after a ride override (live and replay sessions). */
+  refreshBodyInertia: (entity: number): void => wasm.refresh_body_inertia(entity),
+  /** Whether a vehicle gets the player steering aids (player cars; not AI, police or traffic). */
+  playerInput: (entity: number): boolean => wasm.player_input(entity),
   /** [mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle]; mode 0 off … 5 exceeded. */
   driftReadout: (entity: number): Float32Array => wasm.drift_readout(entity),
-  /** Drift Lab W: plain keyboard steering constants in effect (null = off) / defaults (wp_vehicle::plain::PlainSteer). */
+  /** Plain keyboard steering constants a player's car drives with (override or shipped; null = off / legacy) / the shipped defaults (wp_vehicle::plain::PlainSteer). */
   plainSteer: (): Record<string, number> | null => JSON.parse(wasm.plain_steer_json()),
   plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
-  /** Turn plain steering on with these constants ("" = off). */
+  /** Set the plain steering override with these constants ("" = the shipped default; plain off: labScopeSetPlainOff). */
   plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
   /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg,
    * auto_clutch (1/0), clutch engagement 0..1, clutch_locked (1/0), engine_rpm, driven_wheel_rpm, clutch_pedal]. */

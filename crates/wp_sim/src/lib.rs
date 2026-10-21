@@ -640,15 +640,14 @@ impl Sim {
         Ok(())
     }
 
-    /// Tag a vehicle for the Drift Lab W lab overrides (`wp_vehicle::lab_scope`; the testbed's
-    /// "use W handling everywhere"), re-applying its body inertia. Lab-only: not a replay op.
-    pub fn set_lab_tagged(&mut self, id: EntityId, on: bool) -> Result<(), SimError> {
+    /// Re-apply a vehicle's body inertia (`wp_vehicle::Vehicle::body_inertia`) after a lab
+    /// ride override changed it (the hidden tuning panel). Lab-only: not a replay op.
+    pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), SimError> {
         let slot = self
             .vehicles
             .iter_mut()
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
-        slot.vehicle.set_lab_tagged(on);
         slot.vehicle
             .apply_body_inertia(&mut self.physics.bodies[slot.body.body]);
         Ok(())
@@ -931,6 +930,10 @@ impl Sim {
                 let ground = RapierGround {
                     query: self.physics.query_pipeline(filter),
                 };
+                // One physics for every car; the plain keyboard steering aids only for a
+                // player's car (AI racers, police and traffic steer with their own model).
+                slot.vehicle
+                    .set_player_input(slot.kind == VehicleKind::Player);
                 slot.vehicle.step_with_ground(
                     &slot.input,
                     &slot.assists,

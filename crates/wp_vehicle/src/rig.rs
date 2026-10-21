@@ -172,10 +172,10 @@ impl<W: WorldQuery> Rig<W> {
         }
     }
 
-    /// Tag the car for the Drift Lab W overrides ([`crate::lab_scope`]) and re-apply its body
-    /// inertia.
-    pub fn set_lab_tagged(&mut self, on: bool) {
-        self.vehicle.set_lab_tagged(on);
+    /// Mark the car player-driven or AI-driven ([`Vehicle::set_player_input`]) and re-apply
+    /// its body inertia.
+    pub fn set_player_input(&mut self, on: bool) {
+        self.vehicle.set_player_input(on);
         self.vehicle
             .apply_body_inertia(&mut self.bodies[self.handles.body]);
     }

@@ -159,6 +159,12 @@ impl CarTune {
         }
     }
 
+    /// The shipped tyres (unify, 2026-10-21): Drift Lab W's step-23 "spin" set
+    /// ([`CarTune::spin_candidate`]) for every vehicle (`crate::lab_scope`).
+    pub fn shipped() -> Self {
+        Self::spin_candidate()
+    }
+
     /// Tyre-slip workstream's spin-model set (docs/integration/tyre-slip.md): the spin-weighted
     /// combined slip on the rears, no yaw damper, steering / ride as they are. On parity_rwd_d
     /// with the lab driver (counter key at 6° + full throttle, 0.6 g entry) it holds ~41–44° for

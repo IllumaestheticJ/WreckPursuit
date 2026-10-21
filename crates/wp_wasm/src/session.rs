@@ -668,13 +668,11 @@ impl Session {
         Ok(&mut self.sim)
     }
 
-    /// Drift Lab W "use W handling everywhere": tag vehicle `id` for the lab overrides
-    /// (`wp_sim::Sim::set_lab_tagged`). Not a logged op, and allowed in playback too: the
-    /// testbed tags the player at every session start (live or replay), so a recording made
-    /// with W handling plays back with it (the overrides themselves are never recorded).
-    pub fn set_lab_tagged(&mut self, id: EntityId, on: bool) -> Result<(), String> {
+    /// Re-apply vehicle `id`'s body inertia after a lab ride override
+    /// (`wp_sim::Sim::refresh_body_inertia`). Not a logged op; allowed in playback too.
+    pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), String> {
         self.sim
-            .set_lab_tagged(id, on)
+            .refresh_body_inertia(id)
             .map_err(|e| format!("{e:?}"))
     }
 
