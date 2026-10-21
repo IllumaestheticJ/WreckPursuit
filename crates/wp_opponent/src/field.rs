@@ -287,6 +287,8 @@ struct Obstacle {
     /// A racer out of the race (fled, busted, retired) driving or standing on the road: not
     /// racing anyone, so anyone may go round it when it is slower than they are.
     out_of_race: bool,
+    /// A racer stuck nose-in that cannot back out because something stands right behind it.
+    wants_room: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -352,6 +354,9 @@ struct Racer {
     tactic_ticks: u64,
     blocked_s: f32,
     stuck_s: f32,
+    /// Stuck and wanting to back out, but something stands right behind me (the car there
+    /// backs off for me).
+    wants_room: bool,
     stable_s: f32,
     defended: bool,
     in_brake_zone: bool,
@@ -653,6 +658,7 @@ impl Field {
                 tactic_ticks: 0,
                 blocked_s: 0.0,
                 stuck_s: 0.0,
+                wants_room: false,
                 stable_s: 0.0,
                 defended: false,
                 in_brake_zone: false,
@@ -1399,6 +1405,7 @@ impl Field {
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
                             facing: 1.0,
                             out_of_race: false,
+                            wants_room: r.wants_room,
                         });
                         continue;
                     }
@@ -1791,6 +1798,9 @@ fn decide_racer(
                 r.stable_s = 0.0;
             }
             // Stuck against something → back out.
+            if v > 1.0 {
+                r.wants_room = false;
+            }
             let wants_to_move = v_line(r.s) > 3.0;
             let held_by_car = rel
                 .iter()
@@ -1832,6 +1842,20 @@ fn decide_racer(
                 // Nose to nose, or nosed up to a parked car: back out far enough to steer
                 // round it (a car needs ~5 m of travel to move 1.5 m sideways).
                 r.reverse_s = if head_on || nosed_up { 3.0 } else { 1.6 };
+            }
+            // The car right in front of me is stuck and cannot back out because I stand
+            // behind it: back off for it (otherwise both wait for good).
+            let make_room = rel.iter().any(|x| {
+                x.ds > 0.0
+                    && x.gap < 4.0
+                    && x.o.wants_room
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
+            });
+            if r.tactic != Tactic::Reverse && v.abs() < 0.8 && make_room {
+                r.tactic = Tactic::Reverse;
+                r.tactic_ticks = 0;
+                r.stuck_s = 0.0;
+                r.reverse_s = 1.6;
             }
         }
 
@@ -1899,6 +1923,8 @@ fn decide_racer(
                         && x.gap < 4.0 + 1.0 * (-v).max(0.0)
                         && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
                 });
+                // Cut short by something behind me: ask it for room.
+                r.wants_room = blocked_behind && r.tactic_ticks as f32 * dt <= r.reverse_s;
                 if r.tactic_ticks as f32 * dt > r.reverse_s || blocked_behind {
                     r.tactic = Tactic::Rejoin;
                     r.tactic_ticks = 0;
@@ -2144,7 +2170,22 @@ fn decide_racer(
             // within 1.5 s.
             let alongside = x.ds.abs() <= hl + x.o.half_len + 2.5;
             let arriving = x.ds < 0.0 && x.gap < 1.5 * (x.o.v_s - v).max(0.0) + 2.5;
-            if !alongside && !arriving {
+            // A civilian facing me that we meet within 1.5 s: keep to my side of it instead
+            // of stopping for it (it would stop for me in turn). Police and racers keep the
+            // old rules: a box of standing units is squeezed past as before.
+            let meeting = is_civ(&x.o)
+                && x.ds > 0.0
+                && x.o.facing < -0.3
+                && x.gap < 1.5 * (v - x.o.v_s).max(0.0) + 2.5;
+            if !alongside && !arriving && !meeting {
+                continue;
+            }
+            // A car in line right behind me is not beside me: it bounds neither side (grid
+            // highway: the car on my bumper at a red light pinned me in my lane, so I could not
+            // pull out round the civilian ahead with the next lane empty).
+            let in_line_behind =
+                x.ds < 0.0 && x.gap > 0.5 && (x.o.n - r.n).abs() < hw + x.o.half_w - 0.3;
+            if in_line_behind {
                 continue;
             }
             let civ_extra = if is_civ(&x.o) { civ_margin } else { 0.0 };
@@ -2727,6 +2768,7 @@ fn vehicle_obstacle(
         parked: false,
         facing: geom::dot(fwd, t),
         out_of_race: false,
+        wants_room: false,
     })
 }
 
@@ -2780,6 +2822,7 @@ fn civilians_on(
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
             facing: geom::dot(f, t),
             out_of_race: false,
+            wants_room: false,
         });
     }
     out
@@ -2857,19 +2900,25 @@ fn plan_pass(
     } else {
         (v * t_clear).max(40.0)
     };
-    // No three-wide: never pass a car that is passing, nor start a pass while a car is
-    // alongside me.
-    // (A car right behind me in line is not alongside.)
-    let engaged = rel.iter().any(|q| {
-        q.o.who != o.who
-            && !matches!(q.o.who, Who::Civilian(_))
-            && q.ds <= 0.0
-            && q.gap < 3.0
-            && (q.o.n - r.n).abs() > hw + q.o.half_w - 0.5
-    });
-    if o.passing || engaged {
+    // No three-wide: never pass a car that is passing, nor pull out towards a car alongside
+    // me. (A car right behind me in line is not alongside; one alongside on the other side
+    // does not stop me moving away from it: grid highway, a racer boxed between a civilian
+    // at the light and a rival on its left sat out a whole green with the right lane empty.)
+    if o.passing {
         return Err(PassReject::TargetBusy);
     }
+    let alongside_towards = |n_pass: f32| {
+        let dir = n_pass - r.n;
+        rel.iter().any(|q| {
+            let side = q.o.n - r.n;
+            q.o.who != o.who
+                && !matches!(q.o.who, Who::Civilian(_))
+                && q.ds <= 0.0
+                && q.gap < 3.0
+                && side.abs() > hw + q.o.half_w - 0.5
+                && (dir.abs() < 0.3 || side * dir > 0.0)
+        })
+    };
     // A pass needs a run: closing speed now, or pace I'm being denied (my own speed profile
     // a second ahead vs its speed) with a straight ahead, or sitting right on its bumper.
     let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
@@ -2900,6 +2949,10 @@ fn plan_pass(
     let mut why = PassReject::NoRoom;
     'side: for side in sides {
         let n_pass = o.n + side * need;
+        if alongside_towards(n_pass) {
+            why = PassReject::TargetBusy;
+            continue 'side;
+        }
         // No passing on the opposing lanes through a junction (round a parked car aside): a
         // car out there meets the side roads' traffic waiting in the box, and with the field
         // queued behind it nobody can move (Lantern Row, skill 0.95 seed 8: the whole field
@@ -3046,6 +3099,7 @@ mod tests {
             parked: true,
             facing: -1.0,
             out_of_race: false,
+            wants_room: false,
         }
     }
 

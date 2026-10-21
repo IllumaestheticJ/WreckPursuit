@@ -168,6 +168,26 @@ After: the test passes (seed 1). `simcli goldens`: all match. `cargo test --work
 All three are red on the unchanged round12 code too. Hollins output is identical. The pace test
 goes from 26 out-of-range checks to 24, a subset of the 26.
 
+## Run 9e — Lantern stand-offs fixed, pace lock-in re-recorded (2026-10-21)
+
+`wp_race` `opponent_pace::pace_scenarios_hold_their_ranges` (release only; CI's debug run skips
+it): red since `lead/city-residential`, 21 checks out of range after Runs 9c and 9d. Two
+`wp_opponent` fixes for the Lantern stand-offs, then all ten `pace_*.ron` re-measured with the
+lock-in's own rule. Details, the before / after table and the reason for every moved range are
+in `docs/integration/opponent-pace.md` under "Re-lock 2026-10-21". In short:
+- A **civilian facing the racer** that it meets within 1.5 s enters the side constraints: the
+  racer keeps to its side instead of stopping for it (both used to wait for good). Civilians
+  only: with police units in it too, a Loop 9 seed boxed a racer in between standing units
+  (`race_picker::loop9_circuit` never finished).
+- A racer whose **reverse is cut short by the racer behind** sets `Obstacle::wants_room`; a
+  stopped racer right behind it backs off 1.6 s.
+- Lantern: 4 of 4 finish at both skills (was 1 and 2). Grid highway: about twice as slow as at
+  the old lock-in, with the losses in traffic (pace sweep: `civ` / `veh`), recorded as today's
+  times with that reason.
+
+Gate: see the commit. `simcli goldens` unchanged (the pace scenarios' goldens run them
+standalone, cars on the grid).
+
 ## Run 9d — Hollins race tests fixed (2026-10-21)
 
 `wp_race` `race_picker::hollins_hill_sprint` (red since `lead/sim-perf`, 0159b2a8) and
@@ -188,7 +208,7 @@ alongside (`ds = 0`), and the hard side constraints forbade the move toward them
 
 After: both Hollins tests pass; the flee test and every other `wp_opponent` test pass;
 `simcli goldens` all match. `cargo test --workspace --release --no-fail-fast` is red only in
-`opponent_pace::pace_scenarios_hold_their_ranges` (red since city-residential, see Known gaps).
+`opponent_pace::pace_scenarios_hold_their_ranges` (red since city-residential; Run 9e).
 
 ## Run 9b — lead/round12 merged (2026-10-20, lead helper)
 
