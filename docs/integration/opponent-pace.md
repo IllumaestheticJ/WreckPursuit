@@ -369,4 +369,6 @@ DNFs at s50).
 Open: loop9_circuit_s95 — hakone_gt never finishes on the one-version handling (reproduces on
 plain round12): at 55–60 m/s it cannot hold its line's lateral g (the 30 m skidpad figure, 0.89
 g, over-asks at speed), drifts > 1 m wide, the off-line cap brakes mid-bend and the loose rear
-lets go. Needs a speed-dependent lateral capability (next item).
+lets go. Needs a speed-dependent lateral capability (next item). Lock-in until then:
+`finishers` min 5, no ai_mara time (lead's call, 2026-10-21); restore min 6 with the fix. If the
+owner picks rear ×0.55 over ×0.45, re-measure this case on it.
