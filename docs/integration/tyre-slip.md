@@ -135,6 +135,30 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### New-side settle, tyre side (lead, on drift-lab-w 1451d264: W's transition rack + catch)
+
+`transition v2search` with `V2SETTLE=1` (only the spin weighting `spin_b0/b2/c/p`, `rear_relax`,
+`rear_peak_slip` move; no ellipse / drive floor / front falloff), 304 runs, gates held ≥ 25,
+lift-off 0, caught ≥ 17, crossing 0.70–0.90 s (unchanged). Step 20 · plain:
+
+| tyres | held / 27 | caught / 18 | fast | median cross | median settle |
+|---|---|---|---|---|---|
+| current spin model (b0 7.5, b2 1.63, c 0.85, p 8, relax 1.0, peak 1.0) | 25 | 18 | 5 | 0.82 s | 0.45 s |
+| A: b0 9.6, b2 1.95, c 0.92, p 6, relax 0.80, peak 0.95 | 25 | 18 | 9 | 0.80 s | 0.30 s |
+| **B: b0 8.45, b2 1.86, c 0.91, p 5, relax 1.26, peak 1.04** | **26** | 18 | 7 | 0.81 s | 0.33 s |
+
+B per car (current → B; held / 9 · caught / 6 · median cross · fast): rwd_a 9·6·0.85·3 → 9·6·0.88·2;
+**rwd_b 8·6·0.80·0 → 9·6·0.74·3** (settles 1.4–1.6 s → mostly 0.3–1.0 s); rwd_d 8·6·0.86·2 →
+8·6·0.88·2; rampart_50 3·0 → **8**·0 (6 swing-backs from W's catch at 0.9; grip-balance ships
+0.7, which catches it 9 / 9); debug_coupe 9·6·0.85·3 → 9·6·0.87·3. Lift-off 0 everywhere. Fastest
+settling sets lose holds (12 fast at held 23). Not applied: per the lead, the tyre change goes in
+on lead/round12 after the unify, with `opponent_pace` in the gate.
+
+shiro_turbo / lucciola_350 "no hold" (grip-balance's question): the harness enters on power only
+(2nd gear, 40 m circle, 0.3–0.7 g); these cars stay at 1–3° of slip for 6 s (lucciola rotates at
+0.7 g). A harness limit for low-power cars (they need a lift / brake / handbrake entry), not a
+transition or tyre fault.
+
 ### Option (b): front grip falloff at deep front slip (lead, 2026-10-21)
 
 `CarTune::front_deep_falloff` (existing knob: front side force × (1 − falloff) faded in from
