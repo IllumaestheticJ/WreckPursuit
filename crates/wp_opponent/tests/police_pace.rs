@@ -561,14 +561,15 @@ fn police_drive_clean_in_the_wet() {
 /// Measurement (not a gate): a race-AI racer at wanted level 3 flees physical police through
 /// the procedural city with traffic, over several seeds. Prints per seed how the chase ended,
 /// how long it lasted and the nearest pursuer's mean gap while in pursuit, plus the share of
-/// pursuing-unit time spent faster than 11 m/s within 15 m of a junction node. Used to tune
-/// `pursuit_junction_mps`:
+/// pursuing-unit time spent faster than 11 m/s within 15 m of a junction node, and the
+/// racers' contacts. Used to tune the pursuit caps (`pursuit_junction_mps`,
+/// `pursuit_turn_mps`, `shadow_m`):
 /// `cargo test --release -p wp_opponent --test police_pace -- --ignored --nocapture chase_report`
 #[test]
 #[ignore]
 fn chase_report() {
     use wp_police::Assignment;
-    let mut totals = (0u32, 0u32, 0.0f32, 0.0f32);
+    let mut totals = (0u32, 0u32, 0.0f32, 0.0f32, 0u32);
     for seed in 1..=6u64 {
         let setup = common::Setup {
             seed,
@@ -643,19 +644,23 @@ fn chase_report() {
         let gap = gap_sum / gap_n.max(1) as f32;
         eprintln!(
             "seed {seed}: {outcome} at {} s, pursued {pursued_s:.0} s, nearest pursuer {gap:.0} m, \
-             {fast_jct}/{near_jct} junction ticks above 11 m/s",
-            ended.map_or("-".into(), |t| format!("{t:.0}"))
+             {fast_jct}/{near_jct} junction ticks above 11 m/s, racer contacts {}",
+            ended.map_or("-".into(), |t| format!("{t:.0}")),
+            out.other_contacts
         );
+        totals.4 += out.other_contacts;
         totals.0 += outcome.starts_with("Captured") as u32;
         totals.1 += 1;
         totals.2 += pursued_s;
         totals.3 += gap;
     }
     eprintln!(
-        "chase report: {}/{} captured, mean pursued {:.0} s, mean nearest-pursuer gap {:.0} m",
+        "chase report: {}/{} captured, mean pursued {:.0} s, mean nearest-pursuer gap {:.0} m, \
+         racer contacts {} (with police, traffic or the world, >= 50 N·s)",
         totals.0,
         totals.1,
         totals.2 / totals.1 as f32,
-        totals.3 / totals.1 as f32
+        totals.3 / totals.1 as f32,
+        totals.4
     );
 }

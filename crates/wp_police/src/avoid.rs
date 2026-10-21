@@ -493,8 +493,8 @@ pub(crate) fn update(
 /// Without lights a unit stops at a red (and at a yellow it can stop for) and slows to
 /// `yield_mps` through an unsignalised junction. With lights it may run reds and ignore limits,
 /// but crosses every junction at `siren_junction_mps` (`siren_red_mps` against a red, the
-/// turn cap when turning). In an active pursuit (`pursuing`) straight through a junction it
-/// has no red at it keeps `pursuit_junction_mps` instead.
+/// turn cap when turning). In an active pursuit (`pursuing`) it keeps `pursuit_junction_mps`
+/// straight through a junction it has no red at, and turns at `pursuit_turn_mps`.
 pub(crate) fn junction_speed(
     j: Option<JunctionAhead>,
     track_s: f32,
@@ -518,7 +518,9 @@ pub(crate) fn junction_speed(
     // Turning: slow enough to hold the lane through the corner (swinging wide clips cars
     // waiting at the junction).
     let turn_cap = if j.turn {
-        approach(if siren {
+        approach(if pursuing && siren {
+            cfg.pursuit_turn_mps
+        } else if siren {
             cfg.siren_turn_mps
         } else {
             cfg.turn_mps
@@ -803,7 +805,8 @@ mod tests {
         let v = junction_speed(plain, 60.0 - c.junction_slow_m, 10.0, false, false, &c);
         assert!((v - c.yield_mps).abs() < 1e-3, "{v}");
         // With lights: `siren_junction_mps`; in a pursuit, the higher `pursuit_junction_mps`
-        // (green or unsignalised, straight on). Turns keep the turn cap.
+        // (green or unsignalised, straight on); turns at `siren_turn_mps` /
+        // `pursuit_turn_mps`.
         let v = junction_speed(plain, 60.0 - c.junction_slow_m, 20.0, true, false, &c);
         assert!((v - c.siren_junction_mps).abs() < 1e-3, "{v}");
         let v = junction_speed(green, 60.0 - c.junction_slow_m, 20.0, true, true, &c);
@@ -814,8 +817,10 @@ mod tests {
             light: Some(Light::Go),
             turn: true,
         });
-        let v = junction_speed(turn, 60.0 - c.junction_slow_m, 20.0, true, true, &c);
+        let v = junction_speed(turn, 60.0 - c.junction_slow_m, 20.0, true, false, &c);
         assert!((v - c.siren_turn_mps).abs() < 1e-3, "{v}");
+        let v = junction_speed(turn, 60.0 - c.junction_slow_m, 20.0, true, true, &c);
+        assert!((v - c.pursuit_turn_mps).abs() < 1e-3, "{v}");
         // Past the junction: no cap.
         assert!(junction_speed(red, 75.0, 10.0, false, false, &c).is_infinite());
     }

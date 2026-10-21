@@ -101,8 +101,10 @@ yield_mps = 5.0
 turn_mps = 3.5
 siren_turn_mps = 6.0
 siren_junction_mps = 11.0
-# Active pursuit, straight on at a green or unsignalised junction (reds and turns as above).
+# Active pursuit: straight on at a green or unsignalised junction, and through turns (reds as
+# above).
 pursuit_junction_mps = 20.0
+pursuit_turn_mps = 6.0
 siren_red_mps = 6.0
 no_pass_near_junction_m = 25.0
 # Give way to cross traffic (patrol at unsignalised junctions, lights at a red).
