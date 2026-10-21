@@ -301,6 +301,9 @@ pub struct PoliceStats {
     /// (row 80).
     #[serde(default)]
     pub witnessed_pursuits: u32,
+    /// Speeding violations clocked by a unit's radar ([`config::RadarConfig`]).
+    #[serde(default)]
+    pub radar_clocks: u32,
     /// Resets in place (owner row 78): un-wrecked units that stood stuck and snapped to a clear
     /// spot in their lane ([`stuck::RESET_ACTIVE_S`]).
     #[serde(default)]
@@ -424,6 +427,8 @@ pub struct PoliceSystem {
     pub(crate) racers: BTreeMap<EntityId, RacerRecord>,
     pub(crate) obs: BTreeMap<EntityId, RacerObs>,
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
+    /// Seconds each racer has been speeding in a unit's sight (radar hold).
+    pub(crate) radar_over: BTreeMap<EntityId, f32>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
@@ -579,6 +584,7 @@ impl PoliceSystem {
             racers: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
+            radar_over: BTreeMap::new(),
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
             prev_vel: BTreeMap::new(),
@@ -1814,6 +1820,16 @@ impl PoliceSystem {
             throttle = 0.0;
             (brake, handbrake) = standstill_hold(v, brake.max(1.0));
         }
+        // Still rolling backwards after a reverse manoeuvre: the gearbox is in reverse, where
+        // the brake pedal drives backwards (`body.speed` is unsigned, so the pedals above
+        // would brake). Stop on the handbrake; at a standstill the throttle selects first
+        // again (from claude/beautiful-hopper-sfuta0: a unit ran backwards at 22 m/s).
+        let u = &self.units[i];
+        if graph::dot(u.vel, heading) < -ROLLING_BACK_MPS {
+            throttle = 0.0;
+            brake = 0.0;
+            handbrake = 1.0;
+        }
         VehicleInput {
             steer,
             throttle,
@@ -2081,6 +2097,9 @@ fn hold_pedals(v: f32) -> (f32, f32, f32) {
     }
 }
 
+/// Rolling backwards faster than this outside a reverse manoeuvre, a physical unit stops on
+/// the handbrake, m/s.
+const ROLLING_BACK_MPS: f32 = 0.3;
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
 

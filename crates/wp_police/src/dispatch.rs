@@ -139,6 +139,56 @@ impl PoliceSystem {
     // Event handlers
     // -----------------------------------------------------------------------------------------
 
+    /// Radar ([`crate::config::RadarConfig`]): every racer a ground unit can see (this think
+    /// step's witness) that is over the limit where it drives by more than the margin commits
+    /// a witnessed speeding violation, so the blatant rule and the witness's pursuit apply
+    /// at once, whichever way the racer is facing and however often `wp_world` reports.
+    /// Only racers not wanted yet are clocked (the owner's gap: speeding past a unit never
+    /// made them wanted); a wanted racer a unit sees is recognised within about a second and
+    /// pursued anyway, and pursuit heat covers a pursued one. Held racers are never clocked.
+    pub(crate) fn clock_speeders(&mut self, world: &dyn WorldQuery, tdt: f32) {
+        let radar = self.cfg.heat.heat.radar.clone();
+        let speeding = crate::heat::violation_index(&ViolationKind::Speeding { over_mps: 0.0 });
+        let mut clocked: Vec<(EntityId, f32, [f32; 2])> = Vec::new();
+        let ids: Vec<EntityId> = self.racers.keys().copied().collect();
+        for id in ids {
+            let r = &self.racers[&id];
+            let watched = r.level == WantedLevel::None
+                && !self.held.contains(&id)
+                && self.obs.get(&id).is_some_and(|o| o.witness.is_some());
+            // The higher of the world's limit (lane under the car; at a junction that can be
+            // the slower cross street) and the police road graph's nearest road. Off the lanes
+            // (over the kerb, on parking) the world has none: the road's, within half a street.
+            let road = self
+                .graph
+                .nearest_on_road(xy(r.pos))
+                .filter(|rp| rp.dist_m <= RADAR_ROAD_M)
+                .map(|rp| self.graph.segment(rp.segment).speed_limit_mps);
+            let limit = match (world.speed_limit_at(r.pos), road) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, b) => a.or(b),
+            };
+            let speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+            let over = limit.map(|l| (speed - l, l));
+            let fast = over.is_some_and(|(o, l)| o > radar.margin_mps.max(radar.ratio * l));
+            let held = self.radar_over.entry(id).or_insert(0.0);
+            *held = if watched && fast { *held + tdt } else { 0.0 };
+            // At wp_world's cadence: only when no speeding counted for `repeat_s` (a clock a
+            // second made a race field passing one patrol wanted at once, Hollins), and only
+            // after `hold_s` of speeding in sight (wp_world's hold).
+            let due = r.last_violation[speeding].is_none_or(|t| self.now.since(t) >= radar.repeat_s);
+            if *held >= radar.hold_s && due {
+                if let Some((o, _)) = over {
+                    clocked.push((id, o, xy(r.pos)));
+                }
+            }
+        }
+        for (racer, over_mps, at) in clocked {
+            self.stats.radar_clocks += 1;
+            self.on_violation(world, racer, &ViolationKind::Speeding { over_mps }, at);
+        }
+    }
+
     /// A traffic violation by `racer` at world position `at` (from `SimEvent::TrafficViolation`).
     pub(crate) fn on_violation(
         &mut self,
@@ -1237,6 +1287,7 @@ impl PoliceSystem {
             self.warm_up(world);
         }
         self.update_observations(world);
+        self.clock_speeders(world, tdt);
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_stuck(world);
@@ -2857,6 +2908,9 @@ impl PoliceSystem {
 }
 
 /// A violation in a radio line ("running a red").
+/// The radar uses the nearest road's limit for a racer this far off it at most, m.
+const RADAR_ROAD_M: f32 = 12.0;
+
 /// Whether a reset spot at `pos` is free: no other car's centre within
 /// [`crate::stuck::RESET_CLEAR_M`] and no moving car about to drive through it.
 fn reset_clear(pos: [f32; 2], others: &[crate::avoid::Obstacle]) -> bool {
