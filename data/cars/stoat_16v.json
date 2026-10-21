@@ -1,0 +1,158 @@
+{
+  "id": "stoat_16v",
+  "display_name": "Stoat 16V",
+  "class": "Compact",
+  "analog_of": "early-90s European FF hot hatch, 2.0 L 16-valve naturally aspirated I4, three-door",
+  "body_size_m": [1.695, 4.05, 1.4],
+  "mass_kg": 1144.5,
+  "front_weight_frac": 0.62,
+  "wheelbase_m": 2.475,
+  "track_front_m": 1.43,
+  "track_rear_m": 1.41,
+  "cg_height_m": 0.5,
+  "inertia_kgm2": [370.0, 1580.0, 1690.0],
+  "drag_cd_a_m2": 0.678,
+  "lift_front": 0.1,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 120],
+      [1500, 135],
+      [2000, 150],
+      [2500, 160],
+      [3000, 168],
+      [3500, 174],
+      [4000, 178],
+      [4500, 181],
+      [5000, 180],
+      [5500, 176],
+      [6000, 170],
+      [6500, 158],
+      [6800, 145],
+      [7000, 135]
+    ],
+    "idle_rpm": 850.0,
+    "redline_rpm": 6800.0,
+    "rev_limit_rpm": 7000.0,
+    "inertia_kgm2": 0.12,
+    "engine_brake_nm": 22.0
+  },
+  "drivetrain": {
+    "layout": "Fwd",
+    "gear_ratios": [3.27, 2.13, 1.46, 1.13, 0.89],
+    "final_drive": 3.94,
+    "reverse_ratio": 3.3,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 250.0,
+    "shift_time_s": 0.25
+  },
+  "wheels": [
+    {
+      "position_m": [-0.715, 1.238, 0.284],
+      "radius_m": 0.284,
+      "width_m": 0.205,
+      "mass_kg": 19.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.584,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0122,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [0.715, 1.238, 0.284],
+      "radius_m": 0.284,
+      "width_m": 0.205,
+      "mass_kg": 19.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.584,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0122,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [-0.705, -1.238, 0.284],
+      "radius_m": 0.284,
+      "width_m": 0.205,
+      "mass_kg": 16.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.705, -1.238, 0.284],
+      "radius_m": 0.284,
+      "width_m": 0.205,
+      "mass_kg": 16.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 29800.0,
+      "damper_bump_ns_per_m": 1900.0,
+      "damper_rebound_ns_per_m": 2850.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 3000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 29800.0,
+      "damper_bump_ns_per_m": 1900.0,
+      "damper_rebound_ns_per_m": 2850.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 3000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 21700.0,
+      "damper_bump_ns_per_m": 1250.0,
+      "damper_rebound_ns_per_m": 1880.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11700.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 21700.0,
+      "damper_bump_ns_per_m": 1250.0,
+      "damper_rebound_ns_per_m": 1880.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11700.0,
+      "bump_stop_n_per_m": 150000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 1790.0,
+    "max_torque_rear_nm": 680.0,
+    "bias_front": 0.637,
+    "handbrake_rear_nm": 610.0
+  },
+  "steering": {
+    "ratio": 16.0,
+    "rack_speed_rad_per_s": 1.5,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "stoat_16v",
+  "base_price": 9500,
+  "durability_class": 2,
+  "fuel_capacity_l": 55.0
+}
