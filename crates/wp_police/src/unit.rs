@@ -291,7 +291,8 @@ pub struct UnitBody {
     pub pos: [f32; 2],
     /// Unit heading vector (XY).
     pub heading: [f32; 2],
-    /// Speed, m/s (negative while rolling backwards faster than 1 m/s).
+    /// Speed, m/s (negative while rolling backwards faster than 1 m/s, and while the
+    /// built-in driver reverses in a three-point turn).
     pub speed: f32,
     /// Current lateral acceleration, g.
     pub lat_g: f32,
@@ -427,6 +428,13 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// Paved span of the road under a headless unit (refreshed at think rate by the police;
+    /// `None` for scripted racers, which keep the old swing round).
+    #[serde(default)]
+    pub road: Option<crate::graph::RoadSpan>,
+    /// The built-in driver's turn-round manoeuvre in progress ([`crate::turn`]).
+    #[serde(default)]
+    pub turn: Option<crate::turn::TurnRound>,
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -488,6 +496,8 @@ impl Unit {
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            road: None,
+            turn: None,
         }
     }
 
@@ -539,16 +549,35 @@ impl Unit {
             )
     }
 
-    /// Set a new drive command and reset track progress.
+    /// Set a new drive command and reset track progress. A turn-round manoeuvre under way
+    /// ends if the new track lies ahead of the heading ([`crate::turn::TURN_ABANDON_COS`]);
+    /// otherwise it carries on (and plans again if the new track is the other way round).
     pub fn set_command(&mut self, cmd: DriveCommand) {
         let (s, lat) = cmd.track.project(self.body.pos, 0.0, f32::INFINITY);
         self.track_s = s;
         self.on_track = lat < 2.0;
         self.cmd = cmd;
+        if self.turn.is_some()
+            && (!self.cmd.track.is_drivable()
+                || crate::turn::track_ahead_cos(
+                    &self.cmd.track,
+                    s,
+                    self.body.pos,
+                    self.body.heading,
+                ) >= crate::turn::TURN_ABANDON_COS)
+        {
+            self.turn = None;
+        }
         // A pass is tied to the old track's arc length.
         self.avoid.pass_offset_m = None;
         self.avoid.blocked_s = 0.0;
         self.avoid.junction = None;
+    }
+
+    /// Whether the built-in driver is in the middle of a turn-round manoeuvre (planned, not
+    /// given up).
+    pub fn turning_round(&self) -> bool {
+        self.turn.is_some_and(|t| t.active())
     }
 
     /// Whether handling damage forces the unit to pull over.
@@ -623,7 +652,9 @@ pub fn lane_point(track: &Track, s: f32, offset_m: f32) -> [f32; 2] {
 }
 
 /// Planned speed for a unit: corner planning plus a crawl while the unit faces away from its
-/// track (it has to turn around first).
+/// track (it has to turn around first). A police unit turning round sets its own speeds
+/// ([`crate::turn`]); the crawl still caps scripted racers' swing round and a unit steering
+/// onto a track 73-100° off its nose.
 pub fn plan_unit_speed(u: &Unit, brake_mps2: f32) -> f32 {
     let mut v = plan_corner_speed(
         &u.cmd.track,
@@ -639,7 +670,8 @@ pub fn plan_unit_speed(u: &Unit, brake_mps2: f32) -> f32 {
 }
 
 /// Whether `u` faces away from its track (the track 8 m ahead lies more than ~73° off its
-/// heading): it is turning round to start on it, crawling ([`plan_unit_speed`]).
+/// heading): it crawls ([`plan_unit_speed`]); past ~100° a police unit turns round
+/// ([`crate::turn::needs_turn_round`]).
 pub fn facing_away_from_track(u: &Unit) -> bool {
     if !u.cmd.track.is_drivable() {
         return false;
@@ -693,6 +725,7 @@ pub fn step_ground(
         b.speed = (b.speed - dynm.brake_mps2 * dt).max(0.0);
         b.pos = add(b.pos, scale(b.heading, b.speed * dt));
         b.lat_g = 0.0;
+        u.turn = None;
         return rep;
     }
     let (s, lateral) = track.project_ahead(b.pos, u.track_s, 3.0, 40.0);
@@ -700,6 +733,12 @@ pub fn step_ground(
     if lateral < 2.0 {
         u.on_track = true;
     }
+    // Track behind: a U-turn or three-point turn at a few m/s, on the road surface.
+    if crate::turn::step_turn_round(u, dynm.brake_mps2 * 1.3, dt) {
+        return rep;
+    }
+    let track = &u.cmd.track;
+    let b = &mut u.body;
 
     // Steering: wp_world's shared controller (pure pursuit) toward a lookahead point, then a
     // kinematic bicycle (curvature = tan(road-wheel angle) / wheelbase).

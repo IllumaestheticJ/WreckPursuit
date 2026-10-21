@@ -19,6 +19,7 @@
 //! - [`dispatch`]: patrol pool, incidents, reinforcements, helicopter, AI captain.
 //! - [`pursuit`]: tactics (shadow, box-in, PIT, rolling block, intercept, disengage) and driving.
 //! - [`unit`]: unit state and the built-in kinematic driver.
+//! - [`turn`]: the built-in driver's turn-round manoeuvre (U-turn / three-point turn).
 //! - [`walls`]: static feelers against building footprints and tunnel walls.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
@@ -45,6 +46,7 @@ pub mod scenario;
 pub mod stuck;
 pub mod time;
 pub mod tools;
+pub mod turn;
 pub mod unit;
 pub mod walls;
 

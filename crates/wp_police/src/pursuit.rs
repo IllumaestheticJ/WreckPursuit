@@ -1165,8 +1165,19 @@ impl PoliceSystem {
             .iter()
             .map(|u| self.limit_at(u.body.pos))
             .collect();
-        for (u, lim) in self.units.iter_mut().zip(limits) {
+        // The road under each headless car, for its turn-round manoeuvre (`crate::turn`).
+        let roads: Vec<Option<crate::graph::RoadSpan>> = self
+            .units
+            .iter()
+            .map(|u| {
+                (u.internal && u.kind == UnitKind::Car)
+                    .then(|| self.graph.road_span_at(u.body.pos, u.body.heading))
+                    .flatten()
+            })
+            .collect();
+        for ((u, lim), road) in self.units.iter_mut().zip(limits).zip(roads) {
             u.limit_mps = lim;
+            u.road = road;
             if u.kind == UnitKind::Car {
                 // Pursuing and intercepting units brake late (row 63).
                 let chasing = matches!(
