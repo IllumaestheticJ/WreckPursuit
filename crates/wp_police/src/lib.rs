@@ -250,6 +250,9 @@ pub struct PoliceStats {
     pub pursuits: Vec<PursuitRecord>,
     /// Reinforcement request → unit committed, s.
     pub reinforcement_delays_s: Vec<f32>,
+    /// Per pursuit: pursuit start → the first backup unit committed, s.
+    #[serde(default)]
+    pub first_backup_delays_s: Vec<f32>,
     /// Units that ever pursued.
     pub units_engaged: u32,
     /// Units total-lost without racer contact.
@@ -429,6 +432,12 @@ pub struct PoliceSystem {
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
     /// Seconds each racer has been speeding in a unit's sight (radar hold).
     pub(crate) radar_over: BTreeMap<EntityId, f32>,
+    /// When each racer last had a unit sent to wait ahead of it (see
+    /// [`dispatch::AMBUSH_EVERY_S`]).
+    pub(crate) last_ambush: BTreeMap<EntityId, SimTime>,
+    /// The pursuit start each racer's first backup was logged for (see
+    /// `PoliceStats::first_backup_delays_s`).
+    pub(crate) first_backup: BTreeMap<EntityId, SimTime>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
@@ -584,6 +593,8 @@ impl PoliceSystem {
             phase: DayPhase::Day,
             warmed_up: false,
             racers: BTreeMap::new(),
+            last_ambush: BTreeMap::new(),
+            first_backup: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
             radar_over: BTreeMap::new(),
