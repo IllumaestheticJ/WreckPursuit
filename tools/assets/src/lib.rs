@@ -7,14 +7,24 @@
 //!   interior and wheels, skinned to the lattice by [`skin::bind_skin`] (`bind-skin`),
 //! - checked by [`validate::validate`] (`validate-car-asset`).
 //!
+//! The body shape, details, wheels and mechanical parts of each car come from its
+//! [`style::CarStyle`] ([`style::style_for`]): per-car style modules in [`styles`], the
+//! loft in [`profile`] / [`mesh`], primitives in [`builder`], wheels in [`wheels`] and
+//! engine / suspension / brakes in [`mechanical`].
+//!
 //! See `README.md` for the file formats and commands.
 
 #![warn(missing_docs)]
 
+pub mod builder;
+pub mod mechanical;
 pub mod mesh;
 pub mod profile;
 pub mod skin;
+pub mod style;
+pub mod styles;
 pub mod validate;
+pub mod wheels;
 
 use std::path::{Path, PathBuf};
 

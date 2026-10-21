@@ -2,6 +2,8 @@
 //! hinged parts line up with their hinge nodes.
 
 use car_assets::mesh::{PartKind, TRI_BUDGET};
+use car_assets::profile::BodyProfile;
+use car_assets::style::style_for;
 use car_assets::{
     build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
 };
@@ -77,6 +79,11 @@ fn skinned_vertices_follow_their_region_nodes() {
     }
 }
 
+/// Hinged panel meshes start at their hinge line. Doors use the lattice hinge. The hood's
+/// rear edge and the trunk lid's front edge follow the car's *visual* cabin placement
+/// (`BodyStyle::cabin_shift_m` / `hood_length` move the windshield base and the rear-glass
+/// base on purpose, see PLAN.md "Foundation API"), so they are checked against the styled
+/// profile, and the visual edge may sit at most 0.6 m from the lattice hinge.
 #[test]
 fn hinged_parts_start_at_their_hinge_line() {
     let root = repo_root();
@@ -84,8 +91,20 @@ fn hinged_parts_start_at_their_hinge_line() {
         let car = load_car(&root, &id).unwrap();
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let style = style_for(&car.def);
+        let prof = BodyProfile::styled(&car.def, &car.lattice, &style.body);
         for p in spec.panels.iter().filter(|p| p.kind.is_hinged()) {
-            let hinge_y = car.lattice.nodes[p.hinge_nodes[0] as usize].pos_m[1];
+            let lattice_hinge_y = car.lattice.nodes[p.hinge_nodes[0] as usize].pos_m[1];
+            let hinge_y = match p.region {
+                BodyRegion::Hood => lattice_hinge_y + (prof.y_fw - prof.lattice_y_fw),
+                BodyRegion::Trunk => lattice_hinge_y + (prof.y_deck - prof.lattice_y_deck),
+                _ => lattice_hinge_y,
+            };
+            assert!(
+                (hinge_y - lattice_hinge_y).abs() <= 0.6,
+                "{id}/{}: visual hinge {hinge_y} too far from the lattice hinge {lattice_hinge_y}",
+                p.name
+            );
             let part = mesh
                 .parts
                 .iter()
