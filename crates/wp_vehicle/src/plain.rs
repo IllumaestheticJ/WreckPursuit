@@ -171,8 +171,8 @@ pub struct PlainSteer {
     /// a drift keeps the plain rack. 0 = always armed.
     pub trans_arm_s: f32,
     /// New-side catch (lead, step 13: settle within 0.5 s of the crossing): in the same armed
-    /// window (a lift **and** a key reversal: a flick), a **countersteer** key while
-    /// the slide still grows (faster than `trans_catch_growth_dps`) points the wheels at
+    /// within `trans_catch_window_s` of the slide crossing from one side to the other (a
+    /// flick), a **countersteer** key while the slide still grows (below `trans_catch_max_deg`) (faster than `trans_catch_growth_dps`) points the wheels at
     /// `trans_catch_gain` × the front axle's travel plus this, degrees (default 0.9 × travel +
     /// 0°: aiming past it over-catches and swings back), at the
     /// transition rack's speed — the fronts then pull against the swing's rotation at once instead
@@ -183,10 +183,13 @@ pub struct PlainSteer {
     pub trans_catch_gain: f32,
     /// New-side catch: acts while the slide grows faster than this, °/s.
     pub trans_catch_growth_dps: f32,
-    /// New-side catch: only below this body slip, degrees — a slide just come through zero
-    /// (a flick), not a tapped drift that grows a little (which also has lifts and key
-    /// reversals); above it the plain rack (and the step-11 catch) take over.
+    /// New-side catch: only below this body slip, degrees; above it the plain rack (and the
+    /// step-11 catch) take over. Default 45° (with the crossing timer the catch can run through
+    /// the new side's overshoot: rwd_b settles in 0.27 s instead of 1.6 s at 30°).
     pub trans_catch_max_deg: f32,
+    /// New-side catch: acts within this time of the slide crossing from one side to the other
+    /// ([`PlainInput::since_cross_s`]), s.
+    pub trans_catch_window_s: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -247,7 +250,8 @@ impl Default for PlainSteer {
             trans_catch_deg: 0.0,
             trans_catch_gain: 0.9,
             trans_catch_growth_dps: 7.5,
-            trans_catch_max_deg: 30.0,
+            trans_catch_max_deg: 45.0,
+            trans_catch_window_s: 1.0,
         }
     }
 }
@@ -381,6 +385,9 @@ pub struct PlainInput {
     pub since_lift_s: f32,
     /// Seconds since the steer key last reversed (swing-rack arming).
     pub since_reversal_s: f32,
+    /// Time since the body slip crossed from one side (≥ 10°) to the other, s (the vehicle's
+    /// timer; the new-side catch, [`PlainSteer::trans_catch_gain`]).
+    pub since_cross_s: f32,
 }
 
 /// `p` with the swing rack applied for `inp` (see [`PlainSteer::swing_rate`]): all rack
@@ -574,14 +581,12 @@ fn transition_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> 
 /// [`PlainSteer::trans_catch_deg`]: a countersteer key in the armed window while the slide
 /// grows: the wheels just past the travel, at the transition rack's speed.
 fn new_side_catch(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> Option<f32> {
-    // Armed by a flick only — a lift **and** a key reversal in the window: every drift entry
-    // is a key reversal (into the turn, then the counter key) and the snap-back exit is a lift
-    // with the counter key held; an early catch over-catches both.
+    // Armed only just after the slide came through zero (the vehicle's crossing timer): the
+    // lift + key-reversal window also fires inside a tapped drift and the snap-back exit.
     if p.trans_catch_deg < 0.0
         || inp.slide_growth.to_degrees() < p.trans_catch_growth_dps
         || inp.body_slip.abs().to_degrees() > p.trans_catch_max_deg
-        || (p.trans_arm_s > 0.0
-            && (inp.since_lift_s > p.trans_arm_s || inp.since_reversal_s > p.trans_arm_s))
+        || inp.since_cross_s > p.trans_catch_window_s
     {
         return None;
     }
@@ -838,6 +843,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -891,6 +897,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         assert!((run(&grip) + 0.6 * p.lock_frac(15.0)).abs() < 1e-5);
         // Slide (20°), keys released: the wheels go back to the body's centre (no automatic
@@ -944,6 +951,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -968,6 +976,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         let step = |p: &PlainSteer, inp: &PlainInput| {
             let mut a = -0.6;
@@ -995,6 +1004,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
             ..base
         };
         assert_eq!(step(&on, &slow), step(&off, &slow));
@@ -1003,6 +1013,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
             ..base
         };
         assert_eq!(step(&on, &with), step(&off, &with));
@@ -1031,6 +1042,7 @@ mod tests {
             slide_growth: -0.5, // closing (the snap-back case)
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         let run = |inp: &PlainInput, p: &PlainSteer| {
             let mut a = 0.0;
@@ -1081,6 +1093,7 @@ mod tests {
             slide_growth: 1.0, // over-rotating (57°/s)
             since_lift_s: 1.0e3,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         let lock_at = |p: &PlainSteer| 0.6 * p.lock_frac(12.0);
         let run = |inp: &PlainInput, p: &PlainSteer| {
@@ -1155,6 +1168,7 @@ mod tests {
             slide_growth: 0.0,
             since_lift_s: 0.1,
             since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
         };
         let run = |inp: &PlainInput, p: &PlainSteer| {
             let mut a = 0.0;
@@ -1190,6 +1204,7 @@ mod tests {
         let rel = PlainInput {
             driver: 0.0,
             since_reversal_s: 0.2,
+            since_cross_s: 1.0e3,
             ..flick
         };
         let next = update_center_angle(a, &rel, &p, DT);
@@ -1227,6 +1242,7 @@ mod tests {
             slide_growth: 1.0,
             since_lift_s: 0.5,
             since_reversal_s: 0.4,
+            since_cross_s: 0.1,
         };
         let step = |inp: &PlainInput, p: &PlainSteer, n: usize| {
             let mut a = 0.0;
@@ -1244,19 +1260,16 @@ mod tests {
             ..p
         };
         assert!(step(&swing, &off, 12) < 0.5 * aim);
-        // Not a flick: no lift (a drift entry), no reversal (the snap-back exit), a grown drift
-        // (35°), or the slide closing: the plain rack.
+        // Not just after a crossing (a drift entry, a tapped drift, the snap-back exit — even
+        // with a lift and a key reversal), a grown drift (50°), or the slide closing: the plain
+        // rack.
         for inp in [
             PlainInput {
-                since_lift_s: 5.0,
+                since_cross_s: 5.0,
                 ..swing
             },
             PlainInput {
-                since_reversal_s: 5.0,
-                ..swing
-            },
-            PlainInput {
-                body_slip: 35f32.to_radians(),
+                body_slip: 50f32.to_radians(),
                 ..swing
             },
             PlainInput {
