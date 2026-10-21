@@ -68,10 +68,26 @@
   power rebalance (Wolfhound 240, Cruiser 235, Bastion 200 W/kg; see `cars.md`), and at 40 m/s
   every street-spec racer outran the cap in 7-12 s. All `wp_police`, `wp_sim`, `simcli`,
   `wp_opponent` and `wp_race` tests and goldens pass unchanged: no golden pursuit goes above 40 m/s.
-  **Not changed, your call:** `[unit] accel_mps2 = 4.0` also limits the AI's speed-reference ramp
-  in `unit_input`. The street-spec cars pull ≈ 5-7 m/s² below 100 km/h at full throttle, so AI
-  units still launch slower than their car can. Raising it changes the kinematic driver too
-  (self-wreck metrics).
+- **2026-10-21, same session, owner request "raise accel_mps2 too":** split the setting in
+  two (code change in `wp_police`, listed here for you):
+  - `[unit] accel_mps2` stays **4.0**. It is now documented as the kinematic (headless) driver's
+    acceleration. Raising it broke 3 of your doctrine tests: `capture_stop` captures 2 vs 3,
+    `night_is_slower_than_day…` (night pursuit start ≤ 60 s), and `risk_budget_and_caps…`
+    (careful 506 harm vs reckless 484). Those are calibrations for you to redo, not mine.
+  - New `[unit] physical_accel_mps2 = 5.0` (`UnitDynamics::physical_accel_mps2`, read only by
+    `PoliceSystem::unit_input`): the ceiling on the speed-reference ramp of AI units driven as
+    physical cars, i.e. every unit in the game. 5.0 = the Cruiser's full-throttle 0-100
+    average; faster cars saturate it.
+  - 6.0 (`wp_world::drive`'s full-pedal value) was tried first and broke two things:
+    `golden_city_chase` never started its pursuit (the hand-aimed patrol pulls away and turns
+    off before the racer reaches it; re-aim with `examples/probe_police.rs` if this goes
+    higher), and `wp_opponent` `live_police_chase_…_without_stuck_cars` (racer 2 busted at 18 s,
+    clean racer 3 queued behind the traffic stop for 126 s, limit 90; the opponent AI does not
+    pass a stopped traffic stop — pre-existing, flagged to O).
+  - At 5.0: `race_city_sprint`'s coupe distance floor went 380 → 340 m (to L). After the finish
+    the coupe runs into the y ≈ -110 junction and meets a patrol crossing it (contact at 15.2 s,
+    47 m/s closing), stopping at ≈ 357 m. The race result (`wp_race`'s judge) is unchanged.
+    The 11 police-spawning goldens were re-blessed in a `[bless]` commit.
 
 ## Needs
 | From | What | Workaround now |

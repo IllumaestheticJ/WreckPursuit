@@ -39,7 +39,10 @@
     duration_s: 20.0,
     hash_every: 240,
     expect: [
-        metric(name: "distance_m", entity: "coupe", min: 380.0, max: 500.0),
+        // 340 (was 380) since the police accel raise (2026-10-21): after the finish the coupe
+        // runs into the junction at y ≈ -110 and meets a patrol crossing it (contact at 15.2 s,
+        // 47 m/s closing), stopping it at ≈ 357 m. The race itself (wp_race's judge) is unchanged.
+        metric(name: "distance_m", entity: "coupe", min: 340.0, max: 500.0),
         metric(name: "distance_m", entity: "sedan", min: 330.0, max: 450.0),
         total_loss(entity: "coupe", expected: false),
         total_loss(entity: "sedan", expected: false),

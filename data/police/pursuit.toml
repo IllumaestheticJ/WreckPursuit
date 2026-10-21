@@ -26,7 +26,15 @@ dusk = 200.0
 night = 140.0
 
 [unit]
+# Kinematic (headless) driver acceleration; the doctrine tests in crates/wp_police/scenarios
+# are calibrated on it.
 accel_mps2 = 4.0
+# AI units driven as physical cars (the game): ceiling on the speed-reference ramp. 4.0 → 5.0
+# (2026-10-21) with the police street-spec power rebalance: the Cruiser's full-throttle
+# 0-100 km/h average (5.6 s); faster cars saturate it. 6.0 was tried: it starved the hand-aimed
+# golden_city_chase and left an opponent racer queued behind a traffic stop
+# (docs/integration/police.md).
+physical_accel_mps2 = 5.0
 brake_mps2 = 6.5
 grip_g = 0.95
 crash_offset_m = 7.0

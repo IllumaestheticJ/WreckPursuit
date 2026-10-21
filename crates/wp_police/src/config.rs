@@ -291,8 +291,12 @@ pub struct PresenceFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UnitDynamics {
-    /// Max acceleration, m/s².
+    /// Max acceleration of the built-in kinematic driver, m/s².
     pub accel_mps2: f32,
+    /// Ceiling on the speed-reference ramp of AI units driven as physical cars
+    /// ([`PoliceSystem::unit_input`](crate::PoliceSystem::unit_input)), m/s². The car's own
+    /// engine is the real limit; above it the pedals saturate.
+    pub physical_accel_mps2: f32,
     /// Comfortable braking used for planning, m/s².
     pub brake_mps2: f32,
     /// Absolute tire grip limit, g. Demands above this lose the car.

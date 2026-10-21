@@ -764,7 +764,7 @@ impl PoliceSystem {
     pub fn unit_input(&mut self, unit: UnitId, dt: f32) -> Option<VehicleInput> {
         let i = self.unit_index(unit)?;
         let (accel, brake) = (
-            self.cfg.pursuit.unit.accel_mps2,
+            self.cfg.pursuit.unit.physical_accel_mps2,
             self.cfg.pursuit.unit.brake_mps2,
         );
         let u = &mut self.units[i];

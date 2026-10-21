@@ -77,6 +77,10 @@ ignored). The sport cars and the exotic still escape a straight drag race from a
 start: with equal power that is a matter of tactics, not the cap. Tests and goldens unchanged.
 `docs/design/DEMO_GREYBOX.md`'s player-facing cap line is updated (173 / 216 km/h).
 
+Follow-up (2026-10-21), also on owner request: a new `[unit] physical_accel_mps2 = 5.0`, the
+launch ceiling for AI cops driving real cars (was the shared 4.0 `accel_mps2`, which stays for the
+headless kinematic driver). Details, the 6.0 attempt and the scenario changes are in `police.md`.
+
 ## Street-spec rebalance, police cars (2026-10-20, follow-up)
 
 The owner asked for the same treatment on the police cars. Same method: curb mass trimmed ≈ 5 %
