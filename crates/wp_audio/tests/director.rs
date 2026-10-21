@@ -65,7 +65,12 @@ fn engine_layer_selection_is_monotone_in_rpm_for_every_car() {
     for (id, def) in &lib.cars {
         let c = car(id);
         let e = &c.def.engine;
-        let layers = EngineLayers::resolve(&lib.packs[&def.engine_pack], e.idle_rpm, e.redline_rpm);
+        let layers = EngineLayers::resolve(
+            &lib.packs[&def.engine_pack],
+            &def.engine,
+            e.idle_rpm,
+            e.redline_rpm,
+        );
         let mut prev_on = f32::MIN;
         let mut prev_off = f32::MIN;
         let mut prev_dom_root = 0.0;
@@ -90,10 +95,15 @@ fn engine_layer_selection_is_monotone_in_rpm_for_every_car() {
             prev_dom_root = dom;
             rpm += 25.0;
         }
-        // Idle sits on the idle layer, the top of the range on the highest on-layer.
-        assert_eq!(
-            layers.layers[layers.dominant_on_layer(e.idle_rpm)].root_rpm,
-            e.idle_rpm
+        // Idle plays a low layer near its own pitch (recorded packs root each loop at its
+        // measured firing frequency, not at the car's idle), the top of the range the highest
+        // on-layer.
+        let idle_layer = &layers.layers[layers.dominant_on_layer(e.idle_rpm)];
+        let rate = e.idle_rpm / idle_layer.root_rpm;
+        assert!(
+            (0.5..=2.0).contains(&rate),
+            "{id}: idle plays {} at {rate:.2}x",
+            idle_layer.cue
         );
         let top = layers
             .layers

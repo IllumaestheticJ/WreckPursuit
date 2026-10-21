@@ -94,11 +94,16 @@ functions. Same frames in → byte-identical commands out (tested on real physic
     collector or dual pipes → muffler → tailpipe waveguide → open-end radiation, plus intake,
     valvetrain, gear and diff whine, turbo / blow-off / supercharger, crackle (overrun, limiter
     fuel cut, misfires below 70 % engine health: `misfire_probability`), interior / exterior.
+    Since "engine sounds are bad" (2026-10-21): turbulent flow noise rides on each pulse,
+    lossier pipe ends, a leaky (not pure) d/dt radiation, phase dispersion and output headroom
+    (no soft-limit at WOT) — see `docs/integration/audio.md`.
 - **Engine** (`engine.rs`): per-car `EngineAudioDef` (cylinders, layout, firing feel,
   induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Inputs per frame:
   the crank rpm (`VehicleState::engine_rpm`, never a wheel-derived speed), the pedal and the
   **applied throttle** (`VehicleAudioInput::throttle_applied` = `wp_vehicle::Telemetry::throttle`:
   after the pedal filter, TCS and the gearbox's shift cut; the wasm bridge fills it).
+  A layer's root rpm comes from its anchor: the car's idle, an rpm, a fraction of the redline
+  (procedural packs) or, for recordings, the loop's measured firing frequency (`FiringHz`).
   Layers of the on-throttle set (and separately the off-throttle set) are sorted by root rpm;
   the two that bracket the current rpm are crossfaded with an equal-power curve; the on/off
   sets split the energy by `on_share = smoothstep(0, on_full_load, load)` of the smoothed load,
@@ -243,12 +248,13 @@ cue names.
   "kind": "Engine",                 // Engine | World | Siren | Radio
   "description": "Recorded 2.0 turbo I4, onboard + exhaust mix",
   "engine_layers": [                // Engine packs only
-    { "cue": "engine/idle",    "anchor": "Idle",             "throttle": "Both" },
-    { "cue": "engine/low_on",  "anchor": { "Rpm": 2500 },    "throttle": "On"  },
-    { "cue": "engine/mid_on",  "anchor": { "Rpm": 4500 },    "throttle": "On"  },
-    { "cue": "engine/high_on", "anchor": { "Rpm": 6500 },    "throttle": "On"  },
-    { "cue": "engine/low_off", "anchor": { "RedlineFrac": 0.35 }, "throttle": "Off" },
-    { "cue": "engine/high_off","anchor": { "RedlineFrac": 0.8 },  "throttle": "Off" }
+    // Recorded layers: the loop's measured firing frequency (Hz) at playback rate 1.
+    { "cue": "engine/idle",    "anchor": { "FiringHz": 30.0 },  "throttle": "Both" },
+    { "cue": "engine/low_on",  "anchor": { "FiringHz": 83.3 },  "throttle": "On"  },
+    { "cue": "engine/mid_on",  "anchor": { "FiringHz": 150.0 }, "throttle": "On"  },
+    { "cue": "engine/high_on", "anchor": { "FiringHz": 216.7 }, "throttle": "On"  },
+    { "cue": "engine/low_off", "anchor": { "FiringHz": 90.0 },  "throttle": "Off" },
+    { "cue": "engine/high_off","anchor": { "FiringHz": 180.0 }, "throttle": "Off" }
   ],
   "cues": {
     "engine/low_on": {
@@ -266,10 +272,16 @@ cue names.
 ```
 
 **Recording rules.** Engine layers: steady-state loops (2–4 s, seamless, zero-crossing cut) at
-a constant rpm and load; put that rpm in `anchor` (`Rpm`) — or `RedlineFrac` for packs shared by
-several cars. On layers at full load, off layers on closed-throttle overrun. Aim for layers no
-more than ~1500 rpm apart; the director plays each at `rpm / root_rpm`, so a layer stretches at
-most half the gap. Need ≥ 2 on-layers and ≥ 1 off-layer (idle `Both` counts for both).
+a constant rpm and load; put the loop's **measured firing frequency** in `anchor`
+(`{ "FiringHz": f }`: the strongest partial, = rpm / 60 × cylinders / 2 of the recorded engine).
+The root rpm is then the rpm at which *the car using the pack* fires at `f`
+(`EngineAudioDef::rpm_at_firing_hz`), so one set of loops follows the right pitch on a four, six
+or V8. `validate()` rejects recorded layers anchored by `Idle` / `Rpm` / `RedlineFrac` (those are
+for procedural layers): a recording's pitch does not move with a car's idle or redline, and such
+roots played the old six / V8 loops 15–47 semitones off and crossfaded loops at different
+pitches. On layers at full load, off layers on closed-throttle overrun. Aim for layers no more
+than ~1500 rpm apart; the director plays each at `rpm / root_rpm`, so a layer stretches at most
+half the gap (the top loop stretches to the rev limit). Need ≥ 2 on-layers and ≥ 1 off-layer (idle `Both` counts for both).
 Surface loops: record at a known speed and set `root_speed_mps` (pitch = speed / root).
 One-shots: several variations in `files` (one is picked at random per play), tight start, no
 pre-roll. 48 kHz mono `.ogg` (Vorbis q6) or `.wav`. Loudness: normalise loops to −18 LUFS,
@@ -373,9 +385,20 @@ trace). Same signals as a table/CSV (`--burnout` for the
 wheelspin script) and the command stream for an offline browser render:
 
 ```
-cargo run --release -p wp_audio --example engine_trace -- <car_id> [out.csv [render.json]] [--burnout]
+cargo run --release -p wp_audio --example engine_trace -- <car_id> [out.csv [render.json]] [--burnout] [--physical]
 node apps/testbed-web/e2e/engine_render.mjs render.json [out.wav] [report.json]
 ```
+(`--physical`: the modelled engine the browser plays for the player, instead of the layers.)
+
+"Engine sounds are bad" (2026-10-21) regression checks: `tests/samples.rs`
+`recorded_engine_layers_follow_the_cars_firing_frequency` (every car, idle → rev limit, on and
+off throttle, through the director: each audible recorded layer's pitch × its anchor frequency
+= the car's firing frequency within 5 cents, the leading loop within 0.5–3.6×) and
+`validate_rejects_recorded_layers_without_a_firing_frequency`; `engine` unit tests
+`firing_hz_anchor_roots_at_the_cars_firing_frequency`, `layers_do_not_churn_along_an_rpm_sweep`
+(plus the existing equal-power `weights_are_energy_preserving`); `e2e/audio_engine.mjs` part 2b
+(the worklet DSP in Node per car: no soft-limit samples on a WOT pull, detrended level ripple
+≤ 1.5 dB, firing order within 7 dB of the strongest partial, median spectral flatness ≥ −22 dB).
 
 ## Perf
 
@@ -395,6 +418,11 @@ nodes) for material lookup.
   and the own siren (siren v2); tyres and wind are not muffled in the cockpit yet.
 - The modelled engine is browser-only (AudioWorklet); a native backend would port
   `engine_worklet.ts`. Far cars (beyond the 6 nearest / 60 m) keep the layers.
+- Recorded engine loops are thin: three inline-4 loops (~1,300 / 2,600 / 5,000 rpm) and one
+  six-cylinder idle serve every pack. Anchored at their firing frequency they follow every
+  car's pitch, but a V8's top loop plays up to ~3× (3.5× on the 8,800 rpm flat-plane) near the
+  limiter — formants shift up ("chipmunk" at a distance). Better multi-rpm CC0 / CC-BY sets
+  (or a recording session) would fix it; the pack format is ready.
 - No music system; the Music bus exists so the scanner can duck it.
 - Body-less police units are not fed to the director yet (kinematic traffic is, via
   `kinematic::cruise_state` in the wasm bridge; see R12b-1 in `docs/integration/audio.md`).
