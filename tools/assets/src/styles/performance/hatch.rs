@@ -61,6 +61,9 @@ pub fn vireo(def: &VehicleDef) -> CarStyle {
     m.exhaust = ExhaustKind::Single;
     m.exhaust_tip_r_m = 0.045;
     s.tints.push((M::Paint, rgb(0xF4F3EE)));
+    // Red stripe in the accent slot; white 5-spoke wheels (`rim` slot).
+    s.accent_rgb = Some(rgb(0xC8102E));
+    s.wheel.rim_rgb = Some(rgb(0xF2F2EE));
     s
 }
 
@@ -113,7 +116,7 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     k.grille("lower_mouth", fb, 0.50, zm0, zm1, 2, M::Trim, None);
     k.fogs(wn - 0.12, 0.5 * (zm0 + zm1), 0.04);
     k.splitter(M::Trim, 0.04, 0.12, 0.022, false);
-    let accent = dkey("accent_stripe", fb, M::Caliper);
+    let accent = dkey("accent_stripe", fb, M::Accent);
     k.front_box(&accent, -0.52, 0.52, zm1 + 0.012, zm1 + 0.028, 0.016, 0.0);
     k.front_box(
         &accent,
@@ -235,6 +238,8 @@ pub fn lindwurm(def: &VehicleDef) -> CarStyle {
     m.exhaust = ExhaustKind::Quad;
     m.exhaust_tip_r_m = 0.045;
     s.tints.push((M::Paint, rgb(0x1E5BD6)));
+    // Accent bar in its own slot (same blue as before, when it borrowed `caliper`).
+    s.accent_rgb = Some(rgb(0x1E5BD6));
     s
 }
 
@@ -260,7 +265,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         8,
         M::Trim,
     );
-    let bar = dkey("accent_bar", BodyRegion::Hood, M::Caliper);
+    let bar = dkey("accent_bar", BodyRegion::Hood, M::Accent);
     k.front_box(
         &bar,
         -wn + 0.08,
