@@ -91,11 +91,17 @@ fn player_is_held_on_the_grid_until_green() {
         throttle: 1.0,
         ..Default::default()
     };
-    // Countdown: input refused, nobody moves.
+    let idle_rpm = s.vehicle(PLAYER).unwrap().vehicle.state().engine_rpm;
+    // Countdown: input refused (only the throttle gets through, clutch down), nobody moves.
     for _ in 0..240 * 2 {
         assert!(!s.set_input(PLAYER, full).unwrap());
         s.run_ticks(1);
     }
+    let revving = s.vehicle(PLAYER).unwrap().vehicle.state().engine_rpm;
+    assert!(
+        revving > idle_rpm + 2000.0,
+        "revs on the line: {idle_rpm} -> {revving} rpm"
+    );
     let moved = |a: [f32; 3], b: [f32; 3]| (a[0] - b[0]).hypot(a[1] - b[1]);
     assert!(moved(start, pos(&s, PLAYER)) < 0.5);
     assert!(moved(ai_start, pos(&s, ai)) < 0.5);
