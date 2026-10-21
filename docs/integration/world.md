@@ -716,3 +716,42 @@ out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct updat
   `opponent_reverse_grid_2laps`, `race_city_sprint_police`, `world_traffic_soak`; 45/45
   scenarios pass.
 - **Perf:** `surface_at` 0.61 µs/query (0.49 before, same run), markings 0.17 µs (0.13).
+
+
+## Solid terrain = drawn terrain (playtest: "hitting invisible objects / crashing into the map geometry")
+**Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with every vertex lowered to
+the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
+collided with the raw 5 m heightfield. Off the roads ~10 % of the ground stood 1–4 m above
+what was drawn, up to 10.2 m on steep slopes: invisible hillside.
+**Fix.**
+- `wp_world::terrain::Heightfield::lowered_coarse` (the drawn terrain) and
+  `height_on_triangles` (height on the cell triangles, split along the (i, j)–(i+1, j+1)
+  diagonal like the greybox and Rapier tiles).
+- `wp_world::surface::collision_terrain` → `CityMap::ground`: the drawn terrain resampled on the
+  5 m grid, except in the band around at-grade roads, junctions and bends (paved width +
+  sidewalk + 2.5 m), which keeps the fine heights so sidewalks (drawn, not colliders on `main`)
+  stay at road level. Not under bridge decks.
+- `wp_sim::PhysicsWorld::set_city_ground` builds the heightfield tiles from `CityMap::ground`;
+  `CityMap::ground_height` falls back to it off the roads (spawns, resets, physical traffic).
+- `city-import` draws from `lowered_coarse` (the shipped `vesper_v2.greybox.glb` is byte-identical;
+  `TERRAIN_RENDER_M` and `SIDEWALK_M` now live in `wp_world::surface`).
+**Gate.** `wp_sim/tests/city_v2.rs::solid_terrain_is_the_drawn_terrain`: 167k off-road ray casts
+against the Rapier world land within 1 mm of the drawn terrain (fails on the old colliders).
+`CityMap::new` for Port Vesper: 20 ms (release). Files touched outside `wp_world`:
+`crates/wp_sim/src/physics.rs`, `tools/city-import/src/glb.rs`.
+**Not covered here.** Props (parked cars, cones, bins) are Rapier bodies that `main`'s testbed
+never draws; that is playtest row 50, fixed on `lead/draw-props` / `lead/round12`. That line still
+has this terrain mismatch (same `render_terrain`), so this change needs merging there too.
+
+### Drawn terrain follows the ground (follow-up)
+The old greybox terrain lowered every 10 m vertex to the lowest 5 m height within 10 m, so
+flat ground next to a slope was drawn (and, after the fix above, solid) 1-2 m low, e.g. dips
+behind lots that trapped police units. `Heightfield::coarse_under` replaces
+`lowered_coarse`: a vertex keeps the fine height under it and is lowered only to the lowest
+*protected* fine vertex within 10 m, the protected set being the road band
+(`surface::drawn_terrain`, shared by `city-import` and `collision_terrain`). Measured on Port
+Vesper (`wp_world/tests/city_v2.rs::drawn_terrain_stays_under_roads_and_follows_the_ground`):
+never above a road (closest 0.12 m below), off-road heightfield − drawn p50 0.05 / p95 0.19 /
+p99 0.51 m (max 5.0 m on hillsides right beside cuttings, −2.1 m on sharp ridges; physics
+follows the drawn mesh in both). `vesper_v2.greybox.glb` regenerated (6.82 MB).
+

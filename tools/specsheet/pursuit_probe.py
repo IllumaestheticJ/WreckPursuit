@@ -34,7 +34,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
-EXE = os.path.join(REPO, "target", "release", "simcli")
+EXE = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "simcli")
 DATA = os.path.join(REPO, "data")
 
 

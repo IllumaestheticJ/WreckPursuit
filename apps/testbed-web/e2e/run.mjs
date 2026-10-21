@@ -215,7 +215,7 @@ await page.evaluate(() => {
   window.__wp.setCamera("orbit", [-25, -40, 30]);
 });
 await page.waitForTimeout(4000);
-const agents = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 5);
+const agents = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 7);
 await shot("city_traffic.png");
 check(agents > 10, `city free drive: ${agents} traffic agents rendered`);
 // Traffic signals: heads at every signalised approach, frame the junction nearest the player
@@ -341,7 +341,7 @@ const chase = await page.evaluate(() => ({
   panels: document.querySelectorAll(".wp-hud-heat").length,
   banner: document.getElementById("pursuit-banner").classList.contains("hidden") ? null : document.querySelector("#pursuit-banner b").textContent,
   police: Array.from(window.__wp.sim.vehicleMeta()).filter((_, i, a) => i % 3 === 1 && a[i] === 2).length,
-  units: window.__wp.sim.policeUnits().length / 6,
+  units: window.__wp.sim.policeUnits().length / 8,
   violations: window.__wp.app.eventCounts.TrafficViolation ?? 0,
   inFeed: document.querySelector(".feed")?.textContent?.includes("TrafficViolation") ?? false,
   simS: window.__wp.sim.worldInfo()[0] / 240,
@@ -508,7 +508,7 @@ if (process.env.BENCH) {
   }
   await page.evaluate(() => window.__wp.startFreeDrive("debug_sedan", "Arcade", true));
   await timeSim();
-  const agentsNow = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 5);
+  const agentsNow = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 7);
   console.log(`BENCH sim-only city + ${agentsNow} traffic agents: ${(await timeSim()).toFixed(3)} ms per 60 Hz frame`);
 }
 
