@@ -18,7 +18,8 @@
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
-//! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
+//! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
+//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()` — see [`garage_visit`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -30,6 +31,7 @@ pub mod audio;
 pub mod build_stats;
 pub mod data;
 pub mod garage;
+pub mod garage_visit;
 pub mod pack;
 pub mod police;
 pub mod run;
@@ -542,6 +544,37 @@ pub fn run_repair_continue() -> Result<String, JsValue> {
     with(|s| s.repair_and_continue().map(|r| json(&r)))
 }
 
+/// The city's repair shops as JSON ([`garage_visit::GarageSite`] array: name, position,
+/// radius, `Legit` / `Crooked`, district). `[]` without a city or an economy run.
+#[wasm_bindgen]
+pub fn garages_json() -> Result<String, JsValue> {
+    get(|s| json(&s.garages()))
+}
+
+/// The open garage visit as JSON ([`garage_visit::GarageOffer`]: shop, wanted level, G's
+/// `RepairAll` quote at that shop, cash, whether "Repair" is possible), or `null`. A visit
+/// opens when the player's car stops inside a garage with no pursuit on; the car is held on
+/// the brakes until `garage_repair()` or `garage_leave()`.
+#[wasm_bindgen]
+pub fn garage_visit_json() -> Result<String, JsValue> {
+    get(|s| json(&s.garage_visit()))
+}
+
+/// "Repair" in the open garage visit: pays the shop's `RepairAll` from the ledger, repairs the
+/// car in place (replay op `Repair`) and releases the brakes. Returns
+/// [`garage_visit::GarageRepairReport`] JSON; an error (nothing changed) without a visit, with
+/// nothing to repair, or when the player cannot afford it.
+#[wasm_bindgen]
+pub fn garage_repair() -> Result<String, JsValue> {
+    with(|s| s.garage_repair().map(|r| json(&r)))
+}
+
+/// "Leave" the open garage visit without repairing (no-op without one).
+#[wasm_bindgen]
+pub fn garage_leave() -> Result<(), JsValue> {
+    get(|s| s.garage_leave())
+}
+
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is
 /// **not** recorded in replays.
 #[wasm_bindgen]
@@ -561,6 +594,17 @@ pub fn debug_park_near_police(entity: u32, ahead_m: f32) -> Result<u32, JsValue>
     with(|s| {
         s.debug_park_near_police(EntityId(entity), ahead_m)
             .map(|e| e.0)
+    })
+}
+
+/// Debug / e2e: put `entity` on the ground at `[x, y]` facing `yaw` (0 = +Y) at `speed_mps`
+/// (e.g. inside a garage from `garages_json()`). Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_place(entity: u32, x: f32, y: f32, yaw: f32, speed_mps: f32) -> Result<(), JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .place_on_ground(EntityId(entity), [x, y], yaw, speed_mps, None)
+            .map_err(|e| e.to_string())
     })
 }
 
