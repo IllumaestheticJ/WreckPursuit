@@ -234,3 +234,18 @@ Lead: "an audible cue when spikes hit the target" — `SpikeHit` played only the
   line; flap at the wheel's rev rate; rim only when flat; loops stop on repair),
   `apps/testbed-web/e2e/spikes.mjs` (flap slap rate = 3 / 9 rev/s measured from the render;
   recorded pops decode, loud bang over a quieter air rush).
+
+## Follow-up: "generated sound now" for sped-up engines (owner decision on 0.12.36)
+
+Generalised the police rule to every car: a car plays its recorded engine pack only if no loop
+exceeds 1.6× at redline, otherwise its procedural twin. `write_packs.py` applies it (and lists
+the cars it switches); `tests/samples.rs::engines_play_recordings_exactly_when_they_are_not_sped_up`
+enforces both directions (a sped-up recording fails, and so does a procedural engine whose
+recording would fit). New cars (e.g. from detailed-car-models) are classified the same way when
+`write_packs.py` runs, and the test catches any that are not.
+
+Switched to procedural (recorded twin's top-loop rate at redline): `brigand_400` ×1.93,
+`bulwark_400` ×2.01, `debug_coupe` ×2.11 (i6), `drayman_cargo` ×2.25, `hakone_gt` ×2.05 (i6),
+`hauler_1500` ×2.33, `ironside_440` ×2.09, `lucciola_350` ×3.42, `rampart_50` ×2.82, `sperber_32`
+×2.39 (i6); police (`sentinel_bastion`, `sentinel_cruiser` ×2.33, `sentinel_wolfhound` ×1.81 v6)
+were already. Every inline-4 / turbo-4 keeps its recording (≤ ×1.53).

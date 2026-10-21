@@ -153,54 +153,21 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
             p.id
         );
     }
-    // Highest firing frequency any recorded engine loop can reach without being stretched past
-    // 3.6x (`recorded_engine_layers_follow_the_cars_firing_frequency`). An engine that fires
-    // above it at its redline (fulmine_v10: an 8500 rpm V10) keeps the procedural engine, which
-    // follows any pitch, until a recording that high exists.
-    use wp_audio::data::RpmAnchor;
-    use wp_contracts::load_car;
-    let reach_hz = lib
-        .packs
-        .values()
-        .flat_map(|p| p.engine_layers.iter())
-        .filter_map(|l| match l.anchor {
-            RpmAnchor::FiringHz(hz) => Some(hz),
-            _ => None,
-        })
-        .fold(0.0f32, f32::max)
-        * 3.6;
-    let is_rec = |pack: &str| pack.ends_with("_rec") || pack.contains("_rec_");
     for car in lib.cars.values() {
-        let def =
-            load_car(audio_dir().join(format!("../cars/{}.json", car.id))).expect("car loads");
-        let redline_hz = car.engine.firing_hz(def.def.engine.redline_rpm);
-        // Owner 0.12.34 (police "singing / laughing"): a police car whose recorded engine twin
-        // would pitch a loop above MAX_RECORDED_PITCH uses the procedural twin until a
-        // recording covers its rev range.
-        let police_exception = car.siren.is_some()
-            && recorded_twin_top_pitch(&lib, &car.id, &car.engine_pack)
-                .is_some_and(|p| p > MAX_RECORDED_PITCH);
-        if redline_hz > reach_hz {
+        for pack in [&car.engine_pack, &car.world_pack] {
+            let recorded = pack.ends_with("_rec") || pack.contains("_rec_");
+            // The one exception (owner decision on 0.12.36, "generated sound now"): a car whose
+            // recorded engine twin would pitch a loop above MAX_RECORDED_PITCH at redline uses
+            // the procedural twin until a recording covers its rev range.
+            let sped_up_exception = pack == &car.engine_pack
+                && recorded_twin_top_pitch(&lib, &car.id, pack)
+                    .is_some_and(|p| p > MAX_RECORDED_PITCH);
             assert!(
-                !is_rec(&car.engine_pack),
-                "cars/{}: fires at {redline_hz:.0} Hz at redline, beyond the recordings' \
-                 {reach_hz:.0} Hz: use a procedural engine pack",
+                recorded || sped_up_exception,
+                "cars/{}: {pack} is not a recorded pack",
                 car.id
             );
-        } else if !police_exception {
-            assert!(
-                is_rec(&car.engine_pack),
-                "cars/{}: {} is not a recorded pack",
-                car.id,
-                car.engine_pack
-            );
         }
-        assert!(
-            is_rec(&car.world_pack),
-            "cars/{}: {} is not a recorded pack",
-            car.id,
-            car.world_pack
-        );
         // Police sirens play recordings too (owner: "sirens seem unrealistic — use real
         // sounds"); the synth is only their fallback.
         if let Some(siren) = &car.siren {
@@ -439,17 +406,25 @@ fn top_pitch(lib: &AudioLibrary, car_id: &str, pack: &str) -> Option<f32> {
 }
 
 /// For a car on a procedural engine pack `engine_proc_*`, the top layer pitch its recorded twin
-/// (`engine_rec_*`) would reach at redline. `None` if there is no twin.
+/// (`engine_rec_*`; `engine_rec_turbo` for a turbo inline-4) would reach at redline. `None` if
+/// there is no twin.
 fn recorded_twin_top_pitch(lib: &AudioLibrary, car_id: &str, pack: &str) -> Option<f32> {
-    let twin = format!("engine_rec_{}", pack.strip_prefix("engine_proc_")?);
+    let kind = pack.strip_prefix("engine_proc_")?;
+    let twin = if kind == "i4" && lib.cars[car_id].engine.turbo {
+        "engine_rec_turbo".to_string()
+    } else {
+        format!("engine_rec_{kind}")
+    };
     top_pitch(lib, car_id, &twin)
 }
 
 #[test]
-fn police_engines_are_not_sped_up_recordings() {
-    // Owner 0.12.34: "police car audio pitch is wrong, some of it sounds like it's singing".
+fn engines_play_recordings_exactly_when_they_are_not_sped_up() {
+    // Owner on 0.12.34: "police car audio pitch is wrong, some of it sounds like it's singing";
+    // decision on 0.12.36: "generated sound now" for every car whose recording would be sped up.
+    // Recorded engine pack ⇔ its top loop stays ≤ MAX_RECORDED_PITCH at redline.
     let lib = AudioLibrary::load_dir(audio_dir()).unwrap();
-    for car in lib.cars.values().filter(|c| c.siren.is_some()) {
+    for car in lib.cars.values() {
         let pack = &lib.packs[&car.engine_pack];
         let recorded = pack
             .cues
@@ -459,9 +434,15 @@ fn police_engines_are_not_sped_up_recordings() {
             let ratio = top_pitch(&lib, &car.id, &car.engine_pack).unwrap();
             assert!(
                 ratio <= MAX_RECORDED_PITCH,
-                "cars/{}: {} pitches its top loop {ratio:.2}x at redline (max {MAX_RECORDED_PITCH})",
+                "cars/{}: {} pitches its top loop {ratio:.2}x at redline (max {MAX_RECORDED_PITCH}): use the procedural twin",
                 car.id,
                 car.engine_pack
+            );
+        } else if let Some(ratio) = recorded_twin_top_pitch(&lib, &car.id, &car.engine_pack) {
+            assert!(
+                ratio > MAX_RECORDED_PITCH,
+                "cars/{}: its recorded twin fits ({ratio:.2}x ≤ {MAX_RECORDED_PITCH}); use the recording",
+                car.id
             );
         }
     }
