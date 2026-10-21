@@ -281,6 +281,83 @@ fn road_mesh_with(map: &CityMap, patches: &[NodePatch]) -> TriMesh {
     m
 }
 
+/// Whether node `n` is a freeway merge / diverge (a radius-0 junction).
+pub fn is_freeway_node(net: &RoadNetwork, n: u32) -> bool {
+    net.nodes[n as usize]
+        .intersection
+        .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0)
+}
+
+/// Height of the paving under `q` at a freeway merge / diverge: the banked surface of the
+/// candidate road (`roads`, every road with a lane at the node) whose centreline is nearest,
+/// among those within 3 m of `z_hint`. The rule [`CityMap`] uses for the taper connectors'
+/// own heights, so the [`taper_ribbons`] lie exactly under them.
+pub fn freeway_paving_z(net: &RoadNetwork, roads: &[usize], q: V2, z_hint: f32) -> Option<f32> {
+    roads
+        .iter()
+        .filter_map(|r| net.surfaces.get(*r))
+        .map(|s| height_under(s, q))
+        .filter(|(_, z)| (z - z_hint).abs() < 3.0)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, z)| z)
+}
+
+/// Paving under the ramp tapers through freeway merges and diverges (main's divided
+/// highways), per node: a ribbon the connector's width under every connector at a radius-0
+/// junction that joins roads with different lane counts (ramp lane ↔ carriageway lane). This
+/// is such a node's whole [`NodePatch`]: every ribbon is paved right up to the node (the
+/// carriageway runs through, the ramp starts on its plane), so only the gore wedge between
+/// the ramp ribbon and the carriageway ribbon, where the taper sweeps across it, needs
+/// paving. Every vertex lies on the paving under it ([`freeway_paving_z`]): on the
+/// carriageway or the ramp the ribbon is flush with it. Folded triangles are left out.
+pub fn taper_ribbons(map: &CityMap) -> BTreeMap<u32, TriMesh> {
+    let net = &map.net;
+    let mut lanes_per_road = vec![0u32; net.surfaces.len()];
+    let mut node_roads: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for l in &net.lanes {
+        if let Some(n) = lanes_per_road.get_mut(l.road as usize) {
+            *n += 1;
+        }
+        for n in [l.from_node, l.to_node] {
+            if is_freeway_node(net, n) {
+                let list = node_roads.entry(n).or_default();
+                if !list.contains(&(l.road as usize)) {
+                    list.push(l.road as usize);
+                }
+            }
+        }
+    }
+    let mut out: BTreeMap<u32, TriMesh> = BTreeMap::new();
+    for s in map.segs.iter() {
+        let SegKind::Connector { node, from, to, .. } = s.kind else {
+            continue;
+        };
+        let Some(roads) = node_roads.get(&node) else {
+            continue;
+        };
+        let count = |l: u32| lanes_per_road.get(net.lanes[l as usize].road as usize);
+        if count(from) == count(to) {
+            continue;
+        }
+        let half = s.width * 0.5;
+        let mut l = geom::offset_polyline(&s.pts, -half);
+        let mut r = geom::offset_polyline(&s.pts, half);
+        for (k, c) in s.pts.iter().enumerate() {
+            for e in [&mut l[k], &mut r[k]] {
+                e[2] = freeway_paving_z(net, roads, geom::xy(*e), c[2]).unwrap_or(c[2]);
+            }
+        }
+        let mut t = TriMesh::default();
+        t.strip(&l, &r);
+        t.indices.retain(|tri| {
+            let [a, b, c] = tri.map(|i| geom::xy(t.positions[i as usize]));
+            geom::cross(geom::sub(b, a), geom::sub(c, a)) > 0.0
+        });
+        out.entry(node).or_default().append(&t);
+    }
+    out
+}
+
 /// Cross slope of `lane` at each polyline point (dz per metre to the right of the lane's
 /// direction), from its road surface; empty when the lane does not follow the surface point
 /// for point (OSM imports, flat cities: no bank).
@@ -2159,10 +2236,20 @@ mod tests {
             let walk_m = walks.flush();
             let (road, walk) = (PavedIndex::new(&road_m), PavedIndex::new(&walk_m));
             // Known exceptions, counted and capped: corners filled in cells and junctions whose
-            // ribbon ends overlap.
+            // ribbon ends overlap. Freeway merges / diverges (radius-0 junctions, main's divided
+            // highways, which this check predates) are not counted: there every ribbon is
+            // paved up to the node and the ramp's lies on the carriageway's plane, so their
+            // ends overlap by design. Like every overlapping node they stay out of the crack
+            // samples below; `node_patches_pave_every_turning_path` and the physics / visual
+            // surface match cover them.
+            let freeway = |node: u32| {
+                map.net.nodes[node as usize]
+                    .intersection
+                    .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0)
+            };
             let overlapping: Vec<u32> = patches
                 .iter()
-                .filter(|p| p.overlapping_ends)
+                .filter(|p| p.overlapping_ends && !freeway(p.node))
                 .map(|p| p.node)
                 .collect();
             println!(
