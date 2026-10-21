@@ -759,3 +759,12 @@ bridges. All on Port Vesper v2 (`vesper_v2`, same id); details in the `wp_world`
 - Goldens re-blessed (`[bless]`): `opponent_circuit_8x5`, `opponent_open_roads_traffic`,
   `opponent_reverse_grid_2laps`, `race_city_sprint_police` (grid city: the highway's at-grade
   ends now have walls). Every scenario's expectations still pass.
+
+### Follow-up: bridge piers off the roads (same branch, 2026-10-21)
+- User report: a bridge support stood in the middle of the highway. The greybox put a pier
+  under every deck every ~30 m regardless of what was below, so interchange crossroads over
+  Loop 9 (and the grid's viaduct crossings) had piers on the carriageways. `city-import`
+  `glb::deck_piers` now moves a pier on to the next centreline point when any part of it is
+  on, or within 1.5 m of, a lower road's paving or junction box; test
+  `no_bridge_pier_stands_on_a_road` (both cities). Render only (piers have no colliders), so
+  no goldens change; both greyboxes regenerated.
