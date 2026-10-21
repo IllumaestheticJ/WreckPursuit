@@ -55,6 +55,9 @@ Known gaps:
   Same for the Vireo; a `--doors 2` option for B.
 - `tools/tuning-dash/presets/mode_hits_to_total_loss.yaml` (tuning-dash) lists cars by hand and
   does not include the four new ones yet.
+- Meshes: the four cars have no per-car entry in `tools/assets/src/styles/` (added by the
+  vehicle-models work, #28), so `style_for` gives them the class default body. Regenerated with
+  `gen-car-mesh` after merging #28 (mesh format 2); per-car styles are left to that workstream.
 
 | To | Request |
 |---|---|
