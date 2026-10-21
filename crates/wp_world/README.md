@@ -232,6 +232,45 @@ carriageways), 22 ramps, ≈ 10 km of median barrier, terrain
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
 
+## Port Vesper v3 (`metro::generate`, `World::metro`, `gen-city --preset vesper_v3`) — in development
+The full city after `docs/design/CITY.md`, built on the side (v2 stays the default). 8 × 7 km
+(`x −4400..3600`, `y −3600..3400`), 6 m terrain cells; layout in `metro/plan.rs`, pipeline
+and ownership in `metro/mod.rs` and `docs/integration/city-v3.md`.
+- **Water:** the Vesper River (130 m wide, crossed only at its bridges and the tunnel), the
+  walled Sluice Canal, Calder Bay and the south sound; water = terrain below 0.25 m.
+- **Roads** (`metro/roads/`): every district's street pattern (downtown grid with alleys,
+  one-way pairs, row-house grids, warped suburban grids with cul-de-sacs, industrial blocks,
+  Hollins Drive with 11 hairpins to the Knob, Bluff Road, Skyline Drive), 18 arterials, river
+  bridges (Riverside, Westline Low, Iron truss, Meridian, Kettle Street drawbridge), the
+  Westline Viaduct, Harbor Skyway and Crosstown Viaduct, the Calloway and Westridge tunnels
+  (cut-and-cover: trench + solid walls, roof and cover plug), Founders Cut and the Lantern
+  Underpass. Six divided highways (Loop 9, Route 40 West / North, Crosstown Expressway,
+  Airport Expressway, Port Connector) with a full cloverleaf, a stack, three trumpets, seven
+  diamonds, a parclo and a half diamond; ≈ 6.8 k lanes, 1.2 k junctions (≈ 430 signalised),
+  23 km of highway, 56 ramps, 134 grade separations.
+- **Sites:** Vesper International (two runways, terminal, piers + jet bridges, control tower,
+  hangars, parked aircraft) and Northfield Airfield (`metro/airport/`); the container terminal
+  maze, gantry cranes, moored ships, quay walls and the Old Harbor piers (`metro/docks/`);
+  freight and passenger rail with level crossings, the swing bridge, the Westline yard, the
+  roundhouse and the elevated Vesper Central (`metro/rail/`); five drivable multi-storey
+  garages, surface lots and the Starlite Drive-In (`metro/parking*`); Lantern Tower, the
+  Unfinished Exchange (a jump over a missing span), the Canal Flats earthworks and the
+  Eastgate block (`metro/construction.rs`).
+- **Buildings** (`metro/buildings/`): ≈ 12.8 k district-specific buildings (towers on
+  podiums downtown, offices, warehouses, row houses, suburban houses) with lot walls, fences
+  and hedges, and the landmark complexes (Vesper Bowl, City Hall, Calder Power Station, the
+  steel mill, the observatory, two malls, the lighthouse).
+- **Scenery and boundaries** (`metro/scenery/`): barriers along every reachable water edge and
+  the bluff crest, highway guard rails, sound walls and fences, map-edge walls and road-closed
+  portals where Route 40 leaves the map, forest with solid undergrowth edges, parks, street
+  trees, lamps, poles and street furniture.
+- **Features** (format v4): ≈ 110 k scenery / structure features (≈ 55 k solid). Solid ones
+  are static colliders in `wp_sim` (compound per 256 m tile); boxes and cylinders are drawn
+  instanced by the testbed (`city_features()`), prisms are in the greybox.
+
+The road network is generated in memory (`World::metro`, simcli `preset(name: "vesper_v3")`);
+`vesper_v3.road.bin` (≈ 13 MB) is not committed. Generation ≈ 4 s release.
+
 ## Traffic AI
 
 **Agents** live on segments (lanes or junction connectors) with arc length `s` (car centre),
