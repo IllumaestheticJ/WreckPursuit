@@ -2051,6 +2051,20 @@ fn decide_racer(
             }
         }
 
+        // A red (or one turning red) at the next junction when I get there: nobody may be out
+        // on the opposing side then — a racer stopping for it there stands nose to nose with
+        // the queue coming the other way (main's Lantern downtown seed 7: the leader stopped
+        // for a red mid-pass on the opposing side and the whole field stood for 2 minutes).
+        let red_ahead = signal.is_some_and(|g| {
+            let t = g.d_entry / v.max(4.0);
+            g.d_entry < 150.0
+                && match g.state {
+                    SignalState::Red => g.remaining_s > t - 1.0,
+                    SignalState::Yellow => true,
+                    SignalState::Green => g.remaining_s < t + 2.0,
+                    SignalState::Off => false,
+                }
+        });
         // Pass-target bookkeeping.
         let target_rel = |w: Who| rel.iter().find(|x| x.o.who == w);
         match r.tactic {
@@ -2091,7 +2105,14 @@ fn decide_racer(
                                     r.n_goal,
                                     hw,
                                 );
-                            too_late || lost || gone || stale || oncoming || junction
+                            // Out on the opposing side, still behind, a red coming: tuck back in.
+                            let red = x.ds > 0.0
+                                && red_ahead
+                                && r.n - hw
+                                    < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m
+                                && signal
+                                    .is_some_and(|g| g.d_entry < brake_dist.max(v * 2.0) + 30.0);
+                            too_late || lost || gone || stale || oncoming || junction || red
                         }
                     }
                     None => true,
@@ -2231,6 +2252,7 @@ fn decide_racer(
                         margin: margin_for(&x.o),
                         draft,
                         junction_clear,
+                        red_ahead,
                     };
                     let plan = plan_pass(r, x, &rel, &ctx, &pass_limits);
                     let slot = match plan {
@@ -3249,6 +3271,8 @@ struct PassCtx<'a> {
     draft: bool,
     /// The next junction has nobody coming to it ([`junction_arms_empty`]).
     junction_clear: bool,
+    /// The next junction's light is red (or turning red) when I get there.
+    red_ahead: bool,
 }
 
 /// Lateral limits `(lo, hi)` for passing `o`: a little nearer the road edges when it is a
@@ -3353,8 +3377,7 @@ fn plan_pass(
         // gridlocked in a junction for the rest of the race).
         // (Looking 40 m past the pass: a pass that ends just short of a junction stalls there
         // when the queue it was passing stops at the junction — Lantern s95 seed 4.)
-        if !o.parked
-            && !ctx.junction_clear
+        if (ctx.red_ahead || (!o.parked && !ctx.junction_clear))
             && opposing_through_junction(ctx.corridor, r.s, pass_dist + 40.0, n_pass, hw)
         {
             why = PassReject::LaneAhead;
