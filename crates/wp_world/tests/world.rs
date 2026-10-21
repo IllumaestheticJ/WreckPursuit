@@ -466,10 +466,15 @@ fn spawns_respect_sightline_and_active_area() {
             }
         }
     }
-    // Teleport far away: the old area empties (nobody sees it), the new one fills.
+    // Teleport far away: the old area empties (nobody sees it), the new one fills. 20 s
+    // (was 10): an agent is not recycled in a junction or while it holds the permit for the
+    // next one, and the crossing row under the grid's highway viaduct (y = -385) is now a
+    // chain of junctions 34-42 m apart (the columns at ±55 m and the ramp terminals at ±21 m,
+    // main's diamond interchange): a car driving it holds a permit all the way and is
+    // recycled ~15 s after the teleport, once it reaches the next long block.
     let far = player([0.0, 650.0, 0.0], [1.0, 0.0], 0.0);
     w.set_tracked_vehicles(&[far]);
-    run(&mut w, 10.0, &mut ev);
+    run(&mut w, 20.0, &mut ev);
     let near_old = w
         .agents()
         .filter(|a| geom::dist(geom::xy(a.pos), [0.0, -330.0]) < 200.0)
