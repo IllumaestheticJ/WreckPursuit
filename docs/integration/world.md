@@ -1564,3 +1564,36 @@ newly sampled stretch on Bluff Road (1243, 455), all four drives −3.3…−3.5
 physics and drawn surface agree there to 0.3 mm, so it is the tyre dipping at the kerb climb
 on a downhill section banked 2–3 % toward the kerb (not fixed). Not run: simcli scenarios,
 `wp_police`, `wp_net`, `wp_opponent`, the debug-profile workspace run, clippy, wasm build.
+
+## Post-merge fixes (2026-10-21, side/world-port2)
+
+Every failure on the merged release HEAD was checked against `e55d7342` (release before
+the main merge) and `def3f3f0` (the merge, before the port fixes).
+- **POI routes (real bug, `wp_world::routes`).** The grid's Garage 3 stands mid-block beside
+  the main viaduct. `plan_route` snapped it in 2D to the deck lane 7.9 m up, so
+  Garage 2 → Garage 3 was a 2,018 m detour over the highway. `plan_route_between_pois` now
+  uses `nearest_lane_at_height`, which skips lanes more than 4 m above or below the POI
+  unless none are left. The route is now 526 m. Fixes `siren_traffic_yields_{arcade,sim}`.
+  Test: `world.rs::poi_routes_snap_to_a_lane_at_the_poi_height`.
+- **Scenarios aimed at moved roads.** Main moved Terminal Avenue from y −950 to −925, moved
+  Gantry Row from −780 to −770, and gave both two lanes each way. Re-aimed:
+  `sidewalk_mount_{15,40}kmh`, and the `vesper_e2e` `PORT_LOOP`, whose quay leg ran through
+  the warehouses.
+- **Police spawns changed with the network.** Re-aimed `sideswipe_patrol_{day,night}` to
+  glancing swipes of moving, oncoming patrols (at noon no unit waits at a junction for long).
+- **wp_police tests on the 6×6 grid.** These already failed at the merge, because main added
+  half-diamond ramps. `radio_chatter`: the blackout now comes after the sight-call gap.
+  `blocked_siren`: seed 8, since with seed 7 a backup unit parks 2.4 m behind and the unit
+  correctly waits as in a jam. `radio_city_chase`: calm budget raised to 5/min. The calm
+  lines are the same (13 → 12 over 12 runs), but calm time dropped from 224 s to 153 s.
+- **Correction: Bluff Road lot drives.** Bluff Road (1243, 455) is *uphill* at 5 %, and its
+  verge falls 1.5–2.2 % *away* from the road (kerb about 0.11 m). The earlier note said
+  "downhill, banked toward the kerb", which was wrong. `level_frontages` skips frontages that
+  fall away by more than 1 %. The remaining lot drives stay within 0.5 cm.
+
+**Still failing (police tuning on main's 6×6 grid, all already failing at the merge):**
+- `night_is_slower_than_day…`: night/day reinforcement ratio is 1.64. Night backup joins
+  come sooner than before (mean 120 s → 65 s). Night seeds 100–110 give 22–54 s and day
+  seeds give 20–33 s, so no seed choice fixes this honestly.
+- `response_day_suburb` and `response_night_core`: responders fall behind a 2× speeder on
+  the arterials. The worst first unit takes 39.6 s against a 25 s target.
