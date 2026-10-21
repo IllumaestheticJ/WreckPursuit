@@ -320,6 +320,28 @@ fn garages_drive_from_gate_to_roof() {
                     }
                 }
             }
+            // The terrain never pokes through the ground floor.
+            for f in fs.iter().filter(|f| f.kind == K::ParkingDeck) {
+                if let FeatureShape::Prism {
+                    footprint, top_z, ..
+                } = &f.shape
+                {
+                    let (lo, hi) = ground::bounds(footprint);
+                    for i in 0..=10 {
+                        for j in 0..=10 {
+                            let p = [
+                                lo[0] + (hi[0] - lo[0]) * i as f32 / 10.0,
+                                lo[1] + (hi[1] - lo[1]) * j as f32 / 10.0,
+                            ];
+                            assert!(
+                                ctx.ground_z(p) <= top_z + 0.01,
+                                "{}: terrain above the ground floor at {p:?}",
+                                s.id
+                            );
+                        }
+                    }
+                }
+            }
             let entry = entry.unwrap_or_else(|| panic!("{}: no driveway at the gate", s.id));
             let mut seen = vec![false; fs.len()];
             let mut todo = vec![entry];
