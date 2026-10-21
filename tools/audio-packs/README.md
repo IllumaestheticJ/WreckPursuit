@@ -5,7 +5,7 @@ lists every source (URL, author, what it is) and the cuts taken from it, so a sh
 always be traced back to its original page and rebuilt.
 
 ```
-for p in world_rec engine_rec_i4 engine_rec_v8 engine_rec_i6 siren_rec; do
+for p in world_rec engine_rec_i4 engine_rec_v8 engine_rec_i6 siren_rec radio_rec; do
   python3 tools/audio-packs/build.py tools/audio-packs/$p.json
 done
 ```
@@ -57,8 +57,9 @@ closed-throttle drops. A cue variant with `"rpm"` (and optional `"chop_hz"`) doe
 strongest tone in that range and resamples it to a constant pitch (turbo whistle);
 `"resample": r` shifts pitch by a constant ratio; `"band_hz": [lo, hi]` + `"air"` keeps only that
 band (raised-cosine edges) plus broadband content above 2 kHz at `air` — isolates a whistle or
-whine from the engine under it; `"lowpass_hz"` darkens (blow-off from air releases). Applied in
-that order, before looping / one-shot shaping.
+whine from the engine under it; `"lowpass_hz"` darkens (blow-off from air releases), `"highpass_hz"` strips rumble.
+Applied in that order, before looping / one-shot shaping. A cue's `"root_speed_mps"` is copied
+into the pack (surface loops: the speed the recording was made at; pitch = speed / root).
 
 **Siren loops** use `{ "src", "start", "cycles", "cycle_s", "xfade_s"? }`: `start` is phase 0 of
 the cadence (sweep: the lowest pitch; hi-lo: the start of the high tone), the loop is exactly
@@ -89,6 +90,7 @@ The generated `CREDITS.md` next to the files lists every source, author and lice
 - Cylinder counts and rpm of the recorded engines are inferred from the tracked firing
   frequency and plausible idle speeds; the six may in fact be a V8 (only the layer spacing
   depends on it).
+- Surface `root_speed_mps` values are estimates; the recordings carry no speed data.
 - Cuts were chosen from onset/decay/pitch analysis, not by ear; retune `start`/`end`/`gain` after
   listening (rebuild is ~10 s).
 - Safari before 17 cannot decode Ogg Vorbis; the testbed then plays the fallback synths.

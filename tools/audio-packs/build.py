@@ -177,7 +177,7 @@ def resample(x: np.ndarray, ratio: float) -> np.ndarray:
 
 
 def tone(seg: np.ndarray, v: dict) -> np.ndarray:
-    """Whistle / whine shaping: optional tone-track flatten, resample, band isolation, low-pass."""
+    """Optional shaping: tone-track flatten, resample, band isolation, low-pass, high-pass."""
     if "flatten_hz" in v:
         fmin, fmax = v["track_hz"]
         times, f0, _ = pitch.track(seg, SR, fmin, fmax, harmonics=1)
@@ -188,6 +188,9 @@ def tone(seg: np.ndarray, v: dict) -> np.ndarray:
         seg = isolate(seg, v["band_hz"][0], v["band_hz"][1], v.get("air", 0.0))
     if "lowpass_hz" in v:
         seg = lowpass(seg, v["lowpass_hz"])
+    if "highpass_hz" in v:
+        hz = v["highpass_hz"]
+        seg = spectral_mask(seg, lambda f: 1.0 / np.sqrt(1.0 + (hz / np.maximum(f, 1e-3)) ** 4))
     return seg
 
 
@@ -284,6 +287,8 @@ def main() -> None:
         c["source"] = {"Samples": {"files": files}}
         c["gain"] = spec.get("gain", c.get("gain", 1.0))
         c["looped"] = looped
+        if "root_speed_mps" in spec:
+            c["root_speed_mps"] = spec["root_speed_mps"]
         if looped:
             c.pop("duration_s", None)
         else:

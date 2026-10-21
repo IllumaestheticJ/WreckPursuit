@@ -1,0 +1,109 @@
+{
+  "pack": "radio_rec",
+  "base": "radio_proc",
+  "description": "Recorded CC0 two-way radio: key-up squelch bursts, end-of-transmission squelch tails and static beds.",
+  "sources": {
+    "fs346323": {
+      "kind": "freesound",
+      "id": 346323,
+      "uid": 4930786,
+      "author": "lextrack",
+      "what": "portable two-way radio key-up"
+    },
+    "fs522164": {
+      "kind": "freesound",
+      "id": 522164,
+      "uid": 11537497,
+      "author": "magnuswaker",
+      "what": "radio squelch burst"
+    },
+    "fs47646": {
+      "kind": "freesound",
+      "id": 47646,
+      "uid": 545448,
+      "author": "ReadeOnly",
+      "what": "end of radio transmission"
+    },
+    "fs760245": {
+      "kind": "freesound",
+      "id": 760245,
+      "uid": 16236894,
+      "author": "LukaCafuka",
+      "what": "walkie-talkie end of transmission"
+    },
+    "fs524205": {
+      "kind": "freesound",
+      "id": 524205,
+      "uid": 9561949,
+      "author": "JovianSounds",
+      "what": "radio sign-off squelch"
+    },
+    "fs524204": {
+      "kind": "freesound",
+      "id": 524204,
+      "uid": 9561949,
+      "author": "JovianSounds",
+      "what": "radio static"
+    },
+    "fs760335": {
+      "kind": "freesound",
+      "id": 760335,
+      "uid": 16236894,
+      "author": "LukaCafuka",
+      "what": "radio static"
+    }
+  },
+  "cues": {
+    "radio/squelch_on": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs346323",
+          "start": 0.03,
+          "end": 0.25
+        },
+        {
+          "src": "fs522164",
+          "start": 0.0,
+          "end": 0.33
+        }
+      ]
+    },
+    "radio/squelch_off": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs47646",
+          "start": 0.13,
+          "end": 0.37
+        },
+        {
+          "src": "fs760245",
+          "start": 0.2,
+          "end": 0.43
+        },
+        {
+          "src": "fs524205",
+          "start": 0.05,
+          "end": 0.45
+        }
+      ]
+    },
+    "radio/static": {
+      "gain": 0.25,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs524204",
+          "start": 0.5,
+          "end": 3.0
+        },
+        {
+          "src": "fs760335",
+          "start": 17.5,
+          "end": 20.75
+        }
+      ]
+    }
+  }
+}

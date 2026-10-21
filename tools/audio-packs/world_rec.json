@@ -1,7 +1,7 @@
 {
   "pack": "world_rec",
   "base": "world_proc",
-  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns and steam (Freesound + Kenney); everything else falls back to world_proc synths.",
+  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns, steam, road-surface rolling loops, loose-surface scrub and suspension thumps (Freesound + Kenney); plastic scrape and body rattle fall back to world_proc synths.",
   "sources": {
     "kenney_impact": {
       "kind": "zip",
@@ -275,6 +275,104 @@
       "uid": 179538,
       "author": "RutgerMuller",
       "what": "tires squeaking"
+    },
+    "fs188507": {
+      "kind": "freesound",
+      "id": 188507,
+      "uid": 3506052,
+      "author": "petruchio_ru",
+      "what": "tyres rolling, engine off"
+    },
+    "fs591079": {
+      "kind": "freesound",
+      "id": 591079,
+      "uid": 6411813,
+      "author": "orlandorizo",
+      "what": "car rolling, onboard"
+    },
+    "fs251662": {
+      "kind": "freesound",
+      "id": 251662,
+      "uid": 3719168,
+      "author": "OBXJohn",
+      "what": "tyres on gravel road, close"
+    },
+    "fs251661": {
+      "kind": "freesound",
+      "id": 251661,
+      "uid": 3719168,
+      "author": "OBXJohn",
+      "what": "tyres on gravel road, close"
+    },
+    "fs521272": {
+      "kind": "freesound",
+      "id": 521272,
+      "uid": 2535988,
+      "author": "leo153",
+      "what": "driving on gravel road"
+    },
+    "fs685233": {
+      "kind": "freesound",
+      "id": 685233,
+      "uid": 1661766,
+      "author": "felix.blume",
+      "what": "car driving fast on dirt road"
+    },
+    "fs668552": {
+      "kind": "freesound",
+      "id": 668552,
+      "uid": 1661766,
+      "author": "felix.blume",
+      "what": "4x4 driving on dirt and grass track"
+    },
+    "fs324955": {
+      "kind": "freesound",
+      "id": 324955,
+      "uid": 5596057,
+      "author": "buddhafish",
+      "what": "car pulling away on wet, gritty road"
+    },
+    "fs155379": {
+      "kind": "freesound",
+      "id": 155379,
+      "uid": 57789,
+      "author": "cognito perceptu",
+      "what": "cars over bridge decking"
+    },
+    "fs62652": {
+      "kind": "freesound",
+      "id": 62652,
+      "uid": 791247,
+      "author": "bsumusictech",
+      "what": "rumble strip"
+    },
+    "fs327717": {
+      "kind": "freesound",
+      "id": 327717,
+      "uid": 5596057,
+      "author": "buddhafish",
+      "what": "car interior, rough road, suspension bumps"
+    },
+    "fs837875": {
+      "kind": "freesound",
+      "id": 837875,
+      "uid": 13669249,
+      "author": "menfa",
+      "what": "car over a speed bump"
+    },
+    "fs508170": {
+      "kind": "freesound",
+      "id": 508170,
+      "uid": 9159316,
+      "author": "Breviceps",
+      "what": "car over a road bump"
+    },
+    "fs504626": {
+      "kind": "freesound",
+      "id": 504626,
+      "uid": 4437257,
+      "author": "leonelmail",
+      "what": "heavy body fall on dirt"
     }
   },
   "cues": {
@@ -630,6 +728,216 @@
           "src": "fs104026",
           "start": 0.32,
           "end": 1.3
+        }
+      ]
+    },
+    "surface/asphalt": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 15.0,
+      "variants": [
+        {
+          "src": "fs188507",
+          "start": 36.25,
+          "end": 40.25
+        },
+        {
+          "src": "fs188507",
+          "start": 49.75,
+          "end": 53.75
+        }
+      ]
+    },
+    "surface/concrete": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 15.0,
+      "variants": [
+        {
+          "src": "fs591079",
+          "start": 40.75,
+          "end": 44.75,
+          "highpass_hz": 80
+        },
+        {
+          "src": "fs591079",
+          "start": 18.0,
+          "end": 22.0,
+          "highpass_hz": 80
+        }
+      ]
+    },
+    "surface/wet_asphalt": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 10.0,
+      "variants": [
+        {
+          "src": "fs324955",
+          "start": 15.25,
+          "end": 19.25
+        },
+        {
+          "src": "fs324955",
+          "start": 21.0,
+          "end": 25.0
+        }
+      ]
+    },
+    "surface/gravel": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 12.0,
+      "variants": [
+        {
+          "src": "fs251662",
+          "start": 15.75,
+          "end": 19.75
+        },
+        {
+          "src": "fs521272",
+          "start": 64.0,
+          "end": 68.0
+        }
+      ]
+    },
+    "surface/dirt": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 20.0,
+      "variants": [
+        {
+          "src": "fs685233",
+          "start": 76.0,
+          "end": 80.0
+        },
+        {
+          "src": "fs685233",
+          "start": 4.0,
+          "end": 8.0
+        }
+      ]
+    },
+    "surface/grass": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 10.0,
+      "variants": [
+        {
+          "src": "fs668552",
+          "start": 106.75,
+          "end": 110.75,
+          "lowpass_hz": 1800
+        },
+        {
+          "src": "fs668552",
+          "start": 189.25,
+          "end": 193.25,
+          "lowpass_hz": 1800
+        }
+      ]
+    },
+    "surface/curb": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 15.0,
+      "variants": [
+        {
+          "src": "fs62652",
+          "start": 6.25,
+          "end": 10.25
+        }
+      ]
+    },
+    "surface/metal": {
+      "gain": 0.8,
+      "loop": true,
+      "root_speed_mps": 12.0,
+      "variants": [
+        {
+          "src": "fs155379",
+          "start": 44.75,
+          "end": 48.75
+        }
+      ]
+    },
+    "tire/scrub_loose": {
+      "gain": 0.8,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs251661",
+          "start": 6.75,
+          "end": 10.75
+        },
+        {
+          "src": "fs251662",
+          "start": 7.5,
+          "end": 11.5
+        }
+      ]
+    },
+    "suspension/thump": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs327717",
+          "start": 10.74,
+          "end": 11.08,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs327717",
+          "start": 11.07,
+          "end": 11.4,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs327717",
+          "start": 19.24,
+          "end": 19.6,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs327717",
+          "start": 23.94,
+          "end": 24.3,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs837875",
+          "start": 2.15,
+          "end": 2.5,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs508170",
+          "start": 5.0,
+          "end": 5.35,
+          "lowpass_hz": 1500
+        }
+      ]
+    },
+    "suspension/land": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs504626",
+          "start": 0.33,
+          "end": 1.0,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs327717",
+          "start": 25.78,
+          "end": 26.4,
+          "lowpass_hz": 1500
+        },
+        {
+          "src": "fs837875",
+          "start": 2.15,
+          "end": 2.85,
+          "lowpass_hz": 1500
         }
       ]
     }

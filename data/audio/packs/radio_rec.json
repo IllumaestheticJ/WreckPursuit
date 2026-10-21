@@ -1,0 +1,47 @@
+{
+  "id": "radio_rec",
+  "kind": "Radio",
+  "description": "Recorded CC0 two-way radio: key-up squelch bursts, end-of-transmission squelch tails and static beds.",
+  "cues": {
+    "radio/squelch_on": {
+      "source": {
+        "Samples": {
+          "files": [
+            "radio_squelch_on_01.ogg",
+            "radio_squelch_on_02.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.35
+    },
+    "radio/squelch_off": {
+      "source": {
+        "Samples": {
+          "files": [
+            "radio_squelch_off_01.ogg",
+            "radio_squelch_off_02.ogg",
+            "radio_squelch_off_03.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.4
+    },
+    "radio/static": {
+      "source": {
+        "Samples": {
+          "files": [
+            "radio_static_01.ogg",
+            "radio_static_02.ogg"
+          ]
+        }
+      },
+      "gain": 0.25,
+      "looped": true
+    }
+  },
+  "fallback_pack": "radio_proc"
+}

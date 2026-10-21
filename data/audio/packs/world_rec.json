@@ -1,7 +1,7 @@
 {
   "id": "world_rec",
   "kind": "World",
-  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns and steam (Freesound + Kenney); everything else falls back to world_proc synths.",
+  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns, steam, road-surface rolling loops, loose-surface scrub and suspension thumps (Freesound + Kenney); plastic scrape and body rattle fall back to world_proc synths.",
   "cues": {
     "tire/squeal": {
       "source": {
@@ -17,13 +17,11 @@
     },
     "tire/scrub_loose": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 3000.0,
-            "highpass_hz": 400.0,
-            "crackle": 1.0
-          }
+        "Samples": {
+          "files": [
+            "tire_scrub_loose_01.ogg",
+            "tire_scrub_loose_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
@@ -31,32 +29,34 @@
     },
     "suspension/thump": {
       "source": {
-        "Synth": {
-          "synth": "thump",
-          "params": {
-            "freq_hz": 55.0,
-            "decay_s": 0.16
-          }
+        "Samples": {
+          "files": [
+            "suspension_thump_01.ogg",
+            "suspension_thump_02.ogg",
+            "suspension_thump_03.ogg",
+            "suspension_thump_04.ogg",
+            "suspension_thump_05.ogg",
+            "suspension_thump_06.ogg"
+          ]
         }
       },
       "gain": 1.0,
       "looped": false,
-      "duration_s": 0.3
+      "duration_s": 0.4
     },
     "suspension/land": {
       "source": {
-        "Synth": {
-          "synth": "thump",
-          "params": {
-            "freq_hz": 40.0,
-            "decay_s": 0.35,
-            "noise": 0.4
-          }
+        "Samples": {
+          "files": [
+            "suspension_land_01.ogg",
+            "suspension_land_02.ogg",
+            "suspension_land_03.ogg"
+          ]
         }
       },
       "gain": 1.0,
       "looped": false,
-      "duration_s": 0.6
+      "duration_s": 0.7
     },
     "impact/thud": {
       "source": {
@@ -263,119 +263,105 @@
     },
     "surface/asphalt": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 900.0,
-            "highpass_hz": 60.0,
-            "rumble": 0.2
-          }
+        "Samples": {
+          "files": [
+            "surface_asphalt_01.ogg",
+            "surface_asphalt_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 15.0
     },
     "surface/wet_asphalt": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 4500.0,
-            "highpass_hz": 800.0,
-            "rumble": 0.1
-          }
+        "Samples": {
+          "files": [
+            "surface_wet_asphalt_01.ogg",
+            "surface_wet_asphalt_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 10.0
     },
     "surface/concrete": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 1300.0,
-            "highpass_hz": 80.0,
-            "rumble": 0.35
-          }
+        "Samples": {
+          "files": [
+            "surface_concrete_01.ogg",
+            "surface_concrete_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 15.0
     },
     "surface/gravel": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 3500.0,
-            "highpass_hz": 300.0,
-            "rumble": 0.6,
-            "crackle": 0.8
-          }
+        "Samples": {
+          "files": [
+            "surface_gravel_01.ogg",
+            "surface_gravel_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 12.0
     },
     "surface/grass": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 1600.0,
-            "highpass_hz": 200.0,
-            "rumble": 0.3
-          }
+        "Samples": {
+          "files": [
+            "surface_grass_01.ogg",
+            "surface_grass_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 10.0
     },
     "surface/dirt": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 1100.0,
-            "highpass_hz": 90.0,
-            "rumble": 0.5,
-            "crackle": 0.3
-          }
+        "Samples": {
+          "files": [
+            "surface_dirt_01.ogg",
+            "surface_dirt_02.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 20.0
     },
     "surface/curb": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 700.0,
-            "highpass_hz": 40.0,
-            "rumble": 1.0,
-            "ripple_hz": 18.0
-          }
+        "Samples": {
+          "files": [
+            "surface_curb_01.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 15.0
     },
     "surface/metal": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 2600.0,
-            "highpass_hz": 150.0,
-            "rumble": 0.5,
-            "ripple_hz": 9.0
-          }
+        "Samples": {
+          "files": [
+            "surface_metal_01.ogg"
+          ]
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "root_speed_mps": 12.0
     },
     "tire/burst": {
       "source": {

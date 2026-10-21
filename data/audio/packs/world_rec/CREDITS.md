@@ -47,3 +47,17 @@ previews of the CC0 originals, cut, cleaned and re-encoded.
 | [freesound 546528](https://freesound.org/s/546528/) | trezz77 | powerful horn | CC0 1.0 | horn_truck_02.ogg |
 | [freesound 71739](https://freesound.org/s/71739/) | audible-edge | sedan tire squeal | CC0 1.0 | tire_squeal_01.ogg |
 | [freesound 104026](https://freesound.org/s/104026/) | RutgerMuller | tires squeaking | CC0 1.0 | tire_squeal_02.ogg |
+| [freesound 188507](https://freesound.org/s/188507/) | petruchio_ru | tyres rolling, engine off | CC0 1.0 | surface_asphalt_01.ogg, surface_asphalt_02.ogg |
+| [freesound 591079](https://freesound.org/s/591079/) | orlandorizo | car rolling, onboard | CC0 1.0 | surface_concrete_01.ogg, surface_concrete_02.ogg |
+| [freesound 251662](https://freesound.org/s/251662/) | OBXJohn | tyres on gravel road, close | CC0 1.0 | surface_gravel_01.ogg, tire_scrub_loose_02.ogg |
+| [freesound 251661](https://freesound.org/s/251661/) | OBXJohn | tyres on gravel road, close | CC0 1.0 | tire_scrub_loose_01.ogg |
+| [freesound 521272](https://freesound.org/s/521272/) | leo153 | driving on gravel road | CC0 1.0 | surface_gravel_02.ogg |
+| [freesound 685233](https://freesound.org/s/685233/) | felix.blume | car driving fast on dirt road | CC0 1.0 | surface_dirt_01.ogg, surface_dirt_02.ogg |
+| [freesound 668552](https://freesound.org/s/668552/) | felix.blume | 4x4 driving on dirt and grass track | CC0 1.0 | surface_grass_01.ogg, surface_grass_02.ogg |
+| [freesound 324955](https://freesound.org/s/324955/) | buddhafish | car pulling away on wet, gritty road | CC0 1.0 | surface_wet_asphalt_01.ogg, surface_wet_asphalt_02.ogg |
+| [freesound 155379](https://freesound.org/s/155379/) | cognito perceptu | cars over bridge decking | CC0 1.0 | surface_metal_01.ogg |
+| [freesound 62652](https://freesound.org/s/62652/) | bsumusictech | rumble strip | CC0 1.0 | surface_curb_01.ogg |
+| [freesound 327717](https://freesound.org/s/327717/) | buddhafish | car interior, rough road, suspension bumps | CC0 1.0 | suspension_thump_01.ogg, suspension_thump_02.ogg, suspension_thump_03.ogg, suspension_thump_04.ogg, suspension_land_02.ogg |
+| [freesound 837875](https://freesound.org/s/837875/) | menfa | car over a speed bump | CC0 1.0 | suspension_thump_05.ogg, suspension_land_03.ogg |
+| [freesound 508170](https://freesound.org/s/508170/) | Breviceps | car over a road bump | CC0 1.0 | suspension_thump_06.ogg |
+| [freesound 504626](https://freesound.org/s/504626/) | leonelmail | heavy body fall on dirt | CC0 1.0 | suspension_land_01.ogg |
