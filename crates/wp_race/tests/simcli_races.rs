@@ -13,8 +13,8 @@ use wp_race::bridge::{
 use wp_race::schedule::TrafficMode;
 use wp_race::trace::{simulate, ScriptedRacer};
 use wp_race::{
-    Course, DqReason, EventId, MeetHeat, RaceData, RaceJudge, RaceKind, RacerEntry, RacerResult,
-    RacerSample, RacerStatus, Scheduler,
+    Course, EventId, MeetHeat, RaceData, RaceJudge, RaceKind, RacerEntry, RacerResult, RacerSample,
+    RacerStatus, Scheduler,
 };
 use wp_world::procgen::ProcGenConfig;
 use wp_world::{PropKind, World, WorldConfig};
@@ -34,6 +34,16 @@ fn throttle_at(sc: &Scenario, i: usize, t_s: f32) -> f32 {
 
 /// Run a race scenario and judge it. Racers enter in scenario order (= grid order).
 fn judge_scenario(file: &str, kind: RaceKind, course: Course) -> Vec<RacerResult> {
+    judge_scenario_with(file, kind, course, &mut |_| {})
+}
+
+/// [`judge_scenario`], also handing every tick to `watch`.
+fn judge_scenario_with(
+    file: &str,
+    kind: RaceKind,
+    course: Course,
+    watch: &mut dyn FnMut(&simcli::run::TickView),
+) -> Vec<RacerResult> {
     let sc = load_scenario(&repo().join("apps/simcli/scenarios/race").join(file)).unwrap();
     let data = RaceData::embedded();
     let mut judge = RaceJudge::new(EventId(1), data.rules.for_kind(kind), course);
@@ -82,6 +92,7 @@ fn judge_scenario(file: &str, kind: RaceKind, course: Course) -> Vec<RacerResult
             })
             .collect();
         judge.observe(tick, &samples, v.events);
+        watch(v);
         Ok(())
     };
     let out = run_with_hook(
@@ -126,13 +137,34 @@ fn drag_coupe_beats_sedan_with_reaction_and_shifts() {
 }
 
 #[test]
-fn sprint_corridor_cutter_is_disqualified() {
-    let course = Course::straight([0.0, 3.0, 0.0], [0.0, 1.0], 500.0, 100.0, 12.0);
-    let r = judge_scenario("sprint_corridor_dq.ron", RaceKind::Sprint, course);
+fn sprint_off_route_excursion_is_not_disqualified() {
+    // Gates at 250 m and the 500 m finish: room for the excursion before the first one.
+    let course = Course::straight([0.0, 3.0, 0.0], [0.0, 1.0], 500.0, 250.0, 12.0);
+    // The course runs up x = 0, 12 m wide: |x| is the distance off the route. Count the time
+    // the cutter spends more than 10 m off (the old corridor DQ fired after 3 s past 8 m).
+    let dt = wp_contracts::PHYSICS_DT;
+    let mut off_s = 0.0_f32;
+    let mut max_off_m = 0.0_f32;
+    let r = judge_scenario_with("sprint_off_route.ron", RaceKind::Sprint, course, &mut |v| {
+        if let Some((_, s)) = v.sim.vehicle_states().iter().find(|(id, _)| id.0 == 2) {
+            let off = s.pos[0].abs();
+            max_off_m = max_off_m.max(off);
+            if off > 10.0 {
+                off_s += dt;
+            }
+        }
+    });
+    assert!(
+        off_s > 3.0,
+        "cutter only {off_s:.1} s off the route (max {max_off_m:.1} m)"
+    );
     assert_eq!(r[0].racer, EntityId(1));
     assert_eq!(r[0].status, RacerStatus::Finished);
-    assert_eq!(r[0].gates_passed, 5);
-    assert_eq!(r[1].status, RacerStatus::Dq(DqReason::LeftCorridor));
+    assert_eq!(r[0].gates_passed, 2);
+    let cutter = &r[1];
+    assert_eq!(cutter.racer, EntityId(2));
+    assert_eq!(cutter.status, RacerStatus::Finished, "{cutter:?}");
+    assert_eq!(cutter.gates_passed, 2);
 }
 
 #[test]

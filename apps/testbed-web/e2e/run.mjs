@@ -76,6 +76,17 @@ await page.keyboard.up("KeyD");
 check(v > 1.5, `keyboard drives the car (speed ${v.toFixed(2)} m/s)`);
 await shot("drive_chase.png");
 
+// 1b. Car stat bars under the picker follow the selected car (physics-measured table).
+const statBars = await page.evaluate(() => {
+  const el = document.getElementById("car-stats");
+  const widths = () => Array.from(el.querySelectorAll(".car-stat-track i")).map((i) => parseFloat(i.style.width));
+  return { visible: !el.classList.contains("hidden"), car: el.dataset.car, picked: document.getElementById("car").value, widths: widths() };
+});
+check(
+  statBars.visible && statBars.car === statBars.picked && statBars.widths.length === 3 && statBars.widths.every((w) => w > 0 && w <= 100),
+  `car picker shows acceleration / top speed / cornering bars for ${statBars.car} (${statBars.widths.join(" / ")} %)`,
+);
+
 // 2. Every debug layer on, every camera.
 const layerIds = await page.evaluate(() =>
   ["lattice", "stress", "suspension", "regions", "intents"].map((id) => (window.__wp.toggleLayer(id), id)),

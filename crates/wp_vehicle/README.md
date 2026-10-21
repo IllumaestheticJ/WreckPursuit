@@ -29,6 +29,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `slide.rs` | slide throttle for keyboard/gamepad (and the car slide class it uses) |
 | `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, split-µ launch, corner exit, top speed |
 | `ride.rs` | ride / launch tests: axle ride frequency + damping, heave/pitch kick, kerb strike, slide into kerb, crest, side impact |
+| `stats.rs` | menu stat bars: `CarStats::measure` (0–100, top speed, 50 m skidpad g) and `bars()` on fixed 0–1 scales (16 → 3.5 s, 140 → 310 km/h, 0.55 → 1.05 g); table in `data/stats/cars.json` (`just car-stats`) |
 | `handling.rs` | driver-facing handling tests through a real `AssistProfile`: ramp steer, constant radius, step steer, slalom, city corner; keyboard tapping / analog drivers |
 | `math.rs` | deterministic `atan`/`atan2`/`tan` (polynomial), glam helpers |
 

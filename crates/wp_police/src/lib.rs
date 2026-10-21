@@ -38,6 +38,7 @@ pub mod dispatch;
 pub mod events;
 pub mod graph;
 pub mod heat;
+pub mod pro;
 pub mod pursuit;
 pub mod radio;
 pub mod scenario;
@@ -421,6 +422,8 @@ pub struct PoliceSystem {
     pub(crate) feelers: bool,
     /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
     pub(crate) covers: Vec<walls::CoverSpan>,
+    /// Drivable room for the pro driver's racing line (lead P8).
+    pub(crate) room: pro::RoadRoom,
 }
 
 impl Default for PoliceSystem {
@@ -477,6 +480,8 @@ impl PoliceSystem {
             });
         }
         p.set_walls(walls::WallIndex::new(segs));
+        // The real paved geometry: the road graph's polylines follow a lane.
+        p.room = pro::RoadRoom::from_city(world.map(), &p.cfg.pursuit.pro);
         p
     }
 
@@ -510,7 +515,9 @@ impl PoliceSystem {
 
     /// Police on a road network.
     pub fn with_city(cfg: PoliceConfig, graph: RoadGraph, setup: PoliceSetup) -> Self {
+        let room = pro::RoadRoom::new(&graph, &cfg.pursuit.pro);
         Self {
+            room,
             cfg,
             graph: std::sync::Arc::new(graph),
             setup,
@@ -1134,6 +1141,29 @@ impl PoliceSystem {
             u.internal = false;
             u.geometry = geometry;
             u.controller = None;
+            u.pro = None;
+        }
+    }
+
+    /// Limits of the car a unit drives (`wp_vehicle::metrics`: skidpad, braking, 0–100, top
+    /// speed; see [`pro::CarLimits::from_metrics`]). Without them the pro driver plans with the
+    /// `[pro] default_limits` of `pursuit.toml` (the Sentinel Cruiser).
+    pub fn set_unit_limits(&mut self, unit: UnitId, limits: pro::CarLimits) {
+        if let Some(i) = self.unit_index(unit) {
+            let u = &mut self.units[i];
+            u.limits = Some(limits);
+            if let Some(d) = u.pro.as_mut() {
+                d.limits = limits;
+            }
+        }
+    }
+
+    /// Report what the driver of an externally driven unit feels (yaw rate, road grip), after
+    /// [`PoliceSystem::sync_unit`]. Optional: without it the pro driver assumes a dry road and
+    /// learns the grip from its slides.
+    pub fn sync_unit_feel(&mut self, unit: UnitId, feel: pro::UnitFeel) {
+        if let Some(i) = self.unit_index(unit) {
+            self.units[i].feel = feel;
         }
     }
 
@@ -1201,6 +1231,7 @@ impl PoliceSystem {
                 lat_g: u.body.lat_g,
                 alt_m: s.pos[2],
             };
+            u.vel = [s.vel[0], s.vel[1]];
             u.health = s.health;
             u.effects = s.effects;
         }
@@ -1239,16 +1270,16 @@ impl PoliceSystem {
         })
     }
 
-    /// Driver input for an externally driven AI unit, from `wp_world`'s shared
-    /// [`DriveController`](wp_world::drive::DriveController): pure-pursuit steering toward the
-    /// unit's track and PID pedals toward its planned speed. Call once per physics tick with
-    /// that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units and unknown ids.
+    /// Driver input for an externally driven AI unit from its [`pro::ProDriver`] (lead P8):
+    /// with lights on a racing line inside its own-direction lanes, a grip-limit speed profile
+    /// (road grip from [`PoliceSystem::sync_unit_feel`], damage, the car's
+    /// [`pro::CarLimits`]), late braking and slide control, on `wp_world`'s shared pure-pursuit
+    /// and PID controller; patrol keeps its lane and gentle corner budget. Call once per physics
+    /// tick with that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units
+    /// and unknown ids.
     pub fn unit_input(&mut self, unit: UnitId, dt: f32) -> Option<VehicleInput> {
         let i = self.unit_index(unit)?;
-        let (accel, brake) = (
-            self.cfg.pursuit.unit.accel_mps2,
-            self.cfg.pursuit.unit.brake_mps2,
-        );
+        let brake = self.cfg.pursuit.unit.brake_mps2;
         let u = &mut self.units[i];
         if u.player.is_some() {
             return None;
@@ -1277,7 +1308,74 @@ impl PoliceSystem {
             }
         }
         let offset = self.update_avoid(i, dt);
+        if !self.units[i].cmd.siren {
+            return Some(self.lane_input(i, offset, dt));
+        }
+        // Traffic close ahead: keep to the lane (obstacle awareness looks along the lane), no
+        // racing line through other cars' lanes.
+        let traffic_ahead = self.traffic_near_line(i);
+        let pro_cfg = &self.cfg.pursuit.pro;
+        let full_g = self.cfg.pursuit.pursuit_cornering_g;
+        let room = &self.room;
         let u = &mut self.units[i];
+        let want = u.cmd.speed_mps.min(u.avoid.limit_mps);
+        let hold = u.avoid.limit_mps <= 0.0;
+        let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
+        let siren = u.cmd.siren;
+        let ctx = pro::DriveCtx {
+            pos: u.body.pos,
+            heading: u.body.heading,
+            vel: if u.vel == [0.0, 0.0] {
+                u.body.vel()
+            } else {
+                u.vel
+            },
+            yaw_rate: u.feel.yaw_rate,
+            road_grip: u.feel.road_grip.unwrap_or(1.0),
+            damage_grip: u.grip_scale(),
+            power_scale: u.effects.power_scale,
+            target_mps: want.max(0.0),
+            // Shadowing (risk budget spent) keeps its gentle corner budget; a pursuit or a
+            // response drives at the grip limit.
+            cornering_cap_g: (u.cmd.cornering_g < full_g - 1e-3).then_some(u.cmd.cornering_g),
+            braking_cap_mps2: None,
+            lane_offset_m: u.cmd.lane_offset_m,
+            pass_offset_m: u.avoid.pass_offset_m,
+            racing_line: siren && !traffic_ahead,
+            disabled,
+        };
+        let (geometry, limits) = (u.geometry, u.limits.unwrap_or(pro_cfg.default_limits));
+        let driver = u
+            .pro
+            .get_or_insert_with(|| pro::ProDriver::new(pro_cfg.clone(), limits, geometry, v));
+        let out = driver.drive(&ctx, &u.cmd.track, room, dt);
+        u.planned_speed = out.planned_mps;
+        let mut input = out.input;
+        if hold && !out.reversing {
+            // The shared controller releases the brake below its hold speed; right behind
+            // another vehicle or at a stop line the unit must not creep forwards either.
+            input.throttle = 0.0;
+            (input.brake, input.handbrake) = standstill_hold(v, input.brake.max(1.0));
+        } else if disabled && v <= 1.0 {
+            (input.brake, input.handbrake) = standstill_hold(v, input.brake);
+        }
+        input.steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
+        input.siren = siren;
+        input.headlights = true;
+        Some(input)
+    }
+
+    /// Calm driving without lights (patrol, returning): pure pursuit on the lane at `offset`
+    /// and PID pedals toward the think-rate corner plan (`planned_speed`,
+    /// `patrol_cornering_g`) and the obstacle cap, with comfortable braking.
+    fn lane_input(&mut self, i: usize, offset: f32, dt: f32) -> VehicleInput {
+        let (accel, brake) = (
+            self.cfg.pursuit.unit.accel_mps2,
+            self.cfg.pursuit.unit.brake_mps2,
+        );
+        let u = &mut self.units[i];
+        let v = u.body.speed;
+        let s = u.track_s;
         let look = u.controller().lookahead(v);
         // Static feelers (row 66): away from a wall at the side, slow for one ahead.
         let offset = offset + u.avoid.wall.shift_m;
@@ -1313,7 +1411,7 @@ impl PoliceSystem {
                 } else {
                     0.0
                 };
-                return Some(VehicleInput {
+                return VehicleInput {
                     steer,
                     throttle: if fast { 0.0 } else { 0.5 },
                     brake: if fast { 0.5 } else { 0.0 },
@@ -1321,7 +1419,7 @@ impl PoliceSystem {
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
@@ -1331,14 +1429,14 @@ impl PoliceSystem {
             if facing < stuck::SWING_DONE_COS && now < until && !disabled {
                 // In reverse the pedals swap: brake drives backwards, throttle brakes.
                 let (throttle, brake) = reverse_pedals(v, 1.0, SWING_REVERSE_MAX_MPS);
-                return Some(VehicleInput {
+                return VehicleInput {
                     steer,
                     throttle,
                     brake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
@@ -1369,14 +1467,14 @@ impl PoliceSystem {
             && (target_head_on || self.traffic_closing(i, chasing, true))
         {
             let (throttle, brake, handbrake) = hold_pedals(v);
-            return Some(VehicleInput {
+            return VehicleInput {
                 throttle,
                 brake,
                 handbrake,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         let u = &mut self.units[i];
         // Lights on only (pursuit, intercept, response): a patrol turns round like traffic.
@@ -1417,12 +1515,12 @@ impl PoliceSystem {
             } else {
                 stuck::SWING_COOLDOWN_S
             });
-            return Some(VehicleInput {
+            return VehicleInput {
                 brake: 0.8,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         if swing_wanted && (v >= stuck::UTURN_MIN_MPS || fwd_room) {
             // Still rolling, or standing with room for the turning circle: U-turn forward, full
@@ -1439,14 +1537,14 @@ impl PoliceSystem {
             };
             u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
-            return Some(VehicleInput {
+            return VehicleInput {
                 steer,
                 brake: 0.5,
                 handbrake: 1.0,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         if swing_wanted && back_room && self.room_behind(i, 6.0) {
             // Reversing with right lock swings the nose left, and the other way round.
@@ -1459,13 +1557,13 @@ impl PoliceSystem {
             };
             u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
-            return Some(VehicleInput {
+            return VehicleInput {
                 steer,
                 brake: 1.0,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         let u = &mut self.units[i];
         // Un-sticking ([`stuck`]): back out first; otherwise watch for no progress.
@@ -1480,14 +1578,14 @@ impl PoliceSystem {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
                 let (throttle, brake) = reverse_pedals(v, 0.6, REVERSE_MAX_MPS);
-                return Some(VehicleInput {
+                return VehicleInput {
                     steer,
                     throttle,
                     brake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.slow_s = 0.0;
@@ -1506,14 +1604,14 @@ impl PoliceSystem {
                 });
             if waiting {
                 let (throttle, brake, handbrake) = hold_pedals(v);
-                return Some(VehicleInput {
+                return VehicleInput {
                     throttle,
                     brake,
                     handbrake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             self.units[i].unstick.give_way_to = None;
         }
@@ -1580,13 +1678,13 @@ impl PoliceSystem {
                 steer,
             };
             self.stats.give_ways += 1;
-            return Some(VehicleInput {
+            return VehicleInput {
                 steer,
                 brake: 1.0,
                 siren: siren_out,
                 headlights: true,
                 ..Default::default()
-            });
+            };
         }
         let u = &mut self.units[i];
         // Push-through (row 61): with lights on, blocked by a stopped civilian or parked car
@@ -1605,14 +1703,14 @@ impl PoliceSystem {
                 let steer = ctl.steer(pos, heading, [tgt[0], tgt[1], 0.0]);
                 let acc = (av.push_mps - v).clamp(-brake, accel);
                 let (throttle, brake) = ctl.pedals(v, acc, dt, false);
-                return Some(VehicleInput {
+                return VehicleInput {
                     steer,
                     throttle,
                     brake,
                     siren: siren_out,
                     headlights: true,
                     ..Default::default()
-                });
+                };
             }
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.push_ready = now.plus(av.push_cooldown_s);
@@ -1701,7 +1799,9 @@ impl PoliceSystem {
             throttle = 0.0;
             (brake, handbrake) = standstill_hold(v, brake.max(1.0));
         }
-        Some(VehicleInput {
+        // The pro driver picks up from here when the lights go on.
+        self.units[i].pro = None;
+        VehicleInput {
             steer,
             throttle,
             brake,
@@ -1709,6 +1809,32 @@ impl PoliceSystem {
             siren: siren_out,
             headlights: true,
             ..Default::default()
+        }
+    }
+
+    /// Whether another vehicle is close ahead of unit `i` near its road (within
+    /// [`pro::ProParams::traffic_clear_m`] ahead and a road width either side): the racing line
+    /// then gives way to the lane. The unit's own car and the target it is allowed to touch
+    /// (PIT, box-in) do not count.
+    fn traffic_near_line(&self, i: usize) -> bool {
+        let u = &self.units[i];
+        let range = self.cfg.pursuit.pro.traffic_clear_m;
+        let ignore = match (&u.assignment, u.tactic) {
+            (Assignment::Pursue { target }, Tactic::Pit | Tactic::BoxIn(_)) => Some(*target),
+            _ => None,
+        };
+        let f = u.body.heading;
+        let r = [f[1], -f[0]];
+        self.obstacles.iter().any(|o| {
+            if (o.entity.is_some() && o.entity == u.entity)
+                || o.unit == Some(u.id)
+                || (ignore.is_some() && o.entity == ignore)
+            {
+                return false;
+            }
+            let d = graph::sub(o.pos, u.body.pos);
+            let ahead = graph::dot(d, f);
+            ahead > -3.0 && ahead < range && graph::dot(d, r).abs() < 9.0
         })
     }
 
