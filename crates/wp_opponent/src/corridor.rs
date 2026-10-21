@@ -33,6 +33,9 @@ pub struct CorridorOptions {
     pub opposing: OpposingLanes,
     /// Extra width kept clear of every kerb, m.
     pub kerb_margin_m: f32,
+    /// Widest the corridor may be either side of the route's lane line, m (a judged race's
+    /// corridor: leaving it disqualifies). `None`: the road decides.
+    pub max_half_width_m: Option<f32>,
 }
 
 impl Default for CorridorOptions {
@@ -40,6 +43,7 @@ impl Default for CorridorOptions {
         Self {
             opposing: OpposingLanes::Never,
             kerb_margin_m: 0.3,
+            max_half_width_m: None,
         }
     }
 }
@@ -296,14 +300,15 @@ impl Corridor {
                 p.4 = eb.2 + (ea.2 - eb.2) * t;
             }
         }
+        let cap = |w: f32| opts.max_half_width_m.map_or(w, |m| w.min(m.max(0.5)));
         let samples: Vec<CorridorSample> = pts
             .into_iter()
             .map(|(pos, tangent, l, lp, r, j)| CorridorSample {
                 pos,
                 tangent,
-                left_m: l,
-                left_pass_m: lp,
-                right_m: r,
+                left_m: cap(l),
+                left_pass_m: cap(lp),
+                right_m: cap(r),
                 junction: j,
             })
             .collect();
@@ -495,6 +500,32 @@ impl Corridor {
             s,
             n: geom::dot(d, c.normal()),
             index: k,
+        }
+    }
+
+    /// [`Corridor::project`], except that on an open course a point before the start or past
+    /// the end keeps its distance beyond it along the end tangent (`s` < 0 or > `length_m`)
+    /// instead of landing on it. Cars on a grid behind the start line, or behind a flight
+    /// route that starts at the racer, are behind one another, not level.
+    pub fn project_unclamped(&self, p: V2, hint: Option<usize>, window: usize) -> CorridorPos {
+        let mut cp = self.project(p, hint, window);
+        cp.s = self.unclamped_s(p, &cp);
+        cp
+    }
+
+    /// The arc length of `p` (projected as `cp`) without the clamp at the ends of an open
+    /// course; `cp.s` on circuits and inside the course.
+    pub fn unclamped_s(&self, p: V2, cp: &CorridorPos) -> f32 {
+        if self.closed {
+            return cp.s;
+        }
+        let c = &self.samples[cp.index];
+        let along = geom::dot(geom::sub(p, geom::xy(c.pos)), c.tangent);
+        let s = cp.index as f32 * CORRIDOR_STEP_M + along;
+        if s < 0.0 || s > self.length_m {
+            s
+        } else {
+            cp.s
         }
     }
 

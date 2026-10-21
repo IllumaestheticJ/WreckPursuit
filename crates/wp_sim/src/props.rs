@@ -39,7 +39,7 @@ impl Mover {
 }
 
 /// The prop bodies and the spatial index used to wake them.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Props {
     pub(crate) bodies: Vec<RigidBodyHandle>,
     /// Bounding-sphere radius per prop, m.
@@ -84,6 +84,11 @@ impl Props {
     /// Number of props currently simulated as dynamic bodies.
     pub fn active_count(&self) -> usize {
         self.active.len()
+    }
+
+    /// Indices of the props currently simulated as dynamic bodies, ascending.
+    pub fn active(&self) -> impl Iterator<Item = usize> + '_ {
+        self.active.iter().map(|i| *i as usize)
     }
 
     /// Wake props that a mover may reach before the next tick; put back to sleep (fixed) the

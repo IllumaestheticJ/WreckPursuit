@@ -17,6 +17,7 @@
 #![warn(missing_docs)]
 
 pub mod builder;
+pub mod crumple;
 pub mod mechanical;
 pub mod mesh;
 pub mod profile;

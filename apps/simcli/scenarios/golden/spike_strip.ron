@@ -1,25 +1,33 @@
-// Golden "feel" case: spike strip. A racer at 30 m/s with police present; a police unit lays a
-// strip ahead (prompt 06), front tires deflate and the car must stay controllable while
-// slowing. Until police tools exist only the run itself is checked.
+// Golden "feel" case: spike strip. A sedan at 25 m/s runs over a police spike strip laid
+// across its path 50 m ahead (`spikes_at`: wp_police's strip, placed directly so the test does
+// not depend on dispatch AI), then brakes hard at 3 s. wp_police detects each wheel crossing
+// the strip; the punctures go into the vehicle's handling (`tire_puncture`: 30 % smaller
+// rolling radius, half the grip), so the flat tyres stop the car later. The same run without
+// spikes is at 6.0 m/s at 5 s and stops at 5.65 s; spiked it is at 8.2 m/s and stops at 6.23 s.
 (
     name: "golden_spike_strip",
     seed: 105,
     mode: Arcade,
-    assists: keyboard,
-    police_presence: 1.0,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: spikes_at(target: "racer", pos: (0.0, 50.0), dir: (0.0, 1.0)))],
     entities: [
-        (id: "racer", car: "debug_sedan", speed_mps: 30.0, driver: cruise(target_mps: 30.0, until_s: 6.0)),
-        (id: "police", car: "debug_coupe", pos: (4.0, 150.0, 0.0), inputs: [(t_s: 1.0, input: (siren: true, tool_use: 1))]),
+        (
+            id: "racer",
+            car: "debug_sedan",
+            speed_mps: 25.0,
+            driver: cruise(target_mps: 25.0, until_s: 3.0),
+            inputs: [(t_s: 3.0, input: (brake: 1.0))],
+        ),
     ],
-    duration_s: 9.0,
+    duration_s: 8.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "racer", t_s: 4.0, min: 27.0, max: 32.0),
-    ],
-    expect_pending: [
-        // wp_police::events::kind::SPIKES_PLACED.
-        police_event_before(kind: 9, t_s: 3.0),
-        event_count(event: "ComponentDamaged", entity: "racer", min: 1, max: 100),
-        metric(entity: "racer", name: "final_speed_mps", min: 0.0, max: 20.0),
+        world_metric(name: "spike_strips_max", min: 1.0, max: 5.0),
+        // wp_police::events::kind::SPIKE_HIT.
+        police_event_before(kind: 11, t_s: 3.0),
+        metric(entity: "racer", name: "spiked_wheels", min: 4.0, max: 4.0),
+        metric(entity: "racer", name: "max_spike_puncture", min: 0.9, max: 1.0),
+        // Half the grip: still well above the unspiked 6.0 m/s two seconds into the stop.
+        speed_at(entity: "racer", t_s: 5.0, min: 7.0, max: 11.0),
     ],
 )

@@ -83,7 +83,7 @@ Peak **103 kW @ 7000 rpm**, **152 N·m @ 6000 rpm**. Idle 800 / redline 7600 / l
 
 ## Drivetrain
 
-5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 210 N·m. Shift time 0.25 s.
+5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 210 N·m. Shift time 0.45 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -126,7 +126,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1273 N·m/wheel (capacity 1.45×), rear needs 297 N·m/wheel (capacity 2.19×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 432 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.601** → delivered 1850 N·m front / 432 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 432 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.601** → delivered 1850 N·m front / 432 N·m rear per wheel at full pedal. Handbrake 900 N·m per rear wheel.
 
 ## Steering
 
@@ -138,8 +138,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 9.4 s | 206 km/h | 37.9 m | 0.86 g | — |
-| estimate | 8.0 s | 213 km/h | 37.4 m | 0.91 g | 474 |
+| sim | 9.8 s | 206 km/h | 38.6 m | 0.87 g | — |
+| estimate | 8.2 s | 213 km/h | 37.4 m | 0.91 g | 468 |
 
 ## Damage lattice (`data/lattices/vireo_xs.json`)
 

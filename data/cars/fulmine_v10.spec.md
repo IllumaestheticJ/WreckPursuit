@@ -84,7 +84,7 @@ Peak **449 kW @ 8250 rpm**, **560 N·m @ 6500 rpm**. Idle 1000 / redline 8500 / 
 
 ## Drivetrain
 
-7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD. Layout **AWD, 30 % front**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.45, coast ramp 0.30. Clutch capacity 1.40 × peak torque = 780 N·m. Shift time 0.06 s.
+7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD. Layout **AWD, 30 % front**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.45, coast ramp 0.30. Clutch capacity 1.40 × peak torque = 780 N·m. Shift time 0.18 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -131,7 +131,7 @@ ABS ceiling: caliper capacity 4390 / 2687 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1528 N·m/wheel (capacity 1.80×), rear needs 1174 N·m/wheel (capacity 1.43×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 2113 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2750 N·m front / 1680 N·m rear per wheel at full pedal. Handbrake 1340 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 2113 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2750 N·m front / 1680 N·m rear per wheel at full pedal. Handbrake 2420 N·m per rear wheel.
 
 ## Steering
 
@@ -143,8 +143,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 3.6 s | 337 km/h | 34.9 m | 0.95 g | — |
-| estimate | 3.5 s | 336 km/h | 34.7 m | 0.98 g | 832 |
+| sim | 3.7 s | 337 km/h | 35.4 m | 0.99 g | — |
+| estimate | 3.6 s | 336 km/h | 34.7 m | 0.98 g | 816 |
 
 ## Damage lattice (`data/lattices/fulmine_v10.json`)
 

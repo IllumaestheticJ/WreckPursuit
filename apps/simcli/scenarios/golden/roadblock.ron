@@ -1,0 +1,23 @@
+// Golden "feel" case: police roadblock. A sedan at 56 km/h (15.56 m/s) drives into a police
+// roadblock placed across its path 40 m ahead (`roadblock_at`: wp_police's barrier layout and
+// masses, placed directly so the test does not depend on dispatch AI). The barriers are
+// physical boxes (`wp_sim` police tools): the car hits them, shoves them and takes damage.
+(
+    name: "golden_roadblock",
+    seed: 109,
+    mode: Arcade,
+    assists: ai,
+    police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (0.0, 40.0), dir: (0.0, 1.0)))],
+    entities: [
+        (id: "car", car: "debug_sedan", speed_mps: 15.56, driver: cruise(target_mps: 15.56, until_s: 2.0)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        world_metric(name: "roadblock_barriers_max", min: 1.0, max: 20.0),
+        world_metric(name: "barrier_displaced_max_m", min: 0.3, max: 50.0),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+        crush_depth(entity: "car", min: 0.02, max: 1.0),
+        metric(entity: "car", name: "final_health", min: 0.0, max: 0.99),
+    ],
+)

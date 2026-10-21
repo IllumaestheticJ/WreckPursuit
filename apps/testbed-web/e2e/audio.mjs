@@ -96,7 +96,8 @@ await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true
 c = await counts();
 check(sum(c, "impact/") > before, `head-on crash played impact sounds (${sum(c, "impact/") - before})`);
 st = await stats();
-check(st.looped + st.one_shots <= 40, `voice count within max_voices (${st.looped}+${st.one_shots})`);
+const MAX_VOICES = (await page.evaluate(() => fetch("data/audio/audio_config.json").then((r) => r.json()))).max_voices;
+check(st.looped + st.one_shots <= MAX_VOICES, `voice count within max_voices (${st.looped}+${st.one_shots} of ${MAX_VOICES})`);
 console.log("cue counts:", JSON.stringify(c));
 
 // 5. Cost with 24 cars (informational; recorded in docs/integration/audio.md).
@@ -112,7 +113,78 @@ const fps = ((await page.evaluate(() => window.__wpAudio.frames)) - frames0) / 6
 console.log(`      24 cars: ${plays} plays in 6 s at ${fps.toFixed(1)} fps (headless, software GL)`);
 const perf = await page.evaluate(() => ({ ms: window.__wpAudio.frameMs, dir: window.__wpAudio.directorMs, app: window.__wpAudio.applyMs, st: window.__wpAudio.stats() }));
 console.log(`      24 cars: audio frame ${perf.ms.toFixed(3)} ms (director ${perf.dir.toFixed(3)} ms, apply ${perf.app.toFixed(3)} ms), voices ${perf.st.looped}+${perf.st.one_shots}, culled ${perf.st.culled}`);
-check(perf.st.looped + perf.st.one_shots <= 40, "24-car bench stays within max_voices");
+check(perf.st.looped + perf.st.one_shots <= MAX_VOICES, `24-car bench stays within max_voices (${perf.st.looped}+${perf.st.one_shots} of ${MAX_VOICES})`);
+
+// 6. Engine voices keep following slow rpm changes (playtest #19: from 2nd gear the note
+// froze because updates < 0.4 %/frame were dropped) and two procedural layers crossfading
+// keep their level (they used to cancel by start phase). Offline render through the real
+// voice pool: firing frequency 120 -> 160 Hz over 5 s (0.1 %/frame, a 4th-gear pull) while
+// the low layer hands over to the high one.
+const eng = await page.evaluate(async () => {
+  const { AudioMixer, VoicePool } = await import("/src/audio/voices.ts");
+  const SR = 48000;
+  const ctx = new OfflineAudioContext(2, SR * 6, SR);
+  const cue = (bright) => ({
+    source: { Synth: { synth: "engine", params: { h1: 0.5, h2: 1, h3: 0.5, h4: 0.3, noise: 0, drive: 0.35, bright, off: 0 } } },
+    gain: 1,
+    looped: true,
+  });
+  const lib = {
+    config: { max_voices: 40, bus_max_voices: {} },
+    packs: { t: { id: "t", kind: "Engine", description: "", cues: { "engine/low_on": cue(0.6), "engine/high_on": cue(0.6) } } },
+  };
+  const mixer = new AudioMixer(ctx);
+  const pool = new VoicePool(ctx, mixer, lib);
+  const lo = { entity: 7, slot: 0x101 };
+  const hi = { entity: 7, slot: 0x102 };
+  const params = (gain, f) => ({ gain, pitch: 1, freq_hz: f, load: 1, phase: 0, lowpass_hz: 18000, doppler: 1, pos: [0, 4, 0] });
+  const q = 128 / SR;
+  for (let i = 0; i <= 330; i++) {
+    const t = Math.round(i / 60 / q) * q;
+    const u = Math.min(i / 300, 1);
+    const f = 120 + 40 * u;
+    const gl = 0.5 * Math.cos((u * Math.PI) / 2);
+    const gh = 0.5 * Math.sin((u * Math.PI) / 2);
+    const apply = () => {
+      if (i === 0) {
+        pool.play(lo, "Engine", "t", "engine/low_on", true, params(gl, f), {});
+        pool.play(hi, "Engine", "t", "engine/high_on", true, params(gh, f), {});
+      } else {
+        pool.set(lo, params(gl, f));
+        pool.set(hi, params(gh, f));
+      }
+      pool.collect();
+    };
+    if (i === 0) apply();
+    else ctx.suspend(t).then(() => (apply(), ctx.resume()));
+  }
+  const x = (await ctx.startRendering()).getChannelData(0);
+  const win = (t0) => x.subarray(Math.round(t0 * SR), Math.round((t0 + 0.4) * SR));
+  const rms = (s) => Math.sqrt(s.reduce((a, v) => a + v * v, 0) / s.length);
+  // Goertzel scan for the strongest component between 100 and 200 Hz.
+  const peak = (s) => {
+    let best = 0;
+    let bf = 0;
+    for (let fq = 100; fq <= 200; fq += 0.5) {
+      const w = (2 * Math.PI * fq) / SR;
+      const k = 2 * Math.cos(w);
+      let s1 = 0;
+      let s2 = 0;
+      for (const v of s) {
+        const s0 = v + k * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      const p = s1 * s1 + s2 * s2 - k * s1 * s2;
+      if (p > best) [best, bf] = [p, fq];
+    }
+    return bf;
+  };
+  return { f: peak(win(5.4)), levels: [0.3, 2.3, 2.6, 5.4].map((t) => 20 * Math.log10(rms(win(t)))) };
+});
+check(Math.abs(eng.f - 160) <= 2, `engine note follows a slow rpm rise (${eng.f} Hz, want 160)`);
+const spread = Math.max(...eng.levels) - Math.min(...eng.levels);
+check(spread <= 2, `engine layers crossfade at a steady level (spread ${spread.toFixed(2)} dB: ${eng.levels.map((l) => l.toFixed(1)).join(", ")})`);
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 5).join(" | ") : ""}`);
 await browser.close();

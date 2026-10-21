@@ -130,6 +130,7 @@ fn impossible_input_timing_is_rejected() {
         ack_snapshot_tick: 0,
         first_tick: tick + 480,
         inputs: vec![full; 8],
+        missing: Vec::new(),
     };
     h.server.receive(conn, &far.encode());
     assert_eq!(h.server.stats().inputs_rejected, 8);
@@ -139,6 +140,7 @@ fn impossible_input_timing_is_rejected() {
             ack_snapshot_tick: 0,
             first_tick: tick + k * 8,
             inputs: vec![full; 8],
+            missing: Vec::new(),
         };
         h.server.receive(conn, &msg.encode());
     }
@@ -149,6 +151,7 @@ fn impossible_input_timing_is_rejected() {
         ack_snapshot_tick: 0,
         first_tick: tick.saturating_sub(10),
         inputs: vec![full; 5],
+        missing: Vec::new(),
     };
     let before = h.server.stats().inputs_rejected;
     h.server.receive(conn, &past.encode());

@@ -1,0 +1,28 @@
+// Control twin of weather/aquaplane_puddle.ron: the same car, speed, wet road and steer, no
+// flooded stretch. The tires keep their (wet) grip, so the car turns.
+(
+    name: "weather_aquaplane_control",
+    seed: 1,
+    assists: ai,
+    weather: (
+        kind: LightRain,
+        intensity: 0.5,
+        water_mm: 0.6,
+    ),
+    entities: [(
+        id: "car",
+        car: "debug_sedan",
+        speed_mps: 33.0,
+        inputs: [
+            (t_s: 0.0, input: (throttle: 0.35)),
+            (t_s: 0.9, input: (throttle: 0.35, steer: -0.35)),
+            (t_s: 1.9, input: (throttle: 0.35)),
+        ],
+    )],
+    duration_s: 3.0,
+    expect: [
+        // Measured 2026-10-19: 0.37 rad/s (the flooded twin: 0.21).
+        metric(name: "max_yaw_rate_rps", min: 0.30, max: 0.60),
+        speed_at(t_s: 2.9, min: 28.0, max: 34.0),
+    ],
+)

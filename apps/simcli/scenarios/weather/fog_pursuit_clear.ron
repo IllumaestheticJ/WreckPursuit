@@ -1,0 +1,33 @@
+// Clear twin of weather/fog_pursuit.ron: the golden city chase layout at noon (day sight:
+// line of sight 260 m, recognition 250 m in 0.3 s). A known speeder (heat 15 = L1) drives
+// north up the x = 55 collector toward the patrols; in clear air a unit recognises it from
+// far away. `apps/simcli/tests/scenarios.rs::fog_delays_the_pursuit` checks that the fog twin
+// starts its pursuit later than this file does.
+(
+    name: "weather_fog_pursuit_clear",
+    seed: 108,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    parked_cars: false,
+    assists: keyboard,
+    weather: (kind: Clear, intensity: 0.3),
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            pos: (59.75, -175.0, 0.0),
+            speed_mps: 16.5,
+            police_heat: 15.0,
+            driver: cruise(target_mps: 16.5),
+        ),
+    ],
+    duration_s: 20.0,
+    hash_every: 24,
+    expect: [
+        speed_at(entity: "racer", t_s: 2.0, min: 15.0, max: 18.0),
+        // Measured 2026-10-19: first pursuit at 0.30 s (fog twin: 1.90 s).
+        pursuit_started_before(t_s: 1.0),
+    ],
+)

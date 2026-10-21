@@ -52,6 +52,28 @@ def rr(x: float, step: float) -> float:
     return float(round(x / step) * step)
 
 
+# Round 12b ride rules (A): damper scale on the derived rates, free travel at rest, handbrake.
+RIDE_BUMP_SCALE = 1.2
+RIDE_REBOUND_SCALE = 1.6
+HANDBRAKE_LOCK_MARGIN = 1.5
+
+
+def handbrake_nm(caliper_nm: float, m: float, front_frac: float, r_rear: float) -> float:
+    """Handbrake torque per rear wheel: the caliper figure, raised to `HANDBRAKE_LOCK_MARGIN` ×
+    the static rear lock torque (rear corner load × rolling radius) so a pull locks the rears
+    (A, rows 56 / 72)."""
+    lock = m * (1.0 - front_frac) / 2.0 * G * r_rear
+    return max(rr(caliper_nm, 10), rr(HANDBRAKE_LOCK_MARGIN * lock, 10))
+
+
+def preload_for(s: dict, front: bool) -> float:
+    """Strut preload, m: one value for both axles or a `(front, rear)` pair. Cars that sat on
+    their bump stops carry A's measured preload (>= 45 % of the travel free at rest, checked by
+    `wp_vehicle/tests/ride.rs`; measure with `cargo run --release -p wp_vehicle --example ride all`)."""
+    p = s["preload"]
+    return p if isinstance(p, (int, float)) else p[0 if front else 1]
+
+
 def tire_dims(code: str, truck: bool):
     """ISO size code 'W/AR Rrim' → (section width m, unloaded radius m, loaded radius m)."""
     m = re.fullmatch(r"(\d+)/(\d+)R(\d+)", code)
@@ -233,7 +255,7 @@ def derive(c: dict) -> tuple[dict, dict]:
                        raw_f=tbf, raw_r=tbr, k_abs=k_abs, tire_mu=tire_mu,
                        lock_f=lock_f, lock_r=lock_r, rear_ideal=rear_ideal,
                        rear_delivered=rear_delivered,
-                       hb=rr(max(600.0, b["handbrake_frac"] * tbr), 10))
+                       hb=handbrake_nm(max(600.0, b["handbrake_frac"] * tbr), r(m, 1), c["front_frac"], r(tl_r)))
 
     # Steering: lock from the kerb-to-kerb turning circle.
     st = c["steer"]
@@ -269,13 +291,18 @@ def derive(c: dict) -> tuple[dict, dict]:
             "caster_rad": r(a["caster_deg"] * DEG, 4) if front else 0.0,
         }
 
-    def corner(k, cb, travel, arb):
+    def corner(k, cb, travel, arb, front):
+        # Round 12b ride rules (A, `docs/integration/cars.md` "Round 12b (A)"): the derived
+        # dampers are scaled bump × 1.2 / rebound × 1.6 (rebound ≈ 2 × bump).
+        bump = rr(r(cb, 0) * RIDE_BUMP_SCALE, 10)
+        rebound = rr(rr(1.5 * cb, 10) * RIDE_REBOUND_SCALE, 10)
+        preload = preload_for(s, front)
         return {
             "spring_n_per_m": r(k, 0),
-            "damper_bump_ns_per_m": r(cb, 0),
-            "damper_rebound_ns_per_m": r(rr(1.5 * cb, 10), 0),
+            "damper_bump_ns_per_m": r(bump, 0),
+            "damper_rebound_ns_per_m": r(rebound, 0),
             "travel_m": r(travel),
-            "preload_m": r(s["preload"]),
+            "preload_m": r(preload),
             "arb_n_per_m": r(arb, 0),
             "bump_stop_n_per_m": r(s["bump_stop"], 0),
         }
@@ -314,6 +341,8 @@ def derive(c: dict) -> tuple[dict, dict]:
             "diff_rear": diff_json(c["trans"]["diff_r"]),
             "clutch_max_nm": r(d["engine"]["clutch"], 0),
             "shift_time_s": r(c["trans"]["shift"], 3),
+            # Optional: only cars with a non-default (e.g. worn) gearbox state it; `None` = 0.85.
+            **({"efficiency": r(c["trans"]["efficiency"], 3)} if c["trans"].get("efficiency") else {}),
             **({"torque_converter": {
                 "stall_rpm": r(c["trans"]["torque_converter"]["stall_rpm"], 0),
                 "stall_torque_ratio": r(c["trans"]["torque_converter"]["ratio"], 2),
@@ -327,10 +356,10 @@ def derive(c: dict) -> tuple[dict, dict]:
             wheel(tr / 2, -L / 2, tl_r, tw_r, un_r, False),
         ],
         "suspension": [
-            corner(sd["k_f"], sd["cb_f"], s["travel"][0], sd["arb_f"]),
-            corner(sd["k_f"], sd["cb_f"], s["travel"][0], sd["arb_f"]),
-            corner(sd["k_r"], sd["cb_r"], s["travel"][1], sd["arb_r"]),
-            corner(sd["k_r"], sd["cb_r"], s["travel"][1], sd["arb_r"]),
+            corner(sd["k_f"], sd["cb_f"], s["travel"][0], sd["arb_f"], True),
+            corner(sd["k_f"], sd["cb_f"], s["travel"][0], sd["arb_f"], True),
+            corner(sd["k_r"], sd["cb_r"], s["travel"][1], sd["arb_r"], False),
+            corner(sd["k_r"], sd["cb_r"], s["travel"][1], sd["arb_r"], False),
         ],
         "brakes": {
             "max_torque_front_nm": r(d["brakes"]["tf"], 0),
@@ -871,6 +900,8 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
                 f"{tr['torque_converter']['ratio']:.1f}× at stall, couples 1:1 from "
                 f"{tr['torque_converter']['coupling_rpm']} rpm (class-typical for the gearbox). "
                 if tr.get("torque_converter") else "")
+             + (f"Drivetrain efficiency {tr['efficiency']:.2f} (default 0.85): "
+                f"{tr['efficiency_why']}. " if tr.get("efficiency") else "")
              + f"Clutch capacity "
              f"{tr['clutch_factor']:.2f} × peak torque = {de['clutch']:.0f} N·m. Shift time "
              f"{tr['shift']:.2f} s.\n")

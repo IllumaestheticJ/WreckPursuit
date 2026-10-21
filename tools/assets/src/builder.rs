@@ -823,6 +823,7 @@ impl Builder {
                 indices: keep,
                 skin_nodes: Vec::new(),
                 skin_weights: Vec::new(),
+                fold: None,
             });
         }
         out

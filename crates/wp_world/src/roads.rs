@@ -80,6 +80,29 @@ pub struct RoadGraphView {
     pub occluders: Vec<OccluderBox>,
 }
 
+/// Non-parking lanes grouped by source road, in road order (roads without any are empty).
+fn lanes_by_road(net: &crate::network::RoadNetwork) -> Vec<Vec<usize>> {
+    let n_roads = net.lanes.iter().map(|l| l.road + 1).max().unwrap_or(0) as usize;
+    let mut by_road: Vec<Vec<usize>> = vec![Vec::new(); n_roads];
+    for (i, l) in net.lanes.iter().enumerate() {
+        if l.kind != LaneKind::Parking {
+            by_road[l.road as usize].push(i);
+        }
+    }
+    by_road
+}
+
+/// Source road index (`Lane::road`) of every [`RoadGraphView`] edge, in edge order (=
+/// `RoadEdgeId`). Used to name edges after their road (police radio callouts).
+pub fn edge_roads(map: &CityMap) -> Vec<u32> {
+    lanes_by_road(&map.net)
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.is_empty())
+        .map(|(r, _)| r as u32)
+        .collect()
+}
+
 impl RoadGraphView {
     /// Build the view from a city map.
     pub fn from_map(map: &CityMap) -> Self {
@@ -98,14 +121,7 @@ impl RoadGraphView {
                 }),
             })
             .collect();
-        // Group drivable lanes by source road, in road order.
-        let n_roads = net.lanes.iter().map(|l| l.road + 1).max().unwrap_or(0) as usize;
-        let mut by_road: Vec<Vec<usize>> = vec![Vec::new(); n_roads];
-        for (i, l) in net.lanes.iter().enumerate() {
-            if l.kind != LaneKind::Parking {
-                by_road[l.road as usize].push(i);
-            }
-        }
+        let by_road = lanes_by_road(net);
         let mut edges = Vec::new();
         for lanes in by_road.iter().filter(|l| !l.is_empty()) {
             let first = &net.lanes[lanes[0]];

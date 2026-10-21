@@ -81,13 +81,18 @@ fn city_sim(
     (WpSim::with_city(config, cars.clone(), city), cars, modes)
 }
 
-/// Quantised states of every AI police car, exactly as the server sends them.
+/// Quantised states of every AI police car, exactly as the server sends them (player cop
+/// seats are `wp_police` units too; they are left out).
 fn police_states(sim: &WpSim) -> BTreeMap<u32, QVehicle> {
+    let units = sim.sim().police().units();
     let police: BTreeSet<EntityId> = sim
         .sim()
         .vehicles()
         .iter()
-        .filter(|v| v.police_unit.is_some())
+        .filter(|v| {
+            v.police_unit
+                .is_some_and(|u| units.iter().any(|x| x.id == u && x.player.is_none()))
+        })
         .map(|v| v.id)
         .collect();
     sim.vehicles()

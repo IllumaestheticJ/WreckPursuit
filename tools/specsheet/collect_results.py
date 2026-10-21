@@ -147,6 +147,21 @@ def check(car: dict, rows: dict) -> dict:
     return out
 
 
+def run_quarter_mile(results: dict) -> None:
+    """Quarter-mile time and trap speed through the full sim (`simcli`, auto gears, TCS on),
+    via `pursuit_probe.accel`. Includes every shift at the car's `shift_time_s`."""
+    import concurrent.futures as cf
+    import tempfile
+
+    import pursuit_probe
+
+    ids = [c["id"] for c in CARS]
+    with tempfile.TemporaryDirectory() as td, cf.ThreadPoolExecutor(os.cpu_count() or 4) as ex:
+        for cid, r in zip(ids, ex.map(lambda c: pursuit_probe.accel(c, td), ids)):
+            results.setdefault(cid, {})["qm_s"] = round(r["qm_s"], 2) if r["qm_s"] else None
+            results[cid]["qm_kmh"] = round(r["qm_kmh"], 1) if r["qm_kmh"] else None
+
+
 def main() -> int:
     for exe in (METRICS, BARRIER, VMAX):
         if not os.path.exists(exe):
@@ -154,6 +169,7 @@ def main() -> int:
                      "-p wp_damage --bin damage-barrier -p ram-probe")
     results = run_metrics()
     run_vmax(results)
+    run_quarter_mile(results)
     for c in CARS:
         results.setdefault(c["id"], {})["barrier"] = check(c, run_barrier(c["id"]))
     with open(os.path.join(HERE, "validation_results.json"), "w") as f:

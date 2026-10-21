@@ -49,6 +49,23 @@ impl CarCapability {
         }
     }
 
+    /// The car's limits for racing: the pre-measured row of [`crate::capability_table`] when
+    /// the car matches it (same id and fingerprint), otherwise [`CarCapability::measure`].
+    /// Cheap for every stock car (no rig runs), always the car's real pace. Use this in race
+    /// glue; `geometry_only` is for unit tests only.
+    pub fn for_car(car: &LoadedCar) -> Self {
+        match crate::capability_table::lookup(car) {
+            Some(row) => Self {
+                max_lat_g: row.max_lat_g,
+                brake_g: row.brake_g,
+                accel_mps2: row.accel_mps2,
+                top_speed_mps: row.top_speed_mps,
+                ..Self::geometry_only(car)
+            },
+            None => Self::measure(car),
+        }
+    }
+
     /// Only the geometric fields from the car file, with typical street-car limits (0.85 g
     /// lateral, 0.95 g braking, 4 m/s², 55 m/s). For unit tests and quick tools.
     pub fn geometry_only(car: &LoadedCar) -> Self {

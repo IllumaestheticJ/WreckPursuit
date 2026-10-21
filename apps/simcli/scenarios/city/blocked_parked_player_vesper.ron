@@ -1,0 +1,36 @@
+// Playtest row 32 on Port Vesper v2: a player car parked across one lane of a two-lane street
+// south of downtown (z ≈ 2.4 m). Civilians get around it (oncoming-lane pass where the road
+// ahead is visible, else a turn-around) without touching it or each other.
+(
+    name: "city_blocked_parked_player_vesper",
+    seed: 7,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 4.0,
+    parked_cars: false,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "parked",
+            car: "debug_sedan",
+            // Lane 446 centre at (-1.75, -473.43), heading -Y; 0.3 m towards the kerb, turned 90°.
+            pos: (-2.05, -473.43, 2.42),
+            yaw: -1.5708,
+            inputs: [(t_s: 0.0, input: (handbrake: 1.0))],
+        ),
+    ],
+    duration_s: 120.0,
+    // Measured (seeds 3/5/7/9/11: 0-1 passes, 1-2 turn-arounds; 0 collisions, 0 stuck, parked car
+    // untouched). The moving fraction is city-wide (red lights included): 0.45-0.64.
+    expect: [
+        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
+        world_metric(name: "traffic_go_arounds", min: 0.0, max: 100.0),
+        world_metric(name: "traffic_turnarounds", min: 1.0, max: 30.0),
+        world_metric(name: "traffic_stuck_recycled", min: 0.0, max: 3.0),
+        world_metric(name: "traffic_moving_frac_min", min: 0.4, max: 1.0),
+        metric(name: "final_health", min: 0.99, max: 1.0),
+        metric(name: "distance_m", min: 0.0, max: 0.5),
+    ],
+)

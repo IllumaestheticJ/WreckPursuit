@@ -19,7 +19,9 @@ Port Vesper v2 (hills, terrain): `gen-city --preset vesper_v2 [--seed 1] [--json
 the JSON dump only with `--json`).
 
 Greybox: one primitive per material (16-bit index chunks): `asphalt`, `highway_concrete`,
-`parking`, `bus_lane` (lane ribbons, banked like the road surface), `sidewalk` + `kerb`,
+`parking`, `bus_lane` (lane ribbons, banked like the road surface; junction discs from
+`wp_world::surface::junction_polygon`), `sidewalk` + `kerb` (exactly
+`wp_world::surface::sidewalk_mesh`, the triangles `wp_sim` collides with; vertices shared),
 `building` (prisms from `base_z_m`), `ground_<district>` (zone polygons on flat cities; on
 terrain cities a 10 m terrain mesh, each vertex the minimum of the fine heights around it so it
 never rises above a road, smooth normals), `rock`, `seabed`, `water` (sea plane at 0.25 m),
@@ -71,6 +73,13 @@ Covers `maxspeed`/`turn:lanes` parsing, US defaults, a synthetic signalised cros
 (lanes, speed, signal detection, one-way, building height, police POI, projection), ear-clipping
 triangulation and the GLB container layout. The greybox for `procedural_12x12` was also checked
 visually in Three.js (`GLTFLoader`).
+
+`tests/surface_match.rs` (playtest #20) compares the greybox with the `wp_sim` colliders:
+≈ 550 k (Port Vesper) / 615 k (grid) downward rays across every sidewalk-edged lane (road
+side, kerb line, sidewalk, beyond) and a 1 m grid around every junction. Wherever the top
+visual surface is paved or a sidewalk, physics must agree within 3 cm (16 cm right on the
+kerb line); where the player sees terrain, physics must not be lower. Before the fix
+294 k / 246 k samples disagreed (sidewalks 15–27 cm above their collider, metres on fills).
 
 ## Known gaps
 - **Not yet run on a real extract** (download hosts were unreachable from the build

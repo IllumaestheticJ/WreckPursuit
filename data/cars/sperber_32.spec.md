@@ -83,7 +83,7 @@ Peak **248 kW @ 7900 rpm**, **365 N·m @ 4900 rpm**. Idle 800 / redline 7900 / l
 
 ## Drivetrain
 
-6-speed manual, variable-locking clutch rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.50, coast ramp 0.40. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.22 s.
+6-speed manual, variable-locking clutch rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.50, coast ramp 0.40. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.42 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -129,7 +129,7 @@ ABS ceiling: caliper capacity 3266 / 1541 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1715 N·m/wheel (capacity 1.80×), rear needs 801 N·m/wheel (capacity 1.82×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1443 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.503** → delivered 3090 N·m front / 1443 N·m rear per wheel at full pedal. Handbrake 1230 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1443 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.503** → delivered 3090 N·m front / 1443 N·m rear per wheel at full pedal. Handbrake 1850 N·m per rear wheel.
 
 ## Steering
 
@@ -141,8 +141,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.1 s | 272 km/h | 37.1 m | 0.91 g | — |
-| estimate | 5.6 s | 279 km/h | 35.2 m | 0.99 g | 613 |
+| sim | 6.3 s | 272 km/h | 37.6 m | 0.95 g | — |
+| estimate | 5.8 s | 279 km/h | 35.2 m | 0.99 g | 602 |
 
 ## Damage lattice (`data/lattices/sperber_32.json`)
 

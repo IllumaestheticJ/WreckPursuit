@@ -73,7 +73,33 @@ fn main() {
     // Highway lanes (limit ≥ 24 m/s): long straights where cars actually cruise.
     let mut hw_ratios: Vec<f32> = Vec::new();
     let (mut signal_samples, mut view_samples) = (0usize, 0usize);
+    // `SIRENS=n`: n siren units at 15 m/s, each 30 m behind a different civilian, so traffic is
+    // yielding all the time (worst case for the siren reaction cost).
+    let sirens: usize = std::env::var("SIRENS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     for i in 0..ticks {
+        if sirens > 0 && i % 4 == 0 {
+            let units: Vec<wp_world::TrackedVehicle> = w
+                .agents()
+                .step_by(37)
+                .take(sirens)
+                .enumerate()
+                .map(|(k, a)| {
+                    let f = wp_world::geom::dir_of_yaw(a.yaw);
+                    wp_world::TrackedVehicle {
+                        entity: wp_contracts::EntityId(1000 + k as u32),
+                        pos: [a.pos[0] - 30.0 * f[0], a.pos[1] - 30.0 * f[1], a.pos[2]],
+                        vel: [15.0 * f[0], 15.0 * f[1], 0.0],
+                        forward: f,
+                        siren: true,
+                        player: false,
+                    }
+                })
+                .collect();
+            w.set_tracked_vehicles(&units);
+        }
         w.step(PHYSICS_DT, &mut ev);
         if i % 240 == 0 && i > 240 * 60 {
             for a in w.agents() {

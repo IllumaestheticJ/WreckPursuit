@@ -270,3 +270,136 @@ fn follow_without_traffic_is_unchanged() {
     assert_eq!(oa, ob);
     assert_eq!(oa, oc);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Manoeuvres (playtest row 32: turn around when blocked)
+// ---------------------------------------------------------------------------------------------
+
+use wp_world::manoeuvre::{
+    CarShape, ManoeuvreStatus, ReverseDriver, RoadCorridor, TurnDriver, TURN_DONE_COS,
+};
+
+/// Corners' worst lateral excess outside `[lo, hi]` for a body at `pos` facing `f`.
+fn body_excess(pos: [f32; 2], f: [f32; 2], lo: f32, hi: f32) -> f32 {
+    let r = geom::right_of(f);
+    let mut worst = 0.0f32;
+    for (a, b) in [(2.25, 0.95), (2.25, -0.95), (-2.25, 0.95), (-2.25, -0.95)] {
+        let x = pos[0] + f[0] * a + r[0] * b;
+        worst = worst.max(lo - x).max(x - hi);
+    }
+    worst
+}
+
+/// The real car turns around on a 1+1 street (7 m kerb to kerb) behind a stopped car, inside
+/// the kerbs and without touching the blocker.
+#[test]
+fn turn_driver_turns_a_real_car_around_on_a_two_lane_street() {
+    let car = sedan();
+    let mut rig = Rig::new(&car);
+    let assists = AssistProfile::ai();
+    let st0 = rig.vehicle.state();
+    let (p0, f0) = (geom::xy(st0.pos), wp_world::drive::forward_of(st0.rot));
+    assert!(geom::dot(f0, [0.0, 1.0]) > 0.99);
+    let road = RoadCorridor {
+        origin: p0,
+        dir: [0.0, 1.0],
+        lat_min: -5.25,
+        lat_max: 1.75,
+    };
+    let blocker = geom::Obb {
+        c: [p0[0], p0[1] + 2.25 + 7.0 + 2.25],
+        f: [0.0, 1.0],
+        hl: 2.25,
+        hw: 0.95,
+    };
+    let shape = CarShape::from_def(&car.def);
+    let mut drv = TurnDriver::new(shape, road, [0.0, -1.0], vec![blocker]);
+    let mut input = Default::default();
+    let mut status = ManoeuvreStatus::Running;
+    let mut worst_edge = 0.0f32;
+    let mut t_done = 0.0;
+    for i in 0..((60.0 / PHYSICS_DT) as usize) {
+        let st = rig.vehicle.state();
+        let (p, f) = (geom::xy(st.pos), wp_world::drive::forward_of(st.rot));
+        worst_edge = worst_edge.max(body_excess(
+            [p[0] - p0[0], p[1]],
+            f,
+            road.lat_min,
+            road.lat_max,
+        ));
+        let me = geom::Obb {
+            c: p,
+            f,
+            hl: 2.25,
+            hw: 0.95,
+        };
+        assert!(!geom::obb_overlap(&me, &blocker), "hit the blocker at {i}");
+        if i % 4 == 0 {
+            let (inp, s) = drv.step(&st, 4.0 * PHYSICS_DT);
+            input = inp;
+            status = s;
+            if s != ManoeuvreStatus::Running {
+                t_done = i as f32 * PHYSICS_DT;
+                break;
+            }
+        }
+        rig.step(&input, &assists);
+    }
+    let st = rig.vehicle.state();
+    let f = wp_world::drive::forward_of(st.rot);
+    println!(
+        "turn: {status:?} after {t_done:.1} s, {} legs, worst kerb excess {worst_edge:.2} m, end {:?}",
+        drv.legs_driven(),
+        st.pos
+    );
+    assert_eq!(status, ManoeuvreStatus::Done);
+    assert!(geom::dot(f, [0.0, -1.0]) >= TURN_DONE_COS);
+    assert!(worst_edge < 0.3, "left the street by {worst_edge} m");
+    assert!(t_done < 40.0);
+}
+
+/// The real car reverses 40 m down a straight lane and stops at the end.
+#[test]
+fn reverse_driver_backs_a_real_car_down_a_lane() {
+    let car = sedan();
+    let mut rig = Rig::new(&car);
+    let assists = AssistProfile::ai();
+    let st0 = rig.vehicle.state();
+    let p0 = geom::xy(st0.pos);
+    let shape = CarShape::from_def(&car.def);
+    // Rear-axle path straight back, then a slight kink to the right.
+    let rear0 = shape.rear(p0, [0.0, 1.0]);
+    let pts = [
+        [rear0[0], rear0[1], 0.0],
+        [rear0[0], rear0[1] - 30.0, 0.0],
+        [rear0[0] + 2.0, rear0[1] - 40.0, 0.0],
+    ];
+    let mut drv = ReverseDriver::new(shape, &pts, 2.0);
+    let mut input = Default::default();
+    let mut status = ManoeuvreStatus::Running;
+    let mut max_off = 0.0f32;
+    for i in 0..((60.0 / PHYSICS_DT) as usize) {
+        let st = rig.vehicle.state();
+        if i % 4 == 0 {
+            let (inp, s) = drv.step(&st, 4.0 * PHYSICS_DT);
+            input = inp;
+            status = s;
+            let (pos, f) = wp_world::drive::pose_2d(&st);
+            let (_, _, d) = drv.path.project(shape.rear(pos, f), None);
+            max_off = max_off.max(d);
+            if s != ManoeuvreStatus::Running {
+                break;
+            }
+        }
+        rig.step(&input, &assists);
+    }
+    let st = rig.vehicle.state();
+    println!(
+        "reverse: {status:?}, end {:?}, max off-path {max_off:.2} m",
+        st.pos
+    );
+    assert_eq!(status, ManoeuvreStatus::Done);
+    assert!(max_off < 0.8, "{max_off}");
+    let f = wp_world::drive::forward_of(st.rot);
+    assert!(f[1] > 0.9, "still facing forward: {f:?}");
+}

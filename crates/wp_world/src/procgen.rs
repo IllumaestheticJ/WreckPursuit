@@ -21,7 +21,9 @@ use crate::builder::{self, mph, BuildOptions, ControlHint, NodeSpec, RoadClass, 
 use crate::density::default_density_base;
 use crate::geom::{self, V2, V3};
 use crate::network::*;
+use crate::residential::{self, LotKind, LotSite, ObbIndex};
 use crate::signals;
+use crate::surface::{KERB_H_M, SIDEWALK_W_M, VERGE_W_M};
 use crate::terrain::{smoothstep, Heightfield};
 use crate::vesper::{CARVE_BELOW_M, CROSSING_CLEARANCE_M};
 
@@ -50,7 +52,7 @@ const RAMP_PARALLEL_M: f32 = 90.0;
 /// Ramp lane centre beside a carriageway (from the carriageway centreline), m.
 const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
 /// Ramp terminal junctions on a crossing row, from the highway centreline, m.
-const TERMINAL_X_M: f32 = 22.0;
+const TERMINAL_X_M: f32 = 21.0;
 /// Flat run of a ramp into its terminal junction, m.
 const TERMINAL_FLAT_M: f32 = 15.0;
 /// Ramp speed limit, m/s.
@@ -717,14 +719,31 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
                     DistrictKind::Residential => 1 + rng.below(2),
                     _ => 1 + rng.below(2),
                 };
-                buildings.push(Building {
-                    footprint: vec![l0, [l1[0], l0[1]], l1, [l0[0], l1[1]]],
-                    height_m: storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0),
-                    base_z_m: 0.0,
-                });
+                let height = storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0);
+                // Residential blocks are houses on lots (below); the draws above still happen
+                // so every later random choice (POIs) stays as it was.
+                if !residential::is_residential(kind) {
+                    buildings.push(Building::block(
+                        vec![l0, [l1[0], l0[1]], l1, [l0[0], l1[1]]],
+                        height,
+                        0.0,
+                    ));
+                }
             }
         }
     }
+    // Residential blocks (playtest row 95): houses on lots along all four block edges, front
+    // yards, garages, driveways, fences / hedges, yard trees, street trees on the verge.
+    let decor = residential_blocks(
+        cfg,
+        &xs,
+        &ys,
+        &row_class,
+        &col_class,
+        &block_kinds,
+        &blocked,
+        &mut buildings,
+    );
     // Outer bands: warehouses (port/industrial) and houses (suburb) between street ends.
     let band_lo = ex.max(ey) + 22.0;
     let band_hi = rr - 22.0;
@@ -759,11 +778,16 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
                 if blocked(lo, hi, None) {
                     continue;
                 }
-                buildings.push(Building {
-                    footprint: vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]],
-                    height_m: height,
-                    base_z_m: 0.0,
-                });
+                let mut b =
+                    Building::block(vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]], height, 0.0);
+                if !kind_big {
+                    // Suburb houses between the street ends: low, hipped.
+                    b.kind = BuildingKind::House;
+                    b.height_m = height.min(5.8);
+                    b.roof = RoofShape::Hip;
+                    b.roof_rise_m = 3.0;
+                }
+                buildings.push(b);
             }
         }
     }
@@ -885,6 +909,7 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         pois,
         buildings,
     );
+    net.decor = decor;
     apply_green_waves(&mut net, &xs, &ys, &row_class, &col_class, diagonals);
     // Flat ground just under the streets: the viaduct is a bridge, the rest is at grade.
     let (lo, hi) = (net.bounds_min, net.bounds_max);
@@ -946,6 +971,192 @@ fn apply_green_waves(
         let cycle = sc.cycle_s();
         net.signals[si].offset_s = (dist / v - start).rem_euclid(cycle);
     }
+}
+
+/// Houses on the residential grid blocks (playtest row 95): along each edge of every
+/// residential / suburban block, lots from 14 m past one corner to 14 m before the next
+/// ([`residential::plan_lot`]); street trees on the verge of local streets and collectors in
+/// front of them. Own rng (the block draws above keep the POI choice unchanged). Returns the
+/// decor; houses are appended to `buildings`.
+#[allow(clippy::too_many_arguments)]
+fn residential_blocks(
+    cfg: &ProcGenConfig,
+    xs: &[f32],
+    ys: &[f32],
+    row_class: &[RoadClass],
+    col_class: &[RoadClass],
+    block_kinds: &[(usize, usize, DistrictKind)],
+    blocked: &dyn Fn(V2, V2, Option<f32>) -> bool,
+    buildings: &mut Vec<Building>,
+) -> Vec<Decor> {
+    let opt = BuildOptions::default();
+    let mut rng = Rng::new(cfg.seed ^ 0x5E51_DE47);
+    let mut placed = ObbIndex::default();
+    let mut solid = ObbIndex::default();
+    let mut decor = Vec::new();
+    let mut shops = 0usize;
+    let back = |class: RoadClass| {
+        let st = style_for(class);
+        builder::half_width_of(class, st.lanes, st.lanes, st.parking, &opt) + SIDEWALK_W_M
+    };
+    let lot_z = KERB_H_M;
+    let flat_lot = crate::surface::FLAT_LOT_W_M;
+    let aabb_free = |o: &geom::Obb| {
+        let r = geom::right_of(o.f);
+        let pts: Vec<V2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            .iter()
+            .map(|(a, b)| {
+                geom::add(
+                    o.c,
+                    geom::add(geom::scale(o.f, o.hl * a), geom::scale(r, o.hw * b)),
+                )
+            })
+            .collect();
+        let lo = [
+            pts.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min),
+            pts.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min),
+        ];
+        let hi = [
+            pts.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max),
+            pts.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max),
+        ];
+        !blocked(lo, hi, None)
+    };
+    for &(i, j, kind) in block_kinds {
+        if !residential::is_residential(kind) {
+            continue;
+        }
+        // Edges: (street line point, outward unit, along unit, edge length, street class).
+        let (x0, x1, y0, y1) = (xs[i], xs[i + 1], ys[j], ys[j + 1]);
+        let edges = [
+            (
+                [x0, y0 + back(row_class[j])],
+                [0.0, 1.0],
+                [1.0, 0.0],
+                x1 - x0,
+                row_class[j],
+            ),
+            (
+                [x1, y1 - back(row_class[j + 1])],
+                [0.0, -1.0],
+                [-1.0, 0.0],
+                x1 - x0,
+                row_class[j + 1],
+            ),
+            (
+                [x1 - back(col_class[i + 1]), y0],
+                [-1.0, 0.0],
+                [0.0, 1.0],
+                y1 - y0,
+                col_class[i + 1],
+            ),
+            (
+                [x0 + back(col_class[i]), y1],
+                [1.0, 0.0],
+                [0.0, -1.0],
+                y1 - y0,
+                col_class[i],
+            ),
+        ];
+        for (start, out, along, len, class) in edges {
+            let mut mouths: Vec<f32> = Vec::new();
+            let mut u = 14.0;
+            let mut first = true;
+            loop {
+                let shop =
+                    first && shops < 2 && kind == DistrictKind::Residential && rng.chance(0.08);
+                first = false;
+                let (lk, w) = residential::next_lot(&mut rng, kind, shop);
+                if u + w > len - 14.0 {
+                    break;
+                }
+                let centre = u + w * 0.5;
+                u += w;
+                let site = LotSite {
+                    origin: geom::add(start, geom::scale(along, centre)),
+                    along,
+                    out,
+                    width: w,
+                    district: kind,
+                    kind: lk,
+                };
+                let ground = |g: V2| {
+                    if geom::dot(geom::sub(g, site.origin), out) < flat_lot - 0.05 {
+                        lot_z
+                    } else {
+                        0.0
+                    }
+                };
+                let plan = residential::plan_lot(&mut rng, &site, &ground);
+                let shrink = |o: &geom::Obb| geom::Obb {
+                    hl: o.hl - 0.05,
+                    hw: o.hw - 0.05,
+                    ..*o
+                };
+                let ok = |o: &geom::Obb| {
+                    aabb_free(o) && !placed.clashes(&shrink(o)) && !solid.clashes(o)
+                };
+                if !ok(&plan.buildings[0].1) {
+                    continue;
+                }
+                if lk == LotKind::Shop {
+                    shops += 1;
+                }
+                let kept: Vec<bool> = plan
+                    .buildings
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (_, o))| k == 0 || ok(o))
+                    .collect();
+                for (k, (b, o)) in plan.buildings.iter().enumerate() {
+                    if kept[k] {
+                        buildings.push(b.clone());
+                        placed.insert(*o);
+                    }
+                }
+                for (k, d, _) in &plan.tied {
+                    if kept[*k] {
+                        decor.push(*d);
+                        mouths.push(geom::dot(geom::sub([d.pos[0], d.pos[1]], start), along));
+                    }
+                }
+                for (d, o) in &plan.decor {
+                    if aabb_free(o) && !placed.clashes(o) {
+                        decor.push(*d);
+                        solid.insert(*o);
+                    }
+                }
+            }
+            // Street trees on the verge in front (local streets and collectors).
+            if !matches!(class, RoadClass::Local | RoadClass::Collector) {
+                continue;
+            }
+            let inset = SIDEWALK_W_M - VERGE_W_M * 0.5;
+            let mut a = 16.0;
+            while a < len - 16.0 {
+                if mouths
+                    .iter()
+                    .all(|m| (m - a).abs() >= residential::TREE_DRIVEWAY_CLEAR_M)
+                {
+                    let p = geom::add(
+                        start,
+                        geom::add(geom::scale(along, a), geom::scale(out, -inset)),
+                    );
+                    let trunk = geom::Obb {
+                        c: p,
+                        f: along,
+                        hl: residential::TRUNK_R_M,
+                        hw: residential::TRUNK_R_M,
+                    };
+                    if aabb_free(&trunk) {
+                        decor.push(residential::street_tree(&mut rng, p, lot_z));
+                    }
+                }
+                a += residential::STREET_TREE_SPACING_M;
+            }
+        }
+    }
+    decor
 }
 
 #[cfg(test)]
@@ -1104,7 +1315,7 @@ mod tests {
                 .sum();
             assert!(barrier > 600.0, "{n}x{n}: barrier {barrier} m");
             // Taper connectors lie on the paving.
-            for s in &map.segs {
+            for s in map.segs.iter() {
                 let SegKind::Connector { node, .. } = s.kind else {
                     continue;
                 };

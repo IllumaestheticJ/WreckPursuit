@@ -4,25 +4,27 @@
 //! parking / bus, banked like the road surface), junction boxes, raised sidewalks with kerb
 //! faces along ribbon edges, ground per district and extruded buildings. Cities with terrain
 //! (Port Vesper v2) also get the terrain mesh (decimated, never above a road), a sea plane,
-//! retaining walls where roads sit above the ground, and bridge decks with parapets and
-//! piers. Highways are paved from their road surfaces (lanes plus shoulders) with ramp taper
-//! connectors through freeway merges and diverges, and a concrete (Jersey-profile) median
-//! barrier between divided carriageways. Painted markings are not in the greybox: the
-//! testbed draws them from `wp_world::markings::marking_mesh` at run time. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
+//! retaining walls where roads sit above the ground, bridge decks with parapets and
+//! piers, tunnels / covered roads (walls, roof deck, emissive ceiling lights) and a concrete
+//! (Jersey-profile) median barrier between divided carriageways. Painted markings are not in
+//! the greybox: the testbed draws them from `wp_world::markings::marking_mesh` at run time.
+//! World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
 //! rotation, so triangle winding is preserved). Units are metres. Primitives with more than
 //! 65 535 vertices are split so every index buffer is 16-bit.
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
-use wp_world::map::{CityMap, SegKind};
-use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
+use wp_world::map::CityMap;
+use wp_world::network::{Building, BuildingKind, DecorKind, DistrictKind, LaneKind, RoadNetwork};
+use wp_world::residential;
 use wp_world::surface::{
-    inside_other_paving, is_elevated, median_barriers, surface_edges, SIDEWALK_M,
+    is_elevated, lane_bank, median_barriers, node_patches, rail_piece, sidewalk_mesh,
+    surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
-/// Sidewalk (curb) height, m.
-const CURB_M: f32 = 0.15;
+/// Height of the parking / bus lane tint above the road surface, m.
+const LANE_TINT_DZ_M: f32 = 0.01;
 /// Sea level drawn as water, m.
 const SEA_Z: f32 = 0.25;
 
@@ -69,6 +71,29 @@ impl Prim {
             self.normals.push(n);
         }
         (self.positions.len() - 1) as u32
+    }
+
+    /// Append an indexed mesh: the same triangles and winding, vertices at identical
+    /// positions shared.
+    fn mesh(&mut self, m: &TriMesh) {
+        let mut seen: std::collections::BTreeMap<[u32; 3], u32> = std::collections::BTreeMap::new();
+        let ids: Vec<u32> = m
+            .positions
+            .iter()
+            .map(|p| {
+                let key = p.map(f32::to_bits);
+                *seen
+                    .entry(key)
+                    .or_insert_with(|| self.vert(*p, [0.0, 0.0, 1.0]))
+            })
+            .collect();
+        for t in &m.indices {
+            self.indices.extend_from_slice(&[
+                ids[t[0] as usize],
+                ids[t[1] as usize],
+                ids[t[2] as usize],
+            ]);
+        }
     }
 
     /// Up-facing strip between two edge polylines, sharing vertices between quads.
@@ -297,12 +322,6 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
     }
 }
 
-/// Cross slope of `lane` per polyline point, in its own direction (from its road surface).
-/// Number of lanes of source road `road`.
-fn lanes_of(net: &RoadNetwork, road: u32) -> usize {
-    net.lanes.iter().filter(|l| l.road == road).count()
-}
-
 /// Jersey-profile barrier along `line` (road height at the barrier's foot).
 fn barrier_mesh(p: &mut Prim, line: &[V3]) {
     let n = line.len();
@@ -388,23 +407,6 @@ impl BarrierIndex {
     }
 }
 
-fn lane_bank(net: &RoadNetwork, lane: &Lane) -> Vec<f32> {
-    let Some(s) = net.surfaces.get(lane.road as usize) else {
-        return Vec::new();
-    };
-    let n = s.centre.len();
-    if s.road != lane.road || n != lane.polyline.len() {
-        return Vec::new();
-    }
-    let p0 = geom::xy(lane.polyline[0]);
-    let fwd = geom::dist(p0, geom::xy(s.centre[0])) <= geom::dist(p0, geom::xy(s.centre[n - 1]));
-    if fwd {
-        s.bank.clone()
-    } else {
-        s.bank.iter().rev().map(|b| -b).collect()
-    }
-}
-
 /// Render terrain: `coarse` is [`wp_world::surface::drawn_terrain`] (never above a road).
 /// Physics collides with the same surface off the roads (`wp_world::surface::collision_terrain`).
 fn render_terrain(
@@ -484,14 +486,23 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut parking = Prim::new("parking", [0.26, 0.26, 0.27, 1.0]);
     let mut bus = Prim::new("bus_lane", [0.35, 0.16, 0.14, 1.0]);
     let mut sidewalk = Prim::new("sidewalk", [0.62, 0.61, 0.58, 1.0]);
+    let mut corner = Prim::new("sidewalk_corner", [0.62, 0.61, 0.58, 1.0]);
+    // Level lots behind the sidewalks and the skirts beyond them (same colour; separate
+    // materials so tools can tell the flush lot from the slope down to the ground).
+    let mut lot = Prim::new("lot", [0.50, 0.52, 0.44, 1.0]);
+    let mut lot_skirt = Prim::new("lot_skirt", [0.50, 0.52, 0.44, 1.0]);
     let mut kerb = Prim::new("kerb", [0.70, 0.69, 0.66, 1.0]);
     let mut buildings = Prim::new("building", [0.75, 0.74, 0.72, 1.0]);
+    // Residential lots (playtest row 95): grass verges, pitched roofs, garages (trees,
+    // driveways, hedges and fences are instanced: `build_instanced`).
+    let mut verge = Prim::new("verge", [0.42, 0.52, 0.34, 1.0]);
+    let mut roof = Prim::new("roof", [0.46, 0.30, 0.28, 1.0]);
+    let mut garage = Prim::new("garage", [0.68, 0.66, 0.62, 1.0]);
     let mut wall = Prim::new("retaining_wall", [0.52, 0.50, 0.46, 1.0]);
     let mut bridge = Prim::new("bridge", [0.58, 0.58, 0.56, 1.0]);
     let mut rock = Prim::smooth("rock", [0.45, 0.42, 0.37, 1.0]);
     let mut seabed = Prim::smooth("seabed", [0.55, 0.52, 0.40, 1.0]);
     let mut water = Prim::new("water", [0.16, 0.30, 0.45, 1.0]);
-    let mut taper = Prim::new("ramp_taper", [0.42, 0.42, 0.40, 1.0]);
     let mut barrier = Prim::new("median_barrier", [0.66, 0.65, 0.62, 1.0]);
     let mut ground: Vec<Prim> = DistrictKind::ALL
         .iter()
@@ -524,73 +535,47 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
-    // Highways: the whole paved surface (lanes + shoulders), banked.
-    for s in net.surfaces.iter().filter(|s| s.highway) {
-        let (l, r) = surface_edges(s);
-        concrete.strip(&l, &r);
+    // Pavement: the road surface ribbons, the very triangles `wp_sim` collides with; parking
+    // and bus lanes are tinted 1 cm above them.
+    for s in &net.surfaces {
+        let prim = if s.highway {
+            &mut concrete
+        } else {
+            &mut asphalt
+        };
+        prim.mesh(&surface_ribbon(s));
     }
     for l in &net.lanes {
-        let half = l.width_m * 0.5;
-        let bank = lane_bank(net, l);
         let prim = match l.kind {
-            LaneKind::Highway => continue,
             LaneKind::Parking => &mut parking,
             LaneKind::Bus => &mut bus,
-            _ => &mut asphalt,
+            _ => continue,
         };
-        prim.ribbon_banked(&l.polyline, half, half, 0.0, &bank);
-        if l.kind != LaneKind::Highway {
-            let edge = |side: f32| -> Vec<V3> {
-                let mut e = geom::offset_polyline(&l.polyline, side * half);
-                for (k, p) in e.iter_mut().enumerate() {
-                    p[2] += bank.get(k).copied().unwrap_or(0.0) * side * half;
-                }
-                e
-            };
-            if l.edge_right {
-                sidewalk.ribbon_banked(&l.polyline, -half, half + SIDEWALK_M, CURB_M, &bank);
-                let top: Vec<V3> = edge(1.0)
-                    .iter()
-                    .map(|p| [p[0], p[1], p[2] + CURB_M])
-                    .collect();
-                let bottom: Vec<f32> = edge(1.0).iter().map(|p| p[2]).collect();
-                kerb.curtain(&top, &bottom, false);
-            }
-            if l.edge_left {
-                sidewalk.ribbon_banked(&l.polyline, half + SIDEWALK_M, -half, CURB_M, &bank);
-                let top: Vec<V3> = edge(-1.0)
-                    .iter()
-                    .map(|p| [p[0], p[1], p[2] + CURB_M])
-                    .collect();
-                let bottom: Vec<f32> = edge(-1.0).iter().map(|p| p[2]).collect();
-                kerb.curtain(&top, &bottom, true);
-            }
-        }
+        let bank = lane_bank(net, l);
+        prim.ribbon_banked(
+            &l.polyline,
+            l.width_m * 0.5,
+            l.width_m * 0.5,
+            LANE_TINT_DZ_M,
+            &bank,
+        );
     }
-    // Junction boxes (16-gons), bend connectors and ramp tapers through freeway merges and
-    // diverges (radius-0 junctions, where the main road's paving runs through).
-    for ix in net.intersections.iter().filter(|ix| ix.radius_m > 0.0) {
-        let c = net.nodes[ix.node as usize].pos;
-        let poly: Vec<V2> = (0..16)
-            .map(|k| {
-                let (s, co) = wp_math::sin_cos(k as f32 / 16.0 * std::f32::consts::TAU);
-                [c[0] + co * ix.radius_m, c[1] + s * ix.radius_m]
-            })
-            .collect();
-        asphalt.polygon(&poly, c[2] - 0.01);
-    }
-    for s in &map.segs {
-        if let SegKind::Connector { node, from, to, .. } = s.kind {
-            match net.nodes[node as usize].intersection {
-                None => asphalt.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005),
-                Some(ix) if net.intersections[ix as usize].radius_m <= 0.0 => {
-                    let (a, b) = (&net.lanes[from as usize], &net.lanes[to as usize]);
-                    if a.road != b.road && lanes_of(net, a.road) != lanes_of(net, b.road) {
-                        taper.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, 0.0);
-                    }
-                }
-                Some(_) => {}
-            }
+    // Raised sidewalks, their lots and skirts and the kerb faces: the very triangles `wp_sim`
+    // collides with.
+    let walks = sidewalk_mesh(map);
+    sidewalk.mesh(&walks.tops);
+    verge.mesh(&walks.verges);
+    corner.mesh(&walks.corners);
+    lot.mesh(&walks.lots);
+    lot_skirt.mesh(&walks.skirts);
+    kerb.mesh(&walks.kerbs);
+    // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
+    // `wp_sim` collides with.
+    for p in node_patches(map) {
+        if p.highway {
+            concrete.mesh(&p.mesh);
+        } else {
+            asphalt.mesh(&p.mesh);
         }
     }
     // Median barriers.
@@ -607,14 +592,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             let (l, r) = surface_edges(s);
             let n = s.centre.len();
             let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
-            // Retaining walls on the outer kerb line (sidewalk roads) or the paved edge.
-            let out = if s.highway { 0.3 } else { SIDEWALK_M };
+            // Retaining walls 0.3 m outside a highway's paved edge (sidewalk roads: under the
+            // skirt feet and bare sidewalk edges, below).
             for (side, edge) in [(-1.0f32, &l), (1.0, &r)] {
-                let line = geom::offset_polyline(edge, side * out);
+                if !s.highway {
+                    continue;
+                }
+                let line = geom::offset_polyline(edge, side * 0.3);
                 let top: Vec<V3> = line
                     .iter()
                     .zip(edge.iter())
-                    .map(|(p, e)| [p[0], p[1], e[2] + if s.highway { 0.0 } else { CURB_M }])
+                    .map(|(p, e)| [p[0], p[1], e[2]])
                     .collect();
                 let bottom: Vec<f32> = top
                     .iter()
@@ -643,11 +631,15 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     if near_barrier.near(geom::xy(seg[0])) && near_barrier.near(geom::xy(seg[1])) {
                         continue;
                     }
-                    if inside_other_paving(net, si, seg[0]) && inside_other_paving(net, si, seg[1])
-                    {
+                    let Some((a, b)) = rail_piece(net, si, seg[0], seg[1]) else {
+                        continue;
+                    };
+                    let seg = [a, b];
+                    bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
+                    // A sidewalk side's parapet is the rail at the sidewalk's back edge.
+                    if s.sidewalk[usize::from(side > 0.0)] {
                         continue;
                     }
-                    bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
                     let top = [
                         [seg[0][0], seg[0][1], seg[0][2] + 0.9],
                         [seg[1][0], seg[1][1], seg[1][2] + 0.9],
@@ -684,15 +676,420 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
+    // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
+    // physics terrain the skirts end on.
+    if let Some(t) = terrain {
+        let ground_z = |q: V2| t.height_at(q);
+        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+            let bottom: Vec<f32> = line
+                .iter()
+                .map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]))
+                .collect();
+            wall.curtain(&line, &bottom, true);
+        }
+        // The guard rail `wp_sim` puts just outside a lot-less sidewalk edge: 0.3 m wide,
+        // 0.9 m tall (both faces and the top).
+        for (a, b) in &walks.bare_backs {
+            let d = geom::normalize(geom::sub(geom::xy(*b), geom::xy(*a)));
+            let r = geom::right_of(d);
+            let at = |p: &V3, off: f32, dz: f32| {
+                let q = geom::add(geom::xy(*p), geom::scale(r, off));
+                [q[0], q[1], p[2] + dz]
+            };
+            let (i0, i1) = (at(a, 0.0, 0.9), at(b, 0.0, 0.9));
+            let (o0, o1) = (at(a, 0.3, 0.9), at(b, 0.3, 0.9));
+            bridge.curtain(&[i1, i0], &[b[2], a[2]], true);
+            bridge.curtain(&[o0, o1], &[a[2] - 0.2, b[2] - 0.2], true);
+            bridge.quad(i0, o0, o1, i1, [0.0, 0.0, 1.0]);
+        }
+    }
     for b in &net.buildings {
-        buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
+        let walls = if b.kind == BuildingKind::Garage {
+            &mut garage
+        } else {
+            &mut buildings
+        };
+        let r = &mut roof;
+        house(walls, r, b);
+    }
+    // Tunnels and covered roads (backlog B04): concrete walls, the roof deck, ceiling lights.
+    // Colours follow docs/art/STYLE_DECISION.md's palette (retaining wall / bridge greys,
+    // sodium lamps); the low-poly dark restyle maps these material names.
+    let mut tunnel_wall = Prim::new("tunnel_wall", [0.24, 0.25, 0.29, 1.0]);
+    let mut tunnel_roof = Prim::new("tunnel_roof", [0.28, 0.29, 0.34, 1.0]);
+    let mut tunnel_light = Prim::new("tunnel_light", [1.0, 0.76, 0.48, 1.0]);
+    for span in &net.covered {
+        render_cover(span, &mut tunnel_wall, &mut tunnel_roof, &mut tunnel_light);
     }
     let mut out = vec![
-        asphalt, concrete, parking, bus, sidewalk, kerb, buildings, wall, bridge, rock, seabed,
-        water, taper, barrier,
+        asphalt,
+        concrete,
+        parking,
+        bus,
+        sidewalk,
+        verge,
+        corner,
+        lot,
+        lot_skirt,
+        kerb,
+        buildings,
+        roof,
+        garage,
+        wall,
+        bridge,
+        rock,
+        seabed,
+        water,
+        tunnel_wall,
+        tunnel_roof,
+        tunnel_light,
+        barrier,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
+    out
+}
+
+/// Push triangle `a b c` into `p`, wound so its normal points along `out` (flat-shaded).
+fn tri_facing(p: &mut Prim, a: V3, b: V3, c: V3, out: V3) {
+    let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let i = p.vert(a, out);
+    p.vert(b, out);
+    p.vert(c, out);
+    if n[0] * out[0] + n[1] * out[1] + n[2] * out[2] >= 0.0 {
+        p.indices.extend_from_slice(&[i, i + 1, i + 2]);
+    } else {
+        p.indices.extend_from_slice(&[i, i + 2, i + 1]);
+    }
+}
+
+/// Vertex ids of a small shared-vertex mesh piece (one building's walls or roof).
+struct Shared<'a> {
+    p: &'a mut Prim,
+    ids: Vec<(V3, u32)>,
+}
+
+impl Shared<'_> {
+    fn id(&mut self, v: V3) -> u32 {
+        if let Some((_, i)) = self.ids.iter().find(|(q, _)| *q == v) {
+            return *i;
+        }
+        let i = self.p.vert(v, [0.0, 0.0, 1.0]);
+        self.ids.push((v, i));
+        i
+    }
+
+    /// Triangle wound so its normal points along `out`.
+    fn tri(&mut self, a: V3, b: V3, c: V3, out: V3) {
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let n = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let (ia, ib, ic) = (self.id(a), self.id(b), self.id(c));
+        if n[0] * out[0] + n[1] * out[1] + n[2] * out[2] >= 0.0 {
+            self.p.indices.extend_from_slice(&[ia, ib, ic]);
+        } else {
+            self.p.indices.extend_from_slice(&[ia, ic, ib]);
+        }
+    }
+}
+
+/// A building: walls up to the eaves, then a flat top or a gable / hip roof over its
+/// rectangle ([`Building::ridge`]; gable ends are wall). Vertices are shared within each
+/// building's walls and roof (the testbed flat-shades the greybox).
+fn house(walls: &mut Prim, roof: &mut Prim, b: &Building) {
+    let Some(ridge) = b.ridge() else {
+        walls.prism(&b.footprint, b.base_z_m, b.roof_z());
+        return;
+    };
+    let z = b.roof_z();
+    let f = &b.footprint;
+    let n = f.len();
+    let centre = [
+        f.iter().map(|q| q[0]).sum::<f32>() / n as f32,
+        f.iter().map(|q| q[1]).sum::<f32>() / n as f32,
+    ];
+    let near = |q: V2| {
+        if geom::dist(q, geom::xy(ridge[0])) <= geom::dist(q, geom::xy(ridge[1])) {
+            ridge[0]
+        } else {
+            ridge[1]
+        }
+    };
+    let mut w = Shared {
+        p: walls,
+        ids: Vec::new(),
+    };
+    let mut r = Shared {
+        p: roof,
+        ids: Vec::new(),
+    };
+    for i in 0..n {
+        let (qa, qb) = (f[i], f[(i + 1) % n]);
+        let (a, bb) = ([qa[0], qa[1], z], [qb[0], qb[1], z]);
+        let (a0, b0) = ([qa[0], qa[1], b.base_z_m], [qb[0], qb[1], b.base_z_m]);
+        let mid = [(qa[0] + qb[0]) * 0.5, (qa[1] + qb[1]) * 0.5];
+        let o = geom::normalize(geom::sub(mid, centre));
+        let out = [o[0], o[1], 0.0];
+        let up = [o[0], o[1], 1.0];
+        w.tri(a0, b0, bb, out);
+        w.tri(a0, bb, a, out);
+        let (ra, rb) = (near(qa), near(qb));
+        if ra == rb {
+            // Triangle: vertical gable end (ridge end above the edge) or a hip slope.
+            if geom::dist(geom::xy(ra), mid) < 0.05 {
+                w.tri(a, bb, ra, out);
+            } else {
+                r.tri(a, bb, ra, up);
+            }
+        } else {
+            r.tri(a, bb, rb, up);
+            r.tri(a, rb, ra, up);
+        }
+    }
+}
+
+/// A unit mesh drawn many times (glTF `EXT_mesh_gpu_instancing`): trees.
+#[derive(Debug, Clone, Default)]
+pub struct Instanced {
+    /// Mesh name.
+    pub name: String,
+    /// Parts (one primitive per material), world-style coordinates (+Z up) of the unit mesh.
+    pub parts: Vec<Prim>,
+    /// Per instance: base position (world), yaw about +Z, scale (x, y, z world axes).
+    pub instances: Vec<(V3, f32, V3)>,
+}
+
+/// Unit tree (1 m crown diameter, 1 m tall): a hexagonal trunk to 0.45 and a low-poly crown
+/// (an icosahedron stretched to 0.32..1.0).
+fn unit_tree() -> Vec<Prim> {
+    let mut trunk = Prim::new("tree_trunk", [0.36, 0.28, 0.22, 1.0]);
+    let mut crown = Prim::new("tree_crown", [0.27, 0.42, 0.25, 1.0]);
+    let r = 0.045;
+    let ring: Vec<V2> = (0..6)
+        .map(|k| {
+            let (s, c) = wp_math::sin_cos(k as f32 * std::f32::consts::TAU / 6.0);
+            [c * r, s * r]
+        })
+        .collect();
+    trunk.walls(&ring, -0.05, 0.45);
+    // Icosahedron.
+    let t = (1.0 + 5f32.sqrt()) * 0.5;
+    let raw: [[f32; 3]; 12] = [
+        [-1.0, t, 0.0],
+        [1.0, t, 0.0],
+        [-1.0, -t, 0.0],
+        [1.0, -t, 0.0],
+        [0.0, -1.0, t],
+        [0.0, 1.0, t],
+        [0.0, -1.0, -t],
+        [0.0, 1.0, -t],
+        [t, 0.0, -1.0],
+        [t, 0.0, 1.0],
+        [-t, 0.0, -1.0],
+        [-t, 0.0, 1.0],
+    ];
+    let faces: [[usize; 3]; 20] = [
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ];
+    let len = (1.0 + t * t).sqrt();
+    let v: Vec<V3> = raw
+        .iter()
+        .map(|p| [p[0] / len * 0.5, p[1] / len * 0.5, 0.66 + p[2] / len * 0.34])
+        .collect();
+    for f in faces {
+        let (a, b, c) = (v[f[0]], v[f[1]], v[f[2]]);
+        let m = [
+            (a[0] + b[0] + c[0]) / 3.0,
+            (a[1] + b[1] + c[1]) / 3.0,
+            (a[2] + b[2] + c[2]) / 3.0 - 0.66,
+        ];
+        tri_facing(&mut crown, a, b, c, m);
+    }
+    vec![trunk, crown]
+}
+
+/// Unit box: x, y in -0.5..0.5, z in 0..1 (walls and top), one material.
+fn unit_box(material: &str, color: [f32; 4]) -> Prim {
+    let mut p = Prim::new(material, color);
+    let sq = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+    p.block(&sq, 0.0, 1.0);
+    p
+}
+
+/// Instanced meshes of a city (residential lots, playtest row 95): every street and yard
+/// tree as one unit tree scaled to its crown and height, and driveways, hedges and fences as
+/// unit boxes. A box stands on its decor's base point (hedges and fences sunk 0.1 m); a
+/// driveway runs from its mouth across the lot, its top 3 cm above the lot, its sides 0.4 m
+/// deep (it never floats over the coarser drawn ground).
+pub fn build_instanced(map: &CityMap) -> Vec<Instanced> {
+    let decor = &map.net.decor;
+    let mut out = Vec::new();
+    let trees: Vec<(V3, f32, V3)> = decor
+        .iter()
+        .filter(|d| matches!(d.kind, DecorKind::StreetTree | DecorKind::YardTree))
+        .map(|d| (d.pos, d.yaw, [d.size[0], d.size[1], d.size[2]]))
+        .collect();
+    if !trees.is_empty() {
+        out.push(Instanced {
+            name: "trees".into(),
+            parts: unit_tree(),
+            instances: trees,
+        });
+    }
+    for (kind, name, color) in [
+        (DecorKind::Driveway, "driveway", [0.58, 0.57, 0.54, 1.0]),
+        (DecorKind::Hedge, "hedge", [0.24, 0.38, 0.22, 1.0]),
+        (DecorKind::Fence, "fence", [0.60, 0.55, 0.48, 1.0]),
+    ] {
+        let boxes: Vec<(V3, f32, V3)> = decor
+            .iter()
+            .filter(|d| d.kind == kind)
+            .map(|d| {
+                if kind == DecorKind::Driveway {
+                    let c = geom::add(
+                        [d.pos[0], d.pos[1]],
+                        geom::scale(residential::driveway_out(d), d.size[1] * 0.5),
+                    );
+                    let top = residential::driveway_top(d);
+                    ([c[0], c[1], top - 0.4], d.yaw, [d.size[0], d.size[1], 0.4])
+                } else {
+                    (
+                        [d.pos[0], d.pos[1], d.pos[2] - 0.1],
+                        d.yaw,
+                        [d.size[0], d.size[1], d.size[2] + 0.1],
+                    )
+                }
+            })
+            .collect();
+        if !boxes.is_empty() {
+            out.push(Instanced {
+                name: name.into(),
+                parts: vec![unit_box(name, color)],
+                instances: boxes,
+            });
+        }
+    }
+    out
+}
+
+/// The whole greybox `.glb` of a city: [`build_greybox`] plus [`build_instanced`].
+pub fn greybox_glb(map: &CityMap) -> Vec<u8> {
+    write_glb_instanced(&build_greybox(map), &build_instanced(map), &map.net.id)
+}
+
+/// One covered span: both walls (inner and outer faces, from below the road to the ceiling),
+/// the roof deck (ceiling underside, top, side edges, portal faces) and a ceiling light every
+/// [`wp_world::covered::LIGHT_SPACING_M`] (a 1.6 × 0.5 m emissive panel 0.12 m below the
+/// ceiling, two-sided).
+fn render_cover(
+    span: &wp_world::network::CoveredSpan,
+    wall: &mut Prim,
+    roof: &mut Prim,
+    light: &mut Prim,
+) {
+    use wp_world::covered::{CoverShape, ROOF_M, WALL_M};
+    let shape = CoverShape::new(span);
+    let c = &span.centre;
+    let h = span.clearance_m;
+    let deck = shape.deck_half_width();
+    for side in [-1.0f32, 1.0] {
+        for off in [span.half_width_m, span.half_width_m + WALL_M] {
+            let line = geom::offset_polyline(c, side * off);
+            let top: Vec<V3> = line.iter().map(|p| [p[0], p[1], p[2] + h]).collect();
+            let bottom: Vec<f32> = line.iter().map(|p| p[2] - 1.0).collect();
+            // Inner faces look into the tube, outer faces away from it.
+            let inner = off == span.half_width_m;
+            wall.curtain(&top, &bottom, (side < 0.0) == inner);
+        }
+    }
+    roof.ribbon(c, deck, deck, h);
+    roof.ribbon(c, deck, deck, h + ROOF_M);
+    for side in [-1.0f32, 1.0] {
+        let line = geom::offset_polyline(c, side * deck);
+        let top: Vec<V3> = line
+            .iter()
+            .map(|p| [p[0], p[1], p[2] + h + ROOF_M])
+            .collect();
+        let bottom: Vec<f32> = line.iter().map(|p| p[2] + h).collect();
+        roof.curtain(&top, &bottom, side > 0.0);
+    }
+    // Portal faces: the deck's end edges.
+    for k in [0usize, c.len() - 1] {
+        let j = if k == 0 { 1 } else { k - 1 };
+        let d = geom::normalize(geom::sub(geom::xy(c[k]), geom::xy(c[j])));
+        let d = if k == 0 { geom::scale(d, -1.0) } else { d };
+        let r = geom::right_of(d);
+        let p = geom::xy(c[k]);
+        let (z0, z1) = (c[k][2] + h, c[k][2] + h + ROOF_M);
+        let a = geom::add(p, geom::scale(r, -deck));
+        let b = geom::add(p, geom::scale(r, deck));
+        roof.quad(
+            [a[0], a[1], z0],
+            [b[0], b[1], z0],
+            [b[0], b[1], z1],
+            [a[0], a[1], z1],
+            [d[0], d[1], 0.0],
+        );
+    }
+    for q in shape.light_points() {
+        let loc = shape.locate(geom::xy(q));
+        let (_, d) = geom::point_at(c, &shape.cum, loc.s);
+        let r = geom::right_of(d);
+        let z = q[2] - 0.12;
+        let corner = |a: f32, b: f32| {
+            let p = geom::add(geom::xy(q), geom::add(geom::scale(d, a), geom::scale(r, b)));
+            [p[0], p[1], z]
+        };
+        light.quad(
+            corner(-0.8, -0.25),
+            corner(0.8, -0.25),
+            corner(0.8, 0.25),
+            corner(-0.8, 0.25),
+            [0.0, 0.0, -1.0],
+        );
+    }
+}
+
+/// Consecutive segments `(a, b)` (the next starting exactly where one ends) joined into
+/// polylines, in order.
+fn chain_segments<'a>(segs: impl Iterator<Item = &'a (V3, V3)>) -> Vec<Vec<V3>> {
+    let mut out: Vec<Vec<V3>> = Vec::new();
+    for (a, b) in segs {
+        match out.last_mut() {
+            Some(line) if line.last() == Some(a) => line.push(*b),
+            _ => out.push(vec![*a, *b]),
+        }
+    }
     out
 }
 
@@ -737,8 +1134,99 @@ fn split_u16(p: &Prim) -> Vec<Prim> {
     out
 }
 
+/// Append one primitive's vertex / index data to `bin` and its views and accessors; returns
+/// the glTF primitive (material `mi`).
+fn push_prim(
+    bin: &mut Vec<u8>,
+    views: &mut Vec<serde_json::Value>,
+    accessors: &mut Vec<serde_json::Value>,
+    p: &Prim,
+    mi: usize,
+) -> serde_json::Value {
+    let to_gl = |p: V3| [p[0], p[2], -p[1]];
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    let pos_off = bin.len();
+    for v in &p.positions {
+        let g = to_gl(*v);
+        for k in 0..3 {
+            lo[k] = lo[k].min(g[k]);
+            hi[k] = hi[k].max(g[k]);
+            bin.extend_from_slice(&g[k].to_le_bytes());
+        }
+    }
+    let pos_len = bin.len() - pos_off;
+    let nrm_off = bin.len();
+    for n in &p.normals {
+        for c in to_gl(*n) {
+            bin.extend_from_slice(&c.to_le_bytes());
+        }
+    }
+    let nrm_len = bin.len() - nrm_off;
+    let idx_off = bin.len();
+    for i in &p.indices {
+        bin.extend_from_slice(&(*i as u16).to_le_bytes());
+    }
+    let idx_len = bin.len() - idx_off;
+    // Keep the next float buffer view 4-byte aligned.
+    while !bin.len().is_multiple_of(4) {
+        bin.push(0);
+    }
+    let has_n = !p.normals.is_empty();
+    let pos_view = views.len();
+    views.push(json!({"buffer": 0, "byteOffset": pos_off, "byteLength": pos_len, "target": 34962}));
+    let nrm_view = views.len();
+    if has_n {
+        views.push(
+            json!({"buffer": 0, "byteOffset": nrm_off, "byteLength": nrm_len, "target": 34962}),
+        );
+    }
+    let idx_view = views.len();
+    views.push(json!({"buffer": 0, "byteOffset": idx_off, "byteLength": idx_len, "target": 34963}));
+    let pos_acc = accessors.len();
+    accessors.push(json!({"bufferView": pos_view, "componentType": 5126, "count": p.positions.len(), "type": "VEC3", "min": lo, "max": hi}));
+    let mut attributes = json!({ "POSITION": pos_acc });
+    if has_n {
+        attributes["NORMAL"] = json!(accessors.len());
+        accessors.push(json!({"bufferView": nrm_view, "componentType": 5126, "count": p.normals.len(), "type": "VEC3"}));
+    }
+    let idx_acc = accessors.len();
+    accessors.push(json!({"bufferView": idx_view, "componentType": 5123, "count": p.indices.len(), "type": "SCALAR"}));
+    json!({
+        "attributes": attributes,
+        "indices": idx_acc,
+        "material": mi,
+        "mode": 4
+    })
+}
+
+/// glTF material of a primitive.
+fn material_json(p: &Prim) -> serde_json::Value {
+    json!({
+        "name": p.material,
+        // Walls, kerbs and parapets are single quads: draw both faces.
+        "doubleSided": true,
+        // Lamps (`*_light`, e.g. tunnel ceiling lights) glow in their own colour.
+        "emissiveFactor": if p.material.ends_with("_light") {
+            [p.color[0], p.color[1], p.color[2]]
+        } else {
+            [0.0, 0.0, 0.0]
+        },
+        "pbrMetallicRoughness": {
+            "baseColorFactor": p.color,
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.9
+        }
+    })
+}
+
 /// Encode primitives as a `.glb` (positions converted to glTF +Y-up).
 pub fn write_glb(prims: &[Prim], name: &str) -> Vec<u8> {
+    write_glb_instanced(prims, &[], name)
+}
+
+/// [`write_glb`] plus instanced meshes (`EXT_mesh_gpu_instancing`).
+pub fn write_glb_instanced(prims: &[Prim], instanced: &[Instanced], name: &str) -> Vec<u8> {
     let parts: Vec<(usize, Prim)> = prims
         .iter()
         .enumerate()
@@ -749,90 +1237,71 @@ pub fn write_glb(prims: &[Prim], name: &str) -> Vec<u8> {
     let mut accessors = Vec::new();
     let mut materials = Vec::new();
     let mut primitives = Vec::new();
-    let to_gl = |p: V3| [p[0], p[2], -p[1]];
     for p in prims {
-        materials.push(json!({
-            "name": p.material,
-            // Walls, kerbs and parapets are single quads: draw both faces.
-            "doubleSided": true,
-            "pbrMetallicRoughness": {
-                "baseColorFactor": p.color,
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.9
-            }
-        }));
+        materials.push(material_json(p));
     }
     for (mi, p) in &parts {
-        let mut lo = [f32::INFINITY; 3];
-        let mut hi = [f32::NEG_INFINITY; 3];
-        let pos_off = bin.len();
-        for v in &p.positions {
-            let g = to_gl(*v);
-            for k in 0..3 {
-                lo[k] = lo[k].min(g[k]);
-                hi[k] = hi[k].max(g[k]);
-                bin.extend_from_slice(&g[k].to_le_bytes());
+        primitives.push(push_prim(&mut bin, &mut views, &mut accessors, p, *mi));
+    }
+    let mut nodes = vec![json!({"name": name, "mesh": 0})];
+    let mut meshes = vec![json!({"name": name, "primitives": primitives})];
+    // Instanced meshes: one node each with EXT_mesh_gpu_instancing (translation, rotation
+    // about the up axis, scale per instance; glTF axes).
+    for inst in instanced {
+        let mut prims_i = Vec::new();
+        for part in &inst.parts {
+            let mi = materials.len();
+            materials.push(material_json(part));
+            prims_i.push(push_prim(&mut bin, &mut views, &mut accessors, part, mi));
+        }
+        let mut push_vecs = |vals: Vec<f32>, ty: &str| {
+            let off = bin.len();
+            for v in &vals {
+                bin.extend_from_slice(&v.to_le_bytes());
             }
+            let view = views.len();
+            views.push(json!({"buffer": 0, "byteOffset": off, "byteLength": bin.len() - off}));
+            let acc = accessors.len();
+            let n = if ty == "VEC4" { 4 } else { 3 };
+            accessors.push(json!({"bufferView": view, "componentType": 5126, "count": vals.len() / n, "type": ty}));
+            acc
+        };
+        let mut t = Vec::new();
+        let mut r = Vec::new();
+        let mut sc = Vec::new();
+        for (p, yaw, scale) in &inst.instances {
+            t.extend_from_slice(&[p[0], p[2], -p[1]]);
+            let (sn, cs) = wp_math::sin_cos(*yaw * 0.5);
+            r.extend_from_slice(&[0.0, sn, 0.0, cs]);
+            sc.extend_from_slice(&[scale[0], scale[2], scale[1]]);
         }
-        let pos_len = bin.len() - pos_off;
-        let nrm_off = bin.len();
-        for n in &p.normals {
-            for c in to_gl(*n) {
-                bin.extend_from_slice(&c.to_le_bytes());
-            }
-        }
-        let nrm_len = bin.len() - nrm_off;
-        let idx_off = bin.len();
-        for i in &p.indices {
-            bin.extend_from_slice(&(*i as u16).to_le_bytes());
-        }
-        let idx_len = bin.len() - idx_off;
-        // Keep the next float buffer view 4-byte aligned.
-        while !bin.len().is_multiple_of(4) {
-            bin.push(0);
-        }
-        let has_n = !p.normals.is_empty();
-        let pos_view = views.len();
-        views.push(
-            json!({"buffer": 0, "byteOffset": pos_off, "byteLength": pos_len, "target": 34962}),
+        let (ta, ra, sa) = (
+            push_vecs(t, "VEC3"),
+            push_vecs(r, "VEC4"),
+            push_vecs(sc, "VEC3"),
         );
-        let nrm_view = views.len();
-        if has_n {
-            views.push(
-                json!({"buffer": 0, "byteOffset": nrm_off, "byteLength": nrm_len, "target": 34962}),
-            );
-        }
-        let idx_view = views.len();
-        views.push(
-            json!({"buffer": 0, "byteOffset": idx_off, "byteLength": idx_len, "target": 34963}),
-        );
-        let pos_acc = accessors.len();
-        accessors.push(json!({"bufferView": pos_view, "componentType": 5126, "count": p.positions.len(), "type": "VEC3", "min": lo, "max": hi}));
-        let mut attributes = json!({ "POSITION": pos_acc });
-        if has_n {
-            attributes["NORMAL"] = json!(accessors.len());
-            accessors.push(json!({"bufferView": nrm_view, "componentType": 5126, "count": p.normals.len(), "type": "VEC3"}));
-        }
-        let idx_acc = accessors.len();
-        accessors.push(json!({"bufferView": idx_view, "componentType": 5123, "count": p.indices.len(), "type": "SCALAR"}));
-        primitives.push(json!({
-            "attributes": attributes,
-            "indices": idx_acc,
-            "material": mi,
-            "mode": 4
+        meshes.push(json!({"name": inst.name, "primitives": prims_i}));
+        nodes.push(json!({
+            "name": inst.name,
+            "mesh": meshes.len() - 1,
+            "extensions": {"EXT_mesh_gpu_instancing": {"attributes": {"TRANSLATION": ta, "ROTATION": ra, "SCALE": sa}}}
         }));
     }
-    let doc = json!({
+    let node_ids: Vec<usize> = (0..nodes.len()).collect();
+    let mut doc = json!({
         "asset": {"version": "2.0", "generator": "wreckpursuit city-import"},
         "scene": 0,
-        "scenes": [{"name": name, "nodes": [0]}],
-        "nodes": [{"name": name, "mesh": 0}],
-        "meshes": [{"name": name, "primitives": primitives}],
+        "scenes": [{"name": name, "nodes": node_ids}],
+        "nodes": nodes,
+        "meshes": meshes,
         "materials": materials,
         "buffers": [{"byteLength": bin.len()}],
         "bufferViews": views,
         "accessors": accessors
     });
+    if !instanced.is_empty() {
+        doc["extensionsUsed"] = json!(["EXT_mesh_gpu_instancing"]);
+    }
     let mut json_bytes = serde_json::to_vec(&doc).expect("gltf json");
     while !json_bytes.len().is_multiple_of(4) {
         json_bytes.push(b' ');

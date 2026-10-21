@@ -1,15 +1,11 @@
 //! Slide-control assists for keyboard / gamepad drivers (owner playtest, 2026-10-19: "give the
 //! higher-power RWD cars a little more steering assist / gyro so we can control the slides").
 //!
-//! Three pieces, all scaled by [`AssistProfile::countersteer_help`] and doing nothing at all
+//! Two pieces, both scaled by [`AssistProfile::countersteer_help`] and doing nothing at all
 //! when it is 0 (wheel / AI / sim purist stay bit-identical to the plain model):
-//! - [`gyro_yaw_torque`]: a yaw damper that acts only while the rear is sliding. It damps the
-//!   *rate of change* of the slide angle (yaw rate minus the rotation rate of the velocity
-//!   vector), not the slide angle itself, so a snap into a spin is slowed down enough to
-//!   catch. With the steering centred it aims for a slowly shrinking slide angle (the car
-//!   straightens up on its own); steering into the turn holds the drift, steering against it
-//!   straightens faster.
-//! - countersteer targeting and rack speed-up: see [`crate::steering::update_center_angle`].
+//! - self-aligning countersteer (released keys point the front wheels along the front axle's
+//!   travel): see [`crate::steering::steer_target`]. It replaced the yaw "gyro" (owner rows
+//!   57 / 72, 2026-10-20): no assist adds yaw torque any more, so handbrake turns rotate.
 //! - [`slide_throttle`]: with TCS off, a keyboard 0/1 throttle ramps in more gently while the
 //!   rear is already loose, and is feathered a little unless the driver steers into the turn
 //!   (a key cannot feather by itself).
@@ -18,8 +14,6 @@
 //! weight, so a 200+ W/kg RWD coupe gets the full effect and a FWD hatch a light touch.
 
 use wp_contracts::{AssistProfile, DriveLayout, VehicleDef};
-
-use crate::math::atan2;
 
 /// Power-to-weight (W/kg) where the car-class scaling starts to rise.
 pub const CLASS_PW_LOW: f32 = 120.0;
@@ -38,18 +32,6 @@ pub const SLIDE_CLASS_OVERRIDES: &[(&str, f32)] = &[];
 pub const SLIDE_START: f32 = 0.06;
 /// Rear-slip angle (rad) where the slide assists are fully on.
 const SLIDE_FULL: f32 = 0.16;
-/// Gyro gain at full help, full class and a full slide, 1/s: the yaw torque is
-/// `gain × I_zz × (yaw rate − path rate)`.
-const GYRO_GAIN: f32 = 9.0;
-/// While the slide angle is shrinking (the car straightening up) the damper is weaker, so it
-/// slows a snap-back without holding the car in the slide.
-const GYRO_RECOVER_SCALE: f32 = 0.4;
-/// Straighten-up rate with the steering centred, 1/s: the gyro aims for a slide angle that
-/// decays as `exp(-K t)`.
-const GYRO_STRAIGHTEN: f32 = 1.2;
-/// Torque cap as a fraction of `m · g · wheelbase / 2` (about what the rear tires can make).
-const GYRO_CAP: f32 = 0.35;
-
 /// Peak engine power from the torque curve, W.
 pub fn peak_power_w(def: &VehicleDef) -> f32 {
     def.engine
@@ -74,10 +56,26 @@ fn rear_drive_share(layout: &DriveLayout) -> f32 {
     }
 }
 
-/// How much slide help this car gets, `CLASS_FLOOR..=1`: rises with rear-drive share × power
-/// to weight (from [`CLASS_PW_LOW`] to [`CLASS_PW_HIGH`] W/kg). AWD cars count their rear share
-/// at 60% (the front axle pulls them straight). [`SLIDE_CLASS_OVERRIDES`] wins if listed.
+/// How much slide help this car gets, `CLASS_FLOOR..=1`, with the car's own differentials
+/// ([`crate::diff::DiffSetup::for_car`]); see [`slide_class_with_rear_lock`].
 pub fn slide_class(def: &VehicleDef) -> f32 {
+    slide_class_with_rear_lock(def, crate::diff::DiffSetup::for_car(def).rear.power_lock())
+}
+
+/// Rear-diff effect on the slide class: the power × layout term is scaled by
+/// `DIFF_CLASS_OPEN + DIFF_CLASS_PER_LOCK × rear lock` (open 0.85 … locked 1.15). A locking
+/// rear keeps both rear tires spinning together, so power slides start sooner and carry more
+/// yaw; an open rear flares the inside wheel instead and limits them.
+pub const DIFF_CLASS_OPEN: f32 = 0.85;
+/// See [`DIFF_CLASS_OPEN`].
+pub const DIFF_CLASS_PER_LOCK: f32 = 0.3;
+
+/// How much slide help this car gets, `CLASS_FLOOR..=1`: rises with rear-drive share × power
+/// to weight (from [`CLASS_PW_LOW`] to [`CLASS_PW_HIGH`] W/kg), scaled by the rear diff's
+/// steady lock under power (`rear_lock` 0 open … 1 locked, see [`DIFF_CLASS_OPEN`]). AWD cars
+/// count their rear share at 60% (the front axle pulls them straight).
+/// [`SLIDE_CLASS_OVERRIDES`] wins if listed.
+pub fn slide_class_with_rear_lock(def: &VehicleDef, rear_lock: f32) -> f32 {
     if let Some((_, c)) = SLIDE_CLASS_OVERRIDES.iter().find(|(id, _)| *id == def.id) {
         return c.clamp(0.0, 1.0);
     }
@@ -85,107 +83,13 @@ pub fn slide_class(def: &VehicleDef) -> f32 {
     let power = ((pw - CLASS_PW_LOW) / (CLASS_PW_HIGH - CLASS_PW_LOW)).clamp(0.0, 1.0);
     let rear = rear_drive_share(&def.drivetrain.layout);
     let layout = if rear >= 1.0 { 1.0 } else { 0.6 * rear };
-    CLASS_FLOOR + (1.0 - CLASS_FLOOR) * layout * power
+    let diff = DIFF_CLASS_OPEN + DIFF_CLASS_PER_LOCK * rear_lock.clamp(0.0, 1.0);
+    (CLASS_FLOOR + (1.0 - CLASS_FLOOR) * layout * power * diff).clamp(CLASS_FLOOR, 1.0)
 }
 
 /// 0..=1 "how much is the rear sliding" from the rear-axle slip angle (rad).
 pub fn slide_amount(rear_axle_slip: f32) -> f32 {
     ((rear_axle_slip.abs() - SLIDE_START) / (SLIDE_FULL - SLIDE_START)).clamp(0.0, 1.0)
-}
-
-/// 0..=1 "is the rear still out of line" for a driver who is countersteering: full from
-/// [`SLIDE_START`] rear-axle slip up, fading to 0 at straight. Keeps the countersteer help on
-/// through the end of a catch (see [`crate::steering::update_center_angle`]).
-pub fn catch_amount(rear_axle_slip: f32) -> f32 {
-    (rear_axle_slip.abs() / SLIDE_START).clamp(0.0, 1.0)
-}
-
-/// Speeds (km/h) where the highway-speed slide behaviour starts / is full.
-pub const HIGHWAY_KMH: (f32, f32) = (60.0, 110.0);
-
-/// 0..=1 "how much is this highway speed" from forward speed (m/s): 0 up to
-/// [`HIGHWAY_KMH`]`.0`, 1 from [`HIGHWAY_KMH`]`.1`. Above it a slide is a mistake to catch,
-/// not a drift to hold: the gyro also damps a fast swing through straight and the steering
-/// help stops treating a held key as a flick.
-pub fn highway_amount(speed: f32) -> f32 {
-    let kmh = speed.abs() * 3.6;
-    ((kmh - HIGHWAY_KMH.0) / (HIGHWAY_KMH.1 - HIGHWAY_KMH.0)).clamp(0.0, 1.0)
-}
-
-/// Slide-angle rate (rad/s) where the highway swing damper starts / is full.
-const SWING_START: f32 = 0.25;
-const SWING_FULL: f32 = 0.6;
-
-/// Inputs to [`gyro_yaw_torque`], all chassis-frame and measured this tick.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GyroInput {
-    /// Forward speed, m/s.
-    pub v_fwd: f32,
-    /// Leftward speed, m/s.
-    pub v_left: f32,
-    /// Yaw rate, rad/s (+ = turning left).
-    pub yaw_rate: f32,
-    /// Horizontal force on the chassis this tick, chassis frame `(left, forward)`, N.
-    pub force_left: f32,
-    /// See `force_left`.
-    pub force_fwd: f32,
-    /// Rear-axle slip angle, rad.
-    pub rear_axle_slip: f32,
-    /// Mass, kg.
-    pub mass: f32,
-    /// Yaw inertia, kg·m².
-    pub yaw_inertia: f32,
-    /// Wheelbase, m.
-    pub wheelbase: f32,
-    /// Driver steer input, -1 (left) ..= 1 (right).
-    pub driver_steer: f32,
-}
-
-/// Yaw torque (N·m about chassis up, + = left) of the slide gyro, scaled by
-/// `min(2·help, 1) × class`. 0 unless help > 0, the car
-/// is moving forward faster than 5 m/s and the rear is sliding.
-///
-/// "Path rate" is how fast the velocity vector itself turns (lateral acceleration / speed);
-/// yaw rate minus path rate is how fast the slide angle changes. The gyro pushes that toward
-/// a target: slide angle shrinking at [`GYRO_STRAIGHTEN`] with the steering centred, held
-/// (target 0, a pure damper) with full steer into the turn, shrinking twice as fast with full
-/// countersteer. Over-rotation is damped at full gain, straightening faster than the target
-/// at 40%.
-pub fn gyro_yaw_torque(g: &GyroInput, help: f32, class: f32) -> f32 {
-    if help <= 0.0 || g.v_fwd < 5.0 {
-        return 0.0;
-    }
-    let v2 = g.v_fwd * g.v_fwd + g.v_left * g.v_left;
-    // Rotation rate of the velocity vector: (v × a)·up / |v|² (x = right, y = forward).
-    let path_rate = (g.v_fwd * g.force_left - g.v_left * g.force_fwd) / (g.mass * v2);
-    // Slide-angle rate is path − yaw; "excess" = yaw − path (> 0 = rotating left of the path).
-    let excess = g.yaw_rate - path_rate;
-    // At highway speed a fast swing counts as a slide even while the slide angle is small:
-    // that is the car swinging back through straight after a catch, the moment it needs the
-    // damper most (gating on slide angle alone switched it off right there).
-    let swing = highway_amount(g.v_fwd)
-        * ((excess.abs() - SWING_START) / (SWING_FULL - SWING_START)).clamp(0.0, 1.0);
-    let slide = slide_amount(g.rear_axle_slip).max(swing);
-    if slide <= 0.0 {
-        return 0.0;
-    }
-    let beta = atan2(g.v_left, g.v_fwd);
-    let (hold, counter) = slide_intent(g.driver_steer, g.rear_axle_slip);
-    let k = GYRO_STRAIGHTEN * (1.0 - hold) * (1.0 + counter);
-    // Wanted slide-angle rate −k·β ⇒ wanted excess k·β.
-    let err = excess - k * beta;
-    // err · β < 0 = rotating toward more slide than wanted.
-    let over_rotating = err * beta <= 0.0;
-    let scale = if over_rotating {
-        1.0
-    } else {
-        // A fast swing back at highway speed is damped at full gain too.
-        GYRO_RECOVER_SCALE + (1.0 - GYRO_RECOVER_SCALE) * swing
-    };
-    // Full gyro from help 0.5 up (keyboard 0.6 → full, gamepad 0.3 → 60%).
-    let gain = GYRO_GAIN * (2.0 * help).min(1.0) * class * slide * scale;
-    let cap = GYRO_CAP * g.mass * wp_contracts::GRAVITY_MPS2 * g.wheelbase * 0.5;
-    (-gain * g.yaw_inertia * err).clamp(-cap, cap)
 }
 
 /// Driver intent while sliding, from steer input (+ = right) and rear-axle slip (+ = rear
@@ -254,86 +158,6 @@ mod tests {
         assert!(mid > fwd && mid < rwd, "{mid}");
         assert_eq!(fwd, CLASS_FLOOR);
         assert_eq!(slow_rwd, CLASS_FLOOR);
-    }
-
-    fn spin_in() -> GyroInput {
-        // 20 m/s, sliding right of the heading (rear out to the right in a left turn), the
-        // body rotating left faster than its path.
-        GyroInput {
-            v_fwd: 20.0,
-            v_left: -4.0,
-            yaw_rate: 1.2,
-            force_left: 8000.0,
-            force_fwd: 0.0,
-            rear_axle_slip: -0.3,
-            mass: 1500.0,
-            yaw_inertia: 2500.0,
-            wheelbase: 2.7,
-            driver_steer: -1.0,
-        }
-    }
-
-    #[test]
-    fn gyro_resists_spin_and_is_off_without_help() {
-        let t = gyro_yaw_torque(&spin_in(), 0.6, 1.0);
-        assert!(t < 0.0, "{t}");
-        assert_eq!(gyro_yaw_torque(&spin_in(), 0.0, 1.0), 0.0);
-        let held = GyroInput {
-            // Steady drift: yaw rate equals the path rate.
-            yaw_rate: (20.0 * 8000.0 - (-4.0) * 0.0) / (1500.0 * 416.0),
-            ..spin_in()
-        };
-        // Steady drift with the driver steering into the turn: held (pure damper, ~0).
-        assert!(gyro_yaw_torque(&held, 0.6, 1.0).abs() < 1.0);
-        // Same drift with the steering centred: nudged straight (yaw to the right).
-        let neutral = GyroInput {
-            driver_steer: 0.0,
-            ..held
-        };
-        assert!(gyro_yaw_torque(&neutral, 0.6, 1.0) < -100.0);
-        // Straightening at street speed (below the highway band): damped, but weaker.
-        let street = GyroInput {
-            v_fwd: 15.0,
-            v_left: -3.0,
-            ..spin_in()
-        };
-        // Low class so neither hits the torque cap.
-        let t = gyro_yaw_torque(&street, 0.6, 0.25);
-        let straightening = GyroInput {
-            yaw_rate: -0.5,
-            ..street
-        };
-        let r = gyro_yaw_torque(&straightening, 0.6, 0.25);
-        assert!(r > 0.0 && r < -t, "{r} {t}");
-    }
-
-    /// The car swinging back through straight after a catch: small slide angle, fast swing.
-    fn swing_through(v_fwd: f32) -> GyroInput {
-        GyroInput {
-            v_fwd,
-            v_left: -0.5,
-            yaw_rate: -1.1,
-            force_left: -1500.0,
-            force_fwd: 0.0,
-            rear_axle_slip: 0.0,
-            mass: 1400.0,
-            yaw_inertia: 2800.0,
-            wheelbase: 2.7,
-            driver_steer: 1.0,
-        }
-    }
-
-    #[test]
-    fn gyro_damps_a_fast_swing_through_straight_only_at_highway_speed() {
-        // 150 km/h: the swing is damped even though the rear is momentarily in line.
-        let fast = gyro_yaw_torque(&swing_through(150.0 / 3.6), 0.6, 0.25);
-        assert!(fast > 1000.0, "{fast}");
-        // 50 km/h: unchanged (slide-angle gate only), so flicks and drifts stay playful.
-        assert_eq!(gyro_yaw_torque(&swing_through(50.0 / 3.6), 0.6, 0.25), 0.0);
-        // Never without help.
-        assert_eq!(gyro_yaw_torque(&swing_through(150.0 / 3.6), 0.0, 1.0), 0.0);
-        assert_eq!(highway_amount(50.0 / 3.6), 0.0);
-        assert_eq!(highway_amount(120.0 / 3.6), 1.0);
     }
 
     #[test]

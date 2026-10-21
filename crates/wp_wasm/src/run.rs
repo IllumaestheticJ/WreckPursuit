@@ -87,6 +87,8 @@ pub struct RunReport {
     pub mode: DamageMode,
     /// Bounty earned by an escape (`Escape` ledger lines).
     pub bounty_payout: i64,
+    /// Cash paid for an escape (`Escape` ledger lines).
+    pub escape_cash: i64,
     /// Rep change.
     pub rep_delta: i64,
     /// Fines charged.
@@ -179,6 +181,25 @@ pub struct ContinueReport {
     pub ledger: Vec<LedgerLine>,
 }
 
+/// What a race cost and paid the player (`race_result_json().payout`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RacePayout {
+    /// Buy-in charged at the start (0 when refused).
+    pub entry_fee: i64,
+    /// Purse share paid.
+    pub purse: i64,
+    /// Clean-race bonus paid.
+    pub clean_bonus: i64,
+    /// Rep change.
+    pub rep: i64,
+    /// Bounty gained (winning while wanted).
+    pub bounty: i64,
+    /// Cash after the settlement.
+    pub cash_after: i64,
+    /// Ledger lines of the buy-in and the settlement, in order.
+    pub ledger: Vec<LedgerLine>,
+}
+
 /// The car the player drives, as the economy knows it.
 #[derive(Debug, Clone)]
 pub struct PlayerCar {
@@ -251,10 +272,24 @@ impl PlayerRun {
                     damage: DamageSnapshot::default(),
                     location: CarLocation::Garage,
                     insurance: None,
+                    // Handed out by the demo for free: resale is valued from what was paid.
+                    purchase_price: Some(0),
                 });
                 uid
             }
         };
+        Self::bound(econ, acct, ledger, player, uid, mode, seed)
+    }
+
+    fn bound(
+        econ: Economy,
+        mut acct: PlayerAccount,
+        ledger: Vec<EconomyEvent>,
+        player: EntityId,
+        uid: CarUid,
+        mode: DamageMode,
+        seed: u64,
+    ) -> Self {
         acct.active_car = Some(uid);
         let mut config = SessionConfig::new(mode);
         config.repair = RepairPolicy::QuoteOnly;
@@ -274,6 +309,35 @@ impl PlayerRun {
             seq: 0,
             over: false,
         }
+    }
+
+    /// Career run (machine G, `crate::career`): `player` drives the account's car `uid`
+    /// (which must be in the garage). Same as [`PlayerRun::with_account`] otherwise.
+    pub fn for_career_car(
+        econ: Economy,
+        acct: PlayerAccount,
+        ledger: Vec<EconomyEvent>,
+        player: EntityId,
+        uid: CarUid,
+        mode: DamageMode,
+        seed: u64,
+    ) -> Result<Self, String> {
+        let car = acct.try_car(uid).map_err(|e| e.to_string())?;
+        if car.location != CarLocation::Garage {
+            return Err(format!("car {} is not in the garage", uid.0));
+        }
+        Ok(Self::bound(econ, acct, ledger, player, uid, mode, seed))
+    }
+
+    /// The player's car was wanted at some point in this run (insurance will not pay for
+    /// damage from it).
+    pub fn was_wanted(&self) -> bool {
+        self.session.was_wanted(self.player)
+    }
+
+    /// The account's car this run is bound to.
+    pub fn car(&self) -> CarUid {
+        self.car
     }
 
     /// Hand the account and its ledger to the next run (restart).
@@ -412,6 +476,12 @@ impl PlayerRun {
             .filter(|e| matches!(e.reason, EventReason::Escape { .. }))
             .map(|e| e.bounty_delta)
             .sum();
+        let escape_cash = r
+            .events
+            .iter()
+            .filter(|e| matches!(e.reason, EventReason::Escape { .. }))
+            .map(|e| e.cash_delta)
+            .sum();
         let continue_cost = impound.map_or(0, |i| i.fee) + repair_cost;
         let gone = matches!(car_status, CarStatus::Seized | CarStatus::Destroyed);
         self.ledger.extend(r.events.iter().cloned());
@@ -425,6 +495,7 @@ impl PlayerRun {
             level,
             mode: self.mode,
             bounty_payout,
+            escape_cash,
             rep_delta: r.rep_delta,
             fines: r.fines,
             bail: r.bail,
@@ -459,6 +530,58 @@ impl PlayerRun {
                 self.mode,
             )
             .ok()
+    }
+
+    /// The economy tables this run settles with.
+    pub fn economy(&self) -> &Economy {
+        &self.econ
+    }
+
+    /// The player's current wanted level as the economy saw it (race payouts).
+    pub fn wanted_level(&self) -> WantedLevel {
+        self.session.wanted_level(self.player)
+    }
+
+    /// Pay a race's buy-in (G's `Economy::enter_race`) from the account. Returns the fee and
+    /// its ledger lines; an error (nothing charged) when the car is unavailable or the player
+    /// is in debt.
+    pub fn enter_race(
+        &mut self,
+        setup: &wp_economy::RaceSetup,
+    ) -> Result<(i64, Vec<LedgerLine>), String> {
+        let (fee, ev) = self
+            .econ
+            .enter_race(&mut self.acct, setup, self.car)
+            .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((fee, lines))
+    }
+
+    /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,
+    /// bounty while wanted). `entry` = what [`PlayerRun::enter_race`] charged, for the report.
+    pub fn settle_race(
+        &mut self,
+        setup: &wp_economy::RaceSetup,
+        result: &wp_economy::RaceResult,
+        entry: (i64, Vec<LedgerLine>),
+    ) -> Result<RacePayout, String> {
+        let (pay, ev) = self
+            .econ
+            .settle_race(&mut self.acct, setup, self.car, result)
+            .map_err(|e| e.to_string())?;
+        let mut ledger = entry.1;
+        ledger.extend(ev.iter().map(LedgerLine::of));
+        self.ledger.extend(ev);
+        Ok(RacePayout {
+            entry_fee: entry.0,
+            purse: pay.purse,
+            clean_bonus: pay.clean_bonus,
+            rep: pay.rep,
+            bounty: pay.bounty as i64,
+            cash_after: self.acct.cash,
+            ledger,
+        })
     }
 
     /// "Repair & continue" after the run ended: pay the impound fee (if impounded), then

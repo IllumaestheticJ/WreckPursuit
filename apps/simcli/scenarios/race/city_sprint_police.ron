@@ -1,7 +1,7 @@
 // wp_race: an illegal daytime street race that pulls in the police. Same procedural 7x7 city
 // and northbound arterial as race_city_sprint, open roads: civilian traffic on (density 0.3)
-// and police on. Route (60.55, -437) → (60.55, -230), ~207 m, finishing ~100 m short of the
-// next signalled junction so finished cars don't queue on the line. Four entrants on the
+// and police on. Route (60.55, -437) → (60.55, -300), ~137 m, finishing ~190 m short of the
+// next cross street so finished cars have slowed down before the patrol there. Four entrants on the
 // judge's staggered grid (row gap 8 m, columns 5 m apart; x = 59.55 / 64.55 since the grid
 // highway became a divided viaduct with ramps: the course runs down the middle lane of the
 // northbound carriageway).
@@ -31,6 +31,10 @@
 // 4, 5, 6 and 8 replay the same race: same finish, same report-run pursuits at 9.4 s and 11.1 s)
 // and starting heat 3.0 → 3.75: at seed 5, heat 2.5-5.0 passes both runs, 3.75 is the middle.
 // Seed sweep 1-20 at heat 3.0: 15 of 20 seeds pass both runs.
+// Re-aimed for lead/city-residential (rows 94-95: the highway's 3 m median moved the lanes
+// 1.5 m, grid slots with them): at seed 5 a patrol now starts a pursuit at 21 s in the control
+// run at any starting heat (0-5). Seed 5 -> 1: heat 2.5-5.0 passes both runs, 3.75 is the
+// middle (seed 2: 2.0-4.5).
 //
 // Run standalone, simcli has no race block and no AI driver for these entities (see
 // docs/integration/race.md, requests to I and N), so the cars wait on the grid while traffic
@@ -41,7 +45,11 @@
     // release CI jobs (`simcli determinism`, `simcli goldens`).
     slow: true,
     // Re-aimed for the grid highway's ramps (WP_RACE_AIM_*, crates/wp_race/tests/race_police.rs):
-    // seed 12 passes both police tests at dy = -10, 0 and +10 m.
+    // seed 12 passes both police tests at dy = -10, 0 and +10 m. Merged with round 12 (cars
+    // race on their real limits, ~42 m/s at y = -230): the winner then passed the patrol on the
+    // y = -112 cross street at 44 over and was chased in the control run at every seed and heat.
+    // The finish moved to y = -300: finishes at -330 … -260 pass both runs (seeds 1, 5, 12, 20;
+    // heat 2.5-5.0).
     seed: 12,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,

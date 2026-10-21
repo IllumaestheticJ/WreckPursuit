@@ -235,7 +235,7 @@ impl Economy {
         })
     }
 
-    /// Apply an escape: bounty and rep by wanted level (scaled by the night bounty multiplier
+    /// Apply an escape: cash, bounty and rep by wanted level (scaled by the night bounty multiplier
     /// via `phase_bounty`, normally `stakes.day_phase[phase].bounty`).
     pub fn handle_escape(
         &self,
@@ -246,16 +246,18 @@ impl Economy {
         let b = &self.stakes.bounty;
         let bounty = money(b.escape[&level] as f32 * phase_bounty);
         let rep = b.escape_rep[&level];
+        let cash = money(b.escape_cash[&level] as f32 * phase_bounty);
         transact(acct, |tx| {
-            tx.note(
+            tx.post(
                 EventReason::Escape { level },
                 None,
                 Delta {
+                    cash,
                     rep,
                     bounty,
                     ..Delta::default()
                 },
-            );
+            )?;
             let h = &mut tx.acct.heat_history;
             h.escapes += 1;
             h.max_wanted = h.max_wanted.max(level);

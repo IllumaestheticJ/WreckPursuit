@@ -20,7 +20,7 @@
 | `Sim::entity_hashes() -> Vec<(EntityId, u64)>` | per-entity hash, ascending entity order (names the entity that diverged) |
 | `Sim::state_hash()` (changed) + `wp_sim::HASH_SPEC_VERSION = 1` | hash spec below |
 
-### Hash function spec (v3)
+### Hash function spec (v4)
 
 All hashing is FNV-1a 64 (`wp_math::StateHasher`, little-endian integer encoding). Floats are
 **quantised** before hashing: `round(v as f64 × scale) as i64` (`wp_math::quantize`; NaN →
@@ -33,6 +33,8 @@ state_hash = FNV( u32 HASH_SPEC_VERSION, u64 tick,
                   u64 World::state_hash()        // v2: signals + traffic (wp_world's own spec)
                   u64 PoliceSystem::state_hash() // v3: units, heat, pursuits (wp_police's own spec)
                   u32 debris_count, q(debris body translation, 1e-3 m) in spawn order,   // v2
+                  u32 barrier_count, for each roadblock barrier body in sync order:     // v4
+                      u32 tool id, q(body translation, 1e-3 m)
                   u32 vehicle_count,
                   u64 entity_hash(v) for v in vehicles ascending by EntityId )
 
@@ -47,8 +49,9 @@ entity_hash(v) = FNV( u32 entity id,
 ```
 
 v1 → v2 (run 3): added the world/traffic hash and debris bodies. v2 → v3 (run 5): added the
-police hash, because police units are not vehicles and would otherwise drift unnoticed. Every
-golden was re-blessed both times.
+police hash, because police units are not vehicles and would otherwise drift unnoticed. v3 → v4
+(run 9): added roadblock barrier bodies, which cars can now shove. Every golden was re-blessed
+each time.
 City props (parked cars, cones) are physics bodies but are not hashed yet (the sim keeps only
 their count); a prop knocked differently shows up through the vehicles it touches.
 
@@ -133,6 +136,171 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
   `wasm-determinism` module could host one).
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
+
+## Run 9c — `wanted_ai_racer_flees_police_through_the_city` fixed (2026-10-21)
+
+Red since `lead/city-residential` (7955480b): racer 1 drove 168 m after the call (needs ≥ 250).
+Junction 22 now runs a three-phase signal (≈ 63 s red per approach). The racer stops in the
+right-hand lane behind civilian 97, which waits at that red in the left lane with its left
+indicator on, 2.1 m to the side. When it flees, its route turns right from the lane it is
+already in. It still sat there until the light changed (t = 20 → 60 s). Three `wp_opponent` causes, all fixed in
+`crates/wp_opponent` (N's crate, listed here for N):
+1. **Cars behind a flight route's start were placed level with the racer.** An open corridor's
+   `project` clamps `s` to 0; a flight route starts at the racer, so racer 2, 7.5 m behind,
+   showed up at `ds −0.1`, overlapping. New `Corridor::project_unclamped` (s keeps its
+   distance past either end of an open route); used for flight-route perception only
+   (`perceive_on` vehicles, `civilians_on(.., private = true)`). The race corridor is unchanged.
+2. **A car right behind me in line blocked a pass as `LaneBehind`.** At a standstill
+   `v_s > v − 2` holds for any car behind, so the right-hand pass was refused and the racer
+   chose to pass on the far side of the civilian, through it from a standstill. A car directly behind me in line
+   (`|Δn| < half widths − 0.5`, as `engaged` already treats it) no longer counts: pulling
+   out does not cut it off.
+3. **Creeping round a parked car stopped at the 1 m stop gap** while still 0.28 m clear of
+   its body, only inside the margin, and a stopped car cannot move sideways. Now it keeps
+   creeping (`CREEP_MPS`) when its current footprint clears the car's body by
+   `CREEP_CLEAR_M` = 0.15 m and it is steering away from it.
+
+After: the test passes (seed 1). `simcli goldens`: all match. `cargo test --workspace
+--release --no-fail-fast`: red only in `wp_race` `opponent_pace::pace_scenarios_hold_their_ranges`,
+`race_picker::hollins_hill_sprint` and `race_vesper::hollins_drive_sprint_is_raced_to_the_top`.
+All three are red on the unchanged round12 code too. Hollins output is identical. The pace test
+goes from 26 out-of-range checks to 24, a subset of the 26.
+
+## Run 9e — Lantern stand-offs fixed, pace lock-in re-recorded (2026-10-21)
+
+`wp_race` `opponent_pace::pace_scenarios_hold_their_ranges` (release only; CI's debug run skips
+it): red since `lead/city-residential`, 21 checks out of range after Runs 9c and 9d. Two
+`wp_opponent` fixes for the Lantern stand-offs, then all ten `pace_*.ron` re-measured with the
+lock-in's own rule. Details, the before / after table and the reason for every moved range are
+in `docs/integration/opponent-pace.md` under "Re-lock 2026-10-21". In short:
+- A **civilian facing the racer** that it meets within 1.5 s enters the side constraints: the
+  racer keeps to its side instead of stopping for it (both used to wait for good). Civilians
+  only: with police units in it too, a Loop 9 seed boxed a racer in between standing units
+  (`race_picker::loop9_circuit` never finished).
+- A racer whose **reverse is cut short by the racer behind** sets `Obstacle::wants_room`; a
+  stopped racer right behind it backs off 1.6 s.
+- Lantern: 4 of 4 finish at both skills (was 1 and 2). Grid highway: about twice as slow as at
+  the old lock-in, with the losses in traffic (pace sweep: `civ` / `veh`), recorded as today's
+  times with that reason.
+
+Gate: see the commit. `simcli goldens` unchanged (the pace scenarios' goldens run them
+standalone, cars on the grid).
+
+## Run 9d — Hollins race tests fixed (2026-10-21)
+
+`wp_race` `race_picker::hollins_hill_sprint` (red since `lead/sim-perf`, 0159b2a8) and
+`race_vesper::hollins_drive_sprint_is_raced_to_the_top` (red since `lead/city-residential`,
+7955480b): 2 of 4 finished. city-residential's notes describe the cause and leave the fix open.
+The right grid column starts 2.5 m off the course line, on the verge. Racer 3 runs into a new
+street tree 19.5 m ahead and pins there, and the car behind waits on it for the rest of the race.
+Why it did not steer into its lane: **every car on a grid behind the start line had `s` clamped
+to 0**, the same open-corridor clamp as Run 9c. The staggered grid neighbours read as
+alongside (`ds = 0`), and the hard side constraints forbade the move toward them. Fix in
+`crates/wp_opponent` (N's):
+- `Racer::s_rel`: the racer's `s` without the end clamp (`Corridor::unclamped_s`). It is used
+  for every relative position (`rel`, parked / crawler checks), and racer obstacles carry it.
+- The shared corridor's vehicle and civilian obstacles use `project_unclamped` too, as flight
+  routes do since Run 9c.
+- Inside the course nothing changes (`s_rel == s`); only cars before the start line or past the
+  finish of an open course move.
+
+After: both Hollins tests pass; the flee test and every other `wp_opponent` test pass;
+`simcli goldens` all match. `cargo test --workspace --release --no-fail-fast` is red only in
+`opponent_pace::pace_scenarios_hold_their_ranges` (red since city-residential; Run 9e).
+
+## Run 9b — lead/round12 merged (2026-10-20, lead helper)
+
+Merged `origin/lead/round12` into `ws/harness` (merge commit). Conflict choices:
+- `Sim::state_hash` keeps v4 (roadblock barrier bodies) **and** round12's weather hash
+  (barriers first, then weather, then debris).
+- `wp_wasm::Session::run_tick`: the crash-replay snapshot at tick 0 is taken first, then the
+  scenario's police orders are applied (crash replays rerun `run_tick`, so orders reapply).
+- simcli: `police_orders` and `weather` scenario fields both kept; summary metrics
+  `max_spike_puncture`, `spiked_wheels`, `max_los_lost_s` (23 total); world metrics 17.
+- Testbed: round12 already draws spike strips (`render/police_tools.ts`, from
+  `map_dynamic()`), so `Scene.updatePoliceTools` now draws only the physical roadblock
+  barriers. Flat tyres scale the wheel `spin` group, so the panel-mesh wheels deflate too.
+- Goldens re-blessed `[bless]`. Before blessing, hashing as v3 (no barrier section) matched
+  every round12 golden bit-for-bit: the merge changes no round12 behaviour.
+  `golden_roadblock` / `golden_spike_strip` changed with round12's police and still pass.
+
+Gate: fmt ✓, `clippy --workspace -D warnings` ✓, wasm32 build ✓, lint-determinism 0 errors,
+`tsc` ✓, `npm run e2e:police` 7/7 (police are sim vehicles now; barriers still get shoved,
+tyres still go flat). `cargo test --workspace`: 1115 passed, 5 failed, all also failing on
+clean `origin/lead/round12` (not caused by this merge):
+`wp_opponent race::wanted_ai_racer_flees_police_through_the_city`,
+`wp_race race_picker::grid_highway_sprint` (never finishes),
+`wp_wasm race_tests::short_sprint_with_ai_…` (race not over in 120 s), and simcli
+`all_scenarios_pass…` / `goldens_match` through `city/siren_traffic_no_siren`
+(`civilian_collisions` 1, want 0). `clippy --all-targets` also flags
+`wp_audio/src/siren.rs:437` (`inconsistent_digit_grouping`, test code from round12).
+
+## Run 9 — roadblocks and spike strips you can see and hit (2026-10-20)
+
+Request: "police barricades you can actually see and hit, and spikes that burst your tyres".
+wp_police already planned roadblocks and spike strips and punctured tyres; the barriers had no
+body (cars drove through them) and the testbed drew neither tool.
+
+1. **Solid barriers** (`crates/wp_sim/src/police_tools.rs`, new). Each barrier of an active
+   roadblock is a dynamic Rapier box (size and 400 kg mass from `data/police/tools.toml`,
+   friction 0.7, restitution 0.05) yawed across the road. It is synced every tick after
+   police units and removed when the roadblock expires. Contacts reach damage like debris.
+   `Sim::roadblock_barriers()` / `spike_strips()` / `spike_puncture(id)` are the read side.
+   Barrier translations are in the state hash (**spec v4**). Every golden was re-blessed in
+   `7c22ed8 [bless]`; nothing but the version word changed in goldens without police tools.
+2. **Scenario `police_orders`**: `roadblock` / `spikes` captain orders (checked by wp_police
+   rules) and `roadblock_at` / `spikes_at` direct placement (flat world, no pursuit needed)
+   via new `PoliceSystem::place_roadblock_at` / `place_spikes_at`. Results go to
+   `summary.json` → `police_orders`. `simcli::run::apply_police_orders` is shared with the
+   WASM runner, so browser runs of these scenarios match simcli.
+3. **Metrics**: `max_spike_puncture` and `spiked_wheels` (per entity), plus
+   `roadblock_barriers_max`, `spike_strips_max` and `barrier_displaced_max_m` (world; these
+   work on the flat world too).
+4. **Goldens**:
+   - `golden_roadblock`: a sedan at 56 km/h hits a 3-barrier roadblock. It shoves a barrier
+     about 7.6 m, gets about 0.3 m of front crush and loses health.
+   - `golden_spike_strip`: a sedan at 90 km/h crosses a strip and all four tyres deflate.
+     A hard brake at 3 s leaves it at about 8.2 m/s at 5 s, against 6.0 m/s for an unspiked
+     control.
+5. **Testbed**:
+   - `police_tools()` returns 11 floats per tool (`[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]`).
+   - `tire_punctures()` returns 4 floats per vehicle: the max of spike and crash puncture.
+   - Barriers are drawn as white boxes with red bands and a flashing amber lamp. Spike strips
+     are a dark strip with two rows of steel studs.
+   - Punctured tyres are drawn squashed, at radius × (1 − 0.3p), which is the sim's
+     effective rolling radius.
+   - `npm run e2e:police` runs both goldens in the browser and checks:
+     - barriers are drawn;
+     - a barrier was shoved more than 0.3 m;
+     - the strip is drawn;
+     - all four tyres read above 0.5 deflated;
+     - both runs pass and match simcli;
+     - there are no page errors.
+     It passes. Screenshots are written to `$SHOTS`.
+
+Changes outside my crates (minimal, listed for the owners):
+- **wp_sim (lead):** the `police_tools` module, the `tool_bodies` field, the
+  `sync_police_tools()` call in the step, and `set_police` clearing the old bodies. Hash spec v4.
+- **wp_police (E):** `place_roadblock_at` / `place_spikes_at`. These bypass the dispatch rules
+  and are meant for scenarios and tests.
+- **wp_wasm / testbed (04):**
+  - wasm exports `police_tools`, `tire_punctures` and `police_tool_stride`;
+  - `Session` applies `police_orders`;
+  - testbed: `scene.ts` tool meshes, `vehicle_view.ts` `setPunctures`, the `main.ts` calls,
+    `layout.ts` / `sim.ts` bindings, and `e2e/police_tools.mjs`.
+
+Known gaps:
+- Spike strips have no body. The police hash counts strips, and punctures show up in the hash
+  through the wheel state of the vehicle.
+- Barriers never break apart.
+- The AI dispatcher places roadblocks on real roads only in a city. Captain orders on the
+  flat world are refused (`NotPursued`) because there are no units to start a pursuit.
+
+Checks: `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test
+--workspace --no-fail-fast` (784 passed, 0 failed, 15 ignored), wasm build (`npm run wasm`),
+`npm run typecheck`, `npm run e2e:police` (7/7), `simcli run apps/simcli/scenarios` (all pass),
+`simcli goldens` (all match), `simcli determinism apps/simcli/scenarios` (all deterministic),
+`tools/wasm-determinism/compare.sh` (native == wasm).
 
 ## Run 8 — response to lead feedback round 8 (2026-10-19)
 
@@ -490,6 +658,167 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. `crush_depth` → `DamageModel::structural_crush_m()` (B's request).
 2. Promote the observer soak civilian-collision gate (D says it passes; E may flip police back on).
 3. Run the slow city scenarios in the release CI jobs, per `lead/test-speed`.
+
+## Lead helper: debug vs release hashes (2026-10-20, branch `lead/det-debug-release`)
+Report (machine H, and `docs/integration/cars.md` "Lead follow-up round 12b"): on `lead/round12`
+every scenario with steering (`vehicle/coupe_slalom`, `smoke/coupe_circle`,
+`cars/beater_hard_turn`, …) hashed differently in a debug simcli than in the release simcli; the
+goldens matched debug; scenarios without steering (`cars/beater_accel`, `beater_top_speed`) matched
+both.
+
+**Root cause: a stale release binary, not a profile difference.** `cargo test` / `cargo run`
+rebuild simcli; `./target/release/simcli …` runs whatever was last built. A release simcli built
+from `05f92f8` (`lead/round12` before the handling-balance merge `f6e9ecb`, i.e. before
+`caa4797` slip-targeted keyboard/gamepad steering + ESC reference) and run against today's data and
+goldens reproduces the report exactly: `coupe_slalom` / `coupe_circle` differ from tick 960,
+`beater_hard_turn` from tick 720, while `beater_accel`, `beater_top_speed`, `sedan_brake`,
+`sedan_reverse` match. That steering change only moves scenarios with steering input, which is
+the whole pattern. (`tools/wasm-determinism/compare.sh` rebuilds simcli first, which is why
+native == wasm still held.)
+
+Fresh builds of `900261e` agree everywhere (4-core cloud container, AVX-512 + FMA, rustc 1.97.0):
+- `simcli goldens` output (every scenario, incl. slow/soak; the "now" hashes of the pre-existing
+  failures too) is byte-identical from the dev-profile and the release binary; `cargo test`'s
+  `goldens_match` reports the same failures (minus the slow scenarios it skips).
+- `simcli hashes` / `run --no-write` on the steering scenarios is identical across: dev profile
+  (the opt-level 2/3 overrides), dev with incremental + full debuginfo, dev with **every** crate at
+  opt-level 0, release, release with `-C target-cpu=native`, release with fat LTO +
+  `codegen-units=1`.
+- Not address- or memory-dependent: same hashes with ASLR off (`setarch -R`), `MALLOC_PERTURB_`,
+  tcache off / low mmap threshold.
+- Not CPU-dispatch dependent: `matrixmultiply` (runtime FMA/AVX dispatch) is not linked into
+  simcli; forcing glibc onto its non-FMA/AVX variants (`GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,…`)
+  leaves the hashes unchanged.
+- Our sim crates have no `mul_add`, `cfg(debug_assertions)`, `HashMap`/`HashSet`, env reads or
+  std transcendental calls in sim code. Rapier/parry use deterministic hashers (`IndexMap` + Fx)
+  under `enhanced-determinism`; their `cfg(debug_assertions)` blocks are assertion-only.
+
+So the Cargo.toml claim holds (rustc does not reorder or contract float ops at any opt-level)
+and nothing was changed in the simulation; **no goldens move** (no `[bless]` commit).
+`cars_beater_hard_turn`, blessed "with the debug binary" in `dba4862`, is identical in release.
+
+**Guard:** `tools/profile-determinism/compare.sh [scenario.ron|dir …]` (`just det-profiles`, also
+part of `just determinism` and a step in CI's determinism job) **rebuilds** simcli in both
+profiles, then requires byte-identical `simcli hashes` output. Default set: `vehicle/`, `smoke/`,
+`cars/` and `opponent/flee_police` (keyboard/gamepad steering, AI steering + ESC, traffic,
+police; 15 scenarios, ~15 s after the build). Rule of thumb for everyone: never compare or bless
+with a `target/*/simcli` you did not just build — use `cargo run [--release] -p simcli -- …` or
+run `cargo build [--release] -p simcli` first.
+
+Cross-machine note (not a profile issue, not changed here): rapier's joint-constraint builder,
+soft-constraint plasticity and parry's `TriMesh::compute_pseudo_normals` call the platform libm
+(`sincosf`, `powf`, `expf`, `acosf`) despite `enhanced-determinism`; glibc chooses the FMA or
+non-FMA variant per CPU. The vehicle scenarios above don't depend on it (the forced non-FMA run
+matched), and native == wasm holds, but if a future cross-machine mismatch involves joints or
+trimesh setup, look there first.
+
+## Merge of `main` into `ws/harness` (2026-10-21, PR #17)
+
+Owner instruction: resolve the conflicts on `ws/harness` and **keep main's highway layout**
+(grid viaduct with diamond ramps, Loop 9 as a divided highway with interchanges).
+
+**Layout.** Main's procgen / Vesper road plans win. Round 12's road surfaces (node patches,
+sidewalks, residential courts, decor, covered roads) are laid on top of them. Where the two
+clashed:
+- **Highway shoulders** (`wp_world::builder`): round 12's generic 3 m highway shoulder is not
+  added to the paved width of roads that set their own (`RoadSpec::shoulder_left_m` /
+  `shoulder_right_m`: main's carriageways and ramps). Without this, every carriageway was 3 m
+  wider each side and the median barrier sat inside the opposite carriageway. Junction
+  setbacks keep the generic shoulder, so main's spine-end junctions stay at 30 m (with 20 m,
+  three-lane turns collided in `tests/blocked.rs`).
+- **Hollins Tunnel**: one tube over both Loop 9 carriageways. The centreline runs midway
+  between them and the half width reaches the far paved edges. Per-carriageway tubes 14 m apart
+  overlapped, and the backfill over one buried the other.
+- **Founders Cut**: 105 m (was 250 m), north portal at (419.5, 1110). Its 7 m dip had pulled the
+  Uptown diamond's inner terminal down to z 16.3, so main's bridge over Loop 9 needed a 19.5 %
+  grade. The Uptown Connector now matches main (10.0 %, crest 0.18 g). The design floor in
+  `covered_roads_block_sight_in_and_out` moved from 200 m to 100 m; the road between the
+  junctions is only 377 m long and has to fit both 7 m ramps.
+- **Grid ramp terminals**: `TERMINAL_X_M` 22 → 21 m. Round 12's 3 m arterial median widened the
+  grid junctions (radius 9 → 10.5 m), so the block between a terminal and the next junction fell
+  to 12 m, below `default_city_shape`'s two-car minimum.
+- **Freeway merges / diverges** (radius-0 junctions) in `surface::nodes`: they are paved the way
+  main paves them (the carriageways run through; only the ramp's taper connectors are added).
+  They are flagged `overlapping_ends` (the ramp ribbon lies on the carriageway at its own bank,
+  up to 13 cm off on Loop 9's 6 % sweepers) and are not counted against the cap. Ends that only
+  touch (two carriageways sharing the median edge) no longer count as overlapping. A highway
+  kerb corner sharper than 75° is filleted instead of left as a sharp point.
+- **Deck rails** (`surface::rail_piece`, used by physics and the greybox): a ramp edge leaving
+  the carriageway gets its rail from where it leaves the carriageway's paving. Before, a 6 m
+  rail piece stood across the outer lane at every grid viaduct merge.
+- **Flat terrain**: main gave the grid a flat heightfield. `RoadNetwork::relief()` (terrain with
+  relief only) now decides round 12's lot width, wedges and slope support, so the grid keeps
+  its 9 m flat-city lots.
+- **Traffic LOD**: on demotion a car keeps up to a lane width of lateral offset (was ±1.5 m), so
+  a car demoted mid lane change on main's 3.7 m highway lanes carries on into the lane
+  instead of jumping 1.6 m.
+
+**Other merges.**
+- Road format v5 (main's `median_barrier` after round 12's v4).
+- Police: round 12's stuck-recovery phases plus main's pro driver (`pro_input`, used while the
+  siren is on).
+- Race: main's "leaving the route is never a DQ". The AI entrants' corridor gets a fixed
+  `AI_CORRIDOR_MARGIN_M`.
+- Steering: round 12's self-aligning steering is kept (the owner removed the yaw gyro), and
+  main's high-speed catch fix (4a4efba1) is **ported** onto it (owner call): the highway catch
+  (`steering::highway_catch`, a held key aims at the front axle's travel at 60 → 110 km/h, kept
+  on to straight and latched for the key held through a catch, snapshot format 9) and full
+  alignment of released keys at highway speed. Snap-back after a 150 km/h catch 4-8°
+  (keyboard and gamepad), lane change at 140 km/h 4-5° (was up to a spin). Details in
+  `crates/wp_vehicle/README.md`.
+- Police: expectations moved by main's maps re-measured (owner call), with reasons, in
+  `docs/integration/police.md`; `pro_input` no longer overwrites `planned_speed` (a blocked
+  siren unit never pushed).
+- Re-aimed on main's layout: race picker (Loop 9 vertex, grid sprint 1112 m), police race finish
+  (y = -300), off-route sprint inputs, pace lock-in (`docs/integration/opponent-pace.md`), the
+  Vesper e2e port loop, sidewalk mounts, siren yields, sideswipes, tunnel POIs (measured from the
+  portals). `wp_sim` sidewalk lot drives: -3.5 cm (a new residential verge case dips 3.0-3.2 cm).
+- Test expectations adjusted for main's layout: `city_v2` accepts the painted centre line under
+  the Route 40 West probe; `spawns_respect_sightline_and_active_area` waits 12 s (was 10 s) so
+  cars can finish a ramp-terminal junction before the old area must be empty.
+- Regenerated with the tools (`just city`, `just city-v2`, `just car-stats`); goldens
+  re-blessed in a `[bless]` commit.
+
+### Second merge of `main` (2026-10-21): detailed car models, freeway paint, ambush, fleets
+
+Main moved on while PR #17 was open (detailed car models, freeway paint, drawn / collision
+terrain, police ambush, multi-model traffic and police fleets). Merged again with the same rules.
+- **Car meshes**: main's new generator (format 2, `builder` / styles / wheels / mechanical) wins;
+  round 12's crumple binding is ported onto it as **mesh format 3** (= format 2 + `fold` on hood,
+  trunk, front-fender and rear-quarter panels; rigid parts never fold). Round 12's lens skinning
+  (head / tail lights crush with the end of the car) applies to the four head / tail lenses,
+  which now sit in `FrameFront` / `FrameRear` (`skin::is_lens`); main's other lamps (DRLs,
+  indicators, markers, fog lamps, light bars on lids) skin to their own region. Meshes
+  regenerated with `gen-car-mesh`. `lights_sit_outside_the_shell` re-aimed: it samples each lens's
+  outward faces instead of its bounding box (main's lamp housings / projectors / push bars cover
+  parts of the box on purpose; worst case 2 of 4 faces visible).
+- **Terrain**: main's `drawn_terrain` / `collision_terrain` replace the greybox's own coarse
+  terrain; round 12's surface meshes stay. One sidewalk width constant (`SIDEWALK_W_M`).
+- **Police**: main's ambush (`Intercept { ambush }`) next to round 12's backup / responder
+  spawns; round 12's backup and searching intercepts are plain (`ambush: false`).
+- **Traffic**: main's `cars: Vec<…>` models; round 12's blocked-car manoeuvres use the agent's
+  own model shape.
+- **Police, after the merge**: round 12's immediate backup (`call_backup`) also waits ahead of a
+  moving racer where it can get there first (`ambush_route`), as main's committed reinforcements
+  do. Main's `spawned_reinforcements_wait_ahead_facing_the_racers_way` used an empty patrol table
+  to force spawns, which since round 12 means a city without police; it now keeps one industrial
+  patrol and checks the spawned (`Reinforcement`) ambushers. A unit stopped head-on by a stopped
+  racer gets its unstick step after `HELD_CHASE_S` (3 s) instead of `HELD_AFTER_S` (20 s): on
+  Hollins Drive a responder and the AI field waited for each other for good (`hollins_hill_sprint`
+  1 of 4 finished; before the merge already 2 cars lost ~50 s there; now 4 of 4, 67-89 s).
+- **Main's new cars under round 12's rules**: `fulmine_v10`'s dual-clutch shift re-based 0.06 →
+  0.18 s (row 97, like `lindwurm_4t`) and round 12's damper ride rules applied to it, `sentinel_warden`
+  and `sentinel_harrier` (`build_roster.py`); recorded engine / world audio packs for all three.
+- **Audio**: `engine.second_layer_cull_scale` 0.25 → 1e-4. At 0.25 a near car's second layer
+  still beat a quiet traffic car's only layer at 130 m (the crowd test with main's roster), which
+  broke the documented "every main layer before anyone's second".
+- **wasm / testbed**: both APIs kept. `traffic_draw()` / `police_draw()` records gain a `model`
+  field (11 floats) and `session_car_models()` lists every traffic / police model
+  (`traffic`, `police`: `string[]`), so round 12's LOD fleet draws main's mixed fleets.
+- Regenerated with the tools: car meshes, `just city`, `just city-v2`, spec sheet
+  (`collect_results.py` + `specsheet.py`). `data/panels/junkyard_beater.json` is stale against
+  `gen-panels --check` on round 12 already (its car file was retuned there); left as it was.
+  `sentinel_harrier` fails the offset-40 % barrier expectation on main too.
 
 ## Lead helper note (2026-10-21): fuzz "below ground" failures were spawn-in-wall cases
 
