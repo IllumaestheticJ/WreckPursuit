@@ -97,10 +97,25 @@ c["ambient/city_night"] = samples(H, "city_night", H, True, 1.0)
 w["cues"] = dict(sorted(c.items()))
 save(w)
 
-s = copy.deepcopy(P("siren_proc"))
-s.update(id="siren_rec", fallback="siren_proc", description="Electronic siren loops cut from aquinn's 'Sirens and Alarm Noise' (CC0): wail (rise + fall), yelp, phaser, hi-lo. Play at their own cadence.")
-# +6 dB: the recorded loops sat ~7 dB under siren_proc (measured as for LEVEL_DB, police role).
-for k in s["cues"]: s["cues"][k] = samples("siren_rec", k.split("/")[1] + ".ogg", "siren_rec", True, round(10 ** (6.0 / 20), 3))
+# Police siren (owner: "police sirens seem unrealistic — use real sounds"): loops cut from real
+# recordings over the siren v2 synth, which stays the fallback (procedural mode, while the files
+# decode) and keeps the whoop and the air horn (no permissively licensed recording of either).
+# SIREN_GAIN puts the recorded loops (-16 LUFS files) at the synth's loudness: integrated loudness
+# of the parked 30 m renders of apps/testbed-web/e2e/siren_samples.mjs (--wav, Police bus only),
+# recorded vs siren_v2. At +5 dB they still sat 2.4 (wail, yelp), 1.8 (phaser) and 4.6 (hi-lo) LU
+# under the synth; +7.5 dB matches wail and yelp within 0.1 LU.
+SIREN_GAIN = round(10 ** (7.5 / 20), 3)  # +7.5 dB
+v2 = P("siren_v2")
+s = {"id": "siren_rec", "kind": "Siren", "fallback": "siren_v2", "cues": {},
+     "description": "Recorded police siren loops (whole natural cycles, played at their own cadence): wail, yelp and fast phaser from a "
+                    "fire-apparatus electronic siren (Heggyhomolit, CC0) and a German police two-tone for hi-lo (Work With Sounds / "
+                    "Konrad Gutkowski, CC-BY 4.0). Whoop and air horn stay synthesized (siren_v2)."}
+for k, c in v2["cues"].items():
+    if k in ("siren/whoop", "siren/airhorn"):
+        s["cues"][k] = copy.deepcopy(c)
+    else:
+        s["cues"][k] = dict(samples("siren_rec", k.split("/")[1] + ".ogg", "siren_rec", True, SIREN_GAIN), release_s=c.get("release_s", 0.15))
+s["cues"] = dict(sorted(s["cues"].items()))
 save(s)
 r = copy.deepcopy(P("radio_proc"))
 r.update(id="radio_rec", fallback="radio_proc", description="Scanner squelch bursts and static bed cut from a real scanner recording (Kresiek The Furry, Uniden SDS100, CC0).")
@@ -120,7 +135,7 @@ for f in sorted(os.listdir(os.path.join(A, "cars"))):
     if d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
         print(f"warning: cars/{f}: engine_pack {d['engine_pack']} is not a recorded pack")
     d["world_pack"] = "world_rec"
-    # Police cars use the synthesized siren v2 (playtest row 82); siren_rec stays available.
-    if d.get("siren"): d["siren"]["pack"] = "siren_v2"
+    # Police cars play the recorded sirens; siren_v2 (playtest row 82) is their fallback.
+    if d.get("siren"): d["siren"]["pack"] = "siren_rec"
     open(p, "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 print("ok")
