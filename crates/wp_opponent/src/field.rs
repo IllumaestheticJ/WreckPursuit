@@ -595,6 +595,9 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
+/// Lateral step between the pass positions tried beside a car (about a lane), m.
+const PASS_LANE_STEP_M: f32 = 3.5;
+
 /// The whole-road line never puts me on the opposing side this close to a junction, m.
 const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
 
@@ -3075,8 +3078,15 @@ fn plan_pass(
         [-1.0, 1.0]
     };
     let mut why = PassReject::NoRoom;
-    'side: for side in sides {
-        let n_pass = o.n + side * need;
+    // Right beside it first (preferred side, then the other), then a lane and two lanes
+    // further out: on a multi-lane road the lane next to it may hold a car abreast of it while
+    // the one beyond is empty (grid highway: passes were refused "lane ahead" with a free lane
+    // two over).
+    let candidates = [0.0f32, PASS_LANE_STEP_M, 2.0 * PASS_LANE_STEP_M]
+        .into_iter()
+        .flat_map(|extra| sides.map(|side| (side, extra)));
+    'side: for (side, extra) in candidates {
+        let n_pass = o.n + side * (need + extra);
         if alongside_towards(n_pass) {
             why = PassReject::TargetBusy;
             continue 'side;
