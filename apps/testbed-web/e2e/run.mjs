@@ -753,6 +753,84 @@ await shot("city_chase_greybox_toggle.png");
     `"Repair & continue": health ${after.health}, cash $${before.cashAfter} → $${after.cash} (paid $${before.cost}), panel closed`,
   );
 }
+// Helicopter (P9): at wanted level 3 a helicopter tracks the racer; at night (the chase is at
+// 23:00) it is drawn as an airframe with a spotlight on the car. The real launch takes 120 s at
+// night, so the e2e puts one up with the debug hook once the pursuit is on.
+{
+  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  const parked = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugParkNearPolice(wp.app.player, 14);
+          wp.sim.debugSetHeat(wp.app.player, 60);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const launched = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugLaunchHelicopter(wp.app.player, 120);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  // Drive off so the stop doesn't turn into a capture; the helicopter follows.
+  await page.keyboard.down("KeyW");
+  const tracking = await page
+    .waitForFunction(() => {
+      const h = window.__wp.sim.policeHelicopters();
+      return h.length >= 8 && (h[7] & 1) === 1 && window.__wp.scene.spotlightsLit > 0;
+    }, null, { timeout: 120000, polling: 100 })
+    .then(() => true)
+    .catch(() => false);
+  await page.waitForTimeout(800);
+  await page.keyboard.up("KeyW");
+  const heli = await page.evaluate(() => {
+    const wp = window.__wp;
+    const h = wp.sim.policeHelicopters();
+    const s = wp.sim.states();
+    const player = [s[1], s[2], s[3]];
+    return {
+      n: h.length / 8,
+      visual: (h[7] & 1) === 1,
+      alt: h[2] - player[2],
+      aimOff: Math.hypot(h[3] - player[0], h[4] - player[1]),
+      shown: wp.scene.helicoptersShown,
+      lit: wp.scene.spotlightsLit,
+      player,
+      heli: [h[0], h[1], h[2]],
+    };
+  });
+  await shot("helicopter_spotlight_chase.png");
+  if (shots) {
+    // Side-on view: the beam from the helicopter down to the car.
+    const p = heli.player;
+    await page.evaluate(([p, h]) => window.__wp.lookFrom([p[0] - 70, p[1] - 70, p[2] + 45], [(p[0] + h[0]) / 2, (p[1] + h[1]) / 2, (p[2] + h[2]) / 2]), [p, heli.heli]);
+    await page.waitForTimeout(400);
+    await shot("helicopter_spotlight_beam.png");
+  }
+  check(
+    parked && launched && tracking && heli.n === 1 && heli.visual && heli.shown >= 1 && heli.lit === 1 && heli.alt > 60 && heli.aimOff < 30,
+    `helicopter: launched ${launched}, ${heli.n} tracking with visual ${heli.visual}, ${heli.alt.toFixed(0)} m above the car, spotlight ${heli.aimOff.toFixed(1)} m off it, ${heli.lit} lit`,
+  );
+}
 // Career (machine G): garage → buy a beater → city chase with the career car → busted → garage
 // (car in the pound, saved to localStorage) → reload (the career survives) → release → repair
 // all → a new run uses the repaired car.
@@ -867,6 +945,68 @@ await page.evaluate(() => {
   document.getElementById("city").checked = false;
   window.__wp.startFreeDrive("debug_sedan", "Arcade", false);
 });
+
+// 4b. Mods you can see (render/mod_parts.ts): the shop installs a build, the sim drives the
+// modified car, every visible part is fitted on the panel mesh, and front parts leave with the
+// front bumper in a crash while the trunk wing stays.
+{
+  await page.evaluate(() => window.__wp.startFreeDrive("kestrel_ts", "Arcade", false, undefined, []));
+  await page.click("#mods-btn");
+  for (const id of ["aero_splitter", "aero_wing_2", "wheels_forged", "tires_wide", "brakes_kit_1"]) {
+    await page.click(`#mod-shop button[data-mod="${id}"]`);
+    await page.waitForTimeout(150);
+  }
+  const shop = await page.evaluate(() => ({
+    mods: window.__wp.sim.scenario().entities[0].mods ?? [],
+    status: document.querySelector(".mod-shop-status").textContent,
+  }));
+  // The GT wing needs the splitter: clicked in that order the whole build is legal.
+  check(shop.mods.length === 5 && !shop.status, `mod shop installs a build (${shop.mods.join(", ")})`);
+  await page.waitForFunction(() => window.__wp.app.views.get(window.__wp.app.player)?.fitted, null, { timeout: 20000 });
+  const fit = await page.evaluate(() => {
+    const v = window.__wp.app.views.get(window.__wp.app.player);
+    return { drawn: v.fitted.drawn, width: v.info.wheels[0].width_m, base: v.build.wheels[0].base_width_m };
+  });
+  check(
+    ["BrakeKit", "FrontSplitter", "RearWing", "Rims"].every((k) => fit.drawn.includes(k)) && Math.abs(fit.width - fit.base - 0.02) < 1e-4,
+    `build drawn on the car (${fit.drawn.join(", ")}) and the sim drives +2 cm tires (${fit.base.toFixed(3)} → ${fit.width.toFixed(3)} m)`,
+  );
+  await shot("mods_build.png");
+  // Remove everything again (and leave the viewer's saved build empty for the next checks).
+  await page.click('#mod-shop .mod-shop-head button[title="remove every mod"]');
+  await page.click('#mod-shop .mod-shop-head button[title="close"]');
+  const stock = await page.evaluate(() => (window.__wp.sim.scenario().entities[0].mods ?? []).length);
+  check(stock === 0, "mod shop: back to stock");
+
+  // Crash: a 40 km/h barrier hit dents the front parts with the bumper; the wing stays put.
+  await page.evaluate(async () => {
+    const wp = window.__wp;
+    const sc = JSON.parse(wp.sim.scenarioFromRon(await (await fetch("scenarios/crash/barrier_frontal.ron")).text()));
+    sc.panels = true;
+    sc.entities[0].car = "kestrel_ts";
+    sc.entities[0].mods = ["aero_splitter", "aero_wing_1", "prot_bumper_front"];
+    sc.entities[0].driver = { cruise: { target_mps: 11 } };
+    wp.runScenarioJson(JSON.stringify(sc));
+  });
+  await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] > 240 * 6.8, null, { timeout: 120000 });
+  await page.waitForTimeout(300);
+  // Largest vertex displacement from rest per mod piece (Infinity: it left with its region).
+  const moved = await page.evaluate(() => {
+    const v = window.__wp.app.views.get(window.__wp.app.player);
+    const out = {};
+    for (const name of v.panels.partNames()) {
+      if (!name.startsWith("mod_")) continue;
+      const m = v.panels.partMotion(name);
+      out[name] = m.hidden ? Infinity : m.disp;
+    }
+    return out;
+  });
+  check(
+    moved.mod_splitter > 0.05 && moved.mod_bull_bar > 0.05 && moved.mod_wing_street < 0.02,
+    `crash: splitter / bull bar follow the crushed front (${moved.mod_splitter?.toFixed(2)} / ${moved.mod_bull_bar?.toFixed(2)} m), wing stays (${moved.mod_wing_street?.toFixed(3)} m)`,
+  );
+  await shot("mods_crash.png");
+}
 
 // 5. Perf.
 if (process.env.BENCH) {

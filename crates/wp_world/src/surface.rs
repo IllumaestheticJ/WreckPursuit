@@ -10,6 +10,7 @@
 //!   with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
 //! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
+//! - [`deck_slabs`]: bridge-deck pieces that hide what is under them (line of sight);
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
@@ -1849,9 +1850,14 @@ pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
 /// which keeps the fine heights the sidewalks, lots and skirts are laid on. Drawn and solid
 /// ground agree everywhere else, so there is no hillside the player can hit but not see; the
 /// fine grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
-/// identical off the roads.
+/// identical off the roads. A flat field (e.g. a grid city's ground under a viaduct) is
+/// returned as it is: there is no hidden ground to remove, only the drawn mesh's 5 cm offset,
+/// and callers may tell a flat city by its terrain being uniform.
 pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
+    if t.z.iter().all(|z| *z == t.z[0]) {
+        return Some(t.clone());
+    }
     let keep = road_band(map, t);
     let drawn = t.coarse_under(TERRAIN_RENDER_M, &keep);
     let mut out = t.clone();
@@ -1906,6 +1912,85 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
         .filter(|s| s.median_barrier && s.centre.len() >= 2)
         .map(|s| surface_edges(s).0)
         .collect()
+}
+
+/// Clearance under a deck piece before it counts as cover for line of sight, m (a car fits).
+pub const DECK_COVER_CLEARANCE_M: f32 = 3.0;
+
+/// One piece of bridge deck between two surface centreline points: the paved strip from
+/// `left_m` left to `right_m` right of the centreline `a`→`b`, treated as a thin plane (bank
+/// ignored). Used by [`CityMap::line_of_sight`] so overpasses hide the road below them from a
+/// helicopter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeckSlab {
+    /// Centreline start (road height), m.
+    pub a: V3,
+    /// Centreline end, m.
+    pub b: V3,
+    /// Paved width left of the centreline, m.
+    pub left_m: f32,
+    /// Paved width right of the centreline, m.
+    pub right_m: f32,
+}
+
+impl DeckSlab {
+    /// Whether the 3D segment `p`→`q` passes through the slab. The slab is the plane through
+    /// the centreline that is level across the road; along the segment both the slab's height
+    /// under it and its own height are linear in the segment parameter, so there is at most one
+    /// crossing, found in closed form.
+    pub fn blocks(&self, p: V3, q: V3) -> bool {
+        let e = geom::sub(geom::xy(self.b), geom::xy(self.a));
+        let e2 = geom::dot(e, e);
+        if e2 < 1e-6 {
+            return false;
+        }
+        let (pp, d) = (geom::xy(p), geom::sub(geom::xy(q), geom::xy(p)));
+        // Along-slab parameter u(t) = u0 + du·t; slab height z0 + dz·u(t); segment p.z + sz·t.
+        let u0 = geom::dot(geom::sub(pp, geom::xy(self.a)), e) / e2;
+        let du = geom::dot(d, e) / e2;
+        let dz = self.b[2] - self.a[2];
+        let den = (q[2] - p[2]) - dz * du;
+        if den.abs() < 1e-6 {
+            return false; // parallel to the deck plane
+        }
+        let t = (self.a[2] + dz * u0 - p[2]) / den;
+        if !(0.0..=1.0).contains(&t) {
+            return false;
+        }
+        let u = u0 + du * t;
+        if !(0.0..=1.0).contains(&u) {
+            return false;
+        }
+        let at = geom::add(pp, geom::scale(d, t));
+        let rel = geom::sub(at, geom::xy(self.a));
+        // Signed offset, + right of the travel direction.
+        let lat = geom::dot(rel, geom::right_of(e)) / e2.sqrt();
+        lat >= -self.left_m && lat <= self.right_m
+    }
+}
+
+/// Bridge-deck pieces with at least [`DECK_COVER_CLEARANCE_M`] under their whole
+/// cross-section at both ends. Empty without terrain.
+pub fn deck_slabs(net: &RoadNetwork) -> Vec<DeckSlab> {
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground = |q: V2| t.height_at(q);
+    let gap = DECK_COVER_CLEARANCE_M;
+    let mut out = Vec::new();
+    for s in &net.surfaces {
+        for k in 0..s.centre.len().saturating_sub(1) {
+            if is_elevated(s, k, &ground, gap) && is_elevated(s, k + 1, &ground, gap) {
+                out.push(DeckSlab {
+                    a: s.centre[k],
+                    b: s.centre[k + 1],
+                    left_m: s.left_m,
+                    right_m: s.right_m,
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable
@@ -2418,6 +2503,48 @@ mod tests {
             looking_at_road * 100 >= total * 98,
             "{looking_at_road} of {total} kerb faces face the road"
         );
+    }
+
+    /// A level 10 m wide deck 8 m up, running +Y from (0, 0) to (0, 40), 4 m left / 6 m right.
+    fn slab() -> DeckSlab {
+        DeckSlab {
+            a: [0.0, 0.0, 8.0],
+            b: [0.0, 40.0, 8.0],
+            left_m: 4.0,
+            right_m: 6.0,
+        }
+    }
+
+    #[test]
+    fn deck_slab_blocks_only_rays_through_it() {
+        let d = slab();
+        let heli = [30.0, 20.0, 120.0];
+        // Under the deck (right of the centreline is +X here), and on top of it.
+        assert!(d.blocks(heli, [2.0, 20.0, 1.0]));
+        assert!(!d.blocks(heli, [2.0, 20.0, 9.0]));
+        // Beside the deck at ground level, past either edge or end.
+        assert!(!d.blocks([10.0, 20.0, 120.0], [10.0, 20.0, 1.0]));
+        assert!(!d.blocks([-6.0, 20.0, 120.0], [-6.0, 20.0, 1.0]));
+        assert!(!d.blocks([0.0, 50.0, 120.0], [0.0, 50.0, 1.0]));
+        // Left edge counts left_m, right edge right_m.
+        assert!(d.blocks([-3.5, 20.0, 120.0], [-3.5, 20.0, 1.0]));
+        assert!(d.blocks([5.5, 20.0, 120.0], [5.5, 20.0, 1.0]));
+        // Horizontal rays under or over it never cross the plane; order does not matter.
+        assert!(!d.blocks([-20.0, 20.0, 1.3], [20.0, 20.0, 1.3]));
+        assert!(d.blocks([2.0, 20.0, 1.0], heli));
+    }
+
+    #[test]
+    fn sloped_slab_follows_its_ramp() {
+        // Rises from 2 m to 10 m: a ray ending 5 m up blocks near the high end only.
+        let d = DeckSlab {
+            a: [0.0, 0.0, 2.0],
+            b: [0.0, 40.0, 10.0],
+            left_m: 4.0,
+            right_m: 4.0,
+        };
+        assert!(d.blocks([0.0, 36.0, 100.0], [0.0, 36.0, 5.0]));
+        assert!(!d.blocks([0.0, 4.0, 100.0], [0.0, 4.0, 5.0]));
     }
 }
 

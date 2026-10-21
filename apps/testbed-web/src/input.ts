@@ -68,6 +68,10 @@ export const getDeviceControls = (): Record<ControlDevice, DeviceControls> => de
  * the event, and never cleared by blocking: the test bars read these. */
 const rawHeld = new Set<string>();
 
+/** Is this key code held right now (game input not blocked)? Photo mode flies its free camera
+ * with fixed keys (WASD, Q/E, Shift/Alt) rather than the rebindable driving actions. */
+export const isHeld = (code: string): boolean => !blocked && held.has(code);
+
 /** `onKey` gets every game keydown (not repeats' edges; check `e.repeat`). */
 export function installKeyboard(onKey: (e: KeyboardEvent) => void): void {
   // First listener of all (window, capture): the raw key state for `probeInput`.
@@ -164,6 +168,15 @@ export function toggleHeadlights(): void {
   headlights = !headlights;
 }
 
+/** Drift Lab W: steer and throttle keys reach the sim raw (−1 / 0 / +1, 0 / 1), as in the
+ * reference ("keyboard input is raw"); the rack slew lives in wp_vehicle::plain. */
+let rawKeys = false;
+
+/** Turn raw keyboard steer / throttle on (Drift Lab W) or back to the normal key ramps. */
+export function setRawKeyboard(on: boolean): void {
+  rawKeys = on;
+}
+
 function ramp(cur: number, target: number, up: number, down: number, dt: number): number {
   const rate = Math.abs(target) > Math.abs(cur) || Math.sign(target) !== Math.sign(cur) ? up : down;
   const d = target - cur;
@@ -178,10 +191,15 @@ type KeyRamps = { steer: number; throttle: number; brake: number; clutch: number
 function stepKeyRamps(k: KeyRamps, on: (id: ActionId) => boolean, dt: number): void {
   const left = on("steerLeft") ? 1 : 0;
   const right = on("steerRight") ? 1 : 0;
-  k.steer = ramp(k.steer, right - left, 4.0, 6.0, dt);
+  // Steer keys go to the sim raw (−1 / 0 / +1), as in the owner's reference game: the key
+  // ramp is the car's steering model (wp_vehicle::steering::key_steer, or the plain rack in
+  // Drift Lab W), so replays, the AI and every client see the same steering path.
+  k.steer = right - left;
   // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s). With TCS
   // Off neither applies: the key is raw (row 104; the reference game's keyboard input is raw).
-  k.throttle = rawThrottle ? (on("throttle") ? 1 : 0) : ramp(k.throttle, on("throttle") ? 1 : 0, 12.0, 12.0, dt);
+  // Drift Lab W: always the raw throttle key (0 / 1).
+  const thrKey = on("throttle") ? 1 : 0;
+  k.throttle = rawKeys || rawThrottle ? thrKey : ramp(k.throttle, thrKey, 12.0, 12.0, dt);
   k.brake = ramp(k.brake, on("brake") ? 1 : 0, 6.0, 10.0, dt);
   // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
   k.clutch = ramp(k.clutch, on("clutch") ? 1 : 0, 10.0, 3.5, dt);

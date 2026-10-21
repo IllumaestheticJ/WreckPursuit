@@ -1,4 +1,4 @@
-//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats}/*.json`,
+//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats,mods}/*.json`,
 //! `data/modes/*.toml`) so new cars from other workstreams show up without code changes.
 //! Generates `$OUT_DIR/embedded_data.rs` with a `(kind, id, offset, len)` index into one
 //! deflate-compressed blob (`$OUT_DIR/embedded_data.bin`) of every file's text: the release wasm
@@ -17,18 +17,22 @@ fn main() {
         "/// `(kind, id, byte offset, byte len)` of every embedded data file in the inflated blob.\n",
     );
     out.push_str("pub static EMBEDDED_INDEX: &[(&str, &str, usize, usize)] = &[\n");
-    for (kind, ext) in [
-        ("cars", "json"),
-        ("lattices", "json"),
-        ("tires", "json"),
-        ("materials", "json"),
-        ("modes", "toml"),
+    for (kind, sub, ext) in [
+        ("cars", "cars", "json"),
+        // Drift Lab W reference-parity test cars: loadable by id, not in the roster.
+        ("parity", "cars/parity", "json"),
+        ("lattices", "lattices", "json"),
+        ("tires", "tires", "json"),
+        ("materials", "materials", "json"),
+        ("modes", "modes", "toml"),
         // Panel specs (workstream R); meshes stay files under data/panels/meshes/.
-        ("panels", "json"),
+        ("panels", "panels", "json"),
         // Menu stat bars (`simcli car-stats` → data/stats/cars.json).
-        ("stats", "json"),
+        ("stats", "stats", "json"),
+        // Mod catalog, so scenario entities can drive modified cars (`EntitySpec::mods`).
+        ("mods", "mods", "json"),
     ] {
-        let dir = data.join(kind);
+        let dir = data.join(sub);
         println!("cargo:rerun-if-changed={}", dir.display());
         for path in sorted_files(&dir, ext) {
             println!("cargo:rerun-if-changed={}", path.display());

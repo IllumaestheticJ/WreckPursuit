@@ -264,6 +264,10 @@ pub fn race_pace_in(
     let data_src = FsData::new(repo().join("data"));
     let built = build_sim(&sc, &data_src, &RunOptions::default()).unwrap();
     let mut sim = built.sim;
+    // The AI drives every seat, the player's car included: no player steering aids anywhere.
+    for &id in &built.ids {
+        sim.set_player_steering(id, Some(false)).unwrap();
+    }
     let ids = built.ids;
     let (race, kind, closed, seed) = plan(id, sim.world());
     let data = RaceData::embedded();

@@ -573,3 +573,29 @@ alone passed.
 - Shoulders count as paved on purpose. A lanes-only first version also moved the Grid highway
   and Loop 9 grids (outer column on the new highway shoulder) by about 2.2 m, and that alone
   turned `loop9_circuit` red (police-heavy and seed-fragile; see opponent-pace.md).
+
+## Playtest row 120 (lead, on `lead/round12`): bigger gates, reset onto the track
+
+Owner: "the race gates are too small; if they go too far off course, let them reset back onto
+the track".
+
+- **Gates** (`catalog::plan_course`): each gate spans the corridor + `GATE_CORRIDOR_MARGIN_M`
+  + `GATE_SLACK_M` (5 m) on each side, and is at least `MIN_GATE_WIDTH_M` (26 m). Only the next
+  gate counts and it must be crossed forwards, so a wider gate never credits a skipped one.
+  The testbed arch (`race_marker.ts`) is 8 m tall (was 5.5) with thicker posts, bar and arrow.
+- **Off-course reset** (`RaceJudge::set_reset_off_course`, on for every `LiveRace`): past
+  `corridor_grace_s` outside the corridor, the judge queues a `CourseReset` (the centreline
+  point where the racer was last inside the corridor, and the course direction there) instead
+  of `Dq(LeftCorridor)`. `StepOut::resets` carries them; the browser session puts the car on
+  the nearest clear lane spot there (`reset::reset_pose`), at rest, damage kept, logged as a
+  `ResetAt` op + ghost window, and relocates the racer in the judge. Replays apply the logged
+  op and now also relocate the racer on `Reset` / `ResetAt` ops (they did not before).
+  Server races (`wp_net`) and simcli races keep the DQ (the option is off by default).
+- `race_picker` applies the resets the same way (centreline point, `place_on_ground`).
+- No contract change.
+
+- Checks: fmt, clippy `-D warnings` (wp_race, wp_wasm), wasm build, `wp_race` + `wp_wasm` tests
+  pass except two that are red on `lead/round12` without this change too (same numbers):
+  `race_picker::grid_highway_sprint` (2 of 4 finish: one racer `Dnf(Fled)`) and
+  `wp_wasm race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
+  ("race not over in 120 s"), both on the grid highway sprint.

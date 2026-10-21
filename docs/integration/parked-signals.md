@@ -152,6 +152,42 @@ junction ahead is found (`dispatch.rs`), its unit test, `wp_wasm::police::turn_s
 (stuck-cop behaviour fixes, Loop 9, blessed goldens: separate work on an older base) and its
 own lamp meshes (we have the helper's `VehicleView` lamps).
 
+## 3. Parked cars in the ground (owner bug on preview 0.12.26, "Hollins Drive")
+
+**Reproduced** (`crates/wp_sim/tests/parked_ground.rs`: the static surface under each parked
+car's four wheel points and four body corners, corners a 0.15 m sill above the wheels): on
+Port Vesper v2, **671 of 2,026 parked cars sat more than 3 cm inside the surface** (worst
+0.76 m), **every one a driveway car** on a residential lot (`wp_world::residential::driveway_cars`):
+94 of the 176 parked cars around Hollins Heights. No kerbside car sank; the procedural grid
+had none. Cause: props were seated on `CityMap::ground_height` (the logical lot / road height)
+and a slope sampled 1 m around, not on the solid surface the browser draws (terrain and
+road / sidewalk meshes, "solid terrain = drawn terrain"), which on hillside lots is higher.
+
+**Fix (`wp_sim`, cities with terrain):** `Sim::set_world` seats every parked car from raycasts
+on the drivable ground colliders (road / sidewalk trimeshes, terrain heightfield:
+`PhysicsWorld::drivable_ground_z`) under its four wheels: pitch and roll fitted to them,
+lifted so no wheel is below the surface, 2 cm hover (so it sleeps). Spots where a car cannot
+stand are dropped: steeper than 0.15 along / 0.10 across, wheels more than 6 cm off one plane
+(straddling a kerb), a body corner in the ground, or something solid (tree trunk, hedge,
+fence, wall) in the footprint. **158 of 2,026 spots dropped** (1,868 parked cars remain,
+1,075 of them on driveways); `World::set_parked_cars` (one small setter in `wp_world`) keeps
+the world's list equal to the sim's, so police obstacles and resets see the same cars. The
+drawn car already follows the collider pose (`props_static()`), so drawn = solid.
+
+**Knocked / dented cars:** a resting prop on a hilly city ignores the terrain until it wakes;
+it used to get terrain contacts back only once faster than 0.5 m/s *after a 1 s settle
+window*, so a car knocked in the first second (or pushed slowly) was shoved 0.23–0.38 m into
+the hillside (reproduced near Hollins, also with dents off: a prop bug, not the lattice). Now
+it collides with terrain as soon as it turns dynamic (a mover is near; only the few active
+props). Dented cars keep the box's flat floor, so promotion never lowers them.
+
+**Test** (`parked_ground.rs`, 2.7 s debug): no parked car more than 3 cm in the surface in
+Port Vesper (worst now 1.7 cm *above*) and the grid (0), and the world keeps exactly the sim's
+cars; and after knocking six parked cars around Hollins Heights at 40 km/h (5 dented) and
+letting them settle, none is (deepest 1 mm). Goldens: `race_lantern_checkpoint` and
+`world_traffic_soak_vesper` re-blessed (the Vesper runs that meet parked cars; expectations
+all pass); the other 111 unchanged.
+
 ## Prior prototypes (lead request)
 - `claude/optimistic-wozniak-13v80v` `1617233` "prototype dentable parked cars": swaps a parked
   prop about to be hit for a full driverless `wp_sim` vehicle (Rapier chassis, wheels, vehicle
@@ -197,6 +233,8 @@ over the 300 limit), allocations chase 794 vs 847, rain 819 vs 835, phone 821 vs
 | 1 | `VehicleInput::signal: i8` (or a `lights: u8` bit field: left, right, hazards) | Player and police cars cannot indicate through the sim, the replay or the net today: `VehicleInput` has no field, only `TrafficAgentSnapshot.flags` (traffic) does. With it: police AI could indicate when pulling over a suspect, the player's stalk would reach other clients, and `wp_net` snapshots could carry it like brake lights. | contracts, wp_vehicle (pass-through), wp_net (snapshot flags), testbed (VehicleView lamps), simcli replay (input op) | proposed |
 
 ## Changes outside my crates
+- `crates/wp_world` (owner D): `World::set_parked_cars` (replace the parked list after the sim
+  seated them; used only by `Sim::set_world` on cities with terrain).
 - `apps/simcli` (owner 10): `Scenario::parked` + `ParkedSpec`, `PARKED_CAR`, `parked_*` world
   metrics, `SCENARIOS.md`, `scenarios/parked/*`, goldens; `parked: Vec::new()` in `fuzz.rs` and
   `examples/city_frame_cost.rs`.

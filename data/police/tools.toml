@@ -38,8 +38,16 @@ night = 45.0
 [helicopter]
 speed_mps = 55.0
 altitude_m = 120.0
-spotlight_half_angle_rad = 0.35
+# Spotlight beam (drawing / captain view only): about a 15 m pool from 120 m up.
+spotlight_half_angle_rad = 0.12
 max_track_s = 240.0
+# While it keeps visual the helicopter radios the racer's position this often (the radio's
+# unit_gap_s also limits it), s. Ground units chase the position it sees.
+position_report_s = 30.0
+# Visual is "lost" (radio line) after this long without line of sight: bridge decks, tunnels,
+# tall buildings and parking structures hide a car from the air. Short gaps (a lamp post's worth
+# of building edge) do not count, s.
+lost_visual_after_s = 3.0
 [helicopter.los_range_m]
 dawn = 450.0
 day = 500.0

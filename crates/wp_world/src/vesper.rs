@@ -3919,6 +3919,48 @@ mod tests {
     }
 
     #[test]
+    fn overpass_decks_hide_the_road_below_from_the_air() {
+        let (net, rep) = city();
+        let map = crate::map::CityMap::new(net.clone());
+        assert!(!map.decks().is_empty());
+        let z_on = |road: usize, p: V2| {
+            let s = &net.surfaces[road];
+            let pts: Vec<V2> = s.centre.iter().map(|q| geom::xy(*q)).collect();
+            let (at, _) = project2(&pts, &cum2(&pts), p);
+            geom::point_at(&s.centre, &geom::cumulative(&s.centre), at).0[2]
+        };
+        for c in &rep.crossings {
+            let (lo, hi) = (z_on(c.lower, c.pos), z_on(c.upper, c.pos));
+            // A helicopter 120 m up, a little off to the side.
+            let heli = [c.pos[0] + 20.0, c.pos[1] + 15.0, hi + 120.0];
+            let under = [c.pos[0], c.pos[1], lo + 1.0];
+            let on_deck = [c.pos[0], c.pos[1], hi + 1.0];
+            assert!(
+                !map.line_of_sight(heli, under),
+                "under the deck at {:?}",
+                c.pos
+            );
+            // ... because of the deck itself, not only the cutting's walls.
+            assert!(map.decks().iter().any(|d| d.blocks(heli, under)));
+            assert!(
+                map.line_of_sight(heli, on_deck),
+                "on the deck at {:?}",
+                c.pos
+            );
+            // Ground level beside the deck is not covered: a car on the lower road 60 m
+            // away is visible from straight above.
+            let s = &net.surfaces[c.lower];
+            let pts: Vec<V2> = s.centre.iter().map(|q| geom::xy(*q)).collect();
+            let cum = cum2(&pts);
+            let (at, _) = project2(&pts, &cum, c.pos);
+            let f = geom::cumulative(&s.centre);
+            let away = geom::point_at(&s.centre, &f, (at + 60.0).min(*f.last().unwrap())).0;
+            let above = [away[0] + 3.0, away[1] + 3.0, away[2] + 120.0];
+            assert!(map.line_of_sight(above, [away[0], away[1], away[2] + 1.0]));
+        }
+    }
+
+    #[test]
     fn terrain_stays_under_roads_and_buildings_sit_on_it() {
         let (net, _) = city();
         let t = net.terrain.as_ref().unwrap();

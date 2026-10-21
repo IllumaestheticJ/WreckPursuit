@@ -176,6 +176,35 @@ pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
     out
 }
 
+/// Floats per helicopter in [`helicopters`].
+pub const HELO_STRIDE: usize = 8;
+
+/// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
+/// cone_half_angle_rad, flags]`, flags 1 = has visual on its target. The aim point is where its
+/// spotlight points (the racer, or where it was last seen). Like [`units`], the helicopter's
+/// altitude is drawn above the ground under it; the aim point is on the road surface nearest the
+/// racer's height (the lower road under an overpass, not the deck).
+pub fn helicopters(p: &PoliceSystem, ground: &dyn Fn([f32; 2], Option<f32>) -> f32) -> Vec<f32> {
+    let mut out = Vec::new();
+    for h in p.helicopters() {
+        let xy = [h.pos[0], h.pos[1]];
+        let aim = [h.spotlight_target[0], h.spotlight_target[1]];
+        let z = ground(xy, None) + h.pos[2];
+        let aim_z = ground(aim, Some(h.spotlight_target[2]));
+        out.extend_from_slice(&[
+            xy[0],
+            xy[1],
+            z,
+            aim[0],
+            aim[1],
+            aim_z,
+            h.cone_half_angle_rad,
+            h.has_visual as u32 as f32,
+        ]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +217,7 @@ mod tests {
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
         assert!(units(&p, &|_| 0.0).is_empty());
+        assert!(helicopters(&p, &|_, _| 0.0).is_empty());
         assert_eq!(s.last_outcome, None);
         assert_eq!(s.outcome_age_s, None);
     }

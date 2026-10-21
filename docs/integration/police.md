@@ -1205,3 +1205,29 @@ The reset fixed the Hollins race deadlock this round's sight change exposed: a c
 and two captured racers were jammed in a hairpin.
 
 ### Rows 84, 86, 96, 75 — not started yet.
+## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
+
+Owner backlog item **P9 — Helicopter**: joins at wanted level 3, flies overhead, keeps you in
+sight, spotlight at night, radios your position to ground units; tunnels, covered roads and
+underpasses break its line of sight. Done by a lead helper in your crate (small, listed here so
+you can review):
+
+- Sightline height: the branch's own fix (`racer z + altitude_m` → `racer z + 1.0 m`) was
+  **dropped in the merge**; round 12's `eye_height_at(z)` target (af853e24) is kept as is.
+- `dispatch::helo_reports` + `PoliceSystem::helo_sight` (per tracking helicopter: line of sight,
+  visual as radioed, next report): "Air N: eyes on … Spotlight on." / "still on …, N km/h" every
+  `position_report_s` / "lost visual on … Units, check the cover." after `lost_visual_after_s`
+  without sight / "reacquired". These are the helicopter's own lines, beside `chatter.rs`'s
+  racer-level lost-visual / eyes-on-again calls. New `tools.toml [helicopter]` keys
+  `position_report_s = 30` and `lost_visual_after_s = 3` (validated); `spotlight_half_angle_rad`
+  0.35 → 0.12 (drawing only). `HeloView` gained `has_visual` and the racer's height as the aim z.
+- `PoliceSystem::debug_launch_helicopter(racer, offset_m)` (debug / e2e; `wp_wasm`
+  `debug_launch_helicopter`).
+- Test: `pursuit::tests::helicopter_joins_at_level_3_keeps_visual_and_loses_it_under_an_overpass`
+  (Port Vesper, both grade separations: none at L2, launches at L3, overhead, "eyes on", last
+  known position follows, lost under the deck after 3 s, last known stays outside, reacquired).
+- `wp_world` (D): bridge decks occlude `line_of_sight` (see `docs/integration/world.md`). This
+  applies to every sightline (ground units too: a car on the deck is hidden from a unit on the
+  road below and vice versa).
+- `wp_wasm`/testbed (C): `police_helicopters()` and the night spotlight on round 12's drawn
+  helicopter.

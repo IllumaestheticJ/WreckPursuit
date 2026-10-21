@@ -88,11 +88,13 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
             entities.push(EntitySpec {
                 id: format!("car{i}"),
                 car: car.clone(),
+                mods: Vec::new(),
                 pos,
                 yaw,
                 speed_mps: speed,
                 police_heat: 0.0,
                 assists: Some(assists),
+                player_steering: None,
                 tune: Default::default(),
                 driver: Default::default(),
                 inputs: random_inputs(&mut rng, cfg.case_seconds, kind > 0),

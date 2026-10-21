@@ -31,7 +31,7 @@ use crate::bridge::CityRace;
 use crate::catalog::{venue_pos, RaceDef};
 use crate::data::RaceData;
 use crate::entrants::{AiEntrant, AiEntrants};
-use crate::judge::{RaceJudge, RacePhase, RacerEntry, RacerSample};
+use crate::judge::{CourseReset, RaceJudge, RacePhase, RacerEntry, RacerSample};
 use crate::kind::{ClassBracket, EventId, VenueId};
 use crate::result::{DnfReason, RacerResult, RacerStatus};
 use crate::schedule::{MeetHeat, MeetHeatRules, Venue};
@@ -65,6 +65,9 @@ pub struct StepOut {
     pub reports: Vec<SimEvent>,
     /// Heat to add per racer (the stake's heat for illegal races, at the green light).
     pub add_heat: Vec<(EntityId, f32)>,
+    /// Racers that stayed off the course too long: move each car to the reset pose (on the
+    /// route, at rest) and call [`LiveRace::relocate`].
+    pub resets: Vec<CourseReset>,
 }
 
 /// One racer's live standing (HUD).
@@ -158,6 +161,9 @@ impl LiveRace {
             data.rules.for_kind(def.kind),
             race.course.clone(),
         );
+        // A picker race puts a car that wanders off the route back on it (the glue moves the
+        // car: `StepOut::resets`) rather than disqualifying it.
+        judge.set_reset_off_course(true);
         let mut order = Vec::new();
         for e in ai.iter().chain(std::iter::once(&player)) {
             judge
@@ -343,7 +349,8 @@ impl LiveRace {
     }
 
     /// Feed one stepped tick: `samples` for the racers, the tick's sim `events`, and the
-    /// police vehicles currently in the sim (contacts with them are not civilian hits).
+    /// police vehicles currently in the sim (contacts with them are not civilian hits; the
+    /// judge remembers every police id it has seen, see [`RaceJudge::add_police`]).
     pub fn post_step(
         &mut self,
         tick: u64,
@@ -352,7 +359,7 @@ impl LiveRace {
         police: &[EntityId],
     ) -> StepOut {
         self.last_tick = tick;
-        self.judge.set_police(police);
+        self.judge.add_police(police);
         for e in events {
             if let SimEvent::Police(PoliceEvent::PursuitEnded { racer, outcome, .. }) = e {
                 if outcome.is_capture() {
@@ -363,7 +370,10 @@ impl LiveRace {
         self.judge.observe(tick, samples, events);
         self.ai.report_to(&mut self.judge, tick);
 
-        let mut out = StepOut::default();
+        let mut out = StepOut {
+            resets: self.judge.drain_resets(),
+            ..StepOut::default()
+        };
         for sig in self.judge.drain_signals() {
             match &sig {
                 RaceSignal::Green { .. } => self.on_green(samples, &mut out),
@@ -551,5 +561,27 @@ mod tests {
         let st = live.standings();
         let two = st.iter().find(|s| s.racer == EntityId(2)).unwrap();
         assert_eq!(two.status, RacerStatus::Dnf(DnfReason::Captured));
+
+        // A police unit seen on one tick and despawned (retired) by the tick its contact is
+        // reported: still police, so a contact, not a civilian hit.
+        let unit = EntityId(500);
+        live.post_step(green + 3, &samples, &[], &[unit]);
+        let bump = SimEvent::Contact {
+            a: EntityId(3),
+            b: unit,
+            point: [0.0; 3],
+            normal: [1.0, 0.0, 0.0],
+            impulse_ns: 5000.0,
+            rel_speed: 4.0,
+        };
+        live.post_step(green + 4, &samples, &[bump], &[]);
+        let three = live
+            .judge()
+            .results()
+            .into_iter()
+            .find(|r| r.racer == EntityId(3))
+            .unwrap();
+        assert_eq!(three.civilian_hits, 0);
+        assert_eq!(three.contacts, 1);
     }
 }
