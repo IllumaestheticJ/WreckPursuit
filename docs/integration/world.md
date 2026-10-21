@@ -1386,8 +1386,18 @@ Gates met before: 1 of 10 runs (stop) / 5 of 10 (queue); after: 9 of 10 / 10 of 
 collisions in the pursuit melee (physical civilians shoved by units, wrecks) — not worse on
 average (103 → 88 over the 10 runs) but up on some seeds (Vesper 85: 1 → 14, the pursuit now
 runs through downtown instead of ending in the tunnel); needs its own pass.
+**Collision counter.** `civilian_collisions` now counts a pair that touches again within 2 s
+of separating once (`RETOUCH_STEPS`); before, a bump-part-bump was 2. Found on
+`city_siren_traffic_no_siren` (seed 2): one physical civilian drifts ~1 m off a 5.8 m/s left
+turn (the vehicle-side tracking issue noted in that scenario) and brushes a car on a path that
+is > 2.4 m away and so not a junction conflict; it was counted twice and failed the ≤ 1 gate.
+Sim hashes are unchanged by this. Over seeds 1–9 that scenario has 4 collisions on this branch
+and 4 on the lead tip (on different seeds).
+**Goldens** re-blessed (`[bless]` commit) for the row-85 traffic changes: city / siren /
+blocked / opponent / race / weather scenarios that run civilian traffic.
 **Changes outside wp_world:** `apps/simcli/src/run.rs` (4 metrics, `restart_after_capture`),
-`apps/simcli/src/scenario.rs` and `src/fuzz.rs` (the flag), `apps/simcli/SCENARIOS.md`,
+`apps/simcli/src/scenario.rs`, `src/fuzz.rs` and `examples/city_frame_cost.rs` (the flag),
+`apps/simcli/SCENARIOS.md`, `apps/simcli/golden/*` (bless),
 `apps/simcli/scenarios/jam/*.ron`; `crates/wp_wasm/src/scenario.rs` one-line
 `restart_after_capture: false` so the shared scenario struct still builds. Contract change
 requests: none.
