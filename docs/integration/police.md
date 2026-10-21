@@ -1242,6 +1242,10 @@ Red on plain `lead/main-sync` too, not police (left to main-sync):
 - `wp_race opponent_pace` grid_highway_sprint s50/s95: 0 finishers; police are off in those
   scenarios (start grid on the rebuilt highway).
 - `simcli city/tunnel_founders_cut_drive_through` path length 299 m (< 380).
+- web e2e `run.mjs` perf budgets under software GL (409k triangles > 400k, 323 draw calls > 300
+  on phone, 2.3 fps): main's heavier city geometry. `siren.mjs` audio frame 5–7 ms with sirens
+  on this container (1.6 ms in another run): load-dependent. The siren mode-change check was a
+  test bug (forcing the pattern the unit already played) and is fixed here.
 - 44 goldens mismatch identically on main-sync (same list with or without this branch); only
   the four police ones above are blessed here.
 
