@@ -1507,6 +1507,22 @@ pub fn career_new(mode: &str) -> Result<String, JsValue> {
     with_career(view_json)
 }
 
+/// Start a new career like [`career_new`] but with `starting_cash` instead of the market's
+/// (owner request 2026-10-21: preview / demo builds start with $150 000 so every feature can be
+/// tested). The economy tables are unchanged; only this career's opening balance differs.
+#[wasm_bindgen]
+pub fn career_new_with_cash(mode: &str, starting_cash: f64) -> Result<String, JsValue> {
+    let mode = crate::data::parse_mode(mode).map_err(crate::err)?;
+    detach_session();
+    let mut econ = crate::garage::with_economy(|e| e.clone());
+    econ.market.starting_cash = starting_cash.max(0.0).round() as wp_economy::Money;
+    let career = Career::new(econ, mode);
+    // Keep the shared tables for later runs: only the opening balance came from the override.
+    let econ = crate::garage::with_economy(|e| e.clone());
+    CAREER.with(|c| *c.borrow_mut() = Some(Career::from_profile(econ, career.profile)));
+    with_career(view_json)
+}
+
 /// Load a career save (localStorage or an imported file), replacing any current one. A run
 /// in progress is dropped. Returns the garage view JSON; an error leaves the current career.
 #[wasm_bindgen]

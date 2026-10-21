@@ -87,6 +87,17 @@ const rests = new Map<number, Float32Array>();
  * owner's playtest. */
 const DEFAULT_CAR = "lindwurm_4t";
 
+/** Opening balance of a new career in the testbed / preview / demo builds (owner request
+ * 2026-10-21: "$150K so I can test all features"). `?cash=<n>` picks another amount and
+ * `?cash=market` uses the real economy's starting cash (data/economy/market.toml). */
+const DEMO_CASH = 150_000;
+function newCareer(mode: string): CareerView {
+  const p = params.get("cash");
+  if (p === "market") return sim.careerNew(mode);
+  const n = p === null ? DEMO_CASH : Number(p);
+  return sim.careerNewWithCash(mode, Number.isFinite(n) && n >= 0 ? n : DEMO_CASH);
+}
+
 interface AppState {
   views: Map<number, VehicleView>;
   player: number;
@@ -279,7 +290,7 @@ async function main(): Promise<void> {
       }
     }
     if (!loaded) {
-      sim.careerNew("Arcade");
+      newCareer("Arcade");
       persistCareer();
     }
   }
@@ -307,7 +318,7 @@ async function main(): Promise<void> {
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
-    newCareer: (mode) => act(() => sim.careerNew(mode)),
+    newCareer: (mode) => act(() => newCareer(mode)),
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
     startRun: (kind) => void startCareerRun(kind),
