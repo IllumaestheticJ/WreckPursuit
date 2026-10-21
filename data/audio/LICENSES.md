@@ -35,6 +35,7 @@ These credits are also shown in the testbed's F1 help overlay.
 - [Emergency siren tones (wail, yelp, fast phaser) used on a fire engine (Wikimedia Commons)](https://commons.wikimedia.org/w/index.php?curid=12624440) — Heggyhomolit — CC0 1.0
 - [WWS Policecarsiren (Wikimedia Commons, Work With Sounds)](https://commons.wikimedia.org/wiki/File:WWS_Policecarsiren.ogg) — Work With Sounds / Konrad Gutkowski — CC-BY 4.0
 - [Radio Noise 1](https://opengameart.org/content/radio-noise-1) — Kresiek The Furry — CC0 1.0
+- [Balloon Sounds](https://opengameart.org/content/balloon-sounds) — AntumDeluge — CC0 1.0
 - [Crickets Ambient Noise - loopable](https://opengameart.org/content/crickets-ambient-noise-loopable) — Wolfgang_ — CC0 1.0 (mixed into `city_night.ogg`)
 
 ## Files
@@ -110,6 +111,8 @@ These credits are also shown in the testbed's F1 help overlay.
 | packs/radio_rec/static.ogg | CC0 1.0 | Kresiek The Furry | [Radio Noise 1](https://opengameart.org/content/radio-noise-1) | radio_noise_loop.wav | mono, 10 s (8 kHz source), crossfade loop 0.3s, -24 LUFS |
 | packs/radio_rec/squelch_on.ogg | CC0 1.0 | Kresiek The Furry | [Radio Noise 1](https://opengameart.org/content/radio-noise-1) | radio_noise_loop.wav | mono, 0.14s burst at 20.0s, exponential decay, peak −3 dBFS |
 | packs/radio_rec/squelch_off.ogg | CC0 1.0 | Kresiek The Furry | [Radio Noise 1](https://opengameart.org/content/radio-noise-1) | radio_noise_loop.wav | mono, 0.28s burst at 31.0s, exponential decay, peak −3 dBFS |
+| packs/world_rec/tire_burst_1.ogg | CC0 1.0 | AntumDeluge | [Balloon Sounds](https://opengameart.org/content/balloon-sounds) | balloon_pop.flac | mono, pop at ×0.55 + ×0.275 (−4.4 dB) for body, + steam_hiss.ogg tail (bart, CC0) as the air rush, peak −1 dBFS |
+| packs/world_rec/tire_burst_2.ogg | CC0 1.0 | AntumDeluge | [Balloon Sounds](https://opengameart.org/content/balloon-sounds) | balloon_pop.flac | mono, pop at ×0.65 + ×0.325 (−4.4 dB) for body, + steam_hiss.ogg tail (bart, CC0) as the air rush, peak −1 dBFS |
 
 ## Licence texts
 

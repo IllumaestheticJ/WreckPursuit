@@ -119,6 +119,14 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   supercharger whine follows rpm; overrun pops are Poisson via the seeded rng. Inputs are
   NaN-safe and decaying state is flushed to 0 below 1e-6 (no denormals). Engine sound stops
   when `Component::Engine` health is 0; radiator damage adds a hiss.
+- **Punctured tyres** (`flat_tyre.rs`, playtest row 132): on `PoliceEvent::SpikeHit` a loud
+  recorded blow-out (`tire/burst` in `world_rec`: CC0 balloon pop pitched down + air rush,
+  `tools/audio_packs/build_tyre.py`) per punctured wheel at `Critical` priority, plus a scanner
+  line ("Spikes hit! …"). The bridge feeds per-wheel deflation (`set_tire_deflation`, damage +
+  spikes as the sim combines them): each wheel ≥ 0.25 deflated plays `tire/flat_flap` (synth
+  `flap`, one slap per revolution: `freq_hz` = wheel rev/s), ≥ 0.9 grinds its rim (recorded
+  `scrape/metal`, pitched by wheel speed) until `wp_vehicle` reports rim contact. Tuning:
+  `audio_config.json` → `flat_tyre`.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)` with each wheel's
   own `TireDef` peaks (`TirePeak`, resolved at `register_car`; an all-terrain tire squeals
   later than a semi-slick; the `TireMix` peaks are only the fallback for an unknown tire);

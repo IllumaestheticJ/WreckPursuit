@@ -62,6 +62,8 @@ mod career_tests;
 #[cfg(test)]
 mod crash_replay_tests;
 #[cfg(test)]
+mod police_audio_trace;
+#[cfg(test)]
 mod race_tests;
 #[cfg(test)]
 mod run_tests;

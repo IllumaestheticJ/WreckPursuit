@@ -13,6 +13,10 @@ use wp_police::unit::{Assignment, Unit};
 pub const CLOSE_M: f32 = 45.0;
 /// A junction this close ahead on the unit's track = junction cue (phaser), m.
 pub const JUNCTION_AHEAD_M: f32 = 35.0;
+/// …and only when moving at least this fast and due there within `JUNCTION_AHEAD_S`, m/s.
+pub const JUNCTION_MIN_MPS: f32 = 6.0;
+/// Time to the junction for the junction cue, s.
+pub const JUNCTION_AHEAD_S: f32 = 2.5;
 /// Held behind a vehicle / waiting at a junction this long = blocked (yelp + air horn), s.
 pub const BLOCKED_AFTER_S: f32 = 0.8;
 /// …while moving slower than this, m/s.
@@ -38,7 +42,11 @@ pub fn unit_cue(u: &Unit, target_pos: &dyn Fn(EntityId) -> Option<[f32; 3]>) -> 
     if !parked {
         if let Some(j) = a.junction {
             let ahead = j.s - u.track_s;
-            if (-5.0..JUNCTION_AHEAD_M).contains(&ahead) {
+            let v = u.body.speed.abs();
+            if v >= JUNCTION_MIN_MPS
+                && (0.0..JUNCTION_AHEAD_M).contains(&ahead)
+                && ahead / v <= JUNCTION_AHEAD_S
+            {
                 return SirenCue::Junction;
             }
         }
