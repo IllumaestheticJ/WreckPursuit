@@ -223,7 +223,8 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
   with the unit's **pro driver** (`pro.rs`, below) on top of that controller.
 - **Headless units**: `step_ground` steers with the same controller, then moves a kinematic bicycle
   body. The body keeps right (`LANE_OFFSET_M`), saturates at a grip limit, crashes when it runs
-  wide and has a background traffic-hazard model. Track progress only moves forward
+  wide and has an opt-in background traffic-hazard model (`PoliceSetup::hazards`, off by
+  default; only for runs without real traffic). Track progress only moves forward
   (`Track::project_ahead`), so hairpins and U-turns don't snap back.
 
 Police keep only the speed planning (corner speeds, caps, tactics).

@@ -1434,3 +1434,23 @@ police unit) with line of sight within the new `heat.caller_range_m` (dawn 50 / 
 35 m, `data/police/heat.toml`); otherwise it adds no heat and opens no report. Units and cameras are
 unchanged. Headless runs without `set_obstacles` keep the old behaviour (caller assumed). Test:
 `tests/system.rs::unseen_violation_needs_a_civilian_caller_nearby`.
+- An idle patrol / reinforcement committed as backup (within 700 m) now also gets an ambush when it
+  can make one in time (`dispatch::ambush_route`): it routes from its current position and heading
+  (`start_node`, +3 s if it must turn around first) to the same wait points
+  (`dispatch::ambush_waits`, shared with the spawn search). Skipped when the unit is on the
+  racer's road itself or its route would use it; then it intercepts as before.
+- Ambushers join `Pursue` only once ≥ 5 m past their junction and facing within ~45° of the
+  racer's line (one joined while still turning in from its side road).
+- Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
+  patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).
+
+### Follow-up: traffic-hazard stand-in is opt-in (owner request, 2026-10-21)
+
+- `PoliceSetup::default()` now has `hazards: false`. The statistical traffic model (random near
+  misses / collisions for headless units) is only for runs without real traffic; `wp_sim` already
+  turned it off explicitly (PR #34), since its `wp_world` traffic is reported as obstacles.
+- Explicit setters are unchanged: simcli and the tuning-dash probe still pass
+  `hazards: sc.traffic_cars`, `apps/ui-kit/tools/record-police` and the `wp_net` city tests pass
+  `true`. The one behaviour change is `wp_opponent/tests/common` (police-heat runs on a real
+  `wp_sim` city), which inherited `true` and now gets `false`.
+- Test: `lib.rs::tests::traffic_hazard_stand_in_is_opt_in`.

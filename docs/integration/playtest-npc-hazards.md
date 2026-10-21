@@ -21,6 +21,5 @@ traffic twice, and the invisible half of it was dice rolls.
   with the old setting).
 
 ## Requests
-- **Police (optional):** consider defaulting `PoliceSetup::hazards` to `false` so the stand-in
-  is opt-in for headless tools (simcli and the tuning-dash probe already set it explicitly).
-  `wp_opponent/tests/common` still inherits the default `true`.
+- ~~**Police (optional):** default `PoliceSetup::hazards` to `false`.~~ Done 2026-10-21 (see
+  `docs/integration/police.md`, "traffic-hazard stand-in is opt-in").
