@@ -166,6 +166,28 @@ After: the test passes (seed 1). `simcli goldens`: all match. `cargo test --work
 All three are red on the unchanged round12 code too. Hollins output is identical. The pace test
 goes from 26 out-of-range checks to 24, a subset of the 26.
 
+## Run 9d — Hollins race tests fixed (2026-10-21)
+
+`wp_race` `race_picker::hollins_hill_sprint` (red since `lead/sim-perf`, 0159b2a8) and
+`race_vesper::hollins_drive_sprint_is_raced_to_the_top` (red since `lead/city-residential`,
+7955480b): 2 of 4 finished. city-residential's notes describe the cause and leave the fix open.
+The right grid column starts 2.5 m off the course line, on the verge. Racer 3 runs into a new
+street tree 19.5 m ahead and pins there, and the car behind waits on it for the rest of the race.
+Why it did not steer into its lane: **every car on a grid behind the start line had `s` clamped
+to 0**, the same open-corridor clamp as Run 9c. The staggered grid neighbours read as
+alongside (`ds = 0`), and the hard side constraints forbade the move toward them. Fix in
+`crates/wp_opponent` (N's):
+- `Racer::s_rel`: the racer's `s` without the end clamp (`Corridor::unclamped_s`). It is used
+  for every relative position (`rel`, parked / crawler checks), and racer obstacles carry it.
+- The shared corridor's vehicle and civilian obstacles use `project_unclamped` too, as flight
+  routes do since Run 9c.
+- Inside the course nothing changes (`s_rel == s`); only cars before the start line or past the
+  finish of an open course move.
+
+After: both Hollins tests pass; the flee test and every other `wp_opponent` test pass;
+`simcli goldens` all match. `cargo test --workspace --release --no-fail-fast` is red only in
+`opponent_pace::pace_scenarios_hold_their_ranges` (red since city-residential, see Known gaps).
+
 ## Run 9b — lead/round12 merged (2026-10-20, lead helper)
 
 Merged `origin/lead/round12` into `ws/harness` (merge commit). Conflict choices:

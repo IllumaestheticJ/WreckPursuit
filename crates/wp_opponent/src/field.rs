@@ -321,6 +321,9 @@ struct Racer {
     pos: V2,
     fwd: V2,
     s: f32,
+    /// `s` without the clamp at the ends of an open course (negative on a grid behind the
+    /// start line): where cars are relative to each other.
+    s_rel: f32,
     n: f32,
     v: f32,
     v_s: f32,
@@ -614,6 +617,7 @@ impl Field {
                 pos: [0.0; 2],
                 fwd: [0.0, 1.0],
                 s: 0.0,
+                s_rel: 0.0,
                 n: 0.0,
                 v: 0.0,
                 v_s: 0.0,
@@ -1030,6 +1034,7 @@ impl Field {
                 r.pos = pos;
                 r.fwd = fwd;
                 r.s = cp.s;
+                r.s_rel = corridor.unclamped_s(pos, &cp);
                 r.n = cp.n;
                 r.hint = cp.index;
                 r.v = st.speed_mps;
@@ -1361,7 +1366,7 @@ impl Field {
                         let unstable = r.unstable || r.running_wide || r.tactic == Tactic::Reverse;
                         out.push(Obstacle {
                             who: Who::Racer(k),
-                            s: r.s,
+                            s: r.s_rel,
                             n: r.n,
                             v_s: r.v_s,
                             v_n: r.v_n,
@@ -1382,7 +1387,7 @@ impl Field {
                 continue;
             }
             let hint = self.hints.get(&v.entity).copied();
-            let cp = self.corridor.project(pos, hint, 60);
+            let cp = self.corridor.project_unclamped(pos, hint, 60);
             self.hints.insert(v.entity, cp.index);
             if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
@@ -1593,7 +1598,7 @@ fn decide_racer(
         // to get round a pulled-over racer just ahead.
         let parked_ahead = obstacles.iter().any(|o| {
             o.parked && o.who != Who::Racer(k) && {
-                let ds = corridor.delta_s(r.s, o.s);
+                let ds = corridor.delta_s(r.s_rel, o.s);
                 ds > -(hl + o.half_len) && ds < 60.0
             }
         });
@@ -1610,7 +1615,7 @@ fn decide_racer(
         let crawler_ahead = r.blocked_s > 4.0
             && obstacles.iter().any(|o| {
                 !matches!(o.who, Who::Racer(_)) && o.v_s > 0.5 && o.v_s < crawl_mps && {
-                    let ds = corridor.delta_s(r.s, o.s);
+                    let ds = corridor.delta_s(r.s_rel, o.s);
                     ds > 0.0 && ds < 40.0
                 }
             });
@@ -1632,7 +1637,7 @@ fn decide_racer(
             .iter()
             .filter(|o| o.who != me_who && !matches!(o.who, Who::Vehicle(e) if e == r.entity))
             .map(|o| {
-                let ds = corridor.delta_s(r.s, o.s);
+                let ds = corridor.delta_s(r.s_rel, o.s);
                 let gap = ds.abs() - hl - o.half_len;
                 Rel { o: *o, ds, gap }
             })
@@ -2604,13 +2609,9 @@ fn civilians_on(
             }
         }
         let Some((_, hint)) = near else { continue };
-        let window = (range / CORRIDOR_STEP_M) as usize + 5;
-        // A private (flight) route starts at the racer: cars behind its start stay behind.
-        let cp = if private {
-            c.project_unclamped(p, Some(hint), window)
-        } else {
-            c.project(p, Some(hint), window)
-        };
+        // Beyond the ends of an open course (a grid behind the start line, a flight route that
+        // starts at the racer) a car keeps its distance instead of landing on the end.
+        let cp = c.project_unclamped(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
         // The whole road, opposing lanes included: a racer passing over there must see
         // what stands in them.
         let (l, rr) = c.pass_bounds(cp.s);
