@@ -568,6 +568,8 @@ struct V2Score {
     crosses: Vec<f32>,
     at_flick: Vec<f32>,
     v_flick: Vec<f32>,
+    /// Settle times of the caught flicks (9 = never settled), s.
+    settles: Vec<f32>,
 }
 
 /// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
@@ -607,6 +609,7 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
                     sc.at_flick.push(t.at_flick);
                     sc.v_flick.push(t.v_flick);
                     if t.caught {
+                        sc.settles.push(t.settle_s.unwrap_or(9.0));
                         if let Some(x) = t.cross_s {
                             sc.crosses.push(x);
                             if (0.5..=0.8).contains(&x) && t.settle_s.is_some_and(|s| s <= 0.5) {
@@ -753,7 +756,7 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                     "fast": sc.fast, "cross_med": sc.cross_med,
                     "flick_deg_mean": sc.at_flick.iter().sum::<f32>() / sc.at_flick.len().max(1) as f32,
                     "flick_kmh_mean": sc.v_flick.iter().sum::<f32>() / sc.v_flick.len().max(1) as f32,
-                    "crosses": sc.crosses,
+                    "crosses": sc.crosses, "settles": sc.settles,
                     "steer": steer,
                 })
             );
