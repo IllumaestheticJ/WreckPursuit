@@ -7,14 +7,15 @@
 
 ## Exposes
 - `wp_render::Scene::{new, sync(&Sim, frame_dt), set_static_boxes, set_city, city,
-  traffic_mesh, cars, car, wheel_meshes}`: renderer-side copy of the sim. Read-only on the sim.
+  traffic_mesh, lighting, lights, lights_near, cars, car, wheel_meshes}`: renderer-side copy of the sim. Read-only on the sim.
 - `wp_render::{SkinnedBody, CarMesh, CarMeshLibrary, CityMesh, ChaseCamera, CameraView,
-  StaticBox, Vertex}`. `CityMesh` reads the `data/city/<id>.greybox.glb` files `tools/city-import`
+  StaticBox, Vertex, Lighting, SpotLight}`. `CityMesh` reads the `data/city/<id>.greybox.glb` files `tools/city-import`
   writes (format: `data/city/README.md`).
-- Feature `gpu`: `wp_render::gpu::{Renderer, Offscreen, Lighting, write_png}` and a re-export
-  of the `wgpu` it was built with.
-- `testbed-native --features gpu`: `--gpu [--city ID]` (3D window) and `--shot` (headless PNG,
-  `--city`, `--height`, `--distance`). See
+- Feature `gpu`: `wp_render::gpu::{Renderer, Offscreen, write_png}` and a re-export of the
+  `wgpu` it was built with. The renderer takes its lighting from the scene (`Lighting` moved
+  from `gpu` to `wp_render::lighting`).
+- `testbed-native --features gpu`: `--gpu [--city ID] [--hour H]` (3D window) and `--shot`
+  (headless PNG, `--city`, `--hour`, `--height`, `--distance`). See
   `crates/wp_render/README.md`.
 
 ## Needs
@@ -37,7 +38,7 @@ None. Everything used is already public in `wp_sim` / `wp_damage` / `wp_contract
 - `apps/testbed-native` (workstream 04): new optional feature `gpu` (`src/gpu_view.rs`, a
   `main.rs` hook, Cargo deps). Default and existing features are untouched, so CI still builds
   only the headless smoke run. Later: `--city ID` for the window and `--shot`, `--height` /
-  `--distance` for `--shot`, and `session_in_city` in `main.rs`.
+  `--distance` for `--shot`; `--hour` for both (`gpu_view::FreeDrive`).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
