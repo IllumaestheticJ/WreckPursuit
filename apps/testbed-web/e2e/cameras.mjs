@@ -109,7 +109,7 @@ for (let i = 0; i < modes.length; i++) {
     await page.keyboard.up("KeyV");
     check(back.includes("look back"), "V held: look-back view (HUD shows it)");
   }
-  await page.keyboard.press("KeyC");
+  await page.keyboard.press("F3");
 }
 const back = await camPose();
 check(
