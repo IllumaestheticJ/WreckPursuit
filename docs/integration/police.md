@@ -580,6 +580,44 @@ with the same hash on the lead tip. Goldens moved and re-blessed: golden_city_ch
 opponent_circuit_8x5, opponent_flee_police, opponent_open_roads_traffic,
 police_tunnel_escape_founders_cut_control, world_traffic_soak_observer.
 
+*Lead items (opponent-pace / round 12 vehicle merge): Loop 9 DQ, Hollins deadlocks, passby turn.*
+- **Loop 9 LeftCorridor DQ.** A unit was given a racer to chase while that racer was coming at
+  it. Its new route lay behind it, so it arced across the road at walking pace into the field,
+  the racer hit it and left the corridor. Now a unit whose way lies behind it holds straight in
+  its lane while a car in front of it closes within 4 s (for a pursuer: a racer). It doesn't
+  start a turn-round then either. A pursuer whose target comes straight at it waits for it to go
+  by.
+- **Hollins deadlocks.** (1) A unit without lights never passed a stopped car near a junction
+  (the red-light-queue rule), even a car that was waiting for it. After 12 s it passes anyway
+  (`avoid::QUEUE_DEADLOCK_S`). (2) Last resort: a unit that gave up and has stood within 3 m of
+  one spot for 30 s with a racer within 20 m despawns even in view
+  (`PoliceStats::deadlock_despawns`; owner row 78 allows a quick visible police reset, spawns
+  still never happen in view).
+- **Holding still in reverse.** The new waits braked with the brake pedal, which in reverse
+  drives the car backwards: a unit backing up while it held accelerated away (`wp_wasm` capture
+  tests). `hold_pedals` brakes with the throttle when rolling backwards. Other police cars no
+  longer count as closing traffic.
+- **`wp_sim police_passby` (Vesper, parked cop: facing the player 5.4 s after the pass, bound
+  4 s).** Since round 12's vehicle changes, reverse takes about 1 s to engage from a standstill,
+  and the full-lock reverse arc turned only 0.9 rad in 3 s. A standing unit with room for the
+  turning circle now U-turns forward. The three-point reverse swing stays for narrow streets.
+  Passes (3 of 3).
+
+| | lead/round12 bcc57094 | this branch on bcc57094 | lead/round12 0bc27d29 | this branch on 0bc27d29 |
+|---|---|---|---|---|
+| Loop 9 seeds 1–6, LeftCorridor DQs | 6 (one per seed, opponent-pace's report) | 0 | — | 1 (seed 4; also on 0bc27d29) |
+| Hollins seeds 1–8 finishers / races that never end | 19 / 2 (opponent-pace's report) | 24 / 1 | 20 / 1 | 18 / 1 |
+
+0bc27d29 brought in opponent-pace's new capability table and pace changes, and they move these
+seed-by-seed results a lot. On that tip this branch and the lead tip are about level on Hollins.
+Seed 6 never ending is a fled racer parked in the first hairpin with the field behind it (police
+are only at the tail of that queue). **For N / opponent-pace:** on this branch the default
+`loop9_circuit` seed panics in `wp_opponent/src/corridor.rs:243` (`Option::unwrap()` on `None`):
+the racer AI crashes on some car position instead of handling it. Gate on 0bc27d29 + this
+branch: fmt / clippy clean; `wp_police`, `wp_sim`, `wp_wasm --lib` (86) pass; `wp_race` 6 of 7
+(`loop9_circuit`, above); 109 of 109 scenarios; goldens re-blessed (14 files, listed in the
+`[bless]` commit).
+
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
 pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit
