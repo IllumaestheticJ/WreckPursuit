@@ -9,7 +9,7 @@
 import type { VoicePool } from "./voices";
 import type { RadioPriority } from "./types";
 
-const RADIO_PACK = "radio_proc";
+const RADIO_PACK = "radio_rec";
 
 export interface RadioLog {
   line: number;

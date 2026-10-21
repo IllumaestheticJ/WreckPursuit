@@ -165,7 +165,21 @@ Status 2026-10-20: **`world_rec` shipped** (the network now reaches kenney.nl an
 - New `build.py` options: `track_hz`/`flatten_hz`, `resample`, `band_hz`/`air`, `lowpass_hz`.
 - 6 new sources, CC0 pages checked. e2e: 132 files decode, 0 fallbacks after loading.
 
-Still procedural: radio, surfaces, suspension, plastic scrape, body rattle.
+### Recorded radio, surfaces and suspension (2026-10-21, follow-up 3)
+- `world_rec`: rolling loops for all 8 surfaces (asphalt = tyres coasting with the engine off,
+  concrete = onboard rolling, wet asphalt = gritty wet tyres, gravel = close-miked gravel tyres,
+  dirt = fast dirt-road drive, grass = 4x4 grass track low-passed, curb = rumble strip, metal =
+  bridge decking), `tire/scrub_loose` (gravel crunch), `suspension/thump` (6 hits from an
+  interior rough-road drive, a speed bump and a road bump) and `suspension/land` (3 heavier hits).
+  Picked by a steady-window search (level sd ≤ 1.7 dB, low engine tone); thumps low-passed at
+  1.5 kHz. Surface loops set `root_speed_mps` (estimated: 10–20 m/s).
+- New `radio_rec` (scanner): 2 key-up squelches, 3 end-of-transmission squelches, 2 static
+  beds; `scanner.ts` uses it (`radio_proc` stays as fallback).
+- `build.py`: `highpass_hz` variant option, `root_speed_mps` cue field.
+- 21 new sources, CC0 pages checked. e2e: 164 files decode; the scanner's squelch/static play
+  recorded.
+
+Still procedural: plastic scrape, body rattle (no usable CC0 recordings picked yet).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -186,8 +200,8 @@ Still procedural: radio, surfaces, suspension, plastic scrape, body rattle.
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
 - Engines (incl. turbo/supercharger/blow-off), sirens, collisions, glass, debris, scrapes, squeal
-  and horns are recorded; radio and surfaces are procedural placeholders. Blow-off is an air-valve
-  stand-in. V8s above ≈ 3350 rpm are
+  horns, radio, surfaces and suspension are recorded; plastic scrape and body rattle are
+  procedural placeholders. Blow-off is an air-valve stand-in; surface root speeds are estimates. V8s above ≈ 3350 rpm are
   pitch-stretched recordings.
 - Recorded cut points and gains come from onset/decay/pitch analysis, not listening; tune by ear in
   `tools/audio-packs/<pack>.json`.
