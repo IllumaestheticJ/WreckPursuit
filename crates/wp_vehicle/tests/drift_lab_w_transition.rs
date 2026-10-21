@@ -30,7 +30,7 @@ fn lift_flicks_swing_through_with_the_transition_rack() {
     car_lab::set_override(Some(CarTune::spin_candidate()));
     grip_lab::set_override(Some(GripBalance::lab_default()));
     ride_lab::set_override(Some(RideTune::firm()));
-    for id in ["parity_rwd_d", "parity_rwd_a"] {
+    for id in ["parity_rwd_d", "parity_rwd_a", "parity_rwd_b"] {
         let c = car(id);
         let (mut settled_off, mut settled_on) = (Vec::new(), Vec::new());
         for lift in [0.15f32, 0.25, 0.4] {

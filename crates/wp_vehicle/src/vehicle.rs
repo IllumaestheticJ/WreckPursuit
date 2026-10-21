@@ -263,6 +263,11 @@ pub struct Vehicle {
     /// |Body slip| at the last steering-key reversal, rad (grip lab's transition release).
     reversal_slip: f32,
     last_key_sign: f32,
+    /// Time since the body slip crossed from one side (≥ 10°) to the other (≥ 10°), s (plain
+    /// steering only; the new-side catch, `plain::PlainSteer::trans_catch_gain`).
+    since_cross_s: f32,
+    /// Side of the last slide past 10° of body slip (±1, 0 = none yet).
+    last_slide_side: f32,
     /// Tyre-slip lab (`crate::car_lab::CarTune::rack_compliance`): road-wheel angle the
     /// compliant rack / column yields to the front tyres' steering-axis moment, rad. 0 when off.
     rack_yield: f32,
@@ -406,6 +411,8 @@ impl Vehicle {
             since_reversal_s: 1.0e3,
             reversal_slip: 0.0,
             last_key_sign: 0.0,
+            since_cross_s: 1.0e3,
+            last_slide_side: 0.0,
             rack_yield: 0.0,
             slide_class: slide_class_with_rear_lock(def, diffs.rear.power_lock()),
             throttle_f: 0.0,
@@ -580,6 +587,8 @@ impl Vehicle {
         self.since_reversal_s = 1.0e3;
         self.reversal_slip = 0.0;
         self.last_key_sign = 0.0;
+        self.since_cross_s = 1.0e3;
+        self.last_slide_side = 0.0;
         self.throttle_f = 0.0;
         self.brake_f = 0.0;
         self.tcs = Tcs::default();
@@ -1182,6 +1191,20 @@ impl Vehicle {
             if key != 0.0 {
                 self.last_key_sign = key;
             }
+            // Slide crossing (a transition): the body slip past 10° on the other side from the
+            // last slide past 10°.
+            let slip = body_slip(v_fwd, v_left);
+            let side = if sliding { slip.signum() } else { 0.0 };
+            let crossed =
+                side != 0.0 && self.last_slide_side != 0.0 && side != self.last_slide_side;
+            self.since_cross_s = if crossed {
+                0.0
+            } else {
+                (self.since_cross_s + dt).min(1.0e3)
+            };
+            if side != 0.0 {
+                self.last_slide_side = side;
+            }
             self.throttle_f = thr_in;
         } else {
             // TCS Off = the throttle the driver presses (owner row 104): no pedal filter; the
@@ -1504,6 +1527,7 @@ impl Vehicle {
                     slide_growth: rear_axle.signum() * self.drift.rear_slip_rate,
                     since_lift_s: self.since_lift_s,
                     since_reversal_s: self.since_reversal_s,
+                    since_cross_s: self.since_cross_s,
                 },
                 &p,
                 dt,
