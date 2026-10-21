@@ -434,22 +434,26 @@ fn synthetic_highway_and_closure() {
     let midtown = |p: V2| (-200.0..0.0).contains(&p[1]) && (p[0] + 1200.0).abs() < 25.0;
     let mercer = |p: V2| (1000.0..1600.0).contains(&p[1]) && (p[0] + 1200.0).abs() < 25.0;
     let median = |p: V2| (p[0] + 1200.0).abs() < 3.0 && (-200.0..1600.0).contains(&p[1]);
-    eprintln!(
-        "rails {} fence {} sound {} jersey {}",
-        count(K::GuardRail, &raised),
-        count(K::Fence, &midtown),
-        count(K::SoundWall, &mercer),
-        fs.iter().filter(|f| f.kind == K::JerseyBarrier).count()
+    // Barrier length (box lengths) in a region: pieces are joined into runs, so count metres.
+    let metres = |k: K, pred: &dyn Fn(V2) -> bool| {
+        fs.iter()
+            .filter(|f| f.kind == k && pred(centre2(f)))
+            .map(|f| match f.shape {
+                crate::network::FeatureShape::Box { half, .. } => 2.0 * half[1],
+                _ => 0.0,
+            })
+            .sum::<f32>()
+    };
+    let (rails, fence, sound) = (
+        metres(K::GuardRail, &raised),
+        metres(K::Fence, &midtown),
+        metres(K::SoundWall, &mercer),
     );
-    assert!(
-        count(K::GuardRail, &raised) >= 60,
-        "rails on the embankment"
-    );
-    assert!(count(K::Fence, &midtown) >= 30, "fence by the offices");
-    assert!(
-        count(K::SoundWall, &mercer) >= 100,
-        "sound walls by the houses"
-    );
+    eprintln!("rails {rails:.0} m, fence {fence:.0} m, sound walls {sound:.0} m");
+    // Two outer edges (the median edge has none) along each stretch.
+    assert!(rails >= 650.0, "rails on the embankment: {rails} m");
+    assert!(fence >= 340.0, "fence by the offices: {fence} m");
+    assert!(sound >= 1000.0, "sound walls by the houses: {sound} m");
     for k in [K::GuardRail, K::Fence, K::SoundWall] {
         assert_eq!(count(k, &median), 0, "{k:?} in the median");
     }

@@ -75,8 +75,130 @@ fn build(ctx: &Ctx) -> Vec<Feature> {
     nature::scattered(&env, &fm, &mut out);
     // Final guard: nothing on road paving unless it is overhead.
     out.retain(|f| off_road(ctx, f));
+    let mut out = join_runs(ctx, out);
     // The one exception: closures where roads leave the map.
     bounds::closures(&env, &mut out);
+    out
+}
+
+/// Longest barrier box [`join_runs`] makes, m.
+const JOIN_MAX_M: f32 = 30.0;
+/// Largest sideways offset of a joined piece's ends from the joined box's axis, m.
+const JOIN_TOL_M: f32 = 0.15;
+
+/// Barrier kinds whose consecutive straight pieces are joined into longer boxes.
+fn joinable(k: FeatureKind) -> bool {
+    use FeatureKind as K;
+    matches!(
+        k,
+        K::GuardRail | K::SoundWall | K::Fence | K::QuayWall | K::Hedge | K::Wall | K::MapEdge
+    )
+}
+
+/// A flat (unpitched) barrier box as a segment: ends `a → b`, half thickness, z range.
+#[derive(Clone, Copy)]
+struct Seg {
+    a: V2,
+    b: V2,
+    half_w: f32,
+    lo: f32,
+    hi: f32,
+}
+
+fn seg_of(f: &Feature) -> Option<Seg> {
+    if !joinable(f.kind) {
+        return None;
+    }
+    match f.shape {
+        crate::network::FeatureShape::Box {
+            centre,
+            half,
+            yaw,
+            pitch: 0.0,
+        } => {
+            let (s, c) = wp_math::sin_cos(yaw);
+            let d = [-s * half[1], c * half[1]];
+            Some(Seg {
+                a: [centre[0] - d[0], centre[1] - d[1]],
+                b: [centre[0] + d[0], centre[1] + d[1]],
+                half_w: half[0],
+                lo: centre[2] - half[2],
+                hi: centre[2] + half[2],
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Joins runs of consecutive barrier pieces (same kind, material, thickness; end to start;
+/// nearly collinear; similar heights) into boxes up to [`JOIN_MAX_M`] long, which keeps the
+/// collider count down without opening gaps. A joined box that would touch road paving is
+/// left as its pieces.
+fn join_runs(ctx: &Ctx, feats: Vec<Feature>) -> Vec<Feature> {
+    let mut out: Vec<Feature> = Vec::with_capacity(feats.len());
+    let mut run: Vec<(Feature, Seg)> = Vec::new();
+    let flush = |run: &mut Vec<(Feature, Seg)>, out: &mut Vec<Feature>| {
+        if run.len() >= 2 {
+            let (f0, s0) = &run[0];
+            let b = run[run.len() - 1].1.b;
+            let lo = run.iter().fold(f32::MAX, |m, (_, s)| m.min(s.lo));
+            let hi = run.iter().fold(f32::MIN, |m, (_, s)| m.max(s.hi));
+            let joined = super::ctx::box_on(
+                f0.kind,
+                f0.material,
+                [(s0.a[0] + b[0]) * 0.5, (s0.a[1] + b[1]) * 0.5],
+                lo,
+                [2.0 * s0.half_w, geom::dist(s0.a, b), hi - lo],
+                super::ctx::yaw_of(s0.a, b),
+                f0.solid,
+            );
+            if off_road(ctx, &joined) {
+                out.push(joined);
+                run.clear();
+                return;
+            }
+        }
+        out.extend(run.drain(..).map(|(f, _)| f));
+    };
+    for f in feats {
+        let Some(s) = seg_of(&f) else {
+            flush(&mut run, &mut out);
+            out.push(f);
+            continue;
+        };
+        let fits = run.first().is_some_and(|(f0, s0)| {
+            let last = run[run.len() - 1].1;
+            let axis = geom::sub(s.b, s0.a);
+            let len = geom::dist(s.b, s0.a);
+            if f0.kind != f.kind
+                || f0.material != f.material
+                || f0.solid != f.solid
+                || (s0.half_w - s.half_w).abs() > 1e-3
+                || geom::dist(last.b, s.a) > 0.8
+                || !(1e-3..=JOIN_MAX_M).contains(&len)
+            {
+                return false;
+            }
+            let u = geom::scale(axis, 1.0 / len);
+            let off = |p: V2| {
+                let q = geom::sub(p, s0.a);
+                (q[0] * u[1] - q[1] * u[0]).abs()
+            };
+            let tall = run.iter().fold(s.hi - s.lo, |m, (_, x)| m.max(x.hi - x.lo));
+            let lo = run.iter().fold(s.lo, |m, (_, x)| m.min(x.lo));
+            let hi = run.iter().fold(s.hi, |m, (_, x)| m.max(x.hi));
+            run.iter()
+                .map(|(_, x)| x)
+                .chain(std::iter::once(&s))
+                .all(|x| off(x.a) <= JOIN_TOL_M && off(x.b) <= JOIN_TOL_M)
+                && hi - lo <= tall + 0.5
+        });
+        if !fits {
+            flush(&mut run, &mut out);
+        }
+        run.push((f, s));
+    }
+    flush(&mut run, &mut out);
     out
 }
 
