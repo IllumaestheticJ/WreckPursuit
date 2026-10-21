@@ -192,14 +192,14 @@ export class SceneView {
   /**
    * Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent): the real
    * fleet cars once their meshes load (render/traffic_models.ts), boxes until then / without
-   * a fleet.
+   * a fleet; `trailers` (traffic_trailers()) adds the semis' trailers.
    */
-  updateAgents(agents: Float32Array, skipPhysical = false): void {
+  updateAgents(agents: Float32Array, skipPhysical = false, trailers?: Float32Array): void {
     const total = agents.length / AGENT_STRIDE;
     const show = layers.on("traffic");
     let only: Set<number> | null = null;
     if (this.traffic.active) {
-      only = new Set(this.traffic.update(agents, skipPhysical, show));
+      only = new Set(this.traffic.update(agents, skipPhysical, show, trailers));
     }
     this.agentMesh.visible = show && total > 0 && (only === null || only.size > 0);
     if (!this.agentMesh.visible) {

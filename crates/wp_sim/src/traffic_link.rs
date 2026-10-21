@@ -33,6 +33,13 @@ impl Sim {
         self.traffic_fleet = cars;
     }
 
+    /// Trailers the traffic fleet's models tow (index = fleet model; `None` = no trailer). A
+    /// promoted agent of a towing model gets its trailer hitched (see [`crate::hitch`]),
+    /// swung to where its kinematic trailer was. Set after [`Sim::set_traffic_fleet`].
+    pub fn set_traffic_fleet_trailers(&mut self, trailers: Vec<Option<crate::TrailerSpec>>) {
+        self.traffic_fleet_trailers = trailers;
+    }
+
     /// After the world step: give promoted agents a vehicle, remove demoted / despawned ones.
     pub(crate) fn apply_traffic_lod(&mut self) {
         for change in self.world.drain_lod_changes() {
@@ -66,7 +73,16 @@ impl Sim {
         let Some(car) = fleet_car.or_else(|| self.traffic_car.clone()) else {
             return;
         };
-        if self.vehicles.len() + TRAFFIC_SLOT_RESERVE >= MAX_VEHICLES {
+        let trailer = if self.traffic_fleet.is_empty() {
+            None
+        } else {
+            self.world
+                .agent_model(agent)
+                .and_then(|m| self.traffic_fleet_trailers.get(m as usize).cloned())
+                .flatten()
+        };
+        let slots = 1 + trailer.is_some() as usize;
+        if self.vehicles.len() + slots + TRAFFIC_SLOT_RESERVE > MAX_VEHICLES {
             return;
         }
         let Some(state) = self
@@ -98,6 +114,20 @@ impl Sim {
             slot.traffic_agent = Some(agent);
         }
         self.world.set_agent_entity(agent, Some(id));
+        if let Some(t) = trailer {
+            // Line the trailer up with the kinematic one: kingpin on the fifth wheel, heading
+            // from its axle group to the fifth wheel.
+            let fw = [
+                state.pos[0] - wp_math::sin_cos(yaw).0 * t.fifth_wheel_m[1],
+                state.pos[1] + wp_math::sin_cos(yaw).1 * t.fifth_wheel_m[1],
+            ];
+            let trailer_yaw = self
+                .world
+                .traffic_agent(agent)
+                .and_then(|a| a.trailer_axle())
+                .map(|ax| wp_math::atan2(-(fw[0] - ax[0]), fw[1] - ax[1]));
+            let _ = self.hitch_trailer_at(id, &t.car, t.fifth_wheel_m, t.kingpin_m, trailer_yaw);
+        }
     }
 
     /// Before the vehicle step: traffic drivers' inputs into their vehicles.

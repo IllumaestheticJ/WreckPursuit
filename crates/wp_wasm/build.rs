@@ -1,4 +1,4 @@
-//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats}/*.json`,
+//! Embeds every data file the browser needs (`data/{cars,trailers,lattices,tires,materials,panels,stats}/*.json`,
 //! `data/{modes,fleets}/*.toml`) so new cars from other workstreams show up without code changes.
 //! Generates `$OUT_DIR/embedded_data.rs` with one `(kind, id, contents)` table.
 
@@ -12,6 +12,8 @@ fn main() {
     out.push_str("pub static EMBEDDED: &[(&str, &str, &str)] = &[\n");
     for (kind, ext) in [
         ("cars", "json"),
+        // Semi-trailers towed by fleet semis.
+        ("trailers", "json"),
         ("lattices", "json"),
         ("tires", "json"),
         ("materials", "json"),

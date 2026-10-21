@@ -55,8 +55,8 @@ pub use props::{PropKind, StaticProp};
 pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
 pub use traffic::{
-    AgentId, AgentView, FleetFile, FleetModel, Hazard, Lod, LodChange, PhysicalAgent,
-    TrackedVehicle, TrafficConfig, TrafficStats, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
+    AgentId, AgentView, FleetFile, FleetModel, FleetTrailer, Hazard, Lod, LodChange, PhysicalAgent,
+    TrackedVehicle, TrafficConfig, TrafficStats, TrailerPose, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
 };
 pub use violations::{ViolationConfig, ViolationTracker};
 
@@ -209,6 +209,11 @@ impl World {
                 .set_fleet_car(i, car.def.clone(), car.tires.clone());
         }
         self.traffic.config.fleet = models;
+    }
+
+    /// A traffic agent by id.
+    pub fn traffic_agent(&self, agent: AgentId) -> Option<&traffic::Agent> {
+        self.traffic.agents().iter().find(|a| a.id == agent)
     }
 
     /// Fleet model index of a traffic agent (0 without a fleet).

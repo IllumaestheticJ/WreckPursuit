@@ -173,6 +173,20 @@ export const sim = {
       return [];
     }
   },
+  /** Trailer id each traffic fleet model tows ("" = none), in model order (empty without a fleet). */
+  trafficFleetTrailers: (): string[] => {
+    const fn = (wasm as unknown as { traffic_fleet_trailers?: () => string }).traffic_fleet_trailers;
+    try {
+      return typeof fn === "function" ? (JSON.parse(fn()) as string[]) : [];
+    } catch {
+      return [];
+    }
+  },
+  /** Kinematic agents' trailers: [agent index, x, y, z, yaw] each (TRAILER_STRIDE). */
+  trafficTrailers: (): Float32Array => {
+    const fn = (wasm as unknown as { traffic_trailers?: () => Float32Array }).traffic_trailers;
+    return typeof fn === "function" ? fn() : new Float32Array(0);
+  },
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
   /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */

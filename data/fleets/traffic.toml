@@ -5,7 +5,8 @@
 # `length_m` / `width_m` set its spacing and overlap box (bumper to bumper, from the car's
 # body_size_m); `max_speed_kmh` caps its desired speed (truck governors); `accel_scale` and
 # `headway_scale` scale the sampled driver (heavy vehicles pull away slowly, leave more room).
-# Promoted (near-player) agents become the named car with full physics.
+# Promoted (near-player) agents become the named car with full physics. `[model.trailer]`
+# hitches a semi-trailer (wp_world::FleetTrailer).
 # Used when a scenario sets `fleets: true` (the browser free drive and city chase do).
 
 # --- everyday cars
@@ -150,8 +151,18 @@ width_m = 2.5
 weight_city = 0.3
 weight_highway = 6.0
 max_speed_kmh = 100.0
-accel_scale = 0.5
-headway_scale = 1.4
+accel_scale = 0.4
+headway_scale = 1.5
+
+# Every highway semi tows a 40 ft dry van (data/trailers/box_trailer.json): it adds ~10 m
+# behind the tractor for spacing, swings behind the fifth wheel, and is a real hitched trailer
+# once the rig is promoted to physics (wp_sim::hitch).
+[model.trailer]
+car = "box_trailer"
+fifth_wheel_m = [0.0, -2.0, 1.22]
+kingpin_m = [0.0, 5.2, 1.22]
+length_m = 12.2
+axle_y_m = -4.65
 
 [[model]]
 car = "quarry_tipper"

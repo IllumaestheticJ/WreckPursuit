@@ -5,6 +5,8 @@
 // meshes: painted bodywork (tinted per agent from the car's own palette by its variant),
 // everything else with baked vertex colours, and glass. So a city full of traffic costs three
 // draw calls per model in view. Physical (near-player) agents are full VehicleViews instead.
+// Semis tow a trailer (data/trailers/<id>.json, its own panel mesh), placed from
+// traffic_trailers() the same way; a promoted rig's trailer is a sim vehicle.
 //
 // Coordinates: chassis space (+X right, +Y forward, +Z up); the parent is the scene's world
 // group, which maps that to Three's Y-up.
@@ -15,6 +17,9 @@ import { loadCarMesh, type CarMeshJson, type MaterialSlot } from "./panels";
 
 /** Instances per model (an agent beyond this is not drawn; the agent cap is 400). */
 const MAX_PER_MODEL = 400;
+
+/** Floats per entry of traffic_trailers(): [agent index, x, y, z, yaw]. */
+export const TRAILER_STRIDE = 5;
 
 /** Baked colour per non-paint material slot. */
 const SLOT_COLOUR: Partial<Record<MaterialSlot, number>> = {
@@ -98,6 +103,9 @@ export class TrafficModels {
   readonly group = new THREE.Group();
   private models: (ModelView | null)[] = [];
   private carIds: string[] = [];
+  /** Trailer meshes by trailer id, and the trailer id per fleet model. */
+  private trailers = new Map<string, ModelView | null>();
+  private trailerOf: string[] = [];
   private readonly paintMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.3, roughness: 0.45, side: THREE.DoubleSide });
   private readonly restMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide });
   private readonly glassMat = new THREE.MeshStandardMaterial({
@@ -121,26 +129,58 @@ export class TrafficModels {
     for (const mv of this.models) if (mv) for (const im of [mv.paint, mv.rest, mv.glass]) im.removeFromParent();
     this.models = carIds.map(() => null);
     carIds.forEach((id, i) => {
-      void Promise.all([loadCarMesh(id), fetch(`data/cars/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<CarJson>) : null))]).then(
-        ([mesh, car]) => {
-          if (!mesh || !car || this.carIds[i] !== id) return;
-          const [pg, rg, gg] = bakeModel(mesh, car);
-          const make = (g: THREE.BufferGeometry, mat: THREE.Material) => {
-            const im = new THREE.InstancedMesh(g, mat, MAX_PER_MODEL);
-            im.count = 0;
-            im.frustumCulled = false;
-            this.group.add(im);
-            return im;
-          };
-          const paint = make(pg, this.paintMat);
-          paint.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_MODEL * 3), 3);
-          const glass = make(gg, this.glassMat);
-          glass.renderOrder = 1;
-          const colours = [mesh.palette?.base ?? 0x8a8f96, ...(mesh.palette?.alts ?? [])].map((c) => new THREE.Color(c));
-          this.models[i] = { paint, rest: make(rg, this.restMat), glass, colours, count: 0 };
-        },
-      );
+      void this.load(id, "cars").then((mv) => {
+        if (!mv) return;
+        if (this.carIds[i] === id) this.models[i] = mv;
+        else for (const im of [mv.paint, mv.rest, mv.glass]) im.removeFromParent();
+      });
     });
+  }
+
+  /** Trailer id each fleet model tows ("" = none); loads each trailer's mesh once. */
+  setTrailers(trailerIds: string[]): void {
+    this.trailerOf = trailerIds;
+    for (const id of new Set(trailerIds)) {
+      if (!id || this.trailers.has(id)) continue;
+      this.trailers.set(id, null);
+      void this.load(id, "trailers").then((mv) => this.trailers.set(id, mv));
+    }
+  }
+
+  /** Load one model's mesh (data/panels/meshes/<id>.json) and def (data/<dir>/<id>.json). */
+  private async load(id: string, dir: "cars" | "trailers"): Promise<ModelView | null> {
+    const [mesh, car] = await Promise.all([
+      loadCarMesh(id),
+      fetch(`data/${dir}/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<CarJson>) : null)),
+    ]);
+    if (!mesh || !car) return null;
+    const [pg, rg, gg] = bakeModel(mesh, car);
+    const make = (g: THREE.BufferGeometry, mat: THREE.Material) => {
+      const im = new THREE.InstancedMesh(g, mat, MAX_PER_MODEL);
+      im.count = 0;
+      im.frustumCulled = false;
+      this.group.add(im);
+      return im;
+    };
+    const paint = make(pg, this.paintMat);
+    paint.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_MODEL * 3), 3);
+    const glass = make(gg, this.glassMat);
+    glass.renderOrder = 1;
+    const colours = [mesh.palette?.base ?? 0x8a8f96, ...(mesh.palette?.alts ?? [])].map((c) => new THREE.Color(c));
+    return { paint, rest: make(rg, this.restMat), glass, colours, count: 0 };
+  }
+
+  /** Add one instance of `mv` at (x, y, z, yaw) tinted with livery `variant`. */
+  private place(mv: ModelView, x: number, y: number, z: number, yaw: number, variant: number): void {
+    if (mv.count >= MAX_PER_MODEL) return;
+    this.q.setFromAxisAngle(this.z, yaw);
+    this.p.set(x, y, z);
+    this.m.compose(this.p, this.q, this.one);
+    const k = mv.count++;
+    mv.paint.setMatrixAt(k, this.m);
+    mv.rest.setMatrixAt(k, this.m);
+    mv.glass.setMatrixAt(k, this.m);
+    mv.paint.setColorAt(k, mv.colours[variant % mv.colours.length]);
   }
 
   /** True once there is a fleet (callers fall back to boxes otherwise). */
@@ -157,9 +197,10 @@ export class TrafficModels {
    * Place every kinematic agent ([x, y, z, yaw, flags] per agent, model in flags >> 16).
    * Returns the agents not drawn here (model not loaded yet), as indices, for a fallback.
    */
-  update(agents: Float32Array, skipPhysical: boolean, show: boolean): number[] {
+  update(agents: Float32Array, skipPhysical: boolean, show: boolean, trailers?: Float32Array): number[] {
     const missing: number[] = [];
-    for (const mv of this.models) if (mv) mv.count = 0;
+    const all = [...this.models, ...this.trailers.values()];
+    for (const mv of all) if (mv) mv.count = 0;
     this.group.visible = show;
     if (!show) return missing;
     const total = agents.length / AGENT_STRIDE;
@@ -173,18 +214,19 @@ export class TrafficModels {
         missing.push(a);
         continue;
       }
-      if (mv.count >= MAX_PER_MODEL) continue;
       const variant = Math.floor(flags / 256) % 256;
-      this.q.setFromAxisAngle(this.z, agents[o + 3]);
-      this.p.set(agents[o], agents[o + 1], agents[o + 2]);
-      this.m.compose(this.p, this.q, this.one);
-      const k = mv.count++;
-      mv.paint.setMatrixAt(k, this.m);
-      mv.rest.setMatrixAt(k, this.m);
-      mv.glass.setMatrixAt(k, this.m);
-      mv.paint.setColorAt(k, mv.colours[variant % mv.colours.length]);
+      this.place(mv, agents[o], agents[o + 1], agents[o + 2], agents[o + 3], variant);
     }
-    for (const mv of this.models) {
+    // Trailers of kinematic semis (the tractor's variant picks the trailer livery).
+    if (trailers) {
+      for (let t = 0; t + TRAILER_STRIDE <= trailers.length; t += TRAILER_STRIDE) {
+        const flags = agents[trailers[t] * AGENT_STRIDE + 4];
+        const tv = this.trailers.get(this.trailerOf[Math.floor(flags / 65536)] ?? "");
+        if (!tv) continue;
+        this.place(tv, trailers[t + 1], trailers[t + 2], trailers[t + 3], trailers[t + 4], Math.floor(flags / 256) % 256);
+      }
+    }
+    for (const mv of all) {
       if (!mv) continue;
       for (const im of [mv.paint, mv.rest, mv.glass]) {
         im.count = mv.count;

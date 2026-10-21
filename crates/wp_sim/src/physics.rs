@@ -277,6 +277,21 @@ impl PhysicsWorld {
         );
     }
 
+    /// Couple two bodies with an impulse joint (solved in every [`PhysicsWorld::step`]).
+    pub fn add_joint(
+        &mut self,
+        a: RigidBodyHandle,
+        b: RigidBodyHandle,
+        joint: impl Into<GenericJoint>,
+    ) -> ImpulseJointHandle {
+        self.impulse_joints.insert(a, b, joint, true)
+    }
+
+    /// Remove an impulse joint (no-op if a removed body already took it).
+    pub fn remove_joint(&mut self, joint: ImpulseJointHandle) {
+        self.impulse_joints.remove(joint, true);
+    }
+
     /// The narrow phase (contact pairs of the last step).
     pub fn narrow_phase(&self) -> &NarrowPhase {
         &self.narrow_phase

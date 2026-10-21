@@ -400,6 +400,40 @@ pub struct FleetModel {
     /// Multiplier on the sampled time headway (heavy vehicles leave more room).
     #[serde(default = "one")]
     pub headway_scale: f32,
+    /// Trailer it tows (semis), if any.
+    #[serde(default)]
+    pub trailer: Option<FleetTrailer>,
+}
+
+/// A trailer a fleet model tows. Kinematic agents carry it as extra length behind the body
+/// (spacing, overlap) and swing it behind the fifth wheel for the renderer; promoted agents
+/// get a real hitched trailer in `wp_sim`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FleetTrailer {
+    /// Trailer id (`data/trailers/<id>.json`).
+    pub car: String,
+    /// Fifth-wheel point in the tractor's chassis frame, m.
+    pub fifth_wheel_m: [f32; 3],
+    /// Kingpin point in the trailer's chassis frame, m.
+    pub kingpin_m: [f32; 3],
+    /// Trailer body length (centred on its chassis origin), m.
+    pub length_m: f32,
+    /// Centre of the trailer's axle group along its chassis Y, m (what it pivots about).
+    pub axle_y_m: f32,
+}
+
+impl FleetTrailer {
+    /// How far the trailer reaches behind the rear of a towing body `length_m` long, m.
+    pub fn tail_m(&self, length_m: f32) -> f32 {
+        let rear = self.fifth_wheel_m[1] - self.kingpin_m[1] - 0.5 * self.length_m;
+        (-rear - 0.5 * length_m).max(0.0)
+    }
+
+    /// Kingpin to axle-group distance (the trailer's effective wheelbase), m.
+    fn rod_m(&self) -> f32 {
+        (self.kingpin_m[1] - self.axle_y_m).max(0.5)
+    }
 }
 
 fn no_cap_kmh() -> f32 {
@@ -522,6 +556,10 @@ pub struct Agent {
     pub model: u8,
     /// Bumper-to-bumper length, m ([`CAR_LENGTH_M`] without a fleet).
     pub length_m: f32,
+    /// Extra length a towed trailer adds behind the body, m (0 without one).
+    pub tail_m: f32,
+    /// Ground point of the towed trailer's axle group (follows the fifth wheel like a rod).
+    trailer_axle: Option<V2>,
     /// Body width, m ([`CAR_WIDTH_M`] without a fleet).
     pub width_m: f32,
     /// Desired-speed ceiling, m/s (infinite without a fleet).
@@ -531,6 +569,24 @@ pub struct Agent {
     /// Near-LOD vehicle.
     pub physical: Option<Box<PhysicalAgent>>,
     despawn: bool,
+}
+
+impl Agent {
+    /// Ground point of the towed trailer's axle group, once the agent has moved (kinematic
+    /// trailers swing about it; the sim loop lines a real trailer up with it on promotion).
+    pub fn trailer_axle(&self) -> Option<V2> {
+        self.trailer_axle
+    }
+
+    /// Centre of the agent's whole footprint (body plus any trailer) along its lane, m.
+    fn box_s(&self) -> f32 {
+        self.s - 0.5 * self.tail_m
+    }
+
+    /// Half the length of the agent's whole footprint (body plus any trailer), m.
+    fn box_hl(&self) -> f32 {
+        0.5 * (self.length_m + self.tail_m)
+    }
 }
 
 /// Renderer / netcode view of an agent.
@@ -560,6 +616,18 @@ pub struct AgentView {
     pub variant: u8,
     /// Fleet model index (see [`TrafficConfig::fleet`]).
     pub model: u8,
+    /// Towed trailer's pose, for kinematic agents of a model with a trailer (a promoted
+    /// agent's trailer is a real vehicle in the sim loop).
+    pub trailer: Option<TrailerPose>,
+}
+
+/// Where a kinematic agent's trailer is (chassis origin and heading).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TrailerPose {
+    /// Chassis origin, m.
+    pub pos: V3,
+    /// Yaw about +Z (0 = +Y), rad.
+    pub yaw: f32,
 }
 
 impl From<&AgentView> for wp_contracts::TrafficAgentSnapshot {
@@ -849,8 +917,66 @@ impl Traffic {
                 turn_signal,
                 variant: a.variant,
                 model: a.model,
+                trailer: self.trailer_pose(a, p, f),
             }
         })
+    }
+
+    fn trailer_pose(&self, a: &Agent, p: V3, f: V2) -> Option<TrailerPose> {
+        if a.physical.is_some() {
+            return None;
+        }
+        let tr = self.trailer_of(a)?;
+        let h = geom::add(geom::xy(p), geom::scale(f, tr.fifth_wheel_m[1]));
+        let d = match a.trailer_axle {
+            Some(axle) if geom::len(geom::sub(h, axle)) > 1e-3 => {
+                geom::normalize(geom::sub(h, axle))
+            }
+            _ => f,
+        };
+        let c = geom::sub(h, geom::scale(d, tr.kingpin_m[1]));
+        Some(TrailerPose {
+            pos: [c[0], c[1], p[2]],
+            yaw: geom::yaw_of(d),
+        })
+    }
+
+    fn trailer_of(&self, a: &Agent) -> Option<&FleetTrailer> {
+        self.config
+            .fleet
+            .get(a.model as usize)
+            .and_then(|m| m.trailer.as_ref())
+    }
+
+    /// Swing every towed trailer behind its fifth wheel: the axle group is dragged along like
+    /// the end of a rod (a tractrix), which gives the trailer's lag through turns.
+    fn update_trailers(&mut self, map: &CityMap) {
+        if self.config.fleet.iter().all(|m| m.trailer.is_none()) {
+            return;
+        }
+        self.compute_poses(map);
+        for i in 0..self.agents.len() {
+            let a = &self.agents[i];
+            let Some(tr) = self.trailer_of(a) else {
+                continue;
+            };
+            let pose = self.poses[i];
+            let h = geom::add(geom::xy(pose.p), geom::scale(pose.f, tr.fifth_wheel_m[1]));
+            let rod = tr.rod_m();
+            let axle = match a.trailer_axle {
+                Some(old) => {
+                    let d = geom::sub(h, old);
+                    let d = if geom::len(d) > 1e-3 {
+                        geom::normalize(d)
+                    } else {
+                        pose.f
+                    };
+                    geom::sub(h, geom::scale(d, rod))
+                }
+                None => geom::sub(h, geom::scale(pose.f, rod)),
+            };
+            self.agents[i].trailer_axle = Some(axle);
+        }
     }
 
     fn pose_of(&self, map: &CityMap, a: &Agent) -> (V3, V2) {
@@ -868,9 +994,9 @@ impl Traffic {
         let (p, f) = self.pose_of(map, a);
         (
             Obb {
-                c: geom::xy(p),
+                c: geom::sub(geom::xy(p), geom::scale(f, 0.5 * a.tail_m)),
                 f,
-                hl: 0.5 * a.length_m,
+                hl: a.box_hl(),
                 hw: 0.5 * a.width_m,
             },
             p[2],
@@ -919,6 +1045,7 @@ impl Traffic {
         self.lane_changes(map, inp);
         self.drive_physical(map);
         self.integrate(map, inp, dt);
+        self.update_trailers(map);
         self.spawn_timer += dt;
         if self.spawn_timer >= SPAWN_PERIOD_S {
             self.spawn_timer -= SPAWN_PERIOD_S;
@@ -996,11 +1123,11 @@ impl Traffic {
                 self.touched.push(a.seg);
             }
             l.push(Entry {
-                s: a.s,
+                s: a.box_s(),
                 v: a.v,
                 agent: i as u32,
                 ghost: false,
-                hl: 0.5 * a.length_m,
+                hl: a.box_hl(),
             });
             if let Some((gs, gss)) = a.ghost {
                 let l = &mut self.lists[gs as usize];
@@ -1008,11 +1135,11 @@ impl Traffic {
                     self.touched.push(gs);
                 }
                 l.push(Entry {
-                    s: gss,
+                    s: gss - 0.5 * a.tail_m,
                     v: a.v,
                     agent: i as u32,
                     ghost: true,
-                    hl: 0.5 * a.length_m,
+                    hl: a.box_hl(),
                 });
             }
         }
@@ -1705,7 +1832,13 @@ impl Traffic {
                     let fp = fa.params;
                     let fv0 =
                         (seg.speed_limit * speed_factor_on(map, a.seg, &fp)).min(fa.speed_cap_mps);
-                    let a_o = idm(e.v, fv0, bumper_gap(a.s - e.s, ha, e.hl), a.v, &fp);
+                    let a_o = idm(
+                        e.v,
+                        fv0,
+                        bumper_gap(a.box_s() - e.s, a.box_hl(), e.hl),
+                        a.v,
+                        &fp,
+                    );
                     let a_o2 = self.lane_local_acc(&own[pos + 1..], e.s, e.hl, e.v, &fp, fv0);
                     (a_o, a_o2)
                 }
@@ -1749,14 +1882,21 @@ impl Traffic {
                 }
                 let (a_n, a_n2) = match fol {
                     Some(e) => {
-                        if bumper_gap(s2 - e.s, ha, e.hl) < 2.0 {
+                        let s2_box = s2 - 0.5 * a.tail_m;
+                        if bumper_gap(s2_box - e.s, a.box_hl(), e.hl) < 2.0 {
                             continue;
                         }
                         let fa = &self.agents[e.agent as usize];
                         let fp = fa.params;
                         let fv0 =
                             (cs.speed_limit * speed_factor_on(map, c, &fp)).min(fa.speed_cap_mps);
-                        let a_n2 = idm(e.v, fv0, bumper_gap(s2 - e.s, ha, e.hl), a.v, &fp);
+                        let a_n2 = idm(
+                            e.v,
+                            fv0,
+                            bumper_gap(s2_box - e.s, a.box_hl(), e.hl),
+                            a.v,
+                            &fp,
+                        );
                         if a_n2 < -4.0 {
                             continue;
                         }
@@ -2363,9 +2503,12 @@ impl Traffic {
                 Some(m) => (self.config.fleet[m].length_m, self.config.fleet[m].width_m),
                 None => (CAR_LENGTH_M, CAR_WIDTH_M),
             };
+            let tail = model
+                .and_then(|m| self.config.fleet[m].trailer.as_ref())
+                .map_or(0.0, |t| t.tail_m(len));
             let hl = 0.5 * len;
             let s = smp.s;
-            if s < len + 3.0 || s > seg.length - 25.0 {
+            if s < len + tail + 3.0 || s > seg.length - 25.0 {
                 continue;
             }
             let list = &self.lists[smp.seg as usize];
@@ -2378,7 +2521,7 @@ impl Traffic {
                 continue;
             }
             if let Some(e) = behind {
-                if bumper_gap(s - e.s, hl, e.hl) < 12.0 + e.v * 1.6 {
+                if bumper_gap(s - 0.5 * tail - e.s, hl + 0.5 * tail, e.hl) < 12.0 + e.v * 1.6 {
                     continue;
                 }
             }
@@ -2453,6 +2596,8 @@ impl Traffic {
                 variant,
                 model: model.unwrap_or(0) as u8,
                 length_m: len,
+                tail_m: tail,
+                trailer_axle: None,
                 width_m: width,
                 speed_cap_mps,
                 lod: Lod::Kinematic,
@@ -2465,15 +2610,16 @@ impl Traffic {
             if l.is_empty() {
                 self.touched.push(smp.seg);
             }
-            let pos = l.partition_point(|e| e.s < s);
+            let box_s = s - 0.5 * tail;
+            let pos = l.partition_point(|e| e.s < box_s);
             l.insert(
                 pos,
                 Entry {
-                    s,
+                    s: box_s,
                     v,
                     agent: idx,
                     ghost: false,
-                    hl,
+                    hl: hl + 0.5 * tail,
                 },
             );
             let (p, f) = seg.point_at(s);
@@ -2529,15 +2675,15 @@ impl Traffic {
                         }
                         let (ai, aj) = (&self.agents[i as usize], &self.agents[j as usize]);
                         let oa = Obb {
-                            c: geom::xy(pa.p),
+                            c: geom::sub(geom::xy(pa.p), geom::scale(pa.f, 0.5 * ai.tail_m)),
                             f: pa.f,
-                            hl: 0.5 * ai.length_m,
+                            hl: ai.box_hl(),
                             hw: 0.5 * ai.width_m,
                         };
                         let ob = Obb {
-                            c: geom::xy(pb.p),
+                            c: geom::sub(geom::xy(pb.p), geom::scale(pb.f, 0.5 * aj.tail_m)),
                             f: pb.f,
-                            hl: 0.5 * aj.length_m,
+                            hl: aj.box_hl(),
                             hw: 0.5 * aj.width_m,
                         };
                         if geom::obb_overlap(&oa, &ob) {

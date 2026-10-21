@@ -13,7 +13,7 @@
 //! |---|---|
 //! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `reset_vehicle(entity)` |
-//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
+//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `traffic_trailers()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
@@ -591,6 +591,45 @@ pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Trailers towed by kinematic traffic agents (promoted rigs' trailers are ordinary
+/// vehicles), 5 floats each: `[agent index in traffic_agents(), x, y, z, yaw]` (trailer
+/// chassis origin; its model is the agent's fleet model's trailer, see
+/// [`traffic_fleet_trailers`]).
+#[wasm_bindgen]
+pub fn traffic_trailers() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let mut out = Vec::new();
+        for (i, a) in s.sim().world().agents().enumerate() {
+            if let Some(t) = a.trailer {
+                out.extend_from_slice(&[i as f32, t.pos[0], t.pos[1], t.pos[2], t.yaw]);
+            }
+        }
+        out
+    })
+}
+
+/// Trailer id each traffic fleet model tows (`""` for none), in model order, as a JSON array;
+/// empty when the session has no traffic fleet.
+#[wasm_bindgen]
+pub fn traffic_fleet_trailers() -> Result<String, JsValue> {
+    get(|s| {
+        let ids: Vec<String> = if s.scenario().fleets {
+            fleet_models()
+                .iter()
+                .map(|m| {
+                    m.trailer
+                        .as_ref()
+                        .map(|t| t.car.clone())
+                        .unwrap_or_default()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())
+    })
+}
+
 /// Car ids of the traffic fleet in model order (`traffic_agents()` flags `>> 16`), as a JSON
 /// array; empty when the session has no traffic fleet.
 #[wasm_bindgen]
@@ -607,19 +646,21 @@ pub fn traffic_fleet_cars() -> Result<String, JsValue> {
 
 /// Car ids of the embedded traffic fleet file, in model order.
 fn fleet_car_ids() -> Vec<&'static str> {
-    static IDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    IDS.get_or_init(|| {
+    fleet_models().iter().map(|m| m.car.as_str()).collect()
+}
+
+/// The embedded traffic fleet file's models.
+fn fleet_models() -> &'static [wp_world::FleetModel] {
+    static MODELS: std::sync::OnceLock<Vec<wp_world::FleetModel>> = std::sync::OnceLock::new();
+    MODELS.get_or_init(|| {
         use simcli::DataSource;
         data::mem_data()
             .read(simcli::run::TRAFFIC_FLEET)
             .ok()
             .and_then(|t| toml::from_str::<wp_world::FleetFile>(&t).ok())
-            .map(|f| f.model.into_iter().map(|m| m.car).collect())
+            .map(|f| f.model)
             .unwrap_or_default()
     })
-    .iter()
-    .map(String::as_str)
-    .collect()
 }
 
 /// Floats per head in `signal_heads()`.

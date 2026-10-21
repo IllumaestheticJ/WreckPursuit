@@ -191,6 +191,28 @@ pub fn load_traffic_fleet(
     Ok((file.model, cars))
 }
 
+/// The trailers a traffic fleet's models tow (`data/trailers/<id>.json`), per model.
+pub fn load_fleet_trailers(
+    data: &dyn DataSource,
+    models: &[wp_world::FleetModel],
+) -> Result<Vec<Option<wp_sim::TrailerSpec>>, RunError> {
+    models
+        .iter()
+        .map(|m| {
+            m.trailer
+                .as_ref()
+                .map(|t| {
+                    Ok(wp_sim::TrailerSpec {
+                        car: crate::data::load_trailer(data, &t.car)?,
+                        fifth_wheel_m: t.fifth_wheel_m,
+                        kingpin_m: t.kingpin_m,
+                    })
+                })
+                .transpose()
+        })
+        .collect()
+}
+
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     let density = sc.traffic_density.unwrap_or(1.0);
@@ -365,7 +387,9 @@ pub fn build_sim(
                 sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
             }
             if let Some((models, fleet_cars)) = traffic_fleet {
+                let trailers = load_fleet_trailers(data, &models)?;
                 sim.set_traffic_fleet(models, fleet_cars);
+                sim.set_traffic_fleet_trailers(trailers);
             }
             true
         }

@@ -128,7 +128,16 @@ fn check_id(rel: &str, id: &str) -> Result<(), RunError> {
 /// Load a car and everything it references (tires, lattice, materials) through `src`, with the
 /// same validation as [`wp_contracts::load_car`].
 pub fn load_car(src: &dyn DataSource, car_id: &str) -> Result<LoadedCar, RunError> {
-    let rel = format!("cars/{car_id}.json");
+    load_vehicle(src, &format!("cars/{car_id}.json"))
+}
+
+/// Load a semi-trailer (`trailers/<id>.json`) like a car: its tires, lattice and materials.
+pub fn load_trailer(src: &dyn DataSource, trailer_id: &str) -> Result<LoadedCar, RunError> {
+    load_vehicle(src, &format!("trailers/{trailer_id}.json"))
+}
+
+fn load_vehicle(src: &dyn DataSource, rel: &str) -> Result<LoadedCar, RunError> {
+    let rel = rel.to_string();
     let def = wp_contracts::parse_vehicle_def(&rel, &src.read(&rel)?)?;
     check_id(&rel, &def.id)?;
     let mut tires = BTreeMap::new();

@@ -1,0 +1,240 @@
+{
+  "id": "box_trailer",
+  "display_name": "Dryvan 40",
+  "class": "Truck",
+  "analog_of": "2010s 40 ft dry-van semi-trailer, aluminium box on a steel frame, spread-free tandem axle (empty, light freight)",
+  "body_size_m": [
+    2.6,
+    12.2,
+    4.1
+  ],
+  "mass_kg": 7500.0,
+  "front_weight_frac": 0.5,
+  "wheelbase_m": 1.3,
+  "track_front_m": 1.83,
+  "track_rear_m": 1.83,
+  "cg_height_m": 1.75,
+  "inertia_kgm2": [
+    14730.0,
+    103530.0,
+    97250.0
+  ],
+  "drag_cd_a_m2": 3.0,
+  "lift_front": 0.0,
+  "lift_rear": 0.0,
+  "engine": {
+    "torque_curve_nm": [
+      [
+        600,
+        1400
+      ],
+      [
+        800,
+        1900
+      ],
+      [
+        1000,
+        2300
+      ],
+      [
+        1100,
+        2300
+      ],
+      [
+        1200,
+        2300
+      ],
+      [
+        1300,
+        2300
+      ],
+      [
+        1400,
+        2250
+      ],
+      [
+        1500,
+        2150
+      ],
+      [
+        1600,
+        2050
+      ],
+      [
+        1700,
+        1930
+      ],
+      [
+        1800,
+        1810
+      ],
+      [
+        1900,
+        1680
+      ],
+      [
+        2000,
+        1500
+      ],
+      [
+        2100,
+        1250
+      ]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 2000.0,
+    "rev_limit_rpm": 2100.0,
+    "inertia_kgm2": 1.6,
+    "engine_brake_nm": 460.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [
+      14.94,
+      11.73,
+      9.04,
+      7.09,
+      5.54,
+      4.35,
+      3.44,
+      2.7,
+      2.08,
+      1.63,
+      1.27,
+      1.0
+    ],
+    "final_drive": 3.07,
+    "reverse_ratio": 13.07,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 3220.0,
+    "shift_time_s": 0.5
+  },
+  "wheels": [
+    {
+      "position_m": [
+        -0.915,
+        -4.0,
+        0.5
+      ],
+      "radius_m": 0.5,
+      "width_m": 0.63,
+      "mass_kg": 480.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [
+        0.915,
+        -4.0,
+        0.5
+      ],
+      "radius_m": 0.5,
+      "width_m": 0.63,
+      "mass_kg": 480.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [
+        -0.915,
+        -5.3,
+        0.5
+      ],
+      "radius_m": 0.5,
+      "width_m": 0.63,
+      "mass_kg": 480.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [
+        0.915,
+        -5.3,
+        0.5
+      ],
+      "radius_m": 0.5,
+      "width_m": 0.63,
+      "mass_kg": 480.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 189500.0,
+      "damper_bump_ns_per_m": 11310.0,
+      "damper_rebound_ns_per_m": 16960.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 75800.0,
+      "bump_stop_n_per_m": 2000000.0
+    },
+    {
+      "spring_n_per_m": 189500.0,
+      "damper_bump_ns_per_m": 11310.0,
+      "damper_rebound_ns_per_m": 16960.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 75800.0,
+      "bump_stop_n_per_m": 2000000.0
+    },
+    {
+      "spring_n_per_m": 189500.0,
+      "damper_bump_ns_per_m": 11310.0,
+      "damper_rebound_ns_per_m": 16960.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 75800.0,
+      "bump_stop_n_per_m": 2000000.0
+    },
+    {
+      "spring_n_per_m": 189500.0,
+      "damper_bump_ns_per_m": 11310.0,
+      "damper_rebound_ns_per_m": 16960.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 75800.0,
+      "bump_stop_n_per_m": 2000000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 19000.0,
+    "max_torque_rear_nm": 19000.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 9500.0
+  },
+  "steering": {
+    "ratio": 20.0,
+    "rack_speed_rad_per_s": 0.5,
+    "ffb_scale": 0.0
+  },
+  "aero_downforce_coeffs": [
+    0.0,
+    0.0
+  ],
+  "lattice_id": "box_trailer",
+  "base_price": 30000,
+  "durability_class": 4,
+  "fuel_capacity_l": 1.0
+}

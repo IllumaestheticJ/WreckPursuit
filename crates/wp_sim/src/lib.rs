@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 mod contacts;
+pub mod hitch;
 mod physics;
 mod police_link;
 mod props;
@@ -44,6 +45,9 @@ pub enum SimError {
     /// No vehicle with this id.
     #[error("unknown entity {0:?}")]
     UnknownEntity(EntityId),
+    /// The vehicle already tows a trailer.
+    #[error("{0:?} already tows a trailer")]
+    AlreadyHitched(EntityId),
 }
 
 /// Parameters for a new simulation instance.
@@ -78,6 +82,17 @@ pub enum VehicleKind {
 /// so clients can replay them bit-identically, see `wp_net`). Plain function pointer:
 /// deterministic and `wp_sim` does not depend on the caller's crate.
 pub type ContactFilter = fn(&mut wp_contracts::ContactImpulse);
+
+/// A trailer a vehicle model tows: its car and the two coupling points.
+#[derive(Debug, Clone)]
+pub struct TrailerSpec {
+    /// The trailer (`data/trailers/<id>.json`).
+    pub car: LoadedCar,
+    /// Fifth-wheel point in the tractor's chassis frame, m.
+    pub fifth_wheel_m: [f32; 3],
+    /// Kingpin point in the trailer's chassis frame, m.
+    pub kingpin_m: [f32; 3],
+}
 
 /// One vehicle slot in the simulation.
 pub struct SimVehicle {
@@ -168,6 +183,10 @@ pub struct Sim {
     traffic_car: Option<LoadedCar>,
     /// Mixed traffic fleet cars, by fleet model index.
     traffic_fleet: Vec<LoadedCar>,
+    /// Trailer (car, fifth wheel, kingpin) per traffic fleet model, if it tows one.
+    traffic_fleet_trailers: Vec<Option<TrailerSpec>>,
+    /// Tractor–trailer couplings ([`hitch`]).
+    hitches: Vec<hitch::Hitch>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
@@ -206,6 +225,8 @@ impl Sim {
             police_fleet: None,
             traffic_car: None,
             traffic_fleet: Vec::new(),
+            traffic_fleet_trailers: Vec::new(),
+            hitches: Vec::new(),
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
@@ -422,6 +443,7 @@ impl Sim {
         rb.set_linvel(f * speed_mps, true);
         slot.vehicle.read_body(rb);
         slot.spawn = (pos, yaw);
+        self.realign_trailer(id);
         Ok(())
     }
 
@@ -507,6 +529,7 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))?;
         let slot = self.vehicles.remove(i);
         self.physics.remove_body(slot.body.body);
+        self.on_despawn(id);
         Ok(())
     }
 
@@ -547,6 +570,7 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))?;
         let rb = &mut self.physics.bodies[slot.body.body];
         slot.vehicle.place_body(rb, pos, yaw, speed_mps, 0.0);
+        self.realign_trailer(id);
         Ok(())
     }
 
@@ -589,6 +613,13 @@ impl Sim {
     /// mid-run is an input as far as replays are concerned.
     pub fn damage_mut(&mut self, id: EntityId) -> Result<&mut DamageModel, SimError> {
         Ok(&mut self.slot_mut(id)?.damage)
+    }
+
+    fn slot(&self, id: EntityId) -> Result<&SimVehicle, SimError> {
+        self.vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))
     }
 
     fn slot_mut(&mut self, id: EntityId) -> Result<&mut SimVehicle, SimError> {
@@ -635,6 +666,7 @@ impl Sim {
         let rb = &mut self.physics.bodies[slot.body.body];
         slot.vehicle.place_body(rb, pos, yaw, 0.0, 0.0);
         slot.damage.reset();
+        self.realign_trailer(id);
         Ok(())
     }
 
@@ -679,9 +711,40 @@ impl Sim {
         if sys.police {
             self.drive_police_units();
         }
+        if !self.hitches.is_empty() {
+            self.drive_trailers();
+        }
         if sys.vehicle {
-            for slot in &mut self.vehicles {
-                let filter = QueryFilter::default().exclude_rigid_body(slot.body.body);
+            // A hitched pair never sees each other as ground (the trailer's box overhangs the
+            // tractor's rear wheels).
+            let partners: Vec<Option<rapier3d::prelude::ColliderHandle>> =
+                if self.hitches.is_empty() {
+                    Vec::new()
+                } else {
+                    self.vehicles
+                        .iter()
+                        .map(|v| {
+                            let other = self.hitches.iter().find_map(|h| {
+                                if h.tractor == v.id {
+                                    Some(h.trailer)
+                                } else if h.trailer == v.id {
+                                    Some(h.tractor)
+                                } else {
+                                    None
+                                }
+                            })?;
+                            self.vehicles
+                                .iter()
+                                .find(|o| o.id == other)
+                                .map(|o| o.body.collider)
+                        })
+                        .collect()
+                };
+            for (i, slot) in self.vehicles.iter_mut().enumerate() {
+                let mut filter = QueryFilter::default().exclude_rigid_body(slot.body.body);
+                if let Some(Some(partner)) = partners.get(i) {
+                    filter = filter.exclude_collider(*partner);
+                }
                 let ground = RapierGround {
                     query: self.physics.query_pipeline(filter),
                 };
@@ -697,6 +760,9 @@ impl Sim {
             for slot in &self.vehicles {
                 slot.vehicle
                     .write_body(&mut self.physics.bodies[slot.body.body]);
+            }
+            if !self.hitches.is_empty() {
+                self.load_kingpins();
             }
         }
         let infos: Vec<contacts::BodyInfo> = self

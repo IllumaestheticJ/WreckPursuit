@@ -135,6 +135,7 @@ async function main(): Promise<void> {
     scene.signals.setHeads(sim.signalHeads());
     scene.markings.set(sim.roadMarkings(false), sim.roadMarkings(true));
     scene.traffic.setFleet(sim.trafficFleetCars());
+    scene.traffic.setTrailers(sim.trafficFleetTrailers());
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
@@ -540,7 +541,7 @@ async function main(): Promise<void> {
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
-    scene.updateAgents(sim.trafficAgents(), physicalTraffic);
+    scene.updateAgents(sim.trafficAgents(), physicalTraffic, sim.trafficTrailers());
     scene.updatePoliceUnits(sim.policeUnits(), tS);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);

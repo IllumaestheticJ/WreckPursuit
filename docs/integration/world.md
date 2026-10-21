@@ -714,5 +714,39 @@ Done on the session branch (cars/panels work), touching `wp_world`, `wp_police`,
 - **Contract change request (net)**: `TrafficAgentSnapshot` has `variant` but no fleet model, so
   networked clients cannot draw the right traffic model yet (proposal: add `model: u8`).
 - **Known gaps**: kinematic heavy trucks follow the same lane / junction logic as cars (no
-  wide-turn behaviour, no lane restriction beyond the spawn weights); trailers still need a hitch
-  joint; police tools (roadblock props) are unchanged, only the unit cars vary.
+  wide-turn behaviour, no lane restriction beyond the spawn weights); police tools (roadblock props) are unchanged, only the unit cars vary.
+
+## Semi-trailers (2026-10-21, owner request: "add trailers to the semis")
+Same session branch; touches `wp_world`, `wp_sim`, `simcli`, `wp_wasm`, the testbed and
+`tools/assets`. Fleet-only, so blessed goldens are unchanged.
+- **Data**: `data/trailers/box_trailer.json` ("Dryvan 40", 7.5 t, tandem at the rear) and
+  `data/lattices/box_trailer.json`, both from `tools/specsheet/build_trailers.py`. Trailers are
+  ordinary vehicle defs kept out of `data/cars/` (not in the car picker); `simcli::data::load_trailer`.
+- **Hitch (`wp_sim::hitch`)**: `Sim::hitch_trailer(tractor, car, fifth_wheel_m, kingpin_m)` /
+  `hitch_trailer_at(.., trailer_yaw)` spawn the trailer behind the tractor and couple the two
+  bodies with a Rapier spherical joint (contacts between them off; each excludes the other from
+  its ground rays). Each tick the trailer's input follows the tractor's (brakes, handbrake,
+  lights; clutch held out so it free-rolls) and `KINGPIN_SHARE` (45 %) of its weight moves from
+  its tandem onto the fifth wheel (the vehicle model puts the trailer's centre of mass on its
+  tandem, so without this the drive axle carries none of it). `unhitch`, `trailer_of`,
+  `hitches()`; despawning the tractor takes the trailer, teleports carry it along.
+- **Traffic (`wp_world`)**: `FleetModel::trailer: Option<FleetTrailer>` (`[model.trailer]` in
+  `data/fleets/traffic.toml`; the longhaul tractor tows the box trailer). The agent gets
+  `tail_m` (≈ 9.9 m) behind its body: every list entry, bumper gap and overlap box uses the whole
+  footprint (`box_s` / `box_hl`), the agent's `s` stays the tractor's centre so stop lines and
+  poses are unchanged. The kinematic trailer swings behind the fifth wheel as a rod dragged by
+  it (tractrix, no dt, deterministic) — `AgentView::trailer: Option<TrailerPose>`.
+- **Promotion**: `Sim::set_traffic_fleet_trailers(Vec<Option<TrailerSpec>>)` (simcli
+  `load_fleet_trailers`); a promoted semi gets a real hitched trailer swung to where the
+  kinematic one was (takes two vehicle slots).
+- **Browser**: `traffic_trailers()` (`[agent index, x, y, z, yaw]` each) and
+  `traffic_fleet_trailers()`; `render/traffic_models.ts` instances the trailer mesh
+  (`data/panels/meshes/box_trailer.json`).
+- **Tests**: `wp_sim` hitch tests (pull, turn and stop with the kingpin on the fifth wheel within
+  8 cm; despawn cascade; determinism); `simcli/tests/fleets.rs` (kinematic semis carry a
+  trailer pose that stays behind the tractor; promoted semis tow a physical trailer).
+- **Known gaps**: the trailer's tail can still be in a junction after its tractor's connector
+  reservation is released; `TrafficAgentSnapshot` has no trailer pose (networked clients would
+  draw bare tractors); a hitched rig on full throttle in a tight turn understeers (no
+  jackknife tuning yet); only the AI uses trailers (no player hitch in the browser).
+
