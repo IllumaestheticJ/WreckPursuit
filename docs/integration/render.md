@@ -6,19 +6,27 @@
 - **Contract version built against:** 0.3.0
 
 ## Exposes
-- `wp_render::Scene::{new, sync(&Sim, frame_dt), set_static_boxes, cars, car, wheel_meshes}`:
-  renderer-side copy of the sim. Read-only on the sim.
-- `wp_render::{SkinnedBody, CarMesh, CarMeshLibrary, ChaseCamera, CameraView, StaticBox, Vertex}`.
+- `wp_render::Scene::{new, sync(&Sim, frame_dt), set_static_boxes, set_city, city,
+  traffic_mesh, cars, car, wheel_meshes}`: renderer-side copy of the sim. Read-only on the sim.
+- `wp_render::{SkinnedBody, CarMesh, CarMeshLibrary, CityMesh, ChaseCamera, CameraView,
+  StaticBox, Vertex}`. `CityMesh` reads the `data/city/<id>.greybox.glb` files `tools/city-import`
+  writes (format: `data/city/README.md`).
 - Feature `gpu`: `wp_render::gpu::{Renderer, Offscreen, Lighting, write_png}` and a re-export
   of the `wgpu` it was built with.
-- `testbed-native --features gpu`: `--gpu` (3D window) and `--shot` (headless PNG). See
+- `testbed-native --features gpu`: `--gpu [--city ID]` (3D window) and `--shot` (headless PNG,
+  `--city`, `--height`, `--distance`). See
   `crates/wp_render/README.md`.
 
 ## Needs
 - Debris bodies (`DetachedPart` → Rapier) exposed through `wp_sim`, so detached panels can be
   drawn where the physics puts them instead of vanishing. Workaround: hidden.
-- A read-only accessor for the city geometry the sim builds (roads, buildings, rails), and for
-  static boxes added with `Sim::add_static_box`. Workaround: barriers come from the scenario.
+- Read-only poses of the sim's city props (parked cars, cones), which become Rapier bodies in
+  `Sim::set_world` and move when hit. Workaround: not drawn.
+- A read-only accessor for static boxes added with `Sim::add_static_box`. Workaround: barriers
+  come from the scenario.
+- City geometry comes from the committed greybox `.glb`, not from the sim. If the greybox
+  format changes (`tools/city-import/src/glb.rs`), `wp_render::city` must follow; its tests
+  load both committed cities.
 - The previous-tick vehicle state (as `wp_wasm::vehicle_states_prev`), for interpolation.
 
 ## Contract change requests
@@ -28,12 +36,15 @@ None. Everything used is already public in `wp_sim` / `wp_damage` / `wp_contract
 - Root `Cargo.toml`: `crates/wp_render` added to the workspace.
 - `apps/testbed-native` (workstream 04): new optional feature `gpu` (`src/gpu_view.rs`, a
   `main.rs` hook, Cargo deps). Default and existing features are untouched, so CI still builds
-  only the headless smoke run.
+  only the headless smoke run. Later: `--city ID` for the window and `--shot`, `--height` /
+  `--distance` for `--shot`, and `session_in_city` in `main.rs`.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
 | `Scene::sync` (skin + wheels), head-on scenario, avg | cloud container, 4 vCPU | 0.012 ms/car/frame | — | not set yet |
+| `Scene::sync` in a city (traffic boxes rebuilt), free drive, avg | cloud container, 4 vCPU | 0.006–0.008 ms/car/frame | — | not set yet |
+| City greybox triangles drawn per frame | — | 21,654 (12×12 grid), 372,386 (Vesper) | — | not set yet |
 
 ## Known gaps
 See `crates/wp_render/README.md` → Known gaps.
