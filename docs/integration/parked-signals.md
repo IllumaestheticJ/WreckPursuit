@@ -7,7 +7,9 @@
   `lib.rs`, example `parked_damage_cost`), `apps/simcli` (`parked` field, `parked_*` world
   metrics, `scenarios/parked/*`, goldens), `crates/wp_wasm` (`props.rs`, `lib.rs`,
   `session.rs`, `lod.rs`), `apps/testbed-web` (`render/props.ts`, `render/panels.ts`,
-  `wasm/*`, `e2e/run.mjs`), SIGNALS_FILES
+  `wasm/*`, `e2e/run.mjs`), and for signals `crates/wp_world` (`traffic.rs`, new
+  `traffic/signal_tests.rs`, `tests/siren.rs`, README) and `apps/testbed-web` (`render/fleet.ts`,
+  `render/lod.ts`, `vehicle_view.ts`, `net/main.ts`, new `indicator_stalk.ts`, `e2e/signals.mjs`)
 - **Contract version built against:** 0.3.0 (no contract change; one request below)
 
 ## 1. Parked cars dent
@@ -99,7 +101,42 @@ the car (health < 1) and draw the dent (own panel mesh loaded, largest drawn ver
 
 ## 2. Traffic turn signals
 
-SIGNALS_SECTION
+### What existed
+`wp_world` already computed `AgentView::turn_signal` (and the contract's
+`TrafficAgentSnapshot` LEFT/RIGHT/HAZARDS flags reached the browser and the net), but: the
+junction signal came on at a flat 40 m and went **off while turning** (on the connector), and
+**the testbed never drew it** (only hazards tinted the tail lamps). That is what the owner saw.
+
+### What changed (`crates/wp_world/src/traffic.rs`, view-only)
+- **Junction turns**: on at `turn_signal_lead_m(v)` = clamp(v × 3 s, 30 m, 50 m) before the lane
+  end, latched (a car slowing into a queue keeps it on), held **through the connector** (left,
+  right, U-turn as left), off on the exit lane.
+- **Lane changes**: on while pending and through the whole lateral move, off within 0.3 m of the
+  new lane centre (≈ 3 s in total). Signalling 1.5 s *before* the move (instead of the existing
+  0.5 s) was tried and reverted: it changed traffic behaviour (146 → 96 lane changes in
+  `traffic_bench`) and every traffic golden.
+- **Pulling over for sirens** (towards the kerb), waiting, **merging back** (away): as before,
+  now tested. **Hazards**: disabled / crashed cars (hazards only), signal-less manoeuvres.
+- No parking / pull-away from the kerb exists in traffic, so nothing to signal there.
+- The signal is view state: not in the state hash, never read by the driving logic.
+  `traffic_bench` hash identical before/after; **no golden moved.**
+- Tests: `traffic/signal_tests.rs` (lead distance; 71 right turns tracked on a signalised grid:
+  off at 80 m, onset 30–50 m and ≥ 2 s out, held in the connector, off on the exit lane;
+  lane changes signalled ≥ 0.5 s before and during the move), `tests/siren.rs`
+  `pulling_over_and_merging_back_are_indicated`.
+
+### Testbed
+Amber indicator lamps at the four corners (below head/tail lamps, wrapping the corner),
+blinking 1.5 Hz at 50 %, `PALETTE.hazard` × the brake glow so they bloom at night and read in
+daylight; hazards blink both sides. Drawn in: the instanced fleet (kinematic + far traffic; +2
+draw calls per traffic instance set), a promoted car's `VehicleView` (flags from its traffic
+draw record), and the net client's traffic boxes (`net/main.ts`, from the snapshot's contract
+flags). Player: a cosmetic stalk (`indicator_stalk.ts`, keys `-` left / `=` right, self-cancels
+after the wheel returns past a turn) — not in the sim, replay or net (no `VehicleInput` field;
+see the contract request). Police AI cannot indicate for the same reason.
+e2e `npm run e2e:signals` (`e2e/signals.mjs`): 6 right- and 9 left-signalling cars blink the
+correct side (lit and dark frames, full and proxy meshes), never the wrong side; hazards both
+sides; the player stalk blinks and cancels; no page errors.
 
 ## Perf numbers
 PERF_TABLE
@@ -115,7 +152,7 @@ PERF_TABLE
   `examples/city_frame_cost.rs`.
 - `crates/wp_wasm` / `apps/testbed-web` (owner 04): parked-wreck calls and drawing as above;
   `PanelBody::maxDisp()` (tests); `SessionModels.parked`.
-OUTSIDE_SIGNALS
+- Signals: `crates/wp_world` (owner D) traffic view state + tests; testbed files as listed above.
 
 ## Known gaps
 - A parked car's damage makes no sound and no crash FX (its events are kept out of the stream);
@@ -129,4 +166,9 @@ OUTSIDE_SIGNALS
 - Multiplayer has no parked cars (`parked_cars: false` in `wp_net`); if F turns them on, the
   snapshot needs wreck lattices (like vehicles' `DamageSnapshot`).
 - More than 48 dented parked cars in one session: the rest are shoved without denting.
-SIGNALS_GAPS
+- Player and police signals are local only (cosmetic stalk; police none) until contract
+  request #1. No gamepad binding for the stalk.
+- The e2e did not catch a promoted traffic car (`VehicleView`) signalling; that path shares
+  the flag → lamp code and has a read-back (`window.__wp.indicators`).
+- Lane changes pre-signal 0.5 s (behaviour-preserving), not the 1.5–2 s a careful driver would;
+  lengthening it changes traffic and its goldens (D's call).
