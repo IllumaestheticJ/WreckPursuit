@@ -1448,3 +1448,119 @@ out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct updat
   20.2 s against the 20 s cap); the 7×7 sprint scenarios (`race/city_sprint{,_police}.ron`)
   start on the new carriageway's judge slots (x 58.05 / 63.05 → 59.55 / 64.55) and
   `city_sprint_police` uses seed 12 (both `wp_race` police tests pass at aim dy −10 / 0 / +10).
+
+## Highway port (2026-10-21)
+
+Branch `side/world-port`: main's divided highways (Loop 9 diamonds, the grid's viaduct with
+ramps, median barriers, road markings) on round 12's world system (node patches, sidewalks /
+lots / skirts, drawn vs collision terrain, tunnels, residential, road format v5). Each change
+and why:
+
+**Builder (`builder.rs`)**
+- Round 12's automatic highway shoulder (3 m each side) applies to **two-way** highways only.
+  Main's carriageways and ramps are one-way highways with explicit shoulders
+  (`shoulder_left_m` / `shoulder_right_m`) and centrelines offset so the two carriageways meet
+  at the barrier line; with both shoulders they overlapped by 6 m (the barrier stood on the
+  opposing inner lane) and every ramp's junction setback grew by 3 m.
+- `node_half_widths`: two one-way highways leaving a node within 45° of each other (the grid
+  highway's carriageways sharing the ring node and fanning out to ±7.05 m) count their
+  fan-out offset and explicit shoulder in the crossing roads' setbacks, and do not set each
+  other back. Before, the ring lanes started inside the outer carriageway lane, the right
+  turn off it curled back across the next lane (civilian collisions at the ring T: the
+  `blocked.rs` failures; main's pending `circuit_8x5` note), and the carriageways stopped
+  32 m short of the ring.
+
+**Procedural grid (`procgen.rs`)**
+- Ramp terminals at ±21 m (main: 22 m): round 12's painted arterial median widened the
+  crossing rows' setbacks and left the block between the first column and the terminal 12 m
+  long (`default_city_shape` wants > 12 m).
+- Residential lots keep 30 m (not 14 m) from block corners at junctions on the diagonals
+  (six-road junctions, ~27 m boxes): a right turn there swept over a front fence
+  (`junction_cover`). Exposed because main's terminal band in `blocked` changes the
+  residential random draws. ~60 fewer grid houses (1703 → 1643 buildings).
+
+**Surfaces (`surface.rs`, `surface/nodes.rs`, `map.rs`)**
+- A freeway merge / diverge (radius-0 junction) node patch is the **taper paving** through its
+  gore (`surface::taper_ribbons`: a ribbon under every connector there that joins roads with
+  different lane counts, each vertex on the paving under it with the same rule the taper
+  connectors use, `freeway_paving_z`), flagged `overlapping_ends` (the ramp's ribbon lies on
+  the carriageway by design). The merge had given these nodes junction outlines: degenerate
+  triangles (grid), planes reaching 63 m along the barrier line (Vesper, drawn terrain above
+  the road) and an unpaved gore wedge where the taper sweeps (Vesper node 208: 66 path
+  samples off the pavement). Main paved these with its taper ribbons; the merge had dropped
+  them.
+- `merge_spans`: two ribbons sharing a corner (carriageways either side of the barrier line)
+  are adjacent, not overlapping.
+- `kerb_curve`: a kerbless highway corner no longer paves into the needle tip of a narrow
+  wedge (Bluff Road reaches its diamond terminal beside the off-ramp): the tip is paved up to
+  where the wedge is 0.35 m wide (or the nearer ribbon corner), so no bare slot under 30 cm
+  is left between two pavements. Also chamfers right-angle highway corners by ≤ 25 cm.
+- `deck_rails`: no rail on a segment with **either** end on other paving at its level (main
+  kept it when only one end was: a ramp-edge rail stood 2.3 m inside the carriageway across
+  the taper, found by `junction_cover`'s physics rays) and none along a **sidewalk** edge
+  (main's interchange crossroads bridge the highway with sidewalks; the sidewalk's back edge
+  has the rail, one at the kerb stopped cars mounting it). The greybox parapets follow the
+  same rule (`glb.rs`).
+- `has_relief`: the grid's flat terrain (main added it so `wp_sim` builds the viaduct) does not
+  make it a hilly city: 9 m flat lots (its houses are laid out for them), no sidewalk wedges.
+  Before, grid houses stood 0.27 m above the 3.5 m lots' skirts.
+- `freeway_paving_z` is the shared rule (map.rs's taper connector heights call it).
+
+**Port Vesper (`vesper.rs`)**
+- `covered_spans` indexed the builder surfaces with **draft** indices, which differ since
+  `divide_loop`: both covers were built on unrelated roads (Hollins Tunnel "inside" blocked,
+  terrain above roads). Drafts now map through `remap`; the Hollins Tunnel (on Loop 9) spans
+  both carriageways from the ring centreline (the barrier line), half width to the outer
+  carriageway edge + 1.5 m, like round 12's tube over the undivided highway.
+- Founders Cut moves south (portals y 893 / 1098, round 12: 1005 / 1255, still > 200 m): main's
+  Uptown diamond puts the inner terminal at y ~1261 and the connector then bridges both
+  carriageways (deck 32 m); from the trench floor (~14.5 m) it needs ~260 m at the 10 % cap
+  plus the terminal box. The junction at the cut's south end settles ~5.7 m into the ground.
+  (Fixes `grades_crests_and_banks_within_design` Uptown Connector 12.4 %,
+  `junctions_are_flat_and_lanes_meet_them` −1.36 m.)
+- `backfill_covers` leaves the carve band of roads outside the tube alone (a street leaving
+  the junction 30 m before the moved portal was buried 1.5 m).
+
+**Residential / props**
+- `driveway_cars` skips a car whose box overlaps a fence, hedge or tree trunk (new layouts
+  after the merge put one in a side fence: `parked_cars_do_not_sink_into_vesper`).
+
+**Routes (`routes.rs`)**
+- `plan_circuit`: when a waypoint's snapped lane is unreachable without a lane change (a
+  divided highway's carriageways run lane-locked from piece to piece), the reachable lane
+  beside it with the shortest path is used. Routes that worked before are unchanged.
+
+**Outside `wp_world`** (minimal):
+- `wp_sim/src/physics.rs`: "flat ground" (no building colliders, main) is judged on the
+  network terrain (`has_relief`; round 12's collision terrain is never uniform), and decor is
+  drawn-only there too (round 12's grid behaviour, `city-residential.md`).
+- `wp_sim/src/lib.rs`: `Sim::drivable_ground_z`.
+- `tools/city-import/src/glb.rs`: parapets where `deck_rails` puts colliders.
+- `wp_race::catalog`: Loop 9 circuit waypoint off the Bluff Road merge gore
+  ([1530, 600] → [1524.2, 700]); grid highway sprint finish moved to keep 747 m from the
+  POI, which main's carriageway puts at the south ring (finish [9.2, 400] → [9.2, 23.3, 7.9]);
+  `apps/simcli/scenarios/race/pick_{loop9_circuit,grid_highway_sprint}.ron` regenerated.
+
+**Tests re-aimed (narrowly, comment at each)**
+- `surface::junction_surfaces_have_no_cracks`, `wp_sim/tests/stop_lines.rs`: freeway nodes
+  are not counted as overlapping ends (stop_lines drives their approaches too).
+- `wp_world/tests/city_v2.rs::queries_respect_grade_separation_and_terrain`: probe y 92 → 94
+  (Route 40 West's centre line now runs under y 92).
+- `wp_world/tests/world.rs::spawns_respect_sightline_and_active_area`: 20 s after the teleport
+  (the crossing row under the viaduct is a chain of junctions 34–42 m apart; a car holds a
+  permit all the way and is recycled ~15 s after).
+- `wp_sim/tests/parked_ground.rs::knocked_parked_cars_settle_on_the_ground`: a knocked car
+  resting against a house wall is measured on the drivable ground.
+- `wp_sim/tests/police_passby.rs`: the patrol car is picked ≥ 15 m into its road segment
+  (Port Vesper's was 1 m from a junction centre).
+- `wp_wasm` `map::tests::grid_static_map_is_flat_but_the_viaduct`: decks only on highways.
+
+**Status / gate (incomplete, disk full).** Release runs per suite (before the disk filled):
+`wp_world` all suites, `city-import` all suites, `wp_sim` (`city_v2`, `parked_ground`,
+`police_passby`, `stop_lines`, `sidewalk` kerb drives, lib), `wp_wasm` (lib, `drawn_colliders`),
+`wp_race` `race_picker` (grid_highway_sprint ×2, loop9_circuit ×2) pass. Still failing:
+`wp_sim/tests/sidewalk.rs::vesper_v2_cars_drive_across_the_sidewalk_onto_the_lot` — one
+newly sampled stretch on Bluff Road (1243, 455), all four drives −3.3…−3.5 cm (limit −3 cm);
+physics and drawn surface agree there to 0.3 mm, so it is the tyre dipping at the kerb climb
+on a downhill section banked 2–3 % toward the kerb (not fixed). Not run: simcli scenarios,
+`wp_police`, `wp_net`, `wp_opponent`, the debug-profile workspace run, clippy, wasm build.
