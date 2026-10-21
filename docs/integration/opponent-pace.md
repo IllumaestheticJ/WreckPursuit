@@ -437,3 +437,38 @@ on the opposing side → gridlock), edge margin on both edges (Hollins −0.5–
 line through empty junctions (a civilian turning in met a racer nose to nose). Lock-in:
 lantern_checkpoint_s50 re-ranged (faster, rejoins 8–18 → 1–2 per car, no walls).
 Next: weaving through traffic and the skill / risk spread.
+
+## Street racing phase 3 — weaving + skill / risk spread (2026-10-21)
+
+- A civilian ahead is gone round as soon as I close on it (no patience timer).
+- A car behind in the target lane blocks a pass only if it is closing on me or within 3 m.
+- Pass positions: right beside the target (preferred side, then the other), then one and two
+  lane widths further out (a car abreast of the target in the next lane no longer ends it).
+- `DriverParams::traffic_risk = max(risk, 0.7 · (1 − skill))`: weak drivers use the opposing lanes
+  to pass and accept tighter civilian gaps; skilled drivers keep their personality's risk.
+  Police choices (running, red lights) keep the profile's `risk`.
+- Backing out: a standing out-of-race racer counts like a parked car (race_picker loop9 police
+  deadlock).
+
+Seeds 1–8 (32 cars per row), before = cf00e02f (phase 2), after = this tip:
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev |
+|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | p3_before | 28/32 | 78.4 | 9 | 0.2 | 0 | 80 |
+| lantern_checkpoint | 0.5 | p3_after2 | 31/32 | 82.9 | 9 | 0.2 | 0 | 84 |
+| lantern_checkpoint | 0.95 | p3_before | 32/32 | 74.9 | 9 | 0.2 | 0 | 54 |
+| lantern_checkpoint | 0.95 | p3_after2 | 32/32 | 74.9 | 9 | 0.2 | 0 | 54 |
+| hollins_sprint | 0.5 | p3_before | 32/32 | 67.7 | 41 | 0.0 | 14 | 0 |
+| hollins_sprint | 0.5 | p3_after2 | 32/32 | 67.7 | 41 | 0.0 | 14 | 0 |
+| hollins_sprint | 0.95 | p3_before | 32/32 | 62.5 | 41 | 0.0 | 8 | 8 |
+| hollins_sprint | 0.95 | p3_after2 | 32/32 | 62.5 | 41 | 0.0 | 8 | 8 |
+| grid_highway_sprint | 0.5 | p3_before | 32/32 | 55.9 | 0 | 4.0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | p3_after2 | 32/32 | 54.2 | 0 | 3.3 | 0 | 0 |
+| grid_highway_sprint | 0.95 | p3_before | 32/32 | 54.6 | 0 | 4.1 | 0 | 0 |
+| grid_highway_sprint | 0.95 | p3_after2 | 32/32 | 52.6 | 0 | 4.3 | 0 | 0 |
+
+Passes/km barely move: on the grid highway nearly every rejected pass is a car abreast in the
+next lane or a queue standing at a light inside the pass distance (lane ahead), or a rival
+racer alongside on that side (target busy) — the highway is saturated. Real weaving through
+dense traffic needs a gap planner (longitudinal gaps per lane over ~100 m) — next candidate,
+with the junction-arm look-ahead for cutting empty junctions.
