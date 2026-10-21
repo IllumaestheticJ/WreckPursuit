@@ -1728,12 +1728,18 @@ fn plan_covers(g: &mut Gen) {
             CoverKind::Tunnel,
             "Hollins Tunnel",
         ),
-        // The Uptown Connector under a plaza deck.
+        // The Uptown Connector under a plaza deck. Portals at y 893 / 1098 (round 12 had
+        // 1005 / 1255, the north one 145 m short of the old Loop 9 T-junction). Main's
+        // diamond puts the inner terminal at y ~1261 and the connector then bridges both
+        // carriageways (deck 32 m): from the trench floor (~14.5 m) up to the deck the road
+        // needs ~260 m at the 10 % cap plus the terminal's flat box, so the cut moved south
+        // (the junction at its south end, 30 m before the portal, settles ~5.7 m into the
+        // ground). Still over 200 m long.
         (
             "Uptown Connector",
             [416.0, 1100.0],
-            [418.0, 1005.0],
-            [414.0, 1255.0],
+            [418.0, 893.0],
+            [416.5, 1098.0],
             7.0,
             CoverKind::CoveredTrench,
             "Founders Cut",
@@ -1768,12 +1774,29 @@ fn plan_covers(g: &mut Gen) {
 }
 
 /// Covered spans on the built road surfaces (portal to portal), one per plan.
-fn covered_spans(g: &Gen, built: &Built) -> Vec<CoveredSpan> {
+///
+/// Plans live on the drafts, so a draft's road is found through `remap` (builder index of
+/// each draft; the drafts and the builder roads differ in order since [`divide_loop`]). A
+/// cover on Loop 9 (the Hollins Tunnel) spans both carriageways: its centreline is the ring's
+/// (the median barrier line, on the cross-section plane) and its half width reaches the outer
+/// carriageway edge, like round 12's tube over the undivided highway; `road` is the outer
+/// carriageway piece under its middle.
+fn covered_spans(
+    g: &Gen,
+    built: &Built,
+    ring: &Ring,
+    remap: &[Option<usize>],
+    loop_pieces: &[usize],
+) -> Vec<CoveredSpan> {
     let mut out = Vec::new();
-    for (ri, d) in g.drafts.iter().enumerate() {
-        let s = &built.surfaces[ri];
-        let cum = geom::cumulative(&s.centre);
+    for (di, d) in g.drafts.iter().enumerate() {
         for c in &d.covers {
+            let Some(ri) = remap[di] else {
+                out.push(ring_cover(built, ring, loop_pieces, c));
+                continue;
+            };
+            let s = &built.surfaces[ri];
+            let cum = geom::cumulative(&s.centre);
             let u0 = geom::project(&s.centre, &cum, c.p0).s.max(0.0);
             let u1 = geom::project(&s.centre, &cum, c.p1)
                 .s
@@ -1809,15 +1832,94 @@ fn covered_spans(g: &Gen, built: &Built) -> Vec<CoveredSpan> {
     out
 }
 
+/// A cover over both carriageways of Loop 9 (see [`covered_spans`]).
+fn ring_cover(built: &Built, ring: &Ring, loop_pieces: &[usize], c: &CoverPlan) -> CoveredSpan {
+    let total = ring.total();
+    let (a, b) = (ring.project(c.p0), ring.project(c.p1));
+    // Shorter way round between the portals.
+    let (mut s0, mut s1) = (a.min(b), a.max(b));
+    if s1 - s0 > total * 0.5 {
+        (s0, s1) = (s1, s0 + total);
+    }
+    let mut centre: Vec<V3> = arc_samples(s0, s1, 10.0)
+        .iter()
+        .map(|s| ring.offset(*s, 0.0))
+        .collect();
+    centre.dedup_by(|p, q| geom::dist(geom::xy(*p), geom::xy(*q)) < 0.5);
+    let mid = geom::xy(ring.offset(0.5 * (s0 + s1), 0.0));
+    // The outer carriageway (it carries the barrier) under the middle of the span.
+    let road = loop_pieces
+        .iter()
+        .copied()
+        .filter(|r| built.surfaces[*r].median_barrier)
+        .min_by(|x, y| {
+            let d = |r: usize| {
+                let sc = &built.surfaces[r].centre;
+                geom::project(sc, &geom::cumulative(sc), mid).dist
+            };
+            d(*x).total_cmp(&d(*y)).then(x.cmp(y))
+        })
+        .unwrap_or(0);
+    let outer = built.surfaces[road].right_m;
+    CoveredSpan {
+        name: c.name.into(),
+        kind: c.kind,
+        road: road as u32,
+        centre,
+        half_width_m: CARRIAGEWAY_OFFSET_M + outer + 1.5,
+        clearance_m: TUNNEL_CLEARANCE_HIGHWAY_M,
+    }
+}
+
 /// Fill the ground back over a covered span: beyond the carved shoulder each side, up to the
 /// roof deck (or the natural ground, if lower). Inside the walls and under the deck overhang
 /// the carve stays, so the terrain never reaches into the tube.
-fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
+///
+/// Nor is a vertex filled inside the full-strength carve band of a road running outside the
+/// tube (a street leaving the junction just before a portal: Founders Cut's south portal is
+/// 30 m from one since the Loop 9 interchange moved the cut, release merge): the fill would
+/// bury that street.
+fn backfill_covers(
+    hf: &mut Heightfield,
+    nat: &Natural,
+    spans: &[CoveredSpan],
+    surfaces: &[RoadSurface],
+) {
     for span in spans {
         let shape = CoverShape::new(span);
         let inner = span.half_width_m + WALL_M + DECK_OVERHANG_M - 1.0;
         let reach = span.half_width_m + 45.0;
         let (lo, hi) = (shape.bounds[0], shape.bounds[1]);
+        // Roads near the span, with their carve band half width.
+        let near: Vec<(&RoadSurface, Vec<f32>, f32)> = surfaces
+            .iter()
+            .filter(|s| s.centre.len() >= 2)
+            .filter_map(|s| {
+                let shoulder = if s.highway {
+                    SHOULDER_M
+                } else {
+                    STREET_SHOULDER_M
+                };
+                let band = s.left_m.max(s.right_m) + shoulder;
+                let m = reach + band;
+                let touches = s.centre.iter().any(|p| {
+                    p[0] >= lo[0] - m && p[0] <= hi[0] + m && p[1] >= lo[1] - m && p[1] <= hi[1] + m
+                });
+                touches.then(|| (s, geom::cumulative(&s.centre), band))
+            })
+            .collect();
+        let beside_other_road = |p: V2| {
+            near.iter().any(|(s, cum, band)| {
+                let pr = geom::project(&s.centre, cum, p);
+                if pr.dist > *band {
+                    return false;
+                }
+                let t = pr.s.clamp(0.0, cum[cum.len() - 1]);
+                let (c, _) = geom::point_at(&s.centre, cum, t);
+                // Roads in the tube (the covered road, the other carriageway) don't count.
+                shape.locate(geom::xy(c)).lateral.abs() > span.half_width_m
+            })
+        };
         let cell = hf.cell_m;
         let i0 = (((lo[0] - 45.0 - hf.origin[0]) / cell).floor().max(0.0)) as u32;
         let j0 = (((lo[1] - 45.0 - hf.origin[1]) / cell).floor().max(0.0)) as u32;
@@ -1832,6 +1934,9 @@ fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
                 }
                 let lat = q.lateral.abs();
                 if lat < inner || lat > reach {
+                    continue;
+                }
+                if beside_other_road(p) {
                     continue;
                 }
                 let roof_top = q.road_z + span.clearance_m + ROOF_M;
@@ -3250,8 +3355,8 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         }
     };
     carve(&mut hf, &built, &g.nodes, &deck);
-    let covered = covered_spans(&g, &built);
-    backfill_covers(&mut hf, &g.nat, &covered);
+    let covered = covered_spans(&g, &built, &ring, &remap, &loop_roads);
+    backfill_covers(&mut hf, &g.nat, &covered, &built.surfaces);
 
     let zones = zones();
     let mut degree = vec![0usize; g.nodes.len()];
@@ -3858,3 +3963,4 @@ mod tests {
             .all(|b| !in_cover_corridor(&shapes, &b.footprint)));
     }
 }
+
