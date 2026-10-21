@@ -115,6 +115,15 @@
   Goldens re-blessed (`[bless]` commit): `opponent_{circuit_8x5, flee_police,
   reverse_grid_2laps}` and `world_traffic_soak{,_observer,_vesper}`. Their hashes diverge 25-70 s
   in, i.e. units that used to sit stuck now reroute. Every scenario's range expectations pass.
+- **2026-10-21, owner request "switch to 6.0 and re-aim the city chase": done.**
+  `physical_accel_mps2` 5.0 → **6.0**. `golden_city_chase` re-aimed: at 6.0 the x = 55 patrol
+  pulls away and turns before any start from y = -300 to +30 reaches it. The racer now drives
+  north up the x = 275 collector from y = -10 and meets southbound unit 2 near the y ≈ 58
+  junction: pursuit at 6.2 s (limit 20 s). Patrol spawns avoid the racer, so the passing band
+  is patchy. Contiguous bands on that lane (5 m steps): y = -30…+10 (pursuit at 5.3-7.0 s) and
+  -285…-250; -10 is the middle of the first. `race_city_sprint` (340 m floor) passes at 6.0;
+  the opponent live chase and all doctrine tests pass. The 11 police-spawning goldens were
+  re-blessed (`[bless]` commit).
 
 ## Needs
 | From | What | Workaround now |
