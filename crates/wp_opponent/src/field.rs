@@ -2113,6 +2113,14 @@ fn decide_racer(
             if !alongside && !arriving {
                 continue;
             }
+            // A car in line right behind me is not beside me: it bounds neither side (grid
+            // highway: the car on my bumper at a red light pinned me in my lane, so I could not
+            // pull out round the civilian ahead with the next lane empty).
+            let in_line_behind =
+                x.ds < 0.0 && x.gap > 0.5 && (x.o.n - r.n).abs() < hw + x.o.half_w - 0.3;
+            if in_line_behind {
+                continue;
+            }
             let civ_extra = if is_civ(&x.o) { civ_margin } else { 0.0 };
             let side_gap = if parked_non_racer(&x.o) {
                 parked_gap(v, SIDE_GAP_M + civ_extra)
@@ -2810,19 +2818,25 @@ fn plan_pass(
     } else {
         (v * t_clear).max(40.0)
     };
-    // No three-wide: never pass a car that is passing, nor start a pass while a car is
-    // alongside me.
-    // (A car right behind me in line is not alongside.)
-    let engaged = rel.iter().any(|q| {
-        q.o.who != o.who
-            && !matches!(q.o.who, Who::Civilian(_))
-            && q.ds <= 0.0
-            && q.gap < 3.0
-            && (q.o.n - r.n).abs() > hw + q.o.half_w - 0.5
-    });
-    if o.passing || engaged {
+    // No three-wide: never pass a car that is passing, nor pull out towards a car alongside
+    // me. (A car right behind me in line is not alongside; one alongside on the other side
+    // does not stop me moving away from it: grid highway, a racer boxed between a civilian
+    // at the light and a rival on its left sat out a whole green with the right lane empty.)
+    if o.passing {
         return Err(PassReject::TargetBusy);
     }
+    let alongside_towards = |n_pass: f32| {
+        let dir = n_pass - r.n;
+        rel.iter().any(|q| {
+            let side = q.o.n - r.n;
+            q.o.who != o.who
+                && !matches!(q.o.who, Who::Civilian(_))
+                && q.ds <= 0.0
+                && q.gap < 3.0
+                && side.abs() > hw + q.o.half_w - 0.5
+                && (dir.abs() < 0.3 || side * dir > 0.0)
+        })
+    };
     // A pass needs a run: closing speed now, or pace I'm being denied (my own speed profile
     // a second ahead vs its speed) with a straight ahead, or sitting right on its bumper.
     let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
@@ -2853,6 +2867,10 @@ fn plan_pass(
     let mut why = PassReject::NoRoom;
     'side: for side in sides {
         let n_pass = o.n + side * need;
+        if alongside_towards(n_pass) {
+            why = PassReject::TargetBusy;
+            continue 'side;
+        }
         // No passing on the opposing lanes through a junction (round a parked car aside): a
         // car out there meets the side roads' traffic waiting in the box, and with the field
         // queued behind it nobody can move (Lantern Row, skill 0.95 seed 8: the whole field
