@@ -3890,6 +3890,87 @@ mod tests {
         assert!(split_case(0.9, 0.8, 18.0, 2.3, -0.5).is_some());
     }
 
+    /// Regression scenario for lane-splitting: a 3-lane road (11 m, own direction only), two
+    /// civilians abreast at 15 m/s in the outer lanes with a 3.0 m gap between them, and a
+    /// skilled racer coming up at 17.5 m/s (closing 2.5 m/s, inside the 3 m/s floor). Driven
+    /// closed loop at the decision rate with simple kinematics for the racer. Returns
+    /// (splits, split aborts, smallest lateral clearance to either civilian while alongside).
+    fn split_scenario(skill: f32) -> (u32, u32, f32) {
+        let mut corridor = straight();
+        for smp in &mut corridor.samples {
+            smp.left_m = 5.5;
+            smp.left_pass_m = 5.5;
+            smp.right_m = 5.5;
+        }
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile {
+                skill,
+                risk: 0.3,
+                ..DriverProfile::default()
+            },
+            capability: cap(),
+        };
+        let mut f = Field::new(corridor, &[spec], RaceConfig::default());
+        f.racers[0].laps_done = 1;
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let dt = 4.0 * PHYSICS_DT;
+        let (mut x, mut y, mut v) = (0.0f32, 40.0f32, 17.5f32);
+        let mut civ_s = 80.0f32;
+        let civ_n = [-2.4f32, 2.4];
+        let mut min_clear = f32::INFINITY;
+        for _ in 0..(20.0 / dt) as usize {
+            let mut me = obs(1, y, v, HandlingEffects::NEUTRAL);
+            me.state.pos[0] = x;
+            f.observe(&world, &[me], &NoPolice, dt);
+            let civs: Vec<Obstacle> = civ_n
+                .iter()
+                .enumerate()
+                .map(|(i, &n)| Obstacle {
+                    who: Who::Civilian(i as u32 + 1),
+                    s: civ_s,
+                    n,
+                    v_s: 15.0,
+                    v_n: 0.0,
+                    half_len: 2.3,
+                    half_w: 0.9,
+                    unstable: false,
+                    passing: false,
+                    parked: false,
+                    facing: 1.0,
+                    out_of_race: false,
+                    wants_room: false,
+                })
+                .collect();
+            f.decide(0, &civs, &[], None, None, dt);
+            let d = f.debug_of(0);
+            // Kinematics: lateral toward the command at up to 2 m/s, speed toward the
+            // target at up to 4 m/s² / 9 m/s² braking.
+            x += (d.n_cmd - x).clamp(-2.0 * dt, 2.0 * dt);
+            v += (d.v_target - v).clamp(-9.0 * dt, 4.0 * dt);
+            y += v * dt;
+            civ_s += 15.0 * dt;
+            let r = &f.racers[0];
+            for &n in &civ_n {
+                if (r.s - civ_s).abs() < 2.3 + 2.3 {
+                    min_clear = min_clear.min((x - n).abs() - 0.9 - 0.9);
+                }
+            }
+        }
+        let r = &f.racers[0];
+        (r.splits, r.split_aborts, min_clear)
+    }
+
+    #[test]
+    fn skilled_racer_splits_two_civilians_abreast_on_a_three_lane_road() {
+        let (splits, aborts, clear) = split_scenario(0.9);
+        assert_eq!((splits, aborts), (1, 0), "clearance {clear:.2}");
+        assert!(clear > 0.2, "clearance {clear:.2}");
+        // A middling driver waits behind them instead.
+        let (splits, _, _) = split_scenario(0.5);
+        assert_eq!(splits, 0);
+    }
+
     /// One racer of `risk` at y = 70 m doing 15 m/s on a straight with a junction box at
     /// y = 100..120 m; returns its debug after one decision with `signal` and `civs`.
     fn junction_decision(risk: f32, signal: Option<SignalAhead>, civs: &[Civ]) -> Debug {

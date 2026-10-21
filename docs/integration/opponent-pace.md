@@ -735,3 +735,18 @@ and walls are 0.
 - **Aborts:** one split was started and given up (grid s95 seed 15, lindwurm_4t). It tucked back in (one of the pair drifted toward the gap, or the gap closed; the reason is not logged), and its time went from 52.1 s to 55.7 s.
 - **Everything else:** identical.
 - **Pace ranges:** unchanged.
+
+### Split regression test (2026-10-21)
+
+The test is `skilled_racer_splits_two_civilians_abreast_on_a_three_lane_road`, a closed-loop decision test in `field.rs`:
+
+- **Road:** 3 lanes, 11 m wide, own direction only.
+- **Traffic:** two civilians abreast in the outer lanes at 15 m/s, with a 3.0 m gap between them.
+- **Racer:** skill 0.9 and risk 0.3, so its closing limit is 3 m/s from the 0.6 floor. It closes at 2.5 m/s, and its motion is simple kinematics.
+
+What it checks:
+
+- The skill-0.9 racer makes exactly 1 split with 0 aborts.
+- Its clearance to both civilians stays above 0.2 m; it measured 0.60 m.
+- A skill-0.5 racer makes no split.
+- The test fails when splitting is switched off.
