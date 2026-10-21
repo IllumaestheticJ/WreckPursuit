@@ -203,6 +203,7 @@ fn wanted_racer_abandons_the_race_and_runs() {
         laps: 2,
         drivers,
         max_s: 40.0,
+        allow_abandon: true,
         ..Setup::default()
     };
     // Racer 2 (careful: flees at wanted level 2 with default risk 0.4) is wanted at level 3.
@@ -221,6 +222,33 @@ fn wanted_racer_abandons_the_race_and_runs() {
     // The others keep racing.
     for s in st.iter().filter(|s| s.entity != EntityId(2)) {
         assert_eq!(s.status, RacerStatus::Racing);
+    }
+}
+
+#[test]
+fn wanted_racer_never_gives_up_by_default() {
+    // The owner's rule (2026-10-21): in a race a racer never abandons it or pulls over, at
+    // any wanted level — it keeps racing until the police actually capture it. Same race as
+    // `wanted_racer_abandons_the_race_and_runs`, with the game's default config.
+    let drivers = eight_drivers()[..3].to_vec();
+    let setup = Setup {
+        seed: 2,
+        laps: 2,
+        drivers,
+        max_s: 40.0,
+        ..Setup::default()
+    };
+    let mut heat = BTreeMap::new();
+    heat.insert(EntityId(2), 3u8);
+    let out = common::run(&setup, &FixedHeat(heat), &mut |_, _| {});
+    let mut field = out.field;
+    let events = field.drain_events();
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        OpponentEvent::Abandoned { .. } | OpponentEvent::Yielded { .. }
+    )));
+    for s in field.standings() {
+        assert_eq!(s.status, RacerStatus::Racing, "{:?}", s.entity);
     }
 }
 
@@ -299,6 +327,7 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         traffic: 0.25,
         grid: GridLayout::SingleFile,
         live_police: true,
+        allow_abandon: true,
         inject: vec![
             (
                 20.0,
@@ -442,6 +471,7 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         traffic: 0.25,
         grid: GridLayout::SingleFile,
         sim_police: Some("sentinel_cruiser".into()),
+        allow_abandon: true,
         heat: vec![(EntityId(1), 55.0), (EntityId(2), 15.0)],
         run_full: true,
         max_s: 150.0,

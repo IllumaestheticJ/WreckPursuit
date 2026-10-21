@@ -607,3 +607,47 @@ the new table; the earlier "after" rows above are without it):
 | loop9_circuit | 0.5 | after | 48/48 | 205.0 | 0 | 0.1 | 0 | 0 | 0 | 0 |
 | loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
 | loop9_circuit | 0.95 | after | 48/48 | 199.8 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+
+## Racers keep racing at L1–L2 (2026-10-21)
+
+Street racers do not pull over for a single unit mid-race. A racer still in the race ignores the
+pull-over at L1, and at L2 unless it is careful (personality `risk` < `RED_LIGHT_RISK`), and
+yields from L3 — or once pinned: crawling under 1.5 m/s for 3 s with a chasing unit within 10 m.
+Finished / disqualified racers pull over as before; abandoning the race (`flee_wanted_level`)
+is unchanged. No police-side change.
+
+race_picker with police, seeds 1–8 (`WP_RACE_SEED`), before = 4cddb03d, after = this tip:
+
+| race | run | cars | finished | captured | fled | other | test passes |
+|---|---|---|---|---|---|---|---|
+| hollins_hill_sprint | before | 32 | 1 | 27 | 1 | 3 (2 running, 1 window) | 1/8 |
+| hollins_hill_sprint | after | 32 | 11 | 21 | 0 | 0 | 7/8 |
+| loop9_circuit | before | 48 | 22 | 11 | 13 | 2 (window) | 8/8 |
+| loop9_circuit | after | 48 | 35 | 0 | 13 | 0 | 8/8 |
+| lantern_checkpoint_draws_the_police | before | 32 | 0 | 20 | 11 | 1 (running) | 7/8 |
+| lantern_checkpoint_draws_the_police | after | 32 | 2 | 16 | 13 | 1 (window) | 7/8 |
+
+## Racers never give up (owner, 2026-10-21) — replaces the L1–L2 plan above
+
+In a race a pursued racer never abandons it or pulls over, at any wanted level, whatever its skill
+or risk: it keeps racing and evading until the police actually capture it (police-side capture
+rules) or it is wrecked / DNF'd. Racers already out of the race (finished, disqualified) still pull
+over. `RaceConfig::allow_abandon` now means "may give up" and defaults to off; the flee machinery
+stays (its tests turn it on). race_picker::hollins_hill_sprint requires a winner again.
+
+race_picker with police, seeds 1–8, before = lead/round12 e6165f7f (pursued racers yield / flee),
+after = this tip:
+
+| race | run | cars | finished | captured | fled | other | test passes |
+|---|---|---|---|---|---|---|---|
+| hollins_hill_sprint | before | 32 | 5 | 24 | 2 | 1 running | 7/8 (relaxed check) |
+| hollins_hill_sprint | after | 32 | 3 | 27 | 0 | 2 running | 3/8 (winner required) |
+| loop9_circuit | before | 48 | 23 | 11 | 12 | 2 window | 8/8 |
+| loop9_circuit | after | 48 | 48 | 0 | 0 | 0 | 8/8 |
+| lantern_checkpoint_draws_the_police | before | 32 | 0 | 18 | 13 | 1 running | 7/8 |
+| lantern_checkpoint_draws_the_police | after | 32 | 5 | 27 | 0 | 0 | 8/8 |
+
+Hollins per seed (after): one finisher on seeds 3, 4, 7 (the default seed passes); the police
+genuinely capture all four on seeds 1, 2, 6; on seeds 5 and 8 the last racer is still racing
+(23 m/s, 69 m from the line on seed 8) when the test's 200 s run limit ends it — held up by box-ins
+in the first hairpin earlier, not a deadlock.
