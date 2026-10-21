@@ -8,11 +8,28 @@ use wp_contracts::{DamageMode, LoadedCar, MaterialDef, ModeTable, TireDef};
 
 include!(concat!(env!("OUT_DIR"), "/embedded_data.rs"));
 
-fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str)> {
-    EMBEDDED
+/// The embedded files' text, inflated once from `EMBEDDED_Z` (see `build.rs`).
+fn blob() -> &'static str {
+    static BLOB: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BLOB.get_or_init(|| {
+        let raw = miniz_oxide::inflate::decompress_to_vec(EMBEDDED_Z)
+            .expect("embedded data blob inflates");
+        String::from_utf8(raw).expect("embedded data is UTF-8")
+    })
+}
+
+/// `(kind, id, file text)` for every embedded data file.
+fn embedded() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    let b = blob();
+    EMBEDDED_INDEX
         .iter()
+        .map(move |(kind, id, off, len)| (*kind, *id, &b[*off..*off + *len]))
+}
+
+fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str)> {
+    embedded()
         .filter(move |(k, _, _)| *k == kind)
-        .map(|(_, id, text)| (*id, *text))
+        .map(|(_, id, text)| (id, text))
 }
 
 /// Every embedded file as a simcli data bundle (`cars/<id>.json`, `modes/arcade.toml`, …), so
@@ -20,10 +37,9 @@ fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str
 pub fn mem_data() -> &'static simcli::MemData {
     static DATA: std::sync::OnceLock<simcli::MemData> = std::sync::OnceLock::new();
     DATA.get_or_init(|| {
-        let files = EMBEDDED
-            .iter()
+        let files = embedded()
             .map(|(kind, id, text)| {
-                let ext = if *kind == "modes" { "toml" } else { "json" };
+                let ext = if kind == "modes" { "toml" } else { "json" };
                 (format!("{kind}/{id}.{ext}"), text.to_string())
             })
             .collect();
