@@ -47,6 +47,7 @@ await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 8
 
 const seenPolice = new Set();
 const seenTraffic = new Set();
+let trailersSeen = 0;
 for (let i = 0; i < 45; i++) {
   await sleep(1000);
   const s = await page.evaluate(() => {
@@ -55,8 +56,10 @@ for (let i = 0; i < 45; i++) {
     const cars = wp.sim.trafficFleetCars();
     const flags = wp.sim.trafficAgents().filter((_, k) => k % 5 === 4);
     const drawn = [...new Set([...flags].map((f) => cars[Math.floor(f / 65536)]))];
-    return { police, drawn };
+    const trailers = wp.sim.trafficTrailers().length / 5;
+    return { police, drawn, trailers };
   });
+  trailersSeen = Math.max(trailersSeen, s.trailers);
   s.police.forEach((c) => seenPolice.add(c));
   s.drawn.forEach((c) => seenTraffic.add(c));
 }
@@ -68,6 +71,8 @@ check(
   [...seenTraffic].some((c) => ["gantry_box", "longhaul_tractor", "quarry_tipper"].includes(c)),
   "heavy trucks in traffic",
 );
+const trailerMeshes = await page.evaluate(() => window.__wp.sim.trafficFleetTrailers().filter((t) => t).length);
+check(trailerMeshes > 0, `fleet lists trailer models (${trailerMeshes})`);
 const models = await page.evaluate(() => window.__wp.scene.traffic.group.children.length);
 check(models >= 9, `traffic meshes built (${models} instanced meshes)`);
 
@@ -81,6 +86,32 @@ await page.evaluate(() => {
 });
 await sleep(1500);
 await page.screenshot({ path: join(out, "fleets_chase_overview.png") });
+// Semis live on the highway: the grid city has one. Find a kinematic rig and frame it.
+await page.evaluate(() => {
+  const sel = document.getElementById("city-map");
+  sel.value = "procedural_12x12";
+  sel.dispatchEvent(new Event("change"));
+});
+let rig = null;
+for (let i = 0; i < 60 && !rig; i++) {
+  await sleep(1000);
+  rig = await page.evaluate(() => {
+    const t = window.__wp.sim.trafficTrailers();
+    if (t.length < 5) return null;
+    const a = window.__wp.sim.trafficAgents();
+    const k = t[0] * 5;
+    return { n: t.length / 5, tractor: [a[k], a[k + 1], a[k + 2]], trailer: [t[1], t[2], t[3]] };
+  });
+}
+trailersSeen = Math.max(trailersSeen, rig?.n ?? 0);
+check(trailersSeen > 0, `semis tow trailers (${trailersSeen} kinematic trailers at once)`);
+if (rig) {
+  const gap = Math.hypot(rig.tractor[0] - rig.trailer[0], rig.tractor[1] - rig.trailer[1]);
+  check(gap > 5 && gap < 9.5, `trailer rides behind its tractor (${gap.toFixed(2)} m between origins)`);
+  await page.evaluate(([c]) => window.__wp.lookFrom([c[0] - 16, c[1] - 18, c[2] + 9], c), [rig.trailer]);
+  await sleep(800);
+  await page.screenshot({ path: join(out, "fleets_semi_trailer.png") });
+}
 check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 await browser.close();
 console.log(failures ? `${failures} failure(s)` : `all fleet checks passed; screenshots in ${out}`);

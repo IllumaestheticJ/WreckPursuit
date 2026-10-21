@@ -34,6 +34,7 @@ Every vehicle's personality and visual brief (style sheet) next to what its mesh
 | [Sperber 32](#sperber_32) | Sport | The autobahn sniper in titanium silver | `#9ea6ae` / `#1b1b1d` | 5860 |
 | [Tansy 1.3](#tansy_13) | Compact | Everyone's aunt's supermini | `#9fd0d6` / `#1b1b1d` | 5178 |
 | [Vireo XS](#vireo_xs) | Compact | The little screamer that lives above 5,300 rpm | `#f2c12e` / `#1b1b1d` | 5120 |
+| [Dryvan 40](#box_trailer) | Truck | Forty feet of somebody else's freight | `#eeeeea` / `#3a3d42` | 9684 |
 
 ## Debug Coupe (`debug_coupe`) {#debug_coupe}
 
@@ -956,4 +957,35 @@ Every vehicle's personality and visual brief (style sheet) next to what its mesh
 | Wheels | 4 tire meshes |
 
 68 parts, 5120 triangles.
+
+## Dryvan 40 (`box_trailer`) {#box_trailer}
+
+*Forty feet of somebody else's freight* — Truck, 2010s 40 ft dry-van semi-trailer, aluminium box on a steel frame, spread-free tandem axle (empty, light freight)
+
+**Personality.** A plain 40 ft dry-van semi-trailer that rides behind the Longhaul Tractor. It has no engine and no opinions, just twelve metres of white aluminium wall that swings wide on every corner and fills the mirrors of whoever is trying to get past. Clip it and it shrugs; get under it and you will regret it.
+
+**Silhouette.** A tall white box, flat-faced at the front with slightly rounded corners, standing on wound-up landing gear behind the kingpin, a long empty gap under the floor, then a tandem of dual wheels tucked at the very back above a low underride bar.
+
+**Lighting.** No head lamps. Amber clearance markers on the front top corners and along the bottom rail; red markers on the rear top corners with a three-lamp ID bar between them; round red tail/brake lamps and amber indicators low on the rear sill.
+
+**Signature details.**
+- Tall white sheet-and-post aluminium box with bright top and bottom rails
+- Landing gear legs with crank and foot pads just behind the kingpin plate
+- Rear swing doors with vertical lock bars, hinges on the posts, ICC underride bar
+- Spread of dual wheels on a slider tandem, mud flaps, side underride rail
+
+**Palette.** base `#eeeeea`, accent `#3a3d42`, primer `#6d6f6a`; alternates `#c9ccd0` `#1f4e79` `#c8261e` `#2b5d34` `#e8a317`
+
+**Wheels.** Truck rims, Metal finish, dual tires on every axle
+
+| Render group | Parts |
+|---|---|
+| Body panels | `bumper_f*ont`, `door_f*` ×2, `door_r*` ×2, `fender_f*` ×2, `frame_f*ont`, `frame_rear`, `hood`, `quarter_r*` ×2, `roof`, `sill_l/r`, `trunk` |
+| Bolt-on details | `air_springs_l/r`, `axles`, `bottom_rail_bumper_f*ont`, `bottom_rail_f*ame_f*ont`, `bottom_rail_f*ame_rear`, `bottom_rail_sill_l/r`, `door_hinges_l/r`, `gladhands`, `indicator_l_bezel`, `indicator_r_bezel`, `kingpin`, `landing_gear_crank`, `landing_gear_l/r`, `landing_gear_pad_l/r`, `landing_gear_shaft`, `lock_bars`, `lock_keepers`, `mudflap_hanger_l/r`, `mudflap_l/r`, `plate_rear`, `posts_door_f*` ×2, `posts_door_r*` ×2, `posts_f*ame_rear`, `posts_fender_f*` ×2, `posts_quarter_r*` ×2, `posts_roof`, `side_guard_f*ame_f*ont`, `side_guard_sill_l/r`, `suspension_l/r`, `tail_2_l_bezel`, `tail_2_r_bezel`, `tail_l_bezel`, `tail_r_bezel`, `top_rail_f*ame_rear`, `top_rail_fender_f*` ×2, `top_rail_hood`, `top_rail_roof`, `trunk_seam`, `underride_bar` |
+| Interior | `cargo_load_bars` |
+| Lamps | `indicator_l/r`, `marker_2_l/r`, `marker_3_l/r`, `marker_4_l/r`, `marker_5_l/r`, `marker_6_l/r`, `marker_7`, `marker_8_l/r`, `marker_l/r`, `tail_2_l/r`, `tail_l/r` |
+| Structure & trim | `crossmembers_f*ame_f*ont`, `crossmembers_f*ame_rear`, `rear_header`, `rear_post_l/r`, `rear_sill`, `slider_l/r`, `underbody_f*ame_f*ont`, `underbody_f*ame_rear`, `upper_coupler` |
+| Wheels | 4 tire meshes |
+
+114 parts, 9684 triangles.
 

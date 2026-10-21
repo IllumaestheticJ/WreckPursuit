@@ -1,5 +1,5 @@
-//! Wheels: tires with a rounded shoulder and styled rims (see [`RimStyle`]), dual rear tires
-//! and visual extra axles (tandems). Hub space: axle along +X, origin at the hub; the outer
+//! Wheels: tires with a rounded shoulder and styled rims (see [`RimStyle`]), dual rear (and,
+//! for trailers, dual front) tires and visual extra axles (tandems). Hub space: axle along +X, origin at the hub; the outer
 //! face is −X on the left wheels (FL, RL) and +X on the right (FR, RR).
 
 use wp_contracts::VehicleDef;
@@ -277,7 +277,7 @@ impl Soup {
 }
 
 /// Every wheel part of a car: per wheel a tire, a rim and a dark backing, plus duplicates for
-/// dual rear tires and visual extra axles.
+/// dual tires (`dual_rear`, `dual_front`) and visual extra axles.
 pub fn wheel_parts(def: &VehicleDef, style: &CarStyle) -> Vec<MeshPart> {
     let ws = &style.wheels;
     let finish: MaterialSlot = ws.finish.into();
@@ -308,7 +308,7 @@ pub fn wheel_parts(def: &VehicleDef, style: &CarStyle) -> Vec<MeshPart> {
             let mut t = Soup::default();
             let mut rim = Soup::default();
             let mut back = Soup::default();
-            let dual = !front && ws.dual_rear;
+            let dual = if front { ws.dual_front } else { ws.dual_rear };
             if dual {
                 // Two tires side by side; the rim face shows on the outer one.
                 let tw = 0.47 * hw;

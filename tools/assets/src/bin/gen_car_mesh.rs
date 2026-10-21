@@ -1,10 +1,11 @@
-//! `gen-car-mesh [--check] [car ...]`: generate + skin the procedural mesh of every car (or
-//! the named ones) from its style sheet into `data/panels/meshes/<car>.json`, and (for a full
-//! run) the render list `data/panels/RENDER_LIST.md`. `--check` writes nothing and exits 1
+//! `gen-car-mesh [--check] [car ...]`: generate + skin the procedural mesh of every car and
+//! semi-trailer (or the named ones; ids are looked up in `data/cars/` then `data/trailers/`)
+//! from its style sheet into `data/panels/meshes/<id>.json`, and (for a full run) the render
+//! list `data/panels/RENDER_LIST.md`. `--check` writes nothing and exits 1
 //! if a file on disk differs from what would be generated (stale).
 
 use car_assets::render_list::{render, Entry, RENDER_LIST_PATH};
-use car_assets::{build_mesh, car_ids, load_car, load_style, mesh_path, repo_root};
+use car_assets::{build_mesh, load_car, load_style, mesh_path, repo_root, vehicle_ids};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -13,7 +14,7 @@ fn main() {
     let mut ids: Vec<String> = args.into_iter().filter(|a| !a.starts_with("--")).collect();
     let full = ids.is_empty();
     if full {
-        ids = car_ids(&root);
+        ids = vehicle_ids(&root);
     }
     let mut stale = 0;
     let mut built = Vec::new();

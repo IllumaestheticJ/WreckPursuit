@@ -126,7 +126,7 @@ impl Shell {
                     r[9] = [-(ws - 0.08), y, floor];
                     r[10] = [0.0, y, floor];
                 }
-                BedKind::Rails | BedKind::Closed => {}
+                BedKind::Rails | BedKind::Closed | BedKind::Trailer => {}
             }
         } else if p.has_greenhouse(y) {
             let top = p.top(y);

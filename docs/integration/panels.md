@@ -131,9 +131,10 @@ turned off in the presets, so it is pre-existing on current `main` (C / lead: pl
   anchors (it cannot move a door line or a hood edge). Long-roof lattices are turned into hatches
   with `rear_rake`; the lattice generator's fixed profile fractions still decide where the cabin
   is (e.g. the semi tractor's windscreen is more raked than a real one).
-- Trailers: the semi tractor runs bobtail. A trailer needs a hitch joint in the sim (contract
-  request filed by the cars round in `docs/integration/cars.md`); its mesh would be a `rails` /
-  `box` style on its own lattice.
+- Trailers: `box_trailer` has a mesh (see "Semi-trailer mesh" below) but no panel spec (its
+  car-topology lattice would turn box-side zones into swinging "doors"). The testbed lights panel
+  lamps whenever a mesh has `taillight` parts (`hasLamps` in `render/panels.ts`), so a trailer's
+  tail/brake lenses light without head lamps.
 - AI police still spawn one model (`Sim::set_police_car`); the new units (Courser, Shade, Marshal,
   Warden, Breacher) are drivable but not dispatched. Kinematic traffic is still drawn as boxes; a
   mixed traffic fleet (vans, box trucks, semis on highways) needs agent sizes in `wp_world`.
@@ -157,3 +158,18 @@ New workstream. Do everything in `prompts/21_car_models_panels.md`.
 - New tools: `car-profile` (anchors + lamp windows to author a style against),
   `node tools/assets/gallery.mjs` (headless renders of every car, day/night), `RENDER_LIST.md`
   (checked for staleness by `cargo test -p car-assets`).
+
+## Semi-trailer mesh (2026-10-21)
+- `data/panels/meshes/box_trailer.json` (114 parts, 9.7k tris) from
+  `data/panels/styles/box_trailer.toml` (`bed = "trailer"`, `[parts.trailer]`,
+  `wheels.dual_front`). Generator `tools/assets/src/trailer.rs` (the car loft is skipped): white
+  sheet-and-post box with rounded front corners, top/bottom rails, rear swing doors (`trunk`
+  region) with lock bars and hinges, rear sill with tail/indicator lamps and plate, red rear
+  markers + ID bar, amber side/front markers, kingpin + upper coupler, landing gear with crank and
+  pads, cross-members, slider tandem with air springs, dual wheels on both axles, mud flaps, side
+  and rear underride guards. Box skin cells and multi-region bolt-ons take the region of the
+  nearest lattice node (named `<panel name>` / `<stem>_<panel name>`), so dents and detached
+  groups follow the trailer lattice; Windshield nodes (inside the box) carry interior load bars.
+- `gen-car-mesh`, `validate-car-asset`, the render list and `gallery.mjs` pick up
+  `data/trailers/*.json` too (`car_assets::{trailer_ids, vehicle_ids, is_trailer}`); `gen-panels`
+  stays cars-only. Existing car meshes are byte-identical.

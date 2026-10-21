@@ -140,10 +140,11 @@ pub fn render(entries: &[Entry]) -> String {
             "**Wheels.** {:?} rims, {:?} finish{}{}{}\n",
             st.wheels.rim,
             st.wheels.finish,
-            if st.wheels.dual_rear {
-                ", dual rear tires"
-            } else {
-                ""
+            match (st.wheels.dual_front, st.wheels.dual_rear) {
+                (true, true) => ", dual tires on every axle",
+                (false, true) => ", dual rear tires",
+                (true, false) => ", dual front tires",
+                (false, false) => "",
             },
             if st.wheels.extra_axles.len() > 1 {
                 ", tandem rear axle"

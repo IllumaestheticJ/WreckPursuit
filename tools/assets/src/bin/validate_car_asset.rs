@@ -1,15 +1,16 @@
-//! `validate-car-asset [car ...]`: validate every car's mesh and panel spec (or the named
-//! cars'). Exits 1 on any problem.
+//! `validate-car-asset [car ...]`: validate every car's and trailer's mesh and panel spec (or
+//! the named vehicles'). Trailers have no panel spec. Exits 1 on any problem.
 
 use car_assets::{
-    car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    is_trailer, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    vehicle_ids,
 };
 
 fn main() {
     let root = repo_root();
     let mut ids: Vec<String> = std::env::args().skip(1).collect();
     if ids.is_empty() {
-        ids = car_ids(&root);
+        ids = vehicle_ids(&root);
     }
     let mut bad = 0;
     for id in ids {
@@ -21,19 +22,23 @@ fn main() {
                 continue;
             }
         };
-        let spec = match wp_damage::PanelSpec::load(&panel_path(&root, &id)) {
-            Ok(s) => match s.validate(&car.lattice) {
-                Ok(()) => Some(s),
+        let spec = if is_trailer(&root, &id) {
+            None
+        } else {
+            match wp_damage::PanelSpec::load(&panel_path(&root, &id)) {
+                Ok(s) => match s.validate(&car.lattice) {
+                    Ok(()) => Some(s),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        bad += 1;
+                        None
+                    }
+                },
                 Err(e) => {
                     eprintln!("{e}");
                     bad += 1;
                     None
                 }
-            },
-            Err(e) => {
-                eprintln!("{e}");
-                bad += 1;
-                None
             }
         };
         let mesh = match load_mesh(&mesh_path(&root, &id)) {

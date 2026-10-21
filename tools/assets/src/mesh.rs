@@ -468,7 +468,7 @@ impl Builder {
     }
 
     /// Finish into mesh parts (positions in mm), sorted by name.
-    fn finish(self) -> Vec<MeshPart> {
+    pub(crate) fn finish(self) -> Vec<MeshPart> {
         let mut parts: Vec<MeshPart> = Vec::new();
         for ((name, region, kind, material), pos, uvs, idx, _) in self.parts {
             if idx.is_empty() {
@@ -654,7 +654,7 @@ fn classify_left(sh: &Shell, y0: f32, y1: f32, z: f32, j: usize) -> Class {
                 _ => Class::of(q, PartKind::Body, MaterialSlot::Metal, "tipper_inner_l"),
             },
             BedKind::Rails => Class::of(q, PartKind::Body, MaterialSlot::Trim, "rails_l"),
-            BedKind::Closed => Class::panel(q),
+            BedKind::Closed | BedKind::Trailer => Class::panel(q),
         };
     }
     if p.in_bed(y0) && p.s.bed == BedKind::Rails {
@@ -781,7 +781,11 @@ pub fn station_step(len: f32) -> f32 {
 }
 
 /// Generate the mesh for a car (skin binding left empty; see [`crate::skin::bind_skin`]).
+/// Trailers (`bed = "trailer"`) are built by [`crate::trailer::generate`].
 pub fn generate(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle) -> CarMesh {
+    if style.body.bed == BedKind::Trailer {
+        return crate::trailer::generate(def, lattice, style);
+    }
     let p = BodyProfile::measure(def, lattice, style);
     let sh = Shell::new(p.clone(), style);
     let ys = p.stations(station_step(p.length()));
@@ -911,25 +915,30 @@ pub fn generate(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle) -> Car
     apply_paint_overrides(&mut parts, style);
     parts.extend(crate::wheels::wheel_parts(def, style));
     let tri_count = parts.iter().map(|p| p.tri_count() as u32).sum();
-    let rgb = |s: &str| parse_rgb(s).unwrap_or(0x808080);
     CarMesh {
         id: def.id.clone(),
         lattice_id: lattice.id.clone(),
         format: MESH_FORMAT,
         tri_count,
-        palette: MeshPalette {
-            base: rgb(&style.palette.base),
-            accent: rgb(&style.palette.accent),
-            primer: rgb(&style.palette.primer),
-            alts: style.palette.alts.iter().map(|s| rgb(s)).collect(),
-        },
+        palette: mesh_palette(style),
         parts,
+    }
+}
+
+/// The mesh's livery colours from a style sheet's palette.
+pub(crate) fn mesh_palette(style: &CarStyle) -> MeshPalette {
+    let rgb = |s: &str| parse_rgb(s).unwrap_or(0x808080);
+    MeshPalette {
+        base: rgb(&style.palette.base),
+        accent: rgb(&style.palette.accent),
+        primer: rgb(&style.palette.primer),
+        alts: style.palette.alts.iter().map(|s| rgb(s)).collect(),
     }
 }
 
 /// Re-material painted parts named in `paint_overrides` (exact names, or a `*` suffix
 /// wildcard such as `door_*`).
-fn apply_paint_overrides(parts: &mut [MeshPart], style: &CarStyle) {
+pub(crate) fn apply_paint_overrides(parts: &mut [MeshPart], style: &CarStyle) {
     for part in parts.iter_mut() {
         if !matches!(
             part.material,

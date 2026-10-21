@@ -63,7 +63,8 @@ window.showCar = async (id, view, night) => {
   if (current) root.remove(current);
   const [mesh, car] = await Promise.all([
     fetch(`/data/panels/meshes/${id}.json`).then((r) => r.json()),
-    fetch(`/data/cars/${id}.json`).then((r) => r.json()),
+    // Cars live in data/cars, semi-trailers in data/trailers (same schema).
+    fetch(`/data/cars/${id}.json`).then((r) => (r.ok ? r.json() : fetch(`/data/trailers/${id}.json`).then((t) => t.json()))),
   ]);
   const mats = materials(mesh.palette, night);
   const g = new THREE.Group();

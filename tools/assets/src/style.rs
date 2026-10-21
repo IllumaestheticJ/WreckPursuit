@@ -122,6 +122,10 @@ pub enum BedKind {
     Rails,
     /// Steel tipper body (dump truck): open box with tall sides to `bed_height`.
     Tipper,
+    /// Semi-trailer: no cab, the whole length is a dry-van box from `bed_floor` up to
+    /// `bed_height` (0 = the lattice top), `bed_half_w` wide (0 = the lattice width). Built by
+    /// [`crate::trailer`] instead of the car loft; hardware comes from `[parts.trailer]`.
+    Trailer,
 }
 
 /// Body shape knobs. Defaults reproduce a plain modern car.
@@ -685,6 +689,53 @@ impl Default for Utility {
     }
 }
 
+/// Semi-trailer hardware (used only with `bed = "trailer"`). Positions are chassis metres.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct TrailerParts {
+    /// Kingpin (y, z): the pin's station and the underside of the upper coupler plate (where
+    /// it sits on the tractor's fifth wheel; `wp_sim` hitches at this point).
+    pub kingpin: [f32; 2],
+    /// Landing gear leg station y (0 = 1.6 m behind the kingpin).
+    pub landing_gear_y: f32,
+    /// Landing gear lateral leg position |x|.
+    pub landing_gear_x: f32,
+    /// Landing gear foot pad height above the ground (legs wound up while coupled).
+    pub landing_gear_lift: f32,
+    /// Plan-view radius of the box's front vertical corners.
+    pub corner_r: f32,
+    /// Side underride guard rail between the landing gear and the tandem.
+    pub side_guard: bool,
+    /// Rear underride (ICC) bar centre height (0 = none).
+    pub underride_z: f32,
+    /// Vertical lock bars per rear door leaf.
+    pub lock_bars: u32,
+    /// Spacing of the exterior side posts of a sheet-and-post box (0 = smooth sides).
+    pub post_pitch: f32,
+    /// Height of the side bottom rail extrusion (its bottom is the box floor).
+    pub bottom_rail: f32,
+    /// Height of the rear door frame sill (below the doors, carries the rear lamps).
+    pub rear_sill: f32,
+}
+
+impl Default for TrailerParts {
+    fn default() -> Self {
+        TrailerParts {
+            kingpin: [5.2, 1.22],
+            landing_gear_y: 0.0,
+            landing_gear_x: 0.95,
+            landing_gear_lift: 0.25,
+            corner_r: 0.12,
+            side_guard: true,
+            underride_z: 0.55,
+            lock_bars: 2,
+            post_pitch: 1.2,
+            bottom_rail: 0.2,
+            rear_sill: 0.3,
+        }
+    }
+}
+
 /// Hood scoop style.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -744,6 +795,8 @@ pub struct Parts {
     pub stripes: [f32; 2],
     /// Truck / utility hardware.
     pub utility: Utility,
+    /// Semi-trailer hardware (`bed = "trailer"` only).
+    pub trailer: TrailerParts,
     /// Dark side-window tint on the rear glass (unmarked police, limo).
     pub dark_rear_glass: bool,
 }
@@ -770,6 +823,7 @@ impl Default for Parts {
             handles: true,
             stripes: [0.0, 0.0],
             utility: Utility::default(),
+            trailer: TrailerParts::default(),
             dark_rear_glass: false,
         }
     }
@@ -812,6 +866,9 @@ pub struct WheelStyle {
     pub rim_frac: f32,
     /// Dual rear tires.
     pub dual_rear: bool,
+    /// Dual tires on the front (physics) axle too: trailers, whose "front" axle is the
+    /// leading axle of a tandem, not a steer axle.
+    pub dual_front: bool,
     /// Extra (visual) rear axles: fore-aft offsets from the physics rear axle, m. The
     /// physics axle itself is drawn only when 0.0 is in the list (tandem: `[-0.66, 0.66]`).
     pub extra_axles: Vec<f32>,
@@ -826,6 +883,7 @@ impl Default for WheelStyle {
             finish: PaintSlot::Chrome,
             rim_frac: 0.66,
             dual_rear: false,
+            dual_front: false,
             extra_axles: Vec::new(),
             white_letters: false,
         }

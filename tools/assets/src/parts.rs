@@ -78,7 +78,7 @@ fn inward(face: Face, right: bool) -> [f32; 3] {
 }
 
 /// Lens outline in local face coordinates (+u = outboard), counter-clockwise.
-fn outline(shape: LampShape, w: f32, h: f32, slant: f32) -> Vec<(f32, f32)> {
+pub(crate) fn outline(shape: LampShape, w: f32, h: f32, slant: f32) -> Vec<(f32, f32)> {
     let (a, c) = (0.5 * w, 0.5 * h);
     let mut pts: Vec<(f32, f32)> = match shape {
         LampShape::Rect | LampShape::Slit => {
@@ -132,6 +132,34 @@ fn outline(shape: LampShape, w: f32, h: f32, slant: f32) -> Vec<(f32, f32)> {
         }
     }
     pts
+}
+
+/// Part-name stem of a lamp kind (`tail`, `marker`, …).
+pub(crate) fn lamp_kind_name(kind: LampKind) -> &'static str {
+    match kind {
+        LampKind::Head => "head",
+        LampKind::Fog => "fog",
+        LampKind::Drl => "drl",
+        LampKind::Tail => "tail",
+        LampKind::Brake3 => "brake3",
+        LampKind::Indicator => "indicator",
+        LampKind::Marker => "marker",
+        LampKind::Reverse => "reverse",
+        LampKind::BeaconRed => "beacon_red",
+        LampKind::BeaconBlue => "beacon_blue",
+    }
+}
+
+/// Lens material of a lamp kind.
+pub(crate) fn lamp_material(kind: LampKind) -> MaterialSlot {
+    match kind {
+        LampKind::Head | LampKind::Fog | LampKind::Drl => MaterialSlot::Headlight,
+        LampKind::Tail | LampKind::Brake3 => MaterialSlot::Taillight,
+        LampKind::Indicator | LampKind::Marker => MaterialSlot::Indicator,
+        LampKind::Reverse => MaterialSlot::Lens,
+        LampKind::BeaconRed => MaterialSlot::BeaconRed,
+        LampKind::BeaconBlue => MaterialSlot::BeaconBlue,
+    }
 }
 
 impl Ctx<'_> {
@@ -303,26 +331,8 @@ impl Ctx<'_> {
             let n = count.entry(l.kind).or_insert(0);
             let idx = *n;
             *n += 1;
-            let kname = match l.kind {
-                LampKind::Head => "head",
-                LampKind::Fog => "fog",
-                LampKind::Drl => "drl",
-                LampKind::Tail => "tail",
-                LampKind::Brake3 => "brake3",
-                LampKind::Indicator => "indicator",
-                LampKind::Marker => "marker",
-                LampKind::Reverse => "reverse",
-                LampKind::BeaconRed => "beacon_red",
-                LampKind::BeaconBlue => "beacon_blue",
-            };
-            let mat = match l.kind {
-                LampKind::Head | LampKind::Fog | LampKind::Drl => MaterialSlot::Headlight,
-                LampKind::Tail | LampKind::Brake3 => MaterialSlot::Taillight,
-                LampKind::Indicator | LampKind::Marker => MaterialSlot::Indicator,
-                LampKind::Reverse => MaterialSlot::Lens,
-                LampKind::BeaconRed => MaterialSlot::BeaconRed,
-                LampKind::BeaconBlue => MaterialSlot::BeaconBlue,
-            };
+            let kname = lamp_kind_name(l.kind);
+            let mat = lamp_material(l.kind);
             let stem = if idx == 0 {
                 kname.to_string()
             } else {

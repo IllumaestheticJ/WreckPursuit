@@ -11,6 +11,10 @@
 //! - the render list `data/panels/RENDER_LIST.md` ([`render_list`], `gen-car-mesh`),
 //! - checked by [`validate::validate`] (`validate-car-asset`).
 //!
+//! Semi-trailers (`data/trailers/<id>.json`, same `VehicleDef` schema) get a style sheet and a
+//! mesh the same way ([`trailer`], `bed = "trailer"`), but no panel spec: they have no doors,
+//! hood or trunk lid that swing.
+//!
 //! See `README.md` for the file formats and commands.
 
 #![warn(missing_docs)]
@@ -22,6 +26,7 @@ pub mod render_list;
 pub mod shell;
 pub mod skin;
 pub mod style;
+pub mod trailer;
 pub mod validate;
 pub mod wheels;
 
@@ -49,9 +54,46 @@ pub fn car_ids(root: &Path) -> Vec<String> {
     ids
 }
 
-/// Load a car (definition + tires + lattice + materials).
+/// Every semi-trailer id in `data/trailers`, sorted.
+pub fn trailer_ids(root: &Path) -> Vec<String> {
+    let mut ids: Vec<String> = std::fs::read_dir(root.join("data/trailers"))
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+                .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+/// Every vehicle with a mesh: the cars (sorted), then the trailers (sorted).
+pub fn vehicle_ids(root: &Path) -> Vec<String> {
+    let mut ids = car_ids(root);
+    ids.extend(trailer_ids(root));
+    ids
+}
+
+/// True when `id` is a semi-trailer (`data/trailers/<id>.json`) rather than a car.
+pub fn is_trailer(root: &Path, id: &str) -> bool {
+    !root.join(format!("data/cars/{id}.json")).exists()
+        && root.join(format!("data/trailers/{id}.json")).exists()
+}
+
+/// Path of a vehicle definition: `data/cars/<id>.json`, or `data/trailers/<id>.json` for a
+/// trailer.
+pub fn vehicle_path(root: &Path, id: &str) -> PathBuf {
+    if is_trailer(root, id) {
+        root.join(format!("data/trailers/{id}.json"))
+    } else {
+        root.join(format!("data/cars/{id}.json"))
+    }
+}
+
+/// Load a car or trailer (definition + tires + lattice + materials).
 pub fn load_car(root: &Path, id: &str) -> Result<LoadedCar, String> {
-    wp_contracts::load_car(root.join(format!("data/cars/{id}.json"))).map_err(|e| e.to_string())
+    wp_contracts::load_car(vehicle_path(root, id)).map_err(|e| e.to_string())
 }
 
 /// Path of a car's panel spec.

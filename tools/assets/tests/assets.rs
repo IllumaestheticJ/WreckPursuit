@@ -4,24 +4,30 @@
 use car_assets::mesh::{CarMesh, PartKind, TRI_BUDGET};
 use car_assets::render_list::{render, Entry, RENDER_LIST_PATH};
 use car_assets::{
-    build_mesh, car_ids, load_car, load_mesh, load_style, mesh_path, panel_path, repo_root,
-    validate::validate,
+    build_mesh, car_ids, is_trailer, load_car, load_mesh, load_style, mesh_path, panel_path,
+    repo_root, validate::validate, vehicle_ids,
 };
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
 
+/// Every car (and trailer) mesh is valid and up to date; cars also have a valid panel spec
+/// (trailers have none); the render list covers them all.
 #[test]
 fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
     let root = repo_root();
-    let ids = car_ids(&root);
-    assert!(ids.len() >= 16);
+    assert!(car_ids(&root).len() >= 16);
     let mut built = Vec::new();
-    for id in ids {
+    for id in vehicle_ids(&root) {
         let car = load_car(&root, &id).unwrap();
-        let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
-        spec.validate(&car.lattice).unwrap();
+        let spec = if is_trailer(&root, &id) {
+            None
+        } else {
+            let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
+            spec.validate(&car.lattice).unwrap();
+            Some(spec)
+        };
         let on_disk = load_mesh(&mesh_path(&root, &id)).unwrap();
-        let errs = validate(&car, &on_disk, Some(&spec));
+        let errs = validate(&car, &on_disk, spec.as_ref());
         assert!(errs.is_empty(), "{id}: {errs:#?}");
         let style = load_style(&root, &id).unwrap();
         let fresh = build_mesh(&car, &style);

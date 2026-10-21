@@ -9,6 +9,9 @@ Owned by workstream R (`ws/panels`). Every car in `data/cars` has:
 | `meshes/<car>.json` | Procedural low-poly mesh (`car_assets::mesh::CarMesh`, format 2) generated from the style sheet: body regions, glass, lamps, bolt-on details, interior, wheels; skinned to the lattice | `cargo run -p car-assets --bin gen-car-mesh` (runs `bind-skin`) |
 | `RENDER_LIST.md` | Every car's personality, visual brief and mesh contents | `gen-car-mesh` (generated) |
 
+Semi-trailers in `data/trailers` (e.g. `box_trailer`) have a style sheet (`bed = "trailer"`), a
+mesh and a render-list entry, but no panel spec (`tools/assets/src/trailer.rs`).
+
 Both are checked by `cargo run -p car-assets --bin validate-car-asset` and by
 `cargo test -p car-assets` (which also fails if `meshes/` is stale, like the lattices test).
 Analog names only, no badges or trademarks (`tools/specsheet/nameplate_check.py`).

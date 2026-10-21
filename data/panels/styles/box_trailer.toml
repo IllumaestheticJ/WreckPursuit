@@ -1,0 +1,146 @@
+# Dryvan 40 — style sheet (keys: tools/assets/src/style.rs; built by tools/assets/src/trailer.rs).
+[identity]
+tagline = "Forty feet of somebody else's freight"
+personality = "A plain 40 ft dry-van semi-trailer that rides behind the Longhaul Tractor. It has no engine and no opinions, just twelve metres of white aluminium wall that swings wide on every corner and fills the mirrors of whoever is trying to get past. Clip it and it shrugs; get under it and you will regret it."
+silhouette = "A tall white box, flat-faced at the front with slightly rounded corners, standing on wound-up landing gear behind the kingpin, a long empty gap under the floor, then a tandem of dual wheels tucked at the very back above a low underride bar."
+signatures = [
+  "Tall white sheet-and-post aluminium box with bright top and bottom rails",
+  "Landing gear legs with crank and foot pads just behind the kingpin plate",
+  "Rear swing doors with vertical lock bars, hinges on the posts, ICC underride bar",
+  "Spread of dual wheels on a slider tandem, mud flaps, side underride rail",
+]
+lighting = "No head lamps. Amber clearance markers on the front top corners and along the bottom rail; red markers on the rear top corners with a three-lamp ID bar between them; round red tail/brake lamps and amber indicators low on the rear sill."
+
+[palette]
+base = "#eeeeea"
+accent = "#3a3d42"
+primer = "#6d6f6a"
+alts = ["#c9ccd0", "#1f4e79", "#c8261e", "#2b5d34", "#e8a317"]
+
+[body]
+bed = "trailer"
+bed_height = 4.1
+bed_floor = 1.25
+
+# Front top corners (amber, facing forward).
+[[lamp]]
+kind = "marker"
+face = "front"
+x = 1.1
+z = 3.96
+w = 0.09
+h = 0.05
+
+# Side markers along the bottom rail and at the front top corner (amber).
+[[lamp]]
+kind = "marker"
+face = "side"
+y = 5.6
+z = 1.25
+w = 0.09
+h = 0.05
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = 2.3
+z = 1.25
+w = 0.09
+h = 0.05
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = -1.4
+z = 1.25
+w = 0.09
+h = 0.05
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = 5.75
+z = 3.96
+w = 0.09
+h = 0.05
+
+# Rear top corners (red, on the door header).
+[[lamp]]
+kind = "marker"
+face = "rear"
+x = 1.12
+z = 4.0
+w = 0.08
+h = 0.05
+
+# Three-lamp ID bar, centre of the rear header (red).
+[[lamp]]
+kind = "marker"
+face = "rear"
+x = 0.0
+z = 4.0
+w = 0.06
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "marker"
+face = "rear"
+x = 0.15
+z = 4.0
+w = 0.06
+h = 0.04
+
+# Round tail / brake lamps and amber indicators on the rear sill.
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "round"
+x = 1.02
+z = 1.27
+w = 0.13
+h = 0.13
+bezel = 0.012
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "round"
+x = 0.84
+z = 1.27
+w = 0.13
+h = 0.13
+bezel = 0.012
+
+[[lamp]]
+kind = "indicator"
+face = "rear"
+shape = "round"
+x = 0.66
+z = 1.27
+w = 0.12
+h = 0.12
+bezel = 0.012
+
+[parts]
+plates = true
+
+[parts.utility]
+mudflaps = true
+
+[parts.trailer]
+kingpin = [5.2, 1.22]
+landing_gear_x = 0.95
+landing_gear_lift = 0.25
+corner_r = 0.12
+side_guard = true
+underride_z = 0.55
+lock_bars = 2
+post_pitch = 1.2
+
+[wheels]
+rim = "truck"
+finish = "metal"
+rim_frac = 0.58
+dual_rear = true
+dual_front = true

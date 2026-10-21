@@ -260,8 +260,8 @@ export class PanelBody {
       (this.mats.primer as THREE.MeshStandardMaterial).color.setHex(mesh.palette.primer);
     }
     this.hasBeacons = mesh.parts.some((p) => p.material === "beacon_red" || p.material === "beacon_blue");
-    this.hasLamps =
-      mesh.parts.some((p) => p.material === "headlight") && mesh.parts.some((p) => p.material === "taillight");
+    // Tail lamps are enough: trailers have no head lamps (and must not get fallback ones).
+    this.hasLamps = mesh.parts.some((p) => p.material === "taillight");
     this.restNodes = sim.latticeRest(this.entity);
     const nodeRegions = sim.latticeRegions(this.entity);
     for (const def of mergeParts(mesh.parts)) {
