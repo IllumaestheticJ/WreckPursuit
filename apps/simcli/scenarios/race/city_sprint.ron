@@ -1,9 +1,10 @@
-// wp_race: a short city sprint on the procedural 7x7 city's northbound arterial
-// (three 3.7 m lanes, x = 56.85 / 60.55 / 64.25, straight from y = -457 to -123). The race
+// wp_race: a short city sprint on the procedural 7x7 city's northbound highway carriageway
+// (three 3.7 m lanes, x = 58.35 / 62.05 / 65.75, straight from y = -457 to -123, past the
+// off-ramp gore at y = -390 and up onto the viaduct). The race
 // route comes from wp_world::World::plan_route((60.55, -437) → (60.55, -140)) and is judged by
 // crates/wp_race/tests/simcli_races.rs; that test also checks the route's closure (closed lanes,
 // cones) through World::set_active_routes. Staggered grid behind the start line (y = -437):
-// pole = sedan at (58.05, -440), second = coupe at (63.05, -444). Green at 3.0 s.
+// pole = sedan at (59.55, -440), second = coupe at (64.55, -444). Green at 3.0 s.
 // Traffic is off: simcli cannot apply a race closure yet (see docs/integration/race.md).
 (
     name: "race_city_sprint",
@@ -16,7 +17,7 @@
         (
             id: "sedan",
             car: "debug_sedan",
-            pos: (58.05, -440.0, 0.0),
+            pos: (59.55, -440.0, 0.0),
             inputs: [
                 (t_s: 3.3, input: (throttle: 1.0)),
                 (t_s: 6.0, input: (throttle: 1.0, steer: -0.006)),
@@ -29,7 +30,7 @@
         (
             id: "coupe",
             car: "debug_coupe",
-            pos: (63.05, -444.0, 0.0),
+            pos: (64.55, -444.0, 0.0),
             inputs: [
                 (t_s: 3.2, input: (throttle: 1.0)),
                 (t_s: 15.0, input: (brake: 1.0)),
