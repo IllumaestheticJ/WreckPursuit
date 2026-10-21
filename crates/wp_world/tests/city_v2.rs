@@ -184,3 +184,19 @@ fn drawn_terrain_stays_under_roads_and_follows_the_ground() {
     assert!(q(0.95) < 0.3, "p95 {}", q(0.95));
     assert!(q(0.99) < 0.75, "p99 {}", q(0.99));
 }
+
+/// A flat terrain field (main gives the procedural grid one under its viaduct) is collided
+/// with unchanged, so it stays uniform: wp_sim tells a flat city by its terrain.
+#[test]
+fn flat_terrain_collides_unchanged() {
+    let mut net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default());
+    let (lo, hi) = (net.bounds_min, net.bounds_max);
+    net.terrain = Some(wp_world::terrain::Heightfield::flat(
+        [lo[0] - 50.0, lo[1] - 50.0],
+        [hi[0] + 50.0, hi[1] + 50.0],
+        10.0,
+        -0.12,
+    ));
+    let map = wp_world::CityMap::new(net);
+    assert_eq!(map.ground.as_deref(), map.net.terrain.as_ref());
+}
