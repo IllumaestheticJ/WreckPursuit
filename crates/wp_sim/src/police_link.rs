@@ -21,6 +21,97 @@ pub const POLICE_SLOT_RESERVE: usize = 16;
 /// Police RNG stream offset from the master seed.
 const POLICE_SEED_SALT: u64 = 0x0090_11CE;
 
+/// Salt of the per-unit fleet pick (independent of the police RNG stream: picking a model
+/// draws nothing from any RNG).
+const FLEET_SALT: u64 = 0xF1EE_7000_0000_0001;
+
+/// One police car model of a multi-model fleet ([`Sim::set_police_cars`]): the car, the
+/// wanted levels it is dispatched at and how often relative to the other eligible models.
+#[derive(Debug, Clone)]
+pub struct PoliceModel {
+    /// The car (e.g. `sentinel_warden`).
+    pub car: LoadedCar,
+    /// Lowest wanted level (1..=5) this model is picked at. Patrols spawned while nobody is
+    /// wanted count as level 1.
+    pub min_level: u8,
+    /// Highest wanted level (1..=5) this model is picked at.
+    pub max_level: u8,
+    /// Relative weight among the models eligible at a level (0 = never picked).
+    pub weight: u32,
+    /// Measured limits for the pro driver (see [`Sim::set_police_car_limits`]); `None` = the
+    /// sim-wide limits if set, else `pursuit.toml`'s defaults.
+    pub limits: Option<wp_police::pro::CarLimits>,
+}
+
+impl PoliceModel {
+    /// `car` at wanted levels `min_level..=max_level`, weight 1, default limits.
+    pub fn new(car: LoadedCar, min_level: u8, max_level: u8) -> Self {
+        Self {
+            car,
+            min_level,
+            max_level,
+            weight: 1,
+            limits: None,
+        }
+    }
+
+    /// Same model with another weight.
+    pub fn with_weight(mut self, weight: u32) -> Self {
+        self.weight = weight;
+        self
+    }
+
+    /// Same model with measured pro-driver limits.
+    pub fn with_limits(mut self, limits: wp_police::pro::CarLimits) -> Self {
+        self.limits = Some(limits);
+        self
+    }
+}
+
+/// SplitMix64 finalizer (deterministic integer hash).
+fn mix64(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Fleet index for a unit first seen at wanted `level` (clamped to 1..=5): a weighted pick
+/// among the models whose level range contains it (all models with weight > 0 when none
+/// does), keyed by `hash(seed, unit id)`. Pure function: no RNG, no map iteration order.
+pub fn pick_police_model(fleet: &[PoliceModel], level: u8, seed: u64, unit: UnitId) -> usize {
+    let level = level.clamp(1, 5);
+    let eligible = |m: &PoliceModel| m.weight > 0 && m.min_level <= level && level <= m.max_level;
+    let any_eligible = fleet.iter().any(eligible);
+    let usable = |m: &PoliceModel| {
+        if any_eligible {
+            eligible(m)
+        } else {
+            m.weight > 0
+        }
+    };
+    let total: u64 = fleet
+        .iter()
+        .filter(|m| usable(m))
+        .map(|m| m.weight as u64)
+        .sum();
+    if total == 0 {
+        return 0;
+    }
+    let mut r = mix64(seed ^ FLEET_SALT ^ ((unit.0 as u64) << 8 | level as u64)) % total;
+    for (i, m) in fleet.iter().enumerate() {
+        if !usable(m) {
+            continue;
+        }
+        let w = m.weight as u64;
+        if r < w {
+            return i;
+        }
+        r -= w;
+    }
+    0
+}
+
 impl Sim {
     /// Rebuild the police system on the current world's road network (called by
     /// [`Sim::set_world`]). Units drive kinematically until bound to a vehicle.
@@ -29,7 +120,10 @@ impl Sim {
             seed: self.config.seed ^ POLICE_SEED_SALT,
             mode: self.config.mode.mode,
             internal_driving: true,
-            ..Default::default()
+            // Traffic is real here (wp_world agents, reported as obstacles every tick), so
+            // kinematic units must not also roll wp_police's statistical traffic stand-in:
+            // that turned every unseen civilian car into a random health/speed hit.
+            hazards: false,
         };
         self.police = PoliceSystem::for_world(PoliceConfig::builtin(), &self.world, setup);
     }
@@ -38,6 +132,61 @@ impl Sim {
     /// ground unit from then on gets this vehicle; without one, police stay kinematic.
     pub fn set_police_car(&mut self, car: LoadedCar) {
         self.police_car = Some(car);
+    }
+
+    /// Several police car models keyed by wanted level (replaces [`Sim::set_police_car`]'s
+    /// single model while non-empty; empty restores it). Each AI car unit gets its model once,
+    /// the first tick the sim sees it, from the highest wanted level of any racer at that
+    /// moment ([`pick_police_model`], hashed by the run seed and unit id), and keeps it for
+    /// life — including while it drives kinematically without a body. Deterministic: units in
+    /// `wp_police` order, no RNG draws, so runs that only use `set_police_car` are unchanged.
+    pub fn set_police_cars(&mut self, fleet: Vec<PoliceModel>) {
+        self.police_fleet = fleet;
+        self.police_unit_models.clear();
+    }
+
+    /// The multi-model fleet ([`Sim::set_police_cars`]), in index order.
+    pub fn police_fleet(&self) -> &[PoliceModel] {
+        &self.police_fleet
+    }
+
+    /// Fleet index of a police unit's car (`None` without a fleet, for helicopters / player
+    /// units, or before the unit's first reconcile).
+    pub fn police_unit_model(&self, unit: UnitId) -> Option<usize> {
+        self.police_unit_models.get(&unit).copied()
+    }
+
+    /// Highest wanted level (0..=5) of any racer: the level new police units are picked for.
+    pub fn police_dispatch_level(&self) -> u8 {
+        self.racer_views()
+            .iter()
+            .map(|r| self.police.wanted_level(r.entity).number())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Give every new AI car unit a fleet model; forget retired units.
+    fn assign_police_models(&mut self) {
+        if self.police_fleet.is_empty() {
+            return;
+        }
+        let units = self.police.units();
+        self.police_unit_models
+            .retain(|id, _| units.iter().any(|u| u.id == *id));
+        let new: Vec<UnitId> = units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car && u.player.is_none())
+            .filter(|u| !self.police_unit_models.contains_key(&u.id))
+            .map(|u| u.id)
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        let level = self.police_dispatch_level();
+        for unit in new {
+            let m = pick_police_model(&self.police_fleet, level, self.config.seed, unit);
+            self.police_unit_models.insert(unit, m);
+        }
     }
 
     /// Measured limits of the police car model (`wp_vehicle::metrics`, see
@@ -204,14 +353,24 @@ impl Sim {
             .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && u.entity.is_none())
             .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed))
             .collect();
+        self.assign_police_models();
+        let multi = !self.police_fleet.is_empty();
         // Clone the car model (lattice and all) only when a unit actually needs a body.
-        let car = if wanted.is_empty() {
+        let single = if wanted.is_empty() || multi {
             None
         } else {
             self.police_car.clone()
         };
-        if let Some(car) = car {
+        if multi || single.is_some() {
             for (unit, pos, heading, speed) in wanted {
+                let (car, model_limits) = if multi {
+                    let m = self.police_unit_models.get(&unit).copied().unwrap_or(0);
+                    let pm = &self.police_fleet[m.min(self.police_fleet.len() - 1)];
+                    (pm.car.clone(), pm.limits)
+                } else {
+                    // `single` is Some here (checked above).
+                    (single.clone().expect("single police car"), None)
+                };
                 if self.vehicles.len() + POLICE_SLOT_RESERVE >= MAX_VEHICLES {
                     break;
                 }
@@ -238,7 +397,7 @@ impl Sim {
                     max_steer_rad: car.def.wheels[0].max_steer_rad,
                 };
                 self.police.bind_unit_entity(unit, id, geom);
-                if let Some(limits) = self.police_car_limits {
+                if let Some(limits) = model_limits.or(self.police_car_limits) {
                     self.police.set_unit_limits(unit, limits);
                 }
             }
@@ -273,5 +432,149 @@ impl Sim {
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SimConfig;
+    use wp_contracts::{TimeOfDay, VehicleInput};
+    use wp_world::World;
+
+    fn data(path: &str) -> String {
+        format!("{}/../../data/{path}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn car(id: &str) -> LoadedCar {
+        wp_contracts::load_car(data(&format!("cars/{id}.json"))).unwrap()
+    }
+
+    /// The heat-keyed fleet the browser's city chase uses.
+    fn fleet() -> Vec<PoliceModel> {
+        vec![
+            PoliceModel::new(car("sentinel_warden"), 1, 2),
+            PoliceModel::new(car("sentinel_cruiser"), 1, 2),
+            PoliceModel::new(car("sentinel_bastion"), 2, 3),
+            PoliceModel::new(car("sentinel_wolfhound"), 3, 5),
+            PoliceModel::new(car("sentinel_harrier"), 4, 5),
+        ]
+    }
+
+    #[test]
+    fn pick_respects_levels_and_is_a_pure_function() {
+        let f = fleet();
+        for level in 0..=6u8 {
+            let l = level.clamp(1, 5);
+            let mut seen = std::collections::BTreeSet::new();
+            for u in 0..400 {
+                let m = pick_police_model(&f, level, 5, UnitId(u));
+                assert_eq!(m, pick_police_model(&f, level, 5, UnitId(u)));
+                assert!(f[m].min_level <= l && l <= f[m].max_level, "L{level}: {m}");
+                seen.insert(m);
+            }
+            let want = f
+                .iter()
+                .filter(|m| m.min_level <= l && l <= m.max_level)
+                .count();
+            assert_eq!(
+                seen.len(),
+                want,
+                "L{level}: every eligible model gets picked"
+            );
+        }
+        // Weight 0 is never picked; no eligible model → any weighted model.
+        let mut g = fleet();
+        g[0].weight = 0;
+        assert!((0..200).all(|u| pick_police_model(&g, 1, 1, UnitId(u)) == 1));
+        let only_high = vec![PoliceModel::new(car("sentinel_harrier"), 5, 5)];
+        assert_eq!(pick_police_model(&only_high, 1, 1, UnitId(3)), 0);
+    }
+
+    fn city_run(fleet: Option<Vec<PoliceModel>>, ticks: u32) -> Sim {
+        let player = car("debug_sedan");
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 11,
+            mode,
+            time_of_day: TimeOfDay::from_hours(22.0),
+            time_ratio: 10.0,
+        });
+        sim.set_police_car(car("sentinel_cruiser"));
+        if let Some(f) = fleet {
+            sim.set_police_cars(f);
+        }
+        sim.set_world(World::procedural(
+            &wp_world::procgen::ProcGenConfig::small(),
+            wp_world::WorldConfig::default(),
+        ));
+        let id = sim.spawn_vehicle(&player, [0.0, 0.0, 0.0], 0.0).unwrap();
+        sim.set_input(
+            id,
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for _ in 0..ticks {
+            sim.step_fixed();
+        }
+        sim
+    }
+
+    #[test]
+    fn fleet_units_get_their_models_deterministically() {
+        let a = city_run(Some(fleet()), 2400);
+        let cops: Vec<_> = a
+            .vehicles()
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Police)
+            .collect();
+        assert!(!cops.is_empty(), "no police cars spawned");
+        for v in &cops {
+            let unit = v.police_unit.unwrap();
+            let m = a.police_unit_model(unit).expect("bound unit has a model");
+            assert_eq!(a.police_fleet()[m].car.def.id, v.car_id);
+        }
+        let b = city_run(Some(fleet()), 2400);
+        assert_eq!(a.state_hash(), b.state_hash());
+        let ids = |s: &Sim| {
+            s.vehicles()
+                .iter()
+                .map(|v| (v.id, v.car_id.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&a), ids(&b));
+    }
+
+    #[test]
+    fn patrols_with_nobody_wanted_use_the_low_heat_models() {
+        let mut sim = city_run(Some(fleet()), 0);
+        // Nobody drives: no violations, so every unit is picked at level 1.
+        sim.set_input(EntityId(1), VehicleInput::default()).unwrap();
+        for _ in 0..1200 {
+            sim.step_fixed();
+        }
+        assert_eq!(sim.police_dispatch_level(), 0);
+        let models: Vec<usize> = sim
+            .police()
+            .units()
+            .iter()
+            .filter_map(|u| sim.police_unit_model(u.id))
+            .collect();
+        assert!(!models.is_empty());
+        assert!(models.iter().all(|m| *m <= 1), "{models:?}");
+    }
+
+    #[test]
+    fn a_one_model_fleet_matches_set_police_car() {
+        let single = city_run(None, 1200);
+        let fleet = city_run(
+            Some(vec![PoliceModel::new(car("sentinel_cruiser"), 1, 5)]),
+            1200,
+        );
+        assert_eq!(single.state_hash(), fleet.state_hash());
+        assert!(single.police_unit_model(UnitId(0)).is_none());
     }
 }

@@ -6,7 +6,9 @@ mod crash;
 
 use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
 use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, TRI_BUDGET};
+use car_assets::profile::BodyProfile;
 use car_assets::skin::{deform_detail, FoldMemory};
+use car_assets::style::style_for;
 use car_assets::{
     build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
 };
@@ -82,6 +84,11 @@ fn skinned_vertices_follow_their_region_nodes() {
     }
 }
 
+/// Hinged panel meshes start at their hinge line. Doors use the lattice hinge. The hood's
+/// rear edge and the trunk lid's front edge follow the car's *visual* cabin placement
+/// (`BodyStyle::cabin_shift_m` / `hood_length` move the windshield base and the rear-glass
+/// base on purpose, see PLAN.md "Foundation API"), so they are checked against the styled
+/// profile, and the visual edge may sit at most 0.6 m from the lattice hinge.
 #[test]
 fn hinged_parts_start_at_their_hinge_line() {
     let root = repo_root();
@@ -89,8 +96,20 @@ fn hinged_parts_start_at_their_hinge_line() {
         let car = load_car(&root, &id).unwrap();
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let style = style_for(&car.def);
+        let prof = BodyProfile::styled(&car.def, &car.lattice, &style.body);
         for p in spec.panels.iter().filter(|p| p.kind.is_hinged()) {
-            let hinge_y = car.lattice.nodes[p.hinge_nodes[0] as usize].pos_m[1];
+            let lattice_hinge_y = car.lattice.nodes[p.hinge_nodes[0] as usize].pos_m[1];
+            let hinge_y = match p.region {
+                BodyRegion::Hood => lattice_hinge_y + (prof.y_fw - prof.lattice_y_fw),
+                BodyRegion::Trunk => lattice_hinge_y + (prof.y_deck - prof.lattice_y_deck),
+                _ => lattice_hinge_y,
+            };
+            assert!(
+                (hinge_y - lattice_hinge_y).abs() <= 0.6,
+                "{id}/{}: visual hinge {hinge_y} too far from the lattice hinge {lattice_hinge_y}",
+                p.name
+            );
             let part = mesh
                 .parts
                 .iter()
@@ -452,6 +471,13 @@ fn first_hit(mesh: &car_assets::mesh::CarMesh, o: [f32; 3], d: [f32; 3]) -> Opti
     best.map(|b| b.1)
 }
 
+/// Head / tail light lenses face out and are not buried in the body shell: seen from outside
+/// (a ray along −Y at the front, +Y at the rear), at least half of each lens's outward-facing
+/// triangles are hit on the lens itself first. (Round 12 sampled the lens bounding box; the
+/// detailed lamp assemblies merged from main put housings, projectors, rings and push bars in
+/// front of parts of the lens on purpose, so the box corners no longer sample the lens. Measured
+/// 2026-10-21: worst 2 of 4 face triangles visible, hakone_gt / lindwurm_4t headlights behind
+/// their housings.)
 #[test]
 fn lights_sit_outside_the_shell() {
     let root = repo_root();
@@ -460,32 +486,48 @@ fn lights_sit_outside_the_shell() {
         let lights: Vec<_> = mesh
             .parts
             .iter()
-            .filter(|p| p.kind == PartKind::Light)
+            .filter(|p| car_assets::skin::is_lens(p))
             .collect();
-        assert_eq!(lights.len(), 4, "{id}: two head- and two taillights");
+        assert_eq!(lights.len(), 4, "{id}: two head- and two taillight lenses");
         for l in lights {
-            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-            for v in 0..l.vertex_count() {
-                let q = l.vertex(v);
-                for k in 0..3 {
-                    lo[k] = lo[k].min(q[k]);
-                    hi[k] = hi[k].max(q[k]);
+            let n = l.vertex_count().max(1) as f32;
+            let mean_y = (0..l.vertex_count()).map(|v| l.vertex(v)[1]).sum::<f32>() / n;
+            let front = mean_y > 0.0;
+            let out = if front { 1.0 } else { -1.0 };
+            let (mut faces, mut seen) = (0, 0);
+            for t in l.indices.chunks(3) {
+                let (a, b, c) = (
+                    l.vertex(t[0] as usize),
+                    l.vertex(t[1] as usize),
+                    l.vertex(t[2] as usize),
+                );
+                let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let nrm = [
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
+                ];
+                let len = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt();
+                if len < 1e-6 || nrm[1] * out / len < 0.7 {
+                    continue;
+                }
+                faces += 1;
+                let cen = [
+                    (a[0] + b[0] + c[0]) / 3.0,
+                    (a[1] + b[1] + c[1]) / 3.0 + out * 3.0,
+                    (a[2] + b[2] + c[2]) / 3.0,
+                ];
+                let hit = first_hit(&mesh, cen, [0.0, -out, 0.0]);
+                if hit.as_deref() == Some(l.name.as_str()) {
+                    seen += 1;
                 }
             }
-            let front = hi[1] > 0.0;
-            let dir = if front {
-                [0.0, -1.0, 0.0]
-            } else {
-                [0.0, 1.0, 0.0]
-            };
-            let y = if front { hi[1] + 3.0 } else { lo[1] - 3.0 };
-            // Rays from outside at the centre and near the four corners of the lens face.
-            for (fx, fz) in [(0.5, 0.5), (0.1, 0.1), (0.9, 0.1), (0.1, 0.9), (0.9, 0.9)] {
-                let x = lo[0] + fx * (hi[0] - lo[0]);
-                let z = lo[2] + fz * (hi[2] - lo[2]);
-                let hit = first_hit(&mesh, [x, y, z], dir);
-                assert_eq!(hit.as_deref(), Some(l.name.as_str()), "{id}/{}", l.name);
-            }
+            assert!(
+                faces > 0 && 2 * seen >= faces,
+                "{id}/{}: {seen} of {faces} outward faces visible",
+                l.name
+            );
             // Proud of the body, facing out.
             assert!(
                 l.material == car_assets::mesh::MaterialSlot::Headlight
@@ -508,7 +550,7 @@ fn lights_move_with_the_front_and_rear_structure() {
         let car = load_car(&root, id).unwrap();
         let mesh = load_mesh(&mesh_path(&root, id)).unwrap();
         let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
-        for l in mesh.parts.iter().filter(|p| p.kind == PartKind::Light) {
+        for l in mesh.parts.iter().filter(|p| car_assets::skin::is_lens(p)) {
             let regions = car_assets::skin::light_regions(car_assets::skin::part_centre(l));
             // Bound only to its end of the car, and to the bumper (the first thing a hit crushes).
             assert!(l
@@ -557,6 +599,82 @@ fn lights_move_with_the_front_and_rear_structure() {
                 .iter()
                 .enumerate()
                 .all(|(v, m)| (m[2] - l.vertex(v)[2]).abs() < 1e-6));
+        }
+    }
+}
+
+/// Style knobs at the ends of (and past) their documented ranges never panic the profile or
+/// the generator, on every car's lattice.
+#[test]
+fn style_knob_extremes_never_panic() {
+    use car_assets::mesh::generate_styled;
+    use car_assets::style::{BodyStyle, Silhouette};
+    let root = repo_root();
+    let silhouettes = [
+        Silhouette::Notchback,
+        Silhouette::Fastback,
+        Silhouette::Hatch,
+        Silhouette::Wedge,
+        Silhouette::Suv,
+    ];
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let base = style_for(&car.def);
+        let mut variants: Vec<BodyStyle> = Vec::new();
+        for &sil in &silhouettes {
+            for &shift in &[-0.8f32, -0.6, 0.0, 0.6, 0.8] {
+                for &(ws, rg, hood) in &[
+                    (Some(30.0f32), Some(15.0f32), Some(0.4f32)),
+                    (Some(75.0), Some(85.0), Some(3.5)),
+                    (Some(72.0), Some(80.0), None),
+                    (None, Some(90.0), Some(1.0)),
+                ] {
+                    variants.push(BodyStyle {
+                        silhouette: sil,
+                        cabin_shift_m: shift,
+                        windshield_rake_deg: ws,
+                        rear_glass_rake_deg: rg,
+                        hood_length: hood,
+                        roof_len_trim: if shift > 0.0 { 0.15 } else { -0.25 },
+                        roof_dz: if shift > 0.0 { -0.12 } else { 0.10 },
+                        ..base.body.clone()
+                    });
+                }
+            }
+        }
+        variants.push(BodyStyle {
+            nose_h: Some(0.0),
+            belt_dz: 0.3,
+            ride_dz: -0.3,
+            crease_z: 2.0,
+            sill_tuck: 1.0,
+            shoulder_round: 1.0,
+            tumblehome: Some(1.0),
+            glass_inset: 1.0,
+            overhang_trim: (-1.0, -1.0),
+            tail_round: 2.0,
+            ..base.body.clone()
+        });
+        for (i, body) in variants.into_iter().enumerate() {
+            let p = BodyProfile::styled(&car.def, &car.lattice, &body);
+            let (r0, r1, _, _) = p.roof;
+            assert!(
+                r0 < r1 && r1 < p.y_fw,
+                "{id} variant {i}: roof {r0}..{r1}, fw {}",
+                p.y_fw
+            );
+            for y in [p.y_tail, p.y_deck, r0, r1, p.y_fw, p.y_bf, p.y_nose] {
+                let _ = p.ring(y);
+            }
+        }
+        // Full generation at the two cabin-shift ends (the slow part: once per car).
+        for shift in [-0.6f32, 0.6] {
+            let mut st = base.clone();
+            st.body.cabin_shift_m = shift;
+            st.body.rear_glass_rake_deg = Some(85.0);
+            st.body.hood_length = Some(0.5);
+            let m = generate_styled(&car.def, &car.lattice, &st);
+            assert!(m.tri_count > 0, "{id}");
         }
     }
 }

@@ -51,6 +51,9 @@ TARGETS = {
     "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
     "drayman_cargo": dict(t0100=(9.5, 12.0), lat=(0.64, 0.74), brake=(44, 52), why="road tests of 2000s full-size V8 cargo vans (empty)"),
     "furrow_24": dict(t0100=(10.0, 12.5), lat=(0.70, 0.80), brake=(42, 50), why="period road tests of 90s compact 2.4 L pickups (manual)"),
+    "fulmine_v10": dict(t0100=(3.2, 3.8), lat=(0.95, 1.08), brake=(31, 36), why="road tests of 2010s mid-engine NA V10 AWD supercars (dual-clutch, launch control)"),
+    "sentinel_warden": dict(t0100=(8.0, 10.0), lat=(0.75, 0.85), brake=(39, 46), why="period fleet evaluations of late-80s 5.7 L body-on-frame police sedans"),
+    "sentinel_harrier": dict(t0100=(5.2, 6.2), lat=(0.85, 0.95), brake=(35, 40), why="fleet evaluation figures for 2010s 5.0 V8 muscle-coupe pursuit cars (automatic)"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade

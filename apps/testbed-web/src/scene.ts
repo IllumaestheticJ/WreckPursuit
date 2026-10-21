@@ -6,12 +6,14 @@
 import * as THREE from "three";
 import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { CityTiles } from "./render/city_tiles";
 import { Quality } from "./render/quality";
+import { artStyle } from "./render/style";
 import { MarkingsView } from "./markings_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
@@ -92,6 +94,9 @@ export class SceneView {
   onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
   /** Painted road markings (markings_view.ts). */
   readonly markings = new MarkingsView();
+  /** Image-based lighting for the greybox style (see the constructor); low-poly dark is matte
+   * and lit by its own palette, so it renders without it. */
+  private readonly envMap: THREE.Texture;
 
   /**
    * `postAA: true` when the art style's post stack does the antialiasing (its own MSAA target,
@@ -106,6 +111,13 @@ export class SceneView {
     this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
+    // Image-based lighting so metallic paint, chrome and bare metal on the car meshes read as
+    // metal instead of black (they only reflect an environment, never the direct lights).
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = this.envMap;
+    this.scene.environmentIntensity = 0.6;
+    pmrem.dispose();
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
 
     this.scene.background = DAY_SKY.clone();
@@ -482,6 +494,9 @@ export class SceneView {
   }
 
   render(camera: THREE.PerspectiveCamera): void {
+    // Environment lighting only in the greybox style (changes programs on a style switch only).
+    const env = artStyle.lowpoly ? null : this.envMap;
+    if (this.scene.environment !== env) this.scene.environment = env;
     const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
     if (tiles) {
       camera.getWorldPosition(this.camPos);

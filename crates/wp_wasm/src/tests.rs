@@ -445,3 +445,55 @@ fn reset_in_place_in_the_city_snaps_to_a_lane_and_keeps_heat() {
     let st = s.sim().vehicle_states()[0].1.clone();
     assert!(st.speed_mps.abs() < 0.01 && st.health > 0.999);
 }
+
+#[test]
+fn city_chase_uses_mixed_police_and_traffic_fleets() {
+    let sc = crate::scenario::city_chase("debug_sedan", DamageMode::Arcade);
+    assert!(sc.car_mix);
+    let mut s = Session::new(sc, false).unwrap();
+    s.set_input(EntityId(1), drive(0.6, 0.0)).unwrap();
+    let traffic: Vec<String> = s
+        .sim()
+        .traffic_cars()
+        .iter()
+        .map(|c| c.def.id.clone())
+        .collect();
+    assert_eq!(traffic, simcli::run::CAR_MIX_TRAFFIC);
+    let police: Vec<String> = s
+        .sim()
+        .police_fleet()
+        .iter()
+        .map(|m| m.car.def.id.clone())
+        .collect();
+    assert_eq!(police.len(), 5);
+    let mut models_seen = std::collections::BTreeSet::new();
+    for _ in 0..8 {
+        s.run_ticks(120);
+        // Every physical traffic car is the model its agent shows while kinematic.
+        for v in s.sim().vehicles() {
+            if let Some(a) = v.traffic_agent {
+                let m = s.sim().world().traffic_model_of(a);
+                assert_eq!(traffic[m], v.car_id);
+            }
+            if let Some(u) = v.police_unit {
+                let m = s.sim().police_unit_model(u).unwrap();
+                assert_eq!(police[m], v.car_id);
+            }
+        }
+        for a in s.sim().world().agents() {
+            models_seen.insert(s.sim().world().traffic_model_of(a.id));
+        }
+    }
+    assert!(
+        models_seen.len() >= 4,
+        "traffic models in use: {models_seen:?}"
+    );
+    // Non-sim police units carry their stable id and model in the stream.
+    let units = crate::police::units(s.sim().police(), &|_| 0.0, &|u| {
+        s.sim().police_unit_model(u).map_or(-1.0, |m| m as f32)
+    });
+    assert_eq!(units.len() % crate::police::UNIT_STRIDE, 0);
+    for u in units.chunks(crate::police::UNIT_STRIDE) {
+        assert!(u[6] >= 0.0 && u[7] >= -1.0 && u[7] < 5.0, "{u:?}");
+    }
+}

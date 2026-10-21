@@ -27,9 +27,9 @@ sys.path.insert(0, HERE)
 from roster_inputs import CARS  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
-METRICS = os.path.join(REPO, "target", "release", "examples", "metrics")
-BARRIER = os.path.join(REPO, "target", "release", "damage-barrier")
-VMAX = os.path.join(REPO, "target", "release", "vmax-trace")
+METRICS = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "examples", "metrics")
+BARRIER = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "damage-barrier")
+VMAX = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "vmax-trace")
 
 
 def run_metrics() -> dict:

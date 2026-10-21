@@ -82,13 +82,24 @@ pub fn part_centre(part: &MeshPart) -> [f32; 3] {
     c
 }
 
-/// Nodes a part may bind to: [`candidates`] of its region, or for a light lens every node of
-/// its [`light_regions`] (not pinned to the chassis, so the lens follows the crush).
+/// A head / tail light lens on the nose / tail face: a light part in the front / rear frame
+/// region. Other lights (indicators, markers, fog lamps, light bars on lids …) are skinned to
+/// their own region like any panel detail.
+pub fn is_lens(part: &MeshPart) -> bool {
+    part.kind == PartKind::Light
+        && matches!(
+            part.region,
+            Some(BodyRegion::FrameFront | BodyRegion::FrameRear)
+        )
+}
+
+/// Nodes a part may bind to: [`candidates`] of its region, or for a light lens ([`is_lens`])
+/// every node of its [`light_regions`] (not pinned to the chassis, so the lens follows the crush).
 pub fn part_candidates(lattice: &LatticeDef, part: &MeshPart) -> Vec<u16> {
     let Some(region) = part.region else {
         return Vec::new();
     };
-    if part.kind == PartKind::Light {
+    if is_lens(part) {
         let regions = light_regions(part_centre(part));
         return lattice
             .nodes
@@ -109,8 +120,33 @@ pub fn bind_part(lattice: &LatticeDef, part: &mut MeshPart) {
         return;
     };
     let cand = part_candidates(lattice, part);
-    // Lights pick the nearest of all their candidates; other parts prefer their own region.
-    let own_count = if part.kind == PartKind::Light {
+    if part.rigid {
+        // Rigid part: every vertex on the candidate node nearest the part's centroid.
+        let n = part.vertex_count().max(1) as f32;
+        let mut c = [0.0f32; 3];
+        for v in 0..part.vertex_count() {
+            let q = part.vertex(v);
+            for k in 0..3 {
+                c[k] += q[k] / n;
+            }
+        }
+        let node = cand
+            .iter()
+            .copied()
+            .min_by(|&a, &b| {
+                dist2(c, lattice.nodes[a as usize].pos_m)
+                    .total_cmp(&dist2(c, lattice.nodes[b as usize].pos_m))
+                    .then(a.cmp(&b))
+            })
+            .unwrap_or(0);
+        for _ in 0..part.vertex_count() {
+            part.skin_nodes.extend_from_slice(&[node; 4]);
+            part.skin_weights.extend_from_slice(&[255, 0, 0, 0]);
+        }
+        return;
+    }
+    // Lenses pick the nearest of all their candidates; other parts prefer their own region.
+    let own_count = if is_lens(part) {
         0
     } else {
         lattice.nodes.iter().filter(|n| n.region == region).count()

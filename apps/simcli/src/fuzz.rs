@@ -19,6 +19,13 @@ pub const MAX_EVENTS_PER_TICK: usize = 1000;
 pub const MIN_CHASSIS_Z_M: f32 = -0.5;
 /// How far a lattice node may sit outside the rest-pose bounding box, m.
 pub const NODE_BOUNDS_MARGIN_M: f32 = 0.5;
+/// Clearance between a generated wall and every spawn point, m: more than half the longest
+/// car (~6 m), so no car starts inside a wall. A car spawned overlapping a static box is
+/// pushed out by Rapier's depenetration, sometimes down through the ground slab, which is
+/// an invalid start state rather than a physics failure (seeds 457 and 462 in CI).
+pub const WALL_SPAWN_CLEARANCE_M: f32 = 3.5;
+/// Distances tried for the wall before giving up on it for a case.
+const WALL_ATTEMPTS: u32 = 4;
 
 /// Fuzz parameters.
 #[derive(Debug, Clone)]
@@ -42,6 +49,17 @@ pub struct FuzzFailure {
     pub tick: u64,
     /// What failed.
     pub message: String,
+}
+
+/// Whether a spawn point at `p` is at least [`WALL_SPAWN_CLEARANCE_M`] outside `wall`'s
+/// footprint (checked in the wall's frame: x along its width, y through its depth).
+pub fn wall_clear_of(wall: &Barrier, p: [f32; 3]) -> bool {
+    let (s, c) = wp_math::sin_cos(wall.yaw);
+    let (dx, dy) = (p[0] - wall.pos[0], p[1] - wall.pos[1]);
+    let along = dx * c + dy * s;
+    let through = -dx * s + dy * c;
+    along.abs() > 0.5 * wall.size[0] + WALL_SPAWN_CLEARANCE_M
+        || through.abs() > 0.5 * wall.size[1] + WALL_SPAWN_CLEARANCE_M
 }
 
 /// Generate case `index`. Pure function of `(cfg, index)`.
@@ -99,17 +117,25 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
             i += 1;
         }
     }
-    // Sometimes a rigid wall 10-40 m ahead of a random car.
+    // Sometimes a rigid wall 10-40 m ahead of a random car, clear of every spawn point (the
+    // car's head-on partner is often right where the wall would go).
     let mut barriers = Vec::new();
     if rng.chance(0.3) {
         let e = &entities[rng.below(entities.len() as u32) as usize];
         let (s, c) = wp_math::sin_cos(e.yaw);
-        let d = rng.range_f32(10.0, 40.0);
-        barriers.push(Barrier {
-            pos: [e.pos[0] - s * d, e.pos[1] + c * d, 0.75],
-            size: [rng.range_f32(2.0, 12.0), 1.0, 1.5],
-            yaw: e.yaw,
-        });
+        let width = rng.range_f32(2.0, 12.0);
+        for _ in 0..WALL_ATTEMPTS {
+            let d = rng.range_f32(10.0, 40.0);
+            let wall = Barrier {
+                pos: [e.pos[0] - s * d, e.pos[1] + c * d, 0.75],
+                size: [width, 1.0, 1.5],
+                yaw: e.yaw,
+            };
+            if entities.iter().all(|other| wall_clear_of(&wall, other.pos)) {
+                barriers.push(wall);
+                break;
+            }
+        }
     }
     Scenario {
         name: format!("fuzz_{:016x}_{index}", cfg.seed),
@@ -128,6 +154,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
         assists: AssistSpec::Keyboard,
         traffic_density: None,
         police_presence: None,
+        car_mix: false,
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,
@@ -324,6 +351,63 @@ mod tests {
             .unwrap();
         assert_eq!(cases, 4);
         assert_eq!(ticks, 4 * 720);
+    }
+
+    #[test]
+    fn walls_never_cover_a_spawn_point() {
+        let cfg = FuzzConfig {
+            seed: 7,
+            cars: vec!["debug_sedan".into()],
+            case_seconds: 1.0,
+            max_vehicles: 16,
+        };
+        let mut walls = 0;
+        for i in 0..3000 {
+            let sc = gen_case(&cfg, i);
+            for b in &sc.barriers {
+                walls += 1;
+                for e in &sc.entities {
+                    assert!(
+                        wall_clear_of(b, e.pos),
+                        "case {i}: {} spawns at {:?} in {b:?}",
+                        e.id,
+                        e.pos
+                    );
+                }
+            }
+        }
+        // Walls are still generated (~30 % of cases; a few are dropped for lack of room).
+        assert!(walls > 600, "{walls} walls in 3000 cases");
+        let wall = Barrier {
+            pos: [90.29329, -69.08273, 0.75],
+            size: [10.571841, 1.0, 1.5],
+            yaw: 0.0,
+        };
+        // CI seed 462 case 91: car3 spawned 0.84 m behind this wall's centre line.
+        assert!(!wall_clear_of(&wall, [90.29329, -68.237595, 0.0]));
+        assert!(wall_clear_of(&wall, [90.29329, -100.15213, 0.0]));
+    }
+
+    /// The two cases CI failed on (`below ground`: a car spawned inside the wall) now generate
+    /// with the wall clear of every car and run clean (~4 s).
+    #[test]
+    fn ci_seeds_457_and_462_pass() {
+        let data = FsData::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data"));
+        let cars = crate::data::car_ids(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data"
+        )));
+        for (seed, index) in [(457, 33), (462, 91)] {
+            let cfg = FuzzConfig {
+                seed,
+                cars: cars.clone(),
+                case_seconds: 20.0,
+                max_vehicles: 16,
+            };
+            run_case(&gen_case(&cfg, index), &data)
+                .map_err(|f| format!("seed {seed} case {index}: tick {} {}", f.tick, f.message))
+                .unwrap();
+        }
     }
 
     #[test]

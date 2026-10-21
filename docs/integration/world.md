@@ -1359,7 +1359,8 @@ centre dividers and proper on-ramps").
 out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct update in `osm.rs`).
 
 **Known gaps**
-- No gore chevrons / dotted lane-line extensions through tapers; no ramp metering.
+- No gore chevrons / dotted lane-line extensions through tapers (added later on, see the
+  follow-up below); no ramp metering.
 - Police pursuit AI uses the lane graph as before (ramps are ordinary highway lanes to it).
 
 **Contract change requests:** none (no `wp_contracts` change).
@@ -1415,3 +1416,66 @@ out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct updat
   20.2 s against the 20 s cap); the 7×7 sprint scenarios (`race/city_sprint{,_police}.ron`)
   start on the new carriageway's judge slots (x 58.05 / 63.05 → 59.55 / 64.55) and
   `city_sprint_police` uses seed 12 (both `wp_race` police tests pass at aim dy −10 / 0 / +10).
+
+### Follow-up: gore chevrons and dotted taper lines (2026-10-21)
+- **Markings** (`markings`): new `MarkingKind::DottedLine` and `MarkingKind::GoreChevron`.
+  Connectors through a freeway merge / diverge are painted now (lane lines, yellow median
+  edge line, the taper's outer edge line, the dotted line on the carriageway's outer edge);
+  where a ramp lane runs beside a carriageway lane the two edge lines become one dotted line,
+  and where they part a chevron gore fills the paved shoulders between them. All derived when
+  the map is built (`FreewayPaint` in `CityMap`; no road format change), drawn by
+  `marking_mesh` and reported by `surface_at` (`PaintedLine`) from the same rules.
+- **Found on the way:** on the grid viaduct the ramps start dropping where their shoulder
+  still overlaps the carriageway's (a 0.5-3.9 m step inside the gore, rail-free under 1 m);
+  Port Vesper has a few ramps like that (up to 1.4 m). Chevrons stop at the carriageway's own
+  shoulder there. Holding the ramps level until their paving has left the carriageway's was
+  tried and dropped: the grid viaduct's inner ramps then exceed the 8.5 % grade cap. Fixing it
+  properly needs longer grid ramps (terminals further out), which moves city data.
+- **Tests:** `freeway_tapers_are_dotted_and_gores_chevroned` (one dotted run and one gore per
+  ramp in the grid and on Port Vesper, dots / gaps and chevron bars / bare concrete where the
+  rules say, freeway paint mesh over `marking_at` hits); the mesh checks now test that every
+  triangle corner is on paving (a triangle may bridge a step between overlapping ribbons).
+- **Goldens re-blessed** (paint on the freeway connectors changes tyre grip there):
+  `opponent_circuit_8x5`, `opponent_flee_police`, `opponent_open_roads_traffic`,
+  `opponent_reverse_grid_2laps`, `race_city_sprint_police`, `world_traffic_soak`; 45/45
+  scenarios pass.
+- **Perf:** `surface_at` 0.61 µs/query (0.49 before, same run), markings 0.17 µs (0.13).
+
+
+## Solid terrain = drawn terrain (playtest: "hitting invisible objects / crashing into the map geometry")
+**Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with every vertex lowered to
+the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
+collided with the raw 5 m heightfield. Off the roads ~10 % of the ground stood 1–4 m above
+what was drawn, up to 10.2 m on steep slopes: invisible hillside.
+**Fix.**
+- `wp_world::terrain::Heightfield::lowered_coarse` (the drawn terrain) and
+  `height_on_triangles` (height on the cell triangles, split along the (i, j)–(i+1, j+1)
+  diagonal like the greybox and Rapier tiles).
+- `wp_world::surface::collision_terrain` → `CityMap::ground`: the drawn terrain resampled on the
+  5 m grid, except in the band around at-grade roads, junctions and bends (paved width +
+  sidewalk + 2.5 m), which keeps the fine heights so sidewalks (drawn, not colliders on `main`)
+  stay at road level. Not under bridge decks.
+- `wp_sim::PhysicsWorld::set_city_ground` builds the heightfield tiles from `CityMap::ground`;
+  `CityMap::ground_height` falls back to it off the roads (spawns, resets, physical traffic).
+- `city-import` draws from `lowered_coarse` (the shipped `vesper_v2.greybox.glb` is byte-identical;
+  `TERRAIN_RENDER_M` and `SIDEWALK_M` now live in `wp_world::surface`).
+**Gate.** `wp_sim/tests/city_v2.rs::solid_terrain_is_the_drawn_terrain`: 167k off-road ray casts
+against the Rapier world land within 1 mm of the drawn terrain (fails on the old colliders).
+`CityMap::new` for Port Vesper: 20 ms (release). Files touched outside `wp_world`:
+`crates/wp_sim/src/physics.rs`, `tools/city-import/src/glb.rs`.
+**Not covered here.** Props (parked cars, cones, bins) are Rapier bodies that `main`'s testbed
+never draws; that is playtest row 50, fixed on `lead/draw-props` / `lead/round12`. That line still
+has this terrain mismatch (same `render_terrain`), so this change needs merging there too.
+
+### Drawn terrain follows the ground (follow-up)
+The old greybox terrain lowered every 10 m vertex to the lowest 5 m height within 10 m, so
+flat ground next to a slope was drawn (and, after the fix above, solid) 1-2 m low, e.g. dips
+behind lots that trapped police units. `Heightfield::coarse_under` replaces
+`lowered_coarse`: a vertex keeps the fine height under it and is lowered only to the lowest
+*protected* fine vertex within 10 m, the protected set being the road band
+(`surface::drawn_terrain`, shared by `city-import` and `collision_terrain`). Measured on Port
+Vesper (`wp_world/tests/city_v2.rs::drawn_terrain_stays_under_roads_and_follows_the_ground`):
+never above a road (closest 0.12 m below), off-road heightfield − drawn p50 0.05 / p95 0.19 /
+p99 0.51 m (max 5.0 m on hillsides right beside cuttings, −2.1 m on sharp ridges; physics
+follows the drawn mesh in both). `vesper_v2.greybox.glb` regenerated (6.82 MB).
+

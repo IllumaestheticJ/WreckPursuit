@@ -502,7 +502,7 @@ mod tests {
             blip_load: 0.8,
             blip_ref_rpm: 4000.0,
             lod_two_layer_m: 40.0,
-            second_layer_cull_scale: 0.25,
+            second_layer_cull_scale: 1.0e-4,
             physical_max_others: 6,
             physical_radius_m: 60.0,
         }

@@ -136,7 +136,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 13.8 s | 162 km/h | 40.7 m | 0.81 g | — |
+| sim | 14.0 s | 162 km/h | 40.7 m | 0.81 g | — |
 | estimate | 12.1 s | 176 km/h | 37.4 m | 0.90 g | 381 |
 
 ## Damage lattice (`data/lattices/tansy_13.json`)

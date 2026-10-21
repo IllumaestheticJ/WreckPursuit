@@ -192,7 +192,8 @@ impl PhysicsWorld {
     /// ([`wp_world::surface::sidewalk_mesh`], the same triangles the greybox draws), so a car
     /// bumps up the kerb and drives on the sidewalk at its visual height. A flat city keeps
     /// the slab at z = 0 under them. A city with terrain (Port Vesper v2) replaces the slab:
-    /// a terrain heightfield, one triangle mesh of every paved surface (banked ribbons,
+    /// a terrain heightfield ([`wp_world::surface::collision_terrain`], the drawn ground off
+    /// the roads), one triangle mesh of every paved surface (banked ribbons,
     /// junction discs, bend connectors) and sidewalk, a static collider per building (not on
     /// flat terrain: the grid city), guard rails along bridge decks and median barriers; the
     /// slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
@@ -319,7 +320,9 @@ impl Default for PhysicsWorld {
 /// `wp_net`) so a predicted car drives on exactly the server's ground.
 pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
     let net = &map.net;
-    let t = net.terrain.as_ref()?;
+    // The terrain as drawn (fine heights only under roads and sidewalks), not the raw
+    // `net.terrain`, which stands up to ~10 m above the greybox ground on slopes.
+    let t = map.ground.as_ref()?;
     let mut out = CityColliders::default();
     let mut added: Vec<Collider> = Vec::new();
 
@@ -372,7 +375,10 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     // roofs included (a gable or hip house is still convex). A city on flat terrain (the
     // procedural grid, whose terrain only exists so its highway viaduct is a real bridge)
     // keeps its old behaviour: buildings and street furniture do not block cars.
-    let flat_ground = t.z.iter().all(|z| *z == t.z[0]);
+    let flat_ground = net
+        .terrain
+        .as_ref()
+        .is_some_and(|raw| raw.z.iter().all(|z| *z == raw.z[0]));
     for b in net.buildings.iter().filter(|_| !flat_ground) {
         let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2 + 2);
         for q in &b.footprint {

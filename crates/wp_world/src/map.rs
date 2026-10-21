@@ -194,6 +194,9 @@ pub struct CityMap {
     pub signal_tick: u64,
     /// Current time of day (mirrors the world clock).
     pub time: TimeOfDay,
+    /// The terrain as physics collides with it ([`crate::surface::collision_terrain`]); `None`
+    /// without terrain. Off the roads this is the drawn ground, not `net.terrain`.
+    pub ground: Option<crate::terrain::Heightfield>,
     seg_grid: Arc<Grid>,
     ix_grid: Arc<Grid>,
     zone_grid: Arc<Grid>,
@@ -203,6 +206,8 @@ pub struct CityMap {
     /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
     /// for tunnel scenarios: the geometry stays, only sightlines ignore it).
     pub covered_los: bool,
+    /// Freeway paint derived at build time (dotted taper lines, gore chevrons).
+    pub(crate) paint: crate::markings::FreewayPaint,
 }
 
 impl CityMap {
@@ -397,14 +402,17 @@ impl CityMap {
             approach: Arc::new(approach),
             signal_tick: 0,
             time: TimeOfDay::from_hours(12.0),
+            ground: None,
             seg_grid: Arc::new(seg_grid),
             ix_grid: Arc::new(ix_grid),
             zone_grid: Arc::new(zone_grid),
             building_grid: Arc::new(building_grid),
             covers: crate::covered::CoverIndex::default(),
             covered_los: true,
+            paint: Default::default(),
         };
         map.covers = crate::covered::CoverIndex::new(&map.net.covered);
+        map.paint = crate::markings::freeway_paint(&map);
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
             let s = &map.segs[i];
@@ -420,6 +428,7 @@ impl CityMap {
                 }
             }
         }
+        map.ground = crate::surface::collision_terrain(&map);
         map
     }
 
@@ -527,7 +536,8 @@ impl CityMap {
     }
 
     /// Drivable surface height at `p`: the lane or junction connector under it (the one
-    /// closest to `near_z` when given, else the lowest — grade separation), else the terrain.
+    /// closest to `near_z` when given, else the lowest — grade separation), else the terrain
+    /// physics collides with ([`CityMap::ground`]).
     pub fn ground_height(&self, p: V2, near_z: Option<f32>) -> f32 {
         let mut best: Option<f32> = None;
         let score = |z: f32| near_z.map_or(z, |h| (z - h).abs());
@@ -549,7 +559,11 @@ impl CityMap {
                 best = Some(z);
             }
         }
-        best.unwrap_or_else(|| self.net.ground_z(p))
+        best.unwrap_or_else(|| {
+            self.ground
+                .as_ref()
+                .map_or_else(|| self.net.ground_z(p), |g| g.height_on_triangles(p))
+        })
     }
 
     /// Zone district kind at `p`.

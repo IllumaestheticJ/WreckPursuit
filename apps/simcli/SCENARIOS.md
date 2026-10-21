@@ -25,6 +25,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     parked_cars: true,               // parked cars along parking lanes, as physics bodies (default true)
     police_cars: true,               // AI police units patrolling the city (default true)
     covered_los: true,               // tunnels / covered roads block line of sight (default true; false = A/B control)
+    car_mix: false,                  // mixed fleets: 5 police models keyed by heat + 7 traffic models (default false)
     slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)

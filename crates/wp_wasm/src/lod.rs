@@ -19,7 +19,7 @@ use wp_sim::Sim;
 use wp_world::map::CityMap;
 
 /// Floats per record in [`traffic_draw`] and [`police_draw`].
-pub const DRAW_STRIDE: usize = 10;
+pub const DRAW_STRIDE: usize = 11;
 
 /// Unit quaternion `[x, y, z, w]` for a yaw about +Z (0 = +Y forward).
 pub fn yaw_quat(yaw: f32) -> [f32; 4] {
@@ -106,7 +106,8 @@ fn vehicle_poses(sim: &Sim) -> BTreeMap<u32, ([f32; 3], [f32; 4])> {
 }
 
 /// One draw record per civilian agent (ordered by agent id), [`DRAW_STRIDE`] floats each:
-/// `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`.
+/// `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]`; `model` indexes
+/// [`SessionModels::traffic`] (`wp_world`'s `traffic_model_of`, kept when promoted).
 ///
 /// * Embodied (physical, with a sim vehicle): the vehicle's state pose.
 /// * Otherwise: seated on the ground under the agent (see [`ground_pose`]); on a city without
@@ -161,13 +162,15 @@ pub fn traffic_draw(sim: &Sim) -> Vec<f32> {
             q[2],
             q[3],
             flags as f32,
+            world.traffic_model_of(a.id) as f32,
         ]);
     }
     out
 }
 
 /// One draw record per police unit (cars and helicopters, bound or not, in unit order),
-/// [`DRAW_STRIDE`] floats each: `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`
+/// [`DRAW_STRIDE`] floats each: `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags,
+/// model]`; `model` indexes [`SessionModels::police`] (0 without a multi-model fleet)
 /// with flags 1 helicopter, 2 pursuing / intercepting. Bound units report their vehicle's
 /// state; unbound cars sit on the ground like a fresh police spawn; helicopters fly level at
 /// their altitude above the ground.
@@ -210,6 +213,7 @@ pub fn police_draw(sim: &Sim) -> Vec<f32> {
             q[2],
             q[3],
             flags as f32,
+            sim.police_unit_model(u.id).unwrap_or(0) as f32,
         ]);
     }
     out
@@ -221,16 +225,38 @@ pub fn police_draw(sim: &Sim) -> Vec<f32> {
 pub struct SessionModels {
     /// Every model, without duplicates: scenario cars, then traffic and police.
     pub cars: Vec<String>,
-    /// Model of physical (promoted) traffic, when the session has city traffic.
-    pub traffic: Option<String>,
-    /// Model of police cars, when the session has police cars.
-    pub police: Option<String>,
+    /// Models of physical (promoted) traffic in model-index order (the draw records' `model`),
+    /// empty without city traffic cars.
+    pub traffic: Vec<String>,
+    /// Models of police cars in fleet-index order (the draw records' `model`), empty without
+    /// police cars.
+    pub police: Vec<String>,
 }
 
-/// [`SessionModels`] of a scenario (`has_city`: the session loaded a city).
-pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModels {
-    let traffic = (has_city && sc.traffic_cars).then(|| simcli::run::TRAFFIC_CAR.to_string());
-    let police = (has_city && sc.police_cars).then(|| simcli::run::POLICE_CAR.to_string());
+/// [`SessionModels`] of a scenario (`has_city`: the session loaded a city) running in `sim`:
+/// its traffic models and police fleet, or simcli's single [`simcli::run::TRAFFIC_CAR`] /
+/// [`simcli::run::POLICE_CAR`] when the sim has none set.
+pub fn session_car_models(sc: &simcli::Scenario, has_city: bool, sim: &Sim) -> SessionModels {
+    let traffic: Vec<String> = if !(has_city && sc.traffic_cars) {
+        Vec::new()
+    } else if sim.traffic_cars().is_empty() {
+        vec![simcli::run::TRAFFIC_CAR.to_string()]
+    } else {
+        sim.traffic_cars()
+            .iter()
+            .map(|c| c.def.id.clone())
+            .collect()
+    };
+    let police: Vec<String> = if !(has_city && sc.police_cars) {
+        Vec::new()
+    } else if sim.police_fleet().is_empty() {
+        vec![simcli::run::POLICE_CAR.to_string()]
+    } else {
+        sim.police_fleet()
+            .iter()
+            .map(|m| m.car.def.id.clone())
+            .collect()
+    };
     let mut cars: Vec<String> = Vec::new();
     for id in sc
         .entities
@@ -357,15 +383,24 @@ mod tests {
 
     #[test]
     fn session_models_list_traffic_and_police_once() {
+        use crate::session::Session;
+        // The city chase runs simcli's car_mix: every traffic model and police version, in
+        // model-index order, each once in `cars`.
         let sc = crate::scenario::city_chase("debug_sedan", wp_contracts::DamageMode::Arcade);
-        let m = session_car_models(&sc, true);
-        assert_eq!(m.cars, vec!["debug_sedan", simcli::run::POLICE_CAR]);
-        assert_eq!(m.traffic.as_deref(), Some(simcli::run::TRAFFIC_CAR));
-        assert_eq!(m.police.as_deref(), Some(simcli::run::POLICE_CAR));
+        let s = Session::new(sc.clone(), false).unwrap();
+        let m = session_car_models(&sc, true, s.sim());
+        assert_eq!(m.traffic, simcli::run::CAR_MIX_TRAFFIC);
+        let police: Vec<&str> = simcli::run::CAR_MIX_POLICE.iter().map(|p| p.0).collect();
+        assert_eq!(m.police, police);
+        assert_eq!(m.cars[0], "debug_sedan");
+        for id in m.traffic.iter().chain(&m.police) {
+            assert_eq!(m.cars.iter().filter(|c| *c == id).count(), 1, "{id}");
+        }
         let flat =
             crate::scenario::free_drive("lindwurm_4t", wp_contracts::DamageMode::Arcade, false);
-        let m = session_car_models(&flat, false);
+        let s = Session::new(flat.clone(), false).unwrap();
+        let m = session_car_models(&flat, false, s.sim());
         assert_eq!(m.cars, vec!["lindwurm_4t"]);
-        assert_eq!((m.traffic, m.police), (None, None));
+        assert!(m.traffic.is_empty() && m.police.is_empty());
     }
 }

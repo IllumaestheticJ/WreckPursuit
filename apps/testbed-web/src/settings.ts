@@ -33,6 +33,8 @@ export const LAYERS: LayerDef[] = [
   { id: "minimap", key: "Quote", label: "minimap (UI kit; M or Tab opens the city map)", default: true },
   { id: "mapSignals", key: "Semicolon", label: "minimap: traffic signals", default: false },
   { id: "chase", key: "KeyZ", label: "chase readout: wanted / heat / bounty / pursuit (UI kit)", default: true },
+  // Accessibility (not a debug layer): slow police light pattern everywhere, same as `?flash=slow`.
+  { id: "reducedFlashing", key: "F6", label: "reduced flashing: slow police lights (also ?flash=slow)", default: false },
 ];
 
 const STORE_KEY = "wp.testbed.layers.v1";

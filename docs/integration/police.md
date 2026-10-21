@@ -1011,3 +1011,37 @@ Fixed rather than re-measured:
 one, and suburb / night-core responders arrive later than the round 12b bar ("the police spawn
 too far"). Both look like the out-of-sight responder spawns meeting main's road graph (one-way
 carriageways, ramps); not investigated.
+
+
+## Reinforcements wait ahead, facing the racer's way (owner request, 2026-10-21)
+
+Owner: spawned police cars should appear in the direction the player is travelling and drive up
+to wait, already pointed the player's way, instead of spawning facing the player and doing a 180
+once passed.
+
+- `dispatch::ambush_plan`: when a reinforcement has to be *spawned* for a moving racer, pick a wait
+  point 25 m past a junction on the racer's predicted path (≥ 6 s of racer travel ahead, ≤ 900 m),
+  spawn on a hidden side-road node ≤ 400 m from it (≥ `spawn_min_distance_m` from the racer, spawn
+  clearance as before) whose route reaches the junction without using the racer's road, and keep it
+  only if `route_time × 1.3 + 3 s per junction + 3 s` beats the racer there. Quickest of the 6
+  closest candidates; one unit per wait point.
+- `Assignment::Intercept` gained `ambush: bool` (`point` = wait point when set). An ambusher drives
+  its route and stops at the wait point in the right-hand lane; it joins `Pursue` on sight within
+  120 m even while still ahead of the racer (shadow / rolling block then sorts the gap). It drops to
+  a plain intercept if the racer stops or the point leaves the racer's predicted path.
+- Re-used pool units (idle within 700 m) are unchanged, as is the fallback spawn.
+- Test: `tests/system.rs::spawned_reinforcements_wait_ahead_facing_the_racers_way` (no patrol pool;
+  every ambusher that joins faces the racer's direction, heading · travel > 0.5).
+- Outside my crate: none (the new field is matched with `..` everywhere else).
+
+### Follow-up: nearby patrols set up ahead too (owner request, 2026-10-21)
+
+- An idle patrol / reinforcement committed as backup (within 700 m) now also gets an ambush when it
+  can make one in time (`dispatch::ambush_route`): it routes from its current position and heading
+  (`start_node`, +3 s if it must turn around first) to the same wait points
+  (`dispatch::ambush_waits`, shared with the spawn search). Skipped when the unit is on the
+  racer's road itself or its route would use it; then it intercepts as before.
+- Ambushers join `Pursue` only once ≥ 5 m past their junction and facing within ~45° of the
+  racer's line (one joined while still turning in from its side road).
+- Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
+  patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).

@@ -32,7 +32,13 @@ use crate::unit::{
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
 /// Below this speed a racer counts as stopped for interception, m/s.
-const STOPPED_RACER_MPS: f32 = 2.0;
+pub(crate) const STOPPED_RACER_MPS: f32 = 2.0;
+
+/// An ambush wait point this close to the racer's predicted path still counts as on it, m.
+const AMBUSH_PATH_TOLERANCE_M: f32 = 8.0;
+
+/// An ambusher joins the chase only facing within ~45° of the racer's line, cos.
+const AMBUSH_JOIN_MIN_COS: f32 = 0.7;
 
 /// A pursuer this close to the racer tracks the racer's end of the breadcrumb trail, m.
 const NEAR_RACER_M: f32 = 40.0;
@@ -463,7 +469,7 @@ impl PoliceSystem {
 
     /// Node to start routing from: the end of the unit's current segment it is heading toward
     /// (respecting one-way where possible).
-    fn start_node(&self, pos: [f32; 2], heading: [f32; 2]) -> Option<NodeId> {
+    pub(crate) fn start_node(&self, pos: [f32; 2], heading: [f32; 2]) -> Option<NodeId> {
         let rp = self.graph.nearest_on_road(pos)?;
         let seg = *self.graph.segment(rp.segment);
         let ab = sub(self.graph.node(seg.b).pos, self.graph.node(seg.a).pos);
@@ -581,6 +587,24 @@ impl PoliceSystem {
             .nearest_on_road(p)
             .map(|r| self.graph.segment(r.segment).speed_limit_mps)
             .unwrap_or(13.9)
+    }
+
+    /// Whether a racer is still on course for an ambush wait point: moving, and the point lies
+    /// on its predicted path ahead.
+    pub(crate) fn ambush_holds(&self, racer: EntityId, wait: [f32; 2]) -> bool {
+        let Some(rec) = self.racers.get(&racer) else {
+            return false;
+        };
+        let Some(p) = rec.last_known else {
+            return false;
+        };
+        let v = [rec.vel[0], rec.vel[1]];
+        if (v[0] * v[0] + v[1] * v[1]).sqrt() < STOPPED_RACER_MPS {
+            return false;
+        }
+        let path = self.graph.predict_path(p, v, dist(p, wait) * 1.5 + 100.0);
+        let (_, lat) = Track::new(path.points()).project(wait, 0.0, f32::INFINITY);
+        lat < AMBUSH_PATH_TOLERANCE_M
     }
 
     /// Predicted intercept: the node on the racer's predicted path, 10–20 s out, that the unit
@@ -977,7 +1001,11 @@ impl PoliceSystem {
                         }
                     }
                 }
-                Assignment::Intercept { target, .. } => {
+                Assignment::Intercept {
+                    target,
+                    point: wait,
+                    ambush,
+                } => {
                     let Some(rec) = self.racers.get(&target) else {
                         self.assign(i, Assignment::Idle);
                         continue;
@@ -990,7 +1018,9 @@ impl PoliceSystem {
                     let seen = self.obs.get(&target).is_some_and(|o| o.seen);
                     let u = &self.units[i];
                     // Join the chase only once on the racer's line and behind it (hysteresis with
-                    // the off-trail check in coordinate_pursuits).
+                    // the off-trail check in coordinate_pursuits). An ambusher may join while
+                    // still ahead (and shadow or block), but only once it is on the racer's road
+                    // facing its way: not while still turning in from its side road.
                     if seen
                         && dist(u.body.pos, rp) < 120.0
                         && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2])
@@ -1002,13 +1032,42 @@ impl PoliceSystem {
                             && dot(u.body.heading, normalize([rec.vel[0], rec.vel[1]])) > 0.7;
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
-                            lat < 12.0
-                                && (s_u <= racer_s + 5.0 || (ahead_ok && s_u <= racer_s + 60.0))
+                            let along = normalize(sub(tr.point_at(s_u + 5.0), tr.point_at(s_u)));
+                            let ok = if ambush {
+                                // Turned onto the racer's road: ≥ 5 m past the junction.
+                                let in_place = u.track_s
+                                    > u.cmd.track.length()
+                                        - (crate::dispatch::AMBUSH_INTO_LEG_M - 5.0);
+                                in_place && dot(u.body.heading, along) > AMBUSH_JOIN_MIN_COS
+                            } else {
+                                s_u <= racer_s + 5.0 || (ahead_ok && s_u <= racer_s + 60.0)
+                            };
+                            lat < 12.0 && ok
                         });
                         if joins {
                             self.assign(i, Assignment::Pursue { target });
                             continue;
                         }
+                    }
+                    if ambush {
+                        // Keep driving to (and then sit at) the wait point while the racer is
+                        // still headed for it; otherwise intercept as usual.
+                        if self.ambush_holds(target, wait) {
+                            let lim = self.limit_at(self.units[i].body.pos);
+                            let cap = p.pursuit_cap_mps.get(self.phase);
+                            self.units[i].cmd.speed_mps =
+                                (lim * p.respond_speed_factor * 1.15).min(cap);
+                        } else {
+                            // Still intercepting (no new radio line); replan next think.
+                            let u = &mut self.units[i];
+                            u.assignment = Assignment::Intercept {
+                                target,
+                                point: rp,
+                                ambush: false,
+                            };
+                            u.cmd.track = Track::default();
+                        }
+                        continue;
                     }
                     // Lost: search around the last known position (row 64), spread over the
                     // junctions it could have taken.
@@ -1022,7 +1081,11 @@ impl PoliceSystem {
                             let done = u.track_s > u.cmd.track.length() - 10.0;
                             if dist(cur, point) > 1.0 || !u.cmd.track.is_drivable() || done {
                                 let t = self.route_track(i, node, None);
-                                self.units[i].assignment = Assignment::Intercept { target, point };
+                                self.units[i].assignment = Assignment::Intercept {
+                                    target,
+                                    point,
+                                    ambush: false,
+                                };
                                 self.units[i].set_command(DriveCommand {
                                     track: t,
                                     speed_mps: 0.0,
@@ -1087,7 +1150,11 @@ impl PoliceSystem {
                                 && self.route_from(u.body.pos, u.body.heading, node, fin).1;
                             if !same && !flip {
                                 let t = self.route_track(i, node, fin);
-                                self.units[i].assignment = Assignment::Intercept { target, point };
+                                self.units[i].assignment = Assignment::Intercept {
+                                    target,
+                                    point,
+                                    ambush: false,
+                                };
                                 self.units[i].set_command(DriveCommand {
                                     track: t,
                                     speed_mps: 0.0,
@@ -1241,6 +1308,7 @@ impl PoliceSystem {
                         Assignment::Intercept {
                             target: racer,
                             point,
+                            ambush: false,
                         },
                     );
                 } else {

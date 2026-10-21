@@ -247,7 +247,9 @@ pub struct EngineMix {
     /// of cars is not starved by the voice limit (playtest #47), m.
     pub lod_two_layer_m: f32,
     /// Culling score multiplier of a non-focus car's second engine layer: every car's main
-    /// layer is kept before another car's second layer.
+    /// layer is kept before another car's second layer. Small enough that this holds for any
+    /// audible main layer (score ≥ lowest priority weight × `min_audible_gain`), not only for
+    /// cars at similar distances.
     pub second_layer_cull_scale: f32,
     /// Physically modelled engine (when the backend enables it): besides the focus car, this
     /// many of the nearest cars get the model; every other car keeps the layers.

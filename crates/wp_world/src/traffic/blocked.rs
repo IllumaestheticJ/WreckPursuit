@@ -946,7 +946,10 @@ impl Traffic {
         let Some(road) = self.corridor_at(map, i) else {
             return false;
         };
-        let shape = match (&a.physical, &self.car) {
+        let model = self
+            .cars
+            .get(super::traffic_model_index(a.id, self.cars.len()));
+        let shape = match (&a.physical, model) {
             (Some(_), Some((def, _))) => CarShape::from_def(def),
             _ => CarShape::CIVILIAN,
         };
@@ -1068,7 +1071,10 @@ impl Traffic {
             return false;
         }
         let drv = if a.physical.is_some() {
-            let shape = match &self.car {
+            let shape = match self
+                .cars
+                .get(super::traffic_model_index(a.id, self.cars.len()))
+            {
                 Some((def, _)) => CarShape::from_def(def),
                 None => CarShape::CIVILIAN,
             };

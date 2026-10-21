@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use wp_contracts::{BodyRegion, LoadedCar};
 use wp_damage::PanelSpec;
 
-use crate::mesh::{CarMesh, PartKind, MESH_FORMAT, TRI_BUDGET};
+use crate::mesh::{CarMesh, PartKind, MESH_FORMAT};
 use crate::skin::part_candidates;
 
 /// Exterior regions that must have a mesh part whenever the lattice has nodes in them.
@@ -52,8 +52,13 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
             mesh.tri_count
         ));
     }
-    if tris < TRI_BUDGET.0 || tris > TRI_BUDGET.1 {
-        errs.push(format!("{tris} tris outside budget {TRI_BUDGET:?}"));
+    let tier = crate::style::style_for(&car.def).tier;
+    let budget = tier.tri_budget();
+    if tris < budget.0 || tris > budget.1 {
+        errs.push(format!(
+            "{}: {tris} tris outside the {tier:?} budget {budget:?}",
+            mesh.id
+        ));
     }
     let mut names = BTreeSet::new();
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
@@ -80,12 +85,12 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
             errs.push(format!("{tag}: index out of range"));
         }
         match (p.kind, p.region, p.wheel) {
-            (PartKind::Tire | PartKind::Rim, None, Some(w)) if w < 4 => {
-                if !p.skin_nodes.is_empty() {
+            (k, None, Some(w)) if k.is_wheel_space() && w < 4 => {
+                if !p.skin_nodes.is_empty() || p.rigid {
                     errs.push(format!("{tag}: wheel parts are not skinned"));
                 }
             }
-            (PartKind::Tire | PartKind::Rim, _, _) => {
+            (k, _, _) if k.is_wheel_space() => {
                 errs.push(format!("{tag}: wheel parts need wheel 0..4 and no region"))
             }
             (_, Some(region), None) => {
@@ -136,6 +141,12 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                     if !(1.0..=3.0).contains(&f.gain) || !(0.0..=0.4).contains(&f.max_m) {
                         errs.push(format!("{tag}: fold gain / max out of range"));
                     }
+                }
+                if p.rigid
+                    && (p.skin_nodes.iter().any(|&i| i != p.skin_nodes[0])
+                        || p.skin_weights.chunks(4).any(|w| w != [255, 0, 0, 0]))
+                {
+                    errs.push(format!("{tag}: rigid parts bind one node, weight 255"));
                 }
                 for v in 0..n {
                     let q = p.vertex(v);

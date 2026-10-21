@@ -176,8 +176,11 @@ pub enum Assignment {
     Intercept {
         /// Racer.
         target: EntityId,
-        /// Predicted point, m.
+        /// Predicted point, m (the wait point when `ambush`).
         point: [f32; 2],
+        /// Waiting ahead of the racer at `point`, facing its direction of travel, to join the
+        /// chase as it comes by (fresh reinforcements; see `dispatch::ambush_plan`).
+        ambush: bool,
     },
     /// Parked as part of a roadblock.
     RoadblockAt {

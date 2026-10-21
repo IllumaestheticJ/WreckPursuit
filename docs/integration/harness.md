@@ -778,3 +778,57 @@ clashed:
   cars can finish a ramp-terminal junction before the old area must be empty.
 - Regenerated with the tools (`just city`, `just city-v2`, `just car-stats`); goldens
   re-blessed in a `[bless]` commit.
+
+### Second merge of `main` (2026-10-21): detailed car models, freeway paint, ambush, fleets
+
+Main moved on while PR #17 was open (detailed car models, freeway paint, drawn / collision
+terrain, police ambush, multi-model traffic and police fleets). Merged again with the same rules.
+- **Car meshes**: main's new generator (format 2, `builder` / styles / wheels / mechanical) wins;
+  round 12's crumple binding is ported onto it as **mesh format 3** (= format 2 + `fold` on hood,
+  trunk, front-fender and rear-quarter panels; rigid parts never fold). Round 12's lens skinning
+  (head / tail lights crush with the end of the car) applies to the four head / tail lenses,
+  which now sit in `FrameFront` / `FrameRear` (`skin::is_lens`); main's other lamps (DRLs,
+  indicators, markers, fog lamps, light bars on lids) skin to their own region. Meshes
+  regenerated with `gen-car-mesh`. `lights_sit_outside_the_shell` re-aimed: it samples each lens's
+  outward faces instead of its bounding box (main's lamp housings / projectors / push bars cover
+  parts of the box on purpose; worst case 2 of 4 faces visible).
+- **Terrain**: main's `drawn_terrain` / `collision_terrain` replace the greybox's own coarse
+  terrain; round 12's surface meshes stay. One sidewalk width constant (`SIDEWALK_W_M`).
+- **Police**: main's ambush (`Intercept { ambush }`) next to round 12's backup / responder
+  spawns; round 12's backup and searching intercepts are plain (`ambush: false`).
+- **Traffic**: main's `cars: Vec<…>` models; round 12's blocked-car manoeuvres use the agent's
+  own model shape.
+- **Police, after the merge**: round 12's immediate backup (`call_backup`) also waits ahead of a
+  moving racer where it can get there first (`ambush_route`), as main's committed reinforcements
+  do. Main's `spawned_reinforcements_wait_ahead_facing_the_racers_way` used an empty patrol table
+  to force spawns, which since round 12 means a city without police; it now keeps one industrial
+  patrol and checks the spawned (`Reinforcement`) ambushers. A unit stopped head-on by a stopped
+  racer gets its unstick step after `HELD_CHASE_S` (3 s) instead of `HELD_AFTER_S` (20 s): on
+  Hollins Drive a responder and the AI field waited for each other for good (`hollins_hill_sprint`
+  1 of 4 finished; before the merge already 2 cars lost ~50 s there; now 4 of 4, 67-89 s).
+- **Main's new cars under round 12's rules**: `fulmine_v10`'s dual-clutch shift re-based 0.06 →
+  0.18 s (row 97, like `lindwurm_4t`) and round 12's damper ride rules applied to it, `sentinel_warden`
+  and `sentinel_harrier` (`build_roster.py`); recorded engine / world audio packs for all three.
+- **Audio**: `engine.second_layer_cull_scale` 0.25 → 1e-4. At 0.25 a near car's second layer
+  still beat a quiet traffic car's only layer at 130 m (the crowd test with main's roster), which
+  broke the documented "every main layer before anyone's second".
+- **wasm / testbed**: both APIs kept. `traffic_draw()` / `police_draw()` records gain a `model`
+  field (11 floats) and `session_car_models()` lists every traffic / police model
+  (`traffic`, `police`: `string[]`), so round 12's LOD fleet draws main's mixed fleets.
+- Regenerated with the tools: car meshes, `just city`, `just city-v2`, spec sheet
+  (`collect_results.py` + `specsheet.py`). `data/panels/junkyard_beater.json` is stale against
+  `gen-panels --check` on round 12 already (its car file was retuned there); left as it was.
+  `sentinel_harrier` fails the offset-40 % barrier expectation on main too.
+
+## Lead helper note (2026-10-21): fuzz "below ground" failures were spawn-in-wall cases
+
+CI's fuzz job failed on `main` with `carN: below ground (z ≈ -0.50 m)` (seed 457 case 33, seed
+462 case 91). Both were generator bugs, not physics: `gen_case` put the optional wall 10–40 m
+ahead of one car without checking the others, and in head-on pairs that is where the partner
+spawns, so a car started inside a static box and Rapier's depenetration pushed it down through
+the ground slab. Fixed in `apps/simcli/src/fuzz.rs`: the wall is kept `WALL_SPAWN_CLEARANCE_M`
+(3.5 m) clear of every spawn point (up to 4 distances tried, else no wall that case). Tests:
+`walls_never_cover_a_spawn_point` (3000 generated cases; fails on the old generator) and
+`ci_seeds_457_and_462_pass`. `simcli fuzz --cases 100` passes for seeds 457, 462, 463 and 464.
+Generated cases for a given seed changed (different RNG draws after the wall), so old fuzz repro
+files still reproduce as written but `--seed` now yields different cases.

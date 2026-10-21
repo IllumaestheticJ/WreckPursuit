@@ -39,9 +39,12 @@ export interface WheelInfo {
 
 /** session_car_models() JSON (crates/wp_wasm/src/lod.rs `SessionModels`). */
 export interface SessionModels {
+  /** Every model, without duplicates (preload them all). */
   cars: string[];
-  traffic: string | null;
-  police: string | null;
+  /** Traffic models in model-index order (traffic_draw() `model`); empty without city traffic cars. */
+  traffic: string[];
+  /** Police car models in fleet-index order (police_draw() `model`); empty without police cars. */
+  police: string[];
 }
 
 /** car_model_info(car_id) JSON. */
@@ -76,6 +79,12 @@ export interface VehicleInfo {
   mounted_components: string[];
   surfaces: string[];
   spawn_pos: [number, number, number];
+  /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
+   * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
+  police_unit?: number | null;
+  /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
+   * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
+  traffic_agent?: number | null;
 }
 
 export interface AssistProfile {
@@ -271,7 +280,12 @@ export const sim = {
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
+  /** [x, y, z, yaw, flags, agentId, model] per civilian agent (layout.ts AG, AGENT_STRIDE). */
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
+  /** Car ids indexed by traffic_agents()' model; [] when traffic is kinematic only. Fetch once per session. */
+  trafficModels: (): string[] => JSON.parse(wasm.traffic_models()),
+  /** Car ids indexed by police_units()' model; [] for single-model police. Fetch once per session. */
+  policeModels: (): string[] => JSON.parse(wasm.police_models()),
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
   /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */
@@ -281,15 +295,15 @@ export const sim = {
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
   vehicleMeta: (): Float32Array => wasm.vehicle_meta(),
   /** Wanted level / heat for a racer, or null when the session has no police. */
-  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
+  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags, unitId, model] each (layout.ts PU). */
   policeUnits: (): Float32Array => wasm.police_units(),
   /** Roadblock barriers and spike strips as oriented boxes (layout.ts TOOL_STRIDE, TL, TOOL_KIND). */
   policeTools: (): Float32Array => wasm.police_tools(),
   /** Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR), same order as states(). */
   tirePunctures: (): Float32Array => wasm.tire_punctures(),
-  /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags. */
+  /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags, model. */
   trafficDraw: (): Float32Array => wasm.traffic_draw(),
-  /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D). */
+  /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D), with its model. */
   policeDraw: (): Float32Array => wasm.police_draw(),
   /** Every city prop once per session (layout.ts PROP_STRIDE / P): kind, box-centre pose, half extents. */
   propsStatic: (): Float32Array => wasm.props_static(),
@@ -297,7 +311,7 @@ export const sim = {
   propsMoved: (): Float32Array => wasm.props_moved(),
   /** The sim's pose of one prop `[x, y, z, qx, qy, qz, qw]` (automation). */
   propPose: (index: number): Float32Array => wasm.prop_pose(index),
-  /** Car models this session can show: every id, plus the traffic and police models (or null). */
+  /** Car models this session can show: every id, plus the traffic and police models by index. */
   sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
   /** Body size and wheels of a car model (no vehicle needed). */
   carModelInfo: (carId: string): CarModelInfo => JSON.parse(wasm.car_model_info(carId)),

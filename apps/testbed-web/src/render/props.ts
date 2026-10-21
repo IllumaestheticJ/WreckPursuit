@@ -240,14 +240,16 @@ export class PropView {
     }
     if (this.parkedCount > 0) {
       const h = this.half.subarray(firstCar * 3, firstCar * 3 + 3);
-      this.trafficModel = models.traffic;
-      const info = models.traffic ? sim.carModelInfo(models.traffic) : boxCarInfo([h[0], h[1], h[2]]);
+      // Parked cars use the first traffic model (one instanced model for every parked car).
+      const parkedModel = models.traffic[0] ?? null;
+      this.trafficModel = parkedModel;
+      const info = parkedModel ? sim.carModelInfo(parkedModel) : boxCarInfo([h[0], h[1], h[2]]);
       this.proxyGeo = proxyGeoms(info);
       this.proxyFit = fitOf([this.proxyGeo.paint, this.proxyGeo.detail]);
       this.farGeo = farCarGeometry();
       for (const props of byCell.values()) this.addChunk(props, mats);
-      if (models.traffic) {
-        const carId = models.traffic;
+      if (parkedModel) {
+        const carId = parkedModel;
         const now = carMeshNow(carId);
         if (now) this.setFullMesh(now, info);
         else if (now === undefined) {

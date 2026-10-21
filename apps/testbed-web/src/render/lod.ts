@@ -7,6 +7,9 @@
 //   * its VehicleView (full per-panel mesh), once the sim spawned it and its mesh is ready;
 //   * the instanced fleet (render/fleet.ts) otherwise: same model, same livery, same pose.
 // So a promotion or demotion swaps the drawer on one frame with no gap, jump or recolour.
+// Multi-model sessions (city chase: 7 traffic, 5 police models): each record's `model` picks
+// its car model from `sim.sessionCarModels()` (the fleet instances per model); a promoted car's
+// view shows the same model (its vehicle_info().car_id).
 //
 // `LodLog` records each car's draw state per frame for automation (e2e/run.mjs,
 // e2e/lod_shots.mjs): frames where a car had no proper mesh, the pose jump on every swap with
@@ -59,7 +62,7 @@ function barOf(flags: number, t: number, i: number): number {
 export class LodDirector {
   readonly fleet = new Fleet();
   readonly log = new LodLog();
-  models: SessionModels = { cars: [], traffic: null, police: null };
+  models: SessionModels = { cars: [], traffic: [], police: [] };
   /** Draw states of the last frame (pooled: valid until the next update). */
   readonly states: DrawState[] = [];
   private readonly pool: DrawState[] = [];
@@ -122,8 +125,9 @@ export class LodDirector {
     this.fleet.begin();
 
     const showTraffic = layers.on("traffic");
-    const tModel = this.models.traffic ? this.fleet.model(this.models.traffic) : null;
+    const tModels = this.models.traffic;
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
+      const tModel = this.fleetModel(tModels, traffic[o + D.model], false);
       const entity = traffic[o + D.entity];
       const flags = traffic[o + D.flags];
       const key = keyOf(this.tKeys, "t", traffic[o + D.id]);
@@ -133,11 +137,12 @@ export class LodDirector {
       states.push(this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null));
     }
 
-    const pModel = this.models.police ? this.fleet.model(this.models.police, true) : null;
+    const pModels = this.models.police;
     let unit = 0;
     for (let o = 0; o < police.length; o += DRAW_STRIDE, unit++) {
       const flags = police[o + D.flags];
       if (flags & POLICE_DRAW_FLAG.helicopter) continue; // SceneView draws helicopters
+      const pModel = this.fleetModel(pModels, police[o + D.model], true);
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
@@ -155,6 +160,15 @@ export class LodDirector {
     }
     this.fleet.end();
     this.log.push(timeS, states, focus);
+  }
+
+  /**
+   * Fleet model of a draw record's `model` index into `ids` (a session model list); an index out
+   * of range falls back to the first model, null when the session has none.
+   */
+  private fleetModel(ids: string[], index: number, police: boolean): ReturnType<Fleet["model"]> | null {
+    if (ids.length === 0) return null;
+    return this.fleet.model(ids[index] ?? ids[0], police);
   }
 
   /** Distance from the camera (sim space), m. */

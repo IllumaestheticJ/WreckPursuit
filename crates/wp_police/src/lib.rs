@@ -1523,6 +1523,17 @@ impl PoliceSystem {
             Some(avoid::BlockedBy::Vehicle(e)) => self.racers.contains_key(&e),
             _ => false,
         };
+        // A stopped racer right in front: on a narrow road an AI racer waits for the unit just
+        // as the unit waits for it, so neither would ever move. Treated like two chase units
+        // nose to nose (`HELD_CHASE_S`), not like a dead car (`HELD_AFTER_S`).
+        let stopped_racer_ahead = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Vehicle(e)) => self.racers.get(&e).is_some_and(|r| {
+                let rel = graph::sub([r.pos[0], r.pos[1]], pos);
+                graph::dot(rel, heading) > 0.0
+                    && (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt() < stuck::SLOW_MPS
+            }),
+            _ => false,
+        };
         let u = &mut self.units[i];
         if hold && !disabled && behind_racer_or_unit && !red_ahead && v.abs() < stuck::SLOW_MPS {
             u.unstick.held_s += dt;
@@ -1561,7 +1572,7 @@ impl PoliceSystem {
         if u.unstick.slow_s >= stuck::STUCK_AFTER_S {
             self.on_stuck(i, false);
         } else if u.unstick.held_s >= stuck::HELD_AFTER_S
-            || (chasing && u.unstick.held_s >= stuck::HELD_CHASE_S)
+            || ((chasing || stopped_racer_ahead) && u.unstick.held_s >= stuck::HELD_CHASE_S)
         {
             self.on_stuck(i, true);
         }

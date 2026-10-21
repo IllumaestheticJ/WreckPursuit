@@ -13,7 +13,7 @@
 //! |---|---|
 //! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `set_countersteer(entity, %)` / `countersteer(entity)`, `set_clutch_mode(entity, "auto"|"manual")` / `clutch_mode(entity)`, `engine_stalled(entity)`, `assist_presets()`, `assist_preset_named(name, source)`, `assist_preset_of(entity, source)`, `reset_vehicle(entity)` |
-//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
+//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `traffic_models()`, `police_models()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
@@ -605,6 +605,12 @@ struct VehicleInfo {
     mounted_components: Vec<String>,
     surfaces: Vec<String>,
     spawn_pos: [f32; 3],
+    /// `wp_police` unit id of a sim police vehicle (the `unit_id` of `police_units()`), so a
+    /// unit keeps its number when it becomes a sim vehicle; `None` for other vehicles.
+    police_unit: Option<u32>,
+    /// `wp_world` agent id of promoted traffic (the `agent_id` of `traffic_agents()`), so the
+    /// physical car can be painted like its instanced twin; `None` for other vehicles.
+    traffic_agent: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -641,7 +647,9 @@ pub fn car_model_info(car_id: &str) -> Result<String, JsValue> {
 }
 
 /// Static info JSON for a vehicle: scenario name, dimensions, wheels, CG (chassis space),
-/// lattice sizes and the name tables for region / component / surface indices.
+/// lattice sizes, the name tables for region / component / surface indices and, for sim police
+/// vehicles, their `wp_police` unit id (`police_unit`); for promoted traffic, its `wp_world`
+/// agent id (`traffic_agent`).
 #[wasm_bindgen]
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
@@ -705,6 +713,11 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .collect(),
             surfaces: pack::ALL_SURFACES.iter().map(pack::variant_name).collect(),
             spawn_pos,
+            police_unit: s
+                .vehicle(EntityId(entity))
+                .and_then(|v| v.police_unit)
+                .map(|u| u.0),
+            traffic_agent: s.vehicle(EntityId(entity)).and_then(|v| v.traffic_agent),
         }))
     })
 }
@@ -724,7 +737,9 @@ pub const META_STRIDE: usize = 3;
 /// Per-vehicle render metadata, same order as `vehicle_states()`, 3 floats each:
 /// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]` with flags
 /// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with; a
-/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]).
+/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]),
+/// plus, for physical traffic, its agent's colour `variant << 8` (same as in
+/// `traffic_agents()`, so a car keeps its colour when promoted).
 #[wasm_bindgen]
 pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     get(|s| {
@@ -737,10 +752,18 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
                 wp_sim::VehicleKind::Traffic => 3.0,
             };
             let i = &v.input;
+            let variant = v.traffic_agent.map_or(0, |id| {
+                s.sim()
+                    .world()
+                    .agents()
+                    .find(|a| a.id == id)
+                    .map_or(0, |a| a.variant as u32)
+            });
             let flags = police::siren_on(s.sim(), v) as u32
                 | (i.headlights as u32) << 1
                 | ((i.brake > 0.1) as u32) << 2
-                | (i.horn as u32) << 3;
+                | (i.horn as u32) << 3
+                | variant << 8;
             out.extend_from_slice(&[v.id.0 as f32, kind, flags as f32]);
         }
         out
@@ -850,14 +873,22 @@ pub fn police_status(entity: u32) -> Result<String, JsValue> {
     })
 }
 
-/// Police units that are not sim vehicles (internally driven cars, helicopters), 6 floats
-/// each: `[x, y, z, yaw, speed_mps, flags]` (1 helicopter, 2 pursuing). Bound units are sim
-/// vehicles of kind Police and come through `vehicle_states()` / `vehicle_meta()`.
+/// Police units that are not sim vehicles (internally driven cars, helicopters), 8 floats
+/// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing;
+/// `unit_id` is the stable `wp_police` unit id; `model` indexes `police_models()`, -1 for
+/// helicopters, single-model sessions and units not yet reconciled). A unit keeps its model
+/// when it later becomes a sim vehicle of kind Police (`vehicle_states()` / `vehicle_meta()`,
+/// car id via `vehicle_info()`).
 #[wasm_bindgen]
 pub fn police_units() -> Result<Vec<f32>, JsValue> {
     get(|s| {
-        let world = s.sim().world();
-        police::units(s.sim().police(), &|p| world.map().ground_height(p, None))
+        let sim = s.sim();
+        let world = sim.world();
+        police::units(
+            sim.police(),
+            &|p| world.map().ground_height(p, None),
+            &|u| sim.police_unit_model(u).map_or(-1.0, |m| m as f32),
+        )
     })
 }
 
@@ -1082,7 +1113,7 @@ pub fn prop_pose(index: u32) -> Result<Vec<f32>, JsValue> {
 }
 
 /// Floats per agent in `traffic_agents()`.
-pub const AGENT_STRIDE: usize = 5;
+pub const AGENT_STRIDE: usize = 7;
 
 /// Floats per record in `police_tools()`.
 pub const TOOL_STRIDE: usize = 11;
@@ -1141,15 +1172,20 @@ pub fn tire_punctures() -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// Civilian traffic agents (empty without a city), 5 floats each:
-/// `[x, y, z, yaw, flags]` with flags = bits 1 physical LOD, 2 brake lights, 4 hazard lights,
-/// 8 yielding to a siren, 16 turn signal left, 32 turn signal right, 64 aggressive driver,
-/// plus `variant << 8`.
+/// Civilian traffic agents (empty without a city), 7 floats each:
+/// `[x, y, z, yaw, flags, agent_id, model]` with flags = bits 1 physical LOD, 2 brake lights,
+/// 4 hazard lights, 8 yielding to a siren, 16 turn signal left, 32 turn signal right,
+/// 64 aggressive driver, plus `variant << 8` (colour variant 0..8, drawn once at spawn).
+/// `agent_id` is the stable `wp_world` id; `model` indexes `traffic_models()` and is
+/// `wp_world::traffic::traffic_model_index(agent_id, n)` — the same model (and variant) the
+/// agent keeps when promoted to a physical car (whose `vehicle_info().car_id` is
+/// `traffic_models()[model]`). `model` is 0 with one or no physical traffic model.
 #[wasm_bindgen]
 pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
     get(|s| {
         let mut out = Vec::with_capacity(s.sim().world().agent_count() * AGENT_STRIDE);
-        for a in s.sim().world().agents() {
+        let world = s.sim().world();
+        for a in world.agents() {
             let flags = (a.lod == wp_world::Lod::Physical) as u32
                 | (a.brake_lights as u32) << 1
                 | (a.hazard_lights as u32) << 2
@@ -1158,7 +1194,15 @@ pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
                 | ((a.turn_signal > 0) as u32) << 5
                 | ((a.personality == wp_world::traffic::Personality::Aggressive) as u32) << 6
                 | (a.variant as u32) << 8;
-            out.extend_from_slice(&[a.pos[0], a.pos[1], a.pos[2], a.yaw, flags as f32]);
+            out.extend_from_slice(&[
+                a.pos[0],
+                a.pos[1],
+                a.pos[2],
+                a.yaw,
+                flags as f32,
+                a.id as f32,
+                world.traffic_model_of(a.id) as f32,
+            ]);
         }
         out
     })
@@ -1170,18 +1214,18 @@ pub fn lod_draw_stride() -> u32 {
     lod::DRAW_STRIDE as u32
 }
 
-/// Draw records for every civilian agent at any LOD (see [`lod::traffic_draw`]), 10 floats each:
-/// `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`; flags as in
-/// `traffic_agents()`. Kinematic agents are seated on the ground the way the sim places a
+/// Draw records for every civilian agent at any LOD (see [`lod::traffic_draw`]), 11 floats each:
+/// `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]`; flags as in
+/// `traffic_agents()`, `model` indexes `session_car_models().traffic`. Kinematic agents are seated on the ground the way the sim places a
 /// promoted car, so the browser can swap instanced and full meshes without a jump.
 #[wasm_bindgen]
 pub fn traffic_draw() -> Result<Vec<f32>, JsValue> {
     get(|s| lod::traffic_draw(s.sim()))
 }
 
-/// Draw records for every police unit, bound or not (see [`lod::police_draw`]), 10 floats each:
-/// `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags 1 helicopter,
-/// 2 pursuing.
+/// Draw records for every police unit, bound or not (see [`lod::police_draw`]), 11 floats each:
+/// `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]`, flags 1 helicopter,
+/// 2 pursuing; `model` indexes `session_car_models().police`.
 #[wasm_bindgen]
 pub fn police_draw() -> Result<Vec<f32>, JsValue> {
     get(|s| lod::police_draw(s.sim()))
@@ -1191,7 +1235,45 @@ pub fn police_draw() -> Result<Vec<f32>, JsValue> {
 /// ([`lod::SessionModels`]), for the browser to preload their meshes before they appear.
 #[wasm_bindgen]
 pub fn session_car_models() -> Result<String, JsValue> {
-    get(|s| json(&lod::session_car_models(s.scenario(), s.has_city())))
+    get(|s| {
+        json(&lod::session_car_models(
+            s.scenario(),
+            s.has_city(),
+            s.sim(),
+        ))
+    })
+}
+
+/// Car ids of the physical traffic models as a JSON array, in model-index order (the
+/// `model` of `traffic_agents()`); `[]` when traffic stays kinematic. The city-chase preset
+/// uses simcli's `CAR_MIX_TRAFFIC`. Fetch once per session.
+#[wasm_bindgen]
+pub fn traffic_models() -> Result<String, JsValue> {
+    get(|s| {
+        let ids: Vec<&str> = s
+            .sim()
+            .traffic_cars()
+            .iter()
+            .map(|c| c.def.id.as_str())
+            .collect();
+        json(&ids)
+    })
+}
+
+/// Car ids of the multi-model police fleet as a JSON array, in fleet-index order (the
+/// `model` of `police_units()`); `[]` when the session uses one police model
+/// (`Sim::set_police_car`, then `model` is -1). Fetch once per session.
+#[wasm_bindgen]
+pub fn police_models() -> Result<String, JsValue> {
+    get(|s| {
+        let ids: Vec<&str> = s
+            .sim()
+            .police_fleet()
+            .iter()
+            .map(|m| m.car.def.id.as_str())
+            .collect();
+        json(&ids)
+    })
 }
 
 /// Floats per head in `signal_heads()`.

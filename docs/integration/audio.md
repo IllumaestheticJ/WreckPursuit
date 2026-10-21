@@ -471,8 +471,10 @@ per bus, recorded samples served by vite exactly like the game, and the procedur
    **Fix (`wp_audio`):** engine LOD for every car but the focus — the two loudest layers (the
    crossfade pair) within `engine.lod_two_layer_m` = 40 m, the loudest one beyond, the dropped
    layers' energy moved into the kept ones (loudness unchanged, test-enforced), sticky ×1.25 near
-   a crossover; a non-focus car's second layer gets `engine.second_layer_cull_scale` = 0.25 so
-   every car's main layer is kept before anyone's second. Engine bus 16 → 24, `max_voices`
+   a crossover; a non-focus car's second layer gets `engine.second_layer_cull_scale` (0.25,
+   since 2026-10-21 1e-4: at 0.25 a car's second layer at 10 m still beat a quiet traffic car's
+   only layer at 130 m once main's three new cars changed the test crowd) so every car's main
+   layer is kept before anyone's second. Engine bus 16 → 24, `max_voices`
    40 → 48. Same crowd now: every car to 140 m has its engine (test), only traffic beyond
    ~145 m drops.
 3. **`voices.ts` after the J + J2 merge** (suspect a). Not silent by itself, but wrong:

@@ -2,7 +2,7 @@
 
 - **Workstream / prompt:** 09 — car roster data
 - **Branch:** `ws/cars`
-- **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
+- **Crates / folders owned:** `data/cars/` (roster files); vehicle-models wave 1: multi-model hooks in `wp_sim::{police_link,traffic_link}`, `wp_world::{lib,traffic}`, `wp_wasm`, `apps/simcli/src/run.rs`, `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
 ## Lead helper note (`lead/handling-balance`, playtest row 28) — no car data changed
@@ -281,6 +281,123 @@ the same binary and the old beater files swapped back in: identical result.
 | 02 vehicle (A) + 08 economy (G) | An **`aged_radial`** compound for old, hardened radials (the beater; later traffic/props). `vintage_bias` stands in today but is a 70s bias-ply (half the cornering stiffness, lazy). Proposal: street's shape with lateral `d` 0.82, `e` −0.5 (earlier, louder fall-off), longitudinal `d` 0.95, relaxation 0.40 m, rolling resistance 0.014, wet 0.55, paint 0.93 (peak slips computed from the curves). It needs a `market.tire_grip` row too (`wp_economy`'s `every_tire_file_has_a_grip_factor`), which is why I did not add the file. I switch the beater with one line in `roster_inputs.py` once it exists. |
 | 08 economy (G) | A **3-speed automatic** option for the beater (the brief's "4-speed manual / 3-speed auto"): a gearbox-swap mod, or a second def `junkyard_beater_auto` if you prefer a used-market variant. Data for it: ratios 2.84 / 1.60 / 1.00, final 3.70, torque converter stall 2200 rpm ×2.0, couples 2600 rpm, shift 0.6 s — I add the def on request. |
 | 19 design docs (P) | `FEATURE_BACKLOG.md` B06 can be closed. |
+
+## Vehicle-models wave 1: roster agent (2026-10-21)
+
+Plan: `docs/design/vehicles/PLAN.md` (roster row). Three new cars and multi-model police /
+traffic selection.
+
+### New cars (all from `roster_inputs.py`; full sim validation in `VALIDATION.md`)
+
+| Id | Class | Mass (sim) | Power | 0-100 sim (est.) | Vmax sim | 100-0 | Skidpad | Dur. | Price |
+|---|---|---|---|---|---|---|---|---|---|
+| `fulmine_v10` | Exotic | 1634 kg | 449 kW (5.2 NA V10, 8250 rpm) | 3.59 s (3.5) | 337 km/h | 34.9 m | 0.95 g | 3 | 125 000 |
+| `sentinel_warden` | PoliceCruiser | 1873 kg | 155 kW (5.7 TBI pushrod V8) | 8.80 s (8.6) | 202 km/h | 40.1 m | 0.81 g | 4 | 26 000 (not for sale) |
+| `sentinel_harrier` | PoliceInterceptor | 1813 kg | 319 kW (5.0 DOHC V8) | 5.74 s (5.7) | 275 km/h | 38.2 m | 0.87 g | 4 | 52 000 (not for sale) |
+
+- Dimensions follow the wave-1 research (`research_performance.md` §2, `research_police.md`
+  §1): Fulmine 1.95 × 4.46 × 1.17, wheelbase 2.65, 245/35R20 (loaded r 0.330) / 305/30R21
+  (0.347); Warden 1.98 × 5.40 × 1.43, wb 2.90, front overhang 1.05, 225/70R15, durability 4;
+  Harrier 1.93 × 4.82 × 1.37, wb 2.75, 275/40R20 square. Harrier kept durability 4 (research
+  says 3) because it carries the reinforced push bar + doubled bumper beam like the other
+  pursuit units.
+- Fulmine: fixed `Awd { front_split: 0.30 }`, 7-speed dual-clutch (0.06 s shifts), clutch
+  rear LSD. Durability 3 (not 2): at strength 0.9 the 56 km/h frontal crushed 1.32 m (band
+  0.35-1.3); a bonded aluminium/CFRP cell is a modern safety structure.
+- Warden: body-on-frame sedan = gen-lattice `cruiser` profile + `ladder_frame` (new
+  `TRUCK_RAIL_SCALE["sedan"] = 1.15`, a perimeter frame lighter than a truck ladder), 80s
+  passenger cell (hss × 0.65), drum rears, police package like the cruiser.
+- Barrier matrix: all pass except Harrier `offset 40% 56 km/h` (struck-side corner intact,
+  total loss) — the same known result as the Wolfhound (push-bar front spreads the offset load).
+- Market: prices come from the car files (`wp_economy` market); the Fulmine sits in the
+  Exotic band (60 000-320 000) in every condition, its impound base fee is 2.0 % of value, its
+  class index (832) tops the roster. Police classes are refused by `buy_car`.
+  **Price 125 000, not the ~230 000 the class would cost:** `wp_economy`'s
+  `roster_table_and_feel_targets` requires a medium front hit ≤ 1.6 × the class win purse in
+  Simulation; the Exotic purse (7 452) is shared with the 120 000 Lucciola and repair prices
+  scale with value, so 230 000 gave 2.73. **Request to 08 (economy):** a separate purse tier
+  for class-index ≥ 800 cars (or a value-scaled Exotic purse) so the Fulmine can be priced at
+  ~230 000; then change `price` in `roster_inputs.py`.
+- Audio: `data/audio/cars/{fulmine_v10,sentinel_warden,sentinel_harrier}.json` (audio's
+  folder; `wp_audio` requires one per car). V10 uses the V8 pack (no V10 pack yet), 10
+  cylinders, even firing.
+- Panels / meshes: `gen-panels` + `gen-car-mesh` for the three ids only.
+- **Cab-forward exotic lattice not done:** gen-lattice places the cabin by profile (`coupe`
+  shape fractions), with no knob for cabin position, so `fulmine_v10` (like `lucciola_350`)
+  has a front-engine coupe cabin. Needs either a `mid`/`cab_forward` profile in
+  `wp_damage::lattice_gen` (03) or the foundation's visual `cabin_shift` (research option b).
+
+### Multi-model police (`wp_sim`)
+
+```rust
+pub struct PoliceModel { pub car: LoadedCar, pub min_level: u8, pub max_level: u8,
+                         pub weight: u32, pub limits: Option<wp_police::pro::CarLimits> }
+impl PoliceModel { fn new(car, min_level, max_level) -> Self; fn with_weight(self, u32) -> Self;
+                   fn with_limits(self, CarLimits) -> Self }
+pub fn pick_police_model(fleet: &[PoliceModel], level: u8, seed: u64, unit: UnitId) -> usize;
+impl Sim {
+    pub fn set_police_cars(&mut self, fleet: Vec<PoliceModel>);   // empty = back to set_police_car
+    pub fn police_fleet(&self) -> &[PoliceModel];
+    pub fn police_unit_model(&self, unit: UnitId) -> Option<usize>;
+    pub fn police_dispatch_level(&self) -> u8;                     // max racer wanted level 0..=5
+}
+```
+
+- Each AI car unit gets a model **once**, the first reconcile after it appears (in
+  `wp_police` unit order), at the current dispatch level (max wanted level of any racer,
+  level 0 counted as 1), by `SplitMix64(seed ^ salt ^ (unit_id << 8 | level)) % total_weight`
+  over the models whose `min_level..=max_level` contains the level (all weighted models when
+  none does). Stored in a `BTreeMap<UnitId, usize>`, pruned when units retire; no RNG draws,
+  not part of `state_hash` (the spawned cars are). Kinematic units keep their model when they
+  later get a body.
+- `set_police_car` is untouched; with no fleet the old path runs unchanged. A one-model fleet
+  hashes identically to `set_police_car` (test `a_one_model_fleet_matches_set_police_car`).
+- Per-model `limits` override `set_police_car_limits` for that unit.
+
+### Multi-model traffic (`wp_world` + `wp_sim`)
+
+```rust
+pub fn wp_world::traffic::traffic_model_index(id: AgentId, n: usize) -> usize; // SplitMix64(id) % n
+impl Traffic { fn set_traffic_cars(&mut self, Vec<(VehicleDef, TireDb)>); fn model_count(&self) -> usize;
+               fn model_of(&self, AgentId) -> usize }
+impl World { pub fn set_traffic_cars(&mut self, &[LoadedCar]); pub fn traffic_model_of(&self, AgentId) -> usize }
+impl Sim   { pub fn set_traffic_cars(&mut self, Vec<LoadedCar>); pub fn traffic_cars(&self) -> &[LoadedCar] }
+```
+
+- Derivation per agent: **id** = `wp_world`'s stable agent id (spawn order, from 1);
+  **model** = `traffic_model_index(id, n)` (pure function of the id; pinned by a unit test so
+  renderers can rely on it); **variant** = the existing colour byte drawn once at spawn
+  (`rng.below(8)`), never touched by promotion. So a car never changes model or colour when it
+  becomes physical, and the instanced (kinematic) renderer can draw the same model.
+- One model: identical to `set_traffic_car` (test `a_one_model_list_matches_set_traffic_car`;
+  the world's `cars` is now a `Vec`, `set_traffic_car` sets a one-element list).
+
+### simcli + browser wiring
+
+- New scenario field `car_mix: bool` (default false, omitted when false — existing scenarios,
+  goldens and replays unchanged). True: police fleet `simcli::run::CAR_MIX_POLICE` (warden 1–2,
+  cruiser 1–2, bastion 2–3, wolfhound 3–5, harrier 4–5, limits from VALIDATION.md; cruiser on
+  `pursuit.toml` defaults) and traffic `CAR_MIX_TRAFFIC` (index → id: 0 `debug_sedan`,
+  1 `junkyard_beater`, 2 `tansy_13`, 3 `furrow_24`, 4 `hauler_1500`, 5 `drayman_cargo`,
+  6 `vireo_xs`).
+- `wp_wasm::scenario::city_chase_in` sets `car_mix = true`. Streams (see `testbed.md`):
+  `traffic_agents()` stride 5 → 7 (`agent_id`, `model`), `police_units()` stride 6 → 8
+  (`unit_id`, `model`), new `traffic_models()` / `police_models()` (JSON car-id tables),
+  `vehicle_meta()` flags carry physical traffic's `variant << 8`. `apps/testbed-web`: strides,
+  `AG` / `PU` offsets in `layout.ts`, `sim.trafficModels()` / `sim.policeModels()`; e2e
+  divisors updated. Rendering of the models is wave 2's job.
+- With heat at L0–L1 only warden/cruiser patrol; bastion appears from L2, wolfhound from L3,
+  harrier at L4–L5, so all five show up as a chase escalates.
+
+### Changes outside my crates (this round)
+
+- `crates/wp_sim/src/lib.rs` (lead): three fields (`police_fleet`, `police_unit_models`,
+  `traffic_cars` replacing `traffic_car`) and the `PoliceModel` re-export.
+- `apps/simcli/src/scenario.rs`, `fuzz.rs`, `examples/city_frame_cost.rs`, `SCENARIOS.md`
+  (harness): the `car_mix` field.
+- `data/audio/cars/*` (audio) for the new cars; `apps/testbed-web/src/{scene.ts,wasm/*}` and
+  `e2e/run.mjs` (testbed): parsing only.
+- `tools/specsheet/*.py` now honour `CARGO_TARGET_DIR` for the release binaries.
 
 ## Response to lead feedback round 8 (2026-10-19)
 
