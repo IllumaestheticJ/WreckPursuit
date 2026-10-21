@@ -650,7 +650,11 @@ export class VoicePool {
     // Sirens schedule their pitch curve ahead on each update (their phase moves every frame);
     // others only on change.
     const synthChanged =
-      changed(params.freq_hz, l.freq_hz) || pitchMoved || changed(params.load, l.load) || params.phase !== l.phase;
+      changed(params.freq_hz, l.freq_hz) ||
+      pitchMoved ||
+      changed(params.load, l.load) ||
+      changed(params.timbre ?? 0, l.timbre ?? 0) ||
+      params.phase !== l.phase;
     // The modelled engine and clocked synths (impacts, horns) read every frame.
     if (v.synth && (synthChanged || params.engine || (v.synth as ClockedSynth).everyFrame)) v.synth.update(params, t);
     if (synthChanged) {
@@ -660,6 +664,7 @@ export class VoicePool {
       // drift (Doppler of a receding siren stuck ~5 % sharp).
       if (pitchMoved) l.pitch = params.pitch;
       l.load = params.load;
+      l.timbre = params.timbre;
       l.phase = params.phase;
     }
     l.doppler = params.doppler;

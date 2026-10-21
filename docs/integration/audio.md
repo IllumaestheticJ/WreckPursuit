@@ -959,3 +959,37 @@ defaults and the `AudioMixer` start-up gain. Settings saved before this carry
 `masterDefault !== 2`; a stored master of exactly 0.8 (the untouched old default) moves to 1.0
 once, any other level the player chose is kept. `e2e/audio_mix.mjs` now measures at 1.0 (see the
 validation numbers in the commit message).
+
+## Realistic tire squeal (port of serene-johnson 5f241294 onto round12, 2026-10-21)
+
+Owner playtest "Fix tire sounds and make them more realistic" (row 33 on the serene-johnson
+branch's numbering; row 127 here). Round12 had already solved half of it in parallel, so only
+the missing parts were ported (branch `triage/squeal-port`):
+- **Ported — per-tire slip peaks.** Squeal (and loose scrub) normalise slip by each wheel's
+  own `TireDef::{peak_slip_ratio, peak_slip_angle_rad}` (`tires::TirePeak`, resolved in
+  `register_car` from `LoadedCar::tires`; the `TireMix` peaks are the fallback for an unknown
+  tire). A semi-slick (0.082 rad) now squeals earlier and an all-terrain (0.209 rad) later
+  than the old single 0.12 rad peak. `update_tires` takes `peaks: &[TirePeak; 4]`.
+- **Ported, adapted — lock-up timbre.** `tires::Squeal { gain, pitch, intensity, timbre }`
+  replaces the `(gain, pitch, intensity)` tuple; `timbre` = longitudinal share of the
+  squealing slip, smoothed over `SQUEAL_TIMBRE_TAU_S` = 80 ms. On round12 the squeal only hears
+  braking slip + slip angle (driving spin is the `spin` / `spin_loose` cues), so `timbre` → 1
+  means a **braking lock-up**, not wheelspin; pitch drops up to `LOCKUP_PITCH_DROP` = 18 %.
+  New `VoiceParams::timbre` / `Desire::timbre` (serde default 0 and skipped when 0, so every
+  other voice's JSON is unchanged; wp_audio only, no contract change).
+- **Ported — resonator squeal synth** (`synth.ts` `squeal`): noise through four narrow
+  inharmonic band-passes + jittered sawtooth core + intensity hiss + a lower chattering
+  lock-up layer blended by `timbre`; new deterministic `wander` noise buffer (own LCG, so the
+  white / crackle buffers are unchanged). `world_proc` `tire/squeal` params `freq_hz` 900,
+  `jitter` 0.025, `chatter_hz` 22 (was `wobble_hz`). `voices.ts` re-applies the synth when
+  `timbre` moves. `world_rec` keeps its recorded `squeal.ogg` (only the pitch drop applies).
+- **Skipped, superseded by round12:** squeal attack / release (`squeal_attack_s` /
+  `squeal_release_s` config keys) — round12's `follow()` with `SCRUB_ATTACK_S` /
+  `SCRUB_RELEASE_S` and `SQUEAL_FLOOR` already does it; serene's wheelspin squeal timbre —
+  round12's own `spin` cue; the squeal pitch formula — round12's kept, only × the lock-up
+  drop; speed-tracking road roar (`track` + band peaks in `world_proc` surfaces) — round12's
+  two-stage asphalt / concrete / wet roar already tracks pitch^1.25 / pitch; "slow param fades
+  no longer dropped" in `voices.ts` — round12 already compares against the last *applied*
+  values field by field (playtest #19 fix).
+Tests: `tires::tests::{squeal_follows_each_cars_own_tire_peak,
+lockup_squeals_lower_with_lockup_timbre}`; existing squeal / ABS / spin tests unchanged.
