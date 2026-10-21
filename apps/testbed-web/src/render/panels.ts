@@ -9,6 +9,19 @@
 // Detached panels leave the car as visual debris (ballistic, bounce on the road; the physics
 // debris body lives in Rapier and is not exposed to the browser yet).
 //
+// Mesh format 4 (tools/assets/src/mesh.rs `MESH_FORMAT`) = the detailed-car-models fields
+// (format 2 there: part kinds / materials, `rigid`, `tints`, `livery`, `atlas`,
+// `wheel_camber_deg`, livery atlas UVs) plus round 12's `fold` crumple binding (format 3).
+// Older files simply lack the optional fields.
+//
+// Wheel-space parts: tire / rim / brake_disc spin (`wheelParts`, VehicleView's spin groups);
+// caliper / upright steer and follow compression but do not spin (`hubParts`, the wheel pivots).
+//
+// Livery: paint parts with material `livery` carry atlas UVs (layout: data/panels/README.md);
+// `setLivery(texture)` maps a canvas onto them, `liveryPx()` converts car space to canvas pixels,
+// `?livery=grid` in the URL shows `debugLiveryTexture()` on every car. Light-bar lenses get one
+// material per side (`lightbarMaterials`), flashed by render/lights.ts.
+//
 // Coordinates: chassis space (+X right, +Y forward, +Z up), metres. The parent VehicleView root
 // is already in that frame.
 import * as THREE from "three";
@@ -20,31 +33,31 @@ export const PANEL_STRIDE = 10;
 /** Panel state codes (mirrors wp_damage::PanelState::code). */
 export const PANEL_STATE = { attached: 0, unlatched: 1, hanging: 2, detached: 3 } as const;
 
-/** Materials of the mesh files (tools/assets) plus the ones mod parts use (render/mod_parts.ts). */
-export type PartMaterial =
-  | "paint"
-  | "glass"
-  | "trim"
-  | "headlight"
-  | "taillight"
-  | "rubber"
-  | "metal"
-  | "interior"
-  | "carbon"
-  | "chrome"
-  | "steel"
-  | "caliper"
-  | "caliperRace"
-  | "stripe";
+/** Part kinds (tools/assets/src/mesh.rs `PartKind`), plus "mod" for mod parts (render/mod_parts.ts). */
+export type PartKindJson =
+  | "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim"
+  | "detail" | "engine" | "suspension" | "brake_disc" | "caliper" | "upright" | "lightbar" | "decal_carrier"
+  | "mod";
+/** Material slots of the mesh files (tools/assets/src/mesh.rs `MaterialSlot`). */
+export type MaterialJson =
+  | "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior"
+  | "livery" | "chrome" | "carbon" | "caliper" | "engine" | "lightbar_red" | "lightbar_blue"
+  | "lightbar_clear" | "emissive_amber" | "grille" | "exhaust" | "rim" | "spring" | "accent" | "underglow";
+/** Materials of the mesh files plus the ones only mod parts use (render/mod_parts.ts):
+ * `caliperSport` / `caliperRace` brake-kit calipers (the mesh files' `caliper` is the stock
+ * one, tinted per car), `steel`, `stripe`. */
+export type PartMaterial = MaterialJson | "steel" | "caliperSport" | "caliperRace" | "stripe";
 
 /** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). Mod parts
  * (render/mod_parts.ts) use the same shape with kind "mod". */
 export interface MeshPartJson {
   name: string;
   region: string | null;
-  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim" | "mod";
+  kind: PartKindJson;
   material: PartMaterial;
   wheel?: number | null;
+  /** Bound to one node with weight 255 (moves rigidly; format 4). */
+  rigid?: boolean;
   positions_mm: number[];
   uvs: number[];
   indices: number[];
@@ -99,14 +112,192 @@ export function foldHeight(rest: number, lost: number): number {
   return 0.5 * rest * Math.sqrt(1 - k * k);
 }
 
-/** data/panels/meshes/<car>.json (`CarMesh`). */
+/** Car-space box the livery atlas maps (mesh format 4). */
+export interface LiveryAtlas {
+  /** Tail y, nose y (m). */
+  y: [number, number];
+  /** Ground z, top z (m). */
+  z: [number, number];
+  /** Half width (m). */
+  x_half: number;
+}
+
+/** Livery hint written by the style (tools/assets/src/style.rs `LiveryHint`). */
+export interface LiveryHint {
+  scheme: string;
+  colors: [number, number, number][];
+  text: string[];
+}
+
+/** data/panels/meshes/<car>.json (`CarMesh`). Format 1 files have none of the optional fields. */
 export interface CarMeshJson {
   id: string;
   lattice_id: string;
   format: number;
   tri_count: number;
+  /** Per-car colours of material slots (sRGB 0–255): rim, spring, accent, caliper, underglow, paint … */
+  tints?: Partial<Record<MaterialJson, [number, number, number]>>;
+  livery?: LiveryHint;
+  atlas?: LiveryAtlas;
+  /** Visual camber per wheel (FL FR RL RR), degrees, + = top leans in. */
+  wheel_camber_deg?: [number, number, number, number];
   parts: MeshPartJson[];
 }
+
+/** Wheel-space kinds that steer but do not spin (VehicleView's wheel pivots). */
+const HUB_KINDS: ReadonlySet<PartKindJson> = new Set(["caliper", "upright"]);
+
+// ------------------------------------------------------------------------------------------
+// Livery atlas (layout: data/panels/README.md "Livery atlas")
+// ------------------------------------------------------------------------------------------
+
+/** Atlas band of a livery canvas. */
+export type LiverySide = "left" | "right" | "top" | "front" | "rear";
+
+const ATLAS_PAD = 0.004;
+/** Band rectangles in UV space: [u0, u1, v0, v1] (v up, texture flipY = true). */
+const BANDS: Record<LiverySide, [number, number, number, number]> = {
+  left: [0, 0.25, 0, 0.5],
+  right: [0.25, 0.5, 0, 0.5],
+  top: [0, 0.5, 0.5, 0.8],
+  front: [0, 0.25, 0.8, 1],
+  rear: [0.25, 0.5, 0.8, 1],
+};
+
+/** Default atlas for format-1 meshes / before load (a 4.6 m × 1.9 m × 1.5 m car). */
+export const DEFAULT_ATLAS: LiveryAtlas = { y: [-2.4, 2.4], z: [0, 1.75], x_half: 1.0 };
+
+/**
+ * Car space → livery UV (u, v in 0..1, v up). Arguments per side:
+ * left/right: (y, z) — y forward, z up; top: (y, x); front/rear: (x, z). Metres, chassis space.
+ * Mirrors tools/assets/src/mesh.rs `atlas_uv` exactly.
+ */
+export function liveryUv(atlas: LiveryAtlas, side: LiverySide, a: number, b: number): [number, number] {
+  const clamp = (t: number) => Math.min(Math.max(t, 0), 1);
+  const fy = (y: number) => clamp((y - atlas.y[0]) / (atlas.y[1] - atlas.y[0]));
+  const fz = (z: number) => clamp((z - atlas.z[0]) / (atlas.z[1] - atlas.z[0]));
+  const fx = (x: number) => clamp((x + atlas.x_half) / (2 * atlas.x_half));
+  let s: number;
+  let t: number;
+  switch (side) {
+    case "left": [s, t] = [1 - fy(a), fz(b)]; break; // nose at the band's left: reads front → rear
+    case "right": [s, t] = [fy(a), fz(b)]; break; // tail at the band's left: reads rear → front
+    case "top": [s, t] = [fy(a), 1 - fx(b)]; break; // plan view, nose right, car left at the top
+    case "front": [s, t] = [1 - fx(a), fz(b)]; break; // seen from ahead
+    case "rear": [s, t] = [fx(a), fz(b)]; break; // seen from behind
+  }
+  const [u0, u1, v0, v1] = BANDS[side];
+  return [u0 + ATLAS_PAD + (u1 - u0 - 2 * ATLAS_PAD) * s, v0 + ATLAS_PAD + (v1 - v0 - 2 * ATLAS_PAD) * t];
+}
+
+/**
+ * Car space → livery canvas pixel {x, y} (canvas origin top-left) for a canvas of `w` × `h`
+ * pixels mapped over the whole texture (u 0..1). Arguments as `liveryUv`. Text drawn
+ * left-to-right with plain `fillText` at a left/right-side anchor reads correctly from outside.
+ */
+export function liveryPx(
+  atlas: LiveryAtlas, side: LiverySide, a: number, b: number, w: number, h: number,
+): { x: number; y: number } {
+  const [u, v] = liveryUv(atlas, side, a, b);
+  return { x: u * w, y: (1 - v) * h };
+}
+
+/** Pixel rectangle {x, y, w, h} of an atlas band on a `w` × `h` canvas. */
+export function liveryBandPx(side: LiverySide, w: number, h: number): { x: number; y: number; w: number; h: number } {
+  const [u0, u1, v0, v1] = BANDS[side];
+  return { x: u0 * w, y: (1 - v1) * h, w: (u1 - u0) * w, h: (v1 - v0) * h };
+}
+
+let debugLivery: THREE.CanvasTexture | null = null;
+
+/** A labelled grid on every atlas band (to check the UV mapping): band names, FRONT arrows, 0.5 m grid. */
+export function debugLiveryTexture(atlas: LiveryAtlas = DEFAULT_ATLAS): THREE.CanvasTexture {
+  if (debugLivery) return debugLivery;
+  const W = 2048;
+  const H = 1024;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#777";
+  g.fillRect(0, 0, W, H);
+  const colours: Record<LiverySide, string> = {
+    left: "#c33", right: "#36c", top: "#3a3", front: "#cc3", rear: "#c3c",
+  };
+  for (const side of Object.keys(BANDS) as LiverySide[]) {
+    const r = liveryBandPx(side, W, H);
+    g.fillStyle = colours[side];
+    g.fillRect(r.x, r.y, r.w, r.h);
+    g.strokeStyle = "rgba(255,255,255,0.6)";
+    g.lineWidth = 2;
+    // 0.5 m grid in car space.
+    const lines: [number, number, number, number][] = [];
+    if (side === "left" || side === "right" || side === "top") {
+      for (let y = Math.ceil(atlas.y[0] * 2) / 2; y <= atlas.y[1]; y += 0.5) {
+        const lo = side === "top" ? -atlas.x_half : atlas.z[0];
+        const hi = side === "top" ? atlas.x_half : atlas.z[1];
+        lines.push([y, lo, y, hi]);
+      }
+    }
+    if (side !== "top") {
+      for (let z = 0.5; z < atlas.z[1]; z += 0.5) {
+        const a0 = side === "left" || side === "right" ? atlas.y[0] : -atlas.x_half;
+        const a1 = side === "left" || side === "right" ? atlas.y[1] : atlas.x_half;
+        lines.push([a0, z, a1, z]);
+      }
+    } else {
+      lines.push([atlas.y[0], 0, atlas.y[1], 0]);
+    }
+    for (const [a0, b0, a1, b1] of lines) {
+      const p0 = liveryPx(atlas, side, a0, b0, W, H);
+      const p1 = liveryPx(atlas, side, a1, b1, W, H);
+      g.beginPath();
+      g.moveTo(p0.x, p0.y);
+      g.lineTo(p1.x, p1.y);
+      g.stroke();
+    }
+    g.fillStyle = "#fff";
+    g.font = "bold 40px sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    const label = side.toUpperCase();
+    // Anchors from car space: the arrow points toward the car's front on the sides / top.
+    const mid = (atlas.y[0] + atlas.y[1]) / 2;
+    const zMid = 0.75;
+    const at =
+      side === "left" || side === "right"
+        ? liveryPx(atlas, side, mid, zMid, W, H)
+        : side === "top"
+          ? liveryPx(atlas, side, mid, 0.3, W, H)
+          : liveryPx(atlas, side, 0, zMid, W, H);
+    const front = side === "left" ? "◀ FRONT" : side === "right" || side === "top" ? "FRONT ▶" : "";
+    g.fillText(`${label} ${front} ABC123`, at.x, at.y);
+    if (side === "front" || side === "rear") {
+      const l = liveryPx(atlas, side, -0.6, 0.5, W, H);
+      g.font = "bold 28px sans-serif";
+      g.fillText("CAR-LEFT", l.x, l.y);
+    }
+  }
+  debugLivery = new THREE.CanvasTexture(c);
+  debugLivery.colorSpace = THREE.SRGBColorSpace;
+  return debugLivery;
+}
+
+/** `?livery=<value>` from the URL (`grid`: the debug atlas on every car), or null. */
+export function liveryFlag(): string | null {
+  try {
+    return new URLSearchParams(globalThis.location?.search ?? "").get("livery");
+  } catch {
+    return null;
+  }
+}
+
+/** sRGB 0–255 triple → THREE.Color (linear working space). */
+export function rgbColour(rgb: [number, number, number], out = new THREE.Color()): THREE.Color {
+  return out.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+}
+
+// ------------------------------------------------------------------------------------------
 
 const meshCache = new Map<string, Promise<CarMeshJson | null>>();
 /** Meshes that finished loading (null = file missing), so a new car builds on its first frame. */
@@ -139,9 +330,43 @@ export function carMeshNow(carId: string): CarMeshJson | null | undefined {
   return meshLoaded.get(carId);
 }
 
-/** Start loading every listed car mesh; resolves when all have arrived (or failed). */
+const midCache = new Map<string, Promise<CarMeshJson | null>>();
+/** Mid-LOD meshes that finished loading (null = file missing: draw the full mesh instead). */
+const midLoaded = new Map<string, CarMeshJson | null>();
+
+/**
+ * Fetch (once per car) a car's mid level of detail, `data/panels/meshes/mid/<car>.json`
+ * (tools/assets `gen-car-mesh`, `Lod::Mid`): the same style, livery atlas, atlas UVs and tints
+ * as the full mesh at ~3–6k triangles, without skin bindings. The instanced fleet and parked
+ * cars draw it undeformed (render/fleet.ts, props.ts); VehicleViews always use the full mesh.
+ * Resolves to the full mesh when the mid file is missing (older data), null when neither exists.
+ */
+export function loadCarMidMesh(carId: string): Promise<CarMeshJson | null> {
+  let p = midCache.get(carId);
+  if (!p) {
+    p = fetch(`data/panels/meshes/mid/${carId}.json`)
+      .then((r) => (r.ok ? (r.json() as Promise<CarMeshJson>) : null))
+      .catch(() => null)
+      .then((m) => m ?? loadCarMesh(carId))
+      .then((m) => {
+        midLoaded.set(carId, m);
+        return m;
+      });
+    midCache.set(carId, p);
+  }
+  return p;
+}
+
+/** A car's mid-LOD mesh (or its full-mesh fallback) if it has already loaded (undefined while
+ * loading or never requested). */
+export function carMidMeshNow(carId: string): CarMeshJson | null | undefined {
+  return midLoaded.get(carId);
+}
+
+/** Start loading every listed car mesh (full and mid LOD); resolves when all have arrived (or
+ * failed). */
 export function preloadCarMeshes(carIds: string[]): Promise<void> {
-  return Promise.all(carIds.map((id) => loadCarMesh(id))).then(() => undefined);
+  return Promise.all(carIds.flatMap((id) => [loadCarMesh(id), loadCarMidMesh(id)])).then(() => undefined);
 }
 
 /** Panel states of an entity, PANEL_STRIDE floats per panel (empty if the build or scenario has none). */
@@ -157,6 +382,8 @@ export function panelStates(entity: number): Float32Array {
  * are built once per part (browser perf, round 12b: promotions rebuilt them for each car). */
 interface PartData {
   rest: Float32Array;
+  /** Atlas / mesh UVs (0..1), 2 per vertex (zeros when the file has none). */
+  uv: Float32Array;
   weights: Float32Array;
   foldW: Float32Array;
   nodes: Uint16Array;
@@ -179,6 +406,8 @@ function dataOf(def: MeshPartJson): PartData {
   const foldW = new Float32Array(fw.length);
   for (let i = 0; i < fw.length; i++) foldW[i] = fw[i] / 255;
   const index = n > 65535 ? new Uint32Array(def.indices) : new Uint16Array(def.indices);
+  const uv = new Float32Array(n * 2);
+  for (let i = 0; i < Math.min(def.uvs.length, uv.length); i++) uv[i] = def.uvs[i] / 65535;
   let wheelGeom: THREE.BufferGeometry | null = null;
   if (def.wheel != null) {
     wheelGeom = new THREE.BufferGeometry();
@@ -186,7 +415,7 @@ function dataOf(def: MeshPartJson): PartData {
     wheelGeom.setIndex(new THREE.BufferAttribute(index, 1));
   }
   const foldPack = def.fold && def.fold.chords.length > 0 ? packFold(def.fold) : null;
-  d = { rest, weights, foldW, nodes: new Uint16Array(def.skin_nodes), index, wheelGeom, foldPack };
+  d = { rest, uv, weights, foldW, nodes: new Uint16Array(def.skin_nodes), index, wheelGeom, foldPack };
   partData.set(def, d);
   return d;
 }
@@ -201,11 +430,42 @@ function std(o: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMateria
   greyLook.set(m, { color: m.color.clone(), roughness: m.roughness, metalness: m.metalness, opacity: m.opacity });
   return m;
 }
-/** Materials that are the same on every car (only paint and the lamps are per car): shared, so
- * a promoted car adds 1 material instead of 7. Mod part materials (carbon … stripe) are shared
- * too; a mod that recolours a shared one (tint, interior trim) gets that car its own copy
- * (`PanelBody.setModLook`). */
-type SharedKind = "glass" | "trim" | "rubber" | "metal" | "interior" | "brokenLamp" | "carbon" | "chrome" | "steel" | "caliper" | "caliperRace" | "stripe";
+
+/**
+ * Image-based lighting for car materials (SceneView sets it once: a PMREM of RoomEnvironment),
+ * so metallic paint, chrome and bare metal read as metal instead of black (detailed-car-models).
+ * Only car materials take it (not `scene.environment`: that would relight the whole city), and
+ * only in the greybox style (`applyCarEnv`): low-poly dark is matte and lit by its palette.
+ */
+let carEnv: THREE.Texture | null = null;
+/** envMapIntensity of car materials. */
+export const CAR_ENV_INTENSITY = 0.6;
+/** Set the car environment map (once, before cars are built; SceneView). */
+export function setCarEnvironment(tex: THREE.Texture | null): void {
+  carEnv = tex;
+}
+/** The car environment map (null until SceneView made it). */
+export function carEnvironment(): THREE.Texture | null {
+  return carEnv;
+}
+/** Give `m` the car environment map (`on`, greybox) or none (low-poly dark). */
+export function applyCarEnv(m: THREE.Material, on: boolean): void {
+  if (!(m instanceof THREE.MeshStandardMaterial)) return;
+  const env = on ? carEnv : null;
+  if (m.envMap === env) return;
+  m.envMap = env;
+  m.envMapIntensity = CAR_ENV_INTENSITY;
+  m.needsUpdate = true;
+}
+
+/** Materials that are the same on every car (only paint, livery and the lamps are per car):
+ * shared, so a promoted car adds a few materials instead of 20. Mod part materials (steel …
+ * stripe) are shared too; a mod that recolours a shared one (tint, interior trim) gets that car
+ * its own copy (`PanelBody.setModLook`). Tinted slots (`CarMeshJson.tints`) share one material
+ * per slot and colour (`tintedShared`). */
+type SharedKind =
+  | "glass" | "trim" | "rubber" | "metal" | "interior" | "brokenLamp" | "carbon" | "chrome" | "steel"
+  | "caliper" | "caliperSport" | "caliperRace" | "stripe" | "engine" | "grille" | "exhaust" | "rim" | "spring" | "accent";
 let sharedMats: Record<SharedKind, THREE.MeshStandardMaterial> | null = null;
 /** Every shared material (to tell them from a car's own copies). */
 const sharedSet = new Set<THREE.Material>();
@@ -221,17 +481,81 @@ function shared(): NonNullable<typeof sharedMats> {
     metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
     interior: std({ color: 0x2b2724, roughness: 1 }),
     brokenLamp: std({ color: 0x2a2a2c, roughness: 0.6, metalness: 0.4 }),
-    // Mod parts (render/mod_parts.ts).
     carbon: std({ color: 0x1c1d20, metalness: 0.35, roughness: 0.3 }),
     chrome: std({ color: 0xd8dde2, metalness: 0.95, roughness: 0.12 }),
+    // Mesh-file slots (format 4); rim / spring / accent / caliper are usually tinted per car.
+    caliper: std({ color: 0x3a3c40, metalness: 0.2, roughness: 0.5 }),
+    engine: std({ color: 0x3b3d40, metalness: 0.6, roughness: 0.6 }),
+    grille: std({ color: 0x0d0e10, roughness: 0.8 }),
+    exhaust: std({ color: 0xb9b2a6, metalness: 0.9, roughness: 0.25 }),
+    rim: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
+    spring: std({ color: 0x3a3c40, metalness: 0.3, roughness: 0.5 }),
+    accent: std({ color: 0x8a1020, metalness: 0.25, roughness: 0.55 }),
+    // Mod parts only (render/mod_parts.ts).
     steel: std({ color: 0x2a2c2e, metalness: 0.6, roughness: 0.55 }),
-    caliper: std({ color: 0xc8161d, metalness: 0.2, roughness: 0.45 }),
+    caliperSport: std({ color: 0xc8161d, metalness: 0.2, roughness: 0.45 }),
     caliperRace: std({ color: 0xe0a812, metalness: 0.3, roughness: 0.4 }),
     stripe: std({ color: 0xf2f2f2, roughness: 0.5 }),
   };
   for (const m of Object.values(sharedMats)) sharedSet.add(m);
   return sharedMats;
 }
+/** One shared material per tinted slot and colour (`tints`: every car of a model shares it). */
+const tintCache = new Map<string, THREE.MeshStandardMaterial>();
+function tintedShared(slot: SharedKind, rgb: [number, number, number]): THREE.MeshStandardMaterial {
+  const key = `${slot}:${rgb.join(",")}`;
+  let m = tintCache.get(key);
+  if (!m) {
+    m = shared()[slot].clone();
+    rgbColour(rgb, m.color);
+    greyLook.set(m, { color: m.color.clone(), roughness: m.roughness, metalness: m.metalness, opacity: m.opacity });
+    sharedSet.add(m);
+    tintCache.set(key, m);
+  }
+  return m;
+}
+/** Slots `tints` may recolour through a shared material. */
+const TINTABLE: ReadonlySet<string> = new Set<SharedKind>(["caliper", "rim", "spring", "accent", "engine", "grille", "exhaust", "chrome", "carbon", "metal", "trim", "rubber", "glass", "interior"]);
+
+const tmpStyle = new THREE.Color();
+const tmpLb = new THREE.Vector3();
+let amberShared: THREE.MeshStandardMaterial | null = null;
+/** Amber lenses / advisors of cars that do not flash them. */
+function sharedAmber(): THREE.MeshStandardMaterial {
+  if (!amberShared) sharedSet.add((amberShared = std({ color: 0xc87a10, emissive: 0x2a1600, roughness: 0.4 })));
+  return amberShared;
+}
+let underglowShared: THREE.MeshStandardMaterial | null = null;
+/** Underglow strips while dark (a car with underglow gets its own copy to light). */
+function sharedUnderglow(): THREE.MeshStandardMaterial {
+  if (!underglowShared) sharedSet.add((underglowShared = std({ color: 0x101012, emissive: 0x000000, roughness: 0.6 })));
+  return underglowShared;
+}
+let glowTex: THREE.CanvasTexture | null = null;
+/** Radial white glow (underglow pool), shared. */
+function glowTexture(): THREE.CanvasTexture | null {
+  if (glowTex) return glowTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  const grad = g.createRadialGradient(32, 32, 4, 32, 32, 32);
+  grad.addColorStop(0, "rgba(255,255,255,0.55)");
+  grad.addColorStop(0.6, "rgba(255,255,255,0.22)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return (glowTex = new THREE.CanvasTexture(c));
+}
+
+/** Light-bar lens materials of one side. */
+export interface LightbarSide {
+  red: THREE.MeshStandardMaterial;
+  blue: THREE.MeshStandardMaterial;
+  clear: THREE.MeshStandardMaterial;
+}
+/** Head-lamp materials: one shared, or one per side (left = parts with x < 0) for wig-wag. */
+export type LampMaterials = THREE.Material | { left: THREE.Material; right: THREE.Material };
 
 /** Look a mod gives one material (paint finish, window tint, interior trim); unset = unchanged. */
 export interface ModLook {
@@ -247,8 +571,9 @@ function applyLook(m: THREE.MeshStandardMaterial, l: ModLook): void {
   if (l.opacity !== undefined) m.opacity = l.opacity;
 }
 
-/** Merged index of one material's batched parts (with each part's first index), per car model. */
-const batchIndex = new WeakMap<CarMeshJson, Map<string, { index: Uint16Array | Uint32Array }>>();
+/** Merged index and UVs of one material's batched parts, per car model (every car of the model
+ * shares the UV array: it never changes). */
+const batchIndex = new WeakMap<CarMeshJson, Map<string, { index: Uint16Array | Uint32Array; uv: Float32Array }>>();
 
 /** Largest-triangle node triples per region, per car model (from the rest lattice). */
 const spanCache = new Map<string, Map<number, [number, number, number]>>();
@@ -257,6 +582,9 @@ interface PartRT {
   def: MeshPartJson;
   /** Material drawn (the mesh file's, or a mod's replacement such as a carbon hood). */
   material: PartMaterial;
+  /** Key of the drawn material in `PanelBody.mats` and of its batch: `material`, with "@r" for
+   * the right-side head lamps and light-bar lenses (own materials per side). */
+  key: string;
   /** A mod part (render/mod_parts.ts): batched apart from the mesh file's parts. */
   mod: boolean;
   /** The part's own mesh: drawn for lenses (their material swaps when broken); for batched parts
@@ -284,6 +612,8 @@ interface PartRT {
   foldMem: Float32Array;
   /** `fold` packed into typed arrays (`chordFoldsInto`); null when `fold` is. */
   foldPack: FoldPack | null;
+  /** Drawn by its own mesh (lenses, decal carriers), not a batch. */
+  own: boolean;
   /** Light lenses: broken (crushed or their bumper hangs), drawn dark without glow. */
   broken: boolean;
   /** Largest vertex displacement from rest at the last update, m (lights: break check; tests). */
@@ -660,6 +990,22 @@ export function debrisCount(): number {
   return debris.length;
 }
 
+/** Options of a PanelBody. */
+export interface PanelBodyOptions {
+  /** Keep the given paint colour even if the mesh file tints `paint` (traffic, police, parked
+   * cars: the instanced fleet draws them in that colour, so a promotion must not recolour). */
+  keepPaint?: boolean;
+}
+
+/** Material keys PanelBody.applyStyle leaves alone (lamps belong to their owner; flashing lenses,
+ * amber and underglow are driven by emissive). */
+const UNSTYLED = (k: string) =>
+  k === "headlight" || k === "headlight@r" || k === "taillight" || k.startsWith("lightbar_") || k === "emissive_amber" || k === "underglow";
+/** Mesh-file slots that get one material per side (left x < 0, right "@r"). */
+const SIDED = (m: string) => m === "headlight" || m.startsWith("lightbar_");
+const BLACK = new THREE.Color(0x000000);
+const WHITE = new THREE.Color(0xffffff);
+
 /** All per-panel meshes of one vehicle. Empty (ready = false) until the mesh file loads. */
 export class PanelBody {
   /** Re-skins done since the page loaded, all cars (perf checks: should not grow while nothing
@@ -669,11 +1015,19 @@ export class PanelBody {
   ready = false;
   /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
   readonly wheelParts: THREE.Mesh[][] = [[], [], [], []];
-  /** Non-spinning parts per wheel index, hub space (mod brake calipers; VehicleView parents
-   * them under the steered hub, not the spinning wheel). */
+  /** Non-spinning parts per wheel index, hub space: the mesh file's calipers / uprights and mod
+   * brake calipers (VehicleView parents them under the steered hub, not the spinning wheel). */
   readonly hubParts: THREE.Mesh[][] = [[], [], [], []];
+  /** Visual camber per wheel, radians about +Y (sign already per side: + tilts the top toward +X). */
+  readonly camberRad: number[] = [0, 0, 0, 0];
   /** The loaded mesh file (null until ready). */
   mesh: CarMeshJson | null = null;
+  /** Livery atlas frame of this car (DEFAULT_ATLAS until the mesh loads / for format-1 files). */
+  atlas: LiveryAtlas = DEFAULT_ATLAS;
+  /** Livery hint from the mesh file, if any. */
+  liveryHint: LiveryHint | null = null;
+  /** Light-bar lens centres per side, chassis space (null if the car has none). */
+  readonly lightbarAnchors: { left: THREE.Vector3 | null; right: THREE.Vector3 | null } = { left: null, right: null };
   /** Latest panel states (PANEL_STRIDE floats per panel). */
   states: Float32Array = new Float32Array(0);
   private parts: PartRT[] = [];
@@ -701,7 +1055,20 @@ export class PanelBody {
   /** One reusable `Frame` per free panel region (`frames` holds this re-skin's). */
   private readonly framePool = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
-  private readonly mats: Record<PartMaterial, THREE.Material>;
+  /** Drawn material per key (`PartRT.key`): shared ones, this car's paint / livery / lamps,
+   * and copies made for this car (`ownCopy`). */
+  private readonly mats: Record<string, THREE.Material>;
+  /** Light-bar lens materials per side, made on first use (`lightbarMaterials`). */
+  private lens: { left: LightbarSide; right: LightbarSide } | null = null;
+  /** Underglow colour from the mesh tints (null: the car has none). */
+  private underglowColour: THREE.Color | null = null;
+  /** Soft additive glow on the road under the car (cars with underglow only). */
+  private underglowPool: THREE.Mesh | null = null;
+  /** Livery texture on the `livery` parts (null: plain body colour). */
+  private livery: THREE.Texture | null = null;
+  /** Paint colour the livery scheme asks for (mirrors, plain paint parts), kept over art styles. */
+  private liveryBase: THREE.Color | null = null;
+  private readonly keepPaint: boolean;
   private onReady: (() => void) | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
@@ -717,27 +1084,28 @@ export class PanelBody {
     readonly entity: number,
     readonly carId: string,
     paint: THREE.Color | number,
-    headlight: THREE.Material,
+    headlight: LampMaterials,
     taillight: THREE.Material,
+    opts: PanelBodyOptions = {},
   ) {
     this.regions = sim.info(entity).regions;
+    this.keepPaint = opts.keepPaint ?? false;
     const sm = shared();
+    const headL = headlight instanceof THREE.Material ? headlight : headlight.left;
+    const headR = headlight instanceof THREE.Material ? headlight : headlight.right;
     this.mats = {
+      ...sm,
       paint: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
-      glass: sm.glass,
-      trim: sm.trim,
-      headlight,
+      // Body panels of format-4 meshes: the paint colour, or the livery texture (setLivery).
+      livery: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
+      headlight: headL,
+      "headlight@r": headR,
       taillight,
-      rubber: sm.rubber,
-      metal: sm.metal,
-      interior: sm.interior,
-      carbon: sm.carbon,
-      chrome: sm.chrome,
-      steel: sm.steel,
-      caliper: sm.caliper,
-      caliperRace: sm.caliperRace,
-      stripe: sm.stripe,
+      // Shared until this car flashes them (`amberMaterials`) / lights them (`setUnderglow`).
+      emissive_amber: sharedAmber(),
+      underglow: sharedUnderglow(),
     };
+    for (const m of [this.mats.paint, this.mats.livery]) applyCarEnv(m, true);
     this.brokenLamp = sm.brokenLamp;
     warmSkinVertices();
     bodies.set(entity, this);
@@ -769,73 +1137,243 @@ export class PanelBody {
    * Head/tail lamps are the VehicleView's shared materials and are styled there.
    */
   applyStyle(lowpoly: boolean, paint: THREE.Color): void {
-    const lp: Partial<Record<PartMaterial, number>> = {
+    const lp: Partial<Record<string, number>> = {
       glass: PALETTE.glass,
       trim: PALETTE.trim,
       rubber: PALETTE.tire,
       metal: PALETTE.rim,
       interior: PALETTE.interior,
     };
-    for (const [k, m] of Object.entries(this.mats) as [PartMaterial, THREE.Material][]) {
-      const g = k === "headlight" || k === "taillight" ? undefined : greyLook.get(m);
+    for (const [k, m] of Object.entries(this.mats)) {
+      const g = UNSTYLED(k) || k === "livery" ? undefined : greyLook.get(m);
       if (!g || !(m instanceof THREE.MeshStandardMaterial)) continue;
-      if (k === "paint") m.color.copy(lowpoly ? paint : g.color);
-      else m.color.copy(lowpoly && lp[k] !== undefined ? new THREE.Color(lp[k]) : g.color);
+      // Shared materials are styled by every car alike (same values), env included.
+      applyCarEnv(m, !lowpoly);
+      if (k === "paint") m.color.copy(this.liveryBase ?? (lowpoly ? paint : g.color));
+      else m.color.copy(lowpoly && lp[k] !== undefined ? tmpStyle.setHex(lp[k]) : g.color);
       m.roughness = lowpoly ? (k === "glass" ? 0.35 : 0.85) : g.roughness;
       m.metalness = lowpoly ? (k === "paint" ? 0.15 : 0) : g.metalness;
       // Low-poly glass is darker and less see-through (picker: near-opaque blue-black).
       if (k === "glass") m.opacity = lowpoly ? 0.82 : g.opacity;
       // What the player bought shows in every style.
-      const look = this.modLooks.get(k);
+      const look = this.modLooks.get(k as PartMaterial);
       if (look) applyLook(m, look);
     }
+    applyCarEnv(this.mats.livery, !lowpoly);
+    this.syncLivery(true);
     const b = this.brokenLamp as THREE.MeshStandardMaterial;
     const bg = greyLook.get(b)!;
-    b.color.copy(lowpoly ? new THREE.Color(PALETTE.brokenLight) : bg.color);
+    b.color.copy(lowpoly ? tmpStyle.setHex(PALETTE.brokenLight) : bg.color);
   }
 
-  /** Paint material (livery colour). */
+  /** Paint material (body colour). VehicleView sets its opacity; the livery material follows it. */
   get paint(): THREE.MeshStandardMaterial {
     return this.mats.paint as THREE.MeshStandardMaterial;
+  }
+
+  /** Livery material (body panels of format-4 meshes: paint colour, or the livery texture). */
+  get liveryMaterial(): THREE.MeshStandardMaterial {
+    return this.mats.livery as THREE.MeshStandardMaterial;
+  }
+
+  /**
+   * The livery material follows the paint: opacity always (VehicleView fades the paint for the
+   * lattice view), colour / finish when no texture is set (`all`: finish too).
+   */
+  private syncLivery(all = false): void {
+    const pm = this.paint;
+    const lm = this.liveryMaterial;
+    if (lm.opacity !== pm.opacity || lm.transparent !== pm.transparent) {
+      lm.opacity = pm.opacity;
+      lm.transparent = pm.transparent;
+      lm.depthWrite = pm.depthWrite;
+    }
+    if (!all) return;
+    lm.color.copy(this.livery ? WHITE : pm.color);
+    lm.roughness = pm.roughness;
+    lm.metalness = pm.metalness;
+  }
+
+  /**
+   * Show `texture` (a canvas laid out as the livery atlas, see liveryPx) on the livery parts, or
+   * go back to the plain body colour with null. `base` is the scheme's paint colour for the plain
+   * paint parts (mirrors), kept over art styles. The texture's colours are used as-is (white
+   * material colour) while it is set.
+   */
+  setLivery(texture: THREE.Texture | null, base: THREE.Color | null = null): void {
+    this.livery = texture;
+    this.liveryBase = texture ? base : null;
+    if (this.liveryBase) this.paint.color.copy(this.liveryBase);
+    const m = this.liveryMaterial;
+    m.map = texture;
+    m.needsUpdate = true;
+    this.syncLivery(true);
+  }
+
+  /** The material of a mesh-file slot on this car (tints applied once the mesh loaded). */
+  materialFor(slot: MaterialJson): THREE.Material {
+    return this.mat(slot);
+  }
+
+  /** Light-bar lens materials per side (left = parts with x < 0); flash them via `emissive`. */
+  get lightbarMaterials(): { left: LightbarSide; right: LightbarSide } {
+    if (!this.lens) {
+      const lens = (color: number) => std({ color, emissive: 0x000000, roughness: 0.3, transparent: true, opacity: 0.9, forceSinglePass: true });
+      const side = (): LightbarSide => ({ red: lens(0x661018), blue: lens(0x102266), clear: lens(0xbfc4c8) });
+      this.lens = { left: side(), right: side() };
+    }
+    return this.lens;
+  }
+
+  /** Amber emissive material(s) of this car (advisors, beacons, amber lenses): its own copy, so
+   * flashing it via `emissive` does not flash every car. */
+  get amberMaterials(): THREE.MeshStandardMaterial[] {
+    return [this.ownCopy("emissive_amber")];
+  }
+
+  /** True when the mesh has underglow strips (after load). */
+  get hasUnderglow(): boolean {
+    return this.underglowColour !== null;
+  }
+
+  /** Light (true) or darken the underglow strips; no-op for cars without underglow. */
+  setUnderglow(on: boolean): void {
+    if (!this.underglowColour) return;
+    const m = this.mats.underglow as THREE.MeshStandardMaterial;
+    m.emissive.copy(on ? this.underglowColour : BLACK);
+    m.emissiveIntensity = on ? 1.6 : 1;
+    if (this.underglowPool) this.underglowPool.visible = on;
+  }
+
+  /** Additive radial glow quad on the ground (chassis z ≈ 0) under the car's footprint. */
+  private buildUnderglowPool(colour: THREE.Color): void {
+    const a = this.atlas;
+    const geo = new THREE.PlaneGeometry(2 * a.x_half + 0.9, a.y[1] - a.y[0] + 0.6);
+    const mat = new THREE.MeshBasicMaterial({
+      color: colour,
+      map: glowTexture(),
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const pool = new THREE.Mesh(geo, mat);
+    pool.name = "underglow_pool";
+    pool.position.set(0, (a.y[0] + a.y[1]) / 2, 0.02);
+    pool.renderOrder = 1;
+    pool.visible = false;
+    this.root.add(pool);
+    this.underglowPool = pool;
+  }
+
+  /** Material of a key (`PartRT.key`): light-bar lenses are made on first use. */
+  private mat(key: string): THREE.Material {
+    const m = this.mats[key];
+    if (m) return m;
+    if (key.startsWith("lightbar_")) {
+      const right = key.endsWith("@r");
+      const colour = key.slice("lightbar_".length).replace("@r", "") as keyof LightbarSide;
+      const lb = this.lightbarMaterials[right ? "right" : "left"][colour];
+      if (lb) return (this.mats[key] = lb);
+    }
+    return this.mats.paint; // unknown slot (newer file) → paint
+  }
+
+  /** This car's own copy of a shared material (swapped into its batches, lenses and wheel parts). */
+  private ownCopy(key: string): THREE.MeshStandardMaterial {
+    const m = this.mat(key) as THREE.MeshStandardMaterial;
+    if (!sharedSet.has(m)) return m;
+    const own = m.clone();
+    const g = greyLook.get(m);
+    if (g) greyLook.set(own, { color: g.color.clone(), roughness: g.roughness, metalness: g.metalness, opacity: g.opacity });
+    for (const b of this.batches) if (b.mesh.material === m) b.mesh.material = own;
+    for (const p of this.parts) if (p.mesh.material === m) p.mesh.material = own;
+    for (const list of [this.wheelParts, this.hubParts]) for (const w of list) for (const wm of w) if (wm.material === m) wm.material = own;
+    this.mats[key] = own;
+    return own;
+  }
+
+  /** Key of a mesh-file part's material: sided slots get "@r" on the right (centroid x > 0). */
+  private keyOf(material: PartMaterial, rest: Float32Array): string {
+    if (!SIDED(material)) return material;
+    let cx = 0;
+    const n = rest.length / 3;
+    for (let i = 0; i < n; i++) cx += rest[i * 3];
+    return cx > 0 ? `${material}@r` : material;
   }
 
   private build(mesh: CarMeshJson): void {
     this.mesh = mesh;
     this.restNodes = sim.latticeRest(this.entity);
     this.nodeRegions = sim.latticeRegions(this.entity);
+    if (mesh.atlas) this.atlas = mesh.atlas;
+    this.liveryHint = mesh.livery ?? null;
+    for (const [slot, rgb] of Object.entries(mesh.tints ?? {}) as [MaterialJson, [number, number, number]][]) {
+      if (!rgb) continue;
+      if (slot === "underglow") {
+        // Emissive colour, lit by setUnderglow (VehicleView: with the headlights).
+        this.underglowColour = rgbColour(rgb);
+        this.ownCopy("underglow");
+      } else if (slot === "paint") {
+        // The model's factory colour (player / AI cars; the fleet's cars keep their livery).
+        if (this.keepPaint) continue;
+        rgbColour(rgb, this.paint.color);
+        greyLook.get(this.paint)?.color.copy(this.paint.color);
+        this.syncLivery(true);
+      } else if (TINTABLE.has(slot)) {
+        this.mats[slot] = tintedShared(slot as SharedKind, rgb);
+      }
+    }
+    (mesh.wheel_camber_deg ?? [0, 0, 0, 0]).forEach((deg, i) => {
+      // Wheels 0, 2 are on the left (−X): + camber tilts their top toward +X.
+      this.camberRad[i] = (((i % 2 === 0 ? 1 : -1) * deg) * Math.PI) / 180;
+    });
+    const lbSum = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+    const lbCount = { left: 0, right: 0 };
     for (const def of mesh.parts) {
       const d = dataOf(def);
       const region = def.region ? this.regions.indexOf(def.region) : -1;
+      const key = this.keyOf(def.material, d.rest);
       if (d.wheelGeom) {
-        // Wheel parts spin with VehicleView's wheel groups and are never re-skinned.
-        const wm = new THREE.Mesh(d.wheelGeom, this.mats[def.material]);
+        // Wheel parts follow VehicleView's wheel groups and are never re-skinned: tire / rim /
+        // disc spin, caliper / upright only steer.
+        const wm = new THREE.Mesh(d.wheelGeom, this.mat(key));
         wm.name = def.name;
         wm.frustumCulled = false;
-        this.wheelParts[def.wheel!].push(wm);
+        (HUB_KINDS.has(def.kind) ? this.hubParts : this.wheelParts)[def.wheel!].push(wm);
         continue;
       }
+      if (def.material.startsWith("lightbar_")) {
+        const side = key.endsWith("@r") ? "right" : "left";
+        const n = d.rest.length / 3;
+        for (let i = 0; i < n; i++) lbSum[side].add(tmpLb.fromArray(d.rest, i * 3).divideScalar(n));
+        lbCount[side]++;
+      }
       const pos = d.rest.slice();
-      // Lenses keep their own mesh (broken lenses swap material); every other body part is
+      // Lenses keep their own mesh (broken lenses swap material), decal carriers too (their UVs
+      // and material are per unit, render/livery.ts applyUnitDecals); every other body part is
       // drawn by its material's batch (buildBatches) and keeps a never-drawn handle mesh.
+      const own = def.kind === "light" || def.kind === "decal_carrier";
       let m: THREE.Mesh;
-      if (def.kind === "light") {
+      if (own) {
         const geom = new THREE.BufferGeometry();
         geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        geom.setAttribute("uv", new THREE.BufferAttribute(d.uv.slice(), 2));
         geom.setIndex(new THREE.BufferAttribute(d.index, 1));
-        // Lenses use the shared head/tail materials (not flat-shaded): without a normal attribute
-        // their shading turns NaN and the lens renders black, glow included.
-        geom.computeVertexNormals();
-        m = new THREE.Mesh(geom, this.mats[def.material]);
+        // Lenses use the shared head/tail materials: with a normal attribute they shade even
+        // where the material is not flat-shaded.
+        if (def.kind === "light") geom.computeVertexNormals();
+        m = new THREE.Mesh(geom, this.mat(key));
         m.frustumCulled = false;
         this.root.add(m);
       } else {
-        m = new THREE.Mesh(NO_GEOMETRY, this.mats[def.material]);
+        m = new THREE.Mesh(NO_GEOMETRY, this.mat(key));
       }
       m.name = def.name;
       const fold = def.fold && def.fold.chords.length > 0 ? def.fold : null;
       this.parts.push({
         def,
         material: def.material,
+        key,
         mod: false,
         mesh: m,
         pos,
@@ -850,6 +1388,7 @@ export class PanelBody {
         foldW: d.foldW,
         foldMem: new Float32Array((fold?.chords.length ?? 0) * 2),
         foldPack: fold ? d.foldPack : null,
+        own,
         broken: false,
         maxDisp: 0,
         maxFold: 0,
@@ -857,8 +1396,12 @@ export class PanelBody {
       });
       this.ensureTri(region);
     }
+    for (const side of ["left", "right"] as const)
+      if (lbCount[side] > 0) this.lightbarAnchors[side] = lbSum[side].divideScalar(lbCount[side]);
+    if (this.underglowColour) this.buildUnderglowPool(this.underglowColour);
     this.buildBatches();
     this.ready = true;
+    if (liveryFlag() === "grid") this.setLivery(debugLiveryTexture(this.atlas));
     this.update(this.restNodes, 0);
     this.onReady?.();
   }
@@ -885,8 +1428,9 @@ export class PanelBody {
       this.parts.push({
         def,
         material: def.material,
+        key: def.material,
         mod: true,
-        mesh: new THREE.Mesh(NO_GEOMETRY, this.mats[def.material]),
+        mesh: new THREE.Mesh(NO_GEOMETRY, this.mat(def.material)),
         pos: d.rest.slice(),
         batch: null,
         indexStart: 0,
@@ -899,6 +1443,7 @@ export class PanelBody {
         foldW: d.foldW,
         foldMem: new Float32Array(0),
         foldPack: null,
+        own: false,
         broken: false,
         maxDisp: 0,
         maxFold: 0,
@@ -913,7 +1458,7 @@ export class PanelBody {
   /** Add a mod wheel part (`wheel` set; hub space): it spins with the wheel, or with `hub` only
    * steers (brake calipers). Call before VehicleView parents the wheel parts. */
   addWheelPart(def: MeshPartJson, hub = false): THREE.Mesh {
-    const m = new THREE.Mesh(dataOf(def).wheelGeom!, this.mats[def.material]);
+    const m = new THREE.Mesh(dataOf(def).wheelGeom!, this.mat(def.material));
     m.name = def.name;
     m.frustumCulled = false;
     (hub ? this.hubParts : this.wheelParts)[def.wheel!].push(m);
@@ -924,9 +1469,10 @@ export class PanelBody {
    * the next `rebatch`. */
   setPartMaterial(which: (def: MeshPartJson) => boolean, material: PartMaterial): void {
     for (const p of this.parts) {
-      if (p.def.kind === "light" || !which(p.def)) continue;
+      if (p.own || !which(p.def)) continue;
       p.material = material;
-      p.mesh.material = this.mats[material];
+      p.key = material;
+      p.mesh.material = this.mat(material);
       this.customBatches = true;
       this.batchesStale = true;
     }
@@ -937,20 +1483,12 @@ export class PanelBody {
    * style changes. A shared material is first copied for this car, so other cars keep theirs.
    */
   setModLook(material: PartMaterial, look: ModLook): void {
-    let m = this.mats[material];
-    if (!(m instanceof THREE.MeshStandardMaterial)) return;
-    if (sharedSet.has(m)) {
-      const own = m.clone();
-      const g = greyLook.get(m);
-      if (g) greyLook.set(own, { color: g.color.clone(), roughness: g.roughness, metalness: g.metalness, opacity: g.opacity });
-      for (const b of this.batches) if (b.mesh.material === m) b.mesh.material = own;
-      for (const p of this.parts) if (p.mesh.material === m) p.mesh.material = own;
-      for (const list of [this.wheelParts, this.hubParts]) for (const w of list) for (const wm of w) if (wm.material === m) wm.material = own;
-      this.mats[material] = own;
-      m = own;
-    }
+    if (!(this.mat(material) instanceof THREE.MeshStandardMaterial)) return;
+    const m = this.ownCopy(material);
     this.modLooks.set(material, { ...this.modLooks.get(material), ...look });
-    applyLook(m as THREE.MeshStandardMaterial, look);
+    applyLook(m, look);
+    // The body panels of format-4 meshes are `livery`: a paint finish shows on them too.
+    if (material === "paint") this.syncLivery(true);
   }
 
   /** Rebuild the batches after `addModParts` / `setPartMaterial` (one-off, at spawn). */
@@ -989,14 +1527,14 @@ export class PanelBody {
     if (!cached) batchIndex.set(mesh, (cached = new Map()));
     const groups = new Map<string, PartRT[]>();
     for (const p of this.parts) {
-      if (p.def.kind === "light") continue;
-      const key = p.mod ? `mod:${p.material}` : p.material;
+      if (p.own) continue;
+      const key = p.mod ? `mod:${p.key}` : p.key;
       let g = groups.get(key);
       if (!g) groups.set(key, (g = []));
       g.push(p);
     }
     for (const [key, parts] of groups) {
-      const material = parts[0].material;
+      const material = parts[0].key;
       let nv = 0;
       let ni = 0;
       for (const p of parts) {
@@ -1011,15 +1549,17 @@ export class PanelBody {
       let tmpl = own ? undefined : cached.get(key);
       if (!tmpl) {
         const index = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+        const uv = new Float32Array(nv * 2);
         let v = 0;
         let i = 0;
         for (const p of parts) {
           const idx = p.def.indices;
           for (let k = 0; k < idx.length; k++) index[i + k] = idx[k] + v;
+          uv.set(dataOf(p.def).uv, v * 2);
           v += p.rest.length / 3;
           i += idx.length;
         }
-        tmpl = { index };
+        tmpl = { index, uv };
         if (!own) cached.set(key, tmpl);
       }
       const index = tmpl.index.slice();
@@ -1036,11 +1576,13 @@ export class PanelBody {
       const position = new THREE.BufferAttribute(pos, 3);
       const indexAttr = new THREE.BufferAttribute(index, 1);
       geom.setAttribute("position", position);
+      // UVs: livery atlas on `livery` parts (shared per model; the vinyl overlay reads position only).
+      geom.setAttribute("uv", new THREE.BufferAttribute(tmpl.uv, 2));
       geom.setIndex(indexAttr);
-      const mesh = new THREE.Mesh(geom, this.mats[material]);
+      const mesh = new THREE.Mesh(geom, this.mat(material));
       mesh.name = `${this.carId}:${key}`;
       mesh.frustumCulled = false;
-      if (material === "glass") mesh.renderOrder = 1;
+      if (material === "glass" || material.startsWith("lightbar_")) mesh.renderOrder = 1;
       this.root.add(mesh);
       const batch: Batch = { mesh, position, index: indexAttr, dirty: false };
       for (const p of parts) p.batch = batch;
@@ -1075,6 +1617,7 @@ export class PanelBody {
    */
   update(nodes: Float32Array, dt: number, worldVel?: THREE.Vector3): void {
     if (!this.ready) return;
+    this.syncLivery();
     const states = panelStates(this.entity);
     // Same nodes and panel states as the last re-skin: every vertex would come out the same.
     if (nodes === this.skinnedNodes && sameFloats(states, this.states)) return;
@@ -1170,7 +1713,7 @@ export class PanelBody {
     }
     if (broken !== p.broken) {
       p.broken = broken;
-      p.mesh.material = broken ? this.brokenLamp : this.mats[p.def.material];
+      p.mesh.material = broken ? this.brokenLamp : this.mat(p.key);
     }
   }
 
@@ -1244,6 +1787,7 @@ export class PanelBody {
       if (p.region !== region || p.hidden) continue;
       const geom = new THREE.BufferGeometry();
       geom.setAttribute("position", new THREE.BufferAttribute(p.pos.slice(), 3));
+      geom.setAttribute("uv", p.own ? (p.mesh.geometry.getAttribute("uv") as THREE.BufferAttribute) : new THREE.BufferAttribute(dataOf(p.def).uv, 2));
       geom.setIndex(p.def.indices);
       const m = new THREE.Mesh(geom, p.mesh.material);
       m.frustumCulled = false;

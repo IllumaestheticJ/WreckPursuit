@@ -3,9 +3,11 @@
 //! (hood vertices never follow fender nodes), topped up from neighbour regions when its
 //! region has fewer than four nodes (glass, 2-door side strips).
 //!
-//! Light lenses are the exception: they bind to the nearest nodes of the end of the car they
+//! Head / tail lamp lenses (light parts in the `FrameFront` / `FrameRear` regions, see
+//! [`is_end_lamp`]) are the exception: they bind to the nearest nodes of the end of the car they
 //! sit on (bumper, hood / trunk, the fender / quarter on their side, the frame), so they crush
-//! and move with the bumper and hood. Hood and trunk lids, front fenders and rear quarters get a fold
+//! and move with the bumper and hood. Other lamps (fog lamps, DRLs, light bars, markers) keep
+//! their own region like any part. Rigid parts bind every vertex to one node. Hood and trunk lids, front fenders and rear quarters get a fold
 //! binding ([`bind_fold`]) so a crushed panel buckles and follows the crushed front instead of
 //! sliding back flat.
 
@@ -82,13 +84,24 @@ pub fn part_centre(part: &MeshPart) -> [f32; 3] {
     c
 }
 
-/// Nodes a part may bind to: [`candidates`] of its region, or for a light lens every node of
-/// its [`light_regions`] (not pinned to the chassis, so the lens follows the crush).
+/// True for a head / tail lamp lens: a light part in the front / rear frame region (the
+/// generator's `headlight_*` / `taillight_*` and whatever a style kit adds to them).
+pub fn is_end_lamp(part: &MeshPart) -> bool {
+    part.kind == PartKind::Light
+        && matches!(
+            part.region,
+            Some(BodyRegion::FrameFront | BodyRegion::FrameRear)
+        )
+}
+
+/// Nodes a part may bind to: [`candidates`] of its region, or for a head / tail lamp
+/// ([`is_end_lamp`]) every node of its [`light_regions`] (not pinned to the chassis, so the
+/// lens follows the crush).
 pub fn part_candidates(lattice: &LatticeDef, part: &MeshPart) -> Vec<u16> {
     let Some(region) = part.region else {
         return Vec::new();
     };
-    if part.kind == PartKind::Light {
+    if is_end_lamp(part) {
         let regions = light_regions(part_centre(part));
         return lattice
             .nodes
@@ -109,8 +122,27 @@ pub fn bind_part(lattice: &LatticeDef, part: &mut MeshPart) {
         return;
     };
     let cand = part_candidates(lattice, part);
-    // Lights pick the nearest of all their candidates; other parts prefer their own region.
-    let own_count = if part.kind == PartKind::Light {
+    if part.rigid {
+        // Rigid part: every vertex on the candidate node nearest the part's centroid.
+        let c = part_centre(part);
+        let node = cand
+            .iter()
+            .copied()
+            .min_by(|&a, &b| {
+                dist2(c, lattice.nodes[a as usize].pos_m)
+                    .total_cmp(&dist2(c, lattice.nodes[b as usize].pos_m))
+                    .then(a.cmp(&b))
+            })
+            .unwrap_or(0);
+        for _ in 0..part.vertex_count() {
+            part.skin_nodes.extend_from_slice(&[node; 4]);
+            part.skin_weights.extend_from_slice(&[255, 0, 0, 0]);
+        }
+        return;
+    }
+    // Head / tail lamps pick the nearest of all their candidates; other parts prefer their
+    // own region.
+    let own_count = if is_end_lamp(part) {
         0
     } else {
         lattice.nodes.iter().filter(|n| n.region == region).count()

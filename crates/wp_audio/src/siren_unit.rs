@@ -106,6 +106,11 @@ pub struct SirenV2Config {
     pub two_tone: bool,
     /// Minimum time a pattern plays before another cue may change it, s.
     pub min_hold_s: f32,
+    /// A `Junction` cue plays the junction pattern for this long, s (a burst, not a mode).
+    pub junction_burst_s: f32,
+    /// After a junction burst, further `Junction` cues are ignored for this long, s (in a city
+    /// grid a unit is nearly always near a junction; playtest 0.12.34 "laughing" sirens).
+    pub junction_cooldown_s: f32,
     /// Per-unit pitch spread (± fraction of the cadence frequencies).
     pub pitch_spread: f32,
     /// Per-unit sweep-rate spread (± fraction of the cycle length).
@@ -147,7 +152,9 @@ impl Default for SirenV2Config {
             junction: SirenPattern::Phaser,
             blocked: SirenPattern::Yelp,
             two_tone: false,
-            min_hold_s: 1.2,
+            min_hold_s: 3.0,
+            junction_burst_s: 2.5,
+            junction_cooldown_s: 10.0,
             pitch_spread: 0.015,
             tempo_spread: 0.05,
             whoop_gain: 0.9,
@@ -224,6 +231,12 @@ pub struct SirenUnitState {
     pub horn_left: u32,
     /// Siren ducked under the horn until this tick.
     pub horn_until: u64,
+    /// Junction burst plays until this tick.
+    pub junction_until: u64,
+    /// No new junction burst before this tick.
+    pub junction_ready: u64,
+    /// Last cue other than `Junction` (what plays outside a junction burst).
+    pub base_cue: Option<SirenCue>,
 }
 
 /// Everything [`unit_desires`] needs about one vehicle this frame.
@@ -317,7 +330,26 @@ pub fn update_unit(
             legacy_pattern(sc, o.mode, o.on || inp.on, inp.speed_mps, st.pattern),
             None,
         ),
-        (None, Some(c)) => (cfg.pattern_for(c), Some(c)),
+        (None, Some(c)) => {
+            // Junction = a short burst with a cooldown; otherwise the unit's base cue plays.
+            let mut effective = c;
+            if c == SirenCue::Junction {
+                if tick >= st.junction_ready {
+                    st.junction_until = tick + ticks(cfg.junction_burst_s);
+                    st.junction_ready = st.junction_until + ticks(cfg.junction_cooldown_s);
+                }
+                if tick >= st.junction_until {
+                    effective = st.base_cue.unwrap_or(SirenCue::Pursuit);
+                }
+            } else {
+                st.base_cue = Some(c);
+                if tick < st.junction_until && c != SirenCue::Off && c != SirenCue::Blocked {
+                    // Finish the burst.
+                    effective = SirenCue::Junction;
+                }
+            }
+            (cfg.pattern_for(effective), Some(c))
+        }
         (None, None) => (
             legacy_pattern(sc, inp.mode, inp.on, inp.speed_mps, st.pattern),
             None,
@@ -690,20 +722,15 @@ mod tests {
         assert!(horns.iter().all(|t| (2400..4800).contains(t)));
     }
 
-    #[test]
-    fn pattern_holds_then_switches_without_a_pitch_jump() {
+    /// Run a cue script tick by tick; returns (pattern switches, ticks per pattern).
+    fn run(script: impl Fn(u64) -> SirenCue, ticks: u64) -> (u32, BTreeMap<SirenPattern, u64>) {
         let sc = sc();
         let mut st = SirenUnitState::default();
         let mut last: Option<SirenOutput> = None;
         let mut switches = 0;
-        for t in 0..2400u64 {
-            // The cue flaps every 0.25 s between Pursuit and Junction.
-            let cue = if (t / 60) % 2 == 0 {
-                SirenCue::Pursuit
-            } else {
-                SirenCue::Junction
-            };
-            let o = update_unit(&mut st, &sc, &input(9, Some(cue), t))
+        let mut time = BTreeMap::new();
+        for t in 0..ticks {
+            let o = update_unit(&mut st, &sc, &input(9, Some(script(t)), t))
                 .siren
                 .unwrap();
             if let Some(l) = last {
@@ -713,10 +740,60 @@ mod tests {
                     assert!(rel < 0.08, "switch jumped {} → {} Hz", l.freq_hz, o.freq_hz);
                 }
             }
+            *time.entry(o.pattern).or_insert(0) += 1;
             last = Some(o);
         }
-        // 10 s at a 1.2 s hold: at most ~8 switches instead of 40.
-        assert!((2..=9).contains(&switches), "{switches} switches");
+        (switches, time)
+    }
+
+    #[test]
+    fn pattern_holds_then_switches_without_a_pitch_jump() {
+        // The cue flaps every 0.25 s between Pursuit and Close for 30 s: the 3 s hold allows at
+        // most one switch per 3 s (instead of 120).
+        let flap = |t: u64| {
+            if (t / 60).is_multiple_of(2) {
+                SirenCue::Pursuit
+            } else {
+                SirenCue::Close
+            }
+        };
+        let (switches, _) = run(flap, 240 * 30);
+        assert!((2..=10).contains(&switches), "{switches} switches");
+    }
+
+    #[test]
+    fn junctions_are_short_bursts_with_a_cooldown() {
+        // Playtest 0.12.34 ("laughing" sirens): in a city grid a unit is near a junction every
+        // few seconds. Junction cues every other 0.25 s for 60 s → one 2.5 s phaser burst per
+        // 12.5 s at most, wail the rest of the time.
+        let flap = |t: u64| {
+            if (t / 60).is_multiple_of(2) {
+                SirenCue::Pursuit
+            } else {
+                SirenCue::Junction
+            }
+        };
+        let (switches, time) = run(flap, 240 * 60);
+        let phaser = *time.get(&SirenPattern::Phaser).unwrap_or(&0) as f32 / (240.0 * 60.0);
+        assert!(switches <= 10, "{switches} switches in 60 s");
+        assert!(
+            phaser > 0.05 && phaser < 0.3,
+            "phaser {:.0} % of the time",
+            phaser * 100.0
+        );
+        // A steady junction approach plays one burst, then the base pattern again.
+        let (switches, time) = run(
+            |t| {
+                if t < 240 * 4 {
+                    SirenCue::Pursuit
+                } else {
+                    SirenCue::Junction
+                }
+            },
+            240 * 12,
+        );
+        assert_eq!(switches, 2, "into the burst and back out");
+        assert!(time[&SirenPattern::Phaser] <= 240 * 3);
     }
 
     #[test]

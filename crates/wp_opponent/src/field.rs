@@ -45,7 +45,11 @@ pub struct RaceConfig {
     pub laps: u32,
     /// Physics ticks between AI decisions (4 = 60 Hz).
     pub decision_ticks: u32,
-    /// Racers may abandon the race and run from the police.
+    /// Racers may give up on the police: abandon the race and run (at their
+    /// `flee_wanted_level`), or pull over when a unit is right on them. Off by default — the
+    /// owner's rule (2026-10-21): a racer in a race never gives up; it keeps racing and evading
+    /// until the police actually capture it or it is wrecked / DNF'd. Racers already out of
+    /// the race (finished, disqualified) still pull over either way.
     pub allow_abandon: bool,
     /// Touching a civilian disqualifies the racer (always true in the game; tests may relax it).
     pub civilian_contact_dq: bool,
@@ -75,7 +79,7 @@ impl Default for RaceConfig {
         Self {
             laps: 3,
             decision_ticks: 4,
-            allow_abandon: true,
+            allow_abandon: false,
             civilian_contact_dq: true,
             cooldown_speed_mps: 12.0,
             seed: 1,
@@ -1364,6 +1368,18 @@ impl Field {
             .iter()
             .fold(f32::INFINITY, |m, p| m.min(geom::dist(*p, r.pos)));
         match r.status {
+            // Owner's rule (2026-10-21, `RaceConfig::allow_abandon` off): a racer in a race
+            // never gives up — it neither abandons the race nor pulls over, at any wanted
+            // level; it keeps racing and evading until the police actually capture it
+            // (police-side capture rules) or it is wrecked / DNF'd. A racer already out of the
+            // race (finished, disqualified) pulls over as before.
+            RacerStatus::Racing if !self.config.allow_abandon => {
+                r.yield_s = 0.0;
+                if r.tactic == Tactic::Yield {
+                    r.tactic = Tactic::Rejoin;
+                    r.tactic_ticks = 0;
+                }
+            }
             RacerStatus::Racing
                 if self.config.allow_abandon && lvl >= r.params.flee_wanted_level =>
             {

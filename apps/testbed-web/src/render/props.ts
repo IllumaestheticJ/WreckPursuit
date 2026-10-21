@@ -10,8 +10,8 @@
 // 3,000+ of them, so they are drawn in three tiers, and every car always has exactly one drawn
 // instance (no distance hides a prop: no invisible collisions):
 //   * full: the nearest MAX_FULL parked cars within FULL_LOD_M (the fleet's full-mesh distance)
-//     use the full panel mesh. Re-picked after the camera moves REPICK_M; only the cars that
-//     change drawer are rewritten;
+//     use the car model's mid-LOD panel mesh (render/panels.ts loadCarMidMesh, as the fleet).
+//     Re-picked after the camera moves REPICK_M; only the cars that change drawer are rewritten;
 //   * proxy / box: the city is cut into CHUNK_M chunks, each with its own instanced meshes and
 //     a bounding sphere, so Three frustum-culls whole chunks. A chunk within PROXY_M of the
 //     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (20 triangles).
@@ -28,7 +28,7 @@ import * as THREE from "three";
 import { P, PROP_KIND, PROP_MOVED_STRIDE, PROP_STRIDE, WK, WRECK_STRIDE } from "../wasm/layout";
 import type { CarModelInfo, SessionModels } from "../wasm/sim";
 import { sim } from "../wasm/sim";
-import { PanelBody, carMeshNow, loadCarMesh } from "./panels";
+import { PanelBody, carMidMeshNow, loadCarMidMesh } from "./panels";
 import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, styledPaint, type FleetMaterials } from "./fleet";
 import { PALETTE } from "./palette";
 import { artStyle } from "./style";
@@ -278,8 +278,9 @@ export class PropView {
   private wrecked = new Uint8Array(0);
   private entityBase = 0;
   private wreckReskins = 0;
-  private readonly wreckHead = new THREE.MeshStandardMaterial({ color: 0x8a8778 });
-  private readonly wreckTail = new THREE.MeshStandardMaterial({ color: 0x4a0c0c });
+  // Flat-shaded: some panel-mesh lamp parts are batched without normals (render/panels.ts).
+  private readonly wreckHead = new THREE.MeshStandardMaterial({ color: 0x8a8778, flatShading: true, side: THREE.DoubleSide });
+  private readonly wreckTail = new THREE.MeshStandardMaterial({ color: 0x4a0c0c, flatShading: true, side: THREE.DoubleSide });
 
   private movedWrites = 0;
   private repickWrites = 0;
@@ -333,11 +334,12 @@ export class PropView {
       for (const props of byCell.values()) this.addChunk(props, mats);
       if (models.traffic) {
         const carId = models.traffic;
-        const now = carMeshNow(carId);
+        // The mid LOD (render/panels.ts loadCarMidMesh), as the fleet's near cars.
+        const now = carMidMeshNow(carId);
         if (now) this.setFullMesh(now, info);
         else if (now === undefined) {
           const gen = this.generation;
-          void loadCarMesh(carId).then((mesh) => mesh && gen === this.generation && this.setFullMesh(mesh, info));
+          void loadCarMidMesh(carId).then((mesh) => mesh && gen === this.generation && this.setFullMesh(mesh, info));
         }
       }
     }
@@ -534,7 +536,8 @@ export class PropView {
     root.add(chassis);
     root.name = `parked${i}`;
     const paint = new THREE.Color(styledPaint(parkedPaint(i)));
-    const body = new PanelBody(entity, info.car_id, paint, this.wreckHead, this.wreckTail);
+    // keepPaint: the instanced parked car it replaces has this paint (no factory tint).
+    const body = new PanelBody(entity, info.car_id, paint, this.wreckHead, this.wreckTail, { keepPaint: true });
     chassis.add(body.root);
     const w: Wreck = { prop: i, entity, root, chassis, body, regions: info.regions, nodes: null, shattered: 0, ready: false };
     this.wrecks.set(i, w);
@@ -548,6 +551,7 @@ export class PropView {
         const hub = new THREE.Group();
         hub.position.set(wi.position_m[0], wi.position_m[1], wi.position_m[2]);
         for (const m of body.wheelParts[k] ?? []) hub.add(m);
+        for (const m of body.hubParts[k] ?? []) hub.add(m);
         chassis.add(hub);
       });
       w.ready = true;

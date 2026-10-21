@@ -83,8 +83,14 @@ export const SH = { x: 0, y: 1, z: 2, yaw: 3, left: 4, right: 5, radius: 6, cent
 /** signal_states() codes, one byte per head. */
 export const SIGNAL = { off: 0, red: 1, yellow: 2, green: 3 } as const;
 
-/** Floats per agent in traffic_agents(): [x, y, z, yaw, flags]. */
-export const AGENT_STRIDE = 5;
+/** Floats per agent in traffic_agents(): [x, y, z, yaw, flags, agentId, model]. */
+export const AGENT_STRIDE = 7;
+/**
+ * Offsets inside one traffic_agents() record. `id` is the stable wp_world agent id; `model`
+ * indexes sim.trafficModels() (car ids) and stays the same when the agent becomes a physical
+ * car (whose vehicle_info().car_id is that model); colour variant = (flags >> 8) & 0xff.
+ */
+export const AG = { x: 0, y: 1, z: 2, yaw: 3, flags: 4, id: 5, model: 6 } as const;
 /** traffic_agents() flag bits (variant in bits 8+). */
 export const AGENT_FLAG = {
   physical: 1,
@@ -96,17 +102,31 @@ export const AGENT_FLAG = {
   aggressive: 64,
 } as const;
 
-/** Floats per record in traffic_draw() / police_draw() (crates/wp_wasm/src/lod.rs). */
-export const DRAW_STRIDE = 10;
-/** Offsets inside a draw record: id (agent / unit), entity (0 = none), pos xyz, rot quaternion xyzw, flags. */
-export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9 } as const;
+/** Floats per record in traffic_draw() / police_draw() (crates/wp_wasm/src/lod.rs; `lod_draw_stride()`). */
+export const DRAW_STRIDE = 11;
+/**
+ * Offsets inside a draw record: id (agent / unit), entity (0 = none), pos xyz, rot quaternion
+ * xyzw, flags, model. `model` indexes `SessionModels.traffic_models` (traffic; -1 = no physical
+ * traffic model) or `SessionModels.police_models` (police; -1 = single-model fleet, which draws
+ * `SessionModels.police`).
+ */
+export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9, model: 10 } as const;
 /** police_draw() flag bits. */
 export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2 } as const;
 
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;
 
-/** Floats per vehicle in vehicle_meta(): [entity, kind, flags]. */
+/** Floats per unit in police_units(): [x, y, z, yaw, speed, flags, unitId, model]. */
+export const POLICE_UNIT_STRIDE = 8;
+/**
+ * Offsets inside one police_units() record. `unitId` is the stable wp_police unit id (hash it
+ * for light-bar phase); `model` indexes sim.policeModels() (-1 = none: helicopter or
+ * single-model session). Flags: 1 helicopter, 2 pursuing.
+ */
+export const PU = { x: 0, y: 1, z: 2, yaw: 3, speed: 4, flags: 5, unitId: 6, model: 7 } as const;
+
+/** Floats per vehicle in vehicle_meta(): [entity, kind, flags] (physical traffic: colour variant in flags bits 8-15). */
 export const META_STRIDE = 3;
 /** vehicle_meta() kinds (`wp_sim::VehicleKind`). */
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;

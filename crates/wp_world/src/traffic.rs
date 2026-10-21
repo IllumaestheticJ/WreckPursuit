@@ -732,7 +732,8 @@ pub struct Traffic {
     stats: TrafficStats,
     lod_changes: Vec<LodChange>,
     overlaps: BTreeSet<(u32, u32)>,
-    car: Option<(VehicleDef, TireDb)>,
+    /// Car models for physical agents; agent `id` uses `cars[traffic_model_index(id, len)]`.
+    cars: Vec<(VehicleDef, TireDb)>,
     /// Seed for per-driver values derived from the id (patience).
     seed: u64,
     /// Opposing lane next to the centre line, per lane segment (`NONE` if none / not the
@@ -746,6 +747,21 @@ pub struct Traffic {
     tracked_still: std::collections::BTreeMap<u32, f32>,
     /// Inside [`Traffic::populate`]: the sightline rule uses [`POPULATE_SIGHT_RADIUS_M`].
     populating: bool,
+}
+
+/// Which of `n` traffic car models agent `id` drives: a pure function of the id (a SplitMix64
+/// finalizer, modulo `n`), so the choice is the same while the agent is kinematic and after it
+/// is promoted to physics, on every platform, and uses no RNG draws (single-model traffic is
+/// bit-identical to before). `n <= 1` → 0.
+pub fn traffic_model_index(id: AgentId, n: usize) -> usize {
+    if n <= 1 {
+        return 0;
+    }
+    let mut z = (id as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    (z % n as u64) as usize
 }
 
 /// Desired-speed factor of driver `p` on segment `seg` ([`DriverParams::factor_on`]).
@@ -874,7 +890,7 @@ impl Traffic {
             stats: TrafficStats::default(),
             lod_changes: Vec::new(),
             overlaps: BTreeSet::new(),
-            car: None,
+            cars: Vec::new(),
             seed,
             opposite,
             road_lanes,
@@ -887,7 +903,31 @@ impl Traffic {
     /// Vehicle definition used for physical (near-LOD) agents. Without one, agents stay
     /// kinematic.
     pub fn set_traffic_car(&mut self, def: VehicleDef, tires: TireDb) {
-        self.car = Some((def, tires));
+        self.cars = vec![(def, tires)];
+    }
+
+    /// Several car models for physical agents (empty = agents stay kinematic). Each agent's
+    /// model is [`traffic_model_index`] of its id; with one model this is
+    /// [`Traffic::set_traffic_car`].
+    pub fn set_traffic_cars(&mut self, cars: Vec<(VehicleDef, TireDb)>) {
+        self.cars = cars;
+    }
+
+    /// Number of physical car models set.
+    pub fn model_count(&self) -> usize {
+        self.cars.len()
+    }
+
+    /// Index into the models of [`Traffic::set_traffic_cars`] that agent `id` drives (0 when
+    /// fewer than two models are set).
+    pub fn model_of(&self, id: AgentId) -> usize {
+        traffic_model_index(id, self.cars.len())
+    }
+
+    /// The car model agent `id` drives once physical ([`Traffic::model_of`]); `None` while no
+    /// physical traffic model is set.
+    fn car_of(&self, id: AgentId) -> Option<&(VehicleDef, TireDb)> {
+        self.cars.get(self.model_of(id))
     }
 
     /// All agents, ordered by id.
@@ -2815,10 +2855,10 @@ impl Traffic {
     }
 
     fn promote(&mut self, map: &CityMap, i: usize) {
-        let Some((def, tires)) = &self.car else {
+        let a = &self.agents[i];
+        let Some((def, tires)) = self.cars.get(traffic_model_index(a.id, self.cars.len())) else {
             return;
         };
-        let a = &self.agents[i];
         let (p, f) = self.pose_of(map, a);
         let yaw = geom::yaw_of(f);
         let mut vehicle = Vehicle::new(def, tires, p, yaw);
@@ -2890,12 +2930,12 @@ impl Traffic {
                 {
                     self.agents[i].despawn = true;
                     self.stats.despawned += 1;
-                } else if (d > r + 20.0 && !a.disabled) || self.car.is_none() {
+                } else if (d > r + 20.0 && !a.disabled) || self.cars.is_empty() {
                     self.demote(map, i);
                 } else {
                     physical += 1;
                 }
-            } else if d < r && self.car.is_some() {
+            } else if d < r && !self.cars.is_empty() {
                 cands.push((d, i as u32));
             }
         }
@@ -3394,4 +3434,35 @@ impl Traffic {
         }
         self.overlaps = now;
     }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::traffic_model_index;
+
+    #[test]
+    fn model_index_is_stable_in_range_and_spread() {
+        assert_eq!(traffic_model_index(17, 0), 0);
+        assert_eq!(traffic_model_index(17, 1), 0);
+        let mut counts = [0u32; 7];
+        for id in 1..=7000u32 {
+            let m = traffic_model_index(id, 7);
+            assert_eq!(m, traffic_model_index(id, 7));
+            counts[m] += 1;
+        }
+        // Roughly uniform (1000 each).
+        assert!(
+            counts.iter().all(|c| (850..=1150).contains(c)),
+            "{counts:?}"
+        );
+        // Pinned values: renderers may cache this table, so it must never change.
+        assert_eq!(
+            (1..=8)
+                .map(|id| traffic_model_index(id, 7))
+                .collect::<Vec<_>>(),
+            PINNED.to_vec()
+        );
+    }
+
+    const PINNED: [usize; 8] = [2, 4, 2, 6, 3, 3, 2, 4];
 }

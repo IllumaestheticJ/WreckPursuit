@@ -1,8 +1,8 @@
-//! Reader for the per-panel car meshes in `data/panels/meshes/<car>.json` (formats 1–3, written
+//! Reader for the per-panel car meshes in `data/panels/meshes/<car>.json` (formats 1–4, written
 //! by `tools/assets`, see `data/panels/README.md`). Only the fields the renderer needs are read;
-//! the writer and validator stay in `car-assets`. Formats 2 and 3 only add the optional sheet
-//! buckling binding (hood / trunk / fenders / rear quarters), which this reader ignores: those
-//! panels skin like any other (no crumple bend yet).
+//! the writer and validator stay in `car-assets`. Ignored here: the sheet buckling binding
+//! (`fold`, formats 2–4: those panels skin like any other, no crumple bend yet) and format 4's
+//! tints / livery / atlas / rigid flags (new part kinds and materials get a plain look).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use wp_contracts::BodyRegion;
 pub const MESH_FORMAT: u32 = 1;
 
 /// Newest mesh file format this reader understands (`car_assets::mesh::MESH_FORMAT`).
-pub const MESH_FORMAT_MAX: u32 = 3;
+pub const MESH_FORMAT_MAX: u32 = 4;
 
 /// What a mesh part is (mirrors `car_assets::mesh::PartKind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -37,6 +37,22 @@ pub enum PartKind {
     Tire,
     /// Rim (wheel part, hub space).
     Rim,
+    /// Exterior add-on (scoop, spoiler, splitter, grille, push bar …), skinned.
+    Detail,
+    /// Engine (body-fixed, rigid).
+    Engine,
+    /// Suspension / exhaust / frame hardware (body-fixed, rigid).
+    Suspension,
+    /// Brake disc (wheel part).
+    BrakeDisc,
+    /// Brake caliper (wheel part; drawn spinning with the wheel here).
+    Caliper,
+    /// Upright / knuckle (wheel part; like `Caliper`).
+    Upright,
+    /// Light-bar body or lens.
+    Lightbar,
+    /// Thin quad carrying a decal texture (drawn untextured here).
+    DecalCarrier,
 }
 
 /// Material slot of a part (mirrors `car_assets::mesh::MaterialSlot`).
@@ -59,6 +75,36 @@ pub enum MaterialSlot {
     Metal,
     /// Cabin interior.
     Interior,
+    /// Paint sampling the livery texture (drawn as body colour here).
+    Livery,
+    /// Chrome.
+    Chrome,
+    /// Carbon fibre.
+    Carbon,
+    /// Brake caliper.
+    Caliper,
+    /// Dark engine metal.
+    Engine,
+    /// Light-bar red lens.
+    LightbarRed,
+    /// Light-bar blue lens.
+    LightbarBlue,
+    /// Light-bar clear lens.
+    LightbarClear,
+    /// Amber lens (indicators, beacons).
+    EmissiveAmber,
+    /// Grille / mesh openings.
+    Grille,
+    /// Exhaust tips.
+    Exhaust,
+    /// Rim / hubcap finish.
+    Rim,
+    /// Coil springs.
+    Spring,
+    /// Second paint colour (stripes, accent bars; drawn dark grey here).
+    Accent,
+    /// Underglow strip (unlit here).
+    Underglow,
 }
 
 /// One part of a car mesh.

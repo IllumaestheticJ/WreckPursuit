@@ -152,12 +152,18 @@ pub fn assignment_has_siren(a: &Assignment) -> bool {
 }
 
 /// Floats per unit in [`units`].
-pub const UNIT_STRIDE: usize = 6;
+pub const UNIT_STRIDE: usize = 8;
 
 /// Police units that are **not** sim vehicles (bound units are drawn from `vehicle_states()`),
-/// 6 floats each: `[x, y, z, yaw, speed_mps, flags]`, flags 1 helicopter, 2 pursuing /
-/// intercepting (lights on). Yaw is about +Z with 0 = +Y.
-pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
+/// 8 floats each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]`, flags 1 helicopter,
+/// 2 pursuing / intercepting (lights on). Yaw is about +Z with 0 = +Y. `unit_id` is the
+/// stable `wp_police` id (hash it for per-unit light phases); `model` comes from
+/// `model_of` (fleet index, -1 = none).
+pub fn units(
+    p: &PoliceSystem,
+    ground: &dyn Fn([f32; 2]) -> f32,
+    model_of: &dyn Fn(wp_police::UnitId) -> f32,
+) -> Vec<f32> {
     let mut out = Vec::new();
     for u in p.units().iter().filter(|u| u.entity.is_none()) {
         let b = &u.body;
@@ -171,7 +177,16 @@ pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
         let flags = heli as u32 | (chasing as u32) << 1;
         // Altitude is above the ground under the unit (hilly cities).
         let z = ground(b.pos) + b.alt_m;
-        out.extend_from_slice(&[b.pos[0], b.pos[1], z, yaw, b.speed, flags as f32]);
+        out.extend_from_slice(&[
+            b.pos[0],
+            b.pos[1],
+            z,
+            yaw,
+            b.speed,
+            flags as f32,
+            u.id.0 as f32,
+            model_of(u.id),
+        ]);
     }
     out
 }
@@ -216,7 +231,7 @@ mod tests {
         assert_eq!(s.level, WantedLevel::None);
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
-        assert!(units(&p, &|_| 0.0).is_empty());
+        assert!(units(&p, &|_| 0.0, &|_| -1.0).is_empty());
         assert!(helicopters(&p, &|_, _| 0.0).is_empty());
         assert_eq!(s.last_outcome, None);
         assert_eq!(s.outcome_age_s, None);

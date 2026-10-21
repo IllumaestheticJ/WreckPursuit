@@ -917,7 +917,17 @@ impl ProDriver {
         // pointing the wrong way starts sideways and would hold it at full lock.)
         let lane = ctx.pass_offset_m.unwrap_or(ctx.lane_offset_m);
         let to_line = sub(lane_point(track, s + 8.0, lane), ctx.pos);
-        let turning_round = len(to_line) > 1.0 && dot(normalize(to_line), ctx.heading) < 0.3;
+        // ... and pointing away from the road where it is: approaching a right-angle corner
+        // the point 8 m on is already round it (> 70 deg off the nose), which capped every
+        // chaser at `turn_around_mps` at the apex (keep-up bench: chasers at 3-10 m/s out of
+        // corners while the racer drove away).
+        let road_here = normalize(sub(
+            track.point_at(s + 2.0),
+            track.point_at((s - 2.0).max(0.0)),
+        ));
+        let turning_round = len(to_line) > 1.0
+            && dot(normalize(to_line), ctx.heading) < 0.3
+            && dot(road_here, ctx.heading) < 0.3;
         if turning_round {
             v_ref = v_ref.min(p.turn_around_mps);
         }

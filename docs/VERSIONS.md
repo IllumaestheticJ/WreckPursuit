@@ -42,5 +42,10 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.32 | preview | Main's new maps (divided highways, ramps, lane markings, new grid), P8 pro police + stat bars; police: noticed→pursuit, U-turn route, Hollins hairpin capture, stand-offs clear in 3 s; AI racers use the whole road, weave, gap planner, cut empty junctions; front brake bias +0.05 (brake stability); race payout matches the advertised purse; parked cars clear of fences / Bluff Road ground fix |
 | 0.12.33 | preview | Render budget back under limits: road markings tiled + culled (one draw per tile), 640 m city tiles on phones, buried grid wall curtains dropped (chase 425k → 363k triangles, phone 323 → 280 draw calls) |
 | 0.12.34 | preview | Police: arresting unit busy 30 s (no chain arrests), pinned capture needs a chasing unit, head-on waiting unit creeps aside, backup waits ahead facing the racer, faster chase junctions, stuck units route round traffic; AI racers pass civilians stopped at Lantern Row lights, junction gap check, never stand at a red on the opposing side |
-| 0.12.35 | preview | (next) |
+| 0.12.35 | preview | AI racers never give up in a race (owner rule): no yielding or pulling over at any wanted level; a race ends only on a real capture, wreck or DNF |
+| 0.12.36 | preview | Police audio: police engines procedural (no 2.3x sped-up recordings, no layer flipping), siren junction cue calmer (3 s minimum pattern hold); spikes: recorded blow-out per tyre, flat-tyre flap loop, rim grind, scanner line |
+| 0.12.37 | preview | Police keep-up: pro driver no longer crawls at 4 m/s through every right-angle corner apex (pace vs racer 0.68 → 0.78) |
+| 0.12.38 | preview | Detailed car models for every car (styles, liveries, decals, light rigs), 3 new cars (Fulmine V10, Sentinel Warden, Sentinel Vigil), mixed-model traffic and police, car LOD (hero / mid / fleet); races: going off route is never a DQ or reset, checkpoints in order |
+| 0.12.39 | preview | Big engines (V8 / inline-6, 13 cars incl. police) on the generated engine instead of 4-cylinder recordings sped up 1.8–3.4x (owner: generated sound now); 4-cylinders keep recordings |
+| 0.12.40 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

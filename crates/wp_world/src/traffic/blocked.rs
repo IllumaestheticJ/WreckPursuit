@@ -946,7 +946,7 @@ impl Traffic {
         let Some(road) = self.corridor_at(map, i) else {
             return false;
         };
-        let shape = match (&a.physical, &self.car) {
+        let shape = match (&a.physical, self.car_of(a.id)) {
             (Some(_), Some((def, _))) => CarShape::from_def(def),
             _ => CarShape::CIVILIAN,
         };
@@ -1068,7 +1068,7 @@ impl Traffic {
             return false;
         }
         let drv = if a.physical.is_some() {
-            let shape = match &self.car {
+            let shape = match self.car_of(a.id) {
                 Some((def, _)) => CarShape::from_def(def),
                 None => CarShape::CIVILIAN,
             };
