@@ -44,6 +44,20 @@ pub struct FuzzFailure {
     pub message: String,
 }
 
+/// Clearance between a fuzz barrier's footprint circle and a car spawn point, m (a car's
+/// half length plus a margin).
+pub const BARRIER_SPAWN_CLEARANCE_M: f32 = 3.5;
+
+/// Whether `b` stands clear of every spawn in `entities`: the spawn lies more than
+/// [`BARRIER_SPAWN_CLEARANCE_M`] outside the circle around the barrier's footprint.
+fn barrier_clear_of_spawns(b: &Barrier, entities: &[EntitySpec]) -> bool {
+    let reach = 0.5 * (b.size[0] * b.size[0] + b.size[1] * b.size[1]).sqrt();
+    entities.iter().all(|e| {
+        let (dx, dy) = (e.pos[0] - b.pos[0], e.pos[1] - b.pos[1]);
+        (dx * dx + dy * dy).sqrt() > reach + BARRIER_SPAWN_CLEARANCE_M
+    })
+}
+
 /// Generate case `index`. Pure function of `(cfg, index)`.
 pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
     let mut rng = Rng::new(cfg.seed ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15));
@@ -99,17 +113,22 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
             i += 1;
         }
     }
-    // Sometimes a rigid wall 10-40 m ahead of a random car.
+    // Sometimes a rigid wall 10-40 m ahead of a random car, dropped when it would stand on
+    // another car's spawn (a head-on partner can start inside it and be pushed through the
+    // ground). The draws are the same either way, so the other cases do not change.
     let mut barriers = Vec::new();
     if rng.chance(0.3) {
         let e = &entities[rng.below(entities.len() as u32) as usize];
         let (s, c) = wp_math::sin_cos(e.yaw);
         let d = rng.range_f32(10.0, 40.0);
-        barriers.push(Barrier {
+        let barrier = Barrier {
             pos: [e.pos[0] - s * d, e.pos[1] + c * d, 0.75],
             size: [rng.range_f32(2.0, 12.0), 1.0, 1.5],
             yaw: e.yaw,
-        });
+        };
+        if barrier_clear_of_spawns(&barrier, &entities) {
+            barriers.push(barrier);
+        }
     }
     Scenario {
         name: format!("fuzz_{:016x}_{index}", cfg.seed),
@@ -311,6 +330,37 @@ mod tests {
         a.validate().unwrap();
         // Round-trips through RON so failures can be written as repro files.
         assert_eq!(Scenario::from_ron("x", &a.to_ron()).unwrap(), a);
+    }
+
+    #[test]
+    fn barriers_never_stand_on_a_spawn() {
+        // CI seed 489, case 72 put a wall on a head-on partner's spawn (car pushed through
+        // the ground at tick 49); no case may do that.
+        let mut walls = 0;
+        for seed in [99, 489] {
+            let c = FuzzConfig { seed, ..cfg() };
+            for i in 0..2500 {
+                let sc = gen_case(&c, i);
+                for b in &sc.barriers {
+                    walls += 1;
+                    // Distance from each spawn to the wall's rotated rectangle.
+                    let (s, c) = wp_math::sin_cos(b.yaw);
+                    for e in &sc.entities {
+                        let (dx, dy) = (e.pos[0] - b.pos[0], e.pos[1] - b.pos[1]);
+                        let (lx, ly) = (dx * c + dy * s, -dx * s + dy * c);
+                        let ox = (lx.abs() - b.size[0] * 0.5).max(0.0);
+                        let oy = (ly.abs() - b.size[1] * 0.5).max(0.0);
+                        let gap = (ox * ox + oy * oy).sqrt();
+                        assert!(
+                            gap > 3.0,
+                            "seed {seed} case {i}: {} {gap} m from a wall",
+                            e.id
+                        );
+                    }
+                }
+            }
+        }
+        assert!(walls > 500, "only {walls} walls generated");
     }
 
     #[test]
