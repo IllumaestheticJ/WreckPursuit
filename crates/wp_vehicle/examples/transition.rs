@@ -1100,7 +1100,192 @@ fn poweron_table() {
     }
 }
 
+/// Manual-gear shift in a held drift (lead, step 23: the owner drives manual gears + manual
+/// clutch with no clutch key, so the clutch stays engaged through every shift).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Shift {
+    None,
+    /// One upshift when the engine reaches the rev limiter mid-drift.
+    UpAtLimiter,
+    /// Enter in 3rd and shift down to 2nd as the key goes into the turn.
+    DownAtEntry,
+}
+
+/// One held drift (40 m circle at `lat_g`, key into the turn to 6°, then the counter key +
+/// full throttle, 6 s) with manual gears, the clutch held engaged (input 0) and the `shift`.
+/// Returns (held metrics, spun, a log of the 0.6 s around the shift: (t, gear, rpm, rear wheel
+/// speed km/h, car speed km/h, slide °)).
+fn manual_drift(
+    c: &LoadedCar,
+    lat_g: f32,
+    shift: Shift,
+) -> (
+    wp_vehicle::drift_lab_w::HoldMetrics,
+    Option<f32>,
+    Vec<(f32, i8, f32, f32, f32, f32)>,
+) {
+    use wp_vehicle::drift_lab_w::HoldMetrics;
+    // `AUTO_CLUTCH=1`: the lab's auto clutch instead (comparison).
+    let a = wp_contracts::AssistProfile {
+        auto_gears: false,
+        auto_clutch: std::env::var("AUTO_CLUTCH").is_ok(),
+        ..reference_assists()
+    };
+    let mut rig = settle_on_circle(c, &a, 40.0, lat_g);
+    let start_gear: i8 = if shift == Shift::DownAtEntry { 3 } else { 2 };
+    // Into the start gear (shifts while settled, before the drift).
+    for _ in 0..TPS {
+        let g = rig.vehicle.gear();
+        let (throttle, brake) = {
+            let err = (lat_g * 9.81 * 40.0).sqrt() - rig.state().speed_mps;
+            if err > -1.0 {
+                ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+            } else {
+                (0.0, (-0.2 * err).clamp(0.0, 1.0))
+            }
+        };
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                gear_up: g < start_gear,
+                gear_down: g > start_gear,
+                ..Default::default()
+            },
+            &a,
+        );
+    }
+    let limiter = c.def.engine.rev_limit_rpm;
+    let (mut ang, mut back) = (Vec::new(), Vec::new());
+    let mut entered = false;
+    let mut shift_at: Option<usize> = None;
+    let mut log = Vec::new();
+    let mut hist: Vec<(f32, i8, f32, f32, f32, f32)> = Vec::new();
+    for tick in 0..6 * TPS {
+        let st = slide_state(&rig);
+        let slide = -st.body_slip.to_degrees();
+        entered |= slide > 6.0;
+        let steer = if entered { 1.0 } else { -1.0 };
+        let rpm = rig.state().engine_rpm;
+        let (mut up, mut down) = (false, false);
+        if shift_at.is_none() {
+            match shift {
+                Shift::UpAtLimiter if entered && rpm >= limiter - 150.0 => up = true,
+                Shift::DownAtEntry if tick == 0 => down = true,
+                _ => {}
+            }
+            if up || down {
+                shift_at = Some(tick);
+            }
+        }
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle: 1.0,
+                clutch: 0.0,
+                gear_up: up,
+                gear_down: down,
+                ..Default::default()
+            },
+            &a,
+        );
+        let n = slide_state(&rig);
+        let w = &rig.state().wheel_states;
+        let r = c.def.wheels[2].radius_m;
+        let rear_kmh = 0.5 * (w[2].omega + w[3].omega) * r * 3.6;
+        let row = (
+            tick as f32 / TPS as f32,
+            rig.vehicle.gear(),
+            rig.state().engine_rpm,
+            rear_kmh,
+            rig.state().speed_mps * 3.6,
+            -n.body_slip.to_degrees(),
+        );
+        hist.push(row);
+        ang.push(-n.body_slip.to_degrees());
+        back.push(n.v_fwd < 0.0);
+    }
+    if let Some(sa) = shift_at {
+        let from = sa.saturating_sub(TPS / 10);
+        let to = (sa + TPS / 2).min(hist.len());
+        log = hist[from..to].iter().step_by(TPS / 20).copied().collect();
+    }
+    (
+        HoldMetrics::from_angles(&ang, &back),
+        shift_at.map(|t| t as f32 / TPS as f32),
+        log,
+    )
+}
+
+/// `manual`: [`manual_drift`] per set (ref 7d6b66c9 / step23) × car × lat g × shift.
+fn manual_table() {
+    let ids: Vec<String> = match std::env::var("CARS") {
+        Ok(l) => l.split(',').map(String::from).collect(),
+        Err(_) => ["parity_rwd_a", "parity_rwd_b", "parity_rwd_d", "rampart_50"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    };
+    let sets: Vec<(&str, RideTune, GripBalance, CarTune)> = vec![
+        (
+            "ref 7d6b66c9",
+            RideTune::medium_weight(),
+            GripBalance::step14(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "step23",
+            RideTune::firm(),
+            GripBalance::lab_default(),
+            CarTune::spin_step22(),
+        ),
+    ];
+    let verbose = std::env::var("VERBOSE").is_ok();
+    println!("| set | car | no shift: held / 3 (spun) | upshift at the limiter: held / 3 (spun), shifted at s | downshift 3→2 at entry: held / 3 (spun) |");
+    println!("|---|---|---|---|---|");
+    for (name, ride, grip, tyre) in &sets {
+        plain::set_override(Some(PlainSteer::default()));
+        ride_lab::set_override(Some(*ride));
+        grip_lab::set_override(Some(*grip));
+        car_lab::set_override(Some(*tyre));
+        for id in &ids {
+            let c = car(id);
+            let mut cells = Vec::new();
+            for shift in [Shift::None, Shift::UpAtLimiter, Shift::DownAtEntry] {
+                let (mut held, mut spun, mut at) = (0, 0, Vec::new());
+                for g in [0.3f32, 0.5, 0.7] {
+                    let (m, t, log) = manual_drift(&c, g, shift);
+                    held += m.held as usize;
+                    spun += m.spun as usize;
+                    if let Some(t) = t {
+                        at.push(format!("{t:.1}"));
+                    }
+                    if verbose && !log.is_empty() {
+                        eprintln!("{name} {id} {shift:?} {g} g:");
+                        for (t, gear, rpm, rk, vk, sl) in &log {
+                            eprintln!("  t {t:.2} gear {gear} rpm {rpm:.0} rear wheels {rk:.0} km/h car {vk:.0} km/h slide {sl:+.0}°");
+                        }
+                    }
+                }
+                cells.push(if at.is_empty() {
+                    format!("{held} ({spun})")
+                } else {
+                    format!("{held} ({spun}) @ {}", at.join("/"))
+                });
+            }
+            println!(
+                "| {name} | {id} | {} | {} | {} |",
+                cells[0], cells[1], cells[2]
+            );
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("manual") {
+        manual_table();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("poweron") {
         poweron_table();
         return;

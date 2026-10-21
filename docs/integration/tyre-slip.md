@@ -135,6 +135,31 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Manual gears + manual clutch held engaged (lead's correction: the owner's actual setup)
+
+`transition manual` (VERBOSE=1 logs gear / rpm / rear wheel speed / car speed / slide around the
+shift): held drift (40 m circle, 0.3 / 0.5 / 0.7 g, key into the turn to 6°, then counter key +
+full throttle, 6 s), manual gears, clutch input 0 (engaged), TCS off. Held / 3 (spun):
+
+| set | car | no shift | upshift at the limiter (s) | downshift 3→2 at entry |
+|---|---|---|---|---|
+| ref 7d6b66c9 | parity_rwd_a | 3 (0) | 3 (0) (limiter not reached) | 3 (0) |
+| ref 7d6b66c9 | parity_rwd_b | 0 (0) | 0 (0) @ 1.7–2.4 | 3 (0) |
+| ref 7d6b66c9 | parity_rwd_d | 3 (0) | 3 (0) (not reached) | 2 (1) |
+| ref 7d6b66c9 | rampart_50 | 0 (1) | 0 (1) @ 2.5 | 3 (0) |
+| step23 | parity_rwd_a | 3 (0) | 2 (0) @ 1.1–1.2 | 3 (0) |
+| step23 | parity_rwd_b | 1 (0) | 1 (0) @ 1.1–1.8 | 3 (0) |
+| step23 | parity_rwd_d | 3 (0) | 3 (0) (not reached) | 2 (0) |
+| step23 | rampart_50 | 0 (0) | 0 (0) @ 1.7–2.9 | 2 (0) |
+
+The lab's auto clutch gives nearly the same (manual slightly better). An upshift at the limiter
+mid-drift drops the drive for the 0.5 s shift (step23 rwd_a: rpm 5850 → 4150, rear wheels 119 →
+61 km/h, slide 33° → 27°): the drift **dies**, it does not spin. The downshift at entry is benign
+(it even helps rampart). **No spins come from manual shifting with the clutch held.** So with
+the owner's actual setup the harness still does not reproduce "spinning on throttle / holding a
+drift"; the remaining candidates are the live-driven player path and the browser build's panel
+state.
+
 ### The owner's assists (TCS off, manual clutch, auto gears): auto shifts mid-drift
 
 `OWNER=1 transition poweron` = the owner's setup (lead: parity RWD, TCS off, manual clutch,
