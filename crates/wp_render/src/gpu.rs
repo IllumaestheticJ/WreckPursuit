@@ -1,9 +1,11 @@
 //! wgpu renderer (feature `gpu`).
 //!
-//! Deliberately simple: one shader, two pipelines (opaque, then blended glass), a 4×-MSAA colour
-//! target with a depth buffer. Each car body has its own vertex buffer, rewritten only when the
-//! body deformed; wheel meshes are shared per car id; every draw's model matrix lives in one
-//! uniform buffer addressed with dynamic offsets. Ground and barriers are one mesh each.
+//! Deliberately simple: one shader; opaque pipelines (one per city decal layer, differing only
+//! in depth bias), then blended glass; a 4×-MSAA colour target with a reversed-Z float depth
+//! buffer. Each car body has its own vertex buffer, rewritten only when the body deformed;
+//! wheel meshes are shared per car id; every draw's model matrix lives in one uniform buffer
+//! addressed with dynamic offsets. Ground, barriers and traffic are one mesh each; the city is
+//! one mesh per decal layer, uploaded once.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,6 +17,7 @@ use wgpu::util::DeviceExt;
 use wp_contracts::EntityId;
 
 use crate::camera::CameraView;
+use crate::city::DECAL_LAYERS;
 use crate::scene::Scene;
 use crate::skin::StaticMesh;
 use crate::{Shade, Vertex};
@@ -25,6 +28,9 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const OBJECT_STRIDE: u64 = 256;
 /// Half size of the ground plane, m (fog hides its edge).
 const GROUND_HALF_M: f32 = 2000.0;
+/// Ground plane height under a city, m: below its zone ground (-0.05 m) and roads (0 m), as in
+/// the browser. Without a city the ground is the z = 0 driving plane.
+const CITY_GROUND_Z: f32 = -0.2;
 
 /// Sun, sky and fog. Linear RGB.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,10 +93,34 @@ impl GpuMesh {
             indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: bytemuck::cast_slice(indices),
-                usage: wgpu::BufferUsages::INDEX,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             }),
             index_count: indices.len() as u32,
         }
+    }
+
+    /// Replace the contents, reusing the buffers when the new data fits.
+    fn rewrite(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) {
+        let vb: &[u8] = bytemuck::cast_slice(vertices);
+        let ib: &[u8] = bytemuck::cast_slice(indices);
+        if vb.len() as u64 > self.vertices.size() || ib.len() as u64 > self.indices.size() {
+            // Grow with headroom so a slowly growing mesh is not reallocated every frame.
+            let mut v = vertices.to_vec();
+            v.resize(vertices.len() * 2, Vertex::default());
+            let mut i = indices.to_vec();
+            i.resize(indices.len() * 2, 0);
+            *self = Self::new(device, "dynamic", &v, &i);
+        } else {
+            queue.write_buffer(&self.vertices, 0, vb);
+            queue.write_buffer(&self.indices, 0, ib);
+        }
+        self.index_count = indices.len() as u32;
     }
 }
 
@@ -112,7 +142,9 @@ struct Targets {
 /// What one draw call uses.
 enum DrawMesh {
     Ground,
+    City(usize),
     Boxes,
+    Traffic,
     CarOpaque(EntityId),
     CarGlass(EntityId),
     Wheel(String, usize),
@@ -124,7 +156,8 @@ pub struct Renderer {
     queue: wgpu::Queue,
     format: wgpu::TextureFormat,
     sample_count: u32,
-    opaque: wgpu::RenderPipeline,
+    /// Opaque pipelines by city decal layer (layer `l` is pulled `l` steps toward the camera).
+    opaque: Vec<wgpu::RenderPipeline>,
     glass: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     globals_group: wgpu::BindGroup,
@@ -134,6 +167,8 @@ pub struct Renderer {
     object_slots: u64,
     ground: GpuMesh,
     boxes: Option<(u64, GpuMesh)>,
+    city: Option<(u64, Vec<Option<GpuMesh>>)>,
+    traffic: Option<GpuMesh>,
     cars: BTreeMap<EntityId, GpuCar>,
     wheels: BTreeMap<String, Vec<Option<GpuMesh>>>,
     targets: Option<Targets>,
@@ -178,9 +213,17 @@ impl Renderer {
         let vertex_layout = Some(wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4, 2 => Float32],
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3,
+                1 => Float32x4,
+                2 => Float32,
+                3 => Float32x3
+            ],
         });
-        let pipeline = |label: &str, blend: wgpu::BlendState, depth_write: bool| {
+        let pipeline = |label: &str,
+                        blend: wgpu::BlendState,
+                        depth_write: bool,
+                        bias: wgpu::DepthBiasState| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -198,9 +241,10 @@ impl Renderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(depth_write),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    // Reversed Z (`CameraView::view_proj`): nearer is greater.
+                    depth_compare: Some(wgpu::CompareFunction::Greater),
                     stencil: Default::default(),
-                    bias: Default::default(),
+                    bias,
                 }),
                 multisample: wgpu::MultisampleState {
                     count: sample_count,
@@ -220,8 +264,23 @@ impl Renderer {
                 cache: None,
             })
         };
-        let opaque = pipeline("wp_render opaque", wgpu::BlendState::REPLACE, true);
-        let glass = pipeline("wp_render glass", wgpu::BlendState::ALPHA_BLENDING, false);
+        // Same offsets as the browser's polygon offset per layer, positive for reversed Z.
+        let opaque = (0..DECAL_LAYERS)
+            .map(|l| {
+                let bias = wgpu::DepthBiasState {
+                    constant: 4 * l as i32,
+                    slope_scale: l as f32,
+                    clamp: 0.0,
+                };
+                pipeline("wp_render opaque", wgpu::BlendState::REPLACE, true, bias)
+            })
+            .collect();
+        let glass = pipeline(
+            "wp_render glass",
+            wgpu::BlendState::ALPHA_BLENDING,
+            false,
+            Default::default(),
+        );
 
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wp_render globals"),
@@ -248,6 +307,7 @@ impl Renderer {
                 pos: [x, y, 0.0],
                 color: ground_color,
                 shade,
+                normal: [0.0; 3],
             })
             .collect();
         let ground = GpuMesh::new(device, "ground", &ground_vertices, &[0, 1, 2, 0, 2, 3]);
@@ -267,6 +327,8 @@ impl Renderer {
             object_slots: 64,
             ground,
             boxes: None,
+            city: None,
+            traffic: None,
             cars: BTreeMap::new(),
             wheels: BTreeMap::new(),
             targets: None,
@@ -316,9 +378,27 @@ impl Renderer {
         let mut draws: Vec<(DrawMesh, Mat4)> = Vec::new();
         // The ground follows the camera in 10 m steps so it never runs out.
         let snap = (camera.eye.truncate() / 10.0).round() * 10.0;
-        draws.push((DrawMesh::Ground, Mat4::from_translation(snap.extend(0.0))));
+        let ground_z = if scene.city().is_some() {
+            CITY_GROUND_Z
+        } else {
+            0.0
+        };
+        draws.push((
+            DrawMesh::Ground,
+            Mat4::from_translation(snap.extend(ground_z)),
+        ));
+        if let Some((_, layers)) = &self.city {
+            for (l, m) in layers.iter().enumerate() {
+                if m.is_some() {
+                    draws.push((DrawMesh::City(l), Mat4::IDENTITY));
+                }
+            }
+        }
         if self.boxes.as_ref().is_some_and(|(_, m)| m.index_count > 0) {
             draws.push((DrawMesh::Boxes, Mat4::IDENTITY));
+        }
+        if self.traffic.as_ref().is_some_and(|m| m.index_count > 0) {
+            draws.push((DrawMesh::Traffic, Mat4::IDENTITY));
         }
         for car in scene.cars() {
             draws.push((DrawMesh::CarOpaque(car.entity), car.to_world));
@@ -376,7 +456,8 @@ impl Renderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        // Reversed Z: the far plane is 0.
+                        load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Discard,
                     }),
                     stencil_ops: None,
@@ -384,7 +465,8 @@ impl Renderer {
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.globals_group, &[]);
-            let mut glass_bound = false;
+            // Index into `opaque`, or `DECAL_LAYERS` for glass.
+            let mut bound: Option<usize> = None;
             for (i, (mesh, _)) in draws.iter().enumerate() {
                 let (vertices, indices, count) = match mesh {
                     DrawMesh::Ground => (
@@ -392,8 +474,17 @@ impl Renderer {
                         &self.ground.indices,
                         self.ground.index_count,
                     ),
+                    DrawMesh::City(l) => {
+                        let (_, layers) = self.city.as_ref().expect("checked when listed");
+                        let m = layers[*l].as_ref().expect("checked when listed");
+                        (&m.vertices, &m.indices, m.index_count)
+                    }
                     DrawMesh::Boxes => {
                         let (_, m) = self.boxes.as_ref().expect("checked when listed");
+                        (&m.vertices, &m.indices, m.index_count)
+                    }
+                    DrawMesh::Traffic => {
+                        let m = self.traffic.as_ref().expect("checked when listed");
                         (&m.vertices, &m.indices, m.index_count)
                     }
                     DrawMesh::CarOpaque(id) => {
@@ -415,20 +506,14 @@ impl Renderer {
                 if count == 0 {
                     continue;
                 }
-                let pipeline = if matches!(mesh, DrawMesh::CarGlass(_)) {
-                    if !glass_bound {
-                        glass_bound = true;
-                        Some(&self.glass)
-                    } else {
-                        None
-                    }
-                } else if i == 0 {
-                    Some(&self.opaque)
-                } else {
-                    None
+                let want = match mesh {
+                    DrawMesh::CarGlass(_) => DECAL_LAYERS,
+                    DrawMesh::City(l) => *l,
+                    _ => 0,
                 };
-                if let Some(p) = pipeline {
-                    pass.set_pipeline(p);
+                if bound != Some(want) {
+                    bound = Some(want);
+                    pass.set_pipeline(self.opaque.get(want).unwrap_or(&self.glass));
                 }
                 pass.set_bind_group(1, &self.objects_group, &[(i as u64 * OBJECT_STRIDE) as u32]);
                 pass.set_vertex_buffer(0, vertices.slice(..));
@@ -481,6 +566,32 @@ impl Renderer {
 
     /// Create, update or drop GPU copies of the scene's meshes.
     fn upload_scene(&mut self, scene: &Scene) {
+        let city_rev = scene.city_revision();
+        if self.city.as_ref().map(|(r, _)| *r) != Some(city_rev) {
+            let layers = scene
+                .city()
+                .map(|c| {
+                    c.layers
+                        .iter()
+                        .map(|m| gpu_static(&self.device, m))
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.city = Some((city_rev, layers));
+        }
+        let t = scene.traffic_mesh();
+        match &mut self.traffic {
+            Some(m) => m.rewrite(&self.device, &self.queue, &t.vertices, &t.indices),
+            None if !t.indices.is_empty() => {
+                self.traffic = Some(GpuMesh::new(
+                    &self.device,
+                    "traffic",
+                    &t.vertices,
+                    &t.indices,
+                ));
+            }
+            None => {}
+        }
         let rev = scene.static_revision();
         if self.boxes.as_ref().map(|(r, _)| *r) != Some(rev) {
             let m = scene.static_mesh();
@@ -538,7 +649,7 @@ impl Renderer {
 }
 
 fn gpu_static(device: &wgpu::Device, m: &StaticMesh) -> Option<GpuMesh> {
-    (!m.indices.is_empty()).then(|| GpuMesh::new(device, "wheel", &m.vertices, &m.indices))
+    (!m.indices.is_empty()).then(|| GpuMesh::new(device, "static", &m.vertices, &m.indices))
 }
 
 fn rgb4(c: [f32; 3]) -> [f32; 4] {

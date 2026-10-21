@@ -1,5 +1,6 @@
 //! The renderer-side picture of a [`Sim`]: one [`CarView`] per vehicle (skinned body, wheel
-//! poses, chassis transform) plus static boxes. Pure CPU; the GPU layer only uploads what this
+//! poses, chassis transform), the city greybox, boxes for traffic that is not a physics vehicle,
+//! and static boxes. Pure CPU; the GPU layer only uploads what this
 //! produces. Reading the sim never changes it.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,6 +12,7 @@ use wp_damage::PanelStatus;
 use wp_sim::Sim;
 
 use crate::car_mesh::CarMeshLibrary;
+use crate::city::CityMesh;
 use crate::skin::{material_look, wheel_meshes, SkinnedBody, StaticMesh};
 use crate::{Shade, Vertex};
 
@@ -71,7 +73,17 @@ pub struct Scene {
     wheel_meshes: BTreeMap<String, Arc<[StaticMesh; 4]>>,
     boxes: StaticMesh,
     boxes_revision: u64,
+    city: Option<Arc<CityMesh>>,
+    city_revision: u64,
+    traffic: StaticMesh,
 }
+
+/// Traffic box size `[width, length, height]`, m (as the browser).
+const TRAFFIC_BOX_M: [f32; 3] = [1.8, 4.4, 1.4];
+/// Traffic box colours (linear RGB): cruising, braking, yielding to a siren.
+const TRAFFIC_COLOR: [f32; 3] = [0.48, 0.50, 0.55];
+const TRAFFIC_BRAKE_COLOR: [f32; 3] = [1.0, 0.08, 0.05];
+const TRAFFIC_YIELD_COLOR: [f32; 3] = [0.03, 0.32, 1.0];
 
 /// Body colours handed out by entity id (linear RGB).
 const PAINTS: [[f32; 3]; 6] = [
@@ -101,7 +113,33 @@ impl Scene {
             wheel_meshes: BTreeMap::new(),
             boxes: StaticMesh::default(),
             boxes_revision: 0,
+            city: None,
+            city_revision: 0,
+            traffic: StaticMesh::default(),
         }
+    }
+
+    /// Show `city` (or none: the flat world).
+    pub fn set_city(&mut self, city: Option<Arc<CityMesh>>) {
+        self.city = city;
+        self.city_revision += 1;
+    }
+
+    /// The city greybox, if one is shown.
+    pub fn city(&self) -> Option<&Arc<CityMesh>> {
+        self.city.as_ref()
+    }
+
+    /// Increments whenever [`Self::city`] changed.
+    pub fn city_revision(&self) -> u64 {
+        self.city_revision
+    }
+
+    /// Civilian traffic that is not simulated as a vehicle (far from players) as one
+    /// world-space box mesh, rebuilt every [`Self::sync`]. Agents promoted to physics vehicles
+    /// are drawn as cars instead.
+    pub fn traffic_mesh(&self) -> &StaticMesh {
+        &self.traffic
     }
 
     /// Replace the static boxes.
@@ -128,6 +166,25 @@ impl Scene {
 
     /// Bring every car up to date with `sim`. `frame_dt` (s) only advances wheel spin angles.
     pub fn sync(&mut self, sim: &Sim, frame_dt: f32) {
+        self.traffic.vertices.clear();
+        self.traffic.indices.clear();
+        let half = Vec3::from(TRAFFIC_BOX_M) * 0.5;
+        for a in sim.world().agents() {
+            if a.lod == wp_world::Lod::Physical {
+                continue;
+            }
+            let color = if a.yielding {
+                TRAFFIC_YIELD_COLOR
+            } else if a.brake_lights {
+                TRAFFIC_BRAKE_COLOR
+            } else {
+                TRAFFIC_COLOR
+            };
+            let centre = Vec3::new(a.pos[0], a.pos[1], a.pos[2] + half.z);
+            let to_world = Mat4::from_rotation_translation(Quat::from_rotation_z(a.yaw), centre);
+            push_box(&mut self.traffic, to_world, half, color);
+        }
+
         let states: BTreeMap<EntityId, _> = sim.vehicle_states().into_iter().collect();
         self.cars.retain(|id, _| states.contains_key(id));
         for v in sim.vehicles() {
@@ -240,6 +297,7 @@ fn push_box(mesh: &mut StaticMesh, to_world: Mat4, half: Vec3, color: [f32; 3]) 
             pos: to_world.transform_point3(c).to_array(),
             color: look.0,
             shade: Shade::Lit as u32 as f32,
+            normal: [0.0; 3],
         });
     }
     for q in [

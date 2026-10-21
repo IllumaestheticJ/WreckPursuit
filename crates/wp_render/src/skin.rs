@@ -36,6 +36,7 @@ fn vertex(pos: Vec3, look: ([f32; 4], Shade)) -> Vertex {
         pos: pos.to_array(),
         color: look.0,
         shade: look.1 as u32 as f32,
+        normal: [0.0; 3],
     }
 }
 

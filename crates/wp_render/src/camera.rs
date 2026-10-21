@@ -18,14 +18,16 @@ pub struct CameraView {
 }
 
 impl CameraView {
-    /// World → clip matrix for a viewport of the given aspect (width / height). Depth 0..1.
+    /// World → clip matrix for a viewport of the given aspect (width / height). Reversed Z:
+    /// depth 1 at the near plane, 0 at the far plane, which with a float depth buffer keeps
+    /// surfaces centimetres apart (roads over city ground) separate across a whole city.
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
         let view = glam::camera::rh::view::look_at_mat4(self.eye, self.target, Vec3::Z);
         let proj = glam::camera::rh::proj::directx::perspective(
             self.fov_y,
             aspect.max(1e-3),
-            self.near,
             self.far,
+            self.near,
         );
         proj * view
     }

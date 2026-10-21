@@ -4971,6 +4971,7 @@ dependencies = [
  "wp_damage",
  "wp_sim",
  "wp_wasm",
+ "wp_world",
 ]
 
 [[package]]

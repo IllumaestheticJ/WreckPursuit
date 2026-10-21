@@ -1,7 +1,7 @@
 //! # wp_render
 //!
 //! Our own renderer, the first piece of a custom engine (see `docs/ENGINE_DECISION.md`). It
-//! draws what the browser testbed draws: cars from the per-panel meshes in
+//! draws what the browser testbed draws: the city greybox ([`city`]), cars from the per-panel meshes in
 //! `data/panels/meshes`, skinned to the damage lattice so every dent shows, with spinning and
 //! steering wheels, static boxes and a ground grid, seen from a chase camera.
 //!
@@ -18,6 +18,7 @@
 
 pub mod camera;
 pub mod car_mesh;
+pub mod city;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod scene;
@@ -25,6 +26,7 @@ pub mod skin;
 
 pub use camera::{CameraView, ChaseCamera};
 pub use car_mesh::{CarMesh, CarMeshLibrary};
+pub use city::CityMesh;
 pub use scene::{CarView, Scene, StaticBox};
 pub use skin::{SkinnedBody, StaticMesh};
 
@@ -40,8 +42,9 @@ pub enum Shade {
     Ground = 2,
 }
 
-/// One vertex as uploaded to the GPU (32 bytes). Normals are derived per triangle in the
-/// fragment shader, which gives the low-poly flat look and stays right while the body deforms.
+/// One vertex as uploaded to the GPU (44 bytes). With a zero [`Vertex::normal`] the normal is
+/// derived per triangle in the fragment shader, which gives the low-poly flat look and stays
+/// right while a body deforms; smooth-shaded geometry (city terrain) carries its own.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
@@ -52,4 +55,6 @@ pub struct Vertex {
     pub color: [f32; 4],
     /// [`Shade`] as a float.
     pub shade: f32,
+    /// Smooth-shading normal, or zero for a flat (per-triangle) normal.
+    pub normal: [f32; 3],
 }
