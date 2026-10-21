@@ -2751,7 +2751,8 @@ enum PassReject {
 /// my lane's left edge) anywhere a junction box lies within `span` m ahead of `s`.
 fn opposing_through_junction(corridor: &Corridor, s: f32, span: f32, n: f32, hw: f32) -> bool {
     let i0 = (s / CORRIDOR_STEP_M).floor() as isize;
-    let k = (span / CORRIDOR_STEP_M).ceil() as isize;
+    // (`span` is a braking distance, infinite with no braking point ahead: look 250 m at most.)
+    let k = (span.clamp(0.0, 250.0) / CORRIDOR_STEP_M).ceil() as isize;
     (0..=k).any(|j| {
         let c = corridor.sample(i0 + j);
         c.junction && n - hw < -c.left_m
