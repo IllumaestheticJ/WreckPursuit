@@ -10,7 +10,7 @@
      grid highway as divided highways with diamond interchanges, painted road markings, median
      barriers, racer AI fixes, upbeat-faraday's vehicle catch commit).
   4. `origin/lead/opponent-pace` @ `9a1b060`, `origin/lead/round12` @ `e6f7cc3`, `origin/lead/grip-balance` @ `51f5e60`,
-     `origin/ws/police` @ `fcc9d08`, `origin/lead/opponent-pace` @ `db65359`.
+     `origin/ws/police` @ `fcc9d08`, `origin/lead/opponent-pace` @ `db65359` → `03c03fe` → `cf00e02`.
 - **Contract:** main changed nothing in `crates/wp_contracts` or `schemas/` (both main ranges).
   `DqReason::LeftCorridor` stays in the contract but is no longer produced.
 
