@@ -490,3 +490,16 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. `crush_depth` → `DamageModel::structural_crush_m()` (B's request).
 2. Promote the observer soak civilian-collision gate (D says it passes; E may flip police back on).
 3. Run the slow city scenarios in the release CI jobs, per `lead/test-speed`.
+
+## Lead helper note (2026-10-21): fuzz "below ground" failures were spawn-in-wall cases
+
+CI's fuzz job failed on `main` with `carN: below ground (z ≈ -0.50 m)` (seed 457 case 33, seed
+462 case 91). Both were generator bugs, not physics: `gen_case` put the optional wall 10–40 m
+ahead of one car without checking the others, and in head-on pairs that is where the partner
+spawns, so a car started inside a static box and Rapier's depenetration pushed it down through
+the ground slab. Fixed in `apps/simcli/src/fuzz.rs`: the wall is kept `WALL_SPAWN_CLEARANCE_M`
+(3.5 m) clear of every spawn point (up to 4 distances tried, else no wall that case). Tests:
+`walls_never_cover_a_spawn_point` (3000 generated cases; fails on the old generator) and
+`ci_seeds_457_and_462_pass`. `simcli fuzz --cases 100` passes for seeds 457, 462, 463 and 464.
+Generated cases for a given seed changed (different RNG draws after the wall), so old fuzz repro
+files still reproduce as written but `--seed` now yields different cases.
