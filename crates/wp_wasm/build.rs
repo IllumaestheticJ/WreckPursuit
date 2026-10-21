@@ -1,4 +1,4 @@
-//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels}/*.json`,
+//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,mods}/*.json`,
 //! `data/modes/*.toml`) so new cars from other workstreams show up without code changes.
 //! Generates `$OUT_DIR/embedded_data.rs` with one `(kind, id, contents)` table.
 
@@ -18,6 +18,8 @@ fn main() {
         ("modes", "toml"),
         // Panel specs (workstream R); meshes stay files under data/panels/meshes/.
         ("panels", "json"),
+        // Mod catalog, so scenario entities can drive modified cars (`EntitySpec::mods`).
+        ("mods", "json"),
     ] {
         let dir = data.join(kind);
         println!("cargo:rerun-if-changed={}", dir.display());

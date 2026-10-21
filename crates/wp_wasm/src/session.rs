@@ -81,6 +81,8 @@ pub struct Session {
     ids: Vec<EntityId>,
     /// Resolved cars by car id (scenario cars and any car the sim spawned).
     cars: BTreeMap<String, LoadedCar>,
+    /// Modified cars of scenario entities with `mods` (they drive these, not `cars`).
+    modded: BTreeMap<EntityId, LoadedCar>,
     /// Per-vehicle extras for every sim vehicle, by entity.
     extras: BTreeMap<EntityId, EntityExtra>,
     last_input: Vec<VehicleInput>,
@@ -144,6 +146,7 @@ impl Session {
             mut sim,
             ids,
             cars,
+            modded,
             selection,
             ..
         } = build_sim(&sc, data, &opts(systems)).map_err(|e| e.to_string())?;
@@ -198,6 +201,7 @@ impl Session {
             sim,
             ids,
             cars,
+            modded,
             extras: BTreeMap::new(),
             last_input: vec![VehicleInput::default(); n],
             fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),
@@ -301,8 +305,21 @@ impl Session {
         self.sim.vehicles().iter().find(|v| v.id == id)
     }
 
+    /// Mods installed on a scenario entity (`EntitySpec::mods`; empty for stock cars and for
+    /// vehicles the sim spawned itself).
+    pub fn entity_mods(&self, id: EntityId) -> &[String] {
+        self.ids
+            .iter()
+            .position(|x| *x == id)
+            .and_then(|i| self.sc.entities.get(i))
+            .map_or(&[], |e| e.mods.as_slice())
+    }
+
     /// Resolved car of any sim vehicle.
     pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
+        if let Some(car) = self.modded.get(&id) {
+            return Some(car);
+        }
         self.vehicle(id).and_then(|v| self.cars.get(&v.car_id))
     }
 
