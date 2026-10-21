@@ -12,11 +12,11 @@
 // e2e/lod_shots.mjs): frames where a car had no proper mesh, the pose jump on every swap with
 // a few frames either side, and how far from the player cars appear and vanish.
 import * as THREE from "three";
-import { D, DRAW_STRIDE, AGENT_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
+import { D, DRAW_STRIDE, AGENT_FLAG, META_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
 import type { SessionModels } from "../wasm/sim";
 import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
-import { BAR, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
+import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn, type DrawMode } from "./fleet";
 
 /** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
 const VIEW_LOD_BAND_M = 15;
@@ -48,6 +48,43 @@ export const trafficPaint = (flags: number) => TRAFFIC_PALETTE[(flags >> 8) & 7]
 function tailOf(flags: number, t: number): number {
   if (flags & AGENT_FLAG.hazard && (t * 1.5) % 1 < 0.5) return TAIL.hazard;
   return flags & AGENT_FLAG.brake ? TAIL.brake : TAIL.off;
+}
+
+/**
+ * Indicator lamps lit at time `t` for traffic draw-record flags (`IND` bits): the turn signal's
+ * side, or both for hazards, in the lit half of the 1.5 Hz blink; 0 otherwise.
+ */
+export function indicatorsOf(flags: number, t: number): number {
+  if (!indicatorPhaseOn(t)) return 0;
+  return indicatorRequest(flags);
+}
+
+/** Lit indicator lamps (`IND` bits) of a `vehicle_meta()` record's flags at time `t` (police
+ * cars indicate from their unit; ported from claude/happy-knuth-g39ogc). */
+export function metaIndicators(flags: number, t: number): number {
+  if (!indicatorPhaseOn(t)) return 0;
+  return (flags & META_FLAG.turnLeft ? IND.left : 0) | (flags & META_FLAG.turnRight ? IND.right : 0);
+}
+
+/** Indicator lamps a traffic car asks for (`IND` bits, ignoring the blink phase). */
+export function indicatorRequest(flags: number): number {
+  if (flags & AGENT_FLAG.hazard) return IND.left | IND.right;
+  return (flags & AGENT_FLAG.turnLeft ? IND.left : 0) | (flags & AGENT_FLAG.turnRight ? IND.right : 0);
+}
+
+/** One traffic car's indicators in the last frame (`LodDirector.indicatorRows`, automation). */
+export interface IndicatorRow {
+  /** Traffic agent id. */
+  id: number;
+  /** Draw-record flags. */
+  flags: number;
+  /** Indicator lamps the flags ask for (`IND` bits, ignoring the blink). */
+  request: number;
+  /** How the car was drawn. */
+  mode: LodMode;
+  /** Lamps actually lit on the drawn car (read back from the fleet instance / view). */
+  left: boolean;
+  right: boolean;
 }
 
 /** Police light bar colour (alternating red / blue while pursuing). */
@@ -83,6 +120,10 @@ export class LodDirector {
   /** Entities currently handed to the fleet by `viewDrawM`. */
   private readonly farViews = new Set<number>();
   private readonly cam = new THREE.Vector3();
+  /** Record `indicatorRows` every frame (automation; off by default, costs nothing then). */
+  indicatorProbe = false;
+  /** Traffic cars' indicator state in the last frame while `indicatorProbe` is on. */
+  readonly indicatorRows: IndicatorRow[] = [];
 
   /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). The map is
    * reused: valid until the next call. */
@@ -121,6 +162,8 @@ export class LodDirector {
     claimed.clear();
     this.fleet.begin();
 
+    const probe = this.indicatorProbe;
+    if (probe) this.indicatorRows.length = 0;
     const showTraffic = layers.on("traffic");
     const tModel = this.models.traffic ? this.fleet.model(this.models.traffic) : null;
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
@@ -128,9 +171,20 @@ export class LodDirector {
       const flags = traffic[o + D.flags];
       const key = keyOf(this.tKeys, "t", traffic[o + D.id]);
       const view = entity > 0 ? views.get(entity) : undefined;
-      if (view) claimed.add(entity);
+      const ind = indicatorsOf(flags, timeS);
+      if (view) {
+        claimed.add(entity);
+        // A promoted car's own view shows the same indicators as its draw record.
+        view.setIndicators(ind);
+      }
       const far = !view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
-      states.push(this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null));
+      const s = this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null, ind);
+      states.push(s);
+      if (probe) {
+        const car = s.mode === "full" || s.mode === "proxy" ? this.fleet.lastAdded.car : null;
+        const lit = s.mode === "view" && view ? view.indicatorsLit() : car ? car.indicatorsLit(this.fleet.lastAdded.i) : { left: false, right: false };
+        this.indicatorRows.push({ id: traffic[o + D.id], flags, request: indicatorRequest(flags), mode: s.mode, left: lit.left, right: lit.right });
+      }
     }
 
     const pModel = this.models.police ? this.fleet.model(this.models.police, true) : null;
@@ -188,6 +242,7 @@ export class LodDirector {
     paint: number,
     tail: number,
     bar: number | null,
+    ind = 0,
   ): DrawState {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
@@ -216,7 +271,7 @@ export class LodDirector {
     let mode: LodMode = "none";
     let fallback = false;
     if (model) {
-      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar);
+      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar, ind);
       fallback = mode === "proxy" && d < this.fleet.fullLodM && !model.full;
     }
     const s = this.next(key, mode, fallback, entity, d);

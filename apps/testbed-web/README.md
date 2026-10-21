@@ -25,6 +25,7 @@ npm run typecheck
 | `src/input.ts` | keyboard ramps + Gamepad API (deadzone + steering curve, analogue pass-through), read through the bindings; release on blur / pad disconnect |
 | `src/bindings.ts` | rebindable actions, defaults, `wp.bindings.v1` load/save, display names, F1 help lines |
 | `src/ui/controls.ts` | controls panel (F9 / “controls” button): rebind keys and pad controls, deadzone / curve, reset to defaults; per-device input shaping sliders + live test bars (same values as the game menu's Settings → Controls) |
+| `src/ui/carStats.ts` | stat bars under the car picker (acceleration, top speed, cornering) from `sim.carStats()` (`data/stats/cars.json`, measured on the physics rig); options carry the numbers as tooltips |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `src/render/fx/` | crash effects: sparks, smoke / steam / tyre smoke, glass shards, skid marks, debris chips; `?fx=low\|med\|high`, `__wp.fx.setQuality()` (`docs/integration/crash-fx.md`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
@@ -33,6 +34,7 @@ npm run typecheck
 | `e2e/controls_settings.mjs` | `npm run e2e:controls`: per-device input shaping — keyboard defaults, AssistProfile speed sensitivity per device (keyboard 0.75 / gamepad 0.70 / wheel 0), persistence, test bars + test mode, saturation / dead zone effect, panel ↔ menu, preset highlight |
 | `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
+| `e2e/signals.mjs` | `npm run e2e:signals`: traffic turn signals — a car whose draw record signals right / left blinks that side's corner lamps (lit and unlit frames, read back from the fleet instance or VehicleView), never the other side; hazards light both; the player's cosmetic stalk (`-` / `=`) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
 Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2

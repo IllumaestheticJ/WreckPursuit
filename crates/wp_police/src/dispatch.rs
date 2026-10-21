@@ -181,6 +181,26 @@ impl PoliceSystem {
                 level: after,
             });
         }
+        // Row 80: the unit that saw it acts on it. A violation it witnessed that makes the
+        // racer wanted starts the pursuit at once, day or night (recognition_time_s is only
+        // for a wanted car a unit runs into later).
+        if let Some(unit) = obs.witness {
+            if after > WantedLevel::None && !self.racers[&racer].pursued() {
+                self.stats.witnessed_pursuits += 1;
+                let desc = self.racer_desc(racer);
+                self.radio(RadioCue::new(
+                    RadioTier::Critical,
+                    Some(unit),
+                    format!(
+                        "Unit {}, I just watched {desc} {}, I'm on it.",
+                        unit.0,
+                        offence_text(kind)
+                    ),
+                ));
+                self.start_pursuit(racer, unit);
+                return;
+            }
+        }
         if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
             // violation's position, so a unit is sent to look (a camera alone never sends
@@ -237,6 +257,7 @@ impl PoliceSystem {
         before: WantedLevel,
     ) -> bool {
         let b = self.cfg.heat.heat.blatant.clone();
+        let sight = self.cfg.heat.heat.sight.clone();
         let r = &self.racers[&racer];
         let (rp, rz) = (xy(r.pos), r.pos[2]);
         let mut best: Option<(f32, usize)> = None;
@@ -251,6 +272,7 @@ impl PoliceSystem {
             let d = dist(u.body.pos, rp);
             if d <= b.range_m
                 && best.is_none_or(|x| d < x.0)
+                && crate::pursuit::in_view(u.body.heading, u.body.pos, rp, d, &sight)
                 && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rz)
             {
                 best = Some((d, i));
@@ -559,6 +581,209 @@ impl PoliceSystem {
             }
             i += 1;
         }
+    }
+
+    /// Reset in place (owner row 78): an un-wrecked AI unit that has stood stuck long enough
+    /// (see [`crate::stuck::RESET_ACTIVE_S`]) snaps to the nearest clear spot in its lane
+    /// within [`crate::stuck::RESET_RADIUS_M`] along its route, keeps its damage and drives on
+    /// as a ghost for a second. A racer that can see it gets
+    /// [`crate::stuck::RESET_VIEW_DELAY_S`] more first. No clear spot: it despawns if nobody
+    /// can see it (patrols are refilled out of sight), else tries again next think step.
+    /// Wrecked units stay down (backup replaces them).
+    pub(crate) fn maintain_resets(&mut self, world: &dyn WorldQuery) {
+        use crate::stuck;
+        let now = self.now;
+        let mut i = 0;
+        while i < self.units.len() {
+            let Some(active) = self.reset_wanted(i) else {
+                self.units[i].unstick.reset_due = None;
+                i += 1;
+                continue;
+            };
+            let due = match self.units[i].unstick.reset_due {
+                Some(t) => t,
+                None => {
+                    let in_view = self.in_racer_view(world, self.units[i].body.pos);
+                    let t = if in_view {
+                        now.plus(stuck::RESET_VIEW_DELAY_S)
+                    } else {
+                        now
+                    };
+                    self.units[i].unstick.reset_due = Some(t);
+                    t
+                }
+            };
+            if now < due {
+                i += 1;
+                continue;
+            }
+            self.rebuild_obstacles();
+            let spot = self.reset_spot(i);
+            // Its own spot is the clear one: nothing hems it in, so it is waiting for something
+            // (traffic rules, a call) rather than stuck; only a unit the stuck detector flagged
+            // (wedged on a wall, beached) is re-placed where it stands.
+            let pointless = spot.is_some_and(|(_, p, _)| {
+                dist(p, self.units[i].body.pos) < 1.0 && self.units[i].unstick.first.is_none()
+            });
+            if pointless {
+                self.units[i].unstick.reset_due = Some(now.plus(stuck::RESET_RETRY_S));
+                i += 1;
+                continue;
+            }
+            match spot {
+                Some((s, pos, heading)) => {
+                    let in_view = due > now || self.in_racer_view(world, self.units[i].body.pos);
+                    let u = &mut self.units[i];
+                    let from = u.body.pos;
+                    u.body.pos = pos;
+                    u.body.heading = heading;
+                    u.body.speed = 0.0;
+                    u.track_s = s;
+                    let blocked = std::mem::take(&mut u.unstick.blocked);
+                    let turn_hold = u.unstick.turn_hold;
+                    u.unstick = crate::stuck::UnstickState::default();
+                    u.unstick.blocked = blocked;
+                    u.unstick.turn_hold = turn_hold;
+                    u.avoid = crate::avoid::AvoidState::default();
+                    let (unit, entity) = (u.id, u.entity);
+                    self.resets.push(crate::UnitReset {
+                        unit,
+                        entity,
+                        pos,
+                        heading,
+                        ghost_s: stuck::RESET_GHOST_S,
+                    });
+                    self.stats.resets.push(crate::ResetRecord {
+                        unit,
+                        at: now,
+                        from,
+                        to: pos,
+                        active,
+                        in_view,
+                    });
+                }
+                None => {
+                    let u = &self.units[i];
+                    let near = stuck::DEADLOCK_NEAR_M * stuck::DEADLOCK_NEAR_M;
+                    let wedged = u.unstick.stand_s >= stuck::RESET_VANISH_S
+                        && self.racers.values().any(|r| {
+                            let d = sub(xy(r.pos), u.body.pos);
+                            d[0] * d[0] + d[1] * d[1] < near
+                        });
+                    if wedged {
+                        self.stats.deadlock_despawns += 1;
+                    }
+                    if wedged || self.may_vanish(world, i) {
+                        let id = self.units[i].id;
+                        self.end_response(
+                            id,
+                            crate::ResponseOutcome::Stuck(crate::stuck::StuckCause::NoContact),
+                        );
+                        for inc in self.incidents.iter_mut() {
+                            if inc.unit == Some(id) {
+                                inc.unit = None;
+                            }
+                        }
+                        self.despawn(i);
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    /// Whether unit `i` should be reset in place now (`Some(on a pursuit or search)`): an AI
+    /// ground unit, not wrecked or out of service, that has stood within
+    /// [`crate::stuck::STAND_M`] long enough while it wants to drive, and is not waiting at a
+    /// red light, holding a block or standing over a stopped racer it is after.
+    fn reset_wanted(&self, i: usize) -> Option<bool> {
+        use crate::stuck;
+        let u = &self.units[i];
+        if u.kind != UnitKind::Car
+            || u.player.is_some()
+            || u.wrecked
+            || u.assignment == Assignment::OutOfService
+            || u.role == UnitRole::Tool
+            || matches!(u.tactic, Tactic::RollingBlock)
+            || !u.cmd.track.is_drivable()
+            || u.cmd.speed_mps.min(u.planned_speed) <= stuck::WANT_MPS
+            || u.unstick.reversing()
+        {
+            return None;
+        }
+        let red = u
+            .avoid
+            .junction
+            .is_some_and(|j| j.light == Some(crate::avoid::Light::Stop) && j.s - u.track_s < 80.0);
+        // Queued at a junction (giving way, waiting to turn, cross traffic streaming past):
+        // waiting, not stuck, unless the stuck detector says otherwise.
+        let at_junction = u
+            .avoid
+            .junction
+            .is_some_and(|j| j.s - u.track_s < stuck::RESET_JUNCTION_M);
+        if red || (at_junction && u.unstick.first.is_none()) {
+            return None;
+        }
+        let target = u.assignment.target();
+        let active = matches!(
+            u.assignment,
+            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+        );
+        // Standing over a stopped racer it is after: an arrest, not a jam.
+        if let Some(r) = target.and_then(|t| self.racers.get(&t)) {
+            let slow = r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < 4.0;
+            if slow && dist(xy(r.pos), u.body.pos) < 25.0 {
+                return None;
+            }
+        }
+        let need = if active {
+            stuck::RESET_ACTIVE_S
+        } else if u.avoid.blocked_by == Some(crate::avoid::BlockedBy::Traffic) {
+            stuck::RESET_TRAFFIC_S
+        } else {
+            stuck::RESET_IDLE_S
+        };
+        (u.unstick.stand_s >= need).then_some(active)
+    }
+
+    /// The nearest clear spot in unit `i`'s lane along its route within
+    /// [`crate::stuck::RESET_RADIUS_M`]: (route position, point, heading). Uses the
+    /// obstacles as last rebuilt.
+    fn reset_spot(&self, i: usize) -> Option<(f32, [f32; 2], [f32; 2])> {
+        use crate::stuck;
+        let u = &self.units[i];
+        let tr = &u.cmd.track;
+        let len = tr.length();
+        let (id, entity) = (u.id, u.entity);
+        let others: Vec<crate::avoid::Obstacle> = self
+            .obstacles
+            .iter()
+            .filter(|o| o.unit != Some(id) && (o.entity.is_none() || o.entity != entity))
+            .copied()
+            .collect();
+        let steps = (stuck::RESET_RADIUS_M / stuck::RESET_STEP_M) as i32;
+        for k in 0..=2 * steps {
+            // 0, +1, -1, +2, -2, ...: ahead first.
+            let n = (k + 1) / 2;
+            let d = if k % 2 == 1 { n } else { -n } as f32 * stuck::RESET_STEP_M;
+            let s = u.track_s + d;
+            if s < 0.0 || s > len {
+                continue;
+            }
+            let pos = crate::unit::lane_point(tr, s, u.cmd.lane_offset_m);
+            let a = tr.point_at((s - 2.0).max(0.0));
+            let b = tr.point_at((s + 2.0).min(len));
+            let dir = sub(b, a);
+            // Within reach of where it stands, whatever its route progress says.
+            if crate::graph::len(dir) < 0.1 || dist(pos, u.body.pos) > stuck::RESET_RADIUS_M {
+                continue;
+            }
+            if reset_clear(pos, &others) {
+                return Some((s, pos, normalize(dir)));
+            }
+        }
+        None
     }
 
     /// Start logging unit `i`'s trip to call `incident` about `racer`.
@@ -1015,6 +1240,7 @@ impl PoliceSystem {
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_stuck(world);
+        self.maintain_resets(world);
         self.maintain_pool(world);
         self.dispatch_incidents(world);
         self.update_responses();
@@ -1069,7 +1295,19 @@ impl PoliceSystem {
                 let into = normalize(sub(t.point_at(s), t.point_at(s - 8.0)));
                 let out = normalize(sub(t.point_at(s + 8.0), t.point_at(s)));
                 let turn = crate::graph::dot(into, out) < 0.87;
-                crate::avoid::JunctionAhead { s, light, turn }
+                // +Z up: a positive cross product turns left.
+                let cross = into[0] * out[1] - into[1] * out[0];
+                let turn_dir = match (turn, cross > 0.0) {
+                    (false, _) => 0,
+                    (true, true) => -1,
+                    (true, false) => 1,
+                };
+                crate::avoid::JunctionAhead {
+                    s,
+                    light,
+                    turn,
+                    turn_dir,
+                }
             });
             self.units[i].avoid.junction = junction;
         }
@@ -2615,5 +2853,36 @@ impl PoliceSystem {
         self.reinforcements.retain(|r| r.racer != racer);
         self.helo_requests.retain(|h| h.racer != racer);
         self.remove_tools_for(Some(racer));
+    }
+}
+
+/// A violation in a radio line ("running a red").
+/// Whether a reset spot at `pos` is free: no other car's centre within
+/// [`crate::stuck::RESET_CLEAR_M`] and no moving car about to drive through it.
+fn reset_clear(pos: [f32; 2], others: &[crate::avoid::Obstacle]) -> bool {
+    use crate::stuck::{RESET_CLEAR_M, RESET_PATH_S};
+    others.iter().all(|o| {
+        let rel = sub(pos, o.pos);
+        if crate::graph::dot(rel, rel) < RESET_CLEAR_M * RESET_CLEAR_M {
+            return false;
+        }
+        let v = o.speed();
+        if v < 1.0 {
+            return true;
+        }
+        let dir = [o.vel[0] / v, o.vel[1] / v];
+        let along = crate::graph::dot(rel, dir);
+        let lat = crate::graph::cross(dir, rel).abs();
+        !(along > 0.0 && along < v * RESET_PATH_S + RESET_CLEAR_M && lat < 2.5)
+    })
+}
+
+fn offence_text(kind: &ViolationKind) -> &'static str {
+    match kind {
+        ViolationKind::Speeding { .. } => "speeding past me",
+        ViolationKind::RedLight => "run a red",
+        ViolationKind::WrongWay => "going the wrong way",
+        ViolationKind::Collision => "hit a car",
+        ViolationKind::Reckless => "driving like a maniac",
     }
 }

@@ -207,15 +207,82 @@ call: spawned or not, start and road distance, stuck events, outcome (`Arrived`,
 
 **Driving** uses `wp_world::drive::DriveController`, the controller civilian traffic and opponent
 racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, full-lock angle):
-- **Physical units** (`bind_unit_entity(unit, entity, geometry)`): `unit_input(unit, dt)` returns
-  the controller's pure-pursuit steer toward the unit's track, and its PID pedals toward the
-  planned speed.
+- **Physical units** (`bind_unit_entity(unit, entity, geometry)`): `unit_input(unit, dt)` drives
+  with the unit's **pro driver** (`pro.rs`, below) on top of that controller.
 - **Headless units**: `step_ground` steers with the same controller, then moves a kinematic bicycle
   body. The body keeps right (`LANE_OFFSET_M`), saturates at a grip limit, crashes when it runs
   wide and has a background traffic-hazard model. Track progress only moves forward
   (`Track::project_ahead`), so hairpins and U-turns don't snap back.
 
 Police keep only the speed planning (corner speeds, caps, tactics).
+
+### Pro driving (`pro.rs`, lead P8)
+Physical AI units with lights on (pursuit, intercept, response) drive like trained pursuit
+drivers: within ~5 % of the best race AI and (almost) never into a wall, dry or wet. Without
+lights (patrol, returning) units keep the calm lane driver they always had (pure pursuit on the
+lane, `patrol_cornering_g`, `unit.brake_mps2`). `ProDriver::drive(ctx, track, room, dt)`:
+- **Racing line** (lights on, no other vehicle within `traffic_clear_m` ahead): the next
+  `window_m` of the track, resampled every `step_m`, its polyline corners rounded
+  (`corner_round_passes`), then a lateral offset per sample minimising the summed squared
+  curvature (projected Gauss–Seidel, strides 4 → 1) inside the **drivable room**. The window
+  starts at the car's own lateral position (no jump on a re-plan, every `replan_s`). While
+  passing an obstacle, with traffic ahead or while turning round the unit tracks its lane
+  (traffic look-ahead) and only the speed profile is the pro driver's.
+- **Room** (`RoadRoom`, `RoomQuery`): built from the city's paved surfaces and lanes
+  (`RoadRoom::from_city`; the contract road network's polylines follow a lane, so they are
+  not used for widths): own-direction lanes (bus lanes yes, parking no) plus `opposing_m`
+  over the centreline, and the whole box of a junction (stop line to stop line). Kept in a
+  25 m grid. `RoadRoom::new(&RoadGraph)` is the fallback for hand-built graphs.
+- **Speed profile at the grip limit**: `v ≤ √(a_lat/|κ|)` on the line, then a backward pass
+  braking inside the friction ellipse. `a_lat = lat_g × lat_usage`, braking
+  `brake_g × brake_usage`, both × the **road grip** the sim reports (`sync_unit_feel`: wet,
+  cold, paint, aquaplaning via `wp_vehicle::Vehicle::conditions_grip`) × damage grip ×
+  **confidence** (drops `confidence_drop` per slide or run-wide, floor `confidence_min`,
+  regains `confidence_regain_per_s`). Shadowing (risk budget spent) keeps
+  `shadow_cornering_g` as a cap; a pursuit or a response uses the limit. Obstacle and junction
+  caps (`avoid`, e.g. `siren_junction_mps`) still apply on top.
+- **Late braking**: the pedal command adds the profile's own deceleration a few metres ahead
+  (feed-forward), read `lead_s` ahead in time.
+- **Slide control** (above 5 m/s; body slip less the rolling slip `½·wheelbase·yaw/v`, which
+  is large in a tight turn at a crawl): slip past `slip_deadband_rad` is countersteered
+  (`countersteer_gain`, front wheels toward the velocity); past `slide_slip_rad` the driver
+  lifts to `slide_throttle`. On the way out of a corner the throttle is capped by the friction
+  ellipse from the measured lateral load (`exit_throttle_min` at full load), so the rear stays
+  planted. Running `run_wide_m` outside the line in a corner lifts too.
+- **Recovery**: facing away from the lane ahead → turn round at `turn_around_mps`. The pro
+  driver's own stuck reverse (`stuck_s`) is off inside `PoliceSystem` (set to infinity when the
+  driver is created): round 12's un-sticking (`stuck.rs`) owns recovery there.
+- **With round 12** (merge of `origin/main` into `ws/police`): `unit_input` runs round 12's
+  manoeuvres first for every unit, lights on or off: forward U-turn and reverse swing toward a
+  target behind, give-way to a slow racer, push-through, back-out, holds behind stopped cars and
+  at lines, stuck detection and reset in place. Only the plain drive along the track at the end
+  is the pro driver's (lights on, `PoliceSystem::pro_drive`) or the lane driver's (lights off).
+  The pro driver is asked for the command speed capped by obstacle awareness and the static
+  feelers; a pass or a wall shift is driven as an exact offset (no racing line).
+- **Car limits**: `set_unit_limits(unit, CarLimits)` (`wp_sim::Sim::set_police_car_limits`);
+  default `[pro] default_limits` = the Sentinel Cruiser measured with `wp_vehicle::metrics`.
+
+Measured (`cargo test --release -p wp_opponent --test police_pace -- --nocapture`; Sentinel
+Cruiser, same car and measured capability for both, best race-AI profile = skill 1, both in
+their own-direction lanes, full `wp_sim` loop):
+
+| Course | Race AI | Police (pro) | Wall hits | Max body slip |
+|---|---|---|---|---|
+| Arterial square, best flying lap | 53.30 s | 52.73 s (−1.1 %) | 0 | 0.044 rad |
+| Hollins Drive hill sprint (hairpins, 11 %) | 59.70 s | 61.08 s (+2.3 %) | 0 | 0.049 rad |
+| Arterial square, fully wet (0.5 mm) | — | 59.22 s (+12.3 % vs dry) | 0 | 0.039 rad |
+| Hollins Drive, fully wet | — | 71.78 s (+17.5 % vs dry) | 0 | 0.033 rad |
+
+The pre-P8 driver (pure pursuit on the lane, corners planned at `pursuit_cornering_g` 0.65 g,
+braking at 6.5 m/s², emulated in the same test): arterial square 60.51 s (+13.5 %), Hollins
+Drive not finished (6 hits, stuck at a hairpin).
+
+In the city with traffic (`cargo run --release -p simcli --example police_traffic_contacts --
+pursuit 900`, 12×12 city at noon, now also counting police↔world hits), per 5 min of pursuit,
+lights on: wall hits 5.7 (`main` before P8) → 2.1; traffic contacts 0.3 → 2.4, of which 7 of 8
+are one low-speed stand-off (0.3–0.6 m/s, a held unit and a traffic car at a junction) counted
+every few seconds. Patrol (lights off) is unchanged by construction (`patrol 300`: 3 wall hits,
+as before).
 
 ### Obstacle awareness (`avoid.rs`)
 Every tick each ground unit (physical or headless) looks ahead on its own track:
@@ -344,6 +411,10 @@ racers on D's small city, with exact building line of sight and obstacle awarene
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 
+Pro driver (physical units with lights on): 2.2–3.1 µs per physics tick per unit including
+the line re-plans (`police_pace` test, release, same machine) → ≈ 12 µs per unit per 60 Hz
+frame, ≈ 0.1 ms for 8 chasing units.
+
 ## Determinism
 Absolute time is integer `SimTime` microseconds (`src/time.rs`); durations are `f32` seconds.
 The crate uses no `f64`, no `HashMap` iteration and no libm transcendentals (only `wp_math::sin_cos`
@@ -365,6 +436,12 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
 - Passing assumes the other lane exists. Feelers see buildings and tunnel walls, not rails,
   barriers or terrain steps (not in the road network data).
+- Pro driving (P8): the racing line only sees vehicles within `traffic_clear_m` ahead; a car
+  alongside in the next own-direction lane is not in the line's room. Junction caps
+  (`siren_junction_mps` 11 m/s) still hold pursuits back at every junction. Turning round in a
+  junction is a full-lock crawl, which can touch a kerb on narrow roads.
+- Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
+  in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game. PITs
   and rams need the lead unit within 35 m of a racer it can see on a fairly straight road; a

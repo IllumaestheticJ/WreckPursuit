@@ -52,15 +52,15 @@ fn night_is_slower_than_day_for_pursuit_and_reinforcements() {
     let day = run("day_core_speeder.ron");
     let night = run("night_core_speeder.ron");
     let m = |s: &PoliceRunSummary, k: &str| s.metric(k).unwrap();
-    // Pursuit starts at least 3x later at 03:00 than at noon (mean over runs).
+    // Pursuit starts later at 03:00 than at noon (mean over runs): fewer patrols. Since round
+    // 12c (rows 80 / 89) police see as far as the racer sees them (260 m at night) and the
+    // unit that watches a violation making the racer wanted pursues at once, so the night/day
+    // ratio fell from >= 3x (day 8.8 s, night 33 s) to ~1.7x (8.4 s, 14.6 s); staying out of
+    // sight still escapes (escape_break_contact_night.ron).
     let ratio = m(&night, "pursuit_start_s") / m(&day, "pursuit_start_s");
-    assert!(ratio >= 3.0, "pursuit start night/day = {ratio}");
+    assert!(ratio >= 1.5, "pursuit start night/day = {ratio}");
     assert!(m(&day, "pursuit_start_max_s") <= 20.0);
-    // Was > 60 s. Since round 12b reckless-driving calls get a unit (spawned out of sight if
-    // need be) within seconds, and blatant speeding right past a unit is recognised at once
-    // (`heat.blatant`, row 60), day or night, so a night speeder is found sooner (mean 126 s →
-    // 33 s); night is still sparse, short-sighted and > 3x slower than day.
-    assert!(m(&night, "pursuit_start_s") > 25.0);
+    assert!(m(&night, "pursuit_start_s") > 10.0);
     // Reinforcements take at least 2x as long to arrive.
     let rd = m(&day, "reinforcement_delay_s");
     let rn = m(&night, "reinforcement_delay_s");

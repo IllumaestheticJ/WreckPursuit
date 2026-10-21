@@ -12,11 +12,13 @@
 //! - [`fuzz`]: random-input/random-collision soak with invariant checks.
 //! - [`net`]: snapshot round trip on `wp_net`'s wire codec.
 //! - [`data`]: one loading code path for disk and in-memory (WASM) data.
+//! - [`car_stats`]: the menu stat-bar table (`data/stats/cars.json`).
 //!
 //! Nothing in here reads the wall clock; the CLI owns time limits.
 
 #![warn(missing_docs)]
 
+pub mod car_stats;
 pub mod data;
 pub mod determinism;
 pub mod fuzz;

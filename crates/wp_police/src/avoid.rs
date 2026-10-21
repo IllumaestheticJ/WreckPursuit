@@ -109,7 +109,7 @@ impl Obstacle {
         }
     }
 
-    fn speed(&self) -> f32 {
+    pub(crate) fn speed(&self) -> f32 {
         dot(self.vel, self.vel).sqrt()
     }
 }
@@ -219,6 +219,10 @@ pub struct JunctionAhead {
     /// The track turns there (more than ~30°).
     #[serde(default)]
     pub turn: bool,
+    /// Which way it turns there: -1 left, 0 straight on, 1 right (the unit's turn signal,
+    /// [`crate::unit::Unit::turn_signal`]; presentation only).
+    #[serde(default)]
+    pub turn_dir: i8,
 }
 
 /// The nearest vehicle in a lane corridor.
@@ -860,6 +864,7 @@ mod tests {
             s: 60.0,
             light: Some(Light::Stop),
             turn: false,
+            turn_dir: 0,
         });
         // Patrol stops before the line at a red, and holds once there.
         let far = junction_speed(red, 0.0, 10.0, false, &c);
@@ -874,12 +879,14 @@ mod tests {
             s: 60.0,
             light: Some(Light::Go),
             turn: false,
+            turn_dir: 0,
         });
         assert!(junction_speed(green, 50.0, 10.0, false, &c).is_infinite());
         let plain = Some(JunctionAhead {
             s: 60.0,
             light: None,
             turn: false,
+            turn_dir: 0,
         });
         let v = junction_speed(plain, 60.0 - c.junction_slow_m, 10.0, false, &c);
         assert!((v - c.yield_mps).abs() < 1e-3, "{v}");
@@ -897,6 +904,7 @@ mod tests {
                 s: 20.0,
                 light: Some(Light::Stop),
                 turn: false,
+                turn_dir: 0,
             }),
             ..AvoidState::default()
         };
@@ -924,6 +932,7 @@ mod tests {
             s: 30.0,
             light: None,
             turn: false,
+            turn_dir: 0,
         };
         let plain = Some(junction);
         let m = me(10.0, [1.75, 10.0]);
@@ -992,6 +1001,7 @@ mod tests {
             s: 60.0,
             light: Some(Light::Stop),
             turn: false,
+            turn_dir: 0,
         });
         let at = 60.0 - c.junction_slow_m;
         assert!((chase_junction_speed(red, at, &c) - c.chase_red_mps).abs() < 1e-3);
@@ -1000,6 +1010,7 @@ mod tests {
             s: 60.0,
             light: None,
             turn: true,
+            turn_dir: 1,
         });
         assert!((chase_junction_speed(turn, at, &c) - c.chase_turn_mps).abs() < 1e-3);
         assert!(chase_junction_speed(None, 0.0, &c).is_infinite());

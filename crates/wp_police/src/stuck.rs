@@ -101,6 +101,38 @@ pub const DEADLOCK_NEAR_M: f32 = 20.0;
 /// [`GIVE_WAY_M`]: a unit backing out of a racer's way and nosing back in again, over and over,
 /// is standing (Hollins seed 6: a unit cycled in front of a busted racer for a minute).
 pub const STAND_M: f32 = 8.0;
+/// Reset in place (owner row 78), like the player's R: an un-wrecked AI unit that has stood
+/// within [`STAND_M`] this long while it wants to drive (not at a red light, not holding a
+/// block, not arresting a stopped racer it is after) snaps to a clear spot in its lane within
+/// [`RESET_RADIUS_M`], upright, damage kept, and drives on as a ghost for [`RESET_GHOST_S`]. A
+/// unit on a pursuit or search, s.
+pub const RESET_ACTIVE_S: f32 = 8.0;
+/// ... any other unit (patrol, call, give-way stand-offs), s.
+pub const RESET_IDLE_S: f32 = 15.0;
+/// ... a unit that is not chasing and only waits behind civilian traffic (a jam clears by
+/// itself), s.
+pub const RESET_TRAFFIC_S: f32 = 40.0;
+/// Reset spots are tried along the unit's own route this far either side of it, m.
+pub const RESET_RADIUS_M: f32 = 15.0;
+/// ... in steps of, m.
+pub const RESET_STEP_M: f32 = 2.5;
+/// A reset spot has no other car's centre this close (car-sized, not the 25 m spawn
+/// clearance: a reset is meant for a jam), m.
+pub const RESET_CLEAR_M: f32 = 5.5;
+/// ... and no moving car that would reach it within this long, s.
+pub const RESET_PATH_S: f32 = 2.0;
+/// No clear spot, standing this long with a racer within [`DEADLOCK_NEAR_M`]: it despawns
+/// even in view (the cars round it are waiting for it), s.
+pub const RESET_VANISH_S: f32 = 30.0;
+/// No reset this close before a junction on its route unless the unit is in a stuck episode
+/// (queued to give way or turn is waiting, not stuck), m.
+pub const RESET_JUNCTION_M: f32 = 25.0;
+/// A unit due a reset whose own spot is the clear one checks again this much later, s.
+pub const RESET_RETRY_S: f32 = 5.0;
+/// A reset a racer could see waits this much longer (row 78: "about 2 s"), s.
+pub const RESET_VIEW_DELAY_S: f32 = 2.0;
+/// No-collision window after a reset (wp_sim keeps it a ghost until clear of other cars), s.
+pub const RESET_GHOST_S: f32 = 1.0;
 /// After backing out it waits up to this long for the racer to get past, s.
 pub const GIVE_WAY_HOLD_S: f32 = 8.0;
 /// ... while that racer is still in front of it and this close, m.
@@ -264,6 +296,9 @@ pub struct UnstickState {
     /// Gave way to this racer: wait for it to get past, until then.
     #[serde(default)]
     pub(crate) give_way_to: Option<(EntityId, SimTime)>,
+    /// Reset in place due then (row 78; delayed while a racer can see the unit).
+    #[serde(default)]
+    pub(crate) reset_due: Option<SimTime>,
     /// Seconds within [`STAND_M`] of `stand_at` (rocking back and forth on the spot counts).
     #[serde(default)]
     pub(crate) stand_s: f32,

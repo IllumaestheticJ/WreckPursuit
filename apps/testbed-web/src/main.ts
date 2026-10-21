@@ -12,7 +12,7 @@
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 // ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
-import { assistLevel, loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
+import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
@@ -38,7 +38,7 @@ import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
-import { LodDirector } from "./render/lod";
+import { LodDirector, metaIndicators } from "./render/lod";
 import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
 import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
@@ -56,6 +56,7 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
+import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
 import { ArtStyle, STYLE_LABELS, makeHeadlightPool, type StyleId } from "./render/style";
@@ -66,6 +67,7 @@ import * as THREE from "three";
 import { DriftLab } from "./drift_lab";
 import { mountTuneRow, withQuickTune } from "./tune_panel";
 import { quickTune } from "../../ui-kit/src/garage/tune";
+import { IndicatorStalk } from "./indicator_stalk";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -161,6 +163,8 @@ async function main(): Promise<void> {
   let lastMenuCountersteer: number | null = null;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
+  // The player's indicators: cosmetic and local only (no VehicleInput field; indicator_stalk.ts).
+  const stalk = new IndicatorStalk();
   scene.world.add(tagFeature(lod.fleet.group, "fleet"));
 
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
@@ -361,6 +365,14 @@ async function main(): Promise<void> {
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
   });
+  // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
+  let statTable: CarStatsTable | null = null;
+  try {
+    statTable = sim.carStats();
+  } catch (e) {
+    console.warn("car stats unavailable", e);
+  }
+  const carStats = statTable ? new CarStatBars($("car-stats"), statTable) : null;
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) {
@@ -426,6 +438,7 @@ async function main(): Promise<void> {
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
     if (first) ($("car") as HTMLSelectElement).value = first.info.car_id;
+    carStats?.show(($("car") as HTMLSelectElement).value);
     if (app.scenarioFile) ($("sc-select") as HTMLSelectElement).value = app.scenarioFile;
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -800,8 +813,16 @@ async function main(): Promise<void> {
   // ----- controls -------------------------------------------------------------------------
 
   const carSel = $("car") as HTMLSelectElement;
-  for (const id of sim.carIds()) carSel.add(new Option(id, id));
-  carSel.onchange = () => startFreeDrive(carSel.value);
+  for (const id of sim.carIds()) {
+    const opt = new Option(id, id);
+    const s = statTable?.cars[id];
+    if (s) opt.title = `${s.display_name}: ${statLine(s)}`;
+    carSel.add(opt);
+  }
+  carSel.onchange = () => {
+    carStats?.show(carSel.value);
+    startFreeDrive(carSel.value);
+  };
   mountTuneRow($("tune-row"), carSel);
 
   const scSel = $("sc-select") as HTMLSelectElement;
@@ -1068,6 +1089,13 @@ async function main(): Promise<void> {
     const n = Number(e.key);
     if (n >= 1 && n <= CAMERA_MODES.length) return rig.choose(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
     switch (e.code) {
+      // Indicator stalk (cosmetic, indicator_stalk.ts): `-` left, `=` right.
+      case "Minus":
+        stalk.toggle(-1);
+        break;
+      case "Equal":
+        stalk.toggle(1);
+        break;
       case "Period":
         frameStep(4);
         break;
@@ -1271,6 +1299,7 @@ async function main(): Promise<void> {
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
     app.input = input;
+    stalk.update(input.steer);
     const device = activeDevice();
     if (source !== app.source || device !== app.device) {
       app.source = source;
@@ -1307,7 +1336,15 @@ async function main(): Promise<void> {
     const policeDraw = sim.policeDraw();
     syncViews(meta, lod.paintOfEntity(trafficDraw));
     const tS = wi[W.tick] / 240;
-    for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
+    for (let o = 0; o < meta.length; o += META_STRIDE) {
+      const view = app.views.get(meta[o]);
+      if (!view) continue;
+      view.setMeta(meta[o + 2], tS);
+      // Police cars indicate from their unit (vehicle_meta bits); traffic gets its lamps from
+      // its draw record in lod.update, the player from the stalk below.
+      if (meta[o + 1] === VEHICLE_KIND.police) view.setIndicators(metaIndicators(meta[o + 2], tS));
+    }
+    app.views.get(app.player)?.setIndicators(stalk.lamps(tS));
     const cur = sim.states();
     const prev = sim.statesPrev();
     const punctures = sim.tirePunctures();
@@ -1679,6 +1716,15 @@ async function main(): Promise<void> {
     meshTimings,
     /** Crash effects: `fx.stats()`, `fx.setQuality("low" | "med" | "high")` (render/fx). */
     fx,
+    /** Turn signals (e2e/signals.mjs): `probe(true)` records each traffic car's flags and lit
+     * lamps per frame into `rows()` (render/lod.ts IndicatorRow); `stalk` is the player's
+     * cosmetic stalk and `player()` its lit lamps. */
+    indicators: {
+      probe: (on: boolean) => (lod.indicatorProbe = on),
+      rows: () => lod.indicatorRows.map((r) => ({ ...r })),
+      stalk,
+      player: () => app.views.get(app.player)?.indicatorsLit() ?? null,
+    },
   };
   requestAnimationFrame(frame);
   if (abandonedBust) openGarage(abandonedBust);

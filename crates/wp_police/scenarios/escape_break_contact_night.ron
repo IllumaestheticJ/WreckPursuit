@@ -1,0 +1,17 @@
+// Row 80 / 89 check (round 12c): the escape_break_contact racer at 02:00. Police now see as far
+// at night (260 m) as the racer sees them and a witness pursues at once, but a racer that breaks
+// line of sight still gets away (before round 12c no unit even spotted it in 3 runs; now one
+// pursuit, escaped). A fast racer (2.6x the limit, 0.95 g corners) out-corners capped pursuers,
+// breaks line of sight behind buildings and escapes after escape_time(level, Night).
+(
+    name: "police_escape_break_contact_night",
+    seed: 600,
+    time_of_day_h: 2.0,
+    duration_s: 300.0,
+    runs: 3,
+    stop_after_first_pursuit: true,
+    racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, violations: false, stay_in_district: false)],
+    expect: [
+        (metric: "escapes", min: 1.0, max: 3.0),
+    ],
+)

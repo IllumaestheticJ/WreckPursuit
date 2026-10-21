@@ -335,10 +335,14 @@ fn career_chase_parked(c: &mut Career, heat: f32) -> Session {
 fn brake_until_settled(s: &mut Session, max_s: u64) {
     let id = player(s);
     for _ in 0..240 * max_s {
+        // Half pedal: holds the stopped car. Above 0.5, held at a standstill, the gearbox
+        // auto-reverses (wp_vehicle drivetrain) and the "parked" player backed away from the
+        // patrol at up to 16 m/s and escaped (police round 12c pursues a second sooner, so
+        // the car was no longer pinned against the unit when reverse engaged).
         let _ = s.set_input(
             id,
             VehicleInput {
-                brake: 1.0,
+                brake: 0.5,
                 ..Default::default()
             },
         );

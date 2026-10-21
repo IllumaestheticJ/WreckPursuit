@@ -325,6 +325,14 @@ pub struct DriveCommand {
 /// Right-hand lane offset from the road centreline, m.
 pub const LANE_OFFSET_M: f32 = 1.75;
 
+/// A patrol car indicates this far before a junction where its route turns, m (≈ 3 s at a
+/// 13 m/s patrol, like traffic).
+pub const TURN_SIGNAL_BEFORE_M: f32 = 40.0;
+/// ...and keeps indicating until this far past the junction centre, m.
+pub const TURN_SIGNAL_EXIT_M: f32 = 8.0;
+/// Within this of the end of a pass it indicates back in (right), m.
+pub const PASS_RETURN_SIGNAL_M: f32 = 10.0;
+
 impl DriveCommand {
     /// Stand still.
     pub fn stop() -> Self {
@@ -406,6 +414,19 @@ pub struct Unit {
     /// (lead r13-test-fixes §4). Cleared by every new assignment.
     #[serde(default)]
     pub quiet: bool,
+    /// Measured velocity of a physical unit (XY; `sync_unit`), m/s. The body keeps speed and
+    /// heading only; the pro driver needs the slip between them.
+    #[serde(default)]
+    pub vel: [f32; 2],
+    /// What the sim reports of the car's feel (yaw rate, road grip).
+    #[serde(default)]
+    pub feel: crate::pro::UnitFeel,
+    /// Limits of the unit's car (`PoliceSystem::set_unit_limits`); `None` = the `[pro]` defaults.
+    #[serde(default)]
+    pub limits: Option<crate::pro::CarLimits>,
+    /// Pro driver of a physical unit, created on first use.
+    #[serde(skip)]
+    pub pro: Option<crate::pro::ProDriver>,
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -463,6 +484,10 @@ impl Unit {
             unstick: crate::stuck::UnstickState::default(),
             chase_route: None,
             quiet: false,
+            vel: [0.0, 0.0],
+            feel: crate::pro::UnitFeel::default(),
+            limits: None,
+            pro: None,
         }
     }
 
@@ -472,6 +497,35 @@ impl Unit {
         self.controller.get_or_insert_with(|| {
             DriveController::new(DriveGains::TRAFFIC, g.wheelbase_m, g.max_steer_rad, v)
         })
+    }
+
+    /// Turn signal for the renderer: -1 left, 0 off, 1 right (ported from the unmerged
+    /// `claude/happy-knuth-g39ogc`, owner playtest 2026-10-21). Off with lights and siren on
+    /// and for helicopters. Otherwise the unit indicates [`TURN_SIGNAL_BEFORE_M`] before a
+    /// junction where its route turns (until [`TURN_SIGNAL_EXIT_M`] past it), pulling out to
+    /// pass a stopped vehicle (left) and pulling back in at the end of the pass (right).
+    /// Presentation only: nothing in the sim reads it.
+    pub fn turn_signal(&self) -> i8 {
+        if self.kind != UnitKind::Car || self.cmd.siren || !self.cmd.track.is_drivable() {
+            return 0;
+        }
+        if self.avoid.pass_offset_m.is_some() {
+            return if self.avoid.pass_until_s - self.track_s < PASS_RETURN_SIGNAL_M {
+                1
+            } else {
+                -1
+            };
+        }
+        match self.avoid.junction {
+            Some(j)
+                if j.turn_dir != 0
+                    && (-TURN_SIGNAL_EXIT_M..TURN_SIGNAL_BEFORE_M)
+                        .contains(&(j.s - self.track_s)) =>
+            {
+                j.turn_dir
+            }
+            _ => 0,
+        }
     }
 
     /// Available for a new job (not busy with a tool, not out of service).
@@ -837,5 +891,48 @@ mod tests {
             assert!(!r.crashed, "crashed at tick {i} pos {:?}", u.body.pos);
         }
         assert!(u.body.pos[0] > 150.0, "{:?}", u.body.pos);
+    }
+
+    #[test]
+    fn turn_signals_before_turns_and_passes_but_not_with_lights() {
+        let mut u = Unit::new(
+            UnitId(1),
+            UnitKind::Car,
+            UnitRole::Reinforcement,
+            [0.0, 0.0],
+            [0.0, 1.0],
+            1.0,
+        );
+        u.set_command(DriveCommand {
+            track: l_track(),
+            speed_mps: 10.0,
+            cornering_g: 0.4,
+            siren: false,
+            lane_offset_m: LANE_OFFSET_M,
+        });
+        u.avoid.junction = Some(crate::avoid::JunctionAhead {
+            s: 200.0,
+            light: None,
+            turn: true,
+            turn_dir: 1,
+        });
+        u.track_s = 100.0;
+        assert_eq!(u.turn_signal(), 0, "too far before the junction");
+        u.track_s = 170.0;
+        assert_eq!(u.turn_signal(), 1);
+        u.track_s = 205.0;
+        assert_eq!(u.turn_signal(), 1, "still in the junction");
+        u.track_s = 215.0;
+        assert_eq!(u.turn_signal(), 0, "through it");
+        // Passing: left while pulling out, right while pulling back in.
+        u.track_s = 50.0;
+        u.avoid.pass_offset_m = Some(-1.75);
+        u.avoid.pass_until_s = 80.0;
+        assert_eq!(u.turn_signal(), -1);
+        u.track_s = 75.0;
+        assert_eq!(u.turn_signal(), 1);
+        // Lights on: no indicators.
+        u.cmd.siren = true;
+        assert_eq!(u.turn_signal(), 0);
     }
 }
