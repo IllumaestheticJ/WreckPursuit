@@ -1626,6 +1626,12 @@ impl PoliceSystem {
         if self.units[i].assignment == a {
             return;
         }
+        // Booking a racer it captured: no new chase yet (`pursuit::ARREST_BUSY_S`).
+        if matches!(a, Assignment::Pursue { .. } | Assignment::Intercept { .. })
+            && self.booking(self.units[i].id)
+        {
+            return;
+        }
         // A unit's first patrol is not "resuming" anything: no line (13 units "resuming
         // patrol" at the start held the channel for ≈ 25 s).
         let first_patrol =
@@ -1964,6 +1970,7 @@ impl PoliceSystem {
         let mut best: Option<(f32, usize)> = None;
         for (i, u) in self.units.iter().enumerate() {
             if !u.available()
+                || self.booking(u.id)
                 || u.player.is_some()
                 || !matches!(
                     u.role,
@@ -2614,6 +2621,7 @@ impl PoliceSystem {
             .filter(|&i| {
                 let u = &self.units[i];
                 u.available()
+                    && !self.booking(u.id)
                     && u.player.is_none()
                     && matches!(
                         u.role,

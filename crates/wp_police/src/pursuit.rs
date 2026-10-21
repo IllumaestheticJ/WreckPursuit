@@ -31,6 +31,11 @@ use crate::unit::{
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
+/// A unit that captured a racer is busy booking it this long: it counts for no other capture
+/// and takes no new pursuit or intercept (Hollins hairpin: one unit stopped in the racing line
+/// arrested the whole field as it queued up behind, one after another), s.
+pub const ARREST_BUSY_S: f32 = 30.0;
+
 /// Off the road by `d`, a route joins it at its first node at least this many `d` away.
 const REJOIN_NODE_PER_M: f32 = 2.0;
 /// ... when that node lies off to the side of its heading (cosine below this) and the car
@@ -178,6 +183,7 @@ impl PoliceSystem {
             let pz = self.racers[&id].pos[2];
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
+                nearest_chaser_m: f32::INFINITY,
                 ..Default::default()
             };
             let mut best_spot = f32::INFINITY;
@@ -189,7 +195,14 @@ impl PoliceSystem {
                 let d = dist(u.body.pos, p);
                 match u.kind {
                     UnitKind::Car => {
-                        o.nearest_unit_m = o.nearest_unit_m.min(d);
+                        // Booking another racer: not there to arrest this one.
+                        let booking = self.arresting.get(&u.id).is_some_and(|t| self.now < *t);
+                        if !booking {
+                            o.nearest_unit_m = o.nearest_unit_m.min(d);
+                        }
+                        if !booking && u.assignment.target() == Some(id) {
+                            o.nearest_chaser_m = o.nearest_chaser_m.min(d);
+                        }
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
@@ -274,6 +287,7 @@ impl PoliceSystem {
             }
             let o = self.obs.get(&id).copied().unwrap_or(RacerObs {
                 nearest_unit_m: f32::INFINITY,
+                nearest_chaser_m: f32::INFINITY,
                 ..Default::default()
             });
             let p = xy(self.racers[&id].pos);
@@ -289,6 +303,7 @@ impl PoliceSystem {
             let inp = RuleInputs {
                 seen: o.seen,
                 nearest_unit_m: o.nearest_unit_m,
+                nearest_chaser_m: o.nearest_chaser_m,
                 in_safehouse,
                 speed_mps: speed,
                 district,
@@ -376,6 +391,11 @@ impl PoliceSystem {
                 self.assign(i, Assignment::Pursue { target: racer });
             }
         }
+    }
+
+    /// Whether unit `id` is still booking a racer it captured (see [`ARREST_BUSY_S`]).
+    pub(crate) fn booking(&self, id: UnitId) -> bool {
+        self.arresting.get(&id).is_some_and(|t| self.now < *t)
     }
 
     /// Units credited with capturing `racer`: the closest in-service ground unit assigned to
@@ -500,6 +520,14 @@ impl PoliceSystem {
             });
         }
         self.trails.remove(&racer);
+        if let (Some(u), true) = (capturer, outcome.is_capture()) {
+            let ai = self
+                .unit_index(u)
+                .is_some_and(|i| self.units[i].player.is_none());
+            if ai {
+                self.arresting.insert(u, now.plus(ARREST_BUSY_S));
+            }
+        }
         self.pending.push(PoliceEvent::PursuitEnded {
             racer,
             outcome,

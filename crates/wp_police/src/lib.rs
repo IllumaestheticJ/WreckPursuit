@@ -414,6 +414,8 @@ pub(crate) struct RacerObs {
     pub(crate) witness: Option<UnitId>,
     /// Nearest ground unit distance, m.
     pub(crate) nearest_unit_m: f32,
+    /// Nearest ground unit chasing this racer, m.
+    pub(crate) nearest_chaser_m: f32,
 }
 
 /// Police state for one instance.
@@ -441,6 +443,8 @@ pub struct PoliceSystem {
     /// The pursuit start each racer's first backup was logged for (see
     /// `PoliceStats::first_backup_delays_s`).
     pub(crate) first_backup: BTreeMap<EntityId, SimTime>,
+    /// Units booking a racer they captured, until when (see `pursuit::ARREST_BUSY_S`).
+    pub(crate) arresting: BTreeMap<UnitId, SimTime>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
@@ -598,6 +602,7 @@ impl PoliceSystem {
             racers: BTreeMap::new(),
             last_ambush: BTreeMap::new(),
             first_backup: BTreeMap::new(),
+            arresting: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
             radar_over: BTreeMap::new(),
