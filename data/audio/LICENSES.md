@@ -12,7 +12,6 @@ The tools that did it live in the integration doc (`docs/integration/audio.md`, 
 ## Attribution (CC-BY)
 
 - **"Car Engine Loop 96kHz, 4s"** by **qubodup** — https://opengameart.org/content/car-engine-loop-96khz-4s — licensed [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/). Modified (see table). Used in: `packs/engine_rec_i4/mid_on.ogg`, `packs/engine_rec_i4/mid_off.ogg`.
-- **"Engine-loop heavy vehicle/tank"** by **Nayckron** — https://opengameart.org/content/engine-loop-heavy-vehicletank — licensed [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/). Modified (see table). Used in: `packs/engine_rec_v8/idle.ogg`, `packs/engine_rec_v8/low_on.ogg`, `packs/engine_rec_v8/mid_on.ogg`, `packs/engine_rec_v8/high_on.ogg`, `packs/engine_rec_v8/low_off.ogg`, `packs/engine_rec_v8/high_off.ogg`.
 - **"Car tire squeal skid loop"** by **qubodup (edit of audible-edge, freesound #71739)** — https://opengameart.org/content/car-tire-squeal-skid-loop — licensed [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/). Modified (see table). Used in: `packs/world_rec/squeal.ogg`.
 - **"WWS Policecarsiren (Wikimedia Commons, Work With Sounds)"** by **Work With Sounds / Konrad Gutkowski** — https://commons.wikimedia.org/wiki/File:WWS_Policecarsiren.ogg — licensed [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). Modified (see table). Used in: `packs/siren_rec/hilo.ogg`.
 
@@ -23,7 +22,6 @@ These credits are also shown in the testbed's F1 help overlay.
 - [Car Sound Effects Pack (Low Quality)](https://opengameart.org/content/car-sound-effects-pack-low-quality) — GGBotNet — CC0 1.0
 - [Car Engine Loop 96kHz, 4s](https://opengameart.org/content/car-engine-loop-96khz-4s) — qubodup — CC-BY 3.0
 - [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) — domasx2 (from a public-domain pdsounds.org recording) — CC0 1.0
-- [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) — Nayckron — CC-BY 3.0
 - [Steam release sounds](https://opengameart.org/content/steam-release-sounds) — bart — CC0 1.0
 - [Car tire squeal skid loop](https://opengameart.org/content/car-tire-squeal-skid-loop) — qubodup (edit of audible-edge, freesound #71739) — CC-BY 3.0
 - [Some sounds](https://opengameart.org/content/some-sounds-0) — Ziph — CC0 1.0
@@ -49,17 +47,6 @@ These credits are also shown in the testbed's F1 help overlay.
 | packs/engine_rec_i4/mid_off.ogg | CC-BY 3.0 | qubodup | [Car Engine Loop 96kHz, 4s](https://opengameart.org/content/car-engine-loop-96khz-4s) | engine-loop-1.wav | mono, low-pass 900 Hz (overrun layer), crossfade loop 0.08s, -24 LUFS |
 | packs/engine_rec_i4/high_off.ogg | CC0 1.0 | GGBotNet | [Car Sound Effects Pack (Low Quality)](https://opengameart.org/content/car-sound-effects-pack-low-quality) | Car_Engine_Loop.ogg | mono, low-pass 1.2 kHz (overrun layer), crossfade loop 0.08s, -24 LUFS |
 | packs/engine_rec_v6/idle.ogg | CC0 1.0 | domasx2 (from a public-domain pdsounds.org recording) | [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) | loop_0.wav | mono, crossfade loop 0.02s, -20 LUFS |
-| packs/engine_rec_v6/low_on.ogg | CC0 1.0 | domasx2 (from a public-domain pdsounds.org recording) | [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) | loop_2_0.wav | mono, crossfade loop 0.02s, -20 LUFS |
-| packs/engine_rec_v6/mid_on.ogg | CC0 1.0 | domasx2 (from a public-domain pdsounds.org recording) | [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) | loop_4_0.wav | mono, crossfade loop 0.02s, -20 LUFS |
-| packs/engine_rec_v6/high_on.ogg | CC0 1.0 | domasx2 (from a public-domain pdsounds.org recording) | [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) | loop_5_0.wav | mono, crossfade loop 0.02s, -20 LUFS |
-| packs/engine_rec_v6/low_off.ogg | CC0 1.0 | domasx2 (from a public-domain pdsounds.org recording) | [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) | loop_1_0.wav | mono, low-pass 700 Hz (overrun layer), crossfade loop 0.02s, -24 LUFS |
-| packs/engine_rec_v6/high_off.ogg | CC0 1.0 | domasx2 (from a public-domain pdsounds.org recording) | [racing car engine sound loops](https://opengameart.org/content/racing-car-engine-sound-loops) | loop_3_0.wav | mono, low-pass 900 Hz (overrun layer), crossfade loop 0.02s, -24 LUFS |
-| packs/engine_rec_v8/idle.ogg | CC-BY 3.0 | Nayckron | [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) | engine_heavy_slow_loop.wav | mono, crossfade loop 0.08s, -20 LUFS |
-| packs/engine_rec_v8/low_on.ogg | CC-BY 3.0 | Nayckron | [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) | engine_heavy_loop.wav | mono, crossfade loop 0.08s, -20 LUFS |
-| packs/engine_rec_v8/mid_on.ogg | CC-BY 3.0 | Nayckron | [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) | engine_heavy_average_loop.wav | mono, crossfade loop 0.08s, -20 LUFS |
-| packs/engine_rec_v8/high_on.ogg | CC-BY 3.0 | Nayckron | [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) | engine_heavy_fast_loop.wav | mono, crossfade loop 0.08s, -20 LUFS |
-| packs/engine_rec_v8/low_off.ogg | CC-BY 3.0 | Nayckron | [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) | engine_heavy_loop.wav | mono, low-pass 500 Hz (overrun layer), crossfade loop 0.08s, -24 LUFS |
-| packs/engine_rec_v8/high_off.ogg | CC-BY 3.0 | Nayckron | [Engine-loop heavy vehicle/tank](https://opengameart.org/content/engine-loop-heavy-vehicletank) | engine_heavy_average_loop.wav | mono, low-pass 700 Hz (overrun layer), crossfade loop 0.08s, -24 LUFS |
 | packs/engine_rec_turbo/blowoff_1.ogg | CC0 1.0 | bart | [Steam release sounds](https://opengameart.org/content/steam-release-sounds) | steam hisses - Marker #1.wav | mono, first 0.6 s, exponential decay, peak −1 dBFS |
 | packs/engine_rec_turbo/blowoff_2.ogg | CC0 1.0 | bart | [Steam release sounds](https://opengameart.org/content/steam-release-sounds) | steam hisses - Marker #3.wav | mono, first 0.6 s, exponential decay, peak −1 dBFS |
 | packs/engine_rec_turbo/blowoff_3.ogg | CC0 1.0 | bart | [Steam release sounds](https://opengameart.org/content/steam-release-sounds) | steam hisses - Marker #4.wav | mono, first 0.6 s, exponential decay, peak −1 dBFS |

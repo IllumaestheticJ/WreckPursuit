@@ -6,9 +6,10 @@
 // capture comes sooner, 129.3 s at 25 m/s (was 150.7-168.9 s); the window starts at 115 s.
 // Row 117 (auto clutch stays engaged once moving, revs follow road speed): police units pull
 // through their gears without the old clutch slip, capture at 111.7 s; window starts at 100 s.
+// Row 119: re-seeded to 56 with the escape scenario (see there); captured at 124.7 s.
 (
     name: "police_tunnel_escape_founders_cut_control",
-    seed: 51,
+    seed: 56,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

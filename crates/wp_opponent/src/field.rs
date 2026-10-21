@@ -284,6 +284,9 @@ struct Obstacle {
     /// Its heading along the corridor (cosine to the corridor direction; −1 = facing me
     /// head on).
     facing: f32,
+    /// A racer out of the race (fled, busted, retired) driving or standing on the road: not
+    /// racing anyone, so anyone may go round it when it is slower than they are.
+    out_of_race: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -1384,6 +1387,7 @@ impl Field {
                             passing: r.tactic == Tactic::Overtake,
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
                             facing: 1.0,
+                            out_of_race: false,
                         });
                         continue;
                     }
@@ -1399,6 +1403,9 @@ impl Field {
             self.hints.insert(v.entity, cp.index);
             if let Some(mut o) = vehicle_obstacle(&self.corridor, who, cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.out_of_race = self
+                    .racer_index(v.entity)
+                    .is_some_and(|k| !self.racers[k].in_race());
                 out.push(o);
             }
         }
@@ -1433,6 +1440,9 @@ impl Field {
             let cp = corridor.project(pos, Some(me.hint), 80);
             if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
+                o.out_of_race = self
+                    .racer_index(v.entity)
+                    .is_some_and(|k| !self.racers[k].in_race());
                 out.push(o);
             }
         }
@@ -1620,13 +1630,21 @@ fn decide_racer(
         // that just turned round, a slow climber) that has held me up for 4 s: even a careful
         // driver goes round it on the opposing lanes when the pass checks find them clear.
         let crawl_mps = (0.7 * corridor.interp(&profile.v, r.s + 30.0)).max(6.0);
-        let crawler_ahead = r.blocked_s > 4.0
-            && obstacles.iter().any(|o| {
-                !matches!(o.who, Who::Racer(_)) && o.v_s > 0.5 && o.v_s < crawl_mps && {
-                    let ds = corridor.delta_s(r.s, o.s);
-                    ds > 0.0 && ds < 40.0
+        // A racer out of the race (fled, busted, retired, rolling on to a place to stop) is
+        // gone round as soon as it holds me up at all (Hollins, police seed 6: the field crawled
+        // behind a fled racer through the hairpins for a minute and got caught there).
+        let crawler_ahead = obstacles.iter().any(|o| {
+            let ds = corridor.delta_s(r.s, o.s);
+            ds > 0.0
+                && ds < 40.0
+                && !matches!(o.who, Who::Racer(_))
+                && o.v_s > 0.5
+                && if o.out_of_race {
+                    r.blocked_s > 1.5 && o.v_s < 0.9 * corridor.interp(&profile.v, o.s)
+                } else {
+                    r.blocked_s > 4.0 && o.v_s < crawl_mps
                 }
-            });
+        });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
             && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
@@ -1745,10 +1763,19 @@ fn decide_racer(
                         && !matches!(x.o.who, Who::Racer(_))
                         && (r.n < lim_lo - 1.0 || x.o.facing < -0.3)
                 });
+            // Nose up to a parked car (closer than the creep stop gap allows a car to steer out
+            // round it): back out a little first (Hollins, police seed 6: the last racer stopped
+            // 0.9 m behind a busted car and waited there for the rest of the race).
+            let nosed_up = rel.iter().any(|x| {
+                x.ds > 0.0
+                    && x.o.parked
+                    && x.gap < CREEP_STOP_GAP_M + 0.5
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w
+            });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
                 && wants_to_move
-                && ((!held_by_car && r.throttle > 0.3) || head_on)
+                && ((!held_by_car && r.throttle > 0.3) || head_on || nosed_up)
             {
                 r.stuck_s += dt;
             } else if r.tactic != Tactic::Reverse {
@@ -1758,8 +1785,9 @@ fn decide_racer(
                 r.tactic = Tactic::Reverse;
                 r.tactic_ticks = 0;
                 r.stuck_s = 0.0;
-                // Nose to nose: back out far enough to steer into my own lane.
-                r.reverse_s = if head_on { 3.0 } else { 1.6 };
+                // Nose to nose, or nosed up to a parked car: back out far enough to steer
+                // round it (a car needs ~5 m of travel to move 1.5 m sideways).
+                r.reverse_s = if head_on || nosed_up { 3.0 } else { 1.6 };
             }
         }
 
@@ -2130,7 +2158,11 @@ fn decide_racer(
                 // Out of the race, not in a tight bend either: there is no room to pass a car
                 // stopped in a hairpin (Hollins, police seeds 3-6: a racer busted in the first
                 // hairpin held the field for the rest of the race).
-                let in_bend = out_of_race
+                // Same for a car pulling over for the police: stopped in a hairpin it closes
+                // the road while the unit takes its time (Hollins, police seed 6: a racer
+                // yielding mid-hairpin held the two behind it for a minute until they were
+                // caught too).
+                let in_bend = (out_of_race || r.tactic == Tactic::Yield)
                     && (-5..=10).any(|j| {
                         line.curvature[corridor.wrap(i0 + j)].abs() > 1.0 / PARK_MIN_RADIUS_M
                     });
@@ -2614,6 +2646,7 @@ fn vehicle_obstacle(
         passing: false,
         parked: false,
         facing: geom::dot(fwd, t),
+        out_of_race: false,
     })
 }
 
@@ -2664,6 +2697,7 @@ fn civilians_on(
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
             facing: geom::dot(f, t),
+            out_of_race: false,
         });
     }
     out
@@ -2807,14 +2841,23 @@ fn plan_pass(
             if !in_lane {
                 continue;
             }
-            if q.ds > 0.0 && q.ds < target.ds + 2.0 * hl + 6.0 {
+            // Round a parked car at a crawl only what stands beside it closes that lane: a car
+            // standing further up it (the unit that caught a busted racer) is dodged by tucking
+            // back in behind the parked one (Hollins, police seed 6).
+            let beside = if o.parked {
+                target.ds + hl + o.half_len + 1.5
+            } else {
+                target.ds + 2.0 * hl + 6.0
+            };
+            if q.ds > 0.0 && q.ds < beside {
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
             // Oncoming traffic in that lane: it covers the distance too. A car standing in
             // it anywhere along the pass closes it as well (I would end up nose to nose).
             let oncoming = q.o.v_s < -1.0 && q.ds < pass_dist + (-q.o.v_s) * t_clear + 30.0;
-            let standing = q.o.v_s.abs() < 1.0 && q.ds < pass_dist + 10.0;
+            let standing =
+                q.o.v_s.abs() < 1.0 && q.ds < if o.parked { beside } else { pass_dist + 10.0 };
             if q.ds > 0.0 && (oncoming || standing) {
                 why = PassReject::LaneAhead;
                 continue 'side;
@@ -2897,6 +2940,7 @@ mod tests {
             passing: false,
             parked: true,
             facing: -1.0,
+            out_of_race: false,
         }
     }
 

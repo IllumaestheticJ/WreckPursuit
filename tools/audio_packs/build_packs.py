@@ -12,7 +12,6 @@ DL, OUT = sys.argv[1], sys.argv[2]
 SR = 44100
 K = "kenney_impact/Audio"
 GG = "car-sound-effects-pack-low-quality/car_sound_effects_pack.zip_x"
-HV = "engine-loop-heavy-vehicletank/engine-loop-heavy-pack_0.7z_x/engine-loop-heavy-pack/WAV"
 ZI = "some-sounds-0/all-in-one_0.zip_x"
 RD = "75-cc0-breaking-falling-hit-sfx/sfx_breaking_and_falling.zip_x"
 
@@ -21,7 +20,6 @@ SOURCES = {
     "qubodup_engine": dict(page="https://opengameart.org/content/car-engine-loop-96khz-4s", title="Car Engine Loop 96kHz, 4s", author="qubodup", licence="CC-BY 3.0"),
     "ggbotnet": dict(page="https://opengameart.org/content/car-sound-effects-pack-low-quality", title="Car Sound Effects Pack (Low Quality)", author="GGBotNet", licence="CC0 1.0"),
     "domasx2": dict(page="https://opengameart.org/content/racing-car-engine-sound-loops", title="racing car engine sound loops", author="domasx2 (from a public-domain pdsounds.org recording)", licence="CC0 1.0"),
-    "nayckron": dict(page="https://opengameart.org/content/engine-loop-heavy-vehicletank", title="Engine-loop heavy vehicle/tank", author="Nayckron", licence="CC-BY 3.0"),
     "squeal": dict(page="https://opengameart.org/content/car-tire-squeal-skid-loop", title="Car tire squeal skid loop", author="qubodup (edit of audible-edge, freesound #71739)", licence="CC-BY 3.0"),
     "scrapes": dict(page="https://opengameart.org/content/scrapes", title="Scrapes", author="AntumDeluge", licence="CC0 1.0"),
     "crash": dict(page="https://opengameart.org/content/crash-collision", title="Crash Collision", author="qubodup", licence="CC0 1.0"),
@@ -128,16 +126,10 @@ loop("engine_rec_i4", "high_off.ogg", lowpass(load(f"{GG}/Car_Engine_Loop.ogg", 
 R = "racing-car-engine-sound-loops"
 def tile(x, secs):  # short loops: repeat to ≥ secs for smoother crossfade
     return np.tile(x, int(np.ceil(secs * SR / len(x))))
-for name, f in [("idle.ogg", "loop_0.wav"), ("low_on.ogg", "loop_2_0.wav"), ("mid_on.ogg", "loop_4_0.wav"), ("high_on.ogg", "loop_5_0.wav")]:
-    loop("engine_rec_v6", name, load(f"{R}/{f}"), "domasx2", f, "mono", xf=0.02)
-loop("engine_rec_v6", "low_off.ogg", lowpass(load(f"{R}/loop_1_0.wav"), 700.0), "domasx2", "loop_1_0.wav", "mono, low-pass 700 Hz (overrun layer)", lufs=-24, xf=0.02)
-loop("engine_rec_v6", "high_off.ogg", lowpass(load(f"{R}/loop_3_0.wav"), 900.0), "domasx2", "loop_3_0.wav", "mono, low-pass 900 Hz (overrun layer)", lufs=-24, xf=0.02)
-
-for name, f in [("idle.ogg", "faster_speeds/engine_heavy_slow_loop.wav"), ("low_on.ogg", "engine_heavy_loop.wav"),
-                ("mid_on.ogg", "faster_speeds/engine_heavy_average_loop.wav"), ("high_on.ogg", "faster_speeds/engine_heavy_fast_loop.wav")]:
-    loop("engine_rec_v8", name, load(f"{HV}/{f}"), "nayckron", os.path.basename(f), "mono")
-loop("engine_rec_v8", "low_off.ogg", lowpass(load(f"{HV}/engine_heavy_loop.wav"), 500.0), "nayckron", "engine_heavy_loop.wav", "mono, low-pass 500 Hz (overrun layer)", lufs=-24)
-loop("engine_rec_v8", "high_off.ogg", lowpass(load(f"{HV}/faster_speeds/engine_heavy_average_loop.wav"), 700.0), "nayckron", "engine_heavy_average_loop.wav", "mono, low-pass 700 Hz (overrun layer)", lufs=-24)
+# Only the idle loop of this set is used (engine_rec_v6 / _i6 / _v8 idle): its other loops span
+# 1,300-2,300 rpm of one car and the heavy-vehicle (Nayckron) loops fire at 16-26 Hz, too far from
+# a road car's rev range to anchor at their firing frequency ("engine sounds are bad", 2026-10-21).
+loop("engine_rec_v6", "idle.ogg", load(f"{R}/loop_0.wav"), "domasx2", "loop_0.wav", "mono", xf=0.02)
 
 # turbo: blow-off valve stand-ins from recorded steam/air releases (short, high-passed)
 for i, m in enumerate([1, 3, 4]):

@@ -65,7 +65,12 @@ fn engine_layer_selection_is_monotone_in_rpm_for_every_car() {
     for (id, def) in &lib.cars {
         let c = car(id);
         let e = &c.def.engine;
-        let layers = EngineLayers::resolve(&lib.packs[&def.engine_pack], e.idle_rpm, e.redline_rpm);
+        let layers = EngineLayers::resolve(
+            &lib.packs[&def.engine_pack],
+            &def.engine,
+            e.idle_rpm,
+            e.redline_rpm,
+        );
         let mut prev_on = f32::MIN;
         let mut prev_off = f32::MIN;
         let mut prev_dom_root = 0.0;
@@ -90,10 +95,15 @@ fn engine_layer_selection_is_monotone_in_rpm_for_every_car() {
             prev_dom_root = dom;
             rpm += 25.0;
         }
-        // Idle sits on the idle layer, the top of the range on the highest on-layer.
-        assert_eq!(
-            layers.layers[layers.dominant_on_layer(e.idle_rpm)].root_rpm,
-            e.idle_rpm
+        // Idle plays a low layer near its own pitch (recorded packs root each loop at its
+        // measured firing frequency, not at the car's idle), the top of the range the highest
+        // on-layer.
+        let idle_layer = &layers.layers[layers.dominant_on_layer(e.idle_rpm)];
+        let rate = e.idle_rpm / idle_layer.root_rpm;
+        assert!(
+            (0.5..=2.0).contains(&rate),
+            "{id}: idle plays {} at {rate:.2}x",
+            idle_layer.cue
         );
         let top = layers
             .layers
@@ -799,6 +809,179 @@ fn grass_cues_are_soft() {
             p.cues[cues::SCRUB_GRASS].gain < p.cues[cues::SCRUB].gain,
             "{}",
             p.id
+        );
+        checked += 1;
+    }
+    assert!(checked > 0);
+}
+
+/// Asphalt drive through the director: a straight cruise (tiny real slip) plays the asphalt
+/// rolling loop alone, getting louder and brighter (pitch → noise low-pass) with speed; ABS
+/// braking whose slip cycles around the peak plays the squeal once and holds it (it used to
+/// stop and restart it every 50-100 ms).
+#[test]
+fn asphalt_drive_rolls_quietly_and_squeals_once_under_abs() {
+    use wp_contracts::{SurfaceType, WheelState};
+    let (mut dir, mut s) = one_car_dir();
+    let wheel = |v: f32, slip_ratio: f32, slip_angle: f32| WheelState {
+        omega: v / 0.33,
+        slip_ratio,
+        slip_angle,
+        fz_n: 4000.0,
+        surface: SurfaceType::Asphalt,
+        contact: true,
+        ..Default::default()
+    };
+    let surf = VoiceId::new(1, slot::SURFACE);
+    let squeal = VoiceId::new(1, slot::SQUEAL);
+    let mut tick = 0;
+    let mut last_surface: Option<VoiceParams> = None;
+    let mut run = |s: &mut VehicleState, frames: u64, kmh: f32, sr: &dyn Fn(u64) -> f32| {
+        let v = kmh / 3.6;
+        let mut cmds = Vec::new();
+        for f in 0..frames {
+            s.lin_vel = [0.0, v, 0.0];
+            s.speed_mps = v;
+            s.wheel_states = [wheel(v, sr(f), 0.003); 4];
+            let c = step(&mut dir, s, tick, &[]);
+            for c in &c {
+                match c {
+                    AudioCommand::Play { voice, params, .. }
+                    | AudioCommand::Set { voice, params }
+                        if *voice == surf =>
+                    {
+                        last_surface = Some(*params);
+                    }
+                    _ => {}
+                }
+            }
+            cmds.extend(c);
+            tick += 4;
+        }
+        (cmds, last_surface)
+    };
+    let (c50, p50) = run(&mut s, 120, 50.0, &|_| 0.002);
+    let (c100, p100) = run(&mut s, 120, 100.0, &|_| 0.002);
+    for c in [&c50, &c100] {
+        for cue in ["tire/squeal", "tire/spin", "tire/scrub_loose"] {
+            assert_eq!(plays(c, cue), 0, "{cue} while cruising");
+        }
+    }
+    assert_eq!(plays(&c50, "surface/asphalt"), 1);
+    assert_eq!(plays(&c100, "surface/asphalt"), 0, "held, not restarted");
+    let (p50, p100) = (p50.unwrap(), p100.unwrap());
+    assert!(p100.gain > 1.3 * p50.gain, "{} {}", p50.gain, p100.gain);
+    assert!(p100.pitch > p50.pitch, "brighter with speed");
+    // ABS stop: slip ratio 3 frames past the peak, 3 frames released.
+    let (abs, _) = run(&mut s, 90, 60.0, &|f| if f % 6 < 3 { -0.2 } else { -0.03 });
+    assert_eq!(plays(&abs, "tire/squeal"), 1);
+    let stops = abs
+        .iter()
+        .filter(|c| matches!(c, AudioCommand::Stop { voice, .. } if *voice == squeal))
+        .count();
+    assert_eq!(stops, 0, "squeal held through the ABS cycling");
+}
+
+/// Modelled share of a noise cue's power above `f_hz` at playback `pitch`: white noise through
+/// the `noise` synth's 2nd-order high-pass and `lp_stages` 2nd-order low-passes (Q 0.707,
+/// cut-off `lowpass_hz × pitch^track`), like `synth.ts`. The rumble and peak terms (low
+/// frequencies) are left out, so this over-estimates the bright share.
+fn bright_share(params: &BTreeMap<String, f32>, pitch: f32, f_hz: f32) -> f32 {
+    let hp = params.get("highpass_hz").copied().unwrap_or(60.0);
+    let track = params.get("track").copied().unwrap_or(0.0);
+    let lp = params.get("lowpass_hz").copied().unwrap_or(2000.0) * pitch.powf(track);
+    let stages = params.get("lp_stages").copied().unwrap_or(1.0).max(1.0) as i32;
+    let (mut total, mut above) = (0.0f64, 0.0f64);
+    let mut f = 20.0f32;
+    while f < 20000.0 {
+        let h = (f / hp).powi(4);
+        let p = h / (1.0 + h) / (1.0 + (f / lp).powi(4)).powi(stages);
+        total += p as f64;
+        if f >= f_hz {
+            above += p as f64;
+        }
+        f += 5.0;
+    }
+    (above / total) as f32
+}
+
+/// The paved rolling loops of every world pack are tyre roar, not hiss: asphalt is a
+/// two-stage low-pass that follows speed with almost nothing above 4 kHz even at 140 km/h;
+/// wet asphalt keeps some spray brightness but is no longer an 0.8-4.5 kHz hiss band (or
+/// louder than dry); concrete is a little brighter than asphalt and still not hissy.
+#[test]
+fn asphalt_cues_roar_instead_of_hissing() {
+    use wp_audio::data::{cues, CueSource, PackKind};
+    let lib = lib();
+    let mix = &lib.config.tires;
+    // Director pitch for a synth rolling loop at `kmh` (no recorded root speed).
+    let pitch = |kmh: f32| 0.6 + 0.8 * (kmh / 3.6 / mix.rumble_speed_ref_mps).min(1.0);
+    let mut checked = 0;
+    for p in lib.packs.values().filter(|p| p.kind == PackKind::World) {
+        let synth = |cue: &str| match &p.cues[cue].source {
+            CueSource::Synth { params, .. } => Some(params.clone()),
+            CueSource::Samples { .. } => None,
+        };
+        let (Some(dry), Some(wet), Some(conc)) = (
+            synth(cues::SURFACES[0]),
+            synth(cues::SURFACES[1]),
+            synth(cues::SURFACES[2]),
+        ) else {
+            continue; // recorded loops are judged by ear
+        };
+        let id = &p.id;
+        for (name, q) in [("asphalt", &dry), ("concrete", &conc)] {
+            assert!(
+                q.get("track").is_some_and(|t| *t >= 1.0),
+                "{id} {name}: track"
+            );
+            assert!(q.get("lp_stages").is_some_and(|n| *n >= 2.0), "{id} {name}");
+            assert!(
+                q.get("lowpass_hz").is_some_and(|f| *f <= 1000.0),
+                "{id} {name}"
+            );
+            assert!(q.get("crackle").is_none(), "{id} {name}: crackle");
+        }
+        let s = |q: &BTreeMap<String, f32>, kmh: f32, f: f32| bright_share(q, pitch(kmh), f);
+        // Asphalt: mostly below 1 kHz at cruise, nothing above 4 kHz even flat out.
+        assert!(
+            s(&dry, 50.0, 1000.0) < 0.10,
+            "{id}: {}",
+            s(&dry, 50.0, 1000.0)
+        );
+        assert!(
+            s(&dry, 100.0, 1000.0) < 0.25,
+            "{id}: {}",
+            s(&dry, 100.0, 1000.0)
+        );
+        assert!(
+            s(&dry, 140.0, 4000.0) < 0.005,
+            "{id}: {}",
+            s(&dry, 140.0, 4000.0)
+        );
+        // Brighter with speed.
+        assert!(s(&dry, 100.0, 1000.0) > 1.5 * s(&dry, 50.0, 1000.0), "{id}");
+        // Concrete: a little brighter than asphalt, still no hiss.
+        assert!(s(&conc, 100.0, 1000.0) > s(&dry, 100.0, 1000.0), "{id}");
+        assert!(s(&conc, 100.0, 1000.0) < 0.5, "{id}");
+        assert!(s(&conc, 140.0, 4000.0) < 0.01, "{id}");
+        // Wet: spray brightness, tamed.
+        assert!(
+            s(&wet, 100.0, 1000.0) > s(&dry, 100.0, 1000.0),
+            "{id}: wet is distinct"
+        );
+        assert!(
+            s(&wet, 100.0, 4000.0) < 0.02,
+            "{id}: {}",
+            s(&wet, 100.0, 4000.0)
+        );
+        assert!(
+            wet.get("highpass_hz").copied().unwrap_or(60.0) <= 200.0,
+            "{id}: wet keeps its roar"
+        );
+        assert!(
+            p.cues[cues::SURFACES[1]].gain <= p.cues[cues::SURFACES[0]].gain,
+            "{id}: wet no louder than dry"
         );
         checked += 1;
     }
