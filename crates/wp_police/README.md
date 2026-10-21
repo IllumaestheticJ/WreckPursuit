@@ -25,7 +25,7 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
    at the violation and the nearest free unit is sent after the report delay; `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
    and a racer marks the unit, civilian–civilian contacts above a speed create crash incidents.
 3. **Driving** (every tick): internally driven units integrate with the built-in kinematic driver.
-4. **Think** (`think_hz`, default 10 Hz): line of sight → rules (heat decay, escape, capture,
+4. **Think** (`think_hz`, default 10 Hz): line of sight → radar → rules (heat decay, escape, capture,
    safehouse) → health check (disengage/pull over/wreck) → patrol pool → incidents →
    reinforcements → helicopter → AI captain tools → tactics and drive commands.
 
@@ -34,8 +34,14 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 - Decays only when unseen and not pursued, after `decay_grace_s`, at
   `decay_per_s[phase] × decay_district_scale[district]` (faster at night, Suburb, Industrial).
 - While pursued and seen: `pursuit_heat_per_s` (long chases escalate). Disabling a cop: `cop_disabled_heat`.
+- **Radar**: a ground unit witnessing a racer (`witness_range_m`, line of sight) above the speed
+  limit by more than `max(radar_margin_mps, radar_ratio × limit)` counts a witnessed speeding
+  violation, at most once per `radar_repeat_s`. `wp_world` re-reports sustained speeding only
+  every 5 s, and a car at 250 km/h crosses a unit's witness range faster than that.
 - **Pursuit start**: a wanted racer kept within `recognition_range_m[phase]` with line of sight
-  for `recognition_time_s[phase]` (a glimpse at night is not enough).
+  for `recognition_time_s[phase]` (a glimpse at night is not enough), or at once if a unit
+  witnessed it commit a violation in the last `caught_in_act_s` and a unit has it in recognition
+  range (caught in the act; at night a fast car never stays in range long enough for the dwell).
 - **Escape**: no unit, camera or helicopter has line of sight for
   `escape.base_s[level] × escape.phase_scale[phase]`.
 - **Safehouse**: inside a safehouse POI for `dwell_s` with no unit within `clear_radius_m`;

@@ -104,12 +104,30 @@ impl PoliceSystem {
         let camera = self.camera_sees(world, p);
         let witnessed = obs.witnessed || camera;
         let cfg = self.cfg.heat.clone();
+        if obs.unit_witnessed {
+            self.caught.insert(racer, now);
+        }
+        let speeding = matches!(kind, ViolationKind::Speeding { .. });
+        // A report right after a unit's radar clocked the racer is the same speeding.
+        let already_clocked = speeding
+            && witnessed
+            && self
+                .radar_clocked
+                .get(&racer)
+                .is_some_and(|t| now.since(*t) < cfg.heat.radar_repeat_s);
         let rec = self.racers.get_mut(&racer).expect("racer exists");
         let before = rec.level;
-        let added = rec.add_violation(kind, witnessed, now, &cfg);
+        let added = if already_clocked {
+            0.0
+        } else {
+            rec.add_violation(kind, witnessed, now, &cfg)
+        };
         if witnessed {
             rec.last_seen = Some(now);
             rec.last_known = Some(p);
+        }
+        if speeding && witnessed && added > 0.0 {
+            self.clocked.insert(racer, now);
         }
         let after = rec.level;
         if added <= 0.0 {
@@ -271,6 +289,7 @@ impl PoliceSystem {
         if self.graph.nodes.is_empty() {
             // No road network: rules only.
             self.update_observations(world);
+            self.clock_speeders(world);
             self.update_racer_rules(tdt);
             return;
         }
@@ -278,6 +297,7 @@ impl PoliceSystem {
             self.warm_up();
         }
         self.update_observations(world);
+        self.clock_speeders(world);
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_pool();

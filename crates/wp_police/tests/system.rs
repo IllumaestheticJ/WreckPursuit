@@ -615,3 +615,58 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
     }
     assert!(captured, "parked racer never captured");
 }
+
+/// `ScenarioWorld` with a speed limit everywhere, so units can clock speeders.
+struct LimitedWorld<'a>(&'a ScenarioWorld, f32);
+
+impl wp_contracts::WorldQuery for LimitedWorld<'_> {
+    fn surface_at(&self, p: [f32; 3]) -> wp_contracts::SurfaceType {
+        self.0.surface_at(p)
+    }
+    fn speed_limit_at(&self, _p: [f32; 3]) -> Option<f32> {
+        Some(self.1)
+    }
+    fn signal_state_ahead(&self, p: [f32; 3], h: [f32; 3]) -> Option<wp_contracts::SignalState> {
+        self.0.signal_state_ahead(p, h)
+    }
+    fn time_of_day(&self) -> TimeOfDay {
+        self.0.time_of_day()
+    }
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        self.0.line_of_sight(a, b)
+    }
+}
+
+#[test]
+fn units_clock_a_fast_racer_and_chase_it_day_and_night() {
+    use wp_contracts::WorldQuery;
+    // 250 km/h with no speeding reports from the world at all: the units' own radar has to
+    // notice, and at night a pass is far too short for the recognition dwell.
+    for hour in [12.0, 3.0] {
+        let mut h = Harness::new(hour, 11);
+        h.run(2.0, &[]);
+        h.speed = 250.0 / 3.6;
+        let mut started = false;
+        let mut t = 0.0;
+        while t < 40.0 && h.s < h.path.length() - 10.0 && !started {
+            h.s += h.speed * PHYSICS_DT;
+            h.world.time = h.world.time.advanced(PHYSICS_DT * h.world.ratio);
+            let v = h.racer_view();
+            let mut out = Vec::new();
+            let w = LimitedWorld(&h.world, 13.9);
+            assert!(w.speed_limit_at(v.pos).is_some());
+            h.police.step(&w, &[v], &[], PHYSICS_DT, &mut out);
+            started = out.iter().any(|e| {
+                matches!(e, SimEvent::Police(PoliceEvent::PursuitStarted { racer, .. }) if *racer == RACER)
+            });
+            t += PHYSICS_DT;
+        }
+        let r = h.police.racer(RACER).unwrap();
+        assert!(
+            started,
+            "{hour}h: no pursuit after {t:.1} s, heat {:.1}",
+            r.heat
+        );
+        assert!(r.level > WantedLevel::None, "{hour}h");
+    }
+}

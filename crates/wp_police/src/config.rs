@@ -135,6 +135,18 @@ pub struct HeatConfig {
     /// Seconds of continuous recognition-range line of sight needed before a pursuit starts
     /// (a glimpse at night is not enough).
     pub recognition_time_s: PhaseTable<f32>,
+    /// A unit witnessing a racer over the speed limit by more than
+    /// `max(radar_margin_mps, radar_ratio · limit)` clocks it: a witnessed speeding violation,
+    /// independent of how often `wp_world` reports sustained speeding, m/s.
+    pub radar_margin_mps: f32,
+    /// Relative radar margin (fraction of the limit).
+    pub radar_ratio: f32,
+    /// A racer is clocked (or a witnessed speeding report counted) at most once per this many
+    /// seconds, s.
+    pub radar_repeat_s: f32,
+    /// A unit in recognition range of a racer that a unit caught committing a violation in the
+    /// last this-many seconds starts a pursuit at once, without `recognition_time_s`, s.
+    pub caught_in_act_s: f32,
     /// Heat decay per second while unseen and not pursued.
     pub decay_per_s: PhaseTable<f32>,
     /// Multiplier on decay by the district the racer is in.
@@ -729,6 +741,14 @@ impl PoliceConfig {
         }
         if !(0.0..=1.0).contains(&self.heat.heat.unseen_factor) {
             return bad("heat.unseen_factor must be in 0..=1");
+        }
+        let h = &self.heat.heat;
+        if h.radar_margin_mps < 0.0
+            || h.radar_ratio < 0.0
+            || h.radar_repeat_s <= 0.0
+            || h.caught_in_act_s < 0.0
+        {
+            return bad("heat.radar_* and heat.caught_in_act_s must be non-negative (repeat > 0)");
         }
         if self.pursuit.think_hz <= 0.0 {
             return bad("pursuit.think_hz must be > 0");
