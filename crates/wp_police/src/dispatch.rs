@@ -176,7 +176,8 @@ impl PoliceSystem {
             // At wp_world's cadence: only when no speeding counted for `repeat_s` (a clock a
             // second made a race field passing one patrol wanted at once, Hollins), and only
             // after `hold_s` of speeding in sight (wp_world's hold).
-            let due = r.last_violation[speeding].is_none_or(|t| self.now.since(t) >= radar.repeat_s);
+            let due =
+                r.last_violation[speeding].is_none_or(|t| self.now.since(t) >= radar.repeat_s);
             if *held >= radar.hold_s && due {
                 if let Some((o, _)) = over {
                     clocked.push((id, o, xy(r.pos)));
