@@ -101,6 +101,8 @@ pub struct LiveRace {
     ai: AiEntrants,
     player: EntityId,
     autopilot: bool,
+    /// The player's throttle on the grid (see [`LiveRace::set_grid_throttle`]).
+    grid_throttle: f32,
     /// Judge entry order: the AI field (pole first), then the player.
     order: Vec<EntityId>,
     meet: MeetHeat,
@@ -216,6 +218,7 @@ impl LiveRace {
             ai: field,
             player: player.entity,
             autopilot,
+            grid_throttle: 0.0,
             order,
             meet,
             meet_rules,
@@ -275,7 +278,9 @@ impl LiveRace {
     }
 
     /// Inputs for this tick, before `Sim::step_fixed`: every AI car (held on the handbrake
-    /// until green) and the player's grid hold during the countdown. `vehicles`: every sim
+    /// until green) and the player's grid hold during the countdown: handbrake on, clutch
+    /// pedal down and the player's own throttle (see [`LiveRace::set_grid_throttle`]), so the
+    /// engine revs freely on the line without moving the car. `vehicles`: every sim
     /// vehicle; `events`: the previous tick's events; `police`: e.g. `SimPolice(sim.police())`.
     pub fn pre_step(
         &mut self,
@@ -293,11 +298,19 @@ impl LiveRace {
                 self.player,
                 VehicleInput {
                     handbrake: 1.0,
+                    clutch: 1.0,
+                    throttle: self.grid_throttle,
                     ..VehicleInput::default()
                 },
             ));
         }
         out
+    }
+
+    /// The player's throttle while held on the grid (0..=1): revs the engine during the
+    /// countdown through the grid hold's declutched driveline. Ignored once green.
+    pub fn set_grid_throttle(&mut self, throttle: f32) {
+        self.grid_throttle = throttle.clamp(0.0, 1.0);
     }
 
     /// The server moved a racer on purpose (reset, respawn): not judged as a teleport.
@@ -492,9 +505,16 @@ mod tests {
         let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false);
         // The player is held through the countdown.
         let held = live.pre_step(0, &world, &[], &[], &wp_opponent::NoPolice);
-        assert!(held
+        assert!(held.iter().any(|(e, i)| *e == EntityId(1)
+            && i.handbrake == 1.0
+            && i.clutch == 1.0
+            && i.throttle == 0.0));
+        // ...and may rev on the line: the throttle passes through the hold.
+        live.set_grid_throttle(0.8);
+        let revving = live.pre_step(1, &world, &[], &[], &wp_opponent::NoPolice);
+        assert!(revving
             .iter()
-            .any(|(e, i)| *e == EntityId(1) && i.handbrake == 1.0));
+            .any(|(e, i)| *e == EntityId(1) && i.handbrake == 1.0 && i.throttle == 0.8));
         assert!(live.countdown_s(0) > 2.0);
         let samples: Vec<RacerSample> = slots
             .iter()

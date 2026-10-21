@@ -169,10 +169,21 @@ struct Piece {
 }
 
 impl Corridor {
-    /// Build the corridor of a `wp_world` route.
+    /// Build the corridor of a `wp_world` route. Panics on a route with no length (see
+    /// [`Corridor::try_from_route`]).
     pub fn from_route(map: &CityMap, route: &Route, opts: &CorridorOptions) -> Self {
+        Self::try_from_route(map, route, opts).expect("route with no length")
+    }
+
+    /// Build the corridor of a `wp_world` route, or `None` when the route has no length to
+    /// drive: no segments, or a one-segment route whose destination projects behind its start
+    /// (`wp_world::World::plan_route` returns that for a destination back down the same long
+    /// segment; a racer's flight planner hit it on Loop 9 and panicked).
+    pub fn try_from_route(map: &CityMap, route: &Route, opts: &CorridorOptions) -> Option<Self> {
         let n = route.segs.len();
-        assert!(n > 0, "empty route");
+        if n == 0 || route.polyline.is_empty() {
+            return None;
+        }
         let first = map.seg(route.segs[0]);
         let last = map.seg(route.segs[n - 1]);
         let s_start = first
@@ -198,6 +209,9 @@ impl Corridor {
             })
             .filter(|p| p.b - p.a > 1e-3)
             .collect();
+        if pieces.is_empty() {
+            return None;
+        }
         // Extents per lane piece (connectors get NaN and are blended afterwards).
         // (pos, tangent, left, left_pass, right, junction)
         let mut pts: Vec<(V3, V2, f32, f32, f32, bool)> = Vec::new();
@@ -310,13 +324,13 @@ impl Corridor {
             (samples.len().saturating_sub(1)) as f32 * CORRIDOR_STEP_M
         };
         junction_lanes.retain(|(i, _)| *i < samples.len());
-        Self {
+        Some(Self {
             samples,
             closed,
             length_m,
             opposing: opts.opposing,
             junction_lanes,
-        }
+        })
     }
 
     /// The next junction entry at or after sample `i0` within `steps` samples: `(samples
@@ -559,6 +573,47 @@ mod tests {
             closed,
             junction_lanes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_route_with_no_length_builds_no_corridor() {
+        // One segment whose destination lies behind the start (what `plan_route` returned for
+        // a flight destination back down the same long segment): every piece is empty.
+        let world = wp_world::World::procedural(
+            &wp_world::procgen::ProcGenConfig::default(),
+            wp_world::WorldConfig::default(),
+        );
+        let map = world.map();
+        let (id, seg) = map
+            .segs
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.lane().is_some() && s.length > 50.0)
+            .expect("a long lane");
+        let (a, _) = seg.point_at(seg.length * 0.8);
+        let (b, _) = seg.point_at(seg.length * 0.2);
+        let route = Route {
+            segs: vec![id as u32],
+            lanes: Vec::new(),
+            polyline: vec![a, b],
+            checkpoints: Vec::new(),
+            length_m: 0.0,
+            closed_loop: false,
+        };
+        let opts = CorridorOptions::default();
+        assert!(Corridor::try_from_route(map, &route, &opts).is_none());
+        let empty = Route {
+            segs: Vec::new(),
+            polyline: Vec::new(),
+            ..route.clone()
+        };
+        assert!(Corridor::try_from_route(map, &empty, &opts).is_none());
+        // Forwards along the same segment it builds.
+        let fwd = Route {
+            polyline: vec![b, a],
+            ..route
+        };
+        assert!(Corridor::try_from_route(map, &fwd, &opts).is_some_and(|c| c.len() > 1));
     }
 
     #[test]

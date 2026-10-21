@@ -64,6 +64,8 @@ export interface EngineDspApi {
   render(out: Float32Array, off: number, n: number): void;
   /** Counters for tests: events fired, misfires, pops, limiter cuts. */
   readonly counters: { events: number; misfires: number; pops: number; cuts: number; blowoffs: number };
+  /** Sample index (since this engine's first render) of each pop's onset, first 256 (tests). */
+  readonly popAt: number[];
 }
 
 /** Constructor of [`EngineDspApi`]. */
@@ -95,8 +97,48 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
   const PULSE_TABLE = 256;
   const DELAY = 8192; // power of two
   const MASK = DELAY - 1;
-  /** Output scale: WOT peaks ≈ 0.5 (the pack's cue gain sets the level against the layers). */
-  const OUT_GAIN = 3.6;
+  /**
+   * Output scale: WOT peaks stay under the soft limit below (≈ 0.75 for the loudest V8s; the
+   * pack's cue gain sets the level against the layers). It was 3.6, which drove every V8 / I6
+   * into the tanh knee at full throttle (4-11 % of samples): audible as harshness (playtest
+   * "engine sounds are bad", docs/integration/audio.md).
+   */
+  const OUT_GAIN = 1.8;
+  /**
+   * Open-end radiation: the far field follows d/dt of the tailpipe flow above ~RAD_HZ and is
+   * flat below it (a leaky differentiator). A pure d/dt (the old model) took the firing order
+   * 6 dB/oct down against its harmonics, so the I4's firing order sat ~10 dB under its 2nd-3rd
+   * harmonics where real recordings have it on top.
+   */
+  const RAD_HZ = 250;
+  /**
+   * Header / tailpipe end reflections. Real pipes are lossy; the old -0.42 / -0.55 made a
+   * comb whose peaks and notches swept through the firing harmonics as the rpm rose: up to
+   * 7 dB holes in a WOT pull (detrended level ripple std 2.1-2.8 dB, now 0.7-0.9).
+   */
+  const HDR_R = -0.22;
+  const TAIL_R = -0.25;
+  /**
+   * Turbulent flow noise riding on each blowdown pulse (pulse × (1 + noise), noise low-passed
+   * twice at FLOW_LP ≈ 1.2 kHz, deeper with load): the old pulses were perfectly periodic
+   * (spectral flatness -26 to -33 dB vs -10 to -23 dB in the repo's engine recordings), the
+   * "buzzer" character. Kept below 2 kHz so it adds rasp, not hiss.
+   */
+  const FLOW_NOISE = 1.5;
+  const FLOW_LP = 0.15;
+  /** One-pole high-pass coefficient of the flow noise (≈ 2π·300 Hz / 48 kHz). */
+  const FLOW_HP = 0.04;
+  /**
+   * Phase dispersion of the exhaust (allpasses, no change of the spectrum): with every
+   * harmonic phase-aligned a pulse train is peaky (crest ~13 dB once the radiation keeps the low
+   * end); a real muffler smears the phases. Keeps the peaks off the soft limit at the old loudness.
+   */
+  const DISPERSION_HZ = [140, 420, 1100];
+  /** Afterfire pop level into the tailpipe (see `pop` in `render`). */
+  const POP_GAIN = 0.6;
+  /** Cycle-to-cycle combustion variation (± half of it), at idle / above. */
+  const CYCLE_VAR_IDLE = 0.24;
+  const CYCLE_VAR = 0.14;
 
   // Exhaust blowdown pulse: fast rise (first 22 %), smooth fall. The rise is a quintic
   // smoothstep (continuous slope and curvature at the onset): after the open end's d/dt a
@@ -142,6 +184,12 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       const c = Math.cos(w);
       const al = Math.sin(w) / (2 * q);
       this.set(al, 0, -al, 1 + al, -2 * c, 1 - al);
+    }
+    allpass(f: number, q: number, sr: number) {
+      const w = (TAU * clamp(f, 10, sr * 0.45)) / sr;
+      const c = Math.cos(w);
+      const al = Math.sin(w) / (2 * q);
+      this.set(1 - al, -2 * c, 1 + al, 1 + al, -2 * c, 1 - al);
     }
     peaking(f: number, q: number, db: number, sr: number) {
       const w = (TAU * clamp(f, 10, sr * 0.45)) / sr;
@@ -201,6 +249,9 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
 
   class EngineDsp implements EngineDspApi {
     readonly counters = { events: 0, misfires: 0, pops: 0, cuts: 0, blowoffs: 0 };
+    readonly popAt: number[] = [];
+    /** Samples rendered so far (pop onsets for tests). */
+    private clock = 0;
     private readonly sr: number;
     // ----- spec
     private readonly n: number;
@@ -225,6 +276,7 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
     private toNext = 0;
     private ev = 0;
     private rngState: number;
+    private noiseState: number;
     private pAmp = new Float64Array(MAX_PULSES);
     private pPos = new Float64Array(MAX_PULSES);
     private pInc = new Float64Array(MAX_PULSES);
@@ -256,7 +308,15 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
     private mufLp = [new Biquad(), new Biquad()];
     private mufRes = [new Biquad(), new Biquad()];
     private radPrev = [0, 0];
+    /** Leaky-differentiator pole of the radiation (RAD_HZ). */
+    private radLeak = 0;
+    /** Flow-noise low-pass states per bank (two poles). */
+    private flow = [0, 0];
+    private flow2 = [0, 0];
+    private flowHp = [0, 0];
     private radLp = [new Biquad(), new Biquad()];
+    /** Muffler / pipe dispersion: allpasses that smear the pulse phases (see DISPERSION_HZ). */
+    private disp = [new Biquad(), new Biquad(), new Biquad()];
     private dualDelay = new Float32Array(64);
     private dualW = 0;
     private airbox = new Biquad();
@@ -314,17 +374,29 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       this.dual = (spec.dual ?? 0) > 0.5;
       this.rotary = (spec.rotary ?? 0) > 0.5;
       this.rngState = ((spec.seed ?? 1) | 0) || 1;
+      this.noiseState = (this.rngState ^ 0x5bd1e995) | 0 || 1;
       this.toNext = 0;
       for (const t of this.header) {
-        t.r = -0.42;
+        t.r = HDR_R;
         t.k = 0.55;
       }
       for (const t of this.tail) {
-        t.r = -0.55;
+        t.r = TAIL_R;
         t.k = 0.4;
       }
       this.cur[DOPPLER] = this.tgt[DOPPLER] = 1;
       this.cur[HEALTH] = this.tgt[HEALTH] = 1;
+    }
+
+    /** Flow noise in [-1, 1) from its own xorshift32 stream (the event randomness — pops,
+     * misfires — keeps its own sequence). */
+    private noise(): number {
+      let x = this.noiseState;
+      x ^= x << 13;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      this.noiseState = x;
+      return (x >>> 0) / 2147483648 - 1;
     }
 
     /** xorshift32 → [0, 1). */
@@ -382,11 +454,15 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
           const muffler = clamp(s.muffler ?? 0.6, 0, 1);
           const fc = 380 + 2400 * Math.pow(1 - muffler, 1.6);
           this.mufLp[b].lowpass(fc, 0.65, sr);
-          this.mufRes[b].peaking(s.muffler_hz ?? 200, 1.8, 5, sr);
+          // Chamber resonance: broad and moderate (was Q 1.8 / +5 dB, which with the pipe
+          // combs made harmonics jump in and out as the rpm swept).
+          this.mufRes[b].peaking(s.muffler_hz ?? 200, 1.2, 3, sr);
           // Pipe walls and the open end's directivity roll the radiated highs off.
           this.radLp[b].lowpass(5500, 0.6, sr);
+          this.radLeak = Math.exp((-TAU * RAD_HZ) / sr);
         }
-        this.airbox.bandpass(s.intake_hz ?? 150, 2.2, sr);
+        this.airbox.bandpass(s.intake_hz ?? 150, 1.4, sr); // was Q 2.2 (same reason)
+        for (let i = 0; i < this.disp.length; i++) this.disp[i].allpass(DISPERSION_HZ[i], 0.8, sr);
         this.tickBp.bandpass(4300, 7, sr);
         this.mechBp.bandpass(1900, 0.8, sr);
         this.cabinLp.lowpass(260, 1.25, sr);
@@ -416,9 +492,11 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       const redline = s.redline_rpm || 6500;
       const rf = this.rpm / redline;
       // Combustion strength: load sets cylinder pressure; overrun leaves weak pumping pulses.
-      let amp = 0.08 + 0.92 * Math.pow(load, 1.3);
+      // Mass flow per pulse rises with rpm: a WOT pull gets louder (~3 dB/oct) as the
+      // radiation is no longer a full d/dt.
+      let amp = (0.08 + 0.92 * Math.pow(load, 1.3)) * (0.45 + 0.55 * clamp(rf, 0, 1.1));
       // Cycle-to-cycle variation (more at idle).
-      amp *= 1 + (this.rand() - 0.5) * (rf < 0.25 ? 0.16 : 0.08);
+      amp *= 1 + (this.rand() - 0.5) * (rf < 0.25 ? CYCLE_VAR_IDLE : CYCLE_VAR);
       amp *= this.trim[i] * this.bankGapK[i];
       let unburnt = 0;
       // Rev limiter: fuel cut pattern while the driver holds it on the limiter.
@@ -469,6 +547,7 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       this.popEnv[k] = 1;
       this.popAge[k] = 0;
       this.counters.pops++;
+      if (this.popAt.length < 256) this.popAt.push(this.clock + Math.round(wait));
     }
 
     render(out: Float32Array, off: number, n: number): void {
@@ -549,6 +628,20 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
             k--;
           }
         }
+        // Flow noise on the pulses (see FLOW_NOISE).
+        {
+          const fl = FLOW_NOISE * (0.35 + 0.65 * load);
+          this.flow[0] += (this.noise() - this.flow[0]) * FLOW_LP;
+          this.flow[1] += (this.noise() - this.flow[1]) * FLOW_LP;
+          this.flow2[0] += (this.flow[0] - this.flow2[0]) * FLOW_LP;
+          this.flow2[1] += (this.flow[1] - this.flow2[1]) * FLOW_LP;
+          // High-passed (FLOW_HP): slow noise would modulate whole pulses, i.e. add random
+          // sub-harmonics (half orders) to an even-firing engine.
+          this.flowHp[0] += (this.flow2[0] - this.flowHp[0]) * FLOW_HP;
+          this.flowHp[1] += (this.flow2[1] - this.flowHp[1]) * FLOW_HP;
+          x0 += fl * x0 * (this.flow2[0] - this.flowHp[0]);
+          x1 += fl * x1 * (this.flow2[1] - this.flowHp[1]);
+        }
         // Afterfire pops: sharp noisy bangs entering the tailpipe.
         let pop0 = 0;
         let pop1 = 0;
@@ -557,11 +650,15 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
             this.popWait[k] -= 1;
             continue;
           }
-          // A bang: ~0.5 ms attack, ~6 ms decay, rough (low-passed noise) texture.
+          // A bang: ~1 ms raised-cosine attack, ~6 ms decay, rough (low-passed noise) texture.
+          // The attack shapes the output only; `popEnv` is the decay alone. (It used to be
+          // overwritten with attack × decay: at age 0 the attack is 0, so every pop died on its
+          // first sample — the counters counted crackle, misfire and limiter bangs nobody heard.)
           const age = this.popAge[k]++;
-          const e = this.popEnv[k] * (age < 24 ? age / 24 : 1);
-          this.popNoise += (this.rand() * 2 - 1 - this.popNoise) * 0.25;
-          const y = this.popAmp[k] * e * (0.6 + 1.6 * this.popNoise);
+          const att = age < 48 ? 0.5 - 0.5 * Math.cos((Math.PI * age) / 48) : 1;
+          const e = this.popEnv[k];
+          this.popNoise += (this.noise() - this.popNoise) * 0.1;
+          const y = POP_GAIN * this.popAmp[k] * att * e * (0.6 + 1.6 * this.popNoise);
           if (this.popBank[k] === 0) pop0 += y;
           else pop1 += y;
           this.popEnv[k] = e * 0.9965;
@@ -591,6 +688,7 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
           exhaust = this.pipe(0, h0 + h1, pop0 + pop1, leak, mufScale);
         }
         exhaust *= exhaustGain;
+        for (const ap of this.disp) exhaust = ap.run(exhaust);
         const pulses = x0 + x1;
 
         // Intake: airbox resonance excited by the pulses, opened by the throttle; hiss.
@@ -645,10 +743,11 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
         else if (o < -0.8) o = -0.8 - 0.2 * Math.tanh((-0.8 - o) * 5);
         if (o > -1e-30 && o < 1e-30) o = 0;
         out[off + j] = o;
+        this.clock++;
       }
       // Keep state finite and free of denormals.
       if (!Number.isFinite(this.dcY) || !Number.isFinite(this.tail[0].lp) || !Number.isFinite(this.tail[1].lp)) this.hardReset(out, off, n);
-      for (const b of [this.mufLp, this.mufRes, this.radLp]) for (const q of b) q.flush();
+      for (const b of [this.mufLp, this.mufRes, this.radLp, this.disp]) for (const q of b) q.flush();
       for (const q of [this.airbox, this.intakeHiss, this.tickBp, this.mechBp, this.turboBp, this.blowBp, this.cabinLp, this.cabinLp2, this.firewallLp]) q.flush();
       for (const t of this.header) t.flush();
       for (const t of this.tail) t.flush();
@@ -660,20 +759,23 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
       const lp = this.mufLp[b].run(x);
       const m = (this.mufRes[b].run(lp) + leak * (x - lp)) * scale;
       const t = this.tail[b].run(m + pop);
-      const rad = t - this.radPrev[b];
+      const rad = t - this.radLeak * this.radPrev[b];
       this.radPrev[b] = t;
       return this.radLp[b].run(rad) * 6;
     }
 
     private hardReset(out: Float32Array, off: number, n: number) {
       for (let j = 0; j < n; j++) out[off + j] = 0;
-      for (const b of [this.mufLp, this.mufRes, this.radLp]) for (const q of b) q.reset();
+      for (const b of [this.mufLp, this.mufRes, this.radLp, this.disp]) for (const q of b) q.reset();
       for (const q of [this.airbox, this.intakeHiss, this.tickBp, this.mechBp, this.turboBp, this.blowBp, this.cabinLp, this.cabinLp2, this.firewallLp]) q.reset();
       for (const t of [...this.header, ...this.tail]) {
         t.buf.fill(0);
         t.lp = 0;
       }
       this.radPrev = [0, 0];
+      this.flow = [0, 0];
+      this.flow2 = [0, 0];
+      this.flowHp = [0, 0];
       this.dcX = this.dcY = 0;
       this.pCount = this.popCount = 0;
     }
@@ -697,7 +799,7 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
             this.dsp[m.slot] = null;
           } else if (m.t === "stats") {
             // Counters per slot (tests): events, misfires, pops, limiter cuts, blow-offs.
-            this.port.postMessage({ t: "stats", counters: this.dsp.map((d) => (d ? { ...d.counters } : null)) });
+            this.port.postMessage({ t: "stats", counters: this.dsp.map((d) => (d ? { ...d.counters, popAt: d.popAt.slice() } : null)) });
           } else if (m.t === "frame" && m.data) {
             // Samples between frames (smoothed): the rpm ramps over one frame interval.
             if (this.sinceFrame > 0) this.perFrame += (clamp(this.sinceFrame, 128, sr * 0.1) - this.perFrame) * 0.3;

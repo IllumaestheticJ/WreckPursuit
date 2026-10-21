@@ -416,6 +416,16 @@ impl Session {
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
         self.live_check()?;
         let idx = self.idx(id)?;
+        if self.race_holds(id) && !self.held(id) {
+            // On the grid only the throttle gets through (revving on the line; the grid hold
+            // keeps the handbrake on and the clutch down).
+            let tick = self.sim.tick();
+            if let Some(r) = self.race.as_mut().filter(|r| !r.live().autopilot()) {
+                if r.live().in_countdown(tick) {
+                    r.set_grid_throttle(input.throttle);
+                }
+            }
+        }
         if self.script_running()
             || self.last_input[idx] == input
             || self.held(id)

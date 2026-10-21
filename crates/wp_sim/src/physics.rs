@@ -316,7 +316,9 @@ impl Default for PhysicsWorld {
 /// `wp_net`) so a predicted car drives on exactly the server's ground.
 pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
     let net = &map.net;
-    let t = net.terrain.as_ref()?;
+    // The terrain as drawn (fine heights only along at-grade roads), not the raw
+    // `net.terrain`, which stands up to ~10 m above the greybox ground on slopes.
+    let t = map.ground.as_deref()?;
     let mut out = CityColliders::default();
     let mut added: Vec<Collider> = Vec::new();
 
