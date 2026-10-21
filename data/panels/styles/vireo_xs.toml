@@ -1,0 +1,97 @@
+# Vireo XS — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The little screamer that lives above 5,300 rpm"
+personality = "Late-90s three-door hot hatch: light, eager, cheap to fix and happiest with the tach needle in the red. It is the beater-tier hero every player learns on — scrappy, cheerful, a bit loud for its size."
+silhouette = "Short, rounded three-door hatch with a low sloping nose, big glass, a near-vertical hatch and a little roof spoiler on top of it."
+signatures = [
+  "Swept oval headlamps with clear corner indicators and a thin slatted grille",
+  "Tall vertical tail lamps on the hatch corners, roof spoiler",
+  "One oversized chrome exhaust can",
+  "Silver five-spoke wheels in small arches",
+]
+lighting = "Teardrop-swept headlamps; tall slim tail lamps that read as two red bars at night."
+
+[palette]
+base = "#f2c12e"
+accent = "#1b1b1d"
+primer = "#6d6f6a"
+alts = ["#c4142a", "#e8e6dc", "#2a4d8f", "#1b1b1d"]
+
+[body]
+nose_len = 0.42
+nose_plan = 0.11
+nose_drop = 0.13
+nose_sharp = 0.8
+tail_len = 0.22
+tail_plan = 0.06
+tail_drop = 0.02
+tumblehome = 0.12
+roof_bow = 0.02
+rear_rake = 0.4
+roof_crown = 0.025
+ws_bow = 0.03
+crease = 0.008
+crease_at = 0.55
+flare_f = 0.01
+flare_r = 0.01
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.55
+z = 0.53
+w = 0.34
+h = 0.1
+slant = 0.08
+bezel = 0.01
+
+[[lamp]]
+kind = "indicator"
+x = 0.66
+z = 0.44
+w = 0.08
+h = 0.05
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.66
+z = 0.66
+w = 0.15
+h = 0.2
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.55
+z = 0.48
+w = 0.1
+h = 0.05
+
+[parts]
+skirts = false
+
+[parts.grille]
+style = "slats"
+hw = 0.3
+z = 0.55
+h = 0.06
+bars = 2
+intake = [0.45, 0.36, 0.12]
+
+[parts.spoiler]
+style = "roof"
+chord = 0.22
+hw = 0.6
+painted = true
+
+[parts.exhaust]
+style = "single"
+x = 0.5
+z = 0.24
+d = 0.11
+
+[wheels]
+rim = "star5"
+finish = "chrome"
+rim_frac = 0.62

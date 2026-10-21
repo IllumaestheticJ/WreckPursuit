@@ -12,6 +12,7 @@ wp_math.workspace = true
 wp_damage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [[bin]]
 name = "gen-car-mesh"
@@ -36,3 +37,7 @@ path = "src/bin/panels_bench.rs"
 [dev-dependencies]
 # panel_probe example: runs simcli scenarios and prints panel state changes.
 simcli = { path = "../../apps/simcli" }
+
+[[bin]]
+name = "car-profile"
+path = "src/bin/car_profile.rs"

@@ -22,11 +22,28 @@
   presets have panels on.
 - **Data**: `data/panels/<car>.json` for all 16 cars (8–10 panels each: bumpers, hood, trunk where
   the lattice allows, front doors, rear doors on 4-door lattices, fenders as synthetic groups).
-- **Meshes**: `data/panels/meshes/<car>.json` for all 16 cars, 3.5k–4.6k tris, ~36 parts (one per
-  region + glass, lights, mirrors, interior, underbody, wheels), skinned region-aware to the lattice.
-- **Browser**: `render/panels.ts` draws the parts (flat-shaded low-poly), dents follow the lattice,
-  free panels swing rigidly about their hinge, detached panels fly off as visual debris, shattered
-  glass disappears. Layer toggle **0** = "panel meshes / lattice view".
+- **Meshes (format 2, 2026-10-21 overhaul)**: `data/panels/meshes/<car>.json` for all 28 vehicles,
+  4.9k–8.2k tris, 59–90 parts, generated from a hand-written **style sheet per car**
+  (`data/panels/styles/<car>.toml`): the shape between the lattice anchors (nose/tail rounding,
+  wedge drop, tumblehome, character crease, fender flares and haunches, hood bulge, roof bow and
+  crown, windscreen / rear-glass bow and rake, round / flat-top / square arches, open beds, cargo
+  boxes on raised floors, bare chassis rails, tipper bodies), surface-projected lamps (head, fog,
+  DRL, tail, high brake, indicators, clearance markers, reversing, pop-up pods, police beacons),
+  bolt-on parts (grilles with slats/bars/mesh/egg-crate and surrounds, lower intakes, chrome /
+  rubber / steel bumper bars that follow the plan outline, splitters, diffusers, skirts, scoops,
+  lip / wing / roof spoilers, exhausts incl. quad, centre, side pipes and stacks, mirror styles,
+  light bars, push / bull bars and a ram plate, spotlights, antennas, plates, door handles,
+  stripes, sleeper + fairing, fifth wheel, saddle tanks, mud flaps, steps, roof racks, roll-up
+  ribs, ladders, window guards, roof hatch, cab guard, side intakes, louvres), nine rim designs,
+  dual rears and visual tandem axles, and a livery palette. Everything is skinned region-aware to
+  the lattice as before. The render list `data/panels/RENDER_LIST.md` (generated) gives every
+  car's personality, signatures and what its mesh carries.
+- **Browser**: `render/panels.ts` draws the parts smooth-shaded (seams between parts stay sharp, so
+  panel gaps read), merged per region + material (one draw call each), in the car's own palette;
+  lamps light with the head/brake state, beacons flash with the siren, tandem axles spin with
+  their physics wheel. Dents follow the lattice, free panels swing rigidly about their hinge,
+  detached panels fly off as visual debris, shattered glass disappears. Layer toggle **0** =
+  "panel meshes / lattice view".
 
 ## Exposes
 - `wp_damage::{PanelSpec, PanelDef, PanelKind, PanelState, PanelStatus, PanelError, DeriveOptions}`;
@@ -85,10 +102,15 @@ release; per car; ms/frame = 4 physics steps):
 | Idle car, panels attached vs none | cloud 4 vCPU | 0.51 vs 0.44 µs/step (0.002 ms/frame) | — | — |
 | 40 km/h side hit + 2 s swing (2.4 s avg), panels vs none | cloud 4 vCPU | 24.7 vs 17.9 µs/step (0.099 vs 0.072 ms/frame) | — | 0.25 ms/car (lattice) |
 | Swing only (3 panels swinging per car, lattice asleep) | cloud 4 vCPU | 2.7 µs/step (0.011 ms/frame) | — | 0.25 ms/car |
-| Panel mesh skinning in JS (≈3k vertices + `panel_states`, per car per frame) | cloud, headless Chromium (SwiftShader) | — | 0.21 ms | — |
+| Panel mesh skinning in JS, format 1 (≈3k vertices + `panel_states`, per car per frame) | cloud, headless Chromium (SwiftShader) | — | 0.21 ms | — |
+| Format 2, frame the lattice dents (re-skin + normals, debug_sedan after the frontal) | cloud, headless Chromium (SwiftShader) | — | 0.54 ms | — |
+| Format 2, steady (3 panels swinging; undamaged cars skip skinning) | cloud, headless Chromium (SwiftShader) | — | 0.23 ms | — |
 
 Panels add ~0.03 ms/frame per crashing car on top of the lattice and ~0.01 ms/frame per car with
 swinging panels; both inside the 0.25 ms/car lattice budget.
+
+Format 2 re-skins a part only when the lattice moved that frame or its panel is swinging, so an
+undamaged car costs only the `panel_states` call; the full re-skin runs on impact frames.
 
 ## Gate status (2026-10-19)
 fmt, clippy `-D warnings`, `cargo test --workspace` (incl. goldens; only my two new goldens were
@@ -105,6 +127,16 @@ turned off in the presets, so it is pre-existing on current `main` (C / lead: pl
 - No centrifugal/angular-acceleration terms (only linear chassis acceleration + gravity).
 - Browser debris is visual only (see Needs); the sim's Rapier debris is authoritative.
 - Mirrors are not separately detachable (R-1). Tailgates on hatch/pickup lattices are not panels.
+- Shapes are still procedural: a style sheet can only shape the body *between* the lattice
+  anchors (it cannot move a door line or a hood edge). Long-roof lattices are turned into hatches
+  with `rear_rake`; the lattice generator's fixed profile fractions still decide where the cabin
+  is (e.g. the semi tractor's windscreen is more raked than a real one).
+- Trailers: the semi tractor runs bobtail. A trailer needs a hitch joint in the sim (contract
+  request filed by the cars round in `docs/integration/cars.md`); its mesh would be a `rails` /
+  `box` style on its own lattice.
+- AI police still spawn one model (`Sim::set_police_car`); the new units (Courser, Shade, Marshal,
+  Warden, Breacher) are drivable but not dispatched. Kinematic traffic is still drawn as boxes; a
+  mixed traffic fleet (vans, box trucks, semis on highways) needs agent sizes in `wp_world`.
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)
@@ -115,3 +147,13 @@ New workstream. Do everything in `prompts/21_car_models_panels.md`.
 
 ## Lead feedback (2026-10-19, owner playtest)
 - Brake/head lights did not show: the panel meshes' `headlight`/`taillight` parts sit inside the body shell, so they are never visible. The lead keeps the old lamp markers on, placed at the panel body nose and tail (`vehicle_view.ts`). Please move the light parts onto the outer surface in `tools/assets` (slightly proud of the panel, facing out), and then the lead can drop the markers.
+
+## Response (2026-10-21, car look overhaul)
+- Owner playtest item (lamps inside the shell): fixed. Lamps are projected onto the outer surface
+  and stand proud of it; `vehicle_view.ts` hides its fallback lamp markers and box light bar when
+  the panel mesh carries its own lamps / beacons (they stay for older meshes and with panels off).
+- Mesh format 2 (fields: `palette`, part `hub_offset_mm`, kind `detail`, new material slots —
+  see `data/panels/README.md`). Only `apps/testbed-web` and `tools/assets` read meshes.
+- New tools: `car-profile` (anchors + lamp windows to author a style against),
+  `node tools/assets/gallery.mjs` (headless renders of every car, day/night), `RENDER_LIST.md`
+  (checked for staleness by `cargo test -p car-assets`).

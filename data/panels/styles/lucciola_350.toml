@@ -1,0 +1,110 @@
+# Lucciola 350 — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The poster car — glass cannon in rosso"
+personality = "A 90s mid-engine exotic that screams to 8,500 rpm, rotates instantly and costs a fortune every time it touches anything. Theatrical, fragile and gorgeous: everyone looks, nobody can afford to hit it."
+silhouette = "Long, low wedge: knife-edge nose, cab-forward bubble canopy, flying buttresses into a louvred engine deck and a short kicked-up tail."
+signatures = [
+  "Pop-up headlamp pods rising out of the bonnet",
+  "Deep side intakes ahead of the rear wheels, louvred engine cover",
+  "Twin round tail lamps per side over a centre-twin exhaust",
+  "Turbine-fan silver wheels, wider at the rear",
+]
+lighting = "Pop-ups and low slit driving lamps up front; four round tail lamps in a black mesh panel."
+
+[palette]
+base = "#d0101e"
+accent = "#1b1b1d"
+primer = "#6d6f6a"
+alts = ["#f4c20d", "#1b1b1d", "#e8e6dc", "#20407a"]
+
+[body]
+nose_len = 0.6
+nose_plan = 0.16
+nose_drop = 0.2
+nose_lift = 0.03
+nose_sharp = 1.2
+tail_len = 0.32
+tail_plan = 0.08
+tail_drop = 0.06
+tail_kick = 0.03
+tumblehome = 0.2
+roof_w = 0.92
+roof_bow = 0.03
+roof_crown = 0.03
+ws_bow = 0.05
+rear_bow = 0.02
+crease = 0.0
+flare_f = 0.02
+flare_r = 0.05
+belt_kick = 0.02
+shoulder = 0.07
+
+[[lamp]]
+kind = "head"
+face = "top"
+x = 0.58
+y = 1.55
+w = 0.24
+h = 0.14
+pod = 0.08
+
+[[lamp]]
+kind = "drl"
+shape = "slit"
+x = 0.62
+z = 0.42
+w = 0.22
+h = 0.035
+
+[[lamp]]
+kind = "indicator"
+x = 0.78
+z = 0.45
+w = 0.06
+h = 0.035
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "round"
+x = 0.66
+z = 0.58
+w = 0.13
+h = 0.13
+bezel = 0.012
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "round"
+x = 0.47
+z = 0.58
+w = 0.13
+h = 0.13
+bezel = 0.012
+
+[parts]
+diffuser = true
+splitter = 0.04
+
+[parts.grille]
+style = "mesh"
+hw = 0.42
+z = 0.34
+h = 0.12
+bars = 3
+
+[parts.exhaust]
+style = "centre"
+x = 0.0
+z = 0.3
+d = 0.09
+
+[parts.utility]
+side_intakes = true
+louvres = true
+
+[wheels]
+rim = "turbine"
+finish = "chrome"
+rim_frac = 0.7

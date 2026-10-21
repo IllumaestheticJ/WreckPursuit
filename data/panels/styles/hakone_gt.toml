@@ -1,0 +1,109 @@
+# Hakone GT — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The highway missile in midnight purple"
+personality = "A heavy, calm 90s grand tourer with a sequential twin-turbo six. Ordinary at low revs; past 4,000 rpm it simply leaves. The car of choice for the long escape across the city's open roads — confident, expensive, a little smug."
+silhouette = "Long, low and round everywhere: smooth bubble cabin, long rounded nose, sloping glass hatch and a tall hoop wing standing over the tail."
+signatures = [
+  "Long pill-shaped headlamps in a smooth rounded nose",
+  "Four round tail lamps, two per side",
+  "Tall body-colour hoop wing on uprights",
+  "Polished five-spoke wheels, haunches over the rear",
+]
+lighting = "Long oval headlamps and low round fogs; at night four round red rings at the back."
+
+[palette]
+base = "#3b2d63"
+accent = "#1b1b1d"
+primer = "#6d6f6a"
+alts = ["#d8d4cb", "#b0101c", "#1b1b1d", "#c6c9cc"]
+
+[body]
+nose_len = 0.55
+nose_plan = 0.15
+nose_drop = 0.14
+nose_lift = 0.05
+nose_sharp = 0.75
+tail_len = 0.45
+tail_plan = 0.12
+tail_drop = 0.08
+tail_sharp = 0.8
+tumblehome = 0.16
+roof_w = 0.95
+roof_bow = 0.04
+ws_bow = 0.04
+rear_bow = 0.06
+flare_f = 0.02
+flare_r = 0.04
+belt_kick = 0.02
+shoulder = 0.08
+
+[[lamp]]
+kind = "head"
+shape = "pill"
+x = 0.55
+z = 0.47
+w = 0.4
+h = 0.08
+slant = 0.03
+bezel = 0.01
+
+[[lamp]]
+kind = "fog"
+shape = "round"
+x = 0.62
+z = 0.32
+w = 0.08
+h = 0.08
+
+[[lamp]]
+kind = "indicator"
+shape = "slit"
+x = 0.7
+z = 0.4
+w = 0.14
+h = 0.02
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "round"
+x = 0.6
+z = 0.5
+w = 0.13
+h = 0.13
+bezel = 0.015
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "round"
+x = 0.43
+z = 0.5
+w = 0.13
+h = 0.13
+bezel = 0.015
+
+[parts.grille]
+style = "slats"
+hw = 0.5
+z = 0.32
+h = 0.13
+bars = 2
+
+[parts.spoiler]
+style = "wing"
+rise = 0.22
+chord = 0.24
+hw = 0.76
+painted = true
+
+[parts.exhaust]
+style = "single"
+x = 0.42
+z = 0.24
+d = 0.12
+
+[wheels]
+rim = "star5"
+finish = "chrome"
+rim_frac = 0.66

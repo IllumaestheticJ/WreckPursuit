@@ -1,0 +1,112 @@
+# Sentinel Bastion — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The roadblock on wheels"
+personality = "A full-size body-on-frame police SUV. Slowest of the units and it leans like a ship, but it is tall, heavy and almost unstoppable in a shove. Captains park it across junctions; in a chase it ends things by mass."
+silhouette = "Tall upright box: blunt square nose behind a heavy push bar, flat sides, near-vertical tailgate, full light bar on a high roof."
+signatures = [
+  "Navy body with white doors and roof",
+  "Heavy push bar, grille strobes, A-pillar spotlight",
+  "Full-width light bar and two antennas on a tall flat roof",
+  "Black six-spoke wheels in flat-top arches, running-board steps",
+]
+lighting = "Big square headlamp blocks with amber corners; tall vertical tail lamps on the D-pillars."
+
+[palette]
+base = "#1a2744"
+accent = "#f1f1ec"
+primer = "#5d6066"
+alts = ["#141619", "#f1f1ec"]
+
+[paint_overrides]
+"door_*" = "accent"
+roof = "accent"
+
+[body]
+nose_len = 0.25
+nose_plan = 0.05
+nose_drop = 0.05
+nose_sharp = 1.4
+tail_len = 0.15
+tail_plan = 0.03
+tail_drop = 0.01
+tail_sharp = 1.6
+tumblehome = 0.09
+arch = "flat_top"
+flare_f = 0.02
+flare_r = 0.02
+crease = 0.015
+crease_at = 0.65
+hood_bulge = 0.02
+
+[[lamp]]
+kind = "head"
+x = 0.72
+z = 0.88
+w = 0.32
+h = 0.13
+bezel = 0.02
+
+[[lamp]]
+kind = "indicator"
+x = 0.9
+z = 0.86
+w = 0.06
+h = 0.11
+
+[[lamp]]
+kind = "beacon_red"
+x = -0.25
+z = 0.9
+w = 0.12
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+x = 0.25
+z = 0.9
+w = 0.12
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.9
+z = 0.92
+w = 0.1
+h = 0.22
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.9
+z = 0.74
+w = 0.1
+h = 0.06
+
+[parts]
+spotlights = true
+antennas = 2
+guard = "push"
+
+[parts.grille]
+style = "slats"
+hw = 0.5
+z = 0.88
+h = 0.18
+bars = 3
+surround = 0.03
+intake = [0.6, 0.6, 0.1]
+
+[parts.lightbar]
+style = "full"
+hw = 0.68
+
+[parts.utility]
+steps = true
+
+[wheels]
+rim = "six"
+finish = "trim"
+rim_frac = 0.6

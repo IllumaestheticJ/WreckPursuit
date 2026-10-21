@@ -1,9 +1,11 @@
 //! Every car has an up-to-date, valid mesh and panel spec; meshes deform with the lattice and
 //! hinged parts line up with their hinge nodes.
 
-use car_assets::mesh::{PartKind, TRI_BUDGET};
+use car_assets::mesh::{CarMesh, PartKind, TRI_BUDGET};
+use car_assets::render_list::{render, Entry, RENDER_LIST_PATH};
 use car_assets::{
-    build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    build_mesh, car_ids, load_car, load_mesh, load_style, mesh_path, panel_path, repo_root,
+    validate::validate,
 };
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
@@ -13,6 +15,7 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
     let root = repo_root();
     let ids = car_ids(&root);
     assert!(ids.len() >= 16);
+    let mut built = Vec::new();
     for id in ids {
         let car = load_car(&root, &id).unwrap();
         let spec = PanelSpec::load(&panel_path(&root, &id)).unwrap();
@@ -20,27 +23,43 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
         let on_disk = load_mesh(&mesh_path(&root, &id)).unwrap();
         let errs = validate(&car, &on_disk, Some(&spec));
         assert!(errs.is_empty(), "{id}: {errs:#?}");
-        let fresh = build_mesh(&car);
+        let style = load_style(&root, &id).unwrap();
+        let fresh = build_mesh(&car, &style);
         assert!(
             fresh == on_disk,
             "{id}: data/panels/meshes is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
         );
-        assert!((TRI_BUDGET.0..=TRI_BUDGET.1).contains(&fresh.tri_count));
+        let max = CarMesh::budget_max(car.def.body_size_m[1]);
+        assert!((TRI_BUDGET.0..=max).contains(&fresh.tri_count));
+        built.push((car, style, fresh));
     }
+    let entries: Vec<Entry> = built
+        .iter()
+        .map(|(car, style, mesh)| Entry { car, style, mesh })
+        .collect();
+    let on_disk = std::fs::read_to_string(root.join(RENDER_LIST_PATH)).unwrap_or_default();
+    assert!(
+        render(&entries) == on_disk,
+        "{RENDER_LIST_PATH} is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
+    );
 }
 
 #[test]
 fn generation_is_deterministic() {
     let root = repo_root();
     let car = load_car(&root, "hauler_1500").unwrap();
-    assert_eq!(build_mesh(&car).to_json(), build_mesh(&car).to_json());
+    let style = load_style(&root, "hauler_1500").unwrap();
+    assert_eq!(
+        build_mesh(&car, &style).to_json(),
+        build_mesh(&car, &style).to_json()
+    );
 }
 
 #[test]
 fn skinned_vertices_follow_their_region_nodes() {
     let root = repo_root();
     let car = load_car(&root, "debug_sedan").unwrap();
-    let mesh = build_mesh(&car);
+    let mesh = build_mesh(&car, &load_style(&root, "debug_sedan").unwrap());
     // Push every hood node down 5 cm: every hood vertex moves 5 cm, no fender vertex moves.
     let mut nodes: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
     for n in &car.lattice.nodes {

@@ -1,0 +1,118 @@
+# Ironside 440 — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "Two tonnes of attitude and scary brakes"
+personality = "An early-70s big-block brute: enormous torque, vague steering, wallowing springs and brakes that are more suggestion than promise. It does not corner so much as negotiate. Its owner talks about cubic inches and has never once been early to anything."
+silhouette = "Long, low and wide: a blunt full-width grille face, a flat power-bulged hood with a shaker, coke-bottle hips swelling over the rear wheels and a long flat trunk."
+signatures = [
+  "Full-width chrome egg-crate grille with quad round headlamps set into it",
+  "Chrome blade bumpers front and rear, chrome bullet mirrors",
+  "Black vinyl roof over oxblood paint, shaker scoop through the hood",
+  "Polished deep-dish wheels on raised-white-letter tires",
+]
+lighting = "Four round sealed beams in the grille; a full-width tail-lamp panel split only by the trunk badge gap."
+
+[palette]
+base = "#8c1c13"
+accent = "#121212"
+primer = "#6d6f6a"
+alts = ["#5b2c74", "#e05a1a", "#1f4e3a", "#d9c46a", "#1b1b1d"]
+
+[paint_overrides]
+roof = "accent"
+
+[body]
+nose_len = 0.2
+nose_plan = 0.03
+nose_drop = 0.03
+nose_sharp = 1.6
+tail_len = 0.2
+tail_plan = 0.03
+tail_drop = 0.02
+tail_sharp = 1.6
+tumblehome = 0.15
+roof_w = 0.94
+roof_bow = 0.015
+ws_bow = 0.02
+rear_bow = 0.03
+flare_r = 0.045
+belt_kick = 0.07
+crease = 0.02
+crease_at = 0.55
+hood_bulge = 0.045
+shoulder = 0.04
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+shape = "round"
+x = 0.66
+z = 0.52
+w = 0.14
+h = 0.14
+proud = 0.03
+bezel = 0.012
+
+[[lamp]]
+kind = "head"
+shape = "round"
+x = 0.49
+z = 0.52
+w = 0.13
+h = 0.13
+proud = 0.03
+bezel = 0.012
+
+[[lamp]]
+kind = "indicator"
+x = 0.62
+z = 0.33
+w = 0.14
+h = 0.04
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.4
+z = 0.56
+w = 0.62
+h = 0.09
+bezel = 0.012
+
+[parts]
+scoop = "shaker"
+mirrors = "bullet"
+
+[parts.grille]
+style = "egg"
+hw = 0.8
+z = 0.5
+h = 0.2
+bars = 3
+chrome = true
+surround = 0.02
+
+[parts.bumper_f]
+style = "chrome"
+z = 0.38
+h = 0.1
+proud = 0.06
+wrap = 0.3
+
+[parts.bumper_r]
+style = "chrome"
+z = 0.42
+h = 0.1
+proud = 0.06
+wrap = 0.3
+
+[parts.exhaust]
+style = "dual"
+x = 0.55
+z = 0.26
+d = 0.08
+
+[wheels]
+rim = "dish"
+finish = "chrome"
+rim_frac = 0.6
+white_letters = true

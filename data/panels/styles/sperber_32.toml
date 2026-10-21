@@ -1,0 +1,109 @@
+# Sperber 32 — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The autobahn sniper in titanium silver"
+personality = "A taut 2000s German sport sedan with a silky straight six: precise, composed, a little aloof. It is the car of the driver who brakes later than you and never seems to try. Understated until you look at the four tailpipes."
+silhouette = "Compact three-box sedan with a strong shoulder line, a short tidy deck with a lip and a slightly forward-leaning nose."
+signatures = [
+  "Twin round projector headlamps per side",
+  "Small chrome-ringed centre grille above a wide lower intake",
+  "Swept L-shaped tail lamps, lip spoiler, side skirts",
+  "Quad exhaust, polished ten-spoke wheels",
+]
+lighting = "Four round lamp rings up front read as a quartet at night; wide swept tail lamps."
+
+[palette]
+base = "#9ea6ae"
+accent = "#1b1b1d"
+primer = "#6d6f6a"
+alts = ["#2e5aa8", "#1b1b1d", "#e8e6dc", "#5a1a1f"]
+
+[body]
+nose_len = 0.35
+nose_plan = 0.09
+nose_drop = 0.08
+tail_len = 0.3
+tail_plan = 0.07
+tail_drop = 0.04
+tail_kick = 0.015
+tumblehome = 0.13
+crease = 0.012
+crease_at = 0.72
+flare_r = 0.02
+ws_bow = 0.03
+rear_bow = 0.03
+hood_bulge = 0.02
+
+[[lamp]]
+kind = "head"
+shape = "round"
+x = 0.62
+z = 0.58
+w = 0.11
+h = 0.11
+bezel = 0.01
+
+[[lamp]]
+kind = "head"
+shape = "round"
+x = 0.48
+z = 0.58
+w = 0.11
+h = 0.11
+bezel = 0.01
+
+[[lamp]]
+kind = "indicator"
+shape = "slit"
+x = 0.68
+z = 0.5
+w = 0.12
+h = 0.02
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "swept"
+x = 0.6
+z = 0.66
+w = 0.34
+h = 0.09
+slant = 0.05
+bezel = 0.008
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.4
+z = 0.66
+w = 0.08
+h = 0.05
+
+[parts]
+skirts = true
+
+[parts.grille]
+style = "slats"
+hw = 0.16
+z = 0.57
+h = 0.09
+bars = 4
+chrome = true
+surround = 0.012
+intake = [0.55, 0.35, 0.12]
+
+[parts.spoiler]
+style = "lip"
+rise = 0.03
+chord = 0.1
+hw = 0.6
+
+[parts.exhaust]
+style = "quad"
+x = 0.5
+z = 0.24
+d = 0.08
+
+[wheels]
+rim = "spoke10"
+finish = "chrome"
+rim_frac = 0.68

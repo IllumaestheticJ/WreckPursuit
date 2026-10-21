@@ -1,0 +1,142 @@
+# Gantry Box — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The box truck that owns the loading bay"
+personality = "A medium-duty diesel box truck: six and a half tonnes of furniture, parcels or somebody's whole flat. It turns like a ferry, stops like one too, and treats the right lane as a suggestion. Out-mass anything that is not another truck."
+silhouette = "Conventional red cab with a long square bonnet, then a tall white box that towers over the cab on a separate chassis, rear wheels showing under the box floor."
+signatures = [
+  "Red cab, white box",
+  "Big chrome bar grille with a thick surround, black steel bumper",
+  "Roll-up rear door ribs, amber clearance markers on the box",
+  "Dual rear wheels, truck mirrors, steps, mud flaps",
+]
+lighting = "Square headlamps with amber corners; amber clearance markers along the box sides and on its top corners; low red tail lamps on the box rear."
+
+[palette]
+base = "#c8261e"
+accent = "#efefea"
+primer = "#5d6066"
+alts = ["#efefea", "#1f4e79", "#2b3a2b", "#e8a317"]
+
+[paint_overrides]
+"box_*" = "accent"
+
+[body]
+nose_len = 0.25
+nose_plan = 0.08
+nose_drop = 0.1
+nose_sharp = 1.2
+tail_len = 0.08
+tail_plan = 0.01
+tail_drop = 0.0
+tail_sharp = 2.0
+tumblehome = 0.06
+arch = "flat_top"
+arch_gap = 0.1
+crease = 0.015
+crease_at = 0.5
+bed = "box"
+bed_height = 3.35
+bed_gap = 0.12
+bed_floor = 1.15
+bed_half_w = 1.25
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+x = 0.86
+z = 1.6
+w = 0.3
+h = 0.16
+bezel = 0.02
+
+[[lamp]]
+kind = "indicator"
+x = 1.08
+z = 1.6
+w = 0.08
+h = 0.14
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.3
+y = 0.45
+w = 0.07
+h = 0.04
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.0
+y = 0.45
+w = 0.07
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = -0.6
+z = 1.5
+w = 0.07
+h = 0.05
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = -3.6
+z = 1.5
+w = 0.07
+h = 0.05
+
+[[lamp]]
+kind = "marker"
+face = "rear"
+x = 1.15
+z = 3.25
+w = 0.07
+h = 0.05
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 1.0
+z = 1.35
+w = 0.14
+h = 0.16
+
+[parts]
+mirrors = "truck"
+
+[parts.grille]
+style = "bars"
+hw = 0.55
+z = 1.6
+h = 0.34
+bars = 9
+chrome = true
+surround = 0.035
+
+[parts.bumper_f]
+style = "steel"
+z = 1.12
+h = 0.24
+proud = 0.06
+wrap = 0.2
+
+[parts.exhaust]
+style = "single"
+x = -0.8
+z = 0.6
+d = 0.1
+
+[parts.utility]
+rollup = true
+steps = true
+mudflaps = true
+
+[wheels]
+rim = "truck"
+finish = "metal"
+rim_frac = 0.58
+dual_rear = true

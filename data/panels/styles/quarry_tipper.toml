@@ -1,0 +1,121 @@
+# Quarry Tipper — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "Twelve tonnes of yellow steel with a gravel attitude"
+personality = "A tri-axle dump truck fresh off the quarry run: square, grimy, enormously heavy and slow, with a steel tipper body and a cab guard over its head. Nothing in the city wins a shove against it; nothing in the city wants to try."
+silhouette = "Square-nosed conventional cab with big squared fenders, a tall steel tipper body reaching forward over the cab roof, and two rear axles on dual wheels."
+signatures = [
+  "Construction yellow cab, dark-grey steel tipper",
+  "Black bar grille, heavy black steel bumper",
+  "Cab guard over the roof, twin exhaust stacks",
+  "Tandem rear axle with duals, mud flaps, side fuel tank, steps",
+]
+lighting = "Square recessed headlamps with amber corners; cab-roof amber markers; low red tail lamps on the tipper corners."
+
+[palette]
+base = "#e8a317"
+accent = "#4a4f55"
+primer = "#5d6066"
+alts = ["#c8261e", "#efefea", "#2b5d34"]
+
+[paint_overrides]
+"tipper_*" = "accent"
+"cab_guard_*" = "accent"
+
+[body]
+nose_len = 0.2
+nose_plan = 0.06
+nose_drop = 0.08
+nose_sharp = 1.4
+tail_len = 0.05
+tail_plan = 0.0
+tail_drop = 0.0
+tumblehome = 0.05
+roof_w = 1.05
+arch = "square"
+arch_gap = 0.1
+flare_f = 0.08
+crease = 0.0
+bed = "tipper"
+bed_height = 3.05
+bed_gap = 0.15
+bed_floor = 1.45
+bed_half_w = 1.22
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+x = 0.92
+z = 1.48
+w = 0.28
+h = 0.16
+bezel = 0.03
+
+[[lamp]]
+kind = "indicator"
+x = 1.12
+z = 1.48
+w = 0.08
+h = 0.14
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.0
+y = 0.78
+w = 0.07
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.3
+y = 0.78
+w = 0.07
+h = 0.04
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 1.0
+z = 1.6
+w = 0.14
+h = 0.14
+
+[parts]
+mirrors = "truck"
+
+[parts.grille]
+style = "bars"
+hw = 0.6
+z = 1.58
+h = 0.5
+bars = 9
+surround = 0.04
+
+[parts.bumper_f]
+style = "steel"
+z = 1.0
+h = 0.34
+proud = 0.12
+wrap = 0.2
+
+[parts.exhaust]
+style = "stacks"
+x = 1.0
+z = 3.6
+d = 0.13
+y = -0.85
+
+[parts.utility]
+cab_guard = true
+fuel_tanks = [0.3, 0.9]
+mudflaps = true
+steps = true
+
+[wheels]
+rim = "truck"
+finish = "metal"
+rim_frac = 0.55
+dual_rear = true
+extra_axles = [-0.68, 0.68]

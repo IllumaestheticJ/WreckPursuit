@@ -1,0 +1,116 @@
+# Sentinel Marshal — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The quick police utility that goes where the sedans can't"
+personality = "A mid-size all-wheel-drive police crossover with a twin-turbo V6: nimbler and quicker than the Bastion, tougher than the sedans, happy on a kerb or a gravel shortcut. The modern patrol unit — practical, alert, everywhere."
+silhouette = "Crossover SUV: sloping bonnet, raked windscreen, high flat belt, a tapering D-pillar, roof rails and a slim light bar."
+signatures = [
+  "White with blue doors",
+  "Slim LED light bar on roof rails, push bar, grille strobes",
+  "Narrow swept LED headlamps, wraparound tail lamps",
+  "Black six-spoke wheels",
+]
+lighting = "Thin swept headlamps with light-strip underline; wide wraparound tail lamps."
+
+[palette]
+base = "#f1f1ec"
+accent = "#1d4fa0"
+primer = "#5d6066"
+alts = ["#141619", "#1d4fa0"]
+
+[paint_overrides]
+"door_*" = "accent"
+
+[body]
+nose_len = 0.32
+nose_plan = 0.08
+nose_drop = 0.08
+nose_sharp = 1.2
+tail_len = 0.2
+tail_plan = 0.05
+tail_drop = 0.02
+tumblehome = 0.12
+rear_rake = 0.15
+ws_rake = 0.05
+crease = 0.015
+crease_at = 0.7
+flare_f = 0.02
+flare_r = 0.025
+ws_bow = 0.03
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.68
+z = 0.84
+w = 0.34
+h = 0.09
+slant = 0.08
+bezel = 0.012
+
+[[lamp]]
+kind = "drl"
+shape = "slit"
+x = 0.68
+z = 0.78
+w = 0.28
+h = 0.012
+
+[[lamp]]
+kind = "beacon_red"
+x = -0.25
+z = 0.82
+w = 0.12
+h = 0.035
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+x = 0.25
+z = 0.82
+w = 0.12
+h = 0.035
+mirror = false
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "swept"
+x = 0.75
+z = 0.92
+w = 0.3
+h = 0.09
+slant = 0.04
+
+[[lamp]]
+kind = "brake3"
+face = "rear"
+x = 0.0
+z = 1.68
+w = 0.3
+h = 0.03
+mirror = false
+
+[parts]
+antennas = 2
+guard = "push"
+
+[parts.grille]
+style = "mesh"
+hw = 0.5
+z = 0.83
+h = 0.12
+bars = 2
+surround = 0.02
+intake = [0.6, 0.58, 0.14]
+
+[parts.lightbar]
+style = "low"
+hw = 0.6
+
+[parts.utility]
+roof_rack = true
+
+[wheels]
+rim = "six"
+finish = "trim"
+rim_frac = 0.62

@@ -1,0 +1,132 @@
+# Longhaul Tractor — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "Nine tonnes of chrome and diesel, no trailer required"
+personality = "A long-nose sleeper-cab semi tractor running bobtail. Slow off the line, unstoppable once rolling, all chrome stacks and air horns. Its driver has seen every highway in the country at 3 a.m. and has no intention of moving over."
+silhouette = "Long sloping bonnet with big swept fenders, a tall cab with a roof fairing over the sleeper, twin chrome stacks, then bare chassis rails with a fifth wheel over a tandem rear axle."
+signatures = [
+  "Huge chrome bar grille with a heavy surround and a chrome bumper",
+  "Twin chrome exhaust stacks, roof air horns, roof fairing over the sleeper",
+  "Chrome saddle fuel tanks, cab steps, fifth wheel on bare rails",
+  "Tandem rear axle on dual wheels with mud flaps",
+]
+lighting = "Swept headlamp clusters in the fenders, five amber cab-roof markers; small red tail lamps on the rail ends."
+
+[palette]
+base = "#1f4e79"
+accent = "#c9ccd0"
+primer = "#5d6066"
+alts = ["#c8261e", "#efefea", "#1b1b1d", "#2b5d34", "#e8a317"]
+
+[body]
+nose_len = 0.4
+nose_plan = 0.18
+nose_drop = 0.22
+nose_sharp = 0.9
+tail_len = 0.05
+tail_plan = 0.0
+tail_drop = 0.0
+tumblehome = 0.05
+roof_w = 1.05
+arch = "flat_top"
+arch_gap = 0.1
+flare_f = 0.06
+hood_bulge = 0.05
+crease = 0.0
+bed = "rails"
+bed_height = 1.15
+bed_half_w = 0.5
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.9
+z = 1.42
+w = 0.4
+h = 0.16
+slant = 0.08
+bezel = 0.02
+
+[[lamp]]
+kind = "indicator"
+x = 1.0
+z = 1.25
+w = 0.12
+h = 0.06
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.0
+y = 0.78
+w = 0.07
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.25
+y = 0.78
+w = 0.07
+h = 0.04
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.5
+y = 0.78
+w = 0.07
+h = 0.04
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.35
+z = 0.98
+w = 0.12
+h = 0.1
+
+[parts]
+mirrors = "truck"
+plate_z = [0.0, 1.0]
+
+[parts.grille]
+style = "bars"
+hw = 0.55
+z = 1.46
+h = 0.52
+bars = 11
+chrome = true
+surround = 0.045
+
+[parts.bumper_f]
+style = "steel"
+z = 1.0
+h = 0.34
+proud = 0.08
+wrap = 0.3
+chrome = true
+
+[parts.exhaust]
+style = "stacks"
+x = 0.95
+z = 4.0
+d = 0.14
+y = -1.62
+
+[parts.utility]
+sleeper = 1.0
+fairing = 3.9
+fifth_wheel = true
+fuel_tanks = [0.32, 1.2]
+mudflaps = true
+steps = true
+air_horns = true
+
+[wheels]
+rim = "truck"
+finish = "chrome"
+rim_frac = 0.55
+dual_rear = true
+extra_axles = [-0.66, 0.66]

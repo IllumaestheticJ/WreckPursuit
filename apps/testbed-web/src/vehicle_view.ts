@@ -32,6 +32,8 @@ export function healthColour(h: number, out = tmpColor): THREE.Color {
 interface WheelView {
   pivot: THREE.Group; // positioned at the hub, rotated by steer
   spin: THREE.Group; // rotated about X by the accumulated wheel angle
+  /** Visual extra axles (tandems): spin groups offset from the hub, turned like `spin`. */
+  extraSpins: THREE.Group[];
   tire: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
   angle: number;
@@ -69,16 +71,19 @@ export class VehicleView {
   /** The wireframe currently carries strain colours (repaint grey when stress turns off). */
   private strainShown = false;
   private readonly lightBar: THREE.Group | null = null;
-  private readonly barRed: THREE.MeshStandardMaterial | null = null;
-  private readonly barBlue: THREE.MeshStandardMaterial | null = null;
+  /** Beacon materials: the fallback light bar's and the panel mesh's own beacons. */
+  private readonly barRed: THREE.MeshStandardMaterial;
+  private readonly barBlue: THREE.MeshStandardMaterial;
   private readonly sirenLight: THREE.PointLight | null = null;
   private readonly headMat: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
+  private readonly indicatorMat: THREE.MeshStandardMaterial;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   private readonly lamps: THREE.Mesh[] = [];
 
-  constructor(readonly entity: number, colour: number) {
+  /** `paletteIndex`: which of the car's own livery colours its panel mesh wears (see PanelBody). */
+  constructor(readonly entity: number, colour: number, paletteIndex = -1) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
     const police = this.info.kind === "Police";
@@ -95,8 +100,11 @@ export class VehicleView {
     this.root.add(this.box, nose);
 
     // Head- and tail-lights (emissive, brighter with headlights on / when braking).
-    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000 });
-    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000 });
+    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000, side: THREE.DoubleSide });
+    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x8a0c10, emissive: 0x000000, side: THREE.DoubleSide });
+    this.indicatorMat = new THREE.MeshStandardMaterial({ color: 0xd9820f, emissive: 0x000000, side: THREE.DoubleSide });
+    this.barRed = new THREE.MeshStandardMaterial({ color: 0x661018, emissive: 0x000000, side: THREE.DoubleSide });
+    this.barBlue = new THREE.MeshStandardMaterial({ color: 0x102266, emissive: 0x000000, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) {
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), this.headMat);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
@@ -109,8 +117,6 @@ export class VehicleView {
     // Police: roof light bar (red left, blue right) + one point light that flashes with the siren.
     if (police) {
       this.lightBar = new THREE.Group();
-      this.barRed = new THREE.MeshStandardMaterial({ color: 0x661018, emissive: 0x000000 });
-      this.barBlue = new THREE.MeshStandardMaterial({ color: 0x102266, emissive: 0x000000 });
       const red = new THREE.Mesh(new THREE.BoxGeometry(w * 0.32, 0.25, 0.12), this.barRed);
       red.position.x = -w * 0.17;
       const blue = new THREE.Mesh(new THREE.BoxGeometry(w * 0.32, 0.25, 0.12), this.barBlue);
@@ -186,16 +192,48 @@ export class VehicleView {
       susp.renderOrder = 4;
       this.root.add(susp);
       this.root.add(pivot);
-      this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
+      this.wheels.push({ pivot, spin, extraSpins: [], tire, material, angle: 0, fx, fy, susp });
     }
 
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
-    this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
+    this.panels = new PanelBody(
+      entity,
+      this.info.car_id,
+      colour,
+      {
+        headlight: this.headMat,
+        taillight: this.tailMat,
+        indicator: this.indicatorMat,
+        beaconRed: this.barRed,
+        beaconBlue: this.barBlue,
+      },
+      paletteIndex,
+    );
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
-      this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
-      // The panel body is longer than the debug box: move the lamp markers onto its nose and
-      // tail so head and brake lights show (the mesh's own light parts sit inside the shell).
+      this.wheels.forEach((w, i) =>
+        this.panels.wheelParts[i].forEach((m) => {
+          const off = this.panels.hubOffset.get(m);
+          if (!off) return void w.spin.add(m);
+          // Tandem axle: its own spin group at the offset hub, turned with the physics wheel.
+          let g = w.extraSpins.find((s) => s.position.distanceToSquared(off) < 1e-6);
+          if (!g) {
+            g = new THREE.Group();
+            g.position.copy(off);
+            w.pivot.add(g);
+            w.extraSpins.push(g);
+          }
+          g.add(m);
+        }),
+      );
+      // Meshes with their own light bar / lamps replace the fallback boxes.
+      if (this.lightBar && this.panels.hasBeacons) this.lightBar.userData.replaced = true;
+      if (this.panels.hasLamps) {
+        for (const lamp of this.lamps) lamp.userData.replaced = true;
+        return;
+      }
+      // A mesh without lamps (older format): move the lamp markers onto its nose and tail so
+      // head and brake lights still show.
       this.root.updateWorldMatrix(true, true);
       const inv = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
       const box = new THREE.Box3();
@@ -254,17 +292,20 @@ export class VehicleView {
     const rebuild = this.shapeDirty;
     if (needNodes) this.shapeDirty = false;
     this.panels.root.visible = panelsOn;
-    // The panel meshes' own light parts sit inside the shell (machine R to fix in the mesh
-    // generator), so the lamp markers stay on with panels too: brake and head lights stay visible.
-    for (const lamp of this.lamps) lamp.visible = bodyOn;
-    for (const w of this.wheels)
+    // Lamp markers and the box light bar stand in until a panel mesh with its own lamps /
+    // beacons is shown.
+    for (const lamp of this.lamps) lamp.visible = bodyOn && !(panelsOn && lamp.userData.replaced);
+    if (this.lightBar) this.lightBar.visible = !(panelsOn && this.lightBar.userData.replaced);
+    for (const w of this.wheels) {
       for (const c of w.spin.children) {
         const ours = this.panels.wheelParts.some((p) => p.includes(c as THREE.Mesh));
         c.visible = ours ? panelsOn : !panelsOn;
       }
+      for (const g of w.extraSpins) g.visible = panelsOn;
+    }
     if (panelsOn) {
       const v = new THREE.Vector3(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
-      this.panels.update(this.nodes, dt, v);
+      this.panels.update(this.nodes, dt, v, rebuild);
       this.panels.paint.opacity = latticeOn || stressOn ? 0.35 : 1;
       this.panels.paint.transparent = this.panels.paint.opacity < 1;
       this.panels.paint.depthWrite = !this.panels.paint.transparent;
@@ -329,6 +370,7 @@ export class VehicleView {
       w.pivot.rotation.z = cur[wb + SW.steer];
       w.angle += cur[wb + SW.omega] * dt;
       w.spin.rotation.x = w.angle;
+      for (const g of w.extraSpins) g.rotation.x = w.angle;
       if (slip) heat(Math.abs(cur[wb + SW.slipAngle]) / SLIP_RED, w.material.color);
       else w.material.color.setHex(0x222222);
 
@@ -381,17 +423,20 @@ export class VehicleView {
     const headlights = (flags & META_FLAG.headlights) !== 0;
     this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
     this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
-    if (!this.lightBar) return;
+    this.indicatorMat.emissive.setHex(headlights ? 0x3a1a00 : 0x000000);
+    if (!this.lightBar && !this.panels.hasBeacons) return;
     const siren = (flags & META_FLAG.siren) !== 0;
     // Alternating red/blue at 2.5 Hz with a double strobe on each side.
     const phase = (timeS * 2.5) % 1;
     const strobe = (phase % 0.5) < 0.12 || ((phase % 0.5) > 0.2 && (phase % 0.5) < 0.32);
     const redOn = siren && phase < 0.5 && strobe;
     const blueOn = siren && phase >= 0.5 && strobe;
-    this.barRed!.emissive.setHex(redOn ? 0xff2040 : 0x000000);
-    this.barBlue!.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
-    this.sirenLight!.color.setHex(redOn ? 0xff2040 : 0x2060ff);
-    this.sirenLight!.intensity = redOn || blueOn ? 25 : 0;
+    this.barRed.emissive.setHex(redOn ? 0xff2040 : 0x000000);
+    this.barBlue.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
+    if (this.sirenLight) {
+      this.sirenLight.color.setHex(redOn ? 0xff2040 : 0x2060ff);
+      this.sirenLight.intensity = redOn || blueOn ? 25 : 0;
+    }
   }
 
   dispose(): void {

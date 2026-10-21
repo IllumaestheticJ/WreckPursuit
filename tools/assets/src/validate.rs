@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use wp_contracts::{BodyRegion, LoadedCar};
 use wp_damage::PanelSpec;
 
-use crate::mesh::{CarMesh, PartKind, MESH_FORMAT, TRI_BUDGET};
+use crate::mesh::{CarMesh, MaterialSlot, PartKind, MESH_FORMAT, TRI_BUDGET};
 use crate::skin::candidates;
 
 /// Exterior regions that must have a mesh part whenever the lattice has nodes in them.
@@ -52,8 +52,12 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
             mesh.tri_count
         ));
     }
-    if tris < TRI_BUDGET.0 || tris > TRI_BUDGET.1 {
-        errs.push(format!("{tris} tris outside budget {TRI_BUDGET:?}"));
+    let max = CarMesh::budget_max(car.def.body_size_m[1]);
+    if tris < TRI_BUDGET.0 || tris > max {
+        errs.push(format!(
+            "{tris} tris outside budget {}..={max}",
+            TRI_BUDGET.0
+        ));
     }
     let mut names = BTreeSet::new();
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
@@ -89,6 +93,9 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                 errs.push(format!("{tag}: wheel parts need wheel 0..4 and no region"))
             }
             (_, Some(region), None) => {
+                if p.hub_offset_mm.is_some() {
+                    errs.push(format!("{tag}: hub_offset_mm on a body part"));
+                }
                 if p.skin_nodes.len() != n * 4 || p.skin_weights.len() != n * 4 {
                     errs.push(format!("{tag}: not skinned (run bind-skin)"));
                     continue;
@@ -105,11 +112,14 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                 {
                     errs.push(format!("{tag}: weights must sum to 255"));
                 }
-                for v in 0..n {
-                    let q = p.vertex(v);
-                    for k in 0..3 {
-                        lo[k] = lo[k].min(q[k]);
-                        hi[k] = hi[k].max(q[k]);
+                // Size check on the shell only (wings, mirrors, light bars stick out).
+                if matches!(p.kind, PartKind::Panel | PartKind::Body | PartKind::Glass) {
+                    for v in 0..n {
+                        let q = p.vertex(v);
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(q[k]);
+                            hi[k] = hi[k].max(q[k]);
+                        }
                     }
                 }
             }
@@ -117,7 +127,9 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                 "{tag}: body parts need a region and no wheel index"
             )),
         }
-        if p.kind == PartKind::Glass && p.material != crate::mesh::MaterialSlot::Glass {
+        if p.kind == PartKind::Glass
+            && !matches!(p.material, MaterialSlot::Glass | MaterialSlot::GlassDark)
+        {
             errs.push(format!("{tag}: glass part without glass material"));
         }
     }

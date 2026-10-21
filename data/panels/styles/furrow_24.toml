@@ -1,0 +1,94 @@
+# Furrow 2.4 — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The tradesman's little truck"
+personality = "A 90s compact pickup with a 2.4 four and a gearbox that likes to be rowed. Slow, light-tailed in the wet, cheap, honest and impossible to kill. Every other suburban driveway has one with a ladder in the back."
+silhouette = "Small, square regular-cab pickup: flat bonnet, upright cab, long open bed, flat-top arches and chrome bumpers."
+signatures = [
+  "Faded red paint, white steel wheels",
+  "Square sealed-beam headlamps either side of a chrome three-bar grille",
+  "Chrome front bumper and rear step bumper",
+  "Open bed with mud flaps behind the rear wheels",
+]
+lighting = "Square headlamps with amber corners; tall vertical tail lamps on the bed corners."
+
+[palette]
+base = "#a33a2b"
+accent = "#e3e0d6"
+primer = "#6b6e66"
+alts = ["#e3e0d6", "#2f4a6b", "#4f5b3a", "#c9cdd1"]
+
+[body]
+nose_len = 0.18
+nose_plan = 0.03
+nose_drop = 0.03
+nose_sharp = 1.6
+tail_len = 0.08
+tail_plan = 0.01
+tail_drop = 0.0
+tail_sharp = 2.0
+tumblehome = 0.08
+arch = "flat_top"
+crease = 0.012
+crease_at = 0.6
+shoulder = 0.03
+bed = "open"
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+x = 0.6
+z = 0.74
+w = 0.24
+h = 0.12
+bezel = 0.015
+
+[[lamp]]
+kind = "indicator"
+x = 0.77
+z = 0.74
+w = 0.07
+h = 0.1
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.78
+z = 0.8
+w = 0.07
+h = 0.2
+
+[parts]
+mirrors = "shell"
+plate_z = [0.0, 0.8]
+
+[parts.grille]
+style = "slats"
+hw = 0.4
+z = 0.74
+h = 0.12
+bars = 3
+chrome = true
+surround = 0.015
+
+[parts.bumper_f]
+style = "chrome"
+z = 0.55
+h = 0.14
+proud = 0.05
+wrap = 0.15
+
+[parts.bumper_r]
+style = "steel"
+z = 0.58
+h = 0.14
+proud = 0.08
+wrap = 0.05
+chrome = true
+
+[parts.utility]
+mudflaps = true
+
+[wheels]
+rim = "steel"
+finish = "accent"
+rim_frac = 0.6

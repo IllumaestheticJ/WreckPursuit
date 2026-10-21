@@ -1,0 +1,130 @@
+# Sentinel Shade — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The unmarked car you only notice when it lights up"
+personality = "A plain gunmetal full-size sedan with a high-output V8 and nothing on the outside to say police — except the things cops always forget: fleet hubcaps, two roof antennas and a driver-side spotlight. When the hidden strobes start, it is already too close."
+silhouette = "Sober three-box full-size sedan, tinted rear glass, no light bar, no push bar."
+signatures = [
+  "Gunmetal paint, dark-tinted rear glass",
+  "Hidden red/blue strobes in the grille and on the dash and rear shelf",
+  "The tells: plain fleet hubcaps, a driver-side spotlight, two antennas",
+  "Chrome slatted grille, dual exhaust",
+]
+lighting = "Ordinary swept headlamps by day; at night red and blue strobes flash from the grille, the dash and the rear shelf."
+
+[palette]
+base = "#3d4247"
+accent = "#1b1b1d"
+primer = "#5d6066"
+alts = ["#1b1b1d", "#5a3a2a", "#2b3a4a", "#c9cdd1"]
+
+[body]
+nose_len = 0.32
+nose_plan = 0.08
+nose_drop = 0.07
+tail_len = 0.3
+tail_plan = 0.06
+tail_drop = 0.04
+tumblehome = 0.12
+crease = 0.01
+crease_at = 0.7
+ws_rake = 0.05
+ws_bow = 0.03
+rear_bow = 0.03
+hood_bulge = 0.015
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.6
+z = 0.66
+w = 0.34
+h = 0.1
+slant = 0.05
+bezel = 0.012
+
+[[lamp]]
+kind = "beacon_red"
+x = -0.2
+z = 0.64
+w = 0.1
+h = 0.03
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+x = 0.2
+z = 0.64
+w = 0.1
+h = 0.03
+mirror = false
+
+[[lamp]]
+kind = "beacon_red"
+face = "top"
+x = -0.3
+y = 1.05
+w = 0.18
+h = 0.05
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+face = "top"
+x = 0.3
+y = 1.05
+w = 0.18
+h = 0.05
+mirror = false
+
+[[lamp]]
+kind = "beacon_red"
+face = "top"
+x = -0.3
+y = -1.29
+w = 0.18
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+face = "top"
+x = 0.3
+y = -1.29
+w = 0.18
+h = 0.04
+mirror = false
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.6
+z = 0.74
+w = 0.32
+h = 0.1
+bezel = 0.008
+
+[parts]
+spotlights = true
+antennas = 2
+dark_rear_glass = true
+
+[parts.grille]
+style = "slats"
+hw = 0.38
+z = 0.65
+h = 0.11
+bars = 3
+chrome = true
+surround = 0.012
+intake = [0.5, 0.45, 0.1]
+
+[parts.exhaust]
+style = "dual"
+x = 0.55
+z = 0.25
+d = 0.08
+
+[wheels]
+rim = "hubcap"
+finish = "metal"
+rim_frac = 0.64

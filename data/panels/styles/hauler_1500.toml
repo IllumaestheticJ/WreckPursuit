@@ -1,0 +1,144 @@
+# Hauler 1500 — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The battering ram with a tow hitch"
+personality = "Full-size half-ton crew cab with nothing to prove and nothing to lose. It wins every shoving match, clears roadblocks for everyone behind it and leans like a barn door in a fast corner. Chrome where it counts, scuffs everywhere else."
+silhouette = "Tall, square-nosed crew-cab pickup: a wall of grille, a flat hood at chest height, a stepped cab-back and a long open bed with flat-top wheel arches."
+signatures = [
+  "Massive chrome three-bar grille with a thick surround, flanked by tall square headlamps",
+  "Open bed with tailgate, chrome step bumper, mud flaps",
+  "Tow mirrors on twin arms, running-board steps, flared flat-top arches",
+  "Six-spoke chrome wheels on chunky all-terrain tires",
+]
+lighting = "Big upright headlamp blocks with amber corner markers; tall vertical tail lamps on the bed corners; cab-roof clearance markers."
+
+[palette]
+base = "#2f3b48"
+accent = "#c9ccd0"
+primer = "#5d6066"
+alts = ["#7a1f1f", "#e8e6e1", "#1b1c1e", "#4f5b3a"]
+
+[body]
+nose_len = 0.22
+nose_plan = 0.04
+nose_drop = 0.03
+nose_lift = 0.08
+nose_sharp = 1.5
+tail_len = 0.15
+tail_plan = 0.02
+tail_drop = 0.0
+tail_lift = 0.04
+tumblehome = 0.08
+roof_crown = 0.03
+crease = 0.015
+crease_at = 0.72
+flare_f = 0.035
+flare_r = 0.035
+arch = "flat_top"
+arch_gap = 0.09
+hood_bulge = 0.03
+ws_bow = 0.02
+bed = "open"
+black_pillars = true
+
+[[lamp]]
+kind = "head"
+x = 0.74
+z = 0.93
+w = 0.34
+h = 0.18
+bezel = 0.02
+
+[[lamp]]
+kind = "indicator"
+x = 0.93
+z = 0.92
+w = 0.08
+h = 0.12
+
+[[lamp]]
+kind = "fog"
+shape = "round"
+x = 0.72
+z = 0.5
+w = 0.1
+h = 0.1
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.25
+y = 0.55
+w = 0.06
+h = 0.03
+
+[[lamp]]
+kind = "marker"
+face = "top"
+x = 0.0
+y = 0.55
+w = 0.06
+h = 0.03
+mirror = false
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.92
+z = 0.96
+w = 0.08
+h = 0.3
+
+[[lamp]]
+kind = "brake3"
+face = "top"
+x = 0.0
+y = -0.6
+w = 0.3
+h = 0.04
+mirror = false
+
+[parts]
+handles = true
+mirrors = "truck"
+plate_z = [0.0, 0.95]
+
+[parts.grille]
+style = "slats"
+hw = 0.55
+z = 0.9
+h = 0.28
+bars = 3
+chrome = true
+surround = 0.06
+intake = [0.55, 0.62, 0.12]
+
+[parts.bumper_f]
+style = "steel"
+z = 0.7
+h = 0.2
+proud = 0.06
+wrap = 0.2
+chrome = true
+
+[parts.bumper_r]
+style = "steel"
+z = 0.72
+h = 0.18
+proud = 0.08
+wrap = 0.1
+chrome = true
+
+[parts.exhaust]
+style = "single"
+x = 0.62
+z = 0.35
+d = 0.1
+
+[parts.utility]
+mudflaps = true
+steps = true
+
+[wheels]
+rim = "six"
+finish = "chrome"
+rim_frac = 0.55

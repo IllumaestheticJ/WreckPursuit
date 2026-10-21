@@ -1,0 +1,68 @@
+# Debug Coupe — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The reference coupe with a calibration stripe"
+personality = "The lead's rear-drive test coupe: 300 kW, a clutch LSD and no pretensions. White with a single black calibration stripe so the camera can read its yaw."
+silhouette = "Generic low two-door coupe with a short deck and a small lip."
+signatures = [
+  "White with one broad black centre stripe nose to tail",
+  "Plain swept lamps, mesh grille, lip spoiler",
+  "Dark ten-spoke wheels",
+]
+lighting = "Plain swept head and tail lamps."
+
+[palette]
+base = "#ecebe4"
+accent = "#1b1b1d"
+primer = "#6b6e66"
+alts = ["#7a8a99", "#c8102e"]
+
+[body]
+nose_drop = 0.1
+tail_kick = 0.01
+tumblehome = 0.14
+flare_r = 0.02
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.6
+z = 0.54
+w = 0.32
+h = 0.08
+slant = 0.06
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "swept"
+x = 0.62
+z = 0.6
+w = 0.32
+h = 0.08
+slant = 0.04
+
+[parts]
+stripes = [0.12, 0.0]
+
+[parts.grille]
+style = "mesh"
+hw = 0.4
+z = 0.5
+h = 0.08
+bars = 2
+
+[parts.spoiler]
+style = "lip"
+rise = 0.04
+chord = 0.1
+hw = 0.6
+
+[parts.exhaust]
+style = "dual"
+x = 0.5
+z = 0.25
+d = 0.08
+
+[wheels]
+rim = "spoke10"
+finish = "trim"

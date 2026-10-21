@@ -1,0 +1,114 @@
+# Kestrel TS — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The rally-bred sleeper with gold wheels"
+personality = "A four-door family sedan that went to rally school. Lazy below 2,500 rpm, then the turbo arrives like a shove in the back. Its owners are earnest, a bit nerdy about boost, and never miss a chance to show the wing."
+silhouette = "Mid-size sedan with a squat, purposeful stance: flat bonnet scoop, slightly flared arches, and a tall wing on the trunk."
+signatures = [
+  "Rally blue paint with gold mesh wheels",
+  "Flat intercooler scoop on the bonnet, big lower mouth with round fog lamps",
+  "Tall body-colour wing on the trunk lid",
+  "One fat exhaust tip",
+]
+lighting = "Sharp swept projector headlamps, round fogs low in the bumper; wide rectangular tail lamps with an inner pair on the trunk lid."
+
+[palette]
+base = "#1c3d8c"
+accent = "#c9a54a"
+primer = "#6d6f6a"
+alts = ["#e8e6dc", "#9ea6ae", "#1b1b1d", "#8c1b1b"]
+
+[body]
+nose_len = 0.34
+nose_plan = 0.09
+nose_drop = 0.09
+tail_len = 0.3
+tail_plan = 0.07
+tail_drop = 0.05
+tumblehome = 0.12
+crease = 0.012
+crease_at = 0.6
+flare_f = 0.02
+flare_r = 0.02
+hood_bulge = 0.015
+ws_bow = 0.03
+rear_bow = 0.02
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.57
+z = 0.62
+w = 0.38
+h = 0.1
+slant = 0.1
+bezel = 0.012
+
+[[lamp]]
+kind = "fog"
+shape = "round"
+x = 0.6
+z = 0.38
+w = 0.09
+h = 0.09
+bezel = 0.01
+
+[[lamp]]
+kind = "indicator"
+x = 0.73
+z = 0.5
+w = 0.1
+h = 0.03
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.63
+z = 0.71
+w = 0.28
+h = 0.1
+bezel = 0.008
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.37
+z = 0.71
+w = 0.2
+h = 0.08
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.47
+z = 0.62
+w = 0.08
+h = 0.04
+
+[parts]
+scoop = "flat"
+
+[parts.grille]
+style = "mesh"
+hw = 0.3
+z = 0.62
+h = 0.07
+bars = 2
+intake = [0.5, 0.42, 0.15]
+
+[parts.spoiler]
+style = "wing"
+rise = 0.2
+chord = 0.22
+hw = 0.68
+painted = true
+
+[parts.exhaust]
+style = "single"
+x = 0.45
+z = 0.26
+d = 0.11
+
+[wheels]
+rim = "mesh"
+finish = "accent"
+rim_frac = 0.7

@@ -1,0 +1,118 @@
+# Rampart 5.0 — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "Loud, proud and painted competition orange"
+personality = "Modern V8 muscle with a shark nose and a fastback roof. Traction-limited, noisy, theatrical and fast in a straight line. Its drivers wave at each other and never at the police."
+silhouette = "Long bonnet, short deck, fastback roofline sweeping into a squared-off tail; a forward-leaning shark nose and broad rear haunches."
+signatures = [
+  "Twin black racing stripes nose to tail",
+  "Three vertical tail-lamp bars per side",
+  "Angry slit headlamps over a big trapezoid grille, heat-extractor vents on the bonnet",
+  "Quad exhaust, black ten-spoke wheels",
+]
+lighting = "Slit headlamps with a light-strip underline; the tri-bar tail lamps are the signature at night."
+
+[palette]
+base = "#e0561b"
+accent = "#141414"
+primer = "#6d6f6a"
+alts = ["#1e6fd0", "#e3b505", "#1b1b1d", "#e8e6dc", "#2c5f2d"]
+
+[body]
+nose_len = 0.3
+nose_plan = 0.06
+nose_drop = 0.05
+nose_sharp = 1.4
+tail_len = 0.25
+tail_plan = 0.05
+tail_drop = 0.02
+tail_sharp = 1.4
+tumblehome = 0.15
+roof_w = 0.95
+rear_bow = 0.07
+ws_bow = 0.02
+flare_r = 0.04
+belt_kick = 0.04
+crease = 0.015
+crease_at = 0.6
+hood_bulge = 0.03
+shoulder = 0.05
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.62
+z = 0.58
+w = 0.3
+h = 0.08
+slant = 0.06
+bezel = 0.015
+
+[[lamp]]
+kind = "drl"
+shape = "slit"
+x = 0.62
+z = 0.52
+w = 0.26
+h = 0.014
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.74
+z = 0.58
+w = 0.06
+h = 0.13
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.65
+z = 0.58
+w = 0.06
+h = 0.13
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.56
+z = 0.58
+w = 0.06
+h = 0.13
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.2
+z = 0.38
+w = 0.08
+h = 0.04
+
+[parts]
+scoop = "vents"
+stripes = [0.11, 0.08]
+
+[parts.grille]
+style = "mesh"
+hw = 0.44
+z = 0.53
+h = 0.15
+bars = 2
+surround = 0.02
+intake = [0.5, 0.31, 0.09]
+
+[parts.spoiler]
+style = "lip"
+rise = 0.05
+chord = 0.12
+hw = 0.62
+
+[parts.exhaust]
+style = "quad"
+x = 0.55
+z = 0.24
+d = 0.09
+
+[wheels]
+rim = "spoke10"
+finish = "trim"
+rim_frac = 0.7

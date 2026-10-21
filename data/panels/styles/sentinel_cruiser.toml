@@ -1,0 +1,120 @@
+# Sentinel Cruiser — style sheet (see tools/assets/src/style.rs for every key).
+[identity]
+tagline = "The black-and-white that is always in your mirror"
+personality = "Patrol workhorse. Big, square-shouldered and unhurried until the light bar comes on; then it is a two-tonne brick with a V8 and a push bar. Nothing about it is pretty, everything about it says the shift is long."
+silhouette = "Long, flat three-box sedan with an upright windscreen, a tall flat deck and a steel push bar jutting ahead of the nose; full-width light bar mid-roof."
+signatures = [
+  "Classic black body with white doors and roof",
+  "Steel push bar with rubber pads ahead of a black egg-crate grille",
+  "Full-width red/blue light bar, A-pillar spotlight, three roof antennas",
+  "Black steel wheels with small chrome caps",
+]
+lighting = "Squared-off swept headlamps with dark bezels, grille strobes, wide horizontal tail lamps; at night the bar and grille strobes flash red/blue."
+
+[palette]
+base = "#141619"
+accent = "#f1f1ec"
+primer = "#5d6066"
+alts = ["#f1f1ec", "#1d2a44"]
+
+[paint_overrides]
+"door_*" = "accent"
+roof = "accent"
+
+[body]
+nose_len = 0.30
+nose_plan = 0.07
+nose_drop = 0.06
+tail_len = 0.30
+tail_plan = 0.06
+tail_drop = 0.04
+tumblehome = 0.12
+crease = 0.012
+crease_at = 0.70
+shoulder = 0.05
+hood_bulge = 0.02
+flare_r = 0.01
+ws_bow = 0.03
+rear_bow = 0.02
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.6
+z = 0.71
+w = 0.34
+h = 0.1
+slant = 0.05
+bezel = 0.015
+
+[[lamp]]
+kind = "indicator"
+x = 0.84
+z = 0.70
+w = 0.08
+h = 0.06
+
+[[lamp]]
+kind = "beacon_red"
+x = -0.22
+z = 0.76
+w = 0.1
+h = 0.035
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+x = 0.22
+z = 0.76
+w = 0.1
+h = 0.035
+mirror = false
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.6
+z = 0.77
+w = 0.34
+h = 0.12
+bezel = 0.01
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.36
+z = 0.8
+w = 0.1
+h = 0.1
+
+[[lamp]]
+kind = "brake3"
+face = "top"
+x = 0.0
+y = -1.33
+w = 0.4
+h = 0.04
+mirror = false
+
+[parts]
+spotlights = true
+antennas = 3
+guard = "push"
+
+[parts.grille]
+style = "egg"
+hw = 0.4
+z = 0.69
+h = 0.12
+bars = 3
+surround = 0.015
+intake = [0.5, 0.48, 0.12]
+
+[parts.lightbar]
+style = "full"
+hw = 0.62
+
+[wheels]
+rim = "steel"
+finish = "trim"
+rim_frac = 0.62

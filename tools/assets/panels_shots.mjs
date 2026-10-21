@@ -101,9 +101,15 @@ const perf = await page.evaluate(() => {
   let t0 = performance.now();
   for (let i = 0; i < n; i++) v.panels.update(nodes, 0);
   const skin = (performance.now() - t0) / n;
-  return { skinMsPerCar: skin };
+  t0 = performance.now();
+  for (let i = 0; i < n; i++) v.panels.update(nodes, 0, undefined, false);
+  const steady = (performance.now() - t0) / n;
+  return { skinMsPerCar: skin, steadyMsPerCar: steady };
 });
-console.log(`browser: panel mesh skinning ${perf.skinMsPerCar.toFixed(3)} ms per car per frame (includes panel_states)`);
+console.log(
+  `browser: panel mesh skinning ${perf.skinMsPerCar.toFixed(3)} ms per car per frame while denting (re-skin + normals), ` +
+    `${perf.steadyMsPerCar.toFixed(3)} ms steady (only swinging panels; includes panel_states)`,
+);
 
 check(errors.length === 0, `no page errors ${errors.slice(0, 3).join(" | ")}`);
 await browser.close();

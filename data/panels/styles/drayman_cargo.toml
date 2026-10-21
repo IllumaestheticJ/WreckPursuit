@@ -1,0 +1,101 @@
+# Drayman Cargo — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The delivery van that is always double-parked"
+personality = "A 2000s full-size cargo van: a white steel box on a truck frame with a V8 that gets out of breath above 150 km/h. Leans like a boat, brakes long, wins most shoves at city speed. Smells of cardboard and coffee."
+silhouette = "Tall slab-sided box with a short stubby bonnet, a steep windscreen, blank cargo sides and a flat vertical back with barn doors."
+signatures = [
+  "Fleet white with no side glass behind the doors",
+  "Ladder roof rack, big truck mirrors",
+  "Grey steel bumpers and a plain three-bar grille between square lamps",
+  "Tall vertical tail lamps on the rear corners, steel wheels",
+]
+lighting = "Square headlamps with amber corners; tall vertical tail lamps either side of the barn doors."
+
+[palette]
+base = "#f1f1ee"
+accent = "#2f6f9f"
+primer = "#6b6e66"
+alts = ["#c9cdd1", "#2f3b48", "#8f3b2e", "#e8d27a"]
+
+[body]
+nose_len = 0.25
+nose_plan = 0.06
+nose_drop = 0.05
+nose_sharp = 1.4
+tail_len = 0.1
+tail_plan = 0.02
+tail_drop = 0.0
+tail_sharp = 2.0
+tumblehome = 0.06
+roof_w = 1.05
+rear_rake = -0.45
+arch = "flat_top"
+crease = 0.01
+crease_at = 0.55
+ws_bow = 0.02
+blind_rear = true
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+x = 0.68
+z = 0.96
+w = 0.28
+h = 0.15
+bezel = 0.02
+
+[[lamp]]
+kind = "indicator"
+x = 0.87
+z = 0.96
+w = 0.07
+h = 0.13
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.88
+z = 0.93
+w = 0.1
+h = 0.34
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = -2.6
+z = 0.85
+w = 0.06
+h = 0.04
+
+[parts]
+mirrors = "truck"
+
+[parts.grille]
+style = "slats"
+hw = 0.48
+z = 0.96
+h = 0.16
+bars = 3
+surround = 0.02
+
+[parts.bumper_f]
+style = "steel"
+z = 0.72
+h = 0.18
+proud = 0.05
+wrap = 0.15
+
+[parts.bumper_r]
+style = "steel"
+z = 0.74
+h = 0.16
+proud = 0.1
+wrap = 0.08
+
+[parts.utility]
+roof_rack = true
+
+[wheels]
+rim = "steel"
+finish = "metal"
+rim_frac = 0.58

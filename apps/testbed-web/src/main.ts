@@ -155,7 +155,10 @@ async function main(): Promise<void> {
       const kind = meta[o + 1];
       const colour =
         kind === VEHICLE_KIND.police ? 0xe9ebf0 : kind === VEHICLE_KIND.traffic ? 0x7a8a99 : COLOURS[(id - 1) % COLOURS.length];
-      const v = new VehicleView(id, colour);
+      // Panel meshes wear the car's own livery: police and the first player the signature
+      // colour, other players and traffic one of its alternatives.
+      const palette = kind === VEHICLE_KIND.police ? 0 : kind === VEHICLE_KIND.traffic ? 1 + (id % 5) : id - 1;
+      const v = new VehicleView(id, colour, palette);
       scene.world.add(v.root);
       scene.world.add(v.velocity);
       app.views.set(id, v);

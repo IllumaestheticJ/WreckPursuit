@@ -1,0 +1,107 @@
+# Sentinel Warden — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The paddy wagon"
+personality = "A full-size prisoner-transport van: a windowless steel box on a V8 chassis with a cage behind the seats. Slow, tall, heavy and in no hurry — whoever ends up in the back has already lost."
+silhouette = "Tall flat-sided van: short stubby bonnet, steep windscreen, blank navy cargo box with no side glass, flat vertical back with barn doors."
+signatures = [
+  "White cab and roof over a blank navy prisoner box",
+  "Roof-edge beacons front and rear, push bar",
+  "Square headlamps with amber corners, steel bumpers",
+  "Steel wheels, truck mirrors",
+]
+lighting = "Square headlamps; red/blue corner beacons on all four roof corners and a white centre bar; tall vertical tail lamps."
+
+[palette]
+base = "#eef0ee"
+accent = "#1b2a4a"
+primer = "#5d6066"
+alts = ["#1b2a4a"]
+
+[paint_overrides]
+box_l = "accent"
+box_r = "accent"
+
+[body]
+nose_len = 0.25
+nose_plan = 0.06
+nose_drop = 0.05
+nose_sharp = 1.4
+tail_len = 0.1
+tail_plan = 0.02
+tail_drop = 0.0
+tail_sharp = 2.0
+tumblehome = 0.06
+roof_w = 1.05
+arch = "flat_top"
+crease = 0.01
+crease_at = 0.55
+bed = "box"
+bed_height = 2.1
+blind_rear = true
+black_pillars = false
+
+[[lamp]]
+kind = "head"
+x = 0.68
+z = 0.96
+w = 0.28
+h = 0.15
+bezel = 0.02
+
+[[lamp]]
+kind = "indicator"
+x = 0.87
+z = 0.96
+w = 0.07
+h = 0.13
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 0.88
+z = 1.0
+w = 0.1
+h = 0.34
+
+[[lamp]]
+kind = "marker"
+face = "side"
+y = -3.0
+z = 1.9
+w = 0.06
+h = 0.04
+
+[parts]
+mirrors = "truck"
+antennas = 2
+guard = "push"
+
+[parts.grille]
+style = "slats"
+hw = 0.48
+z = 0.98
+h = 0.16
+bars = 3
+surround = 0.02
+
+[parts.bumper_f]
+style = "steel"
+z = 0.74
+h = 0.18
+proud = 0.05
+wrap = 0.15
+
+[parts.bumper_r]
+style = "steel"
+z = 0.76
+h = 0.16
+proud = 0.1
+wrap = 0.08
+
+[parts.lightbar]
+style = "edge"
+
+[wheels]
+rim = "steel"
+finish = "metal"
+rim_frac = 0.58

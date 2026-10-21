@@ -20,13 +20,35 @@ export const PANEL_STRIDE = 10;
 /** Panel state codes (mirrors wp_damage::PanelState::code). */
 export const PANEL_STATE = { attached: 0, unlatched: 1, hanging: 2, detached: 3 } as const;
 
+/** Material slots of the mesh format (tools/assets/src/mesh.rs `MaterialSlot`). */
+export type MaterialSlot =
+  | "paint"
+  | "accent"
+  | "primer"
+  | "glass"
+  | "glass_dark"
+  | "trim"
+  | "chrome"
+  | "metal"
+  | "headlight"
+  | "taillight"
+  | "indicator"
+  | "lens"
+  | "beacon_red"
+  | "beacon_blue"
+  | "plate"
+  | "rubber"
+  | "interior";
+
 /** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). */
 export interface MeshPartJson {
   name: string;
   region: string | null;
-  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim";
-  material: "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior";
+  kind: "panel" | "glass" | "light" | "mirror" | "body" | "detail" | "interior" | "tire" | "rim";
+  material: MaterialSlot;
   wheel?: number | null;
+  /** Visual extra axle: hub offset from the physics wheel's hub, mm (chassis axes). */
+  hub_offset_mm?: [number, number, number];
   positions_mm: number[];
   uvs: number[];
   indices: number[];
@@ -40,7 +62,18 @@ export interface CarMeshJson {
   lattice_id: string;
   format: number;
   tri_count: number;
+  /** Livery colours from the car's style sheet (0xRRGGBB). */
+  palette?: { base: number; accent: number; primer: number; alts: number[] };
   parts: MeshPartJson[];
+}
+
+/** Lamp materials a VehicleView owns and lights (shared with its fallback lamp boxes). */
+export interface LampMaterials {
+  headlight: THREE.Material;
+  taillight: THREE.Material;
+  indicator: THREE.Material;
+  beaconRed: THREE.Material;
+  beaconBlue: THREE.Material;
 }
 
 const meshCache = new Map<string, Promise<CarMeshJson | null>>();
@@ -147,6 +180,12 @@ export class PanelBody {
   ready = false;
   /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
   readonly wheelParts: THREE.Mesh[][] = [[], [], [], []];
+  /** Hub offset (m, chassis axes) of each wheel part on a visual extra axle. */
+  readonly hubOffset = new Map<THREE.Mesh, THREE.Vector3>();
+  /** The mesh carries its own beacon lamps (police light bar / strobes). */
+  hasBeacons = false;
+  /** The mesh carries head and tail lamps on its surface. */
+  hasLamps = false;
   /** Latest panel states (PANEL_STRIDE floats per panel). */
   states: Float32Array = new Float32Array(0);
   private parts: PartRT[] = [];
@@ -156,27 +195,44 @@ export class PanelBody {
   private readonly tri = new Map<number, [number, number, number]>();
   private readonly frames = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
-  private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
+  private readonly mats: Record<MaterialSlot, THREE.Material>;
   private onReady: (() => void) | null = null;
 
+  /**
+   * `paint` is the fallback body colour; once the mesh loads, a car with a palette uses its
+   * own colours instead: `paletteIndex` 0 = signature colour, n > 0 = the n-th alternative
+   * (wrapping), negative = keep `paint`.
+   */
   constructor(
     readonly entity: number,
     readonly carId: string,
     paint: THREE.Color | number,
-    headlight: THREE.Material,
-    taillight: THREE.Material,
+    lamps: LampMaterials,
+    private readonly paletteIndex = -1,
   ) {
     this.regions = sim.info(entity).regions;
+    // Smooth shading: loft vertices are shared within a part, so panels read as curved
+    // while part seams (panel gaps) stay sharp.
     const std = (o: THREE.MeshStandardMaterialParameters) =>
-      new THREE.MeshStandardMaterial({ flatShading: true, side: THREE.DoubleSide, ...o });
+      new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, ...o });
     this.mats = {
-      paint: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
-      glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.38, metalness: 0.1, roughness: 0.1, depthWrite: false }),
-      trim: std({ color: 0x1b1b1d, roughness: 0.9 }),
-      headlight,
-      taillight,
-      rubber: std({ color: 0x141414, roughness: 0.95 }),
-      metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
+      paint: std({ color: paint, metalness: 0.3, roughness: 0.45 }),
+      accent: std({ color: 0xe8e8e4, metalness: 0.3, roughness: 0.45 }),
+      primer: std({ color: 0x6d6f6a, roughness: 0.95 }),
+      glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.4, metalness: 0.1, roughness: 0.1, depthWrite: false }),
+      glass_dark: std({ color: 0x1c2228, transparent: true, opacity: 0.85, metalness: 0.2, roughness: 0.1 }),
+      trim: std({ color: 0x1b1b1d, roughness: 0.85 }),
+      // No environment map in the testbed: keep metals partly diffuse so they do not go black.
+      chrome: std({ color: 0xe4e8ec, metalness: 0.55, roughness: 0.18 }),
+      metal: std({ color: 0x9aa1a8, metalness: 0.45, roughness: 0.4 }),
+      headlight: lamps.headlight,
+      taillight: lamps.taillight,
+      indicator: lamps.indicator,
+      lens: std({ color: 0xe8ecef, metalness: 0.2, roughness: 0.15 }),
+      beacon_red: lamps.beaconRed,
+      beacon_blue: lamps.beaconBlue,
+      plate: std({ color: 0xece8d8, roughness: 0.6 }),
+      rubber: std({ color: 0x151515, roughness: 0.95 }),
       interior: std({ color: 0x2b2724, roughness: 1 }),
     };
     bodies.set(entity, this);
@@ -195,9 +251,20 @@ export class PanelBody {
   }
 
   private build(mesh: CarMeshJson): void {
+    if (mesh.palette && this.paletteIndex >= 0) {
+      const colours = [mesh.palette.base, ...mesh.palette.alts];
+      (this.mats.paint as THREE.MeshStandardMaterial).color.setHex(colours[this.paletteIndex % colours.length]);
+    }
+    if (mesh.palette) {
+      (this.mats.accent as THREE.MeshStandardMaterial).color.setHex(mesh.palette.accent);
+      (this.mats.primer as THREE.MeshStandardMaterial).color.setHex(mesh.palette.primer);
+    }
+    this.hasBeacons = mesh.parts.some((p) => p.material === "beacon_red" || p.material === "beacon_blue");
+    this.hasLamps =
+      mesh.parts.some((p) => p.material === "headlight") && mesh.parts.some((p) => p.material === "taillight");
     this.restNodes = sim.latticeRest(this.entity);
     const nodeRegions = sim.latticeRegions(this.entity);
-    for (const def of mesh.parts) {
+    for (const def of mergeParts(mesh.parts)) {
       const n = def.positions_mm.length / 3;
       const rest = new Float32Array(n * 3);
       for (let i = 0; i < n * 3; i++) rest[i] = def.positions_mm[i] * 1e-3;
@@ -208,13 +275,15 @@ export class PanelBody {
       for (let i = 0; i < uv.length; i++) uv[i] = def.uvs[i] / 65535;
       geom.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       geom.setIndex(def.indices);
-      const m = new THREE.Mesh(geom, this.mats[def.material]);
+      geom.computeVertexNormals();
+      const m = new THREE.Mesh(geom, this.mats[def.material] ?? this.mats.trim);
       m.name = def.name;
       m.frustumCulled = false;
       if (def.material === "glass") m.renderOrder = 1;
       const region = def.region ? this.regions.indexOf(def.region) : -1;
       if (def.wheel != null) {
         this.wheelParts[def.wheel].push(m);
+        if (def.hub_offset_mm) this.hubOffset.set(m, new THREE.Vector3(...def.hub_offset_mm).multiplyScalar(1e-3));
         continue;
       }
       this.root.add(m);
@@ -241,8 +310,9 @@ export class PanelBody {
   /**
    * Re-skin every part from the current lattice nodes (chassis space, xyz per node) and the
    * panel states. `worldVel` (the car's world velocity, m/s) seeds detached-panel debris.
+   * `nodesChanged` false skips the normal recompute while nothing is dented or swinging.
    */
-  update(nodes: Float32Array, dt: number, worldVel?: THREE.Vector3): void {
+  update(nodes: Float32Array, dt: number, worldVel?: THREE.Vector3, nodesChanged = true): void {
     if (!this.ready) return;
     this.states = panelStates(this.entity);
     this.frames.clear();
@@ -263,6 +333,9 @@ export class PanelBody {
     for (const p of this.parts) {
       if (p.hidden) continue;
       const f = p.region >= 0 ? this.frames.get(p.region) : undefined;
+      // Nothing moved: the part keeps last frame's skin (the common case for every car that
+      // is not being dented right now and has no panel swinging).
+      if (!nodesChanged && !f) continue;
       const { rest, pos, nodes: ids, weights } = p;
       const nv = rest.length / 3;
       for (let v = 0; v < nv; v++) {
@@ -297,6 +370,7 @@ export class PanelBody {
         }
       }
       (p.mesh.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+      if (nodesChanged || f) p.mesh.geometry.computeVertexNormals();
     }
   }
 
@@ -355,6 +429,43 @@ export class PanelBody {
     bodies.delete(this.entity);
     this.root.removeFromParent();
   }
+}
+
+/**
+ * Merge parts that render and deform identically — same region, material and kind class
+ * (glass shatters per region, so it stays apart), or the same wheel, hub offset and material —
+ * into one draw call each. Format-2 meshes carry 60–90 named parts (lamps, bezels, bolt-ons);
+ * merged, a car is ~30–45 draw calls.
+ */
+export function mergeParts(parts: MeshPartJson[]): MeshPartJson[] {
+  const groups = new Map<string, MeshPartJson[]>();
+  for (const p of parts) {
+    const key =
+      p.wheel != null
+        ? `w${p.wheel}|${p.hub_offset_mm?.join(",") ?? ""}|${p.material}`
+        : `${p.region}|${p.material}|${p.kind === "glass" ? "glass" : p.kind === "interior" ? "interior" : "solid"}`;
+    const g = groups.get(key);
+    if (g) g.push(p);
+    else groups.set(key, [p]);
+  }
+  const out: MeshPartJson[] = [];
+  for (const g of groups.values()) {
+    if (g.length === 1) {
+      out.push(g[0]);
+      continue;
+    }
+    const m: MeshPartJson = { ...g[0], name: g.map((p) => p.name).join("+"), positions_mm: [], uvs: [], indices: [], skin_nodes: [], skin_weights: [] };
+    for (const p of g) {
+      const base = m.positions_mm.length / 3;
+      for (const v of p.positions_mm) m.positions_mm.push(v);
+      for (const v of p.uvs) m.uvs.push(v);
+      for (const i of p.indices) m.indices.push(base + i);
+      for (const v of p.skin_nodes) m.skin_nodes.push(v);
+      for (const v of p.skin_weights) m.skin_weights.push(v);
+    }
+    out.push(m);
+  }
+  return out;
 }
 
 /** Three nodes of `region` spanning the largest triangle (rest pose). */

@@ -1,0 +1,106 @@
+# Shiro Turbo — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The drift kid's coupe with a carbon bonnet"
+personality = "Light, rear-drive, turbocharged and permanently a little sideways. It belongs to someone who has spent more on tires than rent and knows every empty car park in the city. Cheeky, twitchy, loyal."
+silhouette = "Compact low coupe with a long dropped nose, a short tight cabin and a small ducktail lip over a high deck."
+signatures = [
+  "Pearl white body with a bare carbon-black bonnet",
+  "Narrow knife-slit headlamps above a gaping lower intake and a front splitter lip",
+  "Side skirts, ducktail lip, one big exhaust can",
+  "Black six-spoke wheels pushed out to the arches",
+]
+lighting = "Slit swept headlamps with thin amber strips below; slim swept tail lamps across the tail."
+
+[palette]
+base = "#ecebe4"
+accent = "#1b1b1d"
+primer = "#6d6f6a"
+alts = ["#c8102e", "#1b1b1d", "#e5c21a", "#4b6e9c"]
+
+[paint_overrides]
+hood = "trim"
+
+[body]
+nose_len = 0.45
+nose_plan = 0.1
+nose_drop = 0.12
+nose_sharp = 1.1
+tail_len = 0.3
+tail_plan = 0.07
+tail_drop = 0.05
+tail_kick = 0.025
+tumblehome = 0.14
+roof_bow = 0.02
+ws_bow = 0.03
+rear_bow = 0.03
+crease = 0.01
+crease_at = 0.55
+flare_f = 0.015
+flare_r = 0.025
+shoulder = 0.05
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.54
+z = 0.52
+w = 0.42
+h = 0.08
+slant = 0.14
+bezel = 0.01
+
+[[lamp]]
+kind = "indicator"
+shape = "slit"
+x = 0.58
+z = 0.45
+w = 0.22
+h = 0.02
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "swept"
+x = 0.58
+z = 0.55
+w = 0.38
+h = 0.08
+slant = 0.06
+
+[[lamp]]
+kind = "reverse"
+face = "rear"
+x = 0.3
+z = 0.55
+w = 0.1
+h = 0.05
+
+[parts]
+splitter = 0.05
+skirts = true
+mirrors = "slim"
+
+[parts.grille]
+style = "mesh"
+hw = 0.24
+z = 0.53
+h = 0.04
+bars = 1
+intake = [0.5, 0.34, 0.15]
+
+[parts.spoiler]
+style = "lip"
+rise = 0.05
+chord = 0.12
+hw = 0.6
+
+[parts.exhaust]
+style = "single"
+x = 0.5
+z = 0.24
+d = 0.12
+
+[wheels]
+rim = "six"
+finish = "trim"
+rim_frac = 0.7

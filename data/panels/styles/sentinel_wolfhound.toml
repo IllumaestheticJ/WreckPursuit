@@ -1,0 +1,121 @@
+# Sentinel Wolfhound — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The pursuit specialist that never lets the gap open"
+personality = "A modern all-wheel-drive twin-turbo pursuit sedan. Heavier than it looks, stable at speed and relentless: it does not need to out-corner you, it just needs to still be there. Clean, efficient, a little cold."
+silhouette = "Modern high-belted sedan with a rising wedge beltline, a fast raked glasshouse, slim low-profile light bar and a push bar."
+signatures = [
+  "White body with navy doors",
+  "Slim low-profile LED light bar and push bar",
+  "Narrow swept headlamps with light-strip underline, grille strobes",
+  "Black six-spoke wheels",
+]
+lighting = "Thin swept LED headlamps and grille strobes; wide swept tail lamps and a high brake light."
+
+[palette]
+base = "#f1f1ec"
+accent = "#18243f"
+primer = "#5d6066"
+alts = ["#18243f", "#2a2c30"]
+
+[paint_overrides]
+"door_*" = "accent"
+
+[body]
+nose_len = 0.35
+nose_plan = 0.09
+nose_drop = 0.08
+tail_len = 0.3
+tail_plan = 0.07
+tail_drop = 0.04
+tumblehome = 0.13
+crease = 0.015
+crease_at = 0.72
+belt_rise = 0.04
+ws_bow = 0.03
+rear_bow = 0.04
+ws_rake = 0.1
+rear_rake = 0.1
+hood_bulge = 0.02
+flare_r = 0.015
+
+[[lamp]]
+kind = "head"
+shape = "swept"
+x = 0.62
+z = 0.69
+w = 0.34
+h = 0.08
+slant = 0.1
+bezel = 0.012
+
+[[lamp]]
+kind = "drl"
+shape = "slit"
+x = 0.62
+z = 0.63
+w = 0.28
+h = 0.012
+
+[[lamp]]
+kind = "beacon_red"
+x = -0.25
+z = 0.69
+w = 0.1
+h = 0.03
+mirror = false
+
+[[lamp]]
+kind = "beacon_blue"
+x = 0.25
+z = 0.69
+w = 0.1
+h = 0.03
+mirror = false
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+shape = "swept"
+x = 0.62
+z = 0.78
+w = 0.34
+h = 0.08
+slant = 0.05
+bezel = 0.008
+
+[[lamp]]
+kind = "brake3"
+face = "top"
+x = 0.0
+y = -1.42
+w = 0.4
+h = 0.04
+mirror = false
+
+[parts]
+antennas = 2
+guard = "push"
+
+[parts.grille]
+style = "mesh"
+hw = 0.42
+z = 0.69
+h = 0.1
+bars = 2
+surround = 0.015
+intake = [0.55, 0.46, 0.12]
+
+[parts.lightbar]
+style = "low"
+hw = 0.58
+
+[parts.exhaust]
+style = "dual"
+x = 0.55
+z = 0.25
+d = 0.08
+
+[wheels]
+rim = "six"
+finish = "trim"
+rim_frac = 0.64

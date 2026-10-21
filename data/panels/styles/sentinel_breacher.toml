@@ -1,0 +1,103 @@
+# Sentinel Breacher — style sheet (keys: tools/assets/src/style.rs).
+[identity]
+tagline = "The SWAT truck: a battering ram with a siren"
+personality = "An armoured tactical truck on a turbo-diesel chassis. Seven tonnes of steel plate that does 140 flat out and does not stop for anything in between. It does not chase; it arrives, and roadblocks stop being roadblocks."
+silhouette = "Huge armoured box: slab sides, tiny armoured windows behind guard bars, a sloped steel ram plate across the nose, roof hatch, dual rear wheels."
+signatures = [
+  "Black armour with dark-grey hardware",
+  "Sloped ram plate with ribs across the whole nose",
+  "Barred windows, roof turret hatch, spotlight, three antennas",
+  "Heavy truck wheels with dual rears, steps, mud flaps",
+]
+lighting = "Small deep-set rectangular headlamps behind the ram; red/blue roof-corner beacons and a white takedown bar; small armoured tail lamps."
+
+[palette]
+base = "#1a1c1e"
+accent = "#3a3f45"
+primer = "#5d6066"
+alts = ["#2b3a2b", "#3a3f45"]
+
+[body]
+nose_len = 0.15
+nose_plan = 0.05
+nose_drop = 0.06
+nose_sharp = 2.0
+tail_len = 0.1
+tail_plan = 0.02
+tail_drop = 0.0
+tail_sharp = 2.0
+tumblehome = 0.04
+roof_w = 1.08
+roof_crown = 0.01
+ws_rake = 0.1
+arch = "square"
+arch_gap = 0.1
+crease = 0.02
+crease_at = 0.5
+shoulder = 0.02
+blind_rear = true
+
+[[lamp]]
+kind = "head"
+x = 0.82
+z = 1.42
+w = 0.22
+h = 0.12
+bezel = 0.03
+
+[[lamp]]
+kind = "indicator"
+x = 1.0
+z = 1.42
+w = 0.06
+h = 0.1
+
+[[lamp]]
+kind = "tail"
+face = "rear"
+x = 1.02
+z = 1.42
+w = 0.1
+h = 0.16
+bezel = 0.02
+
+[parts]
+spotlights = true
+antennas = 3
+guard = "ram"
+mirrors = "truck"
+
+[parts.grille]
+style = "bars"
+hw = 0.45
+z = 1.42
+h = 0.22
+bars = 7
+
+[parts.bumper_r]
+style = "steel"
+z = 0.95
+h = 0.2
+proud = 0.1
+wrap = 0.05
+
+[parts.lightbar]
+style = "edge"
+
+[parts.exhaust]
+style = "single"
+x = -0.7
+z = 0.5
+d = 0.1
+
+[parts.utility]
+window_guards = true
+hatch = true
+steps = true
+mudflaps = true
+
+[wheels]
+rim = "truck"
+finish = "trim"
+rim_frac = 0.55
+dual_rear = true

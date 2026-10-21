@@ -2,9 +2,13 @@
 //!
 //! Car asset pipeline: every car in `data/cars` gets
 //! - a panel spec `data/panels/<car>.json` ([`wp_damage::PanelSpec`], `gen-panels`),
+//! - a style sheet `data/panels/styles/<car>.toml` ([`style::CarStyle`], hand-written): the
+//!   car's shape between its lattice anchors, lamps, bolt-on parts, wheels, palette and
+//!   personality,
 //! - a procedural low-poly mesh `data/panels/meshes/<car>.json` ([`mesh::CarMesh`],
-//!   `gen-car-mesh`): one part per body region plus glass, lights, mirrors, a minimal
+//!   `gen-car-mesh`): one part per body region plus glass, lamps, bolt-on details, a small
 //!   interior and wheels, skinned to the lattice by [`skin::bind_skin`] (`bind-skin`),
+//! - the render list `data/panels/RENDER_LIST.md` ([`render_list`], `gen-car-mesh`),
 //! - checked by [`validate::validate`] (`validate-car-asset`).
 //!
 //! See `README.md` for the file formats and commands.
@@ -12,9 +16,14 @@
 #![warn(missing_docs)]
 
 pub mod mesh;
+pub mod parts;
 pub mod profile;
+pub mod render_list;
+pub mod shell;
 pub mod skin;
+pub mod style;
 pub mod validate;
+pub mod wheels;
 
 use std::path::{Path, PathBuf};
 
@@ -74,9 +83,19 @@ pub fn panels_json(spec: &PanelSpec) -> String {
     s
 }
 
+/// Path of a car's style sheet.
+pub fn style_path(root: &Path, id: &str) -> PathBuf {
+    root.join(format!("data/panels/styles/{id}.toml"))
+}
+
+/// Load a car's style sheet (every car has one).
+pub fn load_style(root: &Path, id: &str) -> Result<style::CarStyle, String> {
+    style::CarStyle::load(&style_path(root, id))
+}
+
 /// The generated, skinned mesh for a car (what `gen-car-mesh` writes).
-pub fn build_mesh(car: &LoadedCar) -> mesh::CarMesh {
-    let mut m = mesh::generate(&car.def, &car.lattice);
+pub fn build_mesh(car: &LoadedCar, style: &style::CarStyle) -> mesh::CarMesh {
+    let mut m = mesh::generate(&car.def, &car.lattice, style);
     skin::bind_skin(&car.lattice, &mut m);
     m
 }
