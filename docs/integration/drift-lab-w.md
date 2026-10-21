@@ -1130,8 +1130,14 @@ the reference swings in 0.5–0.8 s. The new key turned the fronts into the old 
   rack.
 - **Arming:** unarmed, it broke the drift entry (the key into the turn that starts a drift is
   also "into the old corner"; 45 / 45 no hold).
-- **Leaving it:** past the plain lock (this mode, or step 11's extra lock), the rack now returns
-  inside the lock at the return rate instead of jumping.
+- **Leaving it:** past the plain lock right after a flick (a lift and a key reversal within
+  `trans_arm_s` + 0.5 s), the rack returns inside the lock at the return rate instead of jumping.
+  - First version: this applied to any lock shrink, including grip-balance's held-key cut (the
+    vehicle rate-limits that one) and step 11's extension ending. Holding the countersteer
+    longer there spun the tapper on rwd_b, took snap-back 3.3 → 5.5°, the held set 26 → 25,
+    and turned tyre_slip's spin hold red (grip-balance's repro).
+  - Gated to after a flick: all four restored (tapper rwd_b held 4.2 s, snap 3.3°, robust
+    26 / 27, spin hold green). Swings unchanged: 18 / 18 caught, held 26, fast 4.
 
 **Measured** (`--example transition`, the owner's lift-flick: lifts 0.15 / 0.25 / 0.4 s × gaps
 0.05 / 0.15 / 0.3 s, rwd_a / b / d, rampart_50, debug_coupe = 45 flicks; real-swing metric):
