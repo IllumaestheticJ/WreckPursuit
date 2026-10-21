@@ -523,22 +523,9 @@ pub(crate) fn update(
         return offset;
     }
     // Other lane (or, for a vehicle straddling the centreline, a little further left): clear
-    // past the blocker, and no oncoming vehicle close. A chasing unit with both lanes queued
-    // takes the right shoulder past the queue (row 86: never parked in a jam).
+    // past the blocker, and no oncoming vehicle close.
     let need = (b.far_s - me.track_s) + cfg.pass_clear_m;
-    let shoulder = if me.chase {
-        -cfg.pass_shift_m
-    } else {
-        f32::NAN
-    };
-    for shift in [
-        cfg.pass_shift_m,
-        cfg.pass_shift_m + cfg.pass_extra_shift_m,
-        shoulder,
-    ] {
-        if shift.is_nan() {
-            continue;
-        }
+    for shift in [cfg.pass_shift_m, cfg.pass_shift_m + cfg.pass_extra_shift_m] {
         let alt = base_offset_m - shift;
         let clear = match scan(
             me,
