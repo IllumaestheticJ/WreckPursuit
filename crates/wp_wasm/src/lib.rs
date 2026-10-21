@@ -410,9 +410,7 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .vehicle(EntityId(entity))
                 .and_then(|v| v.police_unit)
                 .map(|u| u.0),
-            traffic_agent: s
-                .vehicle(EntityId(entity))
-                .and_then(|v| v.traffic_agent),
+            traffic_agent: s.vehicle(EntityId(entity)).and_then(|v| v.traffic_agent),
         }))
     })
 }
