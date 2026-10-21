@@ -32,6 +32,12 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.23 | preview | Hollins race: busted racers pull off instead of freezing in the hairpin, no stopping in tight bends; asphalt tyre roar instead of hiss |
 | 0.12.24 | preview | AI racers pass cars that are out of the race and never stop to yield in a hairpin (Hollins seed 6 finishes); solid terrain matches drawn terrain (no invisible hillside); engine sound rework (recorded layers at their real firing frequency) |
 | 0.12.25 | preview | C is the clutch (camera cycle on F3); rev on the grid during the countdown; AI: fleeing racers get round cars waiting at reds, grid cars line up properly |
+| 0.12.25 (race build) | preview ([link](https://claude.ai/artifact/R3vr7NVghCGvdvN4TDzZCA)) | Built in parallel from the same round12 commit as the 0.12.25 above (merged in the 2026-10-21 branch triage): race gates much wider (min 26 m) with a taller arch; going too far off course puts the car back on the route instead of a DQ (playtest row 127, filed as row 120 on its branch) |
 | 0.12.26 | preview | Parked cars dent, shed glass and parts when hit; traffic uses turn signals (turns, lane changes, pulling over) and hazards; player indicators on - / = |
-| 0.12.27 | preview | (next) |
+| 0.12.27 | preview | Eight new cars: Stoat 16V and Marten 2.0 (90s hot hatches), Bulwark 400 and Brigand 400 (70s muscle sedans), Arashi T4 and Talus 2.0T (AWD rally saloons), Satchel 2.0 and Tumbril 2.0 (vans); drawn terrain follows the ground behind lots |
+| 0.12.28 | preview | New careers start with $150 000 for testing (?cash=market for the real $4 500); game data embedded compressed (wasm 10.7 MB) |
+| 0.12.29 | preview | Parked cars sit on the ground (hillside driveways around Hollins were up to 0.76 m in the terrain), knocked cars no longer sink; new cars' meshes regenerated |
+| 0.12.30 | preview | ONE VERSION: the owner's handling (reference step-14 balance, springs/bars ×1.5, step-22 tyres) on every car; over-rotation catch, transition + settle steering, held-key fix on the player car; auto gearbox holds gear while sliding; hidden tune panel (?tune=1) with reset-all, copy-tune and rear ×0.50 / ×0.55 presets |
+| 0.12.31 | preview | Photo mode (F7: free camera, filters, save PNG), realistic tyre squeal, mod shop with parts drawn on the car, police helicopter (bridges block its view, radio), race gates wider + off-course reset, audio pauses with the game; tune panel moved to F10 |
+| 0.12.32 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

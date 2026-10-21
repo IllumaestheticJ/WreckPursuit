@@ -53,6 +53,9 @@ export class AudioSystem {
   private lastPos: THREE.Vector3 | null = null;
   private vel = new THREE.Vector3();
   private muted = false;
+  private paused = false;
+  /** Photo mode: the mix is faded out while the game is frozen (the mute toggle is kept). */
+  private ducked = false;
   private failed = false;
   private focus = 0;
   private lineNo = 0;
@@ -69,6 +72,9 @@ export class AudioSystem {
   private readonly listenerArr = new Float32Array(12);
   private readonly scratch = Array.from({ length: 7 }, () => new THREE.Vector3());
   private readonly scratchQ = new THREE.Quaternion();
+  private readonly scratchM = new THREE.Matrix4();
+  private readonly scratchP = new THREE.Vector3();
+  private readonly scratchS = new THREE.Vector3();
   /** Smoothed cost of one audio frame (director in wasm + JSON + Web Audio calls), ms. */
   frameMs = 0;
   /** Smoothed cost of the wasm director call alone (incl. JSON), ms. */
@@ -83,7 +89,7 @@ export class AudioSystem {
   constructor(private worldFrame: THREE.Object3D, parent: HTMLElement) {
     this.panel = new AudioPanel(parent, {
       start: () => this.start(),
-      setMaster: (v) => this.mixer?.master.gain.setTargetAtTime(this.muted ? 0 : v, this.ctx!.currentTime, 0.02),
+      setMaster: (v) => this.mixer?.master.gain.setTargetAtTime(this.muted || this.ducked ? 0 : v, this.ctx!.currentTime, 0.02),
       setBus: (b, v) => this.mixer?.setUserGain(b, v),
       setTier: (t) => this.setTier(t),
       setTts: (on) => {
@@ -119,7 +125,7 @@ export class AudioSystem {
   start(): void {
     if (this.failed) return;
     if (this.ctx) {
-      if (this.ctx.state === "suspended") void this.ctx.resume();
+      if (this.ctx.state === "suspended" && !this.paused) void this.ctx.resume();
       return;
     }
     try {
@@ -139,7 +145,7 @@ export class AudioSystem {
     this.scanner = new ScannerPlayer(this.pool);
     this.scanner.onSay = (unit, text) => this.onRadioSay?.(unit, text);
     const s = this.panel.settings;
-    this.mixer.master.gain.value = s.master;
+    this.mixer.master.gain.value = this.ducked ? 0 : s.master;
     for (const [b, v] of Object.entries(s.buses)) this.mixer.setUserGain(b as Bus, v);
     this.scanner.tts = s.tts;
     this.updateVoiceVolume();
@@ -264,7 +270,7 @@ export class AudioSystem {
     s.ambience = v.ambience;
     this.panel.save();
     if (this.mixer && this.ctx) {
-      if (!this.muted) this.mixer.master.gain.setTargetAtTime(v.master, this.ctx.currentTime, 0.02);
+      if (!this.muted && !this.ducked) this.mixer.master.gain.setTargetAtTime(v.master, this.ctx.currentTime, 0.02);
       this.mixer.setUserGain("Engine", v.engine);
       this.mixer.setUserGain("World", v.effects);
       this.mixer.setUserGain("Police", v.police);
@@ -316,10 +322,38 @@ export class AudioSystem {
   toggleMute(): void {
     this.muted = !this.muted;
     this.updateVoiceVolume();
-    if (this.mixer && this.ctx) {
-      this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
-    }
+    this.applyMaster();
     this.panel.setStatus(this.muted ? "muted" : "unmuted");
+  }
+
+  /**
+   * Silence everything while the game is paused: suspends the AudioContext (looped engine /
+   * siren voices freeze instead of droning on) and pauses scanner TTS. Idempotent, so main.ts
+   * calls it every frame with `app.paused`.
+   */
+  setPaused(p: boolean): void {
+    if (p === this.paused) return;
+    this.paused = p;
+    if (typeof speechSynthesis !== "undefined") {
+      if (p) speechSynthesis.pause();
+      else speechSynthesis.resume();
+    }
+    if (!this.ctx) return;
+    if (p) void this.ctx.suspend();
+    else void this.ctx.resume();
+  }
+
+  /** Fade the whole mix out (`true`) or back in, without touching the mute toggle. */
+  setDucked(on: boolean): void {
+    this.ducked = on;
+    this.applyMaster();
+  }
+
+  private applyMaster(): void {
+    if (this.mixer && this.ctx) {
+      const v = this.muted || this.ducked ? 0 : this.panel.settings.master;
+      this.mixer.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
+    }
   }
 
   /** Siren mode for the focused car: "Default" | "Off" | "Auto" | "Wail" | "Yelp" | "Phaser" | "HiLo". */
@@ -369,12 +403,21 @@ export class AudioSystem {
     // Camera → sim world space (the scene's world group is rotated Z-up → Y-up).
     // Scratch vectors (no allocation per frame).
     const [camPos, pos, fwdW, upW, fwd, up, v] = this.scratch;
-    camera.getWorldPosition(camPos);
-    this.worldFrame.worldToLocal(pos.copy(camPos));
-    camera.getWorldDirection(fwdW);
-    upW.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(this.scratchQ));
-    this.worldFrame.worldToLocal(fwd.copy(camPos).add(fwdW)).sub(pos).normalize();
-    this.worldFrame.worldToLocal(up.copy(camPos).add(upW)).sub(pos).normalize();
+    // getWorldPosition / getWorldDirection / getWorldQuaternion and three worldToLocal, with
+    // the world matrices (and the camera's inverse) updated once: the same arithmetic.
+    camera.updateWorldMatrix(true, false);
+    const cw = camera.matrixWorld;
+    camPos.setFromMatrixPosition(cw);
+    this.worldFrame.updateWorldMatrix(true, false);
+    const toLocal = this.scratchM.copy(this.worldFrame.matrixWorld).invert();
+    pos.copy(camPos).applyMatrix4(toLocal);
+    // Camera.getWorldDirection: -(z column), normalised.
+    const e = cw.elements;
+    fwdW.set(e[8], e[9], e[10]).normalize().negate();
+    cw.decompose(this.scratchP, this.scratchQ, this.scratchS);
+    upW.set(0, 1, 0).applyQuaternion(this.scratchQ);
+    fwd.copy(camPos).add(fwdW).applyMatrix4(toLocal).sub(pos).normalize();
+    up.copy(camPos).add(upW).applyMatrix4(toLocal).sub(pos).normalize();
     if (this.lastPos && dt > 0) {
       v.copy(pos).sub(this.lastPos).divideScalar(dt);
       // Camera cuts teleport: ignore absurd speeds instead of a Doppler squawk.
@@ -412,8 +455,12 @@ export class AudioSystem {
     this.frameMs += (performance.now() - t0 - this.frameMs) * 0.1;
     this.frames++;
     this.lastStats = out.stats;
-    const eng = this.engineHost ? `engines modelled ${this.engineHost.playing}` : `engine synth ${this.engineHostState}`;
-    this.panel.update(out.stats, this.pool.size, this.scanner.log, this.pool.sampleStatus(), eng);
+    // The panel shows these only while open (it returns early otherwise): skip building the
+    // sample status (a [url, state] pair per sample) and the engine line every frame.
+    if (this.panel.settings.open) {
+      const eng = this.engineHost ? `engines modelled ${this.engineHost.playing}` : `engine synth ${this.engineHostState}`;
+      this.panel.update(out.stats, this.pool.size, this.scanner.log, this.pool.sampleStatus(), eng);
+    }
   }
 
   private apply(cmds: AudioCommand[]): void {

@@ -106,8 +106,17 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
   an idle unit within 700 m is committed, or a new unit spawns like a responder (fallback: the
   nearest node ≥ `spawn_min_distance_m` away, out of sight).
-- **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
-  It is kinematic, gives line of sight to every unit, and is **not** a weapon.
+- **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. The AI captain requests
+  it from `min_level` (3). It is kinematic, flies over the racer's last known position at
+  `altitude_m`, gives line of sight to every unit (its sightings keep the last known position
+  fresh, so ground units chase what it sees), and is **not** a weapon. It looks down from
+  altitude: tall buildings, high ground, covered spans (`wp_world::covered`: tunnels, covered
+  trenches) and bridge decks (`wp_world` deck slabs: underpasses) break its sight; its target
+  point is `eye_height_at(z)` like the ground units'. Radio (`dispatch::helo_reports`): "eyes on
+  … Spotlight on." on first sight, a position report every `position_report_s` while it keeps
+  visual, "lost visual" after `lost_visual_after_s` without sight, "reacquired" — the first,
+  lost and reacquired lines are critical (always spoken). `helicopters()` →
+  `HeloView { has_visual, spotlight_target, … }` for the renderer's night spotlight.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
   `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit

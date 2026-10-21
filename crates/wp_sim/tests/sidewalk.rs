@@ -480,7 +480,16 @@ fn vesper_cases(map: &CityMap, len: f32) -> Vec<Case> {
             ahead,
             geom::scale(geom::right_of(c.dir), c.side * (c.half + 4.0)),
         );
-        if ramps < 4 && deck(off, c.start[2]) {
+        // The road itself must be at grade over the drive: a deck carries guard rails along
+        // its kerb (main's interchange crossroads climb onto bridges right past a terminal).
+        let elevated = |q: V2| {
+            net.terrain
+                .as_ref()
+                .is_some_and(|t| c.start[2] - t.height_at(q) > 1.5)
+        };
+        let at_grade =
+            !elevated(p) && !elevated(ahead) && !elevated(geom::add(p, geom::scale(c.dir, len)));
+        if ramps < 4 && at_grade && deck(off, c.start[2]) {
             ramps += 1;
             c.label = "beside a fill / deck approach";
             out.push(c);

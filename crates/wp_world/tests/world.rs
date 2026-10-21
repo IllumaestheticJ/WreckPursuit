@@ -469,7 +469,10 @@ fn spawns_respect_sightline_and_active_area() {
     // Teleport far away: the old area empties (nobody sees it), the new one fills.
     let far = player([0.0, 650.0, 0.0], [1.0, 0.0], 0.0);
     w.set_tracked_vehicles(&[far]);
-    run(&mut w, 10.0, &mut ev);
+    // 20 s: a car holding junction permits is not despawned, and on main's grid the ramp
+    // terminals and the short crossroads between them (lead/main-sync) keep one driving from
+    // permit to permit for up to ~17 s.
+    run(&mut w, 20.0, &mut ev);
     let near_old = w
         .agents()
         .filter(|a| geom::dist(geom::xy(a.pos), [0.0, -330.0]) < 200.0)

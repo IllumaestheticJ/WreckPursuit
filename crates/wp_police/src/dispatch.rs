@@ -116,6 +116,22 @@ pub struct ReinforcementRequest {
     pub due: SimTime,
 }
 
+/// Radio bookkeeping of one tracking helicopter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HeloSight {
+    /// Line of sight to the target at the latest think.
+    pub(crate) los: bool,
+    /// Visual as radioed: set on the first sighting, cleared after
+    /// `lost_visual_after_s` without line of sight.
+    pub(crate) visual: bool,
+    /// Ever had visual on this track ("eyes on" vs "reacquired").
+    pub(crate) acquired: bool,
+    /// Last think with line of sight.
+    pub(crate) last_los: SimTime,
+    /// Next position report.
+    pub(crate) next_report: SimTime,
+}
+
 /// Pending helicopter launch.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct HeloRequest {
@@ -1291,6 +1307,7 @@ impl PoliceSystem {
             self.warm_up(world);
         }
         self.update_observations(world);
+        self.helo_reports();
         self.clock_speeders(world, tdt);
         self.update_racer_rules(tdt);
         self.check_unit_health();
@@ -2500,6 +2517,98 @@ impl PoliceSystem {
                 if done || now.since(u.assigned) > max_track {
                     self.assign(i, Assignment::OutOfService);
                 }
+            }
+        }
+    }
+
+    /// Debug / e2e: put a helicopter on `racer` now, `offset_m` away from its last known position
+    /// at cruise altitude, skipping availability, cooldown, budget and launch time. `None` unless
+    /// the racer is pursued.
+    pub fn debug_launch_helicopter(&mut self, racer: EntityId, offset_m: f32) -> Option<UnitId> {
+        let at = self
+            .racers
+            .get(&racer)
+            .filter(|r| r.pursued())
+            .and_then(|r| r.last_known)?;
+        let pos = [at[0] + offset_m, at[1]];
+        let i = self.spawn_unit(UnitKind::Helicopter, UnitRole::Helicopter, pos, [-1.0, 0.0]);
+        self.units[i].body.alt_m = self.cfg.tools.helicopter.altitude_m;
+        self.stats.helo_launches += 1;
+        let id = self.units[i].id;
+        self.pending.push(PoliceEvent::HeloLaunched {
+            unit: id,
+            target: racer,
+        });
+        self.assign(i, Assignment::HeloTrack { target: racer });
+        Some(id)
+    }
+
+    /// Helicopter radio from this think's line of sight: "eyes on" when it first sees its
+    /// target, a position report every `position_report_s` while it keeps visual, "lost
+    /// visual" after `lost_visual_after_s` without line of sight (under a deck, in a tunnel or
+    /// a parking structure), "reacquired" when it sees the car again. Ground units already
+    /// steer by what it sees (it keeps the racer's last known position fresh); these lines are
+    /// the scanner's and the player's view of it.
+    pub(crate) fn helo_reports(&mut self) {
+        let now = self.now;
+        let every = self.cfg.tools.helicopter.position_report_s;
+        let lost_after = self.cfg.tools.helicopter.lost_visual_after_s;
+        let tracking: Vec<(UnitId, EntityId)> = self
+            .units
+            .iter()
+            .filter_map(|u| match u.assignment {
+                Assignment::HeloTrack { target } if !u.wrecked => Some((u.id, target)),
+                _ => None,
+            })
+            .collect();
+        self.helo_sight
+            .retain(|id, _| tracking.iter().any(|(u, _)| u == id));
+        for (id, target) in tracking {
+            let Some(s) = self.helo_sight.get(&id).copied() else {
+                continue; // not in range yet (update_observations adds it on first sight)
+            };
+            let callsign = format!("Air {}", id.0);
+            let mut s = s;
+            let mut cue = None;
+            if s.los {
+                s.last_los = now;
+                if !s.visual {
+                    s.visual = true;
+                    s.next_report = now.plus(every);
+                    let desc = self.racer_desc(target);
+                    // Both are position calls the ground units act on: always spoken. A
+                    // lost/reacquired pair needs `lost_visual_after_s` of cover in between.
+                    let text = if s.acquired {
+                        format!("{callsign}: reacquired, {desc}.")
+                    } else {
+                        format!("{callsign}: eyes on {desc}. Spotlight on.")
+                    };
+                    cue = Some(RadioCue::new(RadioTier::Critical, Some(id), text));
+                    s.acquired = true;
+                } else if now >= s.next_report {
+                    s.next_report = now.plus(every);
+                    let desc = self.racer_desc(target);
+                    let kmh = self.racers.get(&target).map_or(0.0, |r| {
+                        (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt() * 3.6
+                    });
+                    cue = Some(RadioCue::new(
+                        RadioTier::Tactical,
+                        Some(id),
+                        format!("{callsign}: still on {desc}, {kmh:.0} km/h."),
+                    ));
+                }
+            } else if s.visual && now.since(s.last_los) >= lost_after {
+                s.visual = false;
+                let desc = self.racer_desc(target);
+                cue = Some(RadioCue::new(
+                    RadioTier::Critical,
+                    Some(id),
+                    format!("{callsign}: lost visual on {desc}. Units, check the cover."),
+                ));
+            }
+            self.helo_sight.insert(id, s);
+            if let Some(c) = cue {
+                self.radio(c);
             }
         }
     }

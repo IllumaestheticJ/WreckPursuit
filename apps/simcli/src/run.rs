@@ -11,7 +11,7 @@ use wp_contracts::{
 };
 use wp_sim::{Sim, SimConfig, Systems};
 
-use crate::data::{load_car, load_mode, load_world, DataSource};
+use crate::data::{load_car, load_mod_catalog, load_modded_car, load_mode, load_world, DataSource};
 use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, OrderKind, Scenario};
 use crate::RunError;
@@ -95,8 +95,11 @@ pub struct BuiltSim {
     pub sim: Sim,
     /// Entity ids in scenario order.
     pub ids: Vec<EntityId>,
-    /// Loaded cars by car id.
+    /// Loaded cars by car id (stock).
     pub cars: BTreeMap<String, wp_contracts::LoadedCar>,
+    /// The modified car of every scenario entity with `mods` (it drives this, not the stock
+    /// car in `cars`).
+    pub modded: BTreeMap<EntityId, wp_contracts::LoadedCar>,
     /// Systems that will run.
     pub selection: Selection,
     /// Unsupported features / unapplied overrides.
@@ -295,15 +298,36 @@ pub fn build_sim(
     }
     let mut ids = Vec::new();
     let mut cars: BTreeMap<String, wp_contracts::LoadedCar> = BTreeMap::new();
+    let mut modded = BTreeMap::new();
+    let catalog = if sc.entities.iter().any(|e| !e.mods.is_empty()) {
+        Some(load_mod_catalog(data)?)
+    } else {
+        None
+    };
     for spec in &sc.entities {
         if !cars.contains_key(&spec.car) {
             cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
         }
-        let id = sim.spawn_vehicle_tuned(&cars[&spec.car], spec.pos, spec.yaw, spec.tune)?;
+        let id = match &catalog {
+            Some(catalog) if !spec.mods.is_empty() => {
+                let car = load_modded_car(data, catalog, &spec.car, &spec.mods, sc.mode)?;
+                let id = sim.spawn_vehicle_tuned(&car, spec.pos, spec.yaw, spec.tune)?;
+                modded.insert(id, car);
+                id
+            }
+            _ => sim.spawn_vehicle_tuned(&cars[&spec.car], spec.pos, spec.yaw, spec.tune)?,
+        };
         if spec.speed_mps != 0.0 {
             sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
         }
         sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
+        // Player steering aids: a live-driven entity only (see `EntitySpec::player_steering`).
+        let live = matches!(spec.driver, Driver::Scripted) && spec.inputs.is_empty();
+        match spec.player_steering {
+            Some(on) => sim.set_player_steering(id, Some(on))?,
+            None if !live => sim.set_player_steering(id, Some(false))?,
+            None => {}
+        }
         if sc.panels {
             let rel = format!("panels/{}.json", spec.car);
             let spec_p = wp_damage::PanelSpec::parse(&spec.car, &data.read(&rel)?)
@@ -422,7 +446,7 @@ pub fn build_sim(
         let yaw = wp_world::geom::yaw_of(d0);
         sim.place_on_ground(*id, [p0[0], p0[1]], yaw, spec.speed_mps, Some(p0[2]))?;
         let follower = wp_world::drive::PathFollower::for_vehicle(
-            &cars[&spec.car].def,
+            &modded.get(id).unwrap_or(&cars[&spec.car]).def,
             wp_world::drive::FollowParams::PURSUIT,
             spec.speed_mps,
         );
@@ -439,6 +463,7 @@ pub fn build_sim(
         sim,
         ids,
         cars,
+        modded,
         selection,
         warnings,
         has_city,
@@ -1256,6 +1281,7 @@ pub fn run_with_hook(
         mut sim,
         ids,
         cars: _,
+        modded: _,
         selection,
         warnings,
         has_city,

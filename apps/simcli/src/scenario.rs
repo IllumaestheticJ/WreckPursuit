@@ -385,6 +385,10 @@ pub struct EntitySpec {
     pub id: String,
     /// Car id (`data/cars/<car>.json`).
     pub car: String,
+    /// Installed mods (`data/mods`, a legal set for the car's class): the entity drives the
+    /// modified car (`simcli::data::load_modded_car`). Empty = stock.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mods: Vec<String>,
     /// Spawn position, world m.
     #[serde(default)]
     pub pos: [f32; 3],
@@ -402,6 +406,13 @@ pub struct EntitySpec {
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
+    /// The player steering aids (the shipped plain keyboard steering, `wp_sim::Sim::
+    /// set_player_steering`): `None` (default) = on only for a live-driven entity (`Scripted`
+    /// driver, no input keyframes: the testbed's player); harness drivers (cruise, route,
+    /// AI) and keyframe scripts feed analog inputs and get the normal steering model.
+    /// `Some(true)` tests the player steering with scripted keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_steering: Option<bool>,
     /// The free per-car tune (`wp_vehicle::tune`; default stock). RON:
     /// `tune: (suspension: 5, gearing: 5, diff: 4, brake_balance: 2)`; missing sliders are stock.
     #[serde(default, skip_serializing_if = "CarTune::is_stock")]

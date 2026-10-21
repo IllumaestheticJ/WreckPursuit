@@ -1596,7 +1596,10 @@ impl Traffic {
                 if ap.major {
                     2
                 } else {
-                    if !(at_line && self.stopped_for(i) >= 0.3) {
+                    // A freeway on-ramp (minor approach at a radius-0 merge junction) merges on
+                    // the move: it yields to the main line below but needs no stop first.
+                    let merging = map.net.intersections[ap.intersection as usize].radius_m <= 0.0;
+                    if !merging && !(at_line && self.stopped_for(i) >= 0.3) {
                         return false;
                     }
                     0
@@ -2828,9 +2831,13 @@ impl Traffic {
         let a = &mut self.agents[i];
         if let Some(pa) = a.physical.take() {
             let st = pa.vehicle.state();
-            let pr = map.seg(a.seg).project(geom::xy(st.pos));
-            a.s = pr.s.clamp(0.0, map.seg(a.seg).length);
-            a.lat = pr.lateral.clamp(-1.5, 1.5);
+            let seg = map.seg(a.seg);
+            let pr = seg.project(geom::xy(st.pos));
+            a.s = pr.s.clamp(0.0, seg.length);
+            // Up to a lane width off: a car demoted mid lane change (3.7 m highway lanes on
+            // main's grid viaduct) keeps its place and eases back like a kinematic lane change.
+            let w = seg.width.max(1.5);
+            a.lat = pr.lateral.clamp(-w, w);
             a.lat_target = 0.0;
             a.v = st.speed_mps.max(0.0);
         }

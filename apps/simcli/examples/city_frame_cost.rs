@@ -56,11 +56,13 @@ fn main() {
         entities: vec![EntitySpec {
             id: "player".into(),
             car: "debug_sedan".into(),
+            mods: Vec::new(),
             pos: grid.pos,
             yaw: grid.heading_rad,
             speed_mps: 30.0,
             police_heat: 0.0,
             assists: None,
+            player_steering: None,
             tune: Default::default(),
             driver: Driver::Scripted,
             inputs: Vec::new(),

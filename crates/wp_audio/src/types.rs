@@ -145,6 +145,10 @@ pub struct VoiceParams {
     pub load: f32,
     /// Cycle phase 0..1 for periodic synths (sirens); 0 otherwise.
     pub phase: f32,
+    /// Cue-specific timbre blend 0..=1 (tire squeal: 0 = cornering slide, 1 = braking lock-up);
+    /// 0 otherwise. Absent from the JSON when 0, so every other voice serialises as before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub timbre: f32,
     /// Air-absorption low-pass cutoff from distance, Hz.
     pub lowpass_hz: f32,
     /// Doppler ratio that was folded into `pitch` and `freq_hz` (debug display).
@@ -155,6 +159,11 @@ pub struct VoiceParams {
     /// absent from the JSON) for every other voice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<crate::engine_model::EngineFrame>,
+}
+
+/// `skip_serializing_if` helper: an exactly-zero `f32` is left out of the JSON.
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// One instruction for the audio backend. Serialized externally tagged

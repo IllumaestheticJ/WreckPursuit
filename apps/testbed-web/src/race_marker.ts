@@ -30,7 +30,7 @@ export function parseCourse(a: Float32Array): Course | null {
 
 const GATE_COLOUR = 0x2ee59d;
 const FINISH_COLOUR = 0xffd23f;
-const POST_H = 5.5;
+const POST_H = 8;
 
 export class RaceMarker {
   readonly group = new THREE.Group();
@@ -47,18 +47,18 @@ export class RaceMarker {
   shown = -1;
 
   constructor(parent: THREE.Object3D) {
-    const post = new THREE.BoxGeometry(0.35, 0.35, POST_H);
+    const post = new THREE.BoxGeometry(0.7, 0.7, POST_H);
     for (const side of [-1, 1]) {
       const m = new THREE.Mesh(post, this.postMat);
       m.userData.side = side;
       this.posts.push(m);
       this.arch.add(m);
     }
-    this.bar = new THREE.Mesh(new THREE.BoxGeometry(1, 0.3, 0.5), this.postMat);
+    this.bar = new THREE.Mesh(new THREE.BoxGeometry(1, 0.6, 0.9), this.postMat);
     this.beam = new THREE.Mesh(new THREE.PlaneGeometry(1, POST_H), this.beamMat);
     this.beam.rotation.x = Math.PI / 2; // plane spans X (across) × Z (up)
     this.arch.add(this.bar, this.beam);
-    const cone = new THREE.ConeGeometry(0.9, 1.8, 4);
+    const cone = new THREE.ConeGeometry(1.6, 3.2, 4);
     cone.rotateX(-Math.PI / 2); // cone tip (+Y) → −Z: points down at the gate
     this.arrow = new THREE.Mesh(cone, this.postMat);
     this.arch.add(this.arrow);
@@ -98,7 +98,7 @@ export class RaceMarker {
     const g = c.gates[next];
     if (this.shown !== next) {
       this.shown = next;
-      const w = Math.max(6, g.width);
+      const w = Math.max(12, g.width);
       this.arch.position.set(g.pos[0], g.pos[1], g.pos[2]);
       // Local +Y along travel, +X across the road.
       this.arch.rotation.set(0, 0, Math.atan2(g.dir[1], g.dir[0]) - Math.PI / 2);
@@ -111,7 +111,7 @@ export class RaceMarker {
       this.postMat.color.setHex(colour);
       this.beamMat.color.setHex(colour);
     }
-    this.arrow.position.set(0, 0, POST_H + 2.2 + Math.sin(tS * 3) * 0.4);
+    this.arrow.position.set(0, 0, POST_H + 3.2 + Math.sin(tS * 3) * 0.5);
     this.arrow.rotation.z = tS * 1.5;
   }
 }

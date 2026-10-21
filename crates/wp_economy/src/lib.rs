@@ -27,6 +27,7 @@
 //!   [`RunResult`].
 //! - [`profile`] — the single-player career save (versioned, with carry-over rules).
 //! - [`career`] — scripted multi-night career simulation used for tuning.
+//! - [`visuals`] — what a build looks like: the parts its mods bolt on, for the renderer.
 
 #![warn(missing_docs)]
 
@@ -46,6 +47,7 @@ pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
 pub mod tune;
+pub mod visuals;
 
 pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundStatus};
 pub use data::{CareerRules, DataSources, Economy};
@@ -70,4 +72,5 @@ pub use session::{
     SessionConfig,
 };
 pub use tune::CarTune;
+pub use visuals::{BuildVisuals, PartKind, PartVisual, VisualPart, WheelVisual};
 pub use wp_contracts::{AccountId, WantedLevel};

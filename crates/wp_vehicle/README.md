@@ -15,12 +15,16 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `ground.rs` | `WheelCaster` trait (ray + tyre-shaped `cast_wheel`); `RapierGround` (query pipeline, static world only, cylinder sweep) and `FlatGround` |
 | `suspension.rs` | spring + preload, digressive bump/rebound damping, progressive bump stop with hysteresis, tyre vertical compliance (massless wheel, implicit strut step), anti-roll bars |
 | `launch.rs` | contact launch limiter: caps the upward speed Rapier's chassis contacts add per impact |
-| `tire.rs` | simplified Magic Formula, load sensitivity, combined slip (normalised slip vector), relaxation length, low-speed guard |
+| `tire.rs` | simplified Magic Formula, load sensitivity, combined slip (normalised slip vector), relaxation length, low-speed guard; lab A/B spin-weighted combined slip (`SpinGrip`, docs/integration/tyre-slip.md) |
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
 | `brakes.rs` | bias, ABS Off / Half / Full (~15 Hz release cycle; Half releases at 3× peak slip, Full at 1.4×) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
+| `lab_scope.rs` | Drift Lab W "use W handling everywhere": limit the lab overrides (plain / ride / car_lab / drift tuning) to tagged vehicles (`Vehicle::set_lab_tagged`, the player) |
+| `drift.rs` | Drift Lab B / C (rows 90 / 91 / 104 / 106): slide onset tuning + runtime override, intent modes (straighten / hold = countersteer key / angle-up = key into the turn / exceeded), opt-in throttle shaping and lift softening (default off), slide-angle envelope; steering angle (and opt-in throttle) only |
+| `drift_lab.rs` | scripted slide drivers for Drift Lab B / C (`kick_catch`, `drift_run`); tables via `--example drift_lab_c` |
+| `twitch_lab.rs` | keyboard twitch measurement (row 102): closed-loop key-tapping driver through lane changes, slalom, sweeper, kerb hit; tables via `--example drift_twitch` |
 | `assists.rs` | pedal filters (none with TCS Off), TCS Off / Half / Full (throttle cut + brake-based traction control; Half = integral slip hold at 3.6× peak), ESC (lagged ~1°/g reference) |
 | `presets.rs` | one-click `AssistPreset` Rookie (TCS Full, ABS Full) / Street (TCS Half, ABS Full) / Sim (TCS Off, ABS Half) (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
 | `aero.rs` | drag, axle lift/downforce |
@@ -188,6 +192,25 @@ model. A parked car settles with < 1 cm drift and no jitter (tested).
 `wp_math`); glam runs in scalar mode via Rapier's `enhanced-determinism`; no maps iterated, no
 threads. Identical runs give identical hashes (tested here and by `apps/simcli`).
 
+## Drift Lab B / C (playtest rows 90 / 91 / 104 / 106)
+
+Fast countersteer (any rack move toward the countersteer side runs at full lock in 0.10 s at
+the 60 % slider; slide onset from rear-axle slip 0.025 → 0.06 rad or its growth rate) and the
+semi-intelligent keyboard drift assist (`drift.rs`, gamepad at half weight, wheel off). Design,
+constants, measurements and what to try: `docs/integration/drift-lab-b.md`, then
+`docs/integration/drift-lab-c.md` (C: the countersteer key holds the slide, the key into the
+turn adds angle, the throttle is raw by default). Tests: `tests/drift_lab_b.rs`; tables:
+`cargo run --release -p wp_vehicle --example drift_lab_c`.
+
+**Twitch fix (row 102):** the slide onset only acts once a slide is confirmed
+(`steering::SlideGate`: rear slip past the onset *and* the car yawing more than the wheels ask
+for 70 ms, at once for a big snap, 120 ms exit hysteresis), so lane changes, kerbs and limit
+cornering no longer trigger the fast countersteer; the fast slew stops at the front axle's
+travel; in grip the return to centre is no faster than turn-in. Measured with
+`twitch_lab.rs` (`cargo run --release -p wp_vehicle --example drift_twitch`): kerb hit peak
+rack 376 → 59 °/s, lane change 80 km/h 219 → 65 °/s, catch numbers unchanged. Tables and
+what to try: `docs/integration/drift-twitch.md`.
+
 ## Ride, kerbs and launches (playtest row 54)
 
 Owner: "the car is too bouncy/light and gets launched too easily". Measured with
@@ -347,7 +370,7 @@ Damage `brake_scale` and ABS then modulate per wheel; the handbrake adds
 byte blob (`VehicleSnapshot::as_bytes` / `from_bytes`): chassis, wheels, engine, gearbox timers,
 clutch, input filters, TCS (throttle cut + brake-TC)/ABS, AWD coupling, heat/fuel and the applied `HandlingEffects`. Restore + same
 inputs = bit-identical replay (tested). `Vehicle::set_state(&VehicleState)` is the approximate
-version for when only the public state is available (< 1 m drift after 1 s of a keyboard
+version for when only the public state is available (< 2 m drift after 1 s of a keyboard
 power slide in tests; the pedal filter and a slipping LSD are not in the public state).
 
 `rig::Rig` is the client-side stepper: its own Rapier world built with the same ground

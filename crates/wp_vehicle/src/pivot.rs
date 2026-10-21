@@ -20,7 +20,7 @@
 
 use wp_contracts::AssistProfile;
 
-use crate::steering::DriftTuning;
+use crate::drift::DriftTuning;
 
 /// Forward speed (m/s) up to which the aid is at full strength (55 km/h: the clip-2 hairpin
 /// entry is 45–55 km/h).

@@ -10,7 +10,8 @@
 // + 0.05, never under 0.97), `race_time_s` per car (today's time −15 % .. +15 %, +20 % at
 // skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measured the same day on the
 // round-12 tip (today's grids, residential grid city, police give-way; reasons in
-// docs/integration/opponent-pace.md). Re-measure and widen only with a reason.
+// docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
+// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md. Re-measure and widen only with a reason.
 (
     name: "opponent_pace_loop9_circuit_s50",
     seed: 9,
@@ -92,11 +93,11 @@
     expect_pending: [
         metric(name: "finishers", min: 6, max: 6),
         metric(name: "best_ratio", min: 0.97, max: 1.23),
-        metric(name: "race_time_s", entity: "ai_vic", min: 171.4, max: 242.0),
-        metric(name: "race_time_s", entity: "ai_mara", min: 162.0, max: 228.8),
-        metric(name: "race_time_s", entity: "ai_dez", min: 172.0, max: 242.9),
-        metric(name: "race_time_s", entity: "ai_juno", min: 172.9, max: 244.0),
-        metric(name: "race_time_s", entity: "ai_tito", min: 174.4, max: 246.3),
-        metric(name: "race_time_s", entity: "player", min: 173.6, max: 245.1),
+        metric(name: "race_time_s", entity: "ai_vic", min: 172.1, max: 242.9),
+        metric(name: "race_time_s", entity: "ai_mara", min: 163.1, max: 230.3),
+        metric(name: "race_time_s", entity: "ai_dez", min: 175.9, max: 248.4),
+        metric(name: "race_time_s", entity: "ai_juno", min: 173.4, max: 244.8),
+        metric(name: "race_time_s", entity: "ai_tito", min: 174.6, max: 246.6),
+        metric(name: "race_time_s", entity: "player", min: 178.3, max: 251.8),
     ],
 )

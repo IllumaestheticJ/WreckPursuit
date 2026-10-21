@@ -210,6 +210,8 @@ impl BenchCell {
                 driver: Driver::Scripted,
                 inputs: Vec::new(),
                 tune: Default::default(),
+                mods: Vec::new(),
+                player_steering: None,
             }],
             duration_s,
             sample_hz: 60.0,

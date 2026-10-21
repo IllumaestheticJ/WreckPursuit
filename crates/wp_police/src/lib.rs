@@ -440,6 +440,8 @@ pub struct PoliceSystem {
     pub(crate) next_incident: u32,
     pub(crate) reinforcements: Vec<dispatch::ReinforcementRequest>,
     pub(crate) helo_requests: Vec<dispatch::HeloRequest>,
+    /// Per tracking helicopter: whether it has visual on its target (radio bookkeeping).
+    pub(crate) helo_sight: BTreeMap<UnitId, dispatch::HeloSight>,
     pub(crate) roadblocks: Vec<Roadblock>,
     pub(crate) spikes: Vec<SpikeStrip>,
     pub(crate) next_tool: u32,
@@ -594,6 +596,7 @@ impl PoliceSystem {
             next_incident: 1,
             reinforcements: Vec::new(),
             helo_requests: Vec::new(),
+            helo_sight: BTreeMap::new(),
             roadblocks: Vec::new(),
             spikes: Vec::new(),
             next_tool: 1,
@@ -1992,23 +1995,22 @@ impl PoliceSystem {
         self.radio.iter()
     }
 
-    /// Helicopters on station.
+    /// Helicopters on station (tracking a racer).
     pub fn helicopters(&self) -> Vec<HeloView> {
         self.units
             .iter()
             .filter_map(|u| match (u.kind, &u.assignment) {
                 (UnitKind::Helicopter, Assignment::HeloTrack { target }) => {
-                    let aim = self
-                        .racers
-                        .get(target)
-                        .and_then(|r| r.last_known)
-                        .unwrap_or(u.body.pos);
+                    let r = self.racers.get(target);
+                    let aim = r.and_then(|r| r.last_known).unwrap_or(u.body.pos);
+                    let aim_z = r.map_or(0.0, |r| r.pos[2]);
                     Some(HeloView {
                         unit: u.id,
                         pos: [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                        spotlight_target: [aim[0], aim[1], 0.0],
+                        spotlight_target: [aim[0], aim[1], aim_z],
                         cone_half_angle_rad: self.cfg.tools.helicopter.spotlight_half_angle_rad,
                         target: *target,
+                        has_visual: self.helo_sight.get(&u.id).is_some_and(|s| s.visual),
                     })
                 }
                 _ => None,

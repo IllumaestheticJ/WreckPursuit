@@ -13,7 +13,7 @@
 //! |---|---|
 //! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `set_countersteer(entity, %)` / `countersteer(entity)`, `set_clutch_mode(entity, "auto"|"manual")` / `clutch_mode(entity)`, `engine_stalled(entity)`, `assist_presets()`, `assist_preset_named(name, source)`, `assist_preset_of(entity, source)`, `reset_vehicle(entity)` |
-//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()` |
+//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
@@ -26,6 +26,8 @@
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
+//! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
+//! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -38,9 +40,11 @@ pub mod build_stats;
 pub mod career;
 pub mod crash_replay;
 pub mod data;
+pub mod drift_lab;
 pub mod garage;
 pub mod lod;
 pub mod map;
+pub mod mod_visuals;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -415,94 +419,6 @@ pub fn engine_stalled(entity: u32) -> Result<bool, JsValue> {
         s.vehicle(EntityId(entity))
             .map(|v| v.vehicle.telemetry().stalled)
             .ok_or_else(|| format!("unknown entity {entity}"))
-    })
-}
-
-/// Drift-assist tuning fields, in the order [`set_drift_tuning`] / [`drift_tuning`] use
-/// (owner rows 90 / 91 / 98; see `wp_vehicle::DriftTuning`).
-pub const DRIFT_TUNING_FIELDS: [&str; 11] = [
-    "align_onset_rad",
-    "align_full_rad",
-    "slew_boost",
-    "counter_lock_onset_rad",
-    "counter_lock_full_rad",
-    "hold_gain",
-    "throttle_shaping",
-    "envelope_deg",
-    "hold_enabled",
-    "hb_pivot_accel",
-    "hb_pivot_cap",
-];
-
-/// Set a vehicle's drift-assist tuning (the testbed drift lab's live tuning panel): the 11
-/// values of [`DRIFT_TUNING_FIELDS`] in order. A dev override only: it never touches the car
-/// data, and it is not logged as a replay op (a tuned session does not replay bit-exactly).
-#[wasm_bindgen]
-pub fn set_drift_tuning(entity: u32, values: &[f32]) -> Result<(), JsValue> {
-    if values.len() != DRIFT_TUNING_FIELDS.len() {
-        return Err(err(format!(
-            "drift tuning: want {} values ({:?}), got {}",
-            DRIFT_TUNING_FIELDS.len(),
-            DRIFT_TUNING_FIELDS,
-            values.len()
-        )));
-    }
-    let t = wp_vehicle::DriftTuning {
-        align_onset_rad: values[0],
-        align_full_rad: values[1],
-        slew_boost: values[2],
-        counter_lock_onset_rad: values[3],
-        counter_lock_full_rad: values[4],
-        hold_gain: values[5],
-        throttle_shaping: values[6],
-        envelope_deg: values[7],
-        hold_enabled: values[8] > 0.5,
-        hb_pivot_accel: values[9],
-        hb_pivot_cap: values[10],
-    };
-    with(|s| s.set_drift_tuning(EntityId(entity), t))
-}
-
-/// A vehicle's drift-assist tuning, the 11 values of [`DRIFT_TUNING_FIELDS`] in order.
-#[wasm_bindgen]
-pub fn drift_tuning(entity: u32) -> Result<Vec<f32>, JsValue> {
-    with(|s| {
-        let t = s
-            .vehicle(EntityId(entity))
-            .map(|v| v.vehicle.drift_tuning())
-            .ok_or_else(|| format!("unknown entity {entity}"))?;
-        Ok(vec![
-            t.align_onset_rad,
-            t.align_full_rad,
-            t.slew_boost,
-            t.counter_lock_onset_rad,
-            t.counter_lock_full_rad,
-            t.hold_gain,
-            t.throttle_shaping,
-            t.envelope_deg,
-            if t.hold_enabled { 1.0 } else { 0.0 },
-            t.hb_pivot_accel,
-            t.hb_pivot_cap,
-        ])
-    })
-}
-
-/// Drift readout of a vehicle: `[body slip °, assist mode, envelope °, throttle smoothing in
-/// effect 0..=1]`; mode 0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded
-/// (`wp_vehicle::AssistMode::code`).
-#[wasm_bindgen]
-pub fn drift_state(entity: u32) -> Result<Vec<f32>, JsValue> {
-    with(|s| {
-        let t = s
-            .vehicle(EntityId(entity))
-            .map(|v| v.vehicle.telemetry())
-            .ok_or_else(|| format!("unknown entity {entity}"))?;
-        Ok(vec![
-            t.body_slip_deg,
-            t.assist_mode.code() as f32,
-            t.envelope_deg,
-            t.throttle_smoothing,
-        ])
     })
 }
 
@@ -916,6 +832,17 @@ pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
     get(|s| map::map_dynamic_for(s, EntityId(player)))
 }
 
+/// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
+/// cone_half_angle_rad, flags]` (1 = has visual). For the spotlight; the airframe itself comes
+/// through `police_draw()` (flag 1).
+#[wasm_bindgen]
+pub fn police_helicopters() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let world = s.sim().world();
+        police::helicopters(s.sim().police(), &|p, z| world.map().ground_height(p, z))
+    })
+}
+
 /// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
 /// `Captured`, `CapturedTotalLoss`, `TotalLoss`), bounty payout, fines, bail, impound decision
 /// and fee, G's repair quote, cash before and after, and this settlement's ledger lines.
@@ -1064,6 +991,20 @@ pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
             .police_mut()
             .set_heat(EntityId(entity), heat);
         Ok(())
+    })
+}
+
+/// Debug / e2e: put a police helicopter on `entity` now, `offset_m` from it at altitude
+/// (`PoliceSystem::debug_launch_helicopter`). Returns the unit id, or an error unless the racer
+/// is pursued. Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_launch_helicopter(entity: u32, offset_m: f32) -> Result<u32, JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .police_mut()
+            .debug_launch_helicopter(EntityId(entity), offset_m)
+            .map(|u| u.0)
+            .ok_or_else(|| "racer is not pursued".to_string())
     })
 }
 
@@ -1304,6 +1245,28 @@ pub fn signal_head_stride() -> u32 {
 #[wasm_bindgen]
 pub fn signal_heads() -> Result<Vec<f32>, JsValue> {
     get(|s| signals::heads(s.sim().world()))
+}
+
+/// Painted road markings of the session's city (empty without one) as a triangle soup,
+/// `[x, y, z]` per vertex in sim space, already lifted onto the banked road surface
+/// (`wp_world::markings::marking_mesh`). `yellow` picks centre lines and median-side edge
+/// lines, otherwise white paint. Fetch once per session.
+#[wasm_bindgen]
+pub fn road_markings(yellow: bool) -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        if !s.has_city() {
+            return Vec::new();
+        }
+        let mesh = wp_world::markings::marking_mesh(s.sim().world().map());
+        let m = if yellow { &mesh.yellow } else { &mesh.white };
+        let mut out = Vec::with_capacity(m.indices.len() * 9);
+        for t in &m.indices {
+            for i in t {
+                out.extend_from_slice(&m.positions[*i as usize]);
+            }
+        }
+        out
+    })
 }
 
 /// Current state per head in `signal_heads()` order, one byte each: 0 off, 1 red, 2 yellow,

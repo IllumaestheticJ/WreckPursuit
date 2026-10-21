@@ -28,7 +28,7 @@ use crate::siren_unit::{
     unit_desires, SirenCue, SirenRack, SirenUnitInput, SirenUnitState, AIRHORN_CUE, WHOOP_CUE,
 };
 use crate::spatial::{dot, len, rotate, sub, world_to_local};
-use crate::tires::{update_tires, TireAudioState};
+use crate::tires::{update_tires, TireAudioState, TirePeak};
 use crate::types::{slot, AudioCommand, Bus, Listener, Priority, VoiceId};
 
 /// Who drives a vehicle (mirrors `wp_sim::VehicleKind`; `wp_audio` does not depend on the sim).
@@ -126,6 +126,8 @@ struct CarAudio {
     cabin: Option<([f32; 3], [f32; 3])>,
     /// Loaded wheel radii FL, FR, RL, RR, m (wheelspin slip speed).
     wheel_radius_m: [f32; 4],
+    /// Peak slip of each wheel's tire FL, FR, RL, RR (squeal normalisation).
+    tire_peaks: [TirePeak; 4],
     /// Gameplay class (exhaust geometry of the physical engine model).
     class: wp_contracts::VehicleClass,
     /// Final drive ratio (differential whine).
@@ -456,6 +458,17 @@ impl AudioDirector {
             mass_kg: car.def.mass_kg,
             cabin: cabin_box(&car.lattice),
             wheel_radius_m: car.def.wheels.each_ref().map(|w| w.radius_m),
+            tire_peaks: car
+                .def
+                .wheels
+                .each_ref()
+                .map(|w| match car.tires.get(&w.tire_id) {
+                    Some(t) => TirePeak {
+                        slip_ratio: t.peak_slip_ratio,
+                        slip_angle_rad: t.peak_slip_angle_rad,
+                    },
+                    None => TirePeak::from_mix(&self.lib.config.tires),
+                }),
             class: car.def.class,
             final_drive: car.def.drivetrain.final_drive,
             physical_stock: BTreeMap::new(),
@@ -917,6 +930,7 @@ impl AudioDirector {
         let to = update_tires(
             &mut rt.tires,
             &cfg.tires,
+            &car.tire_peaks,
             s,
             car.static_load_n,
             car.wheel_radius_m,
@@ -924,7 +938,7 @@ impl AudioDirector {
             tick,
             dt,
         );
-        if let Some((gain, pitch, k)) = to.squeal {
+        if let Some(sq) = to.squeal {
             let mut d = Desire::new(
                 VoiceId::new(e, slot::SQUEAL),
                 Bus::World,
@@ -933,9 +947,10 @@ impl AudioDirector {
                 pos,
                 vel,
             );
-            d.gain = gain;
-            d.pitch = pitch;
-            d.load = k;
+            d.gain = sq.gain;
+            d.pitch = sq.pitch;
+            d.load = sq.intensity;
+            d.timbre = sq.timbre;
             out.push(d);
         }
         for (slot_code, cue, spin) in [

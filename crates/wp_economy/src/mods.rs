@@ -25,6 +25,7 @@ use wp_contracts::{
 };
 
 use crate::error::{invalid, DataError, EconomyError};
+use crate::visuals::{mod_parts, VisualPart};
 
 /// UI slot a mod is listed under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -388,6 +389,10 @@ pub struct ModDef {
     pub effects: Vec<ModEffect>,
     /// Plain-language trade-off (what you give up).
     pub tradeoff: String,
+    /// Visible parts the mod bolts on beyond what its effects already say (cosmetic effects
+    /// and tire ids are drawn without this; see [`crate::visuals`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visuals: Vec<VisualPart>,
 }
 
 impl ModDef {
@@ -537,6 +542,16 @@ impl ModDef {
                         return Err(invalid(&w, "tool tier must be 1..=3"));
                     }
                 }
+            }
+        }
+        for (part, style) in mod_parts(self) {
+            if !part.accepts(&style) {
+                return Err(invalid(
+                    &w,
+                    format!(
+                        "{part:?} has no style {style:?} (wp_economy::visuals::PartKind::styles)"
+                    ),
+                ));
             }
         }
         Ok(())

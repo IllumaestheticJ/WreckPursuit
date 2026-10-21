@@ -92,6 +92,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
     let built = build_sim(&sc, &data_src, &RunOptions::default()).unwrap();
     let mut sim = built.sim;
     let ids = built.ids;
+    // The AI drives every seat, the player's car included: no player steering aids on it.
+    sim.set_player_steering(ids[0], Some(false)).unwrap();
     let race = catalog::plan_course(sim.world(), &def).expect("course plans");
     let route_m = race.route.length_m;
     assert!(
@@ -228,6 +230,14 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         if let Some(t1) = t1 {
             glue += t1.elapsed();
             glue_ticks += 1;
+        }
+        // Off-course racers go back on the route at rest, as the browser session does (it also
+        // picks a clear lane spot there; the centreline point is enough here).
+        for r in &out.resets {
+            let yaw = wp_math::atan2(-r.dir[0], r.dir[1]);
+            sim.place_on_ground(r.racer, [r.pos[0], r.pos[1]], yaw, 0.0, Some(r.pos[2]))
+                .unwrap();
+            live.relocate(r.racer, r.pos, sim.tick());
         }
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples

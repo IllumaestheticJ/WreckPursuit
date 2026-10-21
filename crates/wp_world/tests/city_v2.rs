@@ -116,8 +116,10 @@ fn terrain_blocks_line_of_sight_across_the_hill() {
 fn queries_respect_grade_separation_and_terrain() {
     let w = world(1, 0.0);
     let map = w.map();
-    // Route 40 West passes under the Loop near x = -1517, y = 91.
-    let p = [-1517.0, 91.0];
+    // Route 40 West passes under the Loop near x = -1517, y = 91 (probe the inner
+    // carriageway, 7 m east of the median; 1.5 m off Route 40's painted centreline, which
+    // `surface_at` reports as `PaintedLine` since round 12).
+    let p = [-1510.0, 90.5];
     let low = map.ground_height(p, Some(-100.0));
     let high = map.ground_height(p, Some(1000.0));
     assert!(high - low > 6.5, "deck {high} over road {low}");
@@ -183,4 +185,20 @@ fn drawn_terrain_stays_under_roads_and_follows_the_ground() {
     // within 10 m" mesh had ~10 % of these samples more than 1 m low (up to 10.7 m).
     assert!(q(0.95) < 0.3, "p95 {}", q(0.95));
     assert!(q(0.99) < 0.75, "p99 {}", q(0.99));
+}
+
+/// A flat terrain field (main gives the procedural grid one under its viaduct) is collided
+/// with unchanged, so it stays uniform: wp_sim tells a flat city by its terrain.
+#[test]
+fn flat_terrain_collides_unchanged() {
+    let mut net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default());
+    let (lo, hi) = (net.bounds_min, net.bounds_max);
+    net.terrain = Some(wp_world::terrain::Heightfield::flat(
+        [lo[0] - 50.0, lo[1] - 50.0],
+        [hi[0] + 50.0, hi[1] + 50.0],
+        10.0,
+        -0.12,
+    ));
+    let map = wp_world::CityMap::new(net);
+    assert_eq!(map.ground.as_deref(), map.net.terrain.as_ref());
 }
