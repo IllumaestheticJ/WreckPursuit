@@ -132,7 +132,8 @@ export class Hud {
       `<div class="help-binds">${bindingLines.join("<br>")}</div>` +
       `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
-      `. frame step (replay) · [ / ] replay speed<br><br>` +
+      `. frame step (replay) · [ / ] replay speed<br>` +
+      `<b>Photo mode</b> F7 or the photo button (live or replay): free camera, filters, save / copy PNG — keys listed in its panel<br><br>` +
       `<b>Countersteer help</b> (slider, keyboard/gamepad): in a slide, <i>let go</i> of the steering ` +
       `and the front wheels follow the car's travel (straighten); press <i>against</i> the slide for a ` +
       `fast catch (0 % off, 100 % fastest). It never fights your input, and the handbrake turns the ` +

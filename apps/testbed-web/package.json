@@ -14,6 +14,7 @@
     "e2e:radio": "node e2e/radio.mjs",
     "e2e:siren": "node e2e/siren.mjs && node e2e/drift_lab.mjs",
     "e2e:cameras": "node e2e/cameras.mjs",
+    "e2e:photo": "node e2e/photo.mjs",
     "e2e:audio-samples": "node e2e/audio_samples.mjs",
     "e2e:siren-samples": "node e2e/siren_samples.mjs",
     "e2e:audio-mix": "node e2e/audio_mix.mjs",

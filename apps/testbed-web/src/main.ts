@@ -66,6 +66,7 @@ import * as THREE from "three";
 import { DriftLab } from "./drift_lab";
 import { mountTuneRow, withQuickTune } from "./tune_panel";
 import { quickTune } from "../../ui-kit/src/garage/tune";
+import { PhotoMode, PHOTO_HIDDEN_LAYERS } from "./photo";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -968,6 +969,34 @@ async function main(): Promise<void> {
     plots.clear();
   };
 
+  // ----- photo mode -----------------------------------------------------------------------
+
+  // Whether the game was already paused when photo mode opened (it stays paused on leaving).
+  let pausedBeforePhoto = false;
+  const photo = new PhotoMode({
+    renderer: scene.renderer,
+    scene: scene.scene,
+    freeze: (on) => {
+      if (on) pausedBeforePhoto = app.paused;
+      // togglePause also holds / resumes a replay at its selected speed.
+      if (app.paused !== (on || pausedBeforePhoto)) togglePause();
+    },
+    replayStep: (ticks) => frameStep(ticks),
+    isReplay,
+    focusRoot: () => app.views.get(app.focus)?.root ?? null,
+    fileStem: () => {
+      const name = isReplay() ? (sim.replayStatus()?.scenario ?? "replay") : (sim.scenario()?.name ?? "drive");
+      return `${name.replace(/[^\w-]+/g, "_")}-t${sim.worldInfo()[W.tick]}`;
+    },
+    setChrome: (visible) => {
+      overlay.style.display = visible ? "" : "none";
+      layers.hide(visible ? [] : PHOTO_HIDDEN_LAYERS);
+      audio.setDucked(!visible);
+      rig.suspendInput(!visible);
+    },
+  });
+  $("photo").onclick = () => photo.enter(rig.camera);
+
   const togglePause = () => {
     app.paused = !app.paused;
     if (isReplay()) sim.replayPlay(app.paused ? 0 : Number(($("rp-speed") as HTMLSelectElement).value));
@@ -1055,6 +1084,7 @@ async function main(): Promise<void> {
 
   installKeyboard((e) => {
     if (e.repeat) return;
+    if (photo.onKey(e)) return;
     // Rebindable actions win over the fixed keys (debug layers, camera angles, frame step).
     const actions = actionsForKey(getBindings(), e.code);
     if (actions.length) {
@@ -1081,6 +1111,11 @@ async function main(): Promise<void> {
         sel.dispatchEvent(new Event("change"));
         break;
       }
+      case "F7":
+        // Photo mode (F3 is the camera cycle since 2026-10-21).
+        e.preventDefault();
+        photo.enter(rig.camera);
+        break;
     }
   });
 
@@ -1269,7 +1304,8 @@ async function main(): Promise<void> {
     touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || runEnd.open || !!raceView.cards);
     touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
     const { input, source, edges } = readInput(dt);
-    for (const a of edges) doAction(a);
+    // Photo mode reads the pad itself (sticks fly, B / Start leave): no game actions meanwhile.
+    for (const a of edges) if (!photo.active) doAction(a);
     app.input = input;
     const device = activeDevice();
     if (source !== app.source || device !== app.device) {
@@ -1278,7 +1314,8 @@ async function main(): Promise<void> {
       if (!app.scenario && !app.bench) applyAssistPreset(source);
     }
     // The full city map pauses driving input (the sim keeps running): coast with light brakes.
-    if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
+    // Photo mode keeps the input from before it opened (WASD fly the photo camera instead).
+    if (!replay && !app.bench && !photo.active) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     prof.lap("input");
     crash.beforeStep(app.paused);
@@ -1300,6 +1337,8 @@ async function main(): Promise<void> {
     // One world_info() per frame after the step (it was fetched ~7 times a frame).
     const wi = sim.worldInfo();
     rtf.push(wallDt, wi[W.tick], !app.paused && !replay && !app.bench);
+    // Nothing animates while frozen: a paused live session, or anything in photo mode.
+    const still = (app.paused && !replay) || photo.active;
     prof.lap("sim");
 
     const meta = sim.vehicleMeta();
@@ -1323,7 +1362,7 @@ async function main(): Promise<void> {
       // Telemetry: the focus car (HUD, plots) and, with the force arrows on, cars that draw
       // them (background traffic / police only when focused).
       const tel = view.focused || (forcesOn && !view.background) ? sim.telemetry(id) : NO_TEL;
-      view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
+      view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, still ? 0 : dt);
       // tire_punctures() lists vehicles in the same order as vehicle_states().
       view.setPunctures(punctures, i * 4);
       if (id === app.focus) {
@@ -1353,7 +1392,7 @@ async function main(): Promise<void> {
     }
     scene.addEvents(events);
     panelEvents(events);
-    stepDebris(app.paused && !replay ? 0 : dt);
+    stepDebris(still ? 0 : dt);
     driftLab.update();
     if (!crash.playing) hud.pushEvents(events, wi[W.tick]);
     prof.lap("events");
@@ -1420,8 +1459,12 @@ async function main(): Promise<void> {
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     prof.lap("ui");
+    photo.update(dt, rig.camera);
     rig.lookBack = actionHeld("lookBack");
-    if (crash.playing) crash.camera(rig.camera, wi[W.tick], dt);
+    // Photo mode flies its own camera; the game camera stays where it was.
+    if (photo.active) {
+      /* nothing */
+    } else if (crash.playing) crash.camera(rig.camera, wi[W.tick], dt);
     else
       rig.update(
         focusView?.root ?? null,
@@ -1432,7 +1475,7 @@ async function main(): Promise<void> {
       );
     prof.lap("camera");
     audio.setPaused(app.paused);
-    audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus, rig.mode);
+    audio.update(photo.active ? photo.camera : rig.camera, sim.lastEventsJson(), still ? 0 : dt, app.focus, rig.mode);
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
@@ -1451,7 +1494,8 @@ async function main(): Promise<void> {
     scene.prewarmEvery(rig.camera, now);
     prof.lap("shaders");
     const r0 = performance.now();
-    scene.render(rig.camera);
+    if (photo.active) photo.render();
+    else scene.render(rig.camera);
     // Crash effects stay hidden until the first crash: compile their shaders now (after a few
     // frames, once the art style has set the fog and lights they will be drawn with), not
     // mid-chase.
@@ -1660,6 +1704,9 @@ async function main(): Promise<void> {
       rig.camera.updateProjectionMatrix();
     },
     toggleLayer: (id: string) => layers.toggle(id),
+    /** Is this debug layer drawn right now (photo mode hides some)? */
+    layersOn: (id: string) => layers.on(id),
+    photo,
     ui,
     runEnd,
     restartRun,
