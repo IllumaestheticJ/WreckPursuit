@@ -33,6 +33,7 @@ pub mod data;
 pub mod director;
 pub mod engine;
 pub mod engine_model;
+pub mod flat_tyre;
 pub mod impact;
 pub mod kinematic;
 pub mod mixer;
