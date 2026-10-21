@@ -36,6 +36,275 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Drift transitions (lead, Drift Lab W step 14: "hard to catch drift transitions")
+
+Tool: `cargo run --release -p wp_vehicle --example transition [-- cases]` (env `ONLY`, `INIT`,
+`LIFTS`, `PLAIN`, `SWING_PLAIN`, `TYRE`, `YAW_INERTIA`, `TRACE`; see the file header). Driver:
+40 m left circle at 0.5 g; into-turn key + throttle to 12°, then countersteer key + throttle;
+the flick waits until the drift has been in 30–45° for 0.5 s (cars that never get there =
+"no hold"). Swing start: **reverse** = the lead's literal flick (release, gap, opposite key,
+throttle held), or **lift L** = throttle off for L s with the old key held, keys reversed
+(release, gap, new key + throttle) when the old-side angle drops below 5°. Gaps 0.05 / 0.15 /
+0.3 s, cars rwd_d / rwd_a / rwd_b. Caught = crossed, no spin, no swing back, ≥ half the
+remaining 4 s in 10–50° on the new side.
+
+**Baseline: 0 caught in every configuration.** Two separate problems:
+
+1. **Starting the swing.** The opposite key with the throttle held never swings any of our
+   cars (all 6 configs, 0 crossings): the fronts turn into the old corner, slide at ~40° of
+   front slip and the old drift slowly deepens. Physically the front can only push the nose
+   further into the old turn; the swing needs the rear to win, and it does only when the
+   countersteer lines the fronts up with the travel (front slip ≈ 0) and the throttle is lifted.
+   That happens on **balance new · plain** (0.2–0.4 s lift: crosses in 0.67–0.82 s, the
+   reference's 0.5–0.8 s). The VR steering configs and slow weight hold the old drift so firmly
+   (front slip −2…−5°, rear 44° at κ 0.5–1.5) that a 0.2–1.0 s lift does not start a swing
+   (slow weight with plain steering crosses only with yaw inertia × 1.5 on top).
+   Making the rear trade drive grip for side grip (`spin_fx_yield` 0.5 / 1.0) does not help.
+   **Question for the owner / lead: what starts the reference's swing with the throttle held?**
+   Our physics needs a lift (or more lock than the travel angle).
+2. **Catching it.** Once swinging the yaw rate reaches 130–140°/s. The rack reversal (return
+   0.33 s + full 0.28 s ≈ 0.45 s to the new full lock) arrives when the new side is already at
+   45°+, the fronts are still behind the travel, and the car spins (peak 87°, all gaps alike).
+   Faster rack everywhere breaks the held drift before the flick (no hold); yaw inertia alone,
+   rear relaxation × 2 / × 4: no catches.
+
+**New knob — swing rack** (`PlainSteer::swing_rate` / `swing_yaw_dps`, default 1 = off,
+bit-identical): while the yaw rate is past the threshold and the key is held against the
+rotation (or released, the reversal gap), every rack rate is × `swing_rate`. A held drift turns
+at ~30°/s, so it is untouched (robust set: 1 / 27 → 1 / 27 with balance new · plain, same as
+without). Lift-started flicks (0.2 / 0.4 s), 18 per row:
+
+| config | swing rack | yaw inertia | caught | spun | swung back | swing s | peak ° median / max |
+|---|---|---|---|---|---|---|---|
+| balance new · plain | off | 1.0 | 0 | 15 | 3 | 0.82 | 87 / 87 |
+| balance new · plain | off | 1.5 | 0 | 16 | 0 | 0.91 | 87 / 87 |
+| balance new · plain | × 2.5 from 80°/s | 1.0 | 0 (no hold) | — | — | — | — |
+| balance new · plain | × 2.0 from 100°/s | 1.0 | 2 | 5 | 3 | 0.82 | 78 / 87 |
+| **balance new · plain** | **× 2.5 from 80°/s** | **1.5** | **10** | 3 | 4 | 0.91 | 47 / 87 |
+| balance new · plain | × 3.0 from 80°/s | 1.5 | 5 | 1 | 8 | 0.91 | 41 / 87 |
+| slow weight · plain (ride yaw 1.5) | × 2.5 from 80°/s | × 1.5 more | 9 | 1 | 0 | 1.89 | 63 / 87 |
+| VR configs | any | any | 0–1 (no swing) | | | | |
+
+A knife edge in the rack factor: × 2 spins, × 3 over-catches (swings back). In the best set the
+reference's gaps (0.05 / 0.15 s) catch 8 / 12 (rwd_d and rwd_a every time; rwd_b swings back),
+the 0.3 s gap (longer than the clip's) spins. Settle ~0.7 s, new-side peak 40–49° when caught.
+
+**Preset "transition: swing rack (test)"** in the W panel (grip balance row): balance new +
+lab ride with yaw inertia × 1.5 + plain steering with the swing rack × 2.5 from 80°/s
+(`CarTune::transition_plain()`) + spin model tyres. e2e checks it.
+
+Next: the over-catch on rwd_b and the lift dependence. Candidates: a swing rack that eases off
+as the new-side slide passes ~30° (catch, then hold), and asking the reference what starts the
+swing.
+
+### debug_coupe ("slide transition is very violent", owner via lead)
+
+Transition tool with `CARS=<id> INIT=lift` (0.2 / 0.4 s lift, gaps 0.05 / 0.15 / 0.3 s, 6 flicks
+per row), medians of the swing: peak yaw rate / peak yaw acceleration (0.05 s) / peak roll rate.
+
+| config | debug_coupe | rampart_50 | parity_rwd_a |
+|---|---|---|---|
+| W defaults · plain | no hold | 140 °/s / 326 °/s² / 22 °/s (spins) | no hold |
+| W defaults · VR | 122 / 314 / 14 (3 spin) | 54 / 42 / 4 (no swing) | 120 / 276 / 15 (3 spin) |
+| balance new · plain | no hold | no hold | 141 / 317 / 18 (spins) |
+| slow weight · plain | 115 / 263 / 17 (spins) | 120 / 208 / 18 (spins) | 36 / 31 / 4 (no swing) |
+| slow weight · VR | 52 / 53 / 5 (no swing) | 53 / 36 / 4 | 94 / 187 / 17 (3 spin) |
+
+**On this driver debug_coupe's swing is not more violent than the muscle cars'** (same 115–140°/s
+yaw, 260–330°/s² yaw acceleration once a swing starts); every car that swings spins without the
+swing rack. Its data does differ: anti-roll bars 26 000 / 14 000 N/m vs 12 800 / 600 (rampart)
+— the rear 23× stiffer; springs ~15 % stiffer; quicker steering (ratio 13 vs 15.7, lock 0.62 vs
+0.66 rad); 0.18 s shifts vs 0.5 s; yaw inertia ratio Izz / (m·a·b) 1.03 vs 1.11; front weight
+0.52 vs 0.54. The lab ride scales the bars × 0.25 (slow weight: × 0), and `REAR_ARB=600
+FRONT_ARB=12800` or `REAR_ARB=5000` change the swing by < 3 % — not the cause here. It also
+fails to settle a 30–45° drift on two configs (no hold), so its held drift is touchier.
+Needed from the owner: which preset / steering, and whether the violence is the yaw snap, the
+roll, or a gear change mid-swing (its 0.18 s shifts with automatic gears would put torque
+steps into the swing; this driver holds 2nd).
+
+## Grip-balance × spin model (grip-balance's ask, lead/grip-balance @ c7cf0209)
+
+`cargo run --release -p wp_vehicle --example grip_balance -- robust` on their branch (spin model
+tyres via `CarTune::spin_candidate()`, the 27-entry set). "VR" = the steering of the
+"drift: spin + VR (test)" preset (`CarTune::spin_vr_plain()`); "plain" = `PlainSteer::default()`.
+"lock" = smart lock (margin −0.3 / 0.3), "df" = rear downforce C·A 0.8 + probe tilt fix.
+
+| grip set | ride | plain | VR |
+|---|---|---|---|
+| none (data) | lab default | 2 / 27 | 13 / 27 |
+| `lab_default()` ("new") | lab default | 1 | 17 |
+| lock only | lab default | 2 | 12 |
+| lock + df | lab default | 3 | 13 |
+| lock + df + front k 0.6 | lab default | 2 | 18 |
+| **lock + df + rear k 0.45** | lab default | 0 | **20** |
+| lock + df + rear k 0.7 | lab default | 2 | 17 |
+| none | slow weight | 1 | 8 |
+| `for_slow_weight()` | slow weight | 6 | 16 |
+| new | slow weight | 0 | 16 |
+| lock + df + rear k 0.45 | slow weight | 0 | 15 |
+
+- **The softer rear cornering stiffness costs the drift only with the plain steering**, which
+  barely holds anything anyway (0–3 / 27). With the VR steering it **helps** (13 → 20 / 27): the
+  softer rear builds side force more slowly, so VR's catch over-rotates less. The 7 misses of the
+  best set are the deep 20° entries on rwd_d / rwd_a (swap at 29°) and rwd_b's 6° entry at 0.3 /
+  0.7 g (it never gets past 19°). Holds sit at 35–40° body slip, side swaps not spins.
+- Why the spin model hardly cares about B: its spin weighting (`b0`, `b2`, `c`, `p`) is on the
+  raw slip angle (b2·α), not α / peak slip, and the drift lives at 43–51° of rear slip, far past
+  either peak. B only changes (1) the pure side force `Fy0(α)` that the spin weight multiplies:
+  a softer curve falls off less past the peak, so a bit more rear side force deep in the slide,
+  and (2) the drive floor's share `sx / s` (s = √(sx² + sy²), sy = α / peak slip), which grows
+  slightly as the peak slip moves out. Neither needs a "below 10° only" split.
+- So: judge drift with the VR steering (the A/B preset), not the plain steering. Grip's
+  "new" set is drift-positive there.
+
+## Speed bleed in the hold (lead: "57 → 37 km/h; drive floor or rear drag?")
+
+`tyre_slip -- bleed parity_rwd_d` (counter key at 6° + full throttle, lab circle; means over
+1.5–6 s of the along-path force of each group, + = pushes the car along its travel; speed =
+total speed, not forward speed — the earlier "57 → 37" was forward speed at a growing slide):
+
+| tyres | steering | speed (total) | front | rear drive (wheel-x) | rear side (wheel-y) | total tyres | slide | rear κ | rear α | rpm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| spin model | plain | 71 → 72 km/h | −1.12 kN | +6.54 | **−5.44** | −0.02 | 43° | 1.31 | 45° | 5814 |
+| spin model | VR tuned | 72 → 61 | −1.57 | +6.14 | **−5.91** | −1.33 | 49° | 1.94 | 51° | 5534 |
+| spin model, drive floor 0.8 | plain / VR | 65 → 55 / 66 → 58 | −2.4 / −1.5 | +5.5 / +5.4 | −4.7 / −4.9 | −1.6 / −1.0 | 26 / 47° | 2.3 / 3.1 | 44 / 49° | ~6200 |
+| spin model, drive floor 0 | plain / VR | 60 → 30 / 61 → 22 (spins) | −3.0 | +3.4 | −4.8 | −4.4 | 28° | 4–6 | 48–50° | 6367 (limiter) |
+| spin + drift lock | plain | 74 → 69 | −2.57 | +6.91 | −5.14 | −0.80 | 41° | 1.31 | 43° | 5689 |
+
+**It is rear drag, not the drive floor.** The floor is what keeps the drift going: without it the
+rears run to the limiter (κ 4–6), the drive force halves and the car slows to a stop. The loss is
+the rear **side force** pointing backwards along the path at a 45–51° rear slip angle
+(Fy·sin α ≈ −5…−6 kN), plus the fronts' drag (−1…−3 kN). The plain-steering hold is already
+speed-neutral (71 → 72 km/h total); VR's larger slide (49° vs 43°) makes it bleed. To gain speed
+like the reference (43 → 75 km/h in 2nd), the hold has to sit at a **smaller rear slip angle**
+(sin α drops from 0.71 at 45° to 0.5 at 30°) or the rear needs more drive force while spinning
+(it is at ~0.96 of the longitudinal peak already). Both point the same way as the
+release / hold trade-off above: the reference's steady state is a smaller-angle drift than
+ours (30–45° body slip with fronts near zero slip).
+
+## Keys released mid-drift (lead: reference = a slow spin over ~1–2 s)
+
+`tyre_slip -- release` (counter key at 6° + full throttle on the lab circle until 1.5 / 2.5 s,
+then both keys released, throttle held; slide at release / +1 / +2 s, time to |slide| > 90°;
+class: **slow spin** = 0.7–2.5 s (reference), snap < 0.7 s, holds / straightens = no spin in
+3.5 s). Plain steering:
+
+| tyres | rwd_a 1.5 / 2.5 s | rwd_b 1.5 / 2.5 s | rwd_d 1.5 / 2.5 s |
+|---|---|---|---|
+| shipped default | snap / (not drifting) | (not drifting) | (spun before release) |
+| spin model | **holds** 44→42° / holds 47→41° | holds 39→70° / (63°) | **holds** 41→45° / holds 43→43° |
+| spin + drift lock | holds / holds | straightens / (swapped) | holds / holds |
+
+With VR tuned (gain 0.5) + spin model: holds 42→55°, 46→50° (rwd_d, rwd_a).
+
+**The spin model does not match this reference behaviour**: with the keys released the wheels
+return to centre, the fronts sit ~45° past their peak, and the spin model's rear (7–9 kN of side
+force under spin) still out-pulls them, so the car keeps drifting instead of slowly over-rotating.
+In the reference the held counter key holds but releasing it lets the car spin slowly: the rear
+must be strong enough to balance fronts **near zero slip** (counter-lock / VR alignment) but
+weaker than fronts **deep past their peak** (keys released). That points to velocity-relative
+alignment + a *weaker* rear under spin, not the strong rear the spin model uses.
+
+Joint search (`tyre_slip -- joint`, 300 sets: VR on / off + its knobs × spin-model strength ×
+side floor 0.2–0.6; score = 27-case hold + release (slow spin +2, holds / straightens −2, snap
+−1 on rwd_d / rwd_a × 1.5 / 2.5 s) − grip penalty): **no set does both**. Best release (3 / 4 slow
+spins) holds 0 / 27 (spin C 0.97, B2 2.5, floor 0.52, VR off); best compromise 6 / 27 holds with
+2 / 4 slow spins (VR gain 0.29 from 18°, spin B0 3.7 / B2 3.6 / p 8, fx_slide 0.61, floor 0.32;
+grip 10.4 %). The two reference behaviours pull the rear in opposite directions in our model;
+something else must differ (candidates: front tyre behaviour deep past the peak — the reference's
+fronts may lose more at 45° than at ~9°; or the reference's held key keeps the fronts at much
+smaller slip than our fixed lock does).
+
+## Velocity-relative steering (Drift Lab W step 7) × tyres
+
+Merged lead/drift-lab-w @ c234d260. `tyre_slip -- matrix` with `PLAIN='{…}'` (grip reference
+always = old tyres + default plain steering); `tyre_slip -- vrsearch` = seeded search over W's
+knobs (`align_gain`, `align_from_deg`, `align_full_deg`, `t_align_s`, `slide_key_gain`), 27-case
+set, grip penalty past 5 %, `VR_TYRE=spin` for the spin model.
+
+| tyres | steering | held / 27 (≥ 2 s band) | grip max |Δ| | basin (r = 20 °/s) | straight launches |
+|---|---|---|---|---|---|
+| old ellipse | plain | 0 | — | 37 → none | 3 / 6 |
+| shipped (floor 0.4) | plain | 0 | 0.0 % | 37 → none | 6 / 6 |
+| spin model | plain | 2 (2) | 8.6 % | 39 → 42 (3°) | 6 / 6 |
+| spin + drift lock | plain | 14 (11) | 7.0 % | 26 → 36 (10°) | 6 / 6 |
+| old ellipse / shipped | VR, W defaults | 0 / 0 | 6.9 % | 22 / 27 → none | 3 / 6 · 6 / 6 |
+| spin model | VR, W defaults | 0 | 9.1 % | 21 → 22 (1°) | 6 / 6 |
+| shipped (floor 0.4) | VR, best of 250 searched | **0** | 2.1 % | 28 → none | 6 / 6 |
+| **spin model** | **VR tuned**: gain 0.5, fade 7 → 17°, t_align 0.26 s, slide key gain 0.31 | **13 (13)** | 7.4 % (lane change, the spin model's) | **30 → 45 (15°)** | 6 / 6 |
+| spin + drift lock | VR tuned | 14 (1) | 8.6 % | 42 → 43 (1°) | 6 / 6 |
+
+Findings: velocity-relative steering **alone does not hold** with the data / shipped tyres (0 / 27
+for every one of 250 knob sets): the rear still has no stable side-force balance, so pulling
+the fronts toward the travel only changes how the car spins or swings through. With the spin
+model it gives the widest basin so far (15°) and 13 / 27 holds that are all in the band
+(rwd_d and rwd_a over 6 / 12 / 20° and 0.3 / 0.5 / 0.7 g; rwd_b none) at 37–47° — but still not
+steady (standard entry: last 3 s 45° sd 8.0, 57 → 37 km/h) and short of ≥ 20 / 27. W's default
+gain (1.0, i.e. wheels exactly along the travel) over-catches; ~0.5 works. Do not combine
+with the drift-lock reduction (both reduce counter-lock; together the basin collapses).
+Suggested lab A/B for the owner: spin model + VR tuned as above.
+
+## Spin side-force floor — candidate SHIPPED DEFAULT (lead, 2026-10-20 evening)
+
+The owner's off-the-line spin was with the default (data) tyres, so the main game has the bug:
+any RWD car floored on a cambered road spins. Fix, **on by default for every car**, separate
+from the drift-hold lab work (`spin_model`, drift lock, front falloff stay lab-only):
+
+`wp_vehicle::tire::SpinSideFloor` / `SPIN_SIDE_FLOOR` / `spin_side_floor` (tyre substep in
+`vehicle.rs`): under **drive** wheelspin past `kappa_from` = 0.3 (full from `kappa_full` =
+1.0, smoothstep), the side force may not fall below `floor` = **0.4** × the pure side force
+`Fy0(α)`. Below κ 0.3 (grip driving, TCS, moderate wheelspin) and under braking / locked
+wheels (handbrake, ABS off) nothing changes; it never lowers a force, never exceeds the pure
+side force. Lab A/B: `CarTune::side_floor` (default = the shipped 0.4, 0 = the old ellipse;
+panel "side grip floor (spinning)"). No contract change (constants in `wp_vehicle`).
+
+**Roster launch** (`cargo run --release -p wp_vehicle --example tyre_slip -- roster`; rest →
+full throttle 3 s, steer 0, TCS / ESC off, 1st, 0.02 rad/s start disturbance, road cross-slope
+emulated as g·sin θ sideways; max heading change °, target < 3; 19 roster cars + 4 parity cars
+× 0 / 1 / 2 / 3°): **old ellipse 44 / 92 fail** (every RWD road car 35–180° from 1°; kestrel_ts,
+debug_sedan, sentinel_wolfhound 4–10° at 2–3°); floor 0.2: 18 fail; 0.3: 3 fail (3–4° at 3°);
+**0.4: 0 / 92** (worst 2.7°, sentinel_wolfhound at 3°). Launch speed at 3 s unchanged for every
+car (the floor only touches side force).
+
+**Parity suite** (old ellipse → floor 0.4, 707 rows, 59 change): grip (circle 30 / 60, taps
+0.1 / 0.2 / 0.4 s at 60 / 100 mph, lift-off, lane change), braking (ABS on / off, brake taps)
+and handbrake pivots: **unchanged** (FWD `hb_1.0_30_total_deg` 175 → 177°). Launch / TCS:
+0–60 / 0–100, TCS off and full, within **0.4 %**; `launch_spin_full_s` (time at slip > 0.2 with
+TCS full) 0.19 → 0.27 s on parity_rwd_a_tuned, 0.74 → 0.67 on rwd_d (others ≤ 0.01 s). FWD
+power-on straightening (`hb_power_straight_s`) unchanged. What moves: cases that already spin
+(power-on hairpin exits that end at 180°: speed gained −18 → −25 mph; handbrake-stab drive gap
+± 0.05 s; the suite's counter-drift 0.55 → 0.60 s). The held-drift matrix is unchanged (data
+0 / 27, basin edge 37°; spin presets 2 / 27 and 14 / 27).
+
+**Goldens it moves** (`cargo run --release -p simcli -- goldens`): 49 differ vs 7 on
+lead/drift-lab-w @ d2ba10ba (those 7, marked †, already differ there). New with the floor (42):
+cars_beater_hard_turn, city_blocked_parked_player_grid, city_hill_road_descent,
+city_siren_traffic_no_siren, crash_barrier_frontal, crash_barrier_frontal_sim, crash_head_on,
+damage_arcade_beater_frontal_50, damage_arcade_cruiser_frontal_90, damage_arcade_cruiser_ram_90,
+damage_arcade_cruiser_tbone_50, damage_arcade_sports_frontal_50, damage_arcade_sports_frontal_70,
+damage_arcade_sports_frontal_90, golden_barrier_56kmh, golden_barrier_56kmh_arcade,
+golden_city_chase, golden_frontal_56kmh, golden_night_pursuit_escape, golden_rwd_power_slide,
+golden_tbone, golden_tbone_sim, opponent_circuit_8x5, opponent_flee_police,
+opponent_open_roads_traffic, opponent_reverse_grid_2laps, panels_frontal_50_barrier_arcade,
+panels_frontal_50_car_arcade, panels_frontal_56_hood, panels_frontal_bumper_hang,
+panels_rear_50_car_arcade, police_sideswipe_patrol_day, police_sideswipe_patrol_night,
+police_tunnel_escape_founders_cut, police_tunnel_escape_founders_cut_control, race_city_sprint,
+race_city_sprint_police, race_grid_highway_sprint, race_hollins_sprint, race_lantern_checkpoint,
+race_loop9_circuit, regression_grid_24, smoke_coupe_circle, world_traffic_soak,
+world_traffic_soak_observer, world_traffic_soak_vesper, vehicle_coupe_slalom, weather_fog_pursuit,
+weather_fog_pursuit_clear. Mostly crash / damage / race / pursuit scenarios that floor the
+throttle from rest or out of corners (heavy wheelspin). Re-bless after review (`just bless`).
+
+Other tests it moves: pinned in-crate hashes `slide_control::wheel_profile_is_bit_identical_to_the_plain_model`
+and `differentials::roster_diff_hashes_are_pinned` (re-recorded in the `[bless]` commit after
+the floor); `wp_wasm::tests::simcli_golden_replays_play_back_in_the_browser_core` (replays the
+moved goldens; passes again after the simcli re-bless). On lead/drift-lab-w @ d2ba10ba only
+`simcli goldens_match` and `drift_lab_b::handbrake_stabs…` fail (known); same here plus those.
+
+Tests: `tire::tests::spin_side_floor_only_acts_under_heavy_drive_spin`,
+`tests/tyre_slip.rs::launches_straight_on_a_cambered_road` (old ellipse spins on a 2° slope;
+shipped default and both spin presets < 3°).
+
 ## Straight launches (owner: "spins off the line", lead 2026-10-20 evening)
 
 Owner, Drift Lab W: TCS off, floored from rest, no steering → the car spins at once; the

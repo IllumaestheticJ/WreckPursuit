@@ -87,6 +87,14 @@ pub struct PlainSteer {
     pub counter_from_deg: f32,
     /// Body slip, degrees, from which the countersteer limit is fully on.
     pub counter_full_deg: f32,
+    /// Swing rack (tyre-slip, drift transitions): while a steer key is held **against** the
+    /// car's rotation, or no key is held, and the yaw rate is at least [`PlainSteer::swing_yaw_dps`] (the car
+    /// swinging through from one drift to the other; a held drift turns at ~30°/s, a swing at
+    /// 100–140°/s), every rack rate is this many times faster, so the new side's countersteer
+    /// arrives in time to catch the swing. 1 (default) = off.
+    pub swing_rate: f32,
+    /// Yaw rate where the swing rack acts, °/s.
+    pub swing_yaw_dps: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -121,6 +129,8 @@ impl Default for PlainSteer {
             counter_margin_deg: 0.25,
             counter_from_deg: 3.0,
             counter_full_deg: 8.0,
+            swing_rate: 1.0,
+            swing_yaw_dps: 60.0,
         }
     }
 }
@@ -245,6 +255,31 @@ pub struct PlainInput {
     pub front_axle_angle: f32,
     /// Body slip at the CG, rad (velocity-relative steering's fade).
     pub body_slip: f32,
+    /// Yaw rate, rad/s (+ = left; the swing rack, [`PlainSteer::swing_rate`]).
+    pub yaw_rate: f32,
+}
+
+/// `p` with the swing rack applied for `inp` (see [`PlainSteer::swing_rate`]): all rack
+/// times ÷ `swing_rate` while the held key opposes a yaw rate past `swing_yaw_dps`.
+fn with_swing(p: &PlainSteer, inp: &PlainInput) -> PlainSteer {
+    let k = p.swing_rate;
+    let key = inp.driver.clamp(-1.0, 1.0);
+    // Key + = right steers toward −yaw: it opposes the rotation when key × yaw rate > 0.
+    // Released keys (the gap of a key reversal) count too: the rack heads for the centre.
+    let held = key.abs() > crate::steering::STEER_DEADZONE;
+    let swinging = k > 1.0
+        && (!held || key * inp.yaw_rate > 0.0)
+        && inp.yaw_rate.abs().to_degrees() >= p.swing_yaw_dps;
+    if !swinging {
+        return *p;
+    }
+    let k = k.min(10.0);
+    PlainSteer {
+        t_full_s: p.t_full_s / k,
+        t_return_s: p.t_return_s / k,
+        t_align_s: p.t_align_s / k,
+        ..*p
+    }
 }
 
 /// Velocity-relative steering's slide fade, 0..=1, for `body_slip` (rad) at `speed` (m/s):
@@ -265,6 +300,7 @@ pub fn align_fade(p: &PlainSteer, body_slip: f32, speed: f32) -> f32 {
 
 /// Advance the centre road-wheel angle (rad, + = left) one tick under the plain profile.
 pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> f32 {
+    let p = &with_swing(p, inp);
     if p.velocity_relative {
         return velocity_relative_angle(current, inp, p, dt);
     }
@@ -453,6 +489,7 @@ mod tests {
             pull: 0.0,
             front_axle_angle: 0.0,
             body_slip: 0.0,
+            yaw_rate: 0.0,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -502,6 +539,7 @@ mod tests {
             pull: 0.0,
             front_axle_angle: 0.3,
             body_slip: 1f32.to_radians(),
+            yaw_rate: 0.0,
         };
         assert!((run(&grip) + 0.6 * p.lock_frac(15.0)).abs() < 1e-5);
         // Slide (20°), keys released: the wheels go back to the body's centre (no automatic
@@ -551,6 +589,7 @@ mod tests {
             pull: 0.0,
             front_axle_angle: 0.2,
             body_slip: 0.0,
+            yaw_rate: 0.0,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -575,6 +614,7 @@ mod tests {
             pull: 0.0,
             front_axle_angle: -20f32.to_radians(),
             body_slip: -30f32.to_radians(),
+            yaw_rate: 0.0,
         };
         let run = |inp: &PlainInput, p: &PlainSteer| {
             let mut a = 0.0;
@@ -607,5 +647,52 @@ mod tests {
             ..slide
         };
         assert_eq!(run(&rel, &p), 0.0);
+    }
+
+    /// Swing rack: off by default (bit-identical), faster only while swinging with the key
+    /// against the rotation (or released), never for a held drift's slow rotation.
+    #[test]
+    fn swing_rack_only_speeds_up_a_swing() {
+        // Rack at full right (angle −0.6), the left key pressed (driver −1 → angle +).
+        let base = PlainInput {
+            driver: -1.0,
+            speed: 20.0,
+            full_lock: 0.6,
+            pull: 0.0,
+            front_axle_angle: 0.0,
+            body_slip: 0.0,
+            yaw_rate: -120f32.to_radians(), // swinging right; the left key opposes it
+        };
+        let step = |p: &PlainSteer, inp: &PlainInput| {
+            let mut a = -0.6;
+            for _ in 0..24 {
+                a = update_center_angle(a, inp, p, DT);
+            }
+            a
+        };
+        let off = PlainSteer::default();
+        let on = PlainSteer {
+            swing_rate: 2.5,
+            swing_yaw_dps: 80.0,
+            ..off
+        };
+        let plain = PlainSteer {
+            swing_rate: 1.0,
+            ..on
+        };
+        assert_eq!(step(&off, &base), step(&plain, &base));
+        // Swinging: further toward the new side in 0.1 s.
+        assert!(step(&on, &base) > step(&off, &base) + 0.1);
+        // A held drift's ~30°/s rotation, or a key with the rotation: unchanged.
+        let slow = PlainInput {
+            yaw_rate: -30f32.to_radians(),
+            ..base
+        };
+        assert_eq!(step(&on, &slow), step(&off, &slow));
+        let with = PlainInput {
+            yaw_rate: 120f32.to_radians(),
+            ..base
+        };
+        assert_eq!(step(&on, &with), step(&off, &with));
     }
 }

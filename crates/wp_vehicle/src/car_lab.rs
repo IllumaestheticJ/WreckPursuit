@@ -209,6 +209,18 @@ impl CarTune {
         }
     }
 
+    /// The steering half of the "transition: swing rack (test)" lab preset (with
+    /// `GripBalance::lab_default()`, the lab ride with yaw inertia × 1.5 and the spin model):
+    /// the plain profile with the swing rack × 2.5 from 80°/s of yaw (docs/integration/
+    /// tyre-slip.md, "Drift transitions").
+    pub fn transition_plain() -> crate::plain::PlainSteer {
+        crate::plain::PlainSteer {
+            swing_rate: 2.5,
+            swing_yaw_dps: 80.0,
+            ..crate::plain::PlainSteer::default()
+        }
+    }
+
     /// Whether corner `i` (0 FL, 1 FR, 2 RL, 3 RR) uses [`CarTune::lat_under_spin`].
     pub fn combined_applies(&self, i: usize) -> bool {
         !self.combined_rear_only || i >= 2

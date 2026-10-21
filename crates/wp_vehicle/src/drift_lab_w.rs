@@ -886,9 +886,9 @@ pub struct SnapBack {
 
 /// Snap-back run (lead, 2026-10-20: "measure peak yaw acceleration and yaw-rate overshoot when
 /// countersteering out of a 30–40° drift and on key release"): 0.6 g on a 40 m left-hander, key
-/// into the turn + full throttle to 6°, then the counter key + full throttle (the owner's hold)
-/// until the slide has been inside 30–45° (clip 1's band) for 0.5 s (at most 6 s), then `exit`
-/// for 3 s.
+/// into the turn + full throttle to 6°, then a key-tapping driver holding ~35° on the throttle
+/// until the slide has been inside 30–45° (clip 1's band) for 0.5 s with the counter key down
+/// (at most 6 s), then `exit` for 3 s.
 pub fn snap_back(car: &LoadedCar, assists: &AssistProfile, exit: SnapExit) -> SnapBack {
     snap_back_with(car, assists, exit, |_, _, _| {})
 }
@@ -908,10 +908,27 @@ pub fn snap_back_with(
     let gear = |rig: &crate::rig::Rig| !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR;
     let (mut entered, mut in_band) = (false, 0usize);
     let mut reached = false;
+    let mut prev = (-slide_state(&rig).body_slip).to_degrees();
     for _ in 0..6 * TPS {
         let angle = (-slide_state(&rig).body_slip).to_degrees();
+        let rate = (angle - prev) / PHYSICS_DT;
+        prev = angle;
         entered |= angle > 6.0;
-        let (steer, throttle) = if entered { (1.0, 1.0) } else { (-1.0, 1.0) };
+        // Into the drift with the key into the turn, then the key-tapping driver
+        // ([`PlainDriver::Tapper`] at 35°): it holds 30–45° under every tyre / balance set,
+        // where a held counter key does only on some (docs/integration/drift-lab-w.md, step 10).
+        let (steer, throttle) = if !entered {
+            (-1.0, 1.0)
+        } else {
+            let steer = if angle > 35.0 || rate > 15.0 {
+                1.0
+            } else if angle < 20.0 {
+                -1.0
+            } else {
+                0.0
+            };
+            (steer, if angle > 45.0 { 0.0 } else { 1.0 })
+        };
         rig.step(
             &VehicleInput {
                 steer,
@@ -931,7 +948,8 @@ pub fn snap_back_with(
         } else {
             0
         };
-        if in_band >= TPS / 2 {
+        // Leave the drift while the counter key is down (the exit starts from countersteer).
+        if in_band >= TPS / 2 && steer > 0.0 {
             reached = true;
             break;
         }

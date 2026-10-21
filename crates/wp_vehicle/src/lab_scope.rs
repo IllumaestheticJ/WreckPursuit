@@ -1,5 +1,5 @@
 //! Which vehicles the Drift Lab W overrides apply to ([`crate::plain`], [`crate::ride_lab`],
-//! [`crate::car_lab`], the [`crate::drift`] tuning override).
+//! [`crate::car_lab`], [`crate::grip_lab`], the [`crate::drift`] tuning override).
 //!
 //! By default an override applies to every vehicle in the process (the lab pad has one car;
 //! the unit tests drive one rig). The testbed's "use W handling everywhere" toggle (lead,
@@ -53,6 +53,15 @@ pub fn ride(tagged: bool) -> Option<crate::ride_lab::RideTune> {
 pub fn car(tagged: bool) -> Option<crate::car_lab::CarTune> {
     if applies(tagged) {
         crate::car_lab::active()
+    } else {
+        None
+    }
+}
+
+/// The grip-balance override ([`crate::grip_lab::active`]) for a vehicle tagged `tagged`.
+pub fn grip(tagged: bool) -> Option<crate::grip_lab::GripBalance> {
+    if applies(tagged) {
+        crate::grip_lab::active()
     } else {
         None
     }

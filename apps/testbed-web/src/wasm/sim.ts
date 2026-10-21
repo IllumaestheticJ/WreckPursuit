@@ -274,7 +274,8 @@ export const sim = {
   plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
   /** Turn plain steering on with these constants ("" = off). */
   plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
-  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg]. */
+  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg,
+   * auto_clutch (1/0), clutch engagement 0..1, clutch_locked (1/0), engine_rpm, driven_wheel_rpm, clutch_pedal]. */
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
   /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
@@ -291,10 +292,25 @@ export const sim = {
     spin_damper: Record<string, number | boolean>;
     spin: Record<string, number | boolean>;
     spin_lock: Record<string, number | boolean>;
+    spin_vr_plain: Record<string, number>;
+    transition_plain: Record<string, number>;
   } =>
     JSON.parse(wasm.car_tune_defaults_json()),
   /** Set the car / tyre experiments ("" = the data). */
   carTuneSet: (json: string): void => wasm.car_tune_set(json),
+  /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
+  gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
+  gripBalanceDefaults: (): {
+    before: Record<string, number | boolean | string>;
+    new: Record<string, number | boolean | string>;
+    step2: Record<string, number | boolean | string>;
+    slow_weight: Record<string, number | boolean | string>;
+    drift_best: Record<string, number | boolean | string>;
+    lock_only: Record<string, number | boolean | string>;
+  } =>
+    JSON.parse(wasm.grip_balance_defaults_json()),
+  /** Set the grip-balance lab ("" = the data). */
+  gripBalanceSet: (json: string): void => wasm.grip_balance_set(json),
   /** Drift Lab W reference-parity test cars (not in carIds()). */
   parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),
   /** Clutch mode "auto" | "manual" (owner row 59). */

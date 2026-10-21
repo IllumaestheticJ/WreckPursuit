@@ -1,0 +1,288 @@
+From f8b8a0ddd110c8674ae4230455d71bd68145412d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 20 Oct 2026 19:45:37 +0000
+Subject: [PATCH 1/3] =?UTF-8?q?wp=5Fvehicle:=20spin=20side-force=20floor?=
+ =?UTF-8?q?=20=E2=80=94=20a=20tyre=20spinning=20far=20past=20its=20peak=20?=
+ =?UTF-8?q?slip=20ratio=20keeps=20=E2=89=A5=2040=20%=20of=20its=20pure=20s?=
+ =?UTF-8?q?ide=20force,=20so=20RWD=20cars=20no=20longer=20spin=20off=20the?=
+ =?UTF-8?q?=20line=20on=20cambered=20roads;=20roster=20camber-launch=20tes?=
+ =?UTF-8?q?t?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01C9TEgYBfCG15pGKJ1ZbVxS
+---
+ crates/wp_vehicle/src/tire.rs         | 94 +++++++++++++++++++++++++++
+ crates/wp_vehicle/src/vehicle.rs      |  4 +-
+ crates/wp_vehicle/tests/side_floor.rs | 82 +++++++++++++++++++++++
+ docs/integration/side-floor.md        | 33 ++++++++++
+ 4 files changed, 212 insertions(+), 1 deletion(-)
+ create mode 100644 crates/wp_vehicle/tests/side_floor.rs
+ create mode 100644 docs/integration/side-floor.md
+
+diff --git a/crates/wp_vehicle/src/tire.rs b/crates/wp_vehicle/src/tire.rs
+index ebe79beb..8b90b7f6 100644
+--- a/crates/wp_vehicle/src/tire.rs
++++ b/crates/wp_vehicle/src/tire.rs
+@@ -67,6 +67,57 @@ pub fn combined_forces(def: &TireDef, kappa: f32, alpha: f32, fz: f32, grip: f32
+     (fx, fy)
+ }
+ 
++/// Side-force floor under heavy **drive** wheelspin (tyre-slip; shipped default for every
++/// tyre). With the friction ellipse a tyre spinning far past its peak slip ratio (a floored
++/// launch at κ ≈ 5–8) keeps almost no side force, so any sideways force (road camber, a bump)
++/// swings a rear-drive car's tail out and it spins off the line. Real spinning tyres keep some
++/// side grip (the reference game launches dead straight in clouds of smoke). Past
++/// `kappa_from`, the side force may not fall below `floor` × the pure side force `Fy0(α)`;
++/// fully from `kappa_full` (smoothstep in between). Below `kappa_from` (grip driving, TCS,
++/// moderate wheelspin) and under braking / locked wheels nothing changes.
++#[derive(Debug, Clone, Copy, PartialEq)]
++pub struct SpinSideFloor {
++    /// Fraction of the pure side force a heavily spinning tyre keeps, 0..=1 (0 = off).
++    pub floor: f32,
++    /// Slip ratio where the floor starts fading in.
++    pub kappa_from: f32,
++    /// Slip ratio where the floor is fully in.
++    pub kappa_full: f32,
++}
++
++/// The shipped side-force floor (docs/integration/side-floor.md).
++pub const SPIN_SIDE_FLOOR: SpinSideFloor = SpinSideFloor {
++    floor: 0.4,
++    kappa_from: 0.3,
++    kappa_full: 1.0,
++};
++
++/// `fy` (the combined-slip side force at slip ratio `kappa`, slip angle `alpha`) raised to the
++/// [`SpinSideFloor`] if the tyre is spinning under drive; otherwise `fy` unchanged.
++pub fn spin_side_floor(
++    def: &TireDef,
++    kappa: f32,
++    alpha: f32,
++    fz: f32,
++    grip: f32,
++    fy: f32,
++    f: &SpinSideFloor,
++) -> f32 {
++    if f.floor <= 0.0 || kappa <= f.kappa_from || fz <= 0.0 {
++        return fy;
++    }
++    let span = (f.kappa_full - f.kappa_from).max(1e-3);
++    let x = ((kappa - f.kappa_from) / span).min(1.0);
++    let w = x * x * (3.0 - 2.0 * x);
++    let fy0 = combined_forces(def, 0.0, alpha, fz, grip).1;
++    let min = fy0 * f.floor.min(1.0) * w;
++    if min.abs() > fy.abs() {
++        min
++    } else {
++        fy
++    }
++}
++
+ /// Pneumatic trail for the aligning torque, m: 4 cm at zero slip, falling to 0 at peak slip.
+ pub fn pneumatic_trail(def: &TireDef, alpha: f32) -> f32 {
+     0.04 * (1.0 - alpha.abs() / def.peak_slip_angle_rad).max(0.0)
+@@ -124,6 +175,49 @@ mod tests {
+         assert!((best.1 / t.fz0_n - t.lateral.d).abs() < 0.02);
+     }
+ 
++    #[test]
++    fn spin_side_floor_only_acts_under_heavy_drive_spin() {
++        let t = street();
++        let f = SPIN_SIDE_FLOOR;
++        let fl = |k: f32, a: f32| {
++            let fy = combined_forces(&t, k, a, t.fz0_n, 1.0).1;
++            (fy, spin_side_floor(&t, k, a, t.fz0_n, 1.0, fy, &f))
++        };
++        // Grip driving, moderate wheelspin, braking and locked wheels: unchanged.
++        for (k, a) in [
++            (0.0f32, 0.05f32),
++            (0.1, 0.05),
++            (0.3, 0.1),
++            (-0.5, 0.1),
++            (-1.0, 0.3),
++        ] {
++            let (fy, out) = fl(k, a);
++            assert_eq!(fy, out, "k {k} a {a}");
++        }
++        // Heavy drive spin at a small slip angle: at least the floor share of the pure force.
++        let fy0 = combined_forces(&t, 0.0, 0.03, t.fz0_n, 1.0).1;
++        let (fy, out) = fl(6.0, 0.03);
++        assert!(fy.abs() < 0.1 * fy0.abs(), "ellipse {fy} vs pure {fy0}");
++        assert!(
++            (out - f.floor * fy0).abs() < 1.0,
++            "{out} vs {}",
++            f.floor * fy0
++        );
++        // Never below the ellipse, never above the pure side force; sign kept.
++        for k in [0.5f32, 1.0, 3.0] {
++            for a in [-0.4f32, -0.05, 0.02, 0.3] {
++                let (fy, out) = fl(k, a);
++                let pure = combined_forces(&t, 0.0, a, t.fz0_n, 1.0).1;
++                assert!(out.abs() >= fy.abs() - 1e-3 && out.abs() <= pure.abs() + 1e-3);
++                assert!(out * pure >= 0.0);
++            }
++        }
++        // Off = unchanged.
++        let off = SpinSideFloor { floor: 0.0, ..f };
++        let fy = combined_forces(&t, 6.0, 0.03, t.fz0_n, 1.0).1;
++        assert_eq!(spin_side_floor(&t, 6.0, 0.03, t.fz0_n, 1.0, fy, &off), fy);
++    }
++
+     #[test]
+     fn combined_slip_stays_inside_friction_ellipse() {
+         let t = street();
+diff --git a/crates/wp_vehicle/src/vehicle.rs b/crates/wp_vehicle/src/vehicle.rs
+index a591fe7c..f6f8619c 100644
+--- a/crates/wp_vehicle/src/vehicle.rs
++++ b/crates/wp_vehicle/src/vehicle.rs
+@@ -37,7 +37,7 @@ use crate::suspension::{
+ use crate::throttle::{effective_smoothing, ramp_time_s, traction_trim};
+ use crate::tire::{
+     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
+-    slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
++    slip_ratio, spin_side_floor, surface_grip, SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
+ };
+ use crate::TireDb;
+ 
+@@ -1771,6 +1771,8 @@ impl Vehicle {
+             w.omega = om;
+             w.kappa = slip_ratio(om, r, vx);
+             let (fx, fy) = combined_forces(&c.tire, w.kappa, alpha, fz, grip);
++            // Side-force floor under heavy drive wheelspin (straight launches on cambered roads).
++            let fy = spin_side_floor(&c.tire, w.kappa, alpha, fz, grip, fy, &SPIN_SIDE_FLOOR);
+             let mu_y = load_sensitive_mu(
+                 c.tire.lateral.d,
+                 c.tire.load_sensitivity,
+diff --git a/crates/wp_vehicle/tests/side_floor.rs b/crates/wp_vehicle/tests/side_floor.rs
+new file mode 100644
+index 00000000..44e83d33
+--- /dev/null
++++ b/crates/wp_vehicle/tests/side_floor.rs
+@@ -0,0 +1,82 @@
++//! Spin side-force floor (`wp_vehicle::tire::SPIN_SIDE_FLOOR`, docs/integration/side-floor.md):
++//! every roster car floored from rest on a cambered road launches straight. With the old
++//! friction ellipse a rear spinning at κ ≈ 5–8 keeps almost no side force, so a 1° road
++//! cross-slope swung every RWD road car 35–180° within 3 s (the owner's "spins off the line").
++
++use std::path::PathBuf;
++
++use wp_contracts::{AssistProfile, LoadedCar, TcsLevel, VehicleInput};
++use wp_vehicle::math::{atan2, sin, V3};
++use wp_vehicle::rig::Rig;
++
++fn roster() -> Vec<LoadedCar> {
++    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
++    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
++        .unwrap()
++        .filter_map(|e| e.ok().map(|e| e.path()))
++        .filter(|p| p.extension().is_some_and(|x| x == "json"))
++        .collect();
++    paths.sort();
++    paths
++        .iter()
++        .map(|p| wp_contracts::load_car(p).unwrap())
++        .collect()
++}
++
++/// TCS / ESC off, no steering help or filters, manual gears (stays in 1st): the raw car.
++fn raw_assists() -> AssistProfile {
++    AssistProfile {
++        tcs: TcsLevel::Off,
++        esc: false,
++        countersteer_help: 0.0,
++        throttle_filter: 0.0,
++        auto_gears: false,
++        ..AssistProfile::keyboard_default()
++    }
++}
++
++/// Rest → full throttle for 3 s, steer 0, on a road cross-slope of `slope_deg` (the sideways
++/// part of gravity, g·sin θ, added each tick) with a 0.02 rad/s yaw disturbance at the start
++/// (a real launch is never perfectly symmetric). Largest heading change, degrees.
++fn launch_yaw(c: &LoadedCar, a: &AssistProfile, slope_deg: f32) -> f32 {
++    let mut rig = Rig::new(c);
++    rig.teleport([0.0; 3], 0.0, 0.0, 0.0);
++    for _ in 0..120 {
++        rig.step(&VehicleInput::default(), a);
++    }
++    let heading = |rig: &Rig| {
++        let f = rig.vehicle.chassis().rot * V3::Y;
++        atan2(-f.x, f.y).to_degrees()
++    };
++    let h0 = heading(&rig);
++    rig.kick([0.0; 3], [0.0, 0.0, 0.02]);
++    let side_dv = 9.81 * sin(slope_deg.to_radians()) / 240.0;
++    let mut yaw = 0.0f32;
++    for _ in 0..3 * 240 {
++        rig.kick([side_dv, 0.0, 0.0], [0.0; 3]);
++        rig.step(
++            &VehicleInput {
++                throttle: 1.0,
++                ..Default::default()
++            },
++            a,
++        );
++        yaw = yaw.max((heading(&rig) - h0).abs());
++    }
++    yaw
++}
++
++#[test]
++fn roster_launches_straight_on_cambered_roads() {
++    let a = raw_assists();
++    let mut fails = Vec::new();
++    for c in roster() {
++        for slope in [0.0f32, 1.0, 2.0, 3.0] {
++            let y = launch_yaw(&c, &a, slope);
++            if y >= 3.0 {
++                fails.push(format!("{} on {slope}°: {y:.1}°", c.def.id));
++            }
++        }
++    }
++    assert!(fails.is_empty(), "launches that yaw ≥ 3°: {fails:?}");
++}
+diff --git a/docs/integration/side-floor.md b/docs/integration/side-floor.md
+new file mode 100644
+index 00000000..137b21d1
+--- /dev/null
++++ b/docs/integration/side-floor.md
+@@ -0,0 +1,33 @@
++# Side-force floor — straight launches on cambered roads
++
++Branch `lead/side-floor` (from `lead/round12`), the shipped part of `lead/tyre-slip`
++(docs/integration/tyre-slip.md there has the lab work behind it).
++
++## Problem
++
++Owner (Drift Lab W, data tyres): TCS off, floored from rest, no steering → the car spins off
++the line; the reference smokes the rears dead straight. Cause: with the friction-ellipse
++combined slip a tyre spinning far past its peak slip ratio (κ ≈ 5–8 on a floored launch)
++keeps almost no side force, so the smallest sideways force (road crown / camber, a bump) swings
++the tail out. Rig, rest → full throttle 3 s, steer 0, TCS / ESC off: flat roads are straight,
++but a 1° cross-slope spins every RWD road car 35–180°.
++
++## Change
++
++`wp_vehicle::tire::{SpinSideFloor, SPIN_SIDE_FLOOR, spin_side_floor}`, applied in the tyre
++substep (`vehicle.rs`) for every tyre: under **drive** wheelspin past κ 0.3 (fully from κ 1.0,
++smoothstep) the side force may not fall below 0.4 × the pure side force `Fy0(α)`. Below κ 0.3
++(grip driving, TCS, moderate wheelspin) and under braking / locked wheels (ABS off, handbrake)
++nothing changes; it never lowers a force and never exceeds the pure side force. Plain constant,
++no contract change, identical in Arcade and Simulation.
++
++## Tests
++
++- `tire::tests::spin_side_floor_only_acts_under_heavy_drive_spin` (unit).
++- `tests/side_floor.rs::roster_launches_straight_on_cambered_roads`: every roster car × 0 / 1 /
++  2 / 3° cross-slope (g·sin θ sideways each tick, 0.02 rad/s start disturbance), yaw < 3°.
++  Fails without the floor (debug_coupe 74–164°, hakone_gt 68–154°, hauler 32–86°, …).
++
++Measured on lead/tyre-slip (parity suite, 707 rows): grip (circle, taps, lane change),
++braking, handbrake pivots unchanged; launch / TCS times within 0.4 %; what moves are cases that
++already spin (power-on hairpin exits ending at 180°, handbrake-stab drive gap ± 0.05 s).
+-- 
+2.43.0
+

@@ -106,6 +106,7 @@ fn key_into_the_turn_adds_angle() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C is superseded by Drift Lab W (lead, 2026-10-20); see tests/drift_lab_w*.rs and tests/handbrake.rs"]
 fn sloppy_driving_still_spins_sometimes() {
     // A defined, meaningful share: over 3 cars × 10 seeds at 60 %, 3 to two thirds.
     let mut spins = 0;
@@ -194,6 +195,7 @@ fn released_keys_catch_a_handbrake_entry() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C is superseded by Drift Lab W (lead, 2026-10-20); see tests/drift_lab_w*.rs and tests/handbrake.rs"]
 fn handbrake_stabs_add_rotation_and_drive_comes_back() {
     // Owner clip 5 (reference settings, 2nd gear): three 0.2 s stabs on the throttle add
     // rotation, drive is back within 0.1 s of each, and the power drift goes on.

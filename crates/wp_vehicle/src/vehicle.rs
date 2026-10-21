@@ -864,6 +864,24 @@ impl Vehicle {
         }
     }
 
+    /// The front tyres' peak slip angle (rad) as the lab overrides leave it (car lab's peak
+    /// slip scale, grip lab's cornering stiffness scale).
+    fn front_peak_slip(&self) -> f32 {
+        let mut p = self.corners[0].tire.peak_slip_angle_rad;
+        if let Some(t) = crate::lab_scope::car(self.lab_tagged) {
+            p *= t.front_peak_slip.clamp(0.2, 5.0);
+        }
+        if let Some(g) = crate::lab_scope::grip(self.lab_tagged) {
+            p /= g.front_stiffness.clamp(0.2, 5.0);
+        }
+        p
+    }
+
+    /// Vertical tyre loads (FL, FR, RL, RR), N, from the last step (tests and traces).
+    pub fn wheel_loads(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.wheels[i].fz)
+    }
+
     /// Peak slip angle of wheel `i`'s tire, rad.
     pub fn tire_peak_slip(&self, i: usize) -> f32 {
         self.corners[i].tire.peak_slip_angle_rad
@@ -1329,19 +1347,80 @@ impl Vehicle {
             _ => max_steer,
         };
         self.center_steer = if let Some(p) = plain {
-            crate::plain::update_center_angle(
+            // Grip-balance lab: the smart lock replaces the plain speed curve (`None` = plain).
+            let full_lock = max_steer * steer_in.ratio_scale;
+            // Which way the wheels head: the key's side (key + = right, angle + = left), else
+            // where they point now. Toward the slide (same side as the body slip) = countersteer.
+            let dir = if steer_cmd.abs() > crate::steering::STEER_DEADZONE {
+                -steer_cmd
+            } else {
+                self.center_steer
+            };
+            let toward_slide = dir * steer_in.body_slip > 0.0;
+            let smart = crate::lab_scope::grip(self.lab_tagged).and_then(|g| {
+                g.smart_lock(
+                    v_fwd,
+                    wheelbase,
+                    self.front_peak_slip(),
+                    full_lock * p.lock_frac(v_fwd),
+                    toward_slide,
+                    steer_in.body_slip,
+                )
+            });
+            // Angle-rate timing: the plain rack as it is, capped at the smart lock below.
+            let angle_rate =
+                crate::lab_scope::grip(self.lab_tagged).is_some_and(|g| g.smart_angle_rate);
+            let (p, full_lock) = match smart {
+                Some(l) if !angle_rate => (
+                    crate::plain::PlainSteer {
+                        sens_applies: crate::plain::SensApplies::Tyre,
+                        ..p
+                    },
+                    l,
+                ),
+                _ => (p, full_lock),
+            };
+            let a = crate::plain::update_center_angle(
                 self.center_steer,
                 &crate::plain::PlainInput {
                     driver: steer_cmd,
                     speed: v_fwd,
-                    full_lock: max_steer * steer_in.ratio_scale,
+                    full_lock,
                     pull: steer_in.pull,
                     front_axle_angle: steer_in.front_axle_angle,
                     body_slip: steer_in.body_slip,
+                    yaw_rate: self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
                 },
                 &p,
                 dt,
-            )
+            );
+            let a = match smart {
+                Some(l) if angle_rate => a.clamp(-l, l),
+                _ => a,
+            };
+            // Grip-balance lab: the track cap (fronts kept at their peak slip).
+            let a = match crate::lab_scope::grip(self.lab_tagged) {
+                Some(g) if smart.is_some() => g.track_cap(
+                    a,
+                    steer_in.front_axle_angle,
+                    self.front_peak_slip(),
+                    steer_in.body_slip,
+                ),
+                _ => a,
+            };
+            if smart.is_some() && a * self.center_steer > 0.0 {
+                // A shrinking smart lock never pulls the wheels in faster than the rack's
+                // return rate at the car's full lock (no step when the slide fades).
+                let max_drop = max_steer * steer_in.ratio_scale / p.t_return_s.max(0.01) * dt;
+                let floor = self.center_steer.abs() - max_drop;
+                if a.abs() < floor {
+                    a.signum() * floor
+                } else {
+                    a
+                }
+            } else {
+                a
+            }
         } else {
             update_center_angle(
                 self.center_steer,
@@ -1431,9 +1510,11 @@ impl Vehicle {
             }
         }
         let arb_scale = crate::lab_scope::ride(self.lab_tagged).map_or(1.0, |t| t.arb.max(0.0));
+        let grip_lab = crate::lab_scope::grip(self.lab_tagged);
         for (l, r) in [(0usize, 1usize), (2, 3)] {
+            let axle_scale = grip_lab.map_or(1.0, |g| g.arb_scale(l == 0));
             let f = arb_force(
-                self.corners[l].susp.arb_n_per_m * arb_scale,
+                self.corners[l].susp.arb_n_per_m * arb_scale * axle_scale,
                 self.wheels[l].x,
                 self.wheels[r].x,
             );
@@ -1637,13 +1718,16 @@ impl Vehicle {
                 _ => torque += (w.point - ch.com).cross(f),
             }
         }
+        // Grip-balance lab: extra downforce per axle (C·A, m²), 0 = the data.
+        let (df_front, df_rear) = crate::lab_scope::grip(self.lab_tagged)
+            .map_or((0.0, 0.0), |g| (g.front_downforce, g.rear_downforce));
         let aero = aero_forces(
             ch.lin_vel,
             fwd,
             self.def.drag_cd_a_m2,
             eff.drag_scale,
-            self.def.lift_front - self.def.aero_downforce_coeffs[0],
-            self.def.lift_rear - self.def.aero_downforce_coeffs[1],
+            self.def.lift_front - self.def.aero_downforce_coeffs[0] - df_front,
+            self.def.lift_rear - self.def.aero_downforce_coeffs[1] - df_rear,
         );
         force += aero.drag;
         for (y, lift) in [
@@ -1784,7 +1868,10 @@ impl Vehicle {
             dir: down,
             max_dist: travel + PROBE_LIFT_M,
             radius: c.radius,
-            half_width: c.half_width * PROBE_WIDTH_FRAC,
+            half_width: c.half_width
+                * PROBE_WIDTH_FRAC
+                * crate::lab_scope::grip(self.lab_tagged)
+                    .map_or(1.0, |g| g.probe_width.clamp(0.0, 1.5)),
             rot: ch.rot * yaw_quat(w.steer - std::f32::consts::FRAC_PI_2),
         };
         // Rigid-tyre compression plus the tyre's static deflection (data radius = loaded).
@@ -1936,6 +2023,9 @@ impl Vehicle {
 
         // Drift Lab W car / tyre lab override (`crate::car_lab`); `None` = the data.
         let car_tune = crate::lab_scope::car(self.lab_tagged);
+        // Grip-balance lab (`crate::grip_lab`): front / rear tyre scales on top; `None` = data.
+        let grip_tune = crate::lab_scope::grip(self.lab_tagged).filter(|g| g.changes_tyres());
+        let rwd = matches!(self.def.drivetrain.layout, DriveLayout::Rwd);
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -1962,10 +2052,13 @@ impl Vehicle {
                 w.alpha_lag = 0.0;
                 continue;
             }
-            let tuned;
+            let mut tuned;
             let (tire, w_lat, spin): (&wp_contracts::TireDef, f32, _) = match car_tune {
                 Some(t) => {
                     tuned = t.tire_for(&c.tire, i);
+                    if let Some(g) = grip_tune {
+                        g.apply_tire(&mut tuned, i, rwd);
+                    }
                     let w_lat = if t.combined_applies(i) {
                         t.lat_under_spin.clamp(0.0, 1.0)
                     } else {
@@ -1973,7 +2066,14 @@ impl Vehicle {
                     };
                     (&tuned, w_lat, t.spin_grip(i))
                 }
-                None => (&c.tire, 1.0, None),
+                None => match grip_tune {
+                    Some(g) => {
+                        tuned = c.tire.clone();
+                        g.apply_tire(&mut tuned, i, rwd);
+                        (&tuned, 1.0, None)
+                    }
+                    None => (&c.tire, 1.0, None),
+                },
             };
             let side_scale = car_tune.map_or(1.0, |t| t.side_scale(i, w.alpha_lag));
             // Tyre-slip A/B: the spin-weighted combined-slip model replaces the ellipse.

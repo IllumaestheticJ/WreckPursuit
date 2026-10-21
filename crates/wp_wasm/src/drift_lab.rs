@@ -14,7 +14,7 @@
 //! `wp_vehicle::drift`).
 
 use wasm_bindgen::prelude::*;
-use wp_contracts::EntityId;
+use wp_contracts::{EntityId, VehicleSim};
 use wp_vehicle::drift::{self, DriftTuning};
 
 use crate::{err, json, with};
@@ -106,7 +106,9 @@ pub fn plain_steer_set(steer_json: &str) -> Result<(), JsValue> {
 /// Drift Lab W readout of a vehicle: `[steer_key (−1..=1, + = right), rack (−1..=1, + =
 /// right; NaN when plain steering is off), lock_frac (0..=1; NaN when off), slide_deg (body
 /// slip, + = moving toward the left of the heading), throttle_key, engine_throttle, gear,
-/// speed_kmh, wheel_deg (centre road-wheel angle, + = left), heading_deg (yaw, + = left)]`.
+/// speed_kmh, wheel_deg (centre road-wheel angle, + = left), heading_deg (yaw, + = left),
+/// auto_clutch (1 / 0), clutch engagement (0..=1), clutch_locked (1 / 0), engine_rpm,
+/// driven_wheel_rpm (mean of the driven wheels), clutch_pedal (DriverInput.clutch)]`.
 #[wasm_bindgen]
 pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -125,6 +127,20 @@ pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             wp_vehicle::math::atan2(v_left, v_fwd.abs()).to_degrees()
         };
         let (rack, frac) = v.vehicle.plain_readout().unwrap_or((f32::NAN, f32::NAN));
+        let st = v.vehicle.state();
+        let driven: &[usize] = match v.vehicle.def().drivetrain.layout {
+            wp_contracts::DriveLayout::Fwd => &[0, 1],
+            wp_contracts::DriveLayout::Rwd => &[2, 3],
+            _ => &[0, 1, 2, 3],
+        };
+        let wheel_rpm = driven
+            .iter()
+            .map(|&i| st.wheel_states[i].omega)
+            .sum::<f32>()
+            / driven.len() as f32
+            * 60.0
+            / std::f32::consts::TAU;
+        let auto_clutch = s.assists(EntityId(entity)).is_some_and(|a| a.auto_clutch);
         Ok(vec![
             v.input.steer,
             rack,
@@ -136,6 +152,12 @@ pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             ch.lin_vel.length() * 3.6,
             tel.steer_rad.to_degrees(),
             wp_vehicle::math::atan2(-fwd.x, fwd.y).to_degrees(),
+            if auto_clutch { 1.0 } else { 0.0 },
+            tel.clutch,
+            if tel.clutch_locked { 1.0 } else { 0.0 },
+            st.engine_rpm,
+            wheel_rpm,
+            v.input.clutch.clamp(0.0, 1.0),
         ])
     })
 }
@@ -213,7 +235,7 @@ pub fn car_tune_json() -> String {
     json(&wp_vehicle::car_lab::active())
 }
 
-/// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff> }`, JSON.
+/// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset> }`, JSON.
 #[wasm_bindgen]
 pub fn car_tune_defaults_json() -> String {
     json(&serde_json::json!({
@@ -221,7 +243,43 @@ pub fn car_tune_defaults_json() -> String {
         "spin_damper": wp_vehicle::car_lab::CarTune::spin_grip_damper(),
         "spin": wp_vehicle::car_lab::CarTune::spin_candidate(),
         "spin_lock": wp_vehicle::car_lab::CarTune::spin_lock_candidate(),
+        "spin_vr_plain": wp_vehicle::car_lab::CarTune::spin_vr_plain(),
+        "transition_plain": wp_vehicle::car_lab::CarTune::transition_plain(),
     }))
+}
+
+/// The grip-balance lab override in effect (`null` = the data), JSON.
+#[wasm_bindgen]
+pub fn grip_balance_json() -> String {
+    json(&wp_vehicle::grip_lab::active())
+}
+
+/// `{ "before": <the data as is>, "new": <the lab's new balance>, "step2": <step 2's set>,
+/// "slow_weight": <the balance for the slow-weight ride preset>, "drift_best": <drift: best (test)>,
+/// "lock_only": <step 1: the smart lock alone> }`, JSON.
+#[wasm_bindgen]
+pub fn grip_balance_defaults_json() -> String {
+    json(&serde_json::json!({
+        "before": wp_vehicle::grip_lab::GripBalance::default(),
+        "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
+        "step2": wp_vehicle::grip_lab::GripBalance::step2(),
+        "slow_weight": wp_vehicle::grip_lab::GripBalance::for_slow_weight(),
+        "drift_best": wp_vehicle::grip_lab::GripBalance::drift_best(),
+        "lock_only": wp_vehicle::grip_lab::GripBalance::lock_only(),
+    }))
+}
+
+/// Set the grip-balance lab override from JSON (missing fields = the data), or clear it with
+/// `""`. Process-wide, not logged in recordings.
+#[wasm_bindgen]
+pub fn grip_balance_set(json_text: &str) -> Result<(), JsValue> {
+    if json_text.trim().is_empty() {
+        wp_vehicle::grip_lab::set_override(None);
+        return Ok(());
+    }
+    let g: wp_vehicle::grip_lab::GripBalance = serde_json::from_str(json_text).map_err(err)?;
+    wp_vehicle::grip_lab::set_override(Some(g));
+    Ok(())
 }
 
 /// Set the car / tyre lab override from JSON (missing fields = the data), or clear it with `""`.

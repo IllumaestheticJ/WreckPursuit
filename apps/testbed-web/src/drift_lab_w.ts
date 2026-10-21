@@ -46,6 +46,8 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
   t_align_s: { label: "VR: slide align time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "velocity-relative steering: in a slide the wheels move at least full lock in this time" },
   slide_key_gain: { label: "VR: key in slide ×", min: 0, max: 1, step: 0.05, hint: "velocity-relative steering: the key's offset from the travel in a full slide, × lock(speed)" },
+  swing_rate: { label: "swing rack ×", min: 1, max: 4, step: 0.1, hint: "drift transitions (tyre-slip): while the car swings (yaw rate past the threshold) and the key is held against the rotation or released, every rack rate is this many times faster; 1 = off" },
+  swing_yaw_dps: { label: "swing from yaw", min: 30, max: 200, step: 5, unit: "°/s", hint: "yaw rate where the swing rack acts (a held drift turns at ~30°/s, a swing through at 100–140°/s)" },
   self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released: the rack returns toward the front axle's travel instead of the centre (A/B; default 0)" },
 };
 
@@ -75,6 +77,7 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
   spin_fx_slide: { label: "spin model: drive grip spinning", min: 0, max: 1, step: 0.01, hint: "fraction of peak drive force a spinning tyre keeps (0 = the tyre data's curve, ~0.55)" },
   spin_fx_slide_from_deg: { label: "spin model: drive grip from", min: 0, max: 30, step: 0.5, unit: "°", hint: "slip angle where the spinning drive-grip floor starts (straight-line launches below it keep the tyre data's curve)" },
   spin_fx_slide_full_deg: { label: "spin model: drive grip full at", min: 0, max: 45, step: 0.5, unit: "°", hint: "slip angle where the drive-grip floor is fully on" },
+  side_floor: { label: "side grip floor (spinning)", min: 0, max: 1, step: 0.05, hint: "SHIPPED DEFAULT 0.4: a tyre spinning far past its peak slip ratio keeps at least this share of its side force (fixes spinning off the line on cambered roads); 0 = the old friction ellipse" },
   drift_lock_extra: { label: "drift lock ±", min: -0.7, max: 1, step: 0.01, hint: "extra (or, negative, less) steering lock once the body slip passes 'drift lock from' (ramped over 10°); grip driving below it is unchanged. 0 = off" },
   drift_lock_from_deg: { label: "drift lock from", min: 0, max: 45, step: 0.5, unit: "°", hint: "body slip where the drift lock change starts" },
   front_deep_falloff: { label: "front deep-slip falloff", min: 0, max: 0.9, step: 0.01, hint: "fraction of front side force lost at large front slip angles (between the two angles below); grip driving untouched. 0 = off" },
@@ -104,7 +107,44 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
 // v2: step 10's default ride became medium weight (an older saved ride must not override it).
 const RIDE_STORE = "wp.driftLabW.ride.v2";
 const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
+const GRIP_STORE = "wp.driftLabW.grip";
+/** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
+ * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
+const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
+
+/** Grip-balance lab sliders (wp_vehicle::grip_lab::GripBalance). */
+const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; step: number; scale?: number; unit?: string; hint: string }> = {
+  front_mu: { label: "front grip (μ) ×", min: 0.7, max: 1.3, step: 0.01, hint: "front tyres' peak friction" },
+  rear_mu: { label: "rear grip (μ) ×", min: 0.7, max: 1.3, step: 0.01, hint: "rear tyres' peak friction (less = looser at the limit)" },
+  front_stiffness: { label: "front cornering stiffness ×", min: 0.5, max: 2, step: 0.05, hint: "front lateral curve squeezed along the slip axis: same peak, reached at a smaller slip angle" },
+  rear_stiffness: { label: "rear cornering stiffness ×", min: 0.5, max: 2, step: 0.05, hint: "rear: less = bigger rear slip angle (body slip) but less high-speed stability" },
+  front_load_sens: { label: "front load sensitivity ×", min: 0, max: 3, step: 0.1, hint: "more = a loaded outside front loses more μ (push)" },
+  rear_load_sens: { label: "rear load sensitivity ×", min: 0, max: 3, step: 0.1, hint: "more = a loaded outside rear loses more μ (looser at the limit)" },
+  front_relax: { label: "front relaxation ×", min: 0.2, max: 3, step: 0.05, hint: "front tyres' slip-angle lag" },
+  rear_lat_c: { label: "rear past-peak shape C", min: 0, max: 2, step: 0.05, hint: "0 = data (1.4); lower = side force falls less past the peak (cornering stiffness kept)" },
+  front_arb: { label: "front bar ×", min: 0, max: 3, step: 0.05, hint: "front anti-roll bar, on top of the suspension section (less = more front grip)" },
+  rear_arb: { label: "rear bar ×", min: 0, max: 30, step: 0.5, hint: "rear anti-roll bar, on top of the suspension section (more = looser); the data's rear bar is ~5 % of the front's" },
+  front_downforce: { label: "front downforce C·A", min: 0, max: 2, step: 0.05, unit: "m²", hint: "extra front downforce (½ρv² · C·A at the front axle)" },
+  rear_downforce: { label: "rear downforce C·A", min: 0, max: 2, step: 0.05, unit: "m²", hint: "extra rear downforce: grows with v², stabilises the rear at speed without touching low-speed balance (0.8 ≈ 0.35 kN at 60 mph, 1 kN at 100)" },
+  probe_width: { label: "wheel probe width ×", min: 0, max: 1.5, step: 0.0125, hint: "ground probe cylinder width (1 = the vehicle's). It rolls with the body, so in a corner it touches on its edge and the tyre load chatters tick to tick; 0.0125 removes the chatter (A/B for the vehicle owner)" },
+  smart_ay_g: { label: "smart lock: corner g", min: 0, max: 2, step: 0.05, unit: "g", hint: "steady-corner steer angle allowed on top of the front peak slip (L·a/v²)" },
+  smart_margin: { label: "smart lock: past peak", min: -0.8, max: 2, step: 0.05, scale: 100, unit: "%", hint: "front slip allowed past the tyre's peak slip angle" },
+  smart_margin_hi: { label: "smart lock: past peak at speed", min: -0.8, max: 2, step: 0.05, scale: 100, unit: "%", hint: "the past-peak allowance at high speed (blended in between the two speeds below): fronts a little past their peak keep a held key stable at 100 mph" },
+  smart_hi_from_kmh: { label: "smart lock: speed blend from", min: 40, max: 200, step: 5, unit: "km/h", hint: "speed where the high-speed allowance starts to blend in" },
+  smart_hi_full_kmh: { label: "smart lock: speed blend to", min: 60, max: 250, step: 5, unit: "km/h", hint: "speed where the high-speed allowance is fully in" },
+  smart_slide_from_deg: { label: "smart lock off from slip", min: 0, max: 30, step: 0.5, unit: "°", hint: "body slip where the plain lock starts to come back (slides steer as before)" },
+  smart_slide_full_deg: { label: "smart lock off by slip", min: 0, max: 40, step: 0.5, unit: "°", hint: "body slip where the plain lock is fully back" },
+};
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
+
+/** Whether two grip-balance sets are the same (numbers within 1e-6; JSON key order and f32
+ * round-trips do not matter). */
+function sameGrip(a: Record<string, unknown> | null, b: Record<string, unknown>): boolean {
+  if (!a) return false;
+  return Object.keys(b).every((k) =>
+    typeof b[k] === "number" ? Math.abs(Number(a[k]) - Number(b[k])) < 1e-6 : a[k] === b[k],
+  );
+}
 
 /** Lock fraction at `kmh` for constants `p` (mirrors wp_vehicle::plain::PlainSteer::lock_frac). */
 function lockFrac(p: Record<string, number>, kmh: number): number {
@@ -219,6 +259,7 @@ export class DriftLabWPanel {
       this.sim.plainSteerSet("");
       this.sim.rideTuneSet("");
       this.sim.carTuneSet("");
+      this.sim.gripBalanceSet("");
       return;
     }
     let saved = "";
@@ -255,6 +296,17 @@ export class DriftLabWPanel {
       this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
     }
     this.applyPivot();
+    let grip = "";
+    try {
+      grip = localStorage.getItem(GRIP_STORE) ?? "";
+    } catch {
+      /* storage blocked: the new balance */
+    }
+    try {
+      this.sim.gripBalanceSet(grip || JSON.stringify(this.sim.gripBalanceDefaults().new));
+    } catch {
+      this.sim.gripBalanceSet(JSON.stringify(this.sim.gripBalanceDefaults().new));
+    }
     setRawKeyboard(true);
     // Only the player's car: AI racers, police and traffic keep the stock handling.
     this.sim.labScopeSetTaggedOnly(true);
@@ -274,6 +326,28 @@ export class DriftLabWPanel {
       return v === "1" ? "Full" : assistLevel(v, "Off");
     } catch {
       return "Off";
+    }
+  }
+
+  /** The testbed's saved assist choices (the clutch / gears / TCS / ABS selectors the viewer
+   * set); set by main.ts. Only these explicit choices override the lab's reference settings. */
+  userAssists: () => Record<string, unknown> = () => ({});
+
+  /** Whether the lab's own TCS checkbox has been used (then it wins over the testbed's TCS). */
+  private tcsChosen(): boolean {
+    try {
+      return localStorage.getItem(TCS_STORE) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Whether the lab's own ABS select has been used (then it wins over the testbed's ABS). */
+  private absChosen(): boolean {
+    try {
+      return localStorage.getItem(ABS_STORE) !== null;
+    } catch {
+      return false;
     }
   }
 
@@ -304,23 +378,28 @@ export class DriftLabWPanel {
   }
 
   /** The lab's assists (call after any assist preset is applied): the owner's reference
-   * settings — TCS Off / ABS Full (panel selects), ESC off, manual gears (automatic clutch), no pedal filters, no
-   * countersteer help (it is bypassed by plain steering anyway). */
+   * settings — TCS off, ESC off, ABS on, manual gears with the automatic clutch, no pedal
+   * filters, no countersteer help (bypassed by plain steering anyway) — **except** where the
+   * viewer chose otherwise in the testbed's selectors (clutch auto / manual, gears, TCS / ABS
+   * levels; owner bug 2026-10-20: "manual clutch" was overridden back to automatic). The lab's
+   * TCS / ABS selects, once used, decide TCS / ABS. */
   applyAssists(): void {
     if (!this.active) return;
     const id = this.player();
     const a = this.sim.assists(id);
+    const u = this.userAssists();
+    const pick = <T,>(k: string, lab: T): T => (u[k] !== undefined ? (u[k] as T) : lab);
     this.sim.setAssists(id, {
       ...a,
-      abs: this.abs(),
-      tcs: this.tcs(),
+      abs: this.absChosen() ? this.abs() : pick("abs", "Full"),
+      tcs: this.tcsChosen() ? this.tcs() : pick("tcs", "Off"),
       esc: false,
       countersteer_help: 0,
       throttle_filter: 0,
       brake_filter: 0,
-      auto_gears: false,
-      auto_clutch: true,
-    });
+      auto_gears: pick("auto_gears", false),
+      auto_clutch: pick("auto_clutch", true),
+    } as never);
   }
 
   private save(p: Record<string, number>): void {
@@ -656,7 +735,150 @@ export class DriftLabWPanel {
         };
         btns.appendChild(b);
       }
+      {
+        // Tyres + steering together (tyre-slip): spin model + velocity-relative steering at half gain.
+        const b = document.createElement("button");
+        b.textContent = "drift: spin + VR (test)";
+        b.title =
+          "tyre-slip test preset: spin model tyres + velocity-relative steering (gain 0.5, fade 7→17°, align 0.26 s, slide key 0.31). Holds 13 / 27 test entries in the 30–45° band; not steady (speed bleeds). Sets the steering too: use the steering defaults button to undo";
+        b.onclick = () => {
+          const d = this.sim.carTuneDefaults();
+          saveCar(d.spin);
+          this.save(d.spin_vr_plain);
+          this.build();
+        };
+        btns.appendChild(b);
+      }
       this.body.appendChild(btns);
+    }
+    // Grip-driving balance (wp_vehicle::grip_lab; docs/integration/grip-balance.md).
+    {
+      const h = document.createElement("div");
+      h.textContent = "grip balance (lab override)";
+      h.style.cssText = "margin:8px 0 2px;color:#9cf";
+      this.body.appendChild(h);
+      const gd = this.sim.gripBalanceDefaults();
+      const gt = this.sim.gripBalance() ?? gd.before;
+      const saveGrip = (t: Record<string, number | boolean | string>) => {
+        const text = JSON.stringify(t);
+        this.sim.gripBalanceSet(text);
+        try {
+          localStorage.setItem(GRIP_STORE, text);
+        } catch {
+          /* ignore */
+        }
+      };
+      const isNew = sameGrip(gt, gd.new);
+      const ab = document.createElement("button");
+      ab.id = "drift-w-balance-ab";
+      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
+      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
+      ab.onclick = () => {
+        // new → before; anything else (before, lock only, custom) → new.
+        saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
+        this.build();
+      };
+      const lockOnly = document.createElement("button");
+      lockOnly.textContent = "lock only (step 1)";
+      lockOnly.title = "step 1's set: the smart lock alone, tyres as in the data";
+      lockOnly.onclick = () => {
+        saveGrip(gd.lock_only);
+        this.build();
+      };
+      const step2 = document.createElement("button");
+      step2.textContent = "step 2";
+      step2.title = "step 2's set: smart lock (more front scrub at speed), RWD tyres × 0.75 / × 0.65, no downforce, no probe fix";
+      step2.onclick = () => {
+        saveGrip(gd.step2);
+        this.build();
+      };
+      const forSlow = document.createElement("button");
+      forSlow.textContent = "for slow weight";
+      forSlow.title = "the balance to use with the suspension section's slow weight (clip 4): smart lock + rear downforce, tyres as in the data (new's softer tyres spin with slow weight)";
+      forSlow.onclick = () => {
+        saveGrip(gd.slow_weight);
+        this.build();
+      };
+      const driftBest = document.createElement("button");
+      driftBest.id = "drift-w-drift-best";
+      driftBest.textContent = "drift: best (test)";
+      driftBest.title = "smart lock + rear downforce + RWD rear tyres × 0.45, with tyre-slip's tuned velocity-relative steering (steering section): 20 / 27 of the drift robustness set";
+      driftBest.onclick = () => {
+        saveGrip(gd.drift_best);
+        this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
+        this.build();
+      };
+      // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
+      const trans = document.createElement("button");
+      trans.textContent = "transition: swing rack (test)";
+      trans.title =
+        "tyre-slip test preset for drift transitions: balance new + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
+      trans.onclick = () => {
+        saveGrip(gd.new);
+        const rd = this.sim.rideTuneDefaults();
+        const ride = JSON.stringify({ ...rd.lab, yaw_inertia: 1.5 });
+        const tyres = JSON.stringify(this.sim.carTuneDefaults().spin);
+        this.sim.rideTuneSet(ride);
+        this.sim.carTuneSet(tyres);
+        try {
+          localStorage.setItem(RIDE_STORE, ride);
+          localStorage.setItem(CAR_STORE, tyres);
+        } catch {
+          /* ignore */
+        }
+        this.save(this.sim.carTuneDefaults().transition_plain);
+        this.restart(this.car);
+      };
+      const abRow = document.createElement("div");
+      abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+      abRow.append(ab, forSlow, driftBest, step2, lockOnly, trans);
+      this.body.appendChild(abRow);
+      const sel = document.createElement("select");
+      sel.id = "drift-w-lock-mode";
+      for (const m of ["plain", "smart"]) {
+        const o = document.createElement("option");
+        o.value = m;
+        o.textContent = m === "smart" ? "smart (fronts at peak slip)" : "plain (rack curve)";
+        sel.appendChild(o);
+      }
+      sel.value = String(gt.lock_mode ?? "plain");
+      sel.onchange = () => {
+        saveGrip({ ...(this.sim.gripBalance() ?? gd.before), lock_mode: sel.value });
+        this.build();
+      };
+      row("keyboard lock at speed", "plain = the steering section's rack curve; smart = lock capped at the steady-corner angle + the front tyre's peak slip × (1 + past peak)", sel, document.createElement("span"));
+      for (const [key, f] of Object.entries(GRIP_FIELDS)) {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = String(f.min);
+        input.max = String(f.max);
+        input.step = String(f.step);
+        input.value = String(gt[key] ?? gd.before[key]);
+        const val = document.createElement("span");
+        const show = () => {
+          val.textContent = `${Number((Number(input.value) * (f.scale ?? 1)).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
+          val.style.color = Math.abs(Number(input.value) - Number(gd.new[key])) > 1e-6 ? "#ffd27a" : "";
+        };
+        show();
+        input.oninput = () => {
+          show();
+          saveGrip({ ...(this.sim.gripBalance() ?? gd.before), [key]: Number(input.value) });
+        };
+        row(f.label, f.hint, input, val);
+      }
+      for (const [key, label, hint] of [
+        ["probe_tilt_fix", "wheel probe tilt fix", "the ground probe no longer touches on its edge on smooth road when the body rolls: removes the tick-to-tick tyre load chatter in corners (kerbs unchanged); proposed as the default"],
+        ["tyres_rwd_only", "tyre scales: RWD cars only", "the front / rear tyre scales apply to rear-drive cars only (front-drive cars keep their tyres); the lock and bars apply to all"],
+        ["smart_angle_rate", "smart lock: plain wheel speed", "the wheels move at the plain rack's speed and stop at the smart lock (a 0.1 s tap turns them as far as before); off = full smart lock in the rack's 0.28 s"],
+        ["smart_fade_both", "smart lock off in slides (both ways)", "the plain lock comes back with body slip for the into-turn side too (else only for countersteer)"],
+        ["smart_track", "smart lock: track the travel", "experimental: cap the into-turn angle at the front axle's travel + peak slip (fronts held at peak however the car rotates; it tends to spin at speed)"],
+      ] as const) {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = Boolean(gt[key] ?? gd.before[key]);
+        input.onchange = () => saveGrip({ ...(this.sim.gripBalance() ?? gd.before), [key]: input.checked });
+        row(label, hint, input, document.createElement("span"));
+      }
     }
     const curve = document.createElement("div");
     curve.id = "drift-lab-w-curve";
@@ -679,7 +901,7 @@ export class DriftLabWPanel {
     const copy = document.createElement("button");
     copy.textContent = "copy JSON";
     copy.title = "copy the steering + suspension constants (paste them into the owner's notes)";
-    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify({ steer: this.sim.plainSteer(), ride: this.sim.rideTune(), car: this.sim.carTune() }, null, 1));
+    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify({ steer: this.sim.plainSteer(), ride: this.sim.rideTune(), car: this.sim.carTune(), grip: this.sim.gripBalance() }, null, 1));
     actions.append(reset, copy);
     this.body.appendChild(actions);
   }
@@ -713,10 +935,11 @@ export class DriftLabWPanel {
       /* readout unavailable */
     }
     this.readout.textContent =
-      `${DRIFT_LAB_W_TITLE} · plain steering · TCS off · ESC off · manual\n` +
+      `${DRIFT_LAB_W_TITLE} · plain steering · ESC off\n` +
       `key ${key.padEnd(5)} rack ${rack.padEnd(7)} lock ${Number.isNaN(r[2]) ? "–" : pct(r[2])} · wheel ${r[8].toFixed(1)}°\n` +
       `slide ${slide.toFixed(1)}° · throttle key ${pct(r[4])} → engine ${pct(r[5])}\n` +
-      `gear ${gear} · ${r[7].toFixed(0)} km/h` +
+      `gear ${gear} · ${r[7].toFixed(0)} km/h · clutch ${r[10] > 0.5 ? "auto" : "manual"} ${pct(r[11])}${r[12] > 0.5 ? " locked" : ""}\n` +
+      `engine ${r[13].toFixed(0)} rpm · driven wheels ${r[14].toFixed(0)} rpm · clutch pedal ${pct(r[15])}` +
       ride;
     this.readout.style.borderLeftColor = slide > 50 ? "#e04040" : slide > 10 ? "#40c070" : "#40a0e0";
   }

@@ -52,7 +52,7 @@ const ride = await page.evaluate(() => window.__wp.sim.rideTune());
 check(ride && Math.abs(ride.arb - 0.15) < 1e-6 && Math.abs(ride.spring - 0.7) < 1e-6, `ride default = medium weight (step 10) ${JSON.stringify(ride)}`);
 check(Math.abs(plain.counter_margin_deg - 0.25) < 1e-6, `countersteer limit 0.25° by default (${plain.counter_margin_deg})`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
-check(a.tcs === "Off" && !a.esc && !a.auto_gears, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears}`);
+check((a.tcs === "Off" || a.tcs === false) && !a.esc && !a.auto_gears && a.auto_clutch === true, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears} auto clutch ${a.auto_clutch}`);
 check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
 const sliders = await page.locator("#drift-lab-w input[type=range]").count();
 check(sliders >= 18, `${sliders} sliders (steering + suspension + car / tyre)`);
@@ -68,6 +68,14 @@ check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_f
 await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
 const sl = await page.evaluate(() => window.__wp.sim.carTune());
 check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
+await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
+await page.waitForTimeout(300);
+const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
+check(Math.abs(tr.plain.swing_rate - 2.5) < 1e-6 && Math.abs(tr.ride.yaw_inertia - 1.5) < 1e-6 && tr.grip.lock_mode === "smart", `transition preset ${JSON.stringify(tr)}`);
+await page.locator("#drift-lab-w button", { hasText: "drift: spin + VR (test)" }).click();
+const svr = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
+check(svr.car.spin_model === true && svr.plain.velocity_relative === true && Math.abs(svr.plain.align_gain - 0.5) < 1e-6, `drift: spin + VR preset ${JSON.stringify(svr)}`);
+await page.evaluate(() => window.__wp.sim.plainSteerSet(JSON.stringify(window.__wp.sim.plainSteerDefaults())));
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "tyre data turns the spin model off");
 // The spin model checkbox alone (default off) turns it on and off.
@@ -77,6 +85,40 @@ await spinBox.check();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === true, "spin model checkbox → on");
 await spinBox.uncheck();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "spin model checkbox → off");
+// Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
+check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
+const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();
+check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
+await page.locator("#drift-w-balance-ab").click();
+check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
+check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
+await page.locator("#drift-w-balance-ab").click();
+check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
+const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
+check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: softer RWD tyres, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
+check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
+await page.locator("#drift-w-drift-best").click();
+const db = await page.evaluate(() => ({ g: window.__wp.sim.gripBalance(), p: window.__wp.sim.plainSteer() }));
+check((await abText()) === "balance: drift best" && Math.abs(db.g.rear_stiffness - 0.45) < 1e-6 && Math.abs(db.g.rear_downforce - 0.8) < 1e-6 && db.p.velocity_relative === true && Math.abs(db.p.slide_key_gain - 0.31) < 1e-6, `drift: best (test) sets the balance and the VR steering ${JSON.stringify(db)}`);
+await page.evaluate(() => {
+  const vr = document.getElementById("drift-lab-w-vr");
+  if (vr.checked) vr.click();
+});
+await page.locator("#drift-lab-w button", { hasText: "for slow weight" }).click();
+check((await abText()) === "balance: for slow weight" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `slow-weight balance preset: "${await abText()}"`);
+await page.locator("#drift-lab-w button", { hasText: "lock only (step 1)" }).click();
+check((await abText()) === "balance: lock only" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `lock only preset: "${await abText()}"`);
+await page.locator("#drift-w-balance-ab").click(); // lock only → new
+await page.evaluate(() => {
+  const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
+  const s = inputs.find((i) => i.parentElement.textContent.includes("rear grip (μ)"));
+  s.value = "0.9";
+  s.dispatchEvent(new Event("input"));
+});
+check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
+await page.locator("#drift-w-balance-ab").click(); // custom → new
+check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
@@ -172,6 +214,55 @@ const launch = async () => {
   return { maxYaw, kmh: last[7], gear: last[6] };
 };
 const l = await launch();
+// Owner bug (2026-10-20): "rpm stuck / flat" in 3rd with the clutch set to manual — the lab
+// forced the automatic clutch. The testbed's clutch select must win (also after the lab
+// restarts), show in the readout, and a 3rd-gear pull must rev with road speed.
+{
+  await page.evaluate(() => {
+    const sel = document.getElementById("clutch-mode");
+    sel.value = "manual";
+    sel.dispatchEvent(new Event("change"));
+  });
+  check((await page.evaluate((id) => window.__wp.sim.assists(id).auto_clutch, await player())) === false, "clutch select manual → assists.auto_clutch off");
+  // The owner's flow: the choice is saved, then the lab starts (it used to force auto here).
+  await page.reload();
+  await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+  const pid = await player();
+  check((await page.evaluate((id) => window.__wp.sim.assists(id).auto_clutch, pid)) === false, "lab start keeps the manual clutch");
+  const pullRead = () => page.evaluate((id) => Array.from(window.__wp.sim.plainReadout(id)), pid);
+  await page.waitForTimeout(300);
+  check((await pullRead())[10] === 0, "readout: clutch manual");
+  check(/clutch manual/.test(await page.locator("#drift-lab-w").innerText()), "readout text shows clutch manual");
+  // Get rolling in 3rd on the automatic clutch (from rest the manual clutch with the pedal up
+  // stalls, as it should), then the manual clutch for 3 s of full throttle in 3rd.
+  const setClutch = (v) =>
+    page.evaluate((v) => {
+      const sel = document.getElementById("clutch-mode");
+      sel.value = v;
+      sel.dispatchEvent(new Event("change"));
+    }, v);
+  await setClutch("auto");
+  await page.keyboard.down("KeyW");
+  for (let i = 0; i < 60 && (await pullRead())[6] < 3; i++) {
+    await page.waitForTimeout(400);
+    const r = await pullRead();
+    if (r[6] >= 1 && r[13] > 4500) await page.keyboard.press("ShiftLeft");
+  }
+  await page.keyboard.up("KeyW");
+  await setClutch("manual");
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(500);
+  const s0 = await pullRead();
+  await page.waitForTimeout(3000);
+  const s1 = await pullRead();
+  await page.keyboard.up("KeyW");
+  check(s0[10] === 0 && s0[6] === 3 && s1[6] === 3 && s1[13] > s0[13] + 400 && s1[7] > s0[7] + 8, `3rd-gear pull, manual clutch: ${s0[13].toFixed(0)} → ${s1[13].toFixed(0)} rpm, ${s0[7].toFixed(0)} → ${s1[7].toFixed(0)} km/h, wheels ${s0[14].toFixed(0)} → ${s1[14].toFixed(0)} rpm (gear ${s0[6]} → ${s1[6]})`);
+  await page.evaluate(() => {
+    const sel = document.getElementById("clutch-mode");
+    sel.value = "auto";
+    sel.dispatchEvent(new Event("change"));
+  });
+}
 check(l.maxYaw < 3 && l.kmh > 20, `launch, floored from rest (spin model): yaw ${l.maxYaw.toFixed(2)}° at ${l.kmh.toFixed(0)} km/h, gear ${l.gear}`);
 // For the record (not a check): the same launch on the tyre data — the owner's bug.
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
@@ -198,14 +289,15 @@ const freeDrive = async () => {
 };
 await freeDrive();
 check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
-// "Use W handling everywhere" (default ON): free drive keeps the W profile on the player only.
+// "Use W handling everywhere" (default ON): free drive keeps the W profile (grip balance too)
+// on the player only.
 {
   const w = await page.evaluate(() => {
     const s = window.__wp.sim;
     const p = window.__wp.app.player;
-    return { plain: s.plainSteer() !== null, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
+    return { plain: s.plainSteer() !== null, grip: s.gripBalance() !== null, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
   });
-  check(w.plain && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
+  check(w.plain && w.grip && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
 }
 check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
 // The career garage can sit over free drive on load; the button's own click handler is

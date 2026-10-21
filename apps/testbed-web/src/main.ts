@@ -662,6 +662,9 @@ async function main(): Promise<void> {
     }
   };
   const assistOverrides = (): Overrides => ({ tcs: "Off", esc: false, auto_gears: false, ...savedAssistOverrides() });
+  // Drift Lab W honours the viewer's own clutch / gears / TCS / ABS choices (owner bug: the lab
+  // forced the automatic clutch even with "manual" selected).
+  driftLabW.userAssists = savedAssistOverrides;
   /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
    * traction control and stronger steer help; boxes the viewer ticked still win. */
   const TOUCH_ASSISTS: Record<string, unknown> = { tcs: "Full", auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
