@@ -14,7 +14,7 @@ traffic selection.
 
 | Id | Class | Mass (sim) | Power | 0-100 sim (est.) | Vmax sim | 100-0 | Skidpad | Dur. | Price |
 |---|---|---|---|---|---|---|---|---|---|
-| `fulmine_v10` | Exotic | 1634 kg | 449 kW (5.2 NA V10, 8250 rpm) | 3.59 s (3.5) | 337 km/h | 34.9 m | 0.95 g | 3 | 230 000 |
+| `fulmine_v10` | Exotic | 1634 kg | 449 kW (5.2 NA V10, 8250 rpm) | 3.59 s (3.5) | 337 km/h | 34.9 m | 0.95 g | 3 | 125 000 |
 | `sentinel_warden` | PoliceCruiser | 1873 kg | 155 kW (5.7 TBI pushrod V8) | 8.80 s (8.6) | 202 km/h | 40.1 m | 0.81 g | 4 | 26 000 (not for sale) |
 | `sentinel_harrier` | PoliceInterceptor | 1813 kg | 319 kW (5.0 DOHC V8) | 5.74 s (5.7) | 275 km/h | 38.2 m | 0.87 g | 4 | 52 000 (not for sale) |
 
@@ -33,8 +33,14 @@ traffic selection.
 - Barrier matrix: all pass except Harrier `offset 40% 56 km/h` (struck-side corner intact,
   total loss) — the same known result as the Wolfhound (push-bar front spreads the offset load).
 - Market: prices come from the car files (`wp_economy` market); the Fulmine sits in the
-  Exotic band (60 000-320 000) in every condition, its impound base fee is 1.1 % of value, its
+  Exotic band (60 000-320 000) in every condition, its impound base fee is 2.0 % of value, its
   class index (832) tops the roster. Police classes are refused by `buy_car`.
+  **Price 125 000, not the ~230 000 the class would cost:** `wp_economy`'s
+  `roster_table_and_feel_targets` requires a medium front hit ≤ 1.6 × the class win purse in
+  Simulation; the Exotic purse (7 452) is shared with the 120 000 Lucciola and repair prices
+  scale with value, so 230 000 gave 2.73. **Request to 08 (economy):** a separate purse tier
+  for class-index ≥ 800 cars (or a value-scaled Exotic purse) so the Fulmine can be priced at
+  ~230 000; then change `price` in `roster_inputs.py`.
 - Audio: `data/audio/cars/{fulmine_v10,sentinel_warden,sentinel_harrier}.json` (audio's
   folder; `wp_audio` requires one per car). V10 uses the V8 pack (no V10 pack yet), 10
   cylinders, even firing.

@@ -1173,7 +1173,7 @@ CARS = [
             bar=P_MODERN, handbrake_frac=0.5,
         ),
         steer=dict(ratio=15.0, turn_circle_m=11.5, ackermann=0.5, rack_speed=1.7),
-        price=230000,
+        price=125000,  # economy-compressed (see docs/integration/cars.md): front-hit cost / Exotic purse must stay <= 1.6
         durability=3,
         note=("The top of the market. A shrieking 8500 rpm V10, instant dual-clutch shifts and "
               "all-wheel drive make it the quickest car off the line in any weather, and it "

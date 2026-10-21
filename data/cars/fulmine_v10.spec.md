@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Exotic | 2010s Italian mid-engine supercar, 5.2 L naturally aspirated V10, permanent AWD, 7-speed dual-clutch | 3 / 5 | 230,000 |
+| Exotic | 2010s Italian mid-engine supercar, 5.2 L naturally aspirated V10, permanent AWD, 7-speed dual-clutch | 3 / 5 | 125,000 |
 
 ## Design note
 

@@ -163,7 +163,7 @@
   },
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "fulmine_v10",
-  "base_price": 230000,
+  "base_price": 125000,
   "durability_class": 3,
   "fuel_capacity_l": 83.0
 }

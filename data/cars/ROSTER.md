@@ -21,7 +21,7 @@
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 11.6 | 176 | 0.90 | 388 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
 | Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.1 | 183 | 0.83 | 401 | 4 | 21,000 | street |
-| Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 832 | 3 | 230,000 | sport |
+| Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 832 | 3 | 125,000 | sport |
 | Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 155 | 83 | 8.6 | 207 | 0.91 | 455 | 4 | 26,000 | police_pursuit |
 | Sentinel Harrier | `sentinel_harrier` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
