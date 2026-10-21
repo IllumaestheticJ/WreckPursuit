@@ -55,6 +55,10 @@ TARGETS = {
     "bulwark_400": dict(t0100=(7.5, 9.0), lat=(0.70, 0.80), brake=(42, 52), why="period road tests of early-70s high-output 6.6 L full-size sedans on optional radials (net-rated)"),
     "arashi_t4": dict(t0100=(4.8, 5.8), lat=(0.88, 0.97), brake=(35, 39), why="road tests of mid-90s AWD 2.0 T homologation saloons"),
     "satchel_20": dict(t0100=(15.0, 19.0), lat=(0.66, 0.76), brake=(44, 52), why="road tests of 2000s petrol medium panel vans (empty)"),
+    "marten_20": dict(t0100=(7.8, 8.8), lat=(0.82, 0.92), brake=(38, 44), why="road tests of early-90s European 2.0 16-valve hot hatches"),
+    "brigand_400": dict(t0100=(8.0, 10.0), lat=(0.66, 0.76), brake=(46, 62), why="period road tests of mid-70s full-size V8 sedans on period tires (net-rated)"),
+    "talus_20t": dict(t0100=(4.8, 5.6), lat=(0.90, 1.00), brake=(34, 38), why="road tests of late-90s AWD 2.0 T rally-homologation saloons"),
+    "tumbril_20": dict(t0100=(14.0, 18.0), lat=(0.66, 0.76), brake=(42, 50), why="road tests of 2000s petrol high-roof panel vans (empty)"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade
@@ -66,8 +70,8 @@ BARRIERS = [
     ("frontal 56 km/h", "≈0.6 m frame crush (0.35-1.3 m), TotalLoss in Simulation (durability ≥ 4 may survive), Arcade milder"),
     ("frontal 80 km/h", "TotalLoss in Simulation"),
     ("offset 40% 56 km/h", "struck-side front suspension or wheel mount failed"),
-    ("side (T-bone) 40 km/h", "struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame)"),
-    ("rear 40 km/h", "not a total loss; Ironside: rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed"),
+    ("side (T-bone) 40 km/h", "struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame; vans exempt: the striker footprint ends short of the forward front wheel arch)"),
+    ("rear 40 km/h", "not a total loss; 70s cars (Ironside, Brigand): rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed"),
 ]
 
 
@@ -323,6 +327,7 @@ SIM_NOTES = {
     ("Drayman Cargo", "100-0"): "0.7 m short of the band (shorter since A's round-8 brake-pedal filter): an empty van on car-type `street` tires (no light-truck compound) with the 1.5 × lock-torque ABS ceiling stops slightly better than road tests of laden-sensitive LT tires. Tire-limited; an `lt_highway` compound (02) would land it in band.",
     ("Furrow 2.4", "100-0"): "0.2 m short of the band: same cause as the van — an empty light pickup on car-type `street` tires stops a little better than period road tests on 90s LT tires.",
     ("Sentinel Bastion", "skidpad"): "C — ≤ 0.01 g under; tall body-on-frame SUV.",
+    ("Brigand 400", "skidpad"): "same cause as the Ironside: 02's `vintage_bias` on a soft, two-tonne, 0.56 m-CG chassis gives 0.60 g vs 0.66-0.76 g period figures. Not retuned on the chassis side; the joint `vintage_bias` re-tune with 02 covers both 70s cars.",
 }
 
 BARRIER_NOTES = {

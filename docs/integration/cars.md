@@ -337,6 +337,79 @@ the same binary and the old beater files swapped back in: identical result.
 | 02 vehicle (A) + 08 economy (G) | An **`aged_radial`** compound for old, hardened radials (the beater; later traffic/props). `vintage_bias` stands in today but is a 70s bias-ply (half the cornering stiffness, lazy). Proposal: street's shape with lateral `d` 0.82, `e` −0.5 (earlier, louder fall-off), longitudinal `d` 0.95, relaxation 0.40 m, rolling resistance 0.014, wet 0.55, paint 0.93 (peak slips computed from the curves). It needs a `market.tire_grip` row too (`wp_economy`'s `every_tire_file_has_a_grip_factor`), which is why I did not add the file. I switch the beater with one line in `roster_inputs.py` once it exists. |
 | 08 economy (G) | A **3-speed automatic** option for the beater (the brief's "4-speed manual / 3-speed auto"): a gearbox-swap mod, or a second def `junkyard_beater_auto` if you prefer a used-market variant. Data for it: ratios 2.84 / 1.60 / 1.00, final 3.70, torque converter stall 2200 rpm ×2.0, couples 2600 rpm, shift 0.6 s — I add the def on request. |
 | 19 design docs (P) | `FEATURE_BACKLOG.md` B06 can be closed. |
+## Round 9: four new cars (2026-10-20)
+
+Full pipeline for each (inputs in `roster_inputs.py` → car JSON + spec sheet + lattice, audio def,
+panel spec + mesh from `car-assets`, sim-validated, smoke-simmed). Existing 17 cars regenerate
+byte-identical and their `validation_results.json` entries are unchanged.
+
+| Id | Name | Class | Archetype | Price | Dur. | Sim 0-100 / skidpad / 100-0 / Vmax | In band? |
+|---|---|---|---|---|---|---|---|
+| `marten_20` | Marten 2.0 | Compact | early-90s European FF hot hatch, 2.0 16V NA (112 kW, 1114 kg) | 9 500 | 2 | 8.6 s / 0.86 g / 38.0 m / 206 | all ✓ |
+| `brigand_400` | Brigand 400 | Muscle | mid-70s American full-size four-door, 6.6 L V8 net 176 kW, 3-speed auto, LSD live axle, 1990 kg | 23 500 | 4 | 9.8 s / 0.60 g / 55.0 m / 197 | skidpad low (0.66-0.76), same `vintage_bias` cause as the Ironside |
+| `talus_20t` | Talus 2.0T | Sport | late-90s rally-homologation saloon, 2.0 T 206 kW, permanent AWD 45/55, front + rear LSD, 1386 kg | 38 000 | 3 | 5.2 s / 0.93 g / 37.2 m / 240 | all ✓ |
+| `tumbril_20` | Tumbril 2.0 | Truck | 2000s European FWD high-roof panel van, 2.0 petrol I4 85 kW, unibody, 1845 kg | 20 000 | 3 | 17.7 s / 0.68 g / 45.0 m / 142 | all ✓ |
+
+Barrier sweep: 8/8 for all four (see the two rule changes below). Nameplate check: 81 files, 0
+problems. `smoke_sim.py`: 21 cars × 2 modes deterministic.
+
+Pursuit (`pursuit_probe.py --chase`, Arcade, day cap): the Sentinel Cruiser catches the
+Marten (11.0 s with the +10 % margin / 7.8 s cap only), the Brigand (11.0 / 7.3 s) and the
+Tumbril (13.1 / 4.9 s; it never reaches 144 km/h). The Talus (0-144 km/h 9.97 s) escapes both
+the Cruiser and the Wolfhound (10.63 s), like the other sport cars.
+
+Checks (round 9): `cargo fmt --check`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`cargo test --release` for wp_contracts, wp_damage, car-assets, wp_audio, wp_economy, simcli and
+wp_wasm: all pass.
+
+How they differ from the existing cars:
+- **Marten vs Vireo** (both 90s FF hatches): broad 2.0 torque from 3000 rpm instead of the
+  Vireo's high-rev cam step; quicker (8.6 vs 9.4 s) and pricier (9 500 vs 7 500), softer front /
+  stiffer rear bar (front roll share 0.45) for lift-off rotation.
+- **Brigand vs Ironside** (both 70s): four-door, 300 kg heavier, 40 kW less, and a clutch LSD
+  instead of an open diff. Slower, cheaper, the "getaway sedan".
+- **Talus vs Lindwurm / Kestrel** (AWD sport): the first **fixed-split** `Awd` car on the roster
+  (permanent 45/55 split, both axles always driven, LSDs front and rear), short gearing, 0.15 m
+  rally ride height, 0.9 handbrake for handbrake turns.
+- **Tumbril vs Drayman** (both vans): FWD unibody instead of RWD body-on-frame V8; much slower,
+  700 kg lighter, softer in every direction (no frame rails under the cargo box).
+
+### Changes to the tools (round 9)
+
+- `build_roster.py`: the Ironside-only live-axle adjustment (rear suspension / wheel mounts fail
+  early) is now the lattice flag `leaf_hangers=True`, set on the Ironside and the Brigand. The
+  Ironside's lattice is byte-identical.
+- `collect_results.py`: the rear-40 expectation "rear fuel tank failed" now applies to every
+  `era == "70s"` car (the builder already puts every 70s car's tank behind the axle), not only
+  the Ironside.
+- `collect_results.py`: the side (T-bone) 40 km/h "struck-side suspension failed" expectation
+  now exempts `profile == "van"` as well as body-on-frame. Measured reason: the barrier's striker
+  footprint is centred on the front door (`yc ± 0.92 m`) and ends at y = 1.19 m on the Tumbril,
+  while its front wheel arch starts at 1.27 m (front axle under the cab, 0.80 m overhang). The
+  Drayman's footprint ends 0.28 m short of its arch too. Cabin intrusion and health match the
+  Drayman (0.22 m / 0.75 vs 0.19 m / 0.74).
+
+### Changes outside my crates (round 9)
+
+- `crates/wp_economy/tests/roster_prices.rs`: added `brigand_400` to `KNOWN` in
+  `pricier_cars_are_not_slower` (test-only, next to `ironside_440`). The Muscle band floor
+  (14 000) means the Worn price (0.6 ×) needs a base of ≥ 23 334, and at 23 500 its class index
+  (245) is below the cheaper hatches'. That is the slow-classic-muscle case the Ironside already
+  sits in; 08 decides whether the Muscle band floor should drop for 70s cars instead.
+- `data/audio/cars/<id>.json` ×4 (13 audio): procedural packs, same fields as the existing cars
+  (I4 for the Marten/Talus/Tumbril, the Talus with `turbo: true`; cross-plane V8 for the Brigand).
+- `data/panels/<id>.json` and `data/panels/meshes/<id>.json` ×4 (R): generated by
+  `gen-panels` / `gen-car-mesh`, no hand edits; no existing panel file changed.
+
+### Known gaps / requests (round 9)
+
+| To | Item |
+|---|---|
+| 03 damage (B) | No three-door option in `gen-lattice`: the Marten is a typical three-door hot hatch, but the `hatch` profile makes four doors (the panel spec and mesh follow it). The prose avoids claiming three doors. A `--doors 2` option for `hatch` would fix it. |
+| 02 vehicle (A) + 14 | Brigand skidpad 0.60 g joins the Ironside (0.62) under the `vintage_bias` re-tune. |
+| 08 economy (G) | Muscle band floor vs 70s cars (above). Add the Marten and Talus to `career.rs::twenty_nights_on_roster_cars` if you want them in the career sweep (I did not touch it). |
+| 19 design docs | `docs/design/CARS_LORE.md` has no entries for the four new cars. |
+| lead | Still no `Van` class, so the Tumbril is `Truck` like the Drayman. |
 
 ## Response to lead feedback round 8 (2026-10-19)
 
