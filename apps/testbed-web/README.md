@@ -25,14 +25,20 @@ npm run typecheck
 | `src/input.ts` | keyboard ramps + Gamepad API (deadzone + steering curve, analogue pass-through), read through the bindings; release on blur / pad disconnect |
 | `src/bindings.ts` | rebindable actions, defaults, `wp.bindings.v1` load/save, display names, F1 help lines |
 | `src/ui/controls.ts` | controls panel (F9 / “controls” button): rebind keys and pad controls, deadzone / curve, reset to defaults; per-device input shaping sliders + live test bars (same values as the game menu's Settings → Controls) |
+| `src/ui/carStats.ts` | stat bars under the car picker (acceleration, top speed, cornering) from `sim.carStats()` (`data/stats/cars.json`, measured on the physics rig); options carry the numbers as tooltips |
+| `src/ui/modShop.ts` | "mods" button: install mods on the car (catalog from `sim.modCatalog`, checked by `sim.buildVisuals`); each change respawns with the build as the player's scenario `mods`; builds saved per car (`wp.builds`), `?mods=a,b` |
+| `src/render/mod_parts.ts` | draws a build's parts (`entity_visuals_json`): wings, splitters, kits, cages, bars, rims, tread, brakes, paint finish, vinyls; fitted by ray-probing the panel mesh and skinned to the mount region's lattice nodes (dent / hinge / detach with it); body pieces join the car's per-material batches (`PanelBody.addModParts`), so a build adds one draw per mod material |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `src/render/fx/` | crash effects: sparks, smoke / steam / tyre smoke, glass shards, skid marks, debris chips; `?fx=low\|med\|high`, `__wp.fx.setQuality()` (`docs/integration/crash-fx.md`) |
+| `src/photo.ts` | photo mode (F7, live or replay): freeze, free camera, filters, save / copy PNG |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
+| `e2e/photo.mjs` | photo mode check (`npm run e2e:photo`): freeze, free camera, filters, save, clipboard, replay |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 | `e2e/crash_fx.mjs` | crash effects check + `FX_SHOTS=dir` screenshots (run by `e2e/run.mjs` too) |
 | `e2e/controls_settings.mjs` | `npm run e2e:controls`: per-device input shaping — keyboard defaults, AssistProfile speed sensitivity per device (keyboard 0.75 / gamepad 0.70 / wheel 0), persistence, test bars + test mode, saturation / dead zone effect, panel ↔ menu, preset highlight |
 | `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
+| `e2e/mods_shots.mjs` | modified-car screenshots (stock / street / widebody / protection builds; `node e2e/mods_shots.mjs [dir]`, `ONLY=street`, `CAR=…`) |
 | `e2e/signals.mjs` | `npm run e2e:signals`: traffic turn signals — a car whose draw record signals right / left blinks that side's corner lamps (lit and unlit frames, read back from the fleet instance or VehicleView), never the other side; hazards light both; the player's cosmetic stalk (`-` / `=`) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 

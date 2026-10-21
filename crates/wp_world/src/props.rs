@@ -8,9 +8,9 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use wp_math::Rng;
 
-use crate::geom::{self, V3};
+use crate::geom::{self, V2, V3};
 use crate::map::CityMap;
-use crate::network::{DistrictKind, LaneKind};
+use crate::network::{DecorKind, DistrictKind, LaneKind};
 
 /// Kind of static prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -140,6 +140,38 @@ fn parking_allowed(map: &CityMap, t: &ParkingTable, p: V3) -> bool {
     true
 }
 
+/// Whether a parked car at `p` facing `f` keeps clear of the solid street and yard furniture
+/// (fences, hedges, tree trunks): residential lots put fences right at the lot line, and on
+/// main's re-laid Port Vesper streets a driveway car stood in a fence's end (lead/main-sync).
+pub(crate) fn clear_of_decor(map: &CityMap, p: V2, f: V2) -> bool {
+    let car = geom::Obb {
+        c: p,
+        f,
+        hl: 2.25 + 0.1,
+        hw: 0.95 + 0.1,
+    };
+    !map.net.decor.iter().any(|d| {
+        let (hl, hw) = match d.kind {
+            DecorKind::Driveway => return false,
+            DecorKind::StreetTree | DecorKind::YardTree => {
+                (crate::residential::TRUNK_R_M, crate::residential::TRUNK_R_M)
+            }
+            DecorKind::Hedge | DecorKind::Fence => (d.size[1] * 0.5, d.size[0] * 0.5),
+        };
+        let c = [d.pos[0], d.pos[1]];
+        geom::dist(c, p) < hl + 3.0
+            && geom::obb_overlap(
+                &car,
+                &geom::Obb {
+                    c,
+                    f: geom::dir_of_yaw(d.yaw),
+                    hl,
+                    hw,
+                },
+            )
+    })
+}
+
 /// Parked cars along the parking lanes under the built-in [`ParkingTable`], deterministic for
 /// a seed.
 pub fn parked_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
@@ -179,7 +211,7 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                     break;
                 }
                 let (p, tan) = seg.point_at(s);
-                if parking_allowed(map, table, p) {
+                if parking_allowed(map, table, p) && clear_of_decor(map, geom::xy(p), tan) {
                     out.push(StaticProp {
                         kind: PropKind::ParkedCar,
                         pos: [p[0], p[1], p[2] + 0.75],

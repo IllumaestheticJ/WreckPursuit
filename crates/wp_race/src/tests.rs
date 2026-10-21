@@ -8,7 +8,7 @@ use crate::course::Course;
 use crate::crew::{ChallengeState, CrewRegistry};
 use crate::data::RaceData;
 use crate::error::{CrewError, EntryDenied};
-use crate::judge::{RaceJudge, RacerEntry, StartError};
+use crate::judge::{RaceJudge, RacerEntry, RacerSample, StartError};
 use crate::kind::{
     ClassBracket, CrewId, DistrictId, EventId, Legality, RaceKind, RacerAccount, VenueId,
 };
@@ -222,7 +222,6 @@ fn entry_and_start_rules() {
 
 #[test]
 fn server_reset_is_not_a_teleport() {
-    use crate::judge::RacerSample;
     let mut j = judge(RaceKind::Sprint, sprint_course());
     for id in [1, 2] {
         j.enter(RacerEntry {
@@ -253,6 +252,56 @@ fn server_reset_is_not_a_teleport() {
     );
 }
 
+#[test]
+fn reset_mode_puts_an_off_course_racer_back_instead_of_a_dq() {
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    j.set_reset_off_course(true);
+    for id in [1, 2] {
+        j.enter(RacerEntry {
+            racer: EntityId(id),
+            redline_rpm: 0.0,
+        })
+        .unwrap();
+    }
+    let green = j.start(0).unwrap();
+    // Racer 2 waits on the grid; racer 1 is the one that leaves the road.
+    let at = |x: f32, y: f32| RacerSample {
+        racer: EntityId(1),
+        pos: [x, y, 0.0],
+        vel: [0.0, 0.0, 0.0],
+        speed_mps: 0.0,
+        throttle: 0.0,
+        gear: 1,
+        engine_rpm: 1000.0,
+    };
+    // On course at y = 120, then parked 40 m to the side for 4 s (grace is 3 s).
+    // (Both moves are announced so they are not judged as teleports.)
+    j.relocate(EntityId(1), [0.0, 120.0, 0.0], green);
+    j.observe(green, &[at(0.0, 120.0)], &[]);
+    j.relocate(EntityId(1), [40.0, 120.0, 0.0], green);
+    let grace = (data().rules.common.corridor_grace_s / wp_contracts::PHYSICS_DT) as u64;
+    let mut resets = Vec::new();
+    for k in 1..=grace + 240 {
+        j.observe(green + k, &[at(40.0, 120.0)], &[]);
+        resets.extend(j.drain_resets());
+    }
+    assert_eq!(resets.len(), 1, "one reset, then the clock starts again");
+    let r = resets[0];
+    assert_eq!(r.racer, EntityId(1));
+    assert!(
+        r.pos[0].abs() < 1e-3 && (r.pos[1] - 120.0).abs() < 1e-3,
+        "{r:?}"
+    );
+    assert!(
+        (r.dir[1] - 1.0).abs() < 1e-4,
+        "faces along the course: {r:?}"
+    );
+    // The server moved the car; it races on.
+    j.relocate(EntityId(1), r.pos, green + grace + 241);
+    j.observe(green + grace + 241, &[at(r.pos[0], r.pos[1])], &[]);
+    assert_eq!(by_racer(&j.results(), 1).status, RacerStatus::Running);
+}
+
 // ---------------------------------------------------------------- circuit
 
 #[test]
@@ -280,25 +329,27 @@ fn circuit_counts_laps_and_best_lap() {
 // ---------------------------------------------------------------- DNF / DQ
 
 #[test]
-fn corridor_shortcut_is_dq_but_a_short_excursion_is_not() {
+fn leaving_the_route_is_never_a_dq_but_gates_still_count() {
     let racers = [
         ScriptedRacer::new(1, 5.0, 40.0)
             .with(5.0, ScriptedIncident::Swerve { offset_m: 30.0 })
             .with(6.0, ScriptedIncident::Swerve { offset_m: 0.0 }),
         ScriptedRacer::new(2, 5.0, 40.0).with(5.0, ScriptedIncident::Swerve { offset_m: 30.0 }),
     ];
-    let out = run(RaceKind::Sprint, sprint_course(), &racers, 1);
-    assert_eq!(by_racer(&out.results, 1).status, RacerStatus::Finished);
-    assert_eq!(
-        by_racer(&out.results, 2).status,
-        RacerStatus::Dq(DqReason::LeftCorridor)
-    );
-    // Open-route kinds have no corridor, but gates still have to be driven through: the
-    // swerving racer misses them, never finishes and runs out of time after the winner.
-    let out = run(RaceKind::Checkpoint, sprint_course(), &racers, 1);
-    let r2 = by_racer(&out.results, 2);
-    assert_eq!(r2.status, RacerStatus::Dnf(DnfReason::FinishWindow));
-    assert_eq!(r2.gates_passed, 0);
+    // A short excursion off the route and back still finishes. Staying off the route is not
+    // a DQ either, but the racer misses the gates, never finishes and runs out of time after
+    // the winner. Corridor kinds and open-route kinds judge this the same way.
+    for kind in [RaceKind::Sprint, RaceKind::Checkpoint] {
+        let out = run(kind, sprint_course(), &racers, 1);
+        assert_eq!(by_racer(&out.results, 1).status, RacerStatus::Finished);
+        let r2 = by_racer(&out.results, 2);
+        assert_eq!(
+            r2.status,
+            RacerStatus::Dnf(DnfReason::FinishWindow),
+            "{kind:?}"
+        );
+        assert_eq!(r2.gates_passed, 0);
+    }
 }
 
 #[test]

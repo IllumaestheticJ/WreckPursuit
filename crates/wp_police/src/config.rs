@@ -149,6 +149,60 @@ pub struct HeatConfig {
     pub assault: AssaultConfig,
     /// Blatant speeding right past a unit (owner playtest row 60).
     pub blatant: BlatantConfig,
+    /// What a ground unit can see (owner playtest row 89).
+    pub sight: SightConfig,
+    /// How long recognising a wanted car takes (owner playtest rows 80 / 89).
+    pub recognition: RecognitionConfig,
+    /// Units clock speeders themselves (owner report 2026-10-21, "noticed but no pursuit").
+    pub radar: RadarConfig,
+}
+
+/// A ground unit's field of view (owner playtest row 89, "if I can see them, they can see
+/// me"): line of sight within the phase's range, in a forward cone (the windscreen and side
+/// windows) and all round close by (mirrors, a glance over the shoulder).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SightConfig {
+    /// Width of the forward cone, degrees (360 = all round).
+    pub fov_deg: f32,
+    /// Seen in any direction this close, m.
+    pub all_round_m: f32,
+}
+
+/// A ground unit's radar (owner report 2026-10-21: "cops see me but no pursuit"). A unit that
+/// can see a racer (`sight`, line of sight, within `witness_range_m`) clocks it: over the limit
+/// where it drives by more than `max(margin_mps, ratio × limit)` is a witnessed speeding
+/// violation, at most once per `repeat_s` of no counted speeding. `wp_world` only reports speeding
+/// against a lane pointing the car's way, every 5 s: a car on the wrong side of the road, or one
+/// that passed a unit between two reports, was seen but never clocked. Only racers not wanted
+/// yet are clocked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadarConfig {
+    /// Absolute margin over the limit, m/s (`wp_world`'s speeding margin).
+    pub margin_mps: f32,
+    /// Relative margin (fraction of the limit).
+    pub ratio: f32,
+    /// A racer is clocked only when no speeding violation counted for this long (`wp_world`'s
+    /// sustained-speeding repeat), s.
+    pub repeat_s: f32,
+    /// Speeding in a unit's sight this long before it is clocked (`wp_world`'s hold), s.
+    pub hold_s: f32,
+}
+
+/// Recognising an already-wanted car a unit did not see offend (rows 80 / 89):
+/// `recognition_time_s` within `near_m`, rising linearly by `far_extra_s` to the edge of
+/// `recognition_range_m`. Losing sight drains the timer at `decay_per_s` instead of resetting
+/// it, so a one-frame line-of-sight drop costs nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecognitionConfig {
+    /// Recognition takes `recognition_time_s` this close, m.
+    pub near_m: f32,
+    /// Extra seconds at the edge of the recognition range.
+    pub far_extra_s: f32,
+    /// Seconds of the recognition timer lost per second out of sight.
+    pub decay_per_s: f32,
 }
 
 /// Speeding far over the limit right past a unit that can see it is recognised at once, day or
@@ -219,10 +273,15 @@ pub struct CaptureConfig {
     /// A unit must be within this distance, m.
     pub unit_radius_m: f32,
     /// Also captured: boxed in or pinned, never getting farther than this from one spot
-    /// (rocking back and forth) for `pinned_time_s` with a unit within `unit_radius_m`, m.
+    /// (rocking back and forth) for `pinned_time_s` with a unit within `pinned_unit_radius_m`,
+    /// m.
     pub pinned_radius_m: f32,
     /// See `pinned_radius_m`, s.
     pub pinned_time_s: f32,
+    /// See `pinned_radius_m`: wider than `unit_radius_m`, so a racer stuck in a jam with the
+    /// police held up behind other cars 20 m away is captured rather than waited for forever
+    /// (Hollins hairpin, lead/opponent-pace), m.
+    pub pinned_unit_radius_m: f32,
 }
 
 /// Safehouse rule.
@@ -557,6 +616,10 @@ pub struct PursuitFile {
     pub chase: ChaseConfig,
     /// Obstacle awareness (following, passing, spawn clearance).
     pub avoid: AvoidConfig,
+    /// Pro driving of physical units: racing line, grip-limit speed profile, slide control
+    /// ([`crate::pro`]). Defaults when the table has no `[pro]` section.
+    #[serde(default)]
+    pub pro: crate::pro::ProParams,
 }
 
 /// Obstacle awareness for ground units (see [`crate::avoid`]).
@@ -742,6 +805,10 @@ pub struct HeloConfig {
     pub spotlight_half_angle_rad: f32,
     /// Max time on a single track before returning to refuel, s.
     pub max_track_s: f32,
+    /// While it keeps visual, the helicopter radios the racer's position this often, s.
+    pub position_report_s: f32,
+    /// Visual counts as lost (radio "lost visual") after this long without line of sight, s.
+    pub lost_visual_after_s: f32,
 }
 
 /// Racer-side gadgets.
@@ -959,6 +1026,10 @@ impl PoliceConfig {
         {
             return bad("roadblock.units must be [min>=1, max>=min]");
         }
+        let h = &self.tools.helicopter;
+        if !(h.position_report_s > 0.0 && h.lost_visual_after_s >= 0.0) {
+            return bad("helicopter: position_report_s must be > 0, lost_visual_after_s >= 0");
+        }
         if self.tools.gadgets.radar_range_m.is_empty()
             || self.tools.gadgets.scanner_delay_s.is_empty()
         {
@@ -981,6 +1052,15 @@ mod tests {
         let disk =
             PoliceConfig::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/police")).unwrap();
         assert_eq!(c, disk);
+    }
+
+    #[test]
+    fn pro_table_matches_the_code_defaults() {
+        // `[pro]` spells every knob out; keep it and `ProParams::default` in step.
+        assert_eq!(
+            PoliceConfig::builtin().pursuit.pro,
+            crate::pro::ProParams::default()
+        );
     }
 
     #[test]

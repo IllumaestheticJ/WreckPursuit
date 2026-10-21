@@ -395,6 +395,10 @@ pub struct Unit {
     pub pit_ready: SimTime,
     /// Whether this unit ever pursued (for statistics).
     pub engaged: bool,
+    /// Whether it ever had a job (call, pursuit, intercept, tool): only then does "resuming
+    /// patrol" go out on the radio.
+    #[serde(default)]
+    pub had_job: bool,
     /// Steering geometry of the unit's car.
     pub geometry: SteerGeometry,
     /// `wp_world`'s shared driving controller (pure pursuit + PID), created on first use.
@@ -414,6 +418,19 @@ pub struct Unit {
     /// (lead r13-test-fixes §4). Cleared by every new assignment.
     #[serde(default)]
     pub quiet: bool,
+    /// Measured velocity of a physical unit (XY; `sync_unit`), m/s. The body keeps speed and
+    /// heading only; the pro driver needs the slip between them.
+    #[serde(default)]
+    pub vel: [f32; 2],
+    /// What the sim reports of the car's feel (yaw rate, road grip).
+    #[serde(default)]
+    pub feel: crate::pro::UnitFeel,
+    /// Limits of the unit's car (`PoliceSystem::set_unit_limits`); `None` = the `[pro]` defaults.
+    #[serde(default)]
+    pub limits: Option<crate::pro::CarLimits>,
+    /// Pro driver of a physical unit, created on first use.
+    #[serde(skip)]
+    pub pro: Option<crate::pro::ProDriver>,
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -465,12 +482,17 @@ impl Unit {
             captain_hold_until: SimTime::ZERO,
             pit_ready: SimTime::ZERO,
             engaged: false,
+            had_job: false,
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
             chase_route: None,
             quiet: false,
+            vel: [0.0, 0.0],
+            feel: crate::pro::UnitFeel::default(),
+            limits: None,
+            pro: None,
         }
     }
 

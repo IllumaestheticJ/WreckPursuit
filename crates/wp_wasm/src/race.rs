@@ -186,8 +186,25 @@ fn phase_of(def: &RaceDef) -> wp_contracts::DayPhase {
     wp_contracts::TimeOfDay::from_hours(def.time_of_day_h).phase()
 }
 
+/// Ledger note of the adjustment that brings the economy's price to the advertised stake.
+pub const STAKE_NOTE: &str = "race stake (advertised purse / buy-in)";
+
+/// `amount × scale`, rounded (how [`wp_race::bridge::economy_race`] scales the economy's
+/// numbers to the advertised stake).
+pub fn to_stake(amount: i64, scale: f32) -> i64 {
+    (amount as f32 * scale).round() as i64
+}
+
+/// The economy's purse and clean bonus brought to the advertised stake (`purse_scale`).
+pub fn stake_settlement(purse: i64, clean_bonus: i64, purse_scale: f32) -> (i64, i64) {
+    (
+        to_stake(purse, purse_scale),
+        to_stake(clean_bonus, purse_scale),
+    )
+}
+
 /// Advertised stake (`wp_race::bridge::economy_race`, request R5).
-fn advertised(
+pub(crate) fn advertised(
     econ: &wp_economy::Economy,
     data: &RaceData,
     def: &RaceDef,
@@ -280,10 +297,15 @@ pub struct RaceRun {
     prev_events: Vec<SimEvent>,
     setup: wp_economy::RaceSetup,
     advertised: (i64, i64),
+    /// `(purse_scale, entry_scale)` of the advertised stake ([`wp_race::bridge::EconomyRace`]):
+    /// the economy prices the race, these bring it to what the lobby advertised.
+    stake_scale: (f32, f32),
     entry: Option<(i64, Vec<LedgerLine>)>,
     payout: Option<RacePayout>,
     economy_error: Option<String>,
     settled: bool,
+    /// Off-course resets from the last judged tick ([`RaceRun::take_resets`]).
+    resets: Vec<wp_race::CourseReset>,
 }
 
 impl RaceRun {
@@ -361,26 +383,43 @@ impl RaceRun {
                 sc.mode,
             );
             let adv = advertised(econ, &data, def, player_car, length, sc.mode);
-            (setup, (adv.purse, adv.entry_fee))
+            (setup, adv)
         });
         let mut me = Self {
             live,
             names,
             prev_events: Vec::new(),
             setup,
-            advertised: adv,
+            advertised: (adv.purse, adv.entry_fee),
+            stake_scale: (adv.purse_scale, adv.entry_scale),
             entry: None,
             payout: None,
             economy_error: None,
             settled: false,
+            resets: Vec::new(),
         };
         if let Some(run) = run {
-            match run.enter_race(&me.setup) {
-                Ok(e) => me.entry = Some(e),
-                Err(e) => me.economy_error = Some(format!("buy-in refused: {e}")),
-            }
+            me.charge_entry(run);
         }
         Ok(me)
+    }
+
+    /// Charge the buy-in at the advertised stake: G's `enter_race` prices it, an adjustment
+    /// line brings it to `entry_fee × entry_scale` (as `wp_race::bridge::economy_race`).
+    fn charge_entry(&mut self, run: &mut PlayerRun) {
+        match run.enter_race(&self.setup) {
+            Ok((fee, mut lines)) => {
+                let want = to_stake(fee, self.stake_scale.1);
+                if want != fee {
+                    match run.adjust(fee - want, STAKE_NOTE) {
+                        Ok(l) => lines.extend(l),
+                        Err(e) => self.economy_error = Some(format!("buy-in stake: {e}")),
+                    }
+                }
+                self.entry = Some((want, lines));
+            }
+            Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
+        }
     }
 
     /// Charge the buy-in on another account (the session adopted the previous run's account
@@ -388,15 +427,18 @@ impl RaceRun {
     pub fn reenter(&mut self, run: &mut PlayerRun) {
         self.economy_error = None;
         self.entry = None;
-        match run.enter_race(&self.setup) {
-            Ok(e) => self.entry = Some(e),
-            Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
-        }
+        self.charge_entry(run);
     }
 
     /// The car was moved on purpose (reset, debug park): judge its next sample from `pos`.
     pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
         self.live.relocate(racer, pos, tick);
+    }
+
+    /// Racers the judge wants put back on the course (off it past the grace time), oldest
+    /// first. The session moves each car and calls [`RaceRun::relocate`].
+    pub fn take_resets(&mut self) -> Vec<wp_race::CourseReset> {
+        std::mem::take(&mut self.resets)
     }
 
     /// The live race (judge, standings, course).
@@ -453,6 +495,7 @@ impl RaceRun {
             .collect();
         let out = self.live.post_step(sim.tick(), &samples, events, &police);
         self.prev_events = events.to_vec();
+        self.resets.extend_from_slice(&out.resets);
         let mut emitted: Vec<SimEvent> = out.signals.iter().map(|s| s.to_sim_event()).collect();
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples
@@ -493,7 +536,24 @@ impl RaceRun {
         };
         let res = wp_race::bridge::economy_result(&r, run.wanted_level());
         match run.settle_race(&self.setup, &res, entry) {
-            Ok(p) => self.payout = Some(p),
+            Ok(mut p) => {
+                // Pay the advertised stake: purse and clean bonus × purse_scale (the bridge's
+                // R5 scale; the economy alone pays its own per-km base).
+                let (purse, bonus) = stake_settlement(p.purse, p.clean_bonus, self.stake_scale.0);
+                let diff = purse + bonus - p.purse - p.clean_bonus;
+                if diff != 0 {
+                    match run.adjust(diff, STAKE_NOTE) {
+                        Ok(lines) => {
+                            p.ledger.extend(lines);
+                            p.purse = purse;
+                            p.clean_bonus = bonus;
+                            p.cash_after = run.account().cash;
+                        }
+                        Err(e) => self.economy_error = Some(format!("payout stake: {e}")),
+                    }
+                }
+                self.payout = Some(p);
+            }
             Err(e) => self.economy_error = Some(format!("payout refused: {e}")),
         }
     }

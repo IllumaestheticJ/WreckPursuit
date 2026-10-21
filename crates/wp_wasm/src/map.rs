@@ -580,7 +580,13 @@ mod tests {
         let s = chase("procedural_12x12");
         let m = map_static(s.sim().world().map());
         assert!(m.roads.len() > 50);
-        assert!(m.roads.iter().all(|r| r.layer == 0));
+        // Streets are at grade; only main's divided highway runs on a viaduct over them.
+        assert!(m
+            .roads
+            .iter()
+            .filter(|r| r.class != 0)
+            .all(|r| r.layer == 0));
+        assert!(m.roads.iter().any(|r| r.class == 0 && r.layer == 1));
     }
 
     #[test]

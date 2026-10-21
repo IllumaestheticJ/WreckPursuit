@@ -311,7 +311,7 @@ release is fine.
 | File | Change | Why |
 |---|---|---|
 | `Cargo.toml` (root) | `crates/wp_race` workspace member + `wp_race` workspace dependency | new crate |
-| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint, city sprint with police (round 6b); Hollins sprint (round 9); **step 2:** `pick_{hollins_sprint,loop9_circuit,lantern_checkpoint,grid_highway_sprint}.ron`, generated from `wp_race::catalog` | scenario tests live there per `CLAUDE.md` |
+| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, off-route sprint (no DQ; was corridor DQ until main's route-never-DQ change), city sprint, city sprint with police (round 6b); Hollins sprint (round 9); **step 2:** `pick_{hollins_sprint,loop9_circuit,lantern_checkpoint,grid_highway_sprint}.ron`, generated from `wp_race::catalog` | scenario tests live there per `CLAUDE.md` |
 | `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; **step 2:** four new goldens only, no existing golden changed) | `goldens_match` requires one per scenario |
 | **step 2** `crates/wp_wasm` (authorized glue, C owns it) | `Cargo.toml`: + `wp_race`, `wp_opponent`. New `src/race.rs` (race scenarios, `RaceRun` session glue, picker cards, reports) and `src/race_tests.rs`. `src/lib.rs`: exports `race_list`, `race_start`, `race_info`, `race_standings`, `race_standing_stride`, `race_course`, `race_result_json`. `src/session.rs`: optional `race` field attached for scenarios named `race_<id>` (live and playback, not scripted), AI inputs logged before each tick, judge after each tick (outside the step), `set_input` refused while the race holds the player, reset/debug park tell the judge (`relocate`), new `debug_park_in_front_of`. `src/run.rs`: `PlayerRun::{economy, wanted_level, enter_race, settle_race}` + `RacePayout` | races playable in the browser |
 | **step 2** `apps/testbed-web` (authorized, C owns it) | `index.html`: **races** button + `.wp-race-*` styles. New `src/ui/race.tsx` (picker, HUD, results), `src/race_marker.ts` (next-gate arch + route line). `src/main.ts`: `startRace`, `resetRace`, `raceFrame`, `?race=<id>&autopilot=1`, restart of a race, `__wp.{startRace, raceView, raceMarker}`. `src/wasm/sim.ts` + `layout.ts`: race wrappers, `RACE_STRIDE`/`RS`/`RI`. `package.json`: `e2e` also runs `e2e/race.mjs`; `e2e:race`. `src/render/panels.ts` (R): the async panel-mesh build tolerates a car that despawned before its mesh loaded (found by the race e2e: `unknown entity` from a promoted traffic car) | race menu + HUD; the panels fix is 8 lines, FYI R |
@@ -573,3 +573,29 @@ alone passed.
 - Shoulders count as paved on purpose. A lanes-only first version also moved the Grid highway
   and Loop 9 grids (outer column on the new highway shoulder) by about 2.2 m, and that alone
   turned `loop9_circuit` red (police-heavy and seed-fragile; see opponent-pace.md).
+
+## Playtest row 120 (lead, on `lead/round12`): bigger gates, reset onto the track
+
+Owner: "the race gates are too small; if they go too far off course, let them reset back onto
+the track".
+
+- **Gates** (`catalog::plan_course`): each gate spans the corridor + `GATE_CORRIDOR_MARGIN_M`
+  + `GATE_SLACK_M` (5 m) on each side, and is at least `MIN_GATE_WIDTH_M` (26 m). Only the next
+  gate counts and it must be crossed forwards, so a wider gate never credits a skipped one.
+  The testbed arch (`race_marker.ts`) is 8 m tall (was 5.5) with thicker posts, bar and arrow.
+- **Off-course reset** (`RaceJudge::set_reset_off_course`, on for every `LiveRace`): past
+  `corridor_grace_s` outside the corridor, the judge queues a `CourseReset` (the centreline
+  point where the racer was last inside the corridor, and the course direction there) instead
+  of `Dq(LeftCorridor)`. `StepOut::resets` carries them; the browser session puts the car on
+  the nearest clear lane spot there (`reset::reset_pose`), at rest, damage kept, logged as a
+  `ResetAt` op + ghost window, and relocates the racer in the judge. Replays apply the logged
+  op and now also relocate the racer on `Reset` / `ResetAt` ops (they did not before).
+  Server races (`wp_net`) and simcli races keep the DQ (the option is off by default).
+- `race_picker` applies the resets the same way (centreline point, `place_on_ground`).
+- No contract change.
+
+- Checks: fmt, clippy `-D warnings` (wp_race, wp_wasm), wasm build, `wp_race` + `wp_wasm` tests
+  pass except two that are red on `lead/round12` without this change too (same numbers):
+  `race_picker::grid_highway_sprint` (2 of 4 finish: one racer `Dnf(Fled)`) and
+  `wp_wasm race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
+  ("race not over in 120 s"), both on the grid highway sprint.

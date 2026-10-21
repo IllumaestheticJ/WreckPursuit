@@ -1,4 +1,4 @@
-//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels}/*.json`,
+//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats,mods}/*.json`,
 //! `data/modes/*.toml`) so new cars from other workstreams show up without code changes.
 //! Generates `$OUT_DIR/embedded_data.rs` with a `(kind, id, offset, len)` index into one
 //! deflate-compressed blob (`$OUT_DIR/embedded_data.bin`) of every file's text: the release wasm
@@ -27,6 +27,10 @@ fn main() {
         ("modes", "modes", "toml"),
         // Panel specs (workstream R); meshes stay files under data/panels/meshes/.
         ("panels", "panels", "json"),
+        // Menu stat bars (`simcli car-stats` → data/stats/cars.json).
+        ("stats", "stats", "json"),
+        // Mod catalog, so scenario entities can drive modified cars (`EntitySpec::mods`).
+        ("mods", "mods", "json"),
     ] {
         let dir = data.join(sub);
         println!("cargo:rerun-if-changed={}", dir.display());

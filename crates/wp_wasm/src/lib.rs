@@ -11,9 +11,9 @@
 //!
 //! | group | functions |
 //! |---|---|
-//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()` |
+//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `set_countersteer(entity, %)` / `countersteer(entity)`, `set_clutch_mode(entity, "auto"|"manual")` / `clutch_mode(entity)`, `engine_stalled(entity)`, `assist_presets()`, `assist_preset_named(name, source)`, `assist_preset_of(entity, source)`, `reset_vehicle(entity)` |
-//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()` |
+//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
@@ -27,6 +27,7 @@
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
+//! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -35,6 +36,7 @@
 pub mod net;
 
 pub mod audio;
+pub mod build_stats;
 pub mod career;
 pub mod crash_replay;
 pub mod data;
@@ -42,6 +44,7 @@ pub mod drift_lab;
 pub mod garage;
 pub mod lod;
 pub mod map;
+pub mod mod_visuals;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -245,6 +248,14 @@ pub fn set_damage_mode(mode: &str) -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn car_ids() -> String {
     json(&data::car_ids())
+}
+
+/// Menu stat bars for every embedded car as JSON (`simcli::car_stats::CarStatsTable`:
+/// `{scales, cars: {id: {display_name, zero_to_100_s, top_speed_kmh, cornering_g,
+/// bars: {acceleration, top_speed, cornering}}}}`, bars 0–1). Needs no session.
+#[wasm_bindgen]
+pub fn car_stats_json() -> Result<String, JsValue> {
+    data::car_stats().map(json).map_err(err)
 }
 
 /// `wp_contracts::CONTRACT_VERSION`.
@@ -821,6 +832,17 @@ pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
     get(|s| map::map_dynamic_for(s, EntityId(player)))
 }
 
+/// Helicopters tracking a racer, 8 floats each: `[x, y, z, aim_x, aim_y, aim_z,
+/// cone_half_angle_rad, flags]` (1 = has visual). For the spotlight; the airframe itself comes
+/// through `police_draw()` (flag 1).
+#[wasm_bindgen]
+pub fn police_helicopters() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let world = s.sim().world();
+        police::helicopters(s.sim().police(), &|p, z| world.map().ground_height(p, z))
+    })
+}
+
 /// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
 /// `Captured`, `CapturedTotalLoss`, `TotalLoss`), bounty payout, fines, bail, impound decision
 /// and fee, G's repair quote, cash before and after, and this settlement's ledger lines.
@@ -969,6 +991,20 @@ pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
             .police_mut()
             .set_heat(EntityId(entity), heat);
         Ok(())
+    })
+}
+
+/// Debug / e2e: put a police helicopter on `entity` now, `offset_m` from it at altitude
+/// (`PoliceSystem::debug_launch_helicopter`). Returns the unit id, or an error unless the racer
+/// is pursued. Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_launch_helicopter(entity: u32, offset_m: f32) -> Result<u32, JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .police_mut()
+            .debug_launch_helicopter(EntityId(entity), offset_m)
+            .map(|u| u.0)
+            .ok_or_else(|| "racer is not pursued".to_string())
     })
 }
 
@@ -1209,6 +1245,28 @@ pub fn signal_head_stride() -> u32 {
 #[wasm_bindgen]
 pub fn signal_heads() -> Result<Vec<f32>, JsValue> {
     get(|s| signals::heads(s.sim().world()))
+}
+
+/// Painted road markings of the session's city (empty without one) as a triangle soup,
+/// `[x, y, z]` per vertex in sim space, already lifted onto the banked road surface
+/// (`wp_world::markings::marking_mesh`). `yellow` picks centre lines and median-side edge
+/// lines, otherwise white paint. Fetch once per session.
+#[wasm_bindgen]
+pub fn road_markings(yellow: bool) -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        if !s.has_city() {
+            return Vec::new();
+        }
+        let mesh = wp_world::markings::marking_mesh(s.sim().world().map());
+        let m = if yellow { &mesh.yellow } else { &mesh.white };
+        let mut out = Vec::with_capacity(m.indices.len() * 9);
+        for t in &m.indices {
+            for i in t {
+                out.extend_from_slice(&m.positions[*i as usize]);
+            }
+        }
+        out
+    })
 }
 
 /// Current state per head in `signal_heads()` order, one byte each: 0 off, 1 red, 2 yellow,

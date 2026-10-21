@@ -116,6 +116,22 @@ pub struct ReinforcementRequest {
     pub due: SimTime,
 }
 
+/// Radio bookkeeping of one tracking helicopter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HeloSight {
+    /// Line of sight to the target at the latest think.
+    pub(crate) los: bool,
+    /// Visual as radioed: set on the first sighting, cleared after
+    /// `lost_visual_after_s` without line of sight.
+    pub(crate) visual: bool,
+    /// Ever had visual on this track ("eyes on" vs "reacquired").
+    pub(crate) acquired: bool,
+    /// Last think with line of sight.
+    pub(crate) last_los: SimTime,
+    /// Next position report.
+    pub(crate) next_report: SimTime,
+}
+
 /// Pending helicopter launch.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct HeloRequest {
@@ -138,6 +154,57 @@ impl PoliceSystem {
     // -----------------------------------------------------------------------------------------
     // Event handlers
     // -----------------------------------------------------------------------------------------
+
+    /// Radar ([`crate::config::RadarConfig`]): every racer a ground unit can see (this think
+    /// step's witness) that is over the limit where it drives by more than the margin commits
+    /// a witnessed speeding violation, so the blatant rule and the witness's pursuit apply
+    /// at once, whichever way the racer is facing and however often `wp_world` reports.
+    /// Only racers not wanted yet are clocked (the owner's gap: speeding past a unit never
+    /// made them wanted); a wanted racer a unit sees is recognised within about a second and
+    /// pursued anyway, and pursuit heat covers a pursued one. Held racers are never clocked.
+    pub(crate) fn clock_speeders(&mut self, world: &dyn WorldQuery, tdt: f32) {
+        let radar = self.cfg.heat.heat.radar.clone();
+        let speeding = crate::heat::violation_index(&ViolationKind::Speeding { over_mps: 0.0 });
+        let mut clocked: Vec<(EntityId, f32, [f32; 2])> = Vec::new();
+        let ids: Vec<EntityId> = self.racers.keys().copied().collect();
+        for id in ids {
+            let r = &self.racers[&id];
+            let watched = r.level == WantedLevel::None
+                && !self.held.contains(&id)
+                && self.obs.get(&id).is_some_and(|o| o.witness.is_some());
+            // The higher of the world's limit (lane under the car; at a junction that can be
+            // the slower cross street) and the police road graph's nearest road. Off the lanes
+            // (over the kerb, on parking) the world has none: the road's, within half a street.
+            let road = self
+                .graph
+                .nearest_on_road(xy(r.pos))
+                .filter(|rp| rp.dist_m <= RADAR_ROAD_M)
+                .map(|rp| self.graph.segment(rp.segment).speed_limit_mps);
+            let limit = match (world.speed_limit_at(r.pos), road) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, b) => a.or(b),
+            };
+            let speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+            let over = limit.map(|l| (speed - l, l));
+            let fast = over.is_some_and(|(o, l)| o > radar.margin_mps.max(radar.ratio * l));
+            let held = self.radar_over.entry(id).or_insert(0.0);
+            *held = if watched && fast { *held + tdt } else { 0.0 };
+            // At wp_world's cadence: only when no speeding counted for `repeat_s` (a clock a
+            // second made a race field passing one patrol wanted at once, Hollins), and only
+            // after `hold_s` of speeding in sight (wp_world's hold).
+            let due =
+                r.last_violation[speeding].is_none_or(|t| self.now.since(t) >= radar.repeat_s);
+            if *held >= radar.hold_s && due {
+                if let Some((o, _)) = over {
+                    clocked.push((id, o, xy(r.pos)));
+                }
+            }
+        }
+        for (racer, over_mps, at) in clocked {
+            self.stats.radar_clocks += 1;
+            self.on_violation(world, racer, &ViolationKind::Speeding { over_mps }, at);
+        }
+    }
 
     /// A traffic violation by `racer` at world position `at` (from `SimEvent::TrafficViolation`).
     pub(crate) fn on_violation(
@@ -180,6 +247,26 @@ impl PoliceSystem {
                 racer,
                 level: after,
             });
+        }
+        // Row 80: the unit that saw it acts on it. A violation it witnessed that makes the
+        // racer wanted starts the pursuit at once, day or night (recognition_time_s is only
+        // for a wanted car a unit runs into later).
+        if let Some(unit) = obs.witness {
+            if after > WantedLevel::None && !self.racers[&racer].pursued() {
+                self.stats.witnessed_pursuits += 1;
+                let desc = self.racer_desc(racer);
+                self.radio(RadioCue::new(
+                    RadioTier::Critical,
+                    Some(unit),
+                    format!(
+                        "Unit {}, I just watched {desc} {}, I'm on it.",
+                        unit.0,
+                        offence_text(kind)
+                    ),
+                ));
+                self.start_pursuit(racer, unit);
+                return;
+            }
         }
         if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
@@ -237,6 +324,7 @@ impl PoliceSystem {
         before: WantedLevel,
     ) -> bool {
         let b = self.cfg.heat.heat.blatant.clone();
+        let sight = self.cfg.heat.heat.sight.clone();
         let r = &self.racers[&racer];
         let (rp, rz) = (xy(r.pos), r.pos[2]);
         let mut best: Option<(f32, usize)> = None;
@@ -251,6 +339,7 @@ impl PoliceSystem {
             let d = dist(u.body.pos, rp);
             if d <= b.range_m
                 && best.is_none_or(|x| d < x.0)
+                && crate::pursuit::in_view(u.body.heading, u.body.pos, rp, d, &sight)
                 && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rz)
             {
                 best = Some((d, i));
@@ -559,6 +648,327 @@ impl PoliceSystem {
             }
             i += 1;
         }
+    }
+
+    /// Reset in place (owner row 78): an un-wrecked AI unit that has stood stuck long enough
+    /// (see [`crate::stuck::RESET_ACTIVE_S`]) snaps to the nearest clear spot in its lane
+    /// within [`crate::stuck::RESET_RADIUS_M`] along its route, keeps its damage and drives on
+    /// as a ghost for a second. A racer that can see it gets
+    /// [`crate::stuck::RESET_VIEW_DELAY_S`] more first. No clear spot: it despawns if nobody
+    /// can see it (patrols are refilled out of sight), else tries again next think step.
+    /// Wrecked units stay down (backup replaces them).
+    pub(crate) fn maintain_resets(&mut self, world: &dyn WorldQuery) {
+        use crate::stuck;
+        let now = self.now;
+        let mut i = 0;
+        while i < self.units.len() {
+            let Some(active) = self.reset_wanted(i) else {
+                self.units[i].unstick.reset_due = None;
+                i += 1;
+                continue;
+            };
+            let due = match self.units[i].unstick.reset_due {
+                Some(t) => t,
+                None => {
+                    let in_view = self.in_racer_view(world, self.units[i].body.pos);
+                    let t = if in_view {
+                        now.plus(stuck::RESET_VIEW_DELAY_S)
+                    } else {
+                        now
+                    };
+                    self.units[i].unstick.reset_due = Some(t);
+                    t
+                }
+            };
+            if now < due {
+                i += 1;
+                continue;
+            }
+            self.rebuild_obstacles();
+            let turn = self.turn_round_spot(i);
+            let spot = match turn {
+                Some((pos, heading)) => Some((0.0, pos, heading)),
+                None => self.reset_spot(i),
+            };
+            // Its own spot is the clear one: nothing hems it in, so it is waiting for something
+            // (traffic rules, a call) rather than stuck; only a unit the stuck detector flagged
+            // (wedged on a wall, beached) is re-placed where it stands.
+            let pointless = spot.is_some_and(|(_, p, _)| {
+                dist(p, self.units[i].body.pos) < 1.0 && self.units[i].unstick.first.is_none()
+            });
+            if pointless {
+                self.units[i].unstick.reset_due = Some(now.plus(stuck::RESET_RETRY_S));
+                i += 1;
+                continue;
+            }
+            match spot {
+                Some((s, pos, heading)) => {
+                    let in_view = due > now || self.in_racer_view(world, self.units[i].body.pos);
+                    let u = &mut self.units[i];
+                    let from = u.body.pos;
+                    u.body.pos = pos;
+                    u.body.heading = heading;
+                    u.body.speed = 0.0;
+                    u.track_s = s;
+                    let blocked = std::mem::take(&mut u.unstick.blocked);
+                    let turn_hold = u.unstick.turn_hold;
+                    u.unstick = crate::stuck::UnstickState::default();
+                    u.unstick.blocked = blocked;
+                    u.unstick.turn_hold = turn_hold;
+                    u.avoid = crate::avoid::AvoidState::default();
+                    let (unit, entity) = (u.id, u.entity);
+                    if turn.is_some() {
+                        // Turned round: patrol on somewhere the new way.
+                        let d = match self.units[i].role {
+                            UnitRole::Pool(d) => Some(d),
+                            _ => None,
+                        };
+                        if let Some(next) = self.random_node_in(d) {
+                            self.units[i].assignment = Assignment::Patrol { dest: next };
+                            let track = self.route_track(i, next, None);
+                            let p = &self.cfg.pursuit;
+                            let cmd = DriveCommand {
+                                track,
+                                speed_mps: 0.0,
+                                cornering_g: p.patrol_cornering_g,
+                                siren: false,
+                                lane_offset_m: LANE_OFFSET_M,
+                            };
+                            self.units[i].set_command(cmd);
+                        }
+                    }
+                    self.resets.push(crate::UnitReset {
+                        unit,
+                        entity,
+                        pos,
+                        heading,
+                        ghost_s: stuck::RESET_GHOST_S,
+                    });
+                    self.stats.resets.push(crate::ResetRecord {
+                        unit,
+                        at: now,
+                        from,
+                        to: pos,
+                        active,
+                        in_view,
+                    });
+                }
+                None => {
+                    let u = &self.units[i];
+                    let near = stuck::DEADLOCK_NEAR_M * stuck::DEADLOCK_NEAR_M;
+                    let wedged = u.unstick.stand_s >= stuck::RESET_VANISH_S
+                        && self.racers.values().any(|r| {
+                            let d = sub(xy(r.pos), u.body.pos);
+                            d[0] * d[0] + d[1] * d[1] < near
+                        });
+                    if wedged {
+                        self.stats.deadlock_despawns += 1;
+                    }
+                    if wedged || self.may_vanish(world, i) {
+                        let id = self.units[i].id;
+                        self.end_response(
+                            id,
+                            crate::ResponseOutcome::Stuck(crate::stuck::StuckCause::NoContact),
+                        );
+                        for inc in self.incidents.iter_mut() {
+                            if inc.unit == Some(id) {
+                                inc.unit = None;
+                            }
+                        }
+                        self.despawn(i);
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    /// Whether unit `i` should be reset in place now (`Some(on a pursuit or search)`): an AI
+    /// ground unit, not wrecked or out of service, that has stood within
+    /// [`crate::stuck::STAND_M`] long enough while it wants to drive, and is not waiting at a
+    /// red light, holding a block or standing over a stopped racer it is after.
+    fn reset_wanted(&self, i: usize) -> Option<bool> {
+        use crate::stuck;
+        let u = &self.units[i];
+        if u.kind != UnitKind::Car
+            || u.player.is_some()
+            || u.wrecked
+            || u.assignment == Assignment::OutOfService
+            || u.role == UnitRole::Tool
+            || matches!(u.tactic, Tactic::RollingBlock)
+            || !u.cmd.track.is_drivable()
+            || u.cmd.speed_mps.min(u.planned_speed) <= stuck::WANT_MPS
+            || u.unstick.reversing()
+        {
+            return None;
+        }
+        let red = u
+            .avoid
+            .junction
+            .is_some_and(|j| j.light == Some(crate::avoid::Light::Stop) && j.s - u.track_s < 80.0);
+        // Queued at a junction (giving way, waiting to turn, cross traffic streaming past):
+        // waiting, not stuck, unless the stuck detector says otherwise.
+        let at_junction = u
+            .avoid
+            .junction
+            .is_some_and(|j| j.s - u.track_s < stuck::RESET_JUNCTION_M);
+        let deadlock = self.deadlocked(i);
+        if deadlock && u.unstick.stand_s >= stuck::RESET_DEADLOCK_S {
+            return Some(false);
+        }
+        if red || (at_junction && u.unstick.first.is_none()) {
+            return None;
+        }
+        let target = u.assignment.target();
+        let active = matches!(
+            u.assignment,
+            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+        );
+        // Standing over a stopped racer it is after (inside the capture radius): an arrest,
+        // not a jam. Farther out and held up (Hollins hairpin: 20 m off behind other cars, for
+        // minutes) it is a jam like any other.
+        let arrest_m = self.cfg.heat.capture.unit_radius_m;
+        if let Some(r) = target.and_then(|t| self.racers.get(&t)) {
+            let slow = r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < 4.0;
+            if slow && dist(xy(r.pos), u.body.pos) < arrest_m {
+                return None;
+            }
+        }
+        let need = if active {
+            stuck::RESET_ACTIVE_S
+        } else if u.avoid.blocked_by == Some(crate::avoid::BlockedBy::Traffic) {
+            stuck::RESET_TRAFFIC_S
+        } else {
+            stuck::RESET_IDLE_S
+        };
+        (u.unstick.stand_s >= need).then_some(active)
+    }
+
+    /// Whether unit `i` stands in a two-unit deadlock it should give way in: nose to nose
+    /// with another standing unit (main's ramp terminals) or each waiting for the other. The
+    /// one less busy (not chasing; else the higher id) gives way.
+    fn deadlocked(&self, i: usize) -> bool {
+        use crate::stuck;
+        let u = &self.units[i];
+        match u.avoid.blocked_by {
+            Some(crate::avoid::BlockedBy::Unit(other)) => {
+                self.unit_index(other).is_some_and(|j| {
+                    let o = &self.units[j];
+                    let o_active = matches!(
+                        o.assignment,
+                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                    );
+                    let me_active = matches!(
+                        u.assignment,
+                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                    );
+                    // Nose to nose (or it waits on this one): the other's passing attempt
+                    // flips its own `blocked_by` on and off, so facing decides.
+                    let facing = o.body.heading[0] * u.body.heading[0]
+                        + o.body.heading[1] * u.body.heading[1]
+                        < -0.5;
+                    let waits_on_me =
+                        o.avoid.blocked_by == Some(crate::avoid::BlockedBy::Unit(u.id));
+                    (facing || waits_on_me)
+                        && o.body.speed.abs() < stuck::SLOW_MPS
+                        && (o_active, o.id) > (me_active, u.id)
+                })
+            }
+            Some(crate::avoid::BlockedBy::Vehicle(e)) => self.facing_racer(i, e),
+            _ => false,
+        }
+    }
+
+    /// Whether patrolling unit `i` stands nose to nose with racer `e`, stopped (Hollins
+    /// hairpin on main's physics: a patrol met the racers' queue head-on in their lane and
+    /// neither side could move for 20 s).
+    fn facing_racer(&self, i: usize, e: EntityId) -> bool {
+        let u = &self.units[i];
+        if !matches!(u.assignment, Assignment::Patrol { .. }) || !self.racers.contains_key(&e) {
+            return false;
+        }
+        self.obstacles.iter().any(|o| {
+            o.entity == Some(e)
+                && o.speed() < crate::stuck::SLOW_MPS
+                && o.fwd[0] * u.body.heading[0] + o.fwd[1] * u.body.heading[1] < -0.5
+        })
+    }
+
+    /// A turn-round spot for patrolling unit `i` facing a stopped racer (see
+    /// [`Self::facing_racer`]): the other lane, facing the other way, up to
+    /// [`crate::stuck::RESET_RADIUS_M`] back from where it stands, on the road and clear.
+    fn turn_round_spot(&self, i: usize) -> Option<([f32; 2], [f32; 2])> {
+        use crate::stuck;
+        let u = &self.units[i];
+        let Some(crate::avoid::BlockedBy::Vehicle(e)) = u.avoid.blocked_by else {
+            return None;
+        };
+        if !self.facing_racer(i, e) {
+            return None;
+        }
+        let h = u.body.heading;
+        let back = scale(h, -1.0);
+        let left = [-h[1], h[0]];
+        let others: Vec<crate::avoid::Obstacle> = self
+            .obstacles
+            .iter()
+            .filter(|o| o.unit != Some(u.id) && (o.entity.is_none() || o.entity != u.entity))
+            .copied()
+            .collect();
+        let steps = (stuck::RESET_RADIUS_M / stuck::RESET_STEP_M) as i32;
+        (0..=steps).find_map(|k| {
+            let pos = add(
+                add(u.body.pos, scale(left, 2.0 * LANE_OFFSET_M)),
+                scale(back, k as f32 * stuck::RESET_STEP_M),
+            );
+            let on_road = self
+                .graph
+                .nearest_on_road(pos)
+                .is_some_and(|r| r.dist_m < 2.0 * LANE_OFFSET_M);
+            (on_road && reset_clear(pos, &others)).then_some((pos, back))
+        })
+    }
+
+    /// The nearest clear spot in unit `i`'s lane along its route within
+    /// [`crate::stuck::RESET_RADIUS_M`]: (route position, point, heading). Uses the
+    /// obstacles as last rebuilt.
+    fn reset_spot(&self, i: usize) -> Option<(f32, [f32; 2], [f32; 2])> {
+        use crate::stuck;
+        let u = &self.units[i];
+        // Giving way in a deadlock: only past the other unit (a spot behind still faces it).
+        let ahead_only = self.deadlocked(i);
+        let tr = &u.cmd.track;
+        let len = tr.length();
+        let (id, entity) = (u.id, u.entity);
+        let others: Vec<crate::avoid::Obstacle> = self
+            .obstacles
+            .iter()
+            .filter(|o| o.unit != Some(id) && (o.entity.is_none() || o.entity != entity))
+            .copied()
+            .collect();
+        let steps = (stuck::RESET_RADIUS_M / stuck::RESET_STEP_M) as i32;
+        for k in 0..=2 * steps {
+            // 0, +1, -1, +2, -2, ...: ahead first.
+            let n = (k + 1) / 2;
+            let d = if k % 2 == 1 { n } else { -n } as f32 * stuck::RESET_STEP_M;
+            let s = u.track_s + d;
+            if s < 0.0 || s > len || (ahead_only && d <= 0.0) {
+                continue;
+            }
+            let pos = crate::unit::lane_point(tr, s, u.cmd.lane_offset_m);
+            let a = tr.point_at((s - 2.0).max(0.0));
+            let b = tr.point_at((s + 2.0).min(len));
+            let dir = sub(b, a);
+            // Within reach of where it stands, whatever its route progress says.
+            if crate::graph::len(dir) < 0.1 || dist(pos, u.body.pos) > stuck::RESET_RADIUS_M {
+                continue;
+            }
+            if reset_clear(pos, &others) {
+                return Some((s, pos, normalize(dir)));
+            }
+        }
+        None
     }
 
     /// Start logging unit `i`'s trip to call `incident` about `racer`.
@@ -1012,9 +1422,12 @@ impl PoliceSystem {
             self.warm_up(world);
         }
         self.update_observations(world);
+        self.helo_reports();
+        self.clock_speeders(world, tdt);
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_stuck(world);
+        self.maintain_resets(world);
         self.maintain_pool(world);
         self.dispatch_incidents(world);
         self.update_responses();
@@ -1109,10 +1522,17 @@ impl PoliceSystem {
         if self.units[i].assignment == a {
             return;
         }
+        // A unit's first patrol is not "resuming" anything: no line (13 units "resuming
+        // patrol" at the start held the channel for ≈ 25 s).
+        let first_patrol =
+            matches!(a, Assignment::Patrol { .. } | Assignment::Idle) && !self.units[i].had_job;
         let text = self.radio_text(i, &a);
         let now = self.now;
         {
             let u = &mut self.units[i];
+            if !matches!(a, Assignment::Patrol { .. } | Assignment::Idle) {
+                u.had_job = true;
+            }
             u.assignment = a;
             u.assigned = now;
             u.quiet = false;
@@ -1127,7 +1547,9 @@ impl PoliceSystem {
                 self.stats.units_engaged += 1;
             }
         }
-        self.radio(text);
+        if !first_patrol {
+            self.radio(text);
+        }
     }
 
     /// Spoken description of a racer ("racer #3 northbound on Harbor Boulevard", "racer #3
@@ -2223,6 +2645,98 @@ impl PoliceSystem {
         }
     }
 
+    /// Debug / e2e: put a helicopter on `racer` now, `offset_m` away from its last known position
+    /// at cruise altitude, skipping availability, cooldown, budget and launch time. `None` unless
+    /// the racer is pursued.
+    pub fn debug_launch_helicopter(&mut self, racer: EntityId, offset_m: f32) -> Option<UnitId> {
+        let at = self
+            .racers
+            .get(&racer)
+            .filter(|r| r.pursued())
+            .and_then(|r| r.last_known)?;
+        let pos = [at[0] + offset_m, at[1]];
+        let i = self.spawn_unit(UnitKind::Helicopter, UnitRole::Helicopter, pos, [-1.0, 0.0]);
+        self.units[i].body.alt_m = self.cfg.tools.helicopter.altitude_m;
+        self.stats.helo_launches += 1;
+        let id = self.units[i].id;
+        self.pending.push(PoliceEvent::HeloLaunched {
+            unit: id,
+            target: racer,
+        });
+        self.assign(i, Assignment::HeloTrack { target: racer });
+        Some(id)
+    }
+
+    /// Helicopter radio from this think's line of sight: "eyes on" when it first sees its
+    /// target, a position report every `position_report_s` while it keeps visual, "lost
+    /// visual" after `lost_visual_after_s` without line of sight (under a deck, in a tunnel or
+    /// a parking structure), "reacquired" when it sees the car again. Ground units already
+    /// steer by what it sees (it keeps the racer's last known position fresh); these lines are
+    /// the scanner's and the player's view of it.
+    pub(crate) fn helo_reports(&mut self) {
+        let now = self.now;
+        let every = self.cfg.tools.helicopter.position_report_s;
+        let lost_after = self.cfg.tools.helicopter.lost_visual_after_s;
+        let tracking: Vec<(UnitId, EntityId)> = self
+            .units
+            .iter()
+            .filter_map(|u| match u.assignment {
+                Assignment::HeloTrack { target } if !u.wrecked => Some((u.id, target)),
+                _ => None,
+            })
+            .collect();
+        self.helo_sight
+            .retain(|id, _| tracking.iter().any(|(u, _)| u == id));
+        for (id, target) in tracking {
+            let Some(s) = self.helo_sight.get(&id).copied() else {
+                continue; // not in range yet (update_observations adds it on first sight)
+            };
+            let callsign = format!("Air {}", id.0);
+            let mut s = s;
+            let mut cue = None;
+            if s.los {
+                s.last_los = now;
+                if !s.visual {
+                    s.visual = true;
+                    s.next_report = now.plus(every);
+                    let desc = self.racer_desc(target);
+                    // Both are position calls the ground units act on: always spoken. A
+                    // lost/reacquired pair needs `lost_visual_after_s` of cover in between.
+                    let text = if s.acquired {
+                        format!("{callsign}: reacquired, {desc}.")
+                    } else {
+                        format!("{callsign}: eyes on {desc}. Spotlight on.")
+                    };
+                    cue = Some(RadioCue::new(RadioTier::Critical, Some(id), text));
+                    s.acquired = true;
+                } else if now >= s.next_report {
+                    s.next_report = now.plus(every);
+                    let desc = self.racer_desc(target);
+                    let kmh = self.racers.get(&target).map_or(0.0, |r| {
+                        (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt() * 3.6
+                    });
+                    cue = Some(RadioCue::new(
+                        RadioTier::Tactical,
+                        Some(id),
+                        format!("{callsign}: still on {desc}, {kmh:.0} km/h."),
+                    ));
+                }
+            } else if s.visual && now.since(s.last_los) >= lost_after {
+                s.visual = false;
+                let desc = self.racer_desc(target);
+                cue = Some(RadioCue::new(
+                    RadioTier::Critical,
+                    Some(id),
+                    format!("{callsign}: lost visual on {desc}. Units, check the cover."),
+                ));
+            }
+            self.helo_sight.insert(id, s);
+            if let Some(c) = cue {
+                self.radio(c);
+            }
+        }
+    }
+
     /// Helicopter base: the city's helipad POI, else the middle of the map.
     fn helipad(&self) -> [f32; 2] {
         if let Some(h) = self.graph.pois_of(PoiKind::Helipad).next() {
@@ -2627,5 +3141,39 @@ impl PoliceSystem {
         self.reinforcements.retain(|r| r.racer != racer);
         self.helo_requests.retain(|h| h.racer != racer);
         self.remove_tools_for(Some(racer));
+    }
+}
+
+/// A violation in a radio line ("running a red").
+/// The radar uses the nearest road's limit for a racer this far off it at most, m.
+const RADAR_ROAD_M: f32 = 12.0;
+
+/// Whether a reset spot at `pos` is free: no other car's centre within
+/// [`crate::stuck::RESET_CLEAR_M`] and no moving car about to drive through it.
+fn reset_clear(pos: [f32; 2], others: &[crate::avoid::Obstacle]) -> bool {
+    use crate::stuck::{RESET_CLEAR_M, RESET_PATH_S};
+    others.iter().all(|o| {
+        let rel = sub(pos, o.pos);
+        if crate::graph::dot(rel, rel) < RESET_CLEAR_M * RESET_CLEAR_M {
+            return false;
+        }
+        let v = o.speed();
+        if v < 1.0 {
+            return true;
+        }
+        let dir = [o.vel[0] / v, o.vel[1] / v];
+        let along = crate::graph::dot(rel, dir);
+        let lat = crate::graph::cross(dir, rel).abs();
+        !(along > 0.0 && along < v * RESET_PATH_S + RESET_CLEAR_M && lat < 2.5)
+    })
+}
+
+fn offence_text(kind: &ViolationKind) -> &'static str {
+    match kind {
+        ViolationKind::Speeding { .. } => "speeding past me",
+        ViolationKind::RedLight => "run a red",
+        ViolationKind::WrongWay => "going the wrong way",
+        ViolationKind::Collision => "hit a car",
+        ViolationKind::Reckless => "driving like a maniac",
     }
 }

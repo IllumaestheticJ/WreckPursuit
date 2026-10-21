@@ -1,6 +1,6 @@
-// wp_race: a short city sprint on the procedural 7x7 city's northbound arterial
-// (three 3.7 m lanes, x = 58.35 / 62.05 / 65.75 since the 3 m median, straight from y = -457
-// to -123). The race
+// wp_race: a short city sprint on the procedural 7x7 city's northbound highway carriageway
+// (three 3.7 m lanes, x = 58.35 / 62.05 / 65.75, straight from y = -457 to -123, past the
+// off-ramp gore at y = -390 and up onto the viaduct). The race
 // route comes from wp_world::World::plan_route((60.55, -437) → (60.55, -140)) and is judged by
 // crates/wp_race/tests/simcli_races.rs; that test also checks the route's closure (closed lanes,
 // cones) through World::set_active_routes. Staggered grid behind the start line (y = -437):

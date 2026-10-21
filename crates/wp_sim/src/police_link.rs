@@ -40,6 +40,14 @@ impl Sim {
         self.police_car = Some(car);
     }
 
+    /// Measured limits of the police car model (`wp_vehicle::metrics`, see
+    /// `wp_police::pro::CarLimits::from_metrics`) for the units' pro driver. Without them units
+    /// plan with `pursuit.toml`'s `[pro] default_limits` (the Sentinel Cruiser); set them when
+    /// [`Sim::set_police_car`] gets another model.
+    pub fn set_police_car_limits(&mut self, limits: wp_police::pro::CarLimits) {
+        self.police_car_limits = Some(limits);
+    }
+
     /// The police system (heat, units, incidents) for UI and tests.
     pub fn police(&self) -> &PoliceSystem {
         &self.police
@@ -230,6 +238,22 @@ impl Sim {
                     max_steer_rad: car.def.wheels[0].max_steer_rad,
                 };
                 self.police.bind_unit_entity(unit, id, geom);
+                if let Some(limits) = self.police_car_limits {
+                    self.police.set_unit_limits(unit, limits);
+                }
+            }
+        }
+
+        // Units the police system reset in place (owner row 78): to the new spot, upright,
+        // damage kept, a ghost for a moment so it cannot land stuck in the cars round it.
+        for r in self.police.take_unit_resets() {
+            let Some(id) = r.entity else {
+                continue;
+            };
+            let yaw = wp_math::atan2(-r.heading[0], r.heading[1]);
+            if self.place_on_ground(id, r.pos, yaw, 0.0, None).is_ok() {
+                let ticks = (r.ghost_s / wp_contracts::PHYSICS_DT).round() as u32;
+                let _ = self.set_ghost(id, ticks);
             }
         }
 
@@ -251,6 +275,14 @@ impl Sim {
                     heading: [fx / n, fy / n],
                     health: slot.damage.health(),
                     effects: slot.damage.handling_effects(),
+                },
+            );
+            // What the driver feels: yaw rate (slides) and the grip the road leaves (weather).
+            self.police.sync_unit_feel(
+                unit,
+                wp_police::pro::UnitFeel {
+                    yaw_rate: s.ang_vel[2],
+                    road_grip: Some(slot.vehicle.conditions_grip()),
                 },
             );
         }

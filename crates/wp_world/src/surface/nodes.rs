@@ -131,6 +131,22 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
         let nd = &net.nodes[node];
         let c = nd.pos;
         let highway = ends.iter().all(|e| e.highway);
+        // Freeway merge / diverge (radius-0 junction, main's divided highways): every road's
+        // paving runs to the node, so only the ramp's taper connectors are paved here.
+        if nd
+            .intersection
+            .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0)
+        {
+            out.push(NodePatch {
+                node: node as u32,
+                kind: NodePatchKind::Junction,
+                highway,
+                overlapping_ends: true,
+                mesh: freeway_tapers(map, node as u32),
+                rims: Vec::new(),
+            });
+            continue;
+        }
         let patch = match (nd.intersection, ends.len()) {
             (None, 1) => Some(dead_end(map, node as u32, c, &ends[0])),
             // A bend is a two-road junction (same kerb curves, same turning-path check); the
@@ -185,6 +201,34 @@ pub fn node_patches(map: &CityMap) -> Vec<NodePatch> {
 }
 
 type Patch = (NodePatchKind, TriMesh, Vec<Vec<V3>>);
+
+/// The taper connector ribbons through a freeway merge / diverge `node`: connectors between
+/// roads with different lane counts (ramp lane ↔ carriageway; the carriageway's own lanes run
+/// on its paving, which reaches the node).
+fn freeway_tapers(map: &CityMap, node: u32) -> TriMesh {
+    let net = &map.net;
+    let mut lanes_per_road: BTreeMap<u32, u32> = BTreeMap::new();
+    for l in &net.lanes {
+        *lanes_per_road.entry(l.road).or_insert(0) += 1;
+    }
+    let lanes_of = |l: u32| lanes_per_road.get(&net.lanes[l as usize].road).copied();
+    let mut m = TriMesh::default();
+    for s in map.segs.iter() {
+        if let SegKind::Connector {
+            node: n, from, to, ..
+        } = s.kind
+        {
+            if n != node || lanes_of(from) == lanes_of(to) {
+                continue;
+            }
+            let half = s.width * 0.5;
+            let l = geom::offset_polyline(&s.pts, -half);
+            let r = geom::offset_polyline(&s.pts, half);
+            m.strip(&l, &r);
+        }
+    }
+    m
+}
 
 /// Counter-clockwise angle of `p` around `c`, in [0, 2π).
 fn angle_around(c: V2, p: V2) -> f32 {
@@ -435,7 +479,12 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
         if s < -0.05 && u < -0.05 && cos_beta > -0.966 && gap < std::f32::consts::PI {
             let k = geom::add(p, geom::scale(a.out, s));
             if a.highway || b.highway {
-                // No kerb on a highway edge: pave up to where the edges meet.
+                // No kerb on a highway edge: pave up to where the edges meet. A meeting point
+                // right at a corner (a ramp end beside a street end at main's ramp terminals)
+                // left a sliver: join the corners straight instead.
+                if geom::dist(k, p).min(geom::dist(k, q)) < 1.0 {
+                    return Vec::new();
+                }
                 return vec![k];
             }
             // Interior angle β at k; the fillet's deepest point lies t·(1 − sin β/2)/cos β/2

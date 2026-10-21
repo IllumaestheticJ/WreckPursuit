@@ -19,7 +19,8 @@ type Params = Record<string, number>;
 
 // ----- shared buffers ----------------------------------------------------------------------
 
-const buffers = new WeakMap<BaseAudioContext, { white: AudioBuffer; crackle: AudioBuffer }>();
+type NoiseKind = "white" | "crackle" | "wander";
+const buffers = new WeakMap<BaseAudioContext, Record<NoiseKind, AudioBuffer>>();
 
 /** Deterministic LCG so the placeholder noise is the same on every load. */
 function lcg(seed: number): () => number {
@@ -44,12 +45,31 @@ function noiseBuffers(ctx: BaseAudioContext) {
     // Sparse clicks with short decays: gravel / crackle texture.
     c[i] = r() < 0.004 ? (r() * 2 - 1) : c[i - 1] ? c[i - 1] * 0.82 : 0;
   }
-  b = { white, crackle };
+  // Smooth random wander in -1..1, a new target every ~1/16 s with cosine interpolation:
+  // modulation source for jittery pitch / amplitude (tire stick-slip) instead of a sine LFO.
+  // Uses its own LCG so the white / crackle buffers stay as they were.
+  const wander = ctx.createBuffer(1, len, ctx.sampleRate);
+  const wd = wander.getChannelData(0);
+  const rw = lcg(4321);
+  const step = Math.floor(ctx.sampleRate / 16);
+  let a = rw() * 2 - 1;
+  let next = rw() * 2 - 1;
+  for (let i = 0; i < len; i++) {
+    const k = i % step;
+    if (k === 0 && i > 0) {
+      a = next;
+      // Loop seam: the last segment heads back to the first sample's value.
+      next = i + step >= len ? wd[0] : rw() * 2 - 1;
+    }
+    const u = (1 - Math.cos((Math.PI * k) / step)) / 2;
+    wd[i] = a + (next - a) * u;
+  }
+  b = { white, crackle, wander };
   buffers.set(ctx, b);
   return b;
 }
 
-function noise(ctx: BaseAudioContext, kind: "white" | "crackle" = "white"): AudioBufferSourceNode {
+function noise(ctx: BaseAudioContext, kind: NoiseKind = "white"): AudioBufferSourceNode {
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffers(ctx)[kind];
   src.loop = true;
@@ -321,28 +341,104 @@ function whine(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   return v;
 }
 
-/** Tire squeal: wobbling triangle + band noise. */
+/** Tire squeal. A sliding tread is a stick-slip oscillator: the rubber grabs and lets go at a
+ * rate set by the tread-block / carcass resonances, so the sound is a narrow-band, slightly
+ * inharmonic howl whose pitch jitters randomly (not a clean vibrato) and whose loudness
+ * flutters. Built as noise through a bank of resonant band-passes (the howl) plus a jittered
+ * sawtooth core, a broadband hiss that grows with intensity (`load`), and a lower, rougher,
+ * chattering layer for a braking lock-up (`timbre` → 1). Driving wheelspin is the separate
+ * `spin` synth below.
+ *
+ * Params: `freq_hz` howl fundamental (default 900), `jitter` pitch jitter depth (fraction,
+ * default 0.025), `chatter_hz` stick-slip flutter rate (default 22). */
 function squeal(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
-  const out = gain(ctx, 1);
-  const base = s.freq_hz ?? 1000;
-  const o = osc(ctx, "triangle", base);
-  const vib = osc(ctx, "sine", s.wobble_hz ?? 7);
-  const vibDepth = gain(ctx, base * 0.02);
-  vib.connect(vibDepth).connect(o.frequency);
-  const og = gain(ctx, 0.5);
-  o.connect(og).connect(out);
-  const nz = noise(ctx);
-  const bp = filter(ctx, "bandpass", base * 1.5, 3);
-  const ng = gain(ctx, 0.6);
-  nz.connect(bp).connect(ng).connect(out);
+  const out = gain(ctx, 0.75); // headroom: the resonators peak well above their RMS
+  const base = s.freq_hz ?? 900;
+  const jitter = s.jitter ?? 0.025;
+  const chatterHz = s.chatter_hz ?? 22;
+  // Final shaping: no rumble below the howl, tame the fizz above it.
+  const hp = filter(ctx, "highpass", 280, 0.7);
+  const lp = filter(ctx, "lowpass", 7000, 0.7);
+  // Stick-slip amplitude flutter.
+  const flutter = gain(ctx, 1);
+  hp.connect(lp).connect(flutter).connect(out);
+  const bus = gain(ctx, 1);
+  bus.connect(hp);
+
+  // Howl: white noise through narrow resonators at inharmonic ratios of the tread mode.
+  const exc = noise(ctx);
+  const modes: [number, number, number][] = [
+    [1, 34, 1],
+    [1.48, 26, 0.55],
+    [2.07, 20, 0.32],
+    [2.71, 16, 0.18],
+  ];
+  const howl = gain(ctx, 0);
+  howl.connect(bus);
+  const bands = modes.map(([ratio, q, a]) => {
+    const bp = filter(ctx, "bandpass", base * ratio, q);
+    // A Q≈30 band keeps ~1/1000 of white-noise power; make it up so the howl dominates.
+    exc.connect(bp).connect(gain(ctx, a * 9)).connect(howl);
+    return { bp, ratio };
+  });
+
+  // Tonal core: band-limited sawtooth with random pitch jitter (the "eeee").
+  const core = osc(ctx, "sawtooth", base);
+  const coreLp = filter(ctx, "lowpass", base * 3, 0.8);
+  const coreG = gain(ctx, 0);
+  core.connect(coreLp).connect(coreG).connect(bus);
+  const wob = noise(ctx, "wander");
+  const wobDepth = gain(ctx, base * jitter);
+  wob.connect(wobDepth);
+  wobDepth.connect(core.frequency);
+  for (const b of bands) wobDepth.connect(gain(ctx, b.ratio)).connect(b.bp.frequency);
+
+  // Flutter: faster wander on the output gain; deeper on a lock-up.
+  const flut = noise(ctx, "wander");
+  flut.playbackRate.value = chatterHz / 16;
+  const flutDepth = gain(ctx, 0.15);
+  flut.connect(flutDepth).connect(flutter.gain);
+
+  // Broadband slide hiss (rubber tearing) — rises with intensity.
+  const hissSrc = noise(ctx);
+  const hissBp = filter(ctx, "bandpass", base * 2.5, 0.9);
+  const hissG = gain(ctx, 0);
+  hissSrc.connect(hissBp).connect(hissG).connect(bus);
+
+  // Lock-up: lower, rough, chattering band plus a gritty low roar.
+  const lockSrc = noise(ctx);
+  const lockBp = filter(ctx, "bandpass", base * 0.6, 4);
+  const lockG = gain(ctx, 0);
+  lockSrc.connect(lockBp).connect(lockG).connect(bus);
+  const roarSrc = noise(ctx, "crackle");
+  const roarLp = filter(ctx, "lowpass", 900, 0.7);
+  const roarG = gain(ctx, 0);
+  roarSrc.connect(roarLp).connect(gain(ctx, 0.5)).connect(roarG).connect(bus);
+
+  const sources: AudioScheduledSourceNode[] = [exc, core, wob, flut, hissSrc, lockSrc, roarSrc];
   const v: SynthVoice = {
     output: out,
     update(p2, t) {
-      smooth(o.frequency, clampF(base * p2.pitch), t);
-      smooth(bp.frequency, clampF(base * 1.5 * p2.pitch), t);
-      smooth(og.gain, 0.2 + 0.5 * p2.load, t);
+      const k = Math.min(1, Math.max(0, p2.load));
+      const lock = Math.min(1, Math.max(0, p2.timbre ?? 0));
+      const f = clampF(base * p2.pitch, 200, 4000);
+      for (const b of bands) smooth(b.bp.frequency, clampF(f * b.ratio), t, 0.03);
+      smooth(core.frequency, f, t, 0.03);
+      smooth(coreLp.frequency, clampF(f * (2.5 + 2 * k)), t);
+      smooth(wobDepth.gain, f * jitter * (1 + 1.5 * lock + k), t);
+      smooth(hissBp.frequency, clampF(f * 2.5), t);
+      smooth(lockBp.frequency, clampF(f * 0.6), t);
+      smooth(flut.playbackRate, (chatterHz * (1 + 0.8 * lock)) / 16, t, 0.05);
+      // Onset is a clean howl; a hard slide turns harsher and broader; a lock-up trades howl
+      // for grit.
+      smooth(howl.gain, (0.55 + 0.25 * k) * (1 - 0.55 * lock), t);
+      smooth(coreG.gain, (0.16 + 0.1 * k) * (1 - 0.6 * lock), t);
+      smooth(hissG.gain, 0.05 + 0.15 * k * k, t);
+      smooth(lockG.gain, 3.2 * lock * (0.5 + 0.5 * k), t);
+      smooth(roarG.gain, 1.6 * lock * k, t);
+      smooth(flutDepth.gain, 0.12 + 0.12 * k + 0.3 * lock, t);
     },
-    stop: (t) => stopAll([o, vib, nz], t),
+    stop: (t) => stopAll(sources, t),
   };
   v.update(p, ctx.currentTime);
   return v;
@@ -425,6 +521,9 @@ export function sirenFreqAtPhase(s: Params, phase: number): number {
   return lo + (hi - lo) * x;
 }
 
+/** Earliest start of a new siren pitch curve, ahead of the audio clock, s. */
+const SIREN_LEAD_S = 0.05;
+
 /** Siren (v1 packs): a continuous tone whose pitch follows the cadence on the audio clock.
  * Only the PITCH is modulated; the amplitude never changes for the life of the voice.
  *
@@ -455,7 +554,11 @@ function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   let scheduledUntil = t0;
   let doppler = p.doppler || 1;
   const schedule = (now: number) => {
-    if (scheduledUntil < now) scheduledUntil = now;
+    // After a slow frame the schedule lags the audio clock. Restart it a little ahead of
+    // `currentTime`, never at it: a curve starting where the audio thread has already rendered
+    // trips a CHECK in Chromium's AudioParam timeline and kills the tab (headless e2e, ~1 s
+    // SwiftShader frames; reproduced in isolation, see docs/integration/testbed.md).
+    if (scheduledUntil < now + SIREN_LEAD_S) scheduledUntil = now + SIREN_LEAD_S;
     while (scheduledUntil < now + 0.3) {
       // Back-to-back curves must not overlap: float rounding in the running end time can put
       // a start a hair before the previous curve's end, which throws NotSupportedError and

@@ -119,9 +119,13 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   supercharger whine follows rpm; overrun pops are Poisson via the seeded rng. Inputs are
   NaN-safe and decaying state is flushed to 0 below 1e-6 (no denormals). Engine sound stops
   when `Component::Engine` health is 0; radiator damage adds a hiss.
-- **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)`; squeal above
-  `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of the others),
-  quieter on wet asphalt; loose surfaces scrub instead: gravel/dirt on `tire/scrub_loose`
+- **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)` with each wheel's
+  own `TireDef` peaks (`TirePeak`, resolved at `register_car`; an all-terrain tire squeals
+  later than a semi-slick; the `TireMix` peaks are only the fallback for an unknown tire);
+  squeal above `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of
+  the others), quieter on wet asphalt. `VoiceParams::timbre` carries the longitudinal share of
+  the squealing slip (0 = cornering slide, 1 = braking lock-up: up to 18 % lower and rougher,
+  smoothed over 80 ms); driving wheelspin is the separate `spin` cue. Loose surfaces scrub instead: gravel/dirt on `tire/scrub_loose`
   (stone crackle, plus a little rattle while rolling straight), grass on its own soft
   `tire/scrub_grass` loop (slot `SCRUB_GRASS`) only while a tire actually slides or spins.
   Scrub levels follow the target with a 30 ms attack / 150 ms release (`SCRUB_ATTACK_S` /
@@ -318,7 +322,8 @@ same firing frequency interfere; sample layers stay separate voices), `noise` (`
 second low-pass in series, 24 dB/oct; `peak_db` = gain of the `bandpass_hz` peak, default 9;
 `ripple_depth` = AM depth, default 0.5 square, when set softened by a 30 Hz low-pass), `spin`
 (`freq_hz`, `chirp_hz`, `hiss` — the smoke hiss scales with `load`, so a light chirp is the
-howl alone; `pitch` = slip speed, `load` = intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
+howl alone; `pitch` = slip speed, `load` = intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `jitter`, `chatter_hz`; resonator bank + jittered core + hiss +
+lock-up layer blended by `load` and `timbre`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director; `driver: 1` = the siren
 v2 horn-speaker synth in `siren.ts`, `kind` 0 loop / 1 whoop / 2 air horn, `bright`), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,

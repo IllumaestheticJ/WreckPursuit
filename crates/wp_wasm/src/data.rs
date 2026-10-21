@@ -68,21 +68,55 @@ pub fn load_car(car_id: &str) -> Result<LoadedCar, String> {
         .find(|(id, _)| *id == car_id)
         .ok_or_else(|| format!("unknown car {car_id:?} (known: {:?})", car_ids()))?;
     let def = wp_contracts::parse_vehicle_def(car_id, text).map_err(|e| e.to_string())?;
+    let lattices = files("lattices")
+        .filter(|(id, _)| *id == def.lattice_id)
+        .map(|(id, text)| wp_contracts::parse_lattice_def(id, text).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    resolve_with(def, &lattices)
+}
+
+/// Resolve a (possibly modified) definition and lattice against every embedded tire and
+/// material, e.g. a car with mods applied (mods may switch to tires the stock car doesn't use).
+pub fn resolve_with(
+    def: wp_contracts::VehicleDef,
+    lattices: &[wp_contracts::LatticeDef],
+) -> Result<LoadedCar, String> {
     let mut tires: BTreeMap<String, TireDef> = BTreeMap::new();
     for (id, text) in files("tires") {
         let t = wp_contracts::parse_tire_def(id, text).map_err(|e| e.to_string())?;
         tires.insert(t.id.clone(), t);
     }
-    let lattices = files("lattices")
-        .filter(|(id, _)| *id == def.lattice_id)
-        .map(|(id, text)| wp_contracts::parse_lattice_def(id, text).map_err(|e| e.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
     let mut materials: BTreeMap<String, MaterialDef> = BTreeMap::new();
     for (id, text) in files("materials") {
         let m = wp_contracts::parse_material_def(id, text).map_err(|e| e.to_string())?;
         materials.insert(m.id.clone(), m);
     }
-    wp_contracts::resolve_car(def, &tires, &lattices, &materials).map_err(|e| e.to_string())
+    wp_contracts::resolve_car(def, &tires, lattices, &materials).map_err(|e| e.to_string())
+}
+
+/// Menu stat bars for every embedded car: the embedded `data/stats/cars.json`, with any car
+/// missing from it measured here on the `wp_vehicle` rig (slow, once; `simcli car-stats --check`
+/// keeps the table complete).
+pub fn car_stats() -> Result<&'static simcli::car_stats::CarStatsTable, String> {
+    static TABLE: std::sync::OnceLock<Result<simcli::car_stats::CarStatsTable, String>> =
+        std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let mut table = match files("stats").find(|(id, _)| *id == "cars") {
+                Some((_, text)) => simcli::car_stats::parse(text)?,
+                None => simcli::car_stats::table(BTreeMap::new()),
+            };
+            for id in car_ids() {
+                if let std::collections::btree_map::Entry::Vacant(slot) = table.cars.entry(id) {
+                    let row = simcli::car_stats::measure_car(mem_data(), slot.key())
+                        .map_err(|e| e.to_string())?;
+                    slot.insert(row);
+                }
+            }
+            Ok(table)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 /// Parse the embedded mode table for `mode` (`data/modes/arcade.toml` or `sim.toml`).
@@ -118,6 +152,18 @@ mod tests {
         assert!(ids.contains(&"debug_sedan".to_string()));
         for id in ids {
             load_car(&id).unwrap_or_else(|e| panic!("{id}: {e}"));
+        }
+    }
+
+    #[test]
+    fn car_stats_cover_every_embedded_car() {
+        let table = car_stats().unwrap();
+        assert_eq!(table.cars.keys().cloned().collect::<Vec<_>>(), car_ids());
+        for (id, s) in &table.cars {
+            let b = s.bars;
+            for v in [b.acceleration, b.top_speed, b.cornering] {
+                assert!((0.0..=1.0).contains(&v), "{id}: {b:?}");
+            }
         }
     }
 

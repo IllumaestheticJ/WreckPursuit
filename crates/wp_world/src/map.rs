@@ -71,6 +71,10 @@ pub struct Segment {
     /// Connectors leaving the same lane (diverging), excluding this one, each with the arc
     /// length along **that sibling** after which a car on it no longer overlaps this path.
     pub siblings: Vec<(SegId, f32)>,
+    /// Cross slope per point of `pts` (dz per metre right of the direction of travel) from the
+    /// road surface ([`crate::surface::lane_bank`]); empty for connectors and lanes that do not
+    /// follow their surface point for point.
+    pub bank: Vec<f32>,
 }
 
 impl Segment {
@@ -82,6 +86,18 @@ impl Segment {
     /// Project a point onto this segment.
     pub fn project(&self, p: V2) -> geom::Projection {
         geom::project(&self.pts, &self.cum, p)
+    }
+
+    /// Cross slope at arc length `s` ([`Segment::bank`]; 0 without one).
+    pub fn bank_at(&self, s: f32) -> f32 {
+        if self.bank.len() != self.pts.len() || self.pts.len() < 2 {
+            return 0.0;
+        }
+        let n = self.pts.len();
+        let i = self.cum.partition_point(|c| *c <= s).clamp(1, n - 1);
+        let span = (self.cum[i] - self.cum[i - 1]).max(1e-6);
+        let f = ((s - self.cum[i - 1]) / span).clamp(0.0, 1.0);
+        self.bank[i - 1] + (self.bank[i] - self.bank[i - 1]) * f
     }
 
     /// Lane id if this is a lane.
@@ -206,6 +222,9 @@ pub struct CityMap {
     /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
     /// for tunnel scenarios: the geometry stays, only sightlines ignore it).
     pub covered_los: bool,
+    /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_slabs`]).
+    decks: Arc<Vec<crate::surface::DeckSlab>>,
+    deck_grid: Arc<Grid>,
 }
 
 impl CityMap {
@@ -229,13 +248,44 @@ impl CityMap {
                 curve_speed: l.speed_limit_mps,
                 conflicts: Vec::new(),
                 siblings: Vec::new(),
+                bank: crate::surface::lane_bank(&net, l),
             });
+        }
+        // Freeway merges / diverges (radius-0 junctions): their long taper connectors follow
+        // the paving under them (graded, banked) instead of a straight line between the lane
+        // ends. Candidate surfaces: every road with a lane at the node.
+        let mut freeway_roads: Vec<Vec<usize>> = vec![Vec::new(); net.nodes.len()];
+        for l in &net.lanes {
+            for n in [l.from_node, l.to_node] {
+                let freeway = net.nodes[n as usize]
+                    .intersection
+                    .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0);
+                let list = &mut freeway_roads[n as usize];
+                if freeway && !list.contains(&(l.road as usize)) {
+                    list.push(l.road as usize);
+                }
+            }
         }
         // Connectors.
         for (i, l) in net.lanes.iter().enumerate() {
             for c in &l.connections {
                 let to = &net.lanes[c.to as usize];
-                let pts = connector_curve(&l.polyline, &to.polyline, c.turn);
+                let mut pts = connector_curve(&l.polyline, &to.polyline, c.turn);
+                let roads = &freeway_roads[l.to_node as usize];
+                if !roads.is_empty() {
+                    let n = pts.len();
+                    for p in pts.iter_mut().take(n - 1).skip(1) {
+                        let best = roads
+                            .iter()
+                            .filter_map(|r| net.surfaces.get(*r))
+                            .map(|s| crate::surface::height_under(s, geom::xy(*p)))
+                            .filter(|(_, z)| (z - p[2]).abs() < 3.0)
+                            .min_by(|a, b| a.0.total_cmp(&b.0));
+                        if let Some((_, z)) = best {
+                            p[2] = z;
+                        }
+                    }
+                }
                 let cum = geom::cumulative(&pts);
                 let length = *cum.last().unwrap();
                 let limit = l.speed_limit_mps.min(to.speed_limit_mps);
@@ -259,6 +309,7 @@ impl CityMap {
                     prev: vec![i as SegId],
                     conflicts: Vec::new(),
                     siblings: Vec::new(),
+                    bank: Vec::new(),
                 });
                 segs[i].next.push(id);
                 segs[c.to as usize].prev.push(id);
@@ -363,6 +414,17 @@ impl CityMap {
             let (blo, bhi) = bbox2(&b.footprint);
             building_grid.insert_box(blo, bhi, i as u32);
         }
+        let decks = crate::surface::deck_slabs(&net);
+        let mut deck_grid = Grid::new(lo, hi);
+        for (i, d) in decks.iter().enumerate() {
+            let pad = d.left_m.max(d.right_m);
+            let (a, b) = (geom::xy(d.a), geom::xy(d.b));
+            deck_grid.insert_box(
+                [a[0].min(b[0]) - pad, a[1].min(b[1]) - pad],
+                [a[0].max(b[0]) + pad, a[1].max(b[1]) + pad],
+                i as u32,
+            );
+        }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
             net: Arc::new(net),
@@ -377,6 +439,8 @@ impl CityMap {
             building_grid: Arc::new(building_grid),
             covers: crate::covered::CoverIndex::default(),
             covered_los: true,
+            decks: Arc::new(decks),
+            deck_grid: Arc::new(deck_grid),
         };
         map.covers = crate::covered::CoverIndex::new(&map.net.covered);
         // Drivable lane-km per zone (sampled every 10 m).
@@ -513,7 +577,11 @@ impl CityMap {
             if pr.dist > s.width * 0.5 + pad + 0.5 {
                 continue;
             }
-            let z = s.point_at(pr.s.clamp(0.0, s.length)).0[2];
+            let sc = pr.s.clamp(0.0, s.length);
+            // The lane's height plus its road's cross slope out to `p` (a banked road's edge
+            // sits bank × offset off the lane centre: up to ~5 cm on Bluff Road's curves, which
+            // the drawn and solid surface follow).
+            let z = s.point_at(sc).0[2] + s.bank_at(sc) * pr.lateral;
             if best.is_none_or(|b| score(z) < score(b)) {
                 best = Some(z);
             }
@@ -761,8 +829,9 @@ impl CityMap {
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
     /// every 8 m; ends excluded). Covered spans (tunnels) block sightlines in and out of them
-    /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off. Roads, parked cars and
-    /// traffic do not occlude.
+    /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off, and bridge decks with room
+    /// for a car under them ([`crate::surface::deck_slabs`]) block too: from the air, the road
+    /// under an overpass is hidden. Other road surfaces, parked cars and traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
         if self.covered_los && self.covers.blocks(a, b) {
             return false;
@@ -778,10 +847,24 @@ impl CityMap {
                 }
             }
         }
+        let mut cells = Vec::new();
+        if !self.decks.is_empty() {
+            self.deck_grid
+                .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
+            let mut cands: Vec<u32> = cells
+                .iter()
+                .flat_map(|c| self.deck_grid.cells[*c].iter().copied())
+                .collect();
+            cands.sort_unstable();
+            cands.dedup();
+            if cands.iter().any(|&i| self.decks[i as usize].blocks(a, b)) {
+                return false;
+            }
+        }
         if self.net.buildings.is_empty() {
             return true;
         }
-        let mut cells = Vec::new();
+        cells.clear();
         self.building_grid
             .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
         let mut cands: Vec<u32> = cells
@@ -794,6 +877,11 @@ impl CityMap {
             let bld = &self.net.buildings[i as usize];
             bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.roof_z())
         })
+    }
+
+    /// Bridge-deck pieces that occlude line of sight (empty without terrain).
+    pub fn decks(&self) -> &[crate::surface::DeckSlab] {
+        &self.decks
     }
 }
 
@@ -834,9 +922,18 @@ impl WorldQuery for CityMap {
             let half = s.width * 0.5;
             // The lane, or the median half / shoulder beside it.
             if pr.dist <= half + s.paved_side[usize::from(pr.lateral > 0.0)] {
+                let highway = |l: LaneId| self.net.lanes[l as usize].kind == LaneKind::Highway;
                 return match s.kind {
-                    SegKind::Lane { lane }
-                        if self.net.lanes[lane as usize].kind == LaneKind::Highway =>
+                    SegKind::Lane { lane } if highway(lane) => SurfaceType::Concrete,
+                    // Through a freeway merge / diverge (radius-0 junction).
+                    SegKind::Connector { from, to, node, .. }
+                        if highway(from)
+                            && highway(to)
+                            && self.net.nodes[node as usize]
+                                .intersection
+                                .is_some_and(|ix| {
+                                    self.net.intersections[ix as usize].radius_m <= 0.0
+                                }) =>
                     {
                         SurfaceType::Concrete
                     }
@@ -918,11 +1015,13 @@ mod tests {
     }
 
     /// Brute force over every building (reference for the grid walk).
+    /// Every building and every deck slab (main's grid viaduct is decks since lead/main-sync).
     fn los_brute(map: &CityMap, a: V3, b: V3) -> bool {
         !map.net
             .buildings
             .iter()
             .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.roof_z()))
+            && !map.decks().iter().any(|d| d.blocks(a, b))
     }
 
     #[test]

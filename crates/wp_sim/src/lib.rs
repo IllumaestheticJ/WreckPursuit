@@ -198,6 +198,7 @@ pub struct Sim {
     parked: parked::ParkedDamage,
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
+    police_car_limits: Option<wp_police::pro::CarLimits>,
     traffic_car: Option<LoadedCar>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
@@ -238,6 +239,7 @@ impl Sim {
             parked: parked::ParkedDamage::default(),
             contact_filter: None,
             police_car: None,
+            police_car_limits: None,
             traffic_car: None,
             record_contacts: false,
             applied_contacts: Vec::new(),
@@ -829,6 +831,20 @@ impl Sim {
     /// Set the input a vehicle uses from the next tick on.
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<(), SimError> {
         self.slot_mut(id)?.input = input;
+        Ok(())
+    }
+
+    /// Set the road conditions under one vehicle's wheels by hand (wet road tests and tools
+    /// until world weather drives every car; `wp_vehicle::Vehicle::set_surface_conditions`).
+    /// Not recorded in replays.
+    pub fn set_surface_conditions(
+        &mut self,
+        id: EntityId,
+        conditions: [wp_vehicle::surface::SurfaceConditions; 4],
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?
+            .vehicle
+            .set_surface_conditions(conditions);
         Ok(())
     }
 
@@ -1720,22 +1736,31 @@ mod tests {
             &wp_world::procgen::ProcGenConfig::default(),
             wp_world::WorldConfig::default(),
         );
-        let target = *world.static_props().next().unwrap();
+        // Approach the first prop whose side, 20 m out, is on a road (main's grid layout put
+        // the first one's approach in a lot), at 12 m/s.
+        let side_start = |p: &wp_world::StaticProp| {
+            let (s, c) = wp_math::sin_cos(p.yaw);
+            [p.pos[0] + c * 20.0, p.pos[1] + s * 20.0, 0.0]
+        };
+        let (k, target) = world
+            .static_props()
+            .enumerate()
+            .find(|(_, p)| {
+                world
+                    .map()
+                    .locate(side_start(p), None, 0.0, true, false)
+                    .is_some()
+            })
+            .map(|(k, p)| (k, *p))
+            .unwrap();
         sim.set_world(world);
         assert_eq!(sim.active_prop_count(), 0, "props start fixed");
-        // Approach the first prop from 20 m away at 12 m/s, from its side.
-        let (s, c) = wp_math::sin_cos(target.yaw);
-        let side = [c, s];
-        let start = [
-            target.pos[0] + side[0] * 20.0,
-            target.pos[1] + side[1] * 20.0,
-            0.0,
-        ];
+        let start = side_start(&target);
         let (dx, dy) = (target.pos[0] - start[0], target.pos[1] - start[1]);
         let yaw = wp_math::atan2(-dx, dy);
         let id = sim.spawn_vehicle(&car, start, yaw).unwrap();
         sim.place_vehicle(id, start, yaw, 12.0).unwrap();
-        let h = sim.props.bodies[0];
+        let h = sim.props.bodies[k];
         let p0 = sim.physics.bodies[h].translation();
         for _ in 0..480 {
             sim.step_fixed();

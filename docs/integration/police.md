@@ -70,6 +70,23 @@
   Budget scenarios: `radio_city_chase.ron`, `radio_calm_patrol.ron` (metrics
   `radio_per_min_pursuit`, `radio_per_min_calm`); `cargo run --release -p wp_police --example
   radio_log -- <scenario>` prints the spoken lines.
+- **Pro driving** (lead helper `lead/police-driver`, P8; module `wp_police::pro`, README
+  "Pro driving"): with lights on, `unit_input` drives each physical unit with a
+  `pro::ProDriver` (racing line in its own-direction lanes and junction boxes, speed profile at
+  the grip limit, late braking, slide control, stuck recovery). Patrol keeps the old lane
+  driver. New API:
+  - `sync_unit_feel(unit, pro::UnitFeel { yaw_rate, road_grip })` after `sync_unit` (wp_sim
+    sends `ang_vel[2]` and `wp_vehicle::Vehicle::conditions_grip()`, so wet roads slow units);
+  - `set_unit_limits(unit, pro::CarLimits)` (wp_sim: `Sim::set_police_car_limits`); default
+    `[pro] default_limits` = the Sentinel Cruiser measured;
+  - `pro::RoadRoom::from_city(&CityMap, &ProParams)` (built by `for_world`), `pro::RoomQuery`;
+  - `RoadSegment::{lanes_fwd, lanes_back, lane_width_m}` (serde default 0 = unknown);
+  - tuning `[pro]` in `data/police/pursuit.toml` (`PursuitFile::pro`, every key spelled out; a
+    test keeps it equal to `ProParams::default`).
+  Measured: `cargo test --release -p wp_opponent --test police_pace -- --nocapture` (police vs
+  the best race-AI profile, same car: arterial square −1.0 %, Hollins Drive +2.3 %, 0 wall
+  hits dry and wet; the pre-P8 driver +13.5 % and did not finish Hollins). City with traffic:
+  README "Pro driving".
 - Data: `data/police/{heat,presence,pursuit,tools,radio}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
   on D's procedural city (`city: (nx, ny, seed)`, default `ProcGenConfig::small()`).
 
@@ -146,6 +163,15 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **Round 12c:** `crates/wp_sim/src/police_link.rs` (minimal): `reconcile_police_units` applies
+  `PoliceSystem::take_unit_resets` (place the car on the ground at the reset pose, `set_ghost`
+  for `ghost_s`) before syncing units back. `crates/wp_sim/tests/police_passby.rs`: the
+  row-80 pass-by matrix test. `crates/wp_wasm/src/audio.rs`: siren test window 30 → 60 s.
+  `crates/wp_wasm/src/career_tests.rs`: `brake_until_settled` holds the brake at 0.5 (above
+  0.5 at a standstill engages auto-reverse). `apps/simcli/scenarios/police/tunnel_escape_founders_cut*.ron`:
+  re-seeded 56 → 51. `crates/wp_net/tests/vesper_e2e.rs`: p1 may miss racer 0's capture when
+  it lands in p1's deliberate link-down window (it now does, at step ≈ 2746 of 2700–2880;
+  events are not replayed on reconnect). Goldens re-blessed in `[bless]` commits.
 - **Round 13:** `apps/simcli/examples/police_chase.rs` (new measurement example: full sim,
   Port Vesper, scripted fleeing racer, before/after tables for rows 61 / 63 / 64 / 66; read-only
   use of simcli / `wp_sim`). `apps/simcli/scenarios/police/tunnel_escape_founders_cut*.ron`:
@@ -200,11 +226,22 @@ One-click **Rookie / Street / Sim** (GDD §6.1), with damage mode and assists st
   "ESC low", but `esc` is a switch, so Street leaves ESC off for now.
 - Not done: the GDD's "suggest Rookie after three crashes in five minutes" (needs a crash
   counter in the run). simcli scenarios could gain `assists: Preset(..)` (owner: I).
+- **Lead `lead/police-driver` (P8)**, outside `wp_police`:
+  - `crates/wp_vehicle/src/vehicle.rs`: `Vehicle::conditions_grip()` (read-only, additive).
+  - `crates/wp_sim`: `Sim::set_surface_conditions`, `Sim::set_police_car_limits`, and
+    `police_link` sends `sync_unit_feel` / `set_unit_limits`.
+  - `crates/wp_opponent/tests/police_pace.rs`: new full-sim test (police vs race AI), reusing
+    the crate's `tests/common` harness; no change to `wp_opponent` itself.
+  - `apps/simcli/examples/police_traffic_contacts.rs`: also counts police↔world hits;
+    `WP_TRACE_COP=<seed>,<entity>` traces one police car.
+  - Goldens re-blessed (`[bless]` commit): every scenario with physical police cars.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
 | `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.097 ms (round 13: up to 8 units per racer, backup, search; 0.055 ms in round 12b, 0.074 ms in round 6) | not measured | 0.5 ms / 1.0 ms |
+| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
+| Pro driver (`ProDriver::drive`, lead P8) per unit per 60 Hz frame (4 physics ticks, re-plans included; `police_pace` test) | Cloud container, release | ≈ 0.012 ms (2.2–3.1 µs per tick) | not measured | (part of the 0.5 ms) |
 
 ## Known gaps
 - Assault isn't judged by fault: a moving racer that a patrol car drives into (rare with obstacle
@@ -1093,3 +1130,149 @@ Checks: `e2e:presets`, `e2e:touch`, `tsc`, fmt, clippy, wasm build pass. Fail id
 exists" (the setter exists now); `wp_vehicle` `roster_diff_hashes_are_pinned`,
 `front_drive_cars_understeer_mildly`; `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
 `simcli_golden_replays_play_back_in_the_browser_core`; 52 simcli goldens on the round-12 tip of 2026-10-20 (same set with and without this merge; `ws/police` before it: 19; none re-blessed here).
+
+
+## Round 12c (lead rows 75 / 78 / 80 / 84 / 86 / 89 / 96) and the `origin/main` merge — in progress
+Base: `origin/lead/round12` @ `d6baeeec` + `origin/lead/main-sync` (`origin/main` @ `3dc962b`).
+
+### Merge of `origin/main` (P8 pro driver)
+`ws/police` merged `origin/lead/main-sync`, so it contains `origin/main` @ `3dc962b`
+(#18 P8 and the rest). Every non-police file is the helper's resolution. The wp_police
+resolution replaces the provisional one:
+- `unit_input` runs round 12's manoeuvres for every unit, lights on or off. Only the plain drive
+  at the end differs: lights on → `pro::ProDriver` (`PoliceSystem::pro_drive`), lights off → the
+  lane driver. In the provisional merge the siren U-turn / swing / push-through block sat in the
+  lights-off path and was dead code.
+- The pro driver gets the command speed capped by obstacle awareness and the static feelers;
+  a pass or a wall shift is driven as an exact offset.
+- The pro driver's own stuck reverse is off (`stuck_s` = ∞ at creation): `stuck.rs` owns
+  recovery. Its "facing away → crawl round" stays.
+
+Checks on the merge: fmt, clippy, wp_police, wp_sim, wp_race (`hollins_hill_sprint`,
+`loop9_circuit`) and wp_opponent (`live_police_chase…`, P8's `police_pace`) all pass. simcli
+runs 113 PASS. The six goldens `lead/main-sync` left open and the four round-12c police goldens
+were re-blessed. The one red test is `wp_race` `pace_scenarios_hold_their_ranges`:
+`opponent_pace_lantern_checkpoint_s50` never finishes (57 rejoins). That scenario has the police
+off, so it comes from combining the newer `lead/round12` with `main-sync`'s world / opponent
+changes, not from wp_police. Same for `wp_wasm`
+`race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`: two AI cars
+stop for good at (10.8, 355.3) on `grid_highway_sprint` from 60 s on, neither wanted nor near a
+police unit.
+`origin/main` has moved on since `3dc962b` (#19–#27: world viaducts and ramps, vehicle catch
+steering, Loop 9 greybox). Of those changes only `crates/wp_police/scenarios/day_core_speeder.ron`
+touches police. Those commits are left to the main-sync helper.
+
+### Rows 80 + 89: witnessed violations, symmetric sight (done)
+- A unit that watches a violation that makes the racer wanted starts the pursuit at once, day or
+  night. The blatant pass-by threshold is 20 km/h over within 90 m (was 40 km/h within 60 m).
+  A unit already on another racer's pursuit keeps it; backup comes for the new racer.
+- Sight: 380 m by day, 320 m at dawn and dusk, 260 m at night, capped by weather visibility. A
+  200° forward view plus 60 m all round. Recognising a wanted car takes 0.5–1.0 s within 150 m
+  and up to 2 s more at the edge. Out of sight the timer drains (0.5/s) instead of resetting.
+- Pass-by matrix (`wp_sim` `speeding_past_a_cop_at_20_40_80_over_starts_a_chase_within_1_5_s`;
+  +20/+40/+80 km/h, stationary and oncoming unit, day and night, grid and Vesper):
+
+  | | Before | After |
+  |---|---|---|
+  | Cases failing | 12 of 24 | 0 of 24 |
+  | +20 km/h over | never pursued (8 cases) | −1.9 to +0.14 s from the pass |
+  | +40 km/h over, Vesper | pursued 3.3–3.6 s after the pass | within 1.5 s |
+
+- Night `pursuit_start_s` metric:
+
+  | Scenario | Before | After |
+  |---|---|---|
+  | `night_core_speeder` | 33.0 s | 14.6 s |
+  | `day_core_speeder` | 8.8 s | 8.4 s |
+  | Night / day ratio | 3.75 | 1.74 |
+
+  Expectations re-aimed to night > 10 s and ratio ≥ 1.5.
+- A racer who stays out of sight still gets away. `escape_break_contact_night.ron` (new, at
+  02:00): before, no unit even spotted it; after, one pursuit, escaped.
+- Fixed on the way: a far pursuer flipped between Pursue and Intercept every think step (two
+  track projections disagreed), so it never moved (capture_stop seed 401).
+- Gaps: there is no racer headlight state yet, so a lights-off racer is not harder to see at
+  night. The HUD is unchanged.
+
+### Row 78: reset in place (first part, done)
+An un-wrecked AI unit that stands stuck while it wants to drive resets in place.
+- Stuck time: 8 s on a pursuit, 15 s otherwise, 40 s behind civilian traffic.
+- Never: at a red light, queued within 25 m of a junction (unless the stuck detector flagged
+  it), holding a block, or over a stopped racer it is arresting.
+- It snaps to the nearest clear lane spot within 15 m along its route, upright, damage kept, and
+  is a 1 s ghost in `wp_sim`. If a racer can see it, it waits 2 s more first.
+- No clear spot: it despawns out of sight, or in view after 30 s wedged next to a racer.
+- Logged in `PoliceStats::resets`: 0–9 per simcli scenario, all short hops.
+- Test: `stuck_unit_resets_in_place_within_15_m`.
+- To do: count per pursuit-minute and the scenario metric.
+
+The reset fixed the Hollins race deadlock this round's sight change exposed: a column of units
+and two captured racers were jammed in a hairpin.
+
+### `lead/main-sync` merge: police reds fixed (2026-10-21)
+Merged `origin/lead/main-sync` (main's rebuilt grid: divided viaduct at x = 0, diamond ramps
+with terminals at x = ±22) twice (51902403, then its new tip in ead38c0f). Police fixes:
+- **Nose-to-nose unit deadlock** (radio_chatter capture never happened): two units stood face
+  to face at a ramp terminal for a minute. After 3 s the less busy one (not chasing; else the
+  higher id) resets, past the other unit only. Facing decides, not `blocked_by` (the other's
+  passing attempt flips it on and off). Headless units now count standing time too.
+- **Patrol nose to nose with a stopped racer** (wp_race hollins_hill_sprint, all captured): a
+  patrol met the racers' queue head-on on a hairpin. After 3 s it turns round: reset into the
+  other lane facing the other way (up to 15 m back, on the road, clear) with a new patrol.
+- **Wide U-turn rejoin** (wp_sim police_passby Vesper, 174 m > 150 m): the U-turn ended 9 m off
+  the centreline and the chase route began with a sideways leg to the junction beside the car,
+  so it looped across the road. A physically driven unit past the road's edge (lanes × width
+  + 1.5 m) now joins at the first route node that is not beside it (cos < 0.5) within 2× its
+  offset; the pro driver's in-lane look-ahead is at least 2× the distance off the lane. Headless
+  units keep the old route start (with it `self_wreck_sim` rose 17 → 20 wrecks).
+- First patrol of a shift is silent (no 13 × "resuming patrol"); lost-visual sustain 4.5 s;
+  callsign lists over 4 say "N units".
+- Re-aimed: `escape_break_contact`, `response_*` (wp_police scenarios); simcli
+  `police/sideswipe_patrol_{day,night}` (a front-corner clip then flank scrape with a patrol
+  driving at the racer; the assault rule still starts the pursuit in the contact tick).
+  `night_is_slower` pursuit ratio ≥ 1.25 (1.39 on the new grid).
+- Tests adjusted: `blocked_siren…` frees the other units; `presence_matches_table…` expects a
+  quiet shift start; wp_wasm siren-audio test starts the player wanted (the full-throttle player
+  now stops at a ramp terminal 20 s in; test-only `Session::sim_mut`).
+- [bless] `police_sideswipe_patrol_{day,night}`, `police_tunnel_escape_founders_cut{,_control}`.
+
+Red on plain `lead/main-sync` too, not police (left to main-sync):
+- `wp_net vesper_e2e`: racer 0 falls through the ground at its spawn (z 2 → −60 m at step
+  ≈ 1000, (491, −782)); the cop can't follow, so the pursuit ends Escaped.
+- `wp_race opponent_pace` grid_highway_sprint s50/s95: 0 finishers; police are off in those
+  scenarios (start grid on the rebuilt highway).
+- `simcli city/tunnel_founders_cut_drive_through` path length 299 m (< 380).
+- web e2e `run.mjs` perf budgets under software GL (409k triangles > 400k, 323 draw calls > 300
+  on phone, 2.3 fps): main's heavier city geometry. `siren.mjs` audio frame 5–7 ms with sirens
+  on this container (1.6 ms in another run): load-dependent. The siren mode-change check was a
+  test bug (forcing the pattern the unit already played) and is fixed here.
+- 44 goldens mismatch identically on main-sync (same list with or without this branch); only
+  the four police ones above are blessed here.
+
+### Rows 84, 86, 96, 75 — not started yet.
+## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
+
+Owner backlog item **P9 — Helicopter**: joins at wanted level 3, flies overhead, keeps you in
+sight, spotlight at night, radios your position to ground units; tunnels, covered roads and
+underpasses break its line of sight. Done by a lead helper in your crate (small, listed here so
+you can review):
+
+- Sightline height: the branch's own fix (`racer z + altitude_m` → `racer z + 1.0 m`) was
+  **dropped in the merge**; round 12's `eye_height_at(z)` target (af853e24) is kept as is.
+- `dispatch::helo_reports` + `PoliceSystem::helo_sight` (per tracking helicopter: line of sight,
+  visual as radioed, next report): "Air N: eyes on … Spotlight on." / "still on …, N km/h" every
+  `position_report_s` / "lost visual on … Units, check the cover." after `lost_visual_after_s`
+  without sight / "reacquired". These are the helicopter's own lines, beside `chatter.rs`'s
+  racer-level lost-visual / eyes-on-again calls. New `tools.toml [helicopter]` keys
+  `position_report_s = 30` and `lost_visual_after_s = 3` (validated); `spotlight_half_angle_rad`
+  0.35 → 0.12 (drawing only). `HeloView` gained `has_visual` and the racer's height as the aim z.
+- `PoliceSystem::debug_launch_helicopter(racer, offset_m)` (debug / e2e; `wp_wasm`
+  `debug_launch_helicopter`).
+- Test: `pursuit::tests::helicopter_joins_at_level_3_keeps_visual_and_loses_it_under_an_overpass`
+  (Port Vesper, both grade separations: none at L2, launches at L3, overhead, "eyes on", last
+  known position follows, lost under the deck after 3 s, last known stays outside, reacquired).
+- `wp_world` (D): bridge decks occlude `line_of_sight` (see `docs/integration/world.md`). This
+  applies to every sightline (ground units too: a car on the deck is hidden from a unit on the
+  road below and vice versa).
+- `wp_wasm`/testbed (C): `police_helicopters()` and the night spotlight on round 12's drawn
+  helicopter.

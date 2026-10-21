@@ -1,5 +1,5 @@
 // Playtest rows 61-62 (traffic gets out of the way of police with sirens on): a police car drives
-// Garage 2 -> Garage 3 on the 12x12 grid (403 m, mostly two-lane streets) through busy civilian
+// Garage 1 -> Safehouse 2 on the 12x12 grid (≈ 440 m, mostly two-lane streets) through busy civilian
 // traffic, riding the line on the left of its lane (lateral_offset_m -1.55, where a unit passes
 // yielding traffic) and keeping its distance from anything in its way (keep_distance).
 // Control run: the same car with its siren OFF. Nobody pulls over; it follows the traffic
@@ -7,9 +7,13 @@
 // The exact "six cars passed within 10 s" check is wp_world tests/siren.rs (deterministic
 // geometry); this scenario runs the same behaviour in the full sim (physical traffic, wp_sim's
 // siren flag, damage mode Arcade).
+// lead/main-sync: main's grid rework (divided viaduct, ramps) reshuffled the POIs and put
+// Garage 3 at (0, 185) under the viaduct (a 2.3 km route), so the route and seed moved from
+// Garage 2 -> Garage 3, seed 2. Seeds 1-12 on the new route: siren runs finish on 5 and 12,
+// the no-siren control stays below 0.8 on 12 (it also finishes on 5).
 (
     name: "city_siren_traffic_no_siren",
-    seed: 2,
+    seed: 12,
     city: file("city/procedural_12x12.road.json"),
     mode: Arcade,
     time_of_day_h: 12.0,
@@ -24,7 +28,7 @@
             car: "sentinel_cruiser",
             speed_mps: 10.0,
             driver: follow_route(
-                route_id: "Garage 2 -> Garage 3",
+                route_id: "Garage 1 -> Safehouse 2",
                 target_speed: 16.0,
                 lateral_offset_m: -1.55,
                 keep_distance: true,

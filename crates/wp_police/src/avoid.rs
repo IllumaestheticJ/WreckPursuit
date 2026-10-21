@@ -109,7 +109,7 @@ impl Obstacle {
         }
     }
 
-    fn speed(&self) -> f32 {
+    pub(crate) fn speed(&self) -> f32 {
         dot(self.vel, self.vel).sqrt()
     }
 }

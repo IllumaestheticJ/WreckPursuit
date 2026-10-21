@@ -7,9 +7,10 @@
 // Row 117 (auto clutch stays engaged once moving, revs follow road speed): police units pull
 // through their gears without the old clutch slip, capture at 111.7 s; window starts at 100 s.
 // Row 119: re-seeded to 56 with the escape scenario (see there); captured at 124.7 s.
+// Round 12c: re-seeded to 51 with the escape scenario (see there); captured at 112.1 s.
 (
     name: "police_tunnel_escape_founders_cut_control",
-    seed: 56,
+    seed: 51,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

@@ -125,16 +125,17 @@ fn presence_matches_table_for_every_phase() {
                 "{d:?} at {hour}h"
             );
         }
-        // Every pool unit is patrolling and says so on the radio.
+        // Every pool unit is patrolling. A first patrol is not "resuming" anything, so the
+        // start of the shift is quiet on the radio (13 such lines held the channel ≈ 25 s).
         assert!(h
             .police
             .units()
             .iter()
             .all(|u| matches!(u.assignment, Assignment::Patrol { .. })));
-        assert!(h
+        assert!(!h
             .events
             .iter()
-            .any(|e| matches!(e, PoliceEvent::Radio { .. })));
+            .any(|e| matches!(e, PoliceEvent::Radio { text, .. } if text.contains("patrol"))));
     }
 }
 
@@ -926,7 +927,17 @@ fn unit_cap_holds_responders_back() {
     cfg.presence.response.max_units_by_level = [0; 6];
     let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
     h.run(0.5, &[]);
+    // Pursuit tools (a spike-strip unit) may deploy once the chase starts (since round 12c
+    // the 380 m day sight finds the racer during this drive); they are not responders.
+    let cars = |h: &Harness| {
+        h.police
+            .units()
+            .iter()
+            .filter(|u| u.role != wp_police::UnitRole::Tool)
+            .count()
+    };
     let alive = h.police.units().len();
+    assert_eq!(cars(&h), alive);
     drive_reported(&mut h, 20.0);
     let st = h.police.stats();
     assert!(!st.calls.is_empty());
@@ -937,7 +948,7 @@ fn unit_cap_holds_responders_back() {
         "{:?}",
         st.spawns
     );
-    assert!(h.police.units().len() <= alive);
+    assert!(cars(&h) <= alive);
     // An existing unit was sent (the call goes out with it).
     assert!(
         h.events.iter().any(|e| matches!(
@@ -1032,6 +1043,92 @@ fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
     assert!(reversed, "never backed out");
     let gone = gone_at.expect("stuck unit never despawned");
     assert!(gone < 12.0, "despawned at {gone} s");
+}
+
+/// Reset in place (owner row 78): an un-wrecked unit that stands stuck while it wants to
+/// drive (here behind a car stopped across the road) is put on a clear spot in its lane within
+/// 15 m, keeps its damage, and `wp_sim` is told to place its car there as a ghost for a
+/// second.
+#[test]
+fn stuck_unit_resets_in_place_within_15_m() {
+    let mut h = Harness::new(12.0, 7);
+    // Logging only: no back-out / re-route / give-up despawn, so the reset is what frees it.
+    h.police.set_unstick_recovery(false);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(950);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let mut taken = Vec::new();
+    for _ in 0..(25.0 / PHYSICS_DT) as u32 {
+        if !h.police.stats().resets.iter().any(|r| r.unit == id) {
+            // Pinned until it is reset: the body never moves, whatever the input.
+            h.police.sync_unit(
+                id,
+                UnitSync {
+                    pos: [pos[0], pos[1], 0.5],
+                    vel: [0.0; 3],
+                    heading,
+                    health: 0.8,
+                    effects: HandlingEffects::NEUTRAL,
+                },
+            );
+        }
+        let r = h.racer_view();
+        h.police.set_obstacles(&[
+            // Stopped across the road 5 m ahead (no way past).
+            wp_police::ObstacleView {
+                half_length_m: 6.0,
+                ..wp_police::ObstacleView::car(
+                    Some(EntityId(960)),
+                    [pos[0] + heading[0] * 5.0, pos[1] + heading[1] * 5.0, 0.5],
+                    [0.0; 3],
+                    [-heading[1], heading[0]],
+                )
+            },
+            wp_police::ObstacleView::car(Some(RACER), r.pos, r.vel, [0.0, 1.0]),
+        ]);
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &[], PHYSICS_DT, &mut out);
+        taken.extend(h.police.take_unit_resets());
+    }
+    let rec = *h
+        .police
+        .stats()
+        .resets
+        .iter()
+        .find(|r| r.unit == id)
+        .unwrap_or_else(|| {
+            panic!(
+                "never reset: {:?}",
+                h.police.units().iter().find(|u| u.id == id)
+            )
+        });
+    let at = rec.at.secs() - 1.0;
+    assert!((14.0..=20.0).contains(&at), "reset {at} s after it stuck");
+    assert!(!rec.active && !rec.in_view, "{rec:?}");
+    assert!(dist(rec.to, pos) <= 15.0, "{rec:?}");
+    let r = taken
+        .iter()
+        .find(|r| r.unit == id)
+        .expect("wp_sim was told");
+    assert_eq!(r.entity, Some(entity));
+    assert_eq!(r.pos, rec.to);
+    assert!((r.ghost_s - 1.0).abs() < 1e-6);
+    // Damage kept: health is whatever the car reports, untouched by the reset.
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    assert!((u.health - 0.8).abs() < 1e-6);
 }
 
 /// Units on `RACER` (pursuing or intercepting ground cars).
@@ -1152,6 +1249,24 @@ fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
     let mut reversed = false;
     for tick in 0..(8.0 / PHYSICS_DT) as u32 {
         let t = tick as f32 * PHYSICS_DT;
+        // Other units stay out of it: on main's rebuilt grid (#19-#27) a backup unit drove up
+        // 2 m behind the pinned one and left it no room to back out. This test is about the
+        // push and the back-out logic, not a queue of police cars.
+        if tick % 240 == 0 {
+            let others: Vec<_> = h
+                .police
+                .units()
+                .iter()
+                .filter(|u| u.id != id && u.kind == UnitKind::Car)
+                .map(|u| u.id)
+                .collect();
+            for o in others {
+                let _ = h.police.captain_command(CaptainCommand::AssignUnit {
+                    unit: o,
+                    order: wp_contracts::UnitOrder::Disengage,
+                });
+            }
+        }
         h.police.sync_unit(
             id,
             UnitSync {

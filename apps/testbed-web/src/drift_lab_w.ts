@@ -1,4 +1,4 @@
-// The hidden handling tune panel (F7, ?tune=1, or ?drift=w for the test pad). Unify (lead,
+// The hidden handling tune panel (F10, ?tune=1, or ?drift=w for the test pad). Unify (lead,
 // 2026-10-21): the Drift Lab W handling is the game's handling now, at the owner's preferred
 // combo (wp_vehicle::lab_scope: the 7d6b66c9 spin-model tyres, medium ride with springs / bars
 // × 1.5 and the step-14 balance on every car; the plain keyboard steering on player cars). This panel only sets debug overrides on top, saved per viewer; "defaults" and
@@ -155,6 +155,7 @@ const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; ste
   fwd_rear_mu: { label: "FWD: rear grip (μ) ×", min: 0.7, max: 1.3, step: 0.01, hint: "front-drive cars only: rear tyres' peak friction (less = rotates on lift-off)" },
   fwd_rear_stiffness: { label: "FWD: rear cornering stiffness ×", min: 0.4, max: 2, step: 0.05, hint: "front-drive cars only: rear lateral curve squeezed along the slip axis (less = bigger rear slip angle)" },
   fwd_rear_arb: { label: "FWD: rear bar ×", min: 0, max: 6, step: 0.1, hint: "front-drive cars only: rear anti-roll bar on top of the rear bar above (more = looser, less roll)" },
+  brake_bias_front_add: { label: "front brake bias +", min: -0.1, max: 0.15, step: 0.01, hint: "added to every car's front brake bias (shipped +0.05: hard braking at speed with the owner's soft rear rotated the car on any steer; +0.05 holds it, stopping distance +2–5 %)" },
 };
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
@@ -185,7 +186,7 @@ export class DriftLabWPanel {
   private readonly course: THREE.Group;
   /** The test pad session (?drift=w): course, parity cars, reference assists. */
   private active = false;
-  /** The panel is on screen (F7 / ?tune=1 / the pad). */
+  /** The panel is on screen (F10 / ?tune=1 / the pad). */
   private visible = false;
   private shown = false;
   private open = true;
@@ -227,14 +228,14 @@ export class DriftLabWPanel {
     return this.visible;
   }
 
-  /** Show or hide the panel (F7, ?tune=1). */
+  /** Show or hide the panel (F10, ?tune=1). */
   show(on: boolean): void {
     this.visible = on;
     this.root.style.display = on ? "block" : "none";
     if (on) this.build();
   }
 
-  /** Toggle the panel (F7). */
+  /** Toggle the panel (F10). */
   toggle(): void {
     this.show(!this.visible);
   }

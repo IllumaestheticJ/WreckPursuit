@@ -117,6 +117,8 @@ struct Track {
     seg_hint: Option<usize>,
     progress_m: f32,
     out_ticks: u64,
+    /// Course distance (within the lap) of the last sample inside the corridor, m.
+    on_course_m: Option<f32>,
     contacts: u32,
     civilian_hits: u32,
     max_contact_ns: f32,
@@ -150,6 +152,22 @@ pub struct RaceJudge {
     first_finish_tick: Option<u64>,
     leader: usize,
     signals: Vec<RaceSignal>,
+    /// Off-course racers are put back on the course instead of disqualified.
+    reset_off_course: bool,
+    resets: Vec<CourseReset>,
+}
+
+/// A racer the judge wants put back on the course ([`RaceJudge::set_reset_off_course`]):
+/// they stayed outside the corridor past the grace time. The server moves the car to `pos`
+/// facing `dir` and then calls [`RaceJudge::relocate`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CourseReset {
+    /// Racer to move.
+    pub racer: EntityId,
+    /// Centreline point where the racer was last inside the corridor, m.
+    pub pos: [f32; 3],
+    /// Course direction there (unit, world XY).
+    pub dir: [f32; 2],
 }
 
 fn ticks_for(s: f32) -> u64 {
@@ -180,7 +198,21 @@ impl RaceJudge {
             first_finish_tick: None,
             leader: 0,
             signals: Vec::new(),
+            reset_off_course: false,
+            resets: Vec::new(),
         }
+    }
+
+    /// `true`: a racer outside the corridor past the grace time is queued for a reset back
+    /// onto the course ([`RaceJudge::drain_resets`]). Off by default: then nothing happens
+    /// (leaving the route is never a DQ).
+    pub fn set_reset_off_course(&mut self, on: bool) {
+        self.reset_off_course = on;
+    }
+
+    /// Take the resets queued since the last call (see [`RaceJudge::set_reset_off_course`]).
+    pub fn drain_resets(&mut self) -> Vec<CourseReset> {
+        std::mem::take(&mut self.resets)
     }
 
     /// Event id.
@@ -215,6 +247,18 @@ impl RaceJudge {
         self.police.sort();
     }
 
+    /// Add entities to the police set, keeping every earlier one (a live race calls this every
+    /// tick). `wp_sim` despawns a retired unit at the end of the tick its last contact
+    /// happened in, so a per-tick list would miss it; entity ids are never reused, so a
+    /// police id stays police for the whole race.
+    pub fn add_police(&mut self, police: &[EntityId]) {
+        for p in police {
+            if let Err(i) = self.police.binary_search(p) {
+                self.police.insert(i, *p);
+            }
+        }
+    }
+
     /// Enter a racer. Grid slots are assigned in entry order (slot 0 = pole); the server
     /// decides entry order (e.g. by qualifying, rep or lobby join order).
     pub fn enter(&mut self, entry: RacerEntry) -> Result<GridSlot, EntryDenied> {
@@ -246,6 +290,7 @@ impl RaceJudge {
             seg_hint: None,
             progress_m: 0.0,
             out_ticks: 0,
+            on_course_m: None,
             contacts: 0,
             civilian_hits: 0,
             max_contact_ns: 0.0,
@@ -345,7 +390,6 @@ impl RaceJudge {
             let t = &mut self.tracks[i];
             t.last = Some((tick, pos));
             t.seg_hint = None;
-            t.out_ticks = 0;
         }
     }
 
@@ -549,7 +593,8 @@ impl RaceJudge {
                 return;
             }
         }
-        // Progress and corridor.
+        // Progress along the route. Leaving the route is never a DQ: the gates still have to
+        // be driven through in order, so a shortcut that skips one gains nothing.
         let proj = self.course.project(s.pos, self.tracks[i].seg_hint);
         let len = self.course.length_m();
         let t = &mut self.tracks[i];
@@ -564,15 +609,26 @@ impl RaceJudge {
         } else {
             proj.along_m
         };
-        if self.rules.kind.uses_corridor() {
+        // Off-course resets (round 12): back onto the course after the grace time. Without
+        // resets the clock does not run: leaving the route is never a DQ (main's owner call);
+        // the gates still have to be driven in order.
+        if self.reset_off_course && self.rules.kind.uses_corridor() {
             let limit = self.course.corridor_half_width_m + self.rules.common.corridor_margin_m;
             if proj.off_m > limit {
                 t.out_ticks += tick - prev_tick;
                 if t.out_ticks > ticks_for(self.rules.common.corridor_grace_s) {
-                    self.set_status(i, RacerStatus::Dq(DqReason::LeftCorridor), tick);
+                    t.out_ticks = 0;
+                    let along = t.on_course_m.unwrap_or(proj.along_m);
+                    let (pos, dir) = self.course.point_at(along);
+                    self.resets.push(CourseReset {
+                        racer: t.entry.racer,
+                        pos,
+                        dir,
+                    });
                 }
             } else {
                 t.out_ticks = 0;
+                t.on_course_m = Some(proj.along_m);
             }
         }
     }

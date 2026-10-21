@@ -585,6 +585,18 @@ impl PlayerRun {
         })
     }
 
+    /// A cash adjustment on the account (G's `Economy::adjust`, posted as `Adjustment {note}`);
+    /// returns its ledger lines. Used by the race glue to pay the advertised stake.
+    pub fn adjust(&mut self, cash: i64, note: &str) -> Result<Vec<LedgerLine>, String> {
+        let ((), ev) = self
+            .econ
+            .adjust(&mut self.acct, cash, note)
+            .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok(lines)
+    }
+
     /// "Repair & continue" after the run ended: pay the impound fee (if impounded), then
     /// G's `repair` (`RepairAll` at the legit default shop), all or nothing. On success the
     /// caller repairs the sim vehicle (`Sim::repair_vehicle`) and releases the hold.

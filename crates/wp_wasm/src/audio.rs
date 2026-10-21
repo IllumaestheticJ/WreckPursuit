@@ -390,8 +390,16 @@ mod tests {
         let mut d = AudioDirector::new(AudioLibrary::embedded().unwrap(), AUDIO_SEED);
         let (mut police_siren_on, mut siren_voice, mut traffic_engine) = (false, false, false);
         let mut police_ids = std::collections::BTreeSet::new();
-        // Both show up about 17 s in (seed 1); 30 s of sim time leaves margin.
-        for _ in 0..60 * 30 {
+        // On main's rebuilt grid (divided viaduct, ramps) the full-throttle player runs into
+        // a ramp terminal 20 s in and stays there, never wanted. This test is about the audio
+        // bridge, not about how a player gets wanted: start it wanted (L2 heat) so police
+        // respond with lights and siren. 60 s of sim time leaves margin.
+        let l2 = wp_police::PoliceConfig::builtin()
+            .heat
+            .heat
+            .level_thresholds[1];
+        s.sim_mut().police_mut().set_heat(player, l2 + 1.0);
+        for _ in 0..60 * 60 {
             s.set_input(
                 player,
                 VehicleInput {
