@@ -261,9 +261,9 @@ export class VehicleView {
     if (needNodes) this.shapeDirty = false;
     this.panels.root.visible = panelsOn;
     for (const ps of this.panels.pivotParts) for (const m of ps) m.visible = panelsOn;
-    // The panel meshes' own light parts sit inside the shell (machine R to fix in the mesh
-    // generator), so the lamp markers stay on with panels too: brake and head lights stay visible.
-    for (const lamp of this.lamps) lamp.visible = bodyOn;
+    // The panel meshes carry their own head/tail lamp parts on the outer surface (sharing
+    // headMat/tailMat), so the box lamp markers only show without panels.
+    for (const lamp of this.lamps) lamp.visible = bodyOn && !panelsOn;
     for (const w of this.wheels)
       for (const c of w.spin.children) {
         const ours = this.panels.wheelParts.some((p) => p.includes(c as THREE.Mesh));
