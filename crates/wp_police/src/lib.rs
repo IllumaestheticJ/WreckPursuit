@@ -94,7 +94,10 @@ pub struct PoliceSetup {
     /// Drive AI units with the built-in kinematic driver (true until `wp_sim` gives units
     /// physical bodies and calls [`PoliceSystem::sync_unit`]).
     pub internal_driving: bool,
-    /// Simulate background traffic hazards for internally driven units.
+    /// Simulate background traffic hazards for internally driven units: a statistical
+    /// stand-in (random near misses and collisions) for headless runs with **no real
+    /// traffic**. Off by default; leave it off when `wp_world` traffic is simulated and
+    /// reported with [`PoliceSystem::set_obstacles`], or units pay for traffic twice.
     pub hazards: bool,
 }
 
@@ -104,7 +107,7 @@ impl Default for PoliceSetup {
             seed: 0x0090_11CE,
             mode: DamageMode::Arcade,
             internal_driving: true,
-            hazards: true,
+            hazards: false,
         }
     }
 }
@@ -1071,6 +1074,12 @@ fn standstill_hold(v: f32, brake: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traffic_hazard_stand_in_is_opt_in() {
+        // Real traffic is the norm (wp_sim); the statistical stand-in must be asked for.
+        assert!(!PoliceSetup::default().hazards);
+    }
 
     #[test]
     fn no_city_still_tracks_heat() {
