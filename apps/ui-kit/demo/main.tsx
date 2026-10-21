@@ -3,7 +3,10 @@
  * Left: every screen. Top: mock playback (run, play/pause, speed) and accessibility toggles.
  * The stage shows the selected screen over a fake night-street backdrop so the HUD can be judged.
  *
- * URL params: ?screen=<id>&run=<fixture>&t=<seconds>&palette=<p>&scale=<n>&paused=1
+ * URL params: ?screen=<id>&run=<fixture>&t=<seconds>&palette=<p>&scale=<n>&paused=1&measure=0
+ *
+ * Modded builds' stat bars are measured on the physics rig in a Web Worker when the testbed's
+ * wasm package is built (`apps/testbed-web`: `npm run wasm`); `measure=0` keeps the estimates.
  */
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -13,9 +16,12 @@ import type { Palette, ScreenId } from "../src/model/types";
 import { createMockModel } from "../src/mock/MockProvider";
 import { FIXTURES } from "../src/mock/fixtures";
 import { SCREENS } from "../src/screens/registry";
+import { setBuildMeasurer } from "../src/data/measure";
+import { createWorkerMeasurer } from "../src/live/workerMeasurer";
 import "./demo.css";
 
 const params = new URLSearchParams(location.search);
+if (params.get("measure") !== "0") setBuildMeasurer(createWorkerMeasurer());
 const model = createMockModel({
   run: params.get("run") ?? "synthetic_pursuit",
   screen: (params.get("screen") as ScreenId) ?? "hud",

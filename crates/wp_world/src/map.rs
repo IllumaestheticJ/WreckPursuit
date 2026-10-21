@@ -188,6 +188,8 @@ pub struct CityMap {
     ix_grid: Grid,
     zone_grid: Grid,
     building_grid: Grid,
+    /// Freeway paint derived at build time (dotted taper lines, gore chevrons).
+    pub(crate) paint: crate::markings::FreewayPaint,
 }
 
 impl CityMap {
@@ -384,7 +386,9 @@ impl CityMap {
             ix_grid,
             zone_grid,
             building_grid,
+            paint: Default::default(),
         };
+        map.paint = crate::markings::freeway_paint(&map);
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
             let s = &map.segs[i];

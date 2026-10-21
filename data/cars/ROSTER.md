@@ -25,6 +25,9 @@
 | Bulwark 400 | `bulwark_400` | Muscle | RWD | 1920 | 202 | 105 | 7.6 | 209 | 0.83 | 470 | 4 | 26,000 | street |
 | Arashi T4 | `arashi_t4` | Sport | AWD 40/60 | 1313 | 191 | 145 | 5.1 | 247 | 1.01 | 631 | 3 | 32,000 | sport |
 | Satchel 2.0 | `satchel_20` | Truck | FWD | 1895 | 85 | 45 | 16.1 | 153 | 0.78 | 314 | 3 | 20,000 | street |
+| Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 832 | 3 | 125,000 | sport |
+| Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 155 | 83 | 8.6 | 207 | 0.91 | 455 | 4 | 26,000 | police_pursuit |
+| Sentinel Harrier | `sentinel_harrier` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

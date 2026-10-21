@@ -122,6 +122,8 @@ can draw them from the same constants (`wp_world::markings::*`). `surface_at` re
 | Edge line | inside the curb edge | 0.15 m solid |
 | Stop line | last 0.5 m of a lane that stops (signal, all-way stop, minor approach) | full lane width |
 | Crosswalk | 0.2–1.8 m past each lane end / before each lane start at signalised and all-way-stop junctions (inside the 2 m crosswalk setback) | zebra bars 0.5 m on / 0.5 m off across the lane |
+| Dotted line | between a carriageway's right lane and a ramp: through the taper of a freeway merge / diverge and along the auxiliary lane beside it | 0.20 m, 1 m on / 2 m off, straddling the boundary |
+| Gore chevrons | the paved gore where a ramp and its carriageway part (or meet), to where their shoulders no longer touch | 0.6 m bars at 45° every 4 m, V pointing at the narrow end |
 
 Alleys and parking strips are unmarked; highways get centre, lane and edge lines but no stop
 lines or crosswalks. Each lane owns its half of a shared line, so answers do not depend on
@@ -130,8 +132,19 @@ separation). About 4 % of road samples are paint on Port Vesper v2 (`painted_sha
 
 `marking_mesh(&map)` turns the same rules into a render mesh (white + yellow paint, 2 cm above
 the banked surface); the testbed draws it through wasm `road_markings(yellow)` (Port Vesper
-v2: ≈ 91 k triangles, two draw calls). Centre lines and the left (median-side) edge line of a
-one-way highway are yellow; merging freeway ramps get no stop line.
+v2: ≈ 95 k triangles with the freeway paint, two draw calls). Centre lines and the left
+(median-side) edge line of a one-way highway are yellow; merging freeway ramps get no stop
+line.
+
+Through a freeway merge / diverge (radius-0 junction) the carriageway's lane lines and yellow
+median edge line run on along its connectors, the taper connector carries the outer (white)
+edge line, and the carriageway's outer edge is the dotted line. Where a ramp lane runs beside
+the carriageway (found geometrically when the map is built: its left edge within 0.25 m of a
+carriageway lane's right edge) the two edge lines are replaced by that one dotted line; where
+they part, a chevron gore is painted (`FreewayPaint`, built once in `CityMap::new`). If the
+ramp has already climbed or dropped away from the carriageway inside the gore, the chevrons
+stop at the carriageway's own shoulder. Every ramp in all three cities gets one dotted run and
+one gore (`freeway_tapers_are_dotted_and_gores_chevroned`).
 `mesh_paints_what_marking_at_reports` checks that > 98 % of the mesh's triangles sit over a
 `marking_at` hit of the right colour.
 
@@ -377,6 +390,7 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 | Same with civilian-collision diagnostics on | avg 0.20 ms | — | — |
 | `line_of_sight`, random 300 m sight lines at eye height | ≈ 1.1 µs/query | — | — |
 | `surface_at` (round 8, incl. markings) | 0.36 µs/query, of which markings 0.10 µs (`surface_timing`) | — | — |
+| Same with freeway paint (dotted lines, gores; 2026-10-21) | 0.61 µs/query, of which markings 0.17 µs (0.49 / 0.13 before, same container run) | — | — |
 | `RoadNetworkIndex::nearest_on_road` (425 edges) | 0.63 µs/query with the edge grid; linear scan was 19 µs (`nearest_on_road_timing`) | — | — |
 | `World::load` of `procedural_12x12.road.bin` (decode + `CityMap::new` + parked cars) | ≈ 17 ms (debug build ≈ 0.2 s; `ProcGenConfig::small()` ≈ 5 ms / 0.06 s) | — | — |
 | 10-min soak, 9 seeds × {0 %, 5 %} aggressive | 0 civilian–civilian collisions; 0–11 agents recycled after being stuck > 120 s (starved permissive lefts / minor approaches in saturated flow) | — | < 1 % |
@@ -393,8 +407,13 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   coming from the ring, plus the ring junctions at both ends.
 - The single-car rig (`wp_vehicle::rig`, client prediction and `tests/drive.rs`) drives on a
   flat slab, so it does not see the grid's viaduct either (as on Port Vesper's hills).
-- No painted gore chevrons or dotted lane-line extensions across freeway tapers; the taper
-  connectors themselves read as `Concrete` in `surface_at` (other connectors read `Asphalt`).
+- On the grid's viaduct (and a few Port Vesper ramps) a ramp starts to drop or climb where
+  its shoulder still overlaps the carriageway's, so the gore is split-level: the chevrons stop
+  at the carriageway's shoulder, and the step between the two shoulders (rail-free below 1 m
+  of height difference) is still there. Keeping ramps level until their paving has left the
+  carriageway's would need longer grid ramps (tried: the viaduct's inner ramps then exceed the
+  8.5 % grade cap). The taper connectors read as `Concrete` in `surface_at` (other connectors
+  read `Asphalt`).
   Taper connectors follow the paving's height (graded, banked) rather than a straight line.
 - Physical agents are `wp_vehicle` instances, but `wp_sim` does not yet create rigid bodies /
   damage models for them (needs `LodChange` handling in the sim loop, see

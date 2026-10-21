@@ -81,6 +81,9 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `bulwark_400` | Bulwark 400 | Muscle | early-70s 6.6 L HO V8 four-door sedan, clutch-LSD live axle, early radials |
 | `arashi_t4` | Arashi T4 | Sport | mid-90s AWD 2.0 T rally-homologation saloon, 40/60 centre diff, rear LSD |
 | `satchel_20` | Satchel 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody — delivery traffic / parked |
+| `fulmine_v10` | Fulmine V10 | Exotic | 2010s mid-engine 5.2 NA V10, permanent AWD (30 % front), dual-clutch — top of the market |
+| `sentinel_warden` | Sentinel Warden | PoliceCruiser | late-80s RWD 5.7 V8 body-on-frame police sedan, 4-speed auto, push bar — low-heat old fleet |
+| `sentinel_harrier` | Sentinel Harrier | PoliceInterceptor | 2010s RWD 5.0 V8 muscle-coupe pursuit car, push bar — high-heat (L4–L5) unit |
 
 `tansy_13`, `drayman_cargo` and `furrow_24` are civilian traffic cars (round 6b); `satchel_20` joins
 them as a delivery van: cheap, slow, validated like the rest.

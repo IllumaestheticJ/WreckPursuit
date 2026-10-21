@@ -5,10 +5,13 @@
 // every sim-space object is parented under it.
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { PoliceUnitsView } from "./render/police_units";
+import { TrafficRenderer, trafficStride } from "./render/traffic";
 import { MarkingsView } from "./markings_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
@@ -25,8 +28,10 @@ const MAX_AGENTS = 1024;
 /** Traffic car box size [w, l, h], m. */
 const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
 const tmpAgentColour = new THREE.Color();
-/** Floats per unit in police_units(). */
-const POLICE_UNIT_STRIDE = 6;
+const tmpAgentMatrix = new THREE.Matrix4();
+const tmpAgentQuat = new THREE.Quaternion();
+const tmpAgentPos = new THREE.Vector3();
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -40,7 +45,10 @@ export class SceneView {
   contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
-  private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Non-sim police units (render/police_units.ts), created on first use. */
+  private policeView: PoliceUnitsView | null = null;
+  /** Camera position in sim space (last render), for police point-light LOD. */
+  private readonly cameraSim = new THREE.Vector3();
   private readonly agentMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0xffffff }),
@@ -48,6 +56,8 @@ export class SceneView {
   );
 
   private debugGrid!: THREE.GridHelper;
+  /** Styled instanced traffic (render/traffic.ts); the grey boxes above are its fallback. */
+  readonly traffic = new TrafficRenderer();
   /** Traffic signal heads (signals_view.ts). */
   readonly signals = new SignalView();
   /** Painted road markings (markings_view.ts). */
@@ -58,6 +68,12 @@ export class SceneView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
+    // Image-based lighting so metallic paint, chrome and bare metal on the car meshes read as
+    // metal instead of black (they only reflect an environment, never the direct lights).
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.6;
+    pmrem.dispose();
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
 
     this.scene.background = DAY_SKY.clone();
@@ -85,7 +101,15 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group);
+    this.world.add(
+      axes,
+      this.barriers,
+      this.intentGroup,
+      this.agentMesh,
+      this.signals.group,
+      this.markings.group,
+      this.traffic.group,
+    );
   }
 
   /**
@@ -144,57 +168,38 @@ export class SceneView {
   }
 
   /**
-   * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags],
-   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
+   * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags,
+   * unitId, model] — layout.ts PU; flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
    */
   updatePoliceUnits(units: Float32Array, timeS: number): void {
-    const n = units.length / POLICE_UNIT_STRIDE;
-    while (this.policeUnits.length < n) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
-      body.position.z = 0.7;
-      const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
-      const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
-      const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
-      barR.position.set(-0.32, -0.1, 1.48);
-      const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
-      barB.position.set(0.32, -0.1, 1.48);
-      g.add(body, barR, barB);
-      this.world.add(g);
-      this.policeUnits.push({ obj: g, red, blue });
-    }
-    this.policeUnits.forEach((u, i) => {
-      u.obj.visible = i < n;
-      if (i >= n) return;
-      const o = i * POLICE_UNIT_STRIDE;
-      u.obj.position.set(units[o], units[o + 1], units[o + 2]);
-      u.obj.rotation.z = units[o + 3];
-      const flags = units[o + 5];
-      u.obj.scale.setScalar(flags & 1 ? 1.4 : 1); // helicopters: bigger box at altitude
-      const chasing = (flags & 2) !== 0;
-      const phase = (timeS * 2.5 + i * 0.17) % 1;
-      u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
-      u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
-    });
+    // Real police meshes + livery + flash patterns (render/police_units.ts).
+    this.policeView ??= new PoliceUnitsView(this.world);
+    this.policeView.update(units, timeS, this.cameraSim);
   }
 
-  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */
+  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags, agentId, model] per agent, layout.ts AG). */
   updateAgents(agents: Float32Array, skipPhysical = false): void {
-    const total = agents.length / AGENT_STRIDE;
+    const stride = trafficStride();
+    const total = Math.floor(agents.length / stride);
     const show = layers.on("traffic");
+    // Styled meshes once loaded; the grey boxes stay as the fallback.
+    this.traffic.group.visible = show && this.traffic.ready;
+    if (this.traffic.group.visible) {
+      this.agentMesh.visible = false;
+      this.traffic.update(agents, stride, skipPhysical, performance.now());
+      return;
+    }
     this.agentMesh.visible = show && total > 0;
     if (!this.agentMesh.visible) return;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const zAxis = new THREE.Vector3(0, 0, 1);
     let n = 0;
     for (let a = 0; a < total && n < MAX_AGENTS; a++) {
-      const o = a * AGENT_STRIDE;
+      const o = a * stride;
       if (skipPhysical && agents[o + 4] & AGENT_FLAG.physical) continue;
       const i = n++;
-      q.setFromAxisAngle(zAxis, agents[o + 3]);
-      m.compose(new THREE.Vector3(agents[o], agents[o + 1], agents[o + 2] + 0.7), q, AGENT_SCALE);
-      this.agentMesh.setMatrixAt(i, m);
+      tmpAgentQuat.setFromAxisAngle(Z_AXIS, agents[o + 3]);
+      tmpAgentPos.set(agents[o], agents[o + 1], agents[o + 2] + 0.7);
+      tmpAgentMatrix.compose(tmpAgentPos, tmpAgentQuat, AGENT_SCALE);
+      this.agentMesh.setMatrixAt(i, tmpAgentMatrix);
       const flags = agents[o + 4];
       const c =
         flags & AGENT_FLAG.yielding
@@ -216,6 +221,7 @@ export class SceneView {
     (this.scene.background as THREE.Color).copy(DAY_SKY).lerp(NIGHT_SKY, night);
     this.hemi.intensity = 2.0 * (1 - 0.8 * night);
     this.sun.intensity = 1.5 * (1 - night);
+    this.traffic.setNight(night);
   }
 
   setBarriers(list: Barrier[]): void {
@@ -299,6 +305,9 @@ export class SceneView {
   }
 
   render(camera: THREE.Camera): void {
+    this.world.updateMatrixWorld();
+    this.world.worldToLocal(camera.getWorldPosition(this.cameraSim));
+    this.traffic.setCamera(camera);
     this.renderer.render(this.scene, camera);
   }
 }
