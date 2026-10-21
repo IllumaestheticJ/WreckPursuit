@@ -31,6 +31,58 @@ pub const MESH_FORMAT: u32 = 4;
 pub const LIGHT_PROUD_M: f32 = 0.014;
 /// How deep a head / tail lamp lens is sunk into the body behind the nose / tail face, m.
 pub const LIGHT_DEPTH_M: f32 = 0.012;
+/// Name prefix reserved for turn-signal lenses. Every car mesh (full and mid LOD) has exactly
+/// `indicator_front_l/_r` and `indicator_rear_l/_r` (kind `light`, in `FrameFront` /
+/// `FrameRear` like the head / tail lamp they are cut out of) and optionally
+/// `indicator_side_l/_r` repeaters (front fender or door mirror); no other part name starts
+/// with it. `_l` is the x < 0 side.
+pub const INDICATOR_PREFIX: &str = "indicator_";
+/// Gap between a turn-signal segment and the rest of its lamp lens (the lens divider), m.
+pub const INDICATOR_SEAM_M: f32 = 0.005;
+
+/// Key of the front turn-signal lens of the left (`right = false`) or right side: an amber
+/// segment of the head-lamp cluster, in `FrameFront` so it binds and crushes like the lamp.
+pub fn indicator_front_key(right: bool) -> PartKey {
+    let name = if right {
+        "indicator_front_r"
+    } else {
+        "indicator_front_l"
+    };
+    PartKey::body(
+        name,
+        BodyRegion::FrameFront,
+        PartKind::Light,
+        MaterialSlot::EmissiveAmber,
+    )
+}
+
+/// Key of the rear turn-signal lens of a side: a section of the tail-lamp cluster in
+/// `FrameRear`, `EmissiveAmber` (amber section) or `Taillight` (red-on-red, blinked red).
+pub fn indicator_rear_key(right: bool, mat: MaterialSlot) -> PartKey {
+    let name = if right {
+        "indicator_rear_r"
+    } else {
+        "indicator_rear_l"
+    };
+    PartKey::body(name, BodyRegion::FrameRear, PartKind::Light, mat)
+}
+
+/// Key of a side repeater (`indicator_side_l/_r`), amber, on `left_region` (a front fender or
+/// a front door for a mirror repeater; given for the left side, mirrored for the right).
+pub fn indicator_side_key(right: bool, left_region: BodyRegion) -> PartKey {
+    let k = PartKey::body(
+        "indicator_side_l",
+        left_region,
+        PartKind::Light,
+        MaterialSlot::EmissiveAmber,
+    );
+    if right {
+        k.mirrored()
+    } else {
+        k
+    }
+}
+
 /// Hard overall triangle range of any car (per-tier budgets: [`Tier::tri_budget`]).
 pub const TRI_BUDGET: (u32, u32) = (4000, 20000);
 /// Window margin (pillar half width) around door edges, m.
@@ -1118,7 +1170,11 @@ fn underglow(p: &BodyProfile, b: &mut Builder) {
 /// Head / tail lights on the nose / tail faces ([`LIGHT_PROUD_M`] proud, facing out, sunk
 /// [`LIGHT_DEPTH_M`]); their region is the front / rear frame (never a free panel), and
 /// `bind-skin` binds them to the nearest bumper, hood / trunk, fender / quarter and frame nodes
-/// so they crush with the end of the car. Door mirrors on the front doors.
+/// so they crush with the end of the car. Each cluster carries its turn signal as a segment of
+/// the same lens (same depth, proud face and bevel, split by [`INDICATOR_SEAM_M`]): an amber
+/// strip along the bottom of the head lamp, an amber inboard section of the tail lamp. Style
+/// kits reshape both (this default is the police cars' layout). Door mirrors on the front
+/// doors.
 fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
     let top_n = p.belt(p.y_nose);
     let top_t = p.belt(p.y_tail);
@@ -1129,6 +1185,8 @@ fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
         let wf = p.half_width(p.y_nose);
         let (x0, x1) = (sx * (wf - 0.07), sx * (wf - 0.38));
         let side = if right { "r" } else { "l" };
+        // Head lamp over an amber strip along the lens bottom (4 cm tall).
+        let z_split = hl_z - 0.01;
         b.beveled_box(
             &PartKey::body(
                 &format!("headlight_{side}"),
@@ -1136,12 +1194,25 @@ fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
                 PartKind::Light,
                 MaterialSlot::Headlight,
             ),
-            [x0.min(x1), p.y_nose - LIGHT_DEPTH_M, hl_z - 0.05],
+            [
+                x0.min(x1),
+                p.y_nose - LIGHT_DEPTH_M,
+                z_split + INDICATOR_SEAM_M,
+            ],
             [x0.max(x1), p.y_nose + LIGHT_PROUD_M, hl_z + 0.045],
             0.008,
         );
+        b.beveled_box(
+            &indicator_front_key(right),
+            [x0.min(x1), p.y_nose - LIGHT_DEPTH_M, hl_z - 0.05],
+            [x0.max(x1), p.y_nose + LIGHT_PROUD_M, z_split],
+            0.008,
+        );
         let wt = p.half_width(p.y_tail);
+        // Tail lamp with an amber inboard section (9 cm wide).
         let (t0, t1) = (sx * (wt - 0.05), sx * (wt - 0.36));
+        let ts = sx * (wt - 0.27);
+        let tsr = ts + sx * INDICATOR_SEAM_M;
         b.beveled_box(
             &PartKey::body(
                 &format!("taillight_{side}"),
@@ -1149,8 +1220,14 @@ fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
                 PartKind::Light,
                 MaterialSlot::Taillight,
             ),
-            [t0.min(t1), p.y_tail - LIGHT_PROUD_M, tl_z - 0.05],
-            [t0.max(t1), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.05],
+            [t0.min(tsr), p.y_tail - LIGHT_PROUD_M, tl_z - 0.05],
+            [t0.max(tsr), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.05],
+            0.008,
+        );
+        b.beveled_box(
+            &indicator_rear_key(right, MaterialSlot::EmissiveAmber),
+            [t1.min(ts), p.y_tail - LIGHT_PROUD_M, tl_z - 0.05],
+            [t1.max(ts), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.05],
             0.008,
         );
         // Mirror on the front door, just behind its hinge at the belt.

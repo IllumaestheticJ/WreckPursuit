@@ -14,7 +14,7 @@ use crate::style::{
     Induction, RimKind, Silhouette, SuspensionKind,
 };
 
-use super::kit::{dkey, headlight_key, lkey, sided, taillight_key, top_band, Kit, SIDES};
+use super::kit::{dkey, indicator_rear_key, lkey, sided, taillight_key, top_band, Kit, Seg, SIDES};
 use super::{kit_detail, rgb, wheels};
 
 /// Late-90s FF hot hatch: boxy, thin pillars, clear lamps, slim grille slot over a big lower
@@ -130,7 +130,6 @@ pub fn marten(def: &VehicleDef) -> CarStyle {
 fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let mut k = Kit::new(ctx.profile, b);
     let p = ctx.profile;
-    let yn = k.yn;
     let wn = k.wn();
     let wt = k.wt();
     let (nz0, nz1) = k.nose_z();
@@ -149,9 +148,17 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         None,
     );
     for sx in SIDES {
-        let hk = headlight_key(sx);
-        let (x0, x1) = (sx * 0.33, sx * (wn - 0.04));
-        k.front_box(&hk, x0, x1, nz1 - 0.13, nz1 - 0.02, 0.022, 0.012);
+        // Clear lens with the amber turn signal in its outer corner (same lens, same face).
+        k.front_cluster(
+            sx,
+            0.33,
+            wn - 0.04,
+            nz1 - 0.13,
+            nz1 - 0.02,
+            0.022,
+            0.012,
+            Seg::Outboard(0.10),
+        );
         let kr = sided(
             &dkey(
                 "headlamp_reflector_l",
@@ -161,15 +168,6 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             sx,
         );
         k.round_lamp(&kr, true, sx * (wn - 0.22), nz1 - 0.075, 0.035, 0.026, None);
-        let ka = sided(
-            &lkey(
-                "indicator_front_l",
-                BodyRegion::FrontLeftFender,
-                M::EmissiveAmber,
-            ),
-            sx,
-        );
-        k.side_box(&ka, sx, yn - 0.06, nz1 - 0.07, 0.07, 0.05, 0.012, 0.0);
     }
     let zm0 = nz0 + 0.07;
     let zm1 = nz0 + 0.24;
@@ -196,15 +194,9 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         let zl = zh - 0.30;
         let zs = zl + 0.42 * (zh - zl);
         k.rear_box(&tk, x0, x1, zs + 0.005, zh, 0.024, 0.008);
-        let ka = sided(
-            &lkey(
-                "indicator_rear_l",
-                BodyRegion::RearLeftQuarter,
-                M::EmissiveAmber,
-            ),
-            sx,
-        );
-        k.rear_box(&ka, x0, x1, zl + 0.06, zs - 0.005, 0.022, 0.006);
+        // Amber band of the cluster between the red lamp and the reverse lamp, same face.
+        let ka = indicator_rear_key(sx, M::EmissiveAmber);
+        k.rear_box(&ka, x0, x1, zl + 0.06, zs - 0.005, 0.024, 0.008);
         let kc = sided(
             &lkey("reverse_lamp_l", BodyRegion::RearLeftQuarter, M::Headlight),
             sx,
@@ -240,6 +232,7 @@ fn vireo_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.skirts(M::Paint, 0.02, 0.05);
     k.mirrors(0.10, 0.11, None);
+    k.fender_repeaters();
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.10, M::Paint);
     k.wipers();
@@ -336,7 +329,16 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         0.0,
     );
     for sx in SIDES {
-        k.top_lamp(sx, yn - 0.17, yn - 0.03, 0.52, wn - 0.06, 0.022);
+        // Slim LED lens with an amber outboard segment.
+        k.top_lamp_split(
+            sx,
+            yn - 0.17,
+            yn - 0.03,
+            0.52,
+            wn - 0.06,
+            0.022,
+            Seg::Outboard(0.09),
+        );
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
@@ -394,21 +396,23 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     // --- Rear: wrap-around horizontal tails with a bright inner bar, diffuser, big spoiler.
     for sx in SIDES {
-        let tk = taillight_key(sx);
         let kh = sided(
             &dkey("taillight_housing_l", BodyRegion::RearLeftQuarter, M::Trim),
             sx,
         );
         let (z0, z1) = (tz1 - 0.13, tz1 - 0.03);
         k.rear_box(&kh, sx * 0.28, sx * (wt + 0.005), z0, z1, 0.014, 0.006);
-        k.rear_box(
-            &tk,
-            sx * 0.30,
-            sx * (wt - 0.01),
+        // Lens with an amber inboard section; the bright bar runs through the red part.
+        k.rear_cluster(
+            sx,
+            0.30,
+            wt - 0.01,
             z0 + 0.012,
             z1 - 0.012,
             0.022,
             0.006,
+            Seg::Inboard(0.10),
+            M::EmissiveAmber,
         );
         let ki = sided(
             &lkey("taillight_bar_l", BodyRegion::RearLeftQuarter, M::Taillight),
@@ -416,7 +420,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         k.rear_box(
             &ki,
-            sx * 0.32,
+            sx * 0.42,
             sx * (wt - 0.03),
             0.5 * (z0 + z1) - 0.008,
             0.5 * (z0 + z1) + 0.008,
@@ -460,6 +464,7 @@ fn lindwurm_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 
     k.skirts(M::Trim, 0.03, 0.06);
     k.mirrors(0.10, 0.12, Some(M::Metal));
+    k.mirror_repeaters(0.10, 0.12, true);
     k.door_handles(M::Trim);
     k.fuel_filler(1.0, 0.11, M::Paint);
     k.wipers();
