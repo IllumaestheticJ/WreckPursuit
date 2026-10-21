@@ -797,8 +797,14 @@ impl PoliceSystem {
         let acc = (want - v).clamp(-brake, accel);
         let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
         let siren = u.cmd.siren;
+        let steer = u
+            .controller()
+            .steer(pos, heading, [target[0], target[1], 0.0]);
+        if u.avoid.reverse_s > 0.0 && !disabled {
+            return Some(self.back_out(i, steer, dt));
+        }
+        let u = &mut self.units[i];
         let ctl = u.controller();
-        let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
         let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
         let mut handbrake = 0.0;
         if hold {
@@ -816,6 +822,50 @@ impl PoliceSystem {
             headlights: true,
             ..Default::default()
         })
+    }
+
+    /// Input for unit `i` backing out after `reroute_around_block` turned it round: brake at
+    /// a standstill selects reverse, and reversed steering swings the nose toward the new
+    /// track (`steer` is the forward steer toward it). Stops, on the handbrake, as soon as
+    /// anything is within `standstill_gap_m` behind.
+    fn back_out(&mut self, i: usize, steer: f32, dt: f32) -> VehicleInput {
+        let u = &self.units[i];
+        let me = avoid::Me {
+            unit: u.id,
+            entity: u.entity,
+            pos: u.body.pos,
+            heading: u.body.heading,
+            track_s: u.track_s,
+            ignore: None,
+            target: None,
+            skip_higher_units: false,
+        };
+        let clear = avoid::clear_behind(
+            &me,
+            &self.obstacles,
+            self.cfg.pursuit.avoid.standstill_gap_m,
+        );
+        let u = &mut self.units[i];
+        let siren = u.cmd.siren;
+        if !clear {
+            u.avoid.reverse_s = 0.0;
+            return VehicleInput {
+                handbrake: 1.0,
+                siren,
+                headlights: true,
+                ..Default::default()
+            };
+        }
+        u.avoid.reverse_s -= dt;
+        // Forward driving resumes from a standstill.
+        u.controller().resync(0.0);
+        VehicleInput {
+            steer: -steer,
+            brake: REVERSE_PEDAL,
+            siren,
+            headlights: true,
+            ..Default::default()
+        }
     }
 
     pub(crate) fn alloc_unit_id(&mut self) -> UnitId {
@@ -929,6 +979,9 @@ impl PoliceSystem {
 
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
+/// Brake pedal held at a standstill to drive backwards (`wp_vehicle`'s automatic selects
+/// reverse above 0.5 held for 0.25 s; the pedal then drives backwards).
+pub(crate) const REVERSE_PEDAL: f32 = 0.7;
 
 /// Brake and handbrake that keep a car stopped: above walking pace the requested `brake`; at a
 /// standstill a light pedal plus the handbrake, because `wp_vehicle`'s automatic gearbox

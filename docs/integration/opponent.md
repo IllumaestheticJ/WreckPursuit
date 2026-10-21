@@ -162,6 +162,9 @@ No other contract change needed: `WantedLevel` (now in contracts) maps to `Polic
   gap, t = 48-53 s), then meets a real gridlock: two **patrol** cars (entities 6 and 9)
   standing still for > 100 s in both lanes, which no line can pass. That is the police AI
   (reported in `police.md`), not this crate. At the shipped 5.0 the test passes as before.
+  **Update (same day):** the patrol gridlock is fixed in `wp_police` (boxed-in units turn
+  round and back out; `police.md`). With it, the test passes at 6.0 as well, with no further
+  change in this crate.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |

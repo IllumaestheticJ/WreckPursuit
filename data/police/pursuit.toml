@@ -122,6 +122,13 @@ yield_max_s = 8.0
 yield_max_siren_s = 3.0
 # Units waiting on each other: after this the lower unit id creeps on.
 gridlock_s = 2.0
+# Not chasing anyone and stopped this long behind a stopped vehicle it cannot pass (a busted
+# car parked in the junction mouth, a jam): turn around onto another route. Time at a red or
+# yellow light does not count.
+reroute_after_s = 20.0
+# ...backing out first for up to this long (a car cannot turn round from standstill nose to
+# tail with something).
+reroute_reverse_s = 3.0
 spawn_clear_m = 25.0
 spawn_path_s = 5.0
 spawn_path_half_width_m = 6.0

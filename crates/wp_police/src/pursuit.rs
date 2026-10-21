@@ -34,6 +34,9 @@ use crate::unit::{
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
+/// Random destinations tried when turning a stuck patrol around.
+const REROUTE_TRIES: usize = 6;
+
 /// Below this speed a racer counts as stopped for interception, m/s.
 const STOPPED_RACER_MPS: f32 = 2.0;
 
@@ -429,6 +432,55 @@ impl PoliceSystem {
         (Track::new(pts), turn_around)
     }
 
+    /// Turn unit `i` around onto a route that does not lead straight back into the node it is
+    /// stuck in front of (a parked car it cannot pass, a jam). `dest` keeps a responder's
+    /// destination (and `final_point`); a patrol (`None`) picks a new one in its district.
+    /// If no such route is found the unit waits another `reroute_after_s`.
+    pub(crate) fn reroute_around_block(
+        &mut self,
+        i: usize,
+        dest: Option<NodeId>,
+        final_point: Option<[f32; 2]>,
+    ) {
+        let (pos, heading) = (self.units[i].body.pos, self.units[i].body.heading);
+        let ahead = self
+            .start_node(pos, heading)
+            .map(|n| self.graph.node(n).pos);
+        let back = scale(heading, -1.0);
+        let district = match self.units[i].role {
+            UnitRole::Pool(d) => Some(d),
+            _ => None,
+        };
+        self.units[i].avoid.stuck_s = 0.0;
+        let tries = if dest.is_some() { 1 } else { REROUTE_TRIES };
+        for _ in 0..tries {
+            let Some(to) = dest.or_else(|| self.random_node_in(district)) else {
+                return;
+            };
+            let (track, _) = self.route_from(pos, back, to, final_point);
+            // The first node after the body (pts[1]) must not be the blocked one ahead.
+            let via_block =
+                ahead.is_some_and(|a| track.pts.get(1).is_some_and(|p| dist(*p, a) < 1.0));
+            if !track.is_drivable() || via_block {
+                continue;
+            }
+            if dest.is_none() {
+                self.units[i].assignment = Assignment::Patrol { dest: to };
+            }
+            let cmd = DriveCommand {
+                track,
+                ..self.units[i].cmd.clone()
+            };
+            self.units[i].set_command(cmd);
+            // The route leaves behind the unit while the car still faces the block: a physical
+            // unit backs out first (the kinematic driver turns on the spot).
+            if self.units[i].entity.is_some() {
+                self.units[i].avoid.reverse_s = self.cfg.pursuit.avoid.reroute_reverse_s;
+            }
+            return;
+        }
+    }
+
     pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
         let cands: Vec<u32> = (0..self.graph.nodes.len() as u32)
             .filter(|&n| d.is_none_or(|d| self.graph.nodes[n as usize].district == d))
@@ -522,6 +574,9 @@ impl PoliceSystem {
                     }
                 }
                 Assignment::Patrol { dest } => {
+                    if self.units[i].avoid.stuck_s > p.avoid.reroute_after_s {
+                        self.reroute_around_block(i, None, None);
+                    }
                     let u = &self.units[i];
                     let near_end =
                         !u.cmd.track.is_drivable() || u.track_s > u.cmd.track.length() - 8.0;
@@ -579,6 +634,10 @@ impl PoliceSystem {
                             }
                         }
                         continue;
+                    }
+                    if self.units[i].avoid.stuck_s > p.avoid.reroute_after_s {
+                        let dest = self.graph.nearest_node(inc.pos).unwrap_or(NodeId(0));
+                        self.reroute_around_block(i, Some(dest), Some(inc.pos));
                     }
                     if !self.units[i].cmd.track.is_drivable() {
                         let dest = self.graph.nearest_node(inc.pos).unwrap_or(NodeId(0));
@@ -1008,6 +1067,92 @@ pub fn lateral_g(v_mps: f32, r_m: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::PoliceConfig;
+    use crate::graph::{District, RoadClass, RoadGraph};
+    use crate::unit::SteerGeometry;
+    use crate::PoliceSetup;
+
+    /// A 3 × 3 grid of two-way local streets, 100 m apart, all in the core district.
+    fn grid() -> RoadGraph {
+        let mut g = RoadGraph::new();
+        let mut n = Vec::new();
+        for y in 0..3 {
+            for x in 0..3 {
+                n.push(g.add_node([x as f32 * 100.0, y as f32 * 100.0], District::Core));
+            }
+        }
+        for y in 0..3 {
+            for x in 0..3 {
+                let i = y * 3 + x;
+                if x < 2 {
+                    g.add_segment(n[i], n[i + 1], 13.9, RoadClass::Local, false);
+                }
+                if y < 2 {
+                    g.add_segment(n[i], n[i + 3], 13.9, RoadClass::Local, false);
+                }
+            }
+        }
+        g
+    }
+
+    #[test]
+    fn a_patrol_stuck_behind_a_block_turns_round_and_backs_out() {
+        let setup = PoliceSetup {
+            internal_driving: false,
+            ..PoliceSetup::default()
+        };
+        let mut p = PoliceSystem::with_city(PoliceConfig::builtin(), grid(), setup);
+        // Heading north up x = 100 toward the centre node (100, 100), from (101.75, 60).
+        let i = p.spawn_unit(
+            UnitKind::Car,
+            UnitRole::Pool(District::Core),
+            [101.75, 60.0],
+            [0.0, 1.0],
+        );
+        let ahead = NodeId(4);
+        p.assign(i, Assignment::Patrol { dest: NodeId(7) });
+        let t = p.route_track(i, NodeId(7), None);
+        p.units[i].set_command(DriveCommand {
+            track: t,
+            speed_mps: 10.0,
+            cornering_g: 0.35,
+            siren: false,
+            lane_offset_m: LANE_OFFSET_M,
+        });
+        let unit = p.units[i].id;
+        p.bind_unit_entity(unit, EntityId(50), SteerGeometry::default());
+
+        p.reroute_around_block(i, None, None);
+        let u = &p.units[i];
+        let first = u.cmd.track.pts[1];
+        assert!(
+            dist(first, p.graph.node(ahead).pos) > 1.0,
+            "must not route back through the blocked node: {:?}",
+            u.cmd.track.pts
+        );
+        assert!(first[1] < 60.0, "leaves behind the unit: {first:?}");
+        assert!(matches!(u.assignment, Assignment::Patrol { .. }));
+        assert_eq!(u.avoid.stuck_s, 0.0);
+        let reverse_s = p.cfg.pursuit.avoid.reroute_reverse_s;
+        assert_eq!(u.avoid.reverse_s, reverse_s);
+
+        // Nothing behind: drives backwards (brake at a standstill selects reverse).
+        let inp = p.unit_input(unit, wp_contracts::PHYSICS_DT).unwrap();
+        assert_eq!(inp.brake, crate::REVERSE_PEDAL);
+        assert_eq!(inp.throttle, 0.0);
+        // A car right behind: stops backing out and holds.
+        p.obstacles = vec![crate::avoid::Obstacle::car(
+            Some(EntityId(51)),
+            None,
+            [101.75, 60.0 - 2.45 - 2.3 - 0.5],
+            [0.0, 0.0],
+            [0.0, 1.0],
+        )];
+        let inp = p.unit_input(unit, wp_contracts::PHYSICS_DT).unwrap();
+        assert_eq!(inp.handbrake, 1.0);
+        assert_eq!(inp.brake, 0.0);
+        assert_eq!(p.units[i].avoid.reverse_s, 0.0);
+    }
 
     #[test]
     fn cap_is_target_plus_margin_bounded() {

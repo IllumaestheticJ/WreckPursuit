@@ -95,6 +95,23 @@
   across the lane. They seem to wait on each other and the stopped cars around them (`avoid`'s
   follow/wait-behind). Racers now pass a traffic stop, but not two cars blocking the whole
   road. Worth a look before raising `physical_accel_mps2` above 5.0.
+- **2026-10-21, same session, owner request "fix the police patrol gridlock too": fixed.**
+  Traced at `physical_accel_mps2 = 6.0`. Unit 9 (patrol) stood sideways in a junction mouth
+  behind busted racer 2, which stays parked there for good; its other lane was taken (racer 3,
+  then the busted car's overhang). Unit 6 queued behind a kinematic civilian waiting on that
+  junction. A third patrol (unit 4) then joined the jam. `pass_wait` never fired for unit 6
+  (no passing near a junction without lights), and a physical car facing a block could not turn
+  round (no reverse). Changes (`avoid.rs`, `pursuit.rs`, `lib.rs`, `config.rs`,
+  `pursuit.toml [avoid]`; README "Boxed in → turn round"):
+  - `AvoidState::{stuck_s, reverse_s}` (serde-default) and `AvoidConfig::{reroute_after_s = 20,
+    reroute_reverse_s = 3}`;
+  - `PoliceSystem::reroute_around_block` for `Patrol` / `Respond` units over `reroute_after_s`;
+  - `unit_input` backs a physical unit out (`back_out`, brake 0.7 = `wp_vehicle` auto-reverse,
+    which needs > 0.5; handbrake stop when `avoid::clear_behind` fails).
+  Result: unit 9 turns round after 20 s and leaves, the junction clears, unit 6 and the racer
+  drive on, and `live_police_chase…` passes **at 6.0 too**. Tests: 2 in `avoid.rs`, 1 in
+  `pursuit.rs` (reroute + back-out on a 3 × 3 grid). The kinematic driver (headless doctrine
+  scenarios) also reroutes but turns on the spot (no back-out).
 
 ## Needs
 | From | What | Workaround now |

@@ -126,6 +126,15 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
   automatic reverse.
 - **Gridlock**: a unit stopped behind another stopped police unit for `gridlock_s` creeps on at
   `pass_creep_mps` past stopped higher-id units that cross or face it (they keep waiting).
+- **Boxed in → turn round**: a patrol or responder standing still behind a stopped vehicle it
+  cannot pass (`AvoidState::stuck_s`; time at a red or yellow light and while passing does not
+  count) for `reroute_after_s` (20 s) turns round onto a route that does not lead back through
+  the node ahead (`reroute_around_block`: patrols try up to 6 new destinations, responders keep
+  theirs). A physical unit first backs out for up to `reroute_reverse_s` (3 s): brake 0.7 at a
+  standstill selects reverse, steering reversed so the nose swings toward the new route,
+  stopping on the handbrake as soon as anything is within `standstill_gap_m` behind. Pursuing
+  and intercepting units never reroute this way. Typical case: a busted car parked in a
+  junction mouth with the other lane taken.
 - **Spawning**: pool units appear in the right-hand lane, ≥ `spawn_clear_m` from every vehicle
   and outside every moving vehicle's next `spawn_path_s` of travel, already facing their first
   patrol route (a physical car turning around from standstill runs over the kerb). Reinforcement

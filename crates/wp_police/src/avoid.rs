@@ -132,6 +132,13 @@ pub struct AvoidState {
     /// What caps the speed right now: a vehicle's entity id, a police unit id, or none.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
+    /// Time standing still behind a stopped vehicle, not passing and not at a red or yellow
+    /// light, s ([`AvoidConfig::reroute_after_s`]).
+    #[serde(default)]
+    pub stuck_s: f32,
+    /// Time left backing out after a stuck unit was turned round (physical units), s.
+    #[serde(default)]
+    pub reverse_s: f32,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -157,6 +164,8 @@ impl Default for AvoidState {
             yield_s: 0.0,
             unit_wait_s: 0.0,
             blocked_by: None,
+            stuck_s: 0.0,
+            reverse_s: 0.0,
         }
     }
 }
@@ -327,6 +336,21 @@ pub(crate) fn scan(
     best
 }
 
+/// Nothing within `dist_m` behind a unit at `pos` facing `heading` (its own body excluded):
+/// room to back out.
+pub(crate) fn clear_behind(me: &Me, obstacles: &[Obstacle], dist_m: f32) -> bool {
+    let side = [me.heading[1], -me.heading[0]];
+    !obstacles.iter().any(|o| {
+        if o.unit == Some(me.unit) || (o.entity.is_some() && o.entity == me.entity) {
+            return false;
+        }
+        let rel = sub(o.pos, me.pos);
+        let back = -dot(rel, me.heading) - UNIT_HALF_LENGTH_M;
+        let ext = o.half_len.max(o.half_wid);
+        back > -ext && back < dist_m + ext && dot(rel, side).abs() < UNIT_HALF_WIDTH_M + ext
+    })
+}
+
 /// Highest speed that still stops `standstill_gap_m` behind `b`, m/s.
 pub(crate) fn follow_speed(b: &Blocker, v: f32, cfg: &AvoidConfig) -> f32 {
     let room = b.gap_m - cfg.standstill_gap_m - v * cfg.reaction_s;
@@ -418,6 +442,17 @@ pub(crate) fn update(
         (None, Some(e)) => BlockedBy::Vehicle(e),
         (None, None) => BlockedBy::Traffic,
     });
+    let at_light = st
+        .junction
+        .is_some_and(|j| matches!(j.light, Some(Light::Stop | Light::Caution)));
+    let held = v < 0.5
+        && st.pass_offset_m.is_none()
+        && blocker.is_some_and(|b| b.speed_mps < cfg.stopped_mps && b.gap_m < cfg.pass_gap_m);
+    st.stuck_s = if held && !at_light {
+        st.stuck_s + dt
+    } else {
+        0.0
+    };
     if st.pass_offset_m.is_some() {
         // Pulling out from right behind the stopped vehicle: it stays in the bumper box until
         // the car has turned, so creep while there is room.
@@ -758,6 +793,55 @@ mod tests {
         }
         assert_eq!(off, 1.75);
         assert_eq!(st.limit_mps, 0.0);
+    }
+
+    #[test]
+    fn stuck_timer_counts_only_when_boxed_in_and_not_at_a_light() {
+        let c = cfg();
+        // Stopped right behind a parked car, with the other lane blocked too: no pass.
+        let obs = [parked(2, [1.75, 7.5]), parked(3, [-1.75, 9.0])];
+        let m = me(0.0, [1.75, 0.0]);
+        let run = |st: &mut AvoidState, secs: f32| {
+            for _ in 0..(240.0 * secs) as usize {
+                update(st, &m, &straight(), 1.75, 0.0, false, &obs, &c, 1.0 / 240.0);
+            }
+        };
+        let mut st = AvoidState::default();
+        run(&mut st, c.reroute_after_s + 1.0);
+        assert!(st.stuck_s > c.reroute_after_s, "{}", st.stuck_s);
+        assert!(st.pass_offset_m.is_none());
+        // The same queue at a red light is just waiting for the light.
+        let mut st = AvoidState {
+            junction: Some(JunctionAhead {
+                s: 20.0,
+                light: Some(Light::Stop),
+                turn: false,
+            }),
+            ..AvoidState::default()
+        };
+        run(&mut st, c.reroute_after_s + 1.0);
+        assert_eq!(st.stuck_s, 0.0);
+    }
+
+    #[test]
+    fn clear_behind_sees_a_car_at_the_bumper() {
+        let m = me(0.0, [1.75, 10.0]);
+        let gap = cfg().standstill_gap_m;
+        assert!(
+            clear_behind(&m, &[parked(2, [1.75, 30.0])], gap),
+            "ahead is not behind"
+        );
+        assert!(
+            clear_behind(&m, &[parked(2, [-1.75, 4.0])], gap),
+            "other lane"
+        );
+        // Bumper to bumper 1 m behind.
+        assert!(!clear_behind(
+            &m,
+            &[parked(2, [1.75, 10.0 - 2.45 - 2.3 - 1.0])],
+            gap
+        ));
+        assert!(clear_behind(&m, &[parked(10, [1.75, 5.0])], gap), "itself");
     }
 
     #[test]

@@ -486,6 +486,12 @@ pub struct AvoidConfig {
     pub no_pass_near_junction_m: f32,
     /// Stopped behind another police unit this long, the lower id creeps on, s.
     pub gridlock_s: f32,
+    /// A unit that is not chasing anyone, stopped this long behind a stopped vehicle it
+    /// cannot pass (not at a red or yellow light), turns around onto another route, s.
+    pub reroute_after_s: f32,
+    /// A physical unit turned round that way first backs out for up to this long (stopping
+    /// if anything is within `standstill_gap_m` behind it), s.
+    pub reroute_reverse_s: f32,
     /// Units spawn at least this far from any vehicle, m.
     pub spawn_clear_m: f32,
     /// ... and not where a moving vehicle will be within this time, s.
