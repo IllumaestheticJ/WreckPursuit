@@ -1,7 +1,7 @@
 {
   "id": "world_rec",
   "kind": "World",
-  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns, steam, road-surface rolling loops, loose-surface scrub and suspension thumps (Freesound + Kenney); plastic scrape and body rattle fall back to world_proc synths.",
+  "description": "Recorded CC0 impacts, glass, crunches, debris, metal/plastic scrapes, body rattle, tire bursts/squeal, horns, steam, road-surface rolling loops, loose-surface scrub and suspension thumps (Freesound + Kenney); world_proc synths only while files load.",
   "cues": {
     "tire/squeal": {
       "source": {
@@ -173,14 +173,11 @@
     },
     "scrape/plastic": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 2000.0,
-            "highpass_hz": 250.0,
-            "bandpass_hz": 800.0,
-            "crackle": 0.6
-          }
+        "Samples": {
+          "files": [
+            "scrape_plastic_01.ogg",
+            "scrape_plastic_02.ogg"
+          ]
         }
       },
       "gain": 0.7,
@@ -380,14 +377,12 @@
     },
     "body/rattle": {
       "source": {
-        "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 2500.0,
-            "highpass_hz": 300.0,
-            "crackle": 1.5,
-            "ripple_hz": 11.0
-          }
+        "Samples": {
+          "files": [
+            "body_rattle_01.ogg",
+            "body_rattle_02.ogg",
+            "body_rattle_03.ogg"
+          ]
         }
       },
       "gain": 0.7,

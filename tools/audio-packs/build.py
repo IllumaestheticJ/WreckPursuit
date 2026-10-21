@@ -217,8 +217,36 @@ def encode(x: np.ndarray, dest: Path) -> None:
     )
 
 
+def join(v: dict, m: dict, decoded: dict, used: dict, name: str) -> np.ndarray:
+    """Several short cuts (e.g. drag strokes), RMS-matched and joined with equal-power crossfades,
+    then looped — a longer texture than any single stroke gives."""
+    xf = int(v.get("xfade_s", 0.06) * SR)
+    t = np.linspace(0.0, np.pi / 2, xf)
+    out = np.zeros(0)
+    for part in v["join"]:
+        x = decode_cached(part, m, decoded)
+        seg = tone(highpass(x[int(part["start"] * SR) : int(part["end"] * SR)].copy()), v)
+        seg /= np.sqrt(np.mean(seg**2)) + 1e-9
+        if len(out) == 0:
+            out = seg
+        else:
+            out = np.concatenate([out[:-xf], out[-xf:] * np.cos(t) + seg[:xf] * np.sin(t), seg[xf:]])
+        used.setdefault(part["src"], []).append(name)
+    return seamless_loop(out, v.get("xfade_s", 0.06) * 2)
+
+
+def decode_cached(v: dict, m: dict, decoded: dict) -> np.ndarray:
+    """Decoded samples of the source a variant (or join part) cuts from."""
+    path = source_file(v["src"], m["sources"][v["src"]], v)
+    if path not in decoded:
+        decoded[path] = decode(path)
+    return decoded[path]
+
+
 def render(v: dict, spec: dict, m: dict, decoded: dict, used: dict, name: str) -> np.ndarray:
     """Cut and process one variant."""
+    if "join" in v:
+        return join(v, m, decoded, used, name)
     src = m["sources"][v["src"]]
     path = source_file(v["src"], src, v)
     if path not in decoded:
@@ -282,7 +310,8 @@ def main() -> None:
             encode(seg, out_dir / name)
             files.append(name)
             longest = max(longest, len(seg) / SR)
-            print(f"{cue:26} {name:34} {len(seg) / SR:5.2f}s  <- {v['src']}")
+            srcs = v['src'] if 'src' in v else '+'.join(sorted({p['src'] for p in v['join']}))
+            print(f"{cue:26} {name:34} {len(seg) / SR:5.2f}s  <- {srcs}")
         c = pack["cues"][cue]
         c["source"] = {"Samples": {"files": files}}
         c["gain"] = spec.get("gain", c.get("gain", 1.0))

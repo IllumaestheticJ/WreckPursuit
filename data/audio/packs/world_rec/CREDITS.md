@@ -61,3 +61,8 @@ previews of the CC0 originals, cut, cleaned and re-encoded.
 | [freesound 837875](https://freesound.org/s/837875/) | menfa | car over a speed bump | CC0 1.0 | suspension_thump_05.ogg, suspension_land_03.ogg |
 | [freesound 508170](https://freesound.org/s/508170/) | Breviceps | car over a road bump | CC0 1.0 | suspension_thump_06.ogg |
 | [freesound 504626](https://freesound.org/s/504626/) | leonelmail | heavy body fall on dirt | CC0 1.0 | suspension_land_01.ogg |
+| [freesound 455672](https://freesound.org/s/455672/) | kyles | plastic chair dragged across concrete | CC0 1.0 | scrape_plastic_01.ogg, scrape_plastic_01.ogg, scrape_plastic_01.ogg, scrape_plastic_01.ogg |
+| [freesound 161225](https://freesound.org/s/161225/) | lolamadeus | plastic chair dragged on stone | CC0 1.0 | scrape_plastic_02.ogg, scrape_plastic_02.ogg |
+| [freesound 104348](https://freesound.org/s/104348/) | RutgerMuller | plastic/metal chair scraped over concrete | CC0 1.0 | scrape_plastic_02.ogg |
+| [freesound 199455](https://freesound.org/s/199455/) | martinimeniscus | truck rattle | CC0 1.0 | body_rattle_01.ogg, body_rattle_02.ogg |
+| [freesound 160357](https://freesound.org/s/160357/) | qubodup | inside a military truck driving, rattles | CC0 1.0 | body_rattle_03.ogg |

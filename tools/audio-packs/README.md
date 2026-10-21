@@ -58,7 +58,9 @@ strongest tone in that range and resamples it to a constant pitch (turbo whistle
 `"resample": r` shifts pitch by a constant ratio; `"band_hz": [lo, hi]` + `"air"` keeps only that
 band (raised-cosine edges) plus broadband content above 2 kHz at `air` — isolates a whistle or
 whine from the engine under it; `"lowpass_hz"` darkens (blow-off from air releases), `"highpass_hz"` strips rumble.
-Applied in that order, before looping / one-shot shaping. A cue's `"root_speed_mps"` is copied
+Applied in that order, before looping / one-shot shaping. A variant can instead be
+`{ "join": [ {src, start, end}, … ], "xfade_s"? }`: short cuts (e.g. drag strokes) are RMS-matched
+and joined with equal-power crossfades, then looped — longer than any single stroke. A cue's `"root_speed_mps"` is copied
 into the pack (surface loops: the speed the recording was made at; pitch = speed / root).
 
 **Siren loops** use `{ "src", "start", "cycles", "cycle_s", "xfade_s"? }`: `start` is phase 0 of
@@ -91,6 +93,7 @@ The generated `CREDITS.md` next to the files lists every source, author and lice
   frequency and plausible idle speeds; the six may in fact be a V8 (only the layer spacing
   depends on it).
 - Surface `root_speed_mps` values are estimates; the recordings carry no speed data.
+- Freesound blocks the IP for ~40 min after a burst of requests; keep searches ≥ 25 s apart.
 - Cuts were chosen from onset/decay/pitch analysis, not by ear; retune `start`/`end`/`gain` after
   listening (rebuild is ~10 s).
 - Safari before 17 cannot decode Ogg Vorbis; the testbed then plays the fallback synths.
