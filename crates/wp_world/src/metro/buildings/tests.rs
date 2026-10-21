@@ -1,3 +1,6 @@
+// Test-only module (declared under `#[cfg(test)]`); the attribute below also tells
+// lint-determinism to stop scanning here (tests may time themselves).
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::time::Instant;
 

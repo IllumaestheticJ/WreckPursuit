@@ -222,7 +222,10 @@ fn bowl(ctx: &mut Ctx, site: &Site, centre: V2) {
                 [l[0] + 20.0, l[1] + 20.0],
                 [l[0] - 20.0, l[1] + 20.0],
             ];
-            let in_e = |p: &V2, a: f32, b: f32| (p[0] / a).powi(2) + (p[1] / b).powi(2) < 1.0;
+            let in_e = |p: &V2, a: f32, b: f32| {
+                let (u, v) = (p[0] / a, p[1] / b);
+                u * u + v * v < 1.0
+            };
             if !corners.iter().any(|p| in_e(p, a0, b0)) {
                 parts.push(Part::Flat {
                     c: l,
@@ -346,13 +349,15 @@ fn calder(ctx: &mut Ctx, site: &Site, centre: V2) {
     // Two hyperbolic cooling towers: r(z) = rt * sqrt(1 + ((z - zt) / k)^2).
     let (hgt, rt, rb) = (105.0f32, 22.0f32, 34.0f32);
     let zt = 0.78 * hgt;
-    let k = zt / ((rb / rt).powi(2) - 1.0).sqrt();
+    let ratio = rb / rt;
+    let k = zt / (ratio * ratio - 1.0).sqrt();
     let slices = 10;
     let hs = hgt / slices as f32;
     let rings: Vec<(f32, f32)> = (0..slices)
         .map(|i| {
             let z = (i as f32 + 0.5) * hs;
-            (rt * (1.0 + ((z - zt) / k).powi(2)).sqrt(), hs)
+            let u = (z - zt) / k;
+            (rt * (1.0 + u * u).sqrt(), hs)
         })
         .collect();
     for p in [[-130.0, -55.0], [-130.0, 60.0]] {

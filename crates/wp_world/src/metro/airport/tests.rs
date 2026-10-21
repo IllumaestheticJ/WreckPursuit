@@ -1,5 +1,8 @@
 //! Tests of the airport module on the real v3 pipeline (plan, ground, roads, context).
 
+// Test-only module (declared under `#[cfg(test)]`); the attribute below also tells
+// lint-determinism to stop scanning here (tests may time themselves).
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 

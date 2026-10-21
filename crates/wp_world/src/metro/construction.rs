@@ -913,7 +913,8 @@ fn exchange(ctx: &Ctx, site: &Site, rng: &mut Rng, out: &mut Sink) {
         .enumerate()
         .map(|(i, w)| {
             let (p, q) = (at(w[0]), at(w[1]));
-            let dl = ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2)).sqrt();
+            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+            let dl = (dx * dx + dy * dy).sqrt();
             let dir = [(q[0] - p[0]) / dl, (q[1] - p[1]) / dl];
             let slope = (profile_z(&stub, w[1]) - profile_z(&stub, w[0])) / dl;
             // Overlap neighbours so the outside of the curve has no notches.

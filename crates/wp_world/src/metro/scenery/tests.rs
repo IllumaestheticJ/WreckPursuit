@@ -1,6 +1,9 @@
 //! Contract tests of the scenery module, run on the full v3 pipeline (with whatever the
 //! other modules currently place).
 
+// Test-only module (declared under `#[cfg(test)]`); the attribute below also tells
+// lint-determinism to stop scanning here (tests may time themselves).
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 use super::super::*;

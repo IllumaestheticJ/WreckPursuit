@@ -1,6 +1,9 @@
 //! Docks tests: run the v3 pipeline up to (and including) this module, then check the
 //! placed content against the terrain, the occupancy grid and the plan.
 
+// Test-only module (declared under `#[cfg(test)]`); the attribute below also tells
+// lint-determinism to stop scanning here (tests may time themselves).
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 use wp_math::Rng;
