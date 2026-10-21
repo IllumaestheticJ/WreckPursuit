@@ -1238,3 +1238,31 @@ on every seat. The testbed's `&autopilot=1` race does the same.
 
 The police-race outcomes are chaotic: the loop9 test notes that 3 of 7 seeds pass, before and
 after row 99. Each setting has one red race test.
+
+### Gate (unify, lead/grip-balance after merging lead/round12 2a9179da and tyre-slip cbcdbae5)
+
+| step | result |
+|---|---|
+| `cargo fmt --check` | 0 |
+| `cargo clippy --workspace --all-targets -D warnings` | 0 |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | 0 |
+| determinism lint | 0 errors |
+| `simcli goldens` | 0, re-blessed with reasons |
+| `simcli run apps/simcli/scenarios` | 0 |
+| native-vs-wasm (`tools/wasm-determinism`, in `cargo test`) | green |
+| tsc, `npm run build` | 0 |
+| `cargo test --workspace` | 2 red, both also red on their source branches (below) |
+
+The two red tests:
+- `every_car_has_a_valid_up_to_date_mesh_and_panel_spec`: round12's new arashi_t4 mesh is
+  format 1 (expected 3); also red on lead/round12 2a9179da.
+- `self_aligning_steering_does_not_wobble_a_keyboard_corner`: sentinel_cruiser 0.214 vs
+  0.204; also red on lead/drift-lab-w 746319bd and lead/tyre-slip.
+
+Web e2e:
+- drift_lab_w 94 / 94; race 20, countersteer 9, radio 8, siren 23, tune 10: all pass;
+  crash_fx 14 / 14.
+- `run.mjs`: 216 pass, 8 fail. The perf budgets on software GL (allocations per frame, phone
+  draw calls) are also red on lead/round12. The crash_fx smoke check failed only inside the
+  combined run and passes 14 / 14 standalone, twice.
+- round12's own `run.mjs` additionally fails two replay verifications that pass here.
