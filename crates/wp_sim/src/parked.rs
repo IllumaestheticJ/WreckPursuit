@@ -58,6 +58,23 @@ pub const PROMOTE_CLOSING_MPS: f32 = 1.0;
 /// friction with the road takes at most a few mm/s of that in one tick.
 const PROMOTE_MIN_DV: f32 = 0.02;
 
+/// Steepest slope a car is parked on along its length (rise over run, ≈ 8.5°); steeper spots
+/// are dropped (owner bug 0.12.26: parked cars in the ground on Hollins Drive).
+pub const PARK_MAX_PITCH: f32 = 0.15;
+/// Steepest slope across the car (camber / bank), rise over run (≈ 5.7°).
+pub const PARK_MAX_ROLL: f32 = 0.10;
+/// Most the four wheel contact heights may leave the best plane through them, m: more and
+/// the car would straddle a kerb or a crease (one wheel in the air or in the ground).
+pub const PARK_MAX_TWIST_M: f32 = 0.06;
+/// Wheel contact points in the prop frame: `(±(half_x − inset), ±half_y × fraction)`.
+const WHEEL_INSET_M: f32 = 0.2;
+const WHEEL_BASE_FRAC: f32 = 0.6;
+/// The body's corners (bumpers, sills) sit this far above the wheels' plane; a surface above
+/// that under a corner (a kerb, a bank) would cut into the drawn car, m.
+const PARK_BODY_CLEARANCE_M: f32 = 0.15;
+/// Gap left under a seated parked car (no touching contact at creation, so it sleeps), m.
+const PARK_HOVER_M: f32 = 0.02;
+
 /// Most parked cars promoted per session (memory ≈ 0.3 MB each; perf: only awake lattices
 /// cost anything).
 pub const MAX_PARKED_WRECKS: usize = 48;
@@ -205,6 +222,101 @@ impl ParkedDamage {
 }
 
 impl crate::Sim {
+    /// Pose of a parked car seated on the drivable ground colliders (road, sidewalk, terrain:
+    /// what the browser draws) under its four wheels, pitched and rolled to the plane through
+    /// them and lifted so no wheel is below the surface; `None` where a car cannot stand: a
+    /// wheel over no ground, steeper than [`PARK_MAX_PITCH`] / [`PARK_MAX_ROLL`], wheels more
+    /// than [`PARK_MAX_TWIST_M`] off one plane (straddling a kerb), a body corner in the
+    /// ground, or something solid (tree, hedge, fence, wall) inside the footprint. Cities with terrain (Port Vesper v2); `prop.pos` = box centre as laid out.
+    pub(crate) fn seat_parked_car(
+        &self,
+        prop: &wp_world::props::StaticProp,
+    ) -> Option<rapier3d::prelude::Pose> {
+        use rapier3d::math::{Mat3, Rotation, Vector};
+        let [hx, hy, hz] = prop.half_extents;
+        let (sy, cy) = wp_math::sin_cos(prop.yaw);
+        let fwd = [-sy, cy];
+        let right = [cy, sy];
+        let c = [prop.pos[0], prop.pos[1]];
+        let at = |x: f32, y: f32| {
+            [
+                c[0] + right[0] * x + fwd[0] * y,
+                c[1] + right[1] * x + fwd[1] * y,
+            ]
+        };
+        // Rays from well above the lane's own height: the surface the car stands on, not a
+        // deck far above or below (parking is never under or on a deck).
+        let ref_z = prop.pos[2] - hz;
+        let ground = |xy: [f32; 2]| self.physics.drivable_ground_z(xy, ref_z + 1.0, 2.0);
+        let (wx, wy) = (hx - WHEEL_INSET_M, hy * WHEEL_BASE_FRAC);
+        // FL, FR, RL, RR.
+        let wheels = [(-wx, wy), (wx, wy), (-wx, -wy), (wx, -wy)];
+        let mut h = [0.0f32; 4];
+        for (k, (x, y)) in wheels.iter().enumerate() {
+            h[k] = ground(at(*x, *y))?;
+        }
+        let pitch = ((h[0] + h[1]) - (h[2] + h[3])) * 0.5 / (2.0 * wy);
+        let roll = ((h[1] + h[3]) - (h[0] + h[2])) * 0.5 / (2.0 * wx);
+        if pitch.abs() > PARK_MAX_PITCH || roll.abs() > PARK_MAX_ROLL {
+            return None;
+        }
+        let mean = (h[0] + h[1] + h[2] + h[3]) * 0.25;
+        let plane = |x: f32, y: f32| mean + roll * x + pitch * y;
+        let resid: Vec<f32> = wheels
+            .iter()
+            .zip(h)
+            .map(|((x, y), hk)| hk - plane(*x, *y))
+            .collect();
+        let hi = resid.iter().copied().fold(f32::MIN, f32::max);
+        let lo = resid.iter().copied().fold(f32::MAX, f32::min);
+        if hi - lo > PARK_MAX_TWIST_M {
+            return None;
+        }
+        // Lift until no wheel is below the surface.
+        let base = mean + hi.max(0.0);
+        for (x, y) in [(-hx, hy), (hx, hy), (-hx, -hy), (hx, -hy)] {
+            let body = base + roll * x + pitch * y + PARK_BODY_CLEARANCE_M;
+            if ground(at(x, y)).is_some_and(|g| g > body) {
+                return None;
+            }
+        }
+        // Nothing solid inside the footprint (tree trunks, hedges, fences, walls, rails): a
+        // ray from above the car that stops well above the ground hit something standing there.
+        for (x, y) in [
+            (0.0, 0.0),
+            (-hx, hy),
+            (hx, hy),
+            (-hx, -hy),
+            (hx, -hy),
+            (0.0, hy),
+            (0.0, -hy),
+            (-hx, 0.0),
+            (hx, 0.0),
+        ] {
+            let xy = at(x, y);
+            let floor = base + roll * x + pitch * y;
+            let top = floor + 2.0 * hz;
+            let solid = self.physics.static_ground_z(xy, top, 2.0 * hz + 0.5);
+            let drivable = ground(xy);
+            if let (Some(s), Some(d)) = (solid, drivable) {
+                if s > d + 0.05 && s > floor + PARK_BODY_CLEARANCE_M {
+                    return None;
+                }
+            }
+        }
+        // Frame: right / forward along the plane, up its normal.
+        let r = Vector::new(right[0], right[1], roll).normalize();
+        let f0 = Vector::new(fwd[0], fwd[1], pitch);
+        let n = r.cross(f0).normalize();
+        let f = n.cross(r).normalize();
+        let rot = Rotation::from_mat3(&Mat3::from_cols(r, f, n));
+        let floor = Vector::new(c[0], c[1], base);
+        Some(rapier3d::prelude::Pose::from_parts(
+            floor + n * (hz + PARK_HOVER_M),
+            rot,
+        ))
+    }
+
     /// Car model whose lattice dents parked cars (simcli: the traffic car, `debug_sedan`; the
     /// testbed draws parked cars with the same model). Without one, parked cars are shoved but
     /// never dent. Set after [`crate::Sim::set_world`], before the first tick.
