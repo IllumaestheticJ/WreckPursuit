@@ -147,7 +147,10 @@ impl RoadGraphView {
                     if geom::dist(centre[0], pa) > geom::dist(centre[centre.len() - 1], pa) {
                         centre.reverse();
                     }
-                    polyline.extend(centre);
+                    // Interior bends only: the trimmed ends sit just short of the nodes (a
+                    // straight road stays a single node-to-node line).
+                    let n = centre.len();
+                    polyline.extend(centre.into_iter().take(n.saturating_sub(1)).skip(1));
                 }
                 None => {
                     let pl = &first.polyline;
@@ -157,7 +160,6 @@ impl RoadGraphView {
                 }
             }
             polyline.push(pb);
-            polyline.dedup_by(|q, p| geom::dist(*q, *p) < 0.05);
             let length_m = polyline.windows(2).map(|w| geom::dist(w[0], w[1])).sum();
             let (mp, _) = {
                 let pts: Vec<[f32; 3]> = polyline.iter().map(|p| [p[0], p[1], 0.0]).collect();

@@ -984,7 +984,7 @@ impl PoliceSystem {
                     pos,
                     heading,
                     wait: w.wait,
-                    track: Track::new(crate::unit::round_corners(&pts, crate::unit::TURN_RADIUS_M)),
+                    track: Track::new(pts),
                 };
                 best = Some((unit_eta, plan));
             }
