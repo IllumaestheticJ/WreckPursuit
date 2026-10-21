@@ -10,7 +10,7 @@ import { useMemo, useState } from "preact/hooks";
 import { useSend, useSlice } from "../../model/GameModel";
 import { CARS, MODS, modBlocker, modTree, slotLabel, type CarStats, type ModDef } from "../../data/catalog";
 import { previewBuild, type ModPreview } from "../../data/estimate";
-import { buildStats } from "../../data/stats";
+import { statSourceLabel, useBuildStats } from "../../data/measure";
 import { Badge, Button, CarStatBars, Delta, Money, Panel, ScreenHead, useEscape } from "../../ui/kit";
 import { words } from "../../ui/format";
 import "./garage.css";
@@ -28,19 +28,21 @@ export function ModTree() {
   const [slot, setSlot] = useState(tree[0].slot);
   const [sel, setSel] = useState<string>(tree[0].lines[0].mods[0].id);
   useEscape(() => send({ type: "navigate", screen: "garage" }));
-  if (!car) return <div class="wp-screen">No car.</div>;
-  const def = CARS[car.defId];
   const mod = MODS[sel];
-  const installed = car.mods.includes(sel);
+  const mods = car?.mods ?? [];
+  const installed = mods.includes(sel);
   // Candidate build: the selected mod replaces whatever is on the same line.
   const candidate = installed
-    ? car.mods.filter((m) => m !== sel)
-    : [...car.mods.filter((m) => !(MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot)), sel];
+    ? mods.filter((m) => m !== sel)
+    : [...mods.filter((m) => !(MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot)), sel];
+  // Stat bars: the build now (provider-measured if available) vs the candidate build; both are
+  // estimated at once and replaced by physics measurements when the host has a measurer.
+  const statsNow = useBuildStats(car?.defId ?? "", mods, mode, car?.stats);
+  const statsAfter = useBuildStats(car?.defId ?? "", candidate, mode);
+  if (!car) return <div class="wp-screen">No car.</div>;
+  const def = CARS[car.defId];
   const before = previewBuild(def, car.mods);
   const after = previewBuild(def, candidate);
-  // Stat bars: the build now (provider-measured if available) vs the candidate build.
-  const statsNow = buildStats(car.defId, car.mods, car.stats);
-  const statsAfter = buildStats(car.defId, candidate);
   const slotEntry = tree.find((t) => t.slot === slot) ?? tree[0];
   const blocker = installed ? null : modBlocker(mod, car.mods, car.class, mode);
   const replaced = car.mods.find((m) => MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot && m !== sel);
@@ -109,7 +111,7 @@ export function ModTree() {
           {statsNow && statsAfter && (
             <div class="wp-garage-stats" style={{ margin: "0.6em 0" }}>
               <div class="wp-dim wp-mono wp-upper" style={{ fontSize: "0.68em" }}>
-                {installed ? "Without this mod" : "With this mod"} · tick = current build
+                {installed ? "Without this mod" : "With this mod"} ({statSourceLabel(statsAfter)}) · tick = current build
               </div>
               <CarStatBars stats={statsAfter.stats} baseline={statsNow.stats} />
             </div>
