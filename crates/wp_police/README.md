@@ -96,7 +96,8 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   Meetings are timed at the racer's recent top speed (`RacerRecord::expected_speed`: a speeder
   braking for a corner is back at speed on the next straight), and the predicted path runs on
   to the racer's next junction (a divided highway's carriageway can only be met where it
-  comes off). A unit turning round onto its route finishes the turn before the 3-s re-plan. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
+  comes off). A headless unit in the middle of a turn-round (below) is not re-planned until the turn is
+  done, and no re-plan undoes half a turn. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
   responding." No responders in a city whose patrol table is empty for the phase.
 - **Unit cap**: responders and reinforcements only spawn while ground units <
   `max_units_by_level[highest wanted level]` (and `max_ground_units`).
@@ -217,6 +218,19 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
   body. The body keeps right (`LANE_OFFSET_M`), saturates at a grip limit, crashes when it runs
   wide and has a background traffic-hazard model. Track progress only moves forward
   (`Track::project_ahead`), so hairpins and U-turns don't snap back.
+- **Turning round (headless units, `turn.rs`, owner decision 2026-10-21)**: when its track lies
+  more than ~100° behind it, a headless unit brakes straight to 4 m/s and plans on the road
+  surface round it (`RoadGraph::road_span_at`: its segment plus the segments at either end,
+  lanes only, refreshed at think rate): a **U-turn** if one full-lock sweep fits (after a swing
+  out of up to 45° on a 2+2 road), else the quickest **three-point turn** (forward or reverse
+  first, left or right, near a junction moving up to or back into the side road first; each
+  candidate simulated with the live leg logic). Legs: forward on full lock (2.5 m/s, U-turn
+  4 m/s) until aligned within 20° or 0.3 m from a kerb, 0.6 s to re-lock, reverse on the
+  opposite lock (1.5 m/s) until a forward sweep fits, and so on. The car turns about its rear
+  axle, its corners never leave the surface, so a turn-round never counts as running wide.
+  Typical times on the 6×6 grid: U-turn 3-5 s, three-point turn 5-7 s, five-point turn on a
+  1+1 street ≈ 10 s. One-way carriageways never see one (routes go on to the next junction);
+  scripted racers keep the old full-lock swing at a crawl.
 
 Police keep only the speed planning (corner speeds, caps, tactics).
 
@@ -404,7 +418,9 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
-racers on D's small city, with exact building line of sight and obstacle awareness → **0.097 ms per 60 Hz frame** (round 13: up to 8 units per racer, backup and search; 0.055 ms in round 12b, 0.074 ms in round 6)
+racers on D's small city, with exact building line of sight and obstacle awareness → **0.097 ms per 60 Hz frame** (round 13: up to 8 units per racer, backup and search; 0.055 ms in round 12b, 0.074 ms in round 6).
+Turn-rounds (2026-10-21) add ≈ 0.025 ms: 0.168 → 0.193 ms per frame on a slower cloud machine
+(same run before/after; includes the 4 scripted racers)
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 
@@ -431,6 +447,13 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   places one at every third signalised junction). `RoadNetworkQuery` has no signalised-junction
   flag yet, so `from_network` takes the list separately (contract request #7).
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
+- Turn-rounds see the lanes only (no parking strips, junction kerb radii or z: a ground road
+  under the viaduct can be mistaken for the deck). A pursuer facing the legal way on a one-way
+  carriageway whose racer went past the wrong way still swings round the old way, as does a
+  unit whose turn-round gives up (boxed in, > 7 legs or > 30 s: a few per long night run).
+  Scripted racers keep the old swing. Realistic turn-rounds are slower than the old crawl:
+  `response_day_suburb`, `response_night_core` and the night/day reinforcement ratio fail
+  (docs/integration/police.md, 2026-10-21 three-point turns).
 - Passing assumes the other lane exists. Feelers see buildings and tunnel walls, not rails,
   barriers or terrain steps (not in the road network data).
 - Pro driving (P8): the racing line only sees vehicles within `traffic_clear_m` ahead; a car

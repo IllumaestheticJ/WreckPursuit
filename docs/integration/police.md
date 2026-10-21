@@ -1205,3 +1205,122 @@ fails on `response_day_suburb` only). `wp_race --test race_picker` 7/7, `wp_oppo
 `wp_net --test vesper_e2e` 1/1, `wp_sim --test police_passby` 3/3,
 `simcli --test scenarios all_scenarios_pass_and_are_deterministic_in_process` pass. Goldens not
 run or blessed; chase goldens with kinematic police units may move.
+
+## Three-point turns in the built-in driver (2026-10-21, `side/three-point`)
+
+Base: `ca8dc1c0` (the 6×6 section above). Owner decision: model real three-point turns in the
+built-in kinematic driver (`internal_driving: true`), instead of the 4 m/s full-lock crawl
+swing that turned a unit round wherever it was, two turning radii beside its track and
+through the kerbs. `wp_police` only; `wp_vehicle`, `wp_world`, `wp_contracts` untouched.
+
+**Design** (`crates/wp_police/src/turn.rs`, README "Turning round (headless units)")
+- Trigger: the track 8 m ahead *and* the track's own direction at the unit lie > ~100° off the
+  nose (a sharp junction corner short of the node is still the normal driver's). Units with a
+  road span only: police headless cars. Scripted racers keep the old swing.
+- Road: `RoadGraph::road_span_at` → `RoadSpan`, the unit's segment (most nearly along the
+  heading among those within 2 m of the nearest) plus the segments meeting it at either end,
+  each a `RoadRect` of its lanes (wp_world conventions: two-way centreline = divider; one-way
+  = middle). Refreshed at think rate into `Unit::road`.
+- Car: rectangle (half length wheelbase/2 + 1 m, half width 0.95 m) turning about its rear
+  axle; corners and side middles are checked against the union of rectangles with a 0.3 m
+  kerb margin. Full-lock path radius 3.95 m (2.7 m wheelbase, 0.6 rad): kerb-to-kerb circle
+  ≈ 12.3 m, so a U-turn needs ≈ 13.5 m of road from the inner lane (2+2 roads, after a swing
+  out of up to 45°) and a 1+1 local street (7 m) takes a five-point turn.
+- State machine: Slow (brake straight to 4 m/s) → plan → legs. Plan: U-turn if a sweep fits;
+  else the quickest three-point turn among forward/reverse first × left/right × (near a side
+  road) a straight 0/3/6/9 m approach, each simulated at 15 Hz with the live leg code. Legs:
+  forward on full lock (2.5 m/s; U-turn 4 m/s) until aligned within 20° or stopped by the kerb
+  margin, or (three-point) as soon as reversing out finishes the turn and going on does not;
+  0.6 s to re-lock; reverse on the opposite lock at 1.5 m/s until a forward sweep fits.
+  Accel 2.5 m/s², brake 5 m/s². A leg blocked on its lock goes straight if that gets farther;
+  within 45° and blocked with the road clear ahead, the normal driver takes over; boxed in
+  (2 legs without progress), > 7 legs or > 30 s: give up (old swing until the track is no
+  longer behind). The goal direction is taken where the plan position projects on the track
+  (the unit's own projection jumps about a junction bend while it manoeuvres: that alone
+  caused 68 give-ups in the day/night speeder pair before it was anchored; 6 after).
+- Determinism: plain f32, `wp_math` trig, fixed candidate order, no maps; scenario state
+  hashes repeat (checked on day_core_speeder, radio_city_chase, response_night_suburb,
+  capture_stop).
+- One-way carriageways: checked in the graph code. `route_from` starts at the node ahead and a
+  one-way segment is never travelled back, so routes never start with a turn-round there
+  (new test `pursuit::tests::one_way_routes_never_start_with_a_turn_round`). A unit facing the
+  legal way on a one-way piece never starts a manoeuvre.
+
+**Guards**
+- 3-s re-plan of responders/interceptors: **kept, re-keyed** from "facing away" to "turning
+  round" (`Unit::turning_round`). Without it (measured, night core 304) a responder half way
+  through a side-road turn got a re-plan from its momentary heading: a 408 m route along the
+  side road (the new track is "ahead", so the manoeuvre was abandoned). Other re-plans go
+  through `turn::accepts_replan` (adopted only if ahead of the heading or reached by carrying
+  on with the turn); `Unit::set_command` ends a manoeuvre only for a track within 45° ahead.
+- Run-wide crash exemption within `crash_offset_m` of the track start: **kept**. Removing it
+  (measured) takes run-wide crashes over all police scenarios from 296 to 649 (self_wreck_sim
+  72 → 184, night_core_speeder 104 → 189): scripted racers still swing the old way, and units
+  join new tracks from beside their start; the manoeuvre does not cover those.
+
+**Numbers** (before = `ca8dc1c0`, after = this branch; release builds of
+`examples/police_scenario`; per-seed = the same scenario with `runs: 1`, seed changed, not
+committed)
+
+| Check | Before | After | Target |
+|---|---|---|---|
+| `response_day_core` mean / worst / ≤ 25 s (5 runs with a call) | 6.3 / 14.3 s / 5 of 5 | 6.3 / 14.3 s / 5 of 5 | ≤ 10 / ≤ 15 |
+| `response_day_suburb` mean / worst / ≤ 25 s (5 with a call) | 17.4 / 35.5 s / 3 of 5 | 23.6 / 61 (never) / 3 of 5 | ≤ 15 / ≤ 25 / ≥ 0.875 — **fails** |
+| `response_night_core` mean / worst / ≤ 25 s | 10.4 / 18.1 s / 8 of 8 | 15.9 / 61 (never) / 7 of 8 | ≤ 15 / ≤ 25 / ≥ 0.875 — **fails** (mean, worst) |
+| `response_night_suburb` mean / worst / ≤ 25 s | 16.4 / 38.4 s / 6 of 8 | 16.4 / 38.4 s / 6 of 8 | ≤ 30 / ≥ 0.75 |
+| reinforcement night/day (`night_core_speeder` / `day_core_speeder`) | 45.6 / 18.2 s = **2.51** | 26.7 / 27.4 s = **0.97** | ≥ 2 — **fails** |
+| pursuit start night/day; day worst | 3.48; 17.2 s | 3.48; 17.2 s | ≥ 3; ≤ 20 s |
+| `radio_city_chase` calm lines/min | 4.09 | 4.09 | ≤ 5 |
+| run-wide crashes, all police scenarios | 530 | 296 | — |
+| Hollins sprint winner (`wp_race` `hollins_hill_sprint`, with police) | 79.46 s | 79.46 s | ≤ 110 s |
+
+Per seed, call → first unit within 100 m (s; -1 = no call, 61 = not within the 60 s run):
+
+| Scenario | Seeds | Before | After |
+|---|---|---|---|
+| `response_day_suburb` | 300-307 | 4.1, **30.2**, 7.9, 9.3, **35.5**, -, -, - | 4.1, **61**, 7.9, 9.3, **35.7**, -, -, - |
+| `response_night_core` | 300-307 | 17.2, 7.9, 6.6, 10.4, 17.2, 18.1, 0.0, 5.7 | 17.2, 7.9, 6.6, 11.0, **61**, 18.1, 0.0, 5.7 |
+| `response_night_suburb` | 300-307 | 5.1, 38.4, 9.1, 32.7, 20.7, 0.0, 1.4, 24.1 | unchanged |
+| `response_day_core` | 300-307 | -, 1.8, 8.8, -, -, 14.3, 0.0, 6.3 | unchanged |
+
+Reinforcement delay per seed (s): day 103-107 before 14.6, 23.2, 18.9, 16.8, 17.9 → after
+46.8, 24.0, 27.7, 16.8, 10.7; night 100-107 before 66.5, 17.2, 37.4, 111.7, 14.0, 7.9, 96.3,
+10.4 → after 31.9, 16.3, 45.2, 55.7, 6.5, 5.8, 28.0, 8.6.
+
+**Why they fail (not re-aimed; needs an owner / lead decision)**
+- `response_day_suburb` (the stop condition in the brief): seed 304 is the turn-round case:
+  the Core patrol 365 m away still has to turn round, now a real manoeuvre, and the meeting
+  junction moves twice: 35.5 → 35.7 s. Seed 301 is the round-12 shadow-gap hold (unchanged
+  rule, as decided); after it the interceptors' and the pursuer's turn-rounds take 4-8 s
+  instead of ~3 s and the racer, at 2× the limit, is never within 100 m again (30.2 s →
+  never). Three-point turns do not fix this scenario; they make it slightly worse.
+- `response_night_core` seed 304: a responder 107 m from the racer gets a route behind it at
+  27 s; the old swing turned it round in the junction in ~3 s, the side-road three-point
+  turn takes 7.5 s (in 7 m streets with a 12.3 m turning circle), by which time the racer is
+  away at 20-30 m/s and the call lapses at 40 s. Every other seed is within 0.6 s of before.
+- Night/day reinforcement ratio: `reinforcement_delay_s` mixes request waits with "pursuit
+  start → backup joins", so it follows how long pursuits last. The before value (2.51) was
+  carried by three night runs at 67-112 s; with slower, kerb-bound turn-rounds and fewer
+  run-wide crashes (142 → 104 in the night scenario) pursuits evolve differently and both
+  sides land near 27 s. Across the variants measured in this session (re-plan guard on/off,
+  leg speeds 2.5/1.5 vs 3.0/2.0 m/s, three road models) the ratio ranged 0.97-1.85, so it is
+  noise-dominated rather than a turn-round effect that a parameter would fix.
+- Re-aiming: these scenarios have no start position or start time to move (only `seed`,
+  district, speed factor, time of day, duration), and every per-run change to them re-rolls
+  all runs like a seed change would. I did not change seeds, targets or durations.
+  Options: (a) accept and widen `response_day_suburb` / `response_night_core` (a lead call);
+  (b) add a racer start option to `RacerScript` and re-aim with it (re-rolls all runs);
+  (c) quicker "lights-on" turn-rounds (e.g. 3.5/2.5 m/s legs, 0.4 s re-lock) — tried at
+  3.0/2.0/0.5 s: no systematic gain (night core 304 38 s, day suburb 301 never); (d) time the
+  reinforcement ratio on request waits only.
+
+**Gate (this worktree, own target dir).** `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`: pass.
+`cargo test -p wp_police --no-fail-fast`: lib 79/79 (8 new turn-round tests + the one-way
+routing test), system 21/21, radio_chatter 5/5, police_scenarios 1/3
+(`all_police_scenarios_pass_and_are_deterministic`: `response_day_suburb` first;
+`response_night_core` also fails; `night_is_slower_than_day_for_pursuit_and_reinforcements`:
+reinforcement ratio 0.97; `risk_budget_and_caps_keep_cops_alive` passes). `wp_race --test
+race_picker` 7/7, `wp_opponent` all pass, `wp_net --test vesper_e2e` 1/1, `wp_sim --test
+police_passby` 3/3, `simcli --test scenarios all_scenarios_pass_and_are_deterministic_in_process`
+pass. Goldens not run or blessed. Perf: `police_bench` 0.168 → 0.193 ms per frame.
