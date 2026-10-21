@@ -409,6 +409,8 @@ pub struct Debug {
     /// Pass evaluations so far: [accepted, no run, too late, no room, slower line, lane
     /// taken ahead, lane taken behind, target busy passing someone].
     pub pass_checks: [u32; 8],
+    /// Out on the opposing lanes (my body left of my own lanes' edge).
+    pub opposing: bool,
 }
 
 /// What limits a racer's speed target.
@@ -1862,7 +1864,18 @@ fn decide_racer(
                                     && q.gap / (v + -q.o.v_s).max(1.0) < 3.5
                             });
                             let stale = r.tactic_ticks as f32 * dt > 15.0;
-                            too_late || lost || gone || stale || oncoming
+                            // Still behind, out on the opposing lanes, and a junction comes
+                            // up before I could be past: tuck back in.
+                            let junction = x.ds > 0.0
+                                && !x.o.parked
+                                && opposing_through_junction(
+                                    corridor,
+                                    r.s,
+                                    brake_dist.max(v * 2.0) + 10.0,
+                                    r.n_goal,
+                                    hw,
+                                );
+                            too_late || lost || gone || stale || oncoming || junction
                         }
                     }
                     None => true,
@@ -2648,6 +2661,7 @@ fn decide_racer(
             n: r.n,
             brake_dist,
             pass_checks: r.pass_checks,
+            opposing: r.n - hw < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m,
         };
     }
 }
@@ -2783,6 +2797,18 @@ enum PassReject {
     TargetBusy = 7,
 }
 
+/// Whether a car at lateral offset `n` (half width `hw`) is out on the opposing lanes (left of
+/// my lane's left edge) anywhere a junction box lies within `span` m ahead of `s`.
+fn opposing_through_junction(corridor: &Corridor, s: f32, span: f32, n: f32, hw: f32) -> bool {
+    let i0 = (s / CORRIDOR_STEP_M).floor() as isize;
+    // (`span` is a braking distance, infinite with no braking point ahead: look 250 m at most.)
+    let k = (span.clamp(0.0, 250.0) / CORRIDOR_STEP_M).ceil() as isize;
+    (0..=k).any(|j| {
+        let c = corridor.sample(i0 + j);
+        c.junction && n - hw < -c.left_m
+    })
+}
+
 /// Context for [`plan_pass`].
 struct PassCtx<'a> {
     corridor: &'a Corridor,
@@ -2874,6 +2900,14 @@ fn plan_pass(
     let mut why = PassReject::NoRoom;
     'side: for side in sides {
         let n_pass = o.n + side * need;
+        // No passing on the opposing lanes through a junction (round a parked car aside): a
+        // car out there meets the side roads' traffic waiting in the box, and with the field
+        // queued behind it nobody can move (Lantern Row, skill 0.95 seed 8: the whole field
+        // gridlocked in a junction for the rest of the race).
+        if !o.parked && opposing_through_junction(ctx.corridor, r.s, pass_dist, n_pass, hw) {
+            why = PassReject::LaneAhead;
+            continue 'side;
+        }
         // Room for the whole pass.
         let mut x = 0.0;
         while x <= pass_dist.max(10.0) {
