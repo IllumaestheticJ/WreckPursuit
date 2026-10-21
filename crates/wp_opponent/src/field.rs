@@ -2843,7 +2843,9 @@ fn plan_flight(world: &World, r: &Racer, config: &RaceConfig, police_at: &[V2]) 
         if route.polyline.len() < 2 {
             return None;
         }
-        let c = Corridor::from_route(world.map(), &route, &config.corridor);
+        // A route with no length (destination behind on the same segment) plans nothing:
+        // try the next destination.
+        let c = Corridor::try_from_route(world.map(), &route, &config.corridor)?;
         (c.len() >= 25).then_some(c)
     })?;
     let line = RacingLine::constant(&corridor, 0.0);
