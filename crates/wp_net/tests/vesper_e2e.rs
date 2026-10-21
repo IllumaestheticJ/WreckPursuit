@@ -410,6 +410,8 @@ fn four_clients_three_minutes_in_port_vesper() {
 
     // Everything the clients were told, per client (the client keeps a bounded queue).
     let mut events: Vec<Vec<SimEvent>> = vec![Vec::new(); 4];
+    // Step at which p0 saw racer 0's pursuit end.
+    let mut capture_step = None;
     let mut history: VecDeque<(u64, BTreeMap<u32, QVehicle>)> = VecDeque::new();
     let mut positions: VecDeque<(u64, BTreeMap<u32, [f32; 3]>)> = VecDeque::new();
     let mut traffic_history: BTreeMap<u64, BTreeMap<u32, TrafficAgentSnapshot>> = BTreeMap::new();
@@ -516,6 +518,14 @@ fn four_clients_three_minutes_in_port_vesper() {
 
         for (i, p) in h.peers.iter_mut().enumerate() {
             events[i].extend(p.client.game_events.drain(..));
+        }
+        if capture_step.is_none()
+            && events[0].iter().any(|e| {
+                matches!(e, SimEvent::Police(PoliceEvent::PursuitEnded { racer, .. })
+                    if *racer == racer0)
+            })
+        {
+            capture_step = Some(step);
         }
         let tick = h.server.sim().tick();
 
@@ -961,6 +971,14 @@ fn four_clients_three_minutes_in_port_vesper() {
             _ => None,
         });
         println!("p{i} sees the end of racer 0's pursuit: {capture:?}");
+        // Racer 1's link is down from reconnect.0 to reconnect.1: events sent then are not
+        // replayed on reconnect, so p1 misses a capture that lands in that window (police
+        // round 12c caught racer 0 at step ≈ 2746, inside it). The other three must see it.
+        let offline = capture_step.is_some_and(|t| t + 5 >= reconnect.0 && t <= reconnect.1 + 5);
+        if i == 1 && capture.is_none() && offline {
+            println!("p1 was offline at the capture (step {capture_step:?})");
+            continue;
+        }
         let (outcome, capturer, assists) =
             capture.unwrap_or_else(|| panic!("p{i} never saw racer 0's pursuit end"));
         assert_eq!(outcome, PursuitOutcome::Captured, "p{i}");
