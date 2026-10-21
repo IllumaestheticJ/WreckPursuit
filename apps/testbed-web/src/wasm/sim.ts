@@ -415,6 +415,8 @@ export const sim = {
   policeTools: (): Float32Array => wasm.police_tools(),
   /** Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR), same order as states(). */
   tirePunctures: (): Float32Array => wasm.tire_punctures(),
+  /** 4 per vehicle (FL FR RL RR): 1 = a flat tyre on its rim in ground contact. */
+  tireRimContact: (): Float32Array => wasm.tire_rim_contact(),
   /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags, model. */
   trafficDraw: (): Float32Array => wasm.traffic_draw(),
   /** Floats per traffic_draw() / police_draw() record in this wasm build (layout.ts DRAW_STRIDE). */
