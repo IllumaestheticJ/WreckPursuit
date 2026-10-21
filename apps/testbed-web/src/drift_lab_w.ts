@@ -134,6 +134,8 @@ const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; ste
   smart_hi_full_kmh: { label: "smart lock: speed blend to", min: 60, max: 250, step: 5, unit: "km/h", hint: "speed where the high-speed allowance is fully in" },
   smart_slide_from_deg: { label: "smart lock off from slip", min: 0, max: 30, step: 0.5, unit: "°", hint: "body slip where the plain lock starts to come back (slides steer as before)" },
   smart_slide_full_deg: { label: "smart lock off by slip", min: 0, max: 40, step: 0.5, unit: "°", hint: "body slip where the plain lock is fully back" },
+  slide_lock: { label: "countersteer lock in a slide ×", min: 0.5, max: 1.2, step: 0.05, hint: "the held countersteer key's lock past the slip below (1 = plain): less = no over-catch / swing-through when the key is held with full throttle" },
+  slide_lock_from_deg: { label: "countersteer lock from slip", min: 5, max: 40, step: 1, unit: "°", hint: "body slip where the slide lock phases in (over 10°)" },
   fwd_rear_mu: { label: "FWD: rear grip (μ) ×", min: 0.7, max: 1.3, step: 0.01, hint: "front-drive cars only: rear tyres' peak friction (less = rotates on lift-off)" },
   fwd_rear_stiffness: { label: "FWD: rear cornering stiffness ×", min: 0.4, max: 2, step: 0.05, hint: "front-drive cars only: rear lateral curve squeezed along the slip axis (less = bigger rear slip angle)" },
   fwd_rear_arb: { label: "FWD: rear bar ×", min: 0, max: 6, step: 0.1, hint: "front-drive cars only: rear anti-roll bar on top of the rear bar above (more = looser, less roll)" },
@@ -897,6 +899,7 @@ export class DriftLabWPanel {
       }
       for (const [key, label, hint] of [
         ["probe_tilt_fix", "wheel probe tilt fix", "the ground probe no longer touches on its edge on smooth road when the body rolls: removes the tick-to-tick tyre load chatter in corners (kerbs unchanged); proposed as the default"],
+        ["car_fixes", "per-car fixes (lab)", "lab-only car-data proposals: debug_coupe anti-roll bars × 0.5, lucciola_350 rear springs × 0.65 + yaw inertia × 1.2 (inertia applies when the car restarts)"],
         ["tyres_rwd_only", "tyre scales: RWD cars only", "the front / rear tyre scales apply to rear-drive cars only (front-drive cars keep their tyres); the lock and bars apply to all"],
         ["smart_angle_rate", "smart lock: plain wheel speed", "the wheels move at the plain rack's speed and stop at the smart lock (a 0.1 s tap turns them as far as before); off = full smart lock in the rack's 0.28 s"],
         ["smart_fade_both", "smart lock off in slides (both ways)", "the plain lock comes back with body slip for the into-turn side too (else only for countersteer)"],

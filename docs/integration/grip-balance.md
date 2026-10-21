@@ -832,3 +832,76 @@ Closest: debug_coupe 0.4, hakone_gt 0.3.
 
 Data proposals are for machine A (car data owner); nothing in `data/` is changed here. The
 example's `ARB_F/ARB_R/SPRING_F/SPRING_R/TORQUE/YAW_INERTIA` overrides reproduce them.
+
+Lab car fixes (lead-approved for the lab, 2026-10-21): `GripBalance::car_fixes` (on in "new"
+and "grip") applies `grip_lab::car_fix`: debug_coupe bars × 0.5, lucciola_350 rear springs × 0.65
+(preload raised, ride height kept) + yaw inertia × 1.2. Measured through the lab path:
+debug_coupe 0.43 → 0.29, lucciola_350 1.40 → 0.82 (0.68 when the rear sags instead of keeping
+ride height; A can pick either when changing the data). The panel has a "per-car fixes (lab)"
+checkbox. The yaw inertia applies when the car restarts or is tagged. Still **proposals for A**:
+`data/` is not edited.
+
+## Held-key hold (owner's clip-1 technique) — over-catch fix
+
+W found that with "new", the counter key **held** + full throttle (the owner's clip-1 technique)
+swings through or spins on every parity RWD, while a key-tapping driver holds. The reference
+holds a held key. `grip_balance score` now has a "held key" column (counter key at 6°, full
+throttle, 40 m / 0.6 g entry; direction-aware, a swap fails), and `robust` is the 27-case set.
+
+Root cause: the countersteer lock. At full counter lock the slide first grows to ~50°, then the
+fronts bite and the car swings through (or the speed bleeds off and it spins). Experiments
+(medium ride, spin model):
+- W's countersteer limit (0 / 0.25 / 1 / 2 / 4°): no change (0 / 27 on "new").
+- Probe tilt fix off: no change (1 / 27).
+- The smart lock's slide fade (where the plain lock comes back, both-ways fade, angle rate): ≤ 1.
+- Smart lock forced equal to the plain lock: back to 4 (= "before"). The smart lock only matters
+  through how much lock it gives.
+- **More** drift lock (`drift_lock_extra` +0.2 … +0.6): 0 / 27 everywhere.
+- **Less** drift lock (−0.2 … −0.35 from 15–20°): "new" 8–9, "grip" 9–10.
+
+So the held key over-catches with full lock. But a key-tapping driver *needs* the full lock for
+its catches:
+- A permanent cut (× 0.75 from 20°) gave 10 / 27, but the tapper's time in 30–45° fell from
+  3.3–4.5 s to 0.9–2.7 s.
+- A cut only while the slide closes (`slide_closing_dps`) kept the tapper (17.5 s total) but
+  held 0 / 27.
+
+The difference between the two drivers is how long the countersteer key stays down. Fix in the
+balance: `GripBalance::slide_lock` × **0.5**, phased in over 10° from **15°** of body slip, and
+only once the countersteer key has been held **0.5 s** (`slide_lock_after_s`, phased in over
+0.3 s). Quick catching taps keep the full lock; a held key gets less. On in "new" and "grip". It
+acts only on countersteer past 15° of slip, so grip driving is untouched: the `feel` table for
+all 13 cars is identical before / after, except the two cars with lab fixes. The 36-set sweep
+(lock × 0.4–0.75, from 10–20°, after 0–1.2 s) has a plateau at 0.5–0.6 / 10–15° / 0.5 s
+(18–20 / 27 on both rides).
+
+| test (medium ride) | new before → after | grip before → after |
+|---|---|---|
+| held key, parity_rwd_d | 1.1 s drift / SPUN → 3.3 s, 35°, **held** | 1.2 s / SPUN → 5.1 s, 40°, **held** |
+| held key, parity_rwd_a | 1.1 s / SPUN → 3.3 s, 36°, **held** | 1.2 s / SPUN → 5.5 s, 40°, **held** |
+| held key, parity_rwd_b | 0.9 s / SWAPPED → 4.7 s, 36°, **held** | 1.5 s / SWAPPED → 5.4 s, 38°, **held** |
+| held key, rampart_50 | 1.0 s / SPUN → 3.4 s, 33°, **held** | 1.1 s / SPUN → 5.2 s, 39°, **held** |
+| tapper (35° target), band s, rwd_d / a / b / rampart | 3.3 / 3.7 / 3.1 / 3.4 → 3.6 / 5.0 / 3.3 / 4.3 | → 5.1 / 5.1 / 5.0 / 4.8 |
+| robust set, 27 (plain steering), medium / lab ride | 0 / 1 → **19 / 18** | 1 / 1 → **22 / 20** |
+| robust set with tyre-slip VR steering | 16 → 18 | 15 → 22 |
+| snap-back (rwd_d / rwd_b): slip overshoot | 44.8° / 5.8° → 3.7° / 0.9° | — |
+| grip below the limit (body slip vs g, taps, lane change, slalom; 13 cars) | identical | identical |
+
+"Before" (no balance) stays at 4 / 27. shiro_turbo never reaches the 6° entry on a held key
+with full throttle at 40 m / 0.6 g (not enough power), so it has no hold in either case.
+
+Coordination with W's "more steering lock to catch over-rotations": extra lock on a held key at
+a steady angle over-catches (+0.2 … +0.6 drift lock: 0 / 27). A lock extension should go to
+catching taps / a growing slide, which is what this slide lock leaves alone (the first 0.5 s
+of a countersteer press keeps the full lock).
+
+**`spin_model_holds_the_clip_1_drift_where_the_ellipse_spins` (tyre_slip.rs)**: not the same
+root cause, and **green on lead/grip-balance** (b00b20f1 and after). It uses no grip balance. It
+passes here since tyre-slip's spin b0 6.99 → 7.5 (82066a3a), with W's countersteer limit on
+or off. With the probe tilt fix off it fails (2.2 s in band), so it sits on the probe fix's knife
+edge. The 0.8–1.3 s red is on bases without b0 7.5 (e.g. W's a0e1600f is built on 93b9a13d,
+which predates it).
+
+**Spin model v2 (ellipse)** (tyre-slip's preset) was tuned on the `drift_best` balance, and its
+button sets that balance. Held set, medium ride, its own VR steering: drift_best 9 / 27 (tyre-slip
+reports 7), "new" 4, "grip" 1. It needs its own balance, which the button gives it.

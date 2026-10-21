@@ -955,6 +955,7 @@ fn snap_table(args: &[String]) {
 /// inertia) against the W default: snap-back, the drift hold, and turn-in.
 fn snap_sweep(args: &[String]) {
     use wp_vehicle::drift_lab_w::{plain_hold, snap_back, step_steer_roll, SnapExit};
+    use wp_vehicle::grip_lab::{self, GripBalance};
     let ids: Vec<String> = if args.is_empty() {
         ["parity_rwd_d", "parity_rwd_a", "parity_rwd_b"]
             .iter()
@@ -963,93 +964,102 @@ fn snap_sweep(args: &[String]) {
     } else {
         args.to_vec()
     };
-    let margin = |m: f32| PlainSteer {
+    let m: f32 = std::env::var("MARGIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.25);
+    let limit = PlainSteer {
         counter_margin_deg: m,
+        ..PlainSteer::default()
+    };
+    let off = PlainSteer {
+        counter_margin_deg: 0.0,
         ..PlainSteer::default()
     };
     let spin = CarTune::spin_candidate();
     let lab = RideTune::lab_default();
-    let m: f32 = std::env::var("MARGIN")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.5);
-    let configs: Vec<(String, PlainSteer, CarTune, RideTune)> = vec![
+    let mid = RideTune::medium_weight();
+    let gnew = Some(GripBalance::lab_default());
+    type Cfg = (String, PlainSteer, CarTune, RideTune, Option<GripBalance>);
+    let mut configs: Vec<Cfg> = vec![
         (
-            "before (W default)".into(),
-            PlainSteer::default(),
+            "before: no limit, lab ride, grip new".into(),
+            off,
             spin,
             lab,
+            gnew,
         ),
-        (format!("counter limit {m}°"), margin(m), spin, lab),
         (
-            "limit + yaw inertia 1.3".to_string(),
-            margin(m),
+            format!("limit {m}°, lab ride, grip new"),
+            limit,
+            spin,
+            lab,
+            gnew,
+        ),
+        (
+            format!("**new: limit {m}°, medium weight, grip new**"),
+            limit,
+            spin,
+            mid,
+            gnew,
+        ),
+        (
+            "no limit, medium weight, grip new".into(),
+            off,
+            spin,
+            mid,
+            gnew,
+        ),
+        ("before, no grip balance".into(), off, spin, lab, None),
+        (
+            format!("limit {m}°, medium weight, no grip balance"),
+            limit,
+            spin,
+            mid,
+            None,
+        ),
+    ];
+    if std::env::var("CANDIDATES").is_ok() {
+        configs.push((
+            "new + yaw inertia 1.3".into(),
+            limit,
             spin,
             RideTune {
                 yaw_inertia: 1.3,
-                ..lab
+                ..mid
             },
-        ),
-        (
-            "limit + rear relax ×2".to_string(),
-            margin(m),
+            gnew,
+        ));
+        configs.push((
+            "new + rear relax ×2".into(),
+            limit,
             CarTune {
                 rear_relax: 2.0,
                 ..spin
             },
-            lab,
-        ),
-        (
-            "limit + rear relax ×3".to_string(),
-            margin(m),
-            CarTune {
-                rear_relax: 3.0,
-                ..spin
-            },
-            lab,
-        ),
-        (
-            "limit + front falloff 0.3".to_string(),
-            margin(m),
+            mid,
+            gnew,
+        ));
+        configs.push((
+            "new + front falloff 0.3".into(),
+            limit,
             CarTune {
                 front_deep_falloff: 0.3,
                 front_deep_from_deg: 8.0,
                 front_deep_full_deg: 20.0,
                 ..spin
             },
-            lab,
-        ),
-        (
-            "limit + slow weight".to_string(),
-            margin(m),
+            mid,
+            gnew,
+        ));
+        configs.push((
+            "limit + slow weight + grip for slow weight".into(),
+            limit,
             spin,
             RideTune::slow_weight(),
-        ),
-        (
-            "**new: limit + medium weight**".to_string(),
-            margin(m),
-            spin,
-            RideTune::medium_weight(),
-        ),
-        (
-            "yaw inertia 1.3 only".into(),
-            PlainSteer::default(),
-            spin,
-            RideTune {
-                yaw_inertia: 1.3,
-                ..lab
-            },
-        ),
-        (
-            "rear relax ×3 only".into(),
-            PlainSteer::default(),
-            CarTune {
-                rear_relax: 3.0,
-                ..spin
-            },
-            lab,
-        ),
-    ];
+            Some(GripBalance::for_slow_weight()),
+        ));
+    }
     println!("\n## Snap-back candidates");
     println!("| car | config | hold 30–45 s / held | counter+lift: yaw acc / yaw over / slip over / settle | release+lift: yaw acc / yaw over / settle | turn-in: tap 0.15 s @100 heading ° / step heading start s |");
     println!("|---|---|---|---|---|---|");
@@ -1062,10 +1072,11 @@ fn snap_sweep(args: &[String]) {
         }
     };
     for id in &ids {
-        for (name, p, t, r) in &configs {
+        for (name, p, t, r, g) in &configs {
             plain::set_override(Some(*p));
             car_lab::set_override(Some(*t));
             ride_lab::set_override(Some(*r));
+            grip_lab::set_override(*g);
             let c = car(id);
             let h = plain_hold(
                 &c,
@@ -1116,6 +1127,7 @@ fn snap_sweep(args: &[String]) {
     }
     car_lab::set_override(None);
     ride_lab::set_override(None);
+    grip_lab::set_override(None);
     plain::set_override(Some(PlainSteer::default()));
 }
 

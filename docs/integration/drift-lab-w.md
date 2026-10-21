@@ -891,8 +891,10 @@ Known gaps:
 
 **Metric** (`drift_lab_w::snap_back`, example mode `snap` / `snapsweep`):
 
-- Setup: 40 m left-hander at 0.6 g. The owner's hold (counter key + full throttle) runs until
-  the slide has been inside 30–45° for 0.5 s.
+- Setup: 40 m left-hander at 0.6 g. A key-tapping driver holds ~35° on the throttle until the
+  slide has been inside 30–45° for 0.5 s, and the exit starts with the counter key down. (The
+  first runs used the owner's held counter key; on the integration branch that no longer holds
+  a drift, see below.)
 - Then one of three exits for 3 s:
   - *counter+lift*: counter key held, throttle lifted, key let go under 15°;
   - *release*: key released, throttle kept;
@@ -911,8 +913,9 @@ Known gaps:
 
 The key release (rack return 0.33 s) comes too late to stop it.
 
-**Candidates** (snapsweep; counter+lift as yaw acc rad/s² / yaw overshoot rad/s / slip
-overshoot ° / settle s; hold = s inside 30–45°):
+**Candidates, first runs** (before the grip-balance merge: spin model + lab ride, no grip
+balance, no probe-tilt fix; counter-key entry; snapsweep counter+lift as yaw acc rad/s² / yaw
+overshoot rad/s / slip overshoot ° / settle s; hold = s inside 30–45°):
 
 | config | parity_rwd_d | parity_rwd_a | parity_rwd_b |
 |---|---|---|---|
@@ -931,6 +934,36 @@ overshoot ° / settle s; hold = s inside 30–45°):
   hold.
 - **Rear relaxation** does not help.
 
+**On the integration branch** (after merging lead/grip-balance 93b9a13d; the panel default
+tyres are now spin model + grip-balance "new": smart lock, RWD cornering stiffness ×0.6 / ×0.45,
+rear downforce, probe-tilt fix; tapping entry):
+
+| config | parity_rwd_d | parity_rwd_a | parity_rwd_b | turn-in (rwd_d): tap ° / heading start s |
+|---|---|---|---|---|
+| before: no limit, lab ride | 6.0 / 2.18 / 86 / spun | 5.9 / 2.21 / 85 / spun | 7.7 / 2.15 / 57 / — | 8.6 / 0.18 |
+| limit 0.25°, lab ride | 4.0 / 1.63 / 55 / — | 4.0 / 1.62 / 51 / — | 4.9 / 1.57 / 6 / — | 8.6 / 0.18 |
+| **new: limit 0.25° + medium weight** | 3.9 / 1.60 / 60 / — | 3.9 / 1.60 / 41 / — | 4.8 / 1.59 / 44 / — | 8.6 / 0.18 |
+| new + yaw inertia 1.3 | 3.1 / 1.42 / 50 / — | 3.1 / 1.42 / 38 / — | 3.9 / 1.41 / 7 / — | 8.1 / **0.20** |
+| new + rear relax ×2 | 3.9 / 1.64 / 66 / — | 3.9 / 1.65 / 50 / — | 5.2 / 1.66 / 24 / — | 8.8 / 0.18 |
+| new + front falloff 0.3 | 3.9 / 1.59 / 33 / — | 4.0 / 1.57 / 30 / — | no drift | 8.6 / 0.18 |
+| limit + slow weight + grip "for slow weight" | 2.9 / 1.39 / 51 / — | 2.9 / 1.38 / 6 / — | 3.4 / 0.87 / 0 / — | **5.9** / 0.17 |
+
+- **The limit still removes the snap-back spin.** Peak yaw acceleration is ~35 % lower and
+  yaw overshoot ~27 % lower on all three cars.
+- **Without a catch the car still swings 40–60° to the other side.** The softer grip-balance
+  rear does not stop the rotation by itself; a driver would catch it with the other key.
+- **Yaw inertia 1.3** cuts a little more but slows turn-in (heading starts 0.20 s vs 0.18 s).
+- **Slow weight + its grip pairing** is the calmest, but turn-in loses bite (tap 5.9° vs 8.6°).
+- **Neither goes in the default.**
+
+**The owner's clip-1 hold no longer works on the integration branch** (reported to the lead /
+grip-balance). The held counter key + full throttle over-catches and swings to the other side
+(side swap, then spin or straight) on every parity RWD with grip-balance "new": 0–0.3 s in
+30–45°. Even without grip balance, the probe-tilt fix takes the spin model's knife-edge hold
+down to 0.8–1.3 s (the `tyre_slip` hold test is red on lead/grip-balance itself). A key-tapping
+driver (35° target) holds well: grip new + medium weight, 3.2 / 3.4 / 4.5 s in band on rwd_d /
+a / b, all held.
+
 **Shipped default ("new"):**
 
 - **Countersteer limit** (`PlainSteer::counter_margin_deg`, default 0.25°). In a slide (fade
@@ -943,7 +976,8 @@ overshoot ° / settle s; hold = s inside 30–45°):
   - Roll 1.06 Hz / ζ 1.04 (lab default 1.50 Hz; slow weight 0.76 Hz).
   - Step-steer rise 0.40 s (0.31 s lab; 0.60 s slow), peak roll 4.7° (3.7° / 6.2°).
   - Heading starts 0.12 s, the same as before.
-  - The hold improves: rwd_a and rwd_b are now held; rwd_d is 3.0 s in band (was 3.9 s).
+  - First runs: the counter-key hold improved (rwd_a and rwd_b held; rwd_d 3.0 s in band, was
+    3.9 s). On the integration branch the tapping hold is about the same as with the lab ride.
 
 **A/B in the panel:**
 
@@ -954,15 +988,52 @@ overshoot ° / settle s; hold = s inside 30–45°):
 
 **Known:**
 
-- rwd_d's exit with the new combo still swings 11° to the other side and settles after the 3 s
-  window (limit only: 6°, 2.4 s).
+- On the integration branch the exit still swings 40–60° to the other side if nobody catches
+  it (first runs: 11°).
 - parity_rwd_b spins *into* the turn on release+lift with medium weight (lift-off oversteer,
   not snap-back; yaw overshoot 0).
 - The yaw-rate overshoot is ~25 % lower, not gone: the rear's re-grip is physical.
 
-Tests: `tests/drift_lab_w_snap.rs` (before snaps or spins on rwd_d / rwd_b; new: no spin,
-< 25° to the other side, yaw overshoot ≤ 85 % of before, hold kept), the `plain` unit test
-for the limit, and `ride_lab` medium-weight ordering. e2e drift_lab_w: 60 checks.
+Tests: `tests/drift_lab_w_snap.rs`, on the integration default tyres (spin + grip "new"):
+- before snaps or spins on rwd_d / rwd_a;
+- new: no spin, peak yaw acceleration < 80 % and yaw overshoot < 85 % of before, tapping hold
+  held with ≥ 2.5 s in band.
+
+Also the `plain` unit test for the limit and the `ride_lab` medium-weight ordering.
+e2e drift_lab_w: 60 checks.
+
+### Merge of lead/grip-balance (93b9a13d) — the lab integration branch (lead)
+
+- **Kept one version** of each round12 resolution. Grip-balance had already taken W's for the
+  pivot knobs (on `drift::DriftTuning`, W panel handbrake row), the TCS / ABS selects and the
+  side-floor hook (tyre-slip's), and removed its duplicate pivot override. Its `applyAssists`
+  change is kept: the testbed's saved clutch / gears / TCS / ABS choices win (owner: manual
+  clutch was forced back to auto).
+- **Plain rack:** tyre-slip's swing rack (`swing_rate`, default off) and W's countersteer limit
+  both kept; `PlainInput` gained `yaw_rate`.
+- **"Use W handling everywhere" now covers grip balance too.**
+  - `lab_scope::grip`: the grip-lab override applies to the tagged player only.
+  - The panel sets the saved grip balance (default "new") with the W profile and clears it
+    when the profile is off.
+  - e2e: free drive checks grip balance on the player.
+- **Drift Lab B / C tests (lead's call):** `sloppy_driving_still_spins_sometimes` and
+  `handbrake_stabs_add_rotation_and_drive_comes_back` are `#[ignore]`d, pointing to W's
+  equivalents.
+- **Goldens:** 8 keyboard-path goldens fail on lead/grip-balance itself (it took round12's
+  re-blessed hashes over W's keyboard lineage): cars_beater_hard_turn,
+  parity_rampart_counter_drift, parity_shiro_handbrake_10mph, police_sideswipe_patrol_day /
+  night, regression_grid_24, smoke_coupe_circle, vehicle_coupe_slalom. With their assists
+  switched to `wheel`, all 8 hash identically to round12 332f5a12, so it is the keyboard path.
+  Re-blessed.
+- **e2e:** drift_lab_w 79, countersteer 9, presets 13, race 20, menu 40 all pass. The reset
+  e2e's ghost-blink check is flaky (~1 in 2) with W handling on or off.
+- **Red on lead/grip-balance itself, not from this merge** (reported):
+  - `tyre_slip` `spin_model_holds_the_clip_1_drift_where_the_ellipse_spins`: spins since the
+    probe-tilt fix.
+  - `slide_control` `self_aligning_steering_does_not_wobble_a_keyboard_corner`: sentinel_cruiser
+    0.214 vs 0.204.
+
+
 
 ## Contract change requests
 

@@ -372,6 +372,7 @@ fn configs() -> Vec<(String, Option<GripBalance>)> {
     match std::env::var("GRIP").as_deref() {
         Ok("new") => vec![("new".into(), Some(GripBalance::lab_default()))],
         Ok("grip") => vec![("grip".into(), Some(GripBalance::grip()))],
+        Ok("drift_best") => vec![("drift_best".into(), Some(GripBalance::drift_best()))],
         Ok(j) if j.starts_with('[') => {
             let v: Vec<GripBalance> = serde_json::from_str(j).expect("GRIP json list");
             v.into_iter()
@@ -395,6 +396,8 @@ fn configs() -> Vec<(String, Option<GripBalance>)> {
 fn main() {
     // The Drift Lab W defaults (what the owner drives).
     match std::env::var("PLAIN").as_deref() {
+        // PLAIN=v2: tyre-slip's "spin model v2 (ellipse)" steering.
+        Ok("v2") => plain::set_override(Some(CarTune::spin_v2_plain())),
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),
         Err(_) => plain::set_override(Some(PlainSteer::default())),
     }
@@ -414,6 +417,18 @@ fn main() {
     // CARLAB=data: the tyre data instead of the lab's spin model (comparison only).
     if std::env::var("CARLAB").as_deref() == Ok("data") {
         car_lab::set_override(None);
+    } else if std::env::var("CARLAB").as_deref() == Ok("v2") {
+        // tyre-slip's "spin model v2 (ellipse)" tyres.
+        car_lab::set_override(Some(CarTune::spin_v2_candidate()));
+    } else if let Ok(j) = std::env::var("CARLAB").map(|v| v.trim().to_string()) {
+        // CARLAB='{...}': a car-tune JSON on top of the spin model (missing fields = the spin
+        // model's).
+        let mut v = serde_json::to_value(CarTune::spin_candidate()).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(&j).expect("CARLAB json");
+        for (k, x) in patch.as_object().expect("CARLAB object") {
+            v[k] = x.clone();
+        }
+        car_lab::set_override(Some(serde_json::from_value(v).expect("CARLAB fields")));
     } else {
         car_lab::set_override(Some(CarTune::spin_candidate()));
     }
@@ -422,7 +437,7 @@ fn main() {
         [
             "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
             "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score", "feel",
-            "cars",
+            "cars", "holds",
         ]
         .contains(&a.as_str())
     }) {
@@ -466,6 +481,14 @@ fn main() {
     }
     if what == "trace" {
         trace(args.first().map_or("parity_rwd_d", String::as_str));
+        return;
+    }
+    if what == "holds" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("# {name}");
+            holds_table(&args);
+        }
         return;
     }
     if what == "cars" {
@@ -692,8 +715,20 @@ fn score_line(id: &str) -> String {
     };
     let a = slip_curve(&c, 60.0);
     let b = slip_curve(&c, 100.0);
+    // The owner's clip-1 technique: counter key held + full throttle (direction-aware; a swing
+    // through to the other side fails).
+    let hold = plain_hold(
+        &c,
+        &reference_assists(),
+        PlainDriver::HoldCounter {
+            entry_deg: 6.0,
+            throttle: 1.0,
+        },
+        40.0,
+        0.6,
+    );
     format!(
-        "{id}: 60k 0.6g {:.1} 0.8g {:.1} pk {:.2}g/{:.1}{} | 100k 0.6g {:.1} 0.8g {:.1} pk {:.2}g/{:.1}{} | c60 {}",
+        "{id}: 60k 0.6g {:.1} 0.8g {:.1} pk {:.2}g/{:.1}{} | 100k 0.6g {:.1} 0.8g {:.1} pk {:.2}g/{:.1}{} | held key {} | c60 {}",
         pick(&a, 0.6),
         pick(&a, 0.8),
         a.max_g,
@@ -704,6 +739,7 @@ fn score_line(id: &str) -> String {
         b.max_g,
         b.slip_at_max,
         if b.spun { " SPUN" } else { "" },
+        hold.cell(),
         circle60(&c)
     )
 }
@@ -858,6 +894,36 @@ fn cars_table(ids: &[String]) {
             d.wheels[0].tire_id,
             d.wheels[2].tire_id
         );
+    }
+}
+
+/// Held-key vs key-tapping holds (`holds`): the owner's clip-1 technique (counter key held +
+/// full throttle) and W's tapping driver (35° target), 40 m / 0.6 g entry, per car.
+fn holds_table(ids: &[String]) {
+    let a = reference_assists();
+    for id in ids {
+        let c = car(id);
+        let held = plain_hold(
+            &c,
+            &a,
+            PlainDriver::HoldCounter {
+                entry_deg: 6.0,
+                throttle: 1.0,
+            },
+            40.0,
+            0.6,
+        );
+        let tap = plain_hold(
+            &c,
+            &a,
+            PlainDriver::Tapper {
+                entry_deg: 6.0,
+                target_deg: 35.0,
+            },
+            40.0,
+            0.6,
+        );
+        println!("{id}: held key {} | tapper {}", held.cell(), tap.cell());
     }
 }
 
