@@ -379,3 +379,25 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+
+## Reinforcements wait ahead, facing the racer's way (owner request, 2026-10-21)
+
+Owner: spawned police cars should appear in the direction the player is travelling and drive up
+to wait, already pointed the player's way, instead of spawning facing the player and doing a 180
+once passed.
+
+- `dispatch::ambush_plan`: when a reinforcement has to be *spawned* for a moving racer, pick a wait
+  point 25 m past a junction on the racer's predicted path (≥ 6 s of racer travel ahead, ≤ 900 m),
+  spawn on a hidden side-road node ≤ 400 m from it (≥ `spawn_min_distance_m` from the racer, spawn
+  clearance as before) whose route reaches the junction without using the racer's road, and keep it
+  only if `route_time × 1.3 + 3 s per junction + 3 s` beats the racer there. Quickest of the 6
+  closest candidates; one unit per wait point.
+- `Assignment::Intercept` gained `ambush: bool` (`point` = wait point when set). An ambusher drives
+  its route and stops at the wait point in the right-hand lane; it joins `Pursue` on sight within
+  120 m even while still ahead of the racer (shadow / rolling block then sorts the gap). It drops to
+  a plain intercept if the racer stops or the point leaves the racer's predicted path.
+- Re-used pool units (idle within 700 m) are unchanged, as is the fallback spawn.
+- Test: `tests/system.rs::spawned_reinforcements_wait_ahead_facing_the_racers_way` (no patrol pool;
+  every ambusher that joins faces the racer's direction, heading · travel > 0.5).
+- Outside my crate: none (the new field is matched with `..` everywhere else).

@@ -20,7 +20,7 @@ use crate::time::SimTime;
 use crate::tools::{
     compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
 };
-use crate::unit::{Assignment, DriveCommand, Unit, UnitRole, LANE_OFFSET_M};
+use crate::unit::{Assignment, DriveCommand, Track, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
 /// Road half width used for tool layout, m.
@@ -28,6 +28,35 @@ pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
 
 /// Spots tried per pool spawn before giving up until the next think step.
 const SPAWN_TRIES: usize = 8;
+
+/// Ambushing reinforcements wait at least this far (in the racer's travel time) ahead of it, s.
+const AMBUSH_MIN_LEAD_S: f32 = 6.0;
+/// They must reach the wait point at least this long before the racer does, s.
+const AMBUSH_SETTLE_S: f32 = 3.0;
+/// Farthest wait point along the racer's predicted path, m.
+const AMBUSH_MAX_AHEAD_M: f32 = 900.0;
+/// The wait point is this far into the racer's road past the junction the unit turns in at, m.
+const AMBUSH_INTO_LEG_M: f32 = 25.0;
+/// Spawn nodes are at most this far from the wait point, m.
+const AMBUSH_SPAWN_RADIUS_M: f32 = 400.0;
+/// Spawn nodes tried per wait point, closest first.
+const AMBUSH_SPAWN_CANDIDATES: usize = 6;
+/// Cruise time along an ambush route is scaled by this (acceleration, traffic), -.
+const AMBUSH_PACE_MARGIN: f32 = 1.3;
+/// Time added per junction on an ambush route (slowing for the turn), s.
+const AMBUSH_JUNCTION_S: f32 = 3.0;
+
+/// A reinforcement spawn that waits for the racer ahead of it (see `PoliceSystem::ambush_plan`).
+struct AmbushPlan {
+    /// Spawn position (right-hand lane), m.
+    pos: [f32; 2],
+    /// Spawn heading, toward the route's first node.
+    heading: [f32; 2],
+    /// Where to wait, on the racer's predicted path, m.
+    wait: [f32; 2],
+    /// Centreline route from the spawn node to `wait`.
+    track: Track,
+}
 
 /// Kind of incident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -758,6 +787,37 @@ impl PoliceSystem {
                     if self.ground_units_alive() >= self.cfg.presence.max_ground_units {
                         continue;
                     }
+                    let vel = self.racers[&req.racer].vel;
+                    if let Some(plan) = self.ambush_plan(world, target, [vel[0], vel[1]]) {
+                        let i = self.spawn_unit(
+                            UnitKind::Car,
+                            UnitRole::Reinforcement,
+                            plan.pos,
+                            plan.heading,
+                        );
+                        self.stats
+                            .reinforcement_delays_s
+                            .push(now.since(req.requested));
+                        self.assign(
+                            i,
+                            Assignment::Intercept {
+                                target: req.racer,
+                                point: plan.wait,
+                                ambush: true,
+                            },
+                        );
+                        // Start driving right away (before `wp_sim` gives it a body), the way
+                        // it faces.
+                        let cornering_g = self.cfg.pursuit.pursuit_cornering_g;
+                        self.units[i].set_command(DriveCommand {
+                            track: plan.track,
+                            speed_mps: 0.0,
+                            cornering_g,
+                            siren: true,
+                            lane_offset_m: LANE_OFFSET_M,
+                        });
+                        continue;
+                    }
                     let Some((pos, heading)) = self.reinforcement_spawn_point(world, target) else {
                         continue;
                     };
@@ -772,9 +832,144 @@ impl PoliceSystem {
                 Assignment::Intercept {
                     target: req.racer,
                     point: target,
+                    ambush: false,
                 },
             );
         }
+    }
+
+    /// Where a fresh reinforcement should wait for a moving racer, if anywhere: a spot just
+    /// past a junction on the racer's predicted path, reached from a side road the racer cannot
+    /// see, so the unit arrives facing the racer's direction of travel and joins the chase as
+    /// the racer comes by instead of turning around behind it. Spawns at least
+    /// `spawn_min_distance_m` from the racer, out of its sight, and only where the unit can
+    /// reach the wait point [`AMBUSH_SETTLE_S`] before the racer does.
+    fn ambush_plan(
+        &self,
+        world: &dyn WorldQuery,
+        racer: [f32; 2],
+        vel: [f32; 2],
+    ) -> Option<AmbushPlan> {
+        let speed = (vel[0] * vel[0] + vel[1] * vel[1]).sqrt();
+        if speed < crate::pursuit::STOPPED_RACER_MPS {
+            return None;
+        }
+        let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
+        let path = self.graph.predict_path(racer, vel, AMBUSH_MAX_AHEAD_M);
+        // Every node on the racer's road: the unit must not drive along it to get in place
+        // (it would be seen, or come at the racer head-on).
+        let mut on_path: Vec<NodeId> = Vec::new();
+        for leg in &path.legs {
+            on_path.push(leg.from_node);
+            on_path.push(self.graph.other_end(leg.segment, leg.from_node));
+        }
+        // One unit per wait point: later reinforcements take the next junction along.
+        let taken: Vec<[f32; 2]> = self
+            .units
+            .iter()
+            .filter_map(|u| match u.assignment {
+                Assignment::Intercept {
+                    point,
+                    ambush: true,
+                    ..
+                } => Some(point),
+                _ => None,
+            })
+            .collect();
+        let mut leg_start = 0.0;
+        for (k, leg) in path.legs.iter().enumerate() {
+            let s0 = leg_start;
+            leg_start += leg.len_m;
+            // The first leg starts behind the racer; short legs leave no room to pull in.
+            if k == 0 || leg.len_m < 2.0 * AMBUSH_INTO_LEG_M {
+                continue;
+            }
+            let racer_eta = (s0 + AMBUSH_INTO_LEG_M) / speed;
+            if racer_eta < AMBUSH_MIN_LEAD_S {
+                continue;
+            }
+            let junction = leg.from_node;
+            let wait = add(
+                leg.from,
+                scale(normalize(sub(leg.to, leg.from)), AMBUSH_INTO_LEG_M),
+            );
+            if taken
+                .iter()
+                .any(|t| dist(*t, wait) < 2.0 * AMBUSH_INTO_LEG_M)
+            {
+                continue;
+            }
+            // Closest side-road nodes first (index breaks ties: deterministic).
+            let mut cands: Vec<(f32, usize)> = self
+                .graph
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(n, node)| {
+                    !on_path.contains(&NodeId(*n as u32))
+                        && dist(node.pos, wait) <= AMBUSH_SPAWN_RADIUS_M
+                        && dist(node.pos, racer) >= min_d
+                })
+                .map(|(n, node)| (dist(node.pos, wait), n))
+                .collect();
+            cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            // Of the spots that make it in time, take the quickest to get into place.
+            let mut best: Option<(f32, AmbushPlan)> = None;
+            for &(_, n) in cands.iter().take(AMBUSH_SPAWN_CANDIDATES) {
+                let Some(route) = self.graph.shortest_path(NodeId(n as u32), junction) else {
+                    continue;
+                };
+                if route.len() < 2 || route[..route.len() - 1].iter().any(|r| on_path.contains(r)) {
+                    continue;
+                }
+                let unit_eta = self.route_time_s(&route) + AMBUSH_SETTLE_S;
+                if unit_eta > racer_eta || best.as_ref().is_some_and(|b| unit_eta >= b.0) {
+                    continue;
+                }
+                let start = self.graph.node(route[0]).pos;
+                let heading = normalize(sub(self.graph.node(route[1]).pos, start));
+                // In the right-hand lane, facing the first turn of the route.
+                let pos = add(start, scale([heading[1], -heading[0]], LANE_OFFSET_M));
+                if !crate::avoid::spawn_clear(pos, &self.obstacles, &self.cfg.pursuit.avoid)
+                    || self.sees(world, pos, racer)
+                {
+                    continue;
+                }
+                // The track runs on the centreline; the drive command adds the lane offset.
+                let mut pts: Vec<[f32; 2]> =
+                    route.iter().map(|r| self.graph.node(*r).pos).collect();
+                pts.push(wait);
+                let plan = AmbushPlan {
+                    pos,
+                    heading,
+                    wait,
+                    track: Track::new(pts),
+                };
+                best = Some((unit_eta, plan));
+            }
+            if let Some((_, plan)) = best {
+                return Some(plan);
+            }
+        }
+        None
+    }
+
+    /// Driving time along a node route from standstill at intercept pace, s: cruise time
+    /// padded by [`AMBUSH_PACE_MARGIN`] plus [`AMBUSH_JUNCTION_S`] for every junction passed.
+    fn route_time_s(&self, route: &[NodeId]) -> f32 {
+        let p = &self.cfg.pursuit;
+        let cap = p.pursuit_cap_mps.get(self.phase);
+        let mut t = AMBUSH_JUNCTION_S * route.len().saturating_sub(1) as f32;
+        for w in route.windows(2) {
+            if let Some(&(s, _)) = self.graph.outgoing(w[0]).iter().find(|(_, n)| *n == w[1]) {
+                let seg = self.graph.segment(s);
+                let v = (seg.speed_limit_mps * p.respond_speed_factor * 1.15)
+                    .min(cap)
+                    .max(1.0);
+                t += seg.length_m / v * AMBUSH_PACE_MARGIN;
+            }
+        }
+        t
     }
 
     /// The closest node at least `spawn_min_distance_m` from `target` without line of sight.

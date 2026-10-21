@@ -40,6 +40,10 @@ impl Harness {
     }
 
     fn with_mode(hour: f32, seed: u64, mode: DamageMode) -> Self {
+        Self::with_config(hour, seed, mode, PoliceConfig::builtin())
+    }
+
+    fn with_config(hour: f32, seed: u64, mode: DamageMode, cfg: PoliceConfig) -> Self {
         let (graph, map) = city().clone();
         // Racer path: from the middle of a Core arterial, straight-most continuation.
         let seg = graph
@@ -59,7 +63,7 @@ impl Harness {
             hazards: false,
         };
         Self {
-            police: PoliceSystem::with_city(PoliceConfig::builtin(), graph, setup),
+            police: PoliceSystem::with_city(cfg, graph, setup),
             world: ScenarioWorld {
                 map: Some(map),
                 ..ScenarioWorld::clock(TimeOfDay::from_hours(hour), 0.0)
@@ -614,4 +618,77 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
         }
     }
     assert!(captured, "parked racer never captured");
+}
+
+#[test]
+fn spawned_reinforcements_wait_ahead_facing_the_racers_way() {
+    // No patrol pool: every AI reinforcement has to be spawned. A player chase car tails the
+    // racer to keep the pursuit going.
+    let mut cfg = PoliceConfig::builtin();
+    let none = wp_police::config::PhaseTable {
+        dawn: 0,
+        day: 0,
+        dusk: 0,
+        night: 0,
+    };
+    cfg.presence.patrols = wp_police::config::DistrictTable {
+        core: none,
+        suburb: none,
+        industrial: none,
+    };
+    let mut h = Harness::with_config(12.0, 5, DamageMode::Arcade, cfg);
+    h.speed = 18.0;
+    h.s = 40.0;
+    let tail = |h: &Harness| {
+        let s = (h.s - 30.0).max(0.0);
+        let p = h.path.point_at(s).unwrap();
+        let d = h.path.dir_at(s).unwrap();
+        (p, d)
+    };
+    let (p, d) = tail(&h);
+    let pu = h
+        .police
+        .add_player_unit(PlayerId(1), EntityId(900), [p[0], p[1], 0.0], d);
+    h.police.set_heat(RACER, 80.0);
+    // Units seen waiting ahead, and their heading · racer direction when they joined.
+    let mut ambushers = std::collections::BTreeSet::new();
+    let mut joined_facing = std::collections::BTreeMap::new();
+    for _ in 0..400 {
+        let (p, d) = tail(&h);
+        h.police.sync_unit(
+            pu,
+            UnitSync {
+                pos: [p[0], p[1], 0.0],
+                vel: [d[0] * h.speed, d[1] * h.speed, 0.0],
+                heading: d,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        h.run(0.25, &[]);
+        let dir = h.path.dir_at(h.s).unwrap();
+        for u in h.police.units() {
+            match u.assignment {
+                Assignment::Intercept { ambush: true, .. } => {
+                    ambushers.insert(u.id);
+                }
+                Assignment::Pursue { .. } if ambushers.contains(&u.id) => {
+                    let facing = u.body.heading[0] * dir[0] + u.body.heading[1] * dir[1];
+                    joined_facing.entry(u.id).or_insert(facing);
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(h.police.racer(RACER).unwrap().pursued());
+    assert!(
+        !ambushers.is_empty(),
+        "no reinforcement was spawned to wait ahead"
+    );
+    assert!(!joined_facing.is_empty(), "no ambusher joined the chase");
+    // Joined pointing the racer's way: no turn-around behind it.
+    assert!(
+        joined_facing.values().all(|c| *c > 0.5),
+        "heading·racer dir at join: {joined_facing:?}"
+    );
 }

@@ -54,6 +54,13 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 - **Reinforcements**: each pursued racer wants `units_per_level[level]` ground units. A deficit
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
   an idle unit within 700 m is committed, or a new unit spawns ≥ `spawn_min_distance_m` away, out of sight.
+  A new unit for a moving racer **waits ahead** (`Assignment::Intercept { ambush: true }`): it spawns
+  on a side road near a junction on the racer's predicted path (≤ 900 m ahead, ≥ 6 s of the racer's
+  travel away), drives in so it stops 25 m past the junction already facing the racer's direction
+  of travel, and joins the chase as the racer comes by (no turn-around behind it). It is only
+  planned where its padded route time plus 3 s beats the racer there; one unit per wait point. If the
+  racer stops or leaves the predicted path, it falls back to a plain intercept. With no such spot,
+  or a stopped racer, it spawns at the nearest hidden node facing the racer as before.
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
   It is kinematic, gives line of sight to every unit, and is **not** a weapon.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
