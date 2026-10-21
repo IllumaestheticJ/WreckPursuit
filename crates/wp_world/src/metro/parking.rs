@@ -486,6 +486,37 @@ pub(crate) fn garage(bf: &Frame, s: &GarageSpec, rng: &mut Rng) -> GarageOut {
     out
 }
 
+/// Shallowest garage depth that still fits the stacked ramps, m.
+const GARAGE_MIN_D: f32 = 48.0;
+/// Steepest driveway from the gate to the ground floor (rise / run).
+const DRIVE_SLOPE: f32 = 1.0 / 7.5;
+
+/// Choose the building front (distance from the gate, `y0`) and depth so that a driveway
+/// at ≤ [`DRIVE_SLOPE`] over the apron reaches a ground floor that sits on or above all
+/// the ground under the footprint (earlier modules' earthworks may leave the site
+/// sloping). Prefers the shortest apron, then the deepest building. Returns `(y0, depth,
+/// lowest ground, highest ground)`; if nothing fits, the fullest building with a long
+/// apron (the driveway still never exceeds the slope: the floor is then capped and the
+/// highest terrain may show through at the back).
+fn garage_fit(ctx: &Ctx, gf: &Frame, x_l: f32, w: f32, back: f32, zg: f32) -> (f32, f32, f32, f32) {
+    let mut y0 = APRON;
+    while y0 <= APRON + 30.0 {
+        let mut d = (back - y0).min(GARAGE_MAX[1]);
+        while d >= GARAGE_MIN_D {
+            let (lo, hi) = ctx.ground_range(&gf.shifted(x_l, y0).rect(0.0, 0.0, w, d));
+            if hi + 0.03 - zg <= y0 * DRIVE_SLOPE {
+                return (y0, d, lo, hi);
+            }
+            d -= 2.0;
+        }
+        y0 += 1.0;
+    }
+    let y0 = APRON + 10.0;
+    let d = (back - y0).clamp(GARAGE_MIN_D, GARAGE_MAX[1]);
+    let (lo, hi) = ctx.ground_range(&gf.shifted(x_l, y0).rect(0.0, 0.0, w, d));
+    (y0, d, lo, hi.min(zg + y0 * DRIVE_SLOPE - 0.03))
+}
+
 /// Fill one garage site: the structure, the entrance driveway, gate arm and booth, and a
 /// low wall round the site.
 fn build_garage(ctx: &mut Ctx, site: &Site, rng: &mut Rng, sink: &mut Sink) {
@@ -500,12 +531,11 @@ fn build_garage(ctx: &mut Ctx, site: &Site, rng: &mut Rng, sink: &mut Sink) {
         x_l = c - GARAGE_MAX[0] * 0.5;
         w = GARAGE_MAX[0];
     }
-    let y0 = APRON;
-    let d = (hi[1] - 1.5 - y0).min(GARAGE_MAX[1]);
-    let bf = gf.shifted(x_l, y0);
-    let foot = bf.rect(0.0, 0.0, w, d);
-    let (glo, ghi) = ctx.ground_range(&foot);
     let zg = kit::gate_z(ctx, &g);
+    let (y0, d, glo, ghi) = garage_fit(ctx, &gf, x_l, w, hi[1] - 1.5, zg);
+    let bf = gf.shifted(x_l, y0);
+    // Ground floor at the highest ground under the footprint (never below the gate), so
+    // the terrain never pokes through; the driveway climbs to it at ≤ DRIVE_SLOPE.
     let z0 = zg.max(ghi) + 0.03;
     let spec = GarageSpec {
         w,
