@@ -64,7 +64,7 @@ function slapRate(x) {
 for (const rev of [3, 9]) {
   const x = await page.evaluate(async (r) => Array.from(await window.__wpAudio.renderFlap(r, 3.0)), rev);
   const rate = slapRate(x.slice(SR * 0.3));
-  const peak = Math.max(...x.map(Math.abs));
+  const peak = x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
   check(Math.abs(rate - rev) / rev < 0.1 && peak > 0.05 && x.every(Number.isFinite), `flap at ${rev} rev/s slaps ${rate.toFixed(2)} times a second (peak ${peak.toFixed(2)})`);
 }
 
@@ -83,7 +83,7 @@ const pops = await page.evaluate(async () => {
       for (let i = i0; i < i1; i++) s += d[i] * d[i];
       return 20 * Math.log10(Math.sqrt(s / (i1 - i0)) + 1e-12);
     };
-    out.push({ f, ok: r.ok, dur: buf.duration, peak: 20 * Math.log10(Math.max(...d.map(Math.abs))), bang: rms(0, 0.08), tail: rms(0.2, 0.6) });
+    out.push({ f, ok: r.ok, dur: buf.duration, peak: 20 * Math.log10(d.reduce((m, v) => Math.max(m, Math.abs(v)), 0)), bang: rms(0, 0.08), tail: rms(0.2, 0.6) });
   }
   return out;
 });
