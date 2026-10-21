@@ -66,12 +66,15 @@ const cand = await page.evaluate(() => window.__wp.sim.carTune());
 check(Math.abs(cand.lat_under_spin - 0.15) < 1e-6 && Math.abs(cand.yaw_damping - 0.2) < 1e-6, `spin grip + damper ${JSON.stringify(cand)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().yaw_damping)) === 0, "car data restores");
-await page.locator("#drift-lab-w button", { hasText: "spin model" }).click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "spin model", exact: true }).click();
 const spin = await page.evaluate(() => window.__wp.sim.carTune());
 check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_fx_slide - 0.958) < 1e-4, `spin model preset ${JSON.stringify(spin)}`);
 await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
 const sl = await page.evaluate(() => window.__wp.sim.carTune());
 check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
+await page.locator("#drift-lab-w button", { hasText: "spin model v2 (ellipse)" }).click();
+const v2 = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
+check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.68) < 1e-6 && v2.plain.velocity_relative === true, `spin model v2 preset ${JSON.stringify(v2)}`);
 await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
 await page.waitForTimeout(300);
 const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
@@ -282,7 +285,7 @@ await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car =
 await page.waitForTimeout(1500);
 const ld = await launch();
 console.log(`INFO  launch on the tyre data (owner's bug): yaw ${ld.maxYaw.toFixed(1)}° at ${ld.kmh.toFixed(0)} km/h`);
-await page.locator("#drift-lab-w button", { hasText: "spin model" }).first().click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "spin model", exact: true }).first().click();
 // Every parity car starts from the selector.
 for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo", "parity_rwd_d"]) {
   await page.selectOption("#drift-lab-w select", car);
