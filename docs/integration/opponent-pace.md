@@ -437,3 +437,95 @@ on the opposing side → gridlock), edge margin on both edges (Hollins −0.5–
 line through empty junctions (a civilian turning in met a racer nose to nose). Lock-in:
 lantern_checkpoint_s50 re-ranged (faster, rejoins 8–18 → 1–2 per car, no walls).
 Next: weaving through traffic and the skill / risk spread.
+
+## Street racing phase 3 — weaving + skill / risk spread (2026-10-21)
+
+- A civilian ahead is gone round as soon as I close on it (no patience timer).
+- A car behind in the target lane blocks a pass only if it is closing on me or within 3 m.
+- Pass positions: right beside the target (preferred side, then the other), then one and two
+  lane widths further out (a car abreast of the target in the next lane no longer ends it).
+- `DriverParams::traffic_risk = max(risk, 0.7 · (1 − skill))`: weak drivers use the opposing lanes
+  to pass and accept tighter civilian gaps; skilled drivers keep their personality's risk.
+  Police choices (running, red lights) keep the profile's `risk`.
+- Backing out: a standing out-of-race racer counts like a parked car (race_picker loop9 police
+  deadlock).
+
+Seeds 1–8 (32 cars per row), before = cf00e02f (phase 2), after = this tip:
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev |
+|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | p3_before | 28/32 | 78.4 | 9 | 0.2 | 0 | 80 |
+| lantern_checkpoint | 0.5 | p3_after2 | 31/32 | 82.9 | 9 | 0.2 | 0 | 84 |
+| lantern_checkpoint | 0.95 | p3_before | 32/32 | 74.9 | 9 | 0.2 | 0 | 54 |
+| lantern_checkpoint | 0.95 | p3_after2 | 32/32 | 74.9 | 9 | 0.2 | 0 | 54 |
+| hollins_sprint | 0.5 | p3_before | 32/32 | 67.7 | 41 | 0.0 | 14 | 0 |
+| hollins_sprint | 0.5 | p3_after2 | 32/32 | 67.7 | 41 | 0.0 | 14 | 0 |
+| hollins_sprint | 0.95 | p3_before | 32/32 | 62.5 | 41 | 0.0 | 8 | 8 |
+| hollins_sprint | 0.95 | p3_after2 | 32/32 | 62.5 | 41 | 0.0 | 8 | 8 |
+| grid_highway_sprint | 0.5 | p3_before | 32/32 | 55.9 | 0 | 4.0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | p3_after2 | 32/32 | 54.2 | 0 | 3.3 | 0 | 0 |
+| grid_highway_sprint | 0.95 | p3_before | 32/32 | 54.6 | 0 | 4.1 | 0 | 0 |
+| grid_highway_sprint | 0.95 | p3_after2 | 32/32 | 52.6 | 0 | 4.3 | 0 | 0 |
+
+Passes/km barely move: on the grid highway nearly every rejected pass is a car abreast in the
+next lane or a queue standing at a light inside the pass distance (lane ahead), or a rival
+racer alongside on that side (target busy) — the highway is saturated. Real weaving through
+dense traffic needs a gap planner (longitudinal gaps per lane over ~100 m) — next candidate,
+with the junction-arm look-ahead for cutting empty junctions.
+
+## Street racing — gap planner + junction-arm look-ahead (2026-10-21)
+
+**Junction-arm look-ahead.** The whole-road line may now put a racer on the opposing side within
+30 m of a junction when its arms are empty: no civilian within 60 m of it heading to it, none
+standing within 25 m, no non-racer vehicle at it. It uses the civilians already gathered near
+the racers (`Field::civilians_near`, 160 m) — **no new wp_world query, no wp_contracts change.**
+New metric: `Debug::head_on` (standing nose to nose with a standing car in my path); the pace
+sweep prints `nose <n> <s>` and `opp-nose <n>` (those out on the opposing lanes) per car.
+
+**Gap planner.** In traffic, in Follow, on a straight (next braking zone > 2.5 s plus the time to
+get back to my line away), below 35 m/s and only where my own direction has more than one lane
+(over the next 4 s of travel): compare my lanes over 100 m (room = gap to the next car + 3 s of
+its speed against mine) and move early into one with 20 m more room than mine, when moving over
+is safe (nothing alongside on the way, nothing closing from behind). Tried and narrowed on the
+way: on two-lane roads the "other lane" is the opposing one (Lantern opposing stand-offs 1 → 6,
+Hollins walls 8 → 15); at circuit speed a weave into a lane that ended a second later, and a
+weave ending into a bend 5 m off the line, each lost a car on Loop 9.
+
+Seeds 1–8; before = c1a68c48 (phase 3) with the metric added and the old "never near a
+junction" rule; after = this tip (Lantern / Hollins rows measured before the last two gap-planner
+restrictions, which only narrow it; Loop 9 / grid rows on the tip).
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev | nose-to-nose | of which opposing |
+|---|---|---|---|---|---|---|---|---|---|---|
+| grid_highway_sprint | 0.5 | before | 32/32 | 54.2 | 0 | 3.3 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | after | 32/32 | 52.7 | 0 | 3.5 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | before | 32/32 | 52.6 | 0 | 4.3 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | after | 32/32 | 50.0 | 0 | 4.0 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | before | 48/48 | 200.4 | 1 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | after | 48/48 | 200.8 | 1 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | before | 48/48 | 195.0 | 1 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | after | 48/48 | 194.7 | 1 | 0.0 | 0 | 0 | 0 | 0 |
+
+
+Lantern / Hollins (same metric without the opposing split):
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev | nose-to-nose |
+|---|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | before | 31/32 | 82.9 | 9 | 0.2 | 0 | 84 | 11 |
+| lantern_checkpoint | 0.5 | after | 31/32 | 80.3 | 12 | 0.2 | 0 | 61 | 7 |
+| lantern_checkpoint | 0.95 | before | 32/32 | 74.9 | 9 | 0.2 | 0 | 54 | 13 |
+| lantern_checkpoint | 0.95 | after | 32/32 | 72.8 | 11 | 0.2 | 0 | 58 | 18 |
+| hollins_sprint | 0.5 | before | 32/32 | 67.7 | 41 | 0.0 | 14 | 0 | 0 |
+| hollins_sprint | 0.5 | after | 32/32 | 67.4 | 45 | 0.0 | 14 | 0 | 0 |
+| hollins_sprint | 0.95 | before | 32/32 | 62.5 | 41 | 0.0 | 8 | 8 | 0 |
+| hollins_sprint | 0.95 | after | 32/32 | 62.2 | 45 | 0.0 | 8 | 8 | 0 |
+
+Opposing-side stand-offs over seeds 1–8, Lantern only (none elsewhere), measured with the
+`opp-nose` metric: before 4, after 4 — the same seeds and cars (s50 seeds 3/6/8, s95 seed 8),
+each a brief (≤ 0.6 s) meeting at the give-way junction with a racer whose own line sits ~0.4 m
+over the centre line there; none involves the whole-road line or the look-ahead. The total
+nose-to-nose count at Lantern s95 rose 13 → 18: all in the racer's own lane (a civilian turning
+across the junction box stops facing it; the racer backs out within ~5 s) — more cars reach those
+junctions sooner, none is a side-road car meeting a racer on the wrong side. Passes/km:
+grid highway 3.3–4.3 per seed for the field, Lantern 0.2 (the planner moves cars before a pass
+is needed; completed passes stay rare).

@@ -483,7 +483,7 @@ async function main(): Promise<void> {
     if (cityId && CITY_IDS.includes(cityId)) citySel.value = cityId;
     scene.signals.setHeads(sim.signalHeads());
     props.set(sim.propsStatic(), lod.models, lod.fleet.mats);
-    scene.markings.set(sim.roadMarkings(false), sim.roadMarkings(true));
+    scene.markings.set(sim.roadMarkings(false), sim.roadMarkings(true), scene.quality.cityTileM);
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);

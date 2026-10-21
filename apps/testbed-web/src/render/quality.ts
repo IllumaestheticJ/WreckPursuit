@@ -19,6 +19,7 @@
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
 // profile and high otherwise) is separate: the crash effects (render/fx) read it at start and
 // `CrashFx.setQuality()` changes it live (settings screen).
+import { CITY_TILE_M } from "./city_tiles";
 import type * as THREE from "three";
 import { store } from "../settings";
 import { prefersTouch } from "../touch";
@@ -108,10 +109,12 @@ interface Profile {
   signalM: number;
   /** Small city detail (kerbs, lot skirts, corner fills) within this distance (m). */
   cityDetailM: number;
+  /** City tile edge, m (CityTiles, MarkingsView): bigger tiles, fewer draw calls. */
+  cityTileM: number;
 }
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity, signalM: 450, cityDetailM: Infinity };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
   // car meshes and lamps matter more than pixels). Full car meshes within 150 m, traffic and
@@ -139,7 +142,10 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   };
   if (mode === "high") return high;
   if (mode === "low") return low;
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60 };
+  // Touch: 640 m city tiles (render budget, lead/main-sync): with the 600 m draw distance a
+  // 320 m tile grid put ~10 tiles of every city material in view (one draw call each); the
+  // phone is draw-call bound (budget 300) and has triangle headroom, so fewer, bigger tiles.
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60, cityTileM: 2 * CITY_TILE_M };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
   // resizes the canvas and the post targets, a long hitch under a software rasterizer. Rain at
   // 20 % there (30 % cost ~25 ms a frame, browser-perf.md round 12b).
@@ -177,6 +183,8 @@ export class Quality {
   signalDrawM: number;
   /** Small city detail distance, m (SceneView.detailDistanceM). */
   cityDetailM: number;
+  /** City tile edge, m, for cities loaded from now on (a loaded city keeps its tiles). */
+  cityTileM: number;
   /** Called after `setMode` changed the profile (main re-applies the LOD distances). */
   onChange: (() => void) | null = null;
   readonly rendererName: string;
@@ -208,6 +216,7 @@ export class Quality {
     this.profile = profileFor(this.mode, this.software, this.touch);
     this.trafficDrawM = this.fullLodM = this.propFullMax = this.propDrawM = this.propProxyM = this.lampDrawM = this.viewDrawM = 0;
     this.signalDrawM = this.cityDetailM = 0;
+    this.cityTileM = CITY_TILE_M;
     this.applyLod();
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
@@ -228,6 +237,7 @@ export class Quality {
     this.viewDrawM = this.profile.viewDrawM;
     this.signalDrawM = this.profile.signalM;
     this.cityDetailM = this.profile.cityDetailM;
+    this.cityTileM = this.profile.cityTileM;
   }
 
   /** Native pixel ratio cap. */

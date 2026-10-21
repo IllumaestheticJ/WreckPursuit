@@ -593,6 +593,14 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let near_barrier = BarrierIndex::new(&barriers);
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
     // bridge decks with parapets and piers.
+    // How far wall feet go below the ground: on hills the drawn (coarse) ground can sit lower
+    // than the physics terrain; a flat terrain (main's grid, which has one only for its
+    // viaduct) is drawn exactly, so the feet stay just under it.
+    let foot_m = if wp_world::surface::has_relief(net) {
+        1.5
+    } else {
+        0.2
+    };
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
         for (si, s) in net.surfaces.iter().enumerate() {
@@ -618,7 +626,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                         if *d {
                             p[2]
                         } else {
-                            (ground_z(geom::xy(*p)) - 1.5).min(p[2])
+                            (ground_z(geom::xy(*p)) - foot_m).min(p[2])
                         }
                     })
                     .collect();
@@ -681,13 +689,20 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     }
     // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
     // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
-    // physics terrain the skirts end on.
+    // physics terrain the skirts end on. On flat terrain (main's grid) a skirt foot stands on
+    // the ground, so its curtain would be buried whole: only the bare backs get one there
+    // (render budget: ~10 draw calls and 6k triangles a frame on the grid).
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
-        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+        let feet: &[(V3, V3)] = if wp_world::surface::has_relief(net) {
+            &walks.skirt_feet
+        } else {
+            &[]
+        };
+        for line in chain_segments(feet.iter().chain(&walks.bare_backs)) {
             let bottom: Vec<f32> = line
                 .iter()
-                .map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]))
+                .map(|p| (ground_z(geom::xy(*p)) - foot_m).min(p[2]))
                 .collect();
             wall.curtain(&line, &bottom, true);
         }

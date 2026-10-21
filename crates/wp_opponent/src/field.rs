@@ -322,6 +322,10 @@ struct Racer {
     wide_speed: Option<SpeedProfile>,
     /// Following the whole-road line right now.
     wide_on: bool,
+    /// Lane picked by the gap planner (lateral offset of its centre), and how long it has
+    /// been held, s.
+    weave_n: Option<f32>,
+    weave_s: f32,
     ctrl: DriveController,
     rng: Rng,
     status: RacerStatus,
@@ -420,6 +424,10 @@ pub struct Debug {
     pub pass_checks: [u32; 8],
     /// Out on the opposing lanes (my body left of my own lanes' edge).
     pub opposing: bool,
+    /// Standing nose to nose with a standing car that faces me (or in the opposing lanes with
+    /// a standing car right ahead): the stand-off a racer has to back out of.
+    #[serde(default)]
+    pub head_on: bool,
 }
 
 /// What limits a racer's speed target.
@@ -595,8 +603,27 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
-/// The whole-road line never puts me on the opposing side this close to a junction, m.
+/// Gap planner: city speeds only. At circuit speeds (Loop 9, 50-67 m/s) a weave off the line
+/// cost time and, on seeds 3, a car (into the next bend off its line), m/s.
+const WEAVE_MAX_MPS: f32 = 35.0;
+/// Gap planner: how far ahead lanes are compared, m.
+const WEAVE_RANGE_M: f32 = 100.0;
+/// Gap planner: time over which a car's speed counts towards the room in its lane, s.
+const WEAVE_LOOK_S: f32 = 3.0;
+/// Gap planner: extra room another lane must offer before I move over, m.
+const WEAVE_GAIN_M: f32 = 20.0;
+/// Gap planner: works only where my own lanes leave this much room to move across (more than
+/// one lane of mine), m.
+const WEAVE_MIN_SPAN_M: f32 = 3.0;
+
+/// Lateral step between the pass positions tried beside a car (about a lane), m.
+const PASS_LANE_STEP_M: f32 = 3.5;
+
+/// The whole-road line puts me on the opposing side this close to a junction only when its arms
+/// are empty ([`junction_arms_empty`]), m.
 const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
+/// How far up a junction's arms civilians coming to it are looked for, m.
+const JUNCTION_ARM_LOOK_M: f32 = 60.0;
 
 /// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
@@ -668,6 +695,8 @@ impl Field {
                 speed,
                 wide_speed,
                 wide_on: false,
+                weave_n: None,
+                weave_s: 0.0,
                 ctrl: DriveController::new(
                     gains,
                     spec.capability.wheelbase_m,
@@ -1719,6 +1748,7 @@ fn decide_racer(
         let hw = 0.5 * r.cap.width_m;
         let hl = 0.5 * r.cap.length_m;
         let v = r.v.max(0.0);
+        let mut head_on_now = false;
         // Street racing: the whole road when it is clear. Follow the line over my lanes and
         // the opposing ones (apexes, chicanes, empty junctions) while nothing is in its way on
         // the opposing side or in a junction it crosses, out to past the next braking zone;
@@ -1741,7 +1771,7 @@ fn decide_racer(
                     matches!(r.debug.limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal);
                 (r.wide_on || may_start)
                     && !in_traffic
-                    && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, horizon)
+                    && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, civs, horizon)
             }
             _ => false,
         };
@@ -1802,7 +1832,7 @@ fn decide_racer(
         });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
+            && (p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1921,14 +1951,18 @@ fn decide_racer(
                         && !matches!(x.o.who, Who::Racer(_))
                         && (r.n < lim_lo - 1.0 || x.o.facing < -0.3)
                 });
+            head_on_now = head_on && v.abs() < 0.5;
             // Nose up to a parked car (closer than the creep stop gap allows a car to steer out
             // round it): back out a little first (Hollins, police seed 6: the last racer stopped
             // 0.9 m behind a busted car and waited there for the rest of the race).
+            // A racer out of the race standing there is as good as parked (Loop 9 with police:
+            // a racer nosed up to a captured one waited behind it for the rest of the race).
             let nosed_up = rel.iter().any(|x| {
+                let standing_out = x.o.out_of_race && x.o.v_s.abs() < 0.5;
                 x.ds > 0.0
-                    && x.o.parked
-                    && x.gap < CREEP_STOP_GAP_M + 0.5
-                    && (x.o.n - r.n).abs() < hw + x.o.half_w
+                    && (x.o.parked || standing_out)
+                    && x.gap < CREEP_STOP_GAP_M + if standing_out { 1.5 } else { 0.5 }
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w + if standing_out { 0.5 } else { 0.0 }
             });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
@@ -2123,7 +2157,10 @@ fn decide_racer(
                 let momentum = (v - x.o.v_s > 2.5 || tow_run)
                     && x.gap < pass_horizon(v, x.o.v_s)
                     && brake_dist > v * 1.5;
-                if (r.blocked_s > p.overtake_patience_s || momentum)
+                // Street racing: a civilian ahead is gone round, not queued behind — look for
+                // a gap as soon as I am closing on it.
+                let weave = is_civ(&x.o) && v - x.o.v_s > 1.0;
+                if (r.blocked_s > p.overtake_patience_s || momentum || weave)
                     && x.o.v_s > -1.0
                     && !done_racing
                     && (!start_phase || x.o.parked)
@@ -2155,6 +2192,91 @@ fn decide_racer(
                     }
                 }
             }
+        }
+
+        // Gap planner (weaving): in traffic, pick the lane with the most room over the next
+        // ~100 m and move into it early, instead of driving up to the car in mine and waiting
+        // for a pass. A lane counts only if moving over is safe now (nothing alongside on the
+        // way, nothing closing from behind in it).
+        // Straights only: weaving into a bend takes me off my line where the off-line cap
+        // would have to brake mid-corner.
+        if r.tactic == Tactic::Follow
+            && !done_racing
+            && !start_phase
+            && !fleeing
+            && v < WEAVE_MAX_MPS
+            && brake_dist > 2.5 * v.max(8.0)
+        {
+            let room = |c: f32| -> f32 {
+                rel.iter()
+                    .filter(|q| q.ds > 0.0 && (q.o.n - c).abs() < hw + q.o.half_w + 0.3)
+                    .map(|q| (q.gap + (q.o.v_s - v) * WEAVE_LOOK_S).max(q.gap.min(0.0)))
+                    .fold(WEAVE_RANGE_M, f32::min)
+            };
+            let safe = |c: f32| -> bool {
+                let band = my_band(r.n, c);
+                !rel.iter().any(|q| {
+                    let lat =
+                        band.0 < q.o.n + q.o.half_w + 0.4 && band.1 > q.o.n - q.o.half_w - 0.4;
+                    lat && ((q.ds.abs() < hl + q.o.half_len + 3.0)
+                        || (q.ds < 0.0 && q.gap < 15.0 && q.o.v_s > v + 0.5))
+                })
+            };
+            // My own direction's lanes only, here and over the next 60 m (two-lane roads have
+            // no other lane of mine: the opposing one is for passes and the whole-road line,
+            // which check for oncoming traffic).
+            let own = |s: f32| to_limits(corridor.bounds(s));
+            // (Out to 4 s of travel at speed: a lane that ends a second ahead at 65 m/s is no
+            // lane — Loop 9 s95, a racer weaved into one and spun off where it merged.)
+            let (o_lo, o_hi) = [0.0, 30.0, 60.0, 2.0 * v, 4.0 * v]
+                .iter()
+                .map(|x| own(r.s + x))
+                .fold((f32::NEG_INFINITY, f32::INFINITY), |(a, b), (l, h)| {
+                    (a.max(l), b.min(h))
+                });
+            // Time to get back to my line before the next braking zone (Loop 9 s95 seed 3: a
+            // racer 5 m off its line at 55 m/s ended its weave into the bend and lost it).
+            let back_in_time = |c: f32| {
+                let back_s = (c - line_n(r.s)).abs() / 0.9;
+                brake_dist > v * (2.5 + back_s)
+            };
+            let here = room(r.n);
+            let current = r.weave_n.filter(|c| *c >= o_lo - 0.1 && *c <= o_hi + 0.1);
+            let mut best: Option<(f32, f32)> = None;
+            let mut c = o_lo;
+            while o_hi - o_lo >= WEAVE_MIN_SPAN_M && c <= o_hi + 0.01 {
+                let f = room(c);
+                if (c - r.n).abs() > 1.5
+                    && f > here + WEAVE_GAIN_M
+                    && back_in_time(c)
+                    && safe(c)
+                    && best.is_none_or(|b| f > b.1)
+                {
+                    best = Some((c, f));
+                }
+                c += PASS_LANE_STEP_M;
+            }
+            r.weave_s += dt;
+            r.weave_n = match (current, best) {
+                // Keep my pick while it still pays and is not stale.
+                (Some(cur), _)
+                    if r.weave_s < 8.0
+                        && back_in_time(cur)
+                        && room(cur) > here.min(room(line_n(r.s))) - 5.0 =>
+                {
+                    Some(cur)
+                }
+                (_, Some((c, _))) if here < WEAVE_RANGE_M - 1.0 => {
+                    r.weave_s = 0.0;
+                    Some(c)
+                }
+                _ => None,
+            };
+            if let Some(c) = r.weave_n {
+                tuck = Some(c);
+            }
+        } else {
+            r.weave_n = None;
         }
 
         // Defend: one move toward the attacker's side.
@@ -2821,6 +2943,7 @@ fn decide_racer(
             brake_dist,
             pass_checks: r.pass_checks,
             opposing: r.n - hw < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m,
+            head_on: head_on_now,
         };
     }
 }
@@ -2969,6 +3092,7 @@ fn wide_line_clear(
     r: &Racer,
     me: Who,
     obstacles: &[Obstacle],
+    civs: &[Civ],
     horizon: f32,
 ) -> bool {
     let hw = 0.5 * r.cap.width_m;
@@ -2986,14 +3110,24 @@ fn wide_line_clear(
         let c = corridor.sample((s / CORRIDOR_STEP_M).floor() as isize);
         let n_w = corridor.interp(&wide.offset, s);
         if n_w - hw < -c.left_m - 0.1 {
-            // Not on the opposing side near a junction at all: traffic turning in from a side
-            // road is not in view until it is in the way, and a racer it meets nose to nose
-            // there stays wedged (Lantern s95 seed 4: a racer on the opposing side met a
-            // civilian that had just turned in and both stood for the rest of the race).
+            // On the opposing side near a junction only when nobody is coming to it: look up
+            // its arms, not just my corridor — a civilian turning in from a side road is not on
+            // the corridor until it is in the way, and one meeting a racer nose to nose there
+            // stays wedged (Lantern s95 seed 4).
             let i = (s / CORRIDOR_STEP_M).floor() as isize;
             let back = (WIDE_JUNCTION_CLEAR_M / CORRIDOR_STEP_M).ceil() as isize;
-            if (-back..=back).any(|j| corridor.sample(i + j).junction) {
-                return false;
+            if let Some(j) = (-back..=back).find(|&j| corridor.sample(i + j).junction) {
+                let at = geom::xy(corridor.sample(i + j).pos);
+                if !junction_arms_empty(at, civs) {
+                    return false;
+                }
+                // Anything else (police, parked or physical cars) standing at it.
+                if others.iter().any(|(o, ds)| {
+                    !matches!(o.who, Who::Racer(_))
+                        && (ds - (x + j as f32 * CORRIDOR_STEP_M)).abs() < 35.0
+                }) {
+                    return false;
+                }
             }
             let t = x / v;
             for (o, ds) in &others {
@@ -3010,6 +3144,25 @@ fn wide_line_clear(
         x += 2.0 * CORRIDOR_STEP_M;
     }
     true
+}
+
+/// Whether nobody is coming to the junction at `at`: no civilian within
+/// [`JUNCTION_ARM_LOOK_M`] heading towards it, and none standing within 25 m of it (waiting at
+/// its line, or inside it).
+fn junction_arms_empty(at: V2, civs: &[Civ]) -> bool {
+    !civs.iter().any(|c| {
+        let to = geom::sub(at, c.pos);
+        let d = geom::len(to);
+        if d > JUNCTION_ARM_LOOK_M {
+            return false;
+        }
+        let speed = geom::len(c.vel);
+        if speed < 0.5 {
+            d < 25.0
+        } else {
+            geom::dot(c.vel, to) > 0.0 || d < 12.0
+        }
+    })
 }
 
 /// Whether a car at lateral offset `n` (half width `hw`) is out on the opposing lanes (left of
@@ -3119,8 +3272,15 @@ fn plan_pass(
         [-1.0, 1.0]
     };
     let mut why = PassReject::NoRoom;
-    'side: for side in sides {
-        let n_pass = o.n + side * need;
+    // Right beside it first (preferred side, then the other), then a lane and two lanes
+    // further out: on a multi-lane road the lane next to it may hold a car abreast of it while
+    // the one beyond is empty (grid highway: passes were refused "lane ahead" with a free lane
+    // two over).
+    let candidates = [0.0f32, PASS_LANE_STEP_M, 2.0 * PASS_LANE_STEP_M]
+        .into_iter()
+        .flat_map(|extra| sides.map(|side| (side, extra)));
+    'side: for (side, extra) in candidates {
+        let n_pass = o.n + side * (need + extra);
         if alongside_towards(n_pass) {
             why = PassReject::TargetBusy;
             continue 'side;
@@ -3193,8 +3353,10 @@ fn plan_pass(
             }
             // A car right behind me in line is following me whichever way I go: pulling out
             // does not cut it off.
+            // (Only a car that is closing on me: one behind going no faster cannot run into
+            // me when I move over.)
             let in_line = (q.o.n - r.n).abs() < hw + q.o.half_w - 0.5;
-            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 && !in_line {
+            if q.ds <= 0.0 && (q.gap < 3.0 || (q.gap < 12.0 && q.o.v_s > v + 0.5)) && !in_line {
                 why = PassReject::LaneBehind;
                 continue 'side;
             }

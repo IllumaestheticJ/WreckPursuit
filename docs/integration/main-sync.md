@@ -10,7 +10,7 @@
      grid highway as divided highways with diamond interchanges, painted road markings, median
      barriers, racer AI fixes, upbeat-faraday's vehicle catch commit).
   4. `origin/lead/opponent-pace` @ `9a1b060`, `origin/lead/round12` @ `e6f7cc3`, `origin/lead/grip-balance` @ `51f5e60` → `7b15f90` (the lead named it b6d1bd5; the pushed head is 7b15f90, same one-file change),
-     `origin/ws/police` @ `fcc9d08`, `origin/lead/opponent-pace` @ `db65359` → `03c03fe` → `cf00e02`.
+     `origin/ws/police` @ `fcc9d08`, `origin/lead/opponent-pace` @ `db65359` → `03c03fe` → `cf00e02` → `c1a68c4`.
 - **Contract:** main changed nothing in `crates/wp_contracts` or `schemas/` (both main ranges).
   `DqReason::LeftCorridor` stays in the contract but is no longer produced.
 
@@ -94,6 +94,20 @@ highways on the old code; the merge ports main onto round 12's:
 - simcli `sprint_off_route`: main's open-loop cutter keyframes retuned for round 12 steering.
 - `data/stats/cars.json` re-measured on round 12 physics and cars (`just car-stats`).
 
+## Race payout pays the advertised stake (lead's decision)
+The browser race (`wp_wasm::race`) advertised `wp_race::bridge::economy_race`'s stake but
+charged and paid through `wp_economy` alone (its per-km price, no `purse_scale` /
+`entry_scale`): a grid-sprint win paid 1 377 against an advertised 5 031 (ratio 0.27; R5 band
+0.75–1.34). Latent on round 12 too (the player finished 3rd there, so the winner-only check
+never ran); main's faster highway course let the player win and tripped it. Now the glue
+settles through the economy as before and posts the difference to the stake as one
+`Adjustment { note: "race stake (advertised purse / buy-in)" }` line each for the buy-in and
+the payout (purse and clean bonus × `purse_scale`, buy-in × `entry_scale`), exactly the bridge's
+scaling. No `wp_economy` change. New test
+`race_tests::a_win_pays_the_advertised_purse_on_either_course_length` (747 m round 12 course,
+1 113 m main's). `short_sprint_with_ai…` checks the account through the race's own ledger lines
+(an escaped pursuit mid-race pays its own bonus in between).
+
 ## Scenarios re-aimed on main's maps
 | Scenario | Was | Now | Why |
 |---|---|---|---|
@@ -124,5 +138,55 @@ on the final tip (below).
 
 (final list below, with the gate)
 
-## Gate
-(final, below)
+## Render budget (after the gate; lead's follow-up)
+`node e2e/perf_check.mjs` (software GL in this container, Port Vesper chase, `style=lowpoly`).
+Draw calls swing ±15 between runs (car and prop views), so two runs each:
+
+| Profile | Before (`9a4272f8`) | After |
+|---|---|---|
+| chase 1280×720 | 417–428 k triangles, 327–344 draw calls | 362–364 k, 370–377 |
+| rain 1280×720 | 398–408 k, 307–322 | 330–332 k, 324–327 |
+| phone 740×360 | 385–387 k, 322–325 draw calls | 358–369 k, 272–287 draw calls |
+
+Budgets: ≤ 400 k triangles; < 300 draw calls on the phone (< 600 desktop). The frame-time and
+allocation checks still fail under software GL, as on round 12 (environment, not touched).
+- **Road markings** (`markings_view.ts`): ~94 k triangles as two whole-city meshes with frustum
+  culling off, so every triangle was drawn every frame. Now tiled like the city (one
+  vertex-coloured mesh per tile, white and yellow merged: one draw each), frustum-culled and
+  hidden past the city draw distance (where the road under them is not drawn either). No
+  small-detail cut-off: distant dashes still show from the air. A/B with
+  `e2e/highway_shots.mjs`: the 8 Port Vesper shots are pixel-identical; the grid shots differ
+  only where live traffic had moved.
+- **Touch profile city tiles 640 m** (`Quality.cityTileM`, was 320 m): with the 600 m draw
+  distance ~10 tiles of every city material were in view, one draw call each (city draws on
+  the phone 123 → 84). Instanced trees / fences / hedges / driveways keep their 640 m tiles
+  (`Math.max(INSTANCE_TILE_M, tileM)`): 1280 m ones cost +80 k triangles.
+- **Grid greybox** (`city-import` `glb.rs`): on flat terrain the skirt-foot wall curtains stand
+  on the ground and were buried whole: not emitted there any more (bare sidewalk backs keep
+  theirs). Port Vesper's greybox is unchanged; the perf chase runs on Port Vesper, so this one
+  does not show in the table (grid only).
+
+## Gate (final, `bb2208ed`, published as preview 0.12.32)
+`CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, exit codes:
+
+| Step | Exit | Notes |
+|---|---|---|
+| `cargo fmt --all -- --check` | 0 | |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | 0 | |
+| `cargo run -p lint-determinism` | 0 | 74 findings, 0 errors |
+| `cargo test --workspace --no-fail-fast` | 101 | 3 known reds below; `goldens_match` green |
+| `cargo test --release -p wp_race --test opponent_pace pace_scenarios` | 101 | Lantern only (below) |
+| testbed `npm run wasm`, `tsc --noEmit` | 0, 0 | |
+| testbed `npm run e2e` | 1 | 217 PASS; only `e2e/perf_check.mjs` |
+
+Known reds, with owners:
+- **E (police):** `wp_wasm run_tests::capture_bills_holds_the_car_and_repair_continue_restores_it`,
+  `run_tests::restart_keeps_the_account` (units never reach a racer parked on a grid street of
+  main's map; green on round 12 alone); `wp_race race_picker::hollins_hill_sprint` (all four
+  racers Captured).
+- **opponent-pace:** `opponent_pace lantern_checkpoint_s50/s95` (racers queue behind civilians at
+  main's Lantern Row signals; times ~2× the lock). Red before the 70ab9d0 merge too.
+- **testbed perf (software GL in this container):** frame time / allocation budgets fail on
+  round 12 too; new here: 440 k triangles / frame in the chase (budget 400 k) and 323 draw calls
+  on the phone profile (budget 300), from main's road markings and median barriers.
