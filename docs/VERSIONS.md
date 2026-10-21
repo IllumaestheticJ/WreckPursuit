@@ -41,5 +41,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.31 | preview | Photo mode (F7: free camera, filters, save PNG), realistic tyre squeal, mod shop with parts drawn on the car, police helicopter (bridges block its view, radio), race gates wider + off-course reset, audio pauses with the game; tune panel moved to F10 |
 | 0.12.32 | preview | Main's new maps (divided highways, ramps, lane markings, new grid), P8 pro police + stat bars; police: noticed→pursuit, U-turn route, Hollins hairpin capture, stand-offs clear in 3 s; AI racers use the whole road, weave, gap planner, cut empty junctions; front brake bias +0.05 (brake stability); race payout matches the advertised purse; parked cars clear of fences / Bluff Road ground fix |
 | 0.12.33 | preview | Render budget back under limits: road markings tiled + culled (one draw per tile), 640 m city tiles on phones, buried grid wall curtains dropped (chase 425k → 363k triangles, phone 323 → 280 draw calls) |
-| 0.12.34 | preview | (next) |
+| 0.12.34 | preview | Police: arresting unit busy 30 s (no chain arrests), pinned capture needs a chasing unit, head-on waiting unit creeps aside, backup waits ahead facing the racer, faster chase junctions, stuck units route round traffic; AI racers pass civilians stopped at Lantern Row lights, junction gap check, never stand at a red on the opposing side |
+| 0.12.35 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
