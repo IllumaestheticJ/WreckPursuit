@@ -5,6 +5,7 @@
 // every sim-space object is parented under it.
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
 import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE, POLICE_UNIT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
@@ -53,6 +54,12 @@ export class SceneView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
+    // Image-based lighting so metallic paint, chrome and bare metal on the car meshes read as
+    // metal instead of black (they only reflect an environment, never the direct lights).
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.6;
+    pmrem.dispose();
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
 
     this.scene.background = DAY_SKY.clone();
