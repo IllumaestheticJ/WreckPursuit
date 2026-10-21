@@ -74,7 +74,7 @@ const sl = await page.evaluate(() => window.__wp.sim.carTune());
 check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
 await page.locator("#drift-lab-w button", { hasText: "spin model v2 (ellipse)" }).click();
 const v2 = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
-check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.68) < 1e-6 && v2.plain.velocity_relative === true, `spin model v2 preset ${JSON.stringify(v2)}`);
+check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.7) < 1e-6 && Math.abs(v2.plain.swing_rate - 2.08) < 1e-6, `spin model v2 preset ${JSON.stringify(v2)}`);
 await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
 await page.waitForTimeout(300);
 const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));

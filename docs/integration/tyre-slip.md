@@ -135,6 +135,35 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Spin model v2 re-tuned on the step-20 default (lead go-ahead, 2026-10-21)
+
+Harness aligned with the panel default (all `examples/transition.rs` configs now ride on
+`RideTune::firm()`, the step-20 default; slow weight keeps its own). That was the 9.0–9.3° vs
+7° lift-off difference: my configs still had `RideTune::lab_default()` (bars × 0.25). With the
+firm ride my lift-off check reads 0 / 18 step-outs, worst 7.0°, same as grip-balance's.
+
+`v2search` (648 runs, step 20 · plain first, step 20 · VR second; plain candidates may also
+vary the swing rack). **New v2** = `CarTune::spin_v2_candidate()` (ellipse 0.70, drive floor
+0.35, b0 7.15, b2 1.41, c 0.78, p 5, rear relax 0.73) + `CarTune::spin_v2_plain()` (plain
+steering, swing rack × 2.08 from 86°/s). The W button now keeps the selected balance and ride.
+
+| step 20 (balance new, firm ride) | v1 · plain | **v2 · plain (preset)** | target |
+|---|---|---|---|
+| held-drift set (27) | 26 (1 swap) | **25** (1 swap) | ≥ 24 ✓ |
+| owner's lift flick caught, reference gaps (18) | 0 | **13** (72 %), 0 spins, 0 swing-backs | ≥ 11 ✓ |
+| lift-off in a normal corner, > 8° (18) | 0 (worst 7.0°) | **0** (worst 7.0°) | 0 ✓ |
+| straight launches (6) | 6 (worst 2.9°) | 6 (worst 2.0°) | as before ✓ |
+| grip max Δ vs data tyres (lane change) | 6.3 % | 7.1 % | |
+| keys released (6, tyre_slip's lab ride) | 2 slow spins | 3 slow spins | kept ✓ |
+
+**Caveat — the swing rack's yaw threshold is a knife edge.** Rate is forgiving (× 1.7: 25 / 12,
+× 2.4: 22 / 18), but the threshold is not: 82°/s → held 20, 90°/s → caught 9, 70°/s → held 12.
+A held-drift entry rotates almost as fast as a swing, so a yaw-rate trigger can barely tell
+them apart. A sturdier trigger (e.g. only after a throttle lift or a key reversal within the
+last ~0.5 s) is the proposed next step. Without the swing rack: held 26, caught 9.
+
+The VR column's best: held 20, caught 12 (no candidate reached 24 held with VR).
+
 ### v2 status (paused, lead 2026-10-21)
 
 v2 stays the self-contained "drift best" A/B preset (its button sets `GripBalance::drift_best()`).

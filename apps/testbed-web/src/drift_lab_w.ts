@@ -887,7 +887,7 @@ export class DriftLabWPanel {
       const v2 = document.createElement("button");
       v2.textContent = "spin model v2 (ellipse)";
       v2.title =
-        "tyre-slip A/B: the spin model kept inside the friction ellipse, so a brief throttle lift while switching keys swings the car through (lift flicks caught 12 / 18 at the reference gaps; v1: 0). Holds fewer full-throttle drifts than v1 (7 / 27 vs 18). Sets tyres + VR steering + the 'drift: best' balance";
+        "tyre-slip A/B: the spin model kept inside the friction ellipse, so a brief throttle lift while switching keys swings the car through. On the step-20 default: lift flicks caught 13 / 18 at the reference gaps (v1: 0), held drifts 25 / 27 (v1: 26), no lift-off step-out. Sets tyres + plain steering with the swing rack; keeps the selected balance and ride";
       v2.onclick = () => {
         const d = this.sim.carTuneDefaults();
         const tyres = JSON.stringify(d.spin_v2);
@@ -897,7 +897,6 @@ export class DriftLabWPanel {
         } catch {
           /* ignore */
         }
-        saveGrip(gd.drift_best);
         this.save(d.spin_v2_plain);
         this.build();
       };

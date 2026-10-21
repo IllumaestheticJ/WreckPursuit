@@ -226,36 +226,33 @@ impl CarTune {
 
     /// "Spin model v2 (ellipse)" (tyre-slip, drift transitions; lab A/B next to
     /// [`CarTune::spin_candidate`]): the spin model with its combined force pulled back into
-    /// the friction ellipse (`spin_ellipse` 0.68), so a throttle lift hands the drive force's
+    /// the friction ellipse (`spin_ellipse` 0.7), so a throttle lift hands the drive force's
     /// share of the grip back to cornering and the owner's lift flick swings the car through.
-    /// Tuned with `GripBalance::drift_best()` and [`CarTune::spin_v2_plain`] (examples/
-    /// transition.rs `v2search`): lift flicks caught 12 / 18 at the reference gaps (v1: 0),
-    /// held-drift set 7 / 27 (v1: 18) — docs/integration/tyre-slip.md, "Spin model v2".
+    /// Tuned on the step-20 lab default (`GripBalance::lab_default()`, `RideTune::firm()`)
+    /// with [`CarTune::spin_v2_plain`] (examples/transition.rs `v2search`): held-drift set
+    /// 25 / 27 (v1 26), lift flicks caught 13 / 18 at the reference gaps (v1 0), lift-off in a
+    /// normal corner 0 / 18 step-outs (docs/integration/tyre-slip.md, "Spin model v2").
     pub fn spin_v2_candidate() -> Self {
         Self {
             spin_model: true,
-            spin_ellipse: 0.68,
-            spin_fx_slide: 0.42,
-            spin_b0: 6.17,
+            spin_ellipse: 0.7,
+            spin_fx_slide: 0.35,
+            spin_b0: 7.15,
             spin_b2: 1.41,
-            spin_c: 0.87,
-            spin_p: 8.0,
-            rear_relax: 0.69,
+            spin_c: 0.78,
+            spin_p: 5.0,
+            rear_relax: 0.73,
             ..Self::default()
         }
     }
 
-    /// The steering of the "spin model v2 (ellipse)" preset: the "drift: spin + VR (test)"
-    /// velocity-relative steering re-tuned with the v2 tyres (fade 5.6 → 14.7°, gain 0.52,
-    /// align time 0.32 s, slide key gain 0.33).
+    /// The steering of the "spin model v2 (ellipse)" preset: the plain profile with the swing
+    /// rack × 2.08 from 86°/s of yaw (the threshold is sensitive: 82°/s loses holds, 90°/s
+    /// loses catches; docs/integration/tyre-slip.md).
     pub fn spin_v2_plain() -> crate::plain::PlainSteer {
         crate::plain::PlainSteer {
-            velocity_relative: true,
-            align_gain: 0.52,
-            align_from_deg: 5.56,
-            align_full_deg: 14.68,
-            t_align_s: 0.32,
-            slide_key_gain: 0.33,
+            swing_rate: 2.08,
+            swing_yaw_dps: 86.0,
             ..crate::plain::PlainSteer::default()
         }
     }
