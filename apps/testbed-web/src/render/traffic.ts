@@ -305,7 +305,7 @@ interface Surf {
 const SURF: Record<MaterialJson, Surf | null> = {
   paint: { rgb: 0xffffff, rough: 0.4, metal: 0, lamp: 0, paint: true },
   livery: { rgb: 0xffffff, rough: 0.4, metal: 0, lamp: 0, paint: true },
-  glass: { rgb: 0x1b242c, rough: 0.06, metal: 0.3, lamp: 0, paint: false },
+  glass: { rgb: 0x1b242c, rough: 0.18, metal: 0.1, lamp: 0, paint: false },
   trim: { rgb: 0x161719, rough: 0.6, metal: 0, lamp: 0, paint: false },
   headlight: { rgb: 0xe6e4dc, rough: 0.2, metal: 0.2, lamp: 1, paint: false },
   taillight: { rgb: 0x6a0c0c, rough: 0.25, metal: 0.1, lamp: 2, paint: false },
@@ -779,9 +779,9 @@ if (tGroup > 0.5) {
   }
   // Rust: blotches low on the body and round the arches, scaled by vParams.x.
   if (vParams.x > 0.0) {
-    float low = 1.0 - smoothstep(0.25, 0.6, vLocal.z / uHeight);
+    float low = 1.0 - smoothstep(0.2, 0.45, vLocal.z / uHeight);
     float n = tNoise(vLocal * 7.0) * 0.7 + tNoise(vLocal * 19.0) * 0.3;
-    float r = smoothstep(0.62, 0.72, n + 0.35 * low * vParams.x - 0.25 * (1.0 - vParams.x));
+    float r = smoothstep(0.55, 0.65, n * (0.55 + 0.65 * low) * (0.6 + 0.5 * vParams.x));
     paint = mix(paint, vec3(0.30, 0.13, 0.06) * (0.7 + 0.5 * tNoise(vLocal * 40.0)), r);
     tRough = mix(tRough, 0.95, r);
     tMetal = mix(tMetal, 0.0, r);
