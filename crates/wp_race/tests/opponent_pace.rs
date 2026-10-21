@@ -16,6 +16,7 @@
 //! `cargo test --release -p wp_race --test opponent_pace -- --ignored --nocapture`
 //! Knobs: `WP_PACE_RACES=loop9_circuit,hollins_sprint`, `WP_PACE_SKILLS=0.25,0.95`,
 //! `WP_PACE_POLICE=1` (keep the scenario's police; default off), `WP_PACE_DENSITY=0.0`,
+//! `WP_PACE_TOD=23.0` (time of day, h),
 //! `WP_PACE_SOLO=1` (one car only: the pole car), `WP_PACE_GEOM=1` (geometry-only limits,
 //! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car).
 
@@ -77,6 +78,8 @@ pub struct PaceOpts {
     pub trace: Option<usize>,
     /// Scenario seed override.
     pub seed: Option<u64>,
+    /// Time of day override, h (`WP_PACE_TOD`).
+    pub tod: Option<f32>,
 }
 
 impl PaceOpts {
@@ -89,6 +92,7 @@ impl PaceOpts {
             geometry: var("WP_PACE_GEOM").is_some(),
             trace: var("WP_PACE_TRACE").and_then(|v| v.parse().ok()),
             seed: var("WP_PACE_SEED").and_then(|v| v.parse().ok()),
+            tod: var("WP_PACE_TOD").and_then(|v| v.parse().ok()),
         }
     }
 }
@@ -138,6 +142,8 @@ pub struct CarPace {
     pub contacts: (u32, u32),
     /// Completed passes made between two cars (lane-splitting).
     pub splits: u32,
+    /// Mean civilians within 300 m of the car (sampled at 1 Hz): (my direction, opposing).
+    pub civ_near: (f32, f32),
     /// Lane-splits given up (tucked back in).
     pub split_aborts: u32,
     /// Judge status.
@@ -264,6 +270,9 @@ pub fn race_pace_in(
     if let Some(s) = opts.seed {
         sc.seed = s;
     }
+    if let Some(t) = opts.tod {
+        sc.time_of_day_h = t;
+    }
     // Picker scenarios list the player first, the AI field (pole first) after; the judge
     // enters the AI field first.
     let picker = id != "city_sprint";
@@ -361,6 +370,8 @@ pub fn race_pace_in(
     // (stand-offs, seconds in them, in one now).
     let mut head_on = vec![(0u32, 0.0f32, false); k_n];
     let mut head_on_opp = vec![0u32; k_n];
+    // Civilians within 300 m of each racer once a second, (same direction, opposing, samples).
+    let mut civ_near = vec![(0u32, 0u32, 0u32); k_n];
     let mut last_tactic = vec![Tactic::Follow; k_n];
     // Last non-profile cause; the climb back to the profile afterwards is booked to it.
     let mut recovering: Vec<Option<usize>> = vec![None; k_n];
@@ -559,6 +570,24 @@ pub fn race_pace_in(
                 }
                 h.2 = d.head_on;
             }
+            if tick.is_multiple_of(240) {
+                if let Some(me) = sim.vehicles().iter().find(|x| x.id == racers[k]) {
+                    let st = me.vehicle.state();
+                    let fw = wp_world::drive::forward_of(st.rot);
+                    let c = &mut civ_near[k];
+                    c.2 += 1;
+                    for a in sim.world().agents() {
+                        let (dx, dy) = (a.pos[0] - st.pos[0], a.pos[1] - st.pos[1]);
+                        if dx * dx + dy * dy > 300.0 * 300.0 || (a.pos[2] - st.pos[2]).abs() > 5.0 {
+                            continue;
+                        }
+                        let dir = wp_world::geom::dir_of_yaw(a.yaw);
+                        let along = dir[0] * fw[0] + dir[1] * fw[1];
+                        c.0 += u32::from(along > 0.5);
+                        c.1 += u32::from(along < -0.5);
+                    }
+                }
+            }
             if v > 2.0 {
                 let l = &mut lateral[k];
                 l.0 += 1;
@@ -677,6 +706,11 @@ pub fn race_pace_in(
                 head_on_opposing: head_on_opp[k],
                 contacts: (r.civilian_hits, r.contacts),
                 splits: ai.field().splits_by(k) as u32,
+                civ_near: {
+                    let c = civ_near[k];
+                    let n = c.2.max(1) as f32;
+                    (c.0 as f32 / n, c.1 as f32 / n)
+                },
                 split_aborts: ai.field().split_aborts_by(k) as u32,
                 status: format!("{:?}", r.status),
             }
@@ -719,7 +753,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} civnear {:.2} {:.2} | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -739,6 +773,8 @@ fn pace_sweep() {
                     c.contacts.1,
                     c.splits,
                     c.split_aborts,
+                    c.civ_near.0,
+                    c.civ_near.1,
                     c.status,
                     lost.join(", ")
                 );
@@ -829,6 +865,7 @@ fn pace_scenarios_hold_their_ranges() {
             .ok()
             .and_then(|v| v.parse().ok()),
         seed: None,
+        tod: None,
     };
     let mut caps = BTreeMap::new();
     let mut fails = Vec::new();
