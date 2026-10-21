@@ -262,6 +262,20 @@ to neutral (wheel preset, 1:1, with A's differentials: RWD 0.07–0.35 road-whee
 
 Before/after per car: `docs/integration/vehicle.md` → "Handling balance".
 
+**Highway catch** (2026-10-21, owner: "way too tail happy at speed and incredibly hard to
+catch a slide without snap oversteering"; `steering::highway_catch`). From 60 km/h (full at
+110), once the body slip passes ~3° (full at 4°), keyboard / gamepad steering aims at
+`highway_catch_angle` = body slip − 2 × (body slip − rear-axle slip): the CG's direction of
+travel with the yaw damped. A held countersteer key blends to it (instead of the
+save-the-car lock, which held the front tyres at peak force in the countersteer direction and
+reversed the yaw before the slide angle came back); released keys go all the way to it on any
+slider (the gamepad's 30 % only half-aligned, so it spun even on a prompt release). Below
+60 km/h, in grip, with the slider at 0 and for wheel / AI nothing changes. `cargo run
+--release -p wp_vehicle --example hs_stability`: every catch case (5 cars, keyboard + gamepad,
+110 / 150 km/h, prompt / 0.25 s late) caught, snap-back ≤ 13° (was up to 180°, i.e. spins).
+Tables in `docs/integration/vehicle.md` → "High-speed catch on the round-12 steering";
+regression test `tests/high_speed_catch.rs`.
+
 ## Differentials (`diff.rs`)
 
 Every driven axle (and the centre of an AWD car) is solved once per drivetrain sub-step. A
@@ -399,6 +413,10 @@ gamepad; declutch, gear kept, no stall, drive resumes), `tests/clutch.rs` (row 5
 clutch slip, stall, re-crank; the automatic clutch never stalls); `cargo run --release -p
 wp_vehicle --example handbrake` prints the turn table, `--example slide` the slider 0/50/100
 recovery table.
+
+`tests/high_speed_catch.rs`: 150 km/h keyboard + gamepad catches (prompt and late release)
+end straight with ≤ 15° snap-back; `--example hs_stability` prints the full lane change /
+turn-in / catch sweep.
 
 `tests/handling_balance.rs` holds the per-class understeer-gradient ranges and the "held key
 reaches the grip limit" / "ESC adds no understeer" checks (playtest row 28).

@@ -1344,3 +1344,110 @@ Tests: `pivot.rs` unit tests (key + handbrake only, wheel preset off, build-up, 
 yaw cap), `tests/handbrake.rs::the_clip_2_hairpin_pivots_with_the_aid_and_is_caught` (≥ 130° by
 1.2 s, caught < 1.2 s, no spin-on), the 25 km/h catch test (< 0.8 s). Goldens re-blessed
 (hash-only: two parity scenarios, a frontal crash golden + its replay, a panels frontal, a cruiser ram); all 103 scenarios pass.
+
+## High-speed catch on the round-12 steering (side/handling, 2026-10-21)
+
+Owner playtest: "way too tail happy at speed and incredibly hard to catch a slide without snap
+oversteering". 4a4efba1 fixed this for the older steering model and was deliberately not
+merged; this is the same goal on the round-12 model (self-aligning countersteer, slip-targeted
+lock, countersteer lock, drift hold, handbrake pivot aid), reusing its measurement
+(`metrics::catch_snap_back`, `examples/hs_stability`). Change in `steering.rs` only; no
+contract, car data, tyre or chassis change, and no yaw torque.
+
+**Cause** (per-tick traces of the `hs_stability` runs):
+- *Over-countersteer from the save-the-car lock.* A held countersteer key / full stick asks for
+  the front axle's travel plus the slip-targeted margin (1.1 × front peak slip, gamepad 1.27 ×),
+  never less than the normal lock. That holds the front tyres at their peak force *in the
+  countersteer direction* (−8 900 N front vs 4 500 N rear in the debug_sedan 150 km/h trace).
+  At highway speed the yaw rate reverses (+0.8 → −1.7 rad/s) while the body is still 7–15° out;
+  by the time the slip is under 3° (the metric's release point) the car rotates 1.7 rad/s the
+  other way, i.e. it is already spinning. This is the keyboard snap-back and the gamepad's
+  "spins even on a prompt release" (the gamepad's bigger margin made it 30° of lock for a 20°
+  slide).
+- *Late release.* Once the rear crosses straight the key held 0.25 s longer is a full-grip turn
+  (the normal lock, ~9–10° at 150 km/h) into the new slide.
+- *Gamepad release.* Released keys align the wheels to `align_strength(help)` × the front
+  axle's travel: 51 % at the gamepad's 30 %. Half-aligned, the front tyres keep pushing *into*
+  the slide (front force with the yaw), so after the release the gamepad never recovered.
+- Pointing the wheels exactly along the front axle's travel (no front force) is not enough
+  either: the rear tyres alone swing the car back like a weather vane, and that swing is less
+  damped the faster the car goes (tried: snap-backs 9–35°, gamepad still spinning late).
+
+**Change** (`steering::highway_catch`, `highway_catch_angle`): from 60 km/h (full at
+110 km/h, `HIGHWAY_KMH`), once the body slip angle passes 0.05 rad (~3°, full at 0.07 rad,
+`HIGHWAY_SLIDE_RAD`), keyboard / gamepad steering aims at the catch angle
+`body_slip − 2 × (body_slip − rear_axle_slip)`: the CG's direction of travel minus twice the
+yaw part of the rear axle's travel, so the front tyres always push against the yaw rate
+(slip angle ≈ yaw rate × (a + 2b) / v). A held countersteer key blends its lock to it (its
+part on the key's side, 0 when the car is already swinging back faster than it would help);
+released keys go all the way to it whatever the slider. Body slip and not rear-axle slip
+gates it because the two cases that must differ have the same rear-axle slip (2–3°): a hard
+keyboard weave at 140 km/h (body slip ≤ 3.5°, must be untouched) and the end of a catch (body
+still 4–5° out, where falling back to the normal lock re-launched the yaw). Below 60 km/h, in
+grip, with the slider at 0 and for the wheel / AI profiles the code paths are the old ones
+(the wheel bit-identity test passes; low-speed drift / handbrake / slide tests unchanged).
+
+Choices tried and rejected: travel + 0.3 × peak margin (gamepad still spun); "keep the help on
+to straight" weighted by rear-axle slip (late catches fine, but every highway reversal counted
+as a countersteer: weave yaw −15…40 %); "car rotating toward the key" weight (same problem).
+Damping gain 1 (wheels exactly along the rear axle's travel) reaches 15° worst case; 2 gives
+13° and the same weave / lane / turn-in numbers, so 2 ships.
+
+**`hs_stability` catch** (TCS / ESC off, yaw kick 1.4 rad/s, key held until slip < 3°;
+cells = kick slide° / snap-back° / final°, before → after):
+
+| Car | preset | 110 prompt | 110 late | 150 prompt | 150 late |
+|---|---|---|---|---|---|
+| lindwurm_4t | keyboard | 12/10/0 → **9/1/0** | 12/52/0 → **9/9/0** | 13/16/0 → **9/2/0** | 13/87/67 → **9/12/0** |
+| lindwurm_4t | gamepad | 15/76/61 → **9/1/0** | 15/129/124 → **9/10/0** | 17/143/143 → **9/3/0** | 180/180/-180 → **9/13/0** |
+| debug_sedan | keyboard | 16/26/0 → **11/2/0** | 16/75/37 → **11/10/0** | 18/46/7 → **12/3/0** | 18/108/96 → **12/12/0** |
+| debug_sedan | gamepad | 20/118/109 → **11/2/0** | 20/136/132 → **11/10/0** | 180/180/-179 → **12/3/0** | 180/180/-180 → **12/13/0** |
+| kestrel_ts | keyboard | 14/13/0 → **10/1/0** | 14/58/0 → **10/9/0** | 15/26/0 → **10/2/0** | 15/90/82 → **10/12/0** |
+| kestrel_ts | gamepad | 17/116/116 → **10/1/0** | 17/155/151 → **10/10/0** | 180/180/-180 → **10/3/0** | 180/180/-180 → **10/13/0** |
+| rampart_50 | keyboard | 13/11/0 → **9/1/0** | 13/90/90 → **9/9/0** | 15/25/0 → **10/2/0** | 180/180/-176 → **10/11/0** |
+| rampart_50 | gamepad | 180/180/-179 → **9/1/0** | 180/180/-180 → **9/10/0** | 180/180/-137 → **10/3/0** | 180/180/-99 → **10/13/0** |
+| shiro_turbo | keyboard | 11/9/0 → **8/1/0** | 11/78/55 → **8/9/0** | 13/17/0 → **8/2/0** | 180/180/-173 → **8/11/0** |
+| shiro_turbo | gamepad | 180/180/-177 → **8/1/0** | 180/180/-180 → **8/10/0** | 180/180/-180 → **9/2/0** | 180/180/-167 → **9/13/0** |
+
+Every case caught (final 0°), snap-back 1–3° prompt / 9–13° late, kick slide 8–12° (the
+self-aligning steering now catches harder before the driver reacts). 4a4efba1 on the older
+model: slide 6–15°, snap-back ≤ 15°.
+
+**Lane change** (keyboard, full key left 0.5 s, right 0.6 s, centre; peak body slip°, before →
+after; "ends" = not recovered, final slip):
+
+| Car | 80 | 110 | 140 | 170 |
+|---|---|---|---|---|
+| lindwurm_4t | 8 → **8** | 16 → **11** | 22 → **13** | 27 → **15** |
+| debug_sedan | 9 → **9** | 18 → **10** | 23 → **11** | 28 → **12** |
+| kestrel_ts | 7 → **7** | 15 → **11** | 25 → **12** | 32 → **13** |
+| rampart_50 | 6 → **6** | 15 → **10** | 165 (ends 165) → **12** | 86 (ends 86) → **13** |
+| shiro_turbo | 7 → **7** | 32 (ends 32) → **12** | 97 (ends 97) → **14** | 119 (ends 119) → **15** |
+
+Feel check on the same manoeuvre (lateral offset at 0.5 / 1.1 / 2 / 4 s, peak yaw rate): the
+first half is identical; the right-key half is now a catch where the car is sliding (body slip
+~5° by then at 110+), so the car no longer whips back across: before, every car ended 10–30 m
+to the *right* of its start (yaw up to 1.0–2.35 rad/s), after it ends 0–10 m left with peak
+yaw 0.79–0.91 rad/s, i.e. a slightly under-returned lane change instead of an over-rotation.
+
+**Turn-in** (keyboard, full key 2 s, 50–140 km/h: yaw rate at 0.3 s / 2 s, road-wheel angle):
+identical to the last digit on all five cars (a held turn key is never a countersteer).
+
+**Extra checks** (scratch drivers, not committed): keyboard weave of 0.2 s taps at 80 / 110 /
+140 km/h (grip, body slip ≤ 3.6°): peak yaw rate identical on every car and preset except
+debug_sedan keyboard at 140 km/h (0.72 → 0.68 rad/s). Weave of 0.35 s taps (the tail came out
+5.5–8.5° before): peak yaw 0.9–1.3 → 0.77–0.89 rad/s, slip 4.4–6.1°. Full key held 2 s then
+released: identical up to 110 km/h; at 140 km/h the yaw swings past zero a little more
+(min −0.04…−0.09 → −0.04…−0.15 rad/s).
+
+**Tests:** `tests/high_speed_catch.rs` (kestrel_ts + rampart_50, keyboard + gamepad, 150 km/h,
+prompt + late: final < 3°, snap-back ≤ 15°, slide < 20°; fails on the old code: kestrel
+keyboard prompt 26°), `steering.rs` unit tests `highway_catch_only_in_a_slide_at_speed_with_assisted_steering`,
+`highway_countersteer_aims_at_the_catch_angle_not_past_the_travel`. No existing test changed.
+
+**Open / for the owner's feel:**
+- A sustained full key at 140 km/h still lets the tail out 5–7° (the "release" check above;
+  untouched on purpose: turn-in must not change). The catch then takes over, but the turn
+  itself is as before.
+- simcli goldens that drive keyboard / gamepad presets above 60 km/h with a slide may change
+  hash; not re-blessed here (lead re-blesses at the end).
