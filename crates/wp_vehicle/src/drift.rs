@@ -188,6 +188,7 @@ mod tests {
             front_peak_slip: 0.11,
             front_axle_angle: -0.2,
             handbrake_hold: false,
+            catch_key: 0.0,
             tuning: DriftTuning {
                 hold_enabled: true,
                 ..DriftTuning::default()

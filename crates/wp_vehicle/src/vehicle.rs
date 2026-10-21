@@ -26,8 +26,9 @@ use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{slide_class_with_rear_lock, slide_throttle};
 use crate::steering::{
-    ackermann, assist_mode, body_slip, front_axle_angle, rear_axle_slip, steer_target,
-    torque_steer, update_center_angle, AssistMode, DriftTuning, SteerInput, HANDBRAKE_GRACE_S,
+    ackermann, assist_mode, body_slip, front_axle_angle, next_catch_key, rear_axle_slip,
+    steer_target, torque_steer, update_center_angle, AssistMode, DriftTuning, SteerInput,
+    HANDBRAKE_GRACE_S,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
@@ -275,6 +276,9 @@ pub struct Vehicle {
     /// Handbrake hold for the steering assists: [`crate::steering::HANDBRAKE_GRACE_S`] while
     /// the handbrake is pulled, then counting down to 0 after release, s.
     pub(crate) hb_grace: f32,
+    /// Highway catch latch (see [`SteerInput::catch_key`]): the direction (−1 / +1) of the
+    /// countersteer key held through a highway-speed catch, 0 when none.
+    pub(crate) catch_key: f32,
     /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
     pub(crate) stalled: bool,
     /// Drift-assist tuning (dev override, see [`DriftTuning`]); not in snapshots.
@@ -398,6 +402,7 @@ impl Vehicle {
             conditions_source: ConditionsSource::World,
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
+            catch_key: 0.0,
             stalled: false,
             drift_tuning: DriftTuning::default(),
             drift_hold: DriftHold::default(),
@@ -588,6 +593,7 @@ impl Vehicle {
         self.torque = V3::ZERO;
         self.launch.forget();
         self.hb_grace = 0.0;
+        self.catch_key = 0.0;
         self.drift_hold = DriftHold::default();
         self.stalled = false;
     }
@@ -808,6 +814,7 @@ impl Vehicle {
                 self.def.wheels[0].position_m[1] - self.com_local.y,
             ),
             handbrake_hold: self.hb_grace > 0.0,
+            catch_key: self.catch_key,
             tuning: self.drift_tuning,
             hold_angle: None,
         }
@@ -1227,6 +1234,7 @@ impl Vehicle {
             self.def.steering.rack_speed_rad_per_s,
             dt,
         );
+        self.catch_key = next_catch_key(&steer_in, assists);
         let ts = if base_split[0] > 0.0 && self.corners[0].steerable {
             torque_steer(self.wheels[0].drive, self.wheels[1].drive)
         } else {

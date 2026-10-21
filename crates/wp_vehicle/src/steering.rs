@@ -47,6 +47,10 @@ pub struct SteerInput {
     /// Handbrake pulled, or released less than [`HANDBRAKE_GRACE_S`] ago: the self-aligning
     /// countersteer stays out of the way (handbrake turns rotate freely).
     pub handbrake_hold: bool,
+    /// Highway catch latch ([`next_catch_key`]): the direction (−1 / +1) of the countersteer
+    /// key held through a highway-speed catch, 0 when none. While that key stays held the
+    /// catch stays on, through straight and into the swing back.
+    pub catch_key: f32,
     /// Drift / countersteer tuning (dev override; defaults = the shipped constants).
     pub tuning: DriftTuning,
     /// Drift hold (owner row 91, [`crate::drift`]): the road-wheel centre angle to hold the
@@ -301,16 +305,94 @@ pub fn steer_target(
     let aligning =
         help > 0.0 && inp.speed > 3.0 && inp.driver.abs() <= STEER_DEADZONE && !inp.handbrake_hold;
     if !aligning {
+        let catch = highway_catch(inp, assists);
         return SteerTarget {
-            angle: driver_target.clamp(-max_steer, max_steer),
-            rate_boost: 1.0,
+            // The catch angle: the front axle's direction of travel (front slip zero). Main
+            // kept ~10 % of the driver's lock on top; here that trim was the swing back.
+            angle: lerp(driver_target, inp.front_axle_angle, catch).clamp(-max_steer, max_steer),
+            // At highway speed a catch gets the full rack boost whatever the preset (a
+            // slammed stick over-countersteers just like a key).
+            rate_boost: 1.0 + inp.tuning.slew_boost * lerp(help, 1.0, catch) * catch,
         };
     }
     let full = max_steer * inp.ratio_scale;
+    // At highway speed the released keys align fully whatever the preset: the swing back
+    // after a catch carries the car into a slide the other way unless the wheels follow the
+    // front axle all the way (the job main's highway gyro damper did).
+    let help = lerp(help, 1.0, highway_amount(inp.speed));
     let align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
     SteerTarget {
         angle: (align - inp.pull * lock).clamp(-max_steer, max_steer),
         rate_boost: 1.0 + inp.tuning.slew_boost * help,
+    }
+}
+
+/// Speeds (km/h) where the highway catch ([`highway_catch`]) starts / is full.
+pub const HIGHWAY_KMH: (f32, f32) = (60.0, 110.0);
+
+/// 0..=1 "how much is this highway speed" from forward speed (m/s): 0 up to
+/// [`HIGHWAY_KMH`]`.0`, 1 from [`HIGHWAY_KMH`]`.1`. Above it a slide is a mistake to catch,
+/// not a drift to hold.
+pub fn highway_amount(speed: f32) -> f32 {
+    let kmh = speed.abs() * 3.6;
+    ((kmh - HIGHWAY_KMH.0) / (HIGHWAY_KMH.1 - HIGHWAY_KMH.0)).clamp(0.0, 1.0)
+}
+
+/// Highway catch (main's high-speed catch fix, ported onto the self-aligning steering), 0..=1:
+/// how far a held key's target moves from the driver's lock toward the catch angle (the front
+/// axle's direction of travel, front slip zero) at highway speed with countersteer help on.
+///
+/// The countersteer key opens the lock past the front axle's travel by the slip margin, and
+/// as the slide ends that lock shrinks back to the grip-limit lock, which a key still held
+/// then asks for the other way: the swing back through straight became a slide the other way
+/// (owner playtest 2026-10-20, the snap-back). While the driver countersteers the catch stays
+/// on until the rear is back in line; a key held into the new slide (the countersteer key
+/// held too long) is caught the same way. Street speed (and the wheel profile, help 0) are
+/// unchanged, so flicks and drifts stay playful.
+pub fn highway_catch(inp: &SteerInput, assists: &AssistProfile) -> f32 {
+    let help = assists.countersteer_help.clamp(0.0, 1.0);
+    if help <= 0.0
+        || assists.steer_speed_sensitivity <= 0.0
+        || inp.handbrake_hold
+        || inp.driver.abs() <= STEER_DEADZONE
+    {
+        return 0.0;
+    }
+    let highway = highway_amount(inp.speed);
+    if highway <= 0.0 {
+        return 0.0;
+    }
+    if inp.catch_key != 0.0 && inp.driver * inp.catch_key > 0.0 {
+        // The countersteer key of a catch still held (late release): keep catching.
+        return highway;
+    }
+    let slide = align_slide(inp);
+    let countersteering = -inp.driver * inp.rear_axle_slip > 0.0;
+    let weight = if countersteering {
+        // Full from the onset of the slide all the way back to straight.
+        slide.max((inp.rear_axle_slip.abs() / inp.tuning.align_onset_rad.max(1e-4)).min(1.0))
+    } else {
+        slide
+    };
+    highway * weight
+}
+
+/// The highway catch latch after this tick ([`SteerInput::catch_key`]): set to the key's
+/// direction while the driver countersteers a slide at highway speed (catch more than half
+/// on), kept while that key stays held, cleared when it is released or reversed, or below
+/// highway speed.
+pub fn next_catch_key(inp: &SteerInput, assists: &AssistProfile) -> f32 {
+    if highway_amount(inp.speed) <= 0.0 || inp.driver.abs() <= STEER_DEADZONE {
+        return 0.0;
+    }
+    if inp.catch_key != 0.0 && inp.driver * inp.catch_key > 0.0 {
+        return inp.catch_key;
+    }
+    let countersteering = -inp.driver * inp.rear_axle_slip > 0.0;
+    if countersteering && highway_catch(inp, assists) > 0.5 {
+        inp.driver.signum()
+    } else {
+        0.0
     }
 }
 
@@ -475,6 +557,7 @@ mod tests {
             front_peak_slip: 0.11,
             front_axle_angle: 0.0,
             handbrake_hold: false,
+            catch_key: 0.0,
             tuning: DriftTuning::default(),
             hold_angle: None,
         }
@@ -656,6 +739,7 @@ mod tests {
         // Handbrake held (or just released): no alignment, plain return to centre.
         let hb = SteerInput {
             handbrake_hold: true,
+            catch_key: 0.0,
             ..sliding(0.0)
         };
         assert_eq!(settle(&hb, &a), 0.0);

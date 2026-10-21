@@ -180,45 +180,38 @@ sperber): keyboard TCS/ESC off at slider 0 / 50 / 100: 0/1/1/3 → 1/0/4/3 → 6
 gyro recovered gamepad power exits at its 30 % default; the self-aligning steering needs about
 100 % for the same with full throttle held (by design it adds no yaw torque).
 
-**High-speed catches** (`steering.rs`, `slide.rs`; owner playtest 2026-10-20: "way too tail
-happy at speed and incredibly hard to catch a slide without snap oversteering"). The plain
-model was not the cause: steady state every car is front-limited (at 140 km/h the Lindwurm
-peaks at 0.92 g with 5° front / 2.7° rear slip), and a wheel driver whose countersteer follows
-the slip angle catches a 19° slide at 150 km/h with ≤ 4° swing back. The keyboard/gamepad
-steering was:
-1. *Too much lock at speed.* A full key at 140 km/h gave 12.6° of road-wheel angle; the front
-   tires stop adding cornering force at ~3°. Every full key at speed (turn-in, lane change,
-   countersteer) was a yaw kick. Now the assisted lock is capped at the **grip lock**
-   `atan(L·μ·g/v²) + 1.0 × front peak slip angle` (`steering::grip_lock`; 7.3° at 140 km/h),
-   blended in by `steer_speed_sensitivity` (keyboard 1, gamepad 0.7; wheel 0 = untouched). The
-   save-the-car lock still opens past it to countersteer a slide.
-2. *Over-countersteer.* For a 12° slide the help aimed at the rear-axle slip plus 35% of the
-   driver's lock (16°). Above 110 km/h ([`slide::highway_amount`], fading in from 60 km/h) the
-   driver trim drops to 30% of that, and a countersteer input gets the full help on any preset.
-3. *Help handed back too early.* The help faded with the slide (out below 0.06 rad rear slip),
-   so the driver's full countersteer lock came back while the car was still swinging back.
-   While the driver countersteers it now stays on down to straight (`slide::catch_amount`).
-4. *No damping at the crossing.* The gyro was gated on rear slip > 0.06 rad, so it switched off
-   exactly as the car swung through straight at its fastest (−1.2 rad/s in the trace). At highway
-   speed it also acts on a fast slide-angle rate (0.25 → 0.6 rad/s), at full gain, so the swing
-   is damped instead of carried into a slide the other way. Below 60 km/h nothing changed for the
-   gyro, so flicks and drifts stay as they were.
+**High-speed catches** (`steering.rs`; owner playtest 2026-10-20: "way too tail happy at
+speed and incredibly hard to catch a slide without snap oversteering"). Main fixed this on the
+gyro-based steering (4a4efba1: grip lock, highway driver trim, help kept on to straight, a
+highway swing damper in the gyro). Round 12 replaced that steering with the self-aligning one
+and the owner removed the gyro (rows 56 / 57 / 72), so the fix was ported, not merged:
+1. *Grip lock*: round 12's slip-targeted lock (`slip_target_lock`) already caps a held key at
+   the front tyres' grip limit.
+2. *Highway catch* (`steering::highway_catch`, 60 → 110 km/h, `steering::highway_amount`):
+   with countersteer help on and speed-sensitive steering, a held key in a slide aims the
+   wheels at the front axle's direction of travel (front slip zero) instead of the driver's
+   lock. The countersteer lock opens past that by the slip margin; as the slide ends it shrinks
+   back to the grip lock, which a key still held then asks for the other way: that was the
+   snap-back. While the driver countersteers the catch stays on down to straight, and the key
+   held through a catch stays latched (`steering::next_catch_key`, `Vehicle::catch_key`,
+   snapshot format 9) until released or reversed, so a late release is caught too.
+3. *Released keys at highway speed* align fully and at full rack speed whatever the preset
+   (the gamepad's 30 % only half-aligned and the swing back spun the car). This is what the
+   gyro's swing damper did on main.
 
-`cargo run --release -p wp_vehicle --example hs_stability` (keyboard TCS/ESC off; yaw kick 1.4
-rad/s, countersteer key held until < 3° slip; `metrics::catch_snap_back`). Each cell is
-"slide / snap-back the other way", before → after:
+`cargo run --release -p wp_vehicle --example hs_stability` (TCS/ESC off; yaw kick 1.4 rad/s,
+countersteer until < 3° slip; `metrics::catch_snap_back`). "slide / snap-back", round 12 →
+port:
 
-| Car | 110 km/h | 150 km/h | 150 km/h, key released 0.25 s late | lane change at 140 km/h, peak slip |
-|---|---|---|---|---|
-| lindwurm_4t | 7/9° → 7/1° | 10/14° → 9/2° | 10/18° → 9/8° | 12° → 8° |
-| debug_sedan | 9/13° → 9/2° | 12/18° → 11/4° | 12/19° → 11/9° | 13° → 8° |
-| rampart_50 | 7/7° → 7/1° | 9/13° → 8/1° | 9/14° → 8/6° | 8° → 6° |
-| lindwurm_4t, gamepad full stick | 11/7° → 10/3° | 15/11° → 12/5° | 15/22° → 12/15° | — |
+| Car | keyboard 110 | keyboard 150 | keyboard 150, 0.25 s late | gamepad 150 | lane change 140 km/h, peak slip |
+|---|---|---|---|---|---|
+| lindwurm_4t | 12/10° → 10/3° | 13/17° → 11/4° | 13/89° → 11/5° | 18/159° → 11/4° | 24° → 4° |
+| debug_sedan | 16/27° → 14/6° | 18/50° → 15/7° | 18/117° → 15/8° | spin → 15/7° | 25° → 5° |
+| rampart_50 | 13/12° → 12/3° | 15/28° → 13/4° | spin → 13/5° | spin → 13/4° | 126° (spin) → 4° |
 
-Side effect: less understeer on a held full key (the front no longer scrubs past its peak):
-steady yaw rate after 2 s of full key is 5–30% higher at 50–140 km/h on every car tried,
-turn-in over the first 0.3 s is unchanged. The power-exit / catch sweep of the 2026-10-19 slide
-work (`examples/slide`) is unchanged (within ±2°), and the wheel preset is bit-identical.
+Street speed is unchanged (below 60 km/h the catch is off), and so are the wheel preset and
+help 0. Side effect: a full key held for 2 s at 110–140 km/h stops adding lock once the rear
+steps out (steady yaw rate −15 … +40 % by car); turn-in over the first 0.3 s is unchanged.
 
 **Low-speed guards:** slip ratio and slip angle use `max(|vx|, 3 m/s)` denominators, slip
 angle has a relaxation-length lag, and below 1 m/s the lateral force blends into a viscous
