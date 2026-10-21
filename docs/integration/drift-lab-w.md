@@ -1112,6 +1112,86 @@ still caught, with the counter key held vs the key-tapping driver, plus turn-in:
 - `plain` unit test `over_rotation_gets_full_lock_and_the_drift_lock_extension`.
 - e2e drift_lab_w: 85 checks.
 
+## Step 12 — lift-flick transitions: the transition rack (lead / tyre-slip root cause)
+
+**Problem** (tyre-slip, "Swing time"): on the step-20 integration no lift-flick swung through,
+on any car, by the real-swing metric (yaw toward the new side, ≥ 25 km/h at the sign change);
+the reference swings in 0.5–0.8 s. The new key turned the fronts into the old corner (front slip
+−28 → −45°, saturated) and the lift loaded them, so the yaw moment never reversed.
+
+**Fix:** `PlainSteer::trans_follow` (default on), the transition rack.
+- **When:** within `trans_arm_s` (1 s) of a throttle lift in a slide or a key reversal (the
+  vehicle's `since_lift_s` / `since_reversal_s` timers), with a key pressed **into the old
+  corner** while the car still slides on the old side.
+- **What:** the wheels move to the front axle's travel (× `trans_gain` 1.0, plus the key ×
+  `trans_key_gain` 0 × lock, up to `trans_max_deg` 45°), at 45° per `trans_t_s` (0.1 s).
+  Faded in with old-side body slip from 8° to 15°.
+- **Unchanged:** countersteer (hold, catch), released keys and grip driving keep the plain
+  rack.
+- **Arming:** unarmed, it broke the drift entry (the key into the turn that starts a drift is
+  also "into the old corner"; 45 / 45 no hold).
+- **Leaving it:** past the plain lock (this mode, or step 11's extra lock), the rack now returns
+  inside the lock at the return rate instead of jumping.
+
+**Measured** (`--example transition`, the owner's lift-flick: lifts 0.15 / 0.25 / 0.4 s × gaps
+0.05 / 0.15 / 0.3 s, rwd_a / b / d, rampart_50, debug_coupe = 45 flicks; real-swing metric):
+
+| config (ride firm) | rack off: caught / 45 | rack on: caught / 45 · median swing · median / max peak |
+|---|---|---|
+| balance new (panel default) · plain | 0 | **44** · 1.04 s · 54 / 76° |
+| balance grip · plain | 0 | **45** · 1.02 s · 56 / 67° |
+| W defaults (no balance) · plain | 0 (9 spun, 21 swung back) | 0 |
+| slow weight · plain | 1 | 1 (14 spun) |
+| any balance · VR steering | 0 | 0 (VR is not a transition mode here) |
+
+Per car, panel default: swing from the lift (median / fastest), caught.
+
+| car | median swing | fastest | caught |
+|---|---|---|---|
+| rwd_a | 1.08 s | 0.88 s | 9 / 9 |
+| rwd_b | 0.95 s | 0.79 s | 8 / 9 (peak 71°) |
+| rwd_d | 1.08 s | 0.89 s | 9 / 9 |
+| rampart_50 | 1.04 s | 0.88 s | 9 / 9 |
+| debug_coupe | 1.04 s | 0.87 s | 9 / 9 |
+
+**Sweep:**
+- **Key offset** (`trans_key_gain`): 0.3 → 5 / 45 caught; 0 → 44 / 45; −0.1 / −0.2 (wheels past
+  the travel) swing faster (0.95–1.0 s) but spin 2–9.
+- **Travel share** (`trans_gain`): 0.8 → 0 / 45; 1.15 → 17 spins.
+- **Rack time:** 0.2 → 0.1 s cuts ~0.06 s.
+- **Lower fade (1–8°):** swings back (12–17).
+- **Remaining gap:** ~1.0 s vs the reference's 0.5–0.8 s. The rest is the car (the rear past its
+  peak, yaw inertia): see tyre-slip's levers.
+
+**On tyre-slip's harness** (`transition -- v2search`, N=0, "balance new · plain", v1 spin
+tyres; 18 owner lift-flicks, real swings):
+
+| | held / 27 | caught / 18 | swing back | median crossing | lift-off fails | held-key swaps |
+|---|---|---|---|---|---|---|
+| rack off | 25 | 0 | 0 | — | 0 | 2 |
+| **rack on** | 25 | **17** | 0 | 0.82 s (0.68–0.96) | 0 | 2 |
+| rack on + grip-balance 22582eb3 (cut released 0.75 s after a key reversal) | 25 | **18** | 0 | 0.82 s | 0 | 2 |
+| rack on + tyre-slip's front falloff 0.9 (20→35°) | 25 | 12 | 6 | 0.82 s | 0 | 2 |
+
+"fast" (crossing 0.5–0.8 s and settled within 0.5 s) stays 0: the settle takes longer. The front
+falloff makes it swing back, so it does not combine with the rack.
+
+**Gates** (panel default: firm, grip "new", spin model):
+- **Held-key set (grip-balance `robust`):** 27 / 27 with and without the rack.
+- **Catch window, snap-back, turn-in:** identical with the rack on or off (catchwindow / snapsweep
+  "transition off" rows). The rack never acts on a counter key or in grip.
+
+**Tests and panel:**
+- `tests/drift_lab_w_transition.rs`: rwd_d / a, lifts 0.15 / 0.25 / 0.4 s; off not caught, on
+  caught in < 1.6 s.
+- `plain` unit test.
+- Re-pinned on the step-20 panel ride: `drift_lab_w_catch` (35° push: the step-20 balance lets
+  "before" catch from 40°) and `drift_lab_w_snap` ("before" = steps 1–9 without steps 11–12; the
+  lab ride no longer reaches a drift).
+- Panel: checkbox *transition: follow the travel* (`#drift-lab-w-trans`), sliders *rack time*,
+  *key offset*.
+- e2e drift_lab_w: 90.
+
 ## Contract change requests
 
 None (`AssistProfile` unchanged; the lab's settings live in `wp_vehicle::plain::PlainSteer`).

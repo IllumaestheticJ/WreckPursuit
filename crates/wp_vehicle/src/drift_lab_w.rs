@@ -1160,6 +1160,116 @@ pub fn over_rotation_catch_with(
     }
 }
 
+/// Result of [`lift_flick`] (the owner's lift-flick transition).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Flick {
+    /// The 30–45° left drift held for 0.5 s before the flick.
+    pub reached: bool,
+    /// Time from the flick (lift + key release) until the slide is 10° on the new side, s.
+    pub swing_s: Option<f32>,
+    /// At that sign change the car yawed toward the new side at ≥ 25 km/h (tyre-slip's
+    /// real-swing metric: not a pivot at a crawl).
+    pub real_swing: bool,
+    /// Largest new-side slide, degrees.
+    pub peak_deg: f32,
+    /// Real swing, no spin, never back below −10°, and at least half the remaining time in
+    /// 10–50° on the new side.
+    pub caught: bool,
+    /// Spun (|slip| ≥ 90° or travelling backwards).
+    pub spun: bool,
+}
+
+/// The owner's lift-flick (reference clip 1; tyre-slip's transition harness, `Init::LiftFlick`):
+/// 40 m left-hander at 0.5 g, key into the turn to 12°, then the counter key + full throttle
+/// until the slide has been in 30–45° for 0.5 s; then the throttle off for `lift_s` while the
+/// keys are switched (counter key released, `gap_s`, the new side's countersteer = the left
+/// key), throttle back on after the lift; measured for 4 s.
+pub fn lift_flick(car: &LoadedCar, assists: &AssistProfile, lift_s: f32, gap_s: f32) -> Flick {
+    use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
+    use wp_contracts::VehicleInput;
+    const TPS: usize = 240;
+    let mut rig = settle_on_circle(car, assists, 40.0, 0.5);
+    let mut out = Flick {
+        reached: false,
+        swing_s: None,
+        real_swing: false,
+        peak_deg: 0.0,
+        caught: false,
+        spun: false,
+    };
+    let (mut entered, mut in_band, mut flick_at) = (false, 0usize, None::<usize>);
+    let (lift_t, gap_t, after) = (
+        (lift_s * TPS as f32) as usize,
+        (gap_s * TPS as f32) as usize,
+        4 * TPS,
+    );
+    let (mut crossed, mut back, mut in_new) = (None::<usize>, false, 0usize);
+    for tick in 0..14 * TPS {
+        let old = (-slide_state(&rig).body_slip).to_degrees();
+        if flick_at.is_none() {
+            entered |= old > 12.0;
+            in_band = if entered && (30.0..=45.0).contains(&old) {
+                in_band + 1
+            } else {
+                0
+            };
+            if in_band >= TPS / 2 {
+                flick_at = Some(tick);
+                out.reached = true;
+            } else if tick > 8 * TPS {
+                return out;
+            }
+        }
+        let (steer, throttle) = match flick_at {
+            None => (if entered { 1.0 } else { -1.0 }, 1.0),
+            Some(f) => {
+                let k = tick - f;
+                (
+                    if k < gap_t { 0.0 } else { -1.0 },
+                    if k < lift_t { 0.0 } else { 1.0 },
+                )
+            }
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                ..Default::default()
+            },
+            assists,
+        );
+        let Some(f) = flick_at else { continue };
+        let k = tick + 1 - f;
+        let n = slide_state(&rig);
+        let b = n.body_slip.to_degrees();
+        if b.abs() >= 90.0 || n.v_fwd < 0.0 {
+            out.spun = true;
+            break;
+        }
+        if crossed.is_none() && b >= 10.0 {
+            crossed = Some(k);
+            out.swing_s = Some(k as f32 / TPS as f32);
+            out.real_swing = n.yaw_rate < 0.0 && n.v_fwd * 3.6 >= 25.0;
+        }
+        if crossed.is_some() {
+            out.peak_deg = out.peak_deg.max(b);
+            back |= b <= -10.0;
+            if (10.0..=50.0).contains(&b) {
+                in_new += 1;
+            }
+        }
+        if k >= after {
+            break;
+        }
+    }
+    if let Some(cx) = crossed {
+        let remaining = after.saturating_sub(cx).max(1);
+        out.caught = out.real_swing && !out.spun && !back && in_new * 2 >= remaining;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -193,6 +193,12 @@ await page.waitForTimeout(1500);
   check((await ps()).counter_closing_only === false, '"catch: before" → off');
   await page.locator("#drift-lab-w-catch-new").click();
   check((await ps()).counter_closing_only === true, '"catch: new" → on');
+  // Step 12 transition rack: on by default, the checkbox reaches the sim.
+  check((await ps()).trans_follow === true && (await page.locator("#drift-lab-w-trans").isChecked()), "transition rack on by default");
+  await page.locator("#drift-lab-w-trans").uncheck();
+  check((await ps()).trans_follow === false, "transition checkbox → off");
+  await page.locator("#drift-lab-w-trans").check();
+  check((await ps()).trans_follow === true, "transition checkbox → on");
 }
 // Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
 check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");
