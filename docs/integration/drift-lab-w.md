@@ -1130,8 +1130,14 @@ the reference swings in 0.5–0.8 s. The new key turned the fronts into the old 
   rack.
 - **Arming:** unarmed, it broke the drift entry (the key into the turn that starts a drift is
   also "into the old corner"; 45 / 45 no hold).
-- **Leaving it:** past the plain lock (this mode, or step 11's extra lock), the rack now returns
-  inside the lock at the return rate instead of jumping.
+- **Leaving it:** past the plain lock right after a flick (a lift and a key reversal within
+  `trans_arm_s` + 0.5 s), the rack returns inside the lock at the return rate instead of jumping.
+  - First version: this applied to any lock shrink, including grip-balance's held-key cut (the
+    vehicle rate-limits that one) and step 11's extension ending. Holding the countersteer
+    longer there spun the tapper on rwd_b, took snap-back 3.3 → 5.5°, the held set 26 → 25,
+    and turned tyre_slip's spin hold red (grip-balance's repro).
+  - Gated to after a flick: all four restored (tapper rwd_b held 4.2 s, snap 3.3°, robust
+    26 / 27, spin hold green). Swings unchanged: 18 / 18 caught, held 26, fast 4.
 
 **Measured** (`--example transition`, the owner's lift-flick: lifts 0.15 / 0.25 / 0.4 s × gaps
 0.05 / 0.15 / 0.3 s, rwd_a / b / d, rampart_50, debug_coupe = 45 flicks; real-swing metric):
@@ -1256,6 +1262,33 @@ catch on (step 13)
   without, on rwd_d / a.
 - `plain` unit test `new_side_catch_aims_at_the_travel_only_after_a_flick`.
 - Panel slider *transition: new-side catch* (% of travel).
+
+### Step 13b — the catch armed by the crossing (lead: rwd_b settle; grip-balance / tyre-slip)
+
+- **Problem:** rwd_b settled in 1.48 s. The catch stopped at the 30° ceiling while the new
+  slide was still growing (to 48°), with the counter lock capped at ~27° against ~40° of travel.
+  The ceiling existed only because the lift + key-reversal arming also fired inside tapped
+  drifts.
+- **Fix:** a vehicle timer `since_cross_s` (body slip past 10° on one side, then past 10° on the
+  other; plain steering only, like tyre-slip's timers), passed as `PlainInput::since_cross_s`.
+  The catch is armed within `trans_catch_window_s` (1 s) of a crossing. Lift and reversal no
+  longer matter, and the ceiling rises to 45°.
+- **Measured** (cases, 9 lift-flicks per car, panel default):
+
+| car | 13 (30° ceiling): settle median · ≤ 0.5 s | 13b: settle · ≤ 0.5 s | peak |
+|---|---|---|---|
+| rwd_a | 0.31 s · 9 | 0.32 s · 9 | 40° |
+| rwd_b | 1.60 s · 0 | **0.27 s · 7** | 53 → 44° |
+| rwd_d | 0.29 s · 9 | 0.31 s · 9 | 42° |
+| debug_coupe | 0.28 s · 8 | 0.32 s · 9 | 41° |
+| rampart_50 (transition summary) | — (no hold) | **9 / 9 caught**, with grip-balance's release on or off | 41° |
+
+  (Step 13's numbers here are on the 746319bd base; rwd_a / d / coupe were already ~0.3 s there.)
+
+- **tyre-slip v2search:** 18 / 18 caught, 0 back, fast 4 → 6, held 26, lift-off 0, swaps 1.
+- **Gates:** grip-balance repro (tapper rwd_b held 4.2 s, snap 3.3° / 1.0°, robust 26 / 27),
+  snapsweep 2–3°, catch window and turn-in unchanged. tyre_slip spin hold green.
+- `tests/drift_lab_w_transition.rs` now includes rwd_b (median settle ≤ 0.6 s).
 
 ## Contract change requests
 

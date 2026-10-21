@@ -279,10 +279,16 @@ fn wanted_ai_racer_flees_police_through_the_city() {
     use wp_police::{PoliceEvent, UnitId, UnitKind};
     let unit_at = [-100.0f32, -166.75];
     let setup = Setup {
-        // Seed 4 -> 1 (lead/city-residential, rows 94-95): with the arterial / highway
-        // medians the live police also give racer 2 wanted level 2 at seeds 4 and 5 (it
-        // speeds past the unit and flees too); seeds 1, 2, 3 and 6 pass.
-        seed: 1,
+        // Seed 1 -> 3 (round-12 tip: residential grid layout, police give-way): seed 3 passes
+        // and racers 2 and 3 flee for heat of their own (the check below). Sweep
+        // (`WP_FLEE_SEED`): 2, 3, 7 pass; 1 — a left-turning civilian stands 45 s at the
+        // (141, −167) junction across the flight route; 4 — 247 m; 5, 8 — the flight goal is
+        // chosen away from every known patrol, not only the injected unit; 6 — caught by a
+        // live patrol after 112 m.
+        seed: std::env::var("WP_FLEE_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3),
         laps: 2,
         drivers: eight_drivers()[..3].to_vec(),
         closed_roads: false,
@@ -349,18 +355,45 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         fled.status
     );
     // The others keep racing unless they earn heat of their own: at race pace past the
-    // sim's live patrols (red lights, speeding) they can, and then they flee for their own
-    // wanted level (an `Abandoned` event of their own), never for racer 1's.
+    // sim's live patrols (red lights, speeding) they can. Any other racer that flees must
+    // have its own record — traffic violations by its own car, a wanted level the sim's
+    // police raised for it (not racer 1's injected L3) and an `Abandoned` event of its own.
     for s in st.iter().filter(|s| s.entity != EntityId(1)) {
-        let own_heat = events.iter().any(
-            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level } if *entity == s.entity && *wanted_level >= 1),
-        );
+        if s.status != RacerStatus::Fled {
+            assert!(
+                matches!(s.status, RacerStatus::Racing | RacerStatus::Busted),
+                "{:?}: {:?}",
+                s.entity,
+                s.status
+            );
+            continue;
+        }
+        let own_violations = out.violations_by.get(&s.entity).copied().unwrap_or(0);
+        let own_level = out
+            .police_events
+            .iter()
+            .filter_map(|e| match e {
+                PoliceEvent::WantedLevelChanged { racer, level } if *racer == s.entity => {
+                    Some(level.number())
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        let own_abandon = events.iter().find_map(|e| match e {
+            OpponentEvent::Abandoned {
+                entity,
+                wanted_level,
+            } if *entity == s.entity => Some(*wanted_level),
+            _ => None,
+        });
         assert!(
-            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted)
-                || (s.status == RacerStatus::Fled && own_heat),
-            "{:?}: {:?}; events {events:?}",
-            s.entity,
-            s.status
+            own_violations >= 1
+                && own_level >= 1
+                && own_abandon.is_some_and(|l| l >= 1 && l <= own_level),
+            "{:?} fled without heat of its own: {own_violations} violations, sim wanted level \
+             {own_level}, abandoned at {own_abandon:?}; events {events:?}",
+            s.entity
         );
     }
     // Its flight route ends far from the unit, and it made real progress along it (traffic

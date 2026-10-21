@@ -306,6 +306,10 @@ pub struct PoliceStats {
     /// ([`stuck::GIVE_WAY_S`]).
     #[serde(default)]
     pub give_ways: u32,
+    /// Units that gave up, stood still [`stuck::DEADLOCK_VANISH_S`] next to a racer and were
+    /// despawned in view to break the deadlock.
+    #[serde(default)]
+    pub deadlock_despawns: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -1203,17 +1207,28 @@ impl PoliceSystem {
     }
 
     /// Whether another car is closing on unit `i` and would reach it within
-    /// [`TURN_LOOK_S`]: a unit not chasing anyone doesn't start turning across the road then (opponent-pace: units
+    /// [`TURN_LOOK_S`] (with `ahead_only`, one in front of it; with `racers_only`, a racer: a pursuer turns round for its racer at once
+    /// past other traffic, but not across a racer's path — Loop 9: a pursuer U-turned in front of
+    /// the oncoming racer it had just been given, which hit it and left the corridor; DQ). A unit
+    /// doesn't start turning across the road then (opponent-pace: units
     /// turning round on the Hollins hairpin, just after the race leader passed, ended up across
     /// both lanes in front of the next racer).
-    fn traffic_closing(&self, i: usize) -> bool {
+    fn traffic_closing(&self, i: usize, racers_only: bool, ahead_only: bool) -> bool {
         let u = &self.units[i];
-        let (id, entity, pos) = (u.id, u.entity, u.body.pos);
+        let (entity, pos, heading) = (u.entity, u.body.pos, u.body.heading);
         self.obstacles.iter().any(|o| {
-            if o.ghost || o.unit == Some(id) || (o.entity.is_some() && o.entity == entity) {
+            // Other police cars coordinate among themselves (converging on an arrest they
+            // would hold each other up for good).
+            if o.ghost || o.unit.is_some() || (o.entity.is_some() && o.entity == entity) {
+                return false;
+            }
+            if racers_only && !o.entity.is_some_and(|e| self.racers.contains_key(&e)) {
                 return false;
             }
             let r = graph::sub(o.pos, pos);
+            if ahead_only && graph::dot(r, heading) <= 0.0 {
+                return false;
+            }
             let d2 = graph::dot(r, r);
             if !(1e-4..=TURN_LOOK_M * TURN_LOOK_M).contains(&d2) {
                 return false;
@@ -1254,6 +1269,13 @@ impl PoliceSystem {
         }
         let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
         u.track_s = s;
+        match u.unstick.stand_at {
+            Some(p) if graph::dist(p, u.body.pos) < stuck::STAND_M => u.unstick.stand_s += dt,
+            _ => {
+                u.unstick.stand_at = Some(u.body.pos);
+                u.unstick.stand_s = 0.0;
+            }
+        }
         let offset = self.update_avoid(i, dt);
         let u = &mut self.units[i];
         let look = u.controller().lookahead(v);
@@ -1322,6 +1344,41 @@ impl PoliceSystem {
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
             u.unstick.slow_s = 0.0;
         }
+        let chasing = matches!(
+            u.assignment,
+            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+        );
+        // Its way lies behind it and a car is closing: don't arc across the road in front of
+        // it (Loop 9: a unit given a racer to chase turned across the road at walking pace into
+        // the oncoming field). Hold straight in its lane until they have passed.
+        // Its target coming straight at it (in front, closing head-on): wait in its lane for it
+        // to go by, then turn round from a standstill, instead of driving at it and having to
+        // brake from speed before turning (wp_sim police_passby).
+        let target_head_on = u.assignment.target().is_some_and(|e| {
+            self.racers.get(&e).is_some_and(|r| {
+                let d = graph::sub([r.pos[0], r.pos[1]], pos);
+                let rv = [r.vel[0], r.vel[1]];
+                graph::dot(d, heading) > 0.0
+                    && graph::dot(rv, heading) < -HEAD_ON_MPS
+                    && graph::dot(d, d) < TURN_LOOK_M * TURN_LOOK_M
+            })
+        });
+        if (target_head_on || facing < stuck::SWING_BEHIND_COS)
+            && !disabled
+            && matches!(u.unstick.phase, stuck::Phase::Drive)
+            && (target_head_on || self.traffic_closing(i, chasing, true))
+        {
+            let (throttle, brake, handbrake) = hold_pedals(v);
+            return Some(VehicleInput {
+                throttle,
+                brake,
+                handbrake,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        let u = &mut self.units[i];
         // Lights on only (pursuit, intercept, response): a patrol turns round like traffic.
         let swing_wanted = matches!(u.unstick.phase, stuck::Phase::Drive)
             && siren
@@ -1332,10 +1389,7 @@ impl PoliceSystem {
             && now >= u.unstick.swing_ready
             && u.unstick.may_turn(now)
             && graph::dist(pos, [target[0], target[1]]) > 6.0
-            && (matches!(
-                u.assignment,
-                Assignment::Pursue { .. } | Assignment::Intercept { .. }
-            ) || !self.traffic_closing(i));
+            && !self.traffic_closing(i, chasing, false);
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
         let left_t = graph::cross(heading, to_t) > 0.0;
@@ -1370,8 +1424,11 @@ impl PoliceSystem {
                 ..Default::default()
             });
         }
-        if swing_wanted && v >= stuck::UTURN_MIN_MPS {
-            // Still rolling: U-turn forward, full lock toward the target's side.
+        if swing_wanted && (v >= stuck::UTURN_MIN_MPS || fwd_room) {
+            // Still rolling, or standing with room for the turning circle: U-turn forward, full
+            // lock toward the target's side. (From a standstill reverse takes about a second to
+            // engage and a full-lock reverse arc turns slowly; with the round-12 tyre side-force
+            // floor a parked cop's three-point turn missed wp_sim police_passby's 4 s bound.)
             let left = left_t;
             let steer = if left { -1.0 } else { 1.0 };
             let u = &mut self.units[i];
@@ -1448,9 +1505,9 @@ impl PoliceSystem {
                         && graph::dot(d, d) < stuck::GIVE_WAY_HOLD_M * stuck::GIVE_WAY_HOLD_M
                 });
             if waiting {
-                let (_, b) = self.units[i].controller().pedals(v, -brake, dt, true);
-                let (brake, handbrake) = standstill_hold(v, b);
+                let (throttle, brake, handbrake) = hold_pedals(v);
                 return Some(VehicleInput {
+                    throttle,
                     brake,
                     handbrake,
                     siren: siren_out,
@@ -1793,6 +1850,8 @@ const BACKWARDS_MPS: f32 = 1.0;
 const REVERSE_MAX_MPS: f32 = 3.0;
 
 /// Fastest a unit reverses in a three-point turn (slower and the turn doesn't come round in
+/// A target racer coming at a unit faster than this (along the unit's heading) is head-on, m/s.
+const HEAD_ON_MPS: f32 = 5.0;
 /// A car closing on a unit this soon stops it from starting a turn-round, s.
 const TURN_LOOK_S: f32 = 4.0;
 /// ... looking this far, m.
@@ -1811,6 +1870,19 @@ fn reverse_pedals(v: f32, pedal: f32, max_mps: f32) -> (f32, f32) {
         (0.0, 0.0)
     } else {
         (0.0, pedal)
+    }
+}
+
+/// Throttle, brake and handbrake that bring a car to a stop and keep it there, whichever way
+/// it is rolling: rolling backwards it is in reverse, where the pedals swap (the brake drives
+/// it backwards, the throttle brakes), so it brakes with the throttle.
+fn hold_pedals(v: f32) -> (f32, f32, f32) {
+    if v < -1.0 {
+        (0.6, 0.0, 0.0)
+    } else if v > 1.0 {
+        (0.0, 1.0, 0.0)
+    } else {
+        (0.0, STANDSTILL_BRAKE, 1.0)
     }
 }
 
