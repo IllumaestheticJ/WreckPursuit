@@ -187,6 +187,13 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   adds occlusion (3 rays), interior muffle, street slap-echo delays (facade probe), tunnel
   reverb level and an engine duck. Without a cue (player police car, overrides) the old `Auto`
   / fixed behaviour applies.
+- **Recorded sirens** (`siren_rec`, notes in `docs/integration/siren-recorded.md`): police cars
+  (and `DEFAULT_SIREN_PACK` / the fallback police def) play loops cut from real recordings —
+  one whole wail cycle (4.73 s), seven yelp cycles (331 ms each), one whole fast-phaser pattern
+  (~75 ms sweeps) and six two-tone cycles (0.72 / 0.74 s) — with `siren_v2` as the fallback
+  (procedural mode, while the files decode) and for the whoop / air horn. Everything above
+  (cues, hold, spread, limit, Doppler, distance, air absorption, occlusion, slap echo, tunnel)
+  applies unchanged; the recordings play at their own cadence.
 - **Scanner** (`scanner.rs`): lines queued by `RadioPriority`, released after the tier delay
   (Basic 10 s, Pro 6, Elite 3 — `wp_police` tiers 0/1/2, same numbers as `data/police/tools.toml`; `None` = no scanner), one at a time, stale lines
   dropped, queue capped (lowest priority dropped first). Pursuit/Urgent lines chop lower ones.
@@ -262,7 +269,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
 | World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `tire/scrub_grass`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}`; optional `impact/{body,crunch}`, `horn/police` |
-| Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase`; optional one-shots `siren/whoop`, `siren/airhorn` (siren v2) |
+| Siren | `siren/{wail,yelp,phaser,hilo}` — synth loops follow the director's cadence and `phase`; recorded loops (`siren_rec`) are whole natural cycles played at their own cadence, with the unit's rate spread and start point from the director's siren params (`apps/testbed-web/src/audio/voices.ts` `sirenLoopVariation`); optional one-shots `siren/whoop`, `siren/airhorn` (siren v2) |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
 **Procedural synths** (`Synth { synth, params }`, implemented in

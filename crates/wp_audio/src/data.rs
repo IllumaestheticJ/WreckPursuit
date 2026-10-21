@@ -580,7 +580,7 @@ impl CarAudioDef {
             }
             .to_string(),
             siren: police.then(|| SirenDef {
-                pack: "siren_v2".to_string(),
+                pack: "siren_rec".to_string(),
                 default_mode: SirenMode::Auto,
             }),
         }

@@ -319,7 +319,9 @@ pub struct AudioDirector {
 pub const PHYSICAL_ENGINE_PACK: &str = "engine_physical";
 
 const DEFAULT_WORLD_PACK: &str = "world_proc";
-const DEFAULT_SIREN_PACK: &str = "siren_v2";
+/// Siren pack of a police unit whose car names none: the recorded loops (falling back to the
+/// `siren_v2` synth while they load or in procedural mode).
+const DEFAULT_SIREN_PACK: &str = "siren_rec";
 
 impl AudioDirector {
     /// New director over `lib` with a seed for the (purely cosmetic) pitch variation.

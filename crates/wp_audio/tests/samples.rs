@@ -161,6 +161,19 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
                 car.id
             );
         }
+        // Police sirens play recordings too (owner: "sirens seem unrealistic — use real
+        // sounds"); the synth is only their fallback.
+        if let Some(siren) = &car.siren {
+            assert!(
+                lib.packs[&siren.pack]
+                    .cues
+                    .values()
+                    .any(|c| matches!(c.source, CueSource::Samples { .. })),
+                "cars/{}: siren pack {} plays no recordings",
+                car.id,
+                siren.pack
+            );
+        }
     }
 }
 

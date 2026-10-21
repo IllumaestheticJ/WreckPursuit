@@ -139,6 +139,67 @@ interface Voice {
   last: VoiceParams;
   /** Commanded gain → played gain (a stand-in cue's own gain; see `resolve`). */
   scale: number;
+  /** Commanded pitch → playback rate of a recording (a siren unit's own rate; see `sirenLoopVariation`). */
+  rate: number;
+}
+
+/**
+ * How one unit plays a recorded siren loop. Real units never run in lockstep: each one's
+ * oscillator runs a little fast or slow and it switches on somewhere in its cycle. A synth
+ * siren gets that from the director's per-unit spread (its cadence parameters are already
+ * scaled); a recording gets the same spread as a playback-rate factor (`synth.lo_hz` over the
+ * configured cadence's `lo_hz`) and a start point in the loop from the unit seed
+ * (`synth.unit`). Neutral (rate 1, offset 0) for anything else. Presentation only.
+ */
+export function sirenLoopVariation(
+  lib: AudioLibrary,
+  pack: string,
+  cue: string,
+  synth: Record<string, number>,
+): { rate: number; offset: number } {
+  const neutral = { rate: 1, offset: 0 };
+  if (lib.packs[pack]?.kind !== "Siren" || synth.unit === undefined) return neutral;
+  const name = { "siren/wail": "Wail", "siren/yelp": "Yelp", "siren/phaser": "Phaser", "siren/hilo": "HiLo" }[cue];
+  const cfg = lib.config as { sirens?: { cadence?: Record<string, { lo_hz?: number }> } };
+  const lo = name ? cfg.sirens?.cadence?.[name]?.lo_hz : undefined;
+  const r = lo && synth.lo_hz ? synth.lo_hz / lo : 1;
+  // Golden-ratio sequence over the unit seed: neighbouring ids start far apart in the loop.
+  const offset = (synth.unit * 0.6180339887) % 1;
+  return { rate: Number.isFinite(r) ? Math.min(1.1, Math.max(0.9, r)) : 1, offset };
+}
+
+/**
+ * Exact length of an Ogg Vorbis file: the end-of-stream page's granule position (samples) and
+ * the identification header's sample rate; null for anything else. Chromium's decodeAudioData
+ * ignores this end trim and returns the whole last Vorbis block, up to ~20 ms of decaying codec
+ * tail past the real end, which a looped voice played as a dropout at every wrap.
+ */
+export function oggVorbisLength(bytes: ArrayBuffer): { samples: number; rate: number } | null {
+  const u = new Uint8Array(bytes);
+  const isPage = (i: number) => u[i] === 0x4f && u[i + 1] === 0x67 && u[i + 2] === 0x67 && u[i + 3] === 0x53 && u[i + 4] === 0;
+  if (u.length < 64 || !isPage(0)) return null;
+  const dv = new DataView(bytes);
+  const p = 27 + u[26]; // first packet: after the header and its segment table
+  if (p + 16 > u.length || u[p] !== 1 || String.fromCharCode(...u.subarray(p + 1, p + 7)) !== "vorbis") return null;
+  const rate = dv.getUint32(p + 12, true);
+  // The last page (end-of-stream flag) holds the final granule position.
+  for (let i = u.length - 27; i > 0; i--) {
+    if (!isPage(i) || !(u[i + 5] & 0x04)) continue;
+    const samples = dv.getUint32(i + 10, true) * 2 ** 32 + dv.getUint32(i + 6, true);
+    return samples > 0 && rate > 0 ? { samples, rate } : null;
+  }
+  return null;
+}
+
+/** `buf` cut to the file's real length (see `oggVorbisLength`); unchanged when already right. */
+function trimDecoded(ctx: BaseAudioContext, buf: AudioBuffer, len: { samples: number; rate: number } | null): AudioBuffer {
+  if (!len) return buf;
+  const n = Math.round((len.samples * buf.sampleRate) / len.rate);
+  // Only a short codec tail is cut; anything else means the header was not what we think.
+  if (n >= buf.length || n < buf.length - 0.1 * buf.sampleRate) return buf;
+  const out = ctx.createBuffer(buf.numberOfChannels, n, buf.sampleRate);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) out.copyToChannel(buf.getChannelData(ch).subarray(0, n), ch);
+  return out;
 }
 
 /** wp_audio slot codes (crates/wp_audio/src/types.rs `slot`): engine layers and limiter. */
@@ -332,7 +393,11 @@ export class VoicePool {
           this.samples.set(url, "loading");
           fetch(url)
             .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
-            .then((b) => this.ctx.decodeAudioData(b))
+            .then((b) => {
+              // Read before decoding: decodeAudioData detaches the buffer.
+              const len = oggVorbisLength(b);
+              return this.ctx.decodeAudioData(b).then((buf) => trimDecoded(this.ctx, buf, len));
+            })
             .then((buf) => {
               this.samples.set(url, buf);
               this.decoded = true;
@@ -411,6 +476,7 @@ export class VoicePool {
 
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
+    let rate = 1;
     const source = def?.source;
     if (ext) {
       this.played.synth++;
@@ -421,9 +487,12 @@ export class VoicePool {
       src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = looped;
-      src.playbackRate.value = params.pitch;
+      // A recorded siren loop plays at its unit's rate from its unit's point in the loop.
+      const vary = looped ? sirenLoopVariation(this.lib, played, cue, synth) : null;
+      rate = vary?.rate ?? 1;
+      src.playbackRate.value = params.pitch * rate;
       src.connect(gain);
-      src.start(t);
+      src.start(t, vary ? vary.offset * buf.duration : 0);
     } else {
       this.played.synth++;
       const name = source && "Synth" in source ? source.Synth.synth : "noise";
@@ -433,7 +502,7 @@ export class VoicePool {
     }
     // A recorded one-shot can outlast the director's estimate: keep the voice until it ends.
     const dur = Math.max(def?.duration_s ?? 1, buf && !looped ? buf.duration / Math.max(params.pitch, 0.25) : 0);
-    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params, scale });
+    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params, scale, rate });
     this.created++;
   }
 
@@ -473,7 +542,7 @@ export class VoicePool {
       l.pos = params.pos;
     }
     const pitchMoved = changed(params.pitch, l.pitch);
-    if (v.src && pitchMoved) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
+    if (v.src && pitchMoved) v.src.playbackRate.setTargetAtTime(params.pitch * v.rate, t, 0.02);
     // Sirens schedule their pitch curve ahead on each update (their phase moves every frame);
     // others only on change.
     const synthChanged =
@@ -482,7 +551,10 @@ export class VoicePool {
     if (v.synth && (synthChanged || params.engine || (v.synth as ClockedSynth).everyFrame)) v.synth.update(params, t);
     if (synthChanged) {
       l.freq_hz = params.freq_hz;
-      l.pitch = params.pitch;
+      // Only once applied: a siren's phase changes every frame, and taking the pitch here on
+      // every phase change kept a recording's playback rate from ever following a slow pitch
+      // drift (Doppler of a receding siren stuck ~5 % sharp).
+      if (pitchMoved) l.pitch = params.pitch;
       l.load = params.load;
       l.phase = params.phase;
     }
@@ -536,6 +608,7 @@ export class VoicePool {
         // Gain starts at 0 and is ramped in by the first flush.
         last: { ...params, gain: 0, pos: [...params.pos] as [number, number, number] },
         scale: 1,
+        rate: 1,
         members: new Map(),
         pending: params,
         mix,

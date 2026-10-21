@@ -13,7 +13,7 @@
   "world_pack": "world_rec",
   "horn_cue": "horn/police",
   "siren": {
-    "pack": "siren_v2",
+    "pack": "siren_rec",
     "default_mode": "Auto"
   }
 }
