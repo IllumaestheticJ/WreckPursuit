@@ -384,6 +384,8 @@ struct Racer {
     passes: u32,
     /// Of `passes`, the ones made between two cars (lane-splitting).
     splits: u32,
+    /// Lane-splits given up (a car drifted toward the gap, or it closed).
+    split_aborts: u32,
     race_speed: Option<SpeedProfile>,
     debug: Debug,
     /// Half extents along / across the corridor (yaw-aware), m.
@@ -638,8 +640,11 @@ const SPLIT_MARGIN_M: f32 = 0.25;
 /// Lane-splitting: only drivers at least this skilled go between two cars.
 const SPLIT_MIN_SKILL: f32 = 0.75;
 /// Lane-splitting: largest closing speed on the slower of the two at full traffic risk,
-/// m/s (scaled down with the driver's traffic risk, floor 30 %).
+/// m/s (scaled down with the driver's traffic risk, floor [`SPLIT_MIN_RISK`]).
 const SPLIT_MAX_CLOSING_MPS: f32 = 5.0;
+/// Lane-splitting: the traffic risk the closing limit is scaled by never counts as less
+/// than this (a skilled, careful driver still closes at up to 3 m/s; lead, 2026-10-21).
+const SPLIT_MIN_RISK: f32 = 0.6;
 /// Lane-splitting: lateral speed of either car toward the gap that ends the split, m/s.
 const SPLIT_DRIFT_MPS: f32 = 0.3;
 
@@ -771,6 +776,7 @@ impl Field {
                 flight: None,
                 passes: 0,
                 splits: 0,
+                split_aborts: 0,
                 race_speed: None,
                 debug: Debug::default(),
                 ext: (
@@ -1768,6 +1774,11 @@ impl Field {
     pub fn splits_by(&self, k: usize) -> usize {
         self.racers[k].splits as usize
     }
+
+    /// Lane-splits racer `k` gave up and tucked back in from.
+    pub fn split_aborts_by(&self, k: usize) -> usize {
+        self.racers[k].split_aborts as usize
+    }
 }
 
 /// Steps 3 + 4 for one racer on its current track.
@@ -2166,14 +2177,10 @@ fn decide_racer(
                                     None => true,
                                     Some(q) => split_closing(x, q, hw, true),
                                 };
-                            too_late
-                                || lost
-                                || gone
-                                || stale
-                                || oncoming
-                                || junction
-                                || red
-                                || split_off
+                            too_late || lost || gone || stale || oncoming || junction || red || {
+                                r.split_aborts += u32::from(split_off);
+                                split_off
+                            }
                         }
                     }
                     None => true,
@@ -3572,7 +3579,7 @@ fn plan_split(
     let o = &target.o;
     let hw = 0.5 * r.cap.width_m;
     let hl = 0.5 * r.cap.length_m;
-    let risk = r.params.traffic_risk.clamp(0.3, 1.0);
+    let risk = r.params.traffic_risk.clamp(SPLIT_MIN_RISK, 1.0);
     if r.profile.skill < SPLIT_MIN_SKILL || o.v_s < 1.0 || o.parked || o.out_of_race {
         return None;
     }
@@ -3856,9 +3863,11 @@ mod tests {
         assert!(split_case(0.5, 0.8, 18.0, 2.3, 0.0).is_none());
         // Gap too narrow (2.2 m).
         assert!(split_case(0.9, 0.8, 18.0, 2.0, 0.0).is_none());
-        // Closing too fast (10 m/s), or fast for a careful driver (3 m/s at risk 0.3).
+        // Closing too fast (10 m/s), or fast for a careful driver (4 m/s at risk 0.3: the
+        // limit is 3 m/s from the 0.6 floor), which 3 m/s is not.
         assert!(split_case(0.9, 0.8, 25.0, 2.3, 0.0).is_none());
-        assert!(split_case(0.9, 0.3, 18.0, 2.3, 0.0).is_none());
+        assert!(split_case(0.9, 0.3, 19.0, 2.3, 0.0).is_none());
+        assert!(split_case(0.9, 0.3, 17.9, 2.3, 0.0).is_some());
         // One of them drifting toward the gap.
         assert!(split_case(0.9, 0.8, 18.0, 2.3, 0.5).is_none());
         assert!(split_case(0.9, 0.8, 18.0, 2.3, -0.5).is_some());
