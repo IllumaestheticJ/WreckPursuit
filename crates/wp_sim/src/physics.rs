@@ -37,6 +37,10 @@ pub struct CityColliders {
     pub rails: usize,
     /// Median barrier boxes between divided-highway carriageways.
     pub barriers: usize,
+    /// Structure colliders (tunnel linings and portals, canopies, landmarks, trusses).
+    pub structures: usize,
+    /// Terrain cells removed (tunnel mouths).
+    pub terrain_holes: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -139,7 +143,22 @@ impl PhysicsWorld {
                     Vector::new(lo[0] + sx * 0.5, lo[1] + sy * 0.5, 0.0),
                     rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half),
                 );
-                let hf = ColliderBuilder::heightfield(heights, Vector::new(sx, 1.0, sy))
+                let mut shape =
+                    rapier3d::parry::shape::HeightField::new(heights, Vector::new(sx, 1.0, sy));
+                // Removed cells (tunnel mouths): tile cell (row r, column c) is world cell
+                // (i0 + c, j1 - r - 1).
+                for r in 0..nr - 1 {
+                    for c in 0..nc - 1 {
+                        if t.is_hole(i0 + c as u32, j1 - r as u32 - 1) {
+                            shape.set_cell_status(
+                                r,
+                                c,
+                                rapier3d::parry::shape::HeightFieldCellStatus::CELL_REMOVED,
+                            );
+                        }
+                    }
+                }
+                let hf = ColliderBuilder::new(SharedShape::new(shape))
                     .position(pose)
                     .collision_groups(terrain_groups())
                     .build();
@@ -149,6 +168,7 @@ impl PhysicsWorld {
             j0 = j1;
         }
         out.terrain_vertices = (t.nx * t.ny) as usize;
+        out.terrain_holes = t.holes.len();
 
         // Roads: one triangle mesh per 256 m cell (by triangle centroid).
         const ROAD_TILE_M: f32 = 256.0;
@@ -200,6 +220,20 @@ impl PhysicsWorld {
             if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
                 added.push(self.colliders.insert(cb.friction(0.6).build()));
                 out.buildings += 1;
+            }
+        }
+
+        // Structures: tunnel linings and portals, canopies and pillars, landmarks, trusses
+        // (prisms, possibly floating).
+        for st in &net.features.structures {
+            let mut pts: Vec<Vector> = Vec::with_capacity(st.footprint.len() * 2);
+            for q in &st.footprint {
+                pts.push(Vector::new(q[0], q[1], st.z0_m));
+                pts.push(Vector::new(q[0], q[1], st.z1_m));
+            }
+            if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
+                added.push(self.colliders.insert(cb.friction(0.6).build()));
+                out.structures += 1;
             }
         }
 
