@@ -9,6 +9,7 @@
 //!   to the ground beyond — the greybox draws exactly these triangles and `wp_sim` collides
 //!   with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
+//! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
@@ -164,6 +165,24 @@ pub fn surface_edges(s: &RoadSurface) -> (Vec<V3>, Vec<V3>) {
         right[k][2] = s.z_at(k, s.right_m);
     }
     (left, right)
+}
+
+/// Distance from `q` to `s`'s centreline (clamped to its ends) and the height of the banked
+/// surface under `q` (nearest centreline point).
+pub fn height_under(s: &RoadSurface, q: V2) -> (f32, f32) {
+    let cum = geom::cumulative(&s.centre);
+    let n = s.centre.len();
+    let pr = geom::project(&s.centre, &cum, q);
+    let t = pr.s.clamp(0.0, cum[n - 1]);
+    let (c, _) = geom::point_at(&s.centre, &cum, t);
+    let i = cum.partition_point(|x| *x <= t).clamp(1, n - 1);
+    let span = (cum[i] - cum[i - 1]).max(1e-6);
+    let f = ((t - cum[i - 1]) / span).clamp(0.0, 1.0);
+    let bank = match s.bank.len() {
+        0 => 0.0,
+        _ => s.bank[i - 1] + (s.bank[i] - s.bank[i - 1]) * f,
+    };
+    (pr.dist, c[2] + bank * pr.lateral)
 }
 
 /// Sides of a junction disc polygon.
@@ -1700,12 +1719,17 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     };
     let ground = |q: V2| t.height_at(q);
     let mut out = Vec::new();
-    for s in &net.surfaces {
+    for (si, s) in net.surfaces.iter().enumerate() {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                out.push((l[k], l[k + 1]));
-                out.push((r[k], r[k + 1]));
+                for e in [&l, &r] {
+                    if !inside_other_paving(net, si, e[k])
+                        || !inside_other_paving(net, si, e[k + 1])
+                    {
+                        out.push((e[k], e[k + 1]));
+                    }
+                }
             }
         }
     }
@@ -1805,6 +1829,48 @@ pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
         }
     }
     Some(out)
+}
+
+/// Whether `p` lies on the paving of a surface other than `si`, at its level (a ramp edge
+/// inside the carriageway it leaves, for example: no rail there).
+pub fn inside_other_paving(net: &RoadNetwork, si: usize, p: V3) -> bool {
+    let q = geom::xy(p);
+    net.surfaces.iter().enumerate().any(|(oi, o)| {
+        if oi == si || o.centre.len() < 2 {
+            return false;
+        }
+        let w = o.left_m.max(o.right_m);
+        // Cheap reject on the end points' bounding box.
+        let (a, b) = (
+            geom::xy(o.centre[0]),
+            geom::xy(o.centre[o.centre.len() - 1]),
+        );
+        let reach = geom::dist(a, b) * 0.5 + w + 400.0;
+        if geom::dist(q, geom::scale(geom::add(a, b), 0.5)) > reach {
+            return false;
+        }
+        let cum = geom::cumulative(&o.centre);
+        let pr = geom::project(&o.centre, &cum, q);
+        let inside = if pr.lateral < 0.0 {
+            -pr.lateral < o.left_m - 0.3
+        } else {
+            pr.lateral < o.right_m - 0.3
+        };
+        pr.s > 0.0 && pr.s < cum[cum.len() - 1] && inside && {
+            let (_, z) = height_under(o, q);
+            (z - p[2]).abs() < 1.0
+        }
+    })
+}
+
+/// Median barrier polylines (at road height, along the left paved edge of every surface
+/// flagged [`RoadSurface::median_barrier`]).
+pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
+    net.surfaces
+        .iter()
+        .filter(|s| s.median_barrier && s.centre.len() >= 2)
+        .map(|s| surface_edges(s).0)
+        .collect()
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable

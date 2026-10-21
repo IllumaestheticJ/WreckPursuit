@@ -41,6 +41,8 @@ pub struct CityColliders {
     pub tunnel_boxes: usize,
     /// Tree trunks, hedges and fences (residential lots, playtest row 95).
     pub decor: usize,
+    /// Median barrier boxes between divided-highway carriageways.
+    pub barriers: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -311,7 +313,8 @@ impl Default for PhysicsWorld {
 
 /// The static colliders of a city with terrain (Port Vesper v2), in the order
 /// [`PhysicsWorld::set_city_ground`] inserts them: terrain heightfield tiles, road triangle
-/// meshes, buildings, deck guard rails, tunnel walls and roofs. `None` for flat cities (they keep the slab). Shared
+/// meshes, buildings (not on flat ground), deck guard rails, median barriers, tunnel walls
+/// and roofs. `None` for flat cities (they keep the slab). Shared
 /// with the client prediction stepper (`wp_vehicle::rig::Rig::set_city_ground`, used by
 /// `wp_net`) so a predicted car drives on exactly the server's ground.
 pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
@@ -368,8 +371,11 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     added.extend(walk_colliders);
 
     // Buildings: extruded footprints as convex hulls (footprints are convex lots), pitched
-    // roofs included (a gable or hip house is still convex).
-    for b in &net.buildings {
+    // roofs included (a gable or hip house is still convex). A city on flat ground (the
+    // procedural grid, whose terrain only exists so its highway viaduct is a real bridge)
+    // keeps its old behaviour: buildings do not block cars.
+    let flat_ground = t.z.iter().all(|z| *z == t.z[0]);
+    for b in net.buildings.iter().filter(|_| !flat_ground) {
         let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2 + 2);
         for q in &b.footprint {
             pts.push(Vector::new(q[0], q[1], b.base_z_m));
@@ -389,6 +395,16 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
         if let Some(col) = rail_collider(a, b, 0.0) {
             added.push(col);
             out.rails += 1;
+        }
+    }
+    // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete
+    // boxes on the barrier line.
+    for line in wp_world::surface::median_barriers(net) {
+        for w in line.windows(2) {
+            if let Some(col) = box_collider(w[0], w[1], 0.0, 0.25, 0.405) {
+                added.push(col);
+                out.barriers += 1;
+            }
         }
     }
     // And just outside the back edge of every sidewalk without a lot behind it (decks and
@@ -501,6 +517,19 @@ pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
 /// A guard rail along `a → b` (at its foot height): a 0.3 m wide, 0.9 m tall box, its centre
 /// line `right` metres to the right of the line. `None` for a degenerate segment.
 fn rail_collider(a: [f32; 3], b: [f32; 3], right: f32) -> Option<Collider> {
+    box_collider(a, b, right, 0.15, 0.45)
+}
+
+/// A static box along `a`–`b` (shifted `right` m to its right), `half_w` m half wide and
+/// standing `2 · half_h` m tall on the line: deck guard rails (0.15 / 0.45) and median
+/// barriers (0.25 / 0.405).
+fn box_collider(
+    a: [f32; 3],
+    b: [f32; 3],
+    right: f32,
+    half_w: f32,
+    half_h: f32,
+) -> Option<Collider> {
     let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
     if len < 0.05 {
@@ -512,10 +541,10 @@ fn rail_collider(a: [f32; 3], b: [f32; 3], right: f32) -> Option<Collider> {
     let mid = Vector::new(
         (a[0] + b[0]) * 0.5 + rx,
         (a[1] + b[1]) * 0.5 + ry,
-        (a[2] + b[2]) * 0.5 + 0.45,
+        (a[2] + b[2]) * 0.5 + half_h,
     );
     Some(
-        ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
+        ColliderBuilder::cuboid(half_w, len * 0.5 + 0.05, half_h + d[2].abs() * 0.5)
             .position(Pose::from_parts(
                 mid,
                 rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),

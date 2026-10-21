@@ -895,7 +895,8 @@ impl Field {
                     Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
                 };
                 let signal = self.signal_ahead(k, world);
-                self.decide(k, &obstacles, &civs, signal, dt);
+                let priority = self.priority_ahead(k, world);
+                self.decide(k, &obstacles, &civs, signal, priority, dt);
             }
             self.outputs = self.racers.iter().map(|r| (r.entity, r.input)).collect();
         } else {
@@ -1467,11 +1468,21 @@ impl Field {
 
     /// Step 3 + 4 for racer `k`.
     /// Civilians near any racer, as `(id, position, velocity)` (junction awareness).
+    /// Only civilians on the racer's own level count: traffic on a bridge overhead (or the
+    /// road under one) never enters the racer's junctions.
     fn civilians_near(&self, world: &World) -> Vec<Civ> {
         let mut out = Vec::new();
+        let level = |r: &Racer| {
+            let c = r.flight.as_ref().map_or(&self.corridor, |f| &f.corridor);
+            c.samples[r.hint.min(c.samples.len() - 1)].pos[2]
+        };
         for a in world.agents() {
             let p = geom::xy(a.pos);
-            if self.racers.iter().any(|r| geom::dist(p, r.pos) < 160.0) {
+            if self
+                .racers
+                .iter()
+                .any(|r| geom::dist(p, r.pos) < 160.0 && (a.pos[2] - level(r)).abs() < 4.0)
+            {
                 out.push(Civ {
                     id: a.id,
                     pos: p,
@@ -1481,6 +1492,26 @@ impl Field {
             }
         }
         out
+    }
+
+    /// Entry distance of the next junction on racer `k`'s track when it is a priority
+    /// junction and the racer arrives on the major road (civilians stopped on the minor
+    /// approaches are waiting for it).
+    fn priority_ahead(&self, k: usize, world: &World) -> Option<f32> {
+        let r = &self.racers[k];
+        let corridor = match &r.flight {
+            Some(f) => &f.corridor,
+            None => &self.corridor,
+        };
+        let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
+        let steps = (SIGNAL_LOOKAHEAD_M / CORRIDOR_STEP_M) as usize;
+        let (ahead, lane) = corridor.next_junction_lane(i0, steps)?;
+        match world.map().lane_control(lane)? {
+            (wp_world::network::IntersectionControl::Priority, ap, _) if ap.major => {
+                Some(ahead as f32 * CORRIDOR_STEP_M)
+            }
+            _ => None,
+        }
     }
 
     /// Signal state of the next junction entry on racer `k`'s track (None: unsignalised,
@@ -1511,6 +1542,7 @@ impl Field {
         obstacles: &[Obstacle],
         civs: &[Civ],
         signal: Option<SignalAhead>,
+        priority: Option<f32>,
         dt: f32,
     ) {
         // Take the racer's own track data out while it is mutated.
@@ -1538,6 +1570,7 @@ impl Field {
             &mut self.racers[k],
             civs,
             signal,
+            priority,
             draft,
             finish_m,
             k,
@@ -1594,6 +1627,7 @@ fn decide_racer(
     r: &mut Racer,
     civs: &[Civ],
     signal: Option<SignalAhead>,
+    priority: Option<f32>,
     draft: bool,
     finish_m: Option<f32>,
     k: usize,
@@ -2271,6 +2305,10 @@ fn decide_racer(
                 let can_stop = stop_dist < d_entry - 2.0;
                 let protected =
                     sig.is_some_and(|g| g.state == SignalState::Green && g.remaining_s > t_through);
+                // On the major road of a priority junction: civilians stopped at its minor
+                // approaches are giving way to me.
+                let has_way = !in_junction
+                    && priority.is_some_and(|d| (d - d_entry).abs() <= 2.5 * CORRIDOR_STEP_M);
                 let red_on_arrival = sig.is_some_and(|g| match g.state {
                     SignalState::Red => g.remaining_s > t_arrive - 0.5,
                     SignalState::Yellow => can_stop,
@@ -2334,33 +2372,42 @@ fn decide_racer(
                     // I'm in the box myself (avoid a stand-off). A stopped car that has not
                     // moved while I waited is waiting for me: stop counting it.
                     let waited_out = r.junction_wait_s > JUNCTION_DEADLOCK_S;
-                    let stopped_inside =
-                        speed <= 0.5 && in_strip && !in_junction && !protected && !waited_out;
+                    let stopped_inside = speed <= 0.5
+                        && in_strip
+                        && !in_junction
+                        && !protected
+                        && !has_way
+                        && !waited_out;
+                    // With the right of way (major road of a priority junction), only a
+                    // civilian too close to stop before the box (about 4 m/s² of braking) is
+                    // a threat; the rest give way (main's racer AI fix, grid ramps).
+                    let committed = speed * speed / (2.0 * 4.0) > d - radius - 1.0;
                     // A moving civilian: when does its present course enter / leave my strip?
                     // It only conflicts when that overlaps my own pass through the box, with
                     // my crossing gap either side. Cross traffic held at its red
                     // (`protected`) only counts while already moving inside the box.
-                    let conflict = speed > 0.5 && (!protected || d < radius) && {
-                        let ua = geom::dot(*vel, t_dir);
-                        let ul = geom::dot(*vel, nrm);
-                        let mut t0 = f32::NEG_INFINITY;
-                        let mut t1 = f32::INFINITY;
-                        for (p0, u, lo, hi) in
-                            [(pa, ua, -half_along, half_along), (pl, ul, l_lo, l_hi)]
-                        {
-                            if u.abs() < 1e-3 {
-                                if p0 < lo || p0 > hi {
-                                    t0 = f32::INFINITY;
+                    let conflict =
+                        speed > 0.5 && (!protected || d < radius) && (!has_way || committed) && {
+                            let ua = geom::dot(*vel, t_dir);
+                            let ul = geom::dot(*vel, nrm);
+                            let mut t0 = f32::NEG_INFINITY;
+                            let mut t1 = f32::INFINITY;
+                            for (p0, u, lo, hi) in
+                                [(pa, ua, -half_along, half_along), (pl, ul, l_lo, l_hi)]
+                            {
+                                if u.abs() < 1e-3 {
+                                    if p0 < lo || p0 > hi {
+                                        t0 = f32::INFINITY;
+                                    }
+                                } else {
+                                    let (x0, x1) = ((lo - p0) / u, (hi - p0) / u);
+                                    t0 = t0.max(x0.min(x1));
+                                    t1 = t1.min(x0.max(x1));
                                 }
-                            } else {
-                                let (x0, x1) = ((lo - p0) / u, (hi - p0) / u);
-                                t0 = t0.max(x0.min(x1));
-                                t1 = t1.min(x0.max(x1));
                             }
-                        }
-                        let t_c_in = t0.max(0.0);
-                        t1 > t_c_in && t_in - gap_s < t1 && t_c_in < t_out + gap_s
-                    };
+                            let t_c_in = t0.max(0.0);
+                            t1 > t_c_in && t_in - gap_s < t1 && t_c_in < t_out + gap_s
+                        };
                     if stopped_inside || conflict {
                         if speed <= 0.5 {
                             held_by_stopped = true;
@@ -3077,7 +3124,7 @@ mod tests {
             &[],
             &NoPolice,
         );
-        f.decide(0, &[], civs, signal, 4.0 * PHYSICS_DT);
+        f.decide(0, &[], civs, signal, None, 4.0 * PHYSICS_DT);
         f.debug_of(0)
     }
 

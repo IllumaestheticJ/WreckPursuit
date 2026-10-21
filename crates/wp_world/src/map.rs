@@ -231,11 +231,41 @@ impl CityMap {
                 siblings: Vec::new(),
             });
         }
+        // Freeway merges / diverges (radius-0 junctions): their long taper connectors follow
+        // the paving under them (graded, banked) instead of a straight line between the lane
+        // ends. Candidate surfaces: every road with a lane at the node.
+        let mut freeway_roads: Vec<Vec<usize>> = vec![Vec::new(); net.nodes.len()];
+        for l in &net.lanes {
+            for n in [l.from_node, l.to_node] {
+                let freeway = net.nodes[n as usize]
+                    .intersection
+                    .is_some_and(|ix| net.intersections[ix as usize].radius_m <= 0.0);
+                let list = &mut freeway_roads[n as usize];
+                if freeway && !list.contains(&(l.road as usize)) {
+                    list.push(l.road as usize);
+                }
+            }
+        }
         // Connectors.
         for (i, l) in net.lanes.iter().enumerate() {
             for c in &l.connections {
                 let to = &net.lanes[c.to as usize];
-                let pts = connector_curve(&l.polyline, &to.polyline, c.turn);
+                let mut pts = connector_curve(&l.polyline, &to.polyline, c.turn);
+                let roads = &freeway_roads[l.to_node as usize];
+                if !roads.is_empty() {
+                    let n = pts.len();
+                    for p in pts.iter_mut().take(n - 1).skip(1) {
+                        let best = roads
+                            .iter()
+                            .filter_map(|r| net.surfaces.get(*r))
+                            .map(|s| crate::surface::height_under(s, geom::xy(*p)))
+                            .filter(|(_, z)| (z - p[2]).abs() < 3.0)
+                            .min_by(|a, b| a.0.total_cmp(&b.0));
+                        if let Some((_, z)) = best {
+                            p[2] = z;
+                        }
+                    }
+                }
                 let cum = geom::cumulative(&pts);
                 let length = *cum.last().unwrap();
                 let limit = l.speed_limit_mps.min(to.speed_limit_mps);
@@ -834,9 +864,18 @@ impl WorldQuery for CityMap {
             let half = s.width * 0.5;
             // The lane, or the median half / shoulder beside it.
             if pr.dist <= half + s.paved_side[usize::from(pr.lateral > 0.0)] {
+                let highway = |l: LaneId| self.net.lanes[l as usize].kind == LaneKind::Highway;
                 return match s.kind {
-                    SegKind::Lane { lane }
-                        if self.net.lanes[lane as usize].kind == LaneKind::Highway =>
+                    SegKind::Lane { lane } if highway(lane) => SurfaceType::Concrete,
+                    // Through a freeway merge / diverge (radius-0 junction).
+                    SegKind::Connector { from, to, node, .. }
+                        if highway(from)
+                            && highway(to)
+                            && self.net.nodes[node as usize]
+                                .intersection
+                                .is_some_and(|ix| {
+                                    self.net.intersections[ix as usize].radius_m <= 0.0
+                                }) =>
                     {
                         SurfaceType::Concrete
                     }

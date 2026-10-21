@@ -1349,3 +1349,102 @@ never above a road, tunnels included (closest 0.14 m below); off-road heightfiel
 p50 0.05 / p95 0.21 / p99 0.60 m (max 7.0 m on hillsides right beside cuttings, −2.2 m on
 sharp ridges; physics follows the drawn mesh in both). Greybox regenerated (9.09 MB, +5 KB).
 
+## Lead helper: highway + road markings (branch `claude/festive-dijkstra-5rxjnw`, 2026-10-20)
+Playtest #33 ("the highway needs to feel like an actual highway; road markings everywhere;
+centre dividers and proper on-ramps").
+
+**What exists now**
+- **Loop 9 is a divided highway** (`wp_world::vesper`): two one-way 3-lane carriageways with
+  paved shoulders and a Jersey-profile median barrier, profiled once as a single road so both
+  directions share one profile and bank. Six interchanges replace the seven signalised
+  T-junctions: five diamonds (crossroad bridges both carriageways, signalised terminals 150 m
+  either side, four ramps each) and a half diamond at the port. Ramps leave / join the
+  rightmost lane 300 m from the crossroad through 60 m taper connectors. Numbers and geometry:
+  `crates/wp_world/README.md` → "Port Vesper v2".
+- **Builder:** `ControlHint::Freeway` merge / diverge nodes; `RoadSpec::{shoulder_left_m,
+  shoulder_right_m, median_barrier}`; paving can run through a node while lanes are set back.
+- **Road format v3:** `RoadSurface::median_barrier`. The grid's `.road.bin/.json` were
+  regenerated (lanes unchanged).
+- **Traffic (`traffic.rs`, one rule):** a minor approach at a priority junction whose lane is a
+  highway lane (an on-ramp) yields on the move instead of stopping first. No existing city has
+  such a lane, so grid behaviour is unchanged.
+- **Markings:** `markings::marking_mesh` (render mesh from the same rules as `marking_at`,
+  white + yellow), `markings::must_stop` is public and false for merging ramps. wasm
+  `road_markings(yellow)`; the testbed draws it (`markings_view.ts`) and signal heads no longer
+  draw their own stop line.
+- **Physics (`wp_sim`):** median barrier colliders (`CityColliders::barriers`); test
+  `the_median_barrier_keeps_a_car_on_its_carriageway` (25° swerve at 90 km/h).
+- **Greybox:** highways paved from their surfaces (shoulders included), ramp tapers, the
+  barrier mesh, no parapets on the median side of decks. Both greyboxes regenerated
+  (`vesper_v2.greybox.glb` 6.8 → 7.4 MB, `.b64.txt` 9.1 → 9.9 MB).
+- Screenshots: `docs/media/highway/` (`apps/testbed-web/e2e/highway_shots.mjs`).
+
+**Checks**
+| Check | Result |
+|---|---|
+| `wp_world` (lib, `tests/city_v2.rs`, `tests/world.rs`) | pass; new `loop_is_a_divided_highway_with_ramps`, `mesh_paints_what_marking_at_reports` |
+| 400 agents on Port Vesper, 1 min (`traffic_400_agents_one_minute_on_the_hills_without_collisions`) | 0 civilian collisions |
+| `simcli run apps/simcli/scenarios` | all pass (Loop 9 crest route, hill roads, Vesper soaks) |
+| Goldens | re-blessed: `city_loop_crest_at_limit`, `world_traffic_soak_vesper{,_observer}` (Port Vesper changed); every grid golden unchanged |
+
+**Changes outside `wp_world`** (minimal): `wp_sim/src/physics.rs` (barrier colliders),
+`wp_wasm/src/lib.rs` (`road_markings`), `apps/testbed-web` (markings view, stop lines moved
+out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct update in `osm.rs`).
+
+**Known gaps**
+- No gore chevrons / dotted lane-line extensions through tapers; no ramp metering.
+- Police pursuit AI uses the lane graph as before (ramps are ordinary highway lanes to it).
+
+**Contract change requests:** none (no `wp_contracts` change).
+
+### Follow-up: the grid city's highway (same branch, 2026-10-21)
+- **Procedural grid** (`procgen`): the highway spine is a divided viaduct (two one-way
+  3-lane carriageways, shoulders, median barrier) from the ring road at each end, bridging the
+  arterial/collector rows (7.5 m clearance); full diamonds (8 ramps) at the first and last
+  crossing rows of the 12×12 city, stop-controlled terminals on the street
+  (`ControlHint::RampTerminal`). Smaller grids (6×6–8×8, the opponent/race test cities) have
+  no mid-city ramps: their blocks are too short. Details in the `wp_world` README.
+- **Flat terrain for the grid** (12 cm under the streets) so `wp_sim` builds the road mesh and
+  the viaduct is a real bridge; on flat ground buildings still get no colliders (old grid
+  behaviour; `physics.rs`).
+- **Fixes found on the way (both cities):** taper connectors follow the paving's height
+  (they stuck up or sank by up to 0.66 m on graded/banked highway); every road's paving runs
+  to a freeway node (an unpaved wedge at the gore let a physical car slip under a ramp); deck
+  rails and parapets skip ramp edges lying on the carriageway; junction discs in the road
+  mesh cover the lane-end corners (gaps to the ground at every junction's outer lane corners);
+  the greybox adds the sea only to cities with seabed. The merge-yield rule keys off the
+  radius-0 freeway junction instead of the lane kind.
+- **Tests / scenarios:** `procgen::highway_is_a_divided_viaduct_with_ramps`;
+  `tests/drive.rs` starts at "Arterial drag" (the flat rig cannot drive the viaduct);
+  `golden_city_chase` re-aimed (patrol spawns moved: start (279.75, −10), band −35…10),
+  `golden_night_pursuit_escape` seed 106 → 107 (a civilian sat in the cruise driver's lane);
+  `wp_opponent` `wanted_ai_racer_flees_police_through_the_city` runs 95 s instead of 80 s (the
+  circuit row no longer feeds a highway junction, the south-east corner queue is one cycle
+  longer). All goldens re-blessed; 45/45 scenarios pass.
+- **For the opponent workstream (N):** with ramp terminals on the 8×8 circuit row (tried and
+  dropped), a racer stopped behind a busted racer parked a few metres before a junction
+  waited for ever: the AI does not pass a stopped car that close to a junction.
+- `circuit_8x5` (pending scenario) shows two physical civilians colliding at the highway's
+  north ring T-junction (10 m/s) and staying pressed together.
+
+### Follow-up: ramps on the smaller grids (same branch, 2026-10-21)
+- Every grid now gets the half diamond facing the ring at its first and last crossing rows
+  (4 ramps); the 12×12 city keeps its two full diamonds (8 ramps, data unchanged).
+- **`wp_opponent` (minimal changes, for N to review in `field.rs`):**
+  - junction awareness ignores civilians on another level (more than 4 m above or below the
+    racer's track: traffic on the viaduct overhead was holding racers at the junction under it);
+  - on the major road of a priority junction, civilians stopped at its minor approaches, and
+    those still able to stop before the box, no longer hold the racer;
+  - a racer standing nose to tail with a parked (busted / retired / pulled-over) racer for 3 s
+    reverses for 3.5 s to make room to steer round it (it waited for ever behind a busted car
+    parked just before a junction);
+  - `corridor.rs`: a freeway merge / diverge taper (radius-0 junction) is road, not a
+    junction box (racers stopped before an off-ramp gore for traffic on the other
+    carriageway).
+- **Tests re-aimed:** `open_roads_with_traffic_no_civilian_contact` seed 7 → 5 (seeds 6-8
+  bring the last racer to the 6-way corner lights on a long red just short of 250 m; 1-5, 9,
+  10 pass); `wanted_ai_racer_flees_police_through_the_city` stays at 95 s;
+  `wp_police` `day_core_speeder` seed 100 → 103 (one run of 100-104 started its pursuit at
+  20.2 s against the 20 s cap); the 7×7 sprint scenarios (`race/city_sprint{,_police}.ron`)
+  start on the new carriageway's judge slots (x 58.05 / 63.05 → 59.55 / 64.55) and
+  `city_sprint_police` uses seed 12 (both `wp_race` police tests pass at aim dy −10 / 0 / +10).

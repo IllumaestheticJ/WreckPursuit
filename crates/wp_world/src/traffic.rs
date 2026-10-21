@@ -1596,7 +1596,10 @@ impl Traffic {
                 if ap.major {
                     2
                 } else {
-                    if !(at_line && self.stopped_for(i) >= 0.3) {
+                    // A freeway on-ramp (minor approach at a radius-0 merge junction) merges on
+                    // the move: it yields to the main line below but needs no stop first.
+                    let merging = map.net.intersections[ap.intersection as usize].radius_m <= 0.0;
+                    if !merging && !(at_line && self.stopped_for(i) >= 0.3) {
                         return false;
                     }
                     0

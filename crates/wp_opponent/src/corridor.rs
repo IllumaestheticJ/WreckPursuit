@@ -230,25 +230,33 @@ impl Corridor {
                 SegKind::Lane { lane } => Some(lane_extents(map, lane, opts)),
                 SegKind::Connector { .. } => None,
             };
+            // A freeway merge / diverge (radius-0 junction) has no crossing traffic: its taper
+            // connector is road, not a junction box.
+            let freeway = match seg.kind {
+                SegKind::Connector { node, .. } => map.net.nodes[node as usize]
+                    .intersection
+                    .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0),
+                SegKind::Lane { .. } => false,
+            };
             match seg.lane() {
                 Some(lane) => {
                     prev_lane = Some(lane);
                     prev_was_lane = true;
                 }
                 None => {
-                    if prev_was_lane {
+                    if prev_was_lane && !freeway {
                         if let Some(lane) = prev_lane {
                             junction_lanes.push((pts.len(), lane));
                         }
                     }
-                    prev_was_lane = false;
+                    prev_was_lane = freeway;
                 }
             }
             let mut s = p.a + carry;
             while s < p.b {
                 let (pos, t) = seg.point_at(s);
                 let (l, lp, r) = ext.unwrap_or((f32::NAN, f32::NAN, f32::NAN));
-                pts.push((pos, t, l, lp, r, ext.is_none()));
+                pts.push((pos, t, l, lp, r, ext.is_none() && !freeway));
                 s += CORRIDOR_STEP_M;
             }
             carry = s - p.b;
