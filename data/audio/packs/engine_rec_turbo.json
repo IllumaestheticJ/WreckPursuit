@@ -6,34 +6,36 @@
   "engine_layers": [
     {
       "cue": "engine/idle",
-      "anchor": "Idle",
+      "anchor": {
+        "FiringHz": 44.2
+      },
       "throttle": "Both"
     },
     {
       "cue": "engine/mid_on",
       "anchor": {
-        "Rpm": 2600.0
+        "FiringHz": 87.2
       },
       "throttle": "On"
     },
     {
       "cue": "engine/high_on",
       "anchor": {
-        "Rpm": 4900.0
+        "FiringHz": 165.6
       },
       "throttle": "On"
     },
     {
       "cue": "engine/low_off",
       "anchor": {
-        "Rpm": 2600.0
+        "FiringHz": 87.2
       },
       "throttle": "Off"
     },
     {
       "cue": "engine/high_off",
       "anchor": {
-        "Rpm": 4900.0
+        "FiringHz": 165.6
       },
       "throttle": "Off"
     }

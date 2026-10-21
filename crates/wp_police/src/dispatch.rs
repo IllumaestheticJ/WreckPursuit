@@ -516,7 +516,17 @@ impl PoliceSystem {
                 }
             }
             if self.units[i].unstick.give_up {
-                if self.may_vanish(world, i) {
+                let u = &self.units[i];
+                let near = crate::stuck::DEADLOCK_NEAR_M * crate::stuck::DEADLOCK_NEAR_M;
+                let deadlocked = u.unstick.stand_s >= crate::stuck::DEADLOCK_VANISH_S
+                    && self.racers.values().any(|r| {
+                        let d = sub(xy(r.pos), u.body.pos);
+                        d[0] * d[0] + d[1] * d[1] < near
+                    });
+                if deadlocked {
+                    self.stats.deadlock_despawns += 1;
+                }
+                if deadlocked || self.may_vanish(world, i) {
                     let id = self.units[i].id;
                     let cause = self
                         .stats
@@ -743,6 +753,7 @@ impl PoliceSystem {
         }
         self.contact_cooldown.insert(key, now);
         self.stats.racer_contacts += 1;
+
         let mode = self.setup.mode;
         let coef = self.cfg.pursuit.unit.contact_health_per_kmps2.get(mode);
         // A contact the unit meant (PIT, ram, box-in on its target) costs less risk, and the

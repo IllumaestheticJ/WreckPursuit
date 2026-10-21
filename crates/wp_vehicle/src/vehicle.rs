@@ -827,6 +827,11 @@ impl Vehicle {
         self.corners[0].max_steer.max(self.corners[1].max_steer)
     }
 
+    /// Vertical tyre loads (FL, FR, RL, RR), N, from the last step (tests and traces).
+    pub fn wheel_loads(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.wheels[i].fz)
+    }
+
     /// Peak slip angle of wheel `i`'s tire, rad.
     pub fn tire_peak_slip(&self, i: usize) -> f32 {
         self.corners[i].tire.peak_slip_angle_rad

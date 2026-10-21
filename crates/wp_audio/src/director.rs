@@ -139,6 +139,7 @@ struct CarAudio {
 struct WorldCues {
     squeal: CueRef,
     scrub: CueRef,
+    scrub_grass: CueRef,
     spin: CueRef,
     spin_loose: CueRef,
     surfaces: [CueRef; 8],
@@ -177,6 +178,7 @@ impl WorldCues {
         Self {
             squeal: t.get(pack, cues::SQUEAL, true),
             scrub: t.get(pack, cues::SCRUB, true),
+            scrub_grass: t.get(pack, cues::SCRUB_GRASS, true),
             spin: t.get(pack, cues::SPIN, true),
             spin_loose: t.get(pack, cues::SPIN_LOOSE, true),
             surfaces: cues::SURFACES.map(|c| t.get(pack, c, true)),
@@ -317,7 +319,9 @@ pub struct AudioDirector {
 pub const PHYSICAL_ENGINE_PACK: &str = "engine_physical";
 
 const DEFAULT_WORLD_PACK: &str = "world_proc";
-const DEFAULT_SIREN_PACK: &str = "siren_v2";
+/// Siren pack of a police unit whose car names none: the recorded loops (falling back to the
+/// `siren_v2` synth while they load or in procedural mode).
+const DEFAULT_SIREN_PACK: &str = "siren_rec";
 
 impl AudioDirector {
     /// New director over `lib` with a seed for the (purely cosmetic) pitch variation.
@@ -417,7 +421,7 @@ impl AudioDirector {
             rev_limit_rpm: e.rev_limit_rpm,
         };
         let layers = match self.lib.packs.get(&def.engine_pack) {
-            Some(p) => EngineLayers::resolve(p, e.idle_rpm, e.redline_rpm),
+            Some(p) => EngineLayers::resolve(p, &def.engine, e.idle_rpm, e.redline_rpm),
             None => EngineLayers { layers: Vec::new() },
         };
         let t = &mut self.cues;
@@ -953,18 +957,23 @@ impl AudioDirector {
                 out.push(d);
             }
         }
-        if let Some((gain, k)) = to.scrub {
-            let mut d = Desire::new(
-                VoiceId::new(e, slot::SCRUB),
-                Bus::World,
-                car.world.scrub,
-                up(Priority::Low),
-                pos,
-                vel,
-            );
-            d.gain = gain;
-            d.load = k;
-            out.push(d);
+        for (slot_code, cue, scrub) in [
+            (slot::SCRUB, car.world.scrub, to.scrub),
+            (slot::SCRUB_GRASS, car.world.scrub_grass, to.grass_scrub),
+        ] {
+            if let Some((gain, k)) = scrub {
+                let mut d = Desire::new(
+                    VoiceId::new(e, slot_code),
+                    Bus::World,
+                    cue,
+                    up(Priority::Low),
+                    pos,
+                    vel,
+                );
+                d.gain = gain;
+                d.load = k;
+                out.push(d);
+            }
         }
         if let Some((idx, gain, frac)) = to.surface {
             let cue = car.world.surfaces[idx];

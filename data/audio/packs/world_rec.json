@@ -276,9 +276,13 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 900.0,
-            "highpass_hz": 60.0,
-            "rumble": 0.2
+            "lowpass_hz": 750.0,
+            "highpass_hz": 70.0,
+            "lp_stages": 2.0,
+            "track": 1.25,
+            "bandpass_hz": 320.0,
+            "peak_db": 4.0,
+            "rumble": 0.4
           }
         }
       },
@@ -290,9 +294,15 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 1300.0,
+            "lowpass_hz": 900.0,
             "highpass_hz": 80.0,
-            "rumble": 0.35
+            "lp_stages": 2.0,
+            "track": 1.25,
+            "bandpass_hz": 850.0,
+            "peak_db": 3.0,
+            "rumble": 0.35,
+            "ripple_hz": 2.6,
+            "ripple_depth": 0.15
           }
         }
       },
@@ -334,13 +344,14 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 1600.0,
-            "highpass_hz": 200.0,
-            "rumble": 0.3
+            "lowpass_hz": 650.0,
+            "highpass_hz": 45.0,
+            "rumble": 1.5,
+            "track": 1.0
           }
         }
       },
-      "gain": 0.8,
+      "gain": 1.0,
       "looped": true
     },
     "surface/gravel": {
@@ -378,13 +389,17 @@
         "Synth": {
           "synth": "noise",
           "params": {
-            "lowpass_hz": 4500.0,
-            "highpass_hz": 800.0,
-            "rumble": 0.1
+            "lowpass_hz": 1700.0,
+            "highpass_hz": 120.0,
+            "lp_stages": 2.0,
+            "track": 1.0,
+            "bandpass_hz": 380.0,
+            "peak_db": 3.0,
+            "rumble": 0.45
           }
         }
       },
-      "gain": 0.8,
+      "gain": 0.6,
       "looped": true
     },
     "suspension/land": {
@@ -444,6 +459,20 @@
         }
       },
       "gain": 0.8,
+      "looped": true
+    },
+    "tire/scrub_grass": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 1100.0,
+            "highpass_hz": 120.0,
+            "rumble": 0.6
+          }
+        }
+      },
+      "gain": 0.45,
       "looped": true
     },
     "tire/spin": {

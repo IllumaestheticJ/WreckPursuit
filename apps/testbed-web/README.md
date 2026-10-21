@@ -36,9 +36,10 @@ npm run typecheck
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
 Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2
-(`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=procedural_12x12`,
-`?chase=1`. The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback
-`.greybox.b64.txt` on the published build). Automation: `__wp.lookAt(from, to)` places a fixed
+(`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=vesper_v2` or
+`?city=procedural_12x12` opens free drive in that city (ticks the box), `?chase=1` the chase.
+The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback `.greybox.b64.txt` on the
+published build; a failed load is retried on the next session in that city). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.
 | `e2e/playtest_chase.mjs` | city chase playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
 | `e2e/chase_perf.mjs` | city chase perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |

@@ -190,7 +190,10 @@ fn engine_lod_keeps_loudness() {
     for (focus, want_layers) in [(true, 2usize), (false, 1)] {
         let mut d = AudioDirector::new(lib.clone(), 1);
         d.register_car(car);
-        let st = cruising(car, [80.0, 0.0, 0.5]);
+        let mut st = cruising(car, [80.0, 0.0, 0.5]);
+        // Between two on-throttle loops (engine_rec_v8 roots its loops at their firing
+        // frequency: ~1,300 and ~2,500 rpm on a V8), so the focus car crossfades two layers.
+        st.engine_rpm = 1900.0;
         let mut gains = std::collections::BTreeMap::new();
         for f in 0..30u64 {
             let inp = [VehicleAudioInput {

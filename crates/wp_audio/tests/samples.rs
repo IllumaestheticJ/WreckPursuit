@@ -161,6 +161,19 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
                 car.id
             );
         }
+        // Police sirens play recordings too (owner: "sirens seem unrealistic — use real
+        // sounds"); the synth is only their fallback.
+        if let Some(siren) = &car.siren {
+            assert!(
+                lib.packs[&siren.pack]
+                    .cues
+                    .values()
+                    .any(|c| matches!(c.source, CueSource::Samples { .. })),
+                "cars/{}: siren pack {} plays no recordings",
+                car.id,
+                siren.pack
+            );
+        }
     }
 }
 
@@ -211,4 +224,146 @@ fn gear_change_plays_the_recorded_shift_clunk_once() {
         vec![0, 0, 0, 1, 0, 0],
         "one clunk on the frame the gear changes"
     );
+}
+
+/// Playtest "engine sounds are bad": recorded layers were rooted at the car's idle or at a
+/// fraction of its redline, so the six and V8 loops played 15-47 semitones under the car's
+/// firing frequency and two crossfading loops sounded at pitches up to ~2 octaves apart. Every
+/// recorded layer is now anchored at its loop's measured firing frequency: through the real
+/// director, each audible layer's pitch × its anchor frequency is the car's firing frequency, so
+/// crossfading loops share one pitch.
+#[test]
+fn recorded_engine_layers_follow_the_cars_firing_frequency() {
+    use wp_audio::data::RpmAnchor;
+    use wp_audio::types::slot;
+    use wp_audio::{
+        AudioCommand, AudioDirector, AudioFrame, DriverKind, Listener, VehicleAudioInput,
+    };
+    use wp_contracts::{load_car, EntityId, VehicleState};
+    let lib = AudioLibrary::embedded().unwrap();
+    // Every recorded layer is anchored by its firing frequency (also enforced by validate()).
+    for p in lib.packs.values() {
+        for l in &p.engine_layers {
+            let recorded = matches!(p.cues[&l.cue].source, CueSource::Samples { .. });
+            assert!(
+                !recorded || matches!(l.anchor, RpmAnchor::FiringHz(_)),
+                "packs/{}: recorded layer {} anchored by {:?}",
+                p.id,
+                l.cue,
+                l.anchor
+            );
+        }
+    }
+    let mut checked = 0;
+    for (id, def) in &lib.cars {
+        let pack = &lib.packs[&def.engine_pack];
+        let car = load_car(audio_dir().join(format!("../cars/{id}.json"))).expect("car loads");
+        let e = &car.def.engine;
+        let mut dir = AudioDirector::new(lib.clone(), 5);
+        dir.register_car(&car);
+        let mut rpm = e.idle_rpm;
+        let mut tick = 0u64;
+        while rpm <= e.rev_limit_rpm {
+            for throttle in [1.0f32, 0.0] {
+                let s = VehicleState {
+                    rot: [0.0, 0.0, 0.0, 1.0],
+                    engine_rpm: rpm,
+                    gear: 3,
+                    ..Default::default()
+                };
+                let inputs = [VehicleAudioInput {
+                    entity: EntityId(1),
+                    car_id: id,
+                    state: &s,
+                    throttle,
+                    throttle_applied: Some(throttle),
+                    horn: false,
+                    siren: false,
+                    road_rumble: 0.0,
+                    kind: DriverKind::Player,
+                }];
+                // A few frames so load settles; then read every layer's commanded pitch.
+                let mut pitch = std::collections::BTreeMap::new();
+                for _ in 0..20 {
+                    tick += 4;
+                    for c in dir.update(&AudioFrame {
+                        tick,
+                        listener: Listener::default(),
+                        focus: Some(EntityId(1)),
+                        vehicles: &inputs,
+                        events: &[],
+                    }) {
+                        match c {
+                            AudioCommand::Play { voice, params, .. }
+                            | AudioCommand::Set { voice, params }
+                                if (slot::ENGINE_LAYER..slot::ENGINE_LIMITER)
+                                    .contains(&voice.slot) =>
+                            {
+                                pitch.insert(
+                                    voice.slot - slot::ENGINE_LAYER,
+                                    (params.pitch, params.gain),
+                                );
+                            }
+                            AudioCommand::Stop { voice, .. } => {
+                                pitch.remove(&(voice.slot.wrapping_sub(slot::ENGINE_LAYER)));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let want = def.engine.firing_hz(rpm);
+                let lead = pitch.values().map(|v| v.1).fold(0.0f32, f32::max);
+                for (i, (p, gain)) in &pitch {
+                    let l = &pack.engine_layers[*i as usize];
+                    let RpmAnchor::FiringHz(hz) = l.anchor else {
+                        continue;
+                    };
+                    if !(0.26..=3.99).contains(p) {
+                        continue; // clamped (never in a road car's range, see below)
+                    }
+                    let err = (p * hz / want).ln().abs() * 1200.0 / std::f32::consts::LN_2;
+                    assert!(
+                        err < 5.0,
+                        "{id} at {rpm} rpm: {} plays {:.1} Hz, the car fires at {want:.1} Hz",
+                        l.cue,
+                        p * hz
+                    );
+                    // The leading loop is never stretched beyond what the rev range needs.
+                    assert!(
+                        *gain < lead || (0.5..=3.6).contains(p),
+                        "{id} at {rpm} rpm: {} at {p:.2}x",
+                        l.cue
+                    );
+                    checked += 1;
+                }
+            }
+            rpm += 400.0;
+        }
+    }
+    assert!(checked > 500, "only {checked} layer pitches checked");
+}
+
+/// `validate()` rejects a recorded engine layer rooted by the car's idle / redline / a fixed rpm.
+#[test]
+fn validate_rejects_recorded_layers_without_a_firing_frequency() {
+    use wp_audio::data::RpmAnchor;
+    let mut lib = AudioLibrary::embedded().unwrap();
+    assert!(lib.validate().is_empty(), "{:?}", lib.validate());
+    for bad in [
+        RpmAnchor::Idle,
+        RpmAnchor::RedlineFrac(0.5),
+        RpmAnchor::Rpm(3000.0),
+        RpmAnchor::FiringHz(0.0),
+    ] {
+        let pack = lib.packs.get_mut("engine_rec_v8").unwrap();
+        let keep = pack.engine_layers[1].anchor;
+        pack.engine_layers[1].anchor = bad;
+        let errs = lib.validate();
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("engine_rec_v8") && e.contains("FiringHz")),
+            "{bad:?}: {errs:?}"
+        );
+        lib.packs.get_mut("engine_rec_v8").unwrap().engine_layers[1].anchor = keep;
+    }
 }

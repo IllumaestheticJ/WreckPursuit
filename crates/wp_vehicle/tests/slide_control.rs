@@ -157,11 +157,14 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // (With no help the naive driver spins: full sim, no safety net.)
     // Re-recorded [bless] for the spin side-force floor (a tyre change: these unassisted
     // exits spin the rears past κ 0.3).
+    // Re-recorded [bless] for the ground-probe tilt fix (`ground::discount_tilt`: a rolled
+    // body's probe cylinder no longer hands smooth road to the sweep; a ground-contact change,
+    // not a slide-code change).
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0x47b38256dec45911_u64),
-        ("rampart_50", 0.7, 0.8, 0x0a916550690ab69c),
-        ("lucciola_350", 0.5, 0.3, 0xf420a4432bbd3f5d),
-        ("lucciola_350", 0.7, 0.8, 0x2baa1d89911eeb26),
+        ("rampart_50", 0.5, 0.3, 0x8a3f232189b4d668_u64),
+        ("rampart_50", 0.7, 0.8, 0x07e331d34bf80532),
+        ("lucciola_350", 0.5, 0.3, 0x32b14ede541264cc),
+        ("lucciola_350", 0.7, 0.8, 0x036113d85f8d3256),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

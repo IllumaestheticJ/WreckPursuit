@@ -114,6 +114,12 @@ impl Obstacle {
     }
 }
 
+/// A unit without lights queued this long behind a stopped vehicle near a junction (no
+/// passing there, as in a red-light queue) passes it anyway: the car it waits for may be
+/// waiting for it (Hollins: a racer parked after fleeing, the field queued behind the police
+/// car, nobody moving), s.
+pub const QUEUE_DEADLOCK_S: f32 = 12.0;
+
 /// Per-unit avoidance state.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AvoidState {
@@ -144,6 +150,10 @@ pub struct AvoidState {
     /// Time spent blocked by a stopped civilian or parked car with lights on (push-through).
     #[serde(default)]
     pub push_wait_s: f32,
+    /// Seconds a unit without lights has queued behind a stopped vehicle near a junction (it
+    /// may not pass there); after [`QUEUE_DEADLOCK_S`] it passes anyway.
+    #[serde(default)]
+    pub queue_s: f32,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -171,6 +181,7 @@ impl Default for AvoidState {
             blocked_by: None,
             wall: crate::walls::WallFeel::default(),
             push_wait_s: 0.0,
+            queue_s: 0.0,
         }
     }
 }
@@ -471,6 +482,9 @@ pub(crate) fn update(
         st.blocked_s = 0.0;
         return offset;
     }
+    if blocker.is_none() {
+        st.queue_s = 0.0;
+    }
     let stuck = blocker.filter(|b| {
         b.speed_mps < cfg.stopped_mps
             && b.gap_m < cfg.pass_gap_m
@@ -485,8 +499,13 @@ pub(crate) fn update(
         .junction
         .is_some_and(|j| j.s - me.track_s < (b.far_s - me.track_s) + cfg.no_pass_near_junction_m);
     if !siren && near_junction {
-        st.blocked_s = 0.0;
-        return offset;
+        st.queue_s += dt;
+        if st.queue_s < QUEUE_DEADLOCK_S {
+            st.blocked_s = 0.0;
+            return offset;
+        }
+    } else {
+        st.queue_s = 0.0;
     }
     st.blocked_s += dt;
     let wait = if me.chase {

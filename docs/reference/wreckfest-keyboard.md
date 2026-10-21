@@ -318,3 +318,9 @@ Suspects, in order:
 3. the roll-stiffness split, since lab bars ×0.25 and data ARB front/rear bias both matter
 4. max lock
 5. static weight distribution and CoG height in the car data
+
+## Drift transitions start with a throttle lift (owner, 2026-10-20)
+
+To switch a drift from one side to the other, the owner **lifts the throttle briefly** while switching keys. Not a handbrake tap, and not a full-throttle steering flip. Target for WreckPursuit:
+- a 0.15–0.4 s lift plus the key reversal swings the car through in ~0.5–0.8 s
+- opposite key + throttle back on catches it on the new side with no spin and no swing-back

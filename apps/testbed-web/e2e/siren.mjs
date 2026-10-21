@@ -100,7 +100,8 @@ const HILO = { lo_hz: 770, hi_hz: 960, cycle_s: 1.1, rise_frac: 0.5, two_tone: 1
   const model = (t) => {
     const p = (t / WAIL.cycle_s) % 1;
     const r = WAIL.rise_frac;
-    const x = p < r ? 1 - (1 - p / r) ** 2 : (1 - (p - r) / (1 - r)) ** 2;
+    const smooth = (u) => u * u * (3 - 2 * u);
+    const x = p < r ? smooth(p / r) : 1 - smooth((p - r) / (1 - r));
     return WAIL.lo_hz + (WAIL.hi_hz - WAIL.lo_hz) * x;
   };
   const off = track.filter(([t, f]) => Math.abs(f - model(t + 1024 / SR)) > model(t) * 0.04 + 15);

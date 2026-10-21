@@ -574,7 +574,7 @@ alone passed.
   and Loop 9 grids (outer column on the new highway shoulder) by about 2.2 m, and that alone
   turned `loop9_circuit` red (police-heavy and seed-fragile; see opponent-pace.md).
 
-## Playtest row 119 (lead, on `lead/round12`): bigger gates, reset onto the track
+## Playtest row 120 (lead, on `lead/round12`): bigger gates, reset onto the track
 
 Owner: "the race gates are too small; if they go too far off course, let them reset back onto
 the track".
