@@ -375,6 +375,18 @@ fn configs() -> Vec<Config> {
             RideTune::slow_weight(),
             Some(GripBalance::for_slow_weight()),
         ),
+        // The owner's combo (unify): 7d6b66c9's balance + springs / bars × 1.5, and the
+        // shipped default on it (+ the held-key cut / release; W's steering = the plain set).
+        (
+            "owner ref",
+            RideTune::owner(),
+            Some(GripBalance::owner_reference()),
+        ),
+        (
+            "owner shipped",
+            RideTune::owner(),
+            Some(GripBalance::owner()),
+        ),
     ];
     let mut v = Vec::new();
     for (name, ride, grip) in base {
@@ -1108,6 +1120,37 @@ fn poweron_table() {
                 shipped,
             ),
         ];
+        // OWNERCMP=1: the owner's reference combo (7d6b66c9 + springs / bars × 1.5) against
+        // the shipped unify default (the same + W's steering + the held-key cut / release).
+        if std::env::var("OWNERCMP").is_ok() {
+            let ride = RideTune::owner();
+            let gref = GripBalance::owner_reference();
+            sets = vec![
+                ("owner ref".into(), ride, gref, t22, plain_anchor),
+                ("ref + W steering".into(), ride, gref, t22, shipped),
+                (
+                    "ref + held-key cut".into(),
+                    ride,
+                    GripBalance::owner(),
+                    t22,
+                    plain_anchor,
+                ),
+                (
+                    "shipped (ref + W + cut)".into(),
+                    ride,
+                    GripBalance::owner(),
+                    t22,
+                    shipped,
+                ),
+                (
+                    "shipped, tyres B".into(),
+                    ride,
+                    GripBalance::owner(),
+                    CarTune::spin_candidate(),
+                    shipped,
+                ),
+            ];
+        }
     }
     println!("| set | car | power-on spins / 12 (straight / corner) | corner: median s to 20° slip / to spin | worst peak slip ° (straight / corner) | held drift / 9 (spun) |");
     println!("|---|---|---|---|---|---|");

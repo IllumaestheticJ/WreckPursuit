@@ -374,6 +374,9 @@ fn configs() -> Vec<(String, Option<GripBalance>)> {
         Ok("grip") => vec![("grip".into(), Some(GripBalance::grip()))],
         Ok("drift_best") => vec![("drift_best".into(), Some(GripBalance::drift_best()))],
         Ok("step14") => vec![("step14".into(), Some(GripBalance::step14()))],
+        // The owner's combo (unify): the shipped balance and the 7d6b66c9 reference.
+        Ok("owner") => vec![("owner".into(), Some(GripBalance::owner()))],
+        Ok("owner_ref") => vec![("owner_ref".into(), Some(GripBalance::owner_reference()))],
         Ok(j) if j.starts_with('[') => {
             let v: Vec<GripBalance> = serde_json::from_str(j).expect("GRIP json list");
             v.into_iter()
@@ -430,6 +433,9 @@ fn main() {
     } else if std::env::var("RIDE").as_deref() == Ok("firm") {
         // The step-20 default ride (springs / bars × 1.5 on medium weight).
         ride_lab::set_override(Some(RideTune::firm()));
+    } else if std::env::var("RIDE").as_deref() == Ok("owner") {
+        // The owner's ride (medium weight, springs / bars × 1.5; the shipped ride).
+        ride_lab::set_override(Some(RideTune::owner()));
     } else if std::env::var("RIDE").as_deref() == Ok("medium") {
         // Drift Lab W step 10's "medium weight" ride (W's "new" default).
         ride_lab::set_override(Some(RideTune::medium_weight()));

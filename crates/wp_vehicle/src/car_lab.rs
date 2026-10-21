@@ -159,10 +159,12 @@ impl CarTune {
         }
     }
 
-    /// The shipped tyres (unify, 2026-10-21): Drift Lab W's step-23 "spin" set
-    /// ([`CarTune::spin_candidate`]) for every vehicle (`crate::lab_scope`).
+    /// The shipped tyres (unify, 2026-10-21): the owner's 7d6b66c9 spin model
+    /// ([`CarTune::spin_step22`]: b0 7.5) for every vehicle (`crate::lab_scope`). Candidate B
+    /// ([`CarTune::spin_candidate`]) measures close on the owner's combo but adds about one
+    /// lift-off step-out per car (tyre-slip.md, "The owner's target").
     pub fn shipped() -> Self {
-        Self::spin_candidate()
+        Self::spin_step22()
     }
 
     /// Tyre-slip workstream's spin-model set (docs/integration/tyre-slip.md, "New-side settle,

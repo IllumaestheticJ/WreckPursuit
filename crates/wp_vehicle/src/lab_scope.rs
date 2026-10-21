@@ -1,19 +1,20 @@
 //! The shipped handling and the lab overrides on top of it ([`crate::plain`],
 //! [`crate::ride_lab`], [`crate::car_lab`], [`crate::grip_lab`], the [`crate::drift`] tuning).
 //!
-//! **Unify (lead, 2026-10-21):** Drift Lab W's step-23 handling is the game's handling. With
-//! no lab override set, every vehicle gets:
+//! **Unify (lead, 2026-10-21):** the Drift Lab W handling is the game's handling, set to the
+//! owner's preferred combo (7d6b66c9 with the springs and bars cranked up). With no lab
+//! override set, every vehicle gets:
 //!
-//! - the spin-model tyres ([`crate::car_lab::CarTune::shipped`]),
-//! - the firm ride ([`crate::ride_lab::RideTune::firm`]),
-//! - the step-20+ grip balance ([`crate::grip_lab::GripBalance::shipped`]).
+//! - the owner's spin-model tyres ([`crate::car_lab::CarTune::shipped`], b0 7.5),
+//! - the owner's ride ([`crate::ride_lab::RideTune::owner`]: medium weight, springs / bars
+//!   × 1.5),
+//! - the owner's step-14 grip balance ([`crate::grip_lab::GripBalance::shipped`]).
 //!
 //! AI racers, police and traffic get these too. The owner rule is one physics for every car.
 //! The per-car fixes now live in `data/cars`.
 //!
 //! The plain keyboard steering ([`shipped_plain`]: W's step-13b defaults) is a **player
-//! input**
-//! aid. With it come the smart lock, the countersteer limit, the catch, the held-key release
+//! input** aid. With it come the smart lock, the countersteer limit, the catch, the held-key release
 //! and the transition rack. It applies only to vehicles flagged as player-driven
 //! ([`crate::vehicle::Vehicle::set_player_input`]; `wp_sim` clears the flag for AI racers,
 //! police and traffic). AI keep their own steering.
@@ -76,10 +77,10 @@ pub fn plain(player: Option<bool>) -> Option<crate::plain::PlainSteer> {
     }
 }
 
-/// The ride tuning (every vehicle): the lab override, else the shipped
-/// [`crate::ride_lab::RideTune::firm`] (`None` = the data as is, [`legacy`] only).
+/// The ride tuning (every vehicle): the lab override, else the owner's ride
+/// [`crate::ride_lab::RideTune::owner`] (`None` = the data as is, [`legacy`] only).
 pub fn ride() -> Option<crate::ride_lab::RideTune> {
-    crate::ride_lab::active().or_else(|| (!legacy()).then(crate::ride_lab::RideTune::firm))
+    crate::ride_lab::active().or_else(|| (!legacy()).then(crate::ride_lab::RideTune::owner))
 }
 
 /// The car / tyre tuning (every vehicle): the lab override, else the shipped
@@ -111,7 +112,7 @@ mod tests {
         // (Process-wide; the lib's other unit tests never turn legacy or plain-off on.)
         assert!(plain(Some(true)).is_some() && plain(Some(false)).is_none());
         assert!(plain(None).is_none(), "a bare rig: only a lab override");
-        assert_eq!(ride(), Some(crate::ride_lab::RideTune::firm()));
+        assert_eq!(ride(), Some(crate::ride_lab::RideTune::owner()));
         assert_eq!(car(), Some(crate::car_lab::CarTune::shipped()));
         assert_eq!(grip(), Some(crate::grip_lab::GripBalance::shipped()));
     }

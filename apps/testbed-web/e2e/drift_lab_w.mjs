@@ -51,10 +51,10 @@ check(!sc.traffic_cars && !sc.police_cars, "no traffic, no police");
 const plain = await page.evaluate(() => window.__wp.sim.plainSteer());
 check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return_s - 0.33) < 1e-6, `plain steering on ${JSON.stringify(plain)}`);
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
-check(ride && Math.abs(ride.arb - 1.5) < 1e-6 && Math.abs(ride.spring - 1.5) < 1e-6 && Math.abs(ride.damper_rebound - 3.2) < 1e-6, `ride default = firm (step 20) ${JSON.stringify(ride)}`);
+check(ride && Math.abs(ride.arb - 1.5) < 1e-6 && Math.abs(ride.spring - 1.5) < 1e-6 && Math.abs(ride.damper_rebound - 2.1) < 1e-6, `ride default = the owner's (medium weight, springs / bars × 1.5) ${JSON.stringify(ride)}`);
 {
   const g0 = await page.evaluate(() => window.__wp.sim.gripBalance());
-  check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_stiffness - 0.9) < 1e-6 && Math.abs(g0.rear_lat_c - 1.2) < 1e-6, `grip balance default = new (step 20) ${JSON.stringify(g0)}`);
+  check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_stiffness - 0.45) < 1e-6 && Math.abs(g0.front_stiffness - 0.6) < 1e-6 && Math.abs(g0.slide_lock - 0.5) < 1e-6, `grip balance default = the owner's step 14 + held-key cut ${JSON.stringify(g0)}`);
 }
 check(Math.abs(plain.counter_margin_deg - 0.25) < 1e-6, `countersteer limit 0.25° by default (${plain.counter_margin_deg})`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
@@ -68,7 +68,7 @@ const cand = await page.evaluate(() => window.__wp.sim.carTune());
 check(Math.abs(cand.lat_under_spin - 0.15) < 1e-6 && Math.abs(cand.yaw_damping - 0.2) < 1e-6, `spin grip + damper ${JSON.stringify(cand)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().yaw_damping)) === 0, "car data restores");
-await page.locator("#drift-lab-w").getByRole("button", { name: "spin model", exact: true }).click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "spin model (shipped)", exact: true }).click();
 const spin = await page.evaluate(() => window.__wp.sim.carTune());
 check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_fx_slide - 0.958) < 1e-4, `spin model preset ${JSON.stringify(spin)}`);
 await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
@@ -100,14 +100,14 @@ const abText = async () => (await page.locator("#drift-w-balance-ab").innerText(
 // The transition preset above left balance step 14: A/B goes back to new.
 check((await abText()) === "balance: step 14", `after the transition preset: "${await abText()}"`);
 await page.locator("#drift-w-balance-ab").click();
-check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
+check((await abText()) === "balance: shipped", `A/B button reads "${await abText()}" (balance: shipped)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
-check(Math.abs(gNew.rear_stiffness - 0.9) < 1e-6 && Math.abs(gNew.rear_lat_c - 1.2) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: RWD rear near the data, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffness - 0.6) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `shipped balance: the owner's step 14, rear downforce, probe fix ${JSON.stringify(gNew)}`);
 await page.locator("#drift-lab-w button", { hasText: "balance: step 14" }).click();
 check((await abText()) === "balance: step 14" && Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) - 0.45) < 1e-6, `step 14 preset: "${await abText()}"`);
 await page.locator("#drift-w-balance-ab").click();
@@ -116,7 +116,7 @@ await page.locator("#drift-w-balance-grip").click();
   const gg = await page.evaluate(() => window.__wp.sim.gripBalance());
   check((await abText()) === "balance: grip (test)" && Math.abs(gg.rear_stiffness - 0.8) < 1e-6 && Math.abs(gg.rear_mu - 0.96) < 1e-6 && Math.abs(gg.rear_lat_c - 1.0) < 1e-6, `grip (test) preset: "${await abText()}" ${JSON.stringify(gg)}`);
 }
-await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "step 2", exact: true }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
 await page.locator("#drift-w-drift-best").click();
 const db = await page.evaluate(() => ({ g: window.__wp.sim.gripBalance(), p: window.__wp.sim.plainSteer() }));
@@ -138,7 +138,7 @@ await page.evaluate(() => {
 });
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
 await page.locator("#drift-w-balance-ab").click(); // custom → new
-check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
+check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: shipped", "A/B restores the shipped balance");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
@@ -147,7 +147,7 @@ await page.evaluate(() => {
   s.dispatchEvent(new Event("input"));
 });
 check(Math.abs((await page.evaluate(() => window.__wp.sim.plainSteer().t_full_s)) - 0.4) < 1e-6, "full lock time slider sets the override");
-await page.locator("#drift-lab-w button", { hasText: "defaults" }).click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "steering defaults", exact: true }).click();
 check(Math.abs((await page.evaluate(() => window.__wp.sim.plainSteer().t_full_s)) - 0.28) < 1e-6, "defaults restore 0.28 s");
 // Speed sensitivity A/B: tyre = full lock.
 await page.selectOption("#drift-lab-w-sens", "tyre");
@@ -310,7 +310,7 @@ await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car =
 await page.waitForTimeout(1500);
 const ld = await launch();
 console.log(`INFO  launch on the tyre data (owner's bug): yaw ${ld.maxYaw.toFixed(1)}° at ${ld.kmh.toFixed(0)} km/h`);
-await page.locator("#drift-lab-w").getByRole("button", { name: "spin model", exact: true }).first().click();
+await page.locator("#drift-lab-w").getByRole("button", { name: "spin model (shipped)", exact: true }).first().click();
 // Every parity car starts from the selector.
 for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo", "parity_rwd_d"]) {
   await page.selectOption("#drift-lab-w select", car);
@@ -354,6 +354,10 @@ const handling = () =>
   check(w.plain && w.spin && w.grip === "smart" && w.firm && w.player, `free drive: shipped handling, player steering aids (${JSON.stringify(w)})`);
   check(w.panel === "none" && w.title !== "Drift Lab W", `free drive: tune panel hidden (${w.panel})`);
   check((await page.locator("#sc-drift-w").count()) === 0, "no separate drift lab W button");
+  // (The load's Escape may have opened the pause menu, which keeps the keys.)
+  await page.evaluate(() => {
+    if (window.__wp.menu?.isOpen) window.__wp.menu.close();
+  });
   await page.keyboard.press("F7");
   check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "F7 shows the tune panel");
   await page.keyboard.press("F7");
@@ -372,6 +376,17 @@ check((await sim()).name !== "drift_lab_w", "?tune=1 keeps the session (no separ
   check(legacy.l && legacy.car === null && legacy.plain === null, `pre-unify A/B on: data tyres, no plain steering (${JSON.stringify(legacy)})`);
   await page.evaluate(() => document.getElementById("drift-lab-w-legacy").click());
   check((await page.evaluate(() => window.__wp.sim.labScopeLegacy())) === false, "pre-unify A/B off again");
+  // "Reset all to defaults": a saved override goes away, the shipped handling is back.
+  await page.evaluate(() => {
+    window.__wp.sim.rideTuneSet(JSON.stringify({ spring: 0.7 }));
+    localStorage.setItem("wp.tune.ride.v1", JSON.stringify({ spring: 0.7 }));
+  });
+  await page.evaluate(() => document.getElementById("drift-lab-w-reset-all").click());
+  const reset = await page.evaluate(() => ({ ride: window.__wp.sim.rideTune(), saved: Object.keys(localStorage).filter((k) => k.startsWith("wp.tune.")) }));
+  check(Math.abs(reset.ride.spring - 1.5) < 1e-6 && reset.saved.length === 0, `reset all → shipped ride, no saved tune keys (${JSON.stringify(reset)})`);
+  // "Copy tune JSON": everything in effect.
+  const tj = JSON.parse(await page.evaluate(() => window.__wp.tunePanel.tuneJson()));
+  check(tj.legacy === false && tj.steer && tj.ride && tj.tyres && tj.grip && tj.assists, `tune JSON has steering / ride / tyres / grip / assists (${Object.keys(tj).join(",")})`);
 }
 // The start menu has no Drift Lab W / C entry any more.
 await freeDrive();

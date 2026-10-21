@@ -126,6 +126,19 @@ impl RideTune {
         }
     }
 
+    /// The owner's ride (lead / owner, 2026-10-21: "drives better in handling reference with
+    /// springs and ARBs cranked all the way up"): [`RideTune::medium_weight`] with the springs
+    /// and anti-roll bars × 1.5 (that build's slider maximums), the medium-weight dampers kept
+    /// (× 1.6 / 2.1; [`RideTune::firm`] also raises them to × 2.4 / 3.2). The shipped ride
+    /// (`crate::lab_scope`).
+    pub fn owner() -> Self {
+        Self {
+            spring: 1.5,
+            arb: 1.5,
+            ..Self::medium_weight()
+        }
+    }
+
     /// "Firm" (owner, step 18: "when I turned springs and bars up it feels better under grip
     /// cornering … even better at 1.5 and 1.5"; grip-balance step 20): W's medium weight with
     /// springs and anti-roll bars × 1.5 and dampers × 1.5 on top of its 1.6 / 2.1 (bump 2.4,

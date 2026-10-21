@@ -1,7 +1,7 @@
 // The hidden handling tune panel (F7, ?tune=1, or ?drift=w for the test pad). Unify (lead,
-// 2026-10-21): Drift Lab W's step-23 handling is the game's handling now (wp_vehicle::lab_scope:
-// spin-model tyres, firm ride and the grip balance on every car; the plain keyboard steering on
-// player cars). This panel only sets debug overrides on top, saved per viewer; "defaults" and
+// 2026-10-21): the Drift Lab W handling is the game's handling now, at the owner's preferred
+// combo (wp_vehicle::lab_scope: the 7d6b66c9 spin-model tyres, medium ride with springs / bars
+// × 1.5 and the step-14 balance on every car; the plain keyboard steering on player cars). This panel only sets debug overrides on top, saved per viewer; "defaults" and
 // empty saves mean the shipped handling. The test pad (?drift=w) keeps Drift Lab W's course,
 // reference-parity cars and the owner's reference assists.
 //
@@ -111,8 +111,8 @@ const STORE = "wp.tune.steer.v1";
 // older saved "tyre data" must not override it.
 const CAR_STORE = "wp.tune.car.v1";
 // TCS / ABS levels (round12 Off / Half / Full). The old "1" / "0" TCS checkbox value still reads.
-const TCS_STORE = "wp.driftLabW.tcs";
-const ABS_STORE = "wp.driftLabW.abs";
+const TCS_STORE = "wp.tune.tcs.v1";
+const ABS_STORE = "wp.tune.abs.v1";
 // Handbrake pivot aid knobs (round12 row 109: `hb_pivot_accel` / `hb_pivot_cap` of the drift tuning).
 const PIVOT_STORE = "wp.tune.pivot.v1";
 const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit: string; hint: string }> = {
@@ -461,7 +461,7 @@ export class DriftLabWPanel {
       ab.appendChild(lbl);
       for (const [label, id, margin, ride] of [
         ["before", "drift-lab-w-before", 0, "lab"],
-        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "firm"],
+        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "shipped"],
       ] as const) {
         const b = document.createElement("button");
         b.id = id;
@@ -469,7 +469,7 @@ export class DriftLabWPanel {
         b.title =
           label === "before"
             ? "steps 1–9: no countersteer limit (lifting off with the counter key held snaps the car back and can spin it), step-3 lab ride"
-            : "default: countersteer limit 0.25° past the travel (progressive recovery) + the firm ride (step 20: springs / bars × 1.5, slow weight transfer through the dampers)";
+            : "default: countersteer limit 0.25° past the travel (progressive recovery) + the shipped ride (the owner's: medium weight, springs / bars × 1.5)";
         b.onclick = () => {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_margin_deg: margin });
           const text = JSON.stringify(this.sim.rideTuneDefaults()[ride]);
@@ -609,7 +609,7 @@ export class DriftLabWPanel {
     // Suspension (ride tuning override, wp_vehicle::ride_lab).
     {
       const h = document.createElement("div");
-      h.textContent = "suspension (lab override; × the car data)";
+      h.textContent = "suspension (× the car data; yellow = differs from the shipped ride)";
       h.style.cssText = "margin:8px 0 2px;color:#9cf";
       this.body.appendChild(h);
       const rd = this.sim.rideTuneDefaults();
@@ -624,7 +624,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - rd.firm[key]) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - rd.shipped[key]) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -659,11 +659,13 @@ export class DriftLabWPanel {
         };
         row("keep ride height", "raise the spring preload so softer springs keep the data's static ride height (off the bump stops)", input, document.createElement("span"));
       }
-      for (const [label, which] of [["firm (new)", "firm"], ["medium weight (step 10)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
+      for (const [label, which] of [["owner (shipped)", "shipped"], ["firm (step 20)", "firm"], ["medium weight (step 10)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
         b.title =
-          which === "firm"
+          which === "shipped"
+            ? "the shipped ride (owner, 2026-10-21: \"drives better with springs and ARBs cranked all the way up\"): medium weight with springs / bars × 1.5, the medium dampers (1.6 / 2.1). Restarts the car"
+            : which === "firm"
             ? "step 20 default (owner: springs and bars up feel better in grip cornering): medium weight with springs / bars × 1.5 and dampers × 1.5 (2.4 / 3.2); soft bars let a lift while steering step the rear out. Restarts the car"
             : which === "medium_weight"
             ? "step 10 default: slower weight transfer that keeps the held drift (springs 0.7, bars 0.15, dampers 1.6 / 2.1, ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6). Restarts the car"
@@ -714,7 +716,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - Number(cd.data[key])) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - Number(cd.shipped[key] ?? cd.data[key])) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -743,7 +745,8 @@ export class DriftLabWPanel {
       for (const [label, which, hint] of [
         ["tyre data", "data", "no change: the car and tyre files as they are"],
         ["spin grip + damper (test)", "spin_damper", "step-4 test set (side grip under spin 0.15, lock 0.9, yaw damping 0.2; the damper is not physical). It does NOT hold the drift: the car swings through to the other side"],
-        ["spin model", "spin", "tyre-slip spin model on the rears, no damper (holds ~41–44° on the lab's standard entry; tuned to a knife edge)"],
+        ["spin model (shipped)", "shipped", "the shipped tyres: the owner's 7d6b66c9 spin model on the rears (b0 7.5)"],
+        ["spin model B", "spin", "tyre-slip candidate B (b0 8.45, b2 1.86, c 0.91, p 5, rear relax × 1.26, rear peak × 1.04): held drifts equal or slightly better on the owner's combo, about one more lift-off step-out per car"],
         ["spin + drift lock", "spin_lock", "tyre-slip step 3: spin model + 50 % less counter-lock past 20° of slip + front deep-slip falloff (holds 15 / 27 entries, as a slow 27–54° swing)"],
       ] as const) {
         const b = document.createElement("button");
@@ -788,14 +791,14 @@ export class DriftLabWPanel {
           /* ignore */
         }
       };
-      const isNew = sameGrip(gt, gd.new);
+      const isNew = sameGrip(gt, gd.shipped);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.grip) ? "grip (test)" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
+      ab.textContent = `balance: ${isNew ? "shipped" : sameGrip(gt, gd.owner_ref) ? "owner ref" : sameGrip(gt, gd.new) ? "step 20" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.grip) ? "grip (test)" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
       ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + RWD rear near the data (× 0.9, flatter past the peak: no step-out on a lift while steering, over-rotations catchable) + rear downforce + held-key slide lock (step 20)";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
-        saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
+        saveGrip(sameGrip(this.sim.gripBalance(), gd.shipped) ? gd.before : gd.shipped);
         this.build();
       };
       const step14 = document.createElement("button");
@@ -909,7 +912,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number((Number(input.value) * (f.scale ?? 1)).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - Number(gd.new[key])) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - Number(gd.shipped[key])) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -941,22 +944,74 @@ export class DriftLabWPanel {
     const actions = document.createElement("div");
     actions.style.cssText = "display:flex;gap:6px;margin-top:6px";
     const reset = document.createElement("button");
-    reset.textContent = "defaults";
+    reset.textContent = "steering defaults";
+    reset.title = "the steering sliders back to the shipped steering (the rest unchanged)";
     reset.onclick = () => {
       try {
         localStorage.removeItem(STORE);
       } catch {
         /* ignore */
       }
-      this.sim.plainSteerSet(JSON.stringify(defaults));
+      this.sim.plainSteerSet("");
       this.build();
     };
+    const resetAll = document.createElement("button");
+    resetAll.id = "drift-lab-w-reset-all";
+    resetAll.textContent = "reset all to defaults";
+    resetAll.title = "every tune value back to the shipped handling: steering, suspension, tyres, balance, handbrake pivot, the pad's TCS / ABS; the A/B switches off. Restarts the car";
+    resetAll.onclick = () => {
+      try {
+        for (const k of Object.keys(localStorage)) if (k.startsWith("wp.tune.")) localStorage.removeItem(k);
+      } catch {
+        /* ignore */
+      }
+      this.sim.labScopeSetLegacy(false);
+      this.sim.labScopeSetPlainOff(false);
+      this.applyOverrides();
+      this.applyAssists();
+      if (this.active) this.restart(this.car);
+      else this.build();
+    };
     const copy = document.createElement("button");
-    copy.textContent = "copy JSON";
-    copy.title = "copy the steering + suspension constants (paste them into the owner's notes)";
-    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify({ steer: this.sim.plainSteer(), ride: this.sim.rideTune(), car: this.sim.carTune(), grip: this.sim.gripBalance() }, null, 1));
-    actions.append(reset, copy);
+    copy.id = "drift-lab-w-copy";
+    copy.textContent = "copy tune JSON";
+    copy.title = "copy everything in effect (steering, suspension, tyres, balance, drift / pivot tuning, A/B switches, the car and its assists, the saved overrides) — paste it into a bug report";
+    copy.onclick = () => void navigator.clipboard?.writeText(this.tuneJson());
+    actions.append(reset, resetAll, copy);
     this.body.appendChild(actions);
+  }
+
+  /** Everything in effect, as JSON (the "copy tune JSON" button; e2e reads it too). */
+  tuneJson(): string {
+    const saved: Record<string, string | null> = {};
+    try {
+      for (const k of Object.keys(localStorage)) if (k.startsWith("wp.tune.")) saved[k] = localStorage.getItem(k);
+    } catch {
+      /* storage blocked */
+    }
+    let assists: unknown = null;
+    try {
+      assists = this.sim.assists(this.player());
+    } catch {
+      /* no player */
+    }
+    return JSON.stringify(
+      {
+        car: this.car,
+        pad: this.active,
+        legacy: this.sim.labScopeLegacy(),
+        plain_off: this.sim.labScopePlainOff(),
+        steer: this.sim.plainSteer(),
+        ride: this.sim.rideTune(),
+        tyres: this.sim.carTune(),
+        grip: this.sim.gripBalance(),
+        drift: this.sim.driftTuning(),
+        assists,
+        saved,
+      },
+      null,
+      1,
+    );
   }
 
   /** The lock-vs-speed line under the sliders. */

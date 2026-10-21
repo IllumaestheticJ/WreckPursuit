@@ -283,9 +283,9 @@ export const sim = {
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
   /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
-  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number>; firm: Record<string, number> } =>
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number>; firm: Record<string, number>; owner: Record<string, number>; shipped: Record<string, number> } =>
     JSON.parse(wasm.ride_tune_defaults_json()),
-  /** Set the ride tuning ("" = car data as is). */
+  /** Set the ride tuning override ("" = the shipped ride). */
   rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
   /** [roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]. */
   rideReadout: (entity: number): Float32Array => wasm.ride_readout(entity),
@@ -300,9 +300,11 @@ export const sim = {
     transition_plain: Record<string, number>;
     spin_v2: Record<string, number | boolean>;
     spin_v2_plain: Record<string, number>;
+    step22: Record<string, number | boolean>;
+    shipped: Record<string, number | boolean>;
   } =>
     JSON.parse(wasm.car_tune_defaults_json()),
-  /** Set the car / tyre experiments ("" = the data). */
+  /** Set the car / tyre override ("" = the shipped tyres). */
   carTuneSet: (json: string): void => wasm.car_tune_set(json),
   /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
   gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
@@ -315,9 +317,11 @@ export const sim = {
     slow_weight: Record<string, number | boolean | string>;
     drift_best: Record<string, number | boolean | string>;
     lock_only: Record<string, number | boolean | string>;
+    shipped: Record<string, number | boolean | string>;
+    owner_ref: Record<string, number | boolean | string>;
   } =>
     JSON.parse(wasm.grip_balance_defaults_json()),
-  /** Set the grip-balance lab ("" = the data). */
+  /** Set the grip-balance override ("" = the shipped balance). */
   gripBalanceSet: (json: string): void => wasm.grip_balance_set(json),
   /** Drift Lab W reference-parity test cars (not in carIds()). */
   parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),

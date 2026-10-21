@@ -291,12 +291,51 @@ impl GripBalance {
         }
     }
 
-    /// The shipped balance (unify, 2026-10-21): [`GripBalance::lab_default`]. Its car fixes
-    /// (`car_fixes` off there now) live in `data/cars` (debug_coupe bars × 0.5; lucciola_350 rear
-    /// springs × 0.65 with the ride height kept, yaw inertia × 1.2). Every vehicle
-    /// (`crate::lab_scope`).
+    /// The owner's balance (lead / owner, 2026-10-21): the step-14 balance as the owner drove
+    /// it on lead/grip-balance 7d6b66c9 — smart lock, RWD front cornering stiffness × 0.6 / rear
+    /// × 0.45, rear downforce C·A 0.8, the probe tilt fix; no FWD rear knobs — plus the later
+    /// steering-only parts: the held-key slide lock (the countersteer key held past 15° of slip
+    /// gets × 0.5 lock; not while the slide grows) and its transition release (only out of a
+    /// slide past 10°). The shipped balance ([`GripBalance::shipped`]).
+    pub fn owner() -> Self {
+        Self {
+            lock_mode: LockMode::Smart,
+            smart_ay_g: 0.7,
+            smart_margin: -0.3,
+            smart_margin_hi: 0.3,
+            smart_slide_from_deg: 8.0,
+            smart_slide_full_deg: 15.0,
+            front_stiffness: 0.6,
+            rear_stiffness: 0.45,
+            tyres_rwd_only: true,
+            rear_downforce: 0.8,
+            probe_tilt_fix: true,
+            slide_lock: 0.5,
+            slide_lock_from_deg: 15.0,
+            slide_lock_after_s: 0.5,
+            slide_lock_growth_dps: 15.0,
+            slide_lock_to_deg: 40.0,
+            slide_lock_release_s: 0.75,
+            slide_lock_release_from_deg: 10.0,
+            ..Self::default()
+        }
+    }
+
+    /// The owner's 7d6b66c9 balance exactly ([`GripBalance::owner`] without the held-key slide
+    /// lock), the reference the shipped balance is measured against.
+    pub fn owner_reference() -> Self {
+        Self {
+            slide_lock: 1.0,
+            slide_lock_release_s: 0.0,
+            ..Self::owner()
+        }
+    }
+
+    /// The shipped balance (unify, 2026-10-21): [`GripBalance::owner`] on every car
+    /// (`crate::lab_scope`). The per-car fixes live in `data/cars` (debug_coupe bars × 0.5;
+    /// lucciola_350 rear springs × 0.65 with the ride height kept, yaw inertia × 1.2).
     pub fn shipped() -> Self {
-        Self::lab_default()
+        Self::owner()
     }
 
     /// The step-14 … step-19 "new" (one click away, "balance: step 14"): the smart lock, RWD

@@ -1261,6 +1261,31 @@ impl Vehicle {
         // throttle to engage first, `wp_world::manoeuvre::Crawl`).
         let hb_keep_gear = hb_declutch && v_fwd.abs() > HB_KEEP_GEAR_MPS;
         if assists.auto_gears && !hb_keep_gear {
+            // Sliding (the box holds its gear): body slip, or a driven wheel in contact
+            // spinning past its tyre's peak slip ratio (last tick).
+            let spinning = (0..4).any(|i| {
+                base_split[i] > 0.0
+                    && self.wheels[i].contact
+                    && self.wheels[i].kappa.abs()
+                        > crate::drivetrain::schedule::SLIDE_HOLD_SPIN
+                            * self.corners[i].tire.peak_slip_ratio
+            });
+            let sliding = spinning
+                || body_slip(v_fwd, v_left).abs().to_degrees()
+                    > crate::drivetrain::schedule::SLIDE_HOLD_DEG;
+            let road_axle_omega = {
+                let sum: f32 = base_split.iter().sum();
+                if sum > 0.0 {
+                    (0..4)
+                        .map(|i| {
+                            base_split[i] * self.wheels[i].vx / self.corners[i].radius.max(0.05)
+                        })
+                        .sum::<f32>()
+                        / sum
+                } else {
+                    0.0
+                }
+            };
             let inputs = ShiftInputs {
                 redline_rpm: self.def.engine.redline_rpm,
                 axle_omega,
@@ -1269,6 +1294,8 @@ impl Vehicle {
                 speed: v_fwd,
                 max_gear,
                 lateral_usage: self.lateral_usage(),
+                sliding,
+                road_axle_omega,
             };
             self.gearbox.auto_shift(&self.def.drivetrain, &inputs, dt);
         } else if !assists.auto_gears {
