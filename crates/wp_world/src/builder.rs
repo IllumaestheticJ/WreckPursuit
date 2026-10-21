@@ -300,6 +300,7 @@ impl Built {
             buildings,
             surfaces: self.surfaces,
             terrain: None,
+            features: CityFeatures::default(),
         }
     }
 }

@@ -19,7 +19,9 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
 /// v2 (city v2): road surfaces, terrain heightfield, building base heights.
 /// v3: `RoadSurface::median_barrier` (divided highways).
-pub const ROAD_FORMAT_VERSION: u32 = 3;
+/// v4: [`RoadNetwork::features`] (waterways, bridges, tunnels, structures, landmarks,
+/// hideouts).
+pub const ROAD_FORMAT_VERSION: u32 = 4;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -68,6 +70,9 @@ pub struct RoadNetwork {
     pub surfaces: Vec<RoadSurface>,
     /// Ground heightfield between roads (`None` = flat ground at z = 0).
     pub terrain: Option<crate::terrain::Heightfield>,
+    /// Rivers, bridges, tunnels, landmarks and hiding spots (empty for the grid city and
+    /// imports).
+    pub features: CityFeatures,
 }
 
 /// The paved ribbon of one road between its two junction setbacks.
@@ -332,6 +337,224 @@ impl Building {
     }
 }
 
+/// Water surface level of the sea (and of every waterway at its mouth), m. Terrain below it
+/// is seabed.
+pub const SEA_LEVEL_M: f32 = 0.25;
+
+/// Everything about a city beyond roads, zones and plain buildings: water, named bridges,
+/// tunnels, landmark structures and the places a racer can hide from the police.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CityFeatures {
+    /// Rivers and canals.
+    pub waterways: Vec<Waterway>,
+    /// Named road bridges over water.
+    pub bridges: Vec<Bridge>,
+    /// Road tunnels.
+    pub tunnels: Vec<Tunnel>,
+    /// Solid prisms that are not ordinary buildings: tunnel linings and portals, canopies
+    /// and their pillars, landmark parts, bridge trusses. They collide, render and block line
+    /// of sight like buildings, but may float (`z0_m` above the ground).
+    pub structures: Vec<Structure>,
+    /// Named landmarks (orientation points for players and the minimap).
+    pub landmarks: Vec<Landmark>,
+    /// Places where a car is hidden from the air (tunnels, canopies).
+    pub hideouts: Vec<Hideout>,
+}
+
+/// Kind of waterway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum WaterwayKind {
+    /// A natural river (water surface falls towards the mouth).
+    River,
+    /// A level canal (water surface at sea level).
+    Canal,
+}
+
+/// A river or canal: a water ribbon over a channel carved into the terrain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Waterway {
+    /// Display name.
+    pub name: String,
+    /// River or canal.
+    pub kind: WaterwayKind,
+    /// Centreline from source to mouth; `z` is the water surface, m.
+    pub centre: Vec<[f32; 3]>,
+    /// Half width of the water surface per centreline point, m.
+    pub half_width_m: Vec<f32>,
+    /// Water depth in the middle of the channel, m.
+    pub depth_m: f32,
+}
+
+/// Kind of bridge (looks and deck surface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum BridgeKind {
+    /// Concrete beam bridge (road surface on the deck).
+    Beam,
+    /// Steel truss with a steel-grate deck (`SurfaceType::Metal`).
+    Truss,
+    /// Long highway viaduct.
+    Viaduct,
+}
+
+/// A named bridge: the deck stretch of one road surface over water.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bridge {
+    /// Display name.
+    pub name: String,
+    /// Kind.
+    pub kind: BridgeKind,
+    /// Index into [`RoadNetwork::surfaces`].
+    pub surface: u32,
+    /// Deck centreline (on the road surface), m.
+    pub centre: Vec<[f32; 3]>,
+    /// Half width of the deck (widest paved side), m.
+    pub half_width_m: f32,
+}
+
+/// A road tunnel bore: a box of `2 * half_width_m` by `height_m` along `centre`, under the
+/// terrain. Terrain over it is natural ground; inside, the ground does not block line of
+/// sight.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tunnel {
+    /// Display name.
+    pub name: String,
+    /// Floor centreline (road height at the centre), portal to portal, m.
+    pub centre: Vec<[f32; 3]>,
+    /// Cross slope of the floor per centreline point (dz per metre to the right).
+    pub bank: Vec<f32>,
+    /// Half width between the lining walls, m.
+    pub half_width_m: f32,
+    /// Clear height from the floor to the ceiling, m.
+    pub height_m: f32,
+}
+
+impl Tunnel {
+    /// Total length, m.
+    pub fn length_m(&self) -> f32 {
+        let c = crate::geom::cumulative(&self.centre);
+        c[c.len() - 1]
+    }
+
+    /// Whether `p` is inside the bore (between the walls, with 0.5 m slack, the floor and
+    /// the ceiling).
+    pub fn contains(&self, p: [f32; 3]) -> bool {
+        use crate::geom;
+        let q = geom::xy(p);
+        let r = self.half_width_m + self.height_m;
+        let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+        for c in &self.centre {
+            lo = [lo[0].min(c[0]), lo[1].min(c[1])];
+            hi = [hi[0].max(c[0]), hi[1].max(c[1])];
+        }
+        if q[0] < lo[0] - r || q[0] > hi[0] + r || q[1] < lo[1] - r || q[1] > hi[1] + r {
+            return false;
+        }
+        let cum = geom::cumulative(&self.centre);
+        let pr = geom::project(&self.centre, &cum, q);
+        if pr.s < 0.0 || pr.s > cum[cum.len() - 1] || pr.lateral.abs() > self.half_width_m + 0.5 {
+            return false;
+        }
+        let n = self.centre.len();
+        let i = cum.partition_point(|x| *x <= pr.s).clamp(1, n - 1);
+        let f = ((pr.s - cum[i - 1]) / (cum[i] - cum[i - 1]).max(1e-6)).clamp(0.0, 1.0);
+        let z = self.centre[i - 1][2] + (self.centre[i][2] - self.centre[i - 1][2]) * f;
+        let bank = self.bank[i - 1] + (self.bank[i] - self.bank[i - 1]) * f;
+        let floor = z + bank * pr.lateral;
+        p[2] >= floor - 0.5 && p[2] <= floor + self.height_m
+    }
+}
+
+/// What a [`Structure`] is (render material and diagnostics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum StructureKind {
+    /// Tunnel lining wall.
+    TunnelWall,
+    /// Tunnel ceiling slab.
+    TunnelCeiling,
+    /// Tunnel portal block (walls and roof at the mouth).
+    TunnelPortal,
+    /// Roof slab of a canopy you can drive under.
+    Canopy,
+    /// Pillar holding up a canopy.
+    Pillar,
+    /// Part of a landmark.
+    Landmark,
+    /// Steel truss member over a bridge deck.
+    Truss,
+}
+
+/// A solid vertical prism from `z0_m` to `z1_m` over a convex footprint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Structure {
+    /// What it is.
+    pub kind: StructureKind,
+    /// Convex footprint (counter-clockwise), m.
+    pub footprint: Vec<[f32; 2]>,
+    /// Bottom height, m.
+    pub z0_m: f32,
+    /// Top height, m.
+    pub z1_m: f32,
+}
+
+/// Kind of landmark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum LandmarkKind {
+    /// The tallest tower downtown.
+    Tower,
+    /// Lighthouse on the coast.
+    Lighthouse,
+    /// Observatory dome.
+    Observatory,
+    /// Industrial chimney.
+    Chimney,
+    /// Ship-to-shore container crane.
+    Crane,
+    /// Water tower.
+    WaterTower,
+    /// A named bridge with a distinctive structure.
+    Bridge,
+    /// A named tunnel.
+    Tunnel,
+}
+
+/// A named landmark.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Landmark {
+    /// Display name.
+    pub name: String,
+    /// Kind.
+    pub kind: LandmarkKind,
+    /// Base centre, m.
+    pub pos: [f32; 3],
+    /// Height above `pos`, m.
+    pub height_m: f32,
+    /// Its parts in [`CityFeatures::structures`] (may be empty for bridges and tunnels).
+    pub structures: Vec<u32>,
+}
+
+/// Kind of hiding spot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum HideoutKind {
+    /// Inside a road tunnel.
+    Tunnel,
+    /// Under a canopy (open sides: ground units still see in from close by).
+    Canopy,
+}
+
+/// A place where a car is out of sight from the air (`WorldQuery::line_of_sight` from above
+/// is blocked anywhere within `radius_m` of `pos` at ground level, under the cover).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Hideout {
+    /// Display name.
+    pub name: String,
+    /// Kind.
+    pub kind: HideoutKind,
+    /// Centre at ground level, m.
+    pub pos: [f32; 3],
+    /// Rough radius of the covered area, m.
+    pub radius_m: f32,
+}
+
 /// Errors loading or validating a road network.
 #[derive(Debug, Error)]
 pub enum RoadError {
@@ -507,6 +730,35 @@ impl RoadNetwork {
         for (i, s) in self.surfaces.iter().enumerate() {
             if s.centre.len() < 2 || s.bank.len() != s.centre.len() {
                 return bad(format!("surface {i}: bad centreline / bank"));
+            }
+        }
+        let f = &self.features;
+        for (i, w) in f.waterways.iter().enumerate() {
+            if w.centre.len() < 2 || w.half_width_m.len() != w.centre.len() {
+                return bad(format!("waterway {i}: bad centreline / widths"));
+            }
+        }
+        for (i, b) in f.bridges.iter().enumerate() {
+            if b.centre.len() < 2 || b.surface as usize >= self.surfaces.len() {
+                return bad(format!("bridge {i}: bad centreline / surface"));
+            }
+        }
+        for (i, t) in f.tunnels.iter().enumerate() {
+            if t.centre.len() < 2 || t.bank.len() != t.centre.len() || t.height_m <= 0.0 {
+                return bad(format!("tunnel {i}: bad centreline / size"));
+            }
+        }
+        for (i, s) in f.structures.iter().enumerate() {
+            if s.footprint.len() < 3 || s.z1_m <= s.z0_m {
+                return bad(format!("structure {i}: bad footprint / heights"));
+            }
+        }
+        for (i, l) in f.landmarks.iter().enumerate() {
+            if l.structures
+                .iter()
+                .any(|s| *s as usize >= f.structures.len())
+            {
+                return bad(format!("landmark {i}: structure out of range"));
             }
         }
         if let Some(t) = &self.terrain {

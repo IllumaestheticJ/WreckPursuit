@@ -188,6 +188,7 @@ pub struct CityMap {
     ix_grid: Grid,
     zone_grid: Grid,
     building_grid: Grid,
+    structure_grid: Grid,
 }
 
 impl CityMap {
@@ -373,6 +374,11 @@ impl CityMap {
             let (blo, bhi) = bbox2(&b.footprint);
             building_grid.insert_box(blo, bhi, i as u32);
         }
+        let mut structure_grid = Grid::new(lo, hi);
+        for (i, st) in net.features.structures.iter().enumerate() {
+            let (blo, bhi) = bbox2(&st.footprint);
+            structure_grid.insert_box(blo, bhi, i as u32);
+        }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
             net,
@@ -384,6 +390,7 @@ impl CityMap {
             ix_grid,
             zone_grid,
             building_grid,
+            structure_grid,
         };
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
@@ -508,6 +515,8 @@ impl CityMap {
 
     /// Drivable surface height at `p`: the lane or junction connector under it (the one
     /// closest to `near_z` when given, else the lowest — grade separation), else the terrain.
+    /// Given `near_z`, the terrain wins when it is more than 1 m closer to it than the road
+    /// (hillside over a tunnel, ground under a deck).
     pub fn ground_height(&self, p: V2, near_z: Option<f32>) -> f32 {
         let mut best: Option<f32> = None;
         let score = |z: f32| near_z.map_or(z, |h| (z - h).abs());
@@ -528,7 +537,62 @@ impl CityMap {
                 best = Some(z);
             }
         }
+        // With a reference height, the terrain competes too (a hillside over a tunnel, the
+        // ground under a bridge deck).
+        if let (Some(b), Some(_), Some(_)) = (best, near_z, &self.net.terrain) {
+            let z = self.net.ground_z(p);
+            if score(z) < score(b) - 1.0 {
+                best = Some(z);
+            }
+        }
         best.unwrap_or_else(|| self.net.ground_z(p))
+    }
+
+    /// Whether `p` is on the steel-grate deck of a truss bridge (within 1.5 m of its height).
+    pub fn on_steel_deck(&self, p: V3) -> bool {
+        use crate::network::BridgeKind;
+        let q = geom::xy(p);
+        self.net
+            .features
+            .bridges
+            .iter()
+            .filter(|b| b.kind == BridgeKind::Truss)
+            .any(|b| {
+                let cum = geom::cumulative(&b.centre);
+                let pr = geom::project(&b.centre, &cum, q);
+                let len = cum[cum.len() - 1];
+                if pr.s < 0.0 || pr.s > len || pr.dist > b.half_width_m {
+                    return false;
+                }
+                let (c, _) = geom::point_at(&b.centre, &cum, pr.s);
+                (c[2] - p[2]).abs() < 1.5
+            })
+    }
+
+    /// Whether `p` is inside a tunnel bore.
+    pub fn in_tunnel(&self, p: V3) -> bool {
+        self.net.features.tunnels.iter().any(|t| t.contains(p))
+    }
+
+    /// Water surface height over `p` (a waterway, or the sea where the ground is below
+    /// [`crate::network::SEA_LEVEL_M`]); `None` on dry land.
+    pub fn water_surface_at(&self, p: V2) -> Option<f32> {
+        for w in &self.net.features.waterways {
+            let cum = geom::cumulative(&w.centre);
+            let pr = geom::project(&w.centre, &cum, p);
+            let n = w.centre.len();
+            if pr.s < 0.0 || pr.s > cum[n - 1] {
+                continue;
+            }
+            let i = cum.partition_point(|x| *x <= pr.s).clamp(1, n - 1);
+            let f = ((pr.s - cum[i - 1]) / (cum[i] - cum[i - 1]).max(1e-6)).clamp(0.0, 1.0);
+            let half = w.half_width_m[i - 1] + (w.half_width_m[i] - w.half_width_m[i - 1]) * f;
+            if pr.dist <= half {
+                return Some(w.centre[i - 1][2] + (w.centre[i][2] - w.centre[i - 1][2]) * f);
+            }
+        }
+        let sea = crate::network::SEA_LEVEL_M;
+        (self.net.terrain.is_some() && self.net.ground_z(p) < sea).then_some(sea)
     }
 
     /// Zone district kind at `p`.
@@ -663,6 +727,11 @@ fn bbox2(poly: &[V2]) -> (V2, V2) {
 /// The segment's XY span inside the footprint is `[t_in, t_out]`; since its height is linear
 /// in `t`, it is below the roof somewhere in that span iff it is at one of the two ends.
 fn segment_hits_building(a: V3, b: V3, fp: &[V2], height: f32) -> bool {
+    segment_hits_prism(a, b, fp, f32::NEG_INFINITY, height)
+}
+
+/// Whether segment `a`→`b` passes through the prism over `fp` between heights `z0` and `z1`.
+fn segment_hits_prism(a: V3, b: V3, fp: &[V2], z0: f32, z1: f32) -> bool {
     let (pa, pb) = (geom::xy(a), geom::xy(b));
     let d = geom::sub(pb, pa);
     let mut t_in = f32::INFINITY;
@@ -695,7 +764,7 @@ fn segment_hits_building(a: V3, b: V3, fp: &[V2], height: f32) -> bool {
         return false;
     }
     let z = |t: f32| a[2] + (b[2] - a[2]) * t;
-    z(t_in).min(z(t_out)) < height
+    z(t_in).min(z(t_out)) < z1 && z(t_in).max(z(t_out)) > z0
 }
 
 impl CityMap {
@@ -703,7 +772,9 @@ impl CityMap {
     /// Buildings are extruded footprints from the ground to their height; the segment is
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
-    /// every 8 m; ends excluded). Roads, parked cars and traffic do not occlude.
+    /// every 8 m; ends excluded), except inside tunnel bores. Structures (tunnel linings,
+    /// canopies, landmarks) occlude between their bottom and top. Roads, parked cars and
+    /// traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
         if let Some(t) = &self.net.terrain {
             let len = geom::dist(geom::xy(a), geom::xy(b));
@@ -711,15 +782,34 @@ impl CityMap {
             for k in 1..n {
                 let f = k as f32 / n as f32;
                 let p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
-                if a[2] + (b[2] - a[2]) * f < t.height_at(p) - 0.2 {
+                let z = a[2] + (b[2] - a[2]) * f;
+                if z < t.height_at(p) - 0.2 && !self.in_tunnel([p[0], p[1], z]) {
                     return false;
                 }
             }
         }
+        let mut cells = Vec::new();
+        if !self.net.features.structures.is_empty() {
+            self.structure_grid
+                .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
+            let mut cands: Vec<u32> = cells
+                .iter()
+                .flat_map(|c| self.structure_grid.cells[*c].iter().copied())
+                .collect();
+            cands.sort_unstable();
+            cands.dedup();
+            let hit = cands.iter().any(|&i| {
+                let st = &self.net.features.structures[i as usize];
+                segment_hits_prism(a, b, &st.footprint, st.z0_m, st.z1_m)
+            });
+            if hit {
+                return false;
+            }
+            cells.clear();
+        }
         if self.net.buildings.is_empty() {
             return true;
         }
-        let mut cells = Vec::new();
         self.building_grid
             .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
         let mut cands: Vec<u32> = cells
@@ -739,6 +829,9 @@ impl WorldQuery for CityMap {
     fn surface_at(&self, p: [f32; 3]) -> SurfaceType {
         if self.net.lanes.is_empty() {
             return SurfaceType::Asphalt;
+        }
+        if self.on_steel_deck(p) {
+            return SurfaceType::Metal;
         }
         if crate::markings::painted_at(self, p) {
             return SurfaceType::PaintedLine;

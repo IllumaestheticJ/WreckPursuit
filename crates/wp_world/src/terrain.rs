@@ -29,6 +29,10 @@ pub struct Heightfield {
     pub ny: u32,
     /// Heights, row-major (`j * nx + i`), m.
     pub z: Vec<f32>,
+    /// Removed cells, ascending (cell `(i, j)` spans vertices `i..=i+1`, `j..=j+1`; id
+    /// `j * (nx - 1) + i`). Physics and the greybox leave them out; something else (tunnel
+    /// portals) covers them. Heights there still answer [`Heightfield::height_at`].
+    pub holes: Vec<u32>,
 }
 
 impl Heightfield {
@@ -42,7 +46,18 @@ impl Heightfield {
             nx,
             ny,
             z: vec![z0; (nx * ny) as usize],
+            holes: Vec::new(),
         }
+    }
+
+    /// Id of cell `(i, j)` (see [`Heightfield::holes`]).
+    pub fn cell_id(&self, i: u32, j: u32) -> u32 {
+        j * (self.nx - 1) + i
+    }
+
+    /// Whether cell `(i, j)` is removed.
+    pub fn is_hole(&self, i: u32, j: u32) -> bool {
+        self.holes.binary_search(&self.cell_id(i, j)).is_ok()
     }
 
     /// World position of vertex `(i, j)`.
