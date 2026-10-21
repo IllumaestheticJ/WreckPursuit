@@ -64,6 +64,8 @@ import { CrashFx } from "./render/fx";
 import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
 import { DriftLab } from "./drift_lab";
+import { mountTuneRow, withQuickTune } from "./tune_panel";
+import { quickTune } from "../../ui-kit/src/garage/tune";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -296,6 +298,7 @@ async function main(): Promise<void> {
     setActive: (uid) => act(() => sim.careerSetActive(uid)),
     install: (uid, id) => act(() => sim.careerInstall(uid, id)),
     uninstall: (uid, id) => act(() => sim.careerUninstall(uid, id)),
+    setTune: (uid, tune) => act(() => sim.careerSetTune(uid, tune)),
     repair: (uid, req) => act(() => sim.careerRepair(uid, req)),
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
@@ -455,7 +458,7 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.raceStart(id, car, mode, autopilot);
+    sim.raceStart(id, car, mode, autopilot, quickTune(car));
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
@@ -541,7 +544,7 @@ async function main(): Promise<void> {
     let json = city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false);
     // Optional start hour (automation: day/night screenshots).
     if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
-    sim.init(1, withWeather(json), false);
+    sim.init(1, withWeather(withQuickTune(json)), false);
     app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
@@ -560,7 +563,7 @@ async function main(): Promise<void> {
     app.result = null;
     app.bench = null;
     const json = rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value);
-    sim.init(0, withWeather(json), false);
+    sim.init(0, withWeather(withQuickTune(json)), false);
     rebuildViews();
     applyAssistPreset(app.source);
     // Back to the viewer's own angle (near chase unless they picked another one).
@@ -799,6 +802,7 @@ async function main(): Promise<void> {
   const carSel = $("car") as HTMLSelectElement;
   for (const id of sim.carIds()) carSel.add(new Option(id, id));
   carSel.onchange = () => startFreeDrive(carSel.value);
+  mountTuneRow($("tune-row"), carSel);
 
   const scSel = $("sc-select") as HTMLSelectElement;
   try {
