@@ -1,0 +1,43 @@
+# Branch triage (lead helper, 2026-10-21)
+
+Branch `lead/branch-triage`, from `origin/lead/round12` @ `4ab9703d`. Scope: the `origin/claude/*`
+branches whose commits never reached round12. Method per branch: `git cherry` against round12
+**and** origin/main (a commit whose patch is on main belongs to `lead/main-sync`), a diff by file
+and reading the code where both sides touched the same thing; last push time (< 20 min before
+05:00 UTC = maybe still active, left alone). Merges resolve conflicts keeping round12's behaviour.
+
+`lead/*` and `ws/*` branches are out of scope (lead / workstream branches with their own owners).
+
+## Summary
+
+| Branch | Status | Why / where |
+|---|---|---|
+| `adoring-meitner-dnlwbb` | **dropped (duplicate)** | Marten 2.0 / Brigand 400 / Talus 2.0T / Tumbril 2.0 are the same four archetypes (90s FF hot hatch, 70s US muscle sedan, 90s AWD rally saloon, 2000s FWD panel van) as compassionate-mccarthy's cars. Kept compassionate-mccarthy's set: same coverage (cars, lattices, panels, meshes, audio), and its validation exemption is a lattice flag instead of id / era special cases. adoring-meitner's extras (Brigand in `roster_prices.rs` KNOWN, pursuit-probe notes) belong to the dropped cars. |
+| `compassionate-mccarthy-o60ka7` | **merged** | Stoat 16V, Bulwark 400, Arashi T4, Satchel 2.0. Names pass `nameplate_check.py` and the analog rules. ROSTER / VALIDATION re-rendered with `specsheet.py` (round12's numbers for existing cars). |
+| `detailed-car-models` | **deferred (owned by its session; needs main first)** | Built on origin/main (merged main again 04:26, 13 of its commits are main's stat bars / pro driver), still moving (last push 04:28, pulls in loving-babbage's traffic styles). Too large to cherry-pick around main: mesh format 2 regenerates every car mesh, multi-model police / traffic touches wp_sim / wp_world / wp_wasm. **Naming:** `sentinel_harrier` / "Harrier" is a real production model name — rename before it lands (`data/cars/README.md`: no model names). When it lands, the four new cars merged here need their meshes regenerated in format 2. |
+| `fervent-cerf-ft2h9h` | **merged (adapted)** | Photo mode. F3 became the camera cycle (owner request 2026-10-21) → photo mode opens with **F7** / the photo button; gamepad Start is the pause menu → it no longer enters photo mode (Start / B / Esc / F7 still leave); game actions are skipped while photo mode is active; `layers.hide` sits next to round12's `layers.suppress`; audio ducking next to `setPaused`. Gap: photos bypass the low-poly art style's post pass. |
+| `hopeful-cray-0dtq2z` | see below | Helicopter. |
+| `dreamy-bohr-2lm4wv` | **superseded** | A parallel recorded-audio pipeline (`tools/audio-packs/build.py`). Round12 has its own (`data/audio/sources.json` + `LICENSES.md`, world_rec with 36 cues vs this branch's 28, engine_rec_*, siren_rec, radio_rec); merging would delete round12's. Only leftover: *recorded* turbo whistle (freesound 496171) and supercharger whine (freesound 529315) clips — round12 deliberately voices both with the synth ("no recording found"); a lead for the audio owner, not ported here. |
+| `serene-johnson-xfyckq` | see below | Tire squeal. |
+| `stoic-bohr-ecqmn5` | **already in** | All three commits are on round12 as e5ea6a37 (sirens sweep smoothly), 0f10b6fd (`?city=`), 19462ef4 (grass turf). |
+| `happy-lovelace-4e2oo8` | **merged** | Suspend audio while paused (`audio.setPaused(app.paused)` added to round12's frame loop). |
+| `trusting-mendel-ta85bb` | **merged** | New crate `wp_render` (own wgpu renderer spike, time of day) + testbed-native `gpu` feature. wgpu / pollster / png are optional behind `gpu`; wp_render is not reachable from wp_wasm. Adds a workspace member — lead to note it in the crate map. |
+| `funny-hypatia-wq2ojr` | **merged (Rust) / see below (testbed)** | Built on main; cherry-picked only its own commits (not main's stat bars): wp_economy `visuals`, simcli entity `mods`, wp_wasm mod-visual exports, docs. Stat-bar lines from main stripped from the conflicts (`data/stats` embedding, simcli → wp_vehicle). |
+| `festive-dijkstra-5rxjnw` | **owned elsewhere (lead/main-sync)** | Its grid-city viaduct + diamond ramps (aed96621, d91fb6f6) and Loop 9 highway (674efa72, e0b61729) are all on origin/main; nothing unique left. |
+| `awesome-faraday-epejyl` | **merged** | Wider race gates (min 26 m), off-course racers reset onto the route (published to the owner as the 0.12.25 race build). Docs: round12 and this branch both made a "0.12.25" and a playtest "row 120" from the same commit; both kept, this branch's row renumbered **126**. **Heads-up for main-sync:** main's 94ffb44c ("leaving the route is never a DQ", owner call) deletes the corridor clock this reset is built on, and this branch still DQs when reset is off (server races). Suggested resolution: keep the reset (driven by the corridor clock), drop the `LeftCorridor` DQ path. |
+| `serene-bohr-cey1t7` | **merged** | Race judge remembers every police id (retired-unit bump ≠ civilian hit), wp_net sends events missed while reconnecting, testbed allocation pass (the "WIP" commit is completed by the next one). |
+| `happy-knuth-g39ogc` | **split** | Siren yielding (1f98243f) **already in** (round12 reimplemented it as the `wp_world` siren module: yield phases, pull-over, oncoming / near, d230a5ef / 738d2b2b). Stuck-cop fixes (a5c0b5bb, 02181f6b, 5fdc619e) → **police session E**: they collide with round12's push-through / queue rule / wall feelers and with the unstick work in loving-wright / quirky-fermi that E is reviewing. Loop 9 freeway (e53ee2a6, e9c48a44) → **lead/main-sync** (main has festive-dijkstra's Loop 9 highway; one of the two). Turn signals (fcc9ea35) → **lead/parked-signals**. Bless d3c8c484 / playtest rows cf71fee3 go with those. |
+| `lucid-cori-8sjuzz` | **still active** | Pushed 04:48. a31de58a ≈ round12's b6dfc12d (solid terrain = drawn terrain); ec1b7f35 "drawn terrain follows the ground (no dips behind lots)" is new — left for its session. |
+| `optimistic-wozniak-13v80v` | owned elsewhere | Dentable parked cars → lead/parked-signals. |
+| `beautiful-bell-x1ijjj-stiff-ride` | superseded | lead/grip-balance (one-version merge). |
+| `beautiful-bell-x1ijjj` | owned elsewhere (police E) | Note: besides the pro driver (on main) it has **33e42c3a "data/tires: grass grip matches dirt"** + bless 0058db44 — a tyre change on no integration branch; for lead/grip-balance to decide. |
+| `optimistic-allen-qsfyuj`, `inspiring-hamilton-6096s9`, `loving-wright-6zjxx4`, `affectionate-knuth-3xlkwf`, `quirky-pasteur-qjldcq`, `dazzling-mayer-ovag76`, `beautiful-hopper-sfuta0` | owned elsewhere (police E) | quirky-pasteur is only main's pro-driver commits. beautiful-hopper was pushed 04:49 (active). |
+| `loving-babbage-c9mjmf`, `epic-keller-nck8h5` | owned elsewhere (lead/main-sync) | Only main's commits, except epic-keller's c941e3f0 (stat bars on the physics rig — stat-bar stream, goes with main). loving-babbage is also merged into detailed-car-models. |
+| `quirky-fermi-f4mvd2` | owned elsewhere (main-sync + police E) | Main's commits plus police work not on main: f9ebb4e0 (road graph centreline), 5b3a2de6 (terrain-aware sightlines, engage on witnessed violations, back out when pinned), 13a58aa4, bless 076cff6e, docs 3be54f00 → E. |
+| `upbeat-faraday-b7qcqe` | owned elsewhere (main-sync) | Main's commits plus **4a4efba1 "wp_vehicle: high-speed catches without snap oversteer"** + bless b9a81abe + docs 1fdc4750, on no integration branch (not on grip-balance either) — handling, for lead/grip-balance to decide. |
+| `charming-curie-3vttop`, `magical-goldberg-k0vjje` | **dropped (stale history)** | 2026-10-19, no common ancestor with round12 (pre-rewrite history of the whole project); their work reached round12 through earlier lead runs. |
+| `affectionate-faraday-2y99m2`, `keen-bardeen-ej8cc0`, `laughing-newton-0xqr6q`, `loving-tesla-bpkq1m` | already in | No commits outside round12. |
+
+## Gate
+
+(filled in below after each group)
