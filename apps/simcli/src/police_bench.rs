@@ -306,7 +306,8 @@ pub struct RunMetrics {
     pub police_police_crashes: u32,
     /// Police stuck events (`PoliceStats::stuck`).
     pub stuck_events: u32,
-    /// Police cars that appeared where a racer had line of sight to them (row 131, pop-in).
+    /// Police cars that appeared in a racer's line of sight, or whose spot a racer saw within
+    /// 3 s (row 131, pop-in).
     pub spawns_in_view: u32,
     /// Police cars total-lost without / with racer contact.
     pub self_wrecks: u32,
@@ -848,7 +849,7 @@ pub fn run_one(
     m.stuck_events = (st.stuck.len() - base.stuck.len()) as u32;
     m.spawns_in_view = st.spawns[base.spawns.len()..]
         .iter()
-        .filter(|s| s.in_sight)
+        .filter(|s| s.in_sight || s.seen_after_s.is_some())
         .count() as u32;
     m.self_wrecks = st.self_wrecks - base.self_wrecks;
     m.contact_wrecks = st.contact_wrecks - base.contact_wrecks;

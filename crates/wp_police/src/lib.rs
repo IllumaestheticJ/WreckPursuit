@@ -179,6 +179,11 @@ pub struct SpawnRecord {
     pub nearest_racer_m: f32,
     /// Some racer had line of sight to it.
     pub in_sight: bool,
+    /// Seconds after it appeared that some racer first had line of sight to the spot it
+    /// appeared at, within [`dispatch::ROUTE_VIEW_S`] (row 131's pop-in audit: hidden when it
+    /// appeared, in plain view a moment later). `None`: not seen in that window.
+    #[serde(default)]
+    pub seen_after_s: Option<f32>,
 }
 
 /// How a unit's trip to a reckless-driving call ended.
@@ -462,6 +467,8 @@ pub struct PoliceSystem {
     pub(crate) spikes: Vec<SpikeStrip>,
     /// Tool cars waiting for their spot to leave every racer's view (row 131).
     pub(crate) tool_cars: Vec<dispatch::PendingToolCar>,
+    /// Indices into `stats.spawns` still watched for being seen soon after (pop-in audit).
+    pub(crate) spawn_watch: Vec<usize>,
     pub(crate) next_tool: u32,
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
@@ -620,6 +627,7 @@ impl PoliceSystem {
             helo_sight: BTreeMap::new(),
             roadblocks: Vec::new(),
             tool_cars: Vec::new(),
+            spawn_watch: Vec::new(),
             spikes: Vec::new(),
             next_tool: 1,
             punctures: BTreeMap::new(),

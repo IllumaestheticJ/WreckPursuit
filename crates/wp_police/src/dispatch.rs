@@ -1579,6 +1579,7 @@ impl PoliceSystem {
             self.warm_up(world);
         }
         self.update_observations(world);
+        self.watch_spawns(world);
         self.helo_reports();
         self.clock_speeders(world, tdt);
         self.update_racer_rules(tdt);
@@ -2353,7 +2354,34 @@ impl PoliceSystem {
             pos: p,
             nearest_racer_m: nearest,
             in_sight,
+            seen_after_s: None,
         });
+        if !in_sight {
+            self.spawn_watch.push(self.stats.spawns.len() - 1);
+        }
+    }
+
+    /// Pop-in audit (row 131): note when a racer first sees the spot a unit appeared at,
+    /// within [`ROUTE_VIEW_S`] of it appearing. Statistics only.
+    fn watch_spawns(&mut self, world: &dyn WorldQuery) {
+        let now = self.now;
+        let watch = std::mem::take(&mut self.spawn_watch);
+        for k in watch {
+            let sp = self.stats.spawns[k];
+            let age = now.since(sp.at);
+            if age > ROUTE_VIEW_S {
+                continue;
+            }
+            let seen = self
+                .racers
+                .values()
+                .any(|r| self.sees_at(world, xy(r.pos), r.pos[2], sp.pos, r.pos[2]));
+            if seen {
+                self.stats.spawns[k].seen_after_s = Some(age);
+            } else {
+                self.spawn_watch.push(k);
+            }
+        }
     }
 
     /// Where a responder (or reinforcement) for `racer` appears: a spot in the right-hand lane
