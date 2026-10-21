@@ -61,6 +61,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         parked_cars: true,
         police_cars: true,
         police_presence: None,
+        car_mix: false,
         slow: false,
         // Hinged panels + per-panel meshes in the browser (workstream R).
         panels: true,
@@ -93,6 +94,8 @@ pub fn city_chase_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
     sc.seed = 23;
     sc.time_of_day_h = 23.0;
     sc.police_presence = Some(1.0);
+    // All five police versions (by heat) and seven civilian models (simcli `car_mix`).
+    sc.car_mix = true;
     sc.entities[0].speed_mps = CITY_CHASE_SPEED_MPS;
     sc
 }

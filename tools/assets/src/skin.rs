@@ -56,6 +56,31 @@ pub fn bind_part(lattice: &LatticeDef, part: &mut MeshPart) {
         return;
     };
     let cand = candidates(lattice, region);
+    if part.rigid {
+        // Rigid part: every vertex on the candidate node nearest the part's centroid.
+        let n = part.vertex_count().max(1) as f32;
+        let mut c = [0.0f32; 3];
+        for v in 0..part.vertex_count() {
+            let q = part.vertex(v);
+            for k in 0..3 {
+                c[k] += q[k] / n;
+            }
+        }
+        let node = cand
+            .iter()
+            .copied()
+            .min_by(|&a, &b| {
+                dist2(c, lattice.nodes[a as usize].pos_m)
+                    .total_cmp(&dist2(c, lattice.nodes[b as usize].pos_m))
+                    .then(a.cmp(&b))
+            })
+            .unwrap_or(0);
+        for _ in 0..part.vertex_count() {
+            part.skin_nodes.extend_from_slice(&[node; 4]);
+            part.skin_weights.extend_from_slice(&[255, 0, 0, 0]);
+        }
+        return;
+    }
     let own_count = lattice.nodes.iter().filter(|n| n.region == region).count();
     for v in 0..part.vertex_count() {
         let p = part.vertex(v);

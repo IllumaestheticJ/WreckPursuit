@@ -201,6 +201,22 @@ impl World {
             .set_traffic_car(car.def.clone(), car.tires.clone());
     }
 
+    /// Several car models for physical traffic; agent `id` drives model
+    /// [`traffic::traffic_model_index`]`(id, cars.len())` whether kinematic or physical. One
+    /// model behaves exactly like [`World::set_traffic_car`]; none keeps traffic kinematic.
+    pub fn set_traffic_cars(&mut self, cars: &[LoadedCar]) {
+        self.traffic.set_traffic_cars(
+            cars.iter()
+                .map(|c| (c.def.clone(), c.tires.clone()))
+                .collect(),
+        );
+    }
+
+    /// The traffic model index agent `id` drives (see [`World::set_traffic_cars`]).
+    pub fn traffic_model_of(&self, id: AgentId) -> usize {
+        self.traffic.model_of(id)
+    }
+
     /// Vehicles the world must know about this tick: players, police, AI racers.
     pub fn set_tracked_vehicles(&mut self, tracked: &[TrackedVehicle]) {
         self.tracked.clear();

@@ -158,6 +158,54 @@ pub const POLICE_CAR: &str = "sentinel_cruiser";
 /// Car model for physical (near-player) traffic in city scenarios.
 pub const TRAFFIC_CAR: &str = "debug_sedan";
 
+/// `car_mix` police fleet: `(car, min level, max level, measured limits)`. Limits are
+/// `[skidpad g, 100-0 m, 0-100 s, vmax km/h]` from `data/cars/VALIDATION.md` (sim-measured,
+/// `tools/specsheet/collect_results.py`); `None` = `pursuit.toml`'s defaults (the cruiser's).
+/// Patrols picked while nobody is wanted count as level 1.
+pub const CAR_MIX_POLICE: &[(&str, u8, u8, Option<[f32; 4]>)] = &[
+    ("sentinel_warden", 1, 2, Some([0.81, 40.1, 8.8, 202.0])),
+    ("sentinel_cruiser", 1, 2, None),
+    ("sentinel_bastion", 2, 3, Some([0.72, 42.7, 7.97, 214.0])),
+    ("sentinel_wolfhound", 3, 5, Some([0.85, 39.6, 5.54, 244.0])),
+    ("sentinel_harrier", 4, 5, Some([0.87, 38.2, 5.74, 275.0])),
+];
+
+/// `car_mix` physical traffic models, in model-index order (agent `id` drives
+/// `CAR_MIX_TRAFFIC[wp_world::traffic::traffic_model_index(id, len)]`).
+pub const CAR_MIX_TRAFFIC: &[&str] = &[
+    "debug_sedan",
+    "junkyard_beater",
+    "tansy_13",
+    "furrow_24",
+    "hauler_1500",
+    "drayman_cargo",
+    "vireo_xs",
+];
+
+/// Load the `car_mix` police fleet ([`CAR_MIX_POLICE`]).
+pub fn car_mix_police(data: &dyn DataSource) -> Result<Vec<wp_sim::PoliceModel>, RunError> {
+    CAR_MIX_POLICE
+        .iter()
+        .map(|(id, lo, hi, limits)| {
+            let m = wp_sim::PoliceModel::new(load_car(data, id)?, *lo, *hi);
+            Ok(match limits {
+                Some([g, stop, t, vmax]) => m.with_limits(wp_police::pro::CarLimits::from_metrics(
+                    *g, *stop, *t, *vmax,
+                )),
+                None => m,
+            })
+        })
+        .collect()
+}
+
+/// Load the `car_mix` traffic models ([`CAR_MIX_TRAFFIC`]).
+pub fn car_mix_traffic(data: &dyn DataSource) -> Result<Vec<wp_contracts::LoadedCar>, RunError> {
+    CAR_MIX_TRAFFIC
+        .iter()
+        .map(|id| load_car(data, id))
+        .collect()
+}
+
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     let density = sc.traffic_density.unwrap_or(1.0);
@@ -309,6 +357,9 @@ pub fn build_sim(
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
+                if sc.car_mix {
+                    sim.set_police_cars(car_mix_police(data)?);
+                }
             } else {
                 let quiet = Scenario {
                     police_presence: Some(0.0),
@@ -317,7 +368,11 @@ pub fn build_sim(
                 sim.set_police(police_for_city(&quiet, sim.world(), &ids));
             }
             if sc.traffic_cars {
-                sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+                if sc.car_mix {
+                    sim.set_traffic_cars(car_mix_traffic(data)?);
+                } else {
+                    sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+                }
             }
             true
         }

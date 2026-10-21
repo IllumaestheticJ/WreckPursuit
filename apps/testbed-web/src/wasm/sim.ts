@@ -50,6 +50,12 @@ export interface VehicleInfo {
   mounted_components: string[];
   surfaces: string[];
   spawn_pos: [number, number, number];
+  /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
+   * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
+  police_unit?: number | null;
+  /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
+   * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
+  traffic_agent?: number | null;
 }
 
 export interface AssistProfile {
@@ -163,7 +169,12 @@ export const sim = {
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
+  /** [x, y, z, yaw, flags, agentId, model] per civilian agent (layout.ts AG, AGENT_STRIDE). */
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
+  /** Car ids indexed by traffic_agents()' model; [] when traffic is kinematic only. Fetch once per session. */
+  trafficModels: (): string[] => JSON.parse(wasm.traffic_models()),
+  /** Car ids indexed by police_units()' model; [] for single-model police. Fetch once per session. */
+  policeModels: (): string[] => JSON.parse(wasm.police_models()),
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
   /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */
@@ -173,7 +184,7 @@ export const sim = {
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
   vehicleMeta: (): Float32Array => wasm.vehicle_meta(),
   /** Wanted level / heat for a racer, or null when the session has no police. */
-  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
+  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags, unitId, model] each (layout.ts PU). */
   policeUnits: (): Float32Array => wasm.police_units(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   stateHash: (): string => wasm.state_hash(),
