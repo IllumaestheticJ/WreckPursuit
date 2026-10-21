@@ -2267,6 +2267,7 @@ fn decide_racer(
         // `n_cmd` has its own curvature — slow for it (inside lines are tighter).
         let a_brk = profile.a_brake.max(3.0) * 0.85;
         // Check both the commanded offset and where the car actually is.
+        let mut v_offline = f32::INFINITY;
         for n_path in [n_cmd, r.n] {
             if (n_path - line_n(r.s)).abs() <= 1.0 {
                 continue;
@@ -2282,6 +2283,7 @@ fn decide_racer(
                     // optimised, and usually has a car beside it to run wide into.
                     let v_off = (0.85 * profile.a_lat / k).sqrt();
                     let cap = (v_off * v_off + 2.0 * a_brk * x).sqrt();
+                    v_offline = v_offline.min(cap);
                     cap_to(&mut v_target, cap, SpeedLimit::Mode);
                 }
                 x += 2.0 * CORRIDOR_STEP_M;
@@ -2611,6 +2613,13 @@ fn decide_racer(
                 0.0
             };
             let mut acc = (acc_ff + 2.5 * (v_target - v)).clamp(-12.0, 8.0);
+            // Slowing for an off-line path: trail the brakes, never stamp on them. Mid-bend
+            // a full brake does not make a tighter path any safer and unsettles the car (Loop
+            // 9, skill 0.95, one-version handling: hakone_gt braked flat out at 60 m/s for a
+            // 2 m drift off its line, yawed against its steering and spun).
+            if limit == SpeedLimit::Mode && v_target >= v_offline - 1e-3 {
+                acc = acc.max(-0.4 * profile.a_brake.max(3.0));
+            }
             if decel_demand > 0.5 {
                 acc = acc.min(-1.2 * decel_demand);
             }
