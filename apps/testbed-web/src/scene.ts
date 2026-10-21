@@ -7,9 +7,10 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, INTENT_STRIDE, POLICE_UNIT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { PoliceUnitsView } from "./render/police_units";
 import { TrafficRenderer, trafficStride } from "./render/traffic";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
@@ -43,7 +44,10 @@ export class SceneView {
   contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
-  private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Non-sim police units (render/police_units.ts), created on first use. */
+  private policeView: PoliceUnitsView | null = null;
+  /** Camera position in sim space (last render), for police point-light LOD. */
+  private readonly cameraSim = new THREE.Vector3();
   private readonly agentMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0xffffff }),
@@ -150,34 +154,9 @@ export class SceneView {
    * unitId, model] — layout.ts PU; flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
    */
   updatePoliceUnits(units: Float32Array, timeS: number): void {
-    const n = units.length / POLICE_UNIT_STRIDE;
-    while (this.policeUnits.length < n) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
-      body.position.z = 0.7;
-      const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
-      const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
-      const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
-      barR.position.set(-0.32, -0.1, 1.48);
-      const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
-      barB.position.set(0.32, -0.1, 1.48);
-      g.add(body, barR, barB);
-      this.world.add(g);
-      this.policeUnits.push({ obj: g, red, blue });
-    }
-    this.policeUnits.forEach((u, i) => {
-      u.obj.visible = i < n;
-      if (i >= n) return;
-      const o = i * POLICE_UNIT_STRIDE;
-      u.obj.position.set(units[o], units[o + 1], units[o + 2]);
-      u.obj.rotation.z = units[o + 3];
-      const flags = units[o + 5];
-      u.obj.scale.setScalar(flags & 1 ? 1.4 : 1); // helicopters: bigger box at altitude
-      const chasing = (flags & 2) !== 0;
-      const phase = (timeS * 2.5 + i * 0.17) % 1;
-      u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
-      u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
-    });
+    // Real police meshes + livery + flash patterns (render/police_units.ts).
+    this.policeView ??= new PoliceUnitsView(this.world);
+    this.policeView.update(units, timeS, this.cameraSim);
   }
 
   /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags, agentId, model] per agent, layout.ts AG). */
@@ -308,6 +287,8 @@ export class SceneView {
   }
 
   render(camera: THREE.Camera): void {
+    this.world.updateMatrixWorld();
+    this.world.worldToLocal(camera.getWorldPosition(this.cameraSim));
     this.traffic.setCamera(camera);
     this.renderer.render(this.scene, camera);
   }

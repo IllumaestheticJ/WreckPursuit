@@ -7,7 +7,10 @@ import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
-import { PanelBody } from "./render/panels";
+import { PanelBody, loadCarMesh } from "./render/panels";
+import type { CarMeshJson } from "./render/panels";
+import { hasPoliceLivery, setupPoliceLook } from "./render/livery";
+import { LightRig, patternFor, phaseFor } from "./render/police_units";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -72,6 +75,10 @@ export class VehicleView {
   private readonly barRed: THREE.MeshStandardMaterial | null = null;
   private readonly barBlue: THREE.MeshStandardMaterial | null = null;
   private readonly sirenLight: THREE.PointLight | null = null;
+  /** Second siren light (blue, right side) for the panel-mesh light bar. */
+  private readonly sirenLightR: THREE.PointLight | null = null;
+  /** Police light rig on the panel mesh's light-bar lenses (render/police_units.ts), once loaded. */
+  private rig: LightRig | null = null;
   private readonly headMat: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
@@ -81,7 +88,8 @@ export class VehicleView {
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
-    const police = this.info.kind === "Police";
+    // Police units, and police models driven by anyone else (free drive): bar + siren lights.
+    const police = this.info.kind === "Police" || this.info.car_id.startsWith("sentinel_");
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
     this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
@@ -94,9 +102,10 @@ export class VehicleView {
     this.nose = nose;
     this.root.add(this.box, nose);
 
-    // Head- and tail-lights (emissive, brighter with headlights on / when braking).
-    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000 });
-    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000 });
+    // Head- and tail-lights (emissive, brighter with headlights on / when braking). Shared with
+    // the panel meshes, which carry no normals: flat shading, both sides.
+    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
+    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000, flatShading: true, side: THREE.DoubleSide });
     for (const sx of [-1, 1]) {
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), this.headMat);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
@@ -119,7 +128,10 @@ export class VehicleView {
       this.lightBar.position.set(0, -0.1, h + 0.08);
       this.sirenLight = new THREE.PointLight(0xff2244, 0, 18, 2);
       this.sirenLight.position.set(0, 0, h + 0.6);
-      this.root.add(this.lightBar, this.sirenLight);
+      // Right (blue) light from the start too, so the scene's light count never changes.
+      this.sirenLightR = new THREE.PointLight(0x2060ff, 0, 20, 2);
+      this.sirenLightR.position.set(0, 0, h + 0.6);
+      this.root.add(this.lightBar, this.sirenLight, this.sirenLightR);
     }
 
     const rest = sim.latticeRest(entity);
@@ -193,6 +205,9 @@ export class VehicleView {
     this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
+      // Police models (livery scheme in the mesh file) get livery, decals and the flashing bar
+      // whoever drives them; only Police-kind vehicles have the siren point lights.
+      void loadCarMesh(this.info.car_id).then((m) => m && hasPoliceLivery(m) && this.setupPolice(m));
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
       // Foundation hook: calipers / uprights steer + follow compression but do not spin; camber is visual.
       this.wheels.forEach((w, i) => {
@@ -388,8 +403,13 @@ export class VehicleView {
     const headlights = (flags & META_FLAG.headlights) !== 0;
     this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
     this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
-    if (!this.lightBar) return;
     const siren = (flags & META_FLAG.siren) !== 0;
+    if (this.rig) {
+      this.rig.update(timeS, siren);
+      if (this.lightBar) this.lightBar.visible = !this.panels.root.visible;
+      return;
+    }
+    if (!this.lightBar) return;
     // Alternating red/blue at 2.5 Hz with a double strobe on each side.
     const phase = (timeS * 2.5) % 1;
     const strobe = (phase % 0.5) < 0.12 || ((phase % 0.5) > 0.2 && (phase % 0.5) < 0.32);
@@ -399,6 +419,31 @@ export class VehicleView {
     this.barBlue!.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
     this.sirenLight!.color.setHex(redOn ? 0xff2040 : 0x2060ff);
     this.sirenLight!.intensity = redOn || blueOn ? 25 : 0;
+  }
+
+  /** Police panel mesh: livery + unit decals, and flash the mesh's light bar instead of the box bar. */
+  private setupPolice(mesh: CarMeshJson): void {
+    setupPoliceLook(this.panels, mesh, this.entity);
+    const { left, right } = this.panels.lightbarAnchors;
+    if (!left && !right) return;
+    const up = new THREE.Vector3(0, 0, 0.25);
+    if (this.sirenLight) this.sirenLight.position.copy(left ?? right!).add(up);
+    if (this.sirenLightR) this.sirenLightR.position.copy(right ?? left!).add(up);
+    const amber: THREE.MeshStandardMaterial[] = [];
+    this.panels.root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      const m = mesh.material as THREE.MeshStandardMaterial | undefined;
+      const isAmber = o.name === "traffic_advisor_cells" || o.name.endsWith("_amber");
+      if (mesh.isMesh && m && isAmber && !amber.includes(m)) amber.push(m);
+    });
+    this.rig = new LightRig(
+      this.panels.lightbarMaterials.left,
+      this.panels.lightbarMaterials.right,
+      amber,
+      { left: this.sirenLight, right: this.sirenLightR },
+      patternFor(this.info.car_id),
+      phaseFor(this.entity),
+    );
   }
 
   dispose(): void {

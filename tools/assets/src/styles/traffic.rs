@@ -229,6 +229,8 @@ fn hauler_1500() -> CarStyle {
     s.wheel.lugs = 6;
     s.wheel.pcd_r_m = 0.07;
     s.wheel.rim_material = M::Chrome;
+    // Keeps the crew cab (big loft + real wheels) under the 10k traffic budget.
+    s.wheel.segments = 14;
     s.mechanical.engine = EngineKind::V8;
     s.mechanical.front_suspension = SuspensionKind::DoubleWishbone;
     s.mechanical.rear_suspension = SuspensionKind::SolidAxleLeaf;
@@ -485,7 +487,7 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let (ya, yb) = (p.y_quarter.0 + 0.30, p.y_fd_hinge + 0.05);
     let zs = p.z_floor + 0.10;
     let xs = p.half_w + 0.02;
-    b.beveled_box(&rb, [-(xs + 0.13), ya, zs], [-(xs - 0.10), yb, zs + 0.045], 0.012);
+    b.cuboid(&rb, [-(xs + 0.13), ya, zs], [-(xs - 0.10), yb, zs + 0.045]);
     mirror(b, &rb);
     tall_mirrors(b, p, (0.12, 0.08, 0.24), 0.14);
     // Cab clearance lamps on the roof's front edge.
@@ -1097,7 +1099,7 @@ fn tall_mirrors(b: &mut Builder, p: &BodyProfile, size: (f32, f32, f32), arm: f3
     }
     let lo = [xh - size.0, y - size.1 * 0.5, zb - 0.02];
     let hi = [xh, y + size.1 * 0.5, zb - 0.02 + size.2];
-    b.beveled_box(&k, lo, hi, 0.012);
+    b.cuboid(&k, lo, hi);
     mirror(b, &k);
     let g = PartKey::body("door_mirror_glass_l", R::LeftDoorF, PartKind::Mirror, M::Chrome);
     b.cuboid(
