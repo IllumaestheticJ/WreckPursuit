@@ -47,6 +47,9 @@ const GAPS: [f32; 3] = [0.05, 0.15, 0.3];
 struct Transition {
     /// Old-side slide angle at the flick, °.
     at_flick: f32,
+    /// Time from the flick (start of the lift) until the slide changes sign, s (the reference
+    /// swing: 0.5–0.8 s).
+    cross_s: Option<f32>,
     swing_s: Option<f32>,
     peak: f32,
     settle_s: Option<f32>,
@@ -244,6 +247,9 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 if b.abs() >= 90.0 || n.v_fwd < 0.0 {
                     t.spun = true;
                     break;
+                }
+                if t.cross_s.is_none() && b > 0.0 {
+                    t.cross_s = Some(k as f32 / TPS as f32);
                 }
                 if crossed_at.is_none() && b >= 10.0 {
                     crossed_at = Some(k);
@@ -520,7 +526,7 @@ fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
 }
 
 /// One v2 candidate's score under one configuration.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct V2Score {
     held: usize,
     caught: usize,
@@ -533,6 +539,12 @@ struct V2Score {
     /// Lift-off in a normal corner that stepped out (fail case), of 6 per car; worst slip °.
     lift_fails: usize,
     lift_worst: f32,
+    /// Flicks caught with a reference-like swing: sign change 0.5–0.8 s after the lift starts
+    /// and settled within 0.5 s of crossing onto the new side (no spin / swing-back).
+    fast: usize,
+    /// Median sign-change time of the caught flicks, s.
+    cross_med: f32,
+    crosses: Vec<f32>,
 }
 
 /// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
@@ -569,12 +581,23 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
                 sc.flicks += 1;
                 if let Some(t) = flick(c, gap, Init::LiftFlick(l)) {
                     sc.caught += t.caught as usize;
+                    if t.caught {
+                        if let Some(x) = t.cross_s {
+                            sc.crosses.push(x);
+                            if (0.5..=0.8).contains(&x) && t.settle_s.is_some_and(|s| s <= 0.5) {
+                                sc.fast += 1;
+                            }
+                        }
+                    }
                     sc.spun += t.spun as usize;
                     sc.back += t.swung_back as usize;
                 }
             }
         }
     }
+    let mut v = sc.crosses.clone();
+    v.sort_by(|a, b| a.total_cmp(b));
+    sc.cross_med = v.get(v.len() / 2).copied().unwrap_or(f32::NAN);
     sc
 }
 
@@ -702,6 +725,7 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                     "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
                     "hold_swapped": sc.hold_swapped, "hold_spun": sc.hold_spun,
                     "lift_fails": sc.lift_fails, "lift_worst": sc.lift_worst,
+                    "fast": sc.fast, "cross_med": sc.cross_med,
                     "steer": steer,
                 })
             );
