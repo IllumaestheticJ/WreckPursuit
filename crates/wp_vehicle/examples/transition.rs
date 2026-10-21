@@ -528,6 +528,24 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                 ..base
             }
         };
+        // V2EXTRA=1: also the drift lock, the front deep-slip falloff and the rear peak slip.
+        let t = if std::env::var("V2EXTRA").is_ok() && i > 0 {
+            let mut pick = |cur: f32, lo: f32, hi: f32| {
+                let r = rng.range(lo, hi);
+                (cur + (r - cur) * spread.max(0.6)).clamp(lo, hi)
+            };
+            CarTune {
+                drift_lock_extra: pick(t.drift_lock_extra, -0.6, 0.6),
+                drift_lock_from_deg: pick(t.drift_lock_from_deg, 10.0, 35.0),
+                front_deep_falloff: pick(t.front_deep_falloff, 0.0, 0.3),
+                front_deep_from_deg: pick(t.front_deep_from_deg, 8.0, 25.0),
+                front_deep_full_deg: pick(t.front_deep_full_deg, 30.0, 60.0),
+                rear_peak_slip: pick(t.rear_peak_slip, 0.7, 1.6),
+                ..t
+            }
+        } else {
+            t
+        };
         for cfg in &cfgs {
             apply(cfg);
             car_lab::set_override(Some(t));
