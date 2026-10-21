@@ -529,3 +529,53 @@ across the junction box stops facing it; the racer backs out within ~5 s) — mo
 junctions sooner, none is a side-road car meeting a racer on the wrong side. Passes/km:
 grid highway 3.3–4.3 per seed for the field, Lantern 0.2 (the planner moves cars before a pass
 is needed; completed passes stay rare).
+
+## Main's maps (lead/main-sync bb2208ed) — 2026-10-21
+
+**Divided highways.** On main's grid highway and Loop 9 the corridor has no passing room beyond
+my own carriageway anywhere (`left_pass_m == left_m` on every sample; opposing lanes are only the
+same road's, and only when my leftmost lane has no median / kerb on its left). So the whole-road
+line, opposing-side passes and the gap planner never cross a median or use the far carriageway.
+**Ramps / merges.** The gap planner only takes a lane that exists for the next 4 s of travel and
+only below 35 m/s; grid highway / Loop 9 results are identical to main-sync (table).
+
+**Lantern downtown (new red).** Two behaviour fixes:
+- A civilian stopped in my lane (at a light) is gone round as usual during start discipline, and
+  any standing non-racer that holds me 1 s lets me use the opposing lanes (pass checks permitting).
+  The junction look-ahead became a gap check (a civilian heading in closes the junction only if
+  it arrives within my time to reach and clear it, accelerating as I would, + 1.5 s; standing at
+  its own line does not; in the box does; the cars I am passing do not).
+- Never stand at a red on the opposing side: no opposing-side pass into a junction whose light
+  is red (or turning red) on arrival; out there and still behind with a red coming → tuck back in.
+  (Seed 7: the leader stopped for a red mid-pass on the opposing side, nose to nose with the
+  oncoming queue, for 2 minutes — no car finished.)
+
+What is left over the old lock is red-light queues with no safe way past. At the first light
+(leader, s95): pass rejected 702× on the junction gap (cross traffic arriving in 1.4–5 s against
+~4.5 s needed) and 168× on the oncoming queue standing 36 m ahead in the opposing lane.
+Lock-in re-ranged for lantern_checkpoint_s50 / s95 by the rule after the fixes.
+
+Seeds 1–8, before = lead/main-sync bb2208ed, after = this tip:
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev | nose-to-nose | of which opposing |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | before | 25/32 | 80.3 | 11 | 0.2 | 0 | 188 | 20 | 12 |
+| lantern_checkpoint | 0.5 | after | 29/32 | 82.0 | 14 | 0.0 | 0 | 101 | 25 | 5 |
+| lantern_checkpoint | 0.95 | before | 25/32 | 85.1 | 10 | 0.0 | 7 | 175 | 20 | 10 |
+| lantern_checkpoint | 0.95 | after | 30/32 | 76.1 | 15 | 0.0 | 0 | 52 | 17 | 7 |
+| grid_highway_sprint | 0.5 | before | 32/32 | 44.4 | 0 | 2.7 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | after | 32/32 | 44.4 | 0 | 2.7 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | before | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | after | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | before | 32/32 | 67.0 | 47 | 0.0 | 16 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | after | 32/32 | 67.0 | 47 | 0.0 | 16 | 0 | 0 | 0 |
+| hollins_sprint | 0.95 | before | 32/32 | 62.3 | 46 | 0.0 | 8 | 8 | 0 | 0 |
+| hollins_sprint | 0.95 | after | 32/32 | 62.4 | 45 | 0.0 | 8 | 8 | 0 | 0 |
+| city_sprint | 0.5 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.5 | after | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | after | 32/32 | 10.9 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | before | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | after | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
+| loop9_circuit | 0.95 | after | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
