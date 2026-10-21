@@ -641,14 +641,9 @@ pub fn race_pace_in(
                     let n = f64::from(n.max(1));
                     ((sq / n - (sum / n) * (sum / n)).max(0.0)).sqrt() as f32
                 },
-                passes_per_km: ai
-                    .events()
-                    .iter()
-                    .filter(|e| {
-                        matches!(e, wp_opponent::OpponentEvent::Overtook { entity, .. }
-                            if *entity == racers[k])
-                    })
-                    .count() as f32
+                // Completed overtakes of anything on the road (racers and civilians alike:
+                // weaving through traffic counts), per km raced.
+                passes_per_km: ai.field().passes_by(k) as f32
                     / (race.route.length_m * laps as f32 / 1000.0).max(0.1),
                 status: format!("{:?}", r.status),
             }

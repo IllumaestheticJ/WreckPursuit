@@ -340,7 +340,8 @@ impl Gearbox {
                     / red
             };
             let road = road_at(self.gear);
-            if road >= FORCED_UP && self.gear < n_max && repeat_ok {
+            // Never up a gear under the brakes (it cuts the engine braking mid-stop).
+            if road >= FORCED_UP && self.gear < n_max && repeat_ok && inp.brake <= 0.1 {
                 self.shift(self.gear + 1, t);
             } else if self.gear > 1 && road < DOWN_LIGHT && repeat_ok {
                 self.shift(self.gear - 1, t);
