@@ -31,7 +31,7 @@ use crate::bridge::CityRace;
 use crate::catalog::{venue_pos, RaceDef};
 use crate::data::RaceData;
 use crate::entrants::{AiEntrant, AiEntrants};
-use crate::judge::{RaceJudge, RacePhase, RacerEntry, RacerSample};
+use crate::judge::{CourseReset, RaceJudge, RacePhase, RacerEntry, RacerSample};
 use crate::kind::{ClassBracket, EventId, VenueId};
 use crate::result::{DnfReason, RacerResult, RacerStatus};
 use crate::schedule::{MeetHeat, MeetHeatRules, Venue};
@@ -65,6 +65,9 @@ pub struct StepOut {
     pub reports: Vec<SimEvent>,
     /// Heat to add per racer (the stake's heat for illegal races, at the green light).
     pub add_heat: Vec<(EntityId, f32)>,
+    /// Racers that stayed off the course too long: move each car to the reset pose (on the
+    /// route, at rest) and call [`LiveRace::relocate`].
+    pub resets: Vec<CourseReset>,
 }
 
 /// One racer's live standing (HUD).
@@ -158,6 +161,9 @@ impl LiveRace {
             data.rules.for_kind(def.kind),
             race.course.clone(),
         );
+        // A picker race puts a car that wanders off the route back on it (the glue moves the
+        // car: `StepOut::resets`) rather than disqualifying it.
+        judge.set_reset_off_course(true);
         let mut order = Vec::new();
         for e in ai.iter().chain(std::iter::once(&player)) {
             judge
@@ -363,7 +369,10 @@ impl LiveRace {
         self.judge.observe(tick, samples, events);
         self.ai.report_to(&mut self.judge, tick);
 
-        let mut out = StepOut::default();
+        let mut out = StepOut {
+            resets: self.judge.drain_resets(),
+            ..StepOut::default()
+        };
         for sig in self.judge.drain_signals() {
             match &sig {
                 RaceSignal::Green { .. } => self.on_green(samples, &mut out),

@@ -479,13 +479,34 @@ impl Session {
         id: EntityId,
         repair: bool,
     ) -> Result<crate::reset::ResetPose, String> {
-        use crate::reset::{reset_pose, travel_dir, Obstacle, OTHER_HALF};
-        self.live_check()?;
-        let idx = self.idx(id)?;
         let st = self
             .vehicle(id)
             .map(|v| v.vehicle.state())
             .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let dir = crate::reset::travel_dir(st.rot, st.lin_vel);
+        self.reset_near(id, st.pos, dir, repair)
+    }
+
+    /// Put racer `id` back on the race course at `pos` heading `dir` (the judge's off-course
+    /// reset): the nearest clear lane spot there, at rest, damage kept. Logged like
+    /// [`Self::reset_in_place`].
+    fn reset_onto_course(&mut self, id: EntityId, pos: [f32; 3], dir: [f32; 2]) {
+        // Only an unknown id fails, and a racer is always a scenario entity.
+        let _ = self.reset_near(id, pos, dir, false);
+    }
+
+    /// The shared part of [`Self::reset_in_place`] and [`Self::reset_onto_course`]: the
+    /// nearest clear lane spot to `origin` heading `dir` ([`crate::reset::reset_pose`]).
+    fn reset_near(
+        &mut self,
+        id: EntityId,
+        origin: [f32; 3],
+        dir: [f32; 2],
+        repair: bool,
+    ) -> Result<crate::reset::ResetPose, String> {
+        use crate::reset::{reset_pose, Obstacle, OTHER_HALF};
+        self.live_check()?;
+        let idx = self.idx(id)?;
         let yaw_of_rot = |q: [f32; 4]| {
             let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
             let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
@@ -525,12 +546,7 @@ impl Session {
                 half: [p.half_extents[0], p.half_extents[1]],
             });
         }
-        let pose = reset_pose(
-            Some(world.map()),
-            st.pos,
-            travel_dir(st.rot, st.lin_vel),
-            &obstacles,
-        );
+        let pose = reset_pose(Some(world.map()), origin, dir, &obstacles);
         self.log_op(
             idx,
             OpKind::ResetAt {
@@ -883,6 +899,11 @@ impl Session {
                     p.drift_count += 1;
                 } else if let OpKind::Mode(m) = ev.op {
                     self.mode = m;
+                } else if let (OpKind::Reset | OpKind::ResetAt { .. }, Some(&id)) =
+                    (ev.op, self.ids.get(ev.entity as usize))
+                {
+                    // As live: the race does not judge the move as a teleport.
+                    self.relocate_racer(id);
                 }
                 p.op_cursor += 1;
             }
@@ -965,6 +986,18 @@ impl Session {
         self.observe_run(&extra);
         if let Some(race) = &mut self.race {
             race.settle(self.run.as_mut());
+        }
+        // Off-course racers go back onto the route. Live only: playback applies the logged
+        // `ResetAt` op (and relocates the racer) instead.
+        let resets = self
+            .race
+            .as_mut()
+            .map(|r| r.take_resets())
+            .unwrap_or_default();
+        if self.playback.is_none() {
+            for r in resets {
+                self.reset_onto_course(r.racer, r.pos, r.dir);
+            }
         }
         if self.playback.is_none() {
             if let Some(p) = player {

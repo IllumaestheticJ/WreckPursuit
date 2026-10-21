@@ -284,6 +284,8 @@ pub struct RaceRun {
     payout: Option<RacePayout>,
     economy_error: Option<String>,
     settled: bool,
+    /// Off-course resets from the last judged tick ([`RaceRun::take_resets`]).
+    resets: Vec<wp_race::CourseReset>,
 }
 
 impl RaceRun {
@@ -367,6 +369,7 @@ impl RaceRun {
             payout: None,
             economy_error: None,
             settled: false,
+            resets: Vec::new(),
         };
         if let Some(run) = run {
             match run.enter_race(&me.setup) {
@@ -391,6 +394,12 @@ impl RaceRun {
     /// The car was moved on purpose (reset, debug park): judge its next sample from `pos`.
     pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
         self.live.relocate(racer, pos, tick);
+    }
+
+    /// Racers the judge wants put back on the course (off it past the grace time), oldest
+    /// first. The session moves each car and calls [`RaceRun::relocate`].
+    pub fn take_resets(&mut self) -> Vec<wp_race::CourseReset> {
+        std::mem::take(&mut self.resets)
     }
 
     /// The live race (judge, standings, course).
@@ -447,6 +456,7 @@ impl RaceRun {
             .collect();
         let out = self.live.post_step(sim.tick(), &samples, events, &police);
         self.prev_events = events.to_vec();
+        self.resets.extend_from_slice(&out.resets);
         let mut emitted: Vec<SimEvent> = out.signals.iter().map(|s| s.to_sim_event()).collect();
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples

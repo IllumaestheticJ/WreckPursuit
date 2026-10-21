@@ -56,7 +56,7 @@ pub use course::{Course, Gate, GridLayout, GridSlot};
 pub use crew::{Challenge, ChallengeId, ChallengeOutcome, Crew, CrewCut, CrewRegistry};
 pub use data::RaceData;
 pub use error::{CrewError, EntryDenied, RaceDataError};
-pub use judge::{RaceJudge, RacePhase, RacerEntry, RacerSample, StartError};
+pub use judge::{CourseReset, RaceJudge, RacePhase, RacerEntry, RacerSample, StartError};
 pub use kind::{
     ClassBracket, CrewId, DistrictId, EventId, Legality, RaceKind, RacerAccount, VenueId,
 };

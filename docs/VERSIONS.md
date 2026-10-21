@@ -32,5 +32,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.23 | preview | Hollins race: busted racers pull off instead of freezing in the hairpin, no stopping in tight bends; asphalt tyre roar instead of hiss |
 | 0.12.24 | preview | AI racers pass cars that are out of the race and never stop to yield in a hairpin (Hollins seed 6 finishes); solid terrain matches drawn terrain (no invisible hillside); engine sound rework (recorded layers at their real firing frequency) |
 | 0.12.25 | preview | C is the clutch (camera cycle on F3); rev on the grid during the countdown; AI: fleeing racers get round cars waiting at reds, grid cars line up properly |
+| 0.12.25 (race build) | preview ([link](https://claude.ai/artifact/R3vr7NVghCGvdvN4TDzZCA)) | Built in parallel from the same round12 commit as the 0.12.25 above (merged in the 2026-10-21 branch triage): race gates much wider (min 26 m) with a taller arch; going too far off course puts the car back on the route instead of a DQ (playtest row 126, filed as row 120 on its branch) |
 | 0.12.26 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
