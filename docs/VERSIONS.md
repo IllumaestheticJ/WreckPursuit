@@ -36,5 +36,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.27 | preview | Eight new cars: Stoat 16V and Marten 2.0 (90s hot hatches), Bulwark 400 and Brigand 400 (70s muscle sedans), Arashi T4 and Talus 2.0T (AWD rally saloons), Satchel 2.0 and Tumbril 2.0 (vans); drawn terrain follows the ground behind lots |
 | 0.12.28 | preview | New careers start with $150 000 for testing (?cash=market for the real $4 500); game data embedded compressed (wasm 10.7 MB) |
 | 0.12.29 | preview | Parked cars sit on the ground (hillside driveways around Hollins were up to 0.76 m in the terrain), knocked cars no longer sink; new cars' meshes regenerated |
-| 0.12.30 | preview | (next) |
+| 0.12.30 | preview | ONE VERSION: the owner's handling (reference step-14 balance, springs/bars ×1.5, step-22 tyres) on every car; over-rotation catch, transition + settle steering, held-key fix on the player car; auto gearbox holds gear while sliding; hidden tune panel (?tune=1) with reset-all, copy-tune and rear ×0.50 / ×0.55 presets |
+| 0.12.31 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
