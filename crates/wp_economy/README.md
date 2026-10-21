@@ -83,6 +83,13 @@ the fee and returns the car with exactly the damage it went in with, to be repai
 Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json` (16 packs,
 106 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
 
+## Free car tune
+
+`OwnedCar::tune` holds the car's four-slider tune (`CarTune`, 1..=5, 3 = stock;
+`docs/integration/tune.md`). `Economy::set_tune` is free and writes no ledger line; the car must
+be in the garage (like mod work). The field is `#[serde(default)]` and skipped when stock, so
+career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
+
 ## Economy design
 
 ### Money rules

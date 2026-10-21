@@ -135,6 +135,9 @@ pub struct OwnedCar {
     /// older than profile version 2, which are valued as the cheapest dealer price of the model.
     #[serde(default)]
     pub purchase_price: Option<Money>,
+    /// The free tune ([`crate::Economy::set_tune`]); stock unless the player changed it.
+    #[serde(default, skip_serializing_if = "crate::CarTune::is_stock")]
+    pub tune: crate::CarTune,
 }
 
 impl OwnedCar {

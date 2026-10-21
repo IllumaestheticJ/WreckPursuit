@@ -104,7 +104,7 @@ export function softClipCurve(knee: number, ceiling: number, n = 4096): Float32A
  *
  * Gain staging (docs/integration/audio.md "Mix headroom"): sources are calibrated against each
  * other (engine pack levels, cue gains); the bus trims give the sum its headroom, so a busy
- * chase peaks a few dB under full scale with the user's master at its default 0.8. The master
+ * chase peaks a few dB under full scale with the user's master at its default 1.0. The master
  * compressor only catches peaks (crash transients, several sirens at once) and its automatic
  * make-up gain is divided out, so below threshold the master stage is unity gain. The tanh soft
  * clip after it is a safety net that keeps sample peaks under `clip_ceiling` (−1 dBFS).
@@ -127,7 +127,7 @@ export class AudioMixer {
   ) {
     const m = (this.settings = settings ?? DEFAULT_MASTER);
     this.master = ctx.createGain();
-    this.master.gain.value = 0.8;
+    this.master.gain.value = 1.0;
     const comp = (this.comp = ctx.createDynamicsCompressor());
     comp.threshold.value = m.compressor.threshold_db;
     comp.knee.value = m.compressor.knee_db;

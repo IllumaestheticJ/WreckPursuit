@@ -1511,6 +1511,7 @@ impl<S: NetSim> ServerInstance<S> {
                     insurance: None,
                     // A stand-in car for the capture settlement: valued like an old save.
                     purchase_price: None,
+                    tune: Default::default(),
                 });
                 uid
             }
