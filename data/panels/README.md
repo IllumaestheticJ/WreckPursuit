@@ -54,7 +54,7 @@ part of the front-door mesh; see `docs/integration/panels.md`, contract request 
 ```jsonc
 {
   "id": "debug_coupe", "lattice_id": "debug_coupe", "format": 2, "tri_count": 9413,
-  "tints": { "caliper": [200, 30, 30] },           // optional: per-car material colours (sRGB)
+  "tints": { "caliper": [200, 30, 30], "rim": [184, 150, 62] }, // optional: per-car material colours (sRGB)
   "livery": { "scheme": "...", "colors": [], "text": [] }, // optional: hint for render/livery.ts
   "atlas": { "y": [-2.35, 2.35], "z": [0.0, 1.62], "x_half": 1.04 }, // livery atlas frame (m)
   "wheel_camber_deg": [0, 0, 1.5, 1.5],            // optional: visual camber FL FR RL RR (+ = top in)
@@ -82,13 +82,20 @@ paint).
 |---|---|
 | `paint` | body colour (never textured) |
 | `livery` | body colour, or the livery texture when `PanelBody.setLivery(tex)` is set |
-| `glass`, `trim`, `rubber`, `metal`, `interior`, `headlight`, `taillight` | as before |
+| `glass`, `trim`, `rubber`, `metal`, `interior`, `taillight` | as before (`taillight` base `#8a0a0a`, readable in daylight) |
+| `headlight` | lens; left (x < 0) and right parts get separate materials (`PanelBody` takes `{ left, right }`) so police cars can wig-wag them |
 | `chrome`, `carbon`, `engine` (dark metal), `grille` (near-black), `exhaust` (polished) | fixed |
-| `caliper` | dark grey unless `tints.caliper` |
+| `caliper` | dark grey unless `tints.caliper` (`MechStyle::caliper_rgb`); tinted cam covers share it |
+| `rim` | rims and plastic hubcaps (metal rims are written in this slot): metal unless `tints.rim` (`WheelStyle::rim_rgb`: gold, white, bronze …); discs and hardware stay `metal` |
+| `spring` | coil springs of coilovers / painted springs: `tints.spring` (`MechStyle::spring_rgb`, else the caliper tint), else dark grey |
+| `accent` | second paint colour for stripes / accent bars: `tints.accent` (`CarStyle::accent_rgb`), else dark red |
+| `underglow` | emissive strips under the sills (`underglow_l` / `underglow_r`, only on cars with `CarStyle::underglow_rgb`): glow in `tints.underglow` while the headlights are on (`PanelBody.setUnderglow`) |
 | `lightbar_red`, `lightbar_blue`, `lightbar_clear` | lens; left (x < 0) and right parts get independent materials (`PanelBody.lightbarMaterials.{left,right}.{red,blue,clear}`) for flashing |
 | `emissive_amber` | amber lens with a faint glow |
 
-Any material colour can be overridden per car with `tints`.
+Any material colour can be overridden per car with `tints` (`underglow` sets the glow colour).
+`PanelBody.materialFor(slot)` returns a slot's shared material and `PanelBody.amberMaterials`
+the amber one(s), for code that animates them (police lights).
 
 ### Livery atlas (UVs of `paint` / `livery` parts)
 
