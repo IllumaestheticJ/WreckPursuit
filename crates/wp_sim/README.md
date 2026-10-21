@@ -31,6 +31,25 @@ every contact. Disabling the vehicle system (`set_systems`) also disables the ch
 - Slot reserves: police stop spawning at 64 − 16 vehicles, traffic at 64 − 24.
 - `police()` exposes the police system; `examples/police_probe.rs` prints a chase timeline.
 
+## City features (Port Vesper v3, road format v4)
+`set_city_ground` also adds a static collider for every `solid` `Feature` (after terrain, roads,
+buildings, rails and barriers, so cities without features keep their exact collider set):
+box → cuboid rotated `box_rotation(yaw, pitch)` (pitch about local +X first, then yaw about +Z),
+cylinder → Rapier cylinder turned onto +Z, prism → convex hull of footprint × `[base_z, top_z]`
+(`feature_shape`). Shapes are grouped by the `FEATURE_TILE_M` (256 m) tile of their centre and by
+drivability into compound colliders (`BTreeMap` order: deterministic). Friction 0.8 for drivable
+kinds (`drivable()`: decks, ramps, runway / taxiway / apron, piers, platforms, earthworks,
+tunnels, rail bridges, ground), 0.5 otherwise. Counters: `CityColliders::{features,
+feature_colliders}`. Tests: `tests/features.rs` (wall stops a car + damage, car rests on a 6 m
+deck, car climbs a 1:7 ramp onto it) and unit tests in `physics.rs` (ramp top centreline through
+`metro::ctx::ramp`'s end points, cylinder / prism / box tops).
+
+Measured (release, native, `cargo test --release -p wp_sim --test features -- --ignored
+--nocapture`): 49 504 solid boxes → 72 compound colliders, `set_world` 57 ms in total (145 ms
+with one collider per box); one car driving among them 0.030 ms per 240 Hz step vs 0.025 ms
+without features (≈ the same with separate colliders: the BVH broad phase copes; compounds
+mainly save build time and memory).
+
 ## Known gaps
 - Contacts reach `wp_damage`, but damage is still the prompt-01 stub until workstream 03 merges.
 - Static geometry is boxes only (`add_static_box`, TB-3); simcli/testbed scenarios do not create them yet.
