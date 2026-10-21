@@ -691,3 +691,54 @@ out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct updat
   20.2 s against the 20 s cap); the 7×7 sprint scenarios (`race/city_sprint{,_police}.ron`)
   start on the new carriageway's judge slots (x 58.05 / 63.05 → 59.55 / 64.55) and
   `city_sprint_police` uses seed 12 (both `wp_race` police tests pass at aim dy −10 / 0 / +10).
+
+## River, bridges, tunnel, landmarks and hideouts (branch `claude/beautiful-einstein-b1noth`, 2026-10-21)
+User request: a more advanced map — places to hide, landmarks, tunnels, a river system,
+bridges. All on Port Vesper v2 (`vesper_v2`, same id); details in the `wp_world` README.
+- **Road format v4** (`ROAD_FORMAT_VERSION` 3 → 4): `RoadNetwork::features: CityFeatures`
+  (`waterways`, `bridges`, `tunnels`, `structures`, `landmarks`, `hideouts`) and
+  `Heightfield::holes` (removed terrain cells). The grid city and imports carry empty
+  features; `procedural_12x12.road.{bin,json}` regenerated (`just city`).
+- **Vesper River** (north → south along x ≈ −505, through a gorge past Hollins Heights, into
+  the sea) and **Calder Canal** (level, west through Canal Flats to a turning basin; the Canal
+  Flats grid moved west of the river). Every road over a channel is a deck: eleven named
+  bridges, among them the steel-truss **Iron Bridge** (Canal Street, 1+1; `surface_at` →
+  `SurfaceType::Metal` on its deck) and Loop 9's Vesper / Mouth viaducts.
+- **Hollins Tunnel** (≈ 430 m) on Loop 9's north leg under Hollins Heights' northern
+  shoulder (the old 55 m crest). Terrain over the bore is natural ground, raised to clear the
+  7 m ceiling; the cells at each mouth that would dip across the road are holes in the
+  terrain collider, closed by portal blocks, aprons and the lining.
+- **Landmarks**: Lantern Tower (230 m), Vesper Point Lighthouse, Hollins Observatory, Calder
+  Mill Chimney, three Gantry Cranes, Larkspur Water Tower, plus the Iron Bridge and the tunnel.
+- **Hideouts**: the tunnel and five canopies (open-sided roofs on pillars beside a road).
+- **Queries**: `WorldQuery::line_of_sight` now also stops at structures (between their
+  bottom and top) and ignores the terrain inside tunnel bores (a unit in the tunnel sees
+  along it, the helicopter does not see in); `CityMap::in_tunnel`, `water_surface_at`,
+  `on_steel_deck`; `CityMap::ground_height` with `near_z` lets the terrain win when it is more
+  than 1 m closer than the road (hillside over the tunnel, ground under a deck).
+- **For police (E):** escapes now have real cover — the Hollins Tunnel and the canopies
+  break the helicopter's line of sight with no police-side change. `features.hideouts` lists
+  them (name, position, radius) if dispatch wants to search them.
+- **For the testbed / UI (C, 16):** the greybox carries everything (new materials `river`,
+  `tunnel_lining`, `canopy`, `landmark`, `steel`); `features.landmarks` / `hideouts` are there
+  for the minimap and captain map (not exported through `wp_wasm` yet).
+
+### Changes outside my crates (this branch)
+- `crates/wp_sim/src/physics.rs` (lead): terrain tiles honour `Heightfield::holes`
+  (`HeightField::set_cell_status(.., CELL_REMOVED)`); every `features.structures` prism gets a
+  convex-hull collider; `CityColliders` gained `structures` and `terrain_holes`.
+- `crates/wp_sim/tests/city_v2.rs`: collider counts; new
+  `lanes_through_the_tunnel_and_the_truss_are_clear` (all 8 lanes through the tunnel and over
+  the Iron Bridge driven at the limit: no contact, ≤ 2.5 m off line).
+- `tools/city-import/src/glb.rs`: river ribbons, structures, steel decks; terrain over a
+  tunnel bore is not pulled down by the coarse-render minimum; `SEA_Z` is
+  `wp_world::network::SEA_LEVEL_M`.
+- `apps/simcli/scenarios/race/vesper_hollins_sprint.ron` (+ `wp_race/tests/race_vesper.rs`
+  comment): the `Hollins Ascent` grid now sits just across the Hollins Gorge Bridge (a
+  staggered 1+1 grid launched into the parapets of the new deck; the left column clipped
+  them). Spawn slots updated; all four racers finish with 0 contacts.
+  `city/hill_road_ascent.ron` comment updated (≈ 0.9 km).
+- **Goldens re-blessed** (`[bless]` commit): every Port Vesper scenario changed (new map).
+  `city_loop_crest_at_limit` now runs through the tunnel (passes, no contacts).
+- `docs/media/city-v2/features_*.png`: greybox renders of the river, Iron Bridge, tunnel
+  mouth and bore, canal and port.

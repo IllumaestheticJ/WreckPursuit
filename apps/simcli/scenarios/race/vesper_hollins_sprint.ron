@@ -1,5 +1,6 @@
-// wp_race: a night street sprint up Port Vesper v2's Hollins Drive, from the Mercer junction
-// to the Knob Observatory Lot (≈ 1.2 km, ≈ 85 m climb, 6 hairpins, grades up to 11.5 %). The
+// wp_race: a night street sprint up Port Vesper v2's Hollins Drive, from across the Hollins
+// Gorge Bridge to the Knob Observatory Lot (≈ 1 km, ≈ 80 m climb, 6 hairpins, grades up to
+// 11.5 %). The
 // course is the city's own "Hollins Ascent -> Knob Observatory Lot" route (the one
 // city/hill_road_ascent.ron drives at 25 mph). Four entrants sit on the judge's staggered grid
 // slots on the climb (row gap 8 m, columns 5 m apart); simcli puts each on the road surface.
@@ -22,10 +23,10 @@
     police_cars: false,
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (-437.14, 875.92, 22.4), yaw: 1.4439),
-        (id: "ai_sedan", car: "debug_sedan", pos: (-432.54, 880.37, 22.4), yaw: 1.4439),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (-429.21, 874.9, 22.4), yaw: 1.4439),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (-424.6, 879.36, 22.4), yaw: 1.4439),
+        (id: "ai_coupe", car: "debug_coupe", pos: (-581.17, 897.95, 27.1), yaw: 1.0645),
+        (id: "ai_sedan", car: "debug_sedan", pos: (-575.25, 900.39, 27.1), yaw: 1.0645),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (-574.17, 894.08, 27.1), yaw: 1.0645),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (-568.25, 896.51, 27.1), yaw: 1.0645),
     ],
     duration_s: 10.0,
     hash_every: 240,

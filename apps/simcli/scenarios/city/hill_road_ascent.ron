@@ -1,5 +1,5 @@
-// Port Vesper v2: Hollins Drive from the Mercer junction to Hollins Knob (≈ 1.2 km, ≈ 85 m
-// climb, 6 hairpins, grades up to 11.5 %, crests). The route driver holds the 25 mph limit
+// Port Vesper v2: Hollins Drive from across the Hollins Gorge Bridge to Hollins Knob (≈ 0.9 km,
+// ≈ 80 m climb, 6 hairpins, grades up to 11.5 %, crests). The route driver holds the 25 mph limit
 // wherever the curves allow it (pursuit-grade cornering), so every crest is taken at the
 // limit. Expect: the car stays on the road, never leaves the ground, arrives undamaged.
 (
@@ -26,7 +26,7 @@
         metric(name: "max_airborne_s", min: 0.0, max: 0.05),
         metric(name: "max_speed_mps", min: 10.0, max: 12.5),
         metric(name: "crush_depth_m", min: 0.0, max: 0.02),
-        metric(name: "path_length_m", min: 900.0, max: 1600.0),
+        metric(name: "path_length_m", min: 750.0, max: 1400.0),
         total_loss(expected: false),
     ],
 )

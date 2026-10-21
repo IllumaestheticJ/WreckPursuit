@@ -181,8 +181,8 @@ fn hollins_drive_sprint_is_raced_to_the_top() {
         .iter()
         .find(|x| x.status == RacerStatus::Finished && x.position == 1)
         .expect("a winner");
-    // ~1.2 km uphill through six hairpins: slower than the flat arterial, faster than the
-    // 25 mph route driver (~105 s).
+    // ~0.9 km uphill (from across the gorge bridge) through six hairpins: slower than the
+    // flat arterial, faster than the 25 mph route driver (~105 s).
     let t = winner.elapsed_s().unwrap();
     assert!((40.0..105.0).contains(&t), "winner took {t:.1} s");
     // The field reaches the top. One racing incident is allowed (at seed 16 the last car

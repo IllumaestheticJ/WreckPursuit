@@ -1,6 +1,7 @@
-// Port Vesper v2: Loop 9 westbound over Hollins Heights' northern shoulder at the 55 mph
-// limit: banked sweepers, the big highway crest, the deck over the Route 40 North underpass
-// and the drop down the west leg. Expect: no launch over the crest, on the road throughout.
+// Port Vesper v2: Loop 9 westbound at the 55 mph limit: banked sweepers, the deck over the
+// Route 40 North underpass, the Vesper Viaduct over the river, the Hollins Tunnel under Hollins
+// Heights' northern shoulder (the old crest; portals, lining) and the drop down the west leg.
+// Expect: no launch, no contact with the tunnel, on the road throughout.
 (
     name: "city_loop_crest_at_limit",
     seed: 13,
