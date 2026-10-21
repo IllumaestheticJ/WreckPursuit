@@ -353,12 +353,16 @@ pub struct HeloView {
     pub unit: UnitId,
     /// World position, m.
     pub pos: [f32; 3],
-    /// Spotlight aim point (ground), m.
+    /// Spotlight aim point: the racer's last known position (where it is while the
+    /// helicopter has visual); z is the racer's current height, m.
     pub spotlight_target: [f32; 3],
     /// Spotlight cone half angle, rad.
     pub cone_half_angle_rad: f32,
     /// Racer being tracked.
     pub target: EntityId,
+    /// The helicopter currently has visual on `target` (spotlight on the car rather than on
+    /// where it was last seen).
+    pub has_visual: bool,
 }
 
 /// Compass word for a direction (radio flavour). Pure comparisons, no trig.

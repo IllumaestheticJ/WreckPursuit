@@ -1335,3 +1335,16 @@ drawn (invisible hillside).
 **Gate.** `wp_sim/tests/city_v2.rs::solid_terrain_is_the_drawn_terrain` (158k off-road ray
 casts ≤ 1 mm from the drawn terrain; fails on the old colliders). Also on
 `claude/lucid-cori-8sjuzz` for `main`.
+
+## Lead helper note (P9 helicopter, 2026-10-20; merged 2026-10-21 by `triage/helicopter`)
+
+`CityMap::line_of_sight` now treats **bridge decks** as occluders: `surface::deck_slabs(net)` —
+surface centreline pieces whose whole cross-section is ≥ `DECK_COVER_CLEARANCE_M` (3 m) above
+the terrain at both ends — each a thin plane over the paved width (bank ignored), indexed in a
+32 m grid like buildings; `DeckSlab::blocks(p, q)` solves the single crossing in closed form.
+Effect: a helicopter cannot see a car under Port Vesper's overpass or in the underpass; cars on
+the deck stay visible. Ground-level sight lines are unaffected (horizontal rays under a deck do not
+cross its plane). Tests: `surface::tests::*` (slab geometry), `vesper::tests::overpass_decks_hide_the_road_below_from_the_air`.
+Decks are separate from round 12's covered spans (`covered.rs`: tunnels and the Founders Cut
+trench, switchable with `covered_los`); `deck_slabs` is not affected by `covered_los`. The slab
+list and its grid are `Arc`-shared like the other grids (cheap `CityMap` clones).

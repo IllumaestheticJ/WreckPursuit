@@ -425,6 +425,9 @@ export function sirenFreqAtPhase(s: Params, phase: number): number {
   return lo + (hi - lo) * x;
 }
 
+/** Earliest start of a new siren pitch curve, ahead of the audio clock, s. */
+const SIREN_LEAD_S = 0.05;
+
 /** Siren (v1 packs): a continuous tone whose pitch follows the cadence on the audio clock.
  * Only the PITCH is modulated; the amplitude never changes for the life of the voice.
  *
@@ -455,7 +458,11 @@ function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   let scheduledUntil = t0;
   let doppler = p.doppler || 1;
   const schedule = (now: number) => {
-    if (scheduledUntil < now) scheduledUntil = now;
+    // After a slow frame the schedule lags the audio clock. Restart it a little ahead of
+    // `currentTime`, never at it: a curve starting where the audio thread has already rendered
+    // trips a CHECK in Chromium's AudioParam timeline and kills the tab (headless e2e, ~1 s
+    // SwiftShader frames; reproduced in isolation, see docs/integration/testbed.md).
+    if (scheduledUntil < now + SIREN_LEAD_S) scheduledUntil = now + SIREN_LEAD_S;
     while (scheduledUntil < now + 0.3) {
       // Back-to-back curves must not overlap: float rounding in the running end time can put
       // a start a hair before the previous curve's end, which throws NotSupportedError and

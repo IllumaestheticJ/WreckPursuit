@@ -32,6 +32,109 @@ const tmpNormal = new THREE.Vector3();
 const groundRay = new THREE.Raycaster();
 const groundFrom = new THREE.Vector3();
 const groundDown = new THREE.Vector3(0, -1, 0);
+/** Floats per helicopter in police_helicopters(). */
+const HELO_STRIDE = 8;
+/** The spotlight is on from this night factor (0 noon … 1 midnight). */
+const SPOTLIGHT_NIGHT = 0.35;
+
+interface HeloAirframe {
+  obj: THREE.Group;
+  rotor: THREE.Object3D;
+  tailRotor: THREE.Object3D;
+  nav: THREE.MeshStandardMaterial;
+  /** Light bar (flashes while the unit is pursuing). */
+  red: THREE.MeshStandardMaterial;
+  blue: THREE.MeshStandardMaterial;
+}
+
+/** A helicopter spotlight. Unlit meshes only, no THREE light: a changing light count recompiles
+ * every lit shader mid-chase and every light costs every lit pixel (see `sirenLight`). */
+interface HeloBeam {
+  /** Visible beam: unit cone (apex at the origin, opening along +Z), scaled to length/radius. */
+  cone: THREE.Mesh;
+  /** Pool of light on the ground at the aim point. */
+  pool: THREE.Mesh;
+}
+
+/** Police helicopter: fuselage, tail boom, skids, main + tail rotor, a blinking nav light and a
+ * red / blue light bar under the nose. */
+function makeHelicopter(): HeloAirframe {
+  const g = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color: 0x1d2433 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe9ebf0 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x0a1220 });
+  const fuselage = new THREE.Mesh(new THREE.BoxGeometry(2.2, 5.0, 2.2), body);
+  fuselage.position.set(0, 0.5, 1.6);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.25, 4.0, 0.4), white);
+  stripe.position.set(0, 0.3, 1.4);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.4, 1.5), glass);
+  nose.position.set(0, 3.4, 1.4);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 5.5, 0.5), body);
+  boom.position.set(0, -4.6, 2.1);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 1.6), body);
+  fin.position.set(0, -7.2, 2.7);
+  const skidGeo = new THREE.BoxGeometry(0.15, 5.0, 0.15);
+  const skidL = new THREE.Mesh(skidGeo, white);
+  skidL.position.set(-1.2, 0.5, 0.1);
+  const skidR = new THREE.Mesh(skidGeo, white);
+  skidR.position.set(1.2, 0.5, 0.1);
+  const rotor = new THREE.Group();
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  for (let k = 0; k < 2; k++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.35, 0.06), bladeMat);
+    blade.rotation.z = (k * Math.PI) / 2;
+    rotor.add(blade);
+  }
+  rotor.position.set(0, 0.5, 2.95);
+  const tailRotor = new THREE.Group();
+  const tb = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 1.8), bladeMat);
+  tailRotor.add(tb);
+  tailRotor.position.set(0.3, -7.2, 2.9);
+  const nav = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0x000000 });
+  const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), nav);
+  beacon.position.set(0, -1.2, 2.8);
+  const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
+  const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
+  barR.position.set(-0.32, 2.2, 0.4);
+  const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
+  barB.position.set(0.32, 2.2, 0.4);
+  g.add(fuselage, stripe, nose, boom, fin, skidL, skidR, rotor, tailRotor, beacon, barR, barB);
+  return { obj: g, rotor, tailRotor, nav, red, blue };
+}
+
+/** One spotlight's beam and ground pool, hidden, added to `parent`. */
+function makeBeam(parent: THREE.Object3D): HeloBeam {
+  // Unit cone: apex at the origin, opening along +Z (lookAt's axis), length 1, base radius 1.
+  // Three's cone has its apex at +Y 0.5; rotating -90° about X puts it at -Z 0.5.
+  const geo = new THREE.ConeGeometry(1, 1, 24, 1, true);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0, 0.5);
+  const cone = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: 0xfff6d8,
+      transparent: true,
+      opacity: 0.07,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  const pool = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff6d8,
+      transparent: true,
+      opacity: 0.18,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  cone.visible = pool.visible = false;
+  parent.add(cone, pool);
+  return { cone, pool };
+}
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -57,7 +160,13 @@ export class SceneView {
   /** Small city detail (city_tiles.ts CITY_DETAIL) past this distance is not drawn, m. */
   detailDistanceM = Infinity;
   private readonly camPos = new THREE.Vector3();
-  private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Police helicopter airframes (police_draw()), pooled; see updateHelicopters(). */
+  private readonly helicopters: HeloAirframe[] = [];
+  /** Helicopter spotlights (police_helicopters()), pooled; see updateHelicopterBeams(). */
+  private readonly beams: HeloBeam[] = [];
+  /** Helicopters drawn last frame and spotlights lit (for automation). */
+  helicoptersShown = 0;
+  spotlightsLit = 0;
   /** Roadblock barriers (police_tools()), pooled; see updatePoliceTools(). */
   private readonly tools = new THREE.Group();
   private readonly toolPool: { barrier: THREE.Group; body: THREE.Mesh; bulb: THREE.Mesh; lamp: THREE.MeshStandardMaterial }[] = [];
@@ -128,6 +237,11 @@ export class SceneView {
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
     this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.sirenLight);
+    // One helicopter spotlight exists from the start (hidden) so its two programs are prewarmed,
+    // not compiled in the frame the first helicopter switches it on.
+    const beam = makeBeam(this.world);
+    this.beams.push(beam);
+    this.prewarmRoots.push(beam.cone, beam.pool);
     // The first contact marker exists from the start (hidden), so its shader programs are
     // prewarmed instead of compiled in the frame of the first contact (browser-perf.md 12b).
     const first = this.newContactMarker();
@@ -222,40 +336,36 @@ export class SceneView {
 
   /**
    * Draw police helicopters from police_draw() records (layout.ts D; flags 1 helicopter,
-   * 2 pursuing): a box at altitude with a flashing light bar while pursuing. Police cars, bound
-   * or not, are drawn by render/lod.ts.
+   * 2 pursuing): an airframe at altitude with a spinning rotor, a blinking beacon and a flashing
+   * light bar while pursuing. Police cars, bound or not, are drawn by render/lod.ts.
    */
   updateHelicopters(units: Float32Array, timeS: number): void {
     let n = 0;
     for (let o = 0; o < units.length; o += DRAW_STRIDE) {
       const flags = units[o + D.flags];
       if (!(flags & POLICE_DRAW_FLAG.helicopter)) continue;
-      if (n >= this.policeUnits.length) {
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
-        body.position.z = 0.7;
-        const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
-        const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
-        const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
-        barR.position.set(-0.32, -0.1, 1.48);
-        const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
-        barB.position.set(0.32, -0.1, 1.48);
-        g.add(body, barR, barB);
-        g.scale.setScalar(1.4);
-        this.world.add(g);
-        this.policeUnits.push({ obj: g, red, blue });
+      if (n >= this.helicopters.length) {
+        const h = makeHelicopter();
+        h.obj.scale.setScalar(1.4);
+        this.world.add(h.obj);
+        this.helicopters.push(h);
       }
-      const u = this.policeUnits[n];
-      u.obj.position.set(units[o + D.pos], units[o + D.pos + 1], units[o + D.pos + 2]);
-      u.obj.quaternion.set(units[o + D.rot], units[o + D.rot + 1], units[o + D.rot + 2], units[o + D.rot + 3]);
+      const h = this.helicopters[n];
+      h.obj.position.set(units[o + D.pos], units[o + D.pos + 1], units[o + D.pos + 2]);
+      h.obj.quaternion.set(units[o + D.rot], units[o + D.rot + 1], units[o + D.rot + 2], units[o + D.rot + 3]);
+      // Rotor speed is a look, not a simulation: about 6 rev/s main, 30 rev/s tail.
+      h.rotor.rotation.z = (timeS * 38) % (Math.PI * 2);
+      h.tailRotor.rotation.x = (timeS * 190) % (Math.PI * 2);
+      h.nav.emissive.setHex((timeS + n * 0.3) % 1 < 0.12 ? 0xff2020 : 0x000000);
       const chasing = (flags & POLICE_DRAW_FLAG.chasing) !== 0;
       const phase = (timeS * 2.5 + n * 0.17) % 1;
-      u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
-      u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
-      u.red.emissiveIntensity = u.blue.emissiveIntensity = this.policeGlow;
+      h.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
+      h.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+      h.red.emissiveIntensity = h.blue.emissiveIntensity = this.policeGlow;
       n++;
     }
-    this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
+    this.helicopters.forEach((h, i) => (h.obj.visible = i < n));
+    this.helicoptersShown = n;
   }
 
   /**
@@ -296,6 +406,44 @@ export class SceneView {
       t.bulb.position.set(0, 0, hz + 0.09);
       t.lamp.emissive.setHex(flash ? 0xffaa00 : 0x000000);
     });
+  }
+
+  /**
+   * Helicopter spotlights (police_helicopters(): [x, y, z, aimX, aimY, aimZ, coneHalfAngle,
+   * flags], flag 1 = has visual). At night each tracking helicopter lights its target: a faint
+   * visible beam and a pool of light on the road (additive, unlit: no THREE light). Without
+   * visual the beam stays on the last known position, dimmer, so the player can see that the
+   * helicopter has lost them.
+   */
+  updateHelicopterBeams(helos: Float32Array, night: number): void {
+    const n = helos.length / HELO_STRIDE;
+    while (this.beams.length < n) this.beams.push(makeBeam(this.world));
+    const on = night >= SPOTLIGHT_NIGHT;
+    let lit = 0;
+    const from = new THREE.Vector3();
+    const to = new THREE.Vector3();
+    this.beams.forEach((b, i) => {
+      const show = on && i < n;
+      b.cone.visible = b.pool.visible = show;
+      if (!show) return;
+      lit++;
+      const o = i * HELO_STRIDE;
+      from.set(helos[o], helos[o + 1], helos[o + 2]);
+      to.set(helos[o + 3], helos[o + 4], helos[o + 5]);
+      const half = helos[o + 6];
+      const visual = (helos[o + 7] & 1) !== 0;
+      const k = Math.min(1, (night - SPOTLIGHT_NIGHT) / 0.3) * (visual ? 1 : 0.45);
+      const len = from.distanceTo(to);
+      const r = Math.tan(half) * len;
+      b.cone.position.copy(from);
+      b.cone.lookAt(this.world.localToWorld(to.clone()));
+      b.cone.scale.set(r, r, len);
+      (b.cone.material as THREE.MeshBasicMaterial).opacity = 0.07 * k;
+      b.pool.position.set(to.x, to.y, to.z + 0.08);
+      b.pool.scale.setScalar(r);
+      (b.pool.material as THREE.MeshBasicMaterial).opacity = 0.18 * k;
+    });
+    this.spotlightsLit = lit;
   }
 
   /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
