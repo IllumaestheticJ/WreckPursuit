@@ -48,7 +48,7 @@ fn plan_sprint(world: &World) -> CityRace {
         world,
         [60.55, -437.0 + dy, 0.0],
         [0.0, 1.0],
-        [60.55, -230.0 + dy, 0.0],
+        [60.55, -300.0 + dy, 0.0],
         3.0,
     )
     .expect("arterial sprint route")

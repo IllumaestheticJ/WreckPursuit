@@ -247,6 +247,31 @@ Why each moved:
   (104 / 114 s); they are not now (65 / 69 s).
 - **loop9_circuit, city_sprint**: 1–8 % faster (round-12b physics and traffic).
 
+### Re-lock after the main merge (2026-10-21, ws/harness ← main, PR #17)
+
+Main's highway layout (divided grid viaduct with diamond ramps, divided Loop 9) changed the
+grid sprint's start (the POI is now at the spine end, y = -712: course 1112 m, was 747 m), so
+both grid pace files took the picker's new grid, and both Loop 9 files the circuit's new grid
+(vertex moved off the Bluff Road on-ramp). Re-recorded with the same rule:
+
+| pace scenario | best ratio | race time per car (s), before → after |
+|---|---|---|
+| grid_highway_sprint_s50 | 2.60 → 1.31 | ai_vic 77 → 37, ai_juno 96 → 43, ai_tito 55 → 40, player 97 → 39 (new course) |
+| grid_highway_sprint_s95 | 2.83 → 1.30 | ai_vic 76 → 37, ai_juno 108 → 40, ai_tito 60 → 41, player 106 → 44 (new course) |
+| lantern_checkpoint_s50 | 1.70 → 2.46 | ai_juno 70 → 87, ai_dez 59 → 92, ai_tito 71 → 88, player 76 → 93 |
+| lantern_checkpoint_s95 | 1.85 → 3.35 | ai_juno 67 → 125, ai_dez 64 → 118, ai_tito 110 → 141, player 111 → 138 |
+| city_sprint_s95 | 1.05 → 1.04 | ai_sedan_2 15 → 12 (faster) |
+
+- **grid_highway_sprint**: the divided viaduct has three lanes a side and no civilians side by
+  side across the whole road, so the field passes traffic: about twice as fast as before.
+- **lantern_checkpoint**: slower, and it is traffic, not the AI. The pace sweep books 90 s of
+  the s95 leader's time to `civ`: one civilian after another holds it at the downtown junctions
+  ((0, 163) waiting to turn right, (0, 48), (-6, -52), (11, -48)), and the field queues behind.
+  With the pre-merge `wp_opponent` (field.rs / corridor.rs from f7abeb95) on the merged city,
+  nobody finished at all, so main's racer-AI fixes help here. **Open:** downtown civilian
+  density / junction stand-offs after the merge (owner D / traffic).
+- hollins_sprint and loop9_circuit stay inside their ranges.
+
 ## Tests and gate (release unless noted)
 
 - `wp_opponent`: unit, capability table (fingerprints in debug too), `race.rs` full-sim tests,

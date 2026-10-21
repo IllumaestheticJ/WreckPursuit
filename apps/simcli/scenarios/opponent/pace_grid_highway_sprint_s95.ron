@@ -8,8 +8,9 @@
 // builds) and checks them: `finishers` (every car finishes), `best_ratio` (best time over
 // that car's ideal time: its speed profile at 100 % of its measured limits; at most today's
 // + 0.05, never under 0.97), `race_time_s` per car (today's time −15 % .. +15 %, +20 % at
-// skill 0.50). Re-measured 2026-10-21 on ws/harness, after lead/city-residential; re-measure
-// and widen only with a reason (docs/integration/opponent-pace.md, Re-lock 2026-10-21).
+// skill 0.50). Re-measured 2026-10-21 on ws/harness, after the merge with main's highway
+// layout; re-measure and widen only with a reason (docs/integration/opponent-pace.md,
+// Re-lock after the main merge).
 (
     name: "opponent_pace_grid_highway_sprint_s95",
     seed: 7,
@@ -31,7 +32,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (11.75, -361.9, 0.0),
+            pos: (13.25, -727.0123, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -39,7 +40,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (6.75, -349.9, 0.0),
+            pos: (8.25, -715.0123, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -47,7 +48,7 @@
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (11.75, -353.9, 0.0),
+            pos: (13.25, -719.0123, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -55,7 +56,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (6.75, -357.9, 0.0),
+            pos: (8.25, -723.0123, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -76,10 +77,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 2.88),
-        metric(name: "race_time_s", entity: "ai_vic", min: 64.7, max: 87.6),
-        metric(name: "race_time_s", entity: "ai_juno", min: 91.7, max: 124.1),
-        metric(name: "race_time_s", entity: "ai_tito", min: 51.4, max: 69.7),
-        metric(name: "race_time_s", entity: "player", min: 90.5, max: 122.6),
+        metric(name: "best_ratio", min: 0.97, max: 1.30),
+        metric(name: "race_time_s", entity: "ai_vic", min: 31.5, max: 42.6),
+        metric(name: "race_time_s", entity: "ai_juno", min: 33.9, max: 45.9),
+        metric(name: "race_time_s", entity: "ai_tito", min: 34.9, max: 47.2),
+        metric(name: "race_time_s", entity: "player", min: 37.3, max: 50.4),
     ],
 )
