@@ -308,3 +308,20 @@ candidate build's bars with a tick at the current build. The mod tree's delta ta
 bar values for 0–100, top speed and cornering (50 m) so they match the bars; class index, power,
 mass, power/weight and braking stay the economy estimator's (the class index is computed from the
 estimator, as in `wp_economy`). Cars without stats fall back to the estimator rows.
+
+### Follow-up (2026-10-21): modded builds measured on the physics rig
+
+`src/data/measure.ts`: hosts register a `BuildMeasurer` with `setBuildMeasurer` (exported from
+`src/live`); `useBuildStats(defId, mods, mode, provided?)` returns the estimate at once, asks the
+measurer in the background and re-renders with the measured build (cached per car / sorted mods /
+mode; a failure keeps the estimate). `createWorkerMeasurer()` runs `wp_wasm::car_stats_build_json`
+in a module Web Worker (`src/live/statsWorker.ts`, ~1–2 s per new build in headless Chromium), so
+the UI never blocks. Import it from `src/live/workerMeasurer.ts` directly (not re-exported from
+`src/live`, so hosts without `worker.format = "es"`, e.g. the testbed, still build); the worker lazy-loads the testbed's wasm package via `import.meta.glob` and
+answers with an error when it has not been built (`vite.config.ts`: `worker.format = "es"`). The
+demo installs it unless `?measure=0`. Garage and mod tree labels read measuring… → measured, or
+estimated without a measurer; the mod tree's 0–100 / top speed / cornering rows follow the same
+values. Observed: Shiro Turbo (intake, cat-back, street ECU, bumper) measures 6.1 s / 267 km/h;
+without the ECU map 6.2 s / 270 km/h, i.e. the rig's top speed is not monotonic in that mod (the
+estimator said 271 → 267). Possibly `metrics::top_speed_kmh` stopping early (it stops when speed
+gains < 0.04 m/s over 2 s); not investigated.
