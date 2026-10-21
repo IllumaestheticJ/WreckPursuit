@@ -409,6 +409,8 @@ pub struct Debug {
     /// Pass evaluations so far: [accepted, no run, too late, no room, slower line, lane
     /// taken ahead, lane taken behind, target busy passing someone].
     pub pass_checks: [u32; 8],
+    /// Out on the opposing lanes (my body left of my own lanes' edge).
+    pub opposing: bool,
 }
 
 /// What limits a racer's speed target.
@@ -2612,6 +2614,7 @@ fn decide_racer(
             n: r.n,
             brake_dist,
             pass_checks: r.pass_checks,
+            opposing: r.n - hw < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m,
         };
     }
 }
