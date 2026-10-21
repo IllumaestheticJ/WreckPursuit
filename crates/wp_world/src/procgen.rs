@@ -7,9 +7,8 @@
 //! with kerbside parking. The highway runs between the two central columns: a divided viaduct
 //! (two one-way 3-lane carriageways, shoulders and a median barrier) that rises from the ring
 //! road at each end and bridges the arterial/collector rows; other rows end at the columns
-//! beside it. Full diamond ramps reach the first and last crossing rows when the blocks on
-//! both sides of those rows are long enough (the 12×12 city); smaller grids reach the highway
-//! at the ring junctions only. Diagonals (square grids only) run corner
+//! beside it. Ramps reach the first and last crossing rows: half diamonds facing the ring on
+//! every grid, full diamonds where the next block in is long enough too (the 12×12 city). Diagonals (square grids only) run corner
 //! to corner through grid nodes with a kerbside bus lane. The ring road joins every street
 //! end; its junctions with local streets are priority-controlled. The ground is a flat
 //! heightfield just under the streets, so the viaduct is a real bridge in physics too.
@@ -264,38 +263,48 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         .collect();
     cross_ys.sort_by(f32::total_cmp);
     let mut ramps: Vec<GridRamp> = Vec::new();
-    // Full diamonds at the first and last crossing rows where the blocks on both sides of the
-    // row are long enough for a ramp (the 12×12 city); smaller grids reach the highway at the
-    // ring junctions only.
+    // Ramps at the first and last crossing rows: the outer half of each diamond (towards the
+    // ring) whenever that block is long enough, the inner half too where the next block in is
+    // (the 12×12 city: full diamonds).
     if let (Some(&y1), Some(&yk)) = (cross_ys.first(), cross_ys.last()) {
         let outer = RAMP_SPAN_M + 70.0;
         let inner = RAMP_SPAN_M + 40.0;
         let full = cross_ys.len() >= 2
-            && y1 - y_s >= outer
-            && y_n - yk >= outer
             && cross_ys[1] - y1 >= inner
             && yk - cross_ys[cross_ys.len() - 2] >= inner;
-        if full {
-            for (side, off, row_y, gore_y) in [
-                // Southern row: northbound exit / southbound entry towards the ring, then
-                // southbound exit / northbound entry from the next block north.
+        let mut plan: Vec<(f32, bool, f32, f32)> = Vec::new();
+        if y1 - y_s >= outer && y_n - yk >= outer {
+            // Southern row: northbound exit / southbound entry towards the ring, then (full
+            // diamond) southbound exit / northbound entry from the next block north; the
+            // northern row mirrored.
+            plan.extend([
                 (1.0, true, y1, y1 - RAMP_SPAN_M),
                 (-1.0, false, y1, y1 - RAMP_SPAN_M),
-                (-1.0, true, y1, y1 + RAMP_SPAN_M),
-                (1.0, false, y1, y1 + RAMP_SPAN_M),
-                // Northern row, mirrored.
+            ]);
+            if full {
+                plan.extend([
+                    (-1.0, true, y1, y1 + RAMP_SPAN_M),
+                    (1.0, false, y1, y1 + RAMP_SPAN_M),
+                ]);
+            }
+            plan.extend([
                 (-1.0, true, yk, yk + RAMP_SPAN_M),
                 (1.0, false, yk, yk + RAMP_SPAN_M),
-                (1.0, true, yk, yk - RAMP_SPAN_M),
-                (-1.0, false, yk, yk - RAMP_SPAN_M),
-            ] {
-                ramps.push(GridRamp {
-                    side,
-                    off,
-                    row_y,
-                    gore_y,
-                });
+            ]);
+            if full {
+                plan.extend([
+                    (1.0, true, yk, yk - RAMP_SPAN_M),
+                    (-1.0, false, yk, yk - RAMP_SPAN_M),
+                ]);
             }
+        }
+        for (side, off, row_y, gore_y) in plan {
+            ramps.push(GridRamp {
+                side,
+                off,
+                row_y,
+                gore_y,
+            });
         }
     }
     let terminal_x = |side: f32| hx + side * TERMINAL_X_M;
@@ -1021,7 +1030,7 @@ mod tests {
     #[test]
     fn highway_is_a_divided_viaduct_with_ramps() {
         use crate::map::{CityMap, SegKind};
-        for (n, ramps_expected) in [(12usize, 8usize), (7, 0), (6, 0)] {
+        for (n, ramps_expected) in [(12usize, 8usize), (7, 4), (6, 4)] {
             let net = generate(&ProcGenConfig {
                 nx: n,
                 ny: n,

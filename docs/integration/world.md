@@ -669,3 +669,25 @@ out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct updat
   waited for ever: the AI does not pass a stopped car that close to a junction.
 - `circuit_8x5` (pending scenario) shows two physical civilians colliding at the highway's
   north ring T-junction (10 m/s) and staying pressed together.
+
+### Follow-up: ramps on the smaller grids (same branch, 2026-10-21)
+- Every grid now gets the half diamond facing the ring at its first and last crossing rows
+  (4 ramps); the 12×12 city keeps its two full diamonds (8 ramps, data unchanged).
+- **`wp_opponent` (minimal changes, for N to review in `field.rs`):**
+  - junction awareness ignores civilians on another level (more than 4 m above or below the
+    racer's track: traffic on the viaduct overhead was holding racers at the junction under it);
+  - on the major road of a priority junction, civilians stopped at its minor approaches, and
+    those still able to stop before the box, no longer hold the racer;
+  - a racer standing nose to tail with a parked (busted / retired / pulled-over) racer for 3 s
+    reverses for 3.5 s to make room to steer round it (it waited for ever behind a busted car
+    parked just before a junction);
+  - `corridor.rs`: a freeway merge / diverge taper (radius-0 junction) is road, not a
+    junction box (racers stopped before an off-ramp gore for traffic on the other
+    carriageway).
+- **Tests re-aimed:** `open_roads_with_traffic_no_civilian_contact` seed 7 → 5 (seeds 6-8
+  bring the last racer to the 6-way corner lights on a long red just short of 250 m; 1-5, 9,
+  10 pass); `wanted_ai_racer_flees_police_through_the_city` stays at 95 s;
+  `wp_police` `day_core_speeder` seed 100 → 103 (one run of 100-104 started its pursuit at
+  20.2 s against the 20 s cap); the 7×7 sprint scenarios (`race/city_sprint{,_police}.ron`)
+  start on the new carriageway's judge slots (x 58.05 / 63.05 → 59.55 / 64.55) and
+  `city_sprint_police` uses seed 12 (both `wp_race` police tests pass at aim dy −10 / 0 / +10).

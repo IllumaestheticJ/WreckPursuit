@@ -159,11 +159,12 @@ Grid of streets at 110 m centred on the origin. Rows/columns 2 and 9 are 2+2 art
 a divided viaduct (two one-way 3-lane carriageways, shoulders, median barrier) that leaves
 the ring road at grade at each end (signalised T), climbs over 200 m (≤ 6 %) after a 115 m
 flat run and bridges the arterial/collector rows with 7.5 m clearance; other rows end at the
-columns beside it. Where the blocks on both sides of the first and last crossing rows are
-long enough (the 12×12 city) each of those rows gets a full diamond: four 45 mph ramps that
-leave / join the carriageways 280 m away and meet the row at stop-controlled terminals 22 m
-either side of the centreline (`ControlHint::RampTerminal`: the street keeps priority, the
-off-ramp stops and yields). Smaller grids reach the highway at the ring only. The ground is
+columns beside it. The first and last crossing rows get ramps: 45 mph ramps that leave /
+join the carriageways 280 m away and meet the row at stop-controlled terminals 22 m either
+side of the centreline (`ControlHint::RampTerminal`: the street keeps priority, the off-ramp
+stops and yields). Every grid gets the half diamond facing the ring (an exit for traffic
+heading away from the ring, an entry towards it: 4 ramps); where the next block in is long
+enough as well (the 12×12 city) each row gets a full diamond (8 ramps). The ground is
 a flat heightfield 12 cm under the streets, so `wp_sim` builds the road mesh (the viaduct is a
 real bridge) and the greybox draws piers and parapets; buildings still do not block cars on
 flat ground. Two 3+3 diagonal
@@ -387,8 +388,9 @@ per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seed
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 
 ## Known gaps
-- Grid cities smaller than 12×12 have no mid-city ramps (their blocks are too short for a
-  diamond); their highway is reached at the ring junctions only.
+- Grid cities smaller than 12×12 have half diamonds only (their inner blocks are too short
+  for the other half): from the city you can join the highway towards the ring and leave it
+  coming from the ring, plus the ring junctions at both ends.
 - The single-car rig (`wp_vehicle::rig`, client prediction and `tests/drive.rs`) drives on a
   flat slab, so it does not see the grid's viaduct either (as on Port Vesper's hills).
 - No painted gore chevrons or dotted lane-line extensions across freeway tapers; the taper
