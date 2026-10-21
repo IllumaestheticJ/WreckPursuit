@@ -14,7 +14,9 @@ use crate::terrain::ValueNoise;
 /// Forest trees (interior + edge) budget.
 const CAP_FOREST_TREES: usize = 6500;
 /// Undergrowth pieces along forest edges budget.
-const CAP_UNDERGROWTH: usize = 5000;
+const CAP_UNDERGROWTH: usize = 8000;
+/// Forest trees more than this many 12 m cells inside the forest edge are not solid.
+const FOREST_SOLID_DEPTH: usize = 3;
 /// Scattered trees on open land budget.
 const CAP_SCATTERED: usize = 2500;
 /// Forest mask cell, m.
@@ -906,6 +908,21 @@ pub(super) fn forest(env: &Env, fm: &ForestMask, out: &mut Vec<Feature>) {
                         || b >= fm.ny as i64
                         || fm.v[b as usize * fm.nx + a as usize] < 0.5
                 });
+            // Far inside (every cell within FOREST_SOLID_DEPTH all round is forest): the
+            // solid undergrowth along the edge keeps cars out, so these trees are visual only.
+            let deep = !edge && {
+                let r = FOREST_SOLID_DEPTH as i64;
+                (-r..=r).all(|dj| {
+                    (-r..=r).all(|di| {
+                        let (a, b) = (i as i64 + di, j as i64 + dj);
+                        a >= 0
+                            && b >= 0
+                            && a < fm.nx as i64
+                            && b < fm.ny as i64
+                            && fm.v[b as usize * fm.nx + a as usize] >= 0.5
+                    })
+                })
+            };
             let c = fm.centre(i, j);
             let conifers = matches!(
                 env.zone(c),
@@ -932,7 +949,13 @@ pub(super) fn forest(env: &Env, fm: &ForestMask, out: &mut Vec<Feature>) {
                 } else {
                     TreeKind::Broad
                 };
-                trees.push(tree(p, env.gz(p), kind, r2));
+                let mut t = tree(p, env.gz(p), kind, r2);
+                if deep {
+                    for f in &mut t {
+                        f.solid = false;
+                    }
+                }
+                trees.push(t);
             }
         }
     }
