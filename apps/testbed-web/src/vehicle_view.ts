@@ -7,10 +7,10 @@ import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
-import { PanelBody } from "./render/panels";
+import { PanelBody, carMeshNow } from "./render/panels";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
-import { proxyGeoms, styledPaint } from "./render/fleet";
+import { IND, indicatorColour, indicatorMarkers, meshFrontRear, proxyGeoms, styledPaint } from "./render/fleet";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -151,6 +151,14 @@ export class VehicleView {
   private readonly proxy: THREE.Group;
   /** The proxy's paint material (recoloured by the art style). */
   private readonly proxyPaint: THREE.MeshStandardMaterial;
+  /** Left / right indicator lamps (front + rear corner each), as the fleet draws them. */
+  private readonly indL: THREE.Mesh;
+  private readonly indR: THREE.Mesh;
+  private readonly indMatL = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  private readonly indMatR = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  /** Lit indicator lamps (`IND` bits) and the art-style version they were coloured for. */
+  private indShown = -1;
+  private indStyle = -1;
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
@@ -234,12 +242,27 @@ export class VehicleView {
       this.root.add(this.proxy);
     }
 
+    // Indicator lamps at the corners (render/fleet.ts indicatorMarkers), where the panel mesh's
+    // nose and tail are once it is known (meshes are normally preloaded).
+    {
+      const ind = this.indicatorGeoms();
+      this.indL = new THREE.Mesh(ind.left, this.indMatL);
+      this.indR = new THREE.Mesh(ind.right, this.indMatR);
+      this.root.add(this.indL, this.indR);
+      this.setIndicators(0);
+    }
+
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
       this.wheelPartsShown = null;
+      const ind = this.indicatorGeoms();
+      this.indL.geometry.dispose();
+      this.indR.geometry.dispose();
+      this.indL.geometry = ind.left;
+      this.indR.geometry = ind.right;
     });
 
     // CG marker (+ velocity arrow, which lives in world space; see update()).
@@ -537,6 +560,33 @@ export class VehicleView {
     this.sirenOn = siren;
     this.sirenColour = redOn ? (lowpoly ? PALETTE.policeRed : 0xff2040) : lowpoly ? PALETTE.policeBlue : 0x2060ff;
     this.sirenIntensity = redOn || blueOn ? (lowpoly ? sirenLightIntensity(redOn ? redGlow : blueGlow) : 25) : 0;
+  }
+
+  /**
+   * Indicator lamps lit this frame (`IND` bits from render/fleet.ts, blink phase already
+   * applied): traffic from its draw record (render/lod.ts), the player from the cosmetic stalk
+   * (indicator_stalk.ts). Unlit lenses otherwise.
+   */
+  setIndicators(mask: number): void {
+    if (mask === this.indShown && this.indStyle === artStyle.version) return;
+    this.indShown = mask;
+    this.indStyle = artStyle.version;
+    indicatorColour(this.indMatL.color, (mask & IND.left) !== 0);
+    indicatorColour(this.indMatR.color, (mask & IND.right) !== 0);
+  }
+
+  /** Whether the left / right indicator lamps are lit (read back from their materials;
+   * automation). */
+  indicatorsLit(): { left: boolean; right: boolean } {
+    return { left: this.indMatL.color.r > 0.5, right: this.indMatR.color.r > 0.5 };
+  }
+
+  /** Indicator lamp geometry at the panel mesh's nose / tail (body box ends until it loads). */
+  private indicatorGeoms(): ReturnType<typeof indicatorMarkers> {
+    const l = this.info.body_size_m[1];
+    const mesh = carMeshNow(this.info.car_id);
+    const fr = mesh ? meshFrontRear(mesh) : null;
+    return indicatorMarkers(this.info, fr?.front ?? l / 2, fr?.rear ?? -l / 2);
   }
 
   /** Where the siren light sits (sim space, the scene's `world` group): above the roof. */

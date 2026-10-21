@@ -574,7 +574,8 @@ await shot("city_chase_greybox_toggle.png");
 // sim's prop list (each parked car drawn exactly once; every prop within 150 m of the camera
 // drawn; parked cars within 150 m use the full traffic mesh), and a parked car knocked by the
 // player is drawn where the sim has it (instance matrix read back vs prop_pose, every frame,
-// < 0.2 m) while it moves.
+// < 0.2 m) while it moves. Owner playtest 2026-10-21 "parked cars don't take damage": the
+// 43 km/h knock dents it, and the dent is drawn (its own panel mesh, skinned from its lattice).
 {
   await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
   await page
@@ -608,14 +609,21 @@ await shot("city_chase_greybox_toggle.png");
     const c0 = performance.now();
     for (let i = 0; i < 200; i++) wp.sim.propsMoved();
     const movedCallMs = (performance.now() - c0) / 200;
-    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs };
+    const w0 = performance.now();
+    for (let i = 0; i < 200; i++) wp.sim.parkedWrecks();
+    const wrecksCallMs = (performance.now() - w0) / 200;
+    const wreck = wp.props.wreck(target);
+    const wrecks = wp.sim.parkedWrecks();
+    let health = 1;
+    for (let o = 0; o < wrecks.length; o += 12) if (wrecks[o] === target) health = wrecks[o + 2];
+    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs, wreck, health, wrecksCallMs };
   });
   await shot("props_knock.png");
   const st = knock.stats;
   check(
-    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
+    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox + st.wrecksDrawn === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
       (st.fullInRange === st.parkedInRange || st.fullInRange === st.maxFull || (st.parkedInRange > st.fullInRange && st.fullInRange === st.drawnFull)),
-    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box; ` +
+    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box + ${st.wrecksDrawn} dented; ` +
       `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
       `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
       `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,
@@ -624,6 +632,12 @@ await shot("city_chase_greybox_toggle.png");
     knock.maxMove > 0.3 && knock.maxErr < 0.2 && knock.undrawn === 0,
     `props: knocked parked car #${knock.target} moved ${knock.maxMove.toFixed(2)} m; drawn vs sim pose ≤ ${knock.maxErr.toFixed(3)} m over ${knock.frames} frames` +
       (knock.undrawn ? `; ${knock.undrawn} frames undrawn` : ""),
+  );
+  check(
+    knock.wreck !== null && knock.wreck.drawn && knock.wreck.maxDisp > 0.005 && knock.health < 1,
+    `props: the knocked parked car is dented (health ${knock.health.toFixed(3)}) and drawn dented: ` +
+      (knock.wreck ? `own panel mesh ${knock.wreck.drawn ? "on" : "not loaded"}, largest drawn vertex offset ${knock.wreck.maxDisp.toFixed(3)} m` : "never promoted") +
+      `; ${st.wrecks} dented parked car(s), ${st.wreckReskins} re-skins, parked_wrecks() ${knock.wrecksCallMs.toFixed(3)} ms`,
   );
 }
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
