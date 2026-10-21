@@ -49,5 +49,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.39 | preview | Big engines (V8 / inline-6, 13 cars incl. police) on the generated engine instead of 4-cylinder recordings sped up 1.8–3.4x (owner: generated sound now); 4-cylinders keep recordings |
 | 0.12.40 | preview | Spikes: a flat corner visibly drops (60–85 mm at full deflation; suspension uses the deflated radius), fully flat wheels run on the rim (low grip, pull to the flat side) |
 | 0.12.41 | preview ([link](https://claude.ai/artifact/R3vr7NVghCGvdvN4TDzZCA)) | Traffic no longer panics and slams the brakes when the player (or a racer) passes in the next lane or comes the other way; AI racers fleeing the police use every lane (they sat on the green line on Loop 9) |
-| 0.12.42 | preview | (next) |
+| 0.12.42 | preview | One combined build on the main preview link: 0.12.41's calm traffic + fleeing racers on every lane, plus rim grind on the real rim-contact flag and the lane-split rule (skilled racers thread side-by-side traffic when the gap fits) |
+| 0.12.43 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
