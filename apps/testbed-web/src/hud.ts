@@ -116,6 +116,7 @@ export class Hud {
       `<b>WreckPursuit testbed — keys</b><br>` +
       `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
       `R reset · O headlights · Q horn · M mute · Tab follow the next car<br>` +
+      `<b>Street racers</b> (city): honk (Q) next to one to challenge · \` city map · dot colour = driver level (1 Rookie green … 5 Legend red)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
       `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +

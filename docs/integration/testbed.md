@@ -649,3 +649,79 @@ embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and c
 sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
 stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
 testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
+
+## Lead helper note (2026-10-21) — street racers, A→B races, betting
+
+Owner request: NPC race cars roam the city; honk to challenge one, pick the finish B (A = where you
+met), bet on it; several driver levels, the map icon colour shows the level.
+
+**Rust** (`crates/wp_wasm/src/street.rs`, tests in `street_tests.rs`; `wp_wasm` now depends on
+`wp_opponent`, wasm32-clean):
+
+- `StreetRacers` spawns 7 racers (`ROSTER_LEVELS` = 1, 1, 2, 2, 3, 4, 5) on through / highway
+  lanes ≥ 140 m from the player in every live city session with police (free drive and city chase;
+  not the flat world, not scripted scenarios). Kind `AiRacer`, AI assists.
+- `LEVELS` (5): Rookie `#3fb950` · Street `#2f81f7` · Pro `#a371f7` · Elite `#f0883e` · Legend
+  `#f85149`. Each has a car pool (analog names from `data/cars`), a race `DriverProfile`
+  (skill 0.25 → 0.97, aggression, consistency, risk), a cruise speed and a bet range
+  ($100–500 … $2 000–10 000).
+- **Roaming**: each racer is a one-racer `wp_opponent::Field` on a planned route to a random lane
+  point 300–1 200 m away, with a *cruise capability* (top speed 11.5–13.3 m/s, under the speeding threshold of a 25 mph street, plus a stop-line guard for red and catchable amber lights, 0.4 g, 0.45 g braking)
+  and a calm, low-risk profile, so it keeps traffic pace, follows cars, stops at reds and plans a
+  new route at the end. At most one route is planned per tick.
+- **Challenge**: a horn rising edge (Q / pad Y) within 30 m of a roaming racer stops it and opens
+  an `Offer`. It lapses when the player drives 70 m away, after 2 min, or when the run ends.
+- **Race**: `street_accept(x, y, stake)` checks the stake (level range, cash) and the route
+  (250 m – 6 km, `World::plan_route` from the player's pose), posts the stake as a ledger line
+  (`PlayerRun::wager` → `Economy::adjust`), places the racer beside the player (the roomier side of
+  the corridor, else behind), and holds both for a 3 s countdown (the player's hold is a logged
+  input, like the end-of-run hold). The racer then drives a full-pace `Field` (its level profile,
+  its car's measured `CarCapability`, signals on, opposing lanes for overtaking, no civilian DQ).
+  First within 18 m of B wins, by any path (shortcuts are fair). The race is also
+  decided by a player wreck or capture (loss), by the racer retiring, fleeing or being busted (win),
+  or by the time limit (route / 8 m/s + 60 s: whoever is further along wins). A win posts 2 × stake
+  (even money). Racers keep a W/L record against the player and can be challenged again 20 s later.
+- **Replays**: racer inputs go straight into the sim (not the replay log), but the roaming AI is
+  deterministic, so playback spawns and drives the same racers and stays bit-exact
+  (`city_free_drive_has_traffic_and_replays_in_the_browser_core` still passes). Accept / decline
+  are UI actions the replay format cannot hold yet: a replay drifts after one (gap SR-1 below).
+
+| Export | Returns |
+|---|---|
+| `set_street_racers(on)` | spawn racers in city sessions started after the call (default on) |
+| `street_racers()` | `[entity, level, x, y, yaw, mode]` × racers (mode 0 roam, 1 waiting, 2 racing) |
+| `street_status_json()` | `{ levels, roster, hint, offer, race, result }` or `null` |
+| `street_preview(x, y)` | route from the player to (x, y): `{ ok, reason, length_m, finish, polyline }`; throws if there is no route |
+| `street_accept(x, y, stake)` | start the race; throws (nothing changed) when refused |
+| `street_decline()` | the racer drives off |
+| `map_lanes()` | drivable lane polylines `[n, x0, y0, …]` for the map (once per session) |
+
+**Testbed** (`src/ui/street.ts`, `StreetUi`; wired in `main.ts`, on `window.__wp.street`):
+
+- Minimap (bottom right, heading-up, ≈ 260 m radius): roads, the player arrow, every racer as a dot
+  in its level colour with the level number (white ring = waiting, yellow ring = racing you;
+  clamped to the rim when out of range), the route and the B flag. Level legend above it.
+- City map (click the minimap, or `` ` ``): north-up; roster with level, car and record.
+  During a challenge it is the picker: click to set B (route preview and length), bet slider,
+  **Race!** (Enter) / **Decline** (Esc).
+- "Q honk to challenge …" hint near a racer; race HUD (opponent, stake, distance left for both,
+  AHEAD / BEHIND, time left); 3-2-1-GO countdown; WON / LOST banner with the cash change.
+- Racer cars are painted in their level colour.
+
+**Perf** (native release, Port Vesper free drive, `street_perf` ignored test): 4.27 → 6.05 ms of
+sim per 60 Hz frame with the 7 racers; the street AI (fields, route planning, guard) is ~0.16 ms
+of that, the rest is vehicle + lattice physics of 7 more cars (~0.22 ms/car, inside the
+0.15 + 0.25 ms/car budget). `set_street_racers(false)` before a session turns them off.
+`e2e/street.mjs` (headless Chromium; `SHOTS=dir`): roster, minimap, honk → picker → route →
+stake paid → countdown → win at B pays even money → result banner → city map; 15 checks.
+
+**Requests** (not done here):
+
+- SR-1 (harness, 10): a replay op for "street race accepted (finish, stake) / declined" so
+  recordings with a street race verify.
+- SR-2 (economy, G): an `EventReason::StreetRaceWager { opponent, level }` instead of the
+  `Adjustment` ledger lines the wagers use now; race stats (`races_entered`, `races_won`) are not
+  counted for street races yet.
+- SR-3 (opponent, N): a cruise mode in `Field` (posted speed limits, lane keeping instead of the
+  racing line). Roaming now relies on a capped capability, so racers cut corners within their
+  own carriageway.

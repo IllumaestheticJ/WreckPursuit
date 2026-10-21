@@ -20,6 +20,7 @@ import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
+import { StreetUi } from "./ui/street";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -85,6 +86,8 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  // Street racers (wp_wasm::street): minimap, city map / challenge picker, race HUD.
+  const street = new StreetUi(overlay);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -122,6 +125,7 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     runEnd.reset();
+    street.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -153,8 +157,13 @@ async function main(): Promise<void> {
       live.add(id);
       if (app.views.has(id)) continue;
       const kind = meta[o + 1];
+      // Street racers wear their level colour (the same as their map icon).
       const colour =
-        kind === VEHICLE_KIND.police ? 0xe9ebf0 : kind === VEHICLE_KIND.traffic ? 0x7a8a99 : COLOURS[(id - 1) % COLOURS.length];
+        kind === VEHICLE_KIND.police
+          ? 0xe9ebf0
+          : kind === VEHICLE_KIND.traffic
+            ? 0x7a8a99
+            : ((kind === VEHICLE_KIND.aiRacer ? street.colourFor(id) : null) ?? COLOURS[(id - 1) % COLOURS.length]);
       const v = new VehicleView(id, colour);
       scene.world.add(v.root);
       scene.world.add(v.velocity);
@@ -508,8 +517,16 @@ async function main(): Promise<void> {
     const prev = sim.statesPrev();
     let focusTel: Float32Array | null = null;
     let focusRec = -1;
+    let playerPose: { x: number; y: number; yaw: number } | null = null;
     for (let o = 0, i = 0; o < cur.length; o += STATE_STRIDE, i++) {
       const id = cur[o + S.entity];
+      if (id === app.player) {
+        const [qx, qy, qz, qw] = [cur[o + S.rot], cur[o + S.rot + 1], cur[o + S.rot + 2], cur[o + S.rot + 3]];
+        // Yaw about +Z, 0 = +Y (wp_world convention), from the chassis +Y axis.
+        const fx = 2 * (qx * qy - qw * qz);
+        const fy = 1 - 2 * (qx * qx + qz * qz);
+        playerPose = { x: cur[o + S.pos], y: cur[o + S.pos + 1], yaw: Math.atan2(-fx, fy) };
+      }
       const view = app.views.get(id);
       if (!view) continue;
       // vehicle_states_prev() lists the same entities in the same (ascending) order.
@@ -533,6 +550,7 @@ async function main(): Promise<void> {
       const w = sim.worldInfo();
       ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
       if (!replay) runEnd.update(sim.runResult(), now);
+      street.frame(now, playerPose);
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
@@ -720,6 +738,7 @@ async function main(): Promise<void> {
     toggleLayer: (id: string) => layers.toggle(id),
     ui,
     runEnd,
+    street,
     restartRun,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
