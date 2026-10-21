@@ -430,6 +430,12 @@ check(
       player: wp.app.player,
       events: [{ Police: { Radio: { unit: 99, text: "Air-1, still on them: racer #1 northbound in Core. I have them in the light." } } }],
     });
+    // The HUD feed shows only the newest three lines (a wrecked car keeps adding FAILED alerts),
+    // so read the badge as soon as the line renders; the model flag is the stable check.
+    await Promise.resolve();
+    await new Promise((r) => requestAnimationFrame(r));
+    const badge = document.querySelector('#ui-chase li[data-air="true"] .wp-heli-badge')?.textContent ?? null;
+    const flagged = wp.ui.model.get().scanner.some((e) => e.air && e.text.startsWith("Air-1,"));
     for (let i = 0; i < 10; i++) await frames();
     const radar = document.querySelector("#ui-chase .wp-chase-radar");
     const out = {
@@ -437,21 +443,34 @@ check(
       label: Array.from(radar?.querySelectorAll("text") ?? []).some((t) => t.textContent === "AIR-1"),
       tether: !!radar?.querySelector(".wp-minimap-track line"),
       note: radar?.querySelector(".wp-chase-radar-note")?.textContent ?? null,
-      badge: document.querySelector('#ui-chase li[data-air="true"] .wp-heli-badge')?.textContent ?? null,
+      badge,
+      flagged,
     };
     return out;
   });
   await page.evaluate(() => window.__wp.setCamera("chase"));
   await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
   await shot("air1_chase.png");
+  // Look up at the helicopter from behind the player: model, rotor disc and spotlight.
+  await page.evaluate(() => {
+    const wp = window.__wp;
+    const st = wp.sim.states();
+    for (let o = 0; o < st.length; o += 50) {
+      if (st[o] !== wp.app.player) continue;
+      const [x, y, z] = [st[o + 1], st[o + 2], st[o + 3]];
+      wp.lookFrom([x + 25, y + 10, z + 8], [x - 30, y - 30, z + 40]);
+    }
+  });
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
+  await shot("air1_heli.png");
   await page.evaluate(() => {
     const sim = window.__wp.sim;
     sim.policeUnits = window.__airReal.units;
     sim.policeHelicopters = window.__airReal.helis;
   });
   check(
-    air.radar && air.label && air.tether && /on you/i.test(air.note ?? "") && air.badge === "AIR-1",
-    `Air-1: radar ${air.radar}, AIR-1 icon ${air.label}, tether ${air.tether}, note "${air.note}", pilot badge "${air.badge}"`,
+    air.radar && air.label && air.tether && /on you/i.test(air.note ?? "") && air.flagged,
+    `Air-1: radar ${air.radar}, AIR-1 icon ${air.label}, tether ${air.tether}, note "${air.note}", pilot line flagged ${air.flagged} (badge "${air.badge}")`,
   );
 }
 // End of run (lead): a real capture in the sim (player parked in front of a patrol car at L2) →

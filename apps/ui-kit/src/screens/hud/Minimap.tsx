@@ -53,9 +53,9 @@ export function Minimap(props: { map: CityMap; pos: Vec2; headingRad: number; bl
               // call sign kept upright against the map's rotation.
               return (
                 <g key={`h${b.id}`} transform={`translate(${x} ${y})`}>
-                  <g transform={`rotate(${headingDeg(b.headingRad ?? 0)})`}>{heliShape(R * 0.075, color)}</g>
+                  <g transform={`rotate(${headingDeg(b.headingRad ?? 0)})`}>{heliShape(R * 0.1, color)}</g>
                   {b.label && (
-                    <text transform={`rotate(${-rot})`} x={R * 0.1} y={-R * 0.08} font-size={R * 0.075} fill={color} stroke="#000" stroke-width={R * 0.01} paint-order="stroke" font-family="var(--font-mono)" font-weight="bold">
+                    <text transform={`rotate(${-rot})`} x={R * 0.13} y={-R * 0.1} font-size={R * 0.075} fill={color} stroke="#000" stroke-width={R * 0.01} paint-order="stroke" font-family="var(--font-mono)" font-weight="bold">
                       {b.label}
                     </text>
                   )}
