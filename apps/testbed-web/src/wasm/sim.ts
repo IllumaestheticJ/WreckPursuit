@@ -161,7 +161,12 @@ export const sim = {
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
+  /** [x, y, z, yaw, flags, agentId, model] per civilian agent (layout.ts AG, AGENT_STRIDE). */
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
+  /** Car ids indexed by traffic_agents()' model; [] when traffic is kinematic only. Fetch once per session. */
+  trafficModels: (): string[] => JSON.parse(wasm.traffic_models()),
+  /** Car ids indexed by police_units()' model; [] for single-model police. Fetch once per session. */
+  policeModels: (): string[] => JSON.parse(wasm.police_models()),
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
   /** One state byte per signal head (layout.ts SIGNAL), same order as signalHeads(). */
@@ -169,7 +174,7 @@ export const sim = {
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
   vehicleMeta: (): Float32Array => wasm.vehicle_meta(),
   /** Wanted level / heat for a racer, or null when the session has no police. */
-  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
+  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags, unitId, model] each (layout.ts PU). */
   policeUnits: (): Float32Array => wasm.police_units(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   stateHash: (): string => wasm.state_hash(),
