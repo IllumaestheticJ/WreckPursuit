@@ -308,6 +308,16 @@ torque each diff moved (front, rear, centre).
   braking (lift-off, downshifts) selects the decel ramp; in a clutch shift's neutral phase
   only the preload acts.
 
+## Free car tune (`tune.rs`, parity gap G10)
+
+Four 5-step sliders, 3 = stock: suspension (springs + ARBs × scale, dampers × √scale), gearing
+(final drive × scale), differential (driven axle: open / light clutch / stock / tight clutch /
+locked) and brake balance (front bias ± offset, clamped). Tables in `data/tune/steps.toml`
+(embedded, checked at parse: step 3 must be the identity). `tune::tuned(def, tune)` returns the
+tuned `VehicleDef` and the `DiffSetup` to pass as `VehicleExtras::diffs`; `wp_sim` does this in
+`Sim::spawn_vehicle_tuned`. A stock tune builds the car file exactly. Run the tests with
+`cargo test -p wp_vehicle --lib tune`. Flow and contract request WP-4: `docs/integration/tune.md`.
+
 ## Brakes: how `BrakeDef` is read (worked example)
 
 Torque per wheel at full pedal: `norm = max(bias, 1 − bias)`;

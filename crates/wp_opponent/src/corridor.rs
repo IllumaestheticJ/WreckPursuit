@@ -509,6 +509,32 @@ impl Corridor {
         }
     }
 
+    /// [`Corridor::project`], except that on an open course a point before the start or past
+    /// the end keeps its distance beyond it along the end tangent (`s` < 0 or > `length_m`)
+    /// instead of landing on it. Cars on a grid behind the start line, or behind a flight
+    /// route that starts at the racer, are behind one another, not level.
+    pub fn project_unclamped(&self, p: V2, hint: Option<usize>, window: usize) -> CorridorPos {
+        let mut cp = self.project(p, hint, window);
+        cp.s = self.unclamped_s(p, &cp);
+        cp
+    }
+
+    /// The arc length of `p` (projected as `cp`) without the clamp at the ends of an open
+    /// course; `cp.s` on circuits and inside the course.
+    pub fn unclamped_s(&self, p: V2, cp: &CorridorPos) -> f32 {
+        if self.closed {
+            return cp.s;
+        }
+        let c = &self.samples[cp.index];
+        let along = geom::dot(geom::sub(p, geom::xy(c.pos)), c.tangent);
+        let s = cp.index as f32 * CORRIDOR_STEP_M + along;
+        if s < 0.0 || s > self.length_m {
+            s
+        } else {
+            cp.s
+        }
+    }
+
     /// Signed centreline curvature at `s` (1/m, + = turning right), from the tangents of the
     /// samples around it (±3 samples).
     pub fn centre_curvature(&self, s: f32) -> f32 {

@@ -579,3 +579,36 @@ fn closing_the_game_when_not_pursued_is_free() {
     assert_eq!(c3.profile().account.heat_history.captures, 0);
     c.finish_run(&mut s).unwrap();
 }
+
+#[test]
+fn a_tuned_car_spawns_tuned_and_the_tune_is_saved() {
+    let (mut c, uid) = career_with("rampart_50", 100_000, DamageMode::Arcade);
+    let cash = c.profile().account.cash;
+    let tune = wp_economy::CarTune {
+        suspension: 5,
+        gearing: 5,
+        diff: 4,
+        brake_balance: 2,
+    };
+    c.set_tune(uid, tune).unwrap();
+    assert_eq!(c.profile().account.cash, cash, "the tune is free");
+    assert_eq!(c.view().cars[0].tune, tune);
+    let back = Career::load_json(econ(), &c.save_json()).unwrap();
+    assert_eq!(back.profile().account.car(uid).unwrap().tune, tune);
+
+    let mut s = c
+        .start_run(free_drive("ignored", DamageMode::Arcade, false))
+        .unwrap();
+    assert!(
+        c.set_tune(uid, wp_economy::CarTune::STOCK).is_err(),
+        "not during a run"
+    );
+    let stock = s.car(player(&s)).unwrap().def.clone();
+    let v = &s.sim().vehicles()[0];
+    assert_eq!(v.tune.gearing, 5);
+    assert!(v.vehicle.def().drivetrain.final_drive < stock.drivetrain.final_drive);
+    assert!(v.vehicle.def().brakes.bias_front < stock.brakes.bias_front);
+    assert!(v.vehicle.def().suspension[0].spring_n_per_m > stock.suspension[0].spring_n_per_m);
+    c.finish_run(&mut s).unwrap();
+    c.set_tune(uid, wp_economy::CarTune::STOCK).unwrap();
+}

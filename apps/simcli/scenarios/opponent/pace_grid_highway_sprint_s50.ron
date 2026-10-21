@@ -80,7 +80,7 @@
         metric(name: "best_ratio", min: 0.97, max: 2.41),
         metric(name: "race_time_s", entity: "ai_vic", min: 45.7, max: 64.6),
         metric(name: "race_time_s", entity: "ai_juno", min: 50.0, max: 70.6),
-        metric(name: "race_time_s", entity: "ai_tito", min: 50.2, max: 70.9),
+        metric(name: "race_time_s", entity: "ai_tito", min: 51.3, max: 72.5),
         metric(name: "race_time_s", entity: "player", min: 51.3, max: 72.4),
     ],
 )

@@ -617,3 +617,60 @@ fn unit_stuck_right_behind_a_car_gets_it_to_pull_over_then_it_gives_up_on_a_park
     let (_, v) = lat_and_speed(&w, lane, id);
     assert!(v > 2.0, "not driving on: {v}");
 }
+
+/// Pulling over for a siren indicates towards the kerb (right) while pulling over and waiting,
+/// away from it (left) while merging back, and nothing once back in the lane.
+#[test]
+fn pulling_over_and_merging_back_are_indicated() {
+    let mut w = warmed_loop(1, 4);
+    let lane = northbound_lanes(w.network())[0];
+    let pts = w.network().lanes[lane].polyline.clone();
+    let cum = geom::cumulative(&pts);
+    let id = w
+        .agents()
+        .filter(|a| {
+            let pr = geom::project(&pts, &cum, geom::xy(a.pos));
+            pr.dist < 1.0 && pr.s > 300.0 && pr.s < 700.0
+        })
+        .map(|a| a.id)
+        .next()
+        .expect("a car on the lane");
+    let mut ev = Vec::new();
+    let mut towards_kerb = 0;
+    for _ in 0..(6.0 / PHYSICS_DT) as usize {
+        let u = unit_behind(&w, lane, id, 12.0, 1.0);
+        w.set_tracked_vehicles(&[u]);
+        w.step(PHYSICS_DT, &mut ev);
+        let a = w.agents().find(|a| a.id == id).unwrap();
+        assert!(
+            a.turn_signal >= 0,
+            "indicated away from the kerb while pulling over"
+        );
+        if a.yielding && a.turn_signal == 1 {
+            towards_kerb += 1;
+        }
+    }
+    assert!(towards_kerb > 0, "never indicated towards the kerb");
+    let (lat, _) = lat_and_speed(&w, lane, id);
+    assert!(lat > 0.5, "did not pull over: lat {lat}");
+    // The unit parks: the car merges back (indicating left) and drives on (indicator off).
+    let parked = unit_behind(&w, lane, id, 12.0, 0.0);
+    let mut merging_left = 0;
+    let mut off_in_lane = 0;
+    for _ in 0..(30.0 / PHYSICS_DT) as usize {
+        w.set_tracked_vehicles(&[parked]);
+        w.step(PHYSICS_DT, &mut ev);
+        let Some(a) = w.agents().find(|a| a.id == id) else {
+            break;
+        };
+        let pr = geom::project(&pts, &cum, geom::xy(a.pos));
+        if a.turn_signal == -1 && pr.lateral > 0.2 {
+            merging_left += 1;
+        }
+        if !a.yielding && pr.lateral.abs() < 0.1 && a.speed_mps > 2.0 && a.turn_signal == 0 {
+            off_in_lane += 1;
+        }
+    }
+    assert!(merging_left > 0, "merged back without indicating");
+    assert!(off_in_lane > 0, "indicator left on after merging back");
+}

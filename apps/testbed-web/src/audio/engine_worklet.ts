@@ -98,12 +98,18 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
   const DELAY = 8192; // power of two
   const MASK = DELAY - 1;
   /**
-   * Output scale: WOT peaks stay under the soft limit below (≈ 0.75 for the loudest V8s; the
-   * pack's cue gain sets the level against the layers). It was 3.6, which drove every V8 / I6
-   * into the tanh knee at full throttle (4-11 % of samples): audible as harshness (playtest
-   * "engine sounds are bad", docs/integration/audio.md).
+   * Output scale, in two parts around the voice's soft safety limit (linear to ±0.8):
+   * `OUT_DRIVE` sets the level into the limit, `OUT_MAKEUP` the level out of it (their product,
+   * 1.8, is what the `engine_physical` cue gain is calibrated against, recorded vs modelled
+   * within 1.5 dB). The loudest WOT pull (flat-plane V8) peaks at 0.39 into the limit: 6 dB under
+   * its knee, the same headroom the master stage keeps under its soft clip (docs/integration/
+   * audio.md "Mix headroom"), so only a fault or stacked bangs ever reach it. The total was
+   * 3.6 into the limit, which drove every V8 / I6 into the tanh knee at full throttle (4-11 %
+   * of samples: harshness, playtest "engine sounds are bad"); then 1.8 into the limit, which
+   * left the loudest V8 0.2 dB under the knee.
    */
-  const OUT_GAIN = 1.8;
+  const OUT_DRIVE = 0.9;
+  const OUT_MAKEUP = 2.0;
   /**
    * Open-end radiation: the far field follows d/dt of the tailpipe flow above ~RAD_HZ and is
    * flat below it (a leaky differentiator). A pure d/dt (the old model) took the firing order
@@ -737,12 +743,12 @@ export function engineWorkletMain(scope: WorkletScope | null): { EngineDsp: Engi
         const dc = y - this.dcX + 0.998 * this.dcY;
         this.dcX = y;
         this.dcY = dc;
-        let o = dc * OUT_GAIN;
+        let o = dc * OUT_DRIVE;
         // Soft safety limit: linear to ±0.8, then a continuous tanh knee towards ±1.
         if (o > 0.8) o = 0.8 + 0.2 * Math.tanh((o - 0.8) * 5);
         else if (o < -0.8) o = -0.8 - 0.2 * Math.tanh((-0.8 - o) * 5);
         if (o > -1e-30 && o < 1e-30) o = 0;
-        out[off + j] = o;
+        out[off + j] = o * OUT_MAKEUP;
         this.clock++;
       }
       // Keep state finite and free of denormals.

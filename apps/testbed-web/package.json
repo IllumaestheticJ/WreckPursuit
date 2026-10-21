@@ -10,15 +10,17 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "e2e": "node e2e/run.mjs && node e2e/race.mjs && node e2e/countersteer.mjs && node e2e/radio.mjs && node e2e/siren.mjs && node e2e/drift_lab.mjs",
+    "e2e": "node e2e/run.mjs && node e2e/race.mjs && node e2e/countersteer.mjs && node e2e/radio.mjs && node e2e/siren.mjs && node e2e/drift_lab.mjs && node e2e/tune.mjs",
     "e2e:radio": "node e2e/radio.mjs",
     "e2e:siren": "node e2e/siren.mjs && node e2e/drift_lab.mjs",
     "e2e:cameras": "node e2e/cameras.mjs",
     "e2e:audio-samples": "node e2e/audio_samples.mjs",
     "e2e:siren-samples": "node e2e/siren_samples.mjs",
+    "e2e:audio-mix": "node e2e/audio_mix.mjs",
     "e2e:weather": "node e2e/weather.mjs",
     "e2e:net": "node e2e/net_two_tabs.mjs",
     "e2e:race": "node e2e/race.mjs",
+    "e2e:tune": "node e2e/tune.mjs",
     "e2e:crash-replay": "node e2e/crash_replay.mjs",
     "e2e:perf": "node e2e/perf_check.mjs",
     "e2e:fx": "node e2e/crash_fx.mjs",
@@ -30,7 +32,8 @@
     "e2e:presets": "node e2e/presets.mjs",
     "e2e:controls": "node e2e/controls_settings.mjs",
     "e2e:police": "node e2e/police_tools.mjs",
-    "e2e:brake-dive": "node e2e/brake_dive.mjs"
+    "e2e:brake-dive": "node e2e/brake_dive.mjs",
+    "e2e:signals": "node e2e/signals.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

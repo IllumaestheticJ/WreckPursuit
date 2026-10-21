@@ -67,6 +67,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         panels: true,
         systems: None,
         barriers: Vec::new(),
+        parked: Vec::new(),
         police_orders: Vec::new(),
         weather: None,
         entities: vec![entity("player", car, [0.0; 3], 0.0)],
@@ -110,6 +111,7 @@ pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
         speed_mps: 0.0,
         police_heat: 0.0,
         assists: None,
+        tune: Default::default(),
         driver: Driver::Scripted,
         inputs: Vec::new(),
     }

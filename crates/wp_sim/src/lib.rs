@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 mod contacts;
+mod parked;
 mod physics;
 mod police_link;
 mod police_tools;
@@ -20,6 +21,11 @@ mod traffic_link;
 mod weather_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
+pub use parked::{
+    prop_of_entity, ChassisMap, ParkedStats, ParkedWreck, MAX_PARKED_WRECKS,
+    PARKED_CAR_HALF_EXTENTS, PARKED_CAR_MASS_KG, PARKED_ENTITY_BASE, PROMOTE_CLOSING_MPS,
+    PROMOTE_IMPULSE_NS,
+};
 pub use physics::{
     city_ground_colliders, city_sidewalk_colliders, parked_slab_collider, CityColliders,
     PhysicsWorld, SAFETY_FLOOR_Z,
@@ -29,6 +35,8 @@ pub use police_tools::{BarrierView, SpikeStripView};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
+/// The free per-car tune, re-exported for spawners ([`Sim::spawn_vehicle_tuned`]).
+pub use wp_vehicle::CarTune;
 
 use rapier3d::prelude::QueryFilter;
 use thiserror::Error;
@@ -39,7 +47,7 @@ use wp_contracts::{
 use wp_damage::DamageModel;
 use wp_math::{FixedStep, Rng, StateHasher};
 use wp_police::PoliceSystem;
-use wp_vehicle::{RapierGround, Vehicle, VehicleBody};
+use wp_vehicle::{RapierGround, Vehicle, VehicleBody, VehicleExtras};
 use wp_world::World;
 
 /// Errors from simulation control calls.
@@ -93,6 +101,8 @@ pub struct SimVehicle {
     pub id: EntityId,
     /// Car id (`VehicleDef::id`).
     pub car_id: String,
+    /// The tune the car was built with ([`Sim::spawn_vehicle_tuned`]; stock otherwise).
+    pub tune: CarTune,
     /// Vehicle dynamics.
     pub vehicle: Vehicle,
     /// Damage model.
@@ -185,6 +195,8 @@ pub struct Sim {
     last_tick_events: usize,
     static_boxes: usize,
     props: props::Props,
+    /// Promoted (damageable) parked cars (`parked.rs`).
+    parked: parked::ParkedDamage,
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
     traffic_car: Option<LoadedCar>,
@@ -227,6 +239,7 @@ impl Sim {
             last_tick_events: 0,
             static_boxes: 0,
             props: props::Props::default(),
+            parked: parked::ParkedDamage::default(),
             contact_filter: None,
             police_car: None,
             traffic_car: None,
@@ -267,12 +280,34 @@ impl Sim {
         pos: [f32; 3],
         yaw: f32,
     ) -> Result<EntityId, SimError> {
+        self.spawn_vehicle_tuned(car, pos, yaw, CarTune::STOCK)
+    }
+
+    /// [`Sim::spawn_vehicle`] with the player's free tune applied to the car first
+    /// (`wp_vehicle::tune`; a stock tune builds exactly the car file).
+    pub fn spawn_vehicle_tuned(
+        &mut self,
+        car: &LoadedCar,
+        pos: [f32; 3],
+        yaw: f32,
+        tune: CarTune,
+    ) -> Result<EntityId, SimError> {
         if self.vehicles.len() >= MAX_VEHICLES {
             return Err(SimError::TooManyVehicles);
         }
         let id = EntityId(self.next_entity);
         self.next_entity += 1;
-        let mut vehicle = Vehicle::new(&car.def, &car.tires, pos, yaw);
+        let tune = tune.clamped();
+        let mut vehicle = if tune.is_stock() {
+            Vehicle::new(&car.def, &car.tires, pos, yaw)
+        } else {
+            let (def, diffs) = wp_vehicle::tune::tuned(&car.def, tune);
+            let extras = VehicleExtras {
+                diffs: Some(diffs),
+                ..VehicleExtras::default()
+            };
+            Vehicle::with_extras(&def, &car.tires, pos, yaw, extras)
+        };
         vehicle.set_entity(id);
         let body = vehicle.build_body(&mut self.physics.bodies, &mut self.physics.colliders);
         self.physics.bodies[body.body].set_enabled(self.systems.vehicle);
@@ -288,6 +323,7 @@ impl Sim {
         self.vehicles.push(SimVehicle {
             id,
             car_id: car.def.id.clone(),
+            tune,
             body,
             vehicle,
             damage,
@@ -316,63 +352,87 @@ impl Sim {
     /// road, building and deck-rail colliders ([`PhysicsWorld::set_city_ground`]).
     pub fn set_world(&mut self, world: World) {
         self.city_colliders = self.physics.set_city_ground(world.map());
-        use rapier3d::math::Rotation;
-        use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
-        let hilly = world.network().terrain.is_some();
-        for prop in world.static_props() {
-            let (s, c) = wp_math::sin_cos(prop.yaw * 0.5);
-            let mut pose = Pose::from_parts(
-                Vector::from_array(prop.pos),
-                Rotation::from_xyzw(0.0, 0.0, s, c),
-            );
-            if hilly {
-                // Flush with the (sloped, banked) surface under it and asleep until something
-                // hits it: thousands of parked cars otherwise keep settling on the road mesh.
-                let (pos, rot) = ground_pose(
-                    world.map(),
-                    [prop.pos[0], prop.pos[1]],
-                    prop.yaw,
-                    Some(prop.pos[2] - prop.half_extents[2]),
-                );
-                // A hair above the surface: no touching contact at creation, so it stays asleep
-                // until something reaches it (then it drops the last few centimetres).
-                let up = rot * Vector::Z;
-                pose = Pose::from_parts(
-                    Vector::from_array(pos) + up * (prop.half_extents[2] + PROP_HOVER_M),
-                    rot,
-                );
-            }
-            // Fixed until a vehicle or debris comes near (`props.rs`), then dynamic.
-            let body = self
-                .physics
-                .bodies
-                .insert(RigidBodyBuilder::fixed().pose(pose).build());
-            let [hx, hy, hz] = prop.half_extents;
-            let mut col = ColliderBuilder::cuboid(hx, hy, hz)
-                .mass(prop.mass_kg.max(1.0))
-                .friction(0.6)
-                .user_data(physics::PROP_USER_BIT)
-                .build();
-            if hilly {
-                // Resting on the road mesh: no pairs with the terrain tiles under it (thousands
-                // of them otherwise cost ~0.6 ms per frame); restored when it wakes.
-                col.set_collision_groups(physics::resting_prop_groups());
-            }
-            let ch = self
-                .physics
-                .colliders
-                .insert_with_parent(col, body, &mut self.physics.bodies);
-            let radius = (hx * hx + hy * hy + hz * hz).sqrt();
-            self.props.add(body, prop.pos, radius);
-            if hilly {
-                self.resting_props.push((body, ch));
-                self.resting_bodies.insert(body.into_raw_parts());
-            }
+        self.world = world;
+        let props: Vec<wp_world::props::StaticProp> = self.world.static_props().copied().collect();
+        for prop in &props {
+            self.insert_prop(prop);
         }
         self.props_settle_until = self.tick + PROP_SETTLE_TICKS;
-        self.world = world;
         self.rebuild_police();
         self.rebuild_weather();
+    }
+
+    /// Add one parked car (a city-style prop: fixed box until something comes near, dented
+    /// through `parked.rs` once hit) standing on the ground at `pos` (world m; on a city with
+    /// terrain only x, y count and the car sits on the ground there), heading `yaw` rad about
+    /// +Z. Scenario setup (simcli `parked`): call after [`Sim::set_world`] and before the first
+    /// tick so replays match. Returns its prop index ([`Sim::prop_pose`]).
+    pub fn add_parked_car(&mut self, pos: [f32; 3], yaw: f32) -> usize {
+        let [_, _, hz] = parked::PARKED_CAR_HALF_EXTENTS;
+        let prop = wp_world::props::StaticProp {
+            kind: wp_world::props::PropKind::ParkedCar,
+            pos: [pos[0], pos[1], pos[2] + hz],
+            yaw,
+            half_extents: parked::PARKED_CAR_HALF_EXTENTS,
+            mass_kg: parked::PARKED_CAR_MASS_KG,
+        };
+        self.insert_prop(&prop);
+        self.props.len() - 1
+    }
+
+    /// One prop as a fixed Rapier box (see [`Sim::set_world`]).
+    fn insert_prop(&mut self, prop: &wp_world::props::StaticProp) {
+        use rapier3d::math::Rotation;
+        use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
+        let hilly = self.world.network().terrain.is_some();
+        let (s, c) = wp_math::sin_cos(prop.yaw * 0.5);
+        let mut pose = Pose::from_parts(
+            Vector::from_array(prop.pos),
+            Rotation::from_xyzw(0.0, 0.0, s, c),
+        );
+        if hilly {
+            // Flush with the (sloped, banked) surface under it and asleep until something
+            // hits it: thousands of parked cars otherwise keep settling on the road mesh.
+            let (pos, rot) = ground_pose(
+                self.world.map(),
+                [prop.pos[0], prop.pos[1]],
+                prop.yaw,
+                Some(prop.pos[2] - prop.half_extents[2]),
+            );
+            // A hair above the surface: no touching contact at creation, so it stays asleep
+            // until something reaches it (then it drops the last few centimetres).
+            let up = rot * Vector::Z;
+            pose = Pose::from_parts(
+                Vector::from_array(pos) + up * (prop.half_extents[2] + PROP_HOVER_M),
+                rot,
+            );
+        }
+        // Fixed until a vehicle or debris comes near (`props.rs`), then dynamic.
+        let body = self
+            .physics
+            .bodies
+            .insert(RigidBodyBuilder::fixed().pose(pose).build());
+        let [hx, hy, hz] = prop.half_extents;
+        let mut col = ColliderBuilder::cuboid(hx, hy, hz)
+            .mass(prop.mass_kg.max(1.0))
+            .friction(0.6)
+            .user_data(physics::PROP_USER_BIT)
+            .build();
+        if hilly {
+            // Resting on the road mesh: no pairs with the terrain tiles under it (thousands
+            // of them otherwise cost ~0.6 ms per frame); restored when it wakes.
+            col.set_collision_groups(physics::resting_prop_groups());
+        }
+        let ch = self
+            .physics
+            .colliders
+            .insert_with_parent(col, body, &mut self.physics.bodies);
+        self.props
+            .add(body, ch, prop.pos, prop.kind, prop.half_extents);
+        if hilly {
+            self.resting_props.push((body, ch));
+            self.resting_bodies.insert(body.into_raw_parts());
+        }
     }
 
     /// A car upright on its wheels lets the wheels alone deal with kerbs and sidewalks: its
@@ -935,6 +995,11 @@ impl Sim {
         self.wake_props();
         self.wake_resting_props();
         self.update_ghosts();
+        let parked = if sys.damage {
+            self.parked_candidates()
+        } else {
+            Vec::new()
+        };
         self.physics.step();
         let mut tick_contacts = contacts::collect(
             self.physics.narrow_phase(),
@@ -979,6 +1044,9 @@ impl Sim {
                 slot.vehicle.apply_damage_effects(&effects);
             }
             self.sync_damage_to_physics();
+            if !parked.is_empty() {
+                self.step_parked_damage(&parked, &infos, dt);
+            }
         }
         if sys.vehicle {
             self.sync_traffic();
@@ -1081,8 +1149,12 @@ impl Sim {
         self.last_tick_events
     }
 
-    /// Damage-model node positions (chassis space) of a vehicle, indexed by node id.
+    /// Damage-model node positions (chassis space) of a vehicle, indexed by node id. Also
+    /// answers for a dented parked car by its [`PARKED_ENTITY_BASE`] id ([`Sim::parked_wrecks`]).
     pub fn node_positions(&self, id: EntityId) -> Result<&[[f32; 3]], SimError> {
+        if let Some(w) = parked::prop_of_entity(id).and_then(|i| self.parked.wreck(i)) {
+            return Ok(w.damage.node_positions());
+        }
         self.vehicles
             .iter()
             .find(|v| v.id == id)
@@ -1094,7 +1166,9 @@ impl Sim {
     /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), [`World::state_hash`]
     /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), roadblock
     /// barrier bodies (count, then tool id + position 1e-3 m each), the weather
-    /// (`WeatherSim::hash_into`, only when [`Sim::set_weather`] was called), debris count and every debris body position (1e-3 m) in spawn order,
+    /// (`WeatherSim::hash_into`, only when [`Sim::set_weather`] was called), dented parked cars
+    /// (count, then prop index, lattice hash and body position (1e-3 m) each; only once a parked
+    /// car has been promoted, see `parked.rs`), debris count and every debris body position (1e-3 m) in spawn order,
     /// vehicle count, then every [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
@@ -1111,6 +1185,20 @@ impl Sim {
             }
         }
         self.hash_weather(&mut h);
+        // Dented parked cars (only once one exists, so runs without one keep their hashes).
+        if !self.parked.wrecks.is_empty() {
+            h.write_u32(self.parked.wrecks.len() as u32);
+            for w in &self.parked.wrecks {
+                h.write_u32(w.prop as u32);
+                h.write_u64(w.damage.state_hash());
+                for x in self.physics.bodies[self.props.bodies[w.prop]]
+                    .translation()
+                    .to_array()
+                {
+                    h.write_f32_q(x, 1e3);
+                }
+            }
+        }
         h.write_u32(self.debris.len() as u32);
         for d in &self.debris {
             for x in self.physics.bodies[*d].translation().to_array() {
@@ -1231,6 +1319,76 @@ mod tests {
         }
         let state = sim.vehicle_states()[0].1.clone();
         (sim.state_hash(), state)
+    }
+
+    /// A stock tune spawns exactly the car file; a tuned spawn carries the tuned definition and
+    /// differential, and drives differently.
+    #[test]
+    fn tuned_spawn_applies_the_tune() {
+        let car = wp_contracts::load_car(data("cars/rampart_50.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let drive = |tune: CarTune| {
+            let mut sim = Sim::new(SimConfig {
+                seed: 7,
+                mode: mode.clone(),
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let id = sim.spawn_vehicle_tuned(&car, [0.0; 3], 0.0, tune).unwrap();
+            sim.set_input(
+                id,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for _ in 0..480 {
+                sim.step_fixed();
+            }
+            let v = &sim.vehicles()[0];
+            (
+                v.tune,
+                v.vehicle.def().clone(),
+                *v.vehicle.diffs(),
+                sim.state_hash(),
+            )
+        };
+        let mut plain = Sim::new(SimConfig {
+            seed: 7,
+            mode: mode.clone(),
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let id = plain.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        plain
+            .set_input(
+                id,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for _ in 0..480 {
+            plain.step_fixed();
+        }
+        let (t, def, _, hash) = drive(CarTune::STOCK);
+        assert_eq!(t, CarTune::STOCK);
+        assert_eq!(def, car.def);
+        assert_eq!(hash, plain.state_hash());
+
+        let owner = CarTune {
+            suspension: 5,
+            gearing: 5,
+            diff: 5,
+            brake_balance: 2,
+        };
+        let (t, def, diffs, tuned_hash) = drive(owner);
+        assert_eq!(t, owner);
+        assert!(def.drivetrain.final_drive < car.def.drivetrain.final_drive);
+        assert_eq!(diffs.rear, wp_vehicle::AxleDiff::Locked);
+        assert_ne!(tuned_hash, hash);
     }
 
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.

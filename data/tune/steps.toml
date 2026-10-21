@@ -1,0 +1,49 @@
+# Free tune screen step tables — read by `wp_vehicle::tune` (embedded at build time).
+#
+# Owner: workstream 09 (cars, machine H). First values from the parity suite's proposal
+# (docs/reference/wreckfest-parity.md → "Tune screen (G10)"); H tunes them.
+#
+# Four sliders, 5 steps each, step 3 = stock. Every list has exactly 5 entries (step 1 first)
+# and its 3rd entry must be the identity (1.0 for scales, 0.0 for offsets): stock means the car
+# exactly as its file defines it.
+#
+#   suspension     spring_n_per_m and arb_n_per_m × scale; both dampers × √scale (keeps the
+#                  damping ratio). Bump stops, travel and ride height unchanged.   1 soft … 5 stiff
+#   gearing        final_drive × scale (long = numerically lower).                 1 short … 5 long
+#   brake_balance  brakes.bias_front + offset, clamped to [bias_min, bias_max].    1 rear … 5 front
+#   diff           the driven axle's differential (rear for RWD and AWD, front for FWD; the
+#                  AWD centre is never changed):
+#                    1 open
+#                    2 light clutch LSD: the stock clutch LSD scaled by `light_*`
+#                    3 the car's stock diff (differentials.toml entry, else the car file)
+#                    4 tight clutch LSD: preload × `tight_preload_scale`, ramps raised to at
+#                      least `tight_accel_min` / `tight_decel_min`
+#                    5 locked
+#                  A stock diff that is not a clutch LSD (open, helical, viscous, active,
+#                  locked) uses `base_*` as the clutch to scale for steps 2 and 4.
+#
+# `[cars.<id>]` overrides a slider's list for one car (same rules). Analog names only.
+
+suspension = [0.70, 0.85, 1.00, 1.18, 1.40]
+gearing = [1.12, 1.06, 1.00, 0.94, 0.88]
+brake_balance = [-0.10, -0.05, 0.00, 0.05, 0.10]
+bias_min = 0.30
+bias_max = 0.80
+
+[diff]
+base_preload_nm = 60.0
+base_accel = 0.40
+base_decel = 0.25
+light_preload_scale = 0.5
+light_accel_scale = 0.6
+light_decel_scale = 0.6
+tight_preload_scale = 2.5
+tight_accel_min = 0.75
+tight_decel_min = 0.60
+
+# Heavy pickups and box trucks: a narrower spring range (the stock rates already carry load).
+[cars.drayman_cargo]
+suspension = [0.85, 0.92, 1.00, 1.08, 1.16]
+
+[cars.hauler_1500]
+suspension = [0.85, 0.92, 1.00, 1.08, 1.16]
