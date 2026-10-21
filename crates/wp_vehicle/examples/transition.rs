@@ -1115,6 +1115,10 @@ enum Shift {
 /// full throttle, 6 s) with manual gears, the clutch held engaged (input 0) and the `shift`.
 /// Returns (held metrics, spun, a log of the 0.6 s around the shift: (t, gear, rpm, rear wheel
 /// speed km/h, car speed km/h, slide °)).
+/// One logged tick of [`manual_drift`]: (t, gear, rpm, rear wheel speed km/h, car speed km/h,
+/// slide °).
+type ShiftRow = (f32, i8, f32, f32, f32, f32);
+
 fn manual_drift(
     c: &LoadedCar,
     lat_g: f32,
@@ -1122,7 +1126,7 @@ fn manual_drift(
 ) -> (
     wp_vehicle::drift_lab_w::HoldMetrics,
     Option<f32>,
-    Vec<(f32, i8, f32, f32, f32, f32)>,
+    Vec<ShiftRow>,
 ) {
     use wp_vehicle::drift_lab_w::HoldMetrics;
     // `AUTO_CLUTCH=1`: the lab's auto clutch instead (comparison).
@@ -1160,7 +1164,7 @@ fn manual_drift(
     let mut entered = false;
     let mut shift_at: Option<usize> = None;
     let mut log = Vec::new();
-    let mut hist: Vec<(f32, i8, f32, f32, f32, f32)> = Vec::new();
+    let mut hist: Vec<ShiftRow> = Vec::new();
     for tick in 0..6 * TPS {
         let st = slide_state(&rig);
         let slide = -st.body_slip.to_degrees();
