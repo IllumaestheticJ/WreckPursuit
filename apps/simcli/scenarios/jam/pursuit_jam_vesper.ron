@@ -10,6 +10,9 @@
     time_ratio: 1.0,
     mode: Arcade,
     police_presence: 1.0,
+    // As in the game, a capture ends the run: the racer starts again from the route start at
+    // its starting heat (otherwise it stands in the road and the scene never clears).
+    restart_after_capture: true,
     assists: ai,
     slow: true,
     entities: [

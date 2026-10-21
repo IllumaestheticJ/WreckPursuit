@@ -131,6 +131,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
         assists: AssistSpec::Keyboard,
         traffic_density: None,
         police_presence: None,
+        restart_after_capture: false,
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,

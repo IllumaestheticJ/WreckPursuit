@@ -1284,7 +1284,7 @@ pub fn run_with_hook(
     let BuiltSim {
         mut sim,
         ids,
-        cars: _,
+        cars,
         selection,
         warnings,
         has_city,
@@ -1389,6 +1389,8 @@ pub fn run_with_hook(
     let mut events_total = 0u64;
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
+    // Captured route drivers to restart next tick (`restart_after_capture`).
+    let mut restarts: Vec<EntityId> = Vec::new();
     // (tick, racer, outcome) of every PursuitEnded, in order.
     let mut pursuit_ends: Vec<(u64, EntityId, wp_contracts::PursuitOutcome)> = Vec::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
@@ -1427,6 +1429,25 @@ pub fn run_with_hook(
                 track_cursor += 1;
             }
         } else {
+            // `restart_after_capture`: a captured route driver starts its run again.
+            for racer in std::mem::take(&mut restarts) {
+                let Some(idx) = ids.iter().position(|i| *i == racer) else {
+                    continue;
+                };
+                let spec = &sc.entities[idx];
+                if let Some(route) = routes[idx].as_mut() {
+                    let (p0, d0) = route.path.point_at(0.0);
+                    let yaw = wp_world::geom::yaw_of(d0);
+                    sim.place_on_ground(racer, [p0[0], p0[1]], yaw, spec.speed_mps, Some(p0[2]))?;
+                    route.follower = wp_world::drive::PathFollower::for_vehicle(
+                        &cars[&spec.car].def,
+                        wp_world::drive::FollowParams::PURSUIT,
+                        spec.speed_mps,
+                    );
+                    route.progress_m = 0.0;
+                    sim.police_mut().set_heat(racer, spec.police_heat);
+                }
+            }
             let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = match routes[idx].as_mut() {
@@ -1475,6 +1496,15 @@ pub fn run_with_hook(
                     police_first.entry(p.kind()).or_insert(now);
                     if let wp_contracts::PoliceEvent::PursuitEnded { racer, outcome, .. } = p {
                         pursuit_ends.push((now, *racer, *outcome));
+                        if sc.restart_after_capture
+                            && matches!(
+                                outcome,
+                                wp_contracts::PursuitOutcome::Captured
+                                    | wp_contracts::PursuitOutcome::CapturedTotalLoss
+                            )
+                        {
+                            restarts.push(*racer);
+                        }
                     }
                 }
                 SimEvent::ComponentFailed { vehicle, component } => {
