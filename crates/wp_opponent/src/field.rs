@@ -561,6 +561,9 @@ struct Civ {
 const CREEP_MPS: f32 = 2.5;
 /// Gap a creeping racer always keeps to the parked car it is steering round, m.
 const CREEP_STOP_GAP_M: f32 = 1.0;
+/// Lateral clearance to a parked car's body that lets a creeping racer roll on alongside it
+/// inside the stop gap, m.
+const CREEP_CLEAR_M: f32 = 0.15;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -1414,7 +1417,7 @@ impl Field {
             if geom::dist(pos, me.pos) > me.ahead_m() + 20.0 {
                 continue;
             }
-            let cp = corridor.project(pos, Some(me.hint), 80);
+            let cp = corridor.project_unclamped(pos, Some(me.hint), 80);
             if let Some(mut o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
                 o.parked = self.is_still(STILL_VEHICLE_KEY + v.entity.0 as u64);
                 out.push(o);
@@ -2336,6 +2339,17 @@ fn decide_racer(
                 cap_to(&mut v_target, creep, SpeedLimit::Obstacle(who_id(o.who)));
                 continue;
             }
+            // Already clear of its body, only inside the margin, and steering further away:
+            // keep creeping alongside it (rolling is what moves me sideways; going forward
+            // cannot touch it). Otherwise a car stopped at the stop gap stays there.
+            if steering_round && !overlaps(my_band(r.n, r.n), o, CREEP_CLEAR_M, 0.0) {
+                cap_to(
+                    &mut v_target,
+                    CREEP_MPS,
+                    SpeedLimit::Obstacle(who_id(o.who)),
+                );
+                continue;
+            }
             let in_corner = r.in_brake_zone
                 || line.curvature[corridor.wrap((r.s / CORRIDOR_STEP_M) as isize)].abs()
                     > 1.0 / 80.0;
@@ -2590,7 +2604,13 @@ fn civilians_on(
             }
         }
         let Some((_, hint)) = near else { continue };
-        let cp = c.project(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
+        let window = (range / CORRIDOR_STEP_M) as usize + 5;
+        // A private (flight) route starts at the racer: cars behind its start stay behind.
+        let cp = if private {
+            c.project_unclamped(p, Some(hint), window)
+        } else {
+            c.project(p, Some(hint), window)
+        };
         // The whole road, opposing lanes included: a racer passing over there must see
         // what stands in them.
         let (l, rr) = c.pass_bounds(cp.s);
@@ -2771,7 +2791,10 @@ fn plan_pass(
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
-            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 {
+            // A car right behind me in line is following me whichever way I go: pulling out
+            // does not cut it off.
+            let in_line = (q.o.n - r.n).abs() < hw + q.o.half_w - 0.5;
+            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 && !in_line {
                 why = PassReject::LaneBehind;
                 continue 'side;
             }

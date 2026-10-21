@@ -137,6 +137,35 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
 
+## Run 9c — `wanted_ai_racer_flees_police_through_the_city` fixed (2026-10-21)
+
+Red since `lead/city-residential` (7955480b): racer 1 drove 168 m after the call (needs ≥ 250).
+Junction 22 now runs a three-phase signal (≈ 63 s red per approach). The racer stops in the
+right-hand lane behind civilian 97, which waits at that red in the left lane with its left
+indicator on, 2.1 m to the side. When it flees, its route turns right from the lane it is
+already in. It still sat there until the light changed (t = 20 → 60 s). Three `wp_opponent` causes, all fixed in
+`crates/wp_opponent` (N's crate, listed here for N):
+1. **Cars behind a flight route's start were placed level with the racer.** An open corridor's
+   `project` clamps `s` to 0; a flight route starts at the racer, so racer 2, 7.5 m behind,
+   showed up at `ds −0.1`, overlapping. New `Corridor::project_unclamped` (s keeps its
+   distance past either end of an open route); used for flight-route perception only
+   (`perceive_on` vehicles, `civilians_on(.., private = true)`). The race corridor is unchanged.
+2. **A car right behind me in line blocked a pass as `LaneBehind`.** At a standstill
+   `v_s > v − 2` holds for any car behind, so the right-hand pass was refused and the racer
+   chose to pass on the far side of the civilian, through it from a standstill. A car directly behind me in line
+   (`|Δn| < half widths − 0.5`, as `engaged` already treats it) no longer counts: pulling
+   out does not cut it off.
+3. **Creeping round a parked car stopped at the 1 m stop gap** while still 0.28 m clear of
+   its body, only inside the margin, and a stopped car cannot move sideways. Now it keeps
+   creeping (`CREEP_MPS`) when its current footprint clears the car's body by
+   `CREEP_CLEAR_M` = 0.15 m and it is steering away from it.
+
+After: the test passes (seed 1). `simcli goldens`: all match. `cargo test --workspace
+--release --no-fail-fast`: red only in `wp_race` `opponent_pace::pace_scenarios_hold_their_ranges`,
+`race_picker::hollins_hill_sprint` and `race_vesper::hollins_drive_sprint_is_raced_to_the_top`.
+All three are red on the unchanged round12 code too. Hollins output is identical. The pace test
+goes from 26 out-of-range checks to 24, a subset of the 26.
+
 ## Run 9b — lead/round12 merged (2026-10-20, lead helper)
 
 Merged `origin/lead/round12` into `ws/harness` (merge commit). Conflict choices:

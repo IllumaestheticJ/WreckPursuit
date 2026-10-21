@@ -495,6 +495,23 @@ impl Corridor {
         }
     }
 
+    /// [`Corridor::project`], except that on an open route a point before the start or past
+    /// the end keeps its distance beyond it along the end tangent (`s` < 0 or > `length_m`)
+    /// instead of being clamped onto it. A flight route starts where the racer is: a car
+    /// queued behind it is behind it, not level with it.
+    pub fn project_unclamped(&self, p: V2, hint: Option<usize>, window: usize) -> CorridorPos {
+        let mut cp = self.project(p, hint, window);
+        if !self.closed {
+            let c = &self.samples[cp.index];
+            let along = geom::dot(geom::sub(p, geom::xy(c.pos)), c.tangent);
+            let s = cp.index as f32 * CORRIDOR_STEP_M + along;
+            if s < 0.0 || s > self.length_m {
+                cp.s = s;
+            }
+        }
+        cp
+    }
+
     /// Signed centreline curvature at `s` (1/m, + = turning right), from the tangents of the
     /// samples around it (±3 samples).
     pub fn centre_curvature(&self, s: f32) -> f32 {
