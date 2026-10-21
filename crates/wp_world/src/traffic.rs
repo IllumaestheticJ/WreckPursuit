@@ -54,6 +54,12 @@ pub use siren::{SirenYield, YieldPhase};
 pub const CAR_LENGTH_M: f32 = 4.5;
 /// Civilian car width, m.
 pub const CAR_WIDTH_M: f32 = 1.9;
+
+/// Look-ahead for an emergency stop on a tracked vehicle's collision course, s.
+const EMERGENCY_HORIZON_S: f32 = 2.5;
+/// Side clearance under which a closest approach counts as a hit for the emergency stop, m
+/// (on top of both cars' half widths).
+const EMERGENCY_SIDE_MARGIN_M: f32 = 0.4;
 /// Traffic AI update period (60 Hz), s.
 pub const TRAFFIC_DT: f32 = 1.0 / 60.0;
 /// Physics ticks per traffic step (240 Hz / 60 Hz).
@@ -2112,11 +2118,19 @@ impl Traffic {
                 let w = geom::sub(tv, pose.vel);
                 let ww = geom::dot(w, w);
                 // A siren unit coming past a car that has pulled over / slowed for it is expected.
+                // Only a real collision course counts: at the closest approach the two bodies
+                // overlap side to side (a car passing in the next lane or coming the other way
+                // in the opposite lane is ~3.3 m over and is ignored; owner: traffic must not
+                // "freak out and slam the brakes" when the player gets near).
                 if ww > 25.0 && long > -2.0 && !(t.siren && (sy.active() || oncoming)) {
                     let ts = -geom::dot(r, w) / ww;
-                    if ts > 0.0 && ts < 3.0 {
-                        let miss = geom::len(geom::add(r, geom::scale(w, ts)));
-                        if miss < 3.0 {
+                    if ts > 0.0 && ts < EMERGENCY_HORIZON_S {
+                        let m = geom::add(r, geom::scale(w, ts));
+                        let side = geom::dot(m, right).abs();
+                        let along = geom::dot(m, pose.f).abs();
+                        if side < CAR_WIDTH_M * 0.5 + ext + EMERGENCY_SIDE_MARGIN_M
+                            && along < CAR_LENGTH_M
+                        {
                             emergency = true;
                         }
                     }

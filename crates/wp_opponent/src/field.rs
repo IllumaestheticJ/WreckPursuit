@@ -586,6 +586,11 @@ const PARK_MIN_RADIUS_M: f32 = 35.0;
 
 /// Minimum time between flight re-plans, s.
 const FLIGHT_REPLAN_S: f32 = 6.0;
+/// Line optimiser sweeps for a flight route (the race line uses `RaceConfig::line`'s,
+/// 100 / 150): about a fifth of the cost per sample.
+const FLIGHT_LINE_SMOOTH_SWEEPS: u32 = 30;
+/// See [`FLIGHT_LINE_SMOOTH_SWEEPS`].
+const FLIGHT_LINE_CURVATURE_SWEEPS: u32 = 30;
 /// Drivers below this risk stop for red lights on open roads; the others go through a red
 /// only when the junction is clear.
 pub const RED_LIGHT_RISK: f32 = 0.35;
@@ -3679,7 +3684,19 @@ fn plan_flight(world: &World, r: &Racer, config: &RaceConfig, police_at: &[V2]) 
         let c = Corridor::try_from_route(world.map(), &route, &config.corridor)?;
         (c.len() >= 25).then_some(c)
     })?;
-    let line = RacingLine::constant(&corridor, 0.0);
+    // A real line over every lane of the flight route, not its lane centre: a fleeing racer
+    // on a multi-lane road held the planned lane's centre to the centimetre (owner, Loop 9:
+    // "AI racers only follow the green line"). Fewer sweeps than the race line (that one is
+    // built once; flights replan every few seconds).
+    let line = RacingLine::optimise(
+        &corridor,
+        0.5 * r.cap.width_m,
+        &LineParams {
+            smooth_sweeps: FLIGHT_LINE_SMOOTH_SWEEPS,
+            curvature_sweeps: FLIGHT_LINE_CURVATURE_SWEEPS,
+            ..config.line
+        },
+    );
     let profile = SpeedProfile::build(
         &corridor,
         &line,

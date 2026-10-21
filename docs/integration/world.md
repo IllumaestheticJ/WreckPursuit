@@ -1463,3 +1463,13 @@ cross its plane). Tests: `surface::tests::*` (slab geometry), `vesper::tests::ov
 Decks are separate from round 12's covered spans (`covered.rs`: tunnels and the Founders Cut
 trench, switchable with `covered_los`); `deck_slabs` is not affected by `covered_los`. The slab
 list and its grid are `Arc`-shared like the other grids (cheap `CityMap` clones).
+
+## Playtest row 134 (lead): traffic no longer panics when the player is near
+
+`traffic.rs` emergency stop on a tracked vehicle: was "closest approach within 3 m in the next
+3 s", which a player passing in the next lane (same direction or oncoming, ~2.7–3.3 m over)
+kept setting off. Now the closest approach must overlap the agent's body side to side
+(half widths + `EMERGENCY_SIDE_MARGIN_M` 0.4 m, and within a car length along it), look-ahead
+`EMERGENCY_HORIZON_S` 2.5 s. Tests: `tests/player_nearby.rs` (two same-world runs, with and
+without the player, compare the chosen agent): oncoming 636 → 0 panic ticks, overtaking 40 → 0;
+a car in its lane head-on still triggers it.
