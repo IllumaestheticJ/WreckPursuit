@@ -58,6 +58,8 @@ pub struct CarTune {
     pub spin_fx_yield: f32,
     /// [`crate::tire::SpinGrip::on_braking`].
     pub spin_on_braking: bool,
+    /// [`crate::tire::SpinGrip::ellipse`].
+    pub spin_ellipse: f32,
     /// [`crate::tire::SpinGrip::fx_slide`].
     pub spin_fx_slide: f32,
     /// [`crate::tire::SpinGrip::fx_slide_from_deg`].
@@ -123,6 +125,7 @@ impl Default for CarTune {
             spin_p: d.p,
             spin_fx_yield: d.fx_yield,
             spin_on_braking: d.on_braking,
+            spin_ellipse: d.ellipse,
             spin_fx_slide: d.fx_slide,
             spin_fx_slide_from_deg: d.fx_slide_from_deg,
             spin_fx_slide_full_deg: d.fx_slide_full_deg,
@@ -235,6 +238,7 @@ impl CarTune {
             p: self.spin_p,
             fx_yield: self.spin_fx_yield,
             on_braking: self.spin_on_braking,
+            ellipse: self.spin_ellipse,
             fx_slide: self.spin_fx_slide,
             fx_slide_from_deg: self.spin_fx_slide_from_deg,
             fx_slide_full_deg: self.spin_fx_slide_full_deg,

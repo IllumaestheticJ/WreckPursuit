@@ -107,7 +107,8 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
 // v2: step 10's default ride became medium weight (an older saved ride must not override it).
 const RIDE_STORE = "wp.driftLabW.ride.v2";
 const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
-const GRIP_STORE = "wp.driftLabW.grip";
+// v2: "new" became "balance: grip" (an older saved "new" must not override it).
+const GRIP_STORE = "wp.driftLabW.grip.v2";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
  * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
 const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
@@ -771,11 +772,18 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
-      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
+      ab.textContent = `balance: ${isNew ? "grip (new)" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.step14) ? "step 14" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
+      ab.title = "A/B: before = the tyre data and the plain lock; grip (new) = the smart lock + RWD tyres near the data below the limit (body slip < 1° to 0.6 g) with the looseness at the limit (rear μ 0.96, flatter rear past the peak) + rear downforce: grip-drivable, steps out 4–6° at the limit";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
         saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
+        this.build();
+      };
+      const step14 = document.createElement("button");
+      step14.textContent = "step 14 (old new)";
+      step14.title = "the step-14 default: smart lock + softer RWD tyres (cornering stiffness × 0.6 / × 0.45) + rear downforce: looser everywhere, slides even in gentle corners";
+      step14.onclick = () => {
+        saveGrip(gd.step14);
         this.build();
       };
       const lockOnly = document.createElement("button");
@@ -812,9 +820,9 @@ export class DriftLabWPanel {
       const trans = document.createElement("button");
       trans.textContent = "transition: swing rack (test)";
       trans.title =
-        "tyre-slip test preset for drift transitions: balance new + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
+        "tyre-slip test preset for drift transitions: balance step 14 + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
       trans.onclick = () => {
-        saveGrip(gd.new);
+        saveGrip(gd.step14);
         const rd = this.sim.rideTuneDefaults();
         const ride = JSON.stringify({ ...rd.lab, yaw_inertia: 1.5 });
         const tyres = JSON.stringify(this.sim.carTuneDefaults().spin);
@@ -831,7 +839,7 @@ export class DriftLabWPanel {
       };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, forSlow, driftBest, step2, lockOnly, trans);
+      abRow.append(ab, step14, forSlow, driftBest, step2, lockOnly, trans);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

@@ -261,7 +261,10 @@ pub fn grip_balance_json() -> String {
 pub fn grip_balance_defaults_json() -> String {
     json(&serde_json::json!({
         "before": wp_vehicle::grip_lab::GripBalance::default(),
-        "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
+        // "new" = "balance: grip" since the lead's grip-drivable rework (2026-10-21); the
+        // step-14 "new" stays as "step14".
+        "new": wp_vehicle::grip_lab::GripBalance::grip(),
+        "step14": wp_vehicle::grip_lab::GripBalance::lab_default(),
         "step2": wp_vehicle::grip_lab::GripBalance::step2(),
         "slow_weight": wp_vehicle::grip_lab::GripBalance::for_slow_weight(),
         "drift_best": wp_vehicle::grip_lab::GripBalance::drift_best(),

@@ -26,7 +26,7 @@ fn car(id: &str) -> LoadedCar {
 fn countersteer_limit_stops_the_snap_back_spin_and_keeps_the_hold() {
     let a = reference_assists();
     car_lab::set_override(Some(CarTune::spin_candidate()));
-    grip_lab::set_override(Some(GripBalance::lab_default()));
+    grip_lab::set_override(Some(GripBalance::grip()));
     let ids = ["parity_rwd_d", "parity_rwd_a"];
     // Before: steps 1–9.
     plain::set_override(Some(PlainSteer {

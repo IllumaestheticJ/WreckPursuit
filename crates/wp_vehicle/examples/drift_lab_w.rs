@@ -979,7 +979,7 @@ fn snap_sweep(args: &[String]) {
     let spin = CarTune::spin_candidate();
     let lab = RideTune::lab_default();
     let mid = RideTune::medium_weight();
-    let gnew = Some(GripBalance::lab_default());
+    let gnew = Some(GripBalance::grip());
     type Cfg = (String, PlainSteer, CarTune, RideTune, Option<GripBalance>);
     let mut configs: Vec<Cfg> = vec![
         (
