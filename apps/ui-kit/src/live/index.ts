@@ -5,6 +5,5 @@
 export { ChaseEndDetector, chaseEndOf, isChased, type ChaseEnd, type ChaseEndInfo } from "./chaseEnd";
 export { createLiveModel, type LiveFrame, type LiveModel, type LiveOptions, type LiveVehicle, type PoliceReadout } from "./LiveModel";
 export { mountOverlay, type OverlayScreen } from "./mount";
-export { createWorkerMeasurer } from "./workerMeasurer";
 export { setBuildMeasurer, type BuildMeasurer } from "../data/measure";
 export { billFromWasm, billRequestJson, DEFAULT_BILL_REQUEST, type LiveBillJson } from "./bill";

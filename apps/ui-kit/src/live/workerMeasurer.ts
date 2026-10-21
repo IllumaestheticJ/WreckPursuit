@@ -1,6 +1,10 @@
 /**
  * A [`BuildMeasurer`](../data/measure.ts) backed by `statsWorker.ts` (physics-measured stat bars
  * for modded builds, off the main thread). Hosts: `setBuildMeasurer(createWorkerMeasurer())`.
+ *
+ * Import this file directly, not through `src/live`: it bundles a worker that needs
+ * `worker: { format: "es" }` in the host's Vite config, and the live entry point must keep
+ * building in hosts that don't measure (the testbed).
  */
 import type { CarStats } from "../data/catalog";
 import type { BuildMeasurer } from "../data/measure";

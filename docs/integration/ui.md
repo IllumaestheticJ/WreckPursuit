@@ -316,7 +316,8 @@ estimator, as in `wp_economy`). Cars without stats fall back to the estimator ro
 measurer in the background and re-renders with the measured build (cached per car / sorted mods /
 mode; a failure keeps the estimate). `createWorkerMeasurer()` runs `wp_wasm::car_stats_build_json`
 in a module Web Worker (`src/live/statsWorker.ts`, ~1–2 s per new build in headless Chromium), so
-the UI never blocks; the worker lazy-loads the testbed's wasm package via `import.meta.glob` and
+the UI never blocks. Import it from `src/live/workerMeasurer.ts` directly (not re-exported from
+`src/live`, so hosts without `worker.format = "es"`, e.g. the testbed, still build); the worker lazy-loads the testbed's wasm package via `import.meta.glob` and
 answers with an error when it has not been built (`vite.config.ts`: `worker.format = "es"`). The
 demo installs it unless `?measure=0`. Garage and mod tree labels read measuring… → measured, or
 estimated without a measurer; the mod tree's 0–100 / top speed / cornering rows follow the same
