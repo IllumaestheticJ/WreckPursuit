@@ -61,7 +61,9 @@ const on = await simMs();
 const frameMs = await page.evaluate(() => window.__wp.app.perf.frameMs);
 console.log(`sim ms per frame: without street racers ${off.toFixed(2)}, with ${on.toFixed(2)} (frame ${frameMs.toFixed(0)} ms)`);
 
-const st = await page.evaluate(() => window.__wp.street.status);
+const st = await page.evaluate(() => window.__wp.sim.streetStatus());
+await page.waitForSelector("#street-mini:not(.hidden)", { timeout: 30000 }).catch(() => {});
+await page.waitForSelector("#street-legend:not(.hidden)", { timeout: 30000 }).catch(() => {});
 check(st && st.roster.length === 7, `7 street racers (${st?.roster.length})`);
 check(st && new Set(st.levels.map((l) => l.colour)).size === 5, "5 level colours");
 check(await page.isVisible("#street-mini"), "minimap visible");
