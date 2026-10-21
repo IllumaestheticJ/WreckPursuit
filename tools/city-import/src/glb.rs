@@ -15,7 +15,9 @@
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
-use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
+use wp_world::network::{
+    BridgeKind, DistrictKind, Lane, LaneKind, RoadNetwork, StructureKind, SEA_LEVEL_M,
+};
 use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
 use wp_world::terrain::Heightfield;
 
@@ -26,7 +28,7 @@ const CURB_M: f32 = 0.15;
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
-const SEA_Z: f32 = 0.25;
+const SEA_Z: f32 = SEA_LEVEL_M;
 
 /// Median barrier cross-section (half width, height above the road), m: a Jersey profile.
 const BARRIER_PROFILE: [(f32, f32); 4] = [(0.30, 0.0), (0.28, 0.08), (0.18, 0.33), (0.08, 0.81)];
@@ -192,6 +194,21 @@ impl Prim {
     fn block(&mut self, corners: &[V2; 4], z0: f32, z1: f32) {
         self.walls(corners, z0, z1);
         self.polygon(corners, z1);
+    }
+
+    /// Closed solid over `poly` from `z0` to `z1` with a downward-facing underside (floating
+    /// structures: canopies, tunnel ceilings, crane booms).
+    fn solid(&mut self, poly: &[V2], z0: f32, z1: f32) {
+        self.walls(poly, z0, z1);
+        self.polygon(poly, z1);
+        let base = self.positions.len() as u32;
+        for p in poly {
+            self.vert([p[0], p[1], z0], [0.0, 0.0, -1.0]);
+        }
+        for t in triangulate(poly) {
+            self.indices
+                .extend_from_slice(&[base + t[0], base + t[2], base + t[1]]);
+        }
     }
 
     /// Upward-facing polygon at height `z` (ear clipping; handles concave footprints).
@@ -407,6 +424,13 @@ fn lane_bank(net: &RoadNetwork, lane: &Lane) -> Vec<f32> {
     }
 }
 
+/// Whether `q` is over a tunnel bore (within 1 m beyond its walls).
+fn over_bore(t: &wp_world::network::Tunnel, q: V2) -> bool {
+    let cum = geom::cumulative(&t.centre);
+    let pr = geom::project(&t.centre, &cum, q);
+    pr.s >= 0.0 && pr.s <= cum[cum.len() - 1] && pr.dist <= t.half_width_m + 1.0
+}
+
 /// Render terrain: every `k`-th vertex, each lowered to the minimum of the fine heights around
 /// it, so the coarse surface never rises above the fine one (and so never above a road).
 fn render_terrain(
@@ -425,6 +449,14 @@ fn render_terrain(
     for j in 0..cy {
         for i in 0..cx {
             let (fi, fj) = fine(i * k, j * k);
+            // Over a tunnel bore the ground stays as it is (the minimum would pull the
+            // hillside down through the bore next to its mouths).
+            let q = t.vertex_pos(fi, fj);
+            if net.features.tunnels.iter().any(|tn| over_bore(tn, q)) {
+                z[(j * cx + i) as usize] = t.at(fi, fj) - 0.05;
+                pos[(j * cx + i) as usize] = q;
+                continue;
+            }
             let mut m = f32::INFINITY;
             for dj in -(k as i64)..=(k as i64) {
                 for di in -(k as i64)..=(k as i64) {
@@ -510,6 +542,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut water = Prim::new("water", [0.16, 0.30, 0.45, 1.0]);
     let mut taper = Prim::new("ramp_taper", [0.42, 0.42, 0.40, 1.0]);
     let mut barrier = Prim::new("median_barrier", [0.66, 0.65, 0.62, 1.0]);
+    let mut river = Prim::new("river", [0.18, 0.34, 0.44, 1.0]);
+    let mut lining = Prim::new("tunnel_lining", [0.56, 0.55, 0.52, 1.0]);
+    let mut canopy = Prim::new("canopy", [0.33, 0.36, 0.38, 1.0]);
+    let mut landmark = Prim::new("landmark", [0.80, 0.74, 0.62, 1.0]);
+    let mut steel = Prim::new("steel", [0.50, 0.24, 0.18, 1.0]);
     let mut ground: Vec<Prim> = DistrictKind::ALL
         .iter()
         .map(|k| Prim::smooth(&format!("ground_{k:?}").to_lowercase(), district_color(*k)))
@@ -703,9 +740,55 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     for b in &net.buildings {
         buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
     }
+    // Rivers above sea level (at the sea the sea plane is the water).
+    for w in &net.features.waterways {
+        let edge = |side: f32| -> Vec<V3> {
+            w.centre
+                .iter()
+                .enumerate()
+                .map(|(k, p)| {
+                    let n = w.centre.len();
+                    let a = geom::xy(w.centre[k.saturating_sub(1)]);
+                    let b = geom::xy(w.centre[(k + 1).min(n - 1)]);
+                    let r = geom::right_of(geom::normalize(geom::sub(b, a)));
+                    let q = geom::add(
+                        geom::xy(*p),
+                        geom::scale(r, side * (w.half_width_m[k] + 3.0)),
+                    );
+                    [q[0], q[1], p[2]]
+                })
+                .collect()
+        };
+        let (l, r) = (edge(-1.0), edge(1.0));
+        for k in 0..w.centre.len() - 1 {
+            if w.centre[k][2] > SEA_Z + 0.05 || w.centre[k + 1][2] > SEA_Z + 0.05 {
+                river.strip(&l[k..k + 2], &r[k..k + 2]);
+            }
+        }
+    }
+    // Steel decks of truss bridges.
+    for b in net
+        .features
+        .bridges
+        .iter()
+        .filter(|b| b.kind == BridgeKind::Truss)
+    {
+        steel.ribbon(&b.centre, b.half_width_m, b.half_width_m, 0.02);
+    }
+    for st in &net.features.structures {
+        let prim = match st.kind {
+            StructureKind::TunnelWall
+            | StructureKind::TunnelCeiling
+            | StructureKind::TunnelPortal => &mut lining,
+            StructureKind::Canopy | StructureKind::Pillar => &mut canopy,
+            StructureKind::Landmark => &mut landmark,
+            StructureKind::Truss => &mut steel,
+        };
+        prim.solid(&st.footprint, st.z0_m, st.z1_m);
+    }
     let mut out = vec![
         asphalt, concrete, parking, bus, sidewalk, kerb, buildings, wall, bridge, rock, seabed,
-        water, taper, barrier,
+        water, taper, barrier, river, lining, canopy, landmark, steel,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
