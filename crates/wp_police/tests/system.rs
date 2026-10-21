@@ -1137,7 +1137,10 @@ fn contact_tactics_escalate_with_the_wanted_level() {
 #[test]
 fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
     let av = PoliceConfig::builtin().pursuit.avoid;
-    let mut h = pursued_at(12.0, 7, 40.0);
+    // Seed 8 (was 7): on the 6x6 grid since the highway port, seed 7's backup unit 7 drives
+    // up and stops 2.4 m behind this unit, so after the failed push there is no room to back
+    // out and it waits as in a jam (correctly); this test needs the road behind it clear.
+    let mut h = pursued_at(12.0, 8, 40.0);
     let id = units_on_racer(&h)[0];
     let entity = EntityId(951);
     h.police

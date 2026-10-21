@@ -13,6 +13,11 @@
     expect: [
         (metric: "pursuits", min: 1, max: 1000),
         (metric: "radio_per_min_pursuit", min: 0.5, max: 10.0),
-        (metric: "radio_per_min_calm", min: 0.0, max: 4.0),
+        // Calm here is only the gaps between chases (about 70 s of the 4 runs), mostly "resuming
+        // patrol" wrap-ups, so one line moves the rate by ~0.85/min. Since the highway port the
+        // racer is wanted for more of each run (calm 224 -> 153 s over 12 runs) while the calm
+        // lines stay the same (13 -> 12 lines): 4.2/min with 4 runs (was 3.4). The calm-patrol
+        // budget of 4/min is radio_calm_patrol.ron.
+        (metric: "radio_per_min_calm", min: 0.0, max: 5.0),
     ],
 )

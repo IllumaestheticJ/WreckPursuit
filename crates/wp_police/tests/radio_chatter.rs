@@ -199,7 +199,11 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
         t += 0.5;
     }
     assert_eq!(h.status(), PursuitStatus::Pursuit, "{:#?}", h.texts());
-    h.run(6.0);
+    // Chase on past `SIGHT_CALL_GAP_S` before the blackout. Since the highway port changed the
+    // 6x6 grid, the racer starts on another Core arterial and the chase opens with a ~2 s
+    // line-of-sight flicker (Searching at about 11-13 s, no line aired); with the blackout 6 s
+    // after the pursuit start, the lost-visual call came only as the racer escaped (12 s).
+    h.run(6.0 + wp_police::chatter::SIGHT_CALL_GAP_S);
 
     // Break line of sight: the lead unit calls "lost visual" with the last known place and
     // heading — the racer record search steers to.
