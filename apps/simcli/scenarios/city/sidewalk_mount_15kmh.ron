@@ -17,8 +17,8 @@
         (
             id: "mounter",
             car: "debug_sedan",
-            // Lane 463 (eastbound, kerb at y = -957.0), heading 12° to the right.
-            pos: (470.0, -955.25, 2.5),
+            // The quay's outer eastbound lane (kerb at y = -932.0; main moved the quay 25 m north), heading 12° to the right.
+            pos: (470.0, -930.25, 2.5),
             yaw: -1.7802,
             speed_mps: 4.17,
             driver: cruise(target_mps: 4.17, from_s: 0.0, until_s: 14.0),
@@ -31,8 +31,8 @@
         (
             id: "walker",
             car: "debug_sedan",
-            // On the sidewalk of lane 465 (westbound, kerb at y = -943.0), 1.5 m in.
-            pos: (890.0, -941.5, 2.65),
+            // On the sidewalk of the quay's westbound side (kerb at y = -918.0), 1.5 m in.
+            pos: (890.0, -916.5, 2.65),
             yaw: 1.5708,
             speed_mps: 4.17,
             driver: cruise(target_mps: 4.17, from_s: 0.0, until_s: 14.0),

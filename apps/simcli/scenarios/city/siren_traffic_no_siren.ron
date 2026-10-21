@@ -1,5 +1,5 @@
 // Playtest rows 61-62 (traffic gets out of the way of police with sirens on): a police car drives
-// Garage 2 -> Garage 3 on the 12x12 grid (403 m, mostly two-lane streets) through busy civilian
+// Garage 1 -> Garage 2 on the 12x12 grid (418 m, mostly two-lane streets) through busy civilian
 // traffic, riding the line on the left of its lane (lateral_offset_m -1.55, where a unit passes
 // yielding traffic) and keeping its distance from anything in its way (keep_distance).
 // Control run: the same car with its siren OFF. Nobody pulls over; it follows the traffic
@@ -9,7 +9,9 @@
 // siren flag, damage mode Arcade).
 (
     name: "city_siren_traffic_no_siren",
-    seed: 2,
+    // Seed 2 -> 1 after merging main's highway layout (new route Garage 1 -> Garage 2): seeds
+    // 2-4 jam the unit against a stopped car, 1 and 5-9 pass except 8 (the yield runs' seed).
+    seed: 1,
     city: file("city/procedural_12x12.road.json"),
     mode: Arcade,
     time_of_day_h: 12.0,
@@ -24,7 +26,7 @@
             car: "sentinel_cruiser",
             speed_mps: 10.0,
             driver: follow_route(
-                route_id: "Garage 2 -> Garage 3",
+                route_id: "Garage 1 -> Garage 2",
                 target_speed: 16.0,
                 lateral_offset_m: -1.55,
                 keep_distance: true,

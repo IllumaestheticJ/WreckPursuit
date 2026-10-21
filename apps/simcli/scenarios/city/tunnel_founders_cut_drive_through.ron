@@ -1,5 +1,6 @@
 // Port Vesper v2: the Uptown Connector northbound through Founders Cut — down a ≈ 5 % ramp
-// into the 250 m covered trench (road 7 m below the plaza), out up the north ramp — at the
+// into the 105 m covered trench (road 7 m below the plaza; 250 m before the merge with main's
+// Uptown interchange), out up the north ramp — at the
 // 40 mph limit. Expect: no contact with the walls or deck, no airborne time over the sag and
 // crest at the ramps, the car stays on the road and arrives undamaged.
 (
@@ -27,7 +28,8 @@
         metric(name: "max_airborne_s", min: 0.0, max: 0.05),
         metric(name: "max_speed_mps", min: 15.0, max: 19.0),
         metric(name: "crush_depth_m", min: 0.0, max: 0.02),
-        metric(name: "path_length_m", min: 380.0, max: 500.0),
+        // 40 m before + 105 m + 40 m after the portals (186 m measured).
+        metric(name: "path_length_m", min: 160.0, max: 230.0),
         total_loss(expected: false),
     ],
 )

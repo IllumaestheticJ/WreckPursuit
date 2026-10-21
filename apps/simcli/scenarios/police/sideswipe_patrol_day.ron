@@ -8,6 +8,9 @@
 // I've been hit! ...". Before the fix nothing happened at the contact; near-miss and wrong-way
 // reports only made the racer L1 and a pursuit started at 9.2 s, so the 9.0 s bound below
 // separates the two. Re-aim with `examples/probe_police.rs` if police spawning changes.
+// Re-aimed for main's highway layout (merge into ws/harness): unit 6 now drives east along
+// y = -56.8 and slows for the junction at x = -55; the racer starts at x = -8 and steers 0.1
+// left at 8.0 s into its flank.
 (
     name: "police_sideswipe_patrol_day",
     seed: 24,
@@ -22,11 +25,11 @@
         (
             id: "racer",
             car: "debug_sedan",
-            pos: (10.0, -55.6, 0.0),
+            pos: (-8.0, -55.6, 0.0),
             yaw: 1.5708,
             driver: cruise(target_mps: 8.33, from_s: 1.0),
             inputs: [
-                (t_s: 8.0, input: (steer: 0.1)),
+                (t_s: 8.0, input: (steer: -0.1)),
                 (t_s: 8.6, input: ()),
             ],
         ),

@@ -3417,40 +3417,41 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         }
     }
     // Route ends either side of each covered road (drive-through and pursuit scenarios):
-    // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
-    // after the second.
+    // "<name> entry" sits `before` m before the first portal in the forward direction,
+    // "<name> exit" `after` m past the second (measured from the portals, so they hold on
+    // divided Loop 9, whose carriageway pieces end at the interchanges), "<name> lay-by" in
+    // the middle of the covered stretch (a place to hide from the helicopter). All on the
+    // forward kerb lane of the span's road.
     let tunnel_ends: [(&str, f32, f32); 2] = [
-        ("Hollins Tunnel", 950.0, -1100.0),
-        ("Founders Cut", 40.0, -40.0),
+        ("Hollins Tunnel", 150.0, 180.0),
+        ("Founders Cut", 40.0, 40.0),
     ];
-    for (name, s0, s1) in tunnel_ends {
+    for (name, before, after) in tunnel_ends {
         let Some(c) = covered.iter().find(|c| c.name == name) else {
             continue;
         };
-        // "<name> lay-by": the forward kerb lane in the middle of the covered stretch (a
-        // place to hide from the helicopter).
-        let mid = {
-            let sh = CoverShape::new(c);
-            geom::xy(geom::point_at(&c.centre, &sh.cum, sh.length() * 0.5).0)
+        let Some(&lane) = built.road_lanes[c.road as usize].fwd.last() else {
+            continue;
         };
-        let lay_by = built.road_lanes[c.road as usize].fwd.last().map(|l| {
-            let pl = &built.lanes[*l as usize].polyline;
-            geom::project(pl, &geom::cumulative(pl), mid).s
-        });
+        let pl = &built.lanes[lane as usize].polyline;
+        let cum = geom::cumulative(pl);
+        let total = cum[cum.len() - 1];
+        let along = |p: V3| geom::project(pl, &cum, geom::xy(p)).s;
+        let (a, b) = (along(c.centre[0]), along(c.centre[c.centre.len() - 1]));
+        let (p0, p1) = (a.min(b), a.max(b));
         for (suffix, s) in [
-            ("entry", s0),
-            ("lay-by", lay_by.unwrap_or(s0)),
-            ("exit", s1),
+            ("entry", p0 - before),
+            ("lay-by", 0.5 * (p0 + p1)),
+            ("exit", p1 + after),
         ] {
-            if let Some((p, yaw, lane)) = lane_pose(&built, c.road as usize, s, true) {
-                pois.push(Poi {
-                    kind: PoiKind::RaceStartGrid,
-                    name: format!("{name} {suffix}"),
-                    pos: p,
-                    heading_rad: yaw,
-                    lane: Some(lane),
-                });
-            }
+            let (p, d) = geom::point_at(pl, &cum, s.clamp(1.0, total - 1.0));
+            pois.push(Poi {
+                kind: PoiKind::RaceStartGrid,
+                name: format!("{name} {suffix}"),
+                pos: p,
+                heading_rad: geom::yaw_of(d),
+                lane: Some(lane),
+            });
         }
     }
     let mut block_poi = |kind: PoiKind, name: &str, p: V2| {

@@ -8,6 +8,9 @@
 // the racer at once instead, so wanted L2 and the pursuit start in the contact's tick. Without
 // the fix this run has no police event for the racer at all. Re-aim with
 // `examples/probe_police.rs` if police spawning changes.
+// Re-aimed for main's highway layout (merge into ws/harness): unit 1 now turns east onto
+// y = 53.3 and the racer comes the other way along y = 56.75 from x = -15, steering left (-0.3)
+// at 11.3 s into its flank (x = -11 … -17 and steer -0.25 … -0.35 pass, -19 misses).
 (
     name: "police_sideswipe_patrol_night",
     seed: 24,
@@ -22,10 +25,11 @@
         (
             id: "racer",
             car: "debug_sedan",
-            pos: (-273.25, 70.0, 0.0),
+            pos: (-15.0, 56.75, 0.0),
+            yaw: 1.5708,
             driver: cruise(target_mps: 8.33, from_s: 1.0),
             inputs: [
-                (t_s: 11.3, input: (steer: -0.4)),
+                (t_s: 11.3, input: (steer: -0.3)),
                 (t_s: 12.1, input: ()),
             ],
         ),
