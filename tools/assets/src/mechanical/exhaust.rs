@@ -130,7 +130,8 @@ pub fn exhaust(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut, b:
     let truck = def.body_size_m[2] > 1.7;
     let z_pipe = (p.z_floor - pr - 0.01).max(pr + 0.09);
     let hw = p.half_w;
-    let y_tip = p.y_tail + 0.015;
+    // Mouths 2 cm proud of the tail so they show past bumpers, valances and diffusers.
+    let y_tip = p.y_tail - 0.02;
     let z_tip = (p.z_floor + 0.05).max(0.15);
     let x_out = (hw - 0.36).clamp(0.25, 0.6);
 
@@ -168,8 +169,14 @@ pub fn exhaust(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut, b:
         // Mufflers at the tail behind the gearbox.
         let yc = (y_ra - 0.5).max(p.y_tail + 0.28);
         let zc = (p.z_floor + 0.14).max(0.24);
-        let high = ex.tips == Tips::QuadHigh;
-        if high {
+        let corners = ex.tips == Tips::QuadHigh;
+        let high = matches!(ex.tips, Tips::QuadHigh | Tips::HighCentre);
+        let zm = if ex.tips == Tips::HighCentre {
+            zc + 0.1
+        } else {
+            zc
+        };
+        if corners {
             for sx in [-1.0f32, 1.0] {
                 let c = [sx * 0.32, yc, zc + 0.08];
                 muffler(b, &k, c, [0.1, 0.17, 0.1], hero);
@@ -187,12 +194,12 @@ pub fn exhaust(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut, b:
                 );
             }
         } else {
-            muffler(b, &k, [0.0, yc, zc], [0.4, 0.11, 0.11], hero);
+            muffler(b, &k, [0.0, yc, zm], [0.4, 0.11, 0.11], hero);
             for start in &run_starts {
                 pipe(
                     b,
                     &k,
-                    &[*start, [start[0], yc + 0.25, zc], [start[0], yc + 0.11, zc]],
+                    &[*start, [start[0], yc + 0.25, zm], [start[0], yc + 0.11, zm]],
                     pr,
                     hero,
                 );
@@ -205,18 +212,26 @@ pub fn exhaust(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut, b:
         };
         let tips: Vec<f32> = match ex.tips {
             Tips::QuadHigh | Tips::Quad | Tips::QuadTrap => vec![-0.32, -0.17, 0.17, 0.32],
+            Tips::CentreQuad => vec![-0.17, -0.06, 0.06, 0.17],
+            Tips::HighCentre => vec![-0.18, -0.06, 0.06, 0.18],
             Tips::Dual | Tips::DualDown | Tips::DualOval => vec![-0.3, 0.3],
             Tips::Single | Tips::SingleDown => vec![-0.3],
             _ => vec![-0.07, 0.07],
         };
         for x in tips {
             let at = [x, y_tip, zt];
-            let from = if high {
+            let from = if corners {
                 [x.signum() * 0.32, yc - 0.17, zt]
             } else {
-                [x, yc - 0.11, zc]
+                [x, yc - 0.11, zm]
             };
-            pipe(b, &k, &[from, [x, at[1] + 0.12, zt]], pr, hero);
+            pipe(
+                b,
+                &k,
+                &[from, [x, at[1] + 0.2, zt], [x, at[1] + 0.12, zt]],
+                pr,
+                hero,
+            );
             tip(b, &k, at, [0.0, -1.0, 0.0], tr, Mouth::Round, hero);
         }
         return;
@@ -391,7 +406,7 @@ pub fn exhaust(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut, b:
                         tips.push(([sx * x_out + 0.5 * gap, y_tip, zt], i));
                     }
                 }
-                Tips::Centre | Tips::QuadHigh => {
+                Tips::Centre | Tips::QuadHigh | Tips::CentreQuad | Tips::HighCentre => {
                     tips.push(([-0.07, y_tip, z_tip], 0));
                     tips.push(([0.07, y_tip, z_tip], 0));
                 }

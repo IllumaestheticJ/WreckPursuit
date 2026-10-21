@@ -265,6 +265,10 @@ pub enum Tips {
     Centre,
     /// Four big tips high in the rear panel.
     QuadHigh,
+    /// Four tips in a row in the centre of the valance (90s mid-engine exotic).
+    CentreQuad,
+    /// Four big tips high in the centre of a mesh rear panel (supercar).
+    HighCentre,
     /// Single exit behind the right rear wheel (trucks, SUVs).
     SideRight,
     /// Bare pipe, no tip (beaters, vans), exits before the right rear wheel.
@@ -319,6 +323,8 @@ pub struct CarSpec {
     pub rusty: bool,
     /// AWD: front diff + shafts.
     pub awd: bool,
+    /// Roots blower on the intake (V8s).
+    pub blower: bool,
     /// Exhaust.
     pub exhaust: ExhaustSpec,
 }
@@ -418,6 +424,7 @@ pub fn table(id: &str) -> Option<CarSpec> {
         tinted_springs: false,
         rusty: false,
         awd: false,
+        blower: false,
         exhaust,
     };
     let leaf = |leaves: u8, over: bool| Susp::LeafAxle { leaves, over };
@@ -591,7 +598,7 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 Mount::Mid,
                 Susp::Coilover,
                 Susp::Coilover,
-                exhaust(Tips::Centre, 0.04, 0.03, true),
+                exhaust(Tips::CentreQuad, 0.036, 0.03, true),
             )
         },
         "fulmine_v10" => CarSpec {
@@ -607,7 +614,7 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 Mount::Mid,
                 Susp::Coilover,
                 Susp::Coilover,
-                exhaust(Tips::QuadHigh, 0.05, 0.034, true),
+                exhaust(Tips::HighCentre, 0.05, 0.034, true),
             )
         },
         "debug_sedan" => CarSpec {
@@ -889,9 +896,11 @@ pub fn apply_mech(def: &VehicleDef, mut s: CarSpec, m: &MechStyle) -> CarSpec {
     } else if let Some(ind) = induction {
         s.engine = engine_from(family(s.engine), ind, s.mount, def.class);
     }
-    if s.engine == Engine::BigBlockV8 && m.induction == Induction::Blower {
-        // Drawn as the big block with a blower box through the hood (engine.rs).
-    }
+    s.blower = m.induction == Induction::Blower
+        && matches!(
+            s.engine,
+            Engine::BigBlockV8 | Engine::SmallBlockV8 { .. } | Engine::DohcV8
+        );
     s.engine_detail |= m.show_engine_detail;
     if let Some(k) = set(m.front_suspension, d.front_suspension, c.front_suspension) {
         s.front_susp = susp_from(k, true);
@@ -939,18 +948,38 @@ pub fn apply_mech(def: &VehicleDef, mut s: CarSpec, m: &MechStyle) -> CarSpec {
         s.tinted_springs = true;
     }
     if let Some(e) = set(m.exhaust, d.exhaust, c.exhaust) {
-        s.exhaust.tips = match e {
-            ExhaustKind::None => Tips::Hidden,
-            ExhaustKind::Single => Tips::Single,
-            ExhaustKind::Dual => Tips::Dual,
-            ExhaustKind::Quad => Tips::Quad,
-            ExhaustKind::Centre => Tips::Centre,
-            ExhaustKind::SidePipes => Tips::SidePipes,
-        };
-        s.exhaust.dual = matches!(
-            e,
-            ExhaustKind::Dual | ExhaustKind::Quad | ExhaustKind::SidePipes
+        // Car-specific outlet layouts survive a style asking for the same family.
+        let keep = matches!(
+            (s.exhaust.tips, e),
+            (Tips::CentreQuad, ExhaustKind::Centre | ExhaustKind::Quad)
+                | (Tips::HighCentre, ExhaustKind::Centre | ExhaustKind::Quad)
+                | (Tips::QuadTrap | Tips::QuadHigh, ExhaustKind::Quad)
+                | (
+                    Tips::DualDown | Tips::DualOval | Tips::DualLeft,
+                    ExhaustKind::Dual
+                )
+                | (
+                    Tips::SingleDown | Tips::Bare | Tips::Hidden,
+                    ExhaustKind::Single
+                )
+                | (Tips::SideRight | Tips::BareSide, ExhaustKind::Single)
         );
+        if keep {
+            s.exhaust.dual |= matches!(e, ExhaustKind::Dual | ExhaustKind::Quad);
+        } else {
+            s.exhaust.tips = match e {
+                ExhaustKind::None => Tips::Hidden,
+                ExhaustKind::Single => Tips::Single,
+                ExhaustKind::Dual => Tips::Dual,
+                ExhaustKind::Quad => Tips::Quad,
+                ExhaustKind::Centre => Tips::Centre,
+                ExhaustKind::SidePipes => Tips::SidePipes,
+            };
+            s.exhaust.dual = matches!(
+                e,
+                ExhaustKind::Dual | ExhaustKind::Quad | ExhaustKind::SidePipes
+            );
+        }
     }
     if let Some(r) = set(m.exhaust_tip_r_m, d.exhaust_tip_r_m, c.exhaust_tip_r_m) {
         s.exhaust.tip_r = r.clamp(0.025, 0.06);

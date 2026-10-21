@@ -42,13 +42,13 @@ impl Axle {
         } else if s.tinted_springs {
             MaterialSlot::Caliper
         } else {
-            MaterialSlot::Metal
+            MaterialSlot::Exhaust
         };
         let k =
             |n: &str, m: MaterialSlot| PartKey::body(n, region, PartKind::Suspension, m).rigid();
         Axle {
             dark: k(name, MaterialSlot::Engine),
-            metal: k(&format!("{name}_metal"), MaterialSlot::Metal),
+            metal: k(&format!("{name}_metal"), MaterialSlot::Exhaust),
             spring: k(&format!("{name}_spring"), spring_mat),
         }
     }
@@ -61,12 +61,29 @@ struct Corner {
     s: f32,
     k_in: f32,
     travel: f32,
+    /// Highest point allowed above the hub (under the hood / deck surface), m.
+    top: f32,
 }
 
 impl Corner {
     /// Chassis point `in_m` inboard of the hub plane, `dy` forward, `dz` up from the hub.
+    /// Heights are capped at [`Corner::top`] so nothing pokes through a low hood.
     fn p(&self, in_m: f32, dy: f32, dz: f32) -> [f32; 3] {
-        [self.h[0] - self.s * in_m, self.h[1] + dy, self.h[2] + dz]
+        [
+            self.h[0] - self.s * in_m,
+            self.h[1] + dy,
+            self.h[2] + dz.min(self.top),
+        ]
+    }
+
+    /// Strut heights above the spring seat squeezed so the top mount fits under `top`.
+    fn strut_z(&self, z: f32) -> f32 {
+        let k = ((self.top - 0.25) / 0.335).clamp(0.3, 1.0);
+        if z <= 0.25 {
+            z
+        } else {
+            0.25 + (z - 0.25) * k
+        }
     }
 }
 
@@ -118,6 +135,7 @@ impl Ctx<'_> {
 
 /// Point at height `z` on a strut line (matches `brakes::pivot_hardware`).
 fn strut_pt(c: &Corner, z: f32) -> [f32; 3] {
+    let z = c.strut_z(z);
     let f = (z - 0.08) / 0.50;
     c.p(c.k_in + 0.08 * f, -0.02 - 0.02 * f, z)
 }
@@ -461,6 +479,20 @@ pub fn suspension(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut,
             s: if w.position_m[0] < 0.0 { -1.0 } else { 1.0 },
             k_in: knuckle_in(w.width_m),
             travel: def.suspension.get(i).map_or(0.18, |d| d.travel_m),
+            top: {
+                let k = knuckle_in(w.width_m);
+                let s = if w.position_m[0] < 0.0 { -1.0 } else { 1.0 };
+                let y = w.position_m[1].clamp(p.y_tail + 0.05, p.y_nose - 0.05);
+                [k + 0.08, k + 0.3]
+                    .iter()
+                    .map(|&i| {
+                        let x = (w.position_m[0] - s * i).clamp(-0.9 * p.half_w, 0.9 * p.half_w);
+                        p.top_point(y, x).0[2]
+                    })
+                    .fold(f32::MAX, f32::min)
+                    - 0.04
+                    - w.position_m[2]
+            },
         })
         .collect();
     let y_fa = def.wheels[0].position_m[1];
@@ -571,7 +603,7 @@ pub fn suspension(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, e: &EngineOut,
         "driveline",
         BodyRegion::FrameRear,
         PartKind::Suspension,
-        MaterialSlot::Metal,
+        MaterialSlot::Exhaust,
     )
     .rigid();
     let hub_z = def.wheels[2].position_m[2];

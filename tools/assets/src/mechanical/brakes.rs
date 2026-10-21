@@ -92,10 +92,10 @@ pub fn brake(g: &WheelGeom, b: &mut Builder) -> BrakePlace {
     let disc_mat = if bs.face == DiscFace::Ceramic {
         MaterialSlot::Carbon
     } else {
-        MaterialSlot::Metal
+        MaterialSlot::Exhaust
     };
     let hat_mat = if bs.face == DiscFace::Ceramic {
-        MaterialSlot::Metal
+        MaterialSlot::Exhaust
     } else {
         MaterialSlot::Engine
     };

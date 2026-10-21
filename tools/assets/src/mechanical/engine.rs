@@ -61,7 +61,7 @@ enum Mat {
 const MATS: [(Mat, &str, MaterialSlot); 7] = [
     (Mat::Block, "engine_block", MaterialSlot::Engine),
     (Mat::Cover, "engine_cover", MaterialSlot::Caliper),
-    (Mat::Metal, "engine_metal", MaterialSlot::Metal),
+    (Mat::Metal, "engine_metal", MaterialSlot::Exhaust),
     (Mat::Trim, "engine_trim", MaterialSlot::Trim),
     (Mat::Chrome, "engine_chrome", MaterialSlot::Chrome),
     (Mat::Carbon, "engine_carbon", MaterialSlot::Carbon),
@@ -79,6 +79,8 @@ struct E {
     gearbox_end: Option<[f32; 3]>,
     /// Compressor outlet / throttle body (local) for intercooler piping.
     charge: Option<([f32; 3], [f32; 3])>,
+    /// Roots blower on the intake.
+    blower: bool,
 }
 
 fn key(m: Mat) -> PartKey {
@@ -258,15 +260,19 @@ fn big_block(e: &mut E) {
     let l = 0.66;
     v_banks(e, l, 45.0, 0.22, 0.13, 0.58);
     e.bx(Mat::Block, [0.0, 0.0, 0.31], [0.15, 0.24, 0.06]);
-    e.bx(Mat::Metal, [0.0, 0.02, 0.405], [0.075, 0.075, 0.04]);
-    e.can(
-        Mat::Block,
-        Mat::Chrome,
-        [0.0, 0.02, 0.44],
-        0.18,
-        0.07,
-        if e.detail { 16 } else { 10 },
-    );
+    if e.blower {
+        blower(e, 0.37);
+    } else {
+        e.bx(Mat::Metal, [0.0, 0.02, 0.405], [0.075, 0.075, 0.04]);
+        e.can(
+            Mat::Block,
+            Mat::Chrome,
+            [0.0, 0.02, 0.44],
+            0.18,
+            0.07,
+            if e.detail { 16 } else { 10 },
+        );
+    }
     if e.detail {
         plug_leads(e, l, 45.0, 4);
         fan(e, l);
@@ -276,6 +282,25 @@ fn big_block(e: &mut E) {
         e.exits.push(x);
     }
     gearbox(e, l, 0.7, 0.15, 0.09);
+}
+
+/// Roots blower: ribbed case on the intake at `z` (local), belt snout forward, chrome hat.
+fn blower(e: &mut E, z: f32) {
+    e.bx(Mat::Metal, [0.0, 0.0, z + 0.06], [0.12, 0.2, 0.06]);
+    e.cyl(
+        Mat::Block,
+        [0.0, 0.2, z + 0.06],
+        [0.0, 0.27, z + 0.06],
+        0.055,
+        8,
+    );
+    e.bx(Mat::Chrome, [0.0, 0.0, z + 0.14], [0.09, 0.08, 0.025]);
+    if e.detail {
+        for k in 0..4 {
+            let y = -0.15 + 0.1 * k as f32;
+            e.bx(Mat::Metal, [0.0, y, z + 0.06], [0.125, 0.008, 0.055]);
+        }
+    }
 }
 
 /// Plug leads: a row of thin rods per bank down the outside of each head.
@@ -320,8 +345,11 @@ fn small_block(e: &mut E, old: bool) {
             plug_leads(e, l, 45.0, 4);
         }
     } else {
-        e.bx(Mat::Metal, [0.0, 0.0, 0.33], [0.27, 0.2, 0.06]);
+        e.bx(Mat::Trim, [0.0, 0.0, 0.33], [0.27, 0.2, 0.06]);
         e.cyl(Mat::Metal, [0.0, 0.2, 0.33], [0.0, 0.28, 0.33], 0.045, 8);
+        if e.blower {
+            blower(e, 0.39);
+        }
         e.tube(
             Mat::Trim,
             &[
@@ -335,7 +363,9 @@ fn small_block(e: &mut E, old: bool) {
         e.bx(Mat::Trim, [-0.33, 0.5 * l + 0.3, 0.2], [0.16, 0.12, 0.09]);
         if e.detail {
             coil_packs(e, l, 45.0, 4);
-            e.bx(Mat::Trim, [0.0, 0.0, 0.405], [0.24, 0.2, 0.02]);
+            if !e.blower {
+                e.bx(Mat::Trim, [0.0, 0.0, 0.405], [0.24, 0.2, 0.02]);
+            }
         }
     }
     for side in [-1.0f32, 1.0] {
@@ -366,6 +396,9 @@ fn dohc_v8(e: &mut E) {
     v_banks(e, l, 45.0, 0.24, 0.2, 0.6);
     e.bx(Mat::Metal, [0.0, 0.0, 0.36], [0.24, 0.16, 0.065]);
     e.cyl(Mat::Metal, [0.0, 0.16, 0.36], [0.0, 0.24, 0.36], 0.043, 8);
+    if e.blower {
+        blower(e, 0.425);
+    }
     e.tube(
         Mat::Trim,
         &[
@@ -757,6 +790,7 @@ pub fn engine(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, b: &mut Builder) -
         exits: Vec::new(),
         gearbox_end: None,
         charge: None,
+        blower: s.blower,
     };
     let stacks = false;
     // (crank height, block front face y, half length) per type and mount.
@@ -930,7 +964,7 @@ pub fn engine(def: &VehicleDef, p: &BodyProfile, s: &CarSpec, b: &mut Builder) -
         Cover::Tint => MaterialSlot::Caliper,
         Cover::Chrome => MaterialSlot::Chrome,
         Cover::Black => MaterialSlot::Trim,
-        Cover::Silver => MaterialSlot::Metal,
+        Cover::Silver => MaterialSlot::Exhaust,
         Cover::Dull => MaterialSlot::Engine,
     };
     for k in e.b.keys() {
@@ -1071,7 +1105,7 @@ fn intercooler(b: &mut Builder, p: &BodyProfile, hero: bool, co: [f32; 3], th: [
         "engine_charge_pipes",
         BodyRegion::FrameFront,
         PartKind::Engine,
-        MaterialSlot::Metal,
+        MaterialSlot::Exhaust,
     )
     .rigid();
     let y = p.y_nose - 0.11;
