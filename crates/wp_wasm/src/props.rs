@@ -52,10 +52,35 @@ fn pose7(sim: &Sim, i: usize) -> [f32; 7] {
 pub fn static_list(sim: &Sim) -> Vec<f32> {
     let n = sim.prop_count();
     let mut out = Vec::with_capacity(n * PROP_STRIDE);
-    for (i, prop) in sim.world().static_props().take(n).enumerate() {
-        out.push(kind_code(prop.kind));
+    // From the sim's own list: the city's props, then any a scenario added (`parked`).
+    for i in 0..n {
+        let kind = sim.prop_kind(i).unwrap_or(PropKind::Cone);
+        out.push(kind_code(kind));
         out.extend_from_slice(&pose7(sim, i));
-        out.extend_from_slice(&prop.half_extents);
+        out.extend_from_slice(&sim.prop_half_extents(i).unwrap_or([0.5; 3]));
+    }
+    out
+}
+
+/// Floats per record in [`wreck_list`].
+pub const WRECK_STRIDE: usize = 12;
+
+/// Dented parked cars ([`wp_sim::Sim::parked_wrecks`]), [`WRECK_STRIDE`] floats each:
+/// `[prop index, awake, health, shattered glass regions, scale xyz, origin xyz, 0, 0]`. The
+/// entity id is `wp_sim::PARKED_ENTITY_BASE + prop` (too large for an exact f32, so not in
+/// the list).
+pub fn wreck_list(sim: &Sim) -> Vec<f32> {
+    let mut out = Vec::with_capacity(sim.parked_wrecks().len() * WRECK_STRIDE);
+    for w in sim.parked_wrecks() {
+        out.extend_from_slice(&[
+            w.prop as f32,
+            w.damage.is_awake() as u8 as f32,
+            w.damage.health(),
+            w.damage.shattered_regions().len() as f32,
+        ]);
+        out.extend_from_slice(&w.map.scale);
+        out.extend_from_slice(&w.map.origin);
+        out.extend_from_slice(&[0.0, 0.0]);
     }
     out
 }
@@ -120,13 +145,9 @@ pub fn prop_right_xy(q: [f32; 4]) -> [f32; 2] {
 /// Parked cars (indices into [`static_list`]) nearest to `xy` first.
 pub fn parked_cars_by_distance(sim: &Sim, xy: [f32; 2]) -> Vec<usize> {
     let n = sim.prop_count();
-    let mut out: Vec<(f32, usize)> = sim
-        .world()
-        .static_props()
-        .take(n)
-        .enumerate()
-        .filter(|(_, p)| p.kind == PropKind::ParkedCar)
-        .map(|(i, _)| {
+    let mut out: Vec<(f32, usize)> = (0..n)
+        .filter(|i| sim.prop_kind(*i) == Some(PropKind::ParkedCar))
+        .map(|i| {
             let p = pose7(sim, i);
             ((p[0] - xy[0]).powi(2) + (p[1] - xy[1]).powi(2), i)
         })
@@ -200,5 +221,45 @@ mod tests {
         let fresh = city_session();
         let back = sync.moved(fresh.sim());
         assert!(back.len() / MOVED_STRIDE <= 20);
+    }
+
+    #[test]
+    fn a_knocked_parked_car_dents_and_reads_like_a_vehicle() {
+        let mut s = city_session();
+        let player = s.entities()[0];
+        let target = s.debug_knock_prop(player, None, 14.0).unwrap();
+        assert!(
+            wreck_list(s.sim()).is_empty(),
+            "nothing dented before the hit"
+        );
+        s.run_ticks(480);
+        let list = wreck_list(s.sim());
+        assert_eq!(list.len() % WRECK_STRIDE, 0);
+        let rec = list
+            .chunks(WRECK_STRIDE)
+            .find(|r| r[0] as usize == target)
+            .expect("the knocked parked car was promoted");
+        assert!(rec[2] < 1.0, "health {}", rec[2]);
+        for s in &rec[4..7] {
+            assert!((0.9..1.1).contains(s), "scale {s}");
+        }
+        // Its entity id reads like a vehicle's: car model and a dented lattice.
+        let id = wp_contracts::EntityId(wp_sim::PARKED_ENTITY_BASE + target as u32);
+        let car = s
+            .car(id)
+            .expect("car model loaded for the dented parked car");
+        let nodes = s.sim().node_positions(id).unwrap();
+        assert_eq!(nodes.len(), car.lattice.nodes.len());
+        let moved = nodes
+            .iter()
+            .zip(&car.lattice.nodes)
+            .map(|(a, b)| {
+                ((a[0] - b.pos_m[0]).powi(2)
+                    + (a[1] - b.pos_m[1]).powi(2)
+                    + (a[2] - b.pos_m[2]).powi(2))
+                .sqrt()
+            })
+            .fold(0.0f32, f32::max);
+        assert!(moved > 0.01, "lattice dented by {moved} m");
     }
 }

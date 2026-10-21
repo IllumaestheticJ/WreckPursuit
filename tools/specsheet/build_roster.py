@@ -684,7 +684,7 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
         comps["FuelTank"]["node_ids"] = sorted(nearest(floor_left, y_tank, 2))
         comps["FuelTank"]["intrusion_fail_m"], comps["FuelTank"]["intrusion_total_m"] = 0.10, 0.22
         log.append("Side-saddle fuel tank outboard of the left frame rail between cab and rear axle.")
-    if c["id"] == "ironside_440":
+    if lt.get("live_axle"):
         for kind in ("SuspensionRL", "SuspensionRR"):
             comps[kind]["intrusion_fail_m"], comps[kind]["intrusion_total_m"] = 0.04, 0.09
         for kind in ("WheelRL", "WheelRR"):

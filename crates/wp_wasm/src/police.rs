@@ -124,6 +124,21 @@ pub fn siren_on(sim: &wp_sim::Sim, v: &wp_sim::SimVehicle) -> bool {
     }
 }
 
+/// Turn signal of a sim vehicle bound to a police unit: -1 left, 0 off, 1 right
+/// (`wp_police::unit::Unit::turn_signal`); always off while its lights run (see [`siren_on`]).
+/// Presentation only.
+pub fn turn_signal(sim: &wp_sim::Sim, v: &wp_sim::SimVehicle) -> i8 {
+    let Some(unit) = v.police_unit else {
+        return 0;
+    };
+    sim.police()
+        .units()
+        .iter()
+        .find(|u| u.id == unit)
+        .filter(|u| !assignment_has_siren(&u.assignment))
+        .map_or(0, |u| u.turn_signal())
+}
+
 /// Assignments that run with lights and siren.
 pub fn assignment_has_siren(a: &Assignment) -> bool {
     matches!(

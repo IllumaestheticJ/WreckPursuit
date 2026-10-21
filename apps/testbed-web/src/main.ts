@@ -40,7 +40,7 @@ import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
-import { LodDirector } from "./render/lod";
+import { LodDirector, metaIndicators } from "./render/lod";
 import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
 import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
@@ -68,6 +68,7 @@ import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
 import { mountTuneRow, withQuickTune } from "./tune_panel";
 import { quickTune } from "../../ui-kit/src/garage/tune";
+import { IndicatorStalk } from "./indicator_stalk";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -162,6 +163,8 @@ async function main(): Promise<void> {
   let lastMenuCountersteer: number | null = null;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
+  // The player's indicators: cosmetic and local only (no VehicleInput field; indicator_stalk.ts).
+  const stalk = new IndicatorStalk();
   scene.world.add(tagFeature(lod.fleet.group, "fleet"));
 
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
@@ -1085,6 +1088,13 @@ async function main(): Promise<void> {
     const n = Number(e.key);
     if (n >= 1 && n <= CAMERA_MODES.length) return rig.choose(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
     switch (e.code) {
+      // Indicator stalk (cosmetic, indicator_stalk.ts): `-` left, `=` right.
+      case "Minus":
+        stalk.toggle(-1);
+        break;
+      case "Equal":
+        stalk.toggle(1);
+        break;
       case "Period":
         frameStep(4);
         break;
@@ -1299,6 +1309,7 @@ async function main(): Promise<void> {
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
     app.input = input;
+    stalk.update(input.steer);
     const device = activeDevice();
     if (source !== app.source || device !== app.device) {
       app.source = source;
@@ -1335,7 +1346,15 @@ async function main(): Promise<void> {
     const policeDraw = sim.policeDraw();
     syncViews(meta, lod.paintOfEntity(trafficDraw));
     const tS = wi[W.tick] / 240;
-    for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
+    for (let o = 0; o < meta.length; o += META_STRIDE) {
+      const view = app.views.get(meta[o]);
+      if (!view) continue;
+      view.setMeta(meta[o + 2], tS);
+      // Police cars indicate from their unit (vehicle_meta bits); traffic gets its lamps from
+      // its draw record in lod.update, the player from the stalk below.
+      if (meta[o + 1] === VEHICLE_KIND.police) view.setIndicators(metaIndicators(meta[o + 2], tS));
+    }
+    app.views.get(app.player)?.setIndicators(stalk.lamps(tS));
     const cur = sim.states();
     const prev = sim.statesPrev();
     const punctures = sim.tirePunctures();
@@ -1710,6 +1729,15 @@ async function main(): Promise<void> {
     meshTimings,
     /** Crash effects: `fx.stats()`, `fx.setQuality("low" | "med" | "high")` (render/fx). */
     fx,
+    /** Turn signals (e2e/signals.mjs): `probe(true)` records each traffic car's flags and lit
+     * lamps per frame into `rows()` (render/lod.ts IndicatorRow); `stalk` is the player's
+     * cosmetic stalk and `player()` its lit lamps. */
+    indicators: {
+      probe: (on: boolean) => (lod.indicatorProbe = on),
+      rows: () => lod.indicatorRows.map((r) => ({ ...r })),
+      stalk,
+      player: () => app.views.get(app.player)?.indicatorsLit() ?? null,
+    },
   };
   requestAnimationFrame(frame);
   if (abandonedBust) openGarage(abandonedBust);

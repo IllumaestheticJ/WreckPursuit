@@ -1069,7 +1069,19 @@ impl PoliceSystem {
                 let into = normalize(sub(t.point_at(s), t.point_at(s - 8.0)));
                 let out = normalize(sub(t.point_at(s + 8.0), t.point_at(s)));
                 let turn = crate::graph::dot(into, out) < 0.87;
-                crate::avoid::JunctionAhead { s, light, turn }
+                // +Z up: a positive cross product turns left.
+                let cross = into[0] * out[1] - into[1] * out[0];
+                let turn_dir = match (turn, cross > 0.0) {
+                    (false, _) => 0,
+                    (true, true) => -1,
+                    (true, false) => 1,
+                };
+                crate::avoid::JunctionAhead {
+                    s,
+                    light,
+                    turn,
+                    turn_dir,
+                }
             });
             self.units[i].avoid.junction = junction;
         }
