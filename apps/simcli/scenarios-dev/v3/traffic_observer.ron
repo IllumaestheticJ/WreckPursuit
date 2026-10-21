@@ -1,0 +1,22 @@
+// Port Vesper v3 (in development): traffic and police soak with a parked observer on the
+// first race grid. Expect: no civilian collisions, a populated active area, traffic moving.
+(
+    name: "v3_traffic_observer",
+    seed: 5,
+    city: preset(name: "vesper_v3", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 4.0,
+    police_cars: true,
+    assists: ai,
+    entities: [
+        (id: "observer", car: "debug_sedan", pos: (0.0, 0.0, 0.0)),
+    ],
+    duration_s: 120.0,
+    expect: [
+        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
+        world_metric(name: "traffic_agents_min", min: 150.0, max: 400.0),
+        world_metric(name: "traffic_moving_frac_min", min: 0.4, max: 1.0),
+        metric(name: "distance_m", min: 0.0, max: 0.5),
+    ],
+)

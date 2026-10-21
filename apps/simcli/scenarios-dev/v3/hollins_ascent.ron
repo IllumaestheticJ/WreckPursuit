@@ -1,0 +1,26 @@
+// Port Vesper v3 (in development): from R04 (Ridge Street) up Hollins Drive's 11 hairpins to
+// the Knob Observatory Lot (~5.2 km, ~475 s at 25 mph). Expect: the car stays on the road and
+// arrives undamaged (catches low structures over ramps and missing links on the climb).
+(
+    name: "v3_hollins_ascent",
+    seed: 11,
+    city: preset(name: "vesper_v3", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "climber",
+            car: "debug_sedan",
+            pos: (0.0, 0.0, 0.0),
+            driver: follow_route(route_id: "R04 Hollins Ascent -> SH06 Knob Observatory Lot", target_speed: 11.176),
+        ),
+    ],
+    duration_s: 540.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        total_loss(expected: false),
+    ],
+)
