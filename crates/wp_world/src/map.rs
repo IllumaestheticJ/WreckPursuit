@@ -194,6 +194,9 @@ pub struct CityMap {
     pub signal_tick: u64,
     /// Current time of day (mirrors the world clock).
     pub time: TimeOfDay,
+    /// The terrain as physics collides with it ([`crate::surface::collision_terrain`]); `None`
+    /// without terrain. Off the roads this is the drawn ground, not `net.terrain`.
+    pub ground: Option<Arc<crate::terrain::Heightfield>>,
     seg_grid: Arc<Grid>,
     ix_grid: Arc<Grid>,
     zone_grid: Arc<Grid>,
@@ -367,6 +370,7 @@ impl CityMap {
             approach: Arc::new(approach),
             signal_tick: 0,
             time: TimeOfDay::from_hours(12.0),
+            ground: None,
             seg_grid: Arc::new(seg_grid),
             ix_grid: Arc::new(ix_grid),
             zone_grid: Arc::new(zone_grid),
@@ -390,6 +394,7 @@ impl CityMap {
                 }
             }
         }
+        map.ground = crate::surface::collision_terrain(&map).map(Arc::new);
         map
     }
 
@@ -519,7 +524,11 @@ impl CityMap {
                 best = Some(z);
             }
         }
-        best.unwrap_or_else(|| self.net.ground_z(p))
+        best.unwrap_or_else(|| {
+            self.ground
+                .as_ref()
+                .map_or_else(|| self.net.ground_z(p), |g| g.height_on_triangles(p))
+        })
     }
 
     /// Zone district kind at `p`.
