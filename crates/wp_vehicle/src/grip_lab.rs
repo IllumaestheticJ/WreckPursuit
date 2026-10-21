@@ -22,7 +22,7 @@
 
 use std::sync::RwLock;
 
-use wp_contracts::TireDef;
+use wp_contracts::{DriveLayout, TireDef};
 
 /// How the keyboard (plain profile) lock is limited at speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -135,6 +135,14 @@ pub struct GripBalance {
     /// The track cap never asks for less than this into-turn angle, degrees (so the key always
     /// turns the wheels a little into the corner).
     pub track_floor_deg: f32,
+    /// Front-drive cars only (FWD, not AWD; whatever [`GripBalance::tyres_rwd_only`] says):
+    /// rear tyres' peak friction scale (lead 2026-10-21: the FWD cars are the furthest from the
+    /// owner's shiro_turbo / rampart_50 feel; less rear grip = more rotation on lift-off).
+    pub fwd_rear_mu: f32,
+    /// Front-drive cars only: rear cornering stiffness scale (as [`GripBalance::rear_stiffness`]).
+    pub fwd_rear_stiffness: f32,
+    /// Front-drive cars only: rear anti-roll bar scale (on top of [`GripBalance::rear_arb`]).
+    pub fwd_rear_arb: f32,
 }
 
 impl Default for GripBalance {
@@ -170,6 +178,9 @@ impl Default for GripBalance {
             track_from_deg: 10.0,
             track_full_deg: 20.0,
             track_floor_deg: 1.0,
+            fwd_rear_mu: 1.0,
+            fwd_rear_stiffness: 1.0,
+            fwd_rear_arb: 1.0,
         }
     }
 }
@@ -199,6 +210,12 @@ impl GripBalance {
             tyres_rwd_only: true,
             rear_downforce: 0.8,
             probe_tilt_fix: true,
+            // Front-drive cars (lead 2026-10-21: the FWD cars were the furthest from the
+            // owner's shiro_turbo / rampart_50 feel — no lift-off rotation, 2× the slalom roll
+            // rate): a looser, stiffer-barred rear. RWD and AWD cars are unchanged.
+            fwd_rear_mu: 0.97,
+            fwd_rear_stiffness: 0.7,
+            fwd_rear_arb: 2.0,
             ..Self::default()
         }
     }
@@ -296,6 +313,8 @@ impl GripBalance {
             self.front_load_sens,
             self.rear_load_sens,
             self.front_relax,
+            self.fwd_rear_mu,
+            self.fwd_rear_stiffness,
         ]
         .iter()
         .any(|k| (k - 1.0).abs() > 1e-6)
@@ -303,10 +322,19 @@ impl GripBalance {
             || self.front_lat_c > 0.0
     }
 
-    /// `tire` with the scales of corner `i` (0 FL, 1 FR, 2 RL, 3 RR) applied in place; `rwd` =
-    /// the car is rear-wheel drive (see [`GripBalance::tyres_rwd_only`]).
-    pub fn apply_tire(&self, tire: &mut TireDef, i: usize, rwd: bool) {
+    /// `tire` with the scales of corner `i` (0 FL, 1 FR, 2 RL, 3 RR) applied in place for a car
+    /// of drive `layout` (see [`GripBalance::tyres_rwd_only`] and the `fwd_*` knobs).
+    pub fn apply_tire(&self, tire: &mut TireDef, i: usize, layout: &DriveLayout) {
         let front = i < 2;
+        let rwd = matches!(layout, DriveLayout::Rwd);
+        if !front && matches!(layout, DriveLayout::Fwd) {
+            let mu = self.fwd_rear_mu.clamp(0.3, 2.0);
+            tire.lateral.d *= mu;
+            tire.longitudinal.d *= mu;
+            let k = self.fwd_rear_stiffness.clamp(0.2, 5.0);
+            tire.lateral.b *= k;
+            tire.peak_slip_angle_rad /= k;
+        }
         if self.tyres_rwd_only && !rwd {
             return;
         }
@@ -338,10 +366,13 @@ impl GripBalance {
         }
     }
 
-    /// Anti-roll bar scale of the front (`front = true`) or rear axle.
-    pub fn arb_scale(&self, front: bool) -> f32 {
+    /// Anti-roll bar scale of the front (`front = true`) or rear axle of a car of drive
+    /// `layout` ([`GripBalance::fwd_rear_arb`] on front-drive cars).
+    pub fn arb_scale(&self, front: bool, layout: &DriveLayout) -> f32 {
         if front {
             self.front_arb.max(0.0)
+        } else if matches!(layout, DriveLayout::Fwd) {
+            self.rear_arb.max(0.0) * self.fwd_rear_arb.max(0.0)
         } else {
             self.rear_arb.max(0.0)
         }
@@ -532,10 +563,29 @@ mod tests {
             "peak_slip_angle_rad":0.109,"peak_slip_ratio":0.101,"surface_multipliers":{},"wear_rate":0}"#,
         )
         .unwrap();
-        GripBalance::lab_default().apply_tire(&mut t, 2, false);
-        assert_eq!(t.lateral.b, 17.0);
-        GripBalance::lab_default().apply_tire(&mut t, 2, true);
+        // "new" on a front-drive car: only its FWD rear knobs (stiffness × 0.7), not the RWD
+        // tyre scales; on a rear-drive car: the RWD rear stiffness × 0.45.
+        let mut fwd = t.clone();
+        GripBalance::lab_default().apply_tire(&mut fwd, 2, &DriveLayout::Fwd);
+        assert!((fwd.lateral.b - 17.0 * 0.7).abs() < 1e-4);
+        let mut front = t.clone();
+        GripBalance::lab_default().apply_tire(&mut front, 0, &DriveLayout::Fwd);
+        assert_eq!(front.lateral.b, 17.0);
+        GripBalance::lab_default().apply_tire(&mut t, 2, &DriveLayout::Rwd);
         assert!((t.lateral.b - 17.0 * 0.45).abs() < 1e-4);
+        // The FWD knobs touch front-drive rears only.
+        let f = GripBalance {
+            fwd_rear_mu: 0.9,
+            ..GripBalance::default()
+        };
+        assert!(f.changes_tyres());
+        let mut r = t.clone();
+        f.apply_tire(&mut r, 2, &DriveLayout::Rwd);
+        assert_eq!(r.lateral.d, t.lateral.d);
+        f.apply_tire(&mut r, 2, &DriveLayout::Fwd);
+        assert!((r.lateral.d - 0.9 * t.lateral.d).abs() < 1e-6);
+        f.apply_tire(&mut r, 0, &DriveLayout::Fwd);
+        assert!((r.lateral.d - 0.9 * t.lateral.d).abs() < 1e-6);
         // The high-speed margin blends in between 100 and 160 km/h.
         let n = GripBalance::lab_default();
         assert!((n.margin_at(80.0 / 3.6) + 0.3).abs() < 1e-6);

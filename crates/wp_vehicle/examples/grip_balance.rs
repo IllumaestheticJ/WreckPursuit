@@ -28,7 +28,8 @@ const TPS: usize = 240;
 const MPH: f32 = 0.44704;
 
 /// Load a car; offline car-data experiments (set before spawn): `YAW_INERTIA=k` (yaw inertia
-/// × k), `FRONT_WEIGHT=f` (static front weight fraction), `CG_H=k` (CG height × k).
+/// × k), `FRONT_WEIGHT=f` (static front weight fraction), `CG_H=k` (CG height × k), and the
+/// bar / spring / torque scales below.
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let mut c = load_any_car(&data, id).unwrap();
@@ -41,6 +42,31 @@ fn car(id: &str) -> LoadedCar {
     }
     if let Some(k) = env("CG_H") {
         c.def.cg_height_m *= k;
+    }
+    // `ARB_F=k` / `ARB_R=k` / `SPRING_F=k` / `SPRING_R=k`: anti-roll bar / spring rate × k on
+    // that axle; `TORQUE=k`: the engine torque curve × k.
+    for (key, front) in [("ARB_F", true), ("ARB_R", false)] {
+        if let Some(k) = env(key) {
+            for (i, s) in c.def.suspension.iter_mut().enumerate() {
+                if (i < 2) == front {
+                    s.arb_n_per_m *= k;
+                }
+            }
+        }
+    }
+    for (key, front) in [("SPRING_F", true), ("SPRING_R", false)] {
+        if let Some(k) = env(key) {
+            for (i, s) in c.def.suspension.iter_mut().enumerate() {
+                if (i < 2) == front {
+                    s.spring_n_per_m *= k;
+                }
+            }
+        }
+    }
+    if let Some(k) = env("TORQUE") {
+        for p in c.def.engine.torque_curve_nm.iter_mut() {
+            p.1 *= k;
+        }
     }
     c
 }
@@ -395,7 +421,8 @@ fn main() {
     let what = if args.first().is_some_and(|a| {
         [
             "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
-            "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score",
+            "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score", "feel",
+            "cars",
         ]
         .contains(&a.as_str())
     }) {
@@ -441,6 +468,10 @@ fn main() {
         trace(args.first().map_or("parity_rwd_d", String::as_str));
         return;
     }
+    if what == "cars" {
+        cars_table(&args);
+        return;
+    }
     if what == "score" {
         for (name, g) in configs() {
             set_grip(g);
@@ -473,6 +504,9 @@ fn main() {
         }
         if what == "all" || what == "c60" || what == "grip" {
             c60_table(&args);
+        }
+        if what == "feel" {
+            feel_table(&args);
         }
         if what == "all" || what == "snap" {
             snap_table();
@@ -672,6 +706,159 @@ fn score_line(id: &str) -> String {
         if b.spun { " SPUN" } else { "" },
         circle60(&c)
     )
+}
+
+/// Keyboard slalom at `mph`: full key alternating left / right every 0.6 s for 3.6 s with the
+/// cruise controller. Peak yaw acceleration (rad/s², from 0.6 s on) and peak body slip (°) —
+/// how violent the transitions are (owner: debug_coupe's "violent" transitions).
+fn slalom(c: &LoadedCar, mph: f32) -> (f32, f32, bool, f32, f32) {
+    let v = mph * MPH;
+    let mut rig = rolling(c, v);
+    let a = reference_assists();
+    let (mut prev, mut peak_acc, mut peak_slip, mut spun) = (0.0f32, 0.0f32, 0.0f32, false);
+    let (mut prev_roll, mut peak_roll, mut peak_roll_rate) = (0.0f32, 0.0f32, 0.0f32);
+    for tick in 0..(36 * TPS) / 10 {
+        let side = if (tick / (TPS * 6 / 10)).is_multiple_of(2) {
+            -1.0
+        } else {
+            1.0
+        };
+        let (throttle, brake) = hold_speed(&rig, v);
+        rig.step(
+            &VehicleInput {
+                steer: side,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &a,
+        );
+        let s = sample(&rig);
+        let r = s.yaw_dps.to_radians();
+        if tick > TPS * 6 / 10 {
+            peak_acc = peak_acc.max(((r - prev) * TPS as f32).abs());
+        }
+        prev = r;
+        let roll = wp_vehicle::drift_lab_w::body_roll(&rig).to_degrees();
+        if tick > TPS * 6 / 10 {
+            peak_roll = peak_roll.max(roll.abs());
+            peak_roll_rate = peak_roll_rate.max(((roll - prev_roll) * TPS as f32).abs());
+        }
+        prev_roll = roll;
+        peak_slip = peak_slip.max(s.slip_deg.abs());
+        if s.slip_deg.abs() > 60.0 || s.v < 3.0 {
+            spun = true;
+            break;
+        }
+    }
+    (peak_acc, peak_slip, spun, peak_roll, peak_roll_rate)
+}
+
+/// One "feel" row per car (lead: shiro_turbo and rampart_50 are the owner's references):
+/// the body slip vs g curve at 60 / 100 km/h, taps, turn-in, lift / power, lane change and a
+/// slalom. Also prints the numbers as a JSON line (prefix `JSON`) for the shape comparison.
+fn feel_row(id: &str) -> String {
+    let c = car(id);
+    let a = reference_assists();
+    let pick = |r: &SlipCurve, g: f32| {
+        r.bins
+            .iter()
+            .find(|b| (b.0 - g).abs() < 1e-3)
+            .map_or(f32::NAN, |b| b.1)
+    };
+    let s60 = slip_curve(&c, 60.0);
+    let s100 = slip_curve(&c, 100.0);
+    let t2 = tap_response(&c, &a, 60.0 * MPH, 0.2).peak_yaw_dps;
+    let t4 = tap_response(&c, &a, 60.0 * MPH, 0.4).peak_yaw_dps;
+    let ((turn_in, _), _) = lift_off(&c, 60.0);
+    let (_, _, lift_rise) = lift_mid(&c, 60.0);
+    let (_, pow, pow_spun) = power_on(&c, 35.0);
+    let lane = lane_change_slip(&c, &a);
+    let (sl_acc, sl_slip, sl_spun, sl_roll, sl_roll_rate) = slalom(&c, 60.0);
+    let g = [0.3f32, 0.5, 0.6, 0.7, 0.8, 0.9];
+    let c60: Vec<f32> = g.iter().map(|&x| pick(&s60, x)).collect();
+    let c100: Vec<f32> = g.iter().map(|&x| pick(&s100, x)).collect();
+    let js = serde_json::json!({
+        "id": id, "c60": c60, "c100": c100, "pk60": [s60.max_g, s60.slip_at_max],
+        "pk100": [s100.max_g, s100.slip_at_max], "tap": [t2, t4], "turn_in": turn_in,
+        "lift": lift_rise, "power": pow, "power_spun": pow_spun, "lane": lane,
+        "slalom": [sl_acc, sl_slip], "slalom_spun": sl_spun, "roll": [sl_roll, sl_roll_rate],
+    });
+    println!("JSON {js}");
+    let f = |v: &[f32]| {
+        v.iter()
+            .map(|x| {
+                if x.is_nan() {
+                    "–".into()
+                } else {
+                    format!("{x:.1}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
+    format!(
+        "| {id} | {} · {:.2} g/{:.1}° | {} · {:.2} g/{:.1}° | {t2:.1} / {t4:.1} | {turn_in:.1} | +{lift_rise:.1} | {pow:.1}°{} | {lane:.1} | {sl_acc:.1} / {sl_slip:.1}°{} | {sl_roll:.1}° / {sl_roll_rate:.0} °/s |",
+        f(&c60[1..5]),
+        s60.max_g,
+        s60.slip_at_max,
+        f(&c100[1..5]),
+        s100.max_g,
+        s100.slip_at_max,
+        if pow_spun { " SPUN" } else { "" },
+        if sl_spun { " SPUN" } else { "" }
+    )
+}
+
+fn feel_table(ids: &[String]) {
+    println!("\n## Feel (medium ride unless RIDE=): body slip ° at 0.5 / 0.6 / 0.7 / 0.8 g · peak");
+    println!("| car | 60 km/h | 100 km/h | tap 0.2 / 0.4 s yaw °/s | turn-in yaw 0.6 s | lift yaw rise | power-on slip | lane change slip ° | slalom yaw acc rad/s² / slip | slalom roll / roll rate |");
+    println!("|---|---|---|---|---|---|---|---|---|---|");
+    for id in ids {
+        println!("{}", feel_row(id));
+    }
+}
+
+/// Car data relevant to the feel comparison, with the ride model under the active ride
+/// override (`cars`): weight split, Izz/m, front roll-stiffness share (springs + bars), roll
+/// Hz / damping ratio / deg per g, torque per tonne, steering ratio, wheelbase.
+fn cars_table(ids: &[String]) {
+    let tune = ride_lab::active().unwrap_or_default();
+    println!("\n## Car data (ride: {tune:?})");
+    println!("| car | layout | mass kg | front % | Izz/m m² | front roll stiffness % | roll Hz / ζ / °/g | N·m/t | steer ratio | wheelbase m | tyres F/R |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|");
+    for id in ids {
+        let c = car(id);
+        let d = &c.def;
+        let s: Vec<_> = d.suspension.iter().map(|x| tune.scaled(x)).collect();
+        let kf = s[0].spring_n_per_m * d.track_front_m.powi(2) / 2.0
+            + s[0].arb_n_per_m * d.track_front_m.powi(2);
+        let kr = s[2].spring_n_per_m * d.track_rear_m.powi(2) / 2.0
+            + s[2].arb_n_per_m * d.track_rear_m.powi(2);
+        let rm = ride_lab::ride_model(d, &tune);
+        let tq = d
+            .engine
+            .torque_curve_nm
+            .iter()
+            .map(|p| p.1)
+            .fold(0.0f32, f32::max);
+        println!(
+            "| {id} | {:?} | {:.0} | {:.0} | {:.2} | {:.0} | {:.2} / {:.2} / {:.1} | {:.0} | {:.1} | {:.2} | {} / {} |",
+            d.drivetrain.layout,
+            d.mass_kg,
+            d.front_weight_frac * 100.0,
+            d.inertia_kgm2[2] / d.mass_kg,
+            100.0 * kf / (kf + kr),
+            rm.roll_hz,
+            rm.roll_zeta,
+            rm.roll_deg_per_g,
+            tq / d.mass_kg * 1000.0,
+            d.steering.ratio,
+            d.wheelbase_m,
+            d.wheels[0].tire_id,
+            d.wheels[2].tire_id
+        );
+    }
 }
 
 fn c60_table(ids: &[String]) {

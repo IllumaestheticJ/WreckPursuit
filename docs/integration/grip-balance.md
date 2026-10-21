@@ -752,3 +752,83 @@ The step-14 set is one click away ("step 14 (old new)"); the transition preset k
 since it was measured on it. The panel's saved balance moved to a new storage key, so a saved
 step 14 does not override the new default. W's steering-lock change (directional
 countersteer limit + slide lock) is not pushed yet; merge it and re-check this table.
+
+## Feel references: shiro_turbo and rampart_50 (owner, step 18)
+
+Owner: "shiro turbo cornering feels pretty good", "rampart feels pretty good for the most part".
+Lead: use both as anchors, keep them within ~10 %, and fix the cars that don't feel right
+(debug_coupe "violent" transitions, parity_rwd_d/a, lucciola_350, the FWD cars).
+
+**Decision: the default stays step 14 ("new").** "Balance: grip" (above) moves the anchors well
+past 10 %: shiro 1.3° → 0.3° of body slip at 0.6 g, its 0.4 s tap 37.8 → 32.9 °/s (−13 %).
+Rampart's power-on goes 4.6° → 27.5°. So grip is now a test preset ("balance: grip (test)"),
+and the default adds only FWD-only knobs (below). RWD and AWD cars are bit-identical to the
+step-18 build.
+
+`grip_balance feel` measures each car (medium ride, step 14):
+- body slip vs lateral g at 60 / 100 km/h (0.5 / 0.6 / 0.7 / 0.8 g · peak g / slip);
+- 0.2 / 0.4 s taps at 60 mph (peak yaw);
+- turn-in yaw at 0.6 s with the key held at 60 mph;
+- the mid-corner lift yaw rise and the power-on slip at 35 mph;
+- the 100 km/h keyboard lane change (peak body slip);
+- a 60 mph keyboard slalom (full key alternating every 0.6 s): peak yaw acceleration, peak slip,
+  peak roll and roll rate.
+
+"Distance" is the RMS over all of these from the nearer anchor. Each term is normalised: 1° of
+slip, 10 % of yaw rate / roll, 3 °/s of lift yaw, 1.5° of lane-change slip. `cars` prints the
+data columns.
+
+| car | layout, mass, front % | Izz/m | front roll stiffness % | roll Hz / °/g (medium) | N·m/t | 60 km/h slip at 0.5/0.6/0.7/0.8 g | tap 0.2/0.4 s | lift rise | power-on | lane | slalom yaw acc / roll rate | **distance (step 18 → now)** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **shiro_turbo** | RWD 1301 kg 55 % | 1.66 | 55 | 1.30 / 5.1 | 212 | 1.0 / 1.3 / 1.8 / 2.9 | 29.4 / 37.8 | +9.6 | 3.7° | 8.4 | 4.9 / 16 | anchor |
+| **rampart_50** | RWD 1753 kg 54 % | 2.04 | 52 | 1.06 / 6.9 | 302 | 1.1 / 1.6 / 2.1 / 3.6 | 26.6 / 35.7 | +6.4 | 4.6° | 8.2 | 4.3 / 18 | anchor |
+| hakone_gt | RWD 1599 kg 53 % | 1.78 | 53 | 1.26 / 5.2 | 272 | 1.2 / 1.6 / 2.1 / 3.5 | 29.2 / 38.1 | +9.9 | 4.3° | 9.6 | 4.8 / 16 | 0.28 |
+| debug_coupe | RWD 1500 kg 52 % | 1.80 | 51 | 1.37 / 4.2 | 340 | 1.1 / 1.4 / 1.9 / 2.5 | 29.0 / 38.0 | +11.6 | 4.3° | 8.8 | 4.8 / 15 | 0.43 |
+| sperber_32 | RWD 1602 kg 51 % | 1.75 | 50 | 1.25 / 5.2 | 228 | 1.2 / 1.6 / 2.1 / 5.0 | 30.5 / 39.2 | +3.5 | 6.5° | 11.6 | 4.9 / 19 | 0.87 |
+| lucciola_350 | RWD 1344 kg 42 % | 1.35 | 38 | 1.52 / 3.4 | 270 | 1.4 / 1.8 / 2.3 / 4.8 | 33.6 / 42.9 | +15.1 | 6.9° | 13.0 | 5.4 / 19 | 1.40 |
+| parity_rwd_a | RWD 1369 kg 54 % | 2.04 | 52 | 1.06 / 6.9 | 579 | 1.0 / 1.4 / 1.8 / 3.1 | 26.1 / 35.0 | +8.4 | 71° SPUN | 7.4 | 4.3 / 18 | 1.74 |
+| parity_rwd_d | RWD 1633 kg 54 % | 2.04 | 52 | 1.06 / 6.9 | 494 | 1.1 / 1.5 / 2.0 / 3.4 | 24.9 / 33.2 | +5.8 | 68° SPUN | 7.7 | 4.3 / 17 | 1.76 |
+| vireo_xs | FWD 1108 kg 62 % | 1.56 | 54 | 1.04 / 8.0 | 137 | 0.0 / 1.0 / 1.3 (step 18) → 0.5 / 0.8 / 2.7 / 3.1 | 27.7 / 28.1 → 32.1 / 32.9 | +7.7 → +14.3 | 0.7° → 3.5° | 4.2 → 7.9 | 6.6 / 35 → 6.0 / 24 | 2.56 → **1.05** |
+| kestrel_ts | FWD 1453 kg 61 % | 1.87 | 58 | 0.99 / 8.3 | 231 | −0.4 / −0.1 / 0.1 → 0.2 / 0.3 / 0.9 / 1.4 | 26.2 / 27.2 → 29.6 / 31.3 | +3.9 → +3.2 | 0.7° → 1.2° | 2.9 → 5.6 | 6.0 / 37 → 5.6 / 28 | 3.04 → **1.65** |
+| tansy_13 | FWD 1058 kg 62 % | 1.35 | 59 | 0.80 / 13.1 | 114 | → 0.8 / 1.6 / 1.9 / 2.2 | → 33.6 / 33.9 | → +11.1 | → 1.9° | 5.2 → 10.1 | → 5.4 / 29 | 2.89 → **1.79** |
+| parity_fwd_c | FWD 982 kg 61 % | 1.87 | 58 | 0.99 / 8.3 | 182 | −0.5 / −0.5 / −0.1 → 0.0 / 0.1 / 0.3 / 1.0 | 26.2 / 27.9 → 29.6 / 31.9 | +5.0 → +6.3 | 0° → 0.9° | 2.9 → 5.5 | 6.2 / 39 → 5.8 / 30 | 3.31 → **1.92** |
+| junkyard_beater | FWD 1048 kg 60 % | 1.63 | 60 | 0.69 / 18.4 (vintage bias tyres) | 118 | → 3.0 / 3.2 / – / – | → 29.5 / 34.4 | → +15.6 | → 3.0° | 8.6 → 16.6 | → 4.3 / 20 | 1.74 → 1.97 |
+
+**Furthest from the shiro / rampart shape (step 18):** parity_fwd_c 3.3, kestrel_ts 3.0, tansy_13
+2.9, vireo_xs 2.6, parity_rwd_d / a 1.75, junkyard_beater 1.7, lucciola_350 1.4, sperber_32 0.9.
+Closest: debug_coupe 0.4, hakone_gt 0.3.
+
+**What differs, and the fixes:**
+- **FWD cars** (default knobs, new): no lift-off rotation (turn-in yaw 22 vs 35 °/s, lane-change
+  slip 3 vs 8°) and ~2× the slalom roll rate (35–39 vs 16–18 °/s; roll 8 °/g at 1.0 Hz vs the
+  anchors' 5–7 °/g). The RWD-only tyre knobs never reached them. New FWD-only lab knobs
+  (`fwd_rear_mu`, `fwd_rear_stiffness`, `fwd_rear_arb`) are in the "new" default at 0.97 / 0.7 /
+  2.0: distance 2.6–3.3 → 1.05–1.9, roll rate 37 → 24–30 °/s, turn-in 22 → 27–30 °/s. That was
+  the best worst case of a 45-set FWD sweep. Rear μ 0.95 / stiffness 0.6 / bar ×4 brings kestrel
+  and parity_fwd_c to 0.8–0.9, but junkyard_beater (21° lane change) and tansy_13 (14°) get
+  too loose, so the light FWD cars limit how far a shared knob can go. junkyard_beater is a
+  soft, low-grip beater on purpose and stays the furthest FWD car. The handbrake test at
+  40 km/h already spun vireo / tansy / junkyard at step 18; with the FWD knobs kestrel spins it
+  too (parity_fwd_c is still caught).
+- **parity_rwd_a / d**: the same chassis as rampart_50 (geometry, bars, Izz/m), with 1.6–1.9× its
+  torque per tonne. Everything matches rampart except power-on at 35 mph, which spins them
+  (68–71°). Torque × 0.6 (rampart's N·m/t) gives distance 0.26–0.50. They are the
+  reference-parity cars, so no data change is proposed. Their power-on spin is their character
+  (TCS covers it).
+- **lucciola_350**: rear-heavy (42 % front), the lowest Izz/m (1.35) and a rear-biased roll
+  stiffness (38 % front: rear springs 66.8 vs front 41.4 kN/m, no rear bar). It slides 13° in
+  the lane change and 13.5° in the slalom. **Car-data proposal for A:** rear springs × 0.65
+  (66.8 → 43.4 kN/m) and yaw inertia × 1.2 (`inertia_kgm2[2]` 1820 → 2180 kg·m²). Distance 1.40 → 0.68, lane change 13 → 10.6°, slalom yaw acc 5.4 → 4.7
+  (yaw × 1.4 gives 0.62, but a mid-engined analog should keep a low Izz).
+- **debug_coupe**: close to the anchors on every grip metric (0.43). Its outliers are roll
+  (4.5° vs 5.4–6.4°) and the bars: 26 / 14 kN/m, both 2× shiro's, with a 54 % rear bar share,
+  plus quicker steering (13 vs 15–16). Stiff bars give quick, small roll and abrupt load
+  transfer, the likeliest source of "violent" transitions. **Car-data proposal for A:** both
+  bars × 0.5 (26 → 13, 14 → 7 kN/m): distance 0.29, roll matches the anchors, lane change 8.9°.
+  The keyboard path does not use the steering ratio (the rack is road-wheel angle), so 13.0
+  only matters on a wheel / pad.
+- **sperber_32** (not on the list, 0.87): the 0.8 g slip jumps to 5.0° and the lane change is
+  11.6°. Worth a look by A.
+
+Data proposals are for machine A (car data owner); nothing in `data/` is changed here. The
+example's `ARB_F/ARB_R/SPRING_F/SPRING_R/TORQUE/YAW_INERTIA` overrides reproduce them.
