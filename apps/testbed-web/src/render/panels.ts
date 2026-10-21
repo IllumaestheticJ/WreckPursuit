@@ -330,9 +330,43 @@ export function carMeshNow(carId: string): CarMeshJson | null | undefined {
   return meshLoaded.get(carId);
 }
 
-/** Start loading every listed car mesh; resolves when all have arrived (or failed). */
+const midCache = new Map<string, Promise<CarMeshJson | null>>();
+/** Mid-LOD meshes that finished loading (null = file missing: draw the full mesh instead). */
+const midLoaded = new Map<string, CarMeshJson | null>();
+
+/**
+ * Fetch (once per car) a car's mid level of detail, `data/panels/meshes/mid/<car>.json`
+ * (tools/assets `gen-car-mesh`, `Lod::Mid`): the same style, livery atlas, atlas UVs and tints
+ * as the full mesh at ~3–6k triangles, without skin bindings. The instanced fleet and parked
+ * cars draw it undeformed (render/fleet.ts, props.ts); VehicleViews always use the full mesh.
+ * Resolves to the full mesh when the mid file is missing (older data), null when neither exists.
+ */
+export function loadCarMidMesh(carId: string): Promise<CarMeshJson | null> {
+  let p = midCache.get(carId);
+  if (!p) {
+    p = fetch(`data/panels/meshes/mid/${carId}.json`)
+      .then((r) => (r.ok ? (r.json() as Promise<CarMeshJson>) : null))
+      .catch(() => null)
+      .then((m) => m ?? loadCarMesh(carId))
+      .then((m) => {
+        midLoaded.set(carId, m);
+        return m;
+      });
+    midCache.set(carId, p);
+  }
+  return p;
+}
+
+/** A car's mid-LOD mesh (or its full-mesh fallback) if it has already loaded (undefined while
+ * loading or never requested). */
+export function carMidMeshNow(carId: string): CarMeshJson | null | undefined {
+  return midLoaded.get(carId);
+}
+
+/** Start loading every listed car mesh (full and mid LOD); resolves when all have arrived (or
+ * failed). */
 export function preloadCarMeshes(carIds: string[]): Promise<void> {
-  return Promise.all(carIds.map((id) => loadCarMesh(id))).then(() => undefined);
+  return Promise.all(carIds.flatMap((id) => [loadCarMesh(id), loadCarMidMesh(id)])).then(() => undefined);
 }
 
 /** Panel states of an entity, PANEL_STRIDE floats per panel (empty if the build or scenario has none). */

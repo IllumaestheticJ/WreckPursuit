@@ -3,11 +3,14 @@
 // whose own view is not ready yet. One car model = a few InstancedMeshes, so 400 agents cost a
 // handful of draw calls.
 //
-// Near cars (< FULL_LOD_M from the camera) use the model's real panel mesh (the same
-// data/panels/meshes/<car>.json a promoted car shows, merged and undeformed), with the same
-// livery colour as the car will have once promoted, so the swap to a full VehicleView is
-// invisible. Far cars, and cars whose mesh has not arrived yet, use a low-poly proxy of the
-// model's body size. Coordinates: sim space (+Z up), parented under SceneView.world.
+// Near cars (< FULL_LOD_M from the camera, the "full" instance set) use the model's mid level
+// of detail (data/panels/meshes/mid/<car>.json, tools/assets `Lod::Mid`: the same style, livery
+// atlas UVs and tints as the full panel mesh a promoted car's VehicleView shows, ~3–6k
+// triangles instead of 8–20k, merged and undeformed; the full mesh if the mid file is missing),
+// with the same livery colour as the car will have once promoted, so the swap to a full
+// VehicleView (render/lod.ts `viewDrawM`, ~30–40 m) does not pop. Far cars, and cars whose
+// mesh has not arrived yet, use a low-poly proxy of the model's body size. Coordinates: sim
+// space (+Z up), parented under SceneView.world.
 //
 // Every model in the session has its own instance sets (render/lod.ts picks the model from the
 // draw record's `model` index), so mixed traffic and a mixed police fleet cost a few draw calls
@@ -16,15 +19,16 @@
 // unit (render/lights.ts patterns); per-unit numbers only appear once the car is promoted.
 import * as THREE from "three";
 import type { CarMeshJson, MaterialJson, PartMaterial } from "./panels";
-import { applyCarEnv, carMeshNow, loadCarMesh, rgbColour } from "./panels";
+import { applyCarEnv, carMidMeshNow, loadCarMidMesh, rgbColour } from "./panels";
 import { hasPoliceLivery, liveryBaseColour, liveryTexture } from "./livery";
 import { LENS_ON } from "./lights";
 import { sim, type CarModelInfo } from "../wasm/sim";
 import { PALETTE, type Hex } from "./palette";
 import { artStyle } from "./style";
 
-/** Cars nearer than this (to the camera) get the full instanced mesh, m. */
-export const FULL_LOD_M = 150;
+/** Cars nearer than this (to the camera) get the mid-LOD instanced mesh, m (default; the
+ * graphics profiles set `Fleet.fullLodM`, render/quality.ts). */
+export const FULL_LOD_M = 120;
 /** Full-mesh instances per model per frame (the nearest get them; the rest use the proxy). */
 const MAX_FULL = 192;
 /** Proxy instances per model per frame. */
@@ -610,7 +614,14 @@ const tmpIndOff = new THREE.Color();
 const tmpRead = new THREE.Color();
 const tmpLens = new THREE.Color();
 
-/** One car model: full and proxy instance sets. */
+/** Hide an instance set's meshes while it has no instances (per frame: no allocation). */
+function showIfUsed(set: InstancedCar): void {
+  const meshes = set.meshes;
+  const on = set.count > 0;
+  for (let k = 0; k < meshes.length; k++) meshes[k].visible = on;
+}
+
+/** One car model: full (mid-LOD mesh) and proxy instance sets. */
 export class FleetModel {
   full: InstancedCar | null = null;
   proxy: InstancedCar;
@@ -631,9 +642,10 @@ export class FleetModel {
     this.info = sim.carModelInfo(carId);
     this.proxy = new InstancedCar(proxyGeoms(this.info), MAX_PROXY, mats, this.barAt(), !this.police);
     group.add(...this.proxy.meshes);
-    const now = carMeshNow(carId);
+    // The mid LOD (or the full mesh when there is no mid file): drawn undeformed here.
+    const now = carMidMeshNow(carId);
     if (now) this.setMesh(now);
-    else if (now === undefined) void loadCarMesh(carId).then((m) => m && this.setMesh(m));
+    else if (now === undefined) void loadCarMidMesh(carId).then((m) => m && this.setMesh(m));
   }
 
   private barAt(): [number, number] | null {
@@ -663,6 +675,9 @@ export class FleetModel {
   end(): void {
     this.proxy.end();
     this.full?.end();
+    // An empty set skips the render list (no per-mesh state setup for zero instances).
+    showIfUsed(this.proxy);
+    if (this.full) showIfUsed(this.full);
   }
 }
 
