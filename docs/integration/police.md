@@ -1265,10 +1265,11 @@ committed)
 | Check | Before | After | Target |
 |---|---|---|---|
 | `response_day_core` mean / worst / ≤ 25 s (5 runs with a call) | 6.3 / 14.3 s / 5 of 5 | 6.3 / 14.3 s / 5 of 5 | ≤ 10 / ≤ 15 |
-| `response_day_suburb` mean / worst / ≤ 25 s (5 with a call) | 17.4 / 35.5 s / 3 of 5 | 23.6 / 61 (never) / 3 of 5 | ≤ 15 / ≤ 25 / ≥ 0.875 — **fails** |
-| `response_night_core` mean / worst / ≤ 25 s | 10.4 / 18.1 s / 8 of 8 | 15.9 / 61 (never) / 7 of 8 | ≤ 15 / ≤ 25 / ≥ 0.875 — **fails** (mean, worst) |
+| `response_day_suburb` mean / worst / ≤ 25 s (5 with a call) | 17.4 / 35.5 s / 3 of 5 | 23.6 / 61 (never) / 3 of 5 | was ≤ 15 / ≤ 25 / ≥ 0.875; **recalibrated**: ≤ 25 / (≤ 61, range only) / ≥ 0.6 — passes |
+| `response_night_core` mean / worst / ≤ 25 s | 10.4 / 18.1 s / 8 of 8 | 15.9 / 61 (never) / 7 of 8 | was ≤ 15 / ≤ 25 / ≥ 0.875; **recalibrated**: ≤ 20 / (≤ 61, range only) / ≥ 0.875 — passes |
 | `response_night_suburb` mean / worst / ≤ 25 s | 16.4 / 38.4 s / 6 of 8 | 16.4 / 38.4 s / 6 of 8 | ≤ 30 / ≥ 0.75 |
-| reinforcement night/day (`night_core_speeder` / `day_core_speeder`) | 45.6 / 18.2 s = **2.51** | 26.7 / 27.4 s = **0.97** | ≥ 2 — **fails** |
+| reinforcement night/day (`night_core_speeder` / `day_core_speeder`), old `reinforcement_delay_s` | 45.6 / 18.2 s = **2.51** | 26.7 / 27.4 s = **0.97** | no longer asserted |
+| backup wait night/day, new `reinforcement_wait_s` (request → backup committed) | — | 5.32 / 0.00 s (57 / 40 backups) | night ≥ 2 × day — passes |
 | pursuit start night/day; day worst | 3.48; 17.2 s | 3.48; 17.2 s | ≥ 3; ≤ 20 s |
 | `radio_city_chase` calm lines/min | 4.09 | 4.09 | ≤ 5 |
 | run-wide crashes, all police scenarios | 530 | 296 | — |
@@ -1287,7 +1288,7 @@ Reinforcement delay per seed (s): day 103-107 before 14.6, 23.2, 18.9, 16.8, 17.
 46.8, 24.0, 27.7, 16.8, 10.7; night 100-107 before 66.5, 17.2, 37.4, 111.7, 14.0, 7.9, 96.3,
 10.4 → after 31.9, 16.3, 45.2, 55.7, 6.5, 5.8, 28.0, 8.6.
 
-**Why they fail (not re-aimed; needs an owner / lead decision)**
+**Why they failed (kept for the record; resolved below)**
 - `response_day_suburb` (the stop condition in the brief): seed 304 is the turn-round case:
   the Core patrol 365 m away still has to turn round, now a real manoeuvre, and the meeting
   junction moves twice: 35.5 → 35.7 s. Seed 301 is the round-12 shadow-gap hold (unchanged
@@ -1314,13 +1315,59 @@ Reinforcement delay per seed (s): day 103-107 before 14.6, 23.2, 18.9, 16.8, 17.
   3.0/2.0/0.5 s: no systematic gain (night core 304 38 s, day suburb 301 never); (d) time the
   reinforcement ratio on request waits only.
 
+**Resolution (owner decision 2026-10-21): resolved.** Real three-point turns stay (realistic;
+4-8 s where the old swing took ~3 s); the checks calibrated against the old swing are
+recalibrated, nothing else changed (no seeds, durations or behaviour).
+- Response targets, rule: mean = measured rounded up to the next 5 s; hit-rate floor =
+  measured. A run whose call never gets a unit within 100 m counts as 61 s (duration + 1) in
+  both the mean and the max, so while such a run exists no worst-case number is honest: the
+  `call_to_unit_100m_max_s` line is set to 61 (range only, commented as such) and the hit-rate
+  floor carries the check. Each changed line has a "recalibrated 2026-10-21" comment.
+  - `response_day_suburb`: mean ≤ 15 → ≤ 25 s (measured 23.6); worst ≤ 25 → ≤ 61 (measured
+    never, seed 301); within 25 s ≥ 0.875 → ≥ 0.6 (measured 3 of 5).
+  - `response_night_core`: mean ≤ 15 → ≤ 20 s (measured 15.9); worst ≤ 25 → ≤ 61 (measured
+    never, seed 304); within 25 s ≥ 0.875 unchanged (measured 7 of 8).
+  - The other response scenarios are untouched.
+- Night/day reinforcement rule (design: "response time = reinforcement arrival after request",
+  POLICE_DOCTRINE §3.2; night ≥ 2× day): new stat `PoliceStats::reinforcement_waits_s`,
+  scenario metrics `reinforcement_wait_s` (mean) and `reinforcement_waits` (count), alongside
+  the unchanged `reinforcement_delay_s`. Definition: per reinforcement request, request →
+  the unit answering it is committed. A request that comes due and commits a unit (idle unit
+  within 700 m or a spawn) counts request → commit; a nearby unit that joins as backup while a
+  request is pending answers the oldest unanswered one and counts request → join; backup that
+  joins the moment it is wanted (no request outstanding, the shortfall is filled in the same
+  tick) counts 0. Requests dropped without a unit (pursuit over, backup no longer needed, no
+  room / spawn point) count nothing; a request already answered by a join that later still
+  commits a unit (the slot reopened) is not counted twice. Stats only: the dispatch logic
+  never reads the new `ReinforcementRequest::answered` flag; scenario metrics other than the
+  new ones and all state hashes are unchanged. `tests/police_scenarios.rs` asserts
+  `reinforcement_wait_s` night ≥ 2.0 × day (written as `rn >= 2 rd`, with both phases having
+  backup and night > 0), with a comment on why.
+  - Day (`day_core_speeder`, seeds 103-107): 0.00 s in every run (11, 7, 8, 7, 7 backups);
+    no reinforcement request was ever created: every shortfall is filled at once by a unit
+    within `backup_radius_m`. Cross-check, seeds 100-109: 80 backups, 0 requests, 0.00 s.
+  - Night (`night_core_speeder`, seeds 100-107): 5.32 s mean over 57 backups; per run 11.1,
+    3.6, 3.1, 5.2, 1.2, 3.4, 4.3, 8.6 s. 29 requests; 9 committed a unit after 12.1-26.5 s
+    (night `response_s` 12-30 s), the rest were answered by units coming within the backup
+    radius 0.4-20.1 s after the request; 29 backups joined at once (0). Cross-check, seeds
+    110-117: 7.39 s over 64 backups, 38 requests.
+  - What dispatch does differently at night: the same code path; only the tables differ —
+    sparse patrols (`presence.toml` patrols per phase), so nearby backup is often missing and
+    a request is made, and `response_s.night` 12-30 s vs day 4-10 s for the request to come
+    due. Ratio night/day = 5.32 / 0.00 → passes ≥ 2, but degenerately: by day the wait is
+    always 0, so the check currently reads "night backup waits, day backup never does" and the
+    day `response_s` is never exercised by these scenarios. Flagged for the owner; the 2.0 is
+    unchanged and nothing was tuned.
+  - Note: the design tables (POLICE_DOCTRINE §3.2, DEMO_GREYBOX) still give "response 20-40 s
+    day / 60-150 s night", while `presence.toml` has 4-10 / 12-30 s; not changed here.
+
 **Gate (this worktree, own target dir).** `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`: pass.
 `cargo test -p wp_police --no-fail-fast`: lib 79/79 (8 new turn-round tests + the one-way
-routing test), system 21/21, radio_chatter 5/5, police_scenarios 1/3
-(`all_police_scenarios_pass_and_are_deterministic`: `response_day_suburb` first;
-`response_night_core` also fails; `night_is_slower_than_day_for_pursuit_and_reinforcements`:
-reinforcement ratio 0.97; `risk_budget_and_caps_keep_cops_alive` passes). `wp_race --test
+routing test), system 21/21, radio_chatter 5/5, police_scenarios 3/3 after the resolution above (before it: 1/3,
+`response_day_suburb` / `response_night_core` targets and the 0.97 delay ratio). State hashes
+unchanged by the resolution (checked `day_core_speeder`, `response_night_core` against
+`6c086b79`). `wp_race --test
 race_picker` 7/7, `wp_opponent` all pass, `wp_net --test vesper_e2e` 1/1, `wp_sim --test
 police_passby` 3/3, `simcli --test scenarios all_scenarios_pass_and_are_deterministic_in_process`
 pass. Goldens not run or blessed. Perf: `police_bench` 0.168 → 0.193 ms per frame.

@@ -108,9 +108,13 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 - **Crash scenes** (`report_crash_scene`, or automatically from contacts) hold the nearest unit
   for `crash_scene_s[phase]`.
 - **Reinforcements**: each pursued racer wants `units_per_level[level]` ground units. A deficit
-  creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
-  an idle unit within 700 m is committed, or a new unit spawns like a responder (fallback: the
-  nearest node ≥ `spawn_min_distance_m` away, out of sight).
+  first takes available units within `backup_radius_m[level]` of legal driving at once (backup
+  joins); what is still missing creates a request due after `response_s[phase]` (Day 4–10 s,
+  Night 12–30 s). When it comes due, an idle unit within 700 m is committed, or a new unit
+  spawns like a responder (fallback: the nearest node ≥ `spawn_min_distance_m` away, out of
+  sight). Stats: `reinforcement_waits_s` (scenario metric `reinforcement_wait_s`) is request →
+  backup committed, once per request (a backup join with no request pending is 0);
+  `reinforcement_delays_s` (`reinforcement_delay_s`) also counts pursuit start → backup join.
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
   It is kinematic, gives line of sight to every unit, and is **not** a weapon.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
@@ -402,9 +406,9 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Scenario | Result |
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
-| Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 51 s mean (126 s before round 12b's responders); reinforcement 102 s |
-| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each; 6×6 grid with the highway ramps, 2026-10-21) | Core noon 6.2 s mean / 14.3 s worst; Suburb noon 17.4 / 35.5 s, 3 of 5 calls within 25 s (**fails** its 15 s / 25 s targets, see integration doc 2026-10-21); Core 23:00 10.4 / 18.1 s; Suburb 23:00 16.4 s mean, 6 of 8 within 25 s |
+| Day speeder, Core, 2× limit (5 runs) | Pursuit at 9.5 s mean (≤ 17.2 s every run); backup wait 0 s (40 backups, all joined at once from nearby units, no request ever outstanding); old `reinforcement_delay_s` 27.4 s |
+| Night speeder, 03:00 (8 runs) | Pursuit at 33 s mean; backup wait 5.3 s mean (57 backups: 29 requests, 9 committed after 12-27 s, the rest answered by units coming near, 0-20 s); old `reinforcement_delay_s` 26.7 s (2026-10-21, three-point turns) |
+| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each; 6×6 grid with the highway ramps, 2026-10-21) | Core noon 6.3 s mean / 14.3 s worst; Suburb noon 23.6 s mean, 3 of 5 calls within 25 s, one never (targets recalibrated 2026-10-21 for real three-point turns: ≤ 25 s mean, ≥ 0.6 within 25 s); Core 23:00 15.9 s mean, 7 of 8 within 25 s, one never (≤ 20 s, ≥ 0.875); Suburb 23:00 16.4 s mean, 6 of 8 within 25 s. A "never" run counts as 61 s |
 | Pop-in audit, every scenario | 0 of 105 mid-session spawns and 0 of 333 despawns in a racer's view cone / sight or within 120 m |
 | Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; careful units spend their risk budget (809 unit-seconds held to shadowing), an unlimited budget never does |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
@@ -451,9 +455,14 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   under the viaduct can be mistaken for the deck). A pursuer facing the legal way on a one-way
   carriageway whose racer went past the wrong way still swings round the old way, as does a
   unit whose turn-round gives up (boxed in, > 7 legs or > 30 s: a few per long night run).
-  Scripted racers keep the old swing. Realistic turn-rounds are slower than the old crawl:
-  `response_day_suburb`, `response_night_core` and the night/day reinforcement ratio fail
-  (docs/integration/police.md, 2026-10-21 three-point turns).
+  Scripted racers keep the old swing. Realistic turn-rounds are slower than the old crawl
+  (4–8 s vs ~3 s): `response_day_suburb` and `response_night_core` were recalibrated to the
+  measured values (owner decision 2026-10-21); each has one run whose call never gets a unit
+  within 100 m, so their worst-case lines only bound the range.
+- The night ≥ 2× day reinforcement rule is checked on `reinforcement_wait_s`. By day the wait
+  is 0 in every run measured (15 runs, two seed sets): nearby units always fill the shortfall at
+  once, no request is ever outstanding, so the day `response_s` is never exercised and the
+  ratio holds as "night waits, day does not" rather than as a ratio of two waits.
 - Passing assumes the other lane exists. Feelers see buildings and tunnel walls, not rails,
   barriers or terrain steps (not in the road network data).
 - Pro driving (P8): the racing line only sees vehicles within `traffic_clear_m` ahead; a car
