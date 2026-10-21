@@ -235,6 +235,10 @@ pub struct EntitySpec {
     pub id: String,
     /// Car id (`data/cars/<car>.json`).
     pub car: String,
+    /// Installed mods (`data/mods`, a legal set for the car's class): the entity drives the
+    /// modified car (`simcli::data::load_modded_car`). Empty = stock.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mods: Vec<String>,
     /// Spawn position, world m.
     #[serde(default)]
     pub pos: [f32; 3],

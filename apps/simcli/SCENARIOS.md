@@ -83,6 +83,7 @@ failures.
 (
     id: "striker",                  // scenario-local name used by expectations
     car: "debug_coupe",             // data/cars/<car>.json
+    mods: ["tires_semi_slick", "aero_splitter"], // installed mods (data/mods; default none)
     pos: (-40.0, 0.0, 0.0),         // world m (default origin)
     yaw: -1.5708,                   // rad about +Z, 0 = facing +Y (default 0)
     speed_mps: 13.9,                // start rolling forward at this speed (default 0, at rest)
@@ -96,6 +97,11 @@ failures.
 )
 ```
 
+- `mods`: the entity drives the car with these mods installed (`simcli::data::load_modded_car`
+  = `wp_economy::mods::apply_mods`: engine, tires, suspension, aero, lattice reinforcement…).
+  Must be a legal set for the car's class (requirements, class whitelist); only mods active in
+  the scenario's `mode` change the physics. The browser draws the parts on the car
+  (`wp_wasm::mod_visuals`, testbed `render/mod_parts.ts`).
 - `inputs`: keyframes ascending by `t_s`; each `VehicleInput` holds until the next key
   (missing fields are 0/false). `gear_up`/`gear_down` are edges: they apply on the key's first
   tick only. A key at `t_s` applies before tick `round(t_s / PHYSICS_DT)` is stepped.

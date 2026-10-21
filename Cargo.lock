@@ -3132,6 +3132,7 @@ dependencies = [
  "thiserror 2.0.21",
  "wp_contracts",
  "wp_damage",
+ "wp_economy",
  "wp_math",
  "wp_net",
  "wp_police",

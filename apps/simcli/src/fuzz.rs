@@ -88,6 +88,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
             entities.push(EntitySpec {
                 id: format!("car{i}"),
                 car: car.clone(),
+                mods: Vec::new(),
                 pos,
                 yaw,
                 speed_mps: speed,
