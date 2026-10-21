@@ -104,6 +104,10 @@ pub const BOOK_AFTER_S: f32 = 20.0;
 pub const BOOK_MAX_S: f32 = 10.0;
 /// After a booking lapsed, no new one for this long, s.
 pub const BOOK_RETRY_S: f32 = 30.0;
+/// A booking may also be made while the exit has no room yet (the car starves behind a short
+/// block that cars from the other approaches keep filling); it then waits for room at most
+/// this long before it lapses, s.
+pub const BOOK_ROOM_MAX_S: f32 = 40.0;
 /// An all-way-stop driver who stopped first but has not gone after this long (outside red, no
 /// permit) no longer has the right of way over the others, s.
 pub const ALLWAY_STALE_S: f32 = 8.0;
@@ -635,6 +639,8 @@ pub struct Agent {
     booked_s: f32,
     /// No booking before this traffic step.
     book_block_until: u64,
+    /// Time its booking has waited for room on the exit, s.
+    book_room_s: f32,
     /// Time held at the stop line by a siren unit heading for the junction, s
     /// ([`SIREN_JUNCTION_HOLD_MAX_S`]).
     siren_hold_s: f32,
@@ -1209,7 +1215,7 @@ impl Traffic {
     /// only while there is room on the exit (owner row 85).
     fn book_for_waiting(&mut self, map: &CityMap) {
         let now = self.step_count;
-        let mut cands: Vec<(f32, u32, usize)> = Vec::new();
+        let mut cands: Vec<(f32, u32, usize, bool, bool)> = Vec::new();
         for (i, a) in self.agents.iter().enumerate() {
             if a.despawn
                 || a.permit != NONE
@@ -1242,22 +1248,30 @@ impl Traffic {
             if red {
                 continue;
             }
-            // Room on the exit (the box rule would hold it anyway).
+            // No room on the exit: still book (the room that comes free is then its, not the
+            // other approaches'), unless a wreck holds the exit.
             let tgt = map.seg(c).next[0];
-            if self.lists[tgt as usize]
+            let room = !self.lists[tgt as usize]
                 .first()
-                .is_some_and(|e| e.v < 3.0 && e.s - HALF_L < CAR_LENGTH_M + 2.0)
-            {
+                .is_some_and(|e| e.v < 3.0 && e.s - HALF_L < CAR_LENGTH_M + 2.0);
+            if !room && self.exit_wrecked(map, c) {
                 continue;
             }
-            cands.push((a.jam_s, a.id, i));
+            // Waiting for room behind a red-light queue always ends; only other holds count
+            // against `BOOK_ROOM_MAX_S`.
+            let exit_red = map
+                .seg(tgt)
+                .lane()
+                .and_then(|l| map.lane_signal(l))
+                .is_some_and(|(st, _)| matches!(st, SignalState::Red | SignalState::Yellow));
+            cands.push((a.jam_s, a.id, i, room, exit_red));
         }
         if cands.is_empty() {
             return;
         }
         cands.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)));
         let mut booked: Vec<SegId> = Vec::new();
-        for (_, id, i) in cands {
+        for (_, id, i, room, exit_red) in cands {
             let c = self.agents[i].plan[0];
             if self.reservations[c as usize] != NONE {
                 continue;
@@ -1268,12 +1282,18 @@ impl Traffic {
             }
             self.reservations[c as usize] = id;
             booked.push(c);
-            // A booking not turned into a permit within `BOOK_MAX_S` lapses (something else
-            // holds the car), with no new booking for `BOOK_RETRY_S`.
+            // A booking not turned into a permit within `BOOK_MAX_S` of room on the exit (or
+            // `BOOK_ROOM_MAX_S` waiting for room) lapses (something else holds the car), with no
+            // new booking for `BOOK_RETRY_S`.
             let a = &mut self.agents[i];
-            a.booked_s += TRAFFIC_DT;
-            if a.booked_s > BOOK_MAX_S {
+            if room {
+                a.booked_s += TRAFFIC_DT;
+            } else if !exit_red {
+                a.book_room_s += TRAFFIC_DT;
+            }
+            if a.booked_s > BOOK_MAX_S || a.book_room_s > BOOK_ROOM_MAX_S {
                 a.booked_s = 0.0;
+                a.book_room_s = 0.0;
                 a.book_block_until = now + (BOOK_RETRY_S / TRAFFIC_DT) as u64;
             }
         }
@@ -2430,7 +2450,21 @@ impl Traffic {
                     let sig = map.lane_signal(a.seg);
                     let st = sig.map(|x| x.0);
                     let reaches = sig.is_some_and(|x| d_line / v.max(0.1) < x.1 + 0.5);
+                    // A left-turner waiting at the line with its permit (the "sneaker") goes
+                    // when the oncoming traffic stops at amber / red: standing still it "can
+                    // stop" at any decel, so the stopping check below revoked the permit the
+                    // step after it was given and it sat out the next cycle too (owner row 85,
+                    // short greens on main's grid).
+                    let sneaker = matches!(
+                        map.seg(next).kind,
+                        SegKind::Connector {
+                            turn: TurnKind::Left,
+                            ..
+                        }
+                    ) && d_line < 3.5
+                        && v < 3.0;
                     let limit = match st {
+                        _ if sneaker => 0.0,
                         Some(SignalState::Yellow) if p.yellow_runner => 0.0,
                         Some(SignalState::Yellow) if reaches => p.amber_decel,
                         Some(SignalState::Yellow) => p.comfort_decel,
@@ -3614,6 +3648,7 @@ impl Traffic {
                 permit_block_until: 0,
                 booked_s: 0.0,
                 book_block_until: 0,
+                book_room_s: 0.0,
                 emergency: false,
                 yielding: false,
                 disabled: false,

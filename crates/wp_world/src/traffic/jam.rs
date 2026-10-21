@@ -41,6 +41,7 @@ impl Traffic {
             a.jam_s = 0.0;
             a.box_s = 0.0;
             a.booked_s = 0.0;
+            a.book_room_s = 0.0;
             a.metric_stop_s = 0.0;
             return;
         }
