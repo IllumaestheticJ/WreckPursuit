@@ -31,15 +31,15 @@ rounded to what reads correctly at game camera distance.
 
 ### How racing games present these parts (what to copy)
 
-- **Sim showroom games (GT/Forza style):** the brake disc and caliper behind the spokes are the most-seen mechanical
+- **Sim showroom games:** the brake disc and caliper behind the spokes are the most-seen mechanical
   detail. Caliper colour is a customisation knob. Spokes are deliberately concave on big-brake cars, and discs show a
   lighter swept band with a dark vent gap at the edge. The engine bay is a separate mesh seen only with the hood open.
-- **Arcade tuner games (NFS style):** wheel customisation is mostly rim style, rim size, tire profile, lip depth and
+- **Arcade tuner games:** wheel customisation is mostly rim style, rim size, tire profile, lip depth and
   "stretch". At distance, the silhouette of the tire sidewall (tall vs. thin) does most of the work.
-- **Demolition games (Wreckfest style):** engine, radiator and suspension are simplified solid shapes. They show
+- **Demolition games:** engine, radiator and suspension are simplified solid shapes. They show
   when the hood or bumper comes off or a wheel detaches, and a dark block plus a coloured cam cover is enough. The
   damage model's visible parts fall off piece by piece.
-- **Soft-body sim (BeamNG style):** the rim and tire are separate flexbodies on hub/tire node groups. Brake torque
+- **Soft-body sim:** the rim and tire are separate flexbodies on hub/tire node groups. Brake torque
   is reacted between a disc-centre node and a caliper-arm node, which is the same split as our `brake_disc`
   (spins) / `caliper` (steers). Suspension arms are real meshes driven by beams.
 - **For WreckPursuit:** wheels and brakes are always visible, so they get the detail. Suspension is visible in the
