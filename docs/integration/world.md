@@ -190,8 +190,8 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
   (yawed and pitched to the ground, ≥ 0.3 m thick); `CityColliders::fences` counts them.
   `crates/wp_sim/tests/city_v2.rs`: fence collider count + `a_yard_fence_stops_a_car`.
 - `tools/city-import/src/glb.rs`: greybox draws fences (`fence_wood`, `fence_masonry`,
-  `fence_hedge` primitives); `data/city/*` regenerated (format v4; Vesper greybox
-  7.4 → 9.6 MB).
+  `fence_hedge`; timber as thin double-sided panels, walls / hedges as blocks);
+  `data/city/*` regenerated (format v4; Vesper greybox 7.4 → 8.9 MB, under the 9 MB gate).
 - `apps/simcli/golden/*`: re-blessed city goldens for `PaintedLine` (round 8, see gate note).
 - `Cargo.toml` (workspace): added member `tools/city-import`.
 - `Cargo.lock`: `postcard` (wp_world), `osmpbf` (city-import only).

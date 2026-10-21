@@ -238,7 +238,7 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   walls; otherwise the lot's style (Suburb: 65 % timber, 25 % block, 10 % hedge; Residential:
   50 / 30 / 20 %, own RNG stream, so building placement is unchanged). Pieces within 3.2 m of
   pavement, inside their own house or on ground below 0.5 m are dropped. Port Vesper: 2691
-  fenced lots, 11.6 k fences, ≈ 204 km, ≈ 13.8 k collider boxes; ≈ 50 ms of generation
+  fenced lots, 11.6 k fences, ≈ 204 km, ≈ 13.2 k collider boxes (spans within 0.25 m of the ground), ≈ 50 ms of generation
   (release). `backyards_are_out_of_reach` flood-fills a 1 m grid from every road with a car's
   half width around fences and buildings: **99.3 %** of back yards were reachable before,
   **0.5 %** now (gate ≤ 2 %).

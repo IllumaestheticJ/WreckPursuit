@@ -19,6 +19,8 @@ use wp_world::network::{DistrictKind, FenceKind, Lane, LaneKind, RoadNetwork};
 use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
 use wp_world::terrain::Heightfield;
 
+/// Ground deviation within which fence pieces merge into one straight span (as `wp_sim`), m.
+const FENCE_SPAN_TOL_M: f32 = 0.25;
 /// Sidewalk width, m.
 const SIDEWALK_M: f32 = 3.0;
 /// Sidewalk (curb) height, m.
@@ -188,9 +190,31 @@ impl Prim {
         }
     }
 
-    /// Thin wall from ground point `a` to `b` (`half` thickness either side), `h` tall, its
-    /// base sunk `sink` below the ground; top and base follow the slope. No bottom face.
-    fn wall_block(&mut self, a: V3, b: V3, half: f32, h: f32, sink: f32) {
+    /// Thin wall along ground points `pts` (straight in plan; `half` thickness either side),
+    /// `h` tall, its base sunk `sink` below the ground; top and base follow the points.
+    /// Consecutive spans share vertices; only the two ends are capped; no bottom face.
+    /// Zero-thickness, double-sided fence panel along ground points `pts`, `h` tall, its base
+    /// sunk `sink` below the ground (thin timber fences: half the vertices of a wall).
+    fn fence_panel(&mut self, pts: &[V3], h: f32, sink: f32) {
+        let base = self.positions.len() as u32;
+        for p in pts {
+            self.vert([p[0], p[1], p[2] - sink], [0.0, 0.0, 1.0]);
+            self.vert([p[0], p[1], p[2] + h], [0.0, 0.0, 1.0]);
+        }
+        for k in 0..pts.len() as u32 - 1 {
+            let (b0, t0, b1, t1) = (
+                base + 2 * k,
+                base + 2 * k + 1,
+                base + 2 * k + 2,
+                base + 2 * k + 3,
+            );
+            self.indices
+                .extend_from_slice(&[b0, b1, t1, b0, t1, t0, b1, b0, t0, b1, t0, t1]);
+        }
+    }
+
+    fn fence_wall(&mut self, pts: &[V3], half: f32, h: f32, sink: f32) {
+        let (a, b) = (pts[0], pts[pts.len() - 1]);
         let d = [b[0] - a[0], b[1] - a[1]];
         let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
         if len < 0.05 {
@@ -198,31 +222,27 @@ impl Prim {
         }
         let r = [d[1] / len * half, -d[0] / len * half];
         let base = self.positions.len() as u32;
-        // a-left bottom/top, a-right bottom/top, then the same at b.
-        for p in [a, b] {
+        // Per point: left bottom, left top, right bottom, right top.
+        for p in pts {
             for side in [-1.0f32, 1.0] {
                 let q = [p[0] + r[0] * side, p[1] + r[1] * side];
                 self.vert([q[0], q[1], p[2] - sink], [0.0, 0.0, 1.0]);
                 self.vert([q[0], q[1], p[2] + h], [0.0, 0.0, 1.0]);
             }
         }
-        // Right, left, top, end a, end b (counter-clockwise from outside).
-        for [p, q, r, s] in [
-            [2, 6, 7, 3],
-            [0, 1, 5, 4],
-            [1, 3, 7, 5],
-            [0, 2, 3, 1],
-            [6, 4, 5, 7],
-        ] {
-            self.indices.extend_from_slice(&[
-                base + p,
-                base + q,
-                base + r,
-                base + p,
-                base + r,
-                base + s,
-            ]);
+        let mut quad = |idx: &mut Vec<u32>, [p, q, r, s]: [u32; 4]| {
+            idx.extend_from_slice(&[base + p, base + q, base + r, base + p, base + r, base + s]);
+        };
+        for k in 0..pts.len() as u32 - 1 {
+            let (i, j) = (4 * k, 4 * (k + 1));
+            // Right, left, top (counter-clockwise from outside).
+            quad(&mut self.indices, [i + 2, j + 2, j + 3, i + 3]);
+            quad(&mut self.indices, [i, i + 1, j + 1, j]);
+            quad(&mut self.indices, [i + 1, i + 3, j + 3, j + 1]);
         }
+        let last = 4 * (pts.len() as u32 - 1);
+        quad(&mut self.indices, [0, 2, 3, 1]);
+        quad(&mut self.indices, [last + 2, last, last + 1, last + 3]);
     }
 
     /// Axis-free box: footprint `corners` (4, counter-clockwise) from `z0` to `z1`.
@@ -751,16 +771,22 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     for b in &net.buildings {
         buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
     }
-    // Fences: a block per straight span (as physics builds them), following the ground and
-    // sunk 0.2 m into it.
+    // Fences: one wall per fence through its straight spans (as physics builds them),
+    // following the ground and sunk 0.2 m into it; timber fences as thin panels.
     for f in &net.fences {
         let prim = &mut fences[FenceKind::ALL
             .iter()
             .position(|k| *k == f.kind)
             .unwrap_or(0)];
-        let half = f.kind.thickness_m() * 0.5;
-        for (a, b) in wp_world::yards::fence_spans(f, 0.15) {
-            prim.wall_block(a, b, half, f.height_m, 0.2);
+        let spans = wp_world::yards::fence_spans(f, FENCE_SPAN_TOL_M);
+        let mut pts: Vec<V3> = spans.iter().map(|(a, _)| *a).collect();
+        if let Some((_, b)) = spans.last() {
+            pts.push(*b);
+            if f.kind == FenceKind::Wood {
+                prim.fence_panel(&pts, f.height_m, 0.2);
+            } else {
+                prim.fence_wall(&pts, f.kind.thickness_m() * 0.5, f.height_m, 0.2);
+            }
         }
     }
     let mut out = vec![

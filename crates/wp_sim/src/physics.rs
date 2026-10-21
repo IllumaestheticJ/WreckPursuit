@@ -248,13 +248,13 @@ impl PhysicsWorld {
         }
 
         // Yard fences, garden walls and hedges: one box per straight span (pieces merge while
-        // the ground stays within 0.15 m of the span), yawed along it and pitched to the
+        // the ground stays within 0.25 m of the span), yawed along it and pitched to the
         // ground's slope, at least 0.3 m thick so a fast car cannot step through a timber
         // fence in one tick.
         for f in &net.fences {
             let half_w = (f.kind.thickness_m() * 0.5).max(0.15);
             let half_h = f.height_m * 0.5;
-            for (a, b) in wp_world::yards::fence_spans(f, 0.15) {
+            for (a, b) in wp_world::yards::fence_spans(f, 0.25) {
                 let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
                 let run = (d[0] * d[0] + d[1] * d[1]).sqrt();
                 if run < 0.05 {
