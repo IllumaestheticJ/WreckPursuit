@@ -61,9 +61,13 @@ fn check_city(id: &str) -> CityMesh {
 #[test]
 fn procedural_city_greybox_loads() {
     let city = check_city("procedural_12x12");
-    // Flat city: nothing far below the ground, and the road layer sits at z = 0.
+    // Flat city: nothing far below the ground, and the road layer sits at z = 0 except main's
+    // highway along x = 0 (divided viaduct and its diamond ramps, |x| <= 24.5 m).
     assert!(city.bounds.0[2] > -1.0, "{:?}", city.bounds);
-    assert!(city.layers[1].vertices.iter().all(|v| v.pos[2].abs() < 0.5));
+    assert!(city.layers[1]
+        .vertices
+        .iter()
+        .all(|v| v.pos[2].abs() < 0.5 || v.pos[0].abs() <= 25.0));
 }
 
 #[test]
