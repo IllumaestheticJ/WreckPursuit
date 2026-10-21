@@ -1558,18 +1558,31 @@ impl PoliceSystem {
 
     /// Junctions on the predicted path of a racer at `p` moving at `v` (none when it is
     /// about stopped): `(racer arrival time s, legal drive distance from every node to the
-    /// junction m)`, nearest first.
-    fn racer_meets(&self, p: [f32; 2], v: [f32; 2]) -> Vec<(f32, Vec<f32>)> {
+    /// junction m)`, nearest first. The path runs on to the first junction past the horizon
+    /// ([`RoadGraph::predict_path_to_junction`]). Bend nodes of one-way roads are skipped:
+    /// only a car already behind the racer on that road can get to them.
+    ///
+    /// Arrival times are at `speed` (the racer's [`RacerRecord::expected_speed`], not
+    /// necessarily its speed now: one reported while braking for a junction would otherwise
+    /// be expected at the next one seconds after it gets there).
+    fn racer_meets(&self, p: [f32; 2], v: [f32; 2], speed: f32) -> Vec<(f32, Vec<f32>)> {
         const MEET_HORIZON_S: f32 = 15.0;
         const MEET_NODES: usize = 10;
-        let speed = crate::graph::len(v);
         let mut meets = Vec::new();
-        if speed > 3.0 {
-            let path = self.graph.predict_path(p, v, speed * MEET_HORIZON_S);
+        if crate::graph::len(v) > 3.0 {
+            let path = self
+                .graph
+                .predict_path_to_junction(p, v, speed * MEET_HORIZON_S);
             let mut along = 0.0;
-            for leg in path.legs.iter().take(MEET_NODES) {
+            for leg in &path.legs {
                 along += leg.len_m;
                 let node = self.graph.other_end(leg.segment, leg.from_node);
+                if self.graph.segment(leg.segment).oneway && !self.graph.node(node).junction {
+                    continue;
+                }
+                if meets.len() == MEET_NODES {
+                    break;
+                }
                 meets.push((
                     along / speed,
                     self.graph.distances_to(self.graph.node(node).pos),
@@ -1583,13 +1596,11 @@ impl PoliceSystem {
     /// within `radius_m` by road and, for a moving racer, able to reach a junction on its
     /// predicted path before it (a unit behind the racer would only chase it).
     fn unit_placed_for_call(&self, racer: EntityId, at: [f32; 2], radius_m: f32) -> Option<usize> {
-        let v = self
-            .racers
-            .get(&racer)
-            .map_or([0.0, 0.0], |r| [r.vel[0], r.vel[1]]);
+        let (v, speed) = self.racers.get(&racer).map_or(([0.0, 0.0], 0.0), |r| {
+            ([r.vel[0], r.vel[1]], r.expected_speed())
+        });
         let moving = crate::graph::len(v) > 3.0;
-        let meets = self.racer_meets(at, v);
-        let factor = self.cfg.pursuit.respond_speed_factor;
+        let meets = self.racer_meets(at, v, speed);
         let to_racer = self.graph.distances_to(at);
         let mut best: Option<(f32, usize)> = None;
         for (i, u) in self.units.iter().enumerate() {
@@ -1607,14 +1618,8 @@ impl PoliceSystem {
                 continue;
             };
             let lead = dist(u.body.pos, self.graph.node(n).pos);
-            if moving {
-                let v_unit = (self.limit_near(u.body.pos) * factor).max(5.0);
-                let meets_first = meets
-                    .iter()
-                    .any(|(t_racer, d)| (lead + d[n.0 as usize]) / v_unit <= *t_racer);
-                if !meets_first {
-                    continue;
-                }
+            if moving && !self.meets_first(i, &meets) {
+                continue;
             }
             let d = to_racer[n.0 as usize] + lead;
             if d <= radius_m && best.is_none_or(|b| d < b.0) {
@@ -1622,6 +1627,21 @@ impl PoliceSystem {
             }
         }
         best.map(|b| b.1)
+    }
+
+    /// Whether unit `i` can get to one of `meets` (junctions on a racer's predicted path,
+    /// [`PoliceSystem::racer_meets`]) before the racer does, driving at the response speed.
+    fn meets_first(&self, i: usize, meets: &[(f32, Vec<f32>)]) -> bool {
+        let u = &self.units[i];
+        let Some(n) = self.graph.nearest_node(u.body.pos) else {
+            return false;
+        };
+        let lead = dist(u.body.pos, self.graph.node(n).pos);
+        let factor = self.cfg.pursuit.respond_speed_factor;
+        let v_unit = (self.limit_near(u.body.pos) * factor).max(5.0);
+        meets
+            .iter()
+            .any(|(t_racer, d)| (lead + d[n.0 as usize]) / v_unit <= *t_racer)
     }
 
     /// Speed limit of the road nearest `p`, m/s.
@@ -1755,7 +1775,7 @@ impl PoliceSystem {
         const JUNCTION_CLEAR_M: f32 = 12.0;
         // A spawned car starts from rest: seconds lost against cruising the whole way.
         const STARTUP_S: f32 = 3.0;
-        let meets = self.racer_meets(target, rv);
+        let meets = self.racer_meets(target, rv, rec.expected_speed());
         let factor = self.cfg.pursuit.respond_speed_factor;
         let max_m = rs.spawn_max_m + crate::graph::len(rv) * rs.spawn_lead_s;
         let mut cands: Vec<(f32, [f32; 2], [f32; 2])> = Vec::new();

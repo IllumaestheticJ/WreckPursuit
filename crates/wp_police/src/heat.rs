@@ -157,7 +157,15 @@ pub struct RacerRecord {
     pub bounty: BountyRecord,
     /// When the current pursuit started.
     pub pursuit_started: Option<SimTime>,
+    /// Highest recent speed, m/s: the speed now, or the highest seen lately falling off at
+    /// [`TOP_SPEED_DECAY_MPS2`] ([`RacerRecord::expected_speed`]).
+    #[serde(default)]
+    pub recent_top_mps: f32,
 }
+
+/// How fast [`RacerRecord::recent_top_mps`] falls off, m/s per s: a speeder that slowed for
+/// a junction is expected back at speed for a while (≈ 10 s to forget 15 m/s).
+pub const TOP_SPEED_DECAY_MPS2: f32 = 1.5;
 
 impl RacerRecord {
     /// Fresh record (no heat).
@@ -180,7 +188,22 @@ impl RacerRecord {
             last_violation: [None; 5],
             bounty: BountyRecord::default(),
             pursuit_started: None,
+            recent_top_mps: 0.0,
         }
+    }
+
+    /// Update [`RacerRecord::recent_top_mps`] after `dt` s with the latest velocity.
+    pub fn track_top_speed(&mut self, dt: f32) {
+        let v = (self.vel[0] * self.vel[0] + self.vel[1] * self.vel[1]).sqrt();
+        self.recent_top_mps = (self.recent_top_mps - TOP_SPEED_DECAY_MPS2 * dt).max(v);
+    }
+
+    /// The speed to time a meeting with this racer by, m/s: its recent top speed (a speeder
+    /// braking for a corner is back at speed on the next straight), never below the speed
+    /// now.
+    pub fn expected_speed(&self) -> f32 {
+        let v = (self.vel[0] * self.vel[0] + self.vel[1] * self.vel[1]).sqrt();
+        v.max(self.recent_top_mps)
     }
 
     /// Whether a pursuit is active (`Pursuit` or `Searching`).
@@ -343,6 +366,24 @@ mod tests {
 
     fn cfg() -> HeatFile {
         PoliceConfig::builtin().heat
+    }
+
+    #[test]
+    fn expected_speed_remembers_a_recent_top_speed() {
+        let mut r = RacerRecord::new(EntityId(1));
+        r.vel = [0.0, 36.0, 0.0];
+        r.track_top_speed(0.1);
+        // Braking for a junction: still expected back near 36 m/s.
+        r.vel = [0.0, 10.0, 0.0];
+        for _ in 0..20 {
+            r.track_top_speed(0.1);
+        }
+        assert!((r.expected_speed() - (36.0 - 2.0 * TOP_SPEED_DECAY_MPS2)).abs() < 1e-3);
+        // Long enough slow and it is forgotten.
+        for _ in 0..200 {
+            r.track_top_speed(0.1);
+        }
+        assert!((r.expected_speed() - 10.0).abs() < 1e-3);
     }
 
     fn inputs(seen: bool, nearest: f32, speed: f32, now: f32) -> RuleInputs {

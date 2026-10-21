@@ -599,7 +599,8 @@ impl PoliceSystem {
     }
 
     /// Where a unit answering a reckless-driving call meets the racer reported at `p` moving
-    /// at `v`: the first junction on the racer's predicted path (up to
+    /// at `v` (arrivals timed at `speed`, its [`crate::RacerRecord::expected_speed`]): the
+    /// first junction on the racer's predicted path (up to
     /// [`RESPOND_HORIZON_S`] out) the unit reaches before the racer, else the racer's reported
     /// position itself. Shorter-sighted than [`PoliceSystem::intercept_point`]: responders
     /// start close, and a racer roaming a grid turns long before 10–20 s are up.
@@ -608,13 +609,17 @@ impl PoliceSystem {
         i: usize,
         p: [f32; 2],
         v: [f32; 2],
+        speed: f32,
     ) -> Option<(NodeId, [f32; 2])> {
-        let speed = (v[0] * v[0] + v[1] * v[1]).sqrt();
         let to_report = || self.graph.nearest_node(p).map(|n| (n, p));
-        if speed < STOPPED_RACER_MPS {
+        if (v[0] * v[0] + v[1] * v[1]).sqrt() < STOPPED_RACER_MPS {
             return to_report();
         }
-        let path = self.graph.predict_path(p, v, speed * RESPOND_HORIZON_S);
+        // On to the next junction past the horizon: a racer on a carriageway between ramps
+        // can only be met where it comes off.
+        let path = self
+            .graph
+            .predict_path_to_junction(p, v, speed * RESPOND_HORIZON_S);
         let u = &self.units[i];
         let Some(start) = self.start_node(u.body.pos, u.body.heading) else {
             return to_report();
@@ -943,14 +948,18 @@ impl PoliceSystem {
                         // intercept. Driving to where it was only ends in a stern chase.
                         crate::dispatch::IncidentKind::Report { racer } => {
                             let held_for = now.since(u.assigned);
-                            let stale = held_for > 0.0 && held_for % 3.0 < tdt;
+                            // Not in the middle of turning round onto its route: a new meeting
+                            // point the other way flips it back (circling in the junction).
+                            let stale = held_for > 0.0
+                                && held_for % 3.0 < tdt
+                                && !crate::unit::facing_away_from_track(u);
                             let goal = if !t.is_drivable() || u.track_s > t.length() - 10.0 || stale
                             {
-                                let v = self
-                                    .racers
-                                    .get(&racer)
-                                    .map_or([0.0, 0.0], |r| [r.vel[0], r.vel[1]]);
-                                self.respond_meet_point(i, inc.pos, v)
+                                let (v, speed) =
+                                    self.racers.get(&racer).map_or(([0.0, 0.0], 0.0), |r| {
+                                        ([r.vel[0], r.vel[1]], r.expected_speed())
+                                    });
+                                self.respond_meet_point(i, inc.pos, v, speed)
                             } else {
                                 None
                             };

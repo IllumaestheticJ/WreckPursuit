@@ -585,7 +585,7 @@ impl PoliceSystem {
         self.tick += 1;
         self.now = self.now.plus(dt);
         self.phase = world.time_of_day().phase();
-        self.sync_racers(racers);
+        self.sync_racers(racers, dt);
         self.process_events(world, events);
         self.rebuild_obstacles();
         self.drive_units(world, dt);
@@ -603,7 +603,7 @@ impl PoliceSystem {
         }
     }
 
-    fn sync_racers(&mut self, racers: &[RacerView]) {
+    fn sync_racers(&mut self, racers: &[RacerView], dt: f32) {
         let now = self.now;
         for r in racers {
             let rec = self
@@ -613,6 +613,7 @@ impl PoliceSystem {
             self.prev_vel.insert(r.entity, rec.vel);
             rec.pos = r.pos;
             rec.vel = r.vel;
+            rec.track_top_speed(dt);
             let p = xy(r.pos);
             // Spike strips.
             if let Some(prev) = self.prev_pos.get(&r.entity).copied() {

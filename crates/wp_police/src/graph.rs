@@ -515,6 +515,30 @@ impl RoadGraph {
     /// metres, following the straightest legal continuation at each node (a reasonable guess
     /// for a fleeing racer). The path starts at the road point closest to `pos`.
     pub fn predict_path(&self, pos: [f32; 2], vel: [f32; 2], horizon_m: f32) -> RoadPath {
+        self.predict_path_ending(pos, vel, horizon_m, false)
+    }
+
+    /// [`RoadGraph::predict_path`], continued past `horizon_m` to the next junction: the
+    /// vehicle can't leave its road before one, so that is where it can be met. On a divided
+    /// highway the carriageway runs for hundreds of metres between ramps (as many short
+    /// one-way segments); a path cut at the horizon ends between ramps, where nobody can get
+    /// ahead of it.
+    pub fn predict_path_to_junction(
+        &self,
+        pos: [f32; 2],
+        vel: [f32; 2],
+        horizon_m: f32,
+    ) -> RoadPath {
+        self.predict_path_ending(pos, vel, horizon_m, true)
+    }
+
+    fn predict_path_ending(
+        &self,
+        pos: [f32; 2],
+        vel: [f32; 2],
+        horizon_m: f32,
+        to_junction: bool,
+    ) -> RoadPath {
         let Some(rp) = self.nearest_on_road(pos) else {
             return RoadPath::default();
         };
@@ -537,7 +561,7 @@ impl RoadGraph {
         let mut total = legs[0].len_m;
         let mut dir = normalize(sub(self.node(next).pos, self.node(from).pos));
         let mut came_by = rp.segment;
-        while total < horizon_m && legs.len() < 64 {
+        while (total < horizon_m || (to_junction && !self.node(next).junction)) && legs.len() < 64 {
             let mut choice: Option<(f32, SegmentId, NodeId)> = None;
             for &(s, n) in self.outgoing(next) {
                 if s == came_by {
@@ -813,6 +837,31 @@ mod tests {
         for w in p.legs.windows(2) {
             assert!(dist(w[0].to, w[1].from) < 1e-3);
         }
+    }
+
+    #[test]
+    fn prediction_to_junction_runs_on_along_a_carriageway() {
+        // A one-way carriageway of 20 m pieces (bend nodes), 400 m to a junction.
+        let mut g = RoadGraph::new();
+        let nodes: Vec<NodeId> = (0..=20)
+            .map(|k| g.add_node([0.0, 20.0 * k as f32], District::Core))
+            .collect();
+        for w in nodes.windows(2) {
+            g.add_segment(w[0], w[1], 25.0, RoadClass::Highway, true);
+        }
+        let end = *nodes.last().unwrap();
+        for x in [-50.0, 50.0] {
+            let n = g.add_node([x, 400.0], District::Core);
+            g.add_segment(end, n, 14.0, RoadClass::Local, false);
+        }
+        g.nodes[end.0 as usize].junction = true;
+        let (p, v) = ([0.0, 5.0], [0.0, 30.0]);
+        let short = g.predict_path(p, v, 100.0);
+        assert!(short.length() < 150.0);
+        let on = g.predict_path_to_junction(p, v, 100.0);
+        let last = on.legs.last().unwrap();
+        assert_eq!(g.other_end(last.segment, last.from_node), end);
+        assert!((on.length() - 395.0).abs() < 1.0);
     }
 
     #[test]
