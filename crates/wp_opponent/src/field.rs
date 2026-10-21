@@ -284,6 +284,8 @@ struct Obstacle {
     /// Its heading along the corridor (cosine to the corridor direction; −1 = facing me
     /// head on).
     facing: f32,
+    /// A racer stuck nose-in that cannot back out because something stands right behind it.
+    wants_room: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -349,6 +351,9 @@ struct Racer {
     tactic_ticks: u64,
     blocked_s: f32,
     stuck_s: f32,
+    /// Stuck and wanting to back out, but something stands right behind me (the car there
+    /// backs off for me).
+    wants_room: bool,
     stable_s: f32,
     defended: bool,
     in_brake_zone: bool,
@@ -639,6 +644,7 @@ impl Field {
                 tactic_ticks: 0,
                 blocked_s: 0.0,
                 stuck_s: 0.0,
+                wants_room: false,
                 stable_s: 0.0,
                 defended: false,
                 in_brake_zone: false,
@@ -1376,6 +1382,7 @@ impl Field {
                             passing: r.tactic == Tactic::Overtake,
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
                             facing: 1.0,
+                            wants_room: r.wants_room,
                         });
                         continue;
                     }
@@ -1721,6 +1728,9 @@ fn decide_racer(
                 r.stable_s = 0.0;
             }
             // Stuck against something → back out.
+            if v > 1.0 {
+                r.wants_room = false;
+            }
             let wants_to_move = v_line(r.s) > 3.0;
             let held_by_car = rel
                 .iter()
@@ -1752,6 +1762,20 @@ fn decide_racer(
                 r.stuck_s = 0.0;
                 // Nose to nose: back out far enough to steer into my own lane.
                 r.reverse_s = if head_on { 3.0 } else { 1.6 };
+            }
+            // The car right in front of me is stuck and cannot back out because I stand
+            // behind it: back off for it (otherwise both wait for good).
+            let make_room = rel.iter().any(|x| {
+                x.ds > 0.0
+                    && x.gap < 4.0
+                    && x.o.wants_room
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
+            });
+            if r.tactic != Tactic::Reverse && v.abs() < 0.8 && make_room {
+                r.tactic = Tactic::Reverse;
+                r.tactic_ticks = 0;
+                r.stuck_s = 0.0;
+                r.reverse_s = 1.6;
             }
         }
 
@@ -1808,6 +1832,8 @@ fn decide_racer(
                         && x.gap < 4.0 + 1.0 * (-v).max(0.0)
                         && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
                 });
+                // Cut short by something behind me: ask it for room.
+                r.wants_room = blocked_behind && r.tactic_ticks as f32 * dt <= r.reverse_s;
                 if r.tactic_ticks as f32 * dt > r.reverse_s || blocked_behind {
                     r.tactic = Tactic::Rejoin;
                     r.tactic_ticks = 0;
@@ -2053,7 +2079,14 @@ fn decide_racer(
             // within 1.5 s.
             let alongside = x.ds.abs() <= hl + x.o.half_len + 2.5;
             let arriving = x.ds < 0.0 && x.gap < 1.5 * (x.o.v_s - v).max(0.0) + 2.5;
-            if !alongside && !arriving {
+            // A civilian facing me that we meet within 1.5 s: keep to my side of it instead
+            // of stopping for it (it would stop for me in turn). Police and racers keep the
+            // old rules: a box of standing units is squeezed past as before.
+            let meeting = is_civ(&x.o)
+                && x.ds > 0.0
+                && x.o.facing < -0.3
+                && x.gap < 1.5 * (v - x.o.v_s).max(0.0) + 2.5;
+            if !alongside && !arriving && !meeting {
                 continue;
             }
             let civ_extra = if is_civ(&x.o) { civ_margin } else { 0.0 };
@@ -2585,6 +2618,7 @@ fn vehicle_obstacle(
         passing: false,
         parked: false,
         facing: geom::dot(fwd, t),
+        wants_room: false,
     })
 }
 
@@ -2637,6 +2671,7 @@ fn civilians_on(
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
             facing: geom::dot(f, t),
+            wants_room: false,
         });
     }
     out
@@ -2871,6 +2906,7 @@ mod tests {
             passing: false,
             parked: true,
             facing: -1.0,
+            wants_room: false,
         }
     }
 
