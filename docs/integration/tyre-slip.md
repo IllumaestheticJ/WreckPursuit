@@ -135,6 +135,25 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### v2 status (paused, lead 2026-10-21)
+
+v2 stays the self-contained "drift best" A/B preset (its button sets `GripBalance::drift_best()`).
+Re-tuning is paused until grip-balance's combined build lands (stiffer ride ~1.5 / 1.5 bars,
+lift-off fix, W's catch, held-key fix); then re-run `transition v2search` against that default.
+State at pause (VR steering; held / lift flicks at the reference gaps / lift-off step-outs):
+
+| balance | v1 | v2 |
+|---|---|---|
+| step 14 (with the held-key slide lock) | 14/27 (0 swaps) · 0/18 · 11/18 | 0/27 (11 swaps) · 0/18 · 11/18 |
+| drift best | 25/27 · 0/18 · 7/18 | 7/27 · 12/18 · 7/18 |
+| no balance (W defaults · plain) | 3/27 · 0/18 · 0/18 | 0/27 · 0/18 · 0/18 |
+
+Lift-off step-outs come from the balances' softer rear (same with v1 / v2, plain / VR); worst
+is the lift at turn-in (step 14: rwd_b 16–19°, rwd_d / a 9–13°). Search on step 14 · VR before
+the slide lock: best 12/27 · 6/18 or 1/27 · 8/18. Tools: `transition v2search` (V2BASE,
+V2SPREAD, V2STEER, V2EXTRA, V2CONFIGS; JSON lines incl. `hold_swapped`, `lift_fails`),
+`transition holds`, `LIFTV=1` per-case lift-off.
+
 ### Spin model v2 (ellipse) — lead's go-ahead, A/B preset next to v1
 
 `CarTune::spin_v2_candidate()` (+ `CarTune::spin_v2_plain()` steering, with

@@ -432,6 +432,88 @@ fn trace_hold(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// Lift-off in a normal corner (owner: "no side grip and step out, even when steering and
+/// lifting off"): must **not** step out. At 40 / 60 / 80 mph: (a) lift at turn-in — the left
+/// key + throttle 0 from straight cruise, 1.5 s; (b) lift mid-corner — key held 3 s at cruise,
+/// then throttle 0 for 1.5 s. Returns the number of runs whose body slip passes 8° (or that
+/// spin), out of 6, and the worst peak body slip.
+fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
+    use wp_vehicle::rig::Rig;
+    let a = reference_assists();
+    let hold = |rig: &Rig, v: f32| {
+        let err = v - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    let rolling = |v: f32| {
+        let mut rig = Rig::new(c);
+        rig.teleport([0.0; 3], 0.0, v, 0.0);
+        let auto = wp_contracts::AssistProfile {
+            auto_gears: true,
+            ..a
+        };
+        for _ in 0..TPS {
+            let (throttle, brake) = hold(&rig, v);
+            rig.step(
+                &VehicleInput {
+                    throttle,
+                    brake,
+                    ..Default::default()
+                },
+                &auto,
+            );
+        }
+        rig
+    };
+    let (mut fails, mut worst) = (0usize, 0.0f32);
+    for mph in [40.0f32, 60.0, 80.0] {
+        let v = mph * 0.44704;
+        for mid in [false, true] {
+            let mut rig = rolling(v);
+            let lift_at = if mid { 3 * TPS } else { 0 };
+            let mut peak = 0.0f32;
+            let mut spun = false;
+            for tick in 0..lift_at + 3 * TPS / 2 {
+                let (throttle, brake) = if tick >= lift_at {
+                    (0.0, 0.0)
+                } else {
+                    hold(&rig, v)
+                };
+                rig.step(
+                    &VehicleInput {
+                        steer: -1.0,
+                        throttle,
+                        brake,
+                        ..Default::default()
+                    },
+                    &a,
+                );
+                let st = slide_state(&rig);
+                if tick >= lift_at {
+                    peak = peak.max(-st.body_slip.to_degrees());
+                    spun |= st.v_fwd < 0.0;
+                }
+            }
+            worst = worst.max(peak);
+            if std::env::var("LIFTV").is_ok() {
+                eprintln!(
+                    "  {} {mph} mph {}: peak body slip {peak:.1}°{}",
+                    c.def.id,
+                    if mid { "mid-corner lift" } else { "lift at turn-in" },
+                    if spun { " SPUN" } else { "" }
+                );
+            }
+            if peak > 8.0 || spun {
+                fails += 1;
+            }
+        }
+    }
+    (fails, worst)
+}
+
 /// One v2 candidate's score under one configuration.
 #[derive(Debug, Clone, Copy, Default)]
 struct V2Score {
@@ -443,6 +525,9 @@ struct V2Score {
     /// Held-set cases that swung through to the other side (W's over-catch) / spun.
     hold_swapped: usize,
     hold_spun: usize,
+    /// Lift-off in a normal corner that stepped out (fail case), of 6 per car; worst slip °.
+    lift_fails: usize,
+    lift_worst: f32,
 }
 
 /// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
@@ -453,6 +538,9 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
     let a = reference_assists();
     let mut sc = V2Score::default();
     for (_, c) in cars {
+        let (lf, lw) = lift_corner_fails(c);
+        sc.lift_fails += lf;
+        sc.lift_worst = sc.lift_worst.max(lw);
         for e in [6.0f32, 12.0, 20.0] {
             for g in [0.3f32, 0.5, 0.7] {
                 let d = PlainDriver::HoldCounter {
@@ -597,6 +685,7 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                     "config": cfg.name, "held": sc.held, "caught": sc.caught,
                     "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
                     "hold_swapped": sc.hold_swapped, "hold_spun": sc.hold_spun,
+                    "lift_fails": sc.lift_fails, "lift_worst": sc.lift_worst,
                     "steer": steer,
                 })
             );
