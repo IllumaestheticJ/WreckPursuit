@@ -579,3 +579,31 @@ Seeds 1–8, before = lead/main-sync bb2208ed, after = this tip:
 | loop9_circuit | 0.5 | after | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
 | loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
 | loop9_circuit | 0.95 | after | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
+
+Capability table regenerated on main's handling (lead's request): only `brake_g` moved, 1–8 %
+lower on every car (main's front brake bias); lateral grip, acceleration and top speed unchanged.
+Merged lead/round12 66904248 (no table change). Final seeds 1–8 table on this tip (after = with
+the new table; the earlier "after" rows above are without it):
+
+| race | skill | run | finishers | mean s | opp % | passes/km (field, per seed) | walls | rejoin+rev | nose-to-nose | of which opposing |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lantern_checkpoint | 0.5 | before | 25/32 | 80.3 | 11 | 0.2 | 0 | 188 | 20 | 12 |
+| lantern_checkpoint | 0.5 | after | 28/32 | 80.3 | 13 | 0.0 | 0 | 72 | 19 | 1 |
+| lantern_checkpoint | 0.95 | before | 25/32 | 85.1 | 10 | 0.0 | 7 | 175 | 20 | 10 |
+| lantern_checkpoint | 0.95 | after | 30/32 | 75.8 | 14 | 0.2 | 0 | 53 | 14 | 3 |
+| grid_highway_sprint | 0.5 | before | 32/32 | 44.4 | 0 | 2.7 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | after | 32/32 | 43.9 | 0 | 2.1 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | before | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | after | 32/32 | 43.9 | 0 | 3.9 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | before | 32/32 | 67.0 | 47 | 0.0 | 16 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | after | 32/32 | 66.8 | 49 | 0.0 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.95 | before | 32/32 | 62.3 | 46 | 0.0 | 8 | 8 | 0 | 0 |
+| hollins_sprint | 0.95 | after | 32/32 | 62.3 | 45 | 0.0 | 8 | 8 | 0 | 0 |
+| city_sprint | 0.5 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.5 | after | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | before | 32/32 | 11.0 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | after | 32/32 | 10.9 | 0 | 0.6 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | before | 48/48 | 205.3 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | after | 48/48 | 205.0 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
+| loop9_circuit | 0.95 | after | 48/48 | 199.8 | 0 | 0.1 | 0 | 0 | 0 | 0 |
