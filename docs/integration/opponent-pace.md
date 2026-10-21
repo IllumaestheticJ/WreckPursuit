@@ -267,3 +267,21 @@ field to police stand-offs (reported to E); a racer that ends up in the opposing
 a standing civilian with racers queued behind it cannot reverse out (Hollins police-free seed
 3, 8 m from the flag).
 
+
+### ws/police 3bccc796 (main sync) — 2026-10-21
+
+Grid highway `short_sprint` (cars 3/4 DNF FinishWindow, "stopped at (10.8, 355.3)"): not the
+viaduct. At the first signal (y ≈ −84) a racer sat ~14 s behind a civilian with the next lane
+empty: the car in line on its bumper counted as alongside in the hard side constraints (both
+sides closed), and the no-three-wide rule refused a pass to the right while a rival sat on the
+left. Fixed (a car in line behind bounds neither side; a car alongside only blocks a pass
+towards it). Before the fix the two then met the ramp-terminal light at y ≈ 368 as it went red
+behind three civilians across all lanes of a divided road (no opposing lane, 1.2 m strip): a
+32 s red plus a patrol reversing in the box (two units within 10–20 m, not pursuing). Now all
+three AI cars finish by 50 s.
+
+Pace lock-in: only `lantern_checkpoint_s95` moved (best ratio 1.71 → 1.86, already 1.94 on
+fc1b388e before the fix above): the whole field waits ~24 s behind a civilian turning at a
+give-way junction and then for each crossing car (main's turn-signal / give-way timing).
+Re-ranged (today + 0.05, times ±15 %). Taking gaps in cross traffic is the first item of the
+street-racing junction risk check.
