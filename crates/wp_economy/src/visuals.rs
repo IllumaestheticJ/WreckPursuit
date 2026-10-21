@@ -120,9 +120,10 @@ impl PartKind {
         PartKind::TrunkPanel,
     ];
 
-    /// Body regions the part is mounted on. The renderer binds the part's vertices to these
-    /// regions' lattice nodes (dents, hinge swing, detachment). Empty = not on the body: wheel
-    /// parts follow the wheels, material changes follow whatever panel they recolour.
+    /// Body regions the part is mounted on. The renderer binds each drawn piece to the nearest
+    /// of these regions' lattice nodes (dents, hinge swing, detachment): a left skirt to the
+    /// left sill, a front flare to its fender. Empty = not on the body: wheel parts follow the
+    /// wheels, material changes follow whatever panel they recolour.
     pub fn regions(self) -> &'static [BodyRegion] {
         use BodyRegion as R;
         match self {
