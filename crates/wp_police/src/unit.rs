@@ -412,6 +412,13 @@ pub struct Unit {
     /// Stuck detection and recovery (physical units, [`crate::stuck`]).
     #[serde(default)]
     pub unstick: crate::stuck::UnstickState,
+    /// Which branch of `drive_input` produced the last input (debug: bench traces; 0 = the
+    /// plain drive along the track).
+    #[serde(skip)]
+    pub branch: u8,
+    /// The pro driver's planned speed and whether it was reversing out, last tick (debug).
+    #[serde(skip)]
+    pub pro_dbg: (f32, bool),
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -490,6 +497,8 @@ impl Unit {
             controller: None,
             avoid: AvoidState::default(),
             unstick: crate::stuck::UnstickState::default(),
+            branch: 0,
+            pro_dbg: (0.0, false),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],
