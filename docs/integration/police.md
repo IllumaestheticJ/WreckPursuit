@@ -163,6 +163,13 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **Round 12c:** `crates/wp_sim/src/police_link.rs` (minimal): `reconcile_police_units` applies
+  `PoliceSystem::take_unit_resets` (place the car on the ground at the reset pose, `set_ghost`
+  for `ghost_s`) before syncing units back. `crates/wp_sim/tests/police_passby.rs`: the
+  row-80 pass-by matrix test. `crates/wp_wasm/src/audio.rs`: siren test window 30 → 60 s.
+  `crates/wp_wasm/src/career_tests.rs`: `brake_until_settled` holds the brake at 0.5 (above
+  0.5 at a standstill engages auto-reverse). `apps/simcli/scenarios/police/tunnel_escape_founders_cut*.ron`:
+  re-seeded 56 → 51. Goldens re-blessed in `[bless]` commits.
 - **Round 13:** `apps/simcli/examples/police_chase.rs` (new measurement example: full sim,
   Port Vesper, scripted fleeing racer, before/after tables for rows 61 / 63 / 64 / 66; read-only
   use of simcli / `wp_sim`). `apps/simcli/scenarios/police/tunnel_escape_founders_cut*.ron`:
@@ -1121,3 +1128,80 @@ Checks: `e2e:presets`, `e2e:touch`, `tsc`, fmt, clippy, wasm build pass. Fail id
 exists" (the setter exists now); `wp_vehicle` `roster_diff_hashes_are_pinned`,
 `front_drive_cars_understeer_mildly`; `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
 `simcli_golden_replays_play_back_in_the_browser_core`; 52 simcli goldens on the round-12 tip of 2026-10-20 (same set with and without this merge; `ws/police` before it: 19; none re-blessed here).
+
+
+## Round 12c (lead rows 75 / 78 / 80 / 84 / 86 / 89 / 96) and the `origin/main` merge — in progress
+Base: `origin/lead/round12` @ `d6baeeec` + `origin/lead/main-sync` (`origin/main` @ `3dc962b`).
+
+### Merge of `origin/main` (P8 pro driver)
+`ws/police` merged `origin/lead/main-sync`, so it contains `origin/main` @ `3dc962b`
+(#18 P8 and the rest). Every non-police file is the helper's resolution. The wp_police
+resolution replaces the provisional one:
+- `unit_input` runs round 12's manoeuvres for every unit, lights on or off. Only the plain drive
+  at the end differs: lights on → `pro::ProDriver` (`PoliceSystem::pro_drive`), lights off → the
+  lane driver. In the provisional merge the siren U-turn / swing / push-through block sat in the
+  lights-off path and was dead code.
+- The pro driver gets the command speed capped by obstacle awareness and the static feelers;
+  a pass or a wall shift is driven as an exact offset.
+- The pro driver's own stuck reverse is off (`stuck_s` = ∞ at creation): `stuck.rs` owns
+  recovery. Its "facing away → crawl round" stays.
+
+Checks on the merge: fmt, clippy, wp_police, wp_sim, wp_race (`hollins_hill_sprint`,
+`loop9_circuit`) and wp_opponent (`live_police_chase…`, P8's `police_pace`) all pass. simcli
+runs 113 PASS. The six goldens `lead/main-sync` left open and the four round-12c police goldens
+were re-blessed. The one red test is `wp_race` `pace_scenarios_hold_their_ranges`:
+`opponent_pace_lantern_checkpoint_s50` never finishes (57 rejoins). That scenario has the police
+off, so it comes from combining the newer `lead/round12` with `main-sync`'s world / opponent
+changes, not from wp_police.
+`origin/main` has moved on since `3dc962b` (#19–#27: world viaducts and ramps, vehicle catch
+steering, Loop 9 greybox). Of those changes only `crates/wp_police/scenarios/day_core_speeder.ron`
+touches police. Those commits are left to the main-sync helper.
+
+### Rows 80 + 89: witnessed violations, symmetric sight (done)
+- A unit that watches a violation that makes the racer wanted starts the pursuit at once, day or
+  night. The blatant pass-by threshold is 20 km/h over within 90 m (was 40 km/h within 60 m).
+  A unit already on another racer's pursuit keeps it; backup comes for the new racer.
+- Sight: 380 m by day, 320 m at dawn and dusk, 260 m at night, capped by weather visibility. A
+  200° forward view plus 60 m all round. Recognising a wanted car takes 0.5–1.0 s within 150 m
+  and up to 2 s more at the edge. Out of sight the timer drains (0.5/s) instead of resetting.
+- Pass-by matrix (`wp_sim` `speeding_past_a_cop_at_20_40_80_over_starts_a_chase_within_1_5_s`;
+  +20/+40/+80 km/h, stationary and oncoming unit, day and night, grid and Vesper):
+
+  | | Before | After |
+  |---|---|---|
+  | Cases failing | 12 of 24 | 0 of 24 |
+  | +20 km/h over | never pursued (8 cases) | −1.9 to +0.14 s from the pass |
+  | +40 km/h over, Vesper | pursued 3.3–3.6 s after the pass | within 1.5 s |
+
+- Night `pursuit_start_s` metric:
+
+  | Scenario | Before | After |
+  |---|---|---|
+  | `night_core_speeder` | 33.0 s | 14.6 s |
+  | `day_core_speeder` | 8.8 s | 8.4 s |
+  | Night / day ratio | 3.75 | 1.74 |
+
+  Expectations re-aimed to night > 10 s and ratio ≥ 1.5.
+- A racer who stays out of sight still gets away. `escape_break_contact_night.ron` (new, at
+  02:00): before, no unit even spotted it; after, one pursuit, escaped.
+- Fixed on the way: a far pursuer flipped between Pursue and Intercept every think step (two
+  track projections disagreed), so it never moved (capture_stop seed 401).
+- Gaps: there is no racer headlight state yet, so a lights-off racer is not harder to see at
+  night. The HUD is unchanged.
+
+### Row 78: reset in place (first part, done)
+An un-wrecked AI unit that stands stuck while it wants to drive resets in place.
+- Stuck time: 8 s on a pursuit, 15 s otherwise, 40 s behind civilian traffic.
+- Never: at a red light, queued within 25 m of a junction (unless the stuck detector flagged
+  it), holding a block, or over a stopped racer it is arresting.
+- It snaps to the nearest clear lane spot within 15 m along its route, upright, damage kept, and
+  is a 1 s ghost in `wp_sim`. If a racer can see it, it waits 2 s more first.
+- No clear spot: it despawns out of sight, or in view after 30 s wedged next to a racer.
+- Logged in `PoliceStats::resets`: 0–9 per simcli scenario, all short hops.
+- Test: `stuck_unit_resets_in_place_within_15_m`.
+- To do: count per pursuit-minute and the scenario metric.
+
+The reset fixed the Hollins race deadlock this round's sight change exposed: a column of units
+and two captured racers were jammed in a hairpin.
+
+### Rows 84, 86, 96, 75 — not started yet.
