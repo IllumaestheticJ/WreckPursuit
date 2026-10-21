@@ -8,8 +8,9 @@
         "Synth": {
           "synth": "squeal",
           "params": {
-            "freq_hz": 1050.0,
-            "wobble_hz": 7.0
+            "freq_hz": 900.0,
+            "jitter": 0.025,
+            "chatter_hz": 22.0
           }
         }
       },
