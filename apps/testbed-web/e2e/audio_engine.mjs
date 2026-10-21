@@ -637,9 +637,11 @@ check(sportyPops >= 2 * sportyLifts, `overrun crackle: ${sportyPops} pops over $
     // Slow WOT pull idle → redline.
     const secs = 8;
     const y = dsp(spec, idle, red, secs);
+    // The voice's soft limit starts at 0.8 × OUT_MAKEUP (2) = 1.6 at the output; a pull that
+    // peaks ≤ 0.8 keeps 6 dB of headroom under it (docs/integration/audio.md "Mix headroom").
     let knee = 0;
     for (const v of y) if (Math.abs(v) > 0.8) knee++;
-    check(knee === 0, `${car}: full-throttle pull stays out of the synth's soft limit (${knee} samples > 0.8)`);
+    check(knee === 0, `${car}: full-throttle pull keeps 6 dB under the synth's soft limit (${knee} samples > 0.8)`);
     // Level along the pull (100 ms windows) detrended against log rpm, and the firing order's
     // level against the strongest partial.
     const lv = [];
