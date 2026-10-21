@@ -20,12 +20,30 @@ export const PANEL_STRIDE = 10;
 /** Panel state codes (mirrors wp_damage::PanelState::code). */
 export const PANEL_STATE = { attached: 0, unlatched: 1, hanging: 2, detached: 3 } as const;
 
-/** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). */
+/** Materials of the mesh files (tools/assets) plus the ones mod parts use (render/mod_parts.ts). */
+export type PartMaterial =
+  | "paint"
+  | "glass"
+  | "trim"
+  | "headlight"
+  | "taillight"
+  | "rubber"
+  | "metal"
+  | "interior"
+  | "carbon"
+  | "chrome"
+  | "steel"
+  | "caliper"
+  | "caliperRace"
+  | "stripe";
+
+/** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). Mod parts
+ * (render/mod_parts.ts) use the same shape with kind "mod". */
 export interface MeshPartJson {
   name: string;
   region: string | null;
-  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim";
-  material: "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior";
+  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim" | "mod";
+  material: PartMaterial;
   wheel?: number | null;
   positions_mm: number[];
   uvs: number[];
@@ -184,10 +202,16 @@ function std(o: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMateria
   return m;
 }
 /** Materials that are the same on every car (only paint and the lamps are per car): shared, so
- * a promoted car adds 1 material instead of 7. */
-let sharedMats: { glass: THREE.MeshStandardMaterial; trim: THREE.MeshStandardMaterial; rubber: THREE.MeshStandardMaterial; metal: THREE.MeshStandardMaterial; interior: THREE.MeshStandardMaterial; brokenLamp: THREE.MeshStandardMaterial } | null = null;
+ * a promoted car adds 1 material instead of 7. Mod part materials (carbon … stripe) are shared
+ * too; a mod that recolours a shared one (tint, interior trim) gets that car its own copy
+ * (`PanelBody.setModLook`). */
+type SharedKind = "glass" | "trim" | "rubber" | "metal" | "interior" | "brokenLamp" | "carbon" | "chrome" | "steel" | "caliper" | "caliperRace" | "stripe";
+let sharedMats: Record<SharedKind, THREE.MeshStandardMaterial> | null = null;
+/** Every shared material (to tell them from a car's own copies). */
+const sharedSet = new Set<THREE.Material>();
 function shared(): NonNullable<typeof sharedMats> {
-  return (sharedMats ??= {
+  if (sharedMats) return sharedMats;
+  sharedMats = {
     // forceSinglePass: a transparent DoubleSide material is otherwise drawn twice per part
     // (back faces, then front) and Three flips `side`, bumping the material version, so it
     // re-resolved the shader program for every glass part every frame (browser perf pass).
@@ -197,7 +221,30 @@ function shared(): NonNullable<typeof sharedMats> {
     metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
     interior: std({ color: 0x2b2724, roughness: 1 }),
     brokenLamp: std({ color: 0x2a2a2c, roughness: 0.6, metalness: 0.4 }),
-  });
+    // Mod parts (render/mod_parts.ts).
+    carbon: std({ color: 0x1c1d20, metalness: 0.35, roughness: 0.3 }),
+    chrome: std({ color: 0xd8dde2, metalness: 0.95, roughness: 0.12 }),
+    steel: std({ color: 0x2a2c2e, metalness: 0.6, roughness: 0.55 }),
+    caliper: std({ color: 0xc8161d, metalness: 0.2, roughness: 0.45 }),
+    caliperRace: std({ color: 0xe0a812, metalness: 0.3, roughness: 0.4 }),
+    stripe: std({ color: 0xf2f2f2, roughness: 0.5 }),
+  };
+  for (const m of Object.values(sharedMats)) sharedSet.add(m);
+  return sharedMats;
+}
+
+/** Look a mod gives one material (paint finish, window tint, interior trim); unset = unchanged. */
+export interface ModLook {
+  color?: number;
+  roughness?: number;
+  metalness?: number;
+  opacity?: number;
+}
+function applyLook(m: THREE.MeshStandardMaterial, l: ModLook): void {
+  if (l.color !== undefined) m.color.setHex(l.color);
+  if (l.roughness !== undefined) m.roughness = l.roughness;
+  if (l.metalness !== undefined) m.metalness = l.metalness;
+  if (l.opacity !== undefined) m.opacity = l.opacity;
 }
 
 /** Merged index of one material's batched parts (with each part's first index), per car model. */
@@ -208,6 +255,10 @@ const spanCache = new Map<string, Map<number, [number, number, number]>>();
 
 interface PartRT {
   def: MeshPartJson;
+  /** Material drawn (the mesh file's, or a mod's replacement such as a carbon hood). */
+  material: PartMaterial;
+  /** A mod part (render/mod_parts.ts): batched apart from the mesh file's parts. */
+  mod: boolean;
   /** The part's own mesh: drawn for lenses (their material swaps when broken); for batched parts
    * kept only as a handle (material, name) and never drawn. */
   mesh: THREE.Mesh;
@@ -618,15 +669,30 @@ export class PanelBody {
   ready = false;
   /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
   readonly wheelParts: THREE.Mesh[][] = [[], [], [], []];
+  /** Non-spinning parts per wheel index, hub space (mod brake calipers; VehicleView parents
+   * them under the steered hub, not the spinning wheel). */
+  readonly hubParts: THREE.Mesh[][] = [[], [], [], []];
+  /** The loaded mesh file (null until ready). */
+  mesh: CarMeshJson | null = null;
   /** Latest panel states (PANEL_STRIDE floats per panel). */
   states: Float32Array = new Float32Array(0);
   private parts: PartRT[] = [];
-  /** Merged per-material draws of the body parts (`Batch`). */
+  /** Merged per-material draws of the body parts (`Batch`), by batch key (`batchKey`). */
   private batches: Batch[] = [];
-  private readonly regions: string[];
-  private restNodes: Float32Array = new Float32Array(0);
+  private readonly batchByKey = new Map<string, Batch>();
+  /** Parts or part materials changed since the batches were built (`rebatch`). */
+  private batchesStale = false;
+  /** A part draws another material than its mesh file says: the per-model index cache no
+   * longer matches this car's batches. */
+  private customBatches = false;
+  /** Looks mods gave materials (`setModLook`), re-applied over every art style. */
+  private readonly modLooks = new Map<PartMaterial, ModLook>();
+  /** Region names of the car (`vehicle_info.regions`; index = region code). */
+  readonly regions: string[];
+  /** Lattice rest nodes, chassis space (xyz per node). */
+  restNodes: Float32Array = new Float32Array(0);
   /** Region index of every lattice node. */
-  private nodeRegions: Uint8Array = new Uint8Array(0);
+  nodeRegions: Uint8Array = new Uint8Array(0);
   /** Dark, unlit lens of a broken light. */
   private readonly brokenLamp: THREE.Material;
   /** Region index → three node ids spanning the panel (frame fit), for panel regions. */
@@ -635,7 +701,7 @@ export class PanelBody {
   /** One reusable `Frame` per free panel region (`frames` holds this re-skin's). */
   private readonly framePool = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
-  private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
+  private readonly mats: Record<PartMaterial, THREE.Material>;
   private onReady: (() => void) | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
@@ -665,6 +731,12 @@ export class PanelBody {
       rubber: sm.rubber,
       metal: sm.metal,
       interior: sm.interior,
+      carbon: sm.carbon,
+      chrome: sm.chrome,
+      steel: sm.steel,
+      caliper: sm.caliper,
+      caliperRace: sm.caliperRace,
+      stripe: sm.stripe,
     };
     this.brokenLamp = sm.brokenLamp;
     warmSkinVertices();
@@ -697,14 +769,14 @@ export class PanelBody {
    * Head/tail lamps are the VehicleView's shared materials and are styled there.
    */
   applyStyle(lowpoly: boolean, paint: THREE.Color): void {
-    const lp: Partial<Record<MeshPartJson["material"], number>> = {
+    const lp: Partial<Record<PartMaterial, number>> = {
       glass: PALETTE.glass,
       trim: PALETTE.trim,
       rubber: PALETTE.tire,
       metal: PALETTE.rim,
       interior: PALETTE.interior,
     };
-    for (const [k, m] of Object.entries(this.mats) as [MeshPartJson["material"], THREE.Material][]) {
+    for (const [k, m] of Object.entries(this.mats) as [PartMaterial, THREE.Material][]) {
       const g = k === "headlight" || k === "taillight" ? undefined : greyLook.get(m);
       if (!g || !(m instanceof THREE.MeshStandardMaterial)) continue;
       if (k === "paint") m.color.copy(lowpoly ? paint : g.color);
@@ -713,6 +785,9 @@ export class PanelBody {
       m.metalness = lowpoly ? (k === "paint" ? 0.15 : 0) : g.metalness;
       // Low-poly glass is darker and less see-through (picker: near-opaque blue-black).
       if (k === "glass") m.opacity = lowpoly ? 0.82 : g.opacity;
+      // What the player bought shows in every style.
+      const look = this.modLooks.get(k);
+      if (look) applyLook(m, look);
     }
     const b = this.brokenLamp as THREE.MeshStandardMaterial;
     const bg = greyLook.get(b)!;
@@ -725,11 +800,9 @@ export class PanelBody {
   }
 
   private build(mesh: CarMeshJson): void {
+    this.mesh = mesh;
     this.restNodes = sim.latticeRest(this.entity);
-    const nodeRegions = sim.latticeRegions(this.entity);
-    this.nodeRegions = nodeRegions;
-    let spans = spanCache.get(this.carId);
-    if (!spans) spanCache.set(this.carId, (spans = new Map()));
+    this.nodeRegions = sim.latticeRegions(this.entity);
     for (const def of mesh.parts) {
       const d = dataOf(def);
       const region = def.region ? this.regions.indexOf(def.region) : -1;
@@ -762,6 +835,8 @@ export class PanelBody {
       const fold = def.fold && def.fold.chords.length > 0 ? def.fold : null;
       this.parts.push({
         def,
+        material: def.material,
+        mod: false,
         mesh: m,
         pos,
         batch: null,
@@ -780,30 +855,148 @@ export class PanelBody {
         maxFold: 0,
         maxPull: 0,
       });
-      if (region >= 0 && !this.tri.has(region)) {
-        let t = spans.get(region);
-        if (!t) spans.set(region, (t = spanTriangle(this.restNodes, nodeRegions, region)));
-        this.tri.set(region, t);
-      }
+      this.ensureTri(region);
     }
-    this.buildBatches(mesh);
+    this.buildBatches();
     this.ready = true;
     this.update(this.restNodes, 0);
     this.onReady?.();
   }
 
-  /** Merge the non-lens body parts into one mesh per material (see `Batch`). */
-  private buildBatches(mesh: CarMeshJson): void {
+  /** Frame-fit node triple of a panel region (cached per car model). */
+  private ensureTri(region: number): void {
+    if (region < 0 || this.tri.has(region)) return;
+    let spans = spanCache.get(this.carId);
+    if (!spans) spanCache.set(this.carId, (spans = new Map()));
+    let t = spans.get(region);
+    if (!t) spans.set(region, (t = spanTriangle(this.restNodes, this.nodeRegions, region)));
+    this.tri.set(region, t);
+  }
+
+  /**
+   * Add mod body parts (render/mod_parts.ts; `kind` "mod", `wheel` unset): skinned to their
+   * `skin_nodes` like any mesh-file part, so they dent, swing with a hinged panel and leave as
+   * debris with their region. Drawn once `rebatch` has run (one batch per mod material).
+   */
+  addModParts(defs: MeshPartJson[]): void {
+    for (const def of defs) {
+      const d = dataOf(def);
+      const region = def.region ? this.regions.indexOf(def.region) : -1;
+      this.parts.push({
+        def,
+        material: def.material,
+        mod: true,
+        mesh: new THREE.Mesh(NO_GEOMETRY, this.mats[def.material]),
+        pos: d.rest.slice(),
+        batch: null,
+        indexStart: 0,
+        rest: d.rest,
+        nodes: d.nodes,
+        weights: d.weights,
+        region,
+        hidden: false,
+        fold: null,
+        foldW: d.foldW,
+        foldMem: new Float32Array(0),
+        foldPack: null,
+        broken: false,
+        maxDisp: 0,
+        maxFold: 0,
+        maxPull: 0,
+      });
+      this.parts[this.parts.length - 1].mesh.name = def.name;
+      this.ensureTri(region);
+    }
+    this.batchesStale = true;
+  }
+
+  /** Add a mod wheel part (`wheel` set; hub space): it spins with the wheel, or with `hub` only
+   * steers (brake calipers). Call before VehicleView parents the wheel parts. */
+  addWheelPart(def: MeshPartJson, hub = false): THREE.Mesh {
+    const m = new THREE.Mesh(dataOf(def).wheelGeom!, this.mats[def.material]);
+    m.name = def.name;
+    m.frustumCulled = false;
+    (hub ? this.hubParts : this.wheelParts)[def.wheel!].push(m);
+    return m;
+  }
+
+  /** Draw the body parts `which` selects with `material` instead (a carbon hood); applies at
+   * the next `rebatch`. */
+  setPartMaterial(which: (def: MeshPartJson) => boolean, material: PartMaterial): void {
+    for (const p of this.parts) {
+      if (p.def.kind === "light" || !which(p.def)) continue;
+      p.material = material;
+      p.mesh.material = this.mats[material];
+      this.customBatches = true;
+      this.batchesStale = true;
+    }
+  }
+
+  /**
+   * A mod's look for one material (paint finish, window tint, interior trim), kept over art
+   * style changes. A shared material is first copied for this car, so other cars keep theirs.
+   */
+  setModLook(material: PartMaterial, look: ModLook): void {
+    let m = this.mats[material];
+    if (!(m instanceof THREE.MeshStandardMaterial)) return;
+    if (sharedSet.has(m)) {
+      const own = m.clone();
+      const g = greyLook.get(m);
+      if (g) greyLook.set(own, { color: g.color.clone(), roughness: g.roughness, metalness: g.metalness, opacity: g.opacity });
+      for (const b of this.batches) if (b.mesh.material === m) b.mesh.material = own;
+      for (const p of this.parts) if (p.mesh.material === m) p.mesh.material = own;
+      for (const list of [this.wheelParts, this.hubParts]) for (const w of list) for (const wm of w) if (wm.material === m) wm.material = own;
+      this.mats[material] = own;
+      m = own;
+    }
+    this.modLooks.set(material, { ...this.modLooks.get(material), ...look });
+    applyLook(m as THREE.MeshStandardMaterial, look);
+  }
+
+  /** Rebuild the batches after `addModParts` / `setPartMaterial` (one-off, at spawn). */
+  rebatch(): void {
+    if (!this.batchesStale) return;
+    this.batchesStale = false;
+    for (const b of this.batches) {
+      b.mesh.removeFromParent();
+      b.mesh.geometry.dispose();
+    }
+    this.batches.length = 0;
+    this.batchByKey.clear();
+    for (const p of this.parts) {
+      if (!p.batch) continue;
+      p.pos = p.pos.slice();
+      p.batch = null;
+    }
+    this.buildBatches();
+    for (const p of this.parts) if (p.hidden) this.hidePart(p);
+    // Re-skin the new parts on the next update even if the nodes did not move.
+    this.skinnedNodes = null;
+    if (this.ready) this.update(this.restNodes, 0);
+  }
+
+  /** The merged draw of the mesh file's parts made of `material` (null: none). Mod effects that
+   * draw over the body (vinyl overlay) share its skinned geometry. */
+  batchMesh(material: PartMaterial): THREE.Mesh | null {
+    return this.batchByKey.get(material)?.mesh ?? null;
+  }
+
+  /** Merge the non-lens body parts into one mesh per material (see `Batch`); mod parts get
+   * batches of their own (key "mod:<material>"), so the mesh file's batches stay per model. */
+  private buildBatches(): void {
+    const mesh = this.mesh!;
     let cached = batchIndex.get(mesh);
     if (!cached) batchIndex.set(mesh, (cached = new Map()));
-    const groups = new Map<MeshPartJson["material"], PartRT[]>();
+    const groups = new Map<string, PartRT[]>();
     for (const p of this.parts) {
       if (p.def.kind === "light") continue;
-      let g = groups.get(p.def.material);
-      if (!g) groups.set(p.def.material, (g = []));
+      const key = p.mod ? `mod:${p.material}` : p.material;
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = []));
       g.push(p);
     }
-    for (const [material, parts] of groups) {
+    for (const [key, parts] of groups) {
+      const material = parts[0].material;
       let nv = 0;
       let ni = 0;
       for (const p of parts) {
@@ -812,8 +1005,10 @@ export class PanelBody {
       }
       const pos = new Float32Array(nv * 3);
       // The merged index is the same for every car of the model: build it once, copy it per car
-      // (hidden parts are collapsed in the copy).
-      let tmpl = cached.get(material);
+      // (hidden parts are collapsed in the copy). Mod parts and re-materialed parts are this
+      // car's own: their index is built for it alone.
+      const own = parts[0].mod || this.customBatches;
+      let tmpl = own ? undefined : cached.get(key);
       if (!tmpl) {
         const index = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
         let v = 0;
@@ -824,7 +1019,8 @@ export class PanelBody {
           v += p.rest.length / 3;
           i += idx.length;
         }
-        cached.set(material, (tmpl = { index }));
+        tmpl = { index };
+        if (!own) cached.set(key, tmpl);
       }
       const index = tmpl.index.slice();
       let v0 = 0;
@@ -842,13 +1038,14 @@ export class PanelBody {
       geom.setAttribute("position", position);
       geom.setIndex(indexAttr);
       const mesh = new THREE.Mesh(geom, this.mats[material]);
-      mesh.name = `${this.carId}:${material}`;
+      mesh.name = `${this.carId}:${key}`;
       mesh.frustumCulled = false;
       if (material === "glass") mesh.renderOrder = 1;
       this.root.add(mesh);
       const batch: Batch = { mesh, position, index: indexAttr, dirty: false };
       for (const p of parts) p.batch = batch;
       this.batches.push(batch);
+      this.batchByKey.set(key, batch);
     }
   }
 
@@ -978,9 +1175,14 @@ export class PanelBody {
   }
 
   /** Per-part motion at the last update (tests): largest displacement, fold rise and leading-end pull-back, m. */
-  partMotion(name: string): { disp: number; fold: number; pull: number; broken: boolean } | null {
+  partMotion(name: string): { disp: number; fold: number; pull: number; broken: boolean; hidden: boolean } | null {
     const p = this.parts.find((q) => q.def.name === name);
-    return p ? { disp: p.maxDisp, fold: p.maxFold, pull: p.maxPull, broken: p.broken } : null;
+    return p ? { disp: p.maxDisp, fold: p.maxFold, pull: p.maxPull, broken: p.broken, hidden: p.hidden } : null;
+  }
+
+  /** Names of the body parts (mesh file and mods), tests. */
+  partNames(): string[] {
+    return this.parts.map((p) => p.def.name);
   }
 
   /** Light lenses: name, broken, and whether they show the shared head/tail material. */
@@ -1001,7 +1203,7 @@ export class PanelBody {
    * of `material` (`glass`, `headlight`, `taillight`), written to `out`. False when the mesh has
    * none (or is not loaded). Used by the crash effects (render/fx) to burst shards there.
    */
-  materialCentre(region: string | null, material: MeshPartJson["material"], out: THREE.Vector3): boolean {
+  materialCentre(region: string | null, material: PartMaterial, out: THREE.Vector3): boolean {
     let x = 0;
     let y = 0;
     let z = 0;

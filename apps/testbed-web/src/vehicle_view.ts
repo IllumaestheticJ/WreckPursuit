@@ -8,6 +8,7 @@ import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody } from "./render/panels";
+import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
 import { proxyGeoms, styledPaint } from "./render/fleet";
@@ -129,6 +130,10 @@ export class VehicleView {
   private readonly tailMat: THREE.MeshStandardMaterial;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
+  /** Installed mods' parts (scenario `mods`, `entity_visuals_json`); null for stock cars. */
+  readonly build: BuildVisuals | null;
+  /** What was fitted on the panel mesh once it loaded (render/mod_parts.ts). */
+  fitted: FittedBuild | null = null;
   /** Sim-spawned traffic / police car: per-car debug overlays (tire forces, slip colours,
    * suspension bars, CG + velocity) stay off unless it is the focused car, so a promotion does
    * not sprout debug arrows (playtest row 25). */
@@ -237,8 +242,20 @@ export class VehicleView {
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
     this.root.add(this.panels.root);
+    // Sim-spawned traffic / police are stock; scenario cars may carry mods.
+    const build = this.background ? null : sim.entityVisuals(entity);
+    this.build = build && (build.parts.length > 0 || build.mods.length > 0) ? build : null;
     this.panels.whenReady(() => {
+      // Mod parts first, so their wheel pieces are parented with the stock ones below.
+      if (this.build) {
+        this.fitted = fitBuild(this.panels, this.build, this.info.wheels);
+        // Springs move the body relative to the wheels (the sim's wheels stay on the road).
+        this.panels.root.position.z = this.build.ride_height_m;
+        // Smoked lamp covers (re-applied by applyStyle).
+        this.styleVersion = -1;
+      }
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
+      this.wheels.forEach((w, i) => this.panels.hubParts[i].forEach((m) => w.pivot.add(m)));
       this.wheelPartsShown = null;
     });
 
@@ -296,6 +313,7 @@ export class VehicleView {
       this.wheels.forEach((w, i) => {
         const ours = this.panels.wheelParts[i];
         for (const c of w.spin.children) c.visible = ours.includes(c as THREE.Mesh) ? panelsOn : !panelsOn;
+        for (const m of this.panels.hubParts[i]) m.visible = panelsOn;
       });
     }
     if (panelsOn && !this.lodFar) {
@@ -562,8 +580,9 @@ export class VehicleView {
     this.proxyPaint.color.copy(paint);
     this.proxyPaint.roughness = lowpoly ? 1 : 0.55;
     this.proxyPaint.metalness = lowpoly ? 0 : 0.25;
-    this.headMat.color.setHex(lowpoly ? PALETTE.headlight : 0xfff6d0);
-    this.tailMat.color.setHex(lowpoly ? 0x5a1414 : 0x550000);
+    const smoked = this.fitted?.lamps;
+    this.headMat.color.setHex(smoked ? smoked.head : lowpoly ? PALETTE.headlight : 0xfff6d0);
+    this.tailMat.color.setHex(smoked ? smoked.tail : lowpoly ? 0x5a1414 : 0x550000);
     if (this.barRed && this.barBlue) {
       this.barRed.color.setHex(lowpoly ? 0x5a1418 : 0x661018);
       this.barBlue.color.setHex(lowpoly ? 0x141e5a : 0x102266);
