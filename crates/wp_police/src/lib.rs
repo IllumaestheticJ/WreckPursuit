@@ -296,6 +296,10 @@ pub struct PoliceStats {
     pub redispatches: u32,
     /// Blatant speeding right past a unit, recognised at once (`heat.blatant`).
     pub blatant: u32,
+    /// Pursuits started by the unit that witnessed the violation making the racer wanted
+    /// (row 80).
+    #[serde(default)]
+    pub witnessed_pursuits: u32,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
     /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
@@ -355,6 +359,11 @@ pub(crate) struct RacerObs {
     pub(crate) witnessed: bool,
     /// Closest ground unit with line of sight within recognition range.
     pub(crate) spotter: Option<UnitId>,
+    /// Its distance, m (recognition takes longer further out).
+    pub(crate) spotter_m: f32,
+    /// Closest ground unit with line of sight within witness range (it starts the pursuit when
+    /// a violation it sees makes the racer wanted, row 80).
+    pub(crate) witness: Option<UnitId>,
     /// Nearest ground unit distance, m.
     pub(crate) nearest_unit_m: f32,
 }

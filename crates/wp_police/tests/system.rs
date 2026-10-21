@@ -926,7 +926,17 @@ fn unit_cap_holds_responders_back() {
     cfg.presence.response.max_units_by_level = [0; 6];
     let mut h = Harness::with_config(23.0, 11, DamageMode::Arcade, cfg);
     h.run(0.5, &[]);
+    // Pursuit tools (a spike-strip unit) may deploy once the chase starts (since round 12c
+    // the 380 m day sight finds the racer during this drive); they are not responders.
+    let cars = |h: &Harness| {
+        h.police
+            .units()
+            .iter()
+            .filter(|u| u.role != wp_police::UnitRole::Tool)
+            .count()
+    };
     let alive = h.police.units().len();
+    assert_eq!(cars(&h), alive);
     drive_reported(&mut h, 20.0);
     let st = h.police.stats();
     assert!(!st.calls.is_empty());
@@ -937,7 +947,7 @@ fn unit_cap_holds_responders_back() {
         "{:?}",
         st.spawns
     );
-    assert!(h.police.units().len() <= alive);
+    assert!(cars(&h) <= alive);
     // An existing unit was sent (the call goes out with it).
     assert!(
         h.events.iter().any(|e| matches!(

@@ -9,7 +9,9 @@
 
 use std::sync::OnceLock;
 
-use wp_contracts::{load_car, load_mode_table, EntityId, SimEvent, TimeOfDay, VehicleInput};
+use wp_contracts::{
+    load_car, load_mode_table, EntityId, SimEvent, TimeOfDay, VehicleInput, WorldQuery,
+};
 use wp_police::PoliceEvent;
 use wp_sim::{Sim, SimConfig, VehicleKind};
 use wp_world::network::RoadNetwork;
@@ -127,7 +129,19 @@ struct Outcome {
 /// The player comes the other way in the lane left of the cop at `kmh`, passes it, and brakes
 /// to a stop 200 m past it. `parked`: the cop is stopped at its spot first.
 fn pass(city: City, hour: f32, kmh: f32, parked: bool, secs: f32) -> Outcome {
-    let (mut sim, cop) = city_with_patrol(city, hour);
+    let (sim, cop) = city_with_patrol(city, hour);
+    pass_in(sim, cop, kmh, parked, secs)
+}
+
+/// [`pass`] at `over_kmh` over the speed limit where the cop is.
+fn pass_over(city: City, hour: f32, over_kmh: f32, parked: bool, secs: f32) -> (Outcome, f32) {
+    let (sim, cop) = city_with_patrol(city, hour);
+    let (cp, _) = pose(&sim, cop);
+    let limit = sim.world().speed_limit_at(cp).unwrap_or(13.9) * 3.6;
+    (pass_in(sim, cop, limit + over_kmh, parked, secs), limit)
+}
+
+fn pass_in(mut sim: Sim, cop: EntityId, kmh: f32, parked: bool, secs: f32) -> Outcome {
     let (cp, cyaw) = pose(&sim, cop);
     if parked {
         sim.place_on_ground(cop, [cp[0], cp[1]], cyaw, 0.0, Some(cp[2]))
@@ -343,4 +357,31 @@ fn a_legal_pass_by_starts_nothing() {
             );
         }
     }
+}
+
+/// Owner playtest row 80 ("I sped right by a cop and the notice didn't turn into a pursuit"):
+/// a parked cop and an oncoming (patrolling) one, passed at 20, 40 and 80 km/h over the limit,
+/// day and night, grid and Port Vesper v2: the pursuit starts within 1.5 s of the pass.
+#[test]
+fn speeding_past_a_cop_at_20_40_80_over_starts_a_chase_within_1_5_s() {
+    let mut failures = Vec::new();
+    for city in [City::Grid, City::Vesper] {
+        for hour in [12.0, 23.0] {
+            for parked in [true, false] {
+                for over in [20.0, 40.0, 80.0] {
+                    let (o, limit) = pass_over(city, hour, over, parked, 10.0);
+                    let after = o.pursuit_at_s.map(|t| t - o.pass_at_s);
+                    let label = format!(
+                        "{city:?} {hour}:00 {} cop, {over:.0} km/h over a {limit:.0} limit",
+                        if parked { "parked" } else { "oncoming" }
+                    );
+                    eprintln!("PASSBY {label}: pursuit {after:?} s after the pass");
+                    if !after.is_some_and(|a| a <= 1.5) {
+                        failures.push(format!("{label}: pursuit {after:?} s after the pass"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }

@@ -181,6 +181,26 @@ impl PoliceSystem {
                 level: after,
             });
         }
+        // Row 80: the unit that saw it acts on it. A violation it witnessed that makes the
+        // racer wanted starts the pursuit at once, day or night (recognition_time_s is only
+        // for a wanted car a unit runs into later).
+        if let Some(unit) = obs.witness {
+            if after > WantedLevel::None && !self.racers[&racer].pursued() {
+                self.stats.witnessed_pursuits += 1;
+                let desc = self.racer_desc(racer);
+                self.radio(RadioCue::new(
+                    RadioTier::Critical,
+                    Some(unit),
+                    format!(
+                        "Unit {}, I just watched {desc} {}, I'm on it.",
+                        unit.0,
+                        offence_text(kind)
+                    ),
+                ));
+                self.start_pursuit(racer, unit);
+                return;
+            }
+        }
         if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
             // violation's position, so a unit is sent to look (a camera alone never sends
@@ -237,6 +257,7 @@ impl PoliceSystem {
         before: WantedLevel,
     ) -> bool {
         let b = self.cfg.heat.heat.blatant.clone();
+        let sight = self.cfg.heat.heat.sight.clone();
         let r = &self.racers[&racer];
         let (rp, rz) = (xy(r.pos), r.pos[2]);
         let mut best: Option<(f32, usize)> = None;
@@ -251,6 +272,7 @@ impl PoliceSystem {
             let d = dist(u.body.pos, rp);
             if d <= b.range_m
                 && best.is_none_or(|x| d < x.0)
+                && crate::pursuit::in_view(u.body.heading, u.body.pos, rp, d, &sight)
                 && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rz)
             {
                 best = Some((d, i));
@@ -2615,5 +2637,16 @@ impl PoliceSystem {
         self.reinforcements.retain(|r| r.racer != racer);
         self.helo_requests.retain(|h| h.racer != racer);
         self.remove_tools_for(Some(racer));
+    }
+}
+
+/// A violation in a radio line ("running a red").
+fn offence_text(kind: &ViolationKind) -> &'static str {
+    match kind {
+        ViolationKind::Speeding { .. } => "speeding past me",
+        ViolationKind::RedLight => "run a red",
+        ViolationKind::WrongWay => "going the wrong way",
+        ViolationKind::Collision => "hit a car",
+        ViolationKind::Reckless => "driving like a maniac",
     }
 }

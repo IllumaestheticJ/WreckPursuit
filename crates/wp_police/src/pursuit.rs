@@ -97,6 +97,23 @@ const RESPOND_YIELD_SHIFT_M: f32 = 1.2;
 /// How far ahead a responder looks for a junction to meet a reported racer at, s.
 const RESPOND_HORIZON_S: f32 = 12.0;
 
+/// Whether a unit at `pos` facing `heading` has the point `p` (`d` m away) in its field of view
+/// (row 89): inside the forward cone, or close enough to see all round.
+pub(crate) fn in_view(
+    heading: [f32; 2],
+    pos: [f32; 2],
+    p: [f32; 2],
+    d: f32,
+    sight: &crate::config::SightConfig,
+) -> bool {
+    if d <= sight.all_round_m || sight.fov_deg >= 360.0 {
+        return true;
+    }
+    let half = sight.fov_deg * 0.5 * (std::f32::consts::PI / 180.0);
+    let to = sub(p, pos);
+    dot(heading, to) >= wp_math::sin_cos(half).1 * d
+}
+
 /// Pursuit speed: `min(max(target × (1 + margin), floor), cap)`. The floor (10 m/s) lets units
 /// close on a stopped racer for the arrest.
 pub fn pursuit_speed_cap(target_speed: f32, margin: f32, cap: f32) -> f32 {
@@ -130,6 +147,7 @@ impl PoliceSystem {
         let witness = self.cfg.heat.heat.witness_range_m.get(self.phase);
         let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
         let helo_range = self.cfg.tools.helicopter.los_range_m.get(self.phase);
+        let sight = self.cfg.heat.heat.sight.clone();
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for id in ids {
             let p = xy(self.racers[&id].pos);
@@ -139,6 +157,7 @@ impl PoliceSystem {
                 ..Default::default()
             };
             let mut best_spot = f32::INFINITY;
+            let mut best_witness = f32::INFINITY;
             for u in &self.units {
                 if u.wrecked {
                     continue;
@@ -150,14 +169,22 @@ impl PoliceSystem {
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
-                        if d <= los_range && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz) {
+                        if d <= los_range
+                            && in_view(u.body.heading, u.body.pos, p, d, &sight)
+                            && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz)
+                        {
                             // Recognition (pursuit start) and witnessing (full violation heat)
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
-                            o.witnessed |= d <= witness;
+                            if d <= witness && d < best_witness {
+                                o.witnessed = true;
+                                best_witness = d;
+                                o.witness = Some(u.id);
+                            }
                             if d <= recognise && d < best_spot {
                                 best_spot = d;
                                 o.spotter = Some(u.id);
+                                o.spotter_m = d;
                             }
                         }
                     }
@@ -246,10 +273,20 @@ impl PoliceSystem {
                 Some(RuleOutcome::Captured) => self.end_pursuit(id, PursuitOutcome::Captured),
                 None => {}
             }
-            // A unit that keeps a wanted racer in recognition range long enough starts a pursuit.
+            // A unit that keeps a wanted racer in recognition range long enough starts a pursuit
+            // (longer further out; out of sight the timer drains instead of resetting, row 80).
+            let rc = &self.cfg.heat.heat.recognition;
             let acc = self.recognition_s.entry(id).or_insert(0.0);
-            *acc = if o.spotter.is_some() { *acc + tdt } else { 0.0 };
-            let recognised = *acc >= self.cfg.heat.heat.recognition_time_s.get(self.phase);
+            *acc = if o.spotter.is_some() {
+                *acc + tdt
+            } else {
+                (*acc - rc.decay_per_s * tdt).max(0.0)
+            };
+            let range = self.cfg.heat.heat.recognition_range_m.get(self.phase);
+            let far = ((o.spotter_m - rc.near_m) / (range - rc.near_m).max(1.0)).clamp(0.0, 1.0);
+            let needed =
+                self.cfg.heat.heat.recognition_time_s.get(self.phase) + rc.far_extra_s * far;
+            let recognised = o.spotter.is_some() && *acc >= needed;
             let rec = &self.racers[&id];
             if !rec.pursued() && rec.level > WantedLevel::None && recognised {
                 if let Some(spotter) = o.spotter {
@@ -1239,7 +1276,17 @@ impl PoliceSystem {
                 let (s, lat) = if near {
                     track.project(u.body.pos, racer_s, NEAR_RACER_M)
                 } else {
-                    track.project(u.body.pos, hint, 200.0)
+                    // The closer of the projection from its own progress and the one the
+                    // intercept branch joins on (from the racer's end of the trail): they
+                    // disagreed for a unit 50 m behind a stopped racer, which then flipped
+                    // between Pursue and Intercept every think step and never moved.
+                    let own = track.project(u.body.pos, hint, 200.0);
+                    let back = track.project(u.body.pos, racer_s, 200.0);
+                    if back.1 < own.1 {
+                        back
+                    } else {
+                        own
+                    }
                 };
                 pursuers.push((racer_s - s, lat, i));
             }

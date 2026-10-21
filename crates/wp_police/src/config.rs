@@ -149,6 +149,37 @@ pub struct HeatConfig {
     pub assault: AssaultConfig,
     /// Blatant speeding right past a unit (owner playtest row 60).
     pub blatant: BlatantConfig,
+    /// What a ground unit can see (owner playtest row 89).
+    pub sight: SightConfig,
+    /// How long recognising a wanted car takes (owner playtest rows 80 / 89).
+    pub recognition: RecognitionConfig,
+}
+
+/// A ground unit's field of view (owner playtest row 89, "if I can see them, they can see
+/// me"): line of sight within the phase's range, in a forward cone (the windscreen and side
+/// windows) and all round close by (mirrors, a glance over the shoulder).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SightConfig {
+    /// Width of the forward cone, degrees (360 = all round).
+    pub fov_deg: f32,
+    /// Seen in any direction this close, m.
+    pub all_round_m: f32,
+}
+
+/// Recognising an already-wanted car a unit did not see offend (rows 80 / 89):
+/// `recognition_time_s` within `near_m`, rising linearly by `far_extra_s` to the edge of
+/// `recognition_range_m`. Losing sight drains the timer at `decay_per_s` instead of resetting
+/// it, so a one-frame line-of-sight drop costs nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecognitionConfig {
+    /// Recognition takes `recognition_time_s` this close, m.
+    pub near_m: f32,
+    /// Extra seconds at the edge of the recognition range.
+    pub far_extra_s: f32,
+    /// Seconds of the recognition timer lost per second out of sight.
+    pub decay_per_s: f32,
 }
 
 /// Speeding far over the limit right past a unit that can see it is recognised at once, day or
