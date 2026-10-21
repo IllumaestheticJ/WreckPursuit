@@ -45,7 +45,11 @@ pub struct RaceConfig {
     pub laps: u32,
     /// Physics ticks between AI decisions (4 = 60 Hz).
     pub decision_ticks: u32,
-    /// Racers may abandon the race and run from the police.
+    /// Racers may give up on the police: abandon the race and run (at their
+    /// `flee_wanted_level`), or pull over when a unit is right on them. Off by default — the
+    /// owner's rule (2026-10-21): a racer in a race never gives up; it keeps racing and evading
+    /// until the police actually capture it or it is wrecked / DNF'd. Racers already out of
+    /// the race (finished, disqualified) still pull over either way.
     pub allow_abandon: bool,
     /// Touching a civilian disqualifies the racer (always true in the game; tests may relax it).
     pub civilian_contact_dq: bool,
@@ -75,7 +79,7 @@ impl Default for RaceConfig {
         Self {
             laps: 3,
             decision_ticks: 4,
-            allow_abandon: true,
+            allow_abandon: false,
             civilian_contact_dq: true,
             cooldown_speed_mps: 12.0,
             seed: 1,
@@ -396,8 +400,6 @@ struct Racer {
     get_run: Option<Who>,
     /// Seconds a chasing unit has been within [`YIELD_RADIUS_M`] (wanted below flee level).
     yield_s: f32,
-    /// Time crawling with a chasing unit right on me (pinned), s.
-    pinned_s: f32,
     /// Seconds since the flight route was last planned.
     replan_s: f32,
     /// Fleeing racer that lost the police.
@@ -578,11 +580,6 @@ const PARK_MIN_RADIUS_M: f32 = 35.0;
 
 /// Minimum time between flight re-plans, s.
 const FLIGHT_REPLAN_S: f32 = 6.0;
-/// A racer crawling (< 1.5 m/s) this long with a chasing unit within [`PINNED_RADIUS_M`] is
-/// pinned and pulls over whatever its wanted level, s.
-const PINNED_AFTER_S: f32 = 3.0;
-/// See [`PINNED_AFTER_S`], m.
-const PINNED_RADIUS_M: f32 = 10.0;
 /// Drivers below this risk stop for red lights on open roads; the others go through a red
 /// only when the junction is clear.
 pub const RED_LIGHT_RISK: f32 = 0.35;
@@ -761,7 +758,6 @@ impl Field {
                 alongside_s: 0.0,
                 get_run: None,
                 yield_s: 0.0,
-                pinned_s: 0.0,
                 replan_s: 0.0,
                 escaped: false,
                 junction_wait_s: 0.0,
@@ -1367,6 +1363,18 @@ impl Field {
             .iter()
             .fold(f32::INFINITY, |m, p| m.min(geom::dist(*p, r.pos)));
         match r.status {
+            // Owner's rule (2026-10-21, `RaceConfig::allow_abandon` off): a racer in a race
+            // never gives up — it neither abandons the race nor pulls over, at any wanted
+            // level; it keeps racing and evading until the police actually capture it
+            // (police-side capture rules) or it is wrecked / DNF'd. A racer already out of the
+            // race (finished, disqualified) pulls over as before.
+            RacerStatus::Racing if !self.config.allow_abandon => {
+                r.yield_s = 0.0;
+                if r.tactic == Tactic::Yield {
+                    r.tactic = Tactic::Rejoin;
+                    r.tactic_ticks = 0;
+                }
+            }
             RacerStatus::Racing
                 if self.config.allow_abandon && lvl >= r.params.flee_wanted_level =>
             {
@@ -1387,27 +1395,7 @@ impl Field {
                         r.tactic_ticks = 0;
                         r.yield_s = 0.0;
                     }
-                } else if lvl > 0 && chased && nearest < YIELD_RADIUS_M && {
-                    // Street racers do not pull over for one unit mid-race: a racer still in
-                    // the race keeps racing at L1-L2 (a careful one yields from L2), and
-                    // yields from L3 or once pinned (crawling with the unit right on it).
-                    // Done racing (finished / disqualified): pulls over as before.
-                    if r.status == RacerStatus::Racing {
-                        if r.v.abs() < 1.5 && nearest < PINNED_RADIUS_M {
-                            r.pinned_s += dt;
-                        } else {
-                            r.pinned_s = 0.0;
-                        }
-                        let yield_level = if r.profile.risk < RED_LIGHT_RISK {
-                            2
-                        } else {
-                            3
-                        };
-                        lvl >= yield_level || r.pinned_s >= PINNED_AFTER_S
-                    } else {
-                        true
-                    }
-                } {
+                } else if lvl > 0 && chased && nearest < YIELD_RADIUS_M {
                     r.yield_s += dt;
                     if r.yield_s >= YIELD_AFTER_S && r.tactic != Tactic::Park {
                         r.tactic = Tactic::Yield;
