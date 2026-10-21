@@ -17,7 +17,7 @@
 // ?mods=wheels_forged,aero_wing_1 installs mods on the player car (else the build saved for that
 // car in the mod shop).
 import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { DRAW_STRIDE, META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
   actionHeld,
@@ -466,6 +466,7 @@ async function main(): Promise<void> {
     // that appear later never wait for their mesh (playtest row 25).
     lod.models = sim.sessionCarModels();
     void preloadCarMeshes(lod.models.cars);
+    if (sim.lodDrawStride() !== DRAW_STRIDE) console.error(`wasm draw records have ${sim.lodDrawStride()} floats, layout.ts expects ${DRAW_STRIDE}: rebuild the wasm package`);
     lod.log.reset(0);
     syncViews();
     const ids = sim.entities();

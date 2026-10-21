@@ -153,22 +153,54 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
             p.id
         );
     }
+    // Highest firing frequency any recorded engine loop can reach without being stretched past
+    // 3.6x (`recorded_engine_layers_follow_the_cars_firing_frequency`). An engine that fires
+    // above it at its redline (fulmine_v10: an 8500 rpm V10) keeps the procedural engine, which
+    // follows any pitch, until a recording that high exists.
+    use wp_audio::data::RpmAnchor;
+    use wp_contracts::load_car;
+    let reach_hz = lib
+        .packs
+        .values()
+        .flat_map(|p| p.engine_layers.iter())
+        .filter_map(|l| match l.anchor {
+            RpmAnchor::FiringHz(hz) => Some(hz),
+            _ => None,
+        })
+        .fold(0.0f32, f32::max)
+        * 3.6;
+    let is_rec = |pack: &str| pack.ends_with("_rec") || pack.contains("_rec_");
     for car in lib.cars.values() {
-        for pack in [&car.engine_pack, &car.world_pack] {
-            let recorded = pack.ends_with("_rec") || pack.contains("_rec_");
-            // The one exception (owner 0.12.34, police "singing / laughing"): a police car whose
-            // recorded engine twin would pitch a loop above MAX_RECORDED_PITCH uses the
-            // procedural twin until a recording covers its rev range.
-            let police_exception = pack == &car.engine_pack
-                && car.siren.is_some()
-                && recorded_twin_top_pitch(&lib, &car.id, pack)
-                    .is_some_and(|p| p > MAX_RECORDED_PITCH);
+        let def =
+            load_car(audio_dir().join(format!("../cars/{}.json", car.id))).expect("car loads");
+        let redline_hz = car.engine.firing_hz(def.def.engine.redline_rpm);
+        // Owner 0.12.34 (police "singing / laughing"): a police car whose recorded engine twin
+        // would pitch a loop above MAX_RECORDED_PITCH uses the procedural twin until a
+        // recording covers its rev range.
+        let police_exception = car.siren.is_some()
+            && recorded_twin_top_pitch(&lib, &car.id, &car.engine_pack)
+                .is_some_and(|p| p > MAX_RECORDED_PITCH);
+        if redline_hz > reach_hz {
             assert!(
-                recorded || police_exception,
-                "cars/{}: {pack} is not a recorded pack",
+                !is_rec(&car.engine_pack),
+                "cars/{}: fires at {redline_hz:.0} Hz at redline, beyond the recordings' \
+                 {reach_hz:.0} Hz: use a procedural engine pack",
                 car.id
             );
+        } else if !police_exception {
+            assert!(
+                is_rec(&car.engine_pack),
+                "cars/{}: {} is not a recorded pack",
+                car.id,
+                car.engine_pack
+            );
         }
+        assert!(
+            is_rec(&car.world_pack),
+            "cars/{}: {} is not a recorded pack",
+            car.id,
+            car.world_pack
+        );
         // Police sirens play recordings too (owner: "sirens seem unrealistic — use real
         // sounds"); the synth is only their fallback.
         if let Some(siren) = &car.siren {

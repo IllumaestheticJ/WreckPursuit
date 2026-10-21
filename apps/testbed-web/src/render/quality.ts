@@ -11,9 +11,11 @@
 //         the resolution down while frames stay slow (and back up when they are fast again),
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
-//         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance, full
-//         car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m, promoted
-//         cars past 60 m drawn by the fleet, 20 % rain, governor down to 0.3× (target 30 fps).
+//         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance,
+//         mid-LOD car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m,
+//         promoted traffic / police always drawn by the fleet (only the player and AI racers
+//         keep their full per-panel view), 20 % rain, governor down to 0.3× (target 30 fps).
+// Car LOD on every profile: see VIEW_DRAW_M below.
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
@@ -113,14 +115,22 @@ interface Profile {
   cityTileM: number;
 }
 
+/**
+ * Car LOD (every profile): the player and AI racers always draw their full detailed per-panel
+ * view; promoted traffic / police cars draw theirs within VIEW_DRAW_M of the camera (the cars
+ * you see crumple; handed to the instanced fleet past VIEW_DRAW_M + render/lod.ts
+ * VIEW_LOD_BAND_M, back within VIEW_DRAW_M), touch: never (the phone is draw-call bound).
+ * Everything the fleet / parked props draw uses the mid-LOD mesh within `fullLodM` and the
+ * low proxy beyond. */
+const VIEW_DRAW_M = 30;
+
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: VIEW_DRAW_M, signalM: 450, cityDetailM: Infinity, cityTileM: CITY_TILE_M };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
-  // car meshes and lamps matter more than pixels). Full car meshes within 150 m, traffic and
-  // parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no invisible
-  // collisions), street lamps within 450 m, promoted traffic / police past 80 m drawn by the
-  // fleet.
+  // car meshes and lamps matter more than pixels). Mid-LOD car meshes within 120 m (proxies
+  // beyond), parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no
+  // invisible collisions), street lamps within 450 m.
   const low = {
     ...common,
     antialias: false,
@@ -131,10 +141,9 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
     drawM: 900,
     adaptive: false,
     trafficM: 600,
-    fullLodM: 150,
+    fullLodM: 120,
     propProxyM: 150,
     lampDrawM: 450,
-    viewDrawM: 80,
     // Signal heads within 250 m (a lamp is ~2 px there), kerbs / lot skirts / corner fills
     // within 250 m (city_tiles.ts CITY_DETAIL).
     signalM: 250,
@@ -145,7 +154,7 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   // Touch: 640 m city tiles (render budget, lead/main-sync): with the 600 m draw distance a
   // 320 m tile grid put ~10 tiles of every city material in view (one draw call each); the
   // phone is draw-call bound (budget 300) and has triangle headroom, so fewer, bigger tiles.
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60, cityTileM: 2 * CITY_TILE_M };
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 0, cityTileM: 2 * CITY_TILE_M };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
   // resizes the canvas and the post targets, a long hitch under a software rasterizer. Rain at
   // 20 % there (30 % cost ~25 ms a frame, browser-perf.md round 12b).

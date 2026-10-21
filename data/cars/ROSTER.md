@@ -12,7 +12,7 @@
 | Ironside 440 | `ironside_440` | Muscle | RWD | 1695 | 216 | 127 | 7.7 | 220 | 0.71 | 450 | 4 | 38,000 | vintage_bias |
 | Sperber 32 | `sperber_32` | Sport | RWD | 1602 | 248 | 155 | 5.8 | 279 | 0.99 | 602 | 3 | 36,000 | sport |
 | Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 34,000 | sport |
-| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.02 | 692 | 1 | 120,000 | sport |
+| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.03 | 694 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
 | Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
 | Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
@@ -29,7 +29,10 @@
 | Brigand 400 | `brigand_400` | Muscle | RWD | 1990 | 176 | 88 | 9.1 | 202 | 0.69 | 403 | 4 | 23,500 | vintage_bias |
 | Talus 2.0T | `talus_20t` | Sport | AWD 45/55 | 1386 | 206 | 149 | 5.6 | 246 | 0.99 | 599 | 3 | 38,000 | sport |
 | Tumbril 2.0 | `tumbril_20` | Truck | FWD | 1845 | 85 | 46 | 15.6 | 147 | 0.78 | 315 | 3 | 20,000 | street |
-| Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
+| Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 832 | 3 | 125,000 | sport |
+| Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 155 | 83 | 8.6 | 207 | 0.91 | 455 | 4 | 26,000 | police_pursuit |
+| Sentinel Vigil | `sentinel_vigil` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
+| Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.01 | 668 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 
 Estimates come from `tools/specsheet/estimate.py` (point-mass model; see its docstring).
