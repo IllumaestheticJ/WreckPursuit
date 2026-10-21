@@ -24,6 +24,9 @@ fn car(id: &str) -> LoadedCar {
 
 #[test]
 fn countersteer_limit_stops_the_snap_back_spin_and_keeps_the_hold() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     let a = reference_assists();
     car_lab::set_override(Some(CarTune::spin_candidate()));
     // Steps 1–9 had no held-key slide lock (grip-balance added it in "new" later): "before"

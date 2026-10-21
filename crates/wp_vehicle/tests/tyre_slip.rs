@@ -49,6 +49,9 @@ fn hold(c: &LoadedCar) -> (f32, f32, f32, bool, u64) {
 
 #[test]
 fn spin_model_holds_the_clip_1_drift_where_the_ellipse_spins() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     let _lab = LAB.lock().unwrap_or_else(|e| e.into_inner());
     let c = car("parity_rwd_d");
     plain::set_override(Some(PlainSteer::default()));
@@ -118,6 +121,9 @@ fn launch_yaw(c: &LoadedCar, slope_deg: f32) -> f32 {
 
 #[test]
 fn launches_straight_on_a_cambered_road() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // Owner (Drift Lab W): "spins off the line, TCS off, no steering"; the reference smokes
     // the rears dead straight. With the old friction ellipse (side floor 0) a rear spinning at
     // κ ≈ 6–8 has almost no side force, so a 2° road slope swings the tail out. The shipped

@@ -853,9 +853,15 @@ mod tests {
         assert_eq!(r.lateral.d, t.lateral.d);
         f.apply_tire(&mut r, 2, &DriveLayout::Fwd);
         assert!((r.lateral.d - 0.9 * t.lateral.d).abs() < 1e-6);
-        // Per-car fixes: only the listed cars, only with `car_fixes`.
-        assert!(GripBalance::lab_default().fix_for("debug_coupe").is_some());
-        assert!(GripBalance::lab_default().fix_for("shiro_turbo").is_none());
+        // Per-car fixes: only the listed cars, only with `car_fixes` (off in the lab default:
+        // the fixes are in data/cars since the unify).
+        let fixes = GripBalance {
+            car_fixes: true,
+            ..GripBalance::lab_default()
+        };
+        assert!(GripBalance::lab_default().fix_for("debug_coupe").is_none());
+        assert!(fixes.fix_for("debug_coupe").is_some());
+        assert!(fixes.fix_for("shiro_turbo").is_none());
         assert!(GripBalance::default().fix_for("debug_coupe").is_none());
         // The held-key slide lock: countersteer deep in a slide, once the key is held 0.8 s
         // (past 0.5 s + the 0.3 s phase-in); a fresh tap keeps the plain lock.

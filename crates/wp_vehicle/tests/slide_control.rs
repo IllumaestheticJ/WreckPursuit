@@ -33,6 +33,9 @@ fn exit(id: &str, a: &AssistProfile, style: DriverStyle, lat_g: f32, react: f32)
 
 #[test]
 fn keyboard_power_oversteer_exit_is_recoverable() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // TCS on only. With TCS Off the throttle is raw (owner row 104) and, as in the reference,
     // letting go of the steering mid-slide with the throttle floored makes the car spin
     // (docs/reference/wreckfest-keyboard.md "Letting go of the steering mid-drift"), so the
@@ -74,6 +77,9 @@ fn recovered(id: &str, a: &AssistProfile, style: DriverStyle) -> usize {
 
 #[test]
 fn release_the_keys_recovery_grows_with_the_slider() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // The slider at 0 / 50 / 100 %: keyboard with TCS/ESC off (the slide help's own case) and
     // the gamepad preset. Measured (recovered of 6 per car, rampart / lucciola / hakone /
     // sperber): keyboard 0/1/1/3 → 1/0/4/3 → 6/4/5/6, gamepad 2/2/2/3 → 3/3/4/5 → 6/6/6/6.
@@ -120,6 +126,9 @@ fn release_the_keys_recovery_grows_with_the_slider() {
 
 #[test]
 fn self_aligning_steering_does_not_wobble_a_keyboard_corner() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // A tapped key on a 40 m circle at 0.6 g: the yaw-rate spread with the help on is no
     // larger than with it off (measured 0.18–0.25 rad/s on, 0.21–0.25 off), and the car
     // stays on the line.
@@ -146,6 +155,9 @@ fn self_aligning_steering_does_not_wobble_a_keyboard_corner() {
 
 #[test]
 fn wheel_profile_is_bit_identical_to_the_plain_model() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // Hashes first recorded on main (612e036) before the slide assists existed; re-recorded
     // [bless] on ws/vehicle (2026-10-19) when the differential model replaced the old LSD
     // (a drivetrain change, not a slide-code change), and again [bless] in round 12b (ride
@@ -160,11 +172,13 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // Re-recorded [bless] for the ground-probe tilt fix (`ground::discount_tilt`: a rolled
     // body's probe cylinder no longer hands smooth road to the sweep; a ground-contact change,
     // not a slide-code change).
+    // Re-recorded [bless] lucciola_350 for the unify: its per-car fix moved into data/cars
+    // (rear springs × 0.65 with the ride height kept, yaw inertia × 1.2; a car-data change).
     let cases = [
         ("rampart_50", 0.5, 0.3, 0x8a3f232189b4d668_u64),
         ("rampart_50", 0.7, 0.8, 0x07e331d34bf80532),
-        ("lucciola_350", 0.5, 0.3, 0x32b14ede541264cc),
-        ("lucciola_350", 0.7, 0.8, 0x036113d85f8d3256),
+        ("lucciola_350", 0.5, 0.3, 0xab36bbeebaf7cf1c),
+        ("lucciola_350", 0.7, 0.8, 0xbffb037f974823bc),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock
@@ -189,6 +203,9 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
 
 #[test]
 fn keyboard_catches_a_slide_above_100_kmh() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // A sudden yaw kick at 110 / 130 km/h (a nudge from traffic), the driver countersteers
     // with keys. Main spun 7 of 12 such cases with TCS/ESC off; now all are caught (the
     // speed-sensitive lock opens toward the countersteer a slide needs).

@@ -41,6 +41,24 @@ fn shipped_physics_on_every_car_steering_aids_on_player_cars_only() {
     let a = AssistProfile::ai();
     let player = drive(&c, &a, true);
     let ai = drive(&c, &a, false);
+    // A bare rig nobody marked: the physics with the normal steering model (as AI).
+    let bare = {
+        let mut rig = Rig::new(&c);
+        rig.teleport([0.0; 3], 0.0, 60.0 / 3.6, 0.0);
+        for t in 0..720 {
+            rig.step(
+                &VehicleInput {
+                    steer: -1.0,
+                    throttle: 0.8,
+                    handbrake: if (240..360).contains(&t) { 1.0 } else { 0.0 },
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        rig.state_hash()
+    };
+    assert_eq!(bare, ai, "an unmarked rig drives like an AI car");
     assert_ne!(player, ai, "the plain steering changes the player's drive");
     // AI = the shipped physics without the plain steering.
     lab_scope::set_plain_off(true);

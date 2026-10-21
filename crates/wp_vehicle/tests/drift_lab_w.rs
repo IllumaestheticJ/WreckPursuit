@@ -38,6 +38,9 @@ fn steer_after(c: &LoadedCar, speed: f32, steer: f32, ticks: usize) -> (Rig, f32
 
 #[test]
 fn parity_cars_match_the_reference_specs() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     // (id, kW, N·m, kg, gears, rwd)
     for (id, kw, nm, kg, gears, rwd) in [
         ("parity_rwd_a", 345.0f32, 793.0f32, 1369.0f32, 5usize, true),
@@ -77,6 +80,9 @@ fn parity_cars_match_the_reference_specs() {
 
 #[test]
 fn plain_rack_reaches_full_lock_in_t_full_and_returns_in_t_return() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     plain_on();
     let c = car("parity_rwd_d");
     let max = c.def.wheels[0].max_steer_rad;
@@ -105,6 +111,9 @@ fn plain_rack_reaches_full_lock_in_t_full_and_returns_in_t_return() {
 
 #[test]
 fn plain_lock_shrinks_with_speed() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     plain_on();
     let c = car("parity_rwd_d");
     let max = c.def.wheels[0].max_steer_rad;
@@ -117,6 +126,9 @@ fn plain_lock_shrinks_with_speed() {
 
 #[test]
 fn plain_throttle_is_raw() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     plain_on();
     let c = car("parity_rwd_d");
     let mut rig = Rig::new(&c);
@@ -135,6 +147,9 @@ fn plain_throttle_is_raw() {
 
 #[test]
 fn ride_lab_default_calms_the_roll_without_bottoming() {
+    // Written against the pre-unify stock path: `None` overrides = the car data
+    // (`wp_vehicle::lab_scope`; process-wide, every test in this binary sets it).
+    wp_vehicle::lab_scope::set_legacy(true);
     use wp_vehicle::ride_lab::{ride_model, RideTune};
     for id in [
         "parity_rwd_d",

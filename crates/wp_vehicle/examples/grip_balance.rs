@@ -20,7 +20,7 @@ use wp_vehicle::drift_lab_w::{
 };
 use wp_vehicle::grip_lab::{self, GripBalance};
 use wp_vehicle::math::{atan2, V3};
-use wp_vehicle::plain::{self, PlainSteer};
+use wp_vehicle::plain;
 use wp_vehicle::ride_lab::{self, RideTune};
 use wp_vehicle::rig::Rig;
 

@@ -83,7 +83,7 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 /// shipped default; `null` when plain steering is off or in legacy mode), JSON.
 #[wasm_bindgen]
 pub fn plain_steer_json() -> String {
-    json(&wp_vehicle::lab_scope::plain(true))
+    json(&wp_vehicle::lab_scope::plain(Some(true)))
 }
 
 /// The shipped plain steering constants (`wp_vehicle::lab_scope::shipped_plain`), JSON.
@@ -178,7 +178,7 @@ pub fn parity_car_ids() -> String {
 /// data as is, legacy mode only), JSON.
 #[wasm_bindgen]
 pub fn ride_tune_json() -> String {
-    json(&wp_vehicle::lab_scope::ride(true))
+    json(&wp_vehicle::lab_scope::ride())
 }
 
 /// `{ "data": <no scaling>, "lab": <step 3 default, the "before">, "slow_weight": <clip-4
@@ -238,7 +238,7 @@ pub fn ride_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 /// data, legacy mode only), JSON.
 #[wasm_bindgen]
 pub fn car_tune_json() -> String {
-    json(&wp_vehicle::lab_scope::car(true))
+    json(&wp_vehicle::lab_scope::car())
 }
 
 /// `{ "data": <no change>, "spin_damper": <step-4 test set — does not hold>, "spin": <tyre-slip spin model>, "spin_lock": <+ drift lock / front falloff>, "spin_vr_plain": <PlainSteer of the "drift: spin + VR (test)" preset>, "transition_plain": <PlainSteer of the "transition: swing rack (test)" preset>, "spin_v2": <spin model v2 (ellipse)>, "spin_v2_plain": <its steering> }`, JSON.
@@ -260,7 +260,7 @@ pub fn car_tune_defaults_json() -> String {
 /// legacy mode only), JSON.
 #[wasm_bindgen]
 pub fn grip_balance_json() -> String {
-    json(&wp_vehicle::lab_scope::grip(true))
+    json(&wp_vehicle::lab_scope::grip())
 }
 
 /// `{ "before": <the data as is>, "new": <the lab's new balance>, "step2": <step 2's set>,

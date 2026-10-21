@@ -62,25 +62,34 @@ pub fn shipped_plain() -> crate::plain::PlainSteer {
     }
 }
 
-/// The plain steering for a vehicle whose player-input flag is `player`: the lab override,
-/// else [`shipped_plain`]. `None` for AI-driven vehicles,
-/// with [`set_plain_off`], or in [`legacy`] mode without an override.
-pub fn plain(player: bool) -> Option<crate::plain::PlainSteer> {
-    if !player || plain_off() {
+/// The plain steering for a vehicle whose player-input flag is `player`
+/// ([`crate::vehicle::Vehicle::set_player_input`]):
+/// - `Some(true)` (a player's car in `wp_sim`): the lab override, else [`shipped_plain`];
+/// - `Some(false)` (AI, police, traffic, harness drivers): `None`;
+/// - `None` (a bare vehicle / rig no sim manages: tests, lab tools): only the lab override, so
+///   physics tests with analog inputs keep the normal steering model.
+///
+/// Always `None` with [`set_plain_off`]; [`legacy`] drops the shipped fallback.
+pub fn plain(player: Option<bool>) -> Option<crate::plain::PlainSteer> {
+    if plain_off() {
         return None;
     }
-    crate::plain::active().or_else(|| (!legacy()).then(shipped_plain))
+    match player {
+        Some(false) => None,
+        Some(true) => crate::plain::active().or_else(|| (!legacy()).then(shipped_plain)),
+        None => crate::plain::active(),
+    }
 }
 
 /// The ride tuning (every vehicle): the lab override, else the shipped
 /// [`crate::ride_lab::RideTune::firm`] (`None` = the data as is, [`legacy`] only).
-pub fn ride(_player: bool) -> Option<crate::ride_lab::RideTune> {
+pub fn ride() -> Option<crate::ride_lab::RideTune> {
     crate::ride_lab::active().or_else(|| (!legacy()).then(crate::ride_lab::RideTune::firm))
 }
 
 /// The car / tyre tuning (every vehicle): the lab override, else the shipped
 /// [`crate::car_lab::CarTune::shipped`] (`None` = the data as is, [`legacy`] only).
-pub fn car(_player: bool) -> Option<crate::car_lab::CarTune> {
+pub fn car() -> Option<crate::car_lab::CarTune> {
     crate::car_lab::active().or_else(|| (!legacy()).then(crate::car_lab::CarTune::shipped))
 }
 
@@ -88,13 +97,13 @@ pub fn car(_player: bool) -> Option<crate::car_lab::CarTune> {
 /// [`crate::grip_lab::GripBalance::shipped`] (`None` = the data as is, [`legacy`] only). Its
 /// steering parts (smart lock, slide lock) only act through the plain steering, so only on
 /// player cars.
-pub fn grip(_player: bool) -> Option<crate::grip_lab::GripBalance> {
+pub fn grip() -> Option<crate::grip_lab::GripBalance> {
     crate::grip_lab::active().or_else(|| (!legacy()).then(crate::grip_lab::GripBalance::shipped))
 }
 
 /// The drift tuning ([`crate::drift::tuning`]): the override, else the defaults. Every
 /// vehicle.
-pub fn drift(_player: bool) -> crate::drift::DriftTuning {
+pub fn drift() -> crate::drift::DriftTuning {
     crate::drift::tuning()
 }
 
@@ -105,9 +114,10 @@ mod tests {
     #[test]
     fn shipped_defaults_and_player_only_steering() {
         // (Process-wide; the lib's other unit tests never turn legacy or plain-off on.)
-        assert!(plain(true).is_some() && plain(false).is_none());
-        assert_eq!(ride(false), Some(crate::ride_lab::RideTune::firm()));
-        assert_eq!(car(false), Some(crate::car_lab::CarTune::shipped()));
-        assert_eq!(grip(false), Some(crate::grip_lab::GripBalance::shipped()));
+        assert!(plain(Some(true)).is_some() && plain(Some(false)).is_none());
+        assert!(plain(None).is_none(), "a bare rig: only a lab override");
+        assert_eq!(ride(), Some(crate::ride_lab::RideTune::firm()));
+        assert_eq!(car(), Some(crate::car_lab::CarTune::shipped()));
+        assert_eq!(grip(), Some(crate::grip_lab::GripBalance::shipped()));
     }
 }

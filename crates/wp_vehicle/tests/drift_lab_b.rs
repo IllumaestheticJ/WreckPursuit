@@ -28,6 +28,7 @@ fn kb(help: f32) -> AssistProfile {
 const RWD: [&str; 3] = ["shiro_turbo", "sperber_32", "rampart_50"];
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn late_counter_key_catches_kicks_at_speed() {
     // Before Drift Lab B the rack slewed at ~100 °/s and a 150 ms-late key caught 3 of 6
     // kicks at 140 km/h in each of these cars; now ≥ 250 °/s and all 6.
@@ -50,6 +51,7 @@ fn late_counter_key_catches_kicks_at_speed() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn released_keys_straighten_a_kick() {
     for id in RWD {
         let r = kick_catch(&car(id), &kb(0.6), CatchDriver::Released, 100.0 / 3.6, 2.0);
@@ -60,6 +62,7 @@ fn released_keys_straighten_a_kick() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn countersteer_hold_gives_a_long_steady_drift() {
     // 40 m left-hander: the good driver (countersteer key + modulated throttle) drifts ~5 s
     // of the 6 s without spinning; before Drift Lab B step 3 it spun within 0.8 s.
@@ -76,6 +79,7 @@ fn countersteer_hold_gives_a_long_steady_drift() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn held_counter_key_with_full_throttle_holds_too() {
     // Owner clip 1, the primary criterion: the countersteer key + full throttle holds a
     // steady drift (2nd gear, no TCS) without spinning. (Mean from 24°: since round12's TCS
@@ -92,6 +96,7 @@ fn held_counter_key_with_full_throttle_holds_too() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn key_into_the_turn_adds_angle() {
     // At 100 % the into-turn driver drifts as long as the good one, at a bigger peak angle.
     for id in RWD {
@@ -129,6 +134,7 @@ fn reference(help: f32) -> AssistProfile {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn flooring_it_at_a_big_angle_spins_lifting_saves() {
     // Reference settings (2nd gear, no TCS): flicked into a big angle and floored with the
     // key into the turn, the angle creeps past the 48° envelope and the car spins; lifting
@@ -149,6 +155,7 @@ fn flooring_it_at_a_big_angle_spins_lifting_saves() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn abrupt_lift_closes_the_drift() {
     // Drift Lab C: with the countersteer key held a full lift (raw, no softening) closes the
     // slide — the drift is lost early, the car is not.
@@ -160,6 +167,7 @@ fn abrupt_lift_closes_the_drift() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn drift_runs_are_deterministic() {
     let c = car("rampart_50");
     let a = drift_run(&c, &kb(0.6), DriftDriver::Sloppy, 40.0, 0.6, 3);
@@ -168,6 +176,7 @@ fn drift_runs_are_deterministic() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn lift_off_transition_swaps_smoothly() {
     // Row 107: left drift, lift + flick, right drift. At 60 % a smooth swap: no spin, no
     // tank-slapper, the new drift within ~1 s of the lift and held after. (Before: the hold
@@ -181,6 +190,7 @@ fn lift_off_transition_swaps_smoothly() {
 }
 
 #[test]
+#[ignore = "Drift Lab B / C superseded by the unified handling (docs/integration/grip-balance.md, Unify): players drive the plain steering now"]
 fn released_keys_catch_a_handbrake_entry() {
     // Row 108: after a handbrake tap the self-aligning catch is back within ~0.1 s (it was off
     // for 0.5 s and released keys caught 12 of 30 entries at 60 %). 80 km/h, 0.45 s tap.
