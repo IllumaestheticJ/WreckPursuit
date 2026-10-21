@@ -230,7 +230,7 @@ impl Prim {
                 self.vert([q[0], q[1], p[2] + h], [0.0, 0.0, 1.0]);
             }
         }
-        let mut quad = |idx: &mut Vec<u32>, [p, q, r, s]: [u32; 4]| {
+        let quad = |idx: &mut Vec<u32>, [p, q, r, s]: [u32; 4]| {
             idx.extend_from_slice(&[base + p, base + q, base + r, base + p, base + r, base + s]);
         };
         for k in 0..pts.len() as u32 - 1 {
