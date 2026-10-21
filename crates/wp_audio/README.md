@@ -124,8 +124,9 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   `tools/audio_packs/build_tyre.py`) per punctured wheel at `Critical` priority, plus a scanner
   line ("Spikes hit! …"). The bridge feeds per-wheel deflation (`set_tire_deflation`, damage +
   spikes as the sim combines them): each wheel ≥ 0.25 deflated plays `tire/flat_flap` (synth
-  `flap`, one slap per revolution: `freq_hz` = wheel rev/s), ≥ 0.9 grinds its rim (recorded
-  `scrape/metal`, pitched by wheel speed) until `wp_vehicle` reports rim contact. Tuning:
+  `flap`, one slap per revolution: `freq_hz` = wheel rev/s); a wheel whose rim is on the road
+  (`set_rim_contact` ← `wp_vehicle::Vehicle::rim_contact`, false over bumps and jumps; deflation
+  ≥ 0.9 when unknown, e.g. net clients) grinds (recorded `scrape/metal`, pitched by wheel speed). Tuning:
   `audio_config.json` → `flat_tyre`.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)` with each wheel's
   own `TireDef` peaks (`TirePeak`, resolved at `register_car`; an all-terrain tire squeals

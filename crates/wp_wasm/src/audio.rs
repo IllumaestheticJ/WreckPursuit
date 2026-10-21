@@ -178,6 +178,8 @@ pub(crate) fn frame_commands(
             *t = t.max(sp);
         }
         d.set_tire_deflation(*id, deflation);
+        // Rim on the road (grip-balance, 0.12.40): grinds only while the rim touches down.
+        d.set_rim_contact(*id, Some(v.vehicle.rim_contact()));
         inputs.push(VehicleAudioInput {
             entity: *id,
             car_id: &v.car_id,

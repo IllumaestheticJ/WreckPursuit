@@ -141,6 +141,21 @@ fn deflated_wheels_flap_at_wheel_rate_and_flat_ones_grind() {
     let slow = frame(&mut d, &moving(20.0));
     let s_flap = params_of(&slow, FLAP_SLOT).unwrap();
     assert!(s_flap.freq_hz < flap.freq_hz * 0.5);
+    // With the vehicle's rim flag (grip-balance, 0.12.40): RR is flat but momentarily off the
+    // road over a bump → no grind; back on the road → grinds again.
+    d.set_rim_contact(EntityId(1), Some([false; 4]));
+    let bump = frame(&mut d, &moving(60.0));
+    assert!(
+        params_of(&bump, RIM_SLOT + 3).is_none(),
+        "no grind while the rim is off the road"
+    );
+    d.set_rim_contact(EntityId(1), Some([false, false, false, true]));
+    let down = frame(&mut d, &moving(60.0));
+    assert!(
+        params_of(&down, RIM_SLOT + 3).is_some(),
+        "grinds once the rim touches down"
+    );
+    d.set_rim_contact(EntityId(1), None);
     // Reinflated (repair): the loops stop.
     d.set_tire_deflation(EntityId(1), [0.0; 4]);
     let after = frame(&mut d, &moving(60.0));
