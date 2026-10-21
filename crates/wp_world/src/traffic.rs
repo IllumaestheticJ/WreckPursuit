@@ -25,7 +25,7 @@
 //!   radius of a player or active race route become `wp_vehicle` instances driven by a
 //!   pure-pursuit + PID controller; promotion/demotion copy pose and speed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{
@@ -110,6 +110,10 @@ pub const ALLWAY_STALE_S: f32 = 8.0;
 /// A tracked vehicle in a junction faster than this sweeps through it (crossing movements wait);
 /// slower (a police car shunting at a scene) it only blocks the paths it stands in, m/s.
 pub const TV_SWEEP_MPS: f32 = 2.5;
+/// Two civilians touching again within this many traffic steps (2 s) of separating are
+/// still one collision in [`TrafficStats::civilian_collisions`] (cars that bump, part and
+/// bump again counted twice).
+pub const RETOUCH_STEPS: u64 = 120;
 /// A driver held at its stop line by a siren unit heading for the junction goes anyway after
 /// this long (the unit is milling about a scene rather than coming through), s.
 pub const SIREN_JUNCTION_HOLD_MAX_S: f32 = 8.0;
@@ -507,7 +511,8 @@ pub struct TrafficStats {
     pub despawned: u64,
     /// Agents recycled because they were stuck.
     pub stuck_recycled: u64,
-    /// New civilian–civilian overlap pairs (only with `detect_collisions`).
+    /// New civilian–civilian overlap pairs (only with `detect_collisions`); a pair touching
+    /// again within [`RETOUCH_STEPS`] of separating is not counted again.
     pub civilian_collisions: u64,
     /// Of those, pairs involving an aggressive driver.
     pub collisions_involving_aggressive: u64,
@@ -801,6 +806,9 @@ pub struct Traffic {
     stats: TrafficStats,
     lod_changes: Vec<LodChange>,
     overlaps: BTreeSet<(u32, u32)>,
+    /// Pairs that stopped overlapping recently, with the traffic step it ended: a re-touch
+    /// within [`RETOUCH_STEPS`] is the same incident, not a new collision.
+    overlap_ended: BTreeMap<(u32, u32), u64>,
     car: Option<(VehicleDef, TireDb)>,
     /// Seed for per-driver values derived from the id (patience).
     seed: u64,
@@ -947,6 +955,7 @@ impl Traffic {
             stats: TrafficStats::default(),
             lod_changes: Vec::new(),
             overlaps: BTreeSet::new(),
+            overlap_ended: BTreeMap::new(),
             car: None,
             seed,
             opposite,
@@ -3672,8 +3681,16 @@ impl Traffic {
                 }
             }
         }
+        let step = self.step_count;
+        for pair in &self.overlaps {
+            if !now.contains(pair) {
+                self.overlap_ended.insert(*pair, step);
+            }
+        }
+        self.overlap_ended
+            .retain(|_, ended| step - *ended <= RETOUCH_STEPS);
         for pair in &now {
-            if !self.overlaps.contains(pair) {
+            if !self.overlaps.contains(pair) && !self.overlap_ended.contains_key(pair) {
                 self.stats.civilian_collisions += 1;
                 if self.stats.collision_log.len() < 64 {
                     self.stats
