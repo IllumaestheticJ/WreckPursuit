@@ -395,6 +395,10 @@ pub struct Unit {
     pub pit_ready: SimTime,
     /// Whether this unit ever pursued (for statistics).
     pub engaged: bool,
+    /// Whether it ever had a job (call, pursuit, intercept, tool): only then does "resuming
+    /// patrol" go out on the radio.
+    #[serde(default)]
+    pub had_job: bool,
     /// Steering geometry of the unit's car.
     pub geometry: SteerGeometry,
     /// `wp_world`'s shared driving controller (pure pursuit + PID), created on first use.
@@ -478,6 +482,7 @@ impl Unit {
             captain_hold_until: SimTime::ZERO,
             pit_ready: SimTime::ZERO,
             engaged: false,
+            had_job: false,
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),

@@ -295,7 +295,7 @@ impl RacerRecord {
             }
             // Pinned: boxed in and rocking back and forth, never getting away.
             let p = [self.pos[0], self.pos[1]];
-            let close = inp.nearest_unit_m <= cfg.capture.unit_radius_m;
+            let close = inp.nearest_unit_m <= cfg.capture.pinned_unit_radius_m;
             match self.pin_anchor {
                 Some(a)
                     if close
@@ -428,6 +428,32 @@ mod tests {
         }
     }
 
+    /// Lead / opponent-pace (Hollins hairpin): a pursued racer stuck in a jam, the units held up
+    /// behind other cars 20 m off (outside `unit_radius_m`), is captured after
+    /// `pinned_time_s` instead of the whole road waiting for minutes.
+    #[test]
+    fn racer_stuck_in_a_jam_with_police_20_m_off_is_captured() {
+        let c = cfg();
+        assert!(c.capture.unit_radius_m < 20.0 && 20.0 < c.capture.pinned_unit_radius_m);
+        let mut r = RacerRecord::new(EntityId(1));
+        r.add_heat(15.0, &c);
+        r.start_pursuit(SimTime::ZERO);
+        let dt = 0.1;
+        let mut t = 0.0;
+        loop {
+            t += dt;
+            if let Some(o) = r.update(&inputs(true, 20.0, 0.3, t), dt, &c) {
+                assert_eq!(o, RuleOutcome::Captured);
+                break;
+            }
+            assert!(t < c.capture.pinned_time_s + 0.5, "no capture by {t} s");
+        }
+        assert!(
+            (t - c.capture.pinned_time_s).abs() < 0.3,
+            "captured at {t} s"
+        );
+    }
+
     #[test]
     fn capture_needs_stop_time_and_nearby_unit() {
         let c = cfg();
@@ -439,7 +465,12 @@ mod tests {
         for i in 0..100 {
             assert!(r
                 .update(
-                    &inputs(true, c.capture.unit_radius_m + 5.0, 0.5, i as f32 * 0.1),
+                    &inputs(
+                        true,
+                        c.capture.pinned_unit_radius_m + 5.0,
+                        0.5,
+                        i as f32 * 0.1
+                    ),
                     dt,
                     &c
                 )

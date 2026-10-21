@@ -1209,6 +1209,46 @@ An un-wrecked AI unit that stands stuck while it wants to drive resets in place.
 The reset fixed the Hollins race deadlock this round's sight change exposed: a column of units
 and two captured racers were jammed in a hairpin.
 
+### `lead/main-sync` merge: police reds fixed (2026-10-21)
+Merged `origin/lead/main-sync` (main's rebuilt grid: divided viaduct at x = 0, diamond ramps
+with terminals at x = ±22) twice (51902403, then its new tip in ead38c0f). Police fixes:
+- **Nose-to-nose unit deadlock** (radio_chatter capture never happened): two units stood face
+  to face at a ramp terminal for a minute. After 3 s the less busy one (not chasing; else the
+  higher id) resets, past the other unit only. Facing decides, not `blocked_by` (the other's
+  passing attempt flips it on and off). Headless units now count standing time too.
+- **Patrol nose to nose with a stopped racer** (wp_race hollins_hill_sprint, all captured): a
+  patrol met the racers' queue head-on on a hairpin. After 3 s it turns round: reset into the
+  other lane facing the other way (up to 15 m back, on the road, clear) with a new patrol.
+- **Wide U-turn rejoin** (wp_sim police_passby Vesper, 174 m > 150 m): the U-turn ended 9 m off
+  the centreline and the chase route began with a sideways leg to the junction beside the car,
+  so it looped across the road. A physically driven unit past the road's edge (lanes × width
+  + 1.5 m) now joins at the first route node that is not beside it (cos < 0.5) within 2× its
+  offset; the pro driver's in-lane look-ahead is at least 2× the distance off the lane. Headless
+  units keep the old route start (with it `self_wreck_sim` rose 17 → 20 wrecks).
+- First patrol of a shift is silent (no 13 × "resuming patrol"); lost-visual sustain 4.5 s;
+  callsign lists over 4 say "N units".
+- Re-aimed: `escape_break_contact`, `response_*` (wp_police scenarios); simcli
+  `police/sideswipe_patrol_{day,night}` (a front-corner clip then flank scrape with a patrol
+  driving at the racer; the assault rule still starts the pursuit in the contact tick).
+  `night_is_slower` pursuit ratio ≥ 1.25 (1.39 on the new grid).
+- Tests adjusted: `blocked_siren…` frees the other units; `presence_matches_table…` expects a
+  quiet shift start; wp_wasm siren-audio test starts the player wanted (the full-throttle player
+  now stops at a ramp terminal 20 s in; test-only `Session::sim_mut`).
+- [bless] `police_sideswipe_patrol_{day,night}`, `police_tunnel_escape_founders_cut{,_control}`.
+
+Red on plain `lead/main-sync` too, not police (left to main-sync):
+- `wp_net vesper_e2e`: racer 0 falls through the ground at its spawn (z 2 → −60 m at step
+  ≈ 1000, (491, −782)); the cop can't follow, so the pursuit ends Escaped.
+- `wp_race opponent_pace` grid_highway_sprint s50/s95: 0 finishers; police are off in those
+  scenarios (start grid on the rebuilt highway).
+- `simcli city/tunnel_founders_cut_drive_through` path length 299 m (< 380).
+- web e2e `run.mjs` perf budgets under software GL (409k triangles > 400k, 323 draw calls > 300
+  on phone, 2.3 fps): main's heavier city geometry. `siren.mjs` audio frame 5–7 ms with sirens
+  on this container (1.6 ms in another run): load-dependent. The siren mode-change check was a
+  test bug (forcing the pattern the unit already played) and is fixed here.
+- 44 goldens mismatch identically on main-sync (same list with or without this branch); only
+  the four police ones above are blessed here.
+
 ### Rows 84, 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 

@@ -285,6 +285,12 @@ impl Session {
         &self.sim
     }
 
+    /// The simulation, mutable (crate tests: script police state).
+    #[cfg(test)]
+    pub(crate) fn sim_mut(&mut self) -> &mut Sim {
+        &mut self.sim
+    }
+
     /// Entity ids in scenario order.
     pub fn entities(&self) -> &[EntityId] {
         &self.ids

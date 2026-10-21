@@ -685,7 +685,11 @@ impl PoliceSystem {
                 continue;
             }
             self.rebuild_obstacles();
-            let spot = self.reset_spot(i);
+            let turn = self.turn_round_spot(i);
+            let spot = match turn {
+                Some((pos, heading)) => Some((0.0, pos, heading)),
+                None => self.reset_spot(i),
+            };
             // Its own spot is the clear one: nothing hems it in, so it is waiting for something
             // (traffic rules, a call) rather than stuck; only a unit the stuck detector flagged
             // (wedged on a wall, beached) is re-placed where it stands.
@@ -713,6 +717,26 @@ impl PoliceSystem {
                     u.unstick.turn_hold = turn_hold;
                     u.avoid = crate::avoid::AvoidState::default();
                     let (unit, entity) = (u.id, u.entity);
+                    if turn.is_some() {
+                        // Turned round: patrol on somewhere the new way.
+                        let d = match self.units[i].role {
+                            UnitRole::Pool(d) => Some(d),
+                            _ => None,
+                        };
+                        if let Some(next) = self.random_node_in(d) {
+                            self.units[i].assignment = Assignment::Patrol { dest: next };
+                            let track = self.route_track(i, next, None);
+                            let p = &self.cfg.pursuit;
+                            let cmd = DriveCommand {
+                                track,
+                                speed_mps: 0.0,
+                                cornering_g: p.patrol_cornering_g,
+                                siren: false,
+                                lane_offset_m: LANE_OFFSET_M,
+                            };
+                            self.units[i].set_command(cmd);
+                        }
+                    }
                     self.resets.push(crate::UnitReset {
                         unit,
                         entity,
@@ -789,6 +813,10 @@ impl PoliceSystem {
             .avoid
             .junction
             .is_some_and(|j| j.s - u.track_s < stuck::RESET_JUNCTION_M);
+        let deadlock = self.deadlocked(i);
+        if deadlock && u.unstick.stand_s >= stuck::RESET_DEADLOCK_S {
+            return Some(false);
+        }
         if red || (at_junction && u.unstick.first.is_none()) {
             return None;
         }
@@ -797,10 +825,13 @@ impl PoliceSystem {
             u.assignment,
             Assignment::Pursue { .. } | Assignment::Intercept { .. }
         );
-        // Standing over a stopped racer it is after: an arrest, not a jam.
+        // Standing over a stopped racer it is after (inside the capture radius): an arrest,
+        // not a jam. Farther out and held up (Hollins hairpin: 20 m off behind other cars, for
+        // minutes) it is a jam like any other.
+        let arrest_m = self.cfg.heat.capture.unit_radius_m;
         if let Some(r) = target.and_then(|t| self.racers.get(&t)) {
             let slow = r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < 4.0;
-            if slow && dist(xy(r.pos), u.body.pos) < 25.0 {
+            if slow && dist(xy(r.pos), u.body.pos) < arrest_m {
                 return None;
             }
         }
@@ -814,12 +845,99 @@ impl PoliceSystem {
         (u.unstick.stand_s >= need).then_some(active)
     }
 
+    /// Whether unit `i` stands in a two-unit deadlock it should give way in: nose to nose
+    /// with another standing unit (main's ramp terminals) or each waiting for the other. The
+    /// one less busy (not chasing; else the higher id) gives way.
+    fn deadlocked(&self, i: usize) -> bool {
+        use crate::stuck;
+        let u = &self.units[i];
+        match u.avoid.blocked_by {
+            Some(crate::avoid::BlockedBy::Unit(other)) => {
+                self.unit_index(other).is_some_and(|j| {
+                    let o = &self.units[j];
+                    let o_active = matches!(
+                        o.assignment,
+                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                    );
+                    let me_active = matches!(
+                        u.assignment,
+                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                    );
+                    // Nose to nose (or it waits on this one): the other's passing attempt
+                    // flips its own `blocked_by` on and off, so facing decides.
+                    let facing = o.body.heading[0] * u.body.heading[0]
+                        + o.body.heading[1] * u.body.heading[1]
+                        < -0.5;
+                    let waits_on_me =
+                        o.avoid.blocked_by == Some(crate::avoid::BlockedBy::Unit(u.id));
+                    (facing || waits_on_me)
+                        && o.body.speed.abs() < stuck::SLOW_MPS
+                        && (o_active, o.id) > (me_active, u.id)
+                })
+            }
+            Some(crate::avoid::BlockedBy::Vehicle(e)) => self.facing_racer(i, e),
+            _ => false,
+        }
+    }
+
+    /// Whether patrolling unit `i` stands nose to nose with racer `e`, stopped (Hollins
+    /// hairpin on main's physics: a patrol met the racers' queue head-on in their lane and
+    /// neither side could move for 20 s).
+    fn facing_racer(&self, i: usize, e: EntityId) -> bool {
+        let u = &self.units[i];
+        if !matches!(u.assignment, Assignment::Patrol { .. }) || !self.racers.contains_key(&e) {
+            return false;
+        }
+        self.obstacles.iter().any(|o| {
+            o.entity == Some(e)
+                && o.speed() < crate::stuck::SLOW_MPS
+                && o.fwd[0] * u.body.heading[0] + o.fwd[1] * u.body.heading[1] < -0.5
+        })
+    }
+
+    /// A turn-round spot for patrolling unit `i` facing a stopped racer (see
+    /// [`Self::facing_racer`]): the other lane, facing the other way, up to
+    /// [`crate::stuck::RESET_RADIUS_M`] back from where it stands, on the road and clear.
+    fn turn_round_spot(&self, i: usize) -> Option<([f32; 2], [f32; 2])> {
+        use crate::stuck;
+        let u = &self.units[i];
+        let Some(crate::avoid::BlockedBy::Vehicle(e)) = u.avoid.blocked_by else {
+            return None;
+        };
+        if !self.facing_racer(i, e) {
+            return None;
+        }
+        let h = u.body.heading;
+        let back = scale(h, -1.0);
+        let left = [-h[1], h[0]];
+        let others: Vec<crate::avoid::Obstacle> = self
+            .obstacles
+            .iter()
+            .filter(|o| o.unit != Some(u.id) && (o.entity.is_none() || o.entity != u.entity))
+            .copied()
+            .collect();
+        let steps = (stuck::RESET_RADIUS_M / stuck::RESET_STEP_M) as i32;
+        (0..=steps).find_map(|k| {
+            let pos = add(
+                add(u.body.pos, scale(left, 2.0 * LANE_OFFSET_M)),
+                scale(back, k as f32 * stuck::RESET_STEP_M),
+            );
+            let on_road = self
+                .graph
+                .nearest_on_road(pos)
+                .is_some_and(|r| r.dist_m < 2.0 * LANE_OFFSET_M);
+            (on_road && reset_clear(pos, &others)).then_some((pos, back))
+        })
+    }
+
     /// The nearest clear spot in unit `i`'s lane along its route within
     /// [`crate::stuck::RESET_RADIUS_M`]: (route position, point, heading). Uses the
     /// obstacles as last rebuilt.
     fn reset_spot(&self, i: usize) -> Option<(f32, [f32; 2], [f32; 2])> {
         use crate::stuck;
         let u = &self.units[i];
+        // Giving way in a deadlock: only past the other unit (a spot behind still faces it).
+        let ahead_only = self.deadlocked(i);
         let tr = &u.cmd.track;
         let len = tr.length();
         let (id, entity) = (u.id, u.entity);
@@ -835,7 +953,7 @@ impl PoliceSystem {
             let n = (k + 1) / 2;
             let d = if k % 2 == 1 { n } else { -n } as f32 * stuck::RESET_STEP_M;
             let s = u.track_s + d;
-            if s < 0.0 || s > len {
+            if s < 0.0 || s > len || (ahead_only && d <= 0.0) {
                 continue;
             }
             let pos = crate::unit::lane_point(tr, s, u.cmd.lane_offset_m);
@@ -1404,10 +1522,17 @@ impl PoliceSystem {
         if self.units[i].assignment == a {
             return;
         }
+        // A unit's first patrol is not "resuming" anything: no line (13 units "resuming
+        // patrol" at the start held the channel for ≈ 25 s).
+        let first_patrol =
+            matches!(a, Assignment::Patrol { .. } | Assignment::Idle) && !self.units[i].had_job;
         let text = self.radio_text(i, &a);
         let now = self.now;
         {
             let u = &mut self.units[i];
+            if !matches!(a, Assignment::Patrol { .. } | Assignment::Idle) {
+                u.had_job = true;
+            }
             u.assignment = a;
             u.assigned = now;
             u.quiet = false;
@@ -1422,7 +1547,9 @@ impl PoliceSystem {
                 self.stats.units_engaged += 1;
             }
         }
-        self.radio(text);
+        if !first_patrol {
+            self.radio(text);
+        }
     }
 
     /// Spoken description of a racer ("racer #3 northbound on Harbor Boulevard", "racer #3

@@ -204,6 +204,8 @@ impl RoomQuery for FixedRoom {
     }
 }
 
+/// Off the lane by `d`, the in-lane steering target is at least this many `d` ahead.
+const REJOIN_LOOK_PER_M: f32 = 2.0;
 /// Below this speed nothing counts as a slide (no countersteer, no lift), m/s.
 const SLIDE_MIN_MPS: f32 = 5.0;
 
@@ -942,7 +944,11 @@ impl ProDriver {
             let g = DriveGains::TRAFFIC;
             let look = (g.lookahead_base_m + g.lookahead_per_mps * fwd_speed.abs())
                 .clamp(g.lookahead_min_m, g.lookahead_max_m);
-            lane_point(track, s + look, lane)
+            // Well off the lane (out of a U-turn that swung wide onto the far kerb): aim at
+            // least twice that far ahead, or the short low-speed look-ahead pulls full lock and
+            // the car loops across the road (wp_sim police_passby, Vesper: 4 s lost).
+            let off_lane = len(sub(lane_point(track, s, lane), ctx.pos));
+            lane_point(track, s + look.max(REJOIN_LOOK_PER_M * off_lane), lane)
         };
         let to = sub(target, ctx.pos);
         let mut steer = self

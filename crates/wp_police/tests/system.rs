@@ -125,16 +125,17 @@ fn presence_matches_table_for_every_phase() {
                 "{d:?} at {hour}h"
             );
         }
-        // Every pool unit is patrolling and says so on the radio.
+        // Every pool unit is patrolling. A first patrol is not "resuming" anything, so the
+        // start of the shift is quiet on the radio (13 such lines held the channel ≈ 25 s).
         assert!(h
             .police
             .units()
             .iter()
             .all(|u| matches!(u.assignment, Assignment::Patrol { .. })));
-        assert!(h
+        assert!(!h
             .events
             .iter()
-            .any(|e| matches!(e, PoliceEvent::Radio { .. })));
+            .any(|e| matches!(e, PoliceEvent::Radio { text, .. } if text.contains("patrol"))));
     }
 }
 
@@ -1248,6 +1249,24 @@ fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
     let mut reversed = false;
     for tick in 0..(8.0 / PHYSICS_DT) as u32 {
         let t = tick as f32 * PHYSICS_DT;
+        // Other units stay out of it: on main's rebuilt grid (#19-#27) a backup unit drove up
+        // 2 m behind the pinned one and left it no room to back out. This test is about the
+        // push and the back-out logic, not a queue of police cars.
+        if tick % 240 == 0 {
+            let others: Vec<_> = h
+                .police
+                .units()
+                .iter()
+                .filter(|u| u.id != id && u.kind == UnitKind::Car)
+                .map(|u| u.id)
+                .collect();
+            for o in others {
+                let _ = h.police.captain_command(CaptainCommand::AssignUnit {
+                    unit: o,
+                    order: wp_contracts::UnitOrder::Disengage,
+                });
+            }
+        }
         h.police.sync_unit(
             id,
             UnitSync {

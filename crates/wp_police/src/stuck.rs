@@ -124,6 +124,9 @@ pub const RESET_PATH_S: f32 = 2.0;
 /// No clear spot, standing this long with a racer within [`DEADLOCK_NEAR_M`]: it despawns
 /// even in view (the cars round it are waiting for it), s.
 pub const RESET_VANISH_S: f32 = 30.0;
+/// Two units each blocked by the other this long: the less busy one resets (whatever the
+/// junction rule says), s.
+pub const RESET_DEADLOCK_S: f32 = 3.0;
 /// No reset this close before a junction on its route unless the unit is in a stuck episode
 /// (queued to give way or turn is waiting, not stuck), m.
 pub const RESET_JUNCTION_M: f32 = 25.0;

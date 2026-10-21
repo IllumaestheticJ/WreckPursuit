@@ -273,10 +273,15 @@ pub struct CaptureConfig {
     /// A unit must be within this distance, m.
     pub unit_radius_m: f32,
     /// Also captured: boxed in or pinned, never getting farther than this from one spot
-    /// (rocking back and forth) for `pinned_time_s` with a unit within `unit_radius_m`, m.
+    /// (rocking back and forth) for `pinned_time_s` with a unit within `pinned_unit_radius_m`,
+    /// m.
     pub pinned_radius_m: f32,
     /// See `pinned_radius_m`, s.
     pub pinned_time_s: f32,
+    /// See `pinned_radius_m`: wider than `unit_radius_m`, so a racer stuck in a jam with the
+    /// police held up behind other cars 20 m away is captured rather than waited for forever
+    /// (Hollins hairpin, lead/opponent-pace), m.
+    pub pinned_unit_radius_m: f32,
 }
 
 /// Safehouse rule.
