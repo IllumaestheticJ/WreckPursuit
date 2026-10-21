@@ -6,6 +6,9 @@
 //! - default build: headless smoke run (drives a scripted lap, prints FFB samples). CI builds
 //!   only this.
 //! - `--features window`: winit + softbuffer window, top-down car box, keyboard driving.
+//! - `--features gpu`: `--gpu` opens a 3D window drawn by our own renderer (`wp_render`);
+//!   `--shot out.png [--scenario x.ron] [--seconds S] [--size WxH] [--orbit DEG]` renders one
+//!   frame headlessly (any Vulkan/Metal/DX12 adapter, software ones included).
 //! - `--features ffb`: sends `FfbOutput::rack_torque_nm` as a constant force to the first SDL2
 //!   haptic device (wheel) and reads its steering axis.
 //!
@@ -15,6 +18,8 @@
 
 #[cfg(feature = "ffb")]
 mod ffb;
+#[cfg(feature = "gpu")]
+mod gpu_view;
 #[cfg(feature = "window")]
 mod window;
 
@@ -69,6 +74,21 @@ fn headless() {
 }
 
 fn main() {
+    #[cfg(feature = "gpu")]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(shot) = gpu_view::ShotArgs::parse(&args) {
+            if let Err(e) = shot.and_then(|s| gpu_view::shot(&s)) {
+                eprintln!("shot failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        if args.iter().any(|a| a == "--gpu") {
+            gpu_view::run_window();
+            return;
+        }
+    }
     #[cfg(feature = "window")]
     if !std::env::args().any(|a| a == "--headless") {
         window::run();
