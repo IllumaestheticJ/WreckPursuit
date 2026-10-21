@@ -53,6 +53,11 @@ pub const PROMOTE_IMPULSE_NS: f32 = crate::contacts::CONTACT_EVENT_MIN_IMPULSE_N
 /// (`DamageTuning::min_contact_speed_mps`, 1 m/s), so a push or a resting touch never does.
 pub const PROMOTE_CLOSING_MPS: f32 = 1.0;
 
+/// Velocity change (linear m/s + angular rad/s, one tick) below which a parked car is not
+/// scanned for a promoting hit: [`PROMOTE_IMPULSE_NS`] on a 1400 kg car is ≥ 0.036 m/s, and
+/// friction with the road takes at most a few mm/s of that in one tick.
+const PROMOTE_MIN_DV: f32 = 0.02;
+
 /// Most parked cars promoted per session (memory ≈ 0.3 MB each; perf: only awake lattices
 /// cost anything).
 pub const MAX_PARKED_WRECKS: usize = 48;
@@ -293,16 +298,23 @@ impl crate::Sim {
         vehicles: &[crate::contacts::BodyInfo],
         dt: f32,
     ) {
-        let Some(car) = self.parked.car.clone() else {
+        if self.parked.car.is_none() {
             return;
-        };
+        }
         let mut contacts = Vec::new();
         let mut events: Vec<SimEvent> = Vec::new();
         for c in candidates {
             // Asleep after the step: nothing hit it this tick (a contact would have woken it).
             let wreck = self.parked.wreck_index(c.prop).is_ok();
-            if !wreck && self.physics.bodies[c.info.body].is_sleeping() {
-                continue;
+            if !wreck {
+                // A promoting hit (>= PROMOTE_IMPULSE_NS on 1400 kg) changes its velocity by
+                // ~0.04 m/s or more; one that barely moved was not hit (no contact scan).
+                let rb = &self.physics.bodies[c.info.body];
+                let dv = (rb.linvel() - c.info.pre_linvel).length()
+                    + (rb.angvel() - c.info.pre_angvel).length();
+                if rb.is_sleeping() || dv < PROMOTE_MIN_DV {
+                    continue;
+                }
             }
             contacts.clear();
             crate::contacts::body_contacts(
@@ -331,6 +343,9 @@ impl crate::Sim {
                         continue;
                     }
                     let half = self.props.half_extents[c.prop];
+                    let Some(car) = self.parked.car.as_ref() else {
+                        return;
+                    };
                     let mut damage = DamageModel::new(&car.lattice, &car.materials);
                     damage.set_entity(c.info.id);
                     let hull_version = damage.hull_version();
@@ -341,7 +356,7 @@ impl crate::Sim {
                             id: c.info.id,
                             car_id: car.def.id.clone(),
                             damage,
-                            map: ChassisMap::fit(&car, half),
+                            map: ChassisMap::fit(car, half),
                             promoted_tick: self.tick,
                             hull_version,
                             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),

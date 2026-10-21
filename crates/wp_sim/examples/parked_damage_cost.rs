@@ -109,10 +109,16 @@ fn main() {
         on.mean_ms - off.mean_ms,
         on.worst_ms - off.worst_ms
     );
-    let quiet_on = run(&car, &mode, true, false);
+    // Off first, then on, then off again: the second "off" shows the run-to-run noise.
     let quiet_off = run(&car, &mode, false, false);
+    let quiet_on = run(&car, &mode, true, false);
+    let quiet_off2 = run(&car, &mode, false, false);
     println!("24 cars cruising past 408 parked cars, none hit:");
-    for (name, t) in [("dents on ", &quiet_on), ("dents off", &quiet_off)] {
+    for (name, t) in [
+        ("dents off", &quiet_off),
+        ("dents on ", &quiet_on),
+        ("dents off", &quiet_off2),
+    ] {
         println!(
             "  {name}: mean {:.3} ms, worst {:.3} ms, {} dented",
             t.mean_ms, t.worst_ms, t.dented
