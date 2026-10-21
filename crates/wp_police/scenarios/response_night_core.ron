@@ -10,9 +10,19 @@
     racers: [(district: Core, speed_factor: 2.0)],
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
+        // Recalibrated 2026-10-21 for real three-point turns (owner decision). Rule: mean =
+        // measured rounded up to the next 5 s; hit-rate floor = measured; a run whose call
+        // never gets a unit within 100 m counts as 61 s (duration + 1) in the mean and max.
+        // Seeds 300-307 = 17.2, 7.9, 6.6, 11.0, never, 18.1, 0.0, 5.7 s.
+        // Before: >= 0.875; measured: 0.875 (7 of 8): unchanged.
         (metric: "call_reached_25s_frac", min: 0.875, max: 1.0),
-        (metric: "call_to_unit_100m_s", min: 0.0, max: 15.0),
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 25.0),
+        // Before: <= 15 s; measured: 15.9 s (the never run counted as 61).
+        (metric: "call_to_unit_100m_s", min: 0.0, max: 20.0),
+        // Before: <= 25 s; measured: 61 = never (seed 304: a responder 107 m away gets a route
+        // behind the racer and its side-road three-point turn takes 7.5 s; the call lapses).
+        // No honest worst-case number exists while a run never closes: this line only
+        // bounds the range; the hit-rate floor above carries the check.
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 61.0),
         (metric: "responder_spawns", min: 1.0, max: 1000.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),

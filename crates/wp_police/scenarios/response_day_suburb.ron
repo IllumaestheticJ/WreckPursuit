@@ -13,9 +13,19 @@
     racers: [(district: Suburb, speed_factor: 2.0)],
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
-        (metric: "call_reached_25s_frac", min: 0.875, max: 1.0),
-        (metric: "call_to_unit_100m_s", min: 0.0, max: 15.0),
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 25.0),
+        // Recalibrated 2026-10-21 for real three-point turns (owner decision). Rule: mean =
+        // measured rounded up to the next 5 s; hit-rate floor = measured; a run whose call
+        // never gets a unit within 100 m counts as 61 s (duration + 1) in the mean and max.
+        // Runs with a call: seeds 300-304 = 4.1, never, 7.9, 9.3, 35.7 s.
+        // Before: >= 0.875; measured: 0.6 (3 of 5).
+        (metric: "call_reached_25s_frac", min: 0.6, max: 1.0),
+        // Before: <= 15 s; measured: 23.6 s (the never run counted as 61).
+        (metric: "call_to_unit_100m_s", min: 0.0, max: 25.0),
+        // Before: <= 25 s; measured: 61 = never (seed 301: after the shadow-gap hold the
+        // turn-rounds take 4-8 s and the racer at 2x the limit is never within 100 m again).
+        // No honest worst-case number exists while a run never closes: this line only
+        // bounds the range; the hit-rate floor above carries the check.
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 61.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
         (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),
