@@ -13,7 +13,9 @@ in and `fallback_pack` set to the base) plus data/audio/packs/<pack>/CREDITS.md.
 Engine packs: each layer is cut where the recording is near the layer's rpm, its firing
 frequency is tracked (pitch.py) and the cut is resampled to a constant rpm, then looped with a
 length that is a whole number of engine cycles so the seam is in phase. Siren loops are cut at
-phase 0 of the cadence for a whole number of cycles. See README.md for the manifest fields.
+phase 0 of the cadence for a whole number of cycles. Turbo whistle / supercharger whine are
+isolated from the engine noise under them (tone tracking, flatten, band mask). See README.md for
+the manifest fields.
 
 Needs ffmpeg (with libvorbis) and numpy. Output is deterministic for the same downloads.
 """
@@ -144,6 +146,51 @@ def engine_loop(seg: np.ndarray, rpm: float, cylinders: int, xfade_s: float = 0.
     return seamless_loop(flat, xfade_s, int(round(cycles * cycle)))
 
 
+def spectral_mask(x: np.ndarray, gain_at) -> np.ndarray:
+    """Zero-phase FFT filter: multiply the spectrum by `gain_at(freqs_hz)`."""
+    spec = np.fft.rfft(x)
+    return np.fft.irfft(spec * gain_at(np.fft.rfftfreq(len(x), 1.0 / SR)), len(x))
+
+
+def isolate(x: np.ndarray, lo: float, hi: float, air: float) -> np.ndarray:
+    """Keep the `lo`..`hi` Hz band (raised-cosine edges, 15 % wide) plus broadband content above
+    2 kHz at `air` — pulls a whistle or whine out of the engine noise under it."""
+
+    def g(f):
+        edge_lo = np.clip((f - lo * 0.85) / (lo * 0.15), 0.0, 1.0)
+        edge_hi = np.clip((hi * 1.15 - f) / (hi * 0.15), 0.0, 1.0)
+        band = 0.5 - 0.5 * np.cos(np.pi * np.minimum(edge_lo, edge_hi))
+        return np.maximum(band, air * np.clip((f - 2000.0) / 1000.0, 0.0, 1.0))
+
+    return spectral_mask(x, g)
+
+
+def lowpass(x: np.ndarray, hz: float) -> np.ndarray:
+    """Gentle zero-phase low-pass (second-order magnitude response)."""
+    return spectral_mask(x, lambda f: 1.0 / np.sqrt(1.0 + (f / hz) ** 4))
+
+
+def resample(x: np.ndarray, ratio: float) -> np.ndarray:
+    """Play `x` at `ratio` × speed (pitch × ratio, duration / ratio)."""
+    pos = np.arange(0.0, len(x) - 1, ratio)
+    return np.interp(pos, np.arange(len(x)), x)
+
+
+def tone(seg: np.ndarray, v: dict) -> np.ndarray:
+    """Whistle / whine shaping: optional tone-track flatten, resample, band isolation, low-pass."""
+    if "flatten_hz" in v:
+        fmin, fmax = v["track_hz"]
+        times, f0, _ = pitch.track(seg, SR, fmin, fmax, harmonics=1)
+        seg = pitch.flatten(seg, SR, times, f0, v["flatten_hz"])
+    if "resample" in v:
+        seg = resample(seg, v["resample"])
+    if "band_hz" in v:
+        seg = isolate(seg, v["band_hz"][0], v["band_hz"][1], v.get("air", 0.0))
+    if "lowpass_hz" in v:
+        seg = lowpass(seg, v["lowpass_hz"])
+    return seg
+
+
 def chop(x: np.ndarray, hz: float, duty: float = 0.55) -> np.ndarray:
     """Rev-limiter fuel cut: square amplitude gate at `hz` with 4 ms ramps, whole periods only."""
     period = SR / hz
@@ -182,7 +229,7 @@ def render(v: dict, spec: dict, m: dict, decoded: dict, used: dict, name: str) -
         out = seamless_loop(seg, xf, body)
     else:
         b = int(v["end"] * SR) if "end" in v else len(x)
-        seg = highpass(x[a:b].copy())
+        seg = tone(highpass(x[a:b].copy()), v)
         rpm = v.get("rpm", spec.get("rpm"))
         if rpm is not None:
             out = engine_loop(seg, rpm, m["engine"]["cylinders"])

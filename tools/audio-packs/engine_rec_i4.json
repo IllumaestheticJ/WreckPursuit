@@ -1,7 +1,7 @@
 {
   "pack": "engine_rec_i4",
   "base": "engine_proc_i4",
-  "description": "Recorded inline four (CC0): engine-bay pulls and coast-down, plus a low-rpm interior pull and a closed-throttle fall; layers flattened to constant rpm. Turbo, supercharger and blow-off stay procedural.",
+  "description": "Recorded inline four (CC0): engine-bay pulls and coast-down, plus a low-rpm interior pull and a closed-throttle fall; layers flattened to constant rpm. Turbo whistle isolated from a dyno pull, supercharger whine from a centrifugal supercharger, blow-off from pneumatic valve releases.",
   "engine": {
     "cylinders": 4,
     "redline_rpm": 6500
@@ -48,6 +48,55 @@
       "uid": 2524442,
       "author": "craigsmith",
       "what": "car backfires, reverberant"
+    },
+    "fs496171": {
+      "kind": "freesound",
+      "id": 496171,
+      "uid": 1784475,
+      "author": "editboy23",
+      "what": "turbo six on a chassis dyno, full pull"
+    },
+    "fs529315": {
+      "kind": "freesound",
+      "id": 529315,
+      "uid": 7870834,
+      "author": "derrick.d",
+      "what": "centrifugal supercharger whine"
+    },
+    "fs131302": {
+      "kind": "freesound",
+      "id": 131302,
+      "uid": 2394357,
+      "author": "reg7783",
+      "what": "pneumatic air release"
+    },
+    "fs131934": {
+      "kind": "freesound",
+      "id": 131934,
+      "uid": 1542102,
+      "author": "mcpable",
+      "what": "air release valve"
+    },
+    "fs581083": {
+      "kind": "freesound",
+      "id": 581083,
+      "uid": 11537497,
+      "author": "magnuswaker",
+      "what": "pressure hiss"
+    },
+    "fs185515": {
+      "kind": "freesound",
+      "id": 185515,
+      "uid": 2127539,
+      "author": "soneproject",
+      "what": "air compressor valve"
+    },
+    "fs138477": {
+      "kind": "freesound",
+      "id": 138477,
+      "uid": 758593,
+      "author": "JustInvoke",
+      "what": "air burst"
     }
   },
   "layers": [
@@ -195,6 +244,105 @@
           "src": "fs675723",
           "start": 5.8,
           "end": 6.3
+        }
+      ]
+    },
+    "turbo/whistle": {
+      "gain": 0.5,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs496171",
+          "start": 23.45,
+          "end": 25.5,
+          "track_hz": [
+            5500,
+            12000
+          ],
+          "flatten_hz": 7000,
+          "band_hz": [
+            6600,
+            7400
+          ],
+          "air": 0.05
+        },
+        {
+          "src": "fs496171",
+          "start": 22.0,
+          "end": 23.45,
+          "track_hz": [
+            5500,
+            12000
+          ],
+          "flatten_hz": 7000,
+          "band_hz": [
+            6600,
+            7400
+          ],
+          "air": 0.05
+        }
+      ]
+    },
+    "supercharger/whine": {
+      "gain": 0.6,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs529315",
+          "start": 3.6,
+          "end": 5.0,
+          "resample": 0.65,
+          "band_hz": [
+            1000,
+            1600
+          ],
+          "air": 0.03
+        },
+        {
+          "src": "fs529315",
+          "start": 7.4,
+          "end": 8.3,
+          "resample": 0.65,
+          "band_hz": [
+            1000,
+            1600
+          ],
+          "air": 0.03
+        }
+      ]
+    },
+    "turbo/blowoff": {
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs131302",
+          "start": 0.22,
+          "end": 0.75,
+          "lowpass_hz": 5000
+        },
+        {
+          "src": "fs131934",
+          "start": 0.4,
+          "end": 1.3,
+          "lowpass_hz": 5000
+        },
+        {
+          "src": "fs581083",
+          "start": 0.0,
+          "end": 0.7,
+          "lowpass_hz": 5000
+        },
+        {
+          "src": "fs185515",
+          "start": 0.0,
+          "end": 0.35,
+          "lowpass_hz": 5000
+        },
+        {
+          "src": "fs138477",
+          "start": 0.0,
+          "end": 0.17,
+          "lowpass_hz": 5000
         }
       ]
     }

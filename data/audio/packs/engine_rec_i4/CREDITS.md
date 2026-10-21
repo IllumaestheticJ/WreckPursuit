@@ -14,3 +14,10 @@ previews of the CC0 originals, cut, cleaned and re-encoded.
 | [freesound 105351](https://freesound.org/s/105351/) | CeebFrack | backfire | CC0 1.0 | exhaust_pop_01.ogg, exhaust_pop_02.ogg |
 | [freesound 385935](https://freesound.org/s/385935/) | Pól | engine backfire | CC0 1.0 | exhaust_pop_03.ogg |
 | [freesound 675723](https://freesound.org/s/675723/) | craigsmith | car backfires, reverberant | CC0 1.0 | exhaust_pop_04.ogg, exhaust_pop_05.ogg, exhaust_pop_06.ogg, exhaust_pop_07.ogg |
+| [freesound 496171](https://freesound.org/s/496171/) | editboy23 | turbo six on a chassis dyno, full pull | CC0 1.0 | turbo_whistle_01.ogg, turbo_whistle_02.ogg |
+| [freesound 529315](https://freesound.org/s/529315/) | derrick.d | centrifugal supercharger whine | CC0 1.0 | supercharger_whine_01.ogg, supercharger_whine_02.ogg |
+| [freesound 131302](https://freesound.org/s/131302/) | reg7783 | pneumatic air release | CC0 1.0 | turbo_blowoff_01.ogg |
+| [freesound 131934](https://freesound.org/s/131934/) | mcpable | air release valve | CC0 1.0 | turbo_blowoff_02.ogg |
+| [freesound 581083](https://freesound.org/s/581083/) | magnuswaker | pressure hiss | CC0 1.0 | turbo_blowoff_03.ogg |
+| [freesound 185515](https://freesound.org/s/185515/) | soneproject | air compressor valve | CC0 1.0 | turbo_blowoff_04.ogg |
+| [freesound 138477](https://freesound.org/s/138477/) | JustInvoke | air burst | CC0 1.0 | turbo_blowoff_05.ogg |

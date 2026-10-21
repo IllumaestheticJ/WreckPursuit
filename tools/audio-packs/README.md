@@ -53,6 +53,13 @@ resampled to exactly the layer's rpm. On layers come from pulls/held revs, off l
 closed-throttle drops. A cue variant with `"rpm"` (and optional `"chop_hz"`) does the same for
 `engine/limiter`: flatten to the redline, then gate like a fuel cut.
 
+**Whistle / whine / filtering** (any variant): `"track_hz": [lo, hi]` + `"flatten_hz"` tracks the
+strongest tone in that range and resamples it to a constant pitch (turbo whistle);
+`"resample": r` shifts pitch by a constant ratio; `"band_hz": [lo, hi]` + `"air"` keeps only that
+band (raised-cosine edges) plus broadband content above 2 kHz at `air` — isolates a whistle or
+whine from the engine under it; `"lowpass_hz"` darkens (blow-off from air releases). Applied in
+that order, before looping / one-shot shaping.
+
 **Siren loops** use `{ "src", "start", "cycles", "cycle_s", "xfade_s"? }`: `start` is phase 0 of
 the cadence (sweep: the lowest pitch; hi-lo: the start of the high tone), the loop is exactly
 `cycles × cycle_s` long. Put the same `cycle_s` (and the measured lo/hi/rise) in

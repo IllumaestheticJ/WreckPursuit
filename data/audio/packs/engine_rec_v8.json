@@ -1,7 +1,7 @@
 {
   "id": "engine_rec_v8",
   "kind": "Engine",
-  "description": "Recorded cross-plane V8 (CC0): muscle-car idle, held revs and throttle drops plus a hot-rod hold at 1600 rpm; layers flattened to constant rpm. Turbo, supercharger and blow-off stay procedural.",
+  "description": "Recorded cross-plane V8 (CC0): muscle-car idle, held revs and throttle drops plus a hot-rod hold at 1600 rpm; layers flattened to constant rpm. Turbo whistle isolated from a dyno pull, supercharger whine from a centrifugal supercharger, blow-off from pneumatic valve releases.",
   "engine_layers": [
     {
       "cue": "engine/idle",
@@ -65,25 +65,23 @@
     },
     "turbo/whistle": {
       "source": {
-        "Synth": {
-          "synth": "whine",
-          "params": {
-            "freq_hz": 2800.0,
-            "noise": 0.15
-          }
+        "Samples": {
+          "files": [
+            "turbo_whistle_01.ogg",
+            "turbo_whistle_02.ogg"
+          ]
         }
       },
-      "gain": 0.6,
+      "gain": 0.5,
       "looped": true
     },
     "supercharger/whine": {
       "source": {
-        "Synth": {
-          "synth": "whine",
-          "params": {
-            "freq_hz": 1400.0,
-            "noise": 0.05
-          }
+        "Samples": {
+          "files": [
+            "supercharger_whine_01.ogg",
+            "supercharger_whine_02.ogg"
+          ]
         }
       },
       "gain": 0.6,
@@ -91,17 +89,19 @@
     },
     "turbo/blowoff": {
       "source": {
-        "Synth": {
-          "synth": "blowoff",
-          "params": {
-            "decay_s": 0.45,
-            "lowpass_hz": 4000.0
-          }
+        "Samples": {
+          "files": [
+            "turbo_blowoff_01.ogg",
+            "turbo_blowoff_02.ogg",
+            "turbo_blowoff_03.ogg",
+            "turbo_blowoff_04.ogg",
+            "turbo_blowoff_05.ogg"
+          ]
         }
       },
-      "gain": 1.0,
+      "gain": 0.9,
       "looped": false,
-      "duration_s": 0.6
+      "duration_s": 0.9
     },
     "exhaust/pop": {
       "source": {
