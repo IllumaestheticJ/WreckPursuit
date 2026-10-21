@@ -128,6 +128,8 @@ pub struct SimVehicle {
     chassis_skips_sidewalks: bool,
     /// Ticks left as a ghost ([`Sim::set_ghost`]): 0 = solid.
     ghost_ticks: u32,
+    /// Player steering aids override ([`Sim::set_player_steering`]); `None` = from `kind`.
+    player_steering: Option<bool>,
     /// Ticks the ghost was extended because the car still overlapped another car.
     ghost_overstay: u32,
 }
@@ -331,6 +333,7 @@ impl Sim {
             chassis_skips_sidewalks: false,
             ghost_ticks: 0,
             ghost_overstay: 0,
+            player_steering: None,
         });
         Ok(id)
     }
@@ -640,6 +643,15 @@ impl Sim {
         Ok(())
     }
 
+    /// Override whether a vehicle gets the player steering aids (`wp_vehicle::lab_scope::plain`):
+    /// `Some(false)` for a harness or test driver that feeds analog inputs (simcli's scripted
+    /// drivers), `Some(true)` to force them, `None` (the default) = only
+    /// [`VehicleKind::Player`] cars. The physics is the same either way.
+    pub fn set_player_steering(&mut self, id: EntityId, on: Option<bool>) -> Result<(), SimError> {
+        self.slot_mut(id)?.player_steering = on;
+        Ok(())
+    }
+
     /// Re-apply a vehicle's body inertia (`wp_vehicle::Vehicle::body_inertia`) after a lab
     /// ride override changed it (the hidden tuning panel). Lab-only: not a replay op.
     pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), SimError> {
@@ -932,8 +944,10 @@ impl Sim {
                 };
                 // One physics for every car; the plain keyboard steering aids only for a
                 // player's car (AI racers, police and traffic steer with their own model).
-                slot.vehicle
-                    .set_player_input(slot.kind == VehicleKind::Player);
+                slot.vehicle.set_player_input(
+                    slot.player_steering
+                        .unwrap_or(slot.kind == VehicleKind::Player),
+                );
                 slot.vehicle.step_with_ground(
                     &slot.input,
                     &slot.assists,

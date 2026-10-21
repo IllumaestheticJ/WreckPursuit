@@ -301,6 +301,13 @@ pub fn build_sim(
             sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
         }
         sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
+        // Player steering aids: a live-driven entity only (see `EntitySpec::player_steering`).
+        let live = matches!(spec.driver, Driver::Scripted) && spec.inputs.is_empty();
+        match spec.player_steering {
+            Some(on) => sim.set_player_steering(id, Some(on))?,
+            None if !live => sim.set_player_steering(id, Some(false))?,
+            None => {}
+        }
         if sc.panels {
             let rel = format!("panels/{}.json", spec.car);
             let spec_p = wp_damage::PanelSpec::parse(&spec.car, &data.read(&rel)?)
