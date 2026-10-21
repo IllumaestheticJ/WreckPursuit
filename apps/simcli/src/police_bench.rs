@@ -183,6 +183,7 @@ impl BenchCell {
             parked_cars: true,
             police_cars: true,
             covered_los: true,
+            car_mix: false,
             police_presence: None,
             slow: false,
             panels: false,

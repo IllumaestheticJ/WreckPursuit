@@ -28,6 +28,21 @@ pub fn material_look(slot: MaterialSlot, paint: [f32; 3]) -> ([f32; 4], Shade) {
         MaterialSlot::Rubber => ([0.02, 0.02, 0.02, 1.0], Shade::Lit),
         MaterialSlot::Metal => ([0.45, 0.47, 0.50, 1.0], Shade::Lit),
         MaterialSlot::Interior => ([0.05, 0.045, 0.04, 1.0], Shade::Lit),
+        MaterialSlot::Livery => ([paint[0], paint[1], paint[2], 1.0], Shade::Lit),
+        MaterialSlot::Chrome => ([0.80, 0.82, 0.85, 1.0], Shade::Lit),
+        MaterialSlot::Carbon => ([0.04, 0.04, 0.045, 1.0], Shade::Lit),
+        MaterialSlot::Caliper => ([0.55, 0.05, 0.05, 1.0], Shade::Lit),
+        MaterialSlot::Engine => ([0.12, 0.12, 0.13, 1.0], Shade::Lit),
+        MaterialSlot::LightbarRed => ([0.60, 0.02, 0.02, 1.0], Shade::Emissive),
+        MaterialSlot::LightbarBlue => ([0.02, 0.08, 0.60, 1.0], Shade::Emissive),
+        MaterialSlot::LightbarClear => ([0.85, 0.85, 0.85, 1.0], Shade::Emissive),
+        MaterialSlot::EmissiveAmber => ([0.90, 0.50, 0.05, 1.0], Shade::Emissive),
+        MaterialSlot::Grille => ([0.02, 0.02, 0.02, 1.0], Shade::Lit),
+        MaterialSlot::Exhaust => ([0.55, 0.52, 0.48, 1.0], Shade::Lit),
+        MaterialSlot::Rim => ([0.45, 0.47, 0.50, 1.0], Shade::Lit),
+        MaterialSlot::Spring => ([0.30, 0.30, 0.32, 1.0], Shade::Lit),
+        MaterialSlot::Accent => ([0.20, 0.20, 0.22, 1.0], Shade::Lit),
+        MaterialSlot::Underglow => ([0.05, 0.05, 0.06, 1.0], Shade::Lit),
     }
 }
 

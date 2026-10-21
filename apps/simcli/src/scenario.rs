@@ -52,6 +52,12 @@ pub struct Scenario {
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub police_presence: Option<f32>,
+    /// Mixed fleets (default off, so existing goldens are unchanged): AI police use the
+    /// heat-keyed five-model fleet ([`crate::run::CAR_MIX_POLICE`], `Sim::set_police_cars`)
+    /// and physical traffic the civilian models of [`crate::run::CAR_MIX_TRAFFIC`]
+    /// (`Sim::set_traffic_cars`) instead of one police and one traffic car. Needs a city.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub car_mix: bool,
     /// Expensive to simulate (minutes of a full city): debug `cargo test` skips it, as it skips
     /// `scenarios/soak/`; the release CI jobs (`simcli goldens`, `simcli determinism`, the
     /// wasm compare) still run it.

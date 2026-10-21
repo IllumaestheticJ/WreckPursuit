@@ -328,7 +328,7 @@ const r = await page.evaluate(() => {
     vehicles: wp.sim.vehicleMeta().length / 3,
     gfx: wp.scene.quality?.label() ?? "pre-pass (MSAA, native res)",
     structure,
-    agents: wp.sim.trafficAgents().length / 5,
+    agents: wp.sim.trafficAgents().length / 7,
     audioRunning: window.__wpAudio?.ctx?.state === "running",
     audioVoicesPerS: ((window.__wpAudio?.pool?.created ?? 0) - p.voices0) / wall,
     audioStripsReused: window.__wpAudio?.pool?.stripsReused ?? 0,

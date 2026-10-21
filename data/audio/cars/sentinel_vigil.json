@@ -1,0 +1,19 @@
+{
+  "id": "sentinel_vigil",
+  "engine": {
+    "cylinders": 8,
+    "layout": "V",
+    "firing": "CrossPlane",
+    "induction_exhaust_balance": 0.4,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 1.05
+  },
+  "engine_pack": "engine_proc_v8",
+  "world_pack": "world_proc",
+  "horn_cue": "horn/standard",
+  "siren": {
+    "pack": "siren_proc",
+    "default_mode": "Auto"
+  }
+}

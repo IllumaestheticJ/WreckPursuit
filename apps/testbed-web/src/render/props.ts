@@ -278,8 +278,9 @@ export class PropView {
   private wrecked = new Uint8Array(0);
   private entityBase = 0;
   private wreckReskins = 0;
-  private readonly wreckHead = new THREE.MeshStandardMaterial({ color: 0x8a8778 });
-  private readonly wreckTail = new THREE.MeshStandardMaterial({ color: 0x4a0c0c });
+  // Flat-shaded: some panel-mesh lamp parts are batched without normals (render/panels.ts).
+  private readonly wreckHead = new THREE.MeshStandardMaterial({ color: 0x8a8778, flatShading: true, side: THREE.DoubleSide });
+  private readonly wreckTail = new THREE.MeshStandardMaterial({ color: 0x4a0c0c, flatShading: true, side: THREE.DoubleSide });
 
   private movedWrites = 0;
   private repickWrites = 0;
@@ -534,7 +535,8 @@ export class PropView {
     root.add(chassis);
     root.name = `parked${i}`;
     const paint = new THREE.Color(styledPaint(parkedPaint(i)));
-    const body = new PanelBody(entity, info.car_id, paint, this.wreckHead, this.wreckTail);
+    // keepPaint: the instanced parked car it replaces has this paint (no factory tint).
+    const body = new PanelBody(entity, info.car_id, paint, this.wreckHead, this.wreckTail, { keepPaint: true });
     chassis.add(body.root);
     const w: Wreck = { prop: i, entity, root, chassis, body, regions: info.regions, nodes: null, shattered: 0, ready: false };
     this.wrecks.set(i, w);
@@ -548,6 +550,7 @@ export class PropView {
         const hub = new THREE.Group();
         hub.position.set(wi.position_m[0], wi.position_m[1], wi.position_m[2]);
         for (const m of body.wheelParts[k] ?? []) hub.add(m);
+        for (const m of body.hubParts[k] ?? []) hub.add(m);
         chassis.add(hub);
       });
       w.ready = true;

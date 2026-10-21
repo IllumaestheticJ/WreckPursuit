@@ -22,7 +22,7 @@ sys.path.insert(0, HERE)
 from roster_inputs import CARS  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
-EXE = os.path.join(REPO, "target", "release", "simcli")
+EXE = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "simcli")
 
 SCENARIO = """(
     name: "smoke_{car}_{mode}",

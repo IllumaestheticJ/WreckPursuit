@@ -8,9 +8,17 @@
 // livery colour as the car will have once promoted, so the swap to a full VehicleView is
 // invisible. Far cars, and cars whose mesh has not arrived yet, use a low-poly proxy of the
 // model's body size. Coordinates: sim space (+Z up), parented under SceneView.world.
+//
+// Every model in the session has its own instance sets (render/lod.ts picks the model from the
+// draw record's `model` index), so mixed traffic and a mixed police fleet cost a few draw calls
+// per model. Police models with a livery scheme (render/livery.ts) draw their body panels with
+// the scheme's shared texture and their light-bar lenses as instanced lens meshes flashed per
+// unit (render/lights.ts patterns); per-unit numbers only appear once the car is promoted.
 import * as THREE from "three";
-import type { CarMeshJson } from "./panels";
-import { carMeshNow, loadCarMesh } from "./panels";
+import type { CarMeshJson, MaterialJson, PartMaterial } from "./panels";
+import { applyCarEnv, carMeshNow, loadCarMesh, rgbColour } from "./panels";
+import { hasPoliceLivery, liveryBaseColour, liveryTexture } from "./livery";
+import { LENS_ON } from "./lights";
 import { sim, type CarModelInfo } from "../wasm/sim";
 import { PALETTE, type Hex } from "./palette";
 import { artStyle } from "./style";
@@ -97,9 +105,17 @@ export function styledLamp(out: THREE.Color, hex: Hex): THREE.Color {
 /** How a car was drawn this frame. */
 export type DrawMode = "full" | "proxy";
 
-interface Geoms {
+export interface Geoms {
   /** Painted surfaces (white vertex colour; instance colour = livery). */
   paint: THREE.BufferGeometry;
+  /** Body panels under a police livery texture (uv; no instance colour), null without one. */
+  liv?: THREE.BufferGeometry | null;
+  /** Light-bar lenses: left / right side (red and blue lens parts, vertex colour = lit hue),
+   * clear takedowns, amber advisors; instance colour = brightness. Null when the mesh has none. */
+  lensL?: THREE.BufferGeometry | null;
+  lensR?: THREE.BufferGeometry | null;
+  lensW?: THREE.BufferGeometry | null;
+  lensA?: THREE.BufferGeometry | null;
   /** Glass, trim, rubber, metal, head lamps (own vertex colours). */
   detail: THREE.BufferGeometry;
   /** Tail lamps (instance colour = lamp state). */
@@ -111,7 +127,8 @@ interface Geoms {
   indR: THREE.BufferGeometry;
 }
 
-/** Base colour per mesh material (glass is drawn opaque at LOD distances). */
+/** Base colour per mesh material (glass is drawn opaque at LOD distances); render/panels.ts
+ * greybox colours. */
 const MATERIAL_RGB: Record<string, number> = {
   glass: 0x5c7480,
   trim: 0x1b1b1d,
@@ -119,9 +136,24 @@ const MATERIAL_RGB: Record<string, number> = {
   metal: 0x9da3a8,
   headlight: 0xf2ecd2,
   interior: 0x2b2724,
+  chrome: 0xd8dde2,
+  carbon: 0x1c1d20,
+  caliper: 0x3a3c40,
+  engine: 0x3b3d40,
+  grille: 0x0d0e10,
+  exhaust: 0xb9b2a6,
+  rim: 0x9da3a8,
+  spring: 0x3a3c40,
+  accent: 0x8a1020,
+  underglow: 0x101012,
+  emissive_amber: 0xc87a10,
+  lightbar_red: 0x661018,
+  lightbar_blue: 0x102266,
+  lightbar_clear: 0xbfc4c8,
 };
 /** The same in low-poly dark (render/palette.ts; as R's panel meshes are recoloured). */
 const MATERIAL_RGB_LOWPOLY: Record<string, number> = {
+  ...MATERIAL_RGB,
   glass: PALETTE.glass,
   trim: PALETTE.trim,
   rubber: PALETTE.tire,
@@ -129,21 +161,44 @@ const MATERIAL_RGB_LOWPOLY: Record<string, number> = {
   headlight: PALETTE.headlight,
   interior: PALETTE.interior,
 };
-/** Detail colour of a mesh material in the current art style (read when geometry is built). */
+/** Mesh-file slots `tints` recolour in the panel meshes too (render/panels.ts TINTABLE). */
+const TINTED: ReadonlySet<string> = new Set(["caliper", "rim", "spring", "accent", "engine", "grille", "exhaust", "chrome", "carbon", "metal", "trim", "rubber", "glass", "interior"]);
+/** Detail colour of a mesh material in the current art style (read when geometry is built);
+ * the mesh's `tints` win in greybox, as on the panel meshes. Linear RGB into `out`. */
+function detailColour(material: PartMaterial, mesh: CarMeshJson | null, out: THREE.Color): THREE.Color {
+  if (artStyle.lowpoly && LOWPOLY_MAPPED.has(material)) return out.setHex(MATERIAL_RGB_LOWPOLY[material]);
+  const tint = TINTED.has(material) ? mesh?.tints?.[material as MaterialJson] : undefined;
+  if (tint) return rgbColour(tint, out);
+  return out.setHex(MATERIAL_RGB[material] ?? 0x808080);
+}
+/** Materials low-poly dark takes from its palette (render/panels.ts PanelBody.applyStyle). */
+const LOWPOLY_MAPPED: ReadonlySet<string> = new Set(["glass", "trim", "rubber", "metal", "headlight", "interior"]);
+/** Detail colour as a hex (proxy geometry, no mesh). */
 function detailRgb(material: string): number {
   return (artStyle.lowpoly ? MATERIAL_RGB_LOWPOLY : MATERIAL_RGB)[material] ?? 0x808080;
 }
 
-/** Merge parts into one non-indexed geometry with a flat vertex colour per part. */
-function merge(chunks: { pos: Float32Array; idx: ArrayLike<number>; rgb: number }[]): THREE.BufferGeometry {
+/** One part's triangles for `merge`: positions, index, flat colour (hex or linear Color), UVs. */
+interface Chunk {
+  pos: Float32Array;
+  idx: ArrayLike<number>;
+  rgb: number | THREE.Color;
+  uv?: ArrayLike<number>;
+}
+
+/** Merge parts into one non-indexed geometry with a flat vertex colour per part (and UVs when
+ * `withUv`: 0..1 from the mesh file's 0..65535). */
+function merge(chunks: Chunk[], withUv = false): THREE.BufferGeometry {
   let n = 0;
   for (const c of chunks) n += c.idx.length;
   const pos = new Float32Array(n * 3);
   const col = new Float32Array(n * 3);
+  const uv = withUv ? new Float32Array(n * 2) : null;
   const tmp = new THREE.Color();
   let o = 0;
   for (const c of chunks) {
-    tmp.setHex(c.rgb);
+    if (typeof c.rgb === "number") tmp.setHex(c.rgb);
+    else tmp.copy(c.rgb);
     for (let i = 0; i < c.idx.length; i++, o++) {
       const v = c.idx[i] * 3;
       pos[o * 3] = c.pos[v];
@@ -152,11 +207,16 @@ function merge(chunks: { pos: Float32Array; idx: ArrayLike<number>; rgb: number 
       col[o * 3] = tmp.r;
       col[o * 3 + 1] = tmp.g;
       col[o * 3 + 2] = tmp.b;
+      if (uv && c.uv) {
+        uv[o * 2] = (c.uv[c.idx[i] * 2] ?? 0) / 65535;
+        uv[o * 2 + 1] = (c.uv[c.idx[i] * 2 + 1] ?? 0) / 65535;
+      }
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  if (uv) g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   g.computeVertexNormals();
   return g;
 }
@@ -227,6 +287,13 @@ export function indicatorMarkers(info: { body_size_m: [number, number, number] |
 
 /** Nose and tail y of a car mesh (non-wheel parts, chassis space), m; null if it has none. */
 export function meshFrontRear(mesh: CarMeshJson): { front: number; rear: number } | null {
+  // Once per mesh (VehicleView asks for every promoted car).
+  let hit = frontRearCache.get(mesh);
+  if (hit === undefined) frontRearCache.set(mesh, (hit = computeFrontRear(mesh)));
+  return hit;
+}
+const frontRearCache = new WeakMap<CarMeshJson, { front: number; rear: number } | null>();
+function computeFrontRear(mesh: CarMeshJson): { front: number; rear: number } | null {
   let front = -Infinity;
   let rear = Infinity;
   for (const p of mesh.parts) {
@@ -240,11 +307,18 @@ export function meshFrontRear(mesh: CarMeshJson): { front: number; rear: number 
   return Number.isFinite(front) && Number.isFinite(rear) ? { front, rear } : null;
 }
 
-/** The car's panel mesh at rest (chassis space), wheels placed on their hubs. */
-export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
-  const paint: Parameters<typeof merge>[0] = [];
-  const detail: Parameters<typeof merge>[0] = [];
-  const tail: Parameters<typeof merge>[0] = [];
+/**
+ * The car's panel mesh at rest (chassis space), wheels placed on their hubs. `police`: a police
+ * model draws its livery scheme's body panels apart (`liv`, textured) and its light-bar lenses as
+ * lens geometry (`lensL` …); otherwise livery panels are paint and lenses are detail.
+ */
+export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false): Geoms {
+  const paint: Chunk[] = [];
+  const detail: Chunk[] = [];
+  const tail: Chunk[] = [];
+  const liv: Chunk[] = [];
+  const lens: Record<"L" | "R" | "W" | "A", Chunk[]> = { L: [], R: [], W: [], A: [] };
+  const textured = police && hasPoliceLivery(mesh);
   let front = -Infinity;
   let rear = Infinity;
   for (const p of mesh.parts) {
@@ -267,18 +341,41 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
         rear = Math.min(rear, pos[i]);
       }
     }
-    const chunk = { pos, idx: p.indices, rgb: 0xffffff };
-    if (p.material === "paint") paint.push(chunk);
-    else if (p.material === "taillight") tail.push(chunk);
-    else detail.push({ ...chunk, rgb: detailRgb(p.material) });
+    const chunk: Chunk = { pos, idx: p.indices, rgb: 0xffffff, uv: p.uvs };
+    const m = p.material;
+    if (m === "livery" && textured) liv.push(chunk);
+    else if (m === "paint" || m === "livery") paint.push(chunk);
+    else if (m === "taillight") tail.push(chunk);
+    else if (police && (m.startsWith("lightbar_") || m === "emissive_amber")) {
+      // Lit hue in the vertex colour; the instance colour is the pattern's brightness.
+      let cx = 0;
+      for (let i = 0; i < pos.length; i += 3) cx += pos[i];
+      const ch = m === "lightbar_clear" ? "W" : m === "emissive_amber" ? "A" : cx > 0 ? "R" : "L";
+      const hue = m === "lightbar_red" ? LENS_ON.red : m === "lightbar_blue" ? LENS_ON.blue : m === "lightbar_clear" ? LENS_ON.clear : LENS_ON.amber;
+      lens[ch].push({ ...chunk, rgb: hue });
+    } else detail.push({ ...chunk, rgb: detailColour(m, mesh, new THREE.Color()) });
   }
   const l = info.body_size_m[1];
   const fy = Number.isFinite(front) ? front : l / 2;
   const ry = Number.isFinite(rear) ? rear : -l / 2;
   const lamps = lampMarkers(info, fy, ry);
   const ind = indicatorMarkers(info, fy, ry);
+  const lensGeo = (c: Chunk[]) => (c.length ? merge(c) : null);
+  const hasLens = lens.L.length + lens.R.length > 0;
   // The mesh's own tail-light parts sit inside the shell; the markers are what shows.
-  return { paint: merge(paint), detail: merge(detail), tail: join([merge(tail), lamps.tail]), head: lamps.head, indL: ind.left, indR: ind.right };
+  return {
+    paint: merge(paint),
+    liv: liv.length ? merge(liv, true) : null,
+    detail: merge(detail),
+    tail: join([merge(tail), lamps.tail]),
+    head: lamps.head,
+    indL: ind.left,
+    indR: ind.right,
+    lensL: hasLens ? lensGeo(lens.L) : null,
+    lensR: hasLens ? lensGeo(lens.R) : null,
+    lensW: hasLens ? lensGeo(lens.W) : null,
+    lensA: hasLens ? lensGeo(lens.A) : null,
+  };
 }
 
 /** Low-poly stand-in from the body size: lower body, cabin, glass band, wheels, lamps. */
@@ -303,9 +400,18 @@ export function proxyGeoms(info: CarModelInfo): Geoms {
   return { paint, detail, tail: lamps.tail, head: lamps.head, indL: ind.left, indR: ind.right };
 }
 
-/** One set of instanced meshes (paint / detail / tail, optional light bar and indicators). */
+/** Instance brightness of an unlit light-bar lens, and the extra of a fully lit one. */
+const LENS_IDLE = 0.3;
+const LENS_LIT = 1.9;
+
+/** One set of instanced meshes (paint / detail / tail, optional livery, light bar or lenses,
+ * and indicators). */
 export class InstancedCar {
   readonly paint: THREE.InstancedMesh;
+  /** Textured livery body (police schemes; no instance colour). */
+  readonly liv: THREE.InstancedMesh | null;
+  /** Light-bar lens channels L, R, W (clear), A (amber); null without mesh lenses. */
+  readonly lens: (THREE.InstancedMesh | null)[] | null;
   readonly detail: THREE.InstancedMesh;
   readonly tail: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
@@ -317,8 +423,9 @@ export class InstancedCar {
   readonly meshes: readonly THREE.InstancedMesh[];
   count = 0;
 
-  /** `indicators` adds the indicator lamp meshes (the fleet; parked props have none). */
-  constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null, indicators = false) {
+  /** `indicators` adds the indicator lamp meshes (the fleet; parked props have none);
+   * `livMat` draws `g.liv` (police livery texture). */
+  constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null, indicators = false, livMat: THREE.Material | null = null) {
     const mk = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
       const m = new THREE.InstancedMesh(geo, mat, capacity);
       m.count = 0;
@@ -338,7 +445,30 @@ export class InstancedCar {
     }
     this.indL = indicators ? mk(g.indL, mats.lamp) : null;
     this.indR = indicators ? mk(g.indR, mats.lamp) : null;
-    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : []), ...(this.indL && this.indR ? [this.indL, this.indR] : [])];
+    this.liv = g.liv && livMat ? mk(g.liv, livMat) : null;
+    const lensMesh = (geo: THREE.BufferGeometry | null | undefined) => (geo ? mk(geo, mats.lens) : null);
+    this.lens = g.lensL || g.lensR ? [lensMesh(g.lensL), lensMesh(g.lensR), lensMesh(g.lensW), lensMesh(g.lensA)] : null;
+    const extra: THREE.InstancedMesh[] = [];
+    if (this.liv) extra.push(this.liv);
+    for (const m of this.lens ?? []) if (m) extra.push(m);
+    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : []), ...(this.indL && this.indR ? [this.indL, this.indR] : []), ...extra];
+  }
+
+  /** Light-bar lens brightness of instance `i` (channels L, R, W, A in 0..1; null = all off).
+   * No-op without mesh lenses. */
+  putLens(i: number, levels: ArrayLike<number> | null): void {
+    const lens = this.lens;
+    if (!lens) return;
+    for (let k = 0; k < 4; k++) {
+      const m = lens[k];
+      if (!m) continue;
+      const v = LENS_IDLE + LENS_LIT * (levels ? levels[k] : 0);
+      if (m.instanceColor === null) m.setColorAt(i, tmpLens.setRGB(v, v, v));
+      else {
+        const a = m.instanceColor.array as Float32Array;
+        a[i * 3] = a[i * 3 + 1] = a[i * 3 + 2] = v;
+      }
+    }
   }
 
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
@@ -422,6 +552,8 @@ export interface FleetMaterials {
   paint: THREE.Material;
   detail: THREE.Material;
   lamp: THREE.Material;
+  /** Light-bar lenses (vertex colour × instance brightness). */
+  lens: THREE.Material;
 }
 
 /** Lens colours of a car with its lights off (below 1, so they never reach the bloom pass). */
@@ -476,12 +608,19 @@ const tmpHeadStyled = new THREE.Color();
 const tmpIndOn = new THREE.Color();
 const tmpIndOff = new THREE.Color();
 const tmpRead = new THREE.Color();
+const tmpLens = new THREE.Color();
 
 /** One car model: full and proxy instance sets. */
-class FleetModel {
+export class FleetModel {
   full: InstancedCar | null = null;
   proxy: InstancedCar;
   readonly info: CarModelInfo;
+  /** Police livery scheme's body texture material (null: plain paint). */
+  livMat: THREE.MeshStandardMaterial | null = null;
+  /** Paint of the plain paint parts under a livery scheme (its base colour), else null. */
+  liveryBase: number | null = null;
+  /** The full mesh has light-bar lenses (flashed per instance; no box bar). */
+  lensed = false;
 
   constructor(
     readonly carId: string,
@@ -504,7 +643,15 @@ class FleetModel {
 
   private setMesh(mesh: CarMeshJson): void {
     if (this.full) return;
-    this.full = new InstancedCar(fullGeoms(mesh, this.info), MAX_FULL, this.mats, this.barAt(), !this.police);
+    const g = fullGeoms(mesh, this.info, this.police);
+    if (g.liv) {
+      const tex = liveryTexture(mesh);
+      this.livMat = new THREE.MeshStandardMaterial({ map: tex, flatShading: true, metalness: 0.25, roughness: 0.55 });
+      applyCarEnv(this.livMat, !artStyle.lowpoly);
+      this.liveryBase = liveryBaseColour(mesh)?.getHex() ?? null;
+    }
+    this.lensed = g.lensL != null || g.lensR != null;
+    this.full = new InstancedCar(g, MAX_FULL, this.mats, this.lensed ? null : this.barAt(), !this.police, this.livMat);
     this.group.add(...this.full.meshes);
   }
 
@@ -525,10 +672,13 @@ export class Fleet {
   /** Full meshes within this distance from the camera (m); graphics quality lowers it on phones. */
   fullLodM = FULL_LOD_M;
   private readonly models = new Map<string, FleetModel>();
+  /** Bumped whenever the models are dropped (`clear`): holders of FleetModel refs re-resolve. */
+  generation = 0;
   readonly mats: FleetMaterials = {
     paint: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 }),
     detail: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }),
     lamp: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    lens: new THREE.MeshBasicMaterial({ vertexColors: true }),
   };
   /** Art-style version the materials and model geometry were built for. */
   private styleVersion = -1;
@@ -575,6 +725,9 @@ export class Fleet {
     paint.roughness = lowpoly ? 0.85 : 0.55;
     paint.metalness = lowpoly ? 0.15 : 0.25;
     detail.roughness = lowpoly ? 0.85 : 0.6;
+    // Image-based lighting in greybox, as the panel meshes (render/panels.ts applyCarEnv).
+    applyCarEnv(paint, !lowpoly);
+    applyCarEnv(detail, !lowpoly);
     if (this.models.size > 0) this.clear();
   }
 
@@ -592,6 +745,7 @@ export class Fleet {
     tail: number,
     bar: number | null,
     ind = 0,
+    lens: ArrayLike<number> | null = null,
   ): DrawMode {
     this.p.set(rec[o], rec[o + 1], rec[o + 2]);
     this.q.set(rec[o + 3], rec[o + 4], rec[o + 5], rec[o + 6]);
@@ -602,6 +756,7 @@ export class Fleet {
       last.car = full;
       last.i = full.count;
       full.addHex(this.m, paint, tail, bar, ind);
+      full.putLens(last.i, lens);
       return "full";
     }
     last.car = null;
@@ -622,7 +777,9 @@ export class Fleet {
     for (const m of this.models.values()) {
       m.proxy.dispose();
       m.full?.dispose();
+      m.livMat?.dispose();
     }
     this.models.clear();
+    this.generation++;
   }
 }
