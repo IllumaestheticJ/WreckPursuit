@@ -1254,6 +1254,25 @@ Red on plain `lead/main-sync` too, not police (left to main-sync):
 - 44 goldens mismatch identically on main-sync (same list with or without this branch); only
   the four police ones above are blessed here.
 
+### Keep-up round 2: corner exits and turn-round (2026-10-21)
+16 seeds × 12 cells each:
+
+| | lead m | pace | capture | capture s | escape | crash/min | civ/min | stuck/min |
+|---|---|---|---|---|---|---|---|---|
+| baseline d3c7408c | 62 | 0.68 | 79 % | 54 | 14 % | 1.00 | 0.29 | 3.59 |
+| + turning-round fix (6f5b0f24) | 60 | 0.78 | 82 % | 61 | 14 % | 1.05 | 0.34 | 3.33 |
+| + turn_around_mps 4 -> 6 (not kept) | 62 | 0.76 | 81 % | 56 | 13 % | 1.26 | 0.37 | 3.44 |
+
+- **Kept:** the pro driver's 4 m/s "turning round" crawl fired whenever the lane point 8 m on
+  was > 70° off the nose, i.e. at the apex of every right-angle corner; it now also needs the
+  car to point away from the road where it is. Pace 0.68 → 0.78.
+- **Not kept:** a faster turn-round crawl (6 m/s): no gain, +20 % crashes.
+- Traces (`WP_BENCH_TRACE`, new `branch` / `pro_dbg` tags): the nearest pursuer far behind
+  (> 40 m) is slow mostly in the plain drive with no limit in force: genuine turn-rounds at
+  the 4 m/s crawl (≈ 40 % of those), corner speeds and acceleration lag; push-throughs and
+  U-turns make up most of the rest. Lead gap stays ≈ 60 m: the next lever is the
+  turn-round itself (a quicker manoeuvre, not a higher crawl speed) and prediction.
+
 ### Lead's main-sync blockers (2026-10-21, on main-sync cd6cd320)
 - **wp_wasm `run_tests` ×2** (nothing settled in 60 s): not police routing. The test held a
   full brake on the "parked" racer; at a standstill that auto-reverses, and on main's grid the
