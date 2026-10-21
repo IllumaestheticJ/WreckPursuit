@@ -34,7 +34,8 @@ the coefficients, not hand-typed).
 - **Relaxation length:** ~1–1.5× the contact-patch length scale; shorter for stiff
   sidewalls. Also the keyboard-friendliness knob.
 - **Surfaces:** wet asphalt keeps 60–85% of dry grip depending on tread; loose surfaces
-  ~0.45–0.68; grass lowest.
+  ~0.45–0.84 (all-terrain highest). Dry grass uses the same multiplier as dirt so it drives
+  like a dirt road; it only gets slicker than dirt once wet (`wet_loss_scale` 1.3 vs 1.2).
 - **`PaintedLine` (contract v0.3.0, added by 09 / H in round 8)** is the *dry* tire-on-paint
   multiplier: 0.92–0.96. Road paint fills the asphalt macrotexture, so the hysteresis part of
   grip drops a few percent; compounds that lean hardest on hysteresis (semi-slick, drag radial,
