@@ -30,6 +30,7 @@ pub mod map;
 pub mod markings;
 pub mod metro;
 pub mod network;
+pub mod palette;
 pub mod procgen;
 pub mod props;
 pub mod roads;

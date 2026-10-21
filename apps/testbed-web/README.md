@@ -24,13 +24,17 @@ npm run typecheck
 | `src/telemetry.ts` | rolling 10 s canvas plots |
 | `src/input.ts` | keyboard ramps + Gamepad API with deadzones |
 | `src/ui/carStats.ts` | stat bars under the car picker (acceleration, top speed, cornering) from `sim.carStats()` (`data/stats/cars.json`, measured on the physics rig); options carry the numbers as tooltips |
+| `src/features_view.ts` | static city features (format v4) from `city_features()`: one `InstancedMesh` per (512 m chunk, shape, material), yaw/pitch like the physics colliders, palette from `feature_palette()`, per-instance car paint, emissive lights; chunks beyond 1.5 km hidden (`?featureDist=` m), layer `features` (`;` key) |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
+| `e2e/features_shots.mjs` | instanced features check: free drive in `vesper_v3` (default), injects synthetic boxes / cylinders when the city has none, screenshots (`node e2e/features_shots.mjs [outDir] [cityId]`) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
 Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2
-(`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=procedural_12x12`,
+(`vesper_v2`, hills, default), the flat grid (`procedural_12x12`) or Port Vesper v3 (`vesper_v3`, in
+development, generated in the browser at session start, ≈ 5 s; a city without a greybox file only logs a
+warning); URL `?city=procedural_12x12`,
 `?chase=1`. The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback
 `.greybox.b64.txt` on the published build). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.

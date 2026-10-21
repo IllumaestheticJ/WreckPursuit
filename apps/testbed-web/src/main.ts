@@ -24,7 +24,7 @@ import { RealTimeMeter } from "./rtf";
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
 /** Cities the selector offers (data/city/<id>.greybox.glb); the first is the default. */
-const CITY_IDS = ["vesper_v2", "procedural_12x12"];
+const CITY_IDS = ["vesper_v2", "procedural_12x12", "vesper_v3"];
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -134,6 +134,7 @@ async function main(): Promise<void> {
     if (cityId && CITY_IDS.includes(cityId)) citySel.value = cityId;
     scene.signals.setHeads(sim.signalHeads());
     scene.markings.set(sim.roadMarkings(false), sim.roadMarkings(true));
+    scene.features.set(sim.cityFeatures(), sim.featurePalette());
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
@@ -541,6 +542,7 @@ async function main(): Promise<void> {
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
     scene.signals.update(sim.signalStates(), wi[W.night]);
+    scene.features.update(rig.camera);
 
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {

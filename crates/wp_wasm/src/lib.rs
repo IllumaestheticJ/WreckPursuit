@@ -13,7 +13,7 @@
 //! |---|---|
 //! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `reset_vehicle(entity)` |
-//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
+//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)`, `city_features()`, `feature_stride()`, `feature_palette()` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
@@ -29,6 +29,7 @@ pub mod net;
 pub mod audio;
 pub mod build_stats;
 pub mod data;
+pub mod features;
 pub mod garage;
 pub mod pack;
 pub mod police;
@@ -625,6 +626,33 @@ pub fn road_markings(yellow: bool) -> Result<Vec<f32>, JsValue> {
         }
         out
     })
+}
+
+/// Floats per feature in `city_features()`.
+#[wasm_bindgen]
+pub fn feature_stride() -> u32 {
+    features::FEATURE_STRIDE as u32
+}
+
+/// Box and cylinder features of the session's city (empty without one; prisms are in the
+/// greybox), 11 floats each: `[shape (0 box, 1 cylinder), material, kind, cx, cy, cz, hx, hy,
+/// hz, yaw, pitch]` (see [`features::pack`]; cylinder: centre = base + height / 2,
+/// `hx = hy = radius`, `hz = height / 2`). Fetch once per session.
+#[wasm_bindgen]
+pub fn city_features() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        if !s.has_city() {
+            return Vec::new();
+        }
+        features::pack(s.sim().world().network())
+    })
+}
+
+/// Feature material colours, RGBA (4 floats) per `Material` index: the greybox palette
+/// (`wp_world::palette::material_rgba`), so instanced features match the greybox prisms.
+#[wasm_bindgen]
+pub fn feature_palette() -> Vec<f32> {
+    features::palette()
 }
 
 /// Current state per head in `signal_heads()` order, one byte each: 0 off, 1 red, 2 yellow,

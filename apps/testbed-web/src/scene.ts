@@ -10,6 +10,7 @@ import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { MarkingsView } from "./markings_view";
+import { FeaturesView } from "./features_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
@@ -52,6 +53,8 @@ export class SceneView {
   readonly signals = new SignalView();
   /** Painted road markings (markings_view.ts). */
   readonly markings = new MarkingsView();
+  /** Instanced box / cylinder city features (features_view.ts). */
+  readonly features = new FeaturesView();
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -85,7 +88,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group);
+    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group, this.features.group);
   }
 
   /**
@@ -125,6 +128,10 @@ export class SceneView {
         asphalt: 1,
         highway_concrete: 1,
         ramp_taper: 2,
+        // Flat feature prisms painted on the ground (bay lines, runway paint, lawns).
+        feature_paint_white: 2,
+        feature_paint_yellow: 2,
+        feature_grass: 1,
       };
       gltf.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
@@ -139,7 +146,9 @@ export class SceneView {
       });
       holder.add(gltf.scene);
     } catch (e) {
-      console.warn("city greybox not available", cityId, e);
+      // A city without a committed greybox (e.g. vesper_v3 in development) still runs: the
+      // sim, markings and instanced features draw without it.
+      console.warn(`city greybox not available for ${cityId} (generate it with gen-city); continuing without it`, e);
     }
   }
 

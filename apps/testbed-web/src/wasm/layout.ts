@@ -105,3 +105,20 @@ export const META_STRIDE = 3;
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
 export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+
+/** Floats per feature in city_features() (crates/wp_wasm/src/features.rs). Box and cylinder
+ * features only (prisms are in the greybox), network order:
+ * `[shape, material, kind, cx, cy, cz, hx, hy, hz, yaw, pitch]` in sim space (+Z up).
+ * Box: centre, half extents (local x right, y forward, z up), yaw about +Z (0 = local +Y north,
+ * CCW) applied after pitch about local +X (positive = the +Y end up).
+ * Cylinder: centre = base + height / 2, hx = hy = radius, hz = height / 2, yaw = pitch = 0.
+ * `material` / `kind` are wp_world `Material` / `FeatureKind` indices (declaration order). */
+export const FEATURE_STRIDE = 11;
+/** Field offsets inside one city_features() record. */
+export const FT = { shape: 0, material: 1, kind: 2, cx: 3, cy: 4, cz: 5, hx: 6, hy: 7, hz: 8, yaw: 9, pitch: 10 } as const;
+/** city_features() shape codes. */
+export const FEATURE_SHAPE = { box: 0, cylinder: 1 } as const;
+/** Material indices the testbed treats specially (feature_palette() has 4 floats per index). */
+export const FEATURE_MATERIAL = { carPaint: 22, light: 23 } as const;
+/** Spatial chunk size for instanced features, m (frustum culling + draw distance). */
+export const FEATURE_CHUNK_M = 512;
