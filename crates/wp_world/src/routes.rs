@@ -63,6 +63,27 @@ pub struct ActiveRoute {
 
 /// Nearest drivable lane to `p` (optionally agreeing with `heading`): `(lane, s)`.
 pub fn nearest_lane(map: &CityMap, p: V3, heading: Option<V2>) -> Option<(SegId, f32)> {
+    nearest_lane_impl(map, p, heading, false)
+}
+
+/// [`nearest_lane`] for a point whose height is real (a POI on the ground): when `p` is not
+/// on a lane, lanes more than [`SNAP_HEIGHT_M`] above or below it are skipped as long as
+/// any lane at its height is left (a garage beside a viaduct snaps to the street it stands
+/// on, not to the deck 8 m over it).
+pub fn nearest_lane_at_height(map: &CityMap, p: V3, heading: Option<V2>) -> Option<(SegId, f32)> {
+    nearest_lane_impl(map, p, heading, true).or_else(|| nearest_lane_impl(map, p, heading, false))
+}
+
+/// Height difference beyond which [`nearest_lane_at_height`] skips a lane, m (the same
+/// tolerance as [`CityMap::locate`]).
+pub const SNAP_HEIGHT_M: f32 = 4.0;
+
+fn nearest_lane_impl(
+    map: &CityMap,
+    p: V3,
+    heading: Option<V2>,
+    match_height: bool,
+) -> Option<(SegId, f32)> {
     if let Some(l) = map.locate(p, heading, 2.0, true, false) {
         return Some((l.seg, l.s));
     }
@@ -75,10 +96,14 @@ pub fn nearest_lane(map: &CityMap, p: V3, heading: Option<V2>) -> Option<(SegId,
         }
         let pr = s.project(q);
         let sc = pr.s.clamp(0.0, s.length);
+        let (pt, tan) = s.point_at(sc);
         if let Some(h) = heading {
-            if geom::dot(s.point_at(sc).1, h) < 0.3 {
+            if geom::dot(tan, h) < 0.3 {
                 continue;
             }
+        }
+        if match_height && (pt[2] - p[2]).abs() > SNAP_HEIGHT_M {
+            continue;
         }
         if best.is_none_or(|b| pr.dist < b.0) {
             best = Some((pr.dist, i as SegId, sc));
@@ -282,7 +307,13 @@ pub fn plan_route_between_pois(
 ) -> Option<Route> {
     let a = map.net.pois.get(start_poi)?;
     let b = map.net.pois.get(finish_poi)?;
-    plan_route(map, a.pos, Some(geom::dir_of_yaw(a.heading_rad)), b.pos)
+    // POI heights are real ground heights: snap to a lane at that height (the grid's Garage 3
+    // stands mid-block beside the highway viaduct; snapping in 2D only sent its routes up
+    // onto the deck and round a 2 km detour).
+    let sa = nearest_lane_at_height(map, a.pos, Some(geom::dir_of_yaw(a.heading_rad)))?;
+    let sb = nearest_lane_at_height(map, b.pos, None)?;
+    let segs = shortest_path(map, sa, sb)?;
+    Some(build_route(map, segs, sa.1, sb.1, false))
 }
 
 /// `next` moved onto `cur`'s lane when it is a parallel lane of the same road and direction

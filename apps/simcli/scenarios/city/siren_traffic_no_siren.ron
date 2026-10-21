@@ -1,5 +1,5 @@
 // Playtest rows 61-62 (traffic gets out of the way of police with sirens on): a police car drives
-// Garage 2 -> Garage 3 on the 12x12 grid (403 m, mostly two-lane streets) through busy civilian
+// Garage 2 -> Garage 3 on the 12x12 grid (526 m since the highway port, mostly two-lane streets) through busy civilian
 // traffic, riding the line on the left of its lane (lateral_offset_m -1.55, where a unit passes
 // yielding traffic) and keeping its distance from anything in its way (keep_distance).
 // Control run: the same car with its siren OFF. Nobody pulls over; it follows the traffic

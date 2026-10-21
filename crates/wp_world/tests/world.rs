@@ -930,6 +930,26 @@ fn lod_promotion_and_demotion_are_seamless() {
 // Routes & props
 // ---------------------------------------------------------------------------------------------
 
+/// A POI routes from the lane at its own height: the grid's Garage 3 stands mid-block beside
+/// the highway viaduct, 3.4 m from a deck lane 7.9 m up and 20 m from its street; snapping in
+/// 2D only sent its routes up onto the deck (Garage 2 -> Garage 3 was 2 km instead of 526 m).
+#[test]
+fn poi_routes_snap_to_a_lane_at_the_poi_height() {
+    let w = world(no_traffic(), 12.0, 1.0);
+    let pois = &w.network().pois;
+    let poi = |name: &str| pois.iter().position(|p| p.name == name).unwrap();
+    let r = w
+        .plan_route_between_pois(poi("Garage 2"), poi("Garage 3"))
+        .expect("route");
+    assert!(
+        r.length_m < 700.0,
+        "Garage 2 -> Garage 3 is {} m",
+        r.length_m
+    );
+    let top = r.polyline.iter().map(|p| p[2]).fold(f32::MIN, f32::max);
+    assert!(top < 1.0, "the route climbs to {top} m");
+}
+
 #[test]
 fn routes_between_pois_and_circuits() {
     let mut w = world(TrafficConfig::default(), 12.0, 1.0);
