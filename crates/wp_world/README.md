@@ -500,6 +500,45 @@ cars of both directions). Tests: `tests/siren.rs` (stand-in unit: 6 queued cars 
 5.7–6.9 s, moving traffic passed without slowing, siren-off control, multi-lane, stuck/parked
 unit), simcli `city/siren_traffic_*`.
 
+**Jams** (owner playtest row 85: "massive traffic jam" during an L5 pursuit; `traffic/jam.rs`
+plus rules in `traffic.rs` / `traffic/blocked.rs`).
+- *Measured*: `TrafficStats::{max_stop_s, max_queue, box_stops, jam_recycled}` — longest stop
+  outside red / amber (held, not reset, at a red; also held within 60 m of a standing scene, a
+  tracked vehicle stopped 20 s; wrecks left out), longest queue of stopped cars back from a stop
+  line (followed back through junctions, sampled 1 Hz), stops > 5 s inside a junction box.
+  simcli metrics `traffic_max_stop_s`, `traffic_max_queue`, `traffic_box_stops`,
+  `traffic_jam_recycled`; scenarios `jam/pursuit_jam_{grid,vesper}.ron` (10 min, L4 → L5).
+- *Junction rules*: reservations are rebuilt every step from what cars hold (a permit, or being
+  in the connector), so none outlive their car. A tracked vehicle in a crossing path holds
+  crossing traffic only while it moves faster than 2.5 m/s (`TV_SWEEP_MPS`); a stationary one
+  blocks only the paths it stands in, and so does a wreck. A car stopped at its line without a
+  permit for 4 s is not "arriving" for the drivers yielding to it (`STALE_ARRIVAL_S`); at an
+  all-way stop, a first-to-stop driver who has not gone in 8 s loses the right of way
+  (`ALLWAY_STALE_S`). After 20 s at the line a driver books its connector (turn-taking: no new
+  permits into crossing movements; never next to a crossing booking; lapses after 10 s unused).
+  A permit held by a car stopped > 6 m short of the line is dropped. Don't-block-the-box (exit
+  room) was already there.
+- *Police in the way*: a tracked vehicle stopped at the line for 6 s (not red) or in the box for
+  3 s is an obstruction, not a car waiting its turn (`TRACKED_AT_LINE_S`, `TRACKED_IN_BOX_S`);
+  so is a box path blocked by one for 6 s. The front car takes another exit if one is free
+  (`reroute_around_box`), else the queue turns around / backs out from the tail and the lane is
+  marked blocked so upstream cars re-route (now on multi-lane roads too when the obstruction is
+  at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
+- *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
+  (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
+  (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s), and does not merge back while a unit is
+  beside it.
+- *Stuck manoeuvres*: a lane change stalled half-way (car stopped before leaving the old lane)
+  is undone, with no forced lane change for 20 s; a reverse under way that has not moved for
+  8 s and a U-turn that cannot start for 10 s are given up; a reverse never starts with a
+  tracked vehicle within 25 m behind, and the wait for room to reverse is 15 s (was 40 s).
+  Kinematic U-turns also check the pose they leave the turn in, and hold their own lane 8 m
+  back (was 3 m).
+- *Spawning*: never behind a stopped car within 60 m (into a queue); at most one car per 20 m
+  of lane at the daytime peak, scaled with the time-of-day factor. Unseen cars standing 30 s
+  outside a red light are recycled (`TrafficConfig::jam_recycle_s`), also inside a junction box.
+  Wrecks shoved > 2.5 m off their lane are not obstacles in it.
+
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 (`density_scale` 4), noon, aggressive 5 %:

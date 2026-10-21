@@ -683,6 +683,16 @@ pub struct WorldSummary {
     /// Civilians that pulled over for a siren unit coming up behind them
     /// (`TrafficStats::siren_yields`, playtest row 62).
     pub traffic_siren_yields: u64,
+    /// Longest a civilian stood still outside a red / amber light, s
+    /// (`TrafficStats::max_stop_s`, owner row 85).
+    pub traffic_max_stop_s: f32,
+    /// Longest queue of stopped civilians back from a stop line (`TrafficStats::max_queue`).
+    pub traffic_max_queue: u32,
+    /// Times a civilian stood > 5 s inside a junction box (`TrafficStats::box_stops`).
+    pub traffic_box_stops: u64,
+    /// Unseen civilians recycled after standing still 30 s outside a red light
+    /// (`TrafficStats::jam_recycled`).
+    pub traffic_jam_recycled: u64,
     /// City props turned into physics bodies (parked cars, cones).
     pub props: u32,
     /// Static boxes from `barriers`.
@@ -713,6 +723,10 @@ impl WorldSummary {
             "traffic_go_arounds" => self.traffic_go_arounds as f32,
             "traffic_turnarounds" => self.traffic_turnarounds as f32,
             "traffic_siren_yields" => self.traffic_siren_yields as f32,
+            "traffic_max_stop_s" => self.traffic_max_stop_s,
+            "traffic_max_queue" => self.traffic_max_queue as f32,
+            "traffic_box_stops" => self.traffic_box_stops as f32,
+            "traffic_jam_recycled" => self.traffic_jam_recycled as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
@@ -725,7 +739,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 17] = [
+    pub const METRICS: [&'static str; 21] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -736,6 +750,10 @@ impl WorldSummary {
         "traffic_go_arounds",
         "traffic_turnarounds",
         "traffic_siren_yields",
+        "traffic_max_stop_s",
+        "traffic_max_queue",
+        "traffic_box_stops",
+        "traffic_jam_recycled",
         "props",
         "static_boxes",
         "police_units_max",
@@ -815,6 +833,10 @@ impl WorldTracker {
             traffic_go_arounds: stats.oncoming_passes + stats.go_around_lane_changes,
             traffic_turnarounds: stats.turnarounds_completed + stats.reverses,
             traffic_siren_yields: stats.siren_yields,
+            traffic_max_stop_s: stats.max_stop_s,
+            traffic_max_queue: stats.max_queue,
+            traffic_box_stops: stats.box_stops,
+            traffic_jam_recycled: stats.jam_recycled,
             props: sim.prop_count() as u32,
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
