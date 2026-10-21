@@ -14,7 +14,10 @@ use crate::style::{
     HoodScoop, Induction, RimKind, Silhouette, SuspensionKind,
 };
 
-use super::kit::{dkey, headlight_key, lkey, sided, taillight_key, Kit, SIDES};
+use super::kit::{
+    dkey, headlight_key, indicator_front_key, indicator_rear_key, lkey, sided, taillight_key, Kit,
+    Seg, SIDES,
+};
 use super::{kit_detail, rgb, wheels};
 
 /// 70s big-block coupe: long flat slab, cowl scoop, chrome blades, quad round headlamps,
@@ -176,21 +179,22 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         for x in [wn - 0.18, wn - 0.18 - 2.3 * r] {
             k.round_lamp(&headlight_key(sx), true, sx * x, zl, r, 0.03, Some(&bez));
         }
+        // Rectangular amber parking / turn lens set in the grille inboard of the lamp pair,
+        // flush with the bezel faces.
+        let x_in = wn - 0.18 - 2.3 * r - r - 0.016 - 0.014;
+        let ka = indicator_front_key(sx);
+        k.front_box(
+            &ka,
+            sx * (x_in - 0.11),
+            sx * x_in,
+            zl - 0.55 * r,
+            zl + 0.55 * r,
+            0.024,
+            0.006,
+        );
     }
     let val = dkey("front_valance", fb, M::Grille);
     k.front_box(&val, -0.55, 0.55, nz0 + 0.05, zb - 0.08, 0.005, 0.0);
-    for sx in SIDES {
-        let ka = sided(&lkey("indicator_front_l", fb, M::EmissiveAmber), sx);
-        k.front_box(
-            &ka,
-            sx * 0.62,
-            sx * 0.80,
-            nz0 + 0.07,
-            zb - 0.09,
-            0.012,
-            0.004,
-        );
-    }
     k.hood_pins(yn - 0.16, 0.55);
 
     // --- Rear: chrome blade, recessed black lamp panel with two wide lamps per side.
@@ -232,14 +236,17 @@ fn ironside_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let (xa, xb) = (sx * 0.17, sx * (wt - 0.07));
         k.rear_box(&kb, xa, xb, pz0 + 0.012, pz1 - 0.012, 0.018, 0.006);
-        // Three segments per side (reads as one wide lamp with chrome dividers).
+        // Three segments per side (reads as one wide lamp with chrome dividers); the outer
+        // one is the red-on-red turn signal.
+        let ka = indicator_rear_key(sx, M::Taillight);
         let n = 3;
         for i in 0..n {
             let f0 = i as f32 / n as f32;
             let f1 = (i + 1) as f32 / n as f32;
             let x0 = xa + (xb - xa) * f0 + sx * 0.008;
             let x1 = xa + (xb - xa) * f1 - sx * 0.008;
-            k.rear_box(&tk, x0, x1, pz0 + 0.025, pz1 - 0.025, 0.026, 0.004);
+            let key = if i == n - 1 { &ka } else { &tk };
+            k.rear_box(key, x0, x1, pz0 + 0.025, pz1 - 0.025, 0.026, 0.004);
         }
     }
     let kr = dkey("reverse_lamps", BodyRegion::Trunk, M::Headlight);
@@ -408,8 +415,17 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     k.splitter(M::Carbon, 0.06, 0.12, 0.022, false);
     for sx in SIDES {
-        // Lens across the nose top edge, plus the DRL blade on the face.
-        k.top_lamp(sx, yn - 0.20, yn - 0.03, 0.58, wn - 0.07, 0.025);
+        // Lens across the nose top edge with an amber outboard segment, plus the DRL blade on
+        // the face.
+        k.top_lamp_split(
+            sx,
+            yn - 0.20,
+            yn - 0.03,
+            0.58,
+            wn - 0.07,
+            0.025,
+            Seg::Outboard(0.08),
+        );
         let drl = sided(
             &lkey("drl_l", BodyRegion::FrontLeftFender, M::Headlight),
             sx,
@@ -480,10 +496,12 @@ fn rampart_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     );
     for sx in SIDES {
         let tk = taillight_key(sx);
+        // Three vertical bars; the outer one is the red-on-red turn signal.
+        let ka = indicator_rear_key(sx, M::Taillight);
         for i in 0..3 {
             let xc = 0.40 + 0.13 * i as f32;
             k.rear_box(
-                &tk,
+                if i == 2 { &ka } else { &tk },
                 sx * (xc - 0.04),
                 sx * (xc + 0.04),
                 pz0 + 0.02,

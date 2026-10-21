@@ -13,7 +13,7 @@ import { LightRig, patternFor, phaseFor, wigwag } from "./render/lights";
 import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
-import { IND, indicatorColour, indicatorMarkers, meshFrontRear, proxyGeoms, styledPaint } from "./render/fleet";
+import { IND, indicatorColour, indicatorHue, indicatorLevel, indicatorMarkers, meshFrontRear, meshIndicatorEnds, proxyGeoms, styledPaint } from "./render/fleet";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -27,6 +27,10 @@ const tmpColor = new THREE.Color();
 const HEAD_GLOW = new THREE.Color(0xfff2c0);
 /** Head-lamp lens base colour (greybox). */
 const HEAD_LENS = 0xfff6d0;
+/** Unlit indicator lens colour over its hue (lit by the scene like the other lenses): amber
+ * plastic, and red lenses about as dark as the tail lamps. */
+const IND_LENS_AMBER = 0.4;
+const IND_LENS_RED = 0.15;
 // Per-frame scratch (VehicleView.update runs for every car every frame: no allocation).
 const tmpQa = new THREE.Quaternion();
 const tmpQb = new THREE.Quaternion();
@@ -176,11 +180,19 @@ export class VehicleView {
   private readonly proxy: THREE.Group;
   /** The proxy's paint material (recoloured by the art style). */
   private readonly proxyPaint: THREE.MeshStandardMaterial;
-  /** Left / right indicator lamps (front + rear corner each), as the fleet draws them. */
+  /** Left / right indicator box markers (front + rear corner each), as the fleet draws them:
+   * only on corners the panel mesh has no indicator lenses for (render/fleet.ts
+   * indicatorMarkers), hidden when it has all of them. */
   private readonly indL: THREE.Mesh;
   private readonly indR: THREE.Mesh;
   private readonly indMatL = new THREE.MeshBasicMaterial({ color: 0xffffff });
   private readonly indMatR = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  /** Blink materials of the panel mesh's indicator lenses (`indicator_*` parts, drawn and
+   * skinned by PanelBody like the other lamps), per hue and side. */
+  private readonly indLens = {
+    amber: { left: VehicleView.lensMat(), right: VehicleView.lensMat() },
+    red: { left: VehicleView.lensMat(), right: VehicleView.lensMat() },
+  };
   /** Lit indicator lamps (`IND` bits) and the art-style version they were coloured for. */
   private indShown = -1;
   private indStyle = -1;
@@ -286,7 +298,10 @@ export class VehicleView {
 
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     // Traffic / police keep the livery the fleet drew them in (no factory paint tint).
-    this.panels = new PanelBody(entity, this.info.car_id, colour, { left: this.headMat, right: this.headMatR }, this.tailMat, { keepPaint: this.background });
+    this.panels = new PanelBody(entity, this.info.car_id, colour, { left: this.headMat, right: this.headMatR }, this.tailMat, {
+      keepPaint: this.background,
+      indicators: this.indLens,
+    });
     this.root.add(this.panels.root);
     // Sim-spawned traffic / police are stock; scenario cars may carry mods.
     const build = this.background ? null : sim.entityVisuals(entity);
@@ -319,6 +334,9 @@ export class VehicleView {
       this.indR.geometry.dispose();
       this.indL.geometry = ind.left;
       this.indR.geometry = ind.right;
+      // A mesh with lenses on every corner needs no boxes.
+      this.indL.visible = ind.left.getAttribute("position").count > 0;
+      this.indR.visible = ind.right.getAttribute("position").count > 0;
     });
 
     // CG marker (+ velocity arrow, which lives in world space; see update()).
@@ -668,8 +686,14 @@ export class VehicleView {
     if (mask === this.indShown && this.indStyle === artStyle.version) return;
     this.indShown = mask;
     this.indStyle = artStyle.version;
-    indicatorColour(this.indMatL.color, (mask & IND.left) !== 0);
-    indicatorColour(this.indMatR.color, (mask & IND.right) !== 0);
+    const left = (mask & IND.left) !== 0;
+    const right = (mask & IND.right) !== 0;
+    indicatorColour(this.indMatL.color, left);
+    indicatorColour(this.indMatR.color, right);
+    VehicleView.lightLens(this.indLens.amber.left, left, false);
+    VehicleView.lightLens(this.indLens.amber.right, right, false);
+    VehicleView.lightLens(this.indLens.red.left, left, true);
+    VehicleView.lightLens(this.indLens.red.right, right, true);
   }
 
   /** Whether the left / right indicator lamps are lit (read back from their materials;
@@ -678,12 +702,42 @@ export class VehicleView {
     return { left: this.indMatL.color.r > 0.5, right: this.indMatR.color.r > 0.5 };
   }
 
-  /** Indicator lamp geometry at the panel mesh's nose / tail (body box ends until it loads). */
+  /** Whether the left / right indicator lenses of the panel mesh glow (read back from their
+   * blink materials; automation). */
+  indicatorLensesLit(): { left: boolean; right: boolean } {
+    const { amber, red } = this.indLens;
+    return { left: amber.left.emissive.r > 0.5 || red.left.emissive.r > 0.5, right: amber.right.emissive.r > 0.5 || red.right.emissive.r > 0.5 };
+  }
+
+  /** One indicator lens blink material (flat-shaded and double-sided like the shared lamps:
+   * some lens parts have no normals). */
+  private static lensMat(): THREE.MeshStandardMaterial {
+    return new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x000000, roughness: 0.35, flatShading: true, side: THREE.DoubleSide });
+  }
+
+  /** Light (emissive hue × glow, as the fleet's lit lenses) or darken (dark lens, no emission)
+   * one indicator lens material. */
+  private static lightLens(m: THREE.MeshStandardMaterial, lit: boolean, red: boolean): void {
+    const hue = indicatorHue(red);
+    if (lit) {
+      // A red lens keeps a dark base so the sun on it does not wash the glow out to pink.
+      // Both hues keep a dark base: a full-colour base plus the glow tone-maps amber to cream
+      // and red to pink in sunlight.
+      m.color.setHex(hue).multiplyScalar(red ? IND_LENS_RED : IND_LENS_AMBER * 0.5);
+      m.emissive.setHex(hue).multiplyScalar(indicatorLevel(true));
+    } else {
+      m.color.setHex(hue).multiplyScalar(red ? IND_LENS_RED : IND_LENS_AMBER);
+      m.emissive.setHex(0x000000);
+    }
+  }
+
+  /** Indicator box geometry at the panel mesh's nose / tail (body box ends until it loads),
+   * leaving out the corners the mesh has indicator lenses for. */
   private indicatorGeoms(): ReturnType<typeof indicatorMarkers> {
     const l = this.info.body_size_m[1];
     const mesh = carMeshNow(this.info.car_id);
     const fr = mesh ? meshFrontRear(mesh) : null;
-    return indicatorMarkers(this.info, fr?.front ?? l / 2, fr?.rear ?? -l / 2);
+    return indicatorMarkers(this.info, fr?.front ?? l / 2, fr?.rear ?? -l / 2, meshIndicatorEnds(mesh));
   }
 
   /** Where the siren light sits (sim space, the scene's `world` group): above the light bar

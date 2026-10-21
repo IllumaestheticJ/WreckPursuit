@@ -247,6 +247,11 @@ impl Builder {
         self.parts.len() - 1
     }
 
+    /// Remove every part named `name` (a style replacing a foundation part with another key).
+    pub fn remove_part(&mut self, name: &str) {
+        self.parts.retain(|p| p.key.name != name);
+    }
+
     /// True if a part named `name` exists.
     pub fn has(&self, name: &str) -> bool {
         self.parts.iter().any(|p| p.key.name == name)

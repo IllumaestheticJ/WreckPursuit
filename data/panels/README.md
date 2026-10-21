@@ -170,6 +170,34 @@ other lamp a style adds (fog lamps, DRLs, reverse lamps, light bars, roof / side
 light bar) is a normal `light` / `lightbar` part skinned to its own region (bumper, fender,
 trunk, roof …) like any other part. Renderer: `apps/testbed-web/src/render/panels.ts`.
 
+### Turn signals (`indicator_*`, playtest row 136)
+
+Every car mesh, full and mid LOD (all roster cars and the `parity_*` copies), has exactly these
+turn-signal parts, all `kind: light`; no other part name starts with `indicator_`:
+
+| part | region | material | what it is |
+|---|---|---|---|
+| `indicator_front_l` / `_r` | `FrameFront` | `emissive_amber` | amber segment of the head-lamp cluster |
+| `indicator_rear_l` / `_r` | `FrameRear` | `emissive_amber`, or `taillight` (red-on-red, blinked red) | section of the tail-lamp cluster |
+| `indicator_side_l` / `_r` (optional pair) | `FrontLeftFender` / `FrontRightFender`, or `LeftDoorF` / `RightDoorF` (mirror) | `emissive_amber` | flush side repeater on the front fender or the door mirror |
+
+`_l` is the x < 0 side. Each front / rear lens is cut out of its lamp cluster (same housing, same
+lens face and bevel, split from the lamp by a 5 mm divider, `mesh::INDICATOR_SEAM_M`) and holds
+only the signal, so it can be lit on its own; the rest of the cluster stays in `headlight_*` /
+`taillight_*`. Front / rear signals bind like the head / tail lamps (`skin::is_end_lamp`: they
+crush with their end of the car); repeaters bind like their fender / mirror. Amber parts that are
+not turn signals keep their own names (`side_marker_*`, `clearance_lamps`, light-bar cells such as
+`rear_window_bar_lens_amber` / `traffic_advisor_cells`). Layout per family:
+
+| family | front | rear | repeaters |
+|---|---|---|---|
+| hatch (`vireo_xs` / `stoat_16v` / `marten_20`, `lindwurm_4t`) | outboard corner segment of the lens | amber band of the tri-colour cluster / inboard section | front fender / door mirror (`lindwurm_4t`) |
+| tuner (`kestrel_ts` family, `shiro_turbo`, `hakone_gt`, `sperber_32`, `debug_coupe`) | inboard segment next to the grille | inboard section, or the inner round element | front fender (90s) / door mirror (`sperber_32`, `debug_coupe`) |
+| muscle (`ironside_440` family, `rampart_50`) | amber parking / turn lens in the grille beside the lamps / outboard segment of the lens | outer lamp segment, red-on-red | none |
+| exotic (`lucciola_350`, `fulmine_v10`) | outboard corner segment (wrapping onto the fender on `lucciola_350`) | inner round lamp / outer stroke of the C | front fender / door mirror |
+| traffic | corner segment (the former amber corner lamps of `junkyard_beater` / `furrow_24`), teardrop tip (`tansy_13`), bottom strip (`hauler_1500`), outer strip (vans) | inboard amber section, middle band (`tansy_13`), bottom section (vans), red-on-red top section (pickups) | none (amber side markers) |
+| police (`sentinel_*`, the foundation layout) | amber strip along the bottom of the lamp | inboard amber section | none |
+
 ### Livery atlas (UVs of `paint` / `livery` parts)
 
 Paint parts use **U 0–0.5** of the texture; other parts keep a side projection in U 0.5–1

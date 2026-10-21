@@ -15,7 +15,7 @@ cargo run -p car-assets --bin validate-car-asset [car ...]
 cargo run --release -p car-assets --bin panels-bench # perf, 24 cars
 cargo run --release -p car-assets --example panel_probe -- apps/simcli/scenarios/panels/side_swipe_door.ron
 cargo run -p car-assets --example profile_dump -- [--ring <y>] <car>  # styled anchors, regions, a cross-section
-cargo test -p car-assets                             # every car valid + meshes up to date
+cargo test -p car-assets                             # every car valid + meshes up to date + turn-signal contract
 cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame ticks]  # hood/fender/bumper crumple, 30/50/70 km/h
 node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
 node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
@@ -65,7 +65,11 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   their door), quarter glass, sills, roof, windshield, rear glass (or cab-back wall), trunk or
   deck, quarters, pillars, open bed floor (`bed_floor`, FrameRear). Plus head / tail lights on the
   nose / tail faces (`LIGHT_PROUD_M` proud of the surface; region `FrameFront` / `FrameRear`,
-  bound to their end of the car so they crush with it), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
+  bound to their end of the car so they crush with it), each with its turn signal cut out of
+  the same lens (`indicator_front_*` / `indicator_rear_*`, optional `indicator_side_*` fender or
+  mirror repeaters; contract and per-family layouts in `data/panels/README.md` "Turn signals";
+  helpers `Kit::{front_cluster, rear_cluster, top_lamp_split, fender_repeaters,
+  mirror_repeaters}`, traffic `reshape_indicators`), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
   details, mechanical parts (`mechanical/`: engine bay, suspension, exhaust, frame) and per-wheel
   tire / rim (`wheels/`) / brake disc / caliper / upright parts, all from the resolved
   `mechanical::car_spec` (per-id table + style overrides). The underbody plate stays at floor
@@ -81,22 +85,24 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
 ### Triangle budgets (`Tier::tri_budget`, checked by `validate-car-asset`)
 Hero (performance + police, and classes Sport / Muscle / Exotic / Police*): 8k–20k. Traffic
 (traffic module; classes Beater / Compact / Truck): 4k–10k. Current output (2026-10-21, mesh
-format 4 after the round-12 × detailed-car-models merge; the fold bindings add no triangles):
+format 4 after the round-12 × detailed-car-models merge and the integrated turn signals, which
+cost at most +1.6 % per car — `every_car_has_turn_signals_integrated_into_its_lamps` caps them at
++2 % of the counts before; the fold bindings add no triangles):
 
 | car | tris | car | tris | car | tris |
 |---|---|---|---|---|---|
-| arashi_t4 | 16916 | ironside_440 | 18699 | sentinel_vigil | 17715 |
-| brigand_400 | 19772 | junkyard_beater | 7960 | sentinel_warden | 17770 |
-| bulwark_400 | 19186 | kestrel_ts | 17548 | sentinel_wolfhound | 17137 |
-| debug_coupe | 16617 | lindwurm_4t | 16246 | shiro_turbo | 17918 |
-| debug_sedan | 8422 | lucciola_350 | 17242 | sperber_32 | 17772 |
-| drayman_cargo | 9435 | marten_20 | 15796 | stoat_16v | 15610 |
-| fulmine_v10 | 18738 | rampart_50 | 18826 | talus_20t | 17062 |
-| furrow_24 | 8490 | satchel_20 | 8330 | tansy_13 | 7192 |
-| hakone_gt | 17829 | sentinel_bastion | 17191 | tumbril_20 | 8503 |
-| hauler_1500 | 9781 | sentinel_cruiser | 16963 | vireo_xs | 15731 |
+| arashi_t4 | 17180 | ironside_440 | 18699 | sentinel_vigil | 17955 |
+| brigand_400 | 19772 | junkyard_beater | 7968 | sentinel_warden | 18010 |
+| bulwark_400 | 19186 | kestrel_ts | 17812 | sentinel_wolfhound | 17377 |
+| debug_coupe | 16801 | lindwurm_4t | 16430 | shiro_turbo | 17982 |
+| debug_sedan | 8454 | lucciola_350 | 17306 | sperber_32 | 18036 |
+| drayman_cargo | 9467 | marten_20 | 15916 | stoat_16v | 15730 |
+| fulmine_v10 | 18802 | rampart_50 | 18866 | talus_20t | 17326 |
+| furrow_24 | 8498 | satchel_20 | 8362 | tansy_13 | 7220 |
+| hakone_gt | 17773 | sentinel_bastion | 17431 | tumbril_20 | 8535 |
+| hauler_1500 | 9813 | sentinel_cruiser | 17203 | vireo_xs | 15851 |
 
-Headroom: hero cars sit at 15.6k–19.8k of 20k (`brigand_400` 19.8k with 22 wheel segments),
+Headroom: hero cars sit at 15.7k–19.8k of 20k (`brigand_400` 19.8k with 22 wheel segments),
 `hauler_1500` at 9.8k of 10k (drop its tire lugs
 or wheel segments first if traffic details push it over; see `wave2_mechanical.md`).
 
@@ -116,20 +122,21 @@ with the same kinds / materials, every panel / glass / light / tire kept). Forma
 
 | car | mid (full) tris | car | mid (full) tris | car | mid (full) tris |
 |---|---|---|---|---|---|
-| arashi_t4 | 4818 (16916) | ironside_440 | 5317 (18699) | sentinel_vigil | 4815 (17715) |
-| brigand_400 | 6008 (19772) | junkyard_beater | 4425 (7960) | sentinel_warden | 5396 (17770) |
-| bulwark_400 | 5494 (19186) | kestrel_ts | 4919 (17548) | sentinel_wolfhound | 4986 (17137) |
-| debug_coupe | 4671 (16617) | lindwurm_4t | 4624 (16246) | shiro_turbo | 4974 (17918) |
-| debug_sedan | 4530 (8422) | lucciola_350 | 4720 (17242) | sperber_32 | 4792 (17772) |
-| drayman_cargo | 5009 (9435) | marten_20 | 4008 (15796) | stoat_16v | 3878 (15610) |
-| fulmine_v10 | 5548 (18738) | rampart_50 | 5256 (18826) | talus_20t | 5095 (17062) |
-| furrow_24 | 4506 (8490) | satchel_20 | 4661 (8330) | tansy_13 | 4064 (7192) |
-| hakone_gt | 4808 (17829) | sentinel_bastion | 5191 (17191) | tumbril_20 | 4572 (8503) |
-| hauler_1500 | 5277 (9781) | sentinel_cruiser | 4736 (16963) | vireo_xs | 3875 (15731) |
+| arashi_t4 | 4938 (17180) | ironside_440 | 5349 (18699) | sentinel_vigil | 4919 (17955) |
+| brigand_400 | 6008 (19772) | junkyard_beater | 4433 (7968) | sentinel_warden | 5460 (18010) |
+| bulwark_400 | 5502 (19186) | kestrel_ts | 5017 (17812) | sentinel_wolfhound | 5086 (17377) |
+| debug_coupe | 4765 (16801) | lindwurm_4t | 4728 (16430) | shiro_turbo | 5014 (17982) |
+| debug_sedan | 4562 (8454) | lucciola_350 | 4752 (17306) | sperber_32 | 4904 (18036) |
+| drayman_cargo | 5041 (9467) | marten_20 | 4072 (15916) | stoat_16v | 3978 (15730) |
+| fulmine_v10 | 5588 (18802) | rampart_50 | 5280 (18866) | talus_20t | 5213 (17326) |
+| furrow_24 | 4514 (8498) | satchel_20 | 4693 (8362) | tansy_13 | 4092 (7220) |
+| hakone_gt | 4790 (17773) | sentinel_bastion | 5309 (17431) | tumbril_20 | 4604 (8535) |
+| hauler_1500 | 5309 (9813) | sentinel_cruiser | 4824 (17203) | vireo_xs | 3967 (15851) |
 
-Mid LODs: 3875–6008 triangles (full meshes 7192–19772); files 130–190 KB each (full meshes
+Mid LODs: 3967–6008 triangles (full meshes 7220–19772); files 130–190 KB each (full meshes
 0.5–1.4 MB). The four `parity_*` cars' mid files are copies of their template car's
-(`tools/parity/build_parity_cars.py`).
+(`tools/parity/build_parity_cars.py`; after a regeneration refresh the copies with its
+`copy_panels(spec)` for each `CARS` entry, or rerun the script).
 
 ### Mesh format 4
 `MESH_FORMAT = 4` = `claude/detailed-car-models`' format 2 (part kinds / materials, `rigid`,
