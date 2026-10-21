@@ -701,3 +701,37 @@ Seed-1 trace on grid highway s95, 93 candidate ticks:
 - **With the full 5 m/s:** 13 ticks (one episode, gap 2.6–2.7 m, closing 2.2–3.2 m/s) would have qualified.
 
 Loosening the risk scaling is a lead decision.
+
+### Floor at 0.6 risk (lead, 2026-10-21)
+
+The closing limit's risk now counts as at least 0.6 (`SPLIT_MIN_RISK`), so a skilled, careful
+driver closes at up to 3 m/s. The gap rule stays at width + 0.8 m. Split aborts are now counted
+(`splitab` in the sweep). Before is 9679494e plus the metric; after is the floor at 0.6. Grid
+highway gets 8 extra seeds (9–16):
+
+| race | skill | seeds | run | finishers | mean s | walls | passes/km | civ contacts | all contacts | splits | aborts |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| grid_highway_sprint | 0.5 | 1-8 | before | 32/32 | 43.9 | 0 | 2.14 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | 1-8 | after | 32/32 | 43.9 | 0 | 2.14 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | 9-16 | before | 32/32 | 44.6 | 0 | 2.48 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | 9-16 | after | 32/32 | 44.6 | 0 | 2.48 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | 1-8 | before | 32/32 | 43.9 | 0 | 3.94 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | 1-8 | after | 32/32 | 43.9 | 0 | 3.94 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | 9-16 | before | 32/32 | 43.5 | 0 | 2.81 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | 9-16 | after | 32/32 | 43.6 | 0 | 2.81 | 0 | 0 | 0 | 1 |
+| lantern_checkpoint | 0.5 | 1-8 | before | 28/32 | 80.3 | 0 | 0.00 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.5 | 1-8 | after | 28/32 | 80.3 | 0 | 0.00 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | 1-8 | before | 30/32 | 75.8 | 0 | 0.19 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | 1-8 | after | 30/32 | 75.8 | 0 | 0.19 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | 1-8 | before | 48/48 | 205.0 | 0 | 0.09 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | 1-8 | after | 48/48 | 205.0 | 0 | 0.09 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | 1-8 | before | 48/48 | 199.8 | 0 | 0.11 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | 1-8 | after | 48/48 | 199.8 | 0 | 0.11 | 0 | 0 | 0 | 0 |
+
+**Kept by the lead's rule:** across all 16 grid seeds, civilian contacts are 0 before and after,
+and walls are 0.
+
+- **Splits:** still none completed on these maps.
+- **Aborts:** one split was started and given up (grid s95 seed 15, lindwurm_4t). It tucked back in (one of the pair drifted toward the gap, or the gap closed; the reason is not logged), and its time went from 52.1 s to 55.7 s.
+- **Everything else:** identical.
+- **Pace ranges:** unchanged.
