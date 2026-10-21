@@ -138,6 +138,26 @@ e2e `npm run e2e:signals` (`e2e/signals.mjs`): 6 right- and 9 left-signalling ca
 correct side (lit and dark frames, full and proxy meshes), never the wrong side; hazards both
 sides; the player stalk blinks and cancels; no page errors.
 
+### Police cars indicate (ported, lead request)
+From the unmerged `claude/happy-knuth-g39ogc` (commits `a5c0b5b` / `fcc9ea3`, older base) I took
+only the turn-signal part: `wp_police::Unit::turn_signal()` (40 m before a junction where its
+route turns until 8 m past it; left pulling out to pass a stopped car, right pulling back in; off
+with lights and siren and for helicopters), `JunctionAhead::turn_dir` computed where the
+junction ahead is found (`dispatch.rs`), its unit test, `wp_wasm::police::turn_signal` and
+`vehicle_meta()` bits 16 / 32, fed to the police car's `VehicleView.setIndicators` in
+`main.ts`. View only (police state hash untouched). Not taken: the rest of that commit
+(stuck-cop behaviour fixes, Loop 9, blessed goldens: separate work on an older base) and its
+own lamp meshes (we have the helper's `VehicleView` lamps).
+
+## Prior prototypes (lead request)
+- `claude/optimistic-wozniak-13v80v` `1617233` "prototype dentable parked cars": swaps a parked
+  prop about to be hit for a full driverless `wp_sim` vehicle (Rapier chassis, wheels, vehicle
+  sim, at most 8, swapped back once at rest). **Not merged**: the task asks not to pay a full
+  vehicle sim per parked car, and this branch's lattice-only promotion already covers it (48
+  at once, no wheels / drivetrain, promotion only on a real hit instead of on approach). Idea
+  kept from it: a dented car keeps its damage when it turns back into a sleeping prop (here
+  the wreck is never dropped).
+
 ## Perf numbers
 PERF_TABLE
 
