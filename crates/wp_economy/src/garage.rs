@@ -388,6 +388,20 @@ impl Economy {
         })
     }
 
+    /// What `mods` look like on a car: the parts to draw, wheel geometry and ride height
+    /// ([`crate::visuals`]). Validates the set like [`Economy::preview`]; every mod counts
+    /// (a part is on the car whether or not the damage mode lets it work).
+    pub fn build_visuals(
+        &self,
+        vehicle: &VehicleDef,
+        lattice: &LatticeDef,
+        mods: &[String],
+    ) -> Result<crate::visuals::BuildVisuals, EconomyError> {
+        let set = self.catalog.validate_set(vehicle.class, mods)?;
+        let applied = apply_mods(vehicle, lattice, &set, None)?;
+        Ok(crate::visuals::build_visuals(vehicle, &applied, &set))
+    }
+
     /// Buy (or replace) insurance on a car. The first day's premium is charged now.
     pub fn buy_insurance(
         &self,
