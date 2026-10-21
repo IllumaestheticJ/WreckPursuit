@@ -466,7 +466,82 @@ fn grid_highway_sprint_is_deterministic() {
 fn hollins_hill_sprint() {
     let r = run_race("hollins_sprint", 200);
     // ~1 km uphill through six hairpins (the AI-only Hollins race: winner ~65 s).
+    // With the police patrolling the hill a racer may be caught or flee legitimately (owner
+    // decision, as in `loop9_circuit`; `WP_RACE_SEED=6`: two racers out to the police in the
+    // first 45 s), so police outcomes count with the finishers. What still fails: a race
+    // that never ends (a deadlock), no winner, a wreck.
+    check_with_police(&r, 40.0..110.0, 3);
+}
+
+/// [`check`] for a race with police on the course: racers the police caught or chased off
+/// (`Dnf(Captured)` / `Dnf(Fled)`) count with the finishers towards `min_finish`, and the
+/// winner's window stretches to 180 s when the police took someone out (the chase holds the
+/// field up). The race must still end with a winner and nobody wrecked.
+fn check_with_police(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
+    use wp_race::DnfReason;
+    let id = r.def.id;
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert!(r.results.iter().all(|x| x.status != RacerStatus::Running));
+    assert!(matches!(
+        r.signals.last(),
+        Some(RaceSignal::RaceFinished { .. })
+    ));
+    let police_out = r
+        .results
+        .iter()
+        .filter(|x| {
+            matches!(
+                x.status,
+                RacerStatus::Dnf(DnfReason::Captured | DnfReason::Fled)
+            )
+        })
+        .count();
+    let finished = r
+        .results
+        .iter()
+        .filter(|x| x.status == RacerStatus::Finished)
+        .count();
+    let winner = r
+        .results
+        .iter()
+        .find(|x| x.position == 1)
+        .expect("a winner");
+    assert_eq!(
+        winner.status,
+        RacerStatus::Finished,
+        "{id}: winner {winner:?}"
+    );
+    let window = if police_out > 0 {
+        winner_s.start..180.0
+    } else {
+        winner_s
+    };
+    let t = winner.elapsed_s().unwrap();
+    assert!(
+        window.contains(&t),
+        "{id}: winner took {t:.1} s, want {window:?} ({police_out} out to the police)"
+    );
+    assert!(
+        finished + police_out >= min_finish,
+        "{id}: {finished} finished + {police_out} out to the police < {min_finish}: {:?}",
+        r.results
+            .iter()
+            .map(|x| (x.racer, x.status, x.elapsed_s()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        r.results
+            .iter()
+            .all(|x| x.status != RacerStatus::Dnf(DnfReason::TotalLoss)),
+        "{id}: a car was wrecked"
+    );
+}
+
+#[test]
+fn hollins_hill_sprint_pace_without_police() {
+    let r = run_race_with("hollins_sprint", 200, Some(0.0));
     check(&r, 40.0..110.0, 3);
+    assert_eq!(r.pursuits, 0);
 }
 
 #[test]

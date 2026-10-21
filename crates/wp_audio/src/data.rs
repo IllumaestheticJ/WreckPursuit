@@ -41,11 +41,14 @@ pub mod cues {
 
     /// Tire squeal loop on paved surfaces.
     pub const SQUEAL: &str = "tire/squeal";
-    /// Loose-surface scrub loop.
+    /// Loose-surface (gravel, dirt) scrub loop.
     pub const SCRUB: &str = "tire/scrub_loose";
+    /// Grass scrub loop: soft, low turf tearing (no stone crackle); slides and wheelspin on grass.
+    pub const SCRUB_GRASS: &str = "tire/scrub_grass";
     /// Driven-wheel spin loop on paved surfaces (launch, burnout, power-on exit).
     pub const SPIN: &str = "tire/spin";
-    /// Driven-wheel spin loop on loose surfaces (gravel roost, dirt / grass churn).
+    /// Driven-wheel spin loop on loose surfaces (gravel roost, dirt churn; grass spin plays
+    /// [`SCRUB_GRASS`]).
     pub const SPIN_LOOSE: &str = "tire/spin_loose";
     /// Surface rolling loops, indexed like `wp_contracts::SurfaceType` declaration order.
     pub const SURFACES: [&str; 8] = [
@@ -111,6 +114,7 @@ pub mod cues {
         let mut v = vec![
             SQUEAL,
             SCRUB,
+            SCRUB_GRASS,
             SPIN,
             SPIN_LOOSE,
             THUMP,
@@ -472,6 +476,15 @@ impl EngineAudioDef {
         rpm.max(0.0) / 60.0 * per_rev
     }
 
+    /// The rpm at which this engine fires at `hz` (inverse of [`Self::firing_hz`]).
+    pub fn rpm_at_firing_hz(&self, hz: f32) -> f32 {
+        let per_rev = match self.layout {
+            EngineLayout::Rotary => self.cylinders as f32,
+            _ => self.cylinders as f32 * 0.5,
+        };
+        hz.max(0.0) * 60.0 / per_rev.max(0.5)
+    }
+
     /// Synth parameters the procedural engine voice needs from the car.
     pub fn synth_params(&self) -> BTreeMap<String, f32> {
         let uneven = match self.firing {
@@ -576,7 +589,7 @@ impl CarAudioDef {
             }
             .to_string(),
             siren: police.then(|| SirenDef {
-                pack: "siren_v2".to_string(),
+                pack: "siren_rec".to_string(),
                 default_mode: SirenMode::Auto,
             }),
         }
@@ -610,6 +623,12 @@ pub enum RpmAnchor {
     Rpm(f32),
     /// A fraction of the car's `redline_rpm` (procedural packs shared by many cars).
     RedlineFrac(f32),
+    /// The firing frequency (Hz) measured in a recording at playback rate 1: the layer's root is
+    /// the rpm at which this car's engine fires at that frequency
+    /// ([`EngineAudioDef::rpm_at_firing_hz`]), so the loop plays at `rpm / root` and its pitch
+    /// follows the car's firing frequency whatever the cylinder count or redline. Required for
+    /// recorded layers (a recording's pitch does not scale with a car's idle or redline).
+    FiringHz(f32),
 }
 
 /// Which throttle state a layer belongs to.
@@ -899,6 +918,26 @@ impl AudioLibrary {
                     ));
                 }
                 for l in &p.engine_layers {
+                    let recorded = p
+                        .cues
+                        .get(&l.cue)
+                        .is_some_and(|c| matches!(c.source, CueSource::Samples { .. }));
+                    match l.anchor {
+                        RpmAnchor::FiringHz(hz) if !(hz.is_finite() && hz > 0.0) => {
+                            errs.push(format!(
+                                "packs/{}: engine layer {} FiringHz must be > 0",
+                                p.id, l.cue
+                            ))
+                        }
+                        RpmAnchor::FiringHz(_) => {}
+                        _ if recorded => errs.push(format!(
+                            "packs/{}: recorded engine layer {} needs a FiringHz anchor (its \
+                             measured firing frequency): Idle / Rpm / RedlineFrac roots do not \
+                             follow the recording's pitch",
+                            p.id, l.cue
+                        )),
+                        _ => {}
+                    }
                     match p.cues.get(&l.cue) {
                         Some(c) if c.looped => {}
                         Some(_) => errs.push(format!(

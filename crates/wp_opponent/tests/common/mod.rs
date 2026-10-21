@@ -140,6 +140,8 @@ pub struct Outcome {
     pub police_events: Vec<wp_police::PoliceEvent>,
     /// `SimEvent::TrafficViolation`s of the run (any vehicle).
     pub violations: u32,
+    /// `SimEvent::TrafficViolation`s per offending vehicle.
+    pub violations_by: std::collections::BTreeMap<EntityId, u32>,
     /// Longest continuous time each racer (grid order) stood still (< 0.5 m/s) with nothing
     /// holding it (no car, civilian or red light ahead; not parked / yielding), s.
     pub max_stuck_s: Vec<f32>,
@@ -289,6 +291,7 @@ pub fn run(
     let mut field_wall_s = 0.0f64;
     let mut heat = EventHeat::new();
     let mut violations = 0u32;
+    let mut violations_by: std::collections::BTreeMap<EntityId, u32> = Default::default();
     let mut police_events: Vec<wp_police::PoliceEvent> = Vec::new();
     let mut events: Vec<SimEvent> = Vec::new();
     let mut stuck_s = vec![0.0f32; entities.len()];
@@ -353,8 +356,9 @@ pub fn run(
             _ => None,
         }));
         for e in &events {
-            if matches!(e, SimEvent::TrafficViolation { .. }) {
+            if let SimEvent::TrafficViolation { vehicle, .. } = e {
                 violations += 1;
+                *violations_by.entry(*vehicle).or_default() += 1;
             }
         }
         for ev in &events {
@@ -453,6 +457,7 @@ pub fn run(
         field_wall_s,
         police_events,
         violations,
+        violations_by,
         max_stuck_s,
         max_wait_s,
         tow_s,

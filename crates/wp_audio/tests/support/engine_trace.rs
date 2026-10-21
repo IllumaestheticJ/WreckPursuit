@@ -117,6 +117,17 @@ pub fn car(id: &str) -> LoadedCar {
 /// gets the telemetry throttle as `throttle_applied`, like the wasm bridge. `assists`: the
 /// `wp_vehicle` metric assists when `None`.
 pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> Vec<Frame> {
+    run_mode(car_id, script, assists, EngineModelMode::Layers)
+}
+
+/// [`run`] with the director's engine voicing `mode` (layers, or the modelled engine the
+/// browser plays for the focus car once its worklet runs).
+pub fn run_mode(
+    car_id: &str,
+    script: &[Segment],
+    assists: Option<AssistProfile>,
+    mode: EngineModelMode,
+) -> Vec<Frame> {
     let lib = AudioLibrary::embedded().expect("audio data");
     // Engine-layer gains are recorded with the pack's level divided out (its idle layer's cue
     // gain: 1.0 in the procedural packs, the LEVEL_DB boost in the recorded ones), so the checks
@@ -135,6 +146,7 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
     let c = car(car_id);
     let mut dir = AudioDirector::new(lib.clone(), 7);
     dir.register_car(&c);
+    dir.set_engine_model(mode);
     let mut rig = Rig::new(&c);
     let a = assists.unwrap_or_else(metric_assists);
     let entity = EntityId(1);

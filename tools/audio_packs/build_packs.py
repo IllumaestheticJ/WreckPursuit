@@ -12,7 +12,6 @@ DL, OUT = sys.argv[1], sys.argv[2]
 SR = 44100
 K = "kenney_impact/Audio"
 GG = "car-sound-effects-pack-low-quality/car_sound_effects_pack.zip_x"
-HV = "engine-loop-heavy-vehicletank/engine-loop-heavy-pack_0.7z_x/engine-loop-heavy-pack/WAV"
 ZI = "some-sounds-0/all-in-one_0.zip_x"
 RD = "75-cc0-breaking-falling-hit-sfx/sfx_breaking_and_falling.zip_x"
 
@@ -21,11 +20,13 @@ SOURCES = {
     "qubodup_engine": dict(page="https://opengameart.org/content/car-engine-loop-96khz-4s", title="Car Engine Loop 96kHz, 4s", author="qubodup", licence="CC-BY 3.0"),
     "ggbotnet": dict(page="https://opengameart.org/content/car-sound-effects-pack-low-quality", title="Car Sound Effects Pack (Low Quality)", author="GGBotNet", licence="CC0 1.0"),
     "domasx2": dict(page="https://opengameart.org/content/racing-car-engine-sound-loops", title="racing car engine sound loops", author="domasx2 (from a public-domain pdsounds.org recording)", licence="CC0 1.0"),
-    "nayckron": dict(page="https://opengameart.org/content/engine-loop-heavy-vehicletank", title="Engine-loop heavy vehicle/tank", author="Nayckron", licence="CC-BY 3.0"),
     "squeal": dict(page="https://opengameart.org/content/car-tire-squeal-skid-loop", title="Car tire squeal skid loop", author="qubodup (edit of audible-edge, freesound #71739)", licence="CC-BY 3.0"),
     "scrapes": dict(page="https://opengameart.org/content/scrapes", title="Scrapes", author="AntumDeluge", licence="CC0 1.0"),
     "crash": dict(page="https://opengameart.org/content/crash-collision", title="Crash Collision", author="qubodup", licence="CC0 1.0"),
-    "siren": dict(page="https://opengameart.org/content/sirens-and-alarm-noise", title="Sirens and Alarm Noise", author="aquinn", licence="CC0 1.0"),
+    # Wikimedia Commons file pages (downloaded by hand to <dl>/commons/, see README). The CC0 file's
+    # page is linked by its page id: its title is a siren maker's trade name, kept out of the repo.
+    "siren_fire": dict(page="https://commons.wikimedia.org/w/index.php?curid=12624440", title="Emergency siren tones (wail, yelp, fast phaser) used on a fire engine (Wikimedia Commons)", author="Heggyhomolit", licence="CC0 1.0"),
+    "siren_twotone": dict(page="https://commons.wikimedia.org/wiki/File:WWS_Policecarsiren.ogg", title="WWS Policecarsiren (Wikimedia Commons, Work With Sounds)", author="Work With Sounds / Konrad Gutkowski", licence="CC-BY 4.0"),
     "radio": dict(page="https://opengameart.org/content/radio-noise-1", title="Radio Noise 1", author="Kresiek The Furry", licence="CC0 1.0"),
     "traffic": dict(page="https://opengameart.org/content/high-traffic-road-sounds", title="High traffic road sounds", author="IgnasD", licence="CC0 1.0"),
     "crickets": dict(page="https://opengameart.org/content/crickets-ambient-noise-loopable", title="Crickets Ambient Noise - loopable", author="Wolfgang_", licence="CC0 1.0"),
@@ -125,16 +126,10 @@ loop("engine_rec_i4", "high_off.ogg", lowpass(load(f"{GG}/Car_Engine_Loop.ogg", 
 R = "racing-car-engine-sound-loops"
 def tile(x, secs):  # short loops: repeat to ≥ secs for smoother crossfade
     return np.tile(x, int(np.ceil(secs * SR / len(x))))
-for name, f in [("idle.ogg", "loop_0.wav"), ("low_on.ogg", "loop_2_0.wav"), ("mid_on.ogg", "loop_4_0.wav"), ("high_on.ogg", "loop_5_0.wav")]:
-    loop("engine_rec_v6", name, load(f"{R}/{f}"), "domasx2", f, "mono", xf=0.02)
-loop("engine_rec_v6", "low_off.ogg", lowpass(load(f"{R}/loop_1_0.wav"), 700.0), "domasx2", "loop_1_0.wav", "mono, low-pass 700 Hz (overrun layer)", lufs=-24, xf=0.02)
-loop("engine_rec_v6", "high_off.ogg", lowpass(load(f"{R}/loop_3_0.wav"), 900.0), "domasx2", "loop_3_0.wav", "mono, low-pass 900 Hz (overrun layer)", lufs=-24, xf=0.02)
-
-for name, f in [("idle.ogg", "faster_speeds/engine_heavy_slow_loop.wav"), ("low_on.ogg", "engine_heavy_loop.wav"),
-                ("mid_on.ogg", "faster_speeds/engine_heavy_average_loop.wav"), ("high_on.ogg", "faster_speeds/engine_heavy_fast_loop.wav")]:
-    loop("engine_rec_v8", name, load(f"{HV}/{f}"), "nayckron", os.path.basename(f), "mono")
-loop("engine_rec_v8", "low_off.ogg", lowpass(load(f"{HV}/engine_heavy_loop.wav"), 500.0), "nayckron", "engine_heavy_loop.wav", "mono, low-pass 500 Hz (overrun layer)", lufs=-24)
-loop("engine_rec_v8", "high_off.ogg", lowpass(load(f"{HV}/faster_speeds/engine_heavy_average_loop.wav"), 700.0), "nayckron", "engine_heavy_average_loop.wav", "mono, low-pass 700 Hz (overrun layer)", lufs=-24)
+# Only the idle loop of this set is used (engine_rec_v6 / _i6 / _v8 idle): its other loops span
+# 1,300-2,300 rpm of one car and the heavy-vehicle (Nayckron) loops fire at 16-26 Hz, too far from
+# a road car's rev range to anchor at their firing frequency ("engine sounds are bad", 2026-10-21).
+loop("engine_rec_v6", "idle.ogg", load(f"{R}/loop_0.wav"), "domasx2", "loop_0.wav", "mono", xf=0.02)
 
 # turbo: blow-off valve stand-ins from recorded steam/air releases (short, high-passed)
 for i, m in enumerate([1, 3, 4]):
@@ -197,23 +192,43 @@ loop(W, "city_night.ogg", amb, "traffic", "gatve Varniu_2.ogg + crickets_1.mp3",
 rows[-1]["also"] = SOURCES["crickets"]
 
 # ---------------- sirens ----------------
-S = "sirens-and-alarm-noise/siren_0.mp3"
-rise = load(S, 26.50, 3.76)
-wail = np.concatenate([rise, rise[::-1]])
-loop("siren_rec", "wail.ogg", wail, "siren", "siren_0.mp3", "mono, rising sweep 26.50–30.26 s + its mirror (fall)", lufs=-16, xf=0.02)
-loop("siren_rec", "yelp.ogg", load(S, 36.52, 1.36 + 0.02), "siren", "siren_0.mp3", "mono, two 0.68 s yelp cycles 36.52–37.88 s", lufs=-16, xf=0.02)
-loop("siren_rec", "phaser.ogg", load(S, 9.08, 1.0 + 0.02), "siren", "siren_0.mp3", "mono, eight 0.125 s cycles 9.08–10.08 s", lufs=-16, xf=0.02)
-tone = load(S, 29.90, 0.30)  # near-steady top of the sweep (~1045 Hz on the analyser)
-def hold(x, secs):
-    out = x.copy()
-    while len(out) < secs * SR:
-        n = int(0.03 * SR); t = np.linspace(0, np.pi / 2, n)
-        out = np.concatenate([out[:-n], out[-n:] * np.cos(t) + x[:n] * np.sin(t), x[n:]])
-    return out[: int(secs * SR)]
-hi = hold(pitch(S, 960 / 1045, start=29.90, dur=0.30), 0.55)
-lo = hold(pitch(S, 770 / 1045, start=29.90, dur=0.30), 0.55)
-loop("siren_rec", "hilo.ogg", np.concatenate([fade(hi, 0.01, 0.01), fade(lo, 0.01, 0.01), hi[:int(0.03 * SR)]]), "siren", "siren_0.mp3",
-     "mono, steady tone 29.90–30.20 s re-pitched to 960 / 770 Hz, 0.55 s each", lufs=-16, xf=0.03)
+# Whole natural cycles of real recordings (owner: "police sirens seem unrealistic — use real
+# sounds"); nothing reversed, re-pitched or synthesized. Each loop is x[a:b] with b matched to a
+# by normalised cross-correlation (the end runs into the start in phase), a on a rising zero
+# crossing, and its first few ms crossfaded with the audio that follows b in the recording.
+from scipy.signal import butter, sosfiltfilt
+
+def highpass(x, hz):
+    return sosfiltfilt(butter(2, hz, btype="high", fs=SR, output="sos"), x.astype(np.float64)).astype(np.float32)
+
+def cycle_loop(x, a_s, b_s, xf_s, search_s, win_s):
+    a = int(round(a_s * SR))
+    zc = np.where((x[a - 400:a + 400][:-1] <= 0) & (x[a - 400:a + 400][1:] > 0))[0] + a - 400
+    a = int(zc[np.argmin(np.abs(zc - a))]) + 1
+    w = int(win_s * SR); ref = x[a:a + w]; best = (-2.0, 0)
+    for b in range(int(round(b_s * SR)) - int(search_s * SR), int(round(b_s * SR)) + int(search_s * SR) + 1):
+        c = x[b:b + w]; r = float(np.dot(ref, c) / (np.linalg.norm(ref) * np.linalg.norm(c) + 1e-12))
+        if r > best[0]: best = (r, b)
+    b = best[1]; y = x[a:b].copy(); n = int(xf_s * SR); g = np.linspace(0.0, 1.0, n)
+    y[:n] = x[a:a + n] * g + x[b:b + n] * (1.0 - g)
+    return y, a / SR, b / SR
+
+def siren_loop(name, x, a_s, b_s, xf_s, search_s, win_s, src, orig, how):
+    y, a, b = cycle_loop(x, a_s, b_s, xf_s, search_s, win_s)
+    m = pyln.Meter(SR)
+    l = m.integrated_loudness(np.tile(y, int(np.ceil(4.0 * SR / len(y)))).astype(np.float64))
+    y = y * 10 ** ((-16.0 - l) / 20)
+    pk = np.abs(y).max(); y = y / pk * 0.89 if pk > 0.89 else y
+    write("siren_rec", name, y, src, orig, f"mono, {how} {a:.3f}–{b:.3f} s, cut at matched phase (rising zero crossing), seam crossfade {xf_s * 1000:.0f} ms, -16 LUFS", True)
+
+F = highpass(load("commons/cc0_fire_wail_yelp_phaser.ogg"), 200.0)  # 60 Hz hum, rumble (tone is 840-1660 Hz)
+FO = "Commons file, page id 12624440 (Ogg Vorbis, 14.4 s)"
+siren_loop("wail.ogg", F, 9.305, 14.040, 0.010, 0.0025, 0.012, "siren_fire", FO, "high-pass 200 Hz, one whole wail cycle (rise 860→1660 Hz, slow fall back to 860 Hz)")
+siren_loop("yelp.ogg", F, 5.450, 7.7673, 0.008, 0.0015, 0.012, "siren_fire", FO, "high-pass 200 Hz, seven consecutive yelp cycles (331 ms, 860–1630 Hz)")
+siren_loop("phaser.ogg", F, 8.050, 9.090, 0.006, 0.002, 0.075, "siren_fire", FO, "high-pass 200 Hz, one whole fast-phaser pattern (~75 ms sweeps, 840–1200 Hz; the pattern repeats every 1.040 s)")
+T = highpass(load("commons/ccby_de_police_twotone.ogg"), 120.0)
+siren_loop("hilo.ogg", T, 1.640, 1.640 + 6 * 1.4637, 0.012, 0.004, 0.02, "siren_twotone", "WWS_Policecarsiren.ogg",
+           "high-pass 120 Hz, stereo → mono, six consecutive two-tone cycles (457 Hz 0.72 s / 603 Hz 0.74 s)")
 
 # ---------------- radio ----------------
 rn = load("radio-noise-1/radio_noise_loop.wav", 2, 10)

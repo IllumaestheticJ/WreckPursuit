@@ -122,21 +122,21 @@ Status 2026-10-19: **done.** 80 recorded files, **1.25 MB** (budget 15 MB), mono
 kenney.nl and opengameart.org (freesound.org answers 403 without an API key and was skipped). Licences:
 CC0 1.0 and CC-BY 3.0 only (no NC / ND / SA, no game rips); every file, its page, author, licence and
 processing is in `data/audio/LICENSES.md` (+ machine-readable `data/audio/sources.json`); CC-BY authors
-(qubodup, Nayckron) are credited in the testbed's F1 help (`apps/testbed-web/src/audio/credits.ts`).
+(qubodup; Nayckron until their loops were dropped on 2026-10-21) are credited in the testbed's F1 help (`apps/testbed-web/src/audio/credits.ts`).
 
 | Pack (fallback) | What | Source |
 |---|---|---|
-| `engine_rec_i4` (`engine_proc_i4`) | idle / 2,600 / 4,900 rpm loops (anchors from the measured firing frequency), low-passed copies as off-throttle layers | GGBotNet (CC0), qubodup (CC-BY 3.0) |
+| `engine_rec_i4` (`engine_proc_i4`) | idle / ~2,600 / ~5,000 rpm loops, low-passed copies as off-throttle layers; every layer anchored at its measured firing frequency (`FiringHz` 44.2 / 87.2 / 165.6 Hz, see "Engine sounds are bad") | GGBotNet (CC0), qubodup (CC-BY 3.0) |
 | `engine_rec_turbo` (`engine_proc_i4`) | the I4 loops + recorded blow-off hisses; louder whistle (still procedural) | + bart (CC0) |
-| `engine_rec_v6`, `engine_rec_i6` (`engine_proc_v6` / `_i6`) | 4-pitch loops of one public-domain car recording; i6 reuses the v6 files | domasx2 (CC0) |
-| `engine_rec_v8` (`engine_proc_v8`) | heavy engine loop at 4 speeds | Nayckron (CC-BY 3.0) |
+| `engine_rec_v6`, `engine_rec_i6`, `engine_rec_v8` (`engine_proc_v6` / `_i6` / `_v8`) | a six-cylinder idle loop (42.8 Hz) + the I4 loops, at their firing frequency (since 2026-10-21; the old four-pitch six loops and the heavy-vehicle "V8" loops are gone) | domasx2 (CC0) + the I4 sources |
 | `world_rec` (`world_proc`) | squeal loop, impacts light/medium/heavy metal, plastic, glass ×7, cast clank, thud/thump/land, scrape loops (metal/plastic), part tear, wheel off, engine fail, steam hiss, horn + truck horn, **gear-shift clunks**, **city night ambience** | Kenney Impact Sounds (CC0), qubodup, rubberduck, TinyWorlds, AntumDeluge, Ziph, BMacZero, GGBotNet, IgnasD, Wolfgang_ (all CC0) |
-| `siren_rec` (`siren_proc`) | wail (rise + fall), yelp, phaser, hi-lo loops | aquinn (CC0, electronic) |
+| `siren_rec` (`siren_v2`) | wail, yelp, fast phaser and two-tone hi-lo loops: whole natural cycles of real recordings (whoop / air horn stay synthesized); what police cars play since `docs/integration/siren-recorded.md` | Heggyhomolit (CC0), Work With Sounds / Konrad Gutkowski (CC-BY 4.0) |
 | `radio_rec` (`radio_proc`) | squelch on/off bursts + static bed from a real scanner (Uniden SDS100) | Kresiek The Furry (CC0) |
 
 **Honest gaps (best available on these two sites):** no multi-RPM recordings of distinct engines exist
-there under CC0/CC-BY. The I4 layers are three real loops from two different cars; the V6/I6 and V8
-packs are each one recording at several pitches (more "recorded timbre" than true RPM layering). Turbo
+there under CC0/CC-BY. The I4 layers are three real loops from two different cars; the six and V8
+packs reuse them above a six-cylinder idle loop (2026-10-21: their own loops could not reach a road
+car's rev range, see "Engine sounds are bad"). Turbo
 whistle, supercharger whine, exhaust pops, the limiter, rolling-surface noise, gravel scrub, tire burst and
 panel rattle stay procedural inside the recorded packs (no fitting recording). Sirens are electronic
 (synthesised) sweeps — they play at their own recorded cadence, not phase-locked to the director.
@@ -255,7 +255,7 @@ two-layer crossfade must stay within 2 dB: old 5.0 dB, new 0.03 dB).
 ## Playtest #27 — wheelspin audio (lead follow-up, 2026-10-19)
 
 Spinning driven tyres now have their own loop (`tire/spin`, slot `SPIN` = 0x202; on gravel / dirt
-/ grass `tire/spin_loose`, slot 0x203), separate from cornering squeal and braking skid.
+`tire/spin_loose`, slot 0x203; on grass the soft `tire/scrub_grass` since the grass port below), separate from cornering squeal and braking skid.
 Model in `crates/wp_audio/src/tires.rs` (see the README): per-wheel driving slip ratio and slip
 speed (`ω·r − vx`, recovered exactly from `WheelState::slip_ratio`/`omega` and the car's wheel
 radii), weighted by load and surface, intensity and pitch rising with slip speed; the loudest
@@ -423,8 +423,9 @@ listen are not in the repo (the checks are against physics, not recordings).
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
-- Recorded packs are the default (see "Recorded packs"); engine recordings are thin (one or two
-  sources per engine type). Procedural packs remain as the fallback setting.
+- Recorded packs are the default (see "Recorded packs"); engine recordings are thin (three I4
+  loops + one six idle for every pack; a V8's top loop plays up to ~3x near its limiter).
+  Procedural packs remain as the fallback setting.
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)
@@ -639,3 +640,173 @@ docs, and the kinematic-traffic bridge which reads `&Session` only): simcli `gol
 `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
 `tests::simcli_golden_replays_play_back_in_the_browser_core` (golden_tbone drift) — neither
 `wp_wasm` test touches audio. These look like round-13 vehicle changes waiting for a `[bless]`.
+
+## Sirens sweep smoothly instead of "laughing" (port of 2e64f096 onto round12, 2026-10-20)
+
+Both browser siren voices (`siren.ts` sirenLoop for siren v2 packs, `synth.ts` siren for v1)
+re-locked their cadence to the director's per-frame sim phase whenever it drifted > 5 % of a
+cycle (15 ms on the yelp): frame jitter and a sim slower than real time tripped that
+constantly, so the pitch stepped several times a second. They now start at the director's phase
+and free-run on the audio clock (Doppler is the only per-update input; pitch only, constant
+amplitude), with ≥ 64 curve points per cycle. The sweep shape (`SirenCadence::freq_at_phase`,
+`cadenceFreq`, `sirenFreqAtPhase`, the `e2e/siren.mjs` model) is a smoothstep rise and fall
+(the old ease-out / ease-in shape fell at full speed off the peak and dwelt at the bottom, a
+"ha" contour at yelp rate); `phase_for_freq` inverts it by bisection. Test:
+`siren::tests::sweep_turnarounds_are_smooth`.
+
+## Grass sounds like soft turf (port of 95686da1 onto round12, 2026-10-20)
+
+Grass slides used the gravel scrub (`tire/scrub_loose`: 0.4-3 kHz noise + stone crackle) at full
+gain plus the "rolling stones" term, and round12's grass wheelspin played the gravel roost
+(`tire/spin_loose`, crackle 1.6) — worse now that TCS defaults off. Now (`tires.rs`):
+- grass has its own `tire/scrub_grass` loop (`cues::SCRUB_GRASS`, slot `SCRUB_GRASS` = 0x204 —
+  0x202 is `SPIN` on round12; kept in `wp_audio`, no contract change), lowpass 1.1 kHz, no
+  crackle, cue gain 0.45, fed only by slide (braking slip + slip angle) and wheelspin on turf;
+- scrub levels follow their target with 30 ms attack / 150 ms release (`engine::smooth_k`, not
+  `exp`), released below 0.01, so slip flickering at the limit holds one loop;
+- dominant-surface ties keep the rolling loop already playing (no swaps on a straddled edge);
+- `surface/grass` retuned in `world_proc` and `world_rec` (lp 650 Hz, hp 45 Hz, rumble 1.5,
+  gain 1.0, new noise-synth `track` param: low-pass follows speed, `synth.ts`).
+Tests: `tires` grass rolls without scrub / slides on its own loop, grass wheelspin churns softly
+(no roost), flickering slip holds one smooth scrub, edge straddling keeps one loop;
+`tests/director.rs` grass drive scrubs once without churn, grass cues are soft.
+
+## Asphalt sounds like tyre roar, not hiss (lead/round12, 2026-10-21)
+
+Measured on a scripted drive (hakone_gt on the flat `wp_vehicle` rig, `world_rec` — what the
+cars use; its rolling loops are synths, only `tire/squeal` is a recording): launch, cruise
+50 km/h, accelerate, cruise 100, ABS stop to 40, moderate and hard corners at ~57 km/h, stop.
+Director commands rendered offline in headless Chromium through the real `VoicePool` /
+`AudioMixer`. Root causes:
+- `surface/asphalt` (`world_proc` / `world_rec`): white noise through one 12 dB/oct low-pass at
+  900 Hz — a third of its energy at 0.8-3 kHz, centroid 0.69 kHz at *every* speed (the pitch
+  only changed the playback rate of white noise, i.e. nothing). Concrete the same at 1.3 kHz
+  (56 % at 0.8-3 kHz); `surface/wet_asphalt` was a 0.8-4.5 kHz hiss band, 32 % > 4 kHz and 6 dB
+  louder than dry.
+- `tires.rs`: the squeal had no attack / release, so ABS cycling around the slip peak stopped
+  and restarted the squeal recording every 50-100 ms (17 starts in one stop from 100 km/h);
+  the rolling loop restarted at a standstill as FFB rumble flickered.
+- `synth.ts` spin: the smoke hiss (2.5 kHz band) played at 30 % even for a light launch chirp.
+Changes: noise synth gets optional `lp_stages` (2 = 24 dB/oct), `peak_db`, `ripple_depth`
+(softened slab-joint pulse); asphalt = lp 750 Hz × pitch^1.25, two stages, +4 dB at 320 Hz,
+rumble 0.4; wet = lp 1.7 kHz × pitch, hp 120 Hz, two stages, gain 0.6; concrete = lp 900 Hz ×
+pitch^1.25, two stages, +3 dB at 850 Hz, joint pulse 2.6 Hz × pitch at depth 0.15 (both packs).
+Squeal level and rolling gain follow their targets with the scrub's 30 ms / 150 ms
+(`SQUEAL_FLOOR` 0.01, `ROLLING_FLOOR` 0.004); spin hiss scales with `load`. No contract change;
+audio only (no sim hash / golden affected).
+
+Rolling loop alone, in the drive (RMS dBFS / spectral centroid / % energy > 4 kHz):
+
+| | 50 km/h before | 50 after | 100 km/h before | 100 after |
+|---|---|---|---|---|
+| asphalt | −41.5 / 693 Hz / 0.2 % | −41.1 / 399 Hz / 0.0 % | −36.6 / 696 Hz / 0.2 % | −35.3 / 542 Hz / 0.0 % |
+| (asphalt 0.8-3 kHz share) | 33 % | 2 % | 34 % | 19 % |
+| wet asphalt | −34.8 / 3311 Hz / 31.5 % | −40.9 / 915 Hz / 0.0 % | −29.8 / 3359 Hz / 32.9 % | −35.1 / 1205 Hz / 0.1 % |
+| concrete | −39.9 / 982 Hz / 0.5 % | −42.0 / 538 Hz / 0.0 % | −35.0 / 993 Hz / 0.6 % | −35.4 / 732 Hz / 0.0 % |
+
+World bus, asphalt drive: `tire/squeal` starts 17 → 2 (ABS stop, hard corner), surface-loop
+starts 3 → 1; the ABS stop's 95th-percentile 10 ms level jump 8.2 → 6.0 dB. Tests:
+`tires::tests::{asphalt_cruise_rolls_without_squeal_or_spin, abs_cycling_holds_one_squeal,
+rolling_loop_fades_out_once_at_a_stop}`, `tests/director.rs`
+`asphalt_drive_rolls_quietly_and_squeals_once_under_abs`, `asphalt_cues_roar_instead_of_hissing`
+(modelled spectrum of every world pack's paved synth loops).
+
+## "Engine sounds are bad" (owner, 2026-10-21) — branch `fix/engine-audio` from `lead/round12`
+
+**What actually plays.** The player car and the 6 nearest cars within 60 m play the **modelled
+engine** (`engine_worklet.ts`), confirmed in the game page by `e2e/audio_engine.mjs` part 4
+(worklet `ready`, the player's engine modelled). It also loads in a production bundle (vite
+`build.target` is es2022: class fields stay native, `engineWorkletMain.toString()` is
+self-contained; with an es2020 target esbuild would hoist a `__publicField` helper out of the
+function and the worklet would fail to register — checked, not the case). Every other car
+(traffic, police beyond the 6 nearest) and every car before the worklet loads plays the
+**recorded layers** (`engine_rec_*`); all 80 → 69 recorded files decode, the Ogg end trim
+(`oggVorbisLength`) applies to engine loops too (`preloadSamples` trims every `Samples` cue) and
+Chromium-decoded engine loops have no wrap click (wrap step ≤ 1.2× the 99.9th-percentile
+in-file step for the files still used). No silent fallback (the siren-class bug) on the engine path.
+
+**Method.** `engine_trace --physical` (new flag) / layers for `debug_sedan`, `lindwurm_4t`
+(testbed default), `rampart_50`, `shiro_turbo`, `sentinel_cruiser` (police), `sperber_32`: idle,
+WOT 1→6 (upshifts), lift (overrun), brake (rev-matched downshift blips), part throttle, cruise,
+kickdown; plus `engine_sweeps` (WOT + 0.4 s on the limiter, lift, shift, rpm steps, damaged).
+Rendered offline in headless Chromium through the real `VoicePool` + worklet (recorded samples
+decoded first), and the worklet's `EngineDsp` alone in Node for steady states. Sim rpm on the rig
+is clean (residual vs a 150 ms mean: median 0.01 %, p95 ≤ 0.1 % outside shifts): no warble source.
+
+**Root causes and fixes**
+
+| # | Defect (before) | Where | Fix |
+|---|---|---|---|
+| 1 | Modelled V8s / sixes drove the voice's own tanh soft limit at full throttle: 4.2 % (`rampart_50`) and 11.2 % (`lucciola_350`) of samples in the knee at 75 % redline, crest 5–9 dB — harsh, distorted | `engine_worklet.ts` `OUT_GAIN = 3.6` (old l.99) into the limit (old l.644) | `OUT_GAIN` 1.8, `engine_physical` cue gain 2.2 → 5.4 (same loudness): 0 % in the knee |
+| 2 | Pure d/dt radiation: the firing order sat ~10 dB under its 2nd/3rd harmonics on the I4s (−9.8 dB median along a WOT pull, recordings: firing order on top) — thin, nasal | old l.663 `rad = t - radPrev` | leaky differentiator (flat below 250 Hz) |
+| 3 | Pipe combs too resonant (end reflections −0.42 / −0.55, muffler peak +5 dB Q 1.8, airbox Q 2.2): harmonics swept through notches as the rpm rose — level holes of up to 7 dB in a WOT pull (detrended ripple std 2.1–2.8 dB I4 / I6) | old l.319, 323, 385, 389 | −0.22 / −0.25, +3 dB Q 1.2, Q 1.4 |
+| 4 | Perfectly periodic pulses (spectral flatness −26 to −33 dB vs −10 to −23 dB in the repo's recordings): a buzzer | old l.421 | turbulent flow noise riding on each pulse (high-passed 300 Hz, low-passed 1.2 kHz, deeper with load, own RNG stream), cycle variation 8/16 → 14/24 %, phase dispersion (allpasses at 140/420/1100 Hz; crest 12 → 9 dB) |
+| 5 | **Afterfire pops were silent**: the attack ramp overwrote the decay state (`popEnv = env·attack·0.9965`, attack 0 at age 0), so every overrun crackle, limiter and misfire bang died on its first sample; the e2e counted pops from worklet counters and never noticed | old l.562/567 | separate attack (1 ms raised cosine) and decay; `POP_GAIN` 0.6: pops 10–17 dB over the overrun body |
+| 6 | Recorded six / V8 layers rooted at `Idle` / `RedlineFrac` though a recording has a fixed pitch: the six loops (one car at 1,300–2,300 rpm) and the "V8" loops (a heavy vehicle firing at 16–26 Hz) played **15–47 semitones** under the car's firing frequency (median per car, analytic), crossfaded loops sounded up to 2 octaves apart, and the pitch barely rose with rpm. The I4 idle (44 Hz = 1,326 rpm) was rooted at the car's idle: 1.6× sharp and a second pitch through the idle → 2,600 rpm crossfade | `engine.rs` `RpmAnchor::Idle => idle_rpm`; `write_packs.py` old l.61 (`std`); `engine_rec_*.json` | new `RpmAnchor::FiringHz(f)` (root = the rpm at which *this car* fires at `f`, `EngineAudioDef::rpm_at_firing_hz`); measured `f` per loop (strongest partial + autocorrelation); `validate()` rejects recorded layers without it; six / V8 packs = six idle loop + the I4 loops (the old loops could not cover a road car's range: 3–13× shifts); Nayckron's loops and 5 of domasx2's removed (LICENSES / sources / credits regenerated) |
+
+Recorded level: `LEVEL_DB` 15.8 dB for every engine pack (the six / V8 packs now use the I4 files);
+recorded vs procedural within 1.5 dB for all 76 roster cases (`audio_roster.mjs`).
+
+**Before → after** (offline renders, Engine bus, chase camera 6 m):
+
+| Measure | Before | After |
+|---|---|---|
+| Modelled, WOT pull: detrended level ripple std (I4 / I6 / V8 xp / V8 fp / turbo) | 2.1 / 2.8 / 1.4 / 1.5 / 2.1 dB | 0.8 / 1.1 / 0.7 / 0.7 / 0.8 dB |
+| Modelled, WOT pull: firing order vs strongest partial (median, I4 / turbo I4) | −9.8 / −8.1 dB | −5.5 / −0.3 dB |
+| Modelled: samples in the soft-limit knee at 75 % redline WOT (V8 xp / V8 fp) | 4.2 / 11.2 % | 0 / 0 % |
+| Modelled: spectral flatness 200 Hz–4 kHz, 40 % redline WOT (I4 / I6 / V8) | −29.6 / −32.8 / −33.1 dB | −21.3 / −16.8 / −14.0 dB |
+| Modelled: HF share > 5 kHz (I4 drive) | −33.8 dB | −31.7 dB (recordings −20 to −23: no added hiss) |
+| Modelled: pitch error vs crank (drive, median / p90) | 0.08 / 0.27 % | 0.09 / 0.31 % |
+| Modelled: drive levels vs before (WOT / cruise / idle) | — | +0–2 / −2–+1 / +3–5 dB (idle was −46 dB) |
+| Modelled: overrun pops audible | never (0 dB) | 10–17 dB over the overrun body |
+| Recorded, firing harmonic found / pitch error p50 (`rampart_50`, `sentinel_cruiser`, `sperber_32`) | 0.73 / 14.5 %, 0.63 / 2.2 % (p90 14.8), 0.75 / 7.9 % | 0.98 / 1.0 %, 0.97 / 1.1 %, 0.98 / 1.0 % |
+| Recorded, analytic pitch error vs firing frequency, median per car (six / V8 packs) | 1,489–1,924 / 3,858–4,666 cents | 0 cents (by construction; renders ±1 %) |
+| Recorded, crossfade spread between the two audible loops (median, six / V8) | 877–1,145 / 814 cents | 0 cents |
+| Recorded I4: playback rate range over idle → limiter | 0.42–2.88× | 0.57–1.81× |
+| Clicks (2nd-difference detector), all drive renders | 0 | 0 |
+
+Budget: 7 modelled engines 0.69–0.75 ms per 128-frame block (was 0.68; budget 1.5 ms).
+
+**Tests:** `wp_audio` `tests/samples.rs`
+`recorded_engine_layers_follow_the_cars_firing_frequency` (every car, idle → limiter, on / off,
+through the director: pitch × anchor = firing frequency within 5 cents, leading loop 0.5–3.6×),
+`validate_rejects_recorded_layers_without_a_firing_frequency`; `engine` unit tests
+`firing_hz_anchor_roots_at_the_cars_firing_frequency`, `layers_do_not_churn_along_an_rpm_sweep`
+(equal-power sum: existing `weights_are_energy_preserving`). Adjusted: `tests/director.rs`
+(idle plays a layer within 0.5–2×, no longer "rooted at the car's idle"), `tests/engine_shift.rs`
+(the top layer of a set may stretch to 3.2×; layers checked only where the drive visits their
+band), `tests/roster.rs` (LOD test at 1,900 rpm, between two V8 loops). `e2e/audio_engine.mjs`:
+part 2b (worklet in Node per car: no soft-limit samples, ripple ≤ 1.5 dB, firing order within
+7 dB, median flatness ≥ −22 dB); crackle audible (≥ 7 dB over the overrun body; the old code
+measures 1.5–5); "no clicks" leaves out the windows a pop starts in (worklet `popAt` onsets —
+pops are wanted bangs). The data and worklet checks fail on the old code (old values above);
+the churn test is a guard.
+
+**Validation:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -D warnings`,
+`cargo test -p wp_audio` (all), `cargo test -p wp_wasm audio` (2/2), `cargo build --target
+wasm32-unknown-unknown -p wp_wasm`, `npm run typecheck` (pkg from a release wasm build +
+wasm-bindgen 0.2.129; no wasm-pack in the container), `e2e/audio_engine.mjs` (all, game part
+included; regenerated `docs/media/audio/`), `audio_roster.mjs`, `audio_samples.mjs` (69/69),
+`audio.mjs`: pass. Audio is presentation only: no simulation crate changed (`wp_audio` is reached
+from `wp_wasm` / testbed-native only), so sim hashes and goldens are untouched.
+
+**Shared files touched (engine parts only):** `director.rs` (one line: `EngineLayers::resolve`
+takes the car's `EngineAudioDef`), `data.rs` (`RpmAnchor::FiringHz`,
+`EngineAudioDef::rpm_at_firing_hz`, the validation rule), `engine_host.ts` (`EngineCounters` with
+`popAt`), `credits.ts` (Nayckron line), `data/audio/{LICENSES.md,sources.json}` (rows of removed
+files), `tools/audio_packs/{build_packs,write_packs}.py`. Not touched: tyre / surface code,
+`world_*` packs, `synth.ts`, `voices.ts` (the asphalt branch).
+
+**Open / needs a listen:**
+- Recorded V8s near the limiter play the top I4 loop at up to ~3× (3.5× on the 8,800 rpm
+  flat-plane): right pitch, but formants shift up ("chipmunk") — only for cars beyond the 6
+  nearest / 60 m. Alternatives: map V8s an octave down (natural timbre, wrong octave and a jump at
+  the modelled ↔ layers LOD switch), or play far V8s procedurally. Better multi-rpm CC0 / CC-BY
+  recordings are the real fix.
+- The I4 idle loop now plays at 0.6× at an 820 rpm idle (its true pitch is a 1,326 rpm idle).
+- The amount of flow noise / crackle (`FLOW_NOISE`, `POP_GAIN`) and the louder idle are tuned
+  against the recordings' statistics, not by ear.
+- Mix headroom (pre-existing): one V8 at WOT 6 m away already puts 1.3 % (before) / 1.7 %
+  (after) of samples into the master soft clip after the master compressor (−10 dB threshold,
+  Chrome's automatic make-up gain). Lowering `engine.gain` or raising the master threshold would
+  give the mix room; not changed here (shared mixer, affects every bus).

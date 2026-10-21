@@ -16,13 +16,12 @@ use wp_world::network::{Building, BuildingKind, DecorKind, DistrictKind, LaneKin
 use wp_world::residential;
 use wp_world::surface::{
     is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
+    TERRAIN_RENDER_M,
 };
 use wp_world::terrain::Heightfield;
 
 /// Height of the parking / bus lane tint above the road surface, m.
 const LANE_TINT_DZ_M: f32 = 0.01;
-/// Render terrain vertex spacing (cities with terrain), m.
-const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
 const SEA_Z: f32 = 0.25;
 
@@ -317,8 +316,8 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
     }
 }
 
-/// Render terrain: every `k`-th vertex, each lowered to the minimum of the fine heights around
-/// it, so the coarse surface never rises above the fine one (and so never above a road).
+/// Render terrain: [`Heightfield::lowered_coarse`] at [`TERRAIN_RENDER_M`], never above a road.
+/// Physics collides with the same surface off the roads (`wp_world::surface::collision_terrain`).
 fn render_terrain(
     t: &Heightfield,
     net: &RoadNetwork,
@@ -326,27 +325,13 @@ fn render_terrain(
     rock: &mut Prim,
     seabed: &mut Prim,
 ) {
-    let k = ((TERRAIN_RENDER_M / t.cell_m).round() as u32).max(1);
-    let cx = (t.nx - 1).div_ceil(k) + 1;
-    let cy = (t.ny - 1).div_ceil(k) + 1;
-    let fine = |i: u32, j: u32| (i.min(t.nx - 1), j.min(t.ny - 1));
-    let mut z = vec![0.0f32; (cx * cy) as usize];
-    let mut pos = vec![[0.0f32; 2]; (cx * cy) as usize];
-    for j in 0..cy {
-        for i in 0..cx {
-            let (fi, fj) = fine(i * k, j * k);
-            let mut m = f32::INFINITY;
-            for dj in -(k as i64)..=(k as i64) {
-                for di in -(k as i64)..=(k as i64) {
-                    let a = (fi as i64 + di).clamp(0, t.nx as i64 - 1) as u32;
-                    let b = (fj as i64 + dj).clamp(0, t.ny as i64 - 1) as u32;
-                    m = m.min(t.at(a, b));
-                }
-            }
-            z[(j * cx + i) as usize] = m - 0.05;
-            pos[(j * cx + i) as usize] = t.vertex_pos(fi, fj);
-        }
-    }
+    let coarse = t.lowered_coarse(TERRAIN_RENDER_M);
+    let (cx, cy) = (coarse.nx, coarse.ny);
+    let z = &coarse.z;
+    let pos: Vec<V2> = (0..cy)
+        .flat_map(|j| (0..cx).map(move |i| (i, j)))
+        .map(|(i, j)| coarse.vertex_pos(i, j))
+        .collect();
     let zone_kind = |p: V2| {
         net.zones
             .iter()
@@ -355,7 +340,7 @@ fn render_terrain(
     };
     // Smooth normals from central differences on the coarse grid.
     let at = |i: u32, j: u32| z[(j.min(cy - 1) * cx + i.min(cx - 1)) as usize];
-    let step = (k as f32) * t.cell_m;
+    let step = coarse.cell_m;
     let normal = |i: u32, j: u32| -> V3 {
         let dx = (at(i + 1, j) - at(i.saturating_sub(1), j)) / (2.0 * step);
         let dy = (at(i, j + 1) - at(i, j.saturating_sub(1))) / (2.0 * step);

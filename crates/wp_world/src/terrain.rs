@@ -75,6 +75,56 @@ impl Heightfield {
         a + (b - a) * ty
     }
 
+    /// Ground height at `p` on the grid's triangles: each cell split along its
+    /// `(i, j)`–`(i + 1, j + 1)` diagonal, which is how the greybox mesh draws the terrain and
+    /// how `wp_sim`'s Rapier heightfield tiles are split. Clamped to the grid.
+    pub fn height_on_triangles(&self, p: V2) -> f32 {
+        let fx = ((p[0] - self.origin[0]) / self.cell_m).clamp(0.0, (self.nx - 1) as f32);
+        let fy = ((p[1] - self.origin[1]) / self.cell_m).clamp(0.0, (self.ny - 1) as f32);
+        let i = (fx.floor() as u32).min(self.nx - 2);
+        let j = (fy.floor() as u32).min(self.ny - 2);
+        let (u, v) = (fx - i as f32, fy - j as f32);
+        let z0 = self.at(i, j);
+        let z2 = self.at(i + 1, j + 1);
+        if u >= v {
+            z0 + u * (self.at(i + 1, j) - z0) + v * (z2 - self.at(i + 1, j))
+        } else {
+            z0 + v * (self.at(i, j + 1) - z0) + u * (z2 - self.at(i, j + 1))
+        }
+    }
+
+    /// Coarse copy for drawing, with vertices `spacing_m` apart (rounded to whole cells): each
+    /// coarse vertex is lowered to the minimum of the fine heights within one coarse step
+    /// around it, minus 5 cm, so the coarse surface never rises above the fine one (and so
+    /// never above a road). This is the terrain the greybox mesh draws.
+    pub fn lowered_coarse(&self, spacing_m: f32) -> Heightfield {
+        let k = ((spacing_m / self.cell_m).round() as u32).max(1);
+        let cx = (self.nx - 1).div_ceil(k) + 1;
+        let cy = (self.ny - 1).div_ceil(k) + 1;
+        let mut z = vec![0.0f32; (cx * cy) as usize];
+        for j in 0..cy {
+            for i in 0..cx {
+                let (fi, fj) = ((i * k).min(self.nx - 1), (j * k).min(self.ny - 1));
+                let mut m = f32::INFINITY;
+                for dj in -(k as i64)..=(k as i64) {
+                    for di in -(k as i64)..=(k as i64) {
+                        let a = (fi as i64 + di).clamp(0, self.nx as i64 - 1) as u32;
+                        let b = (fj as i64 + dj).clamp(0, self.ny as i64 - 1) as u32;
+                        m = m.min(self.at(a, b));
+                    }
+                }
+                z[(j * cx + i) as usize] = m - 0.05;
+            }
+        }
+        Heightfield {
+            origin: self.origin,
+            cell_m: self.cell_m * k as f32,
+            nx: cx,
+            ny: cy,
+            z,
+        }
+    }
+
     /// Unit ground normal at `p` (central differences over one cell).
     pub fn normal_at(&self, p: V2) -> [f32; 3] {
         let h = self.cell_m;
@@ -173,6 +223,29 @@ mod tests {
         assert!((h.height_at([50.0, 3.0]) - 10.0).abs() < 1e-5);
         let n = h.normal_at([5.0, 5.0]);
         assert!(n[0] < -0.3 && n[2] > 0.5);
+    }
+
+    #[test]
+    fn lowered_coarse_never_rises_above_the_fine_field() {
+        let mut h = Heightfield::flat([0.0, 0.0], [40.0, 40.0], 5.0, 0.0);
+        for j in 0..h.ny {
+            for i in 0..h.nx {
+                h.z[(j * h.nx + i) as usize] = (i * i) as f32 * 0.3 + j as f32;
+            }
+        }
+        let c = h.lowered_coarse(10.0);
+        assert_eq!((c.nx, c.ny, c.cell_m), (5, 5, 10.0));
+        for j in 0..h.ny {
+            for i in 0..h.nx {
+                let p = h.vertex_pos(i, j);
+                assert!(c.height_on_triangles(p) <= h.at(i, j) - 0.05 + 1e-4);
+            }
+        }
+        // On the triangles, a vertex's own height is exact and a cell centre lies on the
+        // (i, j)–(i + 1, j + 1) diagonal.
+        assert_eq!(c.height_on_triangles([10.0, 20.0]), c.at(1, 2));
+        let mid = (c.at(1, 1) + c.at(2, 2)) * 0.5;
+        assert!((c.height_on_triangles([15.0, 15.0]) - mid).abs() < 1e-4);
     }
 
     #[test]
