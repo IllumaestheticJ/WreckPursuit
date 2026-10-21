@@ -11,6 +11,7 @@ use common::Setup;
 use wp_contracts::{EntityId, VehicleSim};
 use wp_opponent::{
     DriverProfile, FixedHeat, GridLayout, OpponentEvent, RacerStatus, AI_CONTACT_IMPULSE_NS,
+    PULL_OVER_MAX_S, PULL_OVER_MPS,
 };
 
 /// Eight default-aggression drivers, skill 0.95 → 0.25 in grid order.
@@ -442,7 +443,10 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         ..Setup::default()
     };
     let mut speeds = [0.0f32; 3];
+    // Race clock (the field's own), s: one hook call per field tick.
+    let mut race_s = 0.0f32;
     let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, _| {
+        race_s += wp_contracts::PHYSICS_DT;
         for (k, v) in sim.vehicles().iter().take(3).enumerate() {
             speeds[k] = v.vehicle.state().speed_mps;
         }
@@ -481,11 +485,28 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
     for s in &st {
         match s.status {
             RacerStatus::Busted => {
-                // A booked car stays put.
+                // A booked car stops: at once, or after rolling on at pull-over pace to a
+                // spot clear of a junction / tight bend (at most PULL_OVER_MAX_S, plus a few
+                // seconds to brake). With the pro-driver police a racer can be caught a few
+                // seconds before the run ends, still rolling on.
                 let k = (s.entity.0 - 1) as usize;
+                let busted_s = events
+                    .iter()
+                    .find_map(|e| match e {
+                        OpponentEvent::Busted { entity, time_s } if *entity == s.entity => {
+                            Some(*time_s)
+                        }
+                        _ => None,
+                    })
+                    .expect("Busted event");
+                let limit = if race_s - busted_s > PULL_OVER_MAX_S + 3.0 {
+                    1.0
+                } else {
+                    PULL_OVER_MPS + 0.5
+                };
                 assert!(
-                    speeds[k].abs() < 1.0,
-                    "busted {:?} still moving {:.1} m/s",
+                    speeds[k].abs() < limit,
+                    "busted {:?} at {busted_s:.1} s still moving {:.1} m/s at {race_s:.1} s",
                     s.entity,
                     speeds[k]
                 );

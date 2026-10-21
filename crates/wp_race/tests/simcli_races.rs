@@ -80,7 +80,7 @@ fn judge_scenario_with(
             .filter(|x| x.kind == wp_sim::VehicleKind::Police)
             .map(|x| x.id)
             .collect();
-        judge.set_police(&police);
+        judge.add_police(&police);
         let samples: Vec<RacerSample> = v
             .sim
             .vehicle_states()

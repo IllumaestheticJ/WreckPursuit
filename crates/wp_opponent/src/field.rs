@@ -352,6 +352,8 @@ struct Racer {
     tactic_ticks: u64,
     blocked_s: f32,
     stuck_s: f32,
+    /// Time in Park / Yield (the pull-over roll-on is capped at [`PULL_OVER_MAX_S`]), s.
+    park_s: f32,
     stable_s: f32,
     defended: bool,
     in_brake_zone: bool,
@@ -550,6 +552,12 @@ const FLIGHT_LOOKAHEAD_M: f32 = 160.0;
 /// A car out of the race doesn't stop where the road bends tighter than this (it rolls on to
 /// a straighter bit first): nobody can get past a car stopped in a hairpin, m.
 const PARK_MIN_RADIUS_M: f32 = 35.0;
+/// Longest a car pulling over or out of the race rolls on looking for a spot (at the kerb,
+/// clear of junctions and tight bends) before it stops where it is, s. A car caught off its
+/// race route (fleeing) never reaches that route's kerb and rolled on for good.
+pub const PULL_OVER_MAX_S: f32 = 15.0;
+/// Speed a car pulling over or out of the race rolls on at while it looks for a spot, m/s.
+pub const PULL_OVER_MPS: f32 = 6.0;
 
 /// Minimum time between flight re-plans, s.
 const FLIGHT_REPLAN_S: f32 = 6.0;
@@ -651,6 +659,7 @@ impl Field {
                 tactic_ticks: 0,
                 blocked_s: 0.0,
                 stuck_s: 0.0,
+                park_s: 0.0,
                 stable_s: 0.0,
                 defended: false,
                 in_brake_zone: false,
@@ -2159,7 +2168,13 @@ fn decide_racer(
             r.status,
             RacerStatus::Busted | RacerStatus::Retired | RacerStatus::Fled
         );
+        if matches!(r.tactic, Tactic::Park | Tactic::Yield) {
+            r.park_s += dt;
+        } else {
+            r.park_s = 0.0;
+        }
         let pulling_over = (r.tactic == Tactic::Yield || (r.tactic == Tactic::Park && out_of_race))
+            && r.park_s < PULL_OVER_MAX_S
             && {
                 let i0 = (r.s / CORRIDOR_STEP_M) as isize;
                 let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
@@ -2185,7 +2200,7 @@ fn decide_racer(
                 cap_to(&mut v_target, 7.0 + 10.0 * aligned, SpeedLimit::Mode)
             }
             Tactic::Yield | Tactic::Park if pulling_over => {
-                cap_to(&mut v_target, 6.0, SpeedLimit::Mode)
+                cap_to(&mut v_target, PULL_OVER_MPS, SpeedLimit::Mode)
             }
             Tactic::Park | Tactic::Yield => cap_to(
                 &mut v_target,

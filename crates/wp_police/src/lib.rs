@@ -1270,13 +1270,14 @@ impl PoliceSystem {
         })
     }
 
-    /// Driver input for an externally driven AI unit from its [`pro::ProDriver`] (lead P8):
-    /// with lights on a racing line inside its own-direction lanes, a grip-limit speed profile
-    /// (road grip from [`PoliceSystem::sync_unit_feel`], damage, the car's
-    /// [`pro::CarLimits`]), late braking and slide control, on `wp_world`'s shared pure-pursuit
-    /// and PID controller; patrol keeps its lane and gentle corner budget. Call once per physics
-    /// tick with that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units
-    /// and unknown ids.
+    /// Driver input for an externally driven AI unit. Manoeuvres first (turning round toward
+    /// a target behind, backing out when stuck, giving way to a slow racer, pushing a stopped
+    /// civilian aside, holding for an oncoming target); then steady driving: chasing a racer
+    /// with lights on, its [`pro::ProDriver`] (lead P8: a racing line inside its own-direction
+    /// lanes, a grip-limit speed profile from [`PoliceSystem::sync_unit_feel`], damage and the
+    /// car's [`pro::CarLimits`], late braking and slide control); otherwise `wp_world`'s shared
+    /// pure-pursuit and PID controller on its lane. Call once per physics tick with that
+    /// tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units and unknown ids.
     pub fn unit_input(&mut self, unit: UnitId, dt: f32) -> Option<VehicleInput> {
         let i = self.unit_index(unit)?;
         let (accel, brake) = (
@@ -1714,10 +1715,13 @@ impl PoliceSystem {
             u.unstick.held_s = 0.0;
         }
         u.unstick.progress(pos);
-        // Steady driving. Lights on: the pro driver (lead P8) — racing line, grip-limit speed
-        // profile, slide control. Lights off: calm pure pursuit on the lane. Every manoeuvre
-        // above (turning round, backing out, giving way, pushing) runs for both.
-        let mut input = if siren {
+        // Steady driving. Chasing a racer (pursue, intercept): the pro driver (lead P8) —
+        // racing line, grip-limit speed profile, slide control. Anything else (patrol, and
+        // lights-on duty like a response): pure pursuit on the lane. A responder on the pro
+        // driver cut the Hollins switchbacks and stopped in the racers' lane, holding the
+        // field for 30 s. Every manoeuvre above (turning round, backing out, giving way,
+        // pushing) runs for both.
+        let mut input = if siren && chasing {
             self.pro_input(i, hold, disabled, dt)
         } else {
             let ctl = u.controller();
@@ -1755,8 +1759,8 @@ impl PoliceSystem {
         Some(input)
     }
 
-    /// Lights-on steady driving from the unit's [`pro::ProDriver`]: the racing line inside its
-    /// own-direction lanes (kept to the lane with traffic close ahead), a grip-limit speed
+    /// Steady driving while chasing, from the unit's [`pro::ProDriver`]: the racing line inside
+    /// its own-direction lanes (kept to the lane with traffic close ahead), a grip-limit speed
     /// profile toward the command speed capped by obstacles and the static wall feelers. A
     /// wall at the side (row 66) pins the line to the lane shifted away from it.
     fn pro_input(&mut self, i: usize, hold: bool, disabled: bool, dt: f32) -> VehicleInput {
@@ -1804,7 +1808,9 @@ impl PoliceSystem {
             .pro
             .get_or_insert_with(|| pro::ProDriver::new(pro_cfg.clone(), limits, geometry, v));
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
-        u.planned_speed = out.planned_mps;
+        // `planned_speed` stays the think-rate corner plan: the manoeuvre checks in
+        // `unit_input` (push-through, stuck) read it as "where it wants to go", and the pro
+        // driver's own plan already includes the obstacle stop.
         let mut input = out.input;
         if hold && !out.reversing {
             // The shared controller releases the brake below its hold speed; right behind
