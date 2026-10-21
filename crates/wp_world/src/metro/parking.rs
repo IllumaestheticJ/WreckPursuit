@@ -555,7 +555,7 @@ fn build_garage(ctx: &mut Ctx, site: &Site, rng: &mut Rng, sink: &mut Sink) {
         .gate_x
         .clamp(ENTRY_W * 0.5 + 1.0, lane_x0 - ENTRY_W * 0.5 - 1.0))
         + x_l;
-    sink.place(gf.ramp(
+    sink.driveway.push(gf.ramp(
         K::ParkingRamp,
         M::Asphalt,
         [0.0, 0.0, zg],
@@ -563,7 +563,7 @@ fn build_garage(ctx: &mut Ctx, site: &Site, rng: &mut Rng, sink: &mut Sink) {
         ENTRY_W,
         0.5,
     ));
-    sink.add(gf.bx(
+    sink.gate.push(gf.bx(
         K::Gate,
         M::PaintWhite,
         ex * 0.5,
@@ -573,7 +573,7 @@ fn build_garage(ctx: &mut Ctx, site: &Site, rng: &mut Rng, sink: &mut Sink) {
         0.0,
         false,
     ));
-    sink.place(gf.bx(
+    sink.gate.push(gf.bx(
         K::Gate,
         M::Glass,
         ex * 0.5 + ENTRY_W * 0.5 + 1.4,
@@ -963,7 +963,8 @@ fn build_drive_in(ctx: &mut Ctx, site: &Site, rng: &mut Rng, sink: &mut Sink) {
         true,
     ));
     let z = gz(ctx, 7.0, 9.0);
-    sink.place(gf.bx(K::Gate, M::Wood, 7.0, 9.0, z, [2.2, 2.6, 2.6], 0.0, true));
+    sink.gate
+        .push(gf.bx(K::Gate, M::Wood, 7.0, 9.0, z, [2.2, 2.6, 2.6], 0.0, true));
     for y in [0.25 * depth, 0.55 * depth, 0.8 * depth] {
         for x in [-(half_w - 6.0), half_w - 6.0] {
             let z = gz(ctx, x, y);

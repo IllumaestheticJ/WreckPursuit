@@ -509,7 +509,7 @@ fn gate_leaves(ctx: &Ctx, site: &Site, out: &mut Sink) {
         let z = ctx.ground_z(g.pos);
         for s in [-1.0f32, 1.0] {
             let x = s * (g.width_m * 0.5 - 0.1);
-            out.add(fr.span(
+            out.gate.push(fr.span(
                 K::Gate,
                 M::Steel,
                 x - 0.05,

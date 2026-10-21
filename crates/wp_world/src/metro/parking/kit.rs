@@ -282,6 +282,20 @@ pub fn on_road(ctx: &Ctx, f: &Feature) -> bool {
     ctx.occ_at(c) == Occ::Road
 }
 
+/// True when any footprint corner or the centre lies on an at-grade road surface, tested
+/// against the paved ribbons themselves (not the 2 m occupancy grid). Used for gate
+/// furniture, which sits right where the access road ends.
+pub fn on_paving(ctx: &Ctx, f: &Feature) -> bool {
+    let fp = footprint(&f.shape);
+    let n = fp.len() as f32;
+    let c = fp
+        .iter()
+        .fold([0.0f32; 2], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n]);
+    fp.iter()
+        .chain(std::iter::once(&c))
+        .any(|p| street_z(ctx, *p, 0.0).is_some())
+}
+
 /// Collects a module's features, dropping any that would land on road paving.
 #[derive(Default)]
 pub struct Sink {
@@ -289,6 +303,11 @@ pub struct Sink {
     pub placed: Vec<Feature>,
     /// Features to `ctx.add` (small items: paint, parked cars, clutter).
     pub added: Vec<Feature>,
+    /// Gate furniture (booths, gate leaves): checked against the paving itself, not the
+    /// occupancy grid (the access road ends just inside the gate).
+    pub gate: Vec<Feature>,
+    /// Driveways that deliberately overlap the end of the access road (never dropped).
+    pub driveway: Vec<Feature>,
 }
 
 impl Sink {
@@ -307,10 +326,20 @@ impl Sink {
         self.placed.extend(fs);
     }
 
-    /// Hand everything to the context (placed first, then added), skipping features on
-    /// road paving. Returns how many were dropped.
+    /// Hand everything to the context (driveways, gate furniture, placed, then added),
+    /// skipping features on road paving. Returns how many were dropped.
     pub fn flush(self, ctx: &mut Ctx) -> usize {
         let mut dropped = 0;
+        for f in self.driveway {
+            ctx.add(f);
+        }
+        for f in self.gate {
+            if on_paving(ctx, &f) {
+                dropped += 1;
+            } else {
+                ctx.add(f);
+            }
+        }
         for f in self.placed {
             if on_road(ctx, &f) {
                 dropped += 1;

@@ -218,6 +218,39 @@ fn meets_surface(all: &[&Feature], skip: usize, e: V3, dir: V2, out: f32) -> boo
     })
 }
 
+/// Height of an at-grade road surface within `r` of its paved edge at `p` (bridges more
+/// than 1.5 m above the ground are ignored).
+fn road_z(ctx: &Ctx, p: V2, r: f32) -> Option<f32> {
+    let g = ctx.ground_z(p);
+    let mut best: Option<(f32, f32)> = None;
+    for s in &ctx.roads.built.surfaces {
+        let half = s.left_m.max(s.right_m);
+        for w in s.centre.windows(2) {
+            let (a, b) = ([w[0][0], w[0][1]], [w[1][0], w[1][1]]);
+            let ab = geom::sub(b, a);
+            let l2 = geom::dot(ab, ab).max(1e-9);
+            let t = (geom::dot(geom::sub(p, a), ab) / l2).clamp(0.0, 1.0);
+            let q = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+            let gap = (geom::dist(p, q) - half).max(0.0);
+            let z = w[0][2] + (w[1][2] - w[0][2]) * t;
+            if gap <= r && (z - g).abs() < 1.5 && best.is_none_or(|b| gap < b.0) {
+                best = Some((gap, z));
+            }
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// A gate driveway: a ramp with one end within 1 m of a site gate.
+fn is_driveway(ctx: &Ctx, f: &Feature) -> bool {
+    f.kind == K::ParkingRamp
+        && ramp_ends(f).is_some_and(|(lo, hi, _, _)| {
+            ctx.plan.sites.iter().flat_map(|s| &s.gates).any(|g| {
+                geom::dist([lo[0], lo[1]], g.pos) < 1.0 || geom::dist([hi[0], hi[1]], g.pos) < 1.0
+            })
+        })
+}
+
 fn sites(ctx: &Ctx, kinds: &[SiteKind]) -> Vec<Site> {
     ctx.plan
         .sites
@@ -568,8 +601,18 @@ fn nothing_on_road_paving_and_prisms_convex() {
     with_city(1, |ctx, park, cons| {
         for f in park.iter().chain(cons) {
             let fp = footprint(&f.shape);
+            // Driveways overlap the end of the access road on purpose; gate furniture is
+            // checked against the paving itself (the road ends just inside the gate, and
+            // the 2 m grid cell there reads Road).
+            if is_driveway(ctx, f) {
+                continue;
+            }
             for p in fp.iter().chain(std::iter::once(&centroid(f))) {
-                assert_ne!(ctx.occ_at(*p), Occ::Road, "{:?} on road paving", f.kind);
+                if f.kind == K::Gate {
+                    assert!(road_z(ctx, *p, 0.0).is_none(), "gate furniture on paving");
+                } else {
+                    assert_ne!(ctx.occ_at(*p), Occ::Road, "{:?} on road paving", f.kind);
+                }
             }
             if let FeatureShape::Prism { footprint, .. } = &f.shape {
                 if f.solid {
@@ -606,8 +649,12 @@ fn ramps_meet_the_ground_and_stay_gentle() {
                     continue;
                 }
                 let d = e[2] - ctx.ground_z([e[0], e[1]]);
+                // Meeting a road surface counts as meeting the ground (roads carve the
+                // terrain 12 cm under their paving).
+                let on_street =
+                    road_z(ctx, [e[0], e[1]], 0.5).is_some_and(|z| (z - e[2]).abs() <= 0.03);
                 assert!(
-                    d.abs() <= 0.03 || d >= 1.0,
+                    d.abs() <= 0.03 || d >= 1.0 || on_street,
                     "{:?} ramp end {e:?} has a {d:.2} m lip",
                     f.kind
                 );
@@ -661,5 +708,27 @@ fn canal_flats_pit_is_dug_and_dry() {
         let z = ctx.ground_z(pit);
         assert!(z < gate_z - 1.5, "pit {z:.2} vs gate {gate_z:.2}");
         assert!(!ctx.is_water(pit));
+    });
+}
+
+#[test]
+fn every_gate_is_reached_by_a_road() {
+    with_city(1, |ctx, _, _| {
+        let mut missing = Vec::new();
+        for s in sites(
+            ctx,
+            &[
+                SiteKind::ParkingGarage,
+                SiteKind::SurfaceLot,
+                SiteKind::Construction,
+            ],
+        ) {
+            for g in &s.gates {
+                if road_z(ctx, g.pos, 3.0).is_none() {
+                    missing.push((s.id, g.pos));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "gates without a road: {missing:?}");
     });
 }
