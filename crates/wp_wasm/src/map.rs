@@ -576,11 +576,13 @@ mod tests {
     }
 
     #[test]
-    fn grid_static_map_is_flat() {
+    fn grid_static_map_is_flat_except_the_viaduct() {
         let s = chase("procedural_12x12");
         let m = map_static(s.sim().world().map());
         assert!(m.roads.len() > 50);
-        assert!(m.roads.iter().all(|r| r.layer == 0));
+        // Only the highway spine (main's divided viaduct and its ramps) leaves the ground.
+        assert!(m.roads.iter().all(|r| r.layer == 0 || r.class == 0));
+        assert!(m.roads.iter().any(|r| r.layer == 1 && r.class == 0));
     }
 
     #[test]

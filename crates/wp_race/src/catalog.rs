@@ -226,7 +226,9 @@ const LOOP9: &[[f32; 2]] = &[
     [-578.0, -1072.0],
     [621.0, -1053.0],
     [1525.0, -343.0],
-    [1530.0, 600.0],
+    // North of the Bluff Road interchange's ramps (main's divided Loop 9): at y = 600 the
+    // vertex snapped onto the on-ramp.
+    [1530.0, 720.0],
     [1091.0, 1358.0],
 ];
 
@@ -301,7 +303,8 @@ pub fn races() -> Vec<RaceDef> {
                 start: "Highway sprint",
                 finish: [9.2, 400.0, 0.0],
             },
-            length_hint_m: 747.0,
+            // From main's spine end (the grid POI at y = -712) up the viaduct.
+            length_hint_m: 1112.0,
             ai: &[VIC, JUNO, TITO],
             seed: 7,
             prior_meets: 0,

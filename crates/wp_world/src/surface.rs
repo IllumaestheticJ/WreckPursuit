@@ -1710,8 +1710,9 @@ pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f
 }
 
 /// Guard-rail lines `(a, b)` (at road height) along both edges of every bridge-deck stretch:
-/// surface segments whose whole cross-section is more than 1.5 m above the terrain. Empty
-/// without terrain.
+/// surface segments whose whole cross-section is more than 1.5 m above the terrain. A side
+/// with a sidewalk has none here (its rail is at the sidewalk's back edge). Empty without
+/// terrain.
 pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     let Some(t) = &net.terrain else {
         return Vec::new();
@@ -1722,8 +1723,12 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                for e in [&l, &r] {
-                    out.extend(rail_piece(net, si, e[k], e[k + 1]));
+                for (e, walk) in [(&l, s.sidewalk[0]), (&r, s.sidewalk[1])] {
+                    // A sidewalk side has its rail at the sidewalk's back edge instead
+                    // (`SidewalkMesh::bare_backs`), not on the kerb line.
+                    if !walk {
+                        out.extend(rail_piece(net, si, e[k], e[k + 1]));
+                    }
                 }
             }
         }

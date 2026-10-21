@@ -652,6 +652,10 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     };
                     let seg = [a, b];
                     bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
+                    // A sidewalk side's parapet is the rail at the sidewalk's back edge.
+                    if s.sidewalk[usize::from(side > 0.0)] {
+                        continue;
+                    }
                     let top = [
                         [seg[0][0], seg[0][1], seg[0][2] + 0.9],
                         [seg[1][0], seg[1][1], seg[1][2] + 0.9],
