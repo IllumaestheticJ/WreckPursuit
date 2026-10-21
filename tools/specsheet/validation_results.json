@@ -233,6 +233,24 @@
     "vmax_converged": true,
     "vmax_kmh": 243.7
   },
+  "sentinel_wolfhound_px": {
+    "barrier": {
+      "frontal 15 km/h": "PASS: crush 0.09 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.49 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.59 m, cabin 0.02 m, health 0.62",
+      "frontal 56 km/h": "PASS: crush 0.72 m, cabin 0.17 m, health 0.25, TotalLoss; failed Radiator",
+      "frontal 80 km/h": "PASS: crush 1.36 m, cabin 0.29 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "FAIL: crush 1.05 m, cabin 0.05 m, health 0.20, TotalLoss; failed Engine, Radiator, Battery (struck-side corner intact)",
+      "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.01 m, health 0.63; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.18 m, cabin 0.17 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
+    },
+    "brake_100_0_m": 39.606644,
+    "skidpad_g": 0.84654826,
+    "t0100_s": 5.1333337,
+    "understeer_deg_per_g": 0.34385931,
+    "vmax_converged": false,
+    "vmax_kmh": 254.0
+  },
   "shiro_turbo": {
     "barrier": {
       "frontal 15 km/h": "PASS: crush 0.02 m, cabin 0.00 m, health 0.96",

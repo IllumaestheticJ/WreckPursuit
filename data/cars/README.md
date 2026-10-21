@@ -72,6 +72,7 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `hauler_1500` | Hauler 1500 | Truck | 2010s half-ton 5.3 V8 pickup, ladder frame |
 | `sentinel_cruiser` | Sentinel Cruiser | PoliceCruiser | RWD 5.7 V8 police sedan (pursuit package), push bar |
 | `sentinel_wolfhound` | Sentinel Wolfhound | PoliceInterceptor | AWD 3.5 TT V6 pursuit sedan, push bar |
+| `sentinel_wolfhound_px` | Sentinel Wolfhound PX | PoliceInterceptor | high-output Wolfhound (+11 % power/torque, raised boost) — top wanted level |
 | `sentinel_bastion` | Sentinel Bastion | PoliceSuv | RWD 5.3 V8 police SUV, ladder frame, push bar |
 | `junkyard_beater` | Junkyard Beater | Beater | late-80s FF 1.6 SOHC sedan, worn — economy floor (3 000) |
 | `tansy_13` | Tansy 1.3 | Compact | 2000s FF 1.3 supermini hatch — traffic / parked |

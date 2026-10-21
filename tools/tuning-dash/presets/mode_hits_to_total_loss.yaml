@@ -7,7 +7,7 @@
 # Checks: Arcade frontal 56 degrades (health <= 0.9) and ends in 2-6 hits; Simulation frontal
 # 56 ends in 1. Side impacts are reported, not checked. No data is changed.
 # Generated variant list: one per car x mode x impact (class in the name). Round 8 added H's
-# drayman_cargo, furrow_24 and tansy_13.
+# drayman_cargo, furrow_24 and tansy_13; sentinel_wolfhound_px added after them.
 description: Hits to total loss and single-hit total-loss speed, every car, Arcade vs Simulation, frontal and side
 probe:
   kind: survival
@@ -143,6 +143,16 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: sentinel_wolfhound (PoliceInterceptor) sim side
     probe: {car: sentinel_wolfhound, mode: Simulation, impact: Side}
+  - name: sentinel_wolfhound_px (PoliceInterceptor) arc frontal
+    probe: {car: sentinel_wolfhound_px, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: sentinel_wolfhound_px (PoliceInterceptor) arc side
+    probe: {car: sentinel_wolfhound_px, mode: Arcade, impact: Side}
+  - name: sentinel_wolfhound_px (PoliceInterceptor) sim frontal
+    probe: {car: sentinel_wolfhound_px, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: sentinel_wolfhound_px (PoliceInterceptor) sim side
+    probe: {car: sentinel_wolfhound_px, mode: Simulation, impact: Side}
   - name: shiro_turbo (Sport) arc frontal
     probe: {car: shiro_turbo, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]

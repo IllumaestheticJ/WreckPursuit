@@ -45,6 +45,7 @@ TARGETS = {
     "hauler_1500": dict(t0100=(7.0, 8.0), lat=(0.68, 0.76), brake=(42, 50), why="prompt 09 target (~7.5 s); 2010s half-ton 5.3 V8 pickup tests"),
     "sentinel_cruiser": dict(t0100=(6.2, 7.2), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD 5.7 V8 police sedans (pursuit package, round 6b)"),
     "sentinel_wolfhound": dict(t0100=(5.5, 6.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for AWD TT V6 pursuit vehicles"),
+    "sentinel_wolfhound_px": dict(t0100=(5.0, 6.2), lat=(0.85, 0.92), brake=(37, 43), why="Wolfhound band with ~11 % more power (high-output TT V6 pursuit calibration)"),
     "sentinel_bastion": dict(t0100=(7.5, 9.0), lat=(0.72, 0.80), brake=(40, 46), why="fleet evaluation figures for RWD 5.3 V8 police SUVs"),
     "junkyard_beater": dict(t0100=(12.0, 15.0), lat=(0.75, 0.88), brake=(38, 46), why="period road tests of late-80s 1.6 L economy sedans, derated for wear"),
     "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
@@ -282,6 +283,7 @@ SIM_NOTES = {
     ("Lindwurm 4T", "0-100"): "0.02 s over (5.42 s) after switching to on-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip — the lead's first-cut coupling, which A tunes); the fixed 65/35 split ran 5.37 s.",
     ("Sentinel Wolfhound", "skidpad"): "C — 0.848 g, 0.002 under the band on `police_pursuit` (rounds to 0.85); on-demand AWD changed it by < 0.01 g.",
     ("Sentinel Wolfhound", "0-100"): "B — converter slip; coupling already set to engage at 2 % front slip.",
+    ("Sentinel Wolfhound PX", "skidpad"): "C — same chassis, tires and mass as the Wolfhound (0.847 g); the PX changes only the engine calibration.",
     ("Sentinel Cruiser", "skidpad"): "C — 0.02 g under on `police_pursuit`; the V8 pursuit package (round 6b) put 60 kg more on the nose (0.81 → 0.83 g after re-deriving bars for the new mass).",
     ("Drayman Cargo", "100-0"): "0.7 m short of the band (shorter since A's round-8 brake-pedal filter): an empty van on car-type `street` tires (no light-truck compound) with the 1.5 × lock-torque ABS ceiling stops slightly better than road tests of laden-sensitive LT tires. Tire-limited; an `lt_highway` compound (02) would land it in band.",
     ("Furrow 2.4", "100-0"): "0.2 m short of the band: same cause as the van — an empty light pickup on car-type `street` tires stops a little better than period road tests on 90s LT tires.",
@@ -291,6 +293,7 @@ SIM_NOTES = {
 BARRIER_NOTES = {
     ("Sentinel Cruiser", "offset 40% 56 km/h"): "near miss: struck-side front suspension intrusion 0.084 m vs its 0.09 m failure threshold (health 0.51; wheel mount 0.078 m) — the `cruiser` profile's reinforced rails and double bumper beam plus the push bar spread the offset load. Total loss anyway (engine, radiator, battery, rack failed). Appeared with B's ab6970d generator (rail bracing); not patched.",
     ("Sentinel Wolfhound", "offset 40% 56 km/h"): "same near miss as the Cruiser (same `cruiser` profile + push bar); total loss anyway.",
+    ("Sentinel Wolfhound PX", "offset 40% 56 km/h"): "identical lattice to the Wolfhound: same near miss as the Cruiser; total loss anyway.",
 }
 
 

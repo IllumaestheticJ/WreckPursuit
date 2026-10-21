@@ -807,6 +807,73 @@ CARS = [
                  "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=True),
     ),
+    # ------------------------------------------------------------------ 12b (top wanted level)
+    dict(
+        id="sentinel_wolfhound_px",
+        display_name="Sentinel Wolfhound PX",
+        cls="PoliceInterceptor",
+        analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6, high-output calibration",
+        era="2010s",
+        profile="sedan",
+        curb_kg=2000.0,
+        fuel_l=70,
+        front_frac=0.56,
+        wheelbase=2.87,
+        track_f=1.66,
+        track_r=1.66,
+        body=(1.94, 5.05, 1.55),
+        clearance=0.15,
+        front_overhang=1.0,
+        cg=0.56,
+        cg_why="same body and police equipment as the Wolfhound; above the sedan band",
+        inertia_k=(0.80, 0.92, 0.94),
+        cd=0.33,
+        area_k=0.84,
+        extra_cda=0.05,
+        lift=(0.08, 0.10),
+        engine=dict(
+            desc="3.5 L DOHC V6, twin turbo, direct injection, high-output calibration (raised boost)",
+            curve=[(800, 260), (1200, 340), (1600, 415), (2000, 480), (2500, 540), (3000, 550),
+                   (3500, 550), (4000, 550), (4500, 545), (5000, 543), (5500, 524), (6000, 466),
+                   (6300, 420)],
+            idle=650, redline=6000, limit=6300, inertia=0.18, brake_frac=0.10,
+            why=("The Wolfhound's 3.5 TT V6 with the boost raised ~0.2 bar: +11 % torque on the "
+                 "plateau (550 vs 495 N·m) and at peak power (~302 vs 272 kW at 5500 rpm), in line "
+                 "with the gains class-typical high-output calibrations of this engine family "
+                 "show on owner dynos. Below 1600 rpm the turbos are not yet at the higher "
+                 "boost, so the bottom of the curve is unchanged."),
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
+            layout=("AwdOnDemand", 0.90, 0.50, 0.02),
+            gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.30,
+            torque_converter=dict(stall_rpm=2600, ratio=1.9, coupling_rpm=3000),
+            diff_f="Open", diff_r="Open", clutch_factor=1.6,
+        ),
+        tires=dict(front="245/55R18", rear="245/55R18", compound="police_pursuit", unsprung=(28.0, 28.0)),
+        susp=dict(hz=(1.50, 1.60), zeta=0.30, travel=(0.17, 0.18), roll_grad_deg_g=3.0,
+                  roll_front_share=0.60, bump_stop=170000.0, preload=0.02),
+        align=dict(camber_deg=(-0.6, -0.9), toe_deg=(0.0, 0.15), caster_deg=5.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=350, pistons_mm=[54, 54], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=345, pistons_mm=[44], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=15.5, turn_circle_m=12.2, ackermann=0.6, rack_speed=1.4),
+        price=52000,
+        durability=4,
+        note=("The Wolfhound the department saves for the worst offenders: same AWD body and "
+              "push bar, but with the boost turned up (brakes unchanged: the Wolfhound's are "
+              "already at the ABS ceiling, so bigger rotors would add nothing). It only appears at the top wanted level, where its extra mid-range lets it close "
+              "on a sports car out of every corner instead of merely holding the gap."),
+        breaks=("Identical structure to the Wolfhound: reinforced police front (push bar "
+                "through to the rails) on a modern UHSS cell, AWD hardware under the floor "
+                "exposed to sill and centre-tunnel hits. Heavier than it looks."),
+        sources=["fleet spec-class data for 2010s AWD police pursuit vehicles",
+                 "owner dyno averages for 3.5 L twin-turbo V6s with raised-boost calibrations",
+                 "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=True),
+    ),
     # ------------------------------------------------------------------ 13
     dict(
         id="sentinel_bastion",

@@ -16,6 +16,7 @@
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
 | Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
 | Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
+| Sentinel Wolfhound PX | `sentinel_wolfhound_px` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 302 | 147 | 5.6 | 261 | 0.91 | 592 | 4 | 52,000 | police_pursuit |
 | Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 265 | 100 | 7.6 | 224 | 0.81 | 472 | 5 | 48,000 | police_pursuit |
 | Junkyard Beater | `junkyard_beater` | Beater | FWD | 1058 | 61 | 58 | 12.3 | 169 | 0.90 | 377 | 2 | 3,000 | street |
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 11.6 | 176 | 0.90 | 388 | 2 | 7,000 | street |

@@ -5,6 +5,26 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
+## New car: Sentinel Wolfhound PX (2026-10-21)
+
+`sentinel_wolfhound_px` (PoliceInterceptor, 52,000): the Wolfhound with a raised-boost engine
+calibration for the top wanted level. Inputs are a copy of the Wolfhound's except the torque
+curve (+11 %: 550 N·m plateau, ~302 kW at 5500 rpm; bottom of the curve unchanged), price and
+prose. Brakes left identical: the Wolfhound's calipers already sit at the 1.5 × lock-torque ABS
+ceiling, so a bigger front rotor only re-scaled both axles (it lowered the delivered rear torque).
+Lattice, panels and mesh are identical to the Wolfhound's apart from the id.
+
+Measured (validation_results.json): 0-100 5.13 s (Wolfhound 5.54), 100-0 39.6 m, skidpad
+0.847 g, Vmax 254 km/h (244). VALIDATION.md: skidpad 0.003 g under band and the offset-56
+near miss, both inherited unchanged from the Wolfhound.
+
+Files added outside `data/cars`/`data/lattices`: `data/audio/cars/sentinel_wolfhound_px.json`
+(copy of the Wolfhound's), `data/panels/{,meshes/}sentinel_wolfhound_px.json` (`gen-panels`,
+`gen-car-mesh`), row in `data/stats/cars.json` (`simcli car-stats`), four variants in
+`tools/tuning-dash/presets/mode_hits_to_total_loss.yaml`. Regenerating every other car with
+`build_roster.py`, `collect_results.py` and `car-stats` changed none of their files.
+Police spawn it at wanted level 5 (`data/police/presence.toml` `car_per_level`, see police.md).
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.

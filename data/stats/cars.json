@@ -180,6 +180,17 @@
         "cornering": 0.594
       }
     },
+    "sentinel_wolfhound_px": {
+      "display_name": "Sentinel Wolfhound PX",
+      "zero_to_100_s": 5.13,
+      "top_speed_kmh": 254.2,
+      "cornering_g": 0.847,
+      "bars": {
+        "acceleration": 0.869,
+        "top_speed": 0.672,
+        "cornering": 0.593
+      }
+    },
     "shiro_turbo": {
       "display_name": "Shiro Turbo",
       "zero_to_100_s": 6.42,
