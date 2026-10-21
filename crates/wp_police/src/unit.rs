@@ -668,7 +668,8 @@ pub fn step_ground(
         .expect("controller created above")
         .steer(b.pos, b.heading, [target[0], target[1], 0.0]);
     // Target behind: pure pursuit degenerates (lateral offset → 0), so turn at full lock.
-    if dot(b.heading, to) < 0.0 {
+    let turning_round = dot(b.heading, to) < 0.0;
+    if turning_round {
         steer = if cross(b.heading, to) >= 0.0 {
             -1.0
         } else {
@@ -705,8 +706,9 @@ pub fn step_ground(
     b.pos = add(b.pos, scale(b.heading, ds));
 
     // Ran wide: hit the kerb / building.
-    // Behind the start of the track (turning around) is not running wide.
-    if u.on_track && s > 1.0 && lateral > dynm.crash_offset_m && b.speed > 5.0 {
+    // Behind the start of the track or turning round toward a target behind (a full-lock
+    // circle is wider than the crash offset) is not running wide.
+    if u.on_track && s > 1.0 && !turning_round && lateral > dynm.crash_offset_m && b.speed > 5.0 {
         let impact = b.speed * 0.6;
         u.health -= dynm.crash_health_per_kmps2.get(env.mode) * impact * impact / 1000.0;
         rep.crashed = true;

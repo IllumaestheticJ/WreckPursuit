@@ -83,7 +83,8 @@ fn risk_budget_and_caps_keep_cops_alive() {
     let reckless = run_scenario_with(&sc, &cfg);
     let m = |s: &PoliceRunSummary, k: &str| s.metric(k).unwrap();
     // The prompt's bar: < 10 % of engaged units total-loss themselves without racer contact.
-    assert!(m(&careful, "self_wreck_rate") < 0.10);
+    let rate = m(&careful, "self_wreck_rate");
+    assert!(rate < 0.10, "careful self-wreck rate {rate}");
     // The risk budget does its job: pursuers spend it and drop to shadowing / gentle
     // cornering, which never happens with an unlimited budget.
     //
