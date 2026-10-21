@@ -140,7 +140,7 @@ const golden = await capture(1);
 keep("03_golden.png", golden);
 check(meanDiff(golden.sample, natural.sample) > 3, `golden-hour filter changes the image (mean Δ ${meanDiff(golden.sample, natural.sample).toFixed(1)})`);
 const big = await capture(2);
-check(big.width === natural.width * 2 && big.height === natural.height * 2, `2× capture: ${big.width}×${big.height}`);
+check(Math.abs(big.width - natural.width * 2) <= 1 && Math.abs(big.height - natural.height * 2) <= 1, `2× capture: ${big.width}×${big.height} (1× ${natural.width}×${natural.height}, ±1 px rounding)`);
 
 const [download] = await Promise.all([page.waitForEvent("download", { timeout: 10000 }), page.keyboard.press("Space")]);
 const dlPath = await download.path();
