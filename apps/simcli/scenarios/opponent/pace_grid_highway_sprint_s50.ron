@@ -14,6 +14,7 @@
 // lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md. Re-measure and widen only with a reason.
 // Re-locked 2026-10-21 on lead/main-sync: main's grid moved the race to the divided viaduct
 // (start y = -728, 1113 m); the old grid stood on round 12's street and nobody finished.
+// Re-locked again on the tip with lead/opponent-pace 70ab9d0 (gap planner).
 (
     name: "opponent_pace_grid_highway_sprint_s50",
     seed: 7,
@@ -80,10 +81,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.29),
-        metric(name: "race_time_s", entity: "ai_vic", min: 31.0, max: 43.9),
-        metric(name: "race_time_s", entity: "ai_juno", min: 35.7, max: 50.5),
-        metric(name: "race_time_s", entity: "ai_tito", min: 40.6, max: 57.5),
-        metric(name: "race_time_s", entity: "player", min: 33.7, max: 47.6),
+        metric(name: "best_ratio", min: 0.97, max: 1.36),
+        metric(name: "race_time_s", entity: "ai_vic", min: 32.7, max: 46.3),
+        metric(name: "race_time_s", entity: "ai_juno", min: 32.0, max: 45.2),
+        metric(name: "race_time_s", entity: "ai_tito", min: 34.3, max: 48.6),
+        metric(name: "race_time_s", entity: "player", min: 33.9, max: 47.9),
     ],
 )
