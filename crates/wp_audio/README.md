@@ -446,6 +446,15 @@ nodes) for material lookup.
 
 ## Known gaps
 
+- **Six- and eight-cylinder engines are procedural** (owner decision on 0.12.36, "generated
+  sound now"): the recorded `engine_rec_v8` / `_v6` / `_i6` packs are inline-4 loops (plus a short
+  six idle), so at redline they would play up to 3.4× fast and "sing". A car plays its recorded
+  pack only if no loop exceeds 1.6× at redline (`tools/audio_packs/write_packs.py` applies it,
+  `tests/samples.rs::engines_play_recordings_exactly_when_they_are_not_sped_up` enforces it);
+  today that is every inline-4 / turbo-4, and every 6 / 8-cylinder car (13 incl. police) is on
+  `engine_proc_*`. Real multi-rpm six / V8 recordings (on / off loops at 3+ rpm points up to
+  ~400 Hz firing) would move them back to recordings automatically. For those cars the audio
+  panel's recorded / procedural switch plays the same engine.
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.

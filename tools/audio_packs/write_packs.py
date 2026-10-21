@@ -127,23 +127,40 @@ for k in r["cues"]:
     r["cues"][k] = samples("radio_rec", k.split("/")[1] + ".ogg", "radio_rec", k == "radio/static", 1.0 if k != "radio/static" else 0.5)
 save(r)
 
-# cars: procedural engine pack -> its recorded pack. Idempotent (re-runs leave *_rec packs and
-# cars added since alone): only engine_proc_* is remapped, anything else is kept as is.
-m = {"engine_proc_i4": "engine_rec_i4", "engine_proc_i6": "engine_rec_i6", "engine_proc_v6": "engine_rec_v6", "engine_proc_v8": "engine_rec_v8"}
+# cars: each car plays its recorded engine pack only if no loop would be pitched above
+# MAX_RECORDED_PITCH at redline; otherwise its procedural twin (owner decision on preview 0.12.36,
+# "generated sound now": the recorded six / V8 packs are inline-4 loops, so a V8 at redline
+# played them at up to 3.4x and sounded like it was "singing"). Same rule test-enforced in
+# crates/wp_audio/tests/samples.rs. Idempotent; real multi-rpm six / V8 recordings would let
+# those cars go back to recorded packs automatically.
+MAX_RECORDED_PITCH = 1.6
+to_rec = {"engine_proc_i4": "engine_rec_i4", "engine_proc_i6": "engine_rec_i6", "engine_proc_v6": "engine_rec_v6", "engine_proc_v8": "engine_rec_v8"}
+to_proc = {"engine_rec_i4": "engine_proc_i4", "engine_rec_turbo": "engine_proc_i4", "engine_rec_i6": "engine_proc_i6",
+           "engine_rec_v6": "engine_proc_v6", "engine_rec_v8": "engine_proc_v8"}
+def top_pitch(rec, car_id, eng):
+    """Playback rate of `rec`'s highest loop at the car's redline (FiringHz anchors)."""
+    per_rev = eng["cylinders"] if eng.get("layout") == "Rotary" else eng["cylinders"] * 0.5
+    anchors = [l["anchor"]["FiringHz"] for l in P(rec)["engine_layers"] if "FiringHz" in l["anchor"]]
+    redline = json.load(open(os.path.join(A, "..", "cars", car_id + ".json")))["engine"]["redline_rpm"]
+    return redline / (max(anchors) * 60.0 / max(per_rev, 0.5))
+switched = []
 for f in sorted(os.listdir(os.path.join(A, "cars"))):
     if not f.endswith(".json"): continue
     p = os.path.join(A, "cars", f); d = json.load(open(p))
     ep = d["engine_pack"]
-    if ep == "engine_proc_i4" and d["engine"]["turbo"]: ep = "engine_rec_turbo"
-    # Police cars keep the procedural V8 / V6 (owner 0.12.34 "police audio sounds like it's
-    # singing / laughing"): the recorded six / V8 packs are inline-4 loops pitched up to 2.3x
-    # at a V8's redline. Test-enforced in crates/wp_audio/tests/samples.rs (MAX_RECORDED_PITCH).
-    police_proc = bool(d.get("siren")) and ep in ("engine_proc_v8", "engine_proc_v6")
-    d["engine_pack"] = ep if police_proc else m.get(ep, ep)
-    if not police_proc and d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
-        print(f"warning: cars/{f}: engine_pack {d['engine_pack']} is not a recorded pack")
+    proc = to_proc.get(ep, ep)
+    rec = to_rec.get(proc)
+    if proc == "engine_proc_i4" and d["engine"]["turbo"]: rec = "engine_rec_turbo"
+    if rec is None:
+        print(f"warning: cars/{f}: engine_pack {ep} has no recorded twin")
+    else:
+        ratio = top_pitch(rec, d["id"], d["engine"])
+        d["engine_pack"] = rec if ratio <= MAX_RECORDED_PITCH else proc
+        if d["engine_pack"] == proc:
+            switched.append(f"{d['id']} ({rec} would play x{ratio:.2f})")
     d["world_pack"] = "world_rec"
     # Police cars play the recorded sirens; siren_v2 (playtest row 82) is their fallback.
     if d.get("siren"): d["siren"]["pack"] = "siren_rec"
     open(p, "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+for s_ in switched: print("procedural engine:", s_)
 print("ok")
