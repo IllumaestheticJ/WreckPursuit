@@ -152,3 +152,56 @@ siren code).
   `wp_audio` reads `data/audio`. Every other workspace test passes (`--no-fail-fast`).
 
 ## Lead feedback
+
+## Follow-up: police audio "singing / laughing" (owner, preview 0.12.34)
+
+Owner: "police car audio pitch is wrong, some of it sounds like it's singing, some of it sounds
+like it's laughing". Investigated on `lead/siren-v2` restarted from `lead/round12` d0913e75.
+
+**How:** `crates/wp_wasm/src/police_audio_trace.rs` (ignored test) drives a real close city chase
+(player parked 30 m in front of a patrol car, L3 heat, fleeing at part throttle and weaving,
+listener on the player, modelled engines on as in the browser) for 90 s and summarises every
+police voice the director plays. `POLICE_TRACE=out.json cargo test -p wp_wasm --release --lib
+police_audio_trace -- --ignored --nocapture`.
+
+**What was wrong**
+1. *Engine "singing".* Pursuing units play the recorded `engine_rec_v8` layers most of the time
+   (the modelled engine only covers the focus car + the 6 nearest within 60 m: the closest unit
+   was modelled on only 40 % of frames). Those layers are inline-4 loops (top loop fires at
+   165.6 Hz = a V8 at 2484 rpm), so a V8 at its 5800 rpm redline plays them at **2.33×**; in the
+   chase the close units' layer pitch reached p90 2.0×, max 2.29× (1290 frames above 1.6× for
+   one unit). No recording in the repo reaches a V8's firing frequency (387 Hz at redline), so
+   capping the pitch would only freeze the note.
+2. *Engine "laughing".* The dominant layer flips 0.5–1 times a second between recordings of
+   *different* engines (a six's idle, inline-4 mid and high loops), a third of the flips back
+   within 0.4 s.
+3. *Siren "laughing".* The siren v2 junction cue fired whenever a unit was within 35 m of a
+   junction — in a city grid nearly always, even standing still — so close units switched
+   wail ↔ phaser (the fast "ha-ha-ha" pattern) **17–20 times a minute**, each switch restarting
+   the recorded loop (the wail never finished a cycle). Doppler was fine (0.91–1.09).
+
+**What changed**
+- Police cars use the procedural twins: `sentinel_cruiser` / `sentinel_bastion` →
+  `engine_proc_v8`, `sentinel_wolfhound` → `engine_proc_v6` (one synth per car on the true
+  firing frequency: no sped-up recording, no crossfades between different engines). Near the
+  player they still get the modelled engine as before. `write_packs.py` keeps that mapping.
+- **Rule change (proposed, implemented, test-enforced):** cars play recorded engine packs,
+  *except* a police car whose recorded twin would pitch a loop above `MAX_RECORDED_PITCH` = 1.6×
+  at redline; it uses the procedural twin until a recording covers its rev range
+  (`tests/samples.rs::recorded_packs_have_a_procedural_fallback_and_cars_use_them`,
+  `police_engines_are_not_sped_up_recordings`). Revert = three car files + that exception.
+- Siren: `Junction` is a 2.5 s burst with a 10 s cooldown (`junction_burst_s`,
+  `junction_cooldown_s`) and only fires when the unit is moving ≥ 6 m/s and due at the junction
+  within 2.5 s; `min_hold_s` 1.2 → 3.0 s. Same chase: **5–9 pattern switches a minute** for the
+  close units (from 17–20). Tests: `junctions_are_short_bursts_with_a_cooldown`, hold test.
+
+**Not fixed here (same defect, other cars):** every six- and eight-cylinder car on a recorded
+pack pitches its top loop past 1.6× at redline — `brigand_400` 1.93, `bulwark_400` 2.01,
+`debug_coupe` 2.11, `drayman_cargo` 2.25, `hakone_gt` 2.05, `hauler_1500` 2.33, `ironside_440`
+2.09, `lucciola_350` 3.42, `rampart_50` 2.82, `sperber_32` 2.39 (inline-4s stay ≤ 1.53). The
+player car is usually on the modelled engine, so this is mostly heard from AI racers and traffic.
+Options for the lead / owner: the same procedural switch for all of them, or a real multi-rpm
+V8 / six recording set.
+
+**A/B in game:** audio panel → sounds `recorded` / `procedural` (procedural = every car on its
+procedural twin, i.e. what police now play).

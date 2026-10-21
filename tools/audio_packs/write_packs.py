@@ -133,8 +133,12 @@ for f in sorted(os.listdir(os.path.join(A, "cars"))):
     p = os.path.join(A, "cars", f); d = json.load(open(p))
     ep = d["engine_pack"]
     if ep == "engine_proc_i4" and d["engine"]["turbo"]: ep = "engine_rec_turbo"
-    d["engine_pack"] = m.get(ep, ep)
-    if d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
+    # Police cars keep the procedural V8 / V6 (owner 0.12.34 "police audio sounds like it's
+    # singing / laughing"): the recorded six / V8 packs are inline-4 loops pitched up to 2.3x
+    # at a V8's redline. Test-enforced in crates/wp_audio/tests/samples.rs (MAX_RECORDED_PITCH).
+    police_proc = bool(d.get("siren")) and ep in ("engine_proc_v8", "engine_proc_v6")
+    d["engine_pack"] = ep if police_proc else m.get(ep, ep)
+    if not police_proc and d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
         print(f"warning: cars/{f}: engine_pack {d['engine_pack']} is not a recorded pack")
     d["world_pack"] = "world_rec"
     # Police cars play the recorded sirens; siren_v2 (playtest row 82) is their fallback.
