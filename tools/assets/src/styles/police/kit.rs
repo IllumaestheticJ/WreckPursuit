@@ -151,7 +151,7 @@ pub fn kit(id: &str) -> Kit {
             r: 0.065,
             chrome: false,
         },
-        pucks: &[(0.07, -0.25), (0.07, 0.0), (0.07, 0.25)],
+        pucks: &[(0.08, -0.56), (0.08, 0.56), (0.22, -0.56)],
         whips: &[(0.90, 0.35, 0.75)],
         visor: false,
         rear_bar: false,
@@ -163,9 +163,9 @@ pub fn kit(id: &str) -> Kit {
         tow_hooks: false,
         unit_region: BodyRegion::RearLeftQuarter,
         unit: UnitDecal {
-            pct: 0.80,
-            z: (0.66, 0.84),
-            half_len: 0.25,
+            pct: 0.925,
+            z: (0.52, 0.70),
+            half_len: 0.20,
         },
         trunk_number: true,
     };
@@ -188,7 +188,7 @@ pub fn kit(id: &str) -> Kit {
             unit: UnitDecal {
                 pct: 0.315,
                 z: (0.62, 0.78),
-                half_len: 0.20,
+                half_len: 0.17,
             },
             ..base
         },
@@ -212,16 +212,16 @@ pub fn kit(id: &str) -> Kit {
                 r: 0.06,
                 chrome: false,
             },
-            pucks: &[(0.06, -0.22), (0.06, 0.22), (0.18, -0.22), (0.18, 0.22)],
+            pucks: &[(0.06, -0.55), (0.06, 0.55), (0.18, -0.55), (0.18, 0.55)],
             whips: &[],
             visor: true,
             rear_bar: true,
             advisor: false,
             spoiler: Spoiler::Lip,
             unit: UnitDecal {
-                pct: 0.815,
-                z: (0.70, 0.88),
-                half_len: 0.25,
+                pct: 0.925,
+                z: (0.55, 0.73),
+                half_len: 0.20,
             },
             ..base
         },
@@ -252,9 +252,9 @@ pub fn kit(id: &str) -> Kit {
             grille_leds: true,
             tow_hooks: true,
             unit: UnitDecal {
-                pct: 0.84,
-                z: (0.78, 0.97),
-                half_len: 0.26,
+                pct: 0.91,
+                z: (0.74, 0.93),
+                half_len: 0.20,
             },
             trunk_number: false,
             ..base
@@ -274,7 +274,7 @@ pub fn kit(id: &str) -> Kit {
                 r: 0.05,
                 chrome: false,
             },
-            pucks: &[(0.06, -0.15), (0.06, 0.15)],
+            pucks: &[(0.06, -0.50), (0.06, 0.50)],
             whips: &[],
             visor: true,
             rear_bar: true,
@@ -282,9 +282,9 @@ pub fn kit(id: &str) -> Kit {
             spoiler: Spoiler::Wing,
             splitter: true,
             unit: UnitDecal {
-                pct: 0.895,
+                pct: 0.92,
                 z: (0.50, 0.66),
-                half_len: 0.20,
+                half_len: 0.18,
             },
             trunk_number: false,
             ..base
@@ -1152,7 +1152,7 @@ pub fn decal_roof(ctx: &DetailCtx, k0: &PartKey, b: &mut Builder) {
         Bar::Slick => p.roof.1 - 0.10,
     }
     .min(p.roof.1 - 0.06);
-    let y0 = (p.roof.0 + 0.16).max(y1 - 0.56);
+    let y0 = (p.roof.0 + 0.05).max(y1 - 0.75);
     let xw = 0.42f32.min(p.roof_half - 0.12);
     b.surface_patch(
         k0,
