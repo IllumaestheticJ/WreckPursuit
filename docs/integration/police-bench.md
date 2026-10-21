@@ -106,6 +106,8 @@ or commercial districts picked by the seed, at 15 m/s. Nothing else is set up.
 | `PIT ok/att` | contacts by a unit in its `Pit` tactic (+ kinematic units' `pit_attempts`); ok = evader spun (> 60° off its travel) or stopped within 3 s | sums |
 | `LOS` | time with status `Pursuit` / time in `Pursuit` or `Searching` | pooled |
 | `units≤300m` | in-service police cars within 300 m, 1 Hz during the pursuit (also at +15/30/60/120 s in the JSON) | mean |
+| `lead m` | keep-up: distance to the nearest unit chasing the evader (`Pursue` / `Intercept`), 1 Hz while police see it | median of all samples |
+| `pace` | keep-up: that unit's speed ÷ the evader's, 1 Hz while police see it and it drives faster than 25 m/s (~90 km/h); 1.0 = matching it | median of all samples |
 | `capture` | pursuit ended `Captured` / `CapturedTotalLoss` | share of runs |
 | `capture s` | capture time after the pursuit start | median |
 | `escape` | pursuit ended `Escaped` / `Safehouse` | share of runs |

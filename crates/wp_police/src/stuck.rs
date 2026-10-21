@@ -69,6 +69,9 @@ pub const REVERSE_MAX_S: f32 = 3.0;
 pub const SAME_SPOT_M: f32 = 15.0;
 /// How long a segment stays blocked for the unit that got stuck on it, s.
 pub const BLOCK_SEGMENT_S: f32 = 30.0;
+/// A unit on a pursuit or intercept held at a standstill behind civilian traffic this long
+/// routes around the road it is on (row 86: active units are never parked in a jam), s.
+pub const JAM_REROUTE_S: f32 = 3.0;
 /// Despawn (out of sight) a unit still stuck this long after its first event, s.
 pub const GIVE_UP_S: f32 = 8.0;
 /// Driving this far from the first event ends the stuck episode, m.
@@ -278,6 +281,9 @@ pub struct UnstickState {
     pub(crate) blocked: Vec<(SegmentId, SimTime)>,
     /// Re-plan the route at the next think step.
     pub(crate) reroute: bool,
+    /// Seconds a chasing unit has stood held behind civilian traffic (see [`JAM_REROUTE_S`]).
+    #[serde(default)]
+    pub(crate) jam_s: f32,
     /// Despawn when out of sight.
     pub(crate) give_up: bool,
     /// Turn-round tries since `turn_first` (see [`MAX_TURNS`]).
