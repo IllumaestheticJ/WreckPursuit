@@ -1,13 +1,13 @@
-# simcli hashes scenario=regression_grid_24 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-120 1eb893f8ea81dcc6
-240 8165702d5462b61b
-360 d4a45ae850433383
-480 1867924da91d2eb4
-600 374b98e08266ba4f
-720 23dd2fb5039fa486
-840 98e02763c9eaf9c8
-960 708cc0c6224fb582
-1080 116c20849e659552
-1200 327dd26924c93cb1
-1320 8bbb148f14b849c1
-1440 2bf031f6e70a0cc2
+# simcli hashes scenario=regression_grid_24 systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
+120 7f9dac5602fa2bfc
+240 1d780ff8d90b36d2
+360 2f4a348657143e0c
+480 ccd34ba640e1d8cb
+600 2ac355abd6611394
+720 70e367b6a9f49f85
+840 4a9fa44b58f515e5
+960 4490b1c314300bc3
+1080 af64bc2c8dcec33f
+1200 747ed164e2e3587c
+1320 87e752333dc8dc77
+1440 da2644af4b373325

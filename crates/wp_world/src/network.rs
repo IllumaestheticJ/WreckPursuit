@@ -22,7 +22,9 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// v4 (residential streets, playtest rows 94–95): building kind and roof
 /// ([`Building::kind`], [`Building::roof`], [`Building::roof_rise_m`]) and street / yard
 /// furniture ([`RoadNetwork::decor`]).
-pub const ROAD_FORMAT_VERSION: u32 = 4;
+/// v5: `RoadSurface::median_barrier` (divided highways; main's v3, renumbered at the release
+/// merge).
+pub const ROAD_FORMAT_VERSION: u32 = 5;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -137,6 +139,9 @@ pub struct RoadSurface {
     pub highway: bool,
     /// Kerb + sidewalk on the left / right edge.
     pub sidewalk: [bool; 2],
+    /// A concrete median barrier runs along the left paved edge (one carriageway of a
+    /// divided highway carries it; [`crate::surface::median_barriers`] gives its line).
+    pub median_barrier: bool,
 }
 
 impl RoadSurface {

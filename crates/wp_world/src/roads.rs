@@ -326,10 +326,13 @@ mod tests {
         for e in &v.edges {
             assert!((e.a as usize) < v.nodes.len() && (e.b as usize) < v.nodes.len());
             assert!(e.lanes_ab >= 1 && e.length_m > 10.0);
-            // Procedural roads are two-way and straight between junction centres.
-            assert!(!e.oneway());
-            let straight = geom::dist(v.nodes[e.a as usize].pos, v.nodes[e.b as usize].pos);
-            assert!((e.length_m - straight).abs() < 0.5);
+            // Procedural streets are two-way and straight between junction centres (the
+            // highway's carriageways and ramps are one-way and curve).
+            if e.class != RoadClass::Highway {
+                assert!(!e.oneway());
+                let straight = geom::dist(v.nodes[e.a as usize].pos, v.nodes[e.b as usize].pos);
+                assert!((e.length_m - straight).abs() < 0.5);
+            }
         }
         for c in [
             RoadClass::Highway,

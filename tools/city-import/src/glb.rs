@@ -5,7 +5,10 @@
 //! faces along ribbon edges, ground per district and extruded buildings. Cities with terrain
 //! (Port Vesper v2) also get the terrain mesh (decimated, never above a road), a sea plane,
 //! retaining walls where roads sit above the ground, bridge decks with parapets and
-//! piers, and tunnels / covered roads (walls, roof deck, emissive ceiling lights). World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
+//! piers, tunnels / covered roads (walls, roof deck, emissive ceiling lights), and a concrete
+//! (Jersey-profile) median barrier between divided highway carriageways. Painted markings are
+//! not in the greybox: the testbed draws them from `wp_world::markings::marking_mesh` at run
+//! time. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
 //! rotation, so triangle winding is preserved). Units are metres. Primitives with more than
 //! 65 535 vertices are split so every index buffer is 16-bit.
 
@@ -15,7 +18,8 @@ use wp_world::map::CityMap;
 use wp_world::network::{Building, BuildingKind, DecorKind, DistrictKind, LaneKind, RoadNetwork};
 use wp_world::residential;
 use wp_world::surface::{
-    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
+    inside_other_paving, is_elevated, lane_bank, median_barriers, node_patches, sidewalk_mesh,
+    surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
@@ -23,6 +27,9 @@ use wp_world::terrain::Heightfield;
 const LANE_TINT_DZ_M: f32 = 0.01;
 /// Sea level drawn as water, m.
 const SEA_Z: f32 = 0.25;
+
+/// Median barrier cross-section (half width, height above the road), m: a Jersey profile.
+const BARRIER_PROFILE: [(f32, f32); 4] = [(0.30, 0.0), (0.28, 0.08), (0.18, 0.33), (0.08, 0.81)];
 
 /// Triangle soup for one material.
 #[derive(Debug, Clone, Default)]
@@ -315,6 +322,91 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
     }
 }
 
+/// Jersey-profile barrier along `line` (road height at the barrier's foot).
+fn barrier_mesh(p: &mut Prim, line: &[V3]) {
+    let n = line.len();
+    if n < 2 {
+        return;
+    }
+    // Cross-section points per line point: left side bottom → top, then right side.
+    let sections: Vec<Vec<V3>> = (0..n)
+        .map(|k| {
+            let a = geom::xy(line[k.saturating_sub(1)]);
+            let b = geom::xy(line[(k + 1).min(n - 1)]);
+            let r = geom::right_of(geom::normalize(geom::sub(b, a)));
+            let c = line[k];
+            let at = |side: f32, w: f32, h: f32| {
+                [c[0] + r[0] * side * w, c[1] + r[1] * side * w, c[2] + h]
+            };
+            BARRIER_PROFILE
+                .iter()
+                .map(|(w, h)| at(-1.0, *w, *h))
+                .chain(BARRIER_PROFILE.iter().map(|(w, h)| at(1.0, *w, *h)))
+                .collect()
+        })
+        .collect();
+    let m = BARRIER_PROFILE.len();
+    for k in 0..n - 1 {
+        let (s0, s1) = (&sections[k], &sections[k + 1]);
+        for j in 0..m - 1 {
+            // Right side faces +r: along the line is to the viewer's right.
+            p.quad(
+                s0[m + j],
+                s1[m + j],
+                s1[m + j + 1],
+                s0[m + j + 1],
+                [0.0, 0.0, 1.0],
+            );
+            // Left side faces -r.
+            p.quad(s1[j], s0[j], s0[j + 1], s1[j + 1], [0.0, 0.0, 1.0]);
+        }
+        p.quad(
+            s0[m - 1],
+            s0[2 * m - 1],
+            s1[2 * m - 1],
+            s1[m - 1],
+            [0.0, 0.0, 1.0],
+        );
+    }
+}
+
+/// Points of the median barriers bucketed on a 10 m grid.
+struct BarrierIndex {
+    cells: std::collections::BTreeMap<(i32, i32), Vec<(V2, V2)>>,
+}
+
+impl BarrierIndex {
+    fn key(p: V2) -> (i32, i32) {
+        ((p[0] / 10.0).floor() as i32, (p[1] / 10.0).floor() as i32)
+    }
+
+    fn new(lines: &[Vec<V3>]) -> Self {
+        let mut cells: std::collections::BTreeMap<(i32, i32), Vec<(V2, V2)>> = Default::default();
+        for l in lines {
+            for w in l.windows(2) {
+                let (a, b) = (geom::xy(w[0]), geom::xy(w[1]));
+                for p in [a, b] {
+                    cells.entry(Self::key(p)).or_default().push((a, b));
+                }
+            }
+        }
+        Self { cells }
+    }
+
+    /// Within 0.6 m of a barrier line.
+    fn near(&self, p: V2) -> bool {
+        let (i, j) = Self::key(p);
+        (i - 1..=i + 1).any(|x| {
+            (j - 1..=j + 1).any(|y| {
+                self.cells.get(&(x, y)).is_some_and(|segs| {
+                    segs.iter()
+                        .any(|(a, b)| geom::point_segment_distance(p, *a, *b) < 0.6)
+                })
+            })
+        })
+    }
+}
+
 /// Render terrain: `coarse` is [`wp_world::surface::drawn_terrain`] (never above a road).
 /// Physics collides with the same surface off the roads (`wp_world::surface::collision_terrain`).
 fn render_terrain(
@@ -411,6 +503,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut rock = Prim::smooth("rock", [0.45, 0.42, 0.37, 1.0]);
     let mut seabed = Prim::smooth("seabed", [0.55, 0.52, 0.40, 1.0]);
     let mut water = Prim::new("water", [0.16, 0.30, 0.45, 1.0]);
+    let mut barrier = Prim::new("median_barrier", [0.66, 0.65, 0.62, 1.0]);
     let mut ground: Vec<Prim> = DistrictKind::ALL
         .iter()
         .map(|k| Prim::smooth(&format!("ground_{k:?}").to_lowercase(), district_color(*k)))
@@ -423,13 +516,18 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             render_terrain(&coarse, net, &mut ground, &mut rock, &mut seabed);
             let (lo, hi) = (t.origin, t.max_corner());
             let m = 400.0;
-            water.quad(
-                [lo[0] - m, lo[1] - m, SEA_Z],
-                [hi[0] + m, lo[1] - m, SEA_Z],
-                [hi[0] + m, hi[1] + m, SEA_Z],
-                [lo[0] - m, hi[1] + m, SEA_Z],
-                [0.0, 0.0, 1.0],
-            );
+            // Only a city with seabed gets the sea (the grid's flat ground sits just under
+            // its streets, below sea level, and stays dry).
+            let has_sea = t.z.iter().any(|z| *z < -1.0);
+            if has_sea {
+                water.quad(
+                    [lo[0] - m, lo[1] - m, SEA_Z],
+                    [hi[0] + m, lo[1] - m, SEA_Z],
+                    [hi[0] + m, hi[1] + m, SEA_Z],
+                    [lo[0] - m, hi[1] + m, SEA_Z],
+                    [0.0, 0.0, 1.0],
+                );
+            }
         }
         None => {
             for z in &net.zones {
@@ -480,11 +578,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             asphalt.mesh(&p.mesh);
         }
     }
+    // Median barriers.
+    let barriers = median_barriers(net);
+    for line in &barriers {
+        barrier_mesh(&mut barrier, line);
+    }
+    let near_barrier = BarrierIndex::new(&barriers);
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
     // bridge decks with parapets and piers.
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
-        for s in &net.surfaces {
+        for (si, s) in net.surfaces.iter().enumerate() {
             let (l, r) = surface_edges(s);
             let n = s.centre.len();
             let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
@@ -522,6 +626,15 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                 }
                 for (side, e) in [(-1.0f32, &l), (1.0, &r)] {
                     let seg = [e[k], e[k + 1]];
+                    // The median side of a divided highway has the barrier instead; a ramp
+                    // edge on the carriageway it leaves has nothing.
+                    if near_barrier.near(geom::xy(seg[0])) && near_barrier.near(geom::xy(seg[1])) {
+                        continue;
+                    }
+                    if inside_other_paving(net, si, seg[0]) && inside_other_paving(net, si, seg[1])
+                    {
+                        continue;
+                    }
                     bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
                     let top = [
                         [seg[0][0], seg[0][1], seg[0][2] + 0.9],
@@ -627,6 +740,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         tunnel_wall,
         tunnel_roof,
         tunnel_light,
+        barrier,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());

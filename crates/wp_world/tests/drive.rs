@@ -96,9 +96,11 @@ fn drive(w: &World, path: &DrivePath, target: f32, params: FollowParams, max_s: 
 fn follows_a_route_between_pois_and_stops_at_the_end() {
     let w = world();
     let pois = &w.network().pois;
+    // At street level: the single-car rig drives on a flat slab, so it stays off the
+    // highway viaduct (the "Highway sprint" grid).
     let start = pois
         .iter()
-        .position(|p| p.kind == PoiKind::RaceStartGrid)
+        .position(|p| p.kind == PoiKind::RaceStartGrid && p.name == "Arterial drag")
         .unwrap();
     let finish = pois.iter().position(|p| p.kind == PoiKind::Garage).unwrap();
     let route = w.plan_route_between_pois(start, finish).unwrap();

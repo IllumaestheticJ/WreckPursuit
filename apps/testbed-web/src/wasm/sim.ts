@@ -294,6 +294,8 @@ export const sim = {
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
+  /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */
+  roadMarkings: (yellow: boolean): Float32Array => wasm.road_markings(yellow),
   /** One state byte per signal head (layout.ts SIGNAL), same order as signalHeads(). */
   signalStates: (): Uint8Array => wasm.signal_states(),
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */

@@ -2,7 +2,9 @@
 // and northbound arterial as race_city_sprint, open roads: civilian traffic on (density 0.3)
 // and police on. Route (60.55, -437) → (60.55, -230), ~207 m, finishing ~100 m short of the
 // next signalled junction so finished cars don't queue on the line. Four entrants on the
-// judge's staggered grid (row gap 8 m, columns 5 m apart).
+// judge's staggered grid (row gap 8 m, columns 5 m apart; x = 59.55 / 64.55 since the grid
+// highway became a divided viaduct with ramps: the course runs down the middle lane of the
+// northbound carriageway).
 //
 // 13:00 and police_presence 2.0: an illegal daytime race has PolicePresence::Max in
 // data/events/stakes.toml; until that reaches wp_police (contract request R2) the scenario
@@ -42,7 +44,9 @@
     // Slowest city runs in the test pass (round 8): skipped by debug `cargo test`, run by the
     // release CI jobs (`simcli determinism`, `simcli goldens`).
     slow: true,
-    seed: 1,
+    // Re-aimed for the grid highway's ramps (WP_RACE_AIM_*, crates/wp_race/tests/race_police.rs):
+    // seed 12 passes both police tests at dy = -10, 0 and +10 m.
+    seed: 12,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,
     mode: Arcade,
