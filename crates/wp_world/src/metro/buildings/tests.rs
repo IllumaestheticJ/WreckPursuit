@@ -337,6 +337,51 @@ fn districts_have_plausible_heights_and_landmarks_exist() {
     assert!((1..=12).contains(&towers), "{towers} landmark towers");
 }
 
+/// The stadium stands are built in its site and the way in from the gate to the pitch is
+/// open (no solid feature or building on it).
+#[test]
+fn stadium_gate_drives_onto_the_pitch() {
+    let w = world(1);
+    let (ctx, n0, _) = after(&w, 1);
+    let site = w.plan.site("vesper_bowl").expect("vesper_bowl site");
+    let stands = ctx.features[n0..]
+        .iter()
+        .filter(|f| f.solid && f.kind == crate::network::FeatureKind::Landmark)
+        .filter(|f| inside(&site.polygon, centroid(&shape_footprint(&f.shape))))
+        .count();
+    assert!(stands >= 40, "{stands} stand pieces");
+    let g = site.gates[0].pos;
+    let c = centroid(&site.polygon);
+    for k in 0..=20 {
+        let t = k as f32 / 20.0 * 0.8;
+        let p = [g[0] + (c[0] - g[0]) * t, g[1] + (c[1] - g[1]) * t];
+        let gz = ctx.ground_z(p);
+        for f in ctx.features[n0..].iter().filter(|f| f.solid) {
+            // Overhead parts (the gate arch) leave room to drive under.
+            let bottom = match &f.shape {
+                FeatureShape::Box { centre, half, .. } => centre[2] - half[2],
+                FeatureShape::Cylinder { base, .. } => base[2],
+                FeatureShape::Prism { base_z, .. } => *base_z,
+            };
+            if bottom > gz + 4.5 {
+                continue;
+            }
+            let fp = shape_footprint(&f.shape);
+            assert!(
+                !inside(&fp, p),
+                "{:?} blocks the stadium gate at {p:?}",
+                f.kind
+            );
+        }
+        for b in &ctx.buildings {
+            assert!(
+                !inside(&b.footprint, p),
+                "building blocks the stadium gate at {p:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn deterministic() {
     let w = world(1);
