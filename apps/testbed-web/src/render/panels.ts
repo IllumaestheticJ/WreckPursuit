@@ -9,6 +9,18 @@
 // Detached panels leave the car as visual debris (ballistic, bounce on the road; the physics
 // debris body lives in Rapier and is not exposed to the browser yet).
 //
+// Cost: a part is only re-skinned when one of its lattice nodes moved since the last update or
+// its panel is swinging; rigid parts (engine, suspension, `rigid: true`) never touch their
+// vertices — their mesh matrix follows their single node.
+//
+// Wheel-space parts: tire / rim / brake_disc spin (VehicleView puts `wheelParts` in its spin
+// groups); caliper / upright steer and follow compression but do not spin (`pivotParts`, put in
+// the wheel pivot groups).
+//
+// Livery: paint parts with material `livery` carry atlas UVs (layout: data/panels/README.md);
+// `setLivery(texture)` maps a canvas onto them, `liveryPx()` converts car space to canvas pixels,
+// `?livery=grid` in the URL shows `debugLiveryTexture()` on every car.
+//
 // Coordinates: chassis space (+X right, +Y forward, +Z up), metres. The parent VehicleView root
 // is already in that frame.
 import * as THREE from "three";
@@ -20,13 +32,25 @@ export const PANEL_STRIDE = 10;
 /** Panel state codes (mirrors wp_damage::PanelState::code). */
 export const PANEL_STATE = { attached: 0, unlatched: 1, hanging: 2, detached: 3 } as const;
 
+/** Part kinds (tools/assets/src/mesh.rs `PartKind`). */
+export type PartKindJson =
+  | "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim"
+  | "detail" | "engine" | "suspension" | "brake_disc" | "caliper" | "upright" | "lightbar" | "decal_carrier";
+/** Material slots (tools/assets/src/mesh.rs `MaterialSlot`). */
+export type MaterialJson =
+  | "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior"
+  | "livery" | "chrome" | "carbon" | "caliper" | "engine" | "lightbar_red" | "lightbar_blue"
+  | "lightbar_clear" | "emissive_amber" | "grille" | "exhaust";
+
 /** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). */
 export interface MeshPartJson {
   name: string;
   region: string | null;
-  kind: "panel" | "glass" | "light" | "mirror" | "body" | "interior" | "tire" | "rim";
-  material: "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior";
+  kind: PartKindJson;
+  material: MaterialJson;
   wheel?: number | null;
+  /** Bound to one node with weight 255 (moves rigidly). */
+  rigid?: boolean;
   positions_mm: number[];
   uvs: number[];
   indices: number[];
@@ -34,14 +58,40 @@ export interface MeshPartJson {
   skin_weights: number[];
 }
 
-/** data/panels/meshes/<car>.json (`CarMesh`). */
+/** Car-space box the livery atlas maps (mesh format 2). */
+export interface LiveryAtlas {
+  /** Tail y, nose y (m). */
+  y: [number, number];
+  /** Ground z, top z (m). */
+  z: [number, number];
+  /** Half width (m). */
+  x_half: number;
+}
+
+/** Livery hint written by the style (tools/assets/src/style.rs `LiveryHint`). */
+export interface LiveryHint {
+  scheme: string;
+  colors: [number, number, number][];
+  text: string[];
+}
+
+/** data/panels/meshes/<car>.json (`CarMesh`). Format 1 files have none of the optional fields. */
 export interface CarMeshJson {
   id: string;
   lattice_id: string;
   format: number;
   tri_count: number;
+  tints?: Partial<Record<MaterialJson, [number, number, number]>>;
+  livery?: LiveryHint;
+  atlas?: LiveryAtlas;
+  /** Visual camber per wheel (FL FR RL RR), degrees, + = top leans in. */
+  wheel_camber_deg?: [number, number, number, number];
   parts: MeshPartJson[];
 }
+
+const PIVOT_KINDS: ReadonlySet<PartKindJson> = new Set(["caliper", "upright"]);
+const WHEEL_KINDS: ReadonlySet<PartKindJson> = new Set(["tire", "rim", "brake_disc", "caliper", "upright"]);
+const RIGID_KINDS: ReadonlySet<PartKindJson> = new Set(["engine", "suspension"]);
 
 const meshCache = new Map<string, Promise<CarMeshJson | null>>();
 
@@ -68,6 +118,152 @@ export function panelStates(entity: number): Float32Array {
   }
 }
 
+// ------------------------------------------------------------------------------------------
+// Livery atlas (layout: data/panels/README.md "Livery atlas")
+// ------------------------------------------------------------------------------------------
+
+/** Atlas band of a livery canvas. */
+export type LiverySide = "left" | "right" | "top" | "front" | "rear";
+
+const ATLAS_PAD = 0.004;
+/** Band rectangles in UV space: [u0, u1, v0, v1] (v up, texture flipY = true). */
+const BANDS: Record<LiverySide, [number, number, number, number]> = {
+  left: [0, 0.25, 0, 0.5],
+  right: [0.25, 0.5, 0, 0.5],
+  top: [0, 0.5, 0.5, 0.8],
+  front: [0, 0.25, 0.8, 1],
+  rear: [0.25, 0.5, 0.8, 1],
+};
+
+/** Default atlas for format-1 meshes / before load (a 4.6 m × 1.9 m × 1.5 m car). */
+export const DEFAULT_ATLAS: LiveryAtlas = { y: [-2.4, 2.4], z: [0, 1.75], x_half: 1.0 };
+
+/**
+ * Car space → livery UV (u, v in 0..1, v up). Arguments per side:
+ * left/right: (y, z) — y forward, z up; top: (y, x); front/rear: (x, z). Metres, chassis space.
+ * Mirrors tools/assets/src/mesh.rs `atlas_uv` exactly.
+ */
+export function liveryUv(atlas: LiveryAtlas, side: LiverySide, a: number, b: number): [number, number] {
+  const clamp = (t: number) => Math.min(Math.max(t, 0), 1);
+  const fy = (y: number) => clamp((y - atlas.y[0]) / (atlas.y[1] - atlas.y[0]));
+  const fz = (z: number) => clamp((z - atlas.z[0]) / (atlas.z[1] - atlas.z[0]));
+  const fx = (x: number) => clamp((x + atlas.x_half) / (2 * atlas.x_half));
+  let s: number;
+  let t: number;
+  switch (side) {
+    case "left": [s, t] = [1 - fy(a), fz(b)]; break; // nose at the band's left: reads front → rear
+    case "right": [s, t] = [fy(a), fz(b)]; break; // tail at the band's left: reads rear → front
+    case "top": [s, t] = [fy(a), 1 - fx(b)]; break; // plan view, nose right, car left at the top
+    case "front": [s, t] = [1 - fx(a), fz(b)]; break; // seen from ahead
+    case "rear": [s, t] = [fx(a), fz(b)]; break; // seen from behind
+  }
+  const [u0, u1, v0, v1] = BANDS[side];
+  return [u0 + ATLAS_PAD + (u1 - u0 - 2 * ATLAS_PAD) * s, v0 + ATLAS_PAD + (v1 - v0 - 2 * ATLAS_PAD) * t];
+}
+
+/**
+ * Car space → livery canvas pixel {x, y} (canvas origin top-left) for a canvas of `w` × `h`
+ * pixels mapped over the whole texture (u 0..1). Arguments as `liveryUv`. Text drawn
+ * left-to-right with plain `fillText` at a left/right-side anchor reads correctly from outside.
+ */
+export function liveryPx(
+  atlas: LiveryAtlas, side: LiverySide, a: number, b: number, w: number, h: number,
+): { x: number; y: number } {
+  const [u, v] = liveryUv(atlas, side, a, b);
+  return { x: u * w, y: (1 - v) * h };
+}
+
+/** Pixel rectangle {x, y, w, h} of an atlas band on a `w` × `h` canvas. */
+export function liveryBandPx(side: LiverySide, w: number, h: number): { x: number; y: number; w: number; h: number } {
+  const [u0, u1, v0, v1] = BANDS[side];
+  return { x: u0 * w, y: (1 - v1) * h, w: (u1 - u0) * w, h: (v1 - v0) * h };
+}
+
+let debugLivery: THREE.CanvasTexture | null = null;
+
+/** A labelled grid on every atlas band (to check the UV mapping): band names, FRONT arrows, 0.5 m grid. */
+export function debugLiveryTexture(atlas: LiveryAtlas = DEFAULT_ATLAS): THREE.CanvasTexture {
+  if (debugLivery) return debugLivery;
+  const W = 2048;
+  const H = 1024;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#777";
+  g.fillRect(0, 0, W, H);
+  const colours: Record<LiverySide, string> = {
+    left: "#c33", right: "#36c", top: "#3a3", front: "#cc3", rear: "#c3c",
+  };
+  for (const side of Object.keys(BANDS) as LiverySide[]) {
+    const r = liveryBandPx(side, W, H);
+    g.fillStyle = colours[side];
+    g.fillRect(r.x, r.y, r.w, r.h);
+    g.strokeStyle = "rgba(255,255,255,0.6)";
+    g.lineWidth = 2;
+    // 0.5 m grid in car space.
+    const lines: [number, number, number, number][] = [];
+    if (side === "left" || side === "right" || side === "top") {
+      for (let y = Math.ceil(atlas.y[0] * 2) / 2; y <= atlas.y[1]; y += 0.5) {
+        const lo = side === "top" ? -atlas.x_half : atlas.z[0];
+        const hi = side === "top" ? atlas.x_half : atlas.z[1];
+        lines.push([y, lo, y, hi]);
+      }
+    }
+    if (side !== "top") {
+      for (let z = 0.5; z < atlas.z[1]; z += 0.5) {
+        const a0 = side === "left" || side === "right" ? atlas.y[0] : -atlas.x_half;
+        const a1 = side === "left" || side === "right" ? atlas.y[1] : atlas.x_half;
+        lines.push([a0, z, a1, z]);
+      }
+    } else {
+      lines.push([atlas.y[0], 0, atlas.y[1], 0]);
+    }
+    for (const [a0, b0, a1, b1] of lines) {
+      const p0 = liveryPx(atlas, side, a0, b0, W, H);
+      const p1 = liveryPx(atlas, side, a1, b1, W, H);
+      g.beginPath();
+      g.moveTo(p0.x, p0.y);
+      g.lineTo(p1.x, p1.y);
+      g.stroke();
+    }
+    g.fillStyle = "#fff";
+    g.font = "bold 40px sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    const label = side.toUpperCase();
+    // Anchors from car space: the arrow points toward the car's front on the sides / top.
+    const mid = (atlas.y[0] + atlas.y[1]) / 2;
+    const zMid = 0.75;
+    const at =
+      side === "left" || side === "right"
+        ? liveryPx(atlas, side, mid, zMid, W, H)
+        : side === "top"
+          ? liveryPx(atlas, side, mid, 0.3, W, H)
+          : liveryPx(atlas, side, 0, zMid, W, H);
+    const front = side === "left" ? "◀ FRONT" : side === "right" || side === "top" ? "FRONT ▶" : "";
+    g.fillText(`${label} ${front} ABC123`, at.x, at.y);
+    if (side === "front" || side === "rear") {
+      const l = liveryPx(atlas, side, -0.6, 0.5, W, H);
+      g.font = "bold 28px sans-serif";
+      g.fillText("CAR-LEFT", l.x, l.y);
+    }
+  }
+  debugLivery = new THREE.CanvasTexture(c);
+  debugLivery.colorSpace = THREE.SRGBColorSpace;
+  return debugLivery;
+}
+
+function liveryFlag(): string | null {
+  try {
+    return new URLSearchParams(globalThis.location?.search ?? "").get("livery");
+  } catch {
+    return null;
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+
 interface PartRT {
   def: MeshPartJson;
   mesh: THREE.Mesh;
@@ -75,9 +271,15 @@ interface PartRT {
   rest: Float32Array;
   nodes: Uint16Array;
   weights: Float32Array;
+  /** Distinct lattice nodes the part reads. */
+  uniq: Uint16Array;
   /** Index into `info.regions`, -1 for wheel parts. */
   region: number;
   hidden: boolean;
+  /** Moves rigidly with its single node (mesh matrix, no vertex work). */
+  rigid: boolean;
+  /** Was skinned through a free-panel frame last update (needs one more pass once it stops). */
+  framed: boolean;
 }
 
 /** Rigid frame of a free panel: x' = R x + t. */
@@ -92,6 +294,13 @@ interface Debris {
   vel: THREE.Vector3;
   spin: THREE.Vector3;
   age: number;
+}
+
+/** Light-bar lens materials of one side. */
+export interface LightbarSide {
+  red: THREE.MeshStandardMaterial;
+  blue: THREE.MeshStandardMaterial;
+  clear: THREE.MeshStandardMaterial;
 }
 
 const bodies = new Map<number, PanelBody>();
@@ -145,18 +354,35 @@ export function debrisCount(): number {
 export class PanelBody {
   readonly root = new THREE.Group();
   ready = false;
-  /** Parts per wheel index, hub space (VehicleView parents them under its spinning wheel groups). */
+  /** Spinning wheel-space parts per wheel index (tire, rim, brake disc): VehicleView puts them in its spin groups. */
   readonly wheelParts: THREE.Mesh[][] = [[], [], [], []];
+  /** Steering, non-spinning wheel-space parts per wheel (caliper, upright): VehicleView puts them in its wheel pivots. */
+  readonly pivotParts: THREE.Mesh[][] = [[], [], [], []];
+  /** Visual camber per wheel, radians about +Y (sign already per side: + tilts the top toward +X). */
+  readonly camberRad: number[] = [0, 0, 0, 0];
   /** Latest panel states (PANEL_STRIDE floats per panel). */
   states: Float32Array = new Float32Array(0);
+  /** Livery atlas frame of this car (DEFAULT_ATLAS until the mesh loads / for format-1 files). */
+  atlas: LiveryAtlas = DEFAULT_ATLAS;
+  /** Livery hint from the mesh file, if any. */
+  liveryHint: LiveryHint | null = null;
+  /** Light-bar lens materials per side (left = parts with x < 0). Flash them via `emissive`. */
+  readonly lightbarMaterials: { left: LightbarSide; right: LightbarSide };
+  /** Light-bar lens centres per side, chassis space (null if the car has none): place point lights here. */
+  readonly lightbarAnchors: { left: THREE.Vector3 | null; right: THREE.Vector3 | null } = { left: null, right: null };
+  /** Re-skinned parts in the last update() (perf / tests). */
+  lastSkinned = 0;
   private parts: PartRT[] = [];
   private readonly regions: string[];
   private restNodes: Float32Array = new Float32Array(0);
+  private lastNodes: Float32Array | null = null;
+  private nodeDirty: Uint8Array = new Uint8Array(0);
   /** Region index → three node ids spanning the panel (frame fit), for panel regions. */
   private readonly tri = new Map<number, [number, number, number]>();
   private readonly frames = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
-  private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
+  private readonly mats: Record<MaterialJson, THREE.Material>;
+  private livery: THREE.Texture | null = null;
   private onReady: (() => void) | null = null;
 
   constructor(
@@ -169,8 +395,14 @@ export class PanelBody {
     this.regions = sim.info(entity).regions;
     const std = (o: THREE.MeshStandardMaterialParameters) =>
       new THREE.MeshStandardMaterial({ flatShading: true, side: THREE.DoubleSide, ...o });
+    const lens = (color: number) => std({ color, emissive: 0x000000, roughness: 0.3, transparent: true, opacity: 0.9 });
+    this.lightbarMaterials = {
+      left: { red: lens(0x661018), blue: lens(0x102266), clear: lens(0xbfc4c8) },
+      right: { red: lens(0x661018), blue: lens(0x102266), clear: lens(0xbfc4c8) },
+    };
     this.mats = {
       paint: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
+      livery: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
       glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.38, metalness: 0.1, roughness: 0.1, depthWrite: false }),
       trim: std({ color: 0x1b1b1d, roughness: 0.9 }),
       headlight,
@@ -178,6 +410,16 @@ export class PanelBody {
       rubber: std({ color: 0x141414, roughness: 0.95 }),
       metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
       interior: std({ color: 0x2b2724, roughness: 1 }),
+      chrome: std({ color: 0xe8ecef, metalness: 1, roughness: 0.12 }),
+      carbon: std({ color: 0x1e2124, metalness: 0.3, roughness: 0.35 }),
+      caliper: std({ color: 0x3a3c40, metalness: 0.2, roughness: 0.5 }),
+      engine: std({ color: 0x3b3d40, metalness: 0.6, roughness: 0.6 }),
+      lightbar_red: this.lightbarMaterials.left.red,
+      lightbar_blue: this.lightbarMaterials.left.blue,
+      lightbar_clear: this.lightbarMaterials.left.clear,
+      emissive_amber: std({ color: 0xc87a10, emissive: 0x2a1600, roughness: 0.4 }),
+      grille: std({ color: 0x0d0e10, roughness: 0.8 }),
+      exhaust: std({ color: 0xb9b2a6, metalness: 0.9, roughness: 0.25 }),
     };
     bodies.set(entity, this);
     void loadCarMesh(carId).then((m) => m && this.build(m));
@@ -189,18 +431,52 @@ export class PanelBody {
     else this.onReady = fn;
   }
 
-  /** Paint material (livery colour). */
+  /** Paint material (body colour). VehicleView sets its opacity; the livery material follows it. */
   get paint(): THREE.MeshStandardMaterial {
     return this.mats.paint as THREE.MeshStandardMaterial;
   }
 
+  /** Livery material (paint parts that take the livery texture). */
+  get liveryMaterial(): THREE.MeshStandardMaterial {
+    return this.mats.livery as THREE.MeshStandardMaterial;
+  }
+
+  /**
+   * Show `texture` (a canvas laid out as the livery atlas, see liveryPx) on the livery parts, or
+   * go back to the plain body colour with null. The texture's colours are used as-is (white
+   * material colour) while it is set.
+   */
+  setLivery(texture: THREE.Texture | null): void {
+    this.livery = texture;
+    const m = this.liveryMaterial;
+    m.map = texture;
+    m.color.copy(texture ? new THREE.Color(0xffffff) : this.paint.color);
+    m.needsUpdate = true;
+  }
+
   private build(mesh: CarMeshJson): void {
     this.restNodes = sim.latticeRest(this.entity);
+    this.nodeDirty = new Uint8Array(this.restNodes.length / 3);
     const nodeRegions = sim.latticeRegions(this.entity);
+    if (mesh.atlas) this.atlas = mesh.atlas;
+    this.liveryHint = mesh.livery ?? null;
+    for (const [slot, rgb] of Object.entries(mesh.tints ?? {})) {
+      const m = this.mats[slot as MaterialJson] as THREE.MeshStandardMaterial | undefined;
+      if (m && rgb && "color" in m) m.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    }
+    (mesh.wheel_camber_deg ?? [0, 0, 0, 0]).forEach((deg, i) => {
+      // Wheels 0, 2 are on the left (−X): + camber tilts their top toward +X.
+      const left = i % 2 === 0;
+      this.camberRad[i] = ((left ? 1 : -1) * deg * Math.PI) / 180;
+    });
+    const lbSum = { left: new THREE.Vector3(), right: new THREE.Vector3() };
+    const lbCount = { left: 0, right: 0 };
     for (const def of mesh.parts) {
       const n = def.positions_mm.length / 3;
       const rest = new Float32Array(n * 3);
+      let cx = 0;
       for (let i = 0; i < n * 3; i++) rest[i] = def.positions_mm[i] * 1e-3;
+      for (let i = 0; i < n; i++) cx += rest[i * 3] / n;
       const geom = new THREE.BufferGeometry();
       const pos = rest.slice();
       geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -208,22 +484,43 @@ export class PanelBody {
       for (let i = 0; i < uv.length; i++) uv[i] = def.uvs[i] / 65535;
       geom.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       geom.setIndex(def.indices);
-      const m = new THREE.Mesh(geom, this.mats[def.material]);
+      let material = this.mats[def.material] ?? this.mats.paint; // unknown slot (newer file) → paint
+      if (def.material.startsWith("lightbar_")) {
+        const side = cx < 0 ? "left" : "right";
+        const colour = def.material.slice("lightbar_".length) as keyof LightbarSide;
+        material = this.lightbarMaterials[side][colour];
+        for (let i = 0; i < n; i++) lbSum[side].add(new THREE.Vector3().fromArray(rest, i * 3).divideScalar(n));
+        lbCount[side]++;
+      }
+      const m = new THREE.Mesh(geom, material);
       m.name = def.name;
       m.frustumCulled = false;
-      if (def.material === "glass") m.renderOrder = 1;
+      if (def.material === "glass" || def.material.startsWith("lightbar_")) m.renderOrder = 1;
       const region = def.region ? this.regions.indexOf(def.region) : -1;
+      if (def.wheel != null && WHEEL_KINDS.has(def.kind)) {
+        (PIVOT_KINDS.has(def.kind) ? this.pivotParts : this.wheelParts)[def.wheel].push(m);
+        continue;
+      }
       if (def.wheel != null) {
+        // Older files: any other wheel part spins.
         this.wheelParts[def.wheel].push(m);
         continue;
       }
       this.root.add(m);
       const w = new Float32Array(def.skin_weights.length);
       for (let i = 0; i < w.length; i++) w[i] = def.skin_weights[i] / 255;
-      this.parts.push({ def, mesh: m, pos, rest, nodes: Uint16Array.from(def.skin_nodes), weights: w, region, hidden: false });
+      const nodes = Uint16Array.from(def.skin_nodes);
+      const rigid = (def.rigid === true || RIGID_KINDS.has(def.kind)) && nodes.length > 0 && nodes.every((x) => x === nodes[0]);
+      if (rigid) m.matrixAutoUpdate = false;
+      const uniq = Uint16Array.from(new Set(nodes));
+      this.parts.push({ def, mesh: m, pos, rest, nodes, weights: w, uniq, region, hidden: false, rigid, framed: false });
       if (region >= 0 && !this.tri.has(region)) this.tri.set(region, spanTriangle(this.restNodes, nodeRegions, region));
     }
+    for (const side of ["left", "right"] as const)
+      if (lbCount[side] > 0) this.lightbarAnchors[side] = lbSum[side].divideScalar(lbCount[side]);
     this.ready = true;
+    const flag = liveryFlag();
+    if (flag === "grid") this.setLivery(debugLiveryTexture(this.atlas));
     this.update(this.restNodes, 0);
     this.onReady?.();
   }
@@ -239,11 +536,22 @@ export class PanelBody {
   }
 
   /**
-   * Re-skin every part from the current lattice nodes (chassis space, xyz per node) and the
-   * panel states. `worldVel` (the car's world velocity, m/s) seeds detached-panel debris.
+   * Re-skin the parts whose nodes moved (or whose panel swings) from the current lattice nodes
+   * (chassis space, xyz per node) and the panel states. `worldVel` (the car's world velocity,
+   * m/s) seeds detached-panel debris.
    */
   update(nodes: Float32Array, dt: number, worldVel?: THREE.Vector3): void {
     if (!this.ready) return;
+    // The livery material follows the paint's opacity (VehicleView fades paint for the lattice view).
+    const pm = this.paint;
+    const lm = this.liveryMaterial;
+    if (lm.opacity !== pm.opacity) {
+      lm.opacity = pm.opacity;
+      lm.transparent = pm.transparent;
+      lm.depthWrite = pm.depthWrite;
+    }
+    if (!this.livery && !lm.color.equals(pm.color)) lm.color.copy(pm.color);
+
     this.states = panelStates(this.entity);
     this.frames.clear();
     for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) {
@@ -258,11 +566,45 @@ export class PanelBody {
         else this.hideRegion(region);
       }
     }
+    // Which nodes moved since the last update (all of them on the first call).
+    const last = this.lastNodes;
+    const dirty = this.nodeDirty;
+    let anyDirty = false;
+    if (!last || last.length !== nodes.length) {
+      dirty.fill(1);
+      anyDirty = true;
+      this.lastNodes = nodes.slice();
+    } else {
+      for (let i = 0; i < dirty.length; i++) {
+        const j = i * 3;
+        const d = nodes[j] !== last[j] || nodes[j + 1] !== last[j + 1] || nodes[j + 2] !== last[j + 2] ? 1 : 0;
+        dirty[i] = d;
+        if (d) anyDirty = true;
+      }
+      if (anyDirty) last.set(nodes);
+    }
+    if (!anyDirty && this.frames.size === 0 && !this.parts.some((p) => p.framed)) {
+      this.lastSkinned = 0;
+      return;
+    }
+
     const rn = this.restNodes;
     const tmp = new THREE.Vector3();
+    let skinned = 0;
     for (const p of this.parts) {
       if (p.hidden) continue;
       const f = p.region >= 0 ? this.frames.get(p.region) : undefined;
+      if (!f && !p.framed) {
+        let touched = false;
+        for (let i = 0; i < p.uniq.length && !touched; i++) touched = dirty[p.uniq[i]] === 1;
+        if (!touched) continue;
+      }
+      p.framed = f !== undefined;
+      skinned++;
+      if (p.rigid) {
+        this.placeRigid(p, nodes, f);
+        continue;
+      }
       const { rest, pos, nodes: ids, weights } = p;
       const nv = rest.length / 3;
       for (let v = 0; v < nv; v++) {
@@ -298,6 +640,25 @@ export class PanelBody {
       }
       (p.mesh.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
     }
+    this.lastSkinned = skinned;
+  }
+
+  /** Rigid part: mesh matrix = its node's displacement (through the panel frame when free). */
+  private placeRigid(p: PartRT, nodes: Float32Array, f: Frame | undefined): void {
+    const i = p.nodes[0] * 3;
+    const rn = this.restNodes;
+    const m = p.mesh.matrix;
+    if (f) {
+      const dent = new THREE.Vector3(nodes[i] - f.t.x, nodes[i + 1] - f.t.y, nodes[i + 2] - f.t.z)
+        .applyMatrix3(f.rt)
+        .sub(new THREE.Vector3(rn[i], rn[i + 1], rn[i + 2]));
+      const e = f.r.elements;
+      const t = dent.applyMatrix3(f.r).add(f.t);
+      m.set(e[0], e[3], e[6], t.x, e[1], e[4], e[7], t.y, e[2], e[5], e[8], t.z, 0, 0, 0, 1);
+    } else {
+      m.makeTranslation(nodes[i] - rn[i], nodes[i + 1] - rn[i + 1], nodes[i + 2] - rn[i + 2]);
+    }
+    p.mesh.matrixWorldNeedsUpdate = true;
   }
 
   private hideRegion(region: number): void {
@@ -323,14 +684,17 @@ export class PanelBody {
       if (p.region !== region || p.hidden) continue;
       const geom = new THREE.BufferGeometry();
       geom.setAttribute("position", new THREE.BufferAttribute(p.pos.slice(), 3));
+      geom.setAttribute("uv", p.mesh.geometry.getAttribute("uv"));
       geom.setIndex(p.def.indices);
+      if (p.rigid) geom.applyMatrix4(p.mesh.matrix);
       const m = new THREE.Mesh(geom, p.mesh.material);
       m.frustumCulled = false;
       group.add(m);
-      for (let i = 0; i < p.pos.length; i += 3) {
-        centroid.x += p.pos[i];
-        centroid.y += p.pos[i + 1];
-        centroid.z += p.pos[i + 2];
+      const arr = geom.getAttribute("position").array as Float32Array;
+      for (let i = 0; i < arr.length; i += 3) {
+        centroid.x += arr[i];
+        centroid.y += arr[i + 1];
+        centroid.z += arr[i + 2];
         count++;
       }
       p.hidden = true;
@@ -354,6 +718,7 @@ export class PanelBody {
   dispose(): void {
     bodies.delete(this.entity);
     this.root.removeFromParent();
+    for (const ps of [...this.wheelParts, ...this.pivotParts]) for (const m of ps) m.removeFromParent();
   }
 }
 

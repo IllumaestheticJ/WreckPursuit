@@ -194,6 +194,12 @@ export class VehicleView {
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
+      // Foundation hook: calipers / uprights steer + follow compression but do not spin; camber is visual.
+      this.wheels.forEach((w, i) => {
+        this.panels.pivotParts[i].forEach((m) => w.pivot.add(m));
+        w.spin.rotation.order = "YXZ";
+        w.spin.rotation.y = this.panels.camberRad[i];
+      });
       // The panel body is longer than the debug box: move the lamp markers onto its nose and
       // tail so head and brake lights show (the mesh's own light parts sit inside the shell).
       this.root.updateWorldMatrix(true, true);
@@ -254,6 +260,7 @@ export class VehicleView {
     const rebuild = this.shapeDirty;
     if (needNodes) this.shapeDirty = false;
     this.panels.root.visible = panelsOn;
+    for (const ps of this.panels.pivotParts) for (const m of ps) m.visible = panelsOn;
     // The panel meshes' own light parts sit inside the shell (machine R to fix in the mesh
     // generator), so the lamp markers stay on with panels too: brake and head lights stay visible.
     for (const lamp of this.lamps) lamp.visible = bodyOn;
