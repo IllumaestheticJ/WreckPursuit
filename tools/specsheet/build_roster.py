@@ -383,7 +383,7 @@ SEC = dict(cover=1.2e-4, cabin=3.0e-4, cross_member=0.06e-4, rail_hard=0.9e-4,
            engine_mount=0.6e-4, engine_firewall=1.2e-4, structural=0.25e-4)
 RAIL_X_FRAC = 0.30
 REAR_RAIL_FACTOR = 1.6  # lattice_gen::REAR_RAIL_FACTOR
-TRUCK_RAIL_SCALE = {"truck": 1.35, "suv": 1.2, "van": 1.2}
+TRUCK_RAIL_SCALE = {"truck": 1.35, "suv": 1.2, "van": 1.2, "sedan": 1.15}  # sedan: perimeter frame, lighter than a truck ladder
 
 PUSHBAR = ("hss", 8.0e-4)
 PUSHBAR_MOUNT = ("hss", 6.0e-4)
@@ -412,7 +412,7 @@ def gen_lattice_args(c: dict, mass: float) -> list[str]:
 
 
 def run_generator(c: dict, mass: float, out_path: str) -> None:
-    exe = os.path.join(REPO, "target", "release", "gen-lattice")
+    exe = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "gen-lattice")
     if not os.path.exists(exe):
         sys.exit("build the generator first: cargo build --release -p wp_damage --bin gen-lattice")
     subprocess.run([exe] + gen_lattice_args(c, mass) + ["--out", out_path],

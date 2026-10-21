@@ -77,8 +77,11 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `tansy_13` | Tansy 1.3 | Compact | 2000s FF 1.3 supermini hatch — traffic / parked |
 | `drayman_cargo` | Drayman Cargo | Truck | 2000s RWD 4.8 V8 full-size cargo van, body-on-frame — traffic / parked |
 | `furrow_24` | Furrow 2.4 | Truck | 90s RWD 2.4 I4 compact pickup, body-on-frame — traffic / parked |
+| `fulmine_v10` | Fulmine V10 | Exotic | 2010s mid-engine 5.2 NA V10, permanent AWD (30 % front), dual-clutch — top of the market |
+| `sentinel_warden` | Sentinel Warden | PoliceCruiser | late-80s RWD 5.7 V8 body-on-frame police sedan, 4-speed auto, push bar — low-heat old fleet |
+| `sentinel_harrier` | Sentinel Harrier | PoliceInterceptor | 2010s RWD 5.0 V8 muscle-coupe pursuit car, push bar — high-heat (L4–L5) unit |
 
-The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
+`tansy_13`, `drayman_cargo` and `furrow_24` are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
 There is no `Van`/`Civilian` class yet, so the van and pickup use `Truck` (requested in
 `docs/integration/cars.md`).
 

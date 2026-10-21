@@ -6,7 +6,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE, POLICE_UNIT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 
@@ -24,8 +24,6 @@ const MAX_AGENTS = 1024;
 /** Traffic car box size [w, l, h], m. */
 const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
 const tmpAgentColour = new THREE.Color();
-/** Floats per unit in police_units(). */
-const POLICE_UNIT_STRIDE = 6;
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -134,8 +132,8 @@ export class SceneView {
   }
 
   /**
-   * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags],
-   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
+   * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags,
+   * unitId, model] — layout.ts PU; flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
    */
   updatePoliceUnits(units: Float32Array, timeS: number): void {
     const n = units.length / POLICE_UNIT_STRIDE;
@@ -168,7 +166,7 @@ export class SceneView {
     });
   }
 
-  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */
+  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags, agentId, model] per agent, layout.ts AG). */
   updateAgents(agents: Float32Array, skipPhysical = false): void {
     const total = agents.length / AGENT_STRIDE;
     const show = layers.on("traffic");
