@@ -239,6 +239,29 @@ pub struct Telemetry {
     pub sliding: bool,
 }
 
+/// A punctured tyre's radius loss at full deflation, × the tyre radius (playtest row 132):
+/// the rolling radius and the ground probe both shrink by `FLAT_DROP_FRAC × radius × deflation`,
+/// so the corner sits that much lower.
+pub const FLAT_DROP_FRAC: f32 = 0.3;
+/// Deflation (`HandlingEffects::tire_puncture`) from which the wheel runs on its rim.
+pub const RIM_FROM: f32 = 0.9;
+/// Grip of a wheel on its rim, × the tyre's grip (a deflating tyre loses up to half).
+pub const RIM_GRIP: f32 = 0.35;
+/// Rolling resistance of a punctured tyre: × (1 + this × deflation) (a flat drags, so the car
+/// pulls toward it).
+pub const FLAT_ROLLING_RESISTANCE: f32 = 4.0;
+
+/// Grip factor of a tyre at deflation `p` (0..=1): `1 − p / 2`, the rim's [`RIM_GRIP`] from
+/// [`RIM_FROM`].
+pub fn puncture_grip(p: f32) -> f32 {
+    let p = p.clamp(0.0, 1.0);
+    if p >= RIM_FROM {
+        RIM_GRIP
+    } else {
+        1.0 - 0.5 * p
+    }
+}
+
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
 #[derive(Debug, Clone)]
 pub struct Vehicle {
@@ -956,6 +979,12 @@ impl Vehicle {
             b.bias_front = (b.bias_front + g.brake_bias_front_add).clamp(0.0, 1.0);
         }
         b
+    }
+
+    /// Wheels running on their rim (FL, FR, RL, RR): in contact with deflation ≥ [`RIM_FROM`]
+    /// (sparks / grind for the renderer and audio; playtest row 132).
+    pub fn rim_contact(&self) -> [bool; 4] {
+        std::array::from_fn(|i| self.wheels[i].contact && self.effects.tire_puncture[i] >= RIM_FROM)
     }
 
     /// The rear axle's differential (Drift Lab W's `car_lab` can lock it).
@@ -1756,7 +1785,7 @@ impl Vehicle {
             w.vx = vc.dot(w.fwd);
             w.vy = vc.dot(w.lat);
             let p = eff.tire_puncture[i].clamp(0.0, 1.0);
-            w.r_eff = c.radius * (1.0 - 0.3 * p);
+            w.r_eff = c.radius * (1.0 - FLAT_DROP_FRAC * p);
             let camber = c.camber + eff.camber_delta[i];
             let camber_grip = (1.0 - (camber.abs() - 0.03).max(0.0)).clamp(0.6, 1.0);
             let (cond_grip, planing) =
@@ -1765,7 +1794,7 @@ impl Vehicle {
             w.grip = surface_grip(&c.tire, w.surface)
                 * cond_grip
                 * eff.grip_scale[i].max(0.0)
-                * (1.0 - 0.5 * p)
+                * puncture_grip(p)
                 * camber_grip;
         }
 
@@ -2033,6 +2062,9 @@ impl Vehicle {
         let service = service_torques(&self.brake_def(), self.brake_f)[i];
         let c = &self.corners[i];
         let lost = self.effects.wheel_lost[i];
+        // A punctured tyre is smaller: the probe uses the deflated radius (playtest row 132).
+        let probe_radius =
+            c.radius * (1.0 - FLAT_DROP_FRAC * self.effects.tire_puncture[i].clamp(0.0, 1.0));
         let w = &mut self.wheels[i];
         let down = -up;
         w.hub_force = V3::ZERO;
@@ -2078,7 +2110,7 @@ impl Vehicle {
             center: origin - down * PROBE_LIFT_M,
             dir: down,
             max_dist: travel + PROBE_LIFT_M,
-            radius: c.radius,
+            radius: probe_radius,
             half_width: c.half_width
                 * PROBE_WIDTH_FRAC
                 * crate::lab_scope::grip().map_or(1.0, |g| g.probe_width.clamp(0.0, 1.5)),
@@ -2245,6 +2277,7 @@ impl Vehicle {
 
         // Drift Lab W car / tyre lab override (`crate::car_lab`); `None` = the data.
         let car_tune = crate::lab_scope::car();
+        let puncture = self.effects.tire_puncture.map(|p| p.clamp(0.0, 1.0));
         // Grip-balance lab (`crate::grip_lab`): front / rear tyre scales on top; `None` = data.
         let grip_tune = crate::lab_scope::grip().filter(|g| g.changes_tyres());
         let layout = self.def.drivetrain.layout;
@@ -2337,7 +2370,11 @@ impl Vehicle {
                 tire.fz0_n,
             );
             w.fy = low_speed_lateral(fy, vx, w.vy, fz, mu_y * grip);
-            w.fx = fx - tire.rolling_resistance * fz * (vx / 0.5).clamp(-1.0, 1.0);
+            w.fx = fx
+                - tire.rolling_resistance
+                    * (1.0 + FLAT_ROLLING_RESISTANCE * puncture[i])
+                    * fz
+                    * (vx / 0.5).clamp(-1.0, 1.0);
         }
 
         // Engine side.

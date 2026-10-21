@@ -1179,6 +1179,21 @@ pub fn tire_punctures() -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Wheels running on their rims, 4 floats per vehicle (FL, FR, RL, RR; 1 = a fully flat tyre
+/// in ground contact, else 0), same order as `vehicle_states()`. For the rim-scrape sound and
+/// sparks ([`wp_vehicle::vehicle::Vehicle::rim_contact`]).
+#[wasm_bindgen]
+pub fn tire_rim_contact() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let sim = s.sim();
+        let mut out = Vec::with_capacity(sim.vehicles().len() * 4);
+        for v in sim.vehicles() {
+            out.extend(v.vehicle.rim_contact().map(|r| r as u8 as f32));
+        }
+        out
+    })
+}
+
 /// Civilian traffic agents (empty without a city), 5 floats each:
 /// `[x, y, z, yaw, flags]` with flags = bits 1 physical LOD, 2 brake lights, 4 hazard lights,
 /// 8 yielding to a siren, 16 turn signal left, 32 turn signal right, 64 aggressive driver,
