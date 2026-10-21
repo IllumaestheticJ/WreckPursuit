@@ -8,6 +8,12 @@
 //! fixed fraction of full lock, 25–100% by speed: at 80 km/h a held key asked for ~3× the slip
 //! angle the tyres can use, the fronts washed out and the car made only 75–90% of its grip.)
 //! The wheel profile stays 1:1 and unfiltered.
+//!
+//! Highway catch (owner playtest 2026-10-20, "tail happy at speed, snap oversteer when
+//! catching"): from 60 km/h (full at 110), once the body slip angle passes ~3°, a held
+//! countersteer key and released keys both steer to [`highway_catch_angle`], which damps the
+//! yaw instead of driving the front tyres to their peak in the countersteer direction. Below
+//! 60 km/h, and for the wheel / AI profiles, nothing changed (see [`highway_catch`]).
 
 use wp_contracts::AssistProfile;
 
@@ -240,7 +246,10 @@ const SLIDE_FULL: f32 = 0.10;
 /// Speed-sensitive lock while countersteering a slide: when the driver steers toward the side
 /// the rear slides to, the lock opens (blended by how much
 /// the rear slides) to that angle plus the slip-targeted margin, so the slip-limited lock never
-/// stops a countersteer. Grip cornering is untouched.
+/// stops a countersteer. Grip cornering is untouched. At highway speed in a slide
+/// ([`highway_catch`]) the lock blends instead to the [`highway_catch_angle`] (its part on the
+/// key's side; 0 if the catch angle is on the other side, i.e. the car is already swinging
+/// back faster than the countersteer would help).
 fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, lock: f32) -> f32 {
     // Countersteering = steering toward the side the rear axle slides to (a right-hand
     // countersteer for the rear stepping out right). In ordinary cornering the driver steers
@@ -252,7 +261,8 @@ fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, 
     let slide = ((inp.rear_axle_slip.abs() - t.counter_lock_onset_rad)
         / (t.counter_lock_full_rad - t.counter_lock_onset_rad).max(1e-4))
     .clamp(0.0, 1.0);
-    if slide <= 0.0 {
+    let catch = highway_catch(inp, assists);
+    if slide <= 0.0 && catch <= 0.0 {
         return lock;
     }
     let margin = slip_target_lock(
@@ -263,7 +273,69 @@ fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, 
         inp.front_peak_slip,
     );
     let needed = (inp.front_axle_angle.abs() + margin).min(max_steer * inp.ratio_scale);
-    lock + (needed.max(lock) - lock) * slide
+    let save = lock + (needed.max(lock) - lock) * slide;
+    if catch <= 0.0 {
+        return save;
+    }
+    // Highway catch: a full countersteer key asks for the catch angle (its component on the
+    // key's side), not the front axle's travel plus the slip margin.
+    let along = -inp.driver.signum() * highway_catch_angle(inp);
+    let catch_lock = along.clamp(0.0, max_steer * inp.ratio_scale);
+    save + (catch_lock - save) * catch
+}
+
+/// Speeds (km/h) where the highway catch ([`highway_catch`]) starts / is full.
+pub const HIGHWAY_KMH: (f32, f32) = (60.0, 110.0);
+/// Body slip angles (rad) where the highway catch starts / is full: about 3° → 4°. Grip
+/// driving stays below it (a limit corner or a quick keyboard weave at 140 km/h peaks at
+/// 2–3.5°); a slide, and the last part of catching one, is above it. (Rear-axle slip does not
+/// separate the two: a hard weave and the end of a catch both sit at 2–3°.)
+pub const HIGHWAY_SLIDE_RAD: (f32, f32) = (0.05, 0.07);
+/// Yaw-damping gain of [`highway_catch_angle`]. 1 = the wheels along the rear axle's travel;
+/// 2 (shipped) = once more the yaw part on top, so the front tyres run at a slip angle of
+/// about `yaw rate × (a + 2b) / v` against the rotation (a, b = CG to front / rear axle).
+/// With 1 the worst `hs_stability` snap-back is 15°, with 2 it is 13°.
+pub const HIGHWAY_CATCH_DAMP: f32 = 2.0;
+
+/// 0..=1 "how much is this highway speed" from forward speed (m/s): 0 up to
+/// [`HIGHWAY_KMH`]`.0`, 1 from [`HIGHWAY_KMH`]`.1`.
+pub fn highway_amount(speed: f32) -> f32 {
+    let kmh = speed.abs() * 3.6;
+    ((kmh - HIGHWAY_KMH.0) / (HIGHWAY_KMH.1 - HIGHWAY_KMH.0)).clamp(0.0, 1.0)
+}
+
+/// Highway catch angle, rad (+ = left): the centre road-wheel angle the keyboard / gamepad
+/// steering catches a slide with at speed. It is the CG's direction of travel (body slip
+/// angle) minus [`HIGHWAY_CATCH_DAMP`] × the yaw part of the rear axle's travel
+/// (`body_slip − rear_axle_slip` ≈ yaw rate × CG-to-rear / v). The front tyres then push
+/// against the yaw rate whichever way the car rotates: first they stop the slide rotating out,
+/// then they brake the swing back through straight.
+///
+/// Why not the save-the-car lock used below 60 km/h (the front axle's travel plus the
+/// slip-targeted margin, never less than the normal lock): that holds the front tyres at their
+/// peak force in the countersteer direction. At highway speed the yaw rate then reverses long
+/// before the slide angle has come back (a 150 km/h catch went from +0.8 to −1.7 rad/s with the
+/// body still 7° out) and the car snaps into a slide the other way. Steering exactly along the
+/// front axle's travel (no front force) is not enough either: the rear tyres alone swing the
+/// car back like a lightly damped weather vane (the swing is less damped the faster you go).
+pub fn highway_catch_angle(inp: &SteerInput) -> f32 {
+    inp.body_slip - HIGHWAY_CATCH_DAMP * (inp.body_slip - inp.rear_axle_slip)
+}
+
+/// 0..=1 weight of the highway catch for keyboard / gamepad steering (0 for the wheel profile
+/// and with the countersteer slider at 0): [`highway_amount`] × the body-slip ramp
+/// [`HIGHWAY_SLIDE_RAD`]. 0 below 60 km/h, so low-speed drifts, flicks and handbrake turns are
+/// exactly as before.
+pub fn highway_catch(inp: &SteerInput, assists: &AssistProfile) -> f32 {
+    if assists.steer_speed_sensitivity <= 0.0 || assists.countersteer_help <= 0.0 {
+        return 0.0;
+    }
+    let hw = highway_amount(inp.speed);
+    if hw <= 0.0 {
+        return 0.0;
+    }
+    let (b0, b1) = HIGHWAY_SLIDE_RAD;
+    hw * ((inp.body_slip.abs() - b0) / (b1 - b0)).clamp(0.0, 1.0)
 }
 
 /// Where the steering is heading this tick: the centre road-wheel angle the rack moves toward
@@ -288,7 +360,8 @@ pub struct SteerTarget {
 /// faster. In a slide that is exactly the countersteer that cancels the front slip angle. It never acts while the driver steers (the
 /// speed-sensitive lock and rate apply as usual), nor while the handbrake is held or within
 /// [`HANDBRAKE_GRACE_S`] of releasing it, and it adds no yaw torque. With help 0 this is
-/// exactly the plain model.
+/// exactly the plain model. At highway speed in a slide ([`highway_catch`]) released keys go
+/// all the way to the [`highway_catch_angle`] instead, whatever the slider.
 pub fn steer_target(
     _current: f32,
     inp: &SteerInput,
@@ -319,7 +392,13 @@ pub fn steer_target(
         };
     }
     let full = max_steer * inp.ratio_scale;
-    let align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
+    let mut align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
+    let catch = highway_catch(inp, assists);
+    if catch > 0.0 {
+        // Highway catch: released keys go all the way to the catch angle, whatever the slider
+        // (the gamepad's 30 % only half-aligned, so the fronts kept pushing into the slide).
+        align += (highway_catch_angle(inp).clamp(-full, full) - align) * catch;
+    }
     SteerTarget {
         angle: (align - inp.pull * lock).clamp(-max_steer, max_steer),
         rate_boost: 1.0 + inp.tuning.slew_boost * help,
@@ -653,6 +732,71 @@ mod tests {
         assert!(ticks(0.3) < ticks(0.0) && ticks(1.0) < ticks(0.3));
         // 60 %: under 50 ms (3.4 × the rack).
         assert!(ticks(0.6) <= 12, "{}", ticks(0.6));
+    }
+
+    /// A 150 km/h slide as the countersteer starts (from the `hs_stability` trace): rear
+    /// stepped out to the right, body 13° out, the car still rotating left at 0.8 rad/s.
+    fn highway_slide(driver: f32) -> SteerInput {
+        SteerInput {
+            body_slip: -0.23,
+            rear_axle_slip: -0.257,
+            front_axle_angle: -0.205,
+            ..straight(driver, 150.0 / 3.6)
+        }
+    }
+
+    #[test]
+    fn highway_catch_only_in_a_slide_at_speed_with_assisted_steering() {
+        let kb = AssistProfile::keyboard_default();
+        let at = |kmh: f32, body_slip: f32| SteerInput {
+            body_slip,
+            ..straight(1.0, kmh / 3.6)
+        };
+        // Below 60 km/h, in grip (body slip under 3°), for the wheel / AI and with the slider at
+        // 0: off. Full from 110 km/h and 4°.
+        assert_eq!(highway_catch(&at(59.0, 0.3), &kb), 0.0);
+        assert_eq!(highway_catch(&at(150.0, 0.045), &kb), 0.0);
+        assert_eq!(
+            highway_catch(&at(150.0, 0.3), &AssistProfile::wheel_default()),
+            0.0
+        );
+        assert_eq!(highway_catch(&at(150.0, 0.3), &AssistProfile::ai()), 0.0);
+        assert_eq!(highway_catch(&at(150.0, 0.3), &help(0.0)), 0.0);
+        assert_eq!(highway_catch(&at(150.0, -0.3), &kb), 1.0);
+        let gp = AssistProfile::gamepad_default();
+        assert_eq!(highway_catch(&at(110.0, 0.07), &gp), 1.0);
+        let half = highway_catch(&at(85.0, 0.3), &kb);
+        assert!((half - 0.5).abs() < 1e-3, "{half}");
+    }
+
+    #[test]
+    fn highway_countersteer_aims_at_the_catch_angle_not_past_the_travel() {
+        let kb = AssistProfile::keyboard_default();
+        let inp = highway_slide(1.0);
+        let catch = highway_catch_angle(&inp);
+        // Rotating into the slide: the catch angle is past the body slip, short of the
+        // save-the-car lock (front axle travel + the keyboard's slip margin 1.1 × peak).
+        let save = inp.front_axle_angle.abs() + SLIP_MARGIN * inp.front_peak_slip;
+        assert!(
+            catch < inp.body_slip && -catch < save - 0.03,
+            "{catch} {save}"
+        );
+        let t = steer_target(0.0, &inp, &kb, 0.6).angle;
+        assert!((t - catch).abs() < 1e-5, "{t} {catch}");
+        // Released keys: the same angle, also for the gamepad's 30 % slider.
+        let gp = AssistProfile::gamepad_default();
+        let r = steer_target(0.0, &highway_slide(0.0), &gp, 0.6).angle;
+        assert!((r - catch).abs() < 1e-5, "{r} {catch}");
+        // Swinging back fast (body 4.6° out, rear axle nearly in line, 1.5 rad/s toward the
+        // key): the catch angle is on the other side, so a held countersteer key gets no lock.
+        let back = SteerInput {
+            body_slip: -0.08,
+            rear_axle_slip: -0.03,
+            front_axle_angle: -0.13,
+            ..highway_slide(1.0)
+        };
+        assert!(highway_catch_angle(&back) > 0.0);
+        assert_eq!(steer_target(0.0, &back, &kb, 0.6).angle, 0.0);
     }
 
     #[test]
