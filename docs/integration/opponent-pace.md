@@ -651,3 +651,53 @@ Hollins per seed (after): one finisher on seeds 3, 4, 7 (the default seed passes
 genuinely capture all four on seeds 1, 2, 6; on seeds 5 and 8 the last racer is still racing
 (23 m/s, 69 m from the line on seed 8) when the test's 200 s run limit ends it — held up by box-ins
 in the first hairpin earlier, not a deadlock.
+
+## Lane-splitting (2026-10-21)
+
+A racer with no clear side to pass on goes between the target and a car abreast of it
+(`plan_split` in `field.rs`) when all of these hold:
+
+- Skill ≥ 0.75 (`SPLIT_MIN_SKILL`).
+- The gap is at least my car's width + 0.8 m (`SPLIT_ROOM_M`, from `cap.width_m`; 2.6 m for a 1.8 m car).
+- Closing on the slower of the two is ≤ 5 m/s × traffic risk (risk clamped 0.3..1, so 1.5..5 m/s).
+- The split stays in my own lanes for the whole pass.
+- Neither car is drifting toward the gap (> 0.3 m/s).
+- Nothing else is in that slot (ahead, oncoming, standing, or closing from behind).
+
+While splitting:
+
+- The pair gets a fixed 0.25 m clearance (`SPLIT_MARGIN_M`) in the side constraints and the obstacle caps.
+- The aim tracks the middle of the gap.
+- The pass completes only when I am past both cars.
+- I tuck back in while either car is still ahead if it drifts toward the gap or the gap narrows below width + 0.5 m.
+
+Unit test: `skilled_driver_splits_a_wide_gap_closing_gently_and_nobody_else_does`.
+
+Before is 9679494e plus the contact metric; after is this commit. Seeds 1–8, opponent_pace sweep:
+
+| race | skill | run | finishers | mean s | walls | passes/km (field, per seed) | civ contacts | all contacts | splits |
+|---|---|---|---|---|---|---|---|---|---|
+| grid_highway_sprint | 0.5 | before | 32/32 | 43.9 | 0 | 2.14 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | after | 32/32 | 43.9 | 0 | 2.14 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | before | 32/32 | 43.9 | 0 | 3.94 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | after | 32/32 | 43.9 | 0 | 3.94 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.5 | before | 28/32 | 80.3 | 0 | 0.00 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.5 | after | 28/32 | 80.3 | 0 | 0.00 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | before | 30/32 | 75.8 | 0 | 0.19 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | after | 30/32 | 75.8 | 0 | 0.19 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | before | 48/48 | 205.0 | 0 | 0.09 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | after | 48/48 | 205.0 | 0 | 0.09 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | before | 48/48 | 199.8 | 0 | 0.11 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | after | 48/48 | 199.8 | 0 | 0.11 | 0 | 0 | 0 |
+
+**No splits happened on these maps, so nothing moved:** times, passes/km and contacts are
+identical, and civilian contacts did not rise. No re-lock is needed.
+
+Seed-1 trace on grid highway s95, 93 candidate ticks:
+
+- **Closing limit:** every candidate was capped at 1.5 m/s. The skilled drivers there have traffic risk ≤ 0.3.
+- **Gap:** civilians abreast in adjacent lanes leave 2.4–2.55 m, under the 2.58 m needed.
+- **Wide gaps:** the 3.8–4.1 m gaps came with 12–13 m/s closing.
+- **With the full 5 m/s:** 13 ticks (one episode, gap 2.6–2.7 m, closing 2.2–3.2 m/s) would have qualified.
+
+Loosening the risk scaling is a lead decision.
