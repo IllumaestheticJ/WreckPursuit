@@ -1,13 +1,17 @@
 // Owner playtest row 24 ("I sideswiped a cop and a chase didn't start"), noon, 12x12 grid city,
-// no traffic or parked cars. Patrol unit 6 waits at the junction ahead of (-45.2, -53.2), facing
-// west, from about 2 s to 25 s. The racer (no heat) starts parked 55 m behind it in the next
-// lane (the oncoming one: one wrong-way report, 4 heat, stays below L1), cruises at 30 km/h
-// from 1 s and steers slightly right at 8.0 s: a glancing flank swipe at 8.6 s (contacts of
-// 540 + 170 N·s, normal closing 1.4 m/s, 30 km/h relative). wp_police counts it as assaulting
-// an officer: wanted L2 and the pursuit start in the same tick, with the radio line "Unit 6:
-// I've been hit! ...". Before the fix nothing happened at the contact; near-miss and wrong-way
-// reports only made the racer L1 and a pursuit started at 9.2 s, so the 9.0 s bound below
-// separates the two. Re-aim with `examples/probe_police.rs` if police spawning changes.
+// no traffic or parked cars. Patrol unit 6 spawns at (-140.8, -56.8) and drives east along
+// y = -55 at 11-13 m/s. The racer (no heat) starts parked in the westbound lane just west of the
+// junction at x = -55, cruises at 30 km/h from 1 s and steers left (-0.5) at 4.95 s for 0.8 s:
+// a glancing side-to-side swipe with the oncoming cruiser at 5.6 s (about 2,400 N·s, contact
+// normal sideways, normal closing 4.9 m/s; health stays above 0.99). The steer is centred in a
+// window that swipes (4.85-5.05 s at -0.5, 4.85-5.0 s at -0.4; earlier is a head-on crash,
+// later a miss). wp_police counts it as assaulting an officer: wanted L2 and the pursuit start
+// in the contact's tick, with the radio line "Unit 6, I've been hit! ...". The 6.0 s bounds
+// below allow 0.4 s. Re-aimed 2026-10-21: after the highway port (grid viaduct, new lanes)
+// the patrols spawn elsewhere and the old target (unit 6 waiting at the junction east of
+// (-45.2, -53.2) from 2 s to 25 s) no longer exists; at noon no unit waits at a junction for
+// long in the first 30 s, so the swipe is now with a moving, oncoming unit. Re-aim with
+// `examples/probe_police.rs` if police spawning changes.
 (
     name: "police_sideswipe_patrol_day",
     seed: 24,
@@ -22,23 +26,23 @@
         (
             id: "racer",
             car: "debug_sedan",
-            pos: (10.0, -55.6, 0.0),
+            pos: (-62.0, -53.25, 0.0),
             yaw: 1.5708,
             driver: cruise(target_mps: 8.33, from_s: 1.0),
             inputs: [
-                (t_s: 8.0, input: (steer: 0.1)),
-                (t_s: 8.6, input: ()),
+                (t_s: 4.95, input: (steer: -0.5)),
+                (t_s: 5.75, input: ()),
             ],
         ),
     ],
     duration_s: 10.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "racer", t_s: 8.0, min: 7.5, max: 9.0),
+        speed_at(entity: "racer", t_s: 4.5, min: 7.5, max: 9.0),
         event_count(event: "Contact", entity: "racer", min: 1, max: 20),
-        // Wanted-level change and pursuit within 0.5 s of the 8.6 s contact.
-        police_event_before(kind: 2, t_s: 9.0),
-        pursuit_started_before(t_s: 9.0),
+        // Wanted-level change and pursuit within 0.4 s of the 5.6 s contact.
+        police_event_before(kind: 2, t_s: 6.0),
+        pursuit_started_before(t_s: 6.0),
         metric(entity: "racer", name: "final_health", min: 0.8, max: 1.0),
     ],
 )
