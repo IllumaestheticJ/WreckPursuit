@@ -198,6 +198,55 @@ with police off; `expect_pending` holds `finishers` (all), `best_ratio` (≤ tod
 (~2.5 min; ignored in debug). simcli runs them standalone (cars on the grid, pending metrics
 unknown to it); goldens blessed (`[bless]` commit 0cd5995f).
 
+### Re-lock 2026-10-21 (ws/harness, after `lead/city-residential`)
+
+The lock-in went red when `lead/city-residential` (7955480b) met round 12b: 26 checks out of
+range. Its new layout (arterial / highway medians, residential traffic and parked cars, verge
+trees) moves every open-road race. Fixed first, all in `wp_opponent`:
+1. **Cars beyond the ends of an open course** (a grid behind the start line, a flight route that
+   starts at the racer) were clamped onto the end, so they read as level with the racer
+   (`Corridor::unclamped_s` / `project_unclamped`, `Racer::s_rel`; harness.md Runs 9c, 9d).
+2. **Head-on stand-off with a civilian** (Lantern, the junction at (0, −45)). The racing line
+   hugs the centre line, so a civilian coming the other way brushed the racer's lateral margin.
+   The racer stopped for it, the civilian stopped for the racer in its path, and both waited for
+   the rest of the race. A civilian facing the racer that it meets within 1.5 s now enters the
+   side constraints (as cars alongside do): the racer keeps to its side and drives on. Police
+   and racers keep the old rules; a box of standing units at Loop 9 is squeezed past as before.
+3. **Reverse blocked by the racer behind** (Lantern s95, a civilian half-way through a left turn
+   with a racer nose-in to it). The stuck racer's reverse ended at once because the next racer
+   stood right behind it, and that one never backed off. A racer whose reverse is cut short now
+   asks for room (`Obstacle::wants_room`), and a stopped racer right behind it backs off 1.6 s.
+
+Lantern now finishes 4 of 4 at both skills (s50: 1 of 4 before; s95: 2 of 4). Then every
+scenario was re-measured with the same rule (`finishers` all, `best_ratio` ≤ today + 0.05,
+`race_time_s` −15 % … +15 %, +20 % at skill 0.50). Today's time per car (s) and best ratio,
+before → after:
+
+| pace scenario | best ratio | race time per car |
+|---|---|---|
+| city_sprint_s50 | 1.08 → 1.01 | ai_coupe 10 → 9, ai_sedan 12 → 11, ai_coupe_2 12 → 10, ai_sedan_2 14 → 12 |
+| city_sprint_s95 | 1.00 → 1.00 | ai_coupe 10 → 9, ai_sedan 11 → 11, ai_coupe_2 11 → 10, ai_sedan_2 15 → 15 |
+| grid_highway_sprint_s50 | 1.69 → 2.60 | ai_vic 39 → 77, ai_juno 40 → 96, ai_tito 54 → 55, player 48 → 97 |
+| grid_highway_sprint_s95 | 1.68 → 2.83 | ai_vic 38 → 76, ai_juno 40 → 108, ai_tito 49 → 60, player 52 → 106 |
+| hollins_sprint_s50 | 1.18 → 1.15 | ai_mara 66 → 64, ai_vic 70 → 69, ai_juno 104 → 65, player 114 → 69 |
+| hollins_sprint_s95 | 1.08 → 1.07 | ai_mara 60 → 59, ai_vic 63 → 64, ai_juno 67 → 61, player 68 → 64 |
+| lantern_checkpoint_s50 | 1.62 → 1.65 | ai_juno 58 → 70, ai_dez 60 → 59, ai_tito 62 → 71, player 63 → 76 |
+| lantern_checkpoint_s95 | 1.39 → 1.80 | ai_juno 50 → 67, ai_dez 60 → 64, ai_tito 71 → 110, player 61 → 111 |
+| loop9_circuit_s50 | 1.20 → 1.18 | ai_vic 216 → 200, ai_mara 217 → 190, ai_dez 227 → 201, ai_juno 238 → 204, ai_tito 239 → 207, player 225 → 206 |
+| loop9_circuit_s95 | 1.15 → 1.13 | ai_vic 206 → 192, ai_mara 207 → 182, ai_dez 212 → 193, ai_juno 234 → 194, ai_tito 214 → 197, player 221 → 196 |
+
+Why each moved:
+- **grid_highway_sprint**: roughly twice as slow. The medians leave no opposing lanes, and two
+  civilians side by side on both lanes (already reported to D) now hold the field for most of
+  the run. The pace sweep at skill 0.95 books 17–44 s per car to `civ` and up to 30 s to
+  `veh`, against 0.1–0.4 s `track`. Traffic and layout, not the AI's driving (Known gaps).
+- **lantern_checkpoint**: everybody finishes now. s95 `ai_tito` / `player` take about 110 s:
+  a 15 s red, a 10 s wait while racer 2 backs out for a civilian turning across it, and 14 s
+  behind a civilian standing crosswise in the lane at (189, −152) waiting to turn right.
+- **hollins_sprint_s50**: `ai_juno` / `player` were held up when the ranges were recorded
+  (104 / 114 s); they are not now (65 / 69 s).
+- **loop9_circuit, city_sprint**: 1–8 % faster (round-12b physics and traffic).
+
 ## Tests and gate (release unless noted)
 
 - `wp_opponent`: unit, capability table (fingerprints in debug too), `race.rs` full-sim tests,
@@ -213,6 +262,8 @@ unknown to it); goldens blessed (`[bless]` commit 0cd5995f).
 
 ## Known gaps
 
+- Since city-residential the grid highway sprint runs 2.6–2.9 × ideal at the front (civ / veh
+  losses, see Re-lock 2026-10-21); the lock-in holds today's times, not a target.
 - Traffic still dominates open-road race times: two civilians side by side on both lanes of
   the grid highway (≈ 20 s of every grid-sprint run) cannot be passed legally; world stand-offs
   (the Lantern 4-way junction, a responding police unit angled across a Hollins hairpin with no
