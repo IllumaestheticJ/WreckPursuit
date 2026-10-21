@@ -175,6 +175,12 @@ pub struct GripBalance {
     /// tyres B rampart_50's flick reversals come at 10–15° (15+ catches 2 / 9 of its flicks,
     /// 10 catches 7 / 9) and its entry holds either way. 0 = any reversal.
     pub slide_lock_release_from_deg: f32,
+    /// Added to every car's front brake bias (`BrakeDef::bias_front`, clamped to 0..=1).
+    /// 0.05 in the shipped balance (lead, 2026-10-21): with the owner's soft step-14 rear, hard
+    /// braking at speed plus any steer rotated the car (AI −0.009 steer at 60 m/s: 6–12° of
+    /// body slip; a key tap with ABS off: up to 38°); +0.05 holds it to 3–6° / 0.5°, stopping
+    /// distance + 2–5 %. A brake-system change: cornering off the brakes is untouched.
+    pub brake_bias_front_add: f32,
     /// Apply the lab-only per-car fixes ([`car_fix`]): car-data proposals for the car-data
     /// owner, tried in the lab first (lead-approved 2026-10-21).
     pub car_fixes: bool,
@@ -233,6 +239,7 @@ impl Default for GripBalance {
             slide_lock_release_s: 0.0,
             slide_lock_release_on_lift: false,
             slide_lock_release_from_deg: 0.0,
+            brake_bias_front_add: 0.0,
             car_fixes: false,
         }
     }
@@ -296,7 +303,8 @@ impl GripBalance {
     /// × 0.45, rear downforce C·A 0.8, the probe tilt fix; no FWD rear knobs — plus the later
     /// steering-only parts: the held-key slide lock (the countersteer key held past 15° of slip
     /// gets × 0.5 lock; not while the slide grows) and its transition release (only out of a
-    /// slide past 10°). The shipped balance ([`GripBalance::shipped`]).
+    /// slide past 10°); and front brake bias + 0.05 (braking stability at speed, see
+    /// [`GripBalance::brake_bias_front_add`]). The shipped balance ([`GripBalance::shipped`]).
     pub fn owner() -> Self {
         Self {
             lock_mode: LockMode::Smart,
@@ -317,16 +325,18 @@ impl GripBalance {
             slide_lock_to_deg: 40.0,
             slide_lock_release_s: 0.75,
             slide_lock_release_from_deg: 10.0,
+            brake_bias_front_add: 0.05,
             ..Self::default()
         }
     }
 
     /// The owner's 7d6b66c9 balance exactly ([`GripBalance::owner`] without the held-key slide
-    /// lock), the reference the shipped balance is measured against.
+    /// lock and the brake bias change), the reference the shipped balance is measured against.
     pub fn owner_reference() -> Self {
         Self {
             slide_lock: 1.0,
             slide_lock_release_s: 0.0,
+            brake_bias_front_add: 0.0,
             ..Self::owner()
         }
     }

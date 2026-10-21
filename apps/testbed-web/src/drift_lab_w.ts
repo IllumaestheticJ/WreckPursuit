@@ -155,6 +155,7 @@ const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; ste
   fwd_rear_mu: { label: "FWD: rear grip (μ) ×", min: 0.7, max: 1.3, step: 0.01, hint: "front-drive cars only: rear tyres' peak friction (less = rotates on lift-off)" },
   fwd_rear_stiffness: { label: "FWD: rear cornering stiffness ×", min: 0.4, max: 2, step: 0.05, hint: "front-drive cars only: rear lateral curve squeezed along the slip axis (less = bigger rear slip angle)" },
   fwd_rear_arb: { label: "FWD: rear bar ×", min: 0, max: 6, step: 0.1, hint: "front-drive cars only: rear anti-roll bar on top of the rear bar above (more = looser, less roll)" },
+  brake_bias_front_add: { label: "front brake bias +", min: -0.1, max: 0.15, step: 0.01, hint: "added to every car's front brake bias (shipped +0.05: hard braking at speed with the owner's soft rear rotated the car on any steer; +0.05 holds it, stopping distance +2–5 %)" },
 };
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
