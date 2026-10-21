@@ -214,7 +214,8 @@ impl PoliceSystem {
         self.stats.racer_contacts += 1;
         let mode = self.setup.mode;
         let coef = self.cfg.pursuit.unit.contact_health_per_kmps2.get(mode);
-        let cost = self.cfg.pursuit.risk.cost_collision;
+        let cost = self.cfg.pursuit.risk.cost_collision
+            * self.cfg.pursuit.aggression.risk_cost_scale[self.aggression_index(racer)];
         let u = &mut self.units[i];
         u.racer_contact = true;
         u.risk -= cost;

@@ -21,6 +21,14 @@ pub const POLICE_SLOT_RESERVE: usize = 16;
 /// Police RNG stream offset from the master seed.
 const POLICE_SEED_SALT: u64 = 0x0090_11CE;
 
+/// `car_per_level` ids, sorted, without repeats.
+fn car_ids(cfg: &PoliceConfig) -> Vec<String> {
+    let mut ids = cfg.presence.reinforcement.car_per_level.to_vec();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 impl Sim {
     /// Rebuild the police system on the current world's road network (called by
     /// [`Sim::set_world`]). Units drive kinematically until bound to a vehicle.
@@ -34,10 +42,31 @@ impl Sim {
         self.police = PoliceSystem::for_world(PoliceConfig::builtin(), &self.world, setup);
     }
 
-    /// Car model for AI police units (e.g. `sentinel_cruiser`). With a city loaded, every AI
-    /// ground unit from then on gets this vehicle; without one, police stay kinematic.
+    /// Base car model for AI police units (e.g. `sentinel_cruiser`). With a city loaded, every
+    /// AI ground unit from then on gets a vehicle: the model for the current heat (see
+    /// [`Sim::add_police_car_model`]) or else this one. Without any model police stay kinematic.
     pub fn set_police_car(&mut self, car: LoadedCar) {
         self.police_car = Some(car);
+    }
+
+    /// Register a police car model by its id. New AI ground units get the model named by
+    /// `presence.toml`'s `car_per_level` at the highest wanted level among racers
+    /// ([`wp_police::PoliceSystem::unit_car_id`]); unregistered ids fall back to
+    /// [`Sim::set_police_car`]'s base model.
+    pub fn add_police_car_model(&mut self, car: LoadedCar) {
+        self.police_car_models.insert(car.def.id.clone(), car);
+    }
+
+    /// The police car model ids the current police config asks for (`presence.toml`'s
+    /// `car_per_level`, sorted, without repeats); load these and pass them to
+    /// [`Sim::add_police_car_model`].
+    pub fn police_car_ids(&self) -> Vec<String> {
+        car_ids(self.police.config())
+    }
+
+    /// [`Sim::police_car_ids`] for the built-in police config, before a `Sim` exists.
+    pub fn builtin_police_car_ids() -> Vec<String> {
+        car_ids(&PoliceConfig::builtin())
     }
 
     /// Measured limits of the police car model (`wp_vehicle::metrics`, see
@@ -152,7 +181,11 @@ impl Sim {
         let car = if wanted.is_empty() {
             None
         } else {
-            self.police_car.clone()
+            // Higher heat brings stronger models (presence.toml `car_per_level`).
+            self.police_car_models
+                .get(self.police.unit_car_id())
+                .or(self.police_car.as_ref())
+                .cloned()
         };
         if let Some(car) = car {
             for (unit, pos, heading, speed) in wanted {

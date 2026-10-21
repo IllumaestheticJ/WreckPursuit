@@ -71,6 +71,20 @@ disengage_health = { arcade = 0.15, simulation = 0.4 }
 bent_wheel_toe_rad = 0.02
 puncture_pull_over = 0.5
 
+# Per wanted level L1..L5 of the chased racer (no heat uses L1's): higher heat pushes harder.
+# L1 = the base tuning above.
+[aggression]
+# Added to target_speed_margin (L5: 0.25 over the target's speed).
+extra_speed_margin = [0.0, 0.0, 0.05, 0.10, 0.15]
+# x pursuit_cap_mps (L5 day: 50 m/s).
+cap_scale = [1.0, 1.0, 1.1, 1.2, 1.25]
+# x risk costs: units keep taking risks longer before dropping to shadowing.
+risk_cost_scale = [1.0, 1.0, 0.8, 0.6, 0.45]
+# x tactics.pit_max_kmh (L5 Arcade: ~100 km/h).
+pit_speed_scale = [1.0, 1.0, 1.15, 1.3, 1.45]
+# x tactics.pit_cooldown_s.
+pit_cooldown_scale = [1.0, 1.0, 0.8, 0.6, 0.5]
+
 # Obstacle awareness: units follow, wait behind or pass any vehicle in their lane, and spawn
 # clear of other vehicles (wp_police::avoid).
 [avoid]

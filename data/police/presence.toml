@@ -34,6 +34,16 @@ night = 120.0
 [reinforcement]
 # Ground units wanted on one racer per wanted level L1..L5.
 units_per_level = [1, 2, 3, 4, 6]
+# Car model for AI police cars per wanted level L1..L5, by the highest wanted level among racers
+# when the car spawns (no heat uses L1's). Cars keep their model for life. A model the sim was not
+# given falls back to its base police car.
+car_per_level = [
+    "sentinel_cruiser",
+    "sentinel_cruiser",
+    "sentinel_wolfhound",
+    "sentinel_wolfhound",
+    "sentinel_wolfhound_px",
+]
 # High-bounty racers get reinforcements up to this much sooner.
 priority_max_reduction = 0.3
 spawn_min_distance_m = 350.0

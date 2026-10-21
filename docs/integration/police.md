@@ -379,3 +379,17 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+
+## Police cars and aggression by heat (2026-10-21)
+Before: every AI police car was the Sentinel Cruiser (peak 535 Nm, ~276 kW / 370 hp, 2048 kg) at every heat level, and
+pursuit tuning did not depend on heat.
+- `presence.toml` `[reinforcement] car_per_level` picks the model for new AI police cars by the highest wanted level among
+  racers at spawn time (`PoliceSystem::unit_car_id` / `max_wanted_level`): Cruiser L1–L2, Wolfhound L3–L4, new
+  `sentinel_wolfhound_px` (higher-output Wolfhound) at L5. `wp_sim`: `Sim::add_police_car_model`, `Sim::police_car_ids`,
+  `Sim::builtin_police_car_ids`; unregistered ids fall back to `set_police_car`'s base model. Loaded by simcli (and so
+  wasm), `wp_net::testkit::load_data` and `WpSim::with_city`.
+- `pursuit.toml` `[aggression]` scales speed margin, pursuit cap, risk costs, PIT speed and PIT cooldown by the chased
+  racer's level (L1 = old tuning). Matches the cars.md request to raise the cap at L3+.
+- Known gap: the pro driver's `CarLimits` are still one set for all models (`[pro] default_limits` = Cruiser), so
+  Wolfhound / PX units plan with the Cruiser's measured limits.

@@ -309,6 +309,10 @@ pub fn build_sim(
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
+                // Stronger models at higher heat (presence.toml `car_per_level`).
+                for id in sim.police_car_ids() {
+                    sim.add_police_car_model(load_car(data, &id)?);
+                }
             } else {
                 let quiet = Scenario {
                     police_presence: Some(0.0),

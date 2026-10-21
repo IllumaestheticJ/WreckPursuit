@@ -209,6 +209,12 @@ impl WpSim {
         sim.set_world(city.world);
         if let Some(car) = city.police_car {
             sim.set_police_car(car);
+            // Stronger models at higher heat, from the instance's cars when it has them.
+            for id in sim.police_car_ids() {
+                if let Some(model) = cars.get(&id) {
+                    sim.add_police_car_model(model.clone());
+                }
+            }
         }
         if let Some(car) = city.traffic_car {
             sim.set_traffic_car(car);

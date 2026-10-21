@@ -23,6 +23,8 @@ pub use police_link::POLICE_SLOT_RESERVE;
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 
+use std::collections::BTreeMap;
+
 use rapier3d::prelude::QueryFilter;
 use thiserror::Error;
 use wp_contracts::{
@@ -162,6 +164,7 @@ pub struct Sim {
     props: props::Props,
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
+    police_car_models: BTreeMap<String, LoadedCar>,
     police_car_limits: Option<wp_police::pro::CarLimits>,
     traffic_car: Option<LoadedCar>,
     record_contacts: bool,
@@ -198,6 +201,7 @@ impl Sim {
             props: props::Props::default(),
             contact_filter: None,
             police_car: None,
+            police_car_models: BTreeMap::new(),
             police_car_limits: None,
             traffic_car: None,
             record_contacts: false,

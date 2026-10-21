@@ -493,6 +493,16 @@ impl PoliceSystem {
         fallback
     }
 
+    /// Index into `pursuit.toml`'s `[aggression]` tables for a chase of `racer` (its wanted
+    /// level; unknown racers use L1's entry).
+    pub(crate) fn aggression_index(&self, racer: EntityId) -> usize {
+        self.racers
+            .get(&racer)
+            .map(|r| r.level)
+            .unwrap_or_default()
+            .table_index()
+    }
+
     pub(crate) fn plan_units(&mut self, world: &dyn WorldQuery, tdt: f32) {
         let now = self.now;
         let p = self.cfg.pursuit.clone();
@@ -640,7 +650,8 @@ impl PoliceSystem {
                         }
                     }
                     let lim = self.limit_at(self.units[i].body.pos);
-                    let cap = p.pursuit_cap_mps.get(self.phase);
+                    let li = rec.level.table_index();
+                    let cap = p.pursuit_cap_mps.get(self.phase) * p.aggression.cap_scale[li];
                     self.units[i].cmd.speed_mps = (lim * p.respond_speed_factor * 1.15).min(cap);
                 }
                 Assignment::Pursue { .. } => {} // coordinate_pursuits
@@ -719,6 +730,9 @@ impl PoliceSystem {
             let rec = self.racers[&racer].clone();
             let seen = rec.status == PursuitStatus::Pursuit;
             let level = rec.level.number();
+            // Higher heat pushes harder (pursuit.toml [aggression]).
+            let li = rec.level.table_index();
+            let ag = &p.aggression;
             let v_r = if seen {
                 (rec.vel[0] * rec.vel[0] + rec.vel[1] * rec.vel[1]).sqrt()
             } else {
@@ -726,8 +740,8 @@ impl PoliceSystem {
             };
             let cap = pursuit_speed_cap(
                 v_r,
-                p.target_speed_margin,
-                p.pursuit_cap_mps.get(self.phase),
+                p.target_speed_margin + ag.extra_speed_margin[li],
+                p.pursuit_cap_mps.get(self.phase) * ag.cap_scale[li],
             );
             // (gap along track, lateral, unit index)
             let mut pursuers: Vec<(f32, f32, usize)> = Vec::new();
@@ -811,7 +825,7 @@ impl PoliceSystem {
                     && seen
                     && has_budget
                     && level >= unlocks.pit_level
-                    && v_r < t.pit_max_kmh.get(mode) / 3.6
+                    && v_r < t.pit_max_kmh.get(mode) * ag.pit_speed_scale[li] / 3.6
                     && v_r > 3.0
                     && straight_ahead
                     && now >= u.pit_ready
@@ -933,25 +947,30 @@ impl PoliceSystem {
                         mode,
                         hazards,
                     };
-                    let pursuing = matches!(
-                        u.assignment,
-                        Assignment::Pursue { .. } | Assignment::Intercept { .. }
-                    );
+                    let chased = match u.assignment {
+                        Assignment::Pursue { target } | Assignment::Intercept { target, .. } => {
+                            Some(target)
+                        }
+                        _ => None,
+                    };
+                    let risk_scale = chased.map_or(1.0, |r| {
+                        cfg.aggression.risk_cost_scale[self.aggression_index(r)]
+                    });
                     self.update_avoid(i, dt);
                     let rep = step_ground(&mut self.units[i], &env, &cfg, &mut self.rng, dt);
                     self.stats.near_misses += rep.near_miss as u32;
                     self.stats.traffic_collisions += rep.traffic_collision as u32;
                     self.stats.run_wide_crashes += rep.crashed as u32;
                     let u = &mut self.units[i];
-                    if pursuing {
+                    if chased.is_some() {
                         if u.body.lat_g > cfg.risk.lateral_g {
-                            u.risk -= cfg.risk.cost_per_s_lateral * dt;
+                            u.risk -= cfg.risk.cost_per_s_lateral * risk_scale * dt;
                         }
                         if rep.near_miss {
-                            u.risk -= cfg.risk.cost_near_miss;
+                            u.risk -= cfg.risk.cost_near_miss * risk_scale;
                         }
                         if rep.traffic_collision || rep.crashed {
-                            u.risk -= cfg.risk.cost_collision;
+                            u.risk -= cfg.risk.cost_collision * risk_scale;
                         }
                     }
                 }
@@ -982,10 +1001,13 @@ impl PoliceSystem {
                     let before = self.stats.racer_contacts;
                     self.unit_racer_contact(i, e, rel_speed, true);
                     if self.stats.racer_contacts != before {
+                        let cooldown = self.cfg.pursuit.tactics.pit_cooldown_s
+                            * self.cfg.pursuit.aggression.pit_cooldown_scale
+                                [self.aggression_index(e)];
                         let u = &mut self.units[i];
                         u.body.speed = u.body.speed.min((v[0] * v[0] + v[1] * v[1]).sqrt()) * 0.8;
                         if pit {
-                            u.pit_ready = self.now.plus(self.cfg.pursuit.tactics.pit_cooldown_s);
+                            u.pit_ready = self.now.plus(cooldown);
                             let id = u.id;
                             self.stats.pit_attempts += 1;
                             self.pending.push(PoliceEvent::PitAttempt {

@@ -472,6 +472,21 @@ impl PoliceSystem {
         self.racers.get(&racer).map(|r| r.level).unwrap_or_default()
     }
 
+    /// Highest wanted level among all known racers (`None` if nobody is wanted).
+    pub fn max_wanted_level(&self) -> WantedLevel {
+        self.racers
+            .values()
+            .map(|r| r.level)
+            .max()
+            .unwrap_or_default()
+    }
+
+    /// Car model id for a police car spawned now: `presence.toml`'s
+    /// `reinforcement.car_per_level` at [`Self::max_wanted_level`].
+    pub fn unit_car_id(&self) -> &str {
+        &self.cfg.presence.reinforcement.car_per_level[self.max_wanted_level().table_index()]
+    }
+
     /// Full police record of a racer.
     pub fn racer(&self, racer: EntityId) -> Option<&RacerRecord> {
         self.racers.get(&racer)
@@ -1111,5 +1126,32 @@ mod tests {
         p.step(&W, &[r], &ev, wp_contracts::PHYSICS_DT, &mut out);
         assert!(p.racer(EntityId(1)).unwrap().heat > 0.0);
         assert!(p.units().is_empty());
+    }
+
+    #[test]
+    fn unit_car_follows_highest_heat() {
+        let mut p = PoliceSystem::new();
+        assert_eq!(p.unit_car_id(), "sentinel_cruiser");
+        p.set_heat(EntityId(1), 35.0);
+        p.set_heat(EntityId(2), 95.0);
+        assert_eq!(p.max_wanted_level(), WantedLevel::L5);
+        assert_eq!(p.unit_car_id(), "sentinel_wolfhound_px");
+        p.set_heat(EntityId(2), 0.0);
+        assert_eq!(p.max_wanted_level(), WantedLevel::L2);
+        assert_eq!(p.unit_car_id(), "sentinel_cruiser");
+    }
+
+    #[test]
+    fn aggression_rises_with_heat() {
+        let a = &PoliceConfig::builtin().pursuit.aggression;
+        assert!(a.is_valid());
+        for w in 0..4 {
+            assert!(a.extra_speed_margin[w + 1] >= a.extra_speed_margin[w]);
+            assert!(a.cap_scale[w + 1] >= a.cap_scale[w]);
+            assert!(a.risk_cost_scale[w + 1] <= a.risk_cost_scale[w]);
+            assert!(a.pit_speed_scale[w + 1] >= a.pit_speed_scale[w]);
+            assert!(a.pit_cooldown_scale[w + 1] <= a.pit_cooldown_scale[w]);
+        }
+        assert!(a.cap_scale[4] > a.cap_scale[0]);
     }
 }

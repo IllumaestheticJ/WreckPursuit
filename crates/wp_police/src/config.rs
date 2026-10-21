@@ -227,6 +227,11 @@ pub struct ReinforcementConfig {
     pub priority_max_reduction: f32,
     /// Ground units wanted on a racer per wanted level L1..L5.
     pub units_per_level: [u32; 5],
+    /// Car model id (`data/cars/<id>.json`) for AI police cars per wanted level L1..L5, picked
+    /// by the highest wanted level among racers when the car spawns (see
+    /// `PoliceSystem::unit_car_id`; no heat uses L1's entry).
+    #[serde(default = "default_car_per_level")]
+    pub car_per_level: [String; 5],
     /// Reinforcements spawn at least this far from the racer, m.
     pub spawn_min_distance_m: f32,
     /// Delay before a civilian report (unseen violations) gets a unit dispatched, s.
@@ -261,6 +266,11 @@ pub struct ToolUnlocks {
     pub boxin_level: u8,
     /// Rolling block.
     pub rolling_block_level: u8,
+}
+
+/// The Sentinel Cruiser at every wanted level (for presence files without `car_per_level`).
+fn default_car_per_level() -> [String; 5] {
+    std::array::from_fn(|_| "sentinel_cruiser".to_string())
 }
 
 /// Contents of `data/police/presence.toml`.
@@ -376,6 +386,51 @@ pub struct TacticConfig {
     pub puncture_pull_over: f32,
 }
 
+/// How much harder AI units push per wanted level L1..L5 of the racer they chase (no heat uses
+/// L1's entry). Every array is indexed by `WantedLevel::table_index`; L1 = the base tuning.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AggressionConfig {
+    /// Added to `target_speed_margin`: pursuers may go this much more faster than the target.
+    pub extra_speed_margin: [f32; 5],
+    /// Multiplier on `pursuit_cap_mps`.
+    pub cap_scale: [f32; 5],
+    /// Multiplier on every risk-budget cost (lower = units take risks for longer).
+    pub risk_cost_scale: [f32; 5],
+    /// Multiplier on `tactics.pit_max_kmh` (PIT at higher racer speeds).
+    pub pit_speed_scale: [f32; 5],
+    /// Multiplier on `tactics.pit_cooldown_s` (lower = more frequent PIT attempts).
+    pub pit_cooldown_scale: [f32; 5],
+}
+
+impl Default for AggressionConfig {
+    /// The same aggression at every level.
+    fn default() -> Self {
+        Self {
+            extra_speed_margin: [0.0; 5],
+            cap_scale: [1.0; 5],
+            risk_cost_scale: [1.0; 5],
+            pit_speed_scale: [1.0; 5],
+            pit_cooldown_scale: [1.0; 5],
+        }
+    }
+}
+
+impl AggressionConfig {
+    /// All scales positive and finite, margins non-negative.
+    pub fn is_valid(&self) -> bool {
+        let pos = |a: &[f32; 5]| a.iter().all(|v| v.is_finite() && *v > 0.0);
+        pos(&self.cap_scale)
+            && pos(&self.risk_cost_scale)
+            && pos(&self.pit_speed_scale)
+            && pos(&self.pit_cooldown_scale)
+            && self
+                .extra_speed_margin
+                .iter()
+                .all(|v| v.is_finite() && *v >= 0.0)
+    }
+}
+
 /// Contents of `data/police/pursuit.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -408,6 +463,9 @@ pub struct PursuitFile {
     pub tactics: TacticConfig,
     /// Obstacle awareness (following, passing, spawn clearance).
     pub avoid: AvoidConfig,
+    /// Per-wanted-level aggression. Neutral when the table has no `[aggression]` section.
+    #[serde(default)]
+    pub aggression: AggressionConfig,
     /// Pro driving of physical units: racing line, grip-limit speed profile, slide control
     /// ([`crate::pro`]). Defaults when the table has no `[pro]` section.
     #[serde(default)]
@@ -722,6 +780,18 @@ impl PoliceConfig {
         let a = &self.pursuit.avoid;
         if a.decel_mps2 <= 0.0 || a.min_horizon_m <= 0.0 || a.max_horizon_m < a.min_horizon_m {
             return bad("pursuit.avoid: decel and horizons must be positive and ordered");
+        }
+        if self
+            .presence
+            .reinforcement
+            .car_per_level
+            .iter()
+            .any(|id| id.is_empty())
+        {
+            return bad("reinforcement.car_per_level ids must not be empty");
+        }
+        if !self.pursuit.aggression.is_valid() {
+            return bad("pursuit.aggression: scales must be > 0 and extra_speed_margin >= 0");
         }
         let t = &self.heat.heat.level_thresholds;
         if t.windows(2).any(|w| w[0] >= w[1]) || t[0] <= 0.0 || t[4] > self.heat.heat.max_heat {

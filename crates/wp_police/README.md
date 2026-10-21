@@ -54,6 +54,10 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 - **Reinforcements**: each pursued racer wants `units_per_level[level]` ground units. A deficit
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
   an idle unit within 700 m is committed, or a new unit spawns ≥ `spawn_min_distance_m` away, out of sight.
+- **Unit cars by heat**: `car_per_level[level]` names the car model of new AI police cars, using the
+  highest wanted level among racers when the car spawns (`PoliceSystem::unit_car_id`; `wp_sim`
+  spawns it, falling back to its base police car for models it was not given). Built-in: Cruiser at
+  L1–L2, Wolfhound at L3–L4, Wolfhound PX (higher-output Wolfhound) at L5. Cars keep their model for life.
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
   It is kinematic, gives line of sight to every unit, and is **not** a weapon.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
@@ -67,6 +71,10 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
 ### Pursuit (`pursuit.rs`, `unit.rs`)
 - Pursuers follow the racer's **breadcrumb trail**, which is recorded only while the racer is
   seen, extended by its predicted path. Losing sight means losing the scent.
+- **Aggression by heat** (`[aggression]`, indexed by the chased racer's level L1..L5; L1 = base): pursuit
+  speed margin `+extra_speed_margin` (L5 +0.15), `pursuit_cap_mps × cap_scale` (L5 ×1.25), risk costs
+  `× risk_cost_scale` (L5 ×0.45), `pit_max_kmh × pit_speed_scale` (L5 ×1.45), `pit_cooldown_s ×
+  pit_cooldown_scale` (L5 ×0.5).
 - Speed = `min(max(target × (1 + target_speed_margin), 10), pursuit_cap_mps[phase])`. Corners are
   planned at `pursuit_cornering_g`, or `shadow_cornering_g` once the budget is spent.
 - **Risk budget**: time above `risk.lateral_g`, near misses and collisions cost budget. A unit
