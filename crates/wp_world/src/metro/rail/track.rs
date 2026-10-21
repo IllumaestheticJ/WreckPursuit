@@ -275,17 +275,27 @@ fn sagitta(line: &[V3], i: usize, j: usize) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// A solid buffer stop at `p` facing along `dir` (z = formation).
-pub fn buffer_stop(out: &mut Output, p: V3, dir: V2) {
-    out.add(box_on(
-        FeatureKind::RailFurniture,
-        Material::Red,
-        [p[0], p[1]],
-        p[2],
-        [3.0, 1.2, 1.4],
-        geom::yaw_of(dir),
-        true,
-    ));
+/// A solid buffer stop at `p` facing along `dir` (z = formation), moved back along the
+/// track (up to 20 m) when `p` is on road paving; none if it cannot be.
+pub fn buffer_stop(out: &mut Output, paving: &Paving, p: V3, dir: V2) {
+    // Step back along the track off any paving the line ends at (a quay road, a street).
+    for back in 0..=20 {
+        let c = geo::along([p[0], p[1]], dir, -(back as f32));
+        let fp = obb(c, [1.5, 0.6], geom::yaw_of(dir));
+        if paving.hits(&fp, 0.3, p[2] - 1.0, p[2] + 2.0) {
+            continue;
+        }
+        out.add(box_on(
+            FeatureKind::RailFurniture,
+            Material::Red,
+            c,
+            p[2],
+            [3.0, 1.2, 1.4],
+            geom::yaw_of(dir),
+            true,
+        ));
+        return;
+    }
 }
 
 /// Zone and road test for corridor fences: built-up where a street is within 40 m or the
@@ -452,11 +462,11 @@ pub fn build_lines(
                 if !at_edge && !in_yard {
                     let d =
                         geom::normalize(geom::sub(geom::xy(line[last]), geom::xy(line[last - 1])));
-                    buffer_stop(out, line[last], d);
+                    buffer_stop(out, paving, line[last], d);
                 }
             } else if last < n - 1 && a.support[last] != Support::StationDeck {
                 let d = geom::normalize(geom::sub(geom::xy(line[last]), geom::xy(line[last - 1])));
-                buffer_stop(out, line[last], d);
+                buffer_stop(out, paving, line[last], d);
             }
             if a.support[0] != Support::StationDeck {
                 let first_in_yard = ctx
@@ -468,7 +478,7 @@ pub fn build_lines(
                 });
                 if !first_in_yard && !on_other {
                     let d = geom::normalize(geom::sub(geom::xy(line[0]), geom::xy(line[1])));
-                    buffer_stop(out, line[0], d);
+                    buffer_stop(out, paving, line[0], d);
                 }
             }
         }

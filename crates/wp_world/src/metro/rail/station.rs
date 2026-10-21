@@ -148,7 +148,7 @@ pub fn build_station(
             let mut line = sample(start, fan);
             line.extend(sample(fan, end).into_iter().skip(1));
             lay_track(out, &line, &vec![true; line.len()]);
-            buffer_stop(out, end, dir);
+            buffer_stop(out, paving, end, dir);
             if *busy {
                 let train = [
                     CarKind::PowerCar,

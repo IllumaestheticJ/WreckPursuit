@@ -24,6 +24,8 @@ pub struct PaveQuad {
     pub centre: Option<(V3, V3)>,
     /// Half paved width, m.
     pub half_w: f32,
+    /// Part of a highway carriageway.
+    pub highway: bool,
 }
 
 /// Spatial index of the paving of `ctx.roads.built`.
@@ -52,6 +54,7 @@ impl Paving {
                     z_hi,
                     centre: Some((s.centre[k], s.centre[k + 1])),
                     half_w,
+                    highway: s.highway,
                 });
             }
         }
@@ -70,6 +73,7 @@ impl Paving {
                 z_hi: n.pos[2] + 0.5,
                 centre: None,
                 half_w: r,
+                highway: false,
             });
         }
         let nx = ((MAP_HI[0] - MAP_LO[0]) / BUCKET_M).ceil() as usize + 1;
@@ -123,6 +127,18 @@ impl Paving {
         self.near(poly, margin).into_iter().any(|qi| {
             let q = &self.quads[qi as usize];
             q.z_lo - 0.5 <= z1
+                && q.z_hi + CLEARANCE_M >= z0
+                && convex_overlap(poly, &q.poly, margin)
+        })
+    }
+
+    /// True when convex `poly` grown by `margin` overlaps highway paving in the height band
+    /// `[z0, z1]` (see [`Paving::hits`]).
+    pub fn hits_highway(&self, poly: &[V2], margin: f32, z0: f32, z1: f32) -> bool {
+        self.near(poly, margin).into_iter().any(|qi| {
+            let q = &self.quads[qi as usize];
+            q.highway
+                && q.z_lo - 0.5 <= z1
                 && q.z_hi + CLEARANCE_M >= z0
                 && convex_overlap(poly, &q.poly, margin)
         })
