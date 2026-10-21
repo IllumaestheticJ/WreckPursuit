@@ -291,7 +291,7 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
             .filter(|v| v.kind == VehicleKind::Police)
             .map(|v| v.id)
             .collect();
-        judge.set_police(&police_ids);
+        judge.add_police(&police_ids);
         let samples: Vec<RacerSample> = sim
             .vehicles()
             .iter()

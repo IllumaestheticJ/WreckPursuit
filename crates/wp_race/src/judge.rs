@@ -247,6 +247,18 @@ impl RaceJudge {
         self.police.sort();
     }
 
+    /// Add entities to the police set, keeping every earlier one (a live race calls this every
+    /// tick). `wp_sim` despawns a retired unit at the end of the tick its last contact
+    /// happened in, so a per-tick list would miss it; entity ids are never reused, so a
+    /// police id stays police for the whole race.
+    pub fn add_police(&mut self, police: &[EntityId]) {
+        for p in police {
+            if let Err(i) = self.police.binary_search(p) {
+                self.police.insert(i, *p);
+            }
+        }
+    }
+
     /// Enter a racer. Grid slots are assigned in entry order (slot 0 = pole); the server
     /// decides entry order (e.g. by qualifying, rep or lobby join order).
     pub fn enter(&mut self, entry: RacerEntry) -> Result<GridSlot, EntryDenied> {
