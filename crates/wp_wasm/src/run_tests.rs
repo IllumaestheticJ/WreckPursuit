@@ -14,9 +14,11 @@ use crate::session::Session;
 
 const PLAYER: EntityId = EntityId(1);
 
+/// Parked: handbrake only. The foot brake at a standstill engages auto-reverse, which backs
+/// the "parked" racer away (or into the police car), so the tests hold the handbrake.
 fn brake() -> VehicleInput {
     VehicleInput {
-        brake: 1.0,
+        handbrake: 1.0,
         ..Default::default()
     }
 }
@@ -72,9 +74,7 @@ fn capture_bills_holds_the_car_and_repair_continue_restores_it() {
     let r = wait_for_report(&mut s, 60);
     assert_eq!(r.outcome, RunOutcome::Captured, "{r:?}");
     assert!(r.run_over);
-    // Started at L2. Full brake at a standstill engages auto-reverse, so the "parked" racer
-    // backs into the police car at about 27 km/h; since playtest row 24 that is assaulting an
-    // officer (+20 heat, L3).
+    // Started at L2; the racer holds the handbrake and waits for the units to box it in.
     assert!(r.level >= WantedLevel::L2, "{:?}", r.level);
     assert_eq!(r.mode, DamageMode::Arcade);
     // Fine (L2, Arcade-scaled) and impound; repair quoted, not paid.
