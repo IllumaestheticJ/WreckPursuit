@@ -134,8 +134,26 @@ export interface SamplePack {
   cues: Record<string, CueDef>;
 }
 
+/**
+ * Master stage gain staging (`audio_config.json` → `master`, wp_audio `MasterMix`): fixed
+ * per-bus headroom trims, the master compressor (a peak catcher; its automatic make-up gain is
+ * compensated, see `compressorMakeupGain`), a final trim and the safety soft clip.
+ */
+export interface MasterMix {
+  /** Fixed gain of each bus where it enters the master stage, dB (after the user slider). */
+  bus_gain_db: Partial<Record<Bus, number>>;
+  /** DynamicsCompressorNode settings. */
+  compressor: { threshold_db: number; knee_db: number; ratio: number; attack_s: number; release_s: number };
+  /** Gain after the compressor (its make-up gain already divided out), dB. */
+  trim_db: number;
+  /** Soft clip: linear below this level (full scale = 1). */
+  clip_knee: number;
+  /** Soft clip: output level the tanh knee approaches (never exceeded). */
+  clip_ceiling: number;
+}
+
 export interface AudioLibrary {
-  config: { max_voices: number; bus_max_voices: Partial<Record<Bus, number>> };
+  config: { max_voices: number; bus_max_voices: Partial<Record<Bus, number>>; master?: MasterMix };
   packs: Record<string, SamplePack>;
 }
 

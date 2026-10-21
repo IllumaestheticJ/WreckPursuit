@@ -23,46 +23,48 @@ def save(p):
 # ambience. Measured with `node apps/testbed-web/e2e/audio_roster.mjs --verbose` (engine RMS
 # over the idle -> 90 % redline sweep, player role, recorded vs procedural) and set so the
 # recorded engine sits ~1 dB under the procedural one.
-LEVEL_DB = {"engine_rec_i4": 15.8, "engine_rec_turbo": 15.8, "engine_rec_i6": 11.7, "engine_rec_v6": 13.0, "engine_rec_v8": 9.1}
+LEVEL_DB = {"engine_rec_i4": 15.8, "engine_rec_turbo": 15.8, "engine_rec_i6": 15.8, "engine_rec_v6": 15.8, "engine_rec_v8": 15.8}
 # Recorded horn loops vs the procedural horn (measured as LEVEL_DB, e2e/audio_roster.mjs horn checks).
 HORN_GAIN = round(10 ** (7.0 / 20), 3)  # +7 dB
 def level(id_, gain): return round(gain * 10 ** (LEVEL_DB.get(id_, 0.0) / 20), 3)
 
-def engine(id_, proc, files_pack, layers, desc, whistle_gain=None):
+# Measured firing frequency of each engine loop at playback rate 1 (Hz): the strongest partial of
+# the loop's spectrum, confirmed by its autocorrelation (method: docs/integration/audio.md,
+# "engine sounds are bad"). Layers are anchored with {"FiringHz": f}: the director plays each loop
+# at rpm / root with root = the rpm at which the car fires at f, so the pitch follows the car's
+# firing frequency for any cylinder count. (Before: RedlineFrac / Idle roots, which put the six
+# and V8 loops 15-47 semitones under the car's firing frequency.)
+FIRING_HZ = {"engine_rec_i4/idle.ogg": 44.2, "engine_rec_i4/mid_on.ogg": 87.2, "engine_rec_i4/mid_off.ogg": 87.2,
+             "engine_rec_i4/high_on.ogg": 165.6, "engine_rec_i4/high_off.ogg": 165.6, "engine_rec_v6/idle.ogg": 42.8}
+
+def engine(id_, proc, layers, desc, whistle_gain=None):
+    """layers: (cue, file under packs/, throttle, gain)."""
     p = copy.deepcopy(P(proc))
     p.update(id=id_, description=desc, fallback=proc)
-    keep = {k: v for k, v in p["cues"].items() if not k.startswith("engine/") or k == "engine/limiter"}
-    cues = dict(keep)
+    cues = {k: v for k, v in p["cues"].items() if not k.startswith("engine/") or k == "engine/limiter"}
     p["engine_layers"] = []
-    for cue, anchor, thr, gain in layers:
-        name = cue.split("/")[1]
-        cues[cue] = samples(files_pack, name + ".ogg", id_, True, level(id_, gain))
-        p["engine_layers"].append({"cue": cue, "anchor": anchor, "throttle": thr})
+    for cue, f, thr, gain in layers:
+        pack, name = f.split("/")
+        cues[cue] = samples(pack, name, id_, True, level(id_, gain))
+        p["engine_layers"].append({"cue": cue, "anchor": {"FiringHz": FIRING_HZ[f]}, "throttle": thr})
     cues["turbo/blowoff"] = samples("engine_rec_turbo", "blowoff_", id_, False, 0.8)
     if whistle_gain: cues["turbo/whistle"]["gain"] = whistle_gain
     p["cues"] = dict(sorted(cues.items()))
     save(p)
 
-frac = lambda f: {"RedlineFrac": f}
-i4_layers = [("engine/idle", "Idle", "Both", 1.0), ("engine/mid_on", {"Rpm": 2600.0}, "On", 1.0),
-             ("engine/high_on", {"Rpm": 4900.0}, "On", 1.0), ("engine/low_off", {"Rpm": 2600.0}, "Off", 0.8),
-             ("engine/high_off", {"Rpm": 4900.0}, "Off", 0.8)]
-# the I4 files are named mid_off/high_off on disk? (see build_packs.py: mid_off.ogg) -> map low_off to mid_off file
-def i4(id_, desc, wg=None):
-    p = copy.deepcopy(P("engine_proc_i4"))
-    engine(id_, "engine_proc_i4", "engine_rec_i4", [l for l in i4_layers if l[0] != "engine/low_off"], desc, wg)
-    q = json.load(open(os.path.join(A, "packs", id_ + ".json")))
-    q["cues"]["engine/low_off"] = samples("engine_rec_i4", "mid_off.ogg", id_, True, level(id_, 0.8))
-    q["engine_layers"].insert(3, {"cue": "engine/low_off", "anchor": {"Rpm": 2600.0}, "throttle": "Off"})
-    q["cues"] = dict(sorted(q["cues"].items()))
-    save(q)
-i4("engine_rec_i4", "Recorded inline-4: idle and 4,900 rpm loops (GGBotNet, CC0) and a 2,600 rpm loop (qubodup, CC-BY 3.0); off-throttle layers are low-passed copies. Anchors from the measured firing frequency (rpm = f × 30).")
-i4("engine_rec_turbo", "Recorded turbo inline-4: the engine_rec_i4 loops, a louder turbo whistle (procedural, no recording found) and recorded blow-off hisses (bart, CC0).", 1.5)
-std = [("engine/idle", "Idle", "Both", 1.0), ("engine/low_on", frac(0.3), "On", 1.0), ("engine/mid_on", frac(0.55), "On", 1.0),
-       ("engine/high_on", frac(0.85), "On", 1.0), ("engine/low_off", frac(0.35), "Off", 0.8), ("engine/high_off", frac(0.78), "Off", 0.8)]
-engine("engine_rec_v6", "engine_proc_v6", "engine_rec_v6", std, "Recorded six: loops cut from a public-domain car recording (domasx2, CC0) at four pitches; off-throttle layers are low-passed copies.")
-engine("engine_rec_i6", "engine_proc_i6", "engine_rec_v6", std, "Recorded inline-6: shares the engine_rec_v6 loops (smooth six-cylinder character); falls back to engine_proc_i6.")
-engine("engine_rec_v8", "engine_proc_v8", "engine_rec_v8", std, "Recorded V8 / heavy: deep engine loop at four speeds (Nayckron, CC-BY 3.0); off-throttle layers are low-passed copies.")
+# Every pack: idle, a ~2,600 and a ~5,000 rpm (inline-4 firing) loop on and off throttle. The six and
+# V8 packs take the six-cylinder idle loop (42.8 Hz: ~860 rpm on a six, ~640 on a V8) and the
+# inline-4 loops above it; the old six (one car at 1,300-2,300 rpm) and V8 (a tank engine firing at
+# 16-26 Hz) loops could not reach a road car's rev range without 3-13x pitch shifts.
+I4 = [("engine/idle", "engine_rec_i4/idle.ogg", "Both", 1.0), ("engine/mid_on", "engine_rec_i4/mid_on.ogg", "On", 1.0),
+      ("engine/high_on", "engine_rec_i4/high_on.ogg", "On", 1.0), ("engine/low_off", "engine_rec_i4/mid_off.ogg", "Off", 0.8),
+      ("engine/high_off", "engine_rec_i4/high_off.ogg", "Off", 0.8)]
+MULTI = [("engine/idle", "engine_rec_v6/idle.ogg", "Both", 1.0)] + I4[1:]
+engine("engine_rec_i4", "engine_proc_i4", I4, "Recorded inline-4: idle and ~5,000 rpm loops (GGBotNet, CC0) and a ~2,600 rpm loop (qubodup, CC-BY 3.0); off-throttle layers are low-passed copies. Anchored at each loop's measured firing frequency.")
+engine("engine_rec_turbo", "engine_proc_i4", I4, "Recorded turbo inline-4: the engine_rec_i4 loops, a louder turbo whistle (procedural, no recording found) and recorded blow-off hisses (bart, CC0).", 1.5)
+engine("engine_rec_v6", "engine_proc_v6", MULTI, "Recorded six: a six-cylinder idle loop (domasx2, CC0) and the engine_rec_i4 loops above it, each anchored at its measured firing frequency (the pitch follows the six's firing frequency).")
+engine("engine_rec_i6", "engine_proc_i6", MULTI, "Recorded inline-6: the engine_rec_v6 layers (six-cylinder idle loop + inline-4 loops at the six's firing frequency); falls back to engine_proc_i6.")
+engine("engine_rec_v8", "engine_proc_v8", MULTI, "Recorded V8: the six-cylinder idle loop (domasx2, CC0) and the engine_rec_i4 loops, anchored at their measured firing frequency (the pitch follows the V8's firing frequency; high rpm plays the top loop up to ~3x).")
 
 # world
 w = copy.deepcopy(P("world_proc"))

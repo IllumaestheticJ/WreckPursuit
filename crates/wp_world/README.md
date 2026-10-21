@@ -326,6 +326,25 @@ safe; debris-forced changes go at once. The car slides over at 1.3 m/s and keeps
 old lane until clear. Lane choice before turns is implicit: an agent picks its turn from the
 lane it is in. `TrafficStats::{lane_changes, lane_changes_left}`.
 
+**Turn signals** (`AgentView::turn_signal`, -1 left / 1 right; owner playtest 2026-10-21).
+View-only: computed in `Traffic::views` from the agent state plus two step-counted fields
+updated after the move (`turn_latch`, `lc_signal`), never read by the driving logic and not in
+the state hash (the traffic hash is unchanged by them).
+- Junction turns (Left / Right / UTurn = left): on from `turn_signal_lead_m(v)` = clamp(v × 3 s,
+  30 m, 50 m) before the lane end (≈ 3 s; latched so slowing into a queue does not switch it
+  off), **on through the connector**, off on the exit lane. Straight on: off.
+- Lane changes: on while pending (≥ `LANE_CHANGE_SIGNAL_S` = 0.5 s before the move; 1.5 s was
+  tried and cut lane changes by a third in `traffic_bench`, so the timing is unchanged) and
+  during the whole lateral move until within `LANE_CHANGE_SIGNAL_OFF_M` (0.3 m) of the new lane
+  centre, about 3 s in all.
+- Siren yield: towards the kerb while pulling over / waiting, away from it while merging back,
+  off after. Manoeuvres: pass out left / back right, turn-around left, reverse hazards.
+- Hazards: disabled (indicator suppressed) and emergency braking.
+Tests: `traffic::signal_tests` (onset 30–50 m and off at 80 m, held in the connector, off on the
+exit lane, lane change pending ≥ 0.5 s + move), `tests/siren.rs`
+`pulling_over_and_merging_back_are_indicated`. `traffic_bench` (400 agents, 2 min): avg 0.228 →
+0.238 ms/frame with diagnostics on, identical hash.
+
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
 speed (head-on or crossing); siren units → see **Yielding to sirens** below; debris ahead (`Hazard`,

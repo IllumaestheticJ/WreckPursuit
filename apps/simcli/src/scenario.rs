@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{AssistProfile, DamageMode, VehicleInput, PHYSICS_DT};
+use wp_sim::CarTune;
 
 use crate::RunError;
 
@@ -66,6 +67,11 @@ pub struct Scenario {
     /// Static boxes (barriers, walls) added before the first tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub barriers: Vec<Barrier>,
+    /// Parked cars placed before the first tick (`Sim::add_parked_car`), on top of any the
+    /// city parks along its kerbs. They dent like the city's parked cars (`wp_sim` parked-car
+    /// damage, the traffic car's lattice) and work on the flat world too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parked: Vec<ParkedSpec>,
     /// Police captain orders issued at set times (`Sim::captain_command`), e.g. a roadblock
     /// ahead of a pursued racer. `wp_police` validates them (pursuit, unlock level, cooldown,
     /// site; `roadblock`/`spikes` need a city with police), or placed at an exact spot
@@ -259,6 +265,17 @@ pub struct Barrier {
     pub yaw: f32,
 }
 
+/// A parked car (`Sim::add_parked_car`): standing on the ground at `pos`, facing `yaw`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParkedSpec {
+    /// Ground point under the car's centre, world m (on a city with terrain only x, y count).
+    pub pos: [f32; 3],
+    /// Heading, rad about +Z (0 = facing +Y).
+    #[serde(default)]
+    pub yaw: f32,
+}
+
 /// A police captain order at time `t_s`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -385,6 +402,17 @@ pub struct EntitySpec {
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
+    /// The player steering aids (the shipped plain keyboard steering, `wp_sim::Sim::
+    /// set_player_steering`): `None` (default) = on only for a live-driven entity (`Scripted`
+    /// driver, no input keyframes: the testbed's player); harness drivers (cruise, route,
+    /// AI) and keyframe scripts feed analog inputs and get the normal steering model.
+    /// `Some(true)` tests the player steering with scripted keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_steering: Option<bool>,
+    /// The free per-car tune (`wp_vehicle::tune`; default stock). RON:
+    /// `tune: (suspension: 5, gearing: 5, diff: 4, brake_balance: 2)`; missing sliders are stock.
+    #[serde(default, skip_serializing_if = "CarTune::is_stock")]
+    pub tune: CarTune,
     /// Who drives. Input keyframes always apply on top of `scripted`; other drivers ignore them.
     #[serde(default)]
     pub driver: Driver,
@@ -824,6 +852,24 @@ mod tests {
         assert_eq!(sc.ticks(), 240);
         assert_eq!(sc.sample_every(), 4);
         assert_eq!(sc.entities[0].driver, Driver::Scripted);
+    }
+
+    #[test]
+    fn tune_field_parses_defaults_and_round_trips() {
+        let sc = Scenario::from_ron("t", MINIMAL).unwrap();
+        assert!(sc.entities[0].tune.is_stock());
+        assert!(!sc.to_ron().contains("tune"), "stock tune → field omitted");
+        let tuned = MINIMAL.replace(
+            r#"car: "debug_sedan","#,
+            r#"car: "debug_sedan", tune: (suspension: 5, diff: 1),"#,
+        );
+        let sc = Scenario::from_ron("t", &tuned).unwrap();
+        let t = sc.entities[0].tune;
+        assert_eq!(
+            (t.suspension, t.gearing, t.diff, t.brake_balance),
+            (5, 3, 1, 3)
+        );
+        assert_eq!(Scenario::from_ron("t", &sc.to_ron()).unwrap(), sc);
     }
 
     #[test]

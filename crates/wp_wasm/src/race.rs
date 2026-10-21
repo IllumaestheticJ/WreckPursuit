@@ -326,6 +326,12 @@ impl RaceRun {
             sim.set_vehicle_kind(e.entity, VehicleKind::AiRacer)
                 .map_err(|e| e.to_string())?;
         }
+        // Autopilot: the AI drives the player's car, so no player steering aids on it (the AI
+        // steers with the normal model, like the field).
+        if autopilot {
+            sim.set_player_steering(player.entity, Some(false))
+                .map_err(|e| e.to_string())?;
+        }
         let abs_s = (def.time_of_day_h * 3600.0) as u64;
         let live = LiveRace::new(
             def,
@@ -396,6 +402,11 @@ impl RaceRun {
     /// The live race (judge, standings, course).
     pub fn live(&self) -> &LiveRace {
         &self.live
+    }
+
+    /// The player's throttle while held on the grid (revs on the line during the countdown).
+    pub fn set_grid_throttle(&mut self, throttle: f32) {
+        self.live.set_grid_throttle(throttle);
     }
 
     /// Inputs for this tick (AI cars, the player's grid hold), before `Sim::step_fixed`.

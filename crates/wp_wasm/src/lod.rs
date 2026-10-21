@@ -225,12 +225,17 @@ pub struct SessionModels {
     pub traffic: Option<String>,
     /// Model of police cars, when the session has police cars.
     pub police: Option<String>,
+    /// Model parked cars are drawn as and dent with (`Sim::set_parked_car`), when the session
+    /// has parked cars (city kerbs or the scenario's `parked`).
+    pub parked: Option<String>,
 }
 
 /// [`SessionModels`] of a scenario (`has_city`: the session loaded a city).
 pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModels {
     let traffic = (has_city && sc.traffic_cars).then(|| simcli::run::TRAFFIC_CAR.to_string());
     let police = (has_city && sc.police_cars).then(|| simcli::run::POLICE_CAR.to_string());
+    let parked = ((has_city && sc.parked_cars) || !sc.parked.is_empty())
+        .then(|| simcli::run::PARKED_CAR.to_string());
     let mut cars: Vec<String> = Vec::new();
     for id in sc
         .entities
@@ -238,6 +243,7 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
         .map(|e| &e.car)
         .chain(traffic.iter())
         .chain(police.iter())
+        .chain(parked.iter())
     {
         if !cars.contains(id) {
             cars.push(id.clone());
@@ -247,6 +253,7 @@ pub fn session_car_models(sc: &simcli::Scenario, has_city: bool) -> SessionModel
         cars,
         traffic,
         police,
+        parked,
     }
 }
 

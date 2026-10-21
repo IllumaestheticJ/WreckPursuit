@@ -18,11 +18,17 @@
 //     Switching a chunk's tier only toggles visibility: both instance sets are always current.
 // Cones are one InstancedMesh of small orange cones. A moved prop rewrites only its own
 // instances. Coordinates: sim space (+Z up), parented under SceneView.world.
+//
+// Dented parked cars (owner playtest 2026-10-21, `parked_wrecks()`): a parked car hit hard
+// enough gets a damage lattice in the sim. From then on it is drawn like a driven car — its own
+// per-panel mesh (render/panels.ts `PanelBody`) skinned from its lattice nodes, broken glass
+// hidden — at its prop pose, and its instance is hidden. Only the few hit cars pay for this;
+// their nodes are re-read only while the lattice is awake.
 import * as THREE from "three";
-import { P, PROP_KIND, PROP_MOVED_STRIDE, PROP_STRIDE } from "../wasm/layout";
+import { P, PROP_KIND, PROP_MOVED_STRIDE, PROP_STRIDE, WK, WRECK_STRIDE } from "../wasm/layout";
 import type { CarModelInfo, SessionModels } from "../wasm/sim";
 import { sim } from "../wasm/sim";
-import { carMeshNow, loadCarMesh } from "./panels";
+import { PanelBody, carMeshNow, loadCarMesh } from "./panels";
 import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, styledPaint, type FleetMaterials } from "./fleet";
 import { PALETTE } from "./palette";
 import { artStyle } from "./style";
@@ -45,6 +51,31 @@ const CONE_RGB = 0xff6a14;
 const CONE_GLOW = 0x2a0e00;
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+
+/** A dented parked car drawn by its own panel mesh. */
+interface Wreck {
+  prop: number;
+  entity: number;
+  /** Prop body frame (box centre, prop pose). */
+  root: THREE.Group;
+  /** Car chassis frame inside it (body = chassis ⊙ scale + origin). */
+  chassis: THREE.Group;
+  body: PanelBody;
+  /** Region names by index (vehicle_info().regions), for shattered glass. */
+  regions: string[];
+  /** Lattice nodes of the last re-skin (null: not skinned yet). */
+  nodes: Float32Array | null;
+  /** Shattered glass regions already hidden. */
+  shattered: number;
+  /** Panel mesh loaded: the instance is hidden and this draws the car. */
+  ready: boolean;
+}
+
+function sameFloats(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
 
 /** Livery of parked car `i` (stable per prop, spread over the traffic palette). */
 export const parkedPaint = (i: number) => TRAFFIC_PALETTE[Math.imul(i + 1, 2654435761) >>> 29];
@@ -140,6 +171,11 @@ export interface PropStats {
   /** Cost of `update()`: mean over frames and the worst frame (a re-pick), ms. */
   updateMeanMs: number;
   updateMaxMs: number;
+  /** Dented parked cars, and how many of them are drawn by their own panel mesh. */
+  wrecks: number;
+  wrecksDrawn: number;
+  /** Lattice re-skins of dented parked cars since the session started. */
+  wreckReskins: number;
 }
 
 export class PropView {
@@ -198,6 +234,14 @@ export class PropView {
   private pickWant = new Uint8Array(0);
   private readonly byPickDist = (a: number, b: number) => this.pickDist[a] - this.pickDist[b];
 
+  /** Dented parked cars by prop index, and a per-prop flag (instance hidden once drawn). */
+  private readonly wrecks = new Map<number, Wreck>();
+  private wrecked = new Uint8Array(0);
+  private entityBase = 0;
+  private wreckReskins = 0;
+  private readonly wreckHead = new THREE.MeshStandardMaterial({ color: 0x8a8778 });
+  private readonly wreckTail = new THREE.MeshStandardMaterial({ color: 0x4a0c0c });
+
   private movedWrites = 0;
   private repickWrites = 0;
   private updates = 0;
@@ -221,6 +265,8 @@ export class PropView {
     this.fullSlot = new Int32Array(n).fill(-1);
     this.pickDist = new Float32Array(n);
     this.pickWant = new Uint8Array(n);
+    this.wrecked = new Uint8Array(n);
+    this.entityBase = n > 0 ? sim.parkedEntityBase() : 0;
     const byCell = new Map<string, number[]>();
     let firstCar = -1;
     for (let i = 0, o = 0; i < n; i++, o += PROP_STRIDE) {
@@ -338,7 +384,15 @@ export class PropView {
     const k = this.slot[i];
     const fs = this.fullSlot[i];
     this.paint.setHex(parkedPaint(i));
-    if (fs >= 0 && this.full) {
+    if (this.wrecked[i]) {
+      // Drawn by its own dented panel mesh.
+      if (fs >= 0 && this.full) {
+        this.full.car.put(fs, ZERO, this.paint, this.tail, null, false);
+        this.full.car.end();
+      }
+      ch.proxy.put(k, ZERO, this.paint, this.tail, null, false);
+      ch.box.setMatrixAt(k, ZERO);
+    } else if (fs >= 0 && this.full) {
       this.full.car.put(fs, this.carMatrix(i, this.full.fit), this.paint, this.tail, null, false);
       this.full.car.end();
       ch.proxy.put(k, ZERO, this.paint, this.tail, null, false);
@@ -381,6 +435,7 @@ export class PropView {
       this.writeInstance(i);
       this.movedWrites++;
     }
+    this.updateWrecks();
     for (const ch of this.chunks) {
       const d = ch.sphere.distanceToPoint(this.cam);
       const near = d < this.proxyM;
@@ -393,6 +448,69 @@ export class PropView {
     this.updates++;
     this.updateMsSum += ms;
     this.updateMaxMs = Math.max(this.updateMaxMs, ms);
+  }
+
+  /**
+   * Dented parked cars: create the panel mesh of a newly dented one, follow each one's prop
+   * pose, re-skin from its lattice while the lattice moves, hide shattered glass.
+   */
+  private updateWrecks(): void {
+    const list = sim.parkedWrecks();
+    for (let o = 0; o + WRECK_STRIDE <= list.length; o += WRECK_STRIDE) {
+      const i = list[o + WK.prop];
+      if (i >= this.n || this.kind[i] === PROP_KIND.cone) continue;
+      const w = this.wrecks.get(i) ?? this.addWreck(i, list, o);
+      const p = i * 7;
+      w.root.position.set(this.pose[p], this.pose[p + 1], this.pose[p + 2]);
+      w.root.quaternion.set(this.pose[p + 3], this.pose[p + 4], this.pose[p + 5], this.pose[p + 6]);
+      if (!w.ready) continue;
+      if (list[o + WK.awake] > 0 || w.nodes === null) {
+        const fresh = sim.latticeNodes(w.entity);
+        if (!w.nodes || !sameFloats(fresh, w.nodes)) {
+          w.nodes = fresh;
+          w.body.update(fresh, 0);
+          this.wreckReskins++;
+        }
+      }
+      if (list[o + WK.shattered] !== w.shattered) {
+        w.shattered = list[o + WK.shattered];
+        for (const r of sim.parkedWreckShattered(w.entity)) w.body.shatter(w.regions[r]);
+      }
+    }
+  }
+
+  private addWreck(i: number, list: Float32Array, o: number): Wreck {
+    const entity = this.entityBase + i;
+    const info = sim.info(entity);
+    const root = new THREE.Group();
+    const chassis = new THREE.Group();
+    chassis.scale.set(list[o + WK.scale], list[o + WK.scale + 1], list[o + WK.scale + 2]);
+    chassis.position.set(list[o + WK.origin], list[o + WK.origin + 1], list[o + WK.origin + 2]);
+    root.add(chassis);
+    root.name = `parked${i}`;
+    const paint = new THREE.Color(styledPaint(parkedPaint(i)));
+    const body = new PanelBody(entity, info.car_id, paint, this.wreckHead, this.wreckTail);
+    chassis.add(body.root);
+    const w: Wreck = { prop: i, entity, root, chassis, body, regions: info.regions, nodes: null, shattered: 0, ready: false };
+    this.wrecks.set(i, w);
+    this.group.add(root);
+    const gen = this.generation;
+    body.whenReady(() => {
+      if (gen !== this.generation || this.wrecks.get(i) !== w) return;
+      body.applyStyle(artStyle.lowpoly, paint);
+      // Wheels stand at their static ride height (a parked car does not roll its wheels).
+      info.wheels.forEach((wi, k) => {
+        const hub = new THREE.Group();
+        hub.position.set(wi.position_m[0], wi.position_m[1], wi.position_m[2]);
+        for (const m of body.wheelParts[k] ?? []) hub.add(m);
+        chassis.add(hub);
+      });
+      w.ready = true;
+      this.wrecked[i] = 1;
+      this.writeInstance(i);
+      this.flush();
+    });
+    return w;
   }
 
   /** Cone material for the current art style (flat-shaded either way). */
@@ -432,7 +550,7 @@ export class PropView {
     const dist = this.pickDist;
     near.length = 0;
     for (let i = 0; i < this.n; i++) {
-      if (this.kind[i] === PROP_KIND.cone) continue;
+      if (this.kind[i] === PROP_KIND.cone || this.wrecked[i]) continue;
       const d = this.distTo(i);
       if (d < this.fullLodM) {
         dist[i] = d;
@@ -500,6 +618,11 @@ export class PropView {
    * m) and rotation `[x, y, z, w]`, or null when it has no drawn instance. Automation (e2e).
    */
   drawnPose(i: number): number[] | null {
+    const w = this.wrecks.get(i);
+    if (w?.ready) {
+      const r = w.root;
+      return [r.position.x, r.position.y, r.position.z, r.quaternion.x, r.quaternion.y, r.quaternion.z, r.quaternion.w];
+    }
     const d = this.drawer(i);
     if (!d || d.slot >= d.mesh.count || !d.mesh.visible) return null;
     const m = new THREE.Matrix4();
@@ -525,8 +648,9 @@ export class PropView {
     let drawnBox = 0;
     for (let i = 0; i < this.n; i++) {
       const d = this.distTo(i);
-      const car = this.kind[i] !== PROP_KIND.cone;
       const drawn = this.drawnPose(i) !== null;
+      // Parked cars of the instanced tiers (a dented one draws itself; it still counts as drawn).
+      const car = this.kind[i] !== PROP_KIND.cone && !this.wrecked[i];
       if (car && drawn && this.fullSlot[i] < 0) {
         if (this.chunks[this.chunkOf[i]]?.near) drawnProxy++;
         else drawnBox++;
@@ -547,7 +671,8 @@ export class PropView {
       parked: this.parkedCount,
       cones: this.coneCount,
       chunks: this.chunks.length,
-      drawnFull: this.full?.car.paint.count ?? 0,
+      // A dented car keeps its full slot until the next re-pick, but its own mesh draws it.
+      drawnFull: this.fullProps.reduce((n, i) => n + (this.wrecked[i] ? 0 : 1), 0),
       drawnProxy,
       drawnBox,
       drawnCones: this.cones?.count ?? 0,
@@ -563,6 +688,9 @@ export class PropView {
       repickWrites: this.repickWrites,
       updateMeanMs: this.updates ? this.updateMsSum / this.updates : 0,
       updateMaxMs: this.updateMaxMs,
+      wrecks: this.wrecks.size,
+      wrecksDrawn: [...this.wrecks.values()].filter((w) => w.ready).length,
+      wreckReskins: this.wreckReskins,
     };
   }
 
@@ -571,8 +699,22 @@ export class PropView {
     return this.trafficModel;
   }
 
+  /** The dented parked car of prop `i` (automation): its entity, whether its panel mesh draws
+   * it, and the largest drawn vertex offset from the undented mesh, m. */
+  wreck(i: number): { entity: number; drawn: boolean; maxDisp: number } | null {
+    const w = this.wrecks.get(i);
+    if (!w) return null;
+    return { entity: w.entity, drawn: w.ready, maxDisp: w.body.maxDisp() };
+  }
+
   /** Drop every instance (new session). */
   clear(): void {
+    for (const w of this.wrecks.values()) {
+      w.root.removeFromParent();
+      w.body.dispose();
+    }
+    this.wrecks.clear();
+    this.wreckReskins = 0;
     // Chunks share geometry: remove their meshes, dispose the shared geometry once.
     for (const ch of this.chunks) for (const mesh of [...ch.proxy.meshes, ch.box]) mesh.removeFromParent();
     this.chunks = [];

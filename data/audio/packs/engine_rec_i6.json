@@ -1,46 +1,41 @@
 {
   "id": "engine_rec_i6",
   "kind": "Engine",
-  "description": "Recorded inline-6: shares the engine_rec_v6 loops (smooth six-cylinder character); falls back to engine_proc_i6.",
+  "description": "Recorded inline-6: the engine_rec_v6 layers (six-cylinder idle loop + inline-4 loops at the six's firing frequency); falls back to engine_proc_i6.",
   "fallback": "engine_proc_i6",
   "engine_layers": [
     {
       "cue": "engine/idle",
-      "anchor": "Idle",
-      "throttle": "Both"
-    },
-    {
-      "cue": "engine/low_on",
       "anchor": {
-        "RedlineFrac": 0.3
+        "FiringHz": 42.8
       },
-      "throttle": "On"
+      "throttle": "Both"
     },
     {
       "cue": "engine/mid_on",
       "anchor": {
-        "RedlineFrac": 0.55
+        "FiringHz": 87.2
       },
       "throttle": "On"
     },
     {
       "cue": "engine/high_on",
       "anchor": {
-        "RedlineFrac": 0.85
+        "FiringHz": 165.6
       },
       "throttle": "On"
     },
     {
       "cue": "engine/low_off",
       "anchor": {
-        "RedlineFrac": 0.35
+        "FiringHz": 87.2
       },
       "throttle": "Off"
     },
     {
       "cue": "engine/high_off",
       "anchor": {
-        "RedlineFrac": 0.78
+        "FiringHz": 165.6
       },
       "throttle": "Off"
     }
@@ -50,22 +45,22 @@
       "source": {
         "Samples": {
           "files": [
-            "../engine_rec_v6/high_off.ogg"
+            "../engine_rec_i4/high_off.ogg"
           ]
         }
       },
-      "gain": 3.077,
+      "gain": 4.933,
       "looped": true
     },
     "engine/high_on": {
       "source": {
         "Samples": {
           "files": [
-            "../engine_rec_v6/high_on.ogg"
+            "../engine_rec_i4/high_on.ogg"
           ]
         }
       },
-      "gain": 3.846,
+      "gain": 6.166,
       "looped": true
     },
     "engine/idle": {
@@ -76,7 +71,7 @@
           ]
         }
       },
-      "gain": 3.846,
+      "gain": 6.166,
       "looped": true
     },
     "engine/limiter": {
@@ -103,33 +98,22 @@
       "source": {
         "Samples": {
           "files": [
-            "../engine_rec_v6/low_off.ogg"
+            "../engine_rec_i4/mid_off.ogg"
           ]
         }
       },
-      "gain": 3.077,
-      "looped": true
-    },
-    "engine/low_on": {
-      "source": {
-        "Samples": {
-          "files": [
-            "../engine_rec_v6/low_on.ogg"
-          ]
-        }
-      },
-      "gain": 3.846,
+      "gain": 4.933,
       "looped": true
     },
     "engine/mid_on": {
       "source": {
         "Samples": {
           "files": [
-            "../engine_rec_v6/mid_on.ogg"
+            "../engine_rec_i4/mid_on.ogg"
           ]
         }
       },
-      "gain": 3.846,
+      "gain": 6.166,
       "looped": true
     },
     "exhaust/pop": {

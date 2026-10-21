@@ -105,8 +105,6 @@
           <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
           <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
           <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
-          <button id="sc-drift" title="drift lab: open asphalt pad, two 90° corners and a long sweeper, day, no traffic; live slide-assist tuning (F8)">drift lab</button>
-          <button id="sc-tune" title="show / hide the drift lab tuning panel (F8)">tune</button>
         </div>
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
@@ -120,6 +118,9 @@
           weather <select id="weather" title="restarts the session with this weather (the scenario's own weather on 'scenario')"><option value="auto">scenario</option></select>
           bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
           <span id="bench-out" class="dim"></span>
+        </div>
+        <div class="row" id="tune-row" title="free car tune for the selected car outside the career (career runs use the tune saved in the garage); 3 = stock, applies from the next start">
+          car tune
         </div>
         <div class="row" id="preset-row" title="one click: damage mode + assists together (GDD §6); any box below can still be changed">
           preset

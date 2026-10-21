@@ -44,7 +44,7 @@ pub mod spatial;
 pub mod tires;
 pub mod types;
 
-pub use data::{AudioConfig, AudioLibrary, CarAudioDef, EngineAudioDef, SamplePack};
+pub use data::{AudioConfig, AudioLibrary, CarAudioDef, EngineAudioDef, MasterMix, SamplePack};
 pub use director::{
     AudioDirector, AudioFrame, DirectorStats, DriverKind, EngineModelMode, SirenOverride,
     VehicleAudioInput, PHYSICAL_ENGINE_PACK,

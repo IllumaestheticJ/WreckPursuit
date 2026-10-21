@@ -8,6 +8,8 @@ const STORE_KEY = "wp.testbed.audio.v1";
 
 export interface PanelSettings {
   master: number;
+  /** Master default the stored `master` was saved under (2 = 1.0 since the mix headroom fix). */
+  masterDefault: number;
   buses: Record<Bus, number>;
   tier: string;
   tts: boolean;
@@ -24,7 +26,8 @@ export interface PanelSettings {
 
 function loadSettings(): PanelSettings {
   const d: PanelSettings = {
-    master: 0.8,
+    master: 1.0,
+    masterDefault: 2,
     buses: { Engine: 1, World: 1, Police: 1, Ui: 1, Music: 1 },
     tier: "Pro",
     tts: true,
@@ -36,6 +39,12 @@ function loadSettings(): PanelSettings {
   };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}");
+    // Settings saved before the default went 0.8 -> 1.0 (the bus trims now give the mix its
+    // headroom): an untouched old default moves up, any other chosen level is kept.
+    if (s.masterDefault !== 2) {
+      if (s.master === 0.8) s.master = d.master;
+      s.masterDefault = 2;
+    }
     return { ...d, ...s, buses: { ...d.buses, ...(s.buses ?? {}) } };
   } catch {
     return d;

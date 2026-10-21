@@ -421,7 +421,7 @@ impl AudioDirector {
             rev_limit_rpm: e.rev_limit_rpm,
         };
         let layers = match self.lib.packs.get(&def.engine_pack) {
-            Some(p) => EngineLayers::resolve(p, e.idle_rpm, e.redline_rpm),
+            Some(p) => EngineLayers::resolve(p, &def.engine, e.idle_rpm, e.redline_rpm),
             None => EngineLayers { layers: Vec::new() },
         };
         let t = &mut self.cues;

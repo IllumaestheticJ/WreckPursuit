@@ -248,6 +248,22 @@ impl PhysicsWorld {
         qp.cast_ray(&ray, max_m, true).map(|(_, toi)| from_z - toi)
     }
 
+    /// Height of the drivable ground (road and sidewalk meshes, terrain: the triangle-mesh and
+    /// heightfield colliders, never buildings, rails, decor or bodies) hit by a ray straight
+    /// down from `(xy, from_z)`, at most `max_m` below it. Seats parked cars on what is drawn.
+    pub fn drivable_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
+        let ground = |_: ColliderHandle, c: &Collider| {
+            c.parent().is_none()
+                && (c.shape().as_trimesh().is_some() || c.shape().as_heightfield().is_some())
+        };
+        let qp = self.query_pipeline(QueryFilter::default().predicate(&ground));
+        let ray = Ray::new(
+            Vector::new(xy[0], xy[1], from_z),
+            Vector::new(0.0, 0.0, -1.0),
+        );
+        qp.cast_ray(&ray, max_m, true).map(|(_, toi)| from_z - toi)
+    }
+
     /// Scene query pipeline over the current colliders (as of the last step), with `filter`
     /// (e.g. excluding a vehicle's own body for its wheel probes).
     pub fn query_pipeline<'a>(&'a self, filter: QueryFilter<'a>) -> QueryPipeline<'a> {
@@ -316,7 +332,9 @@ impl Default for PhysicsWorld {
 /// `wp_net`) so a predicted car drives on exactly the server's ground.
 pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
     let net = &map.net;
-    let t = net.terrain.as_ref()?;
+    // The terrain as drawn (fine heights only along at-grade roads), not the raw
+    // `net.terrain`, which stands up to ~10 m above the greybox ground on slopes.
+    let t = map.ground.as_deref()?;
     let mut out = CityColliders::default();
     let mut added: Vec<Collider> = Vec::new();
 

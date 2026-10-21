@@ -1395,3 +1395,35 @@ tunnels); wp_world tests pass; clippy clean. The full workspace gate has not bee
 the row-93 gate above.
 **Changes outside wp_world:** `apps/simcli/src/run.rs` (4 metrics), `apps/simcli/SCENARIOS.md`,
 `apps/simcli/scenarios/jam/*.ron`. Contract change requests: none.
+## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
+**Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
+the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
+collided with the raw 5 m heightfield: off the roads ground stood up to 11.3 m above what was
+drawn (invisible hillside).
+**Fix.**
+- `wp_world::terrain::Heightfield::lowered_coarse` (the drawn terrain, shared with
+  `city-import`; the shipped greybox is byte-identical) and `height_on_triangles` (cell
+  triangles split along the (i, j)–(i+1, j+1) diagonal, like the greybox and Rapier tiles).
+- `wp_world::surface::collision_terrain` → `CityMap::ground` (`Arc`): the drawn terrain on the
+  5 m grid, except along at-grade roads, junctions and bends (paved + sidewalk + lot + skirt +
+  2.5 m), which keep the fine heights the lots and skirts are laid on. Decks and tunnels are not
+  at grade.
+- `wp_sim::city_ground_colliders` (server and client prediction) builds the heightfield tiles
+  from `CityMap::ground`; `CityMap::ground_height` falls back to it off the roads.
+**Gate.** `wp_sim/tests/city_v2.rs::solid_terrain_is_the_drawn_terrain` (158k off-road ray
+casts ≤ 1 mm from the drawn terrain; fails on the old colliders). Also on
+`claude/lucid-cori-8sjuzz` for `main`.
+
+### Drawn terrain follows the ground (row 119 follow-up)
+The greybox terrain lowered every 10 m vertex to the lowest 5 m height within 10 m, so flat
+ground beside a slope was drawn (and, after the fix above, solid) 1-2 m low: dips behind lots
+that trapped police units (e.g. pool unit 11 in the Founders Cut run). `Heightfield::coarse_under`
+replaces `lowered_coarse`: a vertex keeps the fine height under it and is lowered only to the
+lowest *protected* fine vertex within 10 m, the protected set being the road band
+(`surface::drawn_terrain`, shared by `city-import` and `collision_terrain`). Tunnels: the
+carve inside the walls and under the deck overhang lies inside the band, so the drawn terrain
+never reaches into a tube. Measured (`wp_world/tests/city_v2.rs::drawn_terrain_stays_under_roads_and_follows_the_ground`):
+never above a road, tunnels included (closest 0.14 m below); off-road heightfield − drawn
+p50 0.05 / p95 0.21 / p99 0.60 m (max 7.0 m on hillsides right beside cuttings, −2.2 m on
+sharp ridges; physics follows the drawn mesh in both). Greybox regenerated (9.09 MB, +5 KB).
+

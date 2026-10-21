@@ -47,6 +47,8 @@ use blocked::{Manoeuvre, ObsRef};
 mod jam;
 pub mod siren;
 use siren::SirenRel;
+#[cfg(test)]
+mod signal_tests;
 pub use siren::{SirenYield, YieldPhase};
 
 /// Civilian car length used for spacing and overlap tests, m.
@@ -58,7 +60,37 @@ pub const TRAFFIC_DT: f32 = 1.0 / 60.0;
 /// Physics ticks per traffic step (240 Hz / 60 Hz).
 pub const TICKS_PER_TRAFFIC_STEP: u64 = 4;
 /// A discretionary lane change is indicated at least this long before it starts, s.
+/// Lane changes are re-checked every 0.5 s, so this is the next check choosing the same change.
+/// Kept at 0.5 s: 1.5 s cut lane changes by a third (traffic_bench) and would move the goldens; the
+/// indicator then stays on through the lateral move ([`LANE_CHANGE_SIGNAL_OFF_M`]), about
+/// 3 s in all.
 pub const LANE_CHANGE_SIGNAL_S: f32 = 0.5;
+/// A junction turn is indicated this long before the end of the lane (at the current speed), s.
+pub const TURN_SIGNAL_LEAD_S: f32 = 3.0;
+/// Shortest distance before the end of the lane at which a junction turn is indicated, m.
+pub const TURN_SIGNAL_MIN_M: f32 = 30.0;
+/// Longest distance before the end of the lane at which a junction turn is indicated, m.
+pub const TURN_SIGNAL_MAX_M: f32 = 50.0;
+/// After a lane change the indicator stays on until the car is this close to its new lane
+/// centre, m.
+pub const LANE_CHANGE_SIGNAL_OFF_M: f32 = 0.3;
+
+/// Distance before the end of the lane at which a car doing `speed_mps` switches on its
+/// indicator for a junction turn: [`TURN_SIGNAL_LEAD_S`] of travel, clamped to
+/// [`TURN_SIGNAL_MIN_M`]..[`TURN_SIGNAL_MAX_M`], m.
+pub fn turn_signal_lead_m(speed_mps: f32) -> f32 {
+    (speed_mps * TURN_SIGNAL_LEAD_S).clamp(TURN_SIGNAL_MIN_M, TURN_SIGNAL_MAX_M)
+}
+
+/// Indicator for a junction turn (-1 left, 0 none, 1 right; right-hand traffic: a U-turn
+/// indicates left).
+fn turn_indicator(turn: TurnKind) -> i8 {
+    match turn {
+        TurnKind::Left | TurnKind::UTurn => -1,
+        TurnKind::Right => 1,
+        TurnKind::Straight => 0,
+    }
+}
 
 /// Sightline radius while filling the area before the first tick ([`Traffic::populate`]), m.
 /// Nobody has seen the city yet, so the start state keeps cars this close (the live rule,
@@ -640,6 +672,13 @@ pub struct Agent {
     pub siren_reaction_s: f32,
     /// Wants a lane change out of a siren unit's lane (multi-lane roads): `Some(to the right)`.
     siren_lc: Option<bool>,
+    /// Connector whose turn is being indicated (`NONE` = none). Latched once the car is within
+    /// [`turn_signal_lead_m`] of the lane end, so the indicator does not go off again when the
+    /// car slows down in the queue. View-only: not in the state hash, never read by the AI.
+    turn_latch: SegId,
+    /// Lateral move of the last lane change still being indicated (-1 left, 1 right, 0 none);
+    /// cleared once the car is centred in its new lane. View-only like `turn_latch`.
+    lc_signal: i8,
 }
 
 /// Renderer / netcode view of an agent.
@@ -976,19 +1015,23 @@ impl Traffic {
         self.agents.iter().map(move |a| {
             let (p, f) = self.pose_of(map, a);
             let mut turn_signal = 0i8;
-            if a.plan[0] != NONE && !map.seg(a.seg).is_connector() {
+            if let SegKind::Connector { turn, .. } = map.seg(a.seg).kind {
+                // Keep indicating through the junction until on the exit lane.
+                turn_signal = turn_indicator(turn);
+            } else if a.plan[0] != NONE && a.plan[0] == a.turn_latch {
                 if let SegKind::Connector { turn, .. } = map.seg(a.plan[0]).kind {
-                    if map.seg(a.seg).length - a.s < 40.0 {
-                        turn_signal = match turn {
-                            TurnKind::Left | TurnKind::UTurn => -1,
-                            TurnKind::Right => 1,
-                            TurnKind::Straight => 0,
-                        };
-                    }
+                    turn_signal = turn_indicator(turn);
                 }
             }
-            if a.ghost.is_some() {
-                turn_signal = if a.lat < 0.0 { 1 } else { -1 };
+            if a.ghost.is_some() || a.lc_signal != 0 {
+                // Lane change under way: indicate until centred in the new lane.
+                turn_signal = if a.lc_signal != 0 {
+                    a.lc_signal
+                } else if a.lat < 0.0 {
+                    1
+                } else {
+                    -1
+                };
             } else if let Some((to_right, _)) = a.pending_lc {
                 turn_signal = if to_right { 1 } else { -1 };
             }
@@ -1002,6 +1045,10 @@ impl Traffic {
                 _ => {}
             }
             let mut hazard_lights = a.disabled || a.emergency;
+            if a.disabled {
+                // A wreck shows hazards only.
+                turn_signal = 0;
+            }
             if let Some(m) = &a.manoeuvre {
                 match m.signal() {
                     Some(s) => turn_signal = s,
@@ -1103,6 +1150,7 @@ impl Traffic {
         self.lane_changes(map, inp);
         self.drive_physical(map, inp);
         self.integrate(map, inp, dt);
+        self.update_signals(map);
         self.spawn_timer += dt;
         if self.spawn_timer >= SPAWN_PERIOD_S {
             self.spawn_timer -= SPAWN_PERIOD_S;
@@ -1204,6 +1252,30 @@ impl Traffic {
             if a.booked_s > BOOK_MAX_S {
                 a.booked_s = 0.0;
                 a.book_block_until = now + (BOOK_RETRY_S / TRAFFIC_DT) as u64;
+            }
+        }
+    }
+
+    /// Update the view-only indicator state (`Agent::turn_latch`, `Agent::lc_signal`) after
+    /// the agents moved. Never feeds back into the driving decisions.
+    fn update_signals(&mut self, map: &CityMap) {
+        for a in &mut self.agents {
+            let seg = map.seg(a.seg);
+            if seg.is_connector() {
+                // Kept while in the junction (the view reads the connector's own turn).
+            } else if a.plan[0] != NONE && map.seg(a.plan[0]).is_connector() {
+                if a.turn_latch != a.plan[0] {
+                    a.turn_latch = if seg.length - a.s < turn_signal_lead_m(a.v) {
+                        a.plan[0]
+                    } else {
+                        NONE
+                    };
+                }
+            } else {
+                a.turn_latch = NONE;
+            }
+            if a.lc_signal != 0 && a.ghost.is_none() && a.lat.abs() < LANE_CHANGE_SIGNAL_OFF_M {
+                a.lc_signal = 0;
             }
         }
     }
@@ -2739,6 +2811,7 @@ impl Traffic {
                 a.ghost = Some((old_seg, old_s));
                 a.plan = [plan0, plan1];
                 a.last_lane_change = t;
+                a.lc_signal = if to_right { 1 } else { -1 };
                 a.stopped_since = None;
                 a.came_from = NONE;
                 a.blocked_s = 0.0;
@@ -3502,6 +3575,8 @@ impl Traffic {
                 siren: SirenYield::default(),
                 siren_reaction_s: siren::reaction_s(self.seed, id, personality),
                 siren_lc: None,
+                turn_latch: NONE,
+                lc_signal: 0,
                 retry_s: 0.0,
                 go_around: false,
                 manoeuvre: None,

@@ -276,3 +276,48 @@ fn tunnel_walls_hold_a_car_inside() {
         "never reached the wall: {max_lat} m"
     );
 }
+/// What you see is what you hit (playtest: crashing into invisible map geometry): off the
+/// roads, rays against the Rapier terrain land on the greybox's drawn terrain, which lies up to
+/// ~10 m below the raw heightfield on slopes; under roads and sidewalks they land on
+/// `CityMap::ground`. Sampled off the grid vertices, so cell triangulation must match too.
+#[test]
+fn solid_terrain_is_the_drawn_terrain() {
+    use rapier3d::prelude::{QueryFilter, Ray, Vector};
+    let map = wp_world::CityMap::new(net().clone());
+    let mut phys = wp_sim::PhysicsWorld::new();
+    phys.set_city_ground(&map);
+    let raw = net().terrain.as_ref().unwrap();
+    let drawn = wp_world::surface::drawn_terrain(&map).unwrap();
+    let ground = map.ground.as_ref().unwrap();
+    let only_terrain = |_, c: &rapier3d::prelude::Collider| c.shape().as_heightfield().is_some();
+    let q = phys.query_pipeline(QueryFilter::default().predicate(&only_terrain));
+    let (lo, hi) = (raw.origin, raw.max_corner());
+    let (mut off_road, mut worst, mut raw_above) = (0, 0.0f32, 0.0f32);
+    let mut y = lo[1] + 1.3;
+    while y < hi[1] {
+        let mut x = lo[0] + 2.9;
+        while x < hi[0] {
+            let ray = Ray::new(Vector::new(x, y, 300.0), Vector::new(0.0, 0.0, -1.0));
+            let (_, toi) = q
+                .cast_ray(&ray, 600.0, true)
+                .expect("terrain under every point");
+            let hit = 300.0 - toi;
+            let want = ground.height_on_triangles([x, y]);
+            assert!(
+                (hit - want).abs() < 0.02,
+                "({x}, {y}): solid {hit}, collision terrain {want}"
+            );
+            let seen = drawn.height_on_triangles([x, y]);
+            if (want - seen).abs() < 1e-3 {
+                off_road += 1;
+                worst = worst.max((hit - seen).abs());
+                raw_above = raw_above.max(raw.height_on_triangles([x, y]) - hit);
+            }
+            x += 7.3;
+        }
+        y += 7.3;
+    }
+    println!("off-road samples {off_road}, worst |solid − drawn| {worst:.4} m, raw terrain up to {raw_above:.1} m above");
+    assert!(off_road > 50_000, "{off_road}");
+    assert!(worst < 0.02, "{worst}");
+}

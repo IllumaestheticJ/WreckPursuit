@@ -33,6 +33,24 @@ export const HEAD = 0xfff2c0;
 /** Light bar colours (unlit). */
 export const BAR = { off: 0x1a1a24, red: 0xff2040, blue: 0x2060ff } as const;
 
+/** Indicator lamp bits (`ind` masks below): left-side lamps, right-side lamps. Hazards = both. */
+export const IND = { left: 1, right: 2 } as const;
+/** Indicator blink rate, Hz (50 % duty; every car blinks in phase). */
+export const INDICATOR_HZ = 1.5;
+/** Whether indicators are in the lit half of their blink at time `t` (s). */
+export const indicatorPhaseOn = (t: number): boolean => (t * INDICATOR_HZ) % 1 < 0.5;
+/** Unlit indicator lens (dark amber, below 1 so it never reaches the bloom pass). */
+const UNLIT_IND = 0x3a2a12;
+/** Lit indicator glow over the amber (greybox; low-poly dark uses `PALETTE.brakeGlow`): above 1
+ * so it reaches the bloom pass and reads in daylight. */
+const IND_GLOW = 1.6;
+
+/** Indicator lamp colour into `out`: lit amber (HDR, blooms) or the dark lens. */
+export function indicatorColour(out: THREE.Color, lit: boolean): THREE.Color {
+  if (!lit) return out.setHex(UNLIT_IND);
+  return out.setHex(PALETTE.hazard).multiplyScalar(artStyle.lowpoly ? PALETTE.brakeGlow : IND_GLOW);
+}
+
 
 /**
  * Livery in the current art style. Low-poly dark maps the greybox traffic liveries one to one
@@ -88,6 +106,9 @@ interface Geoms {
   tail: THREE.BufferGeometry;
   /** Head lamps (instance colour). */
   head: THREE.BufferGeometry;
+  /** Left / right indicator lamps, front and rear corner each (instance colour = lit / unlit). */
+  indL: THREE.BufferGeometry;
+  indR: THREE.BufferGeometry;
 }
 
 /** Base colour per mesh material (glass is drawn opaque at LOD distances). */
@@ -188,6 +209,37 @@ function lampMarkers(info: CarModelInfo, front: number, rear: number): { head: T
   return { head: join(head), tail: join(tail) };
 }
 
+/**
+ * Indicator lamps on the four corners (just below the head / tail lamps, wrapping round the
+ * corner so they show from the front or rear and the side): `left` (x < 0) and `right`
+ * geometries, each the front and the rear lamp. `front` / `rear` are the body's nose / tail y.
+ * Shared by the fleet and VehicleView so lamps match either side of a promotion.
+ */
+export function indicatorMarkers(info: { body_size_m: [number, number, number] | number[] }, front: number, rear: number): { left: THREE.BufferGeometry; right: THREE.BufferGeometry } {
+  const [w, , h] = info.body_size_m;
+  const side = (sx: number) =>
+    join([
+      colourBox(0.16, 0.2, 0.09, sx * (w / 2 - 0.06), front - 0.08, h * 0.45 - 0.15, 0xffffff),
+      colourBox(0.16, 0.2, 0.09, sx * (w / 2 - 0.06), rear + 0.08, h * 0.5 - 0.14, 0xffffff),
+    ]);
+  return { left: side(-1), right: side(1) };
+}
+
+/** Nose and tail y of a car mesh (non-wheel parts, chassis space), m; null if it has none. */
+export function meshFrontRear(mesh: CarMeshJson): { front: number; rear: number } | null {
+  let front = -Infinity;
+  let rear = Infinity;
+  for (const p of mesh.parts) {
+    if (p.kind === "interior" || p.wheel != null) continue;
+    const a = p.positions_mm;
+    for (let i = 1; i < a.length; i += 3) {
+      front = Math.max(front, a[i] * 1e-3);
+      rear = Math.min(rear, a[i] * 1e-3);
+    }
+  }
+  return Number.isFinite(front) && Number.isFinite(rear) ? { front, rear } : null;
+}
+
 /** The car's panel mesh at rest (chassis space), wheels placed on their hubs. */
 export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
   const paint: Parameters<typeof merge>[0] = [];
@@ -221,9 +273,12 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
     else detail.push({ ...chunk, rgb: detailRgb(p.material) });
   }
   const l = info.body_size_m[1];
-  const lamps = lampMarkers(info, Number.isFinite(front) ? front : l / 2, Number.isFinite(rear) ? rear : -l / 2);
+  const fy = Number.isFinite(front) ? front : l / 2;
+  const ry = Number.isFinite(rear) ? rear : -l / 2;
+  const lamps = lampMarkers(info, fy, ry);
+  const ind = indicatorMarkers(info, fy, ry);
   // The mesh's own tail-light parts sit inside the shell; the markers are what shows.
-  return { paint: merge(paint), detail: merge(detail), tail: join([merge(tail), lamps.tail]), head: lamps.head };
+  return { paint: merge(paint), detail: merge(detail), tail: join([merge(tail), lamps.tail]), head: lamps.head, indL: ind.left, indR: ind.right };
 }
 
 /** Low-poly stand-in from the body size: lower body, cabin, glass band, wheels, lamps. */
@@ -244,21 +299,26 @@ export function proxyGeoms(info: CarModelInfo): Geoms {
     ),
   ]);
   const lamps = lampMarkers(info, l / 2, -l / 2);
-  return { paint, detail, tail: lamps.tail, head: lamps.head };
+  const ind = indicatorMarkers(info, l / 2, -l / 2);
+  return { paint, detail, tail: lamps.tail, head: lamps.head, indL: ind.left, indR: ind.right };
 }
 
-/** One set of instanced meshes (paint / detail / tail, optional light bar). */
+/** One set of instanced meshes (paint / detail / tail, optional light bar and indicators). */
 export class InstancedCar {
   readonly paint: THREE.InstancedMesh;
   readonly detail: THREE.InstancedMesh;
   readonly tail: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
   readonly bar: THREE.InstancedMesh | null;
+  /** Left / right indicator lamps (two draw calls; only for moving traffic, `indicators`). */
+  readonly indL: THREE.InstancedMesh | null;
+  readonly indR: THREE.InstancedMesh | null;
   /** Every instanced mesh of the car (built once: `put` runs per instance per frame). */
   readonly meshes: readonly THREE.InstancedMesh[];
   count = 0;
 
-  constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null) {
+  /** `indicators` adds the indicator lamp meshes (the fleet; parked props have none). */
+  constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null, indicators = false) {
     const mk = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
       const m = new THREE.InstancedMesh(geo, mat, capacity);
       m.count = 0;
@@ -276,16 +336,19 @@ export class InstancedCar {
     } else {
       this.bar = null;
     }
-    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
+    this.indL = indicators ? mk(g.indL, mats.lamp) : null;
+    this.indR = indicators ? mk(g.indR, mats.lamp) : null;
+    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : []), ...(this.indL && this.indR ? [this.indL, this.indR] : [])];
   }
 
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
     this.put(this.count++, m, paint, tail, bar);
   }
 
-  /** `add` with greybox hex colours (no Color round trip; the fleet's per-frame path). */
-  addHex(m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null): void {
-    this.putHex(this.count++, m, paint, tail, bar);
+  /** `add` with greybox hex colours (no Color round trip; the fleet's per-frame path). `ind` is
+   * the lit indicator lamps (`IND` bits, already gated by the blink phase). */
+  addHex(m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, ind = 0): void {
+    this.putHex(this.count++, m, paint, tail, bar, true, ind);
   }
 
   /**
@@ -298,10 +361,15 @@ export class InstancedCar {
     this.putHex(i, m, paint.getHex(), tail.getHex(), bar ? bar.getHex() : null, lit);
   }
 
-  /** `put` with greybox hex colours (runs per car per frame: no allocation, no iterator). */
-  putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, lit = true): void {
+  /** `put` with greybox hex colours (runs per car per frame: no allocation, no iterator).
+   * `ind`: lit indicator lamps (`IND` bits; ignored without indicator meshes). */
+  putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, lit = true, ind = 0): void {
     const meshes = this.meshes;
     for (let k = 0; k < meshes.length; k++) meshes[k].setMatrixAt(i, m);
+    if (this.indL && this.indR) {
+      this.indL.setColorAt(i, ind & IND.left && lit ? tmpIndOn : tmpIndOff);
+      this.indR.setColorAt(i, ind & IND.right && lit ? tmpIndOn : tmpIndOff);
+    }
     if (!lit) {
       const low = artStyle.lowpoly;
       this.paint.setColorAt(i, tmpPaint.setHex(low ? styledPaint(paint) : paint));
@@ -331,6 +399,13 @@ export class InstancedCar {
     }
   }
 
+  /** Whether instance `i`'s left / right indicator lamps are lit (read back from the instance
+   * colours; automation). */
+  indicatorsLit(i: number): { left: boolean; right: boolean } {
+    const lit = (m: THREE.InstancedMesh | null) => (m ? (m.getColorAt(i, tmpRead), tmpRead.r > 0.5) : false);
+    return { left: lit(this.indL), right: lit(this.indR) };
+  }
+
   dispose(): void {
     for (const mesh of this.meshes) {
       mesh.removeFromParent();
@@ -354,6 +429,10 @@ const tmpHead = new THREE.Color(HEAD);
 const tmpPaint = new THREE.Color();
 const tmpTail = new THREE.Color();
 const tmpHeadStyled = new THREE.Color();
+/** Lit / unlit indicator colours (refreshed per art style by `Fleet.begin`). */
+const tmpIndOn = new THREE.Color();
+const tmpIndOff = new THREE.Color();
+const tmpRead = new THREE.Color();
 
 /** One car model: full and proxy instance sets. */
 class FleetModel {
@@ -368,7 +447,7 @@ class FleetModel {
     readonly police: boolean,
   ) {
     this.info = sim.carModelInfo(carId);
-    this.proxy = new InstancedCar(proxyGeoms(this.info), MAX_PROXY, mats, this.barAt());
+    this.proxy = new InstancedCar(proxyGeoms(this.info), MAX_PROXY, mats, this.barAt(), !this.police);
     group.add(...this.proxy.meshes);
     const now = carMeshNow(carId);
     if (now) this.setMesh(now);
@@ -382,7 +461,7 @@ class FleetModel {
 
   private setMesh(mesh: CarMeshJson): void {
     if (this.full) return;
-    this.full = new InstancedCar(fullGeoms(mesh, this.info), MAX_FULL, this.mats, this.barAt());
+    this.full = new InstancedCar(fullGeoms(mesh, this.info), MAX_FULL, this.mats, this.barAt(), !this.police);
     this.group.add(...this.full.meshes);
   }
 
@@ -414,6 +493,8 @@ export class Fleet {
   private readonly p = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
   private readonly one = new THREE.Vector3(1, 1, 1);
+  /** Instance set and index the last `add` wrote (automation read-back; null = not drawn). */
+  readonly lastAdded: { car: InstancedCar | null; i: number } = { car: null, i: -1 };
 
   /** Model for `carId` (built on first use; `police` adds a light bar). */
   model(carId: string, police = false): FleetModel {
@@ -433,6 +514,8 @@ export class Fleet {
 
   begin(): void {
     if (this.styleVersion !== artStyle.version) this.applyStyle();
+    indicatorColour(tmpIndOn, true);
+    indicatorColour(tmpIndOff, false);
     for (const m of this.models.values()) m.begin();
   }
 
@@ -454,7 +537,8 @@ export class Fleet {
 
   /**
    * Draw one car. `rec` is a draw record array and `o` the record's position offset (xyz then
-   * quaternion xyzw). `dist` is its distance from the camera. Returns how it was drawn.
+   * quaternion xyzw). `dist` is its distance from the camera. `ind` is the lit indicator lamps
+   * (`IND` bits, blink phase applied). Returns how it was drawn.
    */
   add(
     model: FleetModel,
@@ -464,16 +548,25 @@ export class Fleet {
     paint: number,
     tail: number,
     bar: number | null,
+    ind = 0,
   ): DrawMode {
     this.p.set(rec[o], rec[o + 1], rec[o + 2]);
     this.q.set(rec[o + 3], rec[o + 4], rec[o + 5], rec[o + 6]);
     this.m.compose(this.p, this.q, this.one);
     const full = model.full;
+    const last = this.lastAdded;
     if (full && dist < this.fullLodM && full.count < MAX_FULL) {
-      full.addHex(this.m, paint, tail, bar);
+      last.car = full;
+      last.i = full.count;
+      full.addHex(this.m, paint, tail, bar, ind);
       return "full";
     }
-    if (model.proxy.count < MAX_PROXY) model.proxy.addHex(this.m, paint, tail, bar);
+    last.car = null;
+    if (model.proxy.count < MAX_PROXY) {
+      last.car = model.proxy;
+      last.i = model.proxy.count;
+      model.proxy.addHex(this.m, paint, tail, bar, ind);
+    }
     return "proxy";
   }
 

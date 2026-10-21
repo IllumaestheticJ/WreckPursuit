@@ -252,8 +252,26 @@ await page.reload();
 await ready();
 const mig = await page.evaluate(() => window.__wp.bindings());
 check(
-  Array.isArray(mig.keys.clutch) && mig.keys.clutch.length === 0 && mig.pad.horn[0].button === 1 && mig.padCurve === 1.2 && mig.keys.throttle[0] === "KeyW",
-  "an older wp.bindings.v1 save (no clutch) loads: its bindings kept, clutch unbound by default",
+  mig.keys.clutch.join() === "KeyC" && mig.keys.cameraCycle.join() === "F3" && mig.pad.horn[0].button === 1 && mig.padCurve === 1.2 && mig.keys.throttle[0] === "KeyW",
+  "an older wp.bindings.v1 save (no clutch) loads: its bindings kept, clutch on C and camera on F3 by default",
+);
+// A save from before 2026-10-21 holding the old defaults (camera on C, clutch unbound) moves to
+// clutch C / camera F3; a camera the player moved themselves stays.
+await page.evaluate(() => {
+  localStorage.setItem("wp.bindings.v1", JSON.stringify({ keys: { cameraCycle: ["KeyC"], clutch: [] }, pad: {} }));
+});
+await page.reload();
+await ready();
+const mig2 = await page.evaluate(() => window.__wp.bindings());
+await page.evaluate(() => {
+  localStorage.setItem("wp.bindings.v1", JSON.stringify({ keys: { cameraCycle: ["KeyK"], clutch: [] }, pad: {} }));
+});
+await page.reload();
+await ready();
+const mig3 = await page.evaluate(() => window.__wp.bindings());
+check(
+  mig2.keys.clutch.join() === "KeyC" && mig2.keys.cameraCycle.join() === "F3" && mig3.keys.cameraCycle.join() === "KeyK" && mig3.keys.clutch.length === 0,
+  "old-default save (camera C, no clutch) migrates to clutch C / camera F3; a player-chosen camera key is kept",
 );
 await page.evaluate(() => {
   window.__pad.clear();

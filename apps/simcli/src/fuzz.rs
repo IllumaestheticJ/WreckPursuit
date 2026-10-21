@@ -93,6 +93,8 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
                 speed_mps: speed,
                 police_heat: 0.0,
                 assists: Some(assists),
+                player_steering: None,
+                tune: Default::default(),
                 driver: Default::default(),
                 inputs: random_inputs(&mut rng, cfg.case_seconds, kind > 0),
             });
@@ -114,6 +116,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
     Scenario {
         name: format!("fuzz_{:016x}_{index}", cfg.seed),
         barriers,
+        parked: Vec::new(),
         police_orders: Vec::new(),
         weather: None,
         seed: rng.next_u64(),

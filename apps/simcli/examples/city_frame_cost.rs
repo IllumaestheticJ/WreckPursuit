@@ -50,6 +50,7 @@ fn main() {
         police_presence: Some(1.0),
         systems: None,
         barriers: Vec::new(),
+        parked: Vec::new(),
         police_orders: Vec::new(),
         weather: None,
         entities: vec![EntitySpec {
@@ -60,6 +61,8 @@ fn main() {
             speed_mps: 30.0,
             police_heat: 0.0,
             assists: None,
+            player_steering: None,
+            tune: Default::default(),
             driver: Driver::Scripted,
             inputs: Vec::new(),
         }],

@@ -45,6 +45,7 @@ pub mod repair;
 pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
+pub mod tune;
 
 pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundStatus};
 pub use data::{CareerRules, DataSources, Economy};
@@ -68,4 +69,5 @@ pub use session::{
     Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
     SessionConfig,
 };
+pub use tune::CarTune;
 pub use wp_contracts::{AccountId, WantedLevel};

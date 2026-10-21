@@ -301,9 +301,18 @@ impl Session {
         self.sim.vehicles().iter().find(|v| v.id == id)
     }
 
-    /// Resolved car of any sim vehicle.
+    /// Resolved car of any sim vehicle, or of a dented parked car by its
+    /// `wp_sim::PARKED_ENTITY_BASE` id.
     pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
+        if let Some(w) = self.parked_wreck(id) {
+            return self.cars.get(&w.car_id);
+        }
         self.vehicle(id).and_then(|v| self.cars.get(&v.car_id))
+    }
+
+    /// A dented parked car by its `wp_sim::PARKED_ENTITY_BASE` id.
+    pub fn parked_wreck(&self, id: EntityId) -> Option<&wp_sim::ParkedWreck> {
+        wp_sim::prop_of_entity(id).and_then(|i| self.sim.parked_wreck(i))
     }
 
     /// Per-vehicle extras.
@@ -311,13 +320,19 @@ impl Session {
         self.extras.get(&id)
     }
 
-    /// Load the car of every sim vehicle not seen before (the sim may spawn police units and
-    /// physical traffic on its own).
+    /// Load the car of every sim vehicle and dented parked car not seen before (the sim may
+    /// spawn police units and physical traffic, and promote hit parked cars, on its own).
     fn sync_cars(&mut self) {
-        for v in self.sim.vehicles() {
-            if !self.cars.contains_key(&v.car_id) {
-                if let Ok(car) = simcli::data::load_car(mem_data(), &v.car_id) {
-                    self.cars.insert(v.car_id.clone(), car);
+        let ids = self
+            .sim
+            .vehicles()
+            .iter()
+            .map(|v| &v.car_id)
+            .chain(self.sim.parked_wrecks().iter().map(|w| &w.car_id));
+        for car_id in ids {
+            if !self.cars.contains_key(car_id) {
+                if let Ok(car) = simcli::data::load_car(mem_data(), car_id) {
+                    self.cars.insert(car_id.clone(), car);
                 }
             }
         }
@@ -416,6 +431,16 @@ impl Session {
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
         self.live_check()?;
         let idx = self.idx(id)?;
+        if self.race_holds(id) && !self.held(id) {
+            // On the grid only the throttle gets through (revving on the line; the grid hold
+            // keeps the handbrake on and the clutch down).
+            let tick = self.sim.tick();
+            if let Some(r) = self.race.as_mut().filter(|r| !r.live().autopilot()) {
+                if r.live().in_countdown(tick) {
+                    r.set_grid_throttle(input.throttle);
+                }
+            }
+        }
         if self.script_running()
             || self.last_input[idx] == input
             || self.held(id)
@@ -553,18 +578,6 @@ impl Session {
         }
     }
 
-    /// Set a vehicle's drift-assist tuning (drift lab dev override; not logged, so a tuned
-    /// session does not replay bit-exactly).
-    pub fn set_drift_tuning(
-        &mut self,
-        id: EntityId,
-        tuning: wp_vehicle::DriftTuning,
-    ) -> Result<(), String> {
-        self.sim
-            .set_drift_tuning(id, tuning)
-            .map_err(|e| format!("{e:?}"))
-    }
-
     /// Set a vehicle's assists (logged op).
     pub fn set_assists(&mut self, id: EntityId, profile: AssistProfile) -> Result<(), String> {
         self.live_check()?;
@@ -668,6 +681,14 @@ impl Session {
             return Err("only before the first tick".into());
         }
         Ok(&mut self.sim)
+    }
+
+    /// Re-apply vehicle `id`'s body inertia after a lab ride override
+    /// (`wp_sim::Sim::refresh_body_inertia`). Not a logged op; allowed in playback too.
+    pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), String> {
+        self.sim
+            .refresh_body_inertia(id)
+            .map_err(|e| format!("{e:?}"))
     }
 
     /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes

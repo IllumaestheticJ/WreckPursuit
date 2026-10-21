@@ -414,6 +414,14 @@ impl World {
         self.parked.iter().chain(self.cones.iter())
     }
 
+    /// Replace the parked cars, e.g. after the sim seated them on its ground colliders and
+    /// dropped the spots where a car cannot stand (`wp_sim::Sim::set_world` on a city with
+    /// terrain). Every reader of [`World::static_props`] (police obstacles, resets) then sees
+    /// exactly the cars the sim has. Scenario setup, before the first tick.
+    pub fn set_parked_cars(&mut self, cars: Vec<StaticProp>) {
+        self.parked = cars;
+    }
+
     /// Active routes.
     pub fn active_routes(&self) -> &[ActiveRoute] {
         &self.routes

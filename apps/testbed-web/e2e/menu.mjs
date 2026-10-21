@@ -156,8 +156,8 @@ check(m.screen === "pause" && m.visible && m.paused && tp2 === tp, `Esc opens th
 check(m.focus === "gm-resume", `Resume has the focus (${m.focus})`);
 await shot("menu_pause.png");
 // Driving keys do nothing while it is open.
-await page.keyboard.down("KeyC");
-await page.keyboard.up("KeyC");
+await page.keyboard.down("F3");
+await page.keyboard.up("F3");
 const camBefore = await page.evaluate(() => window.__wp.rig.mode);
 await press("Escape");
 m = await menu();

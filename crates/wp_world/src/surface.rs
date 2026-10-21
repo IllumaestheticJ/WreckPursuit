@@ -14,10 +14,11 @@
 use wp_vehicle::{GroundHit, WheelCaster};
 
 use crate::geom::{self, V2, V3};
-use crate::map::CityMap;
+use crate::map::{CityMap, SegKind};
 use std::collections::BTreeMap;
 
 use crate::network::{Lane, LaneKind, RoadNetwork, RoadSurface};
+use crate::terrain::Heightfield;
 
 mod nodes;
 pub use nodes::{node_patches, NodePatch, NodePatchKind};
@@ -1709,6 +1710,106 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         }
     }
     out
+}
+
+/// Vertex spacing of the terrain the greybox mesh draws ([`drawn_terrain`]), m.
+pub const TERRAIN_RENDER_M: f32 = 10.0;
+
+/// The fine-grid vertices of `t` along at-grade roads, junctions and bends (paved width +
+/// sidewalk + lot + skirt + half a cell): the ground the sidewalks, lots and skirts are laid
+/// on. Bridge decks and tunnels are not at grade, so the ground under a deck and above a
+/// tunnel is left out.
+fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
+    let net = &map.net;
+    let mut keep = vec![false; t.z.len()];
+    let margin = t.cell_m * 0.5;
+    let beside = SIDEWALK_W_M + lot_width_m(net) + SKIRT_W_M;
+    let mut mark = |a: V2, b: V2, r: f32| {
+        let lo = [a[0].min(b[0]) - r, a[1].min(b[1]) - r];
+        let hi = [a[0].max(b[0]) + r, a[1].max(b[1]) + r];
+        let cell = |x: f32, o: f32, n: u32| (((x - o) / t.cell_m).max(0.0) as u32).min(n - 1);
+        let (i0, i1) = (
+            cell(lo[0], t.origin[0], t.nx),
+            cell(hi[0], t.origin[0], t.nx) + 1,
+        );
+        let (j0, j1) = (
+            cell(lo[1], t.origin[1], t.ny),
+            cell(hi[1], t.origin[1], t.ny) + 1,
+        );
+        for j in j0..=j1.min(t.ny - 1) {
+            for i in i0..=i1.min(t.nx - 1) {
+                if geom::point_segment_distance(t.vertex_pos(i, j), a, b) <= r {
+                    keep[(j * t.nx + i) as usize] = true;
+                }
+            }
+        }
+    };
+    // Within 1.5 m of the fine ground: not a deck above it, not a tunnel under it.
+    let at_grade = |p: V3| (p[2] - t.height_at(geom::xy(p))).abs() <= 1.5;
+    for s in &net.surfaces {
+        let side = if s.highway { 0.3 } else { beside };
+        let r = s.left_m.max(s.right_m) + side + margin;
+        for k in 0..s.centre.len() - 1 {
+            if at_grade(s.centre[k]) || at_grade(s.centre[k + 1]) {
+                mark(geom::xy(s.centre[k]), geom::xy(s.centre[k + 1]), r);
+            }
+        }
+    }
+    for ix in &net.intersections {
+        let c = net.nodes[ix.node as usize].pos;
+        if at_grade(c) {
+            mark(geom::xy(c), geom::xy(c), ix.radius_m + beside + margin);
+        }
+    }
+    for s in map.segs.iter() {
+        if let SegKind::Connector { node, .. } = s.kind {
+            if net.nodes[node as usize].intersection.is_none() {
+                let r = s.width * 0.5 + beside + margin;
+                for w in s.pts.windows(2) {
+                    if at_grade(w[0]) || at_grade(w[1]) {
+                        mark(geom::xy(w[0]), geom::xy(w[1]), r);
+                    }
+                }
+            }
+        }
+    }
+    keep
+}
+
+/// The terrain the greybox draws (`None` without terrain): `net.terrain` on a
+/// [`TERRAIN_RENDER_M`] grid ([`Heightfield::coarse_under`]), following the fine heights
+/// except where it must stay under the ground roads, sidewalks and lots are laid on.
+pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
+    let t = map.net.terrain.as_ref()?;
+    Some(t.coarse_under(TERRAIN_RENDER_M, &road_band(map, t)))
+}
+
+/// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
+/// terrain): the surface the greybox draws ([`drawn_terrain`]), except in the road band
+/// (at-grade roads, junctions and bends: paved width + sidewalk + lot + skirt + half a cell),
+/// which keeps the fine heights the sidewalks, lots and skirts are laid on. Drawn and solid
+/// ground agree everywhere else, so there is no hillside the player can hit but not see; the
+/// fine grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
+/// identical off the roads. A flat field (e.g. a grid city's ground under a viaduct) is
+/// returned as it is: there is no hidden ground to remove, only the drawn mesh's 5 cm offset,
+/// and callers may tell a flat city by its terrain being uniform.
+pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
+    let t = map.net.terrain.as_ref()?;
+    if t.z.iter().all(|z| *z == t.z[0]) {
+        return Some(t.clone());
+    }
+    let keep = road_band(map, t);
+    let drawn = t.coarse_under(TERRAIN_RENDER_M, &keep);
+    let mut out = t.clone();
+    for j in 0..t.ny {
+        for i in 0..t.nx {
+            let n = (j * t.nx + i) as usize;
+            if !keep[n] {
+                out.z[n] = drawn.height_on_triangles(t.vertex_pos(i, j));
+            }
+        }
+    }
+    Some(out)
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable

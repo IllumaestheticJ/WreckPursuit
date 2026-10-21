@@ -9,9 +9,11 @@
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
+// ?drift=w[&car=<id>] opens the handling test pad (the old Drift Lab W pad: course,
+// reference-parity cars) with the tune panel; ?tune=1 (or F7) shows the hidden handling tune
+// panel in any session (debug overrides on top of the shipped handling).
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
-// ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
 import { assistLevel, loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
@@ -38,7 +40,7 @@ import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
-import { LodDirector } from "./render/lod";
+import { LodDirector, metaIndicators } from "./render/lod";
 import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
 import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
@@ -48,6 +50,7 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
+import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
@@ -63,7 +66,9 @@ import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
 import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
-import { DriftLab } from "./drift_lab";
+import { mountTuneRow, withQuickTune } from "./tune_panel";
+import { quickTune } from "../../ui-kit/src/garage/tune";
+import { IndicatorStalk } from "./indicator_stalk";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -82,6 +87,17 @@ const rests = new Map<number, Float32Array>();
  * km/h in ~5.4 s, 80 ms dual-clutch shifts). The debug sedan (8.3 s) read as "slow" in the
  * owner's playtest. */
 const DEFAULT_CAR = "lindwurm_4t";
+
+/** Opening balance of a new career in the testbed / preview / demo builds (owner request
+ * 2026-10-21: "$150K so I can test all features"). `?cash=<n>` picks another amount and
+ * `?cash=market` uses the real economy's starting cash (data/economy/market.toml). */
+const DEMO_CASH = 150_000;
+function newCareer(mode: string): CareerView {
+  const p = params.get("cash");
+  if (p === "market") return sim.careerNew(mode);
+  const n = p === null ? DEMO_CASH : Number(p);
+  return sim.careerNewWithCash(mode, Number.isFinite(n) && n >= 0 ? n : DEMO_CASH);
+}
 
 interface AppState {
   views: Map<number, VehicleView>;
@@ -136,7 +152,6 @@ async function main(): Promise<void> {
   // MSAA): no multisampled canvas needed (greybox picked later in the session then draws
   // without antialiasing).
   const scene = new SceneView(document.body, { postAA: initialStyle === "lowpoly" });
-  const driftLab = new DriftLab(scene.world);
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
@@ -159,6 +174,8 @@ async function main(): Promise<void> {
   let lastMenuCountersteer: number | null = null;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
+  // The player's indicators: cosmetic and local only (no VehicleInput field; indicator_stalk.ts).
+  const stalk = new IndicatorStalk();
   scene.world.add(tagFeature(lod.fleet.group, "fleet"));
 
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
@@ -192,6 +209,9 @@ async function main(): Promise<void> {
   applyLod();
   scene.quality.onChange = applyLod;
   scene.world.add(tagFeature(props.group, "props"));
+  // Drift Lab C: course paint + the tune panel / readout (shown only in the lab session).
+  // Drift Lab W: plain keyboard steering, reference-parity cars (restarts with the chosen car).
+  const driftLabW = new DriftLabWPanel(overlay, sim, scene.world, () => app.player, (car) => startDriftLabW(car));
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
   scene.world.add(policeTools.group);
@@ -273,7 +293,7 @@ async function main(): Promise<void> {
       }
     }
     if (!loaded) {
-      sim.careerNew("Arcade");
+      newCareer("Arcade");
       persistCareer();
     }
   }
@@ -296,11 +316,12 @@ async function main(): Promise<void> {
     setActive: (uid) => act(() => sim.careerSetActive(uid)),
     install: (uid, id) => act(() => sim.careerInstall(uid, id)),
     uninstall: (uid, id) => act(() => sim.careerUninstall(uid, id)),
+    setTune: (uid, tune) => act(() => sim.careerSetTune(uid, tune)),
     repair: (uid, req) => act(() => sim.careerRepair(uid, req)),
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
-    newCareer: (mode) => act(() => sim.careerNew(mode)),
+    newCareer: (mode) => act(() => newCareer(mode)),
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
     startRun: (kind) => void startCareerRun(kind),
@@ -383,8 +404,6 @@ async function main(): Promise<void> {
   };
 
   const rebuildViews = () => {
-    // Any new session leaves the drift lab (startDriftLab re-enters it right after).
-    driftLab.stop();
     scene.warmLightVariants();
     crash.reset();
     for (const v of app.views.values()) v.dispose();
@@ -413,6 +432,10 @@ async function main(): Promise<void> {
     app.focus = app.player;
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
+    if (sc.name === DRIFT_LAB_W) driftLabW.car = sc.entities?.[0]?.car ?? DRIFT_LAB_W_CAR;
+    // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
+    // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
+    driftLabW.setActive(sc.name === DRIFT_LAB_W);
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -455,7 +478,7 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.raceStart(id, car, mode, autopilot);
+    sim.raceStart(id, car, mode, autopilot, quickTune(car));
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
@@ -541,8 +564,21 @@ async function main(): Promise<void> {
     let json = city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false);
     // Optional start hour (automation: day/night screenshots).
     if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
-    sim.init(1, withWeather(json), false);
+    sim.init(1, withWeather(withQuickTune(json)), false);
     app.scenario = null;
+    rebuildViews();
+    applyAssistPreset(app.source);
+  };
+
+  /** The handling test pad (?drift=w; was Drift Lab W): the course, the reference-parity cars and
+   * the owner's reference assists (TCS / ESC off, manual gears), with the tune panel open. The
+   * handling is the game's; default car = parity_rwd_d. */
+  const startDriftLabW = (car = DRIFT_LAB_W_CAR, mode = ($("mode") as HTMLSelectElement).value) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    sim.init(1, driftLabWScenario(sim.freeDriveJson(car, mode, false)), false);
     rebuildViews();
     applyAssistPreset(app.source);
   };
@@ -560,7 +596,7 @@ async function main(): Promise<void> {
     app.result = null;
     app.bench = null;
     const json = rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value);
-    sim.init(0, withWeather(json), false);
+    sim.init(0, withWeather(withQuickTune(json)), false);
     rebuildViews();
     applyAssistPreset(app.source);
     // Back to the viewer's own angle (near chase unless they picked another one).
@@ -636,6 +672,9 @@ async function main(): Promise<void> {
     }
   };
   const assistOverrides = (): Overrides => ({ tcs: "Off", esc: false, auto_gears: false, ...savedAssistOverrides() });
+  // Drift Lab W honours the viewer's own clutch / gears / TCS / ABS choices (owner bug: the lab
+  // forced the automatic clutch even with "manual" selected).
+  driftLabW.userAssists = savedAssistOverrides;
   /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
    * traction control and stronger steer help; boxes the viewer ticked still win. */
   const TOUCH_ASSISTS: Record<string, unknown> = { tcs: "Full", auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
@@ -701,6 +740,8 @@ async function main(): Promise<void> {
         }
         lastMenuCountersteer = menuCs;
       }
+      // Drift Lab W keeps its reference assists (TCS / ESC off, manual) over any preset.
+      driftLabW.applyAssists();
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
@@ -799,6 +840,7 @@ async function main(): Promise<void> {
   const carSel = $("car") as HTMLSelectElement;
   for (const id of sim.carIds()) carSel.add(new Option(id, id));
   carSel.onchange = () => startFreeDrive(carSel.value);
+  mountTuneRow($("tune-row"), carSel);
 
   const scSel = $("sc-select") as HTMLSelectElement;
   try {
@@ -809,6 +851,7 @@ async function main(): Promise<void> {
   }
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
+  // Drift Lab W (the old lab C, with its drift assists, stays reachable via ?drift=c only).
   $("sc-chase").onclick = () => startCityChase();
   $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
   /** Restart whatever is running with the selected weather (weather is part of the scenario,
@@ -830,14 +873,6 @@ async function main(): Promise<void> {
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
-  /** Drift lab (owner rows 90 / 91 / 98): flat pad at noon (no traffic or police on the flat
-   * world), painted course, live tuning panel. */
-  const startDriftLab = () => {
-    startFreeDrive(undefined, undefined, false, 12);
-    driftLab.start(app.player);
-  };
-  $("sc-drift").onclick = () => startDriftLab();
-  $("sc-tune").onclick = () => (driftLab.running ? driftLab.togglePanel() : startDriftLab());
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     // A career run keeps the career's mode (pick it with "New career" in the garage).
@@ -1064,6 +1099,13 @@ async function main(): Promise<void> {
     const n = Number(e.key);
     if (n >= 1 && n <= CAMERA_MODES.length) return rig.choose(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
     switch (e.code) {
+      // Indicator stalk (cosmetic, indicator_stalk.ts): `-` left, `=` right.
+      case "Minus":
+        stalk.toggle(-1);
+        break;
+      case "Equal":
+        stalk.toggle(1);
+        break;
       case "Period":
         frameStep(4);
         break;
@@ -1219,13 +1261,24 @@ async function main(): Promise<void> {
     await runScenario(scParam, Number(params.get("speed") ?? 0));
   } else if (params.get("race")) {
     startRace(params.get("race")!, DEFAULT_CAR);
+  } else if (params.get("drift") === "w") {
+    // ?drift=w[&car=parity_rwd_a]: the handling test pad with the tune panel open.
+    startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
+  } else if (params.get("drift") === "c" || params.get("drift") === "b") {
+    // Old Drift Lab B / C links (the labs are gone, unify 2026-10-21): the test pad.
+    startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
-  } else if (params.get("drift")) {
-    startDriftLab();
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
+  // The hidden handling tune panel: ?tune=1, or F7 in any session.
+  if (params.get("tune") === "1") driftLabW.show(true);
+  window.addEventListener("keydown", (e) => {
+    if (e.code !== "F7" || e.repeat) return;
+    e.preventDefault();
+    driftLabW.toggle();
+  });
   if (params.get("bench")) startBench(Number(params.get("bench")));
   // First frame only once the session's car meshes are in (bounded: a slow or missing file
   // falls back to the proxy and swaps in when it arrives).
@@ -1267,6 +1320,7 @@ async function main(): Promise<void> {
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
     app.input = input;
+    stalk.update(input.steer);
     const device = activeDevice();
     if (source !== app.source || device !== app.device) {
       app.source = source;
@@ -1303,7 +1357,15 @@ async function main(): Promise<void> {
     const policeDraw = sim.policeDraw();
     syncViews(meta, lod.paintOfEntity(trafficDraw));
     const tS = wi[W.tick] / 240;
-    for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
+    for (let o = 0; o < meta.length; o += META_STRIDE) {
+      const view = app.views.get(meta[o]);
+      if (!view) continue;
+      view.setMeta(meta[o + 2], tS);
+      // Police cars indicate from their unit (vehicle_meta bits); traffic gets its lamps from
+      // its draw record in lod.update, the player from the stalk below.
+      if (meta[o + 1] === VEHICLE_KIND.police) view.setIndicators(metaIndicators(meta[o + 2], tS));
+    }
+    app.views.get(app.player)?.setIndicators(stalk.lamps(tS));
     const cur = sim.states();
     const prev = sim.statesPrev();
     const punctures = sim.tirePunctures();
@@ -1350,7 +1412,6 @@ async function main(): Promise<void> {
     scene.addEvents(events);
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
-    driftLab.update();
     if (!crash.playing) hud.pushEvents(events, wi[W.tick]);
     prof.lap("events");
     if (focusTel && focusRec >= 0) {
@@ -1496,6 +1557,7 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
+    driftLabW.frame();
     radioStrip.frame(now);
     prof.lap("ui");
     layout.frame(now);
@@ -1632,6 +1694,9 @@ async function main(): Promise<void> {
     loadReplay,
     runScenario,
     startFreeDrive,
+    startDriftLabW,
+    /** The hidden handling tune panel (F7 / ?tune=1). */
+    tunePanel: driftLabW,
     startCityChase,
     startBench,
     weather,
@@ -1675,6 +1740,15 @@ async function main(): Promise<void> {
     meshTimings,
     /** Crash effects: `fx.stats()`, `fx.setQuality("low" | "med" | "high")` (render/fx). */
     fx,
+    /** Turn signals (e2e/signals.mjs): `probe(true)` records each traffic car's flags and lit
+     * lamps per frame into `rows()` (render/lod.ts IndicatorRow); `stalk` is the player's
+     * cosmetic stalk and `player()` its lit lamps. */
+    indicators: {
+      probe: (on: boolean) => (lod.indicatorProbe = on),
+      rows: () => lod.indicatorRows.map((r) => ({ ...r })),
+      stalk,
+      player: () => app.views.get(app.player)?.indicatorsLit() ?? null,
+    },
   };
   requestAnimationFrame(frame);
   if (abandonedBust) openGarage(abandonedBust);
