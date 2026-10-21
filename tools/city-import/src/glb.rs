@@ -16,7 +16,6 @@ use wp_world::network::{Building, BuildingKind, DecorKind, DistrictKind, LaneKin
 use wp_world::residential;
 use wp_world::surface::{
     is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
-    TERRAIN_RENDER_M,
 };
 use wp_world::terrain::Heightfield;
 
@@ -316,16 +315,15 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
     }
 }
 
-/// Render terrain: [`Heightfield::lowered_coarse`] at [`TERRAIN_RENDER_M`], never above a road.
+/// Render terrain: `coarse` is [`wp_world::surface::drawn_terrain`] (never above a road).
 /// Physics collides with the same surface off the roads (`wp_world::surface::collision_terrain`).
 fn render_terrain(
-    t: &Heightfield,
+    coarse: &Heightfield,
     net: &RoadNetwork,
     ground: &mut [Prim],
     rock: &mut Prim,
     seabed: &mut Prim,
 ) {
-    let coarse = t.lowered_coarse(TERRAIN_RENDER_M);
     let (cx, cy) = (coarse.nx, coarse.ny);
     let z = &coarse.z;
     let pos: Vec<V2> = (0..cy)
@@ -421,7 +419,8 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let terrain = net.terrain.as_ref();
     match terrain {
         Some(t) => {
-            render_terrain(t, net, &mut ground, &mut rock, &mut seabed);
+            let coarse = wp_world::surface::drawn_terrain(map).expect("terrain");
+            render_terrain(&coarse, net, &mut ground, &mut rock, &mut seabed);
             let (lo, hi) = (t.origin, t.max_corner());
             let m = 400.0;
             water.quad(

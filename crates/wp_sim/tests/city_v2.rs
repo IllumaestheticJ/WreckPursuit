@@ -287,7 +287,7 @@ fn solid_terrain_is_the_drawn_terrain() {
     let mut phys = wp_sim::PhysicsWorld::new();
     phys.set_city_ground(&map);
     let raw = net().terrain.as_ref().unwrap();
-    let drawn = raw.lowered_coarse(wp_world::surface::TERRAIN_RENDER_M);
+    let drawn = wp_world::surface::drawn_terrain(&map).unwrap();
     let ground = map.ground.as_ref().unwrap();
     let only_terrain = |_, c: &rapier3d::prelude::Collider| c.shape().as_heightfield().is_some();
     let q = phys.query_pipeline(QueryFilter::default().predicate(&only_terrain));
