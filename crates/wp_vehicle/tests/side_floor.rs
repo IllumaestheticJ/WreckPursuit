@@ -68,15 +68,21 @@ fn launch_yaw(c: &LoadedCar, a: &AssistProfile, slope_deg: f32) -> f32 {
 
 #[test]
 fn roster_launches_straight_on_cambered_roads() {
+    // Re-ranged (unify, 2026-10-21): owner-chosen balance (row 126); revisit after the owner's ×0.45 / 0.50 / 0.55 A/B. On the owner's soft
+    // step-14 RWD rear the worst launch yaws 4.7° (ironside_440 on 3°); limit 5.5° (was 3°).
+    const LIMIT_DEG: f32 = 5.5;
     let a = raw_assists();
     let mut fails = Vec::new();
     for c in roster() {
         for slope in [0.0f32, 1.0, 2.0, 3.0] {
             let y = launch_yaw(&c, &a, slope);
-            if y >= 3.0 {
+            if y >= LIMIT_DEG {
                 fails.push(format!("{} on {slope}°: {y:.1}°", c.def.id));
             }
         }
     }
-    assert!(fails.is_empty(), "launches that yaw ≥ 3°: {fails:?}");
+    assert!(
+        fails.is_empty(),
+        "launches that yaw ≥ {LIMIT_DEG}°: {fails:?}"
+    );
 }

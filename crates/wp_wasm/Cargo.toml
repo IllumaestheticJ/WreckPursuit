@@ -40,6 +40,8 @@ serde_json.workspace = true
 wasm-bindgen.workspace = true
 # Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+# Pure-Rust deflate (no native build step): the embedded data blob (build.rs, src/data.rs).
+miniz_oxide = "0.9"
 
 [dev-dependencies]
 # tests/drawn_colliders.rs: classify which static collider a contact hit (already in the tree
@@ -51,3 +53,7 @@ wasm-opt = false
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
+
+[build-dependencies]
+# Compresses the embedded data blob (build.rs).
+miniz_oxide = "0.9"

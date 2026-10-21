@@ -102,6 +102,9 @@ impl RigVehicle {
         ground: Option<&CityGround>,
     ) -> Self {
         let mut rig = Rig::new(car);
+        // The client predicts its own player's car: the server's sim gives that car the
+        // player steering aids (`wp_sim`, `VehicleKind::Player`), so must the prediction.
+        rig.set_player_input(true);
         if let Some(g) = ground {
             rig.set_city_ground(g.iter().cloned());
         }
@@ -300,7 +303,9 @@ mod tests {
     }
 
     fn start() -> VehicleState {
-        Rig::new(&car()).state()
+        let mut rig = Rig::new(&car());
+        rig.set_player_input(true);
+        rig.state()
     }
 
     /// Client predicts 2 s in lock-step with a server `Rig` (exactly how `wp_sim` steps the
@@ -312,6 +317,8 @@ mod tests {
         let assists = AssistProfile::default();
         let noon = TimeOfDay::from_hours(12.0);
         let mut server = Rig::new(&c);
+        // The server's sim car is the player's: the player steering aids, as the prediction.
+        server.set_player_input(true);
         let mut client = Predictor::new(&c, assists, &server.state(), 0, noon);
         // As on join: the first own-state carries the exact snapshot.
         assert!(client.restore_exact(server.snapshot().as_bytes()));

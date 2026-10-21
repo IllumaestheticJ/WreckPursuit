@@ -4426,6 +4426,7 @@ dependencies = [
 name = "wp_wasm"
 version = "0.1.0"
 dependencies = [
+ "miniz_oxide",
  "postcard",
  "rapier3d",
  "serde",

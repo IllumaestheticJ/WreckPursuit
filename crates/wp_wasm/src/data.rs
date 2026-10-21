@@ -8,11 +8,28 @@ use wp_contracts::{DamageMode, LoadedCar, MaterialDef, ModeTable, TireDef};
 
 include!(concat!(env!("OUT_DIR"), "/embedded_data.rs"));
 
-fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str)> {
-    EMBEDDED
+/// The embedded files' text, inflated once from `EMBEDDED_Z` (see `build.rs`).
+fn blob() -> &'static str {
+    static BLOB: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BLOB.get_or_init(|| {
+        let raw = miniz_oxide::inflate::decompress_to_vec(EMBEDDED_Z)
+            .expect("embedded data blob inflates");
+        String::from_utf8(raw).expect("embedded data is UTF-8")
+    })
+}
+
+/// `(kind, id, file text)` for every embedded data file.
+fn embedded() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    let b = blob();
+    EMBEDDED_INDEX
         .iter()
+        .map(move |(kind, id, off, len)| (*kind, *id, &b[*off..*off + *len]))
+}
+
+fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str)> {
+    embedded()
         .filter(move |(k, _, _)| *k == kind)
-        .map(|(_, id, text)| (*id, *text))
+        .map(|(_, id, text)| (id, text))
 }
 
 /// Every embedded file as a simcli data bundle (`cars/<id>.json`, `modes/arcade.toml`, …), so
@@ -20,11 +37,12 @@ fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str
 pub fn mem_data() -> &'static simcli::MemData {
     static DATA: std::sync::OnceLock<simcli::MemData> = std::sync::OnceLock::new();
     DATA.get_or_init(|| {
-        let files = EMBEDDED
-            .iter()
+        let files = embedded()
             .map(|(kind, id, text)| {
-                let ext = if *kind == "modes" { "toml" } else { "json" };
-                (format!("{kind}/{id}.{ext}"), text.to_string())
+                let ext = if kind == "modes" { "toml" } else { "json" };
+                // Parity cars load like any car (`cars/<id>.json`); only the roster lists skip them.
+                let dir = if kind == "parity" { "cars" } else { kind };
+                (format!("{dir}/{id}.{ext}"), text.to_string())
             })
             .collect();
         simcli::MemData { files }
@@ -36,9 +54,17 @@ pub fn car_ids() -> Vec<String> {
     files("cars").map(|(id, _)| id.to_string()).collect()
 }
 
-/// Parse and resolve an embedded car (definition + tires + lattice + materials).
+/// Ids of the Drift Lab W reference-parity test cars (`data/cars/parity/*.json`), sorted.
+/// Not in [`car_ids`] (the roster), but [`load_car`] and scenarios load them by id.
+pub fn parity_car_ids() -> Vec<String> {
+    files("parity").map(|(id, _)| id.to_string()).collect()
+}
+
+/// Parse and resolve an embedded car (definition + tires + lattice + materials); roster or
+/// parity car.
 pub fn load_car(car_id: &str) -> Result<LoadedCar, String> {
     let (_, text) = files("cars")
+        .chain(files("parity"))
         .find(|(id, _)| *id == car_id)
         .ok_or_else(|| format!("unknown car {car_id:?} (known: {:?})", car_ids()))?;
     let def = wp_contracts::parse_vehicle_def(car_id, text).map_err(|e| e.to_string())?;
@@ -142,6 +168,18 @@ mod tests {
     }
 
     #[test]
+    fn parity_cars_load_but_are_not_in_the_roster() {
+        let parity = parity_car_ids();
+        assert_eq!(parity.len(), 4, "{parity:?}");
+        let roster = car_ids();
+        for id in &parity {
+            assert!(!roster.contains(id), "{id} is in the roster");
+            load_car(id).unwrap_or_else(|e| panic!("{id}: {e}"));
+            simcli::data::load_car(mem_data(), id).unwrap_or_else(|e| panic!("{id}: {e}"));
+        }
+    }
+
+    #[test]
     fn mem_data_loads_through_simcli() {
         let car = simcli::data::load_car(mem_data(), "debug_coupe").unwrap();
         assert_eq!(car.def.id, "debug_coupe");
@@ -158,5 +196,22 @@ mod tests {
             mode_table(DamageMode::Simulation).unwrap().mode,
             DamageMode::Simulation
         );
+    }
+}
+
+#[cfg(test)]
+mod parity_session_tests {
+    use super::*;
+
+    /// Drift Lab W in the browser: a free-drive session with each parity car starts (car,
+    /// panels and all), as `?drift=w` does.
+    #[test]
+    fn parity_cars_start_a_free_drive_session() {
+        for id in parity_car_ids() {
+            let sc = crate::scenario::free_drive(&id, DamageMode::Arcade, false);
+            let mut s =
+                crate::session::Session::new(sc, false).unwrap_or_else(|e| panic!("{id}: {e}"));
+            s.step(1.0 / 60.0);
+        }
     }
 }
