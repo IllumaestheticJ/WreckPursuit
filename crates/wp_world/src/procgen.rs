@@ -52,7 +52,13 @@ const RAMP_PARALLEL_M: f32 = 90.0;
 /// Ramp lane centre beside a carriageway (from the carriageway centreline), m.
 const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
 /// Ramp terminal junctions on a crossing row, from the highway centreline, m.
-const TERMINAL_X_M: f32 = 22.0;
+///
+/// 21 m (main had 22 m): with round 12's painted median on two-way arterials (3 m) the
+/// crossing rows' junction setbacks grew by 1.5 m at each end, and the street block between
+/// the first column off the highway (±55 m) and the terminal came out exactly 12 m long, the
+/// shortest lane `default_city_shape` allows. The ramp's inner paved edge stays 3.4 m clear of
+/// the carriageway's outer shoulder.
+const TERMINAL_X_M: f32 = 21.0;
 /// Flat run of a ramp into its terminal junction, m.
 const TERMINAL_FLAT_M: f32 = 15.0;
 /// Ramp speed limit, m/s.
