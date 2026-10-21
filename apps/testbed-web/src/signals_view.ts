@@ -1,5 +1,6 @@
 // Traffic signals: one mast-arm head over each signalised approach (at the stop line) plus a
-// far-side pedestal head across the junction, and a white stop line. Static geometry comes from
+// far-side pedestal head across the junction (the stop line is part of the road markings,
+// markings_view.ts). Static geometry comes from
 // signal_heads() once per session; per-frame states from signal_states() (one byte per head)
 // only recolour lamps whose state changed. One InstancedMesh per part keeps it to a handful of
 // draw calls for the whole city.
@@ -72,12 +73,6 @@ export class SignalView {
       new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.8 }),
       inst,
     );
-    const stopMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.9 });
-    // Painted on the asphalt: draw over the road instead of z-fighting with it.
-    stopMat.polygonOffset = true;
-    stopMat.polygonOffsetFactor = -3;
-    stopMat.polygonOffsetUnits = -12;
-    const stops = instanced(new THREE.BoxGeometry(1, 0.45, 0.02), stopMat, n);
     const lampGeo = new THREE.SphereGeometry(0.13, 10, 8);
     this.lamps = [0, 1, 2].map(() => {
       const m = instanced(lampGeo.clone(), new THREE.MeshBasicMaterial({ toneMapped: false }), inst);
@@ -97,7 +92,6 @@ export class SignalView {
     for (let h = 0; h < n; h++) {
       const o = h * SIGNAL_HEAD_STRIDE;
       const [x, y, z, yaw] = [heads[o + SH.x], heads[o + SH.y], heads[o + SH.z], heads[o + SH.yaw]];
-      const left = heads[o + SH.left];
       const right = heads[o + SH.right];
       const radius = heads[o + SH.radius];
       const cz = heads[o + SH.centreZ];
@@ -108,11 +102,6 @@ export class SignalView {
       const ry = -fx;
       q.setFromAxisAngle(zAxis, yaw);
       const poleR = right + POLE_CURB_GAP;
-
-      // Stop line across the approach's lanes.
-      const mid = (left + right) / 2;
-      m4.compose(v.set(x + rx * mid, y + ry * mid, z + 0.012), q, s.set(right - left, 1, 1));
-      stops.setMatrixAt(h, m4);
 
       // Near side: tall pole at the right curb, arm over the lanes, head at the lane centre.
       m4.compose(v.set(x + rx * poleR, y + ry * poleR, z), q, s.set(1, 1, NEAR_POLE_H));
@@ -131,7 +120,7 @@ export class SignalView {
       poles.setMatrixAt(h * 2 + 1, m4);
       this.placeHead(housings, h * 2 + 1, px, py, pz + FAR_POLE_H - 0.45, fx, fy, q, m4, one);
     }
-    this.parts = [poles, arms, housings, stops];
+    this.parts = [poles, arms, housings];
     this.group.add(...this.parts, ...this.lamps, this.glow);
   }
 
