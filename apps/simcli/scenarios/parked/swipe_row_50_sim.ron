@@ -1,0 +1,31 @@
+// Owner playtest 2026-10-21 "parked cars don't take damage" (lead helper, lead/parked-signals).
+// A debug sedan side-swipes a row of four parked cars at 50 km/h (0.2 m overlap with the row's
+// kerb-side line, 1.8 m bumper gaps), then brakes. Every car it clips is promoted and dents
+// (Simulation mode table); a clipped car shoved into the next one wakes and can dent that too.
+(
+    name: "parked_swipe_row_50_sim",
+    seed: 2111,
+    mode: Simulation,
+    assists: ai,
+    parked: [
+        (pos: (0.0, 20.0, 0.0)),
+        (pos: (0.0, 26.3, 0.0)),
+        (pos: (0.0, 32.6, 0.0)),
+        (pos: (0.0, 38.9, 0.0)),
+    ],
+    entities: [
+        (id: "car", car: "debug_sedan", pos: (1.65, 0.0, 0.0), speed_mps: 13.9, driver: cruise(target_mps: 13.9, until_s: 3.0),
+            inputs: [(t_s: 3.0, input: (brake: 1.0)), (t_s: 4.5, input: ())]),
+    ],
+    duration_s: 6.0,
+    hash_every: 60,
+    expect: [
+        // Measured 2026-10-21: 1 parked car dented 0.314 m (health 0.787, a part torn off,
+        // glass broken), shoved 4.9 m; the striker 0.556 m / 0.80.
+        world_metric(name: "parked_dented", min: 1.0, max: 4.0),
+        world_metric(name: "parked_crush_max_m", min: 0.1, max: 0.7),
+        world_metric(name: "parked_health_min", min: 0.5, max: 0.95),
+        world_metric(name: "parked_moved_max_m", min: 0.5, max: 9.0),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+    ],
+)
