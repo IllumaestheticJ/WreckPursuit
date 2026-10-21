@@ -69,7 +69,7 @@ All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md
    grid from `wp_race::{RaceRules, Course}` and forward civilian-contact DQs to the judge. Ask:
    does `wp_race` want `OpponentEvent::Disqualified` as an input or does it detect contacts
    itself?
-5. **Lead (`wp_sim`): slipstream hook — one setter + one line.** The draft model is done
+5. ~~Lead (`wp_sim`): slipstream hook~~ — **done** (2026-10-21, branch `claude/gifted-gauss-y4n7mo`): `Sim::set_drag_scale` landed as proposed, the `sim-draft-hook` feature gate is gone, `draft::slipstream` helper added, `wp_race::AiEntrants` turns `RaceConfig::draft` on and exposes `slipstream()`. Original request kept below for reference. The draft model is done
    (`wp_opponent::draft`); applying it needs the sim to multiply each vehicle's aero drag.
    Proposed patch (exact no-op until someone calls the setter, so no golden changes; tested
    locally with the feature-gated test below, then reverted — this branch does not touch

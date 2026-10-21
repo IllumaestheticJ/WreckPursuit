@@ -4,9 +4,12 @@
 //! can call it once per tick and multiply each vehicle's aerodynamic drag by the result:
 //!
 //! ```text
-//! scales = wp_opponent::draft::drag_scales(&bodies, &DraftParams::default());
-//! effects.drag_scale *= scales[i];   // before VehicleSim::apply_damage_effects
+//! for (e, k) in wp_opponent::draft::slipstream(&vehicle_obs, &DraftParams::default()) {
+//!     sim.set_drag_scale(e, k)?;     // wp_sim multiplies the car's aero drag by k
+//! }
 //! ```
+//!
+//! Apply it to every vehicle in the race, players included: the tow is physics, not AI.
 //!
 //! Model (per follower, strongest leader wins, no stacking):
 //! - the leader must move faster than [`DraftParams::min_speed_mps`] and the follower must
@@ -126,6 +129,20 @@ pub fn drag_scales(bodies: &[DraftBody], p: &DraftParams) -> Vec<f32> {
                 .fold(0.0f32, |m, (_, l)| m.max(reduction(f, l, p)));
             1.0 - best
         })
+        .collect()
+}
+
+/// [`drag_scales`] for the field's vehicle observations, paired with their entities: the
+/// per-tick input for `wp_sim::Sim::set_drag_scale`.
+pub fn slipstream(
+    vehicles: &[crate::field::VehicleObs],
+    p: &DraftParams,
+) -> Vec<(wp_contracts::EntityId, f32)> {
+    let bodies: Vec<DraftBody> = vehicles.iter().map(DraftBody::from_obs).collect();
+    vehicles
+        .iter()
+        .zip(drag_scales(&bodies, p))
+        .map(|(v, k)| (v.entity, k))
         .collect()
 }
 

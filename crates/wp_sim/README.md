@@ -31,6 +31,13 @@ every contact. Disabling the vehicle system (`set_systems`) also disables the ch
 - Slot reserves: police stop spawning at 64 − 16 vehicles, traffic at 64 − 24.
 - `police()` exposes the police system; `examples/police_probe.rs` prints a chase timeline.
 
+## Slipstream hook
+- `set_drag_scale(id, k)`: multiplies the car's aero drag by `k` (clamped 0..2) on top of the
+  damage model's `drag_scale`, every tick until changed. Default 1.0 is an exact no-op (no
+  golden changes). Race code recomputes it each tick from `wp_opponent::draft::slipstream`
+  (see `wp_race::AiEntrants::slipstream`). Applied in the damage step, so it has no effect
+  with the damage system disabled.
+
 ## Known gaps
 - Contacts reach `wp_damage`, but damage is still the prompt-01 stub until workstream 03 merges.
 - Static geometry is boxes only (`add_static_box`, TB-3); simcli/testbed scenarios do not create them yet.

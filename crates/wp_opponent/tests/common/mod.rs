@@ -90,8 +90,8 @@ pub struct Setup {
     pub heat: Vec<(EntityId, f32)>,
     /// Keep running to `max_s` after every racer has left the race (chases).
     pub run_full: bool,
-    /// Apply the slipstream model (`wp_opponent::draft`) to every vehicle each tick. Needs
-    /// the `sim-draft-hook` feature (`Sim::set_drag_scale`); ignored without it.
+    /// Apply the slipstream model (`wp_opponent::draft`) to every vehicle each tick
+    /// (`Sim::set_drag_scale`).
     pub draft: bool,
 }
 
@@ -220,7 +220,7 @@ pub fn run(
             ..CorridorOptions::default()
         },
         signals: !setup.closed_roads && std::env::var("WP_NO_SIGNALS").is_err(),
-        draft: setup.draft && cfg!(feature = "sim-draft-hook"),
+        draft: setup.draft,
         ..RaceConfig::default()
     };
     // Entities are assigned 1.. in spawn order, before any other vehicle.
@@ -294,7 +294,6 @@ pub fn run(
     let mut stuck_s = vec![0.0f32; entities.len()];
     let mut max_stuck_s = vec![0.0f32; entities.len()];
     let mut wait_s = vec![0.0f32; entities.len()];
-    #[allow(unused_mut)]
     let mut tow_s = vec![0.0f32; entities.len()];
     let mut max_wait_s = vec![0.0f32; entities.len()];
     let max_ticks = (setup.max_s * 240.0) as u64;
@@ -332,14 +331,10 @@ pub fn run(
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
         }
-        #[cfg(feature = "sim-draft-hook")]
         if setup.draft {
-            let bodies: Vec<wp_opponent::DraftBody> =
-                obs.iter().map(wp_opponent::DraftBody::from_obs).collect();
-            let scales = wp_opponent::drag_scales(&bodies, &wp_opponent::DraftParams::default());
-            for (o, k) in obs.iter().zip(scales) {
-                sim.set_drag_scale(o.entity, k).unwrap();
-                if let Some(i) = entities.iter().position(|e| *e == o.entity) {
+            for (e, k) in wp_opponent::slipstream(&obs, &wp_opponent::DraftParams::default()) {
+                sim.set_drag_scale(e, k).unwrap();
+                if let Some(i) = entities.iter().position(|x| *x == e) {
                     if k < 0.85 {
                         tow_s[i] += 1.0 / 240.0;
                     }

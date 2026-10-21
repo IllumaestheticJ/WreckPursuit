@@ -193,9 +193,13 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
             }
         }
         heat.observe(&events);
-        let inputs = ai.tick(&judge, tick, sim.world(), &obs(&sim), &events, &heat);
+        let vehicles = obs(&sim);
+        let inputs = ai.tick(&judge, tick, sim.world(), &vehicles, &events, &heat);
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
+        }
+        for (e, k) in ai.slipstream(&vehicles) {
+            sim.set_drag_scale(e, k).unwrap();
         }
         sim.step_fixed();
         events = sim.drain_events();
