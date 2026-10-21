@@ -50,6 +50,9 @@ export interface VehicleInfo {
   mounted_components: string[];
   surfaces: string[];
   spawn_pos: [number, number, number];
+  /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
+   * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
+  police_unit?: number | null;
 }
 
 export interface AssistProfile {
