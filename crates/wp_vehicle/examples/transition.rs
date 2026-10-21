@@ -319,6 +319,16 @@ fn configs() -> Vec<Config> {
             });
         }
     }
+    // Grip-balance's default "balance: grip" (`GripBalance::grip()`), both steerings.
+    for (steer_name, steer) in [("plain", p), ("VR", vr)] {
+        let full: &'static str = Box::leak(format!("balance grip · {steer_name}").into_boxed_str());
+        v.push(Config {
+            name: full,
+            plain: steer,
+            ride: RideTune::lab_default(),
+            grip: Some(GripBalance::grip()),
+        });
+    }
     // Grip-balance's "drift: best (test)" preset: VR steering + `GripBalance::drift_best()`.
     v.push(Config {
         name: "drift best · VR",
@@ -430,6 +440,9 @@ struct V2Score {
     flicks: usize,
     spun: usize,
     back: usize,
+    /// Held-set cases that swung through to the other side (W's over-catch) / spun.
+    hold_swapped: usize,
+    hold_spun: usize,
 }
 
 /// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
@@ -446,8 +459,15 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
                     entry_deg: e,
                     throttle: 1.0,
                 };
-                if plain_hold(c, &a, d, 40.0, g).held {
+                let m = plain_hold(c, &a, d, 40.0, g);
+                if m.held {
                     sc.held += 1;
+                }
+                if m.side_swaps > 0 {
+                    sc.hold_swapped += 1;
+                }
+                if m.spun {
+                    sc.hold_spun += 1;
                 }
             }
         }
@@ -576,6 +596,7 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                 serde_json::json!({
                     "config": cfg.name, "held": sc.held, "caught": sc.caught,
                     "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
+                    "hold_swapped": sc.hold_swapped, "hold_spun": sc.hold_spun,
                     "steer": steer,
                 })
             );
