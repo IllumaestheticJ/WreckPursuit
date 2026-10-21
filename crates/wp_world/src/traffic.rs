@@ -1233,6 +1233,15 @@ impl Traffic {
             if sg.length - a.s > CAR_LENGTH_M + 4.0 {
                 continue;
             }
+            // Not against its own red / amber: the booking would lapse before the green (and
+            // meanwhile hold the crossing traffic that has it).
+            let red = sg
+                .lane()
+                .and_then(|l| map.lane_signal(l))
+                .is_some_and(|(st, _)| matches!(st, SignalState::Red | SignalState::Yellow));
+            if red {
+                continue;
+            }
             // Room on the exit (the box rule would hold it anyway).
             let tgt = map.seg(c).next[0];
             if self.lists[tgt as usize]
