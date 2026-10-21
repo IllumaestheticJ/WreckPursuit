@@ -12,7 +12,8 @@ import { chromium } from "playwright-core";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 5198;
-const URL = `http://localhost:${PORT}/?drift=w`;
+// The pad with the hidden lab (?tune=1) on top: the flick / transition settings (row 137).
+const URL = `http://localhost:${PORT}/?drift=w&tune=1`;
 const preview = process.env.PREVIEW !== "0";
 const server = spawn("npx", preview ? ["vite", "preview", "--port", String(PORT), "--strictPort"] : ["vite", "--port", String(PORT), "--strictPort"], {
   cwd: root,
@@ -77,7 +78,7 @@ check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Ma
 await page.locator("#drift-lab-w button", { hasText: "spin model v2 (ellipse)" }).click();
 const v2 = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
 check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.7) < 1e-6 && Math.abs(v2.plain.swing_rate - 2.08) < 1e-6, `spin model v2 preset ${JSON.stringify(v2)}`);
-await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
+await page.locator("#drift-lab-w button", { hasText: "lab · transition: swing rack (test)" }).click();
 await page.waitForTimeout(300);
 const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
 check(Math.abs(tr.plain.swing_rate - 2.5) < 1e-6 && Math.abs(tr.ride.yaw_inertia - 1.5) < 1e-6 && tr.grip.lock_mode === "smart" && Math.abs(tr.grip.rear_stiffness - 0.45) < 1e-6, `transition preset (balance step 14) ${JSON.stringify(tr)}`);
@@ -368,6 +369,14 @@ const handling = () =>
   check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "F10 shows the tune panel");
   await page.keyboard.press("F10");
   check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "none", "F10 hides it again");
+}
+// Row 137: the pad alone (no ?tune=1) has no flick / transition settings.
+await page.goto(`http://localhost:${PORT}/?drift=w`);
+await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+await page.waitForTimeout(1000);
+{
+  const labRows = await page.evaluate(() => [...document.querySelectorAll("#drift-lab-w *")].filter((e) => e.children.length === 0 && (e.textContent ?? "").includes("lab · ")).length);
+  check(labRows === 0 && (await page.locator("#drift-lab-w-trans").count()) === 0, `pad without ?tune=1: no flick / transition settings (${labRows})`);
 }
 await freeDrive("?tune=1");
 check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "?tune=1 shows the tune panel");

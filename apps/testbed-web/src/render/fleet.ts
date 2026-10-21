@@ -19,7 +19,7 @@
 // unit (render/lights.ts patterns); per-unit numbers only appear once the car is promoted.
 import * as THREE from "three";
 import type { CarMeshJson, MaterialJson, PartMaterial } from "./panels";
-import { applyCarEnv, carMidMeshNow, loadCarMidMesh, rgbColour } from "./panels";
+import { applyCarEnv, carMidMeshNow, indicatorRight, isIndicatorPart, loadCarMidMesh, rgbColour } from "./panels";
 import { hasPoliceLivery, liveryBaseColour, liveryTexture } from "./livery";
 import { LENS_ON } from "./lights";
 import { sim, type CarModelInfo } from "../wasm/sim";
@@ -51,17 +51,50 @@ export const IND = { left: 1, right: 2 } as const;
 export const INDICATOR_HZ = 1.5;
 /** Whether indicators are in the lit half of their blink at time `t` (s). */
 export const indicatorPhaseOn = (t: number): boolean => (t * INDICATOR_HZ) % 1 < 0.5;
-/** Unlit indicator lens (dark amber, below 1 so it never reaches the bloom pass). */
-const UNLIT_IND = 0x3a2a12;
-/** Lit indicator glow over the amber (greybox; low-poly dark uses `PALETTE.brakeGlow`): above 1
+/** Unlit indicator lens brightness over its hue (a dark lens, well below the bloom pass). */
+const IND_UNLIT = 0.12;
+/** Lit indicator glow over the hue (greybox; low-poly dark uses `PALETTE.brakeGlow`): above 1
  * so it reaches the bloom pass and reads in daylight. */
-const IND_GLOW = 1.6;
+const IND_GLOW = 1.0;
+/** Turn-signal amber: deeper than the hazard-flash palette amber, so a lit lens reads as amber
+ * rather than tone-mapping to cream (playtest row 136). */
+const IND_AMBER: Hex = 0xff6400;
 
-/** Indicator lamp colour into `out`: lit amber (HDR, blooms) or the dark lens. */
-export function indicatorColour(out: THREE.Color, lit: boolean): THREE.Color {
-  if (!lit) return out.setHex(UNLIT_IND);
-  return out.setHex(PALETTE.hazard).multiplyScalar(artStyle.lowpoly ? PALETTE.brakeGlow : IND_GLOW);
+/** Indicator lens hue: amber, or red for red-on-red rear lamps (mesh parts in `taillight`;
+ * the saturated brake red, which stays red rather than pink once it glows over 1). */
+export function indicatorHue(red: boolean): Hex {
+  return red ? TAIL.brake : IND_AMBER;
 }
+
+/** Indicator brightness over its hue: lit (HDR, blooms) or the dark lens. The fleet's indicator
+ * geometry carries the hue as vertex colour and this as its instance colour (grey). */
+export function indicatorLevel(lit: boolean): number {
+  return lit ? (artStyle.lowpoly ? PALETTE.brakeGlow : IND_GLOW) : IND_UNLIT;
+}
+
+/** Indicator lamp colour into `out`: lit (HDR, blooms) or the dark lens; amber unless `red`. */
+export function indicatorColour(out: THREE.Color, lit: boolean, red = false): THREE.Color {
+  return out.setHex(indicatorHue(red)).multiplyScalar(indicatorLevel(lit));
+}
+
+/** Which corner lamps (front / rear) a mesh has as indicator lens parts (side repeaters do not
+ * count); the box markers stand in for the rest. Once per mesh. */
+export function meshIndicatorEnds(mesh: CarMeshJson | null | undefined): { front: boolean; rear: boolean } {
+  if (!mesh) return NO_IND_ENDS;
+  let hit = indEndsCache.get(mesh);
+  if (!hit) {
+    hit = { front: false, rear: false };
+    for (const p of mesh.parts) {
+      if (!isIndicatorPart(p.name)) continue;
+      if (p.name.startsWith("indicator_front")) hit.front = true;
+      else if (p.name.startsWith("indicator_rear")) hit.rear = true;
+    }
+    indEndsCache.set(mesh, hit);
+  }
+  return hit;
+}
+const NO_IND_ENDS = { front: false, rear: false } as const;
+const indEndsCache = new WeakMap<CarMeshJson, { front: boolean; rear: boolean }>();
 
 
 /**
@@ -126,7 +159,9 @@ export interface Geoms {
   tail: THREE.BufferGeometry;
   /** Head lamps (instance colour). */
   head: THREE.BufferGeometry;
-  /** Left / right indicator lamps, front and rear corner each (instance colour = lit / unlit). */
+  /** Left / right indicator lamps: the mesh's indicator lens parts of that side (front, rear,
+   * side repeaters; vertex colour = hue), box markers on the corners the mesh has none for;
+   * instance colour = brightness (`indicatorLevel`). */
   indL: THREE.BufferGeometry;
   indR: THREE.BufferGeometry;
 }
@@ -274,18 +309,28 @@ function lampMarkers(info: CarModelInfo, front: number, rear: number): { head: T
 }
 
 /**
- * Indicator lamps on the four corners (just below the head / tail lamps, wrapping round the
+ * Indicator box markers on the corners (just below the head / tail lamps, wrapping round the
  * corner so they show from the front or rear and the side): `left` (x < 0) and `right`
- * geometries, each the front and the rear lamp. `front` / `rear` are the body's nose / tail y.
- * Shared by the fleet and VehicleView so lamps match either side of a promotion.
+ * geometries, each the front and the rear lamp (vertex colour = amber hue). `front` / `rear`
+ * are the body's nose / tail y. `skip`: corners the panel mesh has indicator lenses for (no
+ * box there; a side can come out empty). The fallback for meshes without indicator parts and
+ * the greybox proxy; shared by the fleet and VehicleView so lamps match either side of a
+ * promotion.
  */
-export function indicatorMarkers(info: { body_size_m: [number, number, number] | number[] }, front: number, rear: number): { left: THREE.BufferGeometry; right: THREE.BufferGeometry } {
+export function indicatorMarkers(
+  info: { body_size_m: [number, number, number] | number[] },
+  front: number,
+  rear: number,
+  skip: { front: boolean; rear: boolean } = NO_IND_ENDS,
+): { left: THREE.BufferGeometry; right: THREE.BufferGeometry } {
   const [w, , h] = info.body_size_m;
-  const side = (sx: number) =>
-    join([
-      colourBox(0.16, 0.2, 0.09, sx * (w / 2 - 0.06), front - 0.08, h * 0.45 - 0.15, 0xffffff),
-      colourBox(0.16, 0.2, 0.09, sx * (w / 2 - 0.06), rear + 0.08, h * 0.5 - 0.14, 0xffffff),
-    ]);
+  const amber = indicatorHue(false);
+  const side = (sx: number) => {
+    const boxes: THREE.BufferGeometry[] = [];
+    if (!skip.front) boxes.push(colourBox(0.16, 0.2, 0.09, sx * (w / 2 - 0.06), front - 0.08, h * 0.45 - 0.15, amber));
+    if (!skip.rear) boxes.push(colourBox(0.16, 0.2, 0.09, sx * (w / 2 - 0.06), rear + 0.08, h * 0.5 - 0.14, amber));
+    return join(boxes);
+  };
   return { left: side(-1), right: side(1) };
 }
 
@@ -315,12 +360,17 @@ function computeFrontRear(mesh: CarMeshJson): { front: number; rear: number } | 
  * The car's panel mesh at rest (chassis space), wheels placed on their hubs. `police`: a police
  * model draws its livery scheme's body panels apart (`liv`, textured) and its light-bar lenses as
  * lens geometry (`lensL` …); otherwise livery panels are paint and lenses are detail.
+ * `indicators`: the mesh's indicator lens parts go to `indL` / `indR` (blinked per instance);
+ * otherwise (parked props, the police fleet: never blinking) they stay in their material's
+ * geometry (amber detail / tail lamps), and `indL` / `indR` are the box markers.
  */
-export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false): Geoms {
+export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false, indicators = false): Geoms {
   const paint: Chunk[] = [];
   const detail: Chunk[] = [];
   const tail: Chunk[] = [];
   const liv: Chunk[] = [];
+  const indL: Chunk[] = [];
+  const indR: Chunk[] = [];
   const lens: Record<"L" | "R" | "W" | "A", Chunk[]> = { L: [], R: [], W: [], A: [] };
   const textured = police && hasPoliceLivery(mesh);
   let front = -Infinity;
@@ -347,6 +397,14 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false)
     }
     const chunk: Chunk = { pos, idx: p.indices, rgb: 0xffffff, uv: p.uvs };
     const m = p.material;
+    if (p.wheel == null && isIndicatorPart(p.name)) {
+      // Indicator lenses: hue in the vertex colour, the instance colour is the blink brightness.
+      // Never a light-bar channel (a police car's amber indicators are not advisors).
+      if (indicators) (indicatorRight(p.name, p.positions_mm) ? indR : indL).push({ ...chunk, rgb: indicatorHue(m === "taillight") });
+      else if (m === "taillight") tail.push(chunk);
+      else detail.push({ ...chunk, rgb: detailColour(m, mesh, new THREE.Color()) });
+      continue;
+    }
     if (m === "livery" && textured) liv.push(chunk);
     else if (m === "paint" || m === "livery") paint.push(chunk);
     else if (m === "taillight") tail.push(chunk);
@@ -363,7 +421,8 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false)
   const fy = Number.isFinite(front) ? front : l / 2;
   const ry = Number.isFinite(rear) ? rear : -l / 2;
   const lamps = lampMarkers(info, fy, ry);
-  const ind = indicatorMarkers(info, fy, ry);
+  // Box markers only on corners without mesh lenses (all four when the lenses are not apart).
+  const ind = indicatorMarkers(info, fy, ry, indicators ? meshIndicatorEnds(mesh) : NO_IND_ENDS);
   const lensGeo = (c: Chunk[]) => (c.length ? merge(c) : null);
   const hasLens = lens.L.length + lens.R.length > 0;
   // The mesh's own tail-light parts sit inside the shell; the markers are what shows.
@@ -373,8 +432,8 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, police = false)
     detail: merge(detail),
     tail: join([merge(tail), lamps.tail]),
     head: lamps.head,
-    indL: ind.left,
-    indR: ind.right,
+    indL: indL.length ? join([merge(indL), ind.left]) : ind.left,
+    indR: indR.length ? join([merge(indR), ind.right]) : ind.right,
     lensL: hasLens ? lensGeo(lens.L) : null,
     lensR: hasLens ? lensGeo(lens.R) : null,
     lensW: hasLens ? lensGeo(lens.W) : null,
@@ -420,7 +479,8 @@ export class InstancedCar {
   readonly tail: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
   readonly bar: THREE.InstancedMesh | null;
-  /** Left / right indicator lamps (two draw calls; only for moving traffic, `indicators`). */
+  /** Left / right indicator lamps (two draw calls; only for moving traffic, `indicators`):
+   * the mesh's indicator lenses (`fullGeoms`) or the box markers. */
   readonly indL: THREE.InstancedMesh | null;
   readonly indR: THREE.InstancedMesh | null;
   /** Every instanced mesh of the car (built once: `put` runs per instance per frame). */
@@ -447,8 +507,9 @@ export class InstancedCar {
     } else {
       this.bar = null;
     }
-    this.indL = indicators ? mk(g.indL, mats.lamp) : null;
-    this.indR = indicators ? mk(g.indR, mats.lamp) : null;
+    // Vertex colour (hue) × instance colour (brightness), as the light-bar lenses.
+    this.indL = indicators ? mk(g.indL, mats.lens) : null;
+    this.indR = indicators ? mk(g.indR, mats.lens) : null;
     this.liv = g.liv && livMat ? mk(g.liv, livMat) : null;
     const lensMesh = (geo: THREE.BufferGeometry | null | undefined) => (geo ? mk(geo, mats.lens) : null);
     this.lens = g.lensL || g.lensR ? [lensMesh(g.lensL), lensMesh(g.lensR), lensMesh(g.lensW), lensMesh(g.lensA)] : null;
@@ -608,7 +669,8 @@ const tmpHead = new THREE.Color(HEAD);
 const tmpPaint = new THREE.Color();
 const tmpTail = new THREE.Color();
 const tmpHeadStyled = new THREE.Color();
-/** Lit / unlit indicator colours (refreshed per art style by `Fleet.begin`). */
+/** Lit / unlit indicator brightness as grey instance colours (refreshed per art style by
+ * `Fleet.begin`; the hue is the geometry's vertex colour). */
 const tmpIndOn = new THREE.Color();
 const tmpIndOff = new THREE.Color();
 const tmpRead = new THREE.Color();
@@ -655,7 +717,7 @@ export class FleetModel {
 
   private setMesh(mesh: CarMeshJson): void {
     if (this.full) return;
-    const g = fullGeoms(mesh, this.info, this.police);
+    const g = fullGeoms(mesh, this.info, this.police, !this.police);
     if (g.liv) {
       const tex = liveryTexture(mesh);
       this.livMat = new THREE.MeshStandardMaterial({ map: tex, flatShading: true, metalness: 0.25, roughness: 0.55 });
@@ -722,8 +784,10 @@ export class Fleet {
 
   begin(): void {
     if (this.styleVersion !== artStyle.version) this.applyStyle();
-    indicatorColour(tmpIndOn, true);
-    indicatorColour(tmpIndOff, false);
+    const on = indicatorLevel(true);
+    const off = indicatorLevel(false);
+    tmpIndOn.setRGB(on, on, on);
+    tmpIndOff.setRGB(off, off, off);
     for (const m of this.models.values()) m.begin();
   }
 

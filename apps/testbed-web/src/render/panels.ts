@@ -990,17 +990,49 @@ export function debrisCount(): number {
   return debris.length;
 }
 
+/** Mesh parts that are indicator lenses (`indicator_front_l`, `indicator_rear_r`,
+ * `indicator_side_l` …; data/panels mesh contract: kind `light`, `_l` = x < 0). */
+export function isIndicatorPart(name: string): boolean {
+  return name.startsWith("indicator_");
+}
+
+/** Side of an indicator part: by its `_l` / `_r` suffix, else by the sign of its centroid x
+ * (`positions`: xyz per vertex, chassis space, any unit). */
+export function indicatorRight(name: string, positions: ArrayLike<number>): boolean {
+  if (name.endsWith("_r")) return true;
+  if (name.endsWith("_l")) return false;
+  let cx = 0;
+  for (let i = 0; i < positions.length; i += 3) cx += positions[i];
+  return cx > 0;
+}
+
 /** Options of a PanelBody. */
 export interface PanelBodyOptions {
   /** Keep the given paint colour even if the mesh file tints `paint` (traffic, police, parked
    * cars: the instanced fleet draws them in that colour, so a promotion must not recolour). */
   keepPaint?: boolean;
+  /**
+   * Blink materials of the mesh's indicator lenses (parts named `indicator_*`, render/fleet.ts
+   * isIndicatorPart), per side (left = `_l`, x < 0): `amber`, and `red` for red-on-red rear
+   * lamps (parts in `taillight`). Unset: indicator parts draw their own material (amber lens,
+   * tail lamp) like any lamp.
+   */
+  indicators?: { amber: { left: THREE.Material; right: THREE.Material }; red: { left: THREE.Material; right: THREE.Material } };
 }
 
 /** Material keys PanelBody.applyStyle leaves alone (lamps belong to their owner; flashing lenses,
  * amber and underglow are driven by emissive). */
 const UNSTYLED = (k: string) =>
-  k === "headlight" || k === "headlight@r" || k === "taillight" || k.startsWith("lightbar_") || k === "emissive_amber" || k === "underglow";
+  k === "headlight" ||
+  k === "headlight@r" ||
+  k === "taillight" ||
+  k.startsWith("lightbar_") ||
+  k === "emissive_amber" ||
+  k === "underglow" ||
+  k.startsWith(IND_KEY);
+/** Material keys of indicator lenses (`PanelBodyOptions.indicators`): IND_KEY + "amber" / "red",
+ * with "@r" on the right. */
+const IND_KEY = "indicator:";
 /** Mesh-file slots that get one material per side (left x < 0, right "@r"). */
 const SIDED = (m: string) => m === "headlight" || m.startsWith("lightbar_");
 const BLACK = new THREE.Color(0x000000);
@@ -1069,6 +1101,8 @@ export class PanelBody {
   /** Paint colour the livery scheme asks for (mirrors, plain paint parts), kept over art styles. */
   private liveryBase: THREE.Color | null = null;
   private readonly keepPaint: boolean;
+  /** Indicator parts draw the owner's blink materials (`PanelBodyOptions.indicators`). */
+  private indicatorLenses = false;
   private onReady: (() => void) | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
@@ -1106,6 +1140,14 @@ export class PanelBody {
       underglow: sharedUnderglow(),
     };
     for (const m of [this.mats.paint, this.mats.livery]) applyCarEnv(m, true);
+    const ind = opts.indicators;
+    if (ind) {
+      this.indicatorLenses = true;
+      this.mats[`${IND_KEY}amber`] = ind.amber.left;
+      this.mats[`${IND_KEY}amber@r`] = ind.amber.right;
+      this.mats[`${IND_KEY}red`] = ind.red.left;
+      this.mats[`${IND_KEY}red@r`] = ind.red.right;
+    }
     this.brokenLamp = sm.brokenLamp;
     warmSkinVertices();
     bodies.set(entity, this);
@@ -1292,8 +1334,13 @@ export class PanelBody {
     return own;
   }
 
-  /** Key of a mesh-file part's material: sided slots get "@r" on the right (centroid x > 0). */
-  private keyOf(material: PartMaterial, rest: Float32Array): string {
+  /** Key of a mesh-file part's material: sided slots get "@r" on the right (centroid x > 0);
+   * indicator lenses their side's blink material (when the owner gave them). */
+  private keyOf(material: PartMaterial, rest: Float32Array, name = ""): string {
+    if (this.indicatorLenses && isIndicatorPart(name)) {
+      const hue = material === "taillight" ? "red" : "amber";
+      return `${IND_KEY}${hue}${indicatorRight(name, rest) ? "@r" : ""}`;
+    }
     if (!SIDED(material)) return material;
     let cx = 0;
     const n = rest.length / 3;
@@ -1332,7 +1379,7 @@ export class PanelBody {
     for (const def of mesh.parts) {
       const d = dataOf(def);
       const region = def.region ? this.regions.indexOf(def.region) : -1;
-      const key = this.keyOf(def.material, d.rest);
+      const key = this.keyOf(def.material, d.rest, def.wheel == null ? def.name : "");
       if (d.wheelGeom) {
         // Wheel parts follow VehicleView's wheel groups and are never re-skinned: tire / rim /
         // disc spin, caliper / upright only steer.

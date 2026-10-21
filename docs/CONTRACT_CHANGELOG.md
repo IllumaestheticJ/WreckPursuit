@@ -7,6 +7,14 @@ Every session reads this file at start.
 
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
+- Amendment (**lead-approved**, owner request 2026-10-21, playtest row 137; branch
+  `lead/grip-balance`): `AssistProfile::keyboard_default().countersteer_help` 0.6 → 0.0 (the
+  owner wants raw keyboard steering: no automatic countersteer). A default value only: no
+  type, wire or data change, version kept at 0.3.0. Gamepad (0.3), wheel and AI defaults are
+  unchanged; the testbed's touch preset keeps 0.6. Golden hashes of scenarios that drive with
+  the keyboard default move (re-blessed in the same branch). **Who updates:** nobody; a
+  player's saved countersteer value still wins (the testbed migrates an untouched old
+  default to 0).
 - Amendment (**lead-approved**, owner request 2026-10-20, rows 104/105; branch `lead/assist-levels`):
   `TcsLevel { Off, Half, Full }` and `AbsLevel { Off, Half, Full }` replace the `tcs` / `abs`
   bools in `AssistProfile` (the reference game's levels). Wire / data compatible: a level

@@ -1301,3 +1301,54 @@ Web e2e:
     - the car keeps 21.0 of 22.2 m/s and does not spin.
 - **[bless]:** spike_strip and panels_frontal_56_hood (crash punctures) moved with this
   change. Others were also re-blessed in the same pass; see the commit.
+
+## Row 137: countersteer help 0 % by default, the new-side catch 0.9 → 0.8 (owner, 2026-10-21)
+
+Owner: "the car does a weird auto-steer thing when I try to transition … why is default
+countersteer set to 60 %?" and "it does the transition fine and then immediately transitions
+AGAIN". Owner decision (via the lead): option (b), countersteer 60 % → 0 % only; keep the
+player steering aids. Then also the catch gain below (lead-approved as 0.7; 0.8 measured
+better, see the table).
+
+- **Countersteer help** (`AssistProfile::keyboard_default().countersteer_help`) 0.6 → 0.0.
+  This is a lead-approved contract default (`docs/CONTRACT_CHANGELOG.md`). Touch keeps 0.6;
+  gamepad keeps 0.3.
+- **Testbed / ui-kit menu:** the countersteer default 50 % → 0.
+  - Saved settings from before row 137 have no `countersteerRev` mark. If they still hold
+    the old untouched 50 %, it reads as 0. A value the player changed is kept.
+  - Saves carry the mark from now on (`apps/ui-kit/src/menu/settings.ts`, vitest).
+- **New-side catch** `PlainSteer::trans_catch_gain` 0.9 → 0.8. At 0.9 it over-caught
+  rampart_50 into a second swing.
+- **Tune panel:** the flick / transition settings (the `trans_*` sliders, the
+  "follow the travel" box and the transition preset) are in the hidden lab only (F10 /
+  `?tune=1`), labelled "lab · ". The `?drift=w` pad alone does not show them.
+
+**Why not remove the transition aids** (the owner's first ask): with them off, a real keyboard
+flick swung parity_rwd_b through twice in 4 / 4 flicks and parity_rwd_d in 2 / 4. The aids
+are what stop the second swing.
+
+**The flick test:** `tests/transition_once.rs`. Keyboard, from a held drift:
+1. Lift the throttle (0.2–0.4 s), optionally with a 0.15–0.25 s handbrake pull.
+2. Keep the countersteer key held until the slide crosses.
+3. Then the new countersteer key + full throttle.
+
+It counts the slide's direction changes in the 2 s after the first.
+
+| `trans_catch_gain` | rampart_50 second swing | parity a/b/d | transition bench (27 flicks, shipped path) |
+|---|---|---|---|
+| 0.9 (old) | 2 / 4 | exactly once 12 / 12 | caught 27 / 27, peak 39°, settle 0.33 s |
+| **0.8 (new)** | 0 / 4 | exactly once 12 / 12 | caught 27 / 27, peak 52°, settle 1.83 s |
+| 0.75 | 0 / 4 | exactly once 12 / 12 | caught 27 / 27, peak 55°, settle 1.88 s |
+| 0.7 | 0 / 4 | exactly once 12 / 12 | caught **19 / 27**, peak 59°, settle 2.02 s |
+
+- No spins and no swing-backs at any gain.
+- rampart_50's two handbrake flicks do not swing it through at all at any gain: no second
+  swing, but the player adds input.
+- Entry holds (rampart_50 + parity a/b/d, held / 12) are the same at 0.9 and 0.8: handbrake +
+  held key 12, handbrake + tap 12, lift + held key 8, lift + tap 11, 0 spins.
+- The catch at 0.8 is looser (new-side peak 52° against 39°) and settles slower.
+- `tests/drift_lab_w_transition.rs` (the pre-unify lab setup) keeps its step-13 settle bound by
+  measuring the catch at 0.9; at 0.8 parity_rwd_d's median there is 1.6 s.
+
+**[bless]:** three goldens moved, all driven with the keyboard default assists (now 0
+countersteer help): cars_beater_hard_turn, regression_grid_24 and vehicle_coupe_slalom.

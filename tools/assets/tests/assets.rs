@@ -5,7 +5,9 @@
 mod crash;
 
 use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
-use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, MESH_FORMAT, MID_TRI_BUDGET, TRI_BUDGET};
+use car_assets::mesh::{
+    PartKind, FOLD_MAX_M, INDICATOR_PREFIX, LID_POP_M, MESH_FORMAT, MID_TRI_BUDGET, TRI_BUDGET,
+};
 use car_assets::profile::BodyProfile;
 use car_assets::skin::{deform_detail, FoldMemory};
 use car_assets::style::style_for;
@@ -69,8 +71,10 @@ fn every_car_has_an_up_to_date_mid_lod() {
             "{id}: mid LOD {} tris outside {MID_TRI_BUDGET:?}",
             m.tri_count
         );
+        // Mid ≤ full / 2 + 550: the small traffic vans sit near the bound (satchel_20: 4693 of
+        // 8362 after the turn-signal lenses, which every LOD keeps, were cut into the lamps).
         assert!(
-            m.tri_count * 2 <= full.tri_count + 1000,
+            m.tri_count * 2 <= full.tri_count + 1100,
             "{id}: mid LOD barely smaller"
         );
         // Every exterior panel, glass and light of the full mesh is in the mid LOD, and every
@@ -662,13 +666,24 @@ fn lights_sit_outside_the_shell() {
     let root = repo_root();
     for id in car_ids(&root) {
         let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
-        // Head / tail lamps (style kits add fog lamps, DRLs, markers etc. in other regions).
+        // Head / tail lamps and the turn-signal segments cut out of them (style kits add fog
+        // lamps, DRLs, markers etc. in other regions).
         let lights: Vec<_> = mesh
             .parts
             .iter()
             .filter(|p| car_assets::skin::is_end_lamp(p))
             .collect();
-        assert_eq!(lights.len(), 4, "{id}: two head- and two taillights");
+        let is_signal = |p: &car_assets::mesh::MeshPart| p.name.starts_with(INDICATOR_PREFIX);
+        assert_eq!(
+            lights.iter().filter(|p| !is_signal(p)).count(),
+            4,
+            "{id}: two head- and two taillights"
+        );
+        assert_eq!(
+            lights.iter().filter(|p| is_signal(p)).count(),
+            4,
+            "{id}: front and rear turn signals in the lamp clusters"
+        );
         for l in lights {
             let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
             for v in 0..l.vertex_count() {
@@ -729,12 +744,18 @@ fn lights_sit_outside_the_shell() {
                 l.name
             );
             // Proud of the body, facing out.
-            assert!(
-                l.material == car_assets::mesh::MaterialSlot::Headlight
-                    || l.material == car_assets::mesh::MaterialSlot::Taillight
-            );
+            use car_assets::mesh::MaterialSlot as M;
+            if is_signal(l) {
+                assert!(
+                    l.material == M::EmissiveAmber || (!front && l.material == M::Taillight),
+                    "{id}/{}: amber (or red-on-red at the rear) turn signal",
+                    l.name
+                );
+                continue;
+            }
+            assert!(l.material == M::Headlight || l.material == M::Taillight);
             assert_eq!(
-                l.material == car_assets::mesh::MaterialSlot::Headlight,
+                l.material == M::Headlight,
                 front,
                 "{id}/{}: headlights at the front, taillights at the back",
                 l.name
@@ -805,4 +826,203 @@ fn lights_move_with_the_front_and_rear_structure() {
                 .all(|(v, m)| (m[2] - l.vertex(v)[2]).abs() < 1e-6));
         }
     }
+}
+
+/// Full-mesh triangle counts before the turn signals were rebuilt into the lamp clusters
+/// (round 12, playtest row 136); the rebuild may add at most 2 % per car.
+const TRIS_BEFORE_INTEGRATED_SIGNALS: &[(&str, u32)] = &[
+    ("arashi_t4", 16916),
+    ("brigand_400", 19772),
+    ("bulwark_400", 19186),
+    ("debug_coupe", 16617),
+    ("debug_sedan", 8422),
+    ("drayman_cargo", 9435),
+    ("fulmine_v10", 18738),
+    ("furrow_24", 8490),
+    ("hakone_gt", 17829),
+    ("hauler_1500", 9781),
+    ("ironside_440", 18699),
+    ("junkyard_beater", 7960),
+    ("kestrel_ts", 17548),
+    ("lindwurm_4t", 16246),
+    ("lucciola_350", 17242),
+    ("marten_20", 15796),
+    ("rampart_50", 18826),
+    ("satchel_20", 8330),
+    ("sentinel_bastion", 17191),
+    ("sentinel_cruiser", 16963),
+    ("sentinel_vigil", 17715),
+    ("sentinel_warden", 17770),
+    ("sentinel_wolfhound", 17137),
+    ("shiro_turbo", 17918),
+    ("sperber_32", 17772),
+    ("stoat_16v", 15610),
+    ("talus_20t", 17062),
+    ("tansy_13", 7192),
+    ("tumbril_20", 8503),
+    ("vireo_xs", 15731),
+];
+
+/// Bounding box (lo, hi) of a part, m.
+fn part_box(p: &car_assets::mesh::MeshPart) -> ([f32; 3], [f32; 3]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for v in 0..p.vertex_count() {
+        let q = p.vertex(v);
+        for k in 0..3 {
+            lo[k] = lo[k].min(q[k]);
+            hi[k] = hi[k].max(q[k]);
+        }
+    }
+    (lo, hi)
+}
+
+/// Check the turn-signal contract on one mesh (full or mid LOD): exactly
+/// `indicator_front_l/_r` + `indicator_rear_l/_r` (+ optional `indicator_side_l/_r` pair), kind
+/// `light`, front amber in `FrameFront`, rear amber or red-on-red in `FrameRear`, repeaters amber
+/// on a front fender or front door (mirror), `_l` at x < 0, each a segment of its lamp cluster
+/// (within 5 cm of the same side's head / tail lamp).
+fn check_signals(label: &str, mesh: &car_assets::mesh::CarMesh) {
+    use car_assets::mesh::MaterialSlot as M;
+    use BodyRegion as R;
+    let signals: Vec<_> = mesh
+        .parts
+        .iter()
+        .filter(|p| p.name.starts_with(INDICATOR_PREFIX))
+        .collect();
+    let names: Vec<&str> = signals.iter().map(|p| p.name.as_str()).collect();
+    for want in [
+        "indicator_front_l",
+        "indicator_front_r",
+        "indicator_rear_l",
+        "indicator_rear_r",
+    ] {
+        assert!(names.contains(&want), "{label}: no {want} in {names:?}");
+    }
+    assert_eq!(
+        names.contains(&"indicator_side_l"),
+        names.contains(&"indicator_side_r"),
+        "{label}: repeaters come in pairs"
+    );
+    let get = |n: &str| mesh.parts.iter().find(|p| p.name == n);
+    for s in &signals {
+        let n = s.name.as_str();
+        let left = n.ends_with("_l");
+        assert!(left || n.ends_with("_r"), "{label}/{n}: no side");
+        assert_eq!(s.kind, PartKind::Light, "{label}/{n}");
+        assert!(s.tri_count() > 0, "{label}/{n}: empty");
+        let (lo, hi) = part_box(s);
+        assert!(
+            if left { hi[0] < 0.0 } else { lo[0] > 0.0 },
+            "{label}/{n}: on the wrong side ({lo:?}..{hi:?})"
+        );
+        let side = if left { "l" } else { "r" };
+        let lamp = match n
+            .strip_prefix(INDICATOR_PREFIX)
+            .and_then(|t| t.split('_').next())
+        {
+            Some("front") => {
+                assert_eq!(s.region, Some(R::FrameFront), "{label}/{n}");
+                assert_eq!(s.material, M::EmissiveAmber, "{label}/{n}");
+                Some(format!("headlight_{side}"))
+            }
+            Some("rear") => {
+                assert_eq!(s.region, Some(R::FrameRear), "{label}/{n}");
+                assert!(
+                    matches!(s.material, M::EmissiveAmber | M::Taillight),
+                    "{label}/{n}: {:?}",
+                    s.material
+                );
+                Some(format!("taillight_{side}"))
+            }
+            Some("side") => {
+                assert_eq!(s.material, M::EmissiveAmber, "{label}/{n}");
+                let ok: &[R] = if left {
+                    &[R::FrontLeftFender, R::LeftDoorF]
+                } else {
+                    &[R::FrontRightFender, R::RightDoorF]
+                };
+                assert!(
+                    s.region.is_some_and(|r| ok.contains(&r)),
+                    "{label}/{n}: {:?}",
+                    s.region
+                );
+                None
+            }
+            _ => panic!("{label}: unexpected part {n}"),
+        };
+        if let Some(lamp) = lamp {
+            let l = get(&lamp).unwrap_or_else(|| panic!("{label}: no {lamp}"));
+            let (llo, lhi) = part_box(l);
+            let gap = (0..3)
+                .map(|k| (llo[k] - hi[k]).max(lo[k] - lhi[k]).max(0.0))
+                .fold(0.0f32, f32::max);
+            assert!(
+                gap <= 0.05,
+                "{label}/{n}: {gap} m away from {lamp}, not part of its cluster"
+            );
+        }
+    }
+    // Left and right lenses match.
+    for base in ["indicator_front", "indicator_rear", "indicator_side"] {
+        if let (Some(l), Some(r)) = (get(&format!("{base}_l")), get(&format!("{base}_r"))) {
+            assert_eq!(l.material, r.material, "{label}/{base}");
+        }
+    }
+}
+
+/// Playtest row 136: every car's turn signals are segments of its head / tail lamp clusters
+/// (plus optional flush repeaters), in the full and the mid LOD, bound like the lamps, and
+/// the rebuild costs at most 2 % of a car's triangles.
+#[test]
+fn every_car_has_turn_signals_integrated_into_its_lamps() {
+    let root = repo_root();
+    let ids = car_ids(&root);
+    for id in &ids {
+        let car = load_car(&root, id).unwrap();
+        let full = load_mesh(&mesh_path(&root, id)).unwrap();
+        let mid = load_mesh(&mid_mesh_path(&root, id)).unwrap();
+        check_signals(&format!("{id} (full)"), &full);
+        check_signals(&format!("{id} (mid)"), &mid);
+        // Front / rear signals bind like their lamp: to the nodes of their end of the car.
+        for s in full.parts.iter().filter(|p| {
+            p.name.starts_with("indicator_front") || p.name.starts_with("indicator_rear")
+        }) {
+            assert!(car_assets::skin::is_end_lamp(s), "{id}/{}", s.name);
+            let regions = car_assets::skin::light_regions(car_assets::skin::part_centre(s));
+            assert!(
+                !s.skin_nodes.is_empty()
+                    && s.skin_nodes
+                        .iter()
+                        .all(|&i| regions.contains(&car.lattice.nodes[i as usize].region)),
+                "{id}/{}: not bound to its end of the car",
+                s.name
+            );
+        }
+        if let Some(&(_, before)) = TRIS_BEFORE_INTEGRATED_SIGNALS.iter().find(|(c, _)| c == id) {
+            assert!(
+                full.tri_count * 100 <= before * 102,
+                "{id}: {} tris, more than 2 % over {before}",
+                full.tri_count
+            );
+        }
+    }
+    // The parity test cars (`tools/parity/build_parity_cars.py`) carry copies of their template
+    // car's meshes; they must follow the same contract.
+    let mut parity = 0;
+    for e in std::fs::read_dir(root.join("data/panels/meshes")).unwrap() {
+        let path = e.unwrap().path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|x| x.to_str()) != Some("json")
+            || ids.iter().any(|i| i == stem)
+        {
+            continue;
+        }
+        check_signals(&format!("{stem} (full)"), &load_mesh(&path).unwrap());
+        let mid = load_mesh(&mid_mesh_path(&root, stem)).unwrap();
+        check_signals(&format!("{stem} (mid)"), &mid);
+        parity += 1;
+    }
+    assert!(parity >= 4, "parity meshes checked: {parity}");
 }
