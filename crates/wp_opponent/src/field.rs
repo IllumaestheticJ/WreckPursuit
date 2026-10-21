@@ -420,6 +420,10 @@ pub struct Debug {
     pub pass_checks: [u32; 8],
     /// Out on the opposing lanes (my body left of my own lanes' edge).
     pub opposing: bool,
+    /// Standing nose to nose with a standing car that faces me (or in the opposing lanes with
+    /// a standing car right ahead): the stand-off a racer has to back out of.
+    #[serde(default)]
+    pub head_on: bool,
 }
 
 /// What limits a racer's speed target.
@@ -598,8 +602,11 @@ const CREEP_CLEAR_M: f32 = 0.15;
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
-/// The whole-road line never puts me on the opposing side this close to a junction, m.
+/// The whole-road line puts me on the opposing side this close to a junction only when its arms
+/// are empty ([`junction_arms_empty`]), m.
 const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
+/// How far up a junction's arms civilians coming to it are looked for, m.
+const JUNCTION_ARM_LOOK_M: f32 = 60.0;
 
 /// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
@@ -1688,6 +1695,7 @@ fn decide_racer(
         let hw = 0.5 * r.cap.width_m;
         let hl = 0.5 * r.cap.length_m;
         let v = r.v.max(0.0);
+        let mut head_on_now = false;
         // Street racing: the whole road when it is clear. Follow the line over my lanes and
         // the opposing ones (apexes, chicanes, empty junctions) while nothing is in its way on
         // the opposing side or in a junction it crosses, out to past the next braking zone;
@@ -1710,7 +1718,7 @@ fn decide_racer(
                     matches!(r.debug.limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal);
                 (r.wide_on || may_start)
                     && !in_traffic
-                    && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, horizon)
+                    && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, civs, horizon)
             }
             _ => false,
         };
@@ -1890,6 +1898,7 @@ fn decide_racer(
                         && !matches!(x.o.who, Who::Racer(_))
                         && (r.n < lim_lo - 1.0 || x.o.facing < -0.3)
                 });
+            head_on_now = head_on && v.abs() < 0.5;
             // Nose up to a parked car (closer than the creep stop gap allows a car to steer out
             // round it): back out a little first (Hollins, police seed 6: the last racer stopped
             // 0.9 m behind a busted car and waited there for the rest of the race).
@@ -2783,6 +2792,7 @@ fn decide_racer(
             brake_dist,
             pass_checks: r.pass_checks,
             opposing: r.n - hw < -corridor.sample((r.s / CORRIDOR_STEP_M) as isize).left_m,
+            head_on: head_on_now,
         };
     }
 }
@@ -2931,6 +2941,7 @@ fn wide_line_clear(
     r: &Racer,
     me: Who,
     obstacles: &[Obstacle],
+    civs: &[Civ],
     horizon: f32,
 ) -> bool {
     let hw = 0.5 * r.cap.width_m;
@@ -2948,14 +2959,24 @@ fn wide_line_clear(
         let c = corridor.sample((s / CORRIDOR_STEP_M).floor() as isize);
         let n_w = corridor.interp(&wide.offset, s);
         if n_w - hw < -c.left_m - 0.1 {
-            // Not on the opposing side near a junction at all: traffic turning in from a side
-            // road is not in view until it is in the way, and a racer it meets nose to nose
-            // there stays wedged (Lantern s95 seed 4: a racer on the opposing side met a
-            // civilian that had just turned in and both stood for the rest of the race).
+            // On the opposing side near a junction only when nobody is coming to it: look up
+            // its arms, not just my corridor — a civilian turning in from a side road is not on
+            // the corridor until it is in the way, and one meeting a racer nose to nose there
+            // stays wedged (Lantern s95 seed 4).
             let i = (s / CORRIDOR_STEP_M).floor() as isize;
             let back = (WIDE_JUNCTION_CLEAR_M / CORRIDOR_STEP_M).ceil() as isize;
-            if (-back..=back).any(|j| corridor.sample(i + j).junction) {
-                return false;
+            if let Some(j) = (-back..=back).find(|&j| corridor.sample(i + j).junction) {
+                let at = geom::xy(corridor.sample(i + j).pos);
+                if !junction_arms_empty(at, civs) {
+                    return false;
+                }
+                // Anything else (police, parked or physical cars) standing at it.
+                if others.iter().any(|(o, ds)| {
+                    !matches!(o.who, Who::Racer(_))
+                        && (ds - (x + j as f32 * CORRIDOR_STEP_M)).abs() < 35.0
+                }) {
+                    return false;
+                }
             }
             let t = x / v;
             for (o, ds) in &others {
@@ -2972,6 +2993,25 @@ fn wide_line_clear(
         x += 2.0 * CORRIDOR_STEP_M;
     }
     true
+}
+
+/// Whether nobody is coming to the junction at `at`: no civilian within
+/// [`JUNCTION_ARM_LOOK_M`] heading towards it, and none standing within 25 m of it (waiting at
+/// its line, or inside it).
+fn junction_arms_empty(at: V2, civs: &[Civ]) -> bool {
+    !civs.iter().any(|c| {
+        let to = geom::sub(at, c.pos);
+        let d = geom::len(to);
+        if d > JUNCTION_ARM_LOOK_M {
+            return false;
+        }
+        let speed = geom::len(c.vel);
+        if speed < 0.5 {
+            d < 25.0
+        } else {
+            geom::dot(c.vel, to) > 0.0 || d < 12.0
+        }
+    })
 }
 
 /// Whether a car at lateral offset `n` (half width `hw`) is out on the opposing lanes (left of

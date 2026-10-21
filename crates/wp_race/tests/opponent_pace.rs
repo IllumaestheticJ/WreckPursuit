@@ -128,6 +128,9 @@ pub struct CarPace {
     pub lateral_sd_m: f32,
     /// Overtakes completed per km of route.
     pub passes_per_km: f32,
+    /// Nose-to-nose stand-offs (standing facing a standing car in my path): how many, and the
+    /// time spent in them, s.
+    pub head_on: (u32, f32),
     /// Judge status.
     pub status: String,
 }
@@ -346,6 +349,8 @@ pub fn race_pace_in(
     let mut track_err = vec![(0.0f32, 0u32); k_n];
     // Racing ticks, ticks on the opposing lanes, Σn, Σn² (lateral line usage).
     let mut lateral = vec![(0u32, 0u32, 0.0f64, 0.0f64); k_n];
+    // (stand-offs, seconds in them, in one now).
+    let mut head_on = vec![(0u32, 0.0f32, false); k_n];
     let mut last_tactic = vec![Tactic::Follow; k_n];
     // Last non-profile cause; the climb back to the profile afterwards is booked to it.
     let mut recovering: Vec<Option<usize>> = vec![None; k_n];
@@ -533,6 +538,14 @@ pub fn race_pace_in(
                 track_err[k].0 += (d.n - d.n_cmd).abs();
                 track_err[k].1 += 1;
             }
+            {
+                let h = &mut head_on[k];
+                if d.head_on {
+                    h.0 += u32::from(!h.2);
+                    h.1 += PHYSICS_DT;
+                }
+                h.2 = d.head_on;
+            }
             if v > 2.0 {
                 let l = &mut lateral[k];
                 l.0 += 1;
@@ -645,6 +658,7 @@ pub fn race_pace_in(
                 // weaving through traffic counts), per km raced.
                 passes_per_km: ai.field().passes_by(k) as f32
                     / (race.route.length_m * laps as f32 / 1000.0).max(0.1),
+                head_on: (head_on[k].0, head_on[k].1),
                 status: format!("{:?}", r.status),
             }
         })
@@ -686,7 +700,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -699,6 +713,8 @@ fn pace_sweep() {
                     100.0 * c.opposing_frac,
                     c.lateral_sd_m,
                     c.passes_per_km,
+                    c.head_on.0,
+                    c.head_on.1,
                     c.status,
                     lost.join(", ")
                 );
