@@ -361,7 +361,7 @@ export class PropView {
     // object with different instance matrices re-bound every attribute and allocated a new
     // attribute cache on each draw (~15 KB a frame, allocation pass 2026-10-20).
     const pg = this.proxyGeo!;
-    const views = { paint: geometryView(pg.paint), detail: geometryView(pg.detail), tail: geometryView(pg.tail), head: geometryView(pg.head) };
+    const views = { paint: geometryView(pg.paint), detail: geometryView(pg.detail), tail: geometryView(pg.tail), head: geometryView(pg.head), indL: geometryView(pg.indL), indR: geometryView(pg.indR) };
     const proxy = new InstancedCar(views, props.length, mats, null);
     const box = new THREE.InstancedMesh(geometryView(this.farGeo!), mats.paint, props.length);
     const pts = props.map((i) => new THREE.Vector3(this.pose[i * 7], this.pose[i * 7 + 1], this.pose[i * 7 + 2]));
@@ -761,7 +761,7 @@ export class PropView {
         mesh.geometry.dispose();
       }
     this.chunks = [];
-    if (this.proxyGeo) for (const g of [this.proxyGeo.paint, this.proxyGeo.detail, this.proxyGeo.tail, this.proxyGeo.head]) g.dispose();
+    if (this.proxyGeo) for (const g of [this.proxyGeo.paint, this.proxyGeo.detail, this.proxyGeo.tail, this.proxyGeo.head, this.proxyGeo.indL, this.proxyGeo.indR]) g.dispose();
     this.proxyGeo = null;
     this.farGeo?.dispose();
     this.farGeo = null;
