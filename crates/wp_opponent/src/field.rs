@@ -2196,6 +2196,12 @@ fn decide_racer(
                 .fold((f32::NEG_INFINITY, f32::INFINITY), |(a, b), (l, h)| {
                     (a.max(l), b.min(h))
                 });
+            // Time to get back to my line before the next braking zone (Loop 9 s95 seed 3: a
+            // racer 5 m off its line at 55 m/s ended its weave into the bend and lost it).
+            let back_in_time = |c: f32| {
+                let back_s = (c - line_n(r.s)).abs() / 0.9;
+                brake_dist > v * (2.5 + back_s)
+            };
             let here = room(r.n);
             let current = r.weave_n.filter(|c| *c >= o_lo - 0.1 && *c <= o_hi + 0.1);
             let mut best: Option<(f32, f32)> = None;
@@ -2204,6 +2210,7 @@ fn decide_racer(
                 let f = room(c);
                 if (c - r.n).abs() > 1.5
                     && f > here + WEAVE_GAIN_M
+                    && back_in_time(c)
                     && safe(c)
                     && best.is_none_or(|b| f > b.1)
                 {
@@ -2215,7 +2222,9 @@ fn decide_racer(
             r.weave_n = match (current, best) {
                 // Keep my pick while it still pays and is not stale.
                 (Some(cur), _)
-                    if r.weave_s < 8.0 && room(cur) > here.min(room(line_n(r.s))) - 5.0 =>
+                    if r.weave_s < 8.0
+                        && back_in_time(cur)
+                        && room(cur) > here.min(room(line_n(r.s))) - 5.0 =>
                 {
                     Some(cur)
                 }
