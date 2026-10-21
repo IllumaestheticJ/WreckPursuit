@@ -395,7 +395,7 @@ fn park_trees(
                 } else {
                     TreeKind::Broad
                 };
-                out.extend(tree(p, z, kind, r1));
+                env.push_clear(out, tree(p, z, kind, r1));
             } else if r0 < prob + 0.12 {
                 out.push(cylinder(
                     K::Bush,
@@ -586,12 +586,12 @@ fn square_park(env: &Env, site: &Site, mask: &ParkMask, out: &mut Vec<Feature>) 
     // Benches inside the ring path, lamps outside it.
     for (p, d) in along(&ring, 25.0, 2.6) {
         if mask.ok(p) && keep.iter().all(|(k, r)| geom::dist(*k, p) > *r) {
-            out.push(bench(p, env.gz(p), d));
+            env.push_clear(out, vec![bench(p, env.gz(p), d)]);
         }
     }
     for (p, d) in along(&ring, 35.0, -2.4) {
         if mask.ok(p) {
-            out.extend(lamp(p, env.gz(p), 4.5, [d[1], -d[0]], 0.6));
+            env.push_clear(out, lamp(p, env.gz(p), 4.5, [d[1], -d[0]], 0.6));
         }
     }
     park_trees(env, site, mask, &paths, &keep, 13.0, 0.55, out);
@@ -622,17 +622,17 @@ fn promenade_park(env: &Env, site: &Site, mask: &ParkMask, out: &mut Vec<Feature
             let p = at(s, row * short);
             if mask.ok_r(p, 2.0) && geom::dist(p, c) > 6.0 {
                 let h = env.h01(k, (row * 8.0) as i64, 31);
-                out.extend(tree(p, env.gz(p), TreeKind::Broad, h * 0.6));
+                env.push_clear(out, tree(p, env.gz(p), TreeKind::Broad, h * 0.6));
             }
             let q = at(s + 5.0, row * short);
             if k % 2 == 0 && mask.ok(q) && geom::dist(q, c) > 6.0 {
-                out.push(bench(q, env.gz(q), u));
+                env.push_clear(out, vec![bench(q, env.gz(q), u)]);
             }
         }
         if k % 3 == 1 {
             let p = at(s + 2.5, 0.0);
             if mask.ok(p) && geom::dist(p, c) > 5.0 {
-                out.extend(lamp(p, env.gz(p), 4.2, v, 0.4));
+                env.push_clear(out, lamp(p, env.gz(p), 4.2, v, 0.4));
             }
         }
         s += 10.0;
@@ -723,19 +723,19 @@ fn beach_park(env: &Env, site: &Site, mask: &ParkMask, out: &mut Vec<Feature>) {
         if k % 3 == 0 {
             let t = at(s + 6.0, -4.5);
             if mask.ok_r(t, 2.0) {
-                out.extend(tree(t, env.gz(t), TreeKind::Broad, env.h01(k, 0, 41)));
+                env.push_clear(out, tree(t, env.gz(t), TreeKind::Broad, env.h01(k, 0, 41)));
             }
         }
         if k % 4 == 1 {
             let bp = at(s + 6.0, -2.6);
             if mask.ok(bp) {
-                out.push(bench(bp, env.gz(bp), u));
+                env.push_clear(out, vec![bench(bp, env.gz(bp), u)]);
             }
         }
         if k % 4 == 3 {
             let lp = at(s + 6.0, 2.6);
             if mask.ok(lp) {
-                out.extend(lamp(lp, env.gz(lp), 4.5, inland, 0.5));
+                env.push_clear(out, lamp(lp, env.gz(lp), 4.5, inland, 0.5));
             }
         }
         // Lifeguard tower every 300 m, where the sand is ~1.4 m above the water.
@@ -950,6 +950,9 @@ pub(super) fn forest(env: &Env, fm: &ForestMask, out: &mut Vec<Feature>) {
                     TreeKind::Broad
                 };
                 let mut t = tree(p, env.gz(p), kind, r2);
+                if !env.clear_of_lanes(&t) {
+                    continue;
+                }
                 if deep {
                     for f in &mut t {
                         f.solid = false;
@@ -1053,7 +1056,10 @@ pub(super) fn scattered(env: &Env, fm: &ForestMask, out: &mut Vec<Feature>) {
             } else {
                 TreeKind::Broad
             };
-            trees.push(tree(p, env.gz(p), kind, r2));
+            let t = tree(p, env.gz(p), kind, r2);
+            if env.clear_of_lanes(&t) {
+                trees.push(t);
+            }
         }
     }
     for t in thin(trees, CAP_SCATTERED) {

@@ -202,6 +202,12 @@ fn join_runs(ctx: &Ctx, feats: Vec<Feature>) -> Vec<Feature> {
     out
 }
 
+/// Clearance of solid street items (lamps, trees, poles, furniture, signs) from the edge
+/// of every lane and junction connector, m.
+pub(crate) const STREET_CLEAR_M: f32 = 1.8;
+/// Clearance of solid street items from a junction box (beyond its radius), m.
+pub(crate) const JUNCTION_CLEAR_M: f32 = 8.0;
+
 /// Minimum height above the ground of a feature allowed over road paving, m.
 pub(crate) const OVERHEAD_M: f32 = 3.0;
 
@@ -324,6 +330,9 @@ struct Env<'c, 'a> {
     /// Centreline segments of every surface: (surface, segment index).
     surf_segs: Vec<(u32, u32)>,
     surf_idx: Index,
+    /// Every lane and junction connector as 2D segments: ends, half width, mean height.
+    lane_segs: Vec<(V2, V2, f32, f32)>,
+    lane_idx: Index,
 }
 
 impl<'c, 'a> Env<'c, 'a> {
@@ -381,6 +390,32 @@ impl<'c, 'a> Env<'c, 'a> {
                 surf_segs.push((si as u32, k as u32));
             }
         }
+        // Lanes and the connector curves cars follow through junctions (as in `CityMap`).
+        let mut lane_segs = Vec::new();
+        let mut lane_idx = Index::new(32.0);
+        let mut add_path = |pts: &[[f32; 3]], half: f32| {
+            for w in pts.windows(2) {
+                let (p, q) = (geom::xy(w[0]), geom::xy(w[1]));
+                let lo = [p[0].min(q[0]) - half, p[1].min(q[1]) - half];
+                let hi = [p[0].max(q[0]) + half, p[1].max(q[1]) + half];
+                lane_idx.insert(lane_segs.len() as u32, lo, hi);
+                lane_segs.push((p, q, half, 0.5 * (w[0][2] + w[1][2])));
+            }
+        };
+        for l in &b.lanes {
+            if l.polyline.len() < 2 {
+                continue;
+            }
+            add_path(&l.polyline, l.width_m * 0.5);
+            for c in &l.connections {
+                let to = &b.lanes[c.to as usize];
+                if to.polyline.len() < 2 {
+                    continue;
+                }
+                let pts = crate::map::connector_curve(&l.polyline, &to.polyline, c.turn);
+                add_path(&pts, 0.5 * l.width_m.max(to.width_m));
+            }
+        }
         Self {
             ctx,
             seed,
@@ -392,6 +427,8 @@ impl<'c, 'a> Env<'c, 'a> {
             gates,
             surf_segs,
             surf_idx,
+            lane_segs,
+            lane_idx,
         }
     }
 
@@ -486,6 +523,42 @@ impl<'c, 'a> Env<'c, 'a> {
             let zs = a[2] + (b[2] - a[2]) * t.clamp(0.0, 1.0) + bank * lat;
             (zs - z).abs() < ztol
         })
+    }
+
+    /// Smallest gap between any of `pts` and the edge of a lane or junction connector whose
+    /// height is within 4 m of `z` (capped at `within`), m. Negative = inside a lane.
+    fn lane_gap(&self, pts: &[V2], z: f32, within: f32) -> f32 {
+        let (lo, hi) = super::ground::bounds(pts);
+        let d = within + 3.0;
+        let mut ids = Vec::new();
+        self.lane_idx
+            .query([lo[0] - d, lo[1] - d], [hi[0] + d, hi[1] + d], &mut ids);
+        let mut gap = within;
+        for id in ids {
+            let (a, b, half, zl) = self.lane_segs[id as usize];
+            if (zl - z).abs() > 4.0 {
+                continue;
+            }
+            for p in pts {
+                gap = gap.min(geom::point_segment_distance(*p, a, b) - half);
+            }
+        }
+        gap
+    }
+
+    /// Every solid part of `fs` keeps [`STREET_CLEAR_M`] from every lane and connector.
+    fn clear_of_lanes(&self, fs: &[Feature]) -> bool {
+        fs.iter().filter(|f| f.solid).all(|f| {
+            let fp = super::ctx::footprint(&f.shape);
+            self.lane_gap(&fp, bottom_z(f), STREET_CLEAR_M + 1.0) >= STREET_CLEAR_M
+        })
+    }
+
+    /// Adds the item `fs` (one tree, lamp, bench...) when it is [`Env::clear_of_lanes`].
+    fn push_clear(&self, out: &mut Vec<Feature>, fs: Vec<Feature>) {
+        if self.clear_of_lanes(&fs) {
+            out.extend(fs);
+        }
     }
 
     /// Occupancy at `p`.

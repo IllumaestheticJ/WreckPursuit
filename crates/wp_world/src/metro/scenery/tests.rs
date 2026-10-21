@@ -476,6 +476,121 @@ fn synthetic_highway_and_closure() {
     }
 }
 
+/// Every solid street item (lamps, trees, poles, hydrants, benches, bins, shelters, sign
+/// posts; the closures excepted) keeps lane half width + 1.8 m from the centreline of every
+/// lane and junction connector curve at its height, and 8 m beyond every junction box.
+#[test]
+fn street_items_clear_of_lanes_and_corners() {
+    with_ctx(|ctx| {
+        let fs = super::build(ctx);
+        let b = &ctx.roads.built;
+        // Lane and connector segments on a 16 m grid: (a, b, half width, z).
+        let cell = 16.0;
+        let key = |p: V2| ((p[0] / cell).floor() as i64, (p[1] / cell).floor() as i64);
+        type LaneSeg = (V2, V2, f32, f32);
+        let mut grid: BTreeMap<(i64, i64), Vec<LaneSeg>> = BTreeMap::new();
+        let mut add = |pts: &[[f32; 3]], half: f32| {
+            for w in pts.windows(2) {
+                let (p, q) = (geom::xy(w[0]), geom::xy(w[1]));
+                let r = half + 4.0;
+                let (k0, k1) = (
+                    key([p[0].min(q[0]) - r, p[1].min(q[1]) - r]),
+                    key([p[0].max(q[0]) + r, p[1].max(q[1]) + r]),
+                );
+                for i in k0.0..=k1.0 {
+                    for j in k0.1..=k1.1 {
+                        grid.entry((i, j)).or_default().push((
+                            p,
+                            q,
+                            half,
+                            0.5 * (w[0][2] + w[1][2]),
+                        ));
+                    }
+                }
+            }
+        };
+        for l in &b.lanes {
+            add(&l.polyline, l.width_m * 0.5);
+            for c in &l.connections {
+                let to = &b.lanes[c.to as usize];
+                let pts = crate::map::connector_curve(&l.polyline, &to.polyline, c.turn);
+                add(&pts, 0.5 * l.width_m.max(to.width_m));
+            }
+        }
+        let street = |f: &Feature| {
+            f.solid
+                && matches!(
+                    f.kind,
+                    K::Lamp
+                        | K::TreeTrunk
+                        | K::UtilityPole
+                        | K::StreetFurniture
+                        | K::BusShelter
+                        | K::RoadFurniture
+                )
+                && !(f.kind == K::RoadFurniture && edge_dist(centre2(f)) < 30.0)
+        };
+        let mut worst = (f32::MAX, [0.0, 0.0]);
+        let mut checked = 0;
+        let mut bad = Vec::new();
+        for f in fs.iter().filter(|f| street(f)) {
+            checked += 1;
+            let z = super::bottom_z(f);
+            for p in footprint(&f.shape) {
+                for (a, q, half, zl) in grid.get(&key(p)).into_iter().flatten() {
+                    if (zl - z).abs() > 4.0 {
+                        continue;
+                    }
+                    let gap = geom::point_segment_distance(p, *a, *q) - half;
+                    if gap < worst.0 {
+                        worst = (gap, p);
+                    }
+                    if gap < super::STREET_CLEAR_M - 0.01 {
+                        bad.push((f.kind, p, gap));
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "street items: {checked} checked, closest {:.2} m beyond a lane edge at {:?}",
+            worst.0, worst.1
+        );
+        assert!(checked > 5000, "street items exist: {checked}");
+        assert!(
+            bad.is_empty(),
+            "{} too close, e.g. {:?}",
+            bad.len(),
+            &bad[..bad.len().min(5)]
+        );
+        // Junction corners: street items (not park or forest content) stay 8 m beyond the box.
+        let near_corner: Vec<_> = fs
+            .iter()
+            .filter(|f| street(f) && f.kind != K::TreeTrunk)
+            .filter(|f| {
+                let c = centre2(f);
+                b.intersections.iter().any(|it| {
+                    let n = geom::xy(b.nodes[it.node as usize].pos);
+                    geom::dist(n, c) < it.radius_m.max(6.0) + super::JUNCTION_CLEAR_M - 1.0
+                })
+            })
+            .filter(|f| {
+                // Park content sits in its own (hedged) sites.
+                !ctx.plan
+                    .sites
+                    .iter()
+                    .any(|s| s.kind == SiteKind::Park && inside(&s.polygon, centre2(f)))
+            })
+            .map(|f| (f.kind, centre2(f)))
+            .collect();
+        assert!(
+            near_corner.is_empty(),
+            "{} street items at junction corners, e.g. {:?}",
+            near_corner.len(),
+            &near_corner[..near_corner.len().min(5)]
+        );
+    });
+}
+
 #[test]
 fn closures_cut_roads_leaving_the_map() {
     let line = vec![[-4000.0, 340.0], [-4450.0, 340.0]];

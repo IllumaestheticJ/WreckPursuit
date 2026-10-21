@@ -563,7 +563,7 @@ fn divergence(a: &Segment, b: &Segment) -> f32 {
 }
 
 /// Cubic Bézier from the end of `from` to the start of `to`, tangent-continuous.
-fn connector_curve(from: &[V3], to: &[V3], turn: TurnKind) -> Vec<V3> {
+pub(crate) fn connector_curve(from: &[V3], to: &[V3], turn: TurnKind) -> Vec<V3> {
     let n = from.len();
     let p0 = from[n - 1];
     let d0 = geom::normalize(geom::sub(geom::xy(from[n - 1]), geom::xy(from[n - 2])));

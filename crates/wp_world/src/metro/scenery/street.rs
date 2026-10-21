@@ -3,7 +3,8 @@
 //!
 //! Stations are spaced along each paved edge with a sidewalk; a station is used when its
 //! spot (on the verge, a fixed offset beyond the paved edge) is off every road's paving at
-//! that height, near the ground (no furniture on bridges or embankments), away from junction
+//! that height, every solid part keeps 1.8 m from every lane and junction connector curve,
+//! the spot is 8 m beyond every junction box, near the ground (no furniture on bridges or embankments), away from junction
 //! boxes and site gates, and not on a building, another feature, water or another module's
 //! site. Each category is thinned evenly to its budget, so the real network (hundreds of km
 //! of streets) stays within the city's feature budget.
@@ -120,7 +121,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
                         Occ::Building | Occ::Feature | Occ::Water | Occ::Site
                     )
                     || env.on_paving(p, pe[2], 2.5, None)
-                    || env.near_junction(p, 6.0)
+                    || env.near_junction(p, super::JUNCTION_CLEAR_M)
                     || env.near_gate(p)
                     || env.foreign_site(p)
                 {
@@ -137,7 +138,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
             if arterial {
                 let mut st = if side == 0 { 350.0 } else { 150.0 };
                 while st < len - 20.0 {
-                    if let Some((p, z, n, t)) = spot(st, 2.2) {
+                    if let Some((p, z, n, t)) = spot(st, 2.9) {
                         if clear(&used, st, 5.0) {
                             used.push(st);
                             cands.push((Cat::Shelter, shelter(p, z, n, t)));
@@ -149,7 +150,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
             // Lamps: every 30 m, alternating sides.
             let mut st = if side == 0 { 5.0 } else { 20.0 };
             while st < len {
-                if let Some((p, z, n, _)) = spot(st, 0.7) {
+                if let Some((p, z, n, _)) = spot(st, 2.0) {
                     if clear(&used, st, 3.0) {
                         used.push(st);
                         cands.push((Cat::Lamp, lamp(p, z, 8.0, [-n[0], -n[1]], 2.0)));
@@ -167,7 +168,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
                     12.0
                 };
                 if matches!(zk, Some(D::Core | D::Commercial | D::Residential)) {
-                    if let Some((p, z, _, _)) = spot(st, 1.8) {
+                    if let Some((p, z, _, _)) = spot(st, 2.4) {
                         if clear(&used, st, 3.0) {
                             used.push(st);
                             let h = env.h01(tag, (st * 4.0) as i64, 21);
@@ -196,7 +197,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
             let mut st = if side == 0 { 40.0 } else { 85.0 };
             while st < len {
                 if !matches!(zone_at(st), Some(D::Port) | None) {
-                    if let Some((p, z, _, _)) = spot(st, 0.55) {
+                    if let Some((p, z, _, _)) = spot(st, 2.0) {
                         if clear(&used, st, 2.0) {
                             used.push(st);
                             cands.push((
@@ -219,7 +220,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
             let mut st = 35.0;
             while st < len {
                 if matches!(zone_at(st), Some(D::Core | D::Commercial)) {
-                    if let Some((p, z, _, t)) = spot(st, 2.3) {
+                    if let Some((p, z, _, t)) = spot(st, 2.4) {
                         if clear(&used, st, 2.5) {
                             used.push(st);
                             cands.push((
@@ -236,7 +237,7 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
                             ));
                         }
                     }
-                    if let Some((p, z, _, _)) = spot(st - 25.0, 0.65) {
+                    if let Some((p, z, _, _)) = spot(st - 25.0, 2.2) {
                         if clear(&used, st - 25.0, 2.0) {
                             used.push(st - 25.0);
                             cands.push((
@@ -279,8 +280,8 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
                 s.centre[0]
             };
             if env.near_junction(geom::xy(end_pt), 4.0) {
-                let st = if arrive_end { len - 4.0 } else { 4.0 };
-                if let Some((p, z, _, t)) = spot(st, 0.6) {
+                let st = if arrive_end { len - 10.0 } else { 10.0 };
+                if let Some((p, z, _, t)) = spot(st, 2.0) {
                     if clear(&used, st, 1.5) {
                         used.push(st);
                         cands.push((Cat::Sign, sign_post(p, z, t)));
@@ -289,6 +290,8 @@ pub(super) fn streetscape(env: &Env, out: &mut Vec<Feature>) {
             }
         }
     }
+    // Measured against the real paths cars drive (lanes and junction connector curves).
+    cands.retain(|(_, fs)| env.clear_of_lanes(fs));
     let mut by_cat: Vec<Vec<Vec<Feature>>> = vec![Vec::new(); CATS.len()];
     for (c, fs) in cands {
         by_cat[c as usize].push(fs);

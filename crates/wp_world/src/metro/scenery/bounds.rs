@@ -292,14 +292,27 @@ pub(super) fn highways(env: &Env, out: &mut Vec<Feature>) {
             }
         }
     }
+    // Lamps on the verge of at-grade stretches only (raised ones have rails, not verge),
+    // clear of every lane like the street lamps.
     for (m, n, ze) in lamps {
-        let p = geom::add(m, geom::scale(n, 1.2));
-        if matches!(env.occ(p), Occ::Building) || env.foreign_site(p) {
+        if !ze.is_nan() {
             continue;
         }
-        let z = if ze.is_nan() { env.gz(p) } else { ze };
-        let arm = [-n[0], -n[1]];
-        out.extend(lamp(p, z, 12.0, arm, 2.5));
+        // On the shoulder side of the fence if the shoulder is wide enough, else behind it.
+        for off in [1.2, 3.2] {
+            let p = geom::add(m, geom::scale(n, off));
+            if matches!(env.occ(p), Occ::Building)
+                || env.foreign_site(p)
+                || env.near_junction(p, super::JUNCTION_CLEAR_M)
+            {
+                continue;
+            }
+            let fs = lamp(p, env.gz(p), 12.0, [-n[0], -n[1]], 1.5 + off);
+            if env.clear_of_lanes(&fs) {
+                out.extend(fs);
+                break;
+            }
+        }
     }
     for (m, n) in boards {
         let p = geom::add(m, geom::scale(n, 11.0));
