@@ -67,7 +67,7 @@ while (Date.now() - t0 < 90000 && !(done() && samples > 40)) {
   const rows = await page.evaluate(() => window.__wp.indicators.rows());
   samples++;
   for (const r of rows) {
-    if (r.mode === "none") continue;
+    if (r.mode === "none" || r.mode === "culled") continue;
     const hazard = (r.flags & 4) !== 0;
     if (hazard) {
       hazardSamples++;

@@ -22,7 +22,9 @@ import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn,
 const VIEW_LOD_BAND_M = 15;
 
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
-export type LodMode = "view" | DrawMode | "none";
+/** `culled`: instanced traffic past [`LodDirector.trafficDrawM`], not drawn by design (not a
+ * missing car). */
+export type LodMode = "view" | DrawMode | "none" | "culled";
 
 /** One car's draw state in one frame. */
 export interface DrawState {
@@ -179,6 +181,8 @@ export class LodDirector {
       }
       const far = !view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
       const s = this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null, ind);
+      // Past the traffic draw distance (main's long highway roads keep cars alive out there).
+      if (far && s.mode === "none") s.mode = "culled";
       states.push(s);
       if (probe) {
         const car = s.mode === "full" || s.mode === "proxy" ? this.fleet.lastAdded.car : null;
@@ -392,7 +396,7 @@ export class LodLog {
       }
       if (s.fallback) tr.placeholderS += dt;
       const prev = tr.rows[tr.rows.length - 1];
-      const drawer = (m: LodMode) => (m === "view" ? "view" : m === "none" ? "none" : "fleet");
+      const drawer = (m: LodMode) => (m === "view" ? "view" : m === "none" || m === "culled" ? "none" : "fleet");
       if (drawer(prev.mode) !== drawer(s.mode)) {
         const off = (r: { pos: number[]; truth: number[] }) => r.pos.map((p, i) => p - r.truth[i]);
         const a = off(prev);
