@@ -450,15 +450,16 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     }
     let p = &with_over_rate(p, inp);
     let lock = drift_lock(inp.full_lock * p.lock_frac(inp.speed), inp, p);
-    // Past this tick's lock (a transition or the drift lock extension just ended): back inside
-    // it at the return rate first, so the rack never jumps. Gated (grip-balance, unify
-    // 2026-10-21, until W reworks it): only within the transition arming window of a lift or a
-    // key reversal. Outside it the block held the wheels past a shrinking smart / slide lock
-    // and regressed the tapper (rwd_b spins), the snap-back (3.3° → 5.5°) and spin_model_holds.
-    let armed = p.trans_follow
+    // Past this tick's lock right after a flick (the transition rack / new-side catch just let
+    // go): back inside it at the return rate, so the rack never jumps. Only then: a lock that
+    // shrinks for other reasons (grip-balance's held-key cut — the vehicle rate-limits that —
+    // or the step-11 extension ending) keeps the plain rack's behaviour; holding the
+    // countersteer longer there spun held drifts (grip-balance repro).
+    let after_flick = p.trans_follow
         && p.trans_arm_s > 0.0
-        && (inp.since_lift_s <= p.trans_arm_s || inp.since_reversal_s <= p.trans_arm_s);
-    if armed && current.abs() > lock + 1e-6 {
+        && inp.since_lift_s <= p.trans_arm_s + 0.5
+        && inp.since_reversal_s <= p.trans_arm_s + 0.5;
+    if after_flick && current.abs() > lock + 1e-6 {
         let rate = inp.full_lock.max(lock) / p.t_return_s.max(0.01);
         let a = current - current.signum() * rate * dt;
         return if a.abs() < lock {
@@ -1183,14 +1184,27 @@ mod tests {
             ..flick
         };
         assert!((run(&grip, &p) - lock).abs() < 1e-5);
-        // Leaving the transition past the plain lock: back inside it without a jump.
+        // Leaving the transition past the plain lock just after a flick: back inside it
+        // without a jump.
         let mut a = -0.7f32;
         let rel = PlainInput {
             driver: 0.0,
-            ..unarmed
+            since_reversal_s: 0.2,
+            ..flick
         };
         let next = update_center_angle(a, &rel, &p, DT);
         assert!(next < -0.69 && next > a);
+        // No flick (the lock shrank for another reason): the plain rack, as before step 12.
+        let plain_next = update_center_angle(
+            a,
+            &PlainInput {
+                driver: 0.0,
+                ..unarmed
+            },
+            &p,
+            DT,
+        );
+        assert!(plain_next > -lock - 1e-6);
         for _ in 0..240 {
             a = update_center_angle(a, &rel, &p, DT);
         }
