@@ -1880,6 +1880,46 @@ mod tests {
     }
 
     #[test]
+    fn kinematic_police_do_not_roll_phantom_traffic_hazards() {
+        // No police car model: every unit stays on wp_police's kinematic driver (low LOD).
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 11,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        sim.set_world(World::procedural(
+            &wp_world::procgen::ProcGenConfig::small(),
+            wp_world::WorldConfig::default(),
+        ));
+        let id = sim.spawn_vehicle(&car, [0.0, 0.0, 0.0], 0.0).unwrap();
+        sim.police_mut().set_heat(id, 5.0);
+        sim.set_input(
+            id,
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for _ in 0..(60.0 / wp_contracts::PHYSICS_DT) as u32 {
+            sim.step_fixed();
+        }
+        assert!(
+            sim.police().units().iter().any(|u| u.entity.is_none()),
+            "no kinematic police units spawned"
+        );
+        let stats = sim.police().stats();
+        assert_eq!(
+            (stats.near_misses, stats.traffic_collisions),
+            (0, 0),
+            "kinematic units hit statistical stand-in traffic"
+        );
+    }
+
+    #[test]
     fn traffic_near_the_player_becomes_physical() {
         let run = || {
             let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
