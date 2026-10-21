@@ -28,6 +28,8 @@
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
+//! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)`, `debug_place(entity, x, y, yaw, speed)` — see [`run`] |
+//! | garages (lead) | `garages_json()`, `garage_visit_json()`, `garage_repair()`, `garage_leave()` — see [`garage_visit`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -45,6 +47,7 @@ pub mod garage;
 pub mod lod;
 pub mod map;
 pub mod mod_visuals;
+pub mod garage_visit;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -1013,6 +1016,35 @@ pub fn race_course() -> Result<Vec<f32>, JsValue> {
 #[wasm_bindgen]
 pub fn race_result_json() -> Result<String, JsValue> {
     get(|s| json(&s.race_report()))
+/// The city's repair shops as JSON ([`garage_visit::GarageSite`] array: name, position,
+/// radius, `Legit` / `Crooked`, district). `[]` without a city or an economy run.
+#[wasm_bindgen]
+pub fn garages_json() -> Result<String, JsValue> {
+    get(|s| json(&s.garages()))
+}
+
+/// The open garage visit as JSON ([`garage_visit::GarageOffer`]: shop, wanted level, G's
+/// `RepairAll` quote at that shop, cash, whether "Repair" is possible), or `null`. A visit
+/// opens when the player's car stops inside a garage with no pursuit on; the car is held on
+/// the brakes until `garage_repair()` or `garage_leave()`.
+#[wasm_bindgen]
+pub fn garage_visit_json() -> Result<String, JsValue> {
+    get(|s| json(&s.garage_visit()))
+}
+
+/// "Repair" in the open garage visit: pays the shop's `RepairAll` from the ledger, repairs the
+/// car in place (replay op `Repair`) and releases the brakes. Returns
+/// [`garage_visit::GarageRepairReport`] JSON; an error (nothing changed) without a visit, with
+/// nothing to repair, or when the player cannot afford it.
+#[wasm_bindgen]
+pub fn garage_repair() -> Result<String, JsValue> {
+    with(|s| s.garage_repair().map(|r| json(&r)))
+}
+
+/// "Leave" the open garage visit without repairing (no-op without one).
+#[wasm_bindgen]
+pub fn garage_leave() -> Result<(), JsValue> {
+    get(|s| s.garage_leave())
 }
 
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is
@@ -1062,6 +1094,19 @@ pub fn debug_knock_prop(entity: u32, prop: i32, speed_mps: f32) -> Result<u32, J
             .map(|i| i as u32)
     })
 }
+/// Debug / e2e: put `entity` on the ground at `[x, y]` facing `yaw` (0 = +Y) at `speed_mps`
+/// (e.g. inside a garage from `garages_json()`). Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_place(entity: u32, x: f32, y: f32, yaw: f32, speed_mps: f32) -> Result<(), JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .place_on_ground(EntityId(entity), [x, y], yaw, speed_mps, None)
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// Floats per agent in `traffic_agents()`.
+pub const AGENT_STRIDE: usize = 5;
 
 /// Floats per prop in `props_static()` ([`props::PROP_STRIDE`]).
 #[wasm_bindgen]

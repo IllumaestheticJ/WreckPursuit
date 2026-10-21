@@ -353,4 +353,201 @@ fn helicopter_tracks_a_racer_driving_off_in_port_vesper() {
         }
     }
     assert!(visual > 100, "visual in {visual} of 200 samples");
+// ----- garage visits (`crate::garage_visit`) ------------------------------------------------
+
+/// Free drive in the procedural city, one tick in (the car has left any garage it spawned in).
+fn free_drive_city() -> Session {
+    let sc = crate::scenario::free_drive_in("debug_sedan", DamageMode::Arcade, procedural_city());
+    let mut s = Session::new(sc, false).unwrap();
+    assert!(
+        s.run().is_some(),
+        "free drive in the city has an economy run"
+    );
+    assert!(!s.garages().is_empty(), "the procedural city has garages");
+    s.run_ticks(1);
+    s
+}
+
+/// Drive the player into a static box at `speed_mps` until it is damaged, then clear its heat.
+fn crash(s: &mut Session, speed_mps: f32) {
+    let st = state(s, PLAYER);
+    let sim = s.debug_sim_mut().unwrap();
+    // A wall 25 m ahead along the car's +Y (yaw 0 = +Y).
+    sim.place_on_ground(
+        PLAYER,
+        [st.pos[0], st.pos[1]],
+        0.0,
+        speed_mps,
+        Some(st.pos[2]),
+    )
+    .unwrap();
+    sim.add_static_box(
+        [st.pos[0], st.pos[1] + 25.0, st.pos[2] + 1.0],
+        [8.0, 1.0, 3.0],
+        0.0,
+    );
+    for _ in 0..240 * 4 {
+        s.run_ticks(1);
+    }
+    let health = health(s);
+    assert!(health < 1.0, "the crash did no damage ({health})");
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 0.0);
+}
+
+fn health(s: &Session) -> f32 {
+    s.sim()
+        .vehicles()
+        .iter()
+        .find(|v| v.id == PLAYER)
+        .unwrap()
+        .damage
+        .health()
+}
+
+/// Put the player in garage `i` at `speed_mps` and run `ticks`.
+fn pull_into(s: &mut Session, i: usize, speed_mps: f32, ticks: u64) {
+    let g = s.garages()[i].clone();
+    s.debug_sim_mut()
+        .unwrap()
+        .place_on_ground(
+            PLAYER,
+            [g.pos[0], g.pos[1]],
+            g.heading_rad,
+            speed_mps,
+            Some(g.pos[2]),
+        )
+        .unwrap();
+    s.run_ticks(ticks);
+}
+
+/// Put the player 200 m away from every garage and run a tick.
+fn drive_away(s: &mut Session) {
+    let g = s.garages().to_vec();
+    let far = s
+        .sim()
+        .world()
+        .network()
+        .lanes
+        .iter()
+        .flat_map(|l| l.polyline.iter().map(|p| [p[0], p[1], p[2]]))
+        .find(|p| {
+            g.iter()
+                .all(|g| (p[0] - g.pos[0]).hypot(p[1] - g.pos[1]) > 200.0)
+        })
+        .unwrap();
+    s.debug_sim_mut()
+        .unwrap()
+        .place_on_ground(PLAYER, [far[0], far[1]], 0.0, 0.0, Some(far[2]))
+        .unwrap();
+    s.run_ticks(1);
+}
+
+#[test]
+fn stopping_in_a_garage_opens_repairs_and_repair_restores_the_car() {
+    let mut s = free_drive_city();
+    crash(&mut s, 18.0);
+    drive_away(&mut s);
+    assert!(s.garage_visit().is_none());
+    let cash0 = s.run().unwrap().account().cash;
+
+    pull_into(&mut s, 0, 0.0, 2);
+    let v = s.garage_visit().expect("a visit opened").clone();
+    assert_eq!(v.seq, 1);
+    assert_eq!(v.site.index, 0);
+    assert_eq!(v.wanted, WantedLevel::None);
+    assert!(v.health < 1.0);
+    let q = v.quote.clone().expect("damage is quoted");
+    assert!(q.player_pays > 0, "{q:?}");
+    assert!(!q.reports_to_police);
+    assert!(v.can_repair);
+    assert_eq!(v.cash, cash0);
+    // The car is held while the visit is open.
+    assert!(s.held(PLAYER));
+    let full = VehicleInput {
+        throttle: 1.0,
+        ..Default::default()
+    };
+    assert!(!s.set_input(PLAYER, full).unwrap());
+    s.run_ticks(240);
+    assert!(speed(&s, PLAYER) < 1.0);
+
+    let r = s.garage_repair().unwrap();
+    assert_eq!(r.paid, q.player_pays);
+    assert_eq!(r.cash_after, cash0 - q.player_pays);
+    assert!(r.ledger.iter().any(|l| l.reason == "RepairPaid"));
+    s.run_ticks(1);
+    assert_eq!(health(&s), 1.0);
+    assert!(s.garage_visit().is_none());
+    assert!(!s.held(PLAYER));
+    assert!(s.set_input(PLAYER, full).unwrap());
+    assert_eq!(s.run().unwrap().account().cash, r.cash_after);
+    // A second repair is refused: no visit.
+    assert!(s.garage_repair().is_err());
+    // The repair is a replay op.
+    let rp = s.record_stop().unwrap();
+    assert!(rp.ops.iter().any(|o| o.op == OpKind::Repair));
+    // Whole-session ledger: gap-free and ends at the account's cash.
+    let ledger = s.run().unwrap().ledger();
+    assert!(ledger.windows(2).all(|w| w[1].seq == w[0].seq + 1));
+    assert_eq!(ledger.last().unwrap().cash_after, r.cash_after);
+}
+
+#[test]
+fn garage_visit_needs_a_stop_and_a_fresh_entry() {
+    let mut s = free_drive_city();
+    // Driving through at speed does not stop the car.
+    pull_into(&mut s, 0, 12.0, 1);
+    assert!(s.garage_visit().is_none());
+    drive_away(&mut s);
+
+    // A pristine car: the visit opens with nothing to repair; "Repair" is refused.
+    pull_into(&mut s, 0, 0.0, 2);
+    let v = s.garage_visit().expect("a visit opened").clone();
+    assert!(v.quote.is_none());
+    assert_eq!(v.note.as_deref(), Some("nothing to repair"));
+    assert!(!v.can_repair);
+    assert!(s.garage_repair().is_err());
+    assert!(
+        s.garage_visit().is_some(),
+        "a refused repair keeps the visit open"
+    );
+
+    // "Leave" gives control back; staying inside does not reopen it.
+    s.garage_leave();
+    assert!(!s.held(PLAYER));
+    s.run_ticks(240);
+    assert!(s.garage_visit().is_none());
+
+    // Out and back in: a new visit.
+    drive_away(&mut s);
+    pull_into(&mut s, 0, 0.0, 2);
+    assert_eq!(s.garage_visit().map(|v| v.seq), Some(2));
+}
+
+#[test]
+fn a_pursuit_keeps_the_garage_shut() {
+    let mut s = parked_near_police(14.0, 30.0);
+    for _ in 0..240 * 20 {
+        s.set_input(PLAYER, brake()).unwrap();
+        s.run_ticks(1);
+        if crate::police::status(s.sim().police(), PLAYER).status == "Pursuit" {
+            break;
+        }
+    }
+    assert_eq!(
+        crate::police::status(s.sim().police(), PLAYER).status,
+        "Pursuit"
+    );
+    pull_into(&mut s, 0, 0.0, 2);
+    assert!(
+        matches!(
+            crate::police::status(s.sim().police(), PLAYER).status,
+            "Pursuit" | "Searching"
+        ),
+        "still chased"
+    );
+    assert!(s.garage_visit().is_none(), "no visit mid-chase");
 }

@@ -30,6 +30,7 @@ use crate::crash_replay::{
 };
 use crate::data::mem_data;
 use crate::race::RaceRun;
+use crate::garage_visit::{GarageOffer, GarageRepairReport, GarageSite, GARAGE_ENTER_SPEED_MPS};
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
 
@@ -103,6 +104,14 @@ pub struct Session {
     race: Option<RaceRun>,
     /// Rolling snapshot buffer + big-crash detector (live sessions; see [`crate::crash_replay`]).
     crash: CrashRecorder,
+    /// The city's repair shops (sessions with an economy run; see [`crate::garage_visit`]).
+    garages: Vec<GarageSite>,
+    /// The open garage visit (the player's car is held while it is open).
+    visit: Option<GarageOffer>,
+    /// The player's car has been outside every garage since the last visit (or the start).
+    garage_armed: bool,
+    /// Garage visits opened so far.
+    visit_seq: u32,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -186,12 +195,20 @@ impl Session {
             CrashRecorder::off()
         } else {
             CrashRecorder::default()
+        let garages = if run.is_some() {
+            crate::garage_visit::sites(sim.world())
+        } else {
+            Vec::new()
         };
         Ok(Self {
             crash,
             race,
             run,
             career: false,
+            garages,
+            visit: None,
+            garage_armed: false,
+            visit_seq: 0,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -854,11 +871,147 @@ impl Session {
         Some((spot(side), yaw, p[2]))
     }
 
-    /// The vehicle is held on the brakes because its run is over (capture or wreck).
+    /// The vehicle is held on the brakes because its run is over (capture or wreck) or it is
+    /// in a garage visit.
     pub fn held(&self, id: EntityId) -> bool {
         self.run
             .as_ref()
-            .is_some_and(|r| r.is_over() && r.player() == id)
+            .is_some_and(|r| (r.is_over() || self.visit.is_some()) && r.player() == id)
+    }
+
+    // ----- garage visits (lead; see `crate::garage_visit`) ------------------------------
+
+    /// The city's repair shops (empty without an economy run or a city).
+    pub fn garages(&self) -> &[GarageSite] {
+        if self.race.is_some() || self.career {
+            return &[];
+        }
+        &self.garages
+    }
+
+    /// The open garage visit, if any.
+    pub fn garage_visit(&self) -> Option<&GarageOffer> {
+        self.visit.as_ref()
+    }
+
+    /// The player's car's damage model and the mode table (for pricing).
+    fn player_damage(
+        sim: &Sim,
+        player: EntityId,
+    ) -> Option<(&dyn wp_contracts::DamageSim, &wp_contracts::ModeTable)> {
+        sim.vehicles()
+            .iter()
+            .find(|v| v.id == player)
+            .map(|v| (&v.damage as &dyn wp_contracts::DamageSim, sim.mode_table()))
+    }
+
+    /// Open a visit when the player's car has stopped inside a garage (and close one a new
+    /// pursuit or the end of the run interrupts). Called after every live tick.
+    fn check_garage(&mut self) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let player = run.player();
+        let chased = self.sim.police().racer(player).is_some_and(|r| {
+            matches!(
+                r.status,
+                wp_police::PursuitStatus::Pursuit | wp_police::PursuitStatus::Searching
+            )
+        });
+        if self.visit.is_some() {
+            if run.is_over() || chased {
+                self.garage_leave();
+            }
+            return;
+        }
+        // Not in picker races (a stop in a shop would hold a racer) nor career runs (the
+        // career garage screen owns repairs and the career account).
+        if self.garages.is_empty() || run.is_over() || self.race.is_some() || self.career {
+            return;
+        }
+        let Some(st) = self.vehicle(player).map(|v| v.vehicle.state()) else {
+            return;
+        };
+        let Some(site) = self
+            .garages
+            .iter()
+            .find(|g| g.contains([st.pos[0], st.pos[1]]))
+        else {
+            self.garage_armed = true;
+            return;
+        };
+        let speed = st.lin_vel[0].hypot(st.lin_vel[1]);
+        if !self.garage_armed || chased || speed >= GARAGE_ENTER_SPEED_MPS {
+            return;
+        }
+        let wanted = self
+            .sim
+            .police()
+            .racer(player)
+            .map_or(wp_contracts::WantedLevel::None, |r| r.level);
+        let site = site.clone();
+        let damage = Self::player_damage(&self.sim, player);
+        let (quote, note) = match run.garage_quote(&site.shop(wanted), damage) {
+            Ok(q) => (Some(q), None),
+            Err(wp_economy::EconomyError::NothingToRepair) => {
+                (None, Some("nothing to repair".to_string()))
+            }
+            Err(e) => (None, Some(e.to_string())),
+        };
+        let cash = run.account().cash;
+        let health = damage.map_or(1.0, |(d, _)| d.summary().health);
+        self.visit_seq += 1;
+        self.garage_armed = false;
+        self.visit = Some(GarageOffer {
+            seq: self.visit_seq,
+            tick: self.sim.tick(),
+            can_repair: quote.as_ref().is_some_and(|q| q.player_pays <= cash),
+            site,
+            wanted,
+            health,
+            quote,
+            note,
+            cash,
+        });
+    }
+
+    /// Release the player's car after a hold: neutral input, headlights kept.
+    fn release_player(&mut self, idx: usize) {
+        let keep = self.last_input[idx];
+        self.log_input(
+            idx,
+            VehicleInput {
+                headlights: keep.headlights,
+                ..Default::default()
+            },
+        );
+    }
+
+    /// "Repair" in the open garage visit: pay the shop's `RepairAll` from the ledger, repair
+    /// the car in place (logged replay op) and give control back.
+    pub fn garage_repair(&mut self) -> Result<GarageRepairReport, String> {
+        self.live_check()?;
+        let offer = self.visit.as_ref().ok_or("not in a garage")?;
+        let (name, shop) = (offer.site.name.clone(), offer.site.shop(offer.wanted));
+        let run = self.run.as_mut().ok_or("no economy run in this session")?;
+        let player = run.player();
+        let damage = Self::player_damage(&self.sim, player);
+        let report = run.garage_repair(&name, &shop, damage)?;
+        let idx = self.idx(player)?;
+        self.log_op(idx, OpKind::Repair)?;
+        self.visit = None;
+        self.release_player(idx);
+        Ok(report)
+    }
+
+    /// "Leave" the open garage visit without repairing (no-op without one).
+    pub fn garage_leave(&mut self) {
+        if self.visit.take().is_none() {
+            return;
+        }
+        if let Some(idx) = self.run.as_ref().and_then(|r| self.index(r.player())) {
+            self.release_player(idx);
+        }
     }
 
     /// "Repair & continue": pay the impound fee and the repair from the ledger, repair the car
@@ -870,14 +1023,7 @@ impl Session {
         let report = run.repair_and_continue()?;
         let idx = self.idx(player)?;
         self.log_op(idx, OpKind::Repair)?;
-        let keep = self.last_input[idx];
-        self.log_input(
-            idx,
-            VehicleInput {
-                headlights: keep.headlights,
-                ..Default::default()
-            },
-        );
+        self.release_player(idx);
         Ok(report)
     }
 
@@ -953,10 +1099,10 @@ impl Session {
         } else if let Some(idx) = self
             .run
             .as_ref()
-            .filter(|r| r.is_over())
+            .filter(|r| r.is_over() || self.visit.is_some())
             .and_then(|r| self.index(r.player()))
         {
-            // The run is over: the player's car brakes to a halt and stays there.
+            // The run is over, or the car is in a garage: it brakes to a halt and stays there.
             let keep = self.last_input[idx];
             self.log_input(
                 idx,
@@ -1037,6 +1183,7 @@ impl Session {
             if let Some(p) = player {
                 self.observe_crash(p, player_before.as_ref(), &drained);
             }
+            self.check_garage();
         }
         self.events.extend(drained);
         self.events.extend(extra);

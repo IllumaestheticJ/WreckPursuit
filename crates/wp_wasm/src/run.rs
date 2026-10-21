@@ -28,6 +28,8 @@ use wp_economy::{
 };
 use wp_math::Rng;
 
+use crate::garage_visit::GarageRepairReport;
+
 /// Ledger account of the browser player.
 pub const PLAYER_ACCOUNT: PlayerId = PlayerId(1);
 
@@ -431,26 +433,8 @@ impl PlayerRun {
         outcome: RunOutcome,
         damage: Option<(&dyn DamageSim, &ModeTable)>,
     ) -> Result<&RunReport, String> {
-        let owned = self.acct.try_car(self.car).map_err(|e| e.to_string())?;
-        let price = self.econ.price_table_for(owned);
-        let (health, total_loss) = damage.map_or((1.0, false), |(d, _)| {
-            let s = d.summary();
-            (s.health, s.total_loss)
-        });
-        let report = DamageReport {
-            car: self.car,
-            health,
-            total_loss,
-            handling: damage
-                .map(|(d, _)| d.handling_effects())
-                .unwrap_or_default(),
-            estimate: damage
-                .map(|(d, mt)| d.repair_estimate(mt, &price))
-                .unwrap_or_default(),
-            lattice_state: Vec::new(),
-            wanted_during_session: false,
-            towed: outcome == RunOutcome::TotalLoss,
-        };
+        let report = self.damage_report(damage, outcome == RunOutcome::TotalLoss)?;
+        let (health, total_loss) = (report.health, report.total_loss);
         let level = self.session.wanted_level(self.player);
         let r = self
             .session
@@ -516,6 +500,96 @@ impl PlayerRun {
             ledger: r.events.iter().map(LedgerLine::of).collect(),
         });
         Ok(self.report.as_ref().expect("just set"))
+    }
+
+    /// The player's car's damage as the economy records it (`None` = pristine).
+    fn damage_report(
+        &self,
+        damage: Option<(&dyn DamageSim, &ModeTable)>,
+        towed: bool,
+    ) -> Result<DamageReport, String> {
+        let owned = self.acct.try_car(self.car).map_err(|e| e.to_string())?;
+        let price = self.econ.price_table_for(owned);
+        let (health, total_loss) = damage.map_or((1.0, false), |(d, _)| {
+            let s = d.summary();
+            (s.health, s.total_loss)
+        });
+        Ok(DamageReport {
+            car: self.car,
+            health,
+            total_loss,
+            handling: damage
+                .map(|(d, _)| d.handling_effects())
+                .unwrap_or_default(),
+            estimate: damage
+                .map(|(d, mt)| d.repair_estimate(mt, &price))
+                .unwrap_or_default(),
+            lattice_state: Vec::new(),
+            wanted_during_session: false,
+            towed,
+        })
+    }
+
+    /// G's `RepairAll` quote at `shop` for the car's damage right now (quoted on a copy of the
+    /// account with that damage recorded; nothing changes).
+    pub fn garage_quote(
+        &self,
+        shop: &ShopContext,
+        damage: Option<(&dyn DamageSim, &ModeTable)>,
+    ) -> Result<RepairQuote, EconomyError> {
+        let report = self
+            .damage_report(damage, false)
+            .map_err(EconomyError::InvalidInput)?;
+        let mut probe = self.acct.clone();
+        self.econ.record_damage(&mut probe, &report)?;
+        self.econ
+            .quote_repair(&probe, self.car, &RepairOption::RepairAll, shop, self.mode)
+    }
+
+    /// Repair the car at a garage: record its damage now, then G's `repair` (`RepairAll` at
+    /// `shop`), all or nothing. On success the caller repairs the sim vehicle
+    /// (`Sim::repair_vehicle`). Refused while the run is over (that is "Repair & continue").
+    pub fn garage_repair(
+        &mut self,
+        shop_name: &str,
+        shop: &ShopContext,
+        damage: Option<(&dyn DamageSim, &ModeTable)>,
+    ) -> Result<GarageRepairReport, String> {
+        if self.over {
+            return Err("the run is over; use Repair & continue".into());
+        }
+        let report = self.damage_report(damage, false)?;
+        let mut work = self.acct.clone();
+        let ((), mut events) = self
+            .econ
+            .record_damage(&mut work, &report)
+            .map_err(|e| e.to_string())?;
+        let quote = self
+            .econ
+            .quote_repair(&work, self.car, &RepairOption::RepairAll, shop, self.mode)
+            .map_err(|e| e.to_string())?;
+        let (_order, ev) = self
+            .econ
+            .repair(
+                &mut work,
+                self.car,
+                &RepairOption::RepairAll,
+                shop,
+                self.mode,
+            )
+            .map_err(|e| e.to_string())?;
+        events.extend(ev);
+        let report = GarageRepairReport {
+            shop: shop_name.to_string(),
+            paid: quote.player_pays,
+            insurance_covers: quote.insurance_covers,
+            reported_to_police: quote.reports_to_police,
+            cash_after: work.cash,
+            ledger: events.iter().map(LedgerLine::of).collect(),
+        };
+        self.acct = work;
+        self.ledger.extend(events);
+        Ok(report)
     }
 
     /// The `RepairAll` quote the car will get once out of the pound (quoted on a copy).
