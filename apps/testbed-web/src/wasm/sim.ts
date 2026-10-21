@@ -303,7 +303,7 @@ export const sim = {
   gripBalanceDefaults: (): {
     before: Record<string, number | boolean | string>;
     new: Record<string, number | boolean | string>;
-    step14: Record<string, number | boolean | string>;
+    grip: Record<string, number | boolean | string>;
     step2: Record<string, number | boolean | string>;
     slow_weight: Record<string, number | boolean | string>;
     drift_best: Record<string, number | boolean | string>;

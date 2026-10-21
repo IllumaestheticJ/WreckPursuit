@@ -1512,7 +1512,8 @@ impl Vehicle {
         let arb_scale = crate::lab_scope::ride(self.lab_tagged).map_or(1.0, |t| t.arb.max(0.0));
         let grip_lab = crate::lab_scope::grip(self.lab_tagged);
         for (l, r) in [(0usize, 1usize), (2, 3)] {
-            let axle_scale = grip_lab.map_or(1.0, |g| g.arb_scale(l == 0));
+            let axle_scale =
+                grip_lab.map_or(1.0, |g| g.arb_scale(l == 0, &self.def.drivetrain.layout));
             let f = arb_force(
                 self.corners[l].susp.arb_n_per_m * arb_scale * axle_scale,
                 self.wheels[l].x,
@@ -2025,7 +2026,7 @@ impl Vehicle {
         let car_tune = crate::lab_scope::car(self.lab_tagged);
         // Grip-balance lab (`crate::grip_lab`): front / rear tyre scales on top; `None` = data.
         let grip_tune = crate::lab_scope::grip(self.lab_tagged).filter(|g| g.changes_tyres());
-        let rwd = matches!(self.def.drivetrain.layout, DriveLayout::Rwd);
+        let layout = self.def.drivetrain.layout;
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -2057,7 +2058,7 @@ impl Vehicle {
                 Some(t) => {
                     tuned = t.tire_for(&c.tire, i);
                     if let Some(g) = grip_tune {
-                        g.apply_tire(&mut tuned, i, rwd);
+                        g.apply_tire(&mut tuned, i, &layout);
                     }
                     let w_lat = if t.combined_applies(i) {
                         t.lat_under_spin.clamp(0.0, 1.0)
@@ -2069,7 +2070,7 @@ impl Vehicle {
                 None => match grip_tune {
                     Some(g) => {
                         tuned = c.tire.clone();
-                        g.apply_tire(&mut tuned, i, rwd);
+                        g.apply_tire(&mut tuned, i, &layout);
                         (&tuned, 1.0, None)
                     }
                     None => (&c.tire, 1.0, None),
