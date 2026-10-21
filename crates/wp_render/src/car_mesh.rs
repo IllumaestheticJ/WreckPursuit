@@ -1,6 +1,8 @@
-//! Reader for the per-panel car meshes in `data/panels/meshes/<car>.json` (format 1, written by
-//! `tools/assets`, see `data/panels/README.md`). Only the fields the renderer needs are read;
-//! the writer and validator stay in `car-assets`.
+//! Reader for the per-panel car meshes in `data/panels/meshes/<car>.json` (formats 1–3, written
+//! by `tools/assets`, see `data/panels/README.md`). Only the fields the renderer needs are read;
+//! the writer and validator stay in `car-assets`. Formats 2 and 3 only add the optional sheet
+//! buckling binding (hood / trunk / fenders / rear quarters), which this reader ignores: those
+//! panels skin like any other (no crumple bend yet).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -9,8 +11,11 @@ use std::sync::Arc;
 use serde::Deserialize;
 use wp_contracts::BodyRegion;
 
-/// Mesh file format this reader understands.
+/// Mesh file format this reader writes (test meshes) and the oldest it reads.
 pub const MESH_FORMAT: u32 = 1;
+
+/// Newest mesh file format this reader understands (`car_assets::mesh::MESH_FORMAT`).
+pub const MESH_FORMAT_MAX: u32 = 3;
 
 /// What a mesh part is (mirrors `car_assets::mesh::PartKind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -102,7 +107,7 @@ pub struct CarMesh {
     pub id: String,
     /// Lattice the skin binding refers to.
     pub lattice_id: String,
-    /// File format, must be [`MESH_FORMAT`].
+    /// File format, [`MESH_FORMAT`]..=[`MESH_FORMAT_MAX`].
     pub format: u32,
     /// Parts in file order.
     pub parts: Vec<MeshPart>,
@@ -112,9 +117,9 @@ impl CarMesh {
     /// Parse a mesh file and check its format and index ranges.
     pub fn from_json(text: &str) -> Result<Self, String> {
         let mesh: CarMesh = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        if mesh.format != MESH_FORMAT {
+        if !(MESH_FORMAT..=MESH_FORMAT_MAX).contains(&mesh.format) {
             return Err(format!(
-                "{}: mesh format {} (expected {MESH_FORMAT})",
+                "{}: mesh format {} (expected {MESH_FORMAT}..={MESH_FORMAT_MAX})",
                 mesh.id, mesh.format
             ));
         }

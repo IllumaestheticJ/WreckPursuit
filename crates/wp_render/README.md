@@ -10,7 +10,7 @@ eventually serve the browser too).
 
 | Module | What | Needs a GPU |
 |---|---|---|
-| `car_mesh` | Reader for mesh format 1 (`tools/assets` writes it), on-demand `CarMeshLibrary` | no |
+| `car_mesh` | Reader for mesh formats 1–3 (`tools/assets` writes 3; the sheet-buckling binding is ignored), on-demand `CarMeshLibrary` | no |
 | `city` | `CityMesh::from_glb` / `load_repo`: reads `data/city/<id>.greybox.glb` (the file the browser draws, written by `tools/city-import`) into one world-space mesh per decal layer | no |
 | `skin` | `SkinnedBody`: lattice → vertices (port of `testbed-web/src/render/panels.ts`, incl. rigid-frame fit for free panels); wheel meshes | no |
 | `scene` | `Scene::sync(&Sim, dt)`: one `CarView` per vehicle (body, wheel poses, chassis transform), boxes for abstract traffic, static boxes; `Scene::set_city` | no |

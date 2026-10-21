@@ -5030,7 +5030,7 @@ dependencies = [
 name = "wp_wasm"
 version = "0.1.0"
 dependencies = [
- "miniz_oxide",
+ "miniz_oxide 0.9.1",
  "postcard",
  "rapier3d",
  "serde",
