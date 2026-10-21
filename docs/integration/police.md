@@ -88,6 +88,13 @@
     the coupe runs into the y ≈ -110 junction and meets a patrol crossing it (contact at 15.2 s,
     47 m/s closing), stopping at ≈ 357 m. The race result (`wp_race`'s judge) is unchanged.
     The 11 police-spawning goldens were re-blessed in a `[bless]` commit.
+- **2026-10-21, found while fixing opponent passing (see `opponent.md`): patrol gridlock.**
+  In `wp_opponent` `live_police_chase…` with `physical_accel_mps2 = 6.0`, two units on
+  `patrol` (entities 6 and 9, near (24, -163) and (12, -169)) stand still in both lanes for the
+  rest of the run (> 100 s) after a traffic stop on that stretch. Unit 9 ends up sideways
+  across the lane. They seem to wait on each other and the stopped cars around them (`avoid`'s
+  follow/wait-behind). Racers now pass a traffic stop, but not two cars blocking the whole
+  road. Worth a look before raising `physical_accel_mps2` above 5.0.
 
 ## Needs
 | From | What | Workaround now |

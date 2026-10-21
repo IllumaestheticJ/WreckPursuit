@@ -60,11 +60,22 @@ gap to the player — pace is car capability × how much of it the driver dares 
   heading in. **Stand-off breaker**: after 3 s held by civilians that are standing still in the
   box (each waiting for the other), stop counting them and creep through.
 - **Pulled-over cars** (retired, busted, yielding racers; civilians stopped while yielding to a
-  siren or with hazards on) are fixed obstacles: anyone may pass them, also in the start phase,
-  using the opposing lanes where the corridor allows overtaking there, needing room only until
-  past them; nobody backs away from a stopped car. A racer already stopped right behind one
-  creeps (≤ 2.5 m/s, stopping 1 m short) while steering out, since a stopped car cannot move
-  sideways. Cars told to
+  siren or with hazards on; police cars the police system reports parked —
+  `PoliceQuery::parked_units`: stopped at a traffic stop, a roadblock, wrecked or out of
+  service, not merely waiting while on patrol) are fixed obstacles: anyone may pass them, also
+  in the start phase, using the opposing lanes where the corridor allows overtaking there,
+  needing room only until past them. A car parked beside me does not count as "alongside" for
+  the no-three-wide rule. When the full-margin line round one is blocked by another parked
+  car, the racer threads the gap between them if it leaves 0.45 m each side
+  (`SQUEEZE_MARGIN_M`), and keeps that line (a parked target is not re-aimed at). A racer
+  already stopped right behind one creeps (≤ 2.5 m/s, stopping 1 m short) while steering out,
+  since a stopped car cannot move sideways; if it is still overlapping it within 3.5 m
+  (`TURN_OUT_GAP_M`) after 2 s, it backs out at ≤ 3 m/s until 8 m clear (≤ 5 s) and tries
+  again. The same back-out frees a rejoining car nose-to-nose with a stopped one.
+- **Stall breaker**: any other vehicle standing still in my path that has held me 6 s
+  (`STALL_PASS_S`) counts as pulled over while it stays still (a patrol car in a standoff, a
+  stalled car), unless a signal that is not green is within 40 m past it (a queue at a light).
+  Cars told to
   stop hold on the handbrake (the shared controller releases the brake pedal near a standstill
   because a held brake selects reverse; without this they idle forward at ~0.6 m/s).
 - **Damage**: profile rebuilt from `CarCapability::damaged` when effects change by > 5 %;

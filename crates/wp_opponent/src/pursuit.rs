@@ -1,5 +1,5 @@
 //! Police awareness. The field asks a [`PoliceQuery`] for each racer's wanted level, whether
-//! it is being chased, and where police are. Two implementations:
+//! it is being chased, where police are, and which police cars are parked on the road. Two implementations:
 //!
 //! - [`SimPolice`]: live, read-only view of `wp_sim`'s `PoliceSystem` (`Sim::police()`): wanted
 //!   levels, pursuit status and the *current* positions of every ground unit and roadblock.
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use wp_contracts::{EntityId, SimEvent};
 use wp_police::events::{PoliceEvent, UnitId};
 use wp_police::heat::PursuitStatus;
-use wp_police::{PoliceSystem, UnitKind};
+use wp_police::{Assignment, PoliceSystem, UnitKind};
 use wp_world::geom::V2;
 
 /// What a racer can know about the police.
@@ -31,6 +31,13 @@ pub trait PoliceQuery {
     /// Whether police are actively chasing `racer` (pursuit or search running). Default: no.
     fn in_pursuit(&self, _racer: EntityId) -> bool {
         false
+    }
+
+    /// Police cars standing still on the road for something other than traffic (a traffic
+    /// stop, a roadblock, wrecked or out of service), by vehicle entity. Racers treat them
+    /// like a pulled-over car: a fixed obstacle anyone may pass. Default: none known.
+    fn parked_units(&self) -> Vec<EntityId> {
+        Vec::new()
     }
 }
 
@@ -62,7 +69,32 @@ impl PoliceQuery for SimPolice<'_> {
             .racer(racer)
             .is_some_and(|r| matches!(r.status, PursuitStatus::Pursuit | PursuitStatus::Searching))
     }
+
+    /// Stopped ground units that are not just driving somewhere: an idle, patrolling,
+    /// responding or intercepting car standing still may be waiting at a light or in a queue,
+    /// so it stays a normal obstacle.
+    fn parked_units(&self) -> Vec<EntityId> {
+        self.0
+            .units()
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car && u.body.speed.abs() < PARKED_UNIT_MPS)
+            .filter(|u| {
+                u.wrecked
+                    || !matches!(
+                        u.assignment,
+                        Assignment::Idle
+                            | Assignment::Patrol { .. }
+                            | Assignment::Respond { .. }
+                            | Assignment::Intercept { .. }
+                    )
+            })
+            .filter_map(|u| u.entity)
+            .collect()
+    }
 }
+
+/// Below this speed a police car counts as standing still, m/s.
+const PARKED_UNIT_MPS: f32 = 0.5;
 
 /// No police in this event (or the police system is off).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

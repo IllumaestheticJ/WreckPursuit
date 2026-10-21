@@ -14,7 +14,7 @@
 //!    speed target = min(speed profile with this zone's braking-point error, obstacle caps).
 //! 4. **Track**: `wp_world::drive::DriveController` (pure pursuit + PID, shared with traffic).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{
@@ -273,7 +273,8 @@ struct Obstacle {
     /// A racer that is itself overtaking (never pass it: no three-wide).
     passing: bool,
     /// A car pulled over for good (a retired, busted or yielding racer; a civilian stopped
-    /// for a siren or with its hazards on): a fixed obstacle anyone may pass, using the
+    /// for a siren or with its hazards on; a police car parked at a traffic stop, a roadblock
+    /// or wrecked): a fixed obstacle anyone may pass, also during the start hold, using the
     /// opposing lanes where the corridor allows overtaking there.
     parked: bool,
 }
@@ -331,6 +332,11 @@ struct Racer {
     pass_target: Option<Who>,
     tactic_ticks: u64,
     blocked_s: f32,
+    /// A non-racer vehicle standing still in my path that has held me past [`STALL_PASS_S`]:
+    /// treated as parked (see [`Obstacle::parked`]) while it stays still.
+    stalled_by: Option<Who>,
+    /// Reversing to get room to steer round a stopped car (backs out further).
+    backing_out: bool,
     stuck_s: f32,
     stable_s: f32,
     defended: bool,
@@ -435,6 +441,8 @@ pub struct Field {
     config: RaceConfig,
     tick: u64,
     hints: BTreeMap<EntityId, usize>,
+    /// Police cars parked on the road this decision ([`PoliceQuery::parked_units`]).
+    parked_units: BTreeSet<EntityId>,
     events: Vec<OpponentEvent>,
     outputs: Vec<(EntityId, VehicleInput)>,
     finishers: u32,
@@ -456,6 +464,23 @@ const MIN_GAP_M: f32 = 2.5;
 const LAT_MARGIN_M: f32 = 0.35;
 /// Distance from the start line over which racers hold their grid lane, m.
 const START_HOLD_M: f32 = 150.0;
+/// A non-racer vehicle standing still in a racer's path (a patrol car in a standoff, a
+/// stalled car) that has held the racer this long counts as parked, s.
+const STALL_PASS_S: f32 = 6.0;
+/// ...unless a signal that is not green is this close past it (a queue at a light), m.
+const STALL_SIGNAL_M: f32 = 40.0;
+/// Below this speed along the corridor an obstacle is standing still, m/s.
+const STILL_MPS: f32 = 0.5;
+/// Overtaking a parked car (or rejoining past a stopped one), stopped closer than this behind
+/// it and still overlapping it: too close to turn out, so back out, m.
+const TURN_OUT_GAP_M: f32 = MIN_GAP_M + 1.0;
+/// ...and back out until this far behind it, m.
+const TURN_OUT_ROOM_M: f32 = 8.0;
+/// Reverse speed limit while backing out for room, m/s.
+const BACK_OUT_MPS: f32 = 3.0;
+/// Clearance each side when creeping through the gap between two parked cars, m (at least
+/// the creep-speed civilian margin, 0.4).
+const SQUEEZE_MARGIN_M: f32 = 0.45;
 /// Seconds of lateral closing speed added to the side clearance.
 const LATERAL_LEAD_S: f32 = 0.6;
 /// A racer wanted below its flee level pulls over when a unit chasing it stays this close, m.
@@ -549,6 +574,8 @@ impl Field {
                 pass_target: None,
                 tactic_ticks: 0,
                 blocked_s: 0.0,
+                stalled_by: None,
+                backing_out: false,
                 stuck_s: 0.0,
                 stable_s: 0.0,
                 defended: false,
@@ -586,6 +613,7 @@ impl Field {
             config,
             tick: 0,
             hints: BTreeMap::new(),
+            parked_units: BTreeSet::new(),
             events: Vec::new(),
             outputs: Vec::new(),
             finishers: 0,
@@ -784,6 +812,7 @@ impl Field {
         {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
             self.observe(world, vehicles, police, dt);
+            self.parked_units = police.parked_units().into_iter().collect();
             let snapshot = self.perceive_all(world, vehicles);
             let civs = self.civilians_near(world);
             for k in 0..self.racers.len() {
@@ -1263,7 +1292,8 @@ impl Field {
             let hint = self.hints.get(&v.entity).copied();
             let cp = self.corridor.project(pos, hint, 60);
             self.hints.insert(v.entity, cp.index);
-            if let Some(o) = vehicle_obstacle(&self.corridor, who, cp, v) {
+            let parked = self.parked_units.contains(&v.entity);
+            if let Some(o) = vehicle_obstacle(&self.corridor, who, cp, v, parked) {
                 out.push(o);
             }
         }
@@ -1291,7 +1321,8 @@ impl Field {
                 continue;
             }
             let cp = corridor.project(pos, Some(me.hint), 80);
-            if let Some(o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v) {
+            let parked = self.parked_units.contains(&v.entity);
+            if let Some(o) = vehicle_obstacle(corridor, Who::Vehicle(v.entity), cp, v, parked) {
                 out.push(o);
             }
         }
@@ -1433,6 +1464,21 @@ fn decide_racer(
     obstacles: &[Obstacle],
     dt: f32,
 ) {
+    // A vehicle that stalled me last decision is parked while it stays still.
+    let stalled: Vec<Obstacle>;
+    let obstacles = match r.stalled_by {
+        Some(who) => {
+            stalled = obstacles
+                .iter()
+                .map(|o| Obstacle {
+                    parked: o.parked || (o.who == who && o.v_s.abs() < STILL_MPS),
+                    ..*o
+                })
+                .collect();
+            &stalled[..]
+        }
+        None => obstacles,
+    };
     {
         let p = r.params;
         let hw = 0.5 * r.cap.width_m;
@@ -1554,11 +1600,25 @@ fn decide_racer(
             let held_by_car = rel
                 .iter()
                 .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
+            // Steering round a parked car, or rejoining past a stopped one, but already too
+            // close to it to turn out (a car cannot move sideways): back out and try again
+            // from further back.
+            let too_close_to_turn = rel.iter().any(|x| {
+                let steering_round = match r.tactic {
+                    Tactic::Overtake => x.o.parked && r.pass_target == Some(x.o.who),
+                    Tactic::Rejoin => x.o.v_s.abs() < STILL_MPS,
+                    _ => false,
+                };
+                steering_round
+                    && x.ds > 0.0
+                    && x.gap < TURN_OUT_GAP_M
+                    && (r.n - x.o.n).abs() < hw + x.o.half_w + LAT_MARGIN_M
+            });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
                 && wants_to_move
-                && !held_by_car
-                && r.throttle > 0.3
+                && (!held_by_car || too_close_to_turn)
+                && (r.throttle > 0.3 || too_close_to_turn)
             {
                 r.stuck_s += dt;
             } else if r.tactic != Tactic::Reverse {
@@ -1568,6 +1628,7 @@ fn decide_racer(
                 r.tactic = Tactic::Reverse;
                 r.tactic_ticks = 0;
                 r.stuck_s = 0.0;
+                r.backing_out = too_close_to_turn;
             }
         }
 
@@ -1617,7 +1678,21 @@ fn decide_racer(
                 }
             }
             Tactic::Reverse => {
-                if r.tactic_ticks as f32 * dt > 1.6 {
+                // Backing away from a stopped car to steer round it: until there is room to
+                // turn out.
+                let t = r.tactic_ticks as f32 * dt;
+                let room = rel
+                    .iter()
+                    .filter(|x| x.ds > 0.0 && x.o.v_s.abs() < STILL_MPS)
+                    .filter(|x| (r.n - x.o.n).abs() < hw + x.o.half_w + LAT_MARGIN_M)
+                    .map(|x| x.gap)
+                    .fold(f32::INFINITY, f32::min);
+                let done = if r.backing_out {
+                    room > TURN_OUT_ROOM_M || t > 5.0
+                } else {
+                    t > 1.6
+                };
+                if done {
                     r.tactic = Tactic::Rejoin;
                     r.tactic_ticks = 0;
                     r.ctrl.resync(0.0);
@@ -1684,6 +1759,17 @@ fn decide_racer(
             } else {
                 r.blocked_s = (r.blocked_s - 0.5 * dt).max(0.0);
             }
+            // Stall: a non-racer vehicle standing still in my path, not queued at a light.
+            r.stalled_by = blocker.and_then(|x| {
+                let still = matches!(x.o.who, Who::Vehicle(_)) && x.o.v_s.abs() < STILL_MPS;
+                let at_light = signal.is_some_and(|g| {
+                    g.state != SignalState::Green && g.d_entry < x.gap + STALL_SIGNAL_M
+                });
+                // Once stalled, stalled while it stays still; a light only stops it starting.
+                let stalls = r.stalled_by == Some(x.o.who)
+                    || (held && r.blocked_s > STALL_PASS_S && !at_light);
+                (still && stalls).then_some(x.o.who)
+            });
             if r.blocked_s <= 0.0
                 || r.get_run
                     .is_some_and(|w| blocker.is_none_or(|b| b.o.who != w))
@@ -1766,7 +1852,8 @@ fn decide_racer(
 
         // Re-aim an overtake at the target's current position.
         if r.tactic == Tactic::Overtake {
-            if let Some(x) = r.pass_target.and_then(target_rel) {
+            // A parked target does not move: keep the planned line (it may thread a gap).
+            if let Some(x) = r.pass_target.and_then(target_rel).filter(|x| !x.o.parked) {
                 let side = (r.n_goal - x.o.n).signum();
                 let need = hw + x.o.half_w + margin_for(&x.o) + p.overtake_margin_m;
                 let want = x.o.n + side * need;
@@ -2156,8 +2243,13 @@ fn decide_racer(
             ..Default::default()
         };
         if r.tactic == Tactic::Reverse {
-            // Brake at a standstill engages reverse; the brake pedal then drives backwards.
-            input.brake = 0.7;
+            // Brake at a standstill engages reverse; the brake pedal then drives backwards
+            // (lifting above walking pace while backing out of a long gap).
+            input.brake = if r.backing_out && r.v < -BACK_OUT_MPS {
+                0.0
+            } else {
+                0.7
+            };
             input.steer = -steer;
             r.throttle = 0.0;
         } else {
@@ -2204,11 +2296,14 @@ fn who_id(w: Who) -> u32 {
     }
 }
 
+/// A sim vehicle as an obstacle; `parked` marks a police car parked on the road (see
+/// [`PoliceQuery::parked_units`]).
 fn vehicle_obstacle(
     c: &Corridor,
     who: Who,
     cp: crate::corridor::CorridorPos,
     v: &VehicleObs,
+    parked: bool,
 ) -> Option<Obstacle> {
     let (l, r) = c.bounds(cp.s);
     if cp.n < -l - 6.0 || cp.n > r + 6.0 {
@@ -2233,7 +2328,7 @@ fn vehicle_obstacle(
         half_w: 0.5 * (w * ca + len * sa),
         unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
         passing: false,
-        parked: false,
+        parked,
     })
 }
 
@@ -2338,10 +2433,11 @@ fn plan_pass(
     };
     // No three-wide: never pass a car that is passing, nor start a pass while a car is
     // alongside me.
-    // (A car right behind me in line is not alongside.)
+    // (A car right behind me in line is not alongside, nor is one parked beside me.)
     let engaged = rel.iter().any(|q| {
         q.o.who != o.who
             && !matches!(q.o.who, Who::Civilian(_))
+            && !q.o.parked
             && q.ds <= 0.0
             && q.gap < 3.0
             && (q.o.n - r.n).abs() > hw + q.o.half_w - 0.5
@@ -2376,9 +2472,19 @@ fn plan_pass(
     } else {
         [-1.0, 1.0]
     };
+    // Lines to try: clear of the target by the full margin, on either side. Past a parked
+    // target, also the middle of the gap to a parked car beside that line (creeping
+    // between two stopped cars).
+    let mut lines: Vec<(f32, Option<Who>)> = Vec::new();
+    for side in sides {
+        let n = o.n + side * need;
+        lines.push((n, None));
+        if o.parked {
+            lines.extend(squeeze_line(target, rel, side, n, hw, hl, ctx.margin));
+        }
+    }
     let mut why = PassReject::NoRoom;
-    'side: for side in sides {
-        let n_pass = o.n + side * need;
+    'side: for (n_pass, beside) in lines {
         // Room for the whole pass.
         let mut x = 0.0;
         while x <= pass_dist.max(10.0) {
@@ -2407,7 +2513,7 @@ fn plan_pass(
         }
         // Nobody else in that lane (ahead within the pass, or coming up behind).
         for q in rel {
-            if q.o.who == o.who {
+            if q.o.who == o.who || Some(q.o.who) == beside {
                 continue;
             }
             let in_lane = (q.o.n - n_pass).abs() < hw + q.o.half_w + ctx.margin + 0.3;
@@ -2431,6 +2537,31 @@ fn plan_pass(
         return Ok(n_pass);
     }
     Err(why)
+}
+
+/// The middle of the gap between a parked `target` and the nearest parked car beside it on
+/// `side` that blocks the full-margin line `n_full`, if the gap leaves [`SQUEEZE_MARGIN_M`]
+/// each side of me. Returns the line and the car it squeezes past.
+fn squeeze_line(
+    target: &Rel,
+    rel: &[Rel],
+    side: f32,
+    n_full: f32,
+    hw: f32,
+    hl: f32,
+    margin: f32,
+) -> Option<(f32, Option<Who>)> {
+    let o = target.o;
+    let edge_t = o.n + side * o.half_w;
+    let q = rel
+        .iter()
+        .filter(|q| q.o.parked && q.o.who != o.who && side * (q.o.n - o.n) > 0.0)
+        .filter(|q| q.ds > -(hl + q.o.half_len) && q.ds < target.ds + 2.0 * hl + 6.0)
+        .filter(|q| (q.o.n - n_full).abs() < hw + q.o.half_w + margin + 0.3)
+        .min_by(|a, b| (side * a.o.n).total_cmp(&(side * b.o.n)))?;
+    let edge_q = q.o.n - side * q.o.half_w;
+    (side * (edge_q - edge_t) >= 2.0 * (hw + SQUEEZE_MARGIN_M))
+        .then_some((0.5 * (edge_t + edge_q), Some(q.o.who)))
 }
 
 /// Plan a flight route to the POI that is farthest from the known police (from the racer
@@ -2710,6 +2841,119 @@ mod tests {
             health: 1.0,
             ..Default::default()
         }
+    }
+
+    /// Police that report these vehicle entities as parked on the road.
+    struct ParkedPolice(Vec<EntityId>);
+
+    impl crate::pursuit::PoliceQuery for ParkedPolice {
+        fn wanted_level(&self, _racer: EntityId) -> u8 {
+            0
+        }
+        fn parked_units(&self) -> Vec<EntityId> {
+            self.0.clone()
+        }
+    }
+
+    fn still_at(entity: u32, x: f32, y: f32) -> VehicleObs {
+        let mut o = obs(entity, y, 0.0, HandlingEffects::NEUTRAL);
+        o.state.pos[0] = x;
+        o
+    }
+
+    fn one_racer() -> Field {
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile::default(),
+            capability: cap(),
+        };
+        Field::new(straight(), &[spec], RaceConfig::default())
+    }
+
+    /// Tick with every vehicle held where it is, for at most `seconds` or until `done`.
+    fn hold_until(
+        f: &mut Field,
+        vehicles: &[VehicleObs],
+        police: &dyn PoliceQuery,
+        seconds: f32,
+        done: impl Fn(&Field) -> bool,
+    ) -> f32 {
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let ticks = (seconds / PHYSICS_DT) as usize;
+        for i in 0..ticks {
+            f.tick(&world, vehicles, &[], police);
+            if done(f) {
+                return (i + 1) as f32 * PHYSICS_DT;
+            }
+        }
+        seconds
+    }
+
+    #[test]
+    fn police_car_at_a_traffic_stop_is_a_parked_obstacle() {
+        let mut f = one_racer();
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let cars = [
+            obs(1, 40.0, 0.0, HandlingEffects::NEUTRAL),
+            still_at(9, 0.0, 50.0),
+        ];
+        let one_decision = f.config.decision_ticks.max(1) as usize;
+        for _ in 0..one_decision {
+            f.tick(&world, &cars, &[], &ParkedPolice(vec![EntityId(9)]));
+        }
+        let o = f.perceive_all(&world, &cars);
+        assert!(o
+            .iter()
+            .any(|o| o.who == Who::Vehicle(EntityId(9)) && o.parked));
+        for _ in 0..one_decision {
+            f.tick(&world, &cars, &[], &NoPolice);
+        }
+        let o = f.perceive_all(&world, &cars);
+        assert!(o
+            .iter()
+            .any(|o| o.who == Who::Vehicle(EntityId(9)) && !o.parked));
+    }
+
+    #[test]
+    fn a_car_standing_in_the_lane_is_passed_even_in_the_start_hold() {
+        // Racer 40 m from the start (inside START_HOLD_M), queued 1.4 m behind a car standing
+        // still in its lane that nobody reports as parked (a patrol car stuck in a standoff).
+        let mut f = one_racer();
+        let cars = [
+            obs(1, 40.0, 0.0, HandlingEffects::NEUTRAL),
+            still_at(9, 0.0, 46.0),
+        ];
+        let t = hold_until(&mut f, &cars, &NoPolice, 3.0 * STALL_PASS_S, |f| {
+            f.tactic_of(0) != Tactic::Follow
+        });
+        assert!(t > STALL_PASS_S, "waits first: passed after {t} s");
+        assert_eq!(f.racers[0].stalled_by, Some(Who::Vehicle(EntityId(9))));
+        assert_eq!(f.tactic_of(0), Tactic::Overtake, "{:?}", f.debug_of(0));
+    }
+
+    #[test]
+    fn squeezes_between_two_parked_cars() {
+        // Parked police car 2.5 m right of centre, another 2 m left of centre just past it:
+        // the full-margin lines are off the road (right) or into the second car (left), the
+        // 2.7 m gap between them fits the car with SQUEEZE_MARGIN_M each side.
+        let mut f = one_racer();
+        f.racers[0].laps_done = 1;
+        let cars = [
+            obs(1, 40.0, 0.0, HandlingEffects::NEUTRAL),
+            still_at(9, 2.5, 50.0),
+            still_at(10, -2.0, 53.0),
+        ];
+        let police = ParkedPolice(vec![EntityId(9), EntityId(10)]);
+        hold_until(&mut f, &cars, &police, 5.0, |f| {
+            f.tactic_of(0) != Tactic::Follow
+        });
+        assert_eq!(f.tactic_of(0), Tactic::Overtake, "{:?}", f.debug_of(0));
+        let gap_mid = 0.5 * ((2.5 - 0.9) + (-2.0 + 0.9));
+        assert!(
+            (f.racers[0].n_goal - gap_mid).abs() < 0.05,
+            "{}",
+            f.racers[0].n_goal
+        );
     }
 
     #[test]

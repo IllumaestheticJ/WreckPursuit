@@ -134,6 +134,35 @@ No other contract change needed: `WantedLevel` (now in contracts) maps to `Polic
   `apps/simcli/golden/opponent_open_roads_traffic/hashes.txt` was resolved by taking main's
   version; `simcli goldens` passes.
 
+## Changed by other sessions (owner request)
+
+- **2026-10-21, workstream 09 session, owner request "fix the opponent AI so racers pass
+  stopped traffic stops"** (found while raising police `physical_accel_mps2`: at 6.0,
+  `live_police_chase_ends_in_escape_or_capture_without_stuck_cars` left clean racer 3 queued
+  126 s behind a busted racer and its patrol car). Root causes, traced with `WP_TRACE`:
+  1. A police car stopped on the road was never `parked` (`vehicle_obstacle` always said
+     false), so inside the 150 m start hold the racer could not pass it at all.
+  2. The busted racer parked beside me counted as "alongside" → `TargetBusy` (no three-wide).
+  3. The only full-margin line round the (sideways) police car ran into a civilian pulled over
+     on the other side, though a 3.3 m gap between them fit the car.
+  4. Once stopped < 1 m behind, the racer could not turn out, and nothing backed it out
+     (the stuck rule skips cars held by a car).
+
+  Fixes (all in `field.rs` / `pursuit.rs`, README "Pulled-over cars" + "Stall breaker"):
+  `PoliceQuery::parked_units` (default none; `SimPolice`: stopped ground units that are not
+  idle/patrol/respond/intercept, or wrecked) feeds `Obstacle::parked`; a **stall breaker**
+  (`STALL_PASS_S` 6 s, not near a non-green signal) marks any other standing vehicle that
+  holds me as parked; `engaged` ignores parked cars; `plan_pass` also tries the **middle of the
+  gap** to a second parked car (`squeeze_line`, `SQUEEZE_MARGIN_M` 0.45); the overtake re-aim
+  leaves a parked target's line alone; **back out for room** (`TURN_OUT_GAP_M`,
+  `TURN_OUT_ROOM_M` 8 m, ≤ 3 m/s, ≤ 5 s) when overtaking a parked car or rejoining past a
+  stopped one while still overlapping it. 3 new unit tests in `field.rs`.
+
+  With the police at 6.0 the racer now gets past the traffic stop (reverses once, threads the
+  gap, t = 48-53 s), then meets a real gridlock: two **patrol** cars (entities 6 and 9)
+  standing still for > 100 s in both lanes, which no line can pass. That is the police AI
+  (reported in `police.md`), not this crate. At the shipped 5.0 the test passes as before.
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
