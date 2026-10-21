@@ -617,3 +617,16 @@ against the Rapier world land within 1 mm of the drawn terrain (fails on the old
 **Not covered here.** Props (parked cars, cones, bins) are Rapier bodies that `main`'s testbed
 never draws; that is playtest row 50, fixed on `lead/draw-props` / `lead/round12`. That line still
 has this terrain mismatch (same `render_terrain`), so this change needs merging there too.
+
+### Drawn terrain follows the ground (follow-up)
+The old greybox terrain lowered every 10 m vertex to the lowest 5 m height within 10 m, so
+flat ground next to a slope was drawn (and, after the fix above, solid) 1-2 m low, e.g. dips
+behind lots that trapped police units. `Heightfield::coarse_under` replaces
+`lowered_coarse`: a vertex keeps the fine height under it and is lowered only to the lowest
+*protected* fine vertex within 10 m, the protected set being the road band
+(`surface::drawn_terrain`, shared by `city-import` and `collision_terrain`). Measured on Port
+Vesper (`wp_world/tests/city_v2.rs::drawn_terrain_stays_under_roads_and_follows_the_ground`):
+never above a road (closest 0.12 m below), off-road heightfield − drawn p50 0.05 / p95 0.19 /
+p99 0.51 m (max 5.0 m on hillsides right beside cuttings, −2.1 m on sharp ridges; physics
+follows the drawn mesh in both). `vesper_v2.greybox.glb` regenerated (6.82 MB).
+

@@ -13,7 +13,7 @@ use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
 use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
-use wp_world::surface::{is_elevated, surface_edges, SIDEWALK_M, TERRAIN_RENDER_M};
+use wp_world::surface::{is_elevated, surface_edges, SIDEWALK_M};
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk (curb) height, m.
@@ -307,16 +307,15 @@ fn lane_bank(net: &RoadNetwork, lane: &Lane) -> Vec<f32> {
     }
 }
 
-/// Render terrain: [`Heightfield::lowered_coarse`] at [`TERRAIN_RENDER_M`], never above a road.
+/// Render terrain: `coarse` is [`wp_world::surface::drawn_terrain`] (never above a road).
 /// Physics collides with the same surface off the roads (`wp_world::surface::collision_terrain`).
 fn render_terrain(
-    t: &Heightfield,
+    coarse: &Heightfield,
     net: &RoadNetwork,
     ground: &mut [Prim],
     rock: &mut Prim,
     seabed: &mut Prim,
 ) {
-    let coarse = t.lowered_coarse(TERRAIN_RENDER_M);
     let (cx, cy) = (coarse.nx, coarse.ny);
     let z = &coarse.z;
     let pos: Vec<V2> = (0..cy)
@@ -402,7 +401,8 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let terrain = net.terrain.as_ref();
     match terrain {
         Some(t) => {
-            render_terrain(t, net, &mut ground, &mut rock, &mut seabed);
+            let coarse = wp_world::surface::drawn_terrain(map).expect("terrain");
+            render_terrain(&coarse, net, &mut ground, &mut rock, &mut seabed);
             let (lo, hi) = (t.origin, t.max_corner());
             let m = 400.0;
             water.quad(

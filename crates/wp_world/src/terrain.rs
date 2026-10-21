@@ -93,11 +93,12 @@ impl Heightfield {
         }
     }
 
-    /// Coarse copy for drawing, with vertices `spacing_m` apart (rounded to whole cells): each
-    /// coarse vertex is lowered to the minimum of the fine heights within one coarse step
-    /// around it, minus 5 cm, so the coarse surface never rises above the fine one (and so
-    /// never above a road). This is the terrain the greybox mesh draws.
-    pub fn lowered_coarse(&self, spacing_m: f32) -> Heightfield {
+    /// Coarse copy for drawing, with vertices `spacing_m` apart (rounded to whole cells) and
+    /// 5 cm below the fine field. Each coarse vertex takes the fine height under it, lowered
+    /// where needed so the coarse surface never rises above a `protect`ed fine vertex (one flag
+    /// per vertex, e.g. the ground along roads and sidewalks): to the lowest protected height
+    /// within one coarse step around it. Unprotected low ground nearby does not pull it down.
+    pub fn coarse_under(&self, spacing_m: f32, protect: &[bool]) -> Heightfield {
         let k = ((spacing_m / self.cell_m).round() as u32).max(1);
         let cx = (self.nx - 1).div_ceil(k) + 1;
         let cy = (self.ny - 1).div_ceil(k) + 1;
@@ -105,12 +106,14 @@ impl Heightfield {
         for j in 0..cy {
             for i in 0..cx {
                 let (fi, fj) = ((i * k).min(self.nx - 1), (j * k).min(self.ny - 1));
-                let mut m = f32::INFINITY;
+                let mut m = self.at(fi, fj);
                 for dj in -(k as i64)..=(k as i64) {
                     for di in -(k as i64)..=(k as i64) {
                         let a = (fi as i64 + di).clamp(0, self.nx as i64 - 1) as u32;
                         let b = (fj as i64 + dj).clamp(0, self.ny as i64 - 1) as u32;
-                        m = m.min(self.at(a, b));
+                        if protect[(b * self.nx + a) as usize] {
+                            m = m.min(self.at(a, b));
+                        }
                     }
                 }
                 z[(j * cx + i) as usize] = m - 0.05;
@@ -226,21 +229,29 @@ mod tests {
     }
 
     #[test]
-    fn lowered_coarse_never_rises_above_the_fine_field() {
+    fn coarse_under_stays_below_protected_vertices_only() {
         let mut h = Heightfield::flat([0.0, 0.0], [40.0, 40.0], 5.0, 0.0);
         for j in 0..h.ny {
             for i in 0..h.nx {
                 h.z[(j * h.nx + i) as usize] = (i * i) as f32 * 0.3 + j as f32;
             }
         }
-        let c = h.lowered_coarse(10.0);
+        // Protect the column x = 20 m.
+        let protect: Vec<bool> = (0..h.z.len()).map(|n| n as u32 % h.nx == 4).collect();
+        let c = h.coarse_under(10.0, &protect);
         assert_eq!((c.nx, c.ny, c.cell_m), (5, 5, 10.0));
         for j in 0..h.ny {
             for i in 0..h.nx {
                 let p = h.vertex_pos(i, j);
-                assert!(c.height_on_triangles(p) <= h.at(i, j) - 0.05 + 1e-4);
+                if protect[(j * h.nx + i) as usize] {
+                    assert!(c.height_on_triangles(p) <= h.at(i, j) - 0.05 + 1e-4);
+                }
             }
         }
+        // Far from the protected column a vertex keeps its own height (less 5 cm), however
+        // low the ground around it.
+        assert!((c.at(0, 2) - (h.at(0, 4) - 0.05)).abs() < 1e-5);
+        assert!((c.at(4, 2) - (h.at(8, 4) - 0.05)).abs() < 1e-5);
         // On the triangles, a vertex's own height is exact and a cell centre lies on the
         // (i, j)–(i + 1, j + 1) diagonal.
         assert_eq!(c.height_on_triangles([10.0, 20.0]), c.at(1, 2));

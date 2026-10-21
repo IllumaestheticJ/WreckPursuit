@@ -128,3 +128,60 @@ fn queries_respect_grade_separation_and_terrain() {
     let knob = map.ground_height([-1000.0, 1000.0], None);
     assert!(knob > 80.0, "Hollins Knob at {knob} m");
 }
+
+/// The drawn terrain (`surface::drawn_terrain`, the greybox and off-road physics) never rises
+/// above a paved road, and off the roads it follows the heightfield instead of sinking to the
+/// lowest ground nearby (playtest: dips drawn 1-2 m deep behind lots).
+#[test]
+fn drawn_terrain_stays_under_roads_and_follows_the_ground() {
+    let map = wp_world::CityMap::new(net().clone());
+    let raw = net().terrain.as_ref().unwrap();
+    let drawn = wp_world::surface::drawn_terrain(&map).unwrap();
+    let solid = map.ground.as_ref().unwrap();
+    // Roads: every triangle corner, edge midpoint and centroid.
+    let mesh = wp_world::surface::road_mesh(&map);
+    let mut worst_road = f32::NEG_INFINITY;
+    for tri in &mesh.indices {
+        let p = tri.map(|i| mesh.positions[i as usize]);
+        let mid = |a: [f32; 3], b: [f32; 3], w: f32| [0, 1, 2].map(|c| a[c] + (b[c] - a[c]) * w);
+        let c = mid(mid(p[0], p[1], 0.5), p[2], 1.0 / 3.0);
+        for q in [
+            p[0],
+            p[1],
+            p[2],
+            mid(p[0], p[1], 0.5),
+            mid(p[1], p[2], 0.5),
+            mid(p[2], p[0], 0.5),
+            c,
+        ] {
+            worst_road = worst_road.max(drawn.height_on_triangles([q[0], q[1]]) - q[2]);
+        }
+    }
+    // Off the roads (where solid = drawn): how far below the heightfield the drawn ground is.
+    let mut gaps = Vec::new();
+    for j in 0..raw.ny - 1 {
+        for i in 0..raw.nx - 1 {
+            let p = raw.vertex_pos(i, j);
+            let p = [p[0] + 1.7, p[1] + 2.9];
+            let d = drawn.height_on_triangles(p);
+            if raw.height_at(p) > 0.5 && (solid.height_on_triangles(p) - d).abs() < 1e-3 {
+                gaps.push(raw.height_at(p) - d);
+            }
+        }
+    }
+    gaps.sort_by(|a, b| a.total_cmp(b));
+    let q = |f: f32| gaps[((gaps.len() - 1) as f32 * f) as usize];
+    println!(
+        "drawn terrain: worst {worst_road:.3} m above a road; off-road {} samples, heightfield − drawn p50 {:.2} p95 {:.2} p99 {:.2} min {:.2} max {:.2} m",
+        gaps.len(), q(0.5), q(0.95), q(0.99), gaps[0], gaps[gaps.len() - 1]
+    );
+    assert!(
+        worst_road <= 0.0,
+        "drawn terrain {worst_road} m above a road"
+    );
+    assert!(gaps.len() > 100_000);
+    // Measured: p50 0.05 (the 5 cm offset), p95 0.19, p99 0.51 m; the old "lowest ground
+    // within 10 m" mesh had ~10 % of these samples more than 1 m low (up to 10.7 m).
+    assert!(q(0.95) < 0.3, "p95 {}", q(0.95));
+    assert!(q(0.99) < 0.75, "p99 {}", q(0.99));
+}
