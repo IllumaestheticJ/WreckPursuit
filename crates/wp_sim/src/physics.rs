@@ -408,7 +408,7 @@ pub fn feature_shape(shape: &wp_world::network::FeatureShape) -> Option<(Pose, S
             yaw,
             pitch,
         } => {
-            if half.iter().any(|h| !(*h > MIN)) {
+            if half.iter().any(|h| !h.is_finite() || *h <= MIN) {
                 return None;
             }
             Some((
@@ -421,7 +421,7 @@ pub fn feature_shape(shape: &wp_world::network::FeatureShape) -> Option<(Pose, S
             radius,
             height,
         } => {
-            if !(*radius > MIN && *height > MIN) {
+            if !(radius.is_finite() && height.is_finite()) || *radius <= MIN || *height <= MIN {
                 return None;
             }
             let h = core::f32::consts::FRAC_1_SQRT_2;
@@ -439,7 +439,8 @@ pub fn feature_shape(shape: &wp_world::network::FeatureShape) -> Option<(Pose, S
             base_z,
             top_z,
         } => {
-            if footprint.len() < 3 || !(*top_z - *base_z > MIN) {
+            let h = *top_z - *base_z;
+            if footprint.len() < 3 || !h.is_finite() || h <= MIN {
                 return None;
             }
             // Hull in local coordinates around the footprint's mean point (keeps the compound
