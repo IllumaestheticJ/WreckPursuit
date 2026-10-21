@@ -135,6 +135,27 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### The owner's assists (TCS off, manual clutch, auto gears): auto shifts mid-drift
+
+`OWNER=1 transition poweron` = the owner's setup (lead: parity RWD, TCS off, manual clutch,
+auto gears, panel defaults); the lab harness otherwise holds 2nd with manual gears and auto
+clutch. Held set / 9 (spun), lab assists → owner assists:
+
+| car | step 23 | ref 7d6b66c9 |
+|---|---|---|
+| parity_rwd_a | 9 → **3** | 9 → 5 (2 spun) |
+| parity_rwd_b | 8 → 5 | 6 → 6 |
+| parity_rwd_d | 9 → 6 | 9 → 4 (5 spun) |
+| rampart_50 | 5 → 3 | 4 (3) → 7 (2) |
+
+With auto gears every held-drift entry shifts: typically a **kickdown 2→1 at the entry** (≈ 0.4–0.5
+s, full throttle, slip 1–6°), **1→2 at 8–17° of slip** half a second later, and **2→3 mid-drift**
+(≈ 2–3.8 s, at slip up to 13–52°, as the spinning rears over-rev). The power-on runs log 14–28
+changes per car. The same happens on the reference build, so it is not a tyre change: the
+automatic gearbox shifts on wheel / engine speed during a slide. Proposed (gearbox owner): in a
+slide (|body slip| > ~10° or rear wheelspin past the peak), hold the gear — no kickdown under
+full throttle and no upshift from wheelspin.
+
 ### Step 23 "spinning on throttle / when holding a drift" (lead, 2026-10-21) — tyre side
 
 `transition poweron` (harness drivers, `PlainSteer::default`, TCS off / raw throttle): power-on in
