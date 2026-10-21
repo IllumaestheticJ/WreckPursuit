@@ -33,6 +33,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.24 | preview | AI racers pass cars that are out of the race and never stop to yield in a hairpin (Hollins seed 6 finishes); solid terrain matches drawn terrain (no invisible hillside); engine sound rework (recorded layers at their real firing frequency) |
 | 0.12.25 | preview | C is the clutch (camera cycle on F3); rev on the grid during the countdown; AI: fleeing racers get round cars waiting at reds, grid cars line up properly |
 | 0.12.26 | preview | Parked cars dent, shed glass and parts when hit; traffic uses turn signals (turns, lane changes, pulling over) and hazards; player indicators on - / = |
-| 0.12.27 | preview | Four new cars: Stoat 16V (90s hot hatch), Bulwark 400 (70s muscle sedan), Arashi T4 (AWD rally saloon), Satchel 2.0 (delivery van); drawn terrain follows the ground behind lots |
+| 0.12.27 | preview | Eight new cars: Stoat 16V and Marten 2.0 (90s hot hatches), Bulwark 400 and Brigand 400 (70s muscle sedans), Arashi T4 and Talus 2.0T (AWD rally saloons), Satchel 2.0 and Tumbril 2.0 (vans); drawn terrain follows the ground behind lots |
 | 0.12.28 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
