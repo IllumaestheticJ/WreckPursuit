@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{AssistProfile, DamageMode, VehicleInput, PHYSICS_DT};
+use wp_sim::CarTune;
 
 use crate::RunError;
 
@@ -385,6 +386,10 @@ pub struct EntitySpec {
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
+    /// The free per-car tune (`wp_vehicle::tune`; default stock). RON:
+    /// `tune: (suspension: 5, gearing: 5, diff: 4, brake_balance: 2)`; missing sliders are stock.
+    #[serde(default, skip_serializing_if = "CarTune::is_stock")]
+    pub tune: CarTune,
     /// Who drives. Input keyframes always apply on top of `scripted`; other drivers ignore them.
     #[serde(default)]
     pub driver: Driver,
@@ -824,6 +829,24 @@ mod tests {
         assert_eq!(sc.ticks(), 240);
         assert_eq!(sc.sample_every(), 4);
         assert_eq!(sc.entities[0].driver, Driver::Scripted);
+    }
+
+    #[test]
+    fn tune_field_parses_defaults_and_round_trips() {
+        let sc = Scenario::from_ron("t", MINIMAL).unwrap();
+        assert!(sc.entities[0].tune.is_stock());
+        assert!(!sc.to_ron().contains("tune"), "stock tune → field omitted");
+        let tuned = MINIMAL.replace(
+            r#"car: "debug_sedan","#,
+            r#"car: "debug_sedan", tune: (suspension: 5, diff: 1),"#,
+        );
+        let sc = Scenario::from_ron("t", &tuned).unwrap();
+        let t = sc.entities[0].tune;
+        assert_eq!(
+            (t.suspension, t.gearing, t.diff, t.brake_balance),
+            (5, 3, 1, 3)
+        );
+        assert_eq!(Scenario::from_ron("t", &sc.to_ron()).unwrap(), sc);
     }
 
     #[test]

@@ -951,3 +951,11 @@ streams for all four scenes are byte-identical before and after.
   before; whether idle should come up is a balance question, not headroom.
 - speechSynthesis voice volume now follows the Police trim (−6 dB); TTS loudness is OS-dependent.
 
+
+### Default master volume 1.0 (2026-10-21)
+
+With the headroom in the bus trims, the default master volume is 1.0 (was 0.8): `panel.ts`
+defaults and the `AudioMixer` start-up gain. Settings saved before this carry
+`masterDefault !== 2`; a stored master of exactly 0.8 (the untouched old default) moves to 1.0
+once, any other level the player chose is kept. `e2e/audio_mix.mjs` now measures at 1.0 (see the
+validation numbers in the commit message).

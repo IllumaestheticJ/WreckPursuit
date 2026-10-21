@@ -3,7 +3,8 @@
  * a `CareerApi` (wp_wasm's `career_*` exports, wired by the testbed), so it holds no game
  * state of its own: every action returns the new `CareerView` and the screen redraws.
  *
- * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods),
+ * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods,
+ * the free four-slider tune),
  * Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
  * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
  * starts the next run (free drive or city chase) with the active car.
@@ -14,6 +15,7 @@ import { Badge, Button, Delta, Meter, Money, Panel, severityColor, Stat, Tabs } 
 import { pct, words } from "../ui/format";
 import type {
   CareerApi,
+  CarTune,
   CareerView,
   CarView,
   Condition,
@@ -26,6 +28,7 @@ import type {
   StatsView,
 } from "./types";
 import { pickTextFile } from "./store";
+import { isStockTune, normalizeTune, STOCK_TUNE, TUNE_SLIDERS, TUNE_STEPS, tuneSummary } from "./tune";
 import "./garage.css";
 
 type Tab = "cars" | "dealer" | "pound" | "ledger";
@@ -105,6 +108,7 @@ function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean;
         {car.repair_lines.length > 0 && !car.total_loss && <Badge tone="warn">{car.repair_lines.length} repairs</Badge>}
         {car.insurance && <Badge tone="info">{car.insurance}</Badge>}
         {car.mods.length > 0 && <Badge>{car.mods.length} mods</Badge>}
+        {car.tune && !isStockTune(car.tune) && <Badge title={tuneSummary(car.tune)}>tuned</Badge>}
         <span class="wp-dim wp-mono" style={{ marginLeft: "auto" }}>
           <Money value={car.value} />
         </span>
@@ -350,10 +354,79 @@ function ModTree(props: { car: CarView; api: CareerApi; run: (f: () => CareerVie
   );
 }
 
+/**
+ * The free tune page (reference-game style): four 5-step sliders, 3 = stock, a line under each
+ * saying what it does, and Reset. Every change is saved at once (no money) and applies when the
+ * next run spawns the car. Range inputs: Tab moves between sliders, arrow keys step them.
+ */
+function TunePage(props: { car: CarView; api: CareerApi; run: (f: () => CareerView) => void; onBack: () => void }) {
+  const { car, api } = props;
+  const tune = normalizeTune(car.tune);
+  const set = (next: CarTune) => props.run(() => api.setTune(car.uid, next));
+  return (
+    <div class="wp-cg-tune" data-testid="tune-page">
+      <Panel title={`Tune · ${car.name}`} tag={<Button size="sm" onClick={props.onBack}>Back</Button>}>
+        <p class="wp-dim" style={{ marginTop: 0 }}>
+          Free. Saved with the car and used from the next run. 3 is the car as it left the factory.
+        </p>
+        {TUNE_SLIDERS.map((s) => {
+          const v = tune[s.key];
+          return (
+            <div class="wp-cg-tune-row" key={s.key} data-tune={s.key}>
+              <div class="wp-spread">
+                <b>{s.label}</b>
+                <span class="wp-mono" data-testid={`tune-${s.key}-value`}>
+                  {v} · {s.steps[v - 1]}
+                </span>
+              </div>
+              <div class="wp-row wp-cg-tune-ctl">
+                <span class="wp-dim wp-mono">{s.low}</span>
+                <input
+                  type="range"
+                  class="wp-slider"
+                  min={1}
+                  max={TUNE_STEPS}
+                  step={1}
+                  value={v}
+                  aria-label={s.label}
+                  aria-valuetext={`${v} of ${TUNE_STEPS}, ${s.steps[v - 1]}`}
+                  data-testid={`tune-${s.key}`}
+                  onChange={(e) => {
+                    const n = Number((e.target as HTMLInputElement).value);
+                    if (n !== v) set({ ...tune, [s.key]: n });
+                  }}
+                />
+                <span class="wp-dim wp-mono">{s.high}</span>
+              </div>
+              <div class="wp-cg-tune-ticks wp-mono wp-dim" aria-hidden="true">
+                {s.steps.map((label, i) => (
+                  <span key={label} class={i + 1 === v ? "is-on" : undefined}>
+                    {i + 1}
+                  </span>
+                ))}
+              </div>
+              <small class="wp-dim">{s.hint}</small>
+            </div>
+          );
+        })}
+        <div class="wp-row" style={{ gap: "0.5em", marginTop: "0.6em", alignItems: "center" }}>
+          <Button disabled={isStockTune(tune)} onClick={() => set({ ...STOCK_TUNE })}>
+            Reset to stock
+          </Button>
+          <span class="wp-dim wp-mono" data-testid="tune-summary">
+            {tuneSummary(tune)}
+          </span>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
   const { view, api } = props;
   const [sel, setSel] = useState<number | null>(view.active_car);
   const [mods, setMods] = useState(false);
+  const [tuning, setTuning] = useState(false);
   const [sellAsk, setSellAsk] = useState(false);
   const car = view.cars.find((c) => c.uid === sel) ?? view.cars.find((c) => c.active) ?? view.cars[0];
   if (!car) {
@@ -369,6 +442,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
     );
   }
   if (mods && car.location === "Garage") return <ModTree car={car} api={api} run={props.run} onBack={() => setMods(false)} />;
+  if (tuning && car.location === "Garage") return <TunePage car={car} api={api} run={props.run} onBack={() => setTuning(false)} />;
   return (
     <div class="wp-cg-cars">
       <div class="wp-cg-list" role="listbox" aria-label="Your cars">
@@ -386,6 +460,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
           {car.stats && <StatGrid now={car.stats} />}
           <div class="wp-mono wp-dim" style={{ fontSize: "0.85em", margin: "0.4em 0" }}>
             {car.mods.length ? car.mods.map((m) => m.name).join(" · ") : "Stock"}
+            {car.tune && !isStockTune(car.tune) && <> · tune: {tuneSummary(car.tune)}</>}
           </div>
           <div class="wp-row" style={{ gap: "0.5em", flexWrap: "wrap" }}>
             <Button variant="primary" disabled={car.active || car.location !== "Garage"} onClick={() => props.run(() => api.setActive(car.uid))}>
@@ -393,6 +468,9 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             </Button>
             <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
               Mods
+            </Button>
+            <Button disabled={car.location !== "Garage"} onClick={() => setTuning(true)} title="free: suspension, gearing, differential, brake balance">
+              Tune
             </Button>
             <Button variant="danger" disabled={car.location !== "Garage"} pressed={sellAsk} onClick={() => setSellAsk(!sellAsk)}>
               Sell (+<Money value={car.sale_price} />)

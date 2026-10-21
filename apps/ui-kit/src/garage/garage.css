@@ -70,3 +70,31 @@
 .wp-cg .wp-table td {
   vertical-align: top;
 }
+.wp-cg-tune {
+  max-width: 40em;
+}
+.wp-cg-tune-row {
+  display: grid;
+  gap: 0.25em;
+  padding: 0.55em 0;
+  border-bottom: 1px solid var(--edge);
+}
+.wp-cg-tune-ctl {
+  gap: 0.6em;
+  align-items: center;
+}
+.wp-cg-tune-ctl .wp-slider {
+  flex: 1;
+  min-width: 0;
+}
+.wp-cg-tune-ticks {
+  display: flex;
+  justify-content: space-between;
+  /* Line the numbers up under the slider, between the end labels. */
+  padding: 0 3.6em;
+  font-size: 0.8em;
+}
+.wp-cg-tune-ticks .is-on {
+  color: var(--scan);
+  font-weight: 700;
+}

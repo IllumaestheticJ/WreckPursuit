@@ -264,6 +264,31 @@ impl Economy {
         Ok(())
     }
 
+    /// Set a car's free tune (no money, no ledger line). The car must be in the garage, like
+    /// mod work; every slider must be `1..=5`.
+    pub fn set_tune(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        tune: crate::CarTune,
+    ) -> Result<(), EconomyError> {
+        if !tune.is_valid() {
+            return Err(EconomyError::InvalidInput(format!(
+                "tune steps must be 1..={}: {tune:?}",
+                crate::tune::TUNE_STEPS
+            )));
+        }
+        let c = acct.car_mut(car).ok_or(EconomyError::UnknownCar(car))?;
+        if c.location != CarLocation::Garage {
+            return Err(EconomyError::CarUnavailable {
+                car,
+                reason: "in the pound".into(),
+            });
+        }
+        c.tune = tune;
+        Ok(())
+    }
+
     /// Install a mod (pays the price; a replaced same-line mod is refunded at resale value).
     pub fn install_mod(
         &self,
@@ -441,5 +466,6 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         location: CarLocation::Garage,
         insurance: None,
         purchase_price: Some(paid),
+        tune: Default::default(),
     }
 }

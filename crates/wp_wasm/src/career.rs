@@ -23,6 +23,9 @@
 //! Persistence is the testbed's job: [`Career::save_json`] / [`Career::load_json`] (versioned
 //! by `wp_economy::profile`), stored in `localStorage` and exported / imported as a file.
 //!
+//! **The tune** ([`Career::set_tune`]): each car's free four-slider tune is stored on the car
+//! and goes into the first entity's `tune` when a run starts, so the sim builds it at spawn.
+//!
 //! Known gap: a replay of a career run whose car has mods or started damaged does not verify
 //! (the replay rebuilds the stock car, pristine). Plain careers (stock, undamaged) replay fine.
 
@@ -165,6 +168,8 @@ pub struct CarView {
     pub scrap_value: Money,
     /// Installed mods.
     pub mods: Vec<InstalledModView>,
+    /// The free tune (four 1..=5 sliders, 3 = stock), applied at the next run's spawn.
+    pub tune: wp_economy::CarTune,
     /// Insurance tier, if insured.
     pub insurance: Option<String>,
     /// Daily premium, if insured.
@@ -389,6 +394,17 @@ pub struct Career {
 
 fn e2s(e: EconomyError) -> String {
     e.to_string()
+}
+
+/// The economy's stored tune as the sim's (same fields; one type once the contract carries
+/// `CarTune`, request WP-4).
+fn vehicle_tune(t: wp_economy::CarTune) -> wp_vehicle::CarTune {
+    wp_vehicle::CarTune {
+        suspension: t.suspension,
+        gearing: t.gearing,
+        diff: t.diff,
+        brake_balance: t.brake_balance,
+    }
 }
 
 fn stats_of(p: &wp_economy::Preview) -> StatsView {
@@ -762,6 +778,7 @@ impl Career {
             paid: self.econ.resale_basis(c),
             scrap_value: self.econ.scrap_value(c),
             mods,
+            tune: c.tune,
             insurance: c.insurance.as_ref().map(|i| i.tier.clone()),
             premium_per_day: c.insurance.as_ref().map(|i| i.premium_per_day),
             repair_all,
@@ -1053,6 +1070,14 @@ impl Career {
             .map_err(e2s)
     }
 
+    /// Set a car's free tune (no money; applied when the next run spawns the car).
+    pub fn set_tune(&mut self, uid: CarUid, tune: wp_economy::CarTune) -> Result<(), String> {
+        self.guard()?;
+        self.econ
+            .set_tune(&mut self.profile.account, uid, tune)
+            .map_err(e2s)
+    }
+
     /// Install a mod (pays; a same-line mod is replaced and refunded at resale value).
     pub fn install_mod(&mut self, uid: CarUid, mod_id: &str) -> Result<(), String> {
         self.guard()?;
@@ -1245,6 +1270,7 @@ impl Career {
             .first_mut()
             .ok_or("the scenario has no player entity")?;
         first.car = car.def_id.clone();
+        first.tune = vehicle_tune(car.tune);
         first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat {
             0.0
         } else {
@@ -1614,6 +1640,18 @@ pub fn career_sell_car(uid: u32) -> Result<String, JsValue> {
 pub fn career_set_active(uid: u32) -> Result<String, JsValue> {
     with_career(|c| {
         c.set_active(CarUid(uid))?;
+        view_json(c)
+    })
+}
+
+/// Set car `uid`'s free tune from JSON (`{"suspension":1..5,"gearing":…,"diff":…,
+/// "brake_balance":…}`; missing sliders are stock). Free. Returns the view JSON.
+#[wasm_bindgen]
+pub fn career_set_tune(uid: u32, tune_json: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        let tune: wp_economy::CarTune =
+            serde_json::from_str(tune_json).map_err(|e| format!("bad tune: {e}"))?;
+        c.set_tune(CarUid(uid), tune)?;
         view_json(c)
     })
 }
