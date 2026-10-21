@@ -809,7 +809,11 @@ fn holds(cars: &[(&str, LoadedCar)]) {
 
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("holds") {
-        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        let ids: Vec<String> = match std::env::var("CARS") {
+            Ok(l) => l.split(',').map(String::from).collect(),
+            Err(_) => CARS.iter().map(|s| s.to_string()).collect(),
+        };
+        let cars: Vec<(&str, LoadedCar)> = ids.iter().map(|id| (id.as_str(), car(id))).collect();
         holds(&cars);
         return;
     }
@@ -823,7 +827,11 @@ fn main() {
         return;
     }
     if std::env::args().nth(1).as_deref() == Some("trace") {
-        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        let ids: Vec<String> = match std::env::var("CARS") {
+            Ok(l) => l.split(',').map(String::from).collect(),
+            Err(_) => CARS.iter().map(|s| s.to_string()).collect(),
+        };
+        let cars: Vec<(&str, LoadedCar)> = ids.iter().map(|id| (id.as_str(), car(id))).collect();
         trace_hold(&cars);
         return;
     }
