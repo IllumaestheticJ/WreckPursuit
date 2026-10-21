@@ -38,6 +38,11 @@ pub struct Scenario {
     /// Parked cars along parking lanes (default on; they become physics bodies).
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub parked_cars: bool,
+    /// Parked cars dent (default off): a parked car about to be hit is swapped for a full
+    /// vehicle with a damage model (`Sim::set_parked_car`, the traffic car model). Needs a
+    /// city with `parked_cars`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub parked_damage: bool,
     /// AI police units patrolling the city (default on). `false` keeps heat and wanted levels
     /// but spawns no units. Ignored on the flat world, which has no roads for police.
     #[serde(default = "yes", skip_serializing_if = "is_true")]

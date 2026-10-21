@@ -408,6 +408,7 @@ fn kind_name(k: wp_sim::VehicleKind) -> &'static str {
         wp_sim::VehicleKind::AiRacer => "AiRacer",
         wp_sim::VehicleKind::Police => "Police",
         wp_sim::VehicleKind::Traffic => "Traffic",
+        wp_sim::VehicleKind::Parked => "Parked",
     }
 }
 
@@ -415,7 +416,8 @@ fn kind_name(k: wp_sim::VehicleKind) -> &'static str {
 pub const META_STRIDE: usize = 3;
 
 /// Per-vehicle render metadata, same order as `vehicle_states()`, 3 floats each:
-/// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]` with flags
+/// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic, 4 parked car swapped in
+/// to dent), flags]` with flags
 /// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with; a
 /// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]).
 #[wasm_bindgen]
@@ -428,6 +430,7 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
                 wp_sim::VehicleKind::AiRacer => 1.0,
                 wp_sim::VehicleKind::Police => 2.0,
                 wp_sim::VehicleKind::Traffic => 3.0,
+                wp_sim::VehicleKind::Parked => 4.0,
             };
             let i = &v.input;
             let flags = police::siren_on(s.sim(), v) as u32

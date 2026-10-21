@@ -124,6 +124,10 @@ pub(crate) fn frame_commands(
         let Some(v) = vehicles.get(id) else {
             continue;
         };
+        // Parked cars have their engine off.
+        if v.kind == wp_sim::VehicleKind::Parked {
+            continue;
+        }
         if !d.has_car(&v.car_id) {
             match s.car(*id) {
                 Some(car) => d.register_car(car),
@@ -224,7 +228,7 @@ fn driver_kind(k: wp_sim::VehicleKind) -> DriverKind {
         wp_sim::VehicleKind::Player => DriverKind::Player,
         wp_sim::VehicleKind::AiRacer => DriverKind::AiRacer,
         wp_sim::VehicleKind::Police => DriverKind::Police,
-        wp_sim::VehicleKind::Traffic => DriverKind::Traffic,
+        wp_sim::VehicleKind::Traffic | wp_sim::VehicleKind::Parked => DriverKind::Traffic,
     }
 }
 

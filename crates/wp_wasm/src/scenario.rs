@@ -59,6 +59,8 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         traffic_density: None,
         traffic_cars: true,
         parked_cars: true,
+        // Parked cars dent in the browser (lead prototype).
+        parked_damage: true,
         police_cars: true,
         police_presence: None,
         slow: false,

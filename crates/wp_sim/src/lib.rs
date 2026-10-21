@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 mod contacts;
+mod parked_link;
 mod physics;
 mod police_link;
 mod props;
@@ -18,6 +19,7 @@ mod systems;
 mod traffic_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
+pub use parked_link::{MAX_PARKED_VEHICLES, PARKED_SLOT_RESERVE};
 pub use physics::{CityColliders, PhysicsWorld, SAFETY_FLOOR_Z};
 pub use police_link::POLICE_SLOT_RESERVE;
 pub use systems::{SystemId, Systems};
@@ -72,6 +74,9 @@ pub enum VehicleKind {
     Police,
     /// Physical (promoted) traffic agent.
     Traffic,
+    /// A parked car swapped in for a city prop so it can dent (no driver, handbrake on; see
+    /// [`Sim::set_parked_car`]).
+    Parked,
 }
 
 /// Hook run on every contact before damage applies it (e.g. the server quantising contacts
@@ -101,6 +106,11 @@ pub struct SimVehicle {
     pub police_unit: Option<wp_police::UnitId>,
     /// The `wp_world` traffic agent this car embodies (physical traffic only).
     pub traffic_agent: Option<wp_world::AgentId>,
+    /// The city prop (index in [`Sim::set_world`] creation order) this car stands in for
+    /// (parked cars only).
+    pub parked_prop: Option<u32>,
+    /// Ticks this parked car has been at rest (release back to a prop, `parked_link.rs`).
+    parked_quiet_ticks: u32,
     spawn: ([f32; 3], f32),
     /// Wheel radius / width (m) for debris cylinders when a wheel tears off.
     wheel_size: (f32, f32),
@@ -164,6 +174,10 @@ pub struct Sim {
     police_car: Option<LoadedCar>,
     police_car_limits: Option<wp_police::pro::CarLimits>,
     traffic_car: Option<LoadedCar>,
+    parked_car: Option<LoadedCar>,
+    /// Damage of parked cars that were hit and turned back into props, by prop index; given
+    /// back when the prop is swapped for a vehicle again.
+    parked_damage: std::collections::BTreeMap<u32, DamageModel>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
@@ -200,6 +214,8 @@ impl Sim {
             police_car: None,
             police_car_limits: None,
             traffic_car: None,
+            parked_car: None,
+            parked_damage: std::collections::BTreeMap::new(),
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
@@ -263,6 +279,8 @@ impl Sim {
             kind: VehicleKind::Player,
             police_unit: None,
             traffic_agent: None,
+            parked_prop: None,
+            parked_quiet_ticks: 0,
             spawn: (pos, yaw),
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
             hull_version,
@@ -278,6 +296,7 @@ impl Sim {
     /// replaces it with terrain, road, building and deck-rail colliders
     /// ([`PhysicsWorld::set_city_ground`]).
     pub fn set_world(&mut self, world: World) {
+        self.clear_parked();
         if world.network().terrain.is_some() {
             self.city_colliders = self.physics.set_city_ground(world.map());
         }
@@ -327,7 +346,8 @@ impl Sim {
                 .colliders
                 .insert_with_parent(col, body, &mut self.physics.bodies);
             let radius = (hx * hx + hy * hy + hz * hz).sqrt();
-            self.props.add(body, prop.pos, radius);
+            let dentable = prop.kind == wp_world::PropKind::ParkedCar;
+            self.props.add(body, prop.pos, radius, dentable);
             if hilly {
                 self.resting_props.push((body, ch));
             }
@@ -674,8 +694,14 @@ impl Sim {
             self.drive_police_units();
         }
         if sys.vehicle {
+            self.embody_parked();
+            // Disabled colliders (props a parked vehicle just replaced) stay in the broad phase
+            // until the physics step; wheel probes skip them.
+            let enabled = |_, c: &rapier3d::prelude::Collider| c.is_enabled();
             for slot in &mut self.vehicles {
-                let filter = QueryFilter::default().exclude_rigid_body(slot.body.body);
+                let filter = QueryFilter::default()
+                    .exclude_rigid_body(slot.body.body)
+                    .predicate(&enabled);
                 let ground = RapierGround {
                     query: self.physics.query_pipeline(filter),
                 };
@@ -757,6 +783,7 @@ impl Sim {
         }
         if sys.vehicle {
             self.sync_traffic();
+            self.release_parked();
         }
         if sys.police {
             let racers = self.racer_views();

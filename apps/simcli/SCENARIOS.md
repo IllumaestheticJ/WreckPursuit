@@ -23,6 +23,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     police_presence: 1.0,            // optional patrol multiplier on data/police/presence.toml (1 = default, 0 = none)
     traffic_cars: true,              // moving civilian traffic (default true)
     parked_cars: true,               // parked cars along parking lanes, as physics bodies (default true)
+    parked_damage: false,            // parked cars dent: swapped for full vehicles when about to be hit (default false)
     police_cars: true,               // AI police units patrolling the city (default true)
     slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip

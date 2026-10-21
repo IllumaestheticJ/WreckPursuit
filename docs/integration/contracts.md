@@ -75,3 +75,21 @@ in-process and fresh-process pass. Pre-existing failures on the base branch
   indexes scenario entities by the sim's vehicle list, which since run 6 also holds physical
   police / traffic (`index out of bounds: len 2, index 2`). L should filter samples to the
   scenario's entities.
+
+## Lead prototype: dentable parked cars (2026-10-21)
+
+`wp_sim/src/parked_link.rs`: with `Sim::set_parked_car(car)` a parked-car prop that a vehicle is
+about to hit is swapped for a full `VehicleKind::Parked` vehicle (damage model included) and
+turned back into a prop, keeping its damage, once it rests with nobody near. Details, limits and
+cost in `crates/wp_sim/README.md`. No contract change.
+
+Touched outside `wp_sim` (minimal, for the new `VehicleKind::Parked` arm and the opt-in flag):
+- `apps/simcli`: scenario field `parked_damage` (default `false`, so goldens are unchanged;
+  documented in `SCENARIOS.md`, owner 10 please confirm the name); `city_frame_cost
+  --parked-damage`.
+- `wp_wasm`: browser free drive sets `parked_damage: true`; `vehicle_meta` kind 4 = parked;
+  parked cars send no engine audio. `apps/testbed-web`: `VEHICLE_KIND.parked`, drawn traffic grey.
+- `wp_net`: `VehicleKind::Parked` replicates as `EntityKind::Traffic`.
+
+Open: the testbed does not draw parked-car props, so in the browser a parked car is invisible
+until it is swapped in (just before a hit). World/testbed should render `World::static_props()`.

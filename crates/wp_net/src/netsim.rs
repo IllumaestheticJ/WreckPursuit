@@ -307,6 +307,8 @@ pub fn entity_kind(kind: VehicleKind) -> EntityKind {
         VehicleKind::AiRacer => EntityKind::AiRacer,
         VehicleKind::Police => EntityKind::AiPolice,
         VehicleKind::Traffic => EntityKind::Traffic,
+        // Civilian cars either way; a parked car is just one with no driver.
+        VehicleKind::Parked => EntityKind::Traffic,
     }
 }
 

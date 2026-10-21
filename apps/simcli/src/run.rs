@@ -319,6 +319,9 @@ pub fn build_sim(
             if sc.traffic_cars {
                 sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
             }
+            if sc.parked_damage {
+                sim.set_parked_car(load_car(data, TRAFFIC_CAR)?);
+            }
             true
         }
         None => false,

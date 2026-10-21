@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rapier3d::prelude::{RigidBodyHandle, RigidBodySet, RigidBodyType};
+use rapier3d::prelude::{ColliderSet, RigidBodyHandle, RigidBodySet, RigidBodyType};
 
 /// Grid cell edge, m.
 const CELL_M: f32 = 16.0;
@@ -49,6 +49,11 @@ pub(crate) struct Props {
     grid: BTreeMap<(i32, i32), Vec<u32>>,
     /// Props currently dynamic.
     active: BTreeSet<u32>,
+    /// Per prop: a parked car that can be swapped for a full, dentable vehicle
+    /// (`parked_link.rs`).
+    dentable: Vec<bool>,
+    /// Props swapped out for a vehicle: body disabled, skipped by [`Props::update`].
+    hidden: BTreeSet<u32>,
 }
 
 fn cell(x: f32, y: f32) -> (i32, i32) {
@@ -61,14 +66,98 @@ fn dist2_xy(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 impl Props {
-    /// Register a prop body (created fixed) with its bounding-sphere radius.
-    pub fn add(&mut self, body: RigidBodyHandle, pos: [f32; 3], radius: f32) {
+    /// Register a prop body (created fixed) with its bounding-sphere radius; `dentable` marks
+    /// a parked car that may be swapped for a vehicle.
+    pub fn add(&mut self, body: RigidBodyHandle, pos: [f32; 3], radius: f32, dentable: bool) {
         let idx = self.bodies.len() as u32;
         let c = cell(pos[0], pos[1]);
         self.bodies.push(body);
         self.radius.push(radius);
         self.cell_of.push(c);
+        self.dentable.push(dentable);
         self.grid.entry(c).or_default().push(idx);
+    }
+
+    /// True for a parked car that may be swapped for a vehicle.
+    pub fn is_dentable(&self, i: u32) -> bool {
+        self.dentable[i as usize]
+    }
+
+    /// Visible (not hidden) props whose bounding sphere comes within `span` of `pos` (xy), in
+    /// grid order (deterministic).
+    pub fn near(&self, bodies: &RigidBodySet, pos: [f32; 3], span: f32) -> Vec<u32> {
+        let mut out = Vec::new();
+        if self.bodies.is_empty() {
+            return out;
+        }
+        let max_r = self.radius.iter().copied().fold(0.0f32, f32::max);
+        let (x0, y0) = cell(pos[0] - span - max_r, pos[1] - span - max_r);
+        let (x1, y1) = cell(pos[0] + span + max_r, pos[1] + span + max_r);
+        for cx in x0..=x1 {
+            for cy in y0..=y1 {
+                let Some(list) = self.grid.get(&(cx, cy)) else {
+                    continue;
+                };
+                for &i in list {
+                    if self.hidden.contains(&i) {
+                        continue;
+                    }
+                    let r = span + self.radius[i as usize];
+                    let p = bodies[self.bodies[i as usize]].translation().to_array();
+                    if dist2_xy(p, pos) <= r * r {
+                        out.push(i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Take prop `i` out of the world while a vehicle stands in for it. Body and collider are
+    /// disabled; the collider too, so ground probes made before the next physics step (which
+    /// still see it in the broad phase) can skip it.
+    pub fn hide(&mut self, i: u32, bodies: &mut RigidBodySet, colliders: &mut ColliderSet) {
+        let rb = &mut bodies[self.bodies[i as usize]];
+        rb.set_body_type(RigidBodyType::Fixed, false);
+        rb.set_enabled(false);
+        for c in rb.colliders() {
+            colliders[*c].set_enabled(false);
+        }
+        self.active.remove(&i);
+        self.hidden.insert(i);
+    }
+
+    /// Put hidden prop `i` back as a fixed body at `pose` (where its vehicle came to rest).
+    pub fn show(
+        &mut self,
+        i: u32,
+        bodies: &mut RigidBodySet,
+        colliders: &mut ColliderSet,
+        pose: rapier3d::prelude::Pose,
+    ) {
+        let rb = &mut bodies[self.bodies[i as usize]];
+        rb.set_position(pose, false);
+        rb.set_linvel(rapier3d::prelude::Vector::ZERO, false);
+        rb.set_angvel(rapier3d::prelude::Vector::ZERO, false);
+        rb.set_enabled(true);
+        for c in rb.colliders() {
+            colliders[*c].set_enabled(true);
+        }
+        self.hidden.remove(&i);
+        self.refile(i, pose.translation.to_array());
+    }
+
+    /// File prop `i` under the grid cell of `p`.
+    fn refile(&mut self, i: u32, p: [f32; 3]) {
+        let c = cell(p[0], p[1]);
+        let old = self.cell_of[i as usize];
+        if c != old {
+            if let Some(list) = self.grid.get_mut(&old) {
+                list.retain(|x| *x != i);
+            }
+            self.grid.entry(c).or_default().push(i);
+            self.cell_of[i as usize] = c;
+        }
     }
 
     /// Number of props.
@@ -104,7 +193,7 @@ impl Props {
                         continue;
                     };
                     for &i in list {
-                        if self.active.contains(&i) {
+                        if self.active.contains(&i) || self.hidden.contains(&i) {
                             continue;
                         }
                         let rb = &bodies[self.bodies[i as usize]];
@@ -145,15 +234,7 @@ impl Props {
             let p = rb.translation().to_array();
             self.active.remove(&i);
             // Re-file under the cell it was pushed into.
-            let c = cell(p[0], p[1]);
-            let old = self.cell_of[i as usize];
-            if c != old {
-                if let Some(list) = self.grid.get_mut(&old) {
-                    list.retain(|x| *x != i);
-                }
-                self.grid.entry(c).or_default().push(i);
-                self.cell_of[i as usize] = c;
-            }
+            self.refile(i, p);
         }
     }
 }
@@ -173,7 +254,7 @@ mod tests {
                     .translation(Vector::from_array(pos))
                     .build(),
             );
-            props.add(h, pos, 1.0);
+            props.add(h, pos, 1.0, false);
         }
         (set, props)
     }

@@ -1,5 +1,5 @@
 //! Per-frame sim cost of a city chase (release): `cargo run --release -p simcli --example
-//! city_frame_cost -- [vesper|grid]`. Builds the chase like the testbed (23:00, full police,
+//! city_frame_cost -- [vesper|grid] [--parked-damage]`. Builds the chase like the testbed (23:00, full police,
 //! traffic, parked cars, the player on the first race grid at 30 m/s), warms up 2 s, then
 //! times 5 s of ticks with every system and with each system off. Numbers quoted in
 //! `docs/integration/world.md` (city v2).
@@ -45,6 +45,7 @@ fn main() {
         traffic_density: None,
         traffic_cars: true,
         parked_cars: true,
+        parked_damage: std::env::args().any(|a| a == "--parked-damage"),
         police_cars: true,
         police_presence: Some(1.0),
         systems: None,

@@ -143,7 +143,11 @@ async function main(): Promise<void> {
       if (app.views.has(id)) continue;
       const kind = meta[o + 1];
       const colour =
-        kind === VEHICLE_KIND.police ? 0xe9ebf0 : kind === VEHICLE_KIND.traffic ? 0x7a8a99 : COLOURS[(id - 1) % COLOURS.length];
+        kind === VEHICLE_KIND.police
+          ? 0xe9ebf0
+          : kind === VEHICLE_KIND.traffic || kind === VEHICLE_KIND.parked
+            ? 0x7a8a99
+            : COLOURS[(id - 1) % COLOURS.length];
       const v = new VehicleView(id, colour);
       scene.world.add(v.root);
       scene.world.add(v.velocity);
