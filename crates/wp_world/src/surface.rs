@@ -58,6 +58,24 @@ pub fn surface_edges(s: &RoadSurface) -> (Vec<V3>, Vec<V3>) {
     (left, right)
 }
 
+/// Distance from `q` to `s`'s centreline (clamped to its ends) and the height of the banked
+/// surface under `q` (nearest centreline point).
+pub fn height_under(s: &RoadSurface, q: V2) -> (f32, f32) {
+    let cum = geom::cumulative(&s.centre);
+    let n = s.centre.len();
+    let pr = geom::project(&s.centre, &cum, q);
+    let t = pr.s.clamp(0.0, cum[n - 1]);
+    let (c, _) = geom::point_at(&s.centre, &cum, t);
+    let i = cum.partition_point(|x| *x <= t).clamp(1, n - 1);
+    let span = (cum[i] - cum[i - 1]).max(1e-6);
+    let f = ((t - cum[i - 1]) / span).clamp(0.0, 1.0);
+    let bank = match s.bank.len() {
+        0 => 0.0,
+        _ => s.bank[i - 1] + (s.bank[i] - s.bank[i - 1]) * f,
+    };
+    (pr.dist, c[2] + bank * pr.lateral)
+}
+
 /// Every paved surface of a city as one mesh: road ribbons, junction discs (16-gons) and the
 /// connector ribbons through bend nodes (degree-2 nodes have no junction disc) and through
 /// freeway merges and diverges (radius-0 junctions: the main road's paving runs through,
@@ -75,7 +93,30 @@ pub fn road_mesh(map: &CityMap) -> TriMesh {
             *n += 1;
         }
     }
-    for ix in &net.intersections {
+    // Disc radius: the junction box, grown to cover the corners of every lane end at it (and
+    // the 16-gon's chords), so no wheel finds a gap between a lane and the box.
+    let mut disc_r: Vec<f32> = net.intersections.iter().map(|ix| ix.radius_m).collect();
+    for l in &net.lanes {
+        let n = l.polyline.len();
+        if n < 2 {
+            continue;
+        }
+        for (node, p) in [(l.to_node, l.polyline[n - 1]), (l.from_node, l.polyline[0])] {
+            let Some(ix) = net.nodes[node as usize].intersection else {
+                continue;
+            };
+            if net.intersections[ix as usize].radius_m <= 0.0 {
+                continue;
+            }
+            let c = geom::xy(net.nodes[node as usize].pos);
+            let along = geom::dist(geom::xy(p), c);
+            let corner = (along * along + 0.25 * l.width_m * l.width_m).sqrt();
+            let r = &mut disc_r[ix as usize];
+            // cos(π / 16): the 16-gon's chords sit this much inside its corners.
+            *r = r.max(corner / 0.980_785_3 + 0.1);
+        }
+    }
+    for (ix, r) in net.intersections.iter().zip(&disc_r) {
         if ix.radius_m <= 0.0 {
             continue;
         }
@@ -83,7 +124,7 @@ pub fn road_mesh(map: &CityMap) -> TriMesh {
         let poly: Vec<V3> = (0..16)
             .map(|k| {
                 let (sn, cs) = wp_math::sin_cos(k as f32 / 16.0 * std::f32::consts::TAU);
-                [c[0] + cs * ix.radius_m, c[1] + sn * ix.radius_m, c[2]]
+                [c[0] + cs * r, c[1] + sn * r, c[2]]
             })
             .collect();
         m.fan(&poly);
@@ -135,16 +176,53 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     };
     let ground = |q: V2| t.height_at(q);
     let mut out = Vec::new();
-    for s in &net.surfaces {
+    for (si, s) in net.surfaces.iter().enumerate() {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                out.push((l[k], l[k + 1]));
-                out.push((r[k], r[k + 1]));
+                for e in [&l, &r] {
+                    if !inside_other_paving(net, si, e[k])
+                        || !inside_other_paving(net, si, e[k + 1])
+                    {
+                        out.push((e[k], e[k + 1]));
+                    }
+                }
             }
         }
     }
     out
+}
+
+/// Whether `p` lies on the paving of a surface other than `si`, at its level (a ramp edge
+/// inside the carriageway it leaves, for example: no rail there).
+pub fn inside_other_paving(net: &RoadNetwork, si: usize, p: V3) -> bool {
+    let q = geom::xy(p);
+    net.surfaces.iter().enumerate().any(|(oi, o)| {
+        if oi == si || o.centre.len() < 2 {
+            return false;
+        }
+        let w = o.left_m.max(o.right_m);
+        // Cheap reject on the end points' bounding box.
+        let (a, b) = (
+            geom::xy(o.centre[0]),
+            geom::xy(o.centre[o.centre.len() - 1]),
+        );
+        let reach = geom::dist(a, b) * 0.5 + w + 400.0;
+        if geom::dist(q, geom::scale(geom::add(a, b), 0.5)) > reach {
+            return false;
+        }
+        let cum = geom::cumulative(&o.centre);
+        let pr = geom::project(&o.centre, &cum, q);
+        let inside = if pr.lateral < 0.0 {
+            -pr.lateral < o.left_m - 0.3
+        } else {
+            pr.lateral < o.right_m - 0.3
+        };
+        pr.s > 0.0 && pr.s < cum[cum.len() - 1] && inside && {
+            let (_, z) = height_under(o, q);
+            (z - p[2]).abs() < 1.0
+        }
+    })
 }
 
 /// Median barrier polylines (at road height, along the left paved edge of every surface

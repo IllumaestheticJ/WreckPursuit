@@ -304,7 +304,10 @@ fn wanted_ai_racer_flees_police_through_the_city() {
                 },
             ),
         ],
-        max_s: 80.0,
+        // 95 s: since the grid's highway became a viaduct, the circuit row no longer feeds a
+        // highway junction, so the eastbound queue at the south-east corner lights is a cycle
+        // longer and the flight starts later (it covered ≥ 250 m by 80 s before).
+        max_s: 95.0,
         ..Setup::default()
     };
     let out = common::run(&setup, &wp_opponent::NoPolice, &mut |_, _| {});
@@ -335,7 +338,7 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         );
     }
     // Its flight route ends far from the unit, and it made real progress along it (traffic
-    // and junctions included) in the minute after the call.
+    // and junctions included) in the 75 s after the call.
     let flight = field.flight_of(0).expect("no flight route");
     let end = flight.samples[flight.len() - 1].pos;
     let d_dest = ((end[0] - unit_at[0]).powi(2) + (end[1] - unit_at[1]).powi(2)).sqrt();

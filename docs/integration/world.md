@@ -635,8 +635,37 @@ centre dividers and proper on-ramps").
 out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct update in `osm.rs`).
 
 **Known gaps**
-- The grid city's highway spine is unchanged (one 3+3 road, signals).
 - No gore chevrons / dotted lane-line extensions through tapers; no ramp metering.
 - Police pursuit AI uses the lane graph as before (ramps are ordinary highway lanes to it).
 
 **Contract change requests:** none (no `wp_contracts` change).
+
+### Follow-up: the grid city's highway (same branch, 2026-10-21)
+- **Procedural grid** (`procgen`): the highway spine is a divided viaduct (two one-way
+  3-lane carriageways, shoulders, median barrier) from the ring road at each end, bridging the
+  arterial/collector rows (7.5 m clearance); full diamonds (8 ramps) at the first and last
+  crossing rows of the 12×12 city, stop-controlled terminals on the street
+  (`ControlHint::RampTerminal`). Smaller grids (6×6–8×8, the opponent/race test cities) have
+  no mid-city ramps: their blocks are too short. Details in the `wp_world` README.
+- **Flat terrain for the grid** (12 cm under the streets) so `wp_sim` builds the road mesh and
+  the viaduct is a real bridge; on flat ground buildings still get no colliders (old grid
+  behaviour; `physics.rs`).
+- **Fixes found on the way (both cities):** taper connectors follow the paving's height
+  (they stuck up or sank by up to 0.66 m on graded/banked highway); every road's paving runs
+  to a freeway node (an unpaved wedge at the gore let a physical car slip under a ramp); deck
+  rails and parapets skip ramp edges lying on the carriageway; junction discs in the road
+  mesh cover the lane-end corners (gaps to the ground at every junction's outer lane corners);
+  the greybox adds the sea only to cities with seabed. The merge-yield rule keys off the
+  radius-0 freeway junction instead of the lane kind.
+- **Tests / scenarios:** `procgen::highway_is_a_divided_viaduct_with_ramps`;
+  `tests/drive.rs` starts at "Arterial drag" (the flat rig cannot drive the viaduct);
+  `golden_city_chase` re-aimed (patrol spawns moved: start (279.75, −10), band −35…10),
+  `golden_night_pursuit_escape` seed 106 → 107 (a civilian sat in the cruise driver's lane);
+  `wp_opponent` `wanted_ai_racer_flees_police_through_the_city` runs 95 s instead of 80 s (the
+  circuit row no longer feeds a highway junction, the south-east corner queue is one cycle
+  longer). All goldens re-blessed; 45/45 scenarios pass.
+- **For the opponent workstream (N):** with ramp terminals on the 8×8 circuit row (tried and
+  dropped), a racer stopped behind a busted racer parked a few metres before a junction
+  waited for ever: the AI does not pass a stopped car that close to a junction.
+- `circuit_8x5` (pending scenario) shows two physical civilians colliding at the highway's
+  north ring T-junction (10 m/s) and staying pressed together.

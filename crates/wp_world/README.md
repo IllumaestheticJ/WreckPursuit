@@ -155,8 +155,18 @@ one-way highway are yellow; merging freeway ramps get no stop line.
 ## Procedural city (`gen-city --grid 12x12 --seed N`)
 Grid of streets at 110 m centred on the origin. Rows/columns 2 and 9 are 2+2 arterials
 (40 mph), the two central rows/columns collectors (30 mph, parking), the rest local streets
-(25 mph, parking). A 3+3 highway spine (55 mph) runs north–south between the central columns
-and crosses only arterial/collector rows at signals; other rows end at it. Two 3+3 diagonal
+(25 mph, parking). The highway spine (55 mph) runs north–south between the central columns:
+a divided viaduct (two one-way 3-lane carriageways, shoulders, median barrier) that leaves
+the ring road at grade at each end (signalised T), climbs over 200 m (≤ 6 %) after a 115 m
+flat run and bridges the arterial/collector rows with 7.5 m clearance; other rows end at the
+columns beside it. Where the blocks on both sides of the first and last crossing rows are
+long enough (the 12×12 city) each of those rows gets a full diamond: four 45 mph ramps that
+leave / join the carriageways 280 m away and meet the row at stop-controlled terminals 22 m
+either side of the centreline (`ControlHint::RampTerminal`: the street keeps priority, the
+off-ramp stops and yields). Smaller grids reach the highway at the ring only. The ground is
+a flat heightfield 12 cm under the streets, so `wp_sim` builds the road mesh (the viaduct is a
+real bridge) and the greybox draws piers and parapets; buildings still do not block cars on
+flat ground. Two 3+3 diagonal
 arterials with kerbside bus lanes (35 mph) run corner to corner through grid nodes (6-way
 signalised junctions) and stop at the highway block. An octagonal 2+2 ring road (45 mph)
 collects every street end (priority T-junctions with local streets). Mid-block alleys
@@ -166,7 +176,7 @@ Suburb north/west). Buildings on lots (Core 5–8 storeys, Commercial 2–4, Res
 courtyards, warehouses in the bands). Green-wave offsets along arterial rows (eastbound),
 columns (northbound) and diagonals at 90 % of the limit. POIs: 2 police stations + helipad,
 3 garages, 4 safehouse candidates, 3 race grids (highway, arterial, ring). The 12×12 city has
-1734 lanes, 224 junctions (58 signalised), 1144 buildings, ~104 drivable lane-km.
+1742 lanes, 232 junctions (54 signalised, 8 freeway merges / diverges), 1068 buildings.
 
 ## Port Vesper v2 (`vesper::generate`, `World::vesper`, `gen-city --preset vesper_v2`)
 After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m terrain cells.
@@ -377,10 +387,13 @@ per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seed
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 
 ## Known gaps
-- The grid city's highway spine is still one 3+3 road with signalised junctions (no median or
-  ramps); only Port Vesper's Loop 9 is a divided highway.
+- Grid cities smaller than 12×12 have no mid-city ramps (their blocks are too short for a
+  diamond); their highway is reached at the ring junctions only.
+- The single-car rig (`wp_vehicle::rig`, client prediction and `tests/drive.rs`) drives on a
+  flat slab, so it does not see the grid's viaduct either (as on Port Vesper's hills).
 - No painted gore chevrons or dotted lane-line extensions across freeway tapers; the taper
   connectors themselves read as `Concrete` in `surface_at` (other connectors read `Asphalt`).
+  Taper connectors follow the paving's height (graded, banked) rather than a straight line.
 - Physical agents are `wp_vehicle` instances, but `wp_sim` does not yet create rigid bodies /
   damage models for them (needs `LodChange` handling in the sim loop, see
   `docs/integration/world.md`). Until then physical traffic cannot be hit.

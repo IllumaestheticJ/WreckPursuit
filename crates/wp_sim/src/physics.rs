@@ -93,8 +93,9 @@ impl PhysicsWorld {
 
     /// Replace the flat ground slab by the city's own ground (cities with terrain, e.g.
     /// Port Vesper v2): a terrain heightfield, one triangle mesh of every paved surface
-    /// (banked ribbons, junction discs, bend connectors), a static collider per building and
-    /// guard rails along bridge decks. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
+    /// (banked ribbons, junction discs, bend connectors), a static collider per building
+    /// (not on flat ground: the grid city), guard rails along bridge decks and median
+    /// barriers. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
     /// inserted in a fixed order and registered with the broad phase immediately, so ground
     /// probes see them on the next tick without a physics step. Call once, before the first
     /// tick (scenario setup).
@@ -186,8 +187,11 @@ impl PhysicsWorld {
             }
         }
 
-        // Buildings: extruded footprints as convex hulls (footprints are convex lots).
-        for b in &net.buildings {
+        // Buildings: extruded footprints as convex hulls (footprints are convex lots). A city
+        // on flat ground (the procedural grid, whose terrain only exists so its highway
+        // viaduct is a real bridge) keeps its old behaviour: buildings do not block cars.
+        let flat_ground = t.z.iter().all(|z| *z == t.z[0]);
+        for b in net.buildings.iter().filter(|_| !flat_ground) {
             let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2);
             for q in &b.footprint {
                 pts.push(Vector::new(q[0], q[1], b.base_z_m));

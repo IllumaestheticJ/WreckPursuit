@@ -69,7 +69,12 @@ await shoot([
   ["downtown_markings.png", [-160, -45, 14], [120, -48, 8]],
 ]);
 await city("procedural_12x12");
-await shoot([["grid_markings.png", [-40, -40, 30], [60, 60, 0]]]);
+await shoot([
+  ["grid_markings.png", [-40, -40, 30], [60, 60, 0]],
+  ["grid_interchange.png", [160, -620, 95], [0, -385, 0]],
+  ["grid_viaduct.png", [48, -455, 10], [2, -320, 7]],
+  ["grid_on_viaduct.png", [9.6, -300, 9.5], [9.6, 0, 8.6]],
+]);
 if (errors.length) console.log("page errors:", errors);
 await browser.close();
 process.exit(0);

@@ -415,7 +415,7 @@ pub fn must_stop(map: &CityMap, id: LaneId) -> bool {
         Some((IntersectionControl::Signal { .. }, _, _))
         | Some((IntersectionControl::AllWayStop, _, _)) => true,
         Some((IntersectionControl::Priority, ap, _)) => {
-            !ap.major && map.net.lanes[id as usize].kind != LaneKind::Highway
+            !ap.major && map.net.intersections[ap.intersection as usize].radius_m > 0.0
         }
         _ => false,
     }
@@ -762,13 +762,15 @@ mod tests {
                 ];
                 n += 1;
                 match marking_at(&map, c) {
-                    Some(MarkingKind::CentreLine) if yellow => hit += 1,
+                    Some(MarkingKind::CentreLine | MarkingKind::EdgeLine) if yellow => hit += 1,
                     Some(MarkingKind::CentreLine) => {}
                     Some(_) if !yellow => hit += 1,
                     _ => {}
                 }
-                // On the flat grid every mark lies just above z = 0.
-                assert!((c[2]).abs() < 0.01, "paint at z {}", c[2]);
+                // Every mark lies just above its road (streets at 0, the highway viaduct and
+                // its ramps above them).
+                let g = map.ground_height([c[0], c[1]], Some(c[2]));
+                assert!((c[2] - g).abs() < 0.02, "paint at z {} over road {g}", c[2]);
             }
             let share = hit as f32 / n as f32;
             assert!(

@@ -85,12 +85,15 @@ pub enum ControlHint {
     Uncontrolled,
     /// Freeway merge or diverge between one-way roads (a carriageway and a ramp): every lane
     /// is set back [`FREEWAY_SETBACK_M`] so the ramp lane tapers in or out along a connector,
-    /// the main road's paving runs through the node (no junction disc), the main road keeps
+    /// every road's paving runs to the node (no junction disc), the main road keeps
     /// its lanes and the ramp lanes join or leave its rightmost lanes. Control is
-    /// [`IntersectionControl::Priority`] with the main road major; traffic on a merging ramp
-    /// yields without stopping. Only applies to a node with three one-way roads (one in and
+    /// [`IntersectionControl::Priority`] with the main road major and a radius-0 junction
+    /// (no box); traffic on a merging ramp yields without stopping. Only applies to a node with three one-way roads (one in and
     /// two out, or two in and one out); anything else is built as [`ControlHint::Priority`].
     Freeway,
+    /// Ramp terminal on a street: priority where the two-way roads are major and the one-way
+    /// ramps minor (an off-ramp stops and yields; the street keeps flowing).
+    RampTerminal,
 }
 
 /// Lane setback at a [`ControlHint::Freeway`] node: half the length of the taper connector, m.
@@ -511,15 +514,15 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
     for (ni, list) in inc.iter().enumerate() {
         let deg = list.len();
         let mut sb = vec![0.0f32; deg];
-        if let Some(fw) = freeway[ni] {
+        if freeway[ni].is_some() {
+            // Every road's paving runs to the node: the ramp's lies on the carriageway's plane
+            // there, so the gore between the taper and the ramp is paved too.
             for (k, x) in list.iter().enumerate() {
                 sb[k] = FREEWAY_SETBACK_M;
-                if k == fw.in_main || k == fw.out_main {
-                    if x.at_a {
-                        paving_a[x.road] = 0.0;
-                    } else {
-                        paving_b[x.road] = 0.0;
-                    }
+                if x.at_a {
+                    paving_a[x.road] = 0.0;
+                } else {
+                    paving_b[x.road] = 0.0;
                 }
             }
             for (k, x) in list.iter().enumerate() {
@@ -919,7 +922,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         // Signals where every road is collector or above, or at complex (5+ way) junctions;
         // priority (major road keeps going) where classes differ; all-way stop otherwise.
         let control_kind = match nodes[ni].control {
-            Some(ControlHint::Freeway) => ControlHint::Priority,
+            Some(ControlHint::Freeway) | Some(ControlHint::RampTerminal) => ControlHint::Priority,
             Some(h) => h,
             None if nodes[ni].signal => ControlHint::Signal,
             None if min_rank >= 2 || list.len() >= 5 => ControlHint::Signal,
@@ -947,6 +950,9 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                     signal_group: g,
                     major: match fw {
                         Some(f) => k == f.in_main,
+                        None if nodes[ni].control == Some(ControlHint::RampTerminal) => {
+                            r.lanes_bwd > 0
+                        }
                         None => r.class.rank() == max_rank,
                     },
                 });
@@ -961,7 +967,9 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             ControlHint::AllWayStop => IntersectionControl::AllWayStop,
             ControlHint::Priority => IntersectionControl::Priority,
             ControlHint::Uncontrolled => IntersectionControl::Uncontrolled,
-            ControlHint::Freeway => unreachable!("mapped to Priority above"),
+            ControlHint::Freeway | ControlHint::RampTerminal => {
+                unreachable!("mapped to Priority above")
+            }
         };
         out_nodes[ni].intersection = Some(ix_id);
         intersections.push(Intersection {

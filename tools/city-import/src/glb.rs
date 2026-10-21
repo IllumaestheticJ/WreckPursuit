@@ -16,7 +16,7 @@ use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
 use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
-use wp_world::surface::{is_elevated, median_barriers, surface_edges};
+use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk width, m.
@@ -521,13 +521,18 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             render_terrain(t, net, &mut ground, &mut rock, &mut seabed);
             let (lo, hi) = (t.origin, t.max_corner());
             let m = 400.0;
-            water.quad(
-                [lo[0] - m, lo[1] - m, SEA_Z],
-                [hi[0] + m, lo[1] - m, SEA_Z],
-                [hi[0] + m, hi[1] + m, SEA_Z],
-                [lo[0] - m, hi[1] + m, SEA_Z],
-                [0.0, 0.0, 1.0],
-            );
+            // Only a city with seabed gets the sea (the grid's flat ground sits just under
+            // its streets, below sea level, and stays dry).
+            let has_sea = t.z.iter().any(|z| *z < -1.0);
+            if has_sea {
+                water.quad(
+                    [lo[0] - m, lo[1] - m, SEA_Z],
+                    [hi[0] + m, lo[1] - m, SEA_Z],
+                    [hi[0] + m, hi[1] + m, SEA_Z],
+                    [lo[0] - m, hi[1] + m, SEA_Z],
+                    [0.0, 0.0, 1.0],
+                );
+            }
         }
         None => {
             for z in &net.zones {
@@ -614,7 +619,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     // bridge decks with parapets and piers.
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
-        for s in &net.surfaces {
+        for (si, s) in net.surfaces.iter().enumerate() {
             let (l, r) = surface_edges(s);
             let n = s.centre.len();
             let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
@@ -649,8 +654,13 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                 }
                 for (side, e) in [(-1.0f32, &l), (1.0, &r)] {
                     let seg = [e[k], e[k + 1]];
-                    // The median side of a divided highway has the barrier instead.
+                    // The median side of a divided highway has the barrier instead; a ramp
+                    // edge on the carriageway it leaves has nothing.
                     if near_barrier.near(geom::xy(seg[0])) && near_barrier.near(geom::xy(seg[1])) {
+                        continue;
+                    }
+                    if inside_other_paving(net, si, seg[0]) && inside_other_paving(net, si, seg[1])
+                    {
                         continue;
                     }
                     bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
