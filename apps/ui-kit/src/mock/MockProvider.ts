@@ -621,7 +621,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
           outstanding: { lines: remaining, total: remaining.reduce((a, l) => a + l.total, 0) },
           health: remaining.length ? healthAfter(remaining) : 1,
           totalLoss: car.totalLoss && remaining.some((l) => "Region" in l.item && (l.item.Region === "FrameFront" || l.item.Region === "Cabin")),
-          sustainedWhileWanted: remaining.length > 0 && car.sustainedWhileWanted,
+          sustainedBeforeCapture: remaining.length > 0 && car.sustainedBeforeCapture,
         };
         repaired.drivable = !repaired.totalLoss;
         const note = shop.kind === "legit" && wanted(s) && ["L2", "L3", "L4", "L5"].includes(s.hud.heat.level) ? " The shop reported you to the police." : "";
@@ -680,7 +680,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
           location: { kind: "Garage" },
           insurance: null,
           outstanding: { lines: [], total: 0 },
-          sustainedWhileWanted: false,
+          sustainedBeforeCapture: false,
           value: 0,
         };
         car.value = carValue(car);

@@ -195,7 +195,7 @@ impl Economy {
 
             if level > WantedLevel::None {
                 let c = tx.car_mut(ctx.car)?;
-                c.damage.sustained_while_wanted = true;
+                c.damage.sustained_before_capture = true;
                 if c.insurance.take().is_some() {
                     tx.note(EventReason::InsuranceVoided, car, Delta::default());
                 }
