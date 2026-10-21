@@ -71,6 +71,10 @@ pub struct Segment {
     /// Connectors leaving the same lane (diverging), excluding this one, each with the arc
     /// length along **that sibling** after which a car on it no longer overlaps this path.
     pub siblings: Vec<(SegId, f32)>,
+    /// Cross slope per point of `pts` (dz per metre right of the direction of travel) from the
+    /// road surface ([`crate::surface::lane_bank`]); empty for connectors and lanes that do not
+    /// follow their surface point for point.
+    pub bank: Vec<f32>,
 }
 
 impl Segment {
@@ -82,6 +86,18 @@ impl Segment {
     /// Project a point onto this segment.
     pub fn project(&self, p: V2) -> geom::Projection {
         geom::project(&self.pts, &self.cum, p)
+    }
+
+    /// Cross slope at arc length `s` ([`Segment::bank`]; 0 without one).
+    pub fn bank_at(&self, s: f32) -> f32 {
+        if self.bank.len() != self.pts.len() || self.pts.len() < 2 {
+            return 0.0;
+        }
+        let n = self.pts.len();
+        let i = self.cum.partition_point(|c| *c <= s).clamp(1, n - 1);
+        let span = (self.cum[i] - self.cum[i - 1]).max(1e-6);
+        let f = ((s - self.cum[i - 1]) / span).clamp(0.0, 1.0);
+        self.bank[i - 1] + (self.bank[i] - self.bank[i - 1]) * f
     }
 
     /// Lane id if this is a lane.
@@ -232,6 +248,7 @@ impl CityMap {
                 curve_speed: l.speed_limit_mps,
                 conflicts: Vec::new(),
                 siblings: Vec::new(),
+                bank: crate::surface::lane_bank(&net, l),
             });
         }
         // Freeway merges / diverges (radius-0 junctions): their long taper connectors follow
@@ -292,6 +309,7 @@ impl CityMap {
                     prev: vec![i as SegId],
                     conflicts: Vec::new(),
                     siblings: Vec::new(),
+                    bank: Vec::new(),
                 });
                 segs[i].next.push(id);
                 segs[c.to as usize].prev.push(id);
@@ -559,7 +577,11 @@ impl CityMap {
             if pr.dist > s.width * 0.5 + pad + 0.5 {
                 continue;
             }
-            let z = s.point_at(pr.s.clamp(0.0, s.length)).0[2];
+            let sc = pr.s.clamp(0.0, s.length);
+            // The lane's height plus its road's cross slope out to `p` (a banked road's edge
+            // sits bank × offset off the lane centre: up to ~5 cm on Bluff Road's curves, which
+            // the drawn and solid surface follow).
+            let z = s.point_at(sc).0[2] + s.bank_at(sc) * pr.lateral;
             if best.is_none_or(|b| score(z) < score(b)) {
                 best = Some(z);
             }
