@@ -230,8 +230,9 @@ impl CarTune {
     /// share of the grip back to cornering and the owner's lift flick swings the car through.
     /// Tuned on the step-20 lab default (`GripBalance::lab_default()`, `RideTune::firm()`)
     /// with [`CarTune::spin_v2_plain`] (examples/transition.rs `v2search`): held-drift set
-    /// 25 / 27 (v1 26), lift flicks caught 13 / 18 at the reference gaps (v1 0), lift-off in a
-    /// normal corner 0 / 18 step-outs (docs/integration/tyre-slip.md, "Spin model v2").
+    /// 25 / 27 (v1 26), lift-off in a normal corner 0 / 18 step-outs. It does **not** yet make a
+    /// real lift-flick transition (0 / 18): the "caught" flicks first reported were the car
+    /// slowing to a crawl and pivoting (docs/integration/tyre-slip.md, "Correction").
     pub fn spin_v2_candidate() -> Self {
         Self {
             spin_model: true,
