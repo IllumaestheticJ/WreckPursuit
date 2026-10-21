@@ -29,7 +29,7 @@ wp_contracts ◄── every crate
 wp_math ◄── wp_vehicle, wp_damage, wp_world, wp_police, wp_sim
 wp_sim ──► wp_vehicle, wp_damage, wp_world, wp_police, wp_economy, rapier3d
 wp_wasm ──► wp_sim, simcli (lib: scenario format v2)   (must stay wasm32-clean)
-apps/simcli ──► wp_sim, wp_net
+apps/simcli ──► wp_sim, wp_net, wp_economy (entity `mods`: apply_mods, wasm-clean)
 wp_economy ──► wp_police (WantedLevel, until v0.2.0); rusqlite only behind feature `native` (server)
 apps/server ──► wp_net[native] (tokio, tungstenite — never reachable from wp_wasm)
 ```

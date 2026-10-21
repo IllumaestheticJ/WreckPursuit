@@ -6,6 +6,8 @@
   `tools/wasm-determinism`, `tools/ci`, `.github/workflows/`, the test surface of `wp_sim`
 - **Contract version built against:** 0.3.0
 
+- **Entity `mods`:** scenario entities can drive modified cars (`EntitySpec::mods`, `data::load_modded_car`) — added by the mod-visuals work, see `docs/integration/mod-visuals.md`.
+
 ## Exposes
 
 ### Hooks added to `wp_sim` (test surface only — no game logic)

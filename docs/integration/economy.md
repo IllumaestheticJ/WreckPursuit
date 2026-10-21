@@ -7,6 +7,8 @@
 
 Design write-up, tuning levers and measured numbers: `crates/wp_economy/README.md`.
 
+- **Mod visuals:** `wp_economy::visuals` (what a build looks like, `ModDef::visuals`) — see `docs/integration/mod-visuals.md`.
+
 ## Exposes
 
 Everything is a method on `wp_economy::Economy` (immutable data bundle). Mutating calls take

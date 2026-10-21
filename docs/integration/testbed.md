@@ -16,6 +16,8 @@ Screenshots: `docs/media/` (`drive_chase.png`, `debug_layers_orbit.png`, `camera
 `replay.png`, `scenario_barrier.png`, `scenario_head_on.png`, `city_traffic.png`,
 `bench_24.png`, `native_testbed.png`). Regenerate with `SHOTS=../../docs/media npm run e2e`.
 
+- **Mod visuals:** mod shop (`ui/modShop.ts`) and parts on the car (`render/mod_parts.ts`) — see `docs/integration/mod-visuals.md`.
+
 ## How it fits together
 
 ```
