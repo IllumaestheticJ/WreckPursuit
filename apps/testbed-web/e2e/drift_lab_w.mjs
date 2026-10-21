@@ -88,14 +88,16 @@ check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === fals
 // Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
 const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();
-check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
+check((await abText()) === "balance: grip (new)", `A/B button reads "${await abText()}" (balance: grip (new))`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
-check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: softer RWD tyres, rear downforce, probe fix ${JSON.stringify(gNew)}`);
+check(Math.abs(gNew.rear_stiffness - 0.8) < 1e-6 && Math.abs(gNew.rear_mu - 0.96) < 1e-6 && Math.abs(gNew.rear_lat_c - 1.0) < 1e-6 && gNew.tyres_rwd_only === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new = balance: grip (RWD tyres near the data, rear μ 0.96, flatter past the peak, rear downforce) ${JSON.stringify(gNew)}`);
+await page.locator("#drift-lab-w button", { hasText: "step 14 (old new)" }).click();
+check((await abText()) === "balance: step 14" && Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) - 0.45) < 1e-6, `step 14 preset: "${await abText()}"`);
 await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
 await page.locator("#drift-w-drift-best").click();
@@ -118,7 +120,7 @@ await page.evaluate(() => {
 });
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
 await page.locator("#drift-w-balance-ab").click(); // custom → new
-check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
+check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.96) < 1e-6 && (await abText()) === "balance: grip (new)", "A/B restores the new balance (grip)");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];

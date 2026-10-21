@@ -203,6 +203,29 @@ impl GripBalance {
         }
     }
 
+    /// "balance: grip" (lead, 2026-10-20: "grip-drivable below the tyres' limit"): the smart
+    /// lock of [`Self::lab_default`] with the RWD tyres close to the data in the linear range
+    /// (front cornering stiffness × 0.9, rear × 0.8 instead of 0.6 / 0.45) and the limit
+    /// looseness from the peak instead: rear μ × 0.96, a flatter rear side force past the peak
+    /// (shape C 1.0 instead of 1.4, cornering stiffness kept) so the rear steps out
+    /// progressively, and rear downforce 0.8 m² for speed. Body slip stays under ~1° to 0.6 g
+    /// and reaches 4–6° at the limit; smart lock margin −0.1 → +0.6 (docs/integration/
+    /// grip-balance.md, "Balance: grip").
+    pub fn grip() -> Self {
+        Self {
+            front_stiffness: 0.9,
+            rear_stiffness: 0.8,
+            rear_mu: 0.96,
+            rear_lat_c: 1.0,
+            // The stiffer fronts peak at a smaller slip angle, so the lock allows a little
+            // more past their peak to keep "new"'s wheel angle and turn-in (0.4 s tap at
+            // 60 mph: 24.6 vs 24.9 °/s).
+            smart_margin: -0.1,
+            smart_margin_hi: 0.6,
+            ..Self::lab_default()
+        }
+    }
+
     /// The balance to pair with Drift Lab W's "slow weight (clip 4)" ride preset
     /// (`crate::ride_lab::RideTune::slow_weight`). Slow weight (no anti-roll bars, softer
     /// springs, more yaw inertia) already loosens the cars, and on top of [`Self::lab_default`]'s

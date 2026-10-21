@@ -687,3 +687,68 @@ assists), so the cause was traced before blessing:
   snap-back (no spin, against 85° and a spin before), but slip overshoot is 27.5° against
   the test's < 25°. Turning either change back alone breaks the "before" half instead. It is
   a knife-edge test; W should re-tune it on this base.
+
+## Balance: grip — grip-drivable below the limit (lead / owner, step 18)
+
+Owner: "is there a way to get it so the cars are grip-drivable when you don't exceed the limit
+of the tires?" "New" (step 14) got its looseness from rear cornering stiffness × 0.45. That
+softens the **linear** range too, so the car slid even in gentle corners (1.5° body slip at
+0.6 g, 2° at 0.7 g). `GripBalance::grip()` puts the RWD tyres back near the data below the
+limit and takes the looseness from the peak instead:
+
+| knob (RWD cars; FWD keeps its tyres) | before | step 14 ("old new") | **grip (new default)** |
+|---|---|---|---|
+| front / rear cornering stiffness × | 1 / 1 | 0.6 / 0.45 | **0.9 / 0.8** |
+| rear peak μ × | 1 | 1 | **0.96** |
+| rear shape C past the peak (stiffness kept) | 1.4 (data) | 1.4 | **1.0** (flatter: steps out progressively) |
+| rear downforce C·A | 0 | 0.8 m² | 0.8 m² |
+| smart lock margin, low → high speed | (plain lock) | −0.3 → +0.3 | **−0.1 → +0.6** (same wheel angle as step 14, so turn-in is kept) |
+
+Found by sweeping 3,600 candidates over front/rear stiffness, rear μ, rear load sensitivity,
+post-peak shape, rear anti-roll bar and rear downforce (`grip_balance score`). Ranking used the
+worst of parity_rwd_d / rwd_a / rwd_b / rampart_50, with rear μ ±0.02 as a robustness check.
+Rear μ is a cliff: rear μ 0.90 with near-data stiffness spins on a slow key ramp, 0.94–0.96 does
+not. Load sensitivity and a stiffer rear bar did not help. All numbers below are on W's
+medium-weight ride.
+
+**Body slip (°, + = tail out) vs lateral g**, slow key ramp at constant speed (`grip_balance slipg`):
+
+| car, speed | balance | 0.3 g | 0.5 g | 0.6 g | 0.7 g | 0.8 g | 0.9 g | peak g / slip |
+|---|---|---|---|---|---|---|---|---|
+| parity_rwd_d 60 km/h | before | −0.2 | −0.2 | −0.2 | −0.2 | 0.5 | 1.2 | 0.98 g / 1.6° |
+| | step 14 | 0.5 | 1.1 | 1.5 | 2.0 | 3.4 | 3.9 | 0.95 g / 4.1° |
+| | **grip** | 0.0 | 0.2 | 0.3 | 0.6 | 2.9 | 3.3 | 1.00 g / 3.8° |
+| parity_rwd_d 100 km/h | before | 0.2 | 0.5 | 0.6 | 1.8 | 2.2 | 2.4 | 1.21 g / 3.2° |
+| | step 14 | 0.7 | 1.5 | 1.9 | 3.5 | 4.8 | 5.0 | 0.99 g / 5.4° |
+| | **grip** | 0.4 | 0.9 | 1.1 | 3.3 | 4.2 | 4.1 | 1.11 g / 4.7° |
+| rampart_50 60 km/h | step 14 | 0.5 | 1.1 | 1.6 | 2.1 | 3.6 | 3.9 | 0.94 g / 4.2° |
+| | **grip** | 0.0 | 0.2 | 0.4 | 2.7 | 2.8 | 3.7 | 1.01 g / 4.1° |
+| rampart_50 100 km/h | step 14 | 0.7 | 1.5 | 1.9 | 4.3 | 4.7 | 5.2 | 0.94 g / 5.5° |
+| | **grip** | 0.4 | 0.9 | 2.2 | 4.6 | 4.2 | 4.5 | 1.11 g / 5.9° |
+
+**Other metrics** (parity_rwd_d / rampart_50 unless noted):
+
+| test | before | step 14 | **grip** |
+|---|---|---|---|
+| 60 m circle, speed ramped 20 → 110 km/h: slip at 0.5 / 0.7 / 0.85 g; max slip; exit | −0.3 / 0.8 / 1.5; 3.1°; push at 91 km/h | 1.1 / 2.8 / 4.5; 5.2°; push | 0.1 / 1.2 / 3.1; 4.2°; push at 92 km/h |
+| key held at 60 mph: body slip / lat g | 1.2° / 0.72 g | 5.0° / 0.86 g | 4.4° / 0.81 g |
+| 0.2 s / 0.4 s tap at 60 mph, peak yaw °/s | 22.5 / 26.4 (plain lock) | 9.8 / 24.9 | 11.1 / 24.6 |
+| lift mid-corner at 60 mph: slip before → after, yaw rise | 1.2 → 2.4°, +5.6 | 6.1 → 10.0°, +5.8 | 2.4 → 13.0°, +20.8 |
+| power-on at 35 mph (rampart_50) | 0 → 0° | 3.5 → 4.6° | 1.1 → 27.5° (rotates) |
+| held-drift count, 27 cases (plain / tyre-slip VR steering) | 4 / 17 | 0 / 16 | 1 / 19 |
+| snap-back test reaches its hold (rwd_d / rwd_b) | yes (27.5° overshoot) / yes | no / no | no / yes (56° overshoot, no spin) |
+| FWD parity_fwd_c, slip at 0.9 g / tap 0.4 s | −0.0° / 29.5 | −0.1° / 26.2 | −0.2° / 24.9 (mild understeer, unchanged) |
+
+Reading: below ~0.6 g the RWD cars track like the data (≤ 0.4° at 60 km/h, ≈ 1° at 100 km/h).
+From ~0.7–0.8 g the rear steps out to 3–6° and settles there. Lifting off mid-corner rotates the
+car 3× more than step 14 did. Turn-in matches step 14. The 60 m circle still ends in "push" for
+every balance: at ~92 km/h the car is at its grip limit and the smart lock keeps the fronts at
+their peak, so the front gives first. Rotation at the limit comes from lift or power, as the owner
+asked. Caveats: rampart_50 already reaches 2.7° at 0.7 g at 60 km/h. Power-on at 35 mph still
+spins parity_rwd_d with every lab balance (the spin model, not this balance).
+
+Shipping: `GripBalance::grip()` is the panel's "new" (A/B "balance: grip (new)" ↔ "before").
+The step-14 set is one click away ("step 14 (old new)"); the transition preset keeps step 14,
+since it was measured on it. The panel's saved balance moved to a new storage key, so a saved
+step 14 does not override the new default. W's steering-lock change (directional
+countersteer limit + slide lock) is not pushed yet; merge it and re-check this table.
