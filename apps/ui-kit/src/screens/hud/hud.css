@@ -286,3 +286,52 @@
   width: 22em;
   font-size: 0.72em;
 }
+
+/* helicopter (Air-1): pilot radio lines, chase radar */
+.wp-heli-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  margin-right: 0.6em;
+  padding: 0 0.35em;
+  border: 1px solid var(--heli);
+  border-radius: var(--r);
+  color: var(--heli);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+.wp-hud-alerts li[data-air="true"] {
+  border-left-color: var(--heli);
+  color: var(--heli);
+  font-style: italic;
+}
+.wp-chase-radar {
+  /* Beside the centred chase column (22em alerts), clear of the host's corner panels. */
+  position: absolute;
+  top: 0.8em;
+  left: calc(50% + 12em);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3em;
+}
+.wp-chase-radar-note {
+  font-size: 0.7em;
+  color: var(--heli);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  animation: wp-heli-pulse 1.2s ease-in-out infinite;
+}
+@keyframes wp-heli-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wp-chase-radar-note {
+    animation: none;
+  }
+}

@@ -10,6 +10,7 @@ import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { MarkingsView } from "./markings_view";
+import { HeliView } from "./heli_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
@@ -41,6 +42,8 @@ export class SceneView {
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Police helicopters and their spotlights (heli_view.ts). */
+  private readonly helis = new HeliView(this.world);
   private readonly agentMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0xffffff }),
@@ -145,9 +148,19 @@ export class SceneView {
 
   /**
    * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags],
-   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
+   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing; helicopters
+   * are drawn by HeliView with the spotlights from police_helicopters() (`beams`).
    */
-  updatePoliceUnits(units: Float32Array, timeS: number): void {
+  updatePoliceUnits(all: Float32Array, beams: Float32Array, timeS: number): void {
+    const cars: number[] = [];
+    const helis: number[][] = [];
+    for (let o = 0; o < all.length; o += POLICE_UNIT_STRIDE) {
+      const row = Array.from(all.subarray(o, o + POLICE_UNIT_STRIDE));
+      if (row[5] & 1) helis.push(row);
+      else cars.push(...row);
+    }
+    this.helis.update(helis, beams, timeS);
+    const units = cars;
     const n = units.length / POLICE_UNIT_STRIDE;
     while (this.policeUnits.length < n) {
       const g = new THREE.Group();
@@ -170,7 +183,6 @@ export class SceneView {
       u.obj.position.set(units[o], units[o + 1], units[o + 2]);
       u.obj.rotation.z = units[o + 3];
       const flags = units[o + 5];
-      u.obj.scale.setScalar(flags & 1 ? 1.4 : 1); // helicopters: bigger box at altitude
       const chasing = (flags & 2) !== 0;
       const phase = (timeS * 2.5 + i * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);

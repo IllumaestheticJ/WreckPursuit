@@ -562,6 +562,8 @@ pub struct HeloConfig {
     pub spotlight_half_angle_rad: f32,
     /// Max time on a single track before returning to refuel, s.
     pub max_track_s: f32,
+    /// Gap between the pilot's follow call-outs while tracking ("Air-1, still on them…"), s.
+    pub callout_s: f32,
 }
 
 /// Racer-side gadgets.

@@ -18,6 +18,7 @@ import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
+import { buildRadar } from "./ui/radar";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 
@@ -529,15 +530,19 @@ async function main(): Promise<void> {
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
     hud.pushEvents(events, sim.worldInfo()[W.tick]);
+    const policeUnits = sim.policeUnits();
+    const helis = sim.policeHelicopters(app.player);
     {
       const w = sim.worldInfo();
-      ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
+      const radar = buildRadar(app.player, cur, meta, policeUnits, helis);
+      ui.frame(w[W.tick], app.player, events, w[W.hours], modeName(), radar);
       if (!replay) runEnd.update(sim.runResult(), now);
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
-    scene.updatePoliceUnits(sim.policeUnits(), tS);
+    scene.updatePoliceUnits(policeUnits, helis, tS);
+    audio.setHelicopters(heliPositions(policeUnits));
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
     scene.signals.update(sim.signalStates(), wi[W.night]);
@@ -730,3 +735,10 @@ main().catch((e) => {
   $("error").textContent = `failed to start: ${e}\n\nDid you run \`npm run wasm\` (or \`just web\`)?`;
   console.error(e);
 });
+
+/** Helicopter positions [x, y, z] from police_units() (6 floats each, flag 1 = helicopter). */
+function heliPositions(units: Float32Array): number[][] {
+  const out: number[][] = [];
+  for (let o = 0; o < units.length; o += 6) if (units[o + 5] & 1) out.push([units[o], units[o + 1], units[o + 2]]);
+  return out;
+}

@@ -161,6 +161,32 @@ pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
     out
 }
 
+/// Helicopters on station, 7 floats each: `[x, y, z, aim_x, aim_y, aim_z, flags]` (flags 1 =
+/// tracking `player`). `aim` is the spotlight's ground point (the target's last known
+/// position); `z` values are world heights (ground under the point plus altitude).
+pub fn helicopters(
+    p: &PoliceSystem,
+    player: EntityId,
+    ground: &dyn Fn([f32; 2]) -> f32,
+) -> Vec<f32> {
+    let mut out = Vec::new();
+    for h in p.helicopters() {
+        let at = [h.pos[0], h.pos[1]];
+        let aim = [h.spotlight_target[0], h.spotlight_target[1]];
+        let flags = (h.target == player) as u32;
+        out.extend_from_slice(&[
+            at[0],
+            at[1],
+            ground(at) + h.pos[2],
+            aim[0],
+            aim[1],
+            ground(aim),
+            flags as f32,
+        ]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +199,7 @@ mod tests {
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
         assert!(units(&p, &|_| 0.0).is_empty());
+        assert!(helicopters(&p, EntityId(1), &|_| 0.0).is_empty());
         assert_eq!(s.last_outcome, None);
         assert_eq!(s.outcome_age_s, None);
     }

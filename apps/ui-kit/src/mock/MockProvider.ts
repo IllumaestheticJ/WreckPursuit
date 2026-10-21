@@ -422,7 +422,14 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
         ...captain.suspects.filter((x) => x.id !== player).map((x) => ({ id: x.id, kind: "racer" as const, pos: x.pos, headingRad: x.headingRad })),
         ...captain.units
           .filter((u) => u.assignment !== "out-of-service")
-          .map((u) => ({ id: u.id, kind: u.kind === "Helicopter" ? ("helicopter" as const) : ("police" as const), pos: u.pos, headingRad: u.headingRad })),
+          .map((u, _, all): MapBlip => {
+            if (u.kind !== "Helicopter") return { id: u.id, kind: "police", pos: u.pos, headingRad: u.headingRad };
+            // Air-1 … numbered like wp_police's call signs; tethered to the racer it tracks.
+            const airNo = 1 + all.filter((o) => o.kind === "Helicopter" && o.id < u.id).length;
+            const target = u.assignment === "helo-track" ? u.target : null;
+            const tracking = target === player ? (pose?.pos ?? s.hud.pos) : captain.suspects.find((x) => x.id === target)?.pos;
+            return { id: u.id, kind: "helicopter", pos: u.pos, headingRad: u.headingRad, label: `AIR-${airNo}`, tracking };
+          }),
       ];
       const race = raceHud(tick);
       if (race) blips.push({ id: -1, kind: "checkpoint", pos: race.nextCheckpoint });

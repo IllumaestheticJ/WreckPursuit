@@ -363,6 +363,24 @@ impl PoliceSystem {
         self.radio(text);
     }
 
+    /// Radio call sign of unit `i`: "Unit 4" for cars; "Air-1", "Air-2" … for helicopters,
+    /// numbered by unit id among the helicopters still flying, so a lone helicopter is always
+    /// Air-1 (the testbed and UI kit key the pilot radio treatment on the "Air-" prefix).
+    pub(crate) fn callsign(&self, i: usize) -> String {
+        let u = &self.units[i];
+        match u.kind {
+            UnitKind::Car => format!("Unit {}", u.id.0),
+            UnitKind::Helicopter => {
+                let before = self
+                    .units
+                    .iter()
+                    .filter(|o| o.kind == UnitKind::Helicopter && !o.wrecked && o.id < u.id)
+                    .count();
+                format!("Air-{}", before + 1)
+            }
+        }
+    }
+
     /// Spoken description of a racer ("racer #3 northbound in Core").
     pub(crate) fn racer_desc(&self, racer: EntityId) -> String {
         match self.racers.get(&racer) {
@@ -383,10 +401,7 @@ impl PoliceSystem {
     /// assignment (`data/police/radio.toml` paces them, see [`crate::radio`]).
     fn radio_text(&self, i: usize, a: &Assignment) -> RadioCue {
         let u = &self.units[i];
-        let callsign = match u.kind {
-            UnitKind::Car => format!("Unit {}", u.id.0),
-            UnitKind::Helicopter => format!("Air {}", u.id.0),
-        };
+        let callsign = self.callsign(i);
         let line = |tier: RadioTier, text: String, key: String, group: &str| {
             RadioCue::new(tier, Some(u.id), text).grouped(
                 Some(callsign.clone()),
@@ -460,7 +475,7 @@ impl PoliceSystem {
             Assignment::HeloTrack { target } => line(
                 RadioTier::Tactical,
                 format!(
-                    "{callsign} overhead, tracking {}.",
+                    "{callsign}, airborne and overhead. Eyes on {}, I'll stay on them.",
                     self.racer_desc(*target)
                 ),
                 format!("helo:{}", target.0),
@@ -895,6 +910,54 @@ impl PoliceSystem {
                     self.assign(i, Assignment::OutOfService);
                 }
             }
+        }
+        self.helo_callouts_step();
+    }
+
+    /// Pilot follow call-outs: every `helicopter.callout_s` a tracking helicopter reports where
+    /// its target is going ("Air-1, still on them…"), or that it lost visual. Radio only.
+    fn helo_callouts_step(&mut self) {
+        let now = self.now;
+        let gap = self.cfg.tools.helicopter.callout_s;
+        let units = &self.units;
+        self.helo_callouts.retain(|id, _| {
+            units
+                .iter()
+                .any(|u| u.id == *id && matches!(u.assignment, Assignment::HeloTrack { .. }))
+        });
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            let Assignment::HeloTrack { target } = u.assignment else {
+                continue;
+            };
+            // The first call-out waits a full gap after the "airborne and overhead" line.
+            let last = *self.helo_callouts.entry(u.id).or_insert(u.assigned);
+            if now.since(last) < gap {
+                continue;
+            }
+            self.helo_callouts.insert(u.id, now);
+            let id = u.id;
+            let callsign = self.callsign(i);
+            let in_sight = self
+                .racers
+                .get(&target)
+                .and_then(|r| r.last_seen)
+                .is_some_and(|t| now.since(t) < 1.0);
+            let text = if in_sight {
+                format!(
+                    "{callsign}, still on them: {}. I have them in the light.",
+                    self.racer_desc(target)
+                )
+            } else {
+                let at = self
+                    .racers
+                    .get(&target)
+                    .and_then(|r| r.last_known)
+                    .map(|p| format!("{:?}", self.graph.district_at(p)))
+                    .unwrap_or_else(|| "the area".to_string());
+                format!("{callsign}, lost visual. Circling last known in {at}.")
+            };
+            self.radio(RadioCue::new(RadioTier::Tactical, Some(id), text));
         }
     }
 

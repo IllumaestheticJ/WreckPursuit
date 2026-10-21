@@ -615,3 +615,43 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
     }
     assert!(captured, "parked racer never captured");
 }
+
+#[test]
+fn helicopter_is_air_1_and_keeps_calling_out_its_target() {
+    let mut h = Harness::new(12.0, 5);
+    h.police.set_human_captain(true);
+    h.speed = 15.0;
+    h.run(1.0, &[]);
+    h.police.set_heat(RACER, 70.0);
+    h.run(5.0, &[]);
+    assert!(h.police.racer(RACER).unwrap().pursued());
+    h.police
+        .captain_command(CaptainCommand::RequestHelicopter { target: RACER })
+        .unwrap();
+    // Day launch is 45 s; then a few call-out gaps (30 s) on station.
+    h.run(140.0, &[]);
+    assert!(h
+        .events
+        .iter()
+        .any(|e| matches!(e, PoliceEvent::HeloLaunched { target, .. } if *target == RACER)));
+    let air: Vec<&str> = h
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            PoliceEvent::Radio { text, .. } if text.starts_with("Air-") => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    // A lone helicopter is always Air-1, and it reports on its target more than once.
+    assert!(air.iter().all(|t| t.starts_with("Air-1")), "{air:?}");
+    let follow = air
+        .iter()
+        .filter(|t| t.contains("still on them") || t.contains("lost visual"))
+        .count();
+    let ends: Vec<_> = h
+        .events
+        .iter()
+        .filter(|e| matches!(e, PoliceEvent::PursuitEnded { .. }))
+        .collect();
+    assert!(follow >= 2, "{air:?} {ends:?} {:?}", h.racer_status());
+}

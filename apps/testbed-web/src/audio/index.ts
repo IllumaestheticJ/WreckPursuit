@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
+import { HeliAudio } from "./heli";
 import { ScannerPlayer } from "./scanner";
 import { AudioMixer, setListener, VoicePool } from "./voices";
 import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority } from "./types";
@@ -18,7 +19,7 @@ import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority } fr
 const TEST_LINES: Record<string, string[]> = {
   Routine: ["Unit fourteen, respond to a fender bender on Harbor and Fifth.", "Copy dispatch, fourteen en route."],
   Pursuit: ["Twelve in pursuit, grey coupe northbound on the expressway, speeds over one twenty.", "Suspect vehicle took the off ramp, heading downtown."],
-  Urgent: ["All units, air one has visual on the suspect, deploy spikes at the bridge.", "Officer needs assistance, Fifth and Market!"],
+  Urgent: ["Air-1, eyes on the suspect, I have them in the light. Deploy spikes at the bridge.", "Officer needs assistance, Fifth and Market!"],
 };
 
 export class AudioSystem {
@@ -26,6 +27,9 @@ export class AudioSystem {
   private mixer: AudioMixer | null = null;
   private pool: VoicePool | null = null;
   private scanner: ScannerPlayer | null = null;
+  private heli: HeliAudio | null = null;
+  /** Helicopter positions [x, y, z] (sim space) for the in-world rotor (`setHelicopters`). */
+  private helis: number[][] = [];
   private lib: AudioLibrary | null = null;
   private panel: AudioPanel;
   private lastPos: THREE.Vector3 | null = null;
@@ -93,7 +97,8 @@ export class AudioSystem {
     this.ctx = new AudioContext({ latencyHint: "interactive" });
     this.mixer = new AudioMixer(this.ctx);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
-    this.scanner = new ScannerPlayer(this.pool);
+    this.heli = new HeliAudio(this.ctx, this.mixer);
+    this.scanner = new ScannerPlayer(this.pool, this.heli);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
     for (const [b, v] of Object.entries(s.buses)) this.mixer.setUserGain(b as Bus, v);
@@ -139,6 +144,11 @@ export class AudioSystem {
     this.safe(() => audioBridge.radio(12 + (this.lineNo % 3), p, text));
   }
 
+  /** Helicopter positions [x, y, z] in sim space this frame (rotor sound). */
+  setHelicopters(helis: number[][]): void {
+    this.helis = helis;
+  }
+
   /** Per-frame update. `events` = this frame's drained SimEvents (as decoded JSON). */
   update(camera: THREE.Camera, events: unknown[], dt: number, focus: number): void {
     this.focus = focus;
@@ -161,6 +171,7 @@ export class AudioSystem {
     const a = this.listenerArr;
     a.set([pos.x, pos.y, pos.z, this.vel.x, this.vel.y, this.vel.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z]);
     setListener(ctx, [pos.x, pos.y, pos.z], [fwd.x, fwd.y, fwd.z], [up.x, up.y, up.z]);
+    this.heli?.updateWorld(this.helis, [pos.x, pos.y, pos.z]);
 
     const t0 = performance.now();
     let out;

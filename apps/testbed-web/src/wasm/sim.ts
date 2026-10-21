@@ -175,6 +175,8 @@ export const sim = {
   /** Wanted level / heat for a racer, or null when the session has no police. */
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
+  /** Helicopters on station: [x, y, z, aim_x, aim_y, aim_z, flags] each (flags 1 = tracking `player`). */
+  policeHelicopters: (player: number): Float32Array => wasm.police_helicopters(player),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),

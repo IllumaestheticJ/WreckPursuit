@@ -308,7 +308,7 @@ impl RadioDirector {
 }
 
 /// "Unit 4", "Unit 5", "Unit 7" → "Units 4, 5 and 7"; mixed kinds keep full call signs
-/// ("Unit 4 and Air 9").
+/// ("Unit 4 and Air-1").
 pub fn join_callsigns(signs: &[String]) -> String {
     let split: Vec<(&str, &str)> = signs
         .iter()
@@ -475,7 +475,7 @@ mod tests {
     fn callsign_lists() {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(join_callsigns(&s(&["Unit 4", "Unit 5"])), "Units 4 and 5");
-        assert_eq!(join_callsigns(&s(&["Unit 4", "Air 9"])), "Unit 4 and Air 9");
+        assert_eq!(join_callsigns(&s(&["Unit 4", "Air-1"])), "Unit 4 and Air-1");
         assert_eq!(join_callsigns(&s(&["Unit 4"])), "Unit 4");
     }
 }

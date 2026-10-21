@@ -379,3 +379,23 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Helicopter as Air-1 (2026-10-21, playtest ask)
+
+Ask: make the helicopter a distinct icon on the map, make it obvious it is following you, give
+its call-outs a clear pilot/radio filter, call it Air-1; then "~10-15% louder".
+
+- `wp_police`: helicopter call sign "Air-1" (`dispatch::callsign`, numbered among flying
+  helicopters); new pilot lines on station ("airborne and overhead…") and periodic follow
+  call-outs (`helo_callouts_step`, new `tools.toml` `helicopter.callout_s = 30`, radio only, not
+  in the state hash). Test: `tests/system.rs::helicopter_is_air_1_and_keeps_calling_out_its_target`.
+- `wp_wasm` (minimal, outside my crates): `police_helicopters(player)` → 7 floats per helicopter
+  on station `[x, y, z, aim_x, aim_y, aim_z, flags]` (flag 1 = tracking `player`).
+- Testbed: `heli_view.ts` (helicopter model, rotors, strobes, spotlight cone + ground pool),
+  `audio/heli.ts` (pilot radio EQ, mic-key chirp, rotor-chopped bed, in-world rotor loop;
+  `HELI_LOUDNESS = 1.12` on all helicopter audio and the pilot TTS), `ui/radar.ts` (chase radar
+  blips).
+- UI kit: `MapBlip.label` / `.tracking`, `ScannerEntry.air`, `--heli` colour, `HeliIcon.tsx`;
+  `Minimap` draws helicopters as a top-down helicopter with an upright AIR-1 label and a dashed
+  tether + pulsing ring on whoever it tracks; `ChaseHud` shows that radar while police are
+  around and badges pilot lines AIR-1. `LiveFrame.radar` feeds it.

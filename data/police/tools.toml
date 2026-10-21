@@ -40,6 +40,9 @@ speed_mps = 55.0
 altitude_m = 120.0
 spotlight_half_angle_rad = 0.35
 max_track_s = 240.0
+# Pilot follow call-outs while tracking ("Air-1, still on them…"). Not below radio.toml
+# unit_gap_s (30 s): the radio director would drop the extra ones.
+callout_s = 30.0
 [helicopter.los_range_m]
 dawn = 450.0
 day = 500.0

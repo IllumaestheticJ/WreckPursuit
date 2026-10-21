@@ -60,6 +60,11 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
+- Helicopters use the call sign **Air-1** (Air-2 … when several fly; numbered by unit id among
+  the ones still flying). While tracking, the pilot calls out the target every
+  `tools.toml` `helicopter.callout_s` (30 s, = radio `unit_gap_s`): "Air-1, still on them: racer #3
+  northbound in Core…" with visual, else "Air-1, lost visual…". Clients key the pilot radio
+  treatment (testbed audio, UI kit AIR-1 badge) on the "Air-<n>" prefix.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
 `SpikeAt`, `HeloTrack`, `OutOfService`.

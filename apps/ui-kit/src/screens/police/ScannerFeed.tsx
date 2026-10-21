@@ -2,6 +2,7 @@
  * Police scanner feed: every dispatch / unit / civil / system line, filterable, newest at the
  * bottom with auto-scroll (pauses when you scroll up).
  */
+import { airCallsign, HeliBadge } from "../hud/HeliIcon";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSend, useSlice } from "../../model/GameModel";
 import type { ScannerEntry } from "../../model/types";
@@ -54,9 +55,9 @@ export function ScannerFeed() {
         >
           {shown.length === 0 && <li class="wp-dim">Static… nothing on the air yet.</li>}
           {shown.map((e) => (
-            <li key={e.id} data-sev={e.severity} data-ch={e.channel}>
+            <li key={e.id} data-sev={e.severity} data-ch={e.channel} data-air={e.air ? "true" : undefined}>
               <span class="wp-mono wp-dim">{mmss(e.tS)}</span>
-              <span class="wp-scanner-ch">{e.channel.toUpperCase()}</span>
+              <span class="wp-scanner-ch">{e.air ? <HeliBadge text={airCallsign(e.text)} /> : e.channel.toUpperCase()}</span>
               <span>{e.text}</span>
             </li>
           ))}

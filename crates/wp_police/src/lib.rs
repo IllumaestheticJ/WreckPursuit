@@ -222,6 +222,8 @@ pub struct PoliceSystem {
     pub(crate) next_incident: u32,
     pub(crate) reinforcements: Vec<dispatch::ReinforcementRequest>,
     pub(crate) helo_requests: Vec<dispatch::HeloRequest>,
+    /// Last pilot follow call-out per tracking helicopter (radio only, not hashed).
+    pub(crate) helo_callouts: BTreeMap<UnitId, SimTime>,
     pub(crate) roadblocks: Vec<Roadblock>,
     pub(crate) spikes: Vec<SpikeStrip>,
     pub(crate) next_tool: u32,
@@ -295,6 +297,7 @@ impl PoliceSystem {
             next_incident: 1,
             reinforcements: Vec::new(),
             helo_requests: Vec::new(),
+            helo_callouts: BTreeMap::new(),
             roadblocks: Vec::new(),
             spikes: Vec::new(),
             next_tool: 1,

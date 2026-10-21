@@ -29,6 +29,8 @@
   --cash: #c9f45f;
   --police-a: #ff2e55;
   --police-b: #3b7dff;
+  /* Helicopter (Air-1): spotlight yellow, apart from the red/blue cars and amber racers. */
+  --heli: #ffe14d;
   --heat-0: rgba(255, 178, 30, 0);
   --heat-1: rgba(255, 61, 61, 0.55);
 

@@ -499,6 +499,19 @@ pub fn police_units() -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Helicopters on station, 7 floats each: `[x, y, z, aim_x, aim_y, aim_z, flags]` (flags 1 =
+/// tracking `player`). Drawn as a helicopter with a spotlight onto `aim`, and as Air-1 on the
+/// minimap ([`police::helicopters`]).
+#[wasm_bindgen]
+pub fn police_helicopters(player: u32) -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let world = s.sim().world();
+        police::helicopters(s.sim().police(), EntityId(player), &|p| {
+            world.map().ground_height(p, None)
+        })
+    })
+}
+
 /// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
 /// `Captured`, `CapturedTotalLoss`, `TotalLoss`), bounty payout, fines, bail, impound decision
 /// and fee, G's repair quote, cash before and after, and this settlement's ledger lines.

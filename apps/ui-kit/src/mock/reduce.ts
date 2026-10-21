@@ -154,7 +154,9 @@ function hitRegion(p: Playback, region: BodyRegion, severity: number, spill = 0.
 const split = (s: string) => s.replace(/([a-z])([A-Z])/g, "$1 $2");
 
 function say(p: Playback, line: EventLine, channel: ScannerEntry["channel"], severity: ScannerEntry["severity"], text: string, entity?: number): void {
-  p.scanner = [...p.scanner, { id: p.nextId++, tick: line.tick, tS: line.t_s, channel, severity, text, entity }];
+  const entry: ScannerEntry = { id: p.nextId++, tick: line.tick, tS: line.t_s, channel, severity, text, entity };
+  if (channel === "unit" && isAirLine(text)) entry.air = true;
+  p.scanner = [...p.scanner, entry];
 }
 
 function incident(p: Playback, line: EventLine, kind: Incident["kind"], pos: Vec2, suspect: number | null): void {
@@ -163,9 +165,15 @@ function incident(p: Playback, line: EventLine, kind: Incident["kind"], pos: Vec
 
 const WANTED_ORDER: WantedLevel[] = ["None", "L1", "L2", "L3", "L4", "L5"];
 
-/** Radio callsign for a police unit, matching `wp_police`'s radio text ("Unit 7"). */
-export function callsign(unit: number, kind?: UnitKind): string {
-  return kind === "Helicopter" ? `Air ${unit}` : `Unit ${unit}`;
+/** Radio callsign for a police unit, matching `wp_police`'s radio text: "Unit 7" for cars,
+ * "Air-1", "Air-2" … for helicopters (`airNo` = 1-based number among those flying). */
+export function callsign(unit: number, kind?: UnitKind, airNo = 1): string {
+  return kind === "Helicopter" ? `Air-${airNo}` : `Unit ${unit}`;
+}
+
+/** A line spoken by the helicopter pilot (`wp_police` starts every one with "Air-<n>"). */
+export function isAirLine(text: string): boolean {
+  return /^Air-\d/.test(text);
 }
 
 /** True when the stream reports region damage itself (then contacts are not turned into damage). */
@@ -281,7 +289,8 @@ const OUTCOME_TEXT = {
 
 function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceContext): void {
   const unitKind = (u: number) => p.units.find((x) => x.unit === u)?.kind;
-  const name = (u: number) => callsign(u, unitKind(u));
+  const airNo = (u: number) => 1 + p.units.filter((x) => x.kind === "Helicopter" && x.unit < u).length;
+  const name = (u: number) => callsign(u, unitKind(u), airNo(u));
   if ("Radio" in ev) {
     // wp_police radio text already names the unit ("Unit 3 responding …").
     say(p, line, ev.Radio.unit == null ? "dispatch" : "unit", "info", ev.Radio.text);
@@ -349,7 +358,7 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
   } else if ("HeloLaunched" in ev) {
     const { unit, target } = ev.HeloLaunched;
     p.units = p.units.map((x) => (x.unit === unit ? { ...x, kind: "Helicopter" } : x));
-    say(p, line, "dispatch", "alert", `Air unit ${unit} launched on ${ctx.nameOf(target)}`, target);
+    say(p, line, "dispatch", "alert", `${callsign(unit, "Helicopter", airNo(unit))} launched on ${ctx.nameOf(target)}`, target);
   } else if ("PitAttempt" in ev) {
     const { unit, target } = ev.PitAttempt;
     say(p, line, "unit", "warn", `${name(unit)} attempting PIT on ${ctx.nameOf(target)}`, target);

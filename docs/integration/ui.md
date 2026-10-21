@@ -308,3 +308,9 @@ candidate build's bars with a tick at the current build. The mod tree's delta ta
 bar values for 0–100, top speed and cornering (50 m) so they match the bars; class index, power,
 mass, power/weight and braking stay the economy estimator's (the class index is computed from the
 estimator, as in `wp_economy`). Cars without stats fall back to the estimator rows.
+
+### Helicopter as Air-1 (2026-10-21)
+
+Helicopter model + spotlight, Air-1 pilot radio audio (+12% loudness), chase radar with the
+helicopter's AIR-1 icon and tether, AIR-1 badges on pilot lines. Details:
+`docs/integration/police.md` → "Helicopter as Air-1".

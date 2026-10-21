@@ -69,6 +69,11 @@ export interface MapBlip {
   kind: "player" | "racer" | "police" | "helicopter" | "traffic" | "checkpoint" | "incident";
   pos: Vec2;
   headingRad?: number;
+  /** Call sign drawn next to the blip ("AIR-1"). */
+  label?: string;
+  /** Ground point the unit is watching (a helicopter's spotlight on its target): drawn as a
+   * tether line and a pulsing ring, so it is obvious who it is following. */
+  tracking?: Vec2;
 }
 
 /** One line in the scanner feed / HUD alert stack. */
@@ -85,6 +90,8 @@ export interface ScannerEntry {
   text: string;
   /** Entity the entry is about, if any. */
   entity?: number;
+  /** Spoken by the helicopter pilot ("Air-1, …"): shown with the AIR-1 badge. */
+  air?: boolean;
 }
 
 /** Police heat as the HUD shows it (owner: wp_police). */

@@ -14,6 +14,7 @@ import { clock, gap, gearLabel, raceTime, speed, words } from "../../ui/format";
 import { Badge, Meter, severityColor } from "../../ui/kit";
 import { DamageSilhouette } from "./DamageSilhouette";
 import { visibleFeed } from "./feed";
+import { airCallsign, HeliBadge } from "./HeliIcon";
 import { Minimap } from "./Minimap";
 import "./hud.css";
 
@@ -125,8 +126,8 @@ function Alerts({ entries, nowS }: { entries: ScannerEntry[]; nowS: number }) {
   return (
     <ul class="wp-hud-alerts" aria-live="polite">
       {recent.map(({ entry: e, opacity }) => (
-        <li key={e.id} data-sev={e.severity} data-ch={e.channel} style={{ opacity }}>
-          <span class="wp-hud-alert-ch">{e.channel === "dispatch" ? "DISP" : e.channel === "unit" ? "UNIT" : e.channel === "civil" ? "CIV" : "SYS"}</span>
+        <li key={e.id} data-sev={e.severity} data-ch={e.channel} data-air={e.air ? "true" : undefined} style={{ opacity }}>
+          {e.air ? <HeliBadge text={airCallsign(e.text)} /> : <span class="wp-hud-alert-ch">{e.channel === "dispatch" ? "DISP" : e.channel === "unit" ? "UNIT" : e.channel === "civil" ? "CIV" : "SYS"}</span>}
           {e.text}
         </li>
       ))}

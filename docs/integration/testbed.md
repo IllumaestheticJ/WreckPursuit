@@ -649,3 +649,9 @@ embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and c
 sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
 stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
 testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
+
+### Helicopter as Air-1 (2026-10-21)
+
+Helicopter model + spotlight, Air-1 pilot radio audio (+12% loudness), chase radar with the
+helicopter's AIR-1 icon and tether, AIR-1 badges on pilot lines. Details:
+`docs/integration/police.md` → "Helicopter as Air-1".
