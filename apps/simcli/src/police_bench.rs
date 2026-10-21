@@ -306,6 +306,8 @@ pub struct RunMetrics {
     pub police_police_crashes: u32,
     /// Police stuck events (`PoliceStats::stuck`).
     pub stuck_events: u32,
+    /// Police cars that appeared where a racer had line of sight to them (row 131, pop-in).
+    pub spawns_in_view: u32,
     /// Police cars total-lost without / with racer contact.
     pub self_wrecks: u32,
     /// Police cars wrecked after racer contact.
@@ -507,6 +509,7 @@ pub fn run_one(
         police_civilian_collisions: 0,
         police_police_crashes: 0,
         stuck_events: 0,
+        spawns_in_view: 0,
         self_wrecks: 0,
         contact_wrecks: 0,
         units_engaged: 0,
@@ -843,6 +846,10 @@ pub fn run_one(
     };
     m.police_civilian_collisions += st.traffic_collisions - base.traffic_collisions;
     m.stuck_events = (st.stuck.len() - base.stuck.len()) as u32;
+    m.spawns_in_view = st.spawns[base.spawns.len()..]
+        .iter()
+        .filter(|s| s.in_sight)
+        .count() as u32;
     m.self_wrecks = st.self_wrecks - base.self_wrecks;
     m.contact_wrecks = st.contact_wrecks - base.contact_wrecks;
     m.units_engaged = st.units_engaged - base.units_engaged;
@@ -904,6 +911,8 @@ pub struct CellSummary {
     pub civilian_per_min: f32,
     /// Police stuck events per minute of run.
     pub stuck_per_min: f32,
+    /// Police cars appearing in a racer's line of sight per minute of run (row 131).
+    pub pop_in_per_min: f32,
     /// Police self-wrecks (sum).
     pub self_wrecks: u32,
     /// Evader collisions with civilians per minute of run.
@@ -991,6 +1000,7 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
         static_crashes_per_min: per_min(sum(|r| r.police_static_crashes)),
         civilian_per_min: per_min(sum(|r| r.police_civilian_collisions)),
         stuck_per_min: per_min(sum(|r| r.stuck_events)),
+        pop_in_per_min: per_min(sum(|r| r.spawns_in_view)),
         self_wrecks: sum(|r| r.self_wrecks),
         evader_civilian_per_min: per_min(sum(|r| r.evader_civilian_collisions)),
         minutes,
@@ -1048,7 +1058,7 @@ fn pct(x: f32) -> String {
 pub const PACE_MIN_MPS: f32 = 25.0;
 
 /// Column headers of [`table`].
-const HEADER: [&str; 19] = [
+const HEADER: [&str; 20] = [
     "cell",
     "runs",
     "engaged",
@@ -1068,9 +1078,10 @@ const HEADER: [&str; 19] = [
     "crash/min",
     "civ/min",
     "stuck/min",
+    "pop-in/min",
 ];
 
-fn row(s: &CellSummary) -> [String; 19] {
+fn row(s: &CellSummary) -> [String; 20] {
     [
         s.label.clone(),
         s.runs.to_string(),
@@ -1091,12 +1102,13 @@ fn row(s: &CellSummary) -> [String; 19] {
         format!("{:.2}", s.static_crashes_per_min),
         format!("{:.2}", s.civilian_per_min),
         format!("{:.2}", s.stuck_per_min),
+        format!("{:.2}", s.pop_in_per_min),
     ]
 }
 
 /// Plain-text table (terminal).
 pub fn table(rows: &[CellSummary]) -> String {
-    let body: Vec<[String; 19]> = rows.iter().map(row).collect();
+    let body: Vec<[String; 20]> = rows.iter().map(row).collect();
     let mut w = HEADER.map(|h| h.chars().count());
     for r in &body {
         for (k, c) in r.iter().enumerate() {

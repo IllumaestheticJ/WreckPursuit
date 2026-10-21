@@ -460,6 +460,8 @@ pub struct PoliceSystem {
     pub(crate) helo_sight: BTreeMap<UnitId, dispatch::HeloSight>,
     pub(crate) roadblocks: Vec<Roadblock>,
     pub(crate) spikes: Vec<SpikeStrip>,
+    /// Tool cars waiting for their spot to leave every racer's view (row 131).
+    pub(crate) tool_cars: Vec<dispatch::PendingToolCar>,
     pub(crate) next_tool: u32,
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
@@ -617,6 +619,7 @@ impl PoliceSystem {
             helo_requests: Vec::new(),
             helo_sight: BTreeMap::new(),
             roadblocks: Vec::new(),
+            tool_cars: Vec::new(),
             spikes: Vec::new(),
             next_tool: 1,
             punctures: BTreeMap::new(),
@@ -1042,6 +1045,16 @@ impl PoliceSystem {
     /// Roadblocks in place.
     pub fn roadblocks(&self) -> &[Roadblock] {
         &self.roadblocks
+    }
+
+    /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet: still in a racer's
+    /// view (row 131); each appears there once hidden.
+    pub fn tool_cars_waiting(&self, tool: ToolId) -> Vec<([f32; 2], [f32; 2])> {
+        self.tool_cars
+            .iter()
+            .filter(|c| c.tool == tool)
+            .map(|c| (c.pos, c.heading))
+            .collect()
     }
 
     /// Spike strips in place (line colliders).

@@ -13,7 +13,7 @@ use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
+    add, dist, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
@@ -26,8 +26,61 @@ use crate::PoliceSystem;
 /// At most one new ambush (a unit sent to wait ahead) per racer this often, s.
 pub const AMBUSH_EVERY_S: f32 = 45.0;
 
+/// A racer faster than this also "sees" from points on its predicted road ahead (no spawn
+/// that it would see within [`ROUTE_VIEW_S`]), m/s.
+pub const ROUTE_VIEW_MIN_MPS: f32 = 5.0;
+/// ... this many seconds of its travel ahead, s.
+pub const ROUTE_VIEW_S: f32 = 3.0;
+/// ... sampled this far apart, m.
+pub const ROUTE_VIEW_STEP_M: f32 = 15.0;
+
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
+
+/// How far beyond the road edge a spike-strip car parks, m.
+pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
+
+/// A roadblock or spike-strip car not spawned yet because its spot is in a racer's view
+/// (row 131): it appears once the spot is hidden, while its tool lasts.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PendingToolCar {
+    /// Tool it belongs to.
+    pub tool: ToolId,
+    /// Parking spot, m.
+    pub pos: [f32; 2],
+    /// Heading (unit vector).
+    pub heading: [f32; 2],
+    /// Its assignment once spawned.
+    pub assignment: Assignment,
+}
+
+/// Where a tool goes across the road at a site (row 133): the traffic flow there and the
+/// lateral span the tool may cover, as offsets to the right of `flow` from the site, m. On a
+/// one-way carriageway (a divided highway's half) that is the carriageway only, never across
+/// the median.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ToolSpan {
+    /// Traffic flow direction at the site (unit vector).
+    pub flow: [f32; 2],
+    /// Left edge (negative: left of the site), m.
+    pub inner: f32,
+    /// Right edge, m.
+    pub outer: f32,
+    /// The site is on a one-way carriageway.
+    pub oneway: bool,
+}
+
+impl ToolSpan {
+    /// Unit vector to the right of the flow.
+    pub fn right(&self) -> [f32; 2] {
+        [self.flow[1], -self.flow[0]]
+    }
+
+    /// The site point moved `off` m to the right of the flow.
+    pub fn at(&self, site: [f32; 2], off: f32) -> [f32; 2] {
+        add(site, scale(self.right(), off))
+    }
+}
 
 /// A reckless-driving report this close to an open call about another racer joins that call
 /// (a pack of street racers is one call), m.
@@ -1541,6 +1594,7 @@ impl PoliceSystem {
             self.ai_captain_tools();
         }
         self.expire_tools();
+        self.maintain_tool_cars(world);
         self.plan_units(world, tdt);
         self.refresh_junctions(world);
         self.refresh_walls();
@@ -1888,7 +1942,7 @@ impl PoliceSystem {
             let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
             // The session-start patrols are part of the opening scene; every later refill
             // appears out of every racer's sight (no pop-in).
-            let hidden = !self.warmed_up || !self.in_racer_view(world, pos);
+            let hidden = !self.warmed_up || !self.spawn_in_view(world, pos);
             if hidden && self.spawn_clear(pos) {
                 let i = self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, dir);
                 self.start_patrol(i, dest);
@@ -2188,8 +2242,28 @@ impl PoliceSystem {
     /// Whether any racer can see `p`, or is closer than `response.never_closer_m`. Seeing
     /// means line of sight, in any direction and as far as the world allows, from the
     /// driver's eye or from a chase camera behind and above the car, now or one second on at
-    /// its current velocity, to a car body at `p` (taken at the racer's height). Units never appear or vanish where this is true.
+    /// its current velocity, or from points on its predicted road up to [`ROUTE_VIEW_S`] of its
+    /// travel ahead (row 131), to a car body at `p` (taken at the racer's height). Units never appear or vanish where this is true.
     pub(crate) fn in_racer_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        self.in_racer_view_opt(Some(world), p, false)
+    }
+
+    /// Whether a unit may not appear at `p`: [`Self::in_racer_view`] plus the racers' road
+    /// ahead for [`ROUTE_VIEW_S`] (row 131: no pop-in just round the corner ahead). Spawns
+    /// only; despawns and resets keep the plain check.
+    pub(crate) fn spawn_in_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        self.in_racer_view_opt(Some(world), p, true)
+    }
+
+    /// [`Self::in_racer_view`] (`route`: also from the road ahead, see
+    /// [`Self::spawn_in_view`]); without a world (captain tool placement) only the road
+    /// graph's own sight lines (city blocks) are checked.
+    pub(crate) fn in_racer_view_opt(
+        &self,
+        world: Option<&dyn WorldQuery>,
+        p: [f32; 2],
+        route: bool,
+    ) -> bool {
         /// Driver's eye and chase camera above the racer's chassis, camera distance behind
         /// it, and the height of the car body looked at, m.
         const EYE_UP_M: f32 = 1.3;
@@ -2219,6 +2293,22 @@ impl PoliceSystem {
                 let c = sub(ahead, back);
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
+            // Where it will be over the next few seconds along its road (row 131: a car must
+            // not pop in just round the corner ahead of a fast racer): a few points on its
+            // predicted path, the look-ahead growing with speed.
+            let speed = crate::graph::len(v);
+            if route && speed > ROUTE_VIEW_MIN_MPS {
+                let horizon = speed * ROUTE_VIEW_S;
+                let path = self.graph.predict_path(rp, v, horizon);
+                let pts = Track::new(path.points());
+                let len = pts.length().min(horizon);
+                let mut d = ROUTE_VIEW_STEP_M;
+                while d <= len + 0.5 * ROUTE_VIEW_STEP_M {
+                    let q = pts.point_at(d.min(len));
+                    views.push([q[0], q[1], z + EYE_UP_M]);
+                    d += ROUTE_VIEW_STEP_M;
+                }
+            }
             // Police only know the racer's velocity, not which way it faces (sliding, turning,
             // stopped): the camera may be on any side.
             for d in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
@@ -2226,7 +2316,8 @@ impl PoliceSystem {
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
             views.iter().any(|eye| {
-                self.graph.line_of_sight([eye[0], eye[1]], p) && world.line_of_sight(*eye, body)
+                self.graph.line_of_sight([eye[0], eye[1]], p)
+                    && world.is_none_or(|w| w.line_of_sight(*eye, body))
             })
         })
     }
@@ -2383,7 +2474,7 @@ impl PoliceSystem {
         cands
             .into_iter()
             .find(|(_, pos, _)| {
-                !self.in_racer_view(world, *pos)
+                !self.spawn_in_view(world, *pos)
                     && crate::avoid::spawn_clear(*pos, &self.obstacles, &self.cfg.pursuit.avoid)
             })
             .map(|(_, pos, dir)| (pos, dir))
@@ -2835,7 +2926,7 @@ impl PoliceSystem {
                 // In the right-hand lane, facing the first turn of the route.
                 let pos = add(start, scale([heading[1], -heading[0]], LANE_OFFSET_M));
                 if !crate::avoid::spawn_clear(pos, &self.obstacles, &self.cfg.pursuit.avoid)
-                    || self.sees(world, pos, racer)
+                    || self.spawn_in_view(world, pos)
                 {
                     continue;
                 }
@@ -2929,7 +3020,7 @@ impl PoliceSystem {
             let d = dist(n.pos, target);
             if d < min_d
                 || self.sees(world, n.pos, target)
-                || self.in_racer_view(world, n.pos)
+                || self.spawn_in_view(world, n.pos)
                 || !crate::avoid::spawn_clear(n.pos, &self.obstacles, &self.cfg.pursuit.avoid)
             {
                 continue;
@@ -3192,33 +3283,34 @@ impl PoliceSystem {
         let site =
             plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
         let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
-        let barriers = roadblock_barriers(
-            &site,
-            rb.barrier_half_extents_m,
-            rb.barrier_mass_kg,
-            ROAD_HALF_WIDTH_M,
-        );
+        // Row 133: across the racer's carriageway only (centred on it, never over the
+        // median of a divided road).
+        let span = self.tool_span(&site);
+        let mut across = site;
+        across.pos = span.at(site.pos, 0.5 * (span.inner + span.outer));
+        let half = 0.5 * (span.outer - span.inner);
+        let barriers =
+            roadblock_barriers(&across, rb.barrier_half_extents_m, rb.barrier_mass_kg, half);
         let lifetime = rb.lifetime_s;
         let cooldown = rb.cooldown_s.get(self.phase);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let mut units = Vec::new();
-        for (pos, heading) in roadblock_unit_spots(&site, n, ROAD_HALF_WIDTH_M) {
-            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
-            units.push(self.units[i].id);
-            self.assign(
-                i,
-                Assignment::RoadblockAt {
+        for (pos, heading) in roadblock_unit_spots(&across, n, half) {
+            self.tool_cars.push(PendingToolCar {
+                tool: id,
+                pos,
+                heading,
+                assignment: Assignment::RoadblockAt {
                     segment: site.segment,
                     tool: id,
                 },
-            );
+            });
         }
         self.roadblocks.push(Roadblock {
             id,
             racer,
             site,
-            units,
+            units: Vec::new(),
             barriers,
             expires: now.plus(lifetime),
         });
@@ -3343,20 +3435,26 @@ impl PoliceSystem {
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let side = add(
-            site.pos,
-            scale(perp_left(site.dir), ROAD_HALF_WIDTH_M + 2.5),
-        );
-        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, side, site.dir);
-        let uid = self.units[i].id;
-        self.assign(
-            i,
-            Assignment::SpikeAt {
+        // Row 133: the car parks on the right shoulder of the racer's own carriageway,
+        // facing its traffic; on a one-way carriageway (a divided road's half) the strip
+        // spans that carriageway, lane edge to median.
+        let span = self.tool_span(&site);
+        self.tool_cars.push(PendingToolCar {
+            tool: id,
+            pos: span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M),
+            heading: span.flow,
+            assignment: Assignment::SpikeAt {
                 segment: site.segment,
                 tool: id,
             },
-        );
-        let strip = SpikeStrip::across(id, racer, site, length, Some(uid), now.plus(lifetime));
+        });
+        let expires = now.plus(lifetime);
+        let strip = if span.oneway {
+            let (a, b) = (span.at(site.pos, span.inner), span.at(site.pos, span.outer));
+            SpikeStrip::between(id, racer, site, a, b, None, expires)
+        } else {
+            SpikeStrip::across(id, racer, site, length, None, expires)
+        };
         self.pending.push(PoliceEvent::SpikesPlaced {
             tool: id,
             racer,
@@ -3369,6 +3467,58 @@ impl PoliceSystem {
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         Ok(id)
+    }
+
+    /// The traffic flow and lateral span a tool at `site` may use (row 133, see
+    /// [`ToolSpan`]): a one-way segment's carriageway, or a two-way road's full width
+    /// ([`ROAD_HALF_WIDTH_M`] each side; the right half's real width when the lanes are known
+    /// sets `outer`).
+    pub(crate) fn tool_span(&self, site: &ToolSite) -> ToolSpan {
+        let g = &self.graph;
+        if let Some((inner, outer)) = g.carriageway_m(site.segment) {
+            let a = g.segment(site.segment).a;
+            return ToolSpan {
+                flow: g.dir_from(site.segment, a),
+                inner,
+                outer,
+                oneway: true,
+            };
+        }
+        ToolSpan {
+            flow: site.dir,
+            inner: -ROAD_HALF_WIDTH_M,
+            outer: g
+                .half_road_m(site.segment, site.from_node)
+                .unwrap_or(ROAD_HALF_WIDTH_M),
+            oneway: false,
+        }
+    }
+
+    /// Spawn the roadblock and spike-strip cars whose spots are now out of every racer's
+    /// view, now and along its road ahead (row 131); drop those whose tool has gone.
+    fn maintain_tool_cars(&mut self, world: &dyn WorldQuery) {
+        let pending = std::mem::take(&mut self.tool_cars);
+        for car in pending {
+            let rb = self.roadblocks.iter().position(|r| r.id == car.tool);
+            let sp = self.spikes.iter().position(|s| s.id == car.tool);
+            if rb.is_none() && sp.is_none() {
+                continue;
+            }
+            if self.warmed_up && self.spawn_in_view(world, car.pos) {
+                self.tool_cars.push(car);
+                continue;
+            }
+            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
+            let uid = self.units[i].id;
+            self.assign(i, car.assignment);
+            self.record_spawn(world, i);
+            if let Some(k) = rb {
+                self.roadblocks[k].units.push(uid);
+            }
+            if let Some(k) = sp {
+                self.spikes[k].unit = Some(uid);
+            }
+        }
     }
 
     fn ai_captain_tools(&mut self) {

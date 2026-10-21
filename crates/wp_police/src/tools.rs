@@ -196,6 +196,27 @@ impl SpikeStrip {
         }
     }
 
+    /// Strip from `a` to `b` at `site` (a carriageway's width on a divided road, row 133).
+    pub fn between(
+        id: ToolId,
+        racer: EntityId,
+        site: ToolSite,
+        a: [f32; 2],
+        b: [f32; 2],
+        unit: Option<UnitId>,
+        expires: SimTime,
+    ) -> Self {
+        Self {
+            id,
+            racer,
+            site,
+            a,
+            b,
+            unit,
+            expires,
+        }
+    }
+
     /// Which wheels (FL, FR, RL, RR) cross the strip when a car moves from `p0` to `p1`.
     /// Wheels sit ±`half_track_m` across the travel direction; front and rear take the same
     /// line, so a crossing wheel pair flags both axles.
