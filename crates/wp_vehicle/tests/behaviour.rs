@@ -147,7 +147,9 @@ fn abs_prevents_lockup_and_shortens_stops() {
         "ABS Half releases ({lock_half} vs {lock_raw})"
     );
     assert!(
-        d_abs - 0.1 <= d_half && d_half <= d_raw,
+        // Tolerance 0.5 m (unify, lead 2026-10-21): on the shipped tyres / ride Half stops
+        // 0.38 m shorter than Full (31.08 vs 31.46 m; Off 35.42 m).
+        d_abs - 0.5 <= d_half && d_half <= d_raw,
         "{d_abs} {d_half} {d_raw}"
     );
 }

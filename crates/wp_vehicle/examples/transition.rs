@@ -1205,7 +1205,7 @@ fn poweron_table() {
             // BISECT: the other plain drivers (spins count; the tapper also held).
             let mut extra = String::new();
             if std::env::var("BISECT").is_ok() {
-                let mut tally = |mk: &dyn Fn(f32) -> PlainDriver| {
+                let tally = |mk: &dyn Fn(f32) -> PlainDriver| {
                     let (mut h, mut sp) = (0, 0);
                     for e in [6.0f32, 12.0, 20.0] {
                         for g in [0.3f32, 0.5, 0.7] {

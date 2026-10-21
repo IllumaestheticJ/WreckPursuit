@@ -44,8 +44,10 @@ fn ride_frequency_and_damping_are_car_like() {
     for id in ROSTER {
         for (a, ax) in axle_ride(&car(id)).iter().enumerate() {
             assert!((1.0..=2.15).contains(&ax.ride_hz), "{id} axle {a}: {ax:?}");
+            // Re-ranged (unify, lead 2026-10-21): the owner-chosen ride (medium weight with
+            // springs / bars × 1.5) puts lucciola_350's rear at 0.46 in bump; limit 0.48.
             assert!(
-                (0.2..=0.45).contains(&ax.zeta_bump),
+                (0.2..=0.48).contains(&ax.zeta_bump),
                 "{id} axle {a}: {ax:?}"
             );
             assert!(
@@ -75,7 +77,9 @@ fn a_10cm_kerb_never_launches_and_settles_fast() {
         for kmh in [30.0, 60.0] {
             let k = kerb(&c, kmh, 0.10, 0.0, &a);
             assert_eq!(k.airborne_s, 0.0, "{id} {kmh}: {k:?}");
-            assert!(k.wheel_lift_s < 0.02, "{id} {kmh}: {k:?}");
+            // Re-ranged (unify, lead 2026-10-21): the owner-chosen firm ride lifts a wheel for
+            // up to 0.058 s (hakone_gt at 30 km/h); measured + 25 %.
+            assert!(k.wheel_lift_s < 0.073, "{id} {kmh}: {k:?}");
             assert!(k.peak_rise_m < 0.025, "{id} {kmh}: {k:?}");
             assert!(k.overshoots <= 3, "{id} {kmh}: {k:?}");
             assert!(k.settle_s.is_some_and(|s| s < 1.0), "{id} {kmh}: {k:?}");
@@ -98,7 +102,9 @@ fn a_city_kerb_at_60_keeps_every_car_on_the_ground() {
     for id in ROSTER {
         let k = kerb(&car(id), 60.0, 0.15, 0.0, &a);
         let reference = REFERENCE.contains(&id);
-        let air = if reference { 0.0 } else { 0.08 };
+        // Re-ranged (unify, lead 2026-10-21): the owner-chosen firm ride has lucciola_350
+        // airborne 0.104 s; measured + 25 %. The reference cars still never leave the ground.
+        let air = if reference { 0.0 } else { 0.13 };
         assert!(k.airborne_s <= air, "{id}: {k:?}");
         let rise = if reference { 0.06 } else { 0.12 };
         assert!(k.peak_rise_m < rise, "{id}: {k:?}");

@@ -102,6 +102,9 @@ impl RigVehicle {
         ground: Option<&CityGround>,
     ) -> Self {
         let mut rig = Rig::new(car);
+        // The client predicts its own player's car: the server's sim gives that car the
+        // player steering aids (`wp_sim`, `VehicleKind::Player`), so must the prediction.
+        rig.set_player_input(true);
         if let Some(g) = ground {
             rig.set_city_ground(g.iter().cloned());
         }
