@@ -61,14 +61,26 @@ fn night_is_slower_than_day_for_pursuit_and_reinforcements() {
     // (`heat.blatant`, row 60), day or night, so a night speeder is found sooner (mean 126 s →
     // 33 s); night is still sparse, short-sighted and > 3x slower than day.
     assert!(m(&night, "pursuit_start_s") > 25.0);
-    // Reinforcements take at least 2x as long to arrive.
-    let rd = m(&day, "reinforcement_delay_s");
-    let rn = m(&night, "reinforcement_delay_s");
+    // Reinforcements take at least 2x as long to arrive (design: response time = reinforcement
+    // arrival after request). Measured on `reinforcement_wait_s` since 2026-10-21: request →
+    // backup committed only. `reinforcement_delay_s` also counts "pursuit start → nearby
+    // backup joins", so it followed how long pursuits lasted (night/day 0.97-2.51 across
+    // turn-round variants) rather than how long backup takes to come. By day every shortfall
+    // is filled at once by a unit within `backup_radius_m` (wait 0, no request outstanding);
+    // at night units are sparse, so backup is requested and waits for a unit to come near or
+    // for the night `response_s` (12-30 s) to run out. Written as rn >= 2 rd because rd can
+    // be 0.
+    let rd = m(&day, "reinforcement_wait_s");
+    let rn = m(&night, "reinforcement_wait_s");
     assert!(
-        rd > 0.0 && rn > 0.0,
-        "both phases must dispatch reinforcements ({rd}, {rn})"
+        m(&day, "reinforcement_waits") > 0.0 && m(&night, "reinforcement_waits") > 0.0,
+        "both phases must get backup ({rd}, {rn})"
     );
-    assert!(rn / rd >= 2.0, "reinforcement night/day = {}", rn / rd);
+    assert!(rn > 0.0, "night backup never waited");
+    assert!(
+        rn >= 2.0 * rd,
+        "reinforcement wait night {rn} s vs day {rd} s: night/day < 2"
+    );
 }
 
 #[test]

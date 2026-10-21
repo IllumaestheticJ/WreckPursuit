@@ -270,6 +270,7 @@ struct RunNumbers {
     pursuit_start_s: Option<f32>,
     pursuit_end_s: Option<f32>,
     reinforcement_delays: Vec<f32>,
+    reinforcement_waits: Vec<f32>,
     escapes: u32,
     safehouse: u32,
     captures: u32,
@@ -666,6 +667,7 @@ fn run_once(
     }
     nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end).map(|t| t.secs());
     nums.reinforcement_delays = st.reinforcement_delays_s.clone();
+    nums.reinforcement_waits = st.reinforcement_waits_s.clone();
     for p in &st.pursuits {
         match p.outcome {
             Some(crate::PursuitOutcome::Escaped) => nums.escapes += 1,
@@ -759,6 +761,17 @@ pub fn run_scenario_with_hook(
         mean(&delays).unwrap_or(-1.0),
     );
     m.insert("reinforcements".to_string(), delays.len() as f32);
+    // Request → backup committed only (PoliceStats::reinforcement_waits_s); what the night
+    // ≥ 2x day rule is about. `reinforcement_delay_s` also includes pursuit start → backup.
+    let waits: Vec<f32> = runs
+        .iter()
+        .flat_map(|r| r.reinforcement_waits.iter().copied())
+        .collect();
+    m.insert(
+        "reinforcement_wait_s".to_string(),
+        mean(&waits).unwrap_or(-1.0),
+    );
+    m.insert("reinforcement_waits".to_string(), waits.len() as f32);
     let sum = |f: &dyn Fn(&RunNumbers) -> u32| runs.iter().map(f).sum::<u32>() as f32;
     m.insert("escapes".to_string(), sum(&|r| r.escapes));
     m.insert("safehouse_escapes".to_string(), sum(&|r| r.safehouse));

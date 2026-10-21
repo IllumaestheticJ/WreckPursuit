@@ -114,6 +114,11 @@ pub struct ReinforcementRequest {
     pub requested: SimTime,
     /// Arrives at.
     pub due: SimTime,
+    /// A nearby unit already joined as backup while this request was pending (stats only:
+    /// [`crate::PoliceStats::reinforcement_waits_s`] counts each request's wait once; the
+    /// dispatch logic never reads it).
+    #[serde(default)]
+    pub answered: bool,
 }
 
 /// Pending helicopter launch.
@@ -1997,6 +2002,7 @@ impl PoliceSystem {
                     racer,
                     requested: now,
                     due: now.plus(t),
+                    answered: false,
                 });
                 let n = have + pending + 1;
                 self.radio(
@@ -2058,6 +2064,11 @@ impl PoliceSystem {
             self.stats
                 .reinforcement_delays_s
                 .push(now.since(req.requested));
+            if !req.answered {
+                self.stats
+                    .reinforcement_waits_s
+                    .push(now.since(req.requested));
+            }
             self.assign(
                 i,
                 Assignment::Intercept {
@@ -2126,6 +2137,19 @@ impl PoliceSystem {
                 .pursuit_started
                 .map_or(0.0, |t| self.now.since(t));
             self.stats.reinforcement_delays_s.push(since);
+            // Request → backup wait: the oldest request for this racer still waiting for a unit
+            // (requests are kept in request order) is answered by this one; with none pending the backup joined the moment it was
+            // wanted (wait 0).
+            let now = self.now;
+            let wait = self
+                .reinforcements
+                .iter_mut()
+                .find(|r| r.racer == racer && !r.answered)
+                .map_or(0.0, |r| {
+                    r.answered = true;
+                    now.since(r.requested)
+                });
+            self.stats.reinforcement_waits_s.push(wait);
             joined += 1;
         }
         joined

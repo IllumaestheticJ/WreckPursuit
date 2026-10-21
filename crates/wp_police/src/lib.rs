@@ -250,8 +250,18 @@ pub struct StaticHit {
 pub struct PoliceStats {
     /// Every pursuit.
     pub pursuits: Vec<PursuitRecord>,
-    /// Reinforcement request → unit committed, s.
+    /// Reinforcement delay, s: dispatched reinforcements from request to unit committed, and
+    /// nearby backup from *pursuit start* to joining (so it also follows how long pursuits
+    /// last). Kept for comparison with older numbers; see `reinforcement_waits_s`.
     pub reinforcement_delays_s: Vec<f32>,
+    /// Backup wait, s (added 2026-10-21): from a reinforcement request to the unit that answers
+    /// it being committed, once per request. A dispatched reinforcement counts request → spawned
+    /// or assigned when due; nearby backup that joins while a request is pending counts that
+    /// request → join (the oldest unanswered one); backup that joins the moment it is wanted,
+    /// with no request pending, counts 0. Requests dropped unanswered (pursuit over, backup no
+    /// longer needed, no room) count nothing.
+    #[serde(default)]
+    pub reinforcement_waits_s: Vec<f32>,
     /// Units that ever pursued.
     pub units_engaged: u32,
     /// Units total-lost without racer contact.
