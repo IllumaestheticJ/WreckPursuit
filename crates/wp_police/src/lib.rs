@@ -903,6 +903,18 @@ impl PoliceSystem {
             return self.back_out(i, steer, dt);
         }
         let u = &mut self.units[i];
+        // Still rolling backwards after a back-out: the gearbox is in reverse, where the
+        // brake pedal drives backwards (`body.speed` is unsigned, so the pedals below would
+        // brake). Stop on the handbrake; at a standstill the throttle selects first again.
+        if graph::dot(u.vel, heading) < -ROLLING_BACK_MPS {
+            return VehicleInput {
+                steer,
+                handbrake: 1.0,
+                siren,
+                headlights: true,
+                ..Default::default()
+            };
+        }
         let ctl = u.controller();
         let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
         let mut handbrake = 0.0;
@@ -1106,6 +1118,9 @@ impl PoliceSystem {
 
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
+/// Rolling backwards faster than this (outside a back-out), a physical unit stops on the
+/// handbrake, m/s.
+const ROLLING_BACK_MPS: f32 = 0.3;
 /// Brake pedal held at a standstill to drive backwards (`wp_vehicle`'s automatic selects
 /// reverse above 0.5 held for 0.25 s; the pedal then drives backwards).
 pub(crate) const REVERSE_PEDAL: f32 = 0.7;

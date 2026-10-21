@@ -1153,6 +1153,14 @@ mod tests {
         assert_eq!(inp.handbrake, 1.0);
         assert_eq!(inp.brake, 0.0);
         assert_eq!(p.units[i].avoid.reverse_s, 0.0);
+
+        // Back-out over but still rolling backwards in reverse gear: never the brake pedal
+        // (it would drive backwards), only the handbrake until stopped.
+        p.obstacles.clear();
+        p.units[i].vel = [0.0, -6.0];
+        p.units[i].body.speed = 6.0;
+        let inp = p.unit_input(unit, wp_contracts::PHYSICS_DT).unwrap();
+        assert_eq!((inp.brake, inp.throttle, inp.handbrake), (0.0, 0.0, 1.0));
     }
 
     #[test]

@@ -154,6 +154,18 @@
     the new measured cruiser (0.84 g / 0.99 g / 4.95 m/s² / 82.3 m/s).
   - `golden_city_chase`: main re-aimed it to the same start (x = 275, y = -10) for the
     highway network. Re-checked at 6.0: -35…+10 all pursue; pursuit at 16.2 s.
+  - **Bug fix (reroute back-out, from this PR's `707f2c1`):** after `back_out` ended, a unit
+    still rolling backwards stayed in reverse gear, and `lane_input` (unsigned `body.speed`)
+    braked, which in reverse drives backwards. Unit 14 in `opponent_reverse_grid_2laps` ran
+    backwards at 22 m/s for ~15 s and, once disabled (full brake = full reverse), totalled a
+    parked car. Now a physical unit rolling backwards faster than 0.3 m/s outside a back-out
+    stops on the handbrake only (`ROLLING_BACK_MPS`); at a standstill the throttle selects
+    first again. Units reversing > 1.5 m/s in that run: 52 unit-seconds → 5 (two bounded
+    back-outs). Covered in the reroute unit test.
+  - `race_city_sprint_police` (L's): the control run saw a pursuit with main's seed 12. Per
+    the scenario's own re-aim recipe (`WP_RACE_AIM_*`): seeds 1-20 → 1-4, 11, 14, 18, 19 pass
+    both tests at dy 0, and only seed 3 also passes at dy = ±10. At seed 3, heat 2.5-4.5
+    passes (3.75 kept). Seed → 3.
 
 ## Needs
 | From | What | Workaround now |
