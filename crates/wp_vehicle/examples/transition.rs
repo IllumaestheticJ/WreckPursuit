@@ -153,6 +153,7 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
     // 30–45° hold first).
     let env_f = |k: &str, d: f32| std::env::var(k).ok().map_or(d, |v| v.parse().expect(k));
     let mut rig = settle_on_circle(c, &a, env_f("RADIUS", 40.0), env_f("LATG", 0.5));
+    live_rig(&mut rig);
     // `HOLD_GEAR`: the gear the driver holds through the drift (default 2nd, the lab's).
     let hold_gear: i8 = std::env::var("HOLD_GEAR")
         .ok()
@@ -455,6 +456,7 @@ fn apply(cfg: &Config) {
         Err(_) => CarTune::spin_candidate(),
     };
     car_lab::set_override(Some(tyre));
+    live_clear();
 }
 
 /// Swing starts measured (`INIT=reverse|lift` limits to one kind).
@@ -546,6 +548,7 @@ fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
     let rolling = |v: f32| {
         let mut rig = Rig::new(c);
         rig.teleport([0.0; 3], 0.0, v, 0.0);
+        live_rig(&mut rig);
         let auto = wp_contracts::AssistProfile {
             auto_gears: true,
             ..a
@@ -613,6 +616,42 @@ fn lift_corner_fails(c: &LoadedCar) -> (usize, f32) {
     (fails, worst)
 }
 
+/// [`wp_vehicle::drift_lab_w::plain_hold`] on a player-driven rig (`LIVE=1`): the counter key
+/// from the entry angle on, full throttle, 40 m circle at `lat_g`, 6 s.
+fn held_live(
+    c: &LoadedCar,
+    d: wp_vehicle::drift_lab_w::PlainDriver,
+    lat_g: f32,
+) -> wp_vehicle::drift_lab_w::HoldMetrics {
+    use wp_vehicle::drift_lab_w::{HoldMetrics, PlainDriver};
+    let a = harness_assists();
+    let mut rig = settle_on_circle(c, &a, 40.0, lat_g);
+    live_rig(&mut rig);
+    let entry = match d {
+        PlainDriver::HoldCounter { entry_deg, .. } => entry_deg,
+        _ => 6.0,
+    };
+    let (mut ang, mut back) = (Vec::new(), Vec::new());
+    let mut entered = false;
+    for _ in 0..6 * TPS {
+        let old = (-slide_state(&rig).body_slip).to_degrees();
+        entered |= old > entry;
+        rig.step(
+            &VehicleInput {
+                steer: if entered { 1.0 } else { -1.0 },
+                throttle: 1.0,
+                gear_down: !a.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                ..Default::default()
+            },
+            &a,
+        );
+        let n = slide_state(&rig);
+        ang.push(-n.body_slip.to_degrees());
+        back.push(n.v_fwd < 0.0);
+    }
+    HoldMetrics::from_angles(&ang, &back)
+}
+
 /// One v2 candidate's score under one configuration.
 #[derive(Debug, Clone, Default)]
 struct V2Score {
@@ -656,7 +695,11 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
                     entry_deg: e,
                     throttle: 1.0,
                 };
-                let m = plain_hold(c, &a, d, 40.0, g);
+                let m = if live() {
+                    held_live(c, d, g)
+                } else {
+                    plain_hold(c, &a, d, 40.0, g)
+                };
                 if m.held {
                     sc.held += 1;
                 }
@@ -878,6 +921,30 @@ fn holds(cars: &[(&str, LoadedCar)]) {
 /// then held), optionally the left key held 1 s first (in a corner), then full throttle for
 /// 2.5 s with the key still held (corner) or none (straight). Returns (spun, peak |body slip| °).
 /// Spun = |body slip| ≥ 45° or travelling backwards.
+/// `LIVE=1`: run through the live player path (grip-balance's unify): every rig is marked
+/// player-driven and the lab overrides are cleared, so the shipped defaults apply
+/// (`lab_scope::shipped_plain`, firm ride, lab-default balance, candidate B tyres).
+fn live() -> bool {
+    std::env::var("LIVE").is_ok()
+}
+
+/// Mark `rig` player-driven under `LIVE=1`.
+fn live_rig(rig: &mut wp_vehicle::rig::Rig) {
+    if live() {
+        rig.set_player_input(true);
+    }
+}
+
+/// Clear every lab override under `LIVE=1` (after a configuration was applied).
+fn live_clear() {
+    if live() {
+        plain::set_override(None);
+        ride_lab::set_override(None);
+        grip_lab::set_override(None);
+        car_lab::set_override(None);
+    }
+}
+
 /// The harness's assists: the lab reference (TCS off, manual gears, auto clutch), or with
 /// `MANUAL_CLUTCH=1` the owner's manual clutch held engaged (lead, step 23).
 fn harness_assists() -> wp_contracts::AssistProfile {
@@ -926,6 +993,7 @@ fn power_on(c: &LoadedCar, kmh: f32, gear: i8, corner: bool) -> (bool, f32, Opti
     };
     let mut rig = Rig::new(c);
     rig.teleport([0.0; 3], 0.0, v, 0.0);
+    live_rig(&mut rig);
     // Settle 1.5 s at speed, stepping to the gear.
     for _ in 0..(3 * TPS / 2) {
         let (throttle, brake) = hold(&rig);
@@ -1206,6 +1274,7 @@ fn poweron_table() {
         ride_lab::set_override(Some(*ride));
         grip_lab::set_override(Some(*grip));
         car_lab::set_override(Some(*tyre));
+        live_clear();
         for id in &ids {
             let c = car(id);
             let (mut ss, mut sc, mut ps, mut pc) = (0, 0, 0.0f32, 0.0f32);
@@ -1270,7 +1339,18 @@ fn poweron_table() {
                             t += 1;
                         },
                     );
-                    let m = HoldMetrics::from_angles(&ang, &back);
+                    let m = if live() {
+                        held_live(
+                            &c,
+                            PlainDriver::HoldCounter {
+                                entry_deg: e,
+                                throttle: 1.0,
+                            },
+                            g,
+                        )
+                    } else {
+                        HoldMetrics::from_angles(&ang, &back)
+                    };
                     held += m.held as usize;
                     spun += m.spun as usize;
                 }
@@ -1348,6 +1428,7 @@ fn manual_drift(
         ..harness_assists()
     };
     let mut rig = settle_on_circle(c, &a, 40.0, lat_g);
+    live_rig(&mut rig);
     let start_gear: i8 = if shift == Shift::DownAtEntry { 3 } else { 2 };
     // Into the start gear (shifts while settled, before the drift).
     for _ in 0..TPS {
@@ -1464,6 +1545,7 @@ fn manual_table() {
         ride_lab::set_override(Some(*ride));
         grip_lab::set_override(Some(*grip));
         car_lab::set_override(Some(*tyre));
+        live_clear();
         for id in &ids {
             let c = car(id);
             let mut cells = Vec::new();
@@ -1500,7 +1582,7 @@ fn manual_table() {
 fn main() {
     // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
     // `wp_vehicle::lab_scope`).
-    wp_vehicle::lab_scope::set_legacy(true);
+    wp_vehicle::lab_scope::set_legacy(!live());
     if std::env::args().nth(1).as_deref() == Some("manual") {
         manual_table();
         return;

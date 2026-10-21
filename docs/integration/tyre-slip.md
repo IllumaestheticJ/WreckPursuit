@@ -135,6 +135,31 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Live player path (grip-balance's unify, c80a019e: B shipped for every car)
+
+`LIVE=1` in `examples/transition.rs`: every rig is marked player-driven
+(`Rig::set_player_input(true)`), the lab overrides are cleared and `lab_scope::set_legacy(false)`,
+so the shipped defaults apply (plain steering default, firm ride, lab-default balance, B tyres) —
+the code path wp_sim runs for a player car. Manual gears, manual clutch held, TCS off. Shipped set,
+lab overrides vs LIVE (held / 9 (swaps, spins) · real swings / 6 · median cross · fast ·
+lift-off / 6 (worst)):
+
+| car | lab overrides | LIVE player path |
+|---|---|---|
+| parity_rwd_a | 9 (0, 0) · 6 · 0.89 · 2 · 0 (5.3°) | 9 (0, 0) · 6 · 0.88 · 2 · 0 (5.3°) |
+| parity_rwd_b | 9 · 6 · 0.74 · 5 · 0 (7.6) | 9 · 6 · 0.74 · 5 · 0 (7.6) |
+| parity_rwd_d | 9 · 6 · 0.89 · 2 · 0 (5.7) | 9 · 6 · 0.89 · 2 · 0 (5.7) |
+| rampart_50 | 9 · 6 · 0.85 · 3 · 0 (5.8) | 9 · 6 · 0.85 · 3 · 0 (5.8) |
+| debug_coupe | 9 · 6 · 0.84 · 3 · 0 (6.6) | 9 · 6 · 0.83 · 3 · 0 (6.6) |
+
+Power-on (LIVE = lab): straight never spins; corner full-lock power-on spins 3–6 / 6, 0.90–1.62 s
+to 20° and 1.18–1.67 s to the spin; held 9 / 9 (lab: rwd_b / rampart 8). Manual shifts (LIVE): no
+spins (upshift at the limiter ends the drift on rwd_b / rampart). **The live path matches the lab
+path; the shipped set has no spin problem on harness drivers** (held 9 / 9, lift-off 0 on all five
+cars). FYI: a rig *not* marked player-driven runs the normal steering model, and with it the
+full-throttle held drift spins 9 / 9 — AI drivers do not drive that way, but `opponent_pace`
+should keep watching the AI on the B tyres.
+
 ### The owner's target: 7d6b66c9 + springs / bars × 1.5 (lead, 2026-10-21)
 
 Configs `owner · plain` (grip-balance 7d6b66c9: step-14 balance, medium ride with springs / bars
