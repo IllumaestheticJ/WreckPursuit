@@ -611,12 +611,36 @@ police_tunnel_escape_founders_cut_control, world_traffic_soak_observer.
 0bc27d29 brought in opponent-pace's new capability table and pace changes, and they move these
 seed-by-seed results a lot. On that tip this branch and the lead tip are about level on Hollins.
 Seed 6 never ending is a fled racer parked in the first hairpin with the field behind it (police
-are only at the tail of that queue). **For N / opponent-pace:** on this branch the default
-`loop9_circuit` seed panics in `wp_opponent/src/corridor.rs:243` (`Option::unwrap()` on `None`):
-the racer AI crashes on some car position instead of handling it. Gate on 0bc27d29 + this
+are only at the tail of that queue). The default `loop9_circuit` seed panicked in `wp_opponent/src/corridor.rs:243`; fixed below. Gate on 0bc27d29 + this
 branch: fmt / clippy clean; `wp_police`, `wp_sim`, `wp_wasm --lib` (86) pass; `wp_race` 6 of 7
 (`loop9_circuit`, above); 109 of 109 scenarios; goldens re-blessed (14 files, listed in the
 `[bless]` commit).
+
+*Loop 9 panic in `wp_opponent` (lead, after merging 6e0ac42a).* `loop9_circuit` (default
+seed) panicked at `crates/wp_opponent/src/corridor.rs:243` (`pieces.last().unwrap()`). A fleeing
+racer's `plan_flight` asked `wp_world::World::plan_route` for a destination back down the same
+2.8 km segment. `plan_route` returned a one-segment route whose end (s = 40 m) projects behind its
+start (s = 1535 m), so every corridor piece was empty. No police behaviour hands the racer AI a
+route: the police only decide which racer flees from where. The round-13 hold-in-lane change put
+a racer on that segment at that moment, and the empty-route case was latent in `wp_opponent`
+and `wp_world`. **Change outside my crates (`wp_opponent`, minimal):** `Corridor::try_from_route`
+returns `None` for a route with no length (no segments, or every piece empty), and
+`plan_flight` uses it and tries the next destination. `Corridor::from_route` keeps its contract
+(`expect`). New unit test `corridor::tests::a_route_with_no_length_builds_no_corridor`. For D:
+`plan_route` to a point behind the start on the same one-way segment should loop round, not
+return that segment alone.
+
+After the fix, on lead/round12 + this branch:
+
+| | default | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| `loop9_circuit` | pass | pass | pass | pass | pass (1 DQ) | pass | pass | pass | pass |
+| `hollins_hill_sprint` finishers | 4 | 4 | 4 | 1 | 1 | 1 | 0 (never ends) | 4 | 3 |
+
+`wp_race` (release) 7 of 7 race_picker tests and all other suites pass; `wp_opponent` (release)
+passes; clippy and fmt are clean; `simcli goldens` 0 mismatches. Hollins seeds 3–6 fail the
+test's "at least 3 of 4" check (the default seed passes). Seed 6 is the fled-racer hairpin
+block described above.
 
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
