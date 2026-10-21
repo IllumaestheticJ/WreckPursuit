@@ -56,7 +56,7 @@
       }
     },
     "clutch_max_nm": 780.0,
-    "shift_time_s": 0.06
+    "shift_time_s": 0.15
   },
   "wheels": [
     {

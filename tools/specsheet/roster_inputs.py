@@ -1693,7 +1693,7 @@ CARS = [
         trans=dict(
             desc="7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD",
             layout=("Awd", 0.30),
-            gears=[3.13, 2.19, 1.68, 1.34, 1.10, 0.92, 0.79], final=4.11, reverse=2.90, shift=0.06,
+            gears=[3.13, 2.19, 1.68, 1.34, 1.10, 0.92, 0.79], final=4.11, reverse=2.90, shift=0.15,
             diff_f="Open", diff_r=dict(preload=60.0, power=0.45, coast=0.30), clutch_factor=1.4,
         ),
         tires=dict(front="245/35R20", rear="305/30R21", compound="sport", unsprung=(22.0, 26.0)),

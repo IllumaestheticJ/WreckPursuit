@@ -84,7 +84,7 @@ Peak **449 kW @ 8250 rpm**, **560 N·m @ 6500 rpm**. Idle 1000 / redline 8500 / 
 
 ## Drivetrain
 
-7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD. Layout **AWD, 30 % front**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.45, coast ramp 0.30. Clutch capacity 1.40 × peak torque = 780 N·m. Shift time 0.06 s.
+7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD. Layout **AWD, 30 % front**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.45, coast ramp 0.30. Clutch capacity 1.40 × peak torque = 780 N·m. Shift time 0.15 s (stock dual-clutch, round-12 rule; mods shorten it).
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
