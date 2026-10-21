@@ -163,6 +163,11 @@ export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
+/** Floats per record in parked_wrecks() (crates/wp_wasm/src/props.rs). */
+export const WRECK_STRIDE = 12;
+/** Offsets inside one parked_wrecks() record: prop index, lattice awake (0/1), health, shattered
+ * glass regions, chassis → prop-body scale xyz and origin xyz (body = chassis ⊙ scale + origin). */
+export const WK = { prop: 0, awake: 1, health: 2, shattered: 3, scale: 4, origin: 7 } as const;
 
 /** Wheel-centre height in chassis space for a reported compression (matches wp_vehicle: the
  * hub sits at `position_m` at the static compression; playtest row 92 — drawing it at half

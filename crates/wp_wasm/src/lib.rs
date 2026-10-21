@@ -22,6 +22,7 @@
 //! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
+//! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
@@ -658,24 +659,27 @@ pub fn car_model_info(car_id: &str) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
-        let kind = s
-            .vehicle(EntityId(entity))
-            .map(|v| v.kind)
-            .ok_or_else(|| format!("unknown entity {entity}"))?;
+        // A dented parked car (`parked_wrecks()`): kind "Parked", named after its prop.
+        let parked = s.parked_wreck(EntityId(entity)).map(|w| w.prop);
+        let kind = match parked {
+            Some(_) => "Parked",
+            None => s
+                .vehicle(EntityId(entity))
+                .map(|v| kind_name(v.kind))
+                .ok_or_else(|| format!("unknown entity {entity}"))?,
+        };
         // Scenario entities have a name and spawn pose; sim-spawned ones (police, traffic) don't.
-        let (name, spawn_pos) = match s.spec(EntityId(entity)) {
-            Some(spec) => (spec.id.clone(), spec.pos),
-            None => (
-                format!("{}{entity}", kind_name(kind).to_lowercase()),
-                [0.0; 3],
-            ),
+        let (name, spawn_pos) = match (s.spec(EntityId(entity)), parked) {
+            (_, Some(prop)) => (format!("parked{prop}"), [0.0; 3]),
+            (Some(spec), None) => (spec.id.clone(), spec.pos),
+            (None, None) => (format!("{}{entity}", kind.to_lowercase()), [0.0; 3]),
         };
         let car = car_of(s, entity)?;
         let d = &car.def;
         Ok(json(&VehicleInfo {
             entity,
             name,
-            kind: kind_name(kind).into(),
+            kind: kind.into(),
             car_id: d.id.clone(),
             display_name: d.display_name.clone(),
             body_size_m: d.body_size_m,
@@ -1096,6 +1100,51 @@ pub fn prop_pose(index: u32) -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Floats per record in `parked_wrecks()` ([`props::WRECK_STRIDE`]).
+#[wasm_bindgen]
+pub fn parked_wreck_stride() -> u32 {
+    props::WRECK_STRIDE as u32
+}
+
+/// Dented parked cars (owner playtest 2026-10-21), ascending prop index, 12 floats each:
+/// `[prop index, lattice awake (0/1), health, glass regions shattered, sx, sy, sz, ox, oy,
+/// oz, 0, 0]`. Its entity id is `parked_entity_base() + prop index`; that id works with
+/// `vehicle_info`, `lattice_nodes`, `lattice_rest`, `lattice_regions`, `lattice_beams`,
+/// `lattice_strain` and `panel_states` (always empty) like a vehicle's. The lattice is in the
+/// car's chassis frame; the prop body frame (its pose from `props_static()` /
+/// `props_moved()`) is `chassis ⊙ s + o`. The model is `vehicle_info(entity).car_id`. A prop
+/// enters this list on the tick it is first hit hard enough to dent and never leaves it.
+#[wasm_bindgen]
+pub fn parked_wrecks() -> Result<Vec<f32>, JsValue> {
+    get(|s| props::wreck_list(s.sim()))
+}
+
+/// Entity id of the dented parked car of prop 0 (`wp_sim::PARKED_ENTITY_BASE`); prop `i` is
+/// this plus `i`.
+#[wasm_bindgen]
+pub fn parked_entity_base() -> u32 {
+    wp_sim::PARKED_ENTITY_BASE
+}
+
+/// Body-region indices (like `vehicle_info().regions`) of a dented parked car's shattered
+/// glass, ascending.
+#[wasm_bindgen]
+pub fn parked_wreck_shattered(entity: u32) -> Result<Vec<u32>, JsValue> {
+    with(|s| {
+        let w = s
+            .parked_wreck(EntityId(entity))
+            .ok_or_else(|| format!("unknown parked car {entity}"))?;
+        let mut out: Vec<u32> = w
+            .damage
+            .shattered_regions()
+            .iter()
+            .map(|r| pack::region_index(*r) as u32)
+            .collect();
+        out.sort_unstable();
+        Ok(out)
+    })
+}
+
 /// Floats per agent in `traffic_agents()`.
 pub const AGENT_STRIDE: usize = 5;
 
@@ -1306,6 +1355,10 @@ pub const PANEL_STRIDE: usize = 10;
 #[wasm_bindgen]
 pub fn panel_states(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
+        // Dented parked cars have no hinged panels.
+        if s.parked_wreck(EntityId(entity)).is_some() {
+            return Ok(Vec::new());
+        }
         let v = s
             .sim()
             .vehicles()

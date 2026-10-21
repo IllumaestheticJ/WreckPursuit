@@ -45,6 +45,8 @@ export interface SessionModels {
   cars: string[];
   traffic: string | null;
   police: string | null;
+  /** Model parked cars are drawn as and dent with (null / absent: none parked). */
+  parked?: string | null;
 }
 
 /** car_model_info(car_id) JSON. */
@@ -311,6 +313,12 @@ export const sim = {
   propsMoved: (): Float32Array => wasm.props_moved(),
   /** The sim's pose of one prop `[x, y, z, qx, qy, qz, qw]` (automation). */
   propPose: (index: number): Float32Array => wasm.prop_pose(index),
+  /** Dented parked cars (layout.ts WRECK_STRIDE / WK), ascending prop index. Once per frame. */
+  parkedWrecks: (): Float32Array => wasm.parked_wrecks(),
+  /** Entity id of prop 0's dented parked car; prop i is this + i (lattice_* / vehicle_info). */
+  parkedEntityBase: (): number => wasm.parked_entity_base(),
+  /** Region indices (vehicle_info().regions) of a dented parked car's shattered glass. */
+  parkedWreckShattered: (entity: number): Uint32Array => wasm.parked_wreck_shattered(entity),
   /** Car models this session can show: every id, plus the traffic and police models (or null). */
   sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
   /** Body size and wheels of a car model (no vehicle needed). */
