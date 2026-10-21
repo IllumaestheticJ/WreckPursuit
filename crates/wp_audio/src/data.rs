@@ -148,7 +148,7 @@ pub mod cues {
 }
 
 /// Synth names the procedural backend implements (`apps/testbed-web/src/audio/synth.ts`).
-pub const KNOWN_SYNTHS: [&str; 22] = [
+pub const KNOWN_SYNTHS: [&str; 23] = [
     "engine",
     "noise",
     "tone",
@@ -172,6 +172,7 @@ pub const KNOWN_SYNTHS: [&str; 22] = [
     "friction",
     "disc_horn",
     "air_horn",
+    "flap",
 ];
 
 // ----- config ------------------------------------------------------------------------------
@@ -414,6 +415,9 @@ pub struct AudioConfig {
     /// Physically driven impact / crunch / scrape synthesis (optional, defaults in code).
     #[serde(default)]
     pub impact_synth: crate::impact::ImpactSynthConfig,
+    /// Punctured tyres: blow-out pop, flap loop, rim grind, spike radio line (playtest row 132).
+    #[serde(default)]
+    pub flat_tyre: crate::flat_tyre::FlatTyreConfig,
     /// Master stage gain staging the backend builds (optional, defaults in code).
     #[serde(default)]
     pub master: MasterMix,

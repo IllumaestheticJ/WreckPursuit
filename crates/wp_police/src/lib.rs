@@ -1455,6 +1455,7 @@ impl PoliceSystem {
                 } else {
                     UTURN_HOLD_THROTTLE
                 };
+                self.units[i].branch = 1;
                 return VehicleInput {
                     steer,
                     throttle,
@@ -1473,6 +1474,7 @@ impl PoliceSystem {
             if facing < stuck::SWING_DONE_COS && now < until && !disabled {
                 // In reverse the pedals swap: brake drives backwards, throttle brakes.
                 let (throttle, brake) = reverse_pedals(v, 1.0, SWING_REVERSE_MAX_MPS);
+                self.units[i].branch = 2;
                 return VehicleInput {
                     steer,
                     throttle,
@@ -1537,6 +1539,7 @@ impl PoliceSystem {
             } else {
                 (0.0, 0.4)
             };
+            self.units[i].branch = 3;
             return VehicleInput {
                 steer: if left { -1.0 } else { 1.0 },
                 throttle,
@@ -1552,6 +1555,7 @@ impl PoliceSystem {
             && (target_head_on || self.traffic_closing(i, chasing, true))
         {
             let (throttle, brake, handbrake) = hold_pedals(v);
+            self.units[i].branch = 4;
             return VehicleInput {
                 throttle,
                 brake,
@@ -1600,6 +1604,7 @@ impl PoliceSystem {
             } else {
                 stuck::SWING_COOLDOWN_S
             });
+            self.units[i].branch = 5;
             return VehicleInput {
                 brake: 0.8,
                 siren: siren_out,
@@ -1622,6 +1627,7 @@ impl PoliceSystem {
             };
             u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
+            self.units[i].branch = 6;
             return VehicleInput {
                 steer,
                 brake: 0.5,
@@ -1642,6 +1648,7 @@ impl PoliceSystem {
             };
             u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
+            self.units[i].branch = 7;
             return VehicleInput {
                 steer,
                 brake: 1.0,
@@ -1663,6 +1670,7 @@ impl PoliceSystem {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
                 let (throttle, brake) = reverse_pedals(v, 0.6, REVERSE_MAX_MPS);
+                self.units[i].branch = 8;
                 return VehicleInput {
                     steer,
                     throttle,
@@ -1689,6 +1697,7 @@ impl PoliceSystem {
                 });
             if waiting {
                 let (throttle, brake, handbrake) = hold_pedals(v);
+                self.units[i].branch = 9;
                 return VehicleInput {
                     throttle,
                     brake,
@@ -1763,6 +1772,7 @@ impl PoliceSystem {
                 steer,
             };
             self.stats.give_ways += 1;
+            self.units[i].branch = 10;
             return VehicleInput {
                 steer,
                 brake: 1.0,
@@ -1788,6 +1798,7 @@ impl PoliceSystem {
                 let steer = ctl.steer(pos, heading, [tgt[0], tgt[1], 0.0]);
                 let acc = (av.push_mps - v).clamp(-brake, accel);
                 let (throttle, brake) = ctl.pedals(v, acc, dt, false);
+                self.units[i].branch = 11;
                 return VehicleInput {
                     steer,
                     throttle,
@@ -1863,6 +1874,7 @@ impl PoliceSystem {
             u.unstick.held_s = 0.0;
         }
         u.unstick.progress(pos);
+        self.units[i].branch = 0;
         let (steer, mut throttle, mut brake) = if siren {
             self.pro_drive(i, offset, disabled, dt)
         } else {
@@ -1964,6 +1976,7 @@ impl PoliceSystem {
             pro::ProDriver::new(params, limits, geometry, v)
         });
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
+        u.pro_dbg = (out.planned_mps, out.reversing);
         let input = out.input;
         let steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
         (steer, input.throttle, input.brake)

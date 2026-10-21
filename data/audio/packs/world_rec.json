@@ -432,33 +432,25 @@
     },
     "tire/burst": {
       "source": {
-        "Synth": {
-          "synth": "impact",
-          "params": {
-            "freq_hz": 160.0,
-            "decay_s": 0.25,
-            "noise": 1.0,
-            "crack": 1.0,
-            "ring": 0.0
-          }
+        "Samples": {
+          "files": [
+            "tire_burst_1.ogg",
+            "tire_burst_2.ogg"
+          ]
         }
       },
       "gain": 1.0,
       "looped": false,
-      "duration_s": 0.5
+      "duration_s": 0.95
     },
-    "tire/scrub_loose": {
+    "tire/flat_flap": {
       "source": {
         "Synth": {
-          "synth": "noise",
-          "params": {
-            "lowpass_hz": 3000.0,
-            "highpass_hz": 400.0,
-            "crackle": 1.0
-          }
+          "synth": "flap",
+          "params": {}
         }
       },
-      "gain": 0.8,
+      "gain": 1.0,
       "looped": true
     },
     "tire/scrub_grass": {
@@ -473,6 +465,20 @@
         }
       },
       "gain": 0.45,
+      "looped": true
+    },
+    "tire/scrub_loose": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 3000.0,
+            "highpass_hz": 400.0,
+            "crackle": 1.0
+          }
+        }
+      },
+      "gain": 0.8,
       "looped": true
     },
     "tire/spin": {

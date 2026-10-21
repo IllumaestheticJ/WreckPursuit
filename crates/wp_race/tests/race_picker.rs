@@ -479,13 +479,12 @@ fn hollins_hill_sprint() {
     // With the police patrolling the hill a racer may be caught or flee legitimately (owner
     // decision, as in `loop9_circuit`; `WP_RACE_SEED=6`: two racers out to the police in the
     // first 45 s), so police outcomes count with the finishers. What still fails: a race
-    // that never ends (a deadlock), a wreck. Since opponent-pace phase 3 (main-sync tip) every
-    // racer speeds and runs reds past the hill's patrols in the first 20 s (3 + 3 witnessed
-    // violations each, L1), and a pursued AI racer at L1 yields (wp_opponent `Yield`, 6 m/s),
-    // so the police can take out the whole field: no winner is then a police outcome, not a
-    // bug. (Police side: one unit stopped head-on in the hairpin used to arrest the queue
-    // behind its target one by one; an arresting unit is now busy booking for 30 s.)
-    check_with_police_all_out_ok(&r, 40.0..110.0, 3);
+    // that never ends (a deadlock), no winner, a wreck. Since the owner's "racers never give
+    // up" rule (2026-10-21, wp_opponent `RaceConfig::allow_abandon` off) a pursued racer keeps
+    // racing at any wanted level, so only real captures take racers out and a winner is
+    // required again (E had relaxed this in 6e63486d while pursued racers yielded at L1).
+    // Seeds 1-8: see docs/integration/opponent-pace.md.
+    check_with_police(&r, 40.0..110.0, 3);
 }
 
 /// [`check`] for a race with police on the course: racers the police caught or chased off
@@ -494,12 +493,6 @@ fn hollins_hill_sprint() {
 /// field up). The race must still end with a winner and nobody wrecked.
 fn check_with_police(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
     check_with_police_inner(r, winner_s, min_finish, false);
-}
-
-/// [`check_with_police`] that also accepts a race in which the police took every racer out
-/// (all `Dnf(Captured)` / `Dnf(Fled)`): it must still have ended, with nobody wrecked.
-fn check_with_police_all_out_ok(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
-    check_with_police_inner(r, winner_s, min_finish, true);
 }
 
 fn check_with_police_inner(
