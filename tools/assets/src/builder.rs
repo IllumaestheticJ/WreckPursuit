@@ -356,7 +356,7 @@ impl Builder {
     /// Axis-aligned box with chamfered edges (`bevel` m, clamped to a third of the size).
     pub fn beveled_box(&mut self, key: &PartKey, lo: [f32; 3], hi: [f32; 3], bevel: f32) {
         let size = sub(hi, lo);
-        let b = bevel.clamp(0.0, size[0].min(size[1]).min(size[2]) / 3.0);
+        let b = bevel.clamp(0.0, (size[0].min(size[1]).min(size[2]) / 3.0).max(0.0));
         if b <= 1e-4 {
             return self.cuboid(key, lo, hi);
         }

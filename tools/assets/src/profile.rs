@@ -14,6 +14,9 @@ use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 
 use crate::style::{ArchShape, BodyStyle, Silhouette};
 
+/// Allowed range of [`BodyStyle::cabin_shift_m`], m (− rearward, + forward / cab-forward).
+pub const CABIN_SHIFT_RANGE: (f32, f32) = (-0.60, 0.60);
+
 /// Points per half cross-section ring (see [`BodyProfile::ring`]).
 pub const RING_POINTS: usize = 18;
 /// Ring index of the shoulder point (top of the side, at the belt).
@@ -127,6 +130,13 @@ pub fn smoothstep(x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// `x` limited to `lo..=hi` without panicking when the bounds cross (`lo > hi` gives `hi`).
+/// Style knobs at their extremes can push measured bounds past each other; the upper bound
+/// wins so the body stays inside the car.
+pub fn clamp_soft(x: f32, lo: f32, hi: f32) -> f32 {
+    x.max(lo).min(hi)
+}
+
 /// Linear interpolation with `t` clamped to 0..1.
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
@@ -232,13 +242,15 @@ impl BodyProfile {
         let rz = roof_z + dz + st.roof_dz.clamp(-0.12, 0.10);
 
         // --- Cabin placement ---
-        let shift = st.cabin_shift_m.clamp(-0.55, 0.20);
+        let shift = st
+            .cabin_shift_m
+            .clamp(CABIN_SHIFT_RANGE.0, CABIN_SHIFT_RANGE.1);
         let mut v_fw = (y_fw + shift).min(y_bf - 0.30);
         let mut r1 = ry1 + shift;
         let mut r0 = ry0 + shift;
-        let v_deck = (y_deck + shift).clamp(y_tail + 0.25, r0 - 0.05);
+        let v_deck = clamp_soft(y_deck + shift, y_tail + 0.25, r0 - 0.05);
         if let Some(len) = st.hood_length {
-            let want = (y_nose - len).clamp(r0 + 0.6, y_bf - 0.30);
+            let want = clamp_soft(y_nose - len, r0 + 0.6, y_bf - 0.30);
             r1 += want - v_fw;
             v_fw = want;
         }
@@ -259,15 +271,17 @@ impl BodyProfile {
             r0 = v_deck + (rz - z_deck).max(0.05) * tan_deg(a);
         }
         r0 -= st.roof_len_trim.clamp(-0.25, 0.15);
-        r1 = r1.clamp(r0 + 0.25, v_fw - 0.10);
-        r0 = r0.clamp(v_deck + 0.06, r1 - 0.25);
+        // Roof front stays behind the windshield base; roof rear ahead of the deck start;
+        // the flat roof keeps ≥ 0.25 m where there is room (≥ 0.05 m always).
+        r1 = clamp_soft(r1, r0 + 0.25, v_fw - 0.10);
+        r0 = clamp_soft(r0.min(r1 - 0.25), v_deck + 0.06, r1 - 0.05);
 
         let roof_half = match st.tumblehome {
             Some(t) => half_w - t.clamp(0.10, 0.30),
             None => (roof_hw + 0.05).min(half_w - 0.12),
         };
         let nose_h = st.nose_h.map_or(z_hood.1 - 0.10, |h| h + dz);
-        let z_nose = nose_h.clamp(z_floor + 0.15, z_hood.1);
+        let z_nose = clamp_soft(nose_h, z_floor + 0.15, z_hood.1);
         let nose_run = (0.35
             + (z_hood.1 - z_nose).max(0.0) * tan_deg(st.nose_rake_deg.clamp(0.0, 60.0)))
         .clamp(0.10, 1.2);
@@ -557,8 +571,11 @@ impl BodyProfile {
         let tuck = s.sill_tuck.clamp(0.01, 0.12).min(0.3 * h);
         let ch = s.shoulder_round.clamp(0.01, 0.12).min(0.3 * h);
         let height = self.roof.2.max(belt);
-        let zc =
-            (s.crease_z.clamp(0.25, 0.70) * height).clamp(sill + tuck + 0.06, belt - ch - 0.06);
+        let zc = clamp_soft(
+            s.crease_z.clamp(0.25, 0.70) * height,
+            sill + tuck + 0.06,
+            belt - ch - 0.06,
+        );
         let cd = s.crease_depth.clamp(0.0, 0.03);
         let fl = s.flare.clamp(0.0, 0.08) * self.arch_t(y);
         let hn = self.haunch(y);
