@@ -29,6 +29,8 @@ export const LAYERS: LayerDef[] = [
   { id: "telemetry", key: "KeyJ", label: "telemetry plots", default: true },
   { id: "inputs", key: "KeyN", label: "input display + rack torque", default: true },
   { id: "chase", key: "KeyZ", label: "chase readout: wanted / heat / bounty / pursuit (UI kit)", default: true },
+  // Accessibility (not a debug layer): slow police light pattern everywhere, same as `?flash=slow`.
+  { id: "reducedFlashing", key: "F6", label: "reduced flashing: slow police lights (also ?flash=slow)", default: false },
 ];
 
 const STORE_KEY = "wp.testbed.layers.v1";

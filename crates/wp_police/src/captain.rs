@@ -232,7 +232,11 @@ impl PoliceSystem {
                 if matches!(order, UnitOrder::Pursue { .. }) {
                     Assignment::Pursue { target }
                 } else {
-                    Assignment::Intercept { target, point }
+                    Assignment::Intercept {
+                        target,
+                        point,
+                        ambush: false,
+                    }
                 }
             }
             UnitOrder::Respond { incident } => {
