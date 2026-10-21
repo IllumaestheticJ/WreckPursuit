@@ -1003,15 +1003,15 @@ fn sites() -> Vec<Site> {
             Airport,
             rect(-4350.0, -3500.0, -3550.0, -900.0),
             Some(6.0),
-            vec![gate(-3550.0, -1650.0, W), gate(-3550.0, -1000.0, W)],
+            vec![gate(-3700.0, -900.0, S), gate(-3550.0, -1000.0, W)],
         ),
         site(
             "airport_landside",
             "Airport terminal & parking",
             Airport,
-            rect(-3550.0, -2200.0, -3150.0, -1100.0),
+            rect(-3550.0, -2200.0, -3480.0, -1100.0),
             Some(6.0),
-            vec![gate(-3150.0, -1650.0, W)],
+            vec![gate(-3480.0, -1650.0, W)],
         ),
         site(
             "airfield",
@@ -1061,7 +1061,7 @@ fn sites() -> Vec<Site> {
             "westline_yard",
             "Westline Rail Yard",
             RailYard,
-            rect(-2950.0, -130.0, -2050.0, 160.0),
+            rect(-2950.0, -130.0, -2140.0, 160.0),
             Some(5.0),
             vec![gate(-2500.0, 160.0, S)],
         ),
@@ -1069,9 +1069,9 @@ fn sites() -> Vec<Site> {
             "roundhouse",
             "Westline Roundhouse",
             RailYard,
-            rect_c([-2300.0, 400.0], 220.0, 180.0),
+            rect_c([-2300.0, 540.0], 220.0, 180.0),
             Some(6.0),
-            vec![gate(-2300.0, 490.0, S)],
+            vec![gate(-2300.0, 630.0, S)],
         ),
         site(
             "vesper_central",
@@ -1142,9 +1142,9 @@ fn sites() -> Vec<Site> {
             "park_and_ride",
             "Larkspur Park & Ride",
             SurfaceLot,
-            rect_c([-2200.0, 1200.0], 160.0, 110.0),
+            rect_c([-2225.0, 1200.0], 160.0, 110.0),
             None,
-            vec![gate(-2200.0, 1255.0, S)],
+            vec![gate(-2225.0, 1255.0, S)],
         ),
         site(
             "airport_long_stay",
@@ -1200,9 +1200,9 @@ fn sites() -> Vec<Site> {
             "vesper_bowl",
             "Vesper Bowl stadium",
             Landmark,
-            rect_c([-950.0, -2000.0], 280.0, 240.0),
+            rect_c([-950.0, -1860.0], 280.0, 200.0),
             None,
-            vec![gate(-950.0, -2120.0, N)],
+            vec![gate(-950.0, -1760.0, S)],
         ),
         site(
             "founders_plaza",
@@ -1273,7 +1273,7 @@ fn sites() -> Vec<Site> {
             "ferris_park",
             "Ferris Park",
             Park,
-            rect_c([-2000.0, -900.0], 260.0, 200.0),
+            rect_c([-2250.0, -830.0], 240.0, 160.0),
             None,
             vec![],
         ),
@@ -1350,7 +1350,7 @@ fn landmarks() -> Vec<Landmark> {
         ),
         l(
             "Westline Roundhouse",
-            [-2300.0, 400.0],
+            [-2300.0, 540.0],
             "rail",
             "Disused roundhouse with a turntable; SH05.",
         ),
@@ -1362,7 +1362,7 @@ fn landmarks() -> Vec<Landmark> {
         ),
         l(
             "Vesper Bowl",
-            [-950.0, -2000.0],
+            [-950.0, -1860.0],
             "buildings",
             "Football stadium, bowl stands, floodlight towers.",
         ),
@@ -1511,6 +1511,12 @@ fn pois() -> Vec<PlannedPoi> {
             pos,
             heading_rad,
         });
+    }
+    // v3 moved the roundhouse clear of the Westline Cloverleaf.
+    for p in out.iter_mut() {
+        if p.name.contains("Westline Roundhouse") {
+            p.pos = [-2300.0, 540.0];
+        }
     }
     let _ = (N, E, S, W);
     out
