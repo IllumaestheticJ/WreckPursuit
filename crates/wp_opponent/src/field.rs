@@ -1768,7 +1768,7 @@ fn decide_racer(
         });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
+            && (p.traffic_risk >= 0.5 || parked_ahead || crawler_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -2089,7 +2089,10 @@ fn decide_racer(
                 let momentum = (v - x.o.v_s > 2.5 || tow_run)
                     && x.gap < pass_horizon(v, x.o.v_s)
                     && brake_dist > v * 1.5;
-                if (r.blocked_s > p.overtake_patience_s || momentum)
+                // Street racing: a civilian ahead is gone round, not queued behind — look for
+                // a gap as soon as I am closing on it.
+                let weave = is_civ(&x.o) && v - x.o.v_s > 1.0;
+                if (r.blocked_s > p.overtake_patience_s || momentum || weave)
                     && x.o.v_s > -1.0
                     && !done_racing
                     && (!start_phase || x.o.parked)
@@ -3146,8 +3149,10 @@ fn plan_pass(
             }
             // A car right behind me in line is following me whichever way I go: pulling out
             // does not cut it off.
+            // (Only a car that is closing on me: one behind going no faster cannot run into
+            // me when I move over.)
             let in_line = (q.o.n - r.n).abs() < hw + q.o.half_w - 0.5;
-            if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 && !in_line {
+            if q.ds <= 0.0 && (q.gap < 3.0 || (q.gap < 12.0 && q.o.v_s > v + 0.5)) && !in_line {
                 why = PassReject::LaneBehind;
                 continue 'side;
             }
