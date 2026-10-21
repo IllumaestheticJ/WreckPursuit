@@ -9,7 +9,7 @@
   3. `origin/lead/round12` @ `c29ddd2`, then `origin/main` @ `0c03b82` (#19–#27: Loop 9 and the
      grid highway as divided highways with diamond interchanges, painted road markings, median
      barriers, racer AI fixes, upbeat-faraday's vehicle catch commit).
-  4. `origin/lead/opponent-pace` @ `9a1b060`, `origin/lead/round12` @ `e6f7cc3`,
+  4. `origin/lead/opponent-pace` @ `9a1b060`, `origin/lead/round12` @ `e6f7cc3`, `origin/lead/grip-balance` @ `51f5e60`,
      `origin/ws/police` @ `fcc9d08`, `origin/lead/opponent-pace` @ `db65359`.
 - **Contract:** main changed nothing in `crates/wp_contracts` or `schemas/` (both main ranges).
   `DqReason::LeftCorridor` stays in the contract but is no longer produced.
@@ -114,6 +114,14 @@ highways on the old code; the merge ports main onto round 12's:
   brute force includes deck slabs.
 
 ## Blessed goldens
+Carried in from `lead/grip-balance` @ `51f5e60` (merged before the final re-bless; their reasons
+stand for every golden they moved):
+- `456198ae` — front brake bias +0.05 on every car (`GripBalance::brake_bias_front_add`): every
+  scenario that brakes moves its hashes; no handling expectation changed. 59 goldens.
+- `51f5e60d` — gear hold counts drive slip only, no slide-mode upshift under the brakes. 3 goldens.
+Golden conflicts in that merge were not resolved by picking a side: all goldens are regenerated
+on the final tip (below).
+
 (final list below, with the gate)
 
 ## Gate
