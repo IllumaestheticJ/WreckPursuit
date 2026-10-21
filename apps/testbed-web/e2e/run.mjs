@@ -400,6 +400,60 @@ check(
     `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} (${flow.escapedEnd}) → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}, chase end ${flow.capturedEnd?.how} at ${flow.capturedEnd?.level}) → ${flow.later.banner ?? "cleared"}`,
   );
 }
+// Helicopter as Air-1: a stubbed helicopter on station over the player (a real one needs L3 and
+// a 45-120 s launch) → 3D model + spotlight, the chase radar's AIR-1 icon with its tether and
+// "on you" note, and a pilot line ("Air-1, …") badged in the radio feed.
+{
+  const air = await page.evaluate(async () => {
+    const wp = window.__wp;
+    const sim = wp.sim;
+    const real = { units: sim.policeUnits, helis: sim.policeHelicopters };
+    window.__airReal = real;
+    const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const me = () => {
+      const st = sim.states();
+      for (let o = 0; o < st.length; o += 50) if (st[o] === wp.app.player) return [st[o + 1], st[o + 2], st[o + 3]];
+      return [0, 0, 0];
+    };
+    // 40 m behind-left of the player, 60 m up, nose toward them.
+    sim.policeUnits = () => {
+      const [x, y, z] = me();
+      return new Float32Array([...real.units(), x - 30, y - 30, z + 60, -Math.PI / 4, 20, 1]);
+    };
+    sim.policeHelicopters = () => {
+      const [x, y, z] = me();
+      return new Float32Array([x - 30, y - 30, z + 60, x, y, z, 1]);
+    };
+    const tick = wp.ui.model.get().replay.tick;
+    wp.ui.model.push({
+      tick,
+      player: wp.app.player,
+      events: [{ Police: { Radio: { unit: 99, text: "Air-1, still on them: racer #1 northbound in Core. I have them in the light." } } }],
+    });
+    for (let i = 0; i < 10; i++) await frames();
+    const radar = document.querySelector("#ui-chase .wp-chase-radar");
+    const out = {
+      radar: !!radar,
+      label: Array.from(radar?.querySelectorAll("text") ?? []).some((t) => t.textContent === "AIR-1"),
+      tether: !!radar?.querySelector(".wp-minimap-track line"),
+      note: radar?.querySelector(".wp-chase-radar-note")?.textContent ?? null,
+      badge: document.querySelector('#ui-chase li[data-air="true"] .wp-heli-badge')?.textContent ?? null,
+    };
+    return out;
+  });
+  await page.evaluate(() => window.__wp.setCamera("chase"));
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
+  await shot("air1_chase.png");
+  await page.evaluate(() => {
+    const sim = window.__wp.sim;
+    sim.policeUnits = window.__airReal.units;
+    sim.policeHelicopters = window.__airReal.helis;
+  });
+  check(
+    air.radar && air.label && air.tether && /on you/i.test(air.note ?? "") && air.badge === "AIR-1",
+    `Air-1: radar ${air.radar}, AIR-1 icon ${air.label}, tether ${air.tether}, note "${air.note}", pilot badge "${air.badge}"`,
+  );
+}
 // End of run (lead): a real capture in the sim (player parked in front of a patrol car at L2) →
 // end-of-run panel + repair bill → "Repair & continue" pays from the ledger and restores the car.
 {
