@@ -26,7 +26,12 @@ fn car(id: &str) -> LoadedCar {
 fn countersteer_limit_stops_the_snap_back_spin_and_keeps_the_hold() {
     let a = reference_assists();
     car_lab::set_override(Some(CarTune::spin_candidate()));
-    grip_lab::set_override(Some(GripBalance::lab_default()));
+    // Steps 1–9 had no held-key slide lock (grip-balance added it in "new" later): "before"
+    // pins it off, "new" below uses the current default.
+    grip_lab::set_override(Some(GripBalance {
+        slide_lock: 1.0,
+        ..GripBalance::lab_default()
+    }));
     let ids = ["parity_rwd_d", "parity_rwd_a"];
     // Before: steps 1–9.
     plain::set_override(Some(PlainSteer {
@@ -46,7 +51,8 @@ fn countersteer_limit_stops_the_snap_back_spin_and_keeps_the_hold() {
             b
         })
         .collect();
-    // New: the W default.
+    // New: the W default (with the current grip balance).
+    grip_lab::set_override(Some(GripBalance::lab_default()));
     plain::set_override(Some(PlainSteer::default()));
     ride_lab::set_override(Some(RideTune::medium_weight()));
     for (id, b0) in ids.iter().zip(&before) {

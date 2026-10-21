@@ -298,6 +298,14 @@ pub struct Vehicle {
     /// Drift Lab W "use W handling everywhere": the lab overrides apply to this vehicle when
     /// they are limited to tagged vehicles ([`crate::lab_scope`]). Lab-only; not in snapshots.
     pub(crate) lab_tagged: bool,
+    /// Grip-balance lab: |body slip| last tick (rad) and its filtered rate (rad/s, − = the
+    /// slide closing), for the directional slide lock (`grip_lab::GripBalance::slide_closing_dps`).
+    /// Lab-only steering input: not in snapshots.
+    lab_slip_prev: f32,
+    lab_slip_rate: f32,
+    /// Grip-balance lab: how long the countersteer key has been held, s (the held-key slide
+    /// lock, `grip_lab::GripBalance::slide_lock_after_s`).
+    lab_counter_s: f32,
 }
 
 impl Vehicle {
@@ -420,6 +428,9 @@ impl Vehicle {
             stalled: false,
             hb_held_s: 0.0,
             lab_tagged: false,
+            lab_slip_prev: 0.0,
+            lab_slip_rate: 0.0,
+            lab_counter_s: 0.0,
             corners,
         };
         v.converter = def
@@ -1364,6 +1375,19 @@ impl Vehicle {
                 self.center_steer
             };
             let toward_slide = dir * steer_in.body_slip > 0.0;
+            // |body slip| rate, filtered over ~50 ms (the directional slide lock).
+            let slip_abs = steer_in.body_slip.abs();
+            let raw_rate = (slip_abs - self.lab_slip_prev) / dt.max(1e-6);
+            self.lab_slip_rate += (raw_rate - self.lab_slip_rate) * (dt / 0.05).min(1.0);
+            self.lab_slip_prev = slip_abs;
+            let slip_rate = self.lab_slip_rate;
+            let key_counter = steer_cmd.abs() > crate::steering::STEER_DEADZONE && toward_slide;
+            self.lab_counter_s = if key_counter {
+                self.lab_counter_s + dt
+            } else {
+                0.0
+            };
+            let counter_s = self.lab_counter_s;
             let smart = crate::lab_scope::grip(self.lab_tagged).and_then(|g| {
                 g.smart_lock(
                     v_fwd,
@@ -1372,6 +1396,8 @@ impl Vehicle {
                     full_lock * p.lock_frac(v_fwd),
                     toward_slide,
                     steer_in.body_slip,
+                    slip_rate,
+                    counter_s,
                 )
             });
             // Angle-rate timing: the plain rack as it is, capped at the smart lock below.

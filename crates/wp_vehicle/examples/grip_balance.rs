@@ -437,7 +437,7 @@ fn main() {
         [
             "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
             "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score", "feel",
-            "cars",
+            "cars", "holds",
         ]
         .contains(&a.as_str())
     }) {
@@ -481,6 +481,14 @@ fn main() {
     }
     if what == "trace" {
         trace(args.first().map_or("parity_rwd_d", String::as_str));
+        return;
+    }
+    if what == "holds" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("# {name}");
+            holds_table(&args);
+        }
         return;
     }
     if what == "cars" {
@@ -886,6 +894,36 @@ fn cars_table(ids: &[String]) {
             d.wheels[0].tire_id,
             d.wheels[2].tire_id
         );
+    }
+}
+
+/// Held-key vs key-tapping holds (`holds`): the owner's clip-1 technique (counter key held +
+/// full throttle) and W's tapping driver (35° target), 40 m / 0.6 g entry, per car.
+fn holds_table(ids: &[String]) {
+    let a = reference_assists();
+    for id in ids {
+        let c = car(id);
+        let held = plain_hold(
+            &c,
+            &a,
+            PlainDriver::HoldCounter {
+                entry_deg: 6.0,
+                throttle: 1.0,
+            },
+            40.0,
+            0.6,
+        );
+        let tap = plain_hold(
+            &c,
+            &a,
+            PlainDriver::Tapper {
+                entry_deg: 6.0,
+                target_deg: 35.0,
+            },
+            40.0,
+            0.6,
+        );
+        println!("{id}: held key {} | tapper {}", held.cell(), tap.cell());
     }
 }
 
