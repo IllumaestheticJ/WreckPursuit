@@ -30,6 +30,9 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, split-µ launch, corner exit, top speed |
 | `ride.rs` | ride / launch tests: axle ride frequency + damping, heave/pitch kick, kerb strike, slide into kerb, crest, side impact |
 | `handling.rs` | driver-facing handling tests through a real `AssistProfile`: ramp steer, constant radius, step steer, slalom, city corner; keyboard tapping / analog drivers |
+| `slide.rs` | slide-control assists for keyboard/gamepad: car slide class, gyro yaw damper, slide throttle |
+| `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, top speed |
+| `stats.rs` | menu stat bars: `CarStats::measure` (0–100, top speed, 50 m skidpad g) and `bars()` on fixed 0–1 scales (16 → 3.5 s, 140 → 310 km/h, 0.55 → 1.05 g); table in `data/stats/cars.json` (`just car-stats`) |
 | `math.rs` | deterministic `atan`/`atan2`/`tan` (polynomial), glam helpers |
 
 **Chassis = one Rapier dynamic body.** Mass, CG (`front_weight_frac`, `cg_height_m`) and

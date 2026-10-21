@@ -225,6 +225,11 @@ export interface GarageCar {
   sustainedWhileWanted: boolean;
   /** Current value (damage + mods), from `Economy::current_value`. */
   value: number;
+  /**
+   * Stat bars of this car as built, physics-measured (`wp_wasm::car_stats_build_json`), when the
+   * provider can run the sim. Absent → the kit estimates from the stock table (`data/stats.ts`).
+   */
+  stats?: import("../data/catalog").CarStats | null;
 }
 
 /** Repair decision options (`wp_economy::RepairOption`). */

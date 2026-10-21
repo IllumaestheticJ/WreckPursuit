@@ -60,6 +60,7 @@ pub mod ride;
 pub mod rig;
 pub mod slide;
 pub mod snapshot;
+pub mod stats;
 pub mod steering;
 pub mod surface;
 pub mod suspension;

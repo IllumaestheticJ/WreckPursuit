@@ -13,7 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wp_contracts.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
-# One-click assist presets (`wp_vehicle::AssistPreset`).
+# One-click assist presets (`wp_vehicle::AssistPreset`) and stat bars of a modded car
+# (build_stats.rs: `wp_vehicle::stats` on the rig).
 wp_vehicle.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
