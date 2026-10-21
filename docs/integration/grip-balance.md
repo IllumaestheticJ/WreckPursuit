@@ -905,3 +905,102 @@ which predates it).
 **Spin model v2 (ellipse)** (tyre-slip's preset) was tuned on the `drift_best` balance, and its
 button sets that balance. Held set, medium ride, its own VR steering: drift_best 9 / 27 (tyre-slip
 reports 7), "new" 4, "grip" 1. It needs its own balance, which the button gives it.
+
+
+## Lift-off: no step-out while steering (step 20) — merged with W step 11 and the firm ride
+
+Owner (step 18, "grip" default): "both rampart and parity rwd feel like they have no side grip
+and step out, even when steering and lifting off the throttle." Owner, ride: "when I turned
+springs and bars up it feels better under grip cornering … even better at 1.5 and 1.5". Lead:
+steer + lift at normal loads must not step the rear out (near "before": slip ≲ 3–6°, a mild yaw
+rise); keep W's catch window and the held-key set; ride 1.5 / 1.5; sliders to 3.0.
+
+**Test** (`grip_balance liftcheck`, a hard pass / fail now in the score; tyre-slip's fail case):
+the left key held, throttle 0, (a) at turn-in from a straight cruise and (b) mid-corner after
+3 s at cruise, at 40 / 60 / 80 mph. Cells give peak body slip at turn-in / mid-corner and the
+mid-corner yaw rise. Fail = > 8° or a spin.
+
+| car | ride · balance | 40 mph | 60 mph | 80 mph | worst | result |
+|---|---|---|---|---|---|---|
+| rampart_50 | medium · before | 0.7° / 0.5° +6.6 | 3.1° / 2.6° +5.2 | 4.8° / 3.3° +3.7 | 4.8° | pass |
+| rampart_50 | medium · step14 | 14.7° / 13.5° +7.0 | 17.4° / 10.3° +6.4 | 14.7° / 8.0° +8.2 | 17.4° | **FAIL ×6** |
+| rampart_50 | medium · grip | 12.7° / 12.9° +11.8 | 14.6° / 13.3° +19.2 | 12.2° / 6.7° +0.0 | 14.6° | **FAIL ×5** |
+| rampart_50 | firm · step14 | 7.9° / 4.8° +8.7 | 11.5° / 6.2° +7.2 | 11.9° / 6.4° +8.0 | 11.9° | **FAIL ×2** |
+| rampart_50 | firm · grip | 6.9° / 4.0° +8.6 | 9.9° / 4.7° +4.8 | 9.4° / 4.8° +7.4 | 9.9° | **FAIL ×2** |
+| rampart_50 | firm · new | 2.1° / 1.4° +4.9 | 4.7° / 2.9° +4.0 | 5.4° / 3.0° +2.6 | 5.4° | pass |
+| parity_rwd_d | medium · before | 0.7° / 0.6° +6.8 | 2.9° / 2.4° +5.6 | 4.9° / 3.1° +3.8 | 4.9° | pass |
+| parity_rwd_d | medium · step14 | 14.5° / 13.7° +13.0 | 15.9° / 10.0° +5.8 | 14.3° / 8.9° +11.4 | 15.9° | **FAIL ×6** |
+| parity_rwd_d | medium · grip | 12.8° / 14.5° +15.8 | 14.3° / 13.0° +20.8 | 11.7° / 6.7° +0.0 | 14.5° | **FAIL ×5** |
+| parity_rwd_d | firm · step14 | 7.8° / 4.8° +8.2 | 11.2° / 6.2° +6.8 | 11.6° / 6.4° +7.3 | 11.6° | **FAIL ×2** |
+| parity_rwd_d | firm · grip | 6.7° / 4.2° +8.0 | 9.5° / 4.7° +5.0 | 9.1° / 4.8° +7.4 | 9.5° | **FAIL ×2** |
+| parity_rwd_d | firm · new | 2.0° / 1.4° +5.8 | 4.5° / 2.9° +3.9 | 5.3° / 2.9° +2.9 | 5.3° | pass |
+| parity_rwd_a | medium · before | 0.7° / 0.6° +7.7 | 3.0° / 2.3° +1.9 | 4.7° / 3.4° +4.4 | 4.7° | pass |
+| parity_rwd_a | medium · step14 | 14.5° / 8.3° +2.7 | 15.4° / 10.4° +8.4 | 12.8° / 8.8° +13.0 | 15.4° | **FAIL ×6** |
+| parity_rwd_a | medium · grip | 12.3° / 14.2° +14.2 | 13.3° / 12.8° +12.3 | 10.5° / 5.7° +4.1 | 14.2° | **FAIL ×5** |
+| parity_rwd_a | firm · step14 | 7.6° / 4.8° +8.4 | 10.9° / 6.1° +7.0 | 11.0° / 6.2° +6.4 | 11.0° | **FAIL ×2** |
+| parity_rwd_a | firm · grip | 6.6° / 4.1° +8.2 | 9.2° / 4.7° +5.6 | 8.5° / 4.7° +6.5 | 9.2° | **FAIL ×2** |
+| parity_rwd_a | firm · new | 1.9° / 1.4° +6.1 | 4.4° / 2.8° +4.0 | 4.9° / 2.8° +3.3 | 4.9° | pass |
+| parity_rwd_b | medium · before | 2.6° / 2.8° +12.9 | 5.5° / 3.4° +6.2 | 8.7° / 3.8° +5.6 | 8.7° | **FAIL ×1** |
+| parity_rwd_b | medium · step14 | 25.3° / 19.5° +21.5 | 25.8° / 14.3° +14.5 | 17.9° / 10.3° +11.6 | 25.8° | **FAIL ×6** |
+| parity_rwd_b | medium · grip | 25.3° / 17.6° +11.5 | 21.7° / 16.0° +9.8 | 15.0° / 8.7° +10.7 | 25.3° | **FAIL ×6** |
+| parity_rwd_b | firm · step14 | 12.6° / 8.0° +11.9 | 15.4° / 8.5° +9.6 | 14.0° / 7.3° +6.2 | 15.4° | **FAIL ×5** |
+| parity_rwd_b | firm · grip | 13.8° / 10.3° +15.0 | 14.9° / 8.1° +9.0 | 12.0° / 6.4° +7.5 | 14.9° | **FAIL ×5** |
+| parity_rwd_b | firm · new | 5.0° / 3.7° +8.8 | 7.0° / 4.6° +7.3 | 6.6° / 3.9° +5.8 | 7.0° | pass |
+| shiro_turbo | medium · before | 0.9° / 0.2° +10.4 | 3.1° / 1.8° +4.4 | 5.0° / 2.9° +6.4 | 5.0° | pass |
+| shiro_turbo | medium · step14 | 16.1° / 12.4° +16.4 | 15.9° / 9.2° +9.6 | 12.7° / 8.1° +10.1 | 16.1° | **FAIL ×6** |
+| shiro_turbo | medium · grip | 15.5° / 11.7° +10.6 | 14.3° / 7.6° +6.4 | 9.9° / 6.5° +12.9 | 15.5° | **FAIL ×4** |
+| shiro_turbo | firm · step14 | 8.1° / 4.8° +8.3 | 11.2° / 6.2° +7.2 | 11.1° / 6.2° +5.0 | 11.2° | **FAIL ×3** |
+| shiro_turbo | firm · grip | 7.3° / 4.2° +8.3 | 9.5° / 4.8° +6.2 | 8.5° / 4.8° +5.9 | 9.5° | **FAIL ×2** |
+| shiro_turbo | firm · new | 2.2° / 1.4° +5.7 | 4.5° / 2.8° +3.8 | 4.9° / 2.8° +3.4 | 4.9° | pass |
+
+**Cause.** Two things combine:
+- The soft RWD rear tyres (cornering stiffness × 0.45 in step 14, × 0.8 + μ 0.96 + C 1.0 in
+  grip). Plain lock with those tyres fails; the smart lock with the data tyres passes.
+- W's soft medium-weight bars (× 0.15). With bars ≥ 1.0 the step-out halves. Above that,
+  springs / bars barely matter (0.95 / 1.0 to 2.0 / 2.0: step 14 11.9 → 11.6°).
+
+**Fix ("new", step 20; step 14 one click away as "balance: step 14"):**
+- RWD front cornering stiffness × 0.6 (the smart lock's size and turn-in);
+- RWD rear × 0.9 with a slightly flatter side force past the peak (shape C 1.2, cornering
+  stiffness kept). The flatter tail keeps over-rotations catchable; the near-data stiffness stops
+  the lift step-out. Found in a 24-set sweep scored on lift fails, W's catch, the held-key set and
+  the shiro / rampart feel;
+- FWD: the data tyres with the rear bar × 2. On the firm ride the soft-ride FWD rear (0.97 / 0.7)
+  stepped out on kestrel_ts;
+- the default ride is **"firm"** (`RideTune::firm`): medium weight with springs / bars × 1.5 and
+  dampers × 1.5 (2.4 / 3.2). The panel's springs / bars sliders go to 3.0. The saved ride key is
+  bumped (v3), and the grip key too (v3: the v2 builds saved "grip" as the default).
+
+**Held key + W's catch, together.** W's step 11 adds countersteer lock while the slide still grows
+past 40° (× 1.4, rack × 2). My held-key cut (× 0.5 after a 0.5 s hold past 15°) multiplied on
+top and cancelled the catch (drift_lab_w_catch failed; rwd_d peaked at 61°, not caught). The cut
+now lets go while the slide grows (`slide_lock_growth_dps` 15, W's `over_from_dps`) and above
+40° of slip (`slide_lock_to_deg`, fading over 10°). A normal held drift (30–40°) gets the cut;
+an over-rotation gets W's extension.
+
+**All on one build (firm ride, "new"):**
+
+| requirement | result |
+|---|---|
+| steer + lift, no step-out: rampart_50 / parity_rwd_d / a / b / shiro | **pass** on all 5, worst 4.9–7.0° (before: 4.0–5.9°), yaw rise +2.6 … +8.8 °/s |
+| … the other 9 cars (FWD, debug_coupe, lucciola, hakone, sperber) | pass, worst 3.4–7.9° |
+| W's catch (`over_rotation_catch`): rwd_d / rwd_a | caught at 35 / 40 / 45 / 55° (W's window: 40°) |
+| … rwd_b, rampart_50 | caught at 35 / 40° (at 45–55° the test's entry never reaches the push) |
+| drift_lab_w_catch, drift_lab_w_snap, tyre_slip tests | pass |
+| held-key set (27, plain / VR steering) | **26 / 26** (step 14 on the firm ride: 24 / 25; medium step 14 before the fix: 0) |
+| held key + tapper, rwd_d / a / b | all hold (3.4–4.6 s in band); rampart_50 held key swaps on this entry, its tapper holds |
+| snap-back overshoot rwd_d / b | 3.3° / 1.0° |
+| roll (80 km/h step steer) | rise 0.35–0.40 s, peak 2.3–2.8° (medium step 14: 0.45–0.52 s, 5.2–6.3°) |
+
+**What does not stay the same: the feel.** The lead's (d) "grip feel unchanged except for the
+ride" conflicts with (c). The step-out came from the same soft rear tyres that gave step 14 /
+grip their below-limit slip. On the firm ride with "new":
+- body slip at 0.6 g at 60 km/h ≈ 0° (step 14: 1.3–1.6°);
+- the 0.4 s tap at 60 mph is 26–29 °/s (step 14: 33–38);
+- lane-change slip 3° (step 14: 8°);
+- roll 2.3–2.8° (step 14 on medium weight: 5–6°).
+
+Distance from the step-18 shiro / rampart feel is 2.3–2.4 (step 14 on the firm ride: ~1.3), and
+most of it is roll and slip: the planted, stiffer car the owner asked for. It is not the
+step-18 feel. If the owner wants more rotation back, "balance: step 14" + the firm ride is one
+click away (it still steps out on a lift: 14 / 30 fails).

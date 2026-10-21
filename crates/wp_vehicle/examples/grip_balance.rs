@@ -373,6 +373,7 @@ fn configs() -> Vec<(String, Option<GripBalance>)> {
         Ok("new") => vec![("new".into(), Some(GripBalance::lab_default()))],
         Ok("grip") => vec![("grip".into(), Some(GripBalance::grip()))],
         Ok("drift_best") => vec![("drift_best".into(), Some(GripBalance::drift_best()))],
+        Ok("step14") => vec![("step14".into(), Some(GripBalance::step14()))],
         Ok(j) if j.starts_with('[') => {
             let v: Vec<GripBalance> = serde_json::from_str(j).expect("GRIP json list");
             v.into_iter()
@@ -408,6 +409,20 @@ fn main() {
     } else if std::env::var("RIDE").as_deref() == Ok("slow") {
         // Drift Lab W's "slow weight (clip 4)" preset.
         ride_lab::set_override(Some(RideTune::slow_weight()));
+    } else if let Some(j) = std::env::var("RIDE")
+        .ok()
+        .filter(|v| v.trim_start().starts_with('{'))
+    {
+        // RIDE='{...}': fields on top of the medium-weight ride (W's default).
+        let mut v = serde_json::to_value(RideTune::medium_weight()).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(&j).expect("RIDE json");
+        for (k, x) in patch.as_object().expect("RIDE object") {
+            v[k] = x.clone();
+        }
+        ride_lab::set_override(Some(serde_json::from_value(v).expect("RIDE fields")));
+    } else if std::env::var("RIDE").as_deref() == Ok("firm") {
+        // The step-20 default ride (springs / bars × 1.5 on medium weight).
+        ride_lab::set_override(Some(RideTune::firm()));
     } else if std::env::var("RIDE").as_deref() == Ok("medium") {
         // Drift Lab W step 10's "medium weight" ride (W's "new" default).
         ride_lab::set_override(Some(RideTune::medium_weight()));
@@ -435,9 +450,31 @@ fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args.first().is_some_and(|a| {
         [
-            "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
-            "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score", "feel",
-            "cars", "holds",
+            "all",
+            "circle",
+            "ug",
+            "tap",
+            "lift",
+            "power",
+            "regress",
+            "sweep",
+            "trace",
+            "dtrace",
+            "robust",
+            "ltrace",
+            "chatter",
+            "pull",
+            "slipg",
+            "c60",
+            "snap",
+            "grip",
+            "score",
+            "feel",
+            "cars",
+            "holds",
+            "catch",
+            "liftcheck",
+            "roll",
         ]
         .contains(&a.as_str())
     }) {
@@ -481,6 +518,30 @@ fn main() {
     }
     if what == "trace" {
         trace(args.first().map_or("parity_rwd_d", String::as_str));
+        return;
+    }
+    if what == "roll" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("# {name}");
+            roll_table(&args);
+        }
+        return;
+    }
+    if what == "liftcheck" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("# {name}");
+            liftcheck_table(&args);
+        }
+        return;
+    }
+    if what == "catch" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("# {name}");
+            catch_table(&args);
+        }
         return;
     }
     if what == "holds" {
@@ -924,6 +985,93 @@ fn holds_table(ids: &[String]) {
             0.6,
         );
         println!("{id}: held key {} | tapper {}", held.cell(), tap.cell());
+    }
+}
+
+/// Drift Lab W's over-rotation catch (step 11, `drift_lab_w::over_rotation_catch`) at
+/// `push_deg` per car: caught / peak slide (`catch`).
+fn catch_table(ids: &[String]) {
+    let a = reference_assists();
+    for id in ids {
+        let c = car(id);
+        for push in [35.0f32, 40.0, 45.0, 55.0] {
+            let r = wp_vehicle::drift_lab_w::over_rotation_catch(&c, &a, push);
+            print!(
+                "{id} {push:.0}°: {} peak {:.0}°  ",
+                if r.caught { "CAUGHT" } else { "no" },
+                r.peak_deg
+            );
+        }
+        println!();
+    }
+}
+
+/// Steer + lift, no step-out (lead / owner 2026-10-21: "no side grip, steps out even when
+/// steering and lifting off the throttle"; tyre-slip's fail case): the left key held with the
+/// throttle lifted to 0, (a) at turn-in from a straight cruise and (b) mid-corner after 3 s at
+/// cruise, at 40 / 60 / 80 mph. Fail = peak body slip > 8° or a spin; the lead's target is
+/// ≤ 3° with a mild yaw rise. Returns the number of fails and prints a row (`liftcheck`).
+fn liftcheck_row(id: &str) -> usize {
+    let c = car(id);
+    let mut fails = 0;
+    let mut cells = Vec::new();
+    let mut worst = 0.0f32;
+    for mph in [40.0f32, 60.0, 80.0] {
+        let (_, (_, turn_in)) = lift_off(&c, mph);
+        let (_, mid, rise) = lift_mid(&c, mph);
+        for x in [turn_in, mid] {
+            worst = worst.max(x);
+            if x > 8.0 {
+                fails += 1;
+            }
+        }
+        cells.push(format!("{turn_in:.1}° / {mid:.1}° +{rise:.1}"));
+    }
+    println!(
+        "| {id} | {} | {worst:.1}° | {} |",
+        cells.join(" | "),
+        if fails == 0 {
+            if worst <= 3.0 {
+                "pass (≤ 3°)".to_string()
+            } else {
+                "pass".to_string()
+            }
+        } else {
+            format!("**FAIL ×{fails}**")
+        }
+    );
+    println!("JSONLIFT {{\"id\":\"{id}\",\"fails\":{fails},\"worst\":{worst}}}");
+    fails
+}
+
+fn liftcheck_table(ids: &[String]) {
+    println!(
+        "\n## Steer + lift, no step-out: peak body slip at turn-in / mid-corner (+ yaw rise °/s)"
+    );
+    println!("| car | 40 mph | 60 mph | 80 mph | worst | result |");
+    println!("|---|---|---|---|---|---|");
+    let fails: usize = ids.iter().map(|id| liftcheck_row(id)).sum();
+    println!("fails total: {fails}");
+}
+
+/// Roll timing (`roll`): Drift Lab W's clip-4 step steer at 80 km/h, key held 1.5 s
+/// (`drift_lab_w::step_steer_roll`; reference: rise 0.6–0.8 s, 5–7° at ~0.8 g, no overshoot).
+fn roll_table(ids: &[String]) {
+    let a = reference_assists();
+    println!("| car | roll delay s | rise s | peak roll ° | overshoot % | lat g | heading start s | travel |");
+    println!("|---|---|---|---|---|---|---|---|");
+    for id in ids {
+        let r = wp_vehicle::drift_lab_w::step_steer_roll(&car(id), &a, 80.0 / 3.6, 1.5);
+        println!(
+            "| {id} | {:.2} | {:.2} | {:.1} | {:.0} | {:.2} | {:.2} | {:.2} |",
+            r.roll_delay_s,
+            r.rise_s,
+            r.peak_roll_deg,
+            r.overshoot_pct,
+            r.peak_lat_g,
+            r.heading_start_s,
+            r.max_travel_frac
+        );
     }
 }
 

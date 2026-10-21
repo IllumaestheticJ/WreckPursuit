@@ -186,6 +186,7 @@ pub fn ride_tune_defaults_json() -> String {
         "lab": wp_vehicle::ride_lab::RideTune::lab_default(),
         "slow_weight": wp_vehicle::ride_lab::RideTune::slow_weight(),
         "medium_weight": wp_vehicle::ride_lab::RideTune::medium_weight(),
+        "firm": wp_vehicle::ride_lab::RideTune::firm(),
     }))
 }
 
@@ -263,10 +264,11 @@ pub fn grip_balance_json() -> String {
 pub fn grip_balance_defaults_json() -> String {
     json(&serde_json::json!({
         "before": wp_vehicle::grip_lab::GripBalance::default(),
-        // "new" = the step-14 default the owner drives (shiro_turbo / rampart_50 are the
-        // owner's feel references, lead 2026-10-21); "grip" = the grip-drivable rework (test).
+        // "new" = the lab default (step 20: no step-out on a lift while steering, firm ride);
+        // "step14" = the step-14 … 19 default; "grip" = the grip-drivable rework (test).
         "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
         "grip": wp_vehicle::grip_lab::GripBalance::grip(),
+        "step14": wp_vehicle::grip_lab::GripBalance::step14(),
         "step2": wp_vehicle::grip_lab::GripBalance::step2(),
         "slow_weight": wp_vehicle::grip_lab::GripBalance::for_slow_weight(),
         "drift_best": wp_vehicle::grip_lab::GripBalance::drift_best(),

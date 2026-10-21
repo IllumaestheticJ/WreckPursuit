@@ -279,7 +279,7 @@ export const sim = {
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
   /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
-  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number> } =>
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number>; firm: Record<string, number> } =>
     JSON.parse(wasm.ride_tune_defaults_json()),
   /** Set the ride tuning ("" = car data as is). */
   rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
@@ -306,6 +306,7 @@ export const sim = {
     before: Record<string, number | boolean | string>;
     new: Record<string, number | boolean | string>;
     grip: Record<string, number | boolean | string>;
+    step14: Record<string, number | boolean | string>;
     step2: Record<string, number | boolean | string>;
     slow_weight: Record<string, number | boolean | string>;
     drift_best: Record<string, number | boolean | string>;
