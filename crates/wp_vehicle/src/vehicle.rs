@@ -20,7 +20,7 @@ use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{gyro_yaw_torque, slide_class, slide_throttle, GyroInput};
 use crate::steering::{
-    ackermann, body_slip, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
+    ackermann, body_slip, grip_lock, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
@@ -364,6 +364,29 @@ impl Vehicle {
     /// The road conditions currently set per wheel.
     pub fn surface_conditions(&self) -> &[SurfaceConditions; 4] {
         &self.conditions
+    }
+
+    /// Grip the road conditions leave the tires, relative to the same surface dry (wet,
+    /// cold/ice, paint, aquaplaning): the mean `surface::conditions_grip` of the wheels in
+    /// contact at their current speed, 1.0 with no wheel down. What an AI driver "feels"
+    /// (police pro driver, lead P8); damage is not included.
+    pub fn conditions_grip(&self) -> f32 {
+        let (mut sum, mut n) = (0.0f32, 0u32);
+        for i in 0..4 {
+            let w = &self.wheels[i];
+            if !w.contact {
+                continue;
+            }
+            let (g, _) =
+                conditions_grip(&self.conditions[i], w.surface, w.vx, &self.corners[i].wet);
+            sum += g;
+            n += 1;
+        }
+        if n == 0 {
+            1.0
+        } else {
+            sum / n as f32
+        }
     }
 
     /// The definition this vehicle was built from.
@@ -821,6 +844,12 @@ impl Vehicle {
             slide_class: self.slide_class,
             pull: eff.steer_pull,
             ratio_scale: eff.steer_ratio_scale.max(0.05),
+            grip_lock: grip_lock(
+                wheelbase,
+                self.corners[0].tire.lateral.d,
+                self.corners[0].tire.peak_slip_angle_rad,
+                v_fwd,
+            ),
         };
         let max_steer = self.corners[0].max_steer.max(self.corners[1].max_steer);
         self.center_steer = update_center_angle(

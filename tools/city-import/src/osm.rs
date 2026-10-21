@@ -377,6 +377,7 @@ pub fn to_network(data: &OsmData, opt: &ImportOptions) -> Result<RoadNetwork, St
                     bus_lane: false,
                     turn_lanes_fwd: tl_f.clone(),
                     turn_lanes_bwd: tl_b.clone(),
+                    ..RoadSpec::new(a, b, *class, fwd, bwd)
                 });
             }
             start = i;

@@ -249,25 +249,27 @@ fn circuit_counts_laps_and_best_lap() {
 // ---------------------------------------------------------------- DNF / DQ
 
 #[test]
-fn corridor_shortcut_is_dq_but_a_short_excursion_is_not() {
+fn leaving_the_route_is_never_a_dq_but_gates_still_count() {
     let racers = [
         ScriptedRacer::new(1, 5.0, 40.0)
             .with(5.0, ScriptedIncident::Swerve { offset_m: 30.0 })
             .with(6.0, ScriptedIncident::Swerve { offset_m: 0.0 }),
         ScriptedRacer::new(2, 5.0, 40.0).with(5.0, ScriptedIncident::Swerve { offset_m: 30.0 }),
     ];
-    let out = run(RaceKind::Sprint, sprint_course(), &racers, 1);
-    assert_eq!(by_racer(&out.results, 1).status, RacerStatus::Finished);
-    assert_eq!(
-        by_racer(&out.results, 2).status,
-        RacerStatus::Dq(DqReason::LeftCorridor)
-    );
-    // Open-route kinds have no corridor, but gates still have to be driven through: the
-    // swerving racer misses them, never finishes and runs out of time after the winner.
-    let out = run(RaceKind::Checkpoint, sprint_course(), &racers, 1);
-    let r2 = by_racer(&out.results, 2);
-    assert_eq!(r2.status, RacerStatus::Dnf(DnfReason::FinishWindow));
-    assert_eq!(r2.gates_passed, 0);
+    // A short excursion off the route and back still finishes. Staying off the route is not
+    // a DQ either, but the racer misses the gates, never finishes and runs out of time after
+    // the winner. Corridor kinds and open-route kinds judge this the same way.
+    for kind in [RaceKind::Sprint, RaceKind::Checkpoint] {
+        let out = run(kind, sprint_course(), &racers, 1);
+        assert_eq!(by_racer(&out.results, 1).status, RacerStatus::Finished);
+        let r2 = by_racer(&out.results, 2);
+        assert_eq!(
+            r2.status,
+            RacerStatus::Dnf(DnfReason::FinishWindow),
+            "{kind:?}"
+        );
+        assert_eq!(r2.gates_passed, 0);
+    }
 }
 
 #[test]

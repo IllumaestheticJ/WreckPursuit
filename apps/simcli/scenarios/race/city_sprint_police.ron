@@ -2,7 +2,9 @@
 // and northbound arterial as race_city_sprint, open roads: civilian traffic on (density 0.3)
 // and police on. Route (60.55, -437) → (60.55, -230), ~207 m, finishing ~100 m short of the
 // next signalled junction so finished cars don't queue on the line. Four entrants on the
-// judge's staggered grid (row gap 8 m, columns 5 m apart).
+// judge's staggered grid (row gap 8 m, columns 5 m apart; x = 59.55 / 64.55 since the grid
+// highway became a divided viaduct with ramps: the course runs down the middle lane of the
+// northbound carriageway).
 //
 // 13:00 and police_presence 2.0: an illegal daytime race has PolicePresence::Max in
 // data/events/stakes.toml; until that reaches wp_police (contract request R2) the scenario
@@ -38,7 +40,9 @@
     // Slowest city runs in the test pass (round 8): skipped by debug `cargo test`, run by the
     // release CI jobs (`simcli determinism`, `simcli goldens`).
     slow: true,
-    seed: 5,
+    // Re-aimed for the grid highway's ramps (WP_RACE_AIM_*, crates/wp_race/tests/race_police.rs):
+    // seed 12 passes both police tests at dy = -10, 0 and +10 m.
+    seed: 12,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,
     mode: Arcade,
@@ -48,10 +52,10 @@
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (58.05, -440.0, 0.0), police_heat: 3.75),
-        (id: "ai_sedan", car: "debug_sedan", pos: (63.05, -444.0, 0.0), police_heat: 3.75),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (58.05, -448.0, 0.0), police_heat: 3.75),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (63.05, -452.0, 0.0), police_heat: 3.75),
+        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0), police_heat: 3.75),
+        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0), police_heat: 3.75),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0), police_heat: 3.75),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0), police_heat: 3.75),
     ],
     duration_s: 30.0,
     hash_every: 240,

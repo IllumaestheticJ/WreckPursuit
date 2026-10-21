@@ -9,6 +9,7 @@ import type { Barrier, SimEvent } from "./wasm/sim";
 import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { MarkingsView } from "./markings_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
@@ -47,8 +48,10 @@ export class SceneView {
   );
 
   private debugGrid!: THREE.GridHelper;
-  /** Traffic signal heads and stop lines (signals_view.ts). */
+  /** Traffic signal heads (signals_view.ts). */
   readonly signals = new SignalView();
+  /** Painted road markings (markings_view.ts). */
+  readonly markings = new MarkingsView();
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -82,7 +85,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group);
+    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group);
   }
 
   /**
@@ -115,7 +118,14 @@ export class SceneView {
       // City v2 adds terrain (ground_* / rock / seabed, smooth-shaded) and a sea plane 0.25 m
       // above sea level (no polygon offset: at long range it would win against the land);
       // walls, kerbs and decks come without normals and are flat-shaded.
-      const layer: Record<string, number> = { bus_lane: 2, parking: 2, sidewalk: 1, asphalt: 1, highway_concrete: 1 };
+      const layer: Record<string, number> = {
+        bus_lane: 2,
+        parking: 2,
+        sidewalk: 1,
+        asphalt: 1,
+        highway_concrete: 1,
+        ramp_taper: 2,
+      };
       gltf.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
         for (const mat of m ? (Array.isArray(m) ? m : [m]) : []) {
