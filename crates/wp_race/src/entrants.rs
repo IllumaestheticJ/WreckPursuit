@@ -8,12 +8,15 @@
 //!   [`CityRace`] the judge uses, with the AI's own civilian-contact DQ off (the judge's rules decide);
 //! - inputs are held (handbrake) until the judge's green tick, so AI cars obey the countdown;
 //! - `wp_opponent` outcomes the judge cannot see map onto judge DNFs: `Abandoned` (ran from
-//!   the police) → [`DnfReason::Fled`], `Retired` (too damaged) → [`DnfReason::Retired`].
+//!   the police) → [`DnfReason::Fled`], `Retired` (too damaged) → [`DnfReason::Retired`];
+//! - slipstream: [`AiEntrants::slipstream`] gives every vehicle's drag multiplier from the
+//!   wake geometry (`wp_opponent::draft`), and the AI drives for the tow (`RaceConfig::draft`).
 //!
 //! Server loop, every physics tick (before `Sim::step_fixed`):
 //! ```ignore
 //! let inputs = ai.tick(&judge, sim.tick(), sim.world(), &obs, &last_events, &police_query);
 //! for (e, inp) in inputs { sim.set_input(e, inp)?; }
+//! for (e, k) in ai.slipstream(&obs) { sim.set_drag_scale(e, k)?; }
 //! ai.report_to(&mut judge, sim.tick());
 //! ```
 
@@ -21,8 +24,8 @@ use std::collections::BTreeSet;
 
 use wp_contracts::{EntityId, SimEvent, VehicleInput};
 use wp_opponent::{
-    CarCapability, CorridorOptions, DriverProfile, Field, OpponentEvent, OpposingLanes,
-    PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
+    CarCapability, CorridorOptions, DraftParams, DriverProfile, Field, OpponentEvent,
+    OpposingLanes, PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
 };
 use wp_world::World;
 
@@ -115,6 +118,9 @@ impl AiEntrants {
             seed,
             // The judge owns the rules: a civilian hit is scored there, not by the AI quitting.
             civilian_contact_dq: false,
+            // The server applies slipstream (`slipstream` → `Sim::set_drag_scale`), so the
+            // AI may close up behind a car for the tow.
+            draft: true,
             corridor: CorridorOptions {
                 opposing: if closed {
                     OpposingLanes::Always
@@ -193,6 +199,13 @@ impl AiEntrants {
         let out = self.field.tick(world, vehicles, events, police).to_vec();
         self.log.extend(self.field.drain_events());
         out
+    }
+
+    /// Slipstream drag multiplier for every vehicle in `vehicles` (1 = no tow), in input
+    /// order: feed each to `wp_sim::Sim::set_drag_scale` every tick. Covers human racers
+    /// and traffic too: the wake is physics, not an AI perk.
+    pub fn slipstream(&self, vehicles: &[VehicleObs]) -> Vec<(EntityId, f32)> {
+        wp_opponent::slipstream(vehicles, &DraftParams::default())
     }
 
     /// Report `wp_opponent` outcomes the judge cannot observe: racers that abandoned the race

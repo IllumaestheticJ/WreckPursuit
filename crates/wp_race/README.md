@@ -128,6 +128,12 @@ into reverse). The judge stays the authority: the AI's own civilian-contact DQ i
 `wp_opponent` outcomes the judge cannot see become judge DNFs (`Abandoned` → `Fled`,
 `Retired` → `Retired`), once each.
 
+**Slipstream (drafting).** `AiEntrants::slipstream(&vehicle_obs)` returns a drag multiplier per
+vehicle from `wp_opponent::draft` (35 % less drag bumper to bumper, fading to nothing 25 m back
+and at the edge of the leader's wake; leader ≥ 10 m/s). The server feeds it to
+`Sim::set_drag_scale` every tick for *every* car in the race, human racers included, and the AI
+field is built with `RaceConfig::draft` so it closes up for the tow and pulls out to pass.
+
 ### Police (`police`)
 
 `wp_police` has no race API before contract v0.3.0, so race signals use its existing input:

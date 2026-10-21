@@ -633,8 +633,6 @@ fn sweep_open_roads_progress() {
 
 /// Same car, one clearly better driver at the back: with slipstream it gets past (the tow
 /// on the straights closes the time gap the corners open); without, it never does.
-/// Needs `Sim::set_drag_scale` (feature `sim-draft-hook`, see the integration doc).
-#[cfg(feature = "sim-draft-hook")]
 #[test]
 fn draft_lets_a_faster_driver_in_the_same_car_pass() {
     let race = |seed: u64, draft: bool| {

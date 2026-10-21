@@ -196,7 +196,8 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
             }
         }
         heat.observe(&events);
-        let inputs = ai.tick(&judge, tick, sim.world(), &obs(&sim), &events, &heat);
+        let vehicles = obs(&sim);
+        let inputs = ai.tick(&judge, tick, sim.world(), &vehicles, &events, &heat);
         if std::env::var("WP_RP_TRACE").is_ok() && tick.is_multiple_of(240) {
             for (k, e) in ai.racers().iter().enumerate() {
                 let d = ai.field().debug_of(k);
@@ -223,6 +224,9 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         }
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
+        }
+        for (e, k) in ai.slipstream(&vehicles) {
+            sim.set_drag_scale(e, k).unwrap();
         }
         sim.step_fixed();
         events = sim.drain_events();

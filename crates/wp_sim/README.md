@@ -75,6 +75,12 @@ economy and net key events by vehicle); read `parked_wrecks()` / `parked_stats()
 car's lattice answers `node_positions(PARKED_ENTITY_BASE + prop)`. A shoved prop wakes its
 neighbours like a vehicle. Perf and scenarios: `docs/integration/parked-signals.md`
 (`cargo run --release -p wp_sim --example parked_damage_cost`).
+## Slipstream hook
+- `set_drag_scale(id, k)`: multiplies the car's aero drag by `k` (clamped 0..2) on top of the
+  damage model's `drag_scale`, every tick until changed. Default 1.0 is an exact no-op (no
+  golden changes). Race code recomputes it each tick from `wp_opponent::draft::slipstream`
+  (see `wp_race::AiEntrants::slipstream`). Applied in the damage step, so it has no effect
+  with the damage system disabled.
 
 ## Known gaps
 - Traffic AI does not slow in rain or fog yet (needs a `wp_world` hook, request W-D1 in
