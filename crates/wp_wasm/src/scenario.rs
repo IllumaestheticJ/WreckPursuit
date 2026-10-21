@@ -102,6 +102,7 @@ pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
     EntitySpec {
         id: id.into(),
         car: car.into(),
+        mods: Vec::new(),
         pos,
         yaw,
         speed_mps: 0.0,

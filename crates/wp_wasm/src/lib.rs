@@ -19,6 +19,7 @@
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
+//! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -30,6 +31,7 @@ pub mod audio;
 pub mod build_stats;
 pub mod data;
 pub mod garage;
+pub mod mod_visuals;
 pub mod pack;
 pub mod police;
 pub mod run;

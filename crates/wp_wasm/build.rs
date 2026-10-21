@@ -1,4 +1,4 @@
-//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats}/*.json`,
+//! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats,mods}/*.json`,
 //! `data/modes/*.toml`) so new cars from other workstreams show up without code changes.
 //! Generates `$OUT_DIR/embedded_data.rs` with one `(kind, id, contents)` table.
 
@@ -20,6 +20,8 @@ fn main() {
         ("panels", "json"),
         // Menu stat bars (`simcli car-stats` → data/stats/cars.json).
         ("stats", "json"),
+        // Mod catalog, so scenario entities can drive modified cars (`EntitySpec::mods`).
+        ("mods", "json"),
     ] {
         let dir = data.join(kind);
         println!("cargo:rerun-if-changed={}", dir.display());
