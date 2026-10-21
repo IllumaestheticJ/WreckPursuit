@@ -26,7 +26,7 @@ min_ahead_m = 150.0
 max_ahead_m = 500.0
 min_sight_m = 120.0
 length_m = 7.0
-deflate_s = 5.0
+deflate_s = 1.0
 lifetime_s = 60.0
 max_active = 2
 [spikes.cooldown_s]

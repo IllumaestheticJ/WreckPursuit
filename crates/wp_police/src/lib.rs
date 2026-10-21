@@ -184,6 +184,9 @@ pub struct SpawnRecord {
     /// appeared, in plain view a moment later). `None`: not seen in that window.
     #[serde(default)]
     pub seen_after_s: Option<f32>,
+    /// It appeared on the far carriageway of a pursued racer's divided road (row 140 audit).
+    #[serde(default)]
+    pub far_carriageway: bool,
 }
 
 /// How a unit's trip to a reckless-driving call ended.

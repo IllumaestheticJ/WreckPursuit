@@ -209,18 +209,24 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         matches!(err, CaptainError::Cooldown { .. } | CaptainError::Budget),
         "{err:?}"
     );
-    // Drive over the strip: wheels flagged, deflation ramps over 5 s.
+    // Drive over the strip: wheels flagged, deflation ramps over `deflate_s` (1 s, row 132).
     let ahead = strip.site.ahead_m;
-    h.run(ahead / h.speed + 1.0, &[]);
-    assert!(
+    let hit = |h: &Harness| {
         h.events
             .iter()
-            .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER)),
-        "no spike hit"
-    );
+            .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER))
+    };
+    for _ in 0..((ahead / h.speed + 2.0) / 0.05) as u32 {
+        if hit(&h) {
+            break;
+        }
+        h.run(0.05, &[]);
+    }
+    assert!(hit(&h), "no spike hit");
+    h.run(0.4, &[]);
     let p1 = h.police.tire_puncture(RACER);
     assert!(p1.iter().any(|x| *x > 0.0 && *x < 1.0), "{p1:?}");
-    h.run(6.0, &[]);
+    h.run(2.0, &[]);
     assert!(h.police.tire_puncture(RACER).contains(&1.0));
     // Captain view reflects the chase.
     let v = h.police.captain_view();

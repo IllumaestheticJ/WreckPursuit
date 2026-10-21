@@ -263,3 +263,205 @@ fn spike_car_and_strip_stay_on_the_racers_carriageway_on_divided_highways() {
         assert!(n >= 1, "{name}: no strip landed on a divided highway");
     }
 }
+
+/// The flows of every one-way road within 8 m of `p` (two where carriageways converge).
+fn oneway_flows(g: &RoadGraph, p: [f32; 2]) -> Vec<[f32; 2]> {
+    (0..g.segments.len())
+        .filter_map(|i| {
+            let s = &g.segments[i];
+            if !s.oneway {
+                return None;
+            }
+            let (a, b) = (g.node(s.a).pos, g.node(s.b).pos);
+            let ab = [b[0] - a[0], b[1] - a[1]];
+            let t = (dot([p[0] - a[0], p[1] - a[1]], ab) / dot(ab, ab).max(1e-6)).clamp(0.0, 1.0);
+            let q = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+            (dist(p, q) < 8.0).then(|| unit_dir(g, SegmentId(i as u32)))
+        })
+        .collect()
+}
+
+/// The one-way flow of the road under `p` (nearest segment within 8 m of its line), if any.
+fn oneway_flow(g: &RoadGraph, p: [f32; 2]) -> Option<[f32; 2]> {
+    let rp = g.nearest_on_road(p)?;
+    let s = g.segment(rp.segment);
+    (s.oneway && rp.dist_m < 8.0).then(|| unit_dir(g, rp.segment))
+}
+
+/// Row 140: a fast racer chased for 60 s down a divided highway (12 starts per city; with
+/// the old spike-car layout, grid runs 3 and 6 put the spike car on the far carriageway). No pursuit car (responder,
+/// backup, roadblock or spike car) appears on the far carriageway: a one-way road within 30 m
+/// of the racer's route running the other way. Every unit after the racer drives its route
+/// legally: never the wrong way along a one-way road, never hopping between the two
+/// carriageways across the median.
+fn pursuit_stays_off_the_far_carriageway(name: &str, world: &World) -> (usize, usize) {
+    let probe = PoliceSystem::for_world(PoliceConfig::builtin(), world, PoliceSetup::default());
+    let g = probe.graph().clone();
+    let starts: Vec<usize> = (0..g.segments.len())
+        .filter(|&i| {
+            let s = &g.segments[i];
+            s.oneway
+                && s.class == RoadClass::Highway
+                && far_carriageway(&g, SegmentId(i as u32), g.node(s.a).pos).is_some()
+        })
+        .collect();
+    let (mut spawns, mut routes) = (0, 0);
+    for k in 0..12 {
+        let seg = SegmentId(starts[k * starts.len() / 12] as u32);
+        let start = g.node(g.segment(seg).a).pos;
+        let path = g.predict_path(start, unit_dir(&g, seg), 3000.0);
+        // The racer's route, sampled: (point, travel direction).
+        let samples: Vec<([f32; 2], [f32; 2])> = (0..(path.length() / 5.0) as usize)
+            .map(|i| {
+                let s = i as f32 * 5.0;
+                (path.point_at(s).unwrap(), path.dir_at(s).unwrap())
+            })
+            .collect();
+        let far = |p: [f32; 2]| {
+            oneway_flow(&g, p).is_some_and(|f| {
+                samples
+                    .iter()
+                    .any(|(q, d)| dist(*q, p) < 30.0 && dot(f, *d) < -0.5)
+            })
+        };
+        // One patrol per district: backup has to be spawned, not taken from the pool.
+        let mut cfg = PoliceConfig::builtin();
+        let one = wp_police::config::PhaseTable {
+            dawn: 1,
+            day: 1,
+            dusk: 1,
+            night: 1,
+        };
+        cfg.presence.patrols = wp_police::config::DistrictTable {
+            core: one,
+            suburb: one,
+            industrial: one,
+        };
+        let mut police = PoliceSystem::for_world(
+            cfg,
+            world,
+            PoliceSetup {
+                seed: 11 + k as u64,
+                ..PoliceSetup::default()
+            },
+        );
+        let mut at = 0.0f32;
+        let mut seen_spawns = 0;
+        for tick in 0..(60.5 / PHYSICS_DT) as usize {
+            at = (at + SPEED * PHYSICS_DT).min(path.length());
+            let p = path.point_at(at).unwrap();
+            let d = path.dir_at(at).unwrap();
+            let v = RacerView {
+                entity: RACER,
+                pos: [p[0], p[1], 0.0],
+                vel: [d[0] * SPEED, d[1] * SPEED, 0.0],
+            };
+            let mut out = Vec::new();
+            police.step(world, &[v], &[], PHYSICS_DT, &mut out);
+            if tick == (0.5 / PHYSICS_DT) as usize {
+                police.set_heat(RACER, HEAT);
+                police.begin_pursuit(RACER);
+            }
+            if tick % 240 != 0 {
+                continue;
+            }
+            police.set_heat(RACER, HEAT);
+            // New pursuit spawns since the last check.
+            let st = police.stats();
+            for sp in &st.spawns[seen_spawns..] {
+                use wp_police::UnitRole;
+                if matches!(
+                    sp.role,
+                    UnitRole::Responder | UnitRole::Reinforcement | UnitRole::Tool
+                ) {
+                    spawns += 1;
+                    assert!(
+                        !far(sp.pos),
+                        "{name} run {k}: {:?} unit {:?} spawned on the far carriageway at {:?}",
+                        sp.role,
+                        sp.unit,
+                        sp.pos
+                    );
+                }
+            }
+            seen_spawns = st.spawns.len();
+            // Every unit after the racer: its route, the first 300 m, legal.
+            for u in police.units() {
+                if u.assignment.target() != Some(RACER) || !u.cmd.track.is_drivable() {
+                    continue;
+                }
+                routes += 1;
+                let t = &u.cmd.track;
+                let mut prev: Option<[f32; 2]> = None;
+                // From where the unit is along it (a shadowing unit's track starts with the
+                // racer's trail behind it).
+                let (s0, _) = t.project(u.body.pos, u.track_s, 1e6);
+                let mut s = s0;
+                while s < t.length().min(s0 + 300.0) {
+                    let (a, b) = (t.point_at(s), t.point_at(s + 5.0));
+                    let dir = [b[0] - a[0], b[1] - a[1]];
+                    // Near a junction the carriageways meet (an interchange, or where they
+                    // join at the road's end): turning back the other way there is legal.
+                    let junction = g.nodes.iter().any(|n| n.junction && dist(n.pos, a) < 25.0);
+                    if junction {
+                        prev = None;
+                    } else if let Some(f) = {
+                        // One-way roads it runs along (not ones it crosses on a bridge); where
+                        // two overlap, the one it drives along.
+                        oneway_flows(&g, a)
+                            .into_iter()
+                            .filter(|f| dot(*f, dir).abs() > 0.7 * 5.0)
+                            .max_by(|x, y| dot(*x, dir).total_cmp(&dot(*y, dir)))
+                    } {
+                        assert!(
+                            dot(f, dir) > -0.5 * 5.0,
+                            "{name} run {k}: unit {:?} routed the wrong way along a one-way road at {a:?} \
+                             (unit at {:?} heading {:?}, {:?}, {:?}, racer at {p:?}; track {:?})",
+                            u.id,
+                            u.body.pos,
+                            u.body.heading,
+                            u.assignment,
+                            u.tactic,
+                            &t.pts[..t.pts.len().min(8)]
+                        );
+                        if let Some(pf) = prev {
+                            assert!(
+                                dot(pf, f) > -0.5,
+                                "{name} run {k}: unit {:?} routed across the median at {a:?} \
+                                 (unit at {:?}, {:?}, {:?}, racer at {p:?}; track {:?})",
+                                u.id,
+                                u.body.pos,
+                                u.assignment,
+                                u.tactic,
+                                &t.pts[..t.pts.len().min(8)]
+                            );
+                        }
+                        prev = Some(f);
+                    } else {
+                        prev = None;
+                    }
+                    s += 5.0;
+                }
+            }
+        }
+    }
+    eprintln!("{name}: {spawns} pursuit spawns, {routes} unit routes checked");
+    (spawns, routes)
+}
+
+#[test]
+fn no_pursuit_spawns_on_the_far_carriageway_and_routes_stay_legal() {
+    let grid = World::procedural(
+        &wp_world::procgen::ProcGenConfig::default(),
+        wp_world::WorldConfig::default(),
+    );
+    let vesper = World::vesper(
+        &wp_world::vesper::VesperConfig::default(),
+        wp_world::WorldConfig::default(),
+    );
+    for (name, world) in [("grid", &grid), ("vesper", &vesper)] {
+        let (spawns, routes) = pursuit_stays_off_the_far_carriageway(name, world);
+        assert!(spawns >= 3, "{name}: only {spawns} pursuit spawns");
+        assert!(routes >= 10, "{name}: only {routes} routes");
+    }
+}
