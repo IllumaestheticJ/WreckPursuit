@@ -48,7 +48,7 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
-  trans_catch_gain: { label: "transition: new-side catch", min: 0, max: 1.2, step: 0.05, scale: 100, unit: "% of travel", hint: "step 13: right after a lift-flick crosses onto the new side, a countersteer key points the wheels at this share of the front axle's travel at once (default 90 %; past 100 % over-catches and swings back). Settles the new drift in ~0.5 s instead of ~1.5 s" },
+  trans_catch_gain: { label: "transition: new-side catch", min: 0, max: 1.2, step: 0.05, scale: 100, unit: "% of travel", hint: "step 13: right after a lift-flick crosses onto the new side, a countersteer key points the wheels at this share of the front axle's travel at once (default 80 %; 90 % until row 137 over-caught rampart_50 into a second swing; past 100 % over-catches and swings back). Settles the new drift in ~0.5 s instead of ~1.5 s" },
   trans_t_s: { label: "transition: rack time", min: 0.05, max: 0.5, step: 0.01, unit: "s", hint: "step 12 transition rack: time for the wheels to move 45° toward the travel on a flick (default 0.1 s)" },
   trans_key_gain: { label: "transition: key offset", min: -0.3, max: 0.5, step: 0.05, hint: "step 12: the new key's offset from the travel, × lock (0 = wheels along the travel; + into the old corner stops the swing, − past the travel swings faster but spins)" },
   drift_lock_extra: { label: "catch: extra lock", min: 0, max: 0.6, step: 0.05, scale: 100, unit: "%", hint: "step 11 over-rotation catch: with the counter key held while the car over-rotates past 40–50° of slip, the counter lock may reach full lock × (1 + this) (default 40 %; grip driving and a held drift unchanged)" },
@@ -188,6 +188,9 @@ export class DriftLabWPanel {
   private active = false;
   /** The panel is on screen (F10 / ?tune=1 / the pad). */
   private visible = false;
+  /** Opened as the hidden lab (F10 / ?tune=1): also the flick / transition settings, A/B only
+   * (owner, playtest row 137: they are not player settings). The pad alone hides them. */
+  private lab = false;
   private shown = false;
   private open = true;
   /** The lab's current car id (set by the session start). */
@@ -228,9 +231,11 @@ export class DriftLabWPanel {
     return this.visible;
   }
 
-  /** Show or hide the panel (F10, ?tune=1). */
-  show(on: boolean): void {
+  /** Show or hide the panel. `lab` (F10, ?tune=1; the default) also shows the flick /
+   * transition settings, labelled "lab"; the test pad opens it without them. */
+  show(on: boolean, lab = true): void {
     this.visible = on;
+    if (on) this.lab = lab;
     this.root.style.display = on ? "block" : "none";
     if (on) this.build();
   }
@@ -245,7 +250,7 @@ export class DriftLabWPanel {
    * handling) and raw keys for the plain steering. */
   setActive(pad: boolean): void {
     this.applyOverrides();
-    if (pad && !this.visible) this.show(true);
+    if (pad && !this.visible) this.show(true, false);
     if (pad === this.active) {
       if (this.visible) this.build();
       return;
@@ -411,7 +416,8 @@ export class DriftLabWPanel {
     }
     // Step 12 (lead / tyre-slip): transition rack — on a lift or key reversal in a slide, the
     // key toward the new side points the wheels along the travel so the car swings through.
-    {
+    // Hidden lab only (row 137).
+    if (this.lab) {
       const input = document.createElement("input");
       input.type = "checkbox";
       input.id = "drift-lab-w-trans";
@@ -419,7 +425,7 @@ export class DriftLabWPanel {
       input.onchange = () =>
         this.save({ ...(this.sim.plainSteer() ?? defaults), trans_follow: input.checked } as unknown as Record<string, number>);
       row(
-        "transition: follow the travel",
+        "lab · transition: follow the travel",
         "step 12: within 1 s of a throttle lift or a key reversal in a slide, the key toward the new side points the front wheels along their travel (up to 45°) instead of into the old corner, so a lift-flick swings through (off: no car swung). Countersteer, released keys and grip driving unchanged",
         input,
         document.createElement("span"),
@@ -586,6 +592,9 @@ export class DriftLabWPanel {
       );
     }
     for (const [key, f] of Object.entries(FIELDS)) {
+      // Flick / transition settings: hidden lab only, labelled "lab" (owner, playtest row 137).
+      const transition = key.startsWith("trans_");
+      if (transition && !this.lab) continue;
       const value = p[key] ?? defaults[key];
       const input = document.createElement("input");
       input.type = "range";
@@ -605,7 +614,7 @@ export class DriftLabWPanel {
         this.save({ ...(this.sim.plainSteer() ?? defaults), [key]: Number(input.value) });
         this.curve();
       };
-      row(f.label, f.hint, input, val);
+      row(transition ? `lab · ${f.label}` : f.label, f.hint, input, val);
     }
     // Suspension (ride tuning override, wp_vehicle::ride_lab).
     {
@@ -901,7 +910,9 @@ export class DriftLabWPanel {
       };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, trans, v2);
+      // The transition preset is a flick / transition setting: hidden lab only (row 137).
+      trans.textContent = `lab · ${trans.textContent}`;
+      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans] : []), v2);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

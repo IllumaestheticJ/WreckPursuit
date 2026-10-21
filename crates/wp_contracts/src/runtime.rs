@@ -240,14 +240,16 @@ pub struct AssistProfile {
 }
 
 impl AssistProfile {
-    /// Default assists for keyboard drivers: everything on, strong filtering.
+    /// Default assists for keyboard drivers: everything on, strong filtering, no countersteer
+    /// help (owner, playtest row 137; it was 0.6).
     pub fn keyboard_default() -> Self {
         Self {
             abs: AbsLevel::Full,
             tcs: TcsLevel::Full,
             esc: true,
             steer_speed_sensitivity: 1.0,
-            countersteer_help: 0.6,
+            // Owner, playtest row 137 (2026-10-21): no automatic countersteer by default.
+            countersteer_help: 0.0,
             throttle_filter: 0.7,
             brake_filter: 0.6,
             auto_gears: true,
