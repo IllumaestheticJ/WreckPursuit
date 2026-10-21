@@ -1254,6 +1254,22 @@ Red on plain `lead/main-sync` too, not police (left to main-sync):
 - 44 goldens mismatch identically on main-sync (same list with or without this branch); only
   the four police ones above are blessed here.
 
+### Lead's main-sync blockers (2026-10-21, on main-sync cd6cd320)
+- **wp_wasm `run_tests` ×2** (nothing settled in 60 s): not police routing. The test held a
+  full brake on the "parked" racer; at a standstill that auto-reverses, and on main's grid the
+  racer backed away down a diagonal avenue at 17 m/s (the units on diagonal headings were
+  chasing it). The tests now hold half brake, like `career_tests::brake_until_settled`.
+- **wp_race `hollins_hill_sprint`** (all four `Dnf(Captured)`): partly police, partly
+  legitimate. Police side: a responding unit held head-on in the single-lane hairpin for its
+  target; the target stopped in front of it and was arrested, then the same unit arrested
+  the racers queued behind, one after another (the 30 m pinned rule took them too). Fixed:
+  the capturer is busy booking for `ARREST_BUSY_S` (30 s; no other capture, no new
+  pursuit/intercept) and the pinned rule needs a unit chasing that racer. Legitimate side:
+  with opponent-pace phase 3 every racer speeds and runs reds past the hill's patrols in the
+  first 20 s (3 + 3 witnessed violations, L1) and a pursued L1 AI racer yields at 6 m/s, so
+  the police can still take out the whole field. The test now accepts that (race ended,
+  nobody wrecked); other police races still need a winner.
+
 ### Keep-up and predict (owner: "cops can't keep up", "don't predict fast enough") — 2026-10-21
 Measured with `simcli police-bench`, which now has two keep-up columns (`lead m`: distance
 to the nearest chasing unit while police see the evader; `pace`: that unit's speed ÷ the
