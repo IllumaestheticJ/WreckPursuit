@@ -175,6 +175,9 @@ struct PartBuild {
 #[derive(Debug, Clone, Default)]
 pub struct Builder {
     parts: Vec<PartBuild>,
+    /// Grid step of [`Patch`]es with automatic resolution, m (`None` = 6 cm; the mid LOD sets a
+    /// coarser one, `mesh::MID_PATCH_STEP_M`).
+    pub patch_step_m: Option<f32>,
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -570,10 +573,11 @@ impl Builder {
     /// Thin shell following the loft surface (see [`Patch`]).
     pub fn surface_patch(&mut self, key: &PartKey, profile: &BodyProfile, patch: &Patch) {
         let (y0, y1) = (patch.y0.min(patch.y1), patch.y0.max(patch.y1));
+        let step = self.patch_step_m.unwrap_or(0.06);
         let ny = if patch.steps.0 > 0 {
             patch.steps.0
         } else {
-            (((y1 - y0) / 0.06).ceil() as usize).max(1)
+            (((y1 - y0) / step).ceil() as usize).max(1)
         };
         let (a0, a1) = match patch.band {
             PatchBand::Side { z0, z1 } => (z0.min(z1), z0.max(z1)),
@@ -582,7 +586,7 @@ impl Builder {
         let na = if patch.steps.1 > 0 {
             patch.steps.1
         } else {
-            (((a1 - a0) / 0.06).ceil() as usize).max(1)
+            (((a1 - a0) / step).ceil() as usize).max(1)
         };
         // Surface samples: (point, normal) on a (ny+1) × (na+1) grid.
         let grid: Vec<Vec<([f32; 3], [f32; 3])>> = (0..=ny)

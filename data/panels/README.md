@@ -6,9 +6,32 @@ Owned by workstream R (`ws/panels`). Every car in `data/cars` has:
 |---|---|---|
 | `<car>.json` | Panel spec (`wp_damage::PanelSpec`): hinged/bolted panels, hinge + latch nodes, swing limits, mass, inertia, damping, thresholds | `cargo run -p car-assets --bin gen-panels` (first pass from the lattice; hand edits welcome) |
 | `meshes/<car>.json` | Procedural low-poly mesh (`car_assets::mesh::CarMesh`), one part per body region + glass, lights, mirrors, interior, wheels; skinned to the lattice | `cargo run -p car-assets --bin gen-car-mesh` (runs `bind-skin`) |
+| `meshes/mid/<car>.json` | Mid level of detail of the same car (same format and fields, `car_assets::mesh::Lod::Mid`), not skinned; see "Mid LOD" below | `cargo run -p car-assets --bin gen-car-mesh` (same run) |
 
 Both are checked by `cargo run -p car-assets --bin validate-car-asset` and by
-`cargo test -p car-assets` (which also fails if `meshes/` is stale, like the lattices test).
+`cargo test -p car-assets` (which also fails if `meshes/` or `meshes/mid/` is stale, like the
+lattices test).
+
+### Mid LOD (`meshes/mid/<car>.json`)
+A second file per car in the same format 4 / `CarMesh` shape, in a subfolder so anything listing
+`meshes/*.json` still sees one (full) mesh per car. Generated from the car's own style
+(`mesh::generate_mid`): loft stations every 0.20 m / 0.12 m near the ends and arches
+(`MID_LOFT_STEPS`; full meshes 0.07 / 0.036 hero, 0.11 / 0.065 traffic), 12-segment wheels,
+16 cm surface-patch grids, traffic-tier mechanical detail, and only the parts that read from outside at a distance
+(`mesh::keep_in_mid`): body panels, glass, lights, mirrors, light bars, tires, rims, exhaust tips
+and style details ≥ 0.2 m across. Interior, engine bay, suspension / exhaust runs, brake discs,
+calipers, uprights, decal carriers, underglow and small details (handles, fuel fillers, mirror
+glass …) are dropped; details, rims, lamps, light bars and mirrors are decimated by vertex
+clustering on a 3.5 cm grid. `id`, `lattice_id`, `atlas`, `livery`, `tints` and `wheel_camber_deg` equal
+the full mesh's, paint / livery parts keep their livery-atlas UVs, so paint, police liveries and
+tints look identical. Part names, kinds and materials are a subset of the full mesh's. No
+`skin_nodes` / `skin_weights` / `fold`: it is only drawn undeformed. 2k–6.5k triangles
+(`MID_TRI_BUDGET`, test `every_car_has_an_up_to_date_mid_lod`).
+
+Used by the browser testbed (`render/panels.ts` `loadCarMidMesh`, falling back to the full mesh
+when the file is missing) for the instanced fleet's near tier and the nearest parked cars;
+promoted cars within ~30–40 m, the player and the AI racers draw the full, skinned mesh (their
+own `VehicleView`), so dents and crumple show where they can be seen.
 Analog names only, no badges or trademarks (`tools/specsheet/nameplate_check.py`).
 
 ## Panel spec (`<car>.json`)
