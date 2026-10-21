@@ -581,6 +581,11 @@ pub fn driveway_cars(map: &CityMap, seed: u64) -> Vec<StaticProp> {
         let p = geom::add([d.pos[0], d.pos[1]], geom::scale(dir, v));
         let z = driveway_top(d);
         let nose_in = rng.chance(0.7);
+        // Not into a lot fence / hedge / trunk beside the driveway (checked after the draws so
+        // the other driveways keep their cars).
+        if !crate::props::clear_of_decor(map, p, dir) {
+            continue;
+        }
         out.push(StaticProp {
             kind: PropKind::ParkedCar,
             pos: [p[0], p[1], z + 0.75],

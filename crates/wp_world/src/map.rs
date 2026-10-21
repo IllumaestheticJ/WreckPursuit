@@ -993,11 +993,13 @@ mod tests {
     }
 
     /// Brute force over every building (reference for the grid walk).
+    /// Every building and every deck slab (main's grid viaduct is decks since lead/main-sync).
     fn los_brute(map: &CityMap, a: V3, b: V3) -> bool {
         !map.net
             .buildings
             .iter()
             .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.roof_z()))
+            && !map.decks().iter().any(|d| d.blocks(a, b))
     }
 
     #[test]

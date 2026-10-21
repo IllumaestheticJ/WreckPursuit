@@ -236,7 +236,9 @@ const LOOP9: &[[f32; 2]] = &[
     [-578.0, -1072.0],
     [621.0, -1053.0],
     [1525.0, -343.0],
-    [1530.0, 600.0],
+    // 700 (was 600): main's Bluff Road interchange put a ramp gore at 600; the point must
+    // land on the outer carriageway (lead/main-sync).
+    [1530.0, 700.0],
     [1091.0, 1358.0],
 ];
 
@@ -271,7 +273,7 @@ pub fn races() -> Vec<RaceDef> {
             time_of_day_h: 1.0,
             traffic_density: 0.3,
             course: CourseSpec::Circuit { polygon: LOOP9 },
-            length_hint_m: 10132.0,
+            length_hint_m: 10142.0,
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
             seed: 9,
             prior_meets: 2,
@@ -311,7 +313,9 @@ pub fn races() -> Vec<RaceDef> {
                 start: "Highway sprint",
                 finish: [9.2, 400.0, 0.0],
             },
-            length_hint_m: 747.0,
+            // 1113 m (was 747): main's grid moved the "Highway sprint" grid to y = -713, at the
+            // south end of the divided viaduct (lead/main-sync).
+            length_hint_m: 1113.0,
             ai: &[VIC, JUNO, TITO],
             seed: 7,
             prior_meets: 0,
