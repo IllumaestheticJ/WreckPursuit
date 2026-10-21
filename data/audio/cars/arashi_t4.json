@@ -1,0 +1,15 @@
+{
+  "id": "arashi_t4",
+  "engine": {
+    "cylinders": 4,
+    "layout": "Inline",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.45,
+    "turbo": true,
+    "supercharger": false,
+    "gain": 1.05
+  },
+  "engine_pack": "engine_proc_i4",
+  "world_pack": "world_proc",
+  "horn_cue": "horn/standard"
+}
