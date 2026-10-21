@@ -5,7 +5,8 @@
 //!   stands still (< [`STOPPED_MPS`]) and is held, not reset, while its lane shows red or
 //!   amber, so a car that sits through several cycles without getting through counts the green
 //!   time it lost. Reset once it moves. [`TrafficStats::max_stop_s`] is the longest seen
-//!   (wrecked cars are left out: a wreck is not a jam; the metric's timer is also held within
+//!   (wrecked cars are left out: a wreck is not a jam; the metric's timer is also held while
+//!   the car yields to a siren, like at a red, and within
 //!   [`SCENE_RADIUS_M`] of a standing scene — a tracked vehicle stopped for [`SCENE_STILL_S`],
 //!   which in the game ends the run when it is a capture — while the behaviour timer runs on).
 //! - **Queue length** ([`TrafficStats::max_queue`]), sampled every [`SAMPLE_STEPS`]: stopped cars
@@ -63,7 +64,10 @@ impl Traffic {
             .iter()
             .any(|p| geom::dist(*p, q) < SCENE_RADIUS_M);
         let a = &mut self.agents[i];
-        if !red && !at_scene {
+        // Held for a siren (pulled over, or kept from entering the junction while a unit comes
+        // through) is like a red light: the law, not a jam.
+        let siren = a.yielding || a.siren_hold_s > 0.0;
+        if !red && !at_scene && !siren {
             a.metric_stop_s += dt;
         }
         // A wreck is not a jam (the cars behind it are, and they go around).

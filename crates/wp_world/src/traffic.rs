@@ -2584,7 +2584,10 @@ impl Traffic {
             a.wait = if v < 0.5 { cls } else { Wait::Free };
             a.blocked_s = if cls == Wait::Obstructed && v < 0.5 {
                 a.blocked_s + TRAFFIC_DT
-            } else if cls == Wait::Obstructed || leader_manoeuvring {
+            } else if cls == Wait::Obstructed || leader_manoeuvring || v < 0.5 {
+                // Held, not reset, while it stands: the class flickers for a step now and then
+                // (a level-of-detail switch, a siren yield, the leader's class) and a reset
+                // kept the driver from ever giving up on the obstruction (owner row 85).
                 a.blocked_s
             } else {
                 0.0
