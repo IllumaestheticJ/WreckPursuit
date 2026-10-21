@@ -116,7 +116,6 @@ struct Track {
     elapsed: Option<u64>,
     seg_hint: Option<usize>,
     progress_m: f32,
-    out_ticks: u64,
     contacts: u32,
     civilian_hits: u32,
     max_contact_ns: f32,
@@ -245,7 +244,6 @@ impl RaceJudge {
             elapsed: None,
             seg_hint: None,
             progress_m: 0.0,
-            out_ticks: 0,
             contacts: 0,
             civilian_hits: 0,
             max_contact_ns: 0.0,
@@ -345,7 +343,6 @@ impl RaceJudge {
             let t = &mut self.tracks[i];
             t.last = Some((tick, pos));
             t.seg_hint = None;
-            t.out_ticks = 0;
         }
     }
 
@@ -549,7 +546,8 @@ impl RaceJudge {
                 return;
             }
         }
-        // Progress and corridor.
+        // Progress along the route. Leaving the route is never a DQ: the gates still have to
+        // be driven through in order, so a shortcut that skips one gains nothing.
         let proj = self.course.project(s.pos, self.tracks[i].seg_hint);
         let len = self.course.length_m();
         let t = &mut self.tracks[i];
@@ -564,17 +562,6 @@ impl RaceJudge {
         } else {
             proj.along_m
         };
-        if self.rules.kind.uses_corridor() {
-            let limit = self.course.corridor_half_width_m + self.rules.common.corridor_margin_m;
-            if proj.off_m > limit {
-                t.out_ticks += tick - prev_tick;
-                if t.out_ticks > ticks_for(self.rules.common.corridor_grace_s) {
-                    self.set_status(i, RacerStatus::Dq(DqReason::LeftCorridor), tick);
-                }
-            } else {
-                t.out_ticks = 0;
-            }
-        }
     }
 
     fn drag_sample(&mut self, i: usize, tick: u64, s: &RacerSample) {

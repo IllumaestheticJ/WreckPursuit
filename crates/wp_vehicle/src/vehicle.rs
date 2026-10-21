@@ -479,6 +479,29 @@ impl Vehicle {
         &self.diffs
     }
 
+    /// Grip the road conditions leave the tires, relative to the same surface dry (wet,
+    /// cold/ice, paint, aquaplaning): the mean `surface::conditions_grip` of the wheels in
+    /// contact at their current speed, 1.0 with no wheel down. What an AI driver "feels"
+    /// (police pro driver, lead P8); damage is not included.
+    pub fn conditions_grip(&self) -> f32 {
+        let (mut sum, mut n) = (0.0f32, 0u32);
+        for i in 0..4 {
+            let w = &self.wheels[i];
+            if !w.contact {
+                continue;
+            }
+            let (g, _) =
+                conditions_grip(&self.conditions[i], w.surface, w.vx, &self.corners[i].wet);
+            sum += g;
+            n += 1;
+        }
+        if n == 0 {
+            1.0
+        } else {
+            sum / n as f32
+        }
+    }
+
     /// The definition this vehicle was built from.
     pub fn def(&self) -> &VehicleDef {
         &self.def

@@ -28,7 +28,6 @@ use wp_world::World;
 
 use crate::bridge::CityRace;
 use crate::course::v2;
-use crate::data::RaceData;
 use crate::judge::{RaceJudge, RacePhase};
 use crate::kind::RaceKind;
 use crate::result::DnfReason;
@@ -122,15 +121,11 @@ impl AiEntrants {
                 } else {
                     OpposingLanes::ForOvertaking
                 },
-                // Stay inside the judged corridor (leaving it for long is a DQ): its half
-                // width plus the rule margin, less half a metre to spare.
+                // Keep the AI on the route's corridor: its half width plus the gate margin,
+                // less half a metre to spare. (Leaving the route is no longer a DQ, but the AI
+                // still races the route; the margin is the old `rules.toml` value, 2 m.)
                 max_half_width_m: Some(
-                    race.course.corridor_half_width_m
-                        + RaceData::embedded()
-                            .rules
-                            .for_kind(kind)
-                            .common
-                            .corridor_margin_m
+                    race.course.corridor_half_width_m + crate::catalog::GATE_CORRIDOR_MARGIN_M
                         - 0.5,
                 ),
                 ..CorridorOptions::default()

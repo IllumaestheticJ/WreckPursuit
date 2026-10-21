@@ -46,6 +46,16 @@ pub fn class_of(class: NetClass) -> RoadClass {
     }
 }
 
+/// Lane width of a road class, m (`wp_world::builder::BuildOptions` defaults: the contract
+/// road network does not carry widths).
+pub fn lane_width_of(class: NetClass) -> f32 {
+    match class {
+        NetClass::Highway => 3.7,
+        NetClass::Alley => 3.0,
+        NetClass::Arterial | NetClass::Collector | NetClass::Local => 3.5,
+    }
+}
+
 impl RoadGraph {
     /// Build the police routing index over a contract road network (see the module docs).
     /// `signalised` lists the network nodes with traffic lights (any order; unknown ids are
@@ -85,7 +95,14 @@ impl RoadGraph {
                     g.add_node(*p, district)
                 };
                 let s = g.add_segment(from, next, edge.speed_limit_mps, class, oneway);
-                g.segments[s.0 as usize].edge = Some(e);
+                let seg = &mut g.segments[s.0 as usize];
+                seg.edge = Some(e);
+                (seg.lanes_fwd, seg.lanes_back) = if reversed {
+                    (edge.lanes_ba, edge.lanes_ab)
+                } else {
+                    (edge.lanes_ab, edge.lanes_ba)
+                };
+                seg.lane_width_m = lane_width_of(edge.class);
                 from = next;
             }
         }

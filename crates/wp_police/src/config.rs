@@ -588,6 +588,10 @@ pub struct PursuitFile {
     pub chase: ChaseConfig,
     /// Obstacle awareness (following, passing, spawn clearance).
     pub avoid: AvoidConfig,
+    /// Pro driving of physical units: racing line, grip-limit speed profile, slide control
+    /// ([`crate::pro`]). Defaults when the table has no `[pro]` section.
+    #[serde(default)]
+    pub pro: crate::pro::ProParams,
 }
 
 /// Obstacle awareness for ground units (see [`crate::avoid`]).
@@ -1012,6 +1016,15 @@ mod tests {
         let disk =
             PoliceConfig::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/police")).unwrap();
         assert_eq!(c, disk);
+    }
+
+    #[test]
+    fn pro_table_matches_the_code_defaults() {
+        // `[pro]` spells every knob out; keep it and `ProParams::default` in step.
+        assert_eq!(
+            PoliceConfig::builtin().pursuit.pro,
+            crate::pro::ProParams::default()
+        );
     }
 
     #[test]

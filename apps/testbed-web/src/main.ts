@@ -12,7 +12,7 @@
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 // ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
-import { assistLevel, loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
+import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
@@ -56,6 +56,7 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
+import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
 import { ArtStyle, STYLE_LABELS, makeHeadlightPool, type StyleId } from "./render/style";
@@ -364,6 +365,14 @@ async function main(): Promise<void> {
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
   });
+  // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
+  let statTable: CarStatsTable | null = null;
+  try {
+    statTable = sim.carStats();
+  } catch (e) {
+    console.warn("car stats unavailable", e);
+  }
+  const carStats = statTable ? new CarStatBars($("car-stats"), statTable) : null;
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) {
@@ -429,6 +438,7 @@ async function main(): Promise<void> {
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
     if (first) ($("car") as HTMLSelectElement).value = first.info.car_id;
+    carStats?.show(($("car") as HTMLSelectElement).value);
     if (app.scenarioFile) ($("sc-select") as HTMLSelectElement).value = app.scenarioFile;
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -803,8 +813,16 @@ async function main(): Promise<void> {
   // ----- controls -------------------------------------------------------------------------
 
   const carSel = $("car") as HTMLSelectElement;
-  for (const id of sim.carIds()) carSel.add(new Option(id, id));
-  carSel.onchange = () => startFreeDrive(carSel.value);
+  for (const id of sim.carIds()) {
+    const opt = new Option(id, id);
+    const s = statTable?.cars[id];
+    if (s) opt.title = `${s.display_name}: ${statLine(s)}`;
+    carSel.add(opt);
+  }
+  carSel.onchange = () => {
+    carStats?.show(carSel.value);
+    startFreeDrive(carSel.value);
+  };
   mountTuneRow($("tune-row"), carSel);
 
   const scSel = $("sc-select") as HTMLSelectElement;

@@ -21,7 +21,8 @@ use crate::RaceData;
 /// Corridor margin added to half the widest carriageway, m (same as the city sprints).
 pub const CORRIDOR_MARGIN_M: f32 = 3.0;
 
-/// Matches `rules.toml [common] corridor_margin_m`: gates span the corridor plus this, m.
+/// Gates span the corridor plus this, m (the old `rules.toml [common] corridor_margin_m`, removed
+/// when leaving the route stopped being a DQ; the AI corridor in `entrants.rs` uses it too).
 pub const GATE_CORRIDOR_MARGIN_M: f32 = 2.0;
 
 /// Which city a race runs in (the testbed's city ids).

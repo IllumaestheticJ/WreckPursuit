@@ -15,7 +15,8 @@ use wp_opponent::{CarCapability, DriverProfile, EventHeat, VehicleObs};
 use wp_race::bridge::course_from_route;
 use wp_race::entrants::{AiEntrant, AiEntrants};
 use wp_race::{
-    EventId, RaceData, RaceJudge, RaceKind, RacerEntry, RacerResult, RacerSample, RacerStatus,
+    DnfReason, EventId, RaceData, RaceJudge, RaceKind, RacerEntry, RacerResult, RacerSample,
+    RacerStatus,
 };
 use wp_sim::{Sim, VehicleKind};
 use wp_world::Route;
@@ -196,7 +197,8 @@ fn hollins_drive_sprint_is_raced_to_the_top() {
     assert!((40.0..105.0).contains(&t), "winner took {t:.1} s");
     // The field reaches the top. One racing incident is allowed (at seed 16 the last car
     // follows another over the summit crest and runs into it when it brakes for the bend at
-    // the line, and is DQ'd off the corridor), but nobody totals a car on the hill.
+    // the line, ends up off the road short of the last gate and runs out the finish window), but
+    // nobody totals a car on the hill.
     let finished = r
         .results
         .iter()
@@ -209,7 +211,10 @@ fn hollins_drive_sprint_is_raced_to_the_top() {
     );
     for x in &r.results {
         assert!(
-            matches!(x.status, RacerStatus::Finished | RacerStatus::Dq(_)),
+            matches!(
+                x.status,
+                RacerStatus::Finished | RacerStatus::Dnf(DnfReason::FinishWindow)
+            ),
             "{:?}: {:?}",
             x.racer,
             x.status
