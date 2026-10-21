@@ -23,10 +23,15 @@ pub fn procedural_city() -> CitySpec {
 }
 
 /// City by id for the testbed's selector: `"vesper_v2"` (Port Vesper v2, the default city),
-/// `"procedural_12x12"` (the old grid); anything else is the flat world.
+/// `"procedural_12x12"` (the old grid), `"vesper_v3"` (Port Vesper v3, in development);
+/// anything else is the flat world.
 pub fn city_spec(city_id: &str) -> CitySpec {
     match city_id {
         wp_world::vesper::CITY_ID => CitySpec::vesper(),
+        wp_world::metro::CITY_ID => CitySpec::Preset {
+            name: wp_world::metro::CITY_ID.into(),
+            seed: 1,
+        },
         "procedural_12x12" => procedural_city(),
         _ => CitySpec::Flat,
     }

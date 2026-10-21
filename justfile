@@ -55,6 +55,10 @@ city:
 city-v2:
     cargo run --release -p city-import --bin gen-city -- --preset vesper_v2 --seed 1 --out data/city
 
+# Regenerate Port Vesper v3 (in development; data/city/vesper_v3.greybox.{glb,b64.txt}).
+city-v3:
+    cargo run --release -p city-import --bin gen-city -- --preset vesper_v3 --seed 1 --out data/city
+
 # Traffic benchmark / soak: `just traffic-bench 10` (minutes, 400 agents, noon).
 traffic-bench minutes="2":
     cargo run --release -p wp_world --example traffic_bench -- {{minutes}} 400 12

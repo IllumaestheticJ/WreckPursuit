@@ -6,9 +6,12 @@
 //! `gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]` writes Port Vesper v2
 //! (`vesper_v2.road.bin`, `.greybox.glb`, `.greybox.b64.txt`; the JSON dump, ≈ 6 MB of
 //! terrain, only with `--json`).
+//! `gen-city --preset vesper_v3 [--seed 1] [--out data/city] [--json]` writes Port Vesper v3
+//! (in development, `wp_world::metro`) the same way.
 
 use std::path::PathBuf;
 
+use wp_world::metro::{self, MetroConfig};
 use wp_world::procgen::{generate, ProcGenConfig};
 use wp_world::vesper::{self, VesperConfig};
 
@@ -39,6 +42,7 @@ fn main() {
             "-h" | "--help" => {
                 println!("gen-city --grid 12x12 --seed 1 [--spacing 110] [--out data/city]");
                 println!("gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]");
+                println!("gen-city --preset vesper_v3 [--seed 1] [--out data/city] [--json]");
                 return;
             }
             other => panic!("unknown argument {other}"),
@@ -51,7 +55,24 @@ fn main() {
             seed: cfg.seed,
             ..Default::default()
         }),
-        Some(other) => panic!("unknown preset {other} (known: {})", vesper::CITY_ID),
+        Some(metro::CITY_ID) => {
+            let (net, report) = metro::generate_with_report(&MetroConfig {
+                seed: cfg.seed,
+                ..Default::default()
+            });
+            for n in &report.notes {
+                println!("{n}");
+            }
+            for (k, c) in &report.feature_counts {
+                println!("  {k:?}: {c}");
+            }
+            net
+        }
+        Some(other) => panic!(
+            "unknown preset {other} (known: {}, {})",
+            vesper::CITY_ID,
+            metro::CITY_ID
+        ),
     };
     let json = json || preset.is_none();
     city_import::write_city_files(&net, &out, json).expect("write city files");

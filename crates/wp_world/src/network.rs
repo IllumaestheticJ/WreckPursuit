@@ -19,7 +19,8 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
 /// v2 (city v2): road surfaces, terrain heightfield, building base heights.
 /// v3: `RoadSurface::median_barrier` (divided highways).
-pub const ROAD_FORMAT_VERSION: u32 = 3;
+/// v4: static scenery and structures ([`RoadNetwork::features`]).
+pub const ROAD_FORMAT_VERSION: u32 = 4;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -68,6 +69,292 @@ pub struct RoadNetwork {
     pub surfaces: Vec<RoadSurface>,
     /// Ground heightfield between roads (`None` = flat ground at z = 0).
     pub terrain: Option<crate::terrain::Heightfield>,
+    /// Static scenery and structures (v4): walls, fences, trees, parked cars, rail, cranes,
+    /// parking decks, runways, ... Solid ones are static colliders in `wp_sim`; box and
+    /// cylinder shapes are drawn instanced by the testbed, prisms go into the greybox.
+    /// Empty for the procedural grid and Port Vesper v2.
+    pub features: Vec<Feature>,
+}
+
+/// One static scenery / structure element (format v4).
+///
+/// Features are plain shapes with a semantic [`FeatureKind`] (what it is: gameplay, tests,
+/// minimap) and a [`Material`] (how it is drawn). `solid` features become static colliders
+/// (`wp_sim::physics::PhysicsWorld::set_city_ground`); a solid feature with a flat or gently
+/// sloped top is drivable (parking decks, ramps, runway slabs, tunnel plugs).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Feature {
+    /// What it is.
+    pub kind: FeatureKind,
+    /// How it is drawn.
+    pub material: Material,
+    /// Geometry.
+    pub shape: FeatureShape,
+    /// Static collider in physics (cars hit it / drive on it).
+    pub solid: bool,
+}
+
+/// Geometry of a [`Feature`]. World space, metres, +Z up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FeatureShape {
+    /// Oriented box. `half` = half extents along the local axes (x right, y forward, z up)
+    /// before rotation; the box is pitched about its local +X by `pitch` (positive = the +Y
+    /// end up), then yawed about world +Z by `yaw` (0 = local +Y points north, positive =
+    /// counter-clockwise), then moved to `centre`.
+    Box {
+        /// Centre, m.
+        centre: [f32; 3],
+        /// Half extents, m.
+        half: [f32; 3],
+        /// Yaw about +Z, rad.
+        yaw: f32,
+        /// Pitch about the local +X axis, rad (ramps).
+        pitch: f32,
+    },
+    /// Vertical upright cylinder (trunks, tanks, silos, columns).
+    Cylinder {
+        /// Centre of the bottom face, m.
+        base: [f32; 3],
+        /// Radius, m.
+        radius: f32,
+        /// Height, m.
+        height: f32,
+    },
+    /// Vertical prism: a simple counter-clockwise footprint extruded from `base_z` to `top_z`.
+    /// A solid prism's collider is the convex hull of its footprint, so solid prisms must be
+    /// convex (split concave shapes into several features).
+    Prism {
+        /// Footprint polygon (counter-clockwise), m.
+        footprint: Vec<[f32; 2]>,
+        /// Bottom, m.
+        base_z: f32,
+        /// Top, m.
+        top_z: f32,
+    },
+}
+
+/// Semantic kind of a [`Feature`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum FeatureKind {
+    // --- Boundaries (keep cars out of places that are not meant to be driven) ---
+    /// Concrete or masonry wall.
+    Wall,
+    /// Chain-link / palisade fence.
+    Fence,
+    /// Hedge.
+    Hedge,
+    /// Jersey (concrete) barrier.
+    JerseyBarrier,
+    /// Steel guard rail.
+    GuardRail,
+    /// Highway sound wall.
+    SoundWall,
+    /// Bollard / post.
+    Bollard,
+    /// Gate or barrier arm.
+    Gate,
+    /// Invisible-in-spirit map edge wall (still drawn, low-key).
+    MapEdge,
+    // --- Water edge ---
+    /// Quay or river wall.
+    QuayWall,
+    /// Pier / jetty deck.
+    Pier,
+    /// Mooring bollard.
+    MooringBollard,
+    /// Ship hull or superstructure part.
+    Ship,
+    /// Small boat.
+    Boat,
+    // --- Rail ---
+    /// Track (ballast + rails), one straight piece.
+    RailTrack,
+    /// Station platform.
+    Platform,
+    /// Rail car (freight wagon / coach / locomotive part).
+    RailCar,
+    /// Level-crossing gate, signal mast, catenary pole.
+    RailFurniture,
+    /// Rail bridge deck / pier.
+    RailBridge,
+    // --- Airport / airfield ---
+    /// Runway slab.
+    Runway,
+    /// Taxiway slab.
+    Taxiway,
+    /// Apron slab.
+    Apron,
+    /// Runway / taxiway paint.
+    AirfieldMarking,
+    /// Hangar.
+    Hangar,
+    /// Terminal building part.
+    Terminal,
+    /// Control tower part.
+    ControlTower,
+    /// Parked aircraft part.
+    Aircraft,
+    /// Jet bridge, windsock, beacon, approach light.
+    AirportFurniture,
+    // --- Port ---
+    /// Shipping container.
+    Container,
+    /// Ship-to-shore gantry crane part.
+    GantryCrane,
+    /// Straddle carrier / reach stacker / yard machine.
+    PortMachine,
+    /// Storage tank / silo.
+    Tank,
+    // --- Parking ---
+    /// Parking structure deck (drivable).
+    ParkingDeck,
+    /// Parking structure ramp (drivable).
+    ParkingRamp,
+    /// Column / pillar.
+    Pillar,
+    /// Parked car (static).
+    ParkedCar,
+    /// Parking bay paint.
+    ParkingPaint,
+    // --- Construction ---
+    /// Site hoarding / fence.
+    ConstructionFence,
+    /// Scaffolding.
+    Scaffold,
+    /// Structural steel / concrete frame of an unfinished building.
+    Frame,
+    /// Tower crane part.
+    TowerCrane,
+    /// Excavator, dozer, dump truck part.
+    ConstructionMachine,
+    /// Dirt / gravel mound (drivable if solid).
+    Earthwork,
+    /// Material pile, pipes, pallets, portable toilets.
+    SiteClutter,
+    // --- Roads ---
+    /// Tunnel wall / roof / portal / cover plug.
+    Tunnel,
+    /// Bridge structure (truss, tower, cable, pier) that is not road surface.
+    BridgeStructure,
+    /// Road sign, gantry, signal pole.
+    RoadFurniture,
+    // --- Scenery ---
+    /// Tree trunk.
+    TreeTrunk,
+    /// Tree canopy.
+    TreeCanopy,
+    /// Bush.
+    Bush,
+    /// Street lamp.
+    Lamp,
+    /// Utility pole.
+    UtilityPole,
+    /// Bench, bin, hydrant, mailbox.
+    StreetFurniture,
+    /// Bus shelter.
+    BusShelter,
+    /// Billboard.
+    Billboard,
+    /// Lawn, park or plaza surface.
+    Ground,
+    /// Rock / boulder.
+    Rock,
+    /// Statue, fountain, monument.
+    Monument,
+    /// Landmark structure part (stadium stand, cooling tower, lighthouse, screen, ...).
+    Landmark,
+}
+
+/// Render material of a [`Feature`] (greybox colour; the testbed may shade it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Material {
+    /// Light concrete.
+    Concrete,
+    /// Dark concrete.
+    DarkConcrete,
+    /// Asphalt.
+    Asphalt,
+    /// Painted steel (grey).
+    Steel,
+    /// Rusty steel.
+    Rust,
+    /// Wood.
+    Wood,
+    /// Brick.
+    Brick,
+    /// Glass.
+    Glass,
+    /// Grass.
+    Grass,
+    /// Foliage (trees, hedges).
+    Foliage,
+    /// Bare earth.
+    Dirt,
+    /// Gravel / ballast.
+    Gravel,
+    /// Sand.
+    Sand,
+    /// White paint.
+    PaintWhite,
+    /// Yellow paint.
+    PaintYellow,
+    /// Safety orange (cones, machines, hoarding).
+    SafetyOrange,
+    /// Safety yellow (cranes, machines).
+    SafetyYellow,
+    /// Red (containers, hulls).
+    Red,
+    /// Blue (containers).
+    Blue,
+    /// Green (containers).
+    Green,
+    /// White (aircraft, hulls).
+    White,
+    /// Black (tyres, rubber).
+    Black,
+    /// Car paint (the testbed picks a colour per instance).
+    CarPaint,
+    /// Emissive light.
+    Light,
+}
+
+impl FeatureShape {
+    /// Axis-aligned 2D bounds `(min, max)` of the shape, m.
+    pub fn bounds_2d(&self) -> ([f32; 2], [f32; 2]) {
+        match self {
+            FeatureShape::Box {
+                centre,
+                half,
+                yaw,
+                pitch,
+            } => {
+                let (s, c) = wp_math::sin_cos(*yaw);
+                let (_, cp) = wp_math::sin_cos(*pitch);
+                // Pitch shortens the y extent's footprint (never lengthens past the full
+                // diagonal; this bound is conservative).
+                let hy = half[1] * cp.abs() + half[2] * (1.0 - cp.abs());
+                let ex = (half[0] * c).abs() + (hy * s).abs();
+                let ey = (half[0] * s).abs() + (hy * c).abs();
+                (
+                    [centre[0] - ex, centre[1] - ey],
+                    [centre[0] + ex, centre[1] + ey],
+                )
+            }
+            FeatureShape::Cylinder { base, radius, .. } => (
+                [base[0] - radius, base[1] - radius],
+                [base[0] + radius, base[1] + radius],
+            ),
+            FeatureShape::Prism { footprint, .. } => {
+                let mut lo = [f32::MAX; 2];
+                let mut hi = [f32::MIN; 2];
+                for p in footprint {
+                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+                }
+                (lo, hi)
+            }
+        }
+    }
 }
 
 /// The paved ribbon of one road between its two junction setbacks.

@@ -28,6 +28,7 @@ pub mod geom;
 pub mod leader;
 pub mod map;
 pub mod markings;
+pub mod metro;
 pub mod network;
 pub mod procgen;
 pub mod props;
@@ -132,6 +133,7 @@ fn empty_network() -> RoadNetwork {
         buildings: Vec::new(),
         surfaces: Vec::new(),
         terrain: None,
+        features: Vec::new(),
     }
 }
 
@@ -193,6 +195,11 @@ impl World {
     /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
     pub fn vesper(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
         Self::new(vesper::generate(vc), cfg)
+    }
+
+    /// Generate Port Vesper v3 (the full city, in development; `metro::CITY_ID`) in memory.
+    pub fn metro(mc: &metro::MetroConfig, cfg: WorldConfig) -> Self {
+        Self::new(metro::generate(mc), cfg)
     }
 
     /// Car used for physical (near-LOD) traffic. Without one, traffic stays kinematic.
