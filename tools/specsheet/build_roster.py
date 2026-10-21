@@ -412,7 +412,7 @@ def gen_lattice_args(c: dict, mass: float) -> list[str]:
 
 
 def run_generator(c: dict, mass: float, out_path: str) -> None:
-    exe = os.path.join(REPO, "target", "release", "gen-lattice")
+    exe = os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(REPO, "target"), "release", "gen-lattice")
     if not os.path.exists(exe):
         sys.exit("build the generator first: cargo build --release -p wp_damage --bin gen-lattice")
     subprocess.run([exe] + gen_lattice_args(c, mass) + ["--out", out_path],
