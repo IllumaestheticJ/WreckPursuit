@@ -43,5 +43,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.33 | preview | Render budget back under limits: road markings tiled + culled (one draw per tile), 640 m city tiles on phones, buried grid wall curtains dropped (chase 425k → 363k triangles, phone 323 → 280 draw calls) |
 | 0.12.34 | preview | Police: arresting unit busy 30 s (no chain arrests), pinned capture needs a chasing unit, head-on waiting unit creeps aside, backup waits ahead facing the racer, faster chase junctions, stuck units route round traffic; AI racers pass civilians stopped at Lantern Row lights, junction gap check, never stand at a red on the opposing side |
 | 0.12.35 | preview | AI racers never give up in a race (owner rule): no yielding or pulling over at any wanted level; a race ends only on a real capture, wreck or DNF |
-| 0.12.36 | preview | (next) |
+| 0.12.36 | preview | Police audio: police engines procedural (no 2.3x sped-up recordings, no layer flipping), siren junction cue calmer (3 s minimum pattern hold); spikes: recorded blow-out per tyre, flat-tyre flap loop, rim grind, scanner line |
+| 0.12.37 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
