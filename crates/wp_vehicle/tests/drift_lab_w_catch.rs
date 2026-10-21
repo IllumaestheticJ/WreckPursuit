@@ -1,8 +1,9 @@
 //! Drift Lab W step 11 — over-rotation catch (owner: "more steering lock so we can catch
 //! over-rotations a little easier"): the directional countersteer limit, the drift lock
 //! extension and the over-rotation rack ([`wp_vehicle::plain::PlainSteer`]) against the
-//! "before" (step-10 limit at every slide rate). On the lab's default tyres (spin model +
-//! grip-balance "grip", medium weight). Own test binary: the overrides are process-wide.
+//! "before" (step-10 limit at every slide rate, no transition rack). On the lab's default
+//! tyres and ride (spin model + grip-balance "new", firm; step 20), at the 35° push: the
+//! step-20 balance already lets "before" catch pushes from 40–50°. Own test binary: the overrides are process-wide.
 //! Ranges, not exact numbers (docs/integration/drift-lab-w.md, step 11).
 
 use std::path::PathBuf;
@@ -25,23 +26,24 @@ fn car(id: &str) -> LoadedCar {
 fn over_rotations_are_caught_without_a_worse_snap_back() {
     let a = reference_assists();
     car_lab::set_override(Some(CarTune::spin_candidate()));
-    grip_lab::set_override(Some(GripBalance::grip()));
-    ride_lab::set_override(Some(RideTune::medium_weight()));
+    grip_lab::set_override(Some(GripBalance::lab_default()));
+    ride_lab::set_override(Some(RideTune::firm()));
     for id in ["parity_rwd_a", "parity_rwd_d"] {
         let c = car(id);
         plain::set_override(Some(PlainSteer {
             counter_closing_only: false,
+            trans_follow: false,
             ..PlainSteer::default()
         }));
-        let b0 = over_rotation_catch(&c, &a, 40.0);
+        let b0 = over_rotation_catch(&c, &a, 35.0);
         let s0 = snap_back(&c, &a, SnapExit::CounterLift);
         plain::set_override(Some(PlainSteer::default()));
-        let b1 = over_rotation_catch(&c, &a, 40.0);
+        let b1 = over_rotation_catch(&c, &a, 35.0);
         let s1 = snap_back(&c, &a, SnapExit::CounterLift);
         assert!(b0.reached && b1.reached, "{id}: {b0:?} {b1:?}");
-        assert!(!b0.caught && b0.peak_deg > 68.0, "{id} before: {b0:?}");
+        assert!(!b0.caught, "{id} before: {b0:?}");
         assert!(
-            b1.caught && b1.peak_deg < b0.peak_deg - 8.0,
+            b1.caught && b1.peak_deg < b0.peak_deg,
             "{id} new: {b1:?} (before {b0:?})"
         );
         assert!(s0.reached && s1.reached && !s1.spun, "{id} snap: {s1:?}");

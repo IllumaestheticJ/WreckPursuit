@@ -980,18 +980,27 @@ fn catch_window(args: &[String]) {
         args.to_vec()
     };
     car_lab::set_override(Some(CarTune::spin_candidate()));
-    ride_lab::set_override(Some(RideTune::medium_weight()));
-    grip_lab::set_override(Some(GripBalance::grip()));
+    ride_lab::set_override(Some(RideTune::firm()));
+    grip_lab::set_override(Some(GripBalance::lab_default()));
     let a = reference_assists();
     let before = PlainSteer {
         counter_closing_only: false,
+        trans_follow: false,
         ..PlainSteer::default()
     };
     println!("\n## Catch window: largest push caught (60 m, 0.7 g; caught pushes listed)");
     println!("| car | variant | key held | tapping | turn-in: tap 0.15 s @100 heading ° / step heading start s |");
     println!("|---|---|---|---|---|");
     for id in &ids {
-        for (name, p) in [("before", before), ("W default", PlainSteer::default())] {
+        let no_trans = PlainSteer {
+            trans_follow: false,
+            ..PlainSteer::default()
+        };
+        for (name, p) in [
+            ("before", before),
+            ("transition off", no_trans),
+            ("W default", PlainSteer::default()),
+        ] {
             plain::set_override(Some(p));
             let c = car(id);
             let mut cells = Vec::new();
@@ -1173,7 +1182,27 @@ fn snap_sweep(args: &[String]) {
     let mid = RideTune::medium_weight();
     let gnew = Some(GripBalance::grip());
     type Cfg = (String, PlainSteer, CarTune, RideTune, Option<GripBalance>);
+    let firm = RideTune::firm();
+    let gpanel = Some(GripBalance::lab_default());
+    let no_trans = PlainSteer {
+        trans_follow: false,
+        ..limit
+    };
     let mut configs: Vec<Cfg> = vec![
+        (
+            "panel: firm, grip new, transition off".into(),
+            no_trans,
+            spin,
+            firm,
+            gpanel,
+        ),
+        (
+            "**panel: firm, grip new, W default**".into(),
+            limit,
+            spin,
+            firm,
+            gpanel,
+        ),
         (
             "before: no limit, lab ride, grip new".into(),
             off,

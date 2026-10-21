@@ -143,6 +143,33 @@ pub struct PlainSteer {
     /// Slide growth, °/s, where the over-rotation rack acts and the drift lock extension starts
     /// (full at twice this).
     pub over_from_dps: f32,
+    /// Transition rack (lead, step 12: lift-flick transitions never swung — on the flick the
+    /// new key turned the fronts into the old corner, so their side force kept the old
+    /// rotation). While a key points **into the old corner** (toward the new side of a flick,
+    /// or into the turn) and the car still slides on the old side, the wheels move to the front
+    /// axle's travel × `trans_gain` plus the key × `trans_key_gain` × lock (up to
+    /// `trans_max_deg`), at `trans_t_s` per `trans_max_deg`, faded in with the old-side body slip
+    /// between `trans_from_deg` and `trans_full_deg` — what the reference's cockpit wheel does
+    /// (it follows the travel while a key is held). Countersteer (the hold, the catch), released
+    /// keys and grip driving are unchanged. Off = the plain rack.
+    pub trans_follow: bool,
+    /// Transition rack: share of the front axle's travel the wheels follow (1 = along it).
+    pub trans_gain: f32,
+    /// Transition rack: the key's offset from the travel, × lock(speed).
+    pub trans_key_gain: f32,
+    /// Transition rack: old-side body slip where it starts, degrees.
+    pub trans_from_deg: f32,
+    /// Transition rack: old-side body slip from which it is full, degrees.
+    pub trans_full_deg: f32,
+    /// Transition rack: largest road-wheel angle, degrees.
+    pub trans_max_deg: f32,
+    /// Transition rack: time to move `trans_max_deg`, s.
+    pub trans_t_s: f32,
+    /// Transition rack: armed only within this time of a throttle lift in a slide or a key
+    /// reversal (the vehicle's timers, [`PlainInput::since_lift_s`] /
+    /// [`PlainInput::since_reversal_s`]), s, so the key into the turn that starts or angles up
+    /// a drift keeps the plain rack. 0 = always armed.
+    pub trans_arm_s: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -192,6 +219,14 @@ impl Default for PlainSteer {
             drift_lock_full_deg: 50.0,
             over_rate: 2.0,
             over_from_dps: 15.0,
+            trans_follow: true,
+            trans_gain: 1.0,
+            trans_key_gain: 0.0,
+            trans_from_deg: 8.0,
+            trans_full_deg: 15.0,
+            trans_max_deg: 45.0,
+            trans_t_s: 0.1,
+            trans_arm_s: 1.0,
         }
     }
 }
@@ -389,8 +424,22 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     if p.velocity_relative {
         return velocity_relative_angle(current, inp, p, dt);
     }
+    if let Some(a) = transition_angle(current, inp, p, dt) {
+        return a;
+    }
     let p = &with_over_rate(p, inp);
     let lock = drift_lock(inp.full_lock * p.lock_frac(inp.speed), inp, p);
+    // Past this tick's lock (a transition or the drift lock extension just ended): back inside
+    // it at the return rate first, so the rack never jumps.
+    if current.abs() > lock + 1e-6 {
+        let rate = inp.full_lock.max(lock) / p.t_return_s.max(0.01);
+        let a = current - current.signum() * rate * dt;
+        return if a.abs() < lock {
+            current.signum() * lock
+        } else {
+            a
+        };
+    }
     let rack = rack_of(current, lock, inp.pull);
     let key = inp.driver.clamp(-1.0, 1.0);
     let target = if key.abs() <= crate::steering::STEER_DEADZONE
@@ -447,6 +496,46 @@ fn drift_lock(lock: f32, inp: &PlainInput, p: &PlainSteer) -> f32 {
     fade *= smooth(inp.slide_growth.to_degrees(), from, 2.0 * from);
     let ext = inp.full_lock * (1.0 + p.drift_lock_extra.min(1.0));
     lock + fade * (ext - lock).max(0.0)
+}
+
+/// [`PlainSteer::trans_follow`]: the centre angle for this tick while a key points into the
+/// old corner in a slide, or `None` (the plain rack).
+fn transition_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> Option<f32> {
+    let key = inp.driver.clamp(-1.0, 1.0);
+    if !p.trans_follow
+        || inp.speed.abs() < 3.0
+        || key.abs() <= crate::steering::STEER_DEADZONE
+        || key * inp.body_slip <= 0.0
+        || (p.trans_arm_s > 0.0
+            && inp.since_lift_s > p.trans_arm_s
+            && inp.since_reversal_s > p.trans_arm_s)
+    {
+        return None;
+    }
+    let fade = smooth(
+        inp.body_slip.abs().to_degrees(),
+        p.trans_from_deg,
+        p.trans_full_deg,
+    );
+    if fade <= 0.0 {
+        return None;
+    }
+    let lock = inp.full_lock * p.lock_frac(inp.speed);
+    let max = p.trans_max_deg.max(1.0).to_radians();
+    let plain_w = -(key + inp.pull) * lock;
+    let follow_w = (p.trans_gain * inp.front_axle_angle
+        - (key + inp.pull) * p.trans_key_gain * lock)
+        .clamp(-max, max);
+    let target = plain_w + fade * (follow_w - plain_w);
+    let plain_rate = lock / p.t_full_s.max(0.01);
+    let fast = max / p.trans_t_s.max(0.01);
+    let rate = plain_rate + fade * (fast - plain_rate).max(0.0);
+    let step = rate * dt;
+    Some(if (target - current).abs() <= step {
+        target
+    } else {
+        current + (target - current).signum() * step
+    })
 }
 
 /// [`PlainSteer::over_rate`]: faster rack times while the counter key is held and the slide
@@ -977,5 +1066,63 @@ mod tests {
             a
         };
         assert!(early(&fast) < early(&p) - 0.05);
+    }
+
+    #[test]
+    fn transition_rack_follows_the_travel_only_when_armed_and_into_the_old_corner() {
+        let p = PlainSteer::default();
+        // Left drift at 35° (travel 30° right), the new side's key (left, −1) just after a lift.
+        let flick = PlainInput {
+            driver: -1.0,
+            speed: 12.0,
+            full_lock: 0.6,
+            pull: 0.0,
+            front_axle_angle: -30f32.to_radians(),
+            body_slip: -35f32.to_radians(),
+            yaw_rate: 0.0,
+            slide_growth: 0.0,
+            since_lift_s: 0.1,
+            since_reversal_s: 1.0e3,
+        };
+        let run = |inp: &PlainInput, p: &PlainSteer| {
+            let mut a = 0.0;
+            for _ in 0..240 {
+                a = update_center_angle(a, inp, p, DT);
+            }
+            a
+        };
+        // Along the travel (key offset 0 by default), not full left lock into the old corner.
+        assert!((run(&flick, &p) - flick.front_axle_angle).abs() < 1e-4);
+        let lock = 0.6 * p.lock_frac(12.0);
+        // Not armed (no lift / reversal for 2 s): the plain rack (the key that angles up).
+        let unarmed = PlainInput {
+            since_lift_s: 2.0,
+            ..flick
+        };
+        assert!((run(&unarmed, &p) - lock).abs() < 1e-5);
+        // Off: the plain rack.
+        let off = PlainSteer {
+            trans_follow: false,
+            ..p
+        };
+        assert!((run(&flick, &off) - lock).abs() < 1e-5);
+        // Grip (slip 3°): the plain rack.
+        let grip = PlainInput {
+            body_slip: -3f32.to_radians(),
+            ..flick
+        };
+        assert!((run(&grip, &p) - lock).abs() < 1e-5);
+        // Leaving the transition past the plain lock: back inside it without a jump.
+        let mut a = -0.7f32;
+        let rel = PlainInput {
+            driver: 0.0,
+            ..unarmed
+        };
+        let next = update_center_angle(a, &rel, &p, DT);
+        assert!(next < -0.69 && next > a);
+        for _ in 0..240 {
+            a = update_center_angle(a, &rel, &p, DT);
+        }
+        assert_eq!(a, 0.0);
     }
 }
