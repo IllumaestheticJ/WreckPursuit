@@ -31,6 +31,14 @@ use crate::unit::{
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
+/// Off the road by `d`, a route joins it at its first node at least this many `d` away.
+const REJOIN_NODE_PER_M: f32 = 2.0;
+/// ... when that node lies off to the side of its heading (cosine below this) and the car
+/// is this far past the road's edge, m.
+const REJOIN_SIDE_COS: f32 = 0.5;
+/// See [`REJOIN_SIDE_COS`], m.
+const REJOIN_KERB_M: f32 = 1.5;
+
 /// Below this speed a racer counts as stopped for interception, m/s.
 const STOPPED_RACER_MPS: f32 = 2.0;
 
@@ -564,7 +572,7 @@ impl PoliceSystem {
         let blocked = u.unstick.blocked_at(self.now);
         if blocked.is_empty() {
             return self
-                .route_from(u.body.pos, u.body.heading, dest, final_point)
+                .route_from_body(u.body.pos, u.body.heading, dest, final_point, !u.internal)
                 .0;
         }
         self.route_around(u.body.pos, u.body.heading, dest, final_point, &blocked)
@@ -588,8 +596,11 @@ impl PoliceSystem {
             return self.route_track(i, dest, final_point);
         }
         let (pos, h) = (u.body.pos, u.body.heading);
-        let on = self.route_from(pos, h, dest, final_point).0;
-        let back = self.route_from(pos, scale(h, -1.0), dest, final_point).0;
+        let rejoin = !u.internal;
+        let on = self.route_from_body(pos, h, dest, final_point, rejoin).0;
+        let back = self
+            .route_from_body(pos, scale(h, -1.0), dest, final_point, rejoin)
+            .0;
         let cost = TURN_ROUND_COST_M + TURN_ROUND_COST_PER_MPS * u.body.speed;
         if back.is_drivable() && (!on.is_drivable() || back.length() + cost < on.length()) {
             back
@@ -639,6 +650,19 @@ impl PoliceSystem {
         dest: NodeId,
         final_point: Option<[f32; 2]>,
     ) -> (Track, bool) {
+        self.route_from_body(pos, heading, dest, final_point, false)
+    }
+
+    /// [`Self::route_from`] for a car at `pos`; with `rejoin` (a physically driven unit) a car
+    /// past the road's edge joins it at a node well ahead, not at one beside it.
+    pub(crate) fn route_from_body(
+        &self,
+        pos: [f32; 2],
+        heading: [f32; 2],
+        dest: NodeId,
+        final_point: Option<[f32; 2]>,
+        rejoin: bool,
+    ) -> (Track, bool) {
         let Some(start) = self.start_node(pos, heading) else {
             return (Track::default(), false);
         };
@@ -654,20 +678,49 @@ impl PoliceSystem {
             // Start on the centreline, not at the body: the lane offset is applied on top, so
             // a unit already in its lane would otherwise be pushed a second lane width right
             // (into parked cars).
-            if let Some(rp) = on_road.filter(|rp| !skip && rp.dist_m < ROAD_HALF_WIDTH_M) {
-                pts[0] = rp.point;
+            let mut first = skip as usize;
+            match on_road.filter(|_| !skip) {
+                Some(rp) if rp.dist_m < ROAD_HALF_WIDTH_M => pts[0] = rp.point,
+                Some(rp) if !rejoin || rp.dist_m < self.road_edge_m(rp.segment) + REJOIN_KERB_M => {
+                }
+                // Off the road (out of a U-turn that swung wide onto the far kerb): join it at
+                // a node well ahead, not at one just beside the car (wp_sim police_passby,
+                // Vesper: a leg 9 m sideways to the junction 3 m ahead looped the car across
+                // the road and back, 4 s lost).
+                Some(rp) => {
+                    while first + 1 < route.len() && {
+                        let to = sub(self.graph.node(route[first]).pos, pos);
+                        let d = crate::graph::len(to);
+                        d < REJOIN_NODE_PER_M * rp.dist_m
+                            && d > 0.1
+                            && crate::graph::dot(scale(to, 1.0 / d), heading) < REJOIN_SIDE_COS
+                    } {
+                        first += 1;
+                    }
+                }
+                None => {}
             }
-            pts.extend(
-                route
-                    .iter()
-                    .skip(skip as usize)
-                    .map(|n| self.graph.node(*n).pos),
-            );
+            pts.extend(route.iter().skip(first).map(|n| self.graph.node(*n).pos));
         }
         if let Some(p) = final_point {
             pts.push(p);
         }
         (Track::new(pts), turn_around)
+    }
+
+    /// Distance from segment `seg`'s centreline to its outer road edge, m
+    /// ([`ROAD_HALF_WIDTH_M`] when the lanes are unknown).
+    fn road_edge_m(&self, seg: SegmentId) -> f32 {
+        let g = self.graph.segment(seg);
+        if g.lane_width_m <= 0.0 || g.lanes_fwd == 0 {
+            return ROAD_HALF_WIDTH_M;
+        }
+        let lanes = if g.oneway {
+            0.5 * g.lanes_fwd as f32
+        } else {
+            g.lanes_fwd.max(g.lanes_back) as f32
+        };
+        lanes * g.lane_width_m
     }
 
     pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
