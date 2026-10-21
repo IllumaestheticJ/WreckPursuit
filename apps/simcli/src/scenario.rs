@@ -48,6 +48,12 @@ pub struct Scenario {
     /// (`wp_world::World::set_covered_los`).
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub covered_los: bool,
+    /// After a capture (`PursuitEnded` Captured / CapturedTotalLoss), put the captured route
+    /// driver back at the start of its route with its starting `police_heat`, as a new run
+    /// (in the game a capture ends the run). Without it the captured car stands in the road
+    /// for the rest of the scenario and the units keep coming back to it. Default off.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub restart_after_capture: bool,
     /// Police patrol multiplier on `data/police/presence.toml`'s per-district, per-phase patrol
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]

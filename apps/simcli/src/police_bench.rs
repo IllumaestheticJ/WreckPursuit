@@ -186,6 +186,7 @@ impl BenchCell {
             car_mix: false,
             police_presence: None,
             slow: false,
+            restart_after_capture: false,
             panels: false,
             systems: None,
             barriers: Vec::new(),

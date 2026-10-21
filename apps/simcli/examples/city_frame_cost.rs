@@ -73,6 +73,7 @@ fn main() {
         hash_every: 240,
         expect: Vec::new(),
         expect_pending: Vec::new(),
+        restart_after_capture: false,
         panels: false,
         slow: false,
     };
