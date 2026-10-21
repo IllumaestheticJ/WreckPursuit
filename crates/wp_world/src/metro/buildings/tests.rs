@@ -239,7 +239,8 @@ fn footprints_are_convex_ccw_and_clear() {
     report(&ctx, n0, secs, "stub roads");
     assert!(ctx.buildings.len() > 300, "{}", ctx.buildings.len());
     let landmark_sites: Vec<_> = w.plan.sites_of(SiteKind::Landmark).collect();
-    for b in &ctx.buildings {
+    // Only this module's buildings: earlier modules (airport, docks) add their own.
+    for b in &ctx.buildings[pre.buildings.len()..] {
         assert!(convex_ccw(&b.footprint), "footprint not convex CCW: {b:?}");
         assert!(b.height_m > 2.0 && b.height_m < 260.0, "{b:?}");
         let c = centroid(&b.footprint);
