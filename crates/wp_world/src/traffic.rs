@@ -2136,9 +2136,13 @@ impl Traffic {
                                 && long < CAR_LENGTH_M + 1.0
                                 && geom::dot(r, right).abs() < CAR_WIDTH_M + 1.2
                         });
-                        if closing || beside {
+                        if closing {
                             lat_target = sy.side * kerb;
                             acc = acc.min(siren::approach_speed(v, 0.0, max_decel, p.max_accel));
+                        } else if beside {
+                            // Drive on along the kerb, clear of the unit, and merge back past it.
+                            lat_target = sy.side * kerb;
+                            v0 = v0.min(5.0);
                         }
                         v0 = v0.min(8.0);
                         if !closing && !beside && a.lat.abs() < 0.2 {
