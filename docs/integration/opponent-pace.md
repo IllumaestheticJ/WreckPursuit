@@ -607,3 +607,22 @@ the new table; the earlier "after" rows above are without it):
 | loop9_circuit | 0.5 | after | 48/48 | 205.0 | 0 | 0.1 | 0 | 0 | 0 | 0 |
 | loop9_circuit | 0.95 | before | 48/48 | 201.1 | 0 | 0.1 | 2 | 1 | 0 | 0 |
 | loop9_circuit | 0.95 | after | 48/48 | 199.8 | 0 | 0.1 | 0 | 0 | 0 | 0 |
+
+## Racers keep racing at L1–L2 (2026-10-21)
+
+Street racers do not pull over for a single unit mid-race. A racer still in the race ignores the
+pull-over at L1, and at L2 unless it is careful (personality `risk` < `RED_LIGHT_RISK`), and
+yields from L3 — or once pinned: crawling under 1.5 m/s for 3 s with a chasing unit within 10 m.
+Finished / disqualified racers pull over as before; abandoning the race (`flee_wanted_level`)
+is unchanged. No police-side change.
+
+race_picker with police, seeds 1–8 (`WP_RACE_SEED`), before = 4cddb03d, after = this tip:
+
+| race | run | cars | finished | captured | fled | other | test passes |
+|---|---|---|---|---|---|---|---|
+| hollins_hill_sprint | before | 32 | 1 | 27 | 1 | 3 (2 running, 1 window) | 1/8 |
+| hollins_hill_sprint | after | 32 | 11 | 21 | 0 | 0 | 7/8 |
+| loop9_circuit | before | 48 | 22 | 11 | 13 | 2 (window) | 8/8 |
+| loop9_circuit | after | 48 | 35 | 0 | 13 | 0 | 8/8 |
+| lantern_checkpoint_draws_the_police | before | 32 | 0 | 20 | 11 | 1 (running) | 7/8 |
+| lantern_checkpoint_draws_the_police | after | 32 | 2 | 16 | 13 | 1 (window) | 7/8 |
