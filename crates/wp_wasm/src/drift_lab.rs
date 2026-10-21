@@ -178,7 +178,8 @@ pub fn ride_tune_json() -> String {
 }
 
 /// `{ "data": <no scaling>, "lab": <step 3 default, the "before">, "slow_weight": <clip-4
-/// preset>, "medium_weight": <step 10 default, the "new"> }`, JSON.
+/// preset>, "medium_weight": <step 10 ride>, "stiff_ride": <step 18 default, the "new"> }`,
+/// JSON.
 #[wasm_bindgen]
 pub fn ride_tune_defaults_json() -> String {
     json(&serde_json::json!({
@@ -186,6 +187,7 @@ pub fn ride_tune_defaults_json() -> String {
         "lab": wp_vehicle::ride_lab::RideTune::lab_default(),
         "slow_weight": wp_vehicle::ride_lab::RideTune::slow_weight(),
         "medium_weight": wp_vehicle::ride_lab::RideTune::medium_weight(),
+        "stiff_ride": wp_vehicle::ride_lab::RideTune::stiff_ride(),
     }))
 }
 

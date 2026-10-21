@@ -52,10 +52,10 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
 };
 
 const RIDE_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit?: string; hint: string }> = {
-  spring: { label: "springs ×", min: 0.5, max: 1.5, step: 0.05, hint: "spring rate scale, all corners (below ~0.85 some cars sit near the bump stops)" },
-  arb: { label: "anti-roll bars ×", min: 0, max: 1.5, step: 0.05, hint: "anti-roll bar scale, both axles (front / rear balance kept)" },
-  damper_bump: { label: "dampers bump ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, compression" },
-  damper_rebound: { label: "dampers rebound ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, extension" },
+  spring: { label: "springs ×", min: 0.5, max: 3, step: 0.05, hint: "spring rate scale, all corners (below ~0.85 some cars sit near the bump stops)" },
+  arb: { label: "anti-roll bars ×", min: 0, max: 3, step: 0.05, hint: "anti-roll bar scale, both axles (front / rear balance kept)" },
+  damper_bump: { label: "dampers bump ×", min: 0.5, max: 6, step: 0.05, hint: "damper scale, compression" },
+  damper_rebound: { label: "dampers rebound ×", min: 0.5, max: 6, step: 0.05, hint: "damper scale, extension" },
   roll_centre_m: { label: "roll centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where the tyres' side force acts on the body (0 = contact patch, the data); higher = less roll" },
   pitch_centre_m: { label: "pitch centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where drive / brake forces act on the body (anti-dive / anti-squat feel)" },
   travel: { label: "suspension travel ×", min: 0.8, max: 2.5, step: 0.05, hint: "more travel = more room before the bump stops when the body rolls further" },
@@ -104,8 +104,9 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
   hb_pivot_accel: { label: "handbrake pivot aid", min: 0, max: 15, step: 0.5, unit: "rad/s²", hint: "round12 row 109: yaw acceleration added while the handbrake AND a steer key are held (builds over 0.4 s, full ≤ 55 km/h, gone at 75 km/h); 0 = off, pure tyre physics" },
   hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
 };
-// v2: step 10's default ride became medium weight (an older saved ride must not override it).
-const RIDE_STORE = "wp.driftLabW.ride.v2";
+// v3: step 18's default ride became the stiff ride (an older saved medium weight must not
+// override it).
+const RIDE_STORE = "wp.driftLabW.ride.v3";
 const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
 const GRIP_STORE = "wp.driftLabW.grip";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
@@ -283,9 +284,9 @@ export class DriftLabWPanel {
       /* storage blocked: defaults */
     }
     try {
-      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
+      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().stiff_ride));
     } catch {
-      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
+      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().stiff_ride));
     }
     let carTune = "";
     try {
@@ -439,7 +440,7 @@ export class DriftLabWPanel {
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
     }
     // Step 10 A/B (lead): "before" = steps 1–9 (no countersteer limit, lab ride) vs "new" =
-    // the default (countersteer limit 0.25°, medium weight). Tyres stay as set below.
+    // the default (countersteer limit 0.25°, stiff ride since step 18). Tyres stay as set below.
     {
       const ab = document.createElement("div");
       ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
@@ -448,7 +449,7 @@ export class DriftLabWPanel {
       ab.appendChild(lbl);
       for (const [label, id, margin, ride] of [
         ["before", "drift-lab-w-before", 0, "lab"],
-        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "medium_weight"],
+        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "stiff_ride"],
       ] as const) {
         const b = document.createElement("button");
         b.id = id;
@@ -456,7 +457,7 @@ export class DriftLabWPanel {
         b.title =
           label === "before"
             ? "steps 1–9: no countersteer limit (lifting off with the counter key held snaps the car back and can spin it), step-3 lab ride"
-            : "step 10 default: countersteer limit 0.25° past the travel (progressive recovery) + medium weight (slower weight transfer, keeps the hold)";
+            : "default: countersteer limit 0.25° past the travel (progressive recovery, step 10) + stiff ride (step 18: springs / bars 1.25, slow weight transfer from the dampers)";
         b.onclick = () => {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_margin_deg: margin });
           const text = JSON.stringify(this.sim.rideTuneDefaults()[ride]);
@@ -609,7 +610,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - rd.medium_weight[key]) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - rd.stiff_ride[key]) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -644,11 +645,13 @@ export class DriftLabWPanel {
         };
         row("keep ride height", "raise the spring preload so softer springs keep the data's static ride height (off the bump stops)", input, document.createElement("span"));
       }
-      for (const [label, which] of [["medium weight (new)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
+      for (const [label, which] of [["stiff ride (new)", "stiff_ride"], ["medium weight (step 10)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
         b.title =
-          which === "medium_weight"
+          which === "stiff_ride"
+            ? "step 18 default (owner: stiffer springs / bars corner better): springs 1.25, bars 1.25, dampers 4 / 5 keep the weight transfer slow (roll rise ~0.6 s, no overshoot), ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6. Restarts the car"
+            : which === "medium_weight"
             ? "step 10 default: slower weight transfer that keeps the held drift (springs 0.7, bars 0.15, dampers 1.6 / 2.1, ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6). Restarts the car"
             : which === "lab"
             ? "step 3 default: calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"

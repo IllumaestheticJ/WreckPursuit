@@ -277,9 +277,9 @@ export const sim = {
   /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg,
    * auto_clutch (1/0), clutch engagement 0..1, clutch_locked (1/0), engine_rpm, driven_wheel_rpm, clutch_pedal]. */
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
-  /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
+  /** Drift Lab W ride tuning in effect (null = car data) / {data, lab, slow_weight, medium_weight, stiff_ride} presets (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
-  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number> } =>
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number>; stiff_ride: Record<string, number> } =>
     JSON.parse(wasm.ride_tune_defaults_json()),
   /** Set the ride tuning ("" = car data as is). */
   rideTuneSet: (json: string): void => wasm.ride_tune_set(json),

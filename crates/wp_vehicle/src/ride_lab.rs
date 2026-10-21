@@ -126,6 +126,26 @@ impl RideTune {
         }
     }
 
+    /// Drift Lab W's default after the owner's step-18 ride (springs / bars 0.95 / 1.0 and
+    /// 1.5 / 1.5 cornered better than medium weight's 0.7 / 0.15: the soft bars let the body
+    /// roll onto the outside rear tyre, so it stepped out on steer + lift). Springs and bars
+    /// × 1.25, with the weight transfer kept slow by the dampers (× 4 bump / × 5 rebound,
+    /// roll ζ ≈ 1.6) instead of soft bars; the rest as [`RideTune::medium_weight`].
+    /// Step-14 balance, rampart_50 / parity_rwd_d / shiro_turbo: steer + lift peak slip
+    /// 16–17° → 11–12°, body slip at 0.8 g 2.9–3.6° → 2.0–2.3°, step-steer roll rise
+    /// 0.45–0.52 s → 0.58–0.68 s, peak roll 5.2–6.3° → 2.6–3.2°, peak g 0.94 → 0.86–0.92
+    /// (docs/integration/grip-balance.md, "Stiff ride"). Above × 1.25 the handling barely
+    /// changes and the roll only gets smaller.
+    pub fn stiff_ride() -> Self {
+        Self {
+            spring: 1.25,
+            arb: 1.25,
+            damper_bump: 4.0,
+            damper_rebound: 5.0,
+            ..Self::medium_weight()
+        }
+    }
+
     /// `def` scaled ([`RideTune::scaled`]) for a corner carrying `corner_load_n` at rest:
     /// travel × [`RideTune::travel`] and, with [`RideTune::keep_ride_height`], the preload
     /// raised so the static compression stays as in the data.
@@ -299,6 +319,20 @@ mod tests {
         );
         assert!(mid.roll_zeta > 0.85, "{mid:?}");
         assert_eq!(RideTune::medium_weight().yaw_inertia, 1.0);
+    }
+
+    #[test]
+    fn stiff_ride_is_stiffer_than_medium_weight_but_more_damped() {
+        let d = car();
+        let mid = ride_model(&d, &RideTune::medium_weight());
+        let stiff = ride_model(&d, &RideTune::stiff_ride());
+        assert!(stiff.roll_deg_per_g < 0.5 * mid.roll_deg_per_g, "{stiff:?}");
+        // Slow weight transfer from the dampers, not soft bars: over-damped, no overshoot.
+        assert!(stiff.roll_zeta > 1.3, "{stiff:?}");
+        assert!(stiff.roll_zeta > mid.roll_zeta, "{stiff:?}");
+        let t = RideTune::stiff_ride();
+        assert_eq!((t.roll_inertia, t.yaw_inertia), (1.8, 1.0));
+        assert!(t.keep_ride_height);
     }
 
     #[test]

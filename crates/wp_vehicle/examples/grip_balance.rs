@@ -398,7 +398,7 @@ fn main() {
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),
         Err(_) => plain::set_override(Some(PlainSteer::default())),
     }
-    // RIDE=data|slow|medium: the suspension data or a W ride preset instead of the lab's ride
+    // RIDE=data|slow|medium|stiff: the suspension data or a W ride preset instead of the lab's ride
     // default (comparison only).
     if std::env::var("RIDE").as_deref() == Ok("data") {
         ride_lab::set_override(None);
@@ -406,8 +406,11 @@ fn main() {
         // Drift Lab W's "slow weight (clip 4)" preset.
         ride_lab::set_override(Some(RideTune::slow_weight()));
     } else if std::env::var("RIDE").as_deref() == Ok("medium") {
-        // Drift Lab W step 10's "medium weight" ride (W's "new" default).
+        // Drift Lab W step 10's "medium weight" ride (W's default until step 18).
         ride_lab::set_override(Some(RideTune::medium_weight()));
+    } else if std::env::var("RIDE").as_deref() == Ok("stiff") {
+        // Drift Lab W step 18's "stiff ride" (W's "new" default).
+        ride_lab::set_override(Some(RideTune::stiff_ride()));
     } else {
         ride_lab::set_override(Some(RideTune::lab_default()));
     }
@@ -422,7 +425,7 @@ fn main() {
         [
             "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
             "robust", "ltrace", "chatter", "pull", "slipg", "c60", "snap", "grip", "score", "feel",
-            "cars",
+            "cars", "ride",
         ]
         .contains(&a.as_str())
     }) {
@@ -470,6 +473,14 @@ fn main() {
     }
     if what == "cars" {
         cars_table(&args);
+        return;
+    }
+    if what == "ride" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("\n# balance: {name}");
+            ride_table(&args);
+        }
         return;
     }
     if what == "score" {
@@ -816,6 +827,78 @@ fn feel_table(ids: &[String]) {
     println!("|---|---|---|---|---|---|---|---|---|---|");
     for id in ids {
         println!("{}", feel_row(id));
+    }
+}
+
+/// The rides compared by `ride` (owner, step 18 ride feedback): each entry is a partial
+/// [`RideTune`] laid over the medium-weight ride, as the Drift Lab W sliders do. `RIDES='[{..}]'`
+/// replaces the list.
+fn ride_set() -> Vec<(String, RideTune)> {
+    let list: Vec<serde_json::Value> = match std::env::var("RIDES") {
+        Ok(j) => serde_json::from_str(&j).expect("RIDES json"),
+        Err(_) => vec![
+            serde_json::json!({}),
+            serde_json::json!({"spring": 0.95, "arb": 1.0}),
+            serde_json::json!({"spring": 1.25, "arb": 1.25}),
+            serde_json::json!({"spring": 1.5, "arb": 1.5}),
+            // RideTune::stiff_ride(), the step-18 default.
+            serde_json::json!({"spring": 1.25, "arb": 1.25, "damper_bump": 4.0, "damper_rebound": 5.0}),
+        ],
+    };
+    list.into_iter()
+        .map(|over| {
+            let mut v = serde_json::to_value(RideTune::medium_weight()).unwrap();
+            for (k, x) in over.as_object().expect("RIDES entries are objects") {
+                v[k] = x.clone();
+            }
+            let name = if over.as_object().is_some_and(|o| o.is_empty()) {
+                "medium".to_string()
+            } else {
+                over.to_string()
+            };
+            (name, serde_json::from_value(v).expect("RideTune"))
+        })
+        .collect()
+}
+
+/// `ride`: per car and ride ([`ride_set`]) — grip below the limit (body slip vs g), turn-in,
+/// steer + lift (lift at turn-in; > 8° body slip = a step-out), mid-corner lift, the held key
+/// at 60 mph, clip 4's step-steer roll (target 0.6–0.8 s rise, 5–7°), slalom roll rate and
+/// the lane change. `ROBUST=1` adds the 27-case held-drift count per ride.
+fn ride_table(ids: &[String]) {
+    let a = reference_assists();
+    println!("| car | ride | 60 km/h slip 0.5/0.6/0.7/0.8 g · peak | 100 km/h slip 0.6/0.7 · peak | turn-in yaw 0.6 s | steer+lift peak slip | mid lift slip → / rise | held key 60 mph slip / g | roll 80 km/h delay / rise s / peak ° / overshoot % / lat g / travel | slalom roll / rate | lane |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|");
+    for (name, tune) in ride_set() {
+        ride_lab::set_override(Some(tune));
+        for id in ids {
+            let c = car(id);
+            let pick = |r: &SlipCurve, g: f32| {
+                r.bins
+                    .iter()
+                    .find(|b| (b.0 - g).abs() < 1e-3)
+                    .map_or("–".to_string(), |b| format!("{:.1}", b.1))
+            };
+            let s60 = slip_curve(&c, 60.0);
+            let s100 = slip_curve(&c, 100.0);
+            let ((turn_in, _), (_, lift_slip)) = lift_off(&c, 60.0);
+            let (mb, ma, mr) = lift_mid(&c, 60.0);
+            let held = circle(&c, 60.0);
+            let st = wp_vehicle::drift_lab_w::step_steer_roll(&c, &a, 80.0 / 3.6, 1.5);
+            let (_, _, _, sl_roll, sl_rate) = slalom(&c, 60.0);
+            let lane = lane_change_slip(&c, &a);
+            println!(
+                "| {id} | {name} | {} / {} / {} / {} · {:.2} g/{:.1}° | {} / {} · {:.2} g/{:.1}° | {turn_in:.1} | {lift_slip:.1}°{} | {mb:.1} → {ma:.1}° / +{mr:.1} | {:.1}° / {:.2}{} | {:.2} / {:.2} / {:.1} / {:.0} / {:.2} / {:.2} | {sl_roll:.1}° / {sl_rate:.0} | {lane:.1} |",
+                pick(&s60, 0.5), pick(&s60, 0.6), pick(&s60, 0.7), pick(&s60, 0.8), s60.max_g, s60.slip_at_max,
+                pick(&s100, 0.6), pick(&s100, 0.7), s100.max_g, s100.slip_at_max,
+                if lift_slip > 8.0 { " OUT" } else { "" },
+                held.slip, held.ay_g, if held.spun { " SPUN" } else { "" },
+                st.roll_delay_s, st.rise_s, st.peak_roll_deg, st.overshoot_pct, st.peak_lat_g, st.max_travel_frac,
+            );
+        }
+        if std::env::var("ROBUST").is_ok() {
+            println!("| held-drift count | {name} | {} / 27 |", robust());
+        }
     }
 }
 

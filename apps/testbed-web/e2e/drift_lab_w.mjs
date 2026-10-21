@@ -49,7 +49,7 @@ check(!sc.traffic_cars && !sc.police_cars, "no traffic, no police");
 const plain = await page.evaluate(() => window.__wp.sim.plainSteer());
 check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return_s - 0.33) < 1e-6, `plain steering on ${JSON.stringify(plain)}`);
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
-check(ride && Math.abs(ride.arb - 0.15) < 1e-6 && Math.abs(ride.spring - 0.7) < 1e-6, `ride default = medium weight (step 10) ${JSON.stringify(ride)}`);
+check(ride && Math.abs(ride.arb - 1.25) < 1e-6 && Math.abs(ride.spring - 1.25) < 1e-6 && Math.abs(ride.damper_rebound - 5) < 1e-6, `ride default = stiff ride (step 18) ${JSON.stringify(ride)}`);
 {
   const g0 = await page.evaluate(() => window.__wp.sim.gripBalance());
   check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_stiffness - 0.45) < 1e-6, `grip balance default = new (step 14) ${JSON.stringify(g0)}`);
@@ -161,7 +161,7 @@ check(await page.locator("#drift-lab-w-keep-height").isChecked(), "keep ride hei
 await page.locator("#drift-lab-w button", { hasText: "lab default" }).click();
 await page.waitForTimeout(1500);
 check(Math.abs((await page.evaluate(() => window.__wp.sim.rideTune().arb)) - 0.25) < 1e-6, "lab default ride (before) set");
-// Step 10 A/B: "before" (no countersteer limit, lab ride) vs "new" (limit 0.25°, medium weight).
+// Step 10 A/B: "before" (no countersteer limit, lab ride) vs "new" (limit 0.25°, stiff ride since step 18).
 await page.locator("#drift-lab-w-before").click();
 await page.waitForTimeout(1500);
 {
@@ -172,7 +172,7 @@ await page.locator("#drift-lab-w-new").click();
 await page.waitForTimeout(1500);
 {
   const n = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
-  check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 0.7) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, medium weight (${n})`);
+  check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 1.25) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, stiff ride (${n})`);
 }
 // Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
 check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");

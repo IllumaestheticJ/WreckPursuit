@@ -832,3 +832,100 @@ Closest: debug_coupe 0.4, hakone_gt 0.3.
 
 Data proposals are for machine A (car data owner); nothing in `data/` is changed here. The
 example's `ARB_F/ARB_R/SPRING_F/SPRING_R/TORQUE/YAW_INERTIA` overrides reproduce them.
+
+## Stiff ride — springs / bars up, weight transfer slowed by the dampers (owner ride, step 18)
+
+Owner, on Drift Lab W: cornering grip felt better with springs / bars at 0.95 / 1.0, and better
+still at 1.5 / 1.5 (the slider max), than medium weight's 0.7 / 0.15. Likely cause of the earlier
+"no side grip, steps out on steer + lift": the soft bars let the body roll and load the outside
+rear tyre. The sliders lay over medium weight, so each ride below is medium weight (dampers 1.6 / 2.1,
+ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6) with only the listed fields changed.
+
+**New default: `RideTune::stiff_ride()`** = springs × 1.25, bars × 1.25, dampers × 4.0 bump /
+× 5.0 rebound, the rest as medium weight. It is the panel's "stiff ride (new)" and the A/B "new";
+medium weight stays one click away ("medium weight (step 10)"). The saved ride moved to
+`wp.driftLabW.ride.v3`, so an old saved medium weight does not override it. The springs and bars
+sliders now go to 3.0. The damper sliders now go to 6.0, because the default's rebound (5.0) was
+past the old max of 3.
+
+Measured with `grip_balance ride` on the step-14 balance (`GRIP=new`, the default). Body slip
+is in °, + = tail out. Steer + lift = the left key at 60 mph with the throttle lifted at turn-in,
+peak body slip; > 8° counts as a step-out. Held key = the left key held at 60 mph, last 2 s.
+Roll = clip 4's step steer (right key held 1.5 s at 80 km/h): 10→90 % rise and peak roll. The
+owner's target is a 0.6–0.8 s rise and 5–7° of lean.
+
+| car | ride | slip 60 km/h at 0.6 / 0.7 / 0.8 g · peak g | turn-in yaw 0.6 s °/s | steer + lift slip | mid-corner lift slip / yaw rise | held key slip / g | roll rise s / peak ° / overshoot % | slalom roll rate °/s | lane change slip |
+|---|---|---|---|---|---|---|---|---|---|
+| rampart_50 | medium 0.7 / 0.15 | 1.6 / 2.1 / 3.6 · 0.94 | 34.5 | 17.4 | 5.8 → 10.3 / +6.4 | 5.2 / 0.85 | 0.51 / 6.3 / 3 | 18 | 8.2 |
+| | 0.95 / 1.0 | 1.4 / 1.8 / 2.4 · 0.85 | 33.5 | 11.5 | 4.4 → 6.3 / +7.6 | 4.3 / 0.86 | 0.43 / 4.1 / 1 | 10 | 7.5 |
+| | 1.25 / 1.25 | 1.3 / 1.7 / 2.3 · 0.86 | 33.7 | 11.5 | 4.3 → 6.3 / +7.6 | 4.3 / 0.87 | 0.39 / 3.3 / 2 | 10 | 7.5 |
+| | 1.5 / 1.5 | 1.3 / 1.7 / 2.2 · 0.87 | 33.9 | 11.3 | 4.3 → 6.3 / +7.6 | 4.3 / 0.88 | 0.38 / 2.8 / 3 | 10 | 7.5 |
+| | **stiff ride** | 1.3 / 1.7 / 2.3 · 0.86 | 34.5 | 11.9 | 4.4 → 6.1 / +6.7 | 4.3 / 0.87 | **0.65** / 3.2 / 0 | 8 | 7.5 |
+| parity_rwd_a | medium | 1.4 / 1.8 / 3.1 · 0.99 | 33.5 | 15.4 | 5.9 → 10.4 / +8.4 | 4.7 / 0.86 | 0.55 / 6.6 / 2 | 18 | 7.4 |
+| | 0.95 / 1.0 | 1.2 / 1.6 / 2.0 · 0.87 | 32.7 | 10.9 | 4.2 → 6.2 / +7.5 | 4.2 / 0.90 | 0.44 / 4.2 / 3 | 13 | 6.8 |
+| | 1.25 / 1.25 | 1.1 / 1.5 / 1.9 · 0.88 | 32.9 | 10.9 | 4.1 → 6.2 / +7.5 | 4.2 / 0.91 | 0.40 / 3.4 / 4 | 13 | 6.8 |
+| | 1.5 / 1.5 | 1.1 / 1.5 / 1.9 · 0.89 | 33.1 | 10.7 | 4.1 → 6.2 / +7.4 | 4.2 / 0.92 | 0.38 / 2.9 / 6 | 12 | 6.8 |
+| | **stiff ride** | 1.1 / 1.5 / 1.9 · 0.88 | 33.7 | 11.1 | 4.2 → 6.0 / +6.6 | 4.2 / 0.91 | **0.64** / 3.3 / 1 | 9 | 6.8 |
+| parity_rwd_b | medium | 1.6 / 2.1 / 2.9 · 1.08 | 38.1 | 25.8 | 6.2 → 14.3 / +14.5 | 5.6 / 0.96 | 0.41 / 3.7 / 5 | 16 | 10.3 |
+| | 0.95 / 1.0 | 1.6 / 2.0 / 2.5 · 0.94 | 37.2 | 15.5 | 4.5 → 8.6 / +10.1 | 4.7 / 0.97 | 0.41 / 2.8 / 3 | 13 | 9.3 |
+| | 1.25 / 1.25 | 1.6 / 2.0 / 2.4 · 0.95 | 37.4 | 15.4 | 4.5 → 8.6 / +10.1 | 4.7 / 0.98 | 0.37 / 2.3 / 4 | 12 | 9.1 |
+| | 1.5 / 1.5 | 1.5 / 1.9 / 2.4 · 0.95 | 37.5 | 15.3 | 4.5 → 8.5 / +10.1 | 4.7 / 0.98 | 0.36 / 2.0 / 5 | 10 | 9.0 |
+| | **stiff ride** | 1.5 / 1.9 / 2.4 · 0.95 | 37.8 | 15.8 | 4.5 → 8.5 / +9.4 | 4.7 / 0.98 | **0.59** / 2.2 / 1 | 10 | 9.2 |
+| parity_rwd_d | medium | 1.5 / 2.0 / 3.4 · 0.95 | 32.2 | 15.9 | 6.1 → 10.0 / +5.8 | 5.0 / 0.86 | 0.52 / 6.3 / 1 | 17 | 7.7 |
+| | 0.95 / 1.0 | 1.3 / 1.7 / 2.2 · 0.84 | 30.8 | 11.2 | 4.3 → 6.3 / +7.3 | 4.3 / 0.87 | 0.44 / 4.1 / 3 | 12 | 7.1 |
+| | 1.25 / 1.25 | 1.2 / 1.6 / 2.1 · 0.86 | 31.1 | 11.1 | 4.3 → 6.2 / +7.3 | 4.3 / 0.88 | 0.40 / 3.3 / 4 | 12 | 7.0 |
+| | 1.5 / 1.5 | 1.2 / 1.6 / 2.1 · 0.86 | 31.3 | 11.0 | 4.2 → 6.2 / +7.2 | 4.3 / 0.89 | 0.39 / 2.9 / 5 | 12 | 7.0 |
+| | **stiff ride** | 1.2 / 1.6 / 2.1 · 0.86 | 31.8 | 11.5 | 4.3 → 6.1 / +6.4 | 4.3 / 0.88 | **0.64** / 3.2 / 1 | 9 | 7.1 |
+| shiro_turbo | medium | 1.3 / 1.8 / 2.9 · 0.95 | 35.6 | 15.9 | 5.6 → 9.2 / +9.6 | 4.5 / 0.90 | 0.45 / 5.2 / 6 | 16 | 8.4 |
+| | 0.95 / 1.0 | 1.2 / 1.6 / 2.0 · 0.91 | 35.4 | 11.2 | 4.2 → 6.3 / +7.7 | 4.3 / 0.93 | 0.40 / 3.3 / 3 | 12 | 7.9 |
+| | 1.25 / 1.25 | 1.2 / 1.5 / 2.0 · 0.92 | 35.7 | 11.2 | 4.1 → 6.3 / +7.7 | 4.3 / 0.94 | 0.37 / 2.7 / 5 | 12 | 7.9 |
+| | 1.5 / 1.5 | 1.2 / 1.5 / 1.9 · 0.92 | 35.9 | 11.1 | 4.1 → 6.3 / +7.6 | 4.3 / 0.94 | 0.36 / 2.3 / 6 | 11 | 7.9 |
+| | **stiff ride** | 1.2 / 1.5 / 2.0 · 0.92 | 35.9 | 11.3 | 4.2 → 6.2 / +7.0 | 4.3 / 0.94 | **0.55** / 2.6 / 1 | 10 | 7.8 |
+
+Held-drift count (27 tyre-slip cases, plain steering): 0 / 27 on every ride, as on medium weight.
+
+**Reading:**
+- **The owner's read checks out.** Going from 0.7 / 0.15 to 0.95 / 1.0 cuts the steer + lift
+  step-out from 15–26° to 11–16°, mid-corner lift slip from 9–14° to 6–9°, and slip at 0.8 g from
+  2.9–3.6° to 2.0–2.5°. The held key sits about 1° tighter. Turn-in is unchanged (±1 °/s), and so
+  are taps and the lane change (−0.5 to −1°).
+- **Past 1.25 / 1.25 nothing moves.** From 1.25 to 1.5 every handling number changes by ≤ 0.1° /
+  0.01 g. Going on to 3.0 / 3.0 (rampart_50 / parity_rwd_d / shiro_turbo) adds ≤ 0.4° / 0.02 g. Only the roll keeps shrinking: 3.3 → 2.8 → 1.7° on rampart.
+  So the default takes 1.25 and keeps more lean than 1.5 would.
+- **Cost: peak lateral g.** RWD peak g at 60 km/h falls from 0.94–1.08 to 0.86–0.95 g (−6 to
+  −12 %). The car no longer slides into its limit; it reaches the limit earlier and with less body slip.
+- **Roll timing.** With medium's dampers, stiff bars make the roll quicker (rise 0.36–0.44 s) and
+  under-damped (model ζ 1.05 → 0.62, 13–15 % overshoot in W's `weight` table). Dampers slow it
+  back down: × 4 / × 5 gives a **0.55–0.65 s** rise, 0–1 % overshoot and model roll ζ 1.6. Roll
+  inertia does not help this metric: × 3–4 gives a faster 10→90 % rise, with more overshoot.
+  Pitch ends up over-damped too (model ζ 1.67).
+- **Lean target not met: 2.2–3.3° against 5–7°.** Steady lean is roll stiffness ÷ load. Dampers
+  and inertia set how fast the lean builds, not how far, so 5–7° needs the soft bars the owner
+  just rejected. If the look matters, it would have to be visual-only body roll in the renderer.
+  Not done.
+
+**Step 14 and grip on the stiff ride** (`grip_balance feel`, 14 cars, `RIDE=stiff`):
+- **Step 14 (default balance):** slip at 0.8 g / 60 km/h is 1.9–2.7° on the RWD cars (was 2.5–5.0°).
+  sperber_32 0.8 g slip 5.0 → 2.4°, lane change 11.6 → 9.6°. lucciola_350 lane change 13.0 →
+  11.3°. Taps and turn-in are unchanged (shiro 29.5 / 38.2 °/s, rampart 26.5 / 35.8). The anchor
+  shape holds: shiro and rampart move together. FWD cars: slalom roll rate 24–30 → 13–17 °/s;
+  kestrel_ts / parity_fwd_c turn-in 27–28 → 30.5 °/s; vireo_xs lift yaw rise +14.3 → +6.5.
+  parity_rwd_a / d power-on is still a spin (56–59°, just under the table's 60° SPUN line).
+- **Balance: grip:** now grip-drivable to 0.8 g. RWD slip at 0.8 g / 60 km/h is 0.5–1.3° (medium:
+  1.9–6.6°). rampart_50 power-on 27.5 → 4.1°, which was the reason grip lost to step 14 in
+  "Feel references". lucciola_350 lane change 32.6 → 21.7°, sperber_32 15.5 → 10.2°. Lift
+  rotation is mostly gone, though: yaw rise rampart +19.2 → +3.8, rwd_d +20.8 → +4.2,
+  debug_coupe +8.0 → +1.5. debug_coupe still rotates on power (23.7°). Grip stays a test
+  preset; worth another owner ride on this ride.
+
+Reproduce: `GRIP=new ROBUST=1 grip_balance ride rampart_50 parity_rwd_a parity_rwd_b parity_rwd_d shiro_turbo`
+(`RIDES='[{...}]'` swaps the ride list); `RIDE=stiff GRIP=new|grip grip_balance feel <cars>`.
+
+**Gate:**
+- fmt and clippy (`wp_vehicle`, `wp_wasm`) pass, as do the wasm build (debug and release), tsc,
+  and `e2e:drift-lab-w` (81/81).
+- `cargo test -p wp_vehicle` has the same 4 red tests before and after this change (`drift_lab_b` ×2,
+  `slide_control` wobble, `drift_lab_w_snap`, which pins medium weight itself). The new
+  `ride_lab` test passes.
+- simcli goldens not re-run: the ride override is lab-only, and the vehicle step is
+  bit-identical without it.
