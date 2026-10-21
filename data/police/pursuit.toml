@@ -29,7 +29,8 @@ night = 140.0
 # Kinematic (headless) driver acceleration; the doctrine tests in crates/wp_police/scenarios
 # are calibrated on it.
 accel_mps2 = 4.0
-# AI units driven as physical cars (the game): ceiling on the speed-reference ramp. 4.0 → 5.0 →
+# AI units driven as physical cars without lights (patrol, returning; with lights the [pro]
+# driver uses the car's own limits): ceiling on the speed-reference ramp. 4.0 → 5.0 →
 # 6.0 (2026-10-21) with the police street-spec power rebalance: 6.0 = wp_world::drive's
 # full-pedal acceleration; slower cars saturate it and resync. 6.0 first exposed a traffic-stop
 # queue (fixed in wp_opponent) and a patrol gridlock (fixed: boxed-in units turn round), and
@@ -132,3 +133,43 @@ reroute_reverse_s = 3.0
 spawn_clear_m = 25.0
 spawn_path_s = 5.0
 spawn_path_half_width_m = 6.0
+
+# Pro driving of physical units (wp_police::pro, lead P8): racing line inside the own-direction
+# lanes (plus junction boxes), speed profile at the grip limit (car limits x usage x road grip x
+# damage x confidence), late braking, slide control. Patrol keeps its lane, patrol_cornering_g and
+# unit.brake_mps2; obstacle awareness and junction rules above still cap the speed.
+[pro]
+# Sentinel Cruiser, measured (skidpad g, 100-0 decel g, 0-100 mean accel, top speed).
+default_limits = { lat_g = 0.83, brake_g = 0.98, accel_mps2 = 4.35, top_speed_mps = 72.4 }
+lat_usage = 0.95
+brake_usage = 0.92
+window_m = 220.0
+step_m = 3.0
+edge_margin_m = 0.5
+half_width_m = 0.95
+lane_width_m = 3.5
+opposing_m = 0.5
+corner_round_passes = 12
+traffic_clear_m = 80.0
+replan_s = 0.25
+smooth_sweeps = 30
+curvature_sweeps = 60
+lookahead_base_m = 2.0
+lookahead_per_mps = 0.33
+lookahead_min_m = 5.0
+lookahead_max_m = 30.0
+speed_gain = 2.5
+lead_s = 0.15
+slip_deadband_rad = 0.05
+countersteer_gain = 0.8
+slide_slip_rad = 0.12
+slide_throttle = 0.25
+exit_throttle_min = 0.3
+confidence_drop = 0.05
+confidence_min = 0.8
+confidence_regain_per_s = 0.02
+run_wide_m = 1.2
+turn_around_mps = 4.0
+stuck_s = 1.5
+reverse_s = 2.5
+reverse_min_s = 1.5

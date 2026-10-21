@@ -57,6 +57,23 @@
   Budget scenarios: `radio_city_chase.ron`, `radio_calm_patrol.ron` (metrics
   `radio_per_min_pursuit`, `radio_per_min_calm`); `cargo run --release -p wp_police --example
   radio_log -- <scenario>` prints the spoken lines.
+- **Pro driving** (lead helper `lead/police-driver`, P8; module `wp_police::pro`, README
+  "Pro driving"): with lights on, `unit_input` drives each physical unit with a
+  `pro::ProDriver` (racing line in its own-direction lanes and junction boxes, speed profile at
+  the grip limit, late braking, slide control, stuck recovery). Patrol keeps the old lane
+  driver. New API:
+  - `sync_unit_feel(unit, pro::UnitFeel { yaw_rate, road_grip })` after `sync_unit` (wp_sim
+    sends `ang_vel[2]` and `wp_vehicle::Vehicle::conditions_grip()`, so wet roads slow units);
+  - `set_unit_limits(unit, pro::CarLimits)` (wp_sim: `Sim::set_police_car_limits`); default
+    `[pro] default_limits` = the Sentinel Cruiser measured;
+  - `pro::RoadRoom::from_city(&CityMap, &ProParams)` (built by `for_world`), `pro::RoomQuery`;
+  - `RoadSegment::{lanes_fwd, lanes_back, lane_width_m}` (serde default 0 = unknown);
+  - tuning `[pro]` in `data/police/pursuit.toml` (`PursuitFile::pro`, every key spelled out; a
+    test keeps it equal to `ProParams::default`).
+  Measured: `cargo test --release -p wp_opponent --test police_pace -- --nocapture` (police vs
+  the best race-AI profile, same car: arterial square −1.0 %, Hollins Drive +2.3 %, 0 wall
+  hits dry and wet; the pre-P8 driver +13.5 % and did not finish Hollins). City with traffic:
+  README "Pro driving".
 - Data: `data/police/{heat,presence,pursuit,tools,radio}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
   on D's procedural city (`city: (nx, ny, seed)`, default `ProcGenConfig::small()`).
 
@@ -210,10 +227,21 @@ The reply is `Result<(), CaptainError>` with:
 
   Its recorded fixture (`apps/ui-kit/fixtures/runs/police_pursuit`) was not regenerated.
 
+- **Lead `lead/police-driver` (P8)**, outside `wp_police`:
+  - `crates/wp_vehicle/src/vehicle.rs`: `Vehicle::conditions_grip()` (read-only, additive).
+  - `crates/wp_sim`: `Sim::set_surface_conditions`, `Sim::set_police_car_limits`, and
+    `police_link` sends `sync_unit_feel` / `set_unit_limits`.
+  - `crates/wp_opponent/tests/police_pace.rs`: new full-sim test (police vs race AI), reusing
+    the crate's `tests/common` harness; no change to `wp_opponent` itself.
+  - `apps/simcli/examples/police_traffic_contacts.rs`: also counts police↔world hits;
+    `WP_TRACE_COP=<seed>,<entity>` traces one police car.
+  - Goldens re-blessed (`[bless]` commit): every scenario with physical police cars.
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
 | `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
+| Pro driver (`ProDriver::drive`, lead P8) per unit per 60 Hz frame (4 physics ticks, re-plans included; `police_pace` test) | Cloud container, release | ≈ 0.012 ms (2.2–3.1 µs per tick) | not measured | (part of the 0.5 ms) |
 
 ## Known gaps
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).

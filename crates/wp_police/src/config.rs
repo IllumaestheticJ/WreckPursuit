@@ -293,9 +293,10 @@ pub struct PresenceFile {
 pub struct UnitDynamics {
     /// Max acceleration of the built-in kinematic driver, m/s².
     pub accel_mps2: f32,
-    /// Ceiling on the speed-reference ramp of AI units driven as physical cars
-    /// ([`PoliceSystem::unit_input`](crate::PoliceSystem::unit_input)), m/s². The car's own
-    /// engine is the real limit; above it the pedals saturate.
+    /// Ceiling on the speed-reference ramp of AI units driven as physical cars without lights
+    /// (patrol, returning: [`PoliceSystem::unit_input`](crate::PoliceSystem::unit_input)'s lane
+    /// driver), m/s². The car's own engine is the real limit; above it the pedals saturate.
+    /// With lights the pro driver uses the car's own limits (`[pro]`).
     pub physical_accel_mps2: f32,
     /// Comfortable braking used for planning, m/s².
     pub brake_mps2: f32,
@@ -412,6 +413,10 @@ pub struct PursuitFile {
     pub tactics: TacticConfig,
     /// Obstacle awareness (following, passing, spawn clearance).
     pub avoid: AvoidConfig,
+    /// Pro driving of physical units: racing line, grip-limit speed profile, slide control
+    /// ([`crate::pro`]). Defaults when the table has no `[pro]` section.
+    #[serde(default)]
+    pub pro: crate::pro::ProParams,
 }
 
 /// Obstacle awareness for ground units (see [`crate::avoid`]).
@@ -776,6 +781,15 @@ mod tests {
         let disk =
             PoliceConfig::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/police")).unwrap();
         assert_eq!(c, disk);
+    }
+
+    #[test]
+    fn pro_table_matches_the_code_defaults() {
+        // `[pro]` spells every knob out; keep it and `ProParams::default` in step.
+        assert_eq!(
+            PoliceConfig::builtin().pursuit.pro,
+            crate::pro::ProParams::default()
+        );
     }
 
     #[test]

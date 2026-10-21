@@ -473,8 +473,9 @@ impl PoliceSystem {
             };
             self.units[i].set_command(cmd);
             // The route leaves behind the unit while the car still faces the block: a physical
-            // unit backs out first (the kinematic driver turns on the spot).
-            if self.units[i].entity.is_some() {
+            // unit without lights backs out first (`lane_input`; the pro driver used with lights
+            // reverses when stuck on its own, the kinematic driver turns on the spot).
+            if self.units[i].entity.is_some() && !self.units[i].cmd.siren {
                 self.units[i].avoid.reverse_s = self.cfg.pursuit.avoid.reroute_reverse_s;
             }
             return;
