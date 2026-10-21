@@ -13,6 +13,7 @@ canonical `replay.bin` files that `simcli replay` verifies.
 | `lib.rs` | exported functions (full ABI table: `docs/integration/testbed.md`) |
 | `session.rs` | `Session`: fixed-step loop, live / scripted / playback, op + input log, per-tick hashes, drift check |
 | `scenario.rs` | free-drive scenario generator, `.ron` parsing, cruise-speed override (all simcli v2) |
+| `features.rs` | `city_features()` packing (11 floats per box / cylinder feature) and `feature_palette()` |
 | `pack.rs` | packed typed-array layouts, beam strain, region energy |
 | `run.rs` | the player's economy (lead): drained events → G's `EconomySession`, end-of-run `RunReport`, "Repair & continue"; tests in `run_tests.rs` |
 | `police.rs` / `garage.rs` / `audio.rs` | police read-outs + siren rule, live repair bill, audio director glue |

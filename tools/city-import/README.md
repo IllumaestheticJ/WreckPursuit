@@ -25,6 +25,12 @@ terrain cities a 10 m terrain mesh, each vertex the minimum of the fine heights 
 never rises above a road, smooth normals), `rock`, `seabed`, `water` (sea plane at 0.25 m),
 `retaining_wall` (road edges above the ground) and `bridge` (deck sides, parapets, piers).
 Flat faces carry no normals (the testbed flat-shades them).
+Prism features (format v4, solid or not) become `feature_<material>` primitives (one per
+`Material`, colours from `wp_world::palette::material_rgba`, re-exported as
+`glb::material_rgba`); box and cylinder features are drawn instanced by the testbed instead.
+Big maps (terrain over 25 km², i.e. Port Vesper v3) draw render-terrain 2 × 2 blocks with no road
+within 60 m as one quad (edge midpoints kept where a block meets full-resolution cells, so there
+are no cracks); smaller maps are unchanged byte for byte. v3 with stub roads: 15.3 → 6.6 MB glb.
 Format: see `crates/wp_world/README.md`.
 
 ## OSM mapping

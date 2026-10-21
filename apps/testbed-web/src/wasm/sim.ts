@@ -168,6 +168,10 @@ export const sim = {
   signalHeads: (): Float32Array => wasm.signal_heads(),
   /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */
   roadMarkings: (yellow: boolean): Float32Array => wasm.road_markings(yellow),
+  /** Box + cylinder city features (layout.ts FT, FEATURE_STRIDE); fetch once per session. */
+  cityFeatures: (): Float32Array => wasm.city_features(),
+  /** Feature material colours, RGBA per material index (the greybox palette). */
+  featurePalette: (): Float32Array => wasm.feature_palette(),
   /** One state byte per signal head (layout.ts SIGNAL), same order as signalHeads(). */
   signalStates: (): Uint8Array => wasm.signal_states(),
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
