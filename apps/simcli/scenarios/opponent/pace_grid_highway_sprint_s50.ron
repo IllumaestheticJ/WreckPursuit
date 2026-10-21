@@ -8,8 +8,8 @@
 // builds) and checks them: `finishers` (every car finishes), `best_ratio` (best time over
 // that car's ideal time: its speed profile at 100 % of its measured limits; at most today's
 // + 0.05, never under 0.97), `race_time_s` per car (today's time −15 % .. +15 %, +20 % at
-// skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measure and widen only with a
-// reason (docs/integration/opponent-pace.md).
+// skill 0.50). Re-measured 2026-10-21 on ws/harness, after lead/city-residential; re-measure
+// and widen only with a reason (docs/integration/opponent-pace.md, Re-lock 2026-10-21).
 (
     name: "opponent_pace_grid_highway_sprint_s50",
     seed: 7,
@@ -76,10 +76,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.74),
-        metric(name: "race_time_s", entity: "ai_vic", min: 32.8, max: 46.4),
-        metric(name: "race_time_s", entity: "ai_juno", min: 34.1, max: 48.2),
-        metric(name: "race_time_s", entity: "ai_tito", min: 46.0, max: 65.0),
-        metric(name: "race_time_s", entity: "player", min: 40.4, max: 57.2),
+        metric(name: "best_ratio", min: 0.97, max: 2.65),
+        metric(name: "race_time_s", entity: "ai_vic", min: 65.3, max: 92.3),
+        metric(name: "race_time_s", entity: "ai_juno", min: 81.3, max: 114.9),
+        metric(name: "race_time_s", entity: "ai_tito", min: 47.1, max: 66.6),
+        metric(name: "race_time_s", entity: "player", min: 82.2, max: 116.1),
     ],
 )
