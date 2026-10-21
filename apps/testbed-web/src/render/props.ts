@@ -10,8 +10,8 @@
 // 3,000+ of them, so they are drawn in three tiers, and every car always has exactly one drawn
 // instance (no distance hides a prop: no invisible collisions):
 //   * full: the nearest MAX_FULL parked cars within FULL_LOD_M (the fleet's full-mesh distance)
-//     use the full panel mesh. Re-picked after the camera moves REPICK_M; only the cars that
-//     change drawer are rewritten;
+//     use the car model's mid-LOD panel mesh (render/panels.ts loadCarMidMesh, as the fleet).
+//     Re-picked after the camera moves REPICK_M; only the cars that change drawer are rewritten;
 //   * proxy / box: the city is cut into CHUNK_M chunks, each with its own instanced meshes and
 //     a bounding sphere, so Three frustum-culls whole chunks. A chunk within PROXY_M of the
 //     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (20 triangles).
@@ -28,7 +28,7 @@ import * as THREE from "three";
 import { P, PROP_KIND, PROP_MOVED_STRIDE, PROP_STRIDE, WK, WRECK_STRIDE } from "../wasm/layout";
 import type { CarModelInfo, SessionModels } from "../wasm/sim";
 import { sim } from "../wasm/sim";
-import { PanelBody, carMeshNow, loadCarMesh } from "./panels";
+import { PanelBody, carMidMeshNow, loadCarMidMesh } from "./panels";
 import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, styledPaint, type FleetMaterials } from "./fleet";
 import { PALETTE } from "./palette";
 import { artStyle } from "./style";
@@ -334,11 +334,12 @@ export class PropView {
       for (const props of byCell.values()) this.addChunk(props, mats);
       if (models.traffic) {
         const carId = models.traffic;
-        const now = carMeshNow(carId);
+        // The mid LOD (render/panels.ts loadCarMidMesh), as the fleet's near cars.
+        const now = carMidMeshNow(carId);
         if (now) this.setFullMesh(now, info);
         else if (now === undefined) {
           const gen = this.generation;
-          void loadCarMesh(carId).then((mesh) => mesh && gen === this.generation && this.setFullMesh(mesh, info));
+          void loadCarMidMesh(carId).then((mesh) => mesh && gen === this.generation && this.setFullMesh(mesh, info));
         }
       }
     }

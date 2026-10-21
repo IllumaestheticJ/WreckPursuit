@@ -26,8 +26,9 @@ import { layers } from "../settings";
 import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn, type DrawMode, type FleetModel } from "./fleet";
 import { unitLevels } from "./lights";
 
-/** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
-const VIEW_LOD_BAND_M = 15;
+/** Hysteresis of the view → fleet hand-off (`LodDirector.viewDrawM`): a promoted car goes to
+ * the fleet past `viewDrawM + VIEW_LOD_BAND_M` and comes back to its view within `viewDrawM`, m. */
+export const VIEW_LOD_BAND_M = 10;
 
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
 /** `culled`: instanced traffic past [`LodDirector.trafficDrawM`], not drawn by design (not a
@@ -169,9 +170,11 @@ export class LodDirector {
    * sim vehicles are always drawn. */
   trafficDrawM = Infinity;
   /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
-   * the fleet (one instanced draw for all of them) instead of their own view (~40 draw calls
-   * each, per panel). Low / touch graphics profiles only; the player and AI racers always use
-   * their view. 10 m of hysteresis so a car on the boundary does not flip drawers every frame. */
+   * the fleet (one instanced draw for all of them, mid-LOD mesh) instead of their own view
+   * (full detailed mesh, ~40 draw calls each, per panel, skinned to the lattice: dents and
+   * crumple show). Every graphics profile sets it (render/quality.ts: ~30 m; 0 on touch =
+   * always the fleet); the player and AI racers always use their view. `VIEW_LOD_BAND_M` of
+   * hysteresis so a car on the boundary does not flip drawers every frame. */
   viewDrawM = Infinity;
   /** `fleet.generation` the model caches were resolved for. */
   private fleetGen = -1;
@@ -322,13 +325,14 @@ export class LodDirector {
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
-    // Low / touch profiles (`viewDrawM`): a promoted traffic / police car farther than that is
-    // drawn by the fleet (one instanced draw for all) instead of its own view; 10 m of
-    // hysteresis. `lodFar` also lets the view skip its lattice fetch and re-skin meanwhile.
+    // `viewDrawM`: a promoted traffic / police car farther than that is drawn by the fleet (one
+    // instanced draw for all, mid LOD) instead of its own view; VIEW_LOD_BAND_M of hysteresis;
+    // 0 (touch) = always the fleet. `lodFar` also lets the view skip its lattice fetch and
+    // re-skin meanwhile.
     if (view && ready && model && Number.isFinite(this.viewDrawM)) {
       const p = view.root.position;
       const dv = this.dist(p.x, p.y, p.z);
-      view.lodFar = view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + 10;
+      view.lodFar = this.viewDrawM <= 0 || (view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + VIEW_LOD_BAND_M);
       if (view.lodFar) ready = false;
     } else if (view) view.lodFar = false;
     if (view) view.root.visible = ready;

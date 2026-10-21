@@ -8,7 +8,7 @@ and checks them. See `data/panels/README.md` for the file formats and
 ```sh
 cargo run -p car-assets --bin gen-panels            # data/panels/<car>.json (first pass from the lattice)
 cargo run -p car-assets --bin gen-panels -- --check # exit 1 if a spec differs from the derived one
-cargo run -p car-assets --bin gen-car-mesh          # data/panels/meshes/<car>.json (+ bind-skin)
+cargo run -p car-assets --bin gen-car-mesh          # data/panels/meshes/<car>.json (+ bind-skin) and meshes/mid/<car>.json
 cargo run -p car-assets --bin gen-car-mesh -- --check  # exit 1 if a mesh is stale
 cargo run -p car-assets --bin bind-skin -- data/panels/meshes/<car>.json [data/lattices/<id>.json]
 cargo run -p car-assets --bin validate-car-asset [car ...]
@@ -99,6 +99,37 @@ format 4 after the round-12 × detailed-car-models merge; the fold bindings add 
 Headroom: hero cars sit at 15.6k–19.8k of 20k (`brigand_400` 19.8k with 22 wheel segments),
 `hauler_1500` at 9.8k of 10k (drop its tire lugs
 or wheel segments first if traffic details push it over; see `wave2_mechanical.md`).
+
+### Mid LOD (`Lod::Mid`, `data/panels/meshes/mid/<car>.json`)
+`gen-car-mesh` writes a second, unskinned mesh per car for the browser's instanced far cars
+(fleet near tier, nearest parked cars): `mesh::generate_mid` = `generate_lod(.., Lod::Mid)`, the
+same style at `MID_LOFT_STEPS` (0.20 m / 0.12 m), `MID_WHEEL_SEGMENTS` (12) wheels,
+`MID_PATCH_STEP_M` (16 cm) surface patches and traffic-tier mechanical detail, filtered by
+`keep_in_mid` (exterior panels, glass, lights, mirrors, light bars, tires, rims, exhaust tips,
+details ≥ `MID_MIN_DETAIL_M` = 0.2 m); details, rims, lamps, light bars and mirrors are then
+decimated by vertex clustering (`cluster_part`, `MID_CLUSTER_M` = 3.5 cm grid, vertices snap
+to cell centres so touching parts stay closed; atlas seams kept apart by a UV bucket). Atlas,
+livery hint, tints and atlas UVs equal the full mesh's. Budget `MID_TRI_BUDGET` 2k–6.5k; checked
+by `every_car_has_an_up_to_date_mid_lod` (also: up to date, a subset of the full mesh's parts
+with the same kinds / materials, every panel / glass / light / tire kept). Format: see
+`data/panels/README.md` "Mid LOD". Current output:
+
+| car | mid (full) tris | car | mid (full) tris | car | mid (full) tris |
+|---|---|---|---|---|---|
+| arashi_t4 | 4818 (16916) | ironside_440 | 5317 (18699) | sentinel_vigil | 4815 (17715) |
+| brigand_400 | 6008 (19772) | junkyard_beater | 4425 (7960) | sentinel_warden | 5396 (17770) |
+| bulwark_400 | 5494 (19186) | kestrel_ts | 4919 (17548) | sentinel_wolfhound | 4986 (17137) |
+| debug_coupe | 4671 (16617) | lindwurm_4t | 4624 (16246) | shiro_turbo | 4974 (17918) |
+| debug_sedan | 4530 (8422) | lucciola_350 | 4720 (17242) | sperber_32 | 4792 (17772) |
+| drayman_cargo | 5009 (9435) | marten_20 | 4008 (15796) | stoat_16v | 3878 (15610) |
+| fulmine_v10 | 5548 (18738) | rampart_50 | 5256 (18826) | talus_20t | 5095 (17062) |
+| furrow_24 | 4506 (8490) | satchel_20 | 4661 (8330) | tansy_13 | 4064 (7192) |
+| hakone_gt | 4808 (17829) | sentinel_bastion | 5191 (17191) | tumbril_20 | 4572 (8503) |
+| hauler_1500 | 5277 (9781) | sentinel_cruiser | 4736 (16963) | vireo_xs | 3875 (15731) |
+
+Mid LODs: 3875–6008 triangles (full meshes 7192–19772); files 130–190 KB each (full meshes
+0.5–1.4 MB). The four `parity_*` cars' mid files are copies of their template car's
+(`tools/parity/build_parity_cars.py`).
 
 ### Mesh format 4
 `MESH_FORMAT = 4` = `claude/detailed-car-models`' format 2 (part kinds / materials, `rigid`,

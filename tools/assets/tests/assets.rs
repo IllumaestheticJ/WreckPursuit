@@ -5,12 +5,13 @@
 mod crash;
 
 use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
-use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, MESH_FORMAT, TRI_BUDGET};
+use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, MESH_FORMAT, MID_TRI_BUDGET, TRI_BUDGET};
 use car_assets::profile::BodyProfile;
 use car_assets::skin::{deform_detail, FoldMemory};
 use car_assets::style::style_for;
 use car_assets::{
-    build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
+    build_mesh, build_mid_mesh, car_ids, load_car, load_mesh, mesh_path, mid_mesh_path, panel_path,
+    repo_root, validate::validate,
 };
 use wp_contracts::BodyRegion;
 use wp_damage::PanelSpec;
@@ -33,6 +34,75 @@ fn every_car_has_a_valid_up_to_date_mesh_and_panel_spec() {
             "{id}: data/panels/meshes is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
         );
         assert!((TRI_BUDGET.0..=TRI_BUDGET.1).contains(&fresh.tri_count));
+    }
+}
+
+/// Every car has an up-to-date mid LOD (`data/panels/meshes/mid/<car>.json`) within
+/// [`MID_TRI_BUDGET`] that paints exactly like its full mesh (same atlas, livery hint, tints,
+/// format) and keeps the body panels, glass, lights and wheels.
+#[test]
+fn every_car_has_an_up_to_date_mid_lod() {
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let full = load_mesh(&mesh_path(&root, &id)).unwrap();
+        let on_disk = load_mesh(&mid_mesh_path(&root, &id)).unwrap();
+        let fresh = build_mid_mesh(&car);
+        assert!(
+            fresh == on_disk,
+            "{id}: data/panels/meshes/mid is stale; run `cargo run -p car-assets --bin gen-car-mesh`"
+        );
+        let m = &fresh;
+        assert_eq!(m.id, id);
+        assert_eq!(m.format, MESH_FORMAT, "{id}");
+        assert_eq!(m.lattice_id, full.lattice_id, "{id}");
+        assert_eq!(m.atlas, full.atlas, "{id}: mid atlas differs");
+        assert_eq!(m.livery, full.livery, "{id}: mid livery differs");
+        assert_eq!(m.wheel_camber_deg, full.wheel_camber_deg, "{id}");
+        for (slot, rgb) in &m.tints {
+            assert_eq!(full.tints.get(slot), Some(rgb), "{id}: mid tint {slot:?}");
+        }
+        let tris: u32 = m.parts.iter().map(|p| p.tri_count() as u32).sum();
+        assert_eq!(tris, m.tri_count, "{id}");
+        assert!(
+            (MID_TRI_BUDGET.0..=MID_TRI_BUDGET.1).contains(&m.tri_count),
+            "{id}: mid LOD {} tris outside {MID_TRI_BUDGET:?}",
+            m.tri_count
+        );
+        assert!(
+            m.tri_count * 2 <= full.tri_count + 1000,
+            "{id}: mid LOD barely smaller"
+        );
+        // Every exterior panel, glass and light of the full mesh is in the mid LOD, and every
+        // mid part comes from the full mesh with the same kind and material.
+        for p in &full.parts {
+            let outside = matches!(
+                p.kind,
+                PartKind::Panel | PartKind::Glass | PartKind::Light | PartKind::Tire
+            );
+            if outside {
+                assert!(
+                    m.parts.iter().any(|q| q.name == p.name),
+                    "{id}: mid LOD lost {}",
+                    p.name
+                );
+            }
+        }
+        for q in &m.parts {
+            let p = full.parts.iter().find(|p| p.name == q.name);
+            assert!(
+                p.is_some_and(|p| p.kind == q.kind
+                    && p.material == q.material
+                    && p.wheel == q.wheel),
+                "{id}: mid part {} not in the full mesh",
+                q.name
+            );
+            assert!(
+                q.skin_nodes.is_empty() && q.fold.is_none(),
+                "{id}: mid LOD is not skinned"
+            );
+            assert_eq!(q.uvs.len() * 3, q.positions_mm.len() * 2, "{id}/{}", q.name);
+        }
     }
 }
 
