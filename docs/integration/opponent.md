@@ -362,3 +362,15 @@ trig).
   pulls a busted car to the kerb, but a unit giving way to cars that are waiting for it
   remains a stand-off.
 
+
+## Playtest row 135 (lead): fleeing racers use every lane
+
+Owner: "on the Loop 9 race, AI racers only follow the green line". Measured on Loop 9 (native and
+in the browser): racing racers run 2–7 m off the route line, using the whole carriageway; the
+first `START_HOLD_M` (150 m) keeps the grid lanes on purpose. The exception was a racer the
+police chase: `plan_flight` gave its flight route `RacingLine::constant(0.0)` (the planned
+lane's centre, ±0.1 m), and on Loop 9 that lane is the race route's. Flights now get
+`RacingLine::optimise` with 30 / 30 sweeps (`FLIGHT_LINE_*_SWEEPS`; the race line keeps
+100 / 150). The full race line takes ~27 ms for Loop 9's 5 000 samples (native release); the
+cost scales with the fine-level sweeps, so a 2 km flight (1 000 samples) should cost about 1 ms
+per replan (estimated, not measured; replans every `FLIGHT_REPLAN_S` = 6 s).
