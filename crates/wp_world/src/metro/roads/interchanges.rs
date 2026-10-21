@@ -390,15 +390,17 @@ pub fn parclo(
         let a = *p.last().unwrap();
         let (_, da) = hw.at(sg + side * (TAPER_M + 20.0));
         let da = geom::scale(da, side);
-        // Semicircle centre on the right.
-        let ctr = geom::add(a, geom::scale(geom::right_of(da), LOOP_R));
-        let n = ((LOOP_R * core::f32::consts::PI / 3.0).ceil() as usize).max(8);
+        // Semicircle centre on the right (a little wider than `LOOP_R`: the parallel lane
+        // it leaves may itself curve with the highway).
+        let r = LOOP_R + 6.0;
+        let ctr = geom::add(a, geom::scale(geom::right_of(da), r));
+        let n = ((r * core::f32::consts::PI / 3.0).ceil() as usize).max(8);
         let a0 = geom::atan2(a[1] - ctr[1], a[0] - ctr[0]);
         let semi: Vec<V2> = (0..=n)
             .map(|k| {
                 let ang = a0 - core::f32::consts::PI * k as f32 / n as f32;
                 let (s, c) = wp_math::sin_cos(ang);
-                [ctr[0] + LOOP_R * c, ctr[1] + LOOP_R * s]
+                [ctr[0] + r * c, ctr[1] + r * s]
             })
             .collect();
         let back = *semi.last().unwrap();
@@ -564,6 +566,7 @@ pub fn trumpet(
     at_start: bool,
     name: &'static str,
     stack: bool,
+    semi_extra: f32,
 ) {
     let (tw, sw) = (&hws[th], &hws[sp]);
     let s_end = if at_start { 0.0 } else { sw.total() };
@@ -599,7 +602,8 @@ pub fn trumpet(
     // Points beside the spur near its end, in the frame: inbound at x = +os, outbound at
     // x = -os (y along r = outward).
     let lanes_spur = sw.lanes_at(s_end).0;
-    let big = if stack { 2 } else { 1 };
+    // Ramps are one lane (a wider ramp would need a wider taper beside the carriageway).
+    let big = 1;
     // 1. inbound → near (direct, right turn).
     {
         let taper: Vec<V2> = (0..=6)
@@ -684,7 +688,7 @@ pub fn trumpet(
     let rf = 170.0;
     {
         let x_in = geom::dot(geom::sub(d_in, pc), t);
-        let sm = sc - side_n * (rf + if stack { 230.0 } else { 330.0 } + PARALLEL_M);
+        let sm = sc - side_n * (rf + semi_extra + PARALLEL_M);
         let pm = rev(par(tw, side_f, sm, -1.0, PARALLEL_M, true));
         let b = pm[0];
         let ctrl = vec![

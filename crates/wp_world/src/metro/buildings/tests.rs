@@ -132,6 +132,7 @@ fn grid_world(seed: u64) -> World {
             names,
             features: Vec::new(),
             notes: Vec::new(),
+            report: Default::default(),
         },
     }
 }

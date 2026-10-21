@@ -42,7 +42,7 @@ pub mod interchanges;
 pub mod lines;
 pub mod profile;
 pub mod streets;
-mod structures;
+pub mod structures;
 pub mod style;
 
 use std::collections::BTreeMap;
@@ -123,6 +123,21 @@ pub struct GateReach {
     pub reason: &'static str,
 }
 
+/// Road generator diagnostics.
+#[derive(Debug, Clone, Default)]
+pub struct RoadsReport {
+    /// What each road is (`specs` order).
+    pub info: Vec<RoadInfo>,
+    /// Grade separations (every plan-view crossing of two roads without a junction).
+    pub crossings: Vec<Crossing>,
+    /// Gate reachability.
+    pub gates: Vec<GateReach>,
+    /// Highway names (index = `RoadInfo::owner` of carriageways).
+    pub highway_names: Vec<String>,
+    /// Interchanges: (name, kind, ramp spec indices).
+    pub interchanges: Vec<(String, InterchangeKind, Vec<usize>)>,
+}
+
 /// Output of the road generator.
 pub struct RoadsOut {
     /// Node specs (builder input; index = builder node).
@@ -138,16 +153,9 @@ pub struct RoadsOut {
     pub features: Vec<Feature>,
     /// Diagnostics (one line each), printed by `gen-city` and the stats example.
     pub notes: Vec<String>,
-    /// What each road is (`specs` order).
-    pub info: Vec<RoadInfo>,
-    /// Grade separations (every plan-view crossing of two roads without a junction).
-    pub crossings: Vec<Crossing>,
-    /// Gate reachability.
-    pub gates: Vec<GateReach>,
-    /// Highway names (index = `RoadInfo::owner` of carriageways).
-    pub highway_names: Vec<String>,
-    /// Interchanges: (name, kind, ramp spec indices).
-    pub interchanges: Vec<(String, InterchangeKind, Vec<usize>)>,
+    /// Road generator diagnostics (what each road is, grade separations, gates,
+    /// interchanges). `Default` (empty) for hand-built test networks.
+    pub report: RoadsReport,
 }
 
 // ------------------------------------------------------------------------------------------
@@ -194,13 +202,13 @@ fn build_highways(plan: &Plan) -> Vec<Hw> {
         [-3400.0, 328.0],
         [-2600.0, 302.0],
         [-2000.0, 300.0],
-        [-1493.0, 300.0],
-        [-993.0, 800.0],
+        [-1250.0, 300.0],
+        [-750.0, 800.0],
         [880.0, 800.0],
         [1180.0, 500.0],
         [ct_end_x, 500.0],
     ];
-    let radii = [0.0, 3000.0, 3000.0, 0.0, 500.0, 500.0, 500.0, 500.0, 0.0];
+    let radii = [0.0, 3000.0, 3000.0, 0.0, 450.0, 450.0, 500.0, 500.0, 0.0];
     let mut ct = Hw::new("Crosstown Expressway", &ctrl, &radii, false, 3, mph(55.0));
     let s_clover = ct.s_of([-2000.0, 300.0]);
     ct.lanes = vec![(0.0, 2, mph(65.0)), (s_clover, 3, mph(55.0))];
@@ -329,17 +337,17 @@ fn design_interchanges(
                 [-2000.0, 300.0],
                 x.name,
             ),
-            "Skyway Stack" => {
-                interchanges::trumpet(&mut out, ic, hws, LOOP, CROSSTOWN, false, x.name, true)
-            }
+            "Skyway Stack" => interchanges::trumpet(
+                &mut out, ic, hws, LOOP, CROSSTOWN, false, x.name, true, 130.0,
+            ),
             "North Trumpet" => {
-                interchanges::trumpet(&mut out, ic, hws, LOOP, R40N, true, x.name, false)
+                interchanges::trumpet(&mut out, ic, hws, LOOP, R40N, true, x.name, false, 330.0)
             }
             "Airport Junction" => {
-                interchanges::trumpet(&mut out, ic, hws, LOOP, AIRPORT, true, x.name, false)
+                interchanges::trumpet(&mut out, ic, hws, LOOP, AIRPORT, true, x.name, false, 330.0)
             }
             "Port Trumpet" => {
-                interchanges::trumpet(&mut out, ic, hws, LOOP, PORT, true, x.name, false)
+                interchanges::trumpet(&mut out, ic, hws, LOOP, PORT, true, x.name, false, 230.0)
             }
             "Old Post Road" => {
                 if let Some(l) = art_path(raw, "Old Post Road", x.pos) {
@@ -388,11 +396,13 @@ fn design_interchanges(
                 };
                 let urban = matches!(x.name, "Mercer Street" | "Meridian Avenue (Crosstown)");
                 let reach = if urban { 105.0 } else { 140.0 };
-                let span = if urban || x.name == "Harbor Boulevard" {
-                    230.0
-                } else {
-                    250.0
-                };
+                let span =
+                    if urban || x.name == "Harbor Boulevard" || x.name == "Meridian Avenue (south)"
+                    {
+                        230.0
+                    } else {
+                        250.0
+                    };
                 let control = if half {
                     Some(ControlHint::RampTerminal)
                 } else {
@@ -421,7 +431,13 @@ fn approach_len(dz: f32, st: &Style) -> f32 {
 
 /// Attach planned street structures (bridges, underpasses, the Westridge Tunnel) and the
 /// Meridian Avenue overpass over the freight line as grade-separated ranges.
-fn attach_structures(plan: &Plan, gnd: &Ground, raw: &mut [Line], notes: &mut Vec<String>) {
+fn attach_structures(
+    plan: &Plan,
+    gnd: &Ground,
+    rails: &[Rail],
+    raw: &mut [Line],
+    notes: &mut Vec<String>,
+) {
     for s in &plan.structures {
         let (kind, bound, covered, lanes) = match s.name {
             "Westline Low Bridge" => (SepKind::Bridge, 5.0, false, 0),
@@ -519,13 +535,9 @@ fn attach_structures(plan: &Plan, gnd: &Ground, raw: &mut [Line], notes: &mut Ve
     }
     // Meridian Avenue over the freight line (grade-separated; CITY.md).
     for l in raw.iter_mut().filter(|l| l.name == "Meridian Avenue") {
-        for r in plan
-            .rail
-            .iter()
-            .filter(|r| r.name == "Westline Freight Line")
-        {
-            for (s, _, p, _) in lines::crossings_with(l, &r.line) {
-                let g = gnd.z(p);
+        for r in rails.iter().filter(|r| r.name == "Westline Freight Line") {
+            for (s, sr, p, _) in lines::crossings_with(l, &r.xy) {
+                let g = r.at(sr).0.max(gnd.z(p));
                 let app = approach_len(CLEARANCE_M, &l.st);
                 let len = l.len();
                 l.seps.push(Sep {
@@ -544,12 +556,97 @@ fn attach_structures(plan: &Plan, gnd: &Ground, raw: &mut [Line], notes: &mut Ve
     }
 }
 
+/// A rail line as the rail module builds it (filleted, profiled).
+#[derive(Debug, Clone)]
+pub struct Rail {
+    /// Plan name.
+    pub name: &'static str,
+    /// Centreline.
+    pub xy: Vec<V2>,
+    /// Arc lengths.
+    pub cum: Vec<f32>,
+    /// Formation height per point, m.
+    pub z: Vec<f32>,
+    /// Point carried by a structure (viaduct, bridge, station deck).
+    pub elevated: Vec<bool>,
+}
+
+impl Rail {
+    /// Formation height and elevation flag at arc `s`.
+    pub fn at(&self, s: f32) -> (f32, bool) {
+        let n = self.xy.len();
+        let s = s.clamp(0.0, self.cum[n - 1]);
+        let i = match self.cum.binary_search_by(|c| c.total_cmp(&s)) {
+            Ok(i) => i.min(n - 2),
+            Err(i) => i.saturating_sub(1).min(n - 2),
+        };
+        let t = ((s - self.cum[i]) / (self.cum[i + 1] - self.cum[i]).max(1e-6)).clamp(0.0, 1.0);
+        (
+            self.z[i] + (self.z[i + 1] - self.z[i]) * t,
+            self.elevated[i] || self.elevated[i + 1],
+        )
+    }
+}
+
+/// The rail module's alignments (same natural ground as the pipeline: the seed's first
+/// draws).
+fn rails(plan: &Plan, cfg: &MetroConfig) -> Vec<Rail> {
+    use super::rail::Support;
+    let mut rng = wp_math::Rng::new(cfg.seed);
+    let nat = super::ground::Natural::new(plan, &mut rng);
+    super::rail::rail_lines(plan, &nat)
+        .into_iter()
+        .map(|a| {
+            let xy: Vec<V2> = a.pts.iter().map(|p| geom::xy(*p)).collect();
+            Rail {
+                name: a.name,
+                cum: cum2(&xy),
+                xy,
+                z: a.pts.iter().map(|p| p[2]).collect(),
+                elevated: a
+                    .support
+                    .iter()
+                    .map(|s| matches!(s, Support::Viaduct | Support::Bridge | Support::StationDeck))
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+/// Level crossings: planar street edges crossing a rail line on the ground are held at the
+/// formation height across the tracks (both bounds).
+fn rail_pins(g: &Graph, rails: &[Rail]) -> BTreeMap<usize, Vec<(f32, f32, f32, bool)>> {
+    let mut out: BTreeMap<usize, Vec<(f32, f32, f32, bool)>> = BTreeMap::new();
+    for (ei, e) in g.edges.iter().enumerate() {
+        if e.sep.is_some() {
+            continue;
+        }
+        for r in rails {
+            for (s, sr, _) in geo::path_crossings(&e.path, &r.xy) {
+                let (rz, elevated) = r.at(sr);
+                if elevated {
+                    continue;
+                }
+                let w = 10.0;
+                out.entry(ei)
+                    .or_default()
+                    .push((s - w, s + w, rz - 0.05, true));
+                out.entry(ei)
+                    .or_default()
+                    .push((s - w, s + w, rz + 0.05, false));
+            }
+        }
+    }
+    out
+}
+
 /// Context for clipping.
 struct ClipCtx<'a> {
     plan: &'a Plan,
     gnd: &'a Ground,
     hws: &'a [Hw],
     ics: &'a IcOut,
+    rails: &'a [Rail],
     rail_grid: SegGrid,
     hw_grid: SegGrid,
     hw_paths: Vec<Vec<V2>>,
@@ -565,7 +662,7 @@ impl ClipCtx<'_> {
             .rail_grid
             .query([p[0] - r, p[1] - r], [p[0] + r, p[1] + r])
         {
-            let line = &self.plan.rail[li as usize].line;
+            let line = &self.rails[li as usize].xy;
             let k = k as usize;
             best = best.min(geom::point_segment_distance(p, line[k], line[k + 1]));
         }
@@ -615,10 +712,16 @@ fn clip_line(cx: &ClipCtx, l: &Line, extra: &[(f32, f32)]) -> Vec<Line> {
     }
     // Rail corridors.
     let mut cross_pts: Vec<V2> = Vec::new();
-    for r in &cx.plan.rail {
-        for (s, _, p, sin) in lines::crossings_with(l, &r.line) {
+    for r in cx.rails {
+        for (s, sr, p, sin) in lines::crossings_with(l, &r.xy) {
             cross_pts.push(p);
-            let ok = (l.rail_ok && sin > 0.34) || l.sep_at(s).is_some();
+            let (rz, elevated) = r.at(sr);
+            let g = cx.gnd.z(p);
+            // Under a rail viaduct: any street; at grade: collectors and up, rail on the
+            // ground; otherwise only planned structures.
+            let under = elevated && rz - g > 7.0;
+            let level = !elevated && (rz - g).abs() < 1.5 && l.rail_ok && sin > 0.34;
+            let ok = under || level || l.sep_at(s).is_some();
             if !ok {
                 bad.push((s - half - 20.0, s + half + 20.0));
             }
@@ -848,7 +951,7 @@ fn gate_lines(
                 continue;
             }
             let dir = geo::dir_of(g.heading);
-            let g_in = geom::add(g.pos, geom::scale(dir, 3.0));
+            let g_in = geom::add(g.pos, geom::scale(dir, 0.5));
             let o = geom::sub(g.pos, geom::scale(dir, 28.0));
             // Candidate street points, nearest first.
             let mut cands: Vec<(f32, V2)> = Vec::new();
@@ -1338,7 +1441,7 @@ fn profile_highway(
     gnd: &Ground,
     idx: &ProfIndex,
     street_ids: &dyn Fn(usize) -> bool,
-    rail: &[Vec<V2>],
+    rail: &[Rail],
     notes: &mut Vec<String>,
 ) -> Vec<(f32, usize, f32, V2, bool)> {
     let n = hw.sample_count();
@@ -1428,8 +1531,8 @@ fn profile_highway(
     }
     // Rail lines: over, or under inside a tunnel.
     for r in rail {
-        for (s, _, p) in geo::path_crossings(&path, r) {
-            let g = gnd.z(p);
+        for (s, sr, _p) in geo::path_crossings(&path, &r.xy) {
+            let g = r.at(sr).0;
             let in_tunnel = hw.in_spans(&hw.tunnels, s).is_some();
             let w = half + 12.0;
             if in_tunnel {
@@ -1548,7 +1651,8 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
     let mut raw = streets::layout(cfg.seed);
     let (ics, ic_list) = design_interchanges(plan, &hws, &raw);
     notes.extend(ics.notes.iter().cloned());
-    attach_structures(plan, ground, &mut raw, &mut notes);
+    let rail_lines = rails(plan, cfg);
+    attach_structures(plan, ground, &rail_lines, &mut raw, &mut notes);
     let nb = auto_bridges(ground, &mut raw);
     notes.push(format!(
         "roads: {nb} small bridges (canal / creek crossings)"
@@ -1577,8 +1681,8 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
     }
     // Clip context.
     let mut rail_grid = SegGrid::new(plan::MAP_LO, plan::MAP_HI, 100.0);
-    for (i, r) in plan.rail.iter().enumerate() {
-        rail_grid.insert_line(i as u32, &r.line, 0.0);
+    for (i, r) in rail_lines.iter().enumerate() {
+        rail_grid.insert_line(i as u32, &r.xy, 0.0);
     }
     let mut hw_grid = SegGrid::new(plan::MAP_LO, plan::MAP_HI, 100.0);
     for (i, h) in hws.iter().enumerate() {
@@ -1599,6 +1703,7 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
         gnd: ground,
         hws: &hws_clip,
         ics: &ics,
+        rails: &rail_lines,
         rail_grid,
         hw_grid,
         hw_paths: hws_clip.iter().map(hw_pts).collect(),
@@ -1606,7 +1711,7 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
         corr_grid,
         protect,
     };
-    let rail: Vec<Vec<V2>> = plan.rail.iter().map(|r| r.line.clone()).collect();
+    let rail = rail_lines.clone();
 
     // Iterate: clip → graph → profiles → failed crossings clip more.
     let mut extra: BTreeMap<usize, Vec<(f32, f32)>> = ends_under_structures(&raw);
@@ -1659,7 +1764,8 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
             }
         }
         // Planar streets first, then grade-separated street edges against them.
-        let sp0 = profile_streets(&g, ground, &extra_deg, &BTreeMap::new());
+        let pins = rail_pins(&g, &rail_lines);
+        let sp0 = profile_streets(&g, ground, &extra_deg, &pins);
         let mut idx = ProfIndex::new();
         let mut street_prof = vec![usize::MAX; g.edges.len()];
         for (ei, e) in g.edges.iter().enumerate() {
@@ -1675,12 +1781,29 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
                 });
             }
         }
-        let mut sep_bounds: BTreeMap<usize, Vec<(f32, f32, f32, bool)>> = BTreeMap::new();
+        let mut sep_bounds: BTreeMap<usize, Vec<(f32, f32, f32, bool)>> = pins.clone();
         let mut street_fail: Vec<(usize, f32)> = Vec::new();
+        let prof_edge0: BTreeMap<usize, usize> = street_prof
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| **p != usize::MAX)
+            .map(|(e, p)| (*p, e))
+            .collect();
+        // The same road continuing from a structure edge's end node is a joint, not a
+        // crossing (other streets meeting there are handled as crossings: they get clipped).
+        let joint = |e: &graph::GEdge, oe: usize, s: f32| {
+            let o = &g.edges[oe];
+            let shared = [e.a, e.b].into_iter().any(|n| n == o.a || n == o.b);
+            let same = pieces[o.line].origin == pieces[e.line].origin;
+            shared && same && (s < 3.0 || s > e.len() - 3.0)
+        };
         for (ei, e) in g.edges.iter().enumerate() {
             let Some(r) = e.sep else { continue };
             let (pts, _) = edge_samples(&e.path);
             for (s, oi, so, _p, sin) in idx.crossings(&pts, &|_| false) {
+                if joint(e, prof_edge0[&oi], s) {
+                    continue;
+                }
                 let o = &idx.profs[oi];
                 let w_own = (o.half + 5.0) / sin;
                 let w_o = (e.st.half_width() + 5.0) / sin;
@@ -1732,6 +1855,9 @@ pub fn build(plan: &Plan, ground: &mut Ground, cfg: &MetroConfig) -> RoadsOut {
             for (s, oi, so, _, _) in idx.crossings(&o.path.clone(), &|x| x == own) {
                 let oe = prof_edge[&oi];
                 if g.edges[oe].sep.is_some() {
+                    continue;
+                }
+                if joint(e, oe, s) {
                     continue;
                 }
                 let dz = (idx.profs[own].z_at(s) - idx.profs[oi].z_at(so)).abs();
@@ -2290,7 +2416,7 @@ fn assemble(
                 }
             }
             let len = (s1 - s0).abs();
-            if len < 1.0 || len > total - 1.0 {
+            if len < 1.0 || (hw.closed && len > total - 1.0) {
                 notes.push(format!("{}: zero-length carriageway piece", hw.name));
                 continue;
             }
@@ -2302,11 +2428,13 @@ fn assemble(
                 if !gate_end {
                     return hw.offset;
                 }
-                // Fan into the end junction over the last 70 m.
+                // Fan into the end junction over the last 25 m: the junction setback then
+                // ends both carriageways' lanes side by side.
                 let d = (total - s).max(0.0);
-                hw.offset * smoothstep(0.0, 70.0, d).max(0.0)
+                hw.offset * (d / 25.0).min(1.0)
             };
-            let samples = highways::carriageway_samples(hw, side, s0, s1, &lat, 10.0);
+            let step = if gate_end { 5.0 } else { 10.0 };
+            let samples = highways::carriageway_samples(hw, side, s0, s1, &lat, step);
             let mut pts: Vec<V3> = samples.iter().map(|x| x.1).collect();
             let bank: Vec<f32> = samples.iter().map(|x| x.2).collect();
             pts[0] = [
@@ -2425,9 +2553,11 @@ fn assemble(
     // Grade separations: every plan-view crossing of two surfaces without a shared node.
     let crossings = find_crossings(&built, &specs);
     // Carve and structures.
+    let natural = ground.hf.clone();
     carve::carve(ground, &built, &nodes.specs, &info);
-    let features =
-        structures::features(plan, ground, &built, &specs, &info, &names, hws, &crossings);
+    let features = structures::features(
+        plan, &ground.hf, &natural, &built, &specs, &info, &names, hws, &crossings, &mut notes,
+    );
     let hw_km: f32 = hws.iter().map(|h| h.total()).sum::<f32>() / 1000.0;
     notes.push(format!(
         "roads: {} street edges, {} carriageway pieces, {} ramps, {:.1} km of highway centreline, {} grade separations",
@@ -2466,11 +2596,13 @@ fn assemble(
         names,
         features,
         notes,
-        info,
-        crossings,
-        gates: gate_reach,
-        highway_names: hws.iter().map(|h| h.name.to_string()).collect(),
-        interchanges,
+        report: RoadsReport {
+            info,
+            crossings,
+            gates: gate_reach,
+            highway_names: hws.iter().map(|h| h.name.to_string()).collect(),
+            interchanges,
+        },
     }
 }
 

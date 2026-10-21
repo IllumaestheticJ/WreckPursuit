@@ -421,6 +421,7 @@ fn synthetic_highway_and_closure() {
         names: vec![String::new(); 3],
         features: Vec::new(),
         notes: Vec::new(),
+        report: Default::default(),
     };
     let ctx = ctx::Ctx::new(&plan, &terrain, &roads, 1);
     let fs = super::build(&ctx);

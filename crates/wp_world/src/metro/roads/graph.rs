@@ -302,8 +302,22 @@ pub fn planarize(lines: &[Line], lo: V2, hi: V2) -> Graph {
             });
             at.push((len, g.nodes.len() - 1));
         }
-        // Collapse repeats of the same cluster in a row.
-        at.dedup_by(|b, a| a.1 == b.1);
+        // Collapse repeats of the same cluster in a row, keeping the attachment nearest to
+        // the cluster's position.
+        let mut col: Vec<(f32, usize)> = Vec::new();
+        for x in at {
+            if let Some(last) = col.last_mut() {
+                if last.1 == x.1 {
+                    let c = g.nodes[x.1].pos;
+                    if geom::dist(l.at(x.0).0, c) < geom::dist(l.at(last.0).0, c) {
+                        *last = x;
+                    }
+                    continue;
+                }
+            }
+            col.push(x);
+        }
+        let at = col;
         for w in at.windows(2) {
             let ((s0, n0), (s1, n1)) = (w[0], w[1]);
             if s1 - s0 < 0.5 {
@@ -355,8 +369,20 @@ impl Graph {
             let mut p = std::mem::take(&mut e.path);
             let n = p.len();
             let mut inner: Vec<V2> = p[1..n - 1].to_vec();
-            // Drop interior points within 10 m of either new end.
+            // Drop interior points within 10 m of either new end, and any that would make
+            // the path double back from a moved end (a node merged along the line).
             inner.retain(|q| geom::dist(*q, pa) > 10.0 && geom::dist(*q, pb) > 10.0);
+            let behind =
+                |end: V2, a: V2, b: V2| geom::dot(geom::sub(a, end), geom::sub(b, a)) < 0.0;
+            while inner.len() >= 2 && behind(pa, inner[0], inner[1]) {
+                inner.remove(0);
+            }
+            while inner.len() >= 2 && {
+                let m = inner.len();
+                behind(pb, inner[m - 1], inner[m - 2])
+            } {
+                inner.pop();
+            }
             p = vec![pa];
             p.extend(inner);
             p.push(pb);

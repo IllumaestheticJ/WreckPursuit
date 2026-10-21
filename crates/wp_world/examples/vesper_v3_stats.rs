@@ -63,20 +63,23 @@ fn main() {
             println!("{line}");
         }
         let mut by: std::collections::BTreeMap<String, usize> = Default::default();
-        for c in out.crossings.iter().filter(|c| c.clearance < 7.5) {
+        for c in out.report.crossings.iter().filter(|c| c.clearance < 7.5) {
             let k = format!(
                 "{:?}/{:?} {}|{}",
-                out.info[c.upper].kind,
-                out.info[c.lower].kind,
+                out.report.info[c.upper].kind,
+                out.report.info[c.lower].kind,
                 out.names[c.upper],
                 out.names[c.lower]
             );
             *by.entry(k).or_default() += 1;
         }
         for c in out
+            .report
             .crossings
             .iter()
-            .filter(|c| c.clearance < 7.5 && out.info[c.upper].kind == out.info[c.lower].kind)
+            .filter(|c| {
+                c.clearance < 7.5 && out.report.info[c.upper].kind == out.report.info[c.lower].kind
+            })
             .take(8)
         {
             let (a, b) = (&out.specs[c.upper], &out.specs[c.lower]);

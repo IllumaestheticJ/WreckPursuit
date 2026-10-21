@@ -35,29 +35,28 @@ pub struct Lay {
     rng: Rng,
 }
 
-/// The Hollins Drive switchback path (also used by the tests).
+/// The Hollins Drive switchback path: a meander up the Knob's south-east face, legs
+/// across the slope joined by hairpins (two 90° fillets each, ≈ 29 m radius), 11 hairpins.
 pub fn hollins_path() -> Vec<V2> {
-    // Start by the Loop's north-west corner, zig-zag up the Knob's south-east face.
     let start: V2 = [-1900.0, 1965.0];
-    let knob: V2 = [-2300.0, 2540.0];
+    let knob: V2 = [-2300.0, 2522.0];
     let u = geom::normalize(geom::sub(knob, start)); // uphill
     let v = [u[1], -u[0]]; // across the slope
-    let mut ctrl = vec![start];
     let legs = 12;
-    let along = geom::dist(start, knob) - 40.0;
+    let pitch = (geom::dist(start, knob) - 60.0) / legs as f32;
+    let at = |a: f32, b: f32| geom::add(start, geom::add(geom::scale(u, a), geom::scale(v, b)));
+    let mut ctrl = vec![start, at(30.0, 0.0)];
     for k in 0..legs {
         let side = if k % 2 == 0 { 1.0 } else { -1.0 };
-        let fwd = along * (k as f32 + 0.5) / legs as f32;
-        let width = 175.0 - 6.0 * k as f32;
-        ctrl.push(geom::add(
-            start,
-            geom::add(geom::scale(u, fwd + 20.0), geom::scale(v, side * width)),
-        ));
+        let w = 180.0 - 5.0 * k as f32;
+        let y = 30.0 + pitch * k as f32;
+        ctrl.push(at(y, side * w));
+        ctrl.push(at(y + pitch, side * w));
     }
     ctrl.push(knob);
     let mut rad = vec![0.0; ctrl.len()];
     for r in rad.iter_mut().take(ctrl.len() - 1).skip(1) {
-        *r = 17.0;
+        *r = pitch * 0.5 - 0.5;
     }
     resample(&fillet(&ctrl, &rad, false, 2.0), 5.0)
 }
@@ -320,7 +319,7 @@ fn arterials(l: &mut Lay) {
     let k = l.seg([-3060.0, -1012.0], [2780.0, -1012.0], art, "Canal Street");
     l.lines[k].keep_ends = true;
     l.seg(
-        [-3060.0, -2400.0],
+        [-3185.0, -2400.0],
         [1180.0, -2400.0],
         art,
         "Terminal Avenue",
@@ -803,7 +802,7 @@ fn suburbs(l: &mut Lay) {
 fn industrial(l: &mut Lay) {
     let svc = style::SERVICE;
     // Westline Yards east of the Loop (around the freight line and Central Line).
-    for y in [-300.0, -130.0, 330.0, 470.0, 620.0] {
+    for y in [-300.0, -130.0, 430.0, 620.0] {
         l.seg([-2030.0, y], [-1470.0, y], svc, "Westline Yards");
     }
     for x in [-1870.0, -1580.0] {
@@ -816,7 +815,7 @@ fn industrial(l: &mut Lay) {
     l.lines[k].keep_ends = true;
     // Canal Flats: big blocks, mill land.
     let cf_x = [-1250.0, -1000.0, -760.0, -420.0, -150.0, 120.0];
-    let cf_y = [-1450.0, -1200.0, -800.0, -650.0];
+    let cf_y = [-1415.0, -1200.0, -800.0, -650.0];
     l.grid(
         &cf_x,
         &cf_y,
@@ -917,7 +916,7 @@ fn hills(l: &mut Lay) {
             [-2450.0, 1950.0],
             [-2200.0, 1895.0],
             [-2000.0, 1925.0],
-            [-1860.0, 1985.0],
+            [-1896.0, 1966.0],
         ],
         hill,
         "Hollins Heights",
@@ -968,7 +967,7 @@ fn hills(l: &mut Lay) {
             [-3250.0, 2100.0],
             [-3000.0, 2420.0],
             [-2650.0, 2560.0],
-            [-2335.0, 2545.0],
+            [-2390.0, 2528.0],
         ],
         style::SCENIC.at(35.0),
         "Skyline Drive",
@@ -977,8 +976,8 @@ fn hills(l: &mut Lay) {
     l.lines[k].keep_ends = true;
     // The Knob Observatory Lot spur between the two drives' ends.
     let k = l.seg(
-        [-2335.0, 2545.0],
-        [-2300.0, 2541.0],
+        [-2390.0, 2528.0],
+        [-2300.0, 2522.0],
         style::STREET,
         "Knob Observatory Lot",
     );
@@ -1025,7 +1024,7 @@ fn hills(l: &mut Lay) {
 fn outskirts(l: &mut Lay) {
     // A few roads west of the airport landside and the airport police.
     let k = l.seg(
-        [-3150.0, -2225.0],
+        [-3090.0, -2225.0],
         [-3350.0, -2225.0],
         style::SERVICE,
         "Long Stay Road",

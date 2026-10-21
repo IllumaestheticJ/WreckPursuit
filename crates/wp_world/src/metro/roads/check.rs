@@ -23,7 +23,7 @@ pub struct Violation {
 
 /// Arc position of `q` along the surface of `road` (its trimmed centreline).
 fn covered_at(out: &RoadsOut, road: usize, q: V2) -> bool {
-    let cov = &out.info[road].covered;
+    let cov = &out.report.info[road].covered;
     if cov.is_empty() {
         return false;
     }
@@ -43,7 +43,7 @@ pub fn violations(out: &RoadsOut, terrain: &Heightfield) -> Vec<Violation> {
     let built = &out.built;
     for s in &built.surfaces {
         let r = s.road as usize;
-        let cap = out.info[r].grade;
+        let cap = out.report.info[r].grade;
         let cum = geom::cumulative(&s.centre);
         for k in 0..s.centre.len() - 1 {
             let ds = (cum[k + 1] - cum[k]).max(0.5);
@@ -84,7 +84,7 @@ pub fn violations(out: &RoadsOut, terrain: &Heightfield) -> Vec<Violation> {
             }
         }
     }
-    for c in &out.crossings {
+    for c in &out.report.crossings {
         if c.clearance < 7.5 {
             v.push(Violation {
                 rule: "clearance",
