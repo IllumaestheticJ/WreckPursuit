@@ -1426,3 +1426,11 @@ you can review):
   road below and vice versa).
 - `wp_wasm`/testbed (C): `police_helicopters()` and the night spotlight on round 12's drawn
   helicopter.
+
+## Civilian callers (2026-10-21)
+Owner playtest: civilian reports came far too soon (every unseen violation was called in). An unseen
+violation now needs a civilian car (kinematic traffic, or a reported vehicle that is neither a racer nor a
+police unit) with line of sight within the new `heat.caller_range_m` (dawn 50 / day 70 / dusk 50 / night
+35 m, `data/police/heat.toml`); otherwise it adds no heat and opens no report. Units and cameras are
+unchanged. Headless runs without `set_obstacles` keep the old behaviour (caller assumed). Test:
+`tests/system.rs::unseen_violation_needs_a_civilian_caller_nearby`.

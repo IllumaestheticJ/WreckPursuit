@@ -346,6 +346,10 @@ impl PoliceSystem {
         };
         let camera = self.camera_sees(world, p);
         let witnessed = obs.witnessed || camera;
+        if !witnessed && !self.civilian_sees(world, at) {
+            // Nobody saw it: no heat, nobody calls it in.
+            return;
+        }
         let cfg = self.cfg.heat.clone();
         let rec = self.racers.get_mut(&racer).expect("racer exists");
         let before = rec.level;
@@ -1591,6 +1595,24 @@ impl PoliceSystem {
         self.graph
             .pois_of(PoiKind::Camera)
             .any(|c| dist(c.pos, p) <= c.radius_m && self.sees(world, c.pos, p))
+    }
+
+    /// Whether a civilian car with line of sight is within `heat.caller_range_m` of `p` to call
+    /// a violation in. Civilians are the reported vehicles that are neither racers nor police
+    /// units. Without a reported vehicle list (headless runs without `wp_sim`) traffic is
+    /// unknown and a caller is assumed.
+    pub(crate) fn civilian_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        if !self.ext_obstacles_set {
+            return true;
+        }
+        let range = self.cfg.heat.heat.caller_range_m.get(self.phase);
+        self.ext_obstacles.iter().any(|o| {
+            let civilian = match o.entity {
+                None => true,
+                Some(e) => !self.racers.contains_key(&e) && self.unit_index_by_entity(e).is_none(),
+            };
+            civilian && dist(o.pos, p) <= range && self.sees(world, o.pos, p)
+        })
     }
 
     // -----------------------------------------------------------------------------------------
