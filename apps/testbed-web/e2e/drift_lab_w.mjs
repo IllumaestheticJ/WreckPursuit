@@ -95,6 +95,9 @@ check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === fals
 // Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
 const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();
+// The transition preset above left balance step 14: A/B goes back to new.
+check((await abText()) === "balance: step 14", `after the transition preset: "${await abText()}"`);
+await page.locator("#drift-w-balance-ab").click();
 check((await abText()) === "balance: new", `A/B button reads "${await abText()}" (balance: new)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
