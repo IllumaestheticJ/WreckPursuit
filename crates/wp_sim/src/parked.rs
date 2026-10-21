@@ -43,10 +43,15 @@ pub const PARKED_CAR_MASS_KG: f32 = 1400.0;
 /// (those count up from 1) and below [`wp_contracts::WORLD_ENTITY`].
 pub const PARKED_ENTITY_BASE: u32 = 0x4000_0000;
 
-/// Summed contact impulse (N·s, one tick, from moving bodies) that promotes a parked car to a
-/// damageable one. ≈ a 1400 kg car changing speed by 0.2 m/s: a parking bump, well below any
-/// impact that yields steel, so every hit that could dent is seen from its first tick.
-pub const PROMOTE_IMPULSE_NS: f32 = 300.0;
+/// Summed contact impulse (N·s, one tick, from moving bodies) that, with a closing speed of at
+/// least [`PROMOTE_CLOSING_MPS`], promotes a parked car to a damageable one. Low on purpose
+/// (the contact-event threshold): Rapier spreads an impact over several ticks and the first
+/// one is often light, so a higher bar would lose the start of the crash.
+pub const PROMOTE_IMPULSE_NS: f32 = crate::contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
+
+/// Closing speed (m/s) a contact needs to promote a parked car: the lattice's own minimum
+/// (`DamageTuning::min_contact_speed_mps`, 1 m/s), so a push or a resting touch never does.
+pub const PROMOTE_CLOSING_MPS: f32 = 1.0;
 
 /// Most parked cars promoted per session (memory ≈ 0.3 MB each; perf: only awake lattices
 /// cost anything).
@@ -307,13 +312,13 @@ impl crate::Sim {
             let k = match self.parked.wreck_index(c.prop) {
                 Ok(k) => k,
                 Err(at) => {
-                    // Hit by something that moves (vehicle, debris, another shoved prop)?
-                    let hit: f32 = contacts
-                        .iter()
-                        .filter(|x| x.other_mass_kg > 0.0)
-                        .map(|x| x.impulse_ns)
-                        .sum();
-                    if hit < PROMOTE_IMPULSE_NS {
+                    // Hit by something that moves (vehicle, debris, another shoved prop), hard
+                    // and fast enough for a lattice to take it? Promote on that first tick so
+                    // the whole impact reaches the lattice.
+                    let moving = || contacts.iter().filter(|x| x.other_mass_kg > 0.0);
+                    let hit: f32 = moving().map(|x| x.impulse_ns).sum();
+                    let closing = moving().map(|x| x.rel_speed_mps).fold(0.0, f32::max);
+                    if hit < PROMOTE_IMPULSE_NS || closing < PROMOTE_CLOSING_MPS {
                         continue;
                     }
                     if self.parked.wrecks.len() >= MAX_PARKED_WRECKS {
@@ -546,5 +551,56 @@ mod tests {
         let a = run();
         assert!(a.1 > 0);
         assert_eq!(a, run());
+    }
+
+    /// The same 50 km/h rear hit into a parked car and into the same car standing on its
+    /// wheels: the struck lattice absorbs about the same energy and crushes about as deep
+    /// ("parked cars dent like any car").
+    #[test]
+    fn parked_car_dents_like_the_same_car_on_its_wheels() {
+        let run = |parked: bool| {
+            let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+            let mut sim = Sim::new(SimConfig {
+                seed: 1,
+                mode,
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 1.0,
+            });
+            let id = sim.spawn_vehicle(&car(), [0.0; 3], 0.0).unwrap();
+            sim.place_vehicle(id, [0.0; 3], 0.0, 13.9).unwrap();
+            let struck = if parked {
+                sim.add_parked_car([0.0, 30.0, 0.0], 0.0);
+                sim.set_parked_car(car());
+                None
+            } else {
+                Some(sim.spawn_vehicle(&car(), [0.0, 30.0, 0.0], 0.0).unwrap())
+            };
+            let input = |throttle: f32, brake: f32| VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            };
+            sim.set_input(id, input(0.3, 0.0)).unwrap();
+            for t in 0..720 {
+                if t == 456 {
+                    sim.set_input(id, input(0.0, 1.0)).unwrap();
+                }
+                sim.step_fixed();
+            }
+            let d = match struck {
+                None => &sim.parked_wreck(0).unwrap().damage,
+                Some(e) => &sim.vehicles().iter().find(|v| v.id == e).unwrap().damage,
+            };
+            (d.total_plastic_energy_j(), d.structural_crush_m())
+        };
+        let (pe, pc) = run(true);
+        let (de, dc) = run(false);
+        println!("parked {pe:.0} J {pc:.3} m, on wheels {de:.0} J {dc:.3} m");
+        assert!(de > 1000.0, "the hit dents: {de} J");
+        assert!(
+            (pe / de - 1.0).abs() < 0.25,
+            "plastic energy {pe} vs {de} J"
+        );
+        assert!((pc - dc).abs() < 0.02 + 0.25 * dc, "crush {pc} vs {dc} m");
     }
 }

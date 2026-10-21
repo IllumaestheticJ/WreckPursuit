@@ -114,6 +114,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
     Scenario {
         name: format!("fuzz_{:016x}_{index}", cfg.seed),
         barriers,
+        parked: Vec::new(),
         police_orders: Vec::new(),
         weather: None,
         seed: rng.next_u64(),

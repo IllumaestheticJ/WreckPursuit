@@ -23,7 +23,8 @@ mod weather_link;
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
 pub use parked::{
     prop_of_entity, ChassisMap, ParkedStats, ParkedWreck, MAX_PARKED_WRECKS,
-    PARKED_CAR_HALF_EXTENTS, PARKED_CAR_MASS_KG, PARKED_ENTITY_BASE, PROMOTE_IMPULSE_NS,
+    PARKED_CAR_HALF_EXTENTS, PARKED_CAR_MASS_KG, PARKED_ENTITY_BASE, PROMOTE_CLOSING_MPS,
+    PROMOTE_IMPULSE_NS,
 };
 pub use physics::{
     city_ground_colliders, city_sidewalk_colliders, parked_slab_collider, CityColliders,

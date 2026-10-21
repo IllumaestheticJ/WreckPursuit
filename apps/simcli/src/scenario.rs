@@ -66,6 +66,11 @@ pub struct Scenario {
     /// Static boxes (barriers, walls) added before the first tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub barriers: Vec<Barrier>,
+    /// Parked cars placed before the first tick (`Sim::add_parked_car`), on top of any the
+    /// city parks along its kerbs. They dent like the city's parked cars (`wp_sim` parked-car
+    /// damage, the traffic car's lattice) and work on the flat world too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parked: Vec<ParkedSpec>,
     /// Police captain orders issued at set times (`Sim::captain_command`), e.g. a roadblock
     /// ahead of a pursued racer. `wp_police` validates them (pursuit, unlock level, cooldown,
     /// site; `roadblock`/`spikes` need a city with police), or placed at an exact spot
@@ -255,6 +260,17 @@ pub struct Barrier {
     /// Full size `[x, y, z]`, m (before `yaw`).
     pub size: [f32; 3],
     /// Heading, rad about +Z.
+    #[serde(default)]
+    pub yaw: f32,
+}
+
+/// A parked car (`Sim::add_parked_car`): standing on the ground at `pos`, facing `yaw`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParkedSpec {
+    /// Ground point under the car's centre, world m (on a city with terrain only x, y count).
+    pub pos: [f32; 3],
+    /// Heading, rad about +Z (0 = facing +Y).
     #[serde(default)]
     pub yaw: f32,
 }
