@@ -68,6 +68,11 @@ pub const CLEARANCE_M: f32 = 8.2;
 pub const CARVE_BELOW_M: f32 = 0.12;
 /// Distance of a trumpet / stack spur's junction end from the through highway, m.
 pub const SPUR_Y0_M: f32 = 400.0;
+/// Lateral gap a ramp's paving keeps from its carriageway's paving before the ramp may
+/// leave the carriageway plane, m.
+const PAVING_GAP_M: f32 = 0.5;
+/// Longest extension of a ramp's in-plane stretch past its parallel lane, m.
+const MAX_PLANE_EXT_M: f32 = 250.0;
 
 /// What a builder road is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -396,13 +401,19 @@ fn design_interchanges(
                 };
                 let urban = matches!(x.name, "Mercer Street" | "Meridian Avenue (Crosstown)");
                 let reach = if urban { 105.0 } else { 140.0 };
-                let span =
-                    if urban || x.name == "Harbor Boulevard" || x.name == "Meridian Avenue (south)"
-                    {
-                        230.0
-                    } else {
-                        250.0
-                    };
+                // Mercer Street sits in the Crosstown S-curve where the expressway is high:
+                // its ramps need the extra length to change height once clear of the
+                // carriageway.
+                let span = if x.name == "Mercer Street" {
+                    340.0
+                } else if urban
+                    || x.name == "Harbor Boulevard"
+                    || x.name == "Meridian Avenue (south)"
+                {
+                    230.0
+                } else {
+                    250.0
+                };
                 let control = if half {
                     Some(ControlHint::RampTerminal)
                 } else {
@@ -2077,9 +2088,63 @@ fn profile_ramps(
                 RampEnd::Terminal(_) => None,
             }
         };
+        // The ramp leaves the carriageway plane only once its paving is laterally clear of
+        // the carriageway's paving: before that a ramp that climbs or dips would leave one
+        // deck hanging low over the other road's lanes. Extend each parallel stretch until
+        // the ramp is clear (contiguously, so a ramp that later crosses its own highway is
+        // not affected).
+        let ramp_ext = r.st.half_width() + 1.5;
+        let overlaps = |e: RampEnd, p: V2| -> bool {
+            let (h, side) = match e {
+                RampEnd::Gore { hw, side, .. } | RampEnd::Spur { hw, side, .. } => (hw, side),
+                RampEnd::Terminal(_) => return false,
+            };
+            let hw = &hws[h];
+            let (s, lat, _) = hw.project(p);
+            if !hw.closed && (s < 0.5 || s > hw.total() - 0.5) {
+                // Past the end of a spur: there is no carriageway paving beside the ramp.
+                return false;
+            }
+            let (n_l, _) = hw.lanes_at(s);
+            let half_out = n_l as f32 * highways::HW_LANE_M * 0.5 + highways::OUTER_SHOULDER_M;
+            let rel = side * lat - hw.offset;
+            // Ramps leave on the outer side; a ramp on the median side never counts as
+            // clear (the cap below bounds it).
+            rel < half_out + ramp_ext + PAVING_GAP_M
+        };
+        let mut par_from = r.par_from;
+        let mut par_to = r.par_to;
+        if r.par_from > 0.0 {
+            for i in 0..n {
+                if c[i] <= r.par_from {
+                    continue;
+                }
+                if c[i] - r.par_from > MAX_PLANE_EXT_M || !overlaps(r.from, path[i]) {
+                    break;
+                }
+                par_from = c[i];
+            }
+        }
+        if r.par_to > 0.0 {
+            for i in (0..n).rev() {
+                if len - c[i] <= r.par_to {
+                    continue;
+                }
+                if len - c[i] - r.par_to > MAX_PLANE_EXT_M || !overlaps(r.to, path[i]) {
+                    break;
+                }
+                par_to = len - c[i];
+            }
+        }
+        if par_from + par_to > len - 20.0 {
+            // Leave the ramp some length to change height in.
+            let k = ((len - 20.0) / (par_from + par_to)).max(0.0);
+            par_from = (par_from * k).max(r.par_from.min(par_from));
+            par_to = (par_to * k).max(r.par_to.min(par_to));
+        }
         let mut pin = vec![false; n];
         for i in 0..n {
-            if c[i] <= r.par_from + 0.5 {
+            if c[i] <= par_from + 0.5 {
                 if let Some(z) = plane(r.from, path[i]) {
                     lo[i] = z;
                     hi[i] = z;
@@ -2087,7 +2152,7 @@ fn profile_ramps(
                     pin[i] = true;
                 }
             }
-            if len - c[i] <= r.par_to + 0.5 {
+            if len - c[i] <= par_to + 0.5 {
                 if let Some(z) = plane(r.to, path[i]) {
                     lo[i] = z;
                     hi[i] = z;
@@ -2126,7 +2191,7 @@ fn profile_ramps(
         let mut crosses: Vec<(f32, usize, f32)> = Vec::new();
         for (s, oi, so, _p, sin) in idx.crossings(&path, &|_| false) {
             // Skip the ramp's own highway attachments (crossings within the parallel parts).
-            if s < r.par_from + 5.0 || s > len - r.par_to - 5.0 {
+            if s < par_from + 5.0 || s > len - par_to - 5.0 {
                 continue;
             }
             let o = &idx.profs[oi];
@@ -2172,8 +2237,8 @@ fn profile_ramps(
                     let _ = at_start;
                     Some(side * hw.bank_at(s))
                 };
-                let w0 = smoothstep(r.par_from + 40.0, r.par_from, c[i]);
-                let w1 = smoothstep(r.par_to + 40.0, r.par_to, len - c[i]);
+                let w0 = smoothstep(par_from + 40.0, par_from, c[i]);
+                let w1 = smoothstep(par_to + 40.0, par_to, len - c[i]);
                 let mut b = curve[i];
                 // Fade to 0 at terminals.
                 b *= smoothstep(0.0, 50.0, c[i] - fa) * smoothstep(0.0, 50.0, len - c[i] - fb);

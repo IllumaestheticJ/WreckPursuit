@@ -910,15 +910,26 @@ fn hills(l: &mut Lay) {
         hill,
         "Hollins Heights",
     );
+    // The contour road to the foot of the drive passes below the drive's lowest west
+    // hairpin (≈ (-2090, 1930)): closer, the drive's protection would cut it and leave the
+    // foot on a dead-end stub.
     l.curve(
         &[
             [-2950.0, 2050.0],
             [-2700.0, 2000.0],
             [-2450.0, 1950.0],
-            [-2200.0, 1895.0],
-            [-2000.0, 1925.0],
+            [-2200.0, 1890.0],
+            [-2060.0, 1866.0],
+            [-1955.0, 1912.0],
             [-1896.0, 1966.0],
         ],
+        hill,
+        "Hollins Heights",
+    );
+    // ... and a short link up from Hollins Road (which crosses Loop 9), so the drive can be
+    // reached from the city at its foot.
+    l.curve(
+        &[[-2010.0, 1800.0], [-2008.0, 1840.0], [-2000.0, 1886.0]],
         hill,
         "Hollins Heights",
     );

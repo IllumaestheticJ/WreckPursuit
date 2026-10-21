@@ -35,6 +35,10 @@ use crate::terrain::smoothstep;
 pub const TAPER_M: f32 = crate::builder::FREEWAY_SETBACK_M;
 /// Parallel stretch beside a carriageway (taper included), m.
 pub const PARALLEL_M: f32 = 90.0;
+/// Extra run before the stack's far → outbound flyover leaves its carriageway, m.
+const STACK_RUN_M: f32 = 80.0;
+/// Extra outward swing of the stack flyover beside its carriageway, m.
+const STACK_SWING_M: f32 = 35.0;
 /// Loop ramp radius, m.
 pub const LOOP_R: f32 = 60.0;
 
@@ -750,14 +754,17 @@ pub fn trumpet(
     } else {
         let r4 = 170.0;
         let x_out = geom::dot(geom::sub(m_out, pc), t);
-        let sg = sc + side_n * (r4 + 110.0 + PARALLEL_M);
+        // The flyover swings out beside the far carriageway first: it has to be clear of
+        // that carriageway's paving before it starts climbing, and high enough to cross it
+        // on the way back.
+        let sg = sc + side_n * (r4 + 110.0 + PARALLEL_M + STACK_RUN_M);
         let pg = par(tw, side_f, sg, 1.0, PARALLEL_M, true);
         let a = *pg.last().unwrap();
         // Over the through highway, then over the semi-direct where it starts its turn,
         // then straight down to the spur.
         let ctrl = vec![
             a,
-            f.p(r4 + 40.0, -lat_f - 25.0),
+            f.p(r4 + 40.0, -lat_f - 25.0 - STACK_SWING_M),
             f.p(x_out, y0 - 270.0),
             m_out,
         ];
