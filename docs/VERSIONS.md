@@ -28,5 +28,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.19 | preview | RWD cars no longer spin off the line on cambered roads (spin side-force floor), auto clutch fully engaged once moving (no constant-rpm slip in tall gears) |
 | 0.12.20 | preview | Ground-probe tilt fix: tyre loads no longer chatter in corners (steadier grip everywhere) |
 | 0.12.21 | preview | AI racers: fleeing cars pull over to the kerb (no in-lane deadlocks), low-speed junction line fix, hill starts, AI never triggers the handbrake pivot aid; pace ranges re-measured |
-| 0.12.22 | preview | (next) |
+| 0.12.22 | preview | Police: parked cops U-turn forward to give chase, no turning across oncoming racers, deadlock breaking (Loop 9 / Hollins), reverse-hold braking fix; sirens play real recordings |
+| 0.12.23 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
