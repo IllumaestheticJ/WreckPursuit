@@ -595,7 +595,10 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
-/// Extra edge clearance of the whole-road line over the own-lane line, m.
+/// The whole-road line never puts me on the opposing side this close to a junction, m.
+const WIDE_JUNCTION_CLEAR_M: f32 = 30.0;
+
+/// Extra clearance of the whole-road line from the far edge of the opposing lanes, m.
 const WIDE_EDGE_EXTRA_M: f32 = 0.6;
 
 impl Field {
@@ -613,7 +616,13 @@ impl Field {
         .then(|| {
             let mut w = corridor.clone();
             for c in &mut w.samples {
-                c.left_m = c.left_pass_m;
+                // A little more room from the far edge of the opposing lanes than from my own
+                // kerb: it is a kerb or a wall with nothing to run wide on to (Hollins s95 seed
+                // 7: a racer on that edge into a hairpin braked for the car ahead and slid into
+                // the wall). My own side keeps the own-lane line's margin.
+                if c.left_pass_m > c.left_m {
+                    c.left_m = (c.left_pass_m - WIDE_EDGE_EXTRA_M).max(c.left_m);
+                }
             }
             w
         });
@@ -625,18 +634,10 @@ impl Field {
                 None => {
                     let half = spec.capability.width_m * 0.5;
                     lines.push((key, RacingLine::optimise(&corridor, half, &config.line)));
-                    // A little more room from the edges than on my own lanes: the far side of
-                    // the opposing lanes is a kerb or a wall with nothing to run wide on to
-                    // (Hollins s95 seed 7: a racer on the opposing edge into a hairpin braked for
-                    // the car ahead and slid into the wall).
-                    let wide_params = LineParams {
-                        edge_margin_m: config.line.edge_margin_m + WIDE_EDGE_EXTRA_M,
-                        ..config.line
-                    };
                     wide_lines.push(
                         wide_corridor
                             .as_ref()
-                            .map(|w| RacingLine::optimise(w, half, &wide_params)),
+                            .map(|w| RacingLine::optimise(w, half, &config.line)),
                     );
                     lines.len() - 1
                 }
@@ -1697,15 +1698,15 @@ fn decide_racer(
                 let a_brk = wp.a_brake.max(3.0);
                 let horizon = (v * v / (2.0 * a_brk) + 1.5 * v + 30.0).min(250.0);
                 let may_start = matches!(r.tactic, Tactic::Follow);
-                // Never ride it into a stop: slowing hard for a car or a light ahead, get back
-                // into my lanes while there is room (Lantern s95 seed 4: a racer stopped in a
-                // junction queue on the opposing side, facing a civilian that could not get
-                // past it — the whole field gridlocked).
-                let stopping =
-                    matches!(r.debug.limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal)
-                        && r.debug.v_target < 0.5 * v.max(8.0);
+                // Open road only: once a car or a light ahead sets my speed I am in traffic —
+                // back into my lanes while there is room. (Lantern s95 seed 4: a racer stopped
+                // in a junction queue on the opposing side facing a civilian, the whole field
+                // gridlocked; Hollins s95 seed 7: a racer on the opposing edge right behind
+                // another braked for it into a hairpin and slid off the road.)
+                let in_traffic =
+                    matches!(r.debug.limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal);
                 (r.wide_on || may_start)
-                    && !stopping
+                    && !in_traffic
                     && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, horizon)
             }
             _ => false,
@@ -2938,6 +2939,15 @@ fn wide_line_clear(
         let c = corridor.sample((s / CORRIDOR_STEP_M).floor() as isize);
         let n_w = corridor.interp(&wide.offset, s);
         if n_w - hw < -c.left_m - 0.1 {
+            // Not on the opposing side near a junction at all: traffic turning in from a side
+            // road is not in view until it is in the way, and a racer it meets nose to nose
+            // there stays wedged (Lantern s95 seed 4: a racer on the opposing side met a
+            // civilian that had just turned in and both stood for the rest of the race).
+            let i = (s / CORRIDOR_STEP_M).floor() as isize;
+            let back = (WIDE_JUNCTION_CLEAR_M / CORRIDOR_STEP_M).ceil() as isize;
+            if (-back..=back).any(|j| corridor.sample(i + j).junction) {
+                return false;
+            }
             let t = x / v;
             for (o, ds) in &others {
                 // Where it will be when I get here (oncoming cars close the distance).
@@ -2946,9 +2956,6 @@ fn wide_line_clear(
                 if (ds_then - x).abs() < hl + o.half_len + margin
                     && (o.n - n_w).abs() < hw + o.half_w + 0.8
                 {
-                    return false;
-                }
-                if c.junction && (ds - x).abs() < 30.0 && !matches!(o.who, Who::Racer(_)) {
                     return false;
                 }
             }
@@ -3075,7 +3082,9 @@ fn plan_pass(
         // car out there meets the side roads' traffic waiting in the box, and with the field
         // queued behind it nobody can move (Lantern Row, skill 0.95 seed 8: the whole field
         // gridlocked in a junction for the rest of the race).
-        if !o.parked && opposing_through_junction(ctx.corridor, r.s, pass_dist, n_pass, hw) {
+        // (Looking 40 m past the pass: a pass that ends just short of a junction stalls there
+        // when the queue it was passing stops at the junction — Lantern s95 seed 4.)
+        if !o.parked && opposing_through_junction(ctx.corridor, r.s, pass_dist + 40.0, n_pass, hw) {
             why = PassReject::LaneAhead;
             continue 'side;
         }
