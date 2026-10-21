@@ -90,7 +90,7 @@ impl PhysicsWorld {
     }
 
     /// Replace the flat ground slab by the city's own ground (cities with terrain, e.g.
-    /// Port Vesper v2): a terrain heightfield, one triangle mesh of every paved surface
+    /// Port Vesper v2): a terrain heightfield ([`wp_world::surface::collision_terrain`]), one triangle mesh of every paved surface
     /// (banked ribbons, junction discs, bend connectors), a static collider per building and
     /// guard rails along bridge decks. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
     /// inserted in a fixed order and registered with the broad phase immediately, so ground
@@ -98,7 +98,9 @@ impl PhysicsWorld {
     /// tick (scenario setup).
     pub fn set_city_ground(&mut self, map: &wp_world::CityMap) -> CityColliders {
         let net = &map.net;
-        let Some(t) = &net.terrain else {
+        // The terrain as drawn (fine heights only under roads and sidewalks), not the raw
+        // `net.terrain`, which stands up to ~10 m above the greybox ground on slopes.
+        let Some(t) = &map.ground else {
             return CityColliders::default();
         };
         let mut out = CityColliders::default();

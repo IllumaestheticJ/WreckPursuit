@@ -592,3 +592,28 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+
+## Solid terrain = drawn terrain (playtest: "hitting invisible objects / crashing into the map geometry")
+**Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with every vertex lowered to
+the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
+collided with the raw 5 m heightfield. Off the roads ~10 % of the ground stood 1–4 m above
+what was drawn, up to 10.2 m on steep slopes: invisible hillside.
+**Fix.**
+- `wp_world::terrain::Heightfield::lowered_coarse` (the drawn terrain) and
+  `height_on_triangles` (height on the cell triangles, split along the (i, j)–(i+1, j+1)
+  diagonal like the greybox and Rapier tiles).
+- `wp_world::surface::collision_terrain` → `CityMap::ground`: the drawn terrain resampled on the
+  5 m grid, except in the band around at-grade roads, junctions and bends (paved width +
+  sidewalk + 2.5 m), which keeps the fine heights so sidewalks (drawn, not colliders on `main`)
+  stay at road level. Not under bridge decks.
+- `wp_sim::PhysicsWorld::set_city_ground` builds the heightfield tiles from `CityMap::ground`;
+  `CityMap::ground_height` falls back to it off the roads (spawns, resets, physical traffic).
+- `city-import` draws from `lowered_coarse` (the shipped `vesper_v2.greybox.glb` is byte-identical;
+  `TERRAIN_RENDER_M` and `SIDEWALK_M` now live in `wp_world::surface`).
+**Gate.** `wp_sim/tests/city_v2.rs::solid_terrain_is_the_drawn_terrain`: 167k off-road ray casts
+against the Rapier world land within 1 mm of the drawn terrain (fails on the old colliders).
+`CityMap::new` for Port Vesper: 20 ms (release). Files touched outside `wp_world`:
+`crates/wp_sim/src/physics.rs`, `tools/city-import/src/glb.rs`.
+**Not covered here.** Props (parked cars, cones, bins) are Rapier bodies that `main`'s testbed
+never draws; that is playtest row 50, fixed on `lead/draw-props` / `lead/round12`. That line still
+has this terrain mismatch (same `render_terrain`), so this change needs merging there too.
