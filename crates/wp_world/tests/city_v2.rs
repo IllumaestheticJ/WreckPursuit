@@ -202,3 +202,65 @@ fn flat_terrain_collides_unchanged() {
     let map = wp_world::CityMap::new(net);
     assert_eq!(map.ground.as_deref(), map.net.terrain.as_ref());
 }
+
+/// The contract road network's centrelines are the roads' own centres: 1.75 m to the right of
+/// a two-way road's centreline (the police lane offset), in either direction of travel, is a
+/// driving lane going that way. They used to follow the road's first lane, which put units
+/// one way into the parking lane and the other way onto the centre line, head-on with traffic
+/// (stuck police on curved roads).
+#[test]
+fn road_network_centrelines_offset_into_the_right_lane() {
+    use wp_contracts::RoadNetworkQuery;
+    use wp_world::geom;
+    use wp_world::map::SegKind;
+    let map = wp_world::CityMap::new(net().clone());
+    let idx = wp_world::RoadNetworkIndex::new(&map);
+    let (mut checked, mut wrong) = (0, Vec::new());
+    for e in 0..idx.edge_count() {
+        let info = idx.edge(e);
+        if info.lanes_ab == 0 || info.lanes_ba == 0 {
+            continue;
+        }
+        let pl: Vec<[f32; 3]> = idx
+            .edge_polyline(e)
+            .iter()
+            .map(|p| [p[0], p[1], 0.0])
+            .collect();
+        let cum = geom::cumulative(&pl);
+        let len = cum[cum.len() - 1];
+        // Mid-road samples (junction areas have connectors, not lanes).
+        let mut s = 25.0;
+        while s < len - 25.0 {
+            let (p, d) = geom::point_at(&pl, &cum, s);
+            for dir in [1.0f32, -1.0] {
+                let fwd = geom::scale(d, dir);
+                let q = geom::add(geom::xy(p), geom::scale(geom::right_of(fwd), 1.75));
+                let lane = map
+                    .segs
+                    .iter()
+                    .filter(|sg| matches!(sg.kind, SegKind::Lane { .. }) && sg.drivable)
+                    .min_by(|a, b| a.project(q).dist.total_cmp(&b.project(q).dist));
+                if let Some(sg) = lane {
+                    let pr = sg.project(q);
+                    let (_, ld) = sg.point_at(pr.s.clamp(0.0, sg.length));
+                    checked += 1;
+                    if geom::dot(ld, fwd) < 0.5 || pr.dist > 1.75 {
+                        wrong.push((e, s, dir, pr.dist));
+                    }
+                }
+            }
+            s += 40.0;
+        }
+    }
+    println!(
+        "{checked} samples, {} off their lane: {:?}",
+        wrong.len(),
+        &wrong[..wrong.len().min(5)]
+    );
+    assert!(checked > 200, "{checked}");
+    assert!(
+        wrong.len() * 50 <= checked,
+        "{} of {checked} samples off their lane",
+        wrong.len()
+    );
+}
