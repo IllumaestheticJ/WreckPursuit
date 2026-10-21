@@ -37,6 +37,11 @@ pub struct CityColliders {
     pub rails: usize,
     /// Median barrier boxes between divided-highway carriageways.
     pub barriers: usize,
+    /// Solid [`wp_world::network::Feature`]s turned into collider shapes (boxes, cylinders,
+    /// convex prisms; format v4 cities such as Port Vesper v3).
+    pub features: usize,
+    /// Rapier colliders holding those shapes (one compound per [`FEATURE_TILE_M`] tile).
+    pub feature_colliders: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -95,7 +100,9 @@ impl PhysicsWorld {
     /// Port Vesper v2): a terrain heightfield, one triangle mesh of every paved surface
     /// (banked ribbons, junction discs, bend connectors), a static collider per building
     /// (not on flat ground: the grid city), guard rails along bridge decks and median
-    /// barriers. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
+    /// barriers, plus a static collider for every solid feature (format v4, see
+    /// [`feature_shape`]; grouped per [`FEATURE_TILE_M`] tile). The slab moves down to
+    /// [`SAFETY_FLOOR_Z`]. Colliders are
     /// inserted in a fixed order and registered with the broad phase immediately, so ground
     /// probes see them on the next tick without a physics step. Call once, before the first
     /// tick (scenario setup).
@@ -245,11 +252,60 @@ impl PhysicsWorld {
             }
         }
 
+        // Solid features (format v4): one compound collider per FEATURE_TILE_M tile, in tile
+        // order, shapes in feature order inside it.
+        let (n_shapes, handles) = self.insert_features(&net.features);
+        out.features = n_shapes;
+        out.feature_colliders = handles.len();
+        added.extend(handles);
+
         for h in added {
             let aabb = self.colliders[h].compute_aabb();
             self.broad_phase.set_aabb(&self.params, h, aabb);
         }
         out
+    }
+
+    /// Insert the static colliders of every solid feature (no broad-phase registration):
+    /// shapes grouped by the [`FEATURE_TILE_M`] tile of their centre into one compound
+    /// collider per tile (a `BTreeMap` keyed by tile, so insertion order is fixed). Returns the
+    /// number of shapes and the collider handles in insertion order.
+    fn insert_features(
+        &mut self,
+        features: &[wp_world::network::Feature],
+    ) -> (usize, Vec<ColliderHandle>) {
+        // (tile, drivable) → shapes.
+        type Parts = Vec<(Pose, SharedShape)>;
+        let mut tiles: std::collections::BTreeMap<(i32, i32, bool), Parts> = Default::default();
+        let mut n = 0;
+        for f in features.iter().filter(|f| f.solid) {
+            let Some((pose, shape)) = feature_shape(&f.shape) else {
+                continue;
+            };
+            let key = (
+                (pose.translation.x / FEATURE_TILE_M).floor() as i32,
+                (pose.translation.y / FEATURE_TILE_M).floor() as i32,
+                drivable(f.kind),
+            );
+            tiles.entry(key).or_default().push((pose, shape));
+            n += 1;
+        }
+        let mut handles = Vec::with_capacity(tiles.len());
+        for ((_, _, drive), parts) in tiles {
+            let friction = if drive {
+                FEATURE_DRIVABLE_FRICTION
+            } else {
+                FEATURE_FRICTION
+            };
+            let col = if parts.len() == 1 {
+                let (pose, shape) = parts.into_iter().next().expect("one part");
+                ColliderBuilder::new(shape).position(pose)
+            } else {
+                ColliderBuilder::compound(parts)
+            };
+            handles.push(self.colliders.insert(col.friction(friction).build()));
+        }
+        (n, handles)
     }
 
     /// Scene query pipeline over the current colliders (as of the last step), with `filter`
@@ -302,8 +358,218 @@ impl PhysicsWorld {
     }
 }
 
+/// Solid features are grouped into one compound collider per tile of this size (by shape
+/// centre), m: tens of thousands of separate static colliders would bloat the broad phase.
+pub const FEATURE_TILE_M: f32 = 256.0;
+/// Friction of drivable feature colliders (decks, ramps, slabs, piers, platforms, earthworks).
+pub const FEATURE_DRIVABLE_FRICTION: f32 = 0.8;
+/// Friction of other solid features (walls, fences, poles, containers...).
+pub const FEATURE_FRICTION: f32 = 0.5;
+
+/// Feature kinds whose top is meant to be driven on (higher friction, see
+/// [`FEATURE_DRIVABLE_FRICTION`]).
+pub fn drivable(kind: wp_world::network::FeatureKind) -> bool {
+    use wp_world::network::FeatureKind as K;
+    matches!(
+        kind,
+        K::ParkingDeck
+            | K::ParkingRamp
+            | K::Runway
+            | K::Taxiway
+            | K::Apron
+            | K::Pier
+            | K::Platform
+            | K::Earthwork
+            | K::Tunnel
+            | K::RailBridge
+            | K::Ground
+    )
+}
+
+/// Rotation of a feature box: pitch about local +X (positive = the +Y end up), then yaw about
+/// world +Z (`wp_world::network::FeatureShape::Box`): `q = q_yaw · q_pitch`.
+pub fn box_rotation(yaw: f32, pitch: f32) -> rapier3d::math::Rotation {
+    let (sy, cy) = wp_math::sin_cos(yaw * 0.5);
+    let (sp, cp) = wp_math::sin_cos(pitch * 0.5);
+    rapier3d::math::Rotation::from_xyzw(cy * sp, sy * sp, cp * sy, cy * cp)
+}
+
+/// Collider pose and shape of one feature shape (world space): a cuboid for a box, a cylinder
+/// rotated from Rapier's +Y axis onto +Z, the convex hull of footprint × `[base_z, top_z]` for
+/// a prism. `None` for degenerate shapes (zero size, fewer than 3 footprint points).
+pub fn feature_shape(shape: &wp_world::network::FeatureShape) -> Option<(Pose, SharedShape)> {
+    use rapier3d::math::Rotation;
+    use wp_world::network::FeatureShape as S;
+    const MIN: f32 = 1e-3;
+    match shape {
+        S::Box {
+            centre,
+            half,
+            yaw,
+            pitch,
+        } => {
+            if half.iter().any(|h| !(*h > MIN)) {
+                return None;
+            }
+            Some((
+                Pose::from_parts(Vector::from_array(*centre), box_rotation(*yaw, *pitch)),
+                SharedShape::cuboid(half[0], half[1], half[2]),
+            ))
+        }
+        S::Cylinder {
+            base,
+            radius,
+            height,
+        } => {
+            if !(*radius > MIN && *height > MIN) {
+                return None;
+            }
+            let h = core::f32::consts::FRAC_1_SQRT_2;
+            Some((
+                Pose::from_parts(
+                    Vector::new(base[0], base[1], base[2] + height * 0.5),
+                    // +90° about X: local +Y (Rapier's cylinder axis) → world +Z.
+                    Rotation::from_xyzw(h, 0.0, 0.0, h),
+                ),
+                SharedShape::cylinder(height * 0.5, *radius),
+            ))
+        }
+        S::Prism {
+            footprint,
+            base_z,
+            top_z,
+        } => {
+            if footprint.len() < 3 || !(*top_z - *base_z > MIN) {
+                return None;
+            }
+            // Hull in local coordinates around the footprint's mean point (keeps the compound
+            // BVH and f32 precision sane far from the origin).
+            let k = footprint.len() as f32;
+            let c = footprint
+                .iter()
+                .fold([0.0f32; 2], |a, p| [a[0] + p[0] / k, a[1] + p[1] / k]);
+            let cz = (base_z + top_z) * 0.5;
+            let hz = (top_z - base_z) * 0.5;
+            let mut pts = Vec::with_capacity(footprint.len() * 2);
+            for p in footprint {
+                pts.push(Vector::new(p[0] - c[0], p[1] - c[1], -hz));
+                pts.push(Vector::new(p[0] - c[0], p[1] - c[1], hz));
+            }
+            let shape = SharedShape::convex_hull(&pts)?;
+            Some((Pose::from_translation(Vector::new(c[0], c[1], cz)), shape))
+        }
+    }
+}
+
 impl Default for PhysicsWorld {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wp_world::metro::ctx::{box_on, ramp};
+    use wp_world::network::{FeatureKind, FeatureShape, Material};
+
+    fn close(a: Vector, b: [f32; 3], tol: f32) -> bool {
+        (a - Vector::from_array(b)).length() < tol
+    }
+
+    /// Height of the shape's top surface under `xy` (ray cast straight down from 100 m).
+    fn top_at(pose: &Pose, shape: &SharedShape, xy: [f32; 2]) -> Option<f32> {
+        let ray = rapier3d::parry::query::Ray::new(Vector::new(xy[0], xy[1], 100.0), -Vector::Z);
+        shape
+            .cast_ray(pose, &ray, 1000.0, true)
+            .map(|toi| 100.0 - toi)
+    }
+
+    #[test]
+    fn ramp_top_centreline_passes_through_its_end_points() {
+        // Several directions and slopes, far from the origin.
+        let cases = [
+            ([1200.0, -800.0, 3.0], [1200.0, -758.0, 9.0]),
+            ([-300.0, 40.0, 0.0], [-342.0, 40.0, 6.0]),
+            ([10.0, 10.0, 12.0], [40.0, -20.0, 6.0]),
+            ([0.0, 0.0, 0.0], [-20.0, -25.0, 4.0]),
+        ];
+        for (a, b) in cases {
+            let f = ramp(FeatureKind::ParkingRamp, Material::Concrete, a, b, 6.0, 0.4);
+            let FeatureShape::Box { half, .. } = f.shape else {
+                panic!("ramp is a box");
+            };
+            let (pose, shape) = feature_shape(&f.shape).unwrap();
+            // The top face's centreline ends: local (0, ∓hy, +hz).
+            let start = pose.transform_point(Vector::new(0.0, -half[1], half[2]));
+            let end = pose.transform_point(Vector::new(0.0, half[1], half[2]));
+            assert!(close(start, a, 1e-3), "start {start:?} vs {a:?}");
+            assert!(close(end, b, 1e-3), "end {end:?} vs {b:?}");
+            // Ray casts onto the collider's top along the centreline follow the line a → b.
+            for t in [0.1f32, 0.5, 0.9] {
+                let p = [
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                ];
+                let z = top_at(&pose, &shape, [p[0], p[1]]).expect("ray hits the ramp");
+                assert!((z - p[2]).abs() < 1e-2, "t {t}: top {z} vs {}", p[2]);
+            }
+        }
+    }
+
+    #[test]
+    fn yaw_turns_local_x_to_cos_sin() {
+        for yaw in [0.0f32, 0.4, 1.7, -2.5] {
+            let q = box_rotation(yaw, 0.0);
+            let x = q * Vector::X;
+            let (s, c) = wp_math::sin_cos(yaw);
+            assert!(close(x, [c, s, 0.0], 1e-5), "{yaw}: {x:?}");
+            let y = q * Vector::Y;
+            assert!(close(y, [-s, c, 0.0], 1e-5), "{yaw}: {y:?}");
+        }
+        // Positive pitch lifts the +Y end.
+        let y = box_rotation(0.0, 0.3) * Vector::Y;
+        assert!(y.z > 0.29 && y.y > 0.95, "{y:?}");
+    }
+
+    #[test]
+    fn cylinders_stand_upright_and_prisms_span_base_to_top() {
+        let (pose, shape) = feature_shape(&FeatureShape::Cylinder {
+            base: [50.0, -20.0, 2.0],
+            radius: 1.5,
+            height: 8.0,
+        })
+        .unwrap();
+        assert!((top_at(&pose, &shape, [50.0, -20.0]).unwrap() - 10.0).abs() < 1e-3);
+        assert!((top_at(&pose, &shape, [51.4, -20.0]).unwrap() - 10.0).abs() < 1e-3);
+        assert!(top_at(&pose, &shape, [51.6, -20.0]).is_none());
+        let (pose, shape) = feature_shape(&FeatureShape::Prism {
+            footprint: vec![[100.0, 100.0], [120.0, 100.0], [110.0, 115.0]],
+            base_z: 1.0,
+            top_z: 7.0,
+        })
+        .unwrap();
+        assert!((top_at(&pose, &shape, [110.0, 105.0]).unwrap() - 7.0).abs() < 1e-3);
+        assert!(top_at(&pose, &shape, [101.0, 114.0]).is_none());
+        // A flat box's top is centre + half height.
+        let f = box_on(
+            FeatureKind::ParkingDeck,
+            Material::Concrete,
+            [5.0, 5.0],
+            6.0,
+            [10.0, 20.0, 0.3],
+            0.7,
+            true,
+        );
+        let (pose, shape) = feature_shape(&f.shape).unwrap();
+        assert!((top_at(&pose, &shape, [5.0, 5.0]).unwrap() - 6.3).abs() < 1e-4);
+        // Degenerate shapes make no collider.
+        assert!(feature_shape(&FeatureShape::Prism {
+            footprint: vec![[0.0, 0.0], [1.0, 0.0]],
+            base_z: 0.0,
+            top_z: 1.0
+        })
+        .is_none());
     }
 }
