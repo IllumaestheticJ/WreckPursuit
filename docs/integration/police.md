@@ -984,3 +984,30 @@ Checks: `e2e:presets`, `e2e:touch`, `tsc`, fmt, clippy, wasm build pass. Fail id
 exists" (the setter exists now); `wp_vehicle` `roster_diff_hashes_are_pinned`,
 `front_drive_cars_understeer_mildly`; `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
 `simcli_golden_replays_play_back_in_the_browser_core`; 52 simcli goldens on the round-12 tip of 2026-10-20 (same set with and without this merge; `ws/police` before it: 19; none re-blessed here).
+
+## Merge of main into ws/harness (2026-10-21, PR #17): re-measured expectations
+
+Owner call: keep main's highway layout and re-measure the police expectations it moved
+(round 12's police on main's maps), with the reason for each; root causes still open.
+
+| Test / scenario | Expectation | Before → after (measured) |
+|---|---|---|
+| `police_scenarios::night_is_slower_than_day…` | night / day reinforcement delay | ≥ 2.0 → ≥ 0.85 (28.6 s / 29.2 s = 0.98; round 12 alone 78 / 23 s, main 99 / 28 s) |
+| `radio_city_chase.ron` | `radio_per_min_calm` | ≤ 4 → ≤ 5 (4.22; round 12 3.44, main 3.87) |
+| `response_day_suburb.ron` | 25 s reach / mean / worst call → unit within 100 m | ≥ 0.875 / ≤ 15 s / ≤ 25 s → ≥ 0.5 / ≤ 23 s / ≤ 48 s (0.6 / 18.7 / 39.6) |
+| `response_night_core.ron` | same | same new bounds (0.75 / 19.3 / 40.8) |
+| `wp_sim police_passby` (parked cop) | facing the player after the pass / gap at 15 s | ≤ 4 s / ≤ 150 m → ≤ 8 s / ≤ 175 m (6.1–6.8 s, 151 m: the cop backs round, no room for a forward U-turn) |
+| `radio_chatter` scripted callouts | harness seed | 11 → 12 (at 11 the racer had escaped when "lost visual" was called) |
+| `system` blocked siren unit | harness seed | 7 → 8 (at 7 a second pursuer queued 2.4 m behind the blocked unit, so it re-routed instead of reversing) |
+
+Fixed rather than re-measured:
+- `PoliceSystem::pro_input` no longer overwrites `Unit::planned_speed` with the pro driver's
+  plan (main uses it for telemetry only). Round 12's push and stuck recovery read it as "wants
+  to move", and the pro plan behind a blocker is 0, so a blocked siren unit never pushed.
+- The kinematic scenario step no longer counts a full-lock turn back toward a target behind the
+  unit as running wide (`self_wreck_sim` careful rate 0.103 → 0.070, bar 0.10).
+
+**Open (owner D / E):** on main's layout reinforcements reach a night chase as fast as a day
+one, and suburb / night-core responders arrive later than the round 12b bar ("the police spawn
+too far"). Both look like the out-of-sight responder spawns meeting main's road graph (one-way
+carriageways, ramps); not investigated.

@@ -1621,7 +1621,9 @@ impl PoliceSystem {
             .pro
             .get_or_insert_with(|| pro::ProDriver::new(pro_cfg.clone(), limits, geometry, v));
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
-        u.planned_speed = out.planned_mps;
+        // `planned_speed` stays the think-rate corner plan: the push and stuck recovery read
+        // it as "wants to move", and the pro plan behind a blocker is 0 (a blocked unit never
+        // pushed).
         let mut input = out.input;
         if hold && !out.reversing {
             // The shared controller releases the brake below its hold speed; right behind

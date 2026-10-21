@@ -62,15 +62,16 @@ const DOWNTOWN_LOOP: [[f32; 2]; 4] = [
     [-200.0, 150.0],
 ];
 /// Racer 0 and the cop lap the port block (lane centrelines, right-hand traffic): east along
-/// Gantry Row (y = −780 m, a 470 m straight — the only stretch near the centre with the
+/// Gantry Row (y = −770 m, a 450 m straight — the only stretch near the centre with the
 /// 120 m approach sight police need for a roadblock or spike strip; downtown has a cross
-/// street every 100 m), south on x = 920 m, west along the quay (y = −950 m), north on
-/// x = 450 m. `plan_circuit` does not route this block, so the loop is written out.
+/// street every 100 m), south on x = 920 m, west along the quay (y = −925 m), north on
+/// x = 450 m. `plan_circuit` does not route this block, so the loop is written out. (Main's
+/// divided Loop 9 moved Gantry Row 10 m and the quay 21 m north.)
 const PORT_LOOP: [[f32; 3]; 4] = [
-    [453.5, -781.8, 0.0],
-    [916.5, -781.8, 0.0],
-    [916.5, -946.5, 0.0],
-    [453.5, -946.5, 0.0],
+    [453.5, -771.75, 0.0],
+    [916.5, -771.75, 0.0],
+    [916.5, -921.5, 0.0],
+    [453.5, -921.5, 0.0],
 ];
 /// Route distance (m) of each seat's spawn on its loop: racer 0 (port), racer 1 (downtown),
 /// cop (port, behind racer 0).

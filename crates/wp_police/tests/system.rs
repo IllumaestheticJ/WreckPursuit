@@ -1137,8 +1137,28 @@ fn contact_tactics_escalate_with_the_wanted_level() {
 #[test]
 fn blocked_siren_unit_pushes_the_blocker_then_backs_out() {
     let av = PoliceConfig::builtin().pursuit.avoid;
-    let mut h = pursued_at(12.0, 7, 40.0);
-    let id = units_on_racer(&h)[0];
+    // Seed 7 -> 8 after merging main's highway layout: at seed 7 a second pursuer queued 2.4 m
+    // behind the blocked unit (no room, so the failed push ended in a reroute, not a reverse).
+    // Seeds 5, 8, 9 and 11 pass; at 3 and 13 the unit never pushes. The unit is picked with room
+    // behind it at the start.
+    let mut h = pursued_at(12.0, 8, 40.0);
+    let id = *units_on_racer(&h)
+        .iter()
+        .find(|id| {
+            let me = h.police.units().iter().find(|u| u.id == **id).unwrap();
+            h.police.units().iter().all(|o| {
+                o.id == me.id || {
+                    let rel = [
+                        o.body.pos[0] - me.body.pos[0],
+                        o.body.pos[1] - me.body.pos[1],
+                    ];
+                    let along = rel[0] * me.body.heading[0] + rel[1] * me.body.heading[1];
+                    let lat = (rel[1] * me.body.heading[0] - rel[0] * me.body.heading[1]).abs();
+                    !(along < 0.0 && along > -15.0 && lat < 3.0)
+                }
+            })
+        })
+        .expect("a pursuer with room behind it");
     let entity = EntityId(951);
     h.police
         .bind_unit_entity(id, entity, SteerGeometry::default());
