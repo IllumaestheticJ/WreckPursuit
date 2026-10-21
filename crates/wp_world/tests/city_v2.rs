@@ -186,3 +186,17 @@ fn drawn_terrain_stays_under_roads_and_follows_the_ground() {
     assert!(q(0.95) < 0.3, "p95 {}", q(0.95));
     assert!(q(0.99) < 0.75, "p99 {}", q(0.99));
 }
+
+/// The procedural grid's terrain is a flat field under the streets (so its viaduct is a
+/// bridge): physics collides with it unchanged, and it stays flat (wp_sim tells the grid by
+/// its flat terrain and keeps its buildings non-solid there).
+#[test]
+fn flat_grid_collides_with_its_raw_terrain() {
+    let world = World::procedural(
+        &wp_world::procgen::ProcGenConfig::default(),
+        WorldConfig::default(),
+    );
+    let map = world.map();
+    let raw = map.net.terrain.as_ref().expect("the grid has flat terrain");
+    assert_eq!(map.ground.as_ref(), Some(raw));
+}

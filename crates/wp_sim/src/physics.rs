@@ -192,7 +192,10 @@ impl PhysicsWorld {
         // Buildings: extruded footprints as convex hulls (footprints are convex lots). A city
         // on flat ground (the procedural grid, whose terrain only exists so its highway
         // viaduct is a real bridge) keeps its old behaviour: buildings do not block cars.
-        let flat_ground = t.z.iter().all(|z| *z == t.z[0]);
+        let flat_ground = net
+            .terrain
+            .as_ref()
+            .is_some_and(|raw| raw.z.iter().all(|z| *z == raw.z[0]));
         for b in net.buildings.iter().filter(|_| !flat_ground) {
             let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2);
             for q in &b.footprint {

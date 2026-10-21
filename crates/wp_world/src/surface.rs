@@ -274,9 +274,13 @@ pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
 /// the fine heights so the ground under sidewalks stays at road level. Drawn and solid ground
 /// agree everywhere else, so there is no hillside the player can hit but not see; the fine
 /// grid samples the coarse triangles exactly (same diagonal), so the two surfaces are
-/// identical off the roads.
+/// identical off the roads. A flat field (the procedural grid) is returned as it is: there
+/// is no hidden ground to remove, only the drawn mesh's 5 cm offset.
 pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
+    if t.z.iter().all(|z| *z == t.z[0]) {
+        return Some(t.clone());
+    }
     let keep = road_band(map, t);
     let drawn = t.coarse_under(TERRAIN_RENDER_M, &keep);
     let mut out = t.clone();
