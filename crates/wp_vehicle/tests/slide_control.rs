@@ -33,7 +33,10 @@ fn keyboard_power_oversteer_exit_is_recoverable() {
     for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
         for id in ["rampart_50", "lucciola_350"] {
             for react in [0.3, 0.8] {
-                let r = exit(id, &a, DriverStyle::Keyboard, 0.7, react);
+                // 0.65 g (was 0.7): the street-spec Rampart (2026-10-21) with the grip-capped
+                // keyboard lock entered the 0.7 g circle fast enough to be in third with
+                // TCS/ESC off; 0.65 g keeps the scripted second-gear launch for every case.
+                let r = exit(id, &a, DriverStyle::Keyboard, 0.65, react);
                 assert!(
                     r.recovered && r.max_slip_deg < 90.0,
                     "{id} tcs={} react {react}: {r:?}",

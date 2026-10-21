@@ -61,6 +61,11 @@ engine `why`. Curb mass is trimmed ≈ 5 %. Source of truth: `roster_inputs.py`
     its hashes were recorded on the old Rampart/Lucciola data. The test now loads those
     definitions from `tests/fixtures/pre_street_spec/` (copied from `60c236a`), and all four
     hashes match. So the code invariant is still tested, and no hash was re-recorded.
+  - `wp_vehicle/tests/slide_control.rs` (`keyboard_power_oversteer_exit_is_recoverable`,
+    after merging main's #27 grip-capped keyboard lock): circle 0.7 → 0.65 g. At 0.7 g the
+    street-spec Rampart reached the throttle point in third with TCS/ESC off, which breaks the
+    test's "scripted in second gear" precondition. At 0.65 g every case is in second, and
+    every case still recovers.
 - **Checks:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, wasm build of
   `wp_wasm`, `cargo test --workspace --release --no-fail-fast`. The only failures were the 3
   above, all now passing. No simcli golden changed.
