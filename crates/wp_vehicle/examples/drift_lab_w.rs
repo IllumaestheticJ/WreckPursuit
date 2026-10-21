@@ -66,6 +66,7 @@ fn main() {
             "snap",
             "snapsweep",
             "catch",
+            "catchwindow",
             "vr",
             "sens",
             "ptrace",
@@ -110,6 +111,10 @@ fn main() {
     }
     if what == "snap" {
         snap_table(&args);
+        return;
+    }
+    if what == "catchwindow" {
+        catch_window(&args);
         return;
     }
     if what == "catch" {
@@ -961,6 +966,61 @@ fn snap_table(args: &[String]) {
 /// Over-rotation catch (owner step 18) under the W default and `PLAIN` variants (JSON list in
 /// `PLAINS`, e.g. `[{"counter_closing_only":false},{"drift_lock_extra":0.3}]`): catches per
 /// car × push angle, plus snap-back and the tapping hold, on the panel's default tyres.
+/// Catch window (lead): the largest over-rotation (push angle, 35–75° in 5° steps) caught,
+/// counter key held vs tapping, before vs the W default; plus turn-in (tap / step steer).
+fn catch_window(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{over_rotation_catch_with, step_steer_roll, CatchKey};
+    use wp_vehicle::grip_lab::{self, GripBalance};
+    let ids: Vec<String> = if args.is_empty() {
+        ["parity_rwd_d", "parity_rwd_a", "parity_rwd_b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        args.to_vec()
+    };
+    car_lab::set_override(Some(CarTune::spin_candidate()));
+    ride_lab::set_override(Some(RideTune::medium_weight()));
+    grip_lab::set_override(Some(GripBalance::grip()));
+    let a = reference_assists();
+    let before = PlainSteer {
+        counter_closing_only: false,
+        ..PlainSteer::default()
+    };
+    println!("\n## Catch window: largest push caught (60 m, 0.7 g; caught pushes listed)");
+    println!("| car | variant | key held | tapping | turn-in: tap 0.15 s @100 heading ° / step heading start s |");
+    println!("|---|---|---|---|---|");
+    for id in &ids {
+        for (name, p) in [("before", before), ("W default", PlainSteer::default())] {
+            plain::set_override(Some(p));
+            let c = car(id);
+            let mut cells = Vec::new();
+            for k in [CatchKey::Held, CatchKey::Tapping] {
+                let mut caught = Vec::new();
+                let mut largest = 0.0f32;
+                for push in (7..=15).map(|i| i as f32 * 5.0) {
+                    let r = over_rotation_catch_with(&c, &a, push, k);
+                    if r.reached && r.caught {
+                        caught.push(format!("{push:.0}"));
+                        largest = largest.max(push);
+                    }
+                }
+                cells.push(format!("**{largest:.0}°** ({})", caught.join(",")));
+            }
+            let tap = tap_response(&c, &a, 100.0 / 3.6, 0.15);
+            let st = step_steer_roll(&c, &a, 80.0 / 3.6, 1.5);
+            println!(
+                "| {id} | {name} | {} | {} | {:.1} / {:.2} |",
+                cells[0], cells[1], tap.heading_deg, st.heading_start_s
+            );
+        }
+    }
+    car_lab::set_override(None);
+    ride_lab::set_override(None);
+    grip_lab::set_override(None);
+    plain::set_override(Some(PlainSteer::default()));
+}
+
 fn catch_table(args: &[String]) {
     use wp_vehicle::drift_lab_w::{over_rotation_catch, plain_hold, snap_back, SnapExit};
     use wp_vehicle::grip_lab::{self, GripBalance};

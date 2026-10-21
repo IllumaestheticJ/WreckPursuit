@@ -1084,6 +1084,23 @@ or 50°, then counter key + half throttle. Caught = no spin, peak < 70°, back u
   rampart_50 50° vs 42°, debug_coupe 38° vs 28°, the others 1–2° less.
 - **Tapping hold:** held 5/5 both.
 
+**Catch window** (`--example drift_lab_w catchwindow`). Largest push angle (35–75° in 5° steps)
+still caught, with the counter key held vs the key-tapping driver, plus turn-in:
+
+| car | variant | key held | tapping | turn-in: tap 0.15 s @100 heading ° / step heading start s |
+|---|---|---|---|---|
+| parity_rwd_d | before | **0°** () | **0°** () | 6.2 / 0.17 |
+| parity_rwd_d | W default | **40°** (35,40) | **35°** (35) | 6.2 / 0.17 |
+| parity_rwd_a | before | **0°** () | **0°** () | 6.0 / 0.17 |
+| parity_rwd_a | W default | **40°** (35,40) | **40°** (35,40) | 6.0 / 0.17 |
+| parity_rwd_b | before | **55°** (40,45,50,55) | **55°** (45,50,55) | 7.2 / 0.15 |
+| parity_rwd_b | W default | **55°** (35,40,45,50,55) | **55°** (45,50,55) | 7.2 / 0.15 |
+
+- rwd_d and rwd_a go from nothing caught to 40° (35° tapping on rwd_d).
+- rwd_b already caught up to 55° and still does, now from 35° with the key held.
+- Past ~55° the peak tops 70° whichever setting is used.
+- Turn-in is identical (the extras never act in grip).
+
 **Panel:**
 - "catch A/B: before / new" buttons (`#drift-lab-w-catch-before` / `-new`). "before" turns
   the directional limit, the extra lock and the fast rack off.

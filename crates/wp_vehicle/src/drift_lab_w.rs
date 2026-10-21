@@ -1047,6 +1047,26 @@ pub struct OverCatch {
 /// key-tapping hold ([`snap_back`]'s driver), for 3 s. Caught = no spin, the slide peaks under
 /// 70°, is back under 45° within 1.5 s and swings no more than 15° to the other side.
 pub fn over_rotation_catch(car: &LoadedCar, assists: &AssistProfile, push_deg: f32) -> OverCatch {
+    over_rotation_catch_with(car, assists, push_deg, CatchKey::Held)
+}
+
+/// How the driver works the counter key in [`over_rotation_catch_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatchKey {
+    /// Counter key held (half throttle) until the slide is back under 35°, then tapping.
+    Held,
+    /// Tapping from the start: the key-tapping hold driver (counter key while the slide is
+    /// over 35° or growing faster than 15°/s; throttle off over 45°).
+    Tapping,
+}
+
+/// [`over_rotation_catch`] with the catch driver `key`.
+pub fn over_rotation_catch_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    push_deg: f32,
+    key: CatchKey,
+) -> OverCatch {
     use crate::drift_lab::{settle_on_circle, slide_state, DRIFT_GEAR};
     use wp_contracts::{VehicleInput, PHYSICS_DT};
     const TPS: usize = 240;
@@ -1112,7 +1132,7 @@ pub fn over_rotation_catch(car: &LoadedCar, assists: &AssistProfile, push_deg: f
         let a = angle_of(&rig);
         let rate = (a - prev) / PHYSICS_DT;
         prev = a;
-        catching &= a > 35.0;
+        catching &= a > 35.0 && key == CatchKey::Held;
         let (st, th) = if catching { (1.0, 0.5) } else { tap(a, rate) };
         step(&mut rig, st, th);
         if gone(&rig) {
