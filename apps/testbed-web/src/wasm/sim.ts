@@ -408,6 +408,8 @@ export const sim = {
 
   // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
   careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
+  /** New career with a custom opening balance (preview / demo builds start rich). */
+  careerNewWithCash: (mode: string, cash: number): CareerView => JSON.parse(wasm.career_new_with_cash(mode, cash)),
   careerLoad: (text: string): CareerView => JSON.parse(wasm.career_load_json(text)),
   careerSave: (): string => wasm.career_save_json(),
   careerExists: (): boolean => wasm.career_exists(),
