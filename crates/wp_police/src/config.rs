@@ -153,6 +153,8 @@ pub struct HeatConfig {
     pub sight: SightConfig,
     /// How long recognising a wanted car takes (owner playtest rows 80 / 89).
     pub recognition: RecognitionConfig,
+    /// Units clock speeders themselves (owner report 2026-10-21, "noticed but no pursuit").
+    pub radar: RadarConfig,
 }
 
 /// A ground unit's field of view (owner playtest row 89, "if I can see them, they can see
@@ -165,6 +167,27 @@ pub struct SightConfig {
     pub fov_deg: f32,
     /// Seen in any direction this close, m.
     pub all_round_m: f32,
+}
+
+/// A ground unit's radar (owner report 2026-10-21: "cops see me but no pursuit"). A unit that
+/// can see a racer (`sight`, line of sight, within `witness_range_m`) clocks it: over the limit
+/// where it drives by more than `max(margin_mps, ratio × limit)` is a witnessed speeding
+/// violation, at most once per `repeat_s` of no counted speeding. `wp_world` only reports speeding
+/// against a lane pointing the car's way, every 5 s: a car on the wrong side of the road, or one
+/// that passed a unit between two reports, was seen but never clocked. Only racers not wanted
+/// yet are clocked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadarConfig {
+    /// Absolute margin over the limit, m/s (`wp_world`'s speeding margin).
+    pub margin_mps: f32,
+    /// Relative margin (fraction of the limit).
+    pub ratio: f32,
+    /// A racer is clocked only when no speeding violation counted for this long (`wp_world`'s
+    /// sustained-speeding repeat), s.
+    pub repeat_s: f32,
+    /// Speeding in a unit's sight this long before it is clocked (`wp_world`'s hold), s.
+    pub hold_s: f32,
 }
 
 /// Recognising an already-wanted car a unit did not see offend (rows 80 / 89):

@@ -3410,6 +3410,7 @@ dependencies = [
  "wp_economy",
  "wp_math",
  "wp_net",
+ "wp_opponent",
  "wp_police",
  "wp_sim",
  "wp_vehicle",

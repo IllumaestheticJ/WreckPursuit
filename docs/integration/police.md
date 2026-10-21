@@ -169,7 +169,9 @@ The reply is `Result<(), CaptainError>` with:
   row-80 pass-by matrix test. `crates/wp_wasm/src/audio.rs`: siren test window 30 → 60 s.
   `crates/wp_wasm/src/career_tests.rs`: `brake_until_settled` holds the brake at 0.5 (above
   0.5 at a standstill engages auto-reverse). `apps/simcli/scenarios/police/tunnel_escape_founders_cut*.ron`:
-  re-seeded 56 → 51. Goldens re-blessed in `[bless]` commits.
+  re-seeded 56 → 51. `crates/wp_net/tests/vesper_e2e.rs`: p1 may miss racer 0's capture when
+  it lands in p1's deliberate link-down window (it now does, at step ≈ 2746 of 2700–2880;
+  events are not replayed on reconnect). Goldens re-blessed in `[bless]` commits.
 - **Round 13:** `apps/simcli/examples/police_chase.rs` (new measurement example: full sim,
   Port Vesper, scripted fleeing racer, before/after tables for rows 61 / 63 / 64 / 66; read-only
   use of simcli / `wp_sim`). `apps/simcli/scenarios/police/tunnel_escape_founders_cut*.ron`:
@@ -1152,7 +1154,10 @@ runs 113 PASS. The six goldens `lead/main-sync` left open and the four round-12c
 were re-blessed. The one red test is `wp_race` `pace_scenarios_hold_their_ranges`:
 `opponent_pace_lantern_checkpoint_s50` never finishes (57 rejoins). That scenario has the police
 off, so it comes from combining the newer `lead/round12` with `main-sync`'s world / opponent
-changes, not from wp_police.
+changes, not from wp_police. Same for `wp_wasm`
+`race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`: two AI cars
+stop for good at (10.8, 355.3) on `grid_highway_sprint` from 60 s on, neither wanted nor near a
+police unit.
 `origin/main` has moved on since `3dc962b` (#19–#27: world viaducts and ramps, vehicle catch
 steering, Loop 9 greybox). Of those changes only `crates/wp_police/scenarios/day_core_speeder.ron`
 touches police. Those commits are left to the main-sync helper.
