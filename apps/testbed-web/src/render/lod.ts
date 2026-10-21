@@ -12,7 +12,7 @@
 // e2e/lod_shots.mjs): frames where a car had no proper mesh, the pose jump on every swap with
 // a few frames either side, and how far from the player cars appear and vanish.
 import * as THREE from "three";
-import { D, DRAW_STRIDE, AGENT_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
+import { D, DRAW_STRIDE, AGENT_FLAG, META_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
 import type { SessionModels } from "../wasm/sim";
 import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
@@ -57,6 +57,13 @@ function tailOf(flags: number, t: number): number {
 export function indicatorsOf(flags: number, t: number): number {
   if (!indicatorPhaseOn(t)) return 0;
   return indicatorRequest(flags);
+}
+
+/** Lit indicator lamps (`IND` bits) of a `vehicle_meta()` record's flags at time `t` (police
+ * cars indicate from their unit; ported from claude/happy-knuth-g39ogc). */
+export function metaIndicators(flags: number, t: number): number {
+  if (!indicatorPhaseOn(t)) return 0;
+  return (flags & META_FLAG.turnLeft ? IND.left : 0) | (flags & META_FLAG.turnRight ? IND.right : 0);
 }
 
 /** Indicator lamps a traffic car asks for (`IND` bits, ignoring the blink phase). */

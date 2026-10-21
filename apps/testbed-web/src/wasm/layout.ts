@@ -111,7 +111,7 @@ export const META_STRIDE = 3;
 /** vehicle_meta() kinds (`wp_sim::VehicleKind`). */
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
-export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8, turnLeft: 16, turnRight: 32 } as const;
 
 /** Floats per record in police_tools(): [kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]. */
 export const TOOL_STRIDE = 11;

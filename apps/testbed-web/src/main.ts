@@ -38,7 +38,7 @@ import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
-import { LodDirector } from "./render/lod";
+import { LodDirector, metaIndicators } from "./render/lod";
 import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
 import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
@@ -1314,7 +1314,14 @@ async function main(): Promise<void> {
     const policeDraw = sim.policeDraw();
     syncViews(meta, lod.paintOfEntity(trafficDraw));
     const tS = wi[W.tick] / 240;
-    for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
+    for (let o = 0; o < meta.length; o += META_STRIDE) {
+      const view = app.views.get(meta[o]);
+      if (!view) continue;
+      view.setMeta(meta[o + 2], tS);
+      // Police cars indicate from their unit (vehicle_meta bits); traffic gets its lamps from
+      // its draw record in lod.update, the player from the stalk below.
+      if (meta[o + 1] === VEHICLE_KIND.police) view.setIndicators(metaIndicators(meta[o + 2], tS));
+    }
     app.views.get(app.player)?.setIndicators(stalk.lamps(tS));
     const cur = sim.states();
     const prev = sim.statesPrev();

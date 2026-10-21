@@ -743,7 +743,9 @@ pub const META_STRIDE: usize = 3;
 /// Per-vehicle render metadata, same order as `vehicle_states()`, 3 floats each:
 /// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]` with flags
 /// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with; a
-/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]).
+/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]),
+/// 16 left turn signal, 32 right turn signal (police cars: [`police::turn_signal`]; traffic
+/// takes its lamps from `traffic_draw()`; players have no signal input yet).
 #[wasm_bindgen]
 pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     get(|s| {
@@ -760,6 +762,8 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
                 | (i.headlights as u32) << 1
                 | ((i.brake > 0.1) as u32) << 2
                 | (i.horn as u32) << 3;
+            let signal = police::turn_signal(s.sim(), v);
+            let flags = flags | ((signal < 0) as u32) << 4 | ((signal > 0) as u32) << 5;
             out.extend_from_slice(&[v.id.0 as f32, kind, flags as f32]);
         }
         out
