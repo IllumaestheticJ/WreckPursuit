@@ -135,6 +135,38 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Correction (2026-10-21): v2's "caught" lift flicks were not transitions
+
+Tracing the "caught" v2 flicks: after the lift the car keeps rotating the **old** way (yaw
++20…+45°/s), slows from ~45 to ~9 km/h with the rears spinning (κ ≈ 11) and full lock, and the
+slip angle changes sign ~2.9–3.0 s later while still yawing the old way — a pivot at walking
+pace, which the catch metric counted. Every v2 "caught" count reported earlier in this doc
+(12 / 18 on drift best, 13 / 18 on step 20, the per-car table) is this artefact. The metric now
+requires a **real swing**: at the sign change the car must yaw toward the new side and move at
+≥ 25 km/h. Corrected (step 20 unless noted; held / 27 · real swings caught / 18):
+
+| | held | real swings |
+|---|---|---|
+| v1 · plain | 26 | 0 |
+| v2 preset · plain (swing rack) | 25 | 0 |
+| first v2 on drift best · VR | 11 | 0 |
+| round-1 "lift, then switch keys when straight" flick, v1, with / without swing rack + yaw × 1.5 | — | 0 / 0 |
+
+So **no configuration on the step-20 lab makes a real lift-flick transition**, with the owner's
+flick or with round 1's. Option (1) (old-side cap on the new key, `PlainSteer::old_side_cap_deg`,
+default off) cannot help either: with the held-key slide lock the countersteer lock (~14–17°)
+cannot reach the travel angle (~38°), so the fronts keep pulling into the old corner whatever
+the new key asks; with the slide lock off (`slide_lock` 1) holds collapse (0–1 / 27) and still
+no swing. Diagnostic (3): flicking from 35° at 56 / 71–80 km/h (`RADIUS=80 LATG=0.6
+FLICK_DEG=35`): no crossing either (v1 and v2) — hold depth / speed is not the root.
+
+What a swing needs, from the traces: the yaw moment must reverse within ~0.3 s of the lift.
+Ours never reverses: the fronts (unable to point along the travel) pull the nose into the old
+turn, the lift moves load onto them, and the rear past its peak gains little. Candidates for a
+real fix are outside the tyre curve: countersteer lock that can reach the travel angle in a
+slide (≥ ~40°) without breaking the held-key hold, or less front grip at deep front slip
+angles.
+
 ### Swing time (lead: primary metric, target 0.5–0.8 s from the lift to the sign change)
 
 `v2search` now scores `fast` = caught flicks whose slip changes sign 0.5–0.8 s after the lift

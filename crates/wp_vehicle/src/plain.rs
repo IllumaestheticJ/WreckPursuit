@@ -100,6 +100,17 @@ pub struct PlainSteer {
     /// < 0.5) in a slide (|body slip| > 10°) — or of a steer-key reversal with [`PlainSteer::swing_arm_on_reversal`]. 0
     /// (default) = always armed (the yaw threshold alone).
     pub swing_arm_s: f32,
+    /// Old-side cap (tyre-slip, drift transitions): in a slide past
+    /// [`PlainSteer::old_side_from_deg`], a held key may point the wheels at most this far past
+    /// the front axle's travel **into** the turn (the side away from the travel), degrees, so
+    /// the new key of a flick does not turn the fronts into the old corner (where they would
+    /// pull the car back into the old drift). 0 (default) = off.
+    pub old_side_cap_deg: f32,
+    /// Body slip where the old-side cap starts to fade in, degrees (drift entries switch keys
+    /// below it).
+    pub old_side_from_deg: f32,
+    /// Body slip where the old-side cap is fully on, degrees.
+    pub old_side_full_deg: f32,
     /// Also arm the swing rack on a steer-key reversal (one key released, the other pressed).
     pub swing_arm_on_reversal: bool,
     /// New-side slide (the key countersteering the current slide) where the swing rack starts
@@ -169,6 +180,9 @@ impl Default for PlainSteer {
             counter_from_deg: 3.0,
             counter_full_deg: 8.0,
             swing_arm_s: 0.0,
+            old_side_cap_deg: 0.0,
+            old_side_from_deg: 20.0,
+            old_side_full_deg: 25.0,
             swing_arm_on_reversal: false,
             swing_ease_from_deg: 90.0,
             swing_ease_full_deg: 90.0,
@@ -390,6 +404,7 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
         key
     };
     let target = counter_limited(target, inp, p, lock);
+    let target = old_side_limited(target, inp, p, lock);
     let rack = slew(rack, target, p, dt);
     -(rack + inp.pull) * lock
 }
@@ -488,6 +503,42 @@ fn counter_limited(target: f32, inp: &PlainInput, p: &PlainSteer, lock: f32) -> 
         return target;
     }
     let w = travel.signum() * limit;
+    (-w / lock - inp.pull).clamp(-1.0, 1.0)
+}
+
+/// [`PlainSteer::old_side_cap_deg`]: the rack target limited so a held key points the wheels at
+/// most the cap past the front axle's travel on the side away from it (into the turn) in a
+/// slide. Unchanged when off, in grip, below 3 m/s or with the key released.
+fn old_side_limited(target: f32, inp: &PlainInput, p: &PlainSteer, lock: f32) -> f32 {
+    if p.old_side_cap_deg <= 0.0
+        || inp.speed.abs() < 3.0
+        || inp.driver.abs() <= crate::steering::STEER_DEADZONE
+        || lock <= 1e-6
+    {
+        return target;
+    }
+    let fade = smooth(
+        inp.body_slip.abs().to_degrees(),
+        p.old_side_from_deg,
+        p.old_side_full_deg.max(p.old_side_from_deg + 0.1),
+    );
+    if fade <= 0.0 {
+        return target;
+    }
+    let travel = inp.front_axle_angle;
+    if travel.abs() < 1e-4 {
+        return target;
+    }
+    let away = -travel.signum();
+    let wheel = -(target + inp.pull) * lock;
+    // How far the wheels point past the travel on the side away from it.
+    let past = (wheel - travel) * away;
+    // Faded: at fade 0 the cap sits two full locks further (no effect).
+    let cap = p.old_side_cap_deg.to_radians() + (1.0 - fade) * 2.0 * lock;
+    if past <= cap {
+        return target;
+    }
+    let w = travel + away * cap;
     (-w / lock - inp.pull).clamp(-1.0, 1.0)
 }
 

@@ -47,6 +47,10 @@ const GAPS: [f32; 3] = [0.05, 0.15, 0.3];
 struct Transition {
     /// Old-side slide angle at the flick, °.
     at_flick: f32,
+    /// Speed at the flick, km/h.
+    v_flick: f32,
+    /// The sign change was a swing (yaw toward the new side, ≥ 25 km/h), not a pivot at a crawl.
+    real_swing: bool,
     /// Time from the flick (start of the lift) until the slide changes sign, s (the reference
     /// swing: 0.5–0.8 s).
     cross_s: Option<f32>,
@@ -133,7 +137,14 @@ const REACT_DEG: f32 = 5.0;
 /// Run one flick from a held left drift. `None` = the drift never held 30–45° for 0.5 s.
 fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
     let a = reference_assists();
-    let mut rig = settle_on_circle(c, &a, 40.0, 0.5);
+    // Diagnostic (lead option 3): `RADIUS` / `LATG` for the settle circle (default 40 m,
+    // 0.5 g), `FLICK_DEG` = flick as soon as the old-side slide first reaches it (no settled
+    // 30–45° hold first).
+    let env_f = |k: &str, d: f32| std::env::var(k).ok().map_or(d, |v| v.parse().expect(k));
+    let mut rig = settle_on_circle(c, &a, env_f("RADIUS", 40.0), env_f("LATG", 0.5));
+    let flick_deg = std::env::var("FLICK_DEG")
+        .ok()
+        .map(|v| v.parse::<f32>().expect("FLICK_DEG"));
     let mut entered = false;
     let mut in_band = 0usize;
     let mut flick_at: Option<usize> = None;
@@ -156,9 +167,14 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             } else {
                 0
             };
-            if in_band >= TPS / 2 {
+            let ready = match flick_deg {
+                Some(fd) => old >= fd,
+                None => in_band >= TPS / 2,
+            };
+            if ready {
                 flick_at = Some(tick);
                 t.at_flick = old;
+                t.v_flick = rig.state().speed_mps * 3.6;
                 if matches!(init, Init::Reverse | Init::LiftFlick(_)) {
                     reverse_at = Some(tick);
                     swing_steer(true);
@@ -250,6 +266,11 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 }
                 if t.cross_s.is_none() && b > 0.0 {
                     t.cross_s = Some(k as f32 / TPS as f32);
+                    // A real swing: rotating toward the new side (yaw right, −) at speed. A car
+                    // that slows to a crawl and pivots on the spot also flips the slip sign.
+                    t.real_swing = n.yaw_rate < 0.0
+                        && n.v_fwd.hypot(n.v_fwd * wp_vehicle::math::tan(n.body_slip)) * 3.6
+                            >= 25.0;
                 }
                 if crossed_at.is_none() && b >= 10.0 {
                     crossed_at = Some(k);
@@ -286,7 +307,7 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
         }
         let in_band = b_log.iter().filter(|b| (10.0..=50.0).contains(*b)).count();
         let remaining = after.saturating_sub(cx).max(1);
-        t.caught = !t.spun && !t.swung_back && in_band * 2 >= remaining;
+        t.caught = !t.spun && !t.swung_back && t.real_swing && in_band * 2 >= remaining;
     }
     Some(t)
 }
@@ -545,6 +566,8 @@ struct V2Score {
     /// Median sign-change time of the caught flicks, s.
     cross_med: f32,
     crosses: Vec<f32>,
+    at_flick: Vec<f32>,
+    v_flick: Vec<f32>,
 }
 
 /// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
@@ -581,6 +604,8 @@ fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
                 sc.flicks += 1;
                 if let Some(t) = flick(c, gap, Init::LiftFlick(l)) {
                     sc.caught += t.caught as usize;
+                    sc.at_flick.push(t.at_flick);
+                    sc.v_flick.push(t.v_flick);
                     if t.caught {
                         if let Some(x) = t.cross_s {
                             sc.crosses.push(x);
@@ -726,6 +751,9 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                     "hold_swapped": sc.hold_swapped, "hold_spun": sc.hold_spun,
                     "lift_fails": sc.lift_fails, "lift_worst": sc.lift_worst,
                     "fast": sc.fast, "cross_med": sc.cross_med,
+                    "flick_deg_mean": sc.at_flick.iter().sum::<f32>() / sc.at_flick.len().max(1) as f32,
+                    "flick_kmh_mean": sc.v_flick.iter().sum::<f32>() / sc.v_flick.len().max(1) as f32,
+                    "crosses": sc.crosses,
                     "steer": steer,
                 })
             );
