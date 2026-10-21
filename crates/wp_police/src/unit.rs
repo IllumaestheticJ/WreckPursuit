@@ -557,7 +557,14 @@ impl Unit {
     }
 
     /// Set a new drive command and reset track progress.
-    pub fn set_command(&mut self, cmd: DriveCommand) {
+    pub fn set_command(&mut self, mut cmd: DriveCommand) {
+        // A car driven by physics cannot turn on the spot: without lights (lane driving, see
+        // `PoliceSystem::unit_input`) give it junction corners it can drive at its lane
+        // offset. The pro driver rounds its own line with lights on; internally driven units
+        // follow the track exactly.
+        if !self.internal && !cmd.siren {
+            cmd.track = Track::new(round_junction_corners(&cmd.track.pts, TURN_RADIUS_M));
+        }
         let (s, lat) = cmd.track.project(self.body.pos, 0.0, f32::INFINITY);
         self.track_s = s;
         self.on_track = lat < 2.0;
@@ -639,7 +646,7 @@ pub fn lane_point(track: &Track, s: f32, offset_m: f32) -> [f32; 2] {
     add(p, scale([d[1], -d[0]], offset_m))
 }
 
-/// Radius of the arcs [`round_corners`] puts into route corners, m (centreline). With the
+/// Radius of the arcs [`round_junction_corners`] puts into route corners, m (centreline). With the
 /// lane offset on the inside of a right turn the car still drives about 8 m, inside its
 /// turning circle at junction speeds.
 pub const TURN_RADIUS_M: f32 = 10.0;
@@ -656,14 +663,15 @@ const ROUND_STEP_M: f32 = 1.5;
 /// the spot, and a unit following it at a lane offset swings wide by its turning radius: into
 /// the oncoming lane on a right turn, into the parking lane on a left turn. Gentle bends and
 /// U-turns are left as they are.
-pub fn round_corners(points: &[[f32; 2]], radius_m: f32) -> Vec<[f32; 2]> {
+pub fn round_junction_corners(points: &[[f32; 2]], radius_m: f32) -> Vec<[f32; 2]> {
     let t = Track::new(points.to_vec());
     let n = t.pts.len();
     if n < 3 {
         return t.pts;
     }
     // Corners to round: (index, direction in, direction out, cos, sin of the turn).
-    let corners: Vec<(usize, [f32; 2], [f32; 2], f32, f32)> = (1..n - 1)
+    type Corner = (usize, [f32; 2], [f32; 2], f32, f32);
+    let corners: Vec<Corner> = (1..n - 1)
         .filter_map(|i| {
             let a = normalize(sub(t.pts[i], t.pts[i - 1]));
             let b = normalize(sub(t.pts[i + 1], t.pts[i]));
@@ -949,7 +957,7 @@ mod tests {
         // North along x = 0 in 6 m steps, right turn at the junction centre (0, 60), east.
         let mut pts: Vec<[f32; 2]> = (0..=10).map(|k| [0.0, k as f32 * 6.0]).collect();
         pts.extend((1..=10).map(|k| [k as f32 * 6.0, 60.0]));
-        let round = round_corners(&pts, TURN_RADIUS_M);
+        let round = round_junction_corners(&pts, TURN_RADIUS_M);
         assert_eq!(round[0], pts[0]);
         assert_eq!(*round.last().unwrap(), *pts.last().unwrap());
         // The centreline bends at the turn radius, not on the spot...
@@ -972,9 +980,9 @@ mod tests {
     #[test]
     fn gentle_bends_and_u_turns_stay() {
         let bend = vec![[0.0, 0.0], [0.0, 10.0], [2.0, 20.0], [4.0, 30.0]];
-        assert_eq!(round_corners(&bend, TURN_RADIUS_M), bend);
+        assert_eq!(round_junction_corners(&bend, TURN_RADIUS_M), bend);
         let u_turn = vec![[0.0, 0.0], [0.0, 30.0], [0.5, 0.0]];
-        assert_eq!(round_corners(&u_turn, TURN_RADIUS_M), u_turn);
+        assert_eq!(round_junction_corners(&u_turn, TURN_RADIUS_M), u_turn);
     }
     use crate::config::PoliceConfig;
 

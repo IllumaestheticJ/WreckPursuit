@@ -739,8 +739,6 @@ impl PoliceSystem {
         if let Some(p) = final_point {
             pts.push(p);
         }
-        // Junction corners as arcs a car can drive at its lane offset.
-        let pts = crate::unit::round_corners(&pts, crate::unit::TURN_RADIUS_M);
         (Track::new(pts), turn_around)
     }
 
