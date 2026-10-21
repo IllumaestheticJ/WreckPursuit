@@ -299,6 +299,11 @@ impl crate::Sim {
         let mut contacts = Vec::new();
         let mut events: Vec<SimEvent> = Vec::new();
         for c in candidates {
+            // Asleep after the step: nothing hit it this tick (a contact would have woken it).
+            let wreck = self.parked.wreck_index(c.prop).is_ok();
+            if !wreck && self.physics.bodies[c.info.body].is_sleeping() {
+                continue;
+            }
             contacts.clear();
             crate::contacts::body_contacts(
                 self.physics.narrow_phase(),
