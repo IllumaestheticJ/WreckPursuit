@@ -385,3 +385,55 @@ brake decel) instead of braking flat out; every other limit is unchanged. Loop 9
 finish, hakone_gt fastest (186.0 s, ratio 1.141, no walls); the other races move by under 1 s
 (Loop 9 s95 −3–4 s per car). The lock-in for loop9_circuit_s95 is back to finishers 6 with an
 ai_mara time.
+
+## Street racing — before numbers (2026-10-21, lead/opponent-pace 03c03fe6)
+
+`WP_PACE_SKILLS=0.5,0.95 cargo test --release -p wp_race --test opponent_pace pace_sweep -- --ignored`
+(police off, traffic on). Per race and skill: best ratio, mean opposing-lane time, mean lateral
+spread (m), completed overtakes per km summed over the field (racers and civilians), rejoins +
+reverses, walls, and time lost behind traffic (civ = civilians, veh = sim vehicles, s summed over
+the field).
+
+| race | skill | best ratio | opp % | lat sd | passes/km | rej+rev | walls | civ / veh s |
+|---|---|---|---|---|---|---|---|---|
+| loop9_circuit | 0.50 | 1.168 | 0 | 1.85 | 0.1 | 0 | 0 | 10 / 110 |
+| loop9_circuit | 0.95 | 1.131 | 0 | 1.82 | 0.0 | 0 | 0 | 0 / 106 |
+| hollins_sprint | 0.50 | 1.144 | 18 | 0.82 | 0.0 | 0 | 0 | 0 / 32 |
+| hollins_sprint | 0.95 | 1.069 | 20 | 0.72 | 0.0 | 0 | 2 | 0 / 24 |
+| lantern_checkpoint | 0.50 | 2.592 | 12 | 0.56 | 0.0 | 88 | 0 | 120 / 105 |
+| lantern_checkpoint | 0.95 | 1.931 | 10 | 0.41 | 0.0 | 5 | 0 | 54 / 101 |
+| grid_highway_sprint | 0.50 | 2.501 | 0 | 1.70 | 7.9 | 0 | 0 | 106 / 73 |
+| grid_highway_sprint | 0.95 | 2.001 | 0 | 2.10 | 5.3 | 0 | 0 | 112 / 48 |
+| city_sprint | 0.50 | 1.097 | 2 | 0.70 | 0.0 | 0 | 0 | 9 / 17 |
+| city_sprint | 0.95 | 1.098 | 2 | 0.73 | 0.0 | 0 | 0 | 9 / 17 |
+
+Reading: the field hardly uses the road it has and almost never completes a pass (≤ 8 /km
+summed over the whole field, on the grid highway only). Opposing lanes are used only on Hollins
+(hairpins) and where blocked; on the grid highway and Lantern the field loses 30–70 s per car
+behind civilians and each other. `passes/km` now counts every completed overtake
+(`Field::passes_by`), not only racer position changes.
+
+## Street racing phase 2 — whole-road line (2026-10-21)
+
+Per car width a second line is optimised over the whole road (own lanes + opposing, 0.6 m more
+from the far edge) with its own speed profile. A racer in Follow takes it while
+`wide_line_clear` finds the opposing side clear out past the next braking zone (oncoming cars
+by where they will be), never within 30 m of a junction (side-road traffic is not in view until
+it is in the way), and drops it as soon as a car or a light ahead sets its speed. Passes also
+check for an opposing-side junction 40 m past the pass.
+
+Seeds 1–8 (32 cars per row) vs the pre-street-racing tip:
+
+| race | skill | finishers | mean s | opposing | walls |
+|---|---|---|---|---|---|
+| lantern_checkpoint | 0.50 | 30 → 28 | 84.9 → 78.4 | 9 → 9 % | 0 → 0 |
+| lantern_checkpoint | 0.95 | 32 → 32 | 78.0 → 74.9 | 10 → 9 % | 0 → 0 |
+| hollins_sprint | 0.50 | 32 → 32 | 67.1 → 67.7 | 18 → 41 % | 4 → 14 (taps) |
+| hollins_sprint | 0.95 | 32 → 32 | 64.1 → 62.5 | 20 → 41 % | 17 → 8 |
+
+Lantern s50 DNFs are the give-way junction (the same seeds lose cars with the line forced off).
+Tried and dropped on the way (each made a seed worse): following the line into a queue (stopped
+on the opposing side → gridlock), edge margin on both edges (Hollins −0.5–1.3 s per car), the
+line through empty junctions (a civilian turning in met a racer nose to nose). Lock-in:
+lantern_checkpoint_s50 re-ranged (faster, rejoins 8–18 → 1–2 per car, no walls).
+Next: weaving through traffic and the skill / risk spread.
