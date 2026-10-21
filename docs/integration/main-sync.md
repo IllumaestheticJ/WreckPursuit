@@ -94,6 +94,20 @@ highways on the old code; the merge ports main onto round 12's:
 - simcli `sprint_off_route`: main's open-loop cutter keyframes retuned for round 12 steering.
 - `data/stats/cars.json` re-measured on round 12 physics and cars (`just car-stats`).
 
+## Race payout pays the advertised stake (lead's decision)
+The browser race (`wp_wasm::race`) advertised `wp_race::bridge::economy_race`'s stake but
+charged and paid through `wp_economy` alone (its per-km price, no `purse_scale` /
+`entry_scale`): a grid-sprint win paid 1 377 against an advertised 5 031 (ratio 0.27; R5 band
+0.75–1.34). Latent on round 12 too (the player finished 3rd there, so the winner-only check
+never ran); main's faster highway course let the player win and tripped it. Now the glue
+settles through the economy as before and posts the difference to the stake as one
+`Adjustment { note: "race stake (advertised purse / buy-in)" }` line each for the buy-in and
+the payout (purse and clean bonus × `purse_scale`, buy-in × `entry_scale`), exactly the bridge's
+scaling. No `wp_economy` change. New test
+`race_tests::a_win_pays_the_advertised_purse_on_either_course_length` (747 m round 12 course,
+1 113 m main's). `short_sprint_with_ai…` checks the account through the race's own ledger lines
+(an escaped pursuit mid-race pays its own bonus in between).
+
 ## Scenarios re-aimed on main's maps
 | Scenario | Was | Now | Why |
 |---|---|---|---|

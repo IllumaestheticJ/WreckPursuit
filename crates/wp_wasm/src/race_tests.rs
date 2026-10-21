@@ -167,11 +167,28 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
         reasons.contains(&"RaceEntryFee") && reasons.contains(&"RaceRep"),
         "{reasons:?}"
     );
-    let cash = s.run().unwrap().account().cash;
+    // The race's own ledger lines charge the buy-in and pay purse + clean bonus (stake
+    // adjustments included). Other run events can land in between (a pursuit escaped
+    // mid-race pays its bonus), so the account is checked through the race's lines.
+    let race_cash: i64 = p.ledger.iter().map(|l| l.cash_delta).sum();
     assert_eq!(
-        cash,
-        cash0_before_entry - p.entry_fee + p.purse + p.clean_bonus
+        race_cash,
+        -p.entry_fee + p.purse + p.clean_bonus,
+        "{:?}",
+        p.ledger
     );
+    let cash = s.run().unwrap().account().cash;
+    let first = p.ledger.first().map_or(0, |l| l.seq);
+    let others: i64 = s
+        .run()
+        .unwrap()
+        .ledger()
+        .iter()
+        .map(crate::run::LedgerLine::of)
+        .filter(|l| l.seq > first && !p.ledger.iter().any(|r| r.seq == l.seq))
+        .map(|l| l.cash_delta)
+        .sum();
+    assert_eq!(cash, cash0_before_entry + race_cash + others);
     assert_eq!(p.cash_after, cash);
     assert!(!r.handoff_run_end);
 }
