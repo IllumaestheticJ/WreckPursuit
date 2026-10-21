@@ -1039,64 +1039,138 @@ reversal to land on; on its own it changes no gate.
 
 ## Unify: one handling for the game (lead, 2026-10-21)
 
-The lead asked for one version: Drift Lab W stops being a separate build, and its step-23
-handling becomes the game's handling. Done on `lead/grip-balance`. This session can only push
-that branch, so the requested `lead/unify` branch was not created.
+The lead asked for one version: Drift Lab W stops being a separate build, and its handling
+becomes the game's handling. Done on `lead/grip-balance` (this session can only push that
+branch; the requested `lead/unify` branch was not created).
 
-### What is the default now (`wp_vehicle::lab_scope`)
+### The shipped handling (`wp_vehicle::lab_scope`), the owner's combo
 
-With no lab override set:
+The owner's verdict (2026-10-21): "drives better in handling reference with springs and ARBs
+cranked all the way up". That is lead/grip-balance 7d6b66c9 with the panel's springs × and
+anti-roll bars × at that build's maximum, 1.5. With no lab override set:
 
 | part | every car (player, AI racers, police, traffic) | player cars only |
 |---|---|---|
-| tyres | `CarTune::shipped()` = the spin model (`spin_candidate`) | |
-| ride | `RideTune::firm()` (medium weight + springs / bars × 1.5, dampers × 2.4 / 3.2) | |
-| balance | `GripBalance::shipped()` = `lab_default()` (step 20+: RWD front stiffness × 0.6, rear × 0.9 / C 1.2, rear downforce 0.8, probe tilt fix, FWD rear bar × 2) | smart lock, held-key slide lock + release |
-| steering | the normal steering model (AI keep their own steering) | `PlainSteer::default()`: plain rack, countersteer limit, catch, transition rack |
-| per-car fixes | in `data/cars` now (below) | |
+| tyres | `CarTune::shipped()` = `spin_step22()` (the 7d6b66c9 spin model, b0 7.5) | |
+| ride | `RideTune::owner()`: medium weight, springs / bars × 1.5, dampers × 1.6 / 2.1 (`firm` also raises the dampers to × 2.4 / 3.2) | |
+| balance | `GripBalance::shipped()` = `owner()`: 7d6b66c9's step-14 balance (RWD front stiffness × 0.6 / rear × 0.45, rear downforce C·A 0.8, probe tilt fix; no FWD knobs) | smart lock; held-key slide lock (× 0.5 past 15° after 0.5 s, not while the slide grows); its transition release (0.75 s, only out of a slide past 10°) |
+| steering | the normal steering model (AI keep their own steering) | `shipped_plain()` = `PlainSteer::default()`: W's plain rack, countersteer limit, catch extension, transition rack, step-13b new-side catch |
+| per-car fixes | in `data/cars` (below) | |
+| auto gearbox | holds its gear while sliding (below) | |
 
-- **Player flag.** `Vehicle::set_player_input` replaces the old lab tag. It defaults to
-  `true`. `wp_sim` sets it every tick from `VehicleKind`, so it is `false` for `AiRacer`,
-  `Police` and `Traffic`. A player in a police seat counts as `Player`.
-- **Removed.** `lab_scope::set_tagged_only` and `Sim::set_lab_tagged` are gone; the physics
-  never depends on the tag.
-- **Lab switches.** These stay process-wide and are not recorded:
-  - the lab overrides (`*::set_override`);
-  - `lab_scope::set_legacy(true)`: the pre-unify stock path, for A/B;
-  - `lab_scope::set_plain_off(true)`: plain steering off for players too.
-- **Determinism.** With nothing set, the defaults are constants, so the sim is deterministic
-  across native and wasm.
-- **Gap: wheel input.** A steering-wheel player is also `Player`, so the plain steering
-  applies to them too. The lead asked for keyboard/gamepad; a device field would need a
-  contract change.
+`GripBalance::owner_reference()` is the 7d6b66c9 balance exactly (no held-key cut), for A/B.
+
+- **Player flag.** `Vehicle::set_player_input` is three-state (`Option<bool>`):
+  - `wp_sim` sets it every tick from `VehicleKind` (Player) or `Sim::set_player_steering`;
+  - simcli turns it off for harness drivers (cruise / route / AI drivers, keyframe scripts:
+    they feed analog inputs) unless the entity sets `player_steering: Some(true)`;
+  - a bare vehicle or rig nobody marked (tests, lab tools) gets the plain steering only from a
+    lab override.
+- **Lab switches**, process-wide, never recorded: the overrides; `lab_scope::set_legacy(true)`
+  (the pre-unify stock path, for A/B and the legacy lab tests); `set_plain_off(true)`.
+- **Determinism.** The defaults are constants. The plain steering's tick-to-tick state (lift /
+  reversal / crossing timers, last key and slide side, slip rate, countersteer timer, rack
+  yield) is now in `VehicleSnapshot` (format 13), for netcode prediction.
+- **Gaps.**
+  - A wheel player is also `Player`, so the plain steering applies to them too. Separating them
+    needs an input-device field (a contract change).
+  - The countersteer-help slider and the keyboard steer assists no longer affect player cars:
+    the plain steering bypasses them, as in W.
+
+### The owner's step-23 spins: bisect
+
+The owner reported "spinning all over the place" on lab-r12 d654a5cf: parity RWD, TCS off,
+manual gears and clutch, keyboard.
+
+- **Anchor.** 7d6b66c9's lab set rebuilt in today's code (medium ride, step-14 balance, step-22
+  tyres, W step-10 steering). It matches a real 7d6b66c9 build to the digit on tyre-slip's
+  power-on + held set.
+- **Bisect.** `BISECT=1 cargo run --release -p wp_vehicle --example transition -- poweron`.
+  Cells are rampart_50 / parity rwd_d / rwd_a, harness drivers, TCS off, 2nd / 3rd at
+  30–60 km/h; the 40 m circle at 0.3 / 0.5 / 0.7 g:
+
+  | row | power-on spins / 12 | held key, full throttle: spun / 9 | into-turn held: spun | keys released: spun |
+  |---|---|---|---|---|
+  | 0 anchor | 3 / 5 / 6 | 9 / 9 / 9 | 0 / 9 / 9 | 5 / 9 / 9 |
+  | + firm ride | 3 / 3 / 3 | 0 / 5 / 5 | 0 | 0 |
+  | + step-20 balance | 3 / 3 / 5 | 0 | 0 | 0 |
+  | + held-key cut / release / W 11–13 | 3 / 3 / 5 | 0 (held 8–9 / 9) | 0 | 0 |
+  | + tyres B | 3 / 5 / 6 | 0 | 0 | 0 |
+
+  lab-r12 d654a5cf on these drivers behaves like the "W 11–13" row (rampart 0 spun). Nothing
+  after the anchor spins more on any harness driver, and tyre-slip's manual-gear / manual-clutch
+  runs agree. So the spins were not reproduced. The likely cause is old saved panel state; see
+  the next section.
+- **Owner combo vs the 7d6b66c9 reference** (`OWNERCMP=1`):
+  - power-on: identical (3 / 12 per RWD car, all corner runs);
+  - held key with full throttle: reference 0–5 spun per car → shipped 3–9 held, 0 spun;
+  - tapper: rampart 9 → 5 held (0 spun), other cars equal or better.
+- **Transitions** ("owner shipped · plain", step-22 tyres): rwd_a / b / d and debug_coupe 9 / 9
+  caught, settle 0.30–0.35 s (debug_coupe 0.95 s). The reference catches 0 / 9. rampart_50
+  never reaches this harness's pre-flick hold on the step-14 balance; tyre-slip's swing set has
+  it 6 / 6.
+- **Lift-off step-out is back** on the owner combo (`grip_balance liftcheck`; the step-20
+  balance had 0):
+
+  | car | worst body slip | fails |
+  |---|---|---|
+  | rwd_a | 11.1° | 2 (60 and 80 mph) |
+  | rwd_d | 11.9° | 2 |
+  | rampart_50 | 12.2° | 2 |
+  | parity_fwd_c | 3.0° | pass |
+
+  The reference has the same 6 fails. Reported to the lead; the owner's preference wins.
+
+### Stored panel state (step-23 lab, d654a5cf)
+
+The W lab read these keys. All of them could override the defaults the owner thought they were
+driving:
+
+| key | written by |
+|---|---|
+| `wp.driftLabW.steer` (never versioned) | any steering slider or A/B button, the "drift best" preset |
+| `wp.driftLabW.car.v2` | the tyre buttons and sliders, the transition / VR presets |
+| `wp.driftLabW.ride.v3` | the ride sliders and buttons, the handling A/B, the presets |
+| `wp.driftLabW.grip.v3` | the balance buttons and sliders |
+| `wp.driftLabW.pivot` | the handbrake pivot sliders |
+| `wp.driftLabW.tcs` / `.abs` | the pad's TCS / ABS selects |
+| `wp.driftLabW.everywhere` | the "W handling everywhere" toggle |
+
+The unify reads none of them. Every tune store is a new `wp.tune.*.v1` key, empty = the
+shipped value. The hidden panel:
+- highlights every value that differs from the shipped one;
+- has "reset all to defaults", which clears every `wp.tune.*` key and the A/B switches;
+- has "copy tune JSON": everything in effect, including the assists and the saved keys.
+
+### Auto gearbox: hold the gear while sliding (every car)
+
+The lead asked for this after tyre-slip found the auto box shifting all through held drifts:
+a 2→1 kickdown at the entry, then 1→2 and 2→3 from the rear over-revving. The fix is in
+`Gearbox::auto_shift`. While sliding (|body slip| > 10°, or a driven wheel past 1.5 × its
+tyre's peak slip ratio):
+- no kickdown and no schedule shift;
+- up only when the **road speed** reaches the limiter, down only when it would lug the engine.
+
+Unit test: `sliding_holds_the_gear_and_shifts_on_road_speed`.
 
 ### Per-car fixes moved into `data/cars` (lead-authorized)
 
-- **debug_coupe:** `arb_n_per_m` × 0.5 on all four corners (26000 → 13000 front, 14000 → 7000
-  rear).
+- **debug_coupe:** `arb_n_per_m` × 0.5 on all four corners.
 - **lucciola_350:**
-  - rear `spring_n_per_m` 66800 → 43420 (× 0.65);
-  - rear `preload_m` 0.02 → 0.0508, which keeps the static compression of 0.0373 m at
-    3825 N per rear corner;
-  - `inertia_kgm2[2]` 1820 → 2184 (× 1.2).
+  - rear `spring_n_per_m` 66800 → 43420;
+  - rear `preload_m` 0.02 → 0.0508, which keeps the static compression of 0.0373 m at 3825 N per
+    rear corner;
+  - `inertia_kgm2[2]` 1820 → 2184.
 
-`GripBalance::lab_default()` and `step14()` now have `car_fixes: false`, so the fixes are not
-applied twice. The panel's "per-car fixes again (×2)" checkbox applies them a second time, for
-debug only.
+`car_fixes` is off in every preset. The panel's "per-car fixes again (×2)" checkbox applies them
+a second time (debug only).
 
 ### Testbed
 
-- **No separate lab.** The Drift Lab W menu entry and the "drift lab W" button are gone.
-  Every session applies the tune panel's saved debug overrides; if none are saved, it gets
-  the shipped handling. Every session also gets raw keys for the plain steering.
-- **Tune panel.** Hidden by default; F7 toggles it and `?tune=1` opens it.
-  - Saved values moved to new `wp.tune.*.v1` keys, so values saved by old W builds never
-    override the shipped handling.
-  - A "pre-unify handling (A/B)" checkbox switches the legacy path.
-  - The old "use W handling everywhere" checkbox and the "W handling" badge are gone.
-- **Test pad.** `?drift=w` (and the old `?drift=b|c` links) opens the test pad with the panel
-  open: the course, the parity cars and the owner's reference assists.
-- **Drift Labs B / C** are removed:
-  - files: `drift_lab_b.ts`, `e2e/drift_lab_b.mjs`, `e2e/drift_lab.mjs` (it used `?drift=1`);
-  - the course moved to `src/test_pad.ts`;
-  - their Rust tests are `#[ignore]`d with a pointer here (see the gate below).
+- No separate lab. The Drift Lab W menu entry and button are gone. Every session applies the
+  saved debug overrides (none = shipped) and raw keys.
+- The hidden tune panel: F7 / `?tune=1`.
+- The test pad: `?drift=w` (and the old `?drift=b|c` links): the course, the parity cars, the
+  owner's reference assists, the panel open.
+- Drift Labs B / C removed: `drift_lab_b.ts`, `e2e/drift_lab_b.mjs`, `e2e/drift_lab.mjs`. The
+  course is in `src/test_pad.ts`. Their Rust tests are `#[ignore]`d with a pointer here.
