@@ -1553,7 +1553,10 @@ impl PoliceSystem {
                 let side = if u.id.0.is_multiple_of(2) { 1.0 } else { -1.0 };
                 // Close and in sight: chase the racer's own line. Otherwise drive the roads
                 // (row 66: following the trail round a corner cuts it through the building).
+                // A unit routing round a jam it stood in (row 86) drives the roads, not the
+                // trail through the jam.
                 let close = dist(u.body.pos, rp) < CLOSE_LOS_M
+                    && u.unstick.blocked_at(now).is_empty()
                     && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2]);
                 let tactic = if boxin && with_budget.iter().take(3).any(|x| x.1 == i) {
                     let k = with_budget.iter().position(|x| x.1 == i).unwrap_or(0);

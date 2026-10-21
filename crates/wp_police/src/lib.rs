@@ -313,6 +313,9 @@ pub struct PoliceStats {
     pub resets: Vec<ResetRecord>,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
+    /// Chasing units that routed around a traffic jam they stood in (row 86).
+    #[serde(default)]
+    pub jam_reroutes: u32,
     /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
     /// call was handed back (siren off) and they despawn out of sight.
     #[serde(default)]

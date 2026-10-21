@@ -587,10 +587,66 @@ impl PoliceSystem {
         })
     }
 
+    /// Row 86: a unit on a pursuit or intercept held at a standstill behind civilian traffic
+    /// (a kinematic agent or a non-racer car, not another unit, not a red light; under 3 m/s)
+    /// for
+    /// [`crate::stuck::JAM_REROUTE_S`] blocks the road segment it is on for itself and re-plans
+    /// (turning round if the way on is the jam). Measured on the police bench: chasers stood
+    /// 10-20 s in rain-hour queues while the racer drove off.
+    fn reroute_jammed(&mut self) {
+        use crate::stuck;
+        let tdt = 1.0 / self.cfg.pursuit.think_hz;
+        let now = self.now;
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            let active = matches!(
+                u.assignment,
+                Assignment::Pursue { .. } | Assignment::Intercept { .. }
+            );
+            let red = u.avoid.junction.is_some_and(|j| {
+                j.light == Some(crate::avoid::Light::Stop) && j.s - u.track_s < 30.0
+            });
+            let by_traffic = match u.avoid.blocked_by {
+                Some(crate::avoid::BlockedBy::Traffic) => true,
+                Some(crate::avoid::BlockedBy::Vehicle(e)) => !self.racers.contains_key(&e),
+                _ => false,
+            };
+            let held = active
+                && u.player.is_none()
+                && !u.wrecked
+                && u.kind == UnitKind::Car
+                && by_traffic
+                && !red
+                && u.avoid.limit_mps < 3.0
+                && u.body.speed.abs() < 3.0;
+            let segment = held
+                .then(|| self.graph.nearest_on_road(u.body.pos).map(|r| r.segment))
+                .flatten();
+            let st = &mut self.units[i].unstick;
+            if !held {
+                // Creeping a car length or a blink of a free lane is still the jam.
+                st.jam_s = (st.jam_s - 2.0 * tdt).max(0.0);
+                continue;
+            }
+            st.jam_s += tdt;
+            if st.jam_s < stuck::JAM_REROUTE_S {
+                continue;
+            }
+            st.jam_s = 0.0;
+            if let Some(s) = segment {
+                st.blocked.retain(|(b, until)| *b != s && now < *until);
+                st.blocked.push((s, now.plus(stuck::BLOCK_SEGMENT_S)));
+                st.reroute = true;
+                self.stats.jam_reroutes += 1;
+            }
+        }
+    }
+
     /// Think-rate part of un-sticking: re-plan routes around blocked segments, and despawn
     /// units that gave up once nobody can see them (their call is dispatched again; a patrol
     /// is refilled out of sight by `maintain_pool`).
     pub(crate) fn maintain_stuck(&mut self, world: &dyn WorldQuery) {
+        self.reroute_jammed();
         let mut i = 0;
         while i < self.units.len() {
             let u = &self.units[i];

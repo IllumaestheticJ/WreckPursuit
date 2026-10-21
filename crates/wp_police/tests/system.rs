@@ -1443,3 +1443,79 @@ fn nearby_patrols_sent_as_backup_also_wait_ahead() {
         "heading·racer dir at join: {joined_facing:?}"
     );
 }
+
+/// Row 86: a unit on a pursuit held at a standstill behind a civilian queue filling the road
+/// (both lanes and the shoulder) routes around it within a few seconds instead of waiting.
+#[test]
+fn chasing_unit_stuck_in_a_civilian_queue_routes_around_it() {
+    let mut h = pursued_at(12.0, 7, 40.0);
+    let id = units_on_racer(&h)[0];
+    h.police
+        .bind_unit_entity(id, EntityId(951), SteerGeometry::default());
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    let (pos, heading) = (u.body.pos, u.body.heading);
+    let left = [-heading[1], heading[0]];
+    // A queue across the whole road: own lane, other lane, right shoulder.
+    let queue: Vec<[f32; 3]> = [0.0f32, 3.5, -3.5]
+        .iter()
+        .map(|lat| {
+            [
+                pos[0] + heading[0] * 6.0 + left[0] * lat,
+                pos[1] + heading[1] * 6.0 + left[1] * lat,
+                0.5,
+            ]
+        })
+        .collect();
+    let heat0 = h.police.racer(RACER).unwrap().heat;
+    for tick in 0..(6.0 / PHYSICS_DT) as u32 {
+        if tick % 240 == 0 {
+            // Other units stay out of it (this test is about the one in the queue).
+            let others: Vec<_> = h
+                .police
+                .units()
+                .iter()
+                .filter(|u| u.id != id && u.kind == UnitKind::Car)
+                .map(|u| u.id)
+                .collect();
+            for o in others {
+                let _ = h.police.captain_command(CaptainCommand::AssignUnit {
+                    unit: o,
+                    order: wp_contracts::UnitOrder::Disengage,
+                });
+            }
+        }
+        h.police.sync_unit(
+            id,
+            UnitSync {
+                pos: [pos[0], pos[1], 0.5],
+                vel: [0.0; 3],
+                heading,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        let r = h.racer_view();
+        let mut obs: Vec<wp_police::ObstacleView> = queue
+            .iter()
+            .enumerate()
+            .map(|(k, p)| {
+                wp_police::ObstacleView::car(Some(EntityId(990 + k as u32)), *p, [0.0; 3], heading)
+            })
+            .collect();
+        obs.push(wp_police::ObstacleView::car(
+            Some(RACER),
+            r.pos,
+            r.vel,
+            [0.0, 1.0],
+        ));
+        h.police.set_obstacles(&obs);
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police.set_heat(RACER, heat0);
+        h.police.step(&h.world, &[r], &[], PHYSICS_DT, &mut out);
+    }
+    assert!(
+        h.police.stats().jam_reroutes >= 1,
+        "the unit waited in the queue for 6 s without routing around it"
+    );
+}

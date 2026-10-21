@@ -603,6 +603,48 @@ pub fn run_one(
                 .map(|c| wp_world::geom::dist([c.pos[0], c.pos[1]], [my.pos[0], my.pos[1]]))
                 .fold(f32::INFINITY, f32::min);
             let status = sim.police().racer(me).map(|r| (r.status, r.level.number()));
+            // The nearest unit chasing the evader and what caps its speed.
+            let chaser = sim
+                .police()
+                .units()
+                .iter()
+                .filter(|u| {
+                    matches!(
+                        u.assignment,
+                        Assignment::Pursue { target } | Assignment::Intercept { target, .. }
+                            if target == me
+                    )
+                })
+                .min_by(|a, b| {
+                    let d = |u: &&wp_police::unit::Unit| {
+                        wp_world::geom::dist(u.body.pos, [my.pos[0], my.pos[1]])
+                    };
+                    d(a).total_cmp(&d(b))
+                })
+                .map(|u| {
+                    format!(
+                        "u{} {} {:?} v{:.1} cmd{:.1} lim{:.1} jl{:.1} wall{:.1} by{:?} pos({:.0},{:.0}) trk{:?}",
+                        u.id.0,
+                        u.assignment.name(),
+                        u.tactic,
+                        u.body.speed,
+                        u.cmd.speed_mps,
+                        u.avoid.limit_mps,
+                        u.avoid.junction_limit_mps,
+                        u.avoid.wall.limit_mps,
+                        u.avoid.blocked_by,
+                        u.body.pos[0],
+                        u.body.pos[1],
+                        u.cmd
+                            .track
+                            .pts
+                            .iter()
+                            .take(4)
+                            .map(|p| [p[0] as i32, p[1] as i32])
+                            .collect::<Vec<_>>()
+                    )
+                });
+            eprintln!("    chaser {chaser:?}");
             eprintln!(
                 "t={t:5.0} pos=({:7.1},{:7.1}) v={:4.1} in=(s{:+.2} t{:.2} b{:.2}) mode={:?} known={} cop={near:5.0} {status:?} rev={} {:?}",
                 my.pos[0],
@@ -924,7 +966,11 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
         } else {
             engaged.iter().map(|r| r.units_near_mean).sum::<f32>() / engaged.len() as f32
         },
-        lead_gap_med_m: median(runs.iter().flat_map(|r| r.lead_gaps_m.iter().copied()).collect()),
+        lead_gap_med_m: median(
+            runs.iter()
+                .flat_map(|r| r.lead_gaps_m.iter().copied())
+                .collect(),
+        ),
         pace_med: median(runs.iter().flat_map(|r| r.pace.iter().copied()).collect()),
         capture_rate: runs.iter().filter(|r| r.end.captured()).count() as f32 / n,
         capture_med_s: median(
