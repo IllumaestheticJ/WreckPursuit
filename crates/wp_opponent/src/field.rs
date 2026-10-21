@@ -2297,10 +2297,11 @@ fn decide_racer(
             base + if o.unstable { 1.5 } else { 0.0 }
         };
         // Clearance used against a car ahead: grows with the closing speed. The same figure
-        // decides who blocks me, where a pass goes and what I brake for (Loop 9 at 23:00 with
-        // traffic: with a smaller one for "who blocks me" than for braking, a racer closing at
-        // 20 m/s on a civilian 2.6 m to one side braked to its speed from 110 m out and never
-        // tried to pass it).
+        // decides what I brake for and who blocks me (Loop 9 at 23:00 with traffic: with a
+        // smaller one for "who blocks me" than for braking, a racer closing at 20 m/s on a
+        // civilian 2.6 m to one side braked to its speed from 110 m out and never tried to
+        // pass it). Where a pass goes keeps the plain margin (the closing one there cost
+        // Lantern s95 seed 8 two cars, refused passes in a downtown queue).
         let ahead_margin = |o: &Obstacle| -> f32 {
             let closing = (v - o.v_s).max(0.5);
             let extra = if is_civ(o) { 0.5 } else { 1.0 };
@@ -2356,8 +2357,7 @@ fn decide_racer(
                     && brake_dist > v * 1.5;
                 // Street racing: a civilian ahead is gone round, not queued behind — look for
                 // a gap as soon as I am closing on it.
-                // Held up by one at its speed: no patience either.
-                let weave = is_civ(&x.o) && (v - x.o.v_s > 1.0 || held);
+                let weave = is_civ(&x.o) && v - x.o.v_s > 1.0;
                 if (r.blocked_s > p.overtake_patience_s || momentum || weave)
                     && x.o.v_s > -1.0
                     && !done_racing
@@ -2372,7 +2372,7 @@ fn decide_racer(
                         profile,
                         brake_dist,
                         v,
-                        margin: ahead_margin(&x.o),
+                        margin: margin_for(&x.o),
                         draft,
                         junction_clear,
                         red_ahead,
@@ -2527,7 +2527,7 @@ fn decide_racer(
         } else if r.tactic == Tactic::Overtake {
             if let Some(x) = r.pass_target.and_then(target_rel) {
                 let side = (r.n_goal - x.o.n).signum();
-                let need = hw + x.o.half_w + ahead_margin(&x.o) + pass_margin(&x.o, &p);
+                let need = hw + x.o.half_w + margin_for(&x.o) + pass_margin(&x.o, &p);
                 let want = x.o.n + side * need;
                 let (lo, hi) = squeeze_limits(pass_limits(r.s + x.ds.max(0.0)), &x.o);
                 if want < lo - 0.05 || want > hi + 0.05 {
