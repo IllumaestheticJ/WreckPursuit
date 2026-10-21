@@ -595,6 +595,9 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
+/// Extra edge clearance of the whole-road line over the own-lane line, m.
+const WIDE_EDGE_EXTRA_M: f32 = 0.6;
+
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
     pub fn new(corridor: Corridor, specs: &[RacerSpec], config: RaceConfig) -> Self {
@@ -622,10 +625,18 @@ impl Field {
                 None => {
                     let half = spec.capability.width_m * 0.5;
                     lines.push((key, RacingLine::optimise(&corridor, half, &config.line)));
+                    // A little more room from the edges than on my own lanes: the far side of
+                    // the opposing lanes is a kerb or a wall with nothing to run wide on to
+                    // (Hollins s95 seed 7: a racer on the opposing edge into a hairpin braked for
+                    // the car ahead and slid into the wall).
+                    let wide_params = LineParams {
+                        edge_margin_m: config.line.edge_margin_m + WIDE_EDGE_EXTRA_M,
+                        ..config.line
+                    };
                     wide_lines.push(
                         wide_corridor
                             .as_ref()
-                            .map(|w| RacingLine::optimise(w, half, &config.line)),
+                            .map(|w| RacingLine::optimise(w, half, &wide_params)),
                     );
                     lines.len() - 1
                 }
@@ -1686,7 +1697,15 @@ fn decide_racer(
                 let a_brk = wp.a_brake.max(3.0);
                 let horizon = (v * v / (2.0 * a_brk) + 1.5 * v + 30.0).min(250.0);
                 let may_start = matches!(r.tactic, Tactic::Follow);
+                // Never ride it into a stop: slowing hard for a car or a light ahead, get back
+                // into my lanes while there is room (Lantern s95 seed 4: a racer stopped in a
+                // junction queue on the opposing side, facing a civilian that could not get
+                // past it — the whole field gridlocked).
+                let stopping =
+                    matches!(r.debug.limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal)
+                        && r.debug.v_target < 0.5 * v.max(8.0);
                 (r.wide_on || may_start)
+                    && !stopping
                     && wide_line_clear(corridor, wl, r, Who::Racer(k), obstacles, horizon)
             }
             _ => false,
