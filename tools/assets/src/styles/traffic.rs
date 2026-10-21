@@ -802,7 +802,8 @@ fn side_strip(
                 band: PatchBand::Side { z0: zs.0, z1: zs.1 },
                 offset_m: 0.002,
                 thickness_m: thick,
-                steps: (0, 1),
+                // Sides are nearly straight: a station every 0.25 m is enough.
+                steps: ((((c - a) / 0.25).ceil() as usize).max(1), 1),
             },
         );
         mirror(b, &k);
