@@ -135,6 +135,105 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Live player path (grip-balance's unify, c80a019e: B shipped for every car)
+
+`LIVE=1` in `examples/transition.rs`: every rig is marked player-driven
+(`Rig::set_player_input(true)`), the lab overrides are cleared and `lab_scope::set_legacy(false)`,
+so the shipped defaults apply (plain steering default, firm ride, lab-default balance, B tyres) —
+the code path wp_sim runs for a player car. Manual gears, manual clutch held, TCS off. Shipped set,
+lab overrides vs LIVE (held / 9 (swaps, spins) · real swings / 6 · median cross · fast ·
+lift-off / 6 (worst)):
+
+| car | lab overrides | LIVE player path |
+|---|---|---|
+| parity_rwd_a | 9 (0, 0) · 6 · 0.89 · 2 · 0 (5.3°) | 9 (0, 0) · 6 · 0.88 · 2 · 0 (5.3°) |
+| parity_rwd_b | 9 · 6 · 0.74 · 5 · 0 (7.6) | 9 · 6 · 0.74 · 5 · 0 (7.6) |
+| parity_rwd_d | 9 · 6 · 0.89 · 2 · 0 (5.7) | 9 · 6 · 0.89 · 2 · 0 (5.7) |
+| rampart_50 | 9 · 6 · 0.85 · 3 · 0 (5.8) | 9 · 6 · 0.85 · 3 · 0 (5.8) |
+| debug_coupe | 9 · 6 · 0.84 · 3 · 0 (6.6) | 9 · 6 · 0.83 · 3 · 0 (6.6) |
+
+Power-on (LIVE = lab): straight never spins; corner full-lock power-on spins 3–6 / 6, 0.90–1.62 s
+to 20° and 1.18–1.67 s to the spin; held 9 / 9 (lab: rwd_b / rampart 8). Manual shifts (LIVE): no
+spins (upshift at the limiter ends the drift on rwd_b / rampart). **The live path matches the lab
+path; the shipped set has no spin problem on harness drivers** (held 9 / 9, lift-off 0 on all five
+cars). FYI: a rig *not* marked player-driven runs the normal steering model, and with it the
+full-throttle held drift spins 9 / 9 — AI drivers do not drive that way, but `opponent_pace`
+should keep watching the AI on the B tyres.
+
+### The owner's target: 7d6b66c9 + springs / bars × 1.5 (lead, 2026-10-21)
+
+Configs `owner · plain` (grip-balance 7d6b66c9: step-14 balance, medium ride with springs / bars
+× 1.5, plain steering with W's features as they are) and `owner · no W` (transition rack, catch,
+over-rotation rack and countersteer limit off); manual gears, `MANUAL_CLUTCH=1` (clutch held
+engaged), TCS off. Per car: held / 9 (swaps, spins) · real lift-flick swings caught / 6 · median
+crossing · fast · lift-off step-outs / 6 (worst °):
+
+| car | owner · plain, 7d6b66c9 tyres | owner · plain, B tyres | owner · no W, 7d6b66c9 tyres |
+|---|---|---|---|
+| parity_rwd_a | 9 (0, 0) · 6 · 0.87 s · 2 · 2 (11.1°) | 9 · 6 · 0.88 · 2 · 3 (12.0) | 9 · **0** · — · 0 · 2 (10.9) |
+| parity_rwd_b | 7 (1, 0) · 6 · 0.85 · 0 · **5 (14.4)** | 8 · 6 · 0.75 · 5 · 5 (14.6) | 7 · 0 · — · 0 · 5 (15.3) |
+| parity_rwd_d | 9 (0, 0) · 6 · 0.88 · 2 · 2 (11.9) | 9 · 6 · 0.88 · 2 · 3 (12.8) | 8 (1, 1) · 0 · — · 0 · 2 (11.5) |
+| rampart_50 | 6 (3, 0) · 6 · 0.84 · 0 · 2 (12.2) | 7 (2, 0) · 6 · 0.85 · 1 · 3 (13.1) | 6 (3, 3) · 0 · — · 0 · 2 (11.7) |
+| debug_coupe | 9 (0, 0) · 6 · 0.87 · 3 · 3 (13.9) | 9 · 6 · 0.90 · 2 · 3 (14.3) | 7 (2, 2) · 0 · — · 0 · 3 (13.5) |
+
+- **W's transition features make the transition**: without them 0 / 30 lift flicks swing through,
+  with them 30 / 30, crossing 0.84–0.88 s. They also remove the held-drift spins of rampart /
+  debug_coupe / rwd_d in the no-W column (3 / 2 / 1).
+- **Lift-off step-outs are back on this combo: 2–5 / 6 per car (worst 11–16°)** — the step-14
+  balance's soft rear (× 0.45), the case grip-balance's "new" fixed (0 / 18 there). Same with
+  either tyre set; worst on rwd_b.
+- B vs the 7d6b66c9 tyres here: equal or slightly better holds (rwd_b 7 → 8, rampart 6 → 7),
+  more fast swings on rwd_b (0 → 5), one more lift-off step-out on 3 cars.
+- Power-on (`poweron`, same combo): straight never spins; full-lock corner power-on spins 3 / 6 on
+  every car (rwd_a 5 / 6 on B), 0.73–1.32 s to 20° slip and 1.10–1.88 s to the spin (B 0.67–1.32
+  / 1.10–1.66); shiro_turbo never spins.
+
+### Manual gears + manual clutch held engaged (lead's correction: the owner's actual setup)
+
+`transition manual` (VERBOSE=1 logs gear / rpm / rear wheel speed / car speed / slide around the
+shift): held drift (40 m circle, 0.3 / 0.5 / 0.7 g, key into the turn to 6°, then counter key +
+full throttle, 6 s), manual gears, clutch input 0 (engaged), TCS off. Held / 3 (spun):
+
+| set | car | no shift | upshift at the limiter (s) | downshift 3→2 at entry |
+|---|---|---|---|---|
+| ref 7d6b66c9 | parity_rwd_a | 3 (0) | 3 (0) (limiter not reached) | 3 (0) |
+| ref 7d6b66c9 | parity_rwd_b | 0 (0) | 0 (0) @ 1.7–2.4 | 3 (0) |
+| ref 7d6b66c9 | parity_rwd_d | 3 (0) | 3 (0) (not reached) | 2 (1) |
+| ref 7d6b66c9 | rampart_50 | 0 (1) | 0 (1) @ 2.5 | 3 (0) |
+| step23 | parity_rwd_a | 3 (0) | 2 (0) @ 1.1–1.2 | 3 (0) |
+| step23 | parity_rwd_b | 1 (0) | 1 (0) @ 1.1–1.8 | 3 (0) |
+| step23 | parity_rwd_d | 3 (0) | 3 (0) (not reached) | 2 (0) |
+| step23 | rampart_50 | 0 (0) | 0 (0) @ 1.7–2.9 | 2 (0) |
+
+The lab's auto clutch gives nearly the same (manual slightly better). An upshift at the limiter
+mid-drift drops the drive for the 0.5 s shift (step23 rwd_a: rpm 5850 → 4150, rear wheels 119 →
+61 km/h, slide 33° → 27°): the drift **dies**, it does not spin. The downshift at entry is benign
+(it even helps rampart). **No spins come from manual shifting with the clutch held.** So with
+the owner's actual setup the harness still does not reproduce "spinning on throttle / holding a
+drift"; the remaining candidates are the live-driven player path and the browser build's panel
+state.
+
+### The owner's assists (TCS off, manual clutch, auto gears): auto shifts mid-drift
+
+`OWNER=1 transition poweron` = the owner's setup (lead: parity RWD, TCS off, manual clutch,
+auto gears, panel defaults); the lab harness otherwise holds 2nd with manual gears and auto
+clutch. Held set / 9 (spun), lab assists → owner assists:
+
+| car | step 23 | ref 7d6b66c9 |
+|---|---|---|
+| parity_rwd_a | 9 → **3** | 9 → 5 (2 spun) |
+| parity_rwd_b | 8 → 5 | 6 → 6 |
+| parity_rwd_d | 9 → 6 | 9 → 4 (5 spun) |
+| rampart_50 | 5 → 3 | 4 (3) → 7 (2) |
+
+With auto gears every held-drift entry shifts: typically a **kickdown 2→1 at the entry** (≈ 0.4–0.5
+s, full throttle, slip 1–6°), **1→2 at 8–17° of slip** half a second later, and **2→3 mid-drift**
+(≈ 2–3.8 s, at slip up to 13–52°, as the spinning rears over-rev). The power-on runs log 14–28
+changes per car. The same happens on the reference build, so it is not a tyre change: the
+automatic gearbox shifts on wheel / engine speed during a slide. Proposed (gearbox owner): in a
+slide (|body slip| > ~10° or rear wheelspin past the peak), hold the gear — no kickdown under
+full throttle and no upshift from wheelspin.
+
 ### Step 23 "spinning on throttle / when holding a drift" (lead, 2026-10-21) — tyre side
 
 `transition poweron` (harness drivers, `PlainSteer::default`, TCS off / raw throttle): power-on in
