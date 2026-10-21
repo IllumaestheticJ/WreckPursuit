@@ -22,6 +22,7 @@ export const LAYERS: LayerDef[] = [
   { id: "cgVelocity", key: "KeyG", label: "CG + velocity vector", default: true },
   { id: "traffic", key: "KeyX", label: "civilian traffic agents", default: true },
   { id: "signals", key: "Digit9", label: "traffic signals + stop lines", default: true },
+  { id: "features", key: "Semicolon", label: "city features: walls, trees, props, decks (instanced)", default: true },
   { id: "intents", key: "KeyI", label: "traffic/police intent arrows", default: false },
   { id: "components", key: "KeyK", label: "component health panel", default: true },
   { id: "regions", key: "KeyE", label: "region energy panel", default: false },
