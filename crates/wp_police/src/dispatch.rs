@@ -781,10 +781,13 @@ impl PoliceSystem {
             u.assignment,
             Assignment::Pursue { .. } | Assignment::Intercept { .. }
         );
-        // Standing over a stopped racer it is after: an arrest, not a jam.
+        // Standing over a stopped racer it is after (inside the capture radius): an arrest,
+        // not a jam. Farther out and held up (Hollins hairpin: 20 m off behind other cars, for
+        // minutes) it is a jam like any other.
+        let arrest_m = self.cfg.heat.capture.unit_radius_m;
         if let Some(r) = target.and_then(|t| self.racers.get(&t)) {
             let slow = r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < 4.0;
-            if slow && dist(xy(r.pos), u.body.pos) < 25.0 {
+            if slow && dist(xy(r.pos), u.body.pos) < arrest_m {
                 return None;
             }
         }

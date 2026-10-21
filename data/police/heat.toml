@@ -146,6 +146,10 @@ unit_radius_m = 15.0
 # pinned_time_s with a unit close is a capture too.
 pinned_radius_m = 4.0
 pinned_time_s = 6.0
+# ... with a unit within this range (wider than unit_radius_m: a racer stuck in a jam, the
+# police held up behind other cars 20 m away, is captured, not waited for forever; Hollins
+# hairpin, lead/opponent-pace).
+pinned_unit_radius_m = 30.0
 
 [safehouse]
 dwell_s = 10.0
