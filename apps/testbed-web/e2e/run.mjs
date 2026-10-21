@@ -466,6 +466,51 @@ check(
     `"Repair & continue": health ${after.health}, cash $${before.cashAfter} → $${after.cash} (paid $${before.cost}), panel closed`,
   );
 }
+// Garages (lead): every repair shop has a marker; stopping inside one holds the car and opens the
+// garage panel with the shop's quote (a pristine car: nothing to repair); "Leave" lets it go.
+{
+  await page.evaluate(() => window.__wp.startFreeDrive("debug_sedan", "Arcade", true));
+  await page.waitForTimeout(500);
+  const placed = await page.evaluate(() => {
+    const wp = window.__wp;
+    const garages = wp.sim.garages();
+    let markers = 0;
+    wp.scene.world.traverse((o) => (markers += o.name.startsWith("garage:") ? 1 : 0));
+    const g = garages[0];
+    if (g) wp.sim.debugPlace(wp.app.player, g.pos[0], g.pos[1], g.heading_rad, 0);
+    return { count: garages.length, markers, name: g?.name ?? "" };
+  });
+  const opened = await page
+    .waitForFunction(() => !!window.__wp.garageView.offer && !!document.querySelector('#ui-garage [data-testid="garage-visit"]'), null, { timeout: 30000, polling: 100 })
+    .then(() => true)
+    .catch(() => false);
+  const visit = await page.evaluate(() => {
+    const wp = window.__wp;
+    return {
+      shop: wp.garageView.offer?.site.name ?? null,
+      text: document.querySelector('#ui-garage [data-testid="garage-visit"]')?.textContent ?? "",
+      held: !wp.sim.setInput(wp.app.player, { ...wp.app.input, throttle: 1 }),
+    };
+  });
+  await shot("garage_visit.png");
+  await page.click("#ui-garage button:not(.wp-btn--primary)").catch(() => {});
+  await page.waitForTimeout(300);
+  const left = await page.evaluate(() => {
+    const wp = window.__wp;
+    return {
+      offer: wp.sim.garageVisit(),
+      panel: !!document.querySelector('#ui-garage [data-testid="garage-visit"]'),
+      live: wp.sim.setInput(wp.app.player, { ...wp.app.input, throttle: 0.5 }),
+    };
+  });
+  check(
+    placed.count > 0 && placed.markers === placed.count && opened && visit.shop === placed.name && visit.held && /Nothing to repair/.test(visit.text),
+    `garage: ${placed.count} shops / ${placed.markers} markers; stopping in ${placed.name} opens the panel (${visit.shop}), input ${visit.held ? "held" : "live"}`,
+  );
+  check(!left.offer && !left.panel && left.live, `garage "Leave": panel closed, input ${left.live ? "live" : "held"}`);
+  // Back to the city chase: the selector check below restarts the current mode.
+  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+}
 // The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");

@@ -18,6 +18,7 @@ import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
+import { GarageVisitView } from "./ui/garageVisit";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 
@@ -96,6 +97,15 @@ async function main(): Promise<void> {
     onOpen: () => ui.setBill(true),
     onClose: () => ui.setBill(false),
   });
+  // Garage visit panel (lead): stop inside a repair shop's ring → quote + "Repair" / "Leave".
+  const garageEl = document.createElement("div");
+  garageEl.id = "ui-garage";
+  garageEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(garageEl);
+  const garageView = new GarageVisitView(garageEl, {
+    repair: () => sim.garageRepair(),
+    leave: () => sim.garageLeave(),
+  });
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
   let statTable: CarStatsTable | null = null;
   try {
@@ -122,12 +132,14 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     runEnd.reset();
+    garageView.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
     app.focus = app.player;
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
+    scene.setGarages(sim.garages());
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -532,7 +544,10 @@ async function main(): Promise<void> {
     {
       const w = sim.worldInfo();
       ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
-      if (!replay) runEnd.update(sim.runResult(), now);
+      if (!replay) {
+        runEnd.update(sim.runResult(), now);
+        garageView.update(sim.garageVisit(), now);
+      }
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
@@ -720,6 +735,7 @@ async function main(): Promise<void> {
     toggleLayer: (id: string) => layers.toggle(id),
     ui,
     runEnd,
+    garageView,
     restartRun,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };

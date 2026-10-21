@@ -1,11 +1,11 @@
 // Scene: renderer, lights, sky colour from TimeOfDay, ground + 10 m grid, the city greybox
-// (data/city/<id>.greybox.glb, prompt 05) and its traffic agents, barriers, fading contact
-// markers and intent arrows.
+// (data/city/<id>.greybox.glb, prompt 05) and its traffic agents, barriers, garage markers,
+// fading contact markers and intent arrows.
 // Sim space is +Z up / +Y forward; Three.js is +Y up, so `world` is rotated -90° about X and
 // every sim-space object is parented under it.
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import type { Barrier, SimEvent } from "./wasm/sim";
+import type { Barrier, GarageSite, SimEvent } from "./wasm/sim";
 import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
@@ -27,6 +27,10 @@ const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
 const tmpAgentColour = new THREE.Color();
 /** Floats per unit in police_units(). */
 const POLICE_UNIT_STRIDE = 6;
+/** Garage marker colours: legit (blue) and crooked (amber) shops. */
+const GARAGE_COLOUR = { Legit: 0x3399ff, Crooked: 0xffaa22 } as const;
+/** Height of a garage's light beam, m (visible over the greybox blocks). */
+const GARAGE_BEAM_M = 40;
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -35,6 +39,7 @@ export class SceneView {
   private readonly hemi: THREE.HemisphereLight;
   private readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
+  private readonly garages = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
   /** Contact markers created since the page loaded (for automation). */
   contactsSeen = 0;
@@ -85,7 +90,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group);
+    this.world.add(axes, this.barriers, this.garages, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group);
   }
 
   /**
@@ -233,6 +238,32 @@ export class SceneView {
       );
       m.add(stripe);
       this.barriers.add(m);
+    }
+  }
+
+  /** Repair shop markers (`garages_json()`): a ring on the ground at the shop's radius and a
+   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair. */
+  setGarages(list: GarageSite[]): void {
+    this.garages.clear();
+    for (const g of list) {
+      const colour = GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit;
+      const holder = new THREE.Group();
+      holder.position.set(...g.pos);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(g.radius_m - 0.6, g.radius_m, 48),
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      ring.position.z = 0.08;
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.5, GARAGE_BEAM_M, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.35, depthWrite: false }),
+      );
+      // CylinderGeometry runs along +Y; the world group is +Z up.
+      beam.rotation.x = Math.PI / 2;
+      beam.position.z = GARAGE_BEAM_M / 2;
+      holder.add(ring, beam);
+      holder.name = `garage:${g.name}`;
+      this.garages.add(holder);
     }
   }
 

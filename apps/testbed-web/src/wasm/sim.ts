@@ -216,14 +216,26 @@ export const sim = {
   runAccount: (): { cash: number; rep: number; bounty: number; debt: number } | null => JSON.parse(wasm.run_account_json()),
   /** "Repair & continue": pays impound + repair, repairs the car, releases the brakes. Throws if refused. */
   runRepairContinue: (): ContinueReport => JSON.parse(wasm.run_repair_continue()),
+  /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
+  garages: (): GarageSite[] => JSON.parse(wasm.garages_json()),
+  /** The open garage visit (the car stopped inside a garage), or null. */
+  garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
+  /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
+  garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
+  /** "Leave" the open visit without repairing. */
+  garageLeave: (): void => wasm.garage_leave(),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+  /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
+  debugPlace: (entity: number, x: number, y: number, yaw: number, speedMps: number): void => wasm.debug_place(entity, x, y, yaw, speedMps),
 };
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
+import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

@@ -649,3 +649,42 @@ embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and c
 sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
 stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
 testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
+
+## Lead helper note (2026-10-21) — garages open repairs
+
+Until now the map's `Garage` POIs did nothing (police skip them, the testbed did not draw them, and
+the economy's "garage" was only the end-of-run screen). New module `crates/wp_wasm/src/garage_visit.rs`
+plus `Session::check_garage` (native tests in `run_tests.rs`):
+
+| Export | Returns |
+|---|---|
+| `garages_json()` | `GarageSite[]`: `index, name, pos, heading_rad, radius_m` (15 m, like `PoiInfo`), `kind` (`Legit` / `Crooked`), `district` |
+| `garage_visit_json()` | `GarageOffer` or `null`: `seq, tick, site, wanted, health, quote` (G's `RepairQuote` at that shop, or `null`), `note` (`"nothing to repair"` / refusal), `cash, can_repair` |
+| `garage_repair()` | pays the shop's `RepairAll` (damage recorded first, then G's `repair`), repairs the car in place (replay op `Repair`), releases the brakes; `GarageRepairReport` (`shop, paid, insurance_covers, reported_to_police, cash_after, ledger`); throws when refused |
+| `garage_leave()` | closes the visit without repairing |
+| `debug_place(entity, x, y, yaw, speed)` | e2e / debug teleport, not in replays |
+
+Behaviour (sessions with a `PlayerRun`, i.e. live with police, not replays): after each live tick,
+the player's car stopped (< 3 m/s) inside a garage radius with no pursuit (`Pursuit` / `Searching`)
+opens a visit. The car is held on the brakes (logged inputs, same path as the end-of-run hold) until
+**Repair** or **Leave**; a pursuit starting or the run ending closes it. The car has to leave every
+garage radius before the next visit (no re-trigger while parked). Pricing uses the shop's kind,
+its district's labour rate and the car's current wanted level, so crooked shops mark up and legit
+ones flag `reports_to_police` at L2+. Outside the sim step: hashes and goldens unchanged.
+
+Shop kind: `wp_world`'s POIs have no legit / crooked field yet (`docs/design/CITY.md` C3, open for
+05 / 08). `garage_visit::shop_kind` uses the CITY.md §5.2 list by name (Vesper: Meridian
+Motorworks legit; Sal's Paint & Panel and Gantry Garage crooked) and falls back to the district
+(industrial / port crooked) for the procedural city's `Garage N`. Drop it when C3 lands.
+
+Testbed: `src/ui/garageVisit.tsx` (`GarageVisitView`, kit primitives) in `#ui-garage`: shop name,
+kind, district, condition, priced lines, labour / insurance / police badges, cash before → after,
+**Repair (cost)** / **Leave**, and a 4 s "Repaired at …" toast. `scene.setGarages()` draws a ring
+at the radius and a 40 m light beam per shop (blue legit, amber crooked). `main.ts`: construct,
+`garageView.update(sim.garageVisit(), now)` per frame (not in replays), reset on rebuild, on
+`window.__wp`. `e2e/run.mjs`: free drive → markers = shops → stop in the first shop → panel, input
+held, "Nothing to repair" → **Leave** → input live.
+
+Gaps: police do not act on a legit shop's report (would need a logged sim op that adds heat);
+only `RepairAll` (no per-item repair, drive-damaged or scrap at the counter); no garage test lot
+(backlog B07).
