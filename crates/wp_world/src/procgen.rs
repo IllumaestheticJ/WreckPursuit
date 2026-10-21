@@ -1196,10 +1196,12 @@ mod tests {
         ] {
             assert!(net.intersections.iter().any(|i| i.control == c));
         }
-        // No cramped junctions: every drivable lane holds at least two cars.
+        // No cramped junctions: every drivable lane holds at least two cars (12 m: the
+        // crossroads between main's ramp terminals and the next street come out at exactly
+        // that with round 12's setbacks).
         for (i, l) in net.lanes.iter().enumerate() {
             let len = *geom::cumulative(&l.polyline).last().unwrap();
-            assert!(len > 12.0, "lane {i} only {len} m");
+            assert!(len >= 11.99, "lane {i} only {len} m");
         }
         // Every drivable lane can be left (connections) — the city is closed.
         for (i, l) in net.lanes.iter().enumerate() {

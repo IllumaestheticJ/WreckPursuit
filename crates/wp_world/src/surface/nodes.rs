@@ -479,7 +479,12 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
         if s < -0.05 && u < -0.05 && cos_beta > -0.966 && gap < std::f32::consts::PI {
             let k = geom::add(p, geom::scale(a.out, s));
             if a.highway || b.highway {
-                // No kerb on a highway edge: pave up to where the edges meet.
+                // No kerb on a highway edge: pave up to where the edges meet. A meeting point
+                // right at a corner (a ramp end beside a street end at main's ramp terminals)
+                // left a sliver: join the corners straight instead.
+                if geom::dist(k, p).min(geom::dist(k, q)) < 1.0 {
+                    return Vec::new();
+                }
                 return vec![k];
             }
             // Interior angle β at k; the fillet's deepest point lies t·(1 − sin β/2)/cos β/2

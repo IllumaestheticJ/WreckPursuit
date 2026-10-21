@@ -1731,10 +1731,10 @@ fn plan_covers(g: &mut Gen) {
         // The Uptown Connector under a plaza deck.
         (
             "Uptown Connector",
-            [416.0, 1100.0],
-            [418.0, 1005.0],
-            [414.0, 1255.0],
-            7.0,
+            [416.0, 1000.0],
+            [418.0, 905.0],
+            [414.0, 1110.0],
+            6.0,
             CoverKind::CoveredTrench,
             "Founders Cut",
         ),

@@ -2159,10 +2159,25 @@ mod tests {
             let walk_m = walks.flush();
             let (road, walk) = (PavedIndex::new(&road_m), PavedIndex::new(&walk_m));
             // Known exceptions, counted and capped: corners filled in cells and junctions whose
-            // ribbon ends overlap.
+            // ribbon ends overlap. Main's divided highways overlap by design: at freeway merges
+            // / diverges (radius-0 junctions) every road's paving runs to the node, and the two
+            // carriageways' paving overlaps along the median where they end at a junction.
+            let freeway = |node: u32| {
+                let nd = &map.net.nodes[node as usize];
+                let c = geom::xy(nd.pos);
+                nd.intersection
+                    .is_some_and(|ix| map.net.intersections[ix as usize].radius_m <= 0.0)
+                    || map.net.surfaces.iter().any(|s| {
+                        s.median_barrier
+                            && s.centre.len() >= 2
+                            && [s.centre[0], s.centre[s.centre.len() - 1]]
+                                .iter()
+                                .any(|e| geom::dist(geom::xy(*e), c) < 40.0)
+                    })
+            };
             let overlapping: Vec<u32> = patches
                 .iter()
-                .filter(|p| p.overlapping_ends)
+                .filter(|p| p.overlapping_ends && !freeway(p.node))
                 .map(|p| p.node)
                 .collect();
             println!(
