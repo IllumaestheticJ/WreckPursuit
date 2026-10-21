@@ -1458,7 +1458,19 @@ is held by the siren hold or by units in the crossing paths, and the queue spill
 the short blocks; seed 2's 118 s car is behind such a block). Proposed next step (not done): give
 main's grid signals longer / actuated greens on short-block approaches (`procgen.rs` signal
 plans), and let the siren junction hold count per junction rather than per unit.
-**opponent-pace lantern_checkpoint**: see the gate below.
+**opponent-pace lantern_checkpoint** (`wp_race/tests/opponent_pace.rs`, release, on the
+9a4272f8 merge): still red, but the jam fixes help a lot — best ratio s50 2.678 → 2.246
+(want ≤ 2.2), s95 2.999 → 2.209 (want ≤ 1.98); race times 96–139 s → 79–96 s (before = the
+same tree with the row-85 traffic rules taken out).
+**Merge of lead/round12 5b9ab4f7** (E's police, never-give-up, detailed cars + LOD, audio):
+conflicts only where both sides added fields (`Traffic::{overlap_ended, cars}`,
+`Scenario::{restart_after_capture, car_mix}` in `fuzz.rs` and `wp_wasm/src/scenario.rs`).
+Goldens re-blessed only where ws/world's traffic moves them, by blessing lead/round12 alone and
+the merged tip and comparing: ws/world only — `jam_pursuit_{grid,vesper}`; both ws/world and
+E (merged value differs from round12 alone, so this bless supersedes E's on a merge) —
+`golden_city_chase`, `golden_night_pursuit_escape` (+ replays), `opponent_flee_police`,
+`race_city_sprint_police`, `weather_fog_pursuit{,_clear}`, `world_traffic_soak{,_observer}`;
+E only, left for E — `opponent_circuit_8x5`, `race_lantern_checkpoint`.
 
 ## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
 **Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
