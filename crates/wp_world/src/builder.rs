@@ -576,7 +576,10 @@ fn node_half_widths(
             // Its paved extent: the explicit (median / outer) shoulder too, so the crossing
             // road's sidewalk corner clears the carriageway's paving.
             let r = &roads[x.road];
-            (hw[x.road] + offset + r.shoulder_left_m.max(r.shoulder_right_m), true)
+            (
+                hw[x.road] + offset + r.shoulder_left_m.max(r.shoulder_right_m),
+                true,
+            )
         })
         .unzip()
 }

@@ -65,7 +65,7 @@ pub fn lane_has_verge(map: &CityMap, lane: &Lane) -> bool {
 /// Kerb height: the sidewalk top sits this far above the road edge, m.
 pub const KERB_H_M: f32 = 0.15;
 
-/// Level lot behind every sidewalk in a city with terrain, m: flush with the sidewalk's back
+/// Level lot behind every sidewalk in a hilly city ([`has_relief`]), m: flush with the sidewalk's back
 /// edge, out past the building line (Port Vesper's facades stand 1.5 m behind the sidewalk)
 /// and wide enough for a ≥ 3 m verge where no building stands (playtest #52).
 pub const LOT_W_M: f32 = 3.5;
@@ -91,13 +91,26 @@ pub const LOT_MAX_DROP_M: f32 = 1.0;
 pub const LOT_MAX_RISE_M: f32 = 0.08;
 
 /// Width of the level lot behind every sidewalk of `net`, m ([`LOT_W_M`], or [`FLAT_LOT_W_M`]
-/// without terrain).
+/// in a flat city: see [`has_relief`]).
 pub fn lot_width_m(net: &RoadNetwork) -> f32 {
-    if net.terrain.is_some() {
+    if has_relief(net) {
         LOT_W_M
     } else {
         FLAT_LOT_W_M
     }
+}
+
+/// Whether `net` has terrain with relief (Port Vesper's hills), as opposed to no terrain or a
+/// flat one. The procedural grid has a flat terrain just under its streets since main's
+/// highway viaduct (so `wp_sim` builds its road mesh and the viaduct is a bridge); its
+/// sidewalks and lots stay the flat city's ([`FLAT_LOT_W_M`] lots, no wedges), which its
+/// houses are laid out for.
+pub fn has_relief(net: &RoadNetwork) -> bool {
+    net.terrain.as_ref().is_some_and(|t| {
+        let lo = t.z.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = t.z.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        hi - lo > 0.05
+    })
 }
 
 /// Indexed triangle mesh, world space (+Z up), counter-clockwise seen from above.
@@ -457,14 +470,15 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
             (-LOT_MAX_RISE_M..=LOT_MAX_DROP_M).contains(&drop)
         })
     };
+    let relief = has_relief(net);
     let geo = WalkGeometry {
         lot_w,
-        max_pull_back: if net.terrain.is_some() {
+        max_pull_back: if relief {
             MAX_WEDGE_PULL_BACK_M
         } else {
             MAX_PULL_BACK_M + lot_w
         },
-        wedges: net.terrain.is_some(),
+        wedges: relief,
     };
     let patches = node_patches(map);
     let paved = PavedIndex::new(&road_mesh_with(map, &patches));
@@ -1788,8 +1802,8 @@ pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f
 }
 
 /// Guard-rail lines `(a, b)` (at road height) along both edges of every bridge-deck stretch:
-/// surface segments whose whole cross-section is more than 1.5 m above the terrain. Empty
-/// without terrain.
+/// surface segments whose whole cross-section is more than 1.5 m above the terrain, except
+/// edges with a sidewalk and edges lying on other paving (see below). Empty without terrain.
 pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
     let Some(t) = &net.terrain else {
         return Vec::new();
@@ -1800,9 +1814,19 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         let (l, r) = surface_edges(s);
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
-                for e in [&l, &r] {
-                    if !inside_other_paving(net, si, e[k])
-                        || !inside_other_paving(net, si, e[k + 1])
+                // A segment with either end on another road's paving at its level (a ramp
+                // edge entering the carriageway it joins, the carriageway edge the ramp lane
+                // crosses) gets no rail: it stood up to 2.3 m inside the carriageway, across
+                // the taper the cars drive (round 12's junction-cover physics check).
+                //
+                // An edge with a sidewalk gets no rail either (main's interchange crossroads
+                // bridge the divided highway with their sidewalks): the sidewalk's back edge
+                // has the guard rail there ([`SidewalkMesh::bare_backs`]); one at the kerb
+                // stopped cars mounting the sidewalk.
+                for (e, side) in [(&l, 0), (&r, 1)] {
+                    if !s.sidewalk[side]
+                        && !inside_other_paving(net, si, e[k])
+                        && !inside_other_paving(net, si, e[k + 1])
                     {
                         out.push((e[k], e[k + 1]));
                     }

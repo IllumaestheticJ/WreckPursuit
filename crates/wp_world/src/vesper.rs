@@ -3963,4 +3963,3 @@ mod tests {
             .all(|b| !in_cover_corridor(&shapes, &b.footprint)));
     }
 }
-
