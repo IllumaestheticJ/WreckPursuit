@@ -47,6 +47,7 @@ fn main() {
         parked_cars: true,
         police_cars: true,
         police_presence: Some(1.0),
+        fleets: false,
         systems: None,
         barriers: Vec::new(),
         entities: vec![EntitySpec {

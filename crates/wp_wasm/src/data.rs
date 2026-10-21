@@ -23,7 +23,11 @@ pub fn mem_data() -> &'static simcli::MemData {
         let files = EMBEDDED
             .iter()
             .map(|(kind, id, text)| {
-                let ext = if *kind == "modes" { "toml" } else { "json" };
+                let ext = if matches!(*kind, "modes" | "fleets") {
+                    "toml"
+                } else {
+                    "json"
+                };
                 (format!("{kind}/{id}.{ext}"), text.to_string())
             })
             .collect();

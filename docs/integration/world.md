@@ -691,3 +691,28 @@ out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct updat
   20.2 s against the 20 s cap); the 7×7 sprint scenarios (`race/city_sprint{,_police}.ron`)
   start on the new carriageway's judge slots (x 58.05 / 63.05 → 59.55 / 64.55) and
   `city_sprint_police` uses seed 12 (both `wp_race` police tests pass at aim dy −10 / 0 / +10).
+
+## Mixed fleets (2026-10-21, owner request: "put the new police and heavy trucks into traffic and dispatch")
+Done on the session branch (cars/panels work), touching `wp_world`, `wp_police`, `wp_sim`,
+`simcli`, `wp_wasm` and the testbed; opt-in so every blessed golden is unchanged.
+- **Traffic (`wp_world`)**: `TrafficConfig::fleet: Vec<FleetModel>` (`data/fleets/traffic.toml`,
+  parsed as `FleetFile`). Empty = the old single 4.5 m car, bit-identical (no extra RNG draws,
+  model not hashed). With a fleet, `try_spawn` draws a model by lane kind (highway vs city
+  weights), and the agent carries `model`, `length_m`, `width_m` and `speed_cap_mps`; the
+  sampled driver's `max_accel` / `headway_s` are scaled. Every bumper gap (leader search, IDM,
+  MOBIL, spawn spacing, stop lines, don't-block-the-box, overlap OBBs) now uses the two cars'
+  half lengths (`bumper_gap`) — equal to `CAR_LENGTH_M` arithmetic when all are 4.5 m.
+  Physical agents use their model's car (`Traffic::set_fleet_car`, `World::set_traffic_fleet`,
+  `World::agent_model`); `AgentView::model` carries it to renderers.
+- **Police (`wp_police::fleet`)**: `PoliceFleet` (`data/fleets/police.toml`): per model a patrol
+  weight, reinforcement / roadblock-tool weights by wanted level and measured `CarLimits`.
+  `pick(role, level, unit)` hashes the unit id with the file seed (no shared RNG stream).
+- **Sim (`wp_sim`)**: `Sim::set_police_fleet(fleet, cars)` — each unit getting a body draws its
+  model from its role and the current top wanted level of players / AI racers and gets that
+  model's limits via `set_unit_limits`; `Sim::set_traffic_fleet(models, cars)` — promoted agents
+  embody their own model. Without fleets both paths are the old single-model code.
+- **Contract change request (net)**: `TrafficAgentSnapshot` has `variant` but no fleet model, so
+  networked clients cannot draw the right traffic model yet (proposal: add `model: u8`).
+- **Known gaps**: kinematic heavy trucks follow the same lane / junction logic as cars (no
+  wide-turn behaviour, no lane restriction beyond the spawn weights); trailers still need a hitch
+  joint; police tools (roadblock props) are unchanged, only the unit cars vary.

@@ -61,6 +61,8 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         parked_cars: true,
         police_cars: true,
         police_presence: None,
+        // Mixed police and traffic fleets (data/fleets/*.toml).
+        fleets: true,
         slow: false,
         // Hinged panels + per-panel meshes in the browser (workstream R).
         panels: true,

@@ -570,7 +570,7 @@ pub const AGENT_STRIDE: usize = 5;
 /// Civilian traffic agents (empty without a city), 5 floats each:
 /// `[x, y, z, yaw, flags]` with flags = bits 1 physical LOD, 2 brake lights, 4 hazard lights,
 /// 8 yielding to a siren, 16 turn signal left, 32 turn signal right, 64 aggressive driver,
-/// plus `variant << 8`.
+/// plus `variant << 8` and the fleet model index `<< 16` (see [`traffic_fleet_cars`]).
 #[wasm_bindgen]
 pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
     get(|s| {
@@ -583,11 +583,43 @@ pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
                 | ((a.turn_signal < 0) as u32) << 4
                 | ((a.turn_signal > 0) as u32) << 5
                 | ((a.personality == wp_world::traffic::Personality::Aggressive) as u32) << 6
-                | (a.variant as u32) << 8;
+                | (a.variant as u32) << 8
+                | (a.model as u32) << 16;
             out.extend_from_slice(&[a.pos[0], a.pos[1], a.pos[2], a.yaw, flags as f32]);
         }
         out
     })
+}
+
+/// Car ids of the traffic fleet in model order (`traffic_agents()` flags `>> 16`), as a JSON
+/// array; empty when the session has no traffic fleet.
+#[wasm_bindgen]
+pub fn traffic_fleet_cars() -> Result<String, JsValue> {
+    get(|s| {
+        let ids: Vec<&str> = if s.scenario().fleets {
+            fleet_car_ids()
+        } else {
+            Vec::new()
+        };
+        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())
+    })
+}
+
+/// Car ids of the embedded traffic fleet file, in model order.
+fn fleet_car_ids() -> Vec<&'static str> {
+    static IDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    IDS.get_or_init(|| {
+        use simcli::DataSource;
+        data::mem_data()
+            .read(simcli::run::TRAFFIC_FLEET)
+            .ok()
+            .and_then(|t| toml::from_str::<wp_world::FleetFile>(&t).ok())
+            .map(|f| f.model.into_iter().map(|m| m.car).collect())
+            .unwrap_or_default()
+    })
+    .iter()
+    .map(String::as_str)
+    .collect()
 }
 
 /// Floats per head in `signal_heads()`.

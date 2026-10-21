@@ -18,6 +18,9 @@ use crate::{Sim, VehicleKind};
 /// Vehicle slots kept free for players and racers when spawning police cars.
 pub const POLICE_SLOT_RESERVE: usize = 16;
 
+/// A unit waiting for a body: id, role, position, heading, speed.
+type UnitNeed = (UnitId, wp_police::unit::UnitRole, [f32; 2], [f32; 2], f32);
+
 /// Police RNG stream offset from the master seed.
 const POLICE_SEED_SALT: u64 = 0x0090_11CE;
 
@@ -46,6 +49,40 @@ impl Sim {
     /// [`Sim::set_police_car`] gets another model.
     pub fn set_police_car_limits(&mut self, limits: wp_police::pro::CarLimits) {
         self.police_car_limits = Some(limits);
+    }
+
+    /// Mixed police fleet (`data/fleets/police.toml`): each AI ground unit gets the model
+    /// [`wp_police::PoliceFleet::pick`] draws for its role and the current top wanted level,
+    /// and that model's limits for its pro driver. `cars` are the fleet's cars in its order.
+    /// Units whose role has no fleet model fall back to [`Sim::set_police_car`].
+    pub fn set_police_fleet(&mut self, fleet: wp_police::PoliceFleet, cars: Vec<LoadedCar>) {
+        assert_eq!(fleet.unit.len(), cars.len(), "one car per fleet unit");
+        self.police_fleet = Some((fleet, cars));
+    }
+
+    /// Highest wanted level of any player or AI racer right now.
+    fn top_wanted_level(&self) -> wp_police::WantedLevel {
+        self.vehicles
+            .iter()
+            .filter(|v| matches!(v.kind, VehicleKind::Player | VehicleKind::AiRacer))
+            .map(|v| self.police.wanted_level(v.id))
+            .max()
+            .unwrap_or_default()
+    }
+
+    /// The car (and its pro-driver limits) for a unit about to get a body.
+    fn unit_car(
+        &self,
+        unit: UnitId,
+        role: wp_police::unit::UnitRole,
+        level: wp_police::WantedLevel,
+    ) -> Option<(LoadedCar, Option<wp_police::pro::CarLimits>)> {
+        if let Some((fleet, cars)) = &self.police_fleet {
+            if let Some(i) = fleet.pick(role, level, unit) {
+                return Some((cars[i].clone(), Some(fleet.unit[i].car_limits())));
+            }
+        }
+        self.police_car.clone().map(|c| (c, self.police_car_limits))
     }
 
     /// The police system (heat, units, incidents) for UI and tests.
@@ -141,24 +178,23 @@ impl Sim {
             let _ = self.despawn_vehicle(id);
         }
 
-        let wanted: Vec<(UnitId, [f32; 2], [f32; 2], f32)> = self
+        let wanted: Vec<UnitNeed> = self
             .police
             .units()
             .iter()
             .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && u.entity.is_none())
-            .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed))
+            .map(|u| (u.id, u.role, u.body.pos, u.body.heading, u.body.speed))
             .collect();
-        // Clone the car model (lattice and all) only when a unit actually needs a body.
-        let car = if wanted.is_empty() {
-            None
-        } else {
-            self.police_car.clone()
-        };
-        if let Some(car) = car {
-            for (unit, pos, heading, speed) in wanted {
+        if !wanted.is_empty() && (self.police_car.is_some() || self.police_fleet.is_some()) {
+            let level = self.top_wanted_level();
+            for (unit, role, pos, heading, speed) in wanted {
                 if self.vehicles.len() + POLICE_SLOT_RESERVE >= MAX_VEHICLES {
                     break;
                 }
+                // The car (lattice and all) is cloned only for a unit that gets a body.
+                let Some((car, limits)) = self.unit_car(unit, role, level) else {
+                    continue;
+                };
                 // Heading (x, y) → yaw about +Z with 0 = +Y.
                 let yaw = wp_math::atan2(-heading[0], heading[1]);
                 // On the road / terrain under the unit (z = 0 on flat cities).
@@ -182,7 +218,7 @@ impl Sim {
                     max_steer_rad: car.def.wheels[0].max_steer_rad,
                 };
                 self.police.bind_unit_entity(unit, id, geom);
-                if let Some(limits) = self.police_car_limits {
+                if let Some(limits) = limits {
                     self.police.set_unit_limits(unit, limits);
                 }
             }

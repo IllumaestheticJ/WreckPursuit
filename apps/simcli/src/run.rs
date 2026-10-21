@@ -158,6 +158,39 @@ pub const POLICE_CAR: &str = "sentinel_cruiser";
 /// Car model for physical (near-player) traffic in city scenarios.
 pub const TRAFFIC_CAR: &str = "debug_sedan";
 
+/// Police fleet file (`fleets: true`).
+pub const POLICE_FLEET: &str = "fleets/police.toml";
+/// Traffic fleet file (`fleets: true`).
+pub const TRAFFIC_FLEET: &str = "fleets/traffic.toml";
+
+/// The police fleet table and its cars (`data/fleets/police.toml`).
+pub fn load_police_fleet(
+    data: &dyn DataSource,
+) -> Result<(wp_police::PoliceFleet, Vec<wp_contracts::LoadedCar>), RunError> {
+    let fleet = wp_police::PoliceFleet::parse(&data.read(POLICE_FLEET)?)
+        .map_err(|e| RunError::Scenario(POLICE_FLEET.into(), e))?;
+    let cars = fleet
+        .unit
+        .iter()
+        .map(|u| load_car(data, &u.car))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((fleet, cars))
+}
+
+/// The traffic fleet models and their cars (`data/fleets/traffic.toml`).
+pub fn load_traffic_fleet(
+    data: &dyn DataSource,
+) -> Result<(Vec<wp_world::FleetModel>, Vec<wp_contracts::LoadedCar>), RunError> {
+    let file: wp_world::FleetFile = toml::from_str(&data.read(TRAFFIC_FLEET)?)
+        .map_err(|e| RunError::Scenario(TRAFFIC_FLEET.into(), e.to_string()))?;
+    let cars = file
+        .model
+        .iter()
+        .map(|m| load_car(data, &m.car))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((file.model, cars))
+}
+
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     let density = sc.traffic_density.unwrap_or(1.0);
@@ -301,6 +334,14 @@ pub fn build_sim(
                 .map(|(id, s)| wp_world::TrackedVehicle::from_state(*id, s, false, true))
                 .collect();
             world.set_tracked_vehicles(&tracked);
+            // Mixed traffic fleet: models are drawn at spawn, so it goes in before populate.
+            let traffic_fleet = if sc.fleets && sc.traffic_cars {
+                let (models, fleet_cars) = load_traffic_fleet(data)?;
+                world.set_traffic_fleet(models.clone(), &fleet_cars);
+                Some((models, fleet_cars))
+            } else {
+                None
+            };
             world.populate();
             // `set_world` rebuilds police on the city, so the scenario's police (config,
             // starting heat) are installed after it. Police cars are real vehicles (lead run 5);
@@ -309,6 +350,10 @@ pub fn build_sim(
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
+                if sc.fleets {
+                    let (fleet, fleet_cars) = load_police_fleet(data)?;
+                    sim.set_police_fleet(fleet, fleet_cars);
+                }
             } else {
                 let quiet = Scenario {
                     police_presence: Some(0.0),
@@ -318,6 +363,9 @@ pub fn build_sim(
             }
             if sc.traffic_cars {
                 sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+            }
+            if let Some((models, fleet_cars)) = traffic_fleet {
+                sim.set_traffic_fleet(models, fleet_cars);
             }
             true
         }

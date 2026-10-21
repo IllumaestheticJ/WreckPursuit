@@ -55,8 +55,8 @@ pub use props::{PropKind, StaticProp};
 pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
 pub use traffic::{
-    AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
-    TrafficStats, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
+    AgentId, AgentView, FleetFile, FleetModel, Hazard, Lod, LodChange, PhysicalAgent,
+    TrackedVehicle, TrafficConfig, TrafficStats, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
 };
 pub use violations::{ViolationConfig, ViolationTracker};
 
@@ -199,6 +199,25 @@ impl World {
     pub fn set_traffic_car(&mut self, car: &LoadedCar) {
         self.traffic
             .set_traffic_car(car.def.clone(), car.tires.clone());
+    }
+
+    /// Mixed traffic fleet: `models[i]` spawns as `cars[i]` (same order). Call before
+    /// [`World::populate`]; replaces the single [`World::set_traffic_car`] model.
+    pub fn set_traffic_fleet(&mut self, models: Vec<FleetModel>, cars: &[LoadedCar]) {
+        for (i, car) in cars.iter().enumerate() {
+            self.traffic
+                .set_fleet_car(i, car.def.clone(), car.tires.clone());
+        }
+        self.traffic.config.fleet = models;
+    }
+
+    /// Fleet model index of a traffic agent (0 without a fleet).
+    pub fn agent_model(&self, agent: AgentId) -> Option<u8> {
+        self.traffic
+            .agents()
+            .iter()
+            .find(|a| a.id == agent)
+            .map(|a| a.model)
     }
 
     /// Vehicles the world must know about this tick: players, police, AI racers.

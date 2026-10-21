@@ -1,0 +1,164 @@
+# Traffic fleet: civilian models and how often each spawns (wp_world::FleetModel).
+#
+# An agent's model is drawn at spawn by the lane it spawns on: `weight_city` on city lanes,
+# `weight_highway` on highway lanes (semis and box trucks live mostly on the highway).
+# `length_m` / `width_m` set its spacing and overlap box (bumper to bumper, from the car's
+# body_size_m); `max_speed_kmh` caps its desired speed (truck governors); `accel_scale` and
+# `headway_scale` scale the sampled driver (heavy vehicles pull away slowly, leave more room).
+# Promoted (near-player) agents become the named car with full physics.
+# Used when a scenario sets `fleets: true` (the browser free drive and city chase do).
+
+# --- everyday cars
+[[model]]
+car = "tansy_13"
+length_m = 3.85
+width_m = 1.67
+weight_city = 14.0
+weight_highway = 6.0
+
+[[model]]
+car = "debug_sedan"
+length_m = 4.7
+width_m = 1.8
+weight_city = 10.0
+weight_highway = 9.0
+
+[[model]]
+car = "junkyard_beater"
+length_m = 4.3
+width_m = 1.66
+weight_city = 6.0
+weight_highway = 3.0
+max_speed_kmh = 140.0
+
+[[model]]
+car = "vireo_xs"
+length_m = 4.18
+width_m = 1.7
+weight_city = 4.0
+weight_highway = 3.0
+
+[[model]]
+car = "kestrel_ts"
+length_m = 4.6
+width_m = 1.77
+weight_city = 4.0
+weight_highway = 4.0
+
+[[model]]
+car = "sperber_32"
+length_m = 4.49
+width_m = 1.78
+weight_city = 3.0
+weight_highway = 4.0
+
+[[model]]
+car = "lindwurm_4t"
+length_m = 4.28
+width_m = 1.8
+weight_city = 4.0
+weight_highway = 3.0
+
+# --- the odd enthusiast car
+[[model]]
+car = "shiro_turbo"
+length_m = 4.45
+width_m = 1.7
+weight_city = 1.5
+weight_highway = 1.0
+
+[[model]]
+car = "hakone_gt"
+length_m = 4.52
+width_m = 1.81
+weight_city = 1.0
+weight_highway = 2.0
+
+[[model]]
+car = "rampart_50"
+length_m = 4.78
+width_m = 1.92
+weight_city = 1.5
+weight_highway = 2.0
+
+[[model]]
+car = "ironside_440"
+length_m = 5.2
+width_m = 1.95
+weight_city = 0.7
+weight_highway = 0.7
+
+[[model]]
+car = "lucciola_350"
+length_m = 4.25
+width_m = 1.9
+weight_city = 0.3
+weight_highway = 0.5
+
+# --- pickups and vans
+[[model]]
+car = "furrow_24"
+length_m = 4.75
+width_m = 1.69
+weight_city = 5.0
+weight_highway = 3.0
+max_speed_kmh = 150.0
+
+[[model]]
+car = "hauler_1500"
+length_m = 5.85
+width_m = 2.03
+weight_city = 5.0
+weight_highway = 5.0
+accel_scale = 0.9
+
+[[model]]
+car = "drayman_cargo"
+length_m = 5.69
+width_m = 2.01
+weight_city = 5.0
+weight_highway = 3.0
+max_speed_kmh = 130.0
+accel_scale = 0.8
+headway_scale = 1.1
+
+[[model]]
+car = "parcel_hi"
+length_m = 5.9
+width_m = 1.99
+weight_city = 6.0
+weight_highway = 3.0
+max_speed_kmh = 120.0
+accel_scale = 0.8
+headway_scale = 1.1
+
+# --- heavy vehicles (mostly highway)
+[[model]]
+car = "gantry_box"
+length_m = 7.6
+width_m = 2.45
+weight_city = 2.0
+weight_highway = 4.0
+max_speed_kmh = 95.0
+accel_scale = 0.55
+headway_scale = 1.3
+
+[[model]]
+car = "longhaul_tractor"
+length_m = 6.9
+width_m = 2.5
+weight_city = 0.3
+weight_highway = 6.0
+max_speed_kmh = 100.0
+accel_scale = 0.5
+headway_scale = 1.4
+
+[[model]]
+car = "quarry_tipper"
+length_m = 7.8
+width_m = 2.5
+weight_city = 1.5
+weight_highway = 2.0
+max_speed_kmh = 90.0
+accel_scale = 0.45
+headway_scale = 1.3

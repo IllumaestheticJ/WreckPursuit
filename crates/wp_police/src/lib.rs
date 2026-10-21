@@ -31,6 +31,7 @@ pub mod city;
 pub mod config;
 pub mod dispatch;
 pub mod events;
+pub mod fleet;
 pub mod graph;
 pub mod heat;
 pub mod pro;
@@ -59,6 +60,7 @@ pub use dispatch::{Incident, IncidentKind};
 pub use events::{
     DisableCause, IncidentId, PoliceEvent, PoliceEventExt, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
+pub use fleet::{FleetUnit, PoliceFleet};
 pub use graph::{District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use radio::{RadioConfig, RadioStats, RadioTier};

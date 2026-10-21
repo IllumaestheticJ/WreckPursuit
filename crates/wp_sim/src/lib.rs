@@ -163,7 +163,11 @@ pub struct Sim {
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
     police_car_limits: Option<wp_police::pro::CarLimits>,
+    /// Mixed police fleet: the selection table and its cars (same order).
+    police_fleet: Option<(wp_police::PoliceFleet, Vec<LoadedCar>)>,
     traffic_car: Option<LoadedCar>,
+    /// Mixed traffic fleet cars, by fleet model index.
+    traffic_fleet: Vec<LoadedCar>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
@@ -199,7 +203,9 @@ impl Sim {
             contact_filter: None,
             police_car: None,
             police_car_limits: None,
+            police_fleet: None,
             traffic_car: None,
+            traffic_fleet: Vec::new(),
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),

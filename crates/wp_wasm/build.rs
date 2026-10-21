@@ -1,5 +1,5 @@
 //! Embeds every data file the browser needs (`data/{cars,lattices,tires,materials,panels,stats}/*.json`,
-//! `data/modes/*.toml`) so new cars from other workstreams show up without code changes.
+//! `data/{modes,fleets}/*.toml`) so new cars from other workstreams show up without code changes.
 //! Generates `$OUT_DIR/embedded_data.rs` with one `(kind, id, contents)` table.
 
 use std::fmt::Write as _;
@@ -16,6 +16,8 @@ fn main() {
         ("tires", "json"),
         ("materials", "json"),
         ("modes", "toml"),
+        // Mixed police / traffic fleets (`fleets: true` scenarios).
+        ("fleets", "toml"),
         // Panel specs (workstream R); meshes stay files under data/panels/meshes/.
         ("panels", "json"),
         // Menu stat bars (`simcli car-stats` → data/stats/cars.json).

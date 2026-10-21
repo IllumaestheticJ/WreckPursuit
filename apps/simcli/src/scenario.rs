@@ -46,6 +46,12 @@ pub struct Scenario {
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub police_presence: Option<f32>,
+    /// Mixed fleets (`data/fleets/{police,traffic}.toml`): police units drive the model their
+    /// role and the wanted level call for, traffic spawns cars, vans, pickups and trucks (semis
+    /// mostly on highways). Default off (one police model, one traffic model), so existing
+    /// goldens are unchanged.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fleets: bool,
     /// Expensive to simulate (minutes of a full city): debug `cargo test` skips it, as it skips
     /// `scenarios/soak/`; the release CI jobs (`simcli goldens`, `simcli determinism`, the
     /// wasm compare) still run it.

@@ -57,6 +57,7 @@ pub const SIREN_RADIUS_M: f32 = 60.0;
 
 const NONE: u32 = NO_SEG;
 const HALF_L: f32 = CAR_LENGTH_M * 0.5;
+const HALF_W: f32 = CAR_WIDTH_M * 0.5;
 const SPAWN_PERIOD_S: f32 = 0.25;
 
 /// Seconds spanned by `steps` traffic steps.
@@ -371,6 +372,50 @@ pub struct TrafficConfig {
     pub detect_collisions: bool,
     /// Agents stopped longer than this (and unseen) are recycled, s.
     pub stuck_timeout_s: f32,
+    /// Mixed fleet: vehicle models agents are drawn from (empty = every agent is the one
+    /// [`CAR_LENGTH_M`] car, exactly as before fleets existed).
+    pub fleet: Vec<FleetModel>,
+}
+
+/// One vehicle model of a mixed traffic fleet (`data/fleets/traffic.toml`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FleetModel {
+    /// Car id (`data/cars/<id>.json`); physical agents of this model use that car.
+    pub car: String,
+    /// Bumper-to-bumper length used for spacing and overlap tests, m.
+    pub length_m: f32,
+    /// Body width for overlap tests, m.
+    pub width_m: f32,
+    /// Relative spawn weight on city lanes.
+    pub weight_city: f32,
+    /// Relative spawn weight on highway lanes.
+    pub weight_highway: f32,
+    /// Speed it never exceeds (governor / driver habit), km/h.
+    #[serde(default = "no_cap_kmh")]
+    pub max_speed_kmh: f32,
+    /// Multiplier on the sampled driver acceleration (heavy vehicles pull away slowly).
+    #[serde(default = "one")]
+    pub accel_scale: f32,
+    /// Multiplier on the sampled time headway (heavy vehicles leave more room).
+    #[serde(default = "one")]
+    pub headway_scale: f32,
+}
+
+fn no_cap_kmh() -> f32 {
+    400.0
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// A mixed traffic fleet file: `[[model]]` entries.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FleetFile {
+    /// Models in index order (an agent's `model` indexes this list).
+    pub model: Vec<FleetModel>,
 }
 
 impl Default for TrafficConfig {
@@ -388,6 +433,7 @@ impl Default for TrafficConfig {
             density_scale: 1.0,
             detect_collisions: false,
             stuck_timeout_s: 120.0,
+            fleet: Vec::new(),
         }
     }
 }
@@ -472,6 +518,14 @@ pub struct Agent {
     pub disabled: bool,
     /// Visual variant for the renderer.
     pub variant: u8,
+    /// Fleet model index ([`TrafficConfig::fleet`]; 0 without a fleet).
+    pub model: u8,
+    /// Bumper-to-bumper length, m ([`CAR_LENGTH_M`] without a fleet).
+    pub length_m: f32,
+    /// Body width, m ([`CAR_WIDTH_M`] without a fleet).
+    pub width_m: f32,
+    /// Desired-speed ceiling, m/s (infinite without a fleet).
+    pub speed_cap_mps: f32,
     /// LOD.
     pub lod: Lod,
     /// Near-LOD vehicle.
@@ -504,6 +558,8 @@ pub struct AgentView {
     pub turn_signal: i8,
     /// Visual variant.
     pub variant: u8,
+    /// Fleet model index (see [`TrafficConfig::fleet`]).
+    pub model: u8,
 }
 
 impl From<&AgentView> for wp_contracts::TrafficAgentSnapshot {
@@ -543,6 +599,13 @@ struct Entry {
     v: f32,
     agent: u32,
     ghost: bool,
+    /// Half the agent's length, m.
+    hl: f32,
+}
+
+/// Bumper-to-bumper distance between two centres `d` apart (half lengths `ha`, `hb`).
+fn bumper_gap(d: f32, ha: f32, hb: f32) -> f32 {
+    d - (ha + hb)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -596,7 +659,8 @@ pub struct Traffic {
     stats: TrafficStats,
     lod_changes: Vec<LodChange>,
     overlaps: BTreeSet<(u32, u32)>,
-    car: Option<(VehicleDef, TireDb)>,
+    /// Physical-agent car per fleet model (index 0 = the single traffic car without a fleet).
+    cars: Vec<Option<(VehicleDef, TireDb)>>,
 }
 
 /// Desired-speed factor of driver `p` on segment `seg` ([`DriverParams::factor_on`]).
@@ -679,14 +743,30 @@ impl Traffic {
             stats: TrafficStats::default(),
             lod_changes: Vec::new(),
             overlaps: BTreeSet::new(),
-            car: None,
+            cars: Vec::new(),
         }
     }
 
     /// Vehicle definition used for physical (near-LOD) agents. Without one, agents stay
     /// kinematic.
     pub fn set_traffic_car(&mut self, def: VehicleDef, tires: TireDb) {
-        self.car = Some((def, tires));
+        if self.cars.is_empty() {
+            self.cars.push(None);
+        }
+        self.cars[0] = Some((def, tires));
+    }
+
+    /// Vehicle definition for physical agents of fleet model `model` (models without one
+    /// stay kinematic).
+    pub fn set_fleet_car(&mut self, model: usize, def: VehicleDef, tires: TireDb) {
+        if self.cars.len() <= model {
+            self.cars.resize(model + 1, None);
+        }
+        self.cars[model] = Some((def, tires));
+    }
+
+    fn car_of(&self, a: &Agent) -> Option<&(VehicleDef, TireDb)> {
+        self.cars.get(a.model as usize).and_then(Option::as_ref)
     }
 
     /// All agents, ordered by id.
@@ -768,6 +848,7 @@ impl Traffic {
                 yielding: a.yielding,
                 turn_signal,
                 variant: a.variant,
+                model: a.model,
             }
         })
     }
@@ -789,8 +870,8 @@ impl Traffic {
             Obb {
                 c: geom::xy(p),
                 f,
-                hl: HALF_L,
-                hw: CAR_WIDTH_M * 0.5,
+                hl: 0.5 * a.length_m,
+                hw: 0.5 * a.width_m,
             },
             p[2],
         )
@@ -811,6 +892,9 @@ impl Traffic {
             h.write_u32(a.permit);
             h.write_u32(a.personality as u32);
             h.write_u32(a.lod as u32);
+            if !self.config.fleet.is_empty() {
+                h.write_u32(a.model as u32);
+            }
         }
         h.write_u64(self.stats.spawned);
         h.write_u64(self.stats.despawned);
@@ -916,6 +1000,7 @@ impl Traffic {
                 v: a.v,
                 agent: i as u32,
                 ghost: false,
+                hl: 0.5 * a.length_m,
             });
             if let Some((gs, gss)) = a.ghost {
                 let l = &mut self.lists[gs as usize];
@@ -927,6 +1012,7 @@ impl Traffic {
                     v: a.v,
                     agent: i as u32,
                     ghost: true,
+                    hl: 0.5 * a.length_m,
                 });
             }
         }
@@ -1030,9 +1116,10 @@ impl Traffic {
         let seg = map.seg(a.seg);
         let l = &self.lists[a.seg as usize];
         let mut best: Option<(f32, f32)> = None;
+        let ha = 0.5 * a.length_m;
         for e in &l[self.list_pos[i] as usize + 1..] {
             if e.agent as usize != i {
-                best = Some((e.s - a.s - CAR_LENGTH_M, e.v));
+                best = Some((bumper_gap(e.s - a.s, ha, e.hl), e.v));
                 break;
             }
         }
@@ -1041,8 +1128,8 @@ impl Traffic {
         if seg.is_connector() {
             for &(sib, div) in &seg.siblings {
                 for e in &self.lists[sib as usize] {
-                    if e.s > a.s && e.s - HALF_L < div {
-                        let g = e.s - a.s - CAR_LENGTH_M;
+                    if e.s > a.s && e.s - e.hl < div {
+                        let g = bumper_gap(e.s - a.s, ha, e.hl);
                         if best.is_none_or(|b| g < b.0) {
                             best = Some((g, e.v));
                         }
@@ -1059,21 +1146,21 @@ impl Traffic {
                 break;
             }
             let ns = map.seg(nx);
-            let mut cand: Option<(f32, f32)> = self.lists[nx as usize]
+            let mut cand: Option<(f32, f32, f32)> = self.lists[nx as usize]
                 .iter()
                 .find(|e| e.agent as usize != i)
-                .map(|e| (e.s, e.v));
+                .map(|e| (e.s, e.v, e.hl));
             if k == 0 && ns.is_connector() {
                 for &(sib, div) in &ns.siblings {
                     if let Some(e) = self.lists[sib as usize].first() {
-                        if e.s - HALF_L < div && cand.is_none_or(|c| e.s < c.0) {
-                            cand = Some((e.s, e.v));
+                        if e.s - e.hl < div && cand.is_none_or(|c| e.s < c.0) {
+                            cand = Some((e.s, e.v, e.hl));
                         }
                     }
                 }
             }
-            if let Some((s, v)) = cand {
-                return (dist + s - CAR_LENGTH_M, v);
+            if let Some((s, v, hl)) = cand {
+                return (bumper_gap(dist + s, ha, hl), v);
             }
             dist += ns.length;
         }
@@ -1128,12 +1215,12 @@ impl Traffic {
                 continue;
             }
             if stopping && a.permit != conn {
-                let d = (fseg.length - a.s - HALF_L - 0.5).max(0.1);
+                let d = (fseg.length - a.s - 0.5 * a.length_m - 0.5).max(0.1);
                 if a.v * a.v / (2.0 * d) <= a.params.comfort_decel {
                     continue;
                 }
             }
-            let d = (fseg.length - a.s - HALF_L).max(0.0);
+            let d = (fseg.length - a.s - 0.5 * a.length_m).max(0.0);
             best = best.min(d / a.v.max(1.0));
         }
         let base = fseg.length;
@@ -1192,7 +1279,7 @@ impl Traffic {
                 continue;
             };
             let f = &self.agents[e.agent as usize];
-            let d_line = map.seg(inc.lane).length - f.s - HALF_L;
+            let d_line = map.seg(inc.lane).length - f.s - 0.5 * f.length_m;
             let Some(ft) = f.stopped_since else { continue };
             if d_line < 4.0
                 && (ft < my_t || (ft == my_t && f.id < a.id))
@@ -1312,8 +1399,8 @@ impl Traffic {
         let target = cs.next[0];
         let on_conn = self.lists[conn as usize].len() as f32;
         if let Some(e) = self.lists[target as usize].first() {
-            let space = e.s - HALF_L;
-            if e.v < 3.0 && space < (on_conn + 1.0) * (CAR_LENGTH_M + 2.0) {
+            let space = e.s - e.hl;
+            if e.v < 3.0 && space < (on_conn + 1.0) * (2.0 * e.hl + 2.0) {
                 return false;
             }
         }
@@ -1345,12 +1432,15 @@ impl Traffic {
 
             // Desired speed.
             let sf = speed_factor_on(map, a.seg, &p);
-            let mut v0 = (seg.speed_limit * sf).min(seg.curve_speed * sf);
+            let half = 0.5 * a.length_m;
+            let mut v0 = (seg.speed_limit * sf)
+                .min(seg.curve_speed * sf)
+                .min(a.speed_cap_mps);
             let d_end = seg.length - a.s;
             if a.plan[0] != NONE {
                 let ns = map.seg(a.plan[0]);
                 let vc = ns.curve_speed.min(ns.speed_limit) * speed_factor_on(map, a.plan[0], &p);
-                v0 = v0.min((vc * vc + 2.0 * p.comfort_decel * (d_end - HALF_L).max(0.0)).sqrt());
+                v0 = v0.min((vc * vc + 2.0 * p.comfort_decel * (d_end - half).max(0.0)).sqrt());
             }
             let mut lat_target = 0.0f32;
             let mut acc = f32::INFINITY;
@@ -1384,7 +1474,7 @@ impl Traffic {
                     .iter()
                     .find(|e| e.s > gs && e.agent as usize != i);
                 if let Some(e) = lead {
-                    acc = acc.min(idm(v, v0, e.s - gs - CAR_LENGTH_M, e.v, &p));
+                    acc = acc.min(idm(v, v0, bumper_gap(e.s - gs, half, e.hl), e.v, &p));
                 }
             }
 
@@ -1397,8 +1487,9 @@ impl Traffic {
                 let long = geom::dot(r, pose.f);
                 let latd = geom::dot(r, right);
                 let tv = [t.vel[0], t.vel[1]];
-                if long > 0.0 && long < 80.0 && latd.abs() < CAR_WIDTH_M + 0.4 {
-                    acc = acc.min(idm(v, v0, long - CAR_LENGTH_M, geom::dot(tv, pose.f), &p));
+                if long > 0.0 && long < 80.0 && latd.abs() < 0.5 * a.width_m + HALF_W + 0.4 {
+                    let g = bumper_gap(long, half, HALF_L);
+                    acc = acc.min(idm(v, v0, g, geom::dot(tv, pose.f), &p));
                 }
                 let w = geom::sub(tv, pose.vel);
                 let ww = geom::dot(w, w);
@@ -1450,7 +1541,7 @@ impl Traffic {
             let mut grant: Option<SegId> = None;
             let mut revoke = false;
             if !seg.is_connector() && next != NONE && map.seg(next).is_connector() {
-                let d_line = d_end - HALF_L - 0.5;
+                let d_line = d_end - half - 0.5;
                 let need = v * v / (2.0 * d_line.max(0.1));
                 if a.permit == next {
                     let sig = map.lane_signal(a.seg);
@@ -1482,7 +1573,7 @@ impl Traffic {
                 // Approaching a short lane that ends at a junction: respect its stop line early.
                 let ns = map.seg(next);
                 if ns.length < 40.0 && map.seg(a.plan[1]).is_connector() {
-                    let d_line = d_end + ns.length - HALF_L - 0.5;
+                    let d_line = d_end + ns.length - half - 0.5;
                     acc = acc.min(idm(v, v0, d_line.max(0.0) + p.min_gap_m, 0.0, &p));
                 }
             }
@@ -1542,10 +1633,19 @@ impl Traffic {
     // Lane changes (MOBIL)
     // ------------------------------------------------------------------------------------
 
-    fn lane_local_acc(&self, list: &[Entry], s: f32, v: f32, p: &DriverParams, v0: f32) -> f32 {
+    #[allow(clippy::too_many_arguments)]
+    fn lane_local_acc(
+        &self,
+        list: &[Entry],
+        s: f32,
+        hl: f32,
+        v: f32,
+        p: &DriverParams,
+        v0: f32,
+    ) -> f32 {
         let lead = list.iter().find(|e| e.s > s);
         match lead {
-            Some(e) => idm(v, v0, e.s - s - CAR_LENGTH_M, e.v, p),
+            Some(e) => idm(v, v0, bumper_gap(e.s - s, hl, e.hl), e.v, p),
             None => idm(v, v0, f32::INFINITY, 0.0, p),
         }
     }
@@ -1592,18 +1692,21 @@ impl Traffic {
                 continue;
             }
             let p = a.params;
-            let v0 = seg.speed_limit * speed_factor_on(map, a.seg, &p);
+            let v0 = (seg.speed_limit * speed_factor_on(map, a.seg, &p)).min(a.speed_cap_mps);
+            let ha = 0.5 * a.length_m;
             let own = &self.lists[a.seg as usize];
             let pos = self.list_pos[i] as usize;
-            let a_c = self.lane_local_acc(own, a.s, a.v, &p, v0);
+            let a_c = self.lane_local_acc(own, a.s, ha, a.v, &p, v0);
             // Old follower.
             let old_f = own[..pos].iter().rev().find(|e| !e.ghost);
             let (a_o, a_o2) = match old_f {
                 Some(e) => {
-                    let fp = self.agents[e.agent as usize].params;
-                    let fv0 = seg.speed_limit * speed_factor_on(map, a.seg, &fp);
-                    let a_o = idm(e.v, fv0, a.s - e.s - CAR_LENGTH_M, a.v, &fp);
-                    let a_o2 = self.lane_local_acc(&own[pos + 1..], e.s, e.v, &fp, fv0);
+                    let fa = &self.agents[e.agent as usize];
+                    let fp = fa.params;
+                    let fv0 =
+                        (seg.speed_limit * speed_factor_on(map, a.seg, &fp)).min(fa.speed_cap_mps);
+                    let a_o = idm(e.v, fv0, bumper_gap(a.s - e.s, ha, e.hl), a.v, &fp);
+                    let a_o2 = self.lane_local_acc(&own[pos + 1..], e.s, e.hl, e.v, &fp, fv0);
                     (a_o, a_o2)
                 }
                 None => (0.0, 0.0),
@@ -1640,23 +1743,27 @@ impl Traffic {
                 let lead = list.iter().find(|e| e.s > s2);
                 let fol = list.iter().rev().find(|e| e.s <= s2);
                 if let Some(e) = lead {
-                    if e.s - s2 - CAR_LENGTH_M < p.min_gap_m + 1.0 {
+                    if bumper_gap(e.s - s2, ha, e.hl) < p.min_gap_m + 1.0 {
                         continue;
                     }
                 }
                 let (a_n, a_n2) = match fol {
                     Some(e) => {
-                        if s2 - e.s - CAR_LENGTH_M < 2.0 {
+                        if bumper_gap(s2 - e.s, ha, e.hl) < 2.0 {
                             continue;
                         }
-                        let fp = self.agents[e.agent as usize].params;
-                        let fv0 = cs.speed_limit * speed_factor_on(map, c, &fp);
-                        let a_n2 = idm(e.v, fv0, s2 - e.s - CAR_LENGTH_M, a.v, &fp);
+                        let fa = &self.agents[e.agent as usize];
+                        let fp = fa.params;
+                        let fv0 =
+                            (cs.speed_limit * speed_factor_on(map, c, &fp)).min(fa.speed_cap_mps);
+                        let a_n2 = idm(e.v, fv0, bumper_gap(s2 - e.s, ha, e.hl), a.v, &fp);
                         if a_n2 < -4.0 {
                             continue;
                         }
                         let a_n = match lead {
-                            Some(l2) => idm(e.v, fv0, l2.s - e.s - CAR_LENGTH_M, l2.v, &fp),
+                            Some(l2) => {
+                                idm(e.v, fv0, bumper_gap(l2.s - e.s, e.hl, l2.hl), l2.v, &fp)
+                            }
                             None => idm(e.v, fv0, f32::INFINITY, 0.0, &fp),
                         };
                         (a_n, a_n2)
@@ -1664,7 +1771,7 @@ impl Traffic {
                     None => (0.0, 0.0),
                 };
                 let a_c2 = match lead {
-                    Some(e) => idm(a.v, v0, e.s - s2 - CAR_LENGTH_M, e.v, &p),
+                    Some(e) => idm(a.v, v0, bumper_gap(e.s - s2, ha, e.hl), e.v, &p),
                     None => idm(a.v, v0, f32::INFINITY, 0.0, &p),
                 };
                 let bias = if to_right {
@@ -1838,7 +1945,7 @@ impl Traffic {
                     && map.seg(a.plan[0]).is_connector()
                     && a.permit != a.plan[0]
                 {
-                    let lim = seg.length - HALF_L - 0.3;
+                    let lim = seg.length - 0.5 * a.length_m - 0.3;
                     if a.s > lim {
                         a.s = lim.max(s_prev);
                         a.v = 0.0;
@@ -1944,10 +2051,10 @@ impl Traffic {
     }
 
     fn promote(&mut self, map: &CityMap, i: usize) {
-        let Some((def, tires)) = &self.car else {
+        let a = &self.agents[i];
+        let Some((def, tires)) = self.car_of(a) else {
             return;
         };
-        let a = &self.agents[i];
         let (p, f) = self.pose_of(map, a);
         let yaw = geom::yaw_of(f);
         let mut vehicle = Vehicle::new(def, tires, p, yaw);
@@ -2009,12 +2116,12 @@ impl Traffic {
                 {
                     self.agents[i].despawn = true;
                     self.stats.despawned += 1;
-                } else if (d > r + 20.0 && !a.disabled) || self.car.is_none() {
+                } else if (d > r + 20.0 && !a.disabled) || self.car_of(a).is_none() {
                     self.demote(map, i);
                 } else {
                     physical += 1;
                 }
-            } else if d < r && self.car.is_some() {
+            } else if d < r && self.car_of(a).is_some() {
                 cands.push((d, i as u32));
             }
         }
@@ -2190,6 +2297,30 @@ impl Traffic {
         }
     }
 
+    /// Draw a fleet model for a spawn on a highway or a city lane (weighted).
+    fn pick_model(&mut self, highway: bool) -> usize {
+        let w = |m: &FleetModel| {
+            if highway {
+                m.weight_highway
+            } else {
+                m.weight_city
+            }
+            .max(0.0)
+        };
+        let total: f32 = self.config.fleet.iter().map(w).sum();
+        if total <= 0.0 {
+            return 0;
+        }
+        let mut r = self.rng.next_f32() * total;
+        for (i, m) in self.config.fleet.iter().enumerate() {
+            r -= w(m);
+            if r < 0.0 {
+                return i;
+            }
+        }
+        self.config.fleet.len() - 1
+    }
+
     fn try_spawn(
         &mut self,
         map: &CityMap,
@@ -2218,21 +2349,36 @@ impl Traffic {
             if self.visible(smp.pos, inp.tracked) {
                 continue;
             }
+            // Fleet model (only with a fleet, so a fleet-less run draws exactly as before).
+            let model = if self.config.fleet.is_empty() {
+                None
+            } else {
+                let highway = map
+                    .seg(smp.seg)
+                    .lane()
+                    .is_some_and(|l| map.net.lanes[l as usize].kind == LaneKind::Highway);
+                Some(self.pick_model(highway))
+            };
+            let (len, width) = match model {
+                Some(m) => (self.config.fleet[m].length_m, self.config.fleet[m].width_m),
+                None => (CAR_LENGTH_M, CAR_WIDTH_M),
+            };
+            let hl = 0.5 * len;
             let s = smp.s;
-            if s < CAR_LENGTH_M + 3.0 || s > seg.length - 25.0 {
+            if s < len + 3.0 || s > seg.length - 25.0 {
                 continue;
             }
             let list = &self.lists[smp.seg as usize];
             let ahead = list.iter().find(|e| e.s >= s);
             let behind = list.iter().rev().find(|e| e.s < s);
             let gap_a = ahead
-                .map(|e| e.s - s - CAR_LENGTH_M)
+                .map(|e| bumper_gap(e.s - s, hl, e.hl))
                 .unwrap_or(f32::INFINITY);
             if gap_a < 12.0 {
                 continue;
             }
             if let Some(e) = behind {
-                if s - e.s - CAR_LENGTH_M < 12.0 + e.v * 1.6 {
+                if bumper_gap(s - e.s, hl, e.hl) < 12.0 + e.v * 1.6 {
                     continue;
                 }
             }
@@ -2258,8 +2404,17 @@ impl Traffic {
                     Personality::LawAbiding
                 }
             };
-            let params = DriverParams::sample(personality, &mut self.rng);
-            let v0 = seg.speed_limit * speed_factor_on(map, smp.seg, &params);
+            let mut params = DriverParams::sample(personality, &mut self.rng);
+            let speed_cap_mps = match model {
+                Some(m) => {
+                    let f = &self.config.fleet[m];
+                    params.max_accel *= f.accel_scale;
+                    params.headway_s *= f.headway_scale;
+                    f.max_speed_kmh / 3.6
+                }
+                None => f32::INFINITY,
+            };
+            let v0 = (seg.speed_limit * speed_factor_on(map, smp.seg, &params)).min(speed_cap_mps);
             let room = (seg.length - s - 15.0).max(0.0);
             let v = (v0 * 0.8)
                 .min(((gap_a - 6.0) / 1.6).max(0.0))
@@ -2296,6 +2451,10 @@ impl Traffic {
                 yielding: false,
                 disabled: false,
                 variant,
+                model: model.unwrap_or(0) as u8,
+                length_m: len,
+                width_m: width,
+                speed_cap_mps,
                 lod: Lod::Kinematic,
                 physical: None,
                 despawn: false,
@@ -2314,6 +2473,7 @@ impl Traffic {
                     v,
                     agent: idx,
                     ghost: false,
+                    hl,
                 },
             );
             let (p, f) = seg.point_at(s);
@@ -2367,16 +2527,18 @@ impl Traffic {
                         if (pa.p[2] - pb.p[2]).abs() > 3.0 {
                             continue;
                         }
+                        let (ai, aj) = (&self.agents[i as usize], &self.agents[j as usize]);
                         let oa = Obb {
                             c: geom::xy(pa.p),
                             f: pa.f,
-                            hl: HALF_L,
-                            hw: CAR_WIDTH_M * 0.5,
+                            hl: 0.5 * ai.length_m,
+                            hw: 0.5 * ai.width_m,
                         };
                         let ob = Obb {
                             c: geom::xy(pb.p),
                             f: pb.f,
-                            ..oa
+                            hl: 0.5 * aj.length_m,
+                            hw: 0.5 * aj.width_m,
                         };
                         if geom::obb_overlap(&oa, &ob) {
                             let (ia, ib) = (self.agents[i as usize].id, self.agents[j as usize].id);

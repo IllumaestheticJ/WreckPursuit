@@ -164,6 +164,15 @@ export const sim = {
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
+  /** Car ids of the traffic fleet in model order (empty without a fleet). */
+  trafficFleetCars: (): string[] => {
+    const fn = (wasm as unknown as { traffic_fleet_cars?: () => string }).traffic_fleet_cars;
+    try {
+      return typeof fn === "function" ? (JSON.parse(fn()) as string[]) : [];
+    } catch {
+      return [];
+    }
+  },
   /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
   signalHeads: (): Float32Array => wasm.signal_heads(),
   /** Painted road markings as a triangle soup ([x, y, z] per vertex); fetch once per session. */

@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
 import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
+import { TrafficModels } from "./render/traffic_models";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { MarkingsView } from "./markings_view";
@@ -52,6 +53,8 @@ export class SceneView {
   readonly signals = new SignalView();
   /** Painted road markings (markings_view.ts). */
   readonly markings = new MarkingsView();
+  /** Kinematic traffic as real fleet cars (render/traffic_models.ts). */
+  readonly traffic = new TrafficModels();
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -85,7 +88,15 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group, this.markings.group);
+    this.world.add(
+      axes,
+      this.barriers,
+      this.intentGroup,
+      this.agentMesh,
+      this.traffic.group,
+      this.signals.group,
+      this.markings.group,
+    );
   }
 
   /**
@@ -178,12 +189,23 @@ export class SceneView {
     });
   }
 
-  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */
+  /**
+   * Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent): the real
+   * fleet cars once their meshes load (render/traffic_models.ts), boxes until then / without
+   * a fleet.
+   */
   updateAgents(agents: Float32Array, skipPhysical = false): void {
     const total = agents.length / AGENT_STRIDE;
     const show = layers.on("traffic");
-    this.agentMesh.visible = show && total > 0;
-    if (!this.agentMesh.visible) return;
+    let only: Set<number> | null = null;
+    if (this.traffic.active) {
+      only = new Set(this.traffic.update(agents, skipPhysical, show));
+    }
+    this.agentMesh.visible = show && total > 0 && (only === null || only.size > 0);
+    if (!this.agentMesh.visible) {
+      this.agentMesh.count = 0;
+      return;
+    }
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const zAxis = new THREE.Vector3(0, 0, 1);
@@ -191,6 +213,7 @@ export class SceneView {
     for (let a = 0; a < total && n < MAX_AGENTS; a++) {
       const o = a * AGENT_STRIDE;
       if (skipPhysical && agents[o + 4] & AGENT_FLAG.physical) continue;
+      if (only && !only.has(a)) continue;
       const i = n++;
       q.setFromAxisAngle(zAxis, agents[o + 3]);
       m.compose(new THREE.Vector3(agents[o], agents[o + 1], agents[o + 2] + 0.7), q, AGENT_SCALE);

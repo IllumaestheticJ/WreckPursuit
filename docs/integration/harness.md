@@ -490,3 +490,11 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. `crush_depth` → `DamageModel::structural_crush_m()` (B's request).
 2. Promote the observer soak civilian-collision gate (D says it passes; E may flip police back on).
 3. Run the slow city scenarios in the release CI jobs, per `lead/test-speed`.
+
+## `fleets: bool` scenario field (2026-10-21)
+Default off (omitted when false, so existing RON and replays are unchanged). On: `build_sim` loads
+`data/fleets/traffic.toml` (set on the world before `populate`) and `data/fleets/police.toml`
+(after the police system) — `simcli::run::{load_police_fleet, load_traffic_fleet}`. The browser's
+free-drive / city-chase presets (`wp_wasm::scenario::free_drive_in`) set it. Test:
+`apps/simcli/tests/fleets.rs` (golden city chase with fleets at L4: ≥ 2 police models, ≥ 8 traffic
+models, deterministic; with fleets off only the single models appear).

@@ -24,6 +24,15 @@ impl Sim {
         self.traffic_car = Some(car);
     }
 
+    /// Mixed traffic fleet: agents of fleet model `i` spawn with `models[i]`'s size and
+    /// habits and, when promoted, become `cars[i]`. Set after [`Sim::set_world`] and before
+    /// the world is populated (spawned agents keep their model).
+    pub fn set_traffic_fleet(&mut self, models: Vec<wp_world::FleetModel>, cars: Vec<LoadedCar>) {
+        assert_eq!(models.len(), cars.len(), "one car per fleet model");
+        self.world.set_traffic_fleet(models, &cars);
+        self.traffic_fleet = cars;
+    }
+
     /// After the world step: give promoted agents a vehicle, remove demoted / despawned ones.
     pub(crate) fn apply_traffic_lod(&mut self) {
         for change in self.world.drain_lod_changes() {
@@ -47,7 +56,14 @@ impl Sim {
     }
 
     fn embody_agent(&mut self, agent: AgentId) {
-        let Some(car) = self.traffic_car.clone() else {
+        let fleet_car = if self.traffic_fleet.is_empty() {
+            None
+        } else {
+            self.world
+                .agent_model(agent)
+                .and_then(|m| self.traffic_fleet.get(m as usize).cloned())
+        };
+        let Some(car) = fleet_car.or_else(|| self.traffic_car.clone()) else {
             return;
         };
         if self.vehicles.len() + TRAFFIC_SLOT_RESERVE >= MAX_VEHICLES {

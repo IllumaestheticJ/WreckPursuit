@@ -85,7 +85,7 @@ export const SIGNAL = { off: 0, red: 1, yellow: 2, green: 3 } as const;
 
 /** Floats per agent in traffic_agents(): [x, y, z, yaw, flags]. */
 export const AGENT_STRIDE = 5;
-/** traffic_agents() flag bits (variant in bits 8+). */
+/** traffic_agents() flag bits (variant in bits 8–15, fleet model index in bits 16+). */
 export const AGENT_FLAG = {
   physical: 1,
   brake: 2,

@@ -1,0 +1,71 @@
+# Police fleet: which car each AI ground unit drives (wp_police::fleet::PoliceFleet).
+#
+# A unit's model is drawn when it gets its body, from the weights for its role and the wanted
+# level of the most-wanted racer at that moment (levels L1..L5; patrols use `patrol`):
+#   patrol     district patrol pool units (no pursuit yet)
+#   reinforce  units dispatched to a pursuit, by wanted level
+#   tool       roadblock / spike-strip units, by wanted level
+# `limits` = [skidpad g, 100-0 km/h stop m, 0-100 km/h s, top speed km/h] from
+# data/cars/VALIDATION.md (sim columns); the pro driver plans corners and braking with them.
+# Used when a scenario sets `fleets: true` (the browser free drive and city chase do).
+
+seed = 0x5E47_1ED5
+
+# Black-and-white patrol workhorse: the default at low heat.
+[[unit]]
+car = "sentinel_cruiser"
+limits = [0.85, 40.0, 6.4, 260.0]
+patrol = 6.0
+reinforce = [5.0, 4.0, 3.0, 2.0, 1.0]
+tool = [3.0, 2.0, 1.0, 0.0, 0.0]
+
+# AWD pursuit sedan: the specialist once a chase is on.
+[[unit]]
+car = "sentinel_wolfhound"
+limits = [0.85, 39.6, 5.5, 244.0]
+patrol = 2.0
+reinforce = [2.0, 3.0, 3.0, 3.0, 2.0]
+
+# Mid-size police SUV: patrols everywhere, blocks junctions early on.
+[[unit]]
+car = "sentinel_marshal"
+limits = [0.80, 40.4, 5.8, 236.0]
+patrol = 3.0
+reinforce = [2.0, 2.0, 2.0, 2.0, 1.0]
+tool = [2.0, 2.0, 1.0, 0.0, 0.0]
+
+# Unmarked sedan: rare on patrol, joins chases from L2.
+[[unit]]
+car = "sentinel_shade"
+limits = [0.85, 39.1, 5.7, 259.0]
+patrol = 1.0
+reinforce = [0.0, 1.0, 2.0, 2.0, 1.0]
+
+# Highway-patrol coupe: the fast one, arrives from L3.
+[[unit]]
+car = "sentinel_courser"
+limits = [0.85, 39.7, 5.5, 286.0]
+patrol = 0.5
+reinforce = [0.0, 0.0, 2.0, 3.0, 3.0]
+
+# Full-size police SUV: the roadblock on wheels.
+[[unit]]
+car = "sentinel_bastion"
+limits = [0.72, 42.7, 8.0, 214.0]
+patrol = 1.0
+reinforce = [0.0, 1.0, 1.0, 2.0, 2.0]
+tool = [1.0, 2.0, 3.0, 3.0, 2.0]
+
+# Prisoner van: blocks roads from L2, joins the chase at L4.
+[[unit]]
+car = "sentinel_warden"
+limits = [0.61, 43.8, 8.9, 202.0]
+reinforce = [0.0, 0.0, 0.0, 1.0, 1.0]
+tool = [0.0, 1.0, 2.0, 2.0, 1.0]
+
+# SWAT armoured truck: L4–L5 only, mostly as the roadblock you cannot push.
+[[unit]]
+car = "sentinel_breacher"
+limits = [0.69, 52.9, 19.7, 136.0]
+reinforce = [0.0, 0.0, 0.0, 0.0, 2.0]
+tool = [0.0, 0.0, 0.0, 2.0, 4.0]

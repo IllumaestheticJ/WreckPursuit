@@ -29,6 +29,7 @@ wp_audio.workspace = true
 simcli = { path = "../../apps/simcli" }
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 wasm-bindgen.workspace = true
 # Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
 postcard = { version = "1", default-features = false, features = ["alloc"] }

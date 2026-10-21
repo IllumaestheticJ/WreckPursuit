@@ -649,3 +649,11 @@ embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and c
 sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
 stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
 testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
+
+## Fleet traffic models (2026-10-21)
+`render/traffic_models.ts`: with a traffic fleet (`traffic_fleet_cars()` wasm export, model index
+in `traffic_agents()` flags `>> 16`), kinematic traffic is drawn as the real cars — each model's
+panel mesh merged at rest into three `InstancedMesh`es (paint tinted per agent from the car's
+palette, baked-colour trim / lamps / wheels, glass); boxes only for models still loading or
+without a fleet. Check: `node e2e/fleets_shots.mjs` (city chase at L4: police models dispatched,
+traffic models on the road incl. heavy trucks, no page errors).

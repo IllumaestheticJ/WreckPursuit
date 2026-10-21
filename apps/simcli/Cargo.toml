@@ -19,5 +19,6 @@ wp_world.workspace = true
 wp_vehicle.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 ron.workspace = true
 thiserror.workspace = true
