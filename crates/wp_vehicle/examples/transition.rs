@@ -692,6 +692,27 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                 ..base
             }
         };
+        // V2SETTLE=1 (new-side settle search): only the spin weighting, rear relax and rear peak
+        // slip move (no ellipse / drive floor / front falloff), around V2BASE.
+        let t = if std::env::var("V2SETTLE").is_ok() && i > 0 {
+            let mut pick = |cur: f32, lo: f32, hi: f32| {
+                let r = rng.range(lo, hi);
+                (cur + (r - cur) * spread).clamp(lo, hi)
+            };
+            CarTune {
+                spin_b0: pick(base.spin_b0, 2.0, 12.0),
+                spin_b2: pick(base.spin_b2, 0.8, 3.0),
+                spin_c: pick(base.spin_c, 0.5, 1.0),
+                spin_p: pick(base.spin_p, 1.0, 8.0).round(),
+                rear_relax: pick(base.rear_relax, 0.4, 2.0),
+                rear_peak_slip: pick(base.rear_peak_slip, 0.6, 1.5),
+                spin_ellipse: base.spin_ellipse,
+                spin_fx_slide: base.spin_fx_slide,
+                ..base
+            }
+        } else {
+            t
+        };
         // V2EXTRA=1: also the drift lock, the front deep-slip falloff and the rear peak slip.
         let t = if std::env::var("V2EXTRA").is_ok() && i > 0 {
             let mut pick = |cur: f32, lo: f32, hi: f32| {
