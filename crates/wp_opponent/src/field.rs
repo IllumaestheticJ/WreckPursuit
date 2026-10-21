@@ -1893,11 +1893,14 @@ fn decide_racer(
             // Nose up to a parked car (closer than the creep stop gap allows a car to steer out
             // round it): back out a little first (Hollins, police seed 6: the last racer stopped
             // 0.9 m behind a busted car and waited there for the rest of the race).
+            // A racer out of the race standing there is as good as parked (Loop 9 with police:
+            // a racer nosed up to a captured one waited behind it for the rest of the race).
             let nosed_up = rel.iter().any(|x| {
+                let standing_out = x.o.out_of_race && x.o.v_s.abs() < 0.5;
                 x.ds > 0.0
-                    && x.o.parked
-                    && x.gap < CREEP_STOP_GAP_M + 0.5
-                    && (x.o.n - r.n).abs() < hw + x.o.half_w
+                    && (x.o.parked || standing_out)
+                    && x.gap < CREEP_STOP_GAP_M + if standing_out { 1.5 } else { 0.5 }
+                    && (x.o.n - r.n).abs() < hw + x.o.half_w + if standing_out { 0.5 } else { 0.0 }
             });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
