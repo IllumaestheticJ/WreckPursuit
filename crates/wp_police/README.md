@@ -21,8 +21,11 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 
 1. **Racers** are synced (position/velocity); spike strip crossings are checked per wheel.
 2. **Events**: `TrafficViolation` adds heat (full if a unit/camera *witnessed* it, 20% otherwise
-   as a civilian *report*). If no unit saw it (only a camera, or nobody), a report incident opens
-   at the violation and the nearest free unit is sent after the report delay; `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
+   as a civilian *report*). Once `wp_sim` reports traffic (`set_obstacles`), an unseen violation
+   is only called in when a civilian car with line of sight is within `heat.caller_range_m[phase]`;
+   with nobody around it adds no heat and no report. If no unit saw it (only a camera, or a
+   caller), a report incident opens at the violation and the nearest free unit is sent after the
+   report delay; `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
    and a racer marks the unit, civilian–civilian contacts above a speed create crash incidents.
 3. **Driving** (every tick): internally driven units integrate with the built-in kinematic driver.
 4. **Think** (`think_hz`, default 10 Hz): line of sight → rules (heat decay, escape, capture,
