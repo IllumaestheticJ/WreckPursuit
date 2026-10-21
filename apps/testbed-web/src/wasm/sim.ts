@@ -258,15 +258,79 @@ export const sim = {
   /** Countersteer help slider, 0..100 % (owner row 57). */
   setCountersteer: (entity: number, percent: number): void => wasm.set_countersteer(entity, percent),
   countersteer: (entity: number): number => wasm.countersteer(entity),
+  /** Drift Lab B: drift-assist constants in effect / shipped defaults (wp_vehicle::drift::DriftTuning). */
+  driftTuning: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_json()),
+  driftTuningDefaults: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_defaults_json()),
+  /** Set the runtime override from JSON ("" = defaults). */
+  driftTuningSet: (json: string): void => wasm.drift_tuning_set(json),
+  /** Unify A/B (wp_vehicle::lab_scope): the pre-unify stock handling where no override is set. */
+  labScopeSetLegacy: (on: boolean): void => wasm.lab_scope_set_legacy(on),
+  labScopeLegacy: (): boolean => wasm.lab_scope_legacy(),
+  /** Unify A/B: plain steering off for player cars too. */
+  labScopeSetPlainOff: (on: boolean): void => wasm.lab_scope_set_plain_off(on),
+  labScopePlainOff: (): boolean => wasm.lab_scope_plain_off(),
+  /** Re-apply a vehicle's body inertia after a ride override (live and replay sessions). */
+  refreshBodyInertia: (entity: number): void => wasm.refresh_body_inertia(entity),
+  /** Whether a vehicle gets the player steering aids (player cars; not AI, police or traffic). */
+  playerInput: (entity: number): boolean => wasm.player_input(entity),
+  /** [mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle]; mode 0 off … 5 exceeded. */
+  driftReadout: (entity: number): Float32Array => wasm.drift_readout(entity),
+  /** Plain keyboard steering constants a player's car drives with (override or shipped; null = off / legacy) / the shipped defaults (wp_vehicle::plain::PlainSteer). */
+  plainSteer: (): Record<string, number> | null => JSON.parse(wasm.plain_steer_json()),
+  plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
+  /** Set the plain steering override with these constants ("" = the shipped default; plain off: labScopeSetPlainOff). */
+  plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
+  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg,
+   * auto_clutch (1/0), clutch engagement 0..1, clutch_locked (1/0), engine_rpm, driven_wheel_rpm, clutch_pedal]. */
+  plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
+  /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
+  rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number>; medium_weight: Record<string, number>; firm: Record<string, number>; owner: Record<string, number>; shipped: Record<string, number> } =>
+    JSON.parse(wasm.ride_tune_defaults_json()),
+  /** Set the ride tuning override ("" = the shipped ride). */
+  rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
+  /** [roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]. */
+  rideReadout: (entity: number): Float32Array => wasm.ride_readout(entity),
+  /** Drift Lab W car / tyre experiments in effect (null = data) / {data, spin_damper, spin} (wp_vehicle::car_lab::CarTune). */
+  carTune: (): Record<string, number | boolean> | null => JSON.parse(wasm.car_tune_json()),
+  carTuneDefaults: (): {
+    data: Record<string, number | boolean>;
+    spin_damper: Record<string, number | boolean>;
+    spin: Record<string, number | boolean>;
+    spin_lock: Record<string, number | boolean>;
+    spin_vr_plain: Record<string, number>;
+    transition_plain: Record<string, number>;
+    spin_v2: Record<string, number | boolean>;
+    spin_v2_plain: Record<string, number>;
+    step22: Record<string, number | boolean>;
+    shipped: Record<string, number | boolean>;
+  } =>
+    JSON.parse(wasm.car_tune_defaults_json()),
+  /** Set the car / tyre override ("" = the shipped tyres). */
+  carTuneSet: (json: string): void => wasm.car_tune_set(json),
+  /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
+  gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
+  gripBalanceDefaults: (): {
+    before: Record<string, number | boolean | string>;
+    new: Record<string, number | boolean | string>;
+    grip: Record<string, number | boolean | string>;
+    step14: Record<string, number | boolean | string>;
+    step2: Record<string, number | boolean | string>;
+    slow_weight: Record<string, number | boolean | string>;
+    drift_best: Record<string, number | boolean | string>;
+    lock_only: Record<string, number | boolean | string>;
+    shipped: Record<string, number | boolean | string>;
+    owner_ref: Record<string, number | boolean | string>;
+  } =>
+    JSON.parse(wasm.grip_balance_defaults_json()),
+  /** Set the grip-balance override ("" = the shipped balance). */
+  gripBalanceSet: (json: string): void => wasm.grip_balance_set(json),
+  /** Drift Lab W reference-parity test cars (not in carIds()). */
+  parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),
   /** Clutch mode "auto" | "manual" (owner row 59). */
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
   engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
-  /** Drift-assist tuning (drift lab dev override; 11 values, see wp_wasm DRIFT_TUNING_FIELDS). */
-  setDriftTuning: (entity: number, values: Float32Array): void => wasm.set_drift_tuning(entity, values),
-  driftTuning: (entity: number): number[] => Array.from(wasm.drift_tuning(entity)),
-  /** [body slip °, assist mode (0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded), envelope °, throttle smoothing in effect]. */
-  driftState: (entity: number): number[] => Array.from(wasm.drift_state(entity)),
   /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
   assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
   /** Damage mode + assists of a one-click preset for a driver on `source`. */

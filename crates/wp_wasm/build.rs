@@ -17,16 +17,18 @@ fn main() {
         "/// `(kind, id, byte offset, byte len)` of every embedded data file in the inflated blob.\n",
     );
     out.push_str("pub static EMBEDDED_INDEX: &[(&str, &str, usize, usize)] = &[\n");
-    for (kind, ext) in [
-        ("cars", "json"),
-        ("lattices", "json"),
-        ("tires", "json"),
-        ("materials", "json"),
-        ("modes", "toml"),
+    for (kind, sub, ext) in [
+        ("cars", "cars", "json"),
+        // Drift Lab W reference-parity test cars: loadable by id, not in the roster.
+        ("parity", "cars/parity", "json"),
+        ("lattices", "lattices", "json"),
+        ("tires", "tires", "json"),
+        ("materials", "materials", "json"),
+        ("modes", "modes", "toml"),
         // Panel specs (workstream R); meshes stay files under data/panels/meshes/.
-        ("panels", "json"),
+        ("panels", "panels", "json"),
     ] {
-        let dir = data.join(kind);
+        let dir = data.join(sub);
         println!("cargo:rerun-if-changed={}", dir.display());
         for path in sorted_files(&dir, ext) {
             println!("cargo:rerun-if-changed={}", path.display());

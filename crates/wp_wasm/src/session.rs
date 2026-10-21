@@ -578,18 +578,6 @@ impl Session {
         }
     }
 
-    /// Set a vehicle's drift-assist tuning (drift lab dev override; not logged, so a tuned
-    /// session does not replay bit-exactly).
-    pub fn set_drift_tuning(
-        &mut self,
-        id: EntityId,
-        tuning: wp_vehicle::DriftTuning,
-    ) -> Result<(), String> {
-        self.sim
-            .set_drift_tuning(id, tuning)
-            .map_err(|e| format!("{e:?}"))
-    }
-
     /// Set a vehicle's assists (logged op).
     pub fn set_assists(&mut self, id: EntityId, profile: AssistProfile) -> Result<(), String> {
         self.live_check()?;
@@ -693,6 +681,14 @@ impl Session {
             return Err("only before the first tick".into());
         }
         Ok(&mut self.sim)
+    }
+
+    /// Re-apply vehicle `id`'s body inertia after a lab ride override
+    /// (`wp_sim::Sim::refresh_body_inertia`). Not a logged op; allowed in playback too.
+    pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), String> {
+        self.sim
+            .refresh_body_inertia(id)
+            .map_err(|e| format!("{e:?}"))
     }
 
     /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes

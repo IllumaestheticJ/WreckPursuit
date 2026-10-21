@@ -29,6 +29,8 @@ fn rig_matches_sim_bit_for_bit() {
         pos,
         yaw,
     );
+    // The sim's car is a player's (`VehicleKind::Player`): the same steering aids on the rig.
+    rig.set_player_input(true);
 
     for tick in 0..240 * 8 {
         let t = tick as f32 / 240.0;

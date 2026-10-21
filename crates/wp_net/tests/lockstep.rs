@@ -64,6 +64,10 @@ fn four_clients_replicate_damage_deterministically() {
         };
     }
     h.run_secs(4.0);
+    // Let the last dents replicate before the final-state check: a resync may take up to
+    // 2 s (asserted below), and a dent in the last ticks of the brake phase would otherwise
+    // be checked before its resync lands.
+    h.run_secs(2.0);
 
     let sim = h.server.sim();
     let dented = sim

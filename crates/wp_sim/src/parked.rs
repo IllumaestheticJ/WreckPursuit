@@ -699,6 +699,8 @@ mod tests {
                 time_ratio: 1.0,
             });
             let id = sim.spawn_vehicle(&car(), [0.0; 3], 0.0).unwrap();
+            // A scripted striker (analog inputs): the normal steering model, no player aids.
+            sim.set_player_steering(id, Some(false)).unwrap();
             sim.place_vehicle(id, [0.0; 3], 0.0, 13.9).unwrap();
             let struck = if parked {
                 sim.add_parked_car([0.0, 30.0, 0.0], 0.0);

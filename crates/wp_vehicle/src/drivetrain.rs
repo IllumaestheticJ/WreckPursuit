@@ -41,6 +41,13 @@ pub mod schedule {
     pub const BAND_MARGIN: f32 = 0.05;
     /// Above this the box upshifts whatever else holds it (limiter protection).
     pub const FORCED_UP: f32 = 0.985;
+    /// Body slip past which the box counts the car as sliding and holds its gear, degrees
+    /// (lead, 2026-10-21: no kickdown at a held drift's entry, no upshift from a spinning
+    /// rear's revs mid-drift).
+    pub const SLIDE_HOLD_DEG: f32 = 10.0;
+    /// Driven-wheel slip ratio, × the tyre's peak, past which the box counts the car as
+    /// sliding (wheelspin).
+    pub const SLIDE_HOLD_SPIN: f32 = 1.5;
     /// Kickdown picks the lowest gear whose engine speed stays below this, fraction of redline.
     pub const KICKDOWN_CEILING: f32 = 0.85;
     /// Kickdown: pedal at least this far down…
@@ -80,6 +87,12 @@ pub struct ShiftInputs {
     pub max_gear: i8,
     /// Lateral tire usage 0..1 (`Σ|Fy| / Σ μ·Fz` over wheels in contact).
     pub lateral_usage: f32,
+    /// The car is sliding (|body slip| past [`schedule::SLIDE_HOLD_DEG`] or the driven wheels
+    /// spinning past the tyre's peak): the box holds its gear (see [`Gearbox::auto_shift`]).
+    pub sliding: bool,
+    /// Driven-wheel speed implied by the road (rolling speed, no wheelspin), rad/s: what the
+    /// box shifts on while sliding.
+    pub road_axle_omega: f32,
 }
 
 /// Gearbox state. `gear`: -1 reverse, 0 neutral, 1.. forward.
@@ -316,6 +329,24 @@ impl Gearbox {
         let cornering = inp.lateral_usage >= CORNER_HOLD_USAGE;
         let braking = inp.brake > 0.1;
 
+        // Sliding (a held drift, a power-on slide, wheelspin): hold the gear like a driver
+        // would. No kickdown, no shift from the spinning wheels' revs; shift only on road
+        // speed — up when the road speed alone reaches the limiter, down when it would lug
+        // the engine.
+        if inp.sliding {
+            let road_at = |gear: i8| {
+                (inp.road_axle_omega * Self::ratio_of(def, gear) * def.final_drive).abs()
+                    * crate::engine::RPM_PER_RADPS
+                    / red
+            };
+            let road = road_at(self.gear);
+            if road >= FORCED_UP && self.gear < n_max && repeat_ok {
+                self.shift(self.gear + 1, t);
+            } else if self.gear > 1 && road < DOWN_LIGHT && repeat_ok {
+                self.shift(self.gear - 1, t);
+            }
+            return;
+        }
         // Limiter protection beats everything.
         if now >= FORCED_UP && self.gear < n_max && repeat_ok {
             self.shift(self.gear + 1, t);
@@ -510,6 +541,8 @@ mod tests {
             speed: 10.0,
             max_gear: 6,
             lateral_usage: 0.0,
+            sliding: false,
+            road_axle_omega: 0.0,
         }
     }
 
@@ -584,6 +617,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sliding_holds_the_gear_and_shifts_on_road_speed() {
+        // Lead 2026-10-21: in a held drift the box neither kicks down at full throttle nor
+        // upshifts from the spinning rear's revs.
+        let d = dt();
+        let slide = |axle: f32, road: f32, throttle: f32| ShiftInputs {
+            sliding: true,
+            road_axle_omega: road,
+            ..inputs(axle, throttle)
+        };
+        // Cruising in 2nd, the pedal stabbed at the drift's entry: no kickdown.
+        let road = axle_at(&d, 2, 0.4);
+        let mut g = Gearbox::new();
+        g.set(2);
+        hold(&mut g, &d, &inputs(road, 0.15), 1.5);
+        g.auto_shift(&d, &slide(road, road, 1.0), 0.01);
+        assert!(!g.shifting(), "kickdown while sliding");
+        // Mid-drift the rears spin to the limiter: no upshift while the road speed is low.
+        let spin = axle_at(&d, 2, 1.0);
+        hold(&mut g, &d, &slide(spin, road, 1.0), 2.0);
+        assert_eq!(g.gear, 2, "upshifted on wheelspin");
+        // The road speed itself at the limiter: up a gear.
+        let fast = axle_at(&d, 2, 0.99);
+        hold(&mut g, &d, &slide(fast, fast, 1.0), 1.0);
+        assert_eq!(g.gear, 3);
+        // Not sliding: the normal schedule upshifts on the same revs.
+        let mut n = Gearbox::new();
+        n.set(2);
+        hold(&mut n, &d, &inputs(spin, 1.0), 2.0);
+        assert!(n.gear > 2);
     }
 
     #[test]

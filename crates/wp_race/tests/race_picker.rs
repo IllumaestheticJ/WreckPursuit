@@ -92,6 +92,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
     let built = build_sim(&sc, &data_src, &RunOptions::default()).unwrap();
     let mut sim = built.sim;
     let ids = built.ids;
+    // The AI drives every seat, the player's car included: no player steering aids on it.
+    sim.set_player_steering(ids[0], Some(false)).unwrap();
     let race = catalog::plan_course(sim.world(), &def).expect("course plans");
     let route_m = race.route.length_m;
     assert!(

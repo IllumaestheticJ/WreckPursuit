@@ -134,6 +134,8 @@ pub struct SimVehicle {
     chassis_skips_sidewalks: bool,
     /// Ticks left as a ghost ([`Sim::set_ghost`]): 0 = solid.
     ghost_ticks: u32,
+    /// Player steering aids override ([`Sim::set_player_steering`]); `None` = from `kind`.
+    player_steering: Option<bool>,
     /// Ticks the ghost was extended because the car still overlapped another car.
     ghost_overstay: u32,
 }
@@ -333,6 +335,7 @@ impl Sim {
             chassis_skips_sidewalks: false,
             ghost_ticks: 0,
             ghost_overstay: 0,
+            player_steering: None,
         });
         Ok(id)
     }
@@ -696,6 +699,28 @@ impl Sim {
         Ok(())
     }
 
+    /// Override whether a vehicle gets the player steering aids (`wp_vehicle::lab_scope::plain`):
+    /// `Some(false)` for a harness or test driver that feeds analog inputs (simcli's scripted
+    /// drivers), `Some(true)` to force them, `None` (the default) = only
+    /// [`VehicleKind::Player`] cars. The physics is the same either way.
+    pub fn set_player_steering(&mut self, id: EntityId, on: Option<bool>) -> Result<(), SimError> {
+        self.slot_mut(id)?.player_steering = on;
+        Ok(())
+    }
+
+    /// Re-apply a vehicle's body inertia (`wp_vehicle::Vehicle::body_inertia`) after a lab
+    /// ride override changed it (the hidden tuning panel). Lab-only: not a replay op.
+    pub fn refresh_body_inertia(&mut self, id: EntityId) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        slot.vehicle
+            .apply_body_inertia(&mut self.physics.bodies[slot.body.body]);
+        Ok(())
+    }
+
     /// Remove a vehicle and its physics body. Its id is never reused. Debris it already shed
     /// stays in the world.
     pub fn despawn_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {
@@ -810,18 +835,6 @@ impl Sim {
     /// Set a vehicle's assist profile.
     pub fn set_assists(&mut self, id: EntityId, assists: AssistProfile) -> Result<(), SimError> {
         self.slot_mut(id)?.assists = assists;
-        Ok(())
-    }
-
-    /// Set a vehicle's drift-assist tuning (dev override for the testbed's drift lab, owner
-    /// rows 90 / 91 / 98; see `wp_vehicle::DriftTuning`). Not recorded in replays or
-    /// snapshots: a tuned session does not replay bit-exactly.
-    pub fn set_drift_tuning(
-        &mut self,
-        id: EntityId,
-        tuning: wp_vehicle::DriftTuning,
-    ) -> Result<(), SimError> {
-        self.slot_mut(id)?.vehicle.set_drift_tuning(tuning);
         Ok(())
     }
 
@@ -985,6 +998,12 @@ impl Sim {
                 let ground = RapierGround {
                     query: self.physics.query_pipeline(filter),
                 };
+                // One physics for every car; the plain keyboard steering aids only for a
+                // player's car (AI racers, police and traffic steer with their own model).
+                slot.vehicle.set_player_input(
+                    slot.player_steering
+                        .unwrap_or(slot.kind == VehicleKind::Player),
+                );
                 slot.vehicle.step_with_ground(
                     &slot.input,
                     &slot.assists,

@@ -402,6 +402,13 @@ pub struct EntitySpec {
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
+    /// The player steering aids (the shipped plain keyboard steering, `wp_sim::Sim::
+    /// set_player_steering`): `None` (default) = on only for a live-driven entity (`Scripted`
+    /// driver, no input keyframes: the testbed's player); harness drivers (cruise, route,
+    /// AI) and keyframe scripts feed analog inputs and get the normal steering model.
+    /// `Some(true)` tests the player steering with scripted keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_steering: Option<bool>,
     /// The free per-car tune (`wp_vehicle::tune`; default stock). RON:
     /// `tune: (suspension: 5, gearing: 5, diff: 4, brake_balance: 2)`; missing sliders are stock.
     #[serde(default, skip_serializing_if = "CarTune::is_stock")]
