@@ -91,8 +91,12 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   racer in sight within 150 m they **follow** it (so it can be recognised, which starts a
   pursuit); with the racer coming head-on within 70 m they pull right and stop, and nose to
   nose with it stopped (a narrow road) they back out 8 m. A unit still > `redispatch_far_m`
-  (150 m) away `redispatch_s` (6 s) after taking the call is released and the call goes out
-  again. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
+  (150 m) away `redispatch_s` (6 s) after taking the call, and no longer able to reach a
+  junction on the racer's predicted path before it, is released and the call goes out again.
+  Meetings are timed at the racer's recent top speed (`RacerRecord::expected_speed`: a speeder
+  braking for a corner is back at speed on the next straight), and the predicted path runs on
+  to the racer's next junction (a divided highway's carriageway can only be met where it
+  comes off). A unit turning round onto its route finishes the turn before the 3-s re-plan. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
   responding." No responders in a city whose patrol table is empty for the phase.
 - **Unit cap**: responders and reinforcements only spawn while ground units <
   `max_units_by_level[highest wanted level]` (and `max_ground_units`).

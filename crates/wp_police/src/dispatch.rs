@@ -1487,12 +1487,22 @@ impl PoliceSystem {
                 continue;
             };
             let u = &self.units[i];
-            if now.since(u.assigned) > wait && dist(u.body.pos, xy(r.pos)) > far {
-                self.end_response(id, crate::ResponseOutcome::FellBehind);
-                self.incidents[k].unit = None;
-                self.assign(i, Assignment::Idle);
-                self.stats.redispatches += 1;
+            if now.since(u.assigned) <= wait || dist(u.body.pos, xy(r.pos)) <= far {
+                continue;
             }
+            // Still far, but on its way to meet the racer at a junction ahead of it (the
+            // racer is coming to it): not behind.
+            let v = [r.vel[0], r.vel[1]];
+            if crate::graph::len(v) > 3.0 {
+                let meets = self.racer_meets(xy(r.pos), v, r.expected_speed());
+                if self.meets_first(i, &meets) {
+                    continue;
+                }
+            }
+            self.end_response(id, crate::ResponseOutcome::FellBehind);
+            self.incidents[k].unit = None;
+            self.assign(i, Assignment::Idle);
+            self.stats.redispatches += 1;
         }
         for k in 0..self.incidents.len() {
             let inc = self.incidents[k];
