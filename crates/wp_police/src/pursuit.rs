@@ -45,6 +45,12 @@ const RESPOND_REROUTE_M: f32 = 40.0;
 /// or out of sight it follows the roads ([`PoliceSystem::chase_route`]), m.
 const CLOSE_LOS_M: f32 = 70.0;
 
+/// Turning round counts this much road distance on a chase route (plus
+/// [`TURN_ROUND_COST_PER_MPS`] × speed), m.
+const TURN_ROUND_COST_M: f32 = 20.0;
+/// See [`TURN_ROUND_COST_M`], m per m/s.
+const TURN_ROUND_COST_PER_MPS: f32 = 3.0;
+
 /// A routed pursuer re-plans its road route at least this often, s.
 const CHASE_ROUTE_REFRESH_S: f32 = 1.5;
 
@@ -543,6 +549,34 @@ impl PoliceSystem {
                 .0;
         }
         self.route_around(u.body.pos, u.body.heading, dest, final_point, &blocked)
+    }
+
+    /// A chase route from unit `i` to `dest`: the shorter of driving on (the junction ahead of
+    /// its heading) and turning round (the junction behind it), turning round counted
+    /// [`TURN_ROUND_COST_M`] + [`TURN_ROUND_COST_PER_MPS`] × speed longer. The plain route
+    /// started at the junction ahead of the unit's heading at that moment: a cop half-way
+    /// through a U-turn toward a racer that had passed it was routed on round the block, the
+    /// wrong way (owner: "they don't turn around fast enough"). Blocked segments: as
+    /// [`Self::route_track`].
+    pub(crate) fn chase_route_track(
+        &self,
+        i: usize,
+        dest: NodeId,
+        final_point: Option<[f32; 2]>,
+    ) -> Track {
+        let u = &self.units[i];
+        if !u.unstick.blocked_at(self.now).is_empty() {
+            return self.route_track(i, dest, final_point);
+        }
+        let (pos, h) = (u.body.pos, u.body.heading);
+        let on = self.route_from(pos, h, dest, final_point).0;
+        let back = self.route_from(pos, scale(h, -1.0), dest, final_point).0;
+        let cost = TURN_ROUND_COST_M + TURN_ROUND_COST_PER_MPS * u.body.speed;
+        if back.is_drivable() && (!on.is_drivable() || back.length() + cost < on.length()) {
+            back
+        } else {
+            on
+        }
     }
 
     /// A route that avoids `blocked` segments (un-sticking, [`crate::stuck`]). Stuck on one of
@@ -1557,11 +1591,11 @@ impl PoliceSystem {
             }
         }
         if stopped {
-            let t = self.route_track(i, node, Some(rp));
+            let t = self.chase_route_track(i, node, Some(rp));
             self.units[i].chase_route = Some(crate::unit::ChaseRoute { node, at: now });
             return t;
         }
-        let mut t = self.route_track(i, node, None);
+        let mut t = self.chase_route_track(i, node, None);
         // Then the racer's predicted path beyond that junction (no stop at the route's end).
         let np = self.graph.node(node).pos;
         let (s_node, _) = track.project(np, racer_s, 400.0);
