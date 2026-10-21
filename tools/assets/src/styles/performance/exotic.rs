@@ -2,11 +2,11 @@
 //! supercar).
 //!
 //! Both lattices carry a front-engine cabin, so the cab-forward look comes from
-//! `cabin_shift_m` (+, forward) plus a short visual `hood_length` and a near-flat rear glass
-//! (the engine deck). Genre cues (research §3): knife-edge wedge, louvred engine deck, quad
-//! round tails in a black panel, side strakes, pop-up lamps (exotic); low wide cab-forward
-//! wedge, giant side intakes, thin light-bar tails + black mesh, big diffuser + wing
-//! (supercar).
+//! `cabin_shift_m` (+0.40 / +0.45 m forward: roof centre ≈ 46 % of the length from the nose,
+//! windshield base ≈ 18–19 %) and a steeper rear glass toward the engine deck. Genre cues
+//! (research §3): knife-edge wedge, louvred engine deck, quad round tails in a black panel,
+//! side strakes, pop-up lamps (exotic); low wide cab-forward wedge, giant side intakes, thin
+//! light-bar tails + black mesh, big diffuser + wing (supercar).
 
 use wp_contracts::{BodyRegion, VehicleDef};
 
@@ -31,15 +31,15 @@ fn at(k: &Kit, f: f32) -> f32 {
 /// strakes, louvred deck, quad round tails (outer amber-ringed) in a black rear mesh panel.
 pub fn lucciola(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.20,
+        cabin_shift_m: 0.40,
         nose_h: Some(0.55),
         nose_rake_deg: 55.0,
         nose_plan_round: 0.15,
         tail_plan_round: 0.12,
         hood_crown: 0.010,
-        windshield_rake_deg: Some(62.0),
+        windshield_rake_deg: Some(64.0),
         a_pillar_rake_deg: 14.0,
-        rear_glass_rake_deg: Some(62.0),
+        rear_glass_rake_deg: Some(65.0),
         roof_len_trim: 0.15,
         tumblehome: Some(0.24),
         crease_z: 0.50,
@@ -81,7 +81,7 @@ pub fn lucciola(def: &VehicleDef) -> CarStyle {
     m.rear_brakes.caliper = CaliperKind::Fixed4;
     m.rear_brakes.drilled = true;
     m.caliper_rgb = Some(rgb(0xC81E1E));
-    m.exhaust = ExhaustKind::Centre;
+    m.exhaust = ExhaustKind::CentreQuad;
     m.exhaust_tip_r_m = 0.05;
     s.tints.push((M::Paint, rgb(0xC4161C)));
     s
@@ -255,15 +255,15 @@ fn lucciola_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
 /// haunch scoops.
 pub fn fulmine(def: &VehicleDef) -> CarStyle {
     let mut s = CarStyle::with_body(BodyStyle {
-        cabin_shift_m: 0.20,
+        cabin_shift_m: 0.45,
         nose_h: Some(0.52),
         nose_rake_deg: 45.0,
         nose_plan_round: 0.20,
         tail_plan_round: 0.14,
         hood_crown: 0.020,
-        windshield_rake_deg: Some(62.0),
+        windshield_rake_deg: Some(65.0),
         a_pillar_rake_deg: 18.0,
-        rear_glass_rake_deg: Some(60.0),
+        rear_glass_rake_deg: Some(64.0),
         roof_len_trim: 0.15,
         tumblehome: Some(0.28),
         crease_z: 0.45,
@@ -308,7 +308,7 @@ pub fn fulmine(def: &VehicleDef) -> CarStyle {
     m.rear_brakes.drilled = true;
     m.caliper_rgb = Some(rgb(0xF6C700));
     m.spring_rgb = Some(rgb(0xF57E20));
-    m.exhaust = ExhaustKind::Quad;
+    m.exhaust = ExhaustKind::HighCentre;
     m.exhaust_tip_r_m = 0.05;
     s.tints.push((M::Paint, rgb(0x8DC63F)));
     s

@@ -322,6 +322,11 @@ const SURF: Record<MaterialJson, Surf | null> = {
   emissive_amber: { rgb: 0xc87a10, rough: 0.35, metal: 0, lamp: 3, paint: false },
   grille: { rgb: 0x0d0e10, rough: 0.8, metal: 0, lamp: 0, paint: false },
   exhaust: { rgb: 0xb9b2a6, rough: 0.25, metal: 0.9, lamp: 0, paint: false },
+  rim: { rgb: 0x9da3a8, rough: 0.35, metal: 0.7, lamp: 0, paint: false },
+  spring: { rgb: 0x3a3c40, rough: 0.5, metal: 0.2, lamp: 0, paint: false },
+  // Second body colour (mesh `tints.accent` when set).
+  accent: { rgb: 0x2a2c30, rough: 0.4, metal: 0.2, lamp: 0, paint: false },
+  underglow: null,
 };
 /** Part kinds never drawn for instanced traffic (hidden or too small to matter). */
 const SKIP_KINDS = new Set(["interior", "engine", "suspension", "brake_disc", "caliper", "upright"]);

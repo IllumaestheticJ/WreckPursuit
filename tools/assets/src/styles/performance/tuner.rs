@@ -32,9 +32,9 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
         hood_bulge_w: 0.45,
         hood_scoop: HoodScoop::Scoop,
         hood_scoop_h: 0.07,
-        windshield_rake_deg: Some(56.0),
+        windshield_rake_deg: Some(58.0),
         a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(52.0),
+        rear_glass_rake_deg: Some(55.0),
         tumblehome: Some(0.13),
         crease_z: 0.60,
         crease_depth: 0.010,
@@ -69,8 +69,10 @@ pub fn kestrel(def: &VehicleDef) -> CarStyle {
     m.exhaust = ExhaustKind::Single;
     m.exhaust_tip_r_m = 0.055;
     s.tints.push((M::Paint, rgb(0x1D3F8C)));
-    // Gold rally wheels (the `metal` slot also covers discs / hardware; see the wave-2 notes).
-    s.tints.push((M::Metal, rgb(0xB8963E)));
+    // Gold rally wheels (`rim` slot: discs and hardware stay metal).
+    s.wheel.rim_rgb = Some(rgb(0xB8963E));
+    // Subtle blue underglow, lit with the headlights (research §1.3 tuner neon).
+    s.underglow_rgb = Some(rgb(0x2050D0));
     s
 }
 
@@ -220,9 +222,9 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
         nose_plan_round: 0.30,
         tail_plan_round: 0.22,
         hood_crown: 0.015,
-        windshield_rake_deg: Some(58.0),
+        windshield_rake_deg: Some(60.0),
         a_pillar_rake_deg: 9.0,
-        rear_glass_rake_deg: Some(58.0),
+        rear_glass_rake_deg: Some(62.0),
         tumblehome: Some(0.14),
         crease_z: 0.58,
         crease_depth: 0.010,
@@ -262,6 +264,10 @@ pub fn shiro(def: &VehicleDef) -> CarStyle {
     m.exhaust = ExhaustKind::Single;
     m.exhaust_tip_r_m = 0.06;
     s.tints.push((M::Paint, rgb(0xEEEDE6)));
+    // Vinyl band in the accent slot (gold, matching the calipers).
+    s.accent_rgb = Some(rgb(0xD4A017));
+    // Cyan underglow, lit with the headlights (research §1.3 tuner neon).
+    s.underglow_rgb = Some(rgb(0x18C8E8));
     s
 }
 
@@ -405,7 +411,7 @@ fn shiro_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
             0.0,
             (10, 1),
         );
-        let ka = dkey("vinyl_slash_l", BodyRegion::LeftDoorF, M::Caliper);
+        let ka = dkey("vinyl_slash_l", BodyRegion::LeftDoorF, M::Accent);
         k.side_patch(
             &ka,
             sx,
@@ -619,9 +625,9 @@ pub fn sperber(def: &VehicleDef) -> CarStyle {
         hood_crown: 0.015,
         hood_bulge_h: 0.020,
         hood_bulge_w: 0.35,
-        windshield_rake_deg: Some(57.0),
+        windshield_rake_deg: Some(59.0),
         a_pillar_rake_deg: 8.0,
-        rear_glass_rake_deg: Some(52.0),
+        rear_glass_rake_deg: Some(56.0),
         roof_dz: -0.01,
         tumblehome: Some(0.15),
         crease_z: 0.62,

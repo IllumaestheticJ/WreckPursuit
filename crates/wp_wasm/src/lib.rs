@@ -331,10 +331,14 @@ struct VehicleInfo {
     mounted_components: Vec<String>,
     surfaces: Vec<String>,
     spawn_pos: [f32; 3],
+    /// `wp_police` unit id of a sim police vehicle (the `unit_id` of `police_units()`), so a
+    /// unit keeps its number when it becomes a sim vehicle; `None` for other vehicles.
+    police_unit: Option<u32>,
 }
 
 /// Static info JSON for a vehicle: scenario name, dimensions, wheels, CG (chassis space),
-/// lattice sizes and the name tables for region / component / surface indices.
+/// lattice sizes, the name tables for region / component / surface indices and, for sim police
+/// vehicles, their `wp_police` unit id (`police_unit`).
 #[wasm_bindgen]
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
@@ -398,6 +402,10 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .collect(),
             surfaces: pack::ALL_SURFACES.iter().map(pack::variant_name).collect(),
             spawn_pos,
+            police_unit: s
+                .vehicle(EntityId(entity))
+                .and_then(|v| v.police_unit)
+                .map(|u| u.0),
         }))
     })
 }

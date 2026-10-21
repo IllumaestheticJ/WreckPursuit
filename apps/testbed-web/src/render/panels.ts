@@ -40,7 +40,7 @@ export type PartKindJson =
 export type MaterialJson =
   | "paint" | "glass" | "trim" | "headlight" | "taillight" | "rubber" | "metal" | "interior"
   | "livery" | "chrome" | "carbon" | "caliper" | "engine" | "lightbar_red" | "lightbar_blue"
-  | "lightbar_clear" | "emissive_amber" | "grille" | "exhaust";
+  | "lightbar_clear" | "emissive_amber" | "grille" | "exhaust" | "rim" | "spring" | "accent" | "underglow";
 
 /** One part of data/panels/meshes/<car>.json (tools/assets/src/mesh.rs `MeshPart`). */
 export interface MeshPartJson {
@@ -296,6 +296,9 @@ interface Debris {
   age: number;
 }
 
+/** Head-lamp materials: one shared, or one per side (left = parts with x < 0) for wig-wag. */
+export type LampMaterials = THREE.Material | { left: THREE.Material; right: THREE.Material };
+
 /** Light-bar lens materials of one side. */
 export interface LightbarSide {
   red: THREE.MeshStandardMaterial;
@@ -382,6 +385,11 @@ export class PanelBody {
   private readonly frames = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
   private readonly mats: Record<MaterialJson, THREE.Material>;
+  private readonly headR: THREE.Material;
+  /** Underglow colour from the mesh tints (null: the car has none). */
+  private underglowColour: THREE.Color | null = null;
+  /** Soft additive glow on the road under the car (cars with underglow only). */
+  private underglowPool: THREE.Mesh | null = null;
   private livery: THREE.Texture | null = null;
   private onReady: (() => void) | null = null;
 
@@ -389,9 +397,11 @@ export class PanelBody {
     readonly entity: number,
     readonly carId: string,
     paint: THREE.Color | number,
-    headlight: THREE.Material,
+    headlight: LampMaterials,
     taillight: THREE.Material,
   ) {
+    const headL = headlight instanceof THREE.Material ? headlight : headlight.left;
+    this.headR = headlight instanceof THREE.Material ? headlight : headlight.right;
     this.regions = sim.info(entity).regions;
     const std = (o: THREE.MeshStandardMaterialParameters) =>
       new THREE.MeshStandardMaterial({ flatShading: true, side: THREE.DoubleSide, ...o });
@@ -405,7 +415,7 @@ export class PanelBody {
       livery: std({ color: paint, metalness: 0.25, roughness: 0.55 }),
       glass: std({ color: 0x8fb3c4, transparent: true, opacity: 0.38, metalness: 0.1, roughness: 0.1, depthWrite: false }),
       trim: std({ color: 0x1b1b1d, roughness: 0.9 }),
-      headlight,
+      headlight: headL,
       taillight,
       rubber: std({ color: 0x141414, roughness: 0.95 }),
       metal: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
@@ -420,6 +430,14 @@ export class PanelBody {
       emissive_amber: std({ color: 0xc87a10, emissive: 0x2a1600, roughness: 0.4 }),
       grille: std({ color: 0x0d0e10, roughness: 0.8 }),
       exhaust: std({ color: 0xb9b2a6, metalness: 0.9, roughness: 0.25 }),
+      // Rims / hubcaps: metal until the mesh tints them (`tints.rim`).
+      rim: std({ color: 0x9da3a8, metalness: 0.7, roughness: 0.35 }),
+      // Coil springs: tinted (`tints.spring`) or the old caliper grey.
+      spring: std({ color: 0x3a3c40, metalness: 0.3, roughness: 0.5 }),
+      // Second paint colour (stripes, accent bars): `tints.accent`.
+      accent: std({ color: 0x8a1020, metalness: 0.25, roughness: 0.55 }),
+      // Underglow strips: dark until setUnderglow(true) lights them in `tints.underglow`.
+      underglow: std({ color: 0x101012, emissive: 0x000000, roughness: 0.6 }),
     };
     bodies.set(entity, this);
     void loadCarMesh(carId).then((m) => m && this.build(m));
@@ -434,6 +452,65 @@ export class PanelBody {
   /** Paint material (body colour). VehicleView sets its opacity; the livery material follows it. */
   get paint(): THREE.MeshStandardMaterial {
     return this.mats.paint as THREE.MeshStandardMaterial;
+  }
+
+  /**
+   * The shared material of a slot (tints applied once the mesh loaded). Every part of that
+   * slot uses it, except `headlight` on the right side when per-side lamps were given and the
+   * light-bar lenses (see `lightbarMaterials`).
+   */
+  materialFor(slot: MaterialJson): THREE.Material {
+    return this.mats[slot];
+  }
+
+  /** Amber emissive material(s) (indicators, traffic advisors, beacons): flash via `emissive`. */
+  get amberMaterials(): THREE.MeshStandardMaterial[] {
+    return [this.mats.emissive_amber as THREE.MeshStandardMaterial];
+  }
+
+  /** True when the mesh has underglow strips (after load). */
+  get hasUnderglow(): boolean {
+    return this.underglowColour !== null;
+  }
+
+  /** Light (true) or darken the underglow strips; no-op for cars without underglow. */
+  setUnderglow(on: boolean): void {
+    if (!this.underglowColour) return;
+    const m = this.mats.underglow as THREE.MeshStandardMaterial;
+    m.emissive.copy(on ? this.underglowColour : new THREE.Color(0x000000));
+    m.emissiveIntensity = on ? 1.6 : 1;
+    if (this.underglowPool) this.underglowPool.visible = on;
+  }
+
+  /** Additive radial glow quad on the ground (chassis z ≈ 0) under the car's footprint. */
+  private buildUnderglowPool(colour: THREE.Color): void {
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d");
+    if (!g) return;
+    const grad = g.createRadialGradient(32, 32, 4, 32, 32, 32);
+    grad.addColorStop(0, "rgba(255,255,255,0.55)");
+    grad.addColorStop(0.6, "rgba(255,255,255,0.22)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(c);
+    const a = this.atlas;
+    const geo = new THREE.PlaneGeometry(2 * a.x_half + 0.9, a.y[1] - a.y[0] + 0.6);
+    const mat = new THREE.MeshBasicMaterial({
+      color: colour,
+      map: tex,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const pool = new THREE.Mesh(geo, mat);
+    pool.name = "underglow_pool";
+    pool.position.set(0, (a.y[0] + a.y[1]) / 2, 0.02);
+    pool.renderOrder = 1;
+    pool.visible = false;
+    this.root.add(pool);
+    this.underglowPool = pool;
   }
 
   /** Livery material (paint parts that take the livery texture). */
@@ -461,8 +538,14 @@ export class PanelBody {
     if (mesh.atlas) this.atlas = mesh.atlas;
     this.liveryHint = mesh.livery ?? null;
     for (const [slot, rgb] of Object.entries(mesh.tints ?? {})) {
+      if (!rgb) continue;
+      if (slot === "underglow") {
+        // Emissive colour, lit by setUnderglow (VehicleView: with the headlights).
+        this.underglowColour = new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+        continue;
+      }
       const m = this.mats[slot as MaterialJson] as THREE.MeshStandardMaterial | undefined;
-      if (m && rgb && "color" in m) m.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+      if (m && "color" in m) m.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
     }
     (mesh.wheel_camber_deg ?? [0, 0, 0, 0]).forEach((deg, i) => {
       // Wheels 0, 2 are on the left (−X): + camber tilts their top toward +X.
@@ -485,6 +568,7 @@ export class PanelBody {
       geom.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       geom.setIndex(def.indices);
       let material = this.mats[def.material] ?? this.mats.paint; // unknown slot (newer file) → paint
+      if (def.material === "headlight" && cx > 0) material = this.headR;
       if (def.material.startsWith("lightbar_")) {
         const side = cx < 0 ? "left" : "right";
         const colour = def.material.slice("lightbar_".length) as keyof LightbarSide;
@@ -518,6 +602,7 @@ export class PanelBody {
     }
     for (const side of ["left", "right"] as const)
       if (lbCount[side] > 0) this.lightbarAnchors[side] = lbSum[side].divideScalar(lbCount[side]);
+    if (this.underglowColour) this.buildUnderglowPool(this.underglowColour);
     this.ready = true;
     const flag = liveryFlag();
     if (flag === "grid") this.setLivery(debugLiveryTexture(this.atlas));

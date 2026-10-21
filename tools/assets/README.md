@@ -19,13 +19,30 @@ cargo test -p car-assets                             # every car valid + meshes 
 ```
 
 Wave-2 style / mechanical authors: see `docs/design/vehicles/PLAN.md` "Foundation API (for wave 2)".
+Per-archetype notes: `docs/design/vehicles/wave2_{performance,traffic,police,mechanical}.md`.
+
+### Regenerating after a change
+Any change under `src/` or `data/cars` / `data/lattices` makes the committed meshes stale (the
+`assets` test fails). Regenerate everything, validate, test:
+
+```sh
+export CARGO_TARGET_DIR=<a target dir of this checkout only>   # see below
+cargo run -p car-assets --bin gen-car-mesh && cargo run -p car-assets --bin validate-car-asset
+cargo test -p car-assets
+```
+
+`repo_root()` is `env!("CARGO_MANIFEST_DIR")`, fixed at compile time: a `gen-car-mesh` binary
+built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* worktree's
+`data/`. Use one target dir per checkout (or none).
 
 ## Mesh generator (`src/{style,profile,mesh,builder,wheels,mechanical}.rs`, `src/styles/`)
 - **Style** (`style.rs`): `style_for(def)` asks `styles::{performance, traffic, police}` (first
   `Some` wins) else `class_default` (Truck → Pickup / Van, PoliceSuv → Suv, others the default
   notchback; engine layout / exhaust by class). A `CarStyle` = `BodyStyle` (≈45 shape knobs,
   documented with units and ranges; `Default` = the original look) + `details` + `WheelStyle` +
-  `MechStyle` + optional `LiveryHint` + `tints` + budget `Tier`.
+  `MechStyle` + optional `LiveryHint` + `tints` + `accent_rgb` / `underglow_rgb` + budget `Tier`.
+  Styles live in `src/styles/{performance/,traffic.rs,police.rs + police/}`; every knob clamps
+  softly (`profile::clamp_soft`), so extreme values never panic (`tests/assets.rs` sweeps them).
 - **Body profile** (`profile.rs`) from the `VehicleDef` (width, wheels → arches) anchored to the
   lattice (hood y-range and heights, firewall, door hinge and latch stations, roof, rear glass,
   deck, quarters, bumpers), then styled (cabin shift / hood length, roof edges from glass rakes,
@@ -33,7 +50,8 @@ Wave-2 style / mechanical authors: see `docs/design/vehicles/PLAN.md` "Foundatio
   panel mesh covers its lattice region's zone; doors and the trunk start at their hinge line, the
   hood at the windshield base. `cabin_shift_m` / `hood_length` move the visual hood rear edge and
   the rear-glass base on purpose (the panel still pivots on its lattice hinge nodes; at most 0.6 m
-  away, checked by `tests/assets.rs`).
+  away, checked by `tests/assets.rs`). `cabin_shift_m` spans −0.6…+0.6 m: the mid-engine cars use
+  +0.40 / +0.45 for a cab-forward roof (centre ≈ 46 % of the length from the nose).
 - **Loft** (`mesh.rs`): cross-section rings of 18 points per side (sill tuck, rocker, character
   crease, shoulder, belt ledge, 3-point greenhouse, 7-point crowned top / open bed) at adaptive
   stations: hero 7 cm (3.6 cm near the nose, tail and arches), traffic 11 cm (6.5 cm), plus every
@@ -45,8 +63,12 @@ Wave-2 style / mechanical authors: see `docs/design/vehicles/PLAN.md` "Foundatio
   deck, quarters, pillars, open bed floor (`bed_floor`, FrameRear). Plus head / tail lights on the
   nose / tail faces (proud of the surface; bound to the fenders / quarters so a hanging bumper
   leaves them), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
-  details, mechanical parts (`mechanical.rs`) and per-wheel tire / rim (`wheels.rs`) / brake disc /
-  caliper / upright parts. Paint parts get livery-atlas UVs (`data/panels/README.md`).
+  details, mechanical parts (`mechanical/`: engine bay, suspension, exhaust, frame) and per-wheel
+  tire / rim (`wheels/`) / brake disc / caliper / upright parts, all from the resolved
+  `mechanical::car_spec` (per-id table + style overrides). The underbody plate stays at floor
+  height between the wheels, so the engine bay is open from above. Paint parts get livery-atlas
+  UVs; material slots incl. `rim`, `spring`, `accent`, `underglow` are listed in
+  `data/panels/README.md`.
 - **Builder** (`builder.rs`): `PartKey` + `Builder` with `cuboid`, `beveled_box`, `oriented_box`,
   `cylinder`, `torus`, `lathe`, `extrude`, `surface_patch`, `poly`, `mirror_part`; drops
   degenerate triangles; unit tests check every closed primitive faces outward.
@@ -55,18 +77,22 @@ Wave-2 style / mechanical authors: see `docs/design/vehicles/PLAN.md` "Foundatio
 
 ### Triangle budgets (`Tier::tri_budget`, checked by `validate-car-asset`)
 Hero (performance + police, and classes Sport / Muscle / Exotic / Police*): 8k–20k. Traffic
-(traffic module; classes Beater / Compact / Truck): 4k–10k. Foundation output (2026-10-21, before
-wave-2 styles):
+(traffic module; classes Beater / Compact / Truck): 4k–10k. Current output (2026-10-21, wave-2
+styles + mechanical parts + lead polish; traffic styles still pending):
 
 | car | tris | car | tris | car | tris |
 |---|---|---|---|---|---|
-| debug_coupe (styled example) | 9413 | ironside_440 | 9524 | sentinel_bastion | 10092 |
-| debug_sedan | 6178 | junkyard_beater | 6070 | sentinel_cruiser | 9308 |
-| drayman_cargo | 6590 | kestrel_ts | 9078 | sentinel_wolfhound | 9561 |
-| furrow_24 | 6280 | lindwurm_4t | 8698 | shiro_turbo | 8906 |
-| hakone_gt | 8661 | lucciola_350 | 8654 | sperber_32 | 8934 |
-| hauler_1500 | 7045 | rampart_50 | 9270 | tansy_13 | 5548 |
-| | | | | vireo_xs | 5671 |
+| debug_coupe | 16617 | ironside_440 | 18699 | sentinel_bastion | 17191 |
+| debug_sedan | 8106 | junkyard_beater | 7480 | sentinel_cruiser | 16963 |
+| drayman_cargo | 8594 | kestrel_ts | 17548 | sentinel_harrier | 17715 |
+| fulmine_v10 | 18738 | lindwurm_4t | 16246 | sentinel_warden | 17770 |
+| furrow_24 | 8144 | lucciola_350 | 17242 | sentinel_wolfhound | 17137 |
+| hakone_gt | 17829 | rampart_50 | 18826 | shiro_turbo | 17918 |
+| hauler_1500 | 9403 | sperber_32 | 17772 | tansy_13 | 6926 |
+| | | | | vireo_xs | 15731 |
+
+Headroom: hero cars sit at 15.7k–18.8k of 20k, `hauler_1500` at 9.4k of 10k (drop its tire lugs
+or wheel segments first if traffic details push it over; see `wave2_mechanical.md`).
 
 ## bind-skin (`src/skin.rs`)
 4 nearest nodes of the part's own region, weights ∝ 1/(d² + 1e-4), quantised to 1/255 summing
@@ -104,10 +130,12 @@ vertex count. `panels_shots.mjs` reports 0.14 ms per car per frame during its cr
 
 ## Known gaps
 - Shapes are parametric (`BodyStyle`), but the lattice still fixes the panel zones; very different
-  cabins (mid-engine) use the visual `cabin_shift_m`. Hand-made meshes in the same format still
-  work per car (`bind-skin` binds them).
-- Foundation wheels / mechanical parts are placeholders (star rim, block engine, one strut per
-  corner) for the wave-2 mechanical agent to replace.
-- Calipers / uprights are not cambered with `wheel_camber_deg` (only the spin group is).
+  cabins (mid-engine) use the visual `cabin_shift_m`, so on lucciola / fulmine the windshield sits
+  over lattice hood nodes and the hood lid is short of its hinge line. Hand-made meshes in the
+  same format still work per car (`bind-skin` binds them).
+- Wheels, brakes, engines and suspension are the wave-2 mechanical parts (not placeholders); their
+  open items are in `docs/design/vehicles/wave2_mechanical.md` ("Requests for the lead").
+  Optional table-only fields (`lip_polished`, `missing_cap`, cover finish, `frame_rails`) are not
+  `WheelStyle` / `MechStyle` knobs yet.
 - No per-region convex hulls for debris (the sim uses the lattice hull of the detached nodes).
 - Wheel wells are open (no inner arch liner); fine with the dark interior colour.

@@ -14,9 +14,9 @@
 //! tris, traffic ≈ 400–550; the detailed engine only where [`spec::CarSpec::engine_detail`]
 //! or `MechStyle::show_engine_detail` asks for it.
 //!
-//! The per-wheel calls only receive a `WheelDef`, so [`parts`] (which the generator runs
-//! first, with the whole `VehicleDef`) records the car in a thread-local
-//! ([`spec::set_current`]); [`crate::wheels::WheelGeom::new`] looks it up by hub position.
+//! The generator resolves the car's [`spec::CarSpec`] once ([`car_spec`]) and passes it to
+//! [`parts_with_spec`] and [`crate::wheels::WheelGeom::new`]; [`brake_parts`] reads it from the
+//! [`WheelGeom`] (no hidden per-thread state).
 
 pub mod brakes;
 pub mod engine;
@@ -30,17 +30,29 @@ use wp_contracts::VehicleDef;
 use crate::builder::Builder;
 use crate::mesh::MeshPart;
 use crate::profile::BodyProfile;
-use crate::style::{MechStyle, WheelStyle};
+use crate::style::{MechStyle, Tier, WheelStyle};
 use crate::wheels::WheelGeom;
+use spec::CarSpec;
 
-/// Body-fixed mechanical parts (engine, suspension, exhaust, frame), chassis space.
+/// The resolved mechanical / wheel spec of a car: the per-id table (class fallback) for its
+/// budget tier, with the set fields of `m` applied.
+pub fn car_spec(def: &VehicleDef, m: &MechStyle, tier: Tier) -> CarSpec {
+    spec::apply_mech(def, spec::base_spec(def, tier), m)
+}
+
+/// Body-fixed mechanical parts (engine, suspension, exhaust, frame), chassis space, for the
+/// car's [`style_for`](crate::style::style_for) tier. Prefer [`parts_with_spec`] when the spec
+/// is already resolved.
 pub fn parts(def: &VehicleDef, p: &BodyProfile, m: &MechStyle, b: &mut Builder) {
-    let tier = crate::style::style_for(def).tier;
-    let spec = spec::apply_mech(def, spec::base_spec(def, tier), m);
-    spec::set_current(def, spec);
-    let out = engine::engine(def, p, &spec, b);
-    suspension::suspension(def, p, &spec, &out, b);
-    exhaust::exhaust(def, p, &spec, &out, b);
+    let spec = car_spec(def, m, crate::style::style_for(def).tier);
+    parts_with_spec(def, p, &spec, b);
+}
+
+/// Body-fixed mechanical parts from a resolved spec ([`car_spec`]).
+pub fn parts_with_spec(def: &VehicleDef, p: &BodyProfile, spec: &CarSpec, b: &mut Builder) {
+    let out = engine::engine(def, p, spec, b);
+    suspension::suspension(def, p, spec, &out, b);
+    exhaust::exhaust(def, p, spec, &out, b);
 }
 
 /// Brake disc / drum + caliper + knuckle of one wheel, hub space.
