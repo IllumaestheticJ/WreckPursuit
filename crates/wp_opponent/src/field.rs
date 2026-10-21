@@ -322,6 +322,10 @@ struct Racer {
     wide_speed: Option<SpeedProfile>,
     /// Following the whole-road line right now.
     wide_on: bool,
+    /// Lane picked by the gap planner (lateral offset of its centre), and how long it has
+    /// been held, s.
+    weave_n: Option<f32>,
+    weave_s: f32,
     ctrl: DriveController,
     rng: Rng,
     status: RacerStatus,
@@ -599,6 +603,16 @@ const CREEP_STOP_GAP_M: f32 = 1.0;
 /// inside the stop gap, m.
 const CREEP_CLEAR_M: f32 = 0.15;
 
+/// Gap planner: how far ahead lanes are compared, m.
+const WEAVE_RANGE_M: f32 = 100.0;
+/// Gap planner: time over which a car's speed counts towards the room in its lane, s.
+const WEAVE_LOOK_S: f32 = 3.0;
+/// Gap planner: extra room another lane must offer before I move over, m.
+const WEAVE_GAIN_M: f32 = 20.0;
+/// Gap planner: works only where my own lanes leave this much room to move across (more than
+/// one lane of mine), m.
+const WEAVE_MIN_SPAN_M: f32 = 3.0;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
@@ -678,6 +692,8 @@ impl Field {
                 speed,
                 wide_speed,
                 wide_on: false,
+                weave_n: None,
+                weave_s: 0.0,
                 ctrl: DriveController::new(
                     gains,
                     spec.capability.wheelbase_m,
@@ -2139,6 +2155,72 @@ fn decide_racer(
                     }
                 }
             }
+        }
+
+        // Gap planner (weaving): in traffic, pick the lane with the most room over the next
+        // ~100 m and move into it early, instead of driving up to the car in mine and waiting
+        // for a pass. A lane counts only if moving over is safe now (nothing alongside on the
+        // way, nothing closing from behind in it).
+        if r.tactic == Tactic::Follow && !done_racing && !start_phase && !fleeing {
+            let room = |c: f32| -> f32 {
+                rel.iter()
+                    .filter(|q| q.ds > 0.0 && (q.o.n - c).abs() < hw + q.o.half_w + 0.3)
+                    .map(|q| (q.gap + (q.o.v_s - v) * WEAVE_LOOK_S).max(q.gap.min(0.0)))
+                    .fold(WEAVE_RANGE_M, f32::min)
+            };
+            let safe = |c: f32| -> bool {
+                let band = my_band(r.n, c);
+                !rel.iter().any(|q| {
+                    let lat =
+                        band.0 < q.o.n + q.o.half_w + 0.4 && band.1 > q.o.n - q.o.half_w - 0.4;
+                    lat && ((q.ds.abs() < hl + q.o.half_len + 3.0)
+                        || (q.ds < 0.0 && q.gap < 15.0 && q.o.v_s > v + 0.5))
+                })
+            };
+            // My own direction's lanes only, here and over the next 60 m (two-lane roads have
+            // no other lane of mine: the opposing one is for passes and the whole-road line,
+            // which check for oncoming traffic).
+            let own = |s: f32| to_limits(corridor.bounds(s));
+            let (o_lo, o_hi) = [0.0, 30.0, 60.0]
+                .iter()
+                .map(|x| own(r.s + x))
+                .fold((f32::NEG_INFINITY, f32::INFINITY), |(a, b), (l, h)| {
+                    (a.max(l), b.min(h))
+                });
+            let here = room(r.n);
+            let current = r.weave_n.filter(|c| *c >= o_lo - 0.1 && *c <= o_hi + 0.1);
+            let mut best: Option<(f32, f32)> = None;
+            let mut c = o_lo;
+            while o_hi - o_lo >= WEAVE_MIN_SPAN_M && c <= o_hi + 0.01 {
+                let f = room(c);
+                if (c - r.n).abs() > 1.5
+                    && f > here + WEAVE_GAIN_M
+                    && safe(c)
+                    && best.is_none_or(|b| f > b.1)
+                {
+                    best = Some((c, f));
+                }
+                c += PASS_LANE_STEP_M;
+            }
+            r.weave_s += dt;
+            r.weave_n = match (current, best) {
+                // Keep my pick while it still pays and is not stale.
+                (Some(cur), _)
+                    if r.weave_s < 8.0 && room(cur) > here.min(room(line_n(r.s))) - 5.0 =>
+                {
+                    Some(cur)
+                }
+                (_, Some((c, _))) if here < WEAVE_RANGE_M - 1.0 => {
+                    r.weave_s = 0.0;
+                    Some(c)
+                }
+                _ => None,
+            };
+            if let Some(c) = r.weave_n {
+                tuck = Some(c);
+            }
+        } else {
+            r.weave_n = None;
         }
 
         // Defend: one move toward the attacker's side.

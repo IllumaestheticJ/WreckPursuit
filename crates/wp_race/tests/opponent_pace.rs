@@ -131,6 +131,9 @@ pub struct CarPace {
     /// Nose-to-nose stand-offs (standing facing a standing car in my path): how many, and the
     /// time spent in them, s.
     pub head_on: (u32, f32),
+    /// Of those, the ones out on the opposing lanes (a racer met on the wrong side of the road
+    /// by a car coming the other way or out of a side road).
+    pub head_on_opposing: u32,
     /// Judge status.
     pub status: String,
 }
@@ -351,6 +354,7 @@ pub fn race_pace_in(
     let mut lateral = vec![(0u32, 0u32, 0.0f64, 0.0f64); k_n];
     // (stand-offs, seconds in them, in one now).
     let mut head_on = vec![(0u32, 0.0f32, false); k_n];
+    let mut head_on_opp = vec![0u32; k_n];
     let mut last_tactic = vec![Tactic::Follow; k_n];
     // Last non-profile cause; the climb back to the profile afterwards is booked to it.
     let mut recovering: Vec<Option<usize>> = vec![None; k_n];
@@ -541,6 +545,9 @@ pub fn race_pace_in(
             {
                 let h = &mut head_on[k];
                 if d.head_on {
+                    if !h.2 && d.opposing {
+                        head_on_opp[k] += 1;
+                    }
                     h.0 += u32::from(!h.2);
                     h.1 += PHYSICS_DT;
                 }
@@ -573,7 +580,7 @@ pub fn race_pace_in(
                     }
                 }
                 eprintln!(
-                    "  t={:6.1} s={:7.1} v={:5.1} tgt={:5.1} own={:5.1} ideal={:5.1} lim={:?} tac={:?} n={:5.2} ncmd={:5.2} pass={:?}",
+                    "  t={:6.1} s={:7.1} v={:5.1} tgt={:5.1} own={:5.1} ideal={:5.1} lim={:?} tac={:?} n={:5.2} ncmd={:5.2} opp={} ho={} pass={:?}",
                     (tick - green) as f32 * PHYSICS_DT,
                     d.s,
                     v,
@@ -584,6 +591,8 @@ pub fn race_pace_in(
                     tac,
                     d.n,
                     d.n_cmd,
+                    u8::from(d.opposing),
+                    u8::from(d.head_on),
                     d.pass_checks
                 );
             }
@@ -659,6 +668,7 @@ pub fn race_pace_in(
                 passes_per_km: ai.field().passes_by(k) as f32
                     / (race.route.length_m * laps as f32 / 1000.0).max(0.1),
                 head_on: (head_on[k].0, head_on[k].1),
+                head_on_opposing: head_on_opp[k],
                 status: format!("{:?}", r.status),
             }
         })
@@ -700,7 +710,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -715,6 +725,7 @@ fn pace_sweep() {
                     c.passes_per_km,
                     c.head_on.0,
                     c.head_on.1,
+                    c.head_on_opposing,
                     c.status,
                     lost.join(", ")
                 );
