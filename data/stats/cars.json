@@ -15,6 +15,28 @@
     "skidpad_radius_m": 50.0
   },
   "cars": {
+    "arashi_t4": {
+      "display_name": "Arashi T4",
+      "zero_to_100_s": 5.36,
+      "top_speed_kmh": 248.1,
+      "cornering_g": 0.966,
+      "bars": {
+        "acceleration": 0.851,
+        "top_speed": 0.636,
+        "cornering": 0.833
+      }
+    },
+    "bulwark_400": {
+      "display_name": "Bulwark 400",
+      "zero_to_100_s": 7.92,
+      "top_speed_kmh": 201.3,
+      "cornering_g": 0.718,
+      "bars": {
+        "acceleration": 0.647,
+        "top_speed": 0.361,
+        "cornering": 0.336
+      }
+    },
     "debug_coupe": {
       "display_name": "Debug Coupe",
       "zero_to_100_s": 5.2,
@@ -147,6 +169,17 @@
         "cornering": 0.644
       }
     },
+    "satchel_20": {
+      "display_name": "Satchel 2.0",
+      "zero_to_100_s": 18.46,
+      "top_speed_kmh": 146.3,
+      "cornering_g": 0.68,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.037,
+        "cornering": 0.26
+      }
+    },
     "sentinel_bastion": {
       "display_name": "Sentinel Bastion",
       "zero_to_100_s": 7.97,
@@ -200,6 +233,17 @@
         "acceleration": 0.796,
         "top_speed": 0.782,
         "cornering": 0.729
+      }
+    },
+    "stoat_16v": {
+      "display_name": "Stoat 16V",
+      "zero_to_100_s": 8.78,
+      "top_speed_kmh": 204.4,
+      "cornering_g": 0.851,
+      "bars": {
+        "acceleration": 0.578,
+        "top_speed": 0.379,
+        "cornering": 0.602
       }
     },
     "tansy_13": {
