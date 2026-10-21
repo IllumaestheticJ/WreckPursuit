@@ -39,6 +39,11 @@
   gap: 1.6em;
   align-items: start;
 }
+.wp-garage-stats {
+  display: grid;
+  gap: 0.4em;
+  max-width: 26em;
+}
 .wp-bill tr[data-off="true"] td {
   opacity: 0.4;
 }

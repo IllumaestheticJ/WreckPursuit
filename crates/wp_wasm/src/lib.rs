@@ -11,7 +11,7 @@
 //!
 //! | group | functions |
 //! |---|---|
-//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()` |
+//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `reset_vehicle(entity)` |
 //! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
@@ -27,6 +27,7 @@
 pub mod net;
 
 pub mod audio;
+pub mod build_stats;
 pub mod data;
 pub mod garage;
 pub mod pack;
@@ -196,6 +197,14 @@ pub fn set_damage_mode(mode: &str) -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn car_ids() -> String {
     json(&data::car_ids())
+}
+
+/// Menu stat bars for every embedded car as JSON (`simcli::car_stats::CarStatsTable`:
+/// `{scales, cars: {id: {display_name, zero_to_100_s, top_speed_kmh, cornering_g,
+/// bars: {acceleration, top_speed, cornering}}}}`, bars 0–1). Needs no session.
+#[wasm_bindgen]
+pub fn car_stats_json() -> Result<String, JsValue> {
+    data::car_stats().map(json).map_err(err)
 }
 
 /// `wp_contracts::CONTRACT_VERSION`.

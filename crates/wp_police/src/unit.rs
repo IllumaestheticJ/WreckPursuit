@@ -378,6 +378,19 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Measured velocity of a physical unit (XY; `sync_unit`), m/s. The body keeps speed and
+    /// heading only; the pro driver needs the slip between them.
+    #[serde(default)]
+    pub vel: [f32; 2],
+    /// What the sim reports of the car's feel (yaw rate, road grip).
+    #[serde(default)]
+    pub feel: crate::pro::UnitFeel,
+    /// Limits of the unit's car (`PoliceSystem::set_unit_limits`); `None` = the `[pro]` defaults.
+    #[serde(default)]
+    pub limits: Option<crate::pro::CarLimits>,
+    /// Pro driver of a physical unit, created on first use.
+    #[serde(skip)]
+    pub pro: Option<crate::pro::ProDriver>,
 }
 
 impl Unit {
@@ -423,6 +436,10 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            vel: [0.0, 0.0],
+            feel: crate::pro::UnitFeel::default(),
+            limits: None,
+            pro: None,
         }
     }
 
