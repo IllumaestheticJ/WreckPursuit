@@ -135,6 +135,17 @@ pub struct GripBalance {
     /// The track cap never asks for less than this into-turn angle, degrees (so the key always
     /// turns the wheels a little into the corner).
     pub track_floor_deg: f32,
+    /// Smart lock, held-key drift hold (lead 2026-10-21: the owner's clip-1 technique, the
+    /// countersteer key held + full throttle, over-caught and swung through): the countersteer
+    /// lock in a slide is the plain lock × this, phased in over 10° of body slip from
+    /// [`GripBalance::slide_lock_from_deg`]. 1 = the plain lock (off). Countersteer only, so
+    /// grip driving (below the slip threshold) is unchanged.
+    pub slide_lock: f32,
+    /// Body slip where [`GripBalance::slide_lock`] starts to phase in, degrees.
+    pub slide_lock_from_deg: f32,
+    /// Apply the lab-only per-car fixes ([`car_fix`]): car-data proposals for the car-data
+    /// owner, tried in the lab first (lead-approved 2026-10-21).
+    pub car_fixes: bool,
     /// Front-drive cars only (FWD, not AWD; whatever [`GripBalance::tyres_rwd_only`] says):
     /// rear tyres' peak friction scale (lead 2026-10-21: the FWD cars are the furthest from the
     /// owner's shiro_turbo / rampart_50 feel; less rear grip = more rotation on lift-off).
@@ -181,6 +192,9 @@ impl Default for GripBalance {
             fwd_rear_mu: 1.0,
             fwd_rear_stiffness: 1.0,
             fwd_rear_arb: 1.0,
+            slide_lock: 1.0,
+            slide_lock_from_deg: 15.0,
+            car_fixes: false,
         }
     }
 }
@@ -216,6 +230,13 @@ impl GripBalance {
             fwd_rear_mu: 0.97,
             fwd_rear_stiffness: 0.7,
             fwd_rear_arb: 2.0,
+            // Held countersteer key + full throttle (the owner's clip-1 technique) over-caught
+            // and swung through or spun: 0 / 27 held. Countersteer lock × 0.75 past 20–30° of
+            // body slip: 11 / 27, snap-back overshoot 45° → 0° (docs/integration/grip-balance.md,
+            // "Held-key hold"). Grip driving never reaches 20° of slip, so it is unchanged.
+            slide_lock: 0.75,
+            slide_lock_from_deg: 20.0,
+            car_fixes: true,
             ..Self::default()
         }
     }
@@ -419,12 +440,70 @@ impl GripBalance {
             self.smart_slide_full_deg
                 .max(self.smart_slide_from_deg + 0.1),
         );
-        let x = ((body_slip.abs().to_degrees() - lo) / (hi - lo)).clamp(0.0, 1.0);
-        Some(smart + (plain_lock - smart) * x * x * (3.0 - 2.0 * x))
+        let slip = body_slip.abs().to_degrees();
+        let x = ((slip - lo) / (hi - lo)).clamp(0.0, 1.0);
+        // Held-key hold: less countersteer lock deep in a slide (see `slide_lock`).
+        let target = if toward_slide && self.slide_lock != 1.0 {
+            let y = ((slip - self.slide_lock_from_deg) / 10.0).clamp(0.0, 1.0);
+            let k = 1.0 + (self.slide_lock.clamp(0.3, 1.5) - 1.0) * y * y * (3.0 - 2.0 * y);
+            plain_lock * k
+        } else {
+            plain_lock
+        };
+        Some(smart + (target - smart) * x * x * (3.0 - 2.0 * x))
+    }
+}
+
+/// A lab-only per-car fix ([`car_fix`]): scales on the car data, applied by the vehicle while
+/// the grip-balance lab is on with [`GripBalance::car_fixes`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CarFix {
+    /// Front anti-roll bar scale.
+    pub arb_front: f32,
+    /// Rear anti-roll bar scale.
+    pub arb_rear: f32,
+    /// Rear spring rate scale (the preload is raised so the static ride height stays).
+    pub spring_rear: f32,
+    /// Body yaw inertia scale (applied when the car's body is built).
+    pub yaw_inertia: f32,
+}
+
+/// The lab's per-car fixes, by car id (docs/integration/grip-balance.md, "Feel references";
+/// proposals for the car data, not applied to `data/`):
+/// - `debug_coupe`: both anti-roll bars × 0.5 (the owner: "slide transition is very violent");
+/// - `lucciola_350`: rear springs × 0.65 and yaw inertia × 1.2 (rear-heavy, 13° lane change).
+pub fn car_fix(id: &str) -> Option<CarFix> {
+    let none = CarFix {
+        arb_front: 1.0,
+        arb_rear: 1.0,
+        spring_rear: 1.0,
+        yaw_inertia: 1.0,
+    };
+    match id {
+        "debug_coupe" => Some(CarFix {
+            arb_front: 0.5,
+            arb_rear: 0.5,
+            ..none
+        }),
+        "lucciola_350" => Some(CarFix {
+            spring_rear: 0.65,
+            yaw_inertia: 1.2,
+            ..none
+        }),
+        _ => None,
     }
 }
 
 impl GripBalance {
+    /// The per-car fix for car `id` when [`GripBalance::car_fixes`] is on.
+    pub fn fix_for(&self, id: &str) -> Option<CarFix> {
+        if self.car_fixes {
+            car_fix(id)
+        } else {
+            None
+        }
+    }
+
     /// The track cap (see [`GripBalance::smart_track`]) applied to centre angle `angle` (rad, +
     /// = left) with the front axle's travel `front_axle` (rad, + = left), the front peak slip
     /// and the body slip (rad). Countersteer and angles inside the cap are unchanged.
@@ -584,6 +663,20 @@ mod tests {
         assert_eq!(r.lateral.d, t.lateral.d);
         f.apply_tire(&mut r, 2, &DriveLayout::Fwd);
         assert!((r.lateral.d - 0.9 * t.lateral.d).abs() < 1e-6);
+        // Per-car fixes: only the listed cars, only with `car_fixes`.
+        assert!(GripBalance::lab_default().fix_for("debug_coupe").is_some());
+        assert!(GripBalance::lab_default().fix_for("shiro_turbo").is_none());
+        assert!(GripBalance::default().fix_for("debug_coupe").is_none());
+        // The held-key slide lock: countersteer deep in a slide only.
+        let n = GripBalance::lab_default();
+        let deep = n
+            .smart_lock(15.0, 2.7, 0.109, 0.6, true, 40f32.to_radians())
+            .unwrap();
+        assert!((deep - 0.45).abs() < 1e-4, "{deep}");
+        let into = n
+            .smart_lock(15.0, 2.7, 0.109, 0.6, false, 40f32.to_radians())
+            .unwrap();
+        assert!(into < 0.3, "{into}");
         f.apply_tire(&mut r, 0, &DriveLayout::Fwd);
         assert!((r.lateral.d - 0.9 * t.lateral.d).abs() < 1e-6);
         // The high-speed margin blends in between 100 and 160 km/h.
@@ -602,10 +695,11 @@ mod tests {
             .unwrap()
             .to_degrees();
         assert!((5.5..7.5).contains(&lock), "{lock}");
-        // Countersteer in a 20° slide: the plain lock again; into the turn: still limited ...
-        let ctr = s.smart_lock(26.8, 2.7, 0.109, 0.66, true, 0.35).unwrap();
+        // Countersteer in a 17° slide (below the slide lock's 20°): the plain lock again; into
+        // the turn: still limited ...
+        let ctr = s.smart_lock(26.8, 2.7, 0.109, 0.66, true, 0.30).unwrap();
         assert!((ctr - 0.66).abs() < 1e-6);
-        let into = s.smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.35).unwrap();
+        let into = s.smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.30).unwrap();
         assert!(into.to_degrees() < 7.5);
         // ... unless the fade applies both ways.
         let both = GripBalance {

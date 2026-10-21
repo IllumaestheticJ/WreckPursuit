@@ -832,3 +832,61 @@ Closest: debug_coupe 0.4, hakone_gt 0.3.
 
 Data proposals are for machine A (car data owner); nothing in `data/` is changed here. The
 example's `ARB_F/ARB_R/SPRING_F/SPRING_R/TORQUE/YAW_INERTIA` overrides reproduce them.
+
+Lab car fixes (lead-approved for the lab, 2026-10-21): `GripBalance::car_fixes` (on in "new"
+and "grip") applies `grip_lab::car_fix`: debug_coupe bars × 0.5, lucciola_350 rear springs × 0.65
+(preload raised, ride height kept) + yaw inertia × 1.2. Measured through the lab path:
+debug_coupe 0.43 → 0.29, lucciola_350 1.40 → 0.82 (0.68 when the rear sags instead of keeping
+ride height; A can pick either when changing the data). The panel has a "per-car fixes (lab)"
+checkbox. The yaw inertia applies when the car restarts or is tagged. Still **proposals for A**:
+`data/` is not edited.
+
+## Held-key hold (owner's clip-1 technique) — over-catch fix
+
+W found that with "new", the counter key **held** + full throttle (the owner's clip-1 technique)
+swings through or spins on every parity RWD, while a key-tapping driver holds. The reference
+holds a held key. `grip_balance score` now has a "held key" column (counter key at 6°, full
+throttle, 40 m / 0.6 g entry; direction-aware, a swap fails), and `robust` is the 27-case set.
+
+Root cause: the countersteer lock. At full counter lock the slide first grows to ~50°, then the
+fronts bite and the car swings through (or the speed bleeds off and it spins). Experiments
+(medium ride, spin model):
+- W's countersteer limit (0 / 0.25 / 1 / 2 / 4°): no change (0 / 27 on "new").
+- Probe tilt fix off: no change (1 / 27).
+- The smart lock's slide fade (where the plain lock comes back, both-ways fade, angle rate): ≤ 1.
+- Smart lock forced equal to the plain lock: back to 4 (= "before"). The smart lock only matters
+  through how much lock it gives.
+- **More** drift lock (`drift_lock_extra` +0.2 … +0.6): 0 / 27 everywhere.
+- **Less** drift lock (−0.2 … −0.35 from 15–20°): "new" 8–9, "grip" 9–10.
+
+So the held key over-catches with full lock. Fix in the balance: `GripBalance::slide_lock`
+(countersteer lock × k, phased in over 10° from `slide_lock_from_deg`), in "new" and "grip" at
+**× 0.75 from 20°**. It acts on countersteer past 20° of body slip only, so grip driving is
+untouched: the `feel` table for all 13 cars is identical before / after.
+
+| test | new before → after | grip before → after |
+|---|---|---|
+| held key, parity_rwd_d | 1.1 s drift / SPUN → 4.1 s, 37°, **held** | 1.2 s / SPUN → 4.5 s, 39°, **held** |
+| held key, parity_rwd_a | 1.1 s / SPUN → 4.1 s, 38°, **held** | 1.2 s / SPUN → 4.5 s, 39°, **held** |
+| held key, parity_rwd_b | 0.9 s / SWAPPED → 1.2 s / SWAPPED | 1.5 s / SWAPPED → 4.6 s, 38°, **held** |
+| held key, rampart_50 | 1.0 s / SPUN → 1.0 s / SPUN | 1.1 s / SPUN → 5.2 s, 39°, **held** |
+| robust set, 27 (plain steering) | 0 → 10 | 1 → 10 |
+| robust set with tyre-slip VR steering | 16 → 16 | — |
+| snap-back (rwd_d / rwd_b): slip overshoot | 44.8° / 5.8° → 0.0° / 0.5° | — |
+| handbrake 40 km/h, parity_rwd_b | no catch → caught | — |
+| grip below the limit (body slip vs g, taps, lane change, slalom; 13 cars) | identical | identical |
+
+"Before" (no balance) stays at 4 / 27. Coordination with W's "more steering lock to catch
+over-rotations": these numbers say extra lock must be **directional** (only while the slide is
+growing / over-rotating). Extra lock on a held key at a steady angle over-catches (0 / 27).
+
+**`spin_model_holds_the_clip_1_drift_where_the_ellipse_spins` (tyre_slip.rs)**: not the same
+root cause, and not the probe tilt fix on its own. It uses no grip balance and passes on this
+branch when W's step-10 countersteer limit is off (`counter_margin_deg` 0.25 → 0). It also
+fails with the probe fix off (2.2 s in band). So it went red when W's step-10 default (0.25°)
+met tyre-slip's b0 7.5 hold; tyre-slip tuned against a base without step 10. Either re-tune
+it under the countersteer limit (tyre-slip) or reconsider that default for the spin model (W).
+
+**Spin model v2 (ellipse)** (tyre-slip's preset) was tuned on the `drift_best` balance, and its
+button sets that balance. Held set, medium ride, its own VR steering: drift_best 9 / 27 (tyre-slip
+reports 7), "new" 4, "grip" 1. It needs its own balance, which the button gives it.

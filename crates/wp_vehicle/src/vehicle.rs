@@ -841,10 +841,17 @@ impl Vehicle {
     /// Body inertia [roll, pitch, yaw], kg·m²: the car data's, scaled by the ride lab when its
     /// override applies to this vehicle.
     pub fn body_inertia(&self) -> [f32; 3] {
-        match crate::lab_scope::ride(self.lab_tagged) {
+        let mut i = match crate::lab_scope::ride(self.lab_tagged) {
             Some(t) => t.inertia(self.def.inertia_kgm2),
             None => self.def.inertia_kgm2,
+        };
+        // Grip-balance lab: the per-car fix (`grip_lab::car_fix`).
+        if let Some(f) =
+            crate::lab_scope::grip(self.lab_tagged).and_then(|g| g.fix_for(&self.def.id))
+        {
+            i[2] *= f.yaw_inertia.clamp(0.2, 5.0);
         }
+        i
     }
 
     /// The rear axle's differential (Drift Lab W's `car_lab` can lock it).
@@ -1512,8 +1519,16 @@ impl Vehicle {
         let arb_scale = crate::lab_scope::ride(self.lab_tagged).map_or(1.0, |t| t.arb.max(0.0));
         let grip_lab = crate::lab_scope::grip(self.lab_tagged);
         for (l, r) in [(0usize, 1usize), (2, 3)] {
-            let axle_scale =
-                grip_lab.map_or(1.0, |g| g.arb_scale(l == 0, &self.def.drivetrain.layout));
+            let axle_scale = grip_lab.map_or(1.0, |g| {
+                let fix = g.fix_for(&self.def.id).map_or(1.0, |f| {
+                    if l == 0 {
+                        f.arb_front
+                    } else {
+                        f.arb_rear
+                    }
+                });
+                g.arb_scale(l == 0, &self.def.drivetrain.layout) * fix.max(0.0)
+            });
             let f = arb_force(
                 self.corners[l].susp.arb_n_per_m * arb_scale * axle_scale,
                 self.wheels[l].x,
@@ -1879,16 +1894,28 @@ impl Vehicle {
         let hit = ground.cast_wheel(&probe);
         let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
         // Drift Lab W ride tuning (lab override): scaled springs / dampers.
-        let st = match crate::lab_scope::ride(self.lab_tagged) {
-            Some(t) => step_strut(
-                &t.scaled_at(&c.susp, crate::ride_lab::corner_load(&self.def, i)),
-                c.tyre_rate,
-                w.x,
-                w.vcomp,
-                reach,
-                dt,
-            ),
-            None => step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt),
+        // Grip-balance lab: the per-car rear spring fix (`grip_lab::car_fix`), ride height kept.
+        let spring_fix = if i >= 2 {
+            crate::lab_scope::grip(self.lab_tagged)
+                .and_then(|g| g.fix_for(&self.def.id))
+                .map(|f| f.spring_rear)
+                .filter(|k| *k != 1.0)
+        } else {
+            None
+        };
+        let st = match (crate::lab_scope::ride(self.lab_tagged), spring_fix) {
+            (None, None) => step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt),
+            (ride, fix) => {
+                let load = crate::ride_lab::corner_load(&self.def, i);
+                let mut s = ride.map_or_else(|| c.susp.clone(), |t| t.scaled_at(&c.susp, load));
+                if let Some(k) = fix {
+                    // Static: k (x + preload) = load; keep x.
+                    let x0 = load / s.spring_n_per_m - s.preload_m;
+                    s.spring_n_per_m *= k.clamp(0.2, 5.0);
+                    s.preload_m = load / s.spring_n_per_m - x0;
+                }
+                step_strut(&s, c.tyre_rate, w.x, w.vcomp, reach, dt)
+            }
         };
         w.x = st.x;
         w.vcomp = st.v;
