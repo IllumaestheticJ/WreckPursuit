@@ -759,9 +759,20 @@ clashed:
   siren is on).
 - Race: main's "leaving the route is never a DQ". The AI entrants' corridor gets a fixed
   `AI_CORRIDOR_MARGIN_M`.
-- Steering: round 12's self-aligning steering is kept, because the owner removed the yaw gyro.
-  Main's high-speed catch fix (4a4efba1) is built on the gyro, so it does not carry over; see
-  the open question on the PR.
+- Steering: round 12's self-aligning steering is kept (the owner removed the yaw gyro), and
+  main's high-speed catch fix (4a4efba1) is **ported** onto it (owner call): the highway catch
+  (`steering::highway_catch`, a held key aims at the front axle's travel at 60 → 110 km/h, kept
+  on to straight and latched for the key held through a catch, snapshot format 9) and full
+  alignment of released keys at highway speed. Snap-back after a 150 km/h catch 4-8°
+  (keyboard and gamepad), lane change at 140 km/h 4-5° (was up to a spin). Details in
+  `crates/wp_vehicle/README.md`.
+- Police: expectations moved by main's maps re-measured (owner call), with reasons, in
+  `docs/integration/police.md`; `pro_input` no longer overwrites `planned_speed` (a blocked
+  siren unit never pushed).
+- Re-aimed on main's layout: race picker (Loop 9 vertex, grid sprint 1112 m), police race finish
+  (y = -300), off-route sprint inputs, pace lock-in (`docs/integration/opponent-pace.md`), the
+  Vesper e2e port loop, sidewalk mounts, siren yields, sideswipes, tunnel POIs (measured from the
+  portals). `wp_sim` sidewalk lot drives: -3.5 cm (a new residential verge case dips 3.0-3.2 cm).
 - Test expectations adjusted for main's layout: `city_v2` accepts the painted centre line under
   the Route 40 West probe; `spawns_respect_sightline_and_active_area` waits 12 s (was 10 s) so
   cars can finish a ramp-terminal junction before the old area must be empty.
