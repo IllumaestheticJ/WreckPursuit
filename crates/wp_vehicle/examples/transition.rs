@@ -17,7 +17,8 @@
 //!   the remaining time in 10–50°;
 //! - `spun`: |b| ≥ 90° or travelling backwards.
 //!
-//! Configurations: `W defaults` (plain steering, lab ride, spin model tyres), `balance new`
+//! Configurations (ride: the panel default `RideTune::firm()`, step 20; the slow-weight
+//! config keeps its own): `W defaults` (plain steering, spin model tyres), `balance new`
 //! (+ `GripBalance::lab_default()`), `slow weight` (`RideTune::slow_weight()` +
 //! `GripBalance::for_slow_weight()`), each with the plain steering and with the VR steering
 //! of the "drift: spin + VR (test)" preset. Env overrides on top of every configuration
@@ -295,10 +296,10 @@ fn configs() -> Vec<Config> {
     let vr = CarTune::spin_vr_plain();
     let p = PlainSteer::default();
     let base = [
-        ("W defaults", RideTune::lab_default(), None),
+        ("W defaults", RideTune::firm(), None),
         (
             "balance new",
-            RideTune::lab_default(),
+            RideTune::firm(),
             Some(GripBalance::lab_default()),
         ),
         (
@@ -325,7 +326,7 @@ fn configs() -> Vec<Config> {
         v.push(Config {
             name: full,
             plain: steer,
-            ride: RideTune::lab_default(),
+            ride: RideTune::firm(),
             grip: Some(GripBalance::grip()),
         });
     }
@@ -333,7 +334,7 @@ fn configs() -> Vec<Config> {
     v.push(Config {
         name: "drift best · VR",
         plain: vr,
-        ride: RideTune::lab_default(),
+        ride: RideTune::firm(),
         grip: Some(GripBalance::drift_best()),
     });
     if let Ok(o) = std::env::var("ONLY") {
@@ -675,6 +676,17 @@ fn v2search(cars: &[(&str, LoadedCar)]) {
                     align_full_deg: pick(b.align_full_deg, 8.0, 30.0),
                     t_align_s: pick(b.t_align_s, 0.1, 0.5),
                     slide_key_gain: pick(b.slide_key_gain, 0.0, 1.0),
+                    ..b
+                };
+                plain::set_override(Some(p));
+                Some(p)
+            } else if std::env::var("V2STEER").is_ok() && i > 0 {
+                // Plain steering: the swing rack (off at 1).
+                let b = plain::active().unwrap();
+                let on = rng.f() < 0.5;
+                let p = PlainSteer {
+                    swing_rate: if on { rng.range(1.0, 3.0) } else { 1.0 },
+                    swing_yaw_dps: rng.range(60.0, 120.0),
                     ..b
                 };
                 plain::set_override(Some(p));

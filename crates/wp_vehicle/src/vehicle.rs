@@ -256,6 +256,11 @@ pub struct Vehicle {
     pub(crate) awd_coupling: f32,
     pub(crate) diffs: DiffSetup,
     pub(crate) center_steer: f32,
+    /// Plain steering's swing-rack arming (tyre-slip): seconds since the throttle input was
+    /// last lifted (< 0.5) mid-slide (|body slip| > 10°) / since the steer key last reversed, and the last held key's sign.
+    since_lift_s: f32,
+    since_reversal_s: f32,
+    last_key_sign: f32,
     /// Tyre-slip lab (`crate::car_lab::CarTune::rack_compliance`): road-wheel angle the
     /// compliant rack / column yields to the front tyres' steering-axis moment, rad. 0 when off.
     rack_yield: f32,
@@ -393,6 +398,9 @@ impl Vehicle {
             awd_coupling: 0.0,
             diffs,
             center_steer: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
+            last_key_sign: 0.0,
             rack_yield: 0.0,
             slide_class: slide_class_with_rear_lock(def, diffs.rear.power_lock()),
             throttle_f: 0.0,
@@ -563,6 +571,9 @@ impl Vehicle {
         self.clutch_locked = false;
         self.clutch = 0.0;
         self.center_steer = 0.0;
+        self.since_lift_s = 1.0e3;
+        self.since_reversal_s = 1.0e3;
+        self.last_key_sign = 0.0;
         self.throttle_f = 0.0;
         self.brake_f = 0.0;
         self.tcs = Tcs::default();
@@ -1109,6 +1120,29 @@ impl Vehicle {
         }
         let dc = self.drift_cmd;
         if plain.is_some() {
+            // Swing-rack arming timers (plain steering only; read by `plain::with_swing`).
+            // A lift counts only mid-slide (|body slip| > 10°): a transition starts with a lift
+            // from a drift, while a part-throttle approach to a corner is not a lift.
+            let sliding = body_slip(v_fwd, v_left).abs() > 10f32.to_radians();
+            self.since_lift_s = if thr_in < 0.5 && sliding {
+                0.0
+            } else {
+                (self.since_lift_s + dt).min(1.0e3)
+            };
+            let key = if steer_cmd.abs() > crate::steering::STEER_DEADZONE {
+                steer_cmd.signum()
+            } else {
+                0.0
+            };
+            let reversed = key != 0.0 && self.last_key_sign != 0.0 && key != self.last_key_sign;
+            self.since_reversal_s = if reversed {
+                0.0
+            } else {
+                (self.since_reversal_s + dt).min(1.0e3)
+            };
+            if key != 0.0 {
+                self.last_key_sign = key;
+            }
             self.throttle_f = thr_in;
         } else {
             // TCS Off = the throttle the driver presses (owner row 104): no pedal filter; the
@@ -1427,6 +1461,8 @@ impl Vehicle {
                     yaw_rate: self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
                     // d|rear-axle slip|/dt (filtered, `crate::drift`): + = over-rotating.
                     slide_growth: rear_axle.signum() * self.drift.rear_slip_rate,
+                    since_lift_s: self.since_lift_s,
+                    since_reversal_s: self.since_reversal_s,
                 },
                 &p,
                 dt,
