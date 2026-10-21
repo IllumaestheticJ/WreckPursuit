@@ -90,10 +90,19 @@ pub const LOT_MAX_DROP_M: f32 = 1.0;
 /// deck), m.
 pub const LOT_MAX_RISE_M: f32 = 0.08;
 
+/// Whether `net` has hills: terrain that is not one flat height. Main's grid city carries a
+/// flat heightfield only so its highway viaduct is a real bridge; for lots and sidewalks it is
+/// still a flat city.
+pub fn has_relief(net: &RoadNetwork) -> bool {
+    net.terrain
+        .as_ref()
+        .is_some_and(|t| t.z.iter().any(|z| *z != t.z[0]))
+}
+
 /// Width of the level lot behind every sidewalk of `net`, m ([`LOT_W_M`], or [`FLAT_LOT_W_M`]
-/// without terrain).
+/// on flat ground, [`has_relief`]).
 pub fn lot_width_m(net: &RoadNetwork) -> f32 {
-    if net.terrain.is_some() {
+    if has_relief(net) {
         LOT_W_M
     } else {
         FLAT_LOT_W_M
@@ -382,12 +391,12 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
     };
     let geo = WalkGeometry {
         lot_w,
-        max_pull_back: if net.terrain.is_some() {
+        max_pull_back: if has_relief(net) {
             MAX_WEDGE_PULL_BACK_M
         } else {
             MAX_PULL_BACK_M + lot_w
         },
-        wedges: net.terrain.is_some(),
+        wedges: has_relief(net),
     };
     let patches = node_patches(map);
     let paved = PavedIndex::new(&road_mesh_with(map, &patches));
@@ -1724,10 +1733,36 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         for k in 0..s.centre.len() - 1 {
             if is_elevated(s, k, &ground, 1.5) && is_elevated(s, k + 1, &ground, 1.5) {
                 for e in [&l, &r] {
-                    if !inside_other_paving(net, si, e[k])
-                        || !inside_other_paving(net, si, e[k + 1])
-                    {
-                        out.push((e[k], e[k + 1]));
+                    let (a, b) = (e[k], e[k + 1]);
+                    match (
+                        inside_other_paving(net, si, a),
+                        inside_other_paving(net, si, b),
+                    ) {
+                        (false, false) => out.push((a, b)),
+                        (true, true) => {}
+                        // A ramp edge leaving the carriageway it diverges from: the rail starts
+                        // where the edge leaves that paving (a whole segment from inside cut
+                        // across the taper path; lead/main-sync).
+                        (inside_a, _) => {
+                            let at = |t: f32| {
+                                [
+                                    a[0] + (b[0] - a[0]) * t,
+                                    a[1] + (b[1] - a[1]) * t,
+                                    a[2] + (b[2] - a[2]) * t,
+                                ]
+                            };
+                            let (mut lo, mut hi) = (0.0f32, 1.0f32);
+                            for _ in 0..12 {
+                                let mid = 0.5 * (lo + hi);
+                                if inside_other_paving(net, si, at(mid)) == inside_a {
+                                    lo = mid;
+                                } else {
+                                    hi = mid;
+                                }
+                            }
+                            let c = at(hi);
+                            out.push(if inside_a { (c, b) } else { (a, c) });
+                        }
                     }
                 }
             }

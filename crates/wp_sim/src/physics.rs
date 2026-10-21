@@ -374,7 +374,7 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     // roofs included (a gable or hip house is still convex). A city on flat ground (the
     // procedural grid, whose terrain only exists so its highway viaduct is a real bridge)
     // keeps its old behaviour: buildings do not block cars.
-    let flat_ground = t.z.iter().all(|z| *z == t.z[0]);
+    let flat_ground = !wp_world::surface::has_relief(net);
     for b in net.buildings.iter().filter(|_| !flat_ground) {
         let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2 + 2);
         for q in &b.footprint {
@@ -469,7 +469,9 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     }
 
     // Street and yard furniture: tree trunks, hedges and fences (driveways are flush).
-    for d in &net.decor {
+    // Like buildings: none on flat ground (the grid kept the slab and its sidewalks only before
+    // main's viaduct gave it a flat heightfield).
+    for d in net.decor.iter().filter(|_| !flat_ground) {
         if let Some(col) = decor_collider(d) {
             added.push(col);
             out.decor += 1;

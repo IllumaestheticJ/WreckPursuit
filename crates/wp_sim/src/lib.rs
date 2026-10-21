@@ -1694,22 +1694,31 @@ mod tests {
             &wp_world::procgen::ProcGenConfig::default(),
             wp_world::WorldConfig::default(),
         );
-        let target = *world.static_props().next().unwrap();
+        // Approach the first prop whose side, 20 m out, is on a road (main's grid layout put
+        // the first one's approach in a lot), at 12 m/s.
+        let side_start = |p: &wp_world::StaticProp| {
+            let (s, c) = wp_math::sin_cos(p.yaw);
+            [p.pos[0] + c * 20.0, p.pos[1] + s * 20.0, 0.0]
+        };
+        let (k, target) = world
+            .static_props()
+            .enumerate()
+            .find(|(_, p)| {
+                world
+                    .map()
+                    .locate(side_start(p), None, 0.0, true, false)
+                    .is_some()
+            })
+            .map(|(k, p)| (k, *p))
+            .unwrap();
         sim.set_world(world);
         assert_eq!(sim.active_prop_count(), 0, "props start fixed");
-        // Approach the first prop from 20 m away at 12 m/s, from its side.
-        let (s, c) = wp_math::sin_cos(target.yaw);
-        let side = [c, s];
-        let start = [
-            target.pos[0] + side[0] * 20.0,
-            target.pos[1] + side[1] * 20.0,
-            0.0,
-        ];
+        let start = side_start(&target);
         let (dx, dy) = (target.pos[0] - start[0], target.pos[1] - start[1]);
         let yaw = wp_math::atan2(-dx, dy);
         let id = sim.spawn_vehicle(&car, start, yaw).unwrap();
         sim.place_vehicle(id, start, yaw, 12.0).unwrap();
-        let h = sim.props.bodies[0];
+        let h = sim.props.bodies[k];
         let p0 = sim.physics.bodies[h].translation();
         for _ in 0..480 {
             sim.step_fixed();

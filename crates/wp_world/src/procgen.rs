@@ -734,6 +734,27 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
     }
     // Residential blocks (playtest row 95): houses on lots along all four block edges, front
     // yards, garages, driveways, fences / hedges, yard trees, street trees on the verge.
+    // Lots, fences, hedges and trees also keep out of every junction box: a big junction's
+    // turning paths (the 27.5 m five-way junctions on the diagonals) sweep through the corner
+    // lots 14 m from the block corner (lead/main-sync: a fence on a right-turn path).
+    let junctions: Vec<(V2, f32)> = built
+        .intersections
+        .iter()
+        .filter(|ix| ix.radius_m > 0.0)
+        .map(|ix| {
+            (
+                geom::xy(built.nodes[ix.node as usize].pos),
+                ix.radius_m + 1.0,
+            )
+        })
+        .collect();
+    let lot_blocked = |lo: V2, hi: V2, alley_y: Option<f32>| -> bool {
+        blocked(lo, hi, alley_y)
+            || junctions.iter().any(|(c, r)| {
+                let q = [c[0].clamp(lo[0], hi[0]), c[1].clamp(lo[1], hi[1])];
+                geom::dist(q, *c) < *r
+            })
+    };
     let decor = residential_blocks(
         cfg,
         &xs,
@@ -741,7 +762,7 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
         &row_class,
         &col_class,
         &block_kinds,
-        &blocked,
+        &lot_blocked,
         &mut buildings,
     );
     // Outer bands: warehouses (port/industrial) and houses (suburb) between street ends.
