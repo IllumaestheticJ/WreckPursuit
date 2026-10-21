@@ -169,7 +169,7 @@ impl RacingLine {
         line
     }
 
-    /// A line that simply follows offset `n` (no optimisation) — used for flight routes.
+    /// A line that simply follows offset `n` (no optimisation).
     pub fn constant(corridor: &Corridor, n: f32) -> Self {
         let m = corridor.len();
         let mut line = Self {
