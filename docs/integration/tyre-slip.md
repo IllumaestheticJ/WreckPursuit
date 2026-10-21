@@ -135,6 +135,81 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Step 23 "spinning on throttle / when holding a drift" (lead, 2026-10-21) — tyre side
+
+`transition poweron` (harness drivers, `PlainSteer::default`, TCS off / raw throttle): power-on in
+2nd / 3rd from 30 / 45 / 60 km/h straight and with the left key held 1 s first (corner), plus the
+held-drift set. Sets: **ref** = grip-balance 7d6b66c9 (step-14 balance, medium ride, spin b0 7.5),
+**step23** (balance new, firm ride, b0 7.5), **B** (balance new, firm ride, candidate B), and two
+mixes. Corner power-on with full lock + full throttle spins in every set (it is a hard input);
+straight power-on never spins.
+
+| set | rampart_50: corner spins / 6 · s to 20° / to spin · held / 9 (spun) | parity_rwd_a | parity_rwd_b | parity_rwd_d |
+|---|---|---|---|---|
+| ref 7d6b66c9 | 3 · 0.77 / 1.36 · 4 (3 spun) | 5 · 0.68 / 0.99 · 9 | 3 · 0.67 / 1.08 · 6 | 5 · 0.65 / 1.06 · 9 |
+| step23 | 3 · 1.33 / 1.83 · 5 (0) | 5 · 0.80 / 1.27 · 9 | 3 · 0.93 / 1.34 · 8 | 3 · 0.85 / 1.32 · 9 |
+| B | 3 · 1.05 / 1.56 · 7 (0) | 6 · 1.16 / 1.67 · 9 | 3 · 0.90 / 1.18 · 8 | 5 · 1.62 / 1.18 · 9 |
+| medium ride + balance new | 3 · 0.85 / 1.33 · 7 | 6 · 0.78 / 1.25 · 9 | 5 · 0.67 / 1.20 · 7 | 6 · 0.95 / 1.46 · 9 |
+| firm ride + step-14 balance | 3 · 1.30 / 1.88 · 3 | 3 · 0.73 / 1.10 · 9 | 3 · 0.89 / 1.38 · 6 | 3 · 0.79 / 1.31 · 9 |
+
+shiro_turbo: 0 spins in every set (worst slip 6–9°). **In this harness step 23 is calmer than
+the owner's reference**, not spinnier: it takes ~0.15–0.55 s longer to reach 20° and to spin,
+and no held drift spins (ref: rampart 3). Turning off W's steering features (transition rack,
+catch, over-rotation rack, countersteer limit) changes nothing here. So the owner's step-23 spins
+are not reproduced by the tyre / ride / balance / steering sets — the likely sources are outside
+this harness: the live-driven player path (grip-balance 29f42858 "player steering aids only for
+live-driven cars"), the owner's assist settings (auto clutch / gears, TCS), or the shipped unify
+values (`lab_scope::shipped_plain`). Needs a repro on the live wp_sim path with the owner's
+assists.
+
+### Candidate B as the default spin model; lift / handbrake entries (lead, 2026-10-21)
+
+`CarTune::spin_candidate()` is candidate B (commit 683bdf52); the previous set is
+`CarTune::spin_step22()`. Grip-balance takes it into the unify build. On the panel default
+(firm ride + balance new) the clip-1 hold test sits at ~40° (5.0 s in band, sd 1.6), where the
+step-20 set sat at the 45° edge. W's `drift_lab_w_snap` ("before" half: steps 1–9 steering on
+the new tyres) and `drift_lab_w_catch` (rwd_d's key-tapping snap entry misses the band) move
+with B; reported to grip-balance / W.
+
+Transition harness entries for low-power cars: `ENTRY=handbrake` (key + handbrake, no throttle,
+0.4 s) or `ENTRY=lift` (key, throttle lifted 0.4 s), then full throttle; `HOLD_GEAR` = the gear
+held through the drift (default 2). shiro_turbo / lucciola_350 (B tyres, step 22 · plain):
+
+| entry | shiro_turbo | lucciola_350 |
+|---|---|---|
+| power, 2nd (default) | no hold | no hold |
+| lift, 2nd | no hold | no hold |
+| handbrake, 2nd | no hold | hold 31° at 35 km/h → flick, no crossing |
+| handbrake, 1st | hold 33° at 36 km/h → flick, no crossing | hold 31° at 33 km/h → flick, no crossing |
+
+With 1st gear + the handbrake both enter and hold a drift, but at 33–36 km/h the lift flick
+does not swing them through (no real crossing). parity_rwd_a: power entry 6 / 6, handbrake
+entry 2 / 6 (2 swing-backs, it enters slower and deeper).
+
+### New-side settle, tyre side (lead, on drift-lab-w 1451d264: W's transition rack + catch)
+
+`transition v2search` with `V2SETTLE=1` (only the spin weighting `spin_b0/b2/c/p`, `rear_relax`,
+`rear_peak_slip` move; no ellipse / drive floor / front falloff), 304 runs, gates held ≥ 25,
+lift-off 0, caught ≥ 17, crossing 0.70–0.90 s (unchanged). Step 20 · plain:
+
+| tyres | held / 27 | caught / 18 | fast | median cross | median settle |
+|---|---|---|---|---|---|
+| current spin model (b0 7.5, b2 1.63, c 0.85, p 8, relax 1.0, peak 1.0) | 25 | 18 | 5 | 0.82 s | 0.45 s |
+| A: b0 9.6, b2 1.95, c 0.92, p 6, relax 0.80, peak 0.95 | 25 | 18 | 9 | 0.80 s | 0.30 s |
+| **B: b0 8.45, b2 1.86, c 0.91, p 5, relax 1.26, peak 1.04** | **26** | 18 | 7 | 0.81 s | 0.33 s |
+
+B per car (current → B; held / 9 · caught / 6 · median cross · fast): rwd_a 9·6·0.85·3 → 9·6·0.88·2;
+**rwd_b 8·6·0.80·0 → 9·6·0.74·3** (settles 1.4–1.6 s → mostly 0.3–1.0 s); rwd_d 8·6·0.86·2 →
+8·6·0.88·2; rampart_50 3·0 → **8**·0 (6 swing-backs from W's catch at 0.9; grip-balance ships
+0.7, which catches it 9 / 9); debug_coupe 9·6·0.85·3 → 9·6·0.87·3. Lift-off 0 everywhere. Fastest
+settling sets lose holds (12 fast at held 23). Not applied: per the lead, the tyre change goes in
+on lead/round12 after the unify, with `opponent_pace` in the gate.
+
+shiro_turbo / lucciola_350 "no hold" (grip-balance's question): the harness enters on power only
+(2nd gear, 40 m circle, 0.3–0.7 g); these cars stay at 1–3° of slip for 6 s (lucciola rotates at
+0.7 g). A harness limit for low-power cars (they need a lift / brake / handbrake entry), not a
+transition or tyre fault.
+
 ### Option (b): front grip falloff at deep front slip (lead, 2026-10-21)
 
 `CarTune::front_deep_falloff` (existing knob: front side force × (1 − falloff) faded in from

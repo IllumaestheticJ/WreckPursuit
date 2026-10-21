@@ -22,8 +22,8 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// confirmed-slide gate of the steering (row 102). Format 11: plus the keyboard key ramp
 /// (keys arrive raw, Drift Lab C step 6). Format 12: plus the handbrake-held time (pivot aid,
 /// owner row 109; round12 used 9 for that on A's lineage). Format 13: plus the plain keyboard
-/// steering state (lift / reversal timers, last key, slip rate and countersteer timers, rack
-/// yield), now part of the shipped player handling (unify, 2026-10-21).
+/// steering state (lift / reversal / slide-crossing timers, last key and slide side, slip rate
+/// and countersteer timers, rack yield), now part of the shipped player handling (unify, 2026-10-21).
 const FORMAT: u8 = 13;
 
 /// Opaque full-state snapshot of one [`Vehicle`].

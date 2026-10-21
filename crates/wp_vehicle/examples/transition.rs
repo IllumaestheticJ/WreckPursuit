@@ -131,6 +131,17 @@ fn swing_steer(on: bool) {
     }
 }
 
+/// How the flick driver enters the held drift (`ENTRY`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Entry {
+    /// Key into the turn + full throttle (default).
+    Power,
+    /// Key into the turn + handbrake, no throttle, for 0.4 s, then full throttle.
+    Handbrake,
+    /// Key into the turn with the throttle lifted for 0.4 s, then full throttle.
+    Lift,
+}
+
 /// Old-side angle where a lifting driver reverses the keys, °.
 const REACT_DEG: f32 = 5.0;
 
@@ -142,6 +153,15 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
     // 30–45° hold first).
     let env_f = |k: &str, d: f32| std::env::var(k).ok().map_or(d, |v| v.parse().expect(k));
     let mut rig = settle_on_circle(c, &a, env_f("RADIUS", 40.0), env_f("LATG", 0.5));
+    // `HOLD_GEAR`: the gear the driver holds through the drift (default 2nd, the lab's).
+    let hold_gear: i8 = std::env::var("HOLD_GEAR")
+        .ok()
+        .map_or(DRIFT_GEAR, |v| v.parse().expect("HOLD_GEAR"));
+    let entry = match std::env::var("ENTRY").as_deref() {
+        Ok("handbrake") => Entry::Handbrake,
+        Ok("lift") => Entry::Lift,
+        _ => Entry::Power,
+    };
     let flick_deg = std::env::var("FLICK_DEG")
         .ok()
         .map(|v| v.parse::<f32>().expect("FLICK_DEG"));
@@ -195,7 +215,18 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
             }
         }
         let (steer, throttle) = match (flick_at, reverse_at) {
-            (None, _) => (if entered { 1.0 } else { -1.0 }, 1.0),
+            (None, _) if entered => (1.0, 1.0),
+            // Entry (lead: low-power cars cannot break the rear loose on power alone):
+            // `ENTRY=handbrake` = the key into the turn with the handbrake and no throttle for
+            // the first 0.4 s, `ENTRY=lift` = the key with the throttle lifted for 0.4 s; then
+            // full throttle until the slide passes 12°. Default `power`: full throttle.
+            (None, _) => {
+                let early = tick < (0.4 * TPS as f32) as usize;
+                match entry {
+                    Entry::Handbrake | Entry::Lift if early => (-1.0, 0.0),
+                    _ => (-1.0, 1.0),
+                }
+            }
             (Some(f), None) => {
                 let l = match init {
                     Init::Lift(l) | Init::LiftSwitchEnd(l) => l,
@@ -216,11 +247,21 @@ fn flick(c: &LoadedCar, gap: f32, init: Init) -> Option<Transition> {
                 (if tick - r < gap_t { 0.0 } else { -1.0 }, thr)
             }
         };
+        let handbrake = if flick_at.is_none()
+            && !entered
+            && entry == Entry::Handbrake
+            && tick < (0.4 * TPS as f32) as usize
+        {
+            1.0
+        } else {
+            0.0
+        };
         rig.step(
             &VehicleInput {
                 steer,
                 throttle,
-                gear_down: !a.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                handbrake,
+                gear_down: !a.auto_gears && rig.vehicle.gear() > hold_gear,
                 ..Default::default()
             },
             &a,
@@ -807,12 +848,366 @@ fn holds(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// One power-on run: straight at `kmh` with cruise throttle in `gear` (auto gears to reach it,
+/// then held), optionally the left key held 1 s first (in a corner), then full throttle for
+/// 2.5 s with the key still held (corner) or none (straight). Returns (spun, peak |body slip| °).
+/// Spun = |body slip| ≥ 45° or travelling backwards.
+fn power_on(c: &LoadedCar, kmh: f32, gear: i8, corner: bool) -> (bool, f32, Option<f32>, f32) {
+    use wp_vehicle::rig::Rig;
+    let a = reference_assists();
+    let v = kmh / 3.6;
+    let hold = |rig: &Rig| {
+        let err = v - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    let mut rig = Rig::new(c);
+    rig.teleport([0.0; 3], 0.0, v, 0.0);
+    // Settle 1.5 s at speed, stepping to the gear.
+    for _ in 0..(3 * TPS / 2) {
+        let (throttle, brake) = hold(&rig);
+        let g = rig.vehicle.gear();
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                gear_up: g < gear,
+                gear_down: g > gear,
+                ..Default::default()
+            },
+            &a,
+        );
+    }
+    let steer = if corner { -1.0 } else { 0.0 };
+    if corner {
+        for _ in 0..TPS {
+            let (throttle, brake) = hold(&rig);
+            rig.step(
+                &VehicleInput {
+                    steer,
+                    throttle,
+                    brake,
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+    }
+    let (mut spun, mut peak) = (false, 0.0f32);
+    let (mut t20, mut t_spin) = (None, 9.0f32);
+    for tick in 0..(5 * TPS / 2) {
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle: 1.0,
+                ..Default::default()
+            },
+            &a,
+        );
+        let s = slide_state(&rig);
+        let b = s.body_slip.to_degrees().abs();
+        peak = peak.max(b);
+        if t20.is_none() && b >= 20.0 {
+            t20 = Some(tick as f32 / TPS as f32);
+        }
+        if b >= 45.0 || s.v_fwd < 0.0 {
+            spun = true;
+            t_spin = tick as f32 / TPS as f32;
+            break;
+        }
+    }
+    (spun, peak, t20, t_spin)
+}
+
+/// `poweron`: the owner's "spinning on throttle / when holding a drift" (lead, step 23) — power-on
+/// (TCS off, raw throttle; 2nd / 3rd from 30 / 45 / 60 km/h; straight and with the key held in
+/// a corner) and the held-drift set, per car, for: `ref` (grip-balance 7d6b66c9: step-14 balance,
+/// medium ride, spin model b0 7.5), `step23` (balance new, firm ride, b0 7.5) and `B` (balance
+/// new, firm ride, candidate B). `CARS` overrides the car list; `PLAIN` merges steering fields.
+fn poweron_table() {
+    use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
+    let ids: Vec<String> = match std::env::var("CARS") {
+        Ok(l) => l.split(',').map(String::from).collect(),
+        Err(_) => [
+            "rampart_50",
+            "parity_rwd_a",
+            "parity_rwd_b",
+            "parity_rwd_d",
+            "shiro_turbo",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect(),
+    };
+    let sets: Vec<(&str, RideTune, GripBalance, CarTune)> = vec![
+        (
+            "ref 7d6b66c9",
+            RideTune::medium_weight(),
+            GripBalance::step14(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "step23",
+            RideTune::firm(),
+            GripBalance::lab_default(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "B",
+            RideTune::firm(),
+            GripBalance::lab_default(),
+            CarTune::spin_candidate(),
+        ),
+        (
+            "ref ride + new balance",
+            RideTune::medium_weight(),
+            GripBalance::lab_default(),
+            CarTune::spin_step22(),
+        ),
+        (
+            "firm ride + step-14 balance",
+            RideTune::firm(),
+            GripBalance::step14(),
+            CarTune::spin_step22(),
+        ),
+    ];
+    let sets: Vec<_> = match std::env::var("SETS") {
+        Ok(f) => sets.into_iter().filter(|s| s.0 == f.as_str()).collect(),
+        Err(_) => sets,
+    };
+    let p = match std::env::var("PLAIN") {
+        Ok(j) => merged(&PlainSteer::default(), &j),
+        Err(_) => PlainSteer::default(),
+    };
+    // BISECT=1 (grip-balance, unify): from the owner's "feels good" anchor (lead/grip-balance
+    // 7d6b66c9: medium ride, step-14 balance without the held-key cut, step-22 tyres, W step-10
+    // steering) one change per row to the shipped unify set.
+    let mut sets: Vec<(String, RideTune, GripBalance, CarTune, PlainSteer)> = sets
+        .into_iter()
+        .map(|(n, r, g, t)| (n.to_string(), r, g, t, p))
+        .collect();
+    if std::env::var("BISECT").is_ok() {
+        let plain_anchor = PlainSteer {
+            counter_closing_only: false,
+            drift_lock_extra: 0.0,
+            over_rate: 1.0,
+            trans_follow: false,
+            trans_catch_gain: 0.0,
+            ..PlainSteer::default()
+        };
+        let grip_anchor = GripBalance {
+            fwd_rear_mu: 1.0,
+            fwd_rear_stiffness: 1.0,
+            fwd_rear_arb: 1.0,
+            slide_lock: 1.0,
+            ..GripBalance::step14()
+        };
+        let cut = |g: GripBalance| GripBalance {
+            slide_lock: 0.5,
+            slide_lock_from_deg: 15.0,
+            slide_lock_after_s: 0.5,
+            slide_lock_growth_dps: 15.0,
+            slide_lock_to_deg: 40.0,
+            ..g
+        };
+        let new_no_cut = GripBalance {
+            slide_lock: 1.0,
+            slide_lock_release_s: 0.0,
+            ..GripBalance::lab_default()
+        };
+        let catch_ext = PlainSteer {
+            counter_closing_only: true,
+            drift_lock_extra: 0.4,
+            over_rate: 2.0,
+            ..plain_anchor
+        };
+        let medium = RideTune::medium_weight();
+        let firm = RideTune::firm();
+        let t22 = CarTune::spin_step22();
+        let shipped = wp_vehicle::lab_scope::shipped_plain();
+        sets = vec![
+            (
+                "0 anchor 7d6b66c9".into(),
+                medium,
+                grip_anchor,
+                t22,
+                plain_anchor,
+            ),
+            ("1 + firm ride".into(), firm, grip_anchor, t22, plain_anchor),
+            (
+                "2 + step-20 balance".into(),
+                firm,
+                new_no_cut,
+                t22,
+                plain_anchor,
+            ),
+            (
+                "3 + held-key cut".into(),
+                firm,
+                cut(new_no_cut),
+                t22,
+                plain_anchor,
+            ),
+            (
+                "4 + reversal release".into(),
+                firm,
+                GripBalance::lab_default(),
+                t22,
+                plain_anchor,
+            ),
+            (
+                "5 + catch ext (W 11)".into(),
+                firm,
+                GripBalance::lab_default(),
+                t22,
+                catch_ext,
+            ),
+            (
+                "6 + transition rack / catch (W 12-13)".into(),
+                firm,
+                GripBalance::lab_default(),
+                t22,
+                shipped,
+            ),
+            (
+                "7 + tyres B = shipped".into(),
+                firm,
+                GripBalance::lab_default(),
+                CarTune::spin_candidate(),
+                shipped,
+            ),
+            (
+                "a anchor + step-20 balance only".into(),
+                medium,
+                new_no_cut,
+                t22,
+                plain_anchor,
+            ),
+            (
+                "b anchor + held-key cut only".into(),
+                medium,
+                cut(grip_anchor),
+                t22,
+                plain_anchor,
+            ),
+            (
+                "c anchor + tyres B only".into(),
+                medium,
+                grip_anchor,
+                CarTune::spin_candidate(),
+                plain_anchor,
+            ),
+            (
+                "d anchor + W steering only".into(),
+                medium,
+                grip_anchor,
+                t22,
+                shipped,
+            ),
+        ];
+    }
+    println!("| set | car | power-on spins / 12 (straight / corner) | corner: median s to 20° slip / to spin | worst peak slip ° (straight / corner) | held drift / 9 (spun) |");
+    println!("|---|---|---|---|---|---|");
+    let a = reference_assists();
+    for (name, ride, grip, tyre, p) in &sets {
+        plain::set_override(Some(*p));
+        ride_lab::set_override(Some(*ride));
+        grip_lab::set_override(Some(*grip));
+        car_lab::set_override(Some(*tyre));
+        for id in &ids {
+            let c = car(id);
+            let (mut ss, mut sc, mut ps, mut pc) = (0, 0, 0.0f32, 0.0f32);
+            let (mut t20s, mut tsp) = (Vec::new(), Vec::new());
+            for gear in [2i8, 3] {
+                for kmh in [30.0f32, 45.0, 60.0] {
+                    let (s1, p1, _, _) = power_on(&c, kmh, gear, false);
+                    let (s2, p2, t20, ts) = power_on(&c, kmh, gear, true);
+                    ss += s1 as usize;
+                    sc += s2 as usize;
+                    ps = ps.max(p1);
+                    pc = pc.max(p2);
+                    if let Some(t) = t20 {
+                        t20s.push(t);
+                    }
+                    if s2 {
+                        tsp.push(ts);
+                    }
+                }
+            }
+            let med = |mut v: Vec<f32>| {
+                v.sort_by(|a, b| a.total_cmp(b));
+                v.get(v.len() / 2)
+                    .map_or("—".to_string(), |x| format!("{x:.2}"))
+            };
+            let (mut held, mut spun) = (0, 0);
+            for e in [6.0f32, 12.0, 20.0] {
+                for g in [0.3f32, 0.5, 0.7] {
+                    let m = plain_hold(
+                        &c,
+                        &a,
+                        PlainDriver::HoldCounter {
+                            entry_deg: e,
+                            throttle: 1.0,
+                        },
+                        40.0,
+                        g,
+                    );
+                    held += m.held as usize;
+                    spun += m.spun as usize;
+                }
+            }
+            // BISECT: the other plain drivers (spins count; the tapper also held).
+            let mut extra = String::new();
+            if std::env::var("BISECT").is_ok() {
+                let mut tally = |mk: &dyn Fn(f32) -> PlainDriver| {
+                    let (mut h, mut sp) = (0, 0);
+                    for e in [6.0f32, 12.0, 20.0] {
+                        for g in [0.3f32, 0.5, 0.7] {
+                            let m = plain_hold(&c, &a, mk(e), 40.0, g);
+                            h += m.held as usize;
+                            sp += m.spun as usize;
+                        }
+                    }
+                    (h, sp)
+                };
+                let t = tally(&|e| PlainDriver::Tapper {
+                    entry_deg: e,
+                    target_deg: 35.0,
+                });
+                let i = tally(&|e| PlainDriver::IntoTurnHeld { entry_deg: e });
+                let r = tally(&|e| PlainDriver::Released { entry_deg: e });
+                extra = format!(
+                    " {} held ({} spun) | {} spun | {} spun |",
+                    t.0, t.1, i.1, r.1
+                );
+            }
+            println!(
+                "| {name} | {id} | {} ({ss} / {sc}) | {} / {} | {ps:.0} / {pc:.0} | {held} ({spun} spun) |{extra}",
+                ss + sc,
+                med(t20s),
+                med(tsp)
+            );
+        }
+    }
+}
+
 fn main() {
     // Lab tool: `None` overrides mean the car data, as when this was written (pre-unify;
     // `wp_vehicle::lab_scope`).
     wp_vehicle::lab_scope::set_legacy(true);
+    if std::env::args().nth(1).as_deref() == Some("poweron") {
+        poweron_table();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("holds") {
-        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        let ids: Vec<String> = match std::env::var("CARS") {
+            Ok(l) => l.split(',').map(String::from).collect(),
+            Err(_) => CARS.iter().map(|s| s.to_string()).collect(),
+        };
+        let cars: Vec<(&str, LoadedCar)> = ids.iter().map(|id| (id.as_str(), car(id))).collect();
         holds(&cars);
         return;
     }
@@ -826,7 +1221,11 @@ fn main() {
         return;
     }
     if std::env::args().nth(1).as_deref() == Some("trace") {
-        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        let ids: Vec<String> = match std::env::var("CARS") {
+            Ok(l) => l.split(',').map(String::from).collect(),
+            Err(_) => CARS.iter().map(|s| s.to_string()).collect(),
+        };
+        let cars: Vec<(&str, LoadedCar)> = ids.iter().map(|id| (id.as_str(), car(id))).collect();
         trace_hold(&cars);
         return;
     }

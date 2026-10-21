@@ -863,7 +863,7 @@ impl Vehicle {
     }
 
     /// Number of floats in [`Vehicle::plain_state`].
-    pub(crate) const PLAIN_STATE_LEN: usize = 8;
+    pub(crate) const PLAIN_STATE_LEN: usize = 10;
 
     /// The plain steering's tick-to-tick state, for snapshots.
     pub(crate) fn plain_state(&self) -> [f32; Self::PLAIN_STATE_LEN] {
@@ -876,6 +876,8 @@ impl Vehicle {
             self.lab_slip_prev,
             self.lab_slip_rate,
             self.lab_counter_s,
+            self.since_cross_s,
+            self.last_slide_side,
         ]
     }
 
@@ -890,6 +892,8 @@ impl Vehicle {
             self.lab_slip_prev,
             self.lab_slip_rate,
             self.lab_counter_s,
+            self.since_cross_s,
+            self.last_slide_side,
         ] = a;
     }
 

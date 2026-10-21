@@ -71,12 +71,17 @@ fn spin_model_holds_the_clip_1_drift_where_the_ellipse_spins() {
     // Spin model, no yaw damper: a steady hold inside clip 1's 30–45° (tuned set; it is a
     // knife edge, see docs/integration/tyre-slip.md — a failure here after other physics
     // changes means re-tuning, not necessarily a bug).
+    // The step-22 lab the panel ships: firm ride + grip-balance "new" (since the unify the
+    // main-game default), where the spin model is tuned (candidate B).
+    ride_lab::set_override(Some(RideTune::firm()));
+    wp_vehicle::grip_lab::set_override(Some(wp_vehicle::grip_lab::GripBalance::lab_default()));
     car_lab::set_override(Some(CarTune::spin_candidate()));
     let (band, mean, sd, spun, _) = hold(&c);
+    wp_vehicle::grip_lab::set_override(None);
     assert!(!spun, "spin model spun");
-    // ≥ 3.5 s: since round12's auto-clutch fix (a5956954) the hold sits steadily at ~44°
-    // (sd 1°), right under the band's 45° edge: 3.94 s in the band, was 5.3 s.
-    assert!(band >= 3.5, "spin model: {band} s in 30–45°");
+    // Candidate B on the step-22 lab: ~5.0 s in the band at ~40° (sd ~1.6°); the step-20 set
+    // sat at ~44°, right under the 45° edge.
+    assert!(band >= 4.0, "spin model: {band} s in 30–45°");
     assert!(
         (30.0..=46.0).contains(&mean) && sd <= 6.0,
         "spin model: last 3 s {mean}° sd {sd}"

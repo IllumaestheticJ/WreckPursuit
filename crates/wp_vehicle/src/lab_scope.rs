@@ -11,8 +11,8 @@
 //! AI racers, police and traffic get these too. The owner rule is one physics for every car.
 //! The per-car fixes now live in `data/cars`.
 //!
-//! The plain keyboard steering ([`shipped_plain`]: W's step-13 defaults with the new-side
-//! catch gain at 0.7) is a **player input**
+//! The plain keyboard steering ([`shipped_plain`]: W's step-13b defaults) is a **player
+//! input**
 //! aid. With it come the smart lock, the countersteer limit, the catch, the held-key release
 //! and the transition rack. It applies only to vehicles flagged as player-driven
 //! ([`crate::vehicle::Vehicle::set_player_input`]; `wp_sim` clears the flag for AI racers,
@@ -50,16 +50,11 @@ pub fn plain_off() -> bool {
     PLAIN_OFF.load(Ordering::Relaxed)
 }
 
-/// The shipped plain steering: [`crate::plain::PlainSteer::default`] (Drift Lab W step 13)
-/// with the new-side catch gain 0.7 instead of 0.9. At 0.9 rampart_50 (an owner reference
-/// car) swings back on every flick (0 / 9 caught on tyre-slip's transition harness); at 0.7 the
-/// parity cars, rampart_50 and debug_coupe catch 9 / 9 (docs/integration/grip-balance.md,
-/// Unify).
+/// The shipped plain steering: [`crate::plain::PlainSteer::default`] (Drift Lab W step 13b:
+/// the new-side catch armed by the slide crossing, so rampart_50 no longer over-catches at
+/// gain 0.9).
 pub fn shipped_plain() -> crate::plain::PlainSteer {
-    crate::plain::PlainSteer {
-        trans_catch_gain: 0.7,
-        ..crate::plain::PlainSteer::default()
-    }
+    crate::plain::PlainSteer::default()
 }
 
 /// The plain steering for a vehicle whose player-input flag is `player`

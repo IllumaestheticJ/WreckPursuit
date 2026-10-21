@@ -170,9 +170,10 @@ pub struct GripBalance {
     /// which the cut must keep (with it on, the snap-back overshoot is 3° → 42°).
     pub slide_lock_release_on_lift: bool,
     /// The transition release opens only on a key reversal made with at least this much body
-    /// slip, °: a swing out of a held drift (30–45°), not the entry into one (into-turn key →
-    /// countersteer at a small, growing slip; tyre-slip, rampart_50 2026-10-21). 0 = any
-    /// reversal.
+    /// slip, °: a swing out of a drift, not the entry into one (into-turn key → countersteer at
+    /// a small, growing slip; tyre-slip, rampart_50 2026-10-21). 10 in the lab default: with
+    /// tyres B rampart_50's flick reversals come at 10–15° (15+ catches 2 / 9 of its flicks,
+    /// 10 catches 7 / 9) and its entry holds either way. 0 = any reversal.
     pub slide_lock_release_from_deg: f32,
     /// Apply the lab-only per-car fixes ([`car_fix`]): car-data proposals for the car-data
     /// owner, tried in the lab first (lead-approved 2026-10-21).
@@ -284,7 +285,7 @@ impl GripBalance {
             // ... and for 0.75 s after a steering-key reversal (a transition's new-side
             // countersteer may reach the travel angle; not on a lift: W's snap-back exit).
             slide_lock_release_s: 0.75,
-            slide_lock_release_from_deg: 25.0,
+            slide_lock_release_from_deg: 10.0,
             car_fixes: false,
             ..Self::default()
         }
