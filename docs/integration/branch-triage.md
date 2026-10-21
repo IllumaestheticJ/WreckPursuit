@@ -41,4 +41,31 @@ and reading the code where both sides touched the same thing; last push time (< 
 
 ## Gate
 
-(filled in below after each group)
+Env: `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, 4 cores, other
+sessions building (load 10–13 most of the time). wasm-pack is not installed here: the testbed
+package was built with `cargo build --release --target wasm32-unknown-unknown -p wp_wasm` +
+`wasm-bindgen 0.2.129 --target web` (same as `npm run wasm` minus wasm-opt).
+
+| Run | fmt | clippy -D warnings | cargo test --workspace | wasm32 build | tsc | goldens |
+|---|---|---|---|---|---|---|
+| baseline round12 `4ab9703d` | ok | ok | 1 FAIL: `wp_server` e2e `client_joins_drives_and_admin_reports_it` (inputs_missing under load; passed in both later runs) | ok | — | ok |
+| gate 1 (groups 1–3 + wp_render + mods + squeal) | ok | ok | 5 FAIL, all from the new cars / wp_render: car-assets mesh format 1 (expected 3), wp_audio recorded packs, wp_vehicle stock shift times, wp_opponent capability rows, wp_render reader format 1 only | ok | ok | ok (no golden moved) |
+| gate 2 (+ round12 39321caf, helicopter, fixes) | ok | ok | ok | ok | 1 FAIL → fixed (prop chunks lacked round12's indicator geometries, 223bb358) | ok (no golden moved, no bless) |
+
+No `[bless]` commit on this branch: no golden hash moved.
+
+Browser e2e on the gate-2 head (+ 773e4021):
+- `e2e/photo.mjs`: 22 PASS after 773e4021 (round12's capture-phase Esc → pause menu swallowed photo mode's Esc; the "paused before" step used P, which opens the pause menu since round 12).
+- `e2e/helicopter.mjs`: all PASS (tracking with visual, 120 m above the car, spotlight on it).
+- `e2e/run.mjs`: 217 PASS, including the mod shop checks (4b) and the helicopter block. FAIL: `perf_check` (see below) and `reset.mjs` "ghost blinks" — reset.mjs passes 9/9 when re-run alone (load).
+- `e2e/perf_check.mjs`, same machine back to back (software GL, low load): round12 39321caf and this branch fail the **same 9 checks** (real-time factor ~0.5, frames over 250 ms, steady allocation > 200 KB/frame). Steady allocation per frame, round12 → this branch: chase 435 → 372 KB, rain 606 → 369 KB, phone 419 → 374 KB (serene-bohr's allocation pass); draw calls / triangles / lights / wasm calls within budget on both.
+
+## Still open (for the lead)
+
+- **detailed-car-models**: merge after lead/main-sync lands (rename `sentinel_harrier` → `sentinel_vigil`). Note: its meshes are format 2, round12 / this branch are on format 3 (crumple binding), so "regenerate in its format" means regenerating its cars with round12's `tools/assets` (format 3), not downgrading.
+- **awesome-faraday vs main 94ffb44c** (corridor clock removed on main): for main-sync, see the row above.
+- **Physics on no integration branch:** beautiful-bell 33e42c3a (grass grip = dirt) and upbeat-faraday 4a4efba1 (high-speed catches) → lead/grip-balance to decide.
+- **Police for E:** happy-knuth a5c0b5bb / 02181f6b / 5fdc619e (stuck-cop), quirky-fermi f9ebb4e0 / 5b3a2de6 / 13a58aa4 / 076cff6e / 3be54f00.
+- **Audio lead for J:** dreamy-bohr's recorded turbo whistle / supercharger whine clips.
+- **Unverified visually:** helicopter spotlight look (unlit cone, pool opacity 0.18); photo mode skips the low-poly post pass.
+- `wp_render` is a new workspace member (crate map in docs/INTEGRATION.md not updated: lead-owned).
