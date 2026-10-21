@@ -33,9 +33,12 @@ use super::ground::{bounds, Earthwork, Natural};
 use super::plan::Plan;
 use crate::geom::V2;
 
-/// Feature budget of this module: lot lines behind street-wall lots are left out beyond it
-/// (everything else is always placed).
+/// Feature budget of this module: the queued side / rear lot lines stop once it is reached
+/// (buildings, front lot lines and landmark content are always placed).
 pub const FEATURE_BUDGET: usize = 18_000;
+
+/// Solid feature budget of this module (same rule as [`FEATURE_BUDGET`]).
+pub const SOLID_BUDGET: usize = 13_500;
 
 /// RNG salt of this module.
 pub const SALT: u64 = 0xB1;
@@ -126,8 +129,15 @@ pub fn generate(ctx: &mut Ctx) {
         ..Default::default()
     };
     lots::walk(ctx, &mut rng, &mut claims, &mut st, &mut deferred);
-    let used = ctx.features.len() - n0;
-    lots::emit_deferred(ctx, &claims, &deferred, FEATURE_BUDGET.saturating_sub(used));
+    let added = &ctx.features[n0..];
+    let solid = added.iter().filter(|f| f.solid).count();
+    lots::emit_deferred(
+        ctx,
+        &claims,
+        &deferred,
+        FEATURE_BUDGET.saturating_sub(added.len()),
+        SOLID_BUDGET.saturating_sub(solid),
+    );
 }
 
 #[cfg(test)]

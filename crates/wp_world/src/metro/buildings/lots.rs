@@ -120,6 +120,8 @@ pub struct Lot {
     /// Detached buildings: one continuous front line at `fence_v` closes the run (through
     /// the buildings) instead of closers between them.
     pub front: bool,
+    /// A 150–220 m landmark tower (counted once placed).
+    pub landmark: bool,
 }
 
 impl Lot {
@@ -135,6 +137,7 @@ impl Lot {
             gate: false,
             empty: false,
             front: false,
+            landmark: false,
         }
     }
 
@@ -286,22 +289,24 @@ fn core(env: Env, rng: &mut Rng, st: &mut State) -> Lot {
     let concrete = Some(wall(M::Concrete, 3.0));
     let near = (1.0 - env.d_core / 480.0).max(0.0);
     if st.landmark_towers < MAX_LANDMARK_TOWERS && near > 0.0 && rng.chance(0.06 + 0.3 * near) {
-        st.landmark_towers += 1;
-        let w = rng.range_f32(38.0, 48.0);
-        let d = rng.range_f32(36.0, 44.0);
+        // Sized for the ~37–40 m deep Lantern Row blocks: a podium filling the lot and a
+        // slimmer tower set 4 m back on it.
+        let w = rng.range_f32(34.0, 44.0);
+        let d = rng.range_f32(26.0, 32.0);
         let mut l = Lot::new(w, d, 1.0).lines(concrete, concrete);
+        l.landmark = true;
         let hp = rng.range_f32(4.0, 6.0).floor() * 4.5;
         l.parts
             .push(mass(-w * 0.5 + g, w * 0.5 - g, 0.5, d - 0.5, hp));
         let ht = rng.range_f32(150.0, 220.0);
         l.parts.push(Part::Mass {
-            poly: chamfer(-w * 0.5 + 6.0, w * 0.5 - 6.0, 5.0, d - 5.0, 4.0),
+            poly: chamfer(-w * 0.5 + 5.0, w * 0.5 - 5.0, 4.0, d - 4.0, 4.0),
             h: ht,
         });
         let ch = rng.range_f32(8.0, 14.0);
         l.parts.push(Part::Crown {
             mass: 1,
-            poly: chamfer(-w * 0.5 + 9.0, w * 0.5 - 9.0, 8.0, d - 8.0, 3.0),
+            poly: chamfer(-w * 0.5 + 8.0, w * 0.5 - 8.0, 7.0, d - 7.0, 3.0),
             dz: 0.0,
             h: ch,
             kind: K::Landmark,
@@ -1299,17 +1304,32 @@ impl Run {
 
 /// Emit the queued side / rear lot lines, leaving out the stretches whose far side is
 /// another lot, a site, a building or water (that side is closed already). Lines behind
-/// detached lots go first; lines behind street-wall lots (whose frontage is already nearly
-/// closed) only while fewer than `budget` features have been added.
-pub fn emit_deferred(ctx: &mut Ctx, claims: &Claims, lines: &[Deferred], budget: usize) {
+/// detached lots go first, then lines behind street-wall lots (whose frontage is already
+/// nearly closed); within each group the longest lines go first. Emission stops once
+/// `max_features` features (or `max_solid` solid ones) have been added.
+pub fn emit_deferred(
+    ctx: &mut Ctx,
+    claims: &Claims,
+    lines: &[Deferred],
+    max_features: usize,
+    max_solid: usize,
+) {
     let n0 = ctx.features.len();
-    for pass in [false, true] {
-        for l in lines.iter().filter(|l| l.street_wall == pass) {
-            if pass && ctx.features.len() - n0 >= budget {
-                return;
-            }
-            emit_open(ctx, claims, l);
+    let mut order: Vec<&Deferred> = lines.iter().collect();
+    // Stable sort: equal keys keep their (deterministic) walk order.
+    order.sort_by(|x, y| {
+        x.street_wall
+            .cmp(&y.street_wall)
+            .then(geom::dist(y.a, y.b).total_cmp(&geom::dist(x.a, x.b)))
+    });
+    let mut solid = 0;
+    for l in order {
+        if ctx.features.len() - n0 >= max_features || solid >= max_solid {
+            return;
         }
+        let k = ctx.features.len();
+        emit_open(ctx, claims, l);
+        solid += ctx.features[k..].iter().filter(|f| f.solid).count();
     }
 }
 
@@ -1546,7 +1566,7 @@ pub fn estimate(ctx: &Ctx) -> (f32, f32) {
 }
 
 /// Building budget the row-house grouping aims for.
-const BUILDING_BUDGET: f32 = 13_000.0;
+const BUILDING_BUDGET: f32 = 9_000.0;
 
 /// Budget guard: row houses per building (1..=4) and the detached-house frontage
 /// multiplier (1..=1.8) that keep the whole city near [`BUILDING_BUDGET`] buildings.
@@ -1620,7 +1640,7 @@ pub fn walk(
                     // line runs straight (fewer, longer pieces).
                     if let Some(rd) = run.depth() {
                         let back = lot.mass_extent().2;
-                        if (lot.depth - rd).abs() < 15.0 && back + 2.0 < rd {
+                        if !lot.landmark && (lot.depth - rd).abs() < 15.0 && back + 2.0 < rd {
                             lot.depth = rd;
                         }
                     }
@@ -1637,6 +1657,9 @@ pub fn walk(
                         try_place(ctx, claims, &frame, &lot, style.max_slope(), run.depth())
                     {
                         run.push(ctx, p);
+                        if lot.landmark {
+                            st.landmark_towers += 1;
+                        }
                         placed_f = Some(lot.frontage);
                         break;
                     }
