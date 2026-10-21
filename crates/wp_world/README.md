@@ -526,7 +526,9 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   tracked vehicle stopped 20 s; wrecks left out), longest queue of stopped cars back from a stop
   line (followed back through junctions, sampled 1 Hz), stops > 5 s inside a junction box.
   simcli metrics `traffic_max_stop_s`, `traffic_max_queue`, `traffic_box_stops`,
-  `traffic_jam_recycled`; scenarios `jam/pursuit_jam_{grid,vesper}.ron` (10 min, L4 → L5).
+  `traffic_jam_recycled`; scenarios `jam/pursuit_jam_{grid,vesper}.ron` (10 min, L4 → L5, racer
+  restarted after each capture). Gates: max stop ≤ 45 s, max queue ≤ 12 (both met; seed sweep in
+  `docs/integration/world.md`, round 13, row 85).
 - *Junction rules*: reservations are rebuilt every step from what cars hold (a permit, or being
   in the connector), so none outlive their car. A tracked vehicle in a crossing path holds
   crossing traffic only while it moves faster than 2.5 m/s (`TV_SWEEP_MPS`); a stationary one
@@ -545,8 +547,8 @@ plus rules in `traffic.rs` / `traffic/blocked.rs`).
   at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
 - *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
   (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
-  (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s), and does not merge back while a unit is
-  beside it.
+  (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit beside it, it creeps on
+  along the kerb (≤ 5 m/s) and merges back once past, instead of waiting.
 - *Stuck manoeuvres*: a lane change stalled half-way (car stopped before leaving the old lane)
   is undone, with no forced lane change for 20 s; a reverse under way that has not moved for
   8 s and a U-turn that cannot start for 10 s are given up; a reverse never starts with a

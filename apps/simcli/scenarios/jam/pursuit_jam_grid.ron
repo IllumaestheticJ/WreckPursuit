@@ -31,10 +31,8 @@
     hash_every: 2400,
     expect: [
         pursuit_started_before(t_s: 60.0),
-    ],
-    // Work in progress (row 85): the gates the lead asked for. Measured per seed in
-    // docs/integration/world.md (round 13, row 85).
-    expect_pending: [
+        // Row 85 gates: no car stopped > 45 s outside a red light, no queue > 12 cars.
+        // Seeds 1-4 measured in docs/integration/world.md (round 13, row 85).
         world_metric(name: "traffic_max_stop_s", min: 0.0, max: 45.0),
         world_metric(name: "traffic_max_queue", min: 0.0, max: 12.0),
     ],

@@ -1317,30 +1317,28 @@ of the control: physical cars more than 0.8 m wide within 8 m of a turn exit 7 �
 The control's golden hash moved with the merge (not with my edit); left for the lead's bless.
 Scenarios on the merged tree (release): all 86 pass.
 
-### Response from D (round 13, row 85) — "massive traffic jam" (WORK IN PROGRESS)
+### Response from D (round 13, row 85) — "massive traffic jam"
 Started on the owner's request (lead addendum 2026-10-20). Merged `origin/lead/round12` @ 21e14c0.
-**Status: partly done.** The instrumentation and scenarios are in, and a series of deadlocks is
-fixed (list below), but the lead's gates are **not met yet**; they are `expect_pending` in
-`jam/pursuit_jam_{grid,vesper}.ron` so the suite stays green.
+**Status: done for the gates.** Both jam scenarios meet the lead's gates (no stop > 45 s except
+at red, no queue > 12) as hard `expect`s; across seeds 1–4 + 85, 9 of 10 runs meet both
+(Vesper seed 3: 53 s). Civilian collisions in the pursuit melee still need their own pass.
 
 **1. Instrumentation.** `TrafficStats::{max_stop_s, max_queue, box_stops, jam_recycled}`
 (`traffic/jam.rs`), simcli metrics `traffic_max_stop_s`, `traffic_max_queue`,
 `traffic_box_stops`, `traffic_jam_recycled` (`apps/simcli/src/run.rs`, `SCENARIOS.md`).
 Stop time is held (not reset) at red / amber and, for the metric only, within 60 m of a
 *standing scene* (a tracked vehicle stopped ≥ 20 s); wrecks are left out. Queue = stopped cars
-back from a stop line, followed back through junctions, sampled 1 Hz. New scenarios
+back from a stop line, followed back through junctions, sampled 1 Hz. Scenarios
 `jam/pursuit_jam_grid.ron` (12×12 grid, Safehouse 3 → Safehouse 2) and
 `jam/pursuit_jam_vesper.ron` (Lantern Run → Founders Cut lay-by): noon, racer at heat 70 (L4,
-pursuit takes it to L5), city police on, 10 min.
+pursuit takes it to L5), city police on, 10 min, `restart_after_capture: true`.
 
-**What the runs show.** In simcli the pursuit ends in a **capture**, and the captured racer then
-stands in the road for the rest of the run, so the units keep coming back (repeated
-PursuitStarted / Captured) and a scene with the racer and 5–20 units stands at a junction for
-minutes. Almost every long stop is within ~100 m of that scene (grid seed 2: 100 of 105 cars;
-Vesper seed 3: 118 of 135). In the game a capture ends the run (`RunEnd::Captured`), so this
-part is partly a scenario artefact — **request to the lead / E:** either clear a capture scene
-(units release, captured car removed) in the sim, or let simcli despawn a captured racer, so
-the scenario measures the pursuit, not a ten-minute scene.
+**Capture scenes (simcli).** In simcli a captured racer used to stand in the road for the rest
+of the run with 5–20 units around it — a scene that does not exist in the game (a capture ends
+the run, `RunEnd::Captured`) and accounted for most of the long stops. New scenario flag
+`restart_after_capture` (`apps/simcli/src/scenario.rs`, `run.rs`): on `PursuitEnded`
+Captured / CapturedTotalLoss the racer is put back at its route start with the scenario's heat,
+so a 10-min run measures repeated pursuits. Default off; existing scenarios unchanged.
 
 **2–5. Fixes in wp_world** (details in `crates/wp_world/README.md`, "Jams"):
 - reservations rebuilt every step (stale ones from despawned / re-routed / turned-around cars
@@ -1355,7 +1353,8 @@ the scenario measures the pursuit, not a ten-minute scene.
   the queue turns around / backs out from the tail, and the lane is marked blocked (multi-lane
   roads too) so upstream cars re-route; obstructed cars give up their permit;
 - sirens: junction hold times out after 8 s; pulled-over drivers give up on a unit standing or
-  crawling behind after 8 s (was 15 s); no merge-back while a unit is beside the car;
+  crawling behind after 8 s (was 15 s); with a unit beside the car they creep on along the kerb
+  (≤ 5 m/s) and merge back past it instead of waiting;
 - stuck manoeuvres: half-done lane changes undone (20 s cooldown); reverses stalled 8 s and
   U-turns that cannot start for 10 s given up; no reverse with a tracked vehicle < 25 m behind;
   reverse wait 15 s (was 40 s); kinematic U-turns check their exit pose (0.6 m margin) and hold
@@ -1366,35 +1365,32 @@ the scenario measures the pursuit, not a ten-minute scene.
   they are not obstacles.
 Don't-block-the-box (exit room) already existed and is unchanged.
 
-**Before / after** (release simcli, seeds 1–4 and 85; before = `lead/round12` + the
-instrumentation only). The before stop metric counts scene time too, so compare the queue and
-collision columns; "stop" after excludes standing scenes.
+**Before / after** (release simcli, both with `restart_after_capture`; before = `lead/round12`
+traffic + the instrumentation only, after = this branch). Seed 85 is the shipped scenario.
 
-| run | stop before / after (s) | queue before / after | civilian collisions before / after |
-|---|---|---|---|
-| grid 1 | 536 / 117 | 21 / 21 | 0 / 0 |
-| grid 2 | 472 / 177 | 27 / 24 | 5 / 2 |
-| grid 3 | 251 / 200 | 35 / 30 | 11 / 14 |
-| grid 4 | 536 / 236 | 17 / 20 | 1 / 6 |
-| grid 85 | 556 / 294 | 26 / 30 | 7 / 9 |
-| Vesper 1 | 526 / 141 | 12 / 8 | 8 / 0 |
-| Vesper 2 | 402 / 45 | 8 / 8 | 0 / 5 |
-| Vesper 3 | 233 / 50 | 8 / 6 | 1 / 0 |
-| Vesper 4 | 76 / 155 | 10 / 9 | 1 / 2 |
-| Vesper 85 | 67 / 392 | 8 / 27 | 1 / 25 |
+| run | max stop before / after (s) | max queue before / after | box stops before / after | civilian collisions before / after |
+|---|---|---|---|---|
+| grid 1 | 69 / 30 | 10 / 10 | 2 / 4 | 29 / 7 |
+| grid 2 | 107 / 42 | 13 / 10 | 3 / 16 | 8 / 8 |
+| grid 3 | 50 / 31 | 15 / 10 | 11 / 5 | 12 / 9 |
+| grid 4 | 45 / 32 | 12 / 10 | 9 / 2 | 6 / 15 |
+| grid 85 | 55 / 39 | 13 / 8 | 10 / 9 | 7 / 8 |
+| Vesper 1 | 90 / 44 | 10 / 7 | 6 / 8 | 17 / 12 |
+| Vesper 2 | 94 / 36 | 14 / 9 | 7 / 8 | 9 / 6 |
+| Vesper 3 | 89 / 53 | 9 / 8 | 10 / 9 | 8 / 9 |
+| Vesper 4 | 53 / 38 | 8 / 6 | 5 / 5 | 6 / 0 |
+| Vesper 85 | 55 / 29 | 7 / 10 | 2 / 4 | 1 / 14 |
 
-(Vesper 85 is a different story after the change: the pursuit ends downtown with 130–300 cars
-around instead of in the Founders Cut tunnel with 12–16; most of its collisions are physical
-civilians shoved by police in the melee and wrecks.) Gates (45 s, 12 cars): met by none of the
-grid runs; Vesper 2 and 3 are close.
-**Remaining:** queues of 20–30 behind a standing scene on long arterials (cars already in the
-lane cannot all turn around); cars boxed in right at the scene; civilian collisions in the
-pursuit melee (physical cars pushed by units) — up on some seeds, needs its own pass.
-**Regression gate for this commit:** soak and city scenarios all pass (incl. siren, blocked,
-tunnels); wp_world tests pass; clippy clean. The full workspace gate has not been re-run since
-the row-93 gate above.
-**Changes outside wp_world:** `apps/simcli/src/run.rs` (4 metrics), `apps/simcli/SCENARIOS.md`,
-`apps/simcli/scenarios/jam/*.ron`. Contract change requests: none.
+Gates met before: 1 of 10 runs (stop) / 5 of 10 (queue); after: 9 of 10 / 10 of 10.
+**Remaining:** Vesper seed 3 (53 s, a car boxed in right at a pursuit melee); civilian
+collisions in the pursuit melee (physical civilians shoved by units, wrecks) — not worse on
+average (103 → 88 over the 10 runs) but up on some seeds (Vesper 85: 1 → 14, the pursuit now
+runs through downtown instead of ending in the tunnel); needs its own pass.
+**Changes outside wp_world:** `apps/simcli/src/run.rs` (4 metrics, `restart_after_capture`),
+`apps/simcli/src/scenario.rs` and `src/fuzz.rs` (the flag), `apps/simcli/SCENARIOS.md`,
+`apps/simcli/scenarios/jam/*.ron`; `crates/wp_wasm/src/scenario.rs` one-line
+`restart_after_capture: false` so the shared scenario struct still builds. Contract change
+requests: none.
 ## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
 **Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
 the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier
