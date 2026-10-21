@@ -135,6 +135,35 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Swing time (lead: primary metric, target 0.5–0.8 s from the lift to the sign change)
+
+`v2search` now scores `fast` = caught flicks whose slip changes sign 0.5–0.8 s after the lift
+starts and settle within 0.5 s, and `cross_med` (median sign-change time). Step 20 · plain:
+
+| car | v1: held / 9 · caught / 6 · median swing | v2 preset: held / 9 · caught / 6 · median swing · fast | v2 lift-off fails / 6 |
+|---|---|---|---|
+| parity_rwd_a | 9 · 0 · — | 9 · 6 · 2.99 s · 0 | 0 |
+| parity_rwd_b | 8 · 0 · — | 7 · 1 · 2.85 s · 0 | 0 |
+| parity_rwd_d | 9 · 0 · — | 9 · 6 · 2.96 s · 0 | 0 |
+| rampart_50 | 5 · 0 · — | 8 · 6 · 3.04 s · 0 | 0 |
+| debug_coupe | 9 · 0 · — | 9 · 6 · 2.87 s · 0 | 0 |
+
+Tyre search for the swing (364 candidates: spin model, ellipse, drive floor, rear relax, rear
+peak slip, drift lock, front deep falloff; gates held ≥ 24, lift-off 0): **0 fast swings**; the
+quickest median crossing is 1.82 s. Body levers on v2: yaw inertia × 0.8 → 1.58 s (caught 4, 6
+swing-backs), front bars 2 000 N/m → 1.75 s, rear bars 30 000 → 1.58 s but 16 lift-off fails.
+
+Why (trace, rwd_d, 0.4 s lift): the lift does free the rear (κ 1.6 → 0.5, rear Fy + 15 %), but
+the rear sits at 46–49° slip angle, far past its peak, so the gain is small; meanwhile the new
+key turns the fronts into the old corner (front slip −28 → −45°, saturated) and the lift moves
+load **onto** them, so the front's moment keeps the car rotating into the old drift (+35°/s).
+The swing only happens ~3 s later as the car slows. The reference's 0.5–0.8 s swing needs the
+yaw moment to reverse within ~0.3 s, which our fronts (pulling the old way under the new key)
+prevent; tyre shape alone cannot do it. Candidate levers for the next round: (1) the front's
+into-old-turn force during a swing (a cap on the new key's angle relative to the travel while
+the slide is still on the old side), (2) less yaw inertia, (3) a held drift at a smaller angle
+/ higher speed (the step-20 hold sits at ~44° and 40 km/h; the reference 30–45° at 43–75).
+
 ### Robust swing-rack trigger (lead) — and what it showed
 
 New default-off knobs: `PlainSteer::swing_arm_s` (the swing rack acts only within this time
