@@ -66,7 +66,6 @@ import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
 import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
-import { DriftLab } from "./drift_lab";
 import { mountTuneRow, withQuickTune } from "./tune_panel";
 import { quickTune } from "../../ui-kit/src/garage/tune";
 
