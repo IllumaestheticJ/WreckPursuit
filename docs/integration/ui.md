@@ -282,3 +282,29 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    → ESCAPED (escaped) → CAPTURED (bill opened, chase end captured at L3)". The reworked golden
    frontal scenario (4 s, parked car) changed the crash fixtures; the fixture tests now assert
    ranges for it (rear bumper < half the front, heading checked before the hit).
+
+## Lead helper note (2026-10-20) — car stat bars in the garage and market
+
+`data/stats/cars.json` (physics-measured by `simcli car-stats`, see `docs/integration/testbed.md`)
+is read at build time like the car files: `CAR_STATS` in `src/data/catalog.ts`. New kit component
+`CarStatBars` (`src/ui/kit.tsx`, segmented `Meter`s; `compact` = unlabelled bars, numbers in the
+tooltip). Garage: the selected car's panel shows acceleration / top speed / cornering with values
+(labelled "stock figures" when mods are installed; the mod tree keeps the estimator's build
+numbers). Market: an "Accel · Top · Corner" column per listing. Test: every car in `CARS` has stats
+with bars in 0–1. The kit e2e (`npm run e2e`) could not run in this container (Chromium crashed /
+hung on `repairBill` with and without this change); garage and market were checked by hand in
+headless Chromium (renders, no console errors).
+
+### Follow-up (2026-10-20): bars reflect installed mods
+
+`src/data/stats.ts` `buildStats(defId, mods, measured?)`: stock → the measured table; with mods →
+`GarageCar.stats` when a provider measured the build (new optional field; live providers fill it
+from `wp_wasm::car_stats_build_json`), else stock × the estimator's modded/stock ratio
+(`previewBuild`), so stock cars still show exactly the measured numbers. Kestrel TS + cold air
+intake + race ECU + semi-slicks: estimate 6.46 s / 255 km/h / 1.02 g, rig 6.54 s / 256 km/h /
+1.05 g (test keeps the estimate within 8 %). `CarStatBars` takes a `baseline` (tick + better/worse
+colour). Garage: build bars with a stock tick, labelled measured / estimated. Mod tree: the
+candidate build's bars with a tick at the current build. The mod tree's delta table shows the
+bar values for 0–100, top speed and cornering (50 m) so they match the bars; class index, power,
+mass, power/weight and braking stay the economy estimator's (the class index is computed from the
+estimator, as in `wp_economy`). Cars without stats fall back to the estimator rows.

@@ -3,7 +3,8 @@ import { useMemo, useState } from "preact/hooks";
 import { useSend, useSlice } from "../../model/GameModel";
 import type { MarketListing } from "../../model/types";
 import { salePrice } from "../../data/economy";
-import { Badge, Button, ChoiceField, Money, Panel, ScreenHead, Tabs, useEscape } from "../../ui/kit";
+import { Badge, Button, CarStatBars, ChoiceField, Money, Panel, ScreenHead, Tabs, useEscape } from "../../ui/kit";
+import { CAR_STATS } from "../../data/catalog";
 import { pct, words } from "../../ui/format";
 import "./garage.css";
 
@@ -64,6 +65,7 @@ export function Market() {
               <tr>
                 <th>Car</th>
                 <th>Class</th>
+                <th title="Physics-measured, stock: 0–100 km/h, top speed, 50 m skidpad">Accel · Top · Corner</th>
                 <th class="num">Index</th>
                 <th class="num">Price</th>
                 <th />
@@ -79,6 +81,7 @@ export function Market() {
                     </div>
                   </td>
                   <td>{words(l.class)}</td>
+                  <td>{CAR_STATS[l.defId] ? <CarStatBars stats={CAR_STATS[l.defId]} compact /> : <span class="wp-dim">—</span>}</td>
                   <td class="num">
                     <span class="wp-class-chip">{l.bracket}</span> {l.classIndex}
                   </td>

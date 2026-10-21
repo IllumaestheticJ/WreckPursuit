@@ -623,3 +623,31 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+## Lead helper note (2026-10-20) — car stat bars on the picker
+
+Acceleration, top speed and cornering bars under the car `<select>`, computed from the physics:
+
+- `wp_vehicle::stats` (new module, A's crate): `CarStats::measure(car)` runs the existing metric
+  rigs (`zero_to_100`, `top_speed_kmh`, `skidpad` at 50 m) and `bars()` places them on **fixed**
+  scales (0–100 16 → 3.5 s, 140 → 310 km/h, 0.55 → 1.05 g), so a new car never moves the others.
+- `simcli::car_stats` + `simcli car-stats [--check]` (`just car-stats`, ~2 s release) write
+  `data/stats/cars.json`; `apps/simcli/tests/car_stats.rs` fails when the table drifts from the
+  physics (0.1 s / 2 km/h / 0.01 g) or the roster changes. **A, H: after a handling or car-file
+  change, run `just car-stats` and commit the table.** simcli now depends on `wp_vehicle`.
+- `wp_wasm`: `build.rs` embeds `data/stats/*.json`; new export `car_stats_json()` (no session
+  needed; a car missing from the table is measured in the browser once, ~1 s).
+- Testbed: `src/ui/carStats.ts` (`CarStatBars`) in `#car-stats` under the car row; updates on
+  picker change and on every rebuild; option tooltips carry the numbers. `e2e/run.mjs` step 1b.
+- Not yet in `apps/ui-kit` (garage / market lists use mock listings); the same table can feed
+  them once G's garage picks real car ids.
+
+### Follow-up (2026-10-20): stats of a modded build
+
+`wp_wasm::build_stats` (new module, `wp_wasm` now depends on `wp_vehicle`): export
+`car_stats_build_json(car_id, mods_json, mode)` validates and applies the mods with
+`wp_economy::Economy::preview` (same path as installing), resolves the modified car against every
+embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and caches per (car,
+sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
+stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
+testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
