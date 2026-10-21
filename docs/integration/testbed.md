@@ -657,3 +657,13 @@ panel mesh merged at rest into three `InstancedMesh`es (paint tinted per agent f
 palette, baked-colour trim / lamps / wheels, glass); boxes only for models still loading or
 without a fleet. Check: `node e2e/fleets_shots.mjs` (city chase at L4: police models dispatched,
 traffic models on the road incl. heavy trucks, no page errors).
+- Checked 2026-10-21: `node e2e/fleets_shots.mjs` passes; `node e2e/run.mjs` passes except the two
+  end-of-run capture checks ("capture ends the run", "Repair & continue"). They fail identically
+  with fleets switched off in the preset (the player parked 14 m in front of a cruiser in Port
+  Vesper stays NOTICED, no pursuit starts in the browser, while the native
+  `run_tests::capture_bills_holds_the_car_and_repair_continue_restores_it` captures at 10 s), so
+  that failure predates the fleets — lead to look at the browser-only path.
+- Cost: headless Chromium (SwiftShader, software raster) runs the city chase at ~0.20× real time
+  with fleets vs ~0.30× without — the instanced real-car traffic is many more triangles than the
+  old boxes. On a GPU this is small; a distance LOD (boxes beyond ~250 m) is the next step if a
+  real browser shows it.
