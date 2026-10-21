@@ -95,6 +95,13 @@ pub struct PlainSteer {
     pub counter_from_deg: f32,
     /// Body slip, degrees, from which the countersteer limit is fully on.
     pub counter_full_deg: f32,
+    /// Swing-rack arming window, s (tyre-slip; reference: transitions start with a brief
+    /// throttle lift): the swing rack acts only within this time of a throttle lift (input
+    /// < 0.5) in a slide (|body slip| > 10°) — or of a steer-key reversal with [`PlainSteer::swing_arm_on_reversal`]. 0
+    /// (default) = always armed (the yaw threshold alone).
+    pub swing_arm_s: f32,
+    /// Also arm the swing rack on a steer-key reversal (one key released, the other pressed).
+    pub swing_arm_on_reversal: bool,
     /// New-side slide (the key countersteering the current slide) where the swing rack starts
     /// to ease off, degrees: the catch, then a normal rack for the hold (no over-catch).
     pub swing_ease_from_deg: f32,
@@ -161,6 +168,8 @@ impl Default for PlainSteer {
             counter_margin_deg: 0.25,
             counter_from_deg: 3.0,
             counter_full_deg: 8.0,
+            swing_arm_s: 0.0,
+            swing_arm_on_reversal: false,
             swing_ease_from_deg: 90.0,
             swing_ease_full_deg: 90.0,
             counter_closing_only: true,
@@ -298,6 +307,10 @@ pub struct PlainInput {
     /// How fast the slide angle grows, rad/s (+ = opening / over-rotating, − = closing): the
     /// directional countersteer limit and the over-rotation rack (owner step 18).
     pub slide_growth: f32,
+    /// Seconds since the throttle input was last below 0.5 in a slide (swing-rack arming).
+    pub since_lift_s: f32,
+    /// Seconds since the steer key last reversed (swing-rack arming).
+    pub since_reversal_s: f32,
 }
 
 /// `p` with the swing rack applied for `inp` (see [`PlainSteer::swing_rate`]): all rack
@@ -308,7 +321,11 @@ fn with_swing(p: &PlainSteer, inp: &PlainInput) -> PlainSteer {
     // Key + = right steers toward −yaw: it opposes the rotation when key × yaw rate > 0.
     // Released keys (the gap of a key reversal) count too: the rack heads for the centre.
     let held = key.abs() > crate::steering::STEER_DEADZONE;
+    let armed = p.swing_arm_s <= 0.0
+        || inp.since_lift_s <= p.swing_arm_s
+        || (p.swing_arm_on_reversal && inp.since_reversal_s <= p.swing_arm_s);
     let swinging = k > 1.0
+        && armed
         && (!held || key * inp.yaw_rate > 0.0)
         && inp.yaw_rate.abs().to_degrees() >= p.swing_yaw_dps;
     if !swinging {
@@ -607,6 +624,8 @@ mod tests {
             body_slip: 0.0,
             yaw_rate: 0.0,
             slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -658,6 +677,8 @@ mod tests {
             body_slip: 1f32.to_radians(),
             yaw_rate: 0.0,
             slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
         };
         assert!((run(&grip) + 0.6 * p.lock_frac(15.0)).abs() < 1e-5);
         // Slide (20°), keys released: the wheels go back to the body's centre (no automatic
@@ -709,6 +730,8 @@ mod tests {
             body_slip: 0.0,
             yaw_rate: 0.0,
             slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -731,6 +754,8 @@ mod tests {
             body_slip: 0.0,
             yaw_rate: -120f32.to_radians(), // swinging right; the left key opposes it
             slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
         };
         let step = |p: &PlainSteer, inp: &PlainInput| {
             let mut a = -0.6;
@@ -756,12 +781,16 @@ mod tests {
         let slow = PlainInput {
             yaw_rate: -30f32.to_radians(),
             slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
             ..base
         };
         assert_eq!(step(&on, &slow), step(&off, &slow));
         let with = PlainInput {
             yaw_rate: 120f32.to_radians(),
             slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
             ..base
         };
         assert_eq!(step(&on, &with), step(&off, &with));
@@ -788,6 +817,8 @@ mod tests {
             body_slip: -30f32.to_radians(),
             yaw_rate: 0.0,
             slide_growth: -0.5, // closing (the snap-back case)
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
         };
         let run = |inp: &PlainInput, p: &PlainSteer| {
             let mut a = 0.0;
@@ -836,6 +867,8 @@ mod tests {
             body_slip: -55f32.to_radians(),
             yaw_rate: 0.0,
             slide_growth: 1.0, // over-rotating (57°/s)
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
         };
         let lock_at = |p: &PlainSteer| 0.6 * p.lock_frac(12.0);
         let run = |inp: &PlainInput, p: &PlainSteer| {

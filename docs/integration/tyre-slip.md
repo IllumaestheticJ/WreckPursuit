@@ -135,6 +135,31 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Robust swing-rack trigger (lead) — and what it showed
+
+New default-off knobs: `PlainSteer::swing_arm_s` (the swing rack acts only within this time
+of a throttle lift **in a slide**, |body slip| > 10°) and `swing_arm_on_reversal` (also on a key
+reversal); the vehicle keeps the two timers (`since_lift_s`, `since_reversal_s`, plain steering
+only). A lift counts only mid-slide: the held-set cases approach at part throttle, which
+otherwise armed the rack through the entry.
+
+Yaw-threshold sweep, v2 tyres on step 20 · plain, swing × 2.08 (cells: held / 27 · lift flicks
+caught / 18 · lift-off fails / 18):
+
+| arming \ threshold °/s | 60 | 70 | 78 | 82 | 86 | 90 | 100 | 120 |
+|---|---|---|---|---|---|---|---|---|
+| none (the shipped preset) | 12 · 0 · 0 | 12 · 0 · 0 | 20 · 6 · 0 | 20 · 16 · 0 | **25 · 13 · 0** | 25 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 |
+| key reversal 0.5 s | same as none (a held-set entry *is* a key reversal) |
+| **lift in a slide, 0.5–2 s, × 2.08 / × 2.5** | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 | 26 · 9 · 0 |
+
+The knife edge is gone for the hold (26 / 27 at every threshold), but lift-armed results equal
+**no swing rack at all** (held 26, caught 9). Per case: the always-armed rack's 13 vs 9 came from
+the **hold before the flick** (old-side slide 39° instead of 43° when the flick starts), not
+from the catch, and every crossing takes **≈ 3.0 s** from the flick to 10° on the new side —
+a slow drift across, not the reference's 0.5–0.8 s swing. So the remaining transition problem
+is the swing itself (the rear regains too little grip on a 0.15–0.4 s lift), which the steering
+cannot fix; the v2 "caught" count should be read together with the swing time.
+
 ### Spin model v2 re-tuned on the step-20 default (lead go-ahead, 2026-10-21)
 
 Harness aligned with the panel default (all `examples/transition.rs` configs now ride on
