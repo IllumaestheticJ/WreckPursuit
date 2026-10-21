@@ -5,7 +5,7 @@
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
 // city chase.
-import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
+import { loadWasm, sim, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
@@ -18,6 +18,7 @@ import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
+import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -95,6 +96,14 @@ async function main(): Promise<void> {
     onOpen: () => ui.setBill(true),
     onClose: () => ui.setBill(false),
   });
+  // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
+  let statTable: CarStatsTable | null = null;
+  try {
+    statTable = sim.carStats();
+  } catch (e) {
+    console.warn("car stats unavailable", e);
+  }
+  const carStats = statTable ? new CarStatBars($("car-stats"), statTable) : null;
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -128,6 +137,7 @@ async function main(): Promise<void> {
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
     if (first) ($("car") as HTMLSelectElement).value = first.info.car_id;
+    carStats?.show(($("car") as HTMLSelectElement).value);
     if (app.scenarioFile) ($("sc-select") as HTMLSelectElement).value = app.scenarioFile;
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -277,8 +287,16 @@ async function main(): Promise<void> {
   // ----- controls -------------------------------------------------------------------------
 
   const carSel = $("car") as HTMLSelectElement;
-  for (const id of sim.carIds()) carSel.add(new Option(id, id));
-  carSel.onchange = () => startFreeDrive(carSel.value);
+  for (const id of sim.carIds()) {
+    const opt = new Option(id, id);
+    const s = statTable?.cars[id];
+    if (s) opt.title = `${s.display_name}: ${statLine(s)}`;
+    carSel.add(opt);
+  }
+  carSel.onchange = () => {
+    carStats?.show(carSel.value);
+    startFreeDrive(carSel.value);
+  };
 
   const scSel = $("sc-select") as HTMLSelectElement;
   try {

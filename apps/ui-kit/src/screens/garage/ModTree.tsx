@@ -1,15 +1,17 @@
 /**
  * Mod tree: slots → upgrade lines → tiers, with requirements, class/mode limits and the
  * before/after effect of the selected mod on performance, durability and the class index.
- * Mod data is the real `data/mods/*.json`; numbers come from the estimator port
- * (`data/estimate.ts`, mirror of `wp_economy::Economy::preview`).
+ * Mod data is the real `data/mods/*.json`. 0–100, top speed and cornering are the stat-bar values
+ * (`data/stats.ts`: physics-measured stock, scaled for mods); the class index and the other
+ * numbers come from the estimator port (`data/estimate.ts`, mirror of `wp_economy::Economy::preview`).
  */
 import type { ComponentChildren } from "preact";
 import { useMemo, useState } from "preact/hooks";
 import { useSend, useSlice } from "../../model/GameModel";
-import { CARS, MODS, modBlocker, modTree, slotLabel, type ModDef } from "../../data/catalog";
+import { CARS, MODS, modBlocker, modTree, slotLabel, type CarStats, type ModDef } from "../../data/catalog";
 import { previewBuild, type ModPreview } from "../../data/estimate";
-import { Badge, Button, Delta, Money, Panel, ScreenHead, useEscape } from "../../ui/kit";
+import { buildStats } from "../../data/stats";
+import { Badge, Button, CarStatBars, Delta, Money, Panel, ScreenHead, useEscape } from "../../ui/kit";
 import { words } from "../../ui/format";
 import "./garage.css";
 
@@ -36,6 +38,9 @@ export function ModTree() {
     : [...car.mods.filter((m) => !(MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot)), sel];
   const before = previewBuild(def, car.mods);
   const after = previewBuild(def, candidate);
+  // Stat bars: the build now (provider-measured if available) vs the candidate build.
+  const statsNow = buildStats(car.defId, car.mods, car.stats);
+  const statsAfter = buildStats(car.defId, candidate);
   const slotEntry = tree.find((t) => t.slot === slot) ?? tree[0];
   const blocker = installed ? null : modBlocker(mod, car.mods, car.class, mode);
   const replaced = car.mods.find((m) => MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot && m !== sel);
@@ -101,7 +106,15 @@ export function ModTree() {
           )}
           {mod.modes?.length ? <Badge tone="warn">{mod.modes.join(" / ")} only</Badge> : null}
           {mod.class_whitelist?.length ? <Badge tone="info">{mod.class_whitelist.join(", ")}</Badge> : null}
-          <DeltaTable before={before} after={after} />
+          {statsNow && statsAfter && (
+            <div class="wp-garage-stats" style={{ margin: "0.6em 0" }}>
+              <div class="wp-dim wp-mono wp-upper" style={{ fontSize: "0.68em" }}>
+                {installed ? "Without this mod" : "With this mod"} · tick = current build
+              </div>
+              <CarStatBars stats={statsAfter.stats} baseline={statsNow.stats} />
+            </div>
+          )}
+          <DeltaTable before={before} after={after} statsBefore={statsNow?.stats} statsAfter={statsAfter?.stats} />
           <div class="wp-row" style={{ justifyContent: "space-between", marginTop: "0.8em" }}>
             {blocker ? <span class="wp-danger wp-mono" style={{ fontSize: "0.85em" }}>{blocker}</span> : <span />}
             {installed ? (
@@ -155,9 +168,20 @@ function ClassBadge({ p }: { p: ModPreview }) {
 const f2 = (v: number) => v.toFixed(2);
 const f0 = (v: number) => v.toFixed(0);
 
-function DeltaTable({ before, after }: { before: ModPreview; after: ModPreview }) {
+/**
+ * Before/after table. 0–100, top speed and lateral grip are the stat-bar values (physics-measured
+ * stock, scaled for mods; `data/stats.ts`) so they match the bars above; the rest, and the class
+ * index, are the economy estimator's (`previewBuild`). Falls back to the estimator for a car
+ * without stats.
+ */
+function DeltaTable(props: { before: ModPreview; after: ModPreview; statsBefore?: CarStats; statsAfter?: CarStats }) {
+  const { before, after, statsBefore: sb, statsAfter: sa } = props;
   const b = before.perf;
   const a = after.perf;
+  const bars = sb && sa;
+  const t0 = bars && sb.zero_to_100_s !== null && sa.zero_to_100_s !== null ? [sb.zero_to_100_s, sa.zero_to_100_s] : [b.est0to100S, a.est0to100S];
+  const vmax = bars ? [sb.top_speed_kmh, sa.top_speed_kmh] : [b.estTopSpeedMps * 3.6, a.estTopSpeedMps * 3.6];
+  const grip = bars ? [sb.cornering_g, sa.cornering_g] : [b.lateralGripG, a.lateralGripG];
   const durKeys = [...new Set([...Object.keys(before.durability), ...Object.keys(after.durability)])] as (keyof ModPreview["durability"])[];
   const handKeys = [...new Set([...Object.keys(before.handling), ...Object.keys(after.handling)])];
   return (
@@ -176,13 +200,13 @@ function DeltaTable({ before, after }: { before: ModPreview; after: ModPreview }
         <Delta before={b.powerToWeight} after={a.powerToWeight} format={(v) => `${f0(v)} W/kg`} epsilon={0.05} />
       </Row>
       <Row label="0–100 km/h">
-        <Delta before={b.est0to100S} after={a.est0to100S} format={(v) => `${f2(v)} s`} higherIsBetter={false} epsilon={0.005} />
+        <Delta before={t0[0]} after={t0[1]} format={(v) => `${f2(v)} s`} higherIsBetter={false} epsilon={0.005} />
       </Row>
       <Row label="Top speed">
-        <Delta before={b.estTopSpeedMps * 3.6} after={a.estTopSpeedMps * 3.6} format={(v) => `${f0(v)} km/h`} epsilon={0.3} />
+        <Delta before={vmax[0]} after={vmax[1]} format={(v) => `${f0(v)} km/h`} epsilon={0.3} />
       </Row>
-      <Row label="Lateral grip">
-        <Delta before={b.lateralGripG} after={a.lateralGripG} format={(v) => `${f2(v)} g`} epsilon={0.004} />
+      <Row label={bars ? "Cornering (50 m)" : "Lateral grip"}>
+        <Delta before={grip[0]} after={grip[1]} format={(v) => `${f2(v)} g`} epsilon={0.004} />
       </Row>
       <Row label="Braking">
         <Delta before={b.brakeDecelG} after={a.brakeDecelG} format={(v) => `${f2(v)} g`} epsilon={0.004} />

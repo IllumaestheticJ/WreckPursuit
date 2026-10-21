@@ -1,0 +1,228 @@
+{
+  "scales": {
+    "zero_to_100_s": [
+      16.0,
+      3.5
+    ],
+    "top_speed_kmh": [
+      140.0,
+      310.0
+    ],
+    "cornering_g": [
+      0.55,
+      1.05
+    ],
+    "skidpad_radius_m": 50.0
+  },
+  "cars": {
+    "debug_coupe": {
+      "display_name": "Debug Coupe",
+      "zero_to_100_s": 5.2,
+      "top_speed_kmh": 289.7,
+      "cornering_g": 0.952,
+      "bars": {
+        "acceleration": 0.864,
+        "top_speed": 0.881,
+        "cornering": 0.805
+      }
+    },
+    "debug_sedan": {
+      "display_name": "Debug Sedan",
+      "zero_to_100_s": 8.29,
+      "top_speed_kmh": 233.4,
+      "cornering_g": 0.822,
+      "bars": {
+        "acceleration": 0.617,
+        "top_speed": 0.55,
+        "cornering": 0.544
+      }
+    },
+    "drayman_cargo": {
+      "display_name": "Drayman Cargo",
+      "zero_to_100_s": 10.85,
+      "top_speed_kmh": 201.1,
+      "cornering_g": 0.657,
+      "bars": {
+        "acceleration": 0.412,
+        "top_speed": 0.36,
+        "cornering": 0.214
+      }
+    },
+    "furrow_24": {
+      "display_name": "Furrow 2.4",
+      "zero_to_100_s": 10.78,
+      "top_speed_kmh": 178.5,
+      "cornering_g": 0.729,
+      "bars": {
+        "acceleration": 0.418,
+        "top_speed": 0.227,
+        "cornering": 0.357
+      }
+    },
+    "hakone_gt": {
+      "display_name": "Hakone GT",
+      "zero_to_100_s": 5.86,
+      "top_speed_kmh": 282.3,
+      "cornering_g": 0.906,
+      "bars": {
+        "acceleration": 0.811,
+        "top_speed": 0.837,
+        "cornering": 0.712
+      }
+    },
+    "hauler_1500": {
+      "display_name": "Hauler 1500",
+      "zero_to_100_s": 8.09,
+      "top_speed_kmh": 205.7,
+      "cornering_g": 0.634,
+      "bars": {
+        "acceleration": 0.633,
+        "top_speed": 0.386,
+        "cornering": 0.167
+      }
+    },
+    "ironside_440": {
+      "display_name": "Ironside 440",
+      "zero_to_100_s": 8.14,
+      "top_speed_kmh": 210.5,
+      "cornering_g": 0.615,
+      "bars": {
+        "acceleration": 0.629,
+        "top_speed": 0.414,
+        "cornering": 0.13
+      }
+    },
+    "junkyard_beater": {
+      "display_name": "Junkyard Beater",
+      "zero_to_100_s": 13.83,
+      "top_speed_kmh": 163.5,
+      "cornering_g": 0.803,
+      "bars": {
+        "acceleration": 0.174,
+        "top_speed": 0.138,
+        "cornering": 0.505
+      }
+    },
+    "kestrel_ts": {
+      "display_name": "Kestrel TS",
+      "zero_to_100_s": 7.08,
+      "top_speed_kmh": 248.0,
+      "cornering_g": 0.93,
+      "bars": {
+        "acceleration": 0.713,
+        "top_speed": 0.635,
+        "cornering": 0.76
+      }
+    },
+    "lindwurm_4t": {
+      "display_name": "Lindwurm 4T",
+      "zero_to_100_s": 5.42,
+      "top_speed_kmh": 259.8,
+      "cornering_g": 0.931,
+      "bars": {
+        "acceleration": 0.846,
+        "top_speed": 0.705,
+        "cornering": 0.762
+      }
+    },
+    "lucciola_350": {
+      "display_name": "Lucciola 350",
+      "zero_to_100_s": 4.55,
+      "top_speed_kmh": 290.5,
+      "cornering_g": 0.957,
+      "bars": {
+        "acceleration": 0.916,
+        "top_speed": 0.885,
+        "cornering": 0.814
+      }
+    },
+    "rampart_50": {
+      "display_name": "Rampart 5.0",
+      "zero_to_100_s": 5.84,
+      "top_speed_kmh": 268.9,
+      "cornering_g": 0.872,
+      "bars": {
+        "acceleration": 0.813,
+        "top_speed": 0.758,
+        "cornering": 0.644
+      }
+    },
+    "sentinel_bastion": {
+      "display_name": "Sentinel Bastion",
+      "zero_to_100_s": 7.97,
+      "top_speed_kmh": 214.5,
+      "cornering_g": 0.717,
+      "bars": {
+        "acceleration": 0.643,
+        "top_speed": 0.438,
+        "cornering": 0.335
+      }
+    },
+    "sentinel_cruiser": {
+      "display_name": "Sentinel Cruiser",
+      "zero_to_100_s": 6.38,
+      "top_speed_kmh": 260.6,
+      "cornering_g": 0.851,
+      "bars": {
+        "acceleration": 0.769,
+        "top_speed": 0.71,
+        "cornering": 0.603
+      }
+    },
+    "sentinel_wolfhound": {
+      "display_name": "Sentinel Wolfhound",
+      "zero_to_100_s": 5.54,
+      "top_speed_kmh": 243.7,
+      "cornering_g": 0.847,
+      "bars": {
+        "acceleration": 0.837,
+        "top_speed": 0.61,
+        "cornering": 0.594
+      }
+    },
+    "shiro_turbo": {
+      "display_name": "Shiro Turbo",
+      "zero_to_100_s": 6.42,
+      "top_speed_kmh": 259.9,
+      "cornering_g": 0.955,
+      "bars": {
+        "acceleration": 0.766,
+        "top_speed": 0.705,
+        "cornering": 0.81
+      }
+    },
+    "sperber_32": {
+      "display_name": "Sperber 32",
+      "zero_to_100_s": 6.05,
+      "top_speed_kmh": 272.9,
+      "cornering_g": 0.915,
+      "bars": {
+        "acceleration": 0.796,
+        "top_speed": 0.782,
+        "cornering": 0.729
+      }
+    },
+    "tansy_13": {
+      "display_name": "Tansy 1.3",
+      "zero_to_100_s": 13.3,
+      "top_speed_kmh": 167.9,
+      "cornering_g": 0.788,
+      "bars": {
+        "acceleration": 0.216,
+        "top_speed": 0.164,
+        "cornering": 0.475
+      }
+    },
+    "vireo_xs": {
+      "display_name": "Vireo XS",
+      "zero_to_100_s": 9.45,
+      "top_speed_kmh": 206.5,
+      "cornering_g": 0.865,
+      "bars": {
+        "acceleration": 0.524,
+        "top_speed": 0.391,
+        "cornering": 0.629
+      }
+    }
+  }
+}
