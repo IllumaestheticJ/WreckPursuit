@@ -1350,6 +1350,7 @@ impl Session {
             sim: snap.sim.clone(),
             ids: self.ids.clone(),
             cars: self.cars.clone(),
+            modded: self.modded.clone(),
             extras: snap.extras.clone(),
             last_input: snap.last_input.clone(),
             fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),

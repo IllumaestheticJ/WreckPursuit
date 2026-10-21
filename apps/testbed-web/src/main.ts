@@ -12,6 +12,8 @@
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 // ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
+// ?mods=wheels_forged,aero_wing_1 installs mods on the player car (else the build saved for that
+// car in the mod shop).
 import { assistLevel, loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
@@ -51,6 +53,7 @@ import { HudLayout } from "./ui/layout";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
+import { ModShop } from "./ui/modShop";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
@@ -370,6 +373,34 @@ async function main(): Promise<void> {
     // unticked, so the page opened on the flat world and the city never loaded.
     ($("city") as HTMLInputElement).checked = true;
   }
+  // Mod shop: every change respawns the session with the build on the player car.
+  let urlMods: string[] | null = params.get("mods")?.split(",").filter(Boolean) ?? null;
+  const modsFor = (car: string) => {
+    const m = modShop.modsFor(car, urlMods);
+    urlMods = null;
+    return m;
+  };
+  const withMods = (json: string, mods: string[]) => {
+    if (mods.length === 0) return json;
+    const sc = JSON.parse(json) as { entities: { mods?: string[] }[] };
+    sc.entities[0].mods = mods;
+    return JSON.stringify(sc);
+  };
+  const modShop = new ModShop(
+    $("mod-shop"),
+    (mods) => {
+      const sc = sim.scenario();
+      const car = sc.entities[0]?.car ?? DEFAULT_CAR;
+      if (sc.name === "city_chase") startCityChase(car, sc.mode, false, mods);
+      else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true, mods);
+      else startFreeDrive(car, sc.mode, undefined, undefined, mods);
+    },
+    (open) => {
+      // Walk round the car while shopping; back to the viewer's angle after.
+      if (open) rig.setMode("orbit", app.views.get(app.player)?.root);
+      else rig.setMode(rig.preferred, app.views.get(app.player)?.root);
+    },
+  );
 
   // ----- session management --------------------------------------------------------------
 
@@ -427,6 +458,7 @@ async function main(): Promise<void> {
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
     if (first) ($("car") as HTMLSelectElement).value = first.info.car_id;
+    if (first) modShop.show(first.info.car_id, sc.entities[0]?.mods ?? []);
     if (app.scenarioFile) ($("sc-select") as HTMLSelectElement).value = app.scenarioFile;
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -537,12 +569,13 @@ async function main(): Promise<void> {
     mode = ($("mode") as HTMLSelectElement).value,
     city = ($("city") as HTMLInputElement).checked,
     hour?: number,
+    mods = modsFor(car),
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    let json = city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false);
+    let json = withMods(city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false), mods);
     // Optional start hour (automation: day/night screenshots).
     if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
     sim.init(1, withWeather(withQuickTune(json)), false);
@@ -558,12 +591,13 @@ async function main(): Promise<void> {
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
     rain = false,
+    mods = modsFor(car),
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    const json = rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value);
+    const json = withMods(rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value), mods);
     sim.init(0, withWeather(withQuickTune(json)), false);
     rebuildViews();
     applyAssistPreset(app.source);
@@ -604,16 +638,22 @@ async function main(): Promise<void> {
     const sc = sim.scenario();
     if (sim.careerRunActive()) return void startCareerRun(sc.name === "city_chase" ? "chase" : "free");
     const car = sc.entities[0]?.car;
-    if (sc.name === "city_chase") startCityChase(car, sc.mode);
-    else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true);
+    const mods = sc.entities[0]?.mods ?? [];
+    if (sc.name === "city_chase") startCityChase(car, sc.mode, false, mods);
+    else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true, mods);
     else if (raceView.raceId) startRace(raceView.raceId, car, sc.mode);
-    else startFreeDrive(car, sc.mode);
+    else startFreeDrive(car, sc.mode, undefined, undefined, mods);
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
     const text = await (await fetch(`scenarios/${file}`)).text();
     let json = sim.scenarioFromRon(text);
     if (speedKmh && speedKmh > 0) json = sim.scenarioWithSpeed(json, speedKmh / 3.6);
+    runScenarioJson(json, file);
+  };
+
+  /** Run a scenario given as simcli v2 JSON (automation: e.g. a crash test with `mods`). */
+  const runScenarioJson = (json: string, file: string | null = null) => {
     app.scenarioFile = file;
     app.result = null;
     app.bench = null;
@@ -816,6 +856,10 @@ async function main(): Promise<void> {
   $("sc-free").onclick = () => startFreeDrive();
   $("sc-chase").onclick = () => startCityChase();
   $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
+  // Career cars are modded in the garage (their run carries the career build).
+  $("mods-btn").onclick = () => {
+    if (!sim.careerRunActive()) modShop.toggle();
+  };
   /** Restart whatever is running with the selected weather (weather is part of the scenario,
    * so replays carry it). */
   weatherSel.onchange = () => {
@@ -1680,6 +1724,7 @@ async function main(): Promise<void> {
     stopRecording,
     loadReplay,
     runScenario,
+    runScenarioJson,
     startFreeDrive,
     startCityChase,
     startBench,
@@ -1710,6 +1755,8 @@ async function main(): Promise<void> {
     ui,
     runEnd,
     restartRun,
+    /** Mod shop (src/ui/modShop.ts). */
+    modShop,
     garage,
     careerApi,
     openGarage,
