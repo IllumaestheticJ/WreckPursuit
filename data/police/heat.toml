@@ -16,16 +16,13 @@ decay_grace_s = 5.0
 pursuit_heat_per_s = 0.25
 # Disabling a police unit by contact.
 cop_disabled_heat = 15.0
-# Units clock speeders themselves: a unit witnessing a car over the limit by more than
-# max(radar_margin_mps, radar_ratio × limit) counts a witnessed speeding violation, at most once per
-# radar_repeat_s. (wp_world only re-reports sustained speeding every few seconds, which a fast car can
-# fall between while it passes a unit.)
+# Units clock speeders: a unit witnessing a car over the limit by more than
+# max(radar_margin_mps, radar_ratio × limit) remembers it, and a speeding report up to radar_memory_s
+# later counts as witnessed. (wp_world re-reports sustained speeding only every 5 s, so a fast car
+# can pass a unit between two reports.)
 radar_margin_mps = 2.24
 radar_ratio = 0.1
-radar_repeat_s = 4.0
-# A unit in recognition range of a racer caught committing a violation by a unit in the last
-# caught_in_act_s seconds starts a pursuit at once (no recognition_time_s dwell).
-caught_in_act_s = 5.0
+radar_memory_s = 6.0
 
 [heat.violation]
 speeding_base = 2.0

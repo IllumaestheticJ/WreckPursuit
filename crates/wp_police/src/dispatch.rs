@@ -102,32 +102,23 @@ impl PoliceSystem {
             xy(r.pos)
         };
         let camera = self.camera_sees(world, p);
-        let witnessed = obs.witnessed || camera;
         let cfg = self.cfg.heat.clone();
-        if obs.unit_witnessed {
-            self.caught.insert(racer, now);
-        }
-        let speeding = matches!(kind, ViolationKind::Speeding { .. });
-        // A report right after a unit's radar clocked the racer is the same speeding.
-        let already_clocked = speeding
-            && witnessed
+        // A unit whose radar clocked the racer recently witnessed this speeding, even if the
+        // report (wp_world re-reports sustained speeding every few seconds) arrives after the
+        // racer has left the unit's sight.
+        let clocked = matches!(kind, ViolationKind::Speeding { .. })
             && self
-                .radar_clocked
+                .clocked
                 .get(&racer)
-                .is_some_and(|t| now.since(*t) < cfg.heat.radar_repeat_s);
+                .is_some_and(|t| now.since(*t) <= cfg.heat.radar_memory_s);
+        let unit_saw = obs.witnessed || clocked;
+        let witnessed = unit_saw || camera;
         let rec = self.racers.get_mut(&racer).expect("racer exists");
         let before = rec.level;
-        let added = if already_clocked {
-            0.0
-        } else {
-            rec.add_violation(kind, witnessed, now, &cfg)
-        };
+        let added = rec.add_violation(kind, witnessed, now, &cfg);
         if witnessed {
             rec.last_seen = Some(now);
             rec.last_known = Some(p);
-        }
-        if speeding && witnessed && added > 0.0 {
-            self.clocked.insert(racer, now);
         }
         let after = rec.level;
         if added <= 0.0 {
@@ -139,7 +130,7 @@ impl PoliceSystem {
                 level: after,
             });
         }
-        if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
+        if !unit_saw && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
             // violation's position, so a unit is sent to look (a camera alone never sends
             // anyone otherwise, and a racer that stays put would never be found). One open

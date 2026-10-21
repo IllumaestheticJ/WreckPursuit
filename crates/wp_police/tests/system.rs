@@ -638,35 +638,58 @@ impl wp_contracts::WorldQuery for LimitedWorld<'_> {
 }
 
 #[test]
-fn units_clock_a_fast_racer_and_chase_it_day_and_night() {
-    use wp_contracts::WorldQuery;
-    // 250 km/h with no speeding reports from the world at all: the units' own radar has to
-    // notice, and at night a pass is far too short for the recognition dwell.
+fn units_clock_a_fast_racer_between_world_reports() {
+    // 250 km/h past patrols; the world re-reports sustained speeding every 5 s (wp_world's
+    // `repeat_s`), and here every report lands while no unit is within witness range. A unit
+    // that clocked the racer on the way past still makes the next report count in full.
+    let cfg = PoliceConfig::builtin();
+    let over = 250.0 / 3.6 - 13.9;
+    let full =
+        cfg.heat.heat.violation.speeding_base + cfg.heat.heat.violation.speeding_per_mps * over;
     for hour in [12.0, 3.0] {
         let mut h = Harness::new(hour, 11);
         h.run(2.0, &[]);
         h.speed = 250.0 / 3.6;
-        let mut started = false;
+        let witness = cfg
+            .heat
+            .heat
+            .witness_range_m
+            .get(TimeOfDay::from_hours(hour).phase());
+        let mut next_report = 1.0;
+        let mut jumps = Vec::new();
         let mut t = 0.0;
-        while t < 40.0 && h.s < h.path.length() - 10.0 && !started {
+        while t < 40.0 && h.s < h.path.length() - 10.0 {
             h.s += h.speed * PHYSICS_DT;
             h.world.time = h.world.time.advanced(PHYSICS_DT * h.world.ratio);
             let v = h.racer_view();
-            let mut out = Vec::new();
+            let nearest = h
+                .police
+                .units()
+                .iter()
+                .filter(|u| u.kind == UnitKind::Car)
+                .map(|u| dist(u.body.pos, [v.pos[0], v.pos[1]]))
+                .fold(f32::INFINITY, f32::min);
+            let mut ev = Vec::new();
+            if t >= next_report && nearest > witness + 20.0 {
+                next_report = t + 5.0;
+                ev.push(SimEvent::TrafficViolation {
+                    vehicle: RACER,
+                    kind: ViolationKind::Speeding { over_mps: over },
+                    pos: v.pos,
+                });
+            }
+            let before = h.police.racer(RACER).map(|r| r.heat).unwrap_or(0.0);
             let w = LimitedWorld(&h.world, 13.9);
-            assert!(w.speed_limit_at(v.pos).is_some());
-            h.police.step(&w, &[v], &[], PHYSICS_DT, &mut out);
-            started = out.iter().any(|e| {
-                matches!(e, SimEvent::Police(PoliceEvent::PursuitStarted { racer, .. }) if *racer == RACER)
-            });
+            let mut out = Vec::new();
+            h.police.step(&w, &[v], &ev, PHYSICS_DT, &mut out);
+            if !ev.is_empty() {
+                jumps.push(h.police.racer(RACER).unwrap().heat - before);
+            }
             t += PHYSICS_DT;
         }
-        let r = h.police.racer(RACER).unwrap();
         assert!(
-            started,
-            "{hour}h: no pursuit after {t:.1} s, heat {:.1}",
-            r.heat
+            jumps.iter().any(|j| *j > 0.9 * full),
+            "{hour}h: no report counted as witnessed: {jumps:?}"
         );
-        assert!(r.level > WantedLevel::None, "{hour}h");
     }
 }

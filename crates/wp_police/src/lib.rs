@@ -216,12 +216,8 @@ pub struct PoliceSystem {
     pub(crate) racers: BTreeMap<EntityId, RacerRecord>,
     pub(crate) obs: BTreeMap<EntityId, RacerObs>,
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
-    /// Last time a ground unit witnessed each racer commit a violation.
-    pub(crate) caught: BTreeMap<EntityId, SimTime>,
-    /// Last time a witnessed speeding violation counted for each racer (radar or report).
+    /// Last time a ground unit's radar clocked each racer over the speed limit.
     pub(crate) clocked: BTreeMap<EntityId, SimTime>,
-    /// Last time a unit's radar clocked each racer.
-    pub(crate) radar_clocked: BTreeMap<EntityId, SimTime>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
     pub(crate) units: Vec<Unit>,
@@ -295,9 +291,7 @@ impl PoliceSystem {
             racers: BTreeMap::new(),
             obs: BTreeMap::new(),
             recognition_s: BTreeMap::new(),
-            caught: BTreeMap::new(),
             clocked: BTreeMap::new(),
-            radar_clocked: BTreeMap::new(),
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
             units: Vec::new(),

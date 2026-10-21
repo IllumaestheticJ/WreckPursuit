@@ -22,7 +22,7 @@
 //!   (handled in `dispatch`).
 
 use crate::radio::{RadioCue, RadioTier};
-use wp_contracts::{EntityId, ViolationKind, WorldQuery, GRAVITY_MPS2};
+use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
 
 use crate::dispatch::ROAD_HALF_WIDTH_M;
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
@@ -137,37 +137,23 @@ impl PoliceSystem {
         }
     }
 
-    /// Radar: every racer a ground unit witnesses above the local speed limit (beyond the radar
-    /// margin) gets a witnessed speeding violation, at most once per `radar_repeat_s`. Without
-    /// it a fast car passing a unit is only caught if one of `wp_world`'s periodic speeding
-    /// reports happens to land while the unit is watching.
+    /// Radar: remember every racer a ground unit witnesses above the local speed limit (beyond
+    /// the radar margin). A speeding report within `radar_memory_s` then counts as witnessed
+    /// ([`PoliceSystem::on_violation`]). Without it a fast car passing a unit is only caught if
+    /// one of `wp_world`'s periodic speeding reports happens to land while the unit is watching.
     pub(crate) fn clock_speeders(&mut self, world: &dyn WorldQuery) {
         let h = &self.cfg.heat.heat;
-        let (margin, ratio, repeat) = (h.radar_margin_mps, h.radar_ratio, h.radar_repeat_s);
-        let ids: Vec<EntityId> = self.racers.keys().copied().collect();
-        for id in ids {
-            if !self.obs.get(&id).is_some_and(|o| o.unit_witnessed) {
+        let (margin, ratio) = (h.radar_margin_mps, h.radar_ratio);
+        for (id, r) in &self.racers {
+            if !self.obs.get(id).is_some_and(|o| o.unit_witnessed) {
                 continue;
             }
-            if self
-                .clocked
-                .get(&id)
-                .is_some_and(|t| self.now.since(*t) < repeat)
-            {
-                continue;
-            }
-            let r = &self.racers[&id];
             let Some(limit) = world.speed_limit_at(r.pos) else {
                 continue;
             };
             let speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
             if speed > limit + margin.max(limit * ratio) {
-                let at = xy(r.pos);
-                let kind = ViolationKind::Speeding {
-                    over_mps: speed - limit,
-                };
-                self.on_violation(world, id, &kind, at);
-                self.radar_clocked.insert(id, self.now);
+                self.clocked.insert(*id, self.now);
             }
         }
     }
@@ -229,14 +215,7 @@ impl PoliceSystem {
             // A unit that keeps a wanted racer in recognition range long enough starts a pursuit.
             let acc = self.recognition_s.entry(id).or_insert(0.0);
             *acc = if o.spotter.is_some() { *acc + tdt } else { 0.0 };
-            // Caught in the act: no recognition dwell (at night a fast car never stays in
-            // recognition range long enough for one).
-            let caught = self
-                .caught
-                .get(&id)
-                .is_some_and(|t| self.now.since(*t) <= self.cfg.heat.heat.caught_in_act_s);
-            let recognised = *acc >= self.cfg.heat.heat.recognition_time_s.get(self.phase)
-                || (caught && o.spotter.is_some());
+            let recognised = *acc >= self.cfg.heat.heat.recognition_time_s.get(self.phase);
             let rec = &self.racers[&id];
             if !rec.pursued() && rec.level > WantedLevel::None && recognised {
                 if let Some(spotter) = o.spotter {

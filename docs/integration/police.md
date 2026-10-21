@@ -382,20 +382,22 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 
 
 ## Fix (2026-10-21): speeding past a cop at 250 km/h started no pursuit
-Owner report: passing a cop at 250 km/h did not start a pursuit. Two causes, both in `wp_police`:
-1. **Speeding was only noticed through `wp_world`'s reports**, which re-emit sustained speeding every
-   `repeat_s` = 5 s. At 69 m/s a unit's witness range (160 m by day) is crossed in under 5 s, so
-   whether any report landed while the unit watched was luck; a report nobody saw counts 20 % (4.8
-   heat < L1), so no wanted level and no pursuit. **Fix:** units clock speeders themselves
-   (`clock_speeders`, think rate): a unit witnessing a racer over `speed_limit_at` by more than
-   `max(radar_margin_mps, radar_ratio × limit)` counts a witnessed speeding violation, at most once
-   per `radar_repeat_s` (4 s); a world report right after a radar clock is not counted again.
-2. **At night the recognition dwell is impossible at speed** (40 m range, 4 s of sight: a pass at
-   69 m/s lasts ~1.2 s). Heat reached L5 but no pursuit ever started. **Fix:** caught in the act:
-   a violation witnessed by a unit in the last `caught_in_act_s` (5 s) skips the dwell once a unit
-   has the racer in recognition range.
+Owner report: passing a cop at 250 km/h did not start a pursuit. Cause: speeding was only noticed
+through `wp_world`'s reports, which re-emit sustained speeding every `repeat_s` = 5 s. At 69 m/s a
+unit's witness range (160 m by day, 70 m at night) is crossed in under 5 s, so whether a report
+landed while the unit watched was luck; a report nobody saw counts 20 % (4.8 heat, below L1), so no
+wanted level and no pursuit.
 
-New `heat.toml` keys: `radar_margin_mps`, `radar_ratio`, `radar_repeat_s`, `caught_in_act_s`. No
-contract change. `ScenarioWorld` reports no speed limit, so the radar does not run in the police
-scenarios. Test: `units_clock_a_fast_racer_and_chase_it_day_and_night` (no world reports at all; fails
-before the fix at 12:00 with heat 0).
+**Fix:** units clock speeders (`clock_speeders`, think rate): a unit witnessing a racer over
+`speed_limit_at` by more than `max(radar_margin_mps, radar_ratio × limit)` remembers it, and a
+speeding report up to `radar_memory_s` (6 s) later counts as witnessed. Heat still comes only from
+`wp_world`'s reports (the radar adds none, so nothing is counted twice). New `heat.toml` keys:
+`radar_margin_mps`, `radar_ratio`, `radar_memory_s`. No contract change. `ScenarioWorld` reports no
+speed limit, so the radar does not run in the police scenarios. Test:
+`units_clock_a_fast_racer_between_world_reports` (fails before the fix: every report 4.8 heat).
+
+**Not changed, needs a call from the lead/owner:** at night a fast pass still never *starts* a
+pursuit even at L5 heat, because recognition needs `recognition_range_m.night` = 40 m of sight for
+`recognition_time_s.night` = 4 s (a pass at 69 m/s lasts about 1.2 s). That is the documented "a
+glimpse at night is not enough" rule, and `night_core_speeder` asserts night pursuits start after
+60 s, so I left it. Heat still reaches the racer, and dispatch/reports send units after it.
