@@ -28,6 +28,18 @@ use simcli::{RunSummary, Scenario};
 use crate::data::mem_data;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
+use crate::street::{Preview, StreetRacers};
+
+thread_local! {
+    /// Street racers spawn in new live city sessions ([`set_street_racers_enabled`]).
+    static STREET_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Spawn NPC street racers in live city sessions started from now on (default on; e2e and
+/// benchmarks may turn them off).
+pub fn set_street_racers_enabled(on: bool) {
+    STREET_ENABLED.with(|c| c.set(on));
+}
 
 /// At most this many ticks run per `step()` call (0.25 s of sim time).
 pub const MAX_TICKS_PER_STEP: u32 = 60;
@@ -90,6 +102,8 @@ pub struct Session {
     outcome: Option<RunSummary>,
     /// The player's economy (live sessions with police; see [`crate::run`]).
     run: Option<PlayerRun>,
+    /// NPC street racers (live city sessions with an economy run; see [`crate::street`]).
+    street: Option<StreetRacers>,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -129,7 +143,7 @@ impl Session {
     ) -> Result<Self, String> {
         let load_city = sc.city != CitySpec::Flat;
         let BuiltSim {
-            sim,
+            mut sim,
             ids,
             cars,
             selection,
@@ -154,8 +168,30 @@ impl Session {
             }
             _ => None,
         };
-        Ok(Self {
+        // Street racers: live city sessions with police, and their playback (the roaming AI is
+        // deterministic, so a replay re-creates it; see `crate::street`).
+        let street = match ids.first() {
+            Some(&player)
+                if load_city
+                    && !scripted
+                    && sim.systems().police
+                    && STREET_ENABLED.with(|c| c.get()) =>
+            {
+                let at = sim
+                    .vehicles()
+                    .iter()
+                    .find(|v| v.id == player)
+                    .map_or([0.0; 2], |v| {
+                        let p = v.vehicle.state().pos;
+                        [p[0], p[1]]
+                    });
+                StreetRacers::spawn(&mut sim, at, sc.seed)
+            }
+            _ => None,
+        };
+        let mut session = Self {
             run,
+            street,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -182,7 +218,10 @@ impl Session {
             }),
             live_end_hash: None,
             outcome: None,
-        })
+        };
+        // Street racers' car models (the renderer asks for them before the first tick).
+        session.sync_cars();
+        Ok(session)
     }
 
     /// Live session. `scripted` = drive every entity by its scenario driver until
@@ -485,9 +524,56 @@ impl Session {
 
     /// The vehicle is held on the brakes because its run is over (capture or wreck).
     pub fn held(&self, id: EntityId) -> bool {
-        self.run
+        self.run.as_ref().is_some_and(|r| {
+            r.player() == id
+                && (r.is_over()
+                    || self
+                        .street
+                        .as_ref()
+                        .is_some_and(|s| s.holds_player(self.sim.tick())))
+        })
+    }
+
+    // ----- street racers (see `crate::street`) -------------------------------------------
+
+    /// The session's street racers, if any.
+    pub fn street(&self) -> Option<&StreetRacers> {
+        self.street.as_ref()
+    }
+
+    /// Street racers, mutable (tests).
+    #[cfg(test)]
+    pub(crate) fn street_mut_for_tests(&mut self) -> &mut StreetRacers {
+        self.street.as_mut().expect("street racers")
+    }
+
+    /// Plan a street race from the player to `finish` (the open challenge's B).
+    pub fn street_preview(&self, finish: [f32; 2]) -> Result<Preview, String> {
+        let (street, run) = self
+            .street
             .as_ref()
-            .is_some_and(|r| r.is_over() && r.player() == id)
+            .zip(self.run.as_ref())
+            .ok_or("no street racers in this session")?;
+        street.preview(&self.sim, run.player(), finish)
+    }
+
+    /// Accept the open challenge: race to `finish` for `stake` dollars.
+    pub fn street_accept(&mut self, finish: [f32; 2], stake: i64) -> Result<(), String> {
+        self.live_check()?;
+        let (street, run) = self
+            .street
+            .as_mut()
+            .zip(self.run.as_mut())
+            .ok_or("no street racers in this session")?;
+        street.accept(&mut self.sim, run, finish, stake)
+    }
+
+    /// Decline the open challenge.
+    pub fn street_decline(&mut self) {
+        let tick = self.sim.tick();
+        if let Some(s) = &mut self.street {
+            s.decline(tick);
+        }
     }
 
     /// "Repair & continue": pay the impound fee and the repair from the ledger, repair the car
@@ -583,6 +669,23 @@ impl Session {
                     ..Default::default()
                 },
             );
+        } else if let Some(idx) = self
+            .street
+            .as_ref()
+            .filter(|s| s.holds_player(tick))
+            .and(self.run.as_ref())
+            .and_then(|r| self.index(r.player()))
+        {
+            // Street race countdown: the player waits on the brakes for the green light.
+            let keep = self.last_input[idx];
+            self.log_input(
+                idx,
+                VehicleInput {
+                    brake: 1.0,
+                    headlights: keep.headlights,
+                    ..Default::default()
+                },
+            );
         } else if self.script_running() {
             // Scenario entities only: city runs add police / traffic cars (not scripted).
             let states = scenario_states(&self.sim, &self.ids);
@@ -590,6 +693,14 @@ impl Session {
                 let input = driver_input(&self.sc, idx, tick, state, &self.last_input[idx]);
                 self.log_input(idx, input);
             }
+        }
+
+        // Street racers drive themselves (inputs straight into the sim, not the replay log: the
+        // playback re-runs the same AI from the same state and the logged horn).
+        if let (Some(street), Some(&player)) = (&mut self.street, self.ids.first()) {
+            let horn = self.last_input[0].horn;
+            let over = self.run.as_ref().is_some_and(|r| r.is_over());
+            street.before_step(&mut self.sim, player, horn, over);
         }
 
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
@@ -605,6 +716,9 @@ impl Session {
         self.sync_cars();
         let drained = self.sim.drain_events();
         self.observe_run(&drained);
+        if let Some(street) = &mut self.street {
+            street.after_step(&self.sim, &drained, self.run.as_mut());
+        }
         self.events.extend(drained);
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;

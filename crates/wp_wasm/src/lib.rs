@@ -36,9 +36,12 @@ pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
+pub mod street;
 
 #[cfg(test)]
 mod run_tests;
+#[cfg(test)]
+mod street_tests;
 
 use std::cell::RefCell;
 
@@ -540,6 +543,98 @@ pub fn run_account_json() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn run_repair_continue() -> Result<String, JsValue> {
     with(|s| s.repair_and_continue().map(|r| json(&r)))
+}
+
+// ----- street racers (src/street.rs) -------------------------------------------------------
+
+/// Spawn NPC street racers in live city sessions started after this call (default on).
+#[wasm_bindgen]
+pub fn set_street_racers(on: bool) {
+    session::set_street_racers_enabled(on);
+}
+
+/// Street racers for the map, 6 floats each: `[entity, level 1..=5, x, y, yaw, mode]` (mode
+/// 0 roaming, 1 waiting on a challenge, 2 racing the player). Empty without street racers.
+#[wasm_bindgen]
+pub fn street_racers() -> Result<Vec<f32>, JsValue> {
+    get(|s| s.street().map(|st| st.packed(s.sim())).unwrap_or_default())
+}
+
+/// Street-race state as JSON: `{ levels, roster, hint, offer, race, result }` — the level
+/// table ([`street::LEVELS`]), every racer ([`street::RosterEntry`]), the racer a honk would
+/// challenge now (`hint`), the open challenge ([`street::Offer`]), the race in progress
+/// ([`street::RaceView`]) and the latest result ([`street::RaceResult`], `seq` grows). `null`
+/// without street racers.
+#[wasm_bindgen]
+pub fn street_status_json() -> Result<String, JsValue> {
+    get(|s| {
+        let Some(st) = s.street() else {
+            return "null".to_string();
+        };
+        let player = s.run().map(|r| r.player());
+        json(&serde_json::json!({
+            "levels": street::LEVELS,
+            "roster": st.roster(),
+            "hint": player.and_then(|p| st.challengeable(s.sim(), p)),
+            "offer": st.offer(s.sim(), s.run()),
+            "race": st.race(s.sim()),
+            "result": st.result(),
+        }))
+    })
+}
+
+/// Plan the open challenge's route from the player to `(x, y)` ([`street::Preview`] JSON:
+/// length, snapped finish, centreline, whether it is raceable).
+#[wasm_bindgen]
+pub fn street_preview(x: f32, y: f32) -> Result<String, JsValue> {
+    with(|s| s.street_preview([x, y]).map(|p| json(&p)))
+}
+
+/// Accept the open challenge: race to `(x, y)` for `stake` dollars (paid now; a win pays
+/// twice the stake). Errors (nothing changed) on a bad stake, no route, or no open challenge.
+#[wasm_bindgen]
+pub fn street_accept(x: f32, y: f32, stake: f64) -> Result<(), JsValue> {
+    with(|s| s.street_accept([x, y], stake.round() as i64))
+}
+
+/// Decline the open challenge (the racer drives off).
+#[wasm_bindgen]
+pub fn street_decline() -> Result<(), JsValue> {
+    get(|s| s.street_decline())
+}
+
+/// The city's drivable lanes for the map, flattened: `[n, x0, y0, …, x(n-1), y(n-1)]` per lane
+/// (parking lanes left out). Fetch once per session; empty on the flat world.
+#[wasm_bindgen]
+pub fn map_lanes() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let mut out = Vec::new();
+        if !s.has_city() {
+            return out;
+        }
+        for lane in &s.sim().world().network().lanes {
+            if lane.kind == wp_world::network::LaneKind::Parking || lane.polyline.len() < 2 {
+                continue;
+            }
+            out.push(lane.polyline.len() as f32);
+            for p in &lane.polyline {
+                out.extend_from_slice(&[p[0], p[1]]);
+            }
+        }
+        out
+    })
+}
+
+/// Debug / e2e: put vehicle `entity` (stopped) at `(x, y)` facing `yaw` (0 = +Y), on the
+/// ground. Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_place_vehicle(entity: u32, x: f32, y: f32, yaw: f32) -> Result<(), JsValue> {
+    with(|s| {
+        let sim = s.debug_sim_mut()?;
+        let z = sim.world().map().ground_height([x, y], None);
+        sim.place_on_ground(EntityId(entity), [x, y], yaw, 0.0, Some(z))
+            .map_err(|e| e.to_string())
+    })
 }
 
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is
