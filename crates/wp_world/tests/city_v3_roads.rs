@@ -439,3 +439,111 @@ fn traffic_soak_ten_minutes() {
         assert_eq!(c, 0, "seed {seed}");
     }
 }
+
+/// A paving sample: (road id, point).
+type PavingPt = (u32, [f32; 3]);
+
+fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
+/// (lane road, paving road) → (smallest height of the other road's paving above the lane,
+/// lane point) for every place where another road's paved surface hangs 0.3–5.5 m over a
+/// lane within 1.5 m horizontally. Below 0.3 m the two pavings meet (gores, junctions);
+/// 5.5 m and up is a real overpass.
+fn low_paving_over_lanes(net: &RoadNetwork) -> BTreeMap<(u32, u32), (f32, [f32; 3])> {
+    const CELL: f32 = 3.0;
+    let cell = |x: f32, y: f32| ((x / CELL).floor() as i32, (y / CELL).floor() as i32);
+    let mut grid: BTreeMap<(i32, i32), Vec<PavingPt>> = BTreeMap::new();
+    for s in &net.surfaces {
+        let (l, r) = wp_world::surface::surface_edges(s);
+        for k in 0..l.len() {
+            // Densify along the centreline as well, so long segments leave no holes.
+            let steps = if k + 1 < l.len() {
+                geom::dist(geom::xy(l[k]), geom::xy(l[k + 1]))
+                    .ceil()
+                    .max(1.0) as usize
+            } else {
+                1
+            };
+            for a in 0..steps {
+                let u = a as f32 / steps as f32;
+                let (lk, rk) = if k + 1 < l.len() {
+                    (lerp3(l[k], l[k + 1], u), lerp3(r[k], r[k + 1], u))
+                } else {
+                    (l[k], r[k])
+                };
+                for j in 0..=8 {
+                    let q = lerp3(lk, rk, j as f32 / 8.0);
+                    grid.entry(cell(q[0], q[1])).or_default().push((s.road, q));
+                }
+            }
+        }
+    }
+    let mut bad: BTreeMap<(u32, u32), (f32, [f32; 3])> = BTreeMap::new();
+    for lane in &net.lanes {
+        for w in lane.polyline.windows(2) {
+            let n = geom::dist(geom::xy(w[0]), geom::xy(w[1])).ceil().max(1.0) as usize;
+            for k in 0..n {
+                let q = lerp3(w[0], w[1], k as f32 / n as f32);
+                let c = cell(q[0], q[1]);
+                for di in -1..=1 {
+                    for dj in -1..=1 {
+                        let Some(v) = grid.get(&(c.0 + di, c.1 + dj)) else {
+                            continue;
+                        };
+                        for (r2, p) in v {
+                            if *r2 == lane.road {
+                                continue;
+                            }
+                            let dh = geom::dist(geom::xy(*p), geom::xy(q));
+                            let dz = p[2] - q[2];
+                            if dh < 1.5 && dz > 0.3 && dz < 5.5 {
+                                let e = bad.entry((lane.road, *r2)).or_insert((dz, q));
+                                if dz < e.0 {
+                                    *e = (dz, q);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    bad
+}
+
+/// No road's paving hangs low over another road's lane: a car there would hit the deck
+/// with its roof (ramps that climb while still beside the carriageway did this).
+#[test]
+fn no_paving_0_3_to_5_5_m_above_any_lane_of_another_road() {
+    let net = city();
+    let bad = low_paving_over_lanes(net);
+    let r = roads_only();
+    let label = |i: u32| -> String {
+        let i = i as usize;
+        match (r.out.names.get(i), r.out.report.info.get(i)) {
+            (Some(n), Some(inf)) => format!("{i} {n} ({:?})", inf.kind),
+            _ => format!("{i}"),
+        }
+    };
+    for ((a, b), (dz, p)) in &bad {
+        eprintln!(
+            "lane of {} under paving of {}: dz {dz:.2} at ({:.0}, {:.0}, {:.1})",
+            label(*a),
+            label(*b),
+            p[0],
+            p[1],
+            p[2]
+        );
+    }
+    assert!(
+        bad.is_empty(),
+        "{} (lane road, paving road) pairs with another road's paving 0.3-5.5 m above a lane",
+        bad.len()
+    );
+}
