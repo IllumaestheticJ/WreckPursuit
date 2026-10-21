@@ -29,7 +29,10 @@ impl Sim {
             seed: self.config.seed ^ POLICE_SEED_SALT,
             mode: self.config.mode.mode,
             internal_driving: true,
-            ..Default::default()
+            // Traffic is real here (wp_world agents, reported as obstacles every tick), so
+            // kinematic units must not also roll wp_police's statistical traffic stand-in:
+            // that turned every unseen civilian car into a random health/speed hit.
+            hazards: false,
         };
         self.police = PoliceSystem::for_world(PoliceConfig::builtin(), &self.world, setup);
     }
