@@ -336,3 +336,37 @@ fc1b388e before the fix above): the whole field waits ~24 s behind a civilian tu
 give-way junction and then for each crossing car (main's turn-signal / give-way timing).
 Re-ranged (today + 0.05, times ±15 %). Taking gaps in cross traffic is the first item of the
 street-racing junction risk check.
+
+### Re-lock on ws/police 3bccc796 + ws/harness + lead/round12 — 2026-10-21
+
+Base: this branch merged with ws/police 3bccc796 (main sync), ws/harness 2de604ec / f7abeb95
+(oncoming-civilian side constraint, `wants_room`; their re-recorded ranges replaced by this
+re-lock) and lead/round12 4367d42e (one-version handling, rear ×0.45). Capability table: rows
+added for brigand_400, marten_20, talus_20t, tumbril_20; existing rows unchanged (all within
+2 % on the new handling). Rule as before: best ratio ≤ today + 0.05, race times −15 % .. +15 %
+(+20 % at skill 0.50).
+
+| scenario | best ratio max | finishers |
+|---|---|---|
+| city_sprint_s50 | 1.06 | 4 |
+| city_sprint_s95 | 1.04 | 4 |
+| grid_highway_sprint_s50 | 2.55 | 4 |
+| grid_highway_sprint_s95 | 2.05 | 4 |
+| hollins_sprint_s50 | 1.19 | 4 |
+| hollins_sprint_s95 | 1.12 | 4 |
+| lantern_checkpoint_s50 | 2.64 | 4 |
+| lantern_checkpoint_s95 | 1.98 | 4 |
+| loop9_circuit_s50 | 1.23 | 6 |
+| loop9_circuit_s95 | 1.2 | 5 |
+
+Why things moved: grid highway s50 / Lantern are dominated by main's give-way timing at the
+Lantern junction s≈270 (whole field waits for a civilian turning and the cross traffic; at
+skill 0.50 cars back out / rejoin there 8–18 times). Plain round12 (no main traffic) runs
+Lantern s50 in 75–94 s but loses 3 of 4 cars at s95; this tip finishes 4/4 at both. Each of
+the boxed-in fix and both harness changes is needed there (removing any one: the whole field
+DNFs at s50).
+
+Open: loop9_circuit_s95 — hakone_gt never finishes on the one-version handling (reproduces on
+plain round12): at 55–60 m/s it cannot hold its line's lateral g (the 30 m skidpad figure, 0.89
+g, over-asks at speed), drifts > 1 m wide, the off-line cap brakes mid-bend and the loose rear
+lets go. Needs a speed-dependent lateral capability (next item).
