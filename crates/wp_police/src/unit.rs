@@ -394,6 +394,12 @@ pub struct Unit {
 }
 
 impl Unit {
+    /// Height of the unit's car, m: the synced body height of a physical unit, `None` for the
+    /// built-in kinematic driver (which has no terrain) and helicopters.
+    pub fn ground_z(&self) -> Option<f32> {
+        (self.kind == UnitKind::Car && !self.internal).then_some(self.body.alt_m)
+    }
+
     /// New unit at `pos` facing `heading`.
     pub fn new(
         id: UnitId,

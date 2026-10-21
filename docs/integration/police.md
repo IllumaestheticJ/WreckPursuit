@@ -379,3 +379,10 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Hilly-map sightlines (2026-10-21)
+Playtest: on Port Vesper v2 cops turned towards the racer (report dispatches) but never started a pursuit. Cause: every police sightline was cast at a fixed z = `EYE_HEIGHT_M` (1.3 m). The lowest Vesper road node is at 1.5 m, so the eye sat underground and terrain blocked almost every line (8 of 202 node pairs 20–120 m apart had line of sight; 196 of 202 when measured from ground + 1.3 m). Racers were never `seen`, so they were never witnessed or recognised.
+- `PoliceSystem::sees` now takes `[x, y, ground z]` endpoints and adds `EYE_HEIGHT_M` to each. Racers use `RacerView::pos[2]`. Physical units use their synced height (`Unit::ground_z`). Kinematic units and road nodes have no height, so they are taken level with the racer.
+- Helicopter sightlines aim at racer z + eye height. Cameras use the new `Poi::z` (`#[serde(default)]`), filled from the network POI.
+- `add_player_unit` records `pos[2]`.
+- Test: `tests::units_see_racers_on_raised_ground`.

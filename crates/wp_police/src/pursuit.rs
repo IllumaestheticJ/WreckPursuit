@@ -75,7 +75,8 @@ impl PoliceSystem {
         let helo_range = self.cfg.tools.helicopter.los_range_m.get(self.phase);
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for id in ids {
-            let p = xy(self.racers[&id].pos);
+            let p3 = self.racers[&id].pos;
+            let p = xy(p3);
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 ..Default::default()
@@ -92,7 +93,9 @@ impl PoliceSystem {
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
-                        if d <= los_range && self.sees(world, u.body.pos, p) {
+                        // A unit without a known height is taken level with the racer.
+                        let eye = [u.body.pos[0], u.body.pos[1], u.ground_z().unwrap_or(p3[2])];
+                        if d <= los_range && self.sees(world, eye, p3) {
                             // Recognition (pursuit start) and witnessing (full violation heat)
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
@@ -109,7 +112,7 @@ impl PoliceSystem {
                             // Looking down from altitude: only tall buildings block.
                             && world.line_of_sight(
                                 [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                                [p[0], p[1], crate::EYE_HEIGHT_M],
+                                [p[0], p[1], p3[2] + crate::EYE_HEIGHT_M],
                             )
                         {
                             o.seen = true;
@@ -117,7 +120,7 @@ impl PoliceSystem {
                     }
                 }
             }
-            if self.camera_sees(world, p) {
+            if self.camera_sees(world, p3) {
                 o.seen = true;
                 o.witnessed = true;
             }
@@ -603,12 +606,14 @@ impl PoliceSystem {
                         self.assign(i, Assignment::Idle);
                         continue;
                     }
-                    let rp = xy(rec.pos);
+                    let rp3 = rec.pos;
+                    let rp = xy(rp3);
                     let seen = self.obs.get(&target).is_some_and(|o| o.seen);
                     let u = &self.units[i];
+                    let eye = [u.body.pos[0], u.body.pos[1], u.ground_z().unwrap_or(rp3[2])];
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
-                    if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
+                    if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, eye, rp3) {
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
                             lat < 12.0 && s_u <= racer_s + 5.0

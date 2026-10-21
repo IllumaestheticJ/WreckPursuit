@@ -97,11 +97,9 @@ impl PoliceSystem {
     ) {
         let now = self.now;
         let obs = self.obs.get(&racer).copied().unwrap_or_default();
-        let p = {
-            let r = &self.racers[&racer];
-            xy(r.pos)
-        };
-        let camera = self.camera_sees(world, p);
+        let p3 = self.racers[&racer].pos;
+        let p = xy(p3);
+        let camera = self.camera_sees(world, p3);
         let witnessed = obs.witnessed || camera;
         let cfg = self.cfg.heat.clone();
         let rec = self.racers.get_mut(&racer).expect("racer exists");
@@ -257,10 +255,11 @@ impl PoliceSystem {
         ));
     }
 
-    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
-        self.graph
-            .pois_of(PoiKind::Camera)
-            .any(|c| dist(c.pos, p) <= c.radius_m && self.sees(world, c.pos, p))
+    /// Whether a traffic camera sees the point `p` (`[x, y, ground z]`).
+    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 3]) -> bool {
+        self.graph.pois_of(PoiKind::Camera).any(|c| {
+            dist(c.pos, xy(p)) <= c.radius_m && self.sees(world, [c.pos[0], c.pos[1], c.z], p)
+        })
     }
 
     // -----------------------------------------------------------------------------------------
@@ -758,7 +757,10 @@ impl PoliceSystem {
                     if self.ground_units_alive() >= self.cfg.presence.max_ground_units {
                         continue;
                     }
-                    let Some((pos, heading)) = self.reinforcement_spawn_point(world, target) else {
+                    let target_z = self.racers[&req.racer].pos[2];
+                    let Some((pos, heading)) =
+                        self.reinforcement_spawn_point(world, target, target_z)
+                    else {
                         continue;
                     };
                     self.spawn_unit(UnitKind::Car, UnitRole::Reinforcement, pos, heading)
@@ -778,17 +780,20 @@ impl PoliceSystem {
     }
 
     /// The closest node at least `spawn_min_distance_m` from `target` without line of sight.
+    /// Nodes carry no height, so sight lines are taken level at the target's height `target_z`.
     fn reinforcement_spawn_point(
         &self,
         world: &dyn WorldQuery,
         target: [f32; 2],
+        target_z: f32,
     ) -> Option<([f32; 2], [f32; 2])> {
+        let t3 = [target[0], target[1], target_z];
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
         let mut best: Option<(f32, usize)> = None;
         for (i, n) in self.graph.nodes.iter().enumerate() {
             let d = dist(n.pos, target);
             if d < min_d
-                || self.sees(world, n.pos, target)
+                || self.sees(world, [n.pos[0], n.pos[1], target_z], t3)
                 || !crate::avoid::spawn_clear(n.pos, &self.obstacles, &self.cfg.pursuit.avoid)
             {
                 continue;

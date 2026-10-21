@@ -127,6 +127,7 @@ impl RoadGraph {
             g.pois.push(Poi {
                 kind,
                 pos: [p.pos[0], p.pos[1]],
+                z: p.pos[2],
                 radius_m: p.radius_m,
             });
         }

@@ -118,6 +118,9 @@ pub struct Poi {
     pub kind: PoiKind,
     /// World XY position, m.
     pub pos: [f32; 2],
+    /// Ground height at `pos`, m (line of sight from cameras on hilly maps).
+    #[serde(default)]
+    pub z: f32,
     /// Effective radius, m.
     pub radius_m: f32,
 }

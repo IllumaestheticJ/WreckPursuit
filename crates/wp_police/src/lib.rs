@@ -404,11 +404,16 @@ impl PoliceSystem {
         }
     }
 
-    /// Line of sight between two ground points at eye height: the police graph's own occluders
-    /// (procedural test city) and the world's buildings (`WorldQuery::line_of_sight`).
-    pub(crate) fn sees(&self, world: &dyn WorldQuery, a: [f32; 2], b: [f32; 2]) -> bool {
-        self.graph.line_of_sight(a, b)
-            && world.line_of_sight([a[0], a[1], EYE_HEIGHT_M], [b[0], b[1], EYE_HEIGHT_M])
+    /// Line of sight between two points at eye height above their ground heights (`[x, y,
+    /// ground z]`): the police graph's own occluders (procedural test city) and the world's
+    /// buildings and terrain (`WorldQuery::line_of_sight`). The heights matter on hilly maps:
+    /// an eye at a fixed z would sit underground and see nothing.
+    pub(crate) fn sees(&self, world: &dyn WorldQuery, a: [f32; 3], b: [f32; 3]) -> bool {
+        self.graph.line_of_sight(xy(a), xy(b))
+            && world.line_of_sight(
+                [a[0], a[1], a[2] + EYE_HEIGHT_M],
+                [b[0], b[1], b[2] + EYE_HEIGHT_M],
+            )
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
@@ -767,6 +772,7 @@ impl PoliceSystem {
         u.entity = Some(entity);
         u.player = Some(player);
         u.internal = false;
+        u.body.alt_m = pos[2];
         self.units.push(u);
         id
     }
@@ -1111,5 +1117,56 @@ mod tests {
         p.step(&W, &[r], &ev, wp_contracts::PHYSICS_DT, &mut out);
         assert!(p.racer(EntityId(1)).unwrap().heat > 0.0);
         assert!(p.units().is_empty());
+    }
+
+    /// A hilly map: the ground is 20 m up, so a sight line below that is inside the hill.
+    /// Units must look from eye height above their own ground, not from a fixed z.
+    #[test]
+    fn units_see_racers_on_raised_ground() {
+        const GROUND_Z: f32 = 20.0;
+        struct Hill;
+        impl WorldQuery for Hill {
+            fn surface_at(&self, _p: [f32; 3]) -> wp_contracts::SurfaceType {
+                wp_contracts::SurfaceType::Asphalt
+            }
+            fn speed_limit_at(&self, _p: [f32; 3]) -> Option<f32> {
+                None
+            }
+            fn signal_state_ahead(
+                &self,
+                _p: [f32; 3],
+                _h: [f32; 3],
+            ) -> Option<wp_contracts::SignalState> {
+                None
+            }
+            fn time_of_day(&self) -> wp_contracts::TimeOfDay {
+                wp_contracts::TimeOfDay::from_hours(12.0)
+            }
+            fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+                a[2] > GROUND_Z && b[2] > GROUND_Z
+            }
+        }
+        let mut p = PoliceSystem::new();
+        let racer = EntityId(1);
+        let unit = p.add_player_unit(PlayerId(1), EntityId(2), [0.0, -40.0, GROUND_Z], [0.0, 1.0]);
+        p.set_heat(racer, 20.0);
+        let r = RacerView {
+            entity: racer,
+            pos: [0.0, 0.0, GROUND_Z],
+            vel: [0.0, 10.0, 0.0],
+        };
+        let mut out = Vec::new();
+        for _ in 0..240 {
+            p.step(&Hill, &[r], &[], wp_contracts::PHYSICS_DT, &mut out);
+        }
+        assert!(
+            p.obs[&racer].seen,
+            "the unit on the hill should see the racer"
+        );
+        assert_eq!(p.obs[&racer].spotter, Some(unit));
+        assert!(
+            p.racer(racer).unwrap().pursued(),
+            "recognition starts a pursuit"
+        );
     }
 }
