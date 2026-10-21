@@ -1004,3 +1004,35 @@ Distance from the step-18 shiro / rampart feel is 2.3–2.4 (step 14 on the firm
 most of it is roll and slip: the planted, stiffer car the owner asked for. It is not the
 step-18 feel. If the owner wants more rotation back, "balance: step 14" + the firm ride is one
 click away (it still steps out on a lift: 14 / 30 fails).
+
+## Transition release for the held-key cut (lead, 2026-10-21; W does the rack / limit geometry)
+
+Tyre-slip: in a swing the held-key cut (× 0.5 past 15° after a 0.5 s hold) caps the new side's
+countersteer at ~14–17° while the front axle travels ~38°, so the fronts keep pulling into the
+old corner. Removing the cut (`slide_lock` 1) drops the held-key set to 0–1 / 27.
+
+**Change:** `GripBalance::slide_lock_release_s` — the cut is off for this long after a
+steering-key reversal (tyre-slip's `since_reversal_s` timer, passed in through `LockSlide`),
+fading back in over the window's last 0.2 s. "new" uses **0.75 s**.
+`slide_lock_release_on_lift` (default off) also opens it on a throttle lift mid-slide, but a
+lift with the counter key held is W's snap-back exit: with it on, the snap-back overshoot goes
+3.3° → 42.5°. My half only; plain.rs (rack / countersteer limit / drift lock) is W's.
+
+| release window (firm ride, "new") | held-key set | lift-off fails | catch (d / a / b × 35–55°) | snap-back overshoot rwd_d | held key / tapper (rwd_d / a / b / rampart) | tap 0.2 s @ 60 mph |
+|---|---|---|---|---|---|---|
+| off | 26 / 27 | 0 | 10 / 12 | 3.3° | 3 / 4, 4 / 4 | 20.4 °/s |
+| 0.5 s, reversal | 26 | 0 | 10 | 3.3° | 3 / 4, 4 / 4 | 20.4 |
+| **0.75 s, reversal (new)** | **26** | **0** | **10** | **3.3°** | **3 / 4, 4 / 4** | **20.4** |
+| 1.0 s, reversal | 17 | 0 | 10 | 3.3° | 0 / 4, 4 / 4 | 20.4 |
+| 0.5–1.0 s, lift + reversal | 26 / 26 / 17 | 0 | 10 | **42.5°** | — | — |
+
+(1.0 s is too long: the held-key entry itself is a reversal, into-turn key → counter key, so
+the cut arrives too late.)
+
+**Swings (tyre-slip's real-swing harness, `transition`, "balance new · plain", firm ride):**
+0 / 27 cross to the new side, with or without tyre-slip's `front_deep_falloff` 0.9 (20 → 35°).
+Nothing crosses even with the cut off (`slide_lock` 1), W's countersteer limit off
+(`counter_margin_deg` 0), the swing rack (× 2.08 from 86 °/s) and a drift lock extension from
+15°. So on this base, steering lock is not the only block: the old-side drift does not rotate
+through after a reversal. The release window is in place for W's geometry and tyre-slip's yaw
+reversal to land on; on its own it changes no gate.

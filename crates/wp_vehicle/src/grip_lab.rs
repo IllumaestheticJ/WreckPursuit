@@ -160,6 +160,15 @@ pub struct GripBalance {
     /// 10°): past a normal drift's angle (an over-rotation) the full countersteer lock and
     /// Drift Lab W's drift lock extension (from 40°) do the catching. 0 = no ceiling.
     pub slide_lock_to_deg: f32,
+    /// Transition release (lead, 2026-10-21): within this many seconds of a throttle lift
+    /// mid-slide or a steering-key reversal the held-key cut is off (faded back in over the
+    /// window's last 0.2 s), so a swing's new-side countersteer can reach the travel angle;
+    /// a steady held drift (no recent lift / reversal) keeps the cut. 0 = off.
+    pub slide_lock_release_s: f32,
+    /// The transition release also opens on a throttle lift mid-slide (else only on a key
+    /// reversal). Off by default: a lift with the counter key held is W's snap-back exit,
+    /// which the cut must keep (with it on, the snap-back overshoot is 3° → 42°).
+    pub slide_lock_release_on_lift: bool,
     /// Apply the lab-only per-car fixes ([`car_fix`]): car-data proposals for the car-data
     /// owner, tried in the lab first (lead-approved 2026-10-21).
     pub car_fixes: bool,
@@ -215,6 +224,8 @@ impl Default for GripBalance {
             slide_lock_after_s: 0.0,
             slide_lock_growth_dps: 0.0,
             slide_lock_to_deg: 0.0,
+            slide_lock_release_s: 0.0,
+            slide_lock_release_on_lift: false,
             car_fixes: false,
         }
     }
@@ -263,6 +274,9 @@ impl GripBalance {
             // ... except while the slide still grows (W's over-rotation catch, step 11).
             slide_lock_growth_dps: 15.0,
             slide_lock_to_deg: 40.0,
+            // ... and for 0.75 s after a steering-key reversal (a transition's new-side
+            // countersteer may reach the travel angle; not on a lift: W's snap-back exit).
+            slide_lock_release_s: 0.75,
             car_fixes: true,
             ..Self::default()
         }
@@ -500,7 +514,14 @@ impl GripBalance {
             body_slip,
             slip_rate,
             counter_s,
+            since_lift_s,
+            since_reversal_s,
         } = slide;
+        let since_release_s = if self.slide_lock_release_on_lift {
+            since_lift_s.min(since_reversal_s)
+        } else {
+            since_reversal_s
+        };
         if self.lock_mode != LockMode::Smart {
             return None;
         }
@@ -546,8 +567,16 @@ impl GripBalance {
             } else {
                 1.0
             };
+            let settled = if self.slide_lock_release_s > 0.0 {
+                let t =
+                    ((since_release_s - (self.slide_lock_release_s - 0.2)) / 0.2).clamp(0.0, 1.0);
+                t * t * (3.0 - 2.0 * t)
+            } else {
+                1.0
+            };
             let k = 1.0
                 + (self.slide_lock.clamp(0.3, 1.5) - 1.0)
+                    * settled
                     * growing
                     * below
                     * y
@@ -574,6 +603,11 @@ pub struct LockSlide {
     pub slip_rate: f32,
     /// How long the countersteer key has been held, s.
     pub counter_s: f32,
+    /// Time since the last throttle lift mid-slide, s (tyre-slip's transition timer; large =
+    /// none recent).
+    pub since_lift_s: f32,
+    /// Time since the last steering-key reversal, s (large = none recent).
+    pub since_reversal_s: f32,
 }
 
 /// A lab-only per-car fix ([`car_fix`]): scales on the car data, applied by the vehicle while
@@ -811,10 +845,32 @@ mod tests {
                     body_slip: 40f32.to_radians(),
                     slip_rate: 0.0,
                     counter_s: 0.8,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
         assert!((deep - 0.3).abs() < 1e-4, "{deep}");
+        // A key reversal 0.2 s ago releases the cut (transition); 0.8 s ago it is back.
+        let rel = |since: f32| {
+            n.smart_lock(
+                15.0,
+                2.7,
+                0.109,
+                0.6,
+                LockSlide {
+                    toward_slide: true,
+                    body_slip: 40f32.to_radians(),
+                    slip_rate: 0.0,
+                    counter_s: 0.8,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: since,
+                },
+            )
+            .unwrap()
+        };
+        assert!((rel(0.2) - 0.6).abs() < 1e-4, "{}", rel(0.2));
+        assert!((rel(0.8) - 0.3).abs() < 1e-4, "{}", rel(0.8));
         let tap = n
             .smart_lock(
                 15.0,
@@ -826,6 +882,8 @@ mod tests {
                     body_slip: 40f32.to_radians(),
                     slip_rate: 0.0,
                     counter_s: 0.1,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
@@ -841,6 +899,8 @@ mod tests {
                     body_slip: 40f32.to_radians(),
                     slip_rate: 0.0,
                     counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
@@ -862,7 +922,9 @@ mod tests {
                     toward_slide: false,
                     body_slip: 0.0,
                     slip_rate: 0.0,
-                    counter_s: 0.0
+                    counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3
                 }
             ),
             None
@@ -880,6 +942,8 @@ mod tests {
                     body_slip: 0.0,
                     slip_rate: 0.0,
                     counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
@@ -896,6 +960,8 @@ mod tests {
                     body_slip: 0.0,
                     slip_rate: 0.0,
                     counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap()
@@ -914,6 +980,8 @@ mod tests {
                     body_slip: 0.30,
                     slip_rate: 0.0,
                     counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
@@ -929,6 +997,8 @@ mod tests {
                     body_slip: 0.30,
                     slip_rate: 0.0,
                     counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
@@ -949,6 +1019,8 @@ mod tests {
                     body_slip: 0.35,
                     slip_rate: 0.0,
                     counter_s: 0.0,
+                    since_lift_s: 1.0e3,
+                    since_reversal_s: 1.0e3,
                 },
             )
             .unwrap();
