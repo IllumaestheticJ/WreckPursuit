@@ -1,0 +1,169 @@
+{
+  "id": "sentinel_shade",
+  "display_name": "Sentinel Shade",
+  "class": "PoliceInterceptor",
+  "analog_of": "2010s full-size RWD sport sedan in unmarked police trim, 6.2 L pushrod V8",
+  "body_size_m": [1.9, 5.0, 1.47],
+  "mass_kg": 1898.2,
+  "front_weight_frac": 0.53,
+  "wheelbase_m": 3.01,
+  "track_front_m": 1.6,
+  "track_rear_m": 1.61,
+  "cg_height_m": 0.52,
+  "inertia_kgm2": [730.0, 3950.0, 4250.0],
+  "drag_cd_a_m2": 0.774,
+  "lift_front": 0.08,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 420],
+      [1200, 470],
+      [1600, 505],
+      [2000, 530],
+      [2500, 550],
+      [3000, 560],
+      [3500, 570],
+      [4000, 575],
+      [4400, 575],
+      [4800, 565],
+      [5200, 550],
+      [5600, 525],
+      [6000, 490],
+      [6300, 455]
+    ],
+    "idle_rpm": 650.0,
+    "redline_rpm": 6000.0,
+    "rev_limit_rpm": 6300.0,
+    "inertia_kgm2": 0.23,
+    "engine_brake_nm": 58.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.59, 2.19, 1.41, 1.0, 0.83],
+    "final_drive": 3.7,
+    "reverse_ratio": 3.16,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 40.0,
+        "ramp_power": 0.35,
+        "ramp_coast": 0.2
+      }
+    },
+    "clutch_max_nm": 920.0,
+    "shift_time_s": 0.28,
+    "torque_converter": {
+      "stall_rpm": 2400.0,
+      "stall_torque_ratio": 1.9,
+      "coupling_rpm": 2800.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-0.8, 1.505, 0.341],
+      "radius_m": 0.341,
+      "width_m": 0.245,
+      "mass_kg": 26.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.63,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1134
+    },
+    {
+      "position_m": [0.8, 1.505, 0.341],
+      "radius_m": 0.341,
+      "width_m": 0.245,
+      "mass_kg": 26.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.63,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1134
+    },
+    {
+      "position_m": [-0.805, -1.505, 0.345],
+      "radius_m": 0.345,
+      "width_m": 0.255,
+      "mass_kg": 28.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.805, -1.505, 0.345],
+      "radius_m": 0.345,
+      "width_m": 0.255,
+      "mass_kg": 28.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 45200.0,
+      "damper_bump_ns_per_m": 2970.0,
+      "damper_rebound_ns_per_m": 4460.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 14900.0,
+      "bump_stop_n_per_m": 180000.0
+    },
+    {
+      "spring_n_per_m": 45200.0,
+      "damper_bump_ns_per_m": 2970.0,
+      "damper_rebound_ns_per_m": 4460.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 14900.0,
+      "bump_stop_n_per_m": 180000.0
+    },
+    {
+      "spring_n_per_m": 44900.0,
+      "damper_bump_ns_per_m": 2770.0,
+      "damper_rebound_ns_per_m": 4160.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 200.0,
+      "bump_stop_n_per_m": 180000.0
+    },
+    {
+      "spring_n_per_m": 44900.0,
+      "damper_bump_ns_per_m": 2770.0,
+      "damper_rebound_ns_per_m": 4160.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 200.0,
+      "bump_stop_n_per_m": 180000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 3720.0,
+    "max_torque_rear_nm": 1780.0,
+    "bias_front": 0.528,
+    "handbrake_rear_nm": 1430.0
+  },
+  "steering": {
+    "ratio": 15.5,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "sentinel_shade",
+  "base_price": 52000,
+  "durability_class": 4,
+  "fuel_capacity_l": 72.0
+}

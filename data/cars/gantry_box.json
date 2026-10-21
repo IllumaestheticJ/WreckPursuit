@@ -1,0 +1,160 @@
+{
+  "id": "gantry_box",
+  "display_name": "Gantry Box",
+  "class": "Truck",
+  "analog_of": "2010s American medium-duty conventional cab box truck, 6.7 L turbo-diesel I6, dual rear wheels",
+  "body_size_m": [2.45, 7.6, 3.2],
+  "mass_kg": 6495.7,
+  "front_weight_frac": 0.48,
+  "wheelbase_m": 4.57,
+  "track_front_m": 2.03,
+  "track_rear_m": 1.83,
+  "cg_height_m": 1.05,
+  "inertia_kgm2": [7470.0, 34970.0, 33480.0],
+  "drag_cd_a_m2": 4.829,
+  "lift_front": 0.25,
+  "lift_rear": 0.2,
+  "engine": {
+    "torque_curve_nm": [
+      [700, 650],
+      [1000, 900],
+      [1200, 1050],
+      [1400, 1150],
+      [1600, 1166],
+      [1800, 1150],
+      [2000, 1100],
+      [2200, 1010],
+      [2400, 920],
+      [2600, 820],
+      [2800, 700]
+    ],
+    "idle_rpm": 650.0,
+    "redline_rpm": 2600.0,
+    "rev_limit_rpm": 2800.0,
+    "inertia_kgm2": 1.0,
+    "engine_brake_nm": 175.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.1, 1.81, 1.41, 1.0, 0.71, 0.61],
+    "final_drive": 5.57,
+    "reverse_ratio": 4.49,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 1750.0,
+    "shift_time_s": 0.45,
+    "torque_converter": {
+      "stall_rpm": 1800.0,
+      "stall_torque_ratio": 2.0,
+      "coupling_rpm": 2100.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-1.015, 2.285, 0.402],
+      "radius_m": 0.402,
+      "width_m": 0.245,
+      "mass_kg": 130.0,
+      "tire_id": "commercial",
+      "steerable": true,
+      "max_steer_rad": 0.675,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [1.015, 2.285, 0.402],
+      "radius_m": 0.402,
+      "width_m": 0.245,
+      "mass_kg": 130.0,
+      "tire_id": "commercial",
+      "steerable": true,
+      "max_steer_rad": 0.675,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.915, -2.285, 0.402],
+      "radius_m": 0.402,
+      "width_m": 0.53,
+      "mass_kg": 280.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.915, -2.285, 0.402],
+      "radius_m": 0.402,
+      "width_m": 0.53,
+      "mass_kg": 280.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 144400.0,
+      "damper_bump_ns_per_m": 7180.0,
+      "damper_rebound_ns_per_m": 10770.0,
+      "travel_m": 0.17,
+      "preload_m": 0.03,
+      "arb_n_per_m": 49300.0,
+      "bump_stop_n_per_m": 1200000.0
+    },
+    {
+      "spring_n_per_m": 144400.0,
+      "damper_bump_ns_per_m": 7180.0,
+      "damper_rebound_ns_per_m": 10770.0,
+      "travel_m": 0.17,
+      "preload_m": 0.03,
+      "arb_n_per_m": 49300.0,
+      "bump_stop_n_per_m": 1200000.0
+    },
+    {
+      "spring_n_per_m": 200800.0,
+      "damper_bump_ns_per_m": 8410.0,
+      "damper_rebound_ns_per_m": 12620.0,
+      "travel_m": 0.19,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 1200000.0
+    },
+    {
+      "spring_n_per_m": 200800.0,
+      "damper_bump_ns_per_m": 8410.0,
+      "damper_rebound_ns_per_m": 12620.0,
+      "travel_m": 0.19,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 1200000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 9030.0,
+    "max_torque_rear_nm": 9030.0,
+    "bias_front": 0.71,
+    "handbrake_rear_nm": 3610.0
+  },
+  "steering": {
+    "ratio": 20.0,
+    "rack_speed_rad_per_s": 0.9,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "gantry_box",
+  "base_price": 38000,
+  "durability_class": 4,
+  "fuel_capacity_l": 190.0
+}

@@ -1,0 +1,163 @@
+{
+  "id": "quarry_tipper",
+  "display_name": "Quarry Tipper",
+  "class": "Truck",
+  "analog_of": "2010s American tri-axle dump truck (steer + tandem drive + raised pusher axle), unladen, 11 L turbo-diesel I6",
+  "body_size_m": [2.5, 7.8, 3.3],
+  "mass_kg": 12001.4,
+  "front_weight_frac": 0.46,
+  "wheelbase_m": 4.95,
+  "track_front_m": 2.08,
+  "track_rear_m": 1.83,
+  "cg_height_m": 1.25,
+  "inertia_kgm2": [14570.0, 68150.0, 65080.0],
+  "drag_cd_a_m2": 5.94,
+  "lift_front": 0.25,
+  "lift_rear": 0.2,
+  "engine": {
+    "torque_curve_nm": [
+      [600, 1200],
+      [800, 1650],
+      [1000, 1950],
+      [1100, 1966],
+      [1200, 1966],
+      [1300, 1950],
+      [1400, 1900],
+      [1500, 1830],
+      [1600, 1750],
+      [1700, 1660],
+      [1800, 1560],
+      [1900, 1440],
+      [2000, 1250],
+      [2100, 1000]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 2000.0,
+    "rev_limit_rpm": 2100.0,
+    "inertia_kgm2": 1.4,
+    "engine_brake_nm": 393.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [4.7, 2.21, 1.53, 1.0, 0.76, 0.67],
+    "final_drive": 5.29,
+    "reverse_ratio": 5.55,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 2950.0,
+    "shift_time_s": 0.45,
+    "torque_converter": {
+      "stall_rpm": 1500.0,
+      "stall_torque_ratio": 2.0,
+      "coupling_rpm": 1800.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-1.04, 2.475, 0.516],
+      "radius_m": 0.516,
+      "width_m": 0.315,
+      "mass_kg": 250.0,
+      "tire_id": "commercial",
+      "steerable": true,
+      "max_steer_rad": 0.691,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [1.04, 2.475, 0.516],
+      "radius_m": 0.516,
+      "width_m": 0.315,
+      "mass_kg": 250.0,
+      "tire_id": "commercial",
+      "steerable": true,
+      "max_steer_rad": 0.691,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.915, -2.475, 0.501],
+      "radius_m": 0.501,
+      "width_m": 0.63,
+      "mass_kg": 500.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.915, -2.475, 0.501],
+      "radius_m": 0.501,
+      "width_m": 0.63,
+      "mass_kg": 500.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 286400.0,
+      "damper_bump_ns_per_m": 15020.0,
+      "damper_rebound_ns_per_m": 22530.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 138200.0,
+      "bump_stop_n_per_m": 2500000.0
+    },
+    {
+      "spring_n_per_m": 286400.0,
+      "damper_bump_ns_per_m": 15020.0,
+      "damper_rebound_ns_per_m": 22530.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 138200.0,
+      "bump_stop_n_per_m": 2500000.0
+    },
+    {
+      "spring_n_per_m": 390500.0,
+      "damper_bump_ns_per_m": 18320.0,
+      "damper_rebound_ns_per_m": 27480.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 102100.0,
+      "bump_stop_n_per_m": 2500000.0
+    },
+    {
+      "spring_n_per_m": 390500.0,
+      "damper_bump_ns_per_m": 18320.0,
+      "damper_rebound_ns_per_m": 27480.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 102100.0,
+      "bump_stop_n_per_m": 2500000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 14960.0,
+    "max_torque_rear_nm": 29910.0,
+    "bias_front": 0.836,
+    "handbrake_rear_nm": 14960.0
+  },
+  "steering": {
+    "ratio": 22.0,
+    "rack_speed_rad_per_s": 0.9,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "quarry_tipper",
+  "base_price": 46000,
+  "durability_class": 5,
+  "fuel_capacity_l": 380.0
+}

@@ -77,9 +77,26 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `tansy_13` | Tansy 1.3 | Compact | 2000s FF 1.3 supermini hatch — traffic / parked |
 | `drayman_cargo` | Drayman Cargo | Truck | 2000s RWD 4.8 V8 full-size cargo van, body-on-frame — traffic / parked |
 | `furrow_24` | Furrow 2.4 | Truck | 90s RWD 2.4 I4 compact pickup, body-on-frame — traffic / parked |
+| `sentinel_courser` | Sentinel Courser | PoliceInterceptor | 2010s RWD 5.0 V8 highway-patrol pursuit coupe — fastest police unit on open road |
+| `sentinel_shade` | Sentinel Shade | PoliceInterceptor | 2010s RWD 6.2 V8 unmarked full-size sedan, no push bar |
+| `sentinel_marshal` | Sentinel Marshal | PoliceSuv | 2010s AWD 3.5 TT V6 unibody police utility, push bar |
+| `sentinel_warden` | Sentinel Warden | PoliceSuv | 2010s 6.0 V8 extended full-size prisoner-transport van, body-on-frame |
+| `sentinel_breacher` | Sentinel Breacher | PoliceSuv | 2010s armoured 4x4 tactical truck, 6.7 TD V8, 6.8 t — the battering ram |
+| `gantry_box` | Gantry Box | Truck | 2010s medium-duty box truck, 6.7 TD I6, dual rears, 6.5 t — traffic |
+| `longhaul_tractor` | Longhaul Tractor | Truck | 2010s long-nose sleeper semi tractor (bobtail), 12.8 TD I6, 8.8 t — traffic |
+| `parcel_hi` | Parcel Hi | Truck | 2010s high-roof RWD delivery van, 2.1 TD I4 — traffic / parked |
+| `quarry_tipper` | Quarry Tipper | Truck | 2010s tri-axle dump truck (unladen), 11 TD I6, 12 t — traffic |
 
 The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
 There is no `Van`/`Civilian` class yet, so the van and pickup use `Truck` (requested in
 `docs/integration/cars.md`).
+
+Round 9 added five police units and four heavy civilians. With no `Van`/`HeavyTruck` class
+the heavy civilians are `Truck` and the van/armoured police units are `PoliceSuv` (contract
+change request in `docs/integration/cars.md`). Heavy vehicles use the `commercial` tire
+compound (`data/tires/commercial.json`: Fz0 20 kN, low load sensitivity), model dual rear
+tires as one wide wheel per side, and put the rear axle of a tandem at the tandem centre (the
+physics has four wheels; the renderer draws both axles). Truck top speeds are set by the rev
+limiter in top gear, standing in for the fleet road-speed governor.
 
 Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

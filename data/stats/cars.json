@@ -59,6 +59,17 @@
         "cornering": 0.357
       }
     },
+    "gantry_box": {
+      "display_name": "Gantry Box",
+      "zero_to_100_s": 19.2,
+      "top_speed_kmh": 119.1,
+      "cornering_g": 0.662,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.0,
+        "cornering": 0.224
+      }
+    },
     "hakone_gt": {
       "display_name": "Hakone GT",
       "zero_to_100_s": 5.86,
@@ -125,6 +136,17 @@
         "cornering": 0.762
       }
     },
+    "longhaul_tractor": {
+      "display_name": "Longhaul Tractor",
+      "zero_to_100_s": 21.96,
+      "top_speed_kmh": 118.4,
+      "cornering_g": 0.628,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.0,
+        "cornering": 0.155
+      }
+    },
     "lucciola_350": {
       "display_name": "Lucciola 350",
       "zero_to_100_s": 4.55,
@@ -134,6 +156,28 @@
         "acceleration": 0.916,
         "top_speed": 0.885,
         "cornering": 0.814
+      }
+    },
+    "parcel_hi": {
+      "display_name": "Parcel Hi",
+      "zero_to_100_s": 15.54,
+      "top_speed_kmh": 151.7,
+      "cornering_g": 0.662,
+      "bars": {
+        "acceleration": 0.037,
+        "top_speed": 0.069,
+        "cornering": 0.223
+      }
+    },
+    "quarry_tipper": {
+      "display_name": "Quarry Tipper",
+      "zero_to_100_s": 28.54,
+      "top_speed_kmh": 108.0,
+      "cornering_g": 0.611,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.0,
+        "cornering": 0.122
       }
     },
     "rampart_50": {
@@ -158,6 +202,28 @@
         "cornering": 0.335
       }
     },
+    "sentinel_breacher": {
+      "display_name": "Sentinel Breacher",
+      "zero_to_100_s": 19.65,
+      "top_speed_kmh": 135.9,
+      "cornering_g": 0.693,
+      "bars": {
+        "acceleration": 0.0,
+        "top_speed": 0.0,
+        "cornering": 0.286
+      }
+    },
+    "sentinel_courser": {
+      "display_name": "Sentinel Courser",
+      "zero_to_100_s": 5.54,
+      "top_speed_kmh": 286.1,
+      "cornering_g": 0.845,
+      "bars": {
+        "acceleration": 0.837,
+        "top_speed": 0.86,
+        "cornering": 0.59
+      }
+    },
     "sentinel_cruiser": {
       "display_name": "Sentinel Cruiser",
       "zero_to_100_s": 6.38,
@@ -167,6 +233,39 @@
         "acceleration": 0.769,
         "top_speed": 0.71,
         "cornering": 0.603
+      }
+    },
+    "sentinel_marshal": {
+      "display_name": "Sentinel Marshal",
+      "zero_to_100_s": 5.78,
+      "top_speed_kmh": 235.9,
+      "cornering_g": 0.801,
+      "bars": {
+        "acceleration": 0.817,
+        "top_speed": 0.564,
+        "cornering": 0.501
+      }
+    },
+    "sentinel_shade": {
+      "display_name": "Sentinel Shade",
+      "zero_to_100_s": 5.65,
+      "top_speed_kmh": 258.7,
+      "cornering_g": 0.846,
+      "bars": {
+        "acceleration": 0.828,
+        "top_speed": 0.698,
+        "cornering": 0.593
+      }
+    },
+    "sentinel_warden": {
+      "display_name": "Sentinel Warden",
+      "zero_to_100_s": 8.88,
+      "top_speed_kmh": 202.1,
+      "cornering_g": 0.609,
+      "bars": {
+        "acceleration": 0.57,
+        "top_speed": 0.365,
+        "cornering": 0.119
       }
     },
     "sentinel_wolfhound": {

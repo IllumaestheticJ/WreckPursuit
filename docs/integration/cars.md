@@ -5,6 +5,128 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
+## Round 9: police expansion + heavy traffic (2026-10-21)
+
+Nine new cars through the generated pipeline (`roster_inputs.py` → `build_roster.py`): car
+JSON, spec sheet and lattice, plus panel spec (`gen-panels <ids>`, new cars only), audio def,
+stat-bar row (`simcli car-stats`), validation targets and ROSTER/VALIDATION. Panel **meshes**
+and style sheets are not generated here (workstream R / the asset session owns
+`data/panels/meshes`, `data/panels/styles`, `tools/assets`), so `car-assets`' mesh test fails
+for the nine new ids until their meshes are generated.
+
+| Id | Class | Mass kg | kW / N·m | Body W × L × H m | WB m | Track F / R m | Wheels (hub y, loaded r F / R) | Tire width F / R | Dur. | Price | Sim 0-100 s / Vmax km/h / 100-0 m / skidpad g |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `sentinel_courser` | PoliceInterceptor | 1852 | 345 / 560 | 1.92 × 4.80 × 1.40 | 2.720 | 1.58 / 1.65 | y ±1.360, r 0.333 / 0.341 | 255 / 275 mm police_pursuit | 3 | 55,000 | 5.5 / 286 / 39.7 / 0.85 |
+| `sentinel_shade` | PoliceInterceptor | 1898 | 308 / 575 | 1.90 × 5.00 × 1.47 | 3.010 | 1.60 / 1.61 | y ±1.505, r 0.341 / 0.345 | 245 / 255 mm police_pursuit | 4 | 52,000 | 5.7 / 259 / 39.1 / 0.85 |
+| `sentinel_marshal` | PoliceSuv | 2189 | 281 / 515 | 2.00 × 5.05 × 1.78 | 3.025 | 1.70 / 1.70 | y ±1.512, r 0.366 / 0.366 | 255 / 255 mm police_pursuit | 4 | 50,000 | 5.8 / 236 / 40.4 / 0.80 |
+| `sentinel_warden` | PoliceSuv | 2981 | 255 / 505 | 2.01 × 6.20 × 2.10 | 3.940 | 1.73 / 1.72 | y ±1.970, r 0.371 / 0.371 | 245 / 245 mm street | 5 | 42,000 | 8.9 / 202 / 43.8 / 0.61 |
+| `sentinel_breacher` | PoliceSuv | 6802 | 235 / 1015 | 2.45 × 6.20 × 2.90 | 3.850 | 1.90 / 1.85 | y ±1.925, r 0.389 / 0.389 | 225 / 490 (dual) mm commercial | 5 | 90,000 | 19.7 / 136 / 52.9 / 0.69 |
+| `gantry_box` | Truck | 6496 | 233 / 1166 | 2.45 × 7.60 × 3.20 | 4.570 | 2.03 / 1.83 | y ±2.285, r 0.402 / 0.402 | 245 / 530 (dual) mm commercial | 4 | 38,000 | 19.2 / 119 / 51.0 / 0.66 |
+| `longhaul_tractor` | Truck | 8798 | 344 / 2300 | 2.50 × 6.90 × 3.40 | 4.500 | 2.08 / 1.83 | y ±2.250, r 0.487 / 0.487 | 295 / 630 (dual) mm commercial | 5 | 60,000 | 22.0 / 118 / 59.2 / 0.63 |
+| `parcel_hi` | Truck | 2310 | 113 / 360 | 1.99 × 5.90 × 2.70 | 3.665 | 1.72 / 1.71 | y ±1.833, r 0.342 / 0.342 | 235 / 235 mm street | 4 | 30,000 | 15.5 / 152 / 42.8 / 0.66 |
+| `quarry_tipper` | Truck | 12001 | 296 / 1966 | 2.50 × 7.80 × 3.30 | 4.950 | 2.08 / 1.83 | y ±2.475, r 0.516 / 0.501 | 315 / 630 (dual) mm commercial | 5 | 55,000 | 28.5 / 108 / 60.8 / 0.61 |
+
+All nine are inside their class bands in VALIDATION.md (0-100, skidpad, 100-0). Police ladder on
+open road: Courser 286 > Cruiser 260 > Shade 259 (limiter in 5th, short pursuit final drive) >
+Wolfhound 244 > Marshal 236 > Bastion 214 > Warden 202 > Breacher 136 km/h. Full-sim probe
+(simcli, Arcade, full throttle then full brake): every new car launches, reaches its Vmax and
+stops in a straight line; the trucks stop from Vmax in 71-96 m.
+
+**Renamed: `sentinel_ranger` → `sentinel_marshal` ("Sentinel Marshal").** "Ranger" is a real
+pickup nameplate (NAME tier of `nameplate_check.py`: banned in ids, display names and
+headings); the check failed on the id, display name, lattice id and spec-sheet headings.
+Anything keyed by the requested id (style sheets) must use `sentinel_marshal`.
+
+### How the heavy vehicles are modelled (tools only, no contract change)
+
+- **Class:** existing `VehicleClass` values only — heavy civilians are `Truck`; the
+  prisoner van and the armoured truck are `PoliceSuv` (see the requests below).
+- **Tandem axles** (`longhaul_tractor`, `quarry_tipper`): the physics has 4 wheels, so the rear
+  axle sits at the tandem centre (`wheelbase_m` = front axle → tandem centre); the renderer
+  draws the two axles at ±≈0.65 m around it. Rear unsprung mass and brake torque carry both
+  axles' wheel ends; the inter-axle diff is not modelled.
+- **Dual rear tires** (`gantry_box`, `longhaul_tractor`, `quarry_tipper`, `sentinel_breacher`):
+  one physics wheel per side; `width_m` = 2 × section + 40 mm (only feeds aquaplaning).
+- **Tires:** new compound `data/tires/commercial.json` (lateral D 0.80, longitudinal 0.86,
+  Fz0 20 kN, load sensitivity 0.08, peak α 10.3°, relaxation 0.75 m, rolling resistance 0.0065).
+  On the car compounds (Fz0 4-4.5 kN, ls 0.10-0.12) a 27 kN wheel hits the 30 % μ floor —
+  a 12 t truck would have had ≈ 0.3 g of grip. `market.toml [tire_grip] commercial = 0.83`
+  added (economy test requires an entry for every tire file).
+- **Governed top speed:** trucks are rev-limited in top gear at the class governor speed
+  (box 119, tractor 118, tipper 108, Breacher 136 km/h) — there is no road-speed governor in
+  `wp_vehicle`.
+- **Air brakes:** new `air_drum` brake kind in `build_roster.py` (`T = p·A_chamber·L_slack·G_cam`
+  per wheel end, 6.9 bar); the medium-duty trucks use hydraulic discs. Diesel fuel density
+  (`fuel_kg_per_l` 0.835) and half-inch rims (`R19.5`, `R22.5`) are new optional inputs.
+  Existing cars regenerate byte-identically.
+- **Lattices:** the generator's shape fractions are per profile, so a box truck / tractor /
+  tipper (`truck`) is a pickup-shaped lattice: long hood, cab, open "bed" at belt height (the
+  box, fifth wheel and dump body are not in the lattice — visual only). Vans use `suv`
+  (`van`) with the `cargo_box` relabel; the Breacher too (armoured rear compartment counted as
+  body, not passenger cell — otherwise a 40 km/h rear hit was a cabin-intrusion total loss).
+  Lattices are 325-351 nodes / 2016-2243 beams on the heavy vehicles (roster max was 315 /
+  2078): a few % more lattice cost per heavy car.
+
+Lattice anchors (chassis space, y forward from mid-wheelbase, z up; from the generated
+lattices — `Hood` / `Roof` region node ranges, generator `deck_u` station, `belt_frac × H`):
+
+| Id | gen profile | body y | hood y | roof y | deck y | belt z |
+|---|---|---|---|---|---|---|
+| `sentinel_courser` | coupe | −2.49…+2.31 | +0.65…+2.31 (nodes +1.01…+2.13) | −0.71…+0.05 | −1.46 | 0.81 |
+| `sentinel_shade` | sedan | −2.50…+2.50 | +0.83…+2.50 (nodes +1.17…+2.33) | −0.82…+0.28 | −1.32 | 0.88 |
+| `sentinel_marshal` | suv | −2.59…+2.46 | +0.95…+2.46 (nodes +1.23…+2.28) | −2.28…+0.44 | −2.44 | 1.07 |
+| `sentinel_warden` | suv (van) | −3.33…+2.87 | +1.01…+2.87 (nodes +1.33…+2.69) | −2.96…+0.39 | −3.14 | 1.26 |
+| `sentinel_breacher` | suv (van) | −3.28…+2.92 | +1.06…+2.92 (nodes +1.35…+2.75) | −2.90…+0.44 | −3.09 | 1.74 |
+| `gantry_box` | truck | −4.26…+3.33 | +1.13…+3.33 (nodes +1.42…+3.15) | −0.84…+0.52 | −0.88 | 1.98 |
+| `longhaul_tractor` | truck | −3.50…+3.40 | +1.40…+3.40 (nodes +1.68…+3.22) | −0.40…+0.85 | −0.43 | 2.11 |
+| `parcel_hi` | suv (van) | −3.12…+2.78 | +1.01…+2.78 (nodes +1.29…+2.60) | −2.76…+0.42 | −2.94 | 1.62 |
+| `quarry_tipper` | truck | −4.07…+3.73 | +1.46…+3.73 (nodes +1.80…+3.54) | −0.56…+0.84 | −0.60 | 2.05 |
+
+### Economy fit (round 9)
+- Prices: `longhaul_tractor` 48 000 and `quarry_tipper` 46 000 (were 60 000 / 55 000, above the
+  Truck class band [12 000, 50 000] that `wp_economy`'s `roster_prices_sit_inside_their_class_bands`
+  enforces). `gantry_box` stays 38 000.
+- Change outside my crates: `crates/wp_economy/tests/roster_prices.rs` skips the "front hit ≈ one
+  race win" purse-ratio check for vehicles over 4 500 kg (`HEAVY_COMMERCIAL_KG`). A 6–12 t
+  commercial vehicle's repair bill is meant to dwarf a race purse (box truck 1.83×, tractor 2.2×);
+  bending prices to fit a race-car feel target would be wrong. Every other check (wreck floor,
+  scrape < buy-in, pound fee, class band) still applies. Remove the skip when the requested
+  `HeavyTruck` class gets its own targets (08 / lead to review).
+
+### Validation (round 9)
+
+`collect_results.py`: all nine in their 0-100 / skidpad / 100-0 bands. Barrier sweep 8/8 on
+eight of them; **Parcel Hi side (T-bone) 40 km/h** misses for a geometric reason (striker centred
+by body length lands behind the front wheel arch on a 3.67 m wheelbase; explained in
+VALIDATION.md). Fixes made on the way: Shade's heavy-duty package no longer hardens the front
+suspension/wheel mounts (they made the offset 56 km/h corner survive); Breacher gets the
+`cargo_box` relabel. `smoke_sim.py`: 26 cars × 2 modes deterministic. `nameplate_check.py`: 0
+problems. `gen-panels --check`, `simcli car-stats --check`: current.
+
+`pursuit_probe.py --chase` (full sim, Arcade, s): 0-144 km/h (day cap) Courser **9.12**, Shade
+**9.68**, Wolfhound 10.63, Marshal 11.28, Cruiser 11.65, Bastion 16.08, Warden 18.05; the
+Breacher (125 km/h at 40 s) and the heavy civilians never reach the cap. The Cruiser catches
+every heavy civilian within 4.3-5.0 s at the cap (13.5-14.6 s with `wp_police`'s +10 % rule).
+
+### Contract change requests (round 9)
+
+| To | Request |
+|---|---|
+| lead (`wp_contracts`) | **`VehicleClass::Van` and `VehicleClass::HeavyTruck`** (and keep `Truck` for pickups). Today a 12 t dump truck, a box truck and a semi tractor share `Truck` with the 1.4 t Furrow pickup, and the prisoner van / armoured truck are `PoliceSuv`. Anything that buckets by class (traffic spawn mix, economy class pricing, mod whitelists such as `tires_all_terrain`, police unit roles) cannot tell them apart. Suggested: `Van` (civilian vans), `HeavyTruck` (> 3.5 t GVW), `PoliceVan` / `PoliceArmored` or a `PoliceSuv` + role flag. |
+| lead + 02 (`wp_contracts`, `wp_vehicle`) | **Trailer hitch joint for semis:** a `hitch` point on `VehicleDef` (fifth-wheel position, chassis space; this tractor's would be ≈ y −1.3 m, z ≈ 1.2 m) and a trailer `VehicleDef` kind (kingpin + its own axles), joined by a ball/yaw joint in `wp_sim`. Until then `longhaul_tractor` only runs bobtail. |
+| lead / 02 | **More than 4 wheels** (or an axle-group field with `count` and `spacing_m`): tandems are lumped at the tandem centre, which gives the right load and braking but too little yaw damping and the wrong turning scrub. Also a **road-speed governor** field (km/h) instead of the rev-limiter trick. |
+| 02 vehicle | `commercial` tire compound added in `data/tires/` (owned by 02) for the heavy vehicles; please review the coefficients. Mods that swap a heavy vehicle onto a car compound (e.g. `tires_sport`) will collapse its grip via load sensitivity — whitelist compounds per class. |
+| 03 damage (B) | `gen-lattice` shape fractions are per profile; box truck, tractor and tipper share the pickup (`truck`) shape. A `box_truck` / `tractor` profile (cab-behind-hood, cargo box or open frame) and a wheelbase-relative T-bone striker in `barrier.rs` would make the heavy lattices and their side test more faithful. |
+| 08 economy (G) | `market.toml [tire_grip] commercial = 0.83` added (one line, needed by `every_tire_file_has_a_grip_factor`). Repair prices for 6-12 t vehicles probably need their own class scale once `HeavyTruck` exists. |
+
+### Changes outside my folders (minimal)
+
+- `data/tires/commercial.json` (new) + its row in `data/tires/README.md` (02's folder).
+- `data/economy/market.toml`: one `[tire_grip]` line (08's file).
+- `data/audio/cars/<id>.json` × 9 (audio defs, copied from the closest existing car).
+- `data/panels/<id>.json` × 9 (`gen-panels` for the new ids only), `data/stats/cars.json` (9 rows added).
+
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.

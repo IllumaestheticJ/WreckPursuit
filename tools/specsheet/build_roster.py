@@ -53,16 +53,25 @@ def rr(x: float, step: float) -> float:
 
 
 def tire_dims(code: str, truck: bool):
-    """ISO size code 'W/AR Rrim' → (section width m, unloaded radius m, loaded radius m)."""
-    m = re.fullmatch(r"(\d+)/(\d+)R(\d+)", code)
+    """ISO size code 'W/AR Rrim' → (section width m, unloaded radius m, loaded radius m).
+    Commercial sizes with a half-inch rim (e.g. `295/75R22.5`) are accepted."""
+    m = re.fullmatch(r"(\d+)/(\d+)R(\d+(?:\.5)?)", code)
     if not m:
         raise ValueError(f"bad tire size {code}")
-    w_mm, ar, rim_in = (int(g) for g in m.groups())
+    w_mm, ar, rim_in = int(m.group(1)), int(m.group(2)), float(m.group(3))
     width = w_mm / 1000.0
     sidewall = width * ar / 100.0
     unloaded = rim_in * 0.0254 / 2.0 + sidewall
     loaded_k = 0.96 if truck else 0.97
     return width, unloaded, unloaded * loaded_k, loaded_k
+
+
+DUAL_GAP_M = 0.04  # gap between the two tires of a dual pair, m
+
+
+def fuel_density(c: dict) -> float:
+    """Fuel density, kg/L: petrol by default, `fuel_kg_per_l` per car (diesel 0.835)."""
+    return c.get("fuel_kg_per_l", FUEL_KG_PER_L)
 
 
 def tire_id_for(compound: str) -> str:
@@ -81,6 +90,21 @@ def brake_torque(spec: dict, bar: float):
                f"r_eff = D/2 − 25 mm = {r_eff * 1000:.0f} mm, pad μ = {spec['pad_mu']}: "
                f"T = 2·μ·p·A·r_eff = 2·{spec['pad_mu']}·{bar:.0f} bar·{area * 1e4:.1f} cm²·{r_eff:.3f} m "
                f"= **{t:.0f} N·m**")
+    elif spec["kind"] == "air_drum":
+        # Air-actuated S-cam drum (heavy trucks): chamber force × slack-adjuster arm = camshaft
+        # torque; `cam_gain` = drum torque / camshaft torque (S-cam lift, shoe factor, lining μ,
+        # drum radius). `ends` = wheel ends lumped into this physics wheel (tandem = 2).
+        area = spec["chamber_in2"] * 0.0254 ** 2
+        ends = spec.get("ends", 1)
+        t1 = p * area * spec["slack_mm"] / 1000.0 * spec["cam_gain"]
+        t = t1 * ends
+        txt = (f"{spec['d_mm']} mm air S-cam drum, type-{spec['chamber_in2']} chamber "
+               f"(A = {area * 1e4:.0f} cm²), {spec['slack_mm']} mm slack adjuster, cam gain "
+               f"{spec['cam_gain']} (drum torque / camshaft torque, includes lining μ): "
+               f"T = p·A·L·G = {bar:.1f} bar·{area * 1e4:.0f} cm²·{spec['slack_mm'] / 1000:.3f} m·"
+               f"{spec['cam_gain']} = {t1:.0f} N·m per wheel end"
+               + (f" × {ends} ends (tandem lumped into one physics wheel) = **{t:.0f} N·m**"
+                  if ends > 1 else f" = **{t:.0f} N·m**"))
     else:
         area = math.pi * (spec["wheel_cyl_mm"] / 1000.0) ** 2 / 4.0
         r_d = spec["d_mm"] / 2000.0
@@ -153,7 +177,7 @@ def compact_json(obj) -> str:
 def derive(c: dict) -> tuple[dict, dict]:
     """Return (VehicleDef JSON dict, derivation record for the spec sheet)."""
     d: dict = {}
-    fuel_kg = 0.5 * c["fuel_l"] * FUEL_KG_PER_L
+    fuel_kg = 0.5 * c["fuel_l"] * fuel_density(c)
     m = c["curb_kg"] - fuel_kg + DRIVER_KG
     d["fuel_kg"] = fuel_kg
     w, l, h = c["body"]
@@ -176,6 +200,10 @@ def derive(c: dict) -> tuple[dict, dict]:
     # Tires.
     tw_f, tu_f, tl_f, lk = tire_dims(c["tires"]["front"], truck)
     tw_r, tu_r, tl_r, _ = tire_dims(c["tires"]["rear"], truck)
+    if c["tires"].get("dual_rear"):
+        # Dual rear tires: one physics wheel per side carries both; its width is the pair's
+        # footprint (two sections + the dual gap). Width only feeds aquaplaning.
+        tw_r = 2.0 * tw_r + DUAL_GAP_M
     d["tire"] = dict(wf=tw_f, uf=tu_f, lf=tl_f, wr=tw_r, ur=tu_r, lr=tl_r, lk=lk)
     tid = tire_id_for(c["tires"]["compound"])
     d["tire_id"] = tid
@@ -824,7 +852,7 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
     o.append("## Mass, geometry, CG\n")
     o.append(fmt_table(["Quantity", "Value", "Derivation"], [
         ["Curb mass", f"{c['curb_kg']:.0f} kg", "class spec data (full tank)"],
-        ["Fuel tank", f"{c['fuel_l']:.0f} L", f"`fuel_capacity_l`; half a tank = {d['fuel_kg']:.0f} kg at {FUEL_KG_PER_L} kg/L"],
+        ["Fuel tank", f"{c['fuel_l']:.0f} L", f"`fuel_capacity_l`; half a tank = {d['fuel_kg']:.0f} kg at {fuel_density(c)} kg/L"],
         ["`mass_kg`", f"{m:.0f} kg", f"curb − half tank + {DRIVER_KG:.0f} kg driver (contract: fuel at 50 %)"],
         ["Front weight", f"{c['front_frac']:.3f}", f"axle loads {m * c['front_frac']:.0f} / {m * (1 - c['front_frac']):.0f} kg"],
         ["Wheelbase", f"{L:.3f} m", "spec"],
@@ -891,10 +919,13 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
                  f"uses `street`; re-run the build when the file lands")
     o.append(fmt_table(["Axle", "Size", "Width", "Unloaded r", "Loaded r", "Unsprung"], [
         ["Front", c["tires"]["front"], f"{t['wf'] * 1000:.0f} mm", f"{t['uf']:.4f} m", f"{t['lf']:.3f} m", f"{c['tires']['unsprung'][0]:.0f} kg"],
-        ["Rear", c["tires"]["rear"], f"{t['wr'] * 1000:.0f} mm", f"{t['ur']:.4f} m", f"{t['lr']:.3f} m", f"{c['tires']['unsprung'][1]:.0f} kg"],
+        ["Rear", c["tires"]["rear"] + (" dual" if c["tires"].get("dual_rear") else ""), f"{t['wr'] * 1000:.0f} mm", f"{t['ur']:.4f} m", f"{t['lr']:.3f} m", f"{c['tires']['unsprung'][1]:.0f} kg"],
     ]))
     o.append(f"\nUnloaded r = rim/2 + width·aspect; loaded r = {t['lk']:.2f} × unloaded "
-             f"(static deflection). Compound: {tnote}.\n")
+             f"(static deflection). Compound: {tnote}."
+             + (f" Rear: dual tires, one physics wheel per side; width = 2 × section + "
+                f"{DUAL_GAP_M * 1000:.0f} mm gap = {t['wr'] * 1000:.0f} mm (aquaplaning only)."
+                if c["tires"].get("dual_rear") else "") + "\n")
 
     o.append("## Suspension\n")
     o.append(f"Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass "
@@ -919,7 +950,10 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
 
     o.append("## Brakes\n")
     bb = c["brakes"]
-    o.append(f"Full-pedal line pressure {bb['bar']:.0f} bar.\n")
+    if bb["bar"] < 20:
+        o.append(f"Air brakes: full-application chamber pressure {bb['bar']:.1f} bar.\n")
+    else:
+        o.append(f"Full-pedal line pressure {bb['bar']:.0f} bar.\n")
     o.append(f"- Front: {b['txt_f']}")
     o.append(f"- Rear: {b['txt_r']}")
     if b["k_abs"] < 1.0:

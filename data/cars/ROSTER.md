@@ -21,6 +21,15 @@
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 11.6 | 176 | 0.90 | 388 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
 | Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.1 | 183 | 0.83 | 401 | 4 | 21,000 | street |
+| Sentinel Courser | `sentinel_courser` | PoliceInterceptor | RWD | 1852 | 345 | 186 | 5.6 | 292 | 0.93 | 604 | 3 | 55,000 | police_pursuit |
+| Sentinel Shade | `sentinel_shade` | PoliceInterceptor | RWD | 1898 | 308 | 162 | 5.7 | 267 | 0.93 | 591 | 4 | 52,000 | police_pursuit |
+| Sentinel Marshal | `sentinel_marshal` | PoliceSuv | AWD on-demand (≤ 50 % rear) | 2189 | 281 | 128 | 6.3 | 238 | 0.88 | 538 | 4 | 50,000 | police_pursuit |
+| Sentinel Warden | `sentinel_warden` | PoliceSuv | RWD | 2981 | 255 | 86 | 8.5 | 210 | 0.68 | 418 | 5 | 42,000 | street |
+| Sentinel Breacher | `sentinel_breacher` | PoliceSuv | AWD 45/55 | 6802 | 235 | 35 | 22.0 | 136 | 0.73 | 268 | 5 | 90,000 | commercial |
+| Gantry Box | `gantry_box` | Truck | RWD | 6496 | 233 | 36 | 20.5 | 125 | 0.74 | 270 | 4 | 38,000 | commercial |
+| Longhaul Tractor | `longhaul_tractor` | Truck | RWD | 8798 | 344 | 39 | 23.1 | 125 | 0.70 | 254 | 5 | 60,000 | commercial |
+| Parcel Hi | `parcel_hi` | Truck | RWD | 2310 | 113 | 49 | 14.8 | 155 | 0.74 | 317 | 4 | 30,000 | street |
+| Quarry Tipper | `quarry_tipper` | Truck | RWD | 12001 | 296 | 25 | 28.9 | 112 | 0.66 | 227 | 5 | 55,000 | commercial |
 | Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 

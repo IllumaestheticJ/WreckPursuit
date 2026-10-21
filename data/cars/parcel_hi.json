@@ -1,0 +1,156 @@
+{
+  "id": "parcel_hi",
+  "display_name": "Parcel Hi",
+  "class": "Truck",
+  "analog_of": "2010s European-style high-roof RWD delivery van, 2.1 L turbo-diesel I4, unibody",
+  "body_size_m": [1.99, 5.9, 2.7],
+  "mass_kg": 2310.4,
+  "front_weight_frac": 0.55,
+  "wheelbase_m": 3.665,
+  "track_front_m": 1.72,
+  "track_rear_m": 1.71,
+  "cg_height_m": 0.85,
+  "inertia_kgm2": [1840.0, 7700.0, 7240.0],
+  "drag_cd_a_m2": 1.71,
+  "lift_front": 0.15,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 180],
+      [1200, 270],
+      [1400, 330],
+      [1600, 360],
+      [2000, 360],
+      [2400, 360],
+      [2800, 350],
+      [3200, 330],
+      [3600, 300],
+      [3800, 280],
+      [4000, 250],
+      [4200, 215]
+    ],
+    "idle_rpm": 750.0,
+    "redline_rpm": 4000.0,
+    "rev_limit_rpm": 4200.0,
+    "inertia_kgm2": 0.2,
+    "engine_brake_nm": 43.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [5.08, 2.6, 1.52, 1.0, 0.79, 0.64],
+    "final_drive": 3.92,
+    "reverse_ratio": 4.5,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 500.0,
+    "shift_time_s": 0.35
+  },
+  "wheels": [
+    {
+      "position_m": [-0.86, 1.833, 0.342],
+      "radius_m": 0.342,
+      "width_m": 0.235,
+      "mass_kg": 38.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.659,
+      "ackermann_frac": 0.7,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [0.86, 1.833, 0.342],
+      "radius_m": 0.342,
+      "width_m": 0.235,
+      "mass_kg": 38.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.659,
+      "ackermann_frac": 0.7,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.855, -1.833, 0.342],
+      "radius_m": 0.342,
+      "width_m": 0.235,
+      "mass_kg": 50.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.855, -1.833, 0.342],
+      "radius_m": 0.342,
+      "width_m": 0.235,
+      "mass_kg": 50.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 43000.0,
+      "damper_bump_ns_per_m": 2740.0,
+      "damper_rebound_ns_per_m": 4110.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 19300.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 43000.0,
+      "damper_bump_ns_per_m": 2740.0,
+      "damper_rebound_ns_per_m": 4110.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 19300.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 50500.0,
+      "damper_bump_ns_per_m": 2630.0,
+      "damper_rebound_ns_per_m": 3940.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 50500.0,
+      "damper_bump_ns_per_m": 2630.0,
+      "damper_rebound_ns_per_m": 3940.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 4580.0,
+    "max_torque_rear_nm": 1510.0,
+    "bias_front": 0.542,
+    "handbrake_rear_nm": 1060.0
+  },
+  "steering": {
+    "ratio": 18.0,
+    "rack_speed_rad_per_s": 1.1,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "parcel_hi",
+  "base_price": 30000,
+  "durability_class": 4,
+  "fuel_capacity_l": 71.0
+}

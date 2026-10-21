@@ -45,6 +45,7 @@ COMPOUND_SCALE = {
     "police_pursuit": 1.04,
     "all_terrain": 0.90,
     "vintage_bias": 0.85,
+    "commercial": 0.83,
 }
 
 # Drivetrain efficiency (crank to contact patch), class-typical.

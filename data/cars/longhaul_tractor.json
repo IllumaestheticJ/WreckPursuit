@@ -1,0 +1,158 @@
+{
+  "id": "longhaul_tractor",
+  "display_name": "Longhaul Tractor",
+  "class": "Truck",
+  "analog_of": "2010s American conventional long-nose sleeper semi tractor (bobtail), 12.8 L turbo-diesel I6, tandem drive axles",
+  "body_size_m": [2.5, 6.9, 3.4],
+  "mass_kg": 8797.9,
+  "front_weight_frac": 0.59,
+  "wheelbase_m": 4.5,
+  "track_front_m": 2.08,
+  "track_rear_m": 1.83,
+  "cg_height_m": 1.1,
+  "inertia_kgm2": [11100.0, 41210.0, 38300.0],
+  "drag_cd_a_m2": 6.12,
+  "lift_front": 0.25,
+  "lift_rear": 0.2,
+  "engine": {
+    "torque_curve_nm": [
+      [600, 1400],
+      [800, 1900],
+      [1000, 2300],
+      [1100, 2300],
+      [1200, 2300],
+      [1300, 2300],
+      [1400, 2250],
+      [1500, 2150],
+      [1600, 2050],
+      [1700, 1930],
+      [1800, 1810],
+      [1900, 1680],
+      [2000, 1500],
+      [2100, 1250]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 2000.0,
+    "rev_limit_rpm": 2100.0,
+    "inertia_kgm2": 1.6,
+    "engine_brake_nm": 460.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [14.94, 11.73, 9.04, 7.09, 5.54, 4.35, 3.44, 2.7, 2.08, 1.63, 1.27, 1.0],
+    "final_drive": 3.07,
+    "reverse_ratio": 13.07,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 3220.0,
+    "shift_time_s": 0.5
+  },
+  "wheels": [
+    {
+      "position_m": [-1.04, 2.25, 0.487],
+      "radius_m": 0.487,
+      "width_m": 0.295,
+      "mass_kg": 230.0,
+      "tire_id": "commercial",
+      "steerable": true,
+      "max_steer_rad": 0.724,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [1.04, 2.25, 0.487],
+      "radius_m": 0.487,
+      "width_m": 0.295,
+      "mass_kg": 230.0,
+      "tire_id": "commercial",
+      "steerable": true,
+      "max_steer_rad": 0.724,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.915, -2.25, 0.487],
+      "radius_m": 0.487,
+      "width_m": 0.63,
+      "mass_kg": 480.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.915, -2.25, 0.487],
+      "radius_m": 0.487,
+      "width_m": 0.63,
+      "mass_kg": 480.0,
+      "tire_id": "commercial",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 239100.0,
+      "damper_bump_ns_per_m": 13320.0,
+      "damper_rebound_ns_per_m": 19980.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 52500.0,
+      "bump_stop_n_per_m": 2000000.0
+    },
+    {
+      "spring_n_per_m": 239100.0,
+      "damper_bump_ns_per_m": 13320.0,
+      "damper_rebound_ns_per_m": 19980.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 52500.0,
+      "bump_stop_n_per_m": 2000000.0
+    },
+    {
+      "spring_n_per_m": 133800.0,
+      "damper_bump_ns_per_m": 7450.0,
+      "damper_rebound_ns_per_m": 11180.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 81300.0,
+      "bump_stop_n_per_m": 2000000.0
+    },
+    {
+      "spring_n_per_m": 133800.0,
+      "damper_bump_ns_per_m": 7450.0,
+      "damper_rebound_ns_per_m": 11180.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 81300.0,
+      "bump_stop_n_per_m": 2000000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 12710.0,
+    "max_torque_rear_nm": 29910.0,
+    "bias_front": 0.922,
+    "handbrake_rear_nm": 14960.0
+  },
+  "steering": {
+    "ratio": 22.0,
+    "rack_speed_rad_per_s": 0.9,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "longhaul_tractor",
+  "base_price": 48000,
+  "durability_class": 5,
+  "fuel_capacity_l": 568.0
+}

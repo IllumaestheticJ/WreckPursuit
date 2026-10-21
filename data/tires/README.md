@@ -18,6 +18,7 @@ the coefficients, not hand-typed).
 | `all_terrain` | 0.86 | 0.98 | 12.0° | 0.158 | 0.72 | 0.94 | pickups/SUVs: ≈ 0.9 × street, soft (low cornering stiffness), +33% rolling resistance, best on gravel/dirt (0.82–0.84) |
 | `vintage_bias` | 0.81 | 0.93 | 8.3° | 0.132 | 0.60 | 0.93 | 70s bias-ply: ≈ 0.85 × street, ~half street's cornering stiffness, strong fall-off past the peak (85% at 2× peak slip), long relaxation length (lazy) |
 | `drag_radial` | 0.98 | 1.45 | 11.5° | 0.130 | 0.45 | 0.92 | street-legal drag tire: huge straight-line traction, soft sidewall (weak cornering response), terrible in the wet, fast wear |
+| `commercial` | 0.80 | 0.86 | 10.3° | 0.145 | 0.68 | 0.95 | heavy trucks (≈ 6-35 kN per wheel): Fz0 20 kN and load sensitivity 0.08 so a 12 t truck keeps truck-tire grip (car compounds at Fz0 4-4.5 kN hit the 30 % floor there), soft carcass (late peak), long relaxation length, low rolling resistance (0.0065). Added by 09 / H in round 9 |
 
 ## Source reasoning
 

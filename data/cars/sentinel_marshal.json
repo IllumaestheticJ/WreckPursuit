@@ -1,0 +1,168 @@
+{
+  "id": "sentinel_marshal",
+  "display_name": "Sentinel Marshal",
+  "class": "PoliceSuv",
+  "analog_of": "2010s mid-size AWD unibody police utility, 3.5 L twin-turbo V6",
+  "body_size_m": [2.0, 5.05, 1.78],
+  "mass_kg": 2188.9,
+  "front_weight_frac": 0.56,
+  "wheelbase_m": 3.025,
+  "track_front_m": 1.7,
+  "track_rear_m": 1.7,
+  "cg_height_m": 0.66,
+  "inertia_kgm2": [1070.0, 4860.0, 5110.0],
+  "drag_cd_a_m2": 1.159,
+  "lift_front": 0.15,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 270],
+      [1200, 345],
+      [1600, 420],
+      [2000, 480],
+      [2500, 515],
+      [3000, 515],
+      [3500, 515],
+      [4000, 515],
+      [4500, 510],
+      [5000, 505],
+      [5500, 488],
+      [6000, 435],
+      [6300, 395]
+    ],
+    "idle_rpm": 650.0,
+    "redline_rpm": 6000.0,
+    "rev_limit_rpm": 6300.0,
+    "inertia_kgm2": 0.18,
+    "engine_brake_nm": 52.0
+  },
+  "drivetrain": {
+    "layout": {
+      "AwdOnDemand": {
+        "base_front_split": 0.9,
+        "max_rear_split": 0.5,
+        "engage_slip": 0.02
+      }
+    },
+    "gear_ratios": [4.48, 2.87, 1.84, 1.41, 1.0, 0.74],
+    "final_drive": 3.39,
+    "reverse_ratio": 2.88,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 820.0,
+    "shift_time_s": 0.3,
+    "torque_converter": {
+      "stall_rpm": 2600.0,
+      "stall_torque_ratio": 1.9,
+      "coupling_rpm": 3000.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-0.85, 1.512, 0.366],
+      "radius_m": 0.366,
+      "width_m": 0.255,
+      "mass_kg": 32.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.626,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.0087,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0873
+    },
+    {
+      "position_m": [0.85, 1.512, 0.366],
+      "radius_m": 0.366,
+      "width_m": 0.255,
+      "mass_kg": 32.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.626,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.0087,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0873
+    },
+    {
+      "position_m": [-0.85, -1.512, 0.366],
+      "radius_m": 0.366,
+      "width_m": 0.255,
+      "mass_kg": 32.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0122,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.85, -1.512, 0.366],
+      "radius_m": 0.366,
+      "width_m": 0.255,
+      "mass_kg": 32.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0122,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 44900.0,
+      "damper_bump_ns_per_m": 3070.0,
+      "damper_rebound_ns_per_m": 4600.0,
+      "travel_m": 0.19,
+      "preload_m": 0.025,
+      "arb_n_per_m": 18800.0,
+      "bump_stop_n_per_m": 220000.0
+    },
+    {
+      "spring_n_per_m": 44900.0,
+      "damper_bump_ns_per_m": 3070.0,
+      "damper_rebound_ns_per_m": 4600.0,
+      "travel_m": 0.19,
+      "preload_m": 0.025,
+      "arb_n_per_m": 18800.0,
+      "bump_stop_n_per_m": 220000.0
+    },
+    {
+      "spring_n_per_m": 39900.0,
+      "damper_bump_ns_per_m": 2540.0,
+      "damper_rebound_ns_per_m": 3810.0,
+      "travel_m": 0.2,
+      "preload_m": 0.025,
+      "arb_n_per_m": 5300.0,
+      "bump_stop_n_per_m": 220000.0
+    },
+    {
+      "spring_n_per_m": 39900.0,
+      "damper_bump_ns_per_m": 2540.0,
+      "damper_rebound_ns_per_m": 3810.0,
+      "travel_m": 0.2,
+      "preload_m": 0.025,
+      "arb_n_per_m": 5300.0,
+      "bump_stop_n_per_m": 220000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 5230.0,
+    "max_torque_rear_nm": 1560.0,
+    "bias_front": 0.511,
+    "handbrake_rear_nm": 1260.0
+  },
+  "steering": {
+    "ratio": 16.0,
+    "rack_speed_rad_per_s": 1.3,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "sentinel_marshal",
+  "base_price": 50000,
+  "durability_class": 4,
+  "fuel_capacity_l": 70.0
+}

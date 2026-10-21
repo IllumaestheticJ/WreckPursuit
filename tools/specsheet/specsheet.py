@@ -50,6 +50,15 @@ TARGETS = {
     "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
     "drayman_cargo": dict(t0100=(9.5, 12.0), lat=(0.64, 0.74), brake=(44, 52), why="road tests of 2000s full-size V8 cargo vans (empty)"),
     "furrow_24": dict(t0100=(10.0, 12.5), lat=(0.70, 0.80), brake=(42, 50), why="period road tests of 90s compact 2.4 L pickups (manual)"),
+    "sentinel_courser": dict(t0100=(5.2, 6.0), lat=(0.84, 0.92), brake=(36, 41), why="fleet evaluation figures for 2010s 5.0 V8 highway-patrol pursuit coupes"),
+    "sentinel_shade": dict(t0100=(5.3, 6.2), lat=(0.84, 0.92), brake=(36, 41), why="road tests of 2010s full-size 6.2 V8 RWD sport sedans (fleet versions)"),
+    "sentinel_marshal": dict(t0100=(5.6, 6.6), lat=(0.78, 0.86), brake=(38, 43), why="fleet evaluation figures for 2010s AWD TT V6 police utilities"),
+    "sentinel_warden": dict(t0100=(8.5, 11.0), lat=(0.60, 0.70), brake=(43, 50), why="road tests of 2010s extended full-size V8 vans, plus upfit mass"),
+    "sentinel_breacher": dict(t0100=(17.0, 24.0), lat=(0.60, 0.72), brake=(48, 60), why="published figures for armoured 4x4 trucks on medium-duty diesel chassis"),
+    "gantry_box": dict(t0100=(17.0, 24.0), lat=(0.58, 0.70), brake=(48, 60), why="fleet test figures for empty medium-duty diesel box trucks"),
+    "longhaul_tractor": dict(t0100=(18.0, 26.0), lat=(0.55, 0.68), brake=(52, 65), why="fleet test figures for bobtail linehaul tractors (stopping: better than the regulatory bobtail limit)"),
+    "parcel_hi": dict(t0100=(14.0, 17.0), lat=(0.62, 0.72), brake=(41, 47), why="road tests of 2010s high-roof 2.1 L diesel delivery vans (empty)"),
+    "quarry_tipper": dict(t0100=(24.0, 32.0), lat=(0.55, 0.66), brake=(55, 68), why="fleet test figures for unladen tri-axle dump trucks"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade
@@ -291,6 +300,7 @@ SIM_NOTES = {
 BARRIER_NOTES = {
     ("Sentinel Cruiser", "offset 40% 56 km/h"): "near miss: struck-side front suspension intrusion 0.084 m vs its 0.09 m failure threshold (health 0.51; wheel mount 0.078 m) — the `cruiser` profile's reinforced rails and double bumper beam plus the push bar spread the offset load. Total loss anyway (engine, radiator, battery, rack failed). Appeared with B's ab6970d generator (rail bracing); not patched.",
     ("Sentinel Wolfhound", "offset 40% 56 km/h"): "same near miss as the Cruiser (same `cruiser` profile + push bar); total loss anyway.",
+    ("Parcel Hi", "side (T-bone) 40 km/h"): "geometry: the 1.85 m striker is centred by body length (y = body centre + 6.5 % L, as on the sedan golden), and on this 3.67 m-wheelbase high-roof van it lands on the sliding-door / B-pillar area 0.7 m behind the front wheel arch, so the front suspension is never in the load path (cabin 0.22 m, health 0.75 — the van is hurt, just not at the wheel). The other long vans pass only through the body-on-frame exemption; a wheelbase-relative striker position in `wp_damage::barrier` would test all of them fairly.",
 }
 
 

@@ -1,0 +1,162 @@
+{
+  "id": "sentinel_warden",
+  "display_name": "Sentinel Warden",
+  "class": "PoliceSuv",
+  "analog_of": "2010s American full-size extended RWD van in prisoner-transport fit-out, 6.0 L OHV V8, body-on-frame",
+  "body_size_m": [2.01, 6.2, 2.1],
+  "mass_kg": 2981.4,
+  "front_weight_frac": 0.52,
+  "wheelbase_m": 3.94,
+  "track_front_m": 1.73,
+  "track_rear_m": 1.72,
+  "cg_height_m": 0.84,
+  "inertia_kgm2": [1780.0, 10110.0, 10240.0],
+  "drag_cd_a_m2": 1.468,
+  "lift_front": 0.15,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 380],
+      [1200, 420],
+      [1600, 450],
+      [2000, 470],
+      [2500, 485],
+      [3000, 495],
+      [3500, 502],
+      [4000, 505],
+      [4400, 503],
+      [4800, 490],
+      [5200, 468],
+      [5600, 435],
+      [5900, 400]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 5600.0,
+    "rev_limit_rpm": 5900.0,
+    "inertia_kgm2": 0.26,
+    "engine_brake_nm": 61.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [4.03, 2.36, 1.53, 1.15, 0.85, 0.67],
+    "final_drive": 3.42,
+    "reverse_ratio": 3.06,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 810.0,
+    "shift_time_s": 0.33,
+    "torque_converter": {
+      "stall_rpm": 2200.0,
+      "stall_torque_ratio": 2.0,
+      "coupling_rpm": 2600.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-0.865, 1.97, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 42.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.622,
+      "ackermann_frac": 0.7,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [0.865, 1.97, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 42.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.622,
+      "ackermann_frac": 0.7,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.86, -1.97, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 65.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.86, -1.97, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 65.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 48900.0,
+      "damper_bump_ns_per_m": 3350.0,
+      "damper_rebound_ns_per_m": 5020.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 33600.0,
+      "bump_stop_n_per_m": 350000.0
+    },
+    {
+      "spring_n_per_m": 48900.0,
+      "damper_bump_ns_per_m": 3350.0,
+      "damper_rebound_ns_per_m": 5020.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 33600.0,
+      "bump_stop_n_per_m": 350000.0
+    },
+    {
+      "spring_n_per_m": 61700.0,
+      "damper_bump_ns_per_m": 3550.0,
+      "damper_rebound_ns_per_m": 5320.0,
+      "travel_m": 0.22,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 350000.0
+    },
+    {
+      "spring_n_per_m": 61700.0,
+      "damper_bump_ns_per_m": 3550.0,
+      "damper_rebound_ns_per_m": 5320.0,
+      "travel_m": 0.22,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 350000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 6020.0,
+    "max_torque_rear_nm": 2700.0,
+    "bias_front": 0.552,
+    "handbrake_rear_nm": 1620.0
+  },
+  "steering": {
+    "ratio": 18.0,
+    "rack_speed_rad_per_s": 1.1,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "sentinel_warden",
+  "base_price": 42000,
+  "durability_class": 5,
+  "fuel_capacity_l": 117.0
+}

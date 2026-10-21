@@ -38,6 +38,9 @@ fn roster() -> Vec<LoadedCar> {
     cars
 }
 
+/// Above this mass a vehicle is a heavy commercial one (no race-purse feel target).
+const HEAVY_COMMERCIAL_KG: f32 = 4500.0;
+
 struct Row {
     id: String,
     class: VehicleClass,
@@ -162,6 +165,12 @@ fn roster_table_and_feel_targets() {
             );
             // A medium front-end hit costs about one race win in Simulation. Arcade halves the
             // bill but also pays 1/1.2 of the Simulation purse, so its ratio is 0.6x.
+            // Heavy commercial vehicles (box truck, tractor, tipper, armoured truck) are not
+            // race cars: their repair bills are meant to dwarf a purse. They stay under Truck
+            // until the requested HeavyTruck class exists (docs/integration/cars.md, round 9).
+            if car.def.mass_kg > HEAVY_COMMERCIAL_KG {
+                continue;
+            }
             let ratio = r.front_hit / r.purse as f32;
             let (lo, hi) = match mode {
                 DamageMode::Simulation => (0.5, 1.6),

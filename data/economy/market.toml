@@ -77,3 +77,4 @@ all_terrain = 0.9
 police_pursuit = 1.08
 vintage_bias = 0.84
 wet_biased = 1.0
+commercial = 0.83

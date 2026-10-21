@@ -1,0 +1,170 @@
+{
+  "id": "sentinel_courser",
+  "display_name": "Sentinel Courser",
+  "class": "PoliceInterceptor",
+  "analog_of": "2010s American RWD muscle coupe on a highway-patrol pursuit package, 5.0 L DOHC V8",
+  "body_size_m": [1.92, 4.8, 1.4],
+  "mass_kg": 1852.3,
+  "front_weight_frac": 0.54,
+  "wheelbase_m": 2.72,
+  "track_front_m": 1.58,
+  "track_rear_m": 1.65,
+  "cg_height_m": 0.51,
+  "inertia_kgm2": [700.0, 3470.0, 3800.0],
+  "drag_cd_a_m2": 0.84,
+  "lift_front": 0.08,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 370],
+      [1500, 415],
+      [2000, 450],
+      [2500, 480],
+      [3000, 505],
+      [3500, 525],
+      [4000, 545],
+      [4600, 560],
+      [5000, 555],
+      [5500, 545],
+      [6000, 528],
+      [6500, 505],
+      [7000, 470],
+      [7250, 450],
+      [7500, 420]
+    ],
+    "idle_rpm": 700.0,
+    "redline_rpm": 7250.0,
+    "rev_limit_rpm": 7500.0,
+    "inertia_kgm2": 0.22,
+    "engine_brake_nm": 56.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [4.17, 2.34, 1.52, 1.14, 0.87, 0.69],
+    "final_drive": 3.55,
+    "reverse_ratio": 3.4,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 40.0,
+        "ramp_power": 0.4,
+        "ramp_coast": 0.3
+      }
+    },
+    "clutch_max_nm": 900.0,
+    "shift_time_s": 0.28,
+    "torque_converter": {
+      "stall_rpm": 2500.0,
+      "stall_torque_ratio": 1.9,
+      "coupling_rpm": 2900.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-0.79, 1.36, 0.333],
+      "radius_m": 0.333,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.662,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [0.79, 1.36, 0.333],
+      "radius_m": 0.333,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "police_pursuit",
+      "steerable": true,
+      "max_steer_rad": 0.662,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [-0.825, -1.36, 0.341],
+      "radius_m": 0.341,
+      "width_m": 0.275,
+      "mass_kg": 28.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.825, -1.36, 0.341],
+      "radius_m": 0.341,
+      "width_m": 0.275,
+      "mass_kg": 28.0,
+      "tire_id": "police_pursuit",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 47900.0,
+      "damper_bump_ns_per_m": 2960.0,
+      "damper_rebound_ns_per_m": 4440.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 18300.0,
+      "bump_stop_n_per_m": 180000.0
+    },
+    {
+      "spring_n_per_m": 47900.0,
+      "damper_bump_ns_per_m": 2960.0,
+      "damper_rebound_ns_per_m": 4440.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 18300.0,
+      "bump_stop_n_per_m": 180000.0
+    },
+    {
+      "spring_n_per_m": 45400.0,
+      "damper_bump_ns_per_m": 2640.0,
+      "damper_rebound_ns_per_m": 3960.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 180000.0
+    },
+    {
+      "spring_n_per_m": 45400.0,
+      "damper_bump_ns_per_m": 2640.0,
+      "damper_rebound_ns_per_m": 3960.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 180000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 3760.0,
+    "max_torque_rear_nm": 1230.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1430.0
+  },
+  "steering": {
+    "ratio": 15.7,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "sentinel_courser",
+  "base_price": 55000,
+  "durability_class": 3,
+  "fuel_capacity_l": 61.0
+}

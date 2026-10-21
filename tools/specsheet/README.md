@@ -56,11 +56,17 @@ Never hand-edit the generated files; the next build overwrites them.
   `wp_vehicle`'s ABS cannot modulate an oversized caliper — remove once it can.
 - Steering lock from kerb-to-kerb turning circle (mean road-wheel angle `atan(L/R_rear)`).
 - Engine braking = 10-12 % of peak torque; clutch capacity 1.35-1.6 × peak torque.
+- Heavy vehicles (round 9): diesel fuel density (`fuel_kg_per_l` 0.835); dual rear tires as
+  one physics wheel per side (width = 2 × section + 40 mm, aquaplaning only); tandem axles
+  lumped at the tandem centre; air S-cam drum brakes `T = p·A_chamber·L_slack·G_cam` per wheel
+  end (× ends lumped into the wheel) at 6.9 bar; top speed set by the rev limiter in top gear
+  (stands in for the fleet road-speed governor); engine braking 15-20 % (exhaust/compression
+  brake).
 
 ## Tire compounds
 
 Each car names an *intended* compound (`street`, `sport`, `police_pursuit`, `all_terrain`,
-`vintage_bias`; the last two do not exist yet). `build_roster.py` uses it when `data/tires/<compound>.json` exists, else
+`vintage_bias`, `commercial` for the heavy trucks). `build_roster.py` uses it when `data/tires/<compound>.json` exists, else
 `street`. The estimator then scales street peak friction by `estimate.COMPOUND_SCALE`
 (sport 1.10, semi-slick 1.22, police pursuit 1.04, all-terrain 0.90, vintage bias-ply 0.85 —
 rule-of-thumb ratios of peak lateral g between tire categories on the same car).
@@ -91,5 +97,6 @@ failure.
 
 ## Perf
 
-Building all 14 cars (including 14 gen-lattice runs) takes ≈ 0.8 s; `collect_results.py`
-≈ 15 s; `specsheet.py` < 1 s. Roster lattices: 244-304 nodes and 1539-1988 beams per car.
+Building all 26 roster cars (including 26 gen-lattice runs) takes ≈ 1.4 s; `collect_results.py`
+≈ 40 s; `specsheet.py` < 1 s. Roster lattices: 244-351 nodes and 1536-2243 beams per car (the
+round-9 heavy vehicles are the largest: longer bodies give gen-lattice more stations).

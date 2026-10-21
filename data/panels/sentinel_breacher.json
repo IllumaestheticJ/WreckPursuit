@@ -1,0 +1,377 @@
+{
+  "id": "sentinel_breacher",
+  "lattice_id": "sentinel_breacher",
+  "panels": [
+    {
+      "name": "bumper_front",
+      "region": "FrontBumper",
+      "kind": "Bumper",
+      "group": 0,
+      "hinge_nodes": [
+        322,
+        326
+      ],
+      "latch_nodes": [
+        318,
+        319,
+        320,
+        321,
+        323,
+        324,
+        325,
+        327,
+        328,
+        329,
+        330,
+        331
+      ],
+      "open_dir": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "max_angle_rad": 0.5,
+      "hang_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.4106033,
+      "mass_kg": 50.26,
+      "lever_m": 1.1270001,
+      "gyration_m": 1.3013476,
+      "area_m2": 2.28781,
+      "damping_per_s": 1.0,
+      "restitution": 0.2,
+      "unlatch_impulse_ns": 58834.89,
+      "latch_intrusion_m": 0.15,
+      "hinge_break_impulse_ns": 1005.19995,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "bumper_rear",
+      "region": "RearBumper",
+      "kind": "Bumper",
+      "group": 1,
+      "hinge_nodes": [
+        4,
+        8
+      ],
+      "latch_nodes": [
+        0,
+        1,
+        2,
+        3,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "open_dir": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "max_angle_rad": 0.5,
+      "hang_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.4106033,
+      "mass_kg": 50.26,
+      "lever_m": 1.1270001,
+      "gyration_m": 1.3013476,
+      "area_m2": 2.28781,
+      "damping_per_s": 1.0,
+      "restitution": 0.2,
+      "unlatch_impulse_ns": 19611.629,
+      "latch_intrusion_m": 0.15,
+      "hinge_break_impulse_ns": 1005.19995,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "hood",
+      "region": "Hood",
+      "kind": "Hood",
+      "group": 2,
+      "hinge_nodes": [
+        248,
+        250
+      ],
+      "latch_nodes": [
+        287,
+        288,
+        289,
+        300,
+        301,
+        302,
+        314,
+        315,
+        316
+      ],
+      "open_dir": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "max_angle_rad": 1.1,
+      "hang_axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.6,
+      "mass_kg": 64.34,
+      "lever_m": 0.775,
+      "gyration_m": 0.89489293,
+      "area_m2": 2.2785,
+      "damping_per_s": 0.6,
+      "restitution": 0.25,
+      "unlatch_impulse_ns": 13263.9,
+      "latch_intrusion_m": 0.1,
+      "hinge_break_impulse_ns": 1286.7999,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "door_fl",
+      "region": "LeftDoorF",
+      "kind": "Door",
+      "group": 4,
+      "hinge_nodes": [
+        216,
+        220
+      ],
+      "latch_nodes": [
+        171,
+        175,
+        186,
+        190
+      ],
+      "open_dir": [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      "max_angle_rad": 1.2,
+      "hang_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.5,
+      "mass_kg": 55.29026,
+      "lever_m": 0.74399996,
+      "gyration_m": 0.8590972,
+      "area_m2": 1.1375761,
+      "damping_per_s": 0.6,
+      "restitution": 0.3,
+      "unlatch_impulse_ns": 12632.285,
+      "latch_intrusion_m": 0.06,
+      "hinge_break_impulse_ns": 1105.8052,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "door_fr",
+      "region": "RightDoorF",
+      "kind": "Door",
+      "group": 5,
+      "hinge_nodes": [
+        219,
+        223
+      ],
+      "latch_nodes": [
+        174,
+        178,
+        189,
+        193
+      ],
+      "open_dir": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "max_angle_rad": 1.2,
+      "hang_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.5,
+      "mass_kg": 55.29026,
+      "lever_m": 0.74399996,
+      "gyration_m": 0.8590972,
+      "area_m2": 1.1375761,
+      "damping_per_s": 0.6,
+      "restitution": 0.3,
+      "unlatch_impulse_ns": 12632.285,
+      "latch_intrusion_m": 0.06,
+      "hinge_break_impulse_ns": 1105.8052,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "door_rl",
+      "region": "LeftDoorR",
+      "kind": "Door",
+      "group": 6,
+      "hinge_nodes": [
+        141,
+        145
+      ],
+      "latch_nodes": [
+        111,
+        115
+      ],
+      "open_dir": [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      "max_angle_rad": 1.2,
+      "hang_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.5,
+      "mass_kg": 55.29026,
+      "lever_m": 0.65099996,
+      "gyration_m": 0.75171,
+      "area_m2": 0.99537915,
+      "damping_per_s": 0.6,
+      "restitution": 0.3,
+      "unlatch_impulse_ns": 12632.285,
+      "latch_intrusion_m": 0.06,
+      "hinge_break_impulse_ns": 1105.8052,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "door_rr",
+      "region": "RightDoorR",
+      "kind": "Door",
+      "group": 7,
+      "hinge_nodes": [
+        144,
+        148
+      ],
+      "latch_nodes": [
+        114,
+        118
+      ],
+      "open_dir": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "max_angle_rad": 1.2,
+      "hang_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.5,
+      "mass_kg": 55.29026,
+      "lever_m": 0.65099996,
+      "gyration_m": 0.75171,
+      "area_m2": 0.99537915,
+      "damping_per_s": 0.6,
+      "restitution": 0.3,
+      "unlatch_impulse_ns": 12632.285,
+      "latch_intrusion_m": 0.06,
+      "hinge_break_impulse_ns": 1105.8052,
+      "break_impulse_ns": null
+    },
+    {
+      "name": "fender_fl",
+      "region": "FrontLeftFender",
+      "kind": "Fender",
+      "group": null,
+      "hinge_nodes": [
+        247,
+        243
+      ],
+      "latch_nodes": [
+        256,
+        260,
+        269,
+        273,
+        282,
+        286,
+        295,
+        299,
+        308,
+        313
+      ],
+      "open_dir": [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      "max_angle_rad": 0.5,
+      "hang_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.6,
+      "mass_kg": 19.351591,
+      "lever_m": 0.69666666,
+      "gyration_m": 0.8044414,
+      "area_m2": 1.0652035,
+      "damping_per_s": 1.0,
+      "restitution": 0.2,
+      "unlatch_impulse_ns": 15158.743,
+      "latch_intrusion_m": 0.08,
+      "hinge_break_impulse_ns": 387.03183,
+      "break_impulse_ns": 30317.486
+    },
+    {
+      "name": "fender_fr",
+      "region": "FrontRightFender",
+      "kind": "Fender",
+      "group": null,
+      "hinge_nodes": [
+        251,
+        246
+      ],
+      "latch_nodes": [
+        259,
+        264,
+        272,
+        277,
+        285,
+        290,
+        298,
+        303,
+        312,
+        317
+      ],
+      "open_dir": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "max_angle_rad": 0.5,
+      "hang_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hang_limit_rad": 0.6,
+      "mass_kg": 19.351591,
+      "lever_m": 0.69666666,
+      "gyration_m": 0.8044414,
+      "area_m2": 1.0652035,
+      "damping_per_s": 1.0,
+      "restitution": 0.2,
+      "unlatch_impulse_ns": 15158.743,
+      "latch_intrusion_m": 0.08,
+      "hinge_break_impulse_ns": 387.03183,
+      "break_impulse_ns": 30317.486
+    }
+  ]
+}

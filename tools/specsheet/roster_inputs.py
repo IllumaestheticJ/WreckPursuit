@@ -18,6 +18,13 @@ track_f, track_r, body (w, l, h), fuel_l (tank, L), clearance, front_overhang (f
 scale on the box formula), cd, area_k (frontal area = area_k·w·h), extra_cda (lightbar etc.),
 lift (front, rear Cl·A), engine{...}, trans{...}, tires{...}, susp{...}, align{...},
 brakes{...}, steer{...}, price, durability, note, breaks, sources, lattice{...}.
+
+Heavy-vehicle keys (round 9): `fuel_kg_per_l` (default petrol 0.745; diesel 0.835);
+`tires.dual_rear` (one physics wheel per side carries the dual pair: width = 2 × section + gap);
+tire sizes may use half-inch commercial rims (`295/75R22.5`); brake kind `air_drum`
+(`d_mm`, `chamber_in2`, `slack_mm`, `cam_gain`, `ends` = wheel ends lumped into one physics
+wheel, e.g. 2 for a tandem) with `bar` = air chamber pressure. Tandem axles are modelled as one
+axle at the tandem centre (`wheelbase` = front axle → tandem centre); the renderer draws both.
 """
 
 DRIVER_KG = 75.0  # one driver
@@ -1120,6 +1127,621 @@ CARS = [
         sources=["manufacturer spec-class data for 90s compact pickups",
                  "road-test figures for the class (0-100, braking, skidpad)",
                  "engineering tables (truck tire radius, leaf-spring ride frequency, disc/drum brake hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True),
+    ),
+    # ------------------------------------------------------------------ 18 (police, round 9)
+    dict(
+        id="sentinel_courser",
+        display_name="Sentinel Courser",
+        cls="PoliceInterceptor",
+        analog_of="2010s American RWD muscle coupe on a highway-patrol pursuit package, 5.0 L DOHC V8",
+        era="2010s",
+        profile="coupe",
+        curb_kg=1800.0,
+        fuel_l=61,
+        front_frac=0.54,
+        wheelbase=2.72,
+        track_f=1.58,
+        track_r=1.65,
+        body=(1.92, 4.80, 1.40),
+        clearance=0.13,
+        front_overhang=0.95,
+        cg=0.51,
+        cg_why="muscle coupe plus radio, gun lock and trunk equipment; mid band, a touch above the civilian coupe",
+        inertia_k=(0.80, 0.90, 0.92),
+        cd=0.35,
+        area_k=0.84,
+        extra_cda=0.05,
+        lift=(0.08, 0.10),
+        engine=dict(
+            desc="5.0 L DOHC 32-valve V8, naturally aspirated, later high-compression generation, pursuit calibration",
+            curve=[(1000, 370), (1500, 415), (2000, 450), (2500, 480), (3000, 505), (3500, 525),
+                   (4000, 545), (4600, 560), (5000, 555), (5500, 545), (6000, 528), (6500, 505),
+                   (7000, 470), (7250, 450), (7500, 420)],
+            idle=700, redline=7250, limit=7500, inertia=0.22, brake_frac=0.10,
+            why=("Class-typical late-2010s NA 5.0 V8 (~69 kW/L, ~344 kW at 7000 rpm, ~560 N·m at "
+                 "4600) per spec-class data and owner dynos — the later generation of the "
+                 "Rampart's engine family, which is what highway-patrol pursuit coupes carried."),
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter (pursuit calibration: firm, late shifts), clutch-type rear LSD",
+            layout="Rwd",
+            gears=[4.17, 2.34, 1.52, 1.14, 0.87, 0.69], final=3.55, reverse=3.40, shift=0.28,
+            torque_converter=dict(stall_rpm=2500, ratio=1.9, coupling_rpm=2900),
+            diff_f="Open", diff_r=dict(preload=40.0, power=0.40, coast=0.30), clutch_factor=1.6,
+        ),
+        tires=dict(front="255/40R19", rear="275/40R19", compound="police_pursuit", unsprung=(26.0, 28.0)),
+        susp=dict(hz=(1.60, 1.70), zeta=0.31, travel=(0.15, 0.16), roll_grad_deg_g=2.6,
+                  roll_front_share=0.64, bump_stop=180000.0, preload=0.02),
+        align=dict(camber_deg=(-0.8, -1.0), toe_deg=(0.0, 0.2), caster_deg=7.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=380, pistons_mm=[46, 40, 36], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=330, pistons_mm=[45], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=15.7, turn_circle_m=10.4, ackermann=0.6, rack_speed=1.4),
+        price=55000,
+        durability=3,
+        note=("The highway-patrol hunter: the fastest police unit on open road and the only one "
+              "that can sit on a sports car's bumper flat out. No push bar, and the "
+              "pursuit 5.0 has the power to drag a full light bar to the top of the roster. In town it is the same handful as the "
+              "civilian coupe — traction-limited off the line, heavy nose into corners — so it "
+              "is a poor boxing-in car; it wins on the motorway, not in the grid."),
+        breaks=("A civilian muscle-coupe shell with heavy-duty cooling and suspension parts, but "
+                "no push bar and no reinforced bumper: the long nose and big cooling pack fold "
+                "in any committed ram, and the wide doors dent easily. Built to chase, not to "
+                "shove — it loses to the Cruiser and the SUVs in every contact."),
+        sources=["fleet spec-class data for 2010s highway-patrol pursuit coupes",
+                 "owner dyno averages for later-generation NA 5.0 DOHC V8s",
+                 "engineering tables (tire radius, ride frequency, multi-piston caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="aluminum", pushbar=False,
+                     police_package=dict(
+                         bumper_impulse_scale=1.0,
+                         hd_components=dict(Radiator=1.3, SuspensionFL=1.3, SuspensionFR=1.3,
+                                            WheelFL=1.2, WheelFR=1.2, Battery=1.3))),
+    ),
+    # ------------------------------------------------------------------ 19
+    dict(
+        id="sentinel_shade",
+        display_name="Sentinel Shade",
+        cls="PoliceInterceptor",
+        analog_of="2010s full-size RWD sport sedan in unmarked police trim, 6.2 L pushrod V8",
+        era="2010s",
+        profile="sedan",
+        curb_kg=1850.0,
+        fuel_l=72,
+        front_frac=0.53,
+        wheelbase=3.01,
+        track_f=1.60,
+        track_r=1.61,
+        body=(1.90, 5.00, 1.47),
+        clearance=0.14,
+        front_overhang=1.0,
+        cg=0.52,
+        cg_why="full-size sedan with hidden lights and radios but no roof bar; upper sedan band",
+        inertia_k=(0.80, 0.92, 0.94),
+        cd=0.33,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.08, 0.10),
+        engine=dict(
+            desc="6.2 L OHV 16-valve V8, naturally aspirated, high-output calibration",
+            curve=[(800, 420), (1200, 470), (1600, 505), (2000, 530), (2500, 550), (3000, 560),
+                   (3500, 570), (4000, 575), (4400, 575), (4800, 565), (5200, 550), (5600, 525),
+                   (6000, 490), (6300, 455)],
+            idle=650, redline=6000, limit=6300, inertia=0.23, brake_frac=0.10,
+            why="Class-typical 2010s high-output 6.2 L pushrod V8 (~50 kW/L, ~308 kW at 5600-6000 rpm, ~575 N·m at 4000-4400) per spec-class data and owner dynos.",
+        ),
+        trans=dict(
+            desc="5-speed automatic with torque converter, short pursuit final drive (runs into the limiter in 5th at ≈ 260 km/h), clutch-type rear LSD",
+            layout="Rwd",
+            gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.70, reverse=3.16, shift=0.28,
+            torque_converter=dict(stall_rpm=2400, ratio=1.9, coupling_rpm=2800),
+            diff_f="Open", diff_r=dict(preload=40.0, power=0.35, coast=0.20), clutch_factor=1.6,
+        ),
+        tires=dict(front="245/45R19", rear="255/45R19", compound="police_pursuit", unsprung=(26.0, 28.0)),
+        susp=dict(hz=(1.55, 1.65), zeta=0.32, travel=(0.16, 0.17), roll_grad_deg_g=2.9,
+                  roll_front_share=0.62, bump_stop=180000.0, preload=0.02),
+        align=dict(camber_deg=(-1.0, -0.8), toe_deg=(0.0, 0.15), caster_deg=6.5),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=355, pistons_mm=[44, 42], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=330, pistons_mm=[45], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.8,
+        ),
+        steer=dict(ratio=15.5, turn_circle_m=11.8, ackermann=0.6, rack_speed=1.4),
+        price=52000,
+        durability=4,
+        note=("The one you do not see coming: a plain dark sedan with a big V8, no light bar and "
+              "no push bar. Lighter and cleaner through the air than the Cruiser, so it gets to "
+              "pursuit speed sooner and keeps pulling past it; rear-drive with a mild LSD, it "
+              "rewards a smooth driver and punishes a ham-fisted one. Lights come on only once "
+              "it is already on your bumper."),
+        breaks=("Modern full-size UHSS unibody with heavy-duty cooling and suspension, but no "
+                "push bar or reinforced bumper beam: a shove bends the bumper cover and "
+                "radiator support like any big sedan. Long rear overhang crumples in rear-enders; "
+                "four doors mean four weak spots in a T-bone."),
+        sources=["spec-class data for 2010s full-size RWD V8 sport sedans and their fleet versions",
+                 "owner dyno averages for high-output 6.2 L pushrod V8s",
+                 "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False,
+                     police_package=dict(
+                         bumper_impulse_scale=1.2,
+                         hd_components=dict(Radiator=1.3, SteeringRack=1.3, Battery=1.3))),
+    ),
+    # ------------------------------------------------------------------ 20
+    dict(
+        id="sentinel_marshal",
+        display_name="Sentinel Marshal",
+        cls="PoliceSuv",
+        analog_of="2010s mid-size AWD unibody police utility, 3.5 L twin-turbo V6",
+        era="2010s",
+        profile="suv",
+        curb_kg=2140.0,
+        fuel_l=70,
+        front_frac=0.56,
+        wheelbase=3.025,
+        track_f=1.70,
+        track_r=1.70,
+        body=(2.00, 5.05, 1.78),
+        clearance=0.20,
+        front_overhang=0.95,
+        cg=0.66,
+        cg_why="unibody mid-size utility with roof light bar and cargo-bay equipment; lower half of the truck/SUV band (no ladder frame)",
+        inertia_k=(0.82, 0.93, 0.95),
+        cd=0.38,
+        area_k=0.82,
+        extra_cda=0.05,
+        lift=(0.15, 0.12),
+        engine=dict(
+            desc="3.5 L DOHC V6, twin turbo, direct injection, police calibration",
+            curve=[(800, 270), (1200, 345), (1600, 420), (2000, 480), (2500, 515), (3000, 515),
+                   (3500, 515), (4000, 515), (4500, 510), (5000, 505), (5500, 488), (6000, 435),
+                   (6300, 395)],
+            idle=650, redline=6000, limit=6300, inertia=0.18, brake_frac=0.10,
+            why="Class-typical late-2010s 3.5 TT V6 (~80 kW/L, ~281 kW at 5500 rpm, ~515 N·m from 2500) per fleet spec-class data — the Wolfhound's engine family in its later utility tune.",
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter, on-demand AWD (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
+            layout=("AwdOnDemand", 0.90, 0.50, 0.02),
+            gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.39, reverse=2.88, shift=0.30,
+            torque_converter=dict(stall_rpm=2600, ratio=1.9, coupling_rpm=3000),
+            diff_f="Open", diff_r="Open", clutch_factor=1.6,
+        ),
+        tires=dict(front="255/60R18", rear="255/60R18", compound="police_pursuit", unsprung=(32.0, 32.0)),
+        susp=dict(hz=(1.40, 1.50), zeta=0.30, travel=(0.19, 0.20), roll_grad_deg_g=3.6,
+                  roll_front_share=0.62, bump_stop=220000.0, preload=0.025),
+        align=dict(camber_deg=(-0.5, -0.7), toe_deg=(0.0, 0.15), caster_deg=5.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=363, pistons_mm=[54, 54], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=345, pistons_mm=[44], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.7,
+        ),
+        steer=dict(ratio=16.0, turn_circle_m=12.0, ackermann=0.6, rack_speed=1.3),
+        price=50000,
+        durability=4,
+        note=("The modern patrol utility: AWD launches and a twin-turbo punch make it the "
+              "quickest of the tall police units, and the unibody keeps it far more agile than "
+              "the Bastion. Push bar up front for shoving; it rolls less than the old SUV but "
+              "still leans hard and runs out of grip before the sedans do."),
+        breaks=("Modern UHSS unibody with the police push bar bolted through to the front rails "
+                "and a doubled bumper beam: shunts bend the bar first. No ladder frame, so a hit "
+                "hard enough to get past the bar crushes the rails like a car's. The cargo bay "
+                "behind the rear seat is not passenger cell; the high CG trips it in hard side "
+                "hits at the wheels."),
+        sources=["fleet spec-class data for 2010s mid-size AWD police utilities",
+                 "owner dyno averages for 3.5 L twin-turbo V6s",
+                 "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=True,
+                     reinforce_bumper_beam=True,
+                     police_package=dict(
+                         pushbar_kg=40.0, pushbar_impulse_ns=30000.0, pushbar_section_scale=1.5,
+                         bumper_impulse_scale=2.0,
+                         hd_components=dict(Radiator=1.5, SteeringRack=1.5, SuspensionFL=1.5,
+                                            SuspensionFR=1.5, WheelFL=1.4, WheelFR=1.4,
+                                            BrakeFL=1.3, BrakeFR=1.3, Engine=1.2, Battery=1.3))),
+    ),
+    # ------------------------------------------------------------------ 21
+    dict(
+        id="sentinel_warden",
+        display_name="Sentinel Warden",
+        cls="PoliceSuv",
+        analog_of="2010s American full-size extended RWD van in prisoner-transport fit-out, 6.0 L OHV V8, body-on-frame",
+        era="2010s",
+        profile="van",
+        curb_kg=2950.0,
+        fuel_l=117,
+        front_frac=0.52,
+        wheelbase=3.94,
+        track_f=1.73,
+        track_r=1.72,
+        body=(2.01, 6.20, 2.10),
+        clearance=0.20,
+        front_overhang=0.90,
+        cg=0.84,
+        cg_why="extended full-size van with a steel cell partition and benches in the back; above the truck/SUV band (tall box, heavy fit-out)",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.40,
+        area_k=0.84,
+        extra_cda=0.05,
+        lift=(0.15, 0.12),
+        engine=dict(
+            desc="6.0 L OHV 16-valve V8, naturally aspirated, heavy-duty van calibration",
+            curve=[(800, 380), (1200, 420), (1600, 450), (2000, 470), (2500, 485), (3000, 495),
+                   (3500, 502), (4000, 505), (4400, 503), (4800, 490), (5200, 468), (5600, 435),
+                   (5900, 400)],
+            idle=600, redline=5600, limit=5900, inertia=0.26, brake_frac=0.12,
+            why="Class-typical 2010s 6.0 L van V8 (~43 kW/L, ~255 kW at 5200 rpm, ~505 N·m at 4000) per manufacturer spec-class data.",
+        ),
+        trans=dict(
+            desc="6-speed automatic with lock-up torque converter, open rear differential",
+            layout="Rwd",
+            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.42, reverse=3.06, shift=0.33,
+            torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
+            diff_f="Open", diff_r="Open", clutch_factor=1.6,
+        ),
+        tires=dict(front="245/75R16", rear="245/75R16", compound="street", unsprung=(42.0, 65.0)),
+        susp=dict(hz=(1.30, 1.55), zeta=0.28, travel=(0.20, 0.22), roll_grad_deg_g=5.0,
+                  roll_front_share=0.70, bump_stop=350000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=345, pistons_mm=[57, 57], pad_mu=0.40),
+            rear=dict(kind="disc", d_mm=345, pistons_mm=[54], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.6,
+        ),
+        steer=dict(ratio=18.0, turn_circle_m=15.2, ackermann=0.7, rack_speed=1.1),
+        price=42000,
+        durability=5,
+        note=("The paddy wagon. Three tonnes of long van with a steel cell in the back: slow to "
+              "speed, slow to stop and it wallows through junctions, but nothing small moves it. "
+              "It does not chase; it turns up where the chase ends, blocks the lane and waits."),
+        breaks=("Body-on-frame with steel bumpers: frontal and rear hits crumple the short nose "
+                "and the doors while the frame stays straight. The prisoner cell behind the "
+                "partition is body structure, not passenger cell, so rear and side hits dent "
+                "the box deeply without ending the van. The tall flat side is an easy target and "
+                "the high CG tips it in hard swerves."),
+        sources=["manufacturer spec-class data for 2010s extended full-size vans",
+                 "upfitter weight data for prisoner-transport inserts (class-typical)",
+                 "engineering tables (truck tire radius, leaf/coil ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True,
+                     cargo_box=True),
+    ),
+    # ------------------------------------------------------------------ 22
+    dict(
+        id="sentinel_breacher",
+        display_name="Sentinel Breacher",
+        cls="PoliceSuv",
+        analog_of="2010s armoured tactical truck on a medium-duty 4x4 cab-chassis, 6.7 L turbo-diesel V8, body-on-frame",
+        era="2010s",
+        profile="van",
+        curb_kg=6790.0,
+        fuel_l=151,
+        fuel_kg_per_l=0.835,
+        front_frac=0.48,
+        wheelbase=3.85,
+        track_f=1.90,
+        track_r=1.85,
+        body=(2.45, 6.20, 2.90),
+        clearance=0.35,
+        front_overhang=1.00,
+        cg=1.10,
+        cg_why="armoured steel box on a medium-duty frame: the armour plate sits high, so the CG is well above any SUV's (class data for armoured 4x4s ≈ 1.0-1.2 m)",
+        inertia_k=(0.90, 0.95, 0.97),
+        cd=0.75,
+        area_k=0.90,
+        extra_cda=0.05,
+        lift=(0.25, 0.20),
+        engine=dict(
+            desc="6.7 L OHV turbo-diesel V8, intercooled, common-rail, medium-duty rating",
+            curve=[(700, 600), (1000, 800), (1200, 920), (1400, 990), (1600, 1015), (1800, 1015),
+                   (2000, 1000), (2200, 960), (2400, 910), (2600, 860), (2800, 800), (3000, 720),
+                   (3200, 600)],
+            idle=650, redline=3000, limit=3200, inertia=0.90, brake_frac=0.15,
+            why="Class-typical 2010s 6.7 L medium-duty turbo-diesel V8 (~35 kW/L, ~235 kW at 2600-2800 rpm, ~1015 N·m at 1600-1800) per manufacturer spec-class data; engine braking includes the exhaust brake.",
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter, part-time 4WD driven locked (fixed 45/55 split), clutch-type rear LSD; top speed set by the limiter in 6th (fleet governor)",
+            layout=("Awd", 0.45),
+            gears=[3.97, 2.32, 1.52, 1.15, 0.86, 0.67], final=4.88, reverse=3.13, shift=0.40,
+            torque_converter=dict(stall_rpm=1900, ratio=2.0, coupling_rpm=2300),
+            diff_f="Open", diff_r=dict(preload=150.0, power=0.60, coast=0.20), clutch_factor=1.6,
+        ),
+        tires=dict(front="225/70R19.5", rear="225/70R19.5", compound="commercial",
+                   unsprung=(120.0, 260.0), dual_rear=True),
+        susp=dict(hz=(1.55, 1.75), zeta=0.30, travel=(0.20, 0.20), roll_grad_deg_g=4.0,
+                  roll_front_share=0.60, bump_stop=1200000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=410, pistons_mm=[66, 66], pad_mu=0.42),
+            rear=dict(kind="disc", d_mm=410, pistons_mm=[66, 66], pad_mu=0.42),
+            bar=P_MODERN, handbrake_frac=0.4,
+        ),
+        steer=dict(ratio=20.0, turn_circle_m=16.0, ackermann=0.8, rack_speed=1.0),
+        price=90000,
+        durability=5,
+        note=("The battering ram with a badge. Nearly seven tonnes of armour on a 4x4 truck "
+              "frame: glacial off the line, done at 140 km/h, stops like a lorry and leans like "
+              "one — but whatever it hits moves, and whatever hits it stops. Captains roll it "
+              "into roadblocks and use it to end pursuits by pushing the target off the road."),
+        breaks=("Armoured box on a full-length ladder frame with a heavy push bar and doubled "
+                "bumper beam: almost nothing a car can do reaches the structure, and the "
+                "battering-ram bar soaks the first hits. What does break is outside the armour "
+                "— wheels, steering and suspension at the corners, and the tires (it is heavy "
+                "enough to tear its own hubs on a kerb strike). The high CG means a hard side "
+                "hit at the wheels can trip it."),
+        sources=["spec-class data for 2010s armoured tactical 4x4 trucks on medium-duty cab-chassis",
+                 "manufacturer spec-class data for 6.7 L medium-duty turbo-diesel V8s",
+                 "engineering tables (commercial tire radius, leaf-spring ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=True, ladder_frame=True,
+                     reinforce_bumper_beam=True, cargo_box=True,
+                     police_package=dict(
+                         pushbar_kg=120.0, pushbar_impulse_ns=150000.0, pushbar_section_scale=3.0,
+                         bumper_impulse_scale=3.0,
+                         hd_components=dict(Radiator=2.0, SteeringRack=1.5, SuspensionFL=1.5,
+                                            SuspensionFR=1.5, Engine=1.5, Battery=2.0,
+                                            FuelTank=2.0))),
+    ),
+    # ------------------------------------------------------------------ 23 (heavy traffic)
+    dict(
+        id="gantry_box",
+        display_name="Gantry Box",
+        cls="Truck",
+        analog_of="2010s American medium-duty conventional cab box truck, 6.7 L turbo-diesel I6, dual rear wheels",
+        era="2010s",
+        profile="truck",
+        curb_kg=6500.0,
+        fuel_l=190,
+        fuel_kg_per_l=0.835,
+        front_frac=0.48,
+        wheelbase=4.57,
+        track_f=2.03,
+        track_r=1.83,
+        body=(2.45, 7.60, 3.20),
+        clearance=0.30,
+        front_overhang=1.05,
+        cg=1.05,
+        cg_why="empty box truck: frame and drivetrain low, but a 2.6 m aluminium box on top; class data for empty medium-duty box trucks ≈ 0.95-1.15 m",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.70,
+        area_k=0.88,
+        extra_cda=0.0,
+        lift=(0.25, 0.20),
+        engine=dict(
+            desc="6.7 L OHV 24-valve turbo-diesel I6, intercooled, common-rail, medium-duty rating",
+            curve=[(700, 650), (1000, 900), (1200, 1050), (1400, 1150), (1600, 1166), (1800, 1150),
+                   (2000, 1100), (2200, 1010), (2400, 920), (2600, 820), (2800, 700)],
+            idle=650, redline=2600, limit=2800, inertia=1.00, brake_frac=0.15,
+            why="Class-typical 2010s 6.7 L medium-duty diesel six (~35 kW/L, ~233 kW at 2200 rpm, ~1166 N·m at 1600) per manufacturer spec-class data; engine braking includes the exhaust brake.",
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter (vocational), open rear differential; top speed set by the limiter in 6th (fleet governor)",
+            layout="Rwd",
+            gears=[3.10, 1.81, 1.41, 1.00, 0.71, 0.61], final=5.57, reverse=4.49, shift=0.45,
+            torque_converter=dict(stall_rpm=1800, ratio=2.0, coupling_rpm=2100),
+            diff_f="Open", diff_r="Open", clutch_factor=1.5,
+        ),
+        tires=dict(front="245/70R19.5", rear="245/70R19.5", compound="commercial",
+                   unsprung=(130.0, 280.0), dual_rear=True),
+        susp=dict(hz=(1.60, 1.90), zeta=0.25, travel=(0.17, 0.19), roll_grad_deg_g=4.5,
+                  roll_front_share=0.65, bump_stop=1200000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=380, pistons_mm=[66, 66], pad_mu=0.40),
+            rear=dict(kind="disc", d_mm=380, pistons_mm=[66, 66], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.4,
+        ),
+        steer=dict(ratio=20.0, turn_circle_m=16.5, ackermann=0.8, rack_speed=0.9),
+        price=38000,
+        durability=4,
+        note=("The furniture truck that owns the right lane. Six and a half tonnes, a wall of "
+              "box behind the cab and a top speed set by the fleet governor: it takes half a "
+              "minute to get to motorway speed and a long way to stop. Nobody races it; "
+              "everybody has to get around it, and a car that misjudges it stops dead."),
+        breaks=("Ladder frame and steel bumper take nose and tail hits; the hood and cab are "
+                "ordinary sheet metal over the frame, so frontals above bumper height go into the "
+                "cab. The box itself is thin aluminium on light posts — side hits dent it without "
+                "hurting the truck. Side-saddle fuel tank between the axles; dual rears survive a "
+                "flat."),
+        sources=["manufacturer spec-class data for 2010s medium-duty conventional box trucks (empty)",
+                 "manufacturer spec-class data for 6.7 L medium-duty diesel sixes",
+                 "engineering tables (commercial tire radius, leaf-spring ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True),
+    ),
+    # ------------------------------------------------------------------ 24
+    dict(
+        id="longhaul_tractor",
+        display_name="Longhaul Tractor",
+        cls="Truck",
+        analog_of="2010s American conventional long-nose sleeper semi tractor (bobtail), 12.8 L turbo-diesel I6, tandem drive axles",
+        era="2010s",
+        profile="truck",
+        curb_kg=8960.0,
+        fuel_l=568,
+        fuel_kg_per_l=0.835,
+        front_frac=0.59,
+        wheelbase=4.50,
+        track_f=2.08,
+        track_r=1.83,
+        body=(2.50, 6.90, 3.40),
+        clearance=0.40,
+        front_overhang=1.15,
+        cg=1.10,
+        cg_why="bobtail tractor: heavy engine and frame low, tall sleeper cab high; class data for unladen tractors ≈ 1.0-1.2 m",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.80,
+        area_k=0.90,
+        extra_cda=0.0,
+        lift=(0.25, 0.20),
+        engine=dict(
+            desc="12.8 L DOHC 24-valve turbo-diesel I6, intercooled, linehaul rating",
+            curve=[(600, 1400), (800, 1900), (1000, 2300), (1100, 2300), (1200, 2300), (1300, 2300),
+                   (1400, 2250), (1500, 2150), (1600, 2050), (1700, 1930), (1800, 1810),
+                   (1900, 1680), (2000, 1500), (2100, 1250)],
+            idle=600, redline=2000, limit=2100, inertia=1.60, brake_frac=0.20,
+            why="Class-typical 2010s 12.8 L heavy-duty diesel six (~27 kW/L, ~343 kW at 1600-1700 rpm, ~2300 N·m at 1000-1300) per manufacturer spec-class data; engine braking includes the compression brake.",
+        ),
+        trans=dict(
+            desc="12-speed automated manual (dry clutch), open inter-axle and rear diffs on the tandem; top speed set by the limiter in 12th (fleet governor)",
+            layout="Rwd",
+            gears=[14.94, 11.73, 9.04, 7.09, 5.54, 4.35, 3.44, 2.70, 2.08, 1.63, 1.27, 1.00],
+            final=3.07, reverse=13.07, shift=0.50,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="295/75R22.5", rear="295/75R22.5", compound="commercial",
+                   unsprung=(230.0, 480.0), dual_rear=True),
+        susp=dict(hz=(1.60, 1.60), zeta=0.28, travel=(0.18, 0.20), roll_grad_deg_g=4.0,
+                  roll_front_share=0.60, bump_stop=2000000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="air_drum", d_mm=419, chamber_in2=24, slack_mm=140, cam_gain=8.5),
+            rear=dict(kind="air_drum", d_mm=419, chamber_in2=30, slack_mm=140, cam_gain=8.0, ends=2),
+            bar=6.9, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=22.0, turn_circle_m=15.5, ackermann=0.8, rack_speed=0.9),
+        price=48000,
+        durability=5,
+        note=("A semi tractor running bobtail: no trailer, so nearly nine tonnes with most of it "
+              "on the steer axle and a light, skittish tandem that spins up in the low gears. "
+              "It pulls hard once rolling, tops out at the fleet governor and needs a football "
+              "pitch to stop. In traffic it is a moving wall; in a pursuit it is the thing you "
+              "do not want to meet at a junction."),
+        breaks=("Two deep steel frame rails run bumper to fifth wheel, so frontal and rear hits "
+                "bend the bumper, grille and long fibreglass hood while the frame shrugs. The "
+                "sleeper cab is tall and not crash-structured like a car — hits above frame "
+                "height go straight in. Side-saddle fuel tanks hang outboard of the rails "
+                "between the axles; the steer axle and its tires are the soft spot."),
+        sources=["manufacturer spec-class data for 2010s conventional sleeper tractors (bobtail weights)",
+                 "manufacturer spec-class data for 12.8-13 L heavy-duty diesel sixes",
+                 "engineering tables (commercial tire radius, air-suspension ride frequency, S-cam air brake torque)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True),
+    ),
+    # ------------------------------------------------------------------ 25
+    dict(
+        id="parcel_hi",
+        display_name="Parcel Hi",
+        cls="Truck",
+        analog_of="2010s European-style high-roof RWD delivery van, 2.1 L turbo-diesel I4, unibody",
+        era="2010s",
+        profile="van",
+        curb_kg=2265.0,
+        fuel_l=71,
+        fuel_kg_per_l=0.835,
+        front_frac=0.55,
+        wheelbase=3.665,
+        track_f=1.72,
+        track_r=1.71,
+        body=(1.99, 5.90, 2.70),
+        clearance=0.18,
+        front_overhang=0.95,
+        cg=0.85,
+        cg_why="empty high-roof van: a 2.7 m tall box on a car-like floor; above the truck/SUV band",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.37,
+        area_k=0.86,
+        extra_cda=0.0,
+        lift=(0.15, 0.12),
+        engine=dict(
+            desc="2.1 L DOHC 16-valve turbo-diesel I4, common-rail, variable-geometry turbo",
+            curve=[(800, 180), (1200, 270), (1400, 330), (1600, 360), (2000, 360), (2400, 360),
+                   (2800, 350), (3200, 330), (3600, 300), (3800, 280), (4000, 250), (4200, 215)],
+            idle=750, redline=4000, limit=4200, inertia=0.20, brake_frac=0.12,
+            why="Class-typical 2010s 2.1 L van diesel (~54 kW/L, ~113 kW at 3600 rpm, ~360 N·m at 1600-2400) per manufacturer spec-class data.",
+        ),
+        trans=dict(
+            desc="6-speed manual, open rear differential",
+            layout="Rwd",
+            gears=[5.08, 2.60, 1.52, 1.00, 0.79, 0.64], final=3.92, reverse=4.50, shift=0.35,
+            diff_f="Open", diff_r="Open", clutch_factor=1.4,
+        ),
+        tires=dict(front="235/65R16", rear="235/65R16", compound="street", unsprung=(38.0, 50.0)),
+        susp=dict(hz=(1.35, 1.65), zeta=0.27, travel=(0.18, 0.20), roll_grad_deg_g=5.5,
+                  roll_front_share=0.68, bump_stop=300000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=300, pistons_mm=[54, 54], pad_mu=0.40),
+            rear=dict(kind="disc", d_mm=298, pistons_mm=[44], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.7,
+        ),
+        steer=dict(ratio=18.0, turn_circle_m=13.6, ackermann=0.7, rack_speed=1.1),
+        price=30000,
+        durability=4,
+        note=("The parcel van that stops wherever it likes. Tall, slab-sided and gutless next "
+              "to the V8 vans, it catches every crosswind and leans hard in a turn, but it is "
+              "lighter than it looks and the diesel pulls well in the gears. Every street in "
+              "the city has one with its hazards on."),
+        breaks=("Unibody van: a car-like crumple zone under a short nose, so a hard frontal "
+                "folds the front end and the cab footwell. The cargo box behind the bulkhead is "
+                "thin sheet on light hoops — side and rear hits dent it deeply without touching "
+                "the cab. The tall flat side is an easy target and the high CG tips it in hard "
+                "swerves."),
+        sources=["manufacturer spec-class data for 2010s European high-roof RWD vans",
+                 "manufacturer spec-class data for 2.1 L common-rail van diesels",
+                 "engineering tables (light-truck tire radius, ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False, cargo_box=True),
+    ),
+    # ------------------------------------------------------------------ 26
+    dict(
+        id="quarry_tipper",
+        display_name="Quarry Tipper",
+        cls="Truck",
+        analog_of="2010s American tri-axle dump truck (steer + tandem drive + raised pusher axle), unladen, 11 L turbo-diesel I6",
+        era="2010s",
+        profile="truck",
+        curb_kg=12085.0,
+        fuel_l=380,
+        fuel_kg_per_l=0.835,
+        front_frac=0.46,
+        wheelbase=4.95,
+        track_f=2.08,
+        track_r=1.83,
+        body=(2.50, 7.80, 3.30),
+        clearance=0.40,
+        front_overhang=1.25,
+        cg=1.25,
+        cg_why="unladen dump truck: the steel body and hoist sit high on the frame; class data for empty tippers ≈ 1.1-1.3 m",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.80,
+        area_k=0.90,
+        extra_cda=0.0,
+        lift=(0.25, 0.20),
+        engine=dict(
+            desc="11 L DOHC 24-valve turbo-diesel I6, intercooled, vocational rating",
+            curve=[(600, 1200), (800, 1650), (1000, 1950), (1100, 1966), (1200, 1966), (1300, 1950),
+                   (1400, 1900), (1500, 1830), (1600, 1750), (1700, 1660), (1800, 1560),
+                   (1900, 1440), (2000, 1250), (2100, 1000)],
+            idle=600, redline=2000, limit=2100, inertia=1.40, brake_frac=0.20,
+            why="Class-typical 2010s 11 L heavy-duty diesel six (~27 kW/L, ~295 kW at 1700 rpm, ~1966 N·m at 1100-1200) per manufacturer spec-class data; engine braking includes the compression brake.",
+        ),
+        trans=dict(
+            desc="6-speed automatic with torque converter (vocational), open inter-axle and rear diffs on the tandem; top speed set by the limiter in 6th (fleet governor)",
+            layout="Rwd",
+            gears=[4.70, 2.21, 1.53, 1.00, 0.76, 0.67], final=5.29, reverse=5.55, shift=0.45,
+            torque_converter=dict(stall_rpm=1500, ratio=2.0, coupling_rpm=1800),
+            diff_f="Open", diff_r="Open", clutch_factor=1.5,
+        ),
+        tires=dict(front="315/80R22.5", rear="295/80R22.5", compound="commercial",
+                   unsprung=(250.0, 500.0), dual_rear=True),
+        susp=dict(hz=(1.70, 1.90), zeta=0.28, travel=(0.18, 0.18), roll_grad_deg_g=3.5,
+                  roll_front_share=0.55, bump_stop=2500000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="air_drum", d_mm=419, chamber_in2=30, slack_mm=140, cam_gain=8.0),
+            rear=dict(kind="air_drum", d_mm=419, chamber_in2=30, slack_mm=140, cam_gain=8.0, ends=2),
+            bar=6.9, handbrake_frac=0.5,
+        ),
+        steer=dict(ratio=22.0, turn_circle_m=17.5, ackermann=0.8, rack_speed=0.9),
+        price=46000,
+        durability=5,
+        note=("Twelve tonnes empty, and it still has to stop for the lights. The heaviest thing "
+              "on the road: slow to 100 and done at 110, it brakes in stages and corners like "
+              "a building. Anything that hits it bounces off; anything it hits is scrap."),
+        breaks=("Deep steel frame rails with a heavy steel bumper and a steel dump body: "
+                "frontal and rear hits bend the bumper and grille, then stop. The cab is an "
+                "ordinary steel truck cab on mounts, so a hit above frame height goes into it, "
+                "and the steer axle, its wheels and the side-saddle tank are the parts a car can "
+                "actually break."),
+        sources=["manufacturer spec-class data for 2010s tri-axle dump trucks (unladen)",
+                 "manufacturer spec-class data for 11 L heavy-duty diesel sixes",
+                 "engineering tables (commercial tire radius, leaf-spring ride frequency, S-cam air brake torque)"],
         lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True),
     ),
 ]
