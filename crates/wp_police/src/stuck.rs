@@ -97,8 +97,10 @@ pub const GIVE_WAY_M: f32 = 6.0;
 pub const DEADLOCK_VANISH_S: f32 = 30.0;
 /// See [`DEADLOCK_VANISH_S`], m.
 pub const DEADLOCK_NEAR_M: f32 = 20.0;
-/// Moving less than this from where it stopped still counts as standing, m.
-pub const STAND_M: f32 = 3.0;
+/// Moving less than this from where it stopped still counts as standing, m. More than
+/// [`GIVE_WAY_M`]: a unit backing out of a racer's way and nosing back in again, over and over,
+/// is standing (Hollins seed 6: a unit cycled in front of a busted racer for a minute).
+pub const STAND_M: f32 = 8.0;
 /// After backing out it waits up to this long for the racer to get past, s.
 pub const GIVE_WAY_HOLD_S: f32 = 8.0;
 /// ... while that racer is still in front of it and this close, m.

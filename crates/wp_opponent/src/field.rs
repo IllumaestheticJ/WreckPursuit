@@ -541,6 +541,10 @@ pub const YIELD_AFTER_S: f32 = 2.0;
 const FLIGHT_THREAT_M: f32 = 35.0;
 /// Route stretch checked for police ahead, m.
 const FLIGHT_LOOKAHEAD_M: f32 = 160.0;
+/// A car out of the race doesn't stop where the road bends tighter than this (it rolls on to
+/// a straighter bit first): nobody can get past a car stopped in a hairpin, m.
+const PARK_MIN_RADIUS_M: f32 = 35.0;
+
 /// Minimum time between flight re-plans, s.
 const FLIGHT_REPLAN_S: f32 = 6.0;
 /// Drivers below this risk stop for red lights on open roads; the others go through a red
@@ -2123,7 +2127,14 @@ fn decide_racer(
             && {
                 let i0 = (r.s / CORRIDOR_STEP_M) as isize;
                 let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
-                (r.n - lim_hi).abs() > 0.5 || near_junction
+                // Out of the race, not in a tight bend either: there is no room to pass a car
+                // stopped in a hairpin (Hollins, police seeds 3-6: a racer busted in the first
+                // hairpin held the field for the rest of the race).
+                let in_bend = out_of_race
+                    && (-5..=10).any(|j| {
+                        line.curvature[corridor.wrap(i0 + j)].abs() > 1.0 / PARK_MIN_RADIUS_M
+                    });
+                (r.n - lim_hi).abs() > 0.5 || near_junction || in_bend
             };
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
@@ -2498,13 +2509,16 @@ fn decide_racer(
             if decel_demand > 0.5 {
                 acc = acc.min(-1.2 * decel_demand);
             }
-            let hold = matches!(r.tactic, Tactic::Park | Tactic::Yield) && v < 0.6;
+            // A parked / yielding car rolling on to the kerb or out of a bend (`v_target` above
+            // a crawl) must be able to pull away from rest: holding it there kept a racer
+            // busted in a Hollins hairpin standing in the field's way for the rest of the race.
+            let park_hold = matches!(r.tactic, Tactic::Park | Tactic::Yield) && v_target < 0.3;
+            let hold = park_hold && v < 0.6;
             let (mut th, br) = r.ctrl.pedals(v, acc, dt, hold);
             // The controller releases the brake pedal near a standstill (a held brake there
             // selects reverse): a car told to stop holds on the handbrake instead of idling
             // forward into whatever it stopped for.
-            let holding =
-                v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield));
+            let holding = v < 1.5 && (v_target < 0.3 || park_hold);
             if holding {
                 input.handbrake = 1.0;
                 th = 0.0;

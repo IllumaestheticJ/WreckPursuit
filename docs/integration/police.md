@@ -642,6 +642,36 @@ passes; clippy and fmt are clean; `simcli goldens` 0 mismatches. Hollins seeds 3
 test's "at least 3 of 4" check (the default seed passes). Seed 6 is the fled-racer hairpin
 block described above.
 
+*Hollins police seeds 3–6 (lead, after preview 0.12.22).* On lead/round12 0bc27d29 (before
+this branch's last merges) seeds 3–6 already failed the "≥ 3 of 4" check: 0 (never ends) / 1 /
+1 / 2 finishers. The common case: a racer stands nose to nose with a pursuing unit in the first
+hairpin, the pinned capture busts it, and it then stays where it stopped, mid-hairpin, with the
+field queued behind it. **Changes outside my crates (`wp_opponent`, minimal):**
+- A parked or yielding car that wants to roll on (to the kerb, clear of a junction) could never
+  pull away from rest: `Park`/`Yield` always held the handbrake with zero throttle below
+  1.5 m/s. It now holds only when its target speed is a crawl.
+- A car out of the race (busted, retired, fled) doesn't stop in a bend tighter than 35 m radius
+  (`PARK_MIN_RADIUS_M`). It rolls on at 6 m/s to a straighter bit first.
+
+Police side: the deadlock last resort treated a unit that kept backing out of a racer's way
+(6 m) and nosing back in as moving. "Standing" now means within 8 m of where it stopped
+(`stuck::STAND_M`).
+
+| Hollins finishers | default | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| lead/round12 0bc27d29 | 4 | 4 | 4 | 0 (never ends) | 1 | 1 | 2 | 4 | 4 |
+| before this fix (9899d87c) | 4 | 4 | 4 | 1 | 1 | 1 | 0 (never ends) | 4 | 3 |
+| after | 4 | 4 | 4 | 3 | 3 | 3 | 0 (never ends) | 4 | 3 |
+
+Seed 6 still never ends. The busted racer now rolls on, but every bend there is tight, so it
+crawls ahead of the field for about a minute. Later two more racers are captured, and the last
+one is left behind a captured car at (−770, 1063). For N: a field should be able to pass a slow
+out-of-race car, or a busted racer should leave the road (verge, lay-by). Gate on this commit:
+fmt / clippy clean; `wp_race` (release, all suites incl. race_picker 7/7) and `wp_opponent`
+pass; Loop 9 default + seeds 1–8 pass (1 DQ on seed 4, as on 0bc27d29); `wp_police`, `wp_sim`,
+`wp_wasm --lib` (86) pass; 109 of 109 scenarios; goldens: `opponent_circuit_8x5` and
+`police_tunnel_escape_founders_cut_control` re-blessed, 0 other mismatches.
+
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
 pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit
