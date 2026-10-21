@@ -4474,4 +4474,27 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn highway_edges_are_walled_except_at_ramps_decks_and_the_tunnel() {
+        let (net, _) = city();
+        let lines = crate::surface::edge_barriers(net);
+        let walled: f32 = lines.iter().map(|l| geom::cumulative(l)[l.len() - 1]).sum();
+        let mut edges = 0.0;
+        for s in net.surfaces.iter().filter(|s| s.highway) {
+            let len = geom::cumulative(&s.centre)[s.centre.len() - 1];
+            edges += if s.median_barrier { len } else { 2.0 * len };
+        }
+        assert!(walled > 0.7 * edges, "walled {walled} of {edges} m");
+        // Never on any paving (ramp joins stay open), never in the tunnel.
+        for l in &lines {
+            for p in l {
+                assert!(
+                    !crate::surface::inside_other_paving(net, usize::MAX, *p),
+                    "barrier on paving at {p:?}"
+                );
+                assert!(!net.features.tunnels[0].contains([p[0], p[1], p[2] + 1.0]));
+            }
+        }
+    }
 }

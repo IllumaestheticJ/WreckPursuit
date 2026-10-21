@@ -18,7 +18,9 @@ use wp_world::map::{CityMap, SegKind};
 use wp_world::network::{
     BridgeKind, DistrictKind, Lane, LaneKind, RoadNetwork, StructureKind, SEA_LEVEL_M,
 };
-use wp_world::surface::{inside_other_paving, is_elevated, median_barriers, surface_edges};
+use wp_world::surface::{
+    edge_barriers, inside_other_paving, is_elevated, median_barriers, surface_edges,
+};
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk width, m.
@@ -320,6 +322,60 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
 /// Number of lanes of source road `road`.
 fn lanes_of(net: &RoadNetwork, road: u32) -> usize {
     net.lanes.iter().filter(|l| l.road == road).count()
+}
+
+/// Plain concrete wall along `line` (road height at its foot; `BARRIER_PROFILE`'s base width
+/// and height): two sides and the top, nearly straight stretches merged into one piece. Cheaper
+/// than [`barrier_mesh`] for the tens of kilometres of highway edge.
+fn wall_mesh(p: &mut Prim, line: &[V3]) {
+    let (w, h) = (
+        BARRIER_PROFILE[0].0,
+        BARRIER_PROFILE[BARRIER_PROFILE.len() - 1].1,
+    );
+    // Keep a point where the line turns by more than ~1°, climbs off the straight, or every 60 m.
+    let mut pts: Vec<V3> = vec![line[0]];
+    for k in 1..line.len() {
+        let last = *pts.last().unwrap();
+        let next = line[(k + 1).min(line.len() - 1)];
+        let a = geom::normalize(geom::sub(geom::xy(line[k]), geom::xy(last)));
+        let b = geom::normalize(geom::sub(geom::xy(next), geom::xy(line[k])));
+        let bend = geom::cross(a, b).abs() > 0.017;
+        let far = geom::dist(geom::xy(line[k]), geom::xy(last)) > 60.0;
+        let t = geom::dist(geom::xy(line[k]), geom::xy(last))
+            / geom::dist(geom::xy(next), geom::xy(last)).max(1e-3);
+        let climb = (line[k][2] - (last[2] + (next[2] - last[2]) * t)).abs() > 0.03;
+        if bend || far || climb || k == line.len() - 1 {
+            pts.push(line[k]);
+        }
+    }
+    for q in pts.windows(2) {
+        let d = geom::normalize(geom::sub(geom::xy(q[1]), geom::xy(q[0])));
+        let r = geom::right_of(d);
+        let at =
+            |c: V3, side: f32, z: f32| [c[0] + r[0] * side * w, c[1] + r[1] * side * w, c[2] + z];
+        let (a, b) = (q[0], q[1]);
+        p.quad(
+            at(a, 1.0, 0.0),
+            at(b, 1.0, 0.0),
+            at(b, 1.0, h),
+            at(a, 1.0, h),
+            [r[0], r[1], 0.0],
+        );
+        p.quad(
+            at(b, -1.0, 0.0),
+            at(a, -1.0, 0.0),
+            at(a, -1.0, h),
+            at(b, -1.0, h),
+            [-r[0], -r[1], 0.0],
+        );
+        p.quad(
+            at(a, -1.0, h),
+            at(a, 1.0, h),
+            at(b, 1.0, h),
+            at(b, -1.0, h),
+            [0.0, 0.0, 1.0],
+        );
+    }
 }
 
 /// Jersey-profile barrier along `line` (road height at the barrier's foot).
@@ -650,6 +706,10 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let barriers = median_barriers(net);
     for line in &barriers {
         barrier_mesh(&mut barrier, line);
+    }
+    // Outer highway edges (not in the parapet index below: they stop where decks start).
+    for line in &edge_barriers(net) {
+        wall_mesh(&mut barrier, line);
     }
     let near_barrier = BarrierIndex::new(&barriers);
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and

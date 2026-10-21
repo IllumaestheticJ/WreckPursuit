@@ -35,7 +35,8 @@ pub struct CityColliders {
     pub buildings: usize,
     /// Guard-rail boxes along bridge decks.
     pub rails: usize,
-    /// Median barrier boxes between divided-highway carriageways.
+    /// Concrete barrier boxes: medians between divided-highway carriageways and the outer
+    /// edges of highways and ramps.
     pub barriers: usize,
     /// Structure colliders (tunnel linings and portals, canopies, landmarks, trusses).
     pub structures: usize,
@@ -238,7 +239,8 @@ impl PhysicsWorld {
         }
 
         // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge. Median
-        // barriers: 0.5 m wide, 0.81 m tall concrete boxes on the barrier line.
+        // and highway edge barriers: 0.5 m wide, 0.81 m tall concrete boxes on the barrier
+        // line.
         // (from, to, half width, half height, median barrier)
         type Rail = ([f32; 3], [f32; 3], f32, f32, bool);
         let rails: Vec<Rail> = wp_world::surface::deck_rails(net)
@@ -247,6 +249,7 @@ impl PhysicsWorld {
             .chain(
                 wp_world::surface::median_barriers(net)
                     .iter()
+                    .chain(wp_world::surface::edge_barriers(net).iter())
                     .flat_map(|l| l.windows(2).map(|w| (w[0], w[1], 0.25, 0.405, true)))
                     .collect::<Vec<_>>(),
             )

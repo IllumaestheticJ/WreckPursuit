@@ -13,7 +13,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations, the Vesper River and Calder Canal with their bridges, the Hollins Tunnel, landmarks, hideouts |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
-| `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
+| `surface` | Road trimesh for physics/greybox, deck rails, median and highway edge barriers, `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
@@ -210,6 +210,12 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   then split into two one-way 3-lane carriageways 7.05 m either side of the centreline: 1.5 m
   paved median shoulders up to a Jersey-profile concrete barrier on the centreline (0.6 m base,
   0.81 m tall; `wp_sim` builds 0.5 × 0.81 m box colliders along it), 2.5 m outer shoulders.
+  **Edge barriers** (`surface::edge_barriers`, both cities): the same concrete wall runs
+  along every carriageway's outer edge and both edges of every ramp, its inner face on the
+  paved edge, so a car cannot leave the highway for the verge. It opens wherever another
+  road's paving meets the edge (ramp tapers and gores) and gives way to guard rails on decks
+  and to the lining in the tunnel; ≈ 36 km on Port Vesper, ≈ 1.8 km on the grid city's
+  at-grade highway ends.
   **Interchanges:** five diamonds (Harbor Boulevard west and east, Lantern Way, Bluff Road,
   Uptown Connector) and a half diamond at the port (inner carriageway only). Each diamond's
   crossroad (2+2, 10 % grade cap) bridges both carriageways with 7.5 m clearance between two

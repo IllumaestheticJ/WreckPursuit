@@ -4,6 +4,7 @@
 //!   discs and the connector ribbons through bends;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
 //! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
+//! - [`edge_barriers`]: concrete barrier lines along the outer edges of highways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
@@ -233,6 +234,67 @@ pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
         .filter(|s| s.median_barrier && s.centre.len() >= 2)
         .map(|s| surface_edges(s).0)
         .collect()
+}
+
+/// Half width of a concrete barrier (Jersey base), m: [`edge_barriers`] lines run this far
+/// outside the paved edge, so the barrier's inner face is on the edge.
+pub const BARRIER_HALF_WIDTH_M: f32 = 0.25;
+
+/// Concrete barrier lines (at road height) along the outer edges of highways: the right edge
+/// of every divided-highway carriageway and both edges of ramps, so a car cannot leave the
+/// highway for the verge. Left out where another road's paving meets the edge (ramp tapers,
+/// gores), on bridge decks (they have guard rails, see [`deck_rails`]) and inside tunnels
+/// (the lining). Empty without terrain.
+pub fn edge_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground = |q: V2| t.height_at(q);
+    let mut out = Vec::new();
+    for (si, s) in net.surfaces.iter().enumerate() {
+        if !s.highway || s.centre.len() < 2 {
+            continue;
+        }
+        let (l, r) = surface_edges(s);
+        // A carriageway's left edge carries the median barrier.
+        let sides: &[(f32, &Vec<V3>)] = if s.median_barrier {
+            &[(1.0, &r)]
+        } else {
+            &[(-1.0, &l), (1.0, &r)]
+        };
+        for (side, edge) in sides {
+            let line = geom::offset_polyline(edge, side * BARRIER_HALF_WIDTH_M);
+            let keep: Vec<bool> = (0..edge.len())
+                .map(|k| {
+                    let p = edge[k];
+                    let q = [line[k][0], line[k][1], p[2]];
+                    !is_elevated(s, k, &ground, 1.5)
+                        && !inside_other_paving(net, si, p)
+                        && !inside_other_paving(net, si, q)
+                        && !net
+                            .features
+                            .tunnels
+                            .iter()
+                            .any(|tn| tn.contains([p[0], p[1], p[2] + 1.0]))
+                })
+                .collect();
+            let mut run: Vec<V3> = Vec::new();
+            for k in 0..edge.len() {
+                if keep[k] {
+                    run.push([line[k][0], line[k][1], edge[k][2]]);
+                } else {
+                    if run.len() >= 2 {
+                        out.push(std::mem::take(&mut run));
+                    }
+                    run.clear();
+                }
+            }
+            if run.len() >= 2 {
+                out.push(run);
+            }
+        }
+    }
+    out
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable

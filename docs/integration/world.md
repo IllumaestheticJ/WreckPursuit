@@ -742,3 +742,20 @@ bridges. All on Port Vesper v2 (`vesper_v2`, same id); details in the `wp_world`
   `city_loop_crest_at_limit` now runs through the tunnel (passes, no contacts).
 - `docs/media/city-v2/features_*.png`: greybox renders of the river, Iron Bridge, tunnel
   mouth and bore, canal and port.
+
+### Follow-up: walls on the highways' outer edges (same branch, 2026-10-21)
+- User request: "the outer side of highways should also have walls — shouldn't be able to
+  fly into grass". `wp_world::surface::edge_barriers`: concrete barrier lines along every
+  carriageway's outer edge and both ramp edges (inner face on the paved edge), open where
+  another road's paving meets the edge (ramp tapers, gores), replaced by deck rails on decks
+  and by the lining in the tunnel. Derived at load, no format change.
+- `wp_sim/src/physics.rs` (lead): edge barriers become the same 0.5 × 0.81 m boxes as the
+  median (counted in `CityColliders::barriers`). New test
+  `the_edge_barrier_keeps_a_car_off_the_verge` (a 90 km/h swerve to the right hits it and
+  stays on the carriageway); `vesper::tests::highway_edges_are_walled_except_at_ramps_decks_and_the_tunnel`
+  (> 70 % of highway edge length walled, never on paving or in the tunnel).
+- Greybox: drawn as plain walls (sides + top, straight stretches merged) to keep
+  `vesper_v2.greybox.glb` under its 9 MB budget (7.98 MB); both greyboxes regenerated.
+- Goldens re-blessed (`[bless]`): `opponent_circuit_8x5`, `opponent_open_roads_traffic`,
+  `opponent_reverse_grid_2laps`, `race_city_sprint_police` (grid city: the highway's at-grade
+  ends now have walls). Every scenario's expectations still pass.
