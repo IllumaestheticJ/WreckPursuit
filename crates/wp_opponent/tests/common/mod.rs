@@ -86,6 +86,10 @@ pub struct Setup {
     /// Live police: the AI reads `Sim::police()` through `SimPolice`, and police units are
     /// physical cars of this model (e.g. `sentinel_cruiser`).
     pub sim_police: Option<String>,
+    /// Racers may give up on the police (abandon the race and run, pull over):
+    /// `RaceConfig::allow_abandon`. Off in the game (owner, 2026-10-21); the flee tests turn
+    /// it on to exercise that machinery.
+    pub allow_abandon: bool,
     /// Starting heat per racer (police system rebuilt with it before the first tick).
     pub heat: Vec<(EntityId, f32)>,
     /// Keep running to `max_s` after every racer has left the race (chases).
@@ -114,6 +118,7 @@ impl Default for Setup {
             heat: Vec::new(),
             run_full: false,
             draft: false,
+            allow_abandon: false,
         }
     }
 }
@@ -223,6 +228,7 @@ pub fn run(
         },
         signals: !setup.closed_roads && std::env::var("WP_NO_SIGNALS").is_err(),
         draft: setup.draft && cfg!(feature = "sim-draft-hook"),
+        allow_abandon: setup.allow_abandon,
         ..RaceConfig::default()
     };
     // Entities are assigned 1.. in spawn order, before any other vehicle.
