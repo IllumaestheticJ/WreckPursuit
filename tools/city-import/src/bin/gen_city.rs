@@ -50,7 +50,10 @@ fn main() {
         }
         i += 2;
     }
-    if let Some(p) = preset.as_deref().filter(|p| *p == "touge" || touge::is_touge(p)) {
+    if let Some(p) = preset
+        .as_deref()
+        .filter(|p| *p == "touge" || touge::is_touge(p))
+    {
         let ids: Vec<&str> = if p == "touge" {
             touge::TOUGE_IDS.to_vec()
         } else {

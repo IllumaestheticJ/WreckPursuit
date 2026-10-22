@@ -912,7 +912,7 @@ pub fn settle(
     };
     if let Some(bet) = &ticket.bet {
         let payout = if won {
-            (bet.stake as f64 * stakes.side_bet_payout as f64).round() as Money
+            (bet.stake as f32 * stakes.side_bet_payout).round() as Money
         } else {
             0
         };
@@ -1106,6 +1106,27 @@ mod tests {
         assert!(Boundary::from_world(&w).is_none());
     }
 
+    /// Rep that opens `f` in the shipped career tiers (tuning lives in `career.toml`).
+    fn rep_for(f: Feature) -> i64 {
+        let p = &Economy::embedded().progression;
+        p.tier_def(p.feature_tier(f)).min_rep
+    }
+
+    /// Rep to race challengers only.
+    fn known() -> i64 {
+        rep_for(Feature::TougeRaces)
+    }
+
+    /// Rep to race bosses and bet, not yet pink slips.
+    fn respected() -> i64 {
+        rep_for(Feature::BossRaces).max(rep_for(Feature::TougeBetting))
+    }
+
+    /// Rep for everything, pink slips included.
+    fn feared() -> i64 {
+        rep_for(Feature::PinkSlips)
+    }
+
     fn account(rep: i64, cash: Money) -> (Economy, PlayerAccount, CarUid) {
         let econ = Economy::embedded();
         let (mut acct, _) = econ.open_account(PlayerId(3));
@@ -1140,17 +1161,17 @@ mod tests {
         assert!(m.race.locked_reason.is_some());
         assert_eq!(m.max_stake, 0);
 
-        let (econ, known, _) = account(1_200, 10_000);
+        let (econ, known, _) = account(known(), 10_000);
         let m = wager_menu(&econ, &known, &table, &ch);
         assert!(m.race.unlocked && !m.side_bet.unlocked && !m.pink_slip.unlocked);
         assert!(!wager_menu(&econ, &known, &table, &boss).race.unlocked);
 
-        let (econ, respected, _) = account(3_000, 10_000);
+        let (econ, respected, _) = account(respected(), 10_000);
         let m = wager_menu(&econ, &respected, &table, &boss);
         assert!(m.race.unlocked && m.side_bet.unlocked && !m.pink_slip.unlocked);
         assert!(m.max_stake > 0);
 
-        let (econ, feared, _) = account(6_000, 10_000);
+        let (econ, feared, _) = account(feared(), 10_000);
         let m = wager_menu(&econ, &feared, &table, &boss);
         assert!(m.race.unlocked && m.side_bet.unlocked && m.pink_slip.unlocked);
         assert_eq!(m.opponent_car, "hakone_gt");
@@ -1158,7 +1179,7 @@ mod tests {
 
     #[test]
     fn locked_wagers_are_refused_without_touching_the_account() {
-        let (econ, mut acct, car) = account(1_200, 10_000);
+        let (econ, mut acct, car) = account(known(), 10_000);
         let before = acct.clone();
         let s = setup(0, Direction::Uphill, Opponent::Challenger);
         assert!(place(&econ, &mut acct, s, Wager::SideBet { stake: 500 }, car).is_err());
@@ -1174,7 +1195,7 @@ mod tests {
         let table = TougeTable::embedded();
         let s = setup(2, Direction::Uphill, Opponent::Boss);
         for won in [true, false] {
-            let (econ, mut acct, car) = account(3_000, 20_000);
+            let (econ, mut acct, car) = account(respected(), 20_000);
             let rep0 = acct.rep;
             let (ticket, _) =
                 place(&econ, &mut acct, s, Wager::SideBet { stake: 2_000 }, car).unwrap();
@@ -1222,7 +1243,7 @@ mod tests {
     fn pink_slip_win_brings_the_npc_car_home_as_it_finished() {
         let table = TougeTable::embedded();
         let s = setup(1, Direction::Downhill, Opponent::Boss);
-        let (econ, mut acct, car) = account(6_000, 20_000);
+        let (econ, mut acct, car) = account(feared(), 20_000);
         let (ticket, _) = place(&econ, &mut acct, s, Wager::PinkSlip, car).unwrap();
         let mut damage = wp_economy::DamageSnapshot::pristine();
         damage.health = 0.41;
@@ -1259,7 +1280,7 @@ mod tests {
     fn pink_slip_loss_hands_over_the_player_car() {
         let table = TougeTable::embedded();
         let s = setup(3, Direction::Uphill, Opponent::Challenger);
-        let (econ, mut acct, car) = account(6_000, 20_000);
+        let (econ, mut acct, car) = account(feared(), 20_000);
         let rep0 = acct.rep;
         let (ticket, _) = place(&econ, &mut acct, s, Wager::PinkSlip, car).unwrap();
         let outcome = BattleOutcome {

@@ -15,6 +15,12 @@ fn setup(map: &str, dir: &str, opponent: &str) -> TougeSetup {
     TougeSetup::from_keys(map, dir, "night", "rain", opponent).unwrap()
 }
 
+/// Rep that opens `f` in the shipped career tiers (`data/economy/career.toml`).
+fn rep_for(f: wp_economy::Feature) -> i64 {
+    let p = &wp_economy::Economy::embedded().progression;
+    p.tier_def(p.feature_tier(f)).min_rep
+}
+
 fn battle(setup: &TougeSetup, autopilot: bool, wager: Wager, rep: Option<i64>) -> Session {
     set_next_wager(wager);
     let sc = touge_scenario(setup, CAR, DamageMode::Arcade, autopilot).unwrap();
@@ -137,7 +143,12 @@ fn fixed_walls_hold() {
 #[test]
 fn pink_slip_won_brings_the_wrecked_npc_car_home() {
     let st = setup("touge_ashfall_grade", "up", "boss");
-    let mut s = battle(&st, false, Wager::PinkSlip, Some(6_000));
+    let mut s = battle(
+        &st,
+        false,
+        Wager::PinkSlip,
+        Some(rep_for(wp_economy::Feature::PinkSlips)),
+    );
     let garage0 = s.run().unwrap().account().garage.len();
     s.run_ticks(240 * 4);
     launch_at_krails(&mut s, NPC, 30.0);
@@ -169,7 +180,12 @@ fn pink_slip_won_brings_the_wrecked_npc_car_home() {
 fn locked_wager_is_refused_and_the_battle_still_runs() {
     let st = setup("touge_cedar_switchback", "down", "challenger");
     // Rep 1200 (Known): challengers open, side bets not.
-    let mut s = battle(&st, false, Wager::SideBet { stake: 500 }, Some(1_200));
+    let mut s = battle(
+        &st,
+        false,
+        Wager::SideBet { stake: 500 },
+        Some(rep_for(wp_economy::Feature::TougeRaces)),
+    );
     let cash0 = s.run().unwrap().account().cash;
     s.run_ticks(10);
     let r = s.race().unwrap().touge().unwrap().report();
