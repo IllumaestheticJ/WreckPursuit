@@ -249,7 +249,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("modes")).unwrap();
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../data");
-        std::fs::copy(repo.join("modes/sim.toml"), d.join("modes/sim.toml")).unwrap();
+        // The tests expect the calibrated reference (plasticity 1.0), Extreme since v0.4.0.
+        std::fs::copy(repo.join("modes/extreme.toml"), d.join("modes/sim.toml")).unwrap();
         d
     }
 

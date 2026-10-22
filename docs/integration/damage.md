@@ -908,7 +908,7 @@ drivers only. Traffic and police vehicles still receive full damage."
 three-column mode table). `wp_vehicle::AssistPreset::Sim` still selects Simulation.
 
 ### Requests
-- G: tune Extreme's purse (placeholder ×1.4) and decide whether Simulation's fines/seizure
+- G: Extreme uses the old Simulation purse (×1.2); decide whether Simulation's fines/seizure
   should stay at the old Simulation values (they did not move with the damage table).
 - Lead: `apps/ui-kit/src/generated/contracts.ts` was hand-edited (no node_modules here);
   re-run `npm run gen:types` to confirm.

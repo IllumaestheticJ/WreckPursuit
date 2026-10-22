@@ -531,7 +531,7 @@ mod tests {
     fn embedded_net_data_resolves() {
         let (cars, modes) = super::embedded_data().unwrap();
         assert!(cars.contains_key("debug_sedan") && cars.contains_key("debug_coupe"));
-        assert_eq!(modes.len(), 2);
+        assert_eq!(modes.len(), 3);
     }
 
     #[test]

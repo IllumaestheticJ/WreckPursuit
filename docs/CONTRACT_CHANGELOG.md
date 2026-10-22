@@ -19,7 +19,7 @@ the thread session on the owner's direct request rather than by the lead, so it 
 | New `DamageMode::Extreme` (appended; wire u8 2 in `wp_net` and simcli replays, `"extreme"` in meta's DB) | everyone matching on `DamageMode` | add the arm. Extreme = the old Simulation; done in this branch for every workspace crate, the testbed and ui-kit. |
 | Data: `data/modes/sim.toml` → `extreme.toml` (mode `Extreme`), `arcade.toml` → `sim.toml` (mode `Simulation`), new `arcade.toml` | 03, G, E, 10 | load `extreme.toml` for Extreme. Behaviour of old Arcade = new Simulation, old Simulation = new Extreme, bit for bit. |
 | `wp_police::ModeValue` gains `extreme` (`data/police/pursuit.toml`) | E | police take full damage in every mode: arcade = simulation (old Arcade), extreme = old Simulation. |
-| `wp_economy` tables need an `Extreme` row (`consequences.mode`, `stakes.mode_purse`); `DataSources::extreme_mode` | G | Extreme copies Simulation's consequences; purse ×1.4 (placeholder); pink slips allowed in Simulation and Extreme. |
+| `wp_economy` tables need an `Extreme` row (`consequences.mode`, `stakes.mode_purse`); `DataSources::extreme_mode` | G | Extreme copies Simulation's consequences; purse ×1.2 like the old Simulation (keeps tests/career.rs balance); pink slips allowed in Simulation and Extreme. |
 
 **Additive:**
 - `ModeTable::racer_damage_scale: f32` (`#[serde(default)]` = 1.0, must be > 0): multiplier on

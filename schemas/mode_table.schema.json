@@ -47,7 +47,7 @@
       "format": "float"
     },
     "racer_damage_scale": {
-      "description": "Multiplier on the contact impulses that reach the damage model of *racer* cars (the\nplayer's racer and AI racers). Traffic and police (AI or player-driven) always take\n1.0. Arcade uses 0.2 so racers take 20 % of the damage; omitted = 1.0.",
+      "description": "Multiplier on the contact impulses that reach the damage model of *racer* cars (the\nplayer's racer and AI racers). Traffic and police (AI or player-driven) always take\n1.0. Arcade uses 0.25, which leaves racers about 20 % of the damage (the lattice takes\nthe first part of a hit elastically); omitted = 1.0.",
       "type": "number",
       "format": "float",
       "default": 1.0
@@ -88,7 +88,7 @@
       "description": "Damage mode. Every mode runs the same code path with a different [`crate::ModeTable`].",
       "oneOf": [
         {
-          "description": "Forgiving: the Simulation table with racer cars (player and AI racers) taking 20 % of\nthe damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.",
+          "description": "Forgiving: the Simulation table with racer cars (player and AI racers) taking about 20 %\nof the damage (`ModeTable::racer_damage_scale`); traffic and police take full damage.",
           "type": "string",
           "const": "Arcade"
         },
