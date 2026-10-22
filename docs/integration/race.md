@@ -573,6 +573,13 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   `CourseSpec::PoiAhead`, 402 m from Ashpeak Waterfront, one AI), `ashpeak_metro_circuit` (2 laps
   round the downtown core grid).
 
+- **Tests**: `wp_race` unit (`spots::tests`), `tests/race_spots.rs` (Port Vesper spots on
+  `vesper_v2` and `ashpeak`, no overlaps; the Ashpeak course test is ignored), `wp_wasm`
+  `race_spots_tests` (scripted drive into the Hollins spot, honk outside / moving / held = nothing,
+  stopped press = one start, on both maps). Browser: `npm run e2e:race-spots`
+  (`CITY=ashpeak` for the combined map), uses the new e2e helper `debug_place(entity, x, y, yaw,
+  speed)`.
+
 ### Lead TODO after merging the Ashpeak districts
 1. `cargo test -p wp_race --test race_spots -- --ignored`: lists every Ashpeak race whose
    planned length is off its `length_hint_m` (they are plan estimates) or that does not plan

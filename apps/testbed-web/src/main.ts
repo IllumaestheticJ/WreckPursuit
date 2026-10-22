@@ -1625,6 +1625,8 @@ async function main(): Promise<void> {
     layout,
     /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
     radioStrip,
+    /** Honk-to-start spots view (src/race_spots.ts): `raceSpots.inside`, `raceSpots.group`. */
+    raceSpots,
     ready: true,
     stopRecording,
     loadReplay,
