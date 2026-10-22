@@ -19,7 +19,9 @@
 //! `WP_PACE_TOD=23.0` (time of day, h), `WP_PACE_PLAYER=1` (the player seat stays a player car,
 //! so traffic spawns round it as in the browser),
 //! `WP_PACE_SOLO=1` (one car only: the pole car), `WP_PACE_GEOM=1` (geometry-only limits,
-//! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car).
+//! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car),
+//! `WP_PACE_TYRE` / `WP_PACE_GRIP` / `WP_PACE_RIDE='{…}'` (wp_vehicle lab overrides: fields over
+//! the shipped car / tyre tune, grip balance, ride, for physics A/B on every car).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -739,9 +741,34 @@ fn list<T: std::str::FromStr + Clone>(var: &str, default: &[T]) -> Vec<T> {
         .unwrap_or_else(|| default.to_vec())
 }
 
+/// `{…}` merged over `base`'s JSON fields.
+fn merged<T: serde::Serialize + serde::de::DeserializeOwned>(base: &T, json: &str) -> T {
+    let mut v = serde_json::to_value(base).unwrap();
+    let patch: serde_json::Value = serde_json::from_str(json).expect("override json");
+    for (k, x) in patch.as_object().expect("override object") {
+        v[k] = x.clone();
+    }
+    serde_json::from_value(v).expect("override fields")
+}
+
+/// `WP_PACE_TYRE` / `WP_PACE_GRIP` / `WP_PACE_RIDE`: wp_vehicle lab overrides (process-wide).
+fn lab_overrides_from_env() {
+    use wp_vehicle::{car_lab, grip_lab, ride_lab};
+    if let Ok(j) = std::env::var("WP_PACE_TYRE") {
+        car_lab::set_override(Some(merged(&car_lab::CarTune::shipped(), &j)));
+    }
+    if let Ok(j) = std::env::var("WP_PACE_GRIP") {
+        grip_lab::set_override(Some(merged(&grip_lab::GripBalance::shipped(), &j)));
+    }
+    if let Ok(j) = std::env::var("WP_PACE_RIDE") {
+        ride_lab::set_override(Some(merged(&ride_lab::RideTune::owner(), &j)));
+    }
+}
+
 #[test]
 #[ignore = "measurement sweep (minutes in release); see the module docs"]
 fn pace_sweep() {
+    lab_overrides_from_env();
     let opts = PaceOpts::from_env();
     let races: Vec<String> = list(
         "WP_PACE_RACES",
