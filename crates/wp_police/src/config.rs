@@ -450,6 +450,20 @@ pub struct AvoidConfig {
     pub oncoming_clear_m: f32,
     /// Speed cap while passing, m/s.
     pub pass_speed_mps: f32,
+    /// With lights, also pass a moving vehicle no faster than this, m/s ...
+    pub pass_moving_max_mps: f32,
+    /// ... at least this much slower than the unit wants to go, m/s ...
+    pub pass_moving_margin_mps: f32,
+    /// ... closer than this, m ...
+    pub pass_moving_gap_m: f32,
+    /// ... at its speed plus this, m/s ...
+    pub pass_moving_dv_mps: f32,
+    /// ... staying out at most this far when it is not clear behind yet, m.
+    pub pass_moving_max_m: f32,
+    /// A moving pass must end this far before the next junction centre, m.
+    pub pass_moving_junction_m: f32,
+    /// With lights, a vehicle slower than this counts as stopped (a creeping queue), m/s.
+    pub pass_crawl_mps: f32,
     /// While pulling out to pass, creep at this speed past anything still ahead, m/s ...
     pub pass_creep_mps: f32,
     /// ... while it is further than this, m.

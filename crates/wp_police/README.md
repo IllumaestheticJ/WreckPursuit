@@ -178,7 +178,18 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
   `pass_wait_siren_s` 1.5 s with lights), the unit pulls `pass_shift_m` left (or
   `pass_extra_shift_m` further, for a car straddling the centreline) when that lane is clear past
   the blocker and free of oncoming vehicles for `oncoming_clear_m`. It passes at ≤
-  `pass_speed_mps` and returns to its lane after the blocker.
+  `pass_speed_mps` and returns to its lane after the blocker. With lights a vehicle creeping
+  slower than `pass_crawl_mps` (a queue at a light) counts as stopped.
+- **Passing moving traffic** (lights on): a vehicle going the unit's way at ≤
+  `pass_moving_max_mps`, at least `pass_moving_margin_mps` slower than the unit wants, within
+  `pass_moving_gap_m`, not a police unit and not the target, is passed at its speed +
+  `pass_moving_dv_mps`. The pass length follows from that closing speed; the other lane must be
+  clear for it (oncoming cars counted at 15 m/s over the pass) and it must end
+  `pass_moving_junction_m` before the next junction. The unit rejoins only once the passed car
+  is clear behind (out at most `pass_moving_max_m`). In the chase report (12 seeds, race-AI
+  racer fleeing through traffic) this took captures from 11/12 to 12/12, mean pursuit 62 → 56 s,
+  nearest pursuer 43 → 37 m; police↔traffic incidents with lights on unchanged
+  (`police_traffic_contacts -- pursuit 900`: 1 contact, 6 overlaps, 7 wall hits, as before).
 - **Exceptions**: a unit in a `Pit` or `BoxIn` tactic ignores its own target (contact is the point).
   No unit ever overtakes its own target (a stopped target is an arrest).
 - **Traffic rules** (next junction on the track, refreshed at think rate; light from

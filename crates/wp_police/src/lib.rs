@@ -704,6 +704,7 @@ impl PoliceSystem {
             &u.cmd.track,
             u.cmd.lane_offset_m,
             u.body.speed,
+            u.cmd.speed_mps,
             u.cmd.siren,
             &self.obstacles,
             &self.cfg.pursuit.avoid,

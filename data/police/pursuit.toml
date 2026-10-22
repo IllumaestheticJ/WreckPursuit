@@ -90,6 +90,19 @@ pass_extra_shift_m = 0.9
 pass_clear_m = 8.0
 oncoming_clear_m = 50.0
 pass_speed_mps = 9.0
+# With lights: also pass a slow moving vehicle (pulling over for the siren, or just slow) that is
+# within pass_moving_gap_m, moves at most pass_moving_max_mps and pass_moving_margin_mps slower
+# than the unit wants and goes its way, at its speed + pass_moving_dv_mps, ending
+# pass_moving_junction_m before the next junction; rejoin only once it is clear behind (out at
+# most pass_moving_max_m).
+pass_moving_max_mps = 12.0
+pass_moving_margin_mps = 3.0
+pass_moving_gap_m = 25.0
+pass_moving_dv_mps = 6.0
+pass_moving_max_m = 150.0
+pass_moving_junction_m = 10.0
+# With lights a vehicle creeping slower than this (a queue at a light) is passed like a stopped one.
+pass_crawl_mps = 3.0
 pass_creep_mps = 2.0
 pass_creep_gap_m = 1.0
 # Traffic rules. Without lights: stop at reds (and yellows with room), slow to yield_mps through

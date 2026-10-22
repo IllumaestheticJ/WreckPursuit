@@ -578,7 +578,12 @@ fn chase_report() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(6);
-    for seed in 1..=seeds {
+    // WP_CHASE_FIRST=<k>: start at seed k (re-run one seed).
+    let first: u64 = std::env::var("WP_CHASE_FIRST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    for seed in first..first + seeds {
         let setup = common::Setup {
             seed,
             laps: 2,

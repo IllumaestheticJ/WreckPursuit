@@ -109,6 +109,9 @@ impl Obstacle {
     }
 }
 
+/// Speed assumed for oncoming traffic while checking room for a moving pass, m/s.
+const ONCOMING_ASSUMED_MPS: f32 = 15.0;
+
 /// Per-unit avoidance state.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AvoidState {
@@ -132,6 +135,16 @@ pub struct AvoidState {
     /// What caps the speed right now: a vehicle's entity id, a police unit id, or none.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
+    /// The pass in progress is of a moving vehicle (lights on): held at `pass_speed_now_mps`
+    /// and only ended once the passed vehicle is clear behind.
+    #[serde(default)]
+    pub pass_moving: bool,
+    /// Speed cap while passing a moving vehicle, m/s.
+    #[serde(default)]
+    pub pass_speed_now_mps: f32,
+    /// Arc length where the current pass started, m.
+    #[serde(default)]
+    pub pass_from_s: f32,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -157,6 +170,9 @@ impl Default for AvoidState {
             yield_s: 0.0,
             unit_wait_s: 0.0,
             blocked_by: None,
+            pass_moving: false,
+            pass_speed_now_mps: 0.0,
+            pass_from_s: 0.0,
         }
     }
 }
@@ -348,8 +364,9 @@ pub(crate) fn horizon(v: f32, cfg: &AvoidConfig) -> f32 {
 
 /// Update `st` for one tick of `dt` and return the lane offset to steer for.
 ///
-/// `base_offset_m` is the command's lane offset, `v` the unit's speed and `siren` whether it
-/// runs lights (it then passes sooner).
+/// `base_offset_m` is the command's lane offset, `v` the unit's speed, `want_mps` the speed
+/// its command asks for and `siren` whether it runs lights (it then passes sooner, and also
+/// passes slow moving vehicles).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn update(
     st: &mut AvoidState,
@@ -357,13 +374,32 @@ pub(crate) fn update(
     track: &Track,
     base_offset_m: f32,
     v: f32,
+    want_mps: f32,
     siren: bool,
     obstacles: &[Obstacle],
     cfg: &AvoidConfig,
     dt: f32,
 ) -> f32 {
     if st.pass_offset_m.is_some() && me.track_s > st.pass_until_s {
-        st.pass_offset_m = None;
+        // A moving vehicle may not be behind yet: keep going until it is clear of the lane
+        // ahead of the rejoin point (up to `pass_moving_max_m` in all).
+        let still_beside = st.pass_moving
+            && scan(
+                me,
+                track,
+                base_offset_m,
+                cfg.pass_clear_m + 10.0,
+                obstacles,
+                cfg,
+                false,
+            )
+            .is_some_and(|b| b.gap_m < cfg.pass_clear_m);
+        if still_beside && me.track_s - st.pass_from_s < cfg.pass_moving_max_m {
+            st.pass_until_s = me.track_s + 5.0;
+        } else {
+            st.pass_offset_m = None;
+            st.pass_moving = false;
+        }
     }
     let offset = st.pass_offset_m.unwrap_or(base_offset_m);
     let h = horizon(v, cfg);
@@ -429,19 +465,58 @@ pub(crate) fn update(
         } else {
             0.0
         };
-        st.limit_mps = st.limit_mps.max(creep).min(cfg.pass_speed_mps);
+        st.limit_mps = if st.pass_moving {
+            st.limit_mps.min(st.pass_speed_now_mps)
+        } else {
+            st.limit_mps.max(creep).min(cfg.pass_speed_mps)
+        };
         st.blocked_s = 0.0;
         return offset;
     }
-    let stuck = blocker.filter(|b| {
-        b.speed_mps < cfg.stopped_mps
-            && b.gap_m < cfg.pass_gap_m
-            && (b.entity.is_none() || b.entity != me.target)
+    let not_target = |b: &Blocker| b.entity.is_none() || b.entity != me.target;
+    // With lights a crawling vehicle (a queue creeping up to a light) counts as stopped.
+    let stopped = if siren {
+        cfg.pass_crawl_mps
+    } else {
+        cfg.stopped_mps
+    };
+    let stuck =
+        blocker.filter(|b| b.speed_mps < stopped && b.gap_m < cfg.pass_gap_m && not_target(b));
+    // With lights a slow moving vehicle (pulling over for the siren, or just slow) is passed
+    // too, when the unit wants to go clearly faster and no junction falls inside the pass.
+    let slow = blocker.filter(|b| {
+        siren
+            && b.speed_mps >= stopped
+            // Going our way (not crossing or turning across the track).
+            && b.along_mps >= 0.7 * b.speed_mps
+            && b.along_mps <= cfg.pass_moving_max_mps
+            && b.along_mps < want_mps - cfg.pass_moving_margin_mps
+            && b.gap_m < cfg.pass_moving_gap_m
+            && b.unit.is_none()
+            && not_target(b)
     });
-    let Some(b) = stuck else {
+    let moving = stuck.is_none() && slow.is_some();
+    let Some(b) = stuck.or(slow) else {
         st.blocked_s = 0.0;
         return offset;
     };
+    // Passing a moving vehicle: at its speed + `pass_moving_dv_mps`; the pass covers the
+    // relative distance (gap + both cars + clearance) at that closing speed.
+    let pass_speed = b.along_mps.max(0.0) + cfg.pass_moving_dv_mps;
+    let pass_len = if moving {
+        let rel = b.gap_m.max(0.0) + 4.0 * UNIT_HALF_LENGTH_M + cfg.pass_clear_m;
+        pass_speed * rel / cfg.pass_moving_dv_mps
+    } else {
+        0.0
+    };
+    if moving
+        && st
+            .junction
+            .is_some_and(|j| j.s - me.track_s < pass_len + cfg.pass_moving_junction_m)
+    {
+        st.blocked_s = 0.0;
+        return offset;
+    }
     // Without lights a unit queues like traffic: no passing near a junction (a red-light queue).
     let near_junction = st
         .junction
@@ -461,26 +536,35 @@ pub(crate) fn update(
     }
     // Other lane (or, for a vehicle straddling the centreline, a little further left): clear
     // past the blocker, and no oncoming vehicle close.
-    let need = (b.far_s - me.track_s) + cfg.pass_clear_m;
+    let need = if moving {
+        pass_len
+    } else {
+        (b.far_s - me.track_s) + cfg.pass_clear_m
+    };
+    // An oncoming car keeps coming during a long moving pass (at up to ~15 m/s).
+    let oncoming_need = need
+        + cfg.oncoming_clear_m
+        + if moving {
+            ONCOMING_ASSUMED_MPS * pass_len / pass_speed.max(1.0)
+        } else {
+            0.0
+        };
     for shift in [cfg.pass_shift_m, cfg.pass_shift_m + cfg.pass_extra_shift_m] {
         let alt = base_offset_m - shift;
-        let clear = match scan(
-            me,
-            track,
-            alt,
-            need + cfg.oncoming_clear_m,
-            obstacles,
-            cfg,
-            false,
-        ) {
+        let clear = match scan(me, track, alt, oncoming_need, obstacles, cfg, false) {
             None => true,
-            Some(o) => {
-                o.gap_m > need && (o.along_mps > -1.0 || o.gap_m > need + cfg.oncoming_clear_m)
-            }
+            Some(o) => o.gap_m > need && (o.along_mps > -1.0 || o.gap_m > oncoming_need),
         };
         if clear {
             st.pass_offset_m = Some(alt);
-            st.pass_until_s = b.far_s + UNIT_HALF_LENGTH_M + cfg.pass_clear_m;
+            st.pass_until_s = if moving {
+                me.track_s + pass_len
+            } else {
+                b.far_s + UNIT_HALF_LENGTH_M + cfg.pass_clear_m
+            };
+            st.pass_moving = moving;
+            st.pass_speed_now_mps = pass_speed;
+            st.pass_from_s = me.track_s;
             st.blocked_s = 0.0;
             return alt;
         }
@@ -747,7 +831,18 @@ mod tests {
         let dt = 1.0 / 240.0;
         let mut off = 1.75;
         for _ in 0..(240.0 * (c.pass_wait_siren_s + 0.5)) as usize {
-            off = update(&mut st, &m, &straight(), 1.75, 0.0, true, &obs, &c, dt);
+            off = update(
+                &mut st,
+                &m,
+                &straight(),
+                1.75,
+                0.0,
+                20.0,
+                true,
+                &obs,
+                &c,
+                dt,
+            );
         }
         assert!(off < 0.0, "should pull into the other lane, offset {off}");
         assert!(st.limit_mps > 0.0);
@@ -765,10 +860,82 @@ mod tests {
         ];
         let mut st = AvoidState::default();
         for _ in 0..(240.0 * (c.pass_wait_siren_s + 0.5)) as usize {
-            off = update(&mut st, &m, &straight(), 1.75, 0.0, true, &obs2, &c, dt);
+            off = update(
+                &mut st,
+                &m,
+                &straight(),
+                1.75,
+                0.0,
+                20.0,
+                true,
+                &obs2,
+                &c,
+                dt,
+            );
         }
         assert_eq!(off, 1.75);
         assert_eq!(st.limit_mps, 0.0);
+    }
+
+    /// Drive a unit (at its passing or follow cap, up to 15 m/s) behind a car moving at 4 m/s
+    /// in its lane for `secs`; returns the unit's state, its lane offset and its arc length,
+    /// and the car's arc length.
+    fn chase_slow_car(siren: bool, others: &[Obstacle], secs: f32) -> (AvoidState, f32, f32, f32) {
+        let c = cfg();
+        let dt = 1.0 / 240.0;
+        let (mut s_u, mut s_car, mut v) = (0.0f32, 12.0f32, 4.0f32);
+        let mut st = AvoidState::default();
+        let mut off = 1.75;
+        for _ in 0..(240.0 * secs) as usize {
+            let mut obs = vec![Obstacle::car(
+                Some(EntityId(2)),
+                None,
+                [1.75, s_car],
+                [0.0, 4.0],
+                [0.0, 1.0],
+            )];
+            obs.extend_from_slice(others);
+            let m = me(s_u, [off, s_u]);
+            off = update(&mut st, &m, &straight(), 1.75, v, 15.0, siren, &obs, &c, dt);
+            v = st.limit_mps.clamp(0.0, 15.0);
+            s_u += v * dt;
+            s_car += 4.0 * dt;
+        }
+        (st, off, s_u, s_car)
+    }
+
+    #[test]
+    fn with_lights_passes_a_slow_moving_car_and_rejoins_ahead_of_it() {
+        // Mid-pass: out in the other lane, faster than the car.
+        let (st, off, s_u, s_car) = chase_slow_car(true, &[], 3.0);
+        assert!(off < 0.0 && st.pass_moving, "offset {off}, {st:?}");
+        assert!(st.limit_mps > 4.0 + 3.0, "{}", st.limit_mps);
+        assert!(s_u < s_car + 5.0);
+        // Later: back in the lane, well ahead of the car.
+        let (st, off, s_u, s_car) = chase_slow_car(true, &[], 12.0);
+        assert_eq!(off, 1.75, "{st:?}");
+        assert!(!st.pass_moving);
+        assert!(
+            s_u > s_car + 2.0 * UNIT_HALF_LENGTH_M,
+            "unit {s_u}, car {s_car}"
+        );
+    }
+
+    #[test]
+    fn slow_moving_car_is_followed_without_lights_or_with_oncoming_traffic() {
+        let (_, off, s_u, s_car) = chase_slow_car(false, &[], 12.0);
+        assert_eq!(off, 1.75);
+        assert!(s_u < s_car, "unit {s_u}, car {s_car}");
+        // A car coming the other way 90 m out: the long pass does not fit.
+        let oncoming = [Obstacle::car(
+            Some(EntityId(3)),
+            None,
+            [-1.75, 90.0],
+            [0.0, -12.0],
+            [0.0, -1.0],
+        )];
+        let (st, off, _, _) = chase_slow_car(true, &oncoming, 1.0);
+        assert_eq!(off, 1.75, "{st:?}");
     }
 
     #[test]
@@ -846,6 +1013,7 @@ mod tests {
                 &straight(),
                 1.75,
                 0.0,
+                20.0,
                 false,
                 &obs,
                 &c,
@@ -884,6 +1052,7 @@ mod tests {
             &straight(),
             1.75,
             5.0,
+            10.0,
             false,
             &cross,
             &c,
