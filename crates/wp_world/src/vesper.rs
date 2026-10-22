@@ -3239,6 +3239,79 @@ fn lane_pose(built: &Built, road: usize, s: f32, fwd: bool) -> Option<(V3, f32, 
     Some((p, geom::yaw_of(d), lane))
 }
 
+/// Pose `s` m along `lane` (start = 0), walking on through straight-through connections
+/// when `s` lies beyond either end: before the start into the best-aligned lane that leads
+/// straight into it, past the end into the best-aligned lane it leads straight into. The
+/// connector across a junction box is not counted. Clamped to the last lane reached when the
+/// chain ends.
+fn lane_walk_pose(built: &Built, lane: LaneId, s: f32) -> Option<(V3, f32, LaneId)> {
+    let lanes = &built.lanes;
+    let dir = |l: LaneId, at_end: bool| {
+        let pl = &lanes[l as usize].polyline;
+        let (p, q) = if at_end {
+            (pl[pl.len() - 2], pl[pl.len() - 1])
+        } else {
+            (pl[0], pl[1])
+        };
+        geom::normalize(geom::sub(geom::xy(q), geom::xy(p)))
+    };
+    let dot = geom::dot;
+    let len = |l: LaneId| {
+        *geom::cumulative(&lanes[l as usize].polyline)
+            .last()
+            .unwrap_or(&0.0)
+    };
+    let (mut lane, mut s) = (lane, s);
+    // Bounded: a straight chain never needs more than a few lanes here.
+    for _ in 0..16 {
+        if s < 0.0 {
+            let start = dir(lane, false);
+            let prev = (0..lanes.len() as LaneId)
+                .filter(|k| {
+                    lanes[*k as usize]
+                        .connections
+                        .iter()
+                        .any(|c| c.to == lane && c.turn == TurnKind::Straight)
+                })
+                .max_by(|x, y| {
+                    dot(dir(*x, true), start)
+                        .total_cmp(&dot(dir(*y, true), start))
+                        .then(y.cmp(x))
+                });
+            let Some(p) = prev else {
+                s = 0.0;
+                break;
+            };
+            lane = p;
+            s += len(p);
+        } else if s > len(lane) {
+            let end = dir(lane, true);
+            let next = lanes[lane as usize]
+                .connections
+                .iter()
+                .filter(|c| c.turn == TurnKind::Straight)
+                .map(|c| c.to)
+                .max_by(|x, y| {
+                    dot(dir(*x, false), end)
+                        .total_cmp(&dot(dir(*y, false), end))
+                        .then(y.cmp(x))
+                });
+            let Some(n) = next else {
+                s = len(lane);
+                break;
+            };
+            s -= len(lane);
+            lane = n;
+        } else {
+            break;
+        }
+    }
+    let pl = &lanes[lane as usize].polyline;
+    let cum = geom::cumulative(pl);
+    let (p, d) = geom::point_at(pl, &cum, s.clamp(0.0, cum[cum.len() - 1]));
+    Some((p, geom::yaw_of(d), lane))
+}
+
 fn nearest_lane(built: &Built, p: V2) -> Option<(LaneId, V3, f32)> {
     let mut best: Option<(LaneId, V3, f32, f32)> = None;
     for (i, l) in built.lanes.iter().enumerate() {
@@ -3475,32 +3548,43 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         }
     }
     // Route ends either side of each covered road (drive-through and pursuit scenarios):
-    // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
-    // after the second.
+    // "<name> entry" sits `before` m (along the lanes) before the first portal in the
+    // forward direction, "<name> exit" `after` m past the second. Measured from the portals,
+    // not from the road ends: the highway port moved Founders Cut's south portal to 18 m
+    // from its road's first junction (round 12: 131 m) and divided Loop 9 into shorter
+    // carriageway pieces, which left fixed road offsets inside the covers (release
+    // 2026-10-22). The entry may lie on the road before (straight through the junction).
     let tunnel_ends: [(&str, f32, f32); 2] = [
-        ("Hollins Tunnel", 950.0, -1100.0),
-        ("Founders Cut", 40.0, -40.0),
+        // Through the Hollins Heights shoulder at the 55 mph limit.
+        ("Hollins Tunnel", 150.0, 180.0),
+        // Down the approach into the trench, out up the north ramp (round 12: 91 / 99 m).
+        ("Founders Cut", 90.0, 100.0),
     ];
-    for (name, s0, s1) in tunnel_ends {
+    for (name, before, after) in tunnel_ends {
         let Some(c) = covered.iter().find(|c| c.name == name) else {
             continue;
         };
+        let Some(&lane) = built.road_lanes[c.road as usize].fwd.last() else {
+            continue;
+        };
+        let pl = &built.lanes[lane as usize].polyline;
+        let cum = geom::cumulative(pl);
+        let on_lane = |p: V3| geom::project(pl, &cum, geom::xy(p)).s;
+        let (a, b) = (on_lane(c.centre[0]), on_lane(c.centre[c.centre.len() - 1]));
+        let (first, second) = (a.min(b), a.max(b));
         // "<name> lay-by": the forward kerb lane in the middle of the covered stretch (a
         // place to hide from the helicopter).
         let mid = {
             let sh = CoverShape::new(c);
             geom::xy(geom::point_at(&c.centre, &sh.cum, sh.length() * 0.5).0)
         };
-        let lay_by = built.road_lanes[c.road as usize].fwd.last().map(|l| {
-            let pl = &built.lanes[*l as usize].polyline;
-            geom::project(pl, &geom::cumulative(pl), mid).s
-        });
+        let lay_by = geom::project(pl, &cum, mid).s;
         for (suffix, s) in [
-            ("entry", s0),
-            ("lay-by", lay_by.unwrap_or(s0)),
-            ("exit", s1),
+            ("entry", first - before),
+            ("lay-by", lay_by),
+            ("exit", second + after),
         ] {
-            if let Some((p, yaw, lane)) = lane_pose(&built, c.road as usize, s, true) {
+            if let Some((p, yaw, lane)) = lane_walk_pose(&built, lane, s) {
                 pois.push(Poi {
                     kind: PoiKind::RaceStartGrid,
                     name: format!("{name} {suffix}"),
@@ -3961,5 +4045,41 @@ mod tests {
             .buildings
             .iter()
             .all(|b| !in_cover_corridor(&shapes, &b.footprint)));
+    }
+
+    /// "<tunnel> entry" / "exit" stand outside the cover, before and after it, and "lay-by"
+    /// inside; the route between entry and exit runs through the whole cover. (After the
+    /// highway port both ends of each pair sat inside the cover: fixed road offsets on a
+    /// shorter road piece.)
+    #[test]
+    fn tunnel_route_ends_lie_either_side_of_the_cover() {
+        let (net, _) = city();
+        let map = crate::CityMap::new(net.clone());
+        let poi = |n: String| {
+            net.pois
+                .iter()
+                .position(|p| p.name == n)
+                .unwrap_or_else(|| panic!("no POI {n}"))
+        };
+        for (i, c) in net.covered.iter().enumerate() {
+            let len = CoverShape::new(c).length();
+            let (e, l, x) = (
+                poi(format!("{} entry", c.name)),
+                poi(format!("{} lay-by", c.name)),
+                poi(format!("{} exit", c.name)),
+            );
+            let at = |k: usize| net.pois[k].pos;
+            assert_eq!(map.covered_at(at(e)), None, "{} entry", c.name);
+            assert_eq!(map.covered_at(at(l)), Some(i), "{} lay-by", c.name);
+            assert_eq!(map.covered_at(at(x)), None, "{} exit", c.name);
+            let r = crate::routes::plan_route_between_pois(&map, e, x).expect("route");
+            // At least 90 m of road either side of the portals.
+            assert!(
+                r.length_m > len + 180.0 && r.length_m < len + 400.0,
+                "{}: route {} m for a {len} m cover",
+                c.name,
+                r.length_m
+            );
+        }
     }
 }
