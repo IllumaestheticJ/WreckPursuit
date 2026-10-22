@@ -12,8 +12,8 @@
 //!   key, throttle on, above 30 km/h, |body slip| ≥ 8°: p50 / p90 / max, and the time it takes
 //!   to get within 2° of where it settles 0.5 s after a release in a slide (median).
 //!
-//! Reference (OWNER_KEY_TECHNIQUE.md): settled hands-off marker angle Rocket p50 16°, p90 24°,
-//! max 34°; Hammerhead p50 28°, p90 45°, max 47°; roughly a quarter to a third of full lock.
+//! Reference (OWNER_KEY_TECHNIQUE.md): settled hands-off marker angle parity_rwd_e p50 16°, p90 24°,
+//! max 34°; parity_rwd_f p50 28°, p90 45°, max 47°; roughly a quarter to a third of full lock.
 //!
 //! `cargo run --release -p wp_vehicle --example owner_replay`
 
@@ -31,22 +31,22 @@ const TPS: usize = 240;
 /// (clip file, parity car, the clip's TCS).
 const CLIPS: [(&str, &str, &str); 4] = [
     (
-        "2026-10-21_1630_rocket_rx_track.json",
+        "2026-10-21_1630_parity_rwd_e_track.json",
         "parity_rwd_e",
         "Off",
     ),
     (
-        "2026-10-21_1634_hammerhead_rs_track.json",
+        "2026-10-21_1634_parity_rwd_f_track.json",
         "parity_rwd_f",
         "Off",
     ),
     (
-        "2026-10-21_1637_hammerhead_rs_b_keys.json",
+        "2026-10-21_1637_parity_rwd_f_b_keys.json",
         "parity_rwd_f",
         "Off",
     ),
     (
-        "2026-10-21_1639_hammerhead_rs_tcs_half_keys.json",
+        "2026-10-21_1639_parity_rwd_f_tcs_half_keys.json",
         "parity_rwd_f",
         "Half",
     ),
