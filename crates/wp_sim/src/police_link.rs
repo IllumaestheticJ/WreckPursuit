@@ -308,6 +308,9 @@ impl Sim {
         self.vehicles
             .iter()
             .filter(|v| matches!(v.kind, VehicleKind::Player | VehicleKind::AiRacer))
+            // A racer driving light far from every player and wanted by nobody is out of the
+            // police's picture (SR-3): it rejoins as soon as it nears the player or is wanted.
+            .filter(|v| v.light.is_none() || self.police.is_wanted_or_pursued(v.id))
             .map(|v| {
                 let s = v.vehicle.state();
                 wp_police::RacerView {
