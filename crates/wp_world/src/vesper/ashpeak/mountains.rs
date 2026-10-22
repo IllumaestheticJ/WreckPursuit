@@ -128,7 +128,10 @@ fn terminal(name: &str) -> V2 {
 /// Position on `path` where it first reaches `x` going west, as an arc length.
 fn arc_at_x(path: &[V2], x: f32) -> f32 {
     let cum = cum2(path);
-    let i = path.iter().position(|q| q[0] <= x).unwrap_or(path.len() - 1);
+    let i = path
+        .iter()
+        .position(|q| q[0] <= x)
+        .unwrap_or(path.len() - 1);
     cum[i]
 }
 
@@ -277,32 +280,30 @@ pub(super) fn plans() -> Plans {
         ridge_heading,
         &[
             A(40.0, -80.0),
-            Y(2830.0),
+            Y(2865.0),
             A(20.0, 172.0),
             Y(2610.0),
             A(20.0, -172.0),
-            Y(2840.0),
+            Y(2865.0),
             A(22.0, 172.0),
-            Y(2600.0),
+            Y(2610.0),
             A(18.0, -172.0),
-            Y(2850.0),
+            Y(2865.0),
             A(20.0, 172.0),
             Y(2610.0),
             A(21.0, -172.0),
-            Y(2840.0),
+            Y(2865.0),
             A(19.0, 172.0),
-            Y(2600.0),
+            Y(2610.0),
             A(20.0, -172.0),
-            Y(2840.0),
+            Y(2865.0),
             A(18.0, 172.0),
-            Y(2640.0),
-            A(24.0, -150.0),
-            S(30.0),
-            A(60.0, 60.0),
+            Y(gate[1] + 30.0),
+            A(30.0, -82.0),
             X(gate[0]),
         ],
     );
-    warp(&mut summit, gate, 300.0);
+    warp(&mut summit, gate, 150.0);
     let lot: Vec<V2> = (0..48)
         .map(|k| {
             let (s, c) = wp_math::sin_cos(std::f32::consts::TAU * k as f32 / 48.0);
@@ -405,7 +406,10 @@ pub(super) fn layout(g: &mut Gen) {
     g.road(cuts[3], granite, p.grade.clone(), TOUGE, GRADE);
     let camp = g.node(p.forest[p.forest.len() - 1]);
     g.road(cuts[1], camp, p.forest.clone(), GRAVEL, FOREST);
-    for (k, path, name) in [(0, &p.overlook_s, OVERLOOK_S), (2, &p.overlook_n, OVERLOOK_N)] {
+    for (k, path, name) in [
+        (0, &p.overlook_s, OVERLOOK_S),
+        (2, &p.overlook_n, OVERLOOK_N),
+    ] {
         let end = g.node(path[path.len() - 1]);
         g.road(cuts[k], end, path.clone(), LOT_ROAD, name);
     }
@@ -587,7 +591,10 @@ pub(super) fn extra_buildings(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
     for k in 0..7 {
         let (s, co) = wp_math::sin_cos(0.9 * k as f32);
         spots.push((
-            geom::add(camp, [(22.0 + 4.0 * k as f32) * co, (22.0 + 4.0 * k as f32) * s]),
+            geom::add(
+                camp,
+                [(22.0 + 4.0 * k as f32) * co, (22.0 + 4.0 * k as f32) * s],
+            ),
             [co, s],
         ));
     }
@@ -713,10 +720,22 @@ pub(super) fn pois(site: &mut Site) -> Vec<Poi> {
     let mut out = Vec::new();
     let probe = |path: &[V2], s: f32| point_on(path, &cum2(path), s).0;
     if let Some(r) = site.road_named(PASS, probe(&p.south, 60.0), 10.0) {
-        out.extend(site.lane_poi(PoiKind::RaceStartGrid, plan::POI_CROWFOOT_ASCENT, r, 15.0, true));
+        out.extend(site.lane_poi(
+            PoiKind::RaceStartGrid,
+            plan::POI_CROWFOOT_ASCENT,
+            r,
+            15.0,
+            true,
+        ));
     }
     if let Some(r) = site.road_named(PASS, probe(&p.north, 60.0), 10.0) {
-        out.extend(site.lane_poi(PoiKind::RaceStartGrid, plan::POI_CROWFOOT_SUMMIT, r, 25.0, true));
+        out.extend(site.lane_poi(
+            PoiKind::RaceStartGrid,
+            plan::POI_CROWFOOT_SUMMIT,
+            r,
+            25.0,
+            true,
+        ));
         out.extend(site.lane_poi(
             PoiKind::RaceStartGrid,
             plan::POI_CROWFOOT_NORTH,
@@ -727,7 +746,13 @@ pub(super) fn pois(site: &mut Site) -> Vec<Poi> {
     }
     if let Some(r) = site.road_named(SUMMIT_ROAD, probe(&p.summit, 60.0), 10.0) {
         // Downhill from the lot gate.
-        out.extend(site.lane_poi(PoiKind::RaceStartGrid, plan::POI_OBSERVATORY, r, 25.0, false));
+        out.extend(site.lane_poi(
+            PoiKind::RaceStartGrid,
+            plan::POI_OBSERVATORY,
+            r,
+            25.0,
+            false,
+        ));
     }
     if let Some(r) = site.road_named(GRADE, probe(&p.grade, 60.0), 10.0) {
         out.extend(site.lane_poi(PoiKind::RaceStartGrid, GRADE, r, 20.0, true));
@@ -821,7 +846,11 @@ mod tests {
         let (south, north) = (pass[0], pass[1]);
         let crowfoot = terminal("Crowfoot Interchange");
         assert!(near(south.centre[0], plan::R40N_END, 15.0));
-        assert!(near(*south.centre.last().unwrap(), plan::CROWFOOT_SADDLE, 25.0));
+        assert!(near(
+            *south.centre.last().unwrap(),
+            plan::CROWFOOT_SADDLE,
+            25.0
+        ));
         assert!(near(north.centre[0], plan::CROWFOOT_SADDLE, 25.0));
         assert!(near(*north.centre.last().unwrap(), crowfoot, 15.0));
         // Nine hairpins on the south face, three on the north face.
@@ -888,7 +917,11 @@ mod tests {
                     };
                     let q = geom::add(geom::xy(p), geom::scale(geom::right_of(tan), lat));
                     let g = t.height_at(q);
-                    assert!(g <= road + 0.03, "terrain {g} above road {road} at {q:?}");
+                    assert!(
+                        g <= road + 0.03,
+                        "terrain {g} above road {road} at {q:?} on {}",
+                        rep.road_names[s.road as usize]
+                    );
                 }
             }
         }
@@ -948,7 +981,11 @@ mod tests {
                 })
                 .count()
         };
-        assert_eq!(landmark_within(plan::ASHPEAK_SUMMIT, 25.0), 2, "observatory");
+        assert_eq!(
+            landmark_within(plan::ASHPEAK_SUMMIT, 25.0),
+            2,
+            "observatory"
+        );
         let letters = landmark_within(SIGN_CENTRE, 130.0);
         assert!(letters >= 40, "{letters} letter slabs");
         let cabins = net
