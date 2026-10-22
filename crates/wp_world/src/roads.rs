@@ -147,35 +147,14 @@ impl RoadGraphView {
             } else {
                 RoadClass::Local
             };
-            // Centreline: node centres plus the road's own centre between them (the paved
-            // surface's centreline: the line between the two directions, or the middle of a
-            // one-way road). Users offset from it into a lane, so it must not be a lane itself:
-            // the first lane's line put units driving one way a lane too far right and the other
-            // way onto the centre line (head-on with traffic on curved roads).
-            let (pa, pb) = (
-                geom::xy(net.nodes[a as usize].pos),
-                geom::xy(net.nodes[b as usize].pos),
-            );
-            let mut polyline = vec![pa];
-            match net.surfaces.iter().find(|sf| sf.road == first.road) {
-                Some(sf) => {
-                    let mut centre: Vec<V2> = sf.centre.iter().map(|p| geom::xy(*p)).collect();
-                    if geom::dist(centre[0], pa) > geom::dist(centre[centre.len() - 1], pa) {
-                        centre.reverse();
-                    }
-                    // Interior bends only: the trimmed ends sit just short of the nodes (a
-                    // straight road stays a single node-to-node line).
-                    let n = centre.len();
-                    polyline.extend(centre.into_iter().take(n.saturating_sub(1)).skip(1));
-                }
-                None => {
-                    let pl = &first.polyline;
-                    for p in pl.iter().take(pl.len() - 1).skip(1) {
-                        polyline.push(geom::xy(*p));
-                    }
-                }
+            // Centreline: node centres plus the interior bends of the first lane (offset by
+            // half a road width at most; exact geometry lives in the lanes).
+            let mut polyline = vec![geom::xy(net.nodes[a as usize].pos)];
+            let pl = &first.polyline;
+            for p in pl.iter().take(pl.len() - 1).skip(1) {
+                polyline.push(geom::xy(*p));
             }
-            polyline.push(pb);
+            polyline.push(geom::xy(net.nodes[b as usize].pos));
             let length_m = polyline.windows(2).map(|w| geom::dist(w[0], w[1])).sum();
             let (mp, _) = {
                 let pts: Vec<[f32; 3]> = polyline.iter().map(|p| [p[0], p[1], 0.0]).collect();

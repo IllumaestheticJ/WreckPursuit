@@ -557,14 +557,7 @@ impl Unit {
     }
 
     /// Set a new drive command and reset track progress.
-    pub fn set_command(&mut self, mut cmd: DriveCommand) {
-        // A car driven by physics cannot turn on the spot: without lights (lane driving, see
-        // `PoliceSystem::unit_input`) give it junction corners it can drive at its lane
-        // offset. The pro driver rounds its own line with lights on; internally driven units
-        // follow the track exactly.
-        if !self.internal && !cmd.siren {
-            cmd.track = Track::new(round_junction_corners(&cmd.track.pts, TURN_RADIUS_M));
-        }
+    pub fn set_command(&mut self, cmd: DriveCommand) {
         let (s, lat) = cmd.track.project(self.body.pos, 0.0, f32::INFINITY);
         self.track_s = s;
         self.on_track = lat < 2.0;
@@ -644,90 +637,6 @@ pub fn lane_point(track: &Track, s: f32, offset_m: f32) -> [f32; 2] {
     }
     let d = normalize(sub(track.point_at(s + 1.0), track.point_at(s - 1.0)));
     add(p, scale([d[1], -d[0]], offset_m))
-}
-
-/// Radius of the arcs [`round_junction_corners`] puts into route corners, m (centreline). With the
-/// lane offset on the inside of a right turn the car still drives about 8 m, inside its
-/// turning circle at junction speeds.
-pub const TURN_RADIUS_M: f32 = 10.0;
-
-/// Corners turning less than this (cos of the angle, ~25°) are left as they are.
-const ROUND_MIN_TURN_COS: f32 = 0.9;
-/// Corners turning more than this (cos, ~150°) are U-turns, handled by the turn-around logic.
-const ROUND_MAX_TURN_COS: f32 = -0.85;
-/// Arc length between the points of a rounded corner, m.
-const ROUND_STEP_M: f32 = 1.5;
-
-/// Route points with every junction corner replaced by a circular arc of `radius_m` (smaller
-/// where the legs are too short), tangent to both legs. A route through node centres turns on
-/// the spot, and a unit following it at a lane offset swings wide by its turning radius: into
-/// the oncoming lane on a right turn, into the parking lane on a left turn. Gentle bends and
-/// U-turns are left as they are.
-pub fn round_junction_corners(points: &[[f32; 2]], radius_m: f32) -> Vec<[f32; 2]> {
-    let t = Track::new(points.to_vec());
-    let n = t.pts.len();
-    if n < 3 {
-        return t.pts;
-    }
-    // Corners to round: (index, direction in, direction out, cos, sin of the turn).
-    type Corner = (usize, [f32; 2], [f32; 2], f32, f32);
-    let corners: Vec<Corner> = (1..n - 1)
-        .filter_map(|i| {
-            let a = normalize(sub(t.pts[i], t.pts[i - 1]));
-            let b = normalize(sub(t.pts[i + 1], t.pts[i]));
-            let c = dot(a, b);
-            (ROUND_MAX_TURN_COS..=ROUND_MIN_TURN_COS)
-                .contains(&c)
-                .then(|| (i, a, b, c, cross(a, b)))
-        })
-        .collect();
-    let mut out = vec![t.pts[0]];
-    // Arc length up to which the track has been emitted.
-    let mut done_s = 0.0;
-    let mut next_point = 1;
-    for (k, &(i, a, b, c, sn)) in corners.iter().enumerate() {
-        // Tangent length r · tan(θ / 2), at most half the way to the next corner (or the end)
-        // and not back past the previous arc.
-        let tan_half = sn.abs() / (1.0 + c);
-        let next_s = corners.get(k + 1).map_or(t.length(), |nc| t.cum[nc.0]);
-        let d = (radius_m * tan_half)
-            .min(0.5 * (next_s - t.cum[i]))
-            .min(t.cum[i] - done_s);
-        // Points before the arc.
-        while next_point < i && t.cum[next_point] < t.cum[i] - d {
-            out.push(t.pts[next_point]);
-            next_point += 1;
-        }
-        next_point = next_point.max(i + 1);
-        if d < 0.5 {
-            out.push(t.pts[i]);
-            done_s = t.cum[i];
-            continue;
-        }
-        let r = d / tan_half;
-        let p_in = sub(t.pts[i], scale(a, d));
-        let side = if sn > 0.0 { 1.0 } else { -1.0 };
-        let centre = add(p_in, scale([-a[1] * side, a[0] * side], r));
-        let theta = wp_math::atan2(sn, c);
-        let steps = ((theta.abs() * r / ROUND_STEP_M).ceil() as u32).max(2);
-        out.push(p_in);
-        let arm = sub(p_in, centre);
-        for j in 1..steps {
-            let (s_, c_) = sin_cos(theta * j as f32 / steps as f32);
-            out.push(add(
-                centre,
-                [arm[0] * c_ - arm[1] * s_, arm[0] * s_ + arm[1] * c_],
-            ));
-        }
-        out.push(add(t.pts[i], scale(b, d)));
-        done_s = t.cum[i] + d;
-        // Points the arc replaced.
-        while next_point < n - 1 && t.cum[next_point] <= done_s {
-            next_point += 1;
-        }
-    }
-    out.extend_from_slice(&t.pts[next_point..]);
-    Track::new(out).pts
 }
 
 /// Planned speed for a unit: corner planning plus a crawl while the unit faces away from its
@@ -936,54 +845,6 @@ impl Default for SteerGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Smallest radius of the circle through three consecutive points along `pts`.
-    fn min_radius(pts: &[[f32; 2]]) -> f32 {
-        pts.windows(3)
-            .map(|w| {
-                let (a, b, c) = (dist(w[0], w[1]), dist(w[1], w[2]), dist(w[0], w[2]));
-                let area2 = cross(sub(w[1], w[0]), sub(w[2], w[0])).abs();
-                if area2 < 1e-4 {
-                    f32::INFINITY
-                } else {
-                    a * b * c / (2.0 * area2)
-                }
-            })
-            .fold(f32::INFINITY, f32::min)
-    }
-
-    #[test]
-    fn junction_corners_become_drivable_arcs() {
-        // North along x = 0 in 6 m steps, right turn at the junction centre (0, 60), east.
-        let mut pts: Vec<[f32; 2]> = (0..=10).map(|k| [0.0, k as f32 * 6.0]).collect();
-        pts.extend((1..=10).map(|k| [k as f32 * 6.0, 60.0]));
-        let round = round_junction_corners(&pts, TURN_RADIUS_M);
-        assert_eq!(round[0], pts[0]);
-        assert_eq!(*round.last().unwrap(), *pts.last().unwrap());
-        // The centreline bends at the turn radius, not on the spot...
-        let r = min_radius(&round);
-        assert!((r - TURN_RADIUS_M).abs() < 0.5, "centreline radius {r}");
-        // ...and so does the lane a unit drives, 1.75 m to the right (the inside of the turn).
-        let t = Track::new(round);
-        let lane: Vec<[f32; 2]> = (0..=(t.length() as u32 / 3))
-            .map(|s| lane_point(&t, s as f32 * 3.0, 1.75))
-            .collect();
-        let r_lane = min_radius(&lane);
-        assert!(r_lane > TURN_RADIUS_M - 2.5, "lane radius {r_lane}");
-        // The lane path never strays into the oncoming lane (y > 60) after the turn.
-        assert!(
-            lane.iter().all(|p| p[0] < 1.0 || p[1] < 60.0 - 1.0),
-            "swung wide"
-        );
-    }
-
-    #[test]
-    fn gentle_bends_and_u_turns_stay() {
-        let bend = vec![[0.0, 0.0], [0.0, 10.0], [2.0, 20.0], [4.0, 30.0]];
-        assert_eq!(round_junction_corners(&bend, TURN_RADIUS_M), bend);
-        let u_turn = vec![[0.0, 0.0], [0.0, 30.0], [0.5, 0.0]];
-        assert_eq!(round_junction_corners(&u_turn, TURN_RADIUS_M), u_turn);
-    }
     use crate::config::PoliceConfig;
 
     fn l_track() -> Track {
