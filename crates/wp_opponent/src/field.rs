@@ -637,6 +637,11 @@ const WEAVE_GAIN_M: f32 = 20.0;
 /// one lane of mine), m.
 const WEAVE_MIN_SPAN_M: f32 = 3.0;
 
+/// A civilian's speed across the corridor below this is read as keeping its lane (no drift
+/// look-ahead): Loop 9 at 23:00, a civilian in the next lane reading ±0.37 m/s across the
+/// corridor held racers at its speed for 50 s, a metre of phantom drift over 3 s, m/s.
+const CIV_DRIFT_DEADBAND_MPS: f32 = 0.6;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
@@ -2354,7 +2359,15 @@ fn decide_racer(
             } else {
                 0.5
             };
-            let drift = o.v_n * t_reach.min(horizon);
+            // A civilian keeping its lane reads a few tenths of a m/s across the corridor
+            // (the corridor's sampled direction against its lane's); over the 3 s look-ahead
+            // that is a metre of phantom drift into the next lane.
+            let v_n = if matches!(o.who, Who::Civilian(_)) && o.v_n.abs() < CIV_DRIFT_DEADBAND_MPS {
+                0.0
+            } else {
+                o.v_n
+            };
+            let drift = v_n * t_reach.min(horizon);
             let lo = o.n.min(o.n + drift) - o.half_w - margin;
             let hi = o.n.max(o.n + drift) + o.half_w + margin;
             band.0 < hi && band.1 > lo
