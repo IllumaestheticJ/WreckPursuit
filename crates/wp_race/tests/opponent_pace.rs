@@ -955,18 +955,25 @@ fn pace_scenarios_hold_their_ranges() {
     assert!(fails.is_empty(), "{fails:#?}");
 }
 
-/// Loop 9 at 23:00 with traffic density 2.0: at least 44 of 48 cars finish per skill over seeds
-/// 1-8. A single seed's finishers swing by ±3 cars on millimetre grid differences (the pack
-/// packs up behind racers held by traffic), so the pace RONs check times only and this is
-/// the finishers gate. Release only, ~20 min: `just pace-loop9` (lead main-track gate,
-/// docs/LEAD_AUTOMATION.md).
+/// Loop 9 field mean finishing time over seeds 1-8, s, per skill (0.50, 0.95): measured
+/// 2026-10-22 on lead/opponent-pace (round12 6e0639e1 + 55058973). The check allows
+/// −15 % .. +15 % (+20 % at skill 0.50), the pace RON rule applied to the 8-seed mean.
+const LOOP9_MEAN_TIME_S: [(f32, f32); 2] = [(0.5, 242.0), (0.95, 220.0)];
+
+/// Loop 9 at 23:00 with traffic density 2.0, over seeds 1-8 per skill: at least 44 of 48 cars
+/// finish, and the mean time of the cars that finish is within the pace rule's range of
+/// [`LOOP9_MEAN_TIME_S`]. A single seed's finishers swing by ±3 cars and its times by 30-80 s
+/// on millimetre grid differences (the pack packs up behind racers held by traffic; the
+/// rest-stop bisect in opponent-pace.md), so this is Loop 9's finishers and pace gate and the
+/// single-seed pace RONs only catch gross breakage. Release only, ~20 min: `just pace-loop9`
+/// (lead main-track gate, docs/LEAD_AUTOMATION.md).
 #[test]
 #[ignore = "release-only 8-seed Loop 9 traffic check: `just pace-loop9`"]
 fn loop9_traffic_field_finishes() {
     let mut caps = BTreeMap::new();
     let mut fails = Vec::new();
     for skill in [0.5f32, 0.95] {
-        let mut fin = 0;
+        let mut times = Vec::new();
         let mut all = 0;
         for seed in 1..=8u64 {
             let opts = PaceOpts {
@@ -980,12 +987,26 @@ fn loop9_traffic_field_finishes() {
             };
             let cars = race_pace("loop9_circuit", skill, &opts, &mut caps);
             all += cars.len();
-            fin += cars.iter().filter(|c| c.time_s.is_some()).count();
+            times.extend(cars.iter().filter_map(|c| c.time_s));
         }
-        eprintln!("loop9 skill {skill}: {fin}/{all} finished over seeds 1-8");
+        let fin = times.len();
+        let mean = times.iter().sum::<f32>() / fin.max(1) as f32;
+        eprintln!("loop9 skill {skill}: {fin}/{all} finished over seeds 1-8, mean {mean:.1} s");
         if fin * 48 < 44 * all {
             fails.push(format!(
                 "skill {skill}: {fin}/{all} finished, want >= 44/48"
+            ));
+        }
+        let today = LOOP9_MEAN_TIME_S
+            .iter()
+            .find(|(k, _)| *k == skill)
+            .map(|(_, t)| *t)
+            .expect("a locked mean time per skill");
+        let up = if skill < 0.75 { 1.20 } else { 1.15 };
+        let (lo, hi) = (today * 0.85, today * up);
+        if !(lo..=hi).contains(&mean) {
+            fails.push(format!(
+                "skill {skill}: mean time {mean:.1} s outside {lo:.1}..{hi:.1} s"
             ));
         }
     }

@@ -26,6 +26,10 @@
 // merges (traffic, steering, police). Bisected (opponent-pace.md, "Loop 9 s95 slowdown"): the
 // step is ws/world's rest stops (6799200b, row 153); with traffic off they change nothing, and
 // over seeds 1-8 they make the field faster on average. This seed's traffic draw is unlucky.
+// Widened 2026-10-22 (lead): one seed at 23:00 / density 2.0 swings by 30-80 s on traffic
+// draw alone (opponent-pace.md, "Loop 9 s95 slowdown, bisected"), so this seed only catches
+// gross breakage: today's time −40 % .. +40 %, best_ratio at most today's × 1.4. Loop 9's pace
+// lock is the 8-seed mean in `loop9_traffic_field_finishes` (`just pace-loop9`).
 (
     name: "opponent_pace_loop9_circuit_s95",
     seed: 9,
@@ -105,12 +109,12 @@
         ),
     ],
     expect_pending: [
-        metric(name: "best_ratio", min: 0.97, max: 1.40),
-        metric(name: "race_time_s", entity: "ai_vic", min: 224.3, max: 303.5),
-        metric(name: "race_time_s", entity: "ai_mara", min: 189.4, max: 256.2),
-        metric(name: "race_time_s", entity: "ai_dez", min: 197.1, max: 266.7),
-        metric(name: "race_time_s", entity: "ai_juno", min: 225.2, max: 304.7),
-        metric(name: "race_time_s", entity: "ai_tito", min: 226.7, max: 306.8),
-        metric(name: "race_time_s", entity: "player", min: 213.9, max: 289.3),
+        metric(name: "best_ratio", min: 0.97, max: 1.89),
+        metric(name: "race_time_s", entity: "ai_vic", min: 158.3, max: 369.4),
+        metric(name: "race_time_s", entity: "ai_mara", min: 133.7, max: 312.0),
+        metric(name: "race_time_s", entity: "ai_dez", min: 139.1, max: 324.6),
+        metric(name: "race_time_s", entity: "ai_juno", min: 159.0, max: 370.9),
+        metric(name: "race_time_s", entity: "ai_tito", min: 160.0, max: 373.4),
+        metric(name: "race_time_s", entity: "player", min: 151.0, max: 352.3),
     ],
 )

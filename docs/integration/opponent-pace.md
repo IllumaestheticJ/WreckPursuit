@@ -1121,3 +1121,15 @@ Seed 3 at s95 has 4 cars that do not finish; the 8-seed gate (`just pace-loop9`)
 **Decision.** Keep the s95 re-lock; its RON comment now names the cause. Nothing goes to ws/world.
 The b20e07b2 step on this seed (the front three 5–22 s slower, but all six finish) is the
 traffic-body fix and the box-in escape. They were measured over several seeds when they landed.
+
+## Loop 9 pace lock on seeds 1–8 (2026-10-22, lead)
+
+- **8-seed mean time.** `loop9_traffic_field_finishes` (`just pace-loop9`) now also checks the
+  mean time of the cars that finish, per skill, over seeds 1–8 against `LOOP9_MEAN_TIME_S`. The
+  range is the pace RON rule applied to the mean: today −15 % .. +15 % (+20 % at s50).
+- **Measured on round12 6e0639e1 + 55058973:** s50 48/48 finished, mean 242.0 s; s95 44/48
+  finished, mean 220.0 s. Caveat: s95 sits exactly on the 44/48 floor. It was 47/48 on 9070a6ca,
+  before the round12 merges, and the rest stops reshuffle the traffic draw per seed.
+- **Single-seed RONs widened.** `pace_loop9_circuit_s50/s95` now allow today's times −40 % .. +40 %
+  and best_ratio up to today's × 1.4. They only catch gross breakage; the RON comments point at
+  the 8-seed check.
