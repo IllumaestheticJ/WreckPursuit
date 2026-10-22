@@ -1,9 +1,10 @@
 // Browser perf regression check (docs/integration/browser-perf.md): runs e2e/frame_profile.mjs on
 // the city chase and the rainy-night chase (1280×720) and on the phone profile (740×360 touch,
 // chase), all at the default "auto" graphics quality (= the software-GL / touch profiles under
-// headless SwiftShader), and fails on the targets below. Owner decision 2026-10-22 ("this will
-// be a PC game", playtest row 145): the phone run is informational. Its budgets are printed
-// (INFO, within / over) but never fail; page errors and the structural checks still gate it. Every run also prints per-feature cost
+// headless SwiftShader), and fails on the targets below. Owner, 2026-10-22 (playtest row 145):
+// PC is the target platform, no phone support is planned, performance work is still welcome
+// everywhere. So the phone run is informational: its budgets are printed (INFO, within / over)
+// but never fail; page errors and the structural checks still gate it. Every run also prints per-feature cost
 // lines (frame-loop sections, draw calls, triangles and raster ms per render feature, steady vs
 // one-off allocation) so a regression is attributable to the feature that caused it.
 // Usage: node e2e/perf_check.mjs (needs `npm run wasm`). Run by e2e/run.mjs (`just web-e2e`;

@@ -72,8 +72,9 @@ events ──► wp_economy (billing, payouts) · wp_net (snapshots @ 60 Hz) · 
 - Goldens and perf baselines only change in a commit tagged `[bless]` (CI guard).
 
 ## Perf budgets
-- **Target platform: PC** (owner decision 2026-10-22, "this will be a PC game"; playtest row
-  145). Phone smoothness is not a goal.
+- **PC is the target platform; no phone support is planned; performance work is still welcome
+  everywhere** (owner, 2026-10-22: "this will be a PC game" / "optimize regardless, but there is
+  no intention for phone support currently"; playtest row 145).
 - Native sim budgets: `CLAUDE.md` (vehicle, lattice, traffic, police per frame), gated by
   `just bench` (`docs/PERF.md`).
 - Browser render budgets (`apps/testbed-web/e2e/perf_check.mjs`, run by `just web-e2e`):
