@@ -5,8 +5,11 @@
 //!   racers over the four [`LEVELS`] (2 Street … 5 Legend), each level with its own car pool,
 //!   driver skill and bet range, spawned [`SPAWN_SPACING_M`] apart. By day 8 are out (two per
 //!   level); at night ([`is_night`]) 13, four of them lapping the Loop 9 highway (owner row
-//!   152). Off-shift racers wait in a lockup out past the city's edge and change shift out of
-//!   the player's sight (logged moves, like a respawn). They are
+//!   152). Off-shift racers wait in a lockup off the roads (asleep, `Sim::set_dormant`) and
+//!   change shift out of the player's sight (logged moves, like a respawn). At night the loop
+//!   racers end their laps in the Loop 9 rest stops and idle there; a challenge at a rest stop
+//!   starts side by side on its parking road and offers a Loop 9 lap back to it (row 153).
+//!   They are
 //!   ordinary *scenario entities* (`street_<level>_<name>`, AI assists, no player steering
 //!   aids), added to the scenario before the sim is built ([`plan_roster`]), so every
 //!   recording carries them and a playback spawns them exactly as live did.
