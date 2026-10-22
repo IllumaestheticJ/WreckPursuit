@@ -425,6 +425,9 @@ car farthest from any player (playtest row 149: kinematic cars have no collider,
 drove through them), and a kinematic car turning around or reversing within 20 m of a player
 gives the manoeuvre up to be promoted. A wreck lying across a car's path (its segment or the
 next two of its plan, by position) is its leader whatever lane the wreck is filed under.
+**Priority junction starvation:** a minor-road car that has stood at its line for 25 s
+accepts gaps shrinking to 2.5 s, and slow (≤ 10 m/s) major-road cars that can stop
+comfortably hold at their line for it, so a steady stream cannot hold it indefinitely.
 
 **Parked cars** (`props::parked_cars`, owner row 77): only on parking lanes (collector and
 local streets; arterials, highways, hill roads and service roads have none) and never within

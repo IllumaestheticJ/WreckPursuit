@@ -1493,6 +1493,36 @@ E only, left for E — `opponent_circuit_8x5`, `race_lantern_checkpoint`.
   the difference: 111/86/49/43/115 s without it). The left-turn "sneaker" may now keep its
   permit through amber / red; letting it start on red (tried) boxed junctions in, reverted.
 
+### Row 85 follow-up (2026-10-22, lead): minor-road starvation at Priority junctions
+**Case.** `jam_pursuit_vesper` on lead/round12 (after the police search extras): a minor-road
+car stood 50.5 s at a Priority junction (E re-aimed the gate 45 → 55 s). Probed: the car was
+never refused by gap acceptance but by the crossing paths themselves — the slow major-road
+stream (≈ 4.5 m/s, densified by siren yielding) always had a car in the box or a reservation
+on it. ("Agent 146" is a slot index; the agents vector is reordered, so it names different
+cars over time.)
+**Fix (`traffic.rs`).**
+- *Courtesy:* a major-road car at a Priority junction (not a radius-0 freeway merge) going
+  ≤ 10 m/s (`COURTESY_MAX_V`) that can stop comfortably does not take a permit while a
+  conflicting minor approach's front car has stood at its line ≥ 25 s (`STARVE_AFTER_S`),
+  is headed into that movement and has room beyond the box. The box clears and the minor car
+  goes; its stop timer resets once it moves.
+- *Shorter gaps:* the starved car's accepted gap shrinks from its own (3.5–5 s) to 2.5 s
+  (`STARVE_GAP_S`) over 10 s, and it ignores a major lane whose front car stands without a
+  permit (the courtesy hold: nobody on that lane comes through first).
+**Gate** back to 45 s. Measured (seeds 1–4 + 85, worst stop outside a red, base → new):
+lead/round12 seed 85 50.5 → ≤ 45 (pass); ws/world Vesper seed 2 81.8 → ≤ 45 (the other seeds
+were already ≤ 45; seed 4 fails `pursuit_started_before` both ways, police side); grid
+(gate pending) 0 / 81.8 / 97.4 / 107.6 / 96.7 → 0 / 0 / 58.9 / 64.0 / 119.1 s — better on
+three seeds, worse on 85 (its worst stop is a different car; the grid's remaining stops are
+blocked boxes at short-green signals, not Priority junctions). Test:
+`starve_tests::starved_minor_road_cars_accept_shorter_gaps_after_a_long_wait`; the scenario is
+the behaviour gate.
+
+**`blocked::multi_lane_road_changes_lane_around_a_stopped_car` (lead, 2026-10-22).** Passes
+on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contacts 0). The
+failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
+threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
+
 ## Playtest row 149 — "I currently now can't hit traffic cars" (world side)
 **Cause.** Kinematic traffic has no collider: only physical (promoted) cars can be hit. With the
 physical cap (`TrafficConfig::max_physical`, 16) full, cars stayed physical out to 100 m and
