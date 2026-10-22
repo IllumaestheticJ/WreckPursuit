@@ -119,11 +119,15 @@ mod tests {
         let map = CityMap::new(net);
         let prims = glb::build_greybox(&map);
         let names: Vec<&str> = prims.iter().map(|p| p.material.as_str()).collect();
-        for m in ["asphalt", "gravel_road", "dirt_road", "landmark", "barn", "silo"] {
-            assert!(
-                names.contains(&m),
-                "ashpeak greybox has no {m}"
-            );
+        for m in [
+            "asphalt",
+            "gravel_road",
+            "dirt_road",
+            "landmark",
+            "barn",
+            "silo",
+        ] {
+            assert!(names.contains(&m), "ashpeak greybox has no {m}");
         }
         let fresh = glb::greybox_glb(&map);
         let shipped =
