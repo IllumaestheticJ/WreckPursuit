@@ -27,7 +27,9 @@ npm run typecheck
 npm run e2e         # builds, serves, visits every screen in headless Chromium, screenshots → e2e/out/
 ```
 
-Demo URL parameters: `?screen=garage&run=golden_tbone&t=5&palette=deuteranopia&scale=1.25&paused=1&chrome=0`.
+Demo URL parameters: `?screen=garage&run=golden_tbone&t=5&palette=deuteranopia&scale=1.25&paused=1&chrome=0`
+(`&measure=0` keeps estimated stat bars for modded cars instead of measuring them in the wasm worker;
+measuring needs `npm run wasm` in `apps/testbed-web` first).
 Press <kbd>`</kbd> to hide/show the demo sidebar. `window.wpModel` is the live mock model.
 
 ## Why Preact

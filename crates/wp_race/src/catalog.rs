@@ -133,14 +133,26 @@ pub struct RaceDef {
 }
 
 impl RaceDef {
-    /// Police presence for the sim (`Scenario::police_presence`): the stake table's presence
-    /// for this legality (street = normal, illegal daytime = max).
+    /// Police presence for the sim (`Scenario::police_presence`): the race's own police
+    /// profile (`data/police/races.toml`), or the stake table's presence for this legality
+    /// (street = normal, illegal daytime = max) for a race without one.
     pub fn police_presence(&self) -> f32 {
-        presence_scale(match self.legality {
-            Legality::Sanctioned => PolicePresence::None,
-            Legality::Street => PolicePresence::Normal,
-            Legality::IllegalDaytime => PolicePresence::Max,
-        })
+        match self.police_profile() {
+            Some(p) => p.presence,
+            None => presence_scale(match self.legality {
+                Legality::Sanctioned => PolicePresence::None,
+                Legality::Street => PolicePresence::Normal,
+                Legality::IllegalDaytime => PolicePresence::Max,
+            }),
+        }
+    }
+
+    /// This race's police profile (`data/police/races.toml`, keyed by the race id): how the
+    /// police work this race. Applied by [`crate::police::start_race`].
+    pub fn police_profile(&self) -> Option<wp_police::race::RaceProfile> {
+        wp_police::race::RaceProfiles::builtin()
+            .get(self.id)
+            .cloned()
     }
 
     /// Number of racers (AI + the player).
@@ -270,8 +282,12 @@ pub fn races() -> Vec<RaceDef> {
             city: RaceCity::Vesper,
             kind: RaceKind::Circuit { laps: 1 },
             legality: Legality::Street,
-            time_of_day_h: 1.0,
-            traffic_density: 0.3,
+            // Owner row 139 ("there should be SOME traffic in the loop9 race"): at 01:00 with
+            // 0.3 the night curve left nobody near the player. 23:00 at 2.0 puts a civilian
+            // about every 360 m of carriageway round the player (lead: aim 250-300 m, density
+            // 2-3; the AI field still finishes 95 of 96 runs here, see opponent-pace.md).
+            time_of_day_h: 23.0,
+            traffic_density: 2.0,
             course: CourseSpec::Circuit { polygon: LOOP9 },
             length_hint_m: 10142.0,
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
@@ -634,5 +650,20 @@ mod tests {
         assert!(has(&|r| r.city == RaceCity::Grid));
         assert!(has(&|r| r.legality == Legality::IllegalDaytime));
         assert!(all.iter().all(|r| r.legality != Legality::Sanctioned));
+    }
+
+    #[test]
+    fn every_race_has_its_own_police_profile() {
+        let mut names = Vec::new();
+        for r in races() {
+            let p = r
+                .police_profile()
+                .unwrap_or_else(|| panic!("{}: no data/police/races.toml table", r.id));
+            assert_eq!(r.police_presence(), p.presence);
+            names.push(p.name);
+        }
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), races().len(), "each race has its own style");
     }
 }

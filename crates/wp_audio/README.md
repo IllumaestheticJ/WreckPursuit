@@ -27,7 +27,7 @@ RadioLine ─┘        └─ scanner queue                      (scanner.rs)
 | `Set { voice, params }` | per-frame update of a looped voice |
 | `Stop { voice, fade_s }` | fade out (also used when a voice loses culling) |
 | `Duck { bus, gain, fade_s }` | duck / restore a bus (scanner ducks Music) |
-| `RadioSay { line, unit, text, priority, duration_s, voice_pitch }` / `RadioEnd { line, interrupted }` | scanner lines |
+| `RadioSay { line, unit, text, priority, tier, duration_s, voice_pitch }` / `RadioEnd { line, interrupted }` | scanner lines (`tier` = police priority tier, row 144) |
 
 `VoiceParams` are final: `gain` already includes distance attenuation (Web Audio "inverse"
 model), `pitch` / `freq_hz` already include the Doppler ratio, `lowpass_hz` is air absorption.
@@ -198,8 +198,10 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   low-passed to 2.2 kHz and −5 dB, the own horn muffled, impact voices get `interior`. All
   math is deterministic (`impact::det_log2/det_exp2/det_pow`, basic arithmetic only).
 - **Police events** (`wp_police::PoliceEvent`, decoded from `SimEvent::PoliceEvent`): `Radio`
-  lines go to the scanner (priority: Dispatch for dispatch, Pursuit while a pursuit is active,
-  else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
+  lines go to the scanner with the police priority tier the caller passed
+  (`set_police_radio_tiers`, from `wp_police`'s radio log; row 144): tier 1 → Urgent, 2 →
+  Pursuit, 3 → Dispatch, 4 → Routine, 5 → Chatter. Without a tier: Dispatch for dispatch,
+  Pursuit while a pursuit is active, else Routine; `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
 - **Sirens** (`siren.rs`): wail (650→1600 Hz, 4 s cycle, 2.4 s rise), yelp (same range, 0.3 s),
   phaser (750→1700 Hz, 0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in
   `audio_config.json`. Sweeps use a smoothstep rise and fall (no corner at the peak or trough;
@@ -228,6 +230,9 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 - **Scanner** (`scanner.rs`): lines queued by `RadioPriority`, released after the tier delay
   (Basic 10 s, Pro 6, Elite 3 — `wp_police` tiers 0/1/2, same numbers as `data/police/tools.toml`; `None` = no scanner), one at a time, stale lines
   dropped, queue capped (lowest priority dropped first). Pursuit/Urgent lines chop lower ones.
+  Row 144 (owner): tier 1 lines (roadblock / spikes / helicopter warnings) skip the delay, so
+  they are heard in the frame the tool appears on the map; "Radio: Important only"
+  (`set_radio_important_only`) drops tiers 4–5.
   Music is ducked while a line plays. Duration is estimated from word count (deterministic).
 
 ## Data
@@ -457,8 +462,10 @@ nodes) for material lookup.
   ~400 Hz firing) would move them back to recordings automatically. For those cars the audio
   panel's recorded / procedural switch plays the same engine.
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
-- `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
-  set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
+- `PoliceEvent::Radio` has no priority yet (A-2, R144-1): the caller passes the police tier
+  (`set_police_radio_tiers`; the wasm bridge reads `PoliceSystem::radio_tier_of`); a networked
+  client without the police log falls back to the old heuristic. The scanner tier is set by
+  the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
 - Occlusion (buildings), street slap echo and tunnel reverb exist for **sirens only**
   (`siren_space.rs`); engines, tyres and impacts are not occluded and have no reverb zones.
   Interior / exterior filtering: the modelled engine, the cabin muffle of other cars' voices,

@@ -16,8 +16,11 @@
 //! `cargo test --release -p wp_race --test opponent_pace -- --ignored --nocapture`
 //! Knobs: `WP_PACE_RACES=loop9_circuit,hollins_sprint`, `WP_PACE_SKILLS=0.25,0.95`,
 //! `WP_PACE_POLICE=1` (keep the scenario's police; default off), `WP_PACE_DENSITY=0.0`,
+//! `WP_PACE_TOD=23.0` (time of day, h),
 //! `WP_PACE_SOLO=1` (one car only: the pole car), `WP_PACE_GEOM=1` (geometry-only limits,
-//! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car).
+//! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car),
+//! `WP_PACE_TYRE` / `WP_PACE_GRIP` / `WP_PACE_RIDE='{…}'` (wp_vehicle lab overrides: fields over
+//! the shipped car / tyre tune, grip balance, ride, for physics A/B on every car).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -77,6 +80,8 @@ pub struct PaceOpts {
     pub trace: Option<usize>,
     /// Scenario seed override.
     pub seed: Option<u64>,
+    /// Time of day override, h (`WP_PACE_TOD`).
+    pub tod: Option<f32>,
 }
 
 impl PaceOpts {
@@ -89,6 +94,7 @@ impl PaceOpts {
             geometry: var("WP_PACE_GEOM").is_some(),
             trace: var("WP_PACE_TRACE").and_then(|v| v.parse().ok()),
             seed: var("WP_PACE_SEED").and_then(|v| v.parse().ok()),
+            tod: var("WP_PACE_TOD").and_then(|v| v.parse().ok()),
         }
     }
 }
@@ -138,6 +144,8 @@ pub struct CarPace {
     pub contacts: (u32, u32),
     /// Completed passes made between two cars (lane-splitting).
     pub splits: u32,
+    /// Mean civilians within 300 m of the car (sampled at 1 Hz): (my direction, opposing).
+    pub civ_near: (f32, f32),
     /// Lane-splits given up (tucked back in).
     pub split_aborts: u32,
     /// Judge status.
@@ -264,6 +272,9 @@ pub fn race_pace_in(
     if let Some(s) = opts.seed {
         sc.seed = s;
     }
+    if let Some(t) = opts.tod {
+        sc.time_of_day_h = t;
+    }
     // Picker scenarios list the player first, the AI field (pole first) after; the judge
     // enters the AI field first.
     let picker = id != "city_sprint";
@@ -297,7 +308,12 @@ pub fn race_pace_in(
                 redline_rpm: car.def.engine.redline_rpm,
             })
             .unwrap();
-        sim.set_vehicle_kind(ids[i], VehicleKind::AiRacer).unwrap();
+        // The player seat stays a `VehicleKind::Player` car (AI-driven) as in the browser, so
+        // traffic spawns round it (with every seat an AI racer it spreads over the whole city:
+        // Loop 9 at night had none near the field). Lead, 2026-10-22.
+        if !(picker && i == 0) {
+            sim.set_vehicle_kind(ids[i], VehicleKind::AiRacer).unwrap();
+        }
         if let Some(a) = assists_override() {
             sim.set_assists(ids[i], a).unwrap();
         }
@@ -361,6 +377,8 @@ pub fn race_pace_in(
     // (stand-offs, seconds in them, in one now).
     let mut head_on = vec![(0u32, 0.0f32, false); k_n];
     let mut head_on_opp = vec![0u32; k_n];
+    // Civilians within 300 m of each racer once a second, (same direction, opposing, samples).
+    let mut civ_near = vec![(0u32, 0u32, 0u32); k_n];
     let mut last_tactic = vec![Tactic::Follow; k_n];
     // Last non-profile cause; the climb back to the profile afterwards is booked to it.
     let mut recovering: Vec<Option<usize>> = vec![None; k_n];
@@ -559,6 +577,24 @@ pub fn race_pace_in(
                 }
                 h.2 = d.head_on;
             }
+            if tick.is_multiple_of(240) {
+                if let Some(me) = sim.vehicles().iter().find(|x| x.id == racers[k]) {
+                    let st = me.vehicle.state();
+                    let fw = wp_world::drive::forward_of(st.rot);
+                    let c = &mut civ_near[k];
+                    c.2 += 1;
+                    for a in sim.world().agents() {
+                        let (dx, dy) = (a.pos[0] - st.pos[0], a.pos[1] - st.pos[1]);
+                        if dx * dx + dy * dy > 300.0 * 300.0 || (a.pos[2] - st.pos[2]).abs() > 5.0 {
+                            continue;
+                        }
+                        let dir = wp_world::geom::dir_of_yaw(a.yaw);
+                        let along = dir[0] * fw[0] + dir[1] * fw[1];
+                        c.0 += u32::from(along > 0.5);
+                        c.1 += u32::from(along < -0.5);
+                    }
+                }
+            }
             if v > 2.0 {
                 let l = &mut lateral[k];
                 l.0 += 1;
@@ -677,6 +713,11 @@ pub fn race_pace_in(
                 head_on_opposing: head_on_opp[k],
                 contacts: (r.civilian_hits, r.contacts),
                 splits: ai.field().splits_by(k) as u32,
+                civ_near: {
+                    let c = civ_near[k];
+                    let n = c.2.max(1) as f32;
+                    (c.0 as f32 / n, c.1 as f32 / n)
+                },
                 split_aborts: ai.field().split_aborts_by(k) as u32,
                 status: format!("{:?}", r.status),
             }
@@ -691,9 +732,34 @@ fn list<T: std::str::FromStr + Clone>(var: &str, default: &[T]) -> Vec<T> {
         .unwrap_or_else(|| default.to_vec())
 }
 
+/// `{…}` merged over `base`'s JSON fields.
+fn merged<T: serde::Serialize + serde::de::DeserializeOwned>(base: &T, json: &str) -> T {
+    let mut v = serde_json::to_value(base).unwrap();
+    let patch: serde_json::Value = serde_json::from_str(json).expect("override json");
+    for (k, x) in patch.as_object().expect("override object") {
+        v[k] = x.clone();
+    }
+    serde_json::from_value(v).expect("override fields")
+}
+
+/// `WP_PACE_TYRE` / `WP_PACE_GRIP` / `WP_PACE_RIDE`: wp_vehicle lab overrides (process-wide).
+fn lab_overrides_from_env() {
+    use wp_vehicle::{car_lab, grip_lab, ride_lab};
+    if let Ok(j) = std::env::var("WP_PACE_TYRE") {
+        car_lab::set_override(Some(merged(&car_lab::CarTune::shipped(), &j)));
+    }
+    if let Ok(j) = std::env::var("WP_PACE_GRIP") {
+        grip_lab::set_override(Some(merged(&grip_lab::GripBalance::shipped(), &j)));
+    }
+    if let Ok(j) = std::env::var("WP_PACE_RIDE") {
+        ride_lab::set_override(Some(merged(&ride_lab::RideTune::owner(), &j)));
+    }
+}
+
 #[test]
 #[ignore = "measurement sweep (minutes in release); see the module docs"]
 fn pace_sweep() {
+    lab_overrides_from_env();
     let opts = PaceOpts::from_env();
     let races: Vec<String> = list(
         "WP_PACE_RACES",
@@ -719,7 +785,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} civnear {:.2} {:.2} | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -739,6 +805,8 @@ fn pace_sweep() {
                     c.contacts.1,
                     c.splits,
                     c.split_aborts,
+                    c.civ_near.0,
+                    c.civ_near.1,
                     c.status,
                     lost.join(", ")
                 );
@@ -829,6 +897,7 @@ fn pace_scenarios_hold_their_ranges() {
             .ok()
             .and_then(|v| v.parse().ok()),
         seed: None,
+        tod: None,
     };
     let mut caps = BTreeMap::new();
     let mut fails = Vec::new();
@@ -851,6 +920,12 @@ fn pace_scenarios_hold_their_ranges() {
                 c.rejoins
             );
         }
+        // A scenario whose `finishers` range allows a car short of the flag checks the times
+        // of the cars that finish only (how many must finish is that metric's job).
+        let dnf_ok = expects.iter().any(|x| {
+            matches!(x, simcli::scenario::Expect::Metric { name, min, .. }
+                if name == "finishers" && *min < cars.len() as f32)
+        });
         for x in &expects {
             let simcli::scenario::Expect::Metric {
                 name,
@@ -861,6 +936,10 @@ fn pace_scenarios_hold_their_ranges() {
             else {
                 continue;
             };
+            let unfinished = |e: &str| cars.iter().any(|c| c.entity == e && c.time_s.is_none());
+            if name == "race_time_s" && dnf_ok && entity.as_deref().is_some_and(unfinished) {
+                continue;
+            }
             match pace_metric(&cars, name, entity.as_deref()) {
                 Some(v) if v >= *min && v <= *max => {}
                 Some(v) => fails.push(format!(

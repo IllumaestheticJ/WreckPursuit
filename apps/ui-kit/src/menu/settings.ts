@@ -74,6 +74,10 @@ export interface GameSettings {
   /** Speak police radio lines (browser speech; owner playtest row 79). Off = squelch, static
    * and the radio strip's text only. The volume is the Police radio slider. */
   radioVoice: boolean;
+  /** "Radio: Important only / All" (owner playtest row 144): "important" plays only police
+   * radio tiers 1–3 (roadblocks, spikes, helicopter, units ahead; heat changes and takeovers;
+   * impacts and wrecks). Default "all". */
+  radioFilter: RadioFilter;
   assists: AssistSettings;
   damageMode: "Arcade" | "Simulation";
   units: SpeedUnits;
@@ -84,6 +88,9 @@ export interface GameSettings {
   /** Input shaping per device (dead zones, saturation, sensitivity; see `controls.ts`). */
   controls: Record<ControlDevice, DeviceControls>;
 }
+
+/** Which police radio lines are played (row 144). */
+export type RadioFilter = "all" | "important";
 
 /** localStorage key. */
 export const SETTINGS_KEY = "wp.gameSettings.v1";
@@ -96,6 +103,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     drawDistanceM: 0,
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
     radioVoice: true,
+    radioFilter: "all",
     assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0.3 },
     damageMode: "Arcade",
     units: "kmh",
@@ -145,6 +153,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
       ambience: clamp01(v.ambience, base.volumes.ambience),
     },
     radioVoice: bool(r.radioVoice, base.radioVoice),
+    radioFilter: oneOf(r.radioFilter, ["all", "important"] as const, base.radioFilter),
     assists: {
       abs: assistLevel(a.abs, base.assists.abs),
       tcs: assistLevel(a.tcs, base.assists.tcs),

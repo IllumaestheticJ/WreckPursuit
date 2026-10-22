@@ -225,6 +225,8 @@ pub struct CityMap {
     /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_slabs`]).
     decks: Arc<Vec<crate::surface::DeckSlab>>,
     deck_grid: Arc<Grid>,
+    /// Freeway paint derived at build time (dotted taper lines, gore chevrons).
+    pub(crate) paint: Arc<crate::markings::FreewayPaint>,
 }
 
 impl CityMap {
@@ -441,8 +443,10 @@ impl CityMap {
             covered_los: true,
             decks: Arc::new(decks),
             deck_grid: Arc::new(deck_grid),
+            paint: Default::default(),
         };
         map.covers = crate::covered::CoverIndex::new(&map.net.covered);
+        map.paint = Arc::new(crate::markings::freeway_paint(&map));
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
             let s = &map.segs[i];

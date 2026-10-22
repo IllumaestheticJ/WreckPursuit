@@ -1,6 +1,7 @@
 // HUD layout (playtest row 67: the minimap covered the controls panel). Corners:
 //
-//   top-left      speedo + input panel (.left-col), then the race HUD stacked under it
+//   top-left      speedo + input panel (.left-col), then the race HUD (or the street race
+//                 panel) stacked under it
 //   top-centre    chase readout, the weather line under it (between the side columns, wrapping
 //                 if it must), the police radio strip under those, pursuit banner
 //   top-right     damage silhouette, components, regions, event feed (.right-col), capped so it
@@ -54,6 +55,12 @@ export class HudLayout {
     if (shown(race)) {
       race.style.top = `${Math.round(leftBottom + GAP)}px`;
       leftBottom = race.getBoundingClientRect().bottom;
+    }
+    // Street race panel (src/ui/street.ts): same slot, never shown with a picker race.
+    const street = q("#street-hud");
+    if (shown(street)) {
+      street.style.top = `${Math.round(leftBottom + GAP)}px`;
+      leftBottom = street.getBoundingClientRect().bottom;
     }
 
     // Bottom-right minimap.

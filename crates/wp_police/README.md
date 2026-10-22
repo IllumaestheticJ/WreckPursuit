@@ -115,27 +115,45 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   point is `eye_height_at(z)` like the ground units'. Radio (`dispatch::helo_reports`): "eyes on
   … Spotlight on." on first sight, a position report every `position_report_s` while it keeps
   visual, "lost visual" after `lost_visual_after_s` without sight, "reacquired" — the first,
-  lost and reacquired lines are critical (always spoken). `helicopters()` →
+  lost and reacquired lines are tier 1 (actionable, row 144), position reports tier 4. `helicopters()` →
   `HeloView { has_visual, spotlight_target, … }` for the renderer's night spotlight.
-- Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
-  `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
+- Radio lines are raised by dispatch decisions and callouts; `radio::RadioDirector` paces what
+  is spoken as `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
+- **Priority tiers** (playtest row 144, "filtering between important and unimportant
+  information", `radio::RadioTier`): 1 actionable (roadblock / spikes planned with place and
+  distance — "Dispatch, racer #7: roadblock 400 metres ahead, northbound on Lantern Row." —
+  helicopter launching / arriving / losing the racer, a unit intercepting ahead at L2+), 2
+  escalation (pursuit start / end, level up / down, "Highway Patrol is taking over", "rams
+  authorised", captain orders), 3 impacts (shouted, picked by `chatter::impact_severity` from
+  contact energy and unit damage; a big wreck stacks another unit's "Unit 4 is down!"), 4
+  investigation (calls, searching, lost visual / last seen), 5 routine. Tier 1 cuts anything
+  lower and waits only for the transmission on air (a roadblock / spike warning also cuts other
+  tier 1 traffic); tier 2 cuts tiers 3–5; routine lines are dropped while anything more
+  important waits and thin out as heat rises (`routine_gap_s`). Deployment lines (units joining,
+  responding to a known call, backup, tool cars arriving) are not spoken: at L0–L1 one "units
+  responding" summary when heat first rises. `RadioLine::tier`, `PoliceSystem::radio_tier_of`
+  give bridges the tier (the contract event has none, request R144-1). Bench:
+  `cargo run --release -p wp_police --example radio_bench -- <scenario.ron> [--log N]`.
 - **One transmission at a time** (playtest row 79): a spoken line holds the channel for its
   length (`words / words_per_s + line_pad_s`, the audio scanner's numbers) plus `min_gap_s`
-  (2.5 s); waiting lines are a priority queue (tier, cue `prio`, age), lose their slot when a
+  (2.5 s; 0.8 s after a shouted tier 3 line); waiting lines are a priority queue (tier 1,
+  emergency traffic, tier, cue `prio`, age), lose their slot when a
   newer line supersedes them ("now level 4" replaces a queued "now level 3") and expire
   (`stale_s`, `stale_critical_s`, or the cue's own life). Gaps shrink with the wanted level
   (`global_gap_s` / `unit_gap_s` per L1..L5; L1 keeps the row-6 8 s / 30 s).
 - **Unit-to-unit callouts** (`chatter`, row 79): units call what they see with their call sign
   and a place on the map — "Unit 6, lost visual. Last seen eastbound on Harbor Boulevard at
-  Lantern Way.", "eyes on him again", "requesting backup", "I'm on his bumper", "going for the
-  PIT" / "he's spun" / "he got away", "boxing him in", "spikes hit", "I'm out of the chase",
-  "he's gone into the Hollins Tunnel"; dispatch summarises level rises (place, units on him, air
-  unit) and closes pursuits with the place. Places: street (+ cross street at junctions) from
+  Lantern Way.", "eyes on him again", "I'm on his bumper", "going for the PIT!" / "he's spun!" /
+  "he got away", "boxing him in", "spikes hit!", "he rammed me, I've lost my front end!", "he
+  just took out a civilian!", "he's gone into the Hollins Tunnel"; dispatch summarises level
+  rises and drops (place, units on him, air unit, a tougher department) and closes pursuits
+  with the place. Places: street (+ cross street at junctions) from
   `World::edge_names` (Port Vesper), tunnel names, district otherwise
   (`PoliceSystem::place_phrase`). The lost-visual call reads the racer record's `last_known`,
-  the same position search and interception steer to. Observer only: not hashed, no RNG.
+  the same position search and interception steer to. Observer only: not hashed; line variety
+  from the chatter's own seeded RNG (never the simulation's).
   `chatter_stats()` counts raised callouts. Tests: `tests/radio_chatter.rs`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
@@ -361,6 +379,15 @@ police cars) with `set_obstacles` each tick. Headless, units see the racers and 
 - **Radar detector** `radar(pos, tier)`: units in Patrol/Pursue state within `radar_range_m[tier]`.
 - **Scanner** `scanner(tier, since: Option<SimTime>)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
 
+### Race profiles (`race.rs`)
+Each picker race has its own police (`data/police/races.toml`, keyed by race id):
+`RaceProfile::apply` switches tactics off (unlock level 6) and overrides chase speeds;
+`PoliceSystem::start_race` places scripted roadblocks across the course (with a gap) and on the
+side roads off it, spike strips over part of the course, and stakeout units that join or start a
+chase when a racer passes. Scripted tools outlive a racer's pursuit and do not use the AI
+captain's budget. Styles: Lantern "Downtown lockdown", Loop 9 "Highway interceptors"
+(pursuit only), Hollins "Summit trap", Grid "Speed trap" (see `docs/integration/police.md`).
+
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is
 validated against unlocks (`presence.toml [unlocks]`), cooldowns, budgets and the placement
@@ -377,6 +404,7 @@ Player chase units get `unit_order()` **suggestions** only.
 | `presence.toml` | Patrols per district × phase, reinforcement response times, reckless-driving response (`[response]`: call delays, radius, spawn window, unit cap by heat, despawn distance), helicopter availability, tool/tactic unlock levels, crash scenes |
 | `pursuit.toml` | Think rate, speed factors and caps, cornering g, LOS range, unit dynamics and crash severity per mode, risk budget, traffic hazards, tactic parameters |
 | `tools.toml` | Roadblock, spike strip and helicopter parameters, radar/scanner tiers, captain hold time |
+| `races.toml` | Per-race police profiles (`race.rs`): allowed tactics, speed overrides, scripted roadblocks on/off the course, spike strips and stakeouts, one table per picker race |
 
 The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from disk with
 `PoliceConfig::load(dir)`. A test checks that both copies match.

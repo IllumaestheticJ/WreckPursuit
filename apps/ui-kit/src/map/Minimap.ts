@@ -8,6 +8,7 @@
 import type { MapFrame, MapStatic } from "./data";
 import { isWanted, racersToDraw } from "./data";
 import { buildRoadCache, drawPoi, drawPlayer, drawRacer, drawSearch, drawSight, drawTool, drawUnit, readPalette, type MapPalette, type RoadCache } from "./draw";
+import { drawFlag, drawMarker, drawRoute, type MapExtras } from "./extras";
 import { angleDelta, clampToCircle, compose, glyphRotation, minimapMatrix, radiusForSpeed, smooth, worldToMinimap, type MinimapView } from "./projection";
 
 /** Minimap options. */
@@ -34,6 +35,10 @@ export interface MinimapStats {
   escape: number;
   /** World radius shown, m. */
   radiusM: number;
+  /** Host markers drawn (`MapHud.setExtras`; inside the disc or on the rim). */
+  markers: number;
+  /** Host route drawn. */
+  route: boolean;
 }
 
 /** The minimap renderer. Call `setMap` once per city and `draw` every frame. */
@@ -46,8 +51,10 @@ export class MinimapRenderer {
   private lastMs = NaN;
   private ctx: CanvasRenderingContext2D | null;
   /** Last frame's stats. */
-  stats: MinimapStats = { player: false, units: 0, blinking: 0, racers: 0, tools: 0, search: false, escape: 0, radiusM: 0 };
+  stats: MinimapStats = { player: false, units: 0, blinking: 0, racers: 0, tools: 0, search: false, escape: 0, radiusM: 0, markers: 0, route: false };
   options: MinimapOptions;
+  /** Host overlay (street racers, a race route); null = none. */
+  extras: MapExtras | null = null;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -97,7 +104,8 @@ export class MinimapRenderer {
     const view: MinimapView = { cx: p?.x ?? 0, cy: p?.y ?? 0, yaw: this.yaw, pxPerM: inner / this.radiusM, sx: R, sy: R };
     const m = minimapMatrix(view);
     const k = view.pxPerM;
-    const stats: MinimapStats = { player: false, units: 0, blinking: 0, racers: 0, tools: 0, search: false, escape: 0, radiusM: this.radiusM };
+    const stats: MinimapStats = { player: false, units: 0, blinking: 0, racers: 0, tools: 0, search: false, escape: 0, radiusM: this.radiusM, markers: 0, route: false };
+    const ex = this.extras;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, size, size);
@@ -143,6 +151,10 @@ export class MinimapRenderer {
         drawPoi(ctx, poi.kind, sx, sy, s, pal);
       }
     }
+    if (p && ex?.route && ex.route.length > 1) {
+      drawRoute(ctx, ex.route.map(([x, y]) => worldToMinimap(view, x, y)), 3 * dpr);
+      stats.route = true;
+    }
     ctx.restore();
 
     // units (rim markers for the ones outside)
@@ -165,6 +177,21 @@ export class MinimapRenderer {
         const c = clampToCircle(R, R, inner - rs * 1.4, sx, sy);
         drawRacer(ctx, r, c.x, c.y, glyphRotation(r.yaw, view.yaw), c.outside ? rs * 0.75 : rs, pal);
         stats.racers++;
+      }
+      // host markers (rim markers for the ones outside) and flags (kept on the rim)
+      if (ex) {
+        const ms = 6 * dpr;
+        for (const mk of ex.markers) {
+          const [sx, sy] = worldToMinimap(view, mk.x, mk.y);
+          const c = clampToCircle(R, R, inner - ms * 1.3, sx, sy);
+          drawMarker(ctx, mk, c.x, c.y, c.outside ? ms * 0.75 : ms);
+          stats.markers++;
+        }
+        for (const fl of ex.flags) {
+          const [sx, sy] = worldToMinimap(view, fl.x, fl.y);
+          const c = clampToCircle(R, R, inner - 12 * dpr, sx, sy);
+          drawFlag(ctx, fl, c.x, c.y + 6 * dpr, 14 * dpr);
+        }
       }
       drawPlayer(ctx, R, R, 0, 7 * dpr, pal);
       stats.player = true;

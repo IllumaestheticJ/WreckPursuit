@@ -96,7 +96,10 @@ desktop Chrome with a GPU.
 Browser frame budget (city chase, low-poly dark): `npm run profile` (`e2e/frame_profile.mjs`)
 prints JS ms per frame-loop section, draw calls / triangles / raster ms per render feature
 (`tagFeature` roots in `src/perf.ts`), steady vs one-off allocation and the top allocators;
-`npm run e2e:perf` (`e2e/perf_check.mjs`) checks desktop chase / rain and the phone profile.
+`npm run e2e:perf` (`e2e/perf_check.mjs`) gates the desktop chase / rain budgets and prints the
+phone (touch) profile's numbers for information only. PC is the target platform; no phone
+support is planned; performance work is still welcome everywhere (owner, 2026-10-22, playtest
+row 145; `docs/INTEGRATION.md` "Perf budgets").
 Numbers and history: `docs/integration/browser-perf.md`.
 
 ## Known gaps

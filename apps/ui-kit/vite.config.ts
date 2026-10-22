@@ -7,5 +7,7 @@ export default defineConfig({
   server: { port: 5180, fs: { allow: [new URL("../..", import.meta.url).pathname] } },
   // The demo inlines fixtures, car and mod data on purpose, so the bundle is large.
   build: { outDir: "dist", sourcemap: true, chunkSizeWarningLimit: 2000 },
+  // The stats worker (src/live/statsWorker.ts) lazy-loads the wasm package: needs ES workers.
+  worker: { format: "es" },
   test: { include: ["src/**/*.test.ts"], environment: "node" },
 });

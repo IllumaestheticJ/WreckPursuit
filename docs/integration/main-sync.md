@@ -1,3 +1,83 @@
+# Round 3: origin/main d39aef63 → lead/main-sync (2026-10-22)
+
+- **Base:** `lead/main-sync` fast-forwarded to `origin/lead/round12` @ `9b686f76`, then
+  `origin/main` @ `d39aef63` (33 commits: PRs #17 ws/harness, #39, #28, #35, #33, #34, #30).
+- **Method.** Only **16 non-merge commits** on main are not in round 12; everything else on
+  main's side arrives through main's own merge commits (ws/harness merging main's highway
+  layout and round 12b, detailed-car-models), i.e. main's resolution of the same round-12-vs-main
+  question this branch answered in rounds 1–2. A textual merge gave 122 conflicting files plus 55
+  goldens, nearly all of them that duplicate resolution. So the merge is recorded with round 12's
+  tree (`2c867ca7`, `-s ours`: round 12 wins), and main's genuinely new commits are
+  cherry-picked on top (`-x`), one reviewable commit each.
+
+## Taken from main
+| main commit (PR) | Here | What |
+|---|---|---|
+| `840b1021` (#35) | `d90e9824` | Freeway paint: dotted lines through ramp tapers / auxiliary lanes, gore chevrons (`markings.rs`, `CityMap::paint`, Arc-shared like round 12's other map tables). Screenshots added. |
+| `6eda42e3` (#34) | cherry-pick | Kinematic (low-LOD) police no longer roll `wp_police`'s statistical traffic hazards on top of the real `wp_world` traffic (`PoliceSetup::hazards = false` in `wp_sim`). A sim-glue bug fix, not a police-behaviour decision; flagged to E. |
+| `c941e3f0`, `5d7e469d` (#30) | cherry-picks | ui-kit: modded builds' stat bars measured on the physics rig in a wasm worker (`car_stats_build_json`, already in round 12), estimates until measured. |
+| `4d978135` (#33) + `985aeb0a` (#39) | `e1fa1b50` | Fuzz walls kept 3.5 m clear of every spawn (CI seeds 457 / 462 "below ground"); main's final `fuzz.rs` with round 12's entity / scenario fields. |
+
+## Already in round 12 (skipped)
+| main commit | Round 12 |
+|---|---|
+| `a31de58a` solid terrain = drawn terrain (#39) | `b6dfc12d` (row 119) |
+| `ec1b7f35` drawn terrain follows the ground (#39) | `8abeacc6` |
+| `9db04d32` flat grid keeps its raw terrain collider (#39) | same early return in `surface::collision_terrain`; `wp_sim` reads relief through `surface::has_relief` (round 2); test `flat_terrain_collides_unchanged` |
+| `58bfc8f1`, `eff79e6e` backup / reinforcements wait ahead, "ambush" (#33) | `2b012656` (E's port) |
+| PR #28 detailed-car-models | merged into round 12 (`052430de`, mesh format 4: turn signals, LOD) |
+
+## Round 12 chosen over main (and why)
+| main | Why round 12 |
+|---|---|
+| `37fed9ad` wp_vehicle: main's high-speed catch fix on the self-aligning steering | Owner decisions on round 12's handling: one steering model (unify), brake bias +0.05, countersteer 0, catch 0.8, grip-balance rows 142 / 143 in flight. `crates/wp_vehicle` is byte-for-byte round 12. |
+| `8fabe695` police expectations re-measured on main's layout; `bedfab1d` turning round toward a target behind is not running wide | Police rows 131 / 133 / 140 in flight on `ws/police`; E re-measured and fixed police on main's layout on round 12 (`a0678db4`, `12240a31`, `66904248`). |
+| `3af18fd0`, `6530accb`, `8fa0c8d6`, `85cd1e64` (ws/harness re-aims, race picker, pace lock-in, merge notes on main's layout) | A parallel resolution of the merge round 2 did here (gated, blessed). E.g. harness shortens Founders Cut to 105 m; round 12 keeps 205 m (round 2, all grades in cap); Hollins Tunnel is one tube in both. |
+| Every other conflicting file (main's merge commits `7245e760`, `0eaec919`, detailed-car-models merges): `crates/wp_vehicle`, `crates/wp_police`, `wp_opponent` / `wp_race` (AI racers never give up, pace locks), `data/panels`, `tools/assets`, testbed car rendering (`panels.ts`, `vehicle_view.ts`, `lod.ts`, `fleet.ts`, `props.ts`: format-4 meshes with integrated turn signals and LOD), `data/audio` + `data/cars` (procedural big engines, siren, spike sounds), scenarios, `wp_world` / `wp_sim` / `city-import` merge glue, docs | Round 12's version: these files hold no main-only commit, only main's merge resolutions of content round 12 already has in a newer form. `data/city/*` regenerated: unchanged. |
+
+## Blessed (round 3)
+`2b1a973c`: 12 city goldens, all moved by the freeway paint port alone (each re-run against its
+golden before / after every port: all match before `d90e9824`, the kinematic-police fix moved
+none). Paint is its own tyre surface; the new taper dots and gore chevrons sit where ramps
+leave and join the carriageway. Every other golden matched unchanged.
+
+## Gate (round 3, `2b1a973c`)
+| Step | Exit | Notes |
+|---|---|---|
+| `cargo fmt --check`, `clippy --workspace --all-targets -D warnings` | 0, 0 | |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm`, determinism lint | 0, 0 | lint: 74 findings, 0 errors |
+| `cargo test --workspace --no-fail-fast` | 101 | 2 reds, both identical on round 12 `9b686f76` (below); `goldens_match` green |
+| `opponent_pace pace_scenarios` (release) | 101 | Lantern only, identical on `9b686f76` |
+| testbed `npm run wasm`, `tsc`, `vite build` | 0, 0, 0 | |
+| testbed `npm run e2e` | 1 | 216 PASS. perf_check: phone 330 draw calls / 405 k triangles (`9b686f76`: 332 / 404 k), frame time / allocation as always under software GL. `reset.mjs` ghost-blink check failed once, passed 2 / 2 re-runs (blink frames sampled at ~3 fps) |
+| ui-kit `tsc`, `vitest`, `build` | 0, 1, 0 | `data.test.ts` stock top speed 247.9 vs > 248: red on round 12 before the ui-kit port too |
+
+Reds, none from this merge (all reproduce on round 12 `9b686f76`):
+- `wp_world` `blocked::multi_lane_road_changes_lane_around_a_stopped_car` (98 contacts) —
+  world (D): round 12's traffic changes since `cd6cd320` (`7b3762eb`, `1b3c7441`, `63c8dbfe`, …).
+- `wp_race` `race_picker::lantern_checkpoint_draws_the_police` (a racer ends `Dnf(FinishWindow)`)
+  and `opponent_pace` lantern s50 / s95 (best ratio 2.39 vs 2.27; player 86.8 vs ≥ 87 s) —
+  opponent-pace / E.
+- Testbed phone render budget back over (round 12 after `cd6cd320`) — testbed / lead.
+- ui-kit stat-bar test — ui (data/stats vs the test's hard-coded 248 km/h).
+
+## Round 3 follow-ups (lead's asks)
+**Phone render budget** (`02aed966`, on round 12 `2bac2382`): perf_check phone 330–332 → 290–295
+draw calls (< 300), 404–405 k → 373–375 k triangles (≤ 400 k); desktop within its budgets.
+Cause: draw records name each traffic car's own model, so each model in view had its own
+instance sets at six draws (fleet 22 → 79). Head, tail and indicator lamps are now one
+instanced mesh per set (`lampsMaterial`: a per-vertex lamp channel × per-instance colour,
+the same colours as before; fleet 79 → 41). The touch profile's mid-LOD distance is 100 m
+(was 120 m). Parked cars all stay drawn (14d51c62's rule). e2e `run.mjs`: 219 PASS; the
+indicator / signal / art-style checks pass. `reset.mjs`'s ghost-blink check is timing-flaky
+under software GL: the blink is keyed to wall-clock 125 ms phases and sampled once per frame
+(~300 ms). It failed in the suite, passed standalone; testbed source unchanged by round 3.
+
+**ui-kit `data.test.ts`** (`d210bdf2`): a threshold call, not data. The modded kestrel_ts top
+speed was checked against a fixed 248 km/h, the stock figure before round 12 re-measured the
+table (`38efca77`: 248 → 241). It is now checked against stock, as `wp_wasm`'s rig test does;
+110 / 110 pass.
+
 # main → round 12 sync (lead helper)
 
 - **Branch:** `lead/main-sync`, from `origin/lead/round12` @ `95021b5`.

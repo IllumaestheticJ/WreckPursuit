@@ -193,6 +193,18 @@ pub(crate) fn frame_commands(
             kind: driver_kind(v.kind),
         });
     }
+    // Row 144: each radio line's police priority tier (the contract event has none yet).
+    let tiers: Vec<(Option<u32>, String, u8)> = events
+        .iter()
+        .filter_map(|e| match e {
+            SimEvent::Police(wp_contracts::PoliceEvent::Radio { unit, text }) => {
+                let tier = sim.police().radio_tier_of(*unit, text)?;
+                Some((unit.map(|u| u.0), text.clone(), tier.number()))
+            }
+            _ => None,
+        })
+        .collect();
+    d.set_police_radio_tiers(tiers);
     d.update(&AudioFrame {
         tick: s.tick(),
         listener,
@@ -339,8 +351,33 @@ pub fn audio_radio(unit: u32, priority: &str, text: &str) -> Result<(), JsValue>
             text: text.to_string(),
             priority,
             emitted_tick: tick,
+            tier: 0,
         });
         Ok(())
+    })
+}
+
+/// "Radio: Important only" (`true`: only police tiers 1–3 are heard) or "All" (`false`,
+/// the default). Owner playtest row 144.
+#[wasm_bindgen]
+pub fn audio_set_radio_important_only(on: bool) -> Result<(), JsValue> {
+    with_audio(|d| {
+        d.set_radio_important_only(on);
+        Ok(())
+    })
+}
+
+/// Police priority tier of a radio line just spoken (row 144): 1 = actionable … 5 = routine,
+/// 0 = unknown. `unit` 0 = dispatch. The radio strip uses it for lines shown straight from
+/// police events (audio not running).
+#[wasm_bindgen]
+pub fn police_radio_tier(unit: u32, text: &str) -> Result<u8, JsValue> {
+    with(|s| {
+        let u = (unit != 0).then_some(wp_contracts::UnitId(unit));
+        Ok(s.sim()
+            .police()
+            .radio_tier_of(u, text)
+            .map_or(0, |t| t.number()))
     })
 }
 

@@ -53,5 +53,9 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.43 | preview | Turn signals built into every car's head / tail clusters (per style; flush, break with the car end; the cars' own lenses blink instead of corner boxes); D's traffic jam fixes (row 85) on main's maps |
 | 0.12.44 | preview | Keyboard countersteer default 0 %, new-side catch 0.9 → 0.8 (fixes the rampart double transition), flick sliders lab-only |
 | 0.12.45 | preview | Player keyboard steering = the key (no transition / catch / limit / held-key cut / smart lock; plain speed curve only); hands-off countersteer default 30 %, capped at 30 % of lock, no-key only (matches the reference clips); reference cars parity_rwd_e / parity_rwd_f |
-| 0.12.46 | preview | (next) |
+| 0.12.46 | preview | Police never spawn in the racer's view (pop-in 0.82 → 0.06 /min), spike / roadblock units on the racer's carriageway facing its flow, no pursuit spawns across the median, spikes deflate in ~1 s; police pace 0.45 → 0.70 |
+| 0.12.47 | preview | Loop 9 race has late-night traffic (23:00, density 2.0) and the player seat; touch mid-LOD back to 100 m; phone perf profile informational (PC target, row 145); reset ghost blink fix |
+| 0.12.48 | preview | Free-roam street racers: 16 racers, 4 per level (Street / Pro / Elite / Legend, Rookie removed), challenge on the horn key (Q), never give up; "lab · held-key drift" preset in the hidden tune panel (?tune=1 / F10; candidate B, not default); chase-unit meet point on the map (row 129); lane changes see tracked vehicles |
+| 0.12.49 | preview | "lab · held-key drift" preset is now held_search candidate D (held 3.92 s vs 2.24 s, taps 26/36, AI pace neutral; player-only rack curve 49 km/h); still lab-only, not default |
+| 0.12.50 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

@@ -292,9 +292,12 @@ export function padName(c: PadControl): string {
 
 /** One line per action for the F1 help: `throttle — W / ↑ · RT`. */
 export function bindingsHelp(b: Bindings): string[] {
-  return ACTIONS.map((a) => {
-    const k = b.keys[a.id].map(keyName).join(" / ") || "–";
-    const p = b.pad[a.id].map(padName).join(" / ");
-    return `${a.label} — ${k}${p ? ` · pad ${p}` : ""}`;
-  });
+  return ACTIONS.map((a) => `${a.label} — ${bindingText(b, a.id)}`);
+}
+
+/** One action's bound keys and pad controls as help text ("Q · pad L3"; "–" when unbound). */
+export function bindingText(b: Bindings, id: ActionId): string {
+  const k = b.keys[id].map(keyName).join(" / ") || "–";
+  const p = b.pad[id].map(padName).join(" / ");
+  return `${k}${p ? ` · pad ${p}` : ""}`;
 }

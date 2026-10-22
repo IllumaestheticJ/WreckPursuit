@@ -171,6 +171,7 @@ fn run_crash(seed: u64) -> (u64, usize, BTreeMap<String, usize>) {
         text: "unit twelve in pursuit of a grey coupe".into(),
         priority: RadioPriority::Pursuit,
         emitted_tick: 0,
+        tier: 0,
     });
     let listener = Listener {
         pos: [12.0, 0.0, 2.0],
@@ -522,6 +523,61 @@ fn plays(cmds: &[AudioCommand], cue_name: &str) -> usize {
     cmds.iter()
         .filter(|c| matches!(c, AudioCommand::Play { cue, .. } if cue == cue_name))
         .count()
+}
+
+#[test]
+fn tier_one_police_lines_are_heard_at_once_and_tiers_set_the_priority() {
+    // Row 144: the caller passes each line's police tier; tier 1 skips the scanner delay (the
+    // owner: heard together with the map marker), the rest keep it.
+    use wp_police::{PoliceEvent, PoliceEventExt};
+    let (mut dir, s) = one_car_dir();
+    dir.set_scanner_tier(ScannerTier::Basic); // 10 s
+    let warn = "Dispatch, racer #1: roadblock 400 metres ahead, northbound on Lantern Row.";
+    let call = "Dispatch: caller reports reckless driver, downtown.";
+    dir.set_police_radio_tiers(vec![(None, warn.into(), 1), (None, call.into(), 4)]);
+    let ev = [
+        PoliceEvent::Radio {
+            unit: None,
+            text: call.into(),
+        }
+        .to_sim_event(),
+        PoliceEvent::Radio {
+            unit: None,
+            text: warn.into(),
+        }
+        .to_sim_event(),
+    ];
+    let mut said = Vec::new();
+    for c in step(&mut dir, &s, 0, &ev) {
+        if let AudioCommand::RadioSay {
+            text,
+            priority,
+            tier,
+            ..
+        } = c
+        {
+            said.push((0u64, text, priority, tier));
+        }
+    }
+    for f in 1..=700u64 {
+        for c in step(&mut dir, &s, f * 4, &[]) {
+            if let AudioCommand::RadioSay {
+                text,
+                priority,
+                tier,
+                ..
+            } = c
+            {
+                said.push((f * 4, text, priority, tier));
+            }
+        }
+    }
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert_eq!(said[0].0, 0, "tier 1 in the same frame: {said:?}");
+    assert_eq!(said[0].1, warn);
+    assert_eq!((said[0].2, said[0].3), (RadioPriority::Urgent, 1));
+    assert_eq!(said[1].0, 10 * 240, "tier 4 after the Basic delay");
+    assert_eq!((said[1].2, said[1].3), (RadioPriority::Routine, 4));
 }
 
 #[test]

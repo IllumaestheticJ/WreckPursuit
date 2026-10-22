@@ -314,6 +314,9 @@ pub struct RunMetrics {
     /// Pursuit cars (responders, backup, tool cars) that appeared on the far carriageway of
     /// the pursued racer's divided road (row 140).
     pub spawns_far_carriageway: u32,
+    /// Turn-rounds by units after the evader (the pro driver facing away from its line, a
+    /// reverse swing or U-turn, or backing out), each from its start to driving on, s.
+    pub turn_round_s: Vec<f32>,
     /// Police cars total-lost without / with racer contact.
     pub self_wrecks: u32,
     /// Police cars wrecked after racer contact.
@@ -517,6 +520,7 @@ pub fn run_one(
         stuck_events: 0,
         spawns_in_view: 0,
         spawns_far_carriageway: 0,
+        turn_round_s: Vec::new(),
         self_wrecks: 0,
         contact_wrecks: 0,
         units_engaged: 0,
@@ -527,6 +531,9 @@ pub fn run_one(
         evader_plans: 0,
         evader_reversals: 0,
     };
+    // Turn-round in progress per unit after the evader: when it started, s.
+    let mut turn_started: std::collections::BTreeMap<wp_police::UnitId, f32> =
+        std::collections::BTreeMap::new();
     let base = sim.police().stats().clone();
     let mut contact_eps = Episodes::default();
     let mut crash_eps = Episodes::default();
@@ -703,6 +710,30 @@ pub fn run_one(
                     m.pursuit_seen_s += dt;
                 }
                 PursuitStatus::Searching => m.pursuit_s += dt,
+                _ => {}
+            }
+        }
+        // Turn-rounds by units after the evader: start to end of each.
+        for u in pol.units() {
+            let after_me = matches!(
+                u.assignment,
+                Assignment::Pursue { target } | Assignment::Intercept { target, .. }
+                    if target == me
+            );
+            // The pro driver's crawl round, a reverse swing or U-turn, or backing out.
+            let turning = (u.turning_round || u.unstick.swinging() || u.unstick.reversing())
+                && after_me
+                && !u.wrecked;
+            match (turning, turn_started.get(&u.id).copied()) {
+                (true, None) => {
+                    turn_started.insert(u.id, t1);
+                }
+                (false, Some(t0)) => {
+                    turn_started.remove(&u.id);
+                    if after_me {
+                        m.turn_round_s.push(t1 - t0);
+                    }
+                }
                 _ => {}
             }
         }
@@ -930,6 +961,10 @@ pub struct CellSummary {
     pub stuck_per_min: f32,
     /// Police cars appearing in a racer's line of sight per minute of run (row 131).
     pub pop_in_per_min: f32,
+    /// Turn-rounds per pursuit minute.
+    pub turns_per_min: f32,
+    /// Median turn-round time, s.
+    pub turn_med_s: Option<f32>,
     /// Far-carriageway pursuit spawns per minute of run (row 140).
     pub far_cw_per_min: f32,
     /// Police self-wrecks (sum).
@@ -1020,6 +1055,16 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
         civilian_per_min: per_min(sum(|r| r.police_civilian_collisions)),
         stuck_per_min: per_min(sum(|r| r.stuck_events)),
         pop_in_per_min: per_min(sum(|r| r.spawns_in_view)),
+        turns_per_min: if pursuit_min > 0.0 {
+            runs.iter().map(|r| r.turn_round_s.len()).sum::<usize>() as f32 / pursuit_min
+        } else {
+            0.0
+        },
+        turn_med_s: median(
+            runs.iter()
+                .flat_map(|r| r.turn_round_s.iter().copied())
+                .collect(),
+        ),
         far_cw_per_min: per_min(sum(|r| r.spawns_far_carriageway)),
         self_wrecks: sum(|r| r.self_wrecks),
         evader_civilian_per_min: per_min(sum(|r| r.evader_civilian_collisions)),
@@ -1078,7 +1123,7 @@ fn pct(x: f32) -> String {
 pub const PACE_MIN_MPS: f32 = 25.0;
 
 /// Column headers of [`table`].
-const HEADER: [&str; 21] = [
+const HEADER: [&str; 23] = [
     "cell",
     "runs",
     "engaged",
@@ -1099,10 +1144,12 @@ const HEADER: [&str; 21] = [
     "civ/min",
     "stuck/min",
     "pop-in/min",
+    "turns/min",
+    "turn s",
     "far-cw/min",
 ];
 
-fn row(s: &CellSummary) -> [String; 21] {
+fn row(s: &CellSummary) -> [String; 23] {
     [
         s.label.clone(),
         s.runs.to_string(),
@@ -1124,13 +1171,15 @@ fn row(s: &CellSummary) -> [String; 21] {
         format!("{:.2}", s.civilian_per_min),
         format!("{:.2}", s.stuck_per_min),
         format!("{:.2}", s.pop_in_per_min),
+        format!("{:.2}", s.turns_per_min),
+        s.turn_med_s.map_or("—".to_string(), |x| format!("{x:.1}")),
         format!("{:.2}", s.far_cw_per_min),
     ]
 }
 
 /// Plain-text table (terminal).
 pub fn table(rows: &[CellSummary]) -> String {
-    let body: Vec<[String; 21]> = rows.iter().map(row).collect();
+    let body: Vec<[String; 23]> = rows.iter().map(row).collect();
     let mut w = HEADER.map(|h| h.chars().count());
     for r in &body {
         for (k, c) in r.iter().enumerate() {

@@ -1,0 +1,173 @@
+# Race-specific police profiles (wp_police::race). One table per race in the browser's picker,
+# keyed by the race id (wp_race::catalog::RaceDef::id). Each race's police are configured here
+# and nowhere else: change one table and only that race changes.
+#
+# A profile is applied when the race is set up (wp_race::police::start_race, before the
+# countdown) on top of the normal police tables:
+#   presence      patrol multiplier for the race's scenario (Scenario::police_presence)
+#   backup_scale  reinforcements per wanted level x this
+#   tool_lifetime_s  how long the scripted roadblocks / spikes stay out, s
+#   recognise_on_sight  a racer passing a stakeout is recognised at once (no night window)
+#   [x.tactics]   which tactics and tools the police may use (all on when left out)
+#   [x.speed]     optional speed overrides for the chase
+#   [[x.route_blocks]]  roadblocks ON the course, across the racing direction, at `at`
+#                 (fraction of the course length) with a `gap_m` gap on one side
+#   [[x.side_blocks]]   roadblocks OFF the course: `count` side roads that branch off the
+#                 course between `from` and `to` are sealed `into_m` in from the junction
+#   [[x.stakeouts]]     units parked off the course at `at` that join (or start) the chase
+#                 when a racer passes within `trigger_m`
+#   [[x.spikes]]  spike strips laid across part of the course at `at`, centred `offset_m` to
+#                 the left (+) or right (-) of the course line (the planned racing lane)
+#
+# Physics is the same for every race and both damage modes: these tables only decide where the
+# police are and what they may do (owner rule 2026-10-20).
+
+# Illegal daytime checkpoint run through downtown. Owner brief: heavy police presence with
+# pre-scripted roadblocks both on and off the racing direction.
+[lantern_checkpoint]
+name = "Downtown lockdown"
+summary = "Every cop in town: roadblocks across the route and on the side streets, units staked out at the junctions."
+presence = 2.5
+backup_scale = 1.5
+tool_lifetime_s = 600.0
+recognise_on_sight = true
+
+[[lantern_checkpoint.route_blocks]]
+at = 0.4
+gap_m = 3.5
+gap_side = "left"
+units = 2
+
+[[lantern_checkpoint.route_blocks]]
+at = 0.75
+gap_m = 3.5
+gap_side = "right"
+units = 2
+
+[[lantern_checkpoint.side_blocks]]
+from = 0.1
+to = 0.95
+count = 4
+into_m = 25.0
+units = 1
+
+[[lantern_checkpoint.stakeouts]]
+at = 0.2
+trigger_m = 60.0
+
+[[lantern_checkpoint.stakeouts]]
+at = 0.6
+trigger_m = 60.0
+
+# One flat-out lap of the Loop 9 highway at 1 am. Owner brief: exclusively high-speed pursuit.
+# No roadblocks, spikes, box-ins, rolling blocks, junction blocks or helicopter: interceptors
+# chase at highway speed (cap raised to 70 m/s, PIT allowed up to 220 km/h) and fresh units
+# wait on the loop's shoulders to join the chase as the field comes by.
+[loop9_circuit]
+name = "Highway interceptors"
+summary = "Pure high-speed pursuit: interceptors join from the shoulder and run the field down. No roadblocks, no spikes."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = true
+
+[loop9_circuit.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = false
+junction_block = false
+pit = true
+rams = true
+
+[loop9_circuit.speed]
+pursuit_cap_mps = 70.0
+pit_max_kmh = [0.0, 180.0, 200.0, 220.0, 220.0]
+speed_margin = 0.35
+
+[[loop9_circuit.stakeouts]]
+at = 0.15
+trigger_m = 120.0
+
+[[loop9_circuit.stakeouts]]
+at = 0.4
+trigger_m = 120.0
+
+[[loop9_circuit.stakeouts]]
+at = 0.65
+trigger_m = 120.0
+
+[[loop9_circuit.stakeouts]]
+at = 0.85
+trigger_m = 120.0
+
+# Night hill sprint up six hairpins to the Knob Observatory Lot. Proposed style: summit trap.
+# Hairpins make a rammed chase pointless and deadly, so the police tail the field up the hill
+# without PITs or rams, seal the side roads near the top, and box the racers in at the
+# observatory lot. The trap springs at the top: a unit waits just below the summit and lights
+# the field up as it arrives (springing it lower down stops a pulled-over racer on the
+# one-lane hairpins, and the whole field behind it with him).
+[hollins_sprint]
+name = "Summit trap"
+summary = "Let them climb, then spring the trap: side roads at the top sealed, a unit waiting below the summit, box-ins at the lot. No rams on the hill."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = true
+
+[hollins_sprint.tactics]
+roadblocks = false
+spikes = false
+helicopter = true
+box_in = true
+rolling_block = false
+junction_block = true
+pit = false
+rams = false
+
+[[hollins_sprint.side_blocks]]
+from = 0.6
+to = 1.0
+count = 2
+into_m = 25.0
+units = 1
+
+[[hollins_sprint.stakeouts]]
+at = 0.88
+trigger_m = 50.0
+
+# Short night drag-and-dodge up the grid city's central highway. Proposed style: speed trap.
+# Radar units sit on the shoulder and recognise a racer the moment it flies past; a spike strip
+# covers half the carriageway near the end, so a racer who watches the road can still thread
+# it. Rolling blocks and PITs on the straight; no dynamic roadblocks on the short highway.
+[grid_highway_sprint]
+name = "Speed trap"
+summary = "Radar units on the shoulder pick you up at once; a spike strip covers half the road near the end."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = true
+
+[grid_highway_sprint.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = true
+
+[[grid_highway_sprint.stakeouts]]
+at = 0.3
+trigger_m = 80.0
+
+[[grid_highway_sprint.stakeouts]]
+at = 0.55
+trigger_m = 80.0
+
+[[grid_highway_sprint.spikes]]
+at = 0.85
+length_m = 4.0
+offset_m = 2.5
