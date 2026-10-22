@@ -1618,7 +1618,11 @@ mod tests {
             let id = i as LaneId;
             // Highways stay concrete (and painted) whatever their material says.
             let highway = l.kind == LaneKind::Highway;
-            assert_eq!(unpaved(&map, id), unpaved_road(l.road) && !highway, "lane {i}");
+            assert_eq!(
+                unpaved(&map, id),
+                unpaved_road(l.road) && !highway,
+                "lane {i}"
+            );
             if highway {
                 continue;
             }
