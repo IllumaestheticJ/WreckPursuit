@@ -1547,7 +1547,8 @@ centre dividers and proper on-ramps").
 out of `signals_view.ts`), `tools/city-import` (greybox, `RoadSpec` struct update in `osm.rs`).
 
 **Known gaps**
-- No gore chevrons / dotted lane-line extensions through tapers; no ramp metering.
+- No gore chevrons / dotted lane-line extensions through tapers (added later on, see the
+  follow-up below); no ramp metering.
 - Police pursuit AI uses the lane graph as before (ramps are ordinary highway lanes to it).
 
 **Contract change requests:** none (no `wp_contracts` change).
@@ -1625,3 +1626,27 @@ kept setting off. Now the closest approach must overlap the agent's body side to
 `EMERGENCY_HORIZON_S` 2.5 s. Tests: `tests/player_nearby.rs` (two same-world runs, with and
 without the player, compare the chosen agent): oncoming 636 → 0 panic ticks, overtaking 40 → 0;
 a car in its lane head-on still triggers it.
+
+### Follow-up: gore chevrons and dotted taper lines (2026-10-21)
+- **Markings** (`markings`): new `MarkingKind::DottedLine` and `MarkingKind::GoreChevron`.
+  Connectors through a freeway merge / diverge are painted now (lane lines, yellow median
+  edge line, the taper's outer edge line, the dotted line on the carriageway's outer edge);
+  where a ramp lane runs beside a carriageway lane the two edge lines become one dotted line,
+  and where they part a chevron gore fills the paved shoulders between them. All derived when
+  the map is built (`FreewayPaint` in `CityMap`; no road format change), drawn by
+  `marking_mesh` and reported by `surface_at` (`PaintedLine`) from the same rules.
+- **Found on the way:** on the grid viaduct the ramps start dropping where their shoulder
+  still overlaps the carriageway's (a 0.5-3.9 m step inside the gore, rail-free under 1 m);
+  Port Vesper has a few ramps like that (up to 1.4 m). Chevrons stop at the carriageway's own
+  shoulder there. Holding the ramps level until their paving has left the carriageway's was
+  tried and dropped: the grid viaduct's inner ramps then exceed the 8.5 % grade cap. Fixing it
+  properly needs longer grid ramps (terminals further out), which moves city data.
+- **Tests:** `freeway_tapers_are_dotted_and_gores_chevroned` (one dotted run and one gore per
+  ramp in the grid and on Port Vesper, dots / gaps and chevron bars / bare concrete where the
+  rules say, freeway paint mesh over `marking_at` hits); the mesh checks now test that every
+  triangle corner is on paving (a triangle may bridge a step between overlapping ribbons).
+- **Goldens re-blessed** (paint on the freeway connectors changes tyre grip there):
+  `opponent_circuit_8x5`, `opponent_flee_police`, `opponent_open_roads_traffic`,
+  `opponent_reverse_grid_2laps`, `race_city_sprint_police`, `world_traffic_soak`; 45/45
+  scenarios pass.
+- **Perf:** `surface_at` 0.61 µs/query (0.49 before, same run), markings 0.17 µs (0.13).

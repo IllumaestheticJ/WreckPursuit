@@ -9,7 +9,7 @@ import { useSend, useSlice } from "../../model/GameModel";
 import type { GarageCar, RepairChoice } from "../../model/types";
 import { INSURANCE_TIERS, insuranceQuote, quoteRepair, salePrice } from "../../data/economy";
 import { MODS } from "../../data/catalog";
-import { buildStats } from "../../data/stats";
+import { statSourceLabel, useBuildStats } from "../../data/measure";
 import { DamageSilhouette } from "../hud/DamageSilhouette";
 import { Badge, Button, CarStatBars, Meter, Money, Panel, ScreenHead, severityColor, Tabs, useEscape } from "../../ui/kit";
 import { pct, words } from "../../ui/format";
@@ -131,13 +131,14 @@ function CarDetail({ car, active }: { car: GarageCar; active: boolean }) {
 
 /** The car's stat bars as built; with mods, a tick marks stock. */
 function BuildStatBars({ car }: { car: GarageCar }) {
-  const b = buildStats(car.defId, car.mods, car.stats);
+  const mode = useSlice((s) => s.settings.damageMode);
+  const b = useBuildStats(car.defId, car.mods, mode, car.stats);
   if (!b) return null;
   const modded = car.mods.length > 0;
   return (
-    <div class="wp-garage-stats">
+    <div class="wp-garage-stats" data-source={b.source} data-pending={b.pending}>
       <div class="wp-dim wp-mono wp-upper" style={{ fontSize: "0.68em" }}>
-        Performance{modded ? ` · with mods (${b.source === "measured" ? "measured" : "estimated"}) · tick = stock` : " · stock"}
+        Performance{modded ? ` · with mods (${statSourceLabel(b)}) · tick = stock` : " · stock"}
       </div>
       <CarStatBars stats={b.stats} baseline={modded ? b.stock : undefined} />
     </div>
