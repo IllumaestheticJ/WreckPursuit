@@ -297,6 +297,7 @@ impl Economy {
             let c = tx.car_mut(car)?;
             c.mods.push(mod_id.to_string());
             c.mods.sort();
+            self.sync_parts_with_mods(c);
             Ok(())
         })
     }
@@ -329,6 +330,7 @@ impl Economy {
         let refund = money(self.market.mod_resale_frac * m.price as f32);
         let c = tx.car_mut(car)?;
         c.mods.retain(|x| x != mod_id);
+        self.sync_parts_with_mods(c);
         tx.credit(
             refund,
             EventReason::ModRemoved {
@@ -441,5 +443,6 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         location: CarLocation::Garage,
         insurance: None,
         purchase_price: Some(paid),
+        parts: None,
     }
 }

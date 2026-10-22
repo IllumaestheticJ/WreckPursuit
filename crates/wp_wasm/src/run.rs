@@ -274,6 +274,7 @@ impl PlayerRun {
                     insurance: None,
                     // Handed out by the demo for free: resale is valued from what was paid.
                     purchase_price: Some(0),
+                    parts: None,
                 });
                 uid
             }
