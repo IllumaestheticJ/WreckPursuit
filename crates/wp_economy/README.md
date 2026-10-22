@@ -83,6 +83,21 @@ the fee and returns the car with exactly the damage it went in with, to be repai
 Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json` (16 packs,
 106 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
 
+### Garage workshop (`parts`)
+
+Parts on a car: `data/economy/parts.toml` lists the slots (front bumper, radiator, the four
+wheels...), the mod lines each takes and the removal order. Taking a part off puts it in
+`PlayerAccount::inventory`; fitting takes it back; the car's `mods` are rebuilt from its fitted
+parts, so the mod tree, preview and the sim need no change. Condition comes from the damage
+snapshot. Details and wasm exports: `docs/integration/garage.md`.
+
+```rust
+let (part, _) = econ.remove_part(&mut acct, car, "front_bumper")?;
+let (new, ev) = econ.buy_part(&mut acct, car, "radiator", Some("cooling_radiator_1"), mode)?;
+let (fit, _) = econ.fit_part(&mut acct, car, "radiator", new[0], mode)?; // fit.restore → lattice
+let view = econ.workshop(&acct, car, mode)?;
+```
+
 ## Economy design
 
 ### Money rules

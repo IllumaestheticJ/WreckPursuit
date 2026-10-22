@@ -1084,7 +1084,8 @@ impl Economy {
             return;
         }
         let o = &mut car.damage.outstanding;
-        o.lines.retain(|l| !empty.iter().any(|s| s.owns_line(&l.item)));
+        o.lines
+            .retain(|l| !empty.iter().any(|s| s.owns_line(&l.item)));
         o.total = o.lines.iter().map(|l| l.total).sum();
     }
 
