@@ -515,6 +515,7 @@ impl Economy {
             }
             let items: Vec<RepairItem> = quote.lines.iter().map(|l| l.item).collect();
             let c = tx.car_mut(car)?;
+            self.rebuild_repaired(c, &items);
             let before = c.damage.outstanding.total;
             c.damage
                 .outstanding
@@ -549,6 +550,7 @@ impl Economy {
             let some = Some(report.car);
             let class = {
                 let c = tx.car_mut(report.car)?;
+                let before = std::mem::take(&mut c.damage.outstanding.lines);
                 let was_wanted =
                     c.damage.sustained_while_wanted && !report.estimate.lines.is_empty();
                 c.damage = DamageSnapshot {
@@ -560,6 +562,7 @@ impl Economy {
                     sustained_while_wanted: was_wanted || report.wanted_during_session,
                 };
                 self.strip_empty_slot_lines(c);
+                self.wear_from_damage(c, &before);
                 c.class
             };
             tx.note(

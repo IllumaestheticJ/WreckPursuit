@@ -102,6 +102,8 @@ export class WorkshopMode {
       fit: (slot, part) => this.after(sim.careerFitPart(uid, slot, part)),
       buy: (kind, grade) => this.after(sim.careerBuyPart(uid, kind, grade), false),
       sell: (part) => this.after(sim.careerSellPart(uid, part), false),
+      strip: (assembly, slot) => this.after(sim.careerStripPart(uid, assembly, slot), false),
+      build: (assembly, slot, part) => this.after(sim.careerBuildPart(uid, assembly, slot, part), false),
     };
     const host: WorkshopHost = {
       highlight: (slots) => this.highlight(slots),

@@ -365,6 +365,32 @@ impl Economy {
         })
     }
 
+    /// Preview owned car `car` as it drives: [`Economy::preview`] of its mods, with the torque
+    /// its worn engine parts cost ([`Economy::wear_torque_factor`]). This is what a session of
+    /// the car should load.
+    pub fn car_preview(
+        &self,
+        vehicle: &VehicleDef,
+        lattice: &LatticeDef,
+        car: &OwnedCar,
+        mode: Option<DamageMode>,
+    ) -> Result<Preview, EconomyError> {
+        let mut p = self.preview(vehicle, lattice, &car.mods, mode)?;
+        let f = self.wear_torque_factor(car);
+        if f < 1.0 {
+            for pt in &mut p.applied.vehicle.engine.torque_curve_nm {
+                pt.1 *= f;
+            }
+            p.metrics = self.performance(&p.applied.vehicle);
+            p.class_index = class_index(&p.metrics, &self.market.class_index);
+            p.bracket = bracket(p.class_index, &self.market.class_index).to_string();
+            p.mass_kg = p.metrics.mass_kg;
+            p.est_0_100_s = p.metrics.est_0_100_s;
+            p.est_top_speed_mps = p.metrics.est_top_speed_mps;
+        }
+        Ok(p)
+    }
+
     /// Buy (or replace) insurance on a car. The first day's premium is charged now.
     pub fn buy_insurance(
         &self,

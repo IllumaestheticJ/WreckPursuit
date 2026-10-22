@@ -230,6 +230,19 @@
   gap: 0.5em;
   align-items: center;
 }
+.wp-ws-stand {
+  display: grid;
+  gap: 0.3em;
+  margin-bottom: 0.8em;
+}
+.wp-ws-standrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5em;
+  align-items: center;
+  padding: 0.15em 0;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.06));
+}
 @media (max-width: 760px) {
   .wp-ws {
     grid-template-columns: 1fr;

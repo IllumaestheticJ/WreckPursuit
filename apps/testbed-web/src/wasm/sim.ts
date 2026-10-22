@@ -431,6 +431,9 @@ export const sim = {
   careerFitPart: (uid: number, slot: string, part: number): WorkshopScreen => JSON.parse(wasm.career_fit_part(uid, slot, part)),
   careerBuyPart: (uid: number, kind: string, grade: string | null): WorkshopScreen => JSON.parse(wasm.career_buy_part(uid, kind, grade ?? "")),
   careerSellPart: (uid: number, part: number): WorkshopScreen => JSON.parse(wasm.career_sell_part(uid, part)),
+  careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
+  careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
+    JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
 };
 
 import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";

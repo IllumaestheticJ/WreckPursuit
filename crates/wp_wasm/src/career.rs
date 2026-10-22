@@ -569,13 +569,13 @@ impl Career {
     /// drive `sentinel_*`, traffic `debug_sedan`, and neither is sold).
     pub fn car_files(&self, car: &OwnedCar) -> Result<BTreeMap<String, String>, String> {
         let mut files = BTreeMap::new();
-        if car.mods.is_empty() {
+        if car.mods.is_empty() && self.econ.wear_torque_factor(car) >= 1.0 {
             return Ok(files);
         }
         let base = base_car(&car.def_id)?;
         let p = self
             .econ
-            .preview(&base.def, &base.lattice, &car.mods, Some(self.mode()))
+            .car_preview(&base.def, &base.lattice, car, Some(self.mode()))
             .map_err(e2s)?;
         let v = &p.applied.vehicle;
         let l = &p.applied.lattice;
@@ -1164,6 +1164,29 @@ impl Career {
             .map_err(e2s)?;
         self.post(ev);
         Ok(uids)
+    }
+
+    /// Engine stand: take the part in `slot` out of loose assembly `assembly` (an engine in
+    /// the inventory). Returns the part's uid.
+    pub fn strip_part(&mut self, assembly: u32, slot: &str) -> Result<u32, String> {
+        self.guard()?;
+        let (uid, ev) = self
+            .econ
+            .strip_part(&mut self.profile.account, assembly, slot)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(uid)
+    }
+
+    /// Engine stand: put inventory part `part` into `slot` of loose assembly `assembly`.
+    pub fn build_part(&mut self, assembly: u32, slot: &str, part: u32) -> Result<(), String> {
+        self.guard()?;
+        let ((), ev) = self
+            .econ
+            .build_part(&mut self.profile.account, assembly, slot, part)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(())
     }
 
     /// Sell inventory part `part` to the dealer. Returns the price.
@@ -1794,6 +1817,31 @@ pub fn career_buy_part(uid: u32, kind: &str, grade: &str) -> Result<String, JsVa
     with_career(|c| {
         let grade = (!grade.is_empty()).then_some(grade);
         c.buy_part(CarUid(uid), kind, grade)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Engine stand: take the part in `slot` out of loose engine `assembly`. Returns the workshop
+/// JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_strip_part(uid: u32, assembly: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.strip_part(assembly, slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. Returns
+/// the workshop JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_build_part(
+    uid: u32,
+    assembly: u32,
+    slot: &str,
+    part: u32,
+) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.build_part(assembly, slot, part)?;
         c.workshop(CarUid(uid)).map(|w| json(&w))
     })
 }

@@ -239,6 +239,8 @@ export interface SlotView {
   name: string;
   group: PartGroup;
   kind: string;
+  /** Assembly slot it lives inside (engine internals: "engine"), or null. */
+  parent: string | null;
   fitted: PartView | null;
   required: boolean;
   /** Fitted slots in the way (empty = the slot can be worked on). */
@@ -256,6 +258,26 @@ export interface LoosePart {
   condition: number;
   damage: unknown[];
   value: number;
+  /** Parts still inside a loose assembly (an engine's internals); `kind` is their slot. */
+  contents?: LoosePart[];
+}
+
+/** An empty slot of a loose engine a part can go into (`StandFit`). */
+export interface StandFit {
+  assembly: number;
+  slot: string;
+}
+
+/** A loose engine on the engine stand (`StandView`). */
+export interface StandView {
+  uid: number;
+  name: string;
+  /** Assembly slot id ("engine"). */
+  slot: string;
+  /** Its internals, in table order. */
+  slots: SlotView[];
+  /** Names of internals it is missing. */
+  missing: string[];
 }
 
 /** A loose part with where it fits on this car (`InventoryView`). */
@@ -263,6 +285,8 @@ export interface InventoryView {
   part: LoosePart;
   name: string;
   fits: string[];
+  /** Empty slots of loose engines on the stand that take it. */
+  stand_fits: StandFit[];
   reason: string | null;
   sale_price: number;
 }
@@ -288,6 +312,10 @@ export interface WorkshopScreen {
   missing: string[];
   upgrades: string[];
   inventory: InventoryView[];
+  /** Loose engines in the inventory, as the engine stand shows them. */
+  stands: StandView[];
+  /** Engine torque left after worn parts (1 = nothing lost). */
+  torque_factor: number;
   catalog: CatalogEntry[];
   cash: number;
   def_id: string;
@@ -300,4 +328,8 @@ export interface WorkshopApi {
   fit(slot: string, part: number): WorkshopScreen;
   buy(kind: string, grade: string | null): WorkshopScreen;
   sell(part: number): WorkshopScreen;
+  /** Engine stand: take the part in `slot` out of loose engine `assembly`. */
+  strip(assembly: number, slot: string): WorkshopScreen;
+  /** Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. */
+  build(assembly: number, slot: string, part: number): WorkshopScreen;
 }
