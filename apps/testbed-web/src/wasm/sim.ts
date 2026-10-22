@@ -82,6 +82,9 @@ export interface VehicleInfo {
   /** wp_police unit id of a sim police vehicle (null / absent for every other vehicle and
    * older wasm builds): the same id as `police_units()` `unit_id`, stable across promotion. */
   police_unit?: number | null;
+  /** The police vehicle belongs to the Ashpeak County Sheriff's Office (ACSO livery); absent on
+   * older wasm builds. */
+  police_county?: boolean;
   /** wp_world agent id of promoted traffic (null / absent otherwise and on older builds): the
    * same id as `traffic_agents()` `agent_id`, so the car keeps its instanced twin's paint. */
   traffic_agent?: number | null;

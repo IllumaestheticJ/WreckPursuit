@@ -20,6 +20,7 @@ import type { SessionModels } from "../wasm/sim";
 import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
 import { BAR, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
+import { COUNTY_PAINT, countySkin } from "./livery";
 
 /** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
 const VIEW_LOD_BAND_M = 15;
@@ -142,11 +143,13 @@ export class LodDirector {
     for (let o = 0; o < police.length; o += DRAW_STRIDE, unit++) {
       const flags = police[o + D.flags];
       if (flags & POLICE_DRAW_FLAG.helicopter) continue; // SceneView draws helicopters
-      const pModel = this.fleetModel(pModels, police[o + D.model], true);
+      // Ashpeak County Sheriff units: county livery model and green proxy paint.
+      const county = countySkin((flags & POLICE_DRAW_FLAG.county) !== 0);
+      const pModel = this.fleetModel(pModels, police[o + D.model], true, county);
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      states.push(this.draw(keyOf(this.pKeys, "p", police[o + D.id]), entity, view, police, o, pModel, POLICE_PAINT, TAIL.off, barOf(flags, timeS, unit)));
+      states.push(this.draw(keyOf(this.pKeys, "p", police[o + D.id]), entity, view, police, o, pModel, county ? COUNTY_PAINT : POLICE_PAINT, TAIL.off, barOf(flags, timeS, unit)));
     }
 
     // Player, AI racers and scenario cars: always their own view.
@@ -166,9 +169,9 @@ export class LodDirector {
    * Fleet model of a draw record's `model` index into `ids` (a session model list); an index out
    * of range falls back to the first model, null when the session has none.
    */
-  private fleetModel(ids: string[], index: number, police: boolean): ReturnType<Fleet["model"]> | null {
+  private fleetModel(ids: string[], index: number, police: boolean, county = false): ReturnType<Fleet["model"]> | null {
     if (ids.length === 0) return null;
-    return this.fleet.model(ids[index] ?? ids[0], police);
+    return this.fleet.model(ids[index] ?? ids[0], police, county);
   }
 
   /** Distance from the camera (sim space), m. */

@@ -91,6 +91,8 @@ export const PALETTE = {
   /** Civilian traffic paints (picked by agent / entity id). */
   trafficPaints: [0x6b5a7a, 0x5d6f63, 0x6d7078, 0x4a4e5a, 0x7a6a55, 0x56606e, 0x8a8f96, 0x3d4250] as Hex[],
   policePaint: 0xd8dbe0,
+  /** Ashpeak County Sheriff (ACSO) pine green, low-poly dark (render/livery.ts COUNTY_PAINT). */
+  countyPolicePaint: 0x2a4a3b,
   glass: 0x1d2633,
   tire: 0x18181c,
   rim: 0x6d7078,
