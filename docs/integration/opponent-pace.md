@@ -1082,3 +1082,42 @@ This was "no defensive move with a civilian within 100 m ahead". On Loop 9, 16 s
 | s95 | 90 → 86 /96 | 4.6 s faster |
 
 That is fewer finishers, so it is not kept.
+
+## Loop 9 s95 slowdown, bisected (2026-10-22, lead)
+
+The s95 re-lock on round12 6e0639e1 (best ratio 1.164 → 1.354, the field 20–55 s slower than
+at 9070a6ca) is **not a regression**. It is this one scenario seed meeting less lucky traffic
+after ws/world's Loop 9 rest stops.
+
+**Bisect** (`pace_loop9_circuit_s95`, seed 9). Times in s, in the order vic / mara / dez / juno /
+tito / player:
+
+| commit | times |
+|---|---|
+| 9070a6ca (opponent-pace) | 209.2 / 191.8 / 211.5 / DNF / DNF / 272.0 |
+| 12a721ca (round12, opponent-pace 0e84a9f7 merged) | 209.3 / 191.8 / 211.7 / 261.9 / 262.0 / 253.6 |
+| **6799200b** (ws/world 5558ac04: rest stops, row 153) | 241.8 / 218.3 / 221.9 / DNF / 307.6 / 299.0 |
+| e473c597, c81ecd99 | identical to 6799200b |
+| b20e07b2 (opponent-pace merge), f5a9cd38, 41a7e401, 6e0639e1 | 263.9 / 222.8 / 231.9 / 265.0 / 266.8 / 251.6 |
+
+The lead's three suspects (c81ecd99, f5a9cd38, 41a7e401) change nothing. The ws/world range in
+6799200b is only the rest-stop commits: six more gores on Loop 9, so lane ids and the grid moved
+and traffic spawns and merges differently.
+
+**Traffic off** (`WP_PACE_DENSITY=0`, 12a721ca vs today's tip): every car within 1 s (kestrel_ts
+196.2 vs 196.1). The rest stops do not change the road the racers drive.
+
+**Seeds 1–8 with traffic** (`pace_sweep`, 12a721ca vs 6799200b, the same AI and harness):
+
+| skill | finishers before / after | mean time before / after (s) |
+|---|---|---|
+| 0.50 | 49/54 / 54/54 | 253.4 / 240.4 |
+| 0.95 | 51/54 / 49/54 | 242.2 / 224.6 |
+
+On average the field is 13–18 s faster with the rest stops. A single seed swings by 30–80 s
+either way, both before and after (for example seed 9, s95: vic 205 → 234 s, but dez 216 → 197 s).
+Seed 3 at s95 has 4 cars that do not finish; the 8-seed gate (`just pace-loop9`) covers that.
+
+**Decision.** Keep the s95 re-lock; its RON comment now names the cause. Nothing goes to ws/world.
+The b20e07b2 step on this seed (the front three 5–22 s slower, but all six finish) is the
+traffic-body fix and the box-in escape. They were measured over several seeds when they landed.

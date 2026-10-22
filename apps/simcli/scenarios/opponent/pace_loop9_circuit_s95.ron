@@ -23,7 +23,9 @@
 // Re-measure and widen only with a reason.
 // Re-locked 2026-10-22 on round12 6e0639e1 (identical there without opponent-pace's judge change):
 // best_ratio 1.164 -> 1.354, the field 20-55 s slower than at 9070a6ca, after the round12
-// merges (traffic, steering, police). Not traced to a cause here.
+// merges (traffic, steering, police). Bisected (opponent-pace.md, "Loop 9 s95 slowdown"): the
+// step is ws/world's rest stops (6799200b, row 153); with traffic off they change nothing, and
+// over seeds 1-8 they make the field faster on average. This seed's traffic draw is unlucky.
 (
     name: "opponent_pace_loop9_circuit_s95",
     seed: 9,
