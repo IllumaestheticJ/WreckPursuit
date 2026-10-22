@@ -1597,3 +1597,32 @@ the main merge) and `def3f3f0` (the merge, before the port fixes).
   seeds give 20–33 s, so no seed choice fixes this honestly.
 - `response_day_suburb` and `response_night_core`: responders fall behind a 2× speeder on
   the arterials. The worst first unit takes 39.6 s against a 25 s target.
+
+## Tunnel scenarios after the highway port (2026-10-22, side/tunnels)
+
+Three release-only scenarios failed (their goldens were blessed failing in `9c938146`):
+- **Hollins drive-through (stale slots, `wp_world::vesper`).** "<tunnel> entry/exit" were
+  fixed offsets from the ends of the cover's road (950 m / −1100 m). `divide_loop` made the
+  cover's road a shorter outer-carriageway piece (2,103 m, round 12: 2,778 m), so both slots
+  landed *inside* the tunnel, 74 m apart: the car "stopped" at the route's end after 75 m. No
+  collider or lane problem (the 723 m drive is clean: no contact, no airborne time).
+- **Founders Cut drive-through (stale slot).** The cut moved south (portals y 893 / 1098,
+  205 m covered), 18 m past the Connector's first junction (Mercer, y ≈ 865), so "entry"
+  (40 m into that road) was 21 m inside the cut; route 298 m.
+- Fix: the slots are measured from the portals along the forward kerb lane — entry 150 m /
+  90 m before the first portal, exit 180 m / 100 m past the second (round 12 effectively
+  had 154 / 190 m and 91 / 99 m) — walking straight back through a junction when needed
+  (`lane_walk_pose`). Founders Cut entry is now on the Mercer block south of the junction
+  (25 mph: the 40 mph car logs a speeding violation there). Lay-bys unchanged. Routes:
+  Hollins 723 m (range [600, 900] kept: tunnel unchanged), Founders 419 m (90 + 205 + 100 m
+  + 23 m junction connector; range re-derived as round 12's 440 ± 60 m → 419 ± 60 =
+  [360, 480]). Test: `vesper::tests::tunnel_route_ends_lie_either_side_of_the_cover`.
+  No city-data regeneration: the committed `vesper_v2.greybox.*` carry no POIs (only the
+  local `road.bin` does).
+- **Founders Cut escape (chase outcome, not the tunnel).** Seed 56: responder unit 15 meets
+  the racer head-on on Lantern Row at 49 s; the damaged car weaves ±3.5 m on Mercer, hits a
+  street tree at (193, 487) at 67 s and sits 40 s, reaching the Cut at L4 only at ≈ 141 s
+  (escape would be ≈ 171 s, run ends 170 s). Re-seeded escape and control to 51 (sweep of
+  seeds 40–53: 9 of 14 tell the story; 51 cleanly). Escaped 113.6 s; control Captured 142.0 s.
+  Not investigated (outside this branch's scope): why a 0.29 m front crush makes the route
+  driver weave at ~1 g for 18 s afterwards.
