@@ -96,7 +96,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     drawDistanceM: 0,
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
     radioVoice: true,
-    assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0.5 },
+    assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0.3 },
     damageMode: "Arcade",
     units: "kmh",
     camera: "",
@@ -108,6 +108,24 @@ export function defaultGameSettings(developer = true): GameSettings {
 const clamp01 = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const oneOf = <T extends string>(v: unknown, opts: readonly T[], d: T): T => (opts.includes(v as T) ? (v as T) : d);
+
+/** The menu's countersteer default before playtest row 137 (50 %); 0.12.44 shipped 0, row
+ * 142 sets 30 % (the reference game's hands-off alignment). */
+export const OLD_COUNTERSTEER_DEFAULT = 0.5;
+
+/** Stored-settings mark: saved after the row 142 countersteer default (30 %). */
+export const COUNTERSTEER_REV = 142;
+
+/** Stored countersteer strength. Untouched old defaults read as the new default (30 %): 50 %
+ * in settings saved before row 137 (no `countersteerRev` mark) and 0 in settings saved with
+ * the row 137 mark (0.12.44 shipped 0). A value the player changed is kept. Saved settings
+ * carry the current mark from then on ([`saveGameSettings`]). */
+function migrateCountersteer(r: Record<string, unknown>, a: Record<string, unknown>, d: number): number {
+  const v = clamp01(a.countersteer, d);
+  if (r.countersteerRev === COUNTERSTEER_REV) return v;
+  const oldDefault = r.countersteerRev === 137 ? 0 : OLD_COUNTERSTEER_DEFAULT;
+  return v === oldDefault ? d : v;
+}
 
 /** Merge untrusted data (stored JSON) onto `base`, field by field; bad fields keep the base. */
 export function normalizeSettings(raw: unknown, base: GameSettings): GameSettings {
@@ -133,7 +151,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
       esc: bool(a.esc, base.assists.esc),
       autoGears: bool(a.autoGears, base.assists.autoGears),
       steerHelp: bool(a.steerHelp, base.assists.steerHelp),
-      countersteer: clamp01(a.countersteer, base.assists.countersteer),
+      countersteer: migrateCountersteer(r, a, base.assists.countersteer),
     },
     damageMode: oneOf(r.damageMode, ["Arcade", "Simulation"] as const, base.damageMode),
     units: oneOf(r.units, ["kmh", "mph"] as const, base.units),
@@ -180,7 +198,7 @@ export function loadGameSettings(base: GameSettings, storage: SettingsStorage | 
 export function saveGameSettings(s: GameSettings, storage: SettingsStorage | null = browserStorage()): boolean {
   try {
     if (!storage) return false;
-    storage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, countersteerRev: COUNTERSTEER_REV }));
     return true;
   } catch {
     return false;

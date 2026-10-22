@@ -318,6 +318,8 @@ pub struct AudioDirector {
     plastic_in: BTreeMap<EntityId, f32>,
     /// Per-wheel tyre deflation given by the caller ([`AudioDirector::set_tire_deflation`]).
     tire_deflation: BTreeMap<EntityId, [f32; 4]>,
+    /// Per-wheel rim-on-the-road flags given by the caller ([`AudioDirector::set_rim_contact`]).
+    rim_contact: BTreeMap<EntityId, [bool; 4]>,
     /// Spike-hit radio lines spoken (picks the next line text).
     spike_lines: u32,
     /// Vehicle whose cabin the listener is in this frame (interior camera).
@@ -363,6 +365,7 @@ impl AudioDirector {
             physical_cue,
             plastic_in: BTreeMap::new(),
             tire_deflation: BTreeMap::new(),
+            rim_contact: BTreeMap::new(),
             spike_lines: 0,
             interior: None,
         }
@@ -561,6 +564,20 @@ impl AudioDirector {
         }
     }
 
+    /// Which wheels run on their rims right now (`wp_vehicle::Vehicle::rim_contact`, FL, FR, RL,
+    /// RR): those grind. `None` = unknown (e.g. a net client): deflation ≥ `flat_tyre.rim_deflation`
+    /// decides instead.
+    pub fn set_rim_contact(&mut self, entity: EntityId, rim: Option<[bool; 4]>) {
+        match rim {
+            Some(r) => {
+                self.rim_contact.insert(entity, r);
+            }
+            None => {
+                self.rim_contact.remove(&entity);
+            }
+        }
+    }
+
     /// Vehicle whose cabin the listener was in last frame (interior camera), if any.
     pub fn interior(&self) -> Option<EntityId> {
         self.interior
@@ -580,6 +597,7 @@ impl AudioDirector {
         self.pursuits.clear();
         self.sirens.clear();
         self.tire_deflation.clear();
+        self.rim_contact.clear();
         self.last_tick = None;
         self.one_shot_seq = 0;
         self.rng = Rng::new(self.seed);
@@ -1104,7 +1122,8 @@ impl AudioDirector {
         }
         // Punctured tyres (playtest row 132): flap per deflated wheel, rim grind when flat.
         if let Some(defl) = self.tire_deflation.get(&v.entity).copied() {
-            for w in crate::flat_tyre::wheels(&cfg.flat_tyre, s, defl, car.wheel_radius_m) {
+            let rim = self.rim_contact.get(&v.entity).copied();
+            for w in crate::flat_tyre::wheels(&cfg.flat_tyre, s, defl, rim, car.wheel_radius_m) {
                 let i = w.wheel as u32;
                 if let Some((gain, rev_hz, d)) = w.flap {
                     let mut f = Desire::new(

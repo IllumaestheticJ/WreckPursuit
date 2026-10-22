@@ -5,8 +5,9 @@
 //! - a **flap / thrum** loop per deflated wheel (`tire/flat_flap`, synth `flap`): one slap of the
 //!   loose carcass per wheel revolution, so its rate follows wheel speed (`freq_hz` = revolutions
 //!   per second; the backend retriggers at that rate without re-pitching);
-//! - a **rim grind** loop per wheel running on its rim (deflation ≥ `rim_deflation`, until
-//!   `wp_vehicle` reports rim contact): the world pack's recorded metal scrape, pitched and
+//! - a **rim grind** loop per wheel running on its rim (`wp_vehicle::Vehicle::rim_contact`, which
+//!   is false over jumps and bumps; deflation ≥ `rim_deflation` when the caller has no flag, e.g.
+//!   a net client): the world pack's recorded metal scrape, pitched and
 //!   levelled by wheel speed.
 //!
 //! Deflation comes from the bridge each frame ([`crate::AudioDirector::set_tire_deflation`],
@@ -33,7 +34,7 @@ pub struct FlatTyreConfig {
     pub flap_deflation: f32,
     /// Flap gain at full deflation and `full_speed_mps`.
     pub flap_gain: f32,
-    /// Deflation from which the wheel runs on its rim (until `wp_vehicle` reports rim contact).
+    /// Deflation from which the wheel counts as on its rim when the caller has no rim-contact flag.
     pub rim_deflation: f32,
     /// Rim grind gain at `full_speed_mps`.
     pub rim_gain: f32,
@@ -74,11 +75,14 @@ pub struct WheelFlat {
 }
 
 /// What each wheel of a vehicle with `deflation` (per wheel, 0..=1) sounds like.
-/// `radius_m` = loaded wheel radii. Detached or airborne wheels are silent.
+/// `radius_m` = loaded wheel radii; `rim_contact` = `wp_vehicle`'s per-wheel rim-on-the-road flag
+/// if the caller has it (else deflation ≥ `rim_deflation` decides). Detached or airborne wheels
+/// are silent.
 pub fn wheels(
     cfg: &FlatTyreConfig,
     s: &VehicleState,
     deflation: [f32; 4],
+    rim_contact: Option<[bool; 4]>,
     radius_m: [f32; 4],
 ) -> Vec<WheelFlat> {
     let mut out = Vec::new();
@@ -100,8 +104,11 @@ pub fn wheels(
             rev_hz,
             d,
         ));
-        let rim = (d >= cfg.rim_deflation)
-            .then_some((cfg.rim_gain * (0.25 + 0.75 * speed), 0.7 + 0.6 * speed));
+        let on_rim = match rim_contact {
+            Some(r) => r[i],
+            None => d >= cfg.rim_deflation,
+        };
+        let rim = on_rim.then_some((cfg.rim_gain * (0.25 + 0.75 * speed), 0.7 + 0.6 * speed));
         out.push(WheelFlat {
             wheel: i,
             flap,
@@ -135,9 +142,9 @@ mod tests {
     fn inflated_wheels_are_silent_and_flats_flap_at_wheel_rate() {
         let cfg = FlatTyreConfig::default();
         let r = [0.33; 4];
-        assert!(wheels(&cfg, &state(60.0), [0.0; 4], r).is_empty());
+        assert!(wheels(&cfg, &state(60.0), [0.0; 4], None, r).is_empty());
         // FL half flat, RR flat on its rim, at ~20 m/s.
-        let w = wheels(&cfg, &state(60.0), [0.5, 0.0, 0.0, 1.0], r);
+        let w = wheels(&cfg, &state(60.0), [0.5, 0.0, 0.0, 1.0], None, r);
         assert_eq!(w.len(), 2);
         let (g, hz, _) = w[0].flap.unwrap();
         assert!(
@@ -147,12 +154,22 @@ mod tests {
         assert!(g > 0.0 && w[0].rim.is_none(), "half flat: no rim contact");
         assert!(w[1].rim.is_some(), "flat on the rim grinds");
         // Rate follows wheel speed.
-        let slow = wheels(&cfg, &state(15.0), [0.5, 0.0, 0.0, 0.0], r)[0]
+        let slow = wheels(&cfg, &state(15.0), [0.5, 0.0, 0.0, 0.0], None, r)[0]
             .flap
             .unwrap();
         assert!((slow.1 * 4.0 - hz).abs() < 1e-3 && slow.0 < g);
+        // With the vehicle's flag: RR is flat but momentarily off the road (bump) → no grind;
+        // FL half flat but reported on its rim → grinds.
+        let w = wheels(
+            &cfg,
+            &state(60.0),
+            [0.5, 0.0, 0.0, 1.0],
+            Some([true, false, false, false]),
+            r,
+        );
+        assert!(w[0].rim.is_some() && w[1].rim.is_none());
         // Stopped: nothing.
-        assert!(wheels(&cfg, &state(0.5), [1.0; 4], r).is_empty());
+        assert!(wheels(&cfg, &state(0.5), [1.0; 4], None, r).is_empty());
     }
 
     #[test]

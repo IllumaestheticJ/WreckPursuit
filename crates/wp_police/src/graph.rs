@@ -312,6 +312,39 @@ impl RoadGraph {
         }
     }
 
+    /// The carriageway a one-way segment carries, as lateral offsets from its line to the
+    /// right of travel, m: `(inner, outer)`. Lane 0 is centred on the line and the lanes
+    /// extend to the right, so on a divided highway the median (and the far carriageway) lies
+    /// left of `inner`. `inner` has [`CARRIAGEWAY_INNER_SLACK_M`] of slack (a few network
+    /// segments put lane 0 up to a metre left of the line). `None` for two-way roads and
+    /// unknown lanes.
+    pub fn carriageway_m(&self, s: SegmentId) -> Option<(f32, f32)> {
+        let g = self.segment(s);
+        if !g.oneway || g.lanes_fwd == 0 || g.lane_width_m <= 0.0 {
+            return None;
+        }
+        let w = g.lane_width_m;
+        Some((
+            -0.5 * w - CARRIAGEWAY_INNER_SLACK_M,
+            (g.lanes_fwd as f32 - 0.5) * w,
+        ))
+    }
+
+    /// Distance from a two-way segment's line to its outer edge for travel leaving `from`, m
+    /// (`None` when the lanes are unknown or the segment is one-way).
+    pub fn half_road_m(&self, s: SegmentId, from: NodeId) -> Option<f32> {
+        let g = self.segment(s);
+        if g.oneway || g.lane_width_m <= 0.0 {
+            return None;
+        }
+        let lanes = if g.a == from {
+            g.lanes_fwd
+        } else {
+            g.lanes_back
+        };
+        (lanes > 0).then_some(lanes as f32 * g.lane_width_m)
+    }
+
     /// Unit direction of travel along `s` leaving `from`.
     pub fn dir_from(&self, s: SegmentId, from: NodeId) -> [f32; 2] {
         let to = self.other_end(s, from);
@@ -624,6 +657,9 @@ impl RoadGraph {
 // ---------------------------------------------------------------------------------------------
 // Small 2D vector helpers (f32, IEEE ops only).
 // ---------------------------------------------------------------------------------------------
+
+/// Slack on the median side of a one-way carriageway ([`RoadGraph::carriageway_m`]), m.
+pub const CARRIAGEWAY_INNER_SLACK_M: f32 = 0.5;
 
 /// `a + b`.
 pub fn add(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {

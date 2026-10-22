@@ -13,9 +13,11 @@
 //! AI racers, police and traffic get these too. The owner rule is one physics for every car.
 //! The per-car fixes now live in `data/cars`.
 //!
-//! The plain keyboard steering ([`shipped_plain`]: W's step-13b defaults) is a **player
-//! input** aid. With it come the smart lock, the countersteer limit, the catch, the held-key release
-//! and the transition rack. It applies only to vehicles flagged as player-driven
+//! The plain keyboard steering ([`shipped_plain`]) is the **player's** keyboard rack: the
+//! wheels go where the key says and return to centre on release (owner, playtest row 142: no
+//! auto opposite lock, "more like Wreckfest"; row 141: nothing moves the wheels away from the
+//! key). The only limit is the plain speed-sensitive lock. It applies only to vehicles
+//! flagged as player-driven
 //! ([`crate::vehicle::Vehicle::set_player_input`]; `wp_sim` clears the flag for AI racers,
 //! police and traffic). AI keep their own steering.
 //!
@@ -51,9 +53,9 @@ pub fn plain_off() -> bool {
     PLAIN_OFF.load(Ordering::Relaxed)
 }
 
-/// The shipped plain steering: [`crate::plain::PlainSteer::default`] (Drift Lab W step 13b:
-/// the new-side catch armed by the slide crossing, so rampart_50 no longer over-catches at
-/// gain 0.9).
+/// The shipped plain steering: [`crate::plain::PlainSteer::default`] (rows 141 / 142: no
+/// transition rack, new-side catch, drift lock extension, over-rotation rack or countersteer
+/// limit; Drift Lab W's full set, [`crate::plain::PlainSteer::lab_w`], is lab A/B only).
 pub fn shipped_plain() -> crate::plain::PlainSteer {
     crate::plain::PlainSteer::default()
 }

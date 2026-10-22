@@ -235,7 +235,7 @@ impl CarTune {
             align_full_deg: 17.0,
             t_align_s: 0.26,
             slide_key_gain: 0.31,
-            ..crate::plain::PlainSteer::default()
+            ..crate::plain::PlainSteer::lab_w()
         }
     }
 
@@ -247,7 +247,7 @@ impl CarTune {
         crate::plain::PlainSteer {
             swing_rate: 2.5,
             swing_yaw_dps: 80.0,
-            ..crate::plain::PlainSteer::default()
+            ..crate::plain::PlainSteer::lab_w()
         }
     }
 
@@ -281,7 +281,7 @@ impl CarTune {
         crate::plain::PlainSteer {
             swing_rate: 2.08,
             swing_yaw_dps: 86.0,
-            ..crate::plain::PlainSteer::default()
+            ..crate::plain::PlainSteer::lab_w()
         }
     }
 

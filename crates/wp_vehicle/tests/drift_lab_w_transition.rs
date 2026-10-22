@@ -36,17 +36,17 @@ fn lift_flicks_swing_through_with_the_transition_rack() {
         for lift in [0.15f32, 0.25, 0.4] {
             plain::set_override(Some(PlainSteer {
                 trans_follow: false,
-                ..PlainSteer::default()
+                ..PlainSteer::lab_w()
             }));
             let off = lift_flick(&c, &a, lift, 0.15);
             // Step 12 only (the new-side catch off): swings, settles slowly.
             plain::set_override(Some(PlainSteer {
                 trans_catch_deg: -1.0,
-                ..PlainSteer::default()
+                ..PlainSteer::lab_w()
             }));
             let s12 = lift_flick(&c, &a, lift, 0.15);
             settled_off.push(s12.settle_s.unwrap_or(9.0));
-            plain::set_override(Some(PlainSteer::default()));
+            plain::set_override(Some(PlainSteer::lab_w()));
             let on = lift_flick(&c, &a, lift, 0.15);
             assert!(off.reached && on.reached, "{id} {lift}: {off:?} {on:?}");
             assert!(!off.caught, "{id} {lift} off: {off:?}");
@@ -55,10 +55,19 @@ fn lift_flicks_swing_through_with_the_transition_rack() {
                 "{id} {lift} on: {on:?} (off {off:?})"
             );
             assert!(s12.caught, "{id} {lift} step 12: {s12:?}");
-            settled_on.push(on.settle_s.unwrap_or(9.0));
+            // The settle time is step 13's catch at its own gain, 0.9 of the travel. The default
+            // is 0.8 since playtest row 137 (0.9 over-caught rampart_50 into a second swing,
+            // tests/transition_once.rs): it still catches every flick here (above) but settles
+            // slower in this pre-unify lab setup (parity_rwd_d median 1.6 s).
+            plain::set_override(Some(PlainSteer {
+                trans_catch_gain: 0.9,
+                ..PlainSteer::lab_w()
+            }));
+            let s13 = lift_flick(&c, &a, lift, 0.15);
+            settled_on.push(s13.settle_s.unwrap_or(9.0));
         }
-        // Step 13, the new-side catch: settles on the new side within ~0.5 s (median), where
-        // step 12 alone took ~1.5 s.
+        // Step 13, the new-side catch (at 0.9): settles on the new side within ~0.5 s (median),
+        // where step 12 alone took ~1.5 s.
         let med = |v: &mut Vec<f32>| {
             v.sort_by(f32::total_cmp);
             v[v.len() / 2]

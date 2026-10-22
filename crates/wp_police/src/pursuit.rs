@@ -1583,8 +1583,11 @@ impl PoliceSystem {
                 // (row 66: following the trail round a corner cuts it through the building).
                 // A unit routing round a jam it stood in (row 86) drives the roads, not the
                 // trail through the jam.
+                // Row 140: across a divided road's median it is not "close": it routes round
+                // by the roads instead of shadowing the racer from the other carriageway.
                 let close = dist(u.body.pos, rp) < CLOSE_LOS_M
                     && u.unstick.blocked_at(now).is_empty()
+                    && !self.opposed_carriageways(u.body.pos, rp)
                     && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2]);
                 let tactic = if boxin && with_budget.iter().take(3).any(|x| x.1 == i) {
                     let k = with_budget.iter().position(|x| x.1 == i).unwrap_or(0);

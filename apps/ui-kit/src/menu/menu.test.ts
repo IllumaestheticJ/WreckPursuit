@@ -27,6 +27,20 @@ describe("game settings", () => {
     expect([junk.assists.abs, junk.assists.tcs]).toEqual(["Full", "Off"]);
     expect(assistLevel(false, "Full")).toBe("Off");
   });
+  it("countersteer 30 % by default; migrates the old untouched 50 % and 0 (rows 137 / 142)", () => {
+    const base = defaultGameSettings(true);
+    expect(base.assists.countersteer).toBe(0.3);
+    // Saved before row 137 (no mark): the old 50 % reads as 30 %, a changed value stays.
+    expect(normalizeSettings({ assists: { countersteer: 0.5 } }, base).assists.countersteer).toBe(0.3);
+    expect(normalizeSettings({ assists: { countersteer: 0.8 } }, base).assists.countersteer).toBe(0.8);
+    // Saved by 0.12.44 (mark 137): its untouched 0 reads as 30 %, a changed value stays.
+    expect(normalizeSettings({ countersteerRev: 137, assists: { countersteer: 0 } }, base).assists.countersteer).toBe(0.3);
+    expect(normalizeSettings({ countersteerRev: 137, assists: { countersteer: 0.5 } }, base).assists.countersteer).toBe(0.5);
+    // Saved now: 0 is the player's choice and survives a save / load.
+    const st = memory();
+    saveGameSettings({ ...base, assists: { ...base.assists, countersteer: 0 } }, st);
+    expect(loadGameSettings(base, st).assists.countersteer).toBe(0);
+  });
   it("falls back field by field on bad data", () => {
     const base = defaultGameSettings(true);
     const n = normalizeSettings({ gfx: "ultra", units: "mph", drawDistanceM: 123, volumes: { master: 7, engine: "loud" }, assists: { abs: false, countersteer: -1 } }, base);

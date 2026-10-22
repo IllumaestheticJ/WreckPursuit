@@ -1321,6 +1321,84 @@ interceptors 10–20 s (row 86 above). Next: corner-exit acceleration and turn-r
 for physical units (pro driver), and predicting where the racer goes (the ambush only covers
 backup).
 
+### Rows 131, 133, 140 and spike deflate (2026-10-22, on round12 9b686f76)
+
+**Row 131 — no spawn where a racer will see it.** Every spawn (pool, responder, backup,
+ambush, roadblock and spike cars) is rejected where a racer sees the spot now, from its chase
+camera, 1 s on, or from points on its predicted road over the next `ROUTE_VIEW_S` = 3 s
+(every 15 m; the horizon grows with speed, above 5 m/s). Spawns fall back to the next
+candidate. Roadblock and spike cars wait (`PendingToolCar`) until their spot is hidden: the
+tool is placed at once, the car appears later (on a long straight possibly only after the
+racer has passed). Despawns and resets keep the plain check. Test:
+`no_unit_spawns_in_a_fast_racers_view_now_or_3_s_ahead` (40 m/s racer; seeds 1, 7, 14 each
+had 1-4 such spawns before).
+
+**Row 133 — tools on the racer's carriageway.** `RoadGraph::carriageway_m`: on a one-way
+segment lane 0 is centred on the line and the lanes extend right, so the carriageway is
+[-w/2 - 0.5, (n - 0.5)·w] right of the line (0.5 m slack: 16 of 530 grid and 58 of 3044
+Vesper one-way segments put lane 0 at -0.92 m). The spike car parks 2.5 m beyond the right
+edge facing the carriageway's flow. Before, it parked 7.5 m left, which is on the far
+carriageway. The strip spans the carriageway only, and roadblock barriers and cars are
+centred on it. Two-way roads: the strip is unchanged (7 m, centred) and the spike car parks
+on the right shoulder. Test: `spike_car_and_strip_stay_on_the_racers_carriageway_on_divided_highways`
+(grid 4 strips + 3 roadblocks, Vesper 3 + 3; heading within 30 deg, racer's side of the
+median, strip width = carriageway; the old layout fails it).
+
+**Row 140 — nothing on the far carriageway.** A racer's corridor is its predicted road
+900 m ahead plus its legal road 500 m back. A one-way road within 30 m of the corridor and
+running the other way is its far carriageway.
+- Responder, backup and ambush spawn spots there are rejected.
+- Backup spawned at a node on a one-way road faces its flow.
+- A unit already on the far carriageway is scored for backup by its legal drive (round by
+  the next interchange or turning point), not the straight line.
+- It is never "close" to a racer across the median (`opposed_carriageways`), so it routes
+  round instead of shadowing from the other side.
+
+Test: `no_pursuit_spawns_on_the_far_carriageway_and_routes_stay_legal`, a 40 m/s racer chased
+60 s from 12 starts per city, with one patrol per district so backup must spawn (grid 78
+pursuit spawns and 3507 routes, Vesper 153 and 2662). It asserts no pursuit spawn on the far
+carriageway and that every pursuing unit's route never runs the wrong way along a one-way
+road or hops carriageways away from a junction. With the old spike-car layout, grid starts 3
+and 6 fail it. With rows 131 and 133 in, the far-carriageway spawn rule rarely fires in these
+runs: the far carriageway is in the racer's view.
+
+**Row 132 — spikes deflate in 1 s** (`data/police/tools.toml` `deflate_s` 5 → 1). The spike
+system test now times the partial deflation from the hit.
+
+**Bench** (`simcli police-bench --seeds 16`, 192 runs; "before" = this tree with the
+look-ahead off, tool cars spawning at once, the old spike-car side and the far-carriageway rule
+off):
+
+| | capture | escape | pace | lead m | crash/min | pop-in/min | far-cw/min |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| before, all | 82 % | 11 % | 0.45 | 63 | 1.17 | 0.82 | 0.00 |
+| after, all | 83 % | 12 % | 0.70 | 63 | 1.03 | **0.06** | 0.00 (1 spawn) |
+| before / after, grid | 73 / 78 % | 11 / 14 % | 0.59 / 0.80 | 68 / 70 | 1.34 / 1.17 | 1.95 / 0.12 | 0 / 0 |
+| before / after, Vesper | 87 / 86 % | 12 / 12 % | 0.38 / 0.42 | 59 / 57 | 1.08 / 0.95 | 0.17 / 0.03 | 0 / 0.01 |
+
+`pop-in/min` counts police cars (tool cars included) that appeared in a racer's line of sight
+or whose spot a racer saw within 3 s (`SpawnRecord::seen_after_s`). `far-cw/min` counts pursuit
+cars that appeared on the far carriageway (`SpawnRecord::far_carriageway`). The one remaining
+far-carriageway spawn is in "vesper night clear L3 good". Rerunning that cell alone does not
+reproduce it, so it is still open. The 6 % of pop-ins left are spawns hidden at the time
+whose spot came into view within 3 s from somewhere the look-ahead does not sample (off the
+predicted road).
+
+**Ranges re-aimed, all approved by the lead:**
+- `escape_break_contact_night`: escapes max 3 → 4 (chases diverge once tool cars stop popping
+  in: 25 → 0 in-view tool-car spawns over 10 runs).
+- `response_day_suburb`: call→unit cap 25 → 28 s (responders spawn past the 3 s look-ahead:
+  23.4 → 26.6 s over 3 calls).
+- `golden_spike_strip`: speed at 5 s 7–11 → 13–20 m/s (on its rims when it brakes; 16.3 m/s).
+- `police_bench_light`: "not captured in every run" became "median capture ≥ 15 s after the
+  pursuit start". The one run that used to time out still in pursuit (not an escape) is now
+  captured, at 25–78 s.
+
+**Goldens** (blessed in their own commits): `tunnel_escape_founders_cut` (+ control) on round12
+f850d6b4. On 9b686f76: `golden_spike_strip`, which moves with `deflate_s` only (its hash is
+unchanged at 5 s), and `jam_pursuit_grid`, from 20 s of its L4–L5 pursuit (spawn and tool
+rules). Every other golden passes on the merged tree.
+
 ### Rows 84, 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 

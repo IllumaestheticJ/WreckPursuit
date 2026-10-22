@@ -342,10 +342,23 @@ impl GripBalance {
     }
 
     /// The shipped balance (unify, 2026-10-21): [`GripBalance::owner`] on every car
-    /// (`crate::lab_scope`). The per-car fixes live in `data/cars` (debug_coupe bars × 0.5;
+    /// (`crate::lab_scope`) without its steering parts (rows 141 / 142: no smart lock, no
+    /// held-key cut; they only act on player cars). The per-car fixes live in `data/cars` (debug_coupe bars × 0.5;
     /// lucciola_350 rear springs × 0.65 with the ride height kept, yaw inertia × 1.2).
     pub fn shipped() -> Self {
-        Self::owner()
+        Self {
+            // Rows 141 / 142: no steering parts for players. The smart lock (an into-turn cap
+            // that also reacted to the slide's direction) and the held-key cut moved the wheels
+            // away from the key; the plain speed-sensitive lock is the only limit now.
+            lock_mode: LockMode::Plain,
+            slide_lock: 1.0,
+            slide_lock_after_s: 0.0,
+            slide_lock_growth_dps: 0.0,
+            slide_lock_to_deg: 0.0,
+            slide_lock_release_s: 0.0,
+            slide_lock_release_from_deg: 0.0,
+            ..Self::owner()
+        }
     }
 
     /// The step-14 … step-19 "new" (one click away, "balance: step 14"): the smart lock, RWD

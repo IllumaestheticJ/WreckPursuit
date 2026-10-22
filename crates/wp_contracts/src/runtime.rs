@@ -240,14 +240,17 @@ pub struct AssistProfile {
 }
 
 impl AssistProfile {
-    /// Default assists for keyboard drivers: everything on, strong filtering.
+    /// Default assists for keyboard drivers: everything on, strong filtering, countersteer help
+    /// 0.3 (owner, playtest row 142: the reference's hands-off alignment; it was 0.6, then 0).
     pub fn keyboard_default() -> Self {
         Self {
             abs: AbsLevel::Full,
             tcs: TcsLevel::Full,
             esc: true,
             steer_speed_sensitivity: 1.0,
-            countersteer_help: 0.6,
+            // Owner, playtest rows 137 / 142 (2026-10-21): the hands-off self-alignment of the
+            // reference game (no key held only), measured on its keyboard clips.
+            countersteer_help: 0.3,
             throttle_filter: 0.7,
             brake_filter: 0.6,
             auto_gears: true,

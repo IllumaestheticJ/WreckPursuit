@@ -25,7 +25,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use wp_contracts::{DamageMode, EntityId, PoliceEvent, PursuitOutcome, SimEvent, WORLD_ENTITY};
 use wp_opponent::{Evader, EvaderSkill, PoliceCar};
-use wp_police::{Assignment, PursuitStatus, UnitKind};
+use wp_police::{Assignment, PursuitStatus, UnitKind, UnitRole};
 use wp_sim::VehicleKind;
 use wp_world::drive::forward_of;
 use wp_world::leader::Obstacle;
@@ -308,6 +308,12 @@ pub struct RunMetrics {
     pub police_police_crashes: u32,
     /// Police stuck events (`PoliceStats::stuck`).
     pub stuck_events: u32,
+    /// Police cars that appeared in a racer's line of sight, or whose spot a racer saw within
+    /// 3 s (row 131, pop-in).
+    pub spawns_in_view: u32,
+    /// Pursuit cars (responders, backup, tool cars) that appeared on the far carriageway of
+    /// the pursued racer's divided road (row 140).
+    pub spawns_far_carriageway: u32,
     /// Police cars total-lost without / with racer contact.
     pub self_wrecks: u32,
     /// Police cars wrecked after racer contact.
@@ -509,6 +515,8 @@ pub fn run_one(
         police_civilian_collisions: 0,
         police_police_crashes: 0,
         stuck_events: 0,
+        spawns_in_view: 0,
+        spawns_far_carriageway: 0,
         self_wrecks: 0,
         contact_wrecks: 0,
         units_engaged: 0,
@@ -845,6 +853,20 @@ pub fn run_one(
     };
     m.police_civilian_collisions += st.traffic_collisions - base.traffic_collisions;
     m.stuck_events = (st.stuck.len() - base.stuck.len()) as u32;
+    m.spawns_in_view = st.spawns[base.spawns.len()..]
+        .iter()
+        .filter(|s| s.in_sight || s.seen_after_s.is_some())
+        .count() as u32;
+    m.spawns_far_carriageway = st.spawns[base.spawns.len()..]
+        .iter()
+        .filter(|s| {
+            s.far_carriageway
+                && matches!(
+                    s.role,
+                    UnitRole::Responder | UnitRole::Reinforcement | UnitRole::Tool
+                )
+        })
+        .count() as u32;
     m.self_wrecks = st.self_wrecks - base.self_wrecks;
     m.contact_wrecks = st.contact_wrecks - base.contact_wrecks;
     m.units_engaged = st.units_engaged - base.units_engaged;
@@ -906,6 +928,10 @@ pub struct CellSummary {
     pub civilian_per_min: f32,
     /// Police stuck events per minute of run.
     pub stuck_per_min: f32,
+    /// Police cars appearing in a racer's line of sight per minute of run (row 131).
+    pub pop_in_per_min: f32,
+    /// Far-carriageway pursuit spawns per minute of run (row 140).
+    pub far_cw_per_min: f32,
     /// Police self-wrecks (sum).
     pub self_wrecks: u32,
     /// Evader collisions with civilians per minute of run.
@@ -993,6 +1019,8 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
         static_crashes_per_min: per_min(sum(|r| r.police_static_crashes)),
         civilian_per_min: per_min(sum(|r| r.police_civilian_collisions)),
         stuck_per_min: per_min(sum(|r| r.stuck_events)),
+        pop_in_per_min: per_min(sum(|r| r.spawns_in_view)),
+        far_cw_per_min: per_min(sum(|r| r.spawns_far_carriageway)),
         self_wrecks: sum(|r| r.self_wrecks),
         evader_civilian_per_min: per_min(sum(|r| r.evader_civilian_collisions)),
         minutes,
@@ -1050,7 +1078,7 @@ fn pct(x: f32) -> String {
 pub const PACE_MIN_MPS: f32 = 25.0;
 
 /// Column headers of [`table`].
-const HEADER: [&str; 19] = [
+const HEADER: [&str; 21] = [
     "cell",
     "runs",
     "engaged",
@@ -1070,9 +1098,11 @@ const HEADER: [&str; 19] = [
     "crash/min",
     "civ/min",
     "stuck/min",
+    "pop-in/min",
+    "far-cw/min",
 ];
 
-fn row(s: &CellSummary) -> [String; 19] {
+fn row(s: &CellSummary) -> [String; 21] {
     [
         s.label.clone(),
         s.runs.to_string(),
@@ -1093,12 +1123,14 @@ fn row(s: &CellSummary) -> [String; 19] {
         format!("{:.2}", s.static_crashes_per_min),
         format!("{:.2}", s.civilian_per_min),
         format!("{:.2}", s.stuck_per_min),
+        format!("{:.2}", s.pop_in_per_min),
+        format!("{:.2}", s.far_cw_per_min),
     ]
 }
 
 /// Plain-text table (terminal).
 pub fn table(rows: &[CellSummary]) -> String {
-    let body: Vec<[String; 19]> = rows.iter().map(row).collect();
+    let body: Vec<[String; 21]> = rows.iter().map(row).collect();
     let mut w = HEADER.map(|h| h.chars().count());
     for r in &body {
         for (k, c) in r.iter().enumerate() {

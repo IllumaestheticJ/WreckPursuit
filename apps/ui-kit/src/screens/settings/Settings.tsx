@@ -277,7 +277,7 @@ const ASSIST_ROWS: { key: keyof AssistProfile; label: string; hint: string; kind
   { key: "tcs", label: "Traction control", hint: "Off (raw throttle) / Half (some wheelspin) / Full", kind: "level" },
   { key: "esc", label: "Stability control", hint: "Brakes single wheels to stop spins", kind: "bool" },
   { key: "steer_speed_sensitivity", label: "Speed-sensitive steering", hint: "Less lock at speed", kind: "frac" },
-  { key: "countersteer_help", label: "Countersteer help", hint: "Catches slides for you", kind: "frac" },
+  { key: "countersteer_help", label: "Countersteer help", hint: "Hands off in a slide: the wheels follow it (up to 30 % lock)", kind: "frac" },
   { key: "throttle_filter", label: "Throttle smoothing", hint: "Digital → gradual throttle", kind: "frac" },
   { key: "brake_filter", label: "Brake smoothing", hint: "Digital → gradual brake", kind: "frac" },
   { key: "auto_gears", label: "Automatic gears", hint: "", kind: "bool" },

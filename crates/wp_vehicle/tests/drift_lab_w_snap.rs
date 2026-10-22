@@ -41,7 +41,7 @@ fn countersteer_limit_stops_the_snap_back_spin_and_keeps_the_hold() {
         counter_margin_deg: 0.0,
         counter_closing_only: false,
         trans_follow: false,
-        ..PlainSteer::default()
+        ..PlainSteer::lab_w()
     }));
     // The panel's ride (step 20: firm) for both halves; the step-3 lab ride no longer reaches
     // a 30–45° drift on the step-20 tyres.
@@ -60,7 +60,7 @@ fn countersteer_limit_stops_the_snap_back_spin_and_keeps_the_hold() {
         .collect();
     // New: the W default (with the current grip balance).
     grip_lab::set_override(Some(GripBalance::lab_default()));
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     for (id, b0) in ids.iter().zip(&before) {
         let c = car(id);
         let b = snap_back(&c, &a, SnapExit::CounterLift);

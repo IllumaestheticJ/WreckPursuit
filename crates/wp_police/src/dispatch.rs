@@ -13,7 +13,7 @@ use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
+    add, dist, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
@@ -26,8 +26,90 @@ use crate::PoliceSystem;
 /// At most one new ambush (a unit sent to wait ahead) per racer this often, s.
 pub const AMBUSH_EVERY_S: f32 = 45.0;
 
+/// A racer faster than this also "sees" from points on its predicted road ahead (no spawn
+/// that it would see within [`ROUTE_VIEW_S`]), m/s.
+pub const ROUTE_VIEW_MIN_MPS: f32 = 5.0;
+/// ... this many seconds of its travel ahead, s.
+pub const ROUTE_VIEW_S: f32 = 3.0;
+/// ... sampled this far apart, m.
+pub const ROUTE_VIEW_STEP_M: f32 = 15.0;
+
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
+
+/// Within this distance of a racer's road (ahead or behind it), a one-way road running the
+/// other way is the far carriageway of a divided road (row 140), m.
+pub const FAR_CARRIAGEWAY_M: f32 = 30.0;
+/// How far ahead along its predicted road and back along the road behind it a racer's
+/// corridor reaches (row 140), m.
+pub const CORRIDOR_AHEAD_M: f32 = 900.0;
+/// See [`CORRIDOR_AHEAD_M`].
+pub const CORRIDOR_BEHIND_M: f32 = 500.0;
+/// Corridor sample spacing, m.
+const CORRIDOR_STEP_M: f32 = 10.0;
+
+/// A racer's road as travelled, ahead and behind: sample points with the travel direction
+/// there (row 140, [`PoliceSystem::on_far_carriageway`]).
+pub(crate) type Corridor = Vec<([f32; 2], [f32; 2])>;
+
+/// Sample the leg `a → b` into `out` every [`CORRIDOR_STEP_M`] (with `b`).
+fn sample_leg(a: [f32; 2], b: [f32; 2], out: &mut Corridor) {
+    let d = sub(b, a);
+    let l = crate::graph::len(d);
+    if l < 0.1 {
+        return;
+    }
+    let dir = scale(d, 1.0 / l);
+    let n = (l / CORRIDOR_STEP_M).ceil() as usize;
+    for k in 1..=n {
+        out.push((lerp2(a, b, k as f32 / n as f32), dir));
+    }
+}
+
+/// How far beyond the road edge a spike-strip car parks, m.
+pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
+
+/// A roadblock or spike-strip car not spawned yet because its spot is in a racer's view
+/// (row 131): it appears once the spot is hidden, while its tool lasts.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PendingToolCar {
+    /// Tool it belongs to.
+    pub tool: ToolId,
+    /// Parking spot, m.
+    pub pos: [f32; 2],
+    /// Heading (unit vector).
+    pub heading: [f32; 2],
+    /// Its assignment once spawned.
+    pub assignment: Assignment,
+}
+
+/// Where a tool goes across the road at a site (row 133): the traffic flow there and the
+/// lateral span the tool may cover, as offsets to the right of `flow` from the site, m. On a
+/// one-way carriageway (a divided highway's half) that is the carriageway only, never across
+/// the median.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ToolSpan {
+    /// Traffic flow direction at the site (unit vector).
+    pub flow: [f32; 2],
+    /// Left edge (negative: left of the site), m.
+    pub inner: f32,
+    /// Right edge, m.
+    pub outer: f32,
+    /// The site is on a one-way carriageway.
+    pub oneway: bool,
+}
+
+impl ToolSpan {
+    /// Unit vector to the right of the flow.
+    pub fn right(&self) -> [f32; 2] {
+        [self.flow[1], -self.flow[0]]
+    }
+
+    /// The site point moved `off` m to the right of the flow.
+    pub fn at(&self, site: [f32; 2], off: f32) -> [f32; 2] {
+        add(site, scale(self.right(), off))
+    }
+}
 
 /// A reckless-driving report this close to an open call about another racer joins that call
 /// (a pack of street racers is one call), m.
@@ -1526,6 +1608,7 @@ impl PoliceSystem {
             self.warm_up(world);
         }
         self.update_observations(world);
+        self.watch_spawns(world);
         self.helo_reports();
         self.clock_speeders(world, tdt);
         self.update_racer_rules(tdt);
@@ -1541,6 +1624,7 @@ impl PoliceSystem {
             self.ai_captain_tools();
         }
         self.expire_tools();
+        self.maintain_tool_cars(world);
         self.plan_units(world, tdt);
         self.refresh_junctions(world);
         self.refresh_walls();
@@ -1888,7 +1972,7 @@ impl PoliceSystem {
             let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
             // The session-start patrols are part of the opening scene; every later refill
             // appears out of every racer's sight (no pop-in).
-            let hidden = !self.warmed_up || !self.in_racer_view(world, pos);
+            let hidden = !self.warmed_up || !self.spawn_in_view(world, pos);
             if hidden && self.spawn_clear(pos) {
                 let i = self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, dir);
                 self.start_patrol(i, dest);
@@ -1980,6 +2064,41 @@ impl PoliceSystem {
                 continue;
             }
             let d = dist(u.body.pos, p);
+            if d <= max_m && best.is_none_or(|b| d < b.0) {
+                best = Some((d, i));
+            }
+        }
+        best.map(|b| b.1)
+    }
+
+    /// [`Self::nearest_available`] for backup on `racer` at `p` (row 140): a unit on the far
+    /// carriageway of the racer's divided road is scored by its legal drive (round by the next
+    /// interchange or turning point), not by the straight line across the median.
+    fn nearest_responder(&self, racer: EntityId, p: [f32; 2], max_m: f32) -> Option<usize> {
+        let corridor = self.racer_corridor(racer);
+        let mut to_p: Option<Vec<f32>> = None;
+        let mut best: Option<(f32, usize)> = None;
+        for (i, u) in self.units.iter().enumerate() {
+            if !u.available()
+                || self.booking(u.id)
+                || u.player.is_some()
+                || !matches!(
+                    u.role,
+                    UnitRole::Pool(_) | UnitRole::Reinforcement | UnitRole::Responder
+                )
+            {
+                continue;
+            }
+            let pos = u.body.pos;
+            let mut d = dist(pos, p);
+            if d <= max_m && self.far_side(&corridor, pos) {
+                let to_p = to_p.get_or_insert_with(|| self.graph.distances_to(p));
+                d = self
+                    .start_node(pos, u.body.heading)
+                    .map_or(f32::INFINITY, |n| {
+                        dist(pos, self.graph.node(n).pos) + to_p[n.0 as usize]
+                    });
+            }
             if d <= max_m && best.is_none_or(|b| d < b.0) {
                 best = Some((d, i));
             }
@@ -2188,8 +2307,28 @@ impl PoliceSystem {
     /// Whether any racer can see `p`, or is closer than `response.never_closer_m`. Seeing
     /// means line of sight, in any direction and as far as the world allows, from the
     /// driver's eye or from a chase camera behind and above the car, now or one second on at
-    /// its current velocity, to a car body at `p` (taken at the racer's height). Units never appear or vanish where this is true.
+    /// its current velocity, or from points on its predicted road up to [`ROUTE_VIEW_S`] of its
+    /// travel ahead (row 131), to a car body at `p` (taken at the racer's height). Units never appear or vanish where this is true.
     pub(crate) fn in_racer_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        self.in_racer_view_opt(Some(world), p, false)
+    }
+
+    /// Whether a unit may not appear at `p`: [`Self::in_racer_view`] plus the racers' road
+    /// ahead for [`ROUTE_VIEW_S`] (row 131: no pop-in just round the corner ahead). Spawns
+    /// only; despawns and resets keep the plain check.
+    pub(crate) fn spawn_in_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        self.in_racer_view_opt(Some(world), p, true)
+    }
+
+    /// [`Self::in_racer_view`] (`route`: also from the road ahead, see
+    /// [`Self::spawn_in_view`]); without a world (captain tool placement) only the road
+    /// graph's own sight lines (city blocks) are checked.
+    pub(crate) fn in_racer_view_opt(
+        &self,
+        world: Option<&dyn WorldQuery>,
+        p: [f32; 2],
+        route: bool,
+    ) -> bool {
         /// Driver's eye and chase camera above the racer's chassis, camera distance behind
         /// it, and the height of the car body looked at, m.
         const EYE_UP_M: f32 = 1.3;
@@ -2219,6 +2358,22 @@ impl PoliceSystem {
                 let c = sub(ahead, back);
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
+            // Where it will be over the next few seconds along its road (row 131: a car must
+            // not pop in just round the corner ahead of a fast racer): a few points on its
+            // predicted path, the look-ahead growing with speed.
+            let speed = crate::graph::len(v);
+            if route && speed > ROUTE_VIEW_MIN_MPS {
+                let horizon = speed * ROUTE_VIEW_S;
+                let path = self.graph.predict_path(rp, v, horizon);
+                let pts = Track::new(path.points());
+                let len = pts.length().min(horizon);
+                let mut d = ROUTE_VIEW_STEP_M;
+                while d <= len + 0.5 * ROUTE_VIEW_STEP_M {
+                    let q = pts.point_at(d.min(len));
+                    views.push([q[0], q[1], z + EYE_UP_M]);
+                    d += ROUTE_VIEW_STEP_M;
+                }
+            }
             // Police only know the racer's velocity, not which way it faces (sliding, turning,
             // stopped): the camera may be on any side.
             for d in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
@@ -2226,7 +2381,8 @@ impl PoliceSystem {
                 views.push([c[0], c[1], z + CAM_UP_M]);
             }
             views.iter().any(|eye| {
-                self.graph.line_of_sight([eye[0], eye[1]], p) && world.line_of_sight(*eye, body)
+                self.graph.line_of_sight([eye[0], eye[1]], p)
+                    && world.is_none_or(|w| w.line_of_sight(*eye, body))
             })
         })
     }
@@ -2255,6 +2411,11 @@ impl PoliceSystem {
             .racers
             .values()
             .any(|r| self.sees_at(world, xy(r.pos), r.pos[2], p, r.pos[2]));
+        let far_carriageway = self
+            .racers
+            .values()
+            .any(|r| r.pursued() && self.far_side(&self.racer_corridor(r.entity), p));
+        let u = &self.units[i];
         self.stats.spawns.push(crate::SpawnRecord {
             unit: u.id,
             role: u.role,
@@ -2262,7 +2423,35 @@ impl PoliceSystem {
             pos: p,
             nearest_racer_m: nearest,
             in_sight,
+            seen_after_s: None,
+            far_carriageway,
         });
+        if !in_sight {
+            self.spawn_watch.push(self.stats.spawns.len() - 1);
+        }
+    }
+
+    /// Pop-in audit (row 131): note when a racer first sees the spot a unit appeared at,
+    /// within [`ROUTE_VIEW_S`] of it appearing. Statistics only.
+    fn watch_spawns(&mut self, world: &dyn WorldQuery) {
+        let now = self.now;
+        let watch = std::mem::take(&mut self.spawn_watch);
+        for k in watch {
+            let sp = self.stats.spawns[k];
+            let age = now.since(sp.at);
+            if age > ROUTE_VIEW_S {
+                continue;
+            }
+            let seen = self
+                .racers
+                .values()
+                .any(|r| self.sees_at(world, xy(r.pos), r.pos[2], sp.pos, r.pos[2]));
+            if seen {
+                self.stats.spawns[k].seen_after_s = Some(age);
+            } else {
+                self.spawn_watch.push(k);
+            }
+        }
     }
 
     /// Where a responder (or reinforcement) for `racer` appears: a spot in the right-hand lane
@@ -2291,7 +2480,7 @@ impl PoliceSystem {
         let meets = self.racer_meets(target, rv);
         let factor = self.cfg.pursuit.respond_speed_factor;
         let max_m = rs.spawn_max_m + crate::graph::len(rv) * rs.spawn_lead_s;
-        let mut cands: Vec<(f32, [f32; 2], [f32; 2])> = Vec::new();
+        let mut cands: Vec<(f32, [f32; 2], [f32; 2], bool)> = Vec::new();
         for (k, seg) in self.graph.segments.iter().enumerate() {
             let sid = crate::graph::SegmentId(k as u32);
             let a = self.graph.node(seg.a).pos;
@@ -2371,7 +2560,7 @@ impl PoliceSystem {
                         1000.0 + d_road * (1.0 - 0.4 * ahead.max(0.0))
                     }
                 };
-                cands.push((score, pos, dir));
+                cands.push((score, pos, dir, seg.oneway));
             }
         }
         // Best first; ties by position (deterministic).
@@ -2380,13 +2569,113 @@ impl PoliceSystem {
                 .then(x.1[0].total_cmp(&y.1[0]))
                 .then(x.1[1].total_cmp(&y.1[1]))
         });
+        // Row 140: never on the far carriageway of the racer's divided road.
+        let corridor = self.racer_corridor(racer);
         cands
             .into_iter()
-            .find(|(_, pos, _)| {
-                !self.in_racer_view(world, *pos)
+            .find(|(_, pos, dir, oneway)| {
+                !(*oneway && Self::on_far_carriageway(&corridor, *pos, *dir))
+                    && !self.spawn_in_view(world, *pos)
                     && crate::avoid::spawn_clear(*pos, &self.obstacles, &self.cfg.pursuit.avoid)
             })
-            .map(|(_, pos, dir)| (pos, dir))
+            .map(|(_, pos, dir, _)| (pos, dir))
+    }
+
+    /// `racer`'s corridor (row 140): its predicted road [`CORRIDOR_AHEAD_M`] ahead and the
+    /// road it came along [`CORRIDOR_BEHIND_M`] back (legal, straightest way in at each
+    /// junction), as `(point, travel direction)` samples. Empty for an unknown racer or one
+    /// off the road network.
+    pub(crate) fn racer_corridor(&self, racer: EntityId) -> Corridor {
+        let mut out = Corridor::new();
+        let Some(r) = self.racers.get(&racer) else {
+            return out;
+        };
+        let rp = r.last_known.unwrap_or(xy(r.pos));
+        let v = [r.vel[0], r.vel[1]];
+        let g = &self.graph;
+        let Some(on) = g.nearest_on_road(rp) else {
+            return out;
+        };
+        let seg = g.segment(on.segment);
+        // Which way it travels along its segment: the one way on a one-way road, else as
+        // it moves (towards b when stopped).
+        let to_b =
+            seg.oneway || crate::graph::dot(sub(g.node(seg.b).pos, g.node(seg.a).pos), v) >= 0.0;
+        let (from, to) = if to_b { (seg.a, seg.b) } else { (seg.b, seg.a) };
+        let travel = normalize(sub(g.node(to).pos, g.node(from).pos));
+        // Ahead.
+        let ahead_v = if crate::graph::len(v) > 1.0 {
+            v
+        } else {
+            travel
+        };
+        let path = g.predict_path(on.point, ahead_v, CORRIDOR_AHEAD_M);
+        let pts = path.points();
+        out.push((on.point, travel));
+        for w in pts.windows(2) {
+            sample_leg(w[0], w[1], &mut out);
+        }
+        // Behind: back to the node it came from, then on back the straightest legal way in.
+        let mut back = Corridor::new();
+        sample_leg(g.node(from).pos, on.point, &mut back);
+        let mut node = from;
+        let mut dir = travel;
+        let mut walked = dist(g.node(from).pos, on.point);
+        while walked < CORRIDOR_BEHIND_M {
+            let here = g.node(node).pos;
+            let best = g
+                .incoming(node)
+                .iter()
+                .map(|&(_, prev)| {
+                    let d = normalize(sub(here, g.node(prev).pos));
+                    (crate::graph::dot(d, dir), prev, d)
+                })
+                .filter(|x| x.0 > 0.0)
+                .max_by(|x, y| x.0.total_cmp(&y.0).then(y.1 .0.cmp(&x.1 .0)));
+            let Some((_, prev, d)) = best else {
+                break;
+            };
+            let p = g.node(prev).pos;
+            sample_leg(p, here, &mut back);
+            walked += dist(p, here);
+            node = prev;
+            dir = d;
+        }
+        out.extend(back);
+        out
+    }
+
+    /// Whether `p`, on a one-way road running along `flow`, is on the far carriageway of a
+    /// divided road from the racer whose [`Self::racer_corridor`] is `corridor` (row 140):
+    /// within [`FAR_CARRIAGEWAY_M`] of the racer's road and running the other way. A pursuit
+    /// unit never spawns there: it can neither drive back the wrong way nor cross the median.
+    pub(crate) fn on_far_carriageway(corridor: &Corridor, p: [f32; 2], flow: [f32; 2]) -> bool {
+        corridor
+            .iter()
+            .any(|(q, d)| dist(*q, p) < FAR_CARRIAGEWAY_M && crate::graph::dot(flow, *d) < -0.5)
+    }
+
+    /// The one-way flow at `p` when it lies on a one-way road (within 8 m of its line).
+    pub(crate) fn oneway_flow_at(&self, p: [f32; 2]) -> Option<[f32; 2]> {
+        let rp = self.graph.nearest_on_road(p)?;
+        let seg = self.graph.segment(rp.segment);
+        (seg.oneway && rp.dist_m < 8.0).then(|| self.graph.dir_from(rp.segment, seg.a))
+    }
+
+    /// Whether `a` and `b` are on one-way roads running opposite ways (the two carriageways
+    /// of a divided road, when close): neither can reach the other across the median.
+    pub(crate) fn opposed_carriageways(&self, a: [f32; 2], b: [f32; 2]) -> bool {
+        match (self.oneway_flow_at(a), self.oneway_flow_at(b)) {
+            (Some(fa), Some(fb)) => crate::graph::dot(fa, fb) < -0.5,
+            _ => false,
+        }
+    }
+
+    /// Whether the racer's corridor puts a spot at `p` on its far carriageway
+    /// ([`Self::on_far_carriageway`]); `p` off one-way roads never is.
+    pub(crate) fn far_side(&self, corridor: &Corridor, p: [f32; 2]) -> bool {
+        self.oneway_flow_at(p)
+            .is_some_and(|flow| Self::on_far_carriageway(corridor, p, flow))
     }
 
     /// Reinforcement priority order: captain's priority target first, then bounty, then id.
@@ -2541,7 +2830,7 @@ impl PoliceSystem {
                 continue;
             }
             let vel = self.ambush_vel(req.racer);
-            let i = match self.nearest_available(target, 700.0) {
+            let i = match self.nearest_responder(req.racer, target, 700.0) {
                 Some(i) => {
                     // A unit already on the road also sets up ahead if it can get there in time.
                     if let Some((wait, track)) = self.ambush_route(i, target, vel) {
@@ -2558,7 +2847,7 @@ impl PoliceSystem {
                     if self.ground_units_alive() >= self.unit_cap() {
                         continue;
                     }
-                    if let Some(plan) = self.ambush_plan(world, target, vel) {
+                    if let Some(plan) = self.ambush_plan(world, req.racer, target, vel) {
                         let i = self.spawn_unit(
                             UnitKind::Car,
                             UnitRole::Reinforcement,
@@ -2578,7 +2867,7 @@ impl PoliceSystem {
                     self.rebuild_obstacles();
                     let Some((pos, heading)) = self
                         .response_spawn_point(world, req.racer)
-                        .or_else(|| self.reinforcement_spawn_point(world, target))
+                        .or_else(|| self.reinforcement_spawn_point(world, req.racer, target))
                     else {
                         continue;
                     };
@@ -2797,10 +3086,12 @@ impl PoliceSystem {
     fn ambush_plan(
         &self,
         world: &dyn WorldQuery,
+        racer_id: EntityId,
         racer: [f32; 2],
         vel: [f32; 2],
     ) -> Option<AmbushPlan> {
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
+        let corridor = self.racer_corridor(racer_id);
         let (waits, on_path) = self.ambush_waits(racer, vel);
         for w in waits {
             // Closest side-road nodes first (index breaks ties: deterministic).
@@ -2820,6 +3111,10 @@ impl PoliceSystem {
             // Of the spots that make it in time, take the quickest to get into place.
             let mut best: Option<(f32, AmbushPlan)> = None;
             for &(_, n) in cands.iter().take(AMBUSH_SPAWN_CANDIDATES) {
+                // Row 140: never on the far carriageway of the racer's divided road.
+                if self.node_far_side(&corridor, NodeId(n as u32)) {
+                    continue;
+                }
                 let Some(route) = self.graph.shortest_path(NodeId(n as u32), w.junction) else {
                     continue;
                 };
@@ -2835,7 +3130,7 @@ impl PoliceSystem {
                 // In the right-hand lane, facing the first turn of the route.
                 let pos = add(start, scale([heading[1], -heading[0]], LANE_OFFSET_M));
                 if !crate::avoid::spawn_clear(pos, &self.obstacles, &self.cfg.pursuit.avoid)
-                    || self.sees(world, pos, racer)
+                    || self.spawn_in_view(world, pos)
                 {
                     continue;
                 }
@@ -2921,27 +3216,62 @@ impl PoliceSystem {
     fn reinforcement_spawn_point(
         &self,
         world: &dyn WorldQuery,
+        racer: EntityId,
         target: [f32; 2],
     ) -> Option<([f32; 2], [f32; 2])> {
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
+        let corridor = self.racer_corridor(racer);
         let mut best: Option<(f32, usize)> = None;
         for (i, n) in self.graph.nodes.iter().enumerate() {
             let d = dist(n.pos, target);
             if d < min_d
+                || best.is_some_and(|b| d >= b.0)
                 || self.sees(world, n.pos, target)
-                || self.in_racer_view(world, n.pos)
+                || self.node_far_side(&corridor, NodeId(i as u32))
+                || self.spawn_in_view(world, n.pos)
                 || !crate::avoid::spawn_clear(n.pos, &self.obstacles, &self.cfg.pursuit.avoid)
             {
                 continue;
             }
-            if best.is_none_or(|b| d < b.0) {
-                best = Some((d, i));
-            }
+            best = Some((d, i));
         }
         best.map(|(_, i)| {
             let p = self.graph.nodes[i].pos;
-            (p, normalize(sub(target, p)))
+            // On a one-way road: facing its flow (row 140), not straight at the racer.
+            let heading = self
+                .node_oneway_flow(NodeId(i as u32))
+                .unwrap_or_else(|| normalize(sub(target, p)));
+            (p, heading)
         })
+    }
+
+    /// The flow of the one-way road leaving node `n`, if every road leaving it is one-way
+    /// (a node along a carriageway).
+    fn node_oneway_flow(&self, n: NodeId) -> Option<[f32; 2]> {
+        let out = self.graph.outgoing(n);
+        let all_oneway = !out.is_empty()
+            && out.iter().all(|(s, _)| self.graph.segment(*s).oneway)
+            && self
+                .graph
+                .incoming(n)
+                .iter()
+                .all(|(s, _)| self.graph.segment(*s).oneway);
+        all_oneway.then(|| self.graph.dir_from(out[0].0, n))
+    }
+
+    /// Whether node `n` is on the far carriageway of the racer with `corridor` (row 140): any
+    /// one-way road through it runs the other way alongside the racer's road.
+    fn node_far_side(&self, corridor: &Corridor, n: NodeId) -> bool {
+        let p = self.graph.node(n).pos;
+        self.graph
+            .outgoing(n)
+            .iter()
+            .chain(self.graph.incoming(n))
+            .filter(|(s, _)| self.graph.segment(*s).oneway)
+            .any(|(s, _)| {
+                let seg = self.graph.segment(*s);
+                Self::on_far_carriageway(corridor, p, self.graph.dir_from(*s, seg.a))
+            })
     }
 
     /// Request a helicopter on `racer` (AI captain and captain command share this).
@@ -3192,33 +3522,34 @@ impl PoliceSystem {
         let site =
             plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
         let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
-        let barriers = roadblock_barriers(
-            &site,
-            rb.barrier_half_extents_m,
-            rb.barrier_mass_kg,
-            ROAD_HALF_WIDTH_M,
-        );
+        // Row 133: across the racer's carriageway only (centred on it, never over the
+        // median of a divided road).
+        let span = self.tool_span(&site);
+        let mut across = site;
+        across.pos = span.at(site.pos, 0.5 * (span.inner + span.outer));
+        let half = 0.5 * (span.outer - span.inner);
+        let barriers =
+            roadblock_barriers(&across, rb.barrier_half_extents_m, rb.barrier_mass_kg, half);
         let lifetime = rb.lifetime_s;
         let cooldown = rb.cooldown_s.get(self.phase);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let mut units = Vec::new();
-        for (pos, heading) in roadblock_unit_spots(&site, n, ROAD_HALF_WIDTH_M) {
-            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
-            units.push(self.units[i].id);
-            self.assign(
-                i,
-                Assignment::RoadblockAt {
+        for (pos, heading) in roadblock_unit_spots(&across, n, half) {
+            self.tool_cars.push(PendingToolCar {
+                tool: id,
+                pos,
+                heading,
+                assignment: Assignment::RoadblockAt {
                     segment: site.segment,
                     tool: id,
                 },
-            );
+            });
         }
         self.roadblocks.push(Roadblock {
             id,
             racer,
             site,
-            units,
+            units: Vec::new(),
             barriers,
             expires: now.plus(lifetime),
         });
@@ -3343,20 +3674,26 @@ impl PoliceSystem {
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let side = add(
-            site.pos,
-            scale(perp_left(site.dir), ROAD_HALF_WIDTH_M + 2.5),
-        );
-        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, side, site.dir);
-        let uid = self.units[i].id;
-        self.assign(
-            i,
-            Assignment::SpikeAt {
+        // Row 133: the car parks on the right shoulder of the racer's own carriageway,
+        // facing its traffic; on a one-way carriageway (a divided road's half) the strip
+        // spans that carriageway, lane edge to median.
+        let span = self.tool_span(&site);
+        self.tool_cars.push(PendingToolCar {
+            tool: id,
+            pos: span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M),
+            heading: span.flow,
+            assignment: Assignment::SpikeAt {
                 segment: site.segment,
                 tool: id,
             },
-        );
-        let strip = SpikeStrip::across(id, racer, site, length, Some(uid), now.plus(lifetime));
+        });
+        let expires = now.plus(lifetime);
+        let strip = if span.oneway {
+            let (a, b) = (span.at(site.pos, span.inner), span.at(site.pos, span.outer));
+            SpikeStrip::between(id, racer, site, a, b, None, expires)
+        } else {
+            SpikeStrip::across(id, racer, site, length, None, expires)
+        };
         self.pending.push(PoliceEvent::SpikesPlaced {
             tool: id,
             racer,
@@ -3369,6 +3706,58 @@ impl PoliceSystem {
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         Ok(id)
+    }
+
+    /// The traffic flow and lateral span a tool at `site` may use (row 133, see
+    /// [`ToolSpan`]): a one-way segment's carriageway, or a two-way road's full width
+    /// ([`ROAD_HALF_WIDTH_M`] each side; the right half's real width when the lanes are known
+    /// sets `outer`).
+    pub(crate) fn tool_span(&self, site: &ToolSite) -> ToolSpan {
+        let g = &self.graph;
+        if let Some((inner, outer)) = g.carriageway_m(site.segment) {
+            let a = g.segment(site.segment).a;
+            return ToolSpan {
+                flow: g.dir_from(site.segment, a),
+                inner,
+                outer,
+                oneway: true,
+            };
+        }
+        ToolSpan {
+            flow: site.dir,
+            inner: -ROAD_HALF_WIDTH_M,
+            outer: g
+                .half_road_m(site.segment, site.from_node)
+                .unwrap_or(ROAD_HALF_WIDTH_M),
+            oneway: false,
+        }
+    }
+
+    /// Spawn the roadblock and spike-strip cars whose spots are now out of every racer's
+    /// view, now and along its road ahead (row 131); drop those whose tool has gone.
+    fn maintain_tool_cars(&mut self, world: &dyn WorldQuery) {
+        let pending = std::mem::take(&mut self.tool_cars);
+        for car in pending {
+            let rb = self.roadblocks.iter().position(|r| r.id == car.tool);
+            let sp = self.spikes.iter().position(|s| s.id == car.tool);
+            if rb.is_none() && sp.is_none() {
+                continue;
+            }
+            if self.warmed_up && self.spawn_in_view(world, car.pos) {
+                self.tool_cars.push(car);
+                continue;
+            }
+            let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
+            let uid = self.units[i].id;
+            self.assign(i, car.assignment);
+            self.record_spawn(world, i);
+            if let Some(k) = rb {
+                self.roadblocks[k].units.push(uid);
+            }
+            if let Some(k) = sp {
+                self.spikes[k].unit = Some(uid);
+            }
+        }
     }
 
     fn ai_captain_tools(&mut self) {

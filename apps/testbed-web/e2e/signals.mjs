@@ -113,15 +113,26 @@ await page.keyboard.press("Equal");
 let litFrames = 0;
 let darkFrames = 0;
 let leftLit = 0;
+// The panel mesh's own indicator lenses (render/panels.ts `indicator_*` parts) blink with the
+// lamps: same frames lit, left side dark.
+let lens = null;
+let lensAgree = 0;
+let lensLeft = 0;
 for (let i = 0; i < 30; i++) {
-  const p = await page.evaluate(() => window.__wp.indicators.player());
+  const [p, l] = await page.evaluate(() => [window.__wp.indicators.player(), window.__wp.indicators.playerLenses()]);
   if (p?.right) litFrames++;
   else darkFrames++;
   if (p?.left) leftLit++;
+  if (l) lens = l;
+  if (l && l.right === !!p?.right) lensAgree++;
+  if (l?.left) lensLeft++;
   await page.waitForTimeout(110);
 }
 const stalkDir = await page.evaluate(() => window.__wp.indicators.stalk.dir);
 check(stalkDir === 1 && litFrames > 0 && darkFrames > 0 && leftLit === 0, `player's right indicator blinks after "=" (lit ${litFrames}, dark ${darkFrames}, left lit ${leftLit})`);
+if (lens && lens.count > 0)
+  check(lensAgree === 30 && lensLeft === 0, `the player's ${lens.count} mesh indicator lenses blink with it (${lensAgree}/30 frames agree, left lit ${lensLeft}; ${lens.names.join(", ")})`);
+else console.log(`note  the player's car has no mesh indicator lenses (box markers only)`);
 await page.keyboard.press("Equal");
 await page.waitForTimeout(300);
 const off = await page.evaluate(() => ({ dir: window.__wp.indicators.stalk.dir, lit: window.__wp.indicators.player() }));

@@ -95,10 +95,13 @@ fn police_bench_light() {
         "police stuck {:.2}/min\n{report}",
         s.stuck_per_min
     );
-    // The evader is not a sitting duck: it is not captured in every run.
+    // The evader is not a sitting duck: a capture takes a chase, not a few seconds. (This was
+    // "not captured in every run"; since rows 131/140 the one grid run that used to time out
+    // still in pursuit is captured, 6 of 6, at 25-78 s after the pursuit started.)
+    let capture = s.capture_med_s.unwrap_or(f32::INFINITY);
     assert!(
-        s.capture_rate < 1.0,
-        "captured in every run — is the evader driving?\n{report}"
+        capture >= 15.0,
+        "median capture {capture:.0} s after the pursuit started — is the evader driving?\n{report}"
     );
 }
 

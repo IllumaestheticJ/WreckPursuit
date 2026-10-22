@@ -12,7 +12,8 @@ import { chromium } from "playwright-core";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 5198;
-const URL = `http://localhost:${PORT}/?drift=w`;
+// The pad with the hidden lab (?tune=1) on top: the flick / transition settings (row 137).
+const URL = `http://localhost:${PORT}/?drift=w&tune=1`;
 const preview = process.env.PREVIEW !== "0";
 const server = spawn("npx", preview ? ["vite", "preview", "--port", String(PORT), "--strictPort"] : ["vite", "--port", String(PORT), "--strictPort"], {
   cwd: root,
@@ -54,9 +55,10 @@ const ride = await page.evaluate(() => window.__wp.sim.rideTune());
 check(ride && Math.abs(ride.arb - 1.5) < 1e-6 && Math.abs(ride.spring - 1.5) < 1e-6 && Math.abs(ride.damper_rebound - 2.1) < 1e-6, `ride default = the owner's (medium weight, springs / bars × 1.5) ${JSON.stringify(ride)}`);
 {
   const g0 = await page.evaluate(() => window.__wp.sim.gripBalance());
-  check(g0 && g0.lock_mode === "smart" && Math.abs(g0.rear_stiffness - 0.45) < 1e-6 && Math.abs(g0.front_stiffness - 0.6) < 1e-6 && Math.abs(g0.slide_lock - 0.5) < 1e-6, `grip balance default = the owner's step 14 + held-key cut ${JSON.stringify(g0)}`);
+  // Rows 141 / 142: the owner's step-14 tyres without the steering parts (no smart lock, no held-key cut).
+  check(g0 && g0.lock_mode === "plain" && Math.abs(g0.rear_stiffness - 0.45) < 1e-6 && Math.abs(g0.front_stiffness - 0.6) < 1e-6 && g0.slide_lock === 1, `grip balance default = the owner's step 14 tyres, no steering parts ${JSON.stringify(g0)}`);
 }
-check(Math.abs(plain.counter_margin_deg - 0.25) < 1e-6, `countersteer limit 0.25° by default (${plain.counter_margin_deg})`);
+check(plain.counter_margin_deg === 0, `no countersteer limit by default, row 142 (${plain.counter_margin_deg})`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
 check((a.tcs === "Off" || a.tcs === false) && !a.esc && !a.auto_gears && a.auto_clutch === true, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears} auto clutch ${a.auto_clutch}`);
 check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
@@ -77,7 +79,7 @@ check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Ma
 await page.locator("#drift-lab-w button", { hasText: "spin model v2 (ellipse)" }).click();
 const v2 = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), plain: window.__wp.sim.plainSteer() }));
 check(v2.car.spin_model === true && Math.abs(v2.car.spin_ellipse - 0.7) < 1e-6 && Math.abs(v2.plain.swing_rate - 2.08) < 1e-6, `spin model v2 preset ${JSON.stringify(v2)}`);
-await page.locator("#drift-lab-w button", { hasText: "transition: swing rack (test)" }).click();
+await page.locator("#drift-lab-w button", { hasText: "lab · transition: swing rack (test)" }).click();
 await page.waitForTimeout(300);
 const tr = await page.evaluate(() => ({ plain: window.__wp.sim.plainSteer(), ride: window.__wp.sim.rideTune(), grip: window.__wp.sim.gripBalance() }));
 check(Math.abs(tr.plain.swing_rate - 2.5) < 1e-6 && Math.abs(tr.ride.yaw_inertia - 1.5) < 1e-6 && tr.grip.lock_mode === "smart" && Math.abs(tr.grip.rear_stiffness - 0.45) < 1e-6, `transition preset (balance step 14) ${JSON.stringify(tr)}`);
@@ -105,7 +107,7 @@ await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "plain", `A/B → before (plain lock, tyre data): ${JSON.stringify(await page.evaluate(() => window.__wp.sim.gripBalance()))}`);
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
-check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
+check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance()?.rear_stiffness)) - 0.45) < 1e-6, "A/B → new again (the step-14 rear tyres)");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
 check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffness - 0.6) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `shipped balance: the owner's step 14, rear downforce, probe fix ${JSON.stringify(gNew)}`);
 await page.locator("#drift-lab-w button", { hasText: "balance: step 14" }).click();
@@ -189,24 +191,25 @@ await page.locator("#drift-lab-w-new").click();
 await page.waitForTimeout(1500);
 {
   const n = await page.evaluate(() => [window.__wp.sim.plainSteer().counter_margin_deg, window.__wp.sim.rideTune().spring]);
-  check(Math.abs(n[0] - 0.25) < 1e-6 && Math.abs(n[1] - 1.5) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → limit 0.25°, firm ride (${n})`);
+  check(n[0] === 0 && Math.abs(n[1] - 1.5) < 1e-6 && (await sim()).name === "drift_lab_w", `"new" → the shipped steering (no limit since row 142), firm ride (${n})`);
 }
 // Step 11 catch A/B (owner: catch over-rotations): default new, "before" turns the directional
 // limit / extra lock / fast rack off.
 {
   const ps = () => page.evaluate(() => window.__wp.sim.plainSteer());
   const d = await ps();
-  check(d.counter_closing_only === true && Math.abs(d.drift_lock_extra - 0.4) < 1e-6 && Math.abs(d.over_rate - 2) < 1e-6, `catch default: directional limit, extra lock 40 %, rack × 2 (${d.counter_closing_only}, ${d.drift_lock_extra}, ${d.over_rate})`);
+  // Row 142: the extra lock and the fast rack are lab-only now (off for players).
+  check(d.counter_closing_only === true && d.drift_lock_extra === 0 && d.over_rate === 1, `catch default: directional limit, no extra lock, no fast rack (${d.counter_closing_only}, ${d.drift_lock_extra}, ${d.over_rate})`);
   await page.locator("#drift-lab-w-catch-before").click();
   check((await ps()).counter_closing_only === false, '"catch: before" → off');
   await page.locator("#drift-lab-w-catch-new").click();
   check((await ps()).counter_closing_only === true, '"catch: new" → on');
-  // Step 12 transition rack: on by default, the checkbox reaches the sim.
-  check((await ps()).trans_follow === true && (await page.locator("#drift-lab-w-trans").isChecked()), "transition rack on by default");
-  await page.locator("#drift-lab-w-trans").uncheck();
-  check((await ps()).trans_follow === false, "transition checkbox → off");
+  // Step 12 transition rack: off by default since row 142 (lab A/B only), the checkbox reaches the sim.
+  check((await ps()).trans_follow === false && !(await page.locator("#drift-lab-w-trans").isChecked()), "transition rack off by default (row 142)");
   await page.locator("#drift-lab-w-trans").check();
-  check((await ps()).trans_follow === true, "transition checkbox → on");
+  check((await ps()).trans_follow === true, "lab transition checkbox → on");
+  await page.locator("#drift-lab-w-trans").uncheck();
+  check((await ps()).trans_follow === false, "lab transition checkbox → off");
 }
 // Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
 check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");
@@ -357,7 +360,7 @@ const handling = () =>
   });
 {
   const w = await handling();
-  check(w.plain && w.spin && w.grip === "smart" && w.firm && w.player, `free drive: shipped handling, player steering aids (${JSON.stringify(w)})`);
+  check(w.plain && w.spin && w.grip === "plain" && w.firm && w.player, `free drive: shipped handling, player keyboard rack (${JSON.stringify(w)})`);
   check(w.panel === "none" && w.title !== "Drift Lab W", `free drive: tune panel hidden (${w.panel})`);
   check((await page.locator("#sc-drift-w").count()) === 0, "no separate drift lab W button");
   // (The load's Escape may have opened the pause menu, which keeps the keys.)
@@ -368,6 +371,14 @@ const handling = () =>
   check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "F10 shows the tune panel");
   await page.keyboard.press("F10");
   check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "none", "F10 hides it again");
+}
+// Row 137: the pad alone (no ?tune=1) has no flick / transition settings.
+await page.goto(`http://localhost:${PORT}/?drift=w`);
+await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+await page.waitForTimeout(1000);
+{
+  const labRows = await page.evaluate(() => [...document.querySelectorAll("#drift-lab-w *")].filter((e) => e.children.length === 0 && (e.textContent ?? "").includes("lab · ")).length);
+  check(labRows === 0 && (await page.locator("#drift-lab-w-trans").count()) === 0, `pad without ?tune=1: no flick / transition settings (${labRows})`);
 }
 await freeDrive("?tune=1");
 check((await page.evaluate(() => getComputedStyle(document.getElementById("drift-lab-w")).display)) === "block", "?tune=1 shows the tune panel");

@@ -41,11 +41,22 @@ pub struct PlainSteer {
     /// Exponent of the speed-sensitivity curve, 1..=4 in steps of 0.5 (2 = the lock falls with
     /// speed², like the steer angle a corner of constant lateral g needs).
     pub sens_exponent: f32,
-    /// Self-align, 0..=1 (default 0): with the keys released the rack returns toward
+    /// Self-align, 0..=1: with the keys released the rack returns toward
     /// `self_align × the front axle's direction of travel` instead of the centre (a car whose
-    /// wheels trail the slide). 0 = plain return to centre. An A/B switch: we have no reference
-    /// data for released keys mid-drift.
+    /// wheels trail the slide), within [`PlainSteer::self_align_cap`]. 0 = plain return to
+    /// centre. A player car's countersteer help ([`wp_contracts::AssistProfile::countersteer_help`])
+    /// sets it (the larger of the two): the reference game's hands-off wheel settles at a
+    /// countersteer that follows the slide (`docs/reference/wf-clips`, row 142). A held key
+    /// overrides it at once.
     pub self_align: f32,
+    /// Self-align cap, × the car's full lock: the hands-off wheels follow the travel at most
+    /// this far (the reference's hands-off countersteer stays within about a quarter to a
+    /// third of full lock even in big slides; `docs/reference/wf-clips/OWNER_KEY_TECHNIQUE.md`).
+    /// 1 = no cap.
+    pub self_align_cap: f32,
+    /// Self-align slide fade: body slip, degrees, where the alignment is fully in (from half of
+    /// it), so released keys in grip return to the centre. 0 = always (no fade).
+    pub self_align_slide_deg: f32,
     /// Where the speed sensitivity acts (lead A/B, clip 8: the reference's cockpit wheel turns
     /// as far at 150 km/h as at a standstill).
     pub sens_applies: SensApplies,
@@ -173,7 +184,7 @@ pub struct PlainSteer {
     /// New-side catch (lead, step 13: settle within 0.5 s of the crossing): in the same armed
     /// within `trans_catch_window_s` of the slide crossing from one side to the other (a
     /// flick), a **countersteer** key while the slide still grows (below `trans_catch_max_deg`) (faster than `trans_catch_growth_dps`) points the wheels at
-    /// `trans_catch_gain` × the front axle's travel plus this, degrees (default 0.9 × travel +
+    /// `trans_catch_gain` × the front axle's travel plus this, degrees (default 0.8 × travel +
     /// 0°: aiming past it over-catches and swings back), at the
     /// transition rack's speed — the fronts then pull against the swing's rotation at once instead
     /// of lagging the travel at the plain rack rate. Faded in with body slip by
@@ -206,7 +217,38 @@ pub enum SensApplies {
 }
 
 impl Default for PlainSteer {
+    /// The player's keyboard steering (owner, playtest rows 141 / 142: "this behavior of full
+    /// lock the opposite way to enable transitioning needs to be removed entirely. It should
+    /// behave more like Wreckfest"): the wheels go where the key says, `key × lock(speed)`, at
+    /// the rack rate and return to centre when it is released, like the reference game's
+    /// keyboard steering (`docs/reference/wf-clips`). Nothing moves the wheels away from the key
+    /// position: [`PlainSteer::lab_w`] without the transition rack and new-side catch
+    /// ([`PlainSteer::trans_follow`] off), the drift lock extension, the over-rotation rack and
+    /// the countersteer limit. The only limit is the speed-sensitive lock
+    /// ([`PlainSteer::lock_frac`], the reference's "steering speed sensitivity"). With no key
+    /// held, the countersteer help aligns the wheels with the slide, capped
+    /// ([`PlainSteer::self_align`]).
     fn default() -> Self {
+        Self {
+            trans_follow: false,
+            drift_lock_extra: 0.0,
+            over_rate: 1.0,
+            counter_margin_deg: 0.0,
+            // Hands-off countersteer (the countersteer help slider sets `self_align`): within
+            // 30 % of full lock, only once the car slides (row 142, the reference clips).
+            self_align_cap: 0.3,
+            self_align_slide_deg: 8.0,
+            ..Self::lab_w()
+        }
+    }
+}
+
+impl PlainSteer {
+    /// Drift Lab W's full step-13b set (lab A/B only, `?tune=1`; never a player default since
+    /// row 142): [`PlainSteer::default`] plus the transition rack, the new-side catch, the
+    /// after-flick follow, the drift lock extension, the over-rotation rack and the
+    /// countersteer limit.
+    pub fn lab_w() -> Self {
         Self {
             t_full_s: 0.28,
             t_return_s: 0.33,
@@ -214,6 +256,8 @@ impl Default for PlainSteer {
             sens_ref_kmh: 113.0,
             sens_exponent: 2.0,
             self_align: 0.0,
+            self_align_cap: 1.0,
+            self_align_slide_deg: 0.0,
             sens_applies: SensApplies::Rack,
             velocity_relative: false,
             align_gain: 1.0,
@@ -248,15 +292,16 @@ impl Default for PlainSteer {
             trans_t_s: 0.1,
             trans_arm_s: 1.5,
             trans_catch_deg: 0.0,
-            trans_catch_gain: 0.9,
+            // 0.9 until playtest row 137: it over-caught rampart_50 into a second swing
+            // (tests/transition_once.rs). 0.8, not lower: 0.7 still caught only 19 / 27 of the
+            // transition bench's flicks (0.8: 27 / 27, 0.9: 27 / 27).
+            trans_catch_gain: 0.8,
             trans_catch_growth_dps: 7.5,
             trans_catch_max_deg: 45.0,
             trans_catch_window_s: 1.0,
         }
     }
-}
 
-impl PlainSteer {
     /// Fraction of the car's full lock available at `speed` (m/s, either direction), 0..=1:
     /// `1 / (1 + s × (v / v_ref)^p)`. Defaults (75 %, 113 km/h, p = 2): 1.00 at 5 km/h, 0.83 at
     /// 60, 0.63 at 100, 0.47 at 140, 0.40 at 160 km/h.
@@ -482,8 +527,20 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
         && inp.speed > 3.0
         && lock > 1e-6
     {
-        // Released keys: return toward the travel instead of the centre.
-        (-(inp.front_axle_angle * p.self_align.clamp(0.0, 1.0)) / lock).clamp(-1.0, 1.0)
+        // Released keys: return toward the travel instead of the centre, faded in with the
+        // slide and capped.
+        let fade = if p.self_align_slide_deg > 0.0 {
+            smooth(
+                inp.body_slip.abs().to_degrees(),
+                0.5 * p.self_align_slide_deg,
+                p.self_align_slide_deg,
+            )
+        } else {
+            1.0
+        };
+        let cap = p.self_align_cap.clamp(0.0, 1.0) * inp.full_lock;
+        let aim = (inp.front_axle_angle * p.self_align.clamp(0.0, 1.0) * fade).clamp(-cap, cap);
+        (-aim / lock).clamp(-1.0, 1.0)
     } else {
         key
     };
@@ -787,7 +844,7 @@ mod tests {
 
     #[test]
     fn full_lock_in_t_full_and_back_in_t_return() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         // 0.28 s = 67.2 ticks: not there at 66, there at 68.
         assert!(run(0.0, 1.0, &p, 66) < 1.0);
         assert_eq!(run(0.0, 1.0, &p, 68), 1.0);
@@ -800,7 +857,7 @@ mod tests {
 
     #[test]
     fn reversal_returns_then_goes_out() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         // Full right → full left: 0.33 s back + 0.28 s out = 0.61 s = 146.4 ticks.
         assert!(run(1.0, -1.0, &p, 145) > -1.0);
         assert_eq!(run(1.0, -1.0, &p, 147), -1.0);
@@ -811,7 +868,7 @@ mod tests {
 
     #[test]
     fn speed_sensitivity_curve() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         let f = |kmh: f32| p.lock_frac(kmh / 3.6);
         assert!(f(5.0) > 0.99);
         assert!((0.80..0.86).contains(&f(60.0)), "{}", f(60.0));
@@ -831,7 +888,7 @@ mod tests {
 
     #[test]
     fn centre_angle_round_trips_through_the_rack() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         let inp = PlainInput {
             driver: 1.0,
             speed: 20.0,
@@ -864,7 +921,7 @@ mod tests {
     fn tyre_mode_keeps_full_lock_at_speed() {
         let p = PlainSteer {
             sens_applies: SensApplies::Tyre,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         assert_eq!(p.lock_frac(150.0 / 3.6), 1.0);
         // Serialised lowercase for the testbed.
@@ -876,7 +933,7 @@ mod tests {
     fn velocity_relative_follows_the_travel_in_a_slide_and_is_plain_in_grip() {
         let p = PlainSteer {
             velocity_relative: true,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         let run = |inp: &PlainInput| {
             let mut a = 0.0;
@@ -934,11 +991,63 @@ mod tests {
     }
 
     #[test]
+    fn player_hands_off_follows_the_slide_up_to_the_cap_and_a_key_overrides_it() {
+        // Row 142: the player default with countersteer help 0.3 (the vehicle sets
+        // `self_align` from it). Full lock 0.6 rad, cap 30 % = 0.18 rad.
+        let p = PlainSteer {
+            self_align: 0.3,
+            ..PlainSteer::default()
+        };
+        let slide = PlainInput {
+            driver: 0.0,
+            speed: 15.0,
+            full_lock: 0.6,
+            pull: 0.0,
+            front_axle_angle: 0.4,
+            body_slip: 0.4,
+            yaw_rate: 0.0,
+            slide_growth: 0.0,
+            since_lift_s: 1.0e3,
+            since_reversal_s: 1.0e3,
+            since_cross_s: 1.0e3,
+        };
+        let run = |inp: &PlainInput, a0: f32, n: usize| {
+            let mut a = a0;
+            for _ in 0..n {
+                a = update_center_angle(a, inp, &p, DT);
+            }
+            a
+        };
+        // In a slide: 0.3 × the travel (0.12 rad), within the cap.
+        assert!((run(&slide, 0.0, 240) - 0.12).abs() < 1e-4);
+        // A big slide: capped at 30 % of full lock.
+        let big = PlainInput {
+            front_axle_angle: 1.0,
+            ..slide
+        };
+        assert!((run(&big, 0.0, 240) - 0.18).abs() < 1e-4);
+        // Grip (no body slip): back to the centre.
+        let grip = PlainInput {
+            body_slip: 0.0,
+            ..slide
+        };
+        assert!(run(&grip, 0.12, 240).abs() < 1e-4);
+        // A key overrides it at once: the first tick already heads for the key's side.
+        let key = PlainInput {
+            driver: 1.0,
+            ..slide
+        };
+        let a1 = run(&key, 0.12, 1);
+        assert!(a1 < 0.12, "{a1}");
+        assert!(run(&key, 0.12, 240) < -0.5, "the key's full lock");
+    }
+
+    #[test]
     fn self_align_returns_toward_the_travel() {
         let p = PlainSteer {
             velocity_relative: false,
             self_align: 1.0,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         let inp = PlainInput {
             driver: 0.0,
@@ -985,7 +1094,7 @@ mod tests {
             }
             a
         };
-        let off = PlainSteer::default();
+        let off = PlainSteer::lab_w();
         let on = PlainSteer {
             swing_rate: 2.5,
             swing_yaw_dps: 80.0,
@@ -1023,7 +1132,7 @@ mod tests {
     fn countersteer_limit_follows_the_travel_in_a_slide_only() {
         let p = PlainSteer {
             drift_lock_extra: 0.0,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         let off = PlainSteer {
             counter_margin_deg: 0.0,
@@ -1079,7 +1188,7 @@ mod tests {
 
     #[test]
     fn over_rotation_gets_full_lock_and_the_drift_lock_extension() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         // Left-hand slide at 55° of body slip (past a normal drift), front axle travelling 20°
         // right, counter key.
         let slide = PlainInput {
@@ -1155,7 +1264,7 @@ mod tests {
 
     #[test]
     fn transition_rack_follows_the_travel_only_when_armed_and_into_the_old_corner() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         // Left drift at 35° (travel 30° right), the new side's key (left, −1) just after a lift.
         let flick = PlainInput {
             driver: -1.0,
@@ -1228,7 +1337,7 @@ mod tests {
 
     #[test]
     fn new_side_catch_aims_at_the_travel_only_after_a_flick() {
-        let p = PlainSteer::default();
+        let p = PlainSteer::lab_w();
         // Just through zero onto the new side (tail left, slip +12°, growing), travel 15° left,
         // the new countersteer key (left, −1), within the window of a lift and a key reversal.
         let swing = PlainInput {

@@ -36,11 +36,11 @@ fn over_rotations_are_caught_without_a_worse_snap_back() {
         plain::set_override(Some(PlainSteer {
             counter_closing_only: false,
             trans_follow: false,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         }));
         let b0 = over_rotation_catch(&c, &a, 35.0);
         let s0 = snap_back(&c, &a, SnapExit::CounterLift);
-        plain::set_override(Some(PlainSteer::default()));
+        plain::set_override(Some(PlainSteer::lab_w()));
         let b1 = over_rotation_catch(&c, &a, 35.0);
         let s1 = snap_back(&c, &a, SnapExit::CounterLift);
         assert!(b0.reached && b1.reached, "{id}: {b0:?} {b1:?}");

@@ -19,11 +19,21 @@ fn car(id: &str) -> LoadedCar {
 }
 
 /// Keyboard assists with TCS and ESC off: the case the slide help exists for.
+/// The keyboard assists these tests were written against: the keyboard default with the old
+/// 60 % countersteer help (the default until playtest row 137; it is 0 now). The tests check
+/// what the countersteer help slider does, so they keep it on.
+fn keyboard() -> AssistProfile {
+    AssistProfile {
+        countersteer_help: 0.6,
+        ..AssistProfile::keyboard_default()
+    }
+}
+
 fn keyboard_no_tcs() -> AssistProfile {
     AssistProfile {
         tcs: wp_contracts::TcsLevel::Off,
         esc: false,
-        ..AssistProfile::keyboard_default()
+        ..keyboard()
     }
 }
 
@@ -43,7 +53,7 @@ fn keyboard_power_oversteer_exit_is_recoverable() {
     let _ = keyboard_no_tcs;
     let tcs_on = AssistProfile {
         tcs: wp_contracts::TcsLevel::Full,
-        ..AssistProfile::keyboard_default()
+        ..keyboard()
     };
     for a in [tcs_on] {
         for id in ["rampart_50", "lucciola_350"] {
@@ -149,7 +159,7 @@ fn self_aligning_steering_does_not_wobble_a_keyboard_corner() {
         let c = car(id);
         let a = |h: f32| AssistProfile {
             countersteer_help: h,
-            ..AssistProfile::keyboard_default()
+            ..keyboard()
         };
         let (off, _) = keyboard_corner_wobble(&c, &a(0.0), 40.0, 0.6);
         for h in [0.6, 1.0] {
@@ -216,7 +226,7 @@ fn keyboard_catches_a_slide_above_100_kmh() {
     // A sudden yaw kick at 110 / 130 km/h (a nudge from traffic), the driver countersteers
     // with keys. Main spun 7 of 12 such cases with TCS/ESC off; now all are caught (the
     // speed-sensitive lock opens toward the countersteer a slide needs).
-    for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
+    for a in [keyboard(), keyboard_no_tcs()] {
         for id in ["rampart_50", "shiro_turbo", "lucciola_350"] {
             for kmh in [110.0, 130.0] {
                 let r = high_speed_catch(&car(id), &a, DriverStyle::Keyboard, kmh / 3.6, 1.2);

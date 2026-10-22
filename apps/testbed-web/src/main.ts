@@ -1859,12 +1859,20 @@ async function main(): Promise<void> {
     fx,
     /** Turn signals (e2e/signals.mjs): `probe(true)` records each traffic car's flags and lit
      * lamps per frame into `rows()` (render/lod.ts IndicatorRow); `stalk` is the player's
-     * cosmetic stalk and `player()` its lit lamps. */
+     * cosmetic stalk, `player()` its lit lamps and `playerLenses()` its mesh's indicator lenses. */
     indicators: {
       probe: (on: boolean) => (lod.indicatorProbe = on),
       rows: () => lod.indicatorRows.map((r) => ({ ...r })),
       stalk,
       player: () => app.views.get(app.player)?.indicatorsLit() ?? null,
+      /** The player's panel-mesh indicator lenses: how many (`indicator_*` parts) and which
+       * side glows (null before the mesh is drawn). */
+      playerLenses: () => {
+        const v = app.views.get(app.player);
+        if (!v?.panels.ready) return null;
+        const parts = v.panels.lights().filter((l) => l.name.startsWith("indicator_"));
+        return { count: parts.length, names: parts.map((l) => l.name), ...v.indicatorLensesLit() };
+      },
     },
   };
   requestAnimationFrame(frame);

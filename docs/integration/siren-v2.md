@@ -249,3 +249,12 @@ Switched to procedural (recorded twin's top-loop rate at redline): `brigand_400`
 `hauler_1500` ×2.33, `ironside_440` ×2.09, `lucciola_350` ×3.42, `rampart_50` ×2.82, `sperber_32`
 ×2.39 (i6); police (`sentinel_bastion`, `sentinel_cruiser` ×2.33, `sentinel_wolfhound` ×1.81 v6)
 were already. Every inline-4 / turbo-4 keeps its recording (≤ ×1.53).
+
+## Follow-up: rim grind follows the rim-contact flag (grip-balance, 0.12.40)
+
+`AudioDirector::set_rim_contact(entity, Option<[bool; 4]>)`; the wasm bridge passes
+`wp_vehicle::Vehicle::rim_contact()` every frame, so a flat wheel grinds only while its rim is
+on the road (silent over bumps and jumps). Without a flag (`None`, e.g. a net client until the
+contract's `WheelState` carries it) deflation ≥ `flat_tyre.rim_deflation` (0.9) still decides.
+Tests: `flat_tyre.rs` unit test and `tests/flat_tyre.rs` (flat wheel off the road → no grind,
+touches down → grinds).

@@ -47,5 +47,11 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.37 | preview | Police keep-up: pro driver no longer crawls at 4 m/s through every right-angle corner apex (pace vs racer 0.68 → 0.78) |
 | 0.12.38 | preview | Detailed car models for every car (styles, liveries, decals, light rigs), 3 new cars (Fulmine V10, Sentinel Warden, Sentinel Vigil), mixed-model traffic and police, car LOD (hero / mid / fleet); races: going off route is never a DQ or reset, checkpoints in order |
 | 0.12.39 | preview | Big engines (V8 / inline-6, 13 cars incl. police) on the generated engine instead of 4-cylinder recordings sped up 1.8–3.4x (owner: generated sound now); 4-cylinders keep recordings |
-| 0.12.40 | preview | (next) |
+| 0.12.40 | preview | Spikes: a flat corner visibly drops (60–85 mm at full deflation; suspension uses the deflated radius), fully flat wheels run on the rim (low grip, pull to the flat side) |
+| 0.12.41 | preview ([link](https://claude.ai/artifact/R3vr7NVghCGvdvN4TDzZCA)) | Traffic no longer panics and slams the brakes when the player (or a racer) passes in the next lane or comes the other way; AI racers fleeing the police use every lane (they sat on the green line on Loop 9) |
+| 0.12.42 | preview | One combined build on the main preview link: 0.12.41's calm traffic + fleeing racers on every lane, plus rim grind on the real rim-contact flag and the lane-split rule (skilled racers thread side-by-side traffic when the gap fits) |
+| 0.12.43 | preview | Turn signals built into every car's head / tail clusters (per style; flush, break with the car end; the cars' own lenses blink instead of corner boxes); D's traffic jam fixes (row 85) on main's maps |
+| 0.12.44 | preview | Keyboard countersteer default 0 %, new-side catch 0.9 → 0.8 (fixes the rampart double transition), flick sliders lab-only |
+| 0.12.45 | preview | Player keyboard steering = the key (no transition / catch / limit / held-key cut / smart lock; plain speed curve only); hands-off countersteer default 30 %, capped at 30 % of lock, no-key only (matches the reference clips); reference cars parity_rwd_e / parity_rwd_f |
+| 0.12.46 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
