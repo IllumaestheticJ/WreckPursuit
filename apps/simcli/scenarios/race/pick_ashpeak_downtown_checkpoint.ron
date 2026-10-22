@@ -1,4 +1,4 @@
-// wp_race picker race "Ashpeak City checkpoint run" (ashpeak_downtown_checkpoint): Illegal daytime run through the downtown towers to the Meridian Spire.
+// wp_race picker race "Ashpeak City checkpoint run" (ashpeak_downtown_checkpoint): Illegal daytime run through the downtown towers to the Meridian Spire's block.
 // Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
 // (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
 // the player's car. Entity "player" sits on the last grid slot, the AI field ahead.

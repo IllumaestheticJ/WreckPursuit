@@ -601,3 +601,72 @@ fn lantern_checkpoint_draws_the_police() {
         r.results.len()
     );
 }
+
+// ---- Ashpeak County (the combined `ashpeak` map) ------------------------------------------
+//
+// Raced with police presence 0: these check that the AI field can drive each course to the
+// flag (touge hairpins, gravel, the downtown grid, the freeways); the police side of street
+// races is covered on Port Vesper above.
+
+/// Race `id` without police and [`check`] it (results printed for tuning).
+fn ashpeak_race(id: &str, max_s: u64, winner_s: std::ops::Range<f32>, min_finish: usize) {
+    let r = run_race_with(id, max_s, Some(0.0));
+    eprintln!(
+        "{id}: route {:.0} m, results {:?}",
+        r.route_m,
+        r.results
+            .iter()
+            .map(|x| (x.position, x.status, x.elapsed_s(), x.gates_passed))
+            .collect::<Vec<_>>()
+    );
+    check(&r, winner_s, min_finish);
+    assert_eq!(r.pursuits, 0);
+}
+
+#[test]
+fn crowfoot_ascent_touge() {
+    // 3.5 km up the hairpins, single-file grid: winner ~165 s, all four finish.
+    ashpeak_race("crowfoot_ascent", 400, 120.0..230.0, 3);
+}
+
+#[test]
+fn crowfoot_descent_touge() {
+    // 2.9 km down the north side: winner ~100 s, three of four finish.
+    ashpeak_race("crowfoot_descent", 400, 70.0..150.0, 3);
+}
+
+#[test]
+fn harlan_dirt_run() {
+    // 4 km of gravel section roads: winner ~266 s.
+    ashpeak_race("harlan_dirt_run", 500, 190.0..380.0, 3);
+}
+
+#[test]
+fn ashpeak_downtown_checkpoint() {
+    // 1.25 km through the signalised downtown grid: winner ~42 s, all four finish.
+    ashpeak_race("ashpeak_downtown_checkpoint", 300, 30.0..90.0, 3);
+}
+
+#[test]
+fn route7_tunnel_sprint() {
+    // 3.5 km of freeway through the Talon Tunnel: winner ~64 s, all five finish.
+    ashpeak_race("route7_tunnel_sprint", 400, 45.0..100.0, 4);
+}
+
+#[test]
+fn grizzly_grade_sprint() {
+    // 2.2 km over the Grizzly saddle: winner ~58 s, all four finish.
+    ashpeak_race("grizzly_grade_sprint", 300, 40.0..90.0, 3);
+}
+
+#[test]
+fn waterfront_drag() {
+    // 400 m standing start: winner ~15.7 s.
+    ashpeak_race("waterfront_drag", 90, 10.0..25.0, 2);
+}
+
+#[test]
+fn ashpeak_metro_circuit() {
+    // Two 4.2 km laps of the downtown grid at night: winner ~326 s, three of six finish.
+    ashpeak_race("ashpeak_metro_circuit", 900, 240.0..480.0, 3);
+}
