@@ -65,3 +65,24 @@ mine; `RACK=ref` added. Same conclusion from 4 more seeds: best within every gua
 rear 0.533, front 0.666, yaw 1.35, spring 1.04, arb 0.63, roll 1.34; AI pace not run). Front tyre
 shape breaks handling. Their open hunches: the clip marker is the steering wheel, not the road
 wheels; front slip-angle limit in a closing slide; rack compliance; aligning moment on the body.
+
+## Assist levers on the held drift (row 148), `held_search` `TCS=` / `CS=` / `ENDS=1`
+Base tyres, RACK=ref unless named; held s / taps of 36:
+
+| TCS | CS 0 | CS 0.3 |
+|---|---|---|
+| Off | 2.15 / 12 | 2.15 / 11 |
+| Half | 1.95 / **24** | 1.95 / 24 |
+| Full | 1.86 / 1 | 1.86 / 1 |
+
+- The hands-off countersteer help cannot act on a *held* drift (it only acts with no key).
+- **TCS Half doubles the tapping driver's held entries (12 → 24 / 36)**, in line with the owner's
+  "far more controllable" on TCS Half in the reference. The held-key bench gets a little shorter.
+- **How held drifts end (`ENDS=1`, 12 runs):** never a spin past 90°. ~75 % **swap / snap back**
+  (the slide closes through zero to the other side) after 2.2–3.6 s, the rest stall (car goes
+  backward) about 1 s after a low-speed entry. Shipped rack + TCS Half: swaps average 3.55 s
+  (Off: 2.63 s); reference rack: 2.2 s either way.
+- Full lock is 38° (rwd_a/d/e, rampart) or 33° (rwd_b/f), inside the 30–45° drift band, so as the
+  slide closes below the lock angle a held full lock points the fronts past the travel and helps
+  pull the nose through (grip-balance's trace). Next: trace the swap (front vs rear force at the
+  moment it closes) before choosing a tyre-side change.

@@ -250,6 +250,18 @@ fn held_run(rig: &mut wp_vehicle::rig::Rig, a: &AssistProfile) -> (f32, f32) {
             let lost = angle < -10.0 || angle.abs() >= 90.0 || s.v_fwd < 0.0;
             let held_s = t - entered_at;
             if lost || held_s >= 6.0 {
+                if std::env::var_os("ENDS").is_some() {
+                    let why = if held_s >= 6.0 {
+                        "held"
+                    } else if angle < -10.0 {
+                        "swap"
+                    } else if s.v_fwd < 0.0 {
+                        "backward"
+                    } else {
+                        "spin"
+                    };
+                    eprintln!("end {why} {held_s:.2}");
+                }
                 return (held_s.min(6.0), yaw_ok);
             }
             if (10.0..=60.0).contains(&s.yaw_rate.to_degrees().abs()) {
@@ -383,7 +395,21 @@ struct Score {
 
 fn score(p: &Params, drift: &[LoadedCar], hand: &[(LoadedCar, f32, f32)]) -> Score {
     p.apply();
-    let a = reference_assists();
+    // TCS=half|full and CS=<0..1> (hands-off countersteer help) for the row-148 assist levers;
+    // default: the reference settings (TCS Off, no help).
+    let mut a = reference_assists();
+    match std::env::var("TCS").as_deref() {
+        Ok("half") => a.tcs = wp_contracts::TcsLevel::Half,
+        Ok("full") => a.tcs = wp_contracts::TcsLevel::Full,
+        _ => {}
+    }
+    if let Some(cs) = std::env::var("CS").ok().and_then(|v| v.parse::<f32>().ok()) {
+        a.countersteer_help = cs.clamp(0.0, 1.0);
+    }
+    eprintln!(
+        "assists: tcs {:?}, countersteer_help {}",
+        a.tcs, a.countersteer_help
+    );
     let (mut h, mut y, mut n) = (0.0, 0.0, 0.0);
     for c in drift {
         for (r, g) in [(40.0, 0.5), (80.0, 0.7)] {
