@@ -538,3 +538,55 @@ call. I have not done it.
     triangle count does not depend on the machine (render content: LOD / props / art merges,
     FYI lead / testbed). The frame-time misses are partly the container's software GL.
     `perf_check.mjs` changed on `lead/round12` after db11e64 (now 608a50a), so re-check there.
+
+## Honk-to-start race spots + Ashpeak County races (2026-10-22, `ws/ashpeak`)
+
+Owner request: start the street races from designated spots on the map by honking, on Port
+Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpeak`).
+
+- **Spots** (`wp_race::spots`): `race_spots(world)` = one `RaceSpot { race_id, pos, heading_rad,
+  radius_m (12), length_m }` per catalog race that runs on the world's city, at the pole position
+  of its planned course (`course.start()`, same as `venue_pos`). `RaceCity::hosts()` /
+  `catalog::races_on(city)`: Port Vesper races run on `vesper_v2` **and** `ashpeak` (same
+  coordinates, same POIs), Ashpeak races only on `ashpeak`, the grid race only on the grid.
+- **Honk check** (Rust, `wp_wasm::session::Session::observe_horn` → `wp_wasm::race_spots::MeetSpots`):
+  after every live tick of a city session that is not a race, replay, scripted run or career
+  run, the player's horn rising edge (`VehicleInput::horn`) inside a spot at < 3 m/s records the
+  race. Read-only (no sim writes, hashes and replays unchanged); a held horn never retriggers;
+  spots are planned lazily (first `race_spots()` call or first press).
+- **wasm**: `race_spots()` → JSON `[{id, name, kind, laps, legality, x, y, z, heading, radius,
+  length_m}]` (`[]` when inactive); `race_spot_honked()` → race id or `""` (taken once).
+  `race_start(id, …)` now runs the race on the **current session's map when the race runs there**
+  (`race::race_city`): a Port Vesper race started on `ashpeak` stays on `ashpeak`; "Race again"
+  keeps the map. `race::race_scenario_in(def, car, mode, autopilot, city)` is the explicit form.
+  `RaceCard.cities` lists the hosts.
+- **Testbed** (`apps/testbed-web/src/race_spots.ts`, small hook in `main.ts`): ground ring + disc +
+  light pillar + direction arrow + name/kind/length label sprite per spot (unlit materials, glow
+  at night; orange street, red illegal), HUD prompt "Honk (Q) to start: <name> — <kind>,
+  <length>" ("Stop here to start" above 3 m/s); hidden during races, replays and crash replays.
+  Each frame `main.ts` polls `raceSpotHonked()` and calls `startRace(id, car, mode)`.
+- **New races** (`RaceCity::Ashpeak`): `crowfoot_ascent` (touge uphill, Crowfoot Ascent →
+  Crowfoot Summit), `crowfoot_descent` (Summit → Crowfoot North Foot), `harlan_dirt_run` (Harlan
+  Farm Run → Harlan Crossing), `ashpeak_downtown_checkpoint` (illegal daytime, Ashpeak Downtown →
+  Meridian Spire), `route7_tunnel_sprint` (Route 7 South → North through the Talon Tunnel),
+  `grizzly_grade_sprint` (Grizzly Grade → Route 12 north foot), `waterfront_drag` (new
+  `CourseSpec::PoiAhead`, 402 m from Ashpeak Waterfront, one AI), `ashpeak_metro_circuit` (2 laps
+  round the downtown core grid).
+
+- **Tests**: `wp_race` unit (`spots::tests`), `tests/race_spots.rs` (Port Vesper spots on
+  `vesper_v2` and `ashpeak`, no overlaps; the Ashpeak course test is ignored), `wp_wasm`
+  `race_spots_tests` (scripted drive into the Hollins spot, honk outside / moving / held = nothing,
+  stopped press = one start, on both maps). Browser: `npm run e2e:race-spots`
+  (`CITY=ashpeak` for the combined map), uses the new e2e helper `debug_place(entity, x, y, yaw,
+  speed)`.
+
+### Lead TODO after merging the Ashpeak districts
+1. `cargo test -p wp_race --test race_spots -- --ignored`: lists every Ashpeak race whose
+   planned length is off its `length_hint_m` (they are plan estimates) or that does not plan
+   (POI missing / circuit polygon misses the grid). Tune `length_hint_m` / `METRO_CIRCUIT` /
+   the Grizzly finish point in `catalog.rs`, then drop the `#[ignore]`.
+2. `WP_RACE_WRITE_SCENARIOS=1 cargo test -p wp_wasm --lib -- --ignored ashpeak_race_scenario`
+   writes `apps/simcli/scenarios/race/pick_<id>.ron` for the Ashpeak races; then drop that
+   `#[ignore]` too. `tests/race_picker.rs` does not race them yet (add ids when tuned).
+3. Check the spots don't overlap on `ashpeak` (`spots_do_not_overlap` covers it once the
+   districts exist).

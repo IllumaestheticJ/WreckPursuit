@@ -19,7 +19,7 @@
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
-//! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
+//! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
@@ -44,6 +44,7 @@ pub mod pack;
 pub mod police;
 pub mod props;
 pub mod race;
+pub mod race_spots;
 pub mod reset;
 pub mod run;
 pub mod scenario;
@@ -56,6 +57,8 @@ pub mod weather;
 mod career_tests;
 #[cfg(test)]
 mod crash_replay_tests;
+#[cfg(test)]
+mod race_spots_tests;
 #[cfg(test)]
 mod race_tests;
 #[cfg(test)]
@@ -981,13 +984,39 @@ pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
 /// Start race `id` with the player in `car` (`mode` `"Arcade"` | `"Simulation"`): a new live
 /// session on the race's grid, countdown running, AI field on the slots ahead. `autopilot`
 /// hands the player's car to the AI (tests / e2e). The account carries over like a restart.
-/// Returns the entity ids (player first).
+/// The race runs on the current session's map when it can run there (a Port Vesper race
+/// started on the combined `ashpeak` map stays on it; "Race again" keeps the map), else on its
+/// own city ([`race::race_city`]). Returns the entity ids (player first).
 #[wasm_bindgen]
 pub fn race_start(id: &str, car: &str, mode: &str, autopilot: bool) -> Result<Vec<u32>, JsValue> {
     let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
-    let sc =
-        race::race_scenario(&def, car, parse_mode(mode).map_err(err)?, autopilot).map_err(err)?;
+    let current = with_session_opt(|s| {
+        Ok::<_, ()>(
+            s.filter(|s| s.has_city())
+                .map_or(String::new(), |s| s.sim().world().network().id.clone()),
+        )
+    })
+    .unwrap_or_default();
+    let city = race::race_city(&def, &current);
+    let sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
+        .map_err(err)?;
     Ok(install(Session::new(sc, false).map_err(err)?))
+}
+
+/// Honk-to-start race spots of the current session's map as JSON
+/// ([`race_spots::SpotCard`] array: `id, name, kind, laps, legality, x, y, z, heading, radius,
+/// length_m`); `[]` during a race, a replay, a scripted or career run, or off-city. Planned on
+/// the first call per session.
+#[wasm_bindgen]
+pub fn race_spots() -> Result<String, JsValue> {
+    get(|s| json(&race_spots::spot_cards(s.race_spots())))
+}
+
+/// The race the player just honked for (stopped in its spot, horn pressed), or `""`: taken,
+/// so the next call returns `""`. The testbed then calls `race_start(id, car, mode, false)`.
+#[wasm_bindgen]
+pub fn race_spot_honked() -> Result<String, JsValue> {
+    get(|s| s.take_race_spot_honked().unwrap_or_default().to_string())
 }
 
 /// Live race state, or an empty array without a race: see [`race::RaceRun::info`]
@@ -1053,6 +1082,17 @@ pub fn debug_park_near_police(entity: u32, ahead_m: f32) -> Result<u32, JsValue>
     with(|s| {
         s.debug_park_near_police(EntityId(entity), ahead_m)
             .map(|e| e.0)
+    })
+}
+
+/// Debug / e2e: put `entity` on the ground at `(x, y)` facing `yaw` (0 = +Y), rolling forward
+/// at `speed_mps` (honk-to-start spot checks). Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_place(entity: u32, x: f32, y: f32, yaw: f32, speed_mps: f32) -> Result<(), JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .place_on_ground(EntityId(entity), [x, y], yaw, speed_mps, None)
+            .map_err(|e| e.to_string())
     })
 }
 
