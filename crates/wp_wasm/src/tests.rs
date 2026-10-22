@@ -489,9 +489,12 @@ fn city_chase_uses_mixed_police_and_traffic_fleets() {
         "traffic models in use: {models_seen:?}"
     );
     // Non-sim police units carry their stable id and model in the stream.
-    let units = crate::police::units(s.sim().police(), &|_| 0.0, &|u| {
-        s.sim().police_unit_model(u).map_or(-1.0, |m| m as f32)
-    });
+    let units = crate::police::units(
+        s.sim().police(),
+        &|_| 0.0,
+        &|u| s.sim().police_unit_model(u).map_or(-1.0, |m| m as f32),
+        &crate::police::Agencies::default(),
+    );
     assert_eq!(units.len() % crate::police::UNIT_STRIDE, 0);
     for u in units.chunks(crate::police::UNIT_STRIDE) {
         assert!(u[6] >= 0.0 && u[7] >= -1.0 && u[7] < 5.0, "{u:?}");
