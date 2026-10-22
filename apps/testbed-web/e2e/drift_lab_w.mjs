@@ -110,12 +110,21 @@ await page.locator("#drift-w-balance-ab").click();
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance()?.rear_stiffness)) - 0.45) < 1e-6, "A/B → new again (the step-14 rear tyres)");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
 check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffness - 0.6) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `shipped balance: the owner's step 14, rear downforce, probe fix ${JSON.stringify(gNew)}`);
-// Held-key drift lab preset (held_search candidate D, 2026-10-22; ?tune=1 only).
-await page.locator("#drift-lab-w button", { hasText: "lab · held-key drift" }).click();
-await page.waitForTimeout(300);
+// Player rack A/B presets (physics lead, 2026-10-22; row 147): steering only.
 {
-  const hk = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), grip: window.__wp.sim.gripBalance(), ride: window.__wp.sim.rideTune(), steer: window.__wp.sim.plainSteer() }));
-  check(Math.abs(hk.car.spin_b0 - 11.84) < 1e-4 && hk.car.lock === 1 && Math.abs(hk.grip.rear_stiffness - 0.634) < 1e-6 && Math.abs(hk.ride.yaw_inertia - 1.385) < 1e-6 && Math.abs(hk.steer.sens_ref_kmh - 49.2) < 1e-4 && hk.grip.lock_mode === "plain", `held-key drift lab preset ${JSON.stringify({ b0: hk.car.spin_b0, lock: hk.car.lock, rear: hk.grip.rear_stiffness, yaw: hk.ride.yaw_inertia, sens: hk.steer.sens_ref_kmh })}`);
+  const before = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), grip: window.__wp.sim.gripBalance(), ride: window.__wp.sim.rideTune() }));
+  await page.locator("#drift-lab-w button", { hasText: "rack · reference" }).click();
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), grip: window.__wp.sim.gripBalance(), ride: window.__wp.sim.rideTune(), steer: window.__wp.sim.plainSteer() }));
+  check(Math.abs(r.steer.sens_ref_kmh - 172) < 1e-4 && Math.abs(r.steer.sens_exponent - 4) < 1e-6 && Math.abs(r.steer.speed_sensitivity - 0.75) < 1e-6, `rack · reference preset ${JSON.stringify({ s: r.steer.speed_sensitivity, ref: r.steer.sens_ref_kmh, p: r.steer.sens_exponent })}`);
+  check(JSON.stringify(r.car) === JSON.stringify(before.car) && JSON.stringify(r.grip) === JSON.stringify(before.grip) && JSON.stringify(r.ride) === JSON.stringify(before.ride), "rack preset changes steering only");
+  await page.locator("#drift-lab-w button", { hasText: "rack · full lock" }).click();
+  await page.waitForTimeout(300);
+  check((await page.evaluate(() => window.__wp.sim.plainSteer().speed_sensitivity)) === 0, "rack · full lock preset");
+  await page.locator("#drift-lab-w button", { hasText: "rack · shipped" }).click();
+  await page.waitForTimeout(300);
+  const sh = await page.evaluate(() => window.__wp.sim.plainSteer());
+  check(Math.abs(sh.sens_ref_kmh - 113) < 1e-4 && Math.abs(sh.sens_exponent - 2) < 1e-6 && Math.abs(sh.speed_sensitivity - 0.75) < 1e-6, "rack · shipped preset");
 }
 // Back to the shipped tyres / balance / ride for the checks below.
 await page.evaluate(() => {
