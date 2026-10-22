@@ -3018,6 +3018,7 @@ mod tests {
                     left_pass_m: 5.0,
                     right_m: 5.0,
                     junction: false,
+                    surface: wp_contracts::SurfaceType::Asphalt,
                 })
                 .collect(),
             closed: false,
@@ -3037,6 +3038,7 @@ mod tests {
             max_steer_rad: 0.6,
             length_m: 4.6,
             width_m: 1.8,
+            loose: Default::default(),
         }
     }
 
