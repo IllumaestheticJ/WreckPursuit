@@ -394,6 +394,41 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// What the pursuit tactic based its speed request on (think rate; diagnostics).
+    #[serde(skip)]
+    pub tactic_limiter: SpeedLimiter,
+    /// What set the speed of a physical unit with lights on this tick (diagnostics, tuning).
+    #[serde(skip)]
+    pub limiter: SpeedLimiter,
+}
+
+/// What holds a unit's speed down (diagnostics for tuning pursuits; never read by the AI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum SpeedLimiter {
+    /// Not attributed (no lights, no command).
+    #[default]
+    None,
+    /// Shadow tactic holding its gap behind the racer.
+    TacticGap,
+    /// Tactic capped at the racer's speed × (1 + `target_speed_margin`), the phase's
+    /// `pursuit_cap_mps`, or the 10 m/s floor.
+    TacticMargin,
+    /// Racer out of sight: driving to its last known position at response pace.
+    TacticLostContact,
+    /// Risk budget spent: ≤ 1.3 × the speed limit.
+    TacticNoBudget,
+    /// PIT, box-in or rolling block speed.
+    TacticOther,
+    /// Not pursuing: response or intercept speed from the speed limit.
+    Response,
+    /// A vehicle ahead (`avoid` follow speed).
+    Vehicle,
+    /// A junction rule (`avoid` junction cap, give-way).
+    Junction,
+    /// The pro driver's speed profile: corners, grip, end of track, turning round.
+    Profile,
+    /// The car is slower than asked by more than 2 m/s (accelerating, damaged, stuck).
+    Lag,
 }
 
 impl Unit {
@@ -443,6 +478,8 @@ impl Unit {
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            tactic_limiter: SpeedLimiter::None,
+            limiter: SpeedLimiter::None,
         }
     }
 

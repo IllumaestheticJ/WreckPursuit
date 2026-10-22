@@ -64,7 +64,7 @@ pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use radio::{RadioConfig, RadioStats, RadioTier};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
-pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
+pub use unit::{Assignment, DriveCommand, SpeedLimiter, SteerGeometry, Tactic, Unit};
 
 use graph::xy;
 use tools::Puncture;
@@ -863,6 +863,7 @@ impl PoliceSystem {
             .get_or_insert_with(|| pro::ProDriver::new(pro_cfg.clone(), limits, geometry, v));
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
         u.planned_speed = out.planned_mps;
+        u.limiter = speed_limiter(u, want, out.planned_mps, v);
         let mut input = out.input;
         if hold && !out.reversing {
             // The shared controller releases the brake below its hold speed; right behind
@@ -1052,6 +1053,31 @@ impl PoliceSystem {
         h.write_u32(self.spikes.len() as u32);
         h.write_u64(self.stats.pursuits.len() as u64);
         h.finish()
+    }
+}
+
+/// What set a lights-on unit's speed this tick: the tactic's request (`cmd.speed_mps`), the
+/// obstacle / junction cap, the pro driver's profile, or the car not keeping up (diagnostics).
+fn speed_limiter(u: &Unit, want: f32, planned: f32, v: f32) -> unit::SpeedLimiter {
+    use unit::SpeedLimiter as L;
+    const EPS: f32 = 0.3;
+    let why = if planned < want - EPS {
+        L::Profile
+    } else if u.avoid.limit_mps < u.cmd.speed_mps - EPS {
+        if u.avoid.junction_limit_mps <= u.avoid.limit_mps + EPS {
+            L::Junction
+        } else {
+            L::Vehicle
+        }
+    } else if matches!(u.assignment, Assignment::Pursue { .. }) {
+        u.tactic_limiter
+    } else {
+        L::Response
+    };
+    if v < planned.min(want) - 2.0 {
+        L::Lag
+    } else {
+        why
     }
 }
 

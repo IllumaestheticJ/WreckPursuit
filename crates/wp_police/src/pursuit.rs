@@ -29,8 +29,8 @@ use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
 use crate::heat::{PursuitStatus, RuleInputs, RuleOutcome, WantedLevel};
 use crate::unit::{
-    plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv, Tactic,
-    Track, UnitRole, LANE_OFFSET_M,
+    plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv,
+    SpeedLimiter, Tactic, Track, UnitRole, LANE_OFFSET_M,
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
@@ -891,6 +891,7 @@ impl PoliceSystem {
                 } else {
                     p.shadow_cornering_g
                 };
+                let mut why = SpeedLimiter::TacticOther;
                 let (cmd_track, speed) = match tactic {
                     Tactic::Shadow => {
                         let mid = (t.shadow_m.min + t.shadow_m.max) * 0.5 + 12.0 * shadow_rank;
@@ -906,6 +907,17 @@ impl PoliceSystem {
                             cap
                         } else {
                             cap.min(self.limit_at(u.body.pos) * 1.3)
+                        };
+                        why = if sp < own_cap {
+                            if seen {
+                                SpeedLimiter::TacticGap
+                            } else {
+                                SpeedLimiter::TacticLostContact
+                            }
+                        } else if own_cap < cap {
+                            SpeedLimiter::TacticNoBudget
+                        } else {
+                            SpeedLimiter::TacticMargin
                         };
                         (track.clone(), sp.clamp(0.0, own_cap))
                     }
@@ -951,6 +963,7 @@ impl PoliceSystem {
                 u.cmd.speed_mps = speed;
                 u.cmd.cornering_g = cornering;
                 u.cmd.siren = true;
+                u.tactic_limiter = why;
             }
         }
     }

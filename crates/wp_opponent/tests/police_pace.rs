@@ -570,6 +570,9 @@ fn police_drive_clean_in_the_wet() {
 fn chase_report() {
     use wp_police::Assignment;
     let mut totals = (0u32, 0u32, 0.0f32, 0.0f32, 0u32);
+    let mut all_lim: std::collections::BTreeMap<String, [u32; 2]> = Default::default();
+    let mut all_ticks = (0u32, 0u32);
+    let mut all_icp: std::collections::BTreeMap<String, u32> = Default::default();
     // WP_CHASE_SEEDS=<n>: more seeds (default 6).
     let seeds: u64 = std::env::var("WP_CHASE_SEEDS")
         .ok()
@@ -593,6 +596,10 @@ fn chase_report() {
         let (mut pursued_s, mut gap_sum, mut gap_n) = (0.0f32, 0.0f32, 0u32);
         let (mut near_jct, mut fast_jct) = (0u32, 0u32);
         let mut ended: Option<f32> = None;
+        // Ticks per limiter for units in `Pursue` on this racer: [≥ 30 m behind, closer].
+        let mut lim: std::collections::BTreeMap<String, [u32; 2]> = Default::default();
+        let (mut pursue_ticks, mut intercept_ticks) = (0u32, 0u32);
+        let mut icp: std::collections::BTreeMap<String, u32> = Default::default();
         let mut was = false;
         let out = common::run(&setup, &NoPolice, &mut |sim, _| {
             let t = sim.tick() as f32 / 240.0;
@@ -615,8 +622,49 @@ fn chase_report() {
                 .map(|v| v.vehicle.state().pos);
             let mut best = f32::INFINITY;
             for u in sim.police().units() {
+                if matches!(u.assignment, Assignment::Intercept { target, .. } if target == racer) {
+                    intercept_ticks += 1;
+                    let key = match (u.limiter, u.avoid.blocked_by) {
+                        (
+                            wp_police::SpeedLimiter::Vehicle,
+                            Some(wp_police::avoid::BlockedBy::Traffic),
+                        ) => "Vehicle(kinematic traffic)".to_string(),
+                        (
+                            wp_police::SpeedLimiter::Vehicle,
+                            Some(wp_police::avoid::BlockedBy::Vehicle(e)),
+                        ) => {
+                            if sim
+                                .vehicles()
+                                .iter()
+                                .any(|v| v.id == e && v.kind == VehicleKind::Traffic)
+                            {
+                                "Vehicle(physical traffic)".to_string()
+                            } else {
+                                "Vehicle(racer/other)".to_string()
+                            }
+                        }
+                        (l, _) => format!("{l:?}"),
+                    };
+                    *icp.entry(key).or_default() += 1;
+                }
                 if !matches!(u.assignment, Assignment::Pursue { target } if target == racer) {
                     continue;
+                }
+                pursue_ticks += 1;
+                if let Some(rp) = rp {
+                    let d =
+                        ((u.body.pos[0] - rp[0]).powi(2) + (u.body.pos[1] - rp[1]).powi(2)).sqrt();
+                    let key = match (u.limiter, u.avoid.blocked_by) {
+                        (wp_police::SpeedLimiter::Vehicle, Some(b)) => match b {
+                            wp_police::avoid::BlockedBy::Unit(_) => "Vehicle(police)".into(),
+                            wp_police::avoid::BlockedBy::Vehicle(e) if e == racer => {
+                                "Vehicle(the racer)".into()
+                            }
+                            _ => "Vehicle(other)".into(),
+                        },
+                        (l, _) => format!("{l:?}"),
+                    };
+                    lim.entry(key).or_default()[(d < 30.0) as usize] += 1;
                 }
                 if let Some(rp) = rp {
                     let d =
@@ -654,6 +702,20 @@ fn chase_report() {
             out.other_contacts
         );
         totals.4 += out.other_contacts;
+        eprintln!(
+            "  unit-ticks: pursue {pursue_ticks}, intercept {intercept_ticks}; limiters \
+             [>=30 m behind, closer]: {lim:?}"
+        );
+        for (k, v) in &lim {
+            let e = all_lim.entry(k.clone()).or_insert([0u32; 2]);
+            e[0] += v[0];
+            e[1] += v[1];
+        }
+        for (k, v) in &icp {
+            *all_icp.entry(k.clone()).or_insert(0) += v;
+        }
+        all_ticks.0 += pursue_ticks;
+        all_ticks.1 += intercept_ticks;
         totals.0 += outcome.starts_with("Captured") as u32;
         totals.1 += 1;
         totals.2 += pursued_s;
@@ -668,4 +730,24 @@ fn chase_report() {
         totals.3 / totals.1 as f32,
         totals.4
     );
+    let far: u32 = all_lim.values().map(|v| v[0]).sum();
+    let near: u32 = all_lim.values().map(|v| v[1]).sum();
+    eprintln!(
+        "unit-ticks on this racer: pursue {}, intercept {}",
+        all_ticks.0, all_ticks.1
+    );
+    let icp_n: u32 = all_icp.values().sum();
+    for (k, v) in &all_icp {
+        eprintln!(
+            "  intercept {k:<26} {:5.1} %",
+            100.0 * *v as f32 / icp_n.max(1) as f32
+        );
+    }
+    for (k, v) in &all_lim {
+        eprintln!(
+            "  {k:<18} {:5.1} % of pursuing time >= 30 m behind, {:5.1} % closer",
+            100.0 * v[0] as f32 / far.max(1) as f32,
+            100.0 * v[1] as f32 / near.max(1) as f32
+        );
+    }
 }
