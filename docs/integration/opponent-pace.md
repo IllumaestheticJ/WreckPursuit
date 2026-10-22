@@ -1051,3 +1051,7 @@ Without police:
 
 - With police, the police decide the result (Hollins: nearly everyone is captured either way). Lantern s95 finishers go 9 → 11, and Lantern s50 civilian contacts go 24 → 18.
 - Without police, every race is identical except Lantern: s50 is 2 s faster, and s95 is 2.6 s slower with 2 walls in 32 runs.
+
+## Contract change requests
+
+- **`wp_contracts::DnfReason::Stuck`** (2026-10-22, for the lead's judge safety net (iii)): "made no progress for `stuck_limit_s`". `wp_race::RaceJudge` would end a race once every racer still running has made no course progress for 3 min (generous; logged as a signal), marking them `Dnf(Stuck)`. This is not a racer giving up (owner rule): the judge calls it. Until the variant exists there is no good existing reason: `TimeLimit` and `FinishWindow` mean something else.
