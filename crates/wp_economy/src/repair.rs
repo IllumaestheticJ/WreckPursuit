@@ -559,6 +559,7 @@ impl Economy {
                     lattice_state: report.lattice_state.clone(),
                     sustained_while_wanted: was_wanted || report.wanted_during_session,
                 };
+                self.strip_empty_slot_lines(c);
                 c.class
             };
             tx.note(

@@ -475,6 +475,8 @@ pub struct PoliceSystem {
     pub(crate) tool_cars: Vec<dispatch::PendingToolCar>,
     /// Indices into `stats.spawns` still watched for being seen soon after (pop-in audit).
     pub(crate) spawn_watch: Vec<usize>,
+    /// Elevated road decks (race stakeouts park on the deck, not under it).
+    pub(crate) decks: Vec<race::DeckFoot>,
     pub(crate) next_tool: u32,
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
@@ -539,6 +541,20 @@ impl PoliceSystem {
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
         let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
         chatter::attach_world(&mut p, world);
+        p.set_decks(
+            world
+                .map()
+                .decks()
+                .iter()
+                .map(|d| race::DeckFoot {
+                    a: [d.a[0], d.a[1]],
+                    b: [d.b[0], d.b[1]],
+                    z: [d.a[2], d.b[2]],
+                    left_m: d.left_m,
+                    right_m: d.right_m,
+                })
+                .collect(),
+        );
         p.set_props(
             world
                 .static_props()
@@ -636,6 +652,7 @@ impl PoliceSystem {
             roadblocks: Vec::new(),
             tool_cars: Vec::new(),
             spawn_watch: Vec::new(),
+            decks: Vec::new(),
             spikes: Vec::new(),
             next_tool: 1,
             punctures: BTreeMap::new(),
@@ -1068,6 +1085,12 @@ impl PoliceSystem {
     /// Roadblocks in place.
     pub fn roadblocks(&self) -> &[Roadblock] {
         &self.roadblocks
+    }
+
+    /// Elevated road decks of the city ([`PoliceSystem::for_world`] sets them from the map):
+    /// race stakeouts on a viaduct park on the deck, not on the ground under it.
+    pub fn set_decks(&mut self, decks: Vec<race::DeckFoot>) {
+        self.decks = decks;
     }
 
     /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet: still in a racer's

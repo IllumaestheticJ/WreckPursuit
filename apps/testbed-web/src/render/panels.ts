@@ -394,6 +394,19 @@ interface PartData {
   foldPack: FoldPack | null;
 }
 const partData = new WeakMap<MeshPartJson, PartData>();
+const partCentres = new WeakMap<MeshPartJson, THREE.Vector3>();
+/** Mean rest position of a part's vertices, metres (chassis space; hub space for wheel parts). */
+function centreOf(def: MeshPartJson): THREE.Vector3 {
+  let c = partCentres.get(def);
+  if (c) return c;
+  const rest = dataOf(def).rest;
+  const n = rest.length / 3;
+  c = new THREE.Vector3();
+  for (let i = 0; i < n; i++) c.set(c.x + rest[i * 3], c.y + rest[i * 3 + 1], c.z + rest[i * 3 + 2]);
+  if (n) c.divideScalar(n);
+  partCentres.set(def, c);
+  return c;
+}
 function dataOf(def: MeshPartJson): PartData {
   let d = partData.get(def);
   if (d) return d;
@@ -1113,6 +1126,11 @@ export class PanelBody {
   /** Packed chord folds of the part being re-skinned (`chordFoldsInto`, CHORD_STRIDE per chord). */
   private chordBuf = new Float64Array(CHORD_STRIDE * 4);
   private disposed = false;
+  /** Mesh part of each wheel-space mesh (workshop picking). */
+  private readonly wheelDefs = new Map<THREE.Mesh, MeshPartJson>();
+  /** Workshop highlight overlays and their material. */
+  private glow: THREE.Mesh[] = [];
+  private glowMat: THREE.MeshBasicMaterial | null = null;
 
   constructor(
     readonly entity: number,
@@ -1169,8 +1187,9 @@ export class PanelBody {
 
   /** Called once the mesh has loaded (immediately if it already has). */
   whenReady(fn: () => void): void {
-    if (this.ready) fn();
-    else this.onReady = fn;
+    if (this.ready) return fn();
+    const prev = this.onReady;
+    this.onReady = prev ? () => (prev(), fn()) : fn;
   }
 
   /**
@@ -1206,6 +1225,7 @@ export class PanelBody {
     const b = this.brokenLamp as THREE.MeshStandardMaterial;
     const bg = greyLook.get(b)!;
     b.color.copy(lowpoly ? tmpStyle.setHex(PALETTE.brokenLight) : bg.color);
+    this.onStyled?.();
   }
 
   /** Paint material (body colour). VehicleView sets its opacity; the livery material follows it. */
@@ -1385,6 +1405,7 @@ export class PanelBody {
         // disc spin, caliper / upright only steer.
         const wm = new THREE.Mesh(d.wheelGeom, this.mat(key));
         wm.name = def.name;
+        this.wheelDefs.set(wm, def);
         wm.frustumCulled = false;
         (HUB_KINDS.has(def.kind) ? this.hubParts : this.wheelParts)[def.wheel!].push(wm);
         continue;
@@ -1860,6 +1881,157 @@ export class PanelBody {
     const s = (region % 5) - 2;
     debris.push({ obj: group, vel, spin: new THREE.Vector3(1.5 + s * 0.4, -1.0 + s * 0.3, 0.8 - s * 0.2), age: 0 });
     while (debris.length > MAX_DEBRIS) debris.shift()?.obj.removeFromParent();
+  }
+
+  // ----- garage workshop (src/workshop): pick, hide and highlight parts by name ---------------
+
+  /** The mesh part of a wheel-space mesh (null for other meshes). */
+  wheelDef(m: THREE.Mesh): MeshPartJson | null {
+    return this.wheelDefs.get(m) ?? null;
+  }
+
+  /** Called at the end of every applyStyle (cosmetic looks re-apply their material changes). */
+  onStyled: (() => void) | null = null;
+  private shiftCache = new Map<number, THREE.Vector3>();
+  private shiftNodes: Float32Array | null = null;
+
+  /**
+   * Mean displacement (current − rest, chassis m) of region `name`'s lattice nodes at the last
+   * re-skin: bolt-on parts ride along with a crushed bumper or a bent trunk. Zero before the
+   * mesh is ready or for an unknown region.
+   */
+  regionShift(name: string, out: THREE.Vector3): THREE.Vector3 {
+    out.set(0, 0, 0);
+    const nodes = this.skinnedNodes;
+    const r = this.regions.indexOf(name);
+    if (!nodes || r < 0) return out;
+    if (nodes !== this.shiftNodes) {
+      this.shiftNodes = nodes;
+      this.shiftCache.clear();
+    }
+    let c = this.shiftCache.get(r);
+    if (!c) {
+      c = new THREE.Vector3();
+      let n = 0;
+      const rest = this.restNodes;
+      for (let i = 0; i < this.nodeRegions.length; i++) {
+        if (this.nodeRegions[i] !== r) continue;
+        c.x += nodes[i * 3] - rest[i * 3];
+        c.y += nodes[i * 3 + 1] - rest[i * 3 + 1];
+        c.z += nodes[i * 3 + 2] - rest[i * 3 + 2];
+        n++;
+      }
+      if (n) c.divideScalar(n);
+      this.shiftCache.set(r, c);
+    }
+    return out.copy(c);
+  }
+
+  /** Region `name`'s panel has come off the car (detached), so what is bolted to it goes too. */
+  regionGone(name: string): boolean {
+    const r = this.regions.indexOf(name);
+    return r >= 0 && this.stateOf.get(r) === PANEL_STATE.detached;
+  }
+
+  /**
+   * This car's own copy of a shared slot material (cosmetics recolour it without touching other
+   * cars): every batch and part mesh drawn with the old material switches to the copy. The copy
+   * keeps the greybox look of the original for applyStyle.
+   */
+  ownSlot(slot: MaterialJson): THREE.MeshStandardMaterial {
+    return this.ownCopy(slot);
+  }
+
+  /** Mesh parts of this car with their centre (chassis metres); wheel parts are in hub space. */
+  partDefs(): { def: MeshPartJson; centre: THREE.Vector3 }[] {
+    const out = this.parts.map((p) => ({ def: p.def, centre: centreOf(p.def) }));
+    for (const ps of [...this.wheelParts, ...this.hubParts])
+      for (const m of ps) {
+        const def = this.wheelDefs.get(m);
+        if (def) out.push({ def, centre: centreOf(def) });
+      }
+    return out;
+  }
+
+  /** The visible part `ray` hits first, or null (body batches, lenses and wheel parts). */
+  partAt(ray: THREE.Raycaster): MeshPartJson | null {
+    return this.partHit(ray)?.def ?? null;
+  }
+
+  /** `partAt` with the hit distance along the ray. */
+  partHit(ray: THREE.Raycaster): { def: MeshPartJson; distance: number } | null {
+    const def = this.partHitDef(ray);
+    return def && this.lastHitDistance !== null ? { def, distance: this.lastHitDistance } : null;
+  }
+  private lastHitDistance: number | null = null;
+
+  private partHitDef(ray: THREE.Raycaster): MeshPartJson | null {
+    const targets: THREE.Object3D[] = this.batches.map((b) => b.mesh);
+    for (const p of this.parts) if (p.mesh.geometry !== NO_GEOMETRY && !p.hidden) targets.push(p.mesh);
+    for (const ps of [...this.wheelParts, ...this.hubParts]) for (const m of ps) if (m.visible) targets.push(m);
+    for (const b of this.batches) b.mesh.geometry.boundingSphere = null;
+    const hit = ray.intersectObjects(targets, false)[0];
+    this.lastHitDistance = hit?.distance ?? null;
+    if (!hit) return null;
+    const wheel = this.wheelDefs.get(hit.object as THREE.Mesh);
+    if (wheel) return wheel;
+    const batch = this.batches.find((b) => b.mesh === hit.object);
+    if (!batch) return this.parts.find((p) => p.mesh === hit.object)?.def ?? null;
+    const i = (hit.faceIndex ?? 0) * 3;
+    const part = this.parts.find(
+      (p) => p.batch === batch && i >= p.indexStart && i < p.indexStart + p.def.indices.length,
+    );
+    return part?.def ?? null;
+  }
+
+  /** Stop drawing every part `hide` picks (parts taken off in the workshop). */
+  hideParts(hide: (def: MeshPartJson, centre: THREE.Vector3) => boolean): void {
+    for (const p of this.parts) if (!p.hidden && hide(p.def, centreOf(p.def))) this.hidePart(p);
+    for (const ps of [...this.wheelParts, ...this.hubParts])
+      for (const m of ps) {
+        const def = this.wheelDefs.get(m);
+        if (def && hide(def, centreOf(def))) {
+          m.visible = false;
+          m.userData.wpHidden = true;
+        }
+      }
+  }
+
+  /** Glow over the parts `pick` selects (null clears it). Built from their current shape. */
+  highlightParts(pick: ((def: MeshPartJson, centre: THREE.Vector3) => boolean) | null, colour = 0x39ff88): void {
+    for (const m of this.glow) {
+      m.geometry.dispose();
+      m.removeFromParent();
+    }
+    this.glow = [];
+    if (!pick) return;
+    const material = (this.glowMat ??= new THREE.MeshBasicMaterial({
+      color: colour,
+      transparent: true,
+      opacity: 0.45,
+      depthTest: false,
+      depthWrite: false,
+    }));
+    material.color.set(colour);
+    for (const p of this.parts) {
+      if (p.hidden || !pick(p.def, centreOf(p.def))) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(p.pos.slice(), 3));
+      g.setIndex(new THREE.BufferAttribute(dataOf(p.def).index, 1));
+      const m = new THREE.Mesh(g, material);
+      m.renderOrder = 10;
+      this.root.add(m);
+      this.glow.push(m);
+    }
+    for (const ps of [...this.wheelParts, ...this.hubParts])
+      for (const w of ps) {
+        const def = this.wheelDefs.get(w);
+        if (!def || !w.visible || !pick(def, centreOf(def))) continue;
+        const m = new THREE.Mesh(w.geometry.clone(), material);
+        m.renderOrder = 10;
+        w.add(m);
+        this.glow.push(m);
+      }
   }
 
   dispose(): void {

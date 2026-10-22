@@ -229,5 +229,91 @@ export interface CareerApi {
   exportSave(): void;
   importSave(text: string): CareerView;
   startRun(kind: RunKind): void;
+  /** Open the 3D garage workshop on car `uid` (optional: hosts without one hide the button). */
+  workshop?(uid: number): void;
   close(): void;
+}
+
+// ----- garage workshop (crates/wp_economy/src/parts.rs, wp_wasm career_workshop_json) --------
+
+/** `wp_economy::PartGroup`. */
+export type PartGroup =
+  | "Body" | "Glass" | "Aero" | "Cooling" | "Engine" | "Electronics" | "Drivetrain" | "Fuel"
+  | "Wheels" | "Brakes" | "Suspension" | "Steering" | "Protection" | "Interior";
+
+/** A part as the workshop shows it (`PartView`). */
+export interface PartView {
+  grade: string | null;
+  name: string;
+  tier: number;
+  condition: number;
+}
+
+/** One slot of the car (`SlotView`). */
+export interface SlotView {
+  id: string;
+  name: string;
+  group: PartGroup;
+  kind: string;
+  fitted: PartView | null;
+  required: boolean;
+  /** Fitted slots in the way (empty = the slot can be worked on). */
+  blocked_by: string[];
+  /** Why the fitted part cannot come off now (null = it can). */
+  remove_blocker: string | null;
+}
+
+/** A loose part (`LoosePart`). */
+export interface LoosePart {
+  uid: number;
+  kind: string;
+  grade: string | null;
+  model: string | null;
+  condition: number;
+  damage: unknown[];
+  value: number;
+}
+
+/** A loose part with where it fits on this car (`InventoryView`). */
+export interface InventoryView {
+  part: LoosePart;
+  name: string;
+  fits: string[];
+  reason: string | null;
+  sale_price: number;
+}
+
+/** One line of the parts catalog (`CatalogEntry`). */
+export interface CatalogEntry {
+  kind: string;
+  slot_name: string;
+  group: PartGroup;
+  grade: string | null;
+  name: string;
+  tier: number;
+  price: number;
+  count: number;
+  reason: string | null;
+}
+
+/** `career_workshop_json` (`WorkshopScreen`). */
+export interface WorkshopScreen {
+  car: number;
+  slots: SlotView[];
+  /** Names of empty required slots. */
+  missing: string[];
+  upgrades: string[];
+  inventory: InventoryView[];
+  catalog: CatalogEntry[];
+  cash: number;
+  def_id: string;
+}
+
+/** What the workshop screen calls; every call returns the new screen (throws on refusal). */
+export interface WorkshopApi {
+  screen(): WorkshopScreen;
+  remove(slot: string): WorkshopScreen;
+  fit(slot: string, part: number): WorkshopScreen;
+  buy(kind: string, grade: string | null): WorkshopScreen;
+  sell(part: number): WorkshopScreen;
 }

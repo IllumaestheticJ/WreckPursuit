@@ -51,11 +51,20 @@ const state: Record<string, boolean> = { ...Object.fromEntries(LAYERS.map((l) =>
 /** Layers hidden for now (photo mode) regardless of their saved toggle. */
 let hidden: ReadonlySet<string> = new Set();
 
+/** The debug drawing layers (player mode and the garage workshop hide these). */
+export const DEBUG_LAYERS = ["lattice", "stress", "tireForces", "suspension", "slipColour", "contacts", "cgVelocity", "intents", "components", "regions", "events", "telemetry", "inputs"];
+
 /** Layers forced off regardless of their toggle (player mode hides the debug drawing). */
 let suppressed = new Set<string>();
+/** Layers a screen holds off on top of that (the garage workshop). */
+let held = new Set<string>();
 
 export const layers = {
-  on: (id: string): boolean => !suppressed.has(id) && !hidden.has(id) && (state[id] ?? false),
+  on: (id: string): boolean => !suppressed.has(id) && !hidden.has(id) && !held.has(id) && (state[id] ?? false),
+  /** Hold these layers off while a screen is open (developer mode included); `[]` releases. */
+  hold(ids: Iterable<string>): void {
+    held = new Set(ids);
+  },
   /** Force these layers off (player mode, game menu); `[]` lifts it. Toggles keep their state. */
   suppress(ids: Iterable<string>): void {
     suppressed = new Set(ids);
