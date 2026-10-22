@@ -477,6 +477,108 @@ fn render_terrain(
     }
 }
 
+/// Bridge piers: a block under every deck about every 30 m (`(footprint, bottom, top)`),
+/// 1.6 m deep and 80 % of the deck wide, down to the ground. A pier never stands on a road
+/// under its deck (an interchange crossroad over the highway) or beside one within 1.5 m:
+/// such sites move on to the next centreline point.
+pub fn deck_piers(net: &RoadNetwork) -> Vec<([V2; 4], f32, f32)> {
+    let Some(t) = &net.terrain else {
+        return Vec::new();
+    };
+    let ground_z = |q: V2| t.height_at(q);
+    let mut out = Vec::new();
+    for (si, s) in net.surfaces.iter().enumerate() {
+        let n = s.centre.len();
+        let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
+        let cum = geom::cumulative(&s.centre);
+        let mut next_pier = 0.0;
+        for k in 0..n.saturating_sub(1) {
+            if !(deck[k] && deck[k + 1]) || cum[k] < next_pier {
+                continue;
+            }
+            let c = geom::xy(s.centre[k]);
+            let d = geom::normalize(geom::sub(geom::xy(s.centre[k + 1]), c));
+            let r = geom::right_of(d);
+            let half_w = 0.4 * (s.left_m + s.right_m);
+            let corner =
+                |a: f32, b: f32| geom::add(c, geom::add(geom::scale(d, a), geom::scale(r, b)));
+            let fp = [
+                corner(-0.8, -half_w),
+                corner(-0.8, half_w),
+                corner(0.8, half_w),
+                corner(0.8, -half_w),
+            ];
+            let fp = if signed_area(&fp) < 0.0 {
+                [fp[3], fp[2], fp[1], fp[0]]
+            } else {
+                fp
+            };
+            let mid = |a: V2, b: V2| geom::scale(geom::add(a, b), 0.5);
+            let probes = [
+                fp[0],
+                fp[1],
+                fp[2],
+                fp[3],
+                c,
+                mid(fp[0], fp[1]),
+                mid(fp[2], fp[3]),
+                mid(c, mid(fp[0], fp[1])),
+                mid(c, mid(fp[2], fp[3])),
+            ];
+            let deck_z = s.centre[k][2];
+            if probes.iter().any(|q| on_paving_below(net, si, *q, deck_z)) {
+                continue;
+            }
+            next_pier = cum[k] + 30.0;
+            let base = fp
+                .iter()
+                .map(|q| ground_z(*q))
+                .fold(f32::INFINITY, f32::min)
+                - 0.5;
+            out.push((fp, base, deck_z - 1.2));
+        }
+    }
+    out
+}
+
+/// Whether `q` lies on (or within 1.5 m of) the paving of a road other than surface `si`, or
+/// a junction box, more than 1 m below height `z` (where a bridge pier must not stand).
+fn on_paving_below(net: &RoadNetwork, si: usize, q: V2, z: f32) -> bool {
+    const MARGIN_M: f32 = 1.5;
+    let roads = net.surfaces.iter().enumerate().any(|(oi, o)| {
+        if oi == si || o.centre.len() < 2 {
+            return false;
+        }
+        let (a, b) = (
+            geom::xy(o.centre[0]),
+            geom::xy(o.centre[o.centre.len() - 1]),
+        );
+        let w = o.left_m.max(o.right_m) + MARGIN_M;
+        if geom::dist(q, geom::scale(geom::add(a, b), 0.5)) > geom::dist(a, b) * 0.5 + w + 400.0 {
+            return false;
+        }
+        let cum = geom::cumulative(&o.centre);
+        let pr = geom::project(&o.centre, &cum, q);
+        let edge = if pr.lateral < 0.0 {
+            o.left_m
+        } else {
+            o.right_m
+        };
+        let len = cum[cum.len() - 1];
+        pr.s >= -MARGIN_M
+            && pr.s <= len + MARGIN_M
+            && pr.lateral.abs() <= edge + MARGIN_M
+            && geom::point_at(&o.centre, &cum, pr.s.clamp(0.0, len)).0[2] < z - 1.0
+    });
+    roads
+        || net.intersections.iter().any(|ix| {
+            let n = net.nodes[ix.node as usize].pos;
+            ix.radius_m > 0.0
+                && n[2] < z - 1.0
+                && geom::dist(q, geom::xy(n)) <= ix.radius_m + MARGIN_M
+        })
+}
+
 /// Build the greybox primitives for a city.
 pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let net = &map.net;
@@ -632,9 +734,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     .collect();
                 wall.curtain(&top, &bottom, side > 0.0);
             }
-            // Decks: 1.2 m deep slab sides, 0.9 m parapets, piers every ~30 m.
-            let cum = geom::cumulative(&s.centre);
-            let mut next_pier = 0.0;
+            // Decks: 1.2 m deep slab sides, 0.9 m parapets (piers below).
             for k in 0..n - 1 {
                 if !(deck[k] && deck[k + 1]) {
                     continue;
@@ -657,35 +757,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     ];
                     bridge.curtain(&top, &[seg[0][2], seg[1][2]], side > 0.0);
                 }
-                if cum[k] >= next_pier {
-                    next_pier = cum[k] + 30.0;
-                    let c = geom::xy(s.centre[k]);
-                    let (d, _) = (geom::normalize(geom::sub(geom::xy(s.centre[k + 1]), c)), 0);
-                    let r = geom::right_of(d);
-                    let half_w = 0.4 * (s.left_m + s.right_m);
-                    let corner = |a: f32, b: f32| {
-                        geom::add(c, geom::add(geom::scale(d, a), geom::scale(r, b)))
-                    };
-                    let fp = [
-                        corner(-0.8, -half_w),
-                        corner(-0.8, half_w),
-                        corner(0.8, half_w),
-                        corner(0.8, -half_w),
-                    ];
-                    let fp = if signed_area(&fp) < 0.0 {
-                        [fp[3], fp[2], fp[1], fp[0]]
-                    } else {
-                        fp
-                    };
-                    let base = fp
-                        .iter()
-                        .map(|q| ground_z(*q))
-                        .fold(f32::INFINITY, f32::min)
-                        - 0.5;
-                    bridge.block(&fp, base, s.centre[k][2] - 1.2);
-                }
             }
         }
+    }
+    for (fp, z0, z1) in deck_piers(net) {
+        bridge.block(&fp, z0, z1);
     }
     // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
     // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
@@ -1366,6 +1442,37 @@ mod tests {
             })
             .sum();
         assert!((area - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn no_bridge_pier_stands_on_a_road() {
+        for net in [
+            wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default()),
+            wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default()),
+        ] {
+            let piers = deck_piers(&net);
+            assert!(piers.len() > 20, "{} piers", piers.len());
+            for (fp, _, top) in &piers {
+                for q in fp {
+                    // Nothing paved under a pier (beyond its own deck).
+                    let paved = net.surfaces.iter().any(|o| {
+                        let cum = geom::cumulative(&o.centre);
+                        let pr = geom::project(&o.centre, &cum, *q);
+                        let edge = if pr.lateral < 0.0 {
+                            o.left_m
+                        } else {
+                            o.right_m
+                        };
+                        let len = cum[cum.len() - 1];
+                        pr.s >= 0.0
+                            && pr.s <= len
+                            && pr.lateral.abs() <= edge
+                            && geom::point_at(&o.centre, &cum, pr.s).0[2] < top - 1.0
+                    });
+                    assert!(!paved, "pier on a road at {q:?} in {}", net.id);
+                }
+            }
+        }
     }
 
     #[test]

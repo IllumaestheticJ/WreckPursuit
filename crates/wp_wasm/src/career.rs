@@ -182,8 +182,8 @@ pub struct CarView {
     pub impound: Option<ImpoundStatus>,
     /// Performance of the build as it is.
     pub stats: Option<StatsView>,
-    /// Damage was taken while wanted (insurance will not pay).
-    pub damage_while_wanted: bool,
+    /// Some outstanding damage dates from a police capture (insurance will not pay for it).
+    pub damage_before_capture: bool,
 }
 
 /// A car the dealer sells.
@@ -785,7 +785,7 @@ impl Career {
             repair_lines,
             impound: self.econ.impound_status(acct, c.uid).ok(),
             stats: self.stats_for(&c.def_id, &c.mods).ok(),
-            damage_while_wanted: c.damage.sustained_while_wanted,
+            damage_before_capture: c.damage.sustained_before_capture,
         }
     }
 
@@ -1258,7 +1258,7 @@ impl Career {
             } else {
                 model.apply_repair(&order.items);
             }
-            let wanted = car.damage.sustained_while_wanted;
+            let wanted = car.damage.sustained_before_capture;
             self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
             self.econ.tidy_profile(&mut self.profile);
         }

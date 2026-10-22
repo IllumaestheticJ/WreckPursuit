@@ -60,8 +60,10 @@ pub struct DamageSnapshot {
     /// Opaque lattice state from `wp_damage` (node positions, plastic strain, broken beams).
     /// Empty = pristine lattice. The economy never interprets it.
     pub lattice_state: Vec<u8>,
-    /// Some of this damage was sustained while wanted (insurance will not pay for it).
-    pub sustained_while_wanted: bool,
+    /// Some of this damage was outstanding when the car was captured by the police (insurance
+    /// will not pay for it). Damage taken while wanted is covered as long as the car got away.
+    #[serde(default)]
+    pub sustained_before_capture: bool,
 }
 
 impl DamageSnapshot {
@@ -73,7 +75,7 @@ impl DamageSnapshot {
             handling: HandlingEffects::NEUTRAL,
             outstanding: RepairEstimate::default(),
             lattice_state: Vec::new(),
-            sustained_while_wanted: false,
+            sustained_before_capture: false,
         }
     }
 
@@ -396,7 +398,7 @@ pub enum EventReason {
         /// Amount covered by the insurer.
         covered: Money,
     },
-    /// Insurance refused a claim (damage sustained while wanted).
+    /// Insurance refused a claim (damage outstanding at a capture).
     InsuranceClaimDenied,
     /// Player chose to drive the car damaged.
     DriveDamaged,

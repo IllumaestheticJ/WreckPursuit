@@ -368,10 +368,10 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
         .events
         .iter()
         .any(|ev| matches!(ev.reason, EventReason::CarImpounded)));
-    // Damage was recorded before the impound and is flagged as sustained while wanted.
+    // Damage was recorded before the impound and is flagged as outstanding at a capture.
     let stored = a.car(car).unwrap().damage.clone();
     assert_eq!(stored.lattice_state, report.lattice_state);
-    assert!(stored.sustained_while_wanted);
+    assert!(stored.sustained_before_capture);
 
     // Two nights in the pound: the fee grows by the class rate per day.
     e.end_of_day(&mut a).unwrap();
