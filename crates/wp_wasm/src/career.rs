@@ -1303,6 +1303,12 @@ impl Career {
             RunEnd::Free
         };
         let mut wanted = false;
+        // A pink slip won in a touge battle: the car's lattice as it finished.
+        let won_lattice = s
+            .race()
+            .and_then(|r| r.touge())
+            .and_then(|t| t.won_lattice())
+            .cloned();
         if let Some(run) = s.end_career() {
             if run.is_over() {
                 end = match run.report().map(|r| r.outcome) {
@@ -1316,6 +1322,11 @@ impl Career {
                 .ledger
                 .extend(ledger.into_iter().filter(|e| e.seq >= start.start_seq));
             self.profile.account = acct;
+            if let Some((uid, json)) = won_lattice {
+                if self.profile.account.car(uid).is_some() {
+                    self.profile.lattices.insert(uid.0, json);
+                }
+            }
         }
         let bounty_cash: Money = self
             .profile
@@ -1414,6 +1425,12 @@ impl Career {
 
 thread_local! {
     static CAREER: RefCell<Option<Career>> = const { RefCell::new(None) };
+}
+
+/// The loaded career's account as saved between runs (`None` without a career): the touge
+/// menu reads rep and cash from it.
+pub(crate) fn career_account() -> Option<wp_economy::PlayerAccount> {
+    CAREER.with(|c| c.borrow().as_ref().map(|c| c.profile.account.clone()))
 }
 
 fn with_career<T>(f: impl FnOnce(&mut Career) -> Result<T, String>) -> Result<T, JsValue> {

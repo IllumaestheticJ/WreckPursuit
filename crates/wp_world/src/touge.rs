@@ -69,14 +69,14 @@ pub const WALL_H_M: f32 = 1.2;
 /// Gap between the paved edge and the wall's inner face, m.
 pub const WALL_GAP_M: f32 = 0.05;
 /// K-rail section: length, m.
-pub const KRAIL_LEN_M: f32 = 3.0;
+pub const KRAIL_LEN_M: f32 = 2.0;
 /// K-rail section: width at the base, m (the collider is a box this wide).
 pub const KRAIL_W_M: f32 = 0.6;
 /// K-rail section: height, m.
 pub const KRAIL_H_M: f32 = 0.81;
 /// K-rail section mass, kg (a light precast section: a hard hit shoves it aside, a scrape
 /// only nudges it).
-pub const KRAIL_MASS_KG: f32 = 1400.0;
+pub const KRAIL_MASS_KG: f32 = 600.0;
 /// Terrain grid spacing, m.
 pub const TERRAIN_CELL_M: f32 = 4.0;
 /// Terrain sits this far below the road surface under the paving, m.
@@ -481,6 +481,15 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
         ..BuildOptions::default()
     };
     let built = builder::build(&nodes, &[road], &opt);
+    let mut built = built;
+    // A mountain road: no kerbs or sidewalks. The surface code puts a raised sidewalk (and a
+    // guard rail behind it where nothing else is) on every non-highway lane edge, which would
+    // seal the K-rail drops, so the lanes are tagged as open road. Traffic is off on a touge,
+    // so the highway speed bias never applies.
+    built.surfaces[0].sidewalk = [false, false];
+    for lane in &mut built.lanes {
+        lane.kind = LaneKind::Highway;
+    }
     let surf = built.surfaces[0].clone();
     let lanes = built.road_lanes[0].clone();
     let centre = surf.centre.clone();
@@ -544,7 +553,9 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
     // Fine terrain: natural ground, carved under the road, cliffs beyond the K-rails.
     let mut hf = Heightfield::flat(lo, hi, TERRAIN_CELL_M, 0.0);
     let mut segs = Vec::new();
-    let shelf = wall_off + KRAIL_W_M + 0.5;
+    // Flat ground out to one terrain cell past the K-rails, so a rail stands level (the
+    // terrain is bilinear between 4 m vertices) and slides before it tips over the edge.
+    let shelf = wall_off + KRAIL_W_M + 0.5 + TERRAIN_CELL_M;
     for j in 0..hf.ny {
         for i in 0..hf.nx {
             let p = hf.vertex_pos(i, j);
@@ -567,7 +578,7 @@ pub fn generate(spec: &TougeSpec) -> TougeBuild {
                     let out = lat.abs() - half;
                     let cliff = under
                         - spec.cliff_drop_m
-                            * smoothstep(shelf - half, shelf - half + 7.0, out)
+                            * smoothstep(shelf - half, shelf - half + 6.0, out)
                             * along;
                     zt = zt.min(cliff);
                 }

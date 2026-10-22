@@ -48,6 +48,9 @@ pub const INFO_LEN: usize = 12;
 
 /// The race a scenario name stands for, and whether the player's car is on autopilot.
 pub fn race_for_scenario(name: &str) -> Option<(RaceDef, bool)> {
+    if let Some(setup) = crate::touge::setup_for_scenario(name) {
+        return Some((setup.race_def(), name.ends_with(AUTOPILOT_SUFFIX)));
+    }
     match name.strip_suffix(AUTOPILOT_SUFFIX) {
         Some(base) => catalog::race_for_scenario(base).map(|d| (d, true)),
         None => catalog::race_for_scenario(name).map(|d| (d, false)),
@@ -284,6 +287,8 @@ pub struct RaceRun {
     payout: Option<RacePayout>,
     economy_error: Option<String>,
     settled: bool,
+    /// A touge battle (`crate::touge`): wall breaches, wager; no buy-in or picker purse.
+    touge: Option<crate::touge::TougeRun>,
 }
 
 impl RaceRun {
@@ -308,8 +313,12 @@ impl RaceRun {
                 def.entrants()
             ));
         }
-        let race = catalog::plan_course(sim.world(), def)
-            .ok_or_else(|| format!("{}: no route", def.id))?;
+        let touge_setup = crate::touge::setup_for_scenario(&sc.name);
+        let race = match touge_setup {
+            Some(_) => wp_race::touge::plan_course(sim.world(), def),
+            None => catalog::plan_course(sim.world(), def),
+        }
+        .ok_or_else(|| format!("{}: no route", def.id))?;
         let entrant = |i: usize| -> Result<LiveEntrant, String> {
             let car = cars
                 .get(&sc.entities[i].car)
@@ -357,17 +366,37 @@ impl RaceRun {
             let adv = advertised(econ, &data, def, player_car, length, sc.mode);
             (setup, (adv.purse, adv.entry_fee))
         });
+        let touge = match touge_setup {
+            Some(t) => {
+                let npc = cars
+                    .get(&sc.entities[1].car)
+                    .ok_or("touge opponent car not loaded")?;
+                Some(crate::touge::TougeRun::new(
+                    t,
+                    sim,
+                    ids[0],
+                    ids[1],
+                    npc.def.class,
+                    npc.def.base_price,
+                )?)
+            }
+            None => None,
+        };
         let mut me = Self {
             live,
             names,
             prev_events: Vec::new(),
             setup,
-            advertised: adv,
+            advertised: if touge.is_some() { (0, 0) } else { adv },
             entry: None,
             payout: None,
             economy_error: None,
             settled: false,
+            touge,
         };
+        if me.touge.is_some() {
+            return Ok(me);
+        }
         if let Some(run) = run {
             match run.enter_race(&me.setup) {
                 Ok(e) => me.entry = Some(e),
@@ -380,6 +409,10 @@ impl RaceRun {
     /// Charge the buy-in on another account (the session adopted the previous run's account
     /// after this race was attached).
     pub fn reenter(&mut self, run: &mut PlayerRun) {
+        if self.touge.is_some() {
+            // The wager is taken at the first tick, on whichever account the session has then.
+            return;
+        }
         self.economy_error = None;
         self.entry = None;
         match run.enter_race(&self.setup) {
@@ -440,9 +473,30 @@ impl RaceRun {
             .filter(|v| v.kind == VehicleKind::Police)
             .map(|v| v.id)
             .collect();
+        // Touge: a car through the wall is totaled before the judge sees the tick.
+        let breach = match &mut self.touge {
+            Some(t) => t.check_walls(sim),
+            None => Vec::new(),
+        };
+        let judged: Vec<SimEvent>;
+        let events = if breach.is_empty() {
+            events
+        } else {
+            judged = events
+                .iter()
+                .cloned()
+                .chain(breach.iter().cloned())
+                .collect();
+            &judged
+        };
         let out = self.live.post_step(sim.tick(), &samples, events, &police);
+        if let Some(t) = &mut self.touge {
+            let mode_table = sim.mode_table().clone();
+            t.after_judge(sim, &self.live, &mode_table);
+        }
         self.prev_events = events.to_vec();
-        let mut emitted: Vec<SimEvent> = out.signals.iter().map(|s| s.to_sim_event()).collect();
+        let mut emitted: Vec<SimEvent> = breach;
+        emitted.extend(out.signals.iter().map(|s| s.to_sim_event()));
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples
                 .iter()
@@ -470,6 +524,10 @@ impl RaceRun {
 
     /// Pay the player once the results are final (G's `settle_race` on `run`'s account).
     pub fn settle(&mut self, run: Option<&mut PlayerRun>) {
+        if let Some(t) = &mut self.touge {
+            t.tick_economy(run);
+            return;
+        }
         if self.settled || !self.live.is_finished() {
             return;
         }
@@ -543,7 +601,8 @@ impl RaceRun {
         };
         let player_done = self
             .player_result()
-            .is_some_and(|r| r.status != RacerStatus::Running);
+            .is_some_and(|r| r.status != RacerStatus::Running)
+            || self.touge.as_ref().is_some_and(|t| t.decided());
         vec![
             phase,
             l.countdown_s(tick),
@@ -588,7 +647,8 @@ impl RaceRun {
     /// The results panel, once the player is no longer racing (`None` before).
     pub fn report(&self, player_run_over: bool) -> Option<RaceReport> {
         let me = self.player_result()?;
-        if me.status == RacerStatus::Running {
+        let touge_decided = self.touge.as_ref().is_some_and(|t| t.decided());
+        if me.status == RacerStatus::Running && !touge_decided {
             return None;
         }
         let def = self.live.def();
@@ -606,6 +666,14 @@ impl RaceRun {
                 let (name, car) = self.names.get(&r.racer).cloned().unwrap_or_default();
                 let (status, reason) = match r.status {
                     RacerStatus::Finished => ("Finished", None),
+                    RacerStatus::Running if touge_decided => (
+                        if self.touge_won() == Some(r.racer == self.live.player()) {
+                            "Battle won"
+                        } else {
+                            "Beaten"
+                        },
+                        None,
+                    ),
                     RacerStatus::Running => ("Running", None),
                     RacerStatus::Dnf(x) => ("DNF", Some(format!("{x:?}"))),
                     RacerStatus::Dq(x) => ("DQ", Some(format!("{x:?}"))),
@@ -634,7 +702,7 @@ impl RaceRun {
             kind: def.kind.key(),
             legality: def.legality.key(),
             length_m: self.live.race().route.length_m,
-            final_results: self.live.is_finished(),
+            final_results: self.live.is_finished() || touge_decided,
             rows,
             player_row,
             advertised_purse: self.advertised.0,
@@ -644,6 +712,19 @@ impl RaceRun {
             handoff_run_end: player_run_over
                 || me.status == RacerStatus::Dnf(wp_race::DnfReason::Captured),
         })
+    }
+
+    /// Touge: whether the player won the decided battle.
+    fn touge_won(&self) -> Option<bool> {
+        self.touge
+            .as_ref()
+            .and_then(|t| t.battle().outcome())
+            .map(|o| o.result == wp_race::touge::BattleResult::Won)
+    }
+
+    /// The touge battle state, for a touge battle.
+    pub fn touge(&self) -> Option<&crate::touge::TougeRun> {
+        self.touge.as_ref()
     }
 
     /// The buy-in charged at the start (fee, ledger lines), if any.
