@@ -110,19 +110,20 @@ await page.locator("#drift-w-balance-ab").click();
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance()?.rear_stiffness)) - 0.45) < 1e-6, "A/B → new again (the step-14 rear tyres)");
 const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
 check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffness - 0.6) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `shipped balance: the owner's step 14, rear downforce, probe fix ${JSON.stringify(gNew)}`);
-// Held-key drift lab preset (held_search candidate B, 2026-10-22; ?tune=1 only).
+// Held-key drift lab preset (held_search candidate D, 2026-10-22; ?tune=1 only).
 await page.locator("#drift-lab-w button", { hasText: "lab · held-key drift" }).click();
 await page.waitForTimeout(300);
 {
-  const hk = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), grip: window.__wp.sim.gripBalance(), ride: window.__wp.sim.rideTune() }));
-  check(Math.abs(hk.car.lock - 0.75) < 1e-6 && Math.abs(hk.grip.rear_stiffness - 0.962) < 1e-6 && Math.abs(hk.ride.yaw_inertia - 1.366) < 1e-6 && hk.grip.lock_mode === "plain", `held-key drift lab preset ${JSON.stringify({ lock: hk.car.lock, rear: hk.grip.rear_stiffness, yaw: hk.ride.yaw_inertia })}`);
+  const hk = await page.evaluate(() => ({ car: window.__wp.sim.carTune(), grip: window.__wp.sim.gripBalance(), ride: window.__wp.sim.rideTune(), steer: window.__wp.sim.plainSteer() }));
+  check(Math.abs(hk.car.spin_b0 - 11.84) < 1e-4 && hk.car.lock === 1 && Math.abs(hk.grip.rear_stiffness - 0.634) < 1e-6 && Math.abs(hk.ride.yaw_inertia - 1.385) < 1e-6 && Math.abs(hk.steer.sens_ref_kmh - 49.2) < 1e-4 && hk.grip.lock_mode === "plain", `held-key drift lab preset ${JSON.stringify({ b0: hk.car.spin_b0, lock: hk.car.lock, rear: hk.grip.rear_stiffness, yaw: hk.ride.yaw_inertia, sens: hk.steer.sens_ref_kmh })}`);
 }
 // Back to the shipped tyres / balance / ride for the checks below.
 await page.evaluate(() => {
   window.__wp.sim.carTuneSet("");
   window.__wp.sim.gripBalanceSet("");
   window.__wp.sim.rideTuneSet("");
-  for (const k of ["wp.tune.car.v1", "wp.tune.grip.v1", "wp.tune.ride.v1"]) localStorage.removeItem(k);
+  window.__wp.sim.plainSteerSet("");
+  for (const k of ["wp.tune.car.v1", "wp.tune.grip.v1", "wp.tune.ride.v1", "wp.tune.steer.v1"]) localStorage.removeItem(k);
 });
 await page.locator("#drift-lab-w button", { hasText: "balance: step 14" }).click();
 check((await abText()) === "balance: step 14" && Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) - 0.45) < 1e-6, `step 14 preset: "${await abText()}"`);

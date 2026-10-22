@@ -15,7 +15,8 @@
 //!
 //! AI pace and goldens are checked on the shortlist only (too slow for every candidate).
 //! `N=150 SEED=1 cargo run --release -p wp_vehicle --example held_search`; `ONLY_BASE=1` scores
-//! the shipped set alone.
+//! the shipped set alone; `PLAYER_LOCK=1` searches the player rack's speed curve instead of a
+//! car-wide lock scale (AI unaffected).
 
 use std::path::PathBuf;
 
@@ -74,6 +75,9 @@ struct Params {
     rear_stiffness: f32,
     front_stiffness: f32,
     yaw_inertia: f32,
+    /// The player rack's speed-sensitivity reference speed, km/h (player cars only; AI keep
+    /// their own steering). The shipped 113 km/h unless `PLAYER_LOCK=1`.
+    sens_ref_kmh: f32,
 }
 
 impl Params {
@@ -91,13 +95,17 @@ impl Params {
             rear_stiffness: g.rear_stiffness,
             front_stiffness: g.front_stiffness,
             yaw_inertia: RideTune::owner().yaw_inertia,
+            sens_ref_kmh: wp_vehicle::lab_scope::shipped_plain().sens_ref_kmh,
         }
     }
 
     /// A random candidate (`u` = uniform 0..1 draws).
     fn sample(u: &mut impl FnMut() -> f32) -> Self {
+        // PLAYER_LOCK=1: no car-wide lock change (AI steer with it too); the player rack's
+        // speed curve instead.
+        let player_lock = std::env::var_os("PLAYER_LOCK").is_some();
         let mut r = |lo: f32, hi: f32| lo + (hi - lo) * u();
-        Self {
+        let mut p = Self {
             spin_b0: r(5.0, 14.0),
             spin_b2: r(1.2, 3.0),
             spin_c: r(0.7, 1.0),
@@ -108,7 +116,13 @@ impl Params {
             rear_stiffness: r(0.45, 1.0),
             front_stiffness: r(0.5, 1.0),
             yaw_inertia: r(0.9, 1.4),
+            sens_ref_kmh: 113.0,
+        };
+        if player_lock {
+            p.lock = 1.0;
+            p.sens_ref_kmh = r(40.0, 113.0);
         }
+        p
     }
 
     fn apply(&self) {
@@ -132,18 +146,40 @@ impl Params {
             ..RideTune::owner()
         }));
     }
+
+    /// The player rack with this candidate's speed curve (set after a run's settle, which
+    /// drives a bare rig that a plain-steering override would reach too).
+    fn player_rack(&self) -> wp_vehicle::plain::PlainSteer {
+        wp_vehicle::plain::PlainSteer {
+            sens_ref_kmh: self.sens_ref_kmh,
+            ..wp_vehicle::lab_scope::shipped_plain()
+        }
+    }
 }
 
 /// Held countersteer + throttle worked by the slide angle: (held s until swap / spin, cap 6;
 /// held s with the yaw rate in 10–60 °/s).
-fn held(c: &LoadedCar, a: &AssistProfile, radius: f32, lat_g: f32) -> (f32, f32) {
+fn held(
+    c: &LoadedCar,
+    a: &AssistProfile,
+    rack: wp_vehicle::plain::PlainSteer,
+    radius: f32,
+    lat_g: f32,
+) -> (f32, f32) {
     let mut rig = settle_on_circle(c, a, radius, lat_g);
     rig.set_player_input(true);
+    wp_vehicle::plain::set_override(Some(rack));
+    let r = held_run(&mut rig, a);
+    wp_vehicle::plain::set_override(None);
+    r
+}
+
+fn held_run(rig: &mut wp_vehicle::rig::Rig, a: &AssistProfile) -> (f32, f32) {
     let (mut entered, mut entered_at, mut thr_on, mut prev) = (false, 0.0f32, true, 0.0f32);
     let mut yaw_ok = 0.0f32;
     for k in 0..9 * TPS {
         let t = k as f32 * PHYSICS_DT;
-        let s = slide_state(&rig);
+        let s = slide_state(rig);
         let angle = (-s.body_slip).to_degrees();
         if !entered && angle > 12.0 {
             entered = true;
@@ -188,15 +224,28 @@ fn held(c: &LoadedCar, a: &AssistProfile, radius: f32, lat_g: f32) -> (f32, f32)
 }
 
 /// The tapping driver (examples/entry_hold.rs, `Hold::Tapper`): held entry?
-fn tapped(c: &LoadedCar, a: &AssistProfile, handbrake: bool, lat_g: f32) -> bool {
+fn tapped(
+    c: &LoadedCar,
+    a: &AssistProfile,
+    rack: wp_vehicle::plain::PlainSteer,
+    handbrake: bool,
+    lat_g: f32,
+) -> bool {
     let mut rig = settle_on_circle(c, a, 40.0, lat_g);
     rig.set_player_input(true);
+    wp_vehicle::plain::set_override(Some(rack));
+    let r = tapped_run(&mut rig, a, handbrake);
+    wp_vehicle::plain::set_override(None);
+    r
+}
+
+fn tapped_run(rig: &mut wp_vehicle::rig::Rig, a: &AssistProfile, handbrake: bool) -> bool {
     let (mut angles, mut back) = (Vec::new(), Vec::new());
     let mut entered = false;
-    let mut prev = (-slide_state(&rig).body_slip).to_degrees();
+    let mut prev = (-slide_state(rig).body_slip).to_degrees();
     for k in 0..6 * TPS {
         let t = k as f32 * PHYSICS_DT;
-        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        let angle = (-slide_state(rig).body_slip).to_degrees();
         let rate = (angle - prev) / PHYSICS_DT;
         prev = angle;
         entered |= angle > 12.0;
@@ -226,7 +275,7 @@ fn tapped(c: &LoadedCar, a: &AssistProfile, handbrake: bool, lat_g: f32) -> bool
             },
             a,
         );
-        let n = slide_state(&rig);
+        let n = slide_state(rig);
         angles.push(-n.body_slip.to_degrees());
         back.push(n.v_fwd < 0.0);
     }
@@ -248,7 +297,7 @@ fn score(p: &Params, drift: &[LoadedCar], hand: &[(LoadedCar, f32, f32)]) -> Sco
     let (mut h, mut y, mut n) = (0.0, 0.0, 0.0);
     for c in drift {
         for (r, g) in [(40.0, 0.5), (80.0, 0.7)] {
-            let (hs, ys) = held(c, &a, r, g);
+            let (hs, ys) = held(c, &a, p.player_rack(), r, g);
             h += hs;
             y += ys;
             n += 1.0;
@@ -258,10 +307,13 @@ fn score(p: &Params, drift: &[LoadedCar], hand: &[(LoadedCar, f32, f32)]) -> Sco
     for c in drift {
         for hb in [false, true] {
             for g in [0.3, 0.5, 0.7] {
-                taps += tapped(c, &a, hb, g) as usize;
+                taps += tapped(c, &a, p.player_rack(), hb, g) as usize;
             }
         }
     }
+    // The handling check drives bare rigs, which a plain-steering override would reach too:
+    // measure it on the shipped steering path (the player rack only acts on player cars).
+    wp_vehicle::plain::set_override(None);
     let wheel = presets()[2].1;
     let handling_fails = hand
         .iter()
@@ -329,4 +381,5 @@ fn main() {
     car_lab::set_override(None);
     grip_lab::set_override(None);
     ride_lab::set_override(None);
+    wp_vehicle::plain::set_override(None);
 }
