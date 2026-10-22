@@ -597,7 +597,7 @@ pub fn resolve_offscreen(entrants: &[(String, i32, f32)], seed: u64) -> Vec<Plac
     let mut pos = 1u8;
     while left.iter().any(|e| e.2) {
         let total: f32 = left.iter().filter(|e| e.2).map(|e| e.1).sum();
-        let mut x = rng.next_f32() as f32 * total;
+        let mut x = rng.next_f32() * total;
         let mut idx = None;
         for (i, e) in left.iter().enumerate() {
             if !e.2 {
