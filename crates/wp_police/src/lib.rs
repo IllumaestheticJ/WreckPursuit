@@ -2001,6 +2001,7 @@ impl PoliceSystem {
         });
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
         u.pro_dbg = (out.planned_mps, out.reversing);
+        u.turning_round = out.turning_round;
         let input = out.input;
         let steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
         (steer, input.throttle, input.brake)
