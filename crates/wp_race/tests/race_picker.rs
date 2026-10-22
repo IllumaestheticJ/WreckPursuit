@@ -696,14 +696,21 @@ fn lantern_checkpoint_draws_the_police() {
             x.gates_passed >= 1 || x.progress_m >= 30.0,
             "{id}: {x:?} never left the grid"
         );
+        // Or behind the winner's finish window: racers never give up (owner, 2026-10-21), so a
+        // racer held up past it ends there. On the default seed (31) after the round-12 police
+        // and traffic merges, two racers sat ~25 s behind a civilian standing in their lane on
+        // the narrow downtown street, then crawled behind it with no room to pass (police
+        // status Clear throughout); seeds 1-6 end by the flag or captures (seed 5: a racer
+        // wedged beside two captured cars, a separate AI follow-up in opponent-pace.md).
         assert!(
             matches!(
                 x.status,
                 RacerStatus::Finished
                     | RacerStatus::Dnf(wp_race::DnfReason::Captured)
                     | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+                    | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
             ),
-            "{id}: {x:?} ended by neither the flag nor the police"
+            "{id}: {x:?} ended by neither the flag, the police nor the finish window"
         );
     }
     // Anyone who does get through the 665 m daytime zig-zag (signals, junction queues) does
