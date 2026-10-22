@@ -1634,6 +1634,9 @@ fn profile_roads(
         r.speed_mps = d.st.speed;
         r.parking = d.st.parking;
         r.material = d.st.material;
+        // 3 + 3 arterials (Ashpeak City's grand avenues; Port Vesper has none) carry a bus
+        // lane each way.
+        r.bus_lane = d.st.class == RoadClass::Arterial && d.st.fwd >= 3 && d.st.bwd >= 3;
         if linear_dev < 0.25 && d.anchors.is_empty() {
             r.via = d.path[1..d.path.len() - 1].to_vec();
         } else {

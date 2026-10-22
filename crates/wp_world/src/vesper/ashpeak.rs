@@ -77,7 +77,9 @@ impl Region for Ashpeak {
     }
 
     fn generic_buildings_at(&self, p: V2) -> bool {
-        farms::generic_buildings_at(p) && mountains::generic_buildings_at(p)
+        farms::generic_buildings_at(p)
+            && mountains::generic_buildings_at(p)
+            && metro::generic_buildings_at(p)
     }
 
     fn extra_buildings(&self, site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
@@ -137,7 +139,7 @@ pub fn default_config() -> VesperConfig {
 mod tests {
     use super::*;
 
-    fn city() -> &'static (RoadNetwork, VesperReport) {
+    pub(crate) fn city() -> &'static (RoadNetwork, VesperReport) {
         static CITY: std::sync::OnceLock<(RoadNetwork, VesperReport)> = std::sync::OnceLock::new();
         CITY.get_or_init(|| generate_with_report(&default_config()))
     }
