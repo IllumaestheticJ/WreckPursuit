@@ -1,4 +1,4 @@
-# simcli hashes scenario=weather_fog_pursuit_clear systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=weather_fog_pursuit_clear systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 24 1050191a808c6cd8
 48 0b809f178b311e7d
 72 d59d1f0e517bbc9b

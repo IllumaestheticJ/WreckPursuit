@@ -3,7 +3,7 @@
 // rate of ~2.6–3.1 rad/s); expect_pending tracks that target.
 (
     name: "parity_shiro_handbrake_10mph",
-    mode: Arcade,
+    mode: Simulation,
     seed: 3,
     assists: custom((abs: true, tcs: false, esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
     duration_s: 2.5,

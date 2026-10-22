@@ -50,7 +50,11 @@ pub fn embedded_data() -> Result<Data, String> {
         cars.insert(id, car);
     }
     let mut modes = BTreeMap::new();
-    for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+    for mode in [
+        DamageMode::Arcade,
+        DamageMode::Simulation,
+        DamageMode::Extreme,
+    ] {
         modes.insert(mode, crate::data::mode_table(mode)?);
     }
     Ok((cars, modes))
@@ -342,7 +346,11 @@ pub fn net_status_json() -> Result<String, JsValue> {
             "meta_reconnect_token": c.meta_reconnect_token,
             "role": role_str(c.role()),
             "vehicle": c.own_vehicle().map(|e| e.0),
-            "mode": match c.mode() { DamageMode::Arcade => "arcade", DamageMode::Simulation => "sim" },
+            "mode": match c.mode() {
+                DamageMode::Arcade => "arcade",
+                DamageMode::Simulation => "sim",
+                DamageMode::Extreme => "extreme",
+            },
             "captain_offer": c.captain_offer,
             "unit_order": c.unit_order,
             "captain_replies": c.captain_replies.iter().map(|(seq, r)| serde_json::json!({

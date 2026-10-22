@@ -3,7 +3,7 @@
 // 14 s, past it by 16 s.
 (
     name: "cars_beater_accel",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     duration_s: 16.5,
     entities: [

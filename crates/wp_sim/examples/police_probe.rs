@@ -6,7 +6,7 @@ fn main() {
     let d = |p: &str| format!("{}/../../data/{p}", env!("CARGO_MANIFEST_DIR"));
     let car = wp_contracts::load_car(d("cars/debug_coupe.json")).unwrap();
     let cop = wp_contracts::load_car(d("cars/sentinel_cruiser.json")).unwrap();
-    let mode = wp_contracts::load_mode_table(d("modes/arcade.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(d("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 11,
         mode,

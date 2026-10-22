@@ -181,8 +181,8 @@ fn real_police_capture_settles_through_the_economy() {
                     CarLocation::Impound { .. }
                 ));
             }
-            // Simulation: a total loss at capture means the car is gone.
-            DamageMode::Simulation => {
+            // Simulation / Extreme: a total loss at capture means the car is gone.
+            DamageMode::Simulation | DamageMode::Extreme => {
                 assert_eq!(out.car_fate, CarFate::Destroyed);
                 assert!(acct.car(car).is_none());
             }

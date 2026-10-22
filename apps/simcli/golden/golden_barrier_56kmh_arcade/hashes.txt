@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_barrier_56kmh_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=golden_barrier_56kmh_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 24 36aab53cbce1b273
 48 06c4432678e17cbc
 72 f20292ddf66657be

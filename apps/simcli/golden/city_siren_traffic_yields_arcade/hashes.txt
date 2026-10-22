@@ -1,4 +1,4 @@
-# simcli hashes scenario=city_siren_traffic_yields_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=city_siren_traffic_yields_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 40a9de16b995b753
 480 3c4f00ac4e49ab4d
 720 c548ba184dc3e770

@@ -3,7 +3,7 @@
 (
     name: "smoke_straight_line",
     seed: 1,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     entities: [
         (

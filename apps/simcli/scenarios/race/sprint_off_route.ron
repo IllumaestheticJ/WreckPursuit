@@ -7,7 +7,7 @@
 (
     name: "race_sprint_off_route",
     seed: 15,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     systems: "vehicle,damage",
     entities: [

@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_sprint_off_route systems=vehicle,damage hash_spec=4 contract=0.3.0
+# simcli hashes scenario=race_sprint_off_route systems=vehicle,damage hash_spec=4 contract=0.4.0
 240 8328368aacf0b8af
 480 4ebdc42011da433a
 720 ae2fc097238a7f77

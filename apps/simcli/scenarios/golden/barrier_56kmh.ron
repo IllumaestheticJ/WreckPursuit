@@ -4,7 +4,7 @@
 (
     name: "golden_barrier_56kmh",
     seed: 107,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5))],
     entities: [

@@ -35,7 +35,7 @@ pub fn car(id: &str) -> LoadedCar {
 /// A sim with `n` vehicles (alternating debug sedan / coupe) on a 10 m grid, each with a
 /// different steady throttle/steer, warmed up for one second so nothing is at rest.
 pub fn sim_with_vehicles(n: usize) -> Sim {
-    let mode = wp_contracts::load_mode_table(data_root().join("modes/sim.toml")).expect("mode");
+    let mode = wp_contracts::load_mode_table(data_root().join("modes/extreme.toml")).expect("mode");
     let mut sim = Sim::new(SimConfig {
         seed: 42,
         mode,

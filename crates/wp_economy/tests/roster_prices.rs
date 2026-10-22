@@ -160,11 +160,14 @@ fn roster_table_and_feel_targets() {
                 r.scrape,
                 r.buy_in
             );
-            // A medium front-end hit costs about one race win in Simulation. Arcade halves the
-            // bill but also pays 1/1.2 of the Simulation purse, so its ratio is 0.6x.
+            // A medium front-end hit costs about one race win in Extreme (the pre-v0.4.0
+            // Simulation; full bill, purse x1.4 since v0.4.0, so 1.2/1.4 of the old ratio).
+            // Arcade halves the bill and pays 1/1.2 of the Simulation purse (0.6x the old
+            // Simulation ratio); Simulation halves the bill at the x1.2 purse (0.5x).
             let ratio = r.front_hit / r.purse as f32;
             let (lo, hi) = match mode {
-                DamageMode::Simulation => (0.5, 1.6),
+                DamageMode::Extreme => (0.42, 1.4),
+                DamageMode::Simulation => (0.25, 0.8),
                 DamageMode::Arcade => (0.3, 1.0),
             };
             assert!(

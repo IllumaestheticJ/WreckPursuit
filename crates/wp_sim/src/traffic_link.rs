@@ -160,7 +160,7 @@ mod tests {
     fn run(models: &[&str], list: bool) -> (u64, Vec<(u32, String)>) {
         let player = car("debug_sedan");
         let mode = wp_contracts::load_mode_table(format!(
-            "{}/../../data/modes/arcade.toml",
+            "{}/../../data/modes/sim.toml",
             env!("CARGO_MANIFEST_DIR")
         ))
         .unwrap();

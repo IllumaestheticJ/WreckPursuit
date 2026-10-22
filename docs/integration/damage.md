@@ -876,3 +876,39 @@ fail threshold, which is what made hard hits never end the car. The cruiser's "e
 ### Changes outside my crates
 `apps/simcli/examples/damage_toughness.rs` (measurement only), two new
 `apps/simcli/scenarios/damage/*.ron` + goldens, `docs/integration/cars.md` (request row).
+
+## Contract v0.4.0 — Arcade / Simulation / Extreme (owner request, 2026-10-22)
+
+Owner: "Make arcade damage 20% of what it is now, set current arcade damage to simulation
+damage, and set simulation damage to a new mode called extreme … 20% for the player and AI
+drivers only. Traffic and police vehicles still receive full damage."
+
+- `data/modes/extreme.toml` = the old `sim.toml` (calibrated reference), mode `Extreme`.
+- `data/modes/sim.toml` = the old `arcade.toml`, mode `Simulation`. The forgiving
+  `DamageTuning::arcade_*` rules now apply to Arcade and Simulation (`forgiving_rules`), so the
+  new Simulation behaves exactly like the old Arcade.
+- `data/modes/arcade.toml` = `sim.toml` + `racer_damage_scale = 0.25`. `wp_sim` scales the
+  contact impulses of `VehicleKind::{Player, AiRacer}` by it (`scale_racer_contacts`, before the
+  contact filter so net replicas get the scaled contacts); police and traffic are untouched.
+  0.25 rather than 0.2 because the lattice absorbs the first part of a hit elastically:
+  measured on the debug_sedan barrier sweep, 0.25 leaves 12–22 % of Simulation's health loss and
+  18–23 % of its plastic energy at 56/80 km/h (0.2 left only 12–16 %).
+- Every simcli scenario remapped (Arcade → Simulation, Simulation → Extreme): all 112 golden
+  state hashes are unchanged; only the `contract=` header and the golden replays (which store
+  the mode by position) were re-blessed. Barrier scenarios renamed `*_arcade` → `*_sim`,
+  `*_sim` → `*_extreme`, plus a new `frontal_arcade.ron`.
+- Tests: `arcade_racers_take_about_a_fifth_of_sim_damage`, `racer_contact_scaling`,
+  `forgiving_rules_by_mode` (wp_damage), `arcade_reduces_damage_for_racers_only` (wp_sim).
+
+### Changes outside my crates
+`wp_contracts` (DamageMode::Extreme, ModeTable::racer_damage_scale, v0.4.0), `wp_sim`
+(racer contact scaling), `wp_police` (`ModeValue::extreme`, pursuit.toml), `wp_economy`
+(Extreme tables, career mode scale, roster test ranges), `wp_net`/simcli replay (wire u8 2),
+`wp_wasm`, `apps/meta`, `apps/server`, tuning-dash, testbed-web and ui-kit (Extreme option,
+three-column mode table). `wp_vehicle::AssistPreset::Sim` still selects Simulation.
+
+### Requests
+- G: tune Extreme's purse (placeholder ×1.4) and decide whether Simulation's fines/seizure
+  should stay at the old Simulation values (they did not move with the damage table).
+- Lead: `apps/ui-kit/src/generated/contracts.ts` was hand-edited (no node_modules here);
+  re-run `npm run gen:types` to confirm.

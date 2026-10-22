@@ -151,12 +151,13 @@ L5 = 1.45
 [mode_purse]
 Arcade = 1.0
 Simulation = 1.2
+Extreme = 1.4              # contract v0.4.0: one hard hit at speed ends the car (placeholder, G to tune)
 
 [debt]
 max_entry_fee = 0          # in debt you can only enter free races (street meets)
 
 [pink_slip]
-modes = ["Simulation"]
+modes = ["Simulation", "Extreme"]
 min_rep = 500
 
 [bounty]

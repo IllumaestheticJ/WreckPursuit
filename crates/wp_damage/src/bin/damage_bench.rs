@@ -18,7 +18,7 @@ const CARS: usize = 24;
 fn main() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let car = wp_contracts::load_car(root.join("cars/debug_sedan.json")).expect("car");
-    let mode = wp_contracts::load_mode_table(root.join("modes/sim.toml")).expect("mode");
+    let mode = wp_contracts::load_mode_table(root.join("modes/extreme.toml")).expect("mode");
     let mut lo = [f32::MAX; 3];
     let mut hi = [f32::MIN; 3];
     for n in &car.lattice.nodes {

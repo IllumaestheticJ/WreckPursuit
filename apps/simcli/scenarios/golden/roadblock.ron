@@ -5,7 +5,7 @@
 (
     name: "golden_roadblock",
     seed: 109,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     police_orders: [(t_s: 0.0, order: roadblock_at(target: "car", pos: (0.0, 40.0), dir: (0.0, 1.0)))],
     entities: [

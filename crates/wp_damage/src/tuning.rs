@@ -95,34 +95,45 @@ pub struct DamageTuning {
     pub fuel_leak_damaged_per_s: f32,
     /// Mass of a detached wheel debris body, kg.
     pub wheel_debris_mass_kg: f32,
-    /// Arcade only: closing speed (before the car-to-car share) from which a hit causes
+    /// Arcade and Simulation (not Extreme): closing speed (before the car-to-car share) from which a hit causes
     /// lasting mechanical damage, m/s. A crash episode (wake → sleep) whose contacts all stay
     /// below it is cosmetic: the lattice dents, but component health, alignment and steering
-    /// pull keep their pre-crash values. Simulation: every hit is mechanical. Stop-gap until
+    /// pull keep their pre-crash values. Extreme: every hit is mechanical. Stop-gap until
     /// `ModeTable::mechanical_min_closing_mps` exists (contract request #8).
     pub arcade_mechanical_min_closing_mps: f32,
-    /// Arcade only: fraction of a cosmetic episode's plastic energy that still counts toward
+    /// Arcade and Simulation (not Extreme): fraction of a cosmetic episode's plastic energy that still counts toward
     /// global health (dents are not free, but light hits never end a car).
     pub arcade_cosmetic_health_share: f32,
-    /// Arcade only: fraction of lost (not failed) component health and alignment that comes
+    /// Arcade and Simulation (not Extreme): fraction of lost (not failed) component health and alignment that comes
     /// back after a hard hit ("limp-mode settle"), reached after `arcade_settle_s`.
     pub arcade_settle_fraction: f32,
-    /// Arcade only: time for the limp-mode settle to complete, s.
+    /// Arcade and Simulation (not Extreme): time for the limp-mode settle to complete, s.
     pub arcade_settle_s: f32,
-    /// Arcade only: multiplier on the toe/camber change reported in `HandlingEffects` (the
+    /// Arcade and Simulation (not Extreme): multiplier on the toe/camber change reported in `HandlingEffects` (the
     /// stored suspension geometry stays physical, so switching modes or saving is unaffected).
     /// The raw change is up to 0.2 rad; ×0.09 keeps a bent corner a felt pull (≤ ~1°) instead of
     /// an undrivable one, and below `wp_police`'s 0.02 rad pull-over limit. Stop-gap until
     /// `ModeTable::alignment_scale` exists (contract request #10).
     pub arcade_alignment_scale: f32,
-    /// Arcade only: multiplier on the region-weighted plastic energy that lowers structural
+    /// Arcade and Simulation (not Extreme): multiplier on the region-weighted plastic energy that lowers structural
     /// health (the visible deformation is unchanged; it takes more crumpling to wreck a car).
     /// Stop-gap until `ModeTable::structural_health_scale` exists (contract request #10).
     pub arcade_structural_health_scale: f32,
-    /// Arcade only: `steer_ratio_scale` of a failed steering rack (Simulation: 0.3, about a
+    /// Arcade and Simulation (not Extreme): `steer_ratio_scale` of a failed steering rack (Extreme: 0.3, about a
     /// third of the lock, which makes city corners impossible). 0.5 = what a rack at zero
     /// health gives anyway: badly degraded, still drivable.
     pub arcade_failed_steer_ratio: f32,
+}
+
+/// True for the modes that use the forgiving `arcade_*` rules of [`DamageTuning`] (light hits
+/// cosmetic, limp-mode settle, softened alignment/structural health/failed rack): Arcade and
+/// Simulation. Extreme (the pre-v0.4.0 Simulation) runs without them. The prefix is historical:
+/// these were Arcade-only until the owner moved the Arcade numbers to Simulation (2026-10-22).
+pub fn forgiving_rules(mode: wp_contracts::DamageMode) -> bool {
+    match mode {
+        wp_contracts::DamageMode::Arcade | wp_contracts::DamageMode::Simulation => true,
+        wp_contracts::DamageMode::Extreme => false,
+    }
 }
 
 impl Default for DamageTuning {
