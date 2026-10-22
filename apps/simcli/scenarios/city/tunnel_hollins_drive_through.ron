@@ -3,6 +3,11 @@
 // grid slot ≈ 150 m before the east portal to the "exit" slot ≈ 180 m past the west portal at
 // the 55 mph limit. Expect: the walls and roof colliders leave the carriageway clear (no
 // contact damage, no airborne time), the car stays on the road and arrives.
+//
+// The highway port (2026-10-21) split Loop 9 into shorter carriageway pieces, and the slots
+// (then fixed offsets from the road ends) both fell inside the tunnel, 74 m apart: the car
+// "stopped" after 75 m at the route's end. They are now measured from the portals (150 m
+// before, 180 m past); the tunnel is unchanged (391 m), so is the range (route 723 m).
 (
     name: "city_tunnel_hollins_drive_through",
     seed: 41,
