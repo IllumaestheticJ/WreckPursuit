@@ -1277,7 +1277,7 @@ impl Session {
 
         // 1b. Race: the AI field drives its cars (and the player's grid hold). In playback the
         //     field still runs (its decisions feed the judge) but the log supplies the inputs.
-        if let Some(inputs) = self.race.as_mut().map(|r| r.pre_step(&mut self.sim)) {
+        if let Some(inputs) = self.race.as_mut().map(|r| r.pre_step(&self.sim)) {
             if self.playback.is_none() {
                 for (e, input) in inputs {
                     if self.held(e) {

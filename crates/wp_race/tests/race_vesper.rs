@@ -122,13 +122,9 @@ fn run_hill_sprint() -> HillRace {
     let max_ticks = 240 * 150;
     while sim.tick() < max_ticks {
         let tick = sim.tick();
-        let vehicles = obs(&sim);
-        let inputs = ai.tick(&judge, tick, sim.world(), &vehicles, &events, &heat);
+        let inputs = ai.tick(&judge, tick, sim.world(), &obs(&sim), &events, &heat);
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
-        }
-        for (e, k) in ai.slipstream(&vehicles) {
-            sim.set_drag_scale(e, k).unwrap();
         }
         sim.step_fixed();
         events = sim.drain_events();

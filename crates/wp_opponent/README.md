@@ -153,9 +153,8 @@ slipstream) }`, `AI_CONTACT_IMPULSE_NS = 400` (racer–racer collision threshold
 `YIELD_RADIUS_M`, `YIELD_AFTER_S`, `RED_LIGHT_RISK`.
 
 ### Slipstream model (`draft`)
-`draft::drag_scales(&[DraftBody], &DraftParams) -> Vec<f32>`: a drag multiplier per vehicle;
-`draft::slipstream(&[VehicleObs], &DraftParams) -> Vec<(EntityId, f32)>` pairs them with
-entities for `wp_sim::Sim::set_drag_scale`, which the race loop calls every tick.
+`draft::drag_scales(&[DraftBody], &DraftParams) -> Vec<f32>`: a drag multiplier per vehicle
+for the sim loop to apply (`effects.drag_scale *= scale` before `apply_damage_effects`).
 35 % less drag bumper to bumper, linear to nothing at 25 m behind the leader's rear bumper,
 fading quadratically to the edge of a wake one leader-width wide (+50 % over the range);
 leader ≥ 10 m/s, follower travelling within ~25° of it; strongest leader wins, no stacking.
@@ -230,8 +229,8 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
   wanted racers are caught, the clean one races on.)
 - Signal unit tests: careful driver stops for a red / short green, a risk-taker doesn't; a
   lasting green ignores cross traffic held at its red but not a car moving inside the box.
-- Draft unit tests (wake geometry) and `draft_lets_a_faster_driver_in_the_same_car_pass`
-  (slipstream applied through `Sim::set_drag_scale`):
+- Draft unit tests (wake geometry) and, with `--features sim-draft-hook` (needs
+  `Sim::set_drag_scale`, requested from the lead), `draft_lets_a_faster_driver_in_the_same_car_pass`:
   same sedan, a 0.8-skill driver behind three 0.35s, 4 laps, seeds 1–4 — with slipstream it
   gains places in every seed (finishes 1st/2nd/3rd/2nd), without it finishes last every time;
   zero AI contacts.
@@ -261,9 +260,9 @@ racers, so their race checks are `expect_pending`; `pace_*.ron` are raced and ch
 | Whole sim, 8 cars + city + AI | 0.09 ms per physics tick | — |
 
 ## Known gaps
-- Slipstream only works where the race loop applies it (`draft::slipstream` →
-  `Sim::set_drag_scale` every tick, as `wp_race::AiEntrants::slipstream` does); with
-  `RaceConfig::draft` on and no sim hook the AI chases a tow that isn't there. Even with it, two drivers within ~0.1 skill in the same car
+- **Same-car passes need the slipstream hook in `wp_sim`** (`Sim::set_drag_scale`, one line;
+  patch in `docs/integration/opponent.md`). Until it lands `RaceConfig::draft` must stay off and
+  near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car
   don't catch each other (the pace difference is smaller than the gap). Late-braking passes
   (the other real-world lever) are not implemented.
 - Open-road racing: careful drivers (risk < 0.35) wait out long reds; traffic still dominates

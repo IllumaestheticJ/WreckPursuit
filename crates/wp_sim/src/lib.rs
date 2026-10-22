@@ -119,9 +119,6 @@ pub struct SimVehicle {
     pub police_unit: Option<wp_police::UnitId>,
     /// The `wp_world` traffic agent this car embodies (physical traffic only).
     pub traffic_agent: Option<wp_world::AgentId>,
-    /// External aerodynamic drag multiplier (slipstream), 1 = none. Set with
-    /// [`Sim::set_drag_scale`]; multiplies the damage model's `drag_scale` every tick.
-    pub drag_scale: f32,
     spawn: ([f32; 3], f32),
     /// Player driving this police seat (`Sim::bind_player_police`).
     player_police: Option<wp_contracts::PlayerId>,
@@ -339,7 +336,6 @@ impl Sim {
             kind: VehicleKind::Player,
             police_unit: None,
             traffic_agent: None,
-            drag_scale: 1.0,
             spawn: (pos, yaw),
             player_police: None,
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
@@ -734,14 +730,6 @@ impl Sim {
         Ok(())
     }
 
-    /// Multiply `id`'s aerodynamic drag by `scale` (clamped to 0..2) from the next tick on.
-    /// For slipstream: race code recomputes it every tick from vehicle states, e.g. with
-    /// `wp_opponent::draft::slipstream`. 1.0 (the default) is an exact no-op.
-    pub fn set_drag_scale(&mut self, id: EntityId, scale: f32) -> Result<(), SimError> {
-        self.slot_mut(id)?.drag_scale = scale.clamp(0.0, 2.0);
-        Ok(())
-    }
-
     /// Remove a vehicle and its physics body. Its id is never reused. Debris it already shed
     /// stays in the world.
     pub fn despawn_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {
@@ -1118,8 +1106,6 @@ impl Sim {
                 for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
                     *t = t.max(s);
                 }
-                // Slipstream (`set_drag_scale`), 1.0 = exact no-op.
-                effects.drag_scale *= slot.drag_scale;
                 slot.vehicle.apply_damage_effects(&effects);
             }
             self.sync_damage_to_physics();
@@ -1468,46 +1454,6 @@ mod tests {
         assert!(def.drivetrain.final_drive < car.def.drivetrain.final_drive);
         assert_eq!(diffs.rear, wp_vehicle::AxleDiff::Locked);
         assert_ne!(tuned_hash, hash);
-    }
-
-    /// Speed after 15 s of full throttle in a straight line with drag multiplied by `scale`
-    /// (`None` = setter never called).
-    fn top_end_speed(scale: Option<f32>) -> (f32, u64) {
-        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
-        let mut sim = Sim::new(SimConfig {
-            seed: 1,
-            mode,
-            time_of_day: TimeOfDay::from_hours(12.0),
-            time_ratio: 10.0,
-        });
-        let id = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
-        if let Some(k) = scale {
-            sim.set_drag_scale(id, k).unwrap();
-        }
-        sim.set_input(
-            id,
-            VehicleInput {
-                throttle: 1.0,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        for _ in 0..240 * 15 {
-            sim.step_fixed();
-        }
-        let v = sim.vehicle_states()[0].1.lin_vel;
-        ((v[0] * v[0] + v[1] * v[1]).sqrt(), sim.state_hash())
-    }
-
-    #[test]
-    fn drag_scale_is_a_no_op_at_one_and_a_tow_below_it() {
-        let (v_default, h_default) = top_end_speed(None);
-        let (v_one, h_one) = top_end_speed(Some(1.0));
-        assert_eq!(h_default, h_one, "scale 1.0 must not change the sim");
-        assert_eq!(v_default, v_one);
-        let (v_tow, _) = top_end_speed(Some(0.65));
-        assert!(v_tow > v_default + 0.3, "tow {v_tow} vs {v_default}");
     }
 
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.

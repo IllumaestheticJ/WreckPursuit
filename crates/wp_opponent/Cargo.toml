@@ -14,6 +14,11 @@ wp_world.workspace = true
 wp_police.workspace = true
 serde.workspace = true
 
+[features]
+# Full-sim draft tests: need `wp_sim::Sim::set_drag_scale` (requested from the lead, see
+# docs/integration/opponent.md). Off by default so the crate builds against today's wp_sim.
+sim-draft-hook = []
+
 [dev-dependencies]
 wp_sim.workspace = true
 wp_damage.workspace = true

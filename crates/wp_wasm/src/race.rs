@@ -464,7 +464,7 @@ impl RaceRun {
     }
 
     /// Inputs for this tick (AI cars, the player's grid hold), before `Sim::step_fixed`.
-    pub fn pre_step(&mut self, sim: &mut Sim) -> Vec<(EntityId, VehicleInput)> {
+    pub fn pre_step(&mut self, sim: &Sim) -> Vec<(EntityId, VehicleInput)> {
         let obs: Vec<VehicleObs> = sim
             .vehicles()
             .iter()
@@ -478,12 +478,6 @@ impl RaceRun {
                 ],
             })
             .collect();
-        // Slipstream: every car's drag from the wake geometry, live and in playback alike (it
-        // is computed from the sim state, so replays reproduce it). The AI field drives for
-        // the tow (`wp_race::AiEntrants` sets `RaceConfig::draft`).
-        for (e, k) in self.live.ai().slipstream(&obs) {
-            let _ = sim.set_drag_scale(e, k);
-        }
         let police = SimPolice(sim.police());
         self.live
             .pre_step(sim.tick(), sim.world(), &obs, &self.prev_events, &police)

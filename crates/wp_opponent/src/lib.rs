@@ -42,7 +42,7 @@ pub use capability::CarCapability;
 pub use corridor::{
     Corridor, CorridorOptions, CorridorPos, CorridorSample, OpposingLanes, CORRIDOR_STEP_M,
 };
-pub use draft::{drag_scales, slipstream, DraftBody, DraftParams};
+pub use draft::{drag_scales, DraftBody, DraftParams};
 pub use evader::{
     Evader, EvaderDebug, EvaderMode, EvaderParams, EvaderSkill, EvaderStats, PoliceCar,
 };
