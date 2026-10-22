@@ -993,6 +993,8 @@ mod tests {
             .iter()
             .filter(|b| b.kind == BuildingKind::House && b.roof == RoofShape::Gable)
             .filter(|b| geom::point_in_polygon(b.footprint[0], &range_area()))
+            // Farmsteads on the foothill farms reach just into the range's area.
+            .filter(|b| b.footprint[0][1] >= plan::RANGE_SOUTH_Y)
             .count();
         assert!((3..=6).contains(&cabins), "{cabins} cabins");
         let pines = net
