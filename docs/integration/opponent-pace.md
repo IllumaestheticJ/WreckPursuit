@@ -953,3 +953,39 @@ The race is never judged: the player stays `Running`.
 - The nosed-up reverse fires (`nosed_up`, 3 s). That backs out about 3 m, which is still beside racer 4, so the car creeps back into the same box.
 
 **Proposed fix:** when boxed by standing cars, keep reversing until clear of the one alongside (its rear plus a car length), then plan the pass from there, around the side away from the parked cars. It needs its own police sweep (Lantern, Hollins, Loop 9).
+
+## Physical traffic cars seen once, as traffic + Loop 9 finishers over 8 seeds (2026-10-22)
+
+**The fix.** Every physical traffic car near the player was perceived twice: as a civilian (its world agent) and as a plain `Who::Vehicle` (its sim body at the same spot). The plain copy set the limit with a 0.5 s drift horizon, racer margins and racer headway. A non-racer sim vehicle within 1 m of a Physical-LOD agent is now skipped (`TRAFFIC_BODY_MATCH_M`).
+
+**Sweep, vs 0e84a9f7.**
+
+| case | result |
+|---|---|
+| no traffic | identical |
+| city, Hollins | identical |
+| grid, mean | +0.4 / +0.1 s |
+| Lantern s50, mean | 80.2 → 74.6 s |
+| Lantern s95, finishers | 30 → 31 /32 |
+| Loop 9 s50, seeds 1–16 | 91 → 96 /96 |
+| Loop 9 s95, seeds 1–16 | 89 → 90 /96 |
+| civilian contacts | 0 → 1 in 192 runs |
+
+**Loop 9 finishers check.** At 23:00 with density 2.0, one seed's finishers swing by ±3 cars on millimetre grid differences. The pace RONs (seed 9) went from passing to 3/6 and 4/6, while seed 9 in the sweep finishes 6/6.
+
+- The Loop 9 pace RONs no longer have `finishers`. The times of the cars that finish are still checked.
+- The finishers gate is `loop9_traffic_field_finishes`: at least 44 of 48 per skill over seeds 1–8. It is release-only and ignored, takes about 20 min, runs via `just pace-loop9`, and is listed in the lead's main-track gate (docs/LEAD_AUTOMATION.md). Measured: 48/48 at s50, 47/48 at s95.
+- grid s50 `best_ratio` was re-locked 1.59 → 1.64 (today 1.593).
+
+**TEMPORARY: `lantern_checkpoint_draws_the_police` runs on seed 1.** With this fix, seed 31 (default) and seed 5 end with the last racer boxed in between captured cars, so the race never finishes and is never judged. The other seeds:
+
+- 1 and 4: everyone finishes.
+- 2, 3, 6, 7 and 8: everyone is captured.
+
+Seed 31 comes back with follow-up (a).
+
+**Next, in order (lead):**
+
+1. Follow-up (a): the multi-point reverse-and-turn. Restore seed 31 and check seed 5.
+2. A judge safety net: a race in which every remaining racer has made no progress for 3 min ends, and they are DNF Stuck (logged).
+3. Weaving v2 aimed at the pack.
