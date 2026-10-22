@@ -103,6 +103,12 @@ impl PaceOpts {
     }
 }
 
+/// Picker races whose pace runs keep the player seat a `VehicleKind::Player` car (AI-driven)
+/// as in the browser, so traffic spawns round it (with every seat an AI racer it spreads over
+/// the whole city: Loop 9 at night had none near the field). Lead, 2026-10-22: all picker
+/// races move to this setup; Loop 9 first.
+const PLAYER_SEAT_RACES: &[&str] = &["loop9_circuit"];
+
 /// Loss buckets (s).
 const BUCKETS: [&str; 11] = [
     "usage", "track", "racer", "civ", "veh", "backout", "unstable", "mode", "signal", "rejoin",
@@ -312,7 +318,7 @@ pub fn race_pace_in(
                 redline_rpm: car.def.engine.redline_rpm,
             })
             .unwrap();
-        if !(opts.player_seat && picker && i == 0) {
+        if !(picker && i == 0 && (opts.player_seat || PLAYER_SEAT_RACES.contains(&id))) {
             sim.set_vehicle_kind(ids[i], VehicleKind::AiRacer).unwrap();
         }
         if let Some(a) = assists_override() {
