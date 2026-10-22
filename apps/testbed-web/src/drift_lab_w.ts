@@ -871,6 +871,28 @@ export class DriftLabWPanel {
         this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
         this.build();
       };
+      // Held-key drift (lab, 2026-10-22): the held_search shortlist's best candidate (the owner's
+      // reference clips: a held countersteer key + throttle lifts holds the drift for seconds).
+      // Tyres + grip balance + ride together; lab A/B only, nothing ships from here.
+      const heldKey = document.createElement("button");
+      heldKey.textContent = "lab · held-key drift";
+      heldKey.title =
+        "held_search candidate B: spin model b0 7.86 / b2 2.92 / c 0.84, side floor 0.44, rear relaxation × 1.16, rear peak slip × 1.07, lock × 0.75, front / rear cornering stiffness × 1.0 / 0.96, yaw inertia × 1.37. Held countersteer + throttle lifts hold 3.5 s on average (shipped 2.2 s); taps 27 / 36 (shipped 20). Sets tyres, grip balance and ride; restarts the car";
+      heldKey.onclick = () => {
+        const cd = this.sim.carTuneDefaults();
+        const tyres = JSON.stringify({ ...cd.shipped, spin_b0: 7.86, spin_b2: 2.92, spin_c: 0.842, side_floor: 0.438, rear_relax: 1.157, rear_peak_slip: 1.07, lock: 0.75 });
+        const ride = JSON.stringify({ ...this.sim.rideTuneDefaults().owner, yaw_inertia: 1.366 });
+        saveGrip({ ...gd.shipped, rear_stiffness: 0.962, front_stiffness: 0.998 });
+        this.sim.carTuneSet(tyres);
+        this.sim.rideTuneSet(ride);
+        try {
+          localStorage.setItem(CAR_STORE, tyres);
+          localStorage.setItem(RIDE_STORE, ride);
+        } catch {
+          /* ignore */
+        }
+        this.restart(this.car);
+      };
       // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
       const trans = document.createElement("button");
       trans.textContent = "transition: swing rack (test)";
@@ -913,7 +935,7 @@ export class DriftLabWPanel {
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       // The transition preset is a flick / transition setting: hidden lab only (row 137).
       trans.textContent = `lab · ${trans.textContent}`;
-      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans] : []), v2);
+      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans, heldKey] : []), v2);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";
