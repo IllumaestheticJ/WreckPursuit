@@ -205,6 +205,9 @@ pub struct Sim {
     police_unit_models: std::collections::BTreeMap<wp_police::UnitId, usize>,
     /// Physical traffic models ([`Sim::set_traffic_cars`]); agent → `wp_world` model index.
     traffic_cars: Vec<LoadedCar>,
+    /// `TrafficConfig::max_physical` as configured, before [`Sim::cap_traffic_promotion`] caps
+    /// it to the vehicle slots left (`None` until the first capped step).
+    traffic_physical_base: Option<usize>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
@@ -248,6 +251,7 @@ impl Sim {
             police_fleet: Vec::new(),
             police_unit_models: std::collections::BTreeMap::new(),
             traffic_cars: Vec::new(),
+            traffic_physical_base: None,
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
@@ -982,6 +986,7 @@ impl Sim {
                 })
                 .collect();
             self.world.set_tracked_vehicles(&tracked);
+            self.cap_traffic_promotion();
             self.world.step(dt, &mut out);
             self.apply_traffic_lod();
             self.drive_traffic();

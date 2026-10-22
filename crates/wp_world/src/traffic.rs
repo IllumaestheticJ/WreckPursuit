@@ -3406,6 +3406,8 @@ impl Traffic {
             best
         };
         let mut cands: Vec<(f32, u32)> = Vec::new();
+        // Physical agents that may be demoted, with their distance (cap shrink, below).
+        let mut kept: Vec<(f32, u32)> = Vec::new();
         let mut physical = 0usize;
         for i in 0..self.agents.len() {
             let d = near(geom::xy(self.poses[i].p));
@@ -3440,9 +3442,21 @@ impl Traffic {
                     self.demote(map, i);
                 } else {
                     physical += 1;
+                    if !a.disabled {
+                        kept.push((d, i as u32));
+                    }
                 }
             } else if d < r && !self.cars.is_empty() {
                 cands.push((d, i as u32));
+            }
+        }
+        // `max_physical` can shrink (wp_sim caps it at the vehicle slots it has left, row 149):
+        // the farthest physical cars over the cap demote, so none is physical without a body.
+        if physical > self.config.max_physical {
+            kept.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+            for &(_, i) in kept.iter().take(physical - self.config.max_physical) {
+                self.demote(map, i as usize);
+                physical -= 1;
             }
         }
         cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
