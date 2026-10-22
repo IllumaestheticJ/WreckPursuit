@@ -1841,12 +1841,19 @@ fn road_band(map: &CityMap, t: &Heightfield) -> Vec<bool> {
     keep
 }
 
+/// Drawn ground vertex spacing for `t`: the smallest whole multiple of its cell that is at
+/// least [`TERRAIN_RENDER_M`] (10 m for Port Vesper's 5 m cells, 16 m for the combined
+/// Ashpeak map's 8 m cells).
+pub fn render_spacing(t: &Heightfield) -> f32 {
+    t.cell_m * (TERRAIN_RENDER_M / t.cell_m - 1e-3).ceil().max(1.0)
+}
+
 /// The terrain the greybox draws (`None` without terrain): `net.terrain` on a
 /// [`TERRAIN_RENDER_M`] grid ([`Heightfield::coarse_under`]), following the fine heights
 /// except where it must stay under the ground roads and sidewalks are laid on.
 pub fn drawn_terrain(map: &CityMap) -> Option<Heightfield> {
     let t = map.net.terrain.as_ref()?;
-    Some(t.coarse_under(TERRAIN_RENDER_M, &road_band(map, t)))
+    Some(t.coarse_under(render_spacing(t), &road_band(map, t)))
 }
 
 /// The terrain physics collides with, on the fine grid of `net.terrain` (`None` without
@@ -1863,7 +1870,7 @@ pub fn collision_terrain(map: &CityMap) -> Option<Heightfield> {
         return Some(t.clone());
     }
     let keep = road_band(map, t);
-    let drawn = t.coarse_under(TERRAIN_RENDER_M, &keep);
+    let drawn = t.coarse_under(render_spacing(t), &keep);
     let mut out = t.clone();
     for j in 0..t.ny {
         for i in 0..t.nx {
