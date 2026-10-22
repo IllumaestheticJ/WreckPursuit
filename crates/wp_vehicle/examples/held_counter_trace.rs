@@ -3,7 +3,8 @@
 //! (`examples/entry_hold.rs`): settle on a 40 m left-hand circle at `LATG` (default 0.5 g), the
 //! into-turn key with the handbrake for 0.3 s (or `ENTRY=lift`), then past 12° of slide the
 //! countersteer key + full throttle (`THR`) held, on the shipped player steering. `RADIUS` (m,
-//! default 40), `SECS`.
+//! default 40), `SECS`, `GEAR` (held gear, default 2), `THR_MODE=mod` (throttle on / off by the
+//! slide angle, the owner's held-key technique), `TYRE='{…}'` / `PLAIN='{…}'` (lab overrides).
 //!
 //! Prints every 0.1 s: slide angle (+ = the left drift, °), yaw rate (°/s), speed, the front
 //! wheels' angle and the front axle's travel (°), front / rear axle slip angle (°), rear
@@ -53,11 +54,29 @@ fn main() {
         }
         wp_vehicle::car_lab::set_override(Some(serde_json::from_value(v).unwrap()));
     }
+    // PLAIN='{…}': fields over the shipped player steering (A/B).
+    if let Ok(j) = std::env::var("PLAIN") {
+        let mut v = serde_json::to_value(wp_vehicle::lab_scope::shipped_plain()).unwrap();
+        for (k, x) in serde_json::from_str::<serde_json::Value>(&j)
+            .unwrap()
+            .as_object()
+            .unwrap()
+        {
+            v[k] = x.clone();
+        }
+        wp_vehicle::plain::set_override(Some(serde_json::from_value(v).unwrap()));
+    }
+    let gear: i8 = std::env::var("GEAR")
+        .ok()
+        .map_or(DRIFT_GEAR, |v| v.parse().unwrap());
     let c = car(&id);
     let a = reference_assists();
     let mut rig = settle_on_circle(&c, &a, radius, lat_g);
     rig.set_player_input(true);
     let mut entered = false;
+    // THR_MODE=mod: throttle on / off by the slide angle (see below).
+    let modulate = std::env::var("THR_MODE").as_deref() == Ok("mod");
+    let (mut thr_on, mut prev_angle) = (true, 0.0f32);
     println!(
         "{id}, {} entry, {radius} m at {lat_g} g, held throttle {thr_hold}",
         if lift { "lift" } else { "handbrake" }
@@ -75,15 +94,29 @@ fn main() {
             } else {
                 (-1.0, 1.0, if t < 0.3 { 1.0 } else { 0.0 })
             }
+        } else if modulate {
+            // The owner's held-key technique (wf-clips: 1–7 throttle lifts per long countersteer
+            // hold): the key held, the throttle on / off by the slide angle like a key.
+            let rate = (angle - prev_angle) / PHYSICS_DT;
+            thr_on = if angle > 45.0 || rate > 40.0 {
+                false
+            } else if angle < 30.0 || rate < -40.0 {
+                true
+            } else {
+                thr_on
+            };
+            (1.0, if thr_on { thr_hold } else { 0.0 }, 0.0)
         } else {
             (1.0, thr_hold, 0.0)
         };
+        prev_angle = angle;
         rig.step(
             &VehicleInput {
                 steer,
                 throttle,
                 handbrake: hb,
-                gear_down: !a.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                gear_down: !a.auto_gears && rig.vehicle.gear() > gear,
+                gear_up: !a.auto_gears && rig.vehicle.gear() < gear && k % 24 == 0,
                 ..Default::default()
             },
             &a,
