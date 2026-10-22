@@ -179,7 +179,7 @@ fn held_run(rig: &mut wp_vehicle::rig::Rig, a: &AssistProfile) -> (f32, f32) {
     let mut yaw_ok = 0.0f32;
     for k in 0..9 * TPS {
         let t = k as f32 * PHYSICS_DT;
-        let s = slide_state(&rig);
+        let s = slide_state(rig);
         let angle = (-s.body_slip).to_degrees();
         if !entered && angle > 12.0 {
             entered = true;
@@ -242,10 +242,10 @@ fn tapped(
 fn tapped_run(rig: &mut wp_vehicle::rig::Rig, a: &AssistProfile, handbrake: bool) -> bool {
     let (mut angles, mut back) = (Vec::new(), Vec::new());
     let mut entered = false;
-    let mut prev = (-slide_state(&rig).body_slip).to_degrees();
+    let mut prev = (-slide_state(rig).body_slip).to_degrees();
     for k in 0..6 * TPS {
         let t = k as f32 * PHYSICS_DT;
-        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        let angle = (-slide_state(rig).body_slip).to_degrees();
         let rate = (angle - prev) / PHYSICS_DT;
         prev = angle;
         entered |= angle > 12.0;
@@ -275,7 +275,7 @@ fn tapped_run(rig: &mut wp_vehicle::rig::Rig, a: &AssistProfile, handbrake: bool
             },
             a,
         );
-        let n = slide_state(&rig);
+        let n = slide_state(rig);
         angles.push(-n.body_slip.to_degrees());
         back.push(n.v_fwd < 0.0);
     }
