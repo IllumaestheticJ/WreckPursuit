@@ -154,7 +154,7 @@ tune-test:
     cargo test -p tuning-probe
     python3 -m unittest discover -s tools/tuning-dash/tests
 
-# Loop 9 at 23:00 with traffic: >= 44/48 AI cars finish per skill over seeds 1-8 (~6 min,
+# Loop 9 at 23:00 with traffic: >= 44/48 AI cars finish per skill over seeds 1-8 (~20 min,
 # release). Part of the lead's main-track gate (docs/LEAD_AUTOMATION.md).
 pace-loop9:
     cargo test --release -p wp_race --test opponent_pace loop9_traffic_field_finishes -- --ignored --nocapture

@@ -931,7 +931,7 @@ fn pace_scenarios_hold_their_ranges() {
 /// Loop 9 at 23:00 with traffic density 2.0: at least 44 of 48 cars finish per skill over seeds
 /// 1-8. A single seed's finishers swing by ±3 cars on millimetre grid differences (the pack
 /// packs up behind racers held by traffic), so the pace RONs check times only and this is
-/// the finishers gate. Release only, ~6 min: `just pace-loop9` (lead main-track gate,
+/// the finishers gate. Release only, ~20 min: `just pace-loop9` (lead main-track gate,
 /// docs/LEAD_AUTOMATION.md).
 #[test]
 #[ignore = "release-only 8-seed Loop 9 traffic check: `just pace-loop9`"]
