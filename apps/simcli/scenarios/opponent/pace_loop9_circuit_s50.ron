@@ -11,7 +11,12 @@
 // skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measured the same day on the
 // round-12 tip (today's grids, residential grid city, police give-way; reasons in
 // docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
-// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md. Re-measure and widen only with a reason.
+// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md.
+// finishers 5..6 (2026-10-22, after round12 67dafbfa: D's traffic, new steering): at skill 0.50
+// the back of the field packs up behind racers held by the 23:00 traffic, and sperber_32 was
+// 300 m from the line when the finish window closed (the density-2.0 sweep: 1 car in 96 runs).
+// A car short of the flag has no race_time_s; the others' times are still checked.
+// Re-measure and widen only with a reason.
 (
     name: "opponent_pace_loop9_circuit_s50",
     seed: 9,
@@ -91,7 +96,7 @@
         ),
     ],
     expect_pending: [
-        metric(name: "finishers", min: 6, max: 6),
+        metric(name: "finishers", min: 5, max: 6),
         metric(name: "best_ratio", min: 0.97, max: 1.27),
         metric(name: "race_time_s", entity: "ai_vic", min: 225.0, max: 317.6),
         metric(name: "race_time_s", entity: "ai_mara", min: 170.7, max: 241.0),

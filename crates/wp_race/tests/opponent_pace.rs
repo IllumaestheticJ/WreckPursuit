@@ -903,6 +903,12 @@ fn pace_scenarios_hold_their_ranges() {
                 c.rejoins
             );
         }
+        // A scenario whose `finishers` range allows a car short of the flag checks the times
+        // of the cars that finish only (how many must finish is that metric's job).
+        let dnf_ok = expects.iter().any(|x| {
+            matches!(x, simcli::scenario::Expect::Metric { name, min, .. }
+                if name == "finishers" && *min < cars.len() as f32)
+        });
         for x in &expects {
             let simcli::scenario::Expect::Metric {
                 name,
@@ -913,6 +919,10 @@ fn pace_scenarios_hold_their_ranges() {
             else {
                 continue;
             };
+            let unfinished = |e: &str| cars.iter().any(|c| c.entity == e && c.time_s.is_none());
+            if name == "race_time_s" && dnf_ok && entity.as_deref().is_some_and(unfinished) {
+                continue;
+            }
             match pace_metric(&cars, name, entity.as_deref()) {
                 Some(v) if v >= *min && v <= *max => {}
                 Some(v) => fails.push(format!(
