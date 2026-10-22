@@ -60,6 +60,10 @@ Known gaps:
 - Meshes: the four cars have no per-car entry in `tools/assets/src/styles/` (added by the
   vehicle-models work, #28), so `style_for` gives them the class default body. Regenerated with
   `gen-car-mesh` after merging #28 (mesh format 2); per-car styles are left to that workstream.
+- After merging #17: the four cars' audio defs use the recorded packs like the rest of the
+  roster (Stoat/Satchel `engine_rec_i4`, Arashi `engine_rec_turbo`, Bulwark `engine_rec_v8`,
+  all `world_rec`), and `crates/wp_opponent/src/capability_table.rs` has their four rows
+  (generated: `WP_WRITE_CAPS=1 cargo test --release -p wp_opponent --test capability_table`).
 
 | To | Request |
 |---|---|
