@@ -4321,6 +4321,56 @@ mod tests {
             .any(|e| matches!(e, OpponentEvent::Retired { .. })));
     }
 
+    /// The speed limit of a racer at 30 m/s on the centreline with a civilian doing 20 m/s
+    /// 60 m ahead in the next lane (3.8 m to the right) moving across the corridor at `v_n`.
+    fn next_lane_civ_limit(v_n: f32) -> SpeedLimit {
+        let mut f = Field::new(
+            straight(),
+            &[RacerSpec {
+                entity: EntityId(1),
+                profile: DriverProfile::default(),
+                capability: cap(),
+            }],
+            RaceConfig::default(),
+        );
+        f.racers[0].laps_done = 1;
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let dt = 4.0 * PHYSICS_DT;
+        f.observe(
+            &world,
+            &[obs(1, 40.0, 30.0, HandlingEffects::NEUTRAL)],
+            &NoPolice,
+            dt,
+        );
+        let civ = Obstacle {
+            who: Who::Civilian(1),
+            s: 100.0,
+            n: 3.8,
+            v_s: 20.0,
+            v_n,
+            half_len: 2.3,
+            half_w: 0.9,
+            unstable: false,
+            passing: false,
+            parked: false,
+            facing: 1.0,
+            out_of_race: false,
+            wants_room: false,
+        };
+        f.decide(0, &[civ], &[], None, None, dt);
+        f.debug_of(0).limit
+    }
+
+    #[test]
+    fn a_civilian_keeping_its_lane_next_to_mine_does_not_hold_me_up() {
+        // Holding its lane, with the few tenths of a m/s across the corridor a lane reads
+        // against the corridor's sampled direction: not in my way.
+        assert_ne!(next_lane_civ_limit(0.0), SpeedLimit::Obstacle(1_000_001));
+        assert_ne!(next_lane_civ_limit(-0.4), SpeedLimit::Obstacle(1_000_001));
+        // Changing lanes into mine: braked for.
+        assert_eq!(next_lane_civ_limit(-1.5), SpeedLimit::Obstacle(1_000_001));
+    }
+
     #[test]
     fn follower_brakes_for_a_slower_car_ahead_and_never_steers_into_it() {
         let mut f = field(2);
