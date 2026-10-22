@@ -119,6 +119,44 @@ gap to the player — pace is car capability × how much of it the driver dares 
   error; both scale with `1 + pressure × pressure_sensitivity` (pressure = a car right behind
   or alongside).
 
+## Free roam (`roam`)
+
+AI street racers that live on the city's roads outside organised races (the game's free
+roam). Each roamer has a home **haunt** and chains lane-legal **legs** around the city; every
+leg is a one-car `Field`, so roamers drive with everything above (lines, braking points,
+civilians, signals, police flight/yield, damage, recovery).
+
+| Haunt | Lanes (classified once per city by `HauntMap::classify`) | Stock cars |
+|---|---|---|
+| Highway | `LaneKind::Highway` | muscle / GT |
+| Touge | winding (≥ 0.45 rad per 100 m over the next 300 m, following the road) and climbing ≥ 3 %, or ≥ 0.9 rad/100 m on the flat; posted ≤ 25 m/s; not downtown | light sports cars |
+| Dirt | `surface_at` = `Dirt`/`Gravel` on the lane | beaters, pickups |
+| Downtown | `DistrictId::Core` zone | sports / exotics |
+| Rural | `Suburb` zone or no zone | pickups, beaters |
+
+- **Legs**: 500–3000 m to a random lane of the chosen haunt (home haunt 70 %, another haunt
+  the city has or anywhere otherwise; a haunt the city lacks falls back to any lane). A new
+  leg is planned 60 m before the current one ends, from the car's pose and heading.
+- **Pace**: a leg ≥ 50 % inside the home haunt is a **run** (the driver's full profile);
+  otherwise **transit** (speed capped at 1.25 × the fastest posted limit on the leg, skill and
+  aggression × 0.7).
+- **Police**: as racers (flee at the driver's flee level, yield below it). Busted roamers stay
+  put 45 s, then drive on; an escape starts a new leg.
+- **Stranded**: `Roamers::stranded(s)` lists roamers that have not moved 6 m in `s` seconds
+  (or are wrecked); the session moves them (`wp_wasm`: `ResetAt` + `Ghost` out of the
+  player's sight) and calls `Roamers::relocated`.
+- Spawn with `spawn_slots` (spaced, mid-lane, per haunt), personalities from `stock_roster` /
+  `stock_profile`.
+
+Tests (`tests/roam.rs`, procedural 8×8 city, 25 % traffic, no police): six roamers × 120 s
+keep moving and chain legs with no civilian hit and no roamer collision; same seed ⇒ same
+hashes. Ignored `sweep_roam` (8 roamers × 180 s, seeds 1–6; `WP_SWEEP_SEED=n`,
+`WP_ROAM_TRACE=1`, `WP_ROAM_ONLY=k`, `WP_ROAM_CONTACTS=1`): 14–18 km per seed, 22–45 legs,
+no roamer–roamer collision, one civilian touch in six seeds, `Roamers::tick` 0.24–0.29 ms
+per 60 Hz frame for 8 roamers (native release, cloud 4 vCPU, leg planning included); 2–6 rescues per seed, most at
+the procedural grid's highway diverge ramps (a world geometry snag, reported in
+`docs/integration/roam.md`) and the rest at civilian deadlocks.
+
 ## Tuning parameters (`DriverProfile` → `DriverParams`, all linear)
 
 | Param | 0 → 1 | Knob |
@@ -239,6 +277,7 @@ racers, so their race checks are `expect_pending`; `pace_*.ron` are raced and ch
 | same, open roads with 25 % traffic | 0.11 ms per frame | — |
 | `CarCapability::measure` | ~0.3 s per car (`for_car` reads the table instead: free) | load time |
 | Whole sim, 8 cars + city + AI | 0.09 ms per physics tick | — |
+| `Roamers::tick`, 8 roamers, 25 % traffic, leg planning included | 0.24–0.29 ms per 60 Hz frame | — |
 
 ## Known gaps
 - **Same-car passes need the slipstream hook in `wp_sim`** (`Sim::set_drag_scale`, one line;
