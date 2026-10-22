@@ -47,6 +47,32 @@ What the clips show:
   or spins. That gap is the main open problem.
 - **TCS Half is "far more controllable"** (the owner's words) than Off with the same technique.
 
+## Owner design goals (2026-10-22, row 148) — the definition of done
+- **It should behave like the reference game.**
+  - It is easy to drive under the tyres' limit when you're not over-speeding.
+  - With too much speed for a corner the car **loosens up**, and a keyboard driver can **catch it**
+    (within reason).
+- **Drift transitions on demand.** Lifting off the gas pushes load forward and swings the car to
+  the other side. The transition must be **catchable on keyboard with minimal assistance**.
+- **Use the assists you already have, not new aids.**
+  - **TCS Half** should "cheat" the wheelspin a held drift needs, so the yaw angle stays consistent.
+  - The keyboard steering assist (the hands-off countersteer, capped ~30 %) does the same job for
+    steering.
+  - Tune these two to make drifts hold. Don't add new hidden helpers.
+- **Grip levels by tyre class:**
+  - **street tyres:** the baseline above;
+  - **grippier tyres / semi-slicks:** very similar, with more grip, and breaking loose stays **very
+    predictable**;
+  - **full racing slicks only:** a **violent** transition when grip is exceeded.
+- **Every tyre and drift setup is tuned for forward bite** (traction and drive out of a slide). Not
+  for a loose, spinny rear.
+- **Freeze (owner decision 2026-10-22):** **do not build a new physics engine.** The shipped handling
+  on round12 today (step-23 unify base, the owner's soft-rear / firm-ride combo, key = key, the 30 %
+  hands-off cap, brake bias, gearbox slide hold, rim contact) stays as it is. Work as tuning and
+  presets inside this model, on `lead/physics`, until the owner has finalised the physics. A
+  structural change to the tyre/vehicle model needs the owner's explicit OK first. Propose it with
+  numbers and a lab preset.
+
 ## Owner rules (never break these)
 1. **One physics for every car and both damage modes.** Player, AI, police and traffic all use the
    same vehicle physics. Nothing outside `wp_damage` tables may branch on `DamageMode`.
