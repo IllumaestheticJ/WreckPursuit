@@ -15,8 +15,8 @@ is a model for layout and flow only; all art, assets and text are our own. Plan 
 | Stage | What | Status |
 |---|---|---|
 | 1 | Parts model (`wp_economy::parts`), slot table, wasm exports | PR #43 |
-| 2 | 3D workshop scene in the testbed | this branch |
-| 3 | Visible cosmetics on every car, vinyl library, more cosmetic parts | planned |
+| 2 | 3D workshop scene in the testbed | PR #43 |
+| 3 | Visible cosmetics on every car, vinyl library, more cosmetic parts | PR #43 |
 | 4 | Work on it yourself (DIY repair, paint booth, car info) | planned |
 | 5 | Tuning and polish | planned |
 
@@ -72,9 +72,28 @@ removed part carries them).
 - `e2e/workshop.mjs`: headless browser run (pick, remove, blocker, missing parts, catalog buy,
   fit, drive). `SHOTS=dir` writes screenshots.
 
+### Cosmetics (stage 3)
+- `data/cosmetics/visuals.json`: every mod id → the pieces drawn on the car, or
+  `{"none": reason}` (engine internals, ECU and similar). Piece vocabulary in
+  `data/cosmetics/README.md`. 136 of 157 mods are visible; `wp_economy/tests/visuals.rs` checks
+  the table against the catalog and that every `Cosmetic` mod is visible.
+- 49 new mods: 14 vinyls, bull bars (tube / guard / ram, line `push_bar`), ducktail, drift wing,
+  swan-neck wing, canards, xenon / amber / halo lamps, LED roof bar, fog lamps, underglow (4
+  colours), mud flaps, 4 exhaust tips, whitewall / raised-letter / red-line sidewalls, 5 rims,
+  limo tint, window net, satin and chrome paint, shatter-proof glass (line `glass`, a real
+  durability mod on the windshield and rear glass).
+- `CosmeticKind` gains `FogLights`, `Underglow`, `MudFlaps`, `ExhaustTip`, `Sidewall`,
+  `WindowNet` (wp_economy only; not a contract type).
+- `src/render/cosmetics/`: `CarLook` (look.ts) builds the pieces from the car's panel mesh
+  (`CarFrame`: bumper, hood, roof, lamp, exhaust and wheel anchors), so one piece fits every
+  model. Builders: body.ts (aero, lamps, bars, plates...), wheels.ts (rims, tyres, brakes,
+  springs...), cabin.ts (seats, cage, engine bay, material tweaks), vinyls.ts (18 vinyl designs
+  painted in car metres into the livery atlas). Bolt-ons ride with their region's lattice and
+  vanish when the region detaches; pieces are clickable in the workshop (`slotAt`).
+- `e2e/cosmetics.mjs`: every visible mod on four models, four themed builds, lamps, vinyl gallery.
+
 ## Needs
-- Stage 3 needs panel anchor data per car (bumper, roof, wheel arch positions) from
-  `data/panels/meshes/*.json`; the meshes already carry `region` and `kind` per part.
+- Nothing open. Stage 3 reads anchors straight from `data/panels/meshes/*.json`.
 
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
@@ -91,6 +110,10 @@ removed part carries them).
   exports; the missing-parts start check; `car_session` shared by `start_run` and `showroom`.
 - `apps/testbed-web/src/{main,scene,settings,render/panels,wasm/sim}.ts`, `index.html`: workshop
   wiring (see Testbed above).
+- Stage 3: `render/panels.ts` (`wheelDef`, `onStyled`, `regionShift`, `regionGone`, `ownSlot`,
+  `partHit`, chained `whenReady`), `vehicle_view.ts` (`setLook`, lamp styles, wheel visibility
+  respects hidden stock parts), `main.ts` (`applyCareerLook` puts the career car's look on the
+  player view), `workshop/{mode,slotmap}.ts` (cosmetic piece picking and highlight).
 
 ## Perf numbers
 Workshop operations run on a button press, not per frame.
@@ -100,6 +123,9 @@ Workshop operations run on a button press, not per frame.
   in between, the lattice is pristine there and the next damage report drops the lines.
 - An optional or body slot left empty does not detach the panel when driving yet (stage 4).
 - No workshop hours yet: removing and fitting is free and instant (stage 4).
-- No visible parts yet: mods do not change the car's mesh (stage 3).
+- Bolt-ons move rigidly with their region's mean displacement; they do not bend with the dent.
+- Stock parts a look hides (rims under aftermarket rims) stay hidden until the view rebuilds.
+- Paint colour is still the car's stock colour; the paint booth is stage 4.
+- AI and remote cars show no look yet; only the player's career car does.
 - The workshop part picker only knows parts the car meshes draw; slots with no mesh (gearbox,
   ECU, fuel pump and similar) are reached through the Part list.

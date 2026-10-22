@@ -202,6 +202,8 @@ same line at an equal or higher tier, so upgrading a prerequisite never strands 
 - `Cosmetic { kind, value }` — no gameplay effect, except body-kit pieces produce
   `DetachableRequest`s (existing group if the lattice has one, otherwise a request for prompt
   03's `gen-lattice`).
+- `Cosmetic` mods (and every other mod that can be seen) are drawn by the testbed from
+  `data/cosmetics/visuals.json`; `tests/visuals.rs` keeps that table in step with the catalog.
 - `Tool { kind, tier }` — radar detector, scanner, run-flat, reinforced cooling, fake plates,
   nitrous → `ToolLoadout`.
 

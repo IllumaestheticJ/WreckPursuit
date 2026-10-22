@@ -321,7 +321,11 @@ async function main(): Promise<void> {
     rig,
     overlayEl: workshopEl,
     playerView: () => app.views.get(app.player) ?? null,
-    rebuildViews: () => rebuildViews(),
+    rebuildViews: (uid) => {
+      lookCar = { uid, showcase: true };
+      rebuildViews();
+      lookCar = null;
+    },
     lotScenario: () => sim.freeDriveJson(DEFAULT_CAR, "Arcade", false),
     persist: () => persistCareer(),
     back: () => {
@@ -423,6 +427,17 @@ async function main(): Promise<void> {
     props.set(sim.propsStatic(), lod.models, lod.fleet.mats);
   };
 
+  /**
+   * Career car whose cosmetic look the player's view shows in the session being built (the
+   * workshop sets it; a career run uses the active car).
+   */
+  let lookCar: { uid: number; showcase: boolean } | null = null;
+  const applyCareerLook = () => {
+    const career = lookCar ?? (sim.careerRunActive() ? { uid: sim.careerView().active_car ?? -1, showcase: false } : null);
+    if (!career) return;
+    const car = sim.careerView().cars.find((c) => c.uid === career.uid);
+    if (car) app.views.get(app.player)?.setLook(car.mods.map((m) => m.id), career.showcase);
+  };
   const rebuildViews = () => {
     // Any new session leaves the drift lab (startDriftLab re-enters it right after).
     driftLab.stop();
@@ -452,6 +467,7 @@ async function main(): Promise<void> {
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
     app.focus = app.player;
+    applyCareerLook();
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
     const city = sim.worldInfo()[W.city] > 0.5;

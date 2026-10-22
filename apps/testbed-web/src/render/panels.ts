@@ -861,8 +861,9 @@ export class PanelBody {
 
   /** Called once the mesh has loaded (immediately if it already has). */
   whenReady(fn: () => void): void {
-    if (this.ready) fn();
-    else this.onReady = fn;
+    if (this.ready) return fn();
+    const prev = this.onReady;
+    this.onReady = prev ? () => (prev(), fn()) : fn;
   }
 
   /**
@@ -884,7 +885,7 @@ export class PanelBody {
         for (const c of ["red", "blue", "clear"] as const) this.styleOne(`lightbar_${c}`, s[c], lowpoly, paint);
     const b = this.brokenLamp as THREE.MeshStandardMaterial;
     const bg = greyLook.get(b)!;
-    b.color.copy(lowpoly ? new THREE.Color(PALETTE.brokenLight) : bg.color);
+    b.color.copy(lowpoly ? new THREE.Color(PALETTE.brokenLight) : bg.color);    this.onStyled?.();
   }
 
   /** One slot's material in the art style (see applyStyle). */
@@ -1536,6 +1537,77 @@ export class PanelBody {
 
   // ----- garage workshop (src/workshop): pick, hide and highlight parts by name ---------------
 
+  /** The mesh part of a wheel-space mesh (null for other meshes). */
+  wheelDef(m: THREE.Mesh): MeshPartJson | null {
+    return this.wheelDefs.get(m) ?? null;
+  }
+
+  /** Called at the end of every applyStyle (cosmetic looks re-apply their material changes). */
+  onStyled: (() => void) | null = null;
+  private shiftCache = new Map<number, THREE.Vector3>();
+  private shiftNodes: Float32Array | null = null;
+
+  /**
+   * Mean displacement (current − rest, chassis m) of region `name`'s lattice nodes at the last
+   * re-skin: bolt-on parts ride along with a crushed bumper or a bent trunk. Zero before the
+   * mesh is ready or for an unknown region.
+   */
+  regionShift(name: string, out: THREE.Vector3): THREE.Vector3 {
+    out.set(0, 0, 0);
+    const nodes = this.skinnedNodes;
+    const r = this.regions.indexOf(name);
+    if (!nodes || r < 0) return out;
+    if (nodes !== this.shiftNodes) {
+      this.shiftNodes = nodes;
+      this.shiftCache.clear();
+    }
+    let c = this.shiftCache.get(r);
+    if (!c) {
+      c = new THREE.Vector3();
+      let n = 0;
+      const rest = this.restNodes;
+      for (let i = 0; i < this.nodeRegions.length; i++) {
+        if (this.nodeRegions[i] !== r) continue;
+        c.x += nodes[i * 3] - rest[i * 3];
+        c.y += nodes[i * 3 + 1] - rest[i * 3 + 1];
+        c.z += nodes[i * 3 + 2] - rest[i * 3 + 2];
+        n++;
+      }
+      if (n) c.divideScalar(n);
+      this.shiftCache.set(r, c);
+    }
+    return out.copy(c);
+  }
+
+  /** Region `name`'s panel has come off the car (detached), so what is bolted to it goes too. */
+  regionGone(name: string): boolean {
+    const r = this.regions.indexOf(name);
+    return r >= 0 && this.stateOf.get(r) === PANEL_STATE.detached;
+  }
+
+  /**
+   * This car's own copy of a shared slot material (cosmetics recolour it without touching other
+   * cars): every batch and part mesh drawn with the old material switches to the copy. The copy
+   * keeps the greybox look of the original for applyStyle.
+   */
+  ownSlot(slot: MaterialJson): THREE.MeshStandardMaterial {
+    const old = this.mats[slot] as THREE.MeshStandardMaterial;
+    if (this.owned.has(old)) return old;
+    const m = old.clone();
+    const g = greyLook.get(old);
+    if (g) greyLook.set(m, { ...g, color: g.color.clone() });
+    this.owned.add(m);
+    this.mats[slot] = m;
+    for (const b of this.batches) if (b.mesh.material === old) b.mesh.material = m;
+    for (const p of this.parts) {
+      if (p.material === old) p.material = m;
+      if (p.mesh.material === old) p.mesh.material = m;
+    }
+    for (const ps of [...this.wheelParts, ...this.pivotParts]) for (const w of ps) if (w.material === old) w.material = m;
+    return m;
+  }
+  private readonly owned = new Set<THREE.Material>();
+
   /** Mesh parts of this car with their centre (chassis metres); wheel parts are in hub space. */
   partDefs(): { def: MeshPartJson; centre: THREE.Vector3 }[] {
     const out = this.parts.map((p) => ({ def: p.def, centre: dataOf(p.def).centre }));
@@ -1549,11 +1621,23 @@ export class PanelBody {
 
   /** The visible part `ray` hits first, or null (body batches, lenses and wheel parts). */
   partAt(ray: THREE.Raycaster): MeshPartJson | null {
+    return this.partHit(ray)?.def ?? null;
+  }
+
+  /** `partAt` with the hit distance along the ray. */
+  partHit(ray: THREE.Raycaster): { def: MeshPartJson; distance: number } | null {
+    const def = this.partHitDef(ray);
+    return def && this.lastHitDistance !== null ? { def, distance: this.lastHitDistance } : null;
+  }
+  private lastHitDistance: number | null = null;
+
+  private partHitDef(ray: THREE.Raycaster): MeshPartJson | null {
     const targets: THREE.Object3D[] = this.batches.map((b) => b.mesh);
     for (const p of this.parts) if (p.mesh.geometry !== NO_GEOMETRY && !p.hidden) targets.push(p.mesh);
     for (const ps of [...this.wheelParts, ...this.pivotParts]) for (const m of ps) if (m.visible) targets.push(m);
     for (const b of this.batches) b.mesh.geometry.boundingSphere = null;
     const hit = ray.intersectObjects(targets, false)[0];
+    this.lastHitDistance = hit?.distance ?? null;
     if (!hit) return null;
     const wheel = this.wheelDefs.get(hit.object as THREE.Mesh);
     if (wheel) return wheel;
@@ -1572,7 +1656,10 @@ export class PanelBody {
     for (const ps of [...this.wheelParts, ...this.pivotParts])
       for (const m of ps) {
         const def = this.wheelDefs.get(m);
-        if (def && hide(def, dataOf(def).centre)) m.visible = false;
+        if (def && hide(def, dataOf(def).centre)) {
+          m.visible = false;
+          m.userData.wpHidden = true;
+        }
       }
   }
 

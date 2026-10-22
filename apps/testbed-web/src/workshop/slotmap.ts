@@ -62,6 +62,11 @@ export function slotOfPart(def: MeshPartJson, centreX: number): string | null {
     }
     return null; // frame rails and cross members
   }
+  // Bolt-on aero and scoops modelled on some cars: their own slots, not the panel under them.
+  if (n.startsWith("wing") || n === "spoiler") return "rear_wing";
+  if (n === "splitter") return "front_splitter";
+  if (n.startsWith("hood_scoop")) return "hood_vent";
+  if (n.startsWith("roof_scoop")) return "roof_rack";
   if (def.region && REGION_SLOT[def.region]) {
     if (def.region === "Accessory" && !n.startsWith("pushbar")) return null;
     return REGION_SLOT[def.region];

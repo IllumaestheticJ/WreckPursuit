@@ -24,8 +24,8 @@ export interface WorkshopDeps {
   overlayEl: HTMLElement;
   /** The player's vehicle view of the current session (null until built). */
   playerView(): VehicleView | null;
-  /** Install a fresh session's views (main.ts rebuildViews). */
-  rebuildViews(): void;
+  /** Install a fresh session's views showing career car `uid`'s cosmetic look (main.ts rebuildViews). */
+  rebuildViews(uid: number): void;
   /** Flat free-drive scenario JSON (the lot the car stands on). */
   lotScenario(): string;
   /** Save the career after a change. */
@@ -142,7 +142,7 @@ export class WorkshopMode {
 
   private loadSession(): void {
     sim.careerWorkshopSession(this.car, this.deps.lotScenario());
-    this.deps.rebuildViews();
+    this.deps.rebuildViews(this.car);
     this.placedFor = null;
   }
 
@@ -192,10 +192,13 @@ export class WorkshopMode {
     const r = this.deps.scene.renderer.domElement.getBoundingClientRect();
     this.ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.deps.rig.camera);
-    const def = view.panels.partAt(this.ray);
-    if (!def) return null;
-    const centre = view.panels.partDefs().find((d) => d.def === def)?.centre;
-    return slotOfPart(def, centre?.x ?? 0);
+    // Bolt-on cosmetic pieces (bull bar, wing, cage...) in front of the panel hit win.
+    const hit = view.panels.partHit(this.ray);
+    const piece = view.look?.slotAt(this.ray);
+    if (piece && (!hit || piece.distance < hit.distance)) return piece.slot;
+    if (!hit) return null;
+    const centre = view.panels.partDefs().find((d) => d.def === hit.def)?.centre;
+    return slotOfPart(hit.def, centre?.x ?? 0);
   }
 
   private highlight(slots: string[]): void {
@@ -204,6 +207,7 @@ export class WorkshopMode {
     if (!view?.panels.ready) return;
     const set = new Set(slots);
     view.panels.highlightParts(set.size ? (def, c) => set.has(slotOfPart(def, c.x) ?? "") : null);
+    view.look?.highlight(set);
   }
 
   /** Move to a preset view (raises or lowers the lift for it unless `moveLift` is false). */

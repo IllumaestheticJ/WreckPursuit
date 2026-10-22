@@ -284,6 +284,18 @@ pub enum CosmeticKind {
     WindowTint,
     /// Interior trim.
     Interior,
+    /// Auxiliary fog lamps in the front bumper.
+    FogLights,
+    /// Neon strips under the sills (value: colour name).
+    Underglow,
+    /// Mud flaps behind the wheels.
+    MudFlaps,
+    /// Exhaust tip style.
+    ExhaustTip,
+    /// Tyre sidewall graphics (whitewall, raised letters, ...).
+    Sidewall,
+    /// Window net in the driver's window.
+    WindowNet,
 }
 
 impl CosmeticKind {
