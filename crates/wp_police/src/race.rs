@@ -610,7 +610,7 @@ impl PoliceSystem {
             });
         }
         self.radio(RadioCue::new(
-            RadioTier::Critical,
+            RadioTier::Escalation,
             None,
             format!(
                 "Dispatch: street race reported, all units. Operation {}: {} roadblocks, {} spike strips, {} units staked out.",

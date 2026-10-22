@@ -28,3 +28,9 @@ Reading: **no visible speed reduction up to ~110–120 km/h; above that a held k
 ~50–60° of wheel marker** (some reduction; the exact share of full lock is unknown because full
 lock is out of view). Ours already cuts to 65 % at 100 km/h, earlier and harder than the
 reference.
+
+## Touched outside my crates (to compile)
+- `wp_police` (round12 8757f12f did not compile after PR #42 met the row-144 radio tiers):
+  `race.rs` `RadioTier::Critical` → `Escalation` (its documented successor), and
+  `SpikeStrip::new` sets `scripted: false` (as the other constructor). `cargo test -p wp_police`
+  green. The lead should take its own fix over this one if it differs.
