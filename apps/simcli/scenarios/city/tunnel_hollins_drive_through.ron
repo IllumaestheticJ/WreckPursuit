@@ -1,0 +1,34 @@
+// Port Vesper v2: Loop 9 westbound through the Hollins Tunnel (391 m covered, through the
+// shoulder of Hollins Heights, climbing ≈ 16 m at up to 6 %). From the "Hollins Tunnel entry"
+// grid slot ≈ 150 m before the east portal to the "exit" slot ≈ 180 m past the west portal at
+// the 55 mph limit. Expect: the walls and roof colliders leave the carriageway clear (no
+// contact damage, no airborne time), the car stays on the road and arrives.
+(
+    name: "city_tunnel_hollins_drive_through",
+    seed: 41,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 23.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    parked_cars: false,
+    police_cars: false,
+    assists: ai,
+    slow: true,
+    entities: [
+        (
+            id: "car",
+            car: "debug_sedan",
+            driver: follow_route(route_id: "Hollins Tunnel entry -> Hollins Tunnel exit", target_speed: 24.58),
+        ),
+    ],
+    duration_s: 40.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.05),
+        metric(name: "max_speed_mps", min: 22.0, max: 26.0),
+        metric(name: "crush_depth_m", min: 0.0, max: 0.02),
+        metric(name: "path_length_m", min: 600.0, max: 900.0),
+        total_loss(expected: false),
+    ],
+)

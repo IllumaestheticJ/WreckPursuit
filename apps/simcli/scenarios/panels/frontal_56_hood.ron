@@ -1,0 +1,19 @@
+// Panels (workstream R, playtest row 31): a sedan hits a full-width rigid barrier at 56 km/h.
+// The hood's latch lets go and the hood buckles (browser: fold from the crushed hood chords);
+// the headlights crush with the bumper and break.
+(
+    name: "panels_frontal_56_hood",
+    seed: 2131,
+    mode: Simulation,
+    assists: ai,
+    panels: true,
+    barriers: [(pos: (0.0, 8.0, 0.75), size: (6.0, 1.0, 1.5))],
+    entities: [
+        (id: "car", car: "debug_sedan", speed_mps: 15.56, driver: cruise(target_mps: 15.56)),
+    ],
+    duration_s: 4.0,
+    hash_every: 24,
+    expect: [
+        metric(entity: "car", name: "panels_unlatched", min: 1, max: 8),
+    ],
+)

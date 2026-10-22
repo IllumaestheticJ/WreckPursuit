@@ -41,6 +41,7 @@ import {
   mockPoliceCareer,
   mockResults,
   mockShops,
+  PRESET_MODE,
   presetOf,
 } from "./mockData";
 import { heatSources, initialReadiness, initialUnits, stepUnits, tickTools, toyCaptainCommand, type ToyCaptain } from "./police";
@@ -565,13 +566,15 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
             const cur = next[k];
             (next as unknown as Record<string, unknown>)[k] = typeof cur === "object" && cur !== null ? { ...cur, ...(v as object) } : v;
           }
-          next.assistPreset = presetOf(next.assists);
+          next.assistPreset = presetOf(next.assists, next.damageMode);
           return { ...st, settings: next, hud: { ...st.hud, assists: next.assists } };
         });
       }
       case "settings.assistPreset": {
         if (cmd.preset === "custom") return;
+        // One click: damage mode + assists together (GDD §6).
         const assists = { ...ASSIST_PRESETS[cmd.preset] };
+        setMode(PRESET_MODE[cmd.preset]);
         return set((st) => ({ ...st, settings: { ...st.settings, assistPreset: cmd.preset, assists }, hud: { ...st.hud, assists } }));
       }
       case "settings.damageMode":
@@ -785,7 +788,12 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
   }
 
   function setMode(mode: DamageMode): void {
-    set((st) => ({ ...st, settings: { ...st.settings, damageMode: mode }, hud: { ...st.hud, damageMode: mode }, lobby: { ...st.lobby, damageMode: mode } }));
+    set((st) => ({
+      ...st,
+      settings: { ...st.settings, damageMode: mode, assistPreset: presetOf(st.settings.assists, mode) },
+      hud: { ...st.hud, damageMode: mode },
+      lobby: { ...st.lobby, damageMode: mode },
+    }));
   }
 
   // ------------------------------------------------------------ clock

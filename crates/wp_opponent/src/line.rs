@@ -241,6 +241,25 @@ pub struct Usage {
     pub accel: f32,
 }
 
+/// Speed below which a car's acceleration is taken as traction-limited (constant), m/s.
+const ACCEL_FLAT_MPS: f32 = 22.0;
+
+/// Full-throttle acceleration at speed `u` on the flat, m/s²: `a0` (the measured mean
+/// 0–100 km/h acceleration, scaled by the driver's usage) up to [`ACCEL_FLAT_MPS`], then
+/// power-limited (`∝ 1/u`) minus aerodynamic drag sized so the car tops out at its measured
+/// top speed. Never below 5 % of `a0` below top speed.
+pub fn drive_accel(cap: &CarCapability, a0: f32, u: f32) -> f32 {
+    let top = cap.top_speed_mps.max(ACCEL_FLAT_MPS + 1.0);
+    let k = a0 * ACCEL_FLAT_MPS / (top * top * top);
+    let power = a0 * (ACCEL_FLAT_MPS / u.max(ACCEL_FLAT_MPS));
+    let a = power - k * u * u;
+    if u < top {
+        a.max(0.05 * a0)
+    } else {
+        a
+    }
+}
+
 /// Target speed per corridor sample.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeedProfile {
@@ -285,6 +304,21 @@ impl SpeedProfile {
             let lat = u * u * line.curvature[i].abs() / a_lat.max(0.1);
             (1.0 - lat * lat).max(0.0).sqrt().max(0.25)
         };
+        // Road grade per sample (rise over run to the next sample): gravity takes
+        // `g · grade` from the drive uphill and adds it to the brakes (downhill the reverse).
+        let grade: Vec<f32> = (0..m)
+            .map(|i| {
+                let nx = if i + 1 < m {
+                    i + 1
+                } else if corridor.closed {
+                    0
+                } else {
+                    return 0.0;
+                };
+                let dz = corridor.samples[nx].pos[2] - corridor.samples[i].pos[2];
+                (dz / CORRIDOR_STEP_M).clamp(-0.3, 0.3)
+            })
+            .collect();
         let passes = if corridor.closed { 2 } else { 1 };
         for _ in 0..passes {
             // Forward: acceleration.
@@ -298,9 +332,8 @@ impl SpeedProfile {
                     break;
                 };
                 let u = v[i];
-                let r = u / cap.top_speed_mps;
-                let a = a_acc0 * (1.0 - r * r).max(0.05) * ellipse(i, u);
-                let lim = (u * u + 2.0 * a * line.step_len[i]).sqrt();
+                let a = drive_accel(cap, a_acc0, u) * ellipse(i, u) - GRAVITY_MPS2 * grade[i];
+                let lim = (u * u + 2.0 * a * line.step_len[i]).max(0.0).sqrt();
                 if v[nx] > lim {
                     v[nx] = lim;
                 }
@@ -318,7 +351,8 @@ impl SpeedProfile {
                     break;
                 };
                 let u = v[i];
-                let a = a_brk * ellipse(pv, v[pv].min(v_corner[pv]));
+                let a = (a_brk * ellipse(pv, v[pv].min(v_corner[pv])) + GRAVITY_MPS2 * grade[pv])
+                    .max(0.25 * a_brk);
                 let lim = (u * u + 2.0 * a * line.step_len[pv]).sqrt();
                 if v[pv] > lim {
                     v[pv] = lim;

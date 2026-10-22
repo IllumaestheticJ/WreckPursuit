@@ -408,6 +408,20 @@ fn quat_inv_rotate(q: [f32; 4], v: V3) -> V3 {
 }
 
 impl DamageModel {
+    /// True when node `i` belongs to a panel that is no longer latched (swinging, hanging or
+    /// torn off). Such a node moves with the panel, not with the structure, so component
+    /// intrusion and suspension alignment ignore it: a front fender's strut-top node hanging
+    /// off the car must not read as a bent or failed suspension. Always false without panels.
+    pub(crate) fn node_on_free_panel(&self, i: usize) -> bool {
+        let Some(set) = &self.panels else {
+            return false;
+        };
+        let region = self.node_region[i];
+        set.panels
+            .iter()
+            .any(|p| p.state != PanelState::Attached && p.def.region == region)
+    }
+
     /// Enable hinged/bolted panels from `spec` (validated against this model's lattice).
     /// Replaces any previous spec and resets panel state. Without this call the model has no
     /// panels and behaves exactly as before.

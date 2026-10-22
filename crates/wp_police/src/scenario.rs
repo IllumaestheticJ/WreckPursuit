@@ -36,6 +36,14 @@ fn d_two() -> f32 {
 fn d_corner() -> f32 {
     0.85
 }
+/// Scripted sideswipe impulse = this × the racer's speed, kg. Matches `wp_sim` with real
+/// cars (debug_sedan into a stopped sentinel_cruiser): 30 km/h ≈ 6,700 N·s, 50 km/h ≈
+/// 12,000 N·s, 5 km/h ≈ 860 N·s (see `data/police/heat.toml` `[heat.assault]`).
+const SCRIPTED_HIT_MASS_KG: f32 = 800.0;
+
+fn d_hit_kmh() -> f32 {
+    30.0
+}
 fn d_true() -> bool {
     true
 }
@@ -74,6 +82,14 @@ pub struct RacerScript {
     /// Emit `TotalLoss` for this racer at this time and stop, s.
     #[serde(default)]
     pub total_loss_at_s: Option<f32>,
+    /// Sideswipe the nearest in-service patrol car at this time, s (playtest row 24): the
+    /// patrol car is paused where it is (as at a junction), the racer is put alongside it at
+    /// `hit_kmh` and keeps that speed from then on.
+    #[serde(default)]
+    pub hit_unit_at_s: Option<f32>,
+    /// Racer speed for `hit_unit_at_s`, km/h.
+    #[serde(default = "d_hit_kmh")]
+    pub hit_kmh: f32,
 }
 
 /// Expected metric range.
@@ -244,6 +260,8 @@ struct ScriptedRacer {
     body: Unit,
     total_lost: bool,
     to_safehouse: bool,
+    /// When the scripted sideswipe happened.
+    hit_at: Option<f32>,
 }
 
 /// Per-run raw numbers.
@@ -265,18 +283,50 @@ struct RunNumbers {
     spike_hits: u32,
     helo_launches: u32,
     near_misses: u32,
+    pursuit_harm: u32,
+    pursuit_high_g_s: f32,
+    pursuit_no_risk_s: f32,
     traffic_collisions: u32,
     run_wide: u32,
     pool: [u32; 3],
     max_level: u8,
+    /// Scripted sideswipe → pursuit start, s.
+    hit_to_pursuit_s: Option<f32>,
+    /// Scripted sideswipes done.
+    hits: u32,
+    /// Contacts counted as assaulting an officer.
+    assaults: u32,
     /// Radio lines while no racer is wanted / while some racer is in a pursuit.
     radio_calm: u32,
     radio_hot: u32,
     /// Seconds with no racer wanted / with some racer in a pursuit.
     calm_s: f32,
     hot_s: f32,
+    /// First reckless-driving call → first ground unit within [`ON_SCENE_M`] of that racer, s.
+    call_to_unit_s: Option<f32>,
+    /// Reckless-driving calls, and how many of them spawned a responder.
+    calls: u32,
+    responder_spawns: u32,
+    /// Ground units that appeared after the session start (pool refills, responders,
+    /// reinforcements), and those that did so closer than `never_closer_m` to a racer or in
+    /// its view cone with line of sight.
+    late_spawns: u32,
+    spawns_in_view: u32,
+    /// Ground units that despawned while a racer could see them or was within
+    /// `never_closer_m`.
+    despawns_in_sight: u32,
+    /// Ground units that despawned.
+    despawns: u32,
+    /// Closest late spawn to a racer, m.
+    spawn_min_racer_m: f32,
     hash: u64,
 }
+
+/// "On scene": a unit this close to the reported racer, m (lead feedback round 12b).
+const ON_SCENE_M: f32 = 100.0;
+
+/// Half-angle of a racer's view cone for the pop-in audit (chase camera plus a margin), rad.
+const VIEW_HALF_ANGLE_RAD: f32 = 1.05;
 
 fn random_node(rng: &mut Rng, g: &RoadGraph, d: Option<District>) -> NodeId {
     let cands: Vec<u32> = (0..g.nodes.len() as u32)
@@ -374,12 +424,19 @@ fn run_once(
             body,
             total_lost: false,
             to_safehouse: false,
+            hit_at: None,
         });
     }
     let ticks = (sc.duration_s / PHYSICS_DT).round() as u64;
     let think_every = 24u64;
     let mut out = Vec::new();
-    let mut nums = RunNumbers::default();
+    // Scripted sideswipes placed this tick, reported after the next step (see below).
+    let mut placed: Vec<(crate::UnitId, EntityId, f32, f32)> = Vec::new();
+    let mut nums = RunNumbers {
+        spawn_min_racer_m: f32::MAX,
+        ..RunNumbers::default()
+    };
+    let mut spawns_seen = 0usize;
     let env_template = DriveEnv {
         limit_mps: 13.9,
         phase: world.time.phase(),
@@ -389,6 +446,8 @@ fn run_once(
     for tick in 0..ticks {
         let t = tick as f32 * PHYSICS_DT;
         let mut events = Vec::new();
+        let mut hits = Vec::new();
+        let due = std::mem::take(&mut placed);
         for r in racers.iter_mut() {
             // Script triggers.
             if let Some(ts) = r.script.total_loss_at_s {
@@ -401,6 +460,40 @@ fn run_once(
                 if t >= ts && !r.to_safehouse {
                     r.to_safehouse = true;
                     r.body.cmd.track = Track::default();
+                }
+            }
+            if let Some(ts) = r.script.hit_unit_at_s {
+                if t >= ts && r.hit_at.is_none() {
+                    if let Some(u) = police
+                        .units
+                        .iter_mut()
+                        .filter(|u| {
+                            u.kind == UnitKind::Car
+                                && u.internal
+                                && !u.wrecked
+                                && u.player.is_none()
+                                && u.assignment != crate::Assignment::OutOfService
+                        })
+                        .min_by(|a, b| {
+                            dist(a.body.pos, r.body.body.pos)
+                                .total_cmp(&dist(b.body.pos, r.body.body.pos))
+                                .then(a.id.cmp(&b.id))
+                        })
+                    {
+                        // Paused patrol car; the racer's flank against its left side.
+                        u.body.speed = 0.0;
+                        let h = u.body.heading;
+                        let left = [-h[1], h[0]];
+                        r.body.body.pos =
+                            [u.body.pos[0] + left[0] * 2.0, u.body.pos[1] + left[1] * 2.0];
+                        r.body.body.heading = h;
+                        r.body.body.speed = r.script.hit_kmh / 3.6;
+                        r.body.cmd.track = Track::default();
+                        r.hit_at = Some(t);
+                        nums.hits += 1;
+                        let v = r.script.hit_kmh / 3.6;
+                        hits.push((u.id, r.entity, SCRIPTED_HIT_MASS_KG * v, v));
+                    }
                 }
             }
             let stopped = r.total_lost || r.script.stop_at_s.is_some_and(|s| t >= s);
@@ -423,6 +516,8 @@ fn run_once(
                 }
                 r.body.cmd.speed_mps = if stopped {
                     0.0
+                } else if r.hit_at.is_some() {
+                    r.script.hit_kmh / 3.6
                 } else {
                     limit * r.script.speed_factor
                 };
@@ -456,9 +551,79 @@ fn run_once(
             })
             .collect();
         world.time = world.time.advanced(PHYSICS_DT * world.ratio);
+        // Ground unit positions before the step, for the despawn audit.
+        let before: BTreeMap<crate::UnitId, [f32; 2]> = police
+            .units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car)
+            .map(|u| (u.id, u.body.pos))
+            .collect();
         out.clear();
         police.step(&world, &views, &events, PHYSICS_DT, &mut out);
+        for e in &out {
+            if let Some(PoliceEvent::UnitDespawned { unit }) = PoliceEvent::from_sim_event(e) {
+                if let Some(p) = before.get(&unit) {
+                    nums.despawns += 1;
+                    let seen = racers.iter().any(|r| {
+                        let rp = r.body.body.pos;
+                        dist(rp, *p) < cfg.presence.response.never_closer_m
+                            || police.sees(&world, rp, *p)
+                    });
+                    nums.despawns_in_sight += seen as u32;
+                }
+            }
+        }
+        // Scripted sideswipes: the contact `wp_sim` would report. It comes one step after the
+        // racer was placed, so police have seen it at the placed speed twice (police also
+        // look at the previous step's speed, which would otherwise be from before the move).
+        for (unit, racer, impulse_ns, rel_speed) in due {
+            police.scripted_contact(&world, unit, racer, impulse_ns, rel_speed);
+        }
+        placed = hits;
         hook(&police, &out);
+        // Response time: first call → a ground unit within ON_SCENE_M of that racer.
+        if nums.call_to_unit_s.is_none() {
+            if let Some(call) = police.stats().calls.first() {
+                let on_scene = racers
+                    .iter()
+                    .find(|r| r.entity == call.racer)
+                    .is_some_and(|r| {
+                        police.units.iter().any(|u| {
+                            u.kind == UnitKind::Car
+                                && !u.wrecked
+                                && u.player.is_none()
+                                && u.role != UnitRole::Tool
+                                && dist(u.body.pos, r.body.body.pos) <= ON_SCENE_M
+                        })
+                    });
+                if on_scene {
+                    nums.call_to_unit_s = Some(police.now().since(call.at));
+                }
+            }
+        }
+        // Pop-in audit of every ground unit that appeared this tick.
+        let spawns = &police.stats().spawns;
+        for sp in &spawns[spawns_seen..] {
+            nums.late_spawns += 1;
+            nums.responder_spawns += (sp.role == UnitRole::Responder) as u32;
+            nums.spawn_min_racer_m = nums.spawn_min_racer_m.min(sp.nearest_racer_m);
+            let in_view = racers.iter().any(|r| {
+                let rp = r.body.body.pos;
+                let to = sub(sp.pos, rp);
+                let d = crate::graph::len(to);
+                let h = r.body.body.heading;
+                let cos = if d > 0.0 {
+                    crate::graph::dot(to, h) / d
+                } else {
+                    1.0
+                };
+                d < cfg.presence.response.never_closer_m
+                    || (cos >= wp_math::sin_cos(VIEW_HALF_ANGLE_RAD).1
+                        && police.sees(&world, rp, sp.pos))
+            });
+            nums.spawns_in_view += in_view as u32;
+        }
+        spawns_seen = spawns.len();
         let mut wanted = false;
         let mut hot = false;
         for r in &racers {
@@ -488,7 +653,17 @@ fn run_once(
         }
     }
     let st = police.stats();
+    nums.calls = st.calls.len() as u32;
     nums.pursuit_start_s = st.pursuits.first().map(|p| p.start.secs());
+    nums.assaults = st.assaults;
+    if let Some(hit) = racers.iter().find_map(|r| r.hit_at) {
+        nums.hit_to_pursuit_s = st
+            .pursuits
+            .iter()
+            .map(|p| p.start.secs())
+            .find(|s| *s >= hit - PHYSICS_DT)
+            .map(|s| s - hit);
+    }
     nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end).map(|t| t.secs());
     nums.reinforcement_delays = st.reinforcement_delays_s.clone();
     for p in &st.pursuits {
@@ -513,6 +688,9 @@ fn run_once(
     nums.spike_hits = st.spike_hits;
     nums.helo_launches = st.helo_launches;
     nums.near_misses = st.near_misses;
+    nums.pursuit_harm = st.pursuit_harm;
+    nums.pursuit_high_g_s = st.pursuit_high_g_s;
+    nums.pursuit_no_risk_s = st.pursuit_no_risk_s;
     nums.traffic_collisions = st.traffic_collisions;
     nums.run_wide = st.run_wide_crashes;
     for (k, d) in District::ALL.iter().enumerate() {
@@ -612,11 +790,30 @@ pub fn run_scenario_with_hook(
     m.insert("spike_hits".to_string(), sum(&|r| r.spike_hits));
     m.insert("helo_launches".to_string(), sum(&|r| r.helo_launches));
     m.insert("near_misses".to_string(), sum(&|r| r.near_misses));
+    m.insert("pursuit_harm".to_string(), sum(&|r| r.pursuit_harm));
+    m.insert(
+        "pursuit_high_g_s".to_string(),
+        runs.iter().map(|r| r.pursuit_high_g_s).sum(),
+    );
+    m.insert(
+        "pursuit_no_risk_s".to_string(),
+        runs.iter().map(|r| r.pursuit_no_risk_s).sum(),
+    );
     m.insert(
         "traffic_collisions".to_string(),
         sum(&|r| r.traffic_collisions),
     );
     m.insert("run_wide_crashes".to_string(), sum(&|r| r.run_wide));
+    m.insert("hits".to_string(), sum(&|r| r.hits));
+    m.insert("assaults".to_string(), sum(&|r| r.assaults));
+    // Slowest scripted sideswipe → pursuit over runs (`never` if any run had none).
+    m.insert(
+        "hit_to_pursuit_max_s".to_string(),
+        runs.iter()
+            .filter(|r| r.hits > 0)
+            .map(|r| r.hit_to_pursuit_s.unwrap_or(never))
+            .fold(-1.0, f32::max),
+    );
     m.insert(
         "max_wanted_level".to_string(),
         runs.iter().map(|r| r.max_level).max().unwrap_or(0) as f32,
@@ -641,6 +838,46 @@ pub fn run_scenario_with_hook(
     );
     m.insert("calm_s".to_string(), calm_s);
     m.insert("pursuit_s".to_string(), hot_s);
+    // Dispatch-driven response (round 12b): runs with a call only; `never` if a run's first
+    // call never got a unit within ON_SCENE_M, -1 if no run had a call.
+    let responses: Vec<f32> = runs
+        .iter()
+        .filter(|r| r.calls > 0)
+        .map(|r| r.call_to_unit_s.unwrap_or(never))
+        .collect();
+    m.insert(
+        "call_to_unit_100m_s".to_string(),
+        mean(&responses).unwrap_or(-1.0),
+    );
+    m.insert(
+        "call_to_unit_100m_max_s".to_string(),
+        responses.iter().copied().fold(-1.0, f32::max),
+    );
+    // Share of runs with a call whose first unit got within ON_SCENE_M inside 25 s (lead
+    // round 12b target: ≥ 90 %).
+    m.insert(
+        "call_reached_25s_frac".to_string(),
+        if responses.is_empty() {
+            -1.0
+        } else {
+            responses.iter().filter(|v| **v <= 25.0).count() as f32 / responses.len() as f32
+        },
+    );
+    m.insert("calls".to_string(), sum(&|r| r.calls));
+    m.insert("responder_spawns".to_string(), sum(&|r| r.responder_spawns));
+    m.insert("late_spawns".to_string(), sum(&|r| r.late_spawns));
+    m.insert("spawns_in_view".to_string(), sum(&|r| r.spawns_in_view));
+    m.insert("despawns".to_string(), sum(&|r| r.despawns));
+    m.insert(
+        "despawns_in_sight".to_string(),
+        sum(&|r| r.despawns_in_sight),
+    );
+    m.insert(
+        "spawn_min_racer_m".to_string(),
+        runs.iter()
+            .map(|r| r.spawn_min_racer_m)
+            .fold(9999.0, f32::min),
+    );
     let last = runs.last().expect("at least one run");
     m.insert("patrols_core".to_string(), last.pool[0] as f32);
     m.insert("patrols_suburb".to_string(), last.pool[1] as f32);

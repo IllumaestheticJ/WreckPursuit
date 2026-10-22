@@ -14,6 +14,8 @@
 //!   laps and standings.
 //! - [`draft`]: slipstream model (drag multiplier per vehicle from wake geometry) for the sim
 //!   loop to apply.
+//! - [`roam`]: free-roam street racers that chain legs around their haunt (highway, touge,
+//!   dirt, downtown, rural) on open roads, each leg driven by a one-car [`Field`].
 //! - [`pursuit`]: police awareness ([`PoliceQuery`]; [`EventHeat`] tracks wanted levels and
 //!   police sightings from `wp_police` events).
 //!
@@ -27,12 +29,14 @@
 #![warn(missing_docs)]
 
 pub mod capability;
+pub mod capability_table;
 pub mod corridor;
 pub mod draft;
 pub mod field;
 pub mod line;
 pub mod profile;
 pub mod pursuit;
+pub mod roam;
 
 pub use capability::CarCapability;
 pub use corridor::{
@@ -44,6 +48,11 @@ pub use field::{
     Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, RED_LIGHT_RISK, YIELD_AFTER_S,
     YIELD_RADIUS_M,
 };
-pub use line::{LineParams, RacingLine, SpeedProfile, Usage};
+pub use line::{drive_accel, LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};
 pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery, SimPolice};
+pub use roam::{
+    haunt_by_name, haunt_cars, roster_seed, spawn_slots, stock_profile, stock_roster, Haunt,
+    HauntMap, HauntParams, RoamConfig, RoamEvent, RoamPhase, RoamerSpec, Roamers, RosterEntry,
+    SpawnSlot,
+};

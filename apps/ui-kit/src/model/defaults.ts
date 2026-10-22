@@ -2,51 +2,17 @@
  * Defaults shared by every provider (mock and live): settings, assist presets, and an empty
  * `UiState` for hosts that only use a few screens. No mock data and no fixtures in here.
  */
-import type { AssistProfile } from "../generated/contracts";
+import type { AssistProfile, DamageMode } from "../generated/contracts";
 import { defaultBindings } from "./bindings";
 import { initialReadiness } from "./readiness";
 import type { AssistPreset, Settings, UiState } from "./types";
 
-/** Assist presets, matching `wp_contracts::AssistProfile` constructors. */
+/** One-click presets, matching `wp_vehicle::AssistPreset::assists(InputSource::Keyboard)`
+ * (GDD §6.1). Keyboard keeps its pedal filters and speed-sensitive steering in every preset
+ * (GDD §6.2); pads and wheels drop them in the host. */
 export const ASSIST_PRESETS: Record<Exclude<AssistPreset, "custom">, AssistProfile> = {
-  // Everything off (not a contract preset: the hardcore option).
-  off: {
-    abs: false,
-    tcs: false,
-    esc: false,
-    steer_speed_sensitivity: 0,
-    countersteer_help: 0,
-    throttle_filter: 0,
-    brake_filter: 0,
-    auto_gears: false,
-    auto_clutch: false,
-  },
-  // AssistProfile::wheel_default()
-  sim: {
-    abs: true,
-    tcs: false,
-    esc: false,
-    steer_speed_sensitivity: 0,
-    countersteer_help: 0,
-    throttle_filter: 0,
-    brake_filter: 0,
-    auto_gears: false,
-    auto_clutch: true,
-  },
-  // AssistProfile::gamepad_default()
-  standard: {
-    abs: true,
-    tcs: true,
-    esc: false,
-    steer_speed_sensitivity: 0.7,
-    countersteer_help: 0.3,
-    throttle_filter: 0.2,
-    brake_filter: 0.2,
-    auto_gears: true,
-    auto_clutch: true,
-  },
-  // AssistProfile::keyboard_default()
-  full: {
+  // Arcade damage, every assist on.
+  rookie: {
     abs: true,
     tcs: true,
     esc: true,
@@ -57,12 +23,44 @@ export const ASSIST_PRESETS: Record<Exclude<AssistPreset, "custom">, AssistProfi
     auto_gears: true,
     auto_clutch: true,
   },
+  // Arcade damage, ABS + TCS (the default).
+  street: {
+    abs: true,
+    tcs: true,
+    esc: false,
+    steer_speed_sensitivity: 1,
+    countersteer_help: 0,
+    throttle_filter: 0.7,
+    brake_filter: 0.6,
+    auto_gears: true,
+    auto_clutch: true,
+  },
+  // Simulation damage, assists off, manual gears.
+  sim: {
+    abs: false,
+    tcs: false,
+    esc: false,
+    steer_speed_sensitivity: 1,
+    countersteer_help: 0,
+    throttle_filter: 0.7,
+    brake_filter: 0.6,
+    auto_gears: false,
+    auto_clutch: true,
+  },
 };
 
-/** Which preset (if any) a profile equals. */
-export function presetOf(a: AssistProfile): AssistPreset {
+/** Damage mode each preset selects. */
+export const PRESET_MODE: Record<Exclude<AssistPreset, "custom">, DamageMode> = {
+  rookie: "Arcade",
+  street: "Arcade",
+  sim: "Simulation",
+};
+
+/** Which preset (if any) assists + damage mode equal. */
+export function presetOf(a: AssistProfile, mode: DamageMode): AssistPreset {
   for (const [name, p] of Object.entries(ASSIST_PRESETS)) {
-    if ((Object.keys(p) as (keyof AssistProfile)[]).every((k) => p[k] === a[k])) return name as AssistPreset;
+    const same = (Object.keys(p) as (keyof AssistProfile)[]).every((k) => p[k] === a[k]);
+    if (same && PRESET_MODE[name as Exclude<AssistPreset, "custom">] === mode) return name as AssistPreset;
   }
   return "custom";
 }
@@ -71,9 +69,9 @@ export function presetOf(a: AssistProfile): AssistPreset {
 export function defaultSettings(): Settings {
   return {
     bindings: defaultBindings(),
-    assistPreset: "full",
-    assists: { ...ASSIST_PRESETS.full },
-    damageMode: "Arcade",
+    assistPreset: "street",
+    assists: { ...ASSIST_PRESETS.street },
+    damageMode: PRESET_MODE.street,
     units: "metric",
     input: { steerDeadzone: 0.04, steerLinearity: 1.4, wheelRotationDeg: 900, combinedPedals: false },
     accessibility: { palette: "default", uiScale: 1, reduceMotion: false, largeScannerText: false },

@@ -12,6 +12,12 @@ use wp_contracts::{
 use wp_vehicle::rig::Rig;
 use wp_vehicle::VehicleSnapshot;
 
+/// Static city ground for prediction rigs: the parked safety slab plus the city's terrain,
+/// road, building and rail colliders, exactly as the server's `wp_sim` builds them (see
+/// [`crate::netsim::city_ground`]). Shared between rigs; colliders clone cheaply (shapes are
+/// reference counted).
+pub type CityGround = std::sync::Arc<Vec<rapier3d::prelude::Collider>>;
+
 /// Inputs kept for replay: 1 s at 240 Hz.
 pub const INPUT_RING: usize = 240;
 /// Position error that triggers a correction, m.
@@ -68,8 +74,9 @@ pub trait PredictedVehicle: Send {
 /// a flat ground slab, probed with `RapierGround` and stepped exactly like `wp_sim` steps it
 /// (`wp_vehicle::rig::Rig`). Rewind sets both the vehicle and the rigid body.
 ///
-/// Differences from the server that reconciliation absorbs: the client has no city geometry
-/// or other cars (collisions are not predicted) and no surface map (asphalt everywhere).
+/// Differences from the server that reconciliation absorbs: no other cars (collisions are not
+/// predicted) and no surface map (asphalt everywhere). In cities with terrain the rig drives on
+/// the server's own static ground ([`CityGround`]); otherwise on the flat slab.
 pub struct RigVehicle {
     rig: Rig,
     assists: AssistProfile,
@@ -83,7 +90,21 @@ impl RigVehicle {
         state: &VehicleState,
         time: TimeOfDay,
     ) -> Self {
+        Self::on_ground(car, assists, state, time, None)
+    }
+
+    /// [`RigVehicle::new`] on a city's static ground (`None` = flat slab).
+    pub fn on_ground(
+        car: &LoadedCar,
+        assists: AssistProfile,
+        state: &VehicleState,
+        time: TimeOfDay,
+        ground: Option<&CityGround>,
+    ) -> Self {
         let mut rig = Rig::new(car);
+        if let Some(g) = ground {
+            rig.set_city_ground(g.iter().cloned());
+        }
         rig.world.time = time;
         rig.set_state(state);
         Self { rig, assists }
@@ -141,6 +162,19 @@ impl Predictor {
         time: TimeOfDay,
     ) -> Self {
         Self::with_vehicle(Box::new(RigVehicle::new(car, assists, state, time)), tick)
+    }
+
+    /// [`Predictor::new`] on a city's static ground (`None` = flat slab).
+    pub fn on_ground(
+        car: &LoadedCar,
+        assists: AssistProfile,
+        state: &VehicleState,
+        tick: u64,
+        time: TimeOfDay,
+        ground: Option<&CityGround>,
+    ) -> Self {
+        let v = RigVehicle::on_ground(car, assists, state, time, ground);
+        Self::with_vehicle(Box::new(v), tick)
     }
 
     /// Predict with any [`PredictedVehicle`] whose state is at `tick`.

@@ -198,6 +198,13 @@ pub struct BuildOptions {
     pub alley_lane_width_m: f32,
     /// Parking lane width, m.
     pub parking_width_m: f32,
+    /// Paved median between the two directions of a two-way highway (inner shoulders), m.
+    pub highway_median_m: f32,
+    /// Paved shoulder outside a highway's rightmost lane, m.
+    pub highway_shoulder_m: f32,
+    /// Painted median between the two directions of a two-way arterial with at least two
+    /// lanes each way, m (playtest row 94).
+    pub arterial_median_m: f32,
     /// Allow right turn on red at signals.
     pub allow_rtor: bool,
     /// Extra junction setback for crosswalks, m.
@@ -211,6 +218,9 @@ impl Default for BuildOptions {
             highway_lane_width_m: 3.7,
             alley_lane_width_m: 3.0,
             parking_width_m: 2.5,
+            highway_median_m: 3.0,
+            highway_shoulder_m: 3.0,
+            arterial_median_m: 3.0,
             allow_rtor: true,
             crosswalk_m: 2.0,
         }
@@ -300,6 +310,8 @@ impl Built {
             buildings,
             surfaces: self.surfaces,
             terrain: None,
+            covered: Vec::new(),
+            decor: Vec::new(),
         }
     }
 }
@@ -447,7 +459,8 @@ fn lane_on_surface(center: &[V3], bank: &[f32], off: f32, sign: f32) -> Vec<V3> 
     pts
 }
 
-fn lane_width(class: RoadClass, opt: &BuildOptions) -> f32 {
+/// Lane width of a road class, m.
+pub fn lane_width(class: RoadClass, opt: &BuildOptions) -> f32 {
     match class {
         RoadClass::Highway => opt.highway_lane_width_m,
         RoadClass::Alley => opt.alley_lane_width_m,
@@ -455,15 +468,61 @@ fn lane_width(class: RoadClass, opt: &BuildOptions) -> f32 {
     }
 }
 
-/// Half width of the side of the road a lane group occupies (max of both sides), m.
-fn half_width(r: &RoadSpec, opt: &BuildOptions) -> f32 {
-    let w = lane_width(r.class, opt);
-    let p = if r.parking { opt.parking_width_m } else { 0.0 };
-    if r.lanes_bwd == 0 {
-        r.lanes_fwd as f32 * w * 0.5 + p
-    } else {
-        r.lanes_fwd.max(r.lanes_bwd) as f32 * w + p
+/// Paved median between the two directions (centreline to each direction's inner lane edge
+/// is half of it), m: highways and two-way arterials with at least two lanes each way.
+pub fn median_width(class: RoadClass, lanes_fwd: u8, lanes_bwd: u8, opt: &BuildOptions) -> f32 {
+    if lanes_bwd == 0 {
+        return 0.0;
     }
+    match class {
+        RoadClass::Highway => opt.highway_median_m,
+        RoadClass::Arterial if lanes_fwd >= 2 && lanes_bwd >= 2 => opt.arterial_median_m,
+        _ => 0.0,
+    }
+}
+
+/// Paved shoulder outside the rightmost lane of each direction, m (highways).
+pub fn shoulder_width(class: RoadClass, opt: &BuildOptions) -> f32 {
+    match class {
+        RoadClass::Highway => opt.highway_shoulder_m,
+        _ => 0.0,
+    }
+}
+
+/// Half paved width (widest side) of a road with these lanes, m: lanes, parking strip,
+/// half the median and the shoulder.
+pub fn half_width_of(
+    class: RoadClass,
+    lanes_fwd: u8,
+    lanes_bwd: u8,
+    parking: bool,
+    opt: &BuildOptions,
+) -> f32 {
+    let w = lane_width(class, opt);
+    let p = if parking { opt.parking_width_m } else { 0.0 };
+    let edge = shoulder_width(class, opt);
+    if lanes_bwd == 0 {
+        lanes_fwd as f32 * w * 0.5 + p + edge
+    } else {
+        lanes_fwd.max(lanes_bwd) as f32 * w
+            + p
+            + edge
+            + median_width(class, lanes_fwd, lanes_bwd, opt) * 0.5
+    }
+}
+
+/// Whether a road sets its own shoulders ([`RoadSpec::shoulder_left_m`] /
+/// [`RoadSpec::shoulder_right_m`], e.g. divided-highway carriageways and ramps); those replace
+/// the class's generic [`shoulder_width`] in its paved width.
+fn own_shoulders(r: &RoadSpec) -> bool {
+    r.shoulder_left_m > 0.0 || r.shoulder_right_m > 0.0
+}
+
+/// Half width of the side of the road a lane group occupies (max of both sides), m. Used for
+/// junction setbacks, so it keeps the class's shoulder even where a road paves its own
+/// (main's spine ends then keep their 30 m junctions, roomy enough for three-lane turns).
+fn half_width(r: &RoadSpec, opt: &BuildOptions) -> f32 {
+    half_width_of(r.class, r.lanes_fwd, r.lanes_bwd, r.parking, opt)
 }
 
 /// Build the lane graph.
@@ -552,8 +611,10 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 sb[i] = sb[i].max(d_i + opt.crosswalk_m);
                 sb[j] = sb[j].max(d_j + opt.crosswalk_m);
             }
+            // Cap for very acute junctions (Port Vesper's Bluff Road meets the Loop 9 highway
+            // at ~20°: with the highway's shoulders and median, row 94, it needs ~50 m).
             for v in &mut sb {
-                *v = v.min(45.0);
+                *v = v.min(60.0);
             }
         } else if deg == 2 {
             let (d0, d1) = (list[0].dir_out, list[1].dir_out);
@@ -614,11 +675,21 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         let w = lane_width(r.class, opt);
         let one_way = r.lanes_bwd == 0;
         let park = if r.parking { opt.parking_width_m } else { 0.0 };
+        let shoulder = if own_shoulders(r) {
+            0.0
+        } else {
+            shoulder_width(r.class, opt)
+        };
+        // Centreline to each direction's inner lane edge.
+        let inner = median_width(r.class, r.lanes_fwd, r.lanes_bwd, opt) * 0.5;
         let (left_m, right_m) = if one_way {
-            let h = r.lanes_fwd as f32 * w * 0.5 + park;
+            let h = r.lanes_fwd as f32 * w * 0.5 + park + shoulder;
             (h, h)
         } else {
-            (r.lanes_bwd as f32 * w + park, r.lanes_fwd as f32 * w + park)
+            (
+                inner + r.lanes_bwd as f32 * w + park + shoulder,
+                inner + r.lanes_fwd as f32 * w + park + shoulder,
+            )
         };
         surfaces.push(RoadSurface {
             road: ri as u32,
@@ -648,7 +719,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 let off = if one_way {
                     (j as f32 + 0.5 - count as f32 * 0.5) * w
                 } else {
-                    (j as f32 + 0.5) * w
+                    inner + (j as f32 + 0.5) * w
                 };
                 let kind = if r.bus_lane && count >= 2 && j == count - 1 {
                     LaneKind::Bus
@@ -688,7 +759,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 let edge = if one_way {
                     count as f32 * w * 0.5
                 } else {
-                    count as f32 * w
+                    inner + count as f32 * w
                 };
                 let id = lanes.len() as LaneId;
                 lanes.push(Lane {

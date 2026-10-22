@@ -32,7 +32,7 @@ import {
 import { previewBuild } from "../data/estimate";
 import mapJson from "../../fixtures/city/procedural_12x12.map.json";
 
-export { ASSIST_PRESETS, defaultSettings, presetOf } from "../model/defaults";
+export { ASSIST_PRESETS, defaultSettings, PRESET_MODE, presetOf } from "../model/defaults";
 
 /** The city map fixture as a `CityMap`. */
 export function cityMap(): CityMap {

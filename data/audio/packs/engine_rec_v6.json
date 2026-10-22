@@ -1,0 +1,190 @@
+{
+  "id": "engine_rec_v6",
+  "kind": "Engine",
+  "description": "Recorded six: loops cut from a public-domain car recording (domasx2, CC0) at four pitches; off-throttle layers are low-passed copies.",
+  "fallback": "engine_proc_v6",
+  "engine_layers": [
+    {
+      "cue": "engine/idle",
+      "anchor": "Idle",
+      "throttle": "Both"
+    },
+    {
+      "cue": "engine/low_on",
+      "anchor": {
+        "RedlineFrac": 0.3
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/mid_on",
+      "anchor": {
+        "RedlineFrac": 0.55
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/high_on",
+      "anchor": {
+        "RedlineFrac": 0.85
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/low_off",
+      "anchor": {
+        "RedlineFrac": 0.35
+      },
+      "throttle": "Off"
+    },
+    {
+      "cue": "engine/high_off",
+      "anchor": {
+        "RedlineFrac": 0.78
+      },
+      "throttle": "Off"
+    }
+  ],
+  "cues": {
+    "engine/high_off": {
+      "source": {
+        "Samples": {
+          "files": [
+            "high_off.ogg"
+          ]
+        }
+      },
+      "gain": 3.573,
+      "looped": true
+    },
+    "engine/high_on": {
+      "source": {
+        "Samples": {
+          "files": [
+            "high_on.ogg"
+          ]
+        }
+      },
+      "gain": 4.467,
+      "looped": true
+    },
+    "engine/idle": {
+      "source": {
+        "Samples": {
+          "files": [
+            "idle.ogg"
+          ]
+        }
+      },
+      "gain": 4.467,
+      "looped": true
+    },
+    "engine/limiter": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 0.7,
+            "h2": 1.0,
+            "h3": 0.6,
+            "h4": 0.4,
+            "noise": 0.1,
+            "drive": 0.4,
+            "bright": 1.0,
+            "off": 0.0,
+            "chop_hz": 18.0
+          }
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "engine/low_off": {
+      "source": {
+        "Samples": {
+          "files": [
+            "low_off.ogg"
+          ]
+        }
+      },
+      "gain": 3.573,
+      "looped": true
+    },
+    "engine/low_on": {
+      "source": {
+        "Samples": {
+          "files": [
+            "low_on.ogg"
+          ]
+        }
+      },
+      "gain": 4.467,
+      "looped": true
+    },
+    "engine/mid_on": {
+      "source": {
+        "Samples": {
+          "files": [
+            "mid_on.ogg"
+          ]
+        }
+      },
+      "gain": 4.467,
+      "looped": true
+    },
+    "exhaust/pop": {
+      "source": {
+        "Synth": {
+          "synth": "pop",
+          "params": {
+            "decay_s": 0.08,
+            "freq_hz": 90.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.25
+    },
+    "supercharger/whine": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 1400.0,
+            "noise": 0.05
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "turbo/blowoff": {
+      "source": {
+        "Samples": {
+          "files": [
+            "../engine_rec_turbo/blowoff_1.ogg",
+            "../engine_rec_turbo/blowoff_2.ogg",
+            "../engine_rec_turbo/blowoff_3.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": false,
+      "duration_s": 0.65
+    },
+    "turbo/whistle": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 2800.0,
+            "noise": 0.15
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    }
+  }
+}

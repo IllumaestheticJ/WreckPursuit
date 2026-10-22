@@ -48,6 +48,12 @@ export class Connection {
     for (const f of frames) this.ws.send(f);
   }
 
+  /** Drop the socket as a network failure would (test hook): the client reconnects with
+   * its token inside the server's 30 s window and keeps its car. */
+  dropForTest(): void {
+    this.ws?.close();
+  }
+
   close(): void {
     this.reconnectUntil = 0;
     net.bye(performance.now());

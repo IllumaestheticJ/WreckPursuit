@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use wp_contracts::{EntityId, SimEvent, VehicleState, ViolationKind, PHYSICS_DT, WORLD_ENTITY};
 
-use crate::course::{v2, Course, Gate, GridSlot};
+use crate::course::{v2, Course, Gate, GridLayout, GridSlot};
 use crate::error::EntryDenied;
 use crate::kind::{EventId, RaceKind};
 use crate::result::{
@@ -265,7 +265,14 @@ impl RaceJudge {
     /// (side-by-side grids are centred on `max_racers` lanes).
     fn slot_for(&self, i: usize) -> GridSlot {
         let cap = (self.rules.kind_rules.max_racers as usize).max(i + 1);
-        self.course.grid(self.rules.kind_rules.grid, cap)[i]
+        self.course.grid(self.grid_layout(), cap)[i]
+    }
+
+    /// The course's own grid layout if it has one, else the race kind's.
+    fn grid_layout(&self) -> GridLayout {
+        self.course
+            .grid_layout
+            .unwrap_or(self.rules.kind_rules.grid)
     }
 
     /// Remove a racer while still in the lobby.
@@ -276,9 +283,7 @@ impl RaceJudge {
         let before = self.tracks.len();
         self.tracks.retain(|t| t.entry.racer != racer);
         // Re-slot everyone so the grid stays packed.
-        let grid = self
-            .course
-            .grid(self.rules.kind_rules.grid, self.tracks.len());
+        let grid = self.course.grid(self.grid_layout(), self.tracks.len());
         for (t, s) in self.tracks.iter_mut().zip(grid) {
             t.slot = s;
         }

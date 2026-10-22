@@ -1,0 +1,54 @@
+// Playtest #20 ("I can fall into the sidewalk"), Port Vesper v2 port district (flat, z = 2.5,
+// sidewalk tops 0.15 m above the road). "mounter" leaves its lane at 12°, climbs the kerb at
+// 15 km/h and settles along the middle of the sidewalk; "walker" starts on another street's
+// sidewalk and drives along it. Expect: never airborne, never below the road, the walker
+// never below the sidewalk top (before the fix the sidewalk had no collider: cars sank
+// 0.27 m into it), no damage.
+(
+    name: "city_sidewalk_mount_15kmh",
+    seed: 20,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "mounter",
+            car: "debug_sedan",
+            // The quay's outer eastbound lane (kerb at y = -932.0; main moved the quay 25 m north), heading 12° to the right.
+            pos: (470.0, -930.25, 2.5),
+            yaw: -1.7802,
+            speed_mps: 4.17,
+            driver: cruise(target_mps: 4.17, from_s: 0.0, until_s: 14.0),
+            inputs: [
+                (t_s: 0.0, input: ()),
+                (t_s: 3.0, input: (steer: -0.2)),
+                (t_s: 4.12, input: ()),
+            ],
+        ),
+        (
+            id: "walker",
+            car: "debug_sedan",
+            // On the sidewalk of the quay's westbound side (kerb at y = -918.0), 1.5 m in.
+            pos: (890.0, -916.5, 2.65),
+            yaw: 1.5708,
+            speed_mps: 4.17,
+            driver: cruise(target_mps: 4.17, from_s: 0.0, until_s: 14.0),
+        ),
+    ],
+    duration_s: 14.0,
+    expect: [
+        metric(name: "max_airborne_s", entity: "mounter", min: 0.0, max: 0.05),
+        metric(name: "min_z_m", entity: "mounter", min: 2.47, max: 2.53),
+        metric(name: "distance_m", entity: "mounter", min: 50.0, max: 65.0),
+        metric(name: "crush_depth_m", entity: "mounter", min: 0.0, max: 0.02),
+        metric(name: "max_airborne_s", entity: "walker", min: 0.0, max: 0.05),
+        metric(name: "min_z_m", entity: "walker", min: 2.62, max: 2.68),
+        metric(name: "distance_m", entity: "walker", min: 50.0, max: 65.0),
+        metric(name: "crush_depth_m", entity: "walker", min: 0.0, max: 0.02),
+        total_loss(entity: "mounter", expected: false),
+        total_loss(entity: "walker", expected: false),
+    ],
+)

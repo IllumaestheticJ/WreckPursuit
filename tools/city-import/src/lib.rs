@@ -24,8 +24,7 @@ pub fn write_city_files(net: &RoadNetwork, dir: &Path, json: bool) -> std::io::R
         std::fs::write(dir.join(format!("{}.road.json", net.id)), net.to_json())?;
     }
     let map = CityMap::new(net.clone());
-    let prims = glb::build_greybox(&map);
-    let glb = glb::write_glb(&prims, &net.id);
+    let glb = glb::greybox_glb(&map);
     std::fs::write(
         dir.join(format!("{}.greybox.b64.txt", net.id)),
         base64(&glb),
@@ -65,7 +64,8 @@ mod tests {
     fn shipped_city_v2_greybox_is_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
         let net = wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default());
-        let prims = glb::build_greybox(&CityMap::new(net));
+        let map = CityMap::new(net);
+        let prims = glb::build_greybox(&map);
         let names: Vec<&str> = prims.iter().map(|p| p.material.as_str()).collect();
         for m in [
             "asphalt",
@@ -75,11 +75,24 @@ mod tests {
             "water",
             "bridge",
             "retaining_wall",
+            "roof",
+            "garage",
+            "verge",
         ] {
             assert!(names.contains(&m), "greybox has no {m}");
         }
         assert!(names.iter().any(|n| n.starts_with("ground_")));
-        let fresh = glb::write_glb(&prims, wp_world::vesper::CITY_ID);
+        let instanced: Vec<String> = glb::build_instanced(&map)
+            .into_iter()
+            .map(|i| i.name)
+            .collect();
+        for m in ["trees", "driveway", "hedge", "fence"] {
+            assert!(
+                instanced.iter().any(|n| n == m),
+                "greybox has no instanced {m}"
+            );
+        }
+        let fresh = glb::greybox_glb(&map);
         let shipped = std::fs::read(dir.join("vesper_v2.greybox.glb")).expect("run `just city-v2`");
         assert!(
             fresh == shipped,
@@ -91,7 +104,9 @@ mod tests {
             "vesper_v2.greybox.b64.txt does not match the .glb"
         );
         assert!(
-            shipped.len() < 9_000_000,
+            // 7.5 MB before the residential lots (rows 94–95: houses with pitched roofs,
+            // garages, grass verges; trees, driveways, hedges and fences are instanced).
+            shipped.len() < 10_000_000,
             "greybox grew to {} bytes",
             shipped.len()
         );

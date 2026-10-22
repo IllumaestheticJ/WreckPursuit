@@ -18,6 +18,11 @@
 //!   port; see `divide_loop`). **Route 40 West** passes under it (the loop rises on an
 //!   overpass) and **Route 40 North** dips under it (underpass).
 //!
+//! - **Covered roads** (backlog B04): the **Hollins Tunnel** carries Loop 9 through the
+//!   northern shoulder of Hollins Heights (ground backfilled over the roof), and **Founders
+//!   Cut** drops the Uptown Connector into a covered trench under a plaza deck. Both are
+//!   [`CoveredSpan`]s: police and the helicopter cannot see in or out.
+//!
 //! Elevation: a smooth deterministic heightfield (authored hill, plateau, northward rise,
 //! seeded value noise, sea at the south and east edges). Every road gets a vertical profile
 //! that follows the terrain, is grade-capped per class (highway 6 %, hill road 11.5 %), is
@@ -30,10 +35,12 @@ use std::collections::BTreeMap;
 use wp_math::Rng;
 
 use crate::builder::{self, BuildOptions, Built, ControlHint, NodeSpec, RoadClass, RoadSpec};
+use crate::covered::{CoverShape, DECK_OVERHANG_M, ROOF_M, WALL_M};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
-use crate::surface::is_elevated;
+use crate::residential;
+use crate::surface::{self, is_elevated, KERB_H_M, LOT_W_M, SIDEWALK_W_M};
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
 
 /// City id of this preset (file stem for its data files).
@@ -45,8 +52,46 @@ pub const CROSSING_CLEARANCE_M: f32 = 7.5;
 /// Terrain sits this far below an at-grade road surface, m.
 pub const CARVE_BELOW_M: f32 = 0.12;
 
-/// Full-strength carve corridor beyond the paved edge (sidewalk + verge), m.
+/// Full-strength carve corridor beyond a highway's paved edge, m.
 const SHOULDER_M: f32 = 7.5;
+
+/// Under a sidewalk road's lots (playtest #52) the ground is carved to this far below the lot
+/// top, m: the lot (`wp_world::surface::sidewalk_mesh`) is level with the sidewalk's back edge
+/// and the ground beyond it starts within a few cm of that level.
+const LOT_GROUND_GAP_M: f32 = 0.12;
+
+/// Sidewalk + lot behind a street's paved edge, m.
+const FLUSH_W_M: f32 = SIDEWALK_W_M + LOT_W_M;
+
+/// Full-strength carve corridor beyond a street's paved edge, m: sidewalk, lot, skirt and one
+/// terrain cell more before the slope to the natural ground starts, so no terrain triangle
+/// under the lot or skirt reaches up the slope (it would poke through the lot).
+const STREET_SHOULDER_M: f32 = FLUSH_W_M + 1.0 + 5.0;
+
+/// Beyond its paved radius a junction disc carves at full strength only this far (the
+/// streets' lots take over from there), m.
+const NODE_SHOULDER_M: f32 = 1.5;
+
+/// Carve height under a street at lateral distance `d_out` beyond its paved edge, relative to
+/// the lot level there: the road's own `- CARVE_BELOW_M` under the kerb, rising across the
+/// sidewalk and lot to `- LOT_GROUND_GAP_M` just inside the lot's outer edge.
+fn street_carve_offset(d_out: f32) -> f32 {
+    let t = ((d_out - 1.0) / (FLUSH_W_M - 1.5)).clamp(0.0, 1.0);
+    -(KERB_H_M + CARVE_BELOW_M) + t * (KERB_H_M + CARVE_BELOW_M - LOT_GROUND_GAP_M)
+}
+
+/// Chance that a local block edge of a residential grid gets a court (row 95).
+const COURT_CHANCE: f32 = 0.45;
+/// Shortest block edge that gets a court, m.
+const COURT_MIN_EDGE_M: f32 = 150.0;
+/// Court length (± 15 %), m.
+const COURT_LEN_M: f32 = 75.0;
+/// Clearance of a court from every other road beyond its first 25 m, m (room for a house lot
+/// on both sides of each).
+const COURT_CLEARANCE_M: f32 = 40.0;
+
+/// Smallest angle between a dead-end stub and the other roads at its start node, rad.
+const MIN_STUB_ANGLE_RAD: f32 = 0.7;
 
 /// Generator parameters.
 #[derive(Debug, Clone, PartialEq)]
@@ -246,9 +291,26 @@ struct Draft {
     anchors: Vec<(f32, f32, f32)>,
     /// Arc ranges that are bridge decks (no terrain carving).
     decks: Vec<(f32, f32)>,
+    /// Covered stretches (tunnels) on this road.
+    covers: Vec<CoverPlan>,
     /// Bridges over a highway it crosses (interchange crossroad).
     over: bool,
 }
+
+/// A planned covered stretch of one draft road.
+#[derive(Debug, Clone, Copy)]
+struct CoverPlan {
+    /// Portal plan points (matched onto the built surface).
+    p0: V2,
+    p1: V2,
+    kind: CoverKind,
+    name: &'static str,
+}
+
+/// Ceiling height over a covered highway, m.
+pub const TUNNEL_CLEARANCE_HIGHWAY_M: f32 = 6.5;
+/// Ceiling height over other covered roads, m.
+pub const TUNNEL_CLEARANCE_M: f32 = 6.0;
 
 /// A planned grade separation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -575,6 +637,7 @@ impl Gen {
             dips: false,
             anchors: Vec::new(),
             decks: Vec::new(),
+            covers: Vec::new(),
             over: false,
         });
         Some(self.drafts.len() - 1)
@@ -737,10 +800,59 @@ impl Gen {
         ids
     }
 
-    /// Dead-end stub from `from` towards `towards` (`len` m), slightly curved.
+    /// Unit directions in which the roads laid so far leave node `n` (15 m along each).
+    fn headings_at(&self, n: usize) -> Vec<V2> {
+        let c = self.pos(n);
+        let mut out = Vec::new();
+        for d in &self.drafts {
+            if d.a != n && d.b != n {
+                continue;
+            }
+            let path: Vec<V2> = if d.a == n {
+                d.path.clone()
+            } else {
+                d.path.iter().rev().copied().collect()
+            };
+            let cum = cum2(&path);
+            let (p, _) = point_on(&path, &cum, 15f32.min(cum[cum.len() - 1]));
+            out.push(geom::normalize(geom::sub(p, c)));
+        }
+        out
+    }
+
+    /// Dead-end stub from `from` towards `towards` (`len` m), slightly curved. A stub that
+    /// would leave within [`MIN_STUB_ANGLE_RAD`] of a road already at `from` (their ribbons
+    /// and sidewalks would overlap: Port Vesper node 81) is turned to the middle of the widest
+    /// free angle there instead.
     fn cul_de_sac(&mut self, from: usize, towards: V2, len: f32, name: &'static str) {
         let a = self.pos(from);
-        let d = geom::normalize(geom::sub(towards, a));
+        let mut d = geom::normalize(geom::sub(towards, a));
+        let heads = self.headings_at(from);
+        let angle = |u: V2| wp_math::atan2(u[1], u[0]);
+        let gap = |x: f32, y: f32| (y - x).rem_euclid(std::f32::consts::TAU);
+        let near = heads.iter().any(|h| {
+            let g = gap(angle(*h), angle(d));
+            g.min(std::f32::consts::TAU - g) < MIN_STUB_ANGLE_RAD
+        });
+        if near && !heads.is_empty() {
+            let mut hs: Vec<f32> = heads.iter().map(|h| angle(*h)).collect();
+            hs.sort_by(f32::total_cmp);
+            let (mut best, mut widest) = (0.0f32, -1.0f32);
+            for k in 0..hs.len() {
+                let (x, y) = (hs[k], hs[(k + 1) % hs.len()]);
+                let g = if hs.len() == 1 {
+                    std::f32::consts::TAU
+                } else {
+                    gap(x, y)
+                };
+                if g > widest {
+                    widest = g;
+                    best = x + g * 0.5;
+                }
+            }
+            let (sn, cs) = wp_math::sin_cos(best);
+            d = [cs, sn];
+        }
         let end = geom::add(a, geom::scale(d, len));
         let b = self.node(end);
         let bulge = self.rng.range_f32(-8.0, 8.0);
@@ -1084,7 +1196,96 @@ impl Gen {
         let ridge = resample(&catmull_rom(&ridge_ctrl, 5.0), 5.0);
         self.road(knob, mer[3][1], ridge, HILL_ROAD, "Ridge Road");
 
+        // ---- Residential courts (playtest row 95) -------------------------------------
+        // Laid last so every road above keeps its shape: curving dead-end streets that leave
+        // the middle of a block edge (a T-junction) and end in a turnaround inside the block.
+        for (grid, name) in [
+            (&sub, "Larkspur Court"),
+            (&mer, "Mercer Court"),
+            (&eg, "Eastgate Court"),
+            (&bv, "Bayview Court"),
+        ] {
+            self.courts(grid, name);
+        }
+
         (loop_roads, hollins, knob, lot, r40w, r40n)
+    }
+
+    /// Courts off a residential grid (playtest row 95): for each local block edge at least
+    /// [`COURT_MIN_EDGE_M`] long, with chance [`COURT_CHANCE`], a curving dead-end street from
+    /// the edge's middle (a T-junction splitting the edge) [`COURT_LEN_M`] into the block on
+    /// one side, kept [`COURT_CLEARANCE_M`] from every other road beyond its first 25 m.
+    fn courts(&mut self, grid: &[Vec<usize>], name: &'static str) {
+        let ids: std::collections::BTreeSet<usize> = grid.iter().flatten().copied().collect();
+        // Candidate drafts: local streets between two nodes of this grid.
+        let cands: Vec<(usize, usize)> = self
+            .drafts
+            .iter()
+            .filter(|d| ids.contains(&d.a) && ids.contains(&d.b))
+            .filter(|d| d.st.class == RoadClass::Local)
+            .map(|d| (d.a, d.b))
+            .collect();
+        for (a, b) in cands {
+            let roll = self.rng.next_f32();
+            let side = if self.rng.next_f32() < 0.5 { 1.0 } else { -1.0 };
+            let len = COURT_LEN_M * self.rng.range_f32(0.8, 1.15);
+            let bulge = self.rng.range_f32(-10.0, 10.0);
+            if roll >= COURT_CHANCE {
+                continue;
+            }
+            let Some(k) = self.drafts.iter().position(|d| d.a == a && d.b == b) else {
+                continue;
+            };
+            let path = self.drafts[k].path.clone();
+            let cum = cum2(&path);
+            let total = cum[cum.len() - 1];
+            if total < COURT_MIN_EDGE_M {
+                continue;
+            }
+            let (mid, t) = point_on(&path, &cum, total * 0.5);
+            let dir = geom::scale(geom::right_of(t), side);
+            let end = geom::add(mid, geom::scale(dir, len));
+            let stub = bent(mid, end, bulge, 8.0);
+            // Clear of every other road (and of other courts) past its mouth.
+            let scum = cum2(&stub);
+            let clear = (0..stub.len()).filter(|i| scum[*i] > 25.0).all(|i| {
+                // Its own block edge runs away behind it.
+                self.drafts
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != k)
+                    .all(|(_, d)| {
+                        d.path.windows(2).all(|w| {
+                            geom::point_segment_distance(stub[i], w[0], w[1]) > COURT_CLEARANCE_M
+                        })
+                    })
+            });
+            let crosses = self.drafts.iter().any(|d| {
+                d.st.class != RoadClass::Highway && !path_crossings(&stub[1..], &d.path).is_empty()
+            });
+            if !clear || crosses {
+                continue;
+            }
+            // Split the edge at its middle (keeping its curve) and lay the court.
+            // In place (the first half keeps the draft's index; road indices handed out
+            // earlier, e.g. Hollins Drive's, stay valid).
+            let d = self.drafts[k].clone();
+            let m = self.node(mid);
+            let first = sub_path(&d.path, &cum, 0.0, total * 0.5);
+            let second = sub_path(&d.path, &cum, total * 0.5, total);
+            self.drafts[k] = Draft {
+                b: m,
+                path: first,
+                ..d.clone()
+            };
+            self.drafts.push(Draft {
+                a: m,
+                path: second,
+                ..d
+            });
+            let e = self.node(end);
+            self.road(m, e, stub, SERVICE, name);
+        }
     }
 
     /// Replace the straight road `a`–`b` by two roads through `mid`.
@@ -1134,12 +1335,7 @@ fn connected(edges: &[(usize, usize, bool, usize, f32)], keep: &[bool]) -> bool 
 
 /// Half paved width of a style (widest side), m.
 fn half_width(st: &Style, opt: &BuildOptions) -> f32 {
-    let w = match st.class {
-        RoadClass::Highway => opt.highway_lane_width_m,
-        RoadClass::Alley => opt.alley_lane_width_m,
-        _ => opt.lane_width_m,
-    };
-    st.fwd.max(st.bwd) as f32 * w + if st.parking { opt.parking_width_m } else { 0.0 }
+    builder::half_width_of(st.class, st.fwd, st.bwd, st.parking, opt)
 }
 
 /// Pinned flat length at each node (junction box estimate), m.
@@ -1514,6 +1710,201 @@ fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
         }
     }
     out
+}
+
+/// Plan the covered roads: the Hollins Tunnel on Loop 9 and Founders Cut on the Uptown
+/// Connector. A dipped cover (`dip` m below the lowest natural ground over it) gets an internal
+/// height anchor, so the profile ramps down into it within the grade cap. The plans live on
+/// the drafts.
+fn plan_covers(g: &mut Gen) {
+    let plans: [(&str, V2, V2, V2, f32, CoverKind, &'static str); 2] = [
+        // Loop 9 through the Hollins Heights shoulder (it already runs in a cut there).
+        (
+            "Loop 9",
+            [-1000.0, 1390.0],
+            [-720.0, 1376.0],
+            [-1110.0, 1399.0],
+            0.0,
+            CoverKind::Tunnel,
+            "Hollins Tunnel",
+        ),
+        // The Uptown Connector under a plaza deck.
+        (
+            "Uptown Connector",
+            [416.0, 1100.0],
+            [418.0, 1005.0],
+            [419.5, 1110.0],
+            7.0,
+            CoverKind::CoveredTrench,
+            "Founders Cut",
+        ),
+    ];
+    for (road, probe, p0, p1, dip, kind, name) in plans {
+        let Some(ri) = (0..g.drafts.len()).find(|k| {
+            let d = &g.drafts[*k];
+            d.name == road && project2(&d.path, &cum2(&d.path), probe).1 < 40.0
+        }) else {
+            continue;
+        };
+        let d = &g.drafts[ri];
+        let cum = cum2(&d.path);
+        let (a, b) = (project2(&d.path, &cum, p0).0, project2(&d.path, &cum, p1).0);
+        let (s0, s1, p0, p1) = if a <= b {
+            (a, b, p0, p1)
+        } else {
+            (b, a, p1, p0)
+        };
+        if dip > 0.0 {
+            let mut lowest = f32::INFINITY;
+            let mut s = s0;
+            while s <= s1 {
+                lowest = lowest.min(g.nat.z(point_on(&d.path, &cum, s).0));
+                s += 4.0;
+            }
+            g.drafts[ri].anchors.push((s0, s1, lowest - dip));
+        }
+        g.drafts[ri].covers.push(CoverPlan { p0, p1, kind, name });
+    }
+}
+
+/// Covered spans on the built road surfaces (portal to portal), one per plan. On divided
+/// Loop 9 one tube spans both carriageways through the stretch: its centreline runs midway
+/// between them and its half width reaches the far paved edge. `remap` maps draft roads to
+/// builder roads (`None` for the Loop 9 drafts, which became `loop_roads`).
+fn covered_spans(
+    g: &Gen,
+    built: &Built,
+    remap: &[Option<usize>],
+    loop_roads: &[usize],
+) -> Vec<CoveredSpan> {
+    let mut out = Vec::new();
+    for (di, d) in g.drafts.iter().enumerate() {
+        for c in &d.covers {
+            let roads: Vec<usize> = match remap.get(di).copied().flatten() {
+                Some(r) => vec![r],
+                // A carriageway passes through the covered stretch when both portals project
+                // onto it (inside its ends) within reach of its centreline.
+                None => loop_roads
+                    .iter()
+                    .copied()
+                    .filter(|r| {
+                        let s = &built.surfaces[*r];
+                        let cum = geom::cumulative(&s.centre);
+                        let len = cum[cum.len() - 1];
+                        [c.p0, c.p1].iter().all(|p| {
+                            let pr = geom::project(&s.centre, &cum, *p);
+                            pr.s > 0.0 && pr.s < len && pr.dist < 2.0 * CARRIAGEWAY_OFFSET_M
+                        })
+                    })
+                    .collect(),
+            };
+            let Some(&ri) = roads.first() else {
+                continue;
+            };
+            let s = &built.surfaces[ri];
+            let cum = geom::cumulative(&s.centre);
+            let u0 = geom::project(&s.centre, &cum, c.p0).s.max(0.0);
+            let u1 = geom::project(&s.centre, &cum, c.p1)
+                .s
+                .min(cum[cum.len() - 1]);
+            let (u0, u1) = (u0.min(u1), u0.max(u1));
+            let mut centre = vec![geom::point_at(&s.centre, &cum, u0).0];
+            for (k, p) in s.centre.iter().enumerate() {
+                if cum[k] > u0 + 0.5 && cum[k] < u1 - 0.5 {
+                    centre.push(*p);
+                }
+            }
+            centre.push(geom::point_at(&s.centre, &cum, u1).0);
+            let mut edge = s.left_m.max(s.right_m);
+            // The other carriageways: move the centreline midway to the nearest point of each
+            // and widen the tube by that half spacing.
+            for &rj in &roads[1..] {
+                let o = &built.surfaces[rj];
+                let ocum = geom::cumulative(&o.centre);
+                let mut half = 0.0f32;
+                for p in centre.iter_mut() {
+                    let pr = geom::project(&o.centre, &ocum, geom::xy(*p));
+                    let q = geom::point_at(&o.centre, &ocum, pr.s).0;
+                    half = half.max(0.5 * geom::dist(geom::xy(*p), geom::xy(q)));
+                    *p = [
+                        0.5 * (p[0] + q[0]),
+                        0.5 * (p[1] + q[1]),
+                        0.5 * (p[2] + q[2]),
+                    ];
+                }
+                edge = edge.max(o.left_m.max(o.right_m)) + half;
+            }
+            let walk = if s.sidewalk[0] || s.sidewalk[1] {
+                3.5
+            } else {
+                1.5
+            };
+            out.push(CoveredSpan {
+                name: c.name.into(),
+                kind: c.kind,
+                road: ri as u32,
+                centre,
+                half_width_m: edge + walk,
+                clearance_m: if s.highway {
+                    TUNNEL_CLEARANCE_HIGHWAY_M
+                } else {
+                    TUNNEL_CLEARANCE_M
+                },
+            });
+        }
+    }
+    out
+}
+
+/// Fill the ground back over a covered span: beyond the carved shoulder each side, up to the
+/// roof deck (or the natural ground, if lower). Inside the walls and under the deck overhang
+/// the carve stays, so the terrain never reaches into the tube.
+fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
+    for span in spans {
+        let shape = CoverShape::new(span);
+        let inner = span.half_width_m + WALL_M + DECK_OVERHANG_M - 1.0;
+        let reach = span.half_width_m + 45.0;
+        let (lo, hi) = (shape.bounds[0], shape.bounds[1]);
+        let cell = hf.cell_m;
+        let i0 = (((lo[0] - 45.0 - hf.origin[0]) / cell).floor().max(0.0)) as u32;
+        let j0 = (((lo[1] - 45.0 - hf.origin[1]) / cell).floor().max(0.0)) as u32;
+        let i1 = ((((hi[0] + 45.0 - hf.origin[0]) / cell).ceil()) as u32).min(hf.nx - 1);
+        let j1 = ((((hi[1] + 45.0 - hf.origin[1]) / cell).ceil()) as u32).min(hf.ny - 1);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let p = hf.vertex_pos(i, j);
+                let q = shape.locate(p);
+                if q.s < 0.0 || q.s > shape.length() {
+                    continue;
+                }
+                let lat = q.lateral.abs();
+                if lat < inner || lat > reach {
+                    continue;
+                }
+                let roof_top = q.road_z + span.clearance_m + ROOF_M;
+                let v = (j * hf.nx + i) as usize;
+                let fill = nat.z(p).min(roof_top);
+                if fill > hf.z[v] {
+                    hf.z[v] = (fill * 1000.0).round() / 1000.0;
+                }
+            }
+        }
+    }
+}
+
+/// Whether a building footprint would stand in a covered span's trench (inside the deck).
+fn in_cover_corridor(shapes: &[CoverShape], fp: &[V2]) -> bool {
+    shapes.iter().any(|sh| {
+        let r = sh.span.half_width_m + WALL_M + DECK_OVERHANG_M + 1.0;
+        let mut c = [0.0f32; 2];
+        for q in fp {
+            c = [c[0] + q[0] / fp.len() as f32, c[1] + q[1] / fp.len() as f32];
+        }
+        fp.iter().chain(std::iter::once(&c)).any(|q| {
+            let l = sh.locate(*q);
+            l.s >= -2.0 && l.s <= sh.length() + 2.0 && l.lateral.abs() <= r
+        })
+    })
 }
 
 // ------------------------------------------------------------------------------------------
@@ -2023,6 +2414,39 @@ fn spec_path(nodes: &[NodeSpec], r: &RoadSpec) -> Vec<V2> {
 // Terrain carving
 // ------------------------------------------------------------------------------------------
 
+/// Paved radius of every node's junction / bend area: reaching the trimmed road ends (their
+/// centre distance plus half width) and at least the intersection radius; 0 for unused nodes.
+fn node_radii(built: &Built, nodes: &[NodeSpec]) -> Vec<f32> {
+    let mut radius = vec![0.0f32; nodes.len()];
+    for (s, rl) in built.surfaces.iter().zip(&built.road_lanes) {
+        let _ = rl;
+        let lane0 = built.lanes.iter().find(|l| l.road == s.road);
+        let Some(lane0) = lane0 else { continue };
+        let (na, nb) = if lane0.from_node as usize == lane0.to_node as usize {
+            (lane0.from_node as usize, lane0.to_node as usize)
+        } else {
+            // Surface centre runs a → b of the source road; find which node is which by
+            // distance.
+            let (f, t) = (lane0.from_node as usize, lane0.to_node as usize);
+            let c0 = geom::xy(s.centre[0]);
+            if geom::dist(c0, nodes[f].pos) <= geom::dist(c0, nodes[t].pos) {
+                (f, t)
+            } else {
+                (t, f)
+            }
+        };
+        let w = s.left_m.max(s.right_m);
+        radius[na] = radius[na].max(geom::dist(geom::xy(s.centre[0]), nodes[na].pos) + w);
+        let e = geom::xy(s.centre[s.centre.len() - 1]);
+        radius[nb] = radius[nb].max(geom::dist(e, nodes[nb].pos) + w);
+    }
+    for ix in &built.intersections {
+        let n = ix.node as usize;
+        radius[n] = radius[n].max(ix.radius_m);
+    }
+    radius
+}
+
 /// Carve `hf` (natural ground) to the built road surfaces and junction areas. `deck(road,
 /// point index)` says whether a surface point is a bridge deck (left uncarved).
 fn carve(
@@ -2052,14 +2476,15 @@ fn carve(
                          core_min: &mut [f32],
                          acc_w: &mut [f32],
                          acc_wt: &mut [f32],
+                         shoulder: f32,
                          blend: f32| {
         for &v in touched.iter() {
             let d = best_d[v];
             let t = best_t[v];
-            if d <= SHOULDER_M {
+            if d <= shoulder {
                 core_min[v] = core_min[v].min(t);
             } else {
-                let w = smoothstep(SHOULDER_M + blend, SHOULDER_M, d);
+                let w = smoothstep(shoulder + blend, shoulder, d);
                 acc_w[v] += w;
                 acc_wt[v] += w * t;
             }
@@ -2099,7 +2524,12 @@ fn carve(
     let mut source = 0u32;
     for (ri, s) in built.surfaces.iter().enumerate() {
         let blend = if s.highway { 22.0 } else { 15.0 };
-        let reach = s.left_m.max(s.right_m) + SHOULDER_M + blend;
+        let shoulder = if s.highway {
+            SHOULDER_M
+        } else {
+            STREET_SHOULDER_M
+        };
+        let reach = s.left_m.max(s.right_m) + shoulder + blend;
         for k in 0..s.centre.len() - 1 {
             let (a, b) = (s.centre[k], s.centre[k + 1]);
             if deck(ri, k) || deck(ri, k + 1) {
@@ -2123,7 +2553,14 @@ fn carve(
                 let d = (d_out * d_out + d_end * d_end).sqrt();
                 let zc = a[2] + (b[2] - a[2]) * t;
                 let bank = bank_a + (bank_b - bank_a) * t;
-                let tz = zc + bank * lat.clamp(-s.left_m, s.right_m) - CARVE_BELOW_M;
+                let tz = if s.highway || d_out <= 0.0 {
+                    zc + bank * lat.clamp(-s.left_m, s.right_m) - CARVE_BELOW_M
+                } else {
+                    // Streets: up to just under the sidewalk / lot level (the sidewalk
+                    // continues the bank to its back edge; the lot is level beyond).
+                    let lat_walk = lat.signum() * (edge + d_out.min(SIDEWALK_W_M));
+                    zc + bank * lat_walk + KERB_H_M + street_carve_offset(d_out)
+                };
                 (d, tz)
             };
             visit(
@@ -2144,45 +2581,33 @@ fn carve(
             &mut core_min,
             &mut acc_w,
             &mut acc_wt,
+            shoulder,
             blend,
         );
         source += 1;
     }
     // Junction and bend areas: a disc per node reaching the trimmed road ends.
-    let mut radius = vec![0.0f32; nodes.len()];
-    for (s, rl) in built.surfaces.iter().zip(&built.road_lanes) {
-        let _ = rl;
-        let lane0 = built.lanes.iter().find(|l| l.road == s.road);
-        let Some(lane0) = lane0 else { continue };
-        let (na, nb) = if lane0.from_node as usize == lane0.to_node as usize {
-            (lane0.from_node as usize, lane0.to_node as usize)
-        } else {
-            // Surface centre runs a → b of the source road; find which node is which by
-            // distance.
-            let (f, t) = (lane0.from_node as usize, lane0.to_node as usize);
-            let c0 = geom::xy(s.centre[0]);
-            if geom::dist(c0, nodes[f].pos) <= geom::dist(c0, nodes[t].pos) {
-                (f, t)
-            } else {
-                (t, f)
-            }
-        };
-        let w = s.left_m.max(s.right_m);
-        radius[na] = radius[na].max(geom::dist(geom::xy(s.centre[0]), nodes[na].pos) + w);
-        let e = geom::xy(s.centre[s.centre.len() - 1]);
-        radius[nb] = radius[nb].max(geom::dist(e, nodes[nb].pos) + w);
-    }
-    for ix in &built.intersections {
-        let n = ix.node as usize;
-        radius[n] = radius[n].max(ix.radius_m);
+    let radius = node_radii(built, nodes);
+    // Nodes where a street meets: their lots take over just past the paved radius.
+    let mut street_node = vec![false; nodes.len()];
+    for l in &built.lanes {
+        if l.kind != LaneKind::Highway {
+            street_node[l.from_node as usize] = true;
+            street_node[l.to_node as usize] = true;
+        }
     }
     for (n, node) in nodes.iter().enumerate() {
         if radius[n] <= 0.0 {
             continue;
         }
         let blend = 15.0;
+        let shoulder = if street_node[n] {
+            NODE_SHOULDER_M
+        } else {
+            SHOULDER_M
+        };
         let r = radius[n];
-        let reach = r + SHOULDER_M + blend;
+        let reach = r + shoulder + blend;
         let c = node.pos;
         let lo = [c[0] - reach, c[1] - reach];
         let hi = [c[0] + reach, c[1] + reach];
@@ -2205,6 +2630,7 @@ fn carve(
             &mut core_min,
             &mut acc_w,
             &mut acc_wt,
+            shoulder,
             blend,
         );
         source += 1;
@@ -2399,18 +2825,76 @@ fn obb_corners(o: &Obb) -> [V2; 4] {
     ]
 }
 
+/// Facade setback behind the sidewalk's back edge (on the lot), m.
+const FRONT_SETBACK_M: f32 = 1.5;
+
+/// Clearance from every paved edge a building corner keeps: the sidewalk and a metre more,
+/// so no building stands on another street's sidewalk, m.
+const BUILDING_CLEARANCE_M: f32 = SIDEWALK_W_M + 1.0;
+
+/// Centre height and cross slope of surface `s` at arc length `at` along its centre line
+/// (`cum` = [`cum2`] of its xy points).
+fn surface_z_bank(s: &RoadSurface, cum: &[f32], at: f32) -> (f32, f32) {
+    let n = s.centre.len();
+    let at = at.clamp(0.0, cum[n - 1]);
+    let k = cum.partition_point(|c| *c <= at).clamp(1, n - 1);
+    let t = ((at - cum[k - 1]) / (cum[k] - cum[k - 1]).max(1e-6)).clamp(0.0, 1.0);
+    (
+        s.centre[k - 1][2] + (s.centre[k][2] - s.centre[k - 1][2]) * t,
+        s.bank[k - 1] + (s.bank[k] - s.bank[k - 1]) * t,
+    )
+}
+
+/// Buildings along every street, facades [`FRONT_SETBACK_M`] behind the sidewalk on the level
+/// lot (playtest #52): the base reaches down to the lowest ground under the footprint (a
+/// plinth on the downhill side), never above the lot at the frontage. Lots that would stand
+/// next to a bridge deck (no lot there), on another street's sidewalk, in a junction's
+/// turning area or at a dead end's turnaround are skipped.
+///
+/// Residential and suburban frontages (playtest row 95) are laid out as houses on lots
+/// instead ([`residential::plan_lot`]): front yards, garages and driveways, fences, hedges
+/// and yard trees, a corner shop or two per district, and street trees on the verge
+/// ([`surface::verge_street`]). Returns the buildings and the decor.
 fn buildings(
     rng: &mut Rng,
     built: &Built,
+    nodes: &[NodeSpec],
     zones: &[Zone],
     hf: &Heightfield,
     dead_ends: &[V2],
-) -> Vec<Building> {
+) -> (Vec<Building>, Vec<Decor>) {
     let grid = SurfaceGrid::new(built);
-    let mut placed: Vec<Obb> = Vec::new();
-    let mut bgrid: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
-    let key = |p: V2| ((p[0] / 50.0).floor() as i32, (p[1] / 50.0).floor() as i32);
+    // Junction / bend areas with the turning paths through them, plus a sidewalk.
+    let node_r = node_radii(built, nodes);
+    let junctions: Vec<(V2, f32)> = nodes
+        .iter()
+        .zip(&node_r)
+        .filter(|(_, r)| **r > 0.0)
+        .map(|(n, r)| (n.pos, r + BUILDING_CLEARANCE_M))
+        .collect();
+    // Signalised / controlled crossings: corner shops stand next to them.
+    let crossings: Vec<V2> = built
+        .intersections
+        .iter()
+        .map(|ix| geom::xy(built.nodes[ix.node as usize].pos))
+        .collect();
+    let mut placed = residential::ObbIndex::default();
+    let mut solid_decor = residential::ObbIndex::default();
+    let mut shops: BTreeMap<usize, usize> = BTreeMap::new();
     let mut out = Vec::new();
+    let mut decor: Vec<Decor> = Vec::new();
+    // Clear of every paved edge by `clear`, of junction areas and dead-end turnarounds.
+    let site_ok = |o: &Obb, clear: f32| {
+        let corners = obb_corners(o);
+        let probes = [corners[0], corners[1], corners[2], corners[3], o.c];
+        probes.iter().all(|q| grid.clearance(built, *q) >= clear)
+            && !probes
+                .iter()
+                .any(|q| junctions.iter().any(|(c, r)| geom::dist(*q, *c) < *r))
+            && !probes
+                .iter()
+                .any(|q| dead_ends.iter().any(|d| geom::dist(*q, *d) < 20.0))
+    };
     for s in &built.surfaces {
         if s.highway {
             continue;
@@ -2418,21 +2902,151 @@ fn buildings(
         let pts: Vec<V2> = s.centre.iter().map(|p| geom::xy(*p)).collect();
         let cum = cum2(&pts);
         let len = cum[cum.len() - 1];
+        // Lane speed and kind of this road (for the verge rule).
+        let lane = built.road_lanes[s.road as usize]
+            .fwd
+            .first()
+            .or(built.road_lanes[s.road as usize].bwd.first())
+            .map(|l| &built.lanes[*l as usize]);
         for side in [1.0f32, -1.0] {
             let edge = if side > 0.0 { s.right_m } else { s.left_m };
+            // Sidewalk-top height `off` beyond this side's paved edge at arc length `a`.
+            let walk_z = |a: f32, off: f32| {
+                let (zc, bank) = surface_z_bank(s, &cum, a);
+                zc + bank * side * (edge + off) + KERB_H_M
+            };
+            // Top of the lot behind this side's sidewalk at arc length `a`.
+            let lot_z = |a: f32| walk_z(a, SIDEWALK_W_M);
+            // Point `off` beyond this side's paved edge at arc length `a`.
+            let beside = |a: f32, off: f32| {
+                let (q, tq) = point_on(&pts, &cum, a.clamp(0.0, len));
+                geom::add(q, geom::scale(geom::right_of(tq), side * (edge + off)))
+            };
+            // Whether the level lot exists behind the sidewalk at `a` (not beside a deck).
+            let has_lot =
+                |a: f32| (hf.height_at(beside(a, SIDEWALK_W_M + 1.75)) - lot_z(a)).abs() <= 0.3;
+            let mut drive_mouths: Vec<f32> = Vec::new();
             let mut at = 8.0;
+            let mut after_skip = true;
             while at < len - 8.0 {
+                let at0 = at;
                 let (p, t) = point_on(&pts, &cum, at);
                 let kind = zone_kind(zones, p);
+                if residential::is_residential(kind) {
+                    // A corner shop on the first lot after a crossing, at most two per zone.
+                    let zone = zones
+                        .iter()
+                        .position(|z| geom::point_in_polygon(p, &z.polygon))
+                        .unwrap_or(usize::MAX);
+                    let near_crossing = crossings.iter().any(|c| geom::dist(*c, p) < 45.0);
+                    let shop = after_skip
+                        && near_crossing
+                        && shops.get(&zone).copied().unwrap_or(0) < residential::SHOPS_PER_ZONE
+                        && rng.chance(0.25);
+                    let (lk, w) = residential::next_lot(rng, kind, shop);
+                    let centre = at + w * 0.5;
+                    at += w;
+                    if centre > len - 8.0 {
+                        break;
+                    }
+                    let (q, tq) = point_on(&pts, &cum, centre);
+                    let out_n = geom::scale(geom::right_of(tq), side);
+                    let along = if side > 0.0 {
+                        tq
+                    } else {
+                        geom::scale(tq, -1.0)
+                    };
+                    let site = residential::LotSite {
+                        origin: geom::add(q, geom::scale(out_n, edge + SIDEWALK_W_M)),
+                        along,
+                        out: out_n,
+                        width: w,
+                        district: kind,
+                        kind: lk,
+                    };
+                    // The level lot at the point's own arc length (lots slope along the
+                    // street), the terrain beyond it.
+                    let ground = |g: V2| {
+                        let rel = geom::sub(g, site.origin);
+                        if geom::dot(rel, site.out) < LOT_W_M - 0.05 {
+                            lot_z((centre + geom::dot(rel, tq)).clamp(0.0, len))
+                        } else {
+                            hf.height_at(g)
+                        }
+                    };
+                    if !has_lot(centre - w * 0.4) || !has_lot(centre) || !has_lot(centre + w * 0.4)
+                    {
+                        after_skip = true;
+                        continue;
+                    }
+                    let plan = residential::plan_lot(rng, &site, &ground);
+                    let (main, mo) = &plan.buildings[0];
+                    let shrink = |o: &Obb| Obb {
+                        hl: o.hl - 0.05,
+                        hw: o.hw - 0.05,
+                        ..*o
+                    };
+                    let steep = {
+                        let zs: Vec<f32> =
+                            obb_corners(mo).iter().map(|c| hf.height_at(*c)).collect();
+                        let lo = zs.iter().copied().fold(f32::INFINITY, f32::min);
+                        let hi = zs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                        hi - lo > 4.0 || lo < 1.0
+                    };
+                    if steep
+                        || !site_ok(mo, BUILDING_CLEARANCE_M)
+                        || placed.clashes(&shrink(mo))
+                        || solid_decor.clashes(mo)
+                    {
+                        after_skip = true;
+                        continue;
+                    }
+                    after_skip = false;
+                    if lk == residential::LotKind::Shop {
+                        *shops.entry(zone).or_default() += 1;
+                    }
+                    let mut kept = vec![false; plan.buildings.len()];
+                    kept[0] = true;
+                    out.push(main.clone());
+                    for (k, (b, o)) in plan.buildings.iter().enumerate().skip(1) {
+                        if site_ok(o, BUILDING_CLEARANCE_M)
+                            && !placed.clashes(&shrink(o))
+                            && !solid_decor.clashes(o)
+                        {
+                            kept[k] = true;
+                            out.push(b.clone());
+                        }
+                    }
+                    for (k, (_, o)) in plan.buildings.iter().enumerate() {
+                        if kept[k] {
+                            placed.insert(*o);
+                        }
+                    }
+                    for (k, d, o) in &plan.tied {
+                        // The driveway crosses the lot from the sidewalk: only its far half
+                        // needs the clearance.
+                        if kept[*k] && !placed.clashes(&shrink(o)) {
+                            decor.push(*d);
+                            let u = geom::dot(geom::sub([d.pos[0], d.pos[1]], q), tq);
+                            drive_mouths.push(centre + u);
+                        }
+                    }
+                    for (d, o) in &plan.decor {
+                        if site_ok(o, SIDEWALK_W_M + 0.2) && !placed.clashes(o) {
+                            decor.push(*d);
+                            solid_decor.insert(*o);
+                        }
+                    }
+                    continue;
+                }
+                after_skip = false;
                 let (lot, depth, gap) = match kind {
                     DistrictKind::Core => (30.0, 24.0, 2.0),
                     DistrictKind::Commercial => (24.0, 18.0, 3.0),
-                    DistrictKind::Residential => (16.0, 12.0, 5.0),
-                    DistrictKind::Suburb => (15.0, 11.0, 7.0),
-                    DistrictKind::Industrial | DistrictKind::Port => (42.0, 30.0, 6.0),
+                    _ => (42.0, 30.0, 6.0),
                 };
                 let n = geom::scale(geom::right_of(t), side);
-                let front = edge + 4.5;
+                let front = edge + SIDEWALK_W_M + FRONT_SETBACK_M;
                 let c = geom::add(p, geom::scale(n, front + depth * 0.5));
                 let o = Obb {
                     c,
@@ -2443,31 +3057,27 @@ fn buildings(
                 at += lot;
                 let corners = obb_corners(&o);
                 let probes = [corners[0], corners[1], corners[2], corners[3], c];
-                if probes.iter().any(|q| grid.clearance(built, *q) < 3.0) {
-                    continue;
-                }
-                // Keep dead-end turnarounds clear (U-turns swing past the road end).
-                if probes
-                    .iter()
-                    .any(|q| dead_ends.iter().any(|d| geom::dist(*q, *d) < 20.0))
-                {
-                    continue;
-                }
-                let k = key(c);
-                let clash = (-1..=1).any(|dx| {
-                    (-1..=1).any(|dy| {
-                        bgrid
-                            .get(&(k.0 + dx, k.1 + dy))
-                            .is_some_and(|v| v.iter().any(|b| geom::obb_overlap(&placed[*b], &o)))
-                    })
-                });
-                if clash {
+                if !site_ok(&o, BUILDING_CLEARANCE_M) || placed.clashes(&o) {
                     continue;
                 }
                 let zs: Vec<f32> = probes.iter().map(|q| hf.height_at(*q)).collect();
                 let zmin = zs.iter().copied().fold(f32::INFINITY, f32::min);
                 let zmax = zs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 if zmax - zmin > 8.0 || zmin < 1.0 {
+                    continue;
+                }
+                // The frontage stands on the lot: the lot top along the facade, and the ground
+                // carved to it there (not a deck or its approach, where there is no lot).
+                let half_len = o.hl;
+                let fronts = [at0 - half_len, at0, at0 + half_len];
+                let lot_min = fronts
+                    .iter()
+                    .map(|a| lot_z(*a))
+                    .fold(f32::INFINITY, f32::min);
+                if fronts.iter().any(|a| {
+                    (hf.height_at(beside(*a, SIDEWALK_W_M + FRONT_SETBACK_M)) - lot_z(*a)).abs()
+                        > 0.3
+                }) {
                     continue;
                 }
                 let storeys = match kind {
@@ -2479,26 +3089,69 @@ fn buildings(
                         }
                     }
                     DistrictKind::Commercial => 2 + rng.below(4),
-                    DistrictKind::Residential => 1 + rng.below(3),
-                    DistrictKind::Suburb => 1 + rng.below(2),
                     _ => 2 + rng.below(2),
                 };
                 let mut fp = corners.to_vec();
                 if signed_area(&fp) < 0.0 {
                     fp.reverse();
                 }
-                let base = zmin - 0.3;
-                out.push(Building {
-                    footprint: fp,
-                    height_m: storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0) + (zmax - base),
-                    base_z_m: base,
-                });
-                bgrid.entry(k).or_default().push(placed.len());
-                placed.push(o);
+                // Down to the lowest ground under the footprint, and under the lot at the
+                // frontage (the walls meet the lot; on the downhill side they continue down
+                // as a plinth).
+                let base = zmin.min(lot_min) - 0.3;
+                out.push(Building::block(
+                    fp,
+                    storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0) + (zmax - base),
+                    base,
+                ));
+                placed.insert(o);
+            }
+            // Street trees on the verge, clear of driveway mouths, junctions and dead ends.
+            let verge = lane.is_some_and(|l| {
+                let mid = point_on(&pts, &cum, len * 0.5).0;
+                surface::verge_street(Some(zone_kind(zones, mid)), l.kind, l.speed_limit_mps)
+            });
+            if !verge {
+                continue;
+            }
+            let mut a = residential::STREET_TREE_SPACING_M * 0.5;
+            while a < len {
+                let here = a;
+                a += residential::STREET_TREE_SPACING_M;
+                let p = beside(here, surface::VERGE_W_M * 0.5);
+                if !residential::is_residential(zone_kind(zones, p))
+                    || drive_mouths
+                        .iter()
+                        .any(|m| (m - here).abs() < residential::TREE_DRIVEWAY_CLEAR_M)
+                    || !has_lot(here)
+                {
+                    continue;
+                }
+                let trunk = Obb {
+                    c: p,
+                    f: [1.0, 0.0],
+                    hl: residential::TRUNK_R_M,
+                    hw: residential::TRUNK_R_M,
+                };
+                // On its own street's verge: no other street's pavement nearer than its own.
+                if grid.clearance(built, p) < surface::VERGE_W_M * 0.5 - 0.1 {
+                    continue;
+                }
+                if junctions.iter().any(|(c, r)| geom::dist(p, *c) < *r + 2.0)
+                    || dead_ends.iter().any(|d| geom::dist(p, *d) < 25.0)
+                    || placed.clashes(&trunk)
+                {
+                    continue;
+                }
+                decor.push(residential::street_tree(
+                    rng,
+                    p,
+                    walk_z(here, surface::VERGE_W_M * 0.5),
+                ));
             }
         }
     }
-    out
+    (out, decor)
 }
 
 fn signed_area(p: &[V2]) -> f32 {
@@ -2569,6 +3222,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     };
     let (loop_drafts, hollins_draft, _knob, _lot, _r40w, _r40n) = g.layout();
     let draft_crossings = plan_crossings(&mut g);
+    plan_covers(&mut g);
     let opt = BuildOptions::default();
     // Two passes: the first places the highway, the second holds each interchange terminal
     // within reach of its ramps' gores (the highway itself comes out the same).
@@ -2643,6 +3297,8 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         }
     };
     carve(&mut hf, &built, &g.nodes, &deck);
+    let covered = covered_spans(&g, &built, &remap, &loop_roads);
+    backfill_covers(&mut hf, &g.nat, &covered);
 
     let zones = zones();
     let mut degree = vec![0usize; g.nodes.len()];
@@ -2654,7 +3310,11 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .filter(|n| degree[*n] == 1)
         .map(|n| g.nodes[n].pos)
         .collect();
-    let buildings = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
+    let (mut buildings, mut decor) =
+        buildings(&mut g.rng, &built, &g.nodes, &zones, &hf, &dead_ends);
+    let cover_shapes: Vec<CoverShape> = covered.iter().map(CoverShape::new).collect();
+    buildings.retain(|b| !in_cover_corridor(&cover_shapes, &b.footprint));
+    decor.retain(|d| !in_cover_corridor(&cover_shapes, &[[d.pos[0], d.pos[1]]]));
 
     // POIs. The first race grid is the city-chase / free-drive spawn.
     let mut pois = Vec::new();
@@ -2756,6 +3416,44 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
             });
         }
     }
+    // Route ends either side of each covered road (drive-through and pursuit scenarios):
+    // "<name> entry" sits `before` m before the first portal in the forward direction,
+    // "<name> exit" `after` m past the second (measured from the portals, so they hold on
+    // divided Loop 9, whose carriageway pieces end at the interchanges), "<name> lay-by" in
+    // the middle of the covered stretch (a place to hide from the helicopter). All on the
+    // forward kerb lane of the span's road.
+    let tunnel_ends: [(&str, f32, f32); 2] = [
+        ("Hollins Tunnel", 150.0, 180.0),
+        ("Founders Cut", 40.0, 40.0),
+    ];
+    for (name, before, after) in tunnel_ends {
+        let Some(c) = covered.iter().find(|c| c.name == name) else {
+            continue;
+        };
+        let Some(&lane) = built.road_lanes[c.road as usize].fwd.last() else {
+            continue;
+        };
+        let pl = &built.lanes[lane as usize].polyline;
+        let cum = geom::cumulative(pl);
+        let total = cum[cum.len() - 1];
+        let along = |p: V3| geom::project(pl, &cum, geom::xy(p)).s;
+        let (a, b) = (along(c.centre[0]), along(c.centre[c.centre.len() - 1]));
+        let (p0, p1) = (a.min(b), a.max(b));
+        for (suffix, s) in [
+            ("entry", p0 - before),
+            ("lay-by", 0.5 * (p0 + p1)),
+            ("exit", p1 + after),
+        ] {
+            let (p, d) = geom::point_at(pl, &cum, s.clamp(1.0, total - 1.0));
+            pois.push(Poi {
+                kind: PoiKind::RaceStartGrid,
+                name: format!("{name} {suffix}"),
+                pos: p,
+                heading_rad: geom::yaw_of(d),
+                lane: Some(lane),
+            });
+        }
+    }
     let mut block_poi = |kind: PoiKind, name: &str, p: V2| {
         if let Some((lane, q, yaw)) = nearest_lane(&built, p) {
             pois.push(Poi {
@@ -2803,6 +3501,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         pois,
         buildings,
     );
+    net.decor = decor;
     net.bounds_min = [
         net.bounds_min[0].min(MAP_LO[0]),
         net.bounds_min[1].min(MAP_LO[1]),
@@ -2812,6 +3511,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         net.bounds_max[1].max(MAP_HI[1]),
     ];
     net.terrain = Some(hf);
+    net.covered = covered;
     let report = VesperReport {
         crossings,
         skipped_roads: g.skipped,
@@ -3159,5 +3859,51 @@ mod tests {
             }
             assert!(b.roof_z() > b.base_z_m + 3.0);
         }
+    }
+    #[test]
+    fn covered_roads_block_sight_in_and_out() {
+        let (net, _) = city();
+        let names: Vec<&str> = net.covered.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Hollins Tunnel", "Founders Cut"]);
+        let mut map = crate::CityMap::new(net.clone());
+        let eye = |p: V3| [p[0], p[1], p[2] + 1.3];
+        for (i, c) in net.covered.iter().enumerate() {
+            let sh = CoverShape::new(c);
+            let len = sh.length();
+            // Founders Cut is 105 m: main's Uptown diamond needs the climb room north of it.
+            assert!(len > 100.0, "{} only {len} m", c.name);
+            let at = |s: f32| eye(geom::point_at(&c.centre, &sh.cum, s).0);
+            let (a, b) = (at(30.0), at(len * 0.5));
+            assert_eq!(map.covered_at(a), Some(i));
+            // Inside the same tunnel: clear. From the road 50 m before the portal: blocked.
+            assert!(map.line_of_sight(a, b), "{}: inside", c.name);
+            let (p0, d0) = geom::point_at(&c.centre, &sh.cum, 0.0);
+            let out = eye([p0[0] - d0[0] * 50.0, p0[1] - d0[1] * 50.0, p0[2]]);
+            assert_eq!(map.covered_at(out), None);
+            assert!(!map.line_of_sight(out, a), "{}: portal", c.name);
+            assert!(!map.line_of_sight(a, out), "{}: portal back", c.name);
+            // The helicopter overhead loses the car inside, unless cover is switched off.
+            let heli = [b[0], b[1], b[2] + 120.0];
+            assert!(!map.line_of_sight(heli, b), "{}: helicopter", c.name);
+            map.covered_los = false;
+            assert!(map.line_of_sight(heli, b));
+            map.covered_los = true;
+            // The deck (or backfill) is above the ceiling and terrain never enters the tube.
+            let t = net.terrain.as_ref().unwrap();
+            for k in 0..c.centre.len() {
+                let p = c.centre[k];
+                assert!(
+                    t.height_at(geom::xy(p)) <= p[2] + 0.05,
+                    "{}: ground in the tube",
+                    c.name
+                );
+            }
+        }
+        // No building stands on a deck or in a trench.
+        let shapes: Vec<CoverShape> = net.covered.iter().map(CoverShape::new).collect();
+        assert!(net
+            .buildings
+            .iter()
+            .all(|b| !in_cover_corridor(&shapes, &b.footprint)));
     }
 }

@@ -1,0 +1,38 @@
+// Playtest row 32: a player car parked across one lane of a two-lane collector (12×12 grid,
+// 615 m from the core), nose towards the kerb. Civilians held up behind it pass it slowly in the
+// oncoming lane when that is clear, or turn around; none touch it or each other. Near-player
+// traffic is physical (Rapier bodies), so this covers the physical go-around / turn-around.
+// Police patrols are on (they share the roads; wp_police::avoid handles their own passing).
+(
+    name: "city_blocked_parked_player_grid",
+    seed: 7,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 4.0,
+    parked_cars: false,
+    police_cars: true,
+    assists: ai,
+    entities: [
+        (
+            id: "parked",
+            car: "debug_sedan",
+            // Lane 1330 centre at (-680.65, -53.25), heading -X; 0.3 m towards the kerb, turned 90°.
+            pos: (-680.65, -52.95, 0.0),
+            yaw: 3.1416,
+            inputs: [(t_s: 0.0, input: (handbrake: 1.0))],
+        ),
+    ],
+    duration_s: 120.0,
+    // Measured (seeds 3/5/7/9/11: 1-4 passes, 0-1 turn-arounds; 0 collisions, 0 stuck, parked car
+    // untouched). The moving fraction is city-wide (red lights included): 0.45-0.64.
+    expect: [
+        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
+        world_metric(name: "traffic_go_arounds", min: 1.0, max: 100.0),
+        world_metric(name: "traffic_turnarounds", min: 0.0, max: 30.0),
+        world_metric(name: "traffic_stuck_recycled", min: 0.0, max: 3.0),
+        world_metric(name: "traffic_moving_frac_min", min: 0.4, max: 1.0),
+        metric(name: "final_health", min: 0.99, max: 1.0),
+        metric(name: "distance_m", min: 0.0, max: 0.5),
+    ],
+)

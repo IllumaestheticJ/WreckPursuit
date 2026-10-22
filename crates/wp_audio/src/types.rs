@@ -82,6 +82,8 @@ pub mod slot {
     pub const ENGINE_LAYER: u32 = 0x0000_0100;
     /// Rev-limiter layer.
     pub const ENGINE_LIMITER: u32 = 0x0000_0180;
+    /// The physically modelled engine (one voice per car, replaces the layers).
+    pub const ENGINE_PHYSICAL: u32 = 0x0000_01B0;
     /// Turbo whistle loop.
     pub const TURBO: u32 = 0x0000_0190;
     /// Supercharger whine loop.
@@ -90,10 +92,16 @@ pub mod slot {
     pub const STEAM: u32 = 0x0000_01A0;
     /// Loose / damaged body panels rattling over bumps.
     pub const BODY_RATTLE: u32 = 0x0000_01A1;
+    /// Granular crunch loop following the lattice's deformation power (`impact/crunch`).
+    pub const CRUNCH: u32 = 0x0000_01A2;
     /// Tire squeal loop (paved surfaces).
     pub const SQUEAL: u32 = 0x0000_0200;
     /// Loose-surface scrub loop (gravel, dirt, grass).
     pub const SCRUB: u32 = 0x0000_0201;
+    /// Driven-wheel spin loop (paved surfaces).
+    pub const SPIN: u32 = 0x0000_0202;
+    /// Driven-wheel spin loop (loose surfaces).
+    pub const SPIN_LOOSE: u32 = 0x0000_0203;
     /// Surface rolling noise for `SurfaceType` index `i`: `SURFACE + i`.
     pub const SURFACE: u32 = 0x0000_0210;
     /// Siren loop for pattern index `i` (`SirenPattern::index`): `SIREN + i`.
@@ -141,6 +149,10 @@ pub struct VoiceParams {
     pub doppler: f32,
     /// Source position in world space, m (for the backend's panner).
     pub pos: [f32; 3],
+    /// Engine state for the physically modelled engine voice (`engine/physical`); `None` (and
+    /// absent from the JSON) for every other voice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<crate::engine_model::EngineFrame>,
 }
 
 /// One instruction for the audio backend. Serialized externally tagged

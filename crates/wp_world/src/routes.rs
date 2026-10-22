@@ -285,6 +285,41 @@ pub fn plan_route_between_pois(
     plan_route(map, a.pos, Some(geom::dir_of_yaw(a.heading_rad)), b.pos)
 }
 
+/// `next` moved onto `cur`'s lane when it is a parallel lane of the same road and direction
+/// (routes do not change lanes mid-road: a waypoint on the neighbouring lane of a wide road,
+/// e.g. Loop 9's three lanes beside its median, would otherwise be unreachable).
+fn same_lane_group(map: &CityMap, cur: (SegId, f32), next: (SegId, f32), p: V3) -> (SegId, f32) {
+    let (SegKind::Lane { lane: a }, SegKind::Lane { lane: b }) =
+        (map.seg(cur.0).kind, map.seg(next.0).kind)
+    else {
+        return next;
+    };
+    if a == b {
+        return next;
+    }
+    let lanes = &map.net.lanes;
+    let mut l = Some(a);
+    while let Some(x) = l {
+        l = lanes[x as usize].left;
+        if l == Some(b) {
+            break;
+        }
+    }
+    let mut r = Some(a);
+    while let Some(x) = r {
+        r = lanes[x as usize].right;
+        if r == Some(b) {
+            break;
+        }
+    }
+    if l == Some(b) || r == Some(b) {
+        let s = map.seg(cur.0);
+        let pr = s.project(geom::xy(p));
+        return (cur.0, pr.s.clamp(0.0, s.length));
+    }
+    next
+}
+
 /// Closed circuit visiting the polygon vertices in order and returning to the first.
 pub fn plan_circuit(map: &CityMap, polygon: &[V2]) -> Option<Route> {
     if polygon.len() < 2 {
@@ -300,7 +335,12 @@ pub fn plan_circuit(map: &CityMap, polygon: &[V2]) -> Option<Route> {
         let next = if i == n {
             first
         } else {
-            nearest_lane(map, pos(i), Some(heading(i)))?
+            same_lane_group(
+                map,
+                cur,
+                nearest_lane(map, pos(i), Some(heading(i)))?,
+                pos(i),
+            )
         };
         let mut part = if cur.0 == next.0 && next.1 < cur.1 {
             // Same lane but behind us: go round the block.

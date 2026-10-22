@@ -22,10 +22,6 @@ pub const UNIT_HALF_LENGTH_M: f32 = 2.45;
 /// Half width of a police car, m.
 pub const UNIT_HALF_WIDTH_M: f32 = 0.95;
 
-/// A stopped blocker counts toward a standoff when the cosine between its nose and the unit's
-/// way is below this (it faces the unit or crosses its path, ~60° or more off).
-pub const STANDOFF_MAX_FACING: f32 = 0.5;
-
 /// A vehicle police units must not drive into, as reported by `wp_sim`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ObstacleView {
@@ -69,6 +65,8 @@ pub(crate) struct Obstacle {
     pub(crate) fwd: [f32; 2],
     pub(crate) half_len: f32,
     pub(crate) half_wid: f32,
+    /// Kinematic traffic far from players: no collider in `wp_sim` (a car can't touch it).
+    pub(crate) ghost: bool,
 }
 
 impl Obstacle {
@@ -86,6 +84,8 @@ impl Obstacle {
             fwd: f,
             half_len: v.half_length_m.max(0.1),
             half_wid: v.half_width_m.max(0.1),
+            // `wp_sim` reports kinematic traffic without an entity.
+            ghost: v.entity.is_none(),
         }
     }
 
@@ -105,6 +105,7 @@ impl Obstacle {
             fwd: normalize(heading),
             half_len: 2.3,
             half_wid: 0.95,
+            ghost: false,
         }
     }
 
@@ -136,10 +137,13 @@ pub struct AvoidState {
     /// What caps the speed right now: a vehicle's entity id, a police unit id, or none.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
-    /// Seconds held at a standstill by a stopped vehicle that faces the unit or crosses its
-    /// path (a standoff: each waits for the other), s.
+    /// Static feelers: speed cap and line shift from walls and buildings (refreshed at think
+    /// rate, physical units only; see [`crate::walls`]).
     #[serde(default)]
-    pub standoff_s: f32,
+    pub wall: crate::walls::WallFeel,
+    /// Time spent blocked by a stopped civilian or parked car with lights on (push-through).
+    #[serde(default)]
+    pub push_wait_s: f32,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -165,7 +169,8 @@ impl Default for AvoidState {
             yield_s: 0.0,
             unit_wait_s: 0.0,
             blocked_by: None,
-            standoff_s: 0.0,
+            wall: crate::walls::WallFeel::default(),
+            push_wait_s: 0.0,
         }
     }
 }
@@ -220,9 +225,6 @@ pub(crate) struct Blocker {
     pub(crate) speed_mps: f32,
     /// Arc length of its far end on the track, m.
     pub(crate) far_s: f32,
-    /// Cosine between its nose and the unit's way along the track (1 = same way, -1 = facing
-    /// the unit, ~0 = across its path).
-    pub(crate) facing: f32,
 }
 
 /// What a unit is, for the scan.
@@ -239,6 +241,13 @@ pub(crate) struct Me {
     pub(crate) target: Option<EntityId>,
     /// Gridlock breaker: ignore stopped police units with a higher id that cross or face us.
     pub(crate) skip_higher_units: bool,
+    /// Pursuing or intercepting (row 63): through junctions fast, short waits.
+    pub(crate) chase: bool,
+    /// Ignore ghost traffic (a chasing unit far from every racer: it has no collider there).
+    pub(crate) pass_ghosts: bool,
+    /// Closing in on a stopped racer for the arrest: other stopped police cars don't hold it
+    /// back (no stand-off between units 20 m short of the capture radius).
+    pub(crate) arrest: bool,
 }
 
 /// Nearest obstacle within `horizon_m` ahead on `track`, in the corridor around the lane
@@ -261,6 +270,8 @@ pub(crate) fn scan(
     for o in obstacles {
         if o.unit == Some(me.unit)
             || (o.entity.is_some() && (o.entity == me.entity || o.entity == me.ignore))
+            || (me.pass_ghosts && o.ghost)
+            || (me.arrest && o.unit.is_some() && o.speed() < 0.5)
         {
             continue;
         }
@@ -291,7 +302,14 @@ pub(crate) fn scan(
         if bumper
             && along > 0.0
             && bumper_gap < cfg.bumper_m
-            && dot(rel, side).abs() < UNIT_HALF_WIDTH_M + ext_side + cfg.lateral_margin_m
+            && dot(rel, side).abs()
+                < UNIT_HALF_WIDTH_M
+                    + ext_side
+                    + if me.chase {
+                        cfg.chase_lateral_margin_m
+                    } else {
+                        cfg.lateral_margin_m
+                    }
         {
             let b = Blocker {
                 entity: o.entity,
@@ -300,7 +318,6 @@ pub(crate) fn scan(
                 along_mps: dot(o.vel, me.heading),
                 speed_mps: o.speed(),
                 far_s: me.track_s + along + ext_fwd,
-                facing: dot(o.fwd, me.heading),
             };
             if best.is_none_or(|x| b.gap_m < x.gap_m) {
                 best = Some(b);
@@ -316,7 +333,12 @@ pub(crate) fn scan(
         let c = lane_point(track, s_o, offset_m);
         let lat = dot(sub(o.pos, c), n).abs();
         let ext_n = o.half_len * dot(o.fwd, n).abs() + o.half_wid * dot(o.fwd, t).abs();
-        if lat > UNIT_HALF_WIDTH_M + ext_n + cfg.lateral_margin_m {
+        let margin = if me.chase {
+            cfg.chase_lateral_margin_m
+        } else {
+            cfg.lateral_margin_m
+        };
+        if lat > UNIT_HALF_WIDTH_M + ext_n + margin {
             continue;
         }
         let ext_t = o.half_len * dot(o.fwd, t).abs() + o.half_wid * dot(o.fwd, n).abs();
@@ -332,7 +354,6 @@ pub(crate) fn scan(
             along_mps: dot(o.vel, t),
             speed_mps: o.speed(),
             far_s: s_o + ext_t,
-            facing: dot(o.fwd, t),
         };
         if best.is_none_or(|x| b.gap_m < x.gap_m) {
             best = Some(b);
@@ -395,7 +416,11 @@ pub(crate) fn update(
             creeping = true;
         }
     }
-    st.junction_limit_mps = junction_speed(st.junction, me.track_s, v, siren, cfg);
+    st.junction_limit_mps = if me.chase {
+        chase_junction_speed(st.junction, me.track_s, cfg)
+    } else {
+        junction_speed(st.junction, me.track_s, v, siren, cfg)
+    };
     // Give way to cross traffic: a patrol at an unsignalised junction, a unit with lights at a
     // red. A unit waits at most `yield_max_s` (`yield_max_siren_s` with lights), then goes.
     let give_way = st.junction.is_some_and(|j| match j.light {
@@ -403,7 +428,9 @@ pub(crate) fn update(
         Some(Light::Stop) => siren,
         _ => false,
     });
-    let max_wait = if siren {
+    let max_wait = if me.chase {
+        cfg.chase_yield_max_s
+    } else if siren {
         cfg.yield_max_siren_s
     } else {
         cfg.yield_max_s
@@ -427,16 +454,6 @@ pub(crate) fn update(
     if creeping {
         st.limit_mps = st.limit_mps.min(cfg.pass_creep_mps);
     }
-    // A standoff: held at a standstill by a stopped vehicle that is not in the queue ahead
-    // but faces the unit, crosses its path or overlaps it (tangled after a turn). Each waits
-    // for the other; the driver backs off after `STANDOFF_S` (see
-    // `PoliceSystem::lane_input`).
-    let standoff = v.abs() < 0.5
-        && st.limit_mps <= 0.0
-        && blocker.is_some_and(|b| {
-            b.speed_mps < cfg.stopped_mps && (b.facing < STANDOFF_MAX_FACING || b.gap_m < 0.0)
-        });
-    st.standoff_s = if standoff { st.standoff_s + dt } else { 0.0 };
     st.blocked_by = blocker.map(|b| match (b.unit, b.entity) {
         (Some(u), _) => BlockedBy::Unit(u),
         (None, Some(e)) => BlockedBy::Vehicle(e),
@@ -472,7 +489,9 @@ pub(crate) fn update(
         return offset;
     }
     st.blocked_s += dt;
-    let wait = if siren {
+    let wait = if me.chase {
+        cfg.chase_pass_wait_s
+    } else if siren {
         cfg.pass_wait_siren_s
     } else {
         cfg.pass_wait_s
@@ -572,6 +591,33 @@ pub(crate) fn junction_speed(
     }
 }
 
+/// Speed cap at the next junction for a pursuing / intercepting unit (row 63): it runs reds
+/// and crosses at `chase_red_mps` / `chase_junction_mps` (`chase_turn_mps` turning), braking
+/// for it at `chase_decel_mps2`, m/s.
+pub(crate) fn chase_junction_speed(
+    j: Option<JunctionAhead>,
+    track_s: f32,
+    cfg: &AvoidConfig,
+) -> f32 {
+    let Some(j) = j else {
+        return f32::INFINITY;
+    };
+    let to_centre = j.s - track_s;
+    if to_centre < -cfg.junction_slow_m {
+        return f32::INFINITY;
+    }
+    let mut v_at = if j.light == Some(Light::Stop) {
+        cfg.chase_red_mps
+    } else {
+        cfg.chase_junction_mps
+    };
+    if j.turn {
+        v_at = v_at.min(cfg.chase_turn_mps);
+    }
+    let d = (to_centre - cfg.junction_slow_m).max(0.0);
+    (v_at * v_at + 2.0 * cfg.chase_decel_mps2 * d).sqrt()
+}
+
 /// Speed cap that stops the bumper at the junction's stop line (`INFINITY` once over it).
 fn stop_at_line(j: JunctionAhead, track_s: f32, cfg: &AvoidConfig) -> f32 {
     let to_line = j.s - track_s - cfg.stop_line_back_m - UNIT_HALF_LENGTH_M;
@@ -609,6 +655,7 @@ pub(crate) fn must_yield(
         if o.unit == Some(me.unit)
             || (o.entity.is_some() && (o.entity == me.entity || o.entity == me.ignore))
             || o.unit.is_some_and(|u| u > me.unit)
+            || (me.pass_ghosts && o.ghost)
         {
             return false;
         }
@@ -675,6 +722,9 @@ mod tests {
             ignore: None,
             target: None,
             skip_higher_units: false,
+            chase: false,
+            pass_ghosts: false,
+            arrest: false,
         }
     }
 
@@ -782,31 +832,6 @@ mod tests {
         }
         assert_eq!(off, 1.75);
         assert_eq!(st.limit_mps, 0.0);
-    }
-
-    #[test]
-    fn standoff_counts_for_a_car_facing_or_tangled_not_a_queue() {
-        let c = cfg();
-        let dt = 1.0 / 240.0;
-        let m = me(0.0, [1.75, 0.0]);
-        let run = |at: [f32; 2], fwd: [f32; 2]| {
-            let obs = [Obstacle::car(Some(EntityId(2)), None, at, [0.0, 0.0], fwd)];
-            let mut st = AvoidState::default();
-            for _ in 0..(240.0 * 3.0) as usize {
-                update(&mut st, &m, &straight(), 1.75, 0.0, false, &obs, &c, dt);
-            }
-            st
-        };
-        // Head-on: each waits for the other.
-        let head_on = run([1.75, 7.5], [0.0, -1.0]);
-        assert_eq!(head_on.limit_mps, 0.0);
-        assert!(head_on.standoff_s > 2.9, "{head_on:?}");
-        // Tangled after a turn: overlapping at an angle.
-        let (s40, c40) = (0.64, 0.77);
-        let tangled = run([2.5, 3.0], [s40, c40]);
-        assert!(tangled.standoff_s > 2.9, "{tangled:?}");
-        // The same way, ahead: a queue, not a standoff.
-        assert_eq!(run([1.75, 7.5], [0.0, 1.0]).standoff_s, 0.0);
     }
 
     #[test]
@@ -937,5 +962,27 @@ mod tests {
             spawn_clear([30.0, 60.0], &[racer], &c),
             "parallel street is fine"
         );
+    }
+
+    /// Row 63: a pursuing unit takes junctions much faster than a unit merely running lights,
+    /// and runs reds at `chase_red_mps`.
+    #[test]
+    fn chase_junction_speeds() {
+        let c = cfg();
+        let red = Some(JunctionAhead {
+            s: 60.0,
+            light: Some(Light::Stop),
+            turn: false,
+        });
+        let at = 60.0 - c.junction_slow_m;
+        assert!((chase_junction_speed(red, at, &c) - c.chase_red_mps).abs() < 1e-3);
+        assert!(chase_junction_speed(red, at, &c) > junction_speed(red, at, 20.0, true, &c));
+        let turn = Some(JunctionAhead {
+            s: 60.0,
+            light: None,
+            turn: true,
+        });
+        assert!((chase_junction_speed(turn, at, &c) - c.chase_turn_mps).abs() < 1e-3);
+        assert!(chase_junction_speed(None, 0.0, &c).is_infinite());
     }
 }

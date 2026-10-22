@@ -1,0 +1,23 @@
+// Parity suite (docs/reference/wreckfest-parity.md): heavy RWD muscle car, the owner's keyboard
+// assists (ABS on, TCS / ESC off, manual gears, speed sensitivity 75 %), throttle key from rest
+// with one upshift. Guards launch pace; wheelspin is measured by examples/parity.rs.
+(
+    name: "parity_rampart_launch_tcs_off",
+    mode: Arcade,
+    seed: 1,
+    assists: custom((abs: true, tcs: false, esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
+    duration_s: 6.0,
+    entities: [
+        (
+            id: "car",
+            car: "rampart_50",
+            inputs: [
+                (t_s: 0.0, input: (throttle: 1.0)),
+                (t_s: 2.6, input: (throttle: 1.0, gear_up: true)),
+                (t_s: 2.7, input: (throttle: 1.0)),
+            ],
+        ),
+    ],
+    // Measured 2026-10-20: 7.4 m/s at 2.5 s (still spinning in 1st), 23.6 m/s at 6 s.
+    expect: [speed_at(t_s: 2.5, min: 5.0, max: 10.0), speed_at(t_s: 6.0, min: 20.0, max: 27.0)],
+)

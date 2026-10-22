@@ -38,7 +38,7 @@ pub use run::{
     run, run_with_hook, RunOptions, RunOutput, RunSummary, Selection, TickView,
     PURSUIT_STARTED_KIND,
 };
-pub use scenario::Scenario;
+pub use scenario::{PuddleSpec, Scenario, WeatherSpec};
 
 /// Runner errors.
 #[derive(Debug, Error)]

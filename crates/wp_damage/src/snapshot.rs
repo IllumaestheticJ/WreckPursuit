@@ -494,7 +494,7 @@ impl DamageModel {
                 self.effects = self.compute_effects(&mode);
             }
             None => {
-                self.health = self.raw_health(true).max(0.0);
+                self.health = self.raw_health(true, false).max(0.0);
                 self.total_loss = self.total_loss && self.health < 1.0;
             }
         }
@@ -583,13 +583,17 @@ impl DamageModel {
 
     /// Global health from the current region energies and component health, without the
     /// monotonic clamp `update_health` applies while driving.
-    pub(crate) fn raw_health(&self, from_intrusion: bool) -> f32 {
+    /// `arcade` applies `DamageTuning::arcade_structural_health_scale` to the structural part.
+    pub(crate) fn raw_health(&self, from_intrusion: bool, arcade: bool) -> f32 {
         let mut weighted = 0.0;
         for r in ALL_REGIONS {
             // Arcade cosmetic episodes are discounted from health (machine B, playtest #10).
             let e =
                 (self.region_plastic_j[r as usize] - self.region_cosmetic_j[r as usize]).max(0.0);
             weighted += region_health_weight(r) * e;
+        }
+        if arcade {
+            weighted *= self.tuning.arcade_structural_health_scale;
         }
         let e_ref = (self.tuning.total_loss_energy_per_kg * self.lattice_mass_kg).max(1.0);
         let structural = 1.0 - (weighted / e_ref).clamp(0.0, 1.0);

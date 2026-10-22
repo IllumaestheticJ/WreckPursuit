@@ -1,0 +1,13 @@
+# simcli hashes scenario=damage_arcade_beater_frontal_50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+60 4712445b3fb248b6
+120 b287993004e189d8
+180 e8f52daabedcc826
+240 aad1b4d6dc1a64a8
+300 623deca1fec6f361
+360 fc42fd1e79853150
+420 f01b3d141e19c5fd
+480 3fa53019d379d288
+540 32d83d42fcdc25e1
+600 f8a372719bb29e68
+660 aaa3d7880e8f670f
+720 4ae545b5bf7a7682

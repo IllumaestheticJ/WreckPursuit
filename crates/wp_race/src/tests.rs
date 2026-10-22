@@ -27,6 +27,37 @@ fn judge(kind: RaceKind, course: Course) -> RaceJudge {
     RaceJudge::new(EventId(1), data().rules.for_kind(kind), course)
 }
 
+#[test]
+fn a_course_grid_layout_overrides_the_kind_grid() {
+    let e = |id| RacerEntry {
+        racer: EntityId(id),
+        redline_rpm: 7000.0,
+    };
+    // The sprint's own grid is two columns.
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    let a = j.enter(e(1)).unwrap();
+    let b = j.enter(e(2)).unwrap();
+    assert!((a.pos[0] - b.pos[0]).abs() > 1.0, "two columns");
+    // A narrow start street: the planner sets single file and every car sits on the centreline.
+    let mut course = sprint_course();
+    course.grid_layout = Some(crate::course::GridLayout::SingleFile { gap_m: 8.0 });
+    let mut j = judge(RaceKind::Sprint, course);
+    let slots: Vec<_> = (1..=4).map(|id| j.enter(e(id)).unwrap()).collect();
+    for (i, s) in slots.iter().enumerate() {
+        assert!(
+            s.pos[0].abs() < 1e-4,
+            "slot {i} on the centreline: {:?}",
+            s.pos
+        );
+        if i > 0 {
+            assert!((slots[i - 1].pos[1] - s.pos[1] - 8.0).abs() < 1e-3);
+        }
+    }
+    // Withdrawing re-packs the grid with the same layout.
+    assert!(j.withdraw(EntityId(1)));
+    assert!(j.grid().iter().all(|(_, s)| s.pos[0].abs() < 1e-4));
+}
+
 fn sprint_course() -> Course {
     Course::straight([0.0, 0.0, 0.0], [0.0, 1.0], 1000.0, 200.0, 12.0)
 }

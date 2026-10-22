@@ -1,0 +1,1633 @@
+<title>Art Style Picker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0b0c0e; --bg-raise:#121317; --panel:#15161a; --panel-2:#1b1c21;
+  --line:#2a2c33; --line-2:#3b3e47;
+  --text:#ebe8e1; --muted:#a7a59e; --faint:#75736d;
+  --amber:#f2a541; --amber-ink:#1a1206;
+  --siren-red:#ff4b4b; --siren-blue:#4f8bff;
+  --good:#8fcf8a; --ok:#e2c25c; --weak:#e57d6f;
+  --meter-off:#2b2d34;
+  --hud-bg:#0b0c0ecc; --hud-text:#b6f0b0;
+  --sw-n1:#0b0914; --sw-n2:#ff2bd6; --sw-n3:#26e8ff; --sw-n4:#f0a020; --sw-n5:#1a1b20;
+  --sw-l1:#1d2030; --sw-l2:#3a3446; --sw-l3:#5d6f63; --sw-l4:#c9913a; --sw-l5:#f3c37a;
+  --sw-p1:#1e2233; --sw-p2:#5f6470; --sw-p3:#a08060; --sw-p4:#ffd27a; --sw-p5:#7a2a2a;
+  --sw-h1:#121216; --sw-h2:#3b4250; --sw-h3:#ece4d2; --sw-h4:#e0262f; --sw-h5:#2a5bd7;
+  --sw-r1:#05070d; --sw-r2:#4a4642; --sw-r3:#d48a12; --sw-r4:#ffb870; --sw-r5:#2f3d37;
+  --display:"Big Shoulders Display", "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+  --sans:"IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font:16px/1.55 var(--sans);
+  -webkit-text-size-adjust:100%;
+}
+.wrap{
+  max-width:1200px; margin:0 auto;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:28px 64px;
+}
+a{color:var(--amber)}
+.eyebrow{font:500 12px/1.4 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin:0 0 10px}
+h1{font:800 clamp(34px, 6.4vw, 64px)/0.95 var(--display); text-transform:uppercase; letter-spacing:.01em; margin:0 0 14px; max-width:16ch}
+h1 em{font-style:normal; color:var(--amber)}
+.lede{max-width:62ch; color:var(--muted); margin:0 0 22px; font-size:17px}
+h2{font:800 clamp(26px, 4vw, 38px)/1 var(--display); text-transform:uppercase; margin:56px 0 8px; letter-spacing:.01em}
+.sub{color:var(--muted); margin:0 0 20px; max-width:66ch}
+
+/* ---------- live stage ---------- */
+.stage{border:1px solid var(--line); background:var(--bg-raise)}
+.viewport{position:relative; width:100%; aspect-ratio:16/9; max-height:72vh; min-height:240px; background:#000; overflow:hidden}
+.viewport canvas{display:block; width:100%; height:100%; cursor:grab; touch-action:pan-y}
+.viewport canvas:active{cursor:grabbing}
+.hud{position:absolute; left:10px; top:10px; padding:6px 9px; background:var(--hud-bg); color:var(--hud-text);
+  font:500 12px/1.35 var(--mono); letter-spacing:.02em; pointer-events:none; white-space:pre}
+.stylebadge{position:absolute; right:10px; top:10px; padding:6px 10px; background:var(--hud-bg); color:var(--text);
+  font:700 15px/1 var(--display); text-transform:uppercase; letter-spacing:.06em; pointer-events:none}
+.fail{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; color:var(--muted); background:var(--bg-raise)}
+.fail[hidden]{display:none}
+.controls{display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; padding:12px; border-top:1px solid var(--line)}
+.tabs{display:flex; flex-wrap:wrap; gap:6px}
+.tab{appearance:none; border:1px solid var(--line-2); background:var(--panel); color:var(--text);
+  font:500 14px/1 var(--sans); padding:9px 11px 9px 9px; display:inline-flex; gap:8px; align-items:center; cursor:pointer; min-height:40px}
+.tab .k{font:500 11px/1 var(--mono); color:var(--faint); border:1px solid var(--line-2); padding:3px 5px}
+.tab:hover{border-color:var(--faint)}
+.tab[aria-pressed="true"]{background:var(--amber); color:var(--amber-ink); border-color:var(--amber)}
+.tab[aria-pressed="true"] .k{color:var(--amber-ink); border-color:var(--amber-ink)}
+.tab:focus-visible,.opt:focus-visible,.show:focus-visible{outline:2px solid var(--amber); outline-offset:2px}
+.opts{display:flex; gap:6px; flex-wrap:wrap; margin-left:auto}
+.opt{appearance:none; border:1px solid var(--line-2); background:transparent; color:var(--muted); font:500 13px/1 var(--mono); padding:9px 10px; cursor:pointer; min-height:40px}
+.opt[aria-pressed="true"]{color:var(--text); border-color:var(--text)}
+.now{margin:0; padding:12px; border-top:1px solid var(--line); color:var(--muted); font-size:15px}
+.now strong{color:var(--text); font-weight:600}
+.hint{font:400 12px/1.4 var(--mono); color:var(--faint); padding:0 12px 12px; margin:0}
+
+/* ---------- cards ---------- */
+.cards{display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap:14px}
+.card{background:var(--panel); border:1px solid var(--line); padding:18px 18px 16px; display:flex; flex-direction:column}
+.card.is-on{border-color:var(--amber)}
+.card header{display:flex; align-items:center; gap:10px; margin-bottom:10px}
+.card .key{font:500 12px/1 var(--mono); color:var(--faint); border:1px solid var(--line-2); padding:4px 6px}
+.card h3{font:800 24px/1 var(--display); text-transform:uppercase; margin:0; letter-spacing:.02em}
+.sw{display:flex; height:8px; margin:0 0 14px}
+.sw i{flex:1}
+.mood{margin:0 0 8px}
+.like{margin:0 0 14px; color:var(--muted); font-size:14.5px}
+.lbl{font:500 11px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); display:block; margin-bottom:4px}
+.card dl{margin:0; display:grid; gap:12px; flex:1}
+.card dt{font:500 11px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin-bottom:4px}
+.card dd{margin:0; font-size:14.5px; color:var(--text)}
+.tag{display:inline-block; font:600 11px/1 var(--mono); letter-spacing:.06em; text-transform:uppercase; padding:4px 6px; margin-right:6px; border:1px solid currentColor; vertical-align:1px}
+.t-good{color:var(--good)} .t-ok{color:var(--ok)} .t-weak{color:var(--weak)}
+.show{appearance:none; margin-top:16px; align-self:flex-start; background:transparent; color:var(--amber); border:1px solid var(--amber); font:500 13px/1 var(--mono); padding:10px 12px; cursor:pointer}
+.show:hover{background:var(--amber); color:var(--amber-ink)}
+
+/* ---------- table ---------- */
+.tablewrap{overflow-x:auto; border:1px solid var(--line); background:var(--panel); -webkit-overflow-scrolling:touch}
+table{border-collapse:collapse; width:100%; min-width:900px; font-size:14px}
+th,td{padding:11px 12px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line)}
+thead th{font:500 11px/1.3 var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); background:var(--panel-2)}
+tbody th{font:800 17px/1.1 var(--display); text-transform:uppercase; letter-spacing:.02em; white-space:nowrap}
+tbody tr:last-child th, tbody tr:last-child td{border-bottom:0}
+tr.pick th{color:var(--amber)}
+.m{display:flex; gap:3px; margin-bottom:5px}
+.m i{width:14px; height:6px; background:var(--meter-off)}
+.m.v1 i:nth-child(-n+1),.m.v2 i:nth-child(-n+2),.m.v3 i:nth-child(-n+3),.m.v4 i:nth-child(-n+4),.m.v5 i:nth-child(-n+5){background:var(--text)}
+.m.v1 i:nth-child(-n+1),.m.v2 i:nth-child(-n+2){background:var(--weak)}
+.m.v4 i:nth-child(-n+4),.m.v5 i:nth-child(-n+5){background:var(--good)}
+.m.v3 i:nth-child(-n+3){background:var(--ok)}
+.cellnote{color:var(--muted); font-size:13px}
+.legend{font:400 12px/1.4 var(--mono); color:var(--faint); margin:8px 0 0}
+
+/* ---------- recommendation ---------- */
+.rec{border-left:3px solid var(--amber); background:var(--panel); padding:20px 22px; max-width:820px}
+.rec p{margin:0 0 12px; font-size:17px}
+.rec p:last-child{margin-bottom:0}
+.rec .verdict{font:800 clamp(22px,3.4vw,30px)/1.1 var(--display); text-transform:uppercase; margin:0 0 12px}
+.rec .verdict span{color:var(--amber)}
+.notes{margin-top:48px; border-top:1px solid var(--line); padding-top:16px; color:var(--faint); font-size:13.5px; max-width:80ch}
+.notes p{margin:0 0 8px}
+@media (max-width:640px){
+  .opts{margin-left:0}
+  .tab{padding:8px 9px 8px 7px; font-size:13px}
+  .lede{font-size:16px}
+  .stylebadge{top:auto; bottom:10px; font-size:13px}
+  .hud{font-size:11px}
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">WreckPursuit · art direction · decision page</p>
+    <h1>Five ways Port Vesper could <em>look at night</em></h1>
+    <p class="lede">The same street corner, one crash, one police cruiser, drawn five different ways. Switch styles below (or press 1–5), drag to look around, and watch the frame-rate counter: it shows how hard each style makes your machine work. Then read the cards, the side-by-side table, and the recommendation at the bottom.</p>
+  </header>
+
+  <section class="stage" aria-label="Live preview">
+    <div class="viewport" id="viewport">
+      <canvas id="scene" aria-label="3D night street scene: a crashed sports car with a dented front corner, a parked sedan it hit, and a police cruiser with flashing lights"></canvas>
+      <div class="hud" id="hud" aria-live="off">starting…</div>
+      <div class="stylebadge" id="badge"></div>
+      <div class="fail" id="fail" hidden>
+        <p>The live preview couldn't start in this browser (WebGL isn't available). Everything below the preview still applies: the cards and the table describe each style in full.</p>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="tabs" role="group" aria-label="Art style">
+        <button class="tab" data-style="0" aria-pressed="true"><span class="k">1</span>Neon-noir</button>
+        <button class="tab" data-style="1" aria-pressed="false"><span class="k">2</span>Low-poly dark</button>
+        <button class="tab" data-style="2" aria-pressed="false"><span class="k">3</span>PS2 throwback</button>
+        <button class="tab" data-style="3" aria-pressed="false"><span class="k">4</span>Halftone</button>
+        <button class="tab" data-style="4" aria-pressed="false"><span class="k">5</span>Realistic</button>
+      </div>
+      <div class="opts">
+        <button class="opt" id="optDist" aria-pressed="false" title="Pull the camera back to chase-cam distance">View from 30 m</button>
+        <button class="opt" id="optMotion" aria-pressed="true">Motion on</button>
+      </div>
+    </div>
+    <p class="now" id="now"></p>
+    <p class="hint">Drag sideways to orbit. "View from 30 m" puts the camera where a chase cam would be in a pursuit, so you can judge whether the dent still reads.</p>
+  </section>
+
+  <h2>The five options</h2>
+  <p class="sub">Same layout for each. Effort numbers are relative to the low-poly option (1×), which is the cheapest to produce.</p>
+  <div class="cards">
+
+    <article class="card" data-card="0">
+      <header><span class="key">1</span><h3>Neon-noir realism</h3></header>
+      <div class="sw" aria-hidden="true"><i style="background:var(--sw-n1)"></i><i style="background:var(--sw-n2)"></i><i style="background:var(--sw-n3)"></i><i style="background:var(--sw-n4)"></i><i style="background:var(--sw-n5)"></i></div>
+      <p class="mood">Downtown at 2 a.m. after the rain: black streets, magenta and cyan signs smeared across wet asphalt, deep shadows, light that glows and bleeds. Cinematic and moody.</p>
+      <p class="like"><span class="lbl">In the spirit of</span>Need for Speed (2015), Need for Speed Heat's night half, the street scenes of Cyberpunk 2077.</p>
+      <dl>
+        <div><dt>How damage reads</dt><dd>Up close it's great: reflections bend over a dent and sell the shape. At 30 m the glare, glow and reflections can hide a crumpled corner, so it needs help (scrape marks, sparks, a missing headlight).</dd></div>
+        <div><dt>How night chases read</dt><dd>Spectacular: red and blue strobes bounce off the wet road. The catch is that neon signs fight the police lights for attention, so we'd have to keep signs dimmer than light bars by rule.</dd></div>
+        <div><dt>Browser cost</dt><dd><span class="tag t-weak">High</span>The street is drawn twice (once for the wet-road reflection), plus a glow pass and high-range colour. Roughly 1.5–2× the low-poly cost.</dd></div>
+        <div><dt>Art workload</dt><dd><span class="tag t-ok">About 2×</span>Textured car paint, trim and tyres, a neon sign kit, a wet-road material, and lighting tuned per district.</dd></div>
+        <div><dt>Risks</dt><dd>Looks like a lot of other night racers. Mid-range phones will struggle. Dark cars vanish at night unless we add rim light. The colour-fringe effect annoys some players, so it needs an off switch.</dd></div>
+      </dl>
+      <button class="show" data-style="0">Show in the scene</button>
+    </article>
+
+    <article class="card" data-card="1">
+      <header><span class="key">2</span><h3>Stylised low-poly dark</h3></header>
+      <div class="sw" aria-hidden="true"><i style="background:var(--sw-l1)"></i><i style="background:var(--sw-l2)"></i><i style="background:var(--sw-l3)"></i><i style="background:var(--sw-l4)"></i><i style="background:var(--sw-l5)"></i></div>
+      <p class="mood">A grim diorama: chunky, faceted shapes, a muted palette, soft fog, and lights that glow without any texture detail. Calm and graphic, with grit coming from colour and lighting rather than surface detail.</p>
+      <p class="like"><span class="lbl">In the spirit of</span>art of rally, Absolute Drift, the flat-colour dusk of Firewatch.</p>
+      <dl>
+        <div><dt>How damage reads</dt><dd>Best of the five. Each flat facet catches light on its own, so a crumple shows up as a cluster of broken facets you can see from across a junction. It also maps directly onto our damage lattice.</dd></div>
+        <div><dt>How night chases read</dt><dd>Clean. Nothing else in the frame is shiny, so the light bars are easily the brightest thing. Fog hides the distance cheaply and makes headlights pop.</dd></div>
+        <div><dt>Browser cost</dt><dd><span class="tag t-good">Low</span>No textures, simple materials, a light glow pass. Runs on phones and leaves room for 24 cars and traffic.</dd></div>
+        <div><dt>Art workload</dt><dd><span class="tag t-good">1× (baseline)</span>Matches the procedural car generator we already planned: every car gets a 3–6k triangle mesh immediately, and no texture painting is needed.</dd></div>
+        <div><dt>Risks</dt><dd>Can look cheap or like a mobile game if lighting and silhouettes are lazy. Less "wow" in a trailer. Needs a strong colour script per district so streets don't blur together.</dd></div>
+      </dl>
+      <button class="show" data-style="1">Show in the scene</button>
+    </article>
+
+    <article class="card" data-card="2">
+      <header><span class="key">3</span><h3>PS2 / early-HD throwback</h3></header>
+      <div class="sw" aria-hidden="true"><i style="background:var(--sw-p1)"></i><i style="background:var(--sw-p2)"></i><i style="background:var(--sw-p3)"></i><i style="background:var(--sw-p4)"></i><i style="background:var(--sw-p5)"></i></div>
+      <p class="mood">A memory of 2004 street racing: chunky pixels, fog that swallows the city a block away, slightly wobbly geometry, colours with visible dither. Nostalgic and a bit lo-fi on purpose.</p>
+      <p class="like"><span class="lbl">In the spirit of</span>Need for Speed Underground 2, Midnight Club 3, Burnout 3: Takedown.</p>
+      <dl>
+        <div><dt>How damage reads</dt><dd>Weakest. At low resolution a dent 30 m away is a few pixels. We'd have to exaggerate deformation, lean on parts falling off, sparks and smoke, and accept that subtle damage disappears.</dd></div>
+        <div><dt>How night chases read</dt><dd>Fine. Lights become big glowing sprites and fog keeps the frame simple, so strobes stand out. Long sight lines are lost to fog, which changes how chases feel.</dd></div>
+        <div><dt>Browser cost</dt><dd><span class="tag t-good">Very low</span>It draws about a ninth of the pixels and uses the simplest lighting. The most phone-friendly option.</dd></div>
+        <div><dt>Art workload</dt><dd><span class="tag t-good">About 1.3×</span>Small hand-painted textures (128–256 px) on top of low-poly meshes. Getting the nostalgia exactly right takes taste more than hours.</dd></div>
+        <div><dt>Risks</dt><dd>Niche: some players read it as a joke or as unfinished. Feels at odds with careful sim-cade physics. Low resolution hurts the HUD and readability. Wobble can cause motion sickness at speed.</dd></div>
+      </dl>
+      <button class="show" data-style="2">Show in the scene</button>
+    </article>
+
+    <article class="card" data-card="3">
+      <header><span class="key">4</span><h3>Graphic-novel halftone</h3></header>
+      <div class="sw" aria-hidden="true"><i style="background:var(--sw-h1)"></i><i style="background:var(--sw-h2)"></i><i style="background:var(--sw-h3)"></i><i style="background:var(--sw-h4)"></i><i style="background:var(--sw-h5)"></i></div>
+      <p class="mood">A moving comic book: ink outlines, printed-dot shading, paper and ink only, and the police red and blue as the only colour on the page. Bold and instantly recognisable.</p>
+      <p class="like"><span class="lbl">In the spirit of</span>XIII, Borderlands, the Sin City comics and film.</p>
+      <dl>
+        <div><dt>How damage reads</dt><dd>Good. Outlines trace every fold, so a crumpled corner turns into a scribble of ink lines that reads from a distance. Fine creases can flicker while moving, which needs tuning.</dd></div>
+        <div><dt>How night chases read</dt><dd>Very strong. Darkness becomes solid ink, lit areas become paper, and the strobes are the only colour, so you always know where the police are.</dd></div>
+        <div><dt>Browser cost</dt><dd><span class="tag t-ok">Medium</span>An extra pass to find edges, plus the dot pattern at full resolution. Fine on laptops, OK on newer phones.</dd></div>
+        <div><dt>Art workload</dt><dd><span class="tag t-ok">About 1.6×</span>Simple meshes and flat colours, but custom shaders, per-object line tuning, and every effect (sparks, smoke, rain) has to be redrawn to fit the comic look.</dd></div>
+        <div><dt>Risks</dt><dd>The most opinionated choice: people love it or bounce. Can tire the eye over long sessions. Hard to show wetness, speed and surface detail. Dot patterns shimmer in motion if not handled carefully.</dd></div>
+      </dl>
+      <button class="show" data-style="3">Show in the scene</button>
+    </article>
+
+    <article class="card" data-card="4">
+      <header><span class="key">5</span><h3>Realistic</h3></header>
+      <div class="sw" aria-hidden="true"><i style="background:var(--sw-r1)"></i><i style="background:var(--sw-r2)"></i><i style="background:var(--sw-r3)"></i><i style="background:var(--sw-r4)"></i><i style="background:var(--sw-r5)"></i></div>
+      <p class="mood">As close to a photo of a real street as a browser sensibly allows: clear-coat paint with real reflections, soft shadows under the cars, wet patches on the asphalt, orange street-lamp light.</p>
+      <p class="like"><span class="lbl">In the spirit of</span>Wreckfest itself, Forza Horizon at night, BeamNG.drive.</p>
+      <dl>
+        <div><dt>How damage reads</dt><dd>Matches the Wreckfest reference up close: reflections warp over dents. But realism raises the bar: dents also need scratched paint, dirt and bent trim, or they look oddly clean. At 30 m, smooth shading softens the dent.</dd></div>
+        <div><dt>How night chases read</dt><dd>Real night is dark. To stay readable we have to cheat exposure and add light, which drifts back toward the neon-noir look anyway.</dd></div>
+        <div><dt>Browser cost</dt><dd><span class="tag t-weak">Very high</span>Shadow maps, physically based materials, reflections and high-range colour, on every car. Expect roughly half the frame rate of low-poly; phones will need heavy cut-downs.</dd></div>
+        <div><dt>Art workload</dt><dd><span class="tag t-weak">About 4–5×</span>Detailed car models (20–80k triangles), painted texture sets per car and per district, level-of-detail versions, probably outsourced. Our procedural cars wouldn't be good enough.</dd></div>
+        <div><dt>Risks</dt><dd>In the browser you get "convincing", not photoreal, and "almost real" can look worse than stylised. The biggest asset bill. Realistic cars drift toward real brands (a trademark problem). Much of the work would be redone for the native engine.</dd></div>
+      </dl>
+      <button class="show" data-style="4">Show in the scene</button>
+    </article>
+  </div>
+
+  <h2>Side by side</h2>
+  <p class="sub">More filled bars is always better for us, so "browser cost" and "asset effort" fill up when the cost is low. Scroll the table sideways on a phone.</p>
+  <div class="tablewrap" role="region" aria-label="Comparison table" tabindex="0">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Style</th>
+          <th scope="col">Browser cost</th>
+          <th scope="col">Phone-friendly</th>
+          <th scope="col">Damage readable at 30 m</th>
+          <th scope="col">Night readability</th>
+          <th scope="col">Asset effort</th>
+          <th scope="col">Stands out</th>
+          <th scope="col">Fit: sim-cade crashes + living city</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Neon-noir</th>
+          <td><div class="m v2"><i></i><i></i><i></i><i></i><i></i></div>High<div class="cellnote">reflection + glow passes</div></td>
+          <td><div class="m v2"><i></i><i></i><i></i><i></i><i></i></div>Fair</td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Fair<div class="cellnote">glare hides shape</div></td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>Good<div class="cellnote">if signs stay dimmer than strobes</div></td>
+          <td><div class="m v2"><i></i><i></i><i></i><i></i><i></i></div>About 2×</td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Medium<div class="cellnote">crowded look in the genre</div></td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>Good</td>
+        </tr>
+        <tr class="pick">
+          <th scope="row">Low-poly dark</th>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Low</td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Excellent</td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Excellent<div class="cellnote">facets catch light</div></td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>Good</td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>1× (baseline)</td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Medium<div class="cellnote">depends on lighting craft</div></td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Very good<div class="cellnote">= Checkpoint 3 target</div></td>
+        </tr>
+        <tr>
+          <th scope="row">PS2 throwback</th>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Very low</td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Excellent</td>
+          <td><div class="m v1"><i></i><i></i><i></i><i></i><i></i></div>Poor<div class="cellnote">a dent is a few pixels</div></td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Fair<div class="cellnote">fog limits sight lines</div></td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>About 1.3×</td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>High (niche)</td>
+          <td><div class="m v2"><i></i><i></i><i></i><i></i><i></i></div>Fair<div class="cellnote">lo-fi vs. careful physics</div></td>
+        </tr>
+        <tr>
+          <th scope="row">Halftone</th>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Medium<div class="cellnote">edge pass at full res</div></td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>Good</td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>Good<div class="cellnote">ink lines trace folds</div></td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Excellent<div class="cellnote">strobes are the only colour</div></td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>About 1.6×</td>
+          <td><div class="m v5"><i></i><i></i><i></i><i></i><i></i></div>Very high</td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Fair–good<div class="cellnote">comic look vs. "sim" feel</div></td>
+        </tr>
+        <tr>
+          <th scope="row">Realistic</th>
+          <td><div class="m v1"><i></i><i></i><i></i><i></i><i></i></div>Very high</td>
+          <td><div class="m v1"><i></i><i></i><i></i><i></i><i></i></div>Poor</td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Fair<div class="cellnote">great close, soft far</div></td>
+          <td><div class="m v3"><i></i><i></i><i></i><i></i><i></i></div>Fair<div class="cellnote">real night is dark</div></td>
+          <td><div class="m v1"><i></i><i></i><i></i><i></i><i></i></div>About 4–5×</td>
+          <td><div class="m v2"><i></i><i></i><i></i><i></i><i></i></div>Low<div class="cellnote">unless it's top-tier</div></td>
+          <td><div class="m v4"><i></i><i></i><i></i><i></i><i></i></div>Good in theory<div class="cellnote">needs native engine</div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="legend">Ratings are judgement calls from this prototype scene and typical browser hardware, not measurements of the finished game.</p>
+
+  <h2>Recommendation</h2>
+  <div class="rec">
+    <p class="verdict">Pick <span>Stylised low-poly dark</span>. Runner-up: Neon-noir realism.</p>
+    <p>Low-poly dark is what Checkpoint 3 already aims for, it is the cheapest to run in a browser and on phones, our procedural car meshes come out in that style for free, and its flat facets make dents read at 30 m better than anything else here. Neon-noir uses the same meshes with extra lighting passes (wet-road reflections, glow), so we can layer its best tricks onto low-poly later for fast machines without redoing any assets. On Realistic: in the browser, good materials and lighting get us to "convincing but not photoreal", which is what option 5 shows, at the highest cost of the five. True photorealism needs detailed scanned assets and lighting that only a native engine can deliver, so it belongs in the Godot-vs-Unreal engine decision at Checkpoint 3, not in this prototype.</p>
+  </div>
+
+  <div class="notes">
+    <p><strong>About the live scene.</strong> Everything in it is generated in code: no images, no bought models, no real car brands. The cars are simplified stand-ins, and each style is a quick approximation built for this page, not finished art. The frame-rate counter is the honest part: compare styles on the same machine and you'll see the relative cost.</p>
+    <p>If your device asks for reduced motion, the camera stays still and the police lights are shown steadily on. Use the "Animate anyway" button to see it move.</p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------------
+     Page wiring that works even without WebGL
+  ------------------------------------------------------------------ */
+  var STYLE_IDS = ["neon", "lowpoly", "ps2", "halftone", "real"];
+  var STYLE_NAMES = ["Neon-noir realism", "Stylised low-poly dark", "PS2 throwback", "Graphic-novel halftone", "Realistic"];
+  var STYLE_NOW = [
+    "<strong>Neon-noir realism.</strong> Shiny materials, magenta and cyan signs, a mirrored wet road with streaky reflections, glow around every light, a film-style colour curve and a slight colour fringe at the edges.",
+    "<strong>Stylised low-poly dark.</strong> The same scene with a coarser mesh, flat-shaded facets, a muted palette, no textures, glowing lights and soft fog. Look at how the crumpled corner breaks into visible facets.",
+    "<strong>PS2 throwback.</strong> Drawn at a third of the resolution and scaled up with hard pixels, wobbly vertices, warped textures, 15-bit colour with dither, light halos as sprites, and heavy fog.",
+    "<strong>Graphic-novel halftone.</strong> Edges found from depth and surface direction become ink lines, shading becomes printed dots, and only the police red and blue (and tail lights) keep their colour.",
+    "<strong>Realistic.</strong> Clear-coat car paint, reflections from a generated night sky, soft shadows from the street lamp, puddles that are shinier than dry asphalt, a filmic curve and gentle glow. Convincing, not photoreal."
+  ];
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".card"));
+  var nowEl = document.getElementById("now");
+  var badge = document.getElementById("badge");
+  var hud = document.getElementById("hud");
+  var failEl = document.getElementById("fail");
+  var optDist = document.getElementById("optDist");
+  var optMotion = document.getElementById("optMotion");
+  var current = 0;
+  var onStyleChange = function () {};
+
+  function selectStyle(i) {
+    current = i;
+    tabs.forEach(function (t, k) { t.setAttribute("aria-pressed", k === i ? "true" : "false"); });
+    cards.forEach(function (c, k) { c.classList.toggle("is-on", k === i); });
+    nowEl.innerHTML = STYLE_NOW[i];
+    badge.textContent = STYLE_NAMES[i];
+    onStyleChange(i);
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener("click", function () { selectStyle(+t.getAttribute("data-style")); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".show"), function (b) {
+    b.addEventListener("click", function () {
+      selectStyle(+b.getAttribute("data-style"));
+      var vp = document.getElementById("viewport");
+      var smooth = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+      vp.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "center" });
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    var tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    var n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 5) { selectStyle(n - 1); }
+  });
+  selectStyle(0);
+
+  function fail(msg) {
+    failEl.hidden = false;
+    hud.style.display = "none";
+    if (msg && window.console) console.warn(msg);
+  }
+  if (!window.THREE) { fail("three.js did not load"); return; }
+
+  /* ------------------------------------------------------------------
+     Renderer setup
+  ------------------------------------------------------------------ */
+  var T = window.THREE;
+  var canvas = document.getElementById("scene");
+  var viewport = document.getElementById("viewport");
+  var renderer;
+  try {
+    renderer = new T.WebGLRenderer({ canvas: canvas, antialias: false, powerPreference: "high-performance", alpha: false });
+  } catch (err) { fail(err); return; }
+  if (!renderer.getContext()) { fail("no context"); return; }
+
+  var coarse = window.matchMedia && matchMedia("(pointer: coarse)").matches;
+  var dpr = window.devicePixelRatio || 1;
+  var PR = coarse ? Math.min(dpr, 1.25) : Math.min(dpr, 1.75);
+  renderer.setPixelRatio(PR);
+  renderer.toneMapping = T.NoToneMapping;
+  renderer.outputEncoding = T.LinearEncoding;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFSoftShadowMap;
+  var isGL2 = renderer.capabilities.isWebGL2;
+  var HDR_TYPE = (isGL2 || renderer.extensions.has("EXT_color_buffer_half_float")) ? T.HalfFloatType : T.UnsignedByteType;
+  var canMSAA = isGL2 && !!T.WebGLMultisampleRenderTarget && !coarse;
+
+  /* small helpers */
+  function C(hex) { return new T.Color(hex).convertSRGBToLinear(); }
+  function rngFrom(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function smooth(e0, e1, x) { var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+  function tab(keys, t) {
+    if (t <= keys[0][0]) return keys[0][1];
+    for (var i = 1; i < keys.length; i++) {
+      if (t <= keys[i][0]) {
+        var a = keys[i - 1], b = keys[i];
+        var u = (t - a[0]) / (b[0] - a[0]);
+        u = 0.5 - 0.5 * Math.cos(Math.PI * u);
+        return a[1] + (b[1] - a[1]) * u;
+      }
+    }
+    return keys[keys.length - 1][1];
+  }
+
+  /* ------------------------------------------------------------------
+     Procedural textures (canvas)
+  ------------------------------------------------------------------ */
+  function canvasTex(w, h, draw, opts) {
+    var c = document.createElement("canvas"); c.width = w; c.height = h;
+    var g = c.getContext("2d"); draw(g, w, h);
+    var tx = new T.CanvasTexture(c);
+    opts = opts || {};
+    tx.wrapS = tx.wrapT = T.RepeatWrapping;
+    if (opts.nearest) { tx.magFilter = T.NearestFilter; tx.minFilter = T.NearestFilter; tx.generateMipmaps = false; }
+    if (opts.srgb) tx.encoding = T.sRGBEncoding;
+    if (opts.aniso) tx.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    return tx;
+  }
+  var texR = rngFrom(7);
+  function noiseFill(g, w, h, base, amp, cell) {
+    for (var y = 0; y < h; y += cell) for (var x = 0; x < w; x += cell) {
+      var v = base + (texR() - 0.5) * amp;
+      g.fillStyle = "rgb(" + (v | 0) + "," + (v | 0) + "," + ((v + 2) | 0) + ")";
+      g.fillRect(x, y, cell, cell);
+    }
+  }
+  // Puddle mask: white = standing water. Linear data texture.
+  var texPuddle = canvasTex(256, 256, function (g, w, h) {
+    g.fillStyle = "#000"; g.fillRect(0, 0, w, h);
+    var r = rngFrom(11);
+    for (var i = 0; i < 15; i++) {
+      var x = r() * w, y = r() * h, rad = 18 + r() * 40;
+      for (var ox = -1; ox <= 1; ox++) for (var oy = -1; oy <= 1; oy++) {
+        var gr = g.createRadialGradient(x + ox * w, y + oy * h, 0, x + ox * w, y + oy * h, rad);
+        gr.addColorStop(0, "rgba(255,255,255,0.95)"); gr.addColorStop(0.6, "rgba(255,255,255,0.6)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+        g.fillStyle = gr; g.beginPath(); g.ellipse(x + ox * w, y + oy * h, rad * 1.6, rad, r() * 3, 0, 7); g.fill();
+      }
+    }
+    var d = g.getImageData(0, 0, w, h); // grain
+    for (var k = 0; k < d.data.length; k += 4) { var n = (r() - 0.5) * 18; d.data[k] = Math.max(0, Math.min(255, d.data[k] + n)); d.data[k + 1] = d.data[k]; d.data[k + 2] = d.data[k]; }
+    g.putImageData(d, 0, 0);
+  });
+  // Roughness for realistic road: puddles smooth (dark), dry asphalt rough (light). Green channel is used.
+  var texRough = canvasTex(256, 256, function (g, w, h) {
+    g.drawImage(texPuddle.image, 0, 0);
+    var d = g.getImageData(0, 0, w, h);
+    for (var k = 0; k < d.data.length; k += 4) { var v = 235 - d.data[k] * 0.82; d.data[k] = d.data[k + 1] = d.data[k + 2] = v; }
+    g.putImageData(d, 0, 0);
+  }, { aniso: true });
+  var texAsphalt = canvasTex(256, 256, function (g, w, h) {
+    noiseFill(g, w, h, 58, 26, 2);
+    var r = rngFrom(3);
+    for (var i = 0; i < 900; i++) { g.fillStyle = r() < 0.5 ? "rgba(140,140,140,.35)" : "rgba(10,10,12,.45)"; g.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 2); }
+  }, { srgb: true, aniso: true });
+  var texConcrete = canvasTex(128, 128, function (g, w, h) {
+    noiseFill(g, w, h, 150, 30, 2);
+    g.fillStyle = "rgba(0,0,0,.18)"; for (var y = 0; y < h; y += 32) g.fillRect(0, y, w, 1);
+  }, { srgb: true });
+  var texAsphaltPS2 = canvasTex(32, 32, function (g, w, h) {
+    noiseFill(g, w, h, 70, 30, 2);
+    g.fillStyle = "rgba(20,20,26,.6)"; g.fillRect(3, 9, 6, 2); g.fillRect(20, 24, 7, 2);
+  }, { nearest: true, srgb: true });
+  var texBrickPS2 = canvasTex(32, 32, function (g, w, h) {
+    g.fillStyle = "#5a4a44"; g.fillRect(0, 0, w, h);
+    for (var y = 0; y < h; y += 4) {
+      g.fillStyle = "#3a302c"; g.fillRect(0, y, w, 1);
+      var off = (y / 4) % 2 ? 4 : 0;
+      for (var x = off; x < w; x += 8) g.fillRect(x, y, 1, 4);
+    }
+    var r = rngFrom(5);
+    for (var i = 0; i < 40; i++) { g.fillStyle = r() < 0.5 ? "rgba(255,230,200,.10)" : "rgba(0,0,0,.18)"; g.fillRect((r() * w) | 0, (r() * h) | 0, 2, 1); }
+  }, { nearest: true, srgb: true });
+  var texSidewalkPS2 = canvasTex(16, 16, function (g, w, h) {
+    noiseFill(g, w, h, 105, 22, 2);
+    g.fillStyle = "#4c4c52"; g.fillRect(0, 0, w, 1); g.fillRect(0, 0, 1, h);
+  }, { nearest: true, srgb: true });
+  // Lit shop window: warm interior, ceiling lights, shelves and window frames
+  var texShop = canvasTex(256, 64, function (g, w, h) {
+    var gr = g.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, "#f2d29a"); gr.addColorStop(0.25, "#b98a52"); gr.addColorStop(1, "#5a3c22");
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    var r = rngFrom(8);
+    for (var x = 4; x < w; x += 14 + r() * 10) { g.fillStyle = "rgba(30,18,10," + (0.35 + r() * 0.4) + ")"; g.fillRect(x, 22 + r() * 10, 6 + r() * 8, 40); }
+    g.fillStyle = "rgba(25,15,8,.55)"; g.fillRect(0, 30, w, 2); g.fillRect(0, 44, w, 2);
+    g.fillStyle = "#16120e"; for (var m = 0; m <= w; m += w / 6) g.fillRect(m - 2, 0, 4, h);
+    g.fillRect(0, 0, w, 4); g.fillRect(0, h - 5, w, 5);
+  }, { srgb: true });
+  function signTex(text, vertical) {
+    var w = vertical ? 128 : 512, h = vertical ? 512 : 128;
+    return canvasTex(w, h, function (g) {
+      g.fillStyle = "#000"; g.fillRect(0, 0, w, h);
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.font = "bold " + (vertical ? 66 : 74) + "px 'Arial Narrow', Arial, sans-serif";
+      var draw = function (blur, alpha, lw) {
+        g.shadowColor = "rgba(255,255,255," + alpha + ")"; g.shadowBlur = blur;
+        g.strokeStyle = "#fff"; g.lineWidth = lw; g.fillStyle = "#fff";
+        if (vertical) {
+          for (var i = 0; i < text.length; i++) { var y = 50 + i * (412 / (text.length - 1)); g.strokeText(text[i], 64, y); }
+        } else { g.strokeText(text, 256, 66); }
+      };
+      draw(24, 0.9, 6); draw(6, 1, 3);
+      g.strokeStyle = "#fff"; g.lineWidth = 4; g.shadowBlur = 14;
+      g.strokeRect(8, 8, w - 16, h - 16);
+    });
+  }
+  var texSignA = signTex("LANTERN BAR", false);
+  var texSignB = signTex("VESPER", true);
+  var texHalo = canvasTex(64, 64, function (g, w, h) {
+    var gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.25, "rgba(255,255,255,.55)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  });
+
+  /* ------------------------------------------------------------------
+     Scene
+  ------------------------------------------------------------------ */
+  var scene = new T.Scene();
+  var camera = new T.PerspectiveCamera(50, 16 / 9, 0.3, 700);
+  camera.up.set(0, 0, 1);
+  var groundGroup = new T.Group(); scene.add(groundGroup);
+  var R = rngFrom(20261019);
+
+  function tagMesh(mesh, key, opts) {
+    mesh.userData.mk = key;
+    if (opts && opts.lod) mesh.userData.lod = opts.lod;
+    mesh.castShadow = !(opts && opts.noCast);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  // Ground (asphalt everywhere; sidewalks sit on top)
+  var groundGeo = new T.PlaneGeometry(240, 240, 96, 96);
+  var ground = tagMesh(new T.Mesh(groundGeo, null), "road", { noCast: true });
+  groundGroup.add(ground);
+
+  // Rectangles on the ground -> one geometry
+  function rectsGeometry(rects, z) {
+    var pos = [], nor = [], uv = [], idx = [];
+    rects.forEach(function (r) {
+      var b = pos.length / 3;
+      pos.push(r[0], r[1], z, r[2], r[1], z, r[2], r[3], z, r[0], r[3], z);
+      for (var k = 0; k < 4; k++) nor.push(0, 0, 1);
+      uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    });
+    var g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new T.Float32BufferAttribute(nor, 3));
+    g.setAttribute("uv", new T.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  }
+  (function markings() {
+    var white = [], yellow = [];
+    // main road edge/parking lines at x = +-4 (stop at the junction)
+    [[-118, -7], [7, 118]].forEach(function (s) {
+      yellow.push([-0.22, s[0], -0.08, s[1]], [0.08, s[0], 0.22, s[1]]);
+      white.push([3.9, s[0], 4.05, s[1]], [-4.05, s[0], -3.9, s[1]]);
+    });
+    white.push([3.9, -6, 4.05, 6]);
+    // cross street centre line and edge lines
+    yellow.push([-118, -0.22, -12, -0.08], [-118, 0.08, -12, 0.22]);
+    white.push([-118, 3.9, -12, 4.05], [-118, -4.05, -12, -3.9]);
+    // zebra crossings
+    for (var x = -5.4; x < 5.5; x += 1.1) white.push([x, 7.6, x + 0.55, 10.6]);
+    for (var y = -5.4; y < 5.5; y += 1.1) white.push([-10.8, y, -7.8, y + 0.55]);
+    white.push([0.2, 6.9, 6, 7.25]); // stop line
+    groundGroup.add(tagMesh(new T.Mesh(rectsGeometry(white, 0.012), null), "marking", { noCast: true }));
+    groundGroup.add(tagMesh(new T.Mesh(rectsGeometry(yellow, 0.012), null), "markingY", { noCast: true }));
+  })();
+
+  // Sidewalk slabs + kerbs
+  function box(w, d, h, x, y, z, key, segs) {
+    var g = new T.BoxGeometry(w, d, h, segs ? Math.max(1, Math.round(w / segs)) : 1, segs ? Math.max(1, Math.round(d / segs)) : 1, 1);
+    var m = tagMesh(new T.Mesh(g, null), key);
+    m.position.set(x, y, z);
+    scene.add(m);
+    return m;
+  }
+  function slab(x0, x1, y0, y1) {
+    var m = box(x1 - x0, y1 - y0, 0.15, (x0 + x1) / 2, (y0 + y1) / 2, 0.075, "sidewalk", 3);
+    m.castShadow = false;
+  }
+  slab(6.25, 120, -120, 120);
+  slab(-120, -6.25, 6.25, 120);
+  slab(-120, -6.25, -120, -6.25);
+  function kerb(x0, x1, y0, y1) { box(x1 - x0, y1 - y0, 0.17, (x0 + x1) / 2, (y0 + y1) / 2, 0.085, "kerb", 4).castShadow = false; }
+  kerb(6, 6.3, -120, 120);
+  kerb(-6.3, -6, 6, 120); kerb(-6.3, -6, -120, -6);
+  kerb(-120, -6, 6, 6.3); kerb(-120, -6, -6.3, -6);
+
+  // Buildings and windows
+  var winLit = [], winDark = [];
+  var BKEYS = ["bldgA", "bldgB", "bldgC"];
+  function faceWindows(origin, n, width, height) {
+    var up = new T.Vector3(0, 0, 1);
+    var u = new T.Vector3().crossVectors(up, n).normalize();
+    var cols = Math.max(1, Math.floor((width - 1.6) / 2.7));
+    var rows = Math.max(1, Math.floor((height - 4.2) / 3.3));
+    var startU = (width - (cols - 1) * 2.7) / 2;
+    for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) {
+      var p = origin.clone().addScaledVector(u, startU + c * 2.7).addScaledVector(up, 4.4 + r * 3.3).addScaledVector(n, 0.04);
+      var lit = R() < 0.34;
+      (lit ? winLit : winDark).push({ p: p, n: n.clone(), u: u.clone(), tint: R() });
+    }
+  }
+  function building(x0, x1, y0, y1, h, faces) {
+    var key = BKEYS[(R() * 3) | 0];
+    var m = box(x1 - x0, y1 - y0, h, (x0 + x1) / 2, (y0 + y1) / 2, 0.15 + h / 2, key);
+    m.geometry = new T.BoxGeometry(x1 - x0, y1 - y0, h, Math.max(1, Math.round((x1 - x0) / 4)), Math.max(1, Math.round((y1 - y0) / 4)), Math.max(1, Math.round(h / 4)));
+    // parapet line
+    var par = box(x1 - x0 + 0.3, y1 - y0 + 0.3, 0.5, (x0 + x1) / 2, (y0 + y1) / 2, 0.15 + h + 0.25, "trim");
+    par.castShadow = false;
+    faces.forEach(function (f) {
+      if (f === "x-") faceWindows(new T.Vector3(x0, y1, 0.15), new T.Vector3(-1, 0, 0), y1 - y0, h);
+      if (f === "x+") faceWindows(new T.Vector3(x1, y0, 0.15), new T.Vector3(1, 0, 0), y1 - y0, h);
+      if (f === "y-") faceWindows(new T.Vector3(x0, y0, 0.15), new T.Vector3(0, -1, 0), x1 - x0, h);
+      if (f === "y+") faceWindows(new T.Vector3(x1, y1, 0.15), new T.Vector3(0, 1, 0), x1 - x0, h);
+    });
+    return m;
+  }
+  // right side, fixed near the scene, random further out
+  building(10, 24, -8, 14, 16, ["x-"]);
+  building(10, 22, 15, 33, 28, ["x-", "y-"]);
+  building(10, 26, -27, -9, 22, ["x-"]);
+  (function () {
+    var y = 34; while (y < 118) { var len = 12 + R() * 20; building(10, 20 + R() * 10, y, Math.min(118, y + len), 12 + R() * 26, ["x-"]); y += len + 1 + R() * 2; }
+    y = -28; while (y > -118) { var len2 = 12 + R() * 20; building(10, 20 + R() * 10, Math.max(-118, y - len2), y, 12 + R() * 26, ["x-"]); y -= len2 + 1 + R() * 2; }
+    // left side north and south of the cross street
+    building(-28, -10, 10, 26, 19, ["x+", "y-"]);
+    building(-30, -10, -26, -10, 24, ["x+", "y+"]);
+    y = 27; while (y < 118) { var l3 = 12 + R() * 20; building(-20 - R() * 10, -10, y, Math.min(118, y + l3), 12 + R() * 26, ["x+"]); y += l3 + 1 + R() * 2; }
+    y = -27; while (y > -118) { var l4 = 12 + R() * 20; building(-20 - R() * 10, -10, Math.max(-118, y - l4), y, 12 + R() * 26, ["x+"]); y -= l4 + 1 + R() * 2; }
+    // along the cross street
+    var x = -32; while (x > -118) { var l5 = 12 + R() * 18; building(Math.max(-118, x - l5), x, 10, 22 + R() * 8, 10 + R() * 24, ["y-"]); x -= l5 + 1.5; }
+    x = -32; while (x > -118) { var l6 = 12 + R() * 18; building(Math.max(-118, x - l6), x, -22 - R() * 8, -10, 10 + R() * 24, ["y+"]); x -= l6 + 1.5; }
+  })();
+  // distant skyline ring
+  (function () {
+    for (var i = 0; i < 46; i++) {
+      var a = (i / 46) * Math.PI * 2 + R() * 0.05, rr = 150 + R() * 40;
+      var w = 14 + R() * 16, h = 30 + R() * 80;
+      var cx = Math.cos(a) * rr, cy = Math.sin(a) * rr;
+      var m = box(w, w, h, cx, cy, h / 2, "skyline"); m.castShadow = false; m.rotation.z = a;
+      var n = new T.Vector3(-Math.cos(a), -Math.sin(a), 0);
+      var t = new T.Vector3(-Math.sin(a), Math.cos(a), 0);
+      var org = new T.Vector3(cx, cy, 0).addScaledVector(n, w / 2 + 0.05).addScaledVector(t, -w / 2);
+      // sparse lit windows only
+      var cols = Math.floor(w / 2.7), rows = Math.floor(h / 3.3);
+      for (var r = 1; r < rows; r++) for (var c = 0; c < cols; c++) if (R() < 0.2) {
+        winLit.push({ p: org.clone().addScaledVector(t, 1.3 + c * 2.7).add(new T.Vector3(0, 0, r * 3.3)), n: n.clone(), u: t.clone().negate(), tint: R() });
+      }
+    }
+  })();
+  function windowMesh(list, key) {
+    var geo = new T.PlaneGeometry(1.5, 1.9);
+    var im = new T.InstancedMesh(geo, new T.MeshBasicMaterial(), list.length);
+    var m4 = new T.Matrix4(), up = new T.Vector3(0, 0, 1), col = new T.Color();
+    list.forEach(function (w, i) {
+      m4.makeBasis(w.u, up, w.n); m4.setPosition(w.p);
+      im.setMatrixAt(i, m4);
+      // warm tungsten, cool LED and a few TV blues
+      if (w.tint < 0.55) col.setRGB(1, 0.78, 0.5); else if (w.tint < 0.85) col.setRGB(0.95, 0.92, 0.85); else col.setRGB(0.55, 0.7, 1);
+      col.convertSRGBToLinear();
+      im.setColorAt(i, col);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.frustumCulled = false;
+    tagMesh(im, key, { noCast: true });
+    scene.add(im);
+    return im;
+  }
+  windowMesh(winLit, "winLit");
+  windowMesh(winDark, "winDark");
+
+  // shopfronts at street level
+  function shop(x, y, w, h, nx) {
+    var g = new T.PlaneGeometry(w, h);
+    var m = tagMesh(new T.Mesh(g, null), "shopLit", { noCast: true });
+    m.position.set(x, y, 0.15 + 0.4 + h / 2);
+    m.rotation.set(Math.PI / 2, nx > 0 ? Math.PI / 2 : -Math.PI / 2, 0);
+    scene.add(m);
+  }
+  shop(9.95, 2, 9, 2.4, -1);
+  shop(-9.95, 17, 6, 2.4, 1);
+  shop(9.95, 24, 6, 2.4, -1);
+
+  // Neon signs
+  function plane(w, h, key) { var m = tagMesh(new T.Mesh(new T.PlaneGeometry(w, h), null), key, { noCast: true }); scene.add(m); return m; }
+  (function () {
+    // horizontal sign on the left corner building, facing +x (the road)
+    var back = box(0.25, 7.4, 1.6, -9.85, 18, 4.6, "signBack");
+    back.castShadow = false;
+    var face = plane(7.2, 1.8, "neonSignA");
+    face.position.set(-9.7, 18, 4.6); face.rotation.set(Math.PI / 2, Math.PI / 2, 0);
+    // blade sign on the right building, sticking out over the sidewalk, faces +-y
+    var blade = box(1.5, 0.25, 6.2, 9.2, -1.5, 9.5, "signBack"); blade.castShadow = false;
+    var f1 = plane(1.4, 5.6, "neonSignB"); f1.position.set(9.2, -1.64, 9.5); f1.rotation.set(Math.PI / 2, Math.PI, 0);
+    var f2 = plane(1.4, 5.6, "neonSignB"); f2.position.set(9.2, -1.36, 9.5); f2.rotation.set(Math.PI / 2, 0, 0);
+    // tubes: vertical cyan on the right corner, magenta stripe under left sign
+    box(0.12, 0.12, 13, 9.95, 14.6, 7, "neonTubeB").castShadow = false;
+    box(0.12, 7.4, 0.1, -9.8, 18, 3.55, "neonTubeA").castShadow = false;
+    box(0.12, 0.12, 9, -9.95, 25.9, 6, "neonTubeA").castShadow = false;
+  })();
+
+  // Street lamps
+  var lampHeads = [];
+  function lamp(x, y, side) {
+    var pole = tagMesh(new T.Mesh(new T.CylinderGeometry(0.08, 0.12, 7.2, 10), null), "lampPole");
+    pole.rotation.x = Math.PI / 2; pole.position.set(x, y, 3.75); scene.add(pole);
+    var arm = box(1.9, 0.12, 0.12, x - side * 0.95, y, 7.25, "lampPole");
+    arm.castShadow = false;
+    var head = box(0.8, 0.32, 0.14, x - side * 1.85, y, 7.15, "lampPole");
+    head.castShadow = false;
+    var bulb = box(0.62, 0.22, 0.04, x - side * 1.85, y, 7.06, "lampHead");
+    bulb.castShadow = false;
+    lampHeads.push(new T.Vector3(x - side * 1.85, y, 6.95));
+  }
+  lamp(6.6, 8, 1); lamp(6.6, -16, 1); lamp(-6.6, 22, -1); lamp(-6.6, -20, -1); lamp(6.6, 34, 1); lamp(6.6, 58, 1); lamp(-6.6, 50, -1); lamp(6.6, -42, 1);
+
+  // traffic signal on the NW corner (green, so it never competes with the police red)
+  (function () {
+    var p = tagMesh(new T.Mesh(new T.CylinderGeometry(0.07, 0.07, 4.2, 8), null), "lampPole");
+    p.rotation.x = Math.PI / 2; p.position.set(-6.7, 7.2, 2.25); scene.add(p);
+    box(0.32, 0.3, 1.0, -6.7, 7.2, 4.6, "trim");
+    var g = box(0.2, 0.06, 0.2, -6.7, 7.04, 4.3, "sigGreen"); g.castShadow = false;
+  })();
+
+  /* ---------------- cars ---------------- */
+  function loft(nS, nR, prof, split) {
+    var pos = [], idx = [], idx2 = [];
+    for (var i = 0; i <= nS; i++) {
+      var p = prof(i / nS), zc = (p.z0 + p.z1) / 2, h = (p.z1 - p.z0) / 2, e = 2 / p.n;
+      for (var j = 0; j < nR; j++) {
+        var th = (j / nR) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+        var sx = Math.sign(c) * Math.pow(Math.abs(c), e), sz = Math.sign(s) * Math.pow(Math.abs(s), e);
+        var tuck = 1 - (p.tuck || 0) * Math.max(0, sz);
+        pos.push(p.w * sx * tuck, p.y, zc + h * sz);
+      }
+    }
+    for (i = 0; i < nS; i++) for (j = 0; j < nR; j++) {
+      var a = i * nR + j, b = i * nR + (j + 1) % nR, cc = (i + 1) * nR + j, d = (i + 1) * nR + (j + 1) % nR;
+      var dst = split && split((i + 0.5) / nS, ((j + 0.5) / nR) * Math.PI * 2) ? idx2 : idx;
+      dst.push(a, cc, b, b, cc, d);
+    }
+    // caps with their own vertices so the edge stays crisp
+    [0, nS].forEach(function (ring) {
+      var base = pos.length / 3, cx = 0, cy = 0, cz = 0;
+      for (var j2 = 0; j2 < nR; j2++) { var q = (ring * nR + j2) * 3; pos.push(pos[q], pos[q + 1], pos[q + 2]); cx += pos[q]; cy += pos[q + 1]; cz += pos[q + 2]; }
+      pos.push(cx / nR, cy / nR, cz / nR);
+      var m = base + nR;
+      for (j2 = 0; j2 < nR; j2++) {
+        var r0 = base + j2, r1 = base + (j2 + 1) % nR;
+        if (ring === 0) idx.push(m, r0, r1); else idx.push(m, r1, r0);
+      }
+    });
+    var g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx.concat(idx2));
+    if (split) { g.addGroup(0, idx.length, 0); g.addGroup(idx.length, idx2.length, 1); }
+    return g;
+  }
+  // Dents: push vertices inward with crumple folds; darken the scraped area through vertex colour
+  function damage(geo, dents, colorFn) {
+    var p = geo.attributes.position, n = p.count, cols = new Float32Array(n * 3), v = new T.Vector3();
+    for (var i = 0; i < n; i++) {
+      v.set(p.getX(i), p.getY(i), p.getZ(i));
+      var base = colorFn ? colorFn(v) : 1, scrape = 0, dx = 0, dy = 0, dz = 0;
+      for (var k = 0; k < dents.length; k++) {
+        var D = dents[k], dist = v.distanceTo(D.p);
+        if (dist >= D.r) continue;
+        var f = 1 - smooth(0, D.r, dist);
+        var fold = 0.6 * Math.sin(v.y * 29 + v.z * 7 + D.seed) + 0.4 * Math.sin(v.x * 23 + v.z * 19 + D.seed * 2);
+        dx += (D.dir.x * D.depth + v.x * 0.15 * fold * D.crumple * 6) * f;
+        dy += (D.dir.y * D.depth + fold * D.crumple) * f;
+        dz += (D.dir.z * D.depth + fold * D.crumple * 0.8) * f;
+        scrape = Math.max(scrape, f);
+      }
+      p.setXYZ(i, v.x + dx, v.y + dy, v.z + dz);
+      var dark = 1 - 0.6 * smooth(0.25, 0.75, scrape);
+      cols[i * 3] = base * dark; cols[i * 3 + 1] = base * dark; cols[i * 3 + 2] = base * dark * 1.04;
+    }
+    geo.setAttribute("color", new T.BufferAttribute(cols, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  var CAR = {
+    sport: {
+      L: 4.4, wheelR: 0.33, wheelY: [-1.32, 1.42], track: 0.83,
+      top: [[0, .70], [.06, .84], [.30, .88], [.60, .84], [.80, .72], [.95, .60], [1, .50]],
+      bot: [[0, .30], [.05, .22], [.95, .22], [1, .32]],
+      w: [[0, .74], [.05, .88], [.2, .94], [.5, .92], [.8, .92], [.96, .84], [1, .70]],
+      n: 3.2, tuck: 0.12,
+      cab: [0.24, 0.63], cabH: [[0, 0.02], [.3, .40], [.58, .42], [.70, .37], [1, .02]], cabW: 0.84, cabTuck: 0.45,
+      roof: [0.30, 0.70]
+    },
+    sedan: {
+      L: 4.9, wheelR: 0.35, wheelY: [-1.5, 1.48], track: 0.84,
+      top: [[0, .92], [.05, 1.0], [.26, 1.02], [.32, 1.0], [.68, .98], [.76, .97], [.95, .90], [1, .80]],
+      bot: [[0, .36], [.05, .30], [.95, .30], [1, .38]],
+      w: [[0, .84], [.04, .92], [.5, .95], [.96, .92], [1, .82]],
+      n: 5, tuck: 0.08,
+      cab: [0.25, 0.70], cabH: [[0, .02], [.18, .44], [.3, .48], [.72, .48], [.88, .40], [1, .02]], cabW: 0.9, cabTuck: 0.3,
+      roof: [0.2, 0.8]
+    }
+  };
+  function buildCar(kind, opt) {
+    var S = CAR[kind === "police" ? "sedan" : kind];
+    var root = new T.Group();
+    var paint = opt.paint;
+    ["hi", "lo"].forEach(function (lod) {
+      var hi = lod === "hi";
+      var g = new T.Group(); g.userData.lod = lod; root.add(g);
+      var y0 = -S.L / 2;
+      var bodyProf = function (t) { return { y: y0 + S.L * t, w: tab(S.w, t), z0: tab(S.bot, t), z1: tab(S.top, t), n: S.n, tuck: S.tuck }; };
+      var body = loft(hi ? 48 : 12, hi ? 32 : 10, bodyProf);
+      var colorFn = null;
+      if (kind === "police") colorFn = function (v) { return (Math.abs(v.y) > 1.3 || v.z < 0.5) ? 0.035 : 1; };
+      damage(body, opt.dents || [], colorFn);
+      g.add(tagMesh(new T.Mesh(body, null), paint, { lod: lod }));
+      var cabProf = function (t) {
+        var tb = S.cab[0] + (S.cab[1] - S.cab[0]) * t;
+        var z0 = tab(S.top, tb) - 0.03;
+        return { y: y0 + S.L * tb, w: tab(S.w, tb) * S.cabW, z0: z0, z1: z0 + tab(S.cabH, t), n: 3, tuck: S.cabTuck };
+      };
+      // roof panel = upper part of the cabin surface between the pillars; the rest is glass
+      var isRoof = function (t, th) { return t > S.roof[0] && t < S.roof[1] && Math.sin(th) > (hi ? 0.62 : 0.5); };
+      var cab = loft(hi ? 28 : 7, hi ? 24 : 8, cabProf, isRoof);
+      damage(cab, (opt.dents || []).map(function (d) { return { p: d.p, r: d.r * 0.6, dir: d.dir, depth: d.depth * 0.3, crumple: d.crumple * 0.5, seed: d.seed }; }), null);
+      g.add(tagMesh(new T.Mesh(cab, null), ["glass", paint], { lod: lod }));
+      // wheels
+      var seg = hi ? 24 : 9;
+      var tyreG = new T.CylinderGeometry(S.wheelR, S.wheelR, 0.26, seg); tyreG.rotateZ(Math.PI / 2);
+      var rimG = new T.CylinderGeometry(S.wheelR * 0.62, S.wheelR * 0.62, 0.27, seg); rimG.rotateZ(Math.PI / 2);
+      var archG = new T.CircleGeometry(S.wheelR + 0.07, seg, 0, Math.PI); archG.rotateX(Math.PI / 2); archG.rotateZ(Math.PI / 2);
+      S.wheelY.forEach(function (wy, wi) {
+        [-1, 1].forEach(function (sx) {
+          var w = new T.Group();
+          w.add(tagMesh(new T.Mesh(tyreG, null), "tire", { lod: lod }));
+          var rim = tagMesh(new T.Mesh(rimG, null), "rim", { lod: lod }); rim.position.x = sx * 0.01; w.add(rim);
+          w.position.set(sx * S.track, wy, S.wheelR);
+          if (opt.bentWheel && wi === 1 && sx === 1) { w.rotation.z = 0.22; w.rotation.y = -0.14; w.position.x -= 0.08; w.position.y -= 0.1; }
+          g.add(w);
+          var arch = tagMesh(new T.Mesh(archG, null), "trim", { lod: lod, noCast: true });
+          arch.position.set(sx * (tab(S.w, (wy - y0) / S.L) * 0.985), wy, S.wheelR);
+          arch.rotation.z = sx > 0 ? 0 : Math.PI;
+          g.add(arch);
+        });
+      });
+    });
+    // lights and details shared between LODs
+    var tf = function (t) { return tab(S.top, t); };
+    var yF = S.L / 2, yR = -S.L / 2;
+    var hz = tf(0.975) - 0.1;
+    [-1, 1].forEach(function (sx) {
+      var broken = opt.brokenFR && sx === 1;
+      var hl = tagMesh(new T.Mesh(new T.BoxGeometry(0.34, 0.1, 0.11), null), broken ? "brokenLight" : "headlight", { noCast: true });
+      hl.position.set(sx * (kind === "sport" ? 0.55 : 0.62), yF - 0.06, hz);
+      if (broken) { hl.position.set(0.5, yF - 0.42, hz - 0.12); hl.rotation.set(0.5, 0.3, -0.6); }
+      root.add(hl);
+      var brokenRL = opt.brokenRL && sx === -1;
+      var tl = tagMesh(new T.Mesh(new T.BoxGeometry(kind === "sport" ? 0.5 : 0.36, 0.08, 0.1), null), brokenRL ? "brokenLight" : "taillight", { noCast: true });
+      tl.position.set(sx * 0.58, yR + (brokenRL ? 0.3 : 0.03), tf(0.02) - 0.1);
+      root.add(tl);
+    });
+    var grille = tagMesh(new T.Mesh(new T.BoxGeometry(kind === "sport" ? 0.7 : 1.1, 0.06, 0.16), null), "trim");
+    grille.position.set(opt.brokenFR ? -0.12 : 0, yF - 0.02, hz - 0.06); root.add(grille);
+    if (kind === "police") {
+      var cabTop = tab(S.top, 0.48) - 0.03 + 0.48;
+      var base = tagMesh(new T.Mesh(new T.BoxGeometry(1.25, 0.3, 0.07), null), "lightbarBase");
+      base.position.set(0, -0.1, cabTop + 0.04); root.add(base);
+      var lr = tagMesh(new T.Mesh(new T.BoxGeometry(0.56, 0.24, 0.1), null), "lightRed", { noCast: true }); lr.position.set(-0.31, -0.1, cabTop + 0.12); root.add(lr);
+      var lb = tagMesh(new T.Mesh(new T.BoxGeometry(0.56, 0.24, 0.1), null), "lightBlue", { noCast: true }); lb.position.set(0.31, -0.1, cabTop + 0.12); root.add(lb);
+      root.userData.barZ = cabTop + 0.2;
+      // push bar
+      var pb = tagMesh(new T.Mesh(new T.BoxGeometry(1.05, 0.08, 0.32), null), "trim"); pb.position.set(0, yF + 0.12, 0.55); root.add(pb);
+      [-0.4, 0.4].forEach(function (x) { var u = tagMesh(new T.Mesh(new T.BoxGeometry(0.07, 0.2, 0.55), null), "trim"); u.position.set(x, yF + 0.06, 0.62); root.add(u); });
+    }
+    if (opt.hangingBumper) {
+      var hb = tagMesh(new T.Mesh(new T.BoxGeometry(0.08, 0.9, 0.2), null), paint);
+      hb.position.set(0.86, 1.72, 0.2); hb.rotation.set(-0.35, -0.55, 0.45); root.add(hb);
+    }
+    root.traverse(function (o) { if (o.isMesh && !o.userData.lod && o.parent && o.parent.userData && o.parent.userData.lod) o.userData.lod = o.parent.userData.lod; });
+    return root;
+  }
+
+  // Player: stylised sports coupe, front-right corner crushed into the parked sedan
+  var player = buildCar("sport", {
+    paint: "paintPlayer", brokenFR: true, bentWheel: true, hangingBumper: true,
+    dents: [
+      { p: new T.Vector3(0.95, 2.25, 0.45), r: 1.15, dir: new T.Vector3(-0.5, -0.8, -0.05), depth: 0.55, crumple: 0.075, seed: 1.3 },
+      { p: new T.Vector3(0.4, 1.7, 0.75), r: 0.75, dir: new T.Vector3(0, -0.25, 0.6), depth: 0.18, crumple: 0.05, seed: 4.1 },
+      { p: new T.Vector3(0.98, 0.9, 0.45), r: 0.6, dir: new T.Vector3(-1, 0, 0), depth: 0.06, crumple: 0.02, seed: 2.2 }
+    ]
+  });
+  // it has bounced back off the sedan, so there's a gap and the crushed corner faces the street
+  player.position.set(2.4, 7.0, 0); player.rotation.z = 0.18; scene.add(player);
+  // Parked sedan, rear-left corner pushed in
+  var sedan = buildCar("sedan", {
+    paint: "paintSedan", brokenRL: true,
+    dents: [{ p: new T.Vector3(-0.92, -2.5, 0.62), r: 0.95, dir: new T.Vector3(0.45, 0.8, 0), depth: 0.3, crumple: 0.05, seed: 3.3 }]
+  });
+  sedan.position.set(4.25, 13.6, 0); sedan.rotation.z = 0.1; scene.add(sedan);
+  // Police cruiser boxing the player in
+  var cop = buildCar("police", { paint: "paintPolice" });
+  cop.position.set(0.3, 0.6, 0); cop.rotation.z = -0.42; scene.add(cop);
+  // A passing car in the far lane: the city keeps moving
+  var traffic = buildCar("sedan", { paint: "paintTraffic" });
+  traffic.rotation.z = Math.PI; traffic.position.set(-2.3, 60, 0); scene.add(traffic);
+  // Debris on the road
+  (function () {
+    var dr = rngFrom(99);
+    for (var i = 0; i < 14; i++) {
+      var glass = i < 8;
+      var m = tagMesh(new T.Mesh(new T.BoxGeometry(glass ? 0.07 : 0.22, glass ? 0.05 : 0.12, 0.012), null), glass ? "shard" : (i < 11 ? "paintPlayer" : "trim"), { noCast: true });
+      m.position.set(3.1 + (dr() - 0.4) * 2.0, 10.2 + (dr() - 0.5) * 2.0, 0.01);
+      m.rotation.z = dr() * 6;
+      scene.add(m);
+    }
+  })();
+
+  // Sky dome
+  var skyMat = new T.ShaderMaterial({
+    side: T.BackSide, depthWrite: false, fog: false,
+    uniforms: { uTop: { value: new T.Color() }, uHor: { value: new T.Color() }, uBot: { value: new T.Color() } },
+    vertexShader: "varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+    fragmentShader: "uniform vec3 uTop, uHor, uBot; varying vec3 vD; void main(){ float h = vD.z; vec3 c = h > 0.0 ? mix(uHor, uTop, smoothstep(0.0, 0.45, h)) : mix(uHor, uBot, smoothstep(0.0, 0.1, -h)); gl_FragColor = vec4(c, 1.0); }"
+  });
+  var sky = new T.Mesh(new T.SphereGeometry(400, 32, 16), skyMat);
+  sky.userData.isSky = true; sky.frustumCulled = false;
+  scene.add(sky);
+
+  // Light halos (sprites) — only used by the PS2 style, the way games of that era faked glow
+  var halos = [];
+  function halo(pos, color, size, kind) {
+    var m = new T.SpriteMaterial({ map: texHalo, color: C(color), blending: T.AdditiveBlending, depthWrite: false, transparent: true, fog: false });
+    var s = new T.Sprite(m); s.position.copy(pos); s.scale.set(size, size, 1); s.userData.haloKind = kind || "";
+    s.visible = false; scene.add(s); halos.push(s);
+    return s;
+  }
+  lampHeads.forEach(function (p) { halo(p, "#ffc070", 3.2); });
+
+  /* ---------------- lights ---------------- */
+  var hemi = new T.HemisphereLight(0xffffff, 0x000000, 0.3); hemi.position.set(0, 0, 1); scene.add(hemi);
+  var moon = new T.DirectionalLight(0xffffff, 0.2); moon.position.set(-40, 30, 70); scene.add(moon);
+  function spot(pos, target, dist, angle) {
+    var s = new T.SpotLight(0xffffff, 1, dist, angle, 0.65, 2);
+    s.position.copy(pos); s.target.position.copy(target); scene.add(s); scene.add(s.target);
+    s.shadow.mapSize.set(1024, 1024); s.shadow.bias = -0.0004; s.shadow.camera.near = 1; s.shadow.camera.far = 30; s.shadow.radius = 4;
+    return s;
+  }
+  var lampA = spot(lampHeads[0], new T.Vector3(3.0, 9.5, 0), 30, 1.0);
+  var lampB = spot(lampHeads[1], new T.Vector3(4, -16, 0), 30, 1.0);
+  var lampC = spot(lampHeads[2], new T.Vector3(-4, 22, 0), 30, 1.0);
+  var lampSpots = [lampA, lampB, lampC];
+  // police headlights aimed at the player car
+  var copFront = new T.Vector3(0, 2.6, 0.7).applyAxisAngle(new T.Vector3(0, 0, 1), cop.rotation.z).add(cop.position);
+  var copHead = spot(copFront, player.position.clone().add(new T.Vector3(0.5, 0, 0.3)), 34, 0.42);
+  copHead.penumbra = 0.5;
+  var barPos = new T.Vector3(0, -0.1, cop.userData.barZ).applyAxisAngle(new T.Vector3(0, 0, 1), cop.rotation.z).add(cop.position);
+  var polR = new T.PointLight(0xff0000, 1, 18, 2); polR.position.copy(barPos).add(new T.Vector3(-0.4, 0, 0.3)); scene.add(polR);
+  var polB = new T.PointLight(0x0000ff, 1, 18, 2); polB.position.copy(barPos).add(new T.Vector3(0.4, 0, 0.3)); scene.add(polB);
+  var neonP = new T.PointLight(0xff00ff, 1, 16, 2); neonP.position.set(-8.3, 18, 4.2); scene.add(neonP);
+  var neonC = new T.PointLight(0x00ffff, 1, 16, 2); neonC.position.set(8.1, -1.5, 8.5); scene.add(neonC);
+  var haloR = halo(polR.position, "#ff2020", 2.6, "red");
+  var haloB = halo(polB.position, "#2050ff", 2.6, "blue");
+
+  /* ------------------------------------------------------------------
+     Environment map for reflections (generated night sky + city lights, rendered to a cube map)
+  ------------------------------------------------------------------ */
+  var envTex = null;
+  try {
+    var envScene = new T.Scene();
+    var envSky = new T.Mesh(new T.SphereGeometry(50, 32, 16), new T.ShaderMaterial({
+      side: T.BackSide,
+      vertexShader: "varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+      fragmentShader: "varying vec3 vD; void main(){ float h = vD.z; vec3 top = vec3(0.004,0.006,0.016); vec3 hor = vec3(0.09,0.05,0.06); vec3 bot = vec3(0.012,0.012,0.014); vec3 c = h > 0.0 ? mix(hor, top, smoothstep(0.0,0.5,h)) : mix(hor, bot, smoothstep(0.0,0.15,-h)); gl_FragColor = vec4(c,1.0); }"
+    }));
+    envScene.add(envSky);
+    var er = rngFrom(4);
+    for (var ei = 0; ei < 40; ei++) {
+      var a = er() * Math.PI * 2, el = er() * 0.35, warm = er() < 0.7;
+      var col = warm ? new T.Color(1.6, 1.0, 0.5) : new T.Color(0.7, 0.9, 1.6);
+      if (ei % 13 === 0) col = new T.Color(2.0, 0.3, 1.6); if (ei % 17 === 0) col = new T.Color(0.2, 1.6, 2.0);
+      var q = new T.Mesh(new T.PlaneGeometry(2 + er() * 6, 1 + er() * 2), new T.MeshBasicMaterial({ color: col, side: T.DoubleSide }));
+      q.position.set(Math.cos(a) * 40, Math.sin(a) * 40, Math.sin(el) * 40); q.lookAt(0, 0, 0); envScene.add(q);
+    }
+    var big = new T.Mesh(new T.PlaneGeometry(30, 6), new T.MeshBasicMaterial({ color: new T.Color(1.2, 0.9, 0.7), side: T.DoubleSide }));
+    big.position.set(0, 0, 45); envScene.add(big);
+    // Render the generated sky into a cube map once; mipmaps give blurrier reflections on rougher surfaces.
+    var cubeRT = new T.WebGLCubeRenderTarget(128, { type: HDR_TYPE, format: T.RGBAFormat, generateMipmaps: true, minFilter: T.LinearMipmapLinearFilter, magFilter: T.LinearFilter });
+    var cubeCam = new T.CubeCamera(0.1, 200, cubeRT);
+    envScene.add(cubeCam);
+    cubeCam.update(renderer, envScene);
+    envTex = cubeRT.texture;
+  } catch (e) { envTex = null; }
+
+  /* ------------------------------------------------------------------
+     Shared uniforms for shader patches
+  ------------------------------------------------------------------ */
+  var U = {
+    tMirror: { value: null },
+    mirrorMatrix: { value: new T.Matrix4() },
+    tPuddle: { value: texPuddle },
+    snap: { value: new T.Vector2(160, 90) }
+  };
+
+  // Wet-road reflection: projective lookup into a mirrored render, streaked vertically
+  function wetPatch(mat, strength, maskMix) {
+    var uWet = { value: strength }, uMask = { value: maskMix };
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.tMirror = U.tMirror; sh.uniforms.uMirrorMatrix = U.mirrorMatrix; sh.uniforms.tPuddle = U.tPuddle;
+      sh.uniforms.uWet = uWet; sh.uniforms.uMaskMix = uMask;
+      sh.vertexShader = "uniform mat4 uMirrorMatrix;\nvarying vec4 vMirror;\nvarying vec2 vWXY;\n" +
+        sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\n vec4 wpM = modelMatrix * vec4(transformed, 1.0); vMirror = uMirrorMatrix * wpM; vWXY = wpM.xy;");
+      sh.fragmentShader = "uniform sampler2D tMirror;\nuniform sampler2D tPuddle;\nuniform float uWet;\nuniform float uMaskMix;\nvarying vec4 vMirror;\nvarying vec2 vWXY;\n" +
+        sh.fragmentShader.replace("#include <tonemapping_fragment>", [
+          "{",
+          "  vec2 muv = vMirror.xy / vMirror.w;",
+          "  float pm = texture2D(tPuddle, vWXY * 0.045).r;",
+          "  float mask = mix(1.0, smoothstep(0.15, 0.7, pm), uMaskMix);",
+          "  vec2 jit = (vec2(texture2D(tPuddle, vWXY * 0.8).r, texture2D(tPuddle, vWXY * 0.63 + 0.37).r) - 0.5) * 0.012 * (1.0 - pm);",
+          "  vec3 refl = vec3(0.0); float wsum = 0.0;",
+          "  for (int i = -3; i <= 3; i++) { float fi = float(i); float w = 1.0 - abs(fi) * 0.22; refl += texture2D(tMirror, muv + jit + vec2(0.0, fi * 0.007 * (1.3 - pm))).rgb * w; wsum += w; }",
+          "  refl /= wsum;",
+          "  vec3 vdir = normalize(vViewPosition);",
+          "  float fres = 0.3 + 0.7 * pow(1.0 - clamp(abs(dot(normal, vdir)), 0.0, 1.0), 2.0);",
+          "  gl_FragColor.rgb += refl * uWet * mask * fres;",
+          "}",
+          "#include <tonemapping_fragment>"].join("\n"));
+    };
+    mat.customProgramCacheKey = function () { return "wet"; };
+    return mat;
+  }
+  // PS2: snap vertices to the low-res pixel grid, affine (non-perspective) texture mapping
+  function ps2Patch(mat) {
+    var hasMap = !!mat.map;
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uSnap = U.snap;
+      sh.vertexShader = "uniform vec2 uSnap;\nvarying float vAffW;\n" + sh.vertexShader.replace("#include <project_vertex>",
+        "#include <project_vertex>\n gl_Position.xy = floor(gl_Position.xy / gl_Position.w * uSnap + 0.5) / uSnap * gl_Position.w;\n vAffW = gl_Position.w;" +
+        (hasMap ? "\n vUv *= gl_Position.w;" : ""));
+      sh.fragmentShader = "varying float vAffW;\n" + sh.fragmentShader;
+      if (hasMap) sh.fragmentShader = sh.fragmentShader.replace("#include <map_fragment>",
+        "vec4 texelColor = texture2D( map, vUv / vAffW ); texelColor = mapTexelToLinear( texelColor ); diffuseColor *= texelColor;");
+    };
+    mat.customProgramCacheKey = function () { return "ps2" + (hasMap ? "m" : ""); };
+    return mat;
+  }
+
+  /* ------------------------------------------------------------------
+     Materials per style
+  ------------------------------------------------------------------ */
+  function glow(hex, k, extra) {
+    var m = new T.MeshBasicMaterial(Object.assign({ color: C(hex).multiplyScalar(k) }, extra || {}));
+    m.userData.base = m.color.clone();
+    return m;
+  }
+  function sign(tex, hex, k) {
+    return glow(hex, k, { map: tex, blending: T.AdditiveBlending, transparent: true, depthWrite: false });
+  }
+  function std(hex, rough, metal, extra) {
+    return new T.MeshStandardMaterial(Object.assign({ color: C(hex), roughness: rough, metalness: metal || 0 }, extra || {}));
+  }
+  function phys(hex, rough, metal, extra) {
+    return new T.MeshPhysicalMaterial(Object.assign({ color: C(hex), roughness: rough, metalness: metal || 0 }, extra || {}));
+  }
+
+  var MAKERS = {
+    neon: function () {
+      var env = { envMap: envTex, envMapIntensity: 0.45 };
+      return {
+        road: wetPatch(std("#17181d", 0.5, 0, env), 0.95, 0.35),
+        marking: std("#a9a69e", 0.6), markingY: std("#a8842a", 0.6),
+        sidewalk: std("#26262c", 0.85), kerb: std("#46464d", 0.8),
+        bldgA: std("#1b1c24", 0.85), bldgB: std("#231e27", 0.85), bldgC: std("#171d25", 0.85), skyline: std("#0d0e14", 1),
+        winLit: glow("#ffd7a6", 1.7), winDark: std("#0a0d13", 0.15, 0.4, env), shopLit: glow("#ffffff", 1.25, { map: texShop }),
+        lampPole: std("#2a2b30", 0.45, 0.7, env), lampHead: glow("#ffb565", 9), sigGreen: glow("#39ff9a", 5),
+        neonSignA: sign(texSignA, "#ff2bd6", 5), neonSignB: sign(texSignB, "#26e8ff", 5),
+        neonTubeA: glow("#ff2bd6", 7), neonTubeB: glow("#26e8ff", 7), signBack: std("#101115", 0.6),
+        paintPlayer: phys("#f0a020", 0.3, 0.5, Object.assign({ clearcoat: 0.8, clearcoatRoughness: 0.08, vertexColors: true }, env, { envMapIntensity: 0.8 })),
+        paintSedan: std("#34463e", 0.42, 0.4, Object.assign({ vertexColors: true }, env)),
+        paintPolice: phys("#e6e6e6", 0.32, 0.2, Object.assign({ clearcoat: 0.6, vertexColors: true }, env)),
+        paintTraffic: std("#3d2f4a", 0.4, 0.4, Object.assign({ vertexColors: true }, env)),
+        glass: std("#04060a", 0.06, 0.9, Object.assign({}, env, { envMapIntensity: 1.3 })), shard: std("#9fb4c8", 0.1, 0.6, env),
+        tire: std("#0d0d0f", 0.9), rim: std("#8a8c92", 0.28, 1, env), trim: std("#0b0b0d", 0.6),
+        headlight: glow("#eaf3ff", 3.6), taillight: glow("#ff2020", 3), brokenLight: std("#16181b", 0.3, 0.3),
+        lightbarBase: std("#0b0b0d", 0.5), lightRed: glow("#ff1a1a", 30), lightBlue: glow("#1a4dff", 34)
+      };
+    },
+    lowpoly: function () {
+      var f = function (hex, extra) { return std(hex, 1, 0, Object.assign({ flatShading: true }, extra || {})); };
+      return {
+        road: f("#2b2e38"), marking: f("#8d8b84"), markingY: f("#8f7a45"),
+        sidewalk: f("#3b3e4a"), kerb: f("#555866"),
+        bldgA: f("#3a3446"), bldgB: f("#2f3a4a"), bldgC: f("#433a3c"), skyline: f("#262838"),
+        winLit: glow("#f3c37a", 1.25), winDark: f("#1f2533"), shopLit: glow("#ffffff", 0.95, { map: texShop }),
+        lampPole: f("#3a3d48"), lampHead: glow("#ffc27a", 4), sigGreen: glow("#5fe0a0", 2.5),
+        neonSignA: sign(texSignA, "#d9709f", 2.2), neonSignB: sign(texSignB, "#5fb8b8", 2.2),
+        neonTubeA: glow("#d9709f", 2.4), neonTubeB: glow("#5fb8b8", 2.4), signBack: f("#22232b"),
+        paintPlayer: f("#c9913a", { vertexColors: true }), paintSedan: f("#5d6f63", { vertexColors: true }),
+        paintPolice: f("#d8dbe0", { vertexColors: true }), paintTraffic: f("#6b5a7a", { vertexColors: true }),
+        glass: f("#1d2633"), shard: f("#8aa0b0"),
+        tire: f("#18181c"), rim: f("#6d7078"), trim: f("#1a1b20"),
+        headlight: glow("#f4f1e6", 2), taillight: glow("#e04848", 1.8), brokenLight: f("#202227"),
+        lightbarBase: f("#16171b"), lightRed: glow("#ff3030", 13), lightBlue: glow("#3060ff", 15)
+      };
+    },
+    ps2: function () {
+      var L = function (hex, extra) { return ps2Patch(new T.MeshLambertMaterial(Object.assign({ color: C(hex) }, extra || {}))); };
+      var G = function (hex, k, extra) { return ps2Patch(glow(hex, k, extra)); };
+      var asph = texAsphaltPS2.clone(); asph.needsUpdate = true; asph.repeat.set(60, 60);
+      var brick = texBrickPS2; brick.repeat.set(1, 1);
+      return {
+        road: L("#ffffff", { map: asph }), marking: L("#b8b4aa"), markingY: L("#b89a3a"),
+        sidewalk: L("#ffffff", { map: texSidewalkPS2 }), kerb: L("#77777e"),
+        bldgA: L("#d8c8c0", { map: brick }), bldgB: L("#a8b8c8", { map: brick }), bldgC: L("#c8c0a8", { map: brick }), skyline: L("#2a2e40"),
+        winLit: G("#ffd27a", 1), winDark: L("#1a1e2a"), shopLit: G("#ffffff", 1, { map: texShop }),
+        lampPole: L("#4a4d58"), lampHead: G("#ffd090", 1), sigGreen: G("#60ff90", 1),
+        neonSignA: G("#ff40d0", 1, { map: texSignA, blending: T.AdditiveBlending, transparent: true, depthWrite: false }),
+        neonSignB: G("#40e0ff", 1, { map: texSignB, blending: T.AdditiveBlending, transparent: true, depthWrite: false }),
+        neonTubeA: G("#ff40d0", 1), neonTubeB: G("#40e0ff", 1), signBack: L("#202028"),
+        paintPlayer: L("#e0a030", { vertexColors: true }), paintSedan: L("#58705f", { vertexColors: true }),
+        paintPolice: L("#e0e0e0", { vertexColors: true }), paintTraffic: L("#7a5a8a", { vertexColors: true }),
+        glass: L("#28354a"), shard: L("#a0b8d0"),
+        tire: L("#1a1a1e"), rim: L("#8a8d96"), trim: L("#1c1c22"),
+        headlight: G("#fff8e0", 1), taillight: G("#ff3030", 1), brokenLight: L("#24262c"),
+        lightbarBase: L("#18181c"), lightRed: G("#ff2020", 1), lightBlue: G("#2050ff", 1)
+      };
+    },
+    halftone: function () {
+      var s = function (hex, extra) { return std(hex, 0.85, 0, extra); };
+      return {
+        road: s("#2c2c2c"), marking: s("#cfcfcf"), markingY: s("#b0b0b0"),
+        sidewalk: s("#4a4a4a"), kerb: s("#8a8a8a"),
+        bldgA: s("#3a3a3a"), bldgB: s("#454545"), bldgC: s("#333333"), skyline: s("#262626"),
+        winLit: glow("#ffffff", 1.4), winDark: s("#1c1c1c"), shopLit: glow("#ffffff", 1.1, { map: texShop }),
+        lampPole: s("#444444"), lampHead: glow("#ffffff", 3), sigGreen: glow("#ffffff", 1.5),
+        neonSignA: sign(texSignA, "#ffffff", 1.6), neonSignB: sign(texSignB, "#ffffff", 1.6),
+        neonTubeA: glow("#ffffff", 1.6), neonTubeB: glow("#ffffff", 1.6), signBack: s("#1a1a1a"),
+        paintPlayer: s("#c8b48a", { vertexColors: true }), paintSedan: s("#6a6a6a", { vertexColors: true }),
+        paintPolice: s("#e2e2e2", { vertexColors: true }), paintTraffic: s("#707070", { vertexColors: true }),
+        glass: s("#141414"), shard: s("#bbbbbb"),
+        tire: s("#111111"), rim: s("#888888"), trim: s("#151515"),
+        headlight: glow("#ffffff", 3), taillight: glow("#ff1010", 2.2), brokenLight: s("#202020"),
+        lightbarBase: s("#121212"), lightRed: glow("#ff0808", 7), lightBlue: glow("#0820ff", 8)
+      };
+    },
+    real: function () {
+      var env = { envMap: envTex, envMapIntensity: 0.8 };
+      var asph = texAsphalt.clone(); asph.needsUpdate = true; asph.repeat.set(48, 48);
+      var rough = texRough.clone(); rough.needsUpdate = true; rough.repeat.set(10.8, 10.8);
+      var conc = texConcrete.clone(); conc.needsUpdate = true; conc.repeat.set(12, 12);
+      var concB = texConcrete.clone(); concB.needsUpdate = true; concB.repeat.set(1, 1);
+      var road = std("#ffffff", 1, 0, { map: asph, roughnessMap: rough, envMap: envTex, envMapIntensity: 0.6 });
+      return {
+        road: wetPatch(road, 0.42, 1.0),
+        marking: std("#c9c6bd", 0.7), markingY: std("#c39a30", 0.7),
+        sidewalk: std("#7a7874", 0.92, 0, { map: conc }), kerb: std("#8a8782", 0.85),
+        bldgA: std("#5a5550", 0.92, 0, { map: concB }), bldgB: std("#4c5058", 0.92, 0, { map: concB }), bldgC: std("#62594f", 0.92, 0, { map: concB }), skyline: std("#0e0f14", 1),
+        winLit: glow("#ffd29a", 2.2), winDark: phys("#0a0d12", 0.04, 0, Object.assign({}, env, { envMapIntensity: 1.1 })), shopLit: glow("#ffffff", 1.4, { map: texShop }),
+        lampPole: std("#3a3b3e", 0.4, 0.8, env), lampHead: glow("#ffb870", 12), sigGreen: glow("#39ff9a", 5),
+        neonSignA: sign(texSignA, "#ff2bd6", 3.5), neonSignB: sign(texSignB, "#26e8ff", 3.5),
+        neonTubeA: glow("#ff2bd6", 5), neonTubeB: glow("#26e8ff", 5), signBack: std("#141519", 0.5),
+        paintPlayer: phys("#d48a12", 0.36, 0.6, Object.assign({ clearcoat: 1, clearcoatRoughness: 0.03, vertexColors: true }, env, { envMapIntensity: 1.0 })),
+        paintSedan: phys("#2f3d37", 0.4, 0.5, Object.assign({ clearcoat: 1, clearcoatRoughness: 0.06, vertexColors: true }, env)),
+        paintPolice: phys("#f0f0f0", 0.3, 0.1, Object.assign({ clearcoat: 1, clearcoatRoughness: 0.04, vertexColors: true }, env)),
+        paintTraffic: phys("#4a3a2e", 0.4, 0.5, Object.assign({ clearcoat: 1, vertexColors: true }, env)),
+        glass: phys("#030405", 0.02, 0, Object.assign({}, env, { envMapIntensity: 1.5 })), shard: phys("#b0c4d6", 0.05, 0, env),
+        tire: std("#121214", 0.85), rim: std("#b0b3b8", 0.18, 1, env), trim: std("#0e0e10", 0.55, 0, env),
+        headlight: glow("#f2f6ff", 5), taillight: glow("#ff1a1a", 3.2), brokenLight: std("#18191c", 0.2, 0.2, env),
+        lightbarBase: std("#0e0e10", 0.4, 0.3, env), lightRed: glow("#ff1a1a", 40), lightBlue: glow("#1a4dff", 46)
+      };
+    }
+  };
+
+  /* per-style lighting, fog and post settings */
+  var CFG = {
+    neon: {
+      lod: "hi", sky: ["#04040a", "#2a0f2e", "#050508"], fog: ["exp", "#0b0914", 0.012],
+      hemi: ["#2a2a55", "#08080c", 0.35], moon: ["#6c7cff", 0.12], lamp: ["#ffae5c", 2.6], cop: 5.5, neon: 2.4, copHead: 3.2,
+      shadows: false, mirror: true, post: "filmic",
+      fx: { threshold: 0.9, bloom: 0.95, ca: 0.0045, exposure: 1.0, grain: 0.05, vig: 0.38, sat: 1.12, lift: [0.0, 0.004, 0.012] }
+    },
+    lowpoly: {
+      lod: "lo", sky: ["#141724", "#2c2f44", "#1d2030"], fog: ["exp", "#1d2030", 0.021],
+      hemi: ["#5a6080", "#1a1a22", 0.6], moon: ["#8090c0", 0.35], lamp: ["#ffc27a", 2.1], cop: 4.2, neon: 1.3, copHead: 2.4,
+      shadows: false, mirror: false, post: "filmic",
+      fx: { threshold: 1.0, bloom: 0.55, ca: 0, exposure: 1.1, grain: 0.015, vig: 0.25, sat: 0.85, lift: [0.01, 0.012, 0.02] }
+    },
+    ps2: {
+      lod: "lo", sky: ["#1e2233", "#1e2233", "#1e2233"], fog: ["lin", "#1e2233", 8, 78],
+      hemi: ["#4a5070", "#20202a", 0.65], moon: ["#8090c0", 0.3], lamp: ["#ffc080", 2.3], cop: 4.0, neon: 1.4, copHead: 2.4,
+      shadows: false, mirror: false, post: "ps2", halos: true
+    },
+    halftone: {
+      lod: "hi", sky: ["#111111", "#2a2a2a", "#111111"], fog: null,
+      hemi: ["#777777", "#1a1a1a", 0.2], moon: ["#ffffff", 0.16], lamp: ["#ffffff", 2.6], cop: 2.6, neon: 1.0, copHead: 3.0,
+      shadows: false, mirror: false, post: "halftone"
+    },
+    real: {
+      lod: "hi", sky: ["#05070d", "#1d1a22", "#08080a"], fog: ["exp", "#0c0e16", 0.0075],
+      hemi: ["#1c2440", "#0a0a0c", 0.28], moon: ["#9fb0ff", 0.18], lamp: ["#ffa955", 3.3], cop: 6.0, neon: 1.6, copHead: 4.2,
+      shadows: true, mirror: true, post: "filmic",
+      fx: { threshold: 1.25, bloom: 0.38, ca: 0, exposure: 1.3, grain: 0.015, vig: 0.22, sat: 1.0, lift: [0, 0, 0] }
+    }
+  };
+
+  /* ------------------------------------------------------------------
+     Post-processing (own render targets and full-screen passes)
+  ------------------------------------------------------------------ */
+  var fsScene = new T.Scene(), fsCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  var fsQuad = new T.Mesh(new T.PlaneGeometry(2, 2), null); fsQuad.frustumCulled = false; fsScene.add(fsQuad);
+  var VS = "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }";
+  function shader(frag, uniforms) {
+    return new T.ShaderMaterial({ vertexShader: VS, fragmentShader: frag, uniforms: uniforms, depthTest: false, depthWrite: false });
+  }
+  function pass(mat, target) { fsQuad.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); }
+
+  var brightMat = shader([
+    "uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uThreshold; varying vec2 vUv;",
+    "vec3 tap(vec2 o){ vec3 c = texture2D(tSrc, vUv + o * uTexel).rgb; float l = max(c.r, max(c.g, c.b)); return c * (max(l - uThreshold, 0.0) / max(l, 1e-4)); }",
+    "void main(){ vec3 c = tap(vec2(-1.0,-1.0)) + tap(vec2(1.0,-1.0)) + tap(vec2(-1.0,1.0)) + tap(vec2(1.0,1.0)); gl_FragColor = vec4(min(c * 0.25, vec3(60.0)), 1.0); }"
+  ].join("\n"), { tSrc: { value: null }, uTexel: { value: new T.Vector2() }, uThreshold: { value: 1 } });
+  var downMat = shader([
+    "uniform sampler2D tSrc; uniform vec2 uTexel; varying vec2 vUv;",
+    "void main(){ vec3 c = texture2D(tSrc, vUv + vec2(-1.0,-1.0)*uTexel).rgb + texture2D(tSrc, vUv + vec2(1.0,-1.0)*uTexel).rgb + texture2D(tSrc, vUv + vec2(-1.0,1.0)*uTexel).rgb + texture2D(tSrc, vUv + vec2(1.0,1.0)*uTexel).rgb; gl_FragColor = vec4(c*0.25, 1.0); }"
+  ].join("\n"), { tSrc: { value: null }, uTexel: { value: new T.Vector2() } });
+  var blurMat = shader([
+    "uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv;",
+    "void main(){",
+    "  vec3 c = texture2D(tSrc, vUv).rgb * 0.227027;",
+    "  c += texture2D(tSrc, vUv + uDir * 1.3846154).rgb * 0.3162162; c += texture2D(tSrc, vUv - uDir * 1.3846154).rgb * 0.3162162;",
+    "  c += texture2D(tSrc, vUv + uDir * 3.2307692).rgb * 0.0702703; c += texture2D(tSrc, vUv - uDir * 3.2307692).rgb * 0.0702703;",
+    "  gl_FragColor = vec4(c, 1.0);",
+    "}"
+  ].join("\n"), { tSrc: { value: null }, uDir: { value: new T.Vector2() } });
+
+  var filmicMat = shader([
+    "uniform sampler2D tScene, tB1, tB2; uniform float uBloom, uCA, uExposure, uTime, uGrain, uVig, uSat; uniform vec3 uLift; uniform vec2 uRes; varying vec2 vUv;",
+    "vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }",
+    "vec3 toSRGB(vec3 c){ return mix(c * 12.92, 1.055 * pow(c, vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }",
+    "void main(){",
+    "  vec2 d = vUv - 0.5; float r2 = dot(d, d);",
+    "  vec3 col;",
+    "  if (uCA > 0.0) { col.r = texture2D(tScene, vUv - d * uCA).r; col.g = texture2D(tScene, vUv).g; col.b = texture2D(tScene, vUv + d * uCA).b; }",
+    "  else col = texture2D(tScene, vUv).rgb;",
+    "  vec3 bl = texture2D(tB1, vUv).rgb * 0.8 + texture2D(tB2, vUv).rgb * 1.2;",
+    "  col += bl * uBloom;",
+    "  col = col * uExposure + uLift;",
+    "  col = aces(col);",
+    "  float l = dot(col, vec3(0.2126, 0.7152, 0.0722)); col = max(mix(vec3(l), col, uSat), 0.0);",
+    "  col = toSRGB(col);",
+    "  col *= 1.0 - uVig * r2 * 2.2;",
+    "  float n = fract(sin(dot(floor(vUv * uRes) + fract(uTime) * 91.7, vec2(12.9898, 78.233))) * 43758.5453);",
+    "  col += (n - 0.5) * uGrain;",
+    "  gl_FragColor = vec4(col, 1.0);",
+    "}"
+  ].join("\n"), {
+    tScene: { value: null }, tB1: { value: null }, tB2: { value: null }, uBloom: { value: 1 }, uCA: { value: 0 }, uExposure: { value: 1 },
+    uTime: { value: 0 }, uGrain: { value: 0 }, uVig: { value: 0 }, uSat: { value: 1 }, uLift: { value: new T.Vector3() }, uRes: { value: new T.Vector2(1, 1) }
+  });
+
+  var ps2Mat = shader([
+    "uniform sampler2D tLow; uniform vec2 uLowRes; varying vec2 vUv;",
+    "float bayer2(vec2 a){ a = floor(a); return fract(dot(a, vec2(0.5, a.y * 0.75))); }",
+    "float bayer4(vec2 a){ return bayer2(0.5 * a) * 0.25 + bayer2(a); }",
+    "void main(){",
+    "  vec2 px = floor(vUv * uLowRes);",
+    "  vec3 c = texture2D(tLow, (px + 0.5) / uLowRes).rgb;",
+    "  c = c / (1.0 + c * 0.35) * 1.3;",
+    "  c = pow(clamp(c, 0.0, 1.0), vec3(1.0/2.2));",
+    "  float b = bayer4(px);",
+    "  c = floor(c * 31.0 + b) / 31.0;",
+    "  gl_FragColor = vec4(c, 1.0);",
+    "}"
+  ].join("\n"), { tLow: { value: null }, uLowRes: { value: new T.Vector2(1, 1) } });
+
+  var halftoneMat = shader([
+    "uniform sampler2D tScene, tNormal, tDepth; uniform vec2 uTexel; uniform float uNear, uFar, uCell, uLine, uTime;",
+    "uniform vec3 uPaper, uInk, uSlate, uRed, uBlue; varying vec2 vUv;",
+    "float lin(vec2 uv){ float d = texture2D(tDepth, uv).x; float z = d * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }",
+    "vec3 nrm(vec2 uv){ return texture2D(tNormal, uv).xyz * 2.0 - 1.0; }",
+    "float screen(vec2 frag, float amount, float ang){",
+    "  float s = sin(ang), c = cos(ang); vec2 q = mat2(c, -s, s, c) * frag / uCell;",
+    "  vec2 f = fract(q) - 0.5; float r = sqrt(clamp(amount, 0.0, 1.0)) * 0.72; float dist = length(f);",
+    "  return 1.0 - smoothstep(r - 0.06, r + 0.06, dist);",
+    "}",
+    "void main(){",
+    "  vec2 o = uTexel * uLine;",
+    "  float dc = lin(vUv);",
+    "  float dl = lin(vUv - vec2(o.x, 0.0)), dr = lin(vUv + vec2(o.x, 0.0)), du = lin(vUv + vec2(0.0, o.y)), dd = lin(vUv - vec2(0.0, o.y));",
+    "  float de = (abs(dl - dc) + abs(dr - dc) + abs(du - dc) + abs(dd - dc)) / max(dc, 0.001);",
+    "  vec3 nc = nrm(vUv);",
+    "  float ne = (1.0 - dot(nc, nrm(vUv - vec2(o.x, 0.0)))) + (1.0 - dot(nc, nrm(vUv + vec2(o.x, 0.0)))) + (1.0 - dot(nc, nrm(vUv + vec2(0.0, o.y)))) + (1.0 - dot(nc, nrm(vUv - vec2(0.0, o.y))));",
+    "  float fade = 1.0 - smoothstep(60.0, 160.0, dc);",
+    "  float edge = max(smoothstep(0.06, 0.14, de), smoothstep(0.32, 0.6, ne)) * fade;",
+    "  vec3 c = texture2D(tScene, vUv).rgb * 1.2; vec3 cm = c / (1.0 + c);",
+    "  float L = pow(dot(cm, vec3(0.2126, 0.7152, 0.0722)), 1.0/2.2);",
+    "  vec2 frag = gl_FragCoord.xy;",
+    "  vec3 col;",
+    "  if (L > 0.7) col = uPaper;",
+    "  else if (L > 0.3) col = mix(uSlate, uPaper, screen(frag, (L - 0.3) / 0.4, 0.785));",
+    "  else col = mix(uInk, uSlate, screen(frag, L / 0.3, 0.785));",
+    "  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)); float sat = (mx - mn) / max(mx, 1e-4);",
+    "  if (sat > 0.62 && mx > 0.12) {",
+    "    float isRed = step(c.g * 3.0, c.r) * step(c.b * 3.0, c.r);",
+    "    float isBlue = step(c.r * 2.5, c.b) * step(c.g * 1.8, c.b);",
+    "    float k = clamp((mx - 0.12) * 1.1, 0.0, 1.0);",
+    "    float dots = max(screen(frag, k * 0.8, 0.26), step(0.85, mx));",
+    "    if (isRed > 0.5) col = mix(col, uRed, dots);",
+    "    if (isBlue > 0.5) col = mix(col, uBlue, dots);",
+    "  }",
+    "  vec3 lineCol = L > 0.3 ? uInk : uPaper * 0.62;",
+    "  col = mix(col, lineCol, edge);",
+    "  float grainP = fract(sin(dot(floor(frag / 2.0), vec2(12.9898, 78.233))) * 43758.5453);",
+    "  col *= 0.96 + 0.04 * grainP;",
+    "  gl_FragColor = vec4(col, 1.0);",
+    "}"
+  ].join("\n"), {
+    tScene: { value: null }, tNormal: { value: null }, tDepth: { value: null }, uTexel: { value: new T.Vector2() },
+    uNear: { value: camera.near }, uFar: { value: camera.far }, uCell: { value: 5 }, uLine: { value: 1.25 }, uTime: { value: 0 },
+    uPaper: { value: new T.Vector3(0.925, 0.894, 0.824) }, uInk: { value: new T.Vector3(0.07, 0.07, 0.085) }, uSlate: { value: new T.Vector3(0.23, 0.26, 0.31) },
+    uRed: { value: new T.Vector3(0.88, 0.15, 0.18) }, uBlue: { value: new T.Vector3(0.16, 0.36, 0.84) }
+  });
+  var normalMat = new T.MeshNormalMaterial();
+
+  // Render targets (recreated on resize)
+  var RT = {};
+  function makeRT(w, h, o) {
+    o = o || {};
+    var params = { type: o.type || HDR_TYPE, format: T.RGBAFormat, minFilter: o.nearest ? T.NearestFilter : T.LinearFilter, magFilter: o.nearest ? T.NearestFilter : T.LinearFilter, depthBuffer: o.depth !== false, stencilBuffer: false };
+    var rt;
+    if (o.msaa && canMSAA) { rt = new T.WebGLMultisampleRenderTarget(Math.max(1, w), Math.max(1, h), params); rt.samples = 4; }
+    else rt = new T.WebGLRenderTarget(Math.max(1, w), Math.max(1, h), params);
+    if (o.depthTex) { rt.depthTexture = new T.DepthTexture(Math.max(1, w), Math.max(1, h)); rt.depthTexture.type = T.UnsignedIntType; }
+    rt.texture.generateMipmaps = false;
+    return rt;
+  }
+  var W = 2, H = 2, cssW = 2, cssH = 2;
+  function disposeRTs() { Object.keys(RT).forEach(function (k) { if (RT[k]) RT[k].dispose(); }); RT = {}; }
+  function getRT(name) {
+    if (RT[name]) return RT[name];
+    var q = function (d) { return [Math.max(1, Math.round(W / d)), Math.max(1, Math.round(H / d))]; };
+    var s;
+    switch (name) {
+      case "main": RT.main = makeRT(W, H, { msaa: true }); break;
+      case "mainD": RT.mainD = makeRT(W, H, { depthTex: true }); break;
+      case "normal": RT.normal = makeRT(W, H, { type: T.UnsignedByteType }); break;
+      case "mirror": s = q(2); RT.mirror = makeRT(s[0], s[1]); break;
+      case "b1a": case "b1b": s = q(4); RT[name] = makeRT(s[0], s[1], { depth: false }); break;
+      case "b2a": case "b2b": s = q(8); RT[name] = makeRT(s[0], s[1], { depth: false }); break;
+      case "low":
+        var lh = Math.max(150, Math.round(cssH / 3)), lw = Math.max(200, Math.round(lh * cssW / cssH));
+        RT.low = makeRT(lw, lh, { nearest: true, type: T.UnsignedByteType }); break;
+    }
+    return RT[name];
+  }
+
+  /* ------------------------------------------------------------------
+     Style application
+  ------------------------------------------------------------------ */
+  var matCache = {};
+  var meshes = []; scene.traverse(function (o) { if (o.isMesh && o.userData.mk) meshes.push(o); });
+  var lodNodes = []; scene.traverse(function (o) { if (o.isGroup && o.userData.lod) lodNodes.push(o); });
+  var styleId = "neon", cfg = CFG.neon, mats = null;
+  var flashMats = [];
+
+  function applyStyle(i) {
+    styleId = STYLE_IDS[i]; cfg = CFG[styleId];
+    if (!matCache[styleId]) matCache[styleId] = MAKERS[styleId]();
+    mats = matCache[styleId];
+    meshes.forEach(function (m) {
+      var k = m.userData.mk;
+      var mt = Array.isArray(k) ? k.map(function (x) { return mats[x]; }) : mats[k];
+      if (mt) m.material = mt;
+    });
+    lodNodes.forEach(function (g) { g.visible = g.userData.lod === cfg.lod; });
+    halos.forEach(function (h) { h.visible = !!cfg.halos; });
+    skyMat.uniforms.uTop.value.copy(C(cfg.sky[0])); skyMat.uniforms.uHor.value.copy(C(cfg.sky[1])); skyMat.uniforms.uBot.value.copy(C(cfg.sky[2]));
+    if (!cfg.fog) scene.fog = null;
+    else if (cfg.fog[0] === "exp") scene.fog = new T.FogExp2(C(cfg.fog[1]), cfg.fog[2]);
+    else scene.fog = new T.Fog(C(cfg.fog[1]), cfg.fog[2], cfg.fog[3]);
+    hemi.color.copy(C(cfg.hemi[0])); hemi.groundColor.copy(C(cfg.hemi[1])); hemi.intensity = cfg.hemi[2];
+    moon.color.copy(C(cfg.moon[0])); moon.intensity = cfg.moon[1];
+    lampSpots.forEach(function (s) { s.color.copy(C(cfg.lamp[0])); s.intensity = cfg.lamp[1]; });
+    lampA.castShadow = !!cfg.shadows;
+    copHead.color.copy(C(styleId === "halftone" ? "#ffffff" : "#dfe8ff")); copHead.intensity = cfg.copHead;
+    neonP.color.copy(C(styleId === "halftone" ? "#ffffff" : "#ff2bd6")); neonC.color.copy(C(styleId === "halftone" ? "#ffffff" : "#26e8ff"));
+    neonP.intensity = neonC.intensity = cfg.neon;
+    polR.color.copy(C("#ff1010")); polB.color.copy(C("#1838ff"));
+    flashMats = [mats.lightRed, mats.lightBlue];
+    if (cfg.fx) {
+      var u = filmicMat.uniforms, f = cfg.fx;
+      u.uBloom.value = f.bloom; u.uCA.value = f.ca; u.uExposure.value = f.exposure; u.uGrain.value = f.grain; u.uVig.value = f.vig; u.uSat.value = f.sat;
+      u.uLift.value.set(f.lift[0], f.lift[1], f.lift[2]);
+      brightMat.uniforms.uThreshold.value = f.threshold;
+    }
+    // keep animated state coherent when switching while paused
+    setFlash(lastT);
+    needsRender = true;
+    fpsReset();
+  }
+
+  /* ------------------------------------------------------------------
+     Camera: slow orbit, drag to orbit, optional 30 m chase distance
+  ------------------------------------------------------------------ */
+  var target = new T.Vector3(2.4, 7.5, 0.7);
+  var az = 1.9, el = 0.3, dist = 13, distGoal = 13, elGoal = 0.3;
+  var dragging = false, lastX = 0, lastY = 0, lastInteract = -1e9;
+  function placeCamera() {
+    // An ellipse along the street: the camera never goes inside the buildings either side.
+    var ca = Math.cos(az), rx = ca > 0 ? 4.0 : 8.5;
+    camera.position.set(target.x + rx * ca, target.y + dist * Math.cos(el) * Math.sin(az), target.z + dist * Math.sin(el));
+    camera.lookAt(target);
+  }
+  canvas.addEventListener("pointerdown", function (e) { dragging = true; lastX = e.clientX; lastY = e.clientY; try { canvas.setPointerCapture(e.pointerId); } catch (x) { } });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY;
+    az -= dx * 0.006;
+    if (e.pointerType === "mouse") { elGoal = Math.max(0.05, Math.min(1.1, elGoal + dy * 0.004)); el = elGoal; }
+    lastInteract = performance.now(); needsRender = true;
+  });
+  function endDrag() { dragging = false; }
+  canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
+  optDist.addEventListener("click", function () {
+    var far = optDist.getAttribute("aria-pressed") !== "true";
+    optDist.setAttribute("aria-pressed", far ? "true" : "false");
+    optDist.textContent = far ? "Back to close-up" : "View from 30 m";
+    distGoal = far ? 30 : 13; elGoal = far ? 0.17 : 0.3;
+    if (far) az = 1.6; // start from up the street, looking back at the crushed nose
+    if (!animating()) { dist = distGoal; el = elGoal; }
+    needsRender = true;
+  });
+
+  /* ------------------------------------------------------------------
+     Motion, reduced-motion, visibility
+  ------------------------------------------------------------------ */
+  var mq = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  var reduced = !!(mq && mq.matches);
+  var motionOn = !reduced;
+  function syncMotionButton() {
+    optMotion.setAttribute("aria-pressed", motionOn ? "true" : "false");
+    optMotion.textContent = motionOn ? "Motion on" : (reduced ? "Animate anyway" : "Motion off");
+  }
+  syncMotionButton();
+  optMotion.addEventListener("click", function () { motionOn = !motionOn; syncMotionButton(); needsRender = true; fpsReset(); });
+  if (mq && mq.addEventListener) mq.addEventListener("change", function () { reduced = mq.matches; motionOn = !reduced; syncMotionButton(); needsRender = true; });
+  function animating() { return motionOn; }
+  var onScreen = true, pageVisible = !document.hidden;
+  if ("IntersectionObserver" in window) new IntersectionObserver(function (es) { onScreen = es[0].isIntersecting; }, { threshold: 0.01 }).observe(viewport);
+  document.addEventListener("visibilitychange", function () { pageVisible = !document.hidden; fpsReset(); });
+
+  // Police flash pattern: red double-flash, then blue double-flash, ~1.1 s cycle
+  var lastT = 0;
+  function flashLevel(t, phase) {
+    var c = ((t / 1.1) + phase) % 1;
+    var on = (c < 0.07) || (c > 0.13 && c < 0.2);
+    return on ? 1 : 0.06;
+  }
+  function setFlash(t) {
+    var r, b;
+    if (!motionOn) { r = 1; b = 1; }
+    else { r = flashLevel(t, 0); b = flashLevel(t, 0.5); }
+    if (flashMats[0]) flashMats[0].color.copy(flashMats[0].userData.base).multiplyScalar(r);
+    if (flashMats[1]) flashMats[1].color.copy(flashMats[1].userData.base).multiplyScalar(b);
+    polR.intensity = cfg.cop * (motionOn ? r : 0.7); polB.intensity = cfg.cop * (motionOn ? b : 0.7);
+    haloR.material.opacity = r; haloB.material.opacity = b;
+  }
+
+  /* ------------------------------------------------------------------
+     Resize
+  ------------------------------------------------------------------ */
+  function resize() {
+    var r = viewport.getBoundingClientRect();
+    cssW = Math.max(2, Math.round(r.width)); cssH = Math.max(2, Math.round(r.height));
+    renderer.setSize(cssW, cssH, false);
+    var v = new T.Vector2(); renderer.getDrawingBufferSize(v); W = v.x; H = v.y;
+    camera.aspect = cssW / cssH; camera.updateProjectionMatrix();
+    disposeRTs();
+    needsRender = true;
+  }
+  if ("ResizeObserver" in window) new ResizeObserver(resize).observe(viewport); else window.addEventListener("resize", resize);
+
+  /* ------------------------------------------------------------------
+     Rendering
+  ------------------------------------------------------------------ */
+  var mirrorCam = new T.PerspectiveCamera();
+  var biasM = new T.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
+  function renderMirror() {
+    var rt = getRT("mirror");
+    mirrorCam.copy(camera);
+    mirrorCam.position.set(camera.position.x, camera.position.y, -camera.position.z);
+    mirrorCam.up.set(0, 0, -1);
+    mirrorCam.lookAt(target.x, target.y, -target.z);
+    mirrorCam.updateMatrixWorld(); mirrorCam.updateProjectionMatrix();
+    U.mirrorMatrix.value.copy(biasM).multiply(mirrorCam.projectionMatrix).multiply(mirrorCam.matrixWorldInverse);
+    groundGroup.visible = false;
+    renderer.setRenderTarget(rt); renderer.clear(); renderer.render(scene, mirrorCam);
+    groundGroup.visible = true;
+    U.tMirror.value = rt.texture;
+  }
+  function bloom(src) {
+    var b1a = getRT("b1a"), b1b = getRT("b1b"), b2a = getRT("b2a"), b2b = getRT("b2b");
+    brightMat.uniforms.tSrc.value = src.texture; brightMat.uniforms.uTexel.value.set(1 / W, 1 / H); pass(brightMat, b1a);
+    blurMat.uniforms.tSrc.value = b1a.texture; blurMat.uniforms.uDir.value.set(1 / b1a.width, 0); pass(blurMat, b1b);
+    blurMat.uniforms.tSrc.value = b1b.texture; blurMat.uniforms.uDir.value.set(0, 1 / b1a.height); pass(blurMat, b1a);
+    downMat.uniforms.tSrc.value = b1a.texture; downMat.uniforms.uTexel.value.set(0.5 / b1a.width, 0.5 / b1a.height); pass(downMat, b2a);
+    blurMat.uniforms.tSrc.value = b2a.texture; blurMat.uniforms.uDir.value.set(1.5 / b2a.width, 0); pass(blurMat, b2b);
+    blurMat.uniforms.tSrc.value = b2b.texture; blurMat.uniforms.uDir.value.set(0, 1.5 / b2a.height); pass(blurMat, b2a);
+    return [b1a, b2a];
+  }
+  function render(time) {
+    placeCamera();
+    var pipeline = cfg.post;
+    if (pipeline === "filmic") {
+      if (cfg.mirror) renderMirror();
+      var main = getRT("main");
+      renderer.setRenderTarget(main); renderer.clear(); renderer.render(scene, camera);
+      var b = bloom(main);
+      var u = filmicMat.uniforms;
+      u.tScene.value = main.texture; u.tB1.value = b[0].texture; u.tB2.value = b[1].texture; u.uTime.value = time * 0.001; u.uRes.value.set(W, H);
+      pass(filmicMat, null);
+    } else if (pipeline === "ps2") {
+      var low = getRT("low");
+      U.snap.value.set(low.width / 2, low.height / 2);
+      renderer.setRenderTarget(low); renderer.clear(); renderer.render(scene, camera);
+      ps2Mat.uniforms.tLow.value = low.texture; ps2Mat.uniforms.uLowRes.value.set(low.width, low.height);
+      pass(ps2Mat, null);
+    } else if (pipeline === "halftone") {
+      var md = getRT("mainD"), nr = getRT("normal");
+      renderer.setRenderTarget(md); renderer.clear(); renderer.render(scene, camera);
+      var bg = sky.visible; sky.visible = false;
+      scene.overrideMaterial = normalMat;
+      renderer.setClearColor(0x8080ff, 1);
+      renderer.setRenderTarget(nr); renderer.clear(); renderer.render(scene, camera);
+      scene.overrideMaterial = null; renderer.setClearColor(0x000000, 1); sky.visible = bg;
+      var hu = halftoneMat.uniforms;
+      hu.tScene.value = md.texture; hu.tDepth.value = md.depthTexture; hu.tNormal.value = nr.texture;
+      hu.uTexel.value.set(1 / W, 1 / H); hu.uCell.value = 4.5 * PR; hu.uLine.value = Math.max(1, 1.1 * PR);
+      pass(halftoneMat, null);
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     Loop + FPS readout
+  ------------------------------------------------------------------ */
+  var needsRender = true, prev = performance.now(), frames = 0, acc = 0, fpsShown = "--", msShown = "--", simT = 0;
+  function fpsReset() { frames = 0; acc = 0; fpsShown = "--"; msShown = "--"; }
+  function hudText() {
+    var res = cfg.post === "ps2" && RT.low ? (RT.low.width + "×" + RT.low.height + " → upscaled") : (W + "×" + H);
+    var line1 = animating() ? (fpsShown + " fps  " + msShown + " ms/frame") : "static frame (motion off)";
+    var line2 = res + (dist > 20 ? "  ·  camera 30 m" : "");
+    return line1 + "\n" + line2;
+  }
+  var hudTimer = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    var rawDt = (now - prev) / 1000, dt = Math.min(0.1, rawDt); prev = now;
+    if (!onScreen || !pageVisible) return;
+    var anim = animating();
+    if (anim) {
+      simT += dt;
+      if (!dragging && now - lastInteract > 3000) az += dt * 0.07;
+      dist += (distGoal - dist) * Math.min(1, dt * 2.5);
+      el += (elGoal - el) * Math.min(1, dt * 2.5);
+      lastT = simT;
+      setFlash(simT);
+      // passing traffic in the far lane
+      var ty = 70 - ((simT * 9) % 150);
+      traffic.position.y = ty;
+      needsRender = true;
+    } else {
+      dist = distGoal; el = elGoal;
+    }
+    if (!needsRender) return;
+    needsRender = false;
+    render(now);
+    if (anim) {
+      frames++; acc += rawDt;
+      if (acc >= 0.5) { fpsShown = String(Math.round(frames / acc)); msShown = (1000 * acc / frames).toFixed(1); frames = 0; acc = 0; }
+    }
+    hudTimer += dt;
+    if (hudTimer > 0.25 || !anim) { hud.textContent = hudText(); hudTimer = 0; }
+  }
+
+  onStyleChange = function (i) { applyStyle(i); };
+  resize();
+  try {
+    applyStyle(current);
+    render(performance.now());
+  } catch (err) { fail(err); return; }
+  // expose a tiny hook for automated screenshots / measurements
+  window.__artStyles = { select: selectStyle, fps: function () { return { fps: fpsShown, ms: msShown }; }, setMotion: function (v) { motionOn = !!v; syncMotionButton(); },
+    view: function (a) { az = a; lastInteract = performance.now() + 1e9; needsRender = true; } };
+  requestAnimationFrame(frame);
+})();
+</script>

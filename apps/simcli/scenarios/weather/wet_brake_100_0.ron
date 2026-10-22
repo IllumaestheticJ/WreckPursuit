@@ -1,13 +1,9 @@
-// PENDING — enable by renaming to `wet_brake_100_0.ron` once simcli accepts the top-level
-// `weather:` field (request W-7 in docs/integration/weather.md) and wp_sim wraps its world in
-// wp_weather::WithWeather. Until then simcli would reject the unknown field, so the file
-// carries a non-.ron extension and the harness skips it.
-//
 // Wet twin of weather/dry_brake_100_0.ron: same car, inputs and timing on a soaked road
 // (1.5 mm of water, heavy rain held). Ranges come from the rig measurement in
 // crates/wp_weather/tests/vehicle_grip.rs (dry ~3.1 s / ~43 m, soaked ~3.9 s / ~54 m), widened
-// for the cruise controller and tuning. Verified 2026-10-19 by applying the integration-doc
-// spec to a scratch copy: wet 4.60 m/s at 17.2 s, -0.05 m/s at 18.0 s (dry: -0.05 at 17.2 s).
+// for the cruise controller and tuning. Enabled by the lead (weather in wp_sim, 2026-10-19): the
+// full per-wheel model (wp_vehicle reads `weather_at`), braking 51.6 m / 3.80 s vs 40.0 m /
+// 2.93 s dry.
 (
     name: "weather_wet_brake_100_0",
     seed: 1,
@@ -24,5 +20,8 @@
         // …and it does stop, about 0.8 s later. The pedal is released at 18.0 s in both files:
         // a brake held at standstill selects reverse.
         speed_at(t_s: 18.0, min: -1.0, max: 1.5),
+        // Braking distance (pedal at 14.0 s, stopped before 18.0 s): measured 51.6 m, dry twin
+        // 40.0 m (+29 %). The dry file's range ends at 45 m, this one starts at 46 m.
+        travel_between(from_s: 14.0, to_s: 18.0, min: 46.0, max: 62.0),
     ],
 )

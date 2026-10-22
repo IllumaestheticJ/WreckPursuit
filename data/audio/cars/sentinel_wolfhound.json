@@ -9,11 +9,11 @@
     "supercharger": false,
     "gain": 1.0
   },
-  "engine_pack": "engine_proc_v6",
-  "world_pack": "world_proc",
-  "horn_cue": "horn/standard",
+  "engine_pack": "engine_rec_v6",
+  "world_pack": "world_rec",
+  "horn_cue": "horn/police",
   "siren": {
-    "pack": "siren_proc",
+    "pack": "siren_v2",
     "default_mode": "Auto"
   }
 }

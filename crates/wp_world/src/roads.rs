@@ -80,6 +80,29 @@ pub struct RoadGraphView {
     pub occluders: Vec<OccluderBox>,
 }
 
+/// Non-parking lanes grouped by source road, in road order (roads without any are empty).
+fn lanes_by_road(net: &crate::network::RoadNetwork) -> Vec<Vec<usize>> {
+    let n_roads = net.lanes.iter().map(|l| l.road + 1).max().unwrap_or(0) as usize;
+    let mut by_road: Vec<Vec<usize>> = vec![Vec::new(); n_roads];
+    for (i, l) in net.lanes.iter().enumerate() {
+        if l.kind != LaneKind::Parking {
+            by_road[l.road as usize].push(i);
+        }
+    }
+    by_road
+}
+
+/// Source road index (`Lane::road`) of every [`RoadGraphView`] edge, in edge order (=
+/// `RoadEdgeId`). Used to name edges after their road (police radio callouts).
+pub fn edge_roads(map: &CityMap) -> Vec<u32> {
+    lanes_by_road(&map.net)
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.is_empty())
+        .map(|(r, _)| r as u32)
+        .collect()
+}
+
 impl RoadGraphView {
     /// Build the view from a city map.
     pub fn from_map(map: &CityMap) -> Self {
@@ -98,14 +121,7 @@ impl RoadGraphView {
                 }),
             })
             .collect();
-        // Group drivable lanes by source road, in road order.
-        let n_roads = net.lanes.iter().map(|l| l.road + 1).max().unwrap_or(0) as usize;
-        let mut by_road: Vec<Vec<usize>> = vec![Vec::new(); n_roads];
-        for (i, l) in net.lanes.iter().enumerate() {
-            if l.kind != LaneKind::Parking {
-                by_road[l.road as usize].push(i);
-            }
-        }
+        let by_road = lanes_by_road(net);
         let mut edges = Vec::new();
         for lanes in by_road.iter().filter(|l| !l.is_empty()) {
             let first = &net.lanes[lanes[0]];
@@ -160,6 +176,9 @@ impl RoadGraphView {
                 }
             }
             polyline.push(pb);
+            // Only the points that shape the road (every interior point becomes a node in
+            // users' graphs, e.g. police patrol destinations).
+            let polyline = simplify(&polyline, CENTRELINE_TOLERANCE_M);
             let length_m = polyline.windows(2).map(|w| geom::dist(w[0], w[1])).sum();
             let (mp, _) = {
                 let pts: Vec<[f32; 3]> = polyline.iter().map(|p| [p[0], p[1], 0.0]).collect();
@@ -388,6 +407,39 @@ pub struct RoadNetworkIndex<'a> {
     out: Vec<Vec<u32>>,
     pois: Vec<wp_contracts::PoiInfo>,
     near: EdgeGrid,
+}
+
+/// Largest distance a road network centreline may stray from the road centre when points
+/// are dropped ([`simplify`]), m.
+const CENTRELINE_TOLERANCE_M: f32 = 0.2;
+
+/// Douglas–Peucker: the fewest points of `pts` (ends kept) within `tol` of the original line.
+fn simplify(pts: &[V2], tol: f32) -> Vec<V2> {
+    if pts.len() < 3 {
+        return pts.to_vec();
+    }
+    let mut keep = vec![false; pts.len()];
+    keep[0] = true;
+    keep[pts.len() - 1] = true;
+    let mut stack = vec![(0usize, pts.len() - 1)];
+    while let Some((a, b)) = stack.pop() {
+        let (mut far, mut far_d) = (a, 0.0f32);
+        for k in a + 1..b {
+            let d = geom::point_segment_distance(pts[k], pts[a], pts[b]);
+            if d > far_d {
+                (far, far_d) = (k, d);
+            }
+        }
+        if far_d > tol {
+            keep[far] = true;
+            stack.push((a, far));
+            stack.push((far, b));
+        }
+    }
+    pts.iter()
+        .zip(&keep)
+        .filter_map(|(p, k)| k.then_some(*p))
+        .collect()
 }
 
 /// Uniform grid over every edge's polyline pieces, for [`RoadNetworkIndex`]'s

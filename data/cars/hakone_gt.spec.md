@@ -81,7 +81,7 @@ Peak **242 kW @ 6000 rpm**, **435 N·m @ 4000 rpm**. Idle 750 / redline 6800 / l
 
 ## Drivetrain
 
-6-speed manual, clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 80 N·m, power ramp 0.40, coast ramp 0.25. Clutch capacity 1.40 × peak torque = 610 N·m. Shift time 0.25 s.
+6-speed manual, clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 80 N·m, power ramp 0.40, coast ramp 0.25. Clutch capacity 1.40 × peak torque = 610 N·m. Shift time 0.45 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -137,8 +137,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.9 s | 282 km/h | 38.4 m | 0.91 g | — |
-| estimate | 5.5 s | 289 km/h | 35.4 m | 0.98 g | 618 |
+| sim | 6.0 s | 282 km/h | 38.9 m | 0.93 g | — |
+| estimate | 5.7 s | 289 km/h | 35.4 m | 0.98 g | 607 |
 
 ## Damage lattice (`data/lattices/hakone_gt.json`)
 

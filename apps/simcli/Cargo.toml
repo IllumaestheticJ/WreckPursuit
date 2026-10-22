@@ -15,6 +15,7 @@ wp_sim.workspace = true
 wp_damage.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
+wp_weather.workspace = true
 # Menu stat bars (car_stats).
 wp_vehicle.workspace = true
 serde.workspace = true

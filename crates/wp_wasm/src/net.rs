@@ -16,6 +16,8 @@
 //! | `net_traffic_json(now_ms)` | kinematic traffic `[{id, pos, yaw, speed_mps, flags, variant}]`, extrapolated |
 //! | `net_events_json()` | drain typed game events: `SimEvent` JSON (`{"Police": …}`, `{"Race": …}`, `{"Economy": …}`, `{"WeatherChanged": …}`) |
 //! | `net_stats_json()` | RTT, mispredictions, correction size, bandwidth, hash checks |
+//! | `net_damage_json()` | per damage replica: `[{entity, dented_nodes, max_disp_m, hash}]` |
+//! | `net_lattice_nodes(entity)` | a replica's node positions, chassis space, flat `[x, y, z, …]` (empty if none) |
 //! | `net_captain_json()` | captain map: units, incidents, heat |
 //! | `net_request_role(role, now_ms)` | 0 racer, 1 police chase, 2 captain, 3 spectator |
 //! | `net_captain_command_json(json, now_ms)` | contract `CaptainCommand` JSON, e.g. `{"AssignUnit":{"unit":7,"order":{"Pursue":{"target":3}}}}`; returns the reply `seq` |
@@ -112,6 +114,7 @@ pub fn net_create(name: &str, input_source: u8) -> Result<(), JsValue> {
         cars,
         modes,
         damage_factory: default_damage_factory,
+        city_ground: None,
     });
     NET.with(|n| *n.borrow_mut() = Some(NetApp { client, body_sizes }));
     Ok(())
@@ -215,6 +218,59 @@ pub fn net_render_json(now_ms: f64) -> Result<String, JsValue> {
             })
             .collect();
         Ok(serde_json::to_string(&entries).expect("serializable"))
+    })
+}
+
+#[derive(Serialize)]
+struct DamageEntry {
+    entity: u32,
+    dented_nodes: usize,
+    max_disp_m: f32,
+    hash: u32,
+}
+
+/// Damage replicas: how dented each replicated car is (nodes away from rest by > 1 mm, the
+/// largest displacement) and its lattice hash (equal on every client that holds the same
+/// damage, see `wp_net::lattice::lattice_hash`).
+#[wasm_bindgen]
+pub fn net_damage_json() -> Result<String, JsValue> {
+    with_net(|n| {
+        let c = &n.client;
+        let mut out = Vec::new();
+        for e in c.replica_ids() {
+            let (Some(nodes), Some(rest)) = (c.replica_nodes(e), c.replica_rest(e)) else {
+                continue;
+            };
+            let mut dented = 0;
+            let mut max = 0.0f32;
+            for (a, b) in nodes.iter().zip(rest) {
+                let d =
+                    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+                if d > 0.001 {
+                    dented += 1;
+                }
+                max = max.max(d);
+            }
+            out.push(DamageEntry {
+                entity: e,
+                dented_nodes: dented,
+                max_disp_m: max,
+                hash: wp_net::lattice::lattice_hash(nodes, rest),
+            });
+        }
+        Ok(serde_json::to_string(&out).expect("serializable"))
+    })
+}
+
+/// Node positions of one damage replica (chassis space, flat `[x, y, z, …]`), for drawing the
+/// deformed lattice. Empty when the vehicle has no replica.
+#[wasm_bindgen]
+pub fn net_lattice_nodes(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with_net(|n| {
+        Ok(n.client
+            .replica_nodes(entity)
+            .map(|nodes| nodes.iter().flatten().copied().collect())
+            .unwrap_or_default())
     })
 }
 

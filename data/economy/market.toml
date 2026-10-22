@@ -1,6 +1,6 @@
 # Car market, valuation, economy floor and the class (performance) index. Owned by workstream 08.
 
-starting_cash = 4000
+starting_cash = 4500         # a worn beater (1 800) + three busted L1 nights in it (≈ 740 each)
 dealer_buy_frac = 0.7          # dealer pays 70% of base price (× condition) when you sell
 mod_resale_frac = 0.4          # removing / selling a mod returns 40% of its price
 mod_value_frac = 0.5           # installed mods add 50% of their price to the car's value
