@@ -1,6 +1,10 @@
-//! The playable race picker: a fixed list of street races on the browser's two cities (Port
-//! Vesper v2 and the procedural 12 × 12 grid), each with its course, legality, time of day and
-//! a field of named `wp_opponent` AI drivers.
+//! The playable race picker: a fixed list of street races on the browser's cities (Port
+//! Vesper v2, Ashpeak County and the procedural 12 × 12 grid), each with its course, legality,
+//! time of day and a field of named `wp_opponent` AI drivers.
+//!
+//! A race runs on its own city or on any map that contains it ([`RaceCity::hosts`]): Port
+//! Vesper's races also run on the combined `ashpeak` map, at the same coordinates.
+//! [`crate::spots`] puts a honk-to-start meet spot at each race's start.
 //!
 //! A [`RaceDef`] is pure data. [`plan_course`] turns it into a judged [`CityRace`] on a loaded
 //! `wp_world::World`; [`crate::live::LiveRace`] runs it. The player always starts from the back
@@ -12,6 +16,7 @@
 
 use wp_contracts::{Legality, PolicePresence, RaceKind};
 use wp_opponent::DriverProfile;
+use wp_world::ashpeak::plan as ap;
 use wp_world::World;
 
 use crate::bridge::{course_from_route, CityRace};
@@ -31,6 +36,9 @@ pub enum RaceCity {
     Vesper,
     /// The old procedural 12 × 12 grid (`procedural_12x12`).
     Grid,
+    /// Port Vesper + Ashpeak County (`ashpeak`): races on Ashpeak County's roads (the
+    /// mountains, farmland, freeways and Ashpeak City around Port Vesper).
+    Ashpeak,
 }
 
 impl RaceCity {
@@ -39,7 +47,24 @@ impl RaceCity {
         match self {
             RaceCity::Vesper => "vesper_v2",
             RaceCity::Grid => "procedural_12x12",
+            RaceCity::Ashpeak => "ashpeak",
         }
+    }
+
+    /// Every city id this race can run on: its own city and every map that contains it.
+    /// Port Vesper is laid out unchanged inside the combined `ashpeak` map (same coordinates,
+    /// same POIs), so Port Vesper's races also run there.
+    pub fn hosts(&self) -> &'static [&'static str] {
+        match self {
+            RaceCity::Vesper => &["vesper_v2", "ashpeak"],
+            RaceCity::Grid => &["procedural_12x12"],
+            RaceCity::Ashpeak => &["ashpeak"],
+        }
+    }
+
+    /// The race can run on city `city_id` ([`RaceCity::hosts`]).
+    pub fn runs_on(&self, city_id: &str) -> bool {
+        self.hosts().contains(&city_id)
     }
 }
 
@@ -68,6 +93,14 @@ pub enum CourseSpec {
         heading: [f32; 2],
         /// Finish point, m.
         finish: [f32; 3],
+    },
+    /// Straight-line pass (drags): from a named start POI to the point `distance_m` ahead
+    /// along its heading.
+    PoiAhead {
+        /// Start POI name.
+        start: &'static str,
+        /// Distance from the start to the finish along the POI's heading, m.
+        distance_m: f32,
     },
     /// Closed circuit through these points in driving order (`World::plan_circuit`); the
     /// first point is the start/finish line.
@@ -309,7 +342,173 @@ pub fn races() -> Vec<RaceDef> {
             seed: 7,
             prior_meets: 0,
         },
+        // ---- Ashpeak County (the combined `ashpeak` map). Lengths are estimates from the
+        // master plan (`wp_world::ashpeak::plan`) until the districts are merged; the lead
+        // tunes `length_hint_m` against the planner (see `docs/integration/race.md`).
+        RaceDef {
+            id: "crowfoot_ascent",
+            name: "Crowfoot Pass uphill touge",
+            blurb: "Midnight touge up Crowfoot Pass Road's hairpins to the saddle.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Sprint,
+            legality: Legality::Street,
+            time_of_day_h: 0.0,
+            traffic_density: 0.2,
+            course: CourseSpec::PoiRoute {
+                start: ap::POI_CROWFOOT_ASCENT,
+                finish: ap::POI_CROWFOOT_SUMMIT,
+            },
+            length_hint_m: 2600.0,
+            ai: &[MARA, VIC, JUNO],
+            seed: 41,
+            prior_meets: 0,
+        },
+        RaceDef {
+            id: "crowfoot_descent",
+            name: "Crowfoot Pass downhill touge",
+            blurb: "From the Crowfoot saddle down the north side, brakes glowing.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Sprint,
+            legality: Legality::Street,
+            time_of_day_h: 2.0,
+            traffic_density: 0.2,
+            course: CourseSpec::PoiRoute {
+                start: ap::POI_CROWFOOT_SUMMIT,
+                finish: ap::POI_CROWFOOT_NORTH,
+            },
+            length_hint_m: 2200.0,
+            ai: &[MARA, JUNO, DEZ],
+            seed: 42,
+            prior_meets: 0,
+        },
+        RaceDef {
+            id: "harlan_dirt_run",
+            name: "Harlan Flats dirt run",
+            blurb: "Dusk sprint over gravel section roads and field tracks to Harlan Crossing.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Sprint,
+            legality: Legality::Street,
+            time_of_day_h: 19.5,
+            traffic_density: 0.2,
+            course: CourseSpec::PoiRoute {
+                start: ap::POI_FARM_RUN,
+                finish: ap::POI_HARLAN_CROSSING,
+            },
+            length_hint_m: 2400.0,
+            ai: &[DEZ, TITO, VIC],
+            seed: 43,
+            prior_meets: 0,
+        },
+        RaceDef {
+            id: "ashpeak_downtown_checkpoint",
+            name: "Ashpeak City checkpoint run",
+            blurb: "Illegal daytime run through the downtown towers to the Meridian Spire.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Checkpoint,
+            legality: Legality::IllegalDaytime,
+            time_of_day_h: 13.0,
+            // Busy downtown: keep it below gridlock, like the Lantern Row run.
+            traffic_density: 0.2,
+            course: CourseSpec::PoiRoute {
+                start: ap::POI_DOWNTOWN,
+                finish: ap::POI_SPIRE,
+            },
+            length_hint_m: 1200.0,
+            ai: &[JUNO, DEZ, TITO],
+            seed: 44,
+            prior_meets: 2,
+        },
+        RaceDef {
+            id: "route7_tunnel_sprint",
+            name: "Route 7 tunnel sprint",
+            blurb: "Flat out north on Route 7: through the Talon Tunnel, over the Silver Gorge.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Sprint,
+            legality: Legality::Street,
+            time_of_day_h: 1.0,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiRoute {
+                start: ap::POI_ROUTE7_SOUTH,
+                finish: ap::POI_ROUTE7_NORTH,
+            },
+            length_hint_m: 3900.0,
+            ai: &[VIC, MARA, DEZ, JUNO],
+            seed: 45,
+            prior_meets: 0,
+        },
+        RaceDef {
+            id: "grizzly_grade_sprint",
+            name: "Grizzly Grade pass sprint",
+            blurb: "Night sprint up Route 12's mountain pass and over the Grizzly saddle.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Sprint,
+            legality: Legality::Street,
+            time_of_day_h: 22.0,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiToPoint {
+                start: ap::POI_GRIZZLY_GRADE,
+                // Route 12's north foot of the pass (`plan::ROUTE_12`).
+                finish: [-2750.0, 3400.0, 0.0],
+            },
+            length_hint_m: 1600.0,
+            ai: &[MARA, VIC, TITO],
+            seed: 46,
+            prior_meets: 0,
+        },
+        RaceDef {
+            id: "waterfront_drag",
+            name: "Ashpeak Waterfront drag",
+            blurb: "Quarter-mile grudge drag down the waterfront boulevard, one on one.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Drag,
+            legality: Legality::Street,
+            time_of_day_h: 1.5,
+            traffic_density: 0.1,
+            course: CourseSpec::PoiAhead {
+                start: ap::POI_WATERFRONT,
+                // `rules.toml [drag] distance_m`.
+                distance_m: 402.0,
+            },
+            length_hint_m: 402.0,
+            ai: &[VIC],
+            seed: 47,
+            prior_meets: 0,
+        },
+        RaceDef {
+            id: "ashpeak_metro_circuit",
+            name: "Ashpeak City block circuit",
+            blurb: "Two laps round the downtown block grid, under the towers at night.",
+            city: RaceCity::Ashpeak,
+            kind: RaceKind::Circuit { laps: 2 },
+            legality: Legality::Street,
+            time_of_day_h: 23.5,
+            traffic_density: 0.3,
+            course: CourseSpec::Circuit {
+                polygon: METRO_CIRCUIT,
+            },
+            length_hint_m: 3400.0,
+            ai: &[VIC, MARA, DEZ, JUNO, TITO],
+            seed: 48,
+            prior_meets: 2,
+        },
     ]
+}
+
+/// A loop round Ashpeak City's downtown block grid (inside `plan::METRO_CORE_LO..HI`,
+/// x −1300..−100, y 4150..5150), counter-clockwise: ≈ 3.4 km.
+const METRO_CIRCUIT: &[[f32; 2]] = &[
+    [-1150.0, 4250.0],
+    [-250.0, 4250.0],
+    [-250.0, 5050.0],
+    [-1150.0, 5050.0],
+];
+
+/// Every race that can run on city `city_id` ([`RaceCity::runs_on`]), in menu order.
+pub fn races_on(city_id: &str) -> Vec<RaceDef> {
+    races()
+        .into_iter()
+        .filter(|r| r.city.runs_on(city_id))
+        .collect()
 }
 
 /// The race with this id.
@@ -346,6 +545,16 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
             heading,
             finish,
         } => world.plan_route(start, Some(heading), finish)?,
+        CourseSpec::PoiAhead { start, distance_m } => {
+            let p = &world.network().pois[poi(world, start)?];
+            let dir = wp_world::geom::dir_of_yaw(p.heading_rad);
+            let finish = [
+                p.pos[0] + dir[0] * distance_m,
+                p.pos[1] + dir[1] * distance_m,
+                p.pos[2],
+            ];
+            world.plan_route(p.pos, Some(dir), finish)?
+        }
         CourseSpec::Circuit { polygon } => world.plan_circuit(polygon)?,
     };
     let mut course = course_from_route(&route, CORRIDOR_MARGIN_M);
@@ -440,7 +649,17 @@ mod tests {
         for r in &all {
             assert_eq!(all.iter().filter(|x| x.id == r.id).count(), 1);
             assert_eq!(race_for_scenario(&r.scenario_name()).unwrap().id, r.id);
-            assert!((3..=5).contains(&r.ai.len()), "{}: 3-5 AI racers", r.id);
+            if r.kind == RaceKind::Drag {
+                assert_eq!(r.ai.len(), 1, "{}: drags are one on one", r.id);
+            } else {
+                assert!((3..=5).contains(&r.ai.len()), "{}: 3-5 AI racers", r.id);
+            }
+            let rules = RaceData::embedded().rules.for_kind(r.kind).kind_rules;
+            assert!(
+                (rules.min_racers as usize..=rules.max_racers as usize).contains(&r.entrants()),
+                "{}: field size",
+                r.id
+            );
         }
         assert!(race_for_scenario("city_chase").is_none());
     }
@@ -457,5 +676,31 @@ mod tests {
         assert!(has(&|r| r.city == RaceCity::Grid));
         assert!(has(&|r| r.legality == Legality::IllegalDaytime));
         assert!(all.iter().all(|r| r.legality != Legality::Sanctioned));
+    }
+
+    #[test]
+    fn port_vesper_races_also_run_on_the_ashpeak_map() {
+        let on = |city: &str| -> Vec<&str> { races_on(city).iter().map(|r| r.id).collect() };
+        let vesper = on("vesper_v2");
+        let ashpeak = on("ashpeak");
+        assert!(vesper.contains(&"hollins_sprint"));
+        for id in &vesper {
+            assert!(ashpeak.contains(id), "{id} not on ashpeak");
+        }
+        // Ashpeak County's own races only run on the combined map.
+        for id in [
+            "crowfoot_ascent",
+            "crowfoot_descent",
+            "harlan_dirt_run",
+            "ashpeak_downtown_checkpoint",
+            "route7_tunnel_sprint",
+            "grizzly_grade_sprint",
+            "waterfront_drag",
+            "ashpeak_metro_circuit",
+        ] {
+            assert!(ashpeak.contains(&id) && !vesper.contains(&id), "{id}");
+        }
+        assert_eq!(on("procedural_12x12"), vec!["grid_highway_sprint"]);
+        assert!(on("").is_empty());
     }
 }
