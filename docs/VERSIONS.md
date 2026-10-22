@@ -57,5 +57,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.47 | preview | Loop 9 race has late-night traffic (23:00, density 2.0) and the player seat; touch mid-LOD back to 100 m; phone perf profile informational (PC target, row 145); reset ghost blink fix |
 | 0.12.48 | preview | Free-roam street racers: 16 racers, 4 per level (Street / Pro / Elite / Legend, Rookie removed), challenge on the horn key (Q), never give up; "lab · held-key drift" preset in the hidden tune panel (?tune=1 / F10; candidate B, not default); chase-unit meet point on the map (row 129); lane changes see tracked vehicles |
 | 0.12.49 | preview | "lab · held-key drift" preset is now held_search candidate D (held 3.92 s vs 2.24 s, taps 26/36, AI pace neutral; player-only rack curve 49 km/h); still lab-only, not default |
-| 0.12.50 | preview | (next) |
+| 0.12.50 | preview | Traffic cars collide again (row 149: physical traffic capped at free slots); police radio priority tiers + Radio: All / Important only (row 144, PR #44); race-specific police profiles (PR #42); garage workshop: parts, 3D workshop, visible cosmetics (PR #43); police turn-round, chase-unit map marker, speed traps on the viaduct deck; AI racers on the player seat in all picker races; triage-2 (insurance covers damage while wanted unless captured, garage POI repairs, no bridge piers on roads). KNOWN: street race start can freeze (row 154, open) |
+| 0.12.51 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
