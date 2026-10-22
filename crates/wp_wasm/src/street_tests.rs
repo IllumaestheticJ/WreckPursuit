@@ -600,7 +600,8 @@ fn racers_by_shift_spawn_apart_on_both_cities() {
         }
         eprintln!("{city}: closest pair {closest:.0} m");
         if hour < 20.0 {
-            // The night shift waits in the lockup: parked on drawn ground, at rest, undamaged.
+            // The night shift waits in the lockup: parked on drawn ground, at rest, undamaged,
+            // asleep (no vehicle physics).
             let mut s = s;
             s.run_ticks(240 * 3);
             for r in s.street().unwrap().roster() {
@@ -611,6 +612,12 @@ fn racers_by_shift_spawn_apart_on_both_cities() {
                 assert!(
                     st.speed_mps.abs() < 0.5 && st.health > 0.99 && st.pos[2] > -50.0,
                     "{city}: {} in the lockup moves or fell: {st:?}",
+                    r.name
+                );
+                assert_eq!(
+                    s.sim().is_dormant(EntityId(r.entity)),
+                    Some(true),
+                    "{city}: {} sleeps in the lockup (SR-3)",
                     r.name
                 );
             }
@@ -638,15 +645,21 @@ fn racer_cars_are_known_before_the_first_tick() {
 #[ignore]
 fn street_perf() {
     const FRAMES: f64 = 60.0 * 30.0;
-    for city in ["procedural_12x12", "vesper_v2"] {
+    for (city, hour) in [
+        ("procedural_12x12", 12.0),
+        ("procedural_12x12", 23.0),
+        ("vesper_v2", 12.0),
+        ("vesper_v2", 23.0),
+    ] {
         let mut off_ms = 0.0;
         for on in [false, true] {
             crate::session::set_street_racers_enabled(on);
-            let sc = crate::scenario::free_drive_in(
+            let mut sc = crate::scenario::free_drive_in(
                 "lindwurm_4t",
                 DamageMode::Arcade,
                 crate::scenario::city_spec(city),
             );
+            sc.time_of_day_h = hour;
             let t0 = std::time::Instant::now();
             let mut s = Session::new(sc, false).unwrap();
             let build = t0.elapsed();
@@ -659,7 +672,7 @@ fn street_perf() {
             let ai_ms = ai_ns as f64 / 1e6 / FRAMES;
             let racers = s.street().map_or(0, |st| st.entities().len());
             eprintln!(
-                "{city}: street racers {on}: {ms:.3} ms per 60 Hz frame, street AI {ai_ms:.3} ms (worst call {:.2} ms), \
+                "{city} {hour}h: street racers {on}: {ms:.3} ms per 60 Hz frame, street AI {ai_ms:.3} ms (worst call {:.2} ms), \
                  {} vehicles ({racers} street racers), {} traffic agents, session build {build:?}",
                 worst_ns as f64 / 1e6,
                 s.sim().vehicles().len(),
@@ -668,7 +681,7 @@ fn street_perf() {
             if on {
                 let per = (ms - off_ms) / racers.max(1) as f64;
                 eprintln!(
-                    "{city}: +{:.3} ms per frame for {racers} racers = {per:.3} ms per racer \
+                    "{city} {hour}h: +{:.3} ms per frame for {racers} racers = {per:.3} ms per racer \
                      (AI {:.4} ms per racer)",
                     ms - off_ms,
                     ai_ms / racers.max(1) as f64
