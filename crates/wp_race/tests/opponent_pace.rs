@@ -16,8 +16,7 @@
 //! `cargo test --release -p wp_race --test opponent_pace -- --ignored --nocapture`
 //! Knobs: `WP_PACE_RACES=loop9_circuit,hollins_sprint`, `WP_PACE_SKILLS=0.25,0.95`,
 //! `WP_PACE_POLICE=1` (keep the scenario's police; default off), `WP_PACE_DENSITY=0.0`,
-//! `WP_PACE_TOD=23.0` (time of day, h), `WP_PACE_PLAYER=1` (the player seat stays a player car,
-//! so traffic spawns round it as in the browser),
+//! `WP_PACE_TOD=23.0` (time of day, h),
 //! `WP_PACE_SOLO=1` (one car only: the pole car), `WP_PACE_GEOM=1` (geometry-only limits,
 //! the pre-row-99 behaviour), `WP_PACE_TRACE=<grid idx>` (2 Hz trace of that car).
 
@@ -81,10 +80,6 @@ pub struct PaceOpts {
     pub seed: Option<u64>,
     /// Time of day override, h (`WP_PACE_TOD`).
     pub tod: Option<f32>,
-    /// Keep the player seat a `VehicleKind::Player` car (AI-driven) so traffic spawns round
-    /// it as in the browser (`WP_PACE_PLAYER=1`); otherwise every seat is an AI racer and
-    /// traffic spreads over the whole city.
-    pub player_seat: bool,
 }
 
 impl PaceOpts {
@@ -98,16 +93,9 @@ impl PaceOpts {
             trace: var("WP_PACE_TRACE").and_then(|v| v.parse().ok()),
             seed: var("WP_PACE_SEED").and_then(|v| v.parse().ok()),
             tod: var("WP_PACE_TOD").and_then(|v| v.parse().ok()),
-            player_seat: var("WP_PACE_PLAYER").is_some(),
         }
     }
 }
-
-/// Picker races whose pace runs keep the player seat a `VehicleKind::Player` car (AI-driven)
-/// as in the browser, so traffic spawns round it (with every seat an AI racer it spreads over
-/// the whole city: Loop 9 at night had none near the field). Lead, 2026-10-22: all picker
-/// races move to this setup; Loop 9 first.
-const PLAYER_SEAT_RACES: &[&str] = &["loop9_circuit"];
 
 /// Loss buckets (s).
 const BUCKETS: [&str; 11] = [
@@ -318,7 +306,10 @@ pub fn race_pace_in(
                 redline_rpm: car.def.engine.redline_rpm,
             })
             .unwrap();
-        if !(picker && i == 0 && (opts.player_seat || PLAYER_SEAT_RACES.contains(&id))) {
+        // The player seat stays a `VehicleKind::Player` car (AI-driven) as in the browser, so
+        // traffic spawns round it (with every seat an AI racer it spreads over the whole city:
+        // Loop 9 at night had none near the field). Lead, 2026-10-22.
+        if !(picker && i == 0) {
             sim.set_vehicle_kind(ids[i], VehicleKind::AiRacer).unwrap();
         }
         if let Some(a) = assists_override() {
@@ -880,7 +871,6 @@ fn pace_scenarios_hold_their_ranges() {
             .and_then(|v| v.parse().ok()),
         seed: None,
         tod: None,
-        player_seat: false,
     };
     let mut caps = BTreeMap::new();
     let mut fails = Vec::new();
