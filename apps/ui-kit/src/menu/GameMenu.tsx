@@ -17,7 +17,7 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
 import "../ui/theme.css";
@@ -539,6 +539,10 @@ function Row(props: { label: string; hint?: string; children: ComponentChildren 
 
 /** Off / Half / Full choices for the TCS and ABS rows (reference game levels). */
 const LEVEL_OPTIONS = ASSIST_LEVELS.map((l) => ({ id: l, label: l }));
+const RADIO_FILTER_OPTIONS: { id: RadioFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "important", label: "Important only" },
+];
 const TCS_HINT: Record<AssistLevel, string> = {
   Off: "The throttle you press: wheelspin is yours",
   Half: "Lets the wheels spin a little (slides, smoke)",
@@ -679,6 +683,9 @@ function SettingsScreen(props: {
         ))}
         <Row label="Police radio voice" hint={s.radioVoice ? "Units and dispatch speak their lines" : "Squelch and text only"}>
           <Toggle id="gm-radio-voice" label="Police radio voice" value={s.radioVoice} onChange={(radioVoice) => change({ ...s, radioVoice })} />
+        </Row>
+        <Row label="Radio" hint={s.radioFilter === "important" ? "Warnings, heat changes and crashes only" : "Every transmission"}>
+          <Cycle id="gm-radio-filter" label="Radio" value={s.radioFilter} options={RADIO_FILTER_OPTIONS} onChange={(radioFilter) => change({ ...s, radioFilter })} />
         </Row>
         <h3>Assists</h3>
         <Row label="ABS" hint={ABS_HINT[s.assists.abs]}>

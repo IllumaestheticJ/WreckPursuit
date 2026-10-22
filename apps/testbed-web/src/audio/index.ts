@@ -65,8 +65,11 @@ export class AudioSystem {
   private lastStats: DirectorStats | null = null;
   /** Scanner tier the director was given last ("None" hears nothing). */
   private tier = "Pro";
-  /** Shows every line the scanner says (the radio strip, main.ts). */
-  onRadioSay: ((unit: number, text: string) => void) | null = null;
+  /** Shows every line the scanner says (the radio strip, main.ts); `tier` = police priority
+   * tier (row 144), 0 unknown. */
+  onRadioSay: ((unit: number, text: string, tier: number) => void) | null = null;
+  /** "Radio: Important only" (row 144): only police tiers 1–3 are played. */
+  private importantOnly = false;
   private stopAmbience: (() => void) | null = null;
   /** Engine synthesizer (AudioWorklet), once loaded; null if unavailable. */
   private engineHost: EngineSynthHost | null = null;
@@ -146,13 +149,14 @@ export class AudioSystem {
     this.pool.router = this.sirens;
     this.pool.impacts.enabled = this.panel.settings.impacts !== "recorded";
     this.scanner = new ScannerPlayer(this.pool);
-    this.scanner.onSay = (unit, text) => this.onRadioSay?.(unit, text);
+    this.scanner.onSay = (unit, text, tier) => this.onRadioSay?.(unit, text, tier);
     const s = this.panel.settings;
     this.mixer.master.gain.value = this.ducked ? 0 : s.master;
     for (const [b, v] of Object.entries(s.buses)) this.mixer.setUserGain(b as Bus, v);
     this.scanner.tts = s.tts;
     this.updateVoiceVolume();
     this.setTier(s.tier);
+    this.setRadioImportantOnly(this.importantOnly);
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
     this.resetDirector();
     this.restartAmbience();
@@ -369,6 +373,17 @@ export class AudioSystem {
     this.safe(() => audioBridge.setSiren(entity, mode === "Default" ? "" : mode));
   }
 
+  /** "Radio: Important only" (true: police tiers 1–3) or "All" (false). Game menu, row 144. */
+  setRadioImportantOnly(on: boolean): void {
+    this.importantOnly = on;
+    this.safe(() => audioBridge.setRadioImportantOnly(on));
+  }
+
+  /** Whether only important radio (tiers 1–3) is played. */
+  radioImportantOnly(): boolean {
+    return this.importantOnly;
+  }
+
   /** Scanner tier: "None" | "Basic" | "Pro" | "Elite" (wp_police tiers 0/1/2). */
   setTier(tier: string): void {
     this.tier = tier;
@@ -484,7 +499,7 @@ export class AudioSystem {
         this.mixer!.duck(c.Duck.bus, c.Duck.gain, c.Duck.fade_s);
       } else if ("RadioSay" in c) {
         const r = c.RadioSay;
-        this.scanner!.say(r.line, r.unit, r.text, r.priority, r.voice_pitch);
+        this.scanner!.say(r.line, r.unit, r.text, r.priority, r.voice_pitch, r.tier ?? 0);
         this.sirens?.setRadio(true);
       } else if ("RadioEnd" in c) {
         this.scanner!.end(c.RadioEnd.line, c.RadioEnd.interrupted);

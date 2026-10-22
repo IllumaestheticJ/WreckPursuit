@@ -60,6 +60,12 @@ describe("game settings", () => {
     expect(normalizeSettings({ radioVoice: false }, base).radioVoice).toBe(false);
     expect(normalizeSettings({ radioVoice: "no" }, base).radioVoice).toBe(true);
   });
+  it("keeps the radio filter (row 144), default all", () => {
+    const base = defaultGameSettings(true);
+    expect(base.radioFilter).toBe("all");
+    expect(normalizeSettings({ radioFilter: "important" }, base).radioFilter).toBe("important");
+    expect(normalizeSettings({ radioFilter: "loud" }, base).radioFilter).toBe("all");
+  });
   it("never throws on corrupt or blocked storage", () => {
     const st = memory();
     st.data.set(SETTINGS_KEY, "{not json");

@@ -889,6 +889,30 @@ export class VoicePool {
   }
 
   /**
+   * Radio alert tone (owner playtest row 144: a short distinct cue before a tier 1 line):
+   * square-ish beeps at `freqs`, `each_s` apiece, through the radio EQ. Returns the tone's
+   * length, s.
+   */
+  playRadioTone(freqs: number[], each_s: number, gain: number): number {
+    const t0 = this.ctx.currentTime + 0.01;
+    freqs.forEach((f, i) => {
+      const osc = this.ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = f;
+      const g = this.ctx.createGain();
+      const t = t0 + i * each_s;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.008);
+      g.gain.setValueAtTime(gain, t + each_s - 0.02);
+      g.gain.linearRampToValueAtTime(0, t + each_s - 0.005);
+      osc.connect(g).connect(this.mixer.radioIn);
+      osc.start(t);
+      osc.stop(t + each_s);
+    });
+    return freqs.length * each_s;
+  }
+
+  /**
    * Play a cue outside the director (scanner squelch / static, city ambience), non-spatial at
    * the listener. Returns a stop function.
    */
