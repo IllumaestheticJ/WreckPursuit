@@ -65,6 +65,10 @@ pub struct EntityExtra {
     pub prev_state: Option<VehicleState>,
 }
 
+/// Live sessions hash the state every this many ticks (once per 60 Hz frame) for the replay
+/// log; the ticks between are logged as 0 = not recorded.
+pub const LIVE_HASH_EVERY: u64 = 4;
+
 /// Replay playback state.
 #[derive(Debug, Clone)]
 pub struct Playback {
@@ -74,8 +78,11 @@ pub struct Playback {
     op_cursor: usize,
     /// Playback speed multiplier (0 = paused).
     pub speed: f32,
-    /// Ticks whose recorded hash matched.
+    /// Ticks verified: up to the last tick whose recorded hash matched (live sessions record a
+    /// hash every [`LIVE_HASH_EVERY`] ticks; a match vouches for the ticks since the last one).
     pub verified: u64,
+    /// The tick verification has reached (the playback's start tick at first).
+    checked_to: u64,
     /// First ticks whose hash did not match (at most 64 kept).
     pub drift_ticks: Vec<u64>,
     /// Total mismatching ticks.
@@ -257,6 +264,7 @@ impl Session {
                 op_cursor: 0,
                 speed: 1.0,
                 verified: 0,
+                checked_to: 0,
                 drift_ticks: Vec::new(),
                 drift_count: 0,
             }),
@@ -1328,6 +1336,11 @@ impl Session {
                     let _ = self.log_op(idx, OpKind::Dormant { on: true });
                 }
             }
+            for (e, on) in step.light {
+                if let Some(idx) = self.index(e) {
+                    let _ = self.log_op(idx, OpKind::LightWhenFar { on });
+                }
+            }
             for (e, input) in step.inputs {
                 if let Some(idx) = self.index(e) {
                     self.log_input(idx, input);
@@ -1409,22 +1422,30 @@ impl Session {
             x.accel_local = world_to_local(s.rot, a);
         }
 
-        // 3. Hashes: logged every tick live (replay.bin stores one per tick), compared in
-        //    playback.
+        // 3. Hashes: replay.bin keeps one per tick; live sessions compute one every
+        //    `LIVE_HASH_EVERY` ticks (the state hash is ~0.06 ms per car per frame, the lattice
+        //    nodes) and log 0 = "not recorded" for the ticks between. Playback compares the
+        //    recorded ones.
         let now = self.sim.tick();
-        let hash = self.sim.state_hash();
         match &mut self.playback {
             Some(p) => match p.replay.tick_hashes.get(now as usize - 1) {
-                Some(h) if *h == hash => p.verified += 1,
-                Some(_) => {
-                    p.drift_count += 1;
-                    if p.drift_ticks.len() < MAX_DRIFT_TICKS {
-                        p.drift_ticks.push(now);
+                Some(&h) if h != 0 => {
+                    if self.sim.state_hash() == h {
+                        p.verified += now.saturating_sub(p.checked_to);
+                    } else {
+                        p.drift_count += 1;
+                        if p.drift_ticks.len() < MAX_DRIFT_TICKS {
+                            p.drift_ticks.push(now);
+                        }
                     }
+                    p.checked_to = now;
                 }
-                None => {}
+                _ => {}
             },
             None => {
+                let due = now.is_multiple_of(LIVE_HASH_EVERY)
+                    || (self.scripted && now == self.script_end);
+                let hash = if due { self.sim.state_hash() } else { 0 };
                 self.log.tick_hashes.push(hash);
                 if now.is_multiple_of(self.sc.hash_every) {
                     self.log.checkpoints.push(self.checkpoint());
@@ -1638,6 +1659,10 @@ impl Session {
         if r.checkpoints.last().map(|c| c.tick) != Some(now) {
             r.checkpoints.push(self.checkpoint());
         }
+        // The last tick always carries its hash (the sim is at it now).
+        if let Some(h) = r.tick_hashes.last_mut().filter(|h| **h == 0) {
+            *h = self.sim.state_hash();
+        }
         Ok(r)
     }
 
@@ -1736,6 +1761,7 @@ impl Session {
                 op_cursor,
                 speed: 1.0,
                 verified: 0,
+                checked_to: snap.tick,
                 drift_ticks: Vec::new(),
                 drift_count: 0,
             }),
@@ -1770,7 +1796,13 @@ impl Session {
             drift_count: p.drift_count,
             drift_ticks: p.drift_ticks.clone(),
             state_hash: format!("{:016x}", self.sim.state_hash()),
-            recorded_final_hash: p.replay.tick_hashes.last().map(|h| format!("{h:016x}")),
+            recorded_final_hash: p
+                .replay
+                .tick_hashes
+                .iter()
+                .rev()
+                .find(|h| **h != 0)
+                .map(|h| format!("{h:016x}")),
             scenario: self.sc.name.clone(),
             mode: self.mode,
             contract_version: p.replay.contract_version.clone(),

@@ -363,12 +363,16 @@ pub fn plan_roster(world: &World, player_xy: [f32; 2], seed: u64, night: bool) -
 }
 
 /// Mark the street racers among `sc`'s entities (`ids` in scenario order) as
-/// `VehicleKind::AiRacer`: live, in playback and in crash replays alike (the kind decides how
-/// traffic and the police treat a car, so a playback must match).
+/// `VehicleKind::AiRacer` and allowed the sim's light model far from the player
+/// (`Sim::set_light_when_far`): live, in playback and in crash replays alike (the kind decides
+/// how traffic and the police treat a car, so a playback must match).
 pub fn mark_racers(sim: &mut Sim, sc: &Scenario, ids: &[EntityId]) {
     for (spec, id) in sc.entities.iter().zip(ids) {
         if is_street_entity(spec) {
             let _ = sim.set_vehicle_kind(*id, VehicleKind::AiRacer);
+            // Far from the player they drive the sim's light model (SR-3); a race with the
+            // player turns it off for the racer (logged op).
+            let _ = sim.set_light_when_far(*id, true);
         }
     }
 }
@@ -449,6 +453,9 @@ pub struct StreetStep {
     /// Off-shift racers settled in the lockup to put to sleep (`Sim::set_dormant`, logged as
     /// `OpKind::Dormant`; SR-3). The sim wakes them itself.
     pub sleep: Vec<EntityId>,
+    /// Light-model permission changes (`Sim::set_light_when_far`, logged as
+    /// `OpKind::LightWhenFar`): off for a racer racing the player, on again after.
+    pub light: Vec<(EntityId, bool)>,
 }
 
 /// One NPC street racer.
@@ -644,6 +651,8 @@ pub struct StreetRacers {
     ring: Option<Loop9>,
     /// Lockup spots ([`lockup_slots`]), looked up at the first shift change.
     lockup: Vec<([f32; 3], f32)>,
+    /// Light-model permission changes due next step ([`StreetStep::light`]).
+    pending_light: Vec<(EntityId, bool)>,
 }
 
 /// The player is wanted or in a pursuit (search included): no street challenges then (owner
@@ -827,6 +836,7 @@ impl StreetRacers {
             cars: BTreeMap::new(),
             ring: None,
             lockup: Vec::new(),
+            pending_light: Vec::new(),
         })
     }
 
@@ -1213,6 +1223,8 @@ impl StreetRacers {
         let r = &mut self.racers[k];
         r.mode = RacerMode::Racing;
         r.field = None;
+        // Full physics for the whole race, however far ahead it gets.
+        self.pending_light.push((r.entity, false));
         self.offer = None;
         let gates = snap_gates(&route.polyline, via);
         self.race = Some(Race {
@@ -1321,6 +1333,7 @@ impl StreetRacers {
         }
         self.shift_change(sim, player, &mut out.moves);
         self.lockup_sleep(sim, player, &mut out.sleep);
+        out.light = std::mem::take(&mut self.pending_light);
         // Plan roam routes that are due (at most one per tick: the line optimiser is not free).
         if let Some(k) = (0..self.racers.len()).find(|&k| {
             let r = &self.racers[k];
@@ -1691,6 +1704,7 @@ impl StreetRacers {
         let k = race.racer;
         self.race = None;
         let r = &mut self.racers[k];
+        self.pending_light.push((r.entity, true));
         let l = level(r.level);
         if won {
             r.losses += 1;

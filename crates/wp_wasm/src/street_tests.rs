@@ -651,6 +651,9 @@ fn street_perf() {
         ("vesper_v2", 12.0),
         ("vesper_v2", 23.0),
     ] {
+        if std::env::var("PERF_ONLY").is_ok_and(|o| o != format!("{city}:{hour}")) {
+            continue;
+        }
         let mut off_ms = 0.0;
         for on in [false, true] {
             crate::session::set_street_racers_enabled(on);
@@ -671,6 +674,19 @@ fn street_perf() {
             let (ai_ns, worst_ns) = street::perf::take();
             let ai_ms = ai_ns as f64 / 1e6 / FRAMES;
             let racers = s.street().map_or(0, |st| st.entities().len());
+            let lights = s.street().map_or(0, |st| {
+                st.entities()
+                    .iter()
+                    .filter(|e| s.sim().is_light(**e) == Some(true))
+                    .count()
+            });
+            let dorm = s.street().map_or(0, |st| {
+                st.entities()
+                    .iter()
+                    .filter(|e| s.sim().is_dormant(**e) == Some(true))
+                    .count()
+            });
+            eprintln!("  light {lights}, dormant {dorm}");
             eprintln!(
                 "{city} {hour}h: street racers {on}: {ms:.3} ms per 60 Hz frame, street AI {ai_ms:.3} ms (worst call {:.2} ms), \
                  {} vehicles ({racers} street racers), {} traffic agents, session build {build:?}",
@@ -1070,4 +1086,81 @@ fn street_race_starts_and_runs_30_s() {
         "raced {elapsed} s"
     );
     assert!(top > 10.0, "the racer raced (top {top} m/s)");
+}
+
+/// SR-3: roaming racers far from the player drive the sim's light model and stay on the roads,
+/// moving; the racer the player is racing never goes light, however far away it gets.
+#[test]
+fn far_racers_drive_light_and_the_race_opponent_never_does() {
+    let mut sc = crate::scenario::free_drive_in(
+        "debug_sedan",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    sc.time_of_day_h = 23.0;
+    let mut s = Session::new(sc, false).unwrap();
+    let ids = on_duty(&s);
+    let start: Vec<_> = ids.iter().map(|e| state(&s, *e).pos).collect();
+    let (mut light_seen, mut off_road) = (0usize, Vec::new());
+    for _ in 0..40 {
+        s.run_ticks(240);
+        let p = state(&s, PLAYER).pos;
+        for e in &ids {
+            if s.sim().is_light(*e) != Some(true) {
+                continue;
+            }
+            light_seen += 1;
+            let st = state(&s, *e);
+            assert!(
+                dist2(st.pos, p) > wp_sim::LIGHT_OFF_M,
+                "light only far away"
+            );
+            if s.sim()
+                .world()
+                .map()
+                .locate(st.pos, None, 4.0, true, true)
+                .is_none()
+            {
+                off_road.push((*e, st.pos));
+            }
+        }
+    }
+    let moved = ids
+        .iter()
+        .zip(&start)
+        .filter(|(e, p0)| dist2(state(&s, **e).pos, **p0) > 200.0)
+        .count();
+    eprintln!(
+        "light samples {light_seen}, off road {off_road:?}, moved {moved}/{}",
+        ids.len()
+    );
+    assert!(
+        light_seen > 40,
+        "far racers drive light ({light_seen} samples)"
+    );
+    assert!(
+        off_road.len() * 20 <= light_seen,
+        "light racers stay on the roads: {off_road:?}"
+    );
+    assert!(
+        moved * 4 >= ids.len() * 3,
+        "and keep moving ({moved}/{})",
+        ids.len()
+    );
+
+    // A race: the opponent stays on full physics with the player 600 m away.
+    let racer = start_race(&mut s, 0);
+    let p = state(&s, PLAYER).pos;
+    let off = [p[0] + 600.0, p[1]];
+    let z = s.sim().world().map().ground_height(off, None);
+    s.place_logged(PLAYER, off, 0.0, z).unwrap();
+    let mut light = false;
+    for _ in 0..(240 * 8) {
+        s.run_ticks(1);
+        light |= s.sim().is_light(racer) == Some(true);
+        if s.street().unwrap().race(s.sim()).is_none() {
+            break;
+        }
+    }
+    assert!(!light, "the race opponent never drives light");
 }
