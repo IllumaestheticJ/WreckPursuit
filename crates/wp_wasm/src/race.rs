@@ -373,7 +373,9 @@ impl RaceRun {
             sim.tick(),
             abs_s,
             autopilot,
-        );
+        )
+        // A route with nothing to drive refuses the race (row 154: a panic froze the game).
+        .map_err(|e| e.to_string())?;
         // The race's own police: doctrine and scripted roadblocks / spikes / stakeouts.
         let racers = live.racers().to_vec();
         wp_race::police::start_race(sim.police_mut(), def, live.race(), &racers);

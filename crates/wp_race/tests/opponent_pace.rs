@@ -342,7 +342,8 @@ pub fn race_pace_in(
         entrants.truncate(1);
     }
     let entrants_profiles: Vec<DriverProfile> = entrants.iter().map(|e| e.profile).collect();
-    let mut ai = AiEntrants::new(sim.world(), &race, kind, closed, &entrants, seed);
+    let mut ai = AiEntrants::new(sim.world(), &race, kind, closed, &entrants, seed)
+        .expect("a drivable route");
     let green = judge.start(sim.tick()).unwrap();
     let racers: Vec<EntityId> = entrants.iter().map(|e| e.racer).collect();
     let k_n = racers.len();

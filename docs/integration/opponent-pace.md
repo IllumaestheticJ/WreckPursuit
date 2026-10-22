@@ -923,3 +923,14 @@ The pace harness keeps seat 0 a `VehicleKind::Player` car, driven by the AI, in 
 - **city_sprint** is not a picker race.
 
 Grid s50/s95 and Lantern s50/s95 were re-locked by the rule, with reasons in each RON. Hollins still holds its ranges.
+
+## Race setup never panics on a route with nothing to drive (row 154 hardening, 2026-10-22)
+
+- **The bug:** `Field::from_route` panics ("route with no length") on a route with no length, or on a one-segment route whose end lies behind its start. In the browser a wasm panic froze the game; branch-triage b6bae7d6 fixed the street-race path in `wp_wasm` street.rs.
+- **The same path in wp_race:** `AiEntrants::new`, reached from `LiveRace::new` and the picker's `race_start`.
+- **The fix:**
+  - New `wp_opponent::Field::try_from_route` returns `None` instead of panicking. `from_route` keeps its panic, documented.
+  - `AiEntrants::new` and `LiveRace::new` now return `Result<_, RaceSetupError>`. `RaceSetupError::NoDrivableRoute` refuses the race.
+  - `wp_wasm` `race_start` turns the error into its usual `Err(String)` (minimal change outside my crates).
+  - Callers in the tests unwrap with "a drivable route".
+- **Test:** `entrants::tests::a_route_with_nothing_to_drive_refuses_the_race` covers a backwards one-segment loop route and an empty route; without the fix it panics in `Field::from_route`. A sprint gets a run-off leg past its finish, which can still give the AI a corridor on a degenerate judged route; a loop gets none.
