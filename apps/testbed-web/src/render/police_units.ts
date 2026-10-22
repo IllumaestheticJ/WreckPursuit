@@ -18,7 +18,7 @@ import { POLICE_UNIT_STRIDE, PU } from "../wasm/layout";
 import { sim } from "../wasm/sim";
 import type { CarMeshJson, LightbarSide, MaterialJson } from "./panels";
 import { loadCarMesh } from "./panels";
-import { applyUnitDecals, hash32, liveryBaseColour, liveryTexture } from "./livery";
+import { applyUnitDecals, countySkin, hash32, liveryBaseColour, liveryTexture } from "./livery";
 import { layers } from "../settings";
 
 // ------------------------------------------------------------------------------------------
@@ -245,8 +245,8 @@ const LENS_SLOTS = new Set<MaterialJson>(["lightbar_red", "lightbar_blue", "ligh
 interface Template {
   carId: string;
   mesh: CarMeshJson;
-  /** Merged geometry per static material slot. */
-  statics: { geom: THREE.BufferGeometry; mat: THREE.Material }[];
+  /** Merged geometry per static material slot (`county`: the material in the ACSO livery). */
+  statics: { geom: THREE.BufferGeometry; mat: THREE.Material; county: THREE.Material }[];
   /** Merged lens geometry per side and colour. */
   lenses: { geom: THREE.BufferGeometry; side: "left" | "right"; colour: keyof LightbarSide }[];
   /** Amber parts (per-unit material so they flash). */
@@ -259,6 +259,8 @@ interface Template {
 interface UnitView {
   id: number;
   carId: string;
+  /** Wears the Ashpeak County Sheriff livery (police_units() flag 4). */
+  county: boolean;
   obj: THREE.Group;
   rig: LightRig | null;
   anchors: { left: THREE.Vector3 | null; right: THREE.Vector3 | null };
@@ -365,13 +367,19 @@ export class PoliceUnitsView {
       }
       (bySlot.get(p.material) ?? bySlot.set(p.material, []).get(p.material)!).push(g);
     }
-    const tex = liveryTexture(mesh);
-    const livery = (this.mats.livery as THREE.MeshStandardMaterial).clone();
-    livery.map = tex;
-    const paint = (this.mats.paint as THREE.MeshStandardMaterial).clone();
-    const base = liveryBaseColour(mesh);
-    if (base) paint.color.copy(base);
-    if (!tex) livery.color.copy(paint.color);
+    // City (PVPD) and county (ACSO) livery + paint materials; each unit picks one set.
+    const skin = (county: boolean) => {
+      const tex = liveryTexture(mesh, 8, county);
+      const livery = (this.mats.livery as THREE.MeshStandardMaterial).clone();
+      livery.map = tex;
+      const paint = (this.mats.paint as THREE.MeshStandardMaterial).clone();
+      const base = liveryBaseColour(mesh, county);
+      if (base) paint.color.copy(base);
+      if (!tex) livery.color.copy(paint.color);
+      return { livery, paint };
+    };
+    const city = skin(false);
+    const county = skin(true);
     const tint = (slot: MaterialJson, m: THREE.Material) => {
       const rgb = mesh.tints?.[slot];
       if (!rgb) return m;
@@ -383,8 +391,10 @@ export class PoliceUnitsView {
     for (const [slot, gs] of bySlot) {
       const geom = mergeGeometries(gs);
       if (!geom) continue;
-      const mat = slot === "livery" ? livery : slot === "paint" ? paint : tint(slot, this.mats[slot] ?? paint);
-      statics.push({ geom, mat });
+      const other = tint(slot, this.mats[slot] ?? city.paint);
+      const pick = (k: { livery: THREE.Material; paint: THREE.Material }) =>
+        slot === "livery" ? k.livery : slot === "paint" ? k.paint : other;
+      statics.push({ geom, mat: pick(city), county: pick(county) });
     }
     const lenses: Template["lenses"] = [];
     for (const [key, gs] of lensParts) {
@@ -406,10 +416,10 @@ export class PoliceUnitsView {
     };
   }
 
-  private makeUnit(id: number, t: Template): UnitView {
+  private makeUnit(id: number, t: Template, county: boolean): UnitView {
     const obj = new THREE.Group();
     for (const s of t.statics) {
-      const m = new THREE.Mesh(s.geom, s.mat);
+      const m = new THREE.Mesh(s.geom, county ? s.county : s.mat);
       if ((s.mat as THREE.MeshStandardMaterial).transparent) m.renderOrder = 1;
       obj.add(m);
     }
@@ -432,11 +442,11 @@ export class PoliceUnitsView {
     }
     const decalRoot = new THREE.Group();
     for (const d of t.decals) decalRoot.add(Object.assign(new THREE.Mesh(d.geometry.clone()), { name: d.name }));
-    applyUnitDecals(decalRoot, t.mesh, id);
+    applyUnitDecals(decalRoot, t.mesh, id, county);
     obj.add(decalRoot);
     const rig = new LightRig(sides.left, sides.right, amberMats, { left: null, right: null }, patternFor(t.carId), phaseFor(id));
     this.group.add(obj);
-    return { id, carId: t.carId, obj, rig, anchors: t.anchors, seen: true, chasing: false, dist: Infinity };
+    return { id, carId: t.carId, county, obj, rig, anchors: t.anchors, seen: true, chasing: false, dist: Infinity };
   }
 
   private makeHeli(id: number): UnitView {
@@ -449,7 +459,7 @@ export class PoliceUnitsView {
     rotor.position.z = 1.8;
     obj.add(body, boom, rotor);
     this.group.add(obj);
-    return { id, carId: "heli", obj, rig: null, anchors: { left: null, right: null }, seen: true, chasing: false, dist: Infinity };
+    return { id, carId: "heli", county: false, obj, rig: null, anchors: { left: null, right: null }, seen: true, chasing: false, dist: Infinity };
   }
 
   /**
@@ -465,6 +475,7 @@ export class PoliceUnitsView {
       const o = i * stride;
       const flags = units[o + PU.flags];
       const heli = (flags & 1) !== 0;
+      const county = !heli && countySkin((flags & 4) !== 0);
       const id = Math.round(units[o + PU.unitId] ?? i);
       const mi = Math.round(units[o + PU.model] ?? -1);
       if (mi >= models.length) {
@@ -476,15 +487,15 @@ export class PoliceUnitsView {
       const t = heli ? null : this.template(carId);
       const want = heli ? "heli" : t?.carId;
       let u = this.units.get(id);
-      if (u && want && u.carId !== want) {
-        // Model changed (e.g. the model list arrived): rebuild with the new one.
+      if (u && want && (u.carId !== want || u.county !== county)) {
+        // Model (e.g. the model list arrived) or agency changed: rebuild.
         u.obj.removeFromParent();
         this.units.delete(id);
         u = undefined;
       }
       if (!u) {
         if (heli) u = this.makeHeli(id);
-        else if (t) u = this.makeUnit(id, t);
+        else if (t) u = this.makeUnit(id, t, county);
         else continue; // mesh still loading
         this.units.set(id, u);
       }

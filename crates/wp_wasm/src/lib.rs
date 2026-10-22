@@ -611,6 +611,9 @@ struct VehicleInfo {
     /// `wp_police` unit id of a sim police vehicle (the `unit_id` of `police_units()`), so a
     /// unit keeps its number when it becomes a sim vehicle; `None` for other vehicles.
     police_unit: Option<u32>,
+    /// The police vehicle belongs to the Ashpeak County Sheriff's Office (county livery; see
+    /// [`police::Agencies`]); false for every other vehicle and outside the `ashpeak` map.
+    police_county: bool,
     /// `wp_world` agent id of promoted traffic (the `agent_id` of `traffic_agents()`), so the
     /// physical car can be painted like its instanced twin; `None` for other vehicles.
     traffic_agent: Option<u32>,
@@ -720,6 +723,7 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .vehicle(EntityId(entity))
                 .and_then(|v| v.police_unit)
                 .map(|u| u.0),
+            police_county: police::vehicle_county(s.sim(), EntityId(entity)),
             traffic_agent: s.vehicle(EntityId(entity)).and_then(|v| v.traffic_agent),
         }))
     })
@@ -877,7 +881,8 @@ pub fn police_status(entity: u32) -> Result<String, JsValue> {
 }
 
 /// Police units that are not sim vehicles (internally driven cars, helicopters), 8 floats
-/// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing;
+/// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing,
+/// 4 Ashpeak County unit: county livery, see [`police::Agencies`];
 /// `unit_id` is the stable `wp_police` unit id; `model` indexes `police_models()`, -1 for
 /// helicopters, single-model sessions and units not yet reconciled). A unit keeps its model
 /// when it later becomes a sim vehicle of kind Police (`vehicle_states()` / `vehicle_meta()`,
@@ -891,6 +896,7 @@ pub fn police_units() -> Result<Vec<f32>, JsValue> {
             sim.police(),
             &|p| world.map().ground_height(p, None),
             &|u| sim.police_unit_model(u).map_or(-1.0, |m| m as f32),
+            &police::Agencies::of(Some(world.network())),
         )
     })
 }

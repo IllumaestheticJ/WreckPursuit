@@ -17,7 +17,7 @@
 import * as THREE from "three";
 import type { CarMeshJson } from "./panels";
 import { carMeshNow, loadCarMesh } from "./panels";
-import { hasPoliceLivery, liveryTexture } from "./livery";
+import { COUNTY_PAINT, hasPoliceLivery, liveryTexture } from "./livery";
 import { sim, type CarModelInfo } from "../wasm/sim";
 import { PALETTE, type Hex } from "./palette";
 import { artStyle } from "./style";
@@ -49,6 +49,8 @@ export const BAR = { off: 0x1a1a24, red: 0xff2040, blue: 0x2060ff } as const;
  */
 export function styledPaint(hex: Hex, police = false): Hex {
   if (!artStyle.lowpoly) return hex;
+  // Ashpeak County Sheriff units keep their green (render/livery.ts ACSO scheme).
+  if (hex === COUNTY_PAINT) return PALETTE.countyPolicePaint;
   if (police || hex === POLICE_PAINT) return PALETTE.policePaint;
   const i = TRAFFIC_PALETTE.indexOf(hex);
   return i < 0 ? hex : PALETTE.trafficPaints[i % PALETTE.trafficPaints.length];
@@ -240,15 +242,18 @@ function lampMarkers(info: CarModelInfo, front: number, rear: number): { head: T
 /** Livery material per car model (the shared police livery texture, render/livery.ts). */
 const liveryMats = new Map<string, THREE.MeshStandardMaterial>();
 
-/** The car's panel mesh at rest (chassis space), wheels placed on their hubs. */
-export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
+/**
+ * The car's panel mesh at rest (chassis space), wheels placed on their hubs; `county` puts a
+ * police model in the Ashpeak County Sheriff livery.
+ */
+export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo, county = false): Geoms {
   const paint: Parameters<typeof merge>[0] = [];
   const detail: Parameters<typeof merge>[0] = [];
   const tail: Parameters<typeof merge>[0] = [];
   const bar: Parameters<typeof merge>[0] = [];
   const livery: Parameters<typeof merge>[0] = [];
   // Police models with a known livery scheme show it (as their promoted VehicleView does).
-  const liveryTex = hasPoliceLivery(mesh) ? liveryTexture(mesh) : null;
+  const liveryTex = hasPoliceLivery(mesh) ? liveryTexture(mesh, 8, county) : null;
   let front = -Infinity;
   let rear = Infinity;
   for (const p of mesh.parts) {
@@ -292,10 +297,11 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
   const g: Geoms = { paint: merge(paint), detail: merge(detail), tail: join([merge(tail), lamps.tail]), head: lamps.head };
   if (bar.length > 0) g.bar = merge(bar);
   if (liveryTex && livery.length > 0) {
-    let material = liveryMats.get(mesh.id);
+    const key = county ? `${mesh.id}#county` : mesh.id;
+    let material = liveryMats.get(key);
     if (!material) {
       material = new THREE.MeshStandardMaterial({ map: liveryTex, flatShading: true, metalness: 0.25, roughness: 0.55 });
-      liveryMats.set(mesh.id, material);
+      liveryMats.set(key, material);
     }
     material.roughness = artStyle.lowpoly ? 0.85 : 0.55;
     material.metalness = artStyle.lowpoly ? 0.15 : 0.25;
@@ -450,6 +456,7 @@ class FleetModel {
     private readonly group: THREE.Group,
     private readonly mats: FleetMaterials,
     readonly police: boolean,
+    readonly county = false,
   ) {
     this.info = sim.carModelInfo(carId);
     this.proxy = new InstancedCar(proxyGeoms(this.info), MAX_PROXY, mats, this.barAt());
@@ -466,7 +473,7 @@ class FleetModel {
 
   private setMesh(mesh: CarMeshJson): void {
     if (this.full) return;
-    this.full = new InstancedCar(fullGeoms(mesh, this.info), MAX_FULL, this.mats, this.barAt());
+    this.full = new InstancedCar(fullGeoms(mesh, this.info, this.county), MAX_FULL, this.mats, this.barAt());
     this.group.add(...this.full.meshes);
   }
 
@@ -499,12 +506,15 @@ export class Fleet {
   private readonly q = new THREE.Quaternion();
   private readonly one = new THREE.Vector3(1, 1, 1);
 
-  /** Model for `carId` (built on first use; `police` adds a light bar). */
-  model(carId: string, police = false): FleetModel {
-    const key = police ? `${carId}#police` : carId;
+  /**
+   * Model for `carId` (built on first use; `police` adds a light bar, `county` the Ashpeak
+   * County Sheriff livery on a police model).
+   */
+  model(carId: string, police = false, county = false): FleetModel {
+    const key = police ? `${carId}#${county ? "county" : "police"}` : carId;
     let m = this.models.get(key);
     if (!m) {
-      m = new FleetModel(carId, this.group, this.mats, police);
+      m = new FleetModel(carId, this.group, this.mats, police, police && county);
       this.models.set(key, m);
     }
     return m;

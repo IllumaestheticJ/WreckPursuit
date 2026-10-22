@@ -41,7 +41,9 @@ enum Kind {
 
 fn kind_of(material: &str) -> Kind {
     match material {
-        "asphalt" | "highway_concrete" | "parking" | "bus_lane" => Kind::Paved,
+        "asphalt" | "highway_concrete" | "parking" | "bus_lane" | "gravel_road" | "dirt_road" => {
+            Kind::Paved
+        }
         "sidewalk" | "verge" => Kind::Sidewalk,
         "sidewalk_corner" => Kind::Corner,
         "lot" => Kind::Lot,

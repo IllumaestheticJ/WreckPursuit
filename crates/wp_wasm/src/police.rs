@@ -6,6 +6,83 @@ use serde::Serialize;
 use wp_contracts::{EntityId, WantedLevel};
 use wp_police::unit::Assignment;
 use wp_police::{PoliceSystem, PursuitOutcome, PursuitStatus, UnitKind};
+use wp_world::network::{PoiKind, RoadNetwork};
+
+/// Draw-record flag (`police_units()` / `police_draw()`): the unit belongs to the Ashpeak
+/// County Sheriff's Office (county livery) instead of the Port Vesper Police Department.
+pub const FLAG_COUNTY: u32 = 4;
+
+/// Which agency a police unit works for (presentation only: the livery the testbed paints).
+///
+/// Only the combined map (`wp_world::ashpeak::CITY_ID`) has a second agency. There a unit's
+/// home station is the `PoliceStation` POI nearest to where the unit first appeared
+/// (`Unit::spawn_pos`); units homed at a station outside Port Vesper's extent
+/// (`wp_world::ashpeak::plan::VESPER_LO`..`VESPER_HI`) are county units. While the map has no
+/// station outside Port Vesper yet, the spawn position itself decides.
+#[derive(Debug, Clone, Default)]
+pub struct Agencies {
+    /// Combined map: the county agency exists.
+    active: bool,
+    /// Police station positions (XY) and whether each lies in the county.
+    stations: Vec<([f32; 2], bool)>,
+}
+
+/// Whether `p` lies outside Port Vesper's extent (in Ashpeak County).
+fn in_county(p: [f32; 2]) -> bool {
+    use wp_world::ashpeak::plan::{VESPER_HI, VESPER_LO};
+    p[0] < VESPER_LO[0] || p[0] > VESPER_HI[0] || p[1] < VESPER_LO[1] || p[1] > VESPER_HI[1]
+}
+
+impl Agencies {
+    /// The agencies of a city network (`None` = no city: PVPD only).
+    pub fn of(net: Option<&RoadNetwork>) -> Self {
+        let Some(net) = net.filter(|n| n.id == wp_world::ashpeak::CITY_ID) else {
+            return Self::default();
+        };
+        let stations = net
+            .pois
+            .iter()
+            .filter(|p| p.kind == PoiKind::PoliceStation)
+            .map(|p| {
+                let xy = [p.pos[0], p.pos[1]];
+                (xy, in_county(xy))
+            })
+            .collect();
+        Self {
+            active: true,
+            stations,
+        }
+    }
+
+    /// Whether a unit that first appeared at `spawn` is a county unit.
+    pub fn county(&self, spawn: [f32; 2]) -> bool {
+        if !self.active {
+            return false;
+        }
+        if !self.stations.iter().any(|s| s.1) {
+            return in_county(spawn);
+        }
+        let d2 = |s: [f32; 2]| (s[0] - spawn[0]).powi(2) + (s[1] - spawn[1]).powi(2);
+        // Nearest station; ties go to the first listed (POI order is deterministic).
+        let mut best: Option<(f32, bool)> = None;
+        for &(pos, county) in &self.stations {
+            let d = d2(pos);
+            if best.is_none_or(|b| d < b.0) {
+                best = Some((d, county));
+            }
+        }
+        best.is_some_and(|b| b.1)
+    }
+
+    /// [`FLAG_COUNTY`] for unit `u`, else 0.
+    pub fn flag(&self, u: &wp_police::unit::Unit) -> u32 {
+        if self.county(u.spawn_pos) {
+            FLAG_COUNTY
+        } else {
+            0
+        }
+    }
+}
 
 /// One racer's police status (JSON for the testbed's heat panel).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -136,18 +213,37 @@ pub fn assignment_has_siren(a: &Assignment) -> bool {
     )
 }
 
+/// Whether sim vehicle `entity` is a county police unit ([`Agencies::county`] of its unit).
+pub fn vehicle_county(sim: &wp_sim::Sim, entity: EntityId) -> bool {
+    let Some(unit) = sim
+        .vehicles()
+        .iter()
+        .find(|v| v.id == entity)
+        .and_then(|v| v.police_unit)
+    else {
+        return false;
+    };
+    let agencies = Agencies::of(Some(sim.world().network()));
+    sim.police()
+        .units()
+        .iter()
+        .find(|u| u.id == unit)
+        .is_some_and(|u| agencies.county(u.spawn_pos))
+}
+
 /// Floats per unit in [`units`].
 pub const UNIT_STRIDE: usize = 8;
 
 /// Police units that are **not** sim vehicles (bound units are drawn from `vehicle_states()`),
 /// 8 floats each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]`, flags 1 helicopter,
-/// 2 pursuing / intercepting (lights on). Yaw is about +Z with 0 = +Y. `unit_id` is the
+/// 2 pursuing / intercepting (lights on), 4 county unit ([`FLAG_COUNTY`] from `agencies`). Yaw is about +Z with 0 = +Y. `unit_id` is the
 /// stable `wp_police` id (hash it for per-unit light phases); `model` comes from
 /// `model_of` (fleet index, -1 = none).
 pub fn units(
     p: &PoliceSystem,
     ground: &dyn Fn([f32; 2]) -> f32,
     model_of: &dyn Fn(wp_police::UnitId) -> f32,
+    agencies: &Agencies,
 ) -> Vec<f32> {
     let mut out = Vec::new();
     for u in p.units().iter().filter(|u| u.entity.is_none()) {
@@ -159,7 +255,7 @@ pub fn units(
         );
         // Heading (hx, hy) → yaw with 0 = +Y, positive counter-clockwise.
         let yaw = wp_math::atan2(-b.heading[0], b.heading[1]);
-        let flags = heli as u32 | (chasing as u32) << 1;
+        let flags = heli as u32 | (chasing as u32) << 1 | agencies.flag(u);
         // Altitude is above the ground under the unit (hilly cities).
         let z = ground(b.pos) + b.alt_m;
         out.extend_from_slice(&[
@@ -179,6 +275,95 @@ pub fn units(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wp_police::unit::{Unit, UnitRole};
+    use wp_police::UnitId;
+    use wp_world::network::{Poi, ROAD_FORMAT_VERSION};
+
+    /// An empty network with id `id` and police stations at `stations`.
+    fn net_with_stations(id: &str, stations: &[[f32; 2]]) -> RoadNetwork {
+        RoadNetwork {
+            format_version: ROAD_FORMAT_VERSION,
+            id: id.into(),
+            source: "test".into(),
+            attribution: None,
+            bounds_min: [-5000.0, -2000.0],
+            bounds_max: [2000.0, 6000.0],
+            core: [0.0, 0.0],
+            nodes: vec![],
+            lanes: vec![],
+            intersections: vec![],
+            signals: vec![],
+            zones: vec![],
+            pois: stations
+                .iter()
+                .enumerate()
+                .map(|(i, p)| Poi {
+                    kind: PoiKind::PoliceStation,
+                    name: format!("Station {i}"),
+                    pos: [p[0], p[1], 0.0],
+                    heading_rad: 0.0,
+                    lane: None,
+                })
+                .collect(),
+            buildings: vec![],
+            surfaces: vec![],
+            terrain: None,
+            covered: vec![],
+            decor: vec![],
+        }
+    }
+
+    fn unit_at(pos: [f32; 2]) -> Unit {
+        Unit::new(
+            UnitId(7),
+            UnitKind::Car,
+            UnitRole::Reinforcement,
+            pos,
+            [0.0, 1.0],
+            1.0,
+        )
+    }
+
+    #[test]
+    fn unit_homed_at_an_ashpeak_station_is_a_county_unit() {
+        let vesper_station = [200.0, 300.0];
+        let harlan_station = [-3300.0, 150.0];
+        let net = net_with_stations(
+            wp_world::ashpeak::CITY_ID,
+            &[vesper_station, harlan_station],
+        );
+        let a = Agencies::of(Some(&net));
+        // Spawned at the county station: county; at the city station: PVPD.
+        let county = unit_at(harlan_station);
+        assert_eq!(county.spawn_pos, harlan_station);
+        assert_eq!(a.flag(&county), FLAG_COUNTY);
+        assert_eq!(a.flag(&unit_at(vesper_station)), 0);
+        // Inside Port Vesper but nearer the county station (west edge): homed in the county.
+        assert!(a.county([-1650.0, 150.0]));
+        // Outside Port Vesper but nearest the city station: a PVPD unit.
+        assert!(!a.county([200.0, 1800.0]));
+        // The flag follows the spawn point, not where the unit drives later.
+        let mut moved = unit_at(harlan_station);
+        moved.body.pos = vesper_station;
+        assert_eq!(a.flag(&moved), FLAG_COUNTY);
+    }
+
+    #[test]
+    fn without_county_stations_the_spawn_point_decides() {
+        let net = net_with_stations(wp_world::ashpeak::CITY_ID, &[[200.0, 300.0]]);
+        let a = Agencies::of(Some(&net));
+        assert!(a.county([-3000.0, 0.0]));
+        assert!(a.county([0.0, 2500.0]));
+        assert!(!a.county([0.0, 0.0]));
+    }
+
+    #[test]
+    fn other_cities_have_only_the_city_police() {
+        let net = net_with_stations("vesper_v2", &[[-3300.0, 150.0]]);
+        let a = Agencies::of(Some(&net));
+        assert!(!a.county([-3300.0, 150.0]));
+        assert!(!Agencies::of(None).county([-3300.0, 150.0]));
+    }
 
     #[test]
     fn unknown_racer_is_clear() {
@@ -187,7 +372,7 @@ mod tests {
         assert_eq!(s.level, WantedLevel::None);
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
-        assert!(units(&p, &|_| 0.0, &|_| -1.0).is_empty());
+        assert!(units(&p, &|_| 0.0, &|_| -1.0, &Agencies::default()).is_empty());
         assert_eq!(s.last_outcome, None);
         assert_eq!(s.outcome_age_s, None);
     }
