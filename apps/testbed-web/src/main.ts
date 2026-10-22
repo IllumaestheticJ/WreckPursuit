@@ -575,6 +575,22 @@ async function main(): Promise<void> {
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
   };
 
+  /** Free roam: free drive in the selected city with AI street racers roaming its highways,
+   * touge, dirt roads, downtown and countryside (`roamers` 0 = the default 10). */
+  const startFreeRoam = (
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
+    mode = ($("mode") as HTMLSelectElement).value,
+    roamers = 0,
+  ) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    sim.init(0, withWeather(sim.freeRoamCityJson(car, mode, citySel.value, roamers)), false);
+    rebuildViews();
+    applyAssistPreset(app.source);
+  };
+
   /** A career run: the city chase or a free drive (city box) with the career car, its saved
    * damage and mods. Opens the garage instead when the car cannot go out. */
   const startCareerRun = (kind: RunKind): boolean => {
@@ -610,6 +626,7 @@ async function main(): Promise<void> {
     const car = sc.entities[0]?.car;
     if (sc.name === "city_chase") startCityChase(car, sc.mode);
     else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true);
+    else if (sc.name === "free_roam") startFreeRoam(car, sc.mode);
     else if (raceView.raceId) startRace(raceView.raceId, car, sc.mode);
     else startFreeDrive(car, sc.mode);
   };
@@ -828,11 +845,13 @@ async function main(): Promise<void> {
     } else if (app.scenarioFile) void runScenario(app.scenarioFile);
     else if (name === "city_chase") startCityChase();
     else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
+    else if (name === "free_roam") startFreeRoam();
     else startFreeDrive();
   };
   const careerOn = () => ($("career") as HTMLInputElement).checked;
   $("sc-free").onclick = () => (careerOn() ? startCareerRun("free") : startFreeDrive());
   $("sc-chase").onclick = () => (careerOn() ? startCareerRun("chase") : startCityChase());
+  $("sc-roam").onclick = () => startFreeRoam();
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
@@ -1201,6 +1220,8 @@ async function main(): Promise<void> {
     startRace(params.get("race")!, DEFAULT_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
+  } else if (params.get("roam")) {
+    startFreeRoam(DEFAULT_CAR, undefined, Number(params.get("roam")) || 0);
   } else if (params.get("drift")) {
     startDriftLab();
   } else {
