@@ -800,6 +800,8 @@ function vinylMaterial(style: string, all: Box): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
     side: THREE.DoubleSide,
+    // One pass: transparent + DoubleSide would flip `side` and re-resolve the program twice a frame.
+    forceSinglePass: true,
     flatShading: true,
   });
   const u = {

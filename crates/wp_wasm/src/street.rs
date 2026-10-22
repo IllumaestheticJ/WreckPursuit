@@ -431,6 +431,9 @@ pub struct StreetStep {
     pub moves: Vec<Move>,
     /// Every racer's input for this tick.
     pub inputs: Vec<(EntityId, VehicleInput)>,
+    /// Off-shift racers settled in the lockup to put to sleep (`Sim::set_dormant`, logged as
+    /// `OpKind::Dormant`; SR-3). The sim wakes them itself.
+    pub sleep: Vec<EntityId>,
 }
 
 /// One NPC street racer.
@@ -1229,6 +1232,7 @@ impl StreetRacers {
             self.ring = Some(loop9(sim.world()));
         }
         self.shift_change(sim, player, &mut out.moves);
+        self.lockup_sleep(sim, player, &mut out.sleep);
         // Plan roam routes that are due (at most one per tick: the line optimiser is not free).
         if let Some(k) = (0..self.racers.len()).find(|&k| {
             let r = &self.racers[k];
@@ -1327,6 +1331,25 @@ impl StreetRacers {
             r.mode = RacerMode::OffDuty;
             r.field = None;
             r.respawn = false;
+        }
+    }
+
+    /// Off-shift racers that stand still in the lockup, with the player well away, go to sleep
+    /// (they cost no vehicle physics there; SR-3).
+    fn lockup_sleep(&self, sim: &Sim, player: EntityId, sleep: &mut Vec<EntityId>) {
+        let p = xy_of(sim, player).unwrap_or([0.0; 2]);
+        for r in self.racers.iter().filter(|r| r.mode == RacerMode::OffDuty) {
+            if sim.is_dormant(r.entity) != Some(false) {
+                continue;
+            }
+            let Some(v) = sim.vehicles().iter().find(|v| v.id == r.entity) else {
+                continue;
+            };
+            let st = v.vehicle.state();
+            let far = dist(p, geom::xy(st.pos)) > wp_sim::DORMANT_WAKE_M + 60.0;
+            if far && st.speed_mps.abs() < 0.05 {
+                sleep.push(r.entity);
+            }
         }
     }
 

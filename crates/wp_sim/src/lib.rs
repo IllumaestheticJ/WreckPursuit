@@ -138,7 +138,16 @@ pub struct SimVehicle {
     player_steering: Option<bool>,
     /// Ticks the ghost was extended because the car still overlapped another car.
     ghost_overstay: u32,
+    /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
+    dormant: bool,
 }
+
+/// A dormant vehicle wakes when an awake vehicle's centre comes this close, m
+/// ([`Sim::set_dormant`]): well before the two can touch at any speed a car reaches in
+/// `DORMANT_WAKE_M / speed` seconds, so a collision always finds it dynamic.
+pub const DORMANT_WAKE_M: f32 = 40.0;
+/// Only an awake vehicle faster than this wakes dormant ones nearby, m/s.
+pub const DORMANT_WAKE_MIN_SPEED_MPS: f32 = 0.5;
 
 /// Longest a ghost is extended past its window while it still overlaps another car (3 s).
 pub const GHOST_MAX_OVERSTAY_TICKS: u32 = 3 * 240;
@@ -349,6 +358,7 @@ impl Sim {
             ghost_ticks: 0,
             ghost_overstay: 0,
             player_steering: None,
+            dormant: false,
         });
         Ok(id)
     }
@@ -787,6 +797,11 @@ impl Sim {
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let rb = &mut self.physics.bodies[slot.body.body];
+        // A placed car is awake (a reset, a respawn, a move out of the lockup).
+        if slot.dormant {
+            slot.dormant = false;
+            rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+        }
         slot.vehicle.place_body(rb, pos, yaw, speed_mps, 0.0);
         Ok(())
     }
@@ -877,6 +892,80 @@ impl Sim {
         slot.vehicle.place_body(rb, pos, yaw, 0.0, 0.0);
         slot.damage.reset();
         Ok(())
+    }
+
+    /// Put a vehicle to sleep (`on`) or wake it. A dormant vehicle's chassis becomes a fixed
+    /// body where it stands, at rest: no tyre, suspension or drivetrain step, no forces, no
+    /// damage chassis motion, but its collider stays, so other cars and debris still hit it
+    /// (as a parked car). It wakes by itself, deterministically, when a moving vehicle comes
+    /// within [`DORMANT_WAKE_M`], when anything touches it, and when it is placed or reset.
+    /// For cars that wait out of play (off-shift street racers in their lockup, SR-3); callers
+    /// that record replays log it (`simcli` `OpKind::Dormant`).
+    pub fn set_dormant(&mut self, id: EntityId, on: bool) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        if slot.dormant == on {
+            return Ok(());
+        }
+        slot.dormant = on;
+        let rb = &mut self.physics.bodies[slot.body.body];
+        use rapier3d::prelude::{RigidBodyType, Vector};
+        if on {
+            rb.set_body_type(RigidBodyType::Fixed, true);
+            rb.set_linvel(Vector::ZERO, false);
+            rb.set_angvel(Vector::ZERO, false);
+            rb.reset_forces(false);
+            rb.reset_torques(false);
+        } else {
+            rb.set_body_type(RigidBodyType::Dynamic, true);
+        }
+        slot.vehicle.read_body(rb);
+        Ok(())
+    }
+
+    /// The vehicle is dormant ([`Sim::set_dormant`]).
+    pub fn is_dormant(&self, id: EntityId) -> Option<bool> {
+        self.vehicles.iter().find(|v| v.id == id).map(|v| v.dormant)
+    }
+
+    /// Wake dormant vehicles an awake vehicle has come near (before the physics step).
+    fn wake_dormant_near(&mut self) {
+        if !self.vehicles.iter().any(|v| v.dormant) {
+            return;
+        }
+        // Moving cars only: two cars parked side by side would wake each other (a standing car
+        // that starts off nearby wakes it within a few ticks, or on contact).
+        let awake: Vec<[f32; 3]> = self
+            .vehicles
+            .iter()
+            .filter(|v| !v.dormant)
+            .map(|v| &self.physics.bodies[v.body.body])
+            .filter(|rb| {
+                rb.linvel().length_squared()
+                    > DORMANT_WAKE_MIN_SPEED_MPS * DORMANT_WAKE_MIN_SPEED_MPS
+            })
+            .map(|rb| rb.translation().to_array())
+            .collect();
+        let r2 = DORMANT_WAKE_M * DORMANT_WAKE_M;
+        let wake: Vec<EntityId> = self
+            .vehicles
+            .iter()
+            .filter(|v| v.dormant)
+            .filter(|v| {
+                let p = self.physics.bodies[v.body.body].translation().to_array();
+                awake.iter().any(|q| {
+                    let (dx, dy, dz) = (p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+                    dx * dx + dy * dy + dz * dz < r2
+                })
+            })
+            .map(|v| v.id)
+            .collect();
+        for id in wake {
+            let _ = self.set_dormant(id, false);
+        }
     }
 
     /// Make a vehicle a ghost for `ticks` physics ticks (0 = solid again now): its chassis
@@ -996,6 +1085,7 @@ impl Sim {
         if sys.police {
             self.drive_police_units();
         }
+        self.wake_dormant_near();
         if sys.vehicle {
             // Weather reaches every wheel through `weather_at` (the plain world without weather).
             let wx = self.weather.as_ref().map(|w| w.query(&self.world));
@@ -1013,7 +1103,7 @@ impl Sim {
                               c: &rapier3d::prelude::Collider| {
                 c.user_data & (physics::GHOST_USER_BIT | physics::PROP_USER_BIT) == 0
             };
-            for slot in &mut self.vehicles {
+            for slot in self.vehicles.iter_mut().filter(|v| !v.dormant) {
                 let filter = if slot.ghost_ticks > 0 {
                     QueryFilter::exclude_dynamic()
                         .exclude_rigid_body(slot.body.body)
@@ -1041,7 +1131,7 @@ impl Sim {
                     &mut out,
                 );
             }
-            for slot in &self.vehicles {
+            for slot in self.vehicles.iter().filter(|v| !v.dormant) {
                 slot.vehicle
                     .write_body(&mut self.physics.bodies[slot.body.body]);
             }
@@ -1084,12 +1174,26 @@ impl Sim {
             }
         }
         if sys.vehicle {
-            for slot in &mut self.vehicles {
+            for slot in self.vehicles.iter_mut().filter(|v| !v.dormant) {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
             }
         }
+        // Anything that touched a dormant car wakes it for the next tick.
+        let touched: Vec<EntityId> = self
+            .vehicles
+            .iter()
+            .zip(&tick_contacts.per_vehicle)
+            .filter(|(v, c)| v.dormant && !c.is_empty())
+            .map(|(v, _)| v.id)
+            .collect();
+        for id in touched {
+            let _ = self.set_dormant(id, false);
+        }
         if sys.damage {
             for (slot, contacts) in self.vehicles.iter_mut().zip(&tick_contacts.per_vehicle) {
+                if slot.dormant && contacts.is_empty() {
+                    continue;
+                }
                 // Hinged panels (workstream R) swing from the chassis motion; no-op without
                 // panels attached.
                 let rb = &self.physics.bodies[slot.body.body];
@@ -1619,6 +1723,94 @@ mod tests {
         assert!(y < 20.0, "a ghost still hits a barrier: y = {y}");
     }
 
+    /// SR-3: a dormant car is a fixed body at rest (throttle does nothing); a moving car that
+    /// comes near wakes it before they touch, and the crash then goes as with a car that never
+    /// slept; a placed car is awake; the runs are deterministic.
+    #[test]
+    fn dormant_car_sleeps_until_a_car_comes_near() {
+        let run = |sleep: bool| {
+            let (mut sim, a, b) = two_sedan_sim(7);
+            // Settle on the ground, then b sleeps (with throttle held: it must not drive).
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            if sleep {
+                sim.set_dormant(b, true).unwrap();
+                assert_eq!(sim.is_dormant(b), Some(true));
+            }
+            sim.set_input(
+                b,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            let b_still = sim.vehicle_states()[1].1.pos;
+            let asleep_after_1s = sim.is_dormant(b);
+            sim.set_input(b, VehicleInput::default()).unwrap();
+            // a drives into b from 70 m back at 15 m/s.
+            sim.place_vehicle(a, [0.0, -58.0, 0.0], 0.0, 15.0).unwrap();
+            sim.set_input(
+                a,
+                VehicleInput {
+                    throttle: 0.3,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut woke_at_gap = None;
+            for _ in 0..(240 * 6) {
+                sim.step_fixed();
+                if woke_at_gap.is_none() && sim.is_dormant(b) == Some(false) {
+                    let st = sim.vehicle_states();
+                    woke_at_gap = Some(st[1].1.pos[1] - st[0].1.pos[1]);
+                }
+            }
+            let contacts = sim
+                .drain_events()
+                .iter()
+                .filter(|e| matches!(e, SimEvent::Contact { b, .. } if *b != wp_contracts::WORLD_ENTITY))
+                .count();
+            (
+                b_still,
+                asleep_after_1s,
+                woke_at_gap,
+                contacts,
+                sim.vehicle_states()[1].1.pos,
+                sim.state_hash(),
+            )
+        };
+        let (still, asleep, gap, contacts, b_end, h) = run(true);
+        println!("asleep {asleep:?}, still at {still:?}, woke {gap:?} m ahead, {contacts} contacts, b ends at {b_end:?}");
+        assert_eq!(
+            asleep,
+            Some(true),
+            "full throttle does not wake a dormant car"
+        );
+        assert!(
+            (still[1] - 12.0).abs() < 0.05,
+            "a dormant car does not drive: y = {}",
+            still[1]
+        );
+        let gap = gap.expect("the approaching car woke it");
+        assert!(gap > 20.0, "woken well before contact ({gap} m)");
+        assert!(
+            contacts > 0 && b_end[1] > 12.5,
+            "then it is hit and shoved like any car: y = {}",
+            b_end[1]
+        );
+        assert_eq!(h, run(true).5, "dormant runs are deterministic");
+        // A placed (reset) car is awake.
+        let (mut sim, _, b) = two_sedan_sim(9);
+        sim.set_dormant(b, true).unwrap();
+        sim.place_vehicle(b, [0.0, 30.0, 0.0], 0.0, 0.0).unwrap();
+        assert_eq!(sim.is_dormant(b), Some(false));
+    }
+
     /// A ghost whose window ends inside another car stays a ghost until it is clear (capped).
     #[test]
     fn ghost_overstays_while_overlapping() {
@@ -2027,5 +2219,70 @@ mod tests {
         let (_, s) = run(1);
         assert!(s.speed_mps > 5.0);
         assert_eq!(s.health, 1.0);
+    }
+}
+#[cfg(test)]
+mod cost_probe {
+    use super::*;
+    /// Probe: ms per 60 Hz frame for 13 cars on the flat slab, idle / driving / dormant, with and
+    /// without damage. `cargo test --release -p wp_sim --lib cost_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn cost_probe() {
+        let data = |p: &str| format!("{}/../../data/{p}", env!("CARGO_MANIFEST_DIR"));
+        let car = wp_contracts::load_car(data("cars/hakone_gt.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        for (label, drive, dormant, damage) in [
+            ("idle", false, false, true),
+            ("driving", true, false, true),
+            ("driving, no damage", true, false, false),
+            ("dormant", false, true, true),
+        ] {
+            let mut sim = Sim::new(SimConfig {
+                seed: 1,
+                mode: mode.clone(),
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let mut ids = Vec::new();
+            for k in 0..13 {
+                ids.push(
+                    sim.spawn_vehicle(&car, [k as f32 * 30.0, 0.0, 0.0], 0.0)
+                        .unwrap(),
+                );
+            }
+            let mut sys = sim.systems();
+            sys.damage = damage;
+            sim.set_systems(sys);
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            for id in &ids {
+                if drive {
+                    sim.set_input(
+                        *id,
+                        VehicleInput {
+                            throttle: 0.3,
+                            steer: 0.2,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                if dormant {
+                    sim.set_dormant(*id, true).unwrap();
+                }
+            }
+            let t0 = std::time::Instant::now();
+            let n = 240 * 10;
+            for _ in 0..n {
+                sim.step_fixed();
+            }
+            let ms = t0.elapsed().as_secs_f64() * 1000.0 / (n as f64 / 4.0);
+            println!(
+                "13 cars {label}: {ms:.3} ms per 60 Hz frame ({:.3} per car)",
+                ms / 13.0
+            );
+        }
     }
 }

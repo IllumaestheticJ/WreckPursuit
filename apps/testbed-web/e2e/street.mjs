@@ -30,8 +30,14 @@ const shots = process.env.SHOTS;
 const CITY = process.env.CITY ?? "vesper_v2";
 const CAR = "lindwurm_4t";
 if (shots) mkdirSync(shots, { recursive: true });
-const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
-process.on("exit", () => server.kill("SIGTERM"));
+// Own process group: the exit handler stops vite itself, not just npx (a leftover server on
+// the port would serve the next run stale code).
+const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe", detached: true });
+process.on("exit", () => {
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {}
+});
 for (let i = 0; i < 100; i++) {
   try {
     if ((await fetch(URL)).ok) break;

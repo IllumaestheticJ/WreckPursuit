@@ -1184,3 +1184,13 @@ stake paid → countdown → win at B pays even money → result banner → city
 - SR-3 (opponent, N): a cruise mode in `Field` (posted speed limits, lane keeping instead of the
   racing line). Roaming now relies on a capped capability, so racers cut corners within their
   own carriageway.
+
+## Lead helper note (2026-10-22) — shader re-resolve every frame (perf_check)
+`perf_check` "no shader program re-resolve in steady frames" failed with 24 material version
+bumps over 3 renders. Cause: transparent `DoubleSide` materials without `forceSinglePass`;
+three.js draws those back faces then front faces, setting `side` + `needsUpdate` twice per
+render, so each one re-resolves its program every frame. They were the garage marker rings
+(`scene.ts`), police car decals (`render/livery.ts`), cosmetics mesh / cabin materials
+(`render/cosmetics/*.ts`), vinyls (`render/mod_parts.ts`) and the helicopter spotlight cone.
+All now `forceSinglePass: true` (flat or additive surfaces, so one pass draws the same); 0
+bumps. New transparent double-sided materials need the same flag.

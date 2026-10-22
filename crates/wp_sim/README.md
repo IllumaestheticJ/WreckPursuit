@@ -76,6 +76,17 @@ car's lattice answers `node_positions(PARKED_ENTITY_BASE + prop)`. A shoved prop
 neighbours like a vehicle. Perf and scenarios: `docs/integration/parked-signals.md`
 (`cargo run --release -p wp_sim --example parked_damage_cost`).
 
+## Dormant vehicles (SR-3, lead, 2026-10-22)
+`Sim::set_dormant(id, true)` puts a car out of play to sleep: its chassis becomes a fixed
+Rapier body where it stands (at rest), it gets no tyre / suspension / drivetrain step, no
+forces and no damage chassis motion, but keeps its collider, so it is hit like a parked car.
+It wakes by itself, deterministically: when a moving vehicle (> `DORMANT_WAKE_MIN_SPEED_MPS`)
+comes within `DORMANT_WAKE_M` (40 m, before any contact at road speeds), when anything touches
+it, and when it is placed or reset. Replays log the sleep as `simcli` `OpKind::Dormant` (kind 6);
+the wakes need no op. Cost (`cost_probe`, 13 `hakone_gt` on the slab): 0.10 ms per car per
+60 Hz frame idle, 0.12 driving, 0.004 dormant. Street racers off shift sleep in their lockup
+(`wp_wasm::street`). Test: `dormant_car_sleeps_until_a_car_comes_near`.
+
 ## Known gaps
 - Traffic AI does not slow in rain or fog yet (needs a `wp_world` hook, request W-D1 in
   `docs/integration/world.md`); police speed caps ignore weather (E, weather.md step 4).

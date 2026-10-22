@@ -1310,6 +1310,12 @@ impl Session {
             for m in step.moves {
                 self.apply_street_move(m);
             }
+            for e in step.sleep {
+                if let Some(idx) = self.index(e) {
+                    // Only an unknown entity index fails, and street racers are scenario entities.
+                    let _ = self.log_op(idx, OpKind::Dormant { on: true });
+                }
+            }
             for (e, input) in step.inputs {
                 if let Some(idx) = self.index(e) {
                     self.log_input(idx, input);
