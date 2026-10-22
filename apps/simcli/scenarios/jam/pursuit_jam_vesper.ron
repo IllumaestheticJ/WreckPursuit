@@ -35,8 +35,9 @@
         // Priority junction waiting for a gap in a steady major-road stream (cars crossing at
         // 4.5 m/s, free road ahead, no police car in any path, not red / scene / siren-held);
         // the extra search units add sirens and yielding, which densify the stream. Traffic
-        // gap acceptance, not a jam: 55 s. A minor-road starvation release is D's call.
-        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 55.0),
+        // gap acceptance, not a jam: was 55 s. Back to 45 s with D's starvation release
+        // (courtesy hold by slow major-road cars after 25 s, shorter gaps): 50.5 s -> pass.
+        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 45.0),
         world_metric(name: "traffic_max_queue", min: 0.0, max: 12.0),
     ],
 )

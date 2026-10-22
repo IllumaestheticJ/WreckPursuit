@@ -1861,6 +1861,54 @@ impl Traffic {
         best
     }
 
+    /// Whether a conflicting movement of `conn` starts at a Priority junction's minor approach
+    /// whose front car has stood at the line for [`STARVE_AFTER_S`], is headed into that
+    /// movement and could go if the box were clear (room beyond it, no tracked vehicle in it).
+    fn starved_minor_conflict(&self, map: &CityMap, conn: SegId) -> bool {
+        map.seg(conn).conflicts.iter().any(|&c| {
+            let SegKind::Connector { from, .. } = map.seg(c).kind else {
+                return false;
+            };
+            if !matches!(
+                map.lane_control(from),
+                Some((IntersectionControl::Priority, ap, _)) if !ap.major
+            ) || self.tv_block[c as usize]
+            {
+                return false;
+            }
+            let Some(e) = self.lists[from as usize].iter().rev().find(|e| !e.ghost) else {
+                return false;
+            };
+            let j = e.agent as usize;
+            let o = &self.agents[j];
+            let d_line = map.seg(from).length - o.s - HALF_L;
+            if o.plan[0] != c || o.v >= 0.5 || d_line > 3.5 || self.stopped_for(j) < STARVE_AFTER_S
+            {
+                return false;
+            }
+            let target = map.seg(c).next[0];
+            match self.lists[target as usize].first() {
+                Some(t) => t.v >= 3.0 || t.s - HALF_L >= CAR_LENGTH_M + 2.0,
+                None => true,
+            }
+        })
+    }
+
+    /// Whether the front car on the lane feeding `conn` stands without a permit for it: the
+    /// cars behind it cannot come through before it does.
+    fn lane_holds_for(&self, map: &CityMap, conn: SegId) -> bool {
+        let SegKind::Connector { from, .. } = map.seg(conn).kind else {
+            return false;
+        };
+        match self.lists[from as usize].iter().rev().find(|e| !e.ghost) {
+            Some(e) => {
+                let o = &self.agents[e.agent as usize];
+                o.v < 0.5 && o.permit != conn
+            }
+            None => false,
+        }
+    }
+
     fn stopped_for(&self, i: usize) -> f32 {
         self.agents[i]
             .stopped_since
@@ -1995,6 +2043,17 @@ impl Traffic {
             }
             Some((IntersectionControl::Priority, ap, _)) => {
                 if ap.major {
+                    // Courtesy (lead, jam_pursuit_vesper): in a slow major-road stream that
+                    // keeps the box occupied, a car that can stop comfortably holds at its line
+                    // for a minor-road car that has waited long.
+                    let merging = map.net.intersections[ap.intersection as usize].radius_m <= 0.0;
+                    if !merging
+                        && v <= COURTESY_MAX_V
+                        && need <= p.comfort_decel
+                        && self.starved_minor_conflict(map, conn)
+                    {
+                        return false;
+                    }
                     2
                 } else {
                     // A freeway on-ramp (minor approach at a radius-0 merge junction) merges on
@@ -2044,8 +2103,16 @@ impl Traffic {
         }
         // Yield to higher-ranked conflicting movements (not once it has booked its turn).
         let booked = self.reservations[conn as usize] == a.id;
+        let gap_s = if my_rank == 0 {
+            starved_gap_s(p.gap_accept_s, self.stopped_for(i))
+        } else {
+            p.gap_accept_s
+        };
         for &c in cs.conflicts.iter().filter(|_| !booked) {
-            if self.rank_of(map, c) > my_rank && self.arrival_time(map, c) < p.gap_accept_s {
+            if self.rank_of(map, c) > my_rank
+                && !(gap_s < p.gap_accept_s && self.lane_holds_for(map, c))
+                && self.arrival_time(map, c) < gap_s
+            {
                 return false;
             }
         }
@@ -4058,4 +4125,44 @@ mod model_tests {
     }
 
     const PINNED: [usize; 8] = [2, 4, 2, 6, 3, 3, 2, 4];
+}
+
+/// A minor-road car at a Priority junction that has stood at its line this long starts to
+/// accept shorter gaps in the major-road stream (lead, jam_pursuit_vesper: a car waited 50 s
+/// for a gap in a steady stream slowed by police yielding).
+pub(crate) const STARVE_AFTER_S: f32 = 25.0;
+/// Fastest a major-road car may be going to hold at its line for a starved minor-road car
+/// (courtesy happens in slow streams; free-flowing traffic has gaps).
+pub(crate) const COURTESY_MAX_V: f32 = 10.0;
+/// Seconds over which the accepted gap shrinks from the driver's own to [`STARVE_GAP_S`].
+pub(crate) const STARVE_RAMP_S: f32 = 10.0;
+/// Shortest gap a starved minor-road car accepts (the box and crossing paths must still be
+/// clear and unreserved).
+pub(crate) const STARVE_GAP_S: f32 = 2.5;
+
+/// Gap a minor-road car accepts after `stopped_s` at its line.
+pub(crate) fn starved_gap_s(gap_accept_s: f32, stopped_s: f32) -> f32 {
+    let t = ((stopped_s - STARVE_AFTER_S) / STARVE_RAMP_S).clamp(0.0, 1.0);
+    let floor = STARVE_GAP_S.min(gap_accept_s);
+    gap_accept_s + (floor - gap_accept_s) * t
+}
+
+#[cfg(test)]
+mod starve_tests {
+    use super::*;
+
+    #[test]
+    fn starved_minor_road_cars_accept_shorter_gaps_after_a_long_wait() {
+        assert_eq!(starved_gap_s(4.5, 0.0), 4.5);
+        assert_eq!(starved_gap_s(4.5, STARVE_AFTER_S), 4.5);
+        let mid = starved_gap_s(4.5, STARVE_AFTER_S + STARVE_RAMP_S / 2.0);
+        assert!((mid - 3.5).abs() < 1e-4, "{mid}");
+        assert_eq!(
+            starved_gap_s(4.5, STARVE_AFTER_S + STARVE_RAMP_S),
+            STARVE_GAP_S
+        );
+        assert_eq!(starved_gap_s(4.5, 1000.0), STARVE_GAP_S);
+        // A driver who already takes short gaps keeps their own.
+        assert_eq!(starved_gap_s(2.0, 1000.0), 2.0);
+    }
 }
