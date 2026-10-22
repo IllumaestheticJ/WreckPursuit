@@ -477,7 +477,6 @@ fn render_terrain(
     }
 }
 
-/// Build the greybox primitives for a city.
 /// Bridge piers: a block under every deck about every 30 m (`(footprint, bottom, top)`),
 /// 1.6 m deep and 80 % of the deck wide, down to the ground. A pier never stands on a road
 /// under its deck (an interchange crossroad over the highway) or beside one within 1.5 m:
@@ -580,6 +579,7 @@ fn on_paving_below(net: &RoadNetwork, si: usize, q: V2, z: f32) -> bool {
         })
 }
 
+/// Build the greybox primitives for a city.
 pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let net = &map.net;
     let mut asphalt = Prim::new("asphalt", [0.20, 0.20, 0.21, 1.0]);

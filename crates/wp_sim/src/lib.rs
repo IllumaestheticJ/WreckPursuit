@@ -731,6 +731,9 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))?;
         slot.vehicle
             .apply_body_inertia(&mut self.physics.bodies[slot.body.body]);
+        Ok(())
+    }
+
     /// Multiply `id`'s aerodynamic drag by `scale` (clamped to 0..2) from the next tick on.
     /// For slipstream: race code recomputes it every tick from vehicle states, e.g. with
     /// `wp_opponent::draft::slipstream`. 1.0 (the default) is an exact no-op.
@@ -1465,6 +1468,8 @@ mod tests {
         assert!(def.drivetrain.final_drive < car.def.drivetrain.final_drive);
         assert_eq!(diffs.rear, wp_vehicle::AxleDiff::Locked);
         assert_ne!(tuned_hash, hash);
+    }
+
     /// Speed after 15 s of full throttle in a straight line with drag multiplied by `scale`
     /// (`None` = setter never called).
     fn top_end_speed(scale: Option<f32>) -> (f32, u64) {

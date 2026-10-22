@@ -1579,6 +1579,8 @@ fn spawns_out_of_view(seed: u64) {
         seen, 0,
         "seed {seed}: {seen} of {checked} spawns in the racer's view within 3 s"
     );
+}
+
 /// With traffic reported by the sim, a violation no unit or camera saw is only called in when a
 /// civilian car is close by: no caller, no heat and no report.
 #[test]

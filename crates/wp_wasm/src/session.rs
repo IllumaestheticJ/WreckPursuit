@@ -29,8 +29,8 @@ use crate::crash_replay::{
     CrashMark, CrashRecorder, CrashReplayInfo, Snapshot, POST_IMPACT_TICKS, PRE_IMPACT_TICKS,
 };
 use crate::data::mem_data;
-use crate::race::RaceRun;
 use crate::garage_visit::{GarageOffer, GarageRepairReport, GarageSite, GARAGE_ENTER_SPEED_MPS};
+use crate::race::RaceRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
 
@@ -195,6 +195,7 @@ impl Session {
             CrashRecorder::off()
         } else {
             CrashRecorder::default()
+        };
         let garages = if run.is_some() {
             crate::garage_visit::sites(sim.world())
         } else {
@@ -1507,6 +1508,11 @@ impl Session {
         let op_cursor = replay.ops.partition_point(|e| e.tick < snap.tick);
         let n = self.ids.len();
         let mut s = Session {
+            // A crash replay is playback: no garage visits.
+            garages: Vec::new(),
+            visit: None,
+            garage_armed: false,
+            visit_seq: 0,
             sc: self.sc.clone(),
             scripted: self.scripted,
             script_end: self.script_end,

@@ -44,10 +44,10 @@ pub mod crash_replay;
 pub mod data;
 pub mod drift_lab;
 pub mod garage;
+pub mod garage_visit;
 pub mod lod;
 pub mod map;
 pub mod mod_visuals;
-pub mod garage_visit;
 pub mod pack;
 pub mod police;
 pub mod props;
@@ -1016,6 +1016,8 @@ pub fn race_course() -> Result<Vec<f32>, JsValue> {
 #[wasm_bindgen]
 pub fn race_result_json() -> Result<String, JsValue> {
     get(|s| json(&s.race_report()))
+}
+
 /// The city's repair shops as JSON ([`garage_visit::GarageSite`] array: name, position,
 /// radius, `Legit` / `Crooked`, district). `[]` without a city or an economy run.
 #[wasm_bindgen]
@@ -1094,6 +1096,7 @@ pub fn debug_knock_prop(entity: u32, prop: i32, speed_mps: f32) -> Result<u32, J
             .map(|i| i as u32)
     })
 }
+
 /// Debug / e2e: put `entity` on the ground at `[x, y]` facing `yaw` (0 = +Y) at `speed_mps`
 /// (e.g. inside a garage from `garages_json()`). Not recorded in replays.
 #[wasm_bindgen]
@@ -1104,9 +1107,6 @@ pub fn debug_place(entity: u32, x: f32, y: f32, yaw: f32, speed_mps: f32) -> Res
             .map_err(|e| e.to_string())
     })
 }
-
-/// Floats per agent in `traffic_agents()`.
-pub const AGENT_STRIDE: usize = 5;
 
 /// Floats per prop in `props_static()` ([`props::PROP_STRIDE`]).
 #[wasm_bindgen]

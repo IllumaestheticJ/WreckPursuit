@@ -353,6 +353,8 @@ fn helicopter_tracks_a_racer_driving_off_in_port_vesper() {
         }
     }
     assert!(visual > 100, "visual in {visual} of 200 samples");
+}
+
 // ----- garage visits (`crate::garage_visit`) ------------------------------------------------
 
 /// Free drive in the procedural city, one tick in (the car has left any garage it spawned in).
