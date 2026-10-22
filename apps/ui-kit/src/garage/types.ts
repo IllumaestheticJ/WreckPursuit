@@ -99,7 +99,8 @@ export interface CarView {
   repair_lines: RepairLineView[];
   impound: ImpoundStatus | null;
   stats: StatsView | null;
-  damage_while_wanted: boolean;
+  /** Some outstanding damage dates from a police capture: insurance will not pay for it. */
+  damage_before_capture: boolean;
 }
 
 /** `career::DealerCar`. */
