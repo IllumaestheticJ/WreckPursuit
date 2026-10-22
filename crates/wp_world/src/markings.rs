@@ -1481,7 +1481,7 @@ mod tests {
             &crate::vesper::VesperConfig::default(),
         ));
         // Vesper: 22 interchange ramps + 2 per rest stop (row 153).
-        for (name, map, ramps) in [("grid", &grid, 4), ("vesper", &vesper, 30)] {
+        for (name, map, ramps) in [("grid", &grid, 4), ("vesper", &vesper, 28)] {
             // One dotted stretch and one gore per ramp.
             let ramp_lanes = lanes_where(map, |_, l| {
                 l.kind == LaneKind::Highway && map.paint.road_lanes[l.road as usize] == 1

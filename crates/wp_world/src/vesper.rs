@@ -286,9 +286,9 @@ const REST_ROAD: Style = Style {
 /// Loop 9 rest stops: (near point on the loop, carriageway side +1 outer / -1 inner, name).
 /// Placed on the stretches long enough for their ramps (clear of the interchanges, Route 40's
 /// crossings and the Hollins Tunnel); the south ones sit on the inner carriageway (the sea
-/// starts just beyond the outer one there).
-const REST_SITES: [(V2, f32, &str); 4] = [
-    ([1100.0, 1370.0], 1.0, "Bayview Rest Area"),
+/// starts just beyond the outer one there). The north-east stretch (Bluff Road to Uptown) only
+/// has room on the banked corner, where a gore does not meet the drawn surface; none there.
+const REST_SITES: [(V2, f32, &str); 3] = [
     ([-1490.0, 1120.0], 1.0, "Hollins Rest Area"),
     ([-960.0, -1035.0], -1.0, "Larkspur Rest Area"),
     ([40.0, -1063.0], -1.0, "Harbor Rest Area"),
@@ -3617,7 +3617,9 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
     // after the second.
     let tunnel_ends: [(&str, f32, f32); 2] = [
-        ("Hollins Tunnel", -200.0, 200.0),
+        // Exit 120 m past the west portal: the Hollins Rest Area's off-ramp gore is ~210 m
+        // past it (row 153).
+        ("Hollins Tunnel", -200.0, 120.0),
         ("Founders Cut", 40.0, -40.0),
     ];
     for (name, s0, s1) in tunnel_ends {
@@ -4036,7 +4038,7 @@ mod tests {
             }
             assert!(!crate::markings::must_stop(&map, i as LaneId));
         }
-        // 30 ramps: 4 per full diamond, 2 at the port, 2 per rest stop; each diverges from /
+        // 28 ramps: 4 per full diamond, 2 at the port, 2 per rest stop; each diverges from /
         // merges into the rightmost lane, yields without a stop line and reaches a terminal.
         assert_eq!(rep.ramp_roads.len(), 22 + 2 * REST_SITES.len());
         let mut merges = 0;
@@ -4075,7 +4077,10 @@ mod tests {
             let len = *geom::cumulative(&l.polyline).last().unwrap();
             assert!(len > 180.0, "ramp {r} lane only {len} m");
         }
-        assert_eq!((diverges, merges), (11 + 4, 11 + 4));
+        assert_eq!(
+            (diverges, merges),
+            (11 + REST_SITES.len(), 11 + REST_SITES.len())
+        );
         // Ramps never cross another road at grade (their crossroad bridges the highway).
         for &r in &rep.ramp_roads {
             let s = &net.surfaces[r];
