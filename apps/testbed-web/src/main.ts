@@ -34,7 +34,7 @@ import {
   toggleHeadlights,
   type InputSource,
 } from "./input";
-import { actionsForKey, bindingsHelp, keyName, padName, type ActionId } from "./bindings";
+import { actionsForKey, bindingsHelp, bindingText, keyName, padName, type ActionId } from "./bindings";
 import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
 import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
 import { ControlsPanel } from "./ui/controls";
@@ -74,6 +74,7 @@ import { mountTuneRow, withQuickTune } from "./tune_panel";
 import { quickTune } from "../../ui-kit/src/garage/tune";
 import { PhotoMode, PHOTO_HIDDEN_LAYERS } from "./photo";
 import { IndicatorStalk } from "./indicator_stalk";
+import { StreetUi } from "./ui/street";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -169,6 +170,9 @@ async function main(): Promise<void> {
     if (!crash.playing) radioStrip.push(unit || null, text);
   };
   const map = new MapOverlay(overlay);
+  // Street racers (wp_wasm::street; src/ui/street.ts): their dots, the route and the challenge
+  // picker live in the city map above; the hint, race panel, countdown and result here.
+  const street = new StreetUi(overlay, map.hud, () => !!touch?.visible);
   const layout = new HudLayout();
   // Game menu (built below, once everything it drives exists) and its current settings.
   let menu: ReturnType<typeof mountGameMenu> | null = null;
@@ -186,7 +190,10 @@ async function main(): Promise<void> {
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
   const touch = installTouch();
   const controls = new ControlsPanel(overlay);
-  const refreshHelp = () => hud.setControlsHelp(bindingsHelp(getBindings()));
+  const refreshHelp = () => {
+    const b = getBindings();
+    hud.setControlsHelp(bindingsHelp(b), { horn: bindingText(b, "horn"), map: bindingText(b, "map") });
+  };
   controls.onChange = refreshHelp;
   // One source of truth for the input shaping: the game menu's settings (applied + saved there).
   controls.shaping = {
@@ -468,6 +475,7 @@ async function main(): Promise<void> {
     void preloadCarMeshes(lod.models.cars);
     if (sim.lodDrawStride() !== DRAW_STRIDE) console.error(`wasm draw records have ${sim.lodDrawStride()} floats, layout.ts expects ${DRAW_STRIDE}: rebuild the wasm package`);
     lod.log.reset(0);
+    street.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -572,13 +580,15 @@ async function main(): Promise<void> {
       live.add(id);
       if (app.views.has(id)) continue;
       const kind = meta[o + 1];
+      // Street racers wear their level colour (the same as their map icon) in every art style.
+      const levelPaint = kind === VEHICLE_KIND.aiRacer ? street.colourFor(id) : null;
       const colour =
         kind === VEHICLE_KIND.police
           ? POLICE_PAINT
           : kind === VEHICLE_KIND.traffic
             ? (trafficPaint.get(id) ?? TRAFFIC_PALETTE[0])
-            : COLOURS[(id - 1) % COLOURS.length];
-      const v = new VehicleView(id, colour);
+            : (levelPaint ?? COLOURS[(id - 1) % COLOURS.length]);
+      const v = new VehicleView(id, colour, levelPaint !== null);
       scene.world.add(tagFeature(v.root, "cars"));
       scene.world.add(v.velocity);
       app.views.set(id, v);
@@ -1550,6 +1560,9 @@ async function main(): Promise<void> {
         }
       }
     }
+    // Street racers: map dots / picker always; their HUD hides under the menu, photo mode and
+    // crash replays.
+    street.frame(now, !crash.playing && !photo.active && !menu?.isOpen);
     if (raceView.raceId && !crash.playing) raceFrame(cur, meta, tS, frameNo % 6 === 0);
     prof.lap("ui");
     scene.update(dt, sim.intents());
@@ -1615,6 +1628,7 @@ async function main(): Promise<void> {
     audio.update(photo.active ? photo.camera : rig.camera, sim.lastEventsJson(), still ? 0 : dt, app.focus, rig.mode);
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
+    lod.streetRacers = street.roaming;
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
     prof.lap("fleet");
     props.update(sim.propsMoved(), rig.camera);
@@ -1851,6 +1865,7 @@ async function main(): Promise<void> {
     photo,
     ui,
     runEnd,
+    street,
     restartRun,
     /** Mod shop (src/ui/modShop.ts). */
     modShop,

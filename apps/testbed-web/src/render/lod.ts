@@ -176,6 +176,13 @@ export class LodDirector {
    * always the fleet); the player and AI racers always use their view. `VIEW_LOD_BAND_M` of
    * hysteresis so a car on the boundary does not flip drawers every frame. */
   viewDrawM = Infinity;
+  /** Roaming street racers (AI-racer sim vehicles, src/ui/street.ts): handed to the fleet by
+   * `viewDrawM` like promoted traffic / police, in their level colour and their own model.
+   * Other AI racers (picker-race fields) and the street racer racing the player (not in this
+   * set) keep their view. Set every frame by main. */
+  streetRacers: ReadonlySet<number> = new Set();
+  /** Draw-record scratch for a street racer's pose (D layout). */
+  private readonly rRec = new Float32Array(DRAW_STRIDE);
   /** `fleet.generation` the model caches were resolved for. */
   private fleetGen = -1;
   /** Entities currently handed to the fleet by `viewDrawM`. */
@@ -272,9 +279,33 @@ export class LodDirector {
       states.push(this.draw(keyOf(this.pKeys, "p", id), entity, view, police, o, pModel, paint, TAIL.off, barOf(flags, timeS, unit), 0, lens));
     }
 
+    // Roaming street racers: their view near the camera, the fleet beyond (pose = the view's
+    // interpolated pose, so the hand-off does not jump).
+    for (const id of this.streetRacers) {
+      const v = views.get(id);
+      if (!v || claimed.has(id)) continue;
+      claimed.add(id);
+      const rec = this.rRec;
+      const p = v.root.position;
+      const q = v.root.quaternion;
+      rec[D.entity] = id;
+      setXYZ3(rec, D.pos, p.x, p.y, p.z);
+      rec[D.rot] = q.x;
+      rec[D.rot + 1] = q.y;
+      rec[D.rot + 2] = q.z;
+      rec[D.rot + 3] = q.w;
+      states.push(this.draw(keyOf(this.vKeys, "v", id), id, v, rec, 0, this.fleet.model(v.info.car_id), v.paintHex, TAIL.off, null));
+    }
+
     // Player, AI racers and scenario cars: always their own view.
     for (const [id, v] of views) {
       if (claimed.has(id)) continue;
+      // A street racer handed to the fleet while roaming that now races the player (left
+      // `streetRacers`) comes back to its view at once.
+      if (v.lodFar) {
+        v.lodFar = false;
+        v.root.visible = true;
+      }
       const p = v.root.position;
       const s = this.next(keyOf(this.vKeys, "v", id), "view", !v.panels.ready && layers.on("panels") && layers.on("body"), id, this.dist(p.x, p.y, p.z));
       setXYZ(s.pos, p.x, p.y, p.z);
@@ -355,6 +386,12 @@ export class LodDirector {
     setXYZ(s.truth, x, y, z);
     return s;
   }
+}
+
+function setXYZ3(a: Float32Array, o: number, x: number, y: number, z: number): void {
+  a[o] = x;
+  a[o + 1] = y;
+  a[o + 2] = z;
 }
 
 function setXYZ(a: [number, number, number], x: number, y: number, z: number): void {

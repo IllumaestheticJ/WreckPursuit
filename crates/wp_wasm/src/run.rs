@@ -361,6 +361,17 @@ impl PlayerRun {
         &self.ledger
     }
 
+    /// Street-race wager (`crate::street`): post `cash` (negative = stake paid, positive =
+    /// winnings) as a ledger line with `note`. A stake the account cannot cover is refused.
+    pub fn wager(&mut self, cash: i64, note: &str) -> Result<(), String> {
+        let (_, events) = self
+            .econ
+            .adjust(&mut self.acct, cash, note)
+            .map_err(|e| e.to_string())?;
+        self.ledger.extend(events);
+        Ok(())
+    }
+
     /// The latest settlement, if any.
     pub fn report(&self) -> Option<&RunReport> {
         self.report.as_ref()

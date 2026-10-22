@@ -555,9 +555,111 @@ export const sim = {
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
   debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
+  /** Debug / e2e: put `entity` stopped at (x, y) facing `yaw` (not recorded in replays). */
+  debugPlaceVehicle: (entity: number, x: number, y: number, yaw: number): void => wasm.debug_place_vehicle(entity, x, y, yaw),
+  /** Spawn NPC street racers in city sessions started after this call (default on). */
+  setStreetRacers: (on: boolean): void => wasm.set_street_racers(on),
+  /** Street racers for the map: [entity, level, x, y, yaw, mode] each (mode 0 roam, 1 waiting, 2 racing). */
+  streetRacers: (): Float32Array => wasm.street_racers(),
+  /** Levels, roster, challenge hint, open offer, race in progress and latest result; null without street racers. */
+  streetStatus: (): StreetStatus | null => JSON.parse(wasm.street_status_json()),
+  /** Plan the open challenge's route from the player to (x, y). Throws when no route. */
+  streetPreview: (x: number, y: number): StreetPreview => JSON.parse(wasm.street_preview(x, y)),
+  /** Accept the open challenge: race to (x, y) for `stake` dollars. Throws if refused. */
+  streetAccept: (x: number, y: number, stake: number): void => wasm.street_accept(x, y, stake),
+  /** Decline the open challenge. */
+  streetDecline: (): void => wasm.street_decline(),
+  /** Drivable lanes for the map: [n, x0, y0, …] per lane; fetch once per session. */
+  mapLanes: (): Float32Array => wasm.map_lanes(),
 };
 
 import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+
+/** A street-racer level (`wp_wasm::street::Level`). */
+export interface StreetLevel {
+  level: number;
+  name: string;
+  colour: string;
+  cars: string[];
+  bet_min: number;
+  bet_max: number;
+}
+
+/** One street racer (`wp_wasm::street::RosterEntry`). */
+export interface StreetRacer {
+  entity: number;
+  name: string;
+  level: number;
+  level_name: string;
+  colour: string;
+  car: string;
+  mode: "Roam" | "Waiting" | "Racing";
+  wins: number;
+  losses: number;
+}
+
+/** Open challenge (`wp_wasm::street::Offer`). */
+export interface StreetOffer extends Omit<StreetRacer, "mode"> {
+  bet_min: number;
+  bet_max: number;
+  cash: number;
+  affordable: boolean;
+  start: [number, number];
+}
+
+/** Race in progress (`wp_wasm::street::RaceView`). */
+export interface StreetRace {
+  entity: number;
+  name: string;
+  level: number;
+  level_name: string;
+  colour: string;
+  stake: number;
+  countdown_s: number;
+  elapsed_s: number;
+  time_left_s: number;
+  length_m: number;
+  player_left_m: number;
+  racer_left_m: number;
+  finish: [number, number];
+  start: [number, number];
+  polyline: [number, number][];
+}
+
+/** Race result (`wp_wasm::street::RaceResult`). */
+export interface StreetResult {
+  seq: number;
+  won: boolean;
+  reason: string;
+  name: string;
+  level: number;
+  level_name: string;
+  colour: string;
+  stake: number;
+  net: number;
+  cash_after: number;
+  time_s: number;
+  margin_m: number;
+}
+
+/** `street_status_json()`. */
+export interface StreetStatus {
+  levels: StreetLevel[];
+  roster: StreetRacer[];
+  hint: StreetRacer | null;
+  offer: StreetOffer | null;
+  race: StreetRace | null;
+  result: StreetResult | null;
+}
+
+/** `street_preview()` (`wp_wasm::street::Preview`). */
+export interface StreetPreview {
+  ok: boolean;
+  reason: string | null;
+  length_m: number;
+  finish: [number, number];
+  polyline: [number, number][];
+}
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
