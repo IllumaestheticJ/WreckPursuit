@@ -124,6 +124,15 @@ pub const TV_SWEEP_MPS: f32 = 2.5;
 /// still one collision in [`TrafficStats::civilian_collisions`] (cars that bump, part and
 /// bump again counted twice).
 pub const RETOUCH_STEPS: u64 = 120;
+/// With the physical cap full, a kinematic car this close to a player takes the place of the
+/// physical car farthest from any player ([`TrafficConfig::max_physical`]), m.
+pub const PLAYER_PRIORITY_RADIUS_M: f32 = 40.0;
+/// ... if that one is at least this much farther from the player, m (no swapping back and
+/// forth between two cars at nearly the same distance).
+pub const PLAYER_PRIORITY_MARGIN_M: f32 = 10.0;
+/// A kinematic car in a U-turn or reverse (LOD-locked) this close to a player gives the
+/// manoeuvre up and is promoted, so the player can hit it, m.
+pub const LOCKED_PROMOTE_M: f32 = 20.0;
 /// A wreck closer than this to a car's path (on top of both half widths) is in its way, m.
 pub const WRECK_PATH_MARGIN_M: f32 = 0.3;
 /// A unit beside a car that is merging back after a siren yield counts as standing (the car
@@ -3330,11 +3339,20 @@ impl Traffic {
     }
 
     fn promote(&mut self, map: &CityMap, i: usize) {
+        // Promoted at its manoeuvre pose (if any); a physical car drives it out of a U-turn or
+        // reverse as an ordinary car from there.
+        let (p, f) = self.pose_of(map, &self.agents[i]);
+        if self.agents[i].manoeuvre.is_some() {
+            let a = &mut self.agents[i];
+            a.manoeuvre = None;
+            a.lat_target = 0.0;
+            a.retry_s = 5.0;
+            a.blocked_s = 0.0;
+        }
         let a = &self.agents[i];
         let Some((def, tires)) = self.cars.get(traffic_model_index(a.id, self.cars.len())) else {
             return;
         };
-        let (p, f) = self.pose_of(map, a);
         let yaw = geom::yaw_of(f);
         let mut vehicle = Vehicle::new(def, tires, p, yaw);
         vehicle.set_pose_and_speed(p, yaw, a.v);
@@ -3394,6 +3412,19 @@ impl Traffic {
             if self.lod_locked(i) {
                 if self.agents[i].physical.is_some() {
                     physical += 1;
+                    continue;
+                }
+                // A kinematic car turning around or reversing has no collider: with a player
+                // about to hit it, it gives the manoeuvre up and takes a body where it stands
+                // (it is promoted at its manoeuvre pose below; owner row 149).
+                let dp = inp
+                    .tracked
+                    .iter()
+                    .filter(|t| t.player)
+                    .map(|t| geom::dist(geom::xy(self.poses[i].p), geom::xy(t.pos)))
+                    .fold(f32::INFINITY, f32::min);
+                if dp < LOCKED_PROMOTE_M && !self.cars.is_empty() {
+                    cands.push((d, i as u32));
                 }
                 continue;
             }
@@ -3415,12 +3446,50 @@ impl Traffic {
             }
         }
         cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        for (_, i) in cands {
+        let mut left = Vec::new();
+        for (d, i) in cands {
             if physical >= self.config.max_physical {
-                break;
+                left.push((d, i));
+                continue;
             }
             self.promote(map, i as usize);
             physical += 1;
+        }
+        // Cap full: a car close to a player still gets a body, in place of the physical car
+        // farthest from any player (owner row 149, "can't hit traffic cars": with street racers
+        // the cap filled with cars along their routes and the cars right in front of the player
+        // stayed kinematic, without a collider).
+        let player_d = |q: V2| -> f32 {
+            inp.tracked
+                .iter()
+                .filter(|t| t.player)
+                .map(|t| geom::dist(q, geom::xy(t.pos)))
+                .fold(f32::INFINITY, f32::min)
+        };
+        let mut near_player: Vec<(f32, u32)> = left
+            .into_iter()
+            .map(|(_, i)| (player_d(geom::xy(self.poses[i as usize].p)), i))
+            .filter(|(d, _)| *d < PLAYER_PRIORITY_RADIUS_M)
+            .collect();
+        if near_player.is_empty() {
+            return;
+        }
+        near_player.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut evictable: Vec<(f32, u32)> = (0..self.agents.len())
+            .filter(|&j| {
+                let a = &self.agents[j];
+                a.physical.is_some() && !a.disabled && !self.lod_locked(j)
+            })
+            .map(|j| (player_d(geom::xy(self.poses[j].p)), j as u32))
+            .collect();
+        // Farthest first.
+        evictable.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        for ((d, i), (de, j)) in near_player.into_iter().zip(evictable) {
+            if de < d + PLAYER_PRIORITY_MARGIN_M {
+                break;
+            }
+            self.demote(map, j as usize);
+            self.promote(map, i as usize);
         }
     }
 
