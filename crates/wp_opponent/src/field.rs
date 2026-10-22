@@ -370,6 +370,10 @@ struct Racer {
     /// Time an overtake has been held below pace by a car other than its target, s.
     pass_blocked_s: f32,
     stuck_s: f32,
+    /// Boxed in nose-to-tail against a car standing for good: the car, the lateral position
+    /// beside it I am working towards (reverse with the nose swinging out, creep forward,
+    /// repeat), and how long I have been at it, s.
+    escape: Option<(Who, f32, f32)>,
     /// Stuck and wanting to back out, but something stands right behind me (the car there
     /// backs off for me).
     wants_room: bool,
@@ -646,6 +650,16 @@ const OVERTAKE_BLOCKED_S: f32 = 1.0;
 /// A sim vehicle this close to a physical traffic agent is that agent's body, m.
 const TRAFFIC_BODY_MATCH_M: f32 = 1.0;
 
+/// Gap a reversing racer keeps to a car standing behind it for good (parked or out of the
+/// race), m.
+const REVERSE_STANDING_GAP_M: f32 = 1.0;
+/// Escape from a box-in: lateral clearance to the standing car aimed for beside it, m.
+const ESCAPE_CLEAR_M: f32 = 0.4;
+/// Escape from a box-in: held at a standstill behind a car standing for good this long, s.
+const ESCAPE_AFTER_S: f32 = 3.0;
+/// Escape from a box-in: given up (back to normal driving) after this long, s.
+const ESCAPE_MAX_S: f32 = 30.0;
+
 /// Lane-splitting: room needed between two cars abreast beyond my own width, m (0.4 m a
 /// side).
 const SPLIT_ROOM_M: f32 = 0.8;
@@ -781,6 +795,7 @@ impl Field {
                 blocked_s: 0.0,
                 pass_blocked_s: 0.0,
                 stuck_s: 0.0,
+                escape: None,
                 wants_room: false,
                 stable_s: 0.0,
                 defended: false,
@@ -2103,13 +2118,14 @@ fn decide_racer(
             // 0.9 m behind a busted car and waited there for the rest of the race).
             // A racer out of the race standing there is as good as parked (Loop 9 with police:
             // a racer nosed up to a captured one waited behind it for the rest of the race).
-            let nosed_up = rel.iter().any(|x| {
+            let nosed_to = rel.iter().find(|x| {
                 let standing_out = x.o.out_of_race && x.o.v_s.abs() < 0.5;
                 x.ds > 0.0
                     && (x.o.parked || standing_out)
                     && x.gap < CREEP_STOP_GAP_M + if standing_out { 1.5 } else { 0.5 }
                     && (x.o.n - r.n).abs() < hw + x.o.half_w + if standing_out { 0.5 } else { 0.0 }
             });
+            let nosed_up = nosed_to.is_some();
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
                 && wants_to_move
@@ -2126,6 +2142,35 @@ fn decide_racer(
                 // Nose to nose, or nosed up to a parked car: back out far enough to steer
                 // round it (a car needs ~5 m of travel to move 1.5 m sideways).
                 r.reverse_s = if head_on || nosed_up { 3.0 } else { 1.6 };
+                // Nosed up to a car standing for good: pick the side with more room beside it
+                // and work towards it over as many reverse / creep cycles as it takes (Lantern
+                // police, seeds 5 and 31: boxed in between captured cars, 0.4 m ahead and
+                // 2.4 m behind, a straight reverse and back to the line went nowhere).
+                if let Some(x) = nosed_to {
+                    r.escape = escape_beside(r, x, hw, &pass_limits);
+                }
+            }
+            // Held at a standstill behind a car standing for good, with no pass that fits (a
+            // pass wants its full margin): squeeze past it with the escape clearance instead
+            // (Lantern police seed 31: 3.4 m behind one captured car with another alongside,
+            // 12 000 passes refused for room).
+            if r.escape.is_none() && v.abs() < 1.0 && r.blocked_s > ESCAPE_AFTER_S {
+                if let Some(x) = rel.iter().find(|x| {
+                    x.ds > 0.0
+                        && x.gap < 8.0
+                        && standing_for_good(&x.o)
+                        && r.debug.limit == SpeedLimit::Obstacle(who_id(x.o.who))
+                }) {
+                    r.escape = escape_beside(r, x, hw, &pass_limits);
+                }
+            }
+            // An escape ends once I am past that car (or it has gone, or it is taking long).
+            if let Some((who, n, age)) = r.escape {
+                let past = rel
+                    .iter()
+                    .find(|x| x.o.who == who)
+                    .is_none_or(|x| x.ds < -(hl + x.o.half_len));
+                r.escape = (!past && age < ESCAPE_MAX_S).then_some((who, n, age + dt));
             }
             // The car right in front of me is stuck and cannot back out because I stand
             // behind it: back off for it (otherwise both wait for good).
@@ -2259,9 +2304,18 @@ fn decide_racer(
             Tactic::Reverse => {
                 // Never back into anything: stop reversing when something is close behind in
                 // the band I occupy.
+                // A car standing behind for good (parked, or out of the race) will not move into
+                // me: back up to a metre from it (boxed in between captured cars with 2.4 m
+                // behind, a 4 m rule left no reverse at all).
                 let blocked_behind = rel.iter().any(|x| {
+                    let standing = (x.o.parked || x.o.out_of_race) && x.o.v_s.abs() < 0.5;
+                    let keep = if standing {
+                        REVERSE_STANDING_GAP_M
+                    } else {
+                        4.0
+                    };
                     x.ds < 0.0
-                        && x.gap < 4.0 + 1.0 * (-v).max(0.0)
+                        && x.gap < keep + 1.0 * (-v).max(0.0)
                         && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
                 });
                 // Cut short by something behind me: ask it for room.
@@ -2571,6 +2625,10 @@ fn decide_racer(
             Tactic::Follow if start_phase => {
                 follow_w = 0.0;
                 r.start_n
+            }
+            Tactic::Follow | Tactic::Rejoin | Tactic::Reverse if r.escape.is_some() => {
+                follow_w = 0.0;
+                r.escape.map_or(r.n, |e| e.1)
             }
             Tactic::Follow => match tuck {
                 Some(n) => {
@@ -2984,7 +3042,7 @@ fn decide_racer(
             // Steering out round a parked car (pulled over, or standing for good): once the
             // lane I am heading for is clear of it, creep instead of standing still behind it
             // (a stopped car cannot move sideways), never closer than the stop gap.
-            let steering_round = o.parked
+            let steering_round = standing_for_good(o)
                 && (r.tactic != Tactic::Overtake || r.pass_target == Some(o.who))
                 && !overlaps(my_band(n_cmd, n_cmd), o, margin, 0.0);
             if steering_round && x.gap > CREEP_STOP_GAP_M {
@@ -3473,6 +3531,31 @@ fn squeeze_limits((lo, hi): (f32, f32), o: &Obstacle) -> (f32, f32) {
     } else {
         (lo, hi)
     }
+}
+
+/// A car that will not move: parked (stood still for long), or out of the race and standing.
+fn standing_for_good(o: &Obstacle) -> bool {
+    o.parked || (o.out_of_race && o.v_s.abs() < 0.5)
+}
+
+/// Escape target beside the standing car `x`: the side with more room, with
+/// [`ESCAPE_CLEAR_M`] to its body (keeps an escape already under way round the same car).
+/// `None` when neither side has room for my car.
+fn escape_beside(
+    r: &Racer,
+    x: &Rel,
+    hw: f32,
+    pass_limits: &dyn Fn(f32) -> (f32, f32),
+) -> Option<(Who, f32, f32)> {
+    if let Some(e) = r.escape.filter(|e| e.0 == x.o.who) {
+        return Some(e);
+    }
+    let (lo, hi) = squeeze_limits(pass_limits(r.s + x.ds), &x.o);
+    let beside = x.o.half_w + hw + ESCAPE_CLEAR_M;
+    let up = (x.o.n + beside, hi - (x.o.n + beside));
+    let down = (x.o.n - beside, (x.o.n - beside) - lo);
+    let (n, room) = if up.1 >= down.1 { up } else { down };
+    (room >= 0.0).then_some((x.o.who, n, 0.0))
 }
 
 /// Choose a passing lateral position beside `target`, or None if no side is clear far

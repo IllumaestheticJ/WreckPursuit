@@ -989,3 +989,69 @@ Seed 31 comes back with follow-up (a).
 1. Follow-up (a): the multi-point reverse-and-turn. Restore seed 31 and check seed 5.
 2. A judge safety net: a race in which every remaining racer has made no progress for 3 min ends, and they are DNF Stuck (logged).
 3. Weaving v2 aimed at the pack.
+
+## Follow-up (a) done: escape from a box-in by standing cars (2026-10-22)
+
+When a racer is nosed up to a car standing for good (parked, or out of the race and standing) — or has stood still for 3 s behind one with no pass that fits — it picks the side with more room beside that car and keeps working towards it. The racer:
+
+- reverses with the nose swinging to that side;
+- creeps forward round the car;
+- repeats until past it, giving up after 30 s.
+
+Reversing keeps 1 m to a car standing behind for good (4 m to anything else). The creep logic treats a standing out-of-race car like a parked one. The constants are `ESCAPE_CLEAR_M`, `ESCAPE_AFTER_S`, `ESCAPE_MAX_S` and `REVERSE_STANDING_GAP_M`.
+
+`lantern_checkpoint_draws_the_police` is back on the catalog seed 31.
+
+**Lantern police test, seeds 1–8 and 31:**
+
+- Before: seeds 5 and 31 never finish (a racer stays Running).
+- After: all 9 seeds end.
+
+**Sweeps, seeds 1–8, before df9a2cb4 → after.** With police:
+
+| race | skill | seeds | run | finishers | mean s | walls | passes/km | civ contacts | all contacts 
+|---|---|---|---|---|---|---|---|---|---
+| hollins_sprint | 0.5 | 1-8 | before | 1/32 | 116.8 | 0 | 0.25 | 30 | 0 
+| hollins_sprint | 0.5 | 1-8 | after | 0/32 | 0.0 | 0 | 0.12 | 22 | 0 
+| hollins_sprint | 0.95 | 1-8 | before | 0/32 | 0.0 | 24 | 1.50 | 54 | 12 
+| hollins_sprint | 0.95 | 1-8 | after | 0/32 | 0.0 | 23 | 1.38 | 38 | 12 
+| lantern_checkpoint | 0.5 | 1-8 | before | 18/32 | 73.8 | 4 | 2.25 | 24 | 0 
+| lantern_checkpoint | 0.5 | 1-8 | after | 18/32 | 71.3 | 2 | 2.44 | 18 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | before | 9/32 | 59.5 | 0 | 0.75 | 2 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | after | 11/32 | 73.8 | 0 | 0.75 | 4 | 0 
+| loop9_circuit | 0.5 | 1-8 | before | 39/48 | 256.1 | 85 | 1.23 | 2 | 15 
+| loop9_circuit | 0.5 | 1-8 | after | 39/48 | 256.1 | 85 | 1.23 | 2 | 15 
+| loop9_circuit | 0.95 | 1-8 | before | 27/48 | 228.6 | 336 | 1.10 | 13 | 65 
+| loop9_circuit | 0.95 | 1-8 | after | 27/48 | 228.6 | 336 | 1.10 | 12 | 65 
+
+Without police:
+
+| race | skill | seeds | run | finishers | mean s | walls | passes/km | civ contacts | all contacts 
+|---|---|---|---|---|---|---|---|---|---
+| city_sprint | 0.5 | 1-8 | before | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| city_sprint | 0.5 | 1-8 | after | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| city_sprint | 0.95 | 1-8 | before | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| city_sprint | 0.95 | 1-8 | after | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| grid_highway_sprint | 0.5 | 1-8 | before | 32/32 | 43.4 | 0 | 0.68 | 0 | 0 
+| grid_highway_sprint | 0.5 | 1-8 | after | 32/32 | 43.4 | 0 | 0.68 | 0 | 0 
+| grid_highway_sprint | 0.95 | 1-8 | before | 32/32 | 43.5 | 0 | 1.46 | 0 | 0 
+| grid_highway_sprint | 0.95 | 1-8 | after | 32/32 | 43.5 | 0 | 1.46 | 0 | 0 
+| hollins_sprint | 0.5 | 1-8 | before | 32/32 | 66.8 | 0 | 0.00 | 0 | 0 
+| hollins_sprint | 0.5 | 1-8 | after | 32/32 | 66.8 | 0 | 0.00 | 0 | 0 
+| hollins_sprint | 0.95 | 1-8 | before | 32/32 | 62.5 | 8 | 0.00 | 0 | 8 
+| hollins_sprint | 0.95 | 1-8 | after | 32/32 | 62.5 | 8 | 0.00 | 0 | 8 
+| lantern_checkpoint | 0.5 | 1-8 | before | 32/32 | 74.6 | 0 | 0.38 | 1 | 0 
+| lantern_checkpoint | 0.5 | 1-8 | after | 32/32 | 72.6 | 0 | 0.38 | 1 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | before | 31/32 | 67.3 | 0 | 0.94 | 0 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | after | 31/32 | 69.9 | 2 | 0.75 | 0 | 2 
+| loop9_circuit | 0.5 | 1-8 | before | 48/48 | 255.0 | 0 | 1.21 | 0 | 0 
+| loop9_circuit | 0.5 | 1-8 | after | 48/48 | 255.0 | 0 | 1.21 | 0 | 0 
+| loop9_circuit | 0.95 | 1-8 | before | 47/48 | 243.3 | 0 | 1.20 | 0 | 0 
+| loop9_circuit | 0.95 | 1-8 | after | 47/48 | 243.3 | 0 | 1.20 | 0 | 0 
+
+- With police, the police decide the result (Hollins: nearly everyone is captured either way). Lantern s95 finishers go 9 → 11, and Lantern s50 civilian contacts go 24 → 18.
+- Without police, every race is identical except Lantern: s50 is 2 s faster, and s95 is 2.6 s slower with 2 walls in 32 runs.
+
+## Contract change requests
+
+- **`wp_contracts::DnfReason::Stuck`** (2026-10-22, for the lead's judge safety net (iii)): "made no progress for `stuck_limit_s`". `wp_race::RaceJudge` would end a race once every racer still running has made no course progress for 3 min (generous; logged as a signal), marking them `Dnf(Stuck)`. This is not a racer giving up (owner rule): the judge calls it. Until the variant exists there is no good existing reason: `TimeLimit` and `FinishWindow` mean something else.
