@@ -66,8 +66,9 @@
     hash_every: 240,
     expect: [
         pursuit_started_before(t_s: 15.0),
-        // wp_police HeloLaunched (kind 12).
-        police_event_before(kind: 12, t_s: 80.0),
+        // wp_police HeloLaunched (kind 12). Turn-round round (crawl 4 -> 5.5 m/s, 2026-10-22): the
+        // helicopter launches at 90.2 s (was < 80), still before he reaches the Cut.
+        police_event_before(kind: 12, t_s: 95.0),
         metric(entity: "racer", name: "route_progress", min: 0.97, max: 1.0),
         // The tunnel hides him long enough for the escape timer (22 s at L3 by day).
         metric(entity: "racer", name: "max_los_lost_s", min: 18.0, max: 60.0),
