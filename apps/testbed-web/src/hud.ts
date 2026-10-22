@@ -125,12 +125,14 @@ export class Hud {
     this.setControlsHelp([]);
   }
 
-  /** Rebuild the help overlay with the current bindings (one line per action). */
-  setControlsHelp(bindingLines: string[]): void {
+  /** Rebuild the help overlay with the current bindings (one line per action). `street` names
+   * the bound horn and map controls for the street-racer line (`bindingText`). */
+  setControlsHelp(bindingLines: string[], street: { horn: string; map: string } = { horn: "the horn binding", map: "the map binding" }): void {
     this.help.innerHTML =
       `<b>WreckPursuit testbed — controls</b> <span class="dim">(change them in the controls panel: F9 by default, or the “controls” button)</span><br>` +
       `<div class="help-binds">${bindingLines.join("<br>")}</div>` +
       `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
+      `<b>Street racers</b> (city): drive up to one and honk (horn — ${street.horn}; 📯 on touch) to challenge · the city map (${street.map}) opens as the finish picker: tap / click sets B (pad: left stick + A), pick the bet (pad LB / RB), Race (Enter / pad Menu) or Decline (Esc / pad B) · dot colour and number = driver level (names and colours in the city map legend)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `. frame step (replay) · [ / ] replay speed · − / = indicator left / right (cosmetic, cancels after the turn)<br>` +
       `<b>Photo mode</b> F7 or the photo button (live or replay): free camera, filters, save / copy PNG — keys listed in its panel<br><br>` +

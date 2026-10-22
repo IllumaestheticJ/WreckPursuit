@@ -170,6 +170,10 @@ export class VehicleView {
   private readonly lamps: THREE.Mesh[] = [];
   /** Greybox paint (the colour the view was created with). */
   private readonly greyPaint: THREE.Color;
+  /** The colour the view was created with (0xRRGGBB; a street racer's level colour). */
+  get paintHex(): number {
+    return this.greyPaint.getHex();
+  }
   /** Art-style version last applied (render/style.ts `artStyle`). */
   private styleVersion = -1;
   /** Headlight pool on the road ahead (low-poly dark at night). */
@@ -197,7 +201,13 @@ export class VehicleView {
   private indShown = -1;
   private indStyle = -1;
 
-  constructor(readonly entity: number, colour: number) {
+  /** `colour` is a livery (a street racer's level colour): kept in every art style instead of
+   * the style's car palette. */
+  readonly livery: boolean;
+
+  /** `livery`: keep `colour` in every art style (see `livery`). */
+  constructor(readonly entity: number, colour: number, livery = false) {
+    this.livery = livery;
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
     const police = this.info.kind === "Police" || this.info.car_id.startsWith("sentinel_");
@@ -778,7 +788,7 @@ export class VehicleView {
     const kind = this.info.kind === "Police" ? "police" : this.info.kind === "Traffic" ? "traffic" : "player";
     // Traffic and police keep the livery the instanced fleet gave them (render/fleet.ts
     // styledPaint), so a promotion swaps the drawer without a recolour.
-    const paint = !lowpoly
+    const paint = !lowpoly || this.livery
       ? this.greyPaint
       : new THREE.Color(kind === "player" ? vehiclePaint(kind, this.entity) : styledPaint(this.greyPaint.getHex(), kind === "police"));
     const bodyMat = this.box.material as THREE.MeshStandardMaterial;

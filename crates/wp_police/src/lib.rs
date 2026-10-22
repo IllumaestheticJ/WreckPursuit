@@ -22,6 +22,8 @@
 //! - [`walls`]: static feelers against building footprints and tunnel walls.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
+//! - [`race`]: race-specific police profiles (`data/police/races.toml`): doctrine and
+//!   pre-scripted roadblocks, spike strips and stakeouts per race.
 //! - [`radio`]: radio pacing (one transmission at a time, gaps by wanted level).
 //! - [`chatter`]: unit-to-unit callouts with call signs and street-name places (row 79).
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
@@ -40,6 +42,7 @@ pub mod graph;
 pub mod heat;
 pub mod pro;
 pub mod pursuit;
+pub mod race;
 pub mod radio;
 pub mod scenario;
 pub mod stuck;
@@ -511,6 +514,8 @@ pub struct PoliceSystem {
     pub(crate) resets: Vec<UnitReset>,
     /// Drivable room for the pro driver's racing line (lead P8).
     pub(crate) room: pro::RoadRoom,
+    /// The race being policed ([`PoliceSystem::start_race`]), if any.
+    pub(crate) race: Option<race::RacePolice>,
 }
 
 impl Default for PoliceSystem {
@@ -639,7 +644,7 @@ impl PoliceSystem {
             punctures: BTreeMap::new(),
             radio: VecDeque::new(),
             radio_director: radio::RadioDirector::new(),
-            chatter: chatter::Chatter::default(),
+            chatter: chatter::Chatter::new(setup.seed),
             captain: CaptainState {
                 human: false,
                 priority: None,
@@ -661,6 +666,7 @@ impl PoliceSystem {
             feelers: true,
             covers: Vec::new(),
             resets: Vec::new(),
+            race: None,
         }
     }
 
@@ -842,6 +848,12 @@ impl PoliceSystem {
     /// Radio pacing counters (raised / spoken / collapsed / dropped lines).
     pub fn radio_stats(&self) -> radio::RadioStats {
         self.radio_director.stats()
+    }
+
+    /// Tier of the radio transmission on air now (`None`: the channel is free). The channel
+    /// counts as busy for a line's estimated length plus the silence after it.
+    pub fn radio_on_air(&self) -> Option<radio::RadioTier> {
+        self.radio_director.on_air(self.now)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2004,6 +2016,7 @@ impl PoliceSystem {
         });
         let out = driver.drive(&ctx, &u.cmd.track, room, dt);
         u.pro_dbg = (out.planned_mps, out.reversing);
+        u.turning_round = out.turning_round;
         let input = out.input;
         let steer = (input.steer - u.effects.steer_pull).clamp(-1.0, 1.0);
         (steer, input.throttle, input.brake)
@@ -2095,6 +2108,17 @@ impl PoliceSystem {
         self.radio.iter()
     }
 
+    /// Priority tier of the latest logged radio line spoken by `unit` with this `text` (row
+    /// 144). The contract's `PoliceEvent::Radio` carries no tier yet; bridges (audio, the
+    /// browser strip) look it up here. `None` if it is no longer in the log.
+    pub fn radio_tier_of(&self, unit: Option<UnitId>, text: &str) -> Option<radio::RadioTier> {
+        self.radio
+            .iter()
+            .rev()
+            .find(|l| l.unit == unit && l.text == text)
+            .map(|l| l.tier)
+    }
+
     /// Helicopters on station (tracking a racer).
     pub fn helicopters(&self) -> Vec<HeloView> {
         self.units
@@ -2139,6 +2163,10 @@ impl PoliceSystem {
         h.write_u32(self.roadblocks.len() as u32);
         h.write_u32(self.spikes.len() as u32);
         h.write_u64(self.stats.pursuits.len() as u64);
+        if let Some(r) = &self.race {
+            h.write_bytes(r.race.as_bytes());
+            h.write_u32(r.stakeouts.iter().filter(|s| s.sprung).count() as u32);
+        }
         h.finish()
     }
 }

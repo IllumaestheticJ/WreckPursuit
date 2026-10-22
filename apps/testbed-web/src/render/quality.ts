@@ -154,7 +154,7 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   // Touch: 640 m city tiles (render budget, lead/main-sync): with the 600 m draw distance a
   // 320 m tile grid put ~10 tiles of every city material in view (one draw call each); the
   // phone is draw-call bound (budget 300) and has triangle headroom, so fewer, bigger tiles.
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 0, cityTileM: 2 * CITY_TILE_M };
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 100, propProxyM: 120, lampDrawM: 300, viewDrawM: 0, cityTileM: 2 * CITY_TILE_M };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
   // resizes the canvas and the post targets, a long hitch under a software rasterizer. Rain at
   // 20 % there (30 % cost ~25 ms a frame, browser-perf.md round 12b).

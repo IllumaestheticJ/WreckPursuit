@@ -5,23 +5,37 @@
 //! ([`RadioDirector::flush`]), decides what is actually transmitted (radio event + scanner
 //! log). Rules, tuned in `data/police/radio.toml`:
 //!
+//! - **Priority tiers** (owner playtest row 144, "filtering between important and unimportant
+//!   information"), high to low ([`RadioTier`]):
+//!
+//!   | Tier | Content | Pacing |
+//!   |---|---|---|
+//!   | 1 [`RadioTier::Actionable`] | roadblock / spikes planned (where, how far), helicopter launching / arriving / losing the racer, a unit intercepting ahead | no gap; cuts any lower line on air |
+//!   | 2 [`RadioTier::Escalation`] | pursuit start, wanted level up / down, a tougher department taking over, rams authorised, pursuit end, captain orders | no gap; cuts tiers 3–5 on air |
+//!   | 3 [`RadioTier::Impact`] | rams, PITs, units hit / wrecked, civilian crashes caused by the chase | `impact_gap_s` only; short life (`impact_stale_s`) |
+//!   | 4 [`RadioTier::Investigation`] | calls, searching, lost visual / last seen, eyes on again, bumper, box-in | `global_gap_s` by level, per-unit gap |
+//!   | 5 [`RadioTier::Routine`] | resuming patrol, clear, out of service, unrelated incidents | `routine_gap_s` by level (thins out as heat rises), `routine_quiet_s` after any tier 1–3 line, dropped at once while a higher line waits |
+//!
 //! - **One transmission at a time** (playtest row 79). A spoken line keeps the channel busy for
-//!   its estimated length (`words / words_per_s + line_pad_s`) plus `min_gap_s` of silence;
-//!   nothing else is spoken until then, not even a critical line. Waiting lines form a priority
-//!   queue: tier first, then the cue's `prio`, then the older line.
-//! - **Tiers** ([`RadioTier`]). `Critical` lines (pursuit start, wanted level up, roadblock or
-//!   spikes set, lost visual, suspect lost, capture, unit down, captain orders) skip the gaps
-//!   below and live `stale_critical_s`. `Tactical` and `Routine` lines wait for the gaps and are
-//!   dropped when they get stale (`stale_s`, or the cue's own `ttl_s`).
-//! - **Global gap by wanted level.** After any spoken line, no tactical/routine line for
-//!   `global_gap_s[level - 1]` (highest wanted level of any racer: more chatter as heat rises)
-//!   or `global_gap_calm_s` (nobody wanted). L1 keeps the row-6 value (8 s).
-//! - **Per-unit gap by wanted level.** A unit says at most one tactical/routine line per
+//!   its estimated length (`words / words_per_s + line_pad_s`) plus `min_gap_s` of silence
+//!   (`impact_min_gap_s` after a shouted tier 3 line; a tier 1 line waits for the
+//!   transmission only, not the silence).
+//!   The only way two lines meet is a *cut*: a waiting tier 1 line cuts any lower line on air,
+//!   a tier 2 line cuts tiers 3–5, and emergency traffic ([`RadioCue::breaks_in`]: an officer
+//!   rammed, a captain's order) cuts any line below tier 1 that is not itself a break-in; only
+//!   tier 1 cuts emergency traffic. Waiting lines form a priority queue: tier 1, then
+//!   emergency traffic, then tier, then the cue's `prio`, then the older line.
+//! - **Per-unit gap by wanted level** for tiers 4–5: a unit says at most one such line per
 //!   `unit_gap_s[level - 1]` (L1 / calm: 30 s, the row-6 value).
 //! - **Collapse.** Lines raised with the same group key within `collapse_window_s` become one
 //!   line ("Units 4 and 5 resuming patrol.").
 //! - **Earshot.** Routine chatter needs a wanted racer, or the speaking unit within
 //!   `earshot_m` of a racer (dispatch's own routine lines need a wanted racer).
+//!
+//! Deployment lines ("Unit 9 in pursuit", "copy, sending unit 3 of 4", "moving to intercept"
+//! behind the racer) are filtered where they are raised (`dispatch.rs`, [`crate::chatter`]),
+//! not here: none at L0–L1 except one "units responding" summary when heat first rises, and at
+//! L2+ only the actionable ones (tier 1).
 //!
 //! Deterministic: sim time only, no RNG, fixed iteration order. Nothing here feeds back into
 //! the simulation or the state hash.
@@ -33,21 +47,68 @@ use serde::{Deserialize, Serialize};
 use crate::events::UnitId;
 use crate::time::SimTime;
 
-/// How much a radio line matters.
+/// How much a radio line matters (owner playtest row 144). Ordered low → high, so
+/// `Actionable` is the greatest; [`RadioTier::number`] gives the brief's tier number (1 = most
+/// important).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum RadioTier {
-    /// Ambience: resuming patrol, clear and available, unrelated incidents.
+    /// Tier 5: acknowledgements, resuming patrol, clear and available, out of service,
+    /// unrelated incidents. Only on a quiet channel; dropped first; thins out as heat rises.
     Routine,
-    /// Tactical updates: units en route, intercepts, backup, helicopter, unit callouts.
-    Tactical,
-    /// Skips the gaps: pursuit start, wanted level up, tool set, lost visual, suspect lost,
-    /// capture, unit down.
-    Critical,
+    /// Tier 4: calls, searching, lost visual / last seen, eyes on again, bumper and box-in
+    /// calls. Only when the channel is free (row-79 gaps). Logs from before row 144 said
+    /// `Tactical`.
+    #[serde(alias = "Tactical")]
+    Investigation,
+    /// Tier 3: rams, PITs, units hit or wrecked, civilian crashes caused by the chase. Shouted;
+    /// short gaps.
+    Impact,
+    /// Tier 2: pursuit start and end, wanted level up or down, a tougher department taking
+    /// over, rams authorised, captain orders. Pre-empts tiers 3–5. Logs from before row 144
+    /// said `Critical`.
+    #[serde(alias = "Critical")]
+    Escalation,
+    /// Tier 1: roadblock / spikes planned, helicopter launching / arriving / losing the racer, a
+    /// unit intercepting ahead. Always gets through: cuts any lower line.
+    Actionable,
+}
+
+impl RadioTier {
+    /// Every tier, most important first.
+    pub const ALL: [RadioTier; 5] = [
+        RadioTier::Actionable,
+        RadioTier::Escalation,
+        RadioTier::Impact,
+        RadioTier::Investigation,
+        RadioTier::Routine,
+    ];
+
+    /// The brief's tier number: 1 = actionable … 5 = routine.
+    pub fn number(self) -> u8 {
+        match self {
+            RadioTier::Actionable => 1,
+            RadioTier::Escalation => 2,
+            RadioTier::Impact => 3,
+            RadioTier::Investigation => 4,
+            RadioTier::Routine => 5,
+        }
+    }
+
+    /// Tiers 1–3: what the "Radio: Important only" setting keeps.
+    pub fn important(self) -> bool {
+        self >= RadioTier::Impact
+    }
+
+    /// Whether a waiting line of this tier may cut a line of tier `on_air` (tier 1 cuts any
+    /// lower line, tier 2 cuts tiers 3–5).
+    pub fn cuts(self, on_air: RadioTier) -> bool {
+        self >= RadioTier::Escalation && self > on_air
+    }
 }
 
 /// Serde default for logs written before tiers were recorded.
 pub fn default_tier() -> RadioTier {
-    RadioTier::Tactical
+    RadioTier::Investigation
 }
 
 /// Collapse rule for a line: lines raised close together with the same `key` are spoken once,
@@ -147,26 +208,101 @@ fn d_line_pad() -> f32 {
 fn d_stale_critical() -> f32 {
     15.0
 }
+fn d_impact_gap() -> f32 {
+    0.4
+}
+fn d_impact_stale() -> f32 {
+    4.0
+}
+fn d_impact_min_gap() -> f32 {
+    0.8
+}
+fn d_routine_gap() -> [f32; 5] {
+    [10.0, 14.0, 20.0, 30.0, 45.0]
+}
+fn d_routine_quiet() -> f32 {
+    6.0
+}
+
+fn d_takeover() -> [String; 5] {
+    [
+        String::new(),
+        String::new(),
+        "Highway Patrol is taking over the pursuit.".into(),
+        "Heavy units authorised.".into(),
+        "Tactical units authorised, all units, stop him by any means.".into(),
+    ]
+}
+
+/// Impact severity thresholds (`[impact]` in `data/police/radio.toml`, row 144), see
+/// [`crate::chatter::impact_severity`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ImpactConfig {
+    /// Collision energy for a "hit" line, J (below: a tap, no line).
+    pub hit_j: f32,
+    /// Collision energy for a "heavy" line, J.
+    pub heavy_j: f32,
+    /// Unit health at or below this makes any real hit at least "heavy", 0..1.
+    pub heavy_health: f32,
+    /// Mass for the energy of a contact without an impulse (headless proximity contacts), kg.
+    pub nominal_mass_kg: f32,
+    /// One impact line per unit per this long, unless a worse one follows, s.
+    pub unit_gap_s: f32,
+    /// One civilian-crash line per racer per this long, s.
+    pub civilian_gap_s: f32,
+}
+
+impl Default for ImpactConfig {
+    fn default() -> Self {
+        Self {
+            hit_j: 6_000.0,
+            heavy_j: 30_000.0,
+            heavy_health: 0.45,
+            nominal_mass_kg: 1_500.0,
+            unit_gap_s: 3.0,
+            civilian_gap_s: 8.0,
+        }
+    }
+}
 
 /// Contents of `data/police/radio.toml`. All times are sim seconds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RadioConfig {
-    /// Gap after any spoken line before a tactical/routine line, by the highest wanted level
-    /// of any racer (L1..L5), s. L1 is the playtest row-6 value.
+    /// Gap after any spoken line before a tier 4 (investigation) line, by the highest wanted
+    /// level of any racer (L1..L5), s. L1 is the playtest row-6 value.
     pub global_gap_s: [f32; 5],
-    /// Same while no racer is wanted, s.
+    /// Gap before a tier 4–5 line while no racer is wanted, s.
     pub global_gap_calm_s: f32,
-    /// Gap between one unit's tactical/routine lines, by wanted level (L1..L5; nobody wanted
-    /// uses L1), s.
+    /// Gap after any spoken line before a tier 5 (routine) line, by wanted level (L1..L5), s.
+    /// Grows with heat: routine chatter thins out as the chase heats up (row 144).
+    #[serde(default = "d_routine_gap")]
+    pub routine_gap_s: [f32; 5],
+    /// No tier 5 line within this long after a tier 1–3 line, s.
+    #[serde(default = "d_routine_quiet")]
+    pub routine_quiet_s: f32,
+    /// Gap after any spoken line before a tier 3 (impact) line, s: short, so a big wreck can
+    /// stack the victim's line and another unit's reaction.
+    #[serde(default = "d_impact_gap")]
+    pub impact_gap_s: f32,
+    /// Gap between one unit's tier 4–5 lines, by wanted level (L1..L5; nobody wanted uses
+    /// L1), s.
     pub unit_gap_s: [f32; 5],
-    /// Tactical/routine lines wait this long for duplicates from other units to merge, s.
+    /// Grouped lines wait this long for duplicates from other units to merge, s.
     pub collapse_window_s: f32,
-    /// Held tactical/routine lines older than this are dropped, s.
+    /// Held tier 4–5 lines older than this are dropped, s.
     pub stale_s: f32,
-    /// Held critical lines older than this are dropped, s.
+    /// Held tier 1–2 lines older than this are dropped, s.
     #[serde(default = "d_stale_critical")]
     pub stale_critical_s: f32,
+    /// Held tier 3 lines older than this are dropped (an impact is only news for a moment), s.
+    #[serde(default = "d_impact_stale")]
+    pub impact_stale_s: f32,
+    /// Silence after a tier 3 transmission (instead of `min_gap_s`): shouted traffic comes
+    /// thick and fast, s.
+    #[serde(default = "d_impact_min_gap")]
+    pub impact_min_gap_s: f32,
     /// Routine chatter with nobody wanted plays only within this distance of a racer, m.
     pub earshot_m: f32,
     /// Silence after a transmission ends before the next one starts, s.
@@ -179,6 +315,15 @@ pub struct RadioConfig {
     /// Key-up / squelch time added to every transmission, s (= `wp_audio` `line_pad_s`).
     #[serde(default = "d_line_pad")]
     pub line_pad_s: f32,
+    /// Impact severity thresholds (row 144).
+    #[serde(default)]
+    pub impact: ImpactConfig,
+    /// "Tougher department" sentence added to dispatch's level summary when a pursued racer
+    /// reaches level 1..5 (`""` = none). Fiction over the real escalation (more units, harder
+    /// tactics at higher levels, `data/police/pursuit.toml`); the rams sentence comes from the
+    /// pursuit config's ram levels.
+    #[serde(default = "d_takeover")]
+    pub takeover: [String; 5],
 }
 
 impl RadioConfig {
@@ -188,11 +333,48 @@ impl RadioConfig {
         words / self.words_per_s.max(0.5) + self.line_pad_s
     }
 
-    /// Tactical/routine gap after any line at the highest wanted `level` (0 = nobody), s.
+    /// Tier 4 gap after any line at the highest wanted `level` (0 = nobody), s.
     pub fn global_gap(&self, level: u8) -> f32 {
         match level {
             0 => self.global_gap_calm_s,
             l => self.global_gap_s[(l as usize - 1).min(4)],
+        }
+    }
+
+    /// Tier 5 gap after any line at the highest wanted `level` (0 = nobody), s.
+    pub fn routine_gap(&self, level: u8) -> f32 {
+        match level {
+            0 => self.global_gap_calm_s,
+            l => self.routine_gap_s[(l as usize - 1).min(4)],
+        }
+    }
+
+    /// Silence after a transmission of `tier` before the next one, s.
+    pub fn after_line(&self, tier: RadioTier) -> f32 {
+        if tier == RadioTier::Impact {
+            self.impact_min_gap_s.min(self.min_gap_s)
+        } else {
+            self.min_gap_s
+        }
+    }
+
+    /// Gap after any line before a line of `tier` at wanted `level`, s.
+    pub fn gap(&self, tier: RadioTier, level: u8) -> f32 {
+        match tier {
+            RadioTier::Actionable | RadioTier::Escalation => 0.0,
+            RadioTier::Impact => self.impact_gap_s,
+            RadioTier::Investigation => self.global_gap(level),
+            RadioTier::Routine => self.routine_gap(level),
+        }
+    }
+
+    /// How long a held line of `tier` waits before it is dropped (unless the cue sets its own
+    /// life), s.
+    pub fn stale(&self, tier: RadioTier) -> f32 {
+        match tier {
+            RadioTier::Actionable | RadioTier::Escalation => self.stale_critical_s,
+            RadioTier::Impact => self.impact_stale_s,
+            RadioTier::Investigation | RadioTier::Routine => self.stale_s,
         }
     }
 
@@ -213,6 +395,10 @@ pub struct RadioStats {
     pub collapsed: u32,
     /// Raised lines never spoken (stale, out of earshot, unit cooldown).
     pub dropped: u32,
+    /// Spoken lines per tier, index = tier number − 1 (0 = actionable … 4 = routine).
+    pub spoken_by_tier: [u32; 5],
+    /// Lines that cut a transmission on air.
+    pub cuts: u32,
 }
 
 /// What the director needs to know about the moment of a flush.
@@ -238,7 +424,8 @@ pub struct SpokenLine {
     pub tier: RadioTier,
     /// Estimated transmission length, s (the channel is busy this long plus `min_gap_s`).
     pub duration_s: f32,
-    /// Emergency traffic that cut the transmission on air (the only way two lines meet).
+    /// Cut the transmission on air (a tier 1–2 line pre-empting a lower one, or emergency
+    /// traffic): the only way two lines meet.
     pub cut_in: bool,
 }
 
@@ -268,8 +455,16 @@ pub struct RadioDirector {
     last_line: Option<SimTime>,
     /// The channel is busy (a transmission plus the silence after it) until then.
     busy_until: Option<SimTime>,
-    /// The transmission on air is a break-in (cannot be cut).
+    /// The transmission itself ends then (tier 1 lines need no silence after it).
+    tx_end: Option<SimTime>,
+    /// The transmission on air is a break-in (only a higher tier cuts it).
     on_air_break_in: bool,
+    /// Tier of the transmission on air.
+    on_air_tier: Option<RadioTier>,
+    /// Its `prio`.
+    on_air_prio: u8,
+    /// Last tier 1–3 line spoken (routine lines keep quiet for a while after it).
+    last_important: Option<SimTime>,
     last_unit: BTreeMap<UnitId, SimTime>,
     stats: RadioStats,
 }
@@ -288,6 +483,11 @@ impl RadioDirector {
     /// Lines waiting to be spoken.
     pub fn held(&self) -> usize {
         self.held.len()
+    }
+
+    /// Tier of the transmission on air at `now` (`None`: the channel is free).
+    pub fn on_air(&self, now: SimTime) -> Option<RadioTier> {
+        self.busy_until.filter(|t| now < *t).and(self.on_air_tier)
     }
 
     /// Withdraw the held (unspoken) line with this supersede slot. Returns whether there was one.
@@ -342,8 +542,9 @@ impl RadioDirector {
         });
     }
 
-    /// Decide what is spoken now: at most one line, and only when the channel is free. Call
-    /// once per police step, after all lines were raised.
+    /// Decide what is spoken now: at most one line, and only when the channel is free or a
+    /// waiting line may cut the one on air. Call once per police step, after all lines were
+    /// raised.
     pub fn flush(&mut self, cfg: &RadioConfig, ctx: &RadioContext) -> Vec<SpokenLine> {
         let mut spoken = Vec::new();
         if self.held.is_empty() {
@@ -354,11 +555,7 @@ impl RadioDirector {
         let mut k = 0;
         while k < self.held.len() {
             let h = &self.held[k];
-            let limit = h.ttl_s.unwrap_or(if h.tier == RadioTier::Critical {
-                cfg.stale_critical_s
-            } else {
-                cfg.stale_s
-            });
+            let limit = h.ttl_s.unwrap_or(cfg.stale(h.tier));
             if now.since(h.raised) > limit {
                 let h = self.held.remove(k);
                 self.stats.dropped += h.members.len() as u32;
@@ -366,27 +563,75 @@ impl RadioDirector {
                 k += 1;
             }
         }
-        // 2. One transmission at a time; emergency traffic cuts a normal transmission.
-        let busy = self.busy_until.is_some_and(|t| now < t);
+        // 2. Routine lines are dropped first when the channel is busy: anything more
+        // important waiting, and they go.
+        if self.held.iter().any(|h| h.tier > RadioTier::Routine) {
+            let before: usize = self.held.iter().map(|h| h.members.len()).sum();
+            self.held
+                .retain(|h| h.tier > RadioTier::Routine || h.break_in);
+            let after: usize = self.held.iter().map(|h| h.members.len()).sum();
+            self.stats.dropped += (before - after) as u32;
+        }
+        // 3. One transmission at a time; a higher tier (or emergency traffic) cuts it. Tier 1
+        // waits only for the transmission, not the silence after it.
+        let t1_waiting = self.held.iter().any(|h| h.tier == RadioTier::Actionable);
+        let busy = if t1_waiting {
+            self.tx_end.is_some_and(|t| now < t)
+        } else {
+            self.busy_until.is_some_and(|t| now < t)
+        };
         if busy {
-            if self.on_air_break_in {
-                return spoken;
+            let on_air = self.on_air_tier.unwrap_or(RadioTier::Routine);
+            let on_air_prio = self.on_air_prio;
+            let on_air_break_in = self.on_air_break_in;
+            // Inside tier 1, a tool warning (prio >= TOOL_WARNING_PRIO) cuts the other tier 1
+            // traffic (helicopter, intercepts): it is the one that gets stale in seconds.
+            let tool_over_t1 = |h: &Held| {
+                h.tier == RadioTier::Actionable
+                    && on_air == RadioTier::Actionable
+                    && h.prio >= TOOL_WARNING_PRIO
+                    && on_air_prio < TOOL_WARNING_PRIO
+            };
+            // Emergency traffic on air is only cut by tier 1; it cuts any non-break-in line
+            // below tier 1 itself.
+            let may_cut = |h: &Held| {
+                if on_air_break_in {
+                    h.tier.cuts(on_air) && h.tier == RadioTier::Actionable
+                } else {
+                    h.tier.cuts(on_air)
+                        || tool_over_t1(h)
+                        || (h.break_in && on_air < RadioTier::Actionable)
+                }
+            };
+            let mut best: Option<usize> = None;
+            for k in 0..self.held.len() {
+                if !may_cut(&self.held[k]) {
+                    continue;
+                }
+                if best.is_none_or(|b| Self::key(&self.held[k]) > Self::key(&self.held[b])) {
+                    best = Some(k);
+                }
             }
-            let Some(b) = (0..self.held.len()).find(|&k| self.held[k].break_in) else {
+            let Some(b) = best else {
                 return spoken;
             };
             let h = self.held.remove(b);
+            let break_in = h.break_in;
             let mut line = self.speak(cfg, now, h);
             line.cut_in = true;
-            self.busy_until = Some(now.plus(line.duration_s + cfg.min_gap_s));
-            self.on_air_break_in = true;
+            self.stats.cuts += 1;
+            self.busy_until = Some(now.plus(line.duration_s + cfg.after_line(line.tier)));
+            self.tx_end = Some(now.plus(line.duration_s));
+            self.on_air_break_in = break_in;
             spoken.push(line);
             return spoken;
         }
-        let gap_open = self
-            .last_line
-            .is_none_or(|t| now.since(t) >= cfg.global_gap(ctx.level));
+        // In the silence after a line only tier 1 may start.
+        let silence = self.busy_until.is_some_and(|t| now < t);
         let unit_gap = cfg.unit_gap(ctx.level);
+        let quiet_after_important = self
+            .last_important
+            .is_none_or(|t| now.since(t) >= cfg.routine_quiet_s);
         let mut best: Option<usize> = None;
         let mut k = 0;
         while k < self.held.len() {
@@ -396,11 +641,15 @@ impl RadioDirector {
                 k += 1;
                 continue;
             }
-            if tier < RadioTier::Critical {
-                if !gap_open {
-                    k += 1;
-                    continue;
-                }
+            let gap_open = self
+                .last_line
+                .is_none_or(|t| now.since(t) >= cfg.gap(tier, ctx.level))
+                && (!silence || tier == RadioTier::Actionable);
+            if !gap_open || (tier == RadioTier::Routine && !quiet_after_important) {
+                k += 1;
+                continue;
+            }
+            if tier <= RadioTier::Investigation {
                 let before = self.held[k].members.len();
                 let last_unit = &self.last_unit;
                 self.held[k].members.retain(|m| {
@@ -424,9 +673,7 @@ impl RadioDirector {
                     continue;
                 }
             }
-            // Break-ins first, then higher tier, higher prio, then the older line.
-            let key = |h: &Held| (h.break_in, h.tier, h.prio);
-            if best.is_none_or(|b| key(&self.held[k]) > key(&self.held[b])) {
+            if best.is_none_or(|b| Self::key(&self.held[k]) > Self::key(&self.held[b])) {
                 best = Some(k);
             }
             k += 1;
@@ -435,16 +682,30 @@ impl RadioDirector {
             let h = self.held.remove(b);
             self.on_air_break_in = h.break_in;
             let line = self.speak(cfg, now, h);
-            self.busy_until = Some(now.plus(line.duration_s + cfg.min_gap_s));
+            self.busy_until = Some(now.plus(line.duration_s + cfg.after_line(line.tier)));
+            self.tx_end = Some(now.plus(line.duration_s));
             spoken.push(line);
         }
         spoken
     }
 
+    /// Queue order: tier 1 first, then emergency traffic (the officer who was just rammed
+    /// shouts before dispatch calls the pursuit), then higher tier, then higher prio (ties: the
+    /// earlier, i.e. older, line wins because only a strictly greater key replaces the best).
+    fn key(h: &Held) -> (bool, bool, RadioTier, u8) {
+        (h.tier == RadioTier::Actionable, h.break_in, h.tier, h.prio)
+    }
+
     fn speak(&mut self, cfg: &RadioConfig, now: SimTime, h: Held) -> SpokenLine {
         self.stats.spoken += 1;
+        self.stats.spoken_by_tier[h.tier.number() as usize - 1] += 1;
         self.stats.collapsed += h.members.len().saturating_sub(1) as u32;
         self.last_line = Some(now);
+        self.on_air_tier = Some(h.tier);
+        self.on_air_prio = h.prio;
+        if h.tier.important() {
+            self.last_important = Some(now);
+        }
         for m in &h.members {
             if let Some(u) = m.unit {
                 self.last_unit.insert(u, now);
@@ -476,6 +737,10 @@ impl RadioDirector {
         }
     }
 }
+
+/// A tier 1 line with at least this `prio` is a roadblock / spike warning: it may cut other
+/// tier 1 traffic on air (see [`RadioDirector::flush`]).
+pub const TOOL_WARNING_PRIO: u8 = 2;
 
 /// A grouped line lists at most this many call signs; more are said as a count.
 pub const MAX_LISTED_CALLSIGNS: usize = 4;
@@ -523,10 +788,17 @@ mod tests {
             collapse_window_s: 1.0,
             stale_s: 6.0,
             stale_critical_s: 15.0,
+            routine_gap_s: [10.0, 14.0, 20.0, 30.0, 45.0],
+            routine_quiet_s: 6.0,
+            impact_gap_s: 0.4,
+            impact_stale_s: 4.0,
+            impact_min_gap_s: 0.8,
             earshot_m: 200.0,
             min_gap_s: 2.5,
             words_per_s: 2.6,
             line_pad_s: 0.7,
+            impact: ImpactConfig::default(),
+            takeover: d_takeover(),
         }
     }
 
@@ -579,7 +851,12 @@ mod tests {
     /// the next one is emergency traffic cutting it.
     fn assert_no_overlap(lines: &[(f32, SpokenLine)]) {
         for w in lines.windows(2).filter(|w| !w[1].1.cut_in) {
-            let end = w[0].0 + w[0].1.duration_s + cfg().min_gap_s;
+            let silence = if w[1].1.tier == RadioTier::Actionable {
+                0.0
+            } else {
+                cfg().after_line(w[0].1.tier)
+            };
+            let end = w[0].0 + w[0].1.duration_s + silence;
             assert!(
                 w[1].0 + 1e-3 >= end,
                 "'{}' at {:.1} s starts before '{}' (from {:.1} s) is over at {:.1} s",
@@ -627,7 +904,7 @@ mod tests {
     #[test]
     fn critical_lines_queue_one_at_a_time_and_routine_waits_for_the_gap() {
         let mut d = RadioDirector::new();
-        let crit = |t: &str| RadioCue::new(RadioTier::Critical, None, t.into());
+        let crit = |t: &str| RadioCue::new(RadioTier::Escalation, None, t.into());
         d.raise(SimTime::ZERO, crit("Dispatch: pursuit."));
         d.raise(SimTime::ZERO, patrol(4));
         d.raise(SimTime::ZERO, crit("Dispatch: roadblock set."));
@@ -643,12 +920,12 @@ mod tests {
     #[test]
     fn priority_orders_the_queue() {
         let mut d = RadioDirector::new();
-        let t = |p: u8, s: &str| RadioCue::new(RadioTier::Tactical, None, s.into()).prio(p);
+        let t = |p: u8, s: &str| RadioCue::new(RadioTier::Investigation, None, s.into()).prio(p);
         d.raise(SimTime::ZERO, t(0, "Dispatch: copy, sending backup."));
         d.raise(
             SimTime::ZERO,
             RadioCue::new(
-                RadioTier::Tactical,
+                RadioTier::Investigation,
                 Some(UnitId(4)),
                 "Unit 4, need backup.".into(),
             )
@@ -672,13 +949,10 @@ mod tests {
             out.extend(d.flush(&c, &ctx).into_iter().map(|l| l.text));
             now += 0.1;
         }
+        // The routine line is dropped at once: more important lines were waiting (row 144).
         assert_eq!(
             out,
-            [
-                "Unit 4, need backup.",
-                "Dispatch: copy, sending backup.",
-                "x"
-            ]
+            ["Unit 4, need backup.", "Dispatch: copy, sending backup."]
         );
     }
 
@@ -687,7 +961,7 @@ mod tests {
         let mut d = RadioDirector::new();
         let lvl = |n: u8| {
             RadioCue::new(
-                RadioTier::Critical,
+                RadioTier::Escalation,
                 None,
                 format!("Dispatch: now level {n}."),
             )
@@ -695,7 +969,7 @@ mod tests {
         };
         d.raise(
             SimTime::ZERO,
-            RadioCue::new(RadioTier::Critical, None, "Dispatch: 10-80.".into()),
+            RadioCue::new(RadioTier::Escalation, None, "Dispatch: 10-80.".into()),
         );
         d.raise(SimTime::ZERO, lvl(2));
         d.raise(SimTime::from_secs(1.0), lvl(3));
@@ -713,12 +987,12 @@ mod tests {
             "Dispatch: a long routine line that keeps the channel busy for quite a while now.";
         d.raise(
             SimTime::ZERO,
-            RadioCue::new(RadioTier::Critical, None, long.into()),
+            RadioCue::new(RadioTier::Escalation, None, long.into()),
         );
         let mut out = run(&mut d, 0.0, 0.5, 3, near);
         let hit = |n: u32| {
             RadioCue::new(
-                RadioTier::Critical,
+                RadioTier::Escalation,
                 Some(UnitId(n)),
                 format!("Unit {n}, I've been hit!"),
             )
@@ -744,7 +1018,7 @@ mod tests {
         d.raise(
             SimTime::ZERO,
             RadioCue::new(
-                RadioTier::Critical,
+                RadioTier::Escalation,
                 None,
                 "Dispatch: a long line to keep the channel busy for a while.".into(),
             ),
@@ -752,7 +1026,7 @@ mod tests {
         d.raise(
             SimTime::ZERO,
             RadioCue::new(
-                RadioTier::Tactical,
+                RadioTier::Investigation,
                 Some(UnitId(3)),
                 "Unit 3, on his bumper.".into(),
             )
@@ -775,7 +1049,7 @@ mod tests {
                 d.raise(
                     SimTime::from_secs(t),
                     RadioCue::new(
-                        RadioTier::Tactical,
+                        RadioTier::Investigation,
                         Some(UnitId(u)),
                         format!("Unit {u} en route."),
                     ),
@@ -814,6 +1088,143 @@ mod tests {
         for l in 1..=5 {
             assert_no_overlap(&flood(l));
         }
+    }
+
+    fn cue(tier: RadioTier, text: &str) -> RadioCue {
+        RadioCue::new(tier, None, text.into())
+    }
+
+    const LONG: &str = "Dispatch: a long line that keeps the channel busy for quite a while, more \
+                        than long enough to be cut by something that matters.";
+
+    #[test]
+    fn tier_one_cuts_a_routine_line_mid_air() {
+        let mut d = RadioDirector::new();
+        d.raise(SimTime::ZERO, cue(RadioTier::Routine, LONG));
+        let mut out = run(&mut d, 0.0, 1.0, 1, near);
+        assert_eq!(out.len(), 1, "{out:?}");
+        d.raise(
+            SimTime::from_secs(1.0),
+            cue(
+                RadioTier::Actionable,
+                "Dispatch: roadblock ahead on Lantern Row, 400 metres.",
+            ),
+        );
+        out.extend(run(&mut d, 1.0, 3.0, 1, near));
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(out[1].1.cut_in, "{out:?}");
+        assert!((out[1].0 - 1.0).abs() < 0.11, "spoken at {}", out[1].0);
+        assert_eq!(d.stats().cuts, 1);
+    }
+
+    #[test]
+    fn tier_one_cuts_every_lower_tier_and_tier_two_cuts_three_to_five() {
+        for on_air in [
+            RadioTier::Routine,
+            RadioTier::Investigation,
+            RadioTier::Impact,
+            RadioTier::Escalation,
+            RadioTier::Actionable,
+        ] {
+            for waiting in [RadioTier::Escalation, RadioTier::Actionable] {
+                let mut d = RadioDirector::new();
+                d.raise(SimTime::ZERO, cue(on_air, LONG));
+                let mut out = run(&mut d, 0.0, 0.5, 3, near);
+                d.raise(SimTime::from_secs(0.5), cue(waiting, "Dispatch: now."));
+                out.extend(run(&mut d, 0.5, 1.0, 3, near));
+                let cut = out.len() == 2;
+                assert_eq!(
+                    cut,
+                    waiting > on_air,
+                    "{waiting:?} over {on_air:?}: {out:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn routine_lines_are_dropped_when_busy() {
+        let mut d = RadioDirector::new();
+        d.raise(SimTime::ZERO, cue(RadioTier::Escalation, LONG));
+        d.raise(SimTime::ZERO, cue(RadioTier::Escalation, LONG));
+        d.raise(SimTime::ZERO, patrol(4));
+        let out = run(&mut d, 0.0, 60.0, 1, near);
+        assert!(
+            out.iter().all(|l| l.1.tier != RadioTier::Routine),
+            "{out:?}"
+        );
+        assert_eq!(d.stats().dropped, 1);
+        // On a quiet channel the same line is spoken.
+        let mut d = RadioDirector::new();
+        d.raise(SimTime::ZERO, patrol(4));
+        assert_eq!(run(&mut d, 0.0, 5.0, 1, near).len(), 1);
+    }
+
+    #[test]
+    fn routine_keeps_quiet_after_an_important_line() {
+        let mut d = RadioDirector::new();
+        d.raise(
+            SimTime::ZERO,
+            cue(RadioTier::Impact, "Unit 4, I'm hit! I'm hit!"),
+        );
+        let mut out = run(&mut d, 0.0, 3.0, 0, near);
+        d.raise(SimTime::from_secs(3.0), patrol(5));
+        out.extend(run(&mut d, 3.0, 30.0, 0, near));
+        // Calm gap (20 s) after the impact line: the routine line is stale (6 s) before then.
+        assert_eq!(out.len(), 1, "{out:?}");
+    }
+
+    #[test]
+    fn a_big_wreck_stacks_two_quick_impact_lines() {
+        let mut d = RadioDirector::new();
+        d.raise(
+            SimTime::ZERO,
+            RadioCue::new(
+                RadioTier::Impact,
+                Some(UnitId(4)),
+                "Unit 4, I'm done! I'm done!".into(),
+            )
+            .prio(2),
+        );
+        d.raise(
+            SimTime::ZERO,
+            RadioCue::new(
+                RadioTier::Impact,
+                Some(UnitId(6)),
+                "Unit 6, Unit 4 is down, Unit 4 is down!".into(),
+            )
+            .prio(1)
+            .ttl(6.0),
+        );
+        let out = run(&mut d, 0.0, 10.0, 3, near);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(out[1].1.text.contains("is down"));
+        let end = out[0].0 + out[0].1.duration_s + cfg().impact_min_gap_s;
+        assert!(out[1].0 - end < cfg().impact_gap_s + 0.15, "{out:?}");
+        assert_no_overlap(&out);
+    }
+
+    #[test]
+    fn routine_thins_out_as_heat_rises() {
+        let c = cfg();
+        let gaps: Vec<f32> = (1..=5).map(|l| c.routine_gap(l)).collect();
+        assert!(gaps.windows(2).all(|w| w[1] >= w[0]), "{gaps:?}");
+        assert_eq!(c.gap(RadioTier::Actionable, 5), 0.0);
+        assert!(c.gap(RadioTier::Impact, 3) < c.gap(RadioTier::Investigation, 3));
+    }
+
+    #[test]
+    fn old_logs_still_parse() {
+        #[derive(Deserialize)]
+        struct L {
+            tier: RadioTier,
+        }
+        let crit: L = serde_json::from_str(r#"{"tier":"Critical"}"#).unwrap();
+        let tac: L = serde_json::from_str(r#"{"tier":"Tactical"}"#).unwrap();
+        assert_eq!(crit.tier, RadioTier::Escalation);
+        assert_eq!(tac.tier, RadioTier::Investigation);
+        assert_eq!(RadioTier::Actionable.number(), 1);
+        assert!(RadioTier::Impact.important() && !RadioTier::Investigation.important());
     }
 
     #[test]

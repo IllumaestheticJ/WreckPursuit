@@ -1399,6 +1399,30 @@ f850d6b4. On 9b686f76: `golden_spike_strip`, which moves with `deflate_s` only (
 unchanged at 5 s), and `jam_pursuit_grid`, from 20 s of its L4–L5 pursuit (spawn and tool
 rules). Every other golden passes on the merged tree.
 
+### Turn-round, chase-unit map marker, far-carriageway repro (2026-10-22)
+
+**Where turn-round time goes.** Bench columns `turns/min` and `turn s` (3d1daa45) time each turn-round of a unit after the evader: the pro driver facing more than ~73 deg from its line, a reverse swing or U-turn, or backing out. Baseline: about 51 unit-seconds of turning per pursuit minute, most of it in turns of 3 s or more. With the racer moving, a 3-seed tally split the time into:
+- U-turns while rolling: about 370 s.
+- The pro driver's crawl round at its 4 m/s cap: about 240 s.
+- Standing, blocked by traffic or another unit: about 250 s.
+
+**Change:** the crawl cap goes from 4 to 5.5 m/s (`data/police/pursuit.toml` `turn_around_mps`, and the matching code default). Tried and not kept (6 seeds each):
+- U-turn 6 → 7.5 m/s: turning 52.1 → 49.9 s, no gain.
+- Swing/U-turn from 90 deg instead of 107 deg: 54.6 s, stuck 3.58 → 4.15/min.
+
+| 192 runs | lead m | pace | capture | escape | crash/min | stuck/min | turning s per pursuit min | turns ≥ 3 s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| before (3d1daa45) | 65 | 0.75 | 82 % | 13 % | 1.18 | 3.89 | 50.7 | 1586 |
+| after (crawl 5.5 m/s) | 62 | 0.53 | 83 % | 14 % | 1.20 | 2.86 | 46.6 | 1279 |
+
+Pace is the median over different, smaller sample sets (588 → 371 samples) and moves opposite ways by city (Vesper 0.46 → 0.54, grid 0.78 → 0.50), so it is within its known noise. Turning time, long turns and stuck events clearly drop.
+
+Goldens blessed: jam_pursuit_grid, jam_pursuit_vesper, weather_fog_pursuit, and police_tunnel_escape_founders_cut with its control. Founders Cut's helicopter now launches at 90.2 s; its bound moved from 80 to 95 s (still before the Cut).
+
+**Chase-unit map marker (row 129).** A chasing unit routing round by the roads now shows where its route meets the racer's path: the junction the racer heads for (`Unit::chase_route`). It is drawn in policeB with a dotted line and a diamond, while an interceptor keeps its dashed line and circle. It is shown only while the unit routes; a unit right behind the racer shows none. This is minimal glue in `wp_wasm/src/map.rs` and `apps/ui-kit/src/map/draw.ts`. ui-kit's `data.test` top-speed failure is pre-existing.
+
+**Far-carriageway spawn repro (row 140).** It reproduced with the 192-run sequence on 36a31b1f, vesper night L3: a spike car that had waited for its spot to be hidden spawned 285 s in, with the racer 360 m away on another road. From the racer's road at that moment, the spot was its far carriageway. A waiting tool car whose spot is on the racer's far carriageway is now dropped. On the current base the full 192-run sequence has no such spawn.
+
 ### Rows 84, 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 
@@ -1447,3 +1471,55 @@ you can review):
   `true`. The one behaviour change is `wp_opponent/tests/common` (police-heat runs on a real
   `wp_sim` city), which inherited `true` and now gets `false`.
 - Test: `lib.rs::tests::traffic_hazard_stand_in_is_opt_in`.
+## Race-specific police profiles (owner request, 2026-10-22)
+
+Each race in the browser's picker now has its own police, configured in **`data/police/races.toml`**
+(one table per race id, `wp_police::race`). Changing one table changes only that race.
+
+| race | style | what the police do |
+|---|---|---|
+| `lantern_checkpoint` (illegal daytime, downtown) | **Downtown lockdown** | presence 2.5 (was 2.0), backup ×1.5; two roadblocks *across the route* (each leaves a 3.5 m gap on one side), four roadblocks *off the route* sealing side streets, two stakeouts at junctions |
+| `loop9_circuit` (1 am highway lap) | **Highway interceptors** | high-speed pursuit only: no roadblocks, spikes, box-ins, rolling or junction blocks, no helicopter; pursuit cap 70 m/s, PIT up to 220 km/h; four units staked out on the shoulders join as the field passes |
+| `hollins_sprint` (night hill sprint, hairpins) | **Summit trap** (proposed) | no PITs, rams, spikes or dynamic roadblocks on the hill; the side road at the top is sealed, a unit waits just below the summit and lights the field up, box-ins at the lot |
+| `grid_highway_sprint` (night, short highway) | **Speed trap** (proposed) | two radar stakeouts recognise a racer the moment it flies past; a 4 m spike strip covers the overtaking lane left of the racing line at 85 % (the racing lane stays open); PIT, rams and rolling blocks, no roadblocks |
+
+How it works:
+- `RaceProfile::apply` rewrites the police tables for the race: a tactic switched off unlocks at
+  `NEVER_LEVEL` (6), speed overrides replace `pursuit_cap_mps` / `chase.pit_max_kmh` /
+  `chase.speed_margin`, reinforcements scale by `backup_scale`. Patrol counts come from the
+  profile's `presence` via the race's scenario (`RaceDef::police_presence`).
+- `PoliceSystem::start_race(id, profile, course, entrants)` (called through
+  `wp_race::police::start_race` by `wp_wasm::race::RaceRun::new` and the picker tests, before the
+  countdown) places the scripted tools and stakeouts. Side roads are found from the road graph
+  (junctions on the course, roads leaving across the racing direction, walked through the city's
+  short segment chains). `Roadblock` / `SpikeStrip` gained `scripted: bool`: scripted tools last
+  `tool_lifetime_s`, survive the end of a racer's pursuit and do not count against the AI
+  captain's `max_active`.
+- A stakeout is a parked `UnitRole::Tool` unit. When a racer passes within `trigger_m` with line
+  of sight it joins the racer's pursuit, or (with `recognise_on_sight`) makes the racer L1 and
+  starts the pursuit itself; it then becomes a `Reinforcement` (cleaned up like backup).
+- Events: no new `PoliceEvent` variants (`RoadblockPlaced`, `SpikesPlaced`, `PursuitStarted` as
+  before). One Critical radio line at setup ("Operation <name>: …").
+- Same code path for Arcade and Simulation (nothing branches on `DamageMode`).
+
+Measured (picker tests, AI in every seat, default seeds): Lantern 6 scripted roadblocks, 4
+pursuits, all 4 racers ended by the police; Loop 9 0 roadblocks / 0 spikes, 4 stakeouts sprung,
+8 pursuits, 0 of 6 finished (captures / flights); Hollins 1 side block, 3+ finish; Grid 2
+stakeouts sprung, spike strip hit, 2 of 4 finish (one captured, one fled).
+
+Tests: `wp_police` `race::tests` (12: tables, apply, placement on/off route, gaps, stakeout
+springs a pursuit, spikes cover part of the road only); `wp_race` `catalog::every_race_has_its_own_police_profile`;
+`wp_race/tests/race_picker.rs` checks each race's profile in the full sim (Grid now expects 2
+finishers instead of 3: the speed trap takes racers out).
+
+Outside my crates: `wp_race` (catalog presence/profile, `police::start_race`, picker tests),
+`wp_wasm::race` (start_race call, `RaceCard.police_style/police_summary`),
+`apps/testbed-web/src/ui/race.tsx` (shows the police style on the race card),
+`wp_opponent::corridor` (a flight route whose pieces are all filtered out no longer panics: it
+showed up once the Loop 9 interceptors started forcing flights), `pick_lantern_checkpoint.ron`
+regenerated + its golden blessed (presence 2.5).
+
+Known gaps: standalone `simcli` runs of the `pick_*` scenarios have no race block, so only the
+presence applies there; the AI racers (`wp_opponent`) do not see barriers or spikes and drive
+into them; Loop 9's chase is very punishing (no finishers at the default seed) and may want
+tuning after a playtest.

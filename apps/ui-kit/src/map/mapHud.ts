@@ -14,8 +14,10 @@
 import { decodeMapDynamic, EMPTY_FRAME, type MapFrame, type MapStatic, type MapUnit } from "./data";
 import { CITY_NAMES, districtName, zoneAt } from "./districts";
 import { drawPlayer, drawPoi, drawRacer, drawTool, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
+import { drawMarker, type MapExtras, type MapLegendExtra } from "./extras";
 import { FullMapRenderer, type FullMapStats } from "./FullMap";
 import { MinimapRenderer, type MinimapStats } from "./Minimap";
+import { fullToWorld } from "./projection";
 import { speedIn, unitLabel, type SpeedUnits } from "../menu/settings";
 import "../ui/theme.css";
 import "./map.css";
@@ -39,7 +41,12 @@ export interface MapHudStats {
   full: FullMapStats;
   /** District under the player (minimap caption). */
   district: string | null;
+  /** A host picker is armed (`setPicker`). */
+  picking: boolean;
 }
+
+/** A drag shorter than this (CSS px) is a tap: it picks when a picker is armed. */
+const TAP_PX = 6;
 
 const FAKE_UNIT = (over: Partial<MapUnit>): MapUnit => ({
   id: 1,
@@ -73,7 +80,11 @@ export class MapHud {
   private follow = false;
   private district: string | null = null;
   private lastCaptionMs = -Infinity;
-  private drag: { x: number; y: number; id: number } | null = null;
+  private drag: { x: number; y: number; id: number; x0: number; y0: number } | null = null;
+  private onPick: ((x: number, y: number) => void) | null = null;
+  private readonly hostLegend: HTMLElement;
+  /** Host panel slot over the full map (top-left; e.g. a challenge card). Empty = hidden. */
+  readonly panel: HTMLElement;
   private readonly onKey = (e: KeyboardEvent) => this.key(e);
 
   constructor(
@@ -116,7 +127,15 @@ export class MapHud {
 
     this.mini = new MinimapRenderer(mc, { signals: opts.signals });
     this.full = new FullMapRenderer(fc);
-    this.fullEl.appendChild(this.legend());
+    this.panel = document.createElement("aside");
+    this.panel.className = "wp-panel wp-map-host";
+    this.panel.hidden = true;
+    this.fullEl.appendChild(this.panel);
+    const legend = this.legend();
+    this.hostLegend = document.createElement("div");
+    this.hostLegend.className = "wp-map-legend-host";
+    legend.insertBefore(this.hostLegend, legend.children[1] ?? null);
+    this.fullEl.appendChild(legend);
     this.wirePointer(fc);
   }
 
@@ -183,6 +202,80 @@ export class MapHud {
     else this.open();
   }
 
+  /** Host overlay on both maps (markers, route, flags); `null` clears it. Drawn from the next
+   * `frame()` (the full map redraws at once while open). */
+  setExtras(extras: MapExtras | null): void {
+    this.mini.extras = extras;
+    this.full.extras = extras;
+    if (this.openFlag) this.full.draw(this.frameData, performance.now());
+  }
+
+  /** Arm a picker: a tap / click on the full map (not a drag) calls `onPick` with the world
+   * point, and a crosshair marks the centre for `pickCentre()` (gamepad). `null` disarms. */
+  setPicker(onPick: ((x: number, y: number) => void) | null): void {
+    this.onPick = onPick;
+    this.full.crosshair = !!onPick;
+    this.fullEl.classList.toggle("wp-map-picking", !!onPick);
+  }
+
+  /** Pick the world point under the full map's centre (crosshair). No-op without a picker. */
+  pickCentre(): void {
+    if (!this.onPick || !this.openFlag) return;
+    const v = this.full.view;
+    const [x, y] = fullToWorld(v, v.w / 2, v.h / 2);
+    this.onPick(x, y);
+  }
+
+  /** Pan the full map by CSS px (content follows, like a drag; gamepad stick). */
+  panBy(dxCss: number, dyCss: number): void {
+    if (!this.openFlag) return;
+    this.follow = false;
+    this.full.panBy(dxCss, dyCss);
+  }
+
+  /** World point under a CSS client position on the full map (null when closed). */
+  worldAt(clientX: number, clientY: number): [number, number] | null {
+    if (!this.openFlag) return null;
+    const c = this.full.canvas;
+    const r = c.getBoundingClientRect();
+    const dpr = (typeof devicePixelRatio === "number" && devicePixelRatio) || 1;
+    return fullToWorld(this.full.view, (clientX - r.left) * dpr, (clientY - r.top) * dpr);
+  }
+
+  /** CSS client position of a world point on the full map (null when closed; e2e). */
+  clientAt(x: number, y: number): [number, number] | null {
+    if (!this.openFlag) return null;
+    const v = this.full.view;
+    const r = this.full.canvas.getBoundingClientRect();
+    const dpr = (typeof devicePixelRatio === "number" && devicePixelRatio) || 1;
+    return [r.left + (v.w / 2 + (x - v.cx) * v.pxPerM) / dpr, r.top + (v.h / 2 - (y - v.cy) * v.pxPerM) / dpr];
+  }
+
+  /** Extra legend rows from the host (a titled group above the built-in rows); empty clears. */
+  setLegendExtras(title: string, rows: MapLegendExtra[]): void {
+    this.hostLegend.replaceChildren();
+    if (rows.length === 0) return;
+    const t = document.createElement("div");
+    t.className = "wp-map-legend-row wp-map-legend-sub";
+    t.textContent = title;
+    this.hostLegend.appendChild(t);
+    const dpr = (typeof devicePixelRatio === "number" && devicePixelRatio) || 1;
+    for (const r of rows) {
+      const li = document.createElement("div");
+      li.className = "wp-map-legend-row";
+      const cv = document.createElement("canvas");
+      const s = 22 * dpr;
+      cv.width = s;
+      cv.height = s;
+      const ctx = cv.getContext("2d");
+      if (ctx) drawMarker(ctx, { colour: r.colour, label: r.label }, s / 2, s / 2, s * 0.36);
+      const tx = document.createElement("span");
+      tx.textContent = r.text;
+      li.append(cv, tx);
+      this.hostLegend.appendChild(li);
+    }
+  }
+
   /** Show or hide the corner minimap. */
   setMinimapVisible(on: boolean): void {
     this.miniEl.classList.toggle("wp-hidden", !on);
@@ -207,7 +300,7 @@ export class MapHud {
 
   /** What was drawn (e2e). */
   stats(): MapHudStats {
-    return { open: this.openFlag, city: this.map?.city ?? null, minimap: this.mini.stats, full: this.full.stats, district: this.district };
+    return { open: this.openFlag, city: this.map?.city ?? null, minimap: this.mini.stats, full: this.full.stats, district: this.district, picking: !!this.onPick };
   }
 
   /** Remove from the page. */
@@ -274,7 +367,7 @@ export class MapHud {
 
   private wirePointer(c: HTMLCanvasElement): void {
     c.addEventListener("pointerdown", (e) => {
-      this.drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      this.drag = { x: e.clientX, y: e.clientY, id: e.pointerId, x0: e.clientX, y0: e.clientY };
       this.follow = false;
       c.setPointerCapture?.(e.pointerId);
     });
@@ -283,9 +376,15 @@ export class MapHud {
       this.full.panBy(e.clientX - this.drag.x, e.clientY - this.drag.y);
       this.drag = { ...this.drag, x: e.clientX, y: e.clientY };
     });
-    const end = () => (this.drag = null);
-    c.addEventListener("pointerup", end);
-    c.addEventListener("pointercancel", end);
+    c.addEventListener("pointerup", (e) => {
+      const d = this.drag;
+      this.drag = null;
+      if (!d || d.id !== e.pointerId || !this.onPick) return;
+      if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > TAP_PX) return;
+      const w = this.worldAt(e.clientX, e.clientY);
+      if (w) this.onPick(w[0], w[1]);
+    });
+    c.addEventListener("pointercancel", () => (this.drag = null));
     c.addEventListener(
       "wheel",
       (e) => {

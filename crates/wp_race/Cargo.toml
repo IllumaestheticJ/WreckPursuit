@@ -26,5 +26,7 @@ serde_json.workspace = true
 simcli = { path = "../../apps/simcli" }
 # Vehicle kinds (police / traffic) in judged simcli runs.
 wp_sim.workspace = true
+# Lab overrides for the pace sweep's A/B (WP_PACE_TYRE / _GRIP / _RIDE).
+wp_vehicle.workspace = true
 # Self-check with the repo's determinism lint until wp_race joins its SIM_CRATES list.
 lint-determinism = { path = "../../tools/lint-determinism" }

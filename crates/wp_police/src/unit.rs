@@ -419,6 +419,9 @@ pub struct Unit {
     /// The pro driver's planned speed and whether it was reversing out, last tick (debug).
     #[serde(skip)]
     pub pro_dbg: (f32, bool),
+    /// The pro driver was turning round last tick (debug: bench turn-round audit).
+    #[serde(skip)]
+    pub turning_round: bool,
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -499,6 +502,7 @@ impl Unit {
             unstick: crate::stuck::UnstickState::default(),
             branch: 0,
             pro_dbg: (0.0, false),
+            turning_round: false,
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],

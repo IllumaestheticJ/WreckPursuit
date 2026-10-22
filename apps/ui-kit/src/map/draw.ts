@@ -436,6 +436,24 @@ export function drawSight(ctx: Ctx, f: MapFrame, m: Mat, k: number, pal: MapPale
       ctx.beginPath();
       ctx.arc(tx, ty, Math.max(3, 25 * k), 0, Math.PI * 2);
       ctx.stroke();
+    } else if (u.state === "pursue" && u.target) {
+      // A chasing unit routing round by the roads: where its route meets the racer's path
+      // (row 129). Dotted line and a diamond, to tell it from an interceptor's dashed circle.
+      const [tx, ty] = apply(m, u.target[0], u.target[1]);
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = pal.policeB;
+      ctx.setLineDash([1, 3]);
+      ctx.lineWidth = 1;
+      line(ctx, [x, y], [tx, ty]);
+      ctx.setLineDash([]);
+      const r = Math.max(3, 18 * k);
+      ctx.beginPath();
+      ctx.moveTo(tx, ty - r);
+      ctx.lineTo(tx + r, ty);
+      ctx.lineTo(tx, ty + r);
+      ctx.lineTo(tx - r, ty);
+      ctx.closePath();
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }

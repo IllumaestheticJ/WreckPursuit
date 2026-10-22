@@ -48,6 +48,15 @@
       #radio-strip.empty { visibility: hidden; }
       #radio-strip .radio-line { background: rgba(8, 12, 18, 0.72); border-left: 3px solid currentColor; padding: 2px 8px; color: #eef2f6; text-shadow: 0 1px 2px #000; border-radius: 2px; transition: opacity 0.3s; }
       #radio-strip .radio-cs { font: 700 11px/1 ui-monospace, monospace; letter-spacing: 0.06em; margin-right: 6px; }
+      /* Row 144 priority tiers: 1-2 highlighted, 3 urgent, 4-5 dimmed. */
+      #radio-strip .radio-icon { font-style: normal; margin-right: 6px; }
+      #radio-strip .radio-line.tier-1 { font-weight: 700; background: rgba(70, 48, 0, 0.85); border-left-width: 5px; box-shadow: 0 0 0 1px rgba(255, 204, 0, 0.7); }
+      #radio-strip .radio-line.tier-1 .radio-icon { color: #ffcc00; }
+      #radio-strip .radio-line.tier-2 { font-weight: 700; background: rgba(10, 30, 70, 0.82); border-left-width: 5px; }
+      #radio-strip .radio-line.tier-2 .radio-icon { color: #64b5f6; }
+      #radio-strip .radio-line.tier-3 { background: rgba(90, 8, 8, 0.82); color: #fff; font-style: italic; text-transform: uppercase; letter-spacing: 0.02em; }
+      #radio-strip .radio-line.tier-3 .radio-icon { color: #ff5252; font-style: normal; }
+      #radio-strip .radio-line.tier-4, #radio-strip .radio-line.tier-5 { opacity: 0.62; }
       #ui-chase .wp-hud-alerts li[data-ch="dispatch"], #ui-chase .wp-hud-alerts li[data-ch="unit"] { display: none; }
       .feed { max-width: 360px; max-height: 22vh; overflow: auto; font-size: 11px; }
       .comps, .regions { white-space: pre; max-height: 30vh; overflow: auto; }

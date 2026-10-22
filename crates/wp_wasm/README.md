@@ -14,6 +14,7 @@ canonical `replay.bin` files that `simcli replay` verifies.
 | `session.rs` | `Session`: fixed-step loop, live / scripted / playback, op + input log, per-tick hashes, drift check |
 | `scenario.rs` | free-drive scenario generator, `.ron` parsing, cruise-speed override (all simcli v2) |
 | `pack.rs` | packed typed-array layouts, beam strain, region energy |
+| `street.rs` | NPC street racers (lead): 16 roaming `wp_opponent` drivers (4 at each of levels 2–5), scenario entities `street_<level>_<name>` so replays carry them; horn challenge, A→B race to a player-picked finish (never-give-up race AI as in picker races), wagers through the run's ledger; tests in `street_tests.rs` |
 | `run.rs` | the player's economy (lead): drained events → G's `EconomySession`, end-of-run `RunReport`, "Repair & continue"; tests in `run_tests.rs` |
 | `career.rs` | the browser career (machine G): persistent account, garage actions, career runs with the career car's mods and saved lattice damage, `career_*` exports; tests in `career_tests.rs` (see `docs/integration/economy.md`) |
 | `garage_visit.rs` | garage visits (lead): the city's `Garage` POIs as repair shops (legit / crooked, district); stopping in one holds the car and offers the shop's `RepairAll`; detection in `Session::check_garage`, tests in `run_tests.rs` |
@@ -41,6 +42,15 @@ sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 tra
 `docs/integration/testbed.md`.
 Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world (0.24 vs 0.14 ms,
 1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
+Street racers (`street.rs`, 16 roaming AI cars), native release, city free drive, sim with /
+without them: 12×12 grid 1.40 / 0.75 ms per tick (5.60 / 3.02 ms per 60 Hz frame), +0.040 ms
+per racer per tick; Port Vesper 1.83 / 0.82 ms per tick (7.31 / 3.29 ms per frame), +0.063 ms
+per racer per tick. The street AI itself is ~0.07 ms per tick (0.004 ms per racer); the rest is
+the racers' own vehicle + lattice physics, ~0.03 ms per racer per tick even parked (police and
+traffic barely notice them). The slowest single AI tick is 2.1 ms (grid) / 6.2 ms (Vesper): a
+roam route plan plus its line, at most one per tick. Far racers would only get cheap with a
+dormant / kinematic vehicle mode in `wp_sim` (not there yet).
+`cargo test --release -p wp_wasm --lib street_perf -- --ignored --nocapture --test-threads=1`.
 
 ## Known gaps
 - Instant crash replay (`crash_replay.rs`, `docs/integration/crash-replay.md`): a live session snapshots its `Sim` every 2 s (~6 ms native in a city chase); the last ~1.5 s of a replay accepted early is extrapolated from the last logged inputs.
@@ -50,4 +60,5 @@ Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world
 - Garage shop kind (legit / crooked) comes from the `docs/design/CITY.md` shop list by name, else the district, until the POIs carry it (CITY.md request C3). A legit shop's report of a wanted car is only a `ShopReported` ledger line: police heat does not react yet. Garage visits offer `RepairAll` only (no per-item repair: the sim repairs the whole car).
 - Region energy / strain are proxies until contract request TB-2 lands; `intents()` is empty (TB-5).
 - `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`; race recordings also need the race (AI kinds, meet report) re-applied, which only the browser's playback does.
+- Street racers: their inputs and moves are logged, so recordings (and crash replays) of street sessions verify in the browser's playback; the playback has no street AI, so it shows no offer / race HUD / map icons, and `simcli replay` drifts (city recordings, and it does not mark the racers `AiRacer`, as with picker races). Wagers are `Adjustment` ledger lines (see `docs/integration/testbed.md`, SR-2…3). The log grows ~1 050 input events/s with 16 racers (~36 KB/s of `replay.bin`): every AI steer change is an event.
 - `cargo test -p wp_wasm` takes ~2 min in debug (real physics).

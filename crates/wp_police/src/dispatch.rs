@@ -9,11 +9,12 @@ use serde::{Deserialize, Serialize};
 use wp_contracts::{EntityId, ViolationKind, WorldQuery};
 
 use crate::captain::CaptainError;
+use crate::chatter::round_m;
 use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
+    add, dist, dot, len, lerp2, normalize, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
@@ -380,7 +381,7 @@ impl PoliceSystem {
                 self.stats.witnessed_pursuits += 1;
                 let desc = self.racer_desc(racer);
                 self.radio(RadioCue::new(
-                    RadioTier::Critical,
+                    RadioTier::Escalation,
                     Some(unit),
                     format!(
                         "Unit {}, I just watched {desc} {}, I'm on it.",
@@ -494,7 +495,7 @@ impl PoliceSystem {
         let unit = self.units[i].id;
         let desc = self.racer_desc(racer);
         self.radio(RadioCue::new(
-            RadioTier::Critical,
+            RadioTier::Escalation,
             Some(unit),
             format!(
                 "Unit {}, {desc} just blew past me at {:.0} over, I'm on it.",
@@ -1503,17 +1504,20 @@ impl PoliceSystem {
             });
         }
         let desc = self.racer_desc(racer);
+        // Row 144: shouted, an impact line (tier 3) that still breaks in on lower traffic.
         self.radio(
             RadioCue::new(
-                RadioTier::Critical,
+                RadioTier::Impact,
                 Some(unit),
                 format!(
-                    "Unit {}, I've been hit! {desc} rammed my unit, assault on an officer.",
+                    "Unit {}, I've been hit! I'm hit! {desc} rammed my unit, assault on an officer!",
                     unit.0
                 ),
             )
+            .prio(5)
             .breaks_in(),
         );
+        self.chatter_note_impact_line(unit);
         // Who can act on it: the hit unit unless it is out of action, else the closest
         // in-service unit nearby that sees the racer.
         let able = |u: &Unit| {
@@ -1620,6 +1624,7 @@ impl PoliceSystem {
         self.update_responses();
         self.maintain_reinforcements(world);
         self.maintain_helicopters();
+        self.race_think(world);
         if !self.captain.human {
             self.ai_captain_tools();
         }
@@ -1721,6 +1726,15 @@ impl PoliceSystem {
         let first_patrol =
             matches!(a, Assignment::Patrol { .. } | Assignment::Idle) && !self.units[i].had_job;
         let text = self.radio_text(i, &a);
+        let deploy = matches!(
+            a,
+            Assignment::Pursue { .. }
+                | Assignment::Intercept { .. }
+                | Assignment::Respond { .. }
+                | Assignment::RoadblockAt { .. }
+                | Assignment::SpikeAt { .. }
+                | Assignment::HeloTrack { .. }
+        );
         let now = self.now;
         {
             let u = &mut self.units[i];
@@ -1741,8 +1755,10 @@ impl PoliceSystem {
                 self.stats.units_engaged += 1;
             }
         }
-        if !first_patrol {
-            self.radio(text);
+        match text {
+            Some(cue) if !first_patrol => self.radio(cue),
+            None if deploy => self.radio_deploy_suppressed(),
+            _ => {}
         }
     }
 
@@ -1760,8 +1776,12 @@ impl PoliceSystem {
     }
 
     /// The radio line for unit `i` taking assignment `a`: tier and collapse rule per
-    /// assignment (`data/police/radio.toml` paces them, see [`crate::radio`]).
-    fn radio_text(&self, i: usize, a: &Assignment) -> RadioCue {
+    /// assignment (`data/police/radio.toml` paces them, see [`crate::radio`]). `None`: a
+    /// deployment line that is not spoken (row 144): units joining a pursuit, responding to
+    /// a known call, tool cars arriving (the tool was announced when it was planned) and
+    /// intercepts that are not ahead of the racer. The low-heat "units responding" summary
+    /// and the tier 1 tool / intercept / helicopter lines stand in for them.
+    fn radio_text(&self, i: usize, a: &Assignment) -> Option<RadioCue> {
         let u = &self.units[i];
         let callsign = match u.kind {
             UnitKind::Car => format!("Unit {}", u.id.0),
@@ -1774,7 +1794,7 @@ impl PoliceSystem {
                 group.to_string(),
             )
         };
-        match a {
+        Some(match a {
             Assignment::Idle => line(
                 RadioTier::Routine,
                 format!("{callsign}, clear and available."),
@@ -1791,69 +1811,41 @@ impl PoliceSystem {
                 "{units} resuming patrol.",
             ),
             Assignment::Respond { incident } => {
-                let kind = self
+                // A new call goes out with the first unit sent: one line, not two. Later units
+                // on the same call are deployment chatter (row 144): not spoken.
+                let inc = self
                     .incidents
                     .iter()
-                    .find(|x| x.id == *incident)
-                    .map(|x| x.kind);
-                let (what, tier) = match kind {
-                    Some(IncidentKind::Report { .. }) => {
-                        ("reckless driver report", RadioTier::Tactical)
-                    }
-                    Some(IncidentKind::Crash) => ("crash scene", RadioTier::Routine),
-                    None => ("incident", RadioTier::Routine),
+                    .find(|x| x.id == *incident && !x.announced)?;
+                let tier = match inc.kind {
+                    IncidentKind::Report { .. } => RadioTier::Investigation,
+                    IncidentKind::Crash => RadioTier::Routine,
                 };
-                // A new call goes out with the first unit sent: one line, not two.
-                let fresh = self
-                    .incidents
-                    .iter()
-                    .find(|x| x.id == *incident && !x.announced);
-                let text = match fresh {
-                    Some(inc) => format!(
-                        "Dispatch: {}, {}. {callsign} responding.",
-                        call_text(inc),
-                        self.place_phrase(inc.pos, [0.0, 0.0])
-                    ),
-                    None => format!("{callsign} responding to {what}."),
-                };
+                let text = format!(
+                    "Dispatch: {}, {}. {callsign} responding.",
+                    call_text(inc),
+                    self.place_phrase(inc.pos, [0.0, 0.0])
+                );
                 line(
                     tier,
                     text,
                     format!("respond:{}", incident.0),
-                    &format!("{{units}} responding to {what}."),
+                    "Dispatch: {units} responding.",
                 )
             }
-            Assignment::Pursue { target } => {
-                // A unit joining from far away gives its ETA (row 79).
-                let eta = self
-                    .racers
-                    .get(target)
-                    .and_then(|r| self.eta_phrase(i, xy(r.pos)))
-                    .map(|e| format!(", {e}"))
-                    .unwrap_or_default();
-                line(
-                    RadioTier::Tactical,
-                    format!(
-                        "{callsign} in pursuit of {}{eta}.",
-                        self.racer_desc(*target)
-                    ),
-                    format!("pursue:{}", target.0),
-                    &format!("{{units}} in pursuit of racer #{}.", target.0),
-                )
-            }
+            Assignment::Pursue { .. } => return None,
             Assignment::Intercept { target, point, .. } => {
-                let searching = self
-                    .racers
-                    .get(target)
-                    .is_some_and(|r| r.status == crate::heat::PursuitStatus::Searching);
-                let eta = self
-                    .eta_phrase(i, *point)
-                    .map(|e| format!(", {e}"))
-                    .unwrap_or_default();
+                let r = self.racers.get(target)?;
+                let searching = r.status == crate::heat::PursuitStatus::Searching;
                 if searching {
-                    // Sent to the last known position (search points): say where.
+                    // Sent to the last known position (search points): say where (tier 4,
+                    // "checking the area").
+                    let eta = self
+                        .eta_phrase(i, *point)
+                        .map(|e| format!(", {e}"))
+                        .unwrap_or_default();
                     line(
-                        RadioTier::Tactical,
+                        RadioTier::Investigation,
                         format!(
                             "{callsign}, copy, searching {}{eta}.",
                             self.place_phrase(*point, [0.0, 0.0])
@@ -1862,51 +1854,42 @@ impl PoliceSystem {
                         &format!("{{units}} searching for racer #{}.", target.0),
                     )
                 } else {
+                    // Tier 1 only when it matters to the driver: L2+, and the intercept point
+                    // is ahead of the racer ("a unit ahead of you").
+                    let (rp, rv) = (xy(r.pos), [r.vel[0], r.vel[1]]);
+                    let to = sub(*point, rp);
+                    let ahead = len(rv) >= 2.0 && dot(normalize(rv), to) > 0.0;
+                    if r.level.number() < 2 || !ahead {
+                        return None;
+                    }
+                    let where_ = self.place_phrase(*point, [0.0, 0.0]);
+                    let m = round_m(len(to));
                     line(
-                        RadioTier::Tactical,
+                        RadioTier::Actionable,
                         format!(
-                            "{callsign} moving to intercept {}{eta}.",
-                            self.racer_desc(*target)
+                            "{callsign} moving to intercept racer #{} ahead {where_}, {m} metres.",
+                            target.0
                         ),
                         format!("intercept:{}", target.0),
-                        &format!("{{units}} moving to intercept racer #{}.", target.0),
+                        &format!(
+                            "{{units}} moving to intercept racer #{} ahead {where_}, {m} metres.",
+                            target.0
+                        ),
                     )
+                    .supersedes(format!("intercept:{}", target.0))
                 }
             }
-            Assignment::RoadblockAt { segment, .. } => {
-                let place = self.segment_place(*segment);
-                line(
-                    RadioTier::Critical,
-                    format!("{callsign} setting up a roadblock {place}."),
-                    format!("roadblock:{}", segment.0),
-                    &format!("{{units}} setting up a roadblock {place}."),
-                )
-            }
-            Assignment::SpikeAt { segment, .. } => {
-                let place = self.segment_place(*segment);
-                line(
-                    RadioTier::Critical,
-                    format!("{callsign} deploying spikes {place}."),
-                    format!("spikes:{}", segment.0),
-                    &format!("{{units}} deploying spikes {place}."),
-                )
-            }
-            Assignment::HeloTrack { target } => line(
-                RadioTier::Tactical,
-                format!(
-                    "{callsign} overhead, tracking {}.",
-                    self.racer_desc(*target)
-                ),
-                format!("helo:{}", target.0),
-                &format!("{{units}} overhead, tracking racer #{}.", target.0),
-            ),
+            // Announced when planned (`chatter`, from `RoadblockPlaced` / `SpikesPlaced`).
+            Assignment::RoadblockAt { .. } | Assignment::SpikeAt { .. } => return None,
+            // Announced at the request ("air unit launching") and when it has eyes on.
+            Assignment::HeloTrack { .. } => return None,
             Assignment::OutOfService => line(
                 RadioTier::Routine,
                 format!("{callsign} out of service."),
                 "out_of_service".into(),
                 "{units} out of service.",
             ),
-        }
+        })
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2168,7 +2151,7 @@ impl PoliceSystem {
                     call_text(&inc),
                     self.place_phrase(inc.pos, [0.0, 0.0])
                 );
-                self.radio(RadioCue::new(RadioTier::Tactical, None, text));
+                self.radio(RadioCue::new(RadioTier::Investigation, None, text));
             }
             self.incidents[k].announced = true;
         }
@@ -2790,25 +2773,10 @@ impl PoliceSystem {
                     requested: now,
                     due: now.plus(t),
                 });
-                let n = have + pending + 1;
-                self.radio(
-                    RadioCue::new(
-                        RadioTier::Tactical,
-                        None,
-                        format!(
-                            "Dispatch: copy, sending unit {n} of {want} on racer #{}.",
-                            racer.0
-                        ),
-                    )
-                    .grouped(
-                        None,
-                        format!("backup:{}", racer.0),
-                        format!(
-                            "Dispatch: copy, {{count}} more units en route to racer #{}.",
-                            racer.0
-                        ),
-                    ),
-                );
+                // Row 144: "copy, sending unit n of m" is a deployment line, not actionable
+                // for the driver: not spoken (the units show up as interceptors ahead or on
+                // his bumper instead).
+                self.radio_deploy_suppressed();
             }
         }
         // Commit due reinforcements.
@@ -3301,7 +3269,7 @@ impl PoliceSystem {
         ) {
             self.stats.helo_unavailable += 1;
             self.radio(RadioCue::new(
-                RadioTier::Tactical,
+                RadioTier::Investigation,
                 None,
                 "Dispatch: air unit unavailable.".to_string(),
             ));
@@ -3312,11 +3280,18 @@ impl PoliceSystem {
             racer,
             launch: now.plus(launch),
         });
-        self.radio(RadioCue::new(
-            RadioTier::Tactical,
-            None,
-            format!("Dispatch: air unit requested, ETA {launch:.0} s."),
-        ));
+        // Row 144, tier 1: the helicopter deploying is news the driver can use.
+        self.radio(
+            RadioCue::new(
+                RadioTier::Actionable,
+                None,
+                format!(
+                    "Dispatch: air unit launching on racer #{}, ETA {launch:.0} seconds.",
+                    racer.0
+                ),
+            )
+            .supersedes(format!("air:{}", racer.0)),
+        );
         Ok(())
     }
 
@@ -3431,7 +3406,10 @@ impl PoliceSystem {
                     } else {
                         format!("{callsign}: eyes on {desc}. Spotlight on.")
                     };
-                    cue = Some(RadioCue::new(RadioTier::Critical, Some(id), text));
+                    cue = Some(
+                        RadioCue::new(RadioTier::Actionable, Some(id), text)
+                            .supersedes(format!("air:{}", target.0)),
+                    );
                     s.acquired = true;
                 } else if now >= s.next_report {
                     s.next_report = now.plus(every);
@@ -3440,7 +3418,7 @@ impl PoliceSystem {
                         (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt() * 3.6
                     });
                     cue = Some(RadioCue::new(
-                        RadioTier::Tactical,
+                        RadioTier::Investigation,
                         Some(id),
                         format!("{callsign}: still on {desc}, {kmh:.0} km/h."),
                     ));
@@ -3448,11 +3426,14 @@ impl PoliceSystem {
             } else if s.visual && now.since(s.last_los) >= lost_after {
                 s.visual = false;
                 let desc = self.racer_desc(target);
-                cue = Some(RadioCue::new(
-                    RadioTier::Critical,
-                    Some(id),
-                    format!("{callsign}: lost visual on {desc}. Units, check the cover."),
-                ));
+                cue = Some(
+                    RadioCue::new(
+                        RadioTier::Actionable,
+                        Some(id),
+                        format!("{callsign}: lost visual on {desc}. Units, check the cover."),
+                    )
+                    .supersedes(format!("air:{}", target.0)),
+                );
             }
             self.helo_sight.insert(id, s);
             if let Some(c) = cue {
@@ -3509,7 +3490,7 @@ impl PoliceSystem {
                 remaining_s: self.captain.roadblock_ready.since(now),
             });
         }
-        if self.roadblocks.len() as u32 >= rb.max_active {
+        if self.roadblocks.iter().filter(|r| !r.scripted).count() as u32 >= rb.max_active {
             return Err(CaptainError::Budget);
         }
         let (p, v) = self.racer_motion(racer).ok_or(CaptainError::NotPursued)?;
@@ -3552,6 +3533,7 @@ impl PoliceSystem {
             units: Vec::new(),
             barriers,
             expires: now.plus(lifetime),
+            scripted: false,
         });
         self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
@@ -3602,6 +3584,7 @@ impl PoliceSystem {
             units: Vec::new(),
             barriers,
             expires,
+            scripted: false,
         });
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
@@ -3658,7 +3641,7 @@ impl PoliceSystem {
                 remaining_s: self.captain.spikes_ready.since(now),
             });
         }
-        if self.spikes.len() as u32 >= sc.max_active {
+        if self.spikes.iter().filter(|s| !s.scripted).count() as u32 >= sc.max_active {
             return Err(CaptainError::Budget);
         }
         let (p, v) = self.racer_motion(racer).ok_or(CaptainError::NotPursued)?;
@@ -3743,6 +3726,16 @@ impl PoliceSystem {
             if rb.is_none() && sp.is_none() {
                 continue;
             }
+            // Row 140: by the time its spot is hidden the racer may have moved on, leaving the
+            // spot on the far carriageway of its road now; such a car is not spawned at all.
+            let racer = match (rb, sp) {
+                (Some(k), _) => self.roadblocks[k].racer,
+                (_, Some(k)) => self.spikes[k].racer,
+                _ => continue,
+            };
+            if self.far_side(&self.racer_corridor(racer), car.pos) {
+                continue;
+            }
             if self.warmed_up && self.spawn_in_view(world, car.pos) {
                 self.tool_cars.push(car);
                 continue;
@@ -3785,14 +3778,14 @@ impl PoliceSystem {
         let now = self.now;
         let mut removed = Vec::new();
         self.roadblocks.retain(|rb| {
-            let keep = now < rb.expires && racer != Some(rb.racer);
+            let keep = now < rb.expires && (rb.scripted || racer != Some(rb.racer));
             if !keep {
                 removed.push((rb.id, rb.units.clone()));
             }
             keep
         });
         self.spikes.retain(|s| {
-            let keep = now < s.expires && racer != Some(s.racer);
+            let keep = now < s.expires && (s.scripted || racer != Some(s.racer));
             if !keep {
                 removed.push((s.id, s.unit.into_iter().collect()));
             }

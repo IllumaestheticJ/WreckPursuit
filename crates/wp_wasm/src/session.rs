@@ -33,6 +33,19 @@ use crate::garage_visit::{GarageOffer, GarageRepairReport, GarageSite, GARAGE_EN
 use crate::race::RaceRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
+use crate::street::{Preview, StreetRacers};
+
+thread_local! {
+    /// Street racers spawn in new live city sessions ([`set_street_racers_enabled`]).
+    static STREET_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Add NPC street racers to live free-drive / city-chase sessions in a city started from now
+/// on (default on; e2e and benchmarks may turn them off). Sessions of a scenario that already
+/// has street racers (a replay, a saved street session) keep them either way.
+pub fn set_street_racers_enabled(on: bool) {
+    STREET_ENABLED.with(|c| c.set(on));
+}
 
 /// At most this many ticks run per `step()` call (0.25 s of sim time).
 pub const MAX_TICKS_PER_STEP: u32 = 60;
@@ -91,6 +104,14 @@ pub struct Session {
     log: Replay,
     recording: bool,
     events: Vec<SimEvent>,
+    /// The city's repair shops (sessions with an economy run; see [`crate::garage_visit`]).
+    garages: Vec<GarageSite>,
+    /// The open garage visit (the player's car is held while it is open).
+    visit: Option<GarageOffer>,
+    /// The player's car has been outside every garage since the last visit (or the start).
+    garage_armed: bool,
+    /// Garage visits opened so far.
+    visit_seq: u32,
     playback: Option<Playback>,
     mode: DamageMode,
     live_end_hash: Option<u64>,
@@ -104,14 +125,8 @@ pub struct Session {
     race: Option<RaceRun>,
     /// Rolling snapshot buffer + big-crash detector (live sessions; see [`crate::crash_replay`]).
     crash: CrashRecorder,
-    /// The city's repair shops (sessions with an economy run; see [`crate::garage_visit`]).
-    garages: Vec<GarageSite>,
-    /// The open garage visit (the player's car is held while it is open).
-    visit: Option<GarageOffer>,
-    /// The player's car has been outside every garage since the last visit (or the start).
-    garage_armed: bool,
-    /// Garage visits opened so far.
-    visit_seq: u32,
+    /// The street AI (live sessions whose scenario has street racers; see [`crate::street`]).
+    street: Option<StreetRacers>,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -178,6 +193,15 @@ impl Session {
             }
             _ => None,
         };
+        // Street racers (scenario entities `street_*`, see `crate::street`): AI racers in every
+        // session that has them, driven by the street AI in live sessions only (a playback
+        // takes their inputs and moves from the log).
+        crate::street::mark_racers(&mut sim, &sc, &ids);
+        let street = if playback.is_none() && !scripted && sim.systems().police {
+            StreetRacers::new(&sc, &ids)
+        } else {
+            None
+        };
         // A picker race: judged next to the sim, live and in playback (not scripted menu runs).
         let race = match crate::race::race_for_scenario(&sc.name) {
             Some((def, autopilot)) if !scripted => Some(RaceRun::new(
@@ -202,6 +226,7 @@ impl Session {
             Vec::new()
         };
         Ok(Self {
+            street,
             crash,
             race,
             run,
@@ -269,6 +294,16 @@ impl Session {
                 if let (Some(p), Some(e)) = (grid, sc.entities.first_mut()) {
                     e.pos = p.pos;
                     e.yaw = p.heading_rad;
+                }
+                // Street racers join the scenario as entities before the sim is built, so a
+                // recording carries them and playback spawns them the same way.
+                if STREET_ENABLED.with(|c| c.get()) && crate::street::scenario_wants_racers(&sc) {
+                    let at = sc
+                        .entities
+                        .first()
+                        .map_or([0.0; 2], |e| [e.pos[0], e.pos[1]]);
+                    let roster = crate::street::plan_roster(&world, at, sc.seed);
+                    sc.entities.extend(roster);
                 }
             }
         }
@@ -872,12 +907,18 @@ impl Session {
         Some((spot(side), yaw, p[2]))
     }
 
-    /// The vehicle is held on the brakes because its run is over (capture or wreck) or it is
-    /// in a garage visit.
+    /// The vehicle is held on the brakes because its run is over (capture or wreck), it is in
+    /// a garage visit, or a street race holds it.
     pub fn held(&self, id: EntityId) -> bool {
-        self.run
-            .as_ref()
-            .is_some_and(|r| (r.is_over() || self.visit.is_some()) && r.player() == id)
+        self.run.as_ref().is_some_and(|r| {
+            r.player() == id
+                && (r.is_over()
+                    || self.visit.is_some()
+                    || self
+                        .street
+                        .as_ref()
+                        .is_some_and(|s| s.holds_player(self.sim.tick())))
+        })
     }
 
     // ----- garage visits (lead; see `crate::garage_visit`) ------------------------------
@@ -1016,6 +1057,98 @@ impl Session {
         }
     }
 
+    // ----- street racers (see `crate::street`) -------------------------------------------
+
+    /// The session's street racers, if any.
+    pub fn street(&self) -> Option<&StreetRacers> {
+        self.street.as_ref()
+    }
+
+    /// Street racers, mutable (tests).
+    #[cfg(test)]
+    pub(crate) fn street_mut_for_tests(&mut self) -> &mut StreetRacers {
+        self.street.as_mut().expect("street racers")
+    }
+
+    /// Tests: put scenario entity `id` at `xy` facing `yaw`, at rest, as a logged `ResetAt`
+    /// op (unlike `debug_sim_mut`, recordings and crash replays keep the move).
+    #[cfg(test)]
+    pub(crate) fn place_logged(
+        &mut self,
+        id: EntityId,
+        xy: [f32; 2],
+        yaw: f32,
+        near_z: f32,
+    ) -> Result<(), String> {
+        let idx = self.idx(id)?;
+        self.log_op(
+            idx,
+            OpKind::ResetAt {
+                xy,
+                yaw,
+                near_z,
+                repair: false,
+            },
+        )
+    }
+
+    /// Plan a street race from the player to `finish` (the open challenge's B).
+    pub fn street_preview(&self, finish: [f32; 2]) -> Result<Preview, String> {
+        let (street, run) = self
+            .street
+            .as_ref()
+            .zip(self.run.as_ref())
+            .ok_or("no street racers in this session")?;
+        street.preview(&self.sim, run.player(), finish)
+    }
+
+    /// Accept the open challenge: race to `finish` for `stake` dollars.
+    pub fn street_accept(&mut self, finish: [f32; 2], stake: i64) -> Result<(), String> {
+        self.live_check()?;
+        let (street, run) = self
+            .street
+            .as_mut()
+            .zip(self.run.as_mut())
+            .ok_or("no street racers in this session")?;
+        let m = street.accept(&self.sim, run, finish, stake)?;
+        self.apply_street_move(m);
+        Ok(())
+    }
+
+    /// Log and apply a street racer's move ([`crate::street::Move`]) as replay ops: `ResetAt`,
+    /// then `Ghost` when it asks for a ghost window.
+    fn apply_street_move(&mut self, m: crate::street::Move) {
+        let Some(idx) = self.index(m.entity) else {
+            return;
+        };
+        // Only an unknown entity index fails, and street racers are scenario entities.
+        let _ = self.log_op(
+            idx,
+            OpKind::ResetAt {
+                xy: m.xy,
+                yaw: m.yaw,
+                near_z: m.near_z,
+                repair: m.repair,
+            },
+        );
+        if m.ghost_ticks > 0 {
+            let _ = self.log_op(
+                idx,
+                OpKind::Ghost {
+                    ticks: m.ghost_ticks,
+                },
+            );
+        }
+    }
+
+    /// Decline the open challenge.
+    pub fn street_decline(&mut self) {
+        let tick = self.sim.tick();
+        if let Some(s) = &mut self.street {
+            s.decline(tick);
+        }
+    }
+
     /// "Repair & continue": pay the impound fee and the repair from the ledger, repair the car
     /// in place (logged replay op) and give control back.
     pub fn repair_and_continue(&mut self) -> Result<ContinueReport, String> {
@@ -1115,6 +1248,24 @@ impl Session {
                     ..Default::default()
                 },
             );
+        } else if let Some(idx) = self
+            .street
+            .as_ref()
+            .filter(|s| s.holds_player(tick))
+            .and(self.run.as_ref())
+            .and_then(|r| self.index(r.player()))
+        {
+            // Street race countdown: the player waits on the handbrake for the green light (a
+            // held brake pedal at a standstill would engage reverse).
+            let keep = self.last_input[idx];
+            self.log_input(
+                idx,
+                VehicleInput {
+                    handbrake: 1.0,
+                    headlights: keep.headlights,
+                    ..Default::default()
+                },
+            );
         } else if self.script_running() {
             // Scenario entities only: city runs add police / traffic cars (not scripted).
             let states = scenario_states(&self.sim, &self.ids);
@@ -1135,6 +1286,22 @@ impl Session {
                     if let Some(idx) = self.index(e) {
                         self.log_input(idx, input);
                     }
+                }
+            }
+        }
+
+        // 1c. Street racers (live only: playback has no street AI): their moves (logged ops)
+        //     and inputs (logged like a race's AI), so recordings replay them.
+        if let (Some(street), Some(&player)) = (&mut self.street, self.ids.first()) {
+            let horn = self.last_input[0].horn;
+            let over = self.run.as_ref().is_some_and(|r| r.is_over());
+            let step = street.before_step(&self.sim, player, horn, over);
+            for m in step.moves {
+                self.apply_street_move(m);
+            }
+            for (e, input) in step.inputs {
+                if let Some(idx) = self.index(e) {
+                    self.log_input(idx, input);
                 }
             }
         }
@@ -1180,12 +1347,15 @@ impl Session {
             for r in resets {
                 self.reset_onto_course(r.racer, r.pos, r.dir);
             }
+            self.check_garage();
         }
         if self.playback.is_none() {
             if let Some(p) = player {
                 self.observe_crash(p, player_before.as_ref(), &drained);
             }
-            self.check_garage();
+        }
+        if let Some(street) = &mut self.street {
+            street.after_step(&self.sim, &drained, self.run.as_mut());
         }
         self.events.extend(drained);
         self.events.extend(extra);
@@ -1508,6 +1678,9 @@ impl Session {
         let op_cursor = replay.ops.partition_point(|e| e.tick < snap.tick);
         let n = self.ids.len();
         let mut s = Session {
+            // No street AI in a crash replay: the racers are scenario entities, so the snapshot
+            // holds their cars and the log their inputs and moves, like any other entity.
+            street: None,
             // A crash replay is playback: no garage visits.
             garages: Vec::new(),
             visit: None,
