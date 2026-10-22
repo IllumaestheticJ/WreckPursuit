@@ -1,3 +1,40 @@
+# Round 3: origin/main d39aef63 → lead/main-sync (2026-10-22)
+
+- **Base:** `lead/main-sync` fast-forwarded to `origin/lead/round12` @ `9b686f76`, then
+  `origin/main` @ `d39aef63` (33 commits: PRs #17 ws/harness, #39, #28, #35, #33, #34, #30).
+- **Method.** Only **16 non-merge commits** on main are not in round 12; everything else on
+  main's side arrives through main's own merge commits (ws/harness merging main's highway
+  layout and round 12b, detailed-car-models), i.e. main's resolution of the same round-12-vs-main
+  question this branch answered in rounds 1–2. A textual merge gave 122 conflicting files plus 55
+  goldens, nearly all of them that duplicate resolution. So the merge is recorded with round 12's
+  tree (`2c867ca7`, `-s ours`: round 12 wins), and main's genuinely new commits are
+  cherry-picked on top (`-x`), one reviewable commit each.
+
+## Taken from main
+| main commit (PR) | Here | What |
+|---|---|---|
+| `840b1021` (#35) | `d90e9824` | Freeway paint: dotted lines through ramp tapers / auxiliary lanes, gore chevrons (`markings.rs`, `CityMap::paint`, Arc-shared like round 12's other map tables). Screenshots added. |
+| `6eda42e3` (#34) | cherry-pick | Kinematic (low-LOD) police no longer roll `wp_police`'s statistical traffic hazards on top of the real `wp_world` traffic (`PoliceSetup::hazards = false` in `wp_sim`). A sim-glue bug fix, not a police-behaviour decision; flagged to E. |
+| `c941e3f0`, `5d7e469d` (#30) | cherry-picks | ui-kit: modded builds' stat bars measured on the physics rig in a wasm worker (`car_stats_build_json`, already in round 12), estimates until measured. |
+| `4d978135` (#33) + `985aeb0a` (#39) | `e1fa1b50` | Fuzz walls kept 3.5 m clear of every spawn (CI seeds 457 / 462 "below ground"); main's final `fuzz.rs` with round 12's entity / scenario fields. |
+
+## Already in round 12 (skipped)
+| main commit | Round 12 |
+|---|---|
+| `a31de58a` solid terrain = drawn terrain (#39) | `b6dfc12d` (row 119) |
+| `ec1b7f35` drawn terrain follows the ground (#39) | `8abeacc6` |
+| `9db04d32` flat grid keeps its raw terrain collider (#39) | same early return in `surface::collision_terrain`; `wp_sim` reads relief through `surface::has_relief` (round 2); test `flat_terrain_collides_unchanged` |
+| `58bfc8f1`, `eff79e6e` backup / reinforcements wait ahead, "ambush" (#33) | `2b012656` (E's port) |
+| PR #28 detailed-car-models | merged into round 12 (`052430de`, mesh format 4: turn signals, LOD) |
+
+## Round 12 chosen over main (and why)
+| main | Why round 12 |
+|---|---|
+| `37fed9ad` wp_vehicle: main's high-speed catch fix on the self-aligning steering | Owner decisions on round 12's handling: one steering model (unify), brake bias +0.05, countersteer 0, catch 0.8, grip-balance rows 142 / 143 in flight. `crates/wp_vehicle` is byte-for-byte round 12. |
+| `8fabe695` police expectations re-measured on main's layout; `bedfab1d` turning round toward a target behind is not running wide | Police rows 131 / 133 / 140 in flight on `ws/police`; E re-measured and fixed police on main's layout on round 12 (`a0678db4`, `12240a31`, `66904248`). |
+| `3af18fd0`, `6530accb`, `8fa0c8d6`, `85cd1e64` (ws/harness re-aims, race picker, pace lock-in, merge notes on main's layout) | A parallel resolution of the merge round 2 did here (gated, blessed). E.g. harness shortens Founders Cut to 105 m; round 12 keeps 205 m (round 2, all grades in cap); Hollins Tunnel is one tube in both. |
+| Every other conflicting file (main's merge commits `7245e760`, `0eaec919`, detailed-car-models merges): `crates/wp_vehicle`, `crates/wp_police`, `wp_opponent` / `wp_race` (AI racers never give up, pace locks), `data/panels`, `tools/assets`, testbed car rendering (`panels.ts`, `vehicle_view.ts`, `lod.ts`, `fleet.ts`, `props.ts`: format-4 meshes with integrated turn signals and LOD), `data/audio` + `data/cars` (procedural big engines, siren, spike sounds), scenarios, `wp_world` / `wp_sim` / `city-import` merge glue, docs | Round 12's version: these files hold no main-only commit, only main's merge resolutions of content round 12 already has in a newer form. `data/city/*` regenerated: unchanged. |
+
 # main → round 12 sync (lead helper)
 
 - **Branch:** `lead/main-sync`, from `origin/lead/round12` @ `95021b5`.
