@@ -115,27 +115,45 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   point is `eye_height_at(z)` like the ground units'. Radio (`dispatch::helo_reports`): "eyes on
   … Spotlight on." on first sight, a position report every `position_report_s` while it keeps
   visual, "lost visual" after `lost_visual_after_s` without sight, "reacquired" — the first,
-  lost and reacquired lines are critical (always spoken). `helicopters()` →
+  lost and reacquired lines are tier 1 (actionable, row 144), position reports tier 4. `helicopters()` →
   `HeloView { has_visual, spotlight_target, … }` for the renderer's night spotlight.
-- Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
-  `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
+- Radio lines are raised by dispatch decisions and callouts; `radio::RadioDirector` paces what
+  is spoken as `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
+- **Priority tiers** (playtest row 144, "filtering between important and unimportant
+  information", `radio::RadioTier`): 1 actionable (roadblock / spikes planned with place and
+  distance — "Dispatch, racer #7: roadblock 400 metres ahead, northbound on Lantern Row." —
+  helicopter launching / arriving / losing the racer, a unit intercepting ahead at L2+), 2
+  escalation (pursuit start / end, level up / down, "Highway Patrol is taking over", "rams
+  authorised", captain orders), 3 impacts (shouted, picked by `chatter::impact_severity` from
+  contact energy and unit damage; a big wreck stacks another unit's "Unit 4 is down!"), 4
+  investigation (calls, searching, lost visual / last seen), 5 routine. Tier 1 cuts anything
+  lower and waits only for the transmission on air (a roadblock / spike warning also cuts other
+  tier 1 traffic); tier 2 cuts tiers 3–5; routine lines are dropped while anything more
+  important waits and thin out as heat rises (`routine_gap_s`). Deployment lines (units joining,
+  responding to a known call, backup, tool cars arriving) are not spoken: at L0–L1 one "units
+  responding" summary when heat first rises. `RadioLine::tier`, `PoliceSystem::radio_tier_of`
+  give bridges the tier (the contract event has none, request R144-1). Bench:
+  `cargo run --release -p wp_police --example radio_bench -- <scenario.ron> [--log N]`.
 - **One transmission at a time** (playtest row 79): a spoken line holds the channel for its
   length (`words / words_per_s + line_pad_s`, the audio scanner's numbers) plus `min_gap_s`
-  (2.5 s); waiting lines are a priority queue (tier, cue `prio`, age), lose their slot when a
+  (2.5 s; 0.8 s after a shouted tier 3 line); waiting lines are a priority queue (tier 1,
+  emergency traffic, tier, cue `prio`, age), lose their slot when a
   newer line supersedes them ("now level 4" replaces a queued "now level 3") and expire
   (`stale_s`, `stale_critical_s`, or the cue's own life). Gaps shrink with the wanted level
   (`global_gap_s` / `unit_gap_s` per L1..L5; L1 keeps the row-6 8 s / 30 s).
 - **Unit-to-unit callouts** (`chatter`, row 79): units call what they see with their call sign
   and a place on the map — "Unit 6, lost visual. Last seen eastbound on Harbor Boulevard at
-  Lantern Way.", "eyes on him again", "requesting backup", "I'm on his bumper", "going for the
-  PIT" / "he's spun" / "he got away", "boxing him in", "spikes hit", "I'm out of the chase",
-  "he's gone into the Hollins Tunnel"; dispatch summarises level rises (place, units on him, air
-  unit) and closes pursuits with the place. Places: street (+ cross street at junctions) from
+  Lantern Way.", "eyes on him again", "I'm on his bumper", "going for the PIT!" / "he's spun!" /
+  "he got away", "boxing him in", "spikes hit!", "he rammed me, I've lost my front end!", "he
+  just took out a civilian!", "he's gone into the Hollins Tunnel"; dispatch summarises level
+  rises and drops (place, units on him, air unit, a tougher department) and closes pursuits
+  with the place. Places: street (+ cross street at junctions) from
   `World::edge_names` (Port Vesper), tunnel names, district otherwise
   (`PoliceSystem::place_phrase`). The lost-visual call reads the racer record's `last_known`,
-  the same position search and interception steer to. Observer only: not hashed, no RNG.
+  the same position search and interception steer to. Observer only: not hashed; line variety
+  from the chatter's own seeded RNG (never the simulation's).
   `chatter_stats()` counts raised callouts. Tests: `tests/radio_chatter.rs`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
