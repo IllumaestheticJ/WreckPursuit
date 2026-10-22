@@ -1518,6 +1518,11 @@ blocked boxes at short-green signals, not Priority junctions). Test:
 `starve_tests::starved_minor_road_cars_accept_shorter_gaps_after_a_long_wait`; the scenario is
 the behaviour gate.
 
+**`blocked::multi_lane_road_changes_lane_around_a_stopped_car` (lead, 2026-10-22).** Passes
+on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contacts 0). The
+failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
+threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
+
 ## Playtest row 149 — "I currently now can't hit traffic cars" (world side)
 **Cause.** Kinematic traffic has no collider: only physical (promoted) cars can be hit. With the
 physical cap (`TrafficConfig::max_physical`, 16) full, cars stayed physical out to 100 m and
