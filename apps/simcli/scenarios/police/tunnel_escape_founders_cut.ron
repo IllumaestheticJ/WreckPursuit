@@ -45,9 +45,14 @@
 // timeline (seed 51 lost him on Mercer at 64.5 s and he escaped at 80.4 s, before the helicopter).
 // Seeds 50-63: the escape story holds on 12 of 14, escape and control both on 7 (53-55, 57, 59,
 // 60, 62); re-seeded to 53.
+// World merge 6799200b (D's Loop 9 rest stops add off/on ramps and parking roads to Port Vesper):
+// the new roads change the seeded police spawn spots, and seed 53 diverged at 17.6 s; no unit
+// was near Mercer to re-acquire him at ~72 s, so he escaped at 80.4 s before the helicopter.
+// Seeds 50-63 on the merged tip: escape story on 11 of 14, both scenarios on 4 (54-56, 58); 54
+// and 55 held both before the merge too. Re-seeded to 54.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 53,
+    seed: 54,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
