@@ -223,6 +223,10 @@ pub enum AudioCommand {
         text: String,
         /// Line priority.
         priority: crate::RadioPriority,
+        /// Police priority tier (row 144): 1 = actionable … 5 = routine, 0 = unknown. The
+        /// testbed styles the strip by it, adds a tone before tier 1 and shouts tier 3.
+        #[serde(default)]
+        tier: u8,
         /// Time the director reserves for the line, s.
         duration_s: f32,
         /// Voice pitch multiplier derived from the unit (each unit sounds different).
