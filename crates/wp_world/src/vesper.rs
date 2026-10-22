@@ -264,6 +264,52 @@ const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
 /// Terminal junction distance from the loop centreline at a full interchange, m.
 const FULL_REACH_M: f32 = 150.0;
 
+/// Loop 9 rest stop (playtest row 153): gore distance from its centre along the loop, m.
+const REST_SPAN_M: f32 = 275.0;
+/// Half length of a rest stop's parking road (between its ramp ends), m.
+const REST_HALF_M: f32 = 50.0;
+/// Parking road centreline from the loop centreline, m (beyond the carriageway, its outer
+/// shoulder and the ramp lane).
+const REST_OFFSET_M: f32 = 34.0;
+/// A rest stop's parking road: one-way, one lane, parking on both kerbs, walking pace.
+const REST_ROAD: Style = Style {
+    class: RoadClass::Local,
+    fwd: 1,
+    bwd: 0,
+    speed: 8.9408, // 20 mph
+    parking: true,
+    // The local-street cap: the Hollins one runs across the hill's western slope.
+    grade: 0.10,
+    bank_max: 0.0,
+};
+
+/// Loop 9 rest stops: (near point on the loop, carriageway side +1 outer / -1 inner, name).
+/// Placed on the stretches long enough for their ramps (clear of the interchanges, Route 40's
+/// crossings and the Hollins Tunnel); the south ones sit on the inner carriageway (the sea
+/// starts just beyond the outer one there). The north-east stretch (Bluff Road to Uptown) only
+/// has room on the banked corner, where a gore does not meet the drawn surface; none there.
+const REST_SITES: [(V2, f32, &str); 3] = [
+    ([-1490.0, 1120.0], 1.0, "Hollins Rest Area"),
+    ([-960.0, -1035.0], -1.0, "Larkspur Rest Area"),
+    ([40.0, -1063.0], -1.0, "Harbor Rest Area"),
+];
+
+/// A Loop 9 rest stop: an off-ramp from one carriageway to its parking road and an on-ramp
+/// back.
+#[derive(Debug, Clone, Copy)]
+struct RestStop {
+    /// Centre on the loop centreline (before profiling), m.
+    centre: V2,
+    /// +1 outer (counter-clockwise) carriageway, -1 inner.
+    side: f32,
+    /// Parking road start (off-ramp end) and end (on-ramp start).
+    t_in: usize,
+    t_out: usize,
+    /// Draft index of the parking road.
+    road: usize,
+    name: &'static str,
+}
+
 /// A Loop 9 interchange: a diamond whose crossroad bridges the highway (full), or a half
 /// diamond with ramps to the inner carriageway only.
 #[derive(Debug, Clone, Copy)]
@@ -356,6 +402,8 @@ struct Gen {
     skipped: usize,
     /// Loop 9 interchanges.
     interchanges: Vec<Interchange>,
+    /// Loop 9 rest stops.
+    rest_stops: Vec<RestStop>,
     /// Ramps that will end at each node (counted into its junction flat length).
     ramp_ends: Vec<usize>,
 }
@@ -922,6 +970,38 @@ impl Gen {
                 outer,
             });
             terminal.push(inner);
+        }
+        // Rest stops: the parking road runs beside the loop, ramps at either end.
+        for (near, side, name) in REST_SITES {
+            let sc = project2(&closed, &lcum, near).0;
+            // Beside the loop at arc `u` from the centre: outward of the outer carriageway,
+            // inward (city side) of the inner one.
+            let beside = |u: f32| {
+                let (c, d) = point_on(&closed, &lcum, (sc + u).rem_euclid(ltotal));
+                let inward = [-d[1], d[0]];
+                geom::add(c, geom::scale(inward, -side * REST_OFFSET_M))
+            };
+            // Travel runs with the ring on the outer carriageway, against it on the inner.
+            let (u_in, u_out) = (-side * REST_HALF_M, side * REST_HALF_M);
+            let t_in = self.node(beside(u_in));
+            let t_out = self.node(beside(u_out));
+            let n = (2.0 * REST_HALF_M / 6.0).ceil() as usize;
+            let path: Vec<V2> = (0..=n)
+                .map(|k| beside(u_in + (u_out - u_in) * k as f32 / n as f32))
+                .collect();
+            let road = self
+                .road(t_in, t_out, path, REST_ROAD, name)
+                .expect("rest stop road crosses another road");
+            self.ramp_ends.extend([t_in, t_out]);
+            self.rest_stops.push(RestStop {
+                centre: point_on(&closed, &lcum, sc).0,
+                side,
+                t_in,
+                t_out,
+                road,
+                name,
+            });
+            site_s.push(sc);
         }
         // The loop is cut half-way between interchanges (plain bend nodes), but not near
         // where Route 40 West / North cross it (their grade separations need the room).
@@ -2249,6 +2329,24 @@ fn plan_ramps(g: &Gen, ring: &Ring) -> Vec<RampPath> {
             }
         }
     }
+    // Rest stops: off-ramp upstream of the centre, on-ramp downstream.
+    for rs in &g.rest_stops {
+        let sc = ring.project(rs.centre);
+        for off in [true, false] {
+            let up = if off { -rs.side } else { rs.side };
+            let gs = (sc + up * REST_SPAN_M).rem_euclid(total);
+            let term = if off { rs.t_in } else { rs.t_out };
+            ramps.push(RampPath {
+                gore: usize::MAX,
+                terminal: term,
+                gore_p: ring.offset(gs, rs.side * CARRIAGEWAY_OFFSET_M),
+                gore_s: gs,
+                off,
+                path: ramp_path(ring, gs, rs.side, off, g.nodes[term].pos),
+                dir: rs.side,
+            });
+        }
+    }
     ramps
 }
 
@@ -2877,6 +2975,7 @@ fn buildings(
     zones: &[Zone],
     hf: &Heightfield,
     dead_ends: &[V2],
+    no_buildings: &[usize],
 ) -> (Vec<Building>, Vec<Decor>) {
     let grid = SurfaceGrid::new(built);
     // Junction / bend areas with the turning paths through them, plus a sidewalk.
@@ -2911,7 +3010,8 @@ fn buildings(
                 .any(|q| dead_ends.iter().any(|d| geom::dist(*q, *d) < 20.0))
     };
     for s in &built.surfaces {
-        if s.highway {
+        // Rest stops: a lit parking road, no houses along it.
+        if s.highway || no_buildings.contains(&(s.road as usize)) {
             continue;
         }
         let pts: Vec<V2> = s.centre.iter().map(|p| geom::xy(*p)).collect();
@@ -3289,6 +3389,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         drafts: Vec::new(),
         skipped: 0,
         interchanges: Vec::new(),
+        rest_stops: Vec::new(),
         ramp_ends: Vec::new(),
     };
     let (loop_drafts, hollins_draft, _knob, _lot, _r40w, _r40n) = g.layout();
@@ -3347,7 +3448,13 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     let drafts = &g.drafts;
     let nat = &g.nat;
     let surfaces = &built.surfaces;
+    // Rest stops' parking roads sit at the highway's level beside it: on an embankment (the
+    // ground is filled up to them), never on a deck.
+    let rest_roads: Vec<usize> = g.rest_stops.iter().map(|r| road_of(r.road)).collect();
     let deck = |road: usize, k: usize| -> bool {
+        if rest_roads.contains(&road) {
+            return false;
+        }
         let s = &surfaces[road];
         let p = s.centre[k];
         if is_elevated(s, k, &|q| nat.z(q), 3.0) {
@@ -3381,8 +3488,15 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .filter(|n| degree[*n] == 1)
         .map(|n| g.nodes[n].pos)
         .collect();
-    let (mut buildings, mut decor) =
-        buildings(&mut g.rng, &built, &g.nodes, &zones, &hf, &dead_ends);
+    let (mut buildings, mut decor) = buildings(
+        &mut g.rng,
+        &built,
+        &g.nodes,
+        &zones,
+        &hf,
+        &dead_ends,
+        &rest_roads,
+    );
     let cover_shapes: Vec<CoverShape> = covered.iter().map(CoverShape::new).collect();
     buildings.retain(|b| !in_cover_corridor(&cover_shapes, &b.footprint));
     decor.retain(|d| !in_cover_corridor(&cover_shapes, &[[d.pos[0], d.pos[1]]]));
@@ -3487,11 +3601,25 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
             });
         }
     }
+    // Rest stops: a named site in the middle of each parking road (night meets, bets).
+    for rs in &g.rest_stops {
+        if let Some((p, yaw, lane)) = lane_pose(&built, road_of(rs.road), REST_HALF_M, true) {
+            pois.push(Poi {
+                kind: PoiKind::RestStop,
+                name: rs.name.into(),
+                pos: p,
+                heading_rad: yaw,
+                lane: Some(lane),
+            });
+        }
+    }
     // Route ends either side of each covered road (drive-through and pursuit scenarios):
     // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
     // after the second.
     let tunnel_ends: [(&str, f32, f32); 2] = [
-        ("Hollins Tunnel", -200.0, 200.0),
+        // Exit 120 m past the west portal: the Hollins Rest Area's off-ramp gore is ~210 m
+        // past it (row 153).
+        ("Hollins Tunnel", -200.0, 120.0),
         ("Founders Cut", 40.0, -40.0),
     ];
     for (name, s0, s1) in tunnel_ends {
@@ -3800,6 +3928,87 @@ mod tests {
         }
     }
 
+    /// Playtest row 153: rest stops on Loop 9 — a named site on a lit parking road with parked
+    /// cars, reached from the carriageway by an off-ramp and left by an on-ramp, no houses.
+    #[test]
+    fn loop_rest_stops_pull_off_and_back() {
+        let (net, rep) = city();
+        let map = crate::map::CityMap::new(net.clone());
+        let sites: Vec<&Poi> = net
+            .pois
+            .iter()
+            .filter(|p| p.kind == PoiKind::RestStop)
+            .collect();
+        assert_eq!(sites.len(), REST_SITES.len());
+        let parked = crate::props::parked_cars(&map, 1);
+        let loop_lane = |l: LaneId| {
+            rep.loop_roads
+                .contains(&(net.lanes[l as usize].road as usize))
+        };
+        for site in &sites {
+            let lane = site.lane.expect("site on a lane");
+            let road = net.lanes[lane as usize].road as usize;
+            assert_eq!(rep.road_names[road], site.name.as_str());
+            // Lanes into the parking road come from an off-ramp that leaves the loop; the lane
+            // out of it feeds an on-ramp that joins the loop.
+            let into: Vec<usize> = (0..net.lanes.len())
+                .filter(|i| net.lanes[*i].connections.iter().any(|c| c.to == lane))
+                .collect();
+            assert!(!into.is_empty(), "{}", site.name);
+            for &r in &into {
+                assert!(
+                    rep.ramp_roads.contains(&(net.lanes[r].road as usize)),
+                    "{}",
+                    site.name
+                );
+                let feeds: Vec<usize> = (0..net.lanes.len())
+                    .filter(|i| net.lanes[*i].connections.iter().any(|c| c.to as usize == r))
+                    .collect();
+                assert!(
+                    feeds.iter().any(|f| loop_lane(*f as LaneId)),
+                    "{} off-ramp",
+                    site.name
+                );
+            }
+            let outs = &net.lanes[lane as usize].connections;
+            assert!(!outs.is_empty(), "{}", site.name);
+            for c in outs {
+                let r = &net.lanes[c.to as usize];
+                assert!(rep.ramp_roads.contains(&(r.road as usize)), "{}", site.name);
+                assert!(
+                    r.connections.iter().any(|d| loop_lane(d.to)),
+                    "{} on-ramp",
+                    site.name
+                );
+            }
+            // A couple of parked cars at least; no buildings within 25 m of the site.
+            let q = [site.pos[0], site.pos[1]];
+            let cars = parked
+                .iter()
+                .filter(|p| geom::dist(geom::xy(p.pos), q) < REST_HALF_M + 10.0)
+                .count();
+            assert!(cars >= 2, "{}: {cars} parked cars", site.name);
+            for b in &net.buildings {
+                for c in &b.footprint {
+                    assert!(geom::dist(*c, q) > 25.0, "{}: building at {c:?}", site.name);
+                }
+            }
+            // Near the loop (a pull-off), flat enough to park on.
+            assert!(
+                net.lanes.iter().any(|l| loop_lane_road(rep, l)
+                    && l.polyline
+                        .iter()
+                        .any(|p| geom::dist(geom::xy(*p), q) < 60.0)),
+                "{} beside the loop",
+                site.name
+            );
+        }
+    }
+
+    fn loop_lane_road(rep: &VesperReport, l: &Lane) -> bool {
+        rep.loop_roads.contains(&(l.road as usize))
+    }
+
     #[test]
     fn loop_is_a_divided_highway_with_ramps() {
         let (net, rep) = city();
@@ -3829,9 +4038,9 @@ mod tests {
             }
             assert!(!crate::markings::must_stop(&map, i as LaneId));
         }
-        // 22 ramps: 4 per full diamond, 2 at the port; each diverges from / merges into the
-        // rightmost lane, yields without a stop line and reaches a signalised terminal.
-        assert_eq!(rep.ramp_roads.len(), 22);
+        // 28 ramps: 4 per full diamond, 2 at the port, 2 per rest stop; each diverges from /
+        // merges into the rightmost lane, yields without a stop line and reaches a terminal.
+        assert_eq!(rep.ramp_roads.len(), 22 + 2 * REST_SITES.len());
         let mut merges = 0;
         let mut diverges = 0;
         for &r in &rep.ramp_roads {
@@ -3868,7 +4077,10 @@ mod tests {
             let len = *geom::cumulative(&l.polyline).last().unwrap();
             assert!(len > 180.0, "ramp {r} lane only {len} m");
         }
-        assert_eq!((diverges, merges), (11, 11));
+        assert_eq!(
+            (diverges, merges),
+            (11 + REST_SITES.len(), 11 + REST_SITES.len())
+        );
         // Ramps never cross another road at grade (their crossroad bridges the highway).
         for &r in &rep.ramp_roads {
             let s = &net.surfaces[r];

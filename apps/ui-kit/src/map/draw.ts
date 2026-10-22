@@ -366,6 +366,15 @@ export function drawPoi(ctx: Ctx, kind: MapPoi["kind"], x: number, y: number, s:
       ctx.stroke();
       glyph(ctx, "H", s * 0.8, pal.policeB);
       break;
+    case "RestStop":
+      // Highway rest stop (row 153): a parking "P" on a rounded square.
+      ctx.fillStyle = pal.ink;
+      ctx.beginPath();
+      ctx.roundRect(-s * 0.6, -s * 0.6, s * 1.2, s * 1.2, s * 0.25);
+      ctx.fill();
+      ctx.stroke();
+      glyph(ctx, "P", s * 0.9, "#000");
+      break;
     case "RaceStartGrid":
       ctx.fillStyle = pal.ink;
       ctx.fillRect(-s * 0.5, -s * 0.5, s * 0.5, s * 0.5);

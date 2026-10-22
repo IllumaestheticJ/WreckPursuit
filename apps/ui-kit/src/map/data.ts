@@ -30,7 +30,7 @@ export interface MapZone {
 
 /** Point of interest. */
 export interface MapPoi {
-  kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid";
+  kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid" | "RestStop";
   name: string;
   pos: [number, number];
 }
