@@ -124,6 +124,8 @@ pub const TV_SWEEP_MPS: f32 = 2.5;
 /// still one collision in [`TrafficStats::civilian_collisions`] (cars that bump, part and
 /// bump again counted twice).
 pub const RETOUCH_STEPS: u64 = 120;
+/// A wreck closer than this to a car's path (on top of both half widths) is in its way, m.
+pub const WRECK_PATH_MARGIN_M: f32 = 0.3;
 /// A unit beside a car that is merging back after a siren yield counts as standing (the car
 /// creeps on past it along the kerb) below this speed, m/s; a moving one is waited for.
 pub const BESIDE_STANDING_MPS: f32 = 1.0;
@@ -826,6 +828,8 @@ pub struct Traffic {
     /// Pairs that stopped overlapping recently, with the traffic step it ended: a re-touch
     /// within [`RETOUCH_STEPS`] is the same incident, not a new collision.
     overlap_ended: BTreeMap<(u32, u32), u64>,
+    /// Indices of wrecked agents this step (`Traffic::leader` checks them by position).
+    wrecks: Vec<u32>,
     /// Car models for physical agents; agent `id` uses `cars[traffic_model_index(id, len)]`.
     cars: Vec<(VehicleDef, TireDb)>,
     /// Seed for per-driver values derived from the id (patience).
@@ -1012,6 +1016,7 @@ impl Traffic {
             lod_changes: Vec::new(),
             overlaps: BTreeSet::new(),
             overlap_ended: BTreeMap::new(),
+            wrecks: Vec::new(),
             cars: Vec::new(),
             seed,
             opposite,
@@ -1233,6 +1238,12 @@ impl Traffic {
         self.rebuild_reservations(map);
         self.sample_queues(map);
         self.compute_poses(map);
+        self.wrecks.clear();
+        for (j, a) in self.agents.iter().enumerate() {
+            if a.disabled && !a.despawn {
+                self.wrecks.push(j as u32);
+            }
+        }
         self.compute_tv_blocks(map, inp.tracked, inp.hazards);
         self.decide(map, inp);
         self.resolve_blocks(map, inp);
@@ -1630,6 +1641,66 @@ impl Traffic {
     /// Nearest car ahead: `(gap, speed, agent index)`. Entries on the own segment at or before
     /// `skip_own` (a cluster being passed) are ignored.
     fn leader(&self, map: &CityMap, i: usize, skip_own: f32) -> (f32, f32, Option<u32>) {
+        let found = self.leader_in_lists(map, i, skip_own);
+        match self.wreck_in_path(map, i) {
+            Some((g, j)) if g < found.0 => (g, 0.0, Some(j)),
+            _ => found,
+        }
+    }
+
+    /// A wreck lying across agent `i`'s path (its segment and the next two of its plan) by
+    /// position, whatever segment it is filed under: a wreck shoved over from the next lane or
+    /// junction path is in the way too, and was hit by car after car (owner row 85,
+    /// pursuit melee). Gap to it and its index.
+    fn wreck_in_path(&self, map: &CityMap, i: usize) -> Option<(f32, u32)> {
+        if self.wrecks.is_empty() {
+            return None;
+        }
+        let a = &self.agents[i];
+        let q = self.poses[i].p;
+        let mut best: Option<(f32, u32)> = None;
+        for &j in &self.wrecks {
+            if j as usize == i {
+                continue;
+            }
+            let wp = self.poses[j as usize];
+            if (wp.p[2] - q[2]).abs() > 3.0 || geom::dist(geom::xy(wp.p), geom::xy(q)) > 80.0 {
+                continue;
+            }
+            let w = geom::xy(wp.p);
+            let mut base = -a.s;
+            for sg_id in [a.seg, a.plan[0], a.plan[1]] {
+                if sg_id == NONE {
+                    break;
+                }
+                let sg = map.seg(sg_id);
+                let pr = sg.project(w);
+                if pr.s > 0.0 && pr.s < sg.length {
+                    let (_, t) = sg.point_at(pr.s);
+                    // Half-width of the wreck across this path, as it lies.
+                    let ext = HALF_L * geom::dot(wp.f, geom::right_of(t)).abs()
+                        + CAR_WIDTH_M * 0.5 * geom::dot(wp.f, t).abs();
+                    if pr.dist < CAR_WIDTH_M * 0.5 + ext + WRECK_PATH_MARGIN_M {
+                        let along = base + pr.s;
+                        if along > 0.0 {
+                            // Its half-length along the path, as it lies.
+                            let len = HALF_L * geom::dot(wp.f, t).abs()
+                                + CAR_WIDTH_M * 0.5 * geom::dot(wp.f, geom::right_of(t)).abs();
+                            let g = along - HALF_L - len;
+                            if best.is_none_or(|b| g < b.0) {
+                                best = Some((g, j));
+                            }
+                        }
+                        break;
+                    }
+                }
+                base += sg.length;
+            }
+        }
+        best
+    }
+
+    fn leader_in_lists(&self, map: &CityMap, i: usize, skip_own: f32) -> (f32, f32, Option<u32>) {
         let a = &self.agents[i];
         let seg = map.seg(a.seg);
         let l = &self.lists[a.seg as usize];
