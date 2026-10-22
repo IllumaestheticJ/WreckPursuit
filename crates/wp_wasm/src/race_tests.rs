@@ -131,9 +131,11 @@ fn short_sprint_with_ai_runs_to_results_and_pays_through_the_economy() {
         events.last(),
         Some(RaceEvent::RaceFinished { .. })
     ));
-    // A 750 m sprint: at least three finish within a sensible time.
+    // A 750 m sprint: at least two finish within a sensible time. The grid sprint's speed
+    // trap (`data/police/races.toml`) takes racers out (seed 7: one captured, one fled), as
+    // in `wp_race`'s `race_picker::grid_highway_sprint`.
     let finishers: Vec<_> = r.rows.iter().filter(|x| x.status == "Finished").collect();
-    assert!(finishers.len() >= 3, "{:?}", r.rows);
+    assert!(finishers.len() >= 2, "{:?}", r.rows);
     let win = finishers[0].time_s.unwrap();
     assert!((15.0..60.0).contains(&win), "winner {win} s");
     assert_eq!(finishers[0].gap_s, Some(0.0));
