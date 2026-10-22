@@ -403,7 +403,7 @@ fn sample(u: &mut impl FnMut(f32, f32) -> f32) -> CarTune {
 fn vrsearch(n: usize) {
     let set = robust_set();
     let d = car("parity_rwd_d");
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     car_lab::set_override(Some(CarTune {
         side_floor: 0.0,
         ..CarTune::default()
@@ -427,7 +427,7 @@ fn vrsearch(n: usize) {
             align_full_deg: from + 5.0 + 25.0 * r[2],
             t_align_s: 0.15 + 0.7 * r[3],
             slide_key_gain: 1.2 * r[4],
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         plain::set_override(Some(p));
         let (mut sc, v) = robust(&set);
@@ -439,7 +439,7 @@ fn vrsearch(n: usize) {
         sc -= 0.3 * (worst - 5.0).max(0.0);
         rows.push((sc, p, worst, v));
     }
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     car_lab::set_override(None);
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));
     for (sc, p, worst, v) in rows.iter().take(6) {
@@ -480,7 +480,7 @@ fn release_score() -> (f32, usize) {
 fn joint(n: usize) {
     let set = robust_set();
     let d = car("parity_rwd_d");
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     car_lab::set_override(Some(CarTune {
         side_floor: 0.0,
         ..CarTune::default()
@@ -498,7 +498,7 @@ fn joint(n: usize) {
             align_full_deg: from + 4.0 + 20.0 * r[2],
             t_align_s: 0.15 + 0.6 * r[3],
             slide_key_gain: 1.2 * r[4],
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         let t = CarTune {
             spin_model: true,
@@ -523,7 +523,7 @@ fn joint(n: usize) {
         let held = v.iter().filter(|h| h.m.held && h.band_s >= 2.0).count();
         rows.push((sc, p, t, held, slow, worst));
     }
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     car_lab::set_override(None);
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));
     for (sc, p, t, held, slow, worst) in rows.iter().take(8) {
@@ -875,7 +875,7 @@ fn matrix() {
     car_lab::set_override(None);
     // Grip reference: the old tyres (floor 0) with the default plain steering.
     let plain_now = plain::active();
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     car_lab::set_override(Some(CarTune {
         side_floor: 0.0,
         ..CarTune::default()
@@ -1310,7 +1310,7 @@ fn clip1() {
     use wp_vehicle::ride_lab::{self, RideTune};
     let c = car("parity_rwd_d");
     let a = reference_assists();
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     ride_lab::set_override(Some(RideTune::lab_default()));
     let sweep: Vec<serde_json::Value> =
         serde_json::from_str(&std::env::var("SWEEP").unwrap_or_else(|_| "[{}]".into()))
@@ -1407,7 +1407,7 @@ fn main() {
     }
     // PLAIN='{"velocity_relative":true}': Drift Lab W's plain steering constants (missing
     // fields = defaults).
-    let plain_env: PlainSteer = std::env::var("PLAIN").map_or(PlainSteer::default(), |j| {
+    let plain_env: PlainSteer = std::env::var("PLAIN").map_or(PlainSteer::lab_w(), |j| {
         serde_json::from_str(&j).expect("PLAIN json")
     });
     plain::set_override(Some(plain_env));

@@ -15,7 +15,7 @@ fn car(id: &str) -> LoadedCar {
 }
 
 fn plain_on() {
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
 }
 
 /// Centre road-wheel angle after `ticks` of input `steer` from rest-of-steering at `speed`.

@@ -38,7 +38,7 @@ fn main() {
     match std::env::var("PLAIN").as_deref() {
         Ok("off") => plain::set_override(None),
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),
-        Err(_) => plain::set_override(Some(PlainSteer::default())),
+        Err(_) => plain::set_override(Some(PlainSteer::lab_w())),
     }
     if std::env::var("RIDE_LAB").is_ok() {
         // The lab's ride default (springs 0.9, bars 0.25, dampers 1.4 / 1.8).
@@ -333,7 +333,7 @@ fn throttle_diag(args: &[String]) {
     println!("| car | rack | 100 % | 70 % | 50 % | 30 % |");
     println!("|---|---|---|---|---|---|");
     let a = reference_assists();
-    let d = PlainSteer::default();
+    let d = PlainSteer::lab_w();
     for id in args {
         let c = car(id);
         for (name, p) in [
@@ -366,7 +366,7 @@ fn throttle_diag(args: &[String]) {
 
 /// A/B of the plain constants on the drift drivers (drift s / spun per driver).
 fn sweep(args: &[String]) {
-    let d = PlainSteer::default();
+    let d = PlainSteer::lab_w();
     let configs = [
         ("default (0.28 / 0.33 s, 75 %)", d),
         (
@@ -989,7 +989,7 @@ fn catch_window(args: &[String]) {
     let before = PlainSteer {
         counter_closing_only: false,
         trans_follow: false,
-        ..PlainSteer::default()
+        ..PlainSteer::lab_w()
     };
     println!("\n## Catch window: largest push caught (60 m, 0.7 g; caught pushes listed)");
     println!("| car | variant | key held | tapping | turn-in: tap 0.15 s @100 heading ° / step heading start s |");
@@ -997,12 +997,12 @@ fn catch_window(args: &[String]) {
     for id in &ids {
         let no_trans = PlainSteer {
             trans_follow: false,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         for (name, p) in [
             ("before", before),
             ("transition off", no_trans),
-            ("W default", PlainSteer::default()),
+            ("W default", PlainSteer::lab_w()),
         ] {
             plain::set_override(Some(p));
             let c = car(id);
@@ -1030,7 +1030,7 @@ fn catch_window(args: &[String]) {
     car_lab::set_override(None);
     ride_lab::set_override(None);
     grip_lab::set_override(None);
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
 }
 
 fn catch_table(args: &[String]) {
@@ -1057,15 +1057,15 @@ fn catch_table(args: &[String]) {
                 counter_closing_only: false,
                 drift_lock_extra: 0.0,
                 over_rate: 1.0,
-                ..PlainSteer::default()
+                ..PlainSteer::lab_w()
             },
         ),
-        ("W default".into(), PlainSteer::default()),
+        ("W default".into(), PlainSteer::lab_w()),
     ];
     if let Ok(j) = std::env::var("PLAINS") {
         let list: Vec<serde_json::Value> = serde_json::from_str(&j).expect("PLAINS json list");
         for v in list {
-            let mut base = serde_json::to_value(PlainSteer::default()).unwrap();
+            let mut base = serde_json::to_value(PlainSteer::lab_w()).unwrap();
             for (k, x) in v.as_object().unwrap() {
                 base[k] = x.clone();
             }
@@ -1154,7 +1154,7 @@ fn catch_table(args: &[String]) {
     car_lab::set_override(None);
     ride_lab::set_override(None);
     grip_lab::set_override(None);
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
 }
 
 fn snap_sweep(args: &[String]) {
@@ -1174,11 +1174,11 @@ fn snap_sweep(args: &[String]) {
         .unwrap_or(0.25);
     let limit = PlainSteer {
         counter_margin_deg: m,
-        ..PlainSteer::default()
+        ..PlainSteer::lab_w()
     };
     let off = PlainSteer {
         counter_margin_deg: 0.0,
-        ..PlainSteer::default()
+        ..PlainSteer::lab_w()
     };
     let spin = CarTune::spin_candidate();
     let lab = RideTune::lab_default();
@@ -1352,7 +1352,7 @@ fn snap_sweep(args: &[String]) {
     car_lab::set_override(None);
     ride_lab::set_override(None);
     grip_lab::set_override(None);
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
 }
 
 fn weight_table(args: &[String]) {

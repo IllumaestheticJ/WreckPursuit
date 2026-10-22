@@ -696,7 +696,7 @@ function SettingsScreen(props: {
         <Row label="Steering help" hint="Less steering lock at speed">
           <Toggle id="gm-steer" label="Steering help" value={s.assists.steerHelp} onChange={(v) => assist("steerHelp", v)} />
         </Row>
-        <Row label="Countersteer help" hint={props.countersteer ? "Catches slides for you" : "Coming soon (needs a vehicle update)"}>
+        <Row label="Countersteer help" hint={props.countersteer ? "Hands off in a slide: the wheels follow it (up to 30 % lock)" : "Coming soon (needs a vehicle update)"}>
           <Slider id="gm-cstr" label="Countersteer help" value={s.assists.countersteer} disabled={!props.countersteer} onChange={(v) => assist("countersteer", v)} />
         </Row>
         <ControlsSection

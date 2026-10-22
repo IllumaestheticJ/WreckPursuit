@@ -54,7 +54,7 @@ fn spin_model_holds_the_clip_1_drift_where_the_ellipse_spins() {
     wp_vehicle::lab_scope::set_legacy(true);
     let _lab = LAB.lock().unwrap_or_else(|e| e.into_inner());
     let c = car("parity_rwd_d");
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     ride_lab::set_override(Some(RideTune::lab_default()));
 
     car_lab::set_override(None);
@@ -135,7 +135,7 @@ fn launches_straight_on_a_cambered_road() {
     // side-force floor (no override) and both spin presets launch straight.
     let _lab = LAB.lock().unwrap_or_else(|e| e.into_inner());
     let c = car("parity_rwd_d");
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     ride_lab::set_override(None);
     car_lab::set_override(Some(CarTune {
         side_floor: 0.0,

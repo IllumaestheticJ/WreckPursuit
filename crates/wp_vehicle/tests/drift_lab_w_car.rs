@@ -16,7 +16,7 @@ fn held_countersteer_does_not_hold_on_data_nor_with_the_spin_grip_damper_set() {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let c = load_any_car(&data, "parity_rwd_d").unwrap();
     let a = reference_assists();
-    plain::set_override(Some(PlainSteer::default()));
+    plain::set_override(Some(PlainSteer::lab_w()));
     let driver = PlainDriver::HoldCounter {
         entry_deg: 6.0,
         throttle: 1.0,

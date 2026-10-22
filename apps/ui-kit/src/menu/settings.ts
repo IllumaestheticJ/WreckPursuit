@@ -96,7 +96,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     drawDistanceM: 0,
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
     radioVoice: true,
-    assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0 },
+    assists: { abs: "Full", tcs: "Off", esc: false, autoGears: false, steerHelp: true, countersteer: 0.3 },
     damageMode: "Arcade",
     units: "kmh",
     camera: "",
@@ -109,20 +109,22 @@ const clamp01 = (v: unknown, d: number) => (typeof v === "number" && Number.isFi
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const oneOf = <T extends string>(v: unknown, opts: readonly T[], d: T): T => (opts.includes(v as T) ? (v as T) : d);
 
-/** The countersteer default before playtest row 137 (owner: "why is default countersteer set
- * to 60 %?"); the default is now 0. */
+/** The menu's countersteer default before playtest row 137 (50 %); 0.12.44 shipped 0, row
+ * 142 sets 30 % (the reference game's hands-off alignment). */
 export const OLD_COUNTERSTEER_DEFAULT = 0.5;
 
-/** Stored-settings mark: saved after the row 137 countersteer default change. */
-export const COUNTERSTEER_REV = 137;
+/** Stored-settings mark: saved after the row 142 countersteer default (30 %). */
+export const COUNTERSTEER_REV = 142;
 
-/** Stored countersteer strength. Settings saved before row 137 (no `countersteerRev` mark)
- * that still hold the old untouched default read as the new default (0); a value the player
- * changed is kept. Saved settings carry the mark from then on ([`saveGameSettings`]). */
+/** Stored countersteer strength. Untouched old defaults read as the new default (30 %): 50 %
+ * in settings saved before row 137 (no `countersteerRev` mark) and 0 in settings saved with
+ * the row 137 mark (0.12.44 shipped 0). A value the player changed is kept. Saved settings
+ * carry the current mark from then on ([`saveGameSettings`]). */
 function migrateCountersteer(r: Record<string, unknown>, a: Record<string, unknown>, d: number): number {
   const v = clamp01(a.countersteer, d);
-  const beforeRow137 = r.countersteerRev !== COUNTERSTEER_REV;
-  return beforeRow137 && v === OLD_COUNTERSTEER_DEFAULT ? d : v;
+  if (r.countersteerRev === COUNTERSTEER_REV) return v;
+  const oldDefault = r.countersteerRev === 137 ? 0 : OLD_COUNTERSTEER_DEFAULT;
+  return v === oldDefault ? d : v;
 }
 
 /** Merge untrusted data (stored JSON) onto `base`, field by field; bad fields keep the base. */

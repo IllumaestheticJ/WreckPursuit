@@ -170,7 +170,8 @@ mod tests {
     #[test]
     fn parity_cars_load_but_are_not_in_the_roster() {
         let parity = parity_car_ids();
-        assert_eq!(parity.len(), 4, "{parity:?}");
+        // a, b, d, fwd_c (Drift Lab W) + e, f (the owner's keyboard reference clips, row 142).
+        assert_eq!(parity.len(), 6, "{parity:?}");
         let roster = car_ids();
         for id in &parity {
             assert!(!roster.contains(id), "{id} is in the roster");

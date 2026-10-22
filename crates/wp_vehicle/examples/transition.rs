@@ -363,7 +363,7 @@ struct Config {
 
 fn configs() -> Vec<Config> {
     let vr = CarTune::spin_vr_plain();
-    let p = PlainSteer::default();
+    let p = PlainSteer::lab_w();
     let base = [
         ("W defaults", RideTune::firm(), None),
         (
@@ -1148,8 +1148,8 @@ fn poweron_table() {
         Err(_) => sets,
     };
     let p = match std::env::var("PLAIN") {
-        Ok(j) => merged(&PlainSteer::default(), &j),
-        Err(_) => PlainSteer::default(),
+        Ok(j) => merged(&PlainSteer::lab_w(), &j),
+        Err(_) => PlainSteer::lab_w(),
     };
     // BISECT=1 (grip-balance, unify): from the owner's "feels good" anchor (lead/grip-balance
     // 7d6b66c9: medium ride, step-14 balance without the held-key cut, step-22 tyres, W step-10
@@ -1165,7 +1165,7 @@ fn poweron_table() {
             over_rate: 1.0,
             trans_follow: false,
             trans_catch_gain: 0.0,
-            ..PlainSteer::default()
+            ..PlainSteer::lab_w()
         };
         let grip_anchor = GripBalance {
             fwd_rear_mu: 1.0,
@@ -1584,7 +1584,7 @@ fn manual_table() {
     println!("| set | car | no shift: held / 3 (spun) | upshift at the limiter: held / 3 (spun), shifted at s | downshift 3→2 at entry: held / 3 (spun) |");
     println!("|---|---|---|---|---|");
     for (name, ride, grip, tyre) in &sets {
-        plain::set_override(Some(PlainSteer::default()));
+        plain::set_override(Some(PlainSteer::lab_w()));
         ride_lab::set_override(Some(*ride));
         grip_lab::set_override(Some(*grip));
         car_lab::set_override(Some(*tyre));

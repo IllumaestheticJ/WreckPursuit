@@ -48,11 +48,11 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
-  trans_catch_gain: { label: "transition: new-side catch", min: 0, max: 1.2, step: 0.05, scale: 100, unit: "% of travel", hint: "step 13: right after a lift-flick crosses onto the new side, a countersteer key points the wheels at this share of the front axle's travel at once (default 80 %; 90 % until row 137 over-caught rampart_50 into a second swing; past 100 % over-catches and swings back). Settles the new drift in ~0.5 s instead of ~1.5 s" },
+  trans_catch_gain: { label: "transition: new-side catch", min: 0, max: 1.2, step: 0.05, scale: 100, unit: "% of travel", hint: "step 13: right after a lift-flick crosses onto the new side, a countersteer key points the wheels at this share of the front axle's travel at once (lab A/B only: off for players since row 142, as the whole transition rack; was 80 %; past 100 % over-catches and swings back). Settles the new drift in ~0.5 s instead of ~1.5 s" },
   trans_t_s: { label: "transition: rack time", min: 0.05, max: 0.5, step: 0.01, unit: "s", hint: "step 12 transition rack: time for the wheels to move 45° toward the travel on a flick (default 0.1 s)" },
   trans_key_gain: { label: "transition: key offset", min: -0.3, max: 0.5, step: 0.05, hint: "step 12: the new key's offset from the travel, × lock (0 = wheels along the travel; + into the old corner stops the swing, − past the travel swings faster but spins)" },
-  drift_lock_extra: { label: "catch: extra lock", min: 0, max: 0.6, step: 0.05, scale: 100, unit: "%", hint: "step 11 over-rotation catch: with the counter key held while the car over-rotates past 40–50° of slip, the counter lock may reach full lock × (1 + this) (default 40 %; grip driving and a held drift unchanged)" },
-  over_rate: { label: "catch: rack speed ×", min: 1, max: 3, step: 0.1, hint: "step 11: the rack moves this many times faster toward the counter lock while over-rotating past 40° (1 = off; default 2)" },
+  drift_lock_extra: { label: "catch: extra lock", min: 0, max: 0.6, step: 0.05, scale: 100, unit: "%", hint: "step 11 over-rotation catch: with the counter key held while the car over-rotates past 40–50° of slip, the counter lock may reach full lock × (1 + this) (lab only since row 142, default 0; it was 40 %; grip driving and a held drift unchanged)" },
+  over_rate: { label: "catch: rack speed ×", min: 1, max: 3, step: 0.1, hint: "step 11: the rack moves this many times faster toward the counter lock while over-rotating past 40° (1 = off, the default since row 142: lab only; it was 2)" },
   over_from_dps: { label: "catch: over-rotation from", min: 5, max: 40, step: 1, unit: "°/s", hint: "step 11: slide growth that counts as over-rotating (the countersteer limit lets go, the extra lock and fast rack come in; default 15°/s)" },
   counter_margin_deg: { label: "countersteer limit", min: 0, max: 5, step: 0.05, unit: "°", hint: "step 10 snap-back: in a slide a held counter key points the wheels at most this far past the front axle's travel, so the lock unwinds as the slide closes (0 = off, the 'before'; default 0.25°)" },
   sens_exponent: { label: "sens. exponent", min: 1, max: 4, step: 0.5, hint: "lock = 1 / (1 + s·(v / ref)^exp); 2 = like the angle a constant-g corner needs" },
@@ -61,7 +61,7 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   slide_key_gain: { label: "VR: key in slide ×", min: 0, max: 1, step: 0.05, hint: "velocity-relative steering: the key's offset from the travel in a full slide, × lock(speed)" },
   swing_rate: { label: "swing rack ×", min: 1, max: 4, step: 0.1, hint: "drift transitions (tyre-slip): while the car swings (yaw rate past the threshold) and the key is held against the rotation or released, every rack rate is this many times faster; 1 = off" },
   swing_yaw_dps: { label: "swing from yaw", min: 30, max: 200, step: 5, unit: "°/s", hint: "yaw rate where the swing rack acts (a held drift turns at ~30°/s, a swing through at 100–140°/s)" },
-  self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released: the rack returns toward the front axle's travel instead of the centre (A/B; default 0)" },
+  self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released in a slide: the rack returns toward the front axle's travel (capped at 30 % of full lock) instead of the centre. A player car takes the larger of this and its countersteer help (keyboard default 30 %, row 142)" },
 };
 
 const RIDE_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit?: string; hint: string }> = {
@@ -448,7 +448,7 @@ export class DriftLabWPanel {
         b.id = id;
         b.textContent = label;
         b.title = on
-          ? "step 11 default: the countersteer limit lets go while the car over-rotates, extra counter lock (× 1.4) and a faster rack past 40° of slip — over-rotations are easier to catch"
+          ? "default: the countersteer limit lets go while the car over-rotates (the extra counter lock and the faster rack of step 11 are lab-only since row 142: set the sliders to try them)"
           : "step 10: the countersteer limit at every slide rate, no extra lock, no fast rack";
         b.onclick = () => {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_closing_only: on } as unknown as Record<string, number>);
@@ -459,7 +459,7 @@ export class DriftLabWPanel {
       this.body.appendChild(ab);
     }
     // Step 10 A/B (lead): "before" = steps 1–9 (no countersteer limit, lab ride) vs "new" =
-    // the default (countersteer limit 0.25°, medium weight). Tyres stay as set below.
+    // the default (no countersteer limit since row 142, medium weight). Tyres stay as set below.
     {
       const ab = document.createElement("div");
       ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
@@ -476,7 +476,7 @@ export class DriftLabWPanel {
         b.title =
           label === "before"
             ? "steps 1–9: no countersteer limit (lifting off with the counter key held snaps the car back and can spin it), step-3 lab ride"
-            : "default: countersteer limit 0.25° past the travel (progressive recovery) + the shipped ride (the owner's: medium weight, springs / bars × 1.5)";
+            : "default: the shipped steering (no countersteer limit since row 142; the lab sliders can set one) + the shipped ride (the owner's: medium weight, springs / bars × 1.5)";
         b.onclick = () => {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_margin_deg: margin });
           const text = JSON.stringify(this.sim.rideTuneDefaults()[ride]);
@@ -592,8 +592,9 @@ export class DriftLabWPanel {
       );
     }
     for (const [key, f] of Object.entries(FIELDS)) {
-      // Flick / transition settings: hidden lab only, labelled "lab" (owner, playtest row 137).
-      const transition = key.startsWith("trans_");
+      // Flick / transition settings and anything that adds lock: hidden lab only, labelled
+      // "lab" (owner, playtest rows 137 / 142).
+      const transition = key.startsWith("trans_") || key === "drift_lock_extra" || key === "over_rate";
       if (transition && !this.lab) continue;
       const value = p[key] ?? defaults[key];
       const input = document.createElement("input");

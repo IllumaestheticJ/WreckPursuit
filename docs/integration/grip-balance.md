@@ -1352,3 +1352,100 @@ It counts the slide's direction changes in the 2 s after the first.
 
 **[bless]:** three goldens moved, all driven with the keyboard default assists (now 0
 countersteer help): cars_beater_hard_turn, regression_grid_24 and vehicle_coupe_slalom.
+
+## Rows 141 / 142: player keyboard steering = the key (owner, 2026-10-21 / 22)
+
+The owner wrote: "when I turn towards the inside of the corner, the car goes full lock outside"
+and "this behavior of full lock the opposite way … needs to be removed entirely. It should behave
+more like Wreckfest". Their reference-game keyboard clips (`docs/reference/wf-clips`) show:
+- a held key keeps the wheel on its side, never against it;
+- releasing the key mid-slide lets the wheel settle at a capped countersteer that follows the
+  slide.
+
+### Player steering (`PlainSteer::default`, `GripBalance::shipped`; AI unchanged)
+
+With a key held, the wheels go to `key × full lock × lock(speed)` at the rack rate: full lock in
+0.28 s, back in 0.33 s. `lock(speed)` is the speed-sensitivity curve (the reference's steering
+speed sensitivity): 97 % of full lock at 20 km/h, 91 % at 40 km/h, 63 % at 100 km/h. Nothing
+moves the wheels away from that.
+
+Removed for players:
+- the transition rack, the new-side catch and the after-flick follow;
+- the drift lock extension and the over-rotation rack;
+- the countersteer limit;
+- the smart lock: it capped the into-turn lock and reacted to the slide direction (row 141,
+  3.0–3.8 s). Without the slide part, a speed-only cap would have held a 50 km/h drift's
+  countersteer to about 12°, so the plain speed curve replaces it;
+- the held-key cut and its release (row 141, 2.0–2.2 s and 5.8–6.2 s).
+
+Drift Lab W's full set is `PlainSteer::lab_w()` with `GripBalance::owner()`. It is lab A/B only:
+hidden view (F10 / `?tune=1`), labelled "lab".
+
+### Hands-off countersteer = the countersteer help
+
+On the player path the countersteer help only acts with no key held: the wheels move toward the
+front axle's direction of travel, × the help (`self_align`). That is faded in from 4–8° of body
+slip, so in grip the wheels return to the centre, and capped at 30 % of full lock
+(`self_align_cap`). A key overrides it from the first tick.
+
+- **Keyboard default:** 0.3 (lead-approved contract default, CONTRACT_CHANGELOG).
+- **Menu default:** 30 %. The untouched old defaults (50 %, or the 0 saved by 0.12.44) migrate
+  to 30 %; a changed value is kept.
+- **Touch:** keeps 60 %.
+
+Calibration (`examples/owner_replay.rs`): the reference settles hands-off at p50 about half of
+its maximum, within about a quarter to a third of full lock, over about 0.3–0.5 s. At help 30 %
+ours settles at p50 11–23 % of lock, p90 25–30 %, cap 30 %, in 0.29–0.40 s. At 60 % and 100 %
+it pins at the cap.
+
+Rack timing against the clips: the reference reaches about 70° of wheel marker in 0.15–0.2 s,
+but full lock is past 90° of marker (out of view). That is consistent with our 0.28 s to full
+lock. The reference returns in about 0.3 s against our 0.33 s.
+
+### Tests
+
+- `tests/held_key.rs`, `wheels_never_point_against_the_held_key`: 60 cases (entry holds,
+  flicks including the into-corner key pressed mid-slide, and the row-141 inputs) on
+  rampart_50 + parity a/b/d. With a key held, the wheels never move further toward the other
+  side, are on the key's side (or within 1°) once it has been held 0.4 s, and never pass
+  `full lock × lock(v_fwd)`.
+  - The pre-row-142 steering fails 36 / 60.
+  - The owner's case: in a left drift, the into-corner key at once put the wheels 17–20° the
+    other way. The drift lock extension also took them past the key's lock.
+- `tests/transition_once.rs` asserts that the wheels never pass the key command. Swings and
+  spins are reported, not asserted. The old aids fail it at up to 18.8° past the key.
+
+### Benches (honest, no compensating aids)
+
+**Entry holds**, held / spun out of 12 per column (rampart_50 + parity a/b/d):
+
+| entry + hold | before (0.12.44) | row 142 |
+|---|---|---|
+| handbrake + held key | 12 / 0 | 0 held / 9 spun |
+| handbrake + tap | 12 / 0 | 2 / 1 |
+| lift + held key | 8 / 0 | 1 / 9 |
+| lift + tap | 11 / 0 | 12 / 0 |
+
+Holding the countersteer key at full lock now over-catches and spins, as it does without the
+held-key cut. Tapping, the owner's style (OWNER_KEY_TECHNIQUE.md), holds every lift entry.
+
+**Flicks** (`transition_once`, the drift held by tapping):
+- once the drift holds, every flick swings through exactly once: 12 / 12;
+- with the new countersteer key then held at full lock, all 12 spin;
+- rampart_50's tapped drift never holds long enough to flick.
+- The gentle flick bench (`examples/transition.rs`, LIVE): 0 / 27 swing through.
+
+**Owner replay** (`examples/owner_replay.rs`): the clips' key timelines replayed open-loop,
+from rest, auto gears.
+- 0.12.44: the wheels point against the held key or past it in 638–4339 ticks per clip.
+- Row 142: 0 ticks in every clip and help value.
+- No spins in either; the replay has no feedback, so drift seconds are only a rough
+  comparison.
+- TCS Half against Off on the same clip: 16:39 Half 25.7 s of drift against Off 17.1 s; 16:34
+  Half 16.3 against Off 13.5 (help 30 %).
+
+### Not changed, open
+
+- Parity cars added: `parity_rwd_e` (the 16:30 clip's car: 348 kW / 578 N·m / 1368 kg, 5-speed,
+  rampart_50 base) and `parity_rwd_f` (the 16:34–16:39 clips' car: 323 kW / 525 N·m / 1213 kg,
+  6-speed, lucciola_350 base). Role ids only (rule 9: no reference-game car names).

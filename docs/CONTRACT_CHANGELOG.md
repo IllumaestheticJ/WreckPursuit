@@ -7,14 +7,17 @@ Every session reads this file at start.
 
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
-- Amendment (**lead-approved**, owner request 2026-10-21, playtest row 137; branch
-  `lead/grip-balance`): `AssistProfile::keyboard_default().countersteer_help` 0.6 → 0.0 (the
-  owner wants raw keyboard steering: no automatic countersteer). A default value only: no
-  type, wire or data change, version kept at 0.3.0. Gamepad (0.3), wheel and AI defaults are
-  unchanged; the testbed's touch preset keeps 0.6. Golden hashes of scenarios that drive with
-  the keyboard default move (re-blessed in the same branch). **Who updates:** nobody; a
-  player's saved countersteer value still wins (the testbed migrates an untouched old
-  default to 0).
+- Amendment (**lead-approved**, owner requests 2026-10-21, playtest rows 137 / 142; branch
+  `lead/grip-balance`): `AssistProfile::keyboard_default().countersteer_help` 0.6 → **0.3**
+  (row 137 set it to 0; row 142 replaces that with the measured value). On player cars the
+  help is now only the hands-off self-alignment of the reference game: with no steer key held
+  the front wheels follow the slide, capped at 30 % of full lock. A held key overrides it at
+  once (`wp_vehicle::plain::PlainSteer::self_align`). 0.3 is the value whose hands-off angle
+  and timing best match the owner's keyboard clips (`docs/reference/wf-clips`,
+  `examples/owner_replay.rs`). A default value only: no type, wire or data change, version
+  kept at 0.3.0. Gamepad (0.3), wheel and AI defaults are unchanged; the testbed's touch
+  preset keeps 0.6. **Who updates:** nobody. The testbed migrates untouched old defaults
+  (60 %, 50 % or the 0 shipped in 0.12.44) to 30 %; a value the player changed is kept.
 - Amendment (**lead-approved**, owner request 2026-10-20, rows 104/105; branch `lead/assist-levels`):
   `TcsLevel { Off, Half, Full }` and `AbsLevel { Off, Half, Full }` replace the `tcs` / `abs`
   bools in `AssistProfile` (the reference game's levels). Wire / data compatible: a level

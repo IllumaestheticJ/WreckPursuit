@@ -1555,6 +1555,12 @@ impl Vehicle {
             _ => max_steer,
         };
         self.center_steer = if let Some(p) = plain {
+            // The countersteer help is the hands-off self-alignment on the plain rack (row
+            // 142): it acts only with no key held (`crate::plain::PlainSteer::self_align`).
+            let p = crate::plain::PlainSteer {
+                self_align: p.self_align.max(assists.countersteer_help.clamp(0.0, 1.0)),
+                ..p
+            };
             // Grip-balance lab: the smart lock replaces the plain speed curve (`None` = plain).
             let full_lock = max_steer * steer_in.ratio_scale;
             // Which way the wheels head: the key's side (key + = right, angle + = left), else
