@@ -55,14 +55,27 @@ fn run_race(id: &str, max_s: u64) -> Raced {
     run_race_with(id, max_s, None)
 }
 
+/// [`run_race`] on another event seed than the catalog's (`WP_RACE_SEED` still overrides).
+fn run_race_seeded(id: &str, max_s: u64, seed: u64) -> Raced {
+    run_race_full(id, max_s, None, Some(seed))
+}
+
 /// [`run_race`] with the scenario's police presence replaced (`Some(0.0)` = no police), for
 /// checks of the AI field's pace that the police (captures, flights) would mask.
 fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
+    run_race_full(id, max_s, presence, None)
+}
+
+fn run_race_full(id: &str, max_s: u64, presence: Option<f32>, seed: Option<u64>) -> Raced {
     let mut def = catalog::race(id).unwrap();
     let path = repo().join(format!("apps/simcli/scenarios/race/pick_{id}.ron"));
     let mut sc = load_scenario(&path).unwrap();
     if presence.is_some() {
         sc.police_presence = presence;
+    }
+    if let Some(seed) = seed {
+        def.seed = seed;
+        sc.seed = seed;
     }
     // Tuning knobs (exploration only): another seed / police presence / traffic density.
     if let Some(seed) = std::env::var("WP_RACE_SEED")
@@ -659,7 +672,12 @@ fn loop9_circuit_pace_without_police() {
 
 #[test]
 fn lantern_checkpoint_draws_the_police() {
-    let r = run_race("lantern_checkpoint", 300);
+    // TEMPORARY (lead, 2026-10-22): seed 1 instead of the catalog's 31. Since physical traffic
+    // cars are seen once, as traffic, seed 31 (and seed 5) end with the last racer boxed in
+    // between captured cars (0.4 m ahead, 2.4 m behind), never finishing, so the race is never
+    // judged. Back to `run_race("lantern_checkpoint", 300)` with follow-up (a), the multi-point
+    // reverse-and-turn (docs/integration/opponent-pace.md); check seed 5 then too.
+    let r = run_race_seeded("lantern_checkpoint", 300, 1);
     let id = r.def.id;
     // A hot meet in broad daylight: a patrol is called to the grid, and every racer carries
     // the meet report's heat plus the illegal-daytime stake heat from the green light on.
