@@ -126,6 +126,26 @@ check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && Math.abs(gNew.front_stiffne
   const sh = await page.evaluate(() => window.__wp.sim.plainSteer());
   check(Math.abs(sh.sens_ref_kmh - 113) < 1e-4 && Math.abs(sh.sens_exponent - 2) < 1e-6 && Math.abs(sh.speed_sensitivity - 0.75) < 1e-6, "rack · shipped preset");
 }
+// Eye test (blind A/B, owner 2026-10-22): hides the rest of the panel, five picks, a result code,
+// the shipped handling back afterwards.
+{
+  await page.locator("#eye-start").click();
+  await page.waitForTimeout(300);
+  check((await page.locator("#drift-lab-w button", { hasText: "rack · reference" }).count()) === 0, "eye test hides the other settings");
+  for (let k = 0; k < 5; k++) {
+    await page.locator("#eye-opt-2").click();
+    await page.waitForTimeout(400);
+    await page.locator(k % 2 ? "#eye-pick-2" : "#eye-pick-1").click();
+    await page.waitForTimeout(400);
+  }
+  const code = await page.locator("#eye-code").inputValue();
+  check(/^eye1 rack=\S+ rack2=\S+ ride=\S+ drift=\S+ tcs=\S+$/.test(code), `eye test result code "${code}"`);
+  const st = await page.evaluate(() => window.__wp.sim.plainSteer() ?? window.__wp.sim.plainSteerDefaults());
+  check(Math.abs(st.sens_ref_kmh - 113) < 1e-4 && Math.abs(st.sens_exponent - 2) < 1e-6, "eye test ends on the shipped steering");
+  await page.locator("#drift-lab-w button", { hasText: "close" }).click();
+  await page.waitForTimeout(300);
+  check((await page.locator("#eye-start").count()) === 1, "eye test closes back to the panel");
+}
 // Back to the shipped tyres / balance / ride for the checks below.
 await page.evaluate(() => {
   window.__wp.sim.carTuneSet("");

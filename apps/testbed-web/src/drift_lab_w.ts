@@ -15,6 +15,7 @@ import type * as THREE from "three";
 import { buildCourse } from "./test_pad";
 import { setRawKeyboard } from "./input";
 import { assistLevel, type AssistLevel, type sim as Sim } from "./wasm/sim";
+import { EyeTest } from "./eye_test";
 
 /** Scenario name of the lab (sim.scenario().name). */
 export const DRIFT_LAB_W = "drift_lab_w";
@@ -161,6 +162,16 @@ const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
 /** Whether two grip-balance sets are the same (numbers within 1e-6; JSON key order and f32
  * round-trips do not matter). */
+/// Highlight the selected button of an A/B row (owner: "not having those sections highlighted
+/// makes it hard to figure out what's selected").
+function markActive(b: HTMLButtonElement, active: boolean): void {
+  b.dataset.active = active ? "1" : "0";
+  b.style.background = active ? "#2f6fdf" : "";
+  b.style.color = active ? "#fff" : "";
+  b.style.fontWeight = active ? "600" : "";
+  if (active) b.textContent = `✓ ${b.textContent}`;
+}
+
 function sameGrip(a: Record<string, unknown> | null, b: Record<string, unknown>): boolean {
   if (!a) return false;
   return Object.keys(b).every((k) =>
@@ -196,6 +207,10 @@ export class DriftLabWPanel {
   /** The lab's current car id (set by the session start). */
   car = DRIFT_LAB_W_CAR;
   private prevTitle = "";
+  /** Blind handling A/B (owner, 2026-10-22: "blind test it and ask me which feels better"). */
+  private readonly eye: EyeTest;
+  /** The player's TCS level before the eye test changed it (restored after). */
+  private eyeTcs: string | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -224,6 +239,64 @@ export class DriftLabWPanel {
     this.body.style.cssText = "background:rgba(0,0,0,.72);padding:8px;border-radius:6px;margin-top:4px;max-height:60vh;overflow:auto";
     this.root.append(btn, this.readout, this.body);
     parent.appendChild(this.root);
+    const store = (key: string, text: string) => {
+      try {
+        if (text) localStorage.setItem(key, text);
+        else localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    };
+    this.eye = new EyeTest({
+      resetShipped: () => {
+        for (const [set, key] of [
+          [(t: string) => this.sim.plainSteerSet(t), STORE],
+          [(t: string) => this.sim.carTuneSet(t), CAR_STORE],
+          [(t: string) => this.sim.gripBalanceSet(t), GRIP_STORE],
+          [(t: string) => this.sim.rideTuneSet(t), RIDE_STORE],
+        ] as const) {
+          set("");
+          store(key, "");
+        }
+      },
+      setSteer: (patch) => {
+        const t = JSON.stringify({ ...this.sim.plainSteerDefaults(), ...patch });
+        this.sim.plainSteerSet(t);
+        store(STORE, t);
+      },
+      setTyres: (patch) => {
+        const t = JSON.stringify({ ...this.sim.carTuneDefaults().shipped, ...patch });
+        this.sim.carTuneSet(t);
+        store(CAR_STORE, t);
+      },
+      setGrip: (patch) => {
+        const t = JSON.stringify({ ...this.sim.gripBalanceDefaults().shipped, ...patch });
+        this.sim.gripBalanceSet(t);
+        store(GRIP_STORE, t);
+      },
+      setRide: (patch, base = "shipped") => {
+        const d = this.sim.rideTuneDefaults() as Record<string, Record<string, unknown>>;
+        const t = JSON.stringify({ ...(d[base] ?? d.shipped), ...patch });
+        this.sim.rideTuneSet(t);
+        store(RIDE_STORE, t);
+      },
+      setTcs: (level) => {
+        try {
+          const id = this.player();
+          const a = this.sim.assists(id) as unknown as Record<string, unknown>;
+          if (level === null) {
+            if (this.eyeTcs !== null) this.sim.setAssists(id, { ...a, tcs: this.eyeTcs } as never);
+            this.eyeTcs = null;
+            return;
+          }
+          if (this.eyeTcs === null) this.eyeTcs = String(a.tcs);
+          this.sim.setAssists(id, { ...a, tcs: level } as never);
+        } catch {
+          /* no player car */
+        }
+      },
+      restartCar: () => this.restart(this.car),
+    });
   }
 
   /** Whether the panel is on screen. */
@@ -395,6 +468,10 @@ export class DriftLabWPanel {
     const p = this.sim.plainSteer() ?? this.sim.plainSteerDefaults();
     const defaults = this.sim.plainSteerDefaults();
     this.body.replaceChildren();
+    // Eye test first; while it runs nothing else is shown, so no setting gives it away.
+    this.body.appendChild(this.eye.render(() => this.build()));
+    this.readout.style.display = this.eye.running() ? "none" : "";
+    if (this.eye.running()) return;
     const row = (label: string, hint: string, input: HTMLElement, val: HTMLSpanElement) => {
       const l = document.createElement("label");
       l.title = hint;
@@ -438,8 +515,10 @@ export class DriftLabWPanel {
       const ab = document.createElement("div");
       ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
       const lbl = document.createElement("span");
-      lbl.textContent = "catch A/B:";
+      lbl.textContent = "catch A/B (only acts with a countersteer limit set; shipped has none):";
+      lbl.title = "Switches the countersteer limit between 'always' (before) and 'only while the slide closes' (new). The shipped steering has no countersteer limit (row 142, key = key), so with shipped settings both buttons drive the same";
       ab.appendChild(lbl);
+      const catchNow = (this.sim.plainSteer() ?? defaults) as unknown as Record<string, unknown>;
       for (const [label, id, on] of [
         ["before", "drift-lab-w-catch-before", false],
         ["new", "drift-lab-w-catch-new", true],
@@ -454,6 +533,7 @@ export class DriftLabWPanel {
           this.save({ ...(this.sim.plainSteer() ?? defaults), counter_closing_only: on } as unknown as Record<string, number>);
           this.build();
         };
+        markActive(b, catchNow.counter_closing_only === on);
         ab.appendChild(b);
       }
       this.body.appendChild(ab);
@@ -464,8 +544,11 @@ export class DriftLabWPanel {
       const ab = document.createElement("div");
       ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
       const lbl = document.createElement("span");
-      lbl.textContent = "handling A/B:";
+      lbl.textContent = "handling A/B (suspension: old lab ride vs shipped ride):";
+      lbl.title = "before = the soft step-3 lab ride (springs × 0.9, anti-roll bars × 0.25); new = the shipped ride (the owner's: springs and bars × 1.5). Steering and tyres are the same in both";
       ab.appendChild(lbl);
+      const rideNow = (this.sim.rideTune() ?? this.sim.rideTuneDefaults().shipped) as Record<string, unknown>;
+      const marginNow = ((this.sim.plainSteer() ?? defaults) as Record<string, number>).counter_margin_deg;
       for (const [label, id, margin, ride] of [
         ["before", "drift-lab-w-before", 0, "lab"],
         ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "shipped"],
@@ -488,6 +571,7 @@ export class DriftLabWPanel {
           }
           this.restart(this.car);
         };
+        markActive(b, sameGrip(rideNow, this.sim.rideTuneDefaults()[ride] as Record<string, unknown>) && Math.abs(marginNow - margin) < 1e-6);
         ab.appendChild(b);
       }
       this.body.appendChild(ab);
@@ -883,6 +967,8 @@ export class DriftLabWPanel {
           this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...curve } as unknown as Record<string, number>);
           this.build();
         };
+        const now = (this.sim.plainSteer() ?? this.sim.plainSteerDefaults()) as unknown as Record<string, number>;
+        markActive(b, (curve.speed_sensitivity === 0 && now.speed_sensitivity === 0) || (Math.abs(now.speed_sensitivity - curve.speed_sensitivity) < 1e-6 && Math.abs(now.sens_ref_kmh - curve.sens_ref_kmh) < 1e-4 && Math.abs(now.sens_exponent - curve.sens_exponent) < 1e-6));
         return b;
       };
       const rackShipped = rackBtn(
