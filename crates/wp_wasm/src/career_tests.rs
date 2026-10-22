@@ -612,3 +612,72 @@ fn a_tuned_car_spawns_tuned_and_the_tune_is_saved() {
     c.finish_run(&mut s).unwrap();
     c.set_tune(uid, wp_economy::CarTune::STOCK).unwrap();
 }
+
+#[test]
+fn workshop_swaps_a_crashed_bumper_and_radiator_and_blocks_a_car_with_parts_missing() {
+    let (mut c, uid) = career_with("kestrel_ts", 60_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 35.0);
+    let w = c.workshop(uid).unwrap();
+    let bumper = w
+        .view
+        .slots
+        .iter()
+        .find(|s| s.id == "front_bumper")
+        .unwrap();
+    let worn = bumper.fitted.as_ref().unwrap().condition;
+    assert!(worn < 1.0, "a frontal crash dents the bumper ({worn})");
+
+    // The radiator cannot come off with the bumper on; with it off, the car cannot leave.
+    assert!(c.remove_part(uid, "radiator").is_err());
+    c.remove_part(uid, "front_bumper").unwrap();
+    let old_rad = c.remove_part(uid, "radiator").unwrap();
+    let why = c.start_blocker().unwrap();
+    assert!(why.contains("Radiator"), "{why}");
+
+    // A new stock bumper and the old radiator back in: the bumper area of the lattice is
+    // restored and its repair line is gone.
+    c.fit_part(uid, "radiator", old_rad).unwrap();
+    let new = c.buy_part(uid, "front_bumper", None).unwrap();
+    c.fit_part(uid, "front_bumper", new[0]).unwrap();
+    let w = c.workshop(uid).unwrap();
+    let bumper = w
+        .view
+        .slots
+        .iter()
+        .find(|s| s.id == "front_bumper")
+        .unwrap();
+    assert_eq!(bumper.fitted.as_ref().unwrap().condition, 1.0);
+    assert!(w.view.missing.is_empty());
+    assert!(c.start_blocker().is_none());
+    // The dented bumper is in the inventory and fits nowhere now.
+    let old = w
+        .view
+        .inventory
+        .iter()
+        .find(|p| p.part.kind == "front_bumper")
+        .unwrap();
+    assert!(old.part.condition < 1.0 && old.fits.is_empty());
+
+    // The saved game round-trips the parts and the inventory.
+    let text = c.save_json();
+    let back = Career::load_json(econ(), &text).unwrap();
+    assert_eq!(back.profile().account, c.profile().account);
+}
+
+#[test]
+fn the_workshop_shows_the_car_as_it_is_even_with_parts_missing() {
+    let (mut c, uid) = career_with("kestrel_ts", 30_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 35.0);
+    c.remove_part(uid, "front_bumper").unwrap();
+    c.remove_part(uid, "radiator").unwrap();
+    assert!(c.start_blocker().is_some());
+    let s = c
+        .showroom(uid, free_drive("ignored", DamageMode::Arcade, false))
+        .unwrap();
+    assert_eq!(s.scenario().entities[0].car, "kestrel_ts");
+    assert!(
+        player_damage(&s).summary().health < 1.0,
+        "saved dents are shown"
+    );
+    assert!(!c.run_active(), "the workshop is not a run");
+}

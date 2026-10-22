@@ -18,8 +18,12 @@
 //!    whose effects are numbers (aero, brake kits, cages, bars, exhaust, intercooler,
 //!    supercharger, carbon panels).
 //!
-//! Styles are checked against [`PartKind::styles`] when the catalog loads, so a typo in
-//! `data/mods` fails the data tests instead of drawing nothing.
+//! Styles in explicit `visuals` lists are checked against [`PartKind::styles`] when the catalog
+//! loads, so a typo there fails the data tests instead of drawing nothing. A cosmetic value with
+//! no style here (and the cosmetic kinds [`PartKind::of_cosmetic`] maps to `None`) derives no
+//! part: the testbed's cosmetic look draws it from `data/cosmetics/visuals.json`, which
+//! `tests/visuals.rs` checks covers every mod. The browser draws each mod once: the parts here
+//! first, the look for the mods they leave out.
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{BodyRegion, VehicleDef};
@@ -195,9 +199,11 @@ impl PartKind {
         })
     }
 
-    /// The part a cosmetic effect draws.
-    pub fn of_cosmetic(kind: CosmeticKind) -> PartKind {
-        match kind {
+    /// The part a cosmetic effect draws; `None` for kinds only the testbed's cosmetic looks
+    /// draw (`data/cosmetics/visuals.json`: fog lights, underglow, mud flaps, exhaust tips,
+    /// tyre sidewalls, window nets).
+    pub fn of_cosmetic(kind: CosmeticKind) -> Option<PartKind> {
+        Some(match kind {
             CosmeticKind::BodyKitFront => PartKind::FrontBumperKit,
             CosmeticKind::BodyKitSide => PartKind::SideKit,
             CosmeticKind::BodyKitRear => PartKind::RearBumperKit,
@@ -209,7 +215,13 @@ impl PartKind {
             CosmeticKind::Wheels => PartKind::Rims,
             CosmeticKind::WindowTint => PartKind::WindowTint,
             CosmeticKind::Interior => PartKind::InteriorTrim,
-        }
+            CosmeticKind::FogLights
+            | CosmeticKind::Underglow
+            | CosmeticKind::MudFlaps
+            | CosmeticKind::ExhaustTip
+            | CosmeticKind::Sidewall
+            | CosmeticKind::WindowNet => return None,
+        })
     }
 
     /// Whether `style` is one the renderer draws for this kind.
@@ -294,8 +306,13 @@ pub fn mod_parts(m: &ModDef) -> Vec<(PartKind, String)> {
     let mut out = Vec::new();
     for e in &m.effects {
         match e {
+            // A cosmetic value this renderer has no style for (turbofan rims, satin paint, the
+            // newer vinyls, ...) is drawn by the testbed's cosmetic look instead
+            // (`data/cosmetics/visuals.json`), so it derives no part here.
             ModEffect::Cosmetic { kind, value } => {
-                out.push((PartKind::of_cosmetic(*kind), value.clone()))
+                if let Some(part) = PartKind::of_cosmetic(*kind).filter(|p| p.accepts(value)) {
+                    out.push((part, value.clone()))
+                }
             }
             ModEffect::Vehicle {
                 param: VehicleParam::WheelsTireId,
@@ -404,15 +421,35 @@ mod tests {
         })
     }
 
+    /// Mods the testbed's cosmetic look draws pieces for (`data/cosmetics/visuals.json`; an
+    /// entry of `{"none": ...}` draws nothing).
+    fn drawn_by_cosmetic_look() -> std::collections::BTreeSet<String> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/cosmetics/visuals.json"
+        );
+        let text = std::fs::read_to_string(path).expect("data/cosmetics/visuals.json");
+        let v: serde_json::Value = serde_json::from_str(&text).expect("visuals.json parses");
+        v["mods"]
+            .as_object()
+            .expect("visuals.json mods")
+            .iter()
+            .filter(|(_, pieces)| pieces.as_array().is_some_and(|a| !a.is_empty()))
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     #[test]
     fn every_visible_slot_mod_draws_something() {
         let e = econ();
+        let look = drawn_by_cosmetic_look();
         let mut missing = Vec::new();
         for m in e.catalog.iter() {
             if VISIBLE_SLOTS.contains(&m.slot)
                 && !HIDDEN.contains(&m.id.as_str())
                 && mod_parts(m).is_empty()
                 && !changes_wheels(m)
+                && !look.contains(&m.id)
             {
                 missing.push(m.id.clone());
             }

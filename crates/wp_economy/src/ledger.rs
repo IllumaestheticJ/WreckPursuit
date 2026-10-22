@@ -138,6 +138,10 @@ pub struct OwnedCar {
     /// The free tune ([`crate::Economy::set_tune`]); stock unless the player changed it.
     #[serde(default, skip_serializing_if = "crate::CarTune::is_stock")]
     pub tune: crate::CarTune,
+    /// What is fitted in each workshop slot ([`crate::parts`]). `None` = never opened in the
+    /// workshop: the parts are derived from `mods` (stock everywhere else).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<crate::parts::CarParts>,
 }
 
 impl OwnedCar {
@@ -260,6 +264,16 @@ pub struct PlayerAccount {
     pub next_car_uid: u32,
     /// Sequence number of the next event.
     pub next_event_seq: u64,
+    /// Loose parts in the garage workshop ([`crate::parts`]).
+    #[serde(default)]
+    pub inventory: Vec<crate::parts::LoosePart>,
+    /// Next loose part uid to allocate (uids start at 1).
+    #[serde(default = "first_part_uid")]
+    pub next_part_uid: u32,
+}
+
+fn first_part_uid() -> u32 {
+    1
 }
 
 /// The durable account id for a ledger key. The ledger is keyed by `PlayerId` and both carry
@@ -296,6 +310,8 @@ impl PlayerAccount {
             day: 0,
             next_car_uid: 1,
             next_event_seq: 0,
+            inventory: Vec::new(),
+            next_part_uid: 1,
         }
     }
 

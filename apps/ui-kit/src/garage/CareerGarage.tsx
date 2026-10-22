@@ -466,6 +466,11 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             <Button variant="primary" disabled={car.active || car.location !== "Garage"} onClick={() => props.run(() => api.setActive(car.uid))}>
               {car.active ? "Active car" : "Drive this car"}
             </Button>
+            {api.workshop && (
+              <Button disabled={car.location !== "Garage"} onClick={() => api.workshop!(car.uid)} title="work on the car yourself: take parts off, fit new ones">
+                Workshop
+              </Button>
+            )}
             <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
               Mods
             </Button>
