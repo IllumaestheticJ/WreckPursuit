@@ -38,7 +38,7 @@ use wp_vehicle::{TireDb, Vehicle};
 use crate::density::{f_distance, f_time};
 use crate::drive::{DriveController, DriveGains};
 use crate::geom::{self, Obb, V2, V3};
-use crate::map::{CityMap, SegId, SegKind, NO_SEG};
+use crate::map::{CityMap, SegId, SegKind, Segment, NO_SEG};
 use crate::network::{IntersectionControl, LaneKind, TurnKind, ZoneId};
 
 mod blocked;
@@ -880,6 +880,29 @@ fn idm(v: f32, v0: f32, gap: f32, v_lead: f32, p: &DriverParams) -> f32 {
 
 /// Unit forward (XY) of a chassis quaternion `[x, y, z, w]` (chassis +Y rotated).
 pub use crate::drive::forward_of;
+
+/// The nearest tracked vehicle ahead of arc length `s` on lane segment `seg` that stands in the
+/// lane (centre within half the lane width + 0.5 m of the centreline, same level): its arc
+/// length and its speed along the lane.
+fn tracked_ahead_in_lane(
+    tracked: &[TrackedVehicle],
+    seg: &Segment,
+    s: f32,
+    width: f32,
+) -> Option<(f32, f32)> {
+    tracked
+        .iter()
+        .filter_map(|t| {
+            let pr = seg.project(geom::xy(t.pos));
+            let (p, tan) = seg.point_at(pr.s);
+            ((t.pos[2] - p[2]).abs() < 4.0
+                && pr.dist < width * 0.5 + 0.5
+                && pr.s > s
+                && pr.s < seg.length)
+                .then(|| (pr.s, geom::dot(geom::xy(t.vel), tan).max(0.0)))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
 
 /// A stopped car within 40 m ahead of `s` in `list`.
 fn list_has_stopped_ahead(list: &[Entry], s: f32) -> bool {
@@ -2868,6 +2891,16 @@ impl Traffic {
                         continue;
                     }
                 }
+                // A tracked vehicle (police, the player) ahead in the target lane is a leader
+                // there too: the civilians' lists do not hold it, and a change into the lane
+                // of a car standing 25 m ahead at 15 m/s went unbraked (the car only counts as
+                // its leader once the bodies overlap sideways).
+                let tracked_lead = tracked_ahead_in_lane(inp.tracked, cs, s2, cl.width_m);
+                if let Some((ts, _)) = tracked_lead {
+                    if ts - s2 - CAR_LENGTH_M < p.min_gap_m + 1.0 {
+                        continue;
+                    }
+                }
                 let (a_n, a_n2) = match fol {
                     Some(e) => {
                         if s2 - e.s - CAR_LENGTH_M < 2.0 {
@@ -2887,10 +2920,13 @@ impl Traffic {
                     }
                     None => (0.0, 0.0),
                 };
-                let a_c2 = match lead {
+                let mut a_c2 = match lead {
                     Some(e) => idm(a.v, v0, e.s - s2 - CAR_LENGTH_M, e.v, &p),
                     None => idm(a.v, v0, f32::INFINITY, 0.0, &p),
                 };
+                if let Some((ts, tv)) = tracked_lead {
+                    a_c2 = a_c2.min(idm(a.v, v0, ts - s2 - CAR_LENGTH_M, tv, &p));
+                }
                 let bias = if to_right {
                     p.keep_right_bias
                 } else {
