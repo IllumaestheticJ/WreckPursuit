@@ -1496,3 +1496,16 @@ fn a_race_where_everyone_left_is_stuck_ends_after_the_stuck_limit() {
         assert_eq!(r.status, RacerStatus::Dnf(DnfReason::TimeLimit), "{r:?}");
     }
 }
+
+/// The stuck rule follows lap wraps: a slow circuit (600 s at 4 m/s) is never `Stuck`.
+#[test]
+fn a_slow_circuit_racer_is_not_stuck() {
+    let racers = [
+        ScriptedRacer::new(1, 5.0, 4.0),
+        ScriptedRacer::new(2, 5.0, 4.2),
+    ];
+    let out = run(RaceKind::Circuit { laps: 3 }, square_course(), &racers, 4);
+    for r in &out.results {
+        assert_eq!(r.status, RacerStatus::Finished, "{r:?}");
+    }
+}

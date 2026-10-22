@@ -622,7 +622,12 @@ impl RaceJudge {
         } else {
             proj.along_m
         };
-        if t.progress_m > t.best_progress_m + STUCK_PROGRESS_M {
+        // (A drop of more than half a lap is a wrap, not going backwards: a grid just behind the
+        // start line of a loop reads almost a full lap until the cars cross it — Loop 9 had
+        // every racer `Stuck` at 180 s while they raced.)
+        if t.progress_m > t.best_progress_m + STUCK_PROGRESS_M
+            || t.progress_m < t.best_progress_m - 0.5 * len
+        {
             t.best_progress_m = t.progress_m;
             t.progress_tick = tick;
         }
