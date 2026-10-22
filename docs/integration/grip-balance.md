@@ -1449,3 +1449,34 @@ from rest, auto gears.
 - Parity cars added: `parity_rwd_e` (the 16:30 clip's car: 348 kW / 578 N·m / 1368 kg, 5-speed,
   rampart_50 base) and `parity_rwd_f` (the 16:34–16:39 clips' car: 323 kW / 525 N·m / 1213 kg,
   6-speed, lucciola_350 base). Role ids only (rule 9: no reference-game car names).
+
+## Held-key drift search, lock fixed (lead, 2026-10-22; handed to the physics lead)
+Owner on preview 0.12.49 (lab preset D): "held key drift works very poorly", "it doesn't let me
+steer to full lock at all" (D's player rack speed curve at 49 km/h). The lead's new rules:
+- the steering lock and the player rack are not searched;
+- a new guard rail: a held key's wheel angle at 60 / 100 / 140 km/h must be ≥ 90 % of today's.
+
+`examples/held_search.rs` (8269b038):
+- `N`, `SEED`, `ONLY_BASE=1`;
+- `RACK=full`: the shipped rack without its speed reduction, player only;
+- `FRONT=1`: also the front tyre shape.
+
+Each process runs single-threaded; 150 candidates take about 15 min. Logs:
+`docs/integration/grip-balance-held-search/` (s3 = rear / ride, 4 × 150; s4 = FRONT=1,
+partial ~50 per log, stopped at the handover).
+
+Lock-at-speed baseline:
+- The shipped rack already gives a held key only 84 / 65 / 49 % of full lock at
+  60 / 100 / 140 km/h (speed_sensitivity 0.75, sens_ref 113 km/h).
+- So "≥ 90 % of full lock at any speed" needs `RACK=full`, i.e. a change to the shipped rack.
+
+Results:
+
+| run | base held | best within guard rails |
+|---|---|---|
+| shipped rack | 2.24 s, taps 20 | 2.59 s, taps 21 |
+| RACK=full | 2.13 s, taps 12 | 2.50 s, taps 11 (best taps: 33/36 at 2.29 s) |
+| FRONT=1 | — | 1 of ~200 candidates passes the handling guard (1.66 s); best overall 2.96 s with 5 handling fails and taps 11 |
+
+None comes close to D's 3.92 s or the reference: D's gain came almost entirely from the lock
+at speed.

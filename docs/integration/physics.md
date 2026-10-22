@@ -55,3 +55,13 @@ reference.
 - Next (row 148): the levers the owner named. TCS Half holding the wheelspin and the hands-off
   countersteer (30 % cap) on the held drift, then front slip-angle behaviour. The bench drives
   TCS Off today (`reference_assists`).
+
+## grip-balance handoff merged (lead/grip-balance e6a591de)
+grip-balance stopped handling work and handed over (its results: `docs/integration/grip-balance.md`,
+last section; logs in `docs/integration/grip-balance-held-search/`). Its `held_search` (lock
+fixed, lock-at-speed guard, springs / bars / roll inertia, `FRONT=1` front tyre shape) replaces
+mine; `RACK=ref` added. Same conclusion from 4 more seeds: best within every guard rail 2.59 s
+(taps 21, handling 0, shipped rack: b0 6.48, b2 1.75, c 0.90, floor 0.38, relax 1.41, peak 1.10,
+rear 0.533, front 0.666, yaw 1.35, spring 1.04, arb 0.63, roll 1.34; AI pace not run). Front tyre
+shape breaks handling. Their open hunches: the clip marker is the steering wheel, not the road
+wheels; front slip-angle limit in a closing slide; rack compliance; aligning moment on the body.
