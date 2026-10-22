@@ -16,7 +16,8 @@
 //! AI pace and goldens are checked on the shortlist only (too slow for every candidate).
 //! `N=150 SEED=1 cargo run --release -p wp_vehicle --example held_search`; `ONLY_BASE=1` scores
 //! the shipped set alone; `PLAYER_LOCK=1` searches the player rack's speed curve instead of a
-//! car-wide lock scale (AI unaffected).
+//! car-wide lock scale (AI unaffected); `RACK=ref` / `RACK=full` fix the player rack to the
+//! reference curve / full lock.
 
 use std::path::PathBuf;
 
@@ -118,6 +119,10 @@ impl Params {
             yaw_inertia: r(0.9, 1.4),
             sens_ref_kmh: 113.0,
         };
+        // RACK set: lock fixed (row 147); only tyres / balance / inertia are searched.
+        if std::env::var_os("RACK").is_some() {
+            p.lock = 1.0;
+        }
         if player_lock {
             p.lock = 1.0;
             p.sens_ref_kmh = r(40.0, 113.0);
@@ -150,10 +155,21 @@ impl Params {
     /// The player rack with this candidate's speed curve (set after a run's settle, which
     /// drives a bare rig that a plain-steering override would reach too).
     fn player_rack(&self) -> wp_vehicle::plain::PlainSteer {
-        wp_vehicle::plain::PlainSteer {
+        let mut p = wp_vehicle::plain::PlainSteer {
             sens_ref_kmh: self.sens_ref_kmh,
             ..wp_vehicle::lab_scope::shipped_plain()
+        };
+        // RACK=ref: the reference clips' curve (tune panel "rack · reference");
+        // RACK=full: no speed reduction. Either overrides the searched curve.
+        match std::env::var("RACK").as_deref() {
+            Ok("ref") => {
+                p.sens_ref_kmh = 172.0;
+                p.sens_exponent = 4.0;
+            }
+            Ok("full") => p.speed_sensitivity = 0.0,
+            _ => {}
         }
+        p
     }
 }
 

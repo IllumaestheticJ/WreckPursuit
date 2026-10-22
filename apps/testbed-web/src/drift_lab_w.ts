@@ -871,30 +871,35 @@ export class DriftLabWPanel {
         this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
         this.build();
       };
-      // Held-key drift (lab, 2026-10-22): the held_search shortlist's best candidate (the owner's
-      // reference clips: a held countersteer key + throttle lifts holds the drift for seconds).
-      // Tyres + grip balance + ride + the player rack's speed curve together; lab A/B only,
-      // nothing ships from here.
-      const heldKey = document.createElement("button");
-      heldKey.textContent = "lab · held-key drift";
-      heldKey.title =
-        "held_search candidate D (AI-safe: no car-wide lock change): spin model b0 11.8 / b2 2.88 / c 0.80, side floor 0.52, rear relaxation × 1.26, rear peak slip × 1.04, front / rear cornering stiffness × 0.78 / 0.63, yaw inertia × 1.39, player rack speed curve 49 km/h (less player lock at speed). Held countersteer + throttle lifts hold 3.9 s on average (shipped 2.2 s); taps 26 / 36 (shipped 20); AI pace unchanged. Sets tyres, grip balance, ride and steering; restarts the car";
-      heldKey.onclick = () => {
-        const cd = this.sim.carTuneDefaults();
-        const tyres = JSON.stringify({ ...cd.shipped, spin_b0: 11.84, spin_b2: 2.881, spin_c: 0.796, side_floor: 0.517, rear_relax: 1.262, rear_peak_slip: 1.038 });
-        const ride = JSON.stringify({ ...this.sim.rideTuneDefaults().owner, yaw_inertia: 1.385 });
-        saveGrip({ ...gd.shipped, rear_stiffness: 0.634, front_stiffness: 0.784 });
-        this.sim.carTuneSet(tyres);
-        this.sim.rideTuneSet(ride);
-        try {
-          localStorage.setItem(CAR_STORE, tyres);
-          localStorage.setItem(RIDE_STORE, ride);
-        } catch {
-          /* ignore */
-        }
-        this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), sens_ref_kmh: 49.2 } as unknown as Record<string, number>);
-        this.restart(this.car);
+      // Player rack A/B (physics lead, 2026-10-22; owner rows 147 / 149): only the player's
+      // speed-sensitive lock changes; tyres, ride and balance stay as they are. "reference"
+      // follows the reference clips' held-key wheel angle vs speedometer (near full lock to
+      // ~110 km/h, then easing; docs/integration/physics.md).
+      const rackBtn = (label: string, title: string, curve: { speed_sensitivity: number; sens_ref_kmh: number; sens_exponent: number }) => {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.title = title;
+        b.onclick = () => {
+          this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...curve } as unknown as Record<string, number>);
+          this.build();
+        };
+        return b;
       };
+      const rackShipped = rackBtn(
+        "rack · shipped",
+        "Today's player rack: a held key gets 83 % of full lock at 60 km/h, 63 % at 100, 47 % at 140. Steering only",
+        { speed_sensitivity: 0.75, sens_ref_kmh: 113.0, sens_exponent: 2.0 },
+      );
+      const rackRef = rackBtn(
+        "rack · reference",
+        "Matches the reference clips: a held key gets 98 % of full lock at 60 km/h, 92 % at 100, 89 % at 110, 75 % at 140, 70 % at 150. Steering only",
+        { speed_sensitivity: 0.75, sens_ref_kmh: 172.0, sens_exponent: 4.0 },
+      );
+      const rackFull = rackBtn(
+        "rack · full lock",
+        "No speed reduction: a held key gets full lock at every speed. Steering only",
+        { speed_sensitivity: 0.0, sens_ref_kmh: 113.0, sens_exponent: 2.0 },
+      );
       // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
       const trans = document.createElement("button");
       trans.textContent = "transition: swing rack (test)";
@@ -937,7 +942,7 @@ export class DriftLabWPanel {
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       // The transition preset is a flick / transition setting: hidden lab only (row 137).
       trans.textContent = `lab · ${trans.textContent}`;
-      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans, heldKey] : []), v2);
+      abRow.append(ab, ...rearBtns, step14, gripBtn, forSlow, driftBest, step2, lockOnly, ...(this.lab ? [trans] : []), v2, rackShipped, rackRef, rackFull);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";
