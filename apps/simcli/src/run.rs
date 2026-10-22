@@ -553,6 +553,7 @@ pub fn apply_op(
             }
         }
         OpKind::Ghost { ticks } => sim.set_ghost(id, u32::from(ticks))?,
+        OpKind::Dormant { on } => sim.set_dormant(id, on)?,
     }
     Ok(())
 }
