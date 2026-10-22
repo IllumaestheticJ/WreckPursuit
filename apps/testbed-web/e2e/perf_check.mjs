@@ -1,7 +1,9 @@
 // Browser perf regression check (docs/integration/browser-perf.md): runs e2e/frame_profile.mjs on
 // the city chase and the rainy-night chase (1280×720) and on the phone profile (740×360 touch,
 // chase), all at the default "auto" graphics quality (= the software-GL / touch profiles under
-// headless SwiftShader), and fails on the targets below. Every run also prints per-feature cost
+// headless SwiftShader), and fails on the targets below. Owner decision 2026-10-22 ("this will
+// be a PC game", playtest row 145): the phone run is informational. Its budgets are printed
+// (INFO, within / over) but never fail; page errors and the structural checks still gate it. Every run also prints per-feature cost
 // lines (frame-loop sections, draw calls, triangles and raster ms per render feature, steady vs
 // one-off allocation) so a regression is attributable to the feature that caused it.
 // Usage: node e2e/perf_check.mjs (needs `npm run wasm`). Run by e2e/run.mjs (`just web-e2e`;
@@ -29,7 +31,8 @@ const LIMITS = {
   maxSteadyAllocKBPerFrame: 200,
   // Everything (one-off included); measured ~1000–1400 KB after the 12b pass, 2500–2800 before.
   maxAllocKBPerFrame: 2400,
-  // Desktop: measured ~300 / ~280 after the 12b pass (774 before); the phone has its own limit.
+  // Desktop: measured ~300 / ~280 after the 12b pass (774 before). The phone's 300 is reported,
+  // not enforced (PC game, row 145).
   maxDrawCalls: 600,
   maxPhoneDrawCalls: 300,
   // Measured ~200k after the 12b pass (~456k before).
@@ -47,6 +50,7 @@ const RUNS = [
   { which: "chase", env: {} },
   { which: "rain", env: {} },
   // Phone (docs/integration/touch.md): landscape 740×360, touch (DPR 3, the touch profile).
+  // Informational only (PC game, playtest row 145): budgets printed, not enforced.
   { which: "chase", env: { VIEWPORT: "740x360", TOUCH: "1" }, phone: true },
 ];
 
@@ -78,13 +82,15 @@ for (const run of RUNS) {
   const p = JSON.parse(line);
   const tag = `perf ${name} @ ${p.viewport} [${p.gfx}, ${p.style}]`;
   check(p.errors.length === 0, `${tag}: no page errors (${p.errors.join(" | ")})`);
-  check(p.rtf >= LIMITS.minRtf, `${tag}: real-time factor ${p.rtf.toFixed(3)} ≥ ${LIMITS.minRtf} · ${p.fps.toFixed(1)} fps · p50 ${p.frameP50.toFixed(0)} ms · p90 ${p.frameP90.toFixed(0)} ms`);
-  check(p.framesOver250 <= LIMITS.maxFramesOver250, `${tag}: ${p.framesOver250} frames over 250 ms (≤ ${LIMITS.maxFramesOver250})`);
+  // Budgets: gates on the desktop runs; on the phone run (PC game, row 145) printed only.
+  const budget = run.phone ? (ok, msg) => info(`${ok ? "within" : "OVER"} (phone budget, not a gate) ${msg}`) : check;
+  budget(p.rtf >= LIMITS.minRtf, `${tag}: real-time factor ${p.rtf.toFixed(3)} ≥ ${LIMITS.minRtf} · ${p.fps.toFixed(1)} fps · p50 ${p.frameP50.toFixed(0)} ms · p90 ${p.frameP90.toFixed(0)} ms`);
+  budget(p.framesOver250 <= LIMITS.maxFramesOver250, `${tag}: ${p.framesOver250} frames over 250 ms (≤ ${LIMITS.maxFramesOver250})`);
   const maxCalls = run.phone ? LIMITS.maxPhoneDrawCalls : LIMITS.maxDrawCalls;
-  check(p.drawCalls < maxCalls, `${tag}: ${p.drawCalls.toFixed(0)} draw calls / frame (< ${maxCalls})`);
-  check(p.triangles <= LIMITS.maxTriangles, `${tag}: ${p.triangles.toFixed(0)} triangles / frame (≤ ${LIMITS.maxTriangles})`);
-  check(p.wasmCallsPerFrame <= LIMITS.maxWasmCallsPerFrame, `${tag}: ${p.wasmCallsPerFrame.toFixed(1)} wasm calls / frame (≤ ${LIMITS.maxWasmCallsPerFrame})`);
-  check(
+  budget(p.drawCalls < maxCalls, `${tag}: ${p.drawCalls.toFixed(0)} draw calls / frame (< ${maxCalls})`);
+  budget(p.triangles <= LIMITS.maxTriangles, `${tag}: ${p.triangles.toFixed(0)} triangles / frame (≤ ${LIMITS.maxTriangles})`);
+  budget(p.wasmCallsPerFrame <= LIMITS.maxWasmCallsPerFrame, `${tag}: ${p.wasmCallsPerFrame.toFixed(1)} wasm calls / frame (≤ ${LIMITS.maxWasmCallsPerFrame})`);
+  budget(
     p.steadyAllocKBPerFrame <= LIMITS.maxSteadyAllocKBPerFrame && p.allocKBPerFrame <= LIMITS.maxAllocKBPerFrame,
     `${tag}: ${p.steadyAllocKBPerFrame.toFixed(0)} KB allocated / frame steady (≤ ${LIMITS.maxSteadyAllocKBPerFrame}), ` +
       `${p.allocKBPerFrame.toFixed(0)} KB with one-off view / shader builds (≤ ${LIMITS.maxAllocKBPerFrame})`,
@@ -96,7 +102,7 @@ for (const run of RUNS) {
   check(s.signalHeads === 0 || s.signalsDrawn < s.signalHeads, `${tag}: ${s.signalsDrawn} of ${s.signalHeads} signal heads drawn (near the camera)`);
   if (s.fx) {
     const fxMs = p.sectionsTrim?.fx ?? p.sections.fx ?? 0;
-    check(
+    budget(
       fxMs <= LIMITS.maxFxMsPerFrame && s.fx.drawCalls <= LIMITS.maxFxDrawCalls,
       `${tag}: crash effects [${s.fx.quality}] ${fxMs.toFixed(3)} ms/frame (≤ ${LIMITS.maxFxMsPerFrame}), ${s.fx.drawCalls} draw calls (≤ ${LIMITS.maxFxDrawCalls}); ` +
         `${s.fx.sparks} sparks, ${s.fx.smoke} puffs, ${s.fx.shards} shards, ${s.fx.chips} chips, ${s.fx.skidSegments} skid segments this session`,
