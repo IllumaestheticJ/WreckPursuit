@@ -1399,6 +1399,30 @@ f850d6b4. On 9b686f76: `golden_spike_strip`, which moves with `deflate_s` only (
 unchanged at 5 s), and `jam_pursuit_grid`, from 20 s of its L4–L5 pursuit (spawn and tool
 rules). Every other golden passes on the merged tree.
 
+### Turn-round, chase-unit map marker, far-carriageway repro (2026-10-22)
+
+**Where turn-round time goes.** Bench columns `turns/min` and `turn s` (3d1daa45) time each turn-round of a unit after the evader: the pro driver facing more than ~73 deg from its line, a reverse swing or U-turn, or backing out. Baseline: about 51 unit-seconds of turning per pursuit minute, most of it in turns of 3 s or more. With the racer moving, a 3-seed tally split the time into:
+- U-turns while rolling: about 370 s.
+- The pro driver's crawl round at its 4 m/s cap: about 240 s.
+- Standing, blocked by traffic or another unit: about 250 s.
+
+**Change:** the crawl cap goes from 4 to 5.5 m/s (`data/police/pursuit.toml` `turn_around_mps`, and the matching code default). Tried and not kept (6 seeds each):
+- U-turn 6 → 7.5 m/s: turning 52.1 → 49.9 s, no gain.
+- Swing/U-turn from 90 deg instead of 107 deg: 54.6 s, stuck 3.58 → 4.15/min.
+
+| 192 runs | lead m | pace | capture | escape | crash/min | stuck/min | turning s per pursuit min | turns ≥ 3 s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| before (3d1daa45) | 65 | 0.75 | 82 % | 13 % | 1.18 | 3.89 | 50.7 | 1586 |
+| after (crawl 5.5 m/s) | 62 | 0.53 | 83 % | 14 % | 1.20 | 2.86 | 46.6 | 1279 |
+
+Pace is the median over different, smaller sample sets (588 → 371 samples) and moves opposite ways by city (Vesper 0.46 → 0.54, grid 0.78 → 0.50), so it is within its known noise. Turning time, long turns and stuck events clearly drop.
+
+Goldens blessed: jam_pursuit_grid, jam_pursuit_vesper, weather_fog_pursuit, and police_tunnel_escape_founders_cut with its control. Founders Cut's helicopter now launches at 90.2 s; its bound moved from 80 to 95 s (still before the Cut).
+
+**Chase-unit map marker (row 129).** A chasing unit routing round by the roads now shows where its route meets the racer's path: the junction the racer heads for (`Unit::chase_route`). It is drawn in policeB with a dotted line and a diamond, while an interceptor keeps its dashed line and circle. It is shown only while the unit routes; a unit right behind the racer shows none. This is minimal glue in `wp_wasm/src/map.rs` and `apps/ui-kit/src/map/draw.ts`. ui-kit's `data.test` top-speed failure is pre-existing.
+
+**Far-carriageway spawn repro (row 140).** It reproduced with the 192-run sequence on 36a31b1f, vesper night L3: a spike car that had waited for its spot to be hidden spawned 285 s in, with the racer 360 m away on another road. From the racer's road at that moment, the spot was its far carriageway. A waiting tool car whose spot is on the racer's far carriageway is now dropped. On the current base the full 192-run sequence has no such spawn.
+
 ### Rows 84, 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 
