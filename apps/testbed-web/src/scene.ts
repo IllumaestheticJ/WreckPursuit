@@ -126,6 +126,8 @@ function makeBeam(parent: THREE.Object3D): HeloBeam {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
+      // One pass: transparent + DoubleSide would flip `side` and re-resolve the program twice a frame.
+      forceSinglePass: true,
     }),
   );
   const pool = new THREE.Mesh(
@@ -532,7 +534,8 @@ export class SceneView {
       holder.position.set(...g.pos);
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(g.radius_m - 0.6, g.radius_m, 48),
-        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }),
+        // Single pass (transparent + DoubleSide would flip `side` and re-resolve the program twice a frame).
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true }),
       );
       ring.position.z = 0.08;
       const beam = new THREE.Mesh(

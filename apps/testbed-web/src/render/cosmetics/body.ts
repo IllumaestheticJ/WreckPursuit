@@ -40,7 +40,7 @@ const lip: Builder = (c, p) => {
   const lipH = aggro ? 0.07 : 0.045;
   g.add(box(w * 0.94, 0.1, lipH, c.kit.black, 0, f.max.y - 0.03, f.min.z - lipH / 2 + 0.03));
   if (aggro) {
-    const mesh = new THREE.MeshStandardMaterial({ map: meshTexture("#222428", 10, 6), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
+    const mesh = new THREE.MeshStandardMaterial({ map: meshTexture("#222428", 10, 6), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, forceSinglePass: true });
     g.add(box(w * 0.5, 0.01, 0.13, mesh, 0, f.max.y + 0.012, f.min.z + 0.14));
     for (const sx of [-1, 1]) g.add(box(0.2, 0.1, 0.02, c.kit.black, sx * w * 0.38, f.max.y + 0.01, f.min.z + 0.02));
   }
@@ -455,7 +455,7 @@ const radGuard: Builder = (c) => {
   const grille = c.frame.part("grille") ?? c.frame.part("engine_radiator");
   const f = c.frame.bumperFront;
   const b = grille ?? new THREE.Box3(V(-0.35, f.max.y - 0.02, f.min.z + 0.15), V(0.35, f.max.y, f.min.z + 0.45));
-  const m = new THREE.MeshStandardMaterial({ map: meshTexture("#b8bdc2", 12, 5), transparent: true, alphaTest: 0.4, metalness: 0.8, roughness: 0.3, side: THREE.DoubleSide });
+  const m = new THREE.MeshStandardMaterial({ map: meshTexture("#b8bdc2", 12, 5), transparent: true, alphaTest: 0.4, metalness: 0.8, roughness: 0.3, side: THREE.DoubleSide, forceSinglePass: true });
   const g = new THREE.Group();
   const w = b.max.x - b.min.x + 0.06;
   const h = Math.max(b.max.z - b.min.z + 0.06, 0.14);

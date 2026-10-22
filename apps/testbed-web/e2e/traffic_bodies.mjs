@@ -11,8 +11,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const PORT = 5208;
 const URL = `http://localhost:${PORT}/`;
-const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
-process.on("exit", () => server.kill("SIGTERM"));
+// Own process group: the exit handler stops vite itself, not just npx (a leftover server on
+// the port would serve the next run stale code).
+const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe", detached: true });
+process.on("exit", () => {
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {}
+});
 for (let i = 0; i < 100; i++) { try { if ((await fetch(URL)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });

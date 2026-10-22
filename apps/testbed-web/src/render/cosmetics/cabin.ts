@@ -175,7 +175,7 @@ const fuelCell: Builder = (c) => {
 const windowNet: Builder = (c) => {
   const glass = c.frame.part("door_fl_glass");
   if (!glass) return;
-  const m = new THREE.MeshStandardMaterial({ map: meshTexture("#141414", 8, 5), transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 1 });
+  const m = new THREE.MeshStandardMaterial({ map: meshTexture("#141414", 8, 5), transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, forceSinglePass: true, roughness: 1 });
   const w = glass.max.y - glass.min.y;
   const h = glass.max.z - glass.min.z;
   // Plane in the car's YZ plane (normal across the car).
