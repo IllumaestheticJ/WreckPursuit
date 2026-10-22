@@ -113,13 +113,15 @@ describe("build stats", () => {
     expect(stock.source).toBe("measured");
     expect(stock.stats).toEqual(CAR_STATS.kestrel_ts);
     // Same build as wp_wasm's build_stats test, measured on the rig at 6.54 s / 256 km/h /
-    // 1.047 g (stock 7.08 / 248 / 0.93): the estimate must land near the physics.
+    // 1.047 g: the estimate must land near the physics. Top speed is checked against stock (as
+    // wp_wasm's test does): the stock table was re-measured on round 12's physics (248 → 241 km/h,
+    // data/stats/cars.json, 38efca77), so the old fixed 248 asked the estimate to beat a stale stock.
     const b = buildStats("kestrel_ts", ["engine_intake_1", "engine_ecu_2", "tires_semi_slick"])!;
     expect(b.source).toBe("estimated");
     expect(b.stats.zero_to_100_s!).toBeLessThan(stock.stats.zero_to_100_s!);
     expect(b.stats.zero_to_100_s!).toBeGreaterThan(6.54 * 0.92);
     expect(b.stats.zero_to_100_s!).toBeLessThan(6.54 * 1.08);
-    expect(b.stats.top_speed_kmh).toBeGreaterThan(248);
+    expect(b.stats.top_speed_kmh).toBeGreaterThan(stock.stats.top_speed_kmh);
     expect(b.stats.cornering_g).toBeGreaterThan(1.047 * 0.92);
     expect(b.stats.cornering_g).toBeLessThan(1.047 * 1.08);
     expect(b.stats.bars.cornering).toBeGreaterThan(stock.stats.bars.cornering);
