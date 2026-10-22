@@ -27,6 +27,9 @@ export interface RaceCard {
   length_m: number;
   police: number;
   hot_meet: boolean;
+  /** The race's police style (`data/police/races.toml`) and how it works. */
+  police_style: string;
+  police_summary: string;
   drivers: { name: string; style: string; car: string }[];
   purse: number;
   entry_fee: number;
@@ -130,6 +133,11 @@ function Picker(props: { cards: RaceCard[]; onStart: (id: string) => void; onClo
                 {c.police > 1 ? " · police presence MAX" : ""}
                 {c.hot_meet ? " · hot meet: a patrol will come" : ""}
               </div>
+              {c.police_style ? (
+                <div style={{ fontSize: "0.8em", margin: "0 0 0.3em" }}>
+                  <b>Police: {c.police_style}</b> <span class="wp-dim">— {c.police_summary}</span>
+                </div>
+              ) : null}
               <div style={{ fontSize: "0.8em" }}>
                 {c.drivers.map((d) => (
                   <div key={d.name}>

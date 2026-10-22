@@ -133,14 +133,26 @@ pub struct RaceDef {
 }
 
 impl RaceDef {
-    /// Police presence for the sim (`Scenario::police_presence`): the stake table's presence
-    /// for this legality (street = normal, illegal daytime = max).
+    /// Police presence for the sim (`Scenario::police_presence`): the race's own police
+    /// profile (`data/police/races.toml`), or the stake table's presence for this legality
+    /// (street = normal, illegal daytime = max) for a race without one.
     pub fn police_presence(&self) -> f32 {
-        presence_scale(match self.legality {
-            Legality::Sanctioned => PolicePresence::None,
-            Legality::Street => PolicePresence::Normal,
-            Legality::IllegalDaytime => PolicePresence::Max,
-        })
+        match self.police_profile() {
+            Some(p) => p.presence,
+            None => presence_scale(match self.legality {
+                Legality::Sanctioned => PolicePresence::None,
+                Legality::Street => PolicePresence::Normal,
+                Legality::IllegalDaytime => PolicePresence::Max,
+            }),
+        }
+    }
+
+    /// This race's police profile (`data/police/races.toml`, keyed by the race id): how the
+    /// police work this race. Applied by [`crate::police::start_race`].
+    pub fn police_profile(&self) -> Option<wp_police::race::RaceProfile> {
+        wp_police::race::RaceProfiles::builtin()
+            .get(self.id)
+            .cloned()
     }
 
     /// Number of racers (AI + the player).
@@ -638,5 +650,20 @@ mod tests {
         assert!(has(&|r| r.city == RaceCity::Grid));
         assert!(has(&|r| r.legality == Legality::IllegalDaytime));
         assert!(all.iter().all(|r| r.legality != Legality::Sanctioned));
+    }
+
+    #[test]
+    fn every_race_has_its_own_police_profile() {
+        let mut names = Vec::new();
+        for r in races() {
+            let p = r
+                .police_profile()
+                .unwrap_or_else(|| panic!("{}: no data/police/races.toml table", r.id));
+            assert_eq!(r.police_presence(), p.presence);
+            names.push(p.name);
+        }
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), races().len(), "each race has its own style");
     }
 }

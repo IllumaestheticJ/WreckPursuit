@@ -22,6 +22,8 @@
 //! - [`walls`]: static feelers against building footprints and tunnel walls.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
+//! - [`race`]: race-specific police profiles (`data/police/races.toml`): doctrine and
+//!   pre-scripted roadblocks, spike strips and stakeouts per race.
 //! - [`radio`]: radio pacing (one transmission at a time, gaps by wanted level).
 //! - [`chatter`]: unit-to-unit callouts with call signs and street-name places (row 79).
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
@@ -40,6 +42,7 @@ pub mod graph;
 pub mod heat;
 pub mod pro;
 pub mod pursuit;
+pub mod race;
 pub mod radio;
 pub mod scenario;
 pub mod stuck;
@@ -508,6 +511,8 @@ pub struct PoliceSystem {
     pub(crate) resets: Vec<UnitReset>,
     /// Drivable room for the pro driver's racing line (lead P8).
     pub(crate) room: pro::RoadRoom,
+    /// The race being policed ([`PoliceSystem::start_race`]), if any.
+    pub(crate) race: Option<race::RacePolice>,
 }
 
 impl Default for PoliceSystem {
@@ -658,6 +663,7 @@ impl PoliceSystem {
             feelers: true,
             covers: Vec::new(),
             resets: Vec::new(),
+            race: None,
         }
     }
 
@@ -2154,6 +2160,10 @@ impl PoliceSystem {
         h.write_u32(self.roadblocks.len() as u32);
         h.write_u32(self.spikes.len() as u32);
         h.write_u64(self.stats.pursuits.len() as u64);
+        if let Some(r) = &self.race {
+            h.write_bytes(r.race.as_bytes());
+            h.write_u32(r.stakeouts.iter().filter(|s| s.sprung).count() as u32);
+        }
         h.finish()
     }
 }

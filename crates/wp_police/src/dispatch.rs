@@ -1624,6 +1624,7 @@ impl PoliceSystem {
         self.update_responses();
         self.maintain_reinforcements(world);
         self.maintain_helicopters();
+        self.race_think(world);
         if !self.captain.human {
             self.ai_captain_tools();
         }
@@ -3489,7 +3490,7 @@ impl PoliceSystem {
                 remaining_s: self.captain.roadblock_ready.since(now),
             });
         }
-        if self.roadblocks.len() as u32 >= rb.max_active {
+        if self.roadblocks.iter().filter(|r| !r.scripted).count() as u32 >= rb.max_active {
             return Err(CaptainError::Budget);
         }
         let (p, v) = self.racer_motion(racer).ok_or(CaptainError::NotPursued)?;
@@ -3532,6 +3533,7 @@ impl PoliceSystem {
             units: Vec::new(),
             barriers,
             expires: now.plus(lifetime),
+            scripted: false,
         });
         self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
@@ -3582,6 +3584,7 @@ impl PoliceSystem {
             units: Vec::new(),
             barriers,
             expires,
+            scripted: false,
         });
         self.stats.roadblocks += 1;
         self.pending.push(PoliceEvent::RoadblockPlaced {
@@ -3638,7 +3641,7 @@ impl PoliceSystem {
                 remaining_s: self.captain.spikes_ready.since(now),
             });
         }
-        if self.spikes.len() as u32 >= sc.max_active {
+        if self.spikes.iter().filter(|s| !s.scripted).count() as u32 >= sc.max_active {
             return Err(CaptainError::Budget);
         }
         let (p, v) = self.racer_motion(racer).ok_or(CaptainError::NotPursued)?;
@@ -3775,14 +3778,14 @@ impl PoliceSystem {
         let now = self.now;
         let mut removed = Vec::new();
         self.roadblocks.retain(|rb| {
-            let keep = now < rb.expires && racer != Some(rb.racer);
+            let keep = now < rb.expires && (rb.scripted || racer != Some(rb.racer));
             if !keep {
                 removed.push((rb.id, rb.units.clone()));
             }
             keep
         });
         self.spikes.retain(|s| {
-            let keep = now < s.expires && racer != Some(s.racer);
+            let keep = now < s.expires && (s.scripted || racer != Some(s.racer));
             if !keep {
                 removed.push((s.id, s.unit.into_iter().collect()));
             }

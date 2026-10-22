@@ -379,6 +379,15 @@ police cars) with `set_obstacles` each tick. Headless, units see the racers and 
 - **Radar detector** `radar(pos, tier)`: units in Patrol/Pursue state within `radar_range_m[tier]`.
 - **Scanner** `scanner(tier, since: Option<SimTime>)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
 
+### Race profiles (`race.rs`)
+Each picker race has its own police (`data/police/races.toml`, keyed by race id):
+`RaceProfile::apply` switches tactics off (unlock level 6) and overrides chase speeds;
+`PoliceSystem::start_race` places scripted roadblocks across the course (with a gap) and on the
+side roads off it, spike strips over part of the course, and stakeout units that join or start a
+chase when a racer passes. Scripted tools outlive a racer's pursuit and do not use the AI
+captain's budget. Styles: Lantern "Downtown lockdown", Loop 9 "Highway interceptors"
+(pursuit only), Hollins "Summit trap", Grid "Speed trap" (see `docs/integration/police.md`).
+
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is
 validated against unlocks (`presence.toml [unlocks]`), cooldowns, budgets and the placement
@@ -395,6 +404,7 @@ Player chase units get `unit_order()` **suggestions** only.
 | `presence.toml` | Patrols per district × phase, reinforcement response times, reckless-driving response (`[response]`: call delays, radius, spawn window, unit cap by heat, despawn distance), helicopter availability, tool/tactic unlock levels, crash scenes |
 | `pursuit.toml` | Think rate, speed factors and caps, cornering g, LOS range, unit dynamics and crash severity per mode, risk budget, traffic hazards, tactic parameters |
 | `tools.toml` | Roadblock, spike strip and helicopter parameters, radar/scanner tiers, captain hold time |
+| `races.toml` | Per-race police profiles (`race.rs`): allowed tactics, speed overrides, scripted roadblocks on/off the course, spike strips and stakeouts, one table per picker race |
 
 The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from disk with
 `PoliceConfig::load(dir)`. A test checks that both copies match.
