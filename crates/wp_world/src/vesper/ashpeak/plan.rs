@@ -151,3 +151,88 @@ pub const POI_ROUTE7_NORTH: &str = "Route 7 North";
 pub const POI_GRIZZLY_GRADE: &str = "Grizzly Grade";
 /// Crosstown Expressway eastbound, west end ([`super::freeways`]).
 pub const POI_CROSSTOWN_WEST: &str = "Crosstown West";
+
+// ---- Interchanges ---------------------------------------------------------------------------
+
+/// An interchange between a freeway and a district road: [`super::freeways`] lays the
+/// crossroad from terminal `a` to terminal `b` (it bridges the freeway) and the ramps; the
+/// district named `a_by` / `b_by` joins its roads to the terminal node at exactly that
+/// position (`g.node(pos)` returns the same node). Districts keep every other road
+/// [`FREEWAY_CLEAR_M`] away from the crossroad.
+#[derive(Debug, Clone, Copy)]
+pub struct InterchangePlan {
+    /// Interchange name (also the crossroad's road name).
+    pub name: &'static str,
+    /// Freeway it is on.
+    pub freeway: &'static str,
+    /// Terminal on one side, m.
+    pub a: V2,
+    /// District that connects to `a` (`"farms"`, `"mountains"`, `"metro"`).
+    pub a_by: &'static str,
+    /// Terminal on the other side, m.
+    pub b: V2,
+    /// District that connects to `b`.
+    pub b_by: &'static str,
+}
+
+/// Every freeway interchange with a district road. Freeway-to-freeway junctions (Crosstown
+/// with Route 7 and Route 12) and the freeways' own ends are [`super::freeways`]' business;
+/// see [`FREEWAY_ENDS`].
+pub const INTERCHANGES: &[InterchangePlan] = &[
+    InterchangePlan {
+        name: "Harlan Road",
+        freeway: "Route 12",
+        a: [-2650.0, 1040.0],
+        a_by: "farms",
+        b: [-2320.0, 1040.0],
+        b_by: "farms",
+    },
+    InterchangePlan {
+        name: "Ashpeak West",
+        freeway: "Route 12",
+        a: [-2320.0, 4500.0],
+        a_by: "farms",
+        b: [-1990.0, 4500.0],
+        b_by: "metro",
+    },
+    InterchangePlan {
+        name: "Crowfoot Interchange",
+        freeway: "Crosstown Expressway",
+        a: [-600.0, 3790.0],
+        a_by: "mountains",
+        b: [-600.0, 4110.0],
+        b_by: "metro",
+    },
+    InterchangePlan {
+        name: "Granite Street",
+        freeway: "Crosstown Expressway",
+        a: [-1500.0, 3790.0],
+        a_by: "mountains",
+        b: [-1500.0, 4110.0],
+        b_by: "metro",
+    },
+    InterchangePlan {
+        name: "Midtown Interchange",
+        freeway: "Route 7",
+        a: [440.0, 4450.0],
+        a_by: "metro",
+        b: [760.0, 4450.0],
+        b_by: "metro",
+    },
+    InterchangePlan {
+        name: "Northgate Interchange",
+        freeway: "Route 7",
+        a: [365.0, 5100.0],
+        a_by: "metro",
+        b: [685.0, 5100.0],
+        b_by: "metro",
+    },
+];
+
+/// Where a freeway ends in an at-grade junction with a district road: `(freeway, node
+/// position, district that connects to it)`. Route 7 and Route 12 start at Port Vesper's
+/// interchange outer terminals (`outer_terminal`), laid by [`super::freeways`] itself.
+pub const FREEWAY_ENDS: &[(&str, V2, &str)] = &[
+    ("Route 7", [500.0, 5500.0], "metro"),
+    ("Route 12", [-2050.0, 5500.0], "metro"),
+];

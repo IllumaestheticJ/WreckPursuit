@@ -53,11 +53,13 @@ impl Region for Ashpeak {
 
     fn layout(&self, g: &mut Gen) {
         // Order matters: a non-highway road that would cross an earlier non-highway road is
-        // dropped (`Gen::road`), highways never are and get grade separations instead.
+        // dropped (`Gen::road`), highways never are and get grade separations instead. The
+        // freeways come first, so their interchange crossroads are in place; the districts
+        // then join their roads to the interchange terminals (`plan::INTERCHANGES`).
+        freeways::layout(g);
         mountains::layout(g);
         metro::layout(g);
         farms::layout(g);
-        freeways::layout(g);
     }
 
     fn covers(&self) -> Vec<CoverSpec> {
