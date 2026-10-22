@@ -62,5 +62,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.52 | preview | Street races: no challenge while wanted / chased (row 150), side-by-side reset at the start, up to 8 waypoints after B (row 151), 8 racers by day / 13 at night with 4 lapping Loop 9 (row 152); picker races refuse an undrivable route; Vesper jam stop gate 55 s (gap acceptance, D follow-up) |
 | 0.12.53 | preview | Loop 9 rest stops (row 153: three pull-offs with ramps, lit parking, parked cars, P on the map; racers not hooked yet); Hollins tunnel exit point; wrecks across a lane count as leaders. KNOWN: Founders Cut tunnel pursuit pair fails expectations on the merged tip (E) |
 | 0.12.54 | preview | Night meets at the Loop 9 rest stops (row 153): loop racers idle there between laps, challenge near a stop = side-by-side start on the parking road + one-tap ~10 km lap back to the stop; street races up to 12 km; dormant parked cars (SR-3, ~0.5 ms/frame by day); transparent materials single-pass (no shader re-resolve); Founders Cut pursuit re-seeded after the rest-stop roads |
-| 0.12.55 | preview | (next) |
+| 0.12.55 | preview | Far street racers (>350 m) run a light kinematic mode (Vesper night sim 7.7 → 4.7 ms/frame); police skip far unwanted racers; replay hash every 4th tick; AI racers see physical traffic cars as traffic (Loop 9 finishers 91→96 / 89→90 of 96) |
+| 0.12.56 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
