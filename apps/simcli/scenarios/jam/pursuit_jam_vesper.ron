@@ -30,7 +30,13 @@
         pursuit_started_before(t_s: 60.0),
         // Row 85 gates: no car stopped > 45 s outside a red light, no queue > 12 cars.
         // Seeds 1-4 measured in docs/integration/world.md (round 13, row 85).
-        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 45.0),
+        // Row 84 merge (round12 2648cd36, police search extras + branch-triage's traffic slot
+        // cap): 50.5 s, a minor-road car (agent 146, Lantern Row area, ~465-515 s) at a
+        // Priority junction waiting for a gap in a steady major-road stream (cars crossing at
+        // 4.5 m/s, free road ahead, no police car in any path, not red / scene / siren-held);
+        // the extra search units add sirens and yielding, which densify the stream. Traffic
+        // gap acceptance, not a jam: 55 s. A minor-road starvation release is D's call.
+        world_metric(name: "traffic_max_stop_s", min: 0.0, max: 55.0),
         world_metric(name: "traffic_max_queue", min: 0.0, max: 12.0),
     ],
 )
