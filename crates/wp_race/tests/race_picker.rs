@@ -520,6 +520,14 @@ fn hollins_hill_sprint() {
     // required again (E had relaxed this in 6e63486d while pursued racers yielded at L1).
     // Seeds 1-8: see docs/integration/opponent-pace.md.
     check_with_police(&r, 40.0..110.0, 3);
+    // The summit trap: the side road at the top sealed, a unit waiting below the summit,
+    // no spikes or dynamic roadblocks on the hill.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert!(!plan.side_blocks.is_empty(), "the top is not sealed");
+    assert!(plan.route_blocks.is_empty());
+    assert_eq!(plan.stakeouts.len(), 1);
+    assert_eq!(r.spikes_placed, 0);
+    assert_eq!(r.roadblocks_placed as usize, plan.side_blocks.len());
 }
 
 /// [`check`] for a race with police on the course: racers the police caught or chased off
@@ -609,14 +617,6 @@ fn hollins_hill_sprint_pace_without_police() {
     let r = run_race_with("hollins_sprint", 200, Some(0.0));
     check(&r, 40.0..110.0, 3);
     assert_eq!(r.pursuits, 0);
-    // The summit trap: the side road at the top sealed, a unit waiting below the summit,
-    // no spikes or dynamic roadblocks on the hill.
-    let plan = r.plan.as_ref().expect("police profile");
-    assert!(!plan.side_blocks.is_empty(), "the top is not sealed");
-    assert!(plan.route_blocks.is_empty());
-    assert_eq!(plan.stakeouts.len(), 1);
-    assert_eq!(r.spikes_placed, 0);
-    assert_eq!(r.roadblocks_placed as usize, plan.side_blocks.len());
 }
 
 #[test]

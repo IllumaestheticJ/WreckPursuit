@@ -223,6 +223,7 @@ impl SpikeStrip {
             b,
             unit,
             expires,
+            scripted: false,
         }
     }
 
