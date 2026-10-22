@@ -182,7 +182,7 @@ impl PoliceSystem {
                 self.captain.priority = target;
                 self.radio(
                     RadioCue::new(
-                        RadioTier::Critical,
+                        RadioTier::Escalation,
                         None,
                         match target {
                             Some(t) => format!("Captain: all units, priority is racer #{}.", t.0),

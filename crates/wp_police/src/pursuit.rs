@@ -373,8 +373,12 @@ impl PoliceSystem {
             unit: Some(unit),
         });
         let desc = self.racer_desc(racer);
+        // The pursuit call covers the low-heat "units responding" summary (row 144).
+        self.radio_director
+            .withdraw(&format!("summary:{}", racer.0));
+        self.chatter_pursuit_started(racer);
         self.radio(RadioCue::new(
-            RadioTier::Critical,
+            RadioTier::Escalation,
             None,
             format!("Dispatch: 10-80, all units, pursuit of {desc}."),
         ));
@@ -571,7 +575,10 @@ impl PoliceSystem {
                 racer.0
             ),
         };
-        self.radio(RadioCue::new(RadioTier::Critical, None, text));
+        self.radio(
+            RadioCue::new(RadioTier::Escalation, None, text)
+                .supersedes(format!("level:{}", racer.0)),
+        );
         self.release_units(racer);
     }
 
@@ -2044,7 +2051,10 @@ mod tests {
             }
             assert!(said(p, what), "{what:?} never said: {:?}", log(p));
         };
-        go(&mut p, open, 0.0, "eyes on racer #3");
+        // Row 144: helicopter lines are tier 1 and go out at once, so give it the time it
+        // used to spend waiting for the channel to settle overhead (from its approach angle it
+        // can still see under the deck's edge).
+        go(&mut p, open, 4.0, "eyes on racer #3");
         // It keeps the racer's last known position fresh for the ground units.
         let last = p.racer(racer).unwrap().last_known.unwrap();
         assert!(dist(last, xy(open)) < 1.0);

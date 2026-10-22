@@ -636,7 +636,7 @@ impl PoliceSystem {
             punctures: BTreeMap::new(),
             radio: VecDeque::new(),
             radio_director: radio::RadioDirector::new(),
-            chatter: chatter::Chatter::default(),
+            chatter: chatter::Chatter::new(setup.seed),
             captain: CaptainState {
                 human: false,
                 priority: None,
@@ -839,6 +839,12 @@ impl PoliceSystem {
     /// Radio pacing counters (raised / spoken / collapsed / dropped lines).
     pub fn radio_stats(&self) -> radio::RadioStats {
         self.radio_director.stats()
+    }
+
+    /// Tier of the radio transmission on air now (`None`: the channel is free). The channel
+    /// counts as busy for a line's estimated length plus the silence after it.
+    pub fn radio_on_air(&self) -> Option<radio::RadioTier> {
+        self.radio_director.on_air(self.now)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2090,6 +2096,17 @@ impl PoliceSystem {
     /// Full radio log (captain).
     pub fn radio_log(&self) -> impl Iterator<Item = &RadioLine> {
         self.radio.iter()
+    }
+
+    /// Priority tier of the latest logged radio line spoken by `unit` with this `text` (row
+    /// 144). The contract's `PoliceEvent::Radio` carries no tier yet; bridges (audio, the
+    /// browser strip) look it up here. `None` if it is no longer in the log.
+    pub fn radio_tier_of(&self, unit: Option<UnitId>, text: &str) -> Option<radio::RadioTier> {
+        self.radio
+            .iter()
+            .rev()
+            .find(|l| l.unit == unit && l.text == text)
+            .map(|l| l.tier)
     }
 
     /// Helicopters on station (tracking a racer).
