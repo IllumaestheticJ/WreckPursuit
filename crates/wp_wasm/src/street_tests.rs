@@ -635,3 +635,62 @@ fn street_perf() {
     }
     crate::session::set_street_racers_enabled(true);
 }
+
+/// Row 154 ("the game freezes when I start a street race"): a street race starts and runs 30 s
+/// in the Port Vesper night session (seed 5) where, in 0.12.49, a roaming racer's next route
+/// came back with nothing to drive and `Field::from_route` panicked a few seconds after the
+/// start (in the browser the panic stopped the page). Challenge, a finish ~5 km of road away
+/// (as a player picks on the map), accept, then 30 s of racing (the racer gets going).
+#[test]
+fn street_race_starts_and_runs_30_s() {
+    let mut sc = crate::scenario::free_drive_in(
+        "lindwurm_4t",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    sc.time_of_day_h = 23.0;
+    sc.seed = 5;
+    let mut s = Session::new(sc, false).unwrap();
+    s.run_ticks(240);
+    let racer = challenge(&mut s, 5);
+    let p = state(&s, PLAYER).pos;
+    let mut rng = wp_math::Rng::new(105);
+    let mut fin = None;
+    for _ in 0..40 {
+        let a = rng.next_f32() * std::f32::consts::TAU;
+        let d = 250.0 + rng.next_f32() * 4500.0;
+        let q = [p[0] + a.cos() * d, p[1] + a.sin() * d];
+        if let Ok(pr) = s.street_preview(q) {
+            if pr.ok {
+                fin = Some(q);
+                break;
+            }
+        }
+    }
+    let fin = fin.expect("a raceable finish");
+    let stake = street::level(s.street().unwrap().roster()[5].level).bet_min;
+    s.street_accept(fin, stake).unwrap();
+    // The test player does not drive: at the green light it steps out of the racer's way (it
+    // may be lined up right behind on a one-lane street).
+    s.run_ticks(street::COUNTDOWN_TICKS + 1);
+    let off = [p[0] + 0.0, p[1] + 400.0];
+    let z = s.sim().world().map().ground_height(off, None);
+    s.place_logged(PLAYER, off, 0.0, z).unwrap();
+    let mut elapsed = 0.0f32;
+    let mut top = 0.0f32;
+    for _ in 0..(30 * 240) {
+        s.set_input(PLAYER, horn(false)).unwrap();
+        s.run_ticks(1);
+        match s.street().unwrap().race(s.sim()) {
+            Some(r) => elapsed = r.elapsed_s,
+            None => break,
+        }
+        top = top.max(state(&s, racer).speed_mps);
+    }
+    eprintln!("street race: {elapsed:.1} s raced, racer top {top:.1} m/s");
+    assert!(
+        elapsed > 25.0 || s.street().unwrap().result().is_some(),
+        "raced {elapsed} s"
+    );
+    assert!(top > 10.0, "the racer raced (top {top} m/s)");
+}
