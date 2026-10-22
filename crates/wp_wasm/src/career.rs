@@ -1167,7 +1167,7 @@ impl Career {
         let loaded = self.loaded_car(&car)?;
         let mut model = self.damage_model(&car)?;
         model.apply_repair(&fit.restore);
-        let wanted = car.damage.sustained_while_wanted;
+        let wanted = car.damage.sustained_before_capture;
         let ev = self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
         self.post(ev);
         Ok(())
