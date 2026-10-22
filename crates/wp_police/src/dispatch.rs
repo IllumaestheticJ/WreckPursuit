@@ -3743,6 +3743,16 @@ impl PoliceSystem {
             if rb.is_none() && sp.is_none() {
                 continue;
             }
+            // Row 140: by the time its spot is hidden the racer may have moved on, leaving the
+            // spot on the far carriageway of its road now; such a car is not spawned at all.
+            let racer = match (rb, sp) {
+                (Some(k), _) => self.roadblocks[k].racer,
+                (_, Some(k)) => self.spikes[k].racer,
+                _ => continue,
+            };
+            if self.far_side(&self.racer_corridor(racer), car.pos) {
+                continue;
+            }
             if self.warmed_up && self.spawn_in_view(world, car.pos) {
                 self.tool_cars.push(car);
                 continue;

@@ -174,7 +174,7 @@ impl Default for ProParams {
             confidence_min: 0.8,
             confidence_regain_per_s: 0.02,
             run_wide_m: 1.2,
-            turn_around_mps: 4.0,
+            turn_around_mps: 5.5,
             stuck_s: 1.5,
             reverse_s: 2.5,
             reverse_min_s: 1.5,
