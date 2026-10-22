@@ -430,6 +430,9 @@ async function main(): Promise<void> {
   raceEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   overlay.appendChild(raceEl);
   const raceMarker = new RaceMarker(scene.world);
+  /** Street race gates (waypoints, then B; row 151) in the world. */
+  const streetMarker = new RaceMarker(scene.world);
+  let streetCourseKey = "";
   const raceView = new RaceView(raceEl, {
     start: (id) => startRace(id),
     freeDrive: () => startFreeDrive(undefined, undefined, true),
@@ -1644,6 +1647,15 @@ async function main(): Promise<void> {
     // Street racers: map dots / picker always; their HUD hides under the menu, photo mode and
     // crash replays.
     street.frame(now, !crash.playing && !photo.active && !menu?.isOpen);
+    {
+      const r = street.status?.race ?? null;
+      const key = r ? `${r.entity}|${r.start.join(",")}|${r.finish.join(",")}` : "";
+      if (key !== streetCourseKey) {
+        streetCourseKey = key;
+        streetMarker.setCourse(r ? parseCourse(sim.streetCourse()) : null);
+      }
+      if (r) streetMarker.update(crash.playing ? -1 : r.next_gate, r.next_gate >= r.gates.length, tS);
+    }
     if (raceView.raceId && !crash.playing) raceFrame(cur, meta, tS, frameNo % 6 === 0);
     prof.lap("ui");
     scene.update(dt, sim.intents());
@@ -1962,6 +1974,7 @@ async function main(): Promise<void> {
     startRace,
     raceView,
     raceMarker,
+    streetMarker,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
     /** LOD director: `lod.log.start()` records per-frame draw states, `lod.log.summary()`. */
     lod,

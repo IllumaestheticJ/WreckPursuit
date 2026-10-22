@@ -1025,8 +1025,8 @@ pub fn race_result_json() -> Result<String, JsValue> {
 
 // ----- street racers (src/street.rs) -------------------------------------------------------
 
-/// Add the 16 NPC street racers to live free-drive / city-chase city sessions started after
-/// this call (default on). They are scenario entities (`street_<level>_<name>`, after the
+/// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]) to live free-drive /
+/// city-chase city sessions started after this call (default on). They are scenario entities (`street_<level>_<name>`, after the
 /// player in `entities()`), so recordings and replays carry them.
 #[wasm_bindgen]
 pub fn set_street_racers(on: bool) {
@@ -1035,15 +1035,18 @@ pub fn set_street_racers(on: bool) {
 
 /// Street racers for the map, 6 floats each: `[entity, level, x, y, yaw, mode]` (`level` as in
 /// [`street::LEVELS`]: 2..=5, there is no level 1; mode
-/// 0 roaming, 1 waiting on a challenge, 2 racing the player). Empty without street racers.
+/// 0 roaming, 1 waiting on a challenge, 2 racing the player). Off-shift racers (in the lockup)
+/// are left out. Empty without street racers.
 #[wasm_bindgen]
 pub fn street_racers() -> Result<Vec<f32>, JsValue> {
     get(|s| s.street().map(|st| st.packed(s.sim())).unwrap_or_default())
 }
 
-/// Street-race state as JSON: `{ levels, roster, hint, offer, race, result }` — the level
-/// table ([`street::LEVELS`]), every racer ([`street::RosterEntry`]), the racer a honk would
-/// challenge now (`hint`), the open challenge ([`street::Offer`]), the race in progress
+/// Street-race state as JSON: `{ levels, roster, hint, pursued, blocked, offer, race, result }`
+/// — the level table ([`street::LEVELS`]), every racer ([`street::RosterEntry`]), the racer a
+/// honk would challenge now (`hint`), whether the police are after the player (no challenges
+/// then) and the racer in reach they block (`blocked`),
+/// the open challenge ([`street::Offer`]), the race in progress
 /// ([`street::RaceView`]) and the latest result ([`street::RaceResult`], `seq` grows). `null`
 /// without street racers.
 #[wasm_bindgen]
@@ -1057,6 +1060,12 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "levels": street::LEVELS,
             "roster": st.roster(),
             "hint": player.and_then(|p| st.challengeable(s.sim(), p)),
+            // Wanted or chased: no challenges (owner row 150); `blocked` = the racer a honk
+            // would challenge without the police.
+            "pursued": player.is_some_and(|p| s.sim().police().is_wanted_or_pursued(p)),
+            "blocked": player
+                .filter(|p| s.sim().police().is_wanted_or_pursued(*p))
+                .and_then(|p| st.in_reach(s.sim(), p)),
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),
             "result": st.result(),
@@ -1064,18 +1073,37 @@ pub fn street_status_json() -> Result<String, JsValue> {
     })
 }
 
-/// Plan the open challenge's route from the player to `(x, y)` ([`street::Preview`] JSON:
-/// length, snapped finish, centreline, whether it is raceable).
-#[wasm_bindgen]
-pub fn street_preview(x: f32, y: f32) -> Result<String, JsValue> {
-    with(|s| s.street_preview([x, y]).map(|p| json(&p)))
+/// Waypoints from a flat `[x0, y0, x1, y1, …]` array.
+fn waypoints(via: &[f32]) -> Vec<[f32; 2]> {
+    via.chunks_exact(2).map(|c| [c[0], c[1]]).collect()
 }
 
-/// Accept the open challenge: race to `(x, y)` for `stake` dollars (paid now; a win pays
-/// twice the stake). Errors (nothing changed) on a bad stake, no route, or no open challenge.
+/// Plan the open challenge's route from the player through the waypoints `via` (flat
+/// `[x0, y0, x1, y1, …]`, in order; may be empty) to `(x, y)` ([`street::Preview`] JSON:
+/// length, snapped finish and gates, centreline, whether it is raceable).
 #[wasm_bindgen]
-pub fn street_accept(x: f32, y: f32, stake: f64) -> Result<(), JsValue> {
-    with(|s| s.street_accept([x, y], stake.round() as i64))
+pub fn street_preview(x: f32, y: f32, via: Vec<f32>) -> Result<String, JsValue> {
+    with(|s| s.street_preview([x, y], &waypoints(&via)).map(|p| json(&p)))
+}
+
+/// Accept the open challenge: race through the waypoints `via` (as in [`street_preview`]) to
+/// `(x, y)` for `stake` dollars (paid now; a win pays twice the stake). Both cars are reset
+/// side by side at the start. Errors (nothing changed) on a bad stake, no route, no open
+/// challenge, or while the police are after the player.
+#[wasm_bindgen]
+pub fn street_accept(x: f32, y: f32, via: Vec<f32>, stake: f64) -> Result<(), JsValue> {
+    with(|s| s.street_accept([x, y], &waypoints(&via), stake.round() as i64))
+}
+
+/// The street race's gates (waypoints, then B) and route, as [`race_course`] lays them out:
+/// `[gates, (x, y, z, dx, dy, width) × gates, (x, y, z) × points]`. Empty without a street race.
+#[wasm_bindgen]
+pub fn street_course() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.street()
+            .map(|st| st.course().to_vec())
+            .unwrap_or_default()
+    })
 }
 
 /// Decline the open challenge (the racer drives off).
