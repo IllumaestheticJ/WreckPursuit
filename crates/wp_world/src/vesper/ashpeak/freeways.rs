@@ -8,7 +8,7 @@
 //!   and runs up the east side of Ashpeak City past the Midtown and Northgate interchanges.
 //! - **Route 12** (2 lanes each way, 60 mph, grade cap 7 %) leaves Lantern Way's outer
 //!   terminal, crosses the Sable River valley past the Harlan Road interchange and climbs the
-//!   **Grizzly Grade** in long sweepers to the **Grizzly Summit Tunnel** under the Grizzly
+//!   **Grizzly Grade** in long sweepers to the **Grizzly Tunnel** under the Grizzly
 //!   saddle, then sweeps down to the basin and up the west side of Ashpeak City past Ashpeak
 //!   West.
 //! - The **Crosstown Expressway** (3 lanes each way, 55 mph) runs south of downtown past the
@@ -53,6 +53,8 @@ const LOOP_SPEED: f32 = 13.4112;
 const LINK_SPEED: f32 = 20.1168;
 /// Rock over a tunnel portal (ground above the road), m.
 const TUNNEL_COVER_M: f32 = 14.0;
+/// Steepest climb through a gorge tunnel toward its bridge.
+const TUNNEL_CLIMB: f32 = 0.02;
 /// Diamond gore distance from the crossroad, m.
 const SPAN_M: f32 = 270.0;
 /// Distance of a trumpet's stem end (the Crosstown's end) from the through freeway, m.
@@ -66,8 +68,8 @@ pub(crate) const ROUTE_12: &str = "Route 12";
 pub(crate) const CROSSTOWN: &str = "Crosstown Expressway";
 /// The Talon Tunnel (Route 7).
 pub(crate) const TALON_TUNNEL: &str = "Talon Tunnel";
-/// The Grizzly Summit Tunnel (Route 12).
-pub(crate) const GRIZZLY_TUNNEL: &str = "Grizzly Summit Tunnel";
+/// The Grizzly Tunnel (Route 12).
+pub(crate) const GRIZZLY_TUNNEL: &str = "Grizzly Tunnel";
 /// Where the trumpets join the Crosstown to Route 12 (west) and Route 7 (east).
 const WEST_JUNCTION: V2 = [-2300.0, 3950.0];
 const EAST_JUNCTION: V2 = [700.0, 3950.0];
@@ -121,7 +123,10 @@ struct TunnelPlan {
     /// Portals (arc lengths on the draft path).
     s0: f32,
     s1: f32,
-    /// Road height through the tunnel (and over the bridge), m.
+    /// Road height at the first portal, m.
+    z0: f32,
+    /// Road height at the second portal (and over the bridge), m; the road climbs evenly
+    /// from `z0` through the tunnel.
     z: f32,
     /// Bridge deck end beyond the second portal (gorge), arc length.
     deck_end: Option<f32>,
@@ -157,9 +162,14 @@ fn plan_tunnel(
             ((sg - 200.0) / ds).max(0.0) as usize,
             (((sg + 200.0) / ds) as usize).min(n - 1),
         );
-        (a..=b).min_by(|x, y| gr[*x].total_cmp(&gr[*y])).unwrap_or(a)
+        (a..=b)
+            .min_by(|x, y| gr[*x].total_cmp(&gr[*y]))
+            .unwrap_or(a)
     });
-    let top = gr[w0..=w1].iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let top = gr[w0..=w1]
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
     let mut z = top - TUNNEL_COVER_M;
     while z > 0.0 {
         let last = i_g.map_or(w1, |ig| ig.min(w1));
@@ -178,11 +188,16 @@ fn plan_tunnel(
                     .map(|j| gr[j] + grade * (s_of(j) - s_of(end)))
                     .fold(f32::INFINITY, f32::min);
                 if z <= fwd && z <= bwd {
-                    return Some(TunnelPlan {
+                    let flat = TunnelPlan {
                         s0: s_of(p0),
                         s1: s_of(p1),
+                        z0: z,
                         z,
                         deck_end: i_g.map(|_| s_of(end)),
+                    };
+                    return Some(match i_g {
+                        Some(ig) => climb_to_gorge(&gr, ds, grade, flat, ig),
+                        None => flat,
                     });
                 }
             }
@@ -192,13 +207,52 @@ fn plan_tunnel(
     None
 }
 
-/// Put a tunnel plan on draft `d`: a flat height anchor portal to portal (and over the
-/// bridge), the covered stretch and the bridge deck.
+/// Raise the bridge end of a gorge tunnel `flat`: the road climbs gently through the
+/// tunnel (at most [`TUNNEL_CLIMB`]) so the deck stands higher over the gorge, as long as
+/// the far side still reaches the ground at `grade` and the rock keeps its cover. `gr` is
+/// the smoothed ground on samples `ds` apart, `ig` the gorge bed's sample.
+fn climb_to_gorge(gr: &[f32], ds: f32, grade: f32, flat: TunnelPlan, ig: usize) -> TunnelPlan {
+    let n = gr.len();
+    let s_of = |i: usize| i as f32 * ds;
+    let (p0, p1) = (
+        (flat.s0 / ds).round() as usize,
+        (flat.s1 / ds).round() as usize,
+    );
+    let mut z1 = flat.z0 + TUNNEL_CLIMB * (flat.s1 - flat.s0);
+    while z1 > flat.z {
+        let at = |i: usize| flat.z0 + (z1 - flat.z0) * (s_of(i) - flat.s0) / (flat.s1 - flat.s0);
+        let covered = (p0..=p1).all(|i| gr[i] >= at(i) + TUNNEL_COVER_M);
+        if let Some(end) = (ig..n).find(|i| gr[*i] >= z1 - 3.0) {
+            let bwd = (end..n)
+                .map(|j| gr[j] + grade * (s_of(j) - s_of(end)))
+                .fold(f32::INFINITY, f32::min);
+            if covered && z1 <= bwd {
+                return TunnelPlan {
+                    z: z1,
+                    deck_end: Some(s_of(end)),
+                    ..flat
+                };
+            }
+        }
+        z1 -= 0.5;
+    }
+    flat
+}
+
+/// Put a tunnel plan on draft `d`: height anchors climbing portal to portal, level over the
+/// bridge, the covered stretch and the bridge deck.
 fn apply_tunnel(g: &mut Gen, d: usize, t: &TunnelPlan, name: &'static str) {
     let path = g.drafts[d].path.clone();
     let cum = cum2(&path);
     let end = t.deck_end.unwrap_or(t.s1);
-    g.drafts[d].anchors.push((t.s0, end, t.z));
+    // The climb through the tunnel as short anchors, then the level end (and deck).
+    let steps = ((t.s1 - t.s0) / 20.0).ceil().max(1.0) as usize;
+    for k in 0..steps {
+        let s = t.s0 + (t.s1 - t.s0) * k as f32 / steps as f32;
+        let z = t.z0 + (t.z - t.z0) * k as f32 / steps as f32;
+        g.drafts[d].anchors.push((s, s, z));
+    }
+    g.drafts[d].anchors.push((t.s1, end, t.z));
     if let Some(e) = t.deck_end {
         g.drafts[d].decks.push((t.s1 - 10.0, e + 10.0));
     }
@@ -227,7 +281,10 @@ struct Frame<'a> {
 
 impl Frame<'_> {
     fn p(&self, a: f32, c: f32) -> V2 {
-        geom::add(self.ring.at(self.s0 + self.fs * a).0, geom::scale(self.v, c))
+        geom::add(
+            self.ring.at(self.s0 + self.fs * a).0,
+            geom::scale(self.v, c),
+        )
     }
     fn w(&self, a: f32) -> V2 {
         geom::scale(self.ring.at(self.s0 + self.fs * a).1, self.fs)
@@ -311,7 +368,7 @@ fn trumpet(
             name: names.0,
         });
         // Far → stem: around the loop, then over the through freeway.
-        let c_d = c_b + 2.0 * r + 60.0;
+        let c_d = c_b + 2.0 * r + 40.0;
         out.push(LinkPlan {
             from: gore(far, -480.0),
             to: end(side_out, 1.0),
@@ -374,12 +431,7 @@ pub(super) fn layout(g: &mut Gen) {
     let xe = g.node(geom::sub(EAST_JUNCTION, [STEM_M, 0.0]));
     let p7 = smooth(&route_7_ctrl(g.pos(t7)));
     let p12 = smooth(&route_12_ctrl(g.pos(t12)));
-    let pxt = smooth(&[
-        g.pos(xw),
-        [-1500.0, 3950.0],
-        [-600.0, 3950.0],
-        g.pos(xe),
-    ]);
+    let pxt = smooth(&[g.pos(xw), [-1500.0, 3950.0], [-600.0, 3950.0], g.pos(xe)]);
     let d7 = g
         .road(t7, e7, p7, FREEWAY, ROUTE_7)
         .expect("highways are never dropped");
@@ -390,10 +442,13 @@ pub(super) fn layout(g: &mut Gen) {
         .road(xw, xe, pxt, EXPRESSWAY, CROSSTOWN)
         .expect("highways are never dropped");
 
-    // Talon Tunnel straight onto the Silver Gorge Bridge; the Grizzly Summit Tunnel.
+    // Talon Tunnel straight onto the Silver Gorge Bridge; the Grizzly Tunnel.
     let path7 = g.drafts[d7].path.clone();
-    let w7 = (arc_at(&path7, [600.0, 1850.0]), arc_at(&path7, [800.0, 3350.0]));
-    if let Some(t) = plan_tunnel(g, &path7, w7, 0.05, Some(plan::SILVER_GORGE)) {
+    let w7 = (
+        arc_at(&path7, [600.0, 1850.0]),
+        arc_at(&path7, [800.0, 3350.0]),
+    );
+    if let Some(t) = plan_tunnel(g, &path7, w7, 0.06, Some(plan::SILVER_GORGE)) {
         apply_tunnel(g, d7, &t, TALON_TUNNEL);
     }
     let path12 = g.drafts[d12].path.clone();
@@ -529,8 +584,20 @@ pub(super) fn pois(site: &mut Site) -> Vec<Poi> {
     for (name, freeway, side, near, s_off) in [
         (plan::POI_ROUTE7_SOUTH, ROUTE_7, 1.0, [430.0, 1700.0], 0.0),
         (plan::POI_ROUTE7_NORTH, ROUTE_7, -1.0, [520.0, 5300.0], 0.0),
-        (plan::POI_GRIZZLY_GRADE, ROUTE_12, 1.0, [-2740.0, 1500.0], 0.0),
-        (plan::POI_CROSSTOWN_WEST, CROSSTOWN, 1.0, [-2010.0, 3945.0], 0.0),
+        (
+            plan::POI_GRIZZLY_GRADE,
+            ROUTE_12,
+            1.0,
+            [-2740.0, 1500.0],
+            0.0,
+        ),
+        (
+            plan::POI_CROSSTOWN_WEST,
+            CROSSTOWN,
+            1.0,
+            [-2010.0, 3945.0],
+            0.0,
+        ),
     ] {
         let Some((road, _)) = site.carriageway(freeway, side, near) else {
             continue;
@@ -641,7 +708,11 @@ mod tests {
             let len = *geom::cumulative(&c.centre).last().unwrap();
             assert!(len > 300.0, "{name} only {len} m");
             // It spans both carriageways.
-            assert!(c.half_width_m > 12.0, "{name} half width {}", c.half_width_m);
+            assert!(
+                c.half_width_m > 12.0,
+                "{name} half width {}",
+                c.half_width_m
+            );
         }
         // Talon Tunnel runs under Talon Ridge.
         let talon = net.covered.iter().find(|c| c.name == TALON_TUNNEL).unwrap();
@@ -657,7 +728,10 @@ mod tests {
                 }
             }
         }
-        assert!(best >= 20.0, "Silver Gorge Bridge only {best} m over the bed");
+        assert!(
+            best >= 20.0,
+            "Silver Gorge Bridge only {best} m over the bed"
+        );
     }
 
     #[test]
@@ -741,12 +815,17 @@ mod tests {
                         if pr.s <= 0.0 || pr.s >= cum[cum.len() - 1] {
                             continue;
                         }
-                        let edge = if pr.lateral > 0.0 { cs.right_m } else { cs.left_m };
+                        let edge = if pr.lateral > 0.0 {
+                            cs.right_m
+                        } else {
+                            cs.left_m
+                        };
                         if pr.lateral.abs() > edge - 0.05 {
                             continue;
                         }
                         let j = cum.partition_point(|x| *x < pr.s).min(cs.centre.len() - 1);
-                        let zc = geom::point_at(&cs.centre, &cum, pr.s).0[2] + cs.bank[j] * pr.lateral;
+                        let zc =
+                            geom::point_at(&cs.centre, &cum, pr.s).0[2] + cs.bank[j] * pr.lateral;
                         let dz = zr - zc;
                         assert!(
                             dz.abs() < 0.3 || dz > 6.5,
@@ -775,7 +854,11 @@ mod tests {
             .copied()
             .collect();
         let xy = |r: usize| -> Vec<V2> {
-            net.surfaces[r].centre.iter().map(|p| geom::xy(*p)).collect()
+            net.surfaces[r]
+                .centre
+                .iter()
+                .map(|p| geom::xy(*p))
+                .collect()
         };
         let z_at = |r: usize, p: V2| {
             let c = &net.surfaces[r].centre;
@@ -882,10 +965,12 @@ mod tests {
             let pr = geom::project(&l.polyline, &cum, geom::xy(p.pos));
             let (_, d) = geom::point_at(&l.polyline, &cum, pr.s);
             let diff = (p.heading_rad - geom::yaw_of(d)).rem_euclid(std::f32::consts::TAU);
-            assert!(diff.min(std::f32::consts::TAU - diff) < 0.2, "{name} heading");
+            assert!(
+                diff.min(std::f32::consts::TAU - diff) < 0.2,
+                "{name} heading"
+            );
             // Room ahead to race.
             assert!(cum[cum.len() - 1] - pr.s > 150.0, "{name}");
         }
     }
 }
-

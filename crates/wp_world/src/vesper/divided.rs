@@ -331,7 +331,11 @@ fn end_portion(
 
 /// Plan path of a link (travel order, ends on its nodes) and the lengths of its portions
 /// beside a carriageway at the start and the end (0 at a split end).
-pub(super) fn link_path(lines: &[Ring], plans: &[FreewayPlan], l: &LinkPlan) -> (Vec<V2>, f32, f32) {
+pub(super) fn link_path(
+    lines: &[Ring],
+    plans: &[FreewayPlan],
+    l: &LinkPlan,
+) -> (Vec<V2>, f32, f32) {
     let (mut path, p0) = end_portion(lines, plans, l.from, l.lanes, true);
     let (tail, p1) = end_portion(lines, plans, l.to, l.lanes, false);
     let mut poses = vec![p0];
@@ -471,10 +475,11 @@ pub(super) fn profile_path(
         let total = ring.total();
         let mut run: Option<(usize, f32, bool, bool)> = None;
         for i in 0..=n {
-            let inside = (i < n && i > k_a && i < k_b).then(|| {
-                let (s, lat) = lateral(ring, path[i]);
-                (s > 0.5 && s < total - 0.5 && lat.abs() < reach)
-                    .then(|| (lat, ring.plane_z(path[i])))
+            // Past the last sample (i == n) every open run closes.
+            let at = path.get(i).filter(|_| i < n && i > k_a && i < k_b);
+            let inside = at.map(|p| {
+                let (s, lat) = lateral(ring, *p);
+                (s > 0.5 && s < total - 0.5 && lat.abs() < reach).then(|| (lat, ring.plane_z(*p)))
             });
             match inside.flatten() {
                 Some((lat, z)) => {
@@ -643,14 +648,15 @@ pub(super) fn divide_freeways(
     let flat = flat_lengths(g, opt);
     let mut cuts: Vec<[Vec<(f32, usize)>; 2]> = vec![[Vec::new(), Vec::new()]; plans.len()];
     let side_ix = |side: f32| usize::from(side < 0.0);
-    let gore = |g: &mut Gen, line: usize, side: f32, s: f32, cuts: &mut Vec<[Vec<(f32, usize)>; 2]>| {
-        let p = lines[line].offset(s, side * plans[line].offset());
-        let node = g.node(geom::xy(p));
-        g.nodes[node].z = p[2];
-        g.nodes[node].control = Some(ControlHint::Freeway);
-        cuts[line][side_ix(side)].push((s, node));
-        node
-    };
+    let gore =
+        |g: &mut Gen, line: usize, side: f32, s: f32, cuts: &mut Vec<[Vec<(f32, usize)>; 2]>| {
+            let p = lines[line].offset(s, side * plans[line].offset());
+            let node = g.node(geom::xy(p));
+            g.nodes[node].z = p[2];
+            g.nodes[node].control = Some(ControlHint::Freeway);
+            cuts[line][side_ix(side)].push((s, node));
+            node
+        };
     // Diamond gores.
     let mut ramps = diamond_ramps(&plans, &lines, &g.nodes);
     for (k, rp) in &mut ramps {
@@ -835,11 +841,19 @@ pub(super) fn divide_freeways(
         out.push(r);
         infos.push(info);
     }
-    // Forward carriageways starting at a fan: their first pieces (fed after building).
+    // Carriageways starting at a fan (the forward one at the first end, the backward one at
+    // the last): their first pieces, fed after building.
     let fan_starts: Vec<(usize, usize)> = pieces
         .iter()
-        .filter(|p| p.1 > 0.0 && plans[p.0].ends[0] == FreewayEnd::Fan)
-        .filter(|p| out[p.2].a == g.drafts[plans[p.0].drafts[0]].a)
+        .filter(|p| {
+            let plan = &plans[p.0];
+            let (end, node) = if p.1 > 0.0 {
+                (plan.ends[0], g.drafts[plan.drafts[0]].a)
+            } else {
+                (plan.ends[1], g.drafts[*plan.drafts.last().unwrap()].b)
+            };
+            end == FreewayEnd::Fan && out[p.2].a == node
+        })
         .map(|p| (out[p.2].a, p.2))
         .collect();
     Divided {
@@ -854,20 +868,31 @@ pub(super) fn divide_freeways(
 /// At a fan start (a freeway beginning at an at-grade junction) the approach going straight
 /// on may have fewer lanes than the carriageway: every carriageway lane no connector enters
 /// gets one from the approach lane feeding its nearest fed neighbour (a lane added on the
-/// left, as the right ones already take the turning traffic).
+/// left, as the right ones already take the turning traffic). Where no straight approach
+/// exists (a T junction at the end), the turning approach feeding the neighbour is used.
 pub(super) fn feed_fan_starts(built: &mut Built, fan_starts: &[(usize, usize)]) {
     for &(_, road) in fan_starts {
         let outs = built.road_lanes[road].fwd.clone();
-        let fed_by = |built: &Built, to: LaneId| -> Option<LaneId> {
-            (0..built.lanes.len())
-                .filter(|i| {
-                    built.lanes[*i]
+        // The approach lane feeding `to` (a straight one first, then the leftmost turning one).
+        let fed_by = |built: &Built, to: LaneId| -> Option<(LaneId, TurnKind)> {
+            let feeds: Vec<(LaneId, TurnKind)> = (0..built.lanes.len())
+                .flat_map(|i| {
+                    built.lanes[i]
                         .connections
                         .iter()
-                        .any(|c| c.to == to && c.turn == TurnKind::Straight)
+                        .filter(move |c| c.to == to)
+                        .map(move |c| (i as LaneId, c.turn))
                 })
-                .map(|i| i as LaneId)
-                .min_by_key(|i| built.lanes[*i as usize].index_from_left)
+                .collect();
+            feeds
+                .iter()
+                .min_by_key(|f| {
+                    (
+                        f.1 != TurnKind::Straight,
+                        built.lanes[f.0 as usize].index_from_left,
+                    )
+                })
+                .copied()
         };
         for k in 0..outs.len() {
             let to = outs[k];
@@ -878,14 +903,18 @@ pub(super) fn feed_fan_starts(built: &mut Built, fan_starts: &[(usize, usize)]) 
             if any_in {
                 continue;
             }
-            // The nearest lane to the right that a straight approach feeds.
-            let Some(src) = outs[k + 1..].iter().find_map(|o| fed_by(built, *o)) else {
+            // The nearest fed lane, to the right first (the right ones take the turning
+            // traffic), then to the left.
+            let Some((src, turn)) = outs[k + 1..]
+                .iter()
+                .chain(outs[..k].iter().rev())
+                .find_map(|o| fed_by(built, *o))
+            else {
                 continue;
             };
-            built.lanes[src as usize].connections.push(LaneConnection {
-                to,
-                turn: TurnKind::Straight,
-            });
+            built.lanes[src as usize]
+                .connections
+                .push(LaneConnection { to, turn });
         }
     }
 }

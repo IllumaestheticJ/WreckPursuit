@@ -62,11 +62,7 @@ fn main() {
         if k > 0 {
             s.push(',');
         }
-        let name = rep
-            .road_names
-            .get(r.road as usize)
-            .copied()
-            .unwrap_or("");
+        let name = rep.road_names.get(r.road as usize).copied().unwrap_or("");
         let _ = write!(
             s,
             "{{\"name\":{:?},\"w\":{:.1},\"hw\":{},\"mat\":\"{:?}\",\"pts\":[",
@@ -88,7 +84,11 @@ fn main() {
         if k > 0 {
             s.push(',');
         }
-        let _ = write!(s, "{{\"h\":{:.0},\"k\":\"{:?}\",\"fp\":[", b.height_m, b.kind);
+        let _ = write!(
+            s,
+            "{{\"h\":{:.0},\"k\":\"{:?}\",\"fp\":[",
+            b.height_m, b.kind
+        );
         for (i, p) in b.footprint.iter().enumerate() {
             if i > 0 {
                 s.push(',');
