@@ -80,7 +80,10 @@ pub fn race_spots(world: &World) -> Vec<RaceSpot> {
 /// The spot a car at `pos` stands in (the nearest centre when spots overlap).
 pub fn spot_at(spots: &[RaceSpot], pos: [f32; 3]) -> Option<&RaceSpot> {
     spots.iter().filter(|s| s.contains(pos)).min_by(|a, b| {
-        let d = |s: &RaceSpot| (pos[0] - s.pos[0]).hypot(pos[1] - s.pos[1]);
+        let d = |s: &RaceSpot| {
+            let (dx, dy) = (pos[0] - s.pos[0], pos[1] - s.pos[1]);
+            dx * dx + dy * dy
+        };
         d(a).total_cmp(&d(b))
     })
 }
@@ -157,7 +160,7 @@ mod tests {
     fn honk_fires_once_per_press_inside_a_spot_when_stopped() {
         let spots = vec![spot("a", [0.0; 3])];
         let mut t = HonkTrigger::default();
-        let mut tick = |t: &mut HonkTrigger, horn, pos, v| t.update(horn, pos, v, || &spots);
+        let tick = |t: &mut HonkTrigger, horn, pos, v| t.update(horn, pos, v, || &spots);
         // Outside the spot: nothing.
         assert_eq!(tick(&mut t, true, [50.0, 0.0, 0.0], 0.0), None);
         assert_eq!(tick(&mut t, false, [50.0, 0.0, 0.0], 0.0), None);
