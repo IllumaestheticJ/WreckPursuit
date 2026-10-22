@@ -826,15 +826,28 @@ impl Field {
         }
     }
 
-    /// Build a field on a `wp_world` route.
+    /// Build a field on a `wp_world` route. Panics on a route with nothing to drive (see
+    /// [`Field::try_from_route`]).
     pub fn from_route(
         world: &World,
         route: &wp_world::Route,
         specs: &[RacerSpec],
         config: RaceConfig,
     ) -> Self {
-        let corridor = Corridor::from_route(world.map(), route, &config.corridor);
-        Self::new(corridor, specs, config)
+        Self::try_from_route(world, route, specs, config).expect("route with no length")
+    }
+
+    /// Build a field on a `wp_world` route, or `None` when the route has nothing to drive
+    /// (no length, or a one-segment route whose end lies behind its start: row 154, where the
+    /// panic froze the browser).
+    pub fn try_from_route(
+        world: &World,
+        route: &wp_world::Route,
+        specs: &[RacerSpec],
+        config: RaceConfig,
+    ) -> Option<Self> {
+        let corridor = Corridor::try_from_route(world.map(), route, &config.corridor)?;
+        Some(Self::new(corridor, specs, config))
     }
 
     /// The race corridor.

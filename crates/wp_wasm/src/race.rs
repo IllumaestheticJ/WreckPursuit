@@ -364,7 +364,9 @@ impl RaceRun {
             sim.tick(),
             abs_s,
             autopilot,
-        );
+        )
+        // A route with nothing to drive refuses the race (row 154: a panic froze the game).
+        .map_err(|e| e.to_string())?;
         let mut names = BTreeMap::new();
         names.insert(ids[0], ("You".to_string(), sc.entities[0].car.clone()));
         for (i, d) in def.ai.iter().enumerate() {

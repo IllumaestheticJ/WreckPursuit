@@ -31,6 +31,7 @@ use crate::bridge::CityRace;
 use crate::catalog::{venue_pos, RaceDef};
 use crate::data::RaceData;
 use crate::entrants::{AiEntrant, AiEntrants};
+use crate::error::RaceSetupError;
 use crate::judge::{CourseReset, RaceJudge, RacePhase, RacerEntry, RacerSample};
 use crate::kind::{ClassBracket, EventId, VenueId};
 use crate::result::{DnfReason, RacerResult, RacerStatus};
@@ -145,6 +146,8 @@ impl LiveRace {
     /// Set up the race and start its countdown at `tick`. `ai` are the AI cars in
     /// `def.ai` order (pole first), `player` starts behind them. `abs_s`: in-game time of
     /// the start, s (meet heat). `autopilot`: the AI drives the player's car too.
+    /// [`RaceSetupError::NoDrivableRoute`] when the route has nothing to drive: the race is
+    /// refused (never a panic, which froze the browser — row 154).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         def: &RaceDef,
@@ -155,7 +158,7 @@ impl LiveRace {
         tick: u64,
         abs_s: u64,
         autopilot: bool,
-    ) -> LiveRace {
+    ) -> Result<LiveRace, RaceSetupError> {
         let data = RaceData::embedded();
         let mut judge = RaceJudge::new(
             EventId(def.seed as u32),
@@ -192,7 +195,7 @@ impl LiveRace {
             });
         }
         let closed = def.legality == Legality::Sanctioned;
-        let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed);
+        let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed)?;
         judge.start(tick).expect("enough racers");
 
         let venue = Venue {
@@ -218,7 +221,7 @@ impl LiveRace {
             .iter()
             .map(|e| (*e, if closed_loop { 1 } else { 0 }))
             .collect();
-        LiveRace {
+        Ok(LiveRace {
             def: def.clone(),
             race,
             judge,
@@ -236,7 +239,7 @@ impl LiveRace {
             next_gate,
             final_results: None,
             last_tick: tick,
-        }
+        })
     }
 
     /// The race definition.
@@ -513,7 +516,8 @@ mod tests {
         };
         def.prior_meets = 2;
         let ai: Vec<LiveEntrant> = (2..=def.entrants() as u32).map(entrant).collect();
-        let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false);
+        let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false)
+            .expect("a drivable route");
         // The player is held through the countdown.
         let held = live.pre_step(0, &world, &[], &[], &wp_opponent::NoPolice);
         assert!(held.iter().any(|(e, i)| *e == EntityId(1)
