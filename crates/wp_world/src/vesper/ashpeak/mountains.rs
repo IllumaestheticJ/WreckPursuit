@@ -299,8 +299,8 @@ pub(super) fn plans() -> Plans {
             Y(2865.0),
             A(18.0, 172.0),
             Y(gate[1] + 30.0),
+            // The bend ends a few metres west of the gate; `warp` pulls the end onto it.
             A(30.0, -82.0),
-            X(gate[0]),
         ],
     );
     warp(&mut summit, gate, 150.0);
