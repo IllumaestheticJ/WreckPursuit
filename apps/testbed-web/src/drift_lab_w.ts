@@ -873,16 +873,17 @@ export class DriftLabWPanel {
       };
       // Held-key drift (lab, 2026-10-22): the held_search shortlist's best candidate (the owner's
       // reference clips: a held countersteer key + throttle lifts holds the drift for seconds).
-      // Tyres + grip balance + ride together; lab A/B only, nothing ships from here.
+      // Tyres + grip balance + ride + the player rack's speed curve together; lab A/B only,
+      // nothing ships from here.
       const heldKey = document.createElement("button");
       heldKey.textContent = "lab · held-key drift";
       heldKey.title =
-        "held_search candidate B: spin model b0 7.86 / b2 2.92 / c 0.84, side floor 0.44, rear relaxation × 1.16, rear peak slip × 1.07, lock × 0.75, front / rear cornering stiffness × 1.0 / 0.96, yaw inertia × 1.37. Held countersteer + throttle lifts hold 3.5 s on average (shipped 2.2 s); taps 27 / 36 (shipped 20). Sets tyres, grip balance and ride; restarts the car";
+        "held_search candidate D (AI-safe: no car-wide lock change): spin model b0 11.8 / b2 2.88 / c 0.80, side floor 0.52, rear relaxation × 1.26, rear peak slip × 1.04, front / rear cornering stiffness × 0.78 / 0.63, yaw inertia × 1.39, player rack speed curve 49 km/h (less player lock at speed). Held countersteer + throttle lifts hold 3.9 s on average (shipped 2.2 s); taps 26 / 36 (shipped 20); AI pace unchanged. Sets tyres, grip balance, ride and steering; restarts the car";
       heldKey.onclick = () => {
         const cd = this.sim.carTuneDefaults();
-        const tyres = JSON.stringify({ ...cd.shipped, spin_b0: 7.86, spin_b2: 2.92, spin_c: 0.842, side_floor: 0.438, rear_relax: 1.157, rear_peak_slip: 1.07, lock: 0.75 });
-        const ride = JSON.stringify({ ...this.sim.rideTuneDefaults().owner, yaw_inertia: 1.366 });
-        saveGrip({ ...gd.shipped, rear_stiffness: 0.962, front_stiffness: 0.998 });
+        const tyres = JSON.stringify({ ...cd.shipped, spin_b0: 11.84, spin_b2: 2.881, spin_c: 0.796, side_floor: 0.517, rear_relax: 1.262, rear_peak_slip: 1.038 });
+        const ride = JSON.stringify({ ...this.sim.rideTuneDefaults().owner, yaw_inertia: 1.385 });
+        saveGrip({ ...gd.shipped, rear_stiffness: 0.634, front_stiffness: 0.784 });
         this.sim.carTuneSet(tyres);
         this.sim.rideTuneSet(ride);
         try {
@@ -891,6 +892,7 @@ export class DriftLabWPanel {
         } catch {
           /* ignore */
         }
+        this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), sens_ref_kmh: 49.2 } as unknown as Record<string, number>);
         this.restart(this.car);
       };
       // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
