@@ -13,6 +13,10 @@
 // docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
 // lead/round12 4367d42e (one-version handling); re-measured once more with the off-line cap
 // trail-braking instead of braking flat out (hakone_gt spun at 60 m/s before, finishing 5/6).
+// Re-locked 2026-10-22 for owner row 139: the race moved to 23:00 with traffic density 2.0
+// (a civilian about every 360 m round the player), and the pace harness now keeps the player
+// seat a player car so traffic spawns round the field as in the browser. Times rose 20-60 s
+// (cars held up in traffic; the heavy ones re-accelerate slowly), see opponent-pace.md.
 // Re-measure and widen only with a reason.
 (
     name: "opponent_pace_loop9_circuit_s95",
@@ -21,11 +25,11 @@
         name: "vesper_v2",
         seed: 1,
     ),
-    time_of_day_h: 1.0,
+    time_of_day_h: 23.0,
     time_ratio: 1.0,
     mode: Arcade,
     assists: ai,
-    traffic_density: 0.3,
+    traffic_density: 2.0,
     police_presence: 0.0,
     police_cars: false,
     panels: true,
@@ -94,12 +98,12 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 6, max: 6),
-        metric(name: "best_ratio", min: 0.97, max: 1.18),
-        metric(name: "race_time_s", entity: "ai_vic", min: 164.5, max: 222.5),
-        metric(name: "race_time_s", entity: "ai_mara", min: 158.1, max: 213.9),
-        metric(name: "race_time_s", entity: "ai_dez", min: 165.1, max: 223.4),
-        metric(name: "race_time_s", entity: "ai_juno", min: 165.9, max: 224.5),
-        metric(name: "race_time_s", entity: "ai_tito", min: 168.0, max: 227.3),
-        metric(name: "race_time_s", entity: "player", min: 167.2, max: 226.2),
+        metric(name: "best_ratio", min: 0.97, max: 1.21),
+        metric(name: "race_time_s", entity: "ai_vic", min: 177.8, max: 240.6),
+        metric(name: "race_time_s", entity: "ai_mara", min: 163.1, max: 220.6),
+        metric(name: "race_time_s", entity: "ai_dez", min: 179.8, max: 243.2),
+        metric(name: "race_time_s", entity: "ai_juno", min: 227.4, max: 307.6),
+        metric(name: "race_time_s", entity: "ai_tito", min: 226.4, max: 306.3),
+        metric(name: "race_time_s", entity: "player", min: 225.4, max: 305.0),
     ],
 )

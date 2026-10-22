@@ -270,8 +270,12 @@ pub fn races() -> Vec<RaceDef> {
             city: RaceCity::Vesper,
             kind: RaceKind::Circuit { laps: 1 },
             legality: Legality::Street,
-            time_of_day_h: 1.0,
-            traffic_density: 0.3,
+            // Owner row 139 ("there should be SOME traffic in the loop9 race"): at 01:00 with
+            // 0.3 the night curve left nobody near the player. 23:00 at 2.0 puts a civilian
+            // about every 360 m of carriageway round the player (lead: aim 250-300 m, density
+            // 2-3; the AI field still finishes 95 of 96 runs here, see opponent-pace.md).
+            time_of_day_h: 23.0,
+            traffic_density: 2.0,
             course: CourseSpec::Circuit { polygon: LOOP9 },
             length_hint_m: 10142.0,
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
