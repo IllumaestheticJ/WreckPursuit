@@ -601,3 +601,68 @@ fn lantern_checkpoint_draws_the_police() {
         r.results.len()
     );
 }
+
+#[test]
+fn harbor_dash() {
+    let r = run_race("harbor_dash", 150);
+    // 737 m down Harbor Boulevard onto the Loop 9 on-ramp.
+    check(&r, 15.0..70.0, 3);
+}
+
+#[test]
+fn tunnel_run() {
+    let r = run_race("tunnel_run", 200);
+    // 1.3 km of Loop 9 through the Hollins Tunnel.
+    check(&r, 25.0..110.0, 4);
+}
+
+#[test]
+fn hollins_descent() {
+    let r = run_race("hollins_descent", 240);
+    // 1.35 km down the Hollins hairpins into Mercer.
+    check(&r, 40.0..150.0, 3);
+}
+
+#[test]
+fn offramp_sprint() {
+    let r = run_race("offramp_sprint", 240);
+    let id = r.def.id;
+    // 1.6 km off Loop 9 and through the town's signals at dusk. The red lights draw the
+    // patrols, and races with police can end in captures (owner decision), so like
+    // `loop9_circuit` the police decide how many finish: the race is judged to the end, the
+    // winner takes the flag, and every racer's race ends at the flag, by the police, behind
+    // the finish window or in at most one racing incident.
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    let winner = r.results.iter().find(|x| x.position == 1).unwrap();
+    assert_eq!(winner.status, RacerStatus::Finished, "{id}: {winner:?}");
+    let t = winner.elapsed_s().unwrap();
+    assert!((50.0..170.0).contains(&t), "{id}: winner took {t:.1} s");
+    let dqs = r
+        .results
+        .iter()
+        .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
+        .count();
+    assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    for x in &r.results {
+        assert!(
+            matches!(
+                x.status,
+                RacerStatus::Finished
+                    | RacerStatus::Dq(_)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Captured)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+                    | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+            ),
+            "{id}: {x:?}"
+        );
+        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+    }
+}
+
+#[test]
+fn grid_arterial_sprint() {
+    let r = run_race("grid_arterial_sprint", 200);
+    // 1.0 km across the grid city's blocks.
+    check(&r, 25.0..130.0, 3);
+}
