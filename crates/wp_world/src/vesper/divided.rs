@@ -369,81 +369,112 @@ fn merge_anchors(mut v: Vec<(usize, usize, f32)>) -> Vec<(usize, usize, f32)> {
     out
 }
 
-/// Profile a link (travel order): on the carriageway's plane beside it at a gore, at the node
-/// height at a split end, following the ground in between and bridging every freeway it
-/// crosses and every earlier link (`others`, 3D) at deck height. Returns 3D points and bank.
+/// How a ramp's profile ends.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ZEnd {
+    /// On freeway `line`'s carriageway (a gore): the ramp lies on the carriageway's plane
+    /// until it is clear of the paving.
+    Plane { line: usize, z: f32 },
+    /// At a node of height `z` with a flat junction box `flat` m long (0 at a split end).
+    Node { z: f32, flat: f32 },
+}
+
+impl ZEnd {
+    fn z(&self) -> f32 {
+        match *self {
+            ZEnd::Plane { z, .. } | ZEnd::Node { z, .. } => z,
+        }
+    }
+}
+
+/// Lateral distance from freeway `line`'s centreline beyond which a `lanes`-lane ramp's
+/// paving is clear of the carriageway's (with a 1 m margin), m.
+fn clear_of(plans: &[FreewayPlan], line: usize, lanes: u8) -> f32 {
+    let f = &plans[line];
+    f.offset()
+        + 0.5 * f.st.fwd as f32 * HW_LANE_M
+        + OUTER_SHOULDER_M
+        + 0.5 * lanes as f32 * HW_LANE_M
+        + 0.6
+        + 1.0
+}
+
+/// Profile a ramp or link along `path` (travel order, ends on its nodes) in style `st`.
+/// At a [`ZEnd::Plane`] end it lies exactly on the carriageway's plane (height and cross
+/// slope) until its paving is clear of the carriageway's, so it never steps above or below
+/// the carriageway's edge (nor runs under it); at a node end it is flat over the junction
+/// box. In between it follows the ground (offset as at its ends), within the ramp grade cap,
+/// and bridges every freeway it crosses and every earlier ramp in `others` (3D) at deck
+/// height. Returns 3D points (about 6 m apart) and bank.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn profile_link(
+pub(super) fn profile_path(
     lines: &[Ring],
     plans: &[FreewayPlan],
-    l: &LinkPlan,
+    st: &Style,
     path: &[V2],
-    beside: (f32, f32),
-    z_ends: (f32, f32),
+    ends: (ZEnd, ZEnd),
     ground: &dyn Fn(V2) -> f32,
     others: &[Vec<V3>],
 ) -> (Vec<V3>, Vec<f32>) {
-    let st = l.style();
     let path = resample(path, 4.0);
     let cum = cum2(&path);
     let len = cum[cum.len() - 1];
     let n = path.len();
     let dsr = len / (n - 1) as f32;
-    let plane_of = |e: LinkEnd| match e {
-        LinkEnd::Gore { line, side, .. } => Some((line, side)),
-        LinkEnd::LineEnd { .. } => None,
+    let lateral = |ring: &Ring, q: V2| {
+        let s = ring.project(q);
+        let (p, d, _, _) = ring.at(s);
+        (s, geom::dot(geom::sub(q, p), geom::right_of(d)))
     };
-    let (pa, pb) = (plane_of(l.from), plane_of(l.to));
-    let k_a = if pa.is_some() {
-        cum.partition_point(|c| *c < beside.0).min(n - 1)
-    } else {
-        0
+    // Plane portions: from a gore end until the ramp is clear of the carriageway.
+    let plane_run = |e: ZEnd, from_start: bool| -> Option<(usize, usize)> {
+        let ZEnd::Plane { line, .. } = e else {
+            return None;
+        };
+        let clear = clear_of(plans, line, st.fwd);
+        let idx = |k: usize| if from_start { k } else { n - 1 - k };
+        let mut k = 0;
+        while k + 1 < n / 2 && lateral(&lines[line], path[idx(k)]).1.abs() < clear {
+            k += 1;
+        }
+        Some((line, idx(k)))
     };
-    let k_b = if pb.is_some() {
-        cum.partition_point(|c| *c < len - beside.1).min(n - 1)
-    } else {
-        n - 1
-    };
+    let pa = plane_run(ends.0, true);
+    let pb = plane_run(ends.1, false);
+    let k_a = pa.map_or(0, |p| p.1);
+    let k_b = pb.map_or(n - 1, |p| p.1);
     let raw: Vec<f32> = path.iter().map(|p| ground(*p)).collect();
     let gs = smooth_series(&raw, (12.0 / dsr) as usize);
-    let z_at_a = match pa {
-        Some((li, _)) => lines[li].plane_z(path[k_a]),
-        None => z_ends.0,
-    };
-    let z_at_b = match pb {
-        Some((li, _)) => lines[li].plane_z(path[k_b]),
-        None => z_ends.1,
-    };
-    let (off_a, off_b) = (z_at_a - gs[k_a], z_at_b - gs[k_b]);
+    let plane_z = |li: usize, i: usize| lines[li].plane_z(path[i]);
+    let z_a = pa.map_or(ends.0.z(), |(li, _)| plane_z(li, k_a));
+    let z_b = pb.map_or(ends.1.z(), |(li, _)| plane_z(li, k_b));
+    let (off_a, off_b) = (z_a - gs[k_a], z_b - gs[k_b]);
     let desired: Vec<f32> = (0..n)
         .map(|i| {
-            if i <= k_a {
-                if let Some((li, _)) = pa {
-                    return lines[li].plane_z(path[i]);
-                }
-            }
-            if i >= k_b {
-                if let Some((li, _)) = pb {
-                    return lines[li].plane_z(path[i]);
-                }
-            }
             let t = (cum[i] - cum[k_a]) / (cum[k_b] - cum[k_a]).max(1e-3);
-            gs[i] + off_a + (off_b - off_a) * smoothstep(0.0, 1.0, t)
+            gs[i] + off_a + (off_b - off_a) * smoothstep(0.0, 1.0, t.clamp(0.0, 1.0))
         })
         .collect();
-    // Deck anchors over every freeway this link crosses (a run of samples within its
-    // corridor in which the link passes from one side of the line to the other).
+    // Pinned: every plane sample.
     let mut internal: Vec<(usize, usize, f32)> = Vec::new();
+    if let Some((li, k)) = pa {
+        internal.extend((0..=k).map(|i| (i, i, plane_z(li, i))));
+    }
+    if let Some((li, k)) = pb {
+        internal.extend((k..n).map(|i| (i, i, plane_z(li, i))));
+    }
+    // Deck anchors over every freeway this ramp crosses (a run of samples within its
+    // corridor in which the ramp passes from one side of the line to the other).
+    let mut decks: Vec<(usize, usize, f32)> = Vec::new();
     for (li, ring) in lines.iter().enumerate() {
         let reach = plans[li].corridor();
         let total = ring.total();
-        let mut run: Option<(usize, f32, bool, bool)> = None; // start, max z, side+, side-
+        let mut run: Option<(usize, f32, bool, bool)> = None;
         for i in 0..=n {
             let inside = (i < n && i > k_a && i < k_b).then(|| {
-                let s = ring.project(path[i]);
-                let (p, d, _, _) = ring.at(s);
-                let lat = geom::dot(geom::sub(path[i], p), geom::right_of(d));
-                (s > 0.5 && s < total - 0.5 && lat.abs() < reach).then(|| (lat, ring.plane_z(path[i])))
+                let (s, lat) = lateral(ring, path[i]);
+                (s > 0.5 && s < total - 0.5 && lat.abs() < reach)
+                    .then(|| (lat, ring.plane_z(path[i])))
             });
             match inside.flatten() {
                 Some((lat, z)) => {
@@ -455,7 +486,7 @@ pub(super) fn profile_link(
                 None => {
                     if let Some((i0, z, a, b)) = run.take() {
                         if a && b {
-                            internal.push((
+                            decks.push((
                                 i0.saturating_sub(2),
                                 (i + 1).min(n - 1),
                                 z + LINK_CLEAR_M,
@@ -468,35 +499,52 @@ pub(super) fn profile_link(
     }
     for o in others {
         let oxy: Vec<V2> = o.iter().map(|p| geom::xy(*p)).collect();
-        let ocum = geom::cumulative(o);
-        let ocum2 = cum2(&oxy);
+        let ocum = cum2(&oxy);
+        let o3 = geom::cumulative(o);
         for (sa, sb, _) in path_crossings(&path, &oxy) {
-            let _ = ocum;
             let (_, da) = point_on(&path, &cum, sa);
-            let (_, db) = point_on(&oxy, &ocum2, sb);
+            let (_, db) = point_on(&oxy, &ocum, sb);
             let sin = geom::cross(da, db).abs().max(0.2);
             let half = (10.0 / sin).min(40.0);
-            let z_o = geom::point_at(o, &geom::cumulative(o), sb).0[2];
-            internal.push((
+            let z_o = geom::point_at(o, &o3, sb).0[2];
+            decks.push((
                 ((sa - half) / dsr).floor().max(0.0) as usize,
                 (((sa + half) / dsr).ceil() as usize).min(n - 1),
                 z_o + LINK_CLEAR_M,
             ));
         }
     }
-    let internal = merge_anchors(internal);
+    internal.extend(merge_anchors(decks));
     let kmax = max_vertical_curvature(st.speed);
-    let anchors = [(0, 0, z_ends.0), (n - 1, n - 1, z_ends.1)];
-    let mut z = profile(&desired, dsr, &anchors, &internal, (1, 1), st.grade, kmax);
-    // Beside the carriageway the link shares its plane exactly.
-    if pa.is_some() {
-        let same = k_a.saturating_sub(4) + 1;
-        z[..same].copy_from_slice(&desired[..same]);
-    }
-    if pb.is_some() {
-        let from = (k_b + 4).min(n - 1);
-        z[from..].copy_from_slice(&desired[from..]);
-    }
+    let spread = 2.0 * smoothing_sigma(st.grade, kmax, dsr);
+    let node_anchor = |e: ZEnd, at_start: bool| -> ((usize, usize, f32), usize) {
+        match e {
+            ZEnd::Node { z, flat } if flat > 0.0 => {
+                let f = ((flat + spread) / dsr).ceil() as usize;
+                let p = (flat / dsr).ceil() as usize;
+                if at_start {
+                    ((0, f.min(n - 1), z), p)
+                } else {
+                    (((n - 1).saturating_sub(f), n - 1, z), p)
+                }
+            }
+            _ => {
+                let i = if at_start { 0 } else { n - 1 };
+                ((i, i, e.z()), 1)
+            }
+        }
+    };
+    let (aa, pin_a) = node_anchor(ends.0, true);
+    let (ab, pin_b) = node_anchor(ends.1, false);
+    let z = profile(
+        &desired,
+        dsr,
+        &[aa, ab],
+        &internal,
+        (pin_a, pin_b),
+        st.grade,
+        kmax,
+    );
     let res = resample(&path, 6.0);
     let rc = cum2(&res);
     let pts: Vec<V3> = res
@@ -509,8 +557,8 @@ pub(super) fn profile_link(
             [p[0], p[1], z[i] + (z[i + 1] - z[i]) * t]
         })
         .collect();
-    // Bank: the carriageway's beside it (in travel terms), the curve's own further on, none
-    // at a split end.
+    // Bank: the carriageway's on its plane (in travel terms), the curve's own further on,
+    // none at a node.
     let kappa = curvature(&res);
     let v2 = st.speed * st.speed;
     let spacing = (len / (res.len() - 1).max(1) as f32).max(1.0);
@@ -520,39 +568,32 @@ pub(super) fn profile_link(
         .collect();
     let curve = smooth_series(&raw, (30.0 / spacing) as usize);
     let total = rc[rc.len() - 1];
-    let bank: Vec<f32> = res
-        .iter()
-        .zip(&rc)
-        .zip(&curve)
-        .map(|((p, s), c)| {
-            let plane = |e: Option<(usize, f32)>| {
-                e.map_or(0.0, |(li, side)| {
-                    let ring = &lines[li];
-                    side * ring.at(ring.project(*p)).3
-                })
-            };
-            let wa = if pa.is_some() {
-                smoothstep(beside.0 + 40.0, beside.0, *s)
+    let (s_a, s_b) = (cum[k_a], cum[k_b]);
+    let travel_bank = |li: usize, p: V2, d: V2| {
+        let ring = &lines[li];
+        let s = ring.project(p);
+        let (_, t, _, b) = ring.at(s);
+        // The plane's cross slope right of travel along `d`.
+        b * geom::dot(t, d).signum()
+    };
+    let bank: Vec<f32> = (0..res.len())
+        .map(|i| {
+            let (p, s) = (res[i], rc[i]);
+            let d = if i + 1 < res.len() {
+                geom::normalize(geom::sub(res[i + 1], p))
             } else {
-                0.0
+                geom::normalize(geom::sub(p, res[i - 1]))
             };
-            let wb = if pb.is_some() {
-                smoothstep(total - beside.1 - 40.0, total - beside.1, *s)
-            } else {
-                0.0
-            };
-            let fade_a = if pa.is_none() {
-                smoothstep(0.0, 60.0, *s)
-            } else {
-                1.0
-            };
-            let fade_b = if pb.is_none() {
-                smoothstep(0.0, 60.0, total - s)
-            } else {
-                1.0
+            let wa = pa.map_or(0.0, |_| smoothstep(s_a + 40.0, s_a, s));
+            let wb = pb.map_or(0.0, |_| smoothstep(s_b - 40.0, s_b, s));
+            let fade = |e: ZEnd, dist: f32| match e {
+                ZEnd::Node { flat, .. } => smoothstep(0.0, 60.0, dist - flat),
+                ZEnd::Plane { .. } => 1.0,
             };
             let free = (1.0 - wa - wb).max(0.0);
-            (wa * plane(pa) + wb * plane(pb) + free * c * fade_a * fade_b)
+            let ba = pa.map_or(0.0, |(li, _)| travel_bank(li, p, d));
+            let bb = pb.map_or(0.0, |(li, _)| travel_bank(li, p, d));
+            (wa * ba + wb * bb + free * curve[i] * fade(ends.0, s) * fade(ends.1, total - s))
                 .clamp(-st.bank_max, st.bank_max)
         })
         .collect();
@@ -569,6 +610,8 @@ pub(super) struct Divided {
     pub(super) ramps: Vec<usize>,
     /// Links only (subset of `ramps`).
     pub(super) links: Vec<usize>,
+    /// `(node, road)`: a forward carriageway's first piece leaving a fan start node.
+    pub(super) fan_starts: Vec<(usize, usize)>,
 }
 
 impl Divided {
@@ -703,73 +746,146 @@ pub(super) fn divide_freeways(
             }
         }
     }
-    // Diamond ramps.
+    // Diamond ramps, then links (each over the freeways and the links before it).
+    let ground = |p: V2| g.nat.z(p);
+    let ramp_style = RAMP;
     let mut ramp_roads = Vec::new();
+    let mut new_roads: Vec<(RoadSpec, RoadInfo)> = Vec::new();
     for (k, rp) in &ramps {
-        let (mut pts, mut bank) = profile_ramp(
-            &lines[*k],
-            rp,
-            g.nodes[rp.gore].z,
-            g.nodes[rp.terminal].z,
-            flat[rp.terminal],
-        );
-        let (a, b) = if rp.off {
-            (rp.gore, rp.terminal)
-        } else {
-            pts.reverse();
-            bank.reverse();
-            for b in &mut bank {
-                *b = -*b;
-            }
-            (rp.terminal, rp.gore)
+        let plane = ZEnd::Plane {
+            line: *k,
+            z: g.nodes[rp.gore].z,
         };
-        let mut r = spec_from(a, b, &pts, bank, &RAMP);
+        let term = ZEnd::Node {
+            z: g.nodes[rp.terminal].z,
+            flat: flat[rp.terminal],
+        };
+        let (a, b, path, ends) = if rp.off {
+            (rp.gore, rp.terminal, rp.path.clone(), (plane, term))
+        } else {
+            let mut p = rp.path.clone();
+            p.reverse();
+            (rp.terminal, rp.gore, p, (term, plane))
+        };
+        let mut path = path;
+        let last = path.len() - 1;
+        path[0] = g.nodes[a].pos;
+        path[last] = g.nodes[b].pos;
+        let (pts, bank) = profile_path(&lines, &plans, &ramp_style, &path, ends, &ground, &[]);
+        let mut r = spec_from(a, b, &pts, bank, &ramp_style);
         r.shoulder_left_m = 0.6;
         r.shoulder_right_m = 1.5;
-        ramp_roads.push(out.len());
-        out.push(r);
-        infos.push(RoadInfo {
-            name: plans[*k].ramp_name,
-            speed: RAMP.speed,
-            grade: RAMP.grade,
-            deck: DeckRef::None,
-        });
+        new_roads.push((
+            r,
+            RoadInfo {
+                name: plans[*k].ramp_name,
+                speed: RAMP.speed,
+                grade: RAMP.grade,
+                deck: DeckRef::None,
+            },
+        ));
     }
-    // Links, each over the freeways and the links before it.
     let mut built: Vec<Vec<V3>> = Vec::new();
-    let mut link_roads = Vec::new();
+    let mut link_specs = Vec::new();
     for (l, &(a, b)) in links.iter().zip(&link_nodes) {
-        let (path, ba, bb) = link_path(&lines, &plans, l);
-        let nat = &g.nat;
-        let (pts, bank) = profile_link(
+        let (mut path, _, _) = link_path(&lines, &plans, l);
+        let last = path.len() - 1;
+        path[0] = g.nodes[a].pos;
+        path[last] = g.nodes[b].pos;
+        let zend = |e: LinkEnd, n: usize| match e {
+            LinkEnd::Gore { line, .. } => ZEnd::Plane {
+                line,
+                z: g.nodes[n].z,
+            },
+            LinkEnd::LineEnd { .. } => ZEnd::Node {
+                z: g.nodes[n].z,
+                flat: 0.0,
+            },
+        };
+        let st = l.style();
+        let (pts, bank) = profile_path(
             &lines,
             &plans,
-            l,
+            &st,
             &path,
-            (ba, bb),
-            (g.nodes[a].z, g.nodes[b].z),
-            &|p| nat.z(p),
+            (zend(l.from, a), zend(l.to, b)),
+            &ground,
             &built,
         );
-        let st = l.style();
         let mut r = spec_from(a, b, &pts, bank, &st);
         r.shoulder_left_m = 0.6;
         r.shoulder_right_m = 1.5;
         built.push(pts);
-        ramp_roads.push(out.len());
-        link_roads.push(out.len());
-        out.push(r);
-        infos.push(RoadInfo {
-            name: l.name,
-            speed: st.speed,
-            grade: st.grade,
-            deck: DeckRef::None,
-        });
+        link_specs.push((
+            r,
+            RoadInfo {
+                name: l.name,
+                speed: st.speed,
+                grade: st.grade,
+                deck: DeckRef::None,
+            },
+        ));
     }
+    let mut link_roads = Vec::new();
+    for (i, (r, info)) in new_roads.into_iter().chain(link_specs).enumerate() {
+        if i >= ramps.len() {
+            link_roads.push(out.len());
+        }
+        ramp_roads.push(out.len());
+        out.push(r);
+        infos.push(info);
+    }
+    // Forward carriageways starting at a fan: their first pieces (fed after building).
+    let fan_starts: Vec<(usize, usize)> = pieces
+        .iter()
+        .filter(|p| p.1 > 0.0 && plans[p.0].ends[0] == FreewayEnd::Fan)
+        .filter(|p| out[p.2].a == g.drafts[plans[p.0].drafts[0]].a)
+        .map(|p| (out[p.2].a, p.2))
+        .collect();
     Divided {
         lines,
         pieces,
         ramps: ramp_roads,
         links: link_roads,
+        fan_starts,
+    }
+}
+
+/// At a fan start (a freeway beginning at an at-grade junction) the approach going straight
+/// on may have fewer lanes than the carriageway: every carriageway lane no connector enters
+/// gets one from the approach lane feeding its nearest fed neighbour (a lane added on the
+/// left, as the right ones already take the turning traffic).
+pub(super) fn feed_fan_starts(built: &mut Built, fan_starts: &[(usize, usize)]) {
+    for &(_, road) in fan_starts {
+        let outs = built.road_lanes[road].fwd.clone();
+        let fed_by = |built: &Built, to: LaneId| -> Option<LaneId> {
+            (0..built.lanes.len())
+                .filter(|i| {
+                    built.lanes[*i]
+                        .connections
+                        .iter()
+                        .any(|c| c.to == to && c.turn == TurnKind::Straight)
+                })
+                .map(|i| i as LaneId)
+                .min_by_key(|i| built.lanes[*i as usize].index_from_left)
+        };
+        for k in 0..outs.len() {
+            let to = outs[k];
+            let any_in = built
+                .lanes
+                .iter()
+                .any(|l| l.connections.iter().any(|c| c.to == to));
+            if any_in {
+                continue;
+            }
+            // The nearest lane to the right that a straight approach feeds.
+            let Some(src) = outs[k + 1..].iter().find_map(|o| fed_by(built, *o)) else {
+                continue;
+            };
+            built.lanes[src as usize].connections.push(LaneConnection {
+                to,
+                turn: TurnKind::Straight,
+            });
+        }
     }
 }

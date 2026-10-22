@@ -3582,7 +3582,9 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         }
     }
     // Unused nodes (dropped optional roads) stay in the list without lanes; harmless.
-    let built = builder::build(&g.nodes, &specs, &opt);
+    let mut built = builder::build(&g.nodes, &specs, &opt);
+    feed_fan_starts(&mut built, &fw.fan_starts);
+    let built = built;
 
     // Terrain: natural ground, carved to the roads except bridge decks.
     let mut hf = Heightfield::flat(g.lo, g.hi, cfg.terrain_cell_m, 0.0);
