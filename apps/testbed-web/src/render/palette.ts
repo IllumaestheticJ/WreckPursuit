@@ -55,6 +55,32 @@ export const PALETTE = {
   fence: 0x4a4540,
   treeTrunk: 0x352c28,
   treeCrown: 0x2b3d2e,
+  // ---- Ashpeak County (greybox glb `gravel_road`, `barn`, `pines`, ...) ----
+  /** Unpaved roads: tan-grey gravel, brown dirt (kept darker than in the greybox). */
+  gravelRoad: 0x4a4740,
+  dirtRoad: 0x45382c,
+  /** Barn walls (dark oxblood) and their metal roofs. */
+  barn: 0x5a2a26,
+  barnRoof: 0x34363c,
+  /** Galvanised silos and their caps. */
+  silo: 0x5d6470,
+  siloCap: 0x4d535e,
+  /** Landmarks: blue-glass towers / stone (a cooler, lighter tone than the district blocks). */
+  landmark: 0x4b5d72,
+  /** Construction frames (raw concrete) and their safety-orange bands. */
+  construction: 0x4a4a4c,
+  constructionAccent: 0xb85a1c,
+  pineTrunk: 0x30271f,
+  pineCrown: 0x1f3326,
+  crane: 0xb58a22,
+  craneCounterweight: 0x4a4b50,
+  craneCable: 0x1c1d22,
+  jerseyBarrier: 0x585b63,
+  siteFence: 0x2f3b34,
+  siteFencePost: 0x50535b,
+  hayBale: 0x8a7444,
+  billboard: 0x2e3038,
+  billboardPanel: 0x8c8678,
   /** Flat test world ground (no city). */
   flatGround: 0x2a2d36,
   rock: 0x3d3a40,
@@ -176,6 +202,27 @@ export const CITY_MATERIAL_COLOURS: Record<string, Hex> = {
   ground_industrial: DISTRICT_LOOKS.Industrial.ground,
   ground_port: DISTRICT_LOOKS.Port.ground,
   ground_suburb: DISTRICT_LOOKS.Suburb.ground,
+  // Ashpeak County.
+  gravel_road: PALETTE.gravelRoad,
+  dirt_road: PALETTE.dirtRoad,
+  barn: PALETTE.barn,
+  barn_roof: PALETTE.barnRoof,
+  silo: PALETTE.silo,
+  silo_cap: PALETTE.siloCap,
+  landmark: PALETTE.landmark,
+  construction: PALETTE.construction,
+  construction_accent: PALETTE.constructionAccent,
+  pine_trunk: PALETTE.pineTrunk,
+  pine_crown: PALETTE.pineCrown,
+  crane: PALETTE.crane,
+  crane_counterweight: PALETTE.craneCounterweight,
+  crane_cable: PALETTE.craneCable,
+  jersey_barrier: PALETTE.jerseyBarrier,
+  site_fence: PALETTE.siteFence,
+  site_fence_post: PALETTE.siteFencePost,
+  hay_bale: PALETTE.hayBale,
+  billboard: PALETTE.billboard,
+  billboard_panel: PALETTE.billboardPanel,
   // Buildings get per-district tiers in the building shader (render/style.ts); this is the base.
   building: DISTRICT_LOOKS.Commercial.buildings[0],
 };

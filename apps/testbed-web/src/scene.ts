@@ -195,6 +195,8 @@ export class SceneView {
         lot_skirt: 1,
         asphalt: 1,
         highway_concrete: 1,
+        gravel_road: 1,
+        dirt_road: 1,
         ramp_taper: 2,
       };
       gltf.scene.traverse((o) => {

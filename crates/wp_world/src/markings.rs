@@ -1616,7 +1616,12 @@ mod tests {
             }
             let half = seg.width * 0.5;
             let id = i as LaneId;
-            assert_eq!(unpaved(&map, id), unpaved_road(l.road), "lane {i}");
+            // Highways stay concrete (and painted) whatever their material says.
+            let highway = l.kind == LaneKind::Highway;
+            assert_eq!(unpaved(&map, id), unpaved_road(l.road) && !highway, "lane {i}");
+            if highway {
+                continue;
+            }
             // Along the lane's edges (centre / edge lines) and the stop line.
             for (s, lat) in [
                 (seg.length * 0.5, -half + 0.08),
