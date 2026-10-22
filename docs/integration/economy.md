@@ -6,6 +6,7 @@
 - **Contract version built against:** 0.3.0
 
 Design write-up, tuning levers and measured numbers: `crates/wp_economy/README.md`.
+Career progression (rep tiers, unlocks, betting wallet): `docs/integration/career-progression.md`.
 
 ## Exposes
 
