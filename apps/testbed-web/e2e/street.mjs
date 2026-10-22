@@ -528,6 +528,57 @@ check(hours >= 22.9 || hours < 1, `night session (${hours.toFixed(2)} h)`);
 await race("night", true);
 await page.evaluate(() => window.__pad.connect(false));
 
+// Row 153: a night loop racer idling at a Loop 9 rest stop takes a challenge there; the card
+// offers a Loop 9 lap back to it; the race starts side by side on the parking road.
+if (CITY === "vesper_v2") {
+  await page.evaluate((car) => window.__wp.startFreeDrive(car, "Arcade", true, 23), CAR);
+  await wait(page, 3000);
+  const stops = await page.evaluate(() => window.__wp.sim.restStops());
+  check(stops.length === 3, `rest stops on Loop 9 (${stops.map((s) => s.name).join(", ")})`);
+  const rs = stops[0];
+  const lr = (await status(page)).roster.find((r) => r.shift === "Loop" && r.mode === "Roam");
+  check(!!lr, `a loop racer out at night (${lr?.name})`);
+  if (rs && lr) {
+    await page.evaluate(([e, n]) => window.__wp.sim.debugStreetParkAtRestStop(e, n), [lr.entity, rs.name]);
+    await wait(page, 1500);
+    const hornKey = await page.evaluate(() => window.__wp.bindings().keys.horn[0]);
+    await page.keyboard.down(hornKey);
+    for (let i = 0; i < 30; i++) {
+      await placeBehind(page, lr.entity);
+      await wait(page, 250);
+      if ((await status(page))?.offer) break;
+    }
+    await page.keyboard.up(hornKey);
+    await page.waitForFunction(() => window.__wp.map.isOpen, null, { timeout: 15000 }).catch(() => {});
+    const o = (await status(page))?.offer;
+    check(o?.entity === lr.entity && o?.rest_stop === rs.name && !!o?.loop_lap, `challenge at ${rs.name}: rest-stop meet with a Loop 9 lap (${o?.rest_stop})`);
+    await page.waitForSelector("#st-lap", { timeout: 10000 }).catch(() => {});
+    await page.click("#st-lap").catch(() => {});
+    await frames(page, 2);
+    const pv = await page.evaluate(() => window.__wp.street.preview);
+    check(pv?.ok && pv.length_m > 9000, `"Loop 9 lap back here" plans the lap (${Math.round(pv?.length_m ?? 0)} m)`);
+    await shot(page, "street_reststop_offer.png");
+    await page.keyboard.press("Enter");
+    await frames(page, 2);
+    const race = (await status(page))?.race;
+    const gap = await page.evaluate((e) => {
+      const wp = window.__wp;
+      const st = wp.sim.states();
+      const meta = wp.sim.vehicleMeta();
+      const stride = st.length / (meta.length / 3);
+      const at = (id) => {
+        for (let o = 0; o < st.length; o += stride) if (st[o] === id) return [st[o + 1], st[o + 2]];
+        return null;
+      };
+      const a = at(wp.app.player);
+      const b = at(e);
+      return a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : -1;
+    }, lr.entity);
+    check(race && race.countdown_s > 0 && gap > 3.5 && gap < 4.5, `rest-stop start: countdown, side by side ${gap.toFixed(1)} m apart`);
+    await shot(page, "street_reststop_start.png");
+  }
+}
+
 // Late-night city chase: racers roam there too and show on the map.
 await page.evaluate((car) => window.__wp.startCityChase(car, "Arcade"), CAR);
 await wait(page, 4000);

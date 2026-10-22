@@ -302,6 +302,14 @@ export class StreetUi {
     if (this.status) this.renderCard(this.status);
   }
 
+  /** The rest-stop meet's Loop 9 lap (row 153): B back at the rest stop, waypoints round the loop. */
+  pickLap(finish: [number, number], via: [number, number][]): void {
+    this.finishPick = [finish[0], finish[1]];
+    this.via = via.map((w) => [w[0], w[1]] as [number, number]);
+    this.moveB = false;
+    this.replan();
+  }
+
   /** Remove waypoint `i` (the card's ✕, pad X removes the last). */
   removeWaypoint(i: number): void {
     if (i < 0 || i >= this.via.length) return;
@@ -412,6 +420,10 @@ export class StreetUi {
       `<div class="wp-panel-title"><span>Challenge</span><b>Lv ${o.level}</b></div>` +
       `<h3>${esc(o.name)} <span class="st-lv" style="background:${o.colour}">Lv ${o.level} ${esc(o.level_name)}</span></h3>` +
       `<div class="wp-dim st-row">${esc(o.car)} · your record vs them ${o.losses}–${o.wins}</div>` +
+      (o.rest_stop
+        ? `<div class="st-row">Night meet at <b>${esc(o.rest_stop)}</b>: start side by side on the parking road.</div>` +
+          (o.loop_lap ? `<div class="st-buttons"><button class="wp-btn wp-btn--ghost" id="st-lap">Loop 9 lap back here</button></div>` : "")
+        : "") +
       (this.finishPick
         ? `<div class="st-row">${this.moveB ? `<b>Tap the map</b> to move <b>B</b>.` : `<b>Tap the map</b> to add waypoints, driven in order.`} <span class="wp-dim">Pad: A add, X undo, Y move B.</span></div>`
         : `<div class="st-row">1. <b>Tap / click the map</b> to set the finish <b>B</b> (A is where you are).<br><span class="wp-dim">Pad: left stick moves the map under the crosshair, A sets B.</span></div>`) +
@@ -453,6 +465,11 @@ export class StreetUi {
     }
     el.querySelector<HTMLButtonElement>("#st-go")!.onclick = () => this.accept();
     el.querySelector<HTMLButtonElement>("#st-no")!.onclick = () => this.decline();
+    const lapBtn = el.querySelector<HTMLButtonElement>("#st-lap");
+    if (lapBtn && o.loop_lap) {
+      const lap = o.loop_lap;
+      lapBtn.onclick = () => this.pickLap(lap.finish, lap.via);
+    }
     const moveB = el.querySelector<HTMLButtonElement>("#st-moveb");
     if (moveB)
       moveB.onclick = () => {

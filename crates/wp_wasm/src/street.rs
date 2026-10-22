@@ -93,8 +93,20 @@ pub const OFFER_LEAVE_M: f32 = 70.0;
 pub const FINISH_RADIUS_M: f32 = 18.0;
 /// Shortest and longest race the player may set, m (route length).
 pub const RACE_MIN_M: f32 = 250.0;
-/// See [`RACE_MIN_M`].
-pub const RACE_MAX_M: f32 = 6000.0;
+/// See [`RACE_MIN_M`]. Room for a Loop 9 lap from a rest stop back to it (~10.5 km, row 153).
+pub const RACE_MAX_M: f32 = 12000.0;
+/// A challenge within this distance of a Loop 9 rest stop is a rest-stop meet: the race starts
+/// from the rest stop's parking road, both cars side by side, and the card offers a Loop 9 lap
+/// back to it (owner row 153), m.
+pub const REST_STOP_MEET_M: f32 = 80.0;
+/// Lateral offset of each car from the rest stop's lane centre at a rest-stop start, m (the
+/// parking road is paved 4.25 m either side of its centre).
+const REST_STOP_GRID_M: f32 = 2.0;
+/// A loop racer idles this long at a rest stop between laps, s (plus up to
+/// [`LOOP_IDLE_EXTRA_S`]).
+const LOOP_IDLE_S: u64 = 40;
+/// See [`LOOP_IDLE_S`].
+const LOOP_IDLE_EXTRA_S: u32 = 50;
 /// Passing this close to a waypoint gate counts it, m (in order; B counts only after the
 /// last one).
 pub const GATE_RADIUS_M: f32 = 20.0;
@@ -485,8 +497,22 @@ pub struct Offer {
     pub cash: i64,
     /// The player can afford the minimum stake.
     pub affordable: bool,
-    /// Start (A): where the player is now.
+    /// Start (A): where the player is now (the rest stop's parking road at a rest-stop meet).
     pub start: [f32; 2],
+    /// The Loop 9 rest stop this meet is at (owner row 153).
+    pub rest_stop: Option<String>,
+    /// At a rest stop: a Loop 9 lap back to it (B and the waypoints that make the route go
+    /// round), for the card's one-tap choice.
+    pub loop_lap: Option<LapPlan>,
+}
+
+/// A planned Loop 9 lap from a rest stop back to it (`Offer::loop_lap`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LapPlan {
+    /// Finish (B): the rest stop.
+    pub finish: [f32; 2],
+    /// Waypoints round the loop, in order.
+    pub via: Vec<[f32; 2]>,
 }
 
 /// A planned race route (`street_preview`).
@@ -873,7 +899,18 @@ impl StreetRacers {
         let l = level(r.level);
         let cash = run.map_or(0, |run| run.account().cash);
         let player = run.map(|run| run.player());
-        let start = player.and_then(|p| xy_of(sim, p)).unwrap_or([0.0, 0.0]);
+        let here = player.and_then(|p| xy_of(sim, p)).unwrap_or([0.0, 0.0]);
+        let meet = rest_stop_near(sim.world(), here);
+        let start = meet.map_or(here, |p| geom::xy(p.pos));
+        let ring = self.ring.as_ref().filter(|r| !r.is_empty());
+        let loop_lap = meet.zip(ring).map(|(p, ring)| LapPlan {
+            finish: geom::xy(p.pos),
+            via: lap_waypoints(
+                &ring.corners,
+                geom::xy(p.pos),
+                geom::dir_of_yaw(p.heading_rad),
+            ),
+        });
         Some(Offer {
             entity: r.entity.0,
             name: r.name.clone(),
@@ -888,6 +925,8 @@ impl StreetRacers {
             cash,
             affordable: cash >= l.bet_min,
             start,
+            rest_stop: meet.map(|p| p.name.clone()),
+            loop_lap,
         })
     }
 
@@ -1027,11 +1066,15 @@ impl StreetRacers {
             .find(|v| v.id == player)
             .ok_or("no player car")?;
         let st = v.vehicle.state();
-        let fwd = wp_world::drive::forward_of(st.rot);
-        let z = sim.world().map().ground_height(finish, None);
+        // At a rest stop the race starts on its parking road, facing its way (row 153).
+        let (pos, fwd) = match rest_stop_near(sim.world(), geom::xy(st.pos)) {
+            Some(p) => (p.pos, geom::dir_of_yaw(p.heading_rad)),
+            None => (st.pos, wp_world::drive::forward_of(st.rot)),
+        };
+        let z = sim.world().map().ground_height(finish, Some(pos[2]));
         let route = sim
             .world()
-            .plan_route_via(st.pos, Some(fwd), via, [finish[0], finish[1], z])
+            .plan_route_via(pos, Some(fwd), via, [finish[0], finish[1], z])
             .ok_or(if via.is_empty() {
                 "no road route to that point"
             } else {
@@ -1131,7 +1174,7 @@ impl StreetRacers {
         let yaw = geom::yaw_of(tangent);
         let (lo, hi) = (-(bl - half - 0.3), br - half - 0.3);
         let pn = if lo <= hi { pp.n.clamp(lo, hi) } else { pp.n };
-        let start = geom::xy(c.point(pp.s, pn));
+        let mut start = geom::xy(c.point(pp.s, pn));
         // The racer's side: right if it fits, else left, where the opposing lanes count (a
         // street with one lane each way puts it on the other lane at the start).
         let (left_pass, _) = c.pass_bounds(pp.s);
@@ -1142,6 +1185,19 @@ impl StreetRacers {
         } else {
             let d = cap.length_m + 3.0;
             [start[0] - tangent[0] * d, start[1] - tangent[1] * d]
+        };
+        // A rest-stop meet starts side by side on its parking road (row 153): the player right
+        // of the lane centre, the racer left, both facing its way.
+        let (pos, yaw) = match rest_stop_near(sim.world(), pxy) {
+            Some(p) => {
+                let f = geom::dir_of_yaw(p.heading_rad);
+                let r = geom::right_of(f);
+                let o = geom::xy(p.pos);
+                let g = REST_STOP_GRID_M;
+                start = [o[0] + r[0] * g, o[1] + r[1] * g];
+                ([o[0] - r[0] * g, o[1] - r[1] * g], p.heading_rad)
+            }
+            None => (pos, yaw),
         };
         run.wager(
             -stake,
@@ -1175,11 +1231,40 @@ impl StreetRacers {
             entity,
             xy,
             yaw,
-            near_z: pz,
+            near_z: rest_stop_near(sim.world(), pxy).map_or(pz, |p| p.pos[2]),
             repair: false,
             ghost_ticks: 0,
         };
         Ok(vec![at(player, start), at(entity, pos)])
+    }
+
+    /// Debug / e2e: park roaming racer `entity` idle at rest stop `name` (as at the end of a
+    /// loop lap) for two minutes; returns the move that puts it there (the session logs it).
+    pub fn park_at_rest_stop(
+        &mut self,
+        sim: &Sim,
+        entity: EntityId,
+        name: &str,
+    ) -> Result<Move, String> {
+        let poi = sim
+            .world()
+            .rest_stop(name)
+            .ok_or_else(|| format!("no rest stop {name}"))?;
+        let r = self
+            .racers
+            .iter_mut()
+            .find(|r| r.entity == entity && r.mode == RacerMode::Roam)
+            .ok_or("not a roaming street racer")?;
+        r.field = None;
+        r.replan_at = sim.tick() + 120 * 240;
+        Ok(Move {
+            entity,
+            xy: geom::xy(poi.pos),
+            yaw: poi.heading_rad,
+            near_z: poi.pos[2],
+            repair: false,
+            ghost_ticks: 0,
+        })
     }
 
     /// Decline (or withdraw) the open offer: the racer drives off.
@@ -1413,8 +1498,12 @@ impl StreetRacers {
         let ring = self.ring.clone().unwrap_or_default();
         let on_loop = self.racers[k].shift == Shift::Loop && !ring.is_empty();
         if on_loop {
-            // One lap of Loop 9 from here, then the next.
-            let Some(route) = loop_lap(sim.world(), st.pos, fwd, &ring.corners) else {
+            // One lap of Loop 9 from here, into one of its rest stops (row 153), where it idles a
+            // while before the next.
+            let stops: Vec<[f32; 3]> = sim.world().rest_stops().map(|p| p.pos).collect();
+            let end =
+                (!stops.is_empty()).then(|| stops[self.rng.below(stops.len() as u32) as usize]);
+            let Some(route) = loop_lap(sim.world(), st.pos, fwd, &ring.corners, end) else {
                 self.racers[k].replan_at = tick + 3 * 240;
                 return;
             };
@@ -1493,6 +1582,13 @@ impl StreetRacers {
             if arrived {
                 r.field = None;
                 r.replan_at = tick;
+                // A loop racer idles at the rest stop its lap ended in (row 153).
+                let at_stop =
+                    xy_of(sim, r.entity).is_some_and(|q| rest_stop_near(sim.world(), q).is_some());
+                if r.shift == Shift::Loop && at_stop {
+                    r.replan_at =
+                        tick + (LOOP_IDLE_S + u64::from(self.rng.below(LOOP_IDLE_EXTRA_S))) * 240;
+                }
             } else if f.race_over() || r.idle_ticks > STUCK_TICKS {
                 // Wrecked (retired), caught or stuck: pause, then repair and move it.
                 r.field = None;
@@ -1826,11 +1922,15 @@ fn loop9_corners(world: &World) -> Vec<[f32; 2]> {
 
 /// One lap of Loop 9 (`ring`, corners in driving order) from `pos` heading `fwd`: through the
 /// corners from the one ahead round to the one before it, then back to where it started.
+/// One lap of Loop 9 (`ring`, corners in driving order) from `pos` heading `fwd`: through the
+/// corners from the one ahead round to the one before it, then to `end` (a rest stop) or back
+/// to where it started.
 fn loop_lap(
     world: &World,
     pos: [f32; 3],
     fwd: [f32; 2],
     ring: &[[f32; 2]],
+    end: Option<[f32; 3]>,
 ) -> Option<wp_world::Route> {
     let here = geom::xy(pos);
     let n = ring.len();
@@ -1843,11 +1943,47 @@ fn loop_lap(
         .min_by(|&a, &b| dist(ring[a], here).total_cmp(&dist(ring[b], here)))
         .unwrap_or(0);
     let via: Vec<[f32; 2]> = (0..n).map(|j| ring[(ahead + j) % n]).collect();
-    let back = [here[0] - fwd[0] * 40.0, here[1] - fwd[1] * 40.0];
-    let z = world.map().ground_height(back, Some(pos[2]));
+    let fin = end.unwrap_or_else(|| {
+        let back = [here[0] - fwd[0] * 40.0, here[1] - fwd[1] * 40.0];
+        [
+            back[0],
+            back[1],
+            world.map().ground_height(back, Some(pos[2])),
+        ]
+    });
     world
-        .plan_route_via(pos, Some(fwd), &via, [back[0], back[1], z])
+        .plan_route_via(pos, Some(fwd), &via, fin)
         .filter(|r| r.length_m > 1000.0)
+}
+
+/// The index of the Loop 9 corner ahead of `here` facing `fwd` (nearest in front).
+fn corner_ahead(ring: &[[f32; 2]], here: [f32; 2], fwd: [f32; 2]) -> usize {
+    (0..ring.len())
+        .filter(|&i| {
+            let d = geom::sub(ring[i], here);
+            d[0] * fwd[0] + d[1] * fwd[1] > 0.0
+        })
+        .min_by(|&a, &b| dist(ring[a], here).total_cmp(&dist(ring[b], here)))
+        .unwrap_or(0)
+}
+
+/// Waypoints that take a race from `here` (facing `fwd`) once round Loop 9: three corners
+/// spread round the ring, the last one just before where it started.
+fn lap_waypoints(ring: &[[f32; 2]], here: [f32; 2], fwd: [f32; 2]) -> Vec<[f32; 2]> {
+    let n = ring.len();
+    let a = corner_ahead(ring, here, fwd);
+    [n / 4, n / 2, n - 1]
+        .iter()
+        .map(|k| ring[(a + k) % n])
+        .collect()
+}
+
+/// The Loop 9 rest stop within [`REST_STOP_MEET_M`] of `xy` (row 153).
+fn rest_stop_near(world: &World, xy: [f32; 2]) -> Option<&wp_world::network::Poi> {
+    world
+        .rest_stops()
+        .filter(|p| dist(geom::xy(p.pos), xy) <= REST_STOP_MEET_M)
+        .min_by(|a, b| dist(geom::xy(a.pos), xy).total_cmp(&dist(geom::xy(b.pos), xy)))
 }
 
 /// A random pose on Loop 9's road line, as [`random_lane_pose`] (same distance rules),
@@ -2073,6 +2209,150 @@ mod tests {
             capability: cruise_capability(&car, 12.0),
         };
         assert!(field_on(&world, &route, &[spec], RaceConfig::default()).is_none());
+    }
+
+    /// Night Port Vesper session with the 4th loop racer parked idle at `stop`, the player 9 m
+    /// behind it; returns the session, the racer's roster index and its entity.
+    fn rest_stop_meet(stop: usize) -> (Session, usize, EntityId, wp_world::network::Poi) {
+        let mut sc = crate::scenario::free_drive_in(
+            "debug_sedan",
+            DamageMode::Arcade,
+            crate::scenario::city_spec("vesper_v2"),
+        );
+        sc.time_of_day_h = 23.0;
+        let mut s = Session::new(sc, false).unwrap();
+        s.run_ticks(240);
+        let poi = s
+            .sim()
+            .world()
+            .rest_stops()
+            .nth(stop)
+            .cloned()
+            .expect("a rest stop");
+        let k = s
+            .street()
+            .unwrap()
+            .racers
+            .iter()
+            .position(|r| r.shift == Shift::Loop)
+            .unwrap();
+        let e = s.street().unwrap().racers[k].entity;
+        let f = geom::dir_of_yaw(poi.heading_rad);
+        let o = geom::xy(poi.pos);
+        s.place_logged(e, o, poi.heading_rad, poi.pos[2]).unwrap();
+        {
+            let r = &mut s.street_mut_for_tests().racers[k];
+            r.field = None;
+            r.replan_at = u64::MAX;
+        }
+        s.place_logged(
+            s.entities()[0],
+            [o[0] - f[0] * 9.0, o[1] - f[1] * 9.0],
+            poi.heading_rad,
+            poi.pos[2],
+        )
+        .unwrap();
+        s.run_ticks(240);
+        (s, k, e, poi)
+    }
+
+    /// Row 153: a loop racer idling at a rest stop takes a challenge there; the card offers a
+    /// Loop 9 lap back to the rest stop; accepting puts both cars side by side on its parking
+    /// road, at rest, facing its way, and the racer laps at speed.
+    #[test]
+    fn night_loop_race_meets_at_a_rest_stop() {
+        let (mut s, k, e, poi) = rest_stop_meet(0);
+        let player = s.entities()[0];
+        let horn = |on: bool| VehicleInput {
+            handbrake: 1.0,
+            horn: on,
+            headlights: true,
+            ..Default::default()
+        };
+        s.set_input(player, horn(true)).unwrap();
+        s.run_ticks(2);
+        s.set_input(player, horn(false)).unwrap();
+        s.run_ticks(2);
+        let offer = s
+            .street()
+            .unwrap()
+            .offer(s.sim(), s.run())
+            .expect("challenge at the rest stop");
+        assert_eq!(offer.entity, e.0);
+        assert_eq!(offer.rest_stop.as_deref(), Some(poi.name.as_str()));
+        let lap = offer.loop_lap.clone().expect("a Loop 9 lap on the card");
+        let pv = s.street_preview(lap.finish, &lap.via).unwrap();
+        eprintln!("{}: lap {:.0} m, ok {}", poi.name, pv.length_m, pv.ok);
+        assert!(
+            pv.ok && (9000.0..=RACE_MAX_M).contains(&pv.length_m),
+            "{pv:?}"
+        );
+        let stake = level(s.street().unwrap().racers[k].level).bet_min;
+        s.street_accept(lap.finish, &lap.via, stake).unwrap();
+        s.run_ticks(2);
+        let st = |s: &Session, id| s.vehicle(id).unwrap().vehicle.state();
+        let (a, b) = (st(&s, player), st(&s, e));
+        let f = geom::dir_of_yaw(poi.heading_rad);
+        let r = geom::right_of(f);
+        let rel = |p: [f32; 3]| {
+            let d = geom::sub(geom::xy(p), geom::xy(poi.pos));
+            (d[0] * f[0] + d[1] * f[1], d[0] * r[0] + d[1] * r[1])
+        };
+        let (pa, pb) = (rel(a.pos), rel(b.pos));
+        eprintln!(
+            "start: player {pa:?} racer {pb:?} speeds {:.2} {:.2}",
+            a.speed_mps, b.speed_mps
+        );
+        assert!(
+            pa.0.abs() < 1.0 && pb.0.abs() < 1.0,
+            "both level on the parking road"
+        );
+        assert!(
+            pa.1 > 1.5 && pb.1 < -1.5,
+            "side by side: player right, racer left"
+        );
+        assert!(
+            a.speed_mps.abs() < 0.3 && b.speed_mps.abs() < 0.3,
+            "at rest"
+        );
+        // The racer gets going (the player stays on the handbrake).
+        let mut top = 0.0f32;
+        for _ in 0..(240 * 25) {
+            s.set_input(player, horn(false)).unwrap();
+            s.run_ticks(1);
+            top = top.max(st(&s, e).speed_mps);
+        }
+        eprintln!("racer top {top:.1} m/s");
+        assert!(top > 20.0, "the racer laps at speed ({top} m/s)");
+    }
+
+    /// Row 153: a loop racer's lap ends in a rest stop (one to two laps from wherever it is).
+    #[test]
+    fn a_loop_lap_ends_at_a_rest_stop() {
+        let world = crate::scenario::city_spec("vesper_v2");
+        let mut sc = crate::scenario::free_drive_in("debug_sedan", DamageMode::Arcade, world);
+        sc.time_of_day_h = 23.0;
+        let s = Session::new(sc, false).unwrap();
+        let w = s.sim().world();
+        let ring = loop9(w);
+        assert!(!ring.is_empty());
+        let start = ring.line[ring.line.len() / 3];
+        let next = ring.line[ring.line.len() / 3 + 1];
+        let fwd = geom::normalize(geom::sub(geom::xy(next), geom::xy(start)));
+        for p in w.rest_stops() {
+            let r = loop_lap(w, start, fwd, &ring.corners, Some(p.pos))
+                .expect("a lap into the rest stop");
+            let end = *r.polyline.last().unwrap();
+            eprintln!(
+                "{}: {:.0} m, ends {:.1} m from it",
+                p.name,
+                r.length_m,
+                dist(geom::xy(end), geom::xy(p.pos))
+            );
+            assert!(dist(geom::xy(end), geom::xy(p.pos)) < 5.0);
+            // A full lap from the corner ahead, then on round to the rest stop: 1–2 laps.
+            assert!(r.length_m > 9000.0 && r.length_m < 22000.0);
+        }
     }
 
     #[test]

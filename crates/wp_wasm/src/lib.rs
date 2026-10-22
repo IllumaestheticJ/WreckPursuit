@@ -1146,6 +1146,28 @@ pub fn debug_place_vehicle(entity: u32, x: f32, y: f32, yaw: f32) -> Result<(), 
     })
 }
 
+/// Debug / e2e: park street racer `entity` idle at the Loop 9 rest stop `name` (as between
+/// laps, two minutes; a logged move). Errors without street racers, for an unknown rest stop or a
+/// racer that is not roaming.
+#[wasm_bindgen]
+pub fn debug_street_park_at_rest_stop(entity: u32, name: &str) -> Result<(), JsValue> {
+    with(|s| s.street_park_at_rest_stop(EntityId(entity), name))
+}
+
+/// The Loop 9 rest stops as JSON: `[{ name, pos, heading_rad }]` (`[]` on maps without them).
+#[wasm_bindgen]
+pub fn rest_stops_json() -> Result<String, JsValue> {
+    get(|s| {
+        let v: Vec<_> = s
+            .sim()
+            .world()
+            .rest_stops()
+            .map(|p| serde_json::json!({ "name": p.name, "pos": p.pos, "heading_rad": p.heading_rad }))
+            .collect();
+        json(&v)
+    })
+}
+
 /// The city's repair shops as JSON ([`garage_visit::GarageSite`] array: name, position,
 /// radius, `Legit` / `Crooked`, district). `[]` without a city or an economy run.
 #[wasm_bindgen]
