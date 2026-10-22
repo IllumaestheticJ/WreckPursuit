@@ -54,5 +54,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.44 | preview | Keyboard countersteer default 0 %, new-side catch 0.9 → 0.8 (fixes the rampart double transition), flick sliders lab-only |
 | 0.12.45 | preview | Player keyboard steering = the key (no transition / catch / limit / held-key cut / smart lock; plain speed curve only); hands-off countersteer default 30 %, capped at 30 % of lock, no-key only (matches the reference clips); reference cars parity_rwd_e / parity_rwd_f |
 | 0.12.46 | preview | Police never spawn in the racer's view (pop-in 0.82 → 0.06 /min), spike / roadblock units on the racer's carriageway facing its flow, no pursuit spawns across the median, spikes deflate in ~1 s; police pace 0.45 → 0.70 |
-| 0.12.47 | preview | (next) |
+| 0.12.47 | preview | Loop 9 race has late-night traffic (23:00, density 2.0) and the player seat; touch mid-LOD back to 100 m; phone perf profile informational (PC target, row 145); reset ghost blink fix |
+| 0.12.48 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
