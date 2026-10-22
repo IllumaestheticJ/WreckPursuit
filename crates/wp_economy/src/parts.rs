@@ -455,7 +455,7 @@ impl Economy {
         let grade = mods.iter().find(|m| {
             self.catalog
                 .get(m)
-                .is_some_and(|d| s.lines.iter().any(|l| *l == d.line))
+                .is_some_and(|d| s.lines.contains(&d.line))
         });
         match grade {
             Some(g) => Some(FittedPart {
