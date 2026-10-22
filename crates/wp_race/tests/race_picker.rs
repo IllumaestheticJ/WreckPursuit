@@ -49,6 +49,13 @@ struct Raced {
     /// Each racer's police heat just after the green light (meet report + stake heat).
     heat_after_green: Vec<f32>,
     sim_hash: u64,
+    /// What the race's police profile put out at the start (`None` without police).
+    plan: Option<wp_police::race::RacePolicePlan>,
+    /// Stakeouts that left their post during the race.
+    stakeouts_sprung: usize,
+    /// Roadblocks and spike strips placed in all (scripted and by the AI captain).
+    roadblocks_placed: u32,
+    spikes_placed: u32,
 }
 
 fn run_race(id: &str, max_s: u64) -> Raced {
@@ -162,6 +169,12 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
     );
     let green_tick = live.judge().green_tick();
     let racers = live.racers().to_vec();
+    // The race's own police profile, as the browser session sets it up (none without police).
+    let plan = (sc.police_presence != Some(0.0)).then(|| {
+        wp_race::police::start_race(sim.police_mut(), &def, live.race(), &racers)
+            .expect("every picker race has a police profile")
+    });
+    eprintln!("{id}: police plan {plan:?}");
 
     let mut events: Vec<SimEvent> = Vec::new();
     let mut signals = Vec::new();
@@ -357,7 +370,20 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         "{id}: route {route_m:.0} m, finished at {:?} s, pursuits {pursuits}",
         finished_tick.map(|t| t as f32 / 240.0)
     );
+    let stakeouts_sprung = sim
+        .police()
+        .race_police()
+        .map_or(0, |r| r.stakeouts.iter().filter(|s| s.sprung).count());
+    let stats = sim.police().stats();
+    eprintln!(
+        "{id}: stakeouts sprung {stakeouts_sprung}, roadblocks {}, spikes {} ({} hits)",
+        stats.roadblocks, stats.spikes, stats.spike_hits
+    );
     Raced {
+        plan,
+        stakeouts_sprung,
+        roadblocks_placed: stats.roadblocks,
+        spikes_placed: stats.spikes,
         def,
         results,
         signals,
@@ -435,8 +461,17 @@ fn check(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
 #[test]
 fn grid_highway_sprint() {
     let r = run_race("grid_highway_sprint", 150);
-    // 747 m up a signalled highway with thin traffic.
-    check(&r, 15.0..60.0, 3);
+    // 747 m up a signalled highway with thin traffic. The speed trap (data/police/races.toml)
+    // picks racers up as they fly past its radar units and spikes the racing lane near the
+    // end, so it takes a racer or two out (seed 7: one captured, one fled): two finish.
+    check(&r, 15.0..60.0, 2);
+    let plan = r.plan.as_ref().expect("police profile");
+    assert_eq!(plan.spikes.len(), 1);
+    assert_eq!(plan.stakeouts.len(), 2);
+    assert!(r.stakeouts_sprung >= 1, "nobody drove past the speed trap");
+    assert!(r.pursuits >= 1);
+    // No roadblocks on the short highway: spikes only.
+    assert_eq!(r.roadblocks_placed, 0);
 }
 
 #[test]
@@ -452,6 +487,14 @@ fn hollins_hill_sprint() {
     let r = run_race("hollins_sprint", 200);
     // ~1 km uphill through six hairpins (the AI-only Hollins race: winner ~65 s).
     check(&r, 40.0..110.0, 3);
+    // The summit trap: the side road at the top sealed, a unit waiting below the summit,
+    // no spikes or dynamic roadblocks on the hill.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert!(!plan.side_blocks.is_empty(), "the top is not sealed");
+    assert!(plan.route_blocks.is_empty());
+    assert_eq!(plan.stakeouts.len(), 1);
+    assert_eq!(r.spikes_placed, 0);
+    assert_eq!(r.roadblocks_placed as usize, plan.side_blocks.len());
 }
 
 #[test]
@@ -511,6 +554,20 @@ fn loop9_circuit() {
         let t = w.elapsed_s().unwrap();
         assert!((150.0..420.0).contains(&t), "{id}: winner took {t:.1} s");
     }
+    // Loop 9's police profile is high-speed pursuit only: interceptors staked out on the
+    // shoulders join the chase, and no roadblock or spike strip is ever put out.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert!(plan.route_blocks.is_empty() && plan.side_blocks.is_empty() && plan.spikes.is_empty());
+    assert_eq!(
+        r.roadblocks_placed, 0,
+        "{id}: a roadblock on the pursuit-only loop"
+    );
+    assert_eq!(r.spikes_placed, 0, "{id}: spikes on the pursuit-only loop");
+    assert!(
+        r.stakeouts_sprung >= 1,
+        "{id}: no interceptor joined from the shoulder"
+    );
+    assert!(r.pursuits >= 1, "{id}: no pursuit");
     eprintln!(
         "loop9 pursuits: {}, finished: {}/{}",
         r.pursuits,
@@ -551,6 +608,12 @@ fn lantern_checkpoint_draws_the_police() {
     // Illegal daytime with Max presence is meant to bring every cop in town: pursuits start
     // while the race is on (the loop stops counting when the race is judged over).
     assert!(r.pursuits >= 1, "{id}: no pursuit during the race");
+    // Downtown lockdown (data/police/races.toml): roadblocks across the route and on the side
+    // streets off it, in place from the start.
+    let plan = r.plan.as_ref().expect("police profile");
+    assert_eq!(plan.route_blocks.len(), 2, "{id}: route blocks {plan:?}");
+    assert!(plan.side_blocks.len() >= 2, "{id}: side blocks {plan:?}");
+    assert!(r.roadblocks_placed as usize >= plan.route_blocks.len() + plan.side_blocks.len());
     // The race is judged to the end and nobody wrecks.
     assert!(r.finished_tick.is_some(), "{id}: never finished");
     assert_eq!(r.results.len(), r.def.entrants());

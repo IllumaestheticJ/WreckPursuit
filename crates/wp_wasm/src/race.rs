@@ -134,6 +134,10 @@ pub struct RaceCard {
     pub police: f32,
     /// The meet is hot: a patrol is called in at the green light.
     pub hot_meet: bool,
+    /// Name of the race's police style (`data/police/races.toml`), e.g. "Speed trap".
+    pub police_style: String,
+    /// One line on how the police work this race.
+    pub police_summary: String,
     /// The AI field.
     pub drivers: Vec<DriverCard>,
     /// Advertised winner purse for `car` (`data/events/stakes.toml`, reconciled with G's).
@@ -149,6 +153,7 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
         catalog::races()
             .iter()
             .map(|d| {
+                let profile = d.police_profile();
                 let (purse, entry_fee) = car.map_or((0, 0), |c| {
                     let r = advertised(econ, &data, d, c, d.length_hint_m, mode);
                     (r.purse, r.entry_fee)
@@ -165,6 +170,10 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     length_m: d.length_hint_m,
                     police: d.police_presence(),
                     hot_meet: d.prior_meets >= 2,
+                    police_style: profile
+                        .as_ref()
+                        .map_or_else(String::new, |p| p.name.clone()),
+                    police_summary: profile.map_or_else(String::new, |p| p.summary),
                     drivers: d
                         .ai
                         .iter()
@@ -337,6 +346,9 @@ impl RaceRun {
             abs_s,
             autopilot,
         );
+        // The race's own police: doctrine and scripted roadblocks / spikes / stakeouts.
+        let racers = live.racers().to_vec();
+        wp_race::police::start_race(sim.police_mut(), def, live.race(), &racers);
         let mut names = BTreeMap::new();
         names.insert(ids[0], ("You".to_string(), sc.entities[0].car.clone()));
         for (i, d) in def.ai.iter().enumerate() {

@@ -153,6 +153,10 @@ pub struct Roadblock {
     pub barriers: Vec<StaticCollider>,
     /// Removed at.
     pub expires: SimTime,
+    /// Placed by a race profile ([`crate::race`]): stays when the racer's pursuit ends and
+    /// does not count against the AI captain's budget.
+    #[serde(default)]
+    pub scripted: bool,
 }
 
 /// A spike strip: a line across the road.
@@ -172,6 +176,10 @@ pub struct SpikeStrip {
     pub unit: Option<UnitId>,
     /// Removed at.
     pub expires: SimTime,
+    /// Placed by a race profile ([`crate::race`]): stays when the racer's pursuit ends and
+    /// does not count against the AI captain's budget.
+    #[serde(default)]
+    pub scripted: bool,
 }
 
 impl SpikeStrip {
@@ -193,6 +201,7 @@ impl SpikeStrip {
             b: sub(site.pos, half),
             unit,
             expires,
+            scripted: false,
         }
     }
 

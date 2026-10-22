@@ -247,8 +247,9 @@ impl Corridor {
             }
             carry = s - p.b;
         }
-        if !route.closed_loop {
-            let lp = pieces.last().unwrap();
+        // Every piece can be filtered out (a route that starts and ends on the same spot, e.g.
+        // a flight planned by a racer stopped at its destination): nothing to close off.
+        if let (false, Some(lp)) = (route.closed_loop, pieces.last()) {
             let seg = map.seg(lp.seg);
             let (pos, t) = seg.point_at(lp.b);
             let ext = seg.lane().map(|l| lane_extents(map, l, opts)).unwrap_or((
