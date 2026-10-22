@@ -275,7 +275,9 @@ pub mod flag {
     pub const WRECKED: u32 = 1 << 7;
     /// Driven by a human (player cop).
     pub const HUMAN: u32 = 1 << 8;
-    /// `target_x`, `target_y` are valid (intercept point, tracked racer's last known spot).
+    /// `target_x`, `target_y` are valid: an interceptor's meet point, a chasing unit's route
+    /// meeting the racer's path (only while it routes round), a helicopter's racer's last
+    /// known spot.
     pub const HAS_TARGET: u32 = 1 << 9;
 }
 
@@ -461,7 +463,6 @@ fn police_part(p: &PoliceSystem, player: EntityId, out: &mut Vec<f32>) {
             out[h::ESCAPE] = (r.los_lost_s / escape_s.max(1e-3)).clamp(0.0, 1.0);
         }
     }
-    let last_known = rec.and_then(|r| r.last_known);
     let mut n_units = 0;
     for u in p.units() {
         let b = &u.body;
@@ -473,9 +474,12 @@ fn police_part(p: &PoliceSystem, player: EntityId, out: &mut Vec<f32>) {
                 .racer(*target)
                 .and_then(|r| r.last_known)
                 .map_or(([0.0; 2], false), |q| (q, true)),
-            Assignment::Pursue { target } if *target == player => {
-                last_known.map_or(([0.0; 2], false), |q| (q, true))
-            }
+            // A chasing unit routing round by the roads (row 129): where its route meets the
+            // racer's path (the junction the racer is heading for). None while it follows the
+            // racer directly.
+            Assignment::Pursue { .. } => u
+                .chase_route
+                .map_or(([0.0; 2], false), |c| (p.graph().node(c.node).pos, true)),
             _ => ([0.0; 2], false),
         };
         let flags = state_code(a)
@@ -622,9 +626,23 @@ mod tests {
         assert!((d[h::PLAYER_X] - st.pos[0]).abs() < 1e-3);
         assert!(d[h::CAR_SIGHT_M] > 50.0);
         assert!(d[h::HELI_SPOT_M] > 5.0);
-        for u in d[HEADER..HEADER + n * UNIT_STRIDE].chunks(UNIT_STRIDE) {
+        let police = s.sim().police();
+        for (u, unit) in d[HEADER..HEADER + n * UNIT_STRIDE]
+            .chunks(UNIT_STRIDE)
+            .zip(police.units())
+        {
             assert!(u.iter().all(|v| v.is_finite()));
             assert!((u[5] as u32 & flag::STATE_MASK) <= 8);
+            // A chasing unit shows a target exactly while it routes round (row 129): the
+            // junction its route meets the racer's path at.
+            if matches!(unit.assignment, Assignment::Pursue { .. }) {
+                let has = u[5] as u32 & flag::HAS_TARGET != 0;
+                assert_eq!(has, unit.chase_route.is_some());
+                if let Some(c) = unit.chase_route {
+                    let q = police.graph().node(c.node).pos;
+                    assert_eq!([u[6], u[7]], q);
+                }
+            }
         }
         // Yaw convention: the chase car spawns facing along its road; the pose matches the
         // velocity direction once it moves.

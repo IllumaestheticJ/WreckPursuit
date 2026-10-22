@@ -563,6 +563,9 @@ pub struct ProOutput {
     pub confidence: f32,
     /// Reversing out of a stuck position.
     pub reversing: bool,
+    /// Turning round: facing away from where the line goes (speed capped at
+    /// [`ProParams::turn_around_mps`]).
+    pub turning_round: bool,
 }
 
 /// The line and speed profile over the current window.
@@ -931,6 +934,7 @@ impl ProDriver {
         if turning_round {
             v_ref = v_ref.min(p.turn_around_mps);
         }
+        out.turning_round = turning_round;
         out.planned_mps = v_ref;
         let ahead = lead + 4.0;
         let v_ahead = self.win.sample(&self.win.v, ahead);
