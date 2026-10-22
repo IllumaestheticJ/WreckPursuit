@@ -31,6 +31,8 @@ pub enum RaceCity {
     Vesper,
     /// The old procedural 12 × 12 grid (`procedural_12x12`).
     Grid,
+    /// A touge pass (`wp_world::touge::TOUGE_IDS`; battles in [`crate::touge`]).
+    Touge(&'static str),
 }
 
 impl RaceCity {
@@ -39,6 +41,7 @@ impl RaceCity {
         match self {
             RaceCity::Vesper => "vesper_v2",
             RaceCity::Grid => "procedural_12x12",
+            RaceCity::Touge(id) => id,
         }
     }
 }

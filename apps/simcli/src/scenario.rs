@@ -213,7 +213,8 @@ pub enum CitySpec {
     /// the WASM runner) or `.road.bin` (disk only), e.g. `"city/procedural_12x12.road.json"`.
     File(String),
     /// A named generated city: `"vesper_v2"` (Port Vesper v2: curves, hills, terrain, highway
-    /// loop with grade separations; `wp_world::vesper`). Generated in memory everywhere.
+    /// loop with grade separations; `wp_world::vesper`) or a touge pass (`"touge_*"`,
+    /// `wp_world::touge::TOUGE_IDS`; the seed is ignored). Generated in memory everywhere.
     Preset {
         /// Preset name (`wp_world::vesper::CITY_ID`).
         name: String,

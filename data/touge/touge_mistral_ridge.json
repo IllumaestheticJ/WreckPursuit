@@ -1,0 +1,32 @@
+{
+  "id": "touge_mistral_ridge",
+  "name": "Mistral Ridge",
+  "blurb": "Fast sweepers along an exposed ridge line. Commit early, the drop is right there.",
+  "climb_m": 200.0,
+  "lane_width_m": 3.5,
+  "shoulder_m": 1.0,
+  "speed_mps": 27.0,
+  "cliff_drop_m": 35.0,
+  "krail": [[620, 820], [1450, 1650], [2150, 2350], [2600, 2780]],
+  "legs": [
+    {"straight": 180},
+    {"turn": -40, "r": 120},
+    {"straight": 210},
+    {"turn": 70, "r": 85},
+    {"straight": 160},
+    {"turn": -95, "r": 70},
+    {"straight": 250},
+    {"turn": 55, "r": 110},
+    {"straight": 180},
+    {"turn": 120, "r": 45},
+    {"straight": 230},
+    {"turn": -80, "r": 75},
+    {"straight": 210},
+    {"turn": -60, "r": 95},
+    {"straight": 280},
+    {"turn": 90, "r": 60},
+    {"straight": 180},
+    {"turn": -45, "r": 130},
+    {"straight": 230}
+  ]
+}

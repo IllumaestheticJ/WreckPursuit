@@ -40,6 +40,7 @@ pub mod routes;
 pub mod signals;
 pub mod surface;
 pub mod terrain;
+pub mod touge;
 pub mod traffic;
 pub mod vesper;
 pub mod violations;
@@ -203,6 +204,16 @@ impl World {
     /// Generate the procedural city in memory.
     pub fn procedural(pg: &procgen::ProcGenConfig, cfg: WorldConfig) -> Self {
         Self::new(procgen::generate(pg), cfg)
+    }
+
+    /// Generate built-in touge pass `id` (`touge::TOUGE_IDS`) in memory: one sealed mountain
+    /// road with its terrain, walls and destructible K-rail props. `None` for an unknown id.
+    pub fn touge(id: &str, cfg: WorldConfig) -> Option<Self> {
+        let build = touge::generate_builtin(id)?;
+        let mut w = Self::new(build.net, cfg);
+        w.road_names = vec![build.track.name.clone()];
+        w.parked.extend(build.krails);
+        Some(w)
     }
 
     /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
