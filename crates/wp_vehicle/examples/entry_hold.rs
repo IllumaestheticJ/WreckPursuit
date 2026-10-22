@@ -11,7 +11,7 @@
 //! Runs on the shipped handling (`wp_vehicle::lab_scope`, the rig marked player-driven) with
 //! the lab's reference assists (TCS / ESC off). `cargo run --release -p wp_vehicle --example
 //! entry_hold [-- car …]`; `PLAIN='{…}'` / `GRIP='{…}'` = fields over the shipped plain
-//! steering / grip balance (A/B).
+//! steering / grip balance (A/B); `TYRE='{…}'` = fields over the shipped car / tyre tune.
 
 use std::path::PathBuf;
 
@@ -105,6 +105,12 @@ fn main() {
     // PLAIN='{…}' / GRIP='{…}': fields over the shipped plain steering / grip balance (A/B).
     if let Ok(j) = std::env::var("PLAIN") {
         wp_vehicle::plain::set_override(Some(merged(&wp_vehicle::lab_scope::shipped_plain(), &j)));
+    }
+    if let Ok(j) = std::env::var("TYRE") {
+        wp_vehicle::car_lab::set_override(Some(merged(
+            &wp_vehicle::car_lab::CarTune::shipped(),
+            &j,
+        )));
     }
     if let Ok(j) = std::env::var("GRIP") {
         wp_vehicle::grip_lab::set_override(Some(merged(

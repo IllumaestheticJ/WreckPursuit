@@ -750,3 +750,131 @@ What it checks:
 - Its clearance to both civilians stays above 0.2 m; it measured 0.60 m.
 - A skill-0.5 racer makes no split.
 - The test fails when splitting is switched off.
+
+## Loop 9 late-night traffic (owner row 139, 2026-10-22)
+
+**Owner:** "there should be SOME traffic in the loop9 race".
+
+### Why there was none
+
+- Civilians spawn only within 440 m of a player car.
+- At 01:00 with density 0.3, the night curve (0.20 of peak) times the loop's districts' night multipliers (suburb, industrial, port about 0.6) rounds the target near the player down to zero. In a browser-like run the world held 0 civilians for the whole race.
+- The pace harness marked every seat `AiRacer`, which spreads traffic over the whole city (about 56 cars, none near the field). So the tests never showed what the owner saw.
+
+### Harness
+
+- `WP_PACE_PLAYER=1` keeps the player seat a Player car (AI-driven), as in the browser.
+- `PLAYER_SEAT_RACES` makes this the default for Loop 9 now. All picker races follow in the next commit (lead).
+- With no traffic, the player seat drives identically to an AI seat.
+- race_picker already raced with seat 0 as a Player car.
+- New `WP_PACE_TOD` overrides the time of day.
+- New metric `civnear`: civilians within 300 m of each car, in my direction and opposing, sampled at 1 Hz.
+
+### Setting: 23:00, traffic density 2.0
+
+Seed 1, skill 0.95, player seat. `civnear` is the mean number of civilians within 300 m in my direction (a 600 m window).
+
+| time | density | civnear at the player seat | spacing |
+|---|---|---|---|
+| 01:00 | 0.3 | 0 | none |
+| 01:00 | 1.0 | 0.56 | about 1 km |
+| 01:00 | 3.0 | 2.2 | about 275 m |
+| 23:00 | 1.0 | 0.6 | about 950 m |
+| 23:00 | 2.0 | 1.5–1.7 | about 360 m |
+| 23:00 | 3.0 | 2.2 | about 275 m |
+
+- The lead asked for 250–300 m spacing (density 2–3).
+- At 2.5–3 the field loses 30–55 % and several cars do not finish.
+- 2.0 is the densest setting where the field still finishes 95 of 96 runs.
+
+### AI fixes for traffic at speed
+
+Four fixes were made; three are kept:
+
+1. **Blockers use the closing-speed margin.** Braking added up to 0.5 m of clearance (1.0 m for racers) with closing speed, but "who blocks me" used the plain margin. A racer closing at 20 m/s on a civilian 2.6 m to one side braked to its speed from 110 m out and never tried to pass. Where a pass goes keeps the plain margin: using the larger one there cost Lantern s95 seed 8 two cars.
+2. **"Never pass a car that is passing" applies only on roads under 10 m.** Ahead of the player seat, cars were always mid-pass, so this refused 254–912 passes a race. On 3+ lanes the lane checks decide.
+3. **An overtake held below pace by a car other than its target for 1 s ends and re-plans.** One sat 11 s behind a civilian at 24 m/s with a pace of 67 m/s.
+
+Dropped:
+
+- **"No patience behind a civilian."** It cost Lantern s50 seed 10 two cars.
+- **The gap planner at highway speed (4 s look-ahead)**, also tried. With no traffic, racers weaved round each other at 60 m/s: one car did not finish and two hit walls.
+
+The five races (default harness, seeds 1–8), before = 4b3d690e, after = the kept fixes:
+
+| race | skill | seeds | run | finishers | mean s | walls | passes/km | civ contacts | all contacts | splits | aborts |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| city_sprint | 0.5 | 1-8 | before | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.5 | 1-8 | after | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | 1-8 | before | 32/32 | 10.9 | 0 | 0.60 | 0 | 0 | 0 | 0 |
+| city_sprint | 0.95 | 1-8 | after | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | 1-8 | before | 32/32 | 42.8 | 0 | 1.91 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.5 | 1-8 | after | 32/32 | 44.1 | 0 | 2.02 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | 1-8 | before | 32/32 | 42.9 | 0 | 3.71 | 0 | 0 | 0 | 0 |
+| grid_highway_sprint | 0.95 | 1-8 | after | 32/32 | 42.7 | 0 | 1.80 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | 1-8 | before | 30/32 | 69.0 | 0 | 0.00 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.5 | 1-8 | after | 29/32 | 68.0 | 0 | 0.12 | 0 | 0 | 0 | 0 |
+| hollins_sprint | 0.95 | 1-8 | before | 30/32 | 63.7 | 8 | 0.25 | 0 | 8 | 0 | 0 |
+| hollins_sprint | 0.95 | 1-8 | after | 30/32 | 64.5 | 12 | 0.25 | 0 | 9 | 0 | 0 |
+| lantern_checkpoint | 0.5 | 1-8 | before | 31/32 | 83.1 | 10 | 0.19 | 0 | 7 | 0 | 0 |
+| lantern_checkpoint | 0.5 | 1-8 | after | 31/32 | 83.8 | 9 | 0.56 | 0 | 4 | 0 | 0 |
+| lantern_checkpoint | 0.95 | 1-8 | before | 32/32 | 75.1 | 0 | 0.00 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | 1-8 | after | 32/32 | 76.7 | 0 | 0.56 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | 1-8 | before | 48/48 | 207.5 | 1 | 0.11 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.5 | 1-8 | after | 48/48 | 208.6 | 3 | 0.17 | 0 | 1 | 0 | 0 |
+| loop9_circuit | 0.95 | 1-8 | before | 48/48 | 203.7 | 0 | 0.21 | 0 | 0 | 0 | 0 |
+| loop9_circuit | 0.95 | 1-8 | after | 48/48 | 203.4 | 0 | 0.23 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.5 | 9-16 | before | 32/32 | 79.2 | 0 | 0.00 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.5 | 9-16 | after | 32/32 | 78.3 | 0 | 1.50 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | 9-16 | before | 32/32 | 75.9 | 0 | 0.38 | 0 | 0 | 0 | 0 |
+| lantern_checkpoint | 0.95 | 9-16 | after | 32/32 | 75.6 | 0 | 1.31 | 0 | 0 | 0 | 0 |
+
+- Lantern, grid, city and Loop 9 hold.
+- Hollins: seed 7 at s50, a known jam, has one more non-finisher (3 vs 2). Seed 6 at s95 has one car with 4 walls. Seeds 1–8 at s95 walls total 12 vs 8.
+
+Loop 9 with the player seat at 23:00, old AI (4b3d690e) vs new AI, seeds 1–8:
+
+| density | skill | AI | finishers | mean s | walls | passes/km | civ contacts | all contacts | civnear at the player seat |
+|---|---|---|---|---|---|---|---|---|---|
+| 1.0 | 0.5 | old | 48/48 | 219.4 | 0 | 0.46 | 0 | 0 | 0.53 |
+| 1.0 | 0.5 | new | 48/48 | 226.5 | 2 | 0.60 | 1 | 0 | 0.61 |
+| 1.0 | 0.95 | old | 48/48 | 232.2 | 0 | 0.79 | 2 | 0 | 0.95 |
+| 1.0 | 0.95 | new | 48/48 | 224.0 | 3 | 0.80 | 0 | 2 | 0.65 |
+| 2.0 | 0.5 | old | 47/48 | 244.9 | 0 | 0.94 | 0 | 0 | 1.70 |
+| 2.0 | 0.5 | new | 48/48 | 260.9 | 0 | 1.09 | 1 | 0 | 1.66 |
+| 2.0 | 0.95 | old | 42/48 | 236.7 | 2 | 1.14 | 0 | 0 | 1.73 |
+| 2.0 | 0.95 | new | 47/48 | 233.5 | 0 | 0.96 | 0 | 0 | 1.45 |
+
+### Loop 9 before (01:00, 0.3, old AI) vs after (23:00, 2.0, new AI)
+
+Player seat, seeds 1–8:
+
+| police | skill | run | finishers | mean s | walls | passes/km | civ contacts | all contacts |
+|---|---|---|---|---|---|---|---|---|
+| off | 0.5 | before | 48/48 | 202.6 | 0 | 0.00 | 0 | 0  |
+| off | 0.5 | after | 48/48 | 260.9 | 0 | 1.09 | 1 | 0  |
+| off | 0.95 | before | 48/48 | 196.7 | 0 | 0.00 | 0 | 0  |
+| off | 0.95 | after | 47/48 | 233.5 | 0 | 0.96 | 0 | 0  |
+| on | 0.5 | before | 8/48 | 191.9 | 1235 | 0.10 | 18 | 208  |
+| on | 0.5 | after | 32/48 | 251.5 | 213 | 1.12 | 14 | 47  |
+| on | 0.95 | before | 48/48 | 196.7 | 0 | 0.00 | 0 | 0  |
+| on | 0.95 | after | 19/48 | 221.7 | 377 | 1.11 | 14 | 76  |
+
+Without police:
+
+- Traffic costs the field 37–58 s a lap. Cars are held behind civilians, and the heavy cars re-accelerate slowly from 25 m/s.
+- One car in 96 runs did not finish, with one civilian contact.
+
+With police:
+
+- The police decide the result (owner: captures are fine). Fewer racers take the flag (32/48 and 19/48), and rams and PITs put many cars into walls.
+- The old setup's police numbers look odd: s95 is identical to its no-police run, and s50 has 1235 walls. Worth a look by the police workstream.
+
+### Re-lock
+
+- **Pace scenarios:** `pace_loop9_circuit_s50/s95` were re-locked by the rule, with reasons in the RON. Best ratio is now at most 1.27 / 1.21. Times are each car's today −15 % .. +15 % (+20 % at s50), with the s95 slow cars now 265–268 s.
+- **race_picker:** `loop9_circuit` (9 pursuits, 6/6 finish) and `loop9_circuit_pace_without_police` pass within their existing windows.
+
+### Known gap: weaving at highway speed
+
+At a 250–300 m spacing the field cannot yet weave through traffic. The gap planner is off above 35 m/s and looks only 100 m ahead. Emergency swerves round a civilian changing lanes at 50 m/s can spin a car (seed 2, s95, density 1.5). This is a follow-up task.

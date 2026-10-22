@@ -367,6 +367,8 @@ struct Racer {
     split_with: Option<Who>,
     tactic_ticks: u64,
     blocked_s: f32,
+    /// Time an overtake has been held below pace by a car other than its target, s.
+    pass_blocked_s: f32,
     stuck_s: f32,
     /// Stuck and wanting to back out, but something stands right behind me (the car there
     /// backs off for me).
@@ -634,6 +636,13 @@ const WEAVE_MIN_SPAN_M: f32 = 3.0;
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
+/// Road width (my lanes plus any usable for passing) from which a car that is itself passing
+/// may be passed (three wide), m.
+const THREE_WIDE_MIN_ROAD_M: f32 = 10.0;
+
+/// An overtake held below pace by a car other than its target this long ends (re-plan), s.
+const OVERTAKE_BLOCKED_S: f32 = 1.0;
+
 /// Lane-splitting: room needed between two cars abreast beyond my own width, m (0.4 m a
 /// side).
 const SPLIT_ROOM_M: f32 = 0.8;
@@ -767,6 +776,7 @@ impl Field {
                 split_with: None,
                 tactic_ticks: 0,
                 blocked_s: 0.0,
+                pass_blocked_s: 0.0,
                 stuck_s: 0.0,
                 wants_room: false,
                 stable_s: 0.0,
@@ -2157,6 +2167,19 @@ fn decide_racer(
                                     && q.gap / (v + -q.o.v_s).max(1.0) < 3.5
                             });
                             let stale = r.tactic_ticks as f32 * dt > 15.0;
+                            // Held well below my pace by some other car (one in the lane I
+                            // moved into) for a second: this pass is not happening, re-plan
+                            // (Loop 9 at 23:00 with traffic: a racer passing a rival sat 11 s
+                            // behind a civilian at 24 m/s with its pace at 67 m/s).
+                            let held_by_other = matches!(r.debug.limit,
+                                SpeedLimit::Obstacle(w) if w != who_id(x.o.who))
+                                && v_line(r.s) > r.debug.v_target + 3.0;
+                            if held_by_other {
+                                r.pass_blocked_s += dt;
+                            } else {
+                                r.pass_blocked_s = 0.0;
+                            }
+                            let blocked = r.pass_blocked_s > OVERTAKE_BLOCKED_S;
                             // Still behind, out on the opposing lanes, and a junction comes
                             // up before I could be past: tuck back in.
                             let junction = x.ds > 0.0
@@ -2182,10 +2205,18 @@ fn decide_racer(
                                     None => true,
                                     Some(q) => split_closing(x, q, hw, true),
                                 };
-                            too_late || lost || gone || stale || oncoming || junction || red || {
-                                r.split_aborts += u32::from(split_off);
-                                split_off
-                            }
+                            too_late
+                                || lost
+                                || gone
+                                || stale
+                                || oncoming
+                                || junction
+                                || red
+                                || blocked
+                                || {
+                                    r.split_aborts += u32::from(split_off);
+                                    split_off
+                                }
                         }
                     }
                     None => true,
@@ -2265,6 +2296,17 @@ fn decide_racer(
             }
             base + if o.unstable { 1.5 } else { 0.0 }
         };
+        // Clearance used against a car ahead: grows with the closing speed. The same figure
+        // decides what I brake for and who blocks me (Loop 9 at 23:00 with traffic: with a
+        // smaller one for "who blocks me" than for braking, a racer closing at 20 m/s on a
+        // civilian 2.6 m to one side braked to its speed from 110 m out and never tried to
+        // pass it). Where a pass goes keeps the plain margin (the closing one there cost
+        // Lantern s95 seed 8 two cars, refused passes in a downtown queue).
+        let ahead_margin = |o: &Obstacle| -> f32 {
+            let closing = (v - o.v_s).max(0.5);
+            let extra = if is_civ(o) { 0.5 } else { 1.0 };
+            margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, extra)
+        };
 
         // Follow mode: who blocks the line? Held-up evidence = last decision's speed was set
         // by that car while my own pace here is clearly higher.
@@ -2276,7 +2318,14 @@ fn decide_racer(
             let blocker = rel
                 .iter()
                 .filter(|x| x.ds > 0.0 && x.gap < pass_horizon(v, x.o.v_s))
-                .filter(|x| overlaps(band, &x.o, margin_for(&x.o), x.gap / (v - x.o.v_s).max(1.0)))
+                .filter(|x| {
+                    overlaps(
+                        band,
+                        &x.o,
+                        ahead_margin(&x.o),
+                        x.gap / (v - x.o.v_s).max(1.0),
+                    )
+                })
                 .min_by(|a, b| a.ds.total_cmp(&b.ds));
             let held = blocker.is_some_and(|x| {
                 r.debug.limit == SpeedLimit::Obstacle(who_id(x.o.who))
@@ -2337,6 +2386,7 @@ fn decide_racer(
                     if let Ok((n_pass, split_with)) = plan {
                         r.tactic = Tactic::Overtake;
                         r.tactic_ticks = 0;
+                        r.pass_blocked_s = 0.0;
                         r.alongside_s = 0.0;
                         r.pass_target = Some(x.o.who);
                         r.split_with = split_with;
@@ -2903,7 +2953,7 @@ fn decide_racer(
             let margin = if splitting(o) {
                 SPLIT_MARGIN_M
             } else {
-                margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, if civ { 0.5 } else { 1.0 })
+                ahead_margin(o)
             };
             if !overlaps(band, o, margin, x.gap / closing) {
                 continue;
@@ -3412,7 +3462,11 @@ fn plan_pass(
     // me. (A car right behind me in line is not alongside; one alongside on the other side
     // does not stop me moving away from it: grid highway, a racer boxed between a civilian
     // at the light and a rival on its left sat out a whole green with the right lane empty.)
-    if o.passing {
+    // (Three wide fits on a road of three lanes or more: there the lane checks below decide.
+    // Loop 9 at 23:00 with traffic: the racers ahead were always mid-pass round civilians, so
+    // the cars behind them were refused every pass for the whole race.)
+    let here = ctx.corridor.sample((r.s / CORRIDOR_STEP_M) as isize);
+    if o.passing && here.left_pass_m + here.right_m < THREE_WIDE_MIN_ROAD_M {
         return Err(PassReject::TargetBusy);
     }
     let alongside_towards = |n_pass: f32| {

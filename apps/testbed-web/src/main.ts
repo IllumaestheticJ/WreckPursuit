@@ -1394,6 +1394,9 @@ async function main(): Promise<void> {
   let simMs = 0;
   let renderMs = 0;
   let frameNo = 0;
+  /** Reset ghost blink: shown this frame, and when it last flipped (performance.now ms). */
+  let ghostShown = true;
+  let ghostFlipAt = -Infinity;
   let fxCompiled = false;
   const rtf = new RealTimeMeter();
   const sirenPos = new THREE.Vector3();
@@ -1581,10 +1584,21 @@ async function main(): Promise<void> {
     scene.signals.update(sim.signalStates(), wi[W.night], rig.camera.position);
     prof.lap("traffic");
 
-    // A car reset in place is a ghost for ~1 s (passes through traffic): it blinks meanwhile.
+    // A car reset in place is a ghost for ~1 s (passes through traffic): it blinks meanwhile,
+    // flipping at most every 125 ms and starting hidden. Flipping on a wall-clock phase
+    // (floor(now / 125) % 2) could miss the blink altogether on a slow machine, where the whole
+    // ghost window is a few ~300 ms frames that all landed on "visible" phases.
     {
       const pv = app.views.get(app.player);
-      if (pv) pv.root.visible = sim.ghostTicks(app.player) === 0 || Math.floor(now / 125) % 2 === 0;
+      if (pv) {
+        if (sim.ghostTicks(app.player) === 0) {
+          ghostShown = true;
+        } else if (now - ghostFlipAt >= 125) {
+          ghostShown = !ghostShown;
+          ghostFlipAt = now;
+        }
+        pv.root.visible = ghostShown;
+      }
     }
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {

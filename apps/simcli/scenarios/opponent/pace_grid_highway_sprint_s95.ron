@@ -11,7 +11,11 @@
 // skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measured the same day on the
 // round-12 tip (today's grids, residential grid city, police give-way; reasons in
 // docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
-// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md. Re-measure and widen only with a reason.
+// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md.
+// Re-locked 2026-10-22 after the traffic-passing fixes (one clearance for blockers and braking,
+// three-wide on wide roads, overtakes re-plan when held by another car): on this seed ai_vic
+// lost 8 s behind traffic (36.7 -> 44.9 s); over seeds 1-8 the s95 field mean is unchanged
+// (42.9 -> 42.7 s, per seed -5 .. +3 s). Re-measure and widen only with a reason.
 // Re-locked 2026-10-21 on lead/main-sync: main's grid moved the race to the divided viaduct
 // (start y = -728, 1113 m); the old grid stood on round 12's street and nobody finished.
 (
@@ -80,10 +84,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.29),
-        metric(name: "race_time_s", entity: "ai_vic", min: 31.0, max: 42.0),
-        metric(name: "race_time_s", entity: "ai_juno", min: 34.0, max: 46.1),
-        metric(name: "race_time_s", entity: "ai_tito", min: 34.6, max: 47.0),
-        metric(name: "race_time_s", entity: "player", min: 39.1, max: 53.0),
+        metric(name: "best_ratio", min: 0.97, max: 1.43),
+        metric(name: "race_time_s", entity: "ai_vic", min: 38.2, max: 51.6),
+        metric(name: "race_time_s", entity: "ai_juno", min: 34.0, max: 45.9),
+        metric(name: "race_time_s", entity: "ai_tito", min: 32.4, max: 43.8),
+        metric(name: "race_time_s", entity: "player", min: 34.9, max: 47.3),
     ],
 )

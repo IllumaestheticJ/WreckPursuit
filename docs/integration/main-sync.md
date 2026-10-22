@@ -61,6 +61,23 @@ Reds, none from this merge (all reproduce on round 12 `9b686f76`):
 - Testbed phone render budget back over (round 12 after `cd6cd320`) — testbed / lead.
 - ui-kit stat-bar test — ui (data/stats vs the test's hard-coded 248 km/h).
 
+## Round 3 follow-ups (lead's asks)
+**Phone render budget** (`02aed966`, on round 12 `2bac2382`): perf_check phone 330–332 → 290–295
+draw calls (< 300), 404–405 k → 373–375 k triangles (≤ 400 k); desktop within its budgets.
+Cause: draw records name each traffic car's own model, so each model in view had its own
+instance sets at six draws (fleet 22 → 79). Head, tail and indicator lamps are now one
+instanced mesh per set (`lampsMaterial`: a per-vertex lamp channel × per-instance colour,
+the same colours as before; fleet 79 → 41). The touch profile's mid-LOD distance is 100 m
+(was 120 m). Parked cars all stay drawn (14d51c62's rule). e2e `run.mjs`: 219 PASS; the
+indicator / signal / art-style checks pass. `reset.mjs`'s ghost-blink check is timing-flaky
+under software GL: the blink is keyed to wall-clock 125 ms phases and sampled once per frame
+(~300 ms). It failed in the suite, passed standalone; testbed source unchanged by round 3.
+
+**ui-kit `data.test.ts`** (`d210bdf2`): a threshold call, not data. The modded kestrel_ts top
+speed was checked against a fixed 248 km/h, the stock figure before round 12 re-measured the
+table (`38efca77`: 248 → 241). It is now checked against stock, as `wp_wasm`'s rig test does;
+110 / 110 pass.
+
 # main → round 12 sync (lead helper)
 
 - **Branch:** `lead/main-sync`, from `origin/lead/round12` @ `95021b5`.

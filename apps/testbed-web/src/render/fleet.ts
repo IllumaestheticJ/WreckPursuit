@@ -476,13 +476,17 @@ export class InstancedCar {
   /** Light-bar lens channels L, R, W (clear), A (amber); null without mesh lenses. */
   readonly lens: (THREE.InstancedMesh | null)[] | null;
   readonly detail: THREE.InstancedMesh;
-  readonly tail: THREE.InstancedMesh;
-  readonly head: THREE.InstancedMesh;
+  /** Head, tail and (moving traffic, `indicators`) left / right indicator lamps in one draw
+   * ([`lampsMaterial`]): the mesh's lamp and indicator lens parts (`fullGeoms`) or the box
+   * markers. */
+  readonly lamps: THREE.InstancedMesh;
+  private readonly lampTail: Float32Array;
+  private readonly lampHead: Float32Array;
+  private readonly lampInd: Float32Array;
+  private readonly lampAttrs: THREE.InstancedBufferAttribute[];
   readonly bar: THREE.InstancedMesh | null;
-  /** Left / right indicator lamps (two draw calls; only for moving traffic, `indicators`):
-   * the mesh's indicator lenses (`fullGeoms`) or the box markers. */
-  readonly indL: THREE.InstancedMesh | null;
-  readonly indR: THREE.InstancedMesh | null;
+  /** The car set has indicator lamps. */
+  readonly indicators: boolean;
   /** Every instanced mesh of the car (built once: `put` runs per instance per frame). */
   readonly meshes: readonly THREE.InstancedMesh[];
   count = 0;
@@ -498,8 +502,20 @@ export class InstancedCar {
     };
     this.paint = mk(g.paint, mats.paint);
     this.detail = mk(g.detail, mats.detail);
-    this.tail = mk(g.tail, mats.lamp);
-    this.head = mk(g.head, mats.lamp);
+    this.indicators = indicators;
+    const lampGeo = mergeLamps([g.tail, g.head, indicators ? g.indL : null, indicators ? g.indR : null]);
+    this.lampTail = new Float32Array(capacity * 3);
+    this.lampHead = new Float32Array(capacity * 3);
+    this.lampInd = new Float32Array(capacity * 2);
+    this.lampAttrs = [
+      new THREE.InstancedBufferAttribute(this.lampTail, 3),
+      new THREE.InstancedBufferAttribute(this.lampHead, 3),
+      new THREE.InstancedBufferAttribute(this.lampInd, 2),
+    ];
+    lampGeo.setAttribute("lampTail", this.lampAttrs[0]);
+    lampGeo.setAttribute("lampHead", this.lampAttrs[1]);
+    lampGeo.setAttribute("lampInd", this.lampAttrs[2]);
+    this.lamps = mk(lampGeo, mats.lamps);
     if (barAt) {
       const bg = new THREE.BoxGeometry(barAt[0], 0.25, 0.12);
       bg.translate(0, -0.1, barAt[1] + 0.08);
@@ -507,16 +523,13 @@ export class InstancedCar {
     } else {
       this.bar = null;
     }
-    // Vertex colour (hue) × instance colour (brightness), as the light-bar lenses.
-    this.indL = indicators ? mk(g.indL, mats.lens) : null;
-    this.indR = indicators ? mk(g.indR, mats.lens) : null;
     this.liv = g.liv && livMat ? mk(g.liv, livMat) : null;
     const lensMesh = (geo: THREE.BufferGeometry | null | undefined) => (geo ? mk(geo, mats.lens) : null);
     this.lens = g.lensL || g.lensR ? [lensMesh(g.lensL), lensMesh(g.lensR), lensMesh(g.lensW), lensMesh(g.lensA)] : null;
     const extra: THREE.InstancedMesh[] = [];
     if (this.liv) extra.push(this.liv);
     for (const m of this.lens ?? []) if (m) extra.push(m);
-    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : []), ...(this.indL && this.indR ? [this.indL, this.indR] : []), ...extra];
+    this.meshes = [this.paint, this.detail, this.lamps, ...(this.bar ? [this.bar] : []), ...extra];
   }
 
   /** Light-bar lens brightness of instance `i` (channels L, R, W, A in 0..1; null = all off).
@@ -564,28 +577,28 @@ export class InstancedCar {
     // Colours come from a per-style memo of the instance-buffer floats (`rgbMemo`): the same
     // values `setColorAt(i, color)` would write, copied without going through Color objects.
     syncRgbMemo();
-    if (this.indL && this.indR) {
-      this.indL.setColorAt(i, ind & IND.left && lit ? tmpIndOn : tmpIndOff);
-      this.indR.setColorAt(i, ind & IND.right && lit ? tmpIndOn : tmpIndOff);
+    if (this.indicators) {
+      this.lampInd[i * 2] = ind & IND.left && lit ? tmpIndOn.r : tmpIndOff.r;
+      this.lampInd[i * 2 + 1] = ind & IND.right && lit ? tmpIndOn.r : tmpIndOff.r;
     }
     if (!lit) {
       const low = artStyle.lowpoly;
       putRgb(this.paint, i, paintRgb(low ? styledPaint(paint) : paint));
-      putRgb(this.tail, i, paintRgb(UNLIT_TAIL));
-      putRgb(this.head, i, paintRgb(UNLIT_HEAD));
+      this.lampTail.set(paintRgb(UNLIT_TAIL), i * 3);
+      this.lampHead.set(paintRgb(UNLIT_HEAD), i * 3);
       if (this.bar) putRgb(this.bar, i, low ? lampRgb(BAR.off) : paintRgb(BAR.off));
       return;
     }
     if (artStyle.lowpoly) {
       putRgb(this.paint, i, paintRgb(styledPaint(paint)));
-      putRgb(this.tail, i, lampRgb(tail));
-      putRgb(this.head, i, lampRgb(HEAD));
+      this.lampTail.set(lampRgb(tail), i * 3);
+      this.lampHead.set(lampRgb(HEAD), i * 3);
       if (this.bar) putRgb(this.bar, i, lampRgb(bar ?? BAR.off));
       return;
     }
     putRgb(this.paint, i, paintRgb(paint));
-    putRgb(this.tail, i, paintRgb(tail));
-    putRgb(this.head, i, paintRgb(HEAD));
+    this.lampTail.set(paintRgb(tail), i * 3);
+    this.lampHead.set(paintRgb(HEAD), i * 3);
     if (this.bar) putRgb(this.bar, i, paintRgb(bar ?? BAR.off));
   }
 
@@ -595,13 +608,14 @@ export class InstancedCar {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
+    for (const a of this.lampAttrs) a.needsUpdate = true;
   }
 
   /** Whether instance `i`'s left / right indicator lamps are lit (read back from the instance
    * colours; automation). */
   indicatorsLit(i: number): { left: boolean; right: boolean } {
-    const lit = (m: THREE.InstancedMesh | null) => (m ? (m.getColorAt(i, tmpRead), tmpRead.r > 0.5) : false);
-    return { left: lit(this.indL), right: lit(this.indR) };
+    if (!this.indicators) return { left: false, right: false };
+    return { left: this.lampInd[i * 2] > 0.5, right: this.lampInd[i * 2 + 1] > 0.5 };
   }
 
   dispose(): void {
@@ -619,6 +633,61 @@ export interface FleetMaterials {
   lamp: THREE.Material;
   /** Light-bar lenses (vertex colour × instance brightness). */
   lens: THREE.Material;
+  /** Head, tail and indicator lamps in one draw ([`lampsMaterial`]). */
+  lamps: THREE.Material;
+}
+
+/**
+ * One material for a car's head, tail and indicator lamps (render budget, lead/main-sync): each
+ * lamp vertex carries its channel (`lampCh`: 0 tail, 1 head, 2 left / 3 right indicator) and
+ * the instance carries one colour per channel (`lampTail`, `lampHead` rgb; `lampInd` the two
+ * indicator brightnesses), so the four lamp groups that used to be four instanced draws per car
+ * set are one. Output = vertex colour × the channel's instance value: white × colour for head
+ * and tail lamps (as the old `lamp` material: instance colour only), the lens hue × brightness
+ * for indicators (as the old `lens` material).
+ */
+export function lampsMaterial(): THREE.MeshBasicMaterial {
+  const m = new THREE.MeshBasicMaterial({ vertexColors: true });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nattribute float lampCh;\nattribute vec3 lampTail;\nattribute vec3 lampHead;\nattribute vec2 lampInd;",
+      )
+      .replace(
+        "#include <color_vertex>",
+        "#include <color_vertex>\n" +
+          "vec3 lampMul = lampCh < 0.5 ? lampTail : (lampCh < 1.5 ? lampHead : vec3(lampCh < 2.5 ? lampInd.x : lampInd.y));\n" +
+          "vColor.rgb *= lampMul;",
+      );
+  };
+  m.customProgramCacheKey = () => "wp-fleet-lamps";
+  return m;
+}
+
+/** Lamp groups' geometries as one (`lampCh` per vertex; head / tail vertex colours white). */
+function mergeLamps(parts: (THREE.BufferGeometry | null)[]): THREE.BufferGeometry {
+  let n = 0;
+  for (const g of parts) if (g) n += g.getAttribute("position").count;
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  const ch = new Float32Array(n);
+  let o = 0;
+  parts.forEach((g, c) => {
+    if (!g) return;
+    const p = g.getAttribute("position").array as Float32Array;
+    const k = p.length / 3;
+    pos.set(p, o * 3);
+    if (c >= 2) col.set(g.getAttribute("color").array as Float32Array, o * 3);
+    else col.fill(1, o * 3, (o + k) * 3);
+    ch.fill(c, o, o + k);
+    o += k;
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  g.setAttribute("lampCh", new THREE.BufferAttribute(ch, 1));
+  return g;
 }
 
 /** Lens colours of a car with its lights off (below 1, so they never reach the bloom pass). */
@@ -756,6 +825,7 @@ export class Fleet {
     detail: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }),
     lamp: new THREE.MeshBasicMaterial({ color: 0xffffff }),
     lens: new THREE.MeshBasicMaterial({ vertexColors: true }),
+    lamps: lampsMaterial(),
   };
   /** Art-style version the materials and model geometry were built for. */
   private styleVersion = -1;
