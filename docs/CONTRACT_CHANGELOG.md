@@ -5,6 +5,17 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
+## v0.3.1 — applied 2026-10-22 (branch `lead/round12`)
+
+- Additive (**lead-approved**, request from opponent-pace in `docs/integration/opponent-pace.md`
+  "Contract change requests"): `DnfReason::Stuck`, appended last (existing ordering and serde
+  names unchanged). Meaning: the racer made no course progress for the judge's stuck limit
+  while every other racer still running was stuck too, so the judge ended the race. It is a
+  safety net so a box-in (row 154 follow-up (a)) can never leave a race unjudged; it is not a
+  racer giving up (owner rule: racers never give up). **Who updates:** wp_race adds the judge
+  rule (`stuck_limit_s`, default 180 s); any exhaustive `match` on `DnfReason` adds an arm
+  (UI labels: "Stuck"). Patch bump 0.3.0 → 0.3.1 (wp_net clients and servers must match).
+
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
 - Amendment (**lead-approved**, owner requests 2026-10-21, playtest rows 137 / 142; branch

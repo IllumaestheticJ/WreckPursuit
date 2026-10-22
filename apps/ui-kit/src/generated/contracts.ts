@@ -1152,7 +1152,8 @@ export type DnfReason =
   | "CargoDestroyed"
   | "Outrun"
   | "Disconnected"
-  | "Fled";
+  | "Fled"
+  | "Stuck";
 /**
  * Why a racer was disqualified (ranked below every finisher and every DNF).
  *
