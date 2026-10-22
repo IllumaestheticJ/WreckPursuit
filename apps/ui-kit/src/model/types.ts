@@ -222,7 +222,8 @@ export interface GarageCar {
   insurance: InsuranceView | null;
   /** Repair line items not yet paid. */
   outstanding: RepairEstimate;
-  sustainedWhileWanted: boolean;
+  /** Some outstanding damage dates from a police capture: insurance will not pay for it. */
+  sustainedBeforeCapture: boolean;
   /** Current value (damage + mods), from `Economy::current_value`. */
   value: number;
   /**

@@ -129,7 +129,9 @@ career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
   charge normal rates but report cars at wanted level 2+ (`EventReason::ShopReported`).
 - Towing (flat by class) is a penalty charged when the sim reports the car was towed.
 - Insurance (`basic` 50 % / `full` 80 % after deductible, premium per day as a fraction of value)
-  does not pay for damage sustained while wanted and is voided by a capture while wanted. An
+  pays regardless of pursuit status (damage taken while wanted is covered if you get away). Only
+  getting caught matters: a capture voids the policy, and damage outstanding at the capture is
+  never paid, even by a policy bought afterwards. An
   unaffordable premium lapses the policy (it never creates debt).
 
 ### Getting caught

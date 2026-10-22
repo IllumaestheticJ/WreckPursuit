@@ -188,7 +188,8 @@ health_frac = 0.32
 mods_frac = 0.3
 
 # Insurance: premium per day as a fraction of car value; covers `coverage` of the bill after
-# the deductible. Voided when captured while wanted; damage sustained while wanted is not paid.
+# the deductible. Pursuit status does not matter: only a capture voids the policy, and damage
+# outstanding at a capture is never paid.
 [insurance.basic]
 premium_per_day_frac = 0.0025
 coverage = 0.5
