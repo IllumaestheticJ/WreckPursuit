@@ -36,11 +36,15 @@ wall-clock, no randomness.
 | Tier | Rep | One-off reward | Max single bet |
 |---|---|---|---|
 | Unknown | 0 | 0 | — |
-| Street | 300 | 1 500 | 1 000 |
-| Known | 1 000 | 4 000 | 2 500 |
-| Respected | 2 500 | 8 000 | 6 000 |
-| Feared | 5 000 | 15 000 | 15 000 |
-| Legend | 10 000 | 30 000 | 50 000 |
+| Street | 500 | 2 000 | 1 000 |
+| Known | 2 000 | 5 000 | 3 000 |
+| Respected | 5 000 | 12 000 | 8 000 |
+| Feared | 10 000 | 25 000 | 20 000 |
+| Legend | 20 000 | 50 000 | 60 000 |
+
+Pacing: the scripted mid-skill racer (3 races a night) makes ~250 rep a night: Street after
+~2 nights, Known ~8, Respected ~20, Feared ~40, Legend ~80 (`tests/progression.rs::tier_pacing`).
+Boss / touge wins (`award_rep`) shorten that.
 
 A stake is also capped at 50 % of cash on hand, and betting is refused while in debt.
 
