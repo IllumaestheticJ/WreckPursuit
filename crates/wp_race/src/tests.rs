@@ -391,8 +391,8 @@ fn dnf_and_dq_ordering() {
 
 #[test]
 fn time_limit_and_finish_window() {
-    // Checkpoint: 420 s limit; a racer that stops never finishes.
-    let racers = [ScriptedRacer::new(1, 5.0, 40.0).with(2.0, ScriptedIncident::Stop)];
+    // Checkpoint: 420 s limit; a racer crawling at 1.5 m/s never finishes the 1 km.
+    let racers = [ScriptedRacer::new(1, 5.0, 1.5)];
     let out = run(RaceKind::Checkpoint, sprint_course(), &racers, 4);
     assert_eq!(
         out.results[0].status,
@@ -1467,4 +1467,45 @@ fn economy_race_type_mapping_is_locked() {
         }),
         E::Sprint
     );
+}
+
+#[test]
+fn a_race_where_everyone_left_is_stuck_ends_after_the_stuck_limit() {
+    // The only racer stops 2 s in: no progress, so 180 s later the judge ends the race
+    // (the checkpoint time limit is 420 s).
+    let racers = [ScriptedRacer::new(1, 5.0, 40.0).with(2.0, ScriptedIncident::Stop)];
+    let out = run(RaceKind::Checkpoint, sprint_course(), &racers, 4);
+    let r = &out.results[0];
+    assert_eq!(r.status, RacerStatus::Dnf(DnfReason::Stuck));
+    let ended_s = r.status_tick as f32 / 240.0;
+    assert!((180.0..190.0).contains(&ended_s), "ended at {ended_s} s");
+    assert!(out.signals.iter().any(|s| matches!(
+        s,
+        RaceSignal::RacerDnf {
+            reason: DnfReason::Stuck,
+            ..
+        }
+    )));
+    // One racer still crawling forward keeps the race going: nobody is called stuck.
+    let racers = [
+        ScriptedRacer::new(1, 5.0, 40.0).with(2.0, ScriptedIncident::Stop),
+        ScriptedRacer::new(2, 5.0, 1.5),
+    ];
+    let out = run(RaceKind::Checkpoint, sprint_course(), &racers, 4);
+    for r in &out.results {
+        assert_eq!(r.status, RacerStatus::Dnf(DnfReason::TimeLimit), "{r:?}");
+    }
+}
+
+/// The stuck rule follows lap wraps: a slow circuit (600 s at 4 m/s) is never `Stuck`.
+#[test]
+fn a_slow_circuit_racer_is_not_stuck() {
+    let racers = [
+        ScriptedRacer::new(1, 5.0, 4.0),
+        ScriptedRacer::new(2, 5.0, 4.2),
+    ];
+    let out = run(RaceKind::Circuit { laps: 3 }, square_course(), &racers, 4);
+    for r in &out.results {
+        assert_eq!(r.status, RacerStatus::Finished, "{r:?}");
+    }
 }

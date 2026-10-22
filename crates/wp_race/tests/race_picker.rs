@@ -669,6 +669,8 @@ fn loop9_circuit() {
                     | RacerStatus::Dnf(wp_race::DnfReason::Captured)
                     | RacerStatus::Dnf(wp_race::DnfReason::Fled)
                     | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+                    // Or the judge's safety net: no progress for 3 min (DnfReason::Stuck).
+                    | RacerStatus::Dnf(wp_race::DnfReason::Stuck)
             ),
             "{id}: {x:?} ended by neither the flag, the police nor a racing incident"
         );
@@ -776,6 +778,8 @@ fn lantern_checkpoint_draws_the_police() {
                     | RacerStatus::Dnf(wp_race::DnfReason::Captured)
                     | RacerStatus::Dnf(wp_race::DnfReason::Fled)
                     | RacerStatus::Dnf(wp_race::DnfReason::FinishWindow)
+                    // Or the judge's safety net: no progress for 3 min (DnfReason::Stuck).
+                    | RacerStatus::Dnf(wp_race::DnfReason::Stuck)
             ),
             "{id}: {x:?} ended by neither the flag, the police nor the finish window"
         );
