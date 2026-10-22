@@ -394,6 +394,16 @@ export const sim = {
   raceStandings: (): Float32Array => wasm.race_standings(),
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
+  /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
+  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  /** Street-race betting on the current account: max stake and why it is locked (null = open). */
+  raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
+  /** The city's regulars with their records, strongest first. */
+  rosterList: (): RegularCard[] => JSON.parse(wasm.roster_json()),
+  /** The regulars' records as text (local save). */
+  rosterSave: (): string => wasm.roster_state(),
+  /** Restore the regulars' records from `rosterSave()` output. Throws if unreadable. */
+  rosterLoad: (text: string): void => wasm.roster_state_load(text),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
@@ -434,7 +444,7 @@ import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
-import type { RaceCard, RaceReport } from "../ui/race";
+import type { BetCard, RaceCard, RaceReport, RegularCard } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */

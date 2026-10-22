@@ -353,10 +353,45 @@ async function main(): Promise<void> {
   overlay.appendChild(raceEl);
   const raceMarker = new RaceMarker(scene.world);
   const raceView = new RaceView(raceEl, {
-    start: (id) => startRace(id),
+    start: (id, bet) => {
+      startRace(id);
+      // The countdown is running: bets on yourself are taken until green.
+      if (bet) {
+        try {
+          sim.raceBet(bet.label, bet.stake);
+        } catch (e) {
+          console.warn("bet refused", e);
+        }
+      }
+    },
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+    betStatus: () => {
+      try {
+        return sim.raceBetStatus();
+      } catch {
+        return { max: 0, lock: "no account in this session" };
+      }
+    },
   });
+  // The city's regulars remember their results between visits (wp_race::roster records).
+  const ROSTER_KEY = "wp.roster.v1";
+  try {
+    const saved = localStorage.getItem(ROSTER_KEY);
+    if (saved) sim.rosterLoad(saved);
+  } catch (e) {
+    console.warn("roster save unreadable; starting fresh records", e);
+  }
+  /** This race's final results were saved (reset with each race session). */
+  let rosterSaved = false;
+  const persistRoster = () => {
+    rosterSaved = true;
+    try {
+      localStorage.setItem(ROSTER_KEY, sim.rosterSave());
+    } catch (e) {
+      console.warn("roster not saved", e);
+    }
+  };
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
   let statTable: CarStatsTable | null = null;
   try {
@@ -445,6 +480,7 @@ async function main(): Promise<void> {
       course = parseCourse(sim.raceCourse());
     }
     raceMarker.setCourse(course);
+    rosterSaved = false;
     raceView.reset(id, names, course);
   };
 
@@ -488,6 +524,7 @@ async function main(): Promise<void> {
     }
     const report = withReport || raceView.report ? sim.raceResult() : null;
     raceView.update({ info, standings, report, player: pose, others }, performance.now());
+    if (report?.final_results && !rosterSaved) persistRoster();
     const done = me < 0 || standings[me + RS.status] > 0 || info[RI.phase] === 2;
     const next = done ? -1 : standings[me + RS.nextGate];
     const gates = info[RI.gates];
