@@ -119,3 +119,35 @@ pub const CROSSTOWN: &[V2] = &[[-2300.0, 3950.0], [-800.0, 3950.0], [700.0, 3950
 
 /// Distance every non-freeway junction and building keeps from a freeway corridor, m.
 pub const FREEWAY_CLEAR_M: f32 = 60.0;
+
+// ---- Points of interest every district must create (races and AI racers use the names) ---
+//
+// Race grids (`PoiKind::RaceStartGrid`, pole position facing the race direction):
+
+/// Bottom of Crowfoot Pass Road, facing uphill ([`super::mountains`]).
+pub const POI_CROWFOOT_ASCENT: &str = "Crowfoot Ascent";
+/// Crowfoot saddle, facing downhill towards Ashpeak City ([`super::mountains`]).
+pub const POI_CROWFOOT_SUMMIT: &str = "Crowfoot Summit";
+/// North foot of Crowfoot Pass Road, facing uphill southwards ([`super::mountains`]).
+pub const POI_CROWFOOT_NORTH: &str = "Crowfoot North Foot";
+/// Halcyon Observatory lot at the Ashpeak summit (also a safehouse candidate)
+/// ([`super::mountains`]).
+pub const POI_OBSERVATORY: &str = "Halcyon Observatory";
+/// Start of the farm dirt run on a dirt / gravel road ([`super::farms`]).
+pub const POI_FARM_RUN: &str = "Harlan Farm Run";
+/// Harlan Crossing village centre on Harlan Road ([`super::farms`]).
+pub const POI_HARLAN_CROSSING: &str = "Harlan Crossing";
+/// Downtown Ashpeak City start (core grid avenue) ([`super::metro`]).
+pub const POI_DOWNTOWN: &str = "Ashpeak Downtown";
+/// At the foot of the Meridian Spire ([`super::metro`]).
+pub const POI_SPIRE: &str = "Meridian Spire";
+/// Ashpeak City waterfront boulevard start ([`super::metro`]).
+pub const POI_WATERFRONT: &str = "Ashpeak Waterfront";
+/// Route 7 northbound, just north of the Uptown Connector ([`super::freeways`]).
+pub const POI_ROUTE7_SOUTH: &str = "Route 7 South";
+/// Route 7 near its north end ([`super::freeways`]).
+pub const POI_ROUTE7_NORTH: &str = "Route 7 North";
+/// Route 12 northbound at the foot of the Grizzly Grade ([`super::freeways`]).
+pub const POI_GRIZZLY_GRADE: &str = "Grizzly Grade";
+/// Crosstown Expressway eastbound, west end ([`super::freeways`]).
+pub const POI_CROSSTOWN_WEST: &str = "Crosstown West";
