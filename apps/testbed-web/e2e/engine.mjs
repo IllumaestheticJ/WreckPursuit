@@ -63,7 +63,7 @@ const stand = () => page.locator('[data-testid="ws-engine-stand"]');
 const row = (id) => stand().locator(`[data-testid="ws-stand-slot"][data-slot="${id}"]`);
 const STRIP = ["intake_manifold", "throttle_body", "exhaust_manifold", "valve_cover", "timing", "camshafts", "valvetrain", "cylinder_head", "head_gasket", "pistons"];
 
-await page.goto(URL);
+await page.goto(shots ? `${URL}?gfx=high` : URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
 
 const uid = await page.evaluate(() => {
@@ -94,9 +94,20 @@ const listed = await page.locator('[data-testid="ws-partlist"] button', { hasTex
 check(listed === 0, "the part list no longer shows the engine's internals");
 await button("Part list").click();
 
-// Strip it on the stand, top down.
+// The engine stands beside the car in 3D; clicking a part on it opens the stand list there.
 await button("Engine stand").click();
-check(await stand().isVisible(), "the engine stand opens");
+await settle(1500);
+await shot("engine_stand_3d.png");
+const pt = await page.evaluate(() => window.__wp.workshop.pointOfStandPart("valve_cover"));
+check(!!pt, "the engine is drawn on the stand");
+if (pt) {
+  await page.mouse.click(pt.x, pt.y);
+  await settle(300);
+}
+check(await stand().isVisible(), "clicking the engine opens the stand parts");
+check((await stand().locator('[aria-selected="true"]').getAttribute("data-slot")) === "valve_cover", "the clicked part is picked in the list");
+
+// Strip it on the stand, top down.
 check(await row("pistons").locator("button", { hasText: "Remove" }).isDisabled(), "the pistons cannot come out with the head on");
 await shot("engine_stand_full.png");
 for (const id of STRIP) await row(id).locator("button", { hasText: "Remove" }).click();
@@ -104,7 +115,12 @@ s = await screen();
 check(s.stands[0].missing.includes("Pistons and rings") && s.stands[0].missing.length === STRIP.length, `stripped to the crank: ${s.stands[0].missing.length} parts out`);
 const next = s.inventory.filter((p) => p.stand_fits.length > 0).map((p) => p.part.kind);
 check(next.length === 1 && next[0] === "pistons", `only the pistons can go back first (${next.join(", ")})`);
+await settle(600);
 await shot("engine_stand_stripped.png");
+const pistons = await page.evaluate(() => window.__wp.workshop.pointOfStandPart("pistons"));
+check(pistons === null, "the pistons are gone from the 3D engine too");
+const crank = await page.evaluate(() => window.__wp.workshop.pointOfStandPart("crankshaft"));
+check(!!crank, "the crank still shows in the block");
 
 // The head will not go on before the gasket.
 const head = await row("cylinder_head").locator("button", { hasText: "Fit" }).count();
@@ -114,6 +130,8 @@ check(head === 0, "the cylinder head has no Fit button before the gasket is in")
 for (const id of [...STRIP].reverse()) await row(id).locator("button", { hasText: "Fit" }).first().click();
 s = await screen();
 check(s.stands[0].missing.length === 0, "the engine is complete again");
+await settle(600);
+await shot("engine_stand_rebuilt.png");
 await stand().locator("button", { hasText: "Close" }).click();
 
 // Back in the car.

@@ -230,6 +230,18 @@
   gap: 0.5em;
   align-items: center;
 }
+.wp-ws-standpanel {
+  grid-area: mid;
+  justify-self: start;
+  align-self: start;
+  width: min(27em, 100%);
+  max-height: 100%;
+  overflow: auto;
+}
+.wp-ws-standrow[aria-selected="true"] {
+  background: rgba(61, 255, 143, 0.08);
+  box-shadow: inset 2px 0 0 var(--scan);
+}
 .wp-ws-stand {
   display: grid;
   gap: 0.3em;
@@ -250,6 +262,9 @@
     overflow: auto;
   }
   .wp-ws-list {
+    grid-area: right;
+  }
+  .wp-ws-standpanel {
     grid-area: right;
   }
   .wp-ws-modal {

@@ -18,7 +18,7 @@ is a model for layout and flow only; all art, assets and text are our own. Plan 
 | 2 | 3D workshop scene in the testbed | PR #43 |
 | 3 | Visible cosmetics on every car, vinyl library, more cosmetic parts | PR #43 |
 | 4 | Engine internals: parts inside the engine, engine stand, wear and DIY rebuild | PR #43 |
-| 5 | Engine stand in the 3D workshop (strip and build part by part) | planned |
+| 5 | Engine stand in the 3D workshop (strip and build part by part) | PR #43 |
 | 6 | Work on it yourself (DIY repair, paint booth, car info; time cost from `wp_world::progression`, PR #45) | planned |
 | 7 | Tuning and polish | planned |
 
@@ -90,6 +90,22 @@ removed part carries them).
   engine only while it is fitted, worn-engine badge in the top bar. `e2e/engine.mjs` pulls the
   engine, strips it to the crank on the stand and builds it back.
 
+### 3D engine stand (stage 5)
+- `src/workshop/engine.ts`: `buildEngine(StandView, grade)` draws the loose engine from its
+  internals (inline four; V8 for the swap engine): open-deck block with liners, crank, rods,
+  pistons, gasket, head, valves, cams, valve cover, timing cover, intake runners and plenum,
+  throttle body, headers, oil pan and pump, flywheel, clutch. Each internal is a group with
+  `userData.slot`; parts out of the engine are not drawn, so stripping shows what is under them.
+  Aftermarket parts are anodised by tier; parts under 60 % condition look rusted.
+  `buildStand()` is the stand on casters.
+- `mode.ts`: the stand stands in the bay beside the car (`STAND_AT`), the first loose engine
+  bolted to it and rebuilt when its parts change; picking includes the stand engine
+  (`stand:<slot>` → `WorkshopState.standSelected`), `highlightStand`, camera preset `stand`,
+  `pointOfStandPart(slot)` for automation.
+- ui-kit: the stand parts panel sits at the side (the engine stays in view); a part clicked in 3D
+  opens it at that row; hovering a row lights the part up. `e2e/engine.mjs` clicks the valve
+  cover in 3D and checks that stripped parts disappear from the model.
+
 ### Testbed (`apps/testbed-web`, `apps/ui-kit`)
 - `src/workshop/room.ts`: the garage bay, built in code (concrete floor, block walls, roller door,
   two-post lift, bench, tool chest, tyre rack, shelving, lights). The car never moves: raising the
@@ -160,7 +176,8 @@ Workshop operations run on a button press, not per frame.
 - Bolt-ons move rigidly with their region's mean displacement; they do not bend with the dent.
 - Stock parts a look hides (rims under aftermarket rims) stay hidden until the view rebuilds.
 - Paint colour is still the car's stock colour; the paint booth is stage 6.
-- Engine internals have no 3D model yet; the stand is a list (stage 5 draws the engine).
+- Only the first loose engine stands on the stand; others are worked on from the list.
+- The engine in the car's bay is still the car's panel mesh (no internals drawn there).
 - Buying a stock internal uses the family of the engine in the car; stock parts for a loose
   swap engine with no swap in the car must come out of another engine of that family.
 - Internals wear only from crash damage, not from over-revving or mileage yet.

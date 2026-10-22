@@ -21,12 +21,14 @@ import type { CatalogEntry, InventoryView, PartGroup, SlotView, StandView, Works
 import "./garage.css";
 
 /** Camera presets the host knows. */
-export type WorkshopCam = "overview" | "engine" | "under" | "wheels";
+export type WorkshopCam = "overview" | "engine" | "under" | "wheels" | "stand";
 
 /** What the host (3D side) does for the overlay. */
 export interface WorkshopHost {
   /** Highlight these slots on the car (empty = none). */
   highlight(slots: string[]): void;
+  /** Highlight these parts of the engine on the stand (empty = none). */
+  highlightStand(slots: string[]): void;
   camera(preset: WorkshopCam): void;
   lift(up: boolean): void;
   /** The car changed (rebuild the 3D view). */
@@ -58,8 +60,11 @@ function onCar(screen: WorkshopScreen): SlotView[] {
 export class WorkshopState {
   selected: string | null = null;
   hover: string | null = null;
+  /** Part of the engine on the stand picked in 3D, or under the mouse. */
+  standSelected: string | null = null;
+  standHover: string | null = null;
   private listeners = new Set<() => void>();
-  set(patch: Partial<Pick<WorkshopState, "selected" | "hover">>): void {
+  set(patch: Partial<Pick<WorkshopState, "selected" | "hover" | "standSelected" | "standHover">>): void {
     Object.assign(this, patch);
     for (const l of this.listeners) l();
   }
@@ -256,8 +261,15 @@ function PartsList(props: { screen: WorkshopScreen; state: WorkshopState; onClos
 }
 
 /** One loose engine on the stand: its internals in order, strip and build. */
-function Stand(props: { stand: StandView; screen: WorkshopScreen; run: (f: () => WorkshopScreen) => void; api: WorkshopApi }) {
-  const { stand, screen, run, api } = props;
+function Stand(props: {
+  stand: StandView;
+  screen: WorkshopScreen;
+  run: (f: () => WorkshopScreen) => void;
+  api: WorkshopApi;
+  state: WorkshopState;
+  host: WorkshopHost;
+}) {
+  const { stand, screen, run, api, state, host } = props;
   const name = (id: string) => stand.slots.find((s) => s.id === id)?.name ?? id;
   return (
     <div class="wp-ws-stand" data-testid="ws-stand" data-uid={stand.uid}>
@@ -269,7 +281,19 @@ function Stand(props: { stand: StandView; screen: WorkshopScreen; run: (f: () =>
         const fits = screen.inventory.filter((p) => p.stand_fits.some((f) => f.assembly === stand.uid && f.slot === s.id));
         const stock = screen.catalog.find((c) => c.kind === s.kind && c.grade === null);
         return (
-          <div key={s.id} class="wp-ws-standrow" data-testid="ws-stand-slot" data-slot={s.id}>
+          <div
+            key={s.id}
+            class="wp-ws-standrow"
+            data-testid="ws-stand-slot"
+            data-slot={s.id}
+            aria-selected={state.standSelected === s.id}
+            ref={(el) => {
+              if (state.standSelected === s.id) el?.scrollIntoView({ block: "nearest" });
+            }}
+            onMouseEnter={() => host.highlightStand([s.id])}
+            onMouseLeave={() => host.highlightStand(state.standSelected ? [state.standSelected] : [])}
+            onClick={() => state.set({ standSelected: s.id })}
+          >
             <span>
               {s.name}
               {s.fitted && <span class="wp-dim"> · {s.fitted.grade ? s.fitted.name : "stock"}</span>}
@@ -291,8 +315,14 @@ function Stand(props: { stand: StandView; screen: WorkshopScreen; run: (f: () =>
             ) : (
               <span class="wp-row" style={{ gap: "0.4em", flexWrap: "wrap" }}>
                 {fits.map((p) => (
-                  <Button key={p.part.uid} size="sm" variant="primary" onClick={() => run(() => api.build(stand.uid, s.id, p.part.uid))}>
-                    Fit {p.name} ({pct(p.part.condition)})
+                  <Button
+                    key={p.part.uid}
+                    size="sm"
+                    variant="primary"
+                    title={`fit ${p.name}`}
+                    onClick={() => run(() => api.build(stand.uid, s.id, p.part.uid))}
+                  >
+                    Fit {p.part.grade ? p.name : ""} {pct(p.part.condition)}
                   </Button>
                 ))}
                 {fits.length === 0 && screen.inventory.some((p) => p.part.kind === s.kind) && <span class="wp-dim">in the inventory</span>}
@@ -311,9 +341,16 @@ function Stand(props: { stand: StandView; screen: WorkshopScreen; run: (f: () =>
   );
 }
 
-function EngineStand(props: { screen: WorkshopScreen; run: (f: () => WorkshopScreen) => void; api: WorkshopApi; onClose: () => void }) {
+function EngineStand(props: {
+  screen: WorkshopScreen;
+  run: (f: () => WorkshopScreen) => void;
+  api: WorkshopApi;
+  state: WorkshopState;
+  host: WorkshopHost;
+  onClose: () => void;
+}) {
   return (
-    <div class="wp-ws-modal" data-testid="ws-engine-stand">
+    <div class="wp-ws-standpanel" data-testid="ws-engine-stand">
       <Panel
         title="Engine stand"
         tag={
@@ -325,7 +362,9 @@ function EngineStand(props: { screen: WorkshopScreen; run: (f: () => WorkshopScr
         {props.screen.stands.length === 0 ? (
           <p class="wp-dim">No loose engine. Take the engine out of the car (clear the bay first) to strip it here.</p>
         ) : (
-          props.screen.stands.map((st) => <Stand key={st.uid} stand={st} screen={props.screen} run={props.run} api={props.api} />)
+          props.screen.stands.map((st) => (
+            <Stand key={st.uid} stand={st} screen={props.screen} run={props.run} api={props.api} state={props.state} host={props.host} />
+          ))
         )}
         <p class="wp-dim">Parts come out top down: manifolds, valve cover, timing, cams, valves, head, gasket, pistons, rods, crank.</p>
       </Panel>
@@ -415,6 +454,11 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
   back.current = host.back;
   const modal = useRef(false);
   modal.current = !!catalog || stand;
+  // A part picked on the stand engine in 3D opens the stand list at it.
+  useEffect(() => {
+    if (state.standSelected) setStand(true);
+    host.highlightStand(state.standSelected ? [state.standSelected] : []);
+  }, [state.standSelected, screen]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -481,11 +525,20 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
         <Button size="sm" pressed={list} onClick={() => setList(!list)}>
           Part list
         </Button>
-        <Button size="sm" pressed={stand} onClick={() => setStand(!stand)} title="strip and build a loose engine">
-          Engine stand{screen.stands.length > 0 ? ` (${screen.stands.length})` : ""}
+        {cam("stand", "Engine stand")}
+        <Button size="sm" pressed={stand} onClick={() => (setStand(!stand), !stand && host.camera("stand"))} title="strip and build a loose engine">
+          Stand parts{screen.stands.length > 0 ? ` (${screen.stands.length})` : ""}
         </Button>
       </nav>
       {list && <PartsList screen={screen} state={state} onClose={() => setList(false)} />}
+      {state.standHover && (
+        <div class="wp-ws-hover wp-mono">
+          {(() => {
+            const s = screen.stands[0]?.slots.find((x) => x.id === state.standHover);
+            return s ? `${s.name}${s.fitted ? ` · ${pct(s.fitted.condition)}` : ""}` : state.standHover;
+          })()}
+        </div>
+      )}
       {hover && hover.id !== state.selected && (
         <div class="wp-ws-hover wp-mono">
           {hover.name}
@@ -509,7 +562,9 @@ function WorkshopScreenView(props: { api: WorkshopApi; host: WorkshopHost; state
       </aside>
       <InventoryStrip screen={screen} run={run} api={api} host={host} state={state} />
       {catalog && <Catalog screen={screen} kind={catalog.kind} run={run} api={api} onClose={() => setCatalog(null)} />}
-      {stand && !catalog && <EngineStand screen={screen} run={run} api={api} onClose={() => setStand(false)} />}
+      {stand && !catalog && (
+        <EngineStand screen={screen} run={run} api={api} state={state} host={host} onClose={() => (setStand(false), state.set({ standSelected: null }))} />
+      )}
     </div>
   );
 }
