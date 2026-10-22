@@ -257,6 +257,10 @@ pub struct PlayerAccount {
     pub next_car_uid: u32,
     /// Sequence number of the next event.
     pub next_event_seq: u64,
+    /// Career progression bookkeeping (peak tier for one-off rewards, last tier seen); see
+    /// [`crate::progression`]. Saves without it start at `Unknown`.
+    #[serde(default)]
+    pub career: crate::progression::CareerState,
 }
 
 /// The durable account id for a ledger key. The ledger is keyed by `PlayerId` and both carry
@@ -293,6 +297,7 @@ impl PlayerAccount {
             day: 0,
             next_car_uid: 1,
             next_event_seq: 0,
+            career: crate::progression::CareerState::default(),
         }
     }
 

@@ -73,6 +73,18 @@ pub enum EconomyError {
     /// Bad argument (unknown tier, empty selection, ...).
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// The player's reputation tier is too low for this (career progression gate).
+    #[error("{what} is locked: needs {needs:?} ({needed_rep} rep), have {rep} rep")]
+    Locked {
+        /// What was refused (feature or class).
+        what: String,
+        /// Lowest tier that opens it.
+        needs: crate::progression::RepTier,
+        /// Rep that tier starts at.
+        needed_rep: i64,
+        /// The player's current rep.
+        rep: i64,
+    },
     /// Applying mods produced a definition the contract loader rejects.
     #[error("modified definition is invalid: {0}")]
     InvalidResult(String),
