@@ -163,9 +163,15 @@ mod tests {
     use crate::session::Session;
     use wp_contracts::DamageMode;
 
+    /// A city free drive with the player's car only: no street racers (passing cars wake
+    /// parked cars all over the city, which settle by under a centimetre, and these tests
+    /// count the props near one car).
     fn city_session() -> Session {
         let sc = scenario::free_drive("debug_sedan", DamageMode::Arcade, true);
-        Session::new(sc, false).unwrap()
+        crate::session::set_street_racers_enabled(false);
+        let s = Session::new(sc, false);
+        crate::session::set_street_racers_enabled(true);
+        s.unwrap()
     }
 
     #[test]
