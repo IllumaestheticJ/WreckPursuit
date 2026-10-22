@@ -275,6 +275,7 @@ impl PlayerRun {
                     // Handed out by the demo for free: resale is valued from what was paid.
                     purchase_price: Some(0),
                     tune: Default::default(),
+                    parts: None,
                 });
                 uid
             }

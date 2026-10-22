@@ -574,9 +574,17 @@ export const sim = {
   streetDecline: (): void => wasm.street_decline(),
   /** Drivable lanes for the map: [n, x0, y0, …] per lane; fetch once per session. */
   mapLanes: (): Float32Array => wasm.map_lanes(),
+  // ----- garage workshop (crates/wp_wasm/src/career.rs; throws on refusal) ---------------------
+  /** Show career car `uid` in the workshop: a sandbox session of `scenarioJson` (flat lot). */
+  careerWorkshopSession: (uid: number, scenarioJson: string): number[] => Array.from(wasm.career_workshop_session(uid, scenarioJson)),
+  careerWorkshop: (uid: number): WorkshopScreen => JSON.parse(wasm.career_workshop_json(uid)),
+  careerRemovePart: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_remove_part(uid, slot)),
+  careerFitPart: (uid: number, slot: string, part: number): WorkshopScreen => JSON.parse(wasm.career_fit_part(uid, slot, part)),
+  careerBuyPart: (uid: number, kind: string, grade: string | null): WorkshopScreen => JSON.parse(wasm.career_buy_part(uid, kind, grade ?? "")),
+  careerSellPart: (uid: number, part: number): WorkshopScreen => JSON.parse(wasm.career_sell_part(uid, part)),
 };
 
-import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
