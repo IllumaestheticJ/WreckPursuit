@@ -1152,6 +1152,18 @@ impl Session {
         }
     }
 
+    /// Debug / e2e: park street racer `entity` idle at rest stop `name` (a logged move).
+    pub fn street_park_at_rest_stop(&mut self, entity: EntityId, name: &str) -> Result<(), String> {
+        self.live_check()?;
+        let street = self
+            .street
+            .as_mut()
+            .ok_or("no street racers in this session")?;
+        let m = street.park_at_rest_stop(&self.sim, entity, name)?;
+        self.apply_street_move(m);
+        Ok(())
+    }
+
     /// Decline the open challenge.
     pub fn street_decline(&mut self) {
         let tick = self.sim.tick();

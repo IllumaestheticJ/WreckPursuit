@@ -88,7 +88,17 @@ Browser e2e on the gate-2 head (+ 773e4021):
   edge (on the safety floor; the replay format has no spawn / despawn op), and change shift out of
   the player's sight. Loop racers lap at 27 m/s (25 m/s mean, 0 violations) in Port Vesper; in a
   city without Loop 9 they roam. Ids carry the shift (`street_3_halo_loop`); old ids are all-day.
-- **153** rest stops: not placed by D yet (no rest-stop POIs on any branch); nothing hooked.
+- **153** rest stops (D's `World::rest_stops`, round12 6799200b): at night the loop racers end
+  each lap (one to two laps) in one of the three Loop 9 rest stops and idle there 40–90 s. A
+  challenge within 80 m of a rest stop is a rest-stop meet: the race starts on its parking road,
+  both cars side by side (±2 m of the lane centre, at rest, facing its way), and the card offers
+  "Loop 9 lap back here" (B = the rest stop, 3 waypoints round the loop, ~10.2 km;
+  `RACE_MAX_M` is now 12 km). Bets per the street levels. Debug / e2e:
+  `debug_street_park_at_rest_stop`, `rest_stops_json`.
+- **SR-3** dormant vehicles (`Sim::set_dormant`, op `Dormant`): off-shift racers sleep in the
+  lockup. Native sim per 60 Hz frame with racers: grid noon 7.40 → 6.93 ms, Vesper noon 9.41 →
+  8.90; night unchanged (all 13 drive). Shader re-resolve every frame fixed (transparent
+  DoubleSide materials single pass).
 - Found for D: the procedural grid is not strongly connected (≈980 of 4696 segs unreachable
   from a central lane).
 

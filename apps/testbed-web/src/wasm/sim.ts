@@ -530,6 +530,10 @@ export const sim = {
   garageLeave: (): void => wasm.garage_leave(),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
+  /** Debug / e2e: park street racer `entity` idle at Loop 9 rest stop `name` (logged move). */
+  debugStreetParkAtRestStop: (entity: number, name: string): void => wasm.debug_street_park_at_rest_stop(entity, name),
+  /** The Loop 9 rest stops (row 153): name, position, heading. */
+  restStops: (): { name: string; pos: [number, number, number]; heading_rad: number }[] => JSON.parse(wasm.rest_stops_json()),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
   /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
@@ -632,6 +636,10 @@ export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift"> {
   cash: number;
   affordable: boolean;
   start: [number, number];
+  /** The Loop 9 rest stop this meet is at (row 153). */
+  rest_stop: string | null;
+  /** At a rest stop: a Loop 9 lap back to it (B + waypoints). */
+  loop_lap: { finish: [number, number]; via: [number, number][] } | null;
 }
 
 /** Race in progress (`wp_wasm::street::RaceView`). */
