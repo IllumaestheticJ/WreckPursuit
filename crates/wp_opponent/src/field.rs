@@ -643,6 +643,9 @@ const THREE_WIDE_MIN_ROAD_M: f32 = 10.0;
 /// An overtake held below pace by a car other than its target this long ends (re-plan), s.
 const OVERTAKE_BLOCKED_S: f32 = 1.0;
 
+/// A sim vehicle this close to a physical traffic agent is that agent's body, m.
+const TRAFFIC_BODY_MATCH_M: f32 = 1.0;
+
 /// Lane-splitting: room needed between two cars abreast beyond my own width, m (0.4 m a
 /// side).
 const SPLIT_ROOM_M: f32 = 0.8;
@@ -1542,7 +1545,11 @@ impl Field {
     fn perceive_all(&mut self, world: &World, vehicles: &[VehicleObs]) -> Vec<Obstacle> {
         let mut out = Vec::new();
         let range = self.racers.iter().fold(0.0f32, |m, r| m.max(r.ahead_m())) + 20.0;
+        let bodies = traffic_bodies(world);
         for v in vehicles {
+            if self.racer_index(v.entity).is_none() && is_traffic_body(&bodies, v) {
+                continue;
+            }
             let who = match self.racer_index(v.entity) {
                 Some(k) => {
                     let r = &self.racers[k];
@@ -1609,8 +1616,11 @@ impl Field {
     ) -> Vec<Obstacle> {
         let me = &self.racers[k];
         let mut out = Vec::new();
+        let bodies = traffic_bodies(world);
         for v in vehicles {
-            if v.entity == me.entity {
+            if v.entity == me.entity
+                || (self.racer_index(v.entity).is_none() && is_traffic_body(&bodies, v))
+            {
                 continue;
             }
             let pos = geom::xy(v.state.pos);
@@ -3251,6 +3261,26 @@ fn vehicle_obstacle(
         out_of_race: false,
         wants_room: false,
     })
+}
+
+/// Positions of the traffic agents that have a physical body in the sim (near a player).
+fn traffic_bodies(world: &World) -> Vec<V2> {
+    world
+        .agents()
+        .filter(|a| a.lod == wp_world::Lod::Physical)
+        .map(|a| geom::xy(a.pos))
+        .collect()
+}
+
+/// The sim vehicle `v` is the body of a physical traffic agent. That car is already seen as
+/// a civilian (its agent), with the civilian rules: 3 s drift look-ahead, civilian margins and
+/// headway. Seen a second time as a plain vehicle, those did not apply (Loop 9 at 23:00: a
+/// racer hit a traffic car changing lanes next to the player, its limit set by the body).
+fn is_traffic_body(bodies: &[V2], v: &VehicleObs) -> bool {
+    let p = geom::xy(v.state.pos);
+    bodies
+        .iter()
+        .any(|b| geom::dist(*b, p) < TRAFFIC_BODY_MATCH_M)
 }
 
 fn civilians_on(
