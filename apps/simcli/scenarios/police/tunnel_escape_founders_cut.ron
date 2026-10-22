@@ -41,9 +41,13 @@
 // is now PIT-captured at 54.3 s on the way downtown, before the Cut. Over seeds 50-63 the story
 // holds on 8 of 14 seeds (seeds 50, 51, 53, 58-61, 63 escape in the Cut at L3); re-seeded to 51:
 // Escaped 118.4 s, max time unseen 21.9 s; control captured 112.1 s.
+// Row 84 (search extras, 2026-10-22): extra units sent to the last known spot shift this chase's
+// timeline (seed 51 lost him on Mercer at 64.5 s and he escaped at 80.4 s, before the helicopter).
+// Seeds 50-63: the escape story holds on 12 of 14, escape and control both on 7 (53-55, 57, 59,
+// 60, 62); re-seeded to 53.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 51,
+    seed: 53,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

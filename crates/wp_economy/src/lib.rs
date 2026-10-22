@@ -19,6 +19,7 @@
 //! - [`capture`] — fines, bail, impound, seizure, escapes, the daily tick, cop XP.
 //! - [`payouts`] — purses, buy-ins, clean bonus, pink slips, informants.
 //! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
+//! - [`parts`] — the garage workshop: part slots, removal order, inventory, parts catalog.
 //! - [`garage`] — buy/sell, floor car, install/uninstall, preview, valuation, insurance.
 //! - [`estimate`] — performance estimator and class index.
 //! - [`pursuit`] — police pursuit endings → capture / escape settlement; decodes today's
@@ -39,6 +40,7 @@ pub mod estimate;
 pub mod garage;
 pub mod ledger;
 pub mod mods;
+pub mod parts;
 pub mod payouts;
 pub mod profile;
 pub mod pursuit;
@@ -60,6 +62,10 @@ pub use ledger::{
     ViolationCounts,
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
+pub use parts::{
+    CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, PartFit, PartGroup, PartView,
+    PartsTable, SlotDef, SlotView, WorkshopView,
+};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};

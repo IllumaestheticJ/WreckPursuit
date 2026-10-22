@@ -113,7 +113,8 @@ fn run_hill_sprint() -> HillRace {
         });
     }
     let race = wp_race::bridge::CityRace { route, course };
-    let mut ai = AiEntrants::new(sim.world(), &race, kind, false, &entrants, 16);
+    let mut ai =
+        AiEntrants::new(sim.world(), &race, kind, false, &entrants, 16).expect("a drivable route");
     let green_tick = judge.start(sim.tick()).unwrap();
 
     let heat = EventHeat::new();

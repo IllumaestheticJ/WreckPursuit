@@ -11,6 +11,7 @@ import { PanelBody, carMeshNow, type CarMeshJson } from "./render/panels";
 import { hasPoliceLivery, setupPoliceLook } from "./render/livery";
 import { LightRig, patternFor, phaseFor, wigwag } from "./render/lights";
 import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
+import { CarLook, type LookHost } from "./render/cosmetics/look";
 import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
 import { PALETTE, sirenLightIntensity } from "./render/palette";
 import { IND, indicatorColour, indicatorHue, indicatorLevel, indicatorMarkers, meshFrontRear, meshIndicatorEnds, proxyGeoms, styledPaint } from "./render/fleet";
@@ -74,6 +75,14 @@ export function heat(t: number, out = tmpColor): THREE.Color {
 export function healthColour(h: number, out = tmpColor): THREE.Color {
   return out.setHSL(Math.min(Math.max(h, 0), 1) * 0.33, 0.85, 0.45);
 }
+
+/** Lamp lens looks of the light mods: lens colour, glow colour, tail lens colour. */
+const LAMP_STYLES: Record<string, { lens?: number; glow?: number; tail?: number }> = {
+  smoked: { lens: 0x30343a, tail: 0x2a0d0d },
+  xenon: { lens: 0xe8f1ff, glow: 0xdcebff },
+  amber: { lens: 0xffd27a, glow: 0xffc24a },
+  halo: {},
+};
 
 interface WheelView {
   pivot: THREE.Group; // positioned at the hub, rotated by steer
@@ -168,6 +177,11 @@ export class VehicleView {
    * hidden and the lattice / panel re-skin is skipped until it comes back). */
   lodFar = false;
   private readonly lamps: THREE.Mesh[] = [];
+  /** Cosmetic look of the installed mods (player career car; null for everyone else). */
+  look: CarLook | null = null;
+  private lookGen = 0;
+  /** Lamp lens style from the look (LAMP_STYLES key). */
+  private lampStyle: string | undefined;
   /** Greybox paint (the colour the view was created with). */
   private readonly greyPaint: THREE.Color;
   /** The colour the view was created with (0xRRGGBB; a street racer's level colour). */
@@ -402,8 +416,12 @@ export class VehicleView {
       this.wheelPartsShown = panelsOn;
       this.wheels.forEach((w, i) => {
         const ours = this.panels.wheelParts[i];
-        for (const c of w.spin.children) c.visible = ours.includes(c as THREE.Mesh) ? panelsOn : !panelsOn;
+        // Wheel parts a cosmetic look hid (stock rims under custom ones) stay hidden; the look's
+        // own wheel pieces show with the panel mesh.
+        for (const c of w.spin.children)
+          c.visible = c.userData.wpHidden ? false : ours.includes(c as THREE.Mesh) || c.userData.cosmetic ? panelsOn : !panelsOn;
         for (const m of this.panels.hubParts[i]) m.visible = panelsOn;
+        for (const c of w.camber.children) if (c.userData.cosmetic) c.visible = panelsOn;
       });
     }
     if (panelsOn && !this.lodFar) {
@@ -412,6 +430,7 @@ export class VehicleView {
       this.panels.paint.opacity = latticeOn || stressOn ? 0.35 : 1;
       this.panels.paint.transparent = this.panels.paint.opacity < 1;
       this.panels.paint.depthWrite = !this.panels.paint.transparent;
+      this.look?.update();
     }
 
     // Panel meshes wanted but not loaded yet: the proxy, not the debug box / lattice hull.
@@ -632,7 +651,7 @@ export class VehicleView {
       this.headMatR.color.setHex(lens).multiplyScalar(0.3 + 0.7 * r);
       this.wigwagging = true;
     } else {
-      this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
+      this.headMat.emissive.setHex(headlights ? this.headGlowHex() : 0x000000);
       this.headMatR.emissive.copy(this.headMat.emissive);
       if (this.wigwagging) {
         this.headMat.color.setHex(this.headLensHex());
@@ -650,6 +669,7 @@ export class VehicleView {
     if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * Math.min(1, (artStyle.night - 0.2) * 2.5);
     // Underglow (tuners that have it) only with the headlights on (night / dusk).
     this.panels.setUnderglow(headlights);
+    this.look?.setLights(headlights);
     if (this.rig) {
       // The panel mesh's light bar (render/lights.ts pattern, per-unit phase); the box bar
       // only stands in while the panel mesh is hidden.
@@ -778,7 +798,15 @@ export class VehicleView {
   /** Head-lamp lens colour in the current art style (smoked by a lights mod). */
   private headLensHex(): number {
     const smoked = this.fitted?.lamps;
-    return smoked ? smoked.head : artStyle.lowpoly ? PALETTE.headlight : HEAD_LENS;
+    if (smoked) return smoked.head;
+    const lamp = this.lampStyle ? LAMP_STYLES[this.lampStyle] : undefined;
+    return lamp?.lens ?? (artStyle.lowpoly ? PALETTE.headlight : HEAD_LENS);
+  }
+
+  /** Head-lamp glow colour (xenon / amber lamps from a cosmetic look; warm white otherwise). */
+  private headGlowHex(): number {
+    const lamp = this.lampStyle && !this.fitted?.lamps ? LAMP_STYLES[this.lampStyle] : undefined;
+    return lamp?.glow ?? 0xfff2c0;
   }
 
   /** Re-colour for the current art style (paint, lamp lenses, light bar, flat shading). */
@@ -799,17 +827,60 @@ export class VehicleView {
     this.proxyPaint.color.copy(paint);
     this.proxyPaint.roughness = lowpoly ? 1 : 0.55;
     this.proxyPaint.metalness = lowpoly ? 0 : 0.25;
-    const smoked = this.fitted?.lamps;
-    this.headMat.color.setHex(smoked ? smoked.head : lowpoly ? PALETTE.headlight : HEAD_LENS);
+    this.headMat.color.setHex(this.headLensHex());
     this.headMatR.color.copy(this.headMat.color);
-    this.tailMat.color.setHex(smoked ? smoked.tail : lowpoly ? 0x5a1414 : 0x550000);
+    const lamp = this.lampStyle ? LAMP_STYLES[this.lampStyle] : undefined;
+    this.tailMat.color.setHex(this.fitted?.lamps?.tail ?? lamp?.tail ?? (lowpoly ? 0x5a1414 : 0x550000));
     if (this.barRed && this.barBlue) {
       this.barRed.color.setHex(lowpoly ? 0x5a1418 : 0x661018);
       this.barBlue.color.setHex(lowpoly ? 0x141e5a : 0x102266);
     }
   }
 
+  /**
+   * Show the cosmetic look of `mods` (render/cosmetics; null removes it). `showcase` keeps its
+   * lamps lit (workshop). Built once the panel mesh is ready.
+   *
+   * Mods the build's own parts already drew (render/mod_parts.ts `fitBuild`, from
+   * wp_economy::visuals) are left out, so nothing is drawn twice: the look adds what the mod
+   * parts renderer has no part or style for (fog lights, underglow, new rims and vinyls, …).
+   */
+  setLook(mods: readonly string[] | null, showcase = false): void {
+    const gen = ++this.lookGen;
+    this.look?.dispose();
+    this.look = null;
+    this.lampStyle = undefined;
+    if (!mods?.length) return;
+    this.panels.whenReady(() => {
+      const drawn = new Set(this.fitted?.drawn ?? []);
+      const byBuild = new Set((this.build?.parts ?? []).filter((p) => drawn.has(p.part)).map((p) => p.mod_id));
+      const rest = mods.filter((m) => !byBuild.has(m));
+      if (!rest.length) return;
+      void CarLook.build(this.lookHost(), rest).then((look) => {
+        if (!look) return;
+        if (gen !== this.lookGen) return look.dispose();
+        look.showcase = showcase;
+        look.setLights(false);
+        this.look = look;
+      });
+    });
+  }
+
+  private lookHost(): LookHost {
+    return {
+      root: this.root,
+      panels: this.panels,
+      info: this.info,
+      wheelGroup: (i, spin) => (spin ? this.wheels[i].spin : this.wheels[i].camber),
+      setLampStyle: (style) => {
+        this.lampStyle = style;
+        this.styleVersion = -1;
+      },
+    };
+  }
+
   dispose(): void {
+    this.look?.dispose();
     this.panels.dispose();
     this.root.removeFromParent();
     this.velocity.removeFromParent();

@@ -183,7 +183,8 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         sim.tick(),
         abs_s,
         true,
-    );
+    )
+    .expect("a drivable route");
     let green_tick = live.judge().green_tick();
     let racers = live.racers().to_vec();
     // The race's own police profile, as the browser session sets it up (none without police).

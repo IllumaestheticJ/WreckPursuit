@@ -520,6 +520,14 @@ export const sim = {
   raceCourse: (): Float32Array => wasm.race_course(),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
+  /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
+  garages: (): GarageSite[] => JSON.parse(wasm.garages_json()),
+  /** The open garage visit (the car stopped inside a garage), or null. */
+  garageVisit: (): GarageOffer | null => JSON.parse(wasm.garage_visit_json()),
+  /** "Repair" in the open visit: pays the shop, repairs the car, releases the brakes. Throws if refused. */
+  garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
+  /** "Leave" the open visit without repairing. */
+  garageLeave: (): void => wasm.garage_leave(),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
@@ -558,6 +566,8 @@ export const sim = {
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
   debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
+  /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
+  debugPlace: (entity: number, x: number, y: number, yaw: number, speedMps: number): void => wasm.debug_place(entity, x, y, yaw, speedMps),
   /** Debug / e2e: put `entity` stopped at (x, y) facing `yaw` (not recorded in replays). */
   debugPlaceVehicle: (entity: number, x: number, y: number, yaw: number): void => wasm.debug_place_vehicle(entity, x, y, yaw),
   /** Spawn NPC street racers in city sessions started after this call (default on). */
@@ -574,9 +584,17 @@ export const sim = {
   streetDecline: (): void => wasm.street_decline(),
   /** Drivable lanes for the map: [n, x0, y0, …] per lane; fetch once per session. */
   mapLanes: (): Float32Array => wasm.map_lanes(),
+  // ----- garage workshop (crates/wp_wasm/src/career.rs; throws on refusal) ---------------------
+  /** Show career car `uid` in the workshop: a sandbox session of `scenarioJson` (flat lot). */
+  careerWorkshopSession: (uid: number, scenarioJson: string): number[] => Array.from(wasm.career_workshop_session(uid, scenarioJson)),
+  careerWorkshop: (uid: number): WorkshopScreen => JSON.parse(wasm.career_workshop_json(uid)),
+  careerRemovePart: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_remove_part(uid, slot)),
+  careerFitPart: (uid: number, slot: string, part: number): WorkshopScreen => JSON.parse(wasm.career_fit_part(uid, slot, part)),
+  careerBuyPart: (uid: number, kind: string, grade: string | null): WorkshopScreen => JSON.parse(wasm.career_buy_part(uid, kind, grade ?? "")),
+  careerSellPart: (uid: number, part: number): WorkshopScreen => JSON.parse(wasm.career_sell_part(uid, part)),
 };
 
-import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
@@ -668,6 +686,8 @@ export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
+import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 
 /** `simcli::car_stats::CarStatsTable` (data/stats/cars.json): bars are 0–1 on fixed scales. */
 export interface CarStatsTable {

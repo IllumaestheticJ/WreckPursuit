@@ -990,6 +990,66 @@ fn lod_promotion_and_demotion_are_seamless() {
     assert_eq!(w.agents().filter(|a| a.lod == Lod::Physical).count(), 0);
 }
 
+/// Row 149: `max_physical` can shrink mid-run (wp_sim caps it at the vehicle slots it has
+/// left). The farthest physical cars demote at once, never more stay physical than the cap,
+/// and at the cap the physical car is (within `PLAYER_PRIORITY_MARGIN_M`) the one nearest the
+/// player.
+/// Cruise as in [`lod_promotion_and_demotion_are_seamless`]; the cap drops to 1 at 16 s.
+#[test]
+fn lod_cap_shrinks_to_the_nearest_cars() {
+    let mut w = scripted_world(3);
+    let cruise = |t: f32| player([-200.0 + 12.0 * t, -332.0, 0.0], [1.0, 0.0], 12.0);
+    w.set_tracked_vehicles(&[cruise(0.0)]);
+    w.populate();
+    let mut ev = Vec::new();
+    let mut before_cap = 0;
+    let mut over = 0;
+    let mut not_nearest = 0;
+    let mut checks = 0;
+    for i in 0..(32.0 / PHYSICS_DT) as usize {
+        let t = i as f32 * PHYSICS_DT;
+        if i == (16.0 / PHYSICS_DT) as usize {
+            w.traffic_config_mut().max_physical = 1;
+        }
+        w.set_tracked_vehicles(&[cruise(t)]);
+        w.step(PHYSICS_DT, &mut ev);
+        w.drain_lod_changes();
+        let physical: Vec<_> = w.agents().filter(|a| a.lod == Lod::Physical).collect();
+        if t < 16.0 {
+            before_cap = before_cap.max(physical.len());
+            continue;
+        }
+        if physical.len() > 1 {
+            over += 1;
+        }
+        if i % 24 == 0 && physical.len() == 1 {
+            checks += 1;
+            let p = geom::xy(cruise(t).pos);
+            let d = |q: [f32; 3]| geom::dist(geom::xy(q), p);
+            let nearest = w
+                .agents()
+                // Within `PLAYER_PRIORITY_RADIUS_M` (40 m) a car takes the slot.
+                .filter(|a| d(a.pos) < 40.0)
+                .map(|a| d(a.pos))
+                .fold(f32::INFINITY, f32::min);
+            // `PLAYER_PRIORITY_MARGIN_M` (10 m), plus a tick of travel.
+            if d(physical[0].pos) > nearest + 10.5 {
+                not_nearest += 1;
+            }
+        }
+    }
+    println!("physical before the cap {before_cap}, over {over}, checks {checks}, not nearest {not_nearest}");
+    assert!(before_cap > 1, "several physical cars before the cap");
+    assert_eq!(over, 0, "never more physical cars than the cap");
+    assert!(checks > 0);
+    // A car mid turn-around or reverse keeps its LOD until the manoeuvre ends, so now and then
+    // a nearer one waits a moment.
+    assert!(
+        not_nearest * 20 <= checks,
+        "the physical car is the nearest one: {not_nearest} of {checks} not"
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Routes & props
 // ---------------------------------------------------------------------------------------------

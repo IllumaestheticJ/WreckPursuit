@@ -38,7 +38,7 @@ import { actionsForKey, bindingsHelp, bindingText, keyName, padName, type Action
 import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
 import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
 import { ControlsPanel } from "./ui/controls";
-import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
+import { DEBUG_LAYERS, layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
@@ -57,10 +57,12 @@ import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { ModShop } from "./ui/modShop";
+import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
+import { GarageVisitView } from "./ui/garageVisit";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
@@ -337,12 +339,53 @@ async function main(): Promise<void> {
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
     startRun: (kind) => void startCareerRun(kind),
+    workshop: (uid) => openWorkshop(uid),
     close: () => {
       garage.hide();
       app.paused = false;
     },
   };
   const garage = new CareerGarageView(garageEl, careerApi);
+  // Garage workshop: the career car on a lift in a 3D bay, parts on and off (src/workshop).
+  const workshopEl = document.createElement("div");
+  workshopEl.id = "ui-workshop";
+  workshopEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(workshopEl);
+  const workshop = new WorkshopMode({
+    scene,
+    rig,
+    overlayEl: workshopEl,
+    playerView: () => app.views.get(app.player) ?? null,
+    rebuildViews: (uid) => {
+      lookCar = { uid, showcase: true };
+      rebuildViews();
+      lookCar = null;
+    },
+    lotScenario: () => sim.freeDriveJson(DEFAULT_CAR, "Arcade", false),
+    persist: () => persistCareer(),
+    back: () => {
+      workshop.close();
+      openGarage();
+    },
+    drive: () => {
+      const uid = workshop.current()?.car;
+      workshop.close();
+      if (uid !== undefined) careerApi.setActive(uid);
+      startCareerRun("free");
+    },
+    carName: (defId) => sim.careerView().cars.find((c) => c.def_id === defId)?.name ?? defId,
+  });
+  /** Open the workshop on career car `uid` (back to the garage with the reason if it cannot). */
+  const openWorkshop = (uid: number) => {
+    garage.hide();
+    try {
+      workshop.open(uid);
+      app.paused = true;
+    } catch (e) {
+      workshop.close();
+      openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+    }
+  };
   // Instant crash replay (lead, row 70): offer after a big crash, replay, resume live play.
   const crash = new CrashReplayDirector(
     document.body,
@@ -351,7 +394,7 @@ async function main(): Promise<void> {
     {
       // Not on benches, in the garage, with the full map open or while paused. A wreck's
       // end-of-run panel waits behind the replay (the overlay is hidden while it plays).
-      allowed: () => !app.bench && !app.paused && !garage.open && !map.isOpen,
+      allowed: () => !app.bench && !app.paused && !garage.open && !workshop.active && !map.isOpen,
       sessionSwapped: (entering) => {
         swapSessionViews();
         if (!entering) rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -371,6 +414,7 @@ async function main(): Promise<void> {
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
   const openGarage = (message: string | null = null) => {
+    workshop.close();
     crash.reset();
     if (sim.careerRunActive()) sim.careerEndRun();
     persistCareer();
@@ -390,6 +434,15 @@ async function main(): Promise<void> {
     start: (id) => startRace(id),
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+  });
+  // Garage visit panel (lead): stop inside a repair shop's ring → quote + "Repair" / "Leave".
+  const garageVisitEl = document.createElement("div");
+  garageVisitEl.id = "ui-garage-visit";
+  garageVisitEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(garageVisitEl);
+  const garageView = new GarageVisitView(garageVisitEl, {
+    repair: () => sim.garageRepair(),
+    leave: () => sim.garageLeave(),
   });
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
   let statTable: CarStatsTable | null = null;
@@ -451,6 +504,17 @@ async function main(): Promise<void> {
     props.set(sim.propsStatic(), lod.models, lod.fleet.mats);
   };
 
+  /**
+   * Career car whose cosmetic look the player's view shows in the session being built (the
+   * workshop sets it; a career run uses the active car).
+   */
+  let lookCar: { uid: number; showcase: boolean } | null = null;
+  const applyCareerLook = () => {
+    const career = lookCar ?? (sim.careerRunActive() ? { uid: sim.careerView().active_car ?? -1, showcase: false } : null);
+    if (!career) return;
+    const car = sim.careerView().cars.find((c) => c.uid === career.uid);
+    if (car) app.views.get(app.player)?.setLook(car.mods.map((m) => m.id), career.showcase);
+  };
   const rebuildViews = () => {
     scene.warmLightVariants();
     crash.reset();
@@ -468,6 +532,7 @@ async function main(): Promise<void> {
     radioStrip.clear();
     map.reset();
     runEnd.reset();
+    garageView.reset();
     weather.reset();
     // Every model the session can show (player, traffic, police) starts loading now, so cars
     // that appear later never wait for their mesh (playtest row 25).
@@ -480,12 +545,14 @@ async function main(): Promise<void> {
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
     app.focus = app.player;
+    applyCareerLook();
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
     if (sc.name === DRIFT_LAB_W) driftLabW.car = sc.entities?.[0]?.car ?? DRIFT_LAB_W_CAR;
     // Every session: the tune panel's saved debug overrides (none = the shipped handling) and
     // raw keys; the test pad (?drift=w) also gets its course and the reference assists.
     driftLabW.setActive(sc.name === DRIFT_LAB_W);
+    scene.setGarages(sim.garages());
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -1252,7 +1319,6 @@ async function main(): Promise<void> {
     d.gfx = gfxMode();
     return d;
   };
-  const DEBUG_LAYERS = ["lattice", "stress", "tireForces", "suspension", "slipColour", "contacts", "cgVelocity", "intents", "components", "regions", "events", "telemetry", "inputs"];
   const applySettings = (next: GameSettings, prev: GameSettings | null) => {
     gameSettings = next;
     setDeviceControls(next.controls);
@@ -1297,7 +1363,7 @@ async function main(): Promise<void> {
   };
   /** Something else owns the screen or the Esc key right now. */
   // Photo mode takes Esc (and gamepad Start) to leave itself, so no pause menu meanwhile.
-  const canOpenMenu = () => !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !runEnd.open && !raceView.cards && !isReplay();
+  const canOpenMenu = () => !photo.active && !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !workshop.active && !runEnd.open && !raceView.cards && !isReplay();
   let menuPausedBefore = false;
   let menuShown = false;
   menu = mountGameMenu(overlay, {
@@ -1429,7 +1495,7 @@ async function main(): Promise<void> {
 
     // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
     // map + pause while paused or with the full map open.
-    touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || runEnd.open || !!raceView.cards);
+    touch?.setCovered(!!menu?.isOpen || controls.isOpen || garage.open || workshop.active || runEnd.open || !!raceView.cards);
     touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
     const { input, source, edges } = readInput(dt);
     // Photo mode reads the pad itself (sticks fly, B / Start leave): no game actions meanwhile.
@@ -1507,6 +1573,7 @@ async function main(): Promise<void> {
         focusRec = o;
       }
     }
+    workshop.frame(dt);
     prof.lap("views");
     // One siren light, on the siren car nearest the camera (sim space: Three (x, y, z) = (x, -z, y)).
     {
@@ -1560,7 +1627,10 @@ async function main(): Promise<void> {
       prof.lap("ui");
       map.frame(app.player, now, hudRest);
       prof.lap("map");
-      if (!replay) runEnd.update(sim.runResult(), now);
+      if (!replay) {
+        runEnd.update(sim.runResult(), now);
+        garageView.update(sim.garageVisit(), now);
+      }
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
         const seq = runEnd.report?.seq ?? 0;
@@ -1814,6 +1884,9 @@ async function main(): Promise<void> {
     sim,
     app,
     scene,
+    /** Garage workshop (src/workshop/mode.ts): `workshop.active`, `current()`, `pointOfSlot(id)`. */
+    workshop,
+    openWorkshop,
     /** Controls panel (rebinding, per-device shaping) and the live bindings. */
     controls,
     /** Processed steering / pedals from what is held now (works under menus; fires nothing). */
@@ -1876,6 +1949,7 @@ async function main(): Promise<void> {
     photo,
     ui,
     runEnd,
+    garageView,
     street,
     restartRun,
     /** Mod shop (src/ui/modShop.ts). */

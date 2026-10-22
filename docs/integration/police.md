@@ -1423,7 +1423,31 @@ Goldens blessed: jam_pursuit_grid, jam_pursuit_vesper, weather_fog_pursuit, and 
 
 **Far-carriageway spawn repro (row 140).** It reproduced with the 192-run sequence on 36a31b1f, vesper night L3: a spike car that had waited for its spot to be hidden spawned 285 s in, with the racer 360 m away on another road. From the racer's road at that moment, the spot was its far carriageway. A waiting tool car whose spot is on the racer's far carriageway is now dropped. On the current base the full 192-run sequence has no such spawn.
 
-### Rows 84, 86, 96, 75 — not started yet.
+### Row 84: searching (2026-10-22)
+
+Owner: "Searching doesn't work well enough: more cops should spawn and go to the site."
+
+- **Work the search from the last known spot.** While a racer is lost (Searching), units on it are counted, and far ones stood down, relative to its last known position (`search_centre`). Before, they were measured against where the hidden racer really was, so units sent to search were released as "far".
+- **More units.** `search_extra_units` = [1, 2, 2, 3, 3] more per level L1..L5 while lost (`data/police/presence.toml`).
+- **Search backup spawns around the last known spot**, along the way it was heading (`response_spawn_point`), and is still never in the racer's real view.
+- **A growing sweep.** Search points start 150 m from the last known spot and grow by 0.5 × its last speed (at least 12 m/s) × the time unseen, stepped every 10 s, up to 700 m. Its predicted exits come first, then junctions nearest first, up to 16 points handed out to units in turn.
+- **Re-acquire** stays as it was: any unit (or the helicopter) seeing the racer resumes the pursuit at once.
+
+Bench columns: `re-acquire` (search episodes ending with the racer seen again) and `search units` (cars within 300 m of the last known spot while searching).
+
+| 192 runs | capture | escape | re-acquire | search units | crash/min | stuck/min | night escape |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| before (a981ad2d) | 79 % | 12 % | 95 % | 3.8 | 1.47 | 4.27 | 17 % |
+| after | 82 % | 9 % | 96 % | 3.8 | 1.39 | 3.82 | 12 % |
+
+`search units` does not move: searches are short (95 % end re-acquired) and the extra units take their 4–16 s response time to spawn and drive in. Escapes drop by a quarter.
+
+Re-aims:
+- `response_day_suburb` max call→unit 35 → 38 s. It went 34.2 → 37.1 s, the worst of 3 calls, and is 34.6 s with the extras off. Reserving 2 cap slots for calls did not change it, so the cause is the extra requests' RNG draws, not a cap squeeze.
+- Founders Cut escape + control re-seeded 51 → 53. The extras moved seed 51's loss to 64.5 s, and he escaped before the helicopter. Over seeds 50–63 the story now holds on 12 of 14, both scenarios on 7.
+- Goldens blessed: the jam pair and the Founders Cut pair.
+
+### Rows 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 
 Owner backlog item **P9 — Helicopter**: joins at wanted level 3, flies overhead, keeps you in
@@ -1450,6 +1474,7 @@ you can review):
   road below and vice versa).
 - `wp_wasm`/testbed (C): `police_helicopters()` and the night spotlight on round 12's drawn
   helicopter.
+
 - An idle patrol / reinforcement committed as backup (within 700 m) now also gets an ambush when it
   can make one in time (`dispatch::ambush_route`): it routes from its current position and heading
   (`start_node`, +3 s if it must turn around first) to the same wait points
@@ -1460,6 +1485,16 @@ you can review):
 - Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
   patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).
 
+### Follow-up: traffic-hazard stand-in is opt-in (owner request, 2026-10-21)
+
+- `PoliceSetup::default()` now has `hazards: false`. The statistical traffic model (random near
+  misses / collisions for headless units) is only for runs without real traffic; `wp_sim` already
+  turned it off explicitly (PR #34), since its `wp_world` traffic is reported as obstacles.
+- Explicit setters are unchanged: simcli and the tuning-dash probe still pass
+  `hazards: sc.traffic_cars`, `apps/ui-kit/tools/record-police` and the `wp_net` city tests pass
+  `true`. The one behaviour change is `wp_opponent/tests/common` (police-heat runs on a real
+  `wp_sim` city), which inherited `true` and now gets `false`.
+- Test: `lib.rs::tests::traffic_hazard_stand_in_is_opt_in`.
 ## Race-specific police profiles (owner request, 2026-10-22)
 
 Each race in the browser's picker now has its own police, configured in **`data/police/races.toml`**

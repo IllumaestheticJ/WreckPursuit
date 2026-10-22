@@ -176,7 +176,7 @@ fn capture_while_wanted_voids_insurance() {
         .unwrap();
     assert!(a.car(car).unwrap().insurance.is_none());
     assert!(ev.iter().any(|x| x.reason == EventReason::InsuranceVoided));
-    assert!(a.car(car).unwrap().damage.sustained_while_wanted);
+    assert!(a.car(car).unwrap().damage.sustained_before_capture);
 }
 
 #[test]

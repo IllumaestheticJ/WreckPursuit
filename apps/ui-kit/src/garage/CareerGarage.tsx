@@ -191,7 +191,7 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
               })}
             </tbody>
           </table>
-          {car.damage_while_wanted && <p class="wp-warn">Some of this damage happened while wanted: insurance will not pay for it.</p>}
+          {car.damage_before_capture && <p class="wp-warn">This car was caught by the police with this damage: insurance will not pay for it.</p>}
           <div class="wp-row" style={{ gap: "0.5em", marginTop: "0.6em", flexWrap: "wrap" }}>
             <Button variant="primary" disabled={!all || all.player_pays > view.cash} onClick={() => props.run(() => api.repair(car.uid, req("RepairAll")))}>
               Repair all {all && <Money value={all.player_pays} />}
@@ -466,6 +466,11 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             <Button variant="primary" disabled={car.active || car.location !== "Garage"} onClick={() => props.run(() => api.setActive(car.uid))}>
               {car.active ? "Active car" : "Drive this car"}
             </Button>
+            {api.workshop && (
+              <Button disabled={car.location !== "Garage"} onClick={() => api.workshop!(car.uid)} title="work on the car yourself: take parts off, fit new ones">
+                Workshop
+              </Button>
+            )}
             <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
               Mods
             </Button>
