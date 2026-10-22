@@ -209,18 +209,24 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         matches!(err, CaptainError::Cooldown { .. } | CaptainError::Budget),
         "{err:?}"
     );
-    // Drive over the strip: wheels flagged, deflation ramps over 5 s.
+    // Drive over the strip: wheels flagged, deflation ramps over `deflate_s` (1 s, row 132).
     let ahead = strip.site.ahead_m;
-    h.run(ahead / h.speed + 1.0, &[]);
-    assert!(
+    let hit = |h: &Harness| {
         h.events
             .iter()
-            .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER)),
-        "no spike hit"
-    );
+            .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER))
+    };
+    for _ in 0..((ahead / h.speed + 2.0) / 0.05) as u32 {
+        if hit(&h) {
+            break;
+        }
+        h.run(0.05, &[]);
+    }
+    assert!(hit(&h), "no spike hit");
+    h.run(0.4, &[]);
     let p1 = h.police.tire_puncture(RACER);
     assert!(p1.iter().any(|x| *x > 0.0 && *x < 1.0), "{p1:?}");
-    h.run(6.0, &[]);
+    h.run(2.0, &[]);
     assert!(h.police.tire_puncture(RACER).contains(&1.0));
     // Captain view reflects the chase.
     let v = h.police.captain_view();
@@ -270,7 +276,9 @@ fn roadblocks_respect_sight_and_highway_rules() {
             RoadClass::Highway,
             "roadblock on a highway at L5"
         );
-        assert!(rb.units.len() >= 2 && rb.units.len() <= 3);
+        // Cars spawned, or waiting for their spot to leave the racer's view (row 131).
+        let cars = rb.units.len() + h.police.tool_cars_waiting(rb.id).len();
+        assert!((2..=3).contains(&cars), "{cars} roadblock cars");
         assert!(!rb.barriers.is_empty());
     }
     assert!(!h.police.static_colliders().is_empty() || h.police.roadblocks().is_empty());
@@ -1517,5 +1525,58 @@ fn chasing_unit_stuck_in_a_civilian_queue_routes_around_it() {
     assert!(
         h.police.stats().jam_reroutes >= 1,
         "the unit waited in the queue for 6 s without routing around it"
+    );
+}
+
+/// Row 131: a fast racer on a long road, wanted (backup and responders spawning): no police
+/// car appears where the racer can see it now or within the next 3 s of its travel. Seeds
+/// 1, 7 and 14 each had 1-4 such spawns before the route look-ahead (`ROUTE_VIEW_S`).
+#[test]
+fn no_unit_spawns_in_a_fast_racers_view_now_or_3_s_ahead() {
+    for seed in [1, 7, 14] {
+        spawns_out_of_view(seed);
+    }
+}
+
+fn spawns_out_of_view(seed: u64) {
+    let mut h = Harness::new(12.0, seed);
+    h.speed = 40.0;
+    h.s = 40.0;
+    h.run(1.0, &[]);
+    h.police.set_heat(RACER, 85.0);
+    let mut seen = 0;
+    let mut checked = 0;
+    for _ in 0..(120.0 / 0.25) as u32 {
+        let before = h.police.stats().spawns.len();
+        h.run(0.25, &[]);
+        let spawns: Vec<_> = h.police.stats().spawns[before..].to_vec();
+        for sp in spawns {
+            checked += 1;
+            // Where the racer was when the unit appeared (spawns land inside the 0.25 s step).
+            let s_then = h.s - h.speed * h.police.now().since(sp.at);
+            for k in 0..=6 {
+                let ahead = s_then + h.speed * 0.5 * k as f32;
+                if ahead > h.path.length() {
+                    break;
+                }
+                let p = h.path.point_at(ahead).unwrap();
+                let world_los = wp_contracts::WorldQuery::line_of_sight(
+                    &h.world,
+                    [p[0], p[1], 1.3],
+                    [sp.pos[0], sp.pos[1], 1.0],
+                );
+                if h.police.graph().line_of_sight([p[0], p[1]], sp.pos) && world_los {
+                    seen += 1;
+                    break;
+                }
+            }
+        }
+        // Keep it wanted and moving (heat decays out of sight).
+        h.police.set_heat(RACER, 85.0);
+    }
+    assert!(checked >= 3, "seed {seed}: only {checked} units spawned");
+    assert_eq!(
+        seen, 0,
+        "seed {seed}: {seen} of {checked} spawns in the racer's view within 3 s"
     );
 }

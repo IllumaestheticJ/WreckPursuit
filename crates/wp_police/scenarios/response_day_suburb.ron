@@ -8,6 +8,9 @@
 // 12c's radar and witness pursuits: most runs now start with a witnessed pursuit before any call,
 // so few calls are left to time (day suburb 3 calls in 8 runs) and responders cross the new
 // highway by its ramps. Measured: 25 s reached 1 of 3, mean 22.6 s, max 31.5 s. Flagged to the lead as a regression to look at.
+// Row 131 (2026-10-21): no spawn where the racer will see it within 3 s along its road, so
+// responders appear past that look-ahead: mean 23.4 -> 26.6 s over the 3 timed calls (max 34.2 s
+// unchanged). Cap 25 -> 28 s; trade-off reported to the lead.
 (
     name: "police_response_day_suburb",
     seed: 300,
@@ -18,7 +21,7 @@
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
         (metric: "call_reached_25s_frac", min: 0.33, max: 1.0),
-        (metric: "call_to_unit_100m_s", min: 0.0, max: 25.0),
+        (metric: "call_to_unit_100m_s", min: 0.0, max: 28.0),
         (metric: "call_to_unit_100m_max_s", min: 0.0, max: 35.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),
