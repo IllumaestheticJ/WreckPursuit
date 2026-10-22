@@ -487,6 +487,18 @@ impl World {
         routes::plan_route(&self.map, start, heading, finish)
     }
 
+    /// Plan a lane-legal route from `start` through the waypoints `via` in order to `finish`
+    /// ([`routes::plan_route_via`]).
+    pub fn plan_route_via(
+        &self,
+        start: [f32; 3],
+        heading: Option<[f32; 2]>,
+        via: &[[f32; 2]],
+        finish: [f32; 3],
+    ) -> Option<Route> {
+        routes::plan_route_via(&self.map, start, heading, via, finish)
+    }
+
     /// Plan a closed circuit through polygon vertices.
     pub fn plan_circuit(&self, polygon: &[[f32; 2]]) -> Option<Route> {
         routes::plan_circuit(&self.map, polygon)
