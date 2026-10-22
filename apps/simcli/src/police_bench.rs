@@ -294,6 +294,12 @@ pub struct RunMetrics {
     /// Keep-up: the nearest chasing unit's speed over the evader's, sampled at 1 Hz while
     /// police see it and it drives faster than [`PACE_MIN_MPS`] (1.0 = matching it).
     pub pace: Vec<f32>,
+    /// Search episodes (Pursuit → Searching) ended by re-acquiring the evader / by its escape.
+    pub searches_reacquired: u32,
+    /// See `searches_reacquired`.
+    pub searches_escaped: u32,
+    /// Police cars within [`SEARCH_ZONE_M`] of the last known position, 1 Hz while Searching.
+    pub search_units: Vec<u32>,
     /// Most police cars within 300 m at once.
     pub units_near_max: u32,
     /// Police cars within 300 m at 15 / 30 / 60 / 120 s after the pursuit start (`None` once
@@ -521,6 +527,9 @@ pub fn run_one(
         spawns_in_view: 0,
         spawns_far_carriageway: 0,
         turn_round_s: Vec::new(),
+        searches_reacquired: 0,
+        searches_escaped: 0,
+        search_units: Vec::new(),
         self_wrecks: 0,
         contact_wrecks: 0,
         units_engaged: 0,
@@ -531,6 +540,8 @@ pub fn run_one(
         evader_plans: 0,
         evader_reversals: 0,
     };
+    // Pursuit status on the previous tick (search episodes).
+    let mut prev_status: Option<PursuitStatus> = None;
     // Turn-round in progress per unit after the evader: when it started, s.
     let mut turn_started: std::collections::BTreeMap<wp_police::UnitId, f32> =
         std::collections::BTreeMap::new();
@@ -703,6 +714,28 @@ pub fn run_one(
             m.first_near_s = Some(t1);
         }
         if let Some(rec) = pol.racer(me) {
+            // Search episodes (row 84): how each ends, and units around the last known spot.
+            if prev_status == Some(PursuitStatus::Searching) && rec.status != prev_status.unwrap() {
+                match rec.status {
+                    PursuitStatus::Pursuit => m.searches_reacquired += 1,
+                    _ => m.searches_escaped += 1,
+                }
+            }
+            prev_status = Some(rec.status);
+            if rec.status == PursuitStatus::Searching && tick % 240 == 0 {
+                if let Some(lk) = rec.last_known {
+                    let n = pol
+                        .units()
+                        .iter()
+                        .filter(|u| {
+                            u.kind == UnitKind::Car
+                                && !u.wrecked
+                                && wp_world::geom::dist(u.body.pos, lk) <= SEARCH_ZONE_M
+                        })
+                        .count() as u32;
+                    m.search_units.push(n);
+                }
+            }
             m.max_level = m.max_level.max(rec.level.number());
             match rec.status {
                 PursuitStatus::Pursuit => {
@@ -961,6 +994,10 @@ pub struct CellSummary {
     pub stuck_per_min: f32,
     /// Police cars appearing in a racer's line of sight per minute of run (row 131).
     pub pop_in_per_min: f32,
+    /// Search episodes that ended with the evader re-acquired (rest: escaped).
+    pub reacquire_frac: Option<f32>,
+    /// Mean police cars within [`SEARCH_ZONE_M`] of the last known spot while searching.
+    pub search_units_mean: Option<f32>,
     /// Turn-rounds per pursuit minute.
     pub turns_per_min: f32,
     /// Median turn-round time, s.
@@ -1055,6 +1092,18 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
         civilian_per_min: per_min(sum(|r| r.police_civilian_collisions)),
         stuck_per_min: per_min(sum(|r| r.stuck_events)),
         pop_in_per_min: per_min(sum(|r| r.spawns_in_view)),
+        reacquire_frac: {
+            let re: u32 = runs.iter().map(|r| r.searches_reacquired).sum();
+            let esc: u32 = runs.iter().map(|r| r.searches_escaped).sum();
+            (re + esc > 0).then(|| re as f32 / (re + esc) as f32)
+        },
+        search_units_mean: {
+            let xs: Vec<u32> = runs
+                .iter()
+                .flat_map(|r| r.search_units.iter().copied())
+                .collect();
+            (!xs.is_empty()).then(|| xs.iter().sum::<u32>() as f32 / xs.len() as f32)
+        },
         turns_per_min: if pursuit_min > 0.0 {
             runs.iter().map(|r| r.turn_round_s.len()).sum::<usize>() as f32 / pursuit_min
         } else {
@@ -1119,11 +1168,14 @@ fn pct(x: f32) -> String {
     format!("{:.0}%", x * 100.0)
 }
 
+/// The search zone around the last known position for the bench's search columns (row 84), m.
+pub const SEARCH_ZONE_M: f32 = 300.0;
+
 /// Pace is sampled only while the evader is faster than this, m/s (~90 km/h).
 pub const PACE_MIN_MPS: f32 = 25.0;
 
 /// Column headers of [`table`].
-const HEADER: [&str; 23] = [
+const HEADER: [&str; 25] = [
     "cell",
     "runs",
     "engaged",
@@ -1144,12 +1196,14 @@ const HEADER: [&str; 23] = [
     "civ/min",
     "stuck/min",
     "pop-in/min",
+    "re-acquire",
+    "search units",
     "turns/min",
     "turn s",
     "far-cw/min",
 ];
 
-fn row(s: &CellSummary) -> [String; 23] {
+fn row(s: &CellSummary) -> [String; 25] {
     [
         s.label.clone(),
         s.runs.to_string(),
@@ -1171,6 +1225,9 @@ fn row(s: &CellSummary) -> [String; 23] {
         format!("{:.2}", s.civilian_per_min),
         format!("{:.2}", s.stuck_per_min),
         format!("{:.2}", s.pop_in_per_min),
+        s.reacquire_frac.map_or("—".to_string(), pct),
+        s.search_units_mean
+            .map_or("—".to_string(), |x| format!("{x:.1}")),
         format!("{:.2}", s.turns_per_min),
         s.turn_med_s.map_or("—".to_string(), |x| format!("{x:.1}")),
         format!("{:.2}", s.far_cw_per_min),
@@ -1179,7 +1236,7 @@ fn row(s: &CellSummary) -> [String; 23] {
 
 /// Plain-text table (terminal).
 pub fn table(rows: &[CellSummary]) -> String {
-    let body: Vec<[String; 23]> = rows.iter().map(row).collect();
+    let body: Vec<[String; 25]> = rows.iter().map(row).collect();
     let mut w = HEADER.map(|h| h.chars().count());
     for r in &body {
         for (k, c) in r.iter().enumerate() {
