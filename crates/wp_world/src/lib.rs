@@ -379,6 +379,22 @@ impl World {
         &self.map.net
     }
 
+    /// Highway rest stops (Port Vesper's Loop 9 pull-offs, playtest row 153): named sites in
+    /// the middle of each lit parking road, for night meets and races. Pose = on the parking
+    /// lane, facing its travel direction; `lane` is that lane. Empty on maps without any.
+    pub fn rest_stops(&self) -> impl Iterator<Item = &network::Poi> + '_ {
+        self.map
+            .net
+            .pois
+            .iter()
+            .filter(|p| p.kind == network::PoiKind::RestStop)
+    }
+
+    /// The rest stop named `name` ([`World::rest_stops`]).
+    pub fn rest_stop(&self, name: &str) -> Option<&network::Poi> {
+        self.rest_stops().find(|p| p.name == name)
+    }
+
     /// Road-level graph (nodes, roads with class/limit/one-way/district, POIs, building
     /// bounds) for police routing and minimaps. Built on each call; cache it.
     pub fn road_graph(&self) -> RoadGraphView {

@@ -346,6 +346,9 @@ pub enum PoiKind {
     PoliceStation,
     /// Police helipad.
     Helipad,
+    /// Highway rest stop: a pull-off with a lit parking road (pose = the middle of the
+    /// parking road, facing its travel direction). Not in `wp_contracts`' POI list.
+    RestStop,
 }
 
 /// A point of interest.
