@@ -256,7 +256,7 @@ pub struct OddsCard {
     /// Head-to-head opponent's name.
     pub opponent: Option<String>,
     /// Decimal odds.
-    pub odds: f64,
+    pub odds: f32,
 }
 
 /// A ticket on the results panel.
@@ -269,7 +269,7 @@ pub struct BetCard {
     /// Stake.
     pub stake: i64,
     /// Decimal odds locked in.
-    pub odds: f64,
+    pub odds: f32,
     /// `open`, `won`, `lost`, `void`.
     pub outcome: &'static str,
     /// Paid back (stake included; potential return while open).

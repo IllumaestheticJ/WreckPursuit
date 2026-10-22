@@ -41,17 +41,17 @@ const FILE: &str = "betting.toml";
 #[serde(deny_unknown_fields)]
 pub struct BookRules {
     /// House margin on the win market.
-    pub win_margin: f64,
+    pub win_margin: f32,
     /// House margin on the podium market.
-    pub podium_margin: f64,
+    pub podium_margin: f32,
     /// House margin on head-to-heads.
-    pub h2h_margin: f64,
+    pub h2h_margin: f32,
     /// Shortest decimal odds offered.
-    pub min_odds: f64,
+    pub min_odds: f32,
     /// Longest decimal odds offered.
-    pub max_odds: f64,
+    pub max_odds: f32,
     /// Odds are rounded down to a multiple of this.
-    pub odds_step: f64,
+    pub odds_step: f32,
     /// Smallest stake taken, credits.
     pub min_stake: Money,
     /// Tickets one bettor may hold on one race.
@@ -119,8 +119,8 @@ pub struct Odds(pub u32);
 
 impl Odds {
     /// Decimal odds (display only).
-    pub fn decimal(&self) -> f64 {
-        self.0 as f64 / 1000.0
+    pub fn decimal(&self) -> f32 {
+        self.0 as f32 / 1000.0
     }
 
     /// Gross return of a winning `stake` (stake included), rounded down.
@@ -129,7 +129,7 @@ impl Odds {
     }
 
     /// Offered odds for probability `p` under `margin`, rounded down to the step and clamped.
-    pub fn offer(p: f64, margin: f64, rules: &BookRules) -> Odds {
+    pub fn offer(p: f32, margin: f32, rules: &BookRules) -> Odds {
         let fair = if p > 0.0 {
             1.0 / (p * (1.0 + margin))
         } else {
@@ -198,9 +198,9 @@ pub struct Market {
     /// The field.
     pub entrants: Vec<MarketEntrant>,
     /// Win probability per entrant.
-    pub win_p: Vec<f64>,
+    pub win_p: Vec<f32>,
     /// Podium probability per entrant (`None` = no podium market).
-    pub podium_p: Option<Vec<f64>>,
+    pub podium_p: Option<Vec<f32>>,
     /// Pricing rules.
     pub rules: BookRules,
 }
@@ -208,11 +208,11 @@ pub struct Market {
 impl Market {
     /// Price `entrants` under `rules`.
     pub fn new(race: impl Into<String>, entrants: Vec<MarketEntrant>, rules: &BookRules) -> Market {
-        let s: Vec<f64> = entrants
+        let s: Vec<f32> = entrants
             .iter()
-            .map(|e| pow10(e.rating as f64 / 400.0))
+            .map(|e| pow10(e.rating as f32 / 400.0))
             .collect();
-        let total: f64 = s.iter().sum();
+        let total: f32 = s.iter().sum();
         let win_p = s.iter().map(|x| x / total).collect();
         let podium_p = (entrants.len() >= rules.podium_min_field).then(|| podium_probabilities(&s));
         Market {
@@ -231,7 +231,7 @@ impl Market {
 
     /// Probability that `sel` wins (`None` if not offered: unknown racer, podium market
     /// closed, head-to-head against yourself).
-    pub fn probability(&self, sel: &Selection) -> Option<f64> {
+    pub fn probability(&self, sel: &Selection) -> Option<f32> {
         match sel {
             Selection::Win(k) => Some(self.win_p[self.index_of(k)?]),
             Selection::Podium(k) => Some(self.podium_p.as_ref()?[self.index_of(k)?]),
@@ -288,10 +288,10 @@ pub struct BoardLine {
 
 /// P(each entrant finishes top three) under Plackett–Luce with strengths `s` (exact
 /// enumeration of ordered top threes: n·(n−1)·(n−2) terms, 1 320 for a 12-car field).
-fn podium_probabilities(s: &[f64]) -> Vec<f64> {
+fn podium_probabilities(s: &[f32]) -> Vec<f32> {
     let n = s.len();
-    let total: f64 = s.iter().sum();
-    let mut p = vec![0.0f64; n];
+    let total: f32 = s.iter().sum();
+    let mut p = vec![0.0f32; n];
     for a in 0..n {
         let pa = s[a] / total;
         let rest_a = total - s[a];
@@ -679,11 +679,11 @@ mod tests {
     #[test]
     fn probabilities_are_consistent() {
         let m = market();
-        let sum: f64 = m.win_p.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-12);
+        let sum: f32 = m.win_p.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
         let pod = m.podium_p.as_ref().unwrap();
-        let sum3: f64 = pod.iter().sum();
-        assert!((sum3 - 3.0).abs() < 1e-9, "{sum3}");
+        let sum3: f32 = pod.iter().sum();
+        assert!((sum3 - 3.0).abs() < 1e-4, "{sum3}");
         for (w, p) in m.win_p.iter().zip(pod) {
             assert!(p > w && *p <= 1.0);
         }
@@ -691,7 +691,7 @@ mod tests {
         let b = m.board();
         assert!(b[0].win < b[1].win && b[1].win < b[2].win && b[2].win < b[3].win);
         // The book always keeps an edge: implied probabilities sum above 1.
-        let implied: f64 = b.iter().map(|l| 1.0 / l.win.decimal()).sum();
+        let implied: f32 = b.iter().map(|l| 1.0 / l.win.decimal()).sum();
         assert!(implied > 1.0, "{implied}");
         // Head-to-head pair odds both above evens only for a near-even match.
         let h = |a: &str, o: &str| {
@@ -899,7 +899,7 @@ mod tests {
                 };
             }
         }
-        let per_bet = net as f64 / (2_000.0 * 5.0);
+        let per_bet = net as f32 / (2_000.0 * 5.0);
         assert!((-25.0..-5.0).contains(&per_bet), "{per_bet}");
     }
 }

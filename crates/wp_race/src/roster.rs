@@ -389,7 +389,7 @@ impl RosterState {
         let n = placings.len();
         let mut deltas = Vec::with_capacity(n);
         for (i, p) in placings.iter().enumerate() {
-            let mut sum = 0.0f64;
+            let mut sum = 0.0f32;
             for (j, q) in placings.iter().enumerate() {
                 if i == j {
                     continue;
@@ -411,7 +411,7 @@ impl RosterState {
                 sum += actual - expected;
             }
             let d = if n > 1 {
-                round_half_away(cfg.k as f64 * sum / (n - 1) as f64)
+                round_half_away(cfg.k as f32 * sum / (n - 1) as f32)
             } else {
                 0
             };
@@ -467,13 +467,13 @@ mod serde_json_lite {
 }
 
 /// Elo expected score of a racer rated `a` against one rated `b`.
-pub fn expected_score(a: i32, b: i32) -> f64 {
-    1.0 / (1.0 + pow10((b - a) as f64 / 400.0))
+pub fn expected_score(a: i32, b: i32) -> f32 {
+    1.0 / (1.0 + pow10((b - a) as f32 / 400.0))
 }
 
-/// Round to the nearest integer, halves away from zero, without `f64::round` platform
+/// Round to the nearest integer, halves away from zero, without `f32::round` platform
 /// differences (`round` is exact everywhere, but keep the rule explicit).
-fn round_half_away(x: f64) -> i32 {
+fn round_half_away(x: f32) -> i32 {
     if x >= 0.0 {
         (x + 0.5) as i32
     } else {
@@ -482,22 +482,22 @@ fn round_half_away(x: f64) -> i32 {
 }
 
 /// `10^x` from `+ − × ÷` only (IEEE-exact on every target, unlike `powf`): range reduction to
-/// `2^k · 2^f`, `f ∈ [0, 1)`, and a 16-term Taylor series for `e^(f ln 2)` (error < 1e-15).
+/// `2^k · 2^f`, `f ∈ [0, 1)`, and a 12-term Taylor series for `e^(f ln 2)` (error < 1e-7).
 /// Accurate for |x| ≤ 30, which covers any rating gap.
-pub fn pow10(x: f64) -> f64 {
-    const LOG2_10: f64 = std::f64::consts::LOG2_10;
-    const LN_2: f64 = std::f64::consts::LN_2;
+pub fn pow10(x: f32) -> f32 {
+    const LOG2_10: f32 = std::f32::consts::LOG2_10;
+    const LN_2: f32 = std::f32::consts::LN_2;
     let y = (x * LOG2_10).clamp(-100.0, 100.0);
     // floor without platform calls: truncation toward zero, then fix negatives.
     let mut k = y as i64;
-    if (k as f64) > y {
+    if (k as f32) > y {
         k -= 1;
     }
-    let f = (y - k as f64) * LN_2;
-    let mut term = 1.0f64;
-    let mut sum = 1.0f64;
-    for i in 1..=16 {
-        term *= f / i as f64;
+    let f = (y - k as f32) * LN_2;
+    let mut term = 1.0f32;
+    let mut sum = 1.0f32;
+    for i in 1..=12 {
+        term *= f / i as f32;
         sum += term;
     }
     let (mul, steps) = if k >= 0 { (2.0, k) } else { (0.5, -k) };
@@ -516,20 +516,36 @@ pub fn specialty_bonus(r: &NpcRacer, course: Specialty, cfg: &RatingConfig) -> i
     }
 }
 
-/// Pick `n` regulars for a scheduled meet at `venue` (3–5 is typical): only racers whose tier
-/// the player's licence has reached, weighted towards those who haunt the venue's district
-/// (`home` matched against the venue name / district label `district_name`) and towards
-/// ratings close to the player's. Deterministic in `(seed, event id)`.
+/// Who is asking for a meet field ([`field_for_event`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeetCall<'a> {
+    /// District label of the venue (`wp_world` zone name), matched against racers' `home`.
+    pub district_name: Option<&'a str>,
+    /// The player's licence tier index (`ProgressionTable::licence_for`).
+    pub player_licence: u8,
+    /// Regulars wanted (3–5 is typical).
+    pub size: usize,
+    /// World seed.
+    pub seed: u64,
+}
+
+/// Pick regulars for a scheduled meet at `venue`: only racers whose tier the player's licence
+/// has reached, weighted towards those who haunt the venue (`home` found in the venue name or
+/// the district label) and towards ratings close to the player's. Deterministic in
+/// `(call.seed, event id)`.
 pub fn field_for_event<'a>(
     roster: &'a Roster,
     state: &RosterState,
     event: &ScheduledEvent,
     venue: &Venue,
-    district_name: Option<&str>,
-    player_licence: u8,
-    n: usize,
-    seed: u64,
+    call: &MeetCall<'_>,
 ) -> Vec<&'a NpcRacer> {
+    let (district_name, player_licence, n, seed) = (
+        call.district_name,
+        call.player_licence,
+        call.size,
+        call.seed,
+    );
     let mut rng = Rng::new(seed ^ (event.id.0 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
     let player = state.rating(PLAYER_KEY);
     let mut pool: Vec<(&NpcRacer, u32)> = roster
@@ -572,16 +588,16 @@ pub fn field_for_event<'a>(
 /// [`RosterState::record_race`].
 pub fn resolve_offscreen(entrants: &[(String, i32, f32)], seed: u64) -> Vec<Placing> {
     let mut rng = Rng::new(seed);
-    let mut left: Vec<(String, f64, bool)> = entrants
+    let mut left: Vec<(String, f32, bool)> = entrants
         .iter()
-        .map(|(k, r, dnf)| (k.clone(), pow10(*r as f64 / 400.0), !rng.chance(*dnf)))
+        .map(|(k, r, dnf)| (k.clone(), pow10(*r as f32 / 400.0), !rng.chance(*dnf)))
         .collect();
     // Finishers are ordered by strength draws; non-finishers fill the back in entry order.
     let mut out = Vec::with_capacity(left.len());
     let mut pos = 1u8;
     while left.iter().any(|e| e.2) {
-        let total: f64 = left.iter().filter(|e| e.2).map(|e| e.1).sum();
-        let mut x = rng.next_f32() as f64 * total;
+        let total: f32 = left.iter().filter(|e| e.2).map(|e| e.1).sum();
+        let mut x = rng.next_f32() as f32 * total;
         let mut idx = None;
         for (i, e) in left.iter().enumerate() {
             if !e.2 {
@@ -642,11 +658,11 @@ mod tests {
     #[test]
     fn pow10_matches_reference() {
         for x in [-3.0, -1.25, -0.5, 0.0, 0.1, 0.5, 1.0, 2.5, 4.0] {
-            let want = 10f64.powf(x);
-            assert!(((pow10(x) - want) / want).abs() < 1e-12, "{x}");
+            let want = 10f32.powf(x);
+            assert!(((pow10(x) - want) / want).abs() < 1e-5, "{x}");
         }
         assert_eq!(expected_score(1000, 1000), 0.5);
-        assert!((expected_score(1400, 1000) - 0.909_090_9).abs() < 1e-6);
+        assert!((expected_score(1400, 1000) - 0.909_090_9).abs() < 1e-5);
     }
 
     #[test]
@@ -732,6 +748,70 @@ mod tests {
         }
         // Strength share ≈ 0.86 of the win against these two.
         assert!((300..390).contains(&nina_wins), "{nina_wins}");
+    }
+
+    #[test]
+    fn meet_fields_respect_tiers_and_favour_locals() {
+        use crate::kind::{ClassBracket, EventId, Legality, RaceKind, VenueId};
+        let roster = Roster::embedded();
+        let state = RosterState::new(&roster);
+        let data = crate::RaceData::embedded();
+        let event = ScheduledEvent {
+            id: EventId(7),
+            day: 0,
+            kind: RaceKind::Sprint,
+            legality: Legality::Street,
+            venue: VenueId(0),
+            bracket: ClassBracket::D,
+            phase: wp_contracts::DayPhase::Night,
+            spawn_s: 0,
+            lobby_open_s: 0,
+            start_s: 0,
+            stake: data.stakes.stake(
+                RaceKind::Sprint,
+                wp_contracts::DayPhase::Night,
+                ClassBracket::D,
+                Legality::Street,
+            ),
+            police_presence_override: crate::PolicePresence::Normal,
+            traffic: crate::schedule::TrafficMode::Normal,
+            marshals: 0,
+            requirements: crate::EntryRequirements::bracket(ClassBracket::D),
+        };
+        let venue = Venue {
+            id: VenueId(0),
+            name: "Harbor Boulevard drag".into(),
+            pos: [0.0; 3],
+            district: None,
+            closed_circuit: false,
+        };
+        let call = |licence: u8, seed: u64| MeetCall {
+            district_name: None,
+            player_licence: licence,
+            size: 4,
+            seed,
+        };
+        let a = field_for_event(&roster, &state, &event, &venue, &call(0, 3));
+        assert_eq!(
+            a,
+            field_for_event(&roster, &state, &event, &venue, &call(0, 3))
+        );
+        assert_eq!(a.len(), 4);
+        let mut harbor = 0;
+        for seed in 0..200 {
+            let f = field_for_event(&roster, &state, &event, &venue, &call(0, seed));
+            // A rookie never meets the pros or the elite.
+            assert!(f.iter().all(|r| r.tier == Tier::Rookie), "{seed}");
+            let mut ids: Vec<&str> = f.iter().map(|r| r.id.as_str()).collect();
+            ids.sort();
+            ids.dedup();
+            assert_eq!(ids.len(), 4);
+            harbor += f.iter().filter(|r| r.home == "Harbor").count();
+        }
+        // Two Harbor regulars out of seven rookies: well above their 2/7 share of seats.
+        assert!(harbor as f32 / 800.0 > 0.4, "{harbor}");
+        let legend = field_for_event(&roster, &state, &event, &venue, &call(4, 1));
+        assert_eq!(legend.len(), 4);
     }
 
     #[test]
