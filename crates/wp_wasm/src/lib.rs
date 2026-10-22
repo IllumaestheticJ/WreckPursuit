@@ -64,6 +64,8 @@ pub mod weather;
 #[cfg(test)]
 mod career_tests;
 #[cfg(test)]
+mod collide_tests;
+#[cfg(test)]
 mod crash_replay_tests;
 #[cfg(test)]
 mod police_audio_trace;

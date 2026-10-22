@@ -537,6 +537,72 @@ fn determinism_hash() {
     assert_ne!(scripted_run(&mut c, 20.0), ha);
 }
 
+/// Owner row 149 ("can't hit traffic cars"): with the physical cap full of cars around a race
+/// route (street racers), the cars right in front of the player stayed kinematic — no
+/// collider — and the player drove through them. Cars close to a player now take the place of
+/// the physical car farthest from it.
+#[test]
+fn cars_near_the_player_are_physical_with_the_cap_full_elsewhere() {
+    let mut w = World::procedural(
+        &ProcGenConfig::default(),
+        WorldConfig {
+            seed: 7,
+            traffic: TrafficConfig {
+                density_scale: 4.0,
+                max_physical: 4,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    let car = wp_contracts::load_car(data_dir().join("cars/debug_sedan.json")).unwrap();
+    w.set_traffic_car(&car);
+    // A race route across the north of the city: its focus points fill the cap.
+    let polyline: Vec<[f32; 3]> = (0..=4)
+        .map(|k| [300.0 + 40.0 * k as f32, 330.0, 0.0])
+        .collect();
+    w.set_active_routes(vec![ActiveRoute {
+        route: wp_world::routes::Route {
+            segs: Vec::new(),
+            lanes: Vec::new(),
+            polyline,
+            checkpoints: Vec::new(),
+            length_m: 160.0,
+            closed_loop: false,
+        },
+        closed: false,
+    }]);
+    let mut ev = Vec::new();
+    let ticks = (30.0 / PHYSICS_DT) as usize;
+    let mut checked = 0;
+    for i in 0..ticks {
+        let t = i as f32 * PHYSICS_DT;
+        let p = player([-600.0 + 15.0 * t, -332.0, 0.0], [1.0, 0.0], 15.0);
+        w.set_tracked_vehicles(&[p]);
+        if i == 0 {
+            w.populate();
+        }
+        w.step(PHYSICS_DT, &mut ev);
+        if t < 2.0 {
+            continue;
+        }
+        // Every car within 25 m of the player has a body (the LOD runs every 0.25 s; at
+        // 15 m/s a car enters the 40 m priority ring well before it is that close).
+        for a in w.agents() {
+            if geom::dist(geom::xy(a.pos), geom::xy(p.pos)) < 25.0 {
+                checked += 1;
+                assert_eq!(a.lod, Lod::Physical, "agent {} at t {t:.2} s", a.id);
+            }
+        }
+    }
+    assert!(checked > 100, "cars came near the player: {checked}");
+    let near_route = w
+        .agents()
+        .filter(|a| a.lod == Lod::Physical && (a.pos[1] - 330.0).abs() < 60.0)
+        .count();
+    assert!(near_route <= 4);
+}
+
 #[test]
 #[ignore = "perf: run with --release"]
 fn perf_400_agents_under_budget() {
@@ -922,6 +988,66 @@ fn lod_promotion_and_demotion_are_seamless() {
         println!("still physical: {a:?}");
     }
     assert_eq!(w.agents().filter(|a| a.lod == Lod::Physical).count(), 0);
+}
+
+/// Row 149: `max_physical` can shrink mid-run (wp_sim caps it at the vehicle slots it has
+/// left). The farthest physical cars demote at once, never more stay physical than the cap,
+/// and at the cap the physical car is (within `PLAYER_PRIORITY_MARGIN_M`) the one nearest the
+/// player.
+/// Cruise as in [`lod_promotion_and_demotion_are_seamless`]; the cap drops to 1 at 16 s.
+#[test]
+fn lod_cap_shrinks_to_the_nearest_cars() {
+    let mut w = scripted_world(3);
+    let cruise = |t: f32| player([-200.0 + 12.0 * t, -332.0, 0.0], [1.0, 0.0], 12.0);
+    w.set_tracked_vehicles(&[cruise(0.0)]);
+    w.populate();
+    let mut ev = Vec::new();
+    let mut before_cap = 0;
+    let mut over = 0;
+    let mut not_nearest = 0;
+    let mut checks = 0;
+    for i in 0..(32.0 / PHYSICS_DT) as usize {
+        let t = i as f32 * PHYSICS_DT;
+        if i == (16.0 / PHYSICS_DT) as usize {
+            w.traffic_config_mut().max_physical = 1;
+        }
+        w.set_tracked_vehicles(&[cruise(t)]);
+        w.step(PHYSICS_DT, &mut ev);
+        w.drain_lod_changes();
+        let physical: Vec<_> = w.agents().filter(|a| a.lod == Lod::Physical).collect();
+        if t < 16.0 {
+            before_cap = before_cap.max(physical.len());
+            continue;
+        }
+        if physical.len() > 1 {
+            over += 1;
+        }
+        if i % 24 == 0 && physical.len() == 1 {
+            checks += 1;
+            let p = geom::xy(cruise(t).pos);
+            let d = |q: [f32; 3]| geom::dist(geom::xy(q), p);
+            let nearest = w
+                .agents()
+                // Within `PLAYER_PRIORITY_RADIUS_M` (40 m) a car takes the slot.
+                .filter(|a| d(a.pos) < 40.0)
+                .map(|a| d(a.pos))
+                .fold(f32::INFINITY, f32::min);
+            // `PLAYER_PRIORITY_MARGIN_M` (10 m), plus a tick of travel.
+            if d(physical[0].pos) > nearest + 10.5 {
+                not_nearest += 1;
+            }
+        }
+    }
+    println!("physical before the cap {before_cap}, over {over}, checks {checks}, not nearest {not_nearest}");
+    assert!(before_cap > 1, "several physical cars before the cap");
+    assert_eq!(over, 0, "never more physical cars than the cap");
+    assert!(checks > 0);
+    // A car mid turn-around or reverse keeps its LOD until the manoeuvre ends, so now and then
+    // a nearer one waits a moment.
+    assert!(
+        not_nearest * 20 <= checks,
+        "the physical car is the nearest one: {not_nearest} of {checks} not"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
