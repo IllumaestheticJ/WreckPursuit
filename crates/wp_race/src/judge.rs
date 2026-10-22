@@ -98,6 +98,12 @@ pub enum StartError {
     AlreadyStarted,
 }
 
+/// The judge ends a race in which every racer still running has made no course progress
+/// (at least [`STUCK_PROGRESS_M`]) for this long, s: they are `Dnf(Stuck)`.
+pub const STUCK_LIMIT_S: f32 = 180.0;
+/// Progress along the course that counts as "not stuck", m.
+pub const STUCK_PROGRESS_M: f32 = 5.0;
+
 #[derive(Debug, Clone)]
 struct Track {
     entry: RacerEntry,
@@ -116,6 +122,10 @@ struct Track {
     elapsed: Option<u64>,
     seg_hint: Option<usize>,
     progress_m: f32,
+    /// Furthest progress counted towards "not stuck", m, and the tick it was reached (see
+    /// [`STUCK_LIMIT_S`]).
+    best_progress_m: f32,
+    progress_tick: u64,
     out_ticks: u64,
     /// Course distance (within the lap) of the last sample inside the corridor, m.
     on_course_m: Option<f32>,
@@ -289,6 +299,8 @@ impl RaceJudge {
             elapsed: None,
             seg_hint: None,
             progress_m: 0.0,
+            best_progress_m: 0.0,
+            progress_tick: 0,
             out_ticks: 0,
             on_course_m: None,
             contacts: 0,
@@ -466,6 +478,7 @@ impl RaceJudge {
                         t.start_subtick = Some(green_tick * SUBTICKS_PER_TICK);
                     }
                     t.lap_start_subtick = green_tick * SUBTICKS_PER_TICK;
+                    t.progress_tick = green_tick;
                 }
             }
             _ => {}
@@ -609,6 +622,10 @@ impl RaceJudge {
         } else {
             proj.along_m
         };
+        if t.progress_m > t.best_progress_m + STUCK_PROGRESS_M {
+            t.best_progress_m = t.progress_m;
+            t.progress_tick = tick;
+        }
         // Off-course resets (round 12): back onto the course after the grace time. Without
         // resets the clock does not run: leaving the route is never a DQ (main's owner call);
         // the gates still have to be driven in order.
@@ -814,6 +831,24 @@ impl RaceJudge {
             };
             for i in 0..self.tracks.len() {
                 self.set_status(i, RacerStatus::Dnf(reason), tick);
+            }
+        }
+        // Safety net (lead, 2026-10-22): every racer still running has made no progress for
+        // `STUCK_LIMIT_S` (boxed in by standing cars, say), so the race could not end before
+        // its time limit: the judge ends it, each of them `Dnf(Stuck)` (a `RacerDnf` signal
+        // each). Not a racer giving up: racers never give up (owner).
+        let stuck_after = ticks_for(STUCK_LIMIT_S);
+        let running: Vec<usize> = (0..self.tracks.len())
+            .filter(|i| self.tracks[*i].running())
+            .collect();
+        let all_stuck = !running.is_empty()
+            && !matches!(self.rules.kind, RaceKind::Outrun { .. })
+            && running
+                .iter()
+                .all(|i| tick >= self.tracks[*i].progress_tick + stuck_after);
+        if all_stuck {
+            for i in running {
+                self.set_status(i, RacerStatus::Dnf(DnfReason::Stuck), tick);
             }
         }
         if self.tracks.iter().all(|t| !t.running()) {

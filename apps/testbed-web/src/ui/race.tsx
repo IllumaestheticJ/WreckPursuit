@@ -100,6 +100,7 @@ const REASON_LABEL: Record<string, string> = {
   Retired: "retired",
   Fled: "fled the police",
   FinishWindow: "too slow",
+  Stuck: "stuck",
   TimeLimit: "time limit",
   LeftCorridor: "left the route",
   ImplausibleMovement: "teleported",

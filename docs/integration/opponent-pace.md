@@ -1055,3 +1055,30 @@ Without police:
 ## Contract change requests
 
 - **`wp_contracts::DnfReason::Stuck`** (2026-10-22, for the lead's judge safety net (iii)): "made no progress for `stuck_limit_s`". `wp_race::RaceJudge` would end a race once every racer still running has made no course progress for 3 min (generous; logged as a signal), marking them `Dnf(Stuck)`. This is not a racer giving up (owner rule): the judge calls it. Until the variant exists there is no good existing reason: `TimeLimit` and `FinishWindow` mean something else.
+
+## Judge safety net: `Dnf(Stuck)` (2026-10-22)
+
+The lead added `wp_contracts::DnfReason::Stuck` (0.3.1, round12 6e0639e1).
+
+- **The rule:** `RaceJudge::check_limits` ends a race once every racer still running has made no course progress for `STUCK_LIMIT_S` = 180 s. Progress counts in steps of `STUCK_PROGRESS_M` = 5 m, timed from green. Each of them is `Dnf(Stuck)`, and gets a `RacerDnf` signal, which is the log.
+- **Scope:**
+  - Outrun keeps its own rule.
+  - The time limit and the finish window still take precedence.
+  - Every kind already has a time limit (420–1800 s), so this only shortens a race that would otherwise hang until it.
+- **Not a racer giving up:** the judge calls it.
+- **Constants, not rules.toml:** they are constants in `judge.rs`; say if you want them in `data/events/rules.toml`.
+- **UI:** the testbed race results show reason `Stuck` as "stuck", lowercase like the other labels ("busted", "too slow").
+- **Tests:**
+  - `a_race_where_everyone_left_is_stuck_ends_after_the_stuck_limit`: a lone stopped racer ends at 182 s as Stuck; with one racer still crawling, nobody is Stuck.
+  - `time_limit_and_finish_window` now uses a crawling racer for the time-limit case. A stopped one is now Stuck.
+
+## Weaving v2, step A: tried, dropped (2026-10-22)
+
+This was "no defensive move with a civilian within 100 m ahead". On Loop 9, 16 seeds, against 9070a6ca:
+
+| skill | finishers before → after | mean time |
+|---|---|---|
+| s50 | 96 → 95 /96 | 2.8 s faster |
+| s95 | 90 → 86 /96 | 4.6 s faster |
+
+That is fewer finishers, so it is not kept.
