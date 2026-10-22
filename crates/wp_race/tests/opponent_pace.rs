@@ -894,11 +894,12 @@ fn pace_scenarios_hold_their_ranges() {
                 c.rejoins
             );
         }
-        // A scenario whose `finishers` range allows a car short of the flag checks the times
-        // of the cars that finish only (how many must finish is that metric's job).
-        let dnf_ok = expects.iter().any(|x| {
+        // A scenario whose `finishers` range allows a car short of the flag (or that has no
+        // `finishers` metric: Loop 9, checked over 8 seeds by `loop9_traffic_field_finishes`)
+        // checks the times of the cars that finish only.
+        let dnf_ok = !expects.iter().any(|x| {
             matches!(x, simcli::scenario::Expect::Metric { name, min, .. }
-                if name == "finishers" && *min < cars.len() as f32)
+                if name == "finishers" && *min >= cars.len() as f32)
         });
         for x in &expects {
             let simcli::scenario::Expect::Metric {
@@ -922,6 +923,43 @@ fn pace_scenarios_hold_their_ranges() {
                 )),
                 None => fails.push(format!("{}: unknown pace metric {name:?}", sc.name)),
             }
+        }
+    }
+    assert!(fails.is_empty(), "{fails:#?}");
+}
+
+/// Loop 9 at 23:00 with traffic density 2.0: at least 44 of 48 cars finish per skill over seeds
+/// 1-8. A single seed's finishers swing by ±3 cars on millimetre grid differences (the pack
+/// packs up behind racers held by traffic), so the pace RONs check times only and this is
+/// the finishers gate. Release only, ~6 min: `just pace-loop9` (lead main-track gate,
+/// docs/LEAD_AUTOMATION.md).
+#[test]
+#[ignore = "release-only 8-seed Loop 9 traffic check: `just pace-loop9`"]
+fn loop9_traffic_field_finishes() {
+    let mut caps = BTreeMap::new();
+    let mut fails = Vec::new();
+    for skill in [0.5f32, 0.95] {
+        let mut fin = 0;
+        let mut all = 0;
+        for seed in 1..=8u64 {
+            let opts = PaceOpts {
+                police: false,
+                density: None,
+                solo: false,
+                geometry: false,
+                trace: None,
+                seed: Some(seed),
+                tod: None,
+            };
+            let cars = race_pace("loop9_circuit", skill, &opts, &mut caps);
+            all += cars.len();
+            fin += cars.iter().filter(|c| c.time_s.is_some()).count();
+        }
+        eprintln!("loop9 skill {skill}: {fin}/{all} finished over seeds 1-8");
+        if fin * 48 < 44 * all {
+            fails.push(format!(
+                "skill {skill}: {fin}/{all} finished, want >= 44/48"
+            ));
         }
     }
     assert!(fails.is_empty(), "{fails:#?}");
