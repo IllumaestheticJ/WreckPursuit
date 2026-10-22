@@ -306,3 +306,59 @@ fn map_shows_every_racer_during_a_race() {
         1
     );
 }
+
+#[test]
+fn bets_on_yourself_settle_through_the_career_economy() {
+    let mut s = sprint(true);
+    // A fresh account has no street rep: betting is locked.
+    let (max, lock) = s.bet_status();
+    assert_eq!(max, 0);
+    assert!(lock.is_some());
+    assert!(s.race_place_bet("win:player", 200).is_err());
+    s.debug_run_mut().unwrap().debug_set_rep(2_000);
+    let (max, lock) = s.bet_status();
+    assert!(max >= 200 && lock.is_none(), "{max} {lock:?}");
+    // A racer only backs themselves.
+    assert!(s.race_place_bet("win:vic", 200).is_err());
+    let cash0 = s.run().unwrap().account().cash;
+    let t = s.race_place_bet("h2h:player>tito", 200).unwrap();
+    assert_eq!(t.outcome, "open");
+    assert!(t.odds > 1.0 && t.paid > 200);
+    assert_eq!(s.run().unwrap().account().cash, cash0 - 200);
+    let (report, _) = run_to_final(&mut s, 150);
+    // Bets close at the green light.
+    assert!(s.race_place_bet("win:player", 200).is_err());
+    assert_eq!(report.bets.len(), 1);
+    let b = &report.bets[0];
+    assert_ne!(b.outcome, "open");
+    match b.outcome {
+        "won" => assert_eq!(b.paid, t.paid),
+        "lost" => assert_eq!(b.paid, 0),
+        _ => assert_eq!(b.paid, 200),
+    }
+    // Every racer's form rating moved, and the regulars' records remember the race.
+    assert_eq!(report.rating_changes.len(), 4);
+    assert!(crate::race::with_roster(|st| st.races) >= 1);
+    let saved = crate::race::roster_state_text();
+    crate::race::roster_state_load(&saved).unwrap();
+    assert_eq!(crate::race::roster_state_text(), saved);
+}
+
+#[test]
+fn picker_cards_carry_form_and_odds() {
+    let car = simcli::data::load_car(crate::data::mem_data(), CAR).unwrap();
+    for c in race_cards(Some(&car), DamageMode::Arcade) {
+        assert!(c
+            .drivers
+            .iter()
+            .all(|d| d.rating > 0 && !d.nickname.is_empty()));
+        // win, head-to-head per rival, podium in fields of four or more
+        let want = 1 + c.drivers.len() + usize::from(c.drivers.len() + 1 >= 4);
+        assert_eq!(c.odds.len(), want, "{}", c.id);
+        assert!(c
+            .odds
+            .iter()
+            .all(|o| o.odds >= 1.05 && o.label.contains("player")));
+    }
+    assert_eq!(crate::race::regular_cards().len(), 12);
+}

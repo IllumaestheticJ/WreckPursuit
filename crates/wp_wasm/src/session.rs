@@ -455,6 +455,34 @@ impl Session {
         self.roam.as_ref()
     }
 
+    /// Bet on yourself in this session's race while the countdown runs (see
+    /// [`crate::race::RaceRun::place_bet`]). Not recorded in replays: bets move money, not
+    /// cars.
+    pub fn race_place_bet(
+        &mut self,
+        label: &str,
+        stake: i64,
+    ) -> Result<crate::race::BetCard, String> {
+        let race = self.race.as_mut().ok_or("no race in this session")?;
+        let run = self.run.as_mut().ok_or("no account in this session")?;
+        race.place_bet(run, label, stake)
+    }
+
+    /// Tests: the session's economy run.
+    #[cfg(test)]
+    pub(crate) fn debug_run_mut(&mut self) -> Option<&mut PlayerRun> {
+        self.run.as_mut()
+    }
+
+    /// `(max stake, lock reason)` for street-race bets on this session's account (`(0,
+    /// Some(..))` without an account).
+    pub fn bet_status(&self) -> (i64, Option<String>) {
+        match &self.run {
+            Some(run) => (run.max_city_bet(), run.city_bet_lock()),
+            None => (0, Some("no account in this session".into())),
+        }
+    }
+
     /// The race's results panel (once the player is no longer racing).
     pub fn race_report(&self) -> Option<crate::race::RaceReport> {
         let over = self.run.as_ref().is_some_and(PlayerRun::is_over);

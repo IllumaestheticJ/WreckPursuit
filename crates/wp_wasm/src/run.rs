@@ -558,6 +558,47 @@ impl PlayerRun {
         Ok((fee, lines))
     }
 
+    /// Largest street-race bet the account may place right now (the career economy's
+    /// `max_bet`: rep tier cap, share of cash, 0 when locked or in debt).
+    pub fn max_city_bet(&self) -> i64 {
+        self.econ.max_bet(&self.acct, wp_economy::BetVenue::City)
+    }
+
+    /// Why street-race betting is locked for this account (`None` when it is open).
+    pub fn city_bet_lock(&self) -> Option<String> {
+        self.econ
+            .require_unlocked(&self.acct, wp_economy::Feature::CityBetting)
+            .err()
+            .map(|e| e.to_string())
+    }
+
+    /// Tests: set the account's rep (betting unlocks by rep tier).
+    #[cfg(test)]
+    pub(crate) fn debug_set_rep(&mut self, rep: i64) {
+        self.acct.rep = rep;
+    }
+
+    /// Take a street-race bet's stake (career economy `place_bet`, ledger-posted).
+    pub fn place_city_bet(
+        &mut self,
+        stake: i64,
+        label: &str,
+    ) -> Result<wp_economy::BetTicket, String> {
+        let (ticket, ev) = self
+            .econ
+            .place_bet(&mut self.acct, wp_economy::BetVenue::City, stake, label)
+            .map_err(|e| e.to_string())?;
+        self.ledger.extend(ev);
+        Ok(ticket)
+    }
+
+    /// Pay a bet back (`gross` stake included; 0 = lost, nothing posted).
+    pub fn settle_city_bet(&mut self, ticket: &wp_economy::BetTicket, gross: i64) {
+        if let Ok((_, ev)) = self.econ.settle_bet(&mut self.acct, ticket, gross) {
+            self.ledger.extend(ev);
+        }
+    }
+
     /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,
     /// bounty while wanted). `entry` = what [`PlayerRun::enter_race`] charged, for the report.
     pub fn settle_race(

@@ -28,8 +28,10 @@ use simcli::run::world_config;
 use simcli::Scenario;
 use wp_contracts::{DamageMode, EntityId, LoadedCar, RaceKind, SimEvent, VehicleInput, VehicleSim};
 use wp_opponent::{CarCapability, SimPolice, VehicleObs};
+use wp_race::betting::{BetWallet, BettingRules, Book, Outcome, Selection, Settlement};
 use wp_race::catalog::{self, RaceDef};
 use wp_race::live::{LiveEntrant, LiveRace, Standing};
+use wp_race::roster::{Placing, Roster, RosterState, PLAYER_KEY};
 use wp_race::{RaceData, RacerResult, RacerSample, RacerStatus};
 use wp_sim::{Sim, VehicleKind};
 
@@ -98,9 +100,107 @@ pub fn race_scenario(
     Ok(sc)
 }
 
+thread_local! {
+    /// The regulars' records in this browser (form ratings, wins, recent form). The testbed
+    /// saves it with [`roster_state_text`] and restores it with [`roster_state_load`].
+    static ROSTER_STATE: std::cell::RefCell<Option<RosterState>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` on the browser's roster records (fresh records on first use).
+pub fn with_roster<T>(f: impl FnOnce(&mut RosterState) -> T) -> T {
+    ROSTER_STATE.with(|r| {
+        let mut r = r.borrow_mut();
+        f(r.get_or_insert_with(|| RosterState::new(&Roster::embedded())))
+    })
+}
+
+/// The roster records as text (TOML) for the testbed's local save.
+pub fn roster_state_text() -> String {
+    with_roster(|s| s.to_json())
+}
+
+/// Restore the roster records from [`roster_state_text`] output (regulars added since get
+/// fresh records).
+pub fn roster_state_load(text: &str) -> Result<(), String> {
+    let mut st = RosterState::from_json(text)?;
+    st.sync(&Roster::embedded());
+    with_roster(|s| *s = st);
+    Ok(())
+}
+
+/// One regular with their record (`roster_json`).
+#[derive(Debug, Clone, Serialize)]
+pub struct RegularCard {
+    /// Roster id.
+    pub id: String,
+    /// `Name "Nickname" Surname`.
+    pub billing: String,
+    /// Car id.
+    pub car: String,
+    /// Home turf.
+    pub home: String,
+    /// Specialty key.
+    pub specialty: &'static str,
+    /// Personality.
+    pub style: String,
+    /// Form rating.
+    pub rating: i32,
+    /// Starts / wins / podiums / DNFs.
+    pub starts: u32,
+    /// Wins.
+    pub wins: u32,
+    /// Podiums.
+    pub podiums: u32,
+    /// DNFs.
+    pub dnfs: u32,
+    /// Last five results, oldest first (`1`–`9`, `X` DNF, `-` not raced).
+    pub form: String,
+}
+
+/// Every regular with their current record, strongest first.
+pub fn regular_cards() -> Vec<RegularCard> {
+    let roster = Roster::embedded();
+    with_roster(|st| {
+        let mut out: Vec<RegularCard> = roster
+            .racers
+            .iter()
+            .map(|r| {
+                let rec = st
+                    .get(&r.id)
+                    .cloned()
+                    .unwrap_or_else(|| wp_race::roster::RacerRecord::new(r.rating));
+                RegularCard {
+                    id: r.id.clone(),
+                    billing: r.billing(),
+                    car: r.car.clone(),
+                    home: r.home.clone(),
+                    specialty: r.specialty.key(),
+                    style: r.style.clone(),
+                    rating: rec.rating,
+                    starts: rec.starts,
+                    wins: rec.wins,
+                    podiums: rec.podiums,
+                    dnfs: rec.dnfs,
+                    form: rec.form_string(),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| b.rating.cmp(&a.rating).then(a.id.cmp(&b.id)));
+        out
+    })
+}
+
 /// One AI driver in the picker (`race_list`).
 #[derive(Debug, Clone, Serialize)]
 pub struct DriverCard {
+    /// Roster id.
+    pub id: &'static str,
+    /// Street name.
+    pub nickname: String,
+    /// Current form rating.
+    pub rating: i32,
+    /// Last five results, oldest first.
+    pub form: String,
     /// Name.
     pub name: &'static str,
     /// Personality.
@@ -140,11 +240,137 @@ pub struct RaceCard {
     pub purse: i64,
     /// Advertised buy-in for `car`.
     pub entry_fee: i64,
+    /// Course character (`hill`, `highway`, `downtown`, `mixed`).
+    pub terrain: &'static str,
+    /// What the player may bet on themselves, with today's odds (empty without a car).
+    pub odds: Vec<OddsCard>,
+}
+
+/// One bet the player may place on themselves (`race_list`, `race_bet`).
+#[derive(Debug, Clone, Serialize)]
+pub struct OddsCard {
+    /// Selection label for `race_bet` (`win:player`, `podium:player`, `h2h:player>vic`).
+    pub label: String,
+    /// `win`, `podium` or `h2h`.
+    pub kind: &'static str,
+    /// Head-to-head opponent's name.
+    pub opponent: Option<String>,
+    /// Decimal odds.
+    pub odds: f64,
+}
+
+/// A ticket on the results panel.
+#[derive(Debug, Clone, Serialize)]
+pub struct BetCard {
+    /// Selection label.
+    pub label: String,
+    /// Human-readable selection ("You to win", "You beat Vic Marlowe").
+    pub text: String,
+    /// Stake.
+    pub stake: i64,
+    /// Decimal odds locked in.
+    pub odds: f64,
+    /// `open`, `won`, `lost`, `void`.
+    pub outcome: &'static str,
+    /// Paid back (stake included; potential return while open).
+    pub paid: i64,
+}
+
+/// Rating points for the player's car against race `def`'s field (the career economy's
+/// class index; [`wp_race::roster::RatingConfig::car_adjust`]).
+fn player_car_adjust(
+    econ: &wp_economy::Economy,
+    rules: &BettingRules,
+    def: &RaceDef,
+    car: &LoadedCar,
+) -> i32 {
+    let field: Vec<u16> = def
+        .ai
+        .iter()
+        .filter_map(|d| simcli::data::load_car(mem_data(), d.car).ok())
+        .map(|c| econ.class_index(&c.def))
+        .collect();
+    rules.rating.car_adjust(econ.class_index(&car.def), &field)
+}
+
+/// The betting book for race `def` with the player in `car`, priced from the browser's roster
+/// records.
+fn book_for(
+    econ: &wp_economy::Economy,
+    def: &RaceDef,
+    car: &LoadedCar,
+) -> Book<wp_economy::BetTicket> {
+    let rules = BettingRules::embedded();
+    let adjust = player_car_adjust(econ, &rules, def, car);
+    let market =
+        with_roster(|st| catalog::betting_market(def, &Roster::embedded(), st, &rules, adjust));
+    Book::for_player(market)
+}
+
+fn selection_text(def: &RaceDef, sel: &Selection) -> String {
+    let name = |k: &str| {
+        def.ai
+            .iter()
+            .find(|d| d.id == k)
+            .map_or_else(|| "You".to_string(), |d| d.name.to_string())
+    };
+    match sel {
+        Selection::Win(k) => format!("{} to win", name(k)),
+        Selection::Podium(k) => format!("{} on the podium", name(k)),
+        Selection::HeadToHead { backed, opponent } => {
+            format!("{} beat {}", name(backed), name(opponent))
+        }
+    }
+}
+
+fn odds_cards(def: &RaceDef, book: &Book<wp_economy::BetTicket>) -> Vec<OddsCard> {
+    book.offered()
+        .into_iter()
+        .map(|(sel, o)| {
+            let (kind, opponent) = match &sel {
+                Selection::Win(_) => ("win", None),
+                Selection::Podium(_) => ("podium", None),
+                Selection::HeadToHead { opponent, .. } => (
+                    "h2h",
+                    def.ai
+                        .iter()
+                        .find(|d| d.id == opponent)
+                        .map(|d| d.name.to_string()),
+                ),
+            };
+            OddsCard {
+                label: sel.label(),
+                kind,
+                opponent,
+                odds: o.decimal(),
+            }
+        })
+        .collect()
+}
+
+/// The career economy's account as a betting wallet.
+struct RunWallet<'a>(&'a mut PlayerRun);
+
+impl BetWallet for RunWallet<'_> {
+    type Receipt = wp_economy::BetTicket;
+
+    fn max_stake(&self) -> i64 {
+        self.0.max_city_bet()
+    }
+
+    fn take_stake(&mut self, stake: i64, label: &str) -> Result<wp_economy::BetTicket, String> {
+        self.0.place_city_bet(stake, label)
+    }
+
+    fn pay_out(&mut self, receipt: &wp_economy::BetTicket, gross: i64) {
+        self.0.settle_city_bet(receipt, gross);
+    }
 }
 
 /// The picker for a player in `car` (stakes depend on the car's class bracket).
 pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
     let data = RaceData::embedded();
+    let roster = Roster::embedded();
     crate::garage::with_economy(|econ| {
         catalog::races()
             .iter()
@@ -168,14 +394,28 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     drivers: d
                         .ai
                         .iter()
-                        .map(|a| DriverCard {
-                            name: a.name,
-                            style: a.style,
-                            car: a.car,
+                        .map(|a| {
+                            let (rating, form) = with_roster(|st| {
+                                st.get(a.id)
+                                    .map_or((0, String::new()), |r| (r.rating, r.form_string()))
+                            });
+                            DriverCard {
+                                id: a.id,
+                                nickname: roster
+                                    .get(a.id)
+                                    .map_or_else(String::new, |r| r.nickname.clone()),
+                                rating,
+                                form,
+                                name: a.name,
+                                style: a.style,
+                                car: a.car,
+                            }
                         })
                         .collect(),
                     purse,
                     entry_fee,
+                    terrain: d.terrain.key(),
+                    odds: car.map_or_else(Vec::new, |c| odds_cards(d, &book_for(econ, d, c))),
                 }
             })
             .collect()
@@ -269,6 +509,10 @@ pub struct RaceReport {
     pub economy_error: Option<String>,
     /// The police caught the player (or the run ended): the end-of-run panel owns the screen.
     pub handoff_run_end: bool,
+    /// The player's bets on this race (settled once the results are final).
+    pub bets: Vec<BetCard>,
+    /// Form-rating changes from this race (`(name, change, new rating)`), once final.
+    pub rating_changes: Vec<(String, i32, i32)>,
 }
 
 /// A picker race attached to a session (see the module docs).
@@ -284,6 +528,12 @@ pub struct RaceRun {
     payout: Option<RacePayout>,
     economy_error: Option<String>,
     settled: bool,
+    /// The player's betting book (live runs only; closes at the green light).
+    book: Option<Book<wp_economy::BetTicket>>,
+    /// Settled tickets.
+    bets: Vec<Settlement>,
+    /// Form-rating changes recorded at the end.
+    rating_changes: Vec<(String, i32, i32)>,
 }
 
 impl RaceRun {
@@ -367,8 +617,12 @@ impl RaceRun {
             payout: None,
             economy_error: None,
             settled: false,
+            book: None,
+            bets: Vec::new(),
+            rating_changes: Vec::new(),
         };
         if let Some(run) = run {
+            me.book = Some(book_for(run.economy(), def, player_car));
             match run.enter_race(&me.setup) {
                 Ok(e) => me.entry = Some(e),
                 Err(e) => me.economy_error = Some(format!("buy-in refused: {e}")),
@@ -386,6 +640,39 @@ impl RaceRun {
             Ok(e) => self.entry = Some(e),
             Err(e) => self.economy_error = Some(format!("buy-in refused: {e}")),
         }
+    }
+
+    /// Bet on yourself while the countdown runs (`label` from [`OddsCard::label`]): the stake
+    /// goes through the career economy (`place_bet`: rep-tier cap, cash, debt) on `run`'s
+    /// account, the odds are locked in. Refused once the light is green.
+    pub fn place_bet(
+        &mut self,
+        run: &mut PlayerRun,
+        label: &str,
+        stake: i64,
+    ) -> Result<BetCard, String> {
+        let def = self.live.def().clone();
+        let book = self.book.as_mut().ok_or("no betting in this session")?;
+        if let Some(lock) = run.city_bet_lock() {
+            return Err(lock);
+        }
+        let sel = book
+            .offered()
+            .into_iter()
+            .map(|(s, _)| s)
+            .find(|s| s.label() == label)
+            .ok_or_else(|| format!("not offered: {label}"))?;
+        let t = book
+            .place(&mut RunWallet(run), sel, stake)
+            .map_err(|e| e.to_string())?;
+        Ok(BetCard {
+            label: t.selection.label(),
+            text: selection_text(&def, &t.selection),
+            stake: t.stake,
+            odds: t.odds.decimal(),
+            outcome: "open",
+            paid: t.potential,
+        })
     }
 
     /// The car was moved on purpose (reset, debug park): judge its next sample from `pos`.
@@ -441,6 +728,11 @@ impl RaceRun {
             .map(|v| v.id)
             .collect();
         let out = self.live.post_step(sim.tick(), &samples, events, &police);
+        if let Some(book) = &mut self.book {
+            if book.open && !self.live.in_countdown(sim.tick()) {
+                book.close();
+            }
+        }
         self.prev_events = events.to_vec();
         let mut emitted: Vec<SimEvent> = out.signals.iter().map(|s| s.to_sim_event()).collect();
         if !out.reports.is_empty() {
@@ -474,7 +766,11 @@ impl RaceRun {
             return;
         }
         self.settled = true;
-        let (Some(run), Some(entry)) = (run, self.entry.take()) else {
+        let Some(run) = run else {
+            return;
+        };
+        self.settle_bets_and_form(run);
+        let Some(entry) = self.entry.take() else {
             return;
         };
         let Some(r) = self.player_result() else {
@@ -485,6 +781,71 @@ impl RaceRun {
             Ok(p) => self.payout = Some(p),
             Err(e) => self.economy_error = Some(format!("payout refused: {e}")),
         }
+    }
+
+    /// Record the race in the regulars' records and settle the player's bets.
+    fn settle_bets_and_form(&mut self, run: &mut PlayerRun) {
+        let def = self.live.def().clone();
+        let results = match self.live.final_results() {
+            Some(r) => r.to_vec(),
+            None => self.live.judge().results(),
+        };
+        let placings = Placing::from_results(&results, |e| {
+            self.names
+                .get(&e)
+                .and_then(|(name, _)| catalog::roster_key_of(&def, name))
+                .map(str::to_string)
+        });
+        let rules = BettingRules::embedded();
+        let deltas = with_roster(|st| {
+            st.record_race(&placings, &rules.rating)
+                .into_iter()
+                .map(|(k, d)| (k.clone(), d, st.rating(&k)))
+                .collect::<Vec<_>>()
+        });
+        self.rating_changes = deltas
+            .into_iter()
+            .map(|(k, d, r)| {
+                let name = if k == PLAYER_KEY {
+                    "You".to_string()
+                } else {
+                    def.ai
+                        .iter()
+                        .find(|a| a.id == k)
+                        .map_or(k.clone(), |a| a.name.to_string())
+                };
+                (name, d, r)
+            })
+            .collect();
+        if let Some(book) = &mut self.book {
+            self.bets = book.settle(&mut RunWallet(run), &placings);
+        }
+    }
+
+    fn bet_cards(&self) -> Vec<BetCard> {
+        let def = self.live.def();
+        let Some(book) = &self.book else {
+            return Vec::new();
+        };
+        book.tickets
+            .iter()
+            .map(|t| {
+                let s = self.bets.iter().find(|s| s.ticket == t.id);
+                BetCard {
+                    label: t.selection.label(),
+                    text: selection_text(def, &t.selection),
+                    stake: t.stake,
+                    odds: t.odds.decimal(),
+                    outcome: match s.map(|s| s.outcome) {
+                        None => "open",
+                        Some(Outcome::Won) => "won",
+                        Some(Outcome::Lost) => "lost",
+                        Some(Outcome::Void) => "void",
+                    },
+                    paid: s.map_or(t.potential, |s| s.paid),
+                }
+            })
+            .collect()
     }
 
     fn player_result(&self) -> Option<RacerResult> {
@@ -643,6 +1004,8 @@ impl RaceRun {
             economy_error: self.economy_error.clone(),
             handoff_run_end: player_run_over
                 || me.status == RacerStatus::Dnf(wp_race::DnfReason::Captured),
+            bets: self.bet_cards(),
+            rating_changes: self.rating_changes.clone(),
         })
     }
 
