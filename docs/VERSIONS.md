@@ -63,5 +63,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.53 | preview | Loop 9 rest stops (row 153: three pull-offs with ramps, lit parking, parked cars, P on the map; racers not hooked yet); Hollins tunnel exit point; wrecks across a lane count as leaders. KNOWN: Founders Cut tunnel pursuit pair fails expectations on the merged tip (E) |
 | 0.12.54 | preview | Night meets at the Loop 9 rest stops (row 153): loop racers idle there between laps, challenge near a stop = side-by-side start on the parking road + one-tap ~10 km lap back to the stop; street races up to 12 km; dormant parked cars (SR-3, ~0.5 ms/frame by day); transparent materials single-pass (no shader re-resolve); Founders Cut pursuit re-seeded after the rest-stop roads |
 | 0.12.55 | preview | Far street racers (>350 m) run a light kinematic mode (Vesper night sim 7.7 → 4.7 ms/frame); police skip far unwanted racers; replay hash every 4th tick; AI racers see physical traffic cars as traffic (Loop 9 finishers 91→96 / 89→90 of 96) |
-| 0.12.56 | preview | (next) |
+| 0.12.56 | preview | AI racers escape a box-in (reverse-and-turn round standing cars; Lantern police race always ends); minor-road traffic no longer starves at Priority junctions; wp_contracts 0.3.1 (DnfReason::Stuck, judge rule pending) |
+| 0.12.57 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
