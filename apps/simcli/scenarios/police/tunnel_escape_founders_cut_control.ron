@@ -8,9 +8,13 @@
 // through their gears without the old clutch slip, capture at 111.7 s; window starts at 100 s.
 // Row 119: re-seeded to 56 with the escape scenario (see there); captured at 124.7 s.
 // Round 12c: re-seeded to 51 with the escape scenario (see there); captured at 112.1 s.
+// Row 84 (search extras, 2026-10-22): extra units sent to the last known spot shift this chase's
+// timeline (seed 51 lost him on Mercer at 64.5 s and he escaped at 80.4 s, before the helicopter).
+// Seeds 50-63: the escape story holds on 12 of 14, escape and control both on 7 (53-55, 57, 59,
+// 60, 62); re-seeded to 53.
 (
     name: "police_tunnel_escape_founders_cut_control",
-    seed: 51,
+    seed: 53,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,

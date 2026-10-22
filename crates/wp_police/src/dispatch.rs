@@ -2450,8 +2450,12 @@ impl PoliceSystem {
         racer: EntityId,
     ) -> Option<([f32; 2], [f32; 2])> {
         let rec = self.racers.get(&racer)?;
-        let target = xy(rec.pos);
-        let rv = [rec.vel[0], rec.vel[1]];
+        // Lost (row 84): around the last known position and the way it was heading, not
+        // where the hidden racer really is.
+        let (target, rv) = match (rec.status, rec.last_known) {
+            (PursuitStatus::Searching, Some(lk)) => (lk, rec.last_known_vel),
+            _ => (xy(rec.pos), [rec.vel[0], rec.vel[1]]),
+        };
         let moving = crate::graph::len(rv) > 3.0;
         let rs = &self.cfg.presence.response;
         let to_racer = self.graph.distances_to(target);
@@ -2686,10 +2690,37 @@ impl PoliceSystem {
         rc.backup_radius_m[level] + rc.far_margin_m
     }
 
+    /// Ground units wanted on `racer`: `units_per_level` for its level, plus
+    /// `search_extra_units` while it is lost (row 84).
+    pub(crate) fn wanted_units(&self, racer: EntityId) -> u32 {
+        let Some(rec) = self.racers.get(&racer) else {
+            return 0;
+        };
+        let rc = &self.cfg.presence.reinforcement;
+        let li = rec.level.table_index();
+        rc.units_per_level[li]
+            + if rec.status == PursuitStatus::Searching {
+                rc.search_extra_units[li]
+            } else {
+                0
+            }
+    }
+
+    /// Where the police work a pursuit on `racer` from: the racer while they see it, its last
+    /// known position while it is lost (row 84: units sent to search there were stood down as
+    /// "far" from where the hidden racer had really got to).
+    pub(crate) fn search_centre(&self, racer: EntityId) -> Option<[f32; 2]> {
+        let r = self.racers.get(&racer)?;
+        Some(match (r.status, r.last_known) {
+            (PursuitStatus::Searching, Some(lk)) => lk,
+            _ => xy(r.pos),
+        })
+    }
+
     /// Units on `racer` within [`PoliceSystem::far_m`] of it (what counts toward the level's
     /// units: a unit far across town doesn't stop a closer one being sent).
     pub(crate) fn units_near(&self, racer: EntityId) -> u32 {
-        let Some(p) = self.racers.get(&racer).map(|r| xy(r.pos)) else {
+        let Some(p) = self.search_centre(racer) else {
             return 0;
         };
         let far = self.far_m(racer);
@@ -2707,7 +2738,7 @@ impl PoliceSystem {
     /// Stand down AI units that have been on `racer` for `far_release_s` and are still farther
     /// than `far_m` from it (they despawn once out of sight).
     fn release_far_units(&mut self, racer: EntityId) {
-        let Some(p) = self.racers.get(&racer).map(|r| xy(r.pos)) else {
+        let Some(p) = self.search_centre(racer) else {
             return;
         };
         let (far, wait) = (
@@ -2745,8 +2776,7 @@ impl PoliceSystem {
         self.reinforcements
             .retain(|r| racers.get(&r.racer).is_some_and(|x| x.pursued()));
         for racer in self.pursued_by_priority() {
-            let rec = &self.racers[&racer];
-            let want = self.cfg.presence.reinforcement.units_per_level[rec.level.table_index()];
+            let want = self.wanted_units(racer);
             self.release_far_units(racer);
             let mut have = self.units_near(racer);
             if have < want {
@@ -2792,8 +2822,7 @@ impl PoliceSystem {
                 continue;
             };
             // Backup already got there first (units joined from nearby): not needed.
-            let want = self.cfg.presence.reinforcement.units_per_level
-                [self.racers[&req.racer].level.table_index()];
+            let want = self.wanted_units(req.racer);
             if self.units_near(req.racer) >= want {
                 continue;
             }

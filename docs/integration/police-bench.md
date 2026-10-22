@@ -110,6 +110,8 @@ or commercial districts picked by the seed, at 15 m/s. Nothing else is set up.
 | `pace` | keep-up: that unit's speed ÷ the evader's, 1 Hz while police see it and it drives faster than 25 m/s (~90 km/h); 1.0 = matching it | median of all samples |
 | `pop-in/min` | police cars (any role, tool cars included) that appeared where a racer had line of sight to them, or whose spot a racer saw within 3 s of them appearing (row 131), per minute of run | rate |
 | `far-cw/min` | pursuit cars (responders, backup, roadblock and spike cars) that appeared on the far carriageway of the pursued racer's divided road: within 30 m of its road ahead or behind, on a one-way road running the other way (row 140), per minute of run | rate |
+| `re-acquire` | search episodes (pursuit → searching) that ended with the evader seen again, the rest ended in its escape (row 84) | share |
+| `search units` | police cars within 300 m of the last known position, 1 Hz while searching (row 84) | mean |
 | `turns/min` | turn-rounds by units after the evader (the pro driver facing more than ~73 deg away from its line, a reverse swing or U-turn, or backing out), per pursuit minute | rate |
 | `turn s` | how long each of those turn-rounds took, start to driving on | median |
 | `capture` | pursuit ended `Captured` / `CapturedTotalLoss` | share of runs |
