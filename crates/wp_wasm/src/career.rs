@@ -1304,16 +1304,15 @@ impl Career {
 
     // ----- runs ------------------------------------------------------------------------------
 
-    /// Start a career run of `sc` (any live scenario): the active car in the first slot, the
-    /// career's mode and carried heat, mods applied, saved damage restored, the account bound
-    /// to the session's economy run. Returns the session (install it with `crate::install`).
-    pub fn start_run(&mut self, mut sc: simcli::Scenario) -> Result<Session, String> {
-        if let Some(why) = self.start_blocker() {
-            return Err(why);
-        }
-        let acct = &self.profile.account;
-        let uid = acct.active_car.expect("start_blocker checked");
-        let car = acct.try_car(uid).map_err(e2s)?.clone();
+    /// A session of `sc` with owned car `uid` in the first slot: the career's mode, its mods
+    /// (overlay files), its saved damage, `heat` as police heat outside the flat lot.
+    fn car_session(
+        &self,
+        uid: CarUid,
+        mut sc: simcli::Scenario,
+        heat: f32,
+    ) -> Result<(Session, EntityId), String> {
+        let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         let first = sc
             .entities
             .first_mut()
@@ -1322,7 +1321,7 @@ impl Career {
         first.police_heat = if sc.city == simcli::scenario::CitySpec::Flat {
             0.0
         } else {
-            self.profile.carry.heat
+            heat
         };
         sc.mode = self.mode();
         let files = self.car_files(&car)?;
@@ -1337,6 +1336,35 @@ impl Career {
                 .map_err(|e| e.to_string())?
                 .restore_full(&snap);
         }
+        Ok((session, player))
+    }
+
+    /// The garage workshop's view of car `uid`: a sandbox session of `sc` (a flat lot) with
+    /// the car as it is (mods, saved damage), not a run. Any owned car in the garage, even one
+    /// that cannot drive (parts missing, wrecked).
+    pub fn showroom(&self, uid: CarUid, sc: simcli::Scenario) -> Result<Session, String> {
+        if self.run.is_some() {
+            return Err("finish the run first (back to the garage)".into());
+        }
+        let car = self.profile.account.try_car(uid).map_err(e2s)?;
+        if car.location != CarLocation::Garage {
+            return Err("the car is in the pound".into());
+        }
+        Ok(self.car_session(uid, sc, 0.0)?.0)
+    }
+
+    /// Start a career run of `sc` (any live scenario): the active car in the first slot, the
+    /// career's mode and carried heat, mods applied, saved damage restored, the account bound
+    /// to the session's economy run. Returns the session (install it with `crate::install`).
+    pub fn start_run(&mut self, sc: simcli::Scenario) -> Result<Session, String> {
+        if let Some(why) = self.start_blocker() {
+            return Err(why);
+        }
+        let acct = &self.profile.account;
+        let uid = acct.active_car.expect("start_blocker checked");
+        let heat = self.profile.carry.heat;
+        let (mut session, player) = self.car_session(uid, sc, heat)?;
+        let acct = &self.profile.account;
         let run = if session.run().is_some() {
             let seed = session.scenario().seed ^ CAREER_SEED_SALT ^ ((acct.day as u64) << 32);
             Some(PlayerRun::for_career_car(
@@ -1651,6 +1679,16 @@ pub fn career_start_run(scenario_json: &str) -> Result<Vec<u32>, JsValue> {
     let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(crate::err)?;
     end_active_run()?;
     let session = with_career(|c| c.start_run(sc))?;
+    Ok(crate::install(session))
+}
+
+/// Show career car `uid` in the garage workshop: installs a sandbox session of
+/// `scenario_json` (use the flat lot) with the car as it is, not a run. Returns the entity ids.
+#[wasm_bindgen]
+pub fn career_workshop_session(uid: u32, scenario_json: &str) -> Result<Vec<u32>, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(crate::err)?;
+    end_active_run()?;
+    let session = with_career(|c| c.showroom(CarUid(uid), sc))?;
     Ok(crate::install(session))
 }
 

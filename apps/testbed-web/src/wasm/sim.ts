@@ -423,9 +423,17 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  // ----- garage workshop (crates/wp_wasm/src/career.rs; throws on refusal) ---------------------
+  /** Show career car `uid` in the workshop: a sandbox session of `scenarioJson` (flat lot). */
+  careerWorkshopSession: (uid: number, scenarioJson: string): number[] => Array.from(wasm.career_workshop_session(uid, scenarioJson)),
+  careerWorkshop: (uid: number): WorkshopScreen => JSON.parse(wasm.career_workshop_json(uid)),
+  careerRemovePart: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_remove_part(uid, slot)),
+  careerFitPart: (uid: number, slot: string, part: number): WorkshopScreen => JSON.parse(wasm.career_fit_part(uid, slot, part)),
+  careerBuyPart: (uid: number, kind: string, grade: string | null): WorkshopScreen => JSON.parse(wasm.career_buy_part(uid, kind, grade ?? "")),
+  careerSellPart: (uid: number, part: number): WorkshopScreen => JSON.parse(wasm.career_sell_part(uid, part)),
 };
 
-import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";

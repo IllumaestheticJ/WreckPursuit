@@ -82,6 +82,11 @@ export class SceneView {
   readonly prewarmRoots: THREE.Object3D[] = [];
 
   private debugGrid!: THREE.GridHelper;
+  /** Axis hint at the sim origin (hidden in the workshop). */
+  private originAxes!: THREE.AxesHelper;
+  /** The flat world's ground plane (hidden inside the garage workshop). */
+  private flatGround!: THREE.Mesh;
+  private workshopOn = false;
   /** The one siren point light (browser perf pass): every point light costs every lit pixel,
    * even at intensity 0, and a changing light count recompiles the lit shaders. It follows
    * the nearest police car with its siren on and is hidden when no siren is on. */
@@ -129,6 +134,7 @@ export class SceneView {
     this.world.rotation.x = -Math.PI / 2;
     this.scene.add(this.world);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), this.groundMaterial);
+    this.flatGround = ground;
     // Below the city's zone ground (-0.05 m) and roads (0 m), so they never z-fight with it.
     ground.position.z = -0.2;
     this.world.add(ground);
@@ -140,6 +146,7 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
+    this.originAxes = axes;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
     this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.sirenLight, this.markings.group);
@@ -161,7 +168,7 @@ export class SceneView {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
     this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
-    this.debugGrid.visible = !cityId;
+    this.debugGrid.visible = !cityId && !this.workshopOn;
     if (!cityId || this.cities.has(cityId)) return;
     const holder = new THREE.Group();
     this.cities.set(cityId, holder);
@@ -222,6 +229,14 @@ export class SceneView {
    * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
    * frame per car.
    */
+  /** Garage workshop: hide the flat ground and grid (the bay has its own floor). */
+  setWorkshop(on: boolean): void {
+    this.workshopOn = on;
+    this.flatGround.visible = !on;
+    this.debugGrid.visible = !on && !this.cityShown;
+    this.originAxes.visible = !on;
+  }
+
   groundZ(x: number, y: number): number | null {
     const city = this.cityShown ? this.cities.get(this.cityShown) : null;
     if (!city) return null;

@@ -797,6 +797,11 @@ export class PanelBody {
   private skinnedNodes: Float32Array | null = null;
   private readonly stateOf = new Map<number, number>();
   private disposed = false;
+  /** Mesh part of each wheel-space mesh (workshop picking). */
+  private readonly wheelDefs = new Map<THREE.Mesh, MeshPartJson>();
+  /** Workshop highlight overlays and their material. */
+  private glow: THREE.Mesh[] = [];
+  private glowMat: THREE.MeshBasicMaterial | null = null;
 
   constructor(
     readonly entity: number,
@@ -1108,6 +1113,7 @@ export class PanelBody {
         // uprights) and are never re-skinned.
         const wm = new THREE.Mesh(d.wheelGeom, material);
         wm.name = def.name;
+        this.wheelDefs.set(wm, def);
         wm.frustumCulled = false;
         (PIVOT_KINDS.has(def.kind) ? this.pivotParts : this.wheelParts)[def.wheel!].push(wm);
         continue;
@@ -1526,6 +1532,85 @@ export class PanelBody {
     const s = (region % 5) - 2;
     debris.push({ obj: group, vel, spin: new THREE.Vector3(1.5 + s * 0.4, -1.0 + s * 0.3, 0.8 - s * 0.2), age: 0 });
     while (debris.length > MAX_DEBRIS) debris.shift()?.obj.removeFromParent();
+  }
+
+  // ----- garage workshop (src/workshop): pick, hide and highlight parts by name ---------------
+
+  /** Mesh parts of this car with their centre (chassis metres); wheel parts are in hub space. */
+  partDefs(): { def: MeshPartJson; centre: THREE.Vector3 }[] {
+    const out = this.parts.map((p) => ({ def: p.def, centre: dataOf(p.def).centre }));
+    for (const ps of [...this.wheelParts, ...this.pivotParts])
+      for (const m of ps) {
+        const def = this.wheelDefs.get(m);
+        if (def) out.push({ def, centre: dataOf(def).centre });
+      }
+    return out;
+  }
+
+  /** The visible part `ray` hits first, or null (body batches, lenses and wheel parts). */
+  partAt(ray: THREE.Raycaster): MeshPartJson | null {
+    const targets: THREE.Object3D[] = this.batches.map((b) => b.mesh);
+    for (const p of this.parts) if (p.mesh.geometry !== NO_GEOMETRY && !p.hidden) targets.push(p.mesh);
+    for (const ps of [...this.wheelParts, ...this.pivotParts]) for (const m of ps) if (m.visible) targets.push(m);
+    for (const b of this.batches) b.mesh.geometry.boundingSphere = null;
+    const hit = ray.intersectObjects(targets, false)[0];
+    if (!hit) return null;
+    const wheel = this.wheelDefs.get(hit.object as THREE.Mesh);
+    if (wheel) return wheel;
+    const batch = this.batches.find((b) => b.mesh === hit.object);
+    if (!batch) return this.parts.find((p) => p.mesh === hit.object)?.def ?? null;
+    const i = (hit.faceIndex ?? 0) * 3;
+    const part = this.parts.find(
+      (p) => p.batch === batch && i >= p.indexStart && i < p.indexStart + p.def.indices.length,
+    );
+    return part?.def ?? null;
+  }
+
+  /** Stop drawing every part `hide` picks (parts taken off in the workshop). */
+  hideParts(hide: (def: MeshPartJson, centre: THREE.Vector3) => boolean): void {
+    for (const p of this.parts) if (!p.hidden && hide(p.def, dataOf(p.def).centre)) this.hidePart(p);
+    for (const ps of [...this.wheelParts, ...this.pivotParts])
+      for (const m of ps) {
+        const def = this.wheelDefs.get(m);
+        if (def && hide(def, dataOf(def).centre)) m.visible = false;
+      }
+  }
+
+  /** Glow over the parts `pick` selects (null clears it). Built from their current shape. */
+  highlightParts(pick: ((def: MeshPartJson, centre: THREE.Vector3) => boolean) | null, colour = 0x39ff88): void {
+    for (const m of this.glow) {
+      m.geometry.dispose();
+      m.removeFromParent();
+    }
+    this.glow = [];
+    if (!pick) return;
+    const material = (this.glowMat ??= new THREE.MeshBasicMaterial({
+      color: colour,
+      transparent: true,
+      opacity: 0.45,
+      depthTest: false,
+      depthWrite: false,
+    }));
+    material.color.set(colour);
+    for (const p of this.parts) {
+      if (p.hidden || !pick(p.def, dataOf(p.def).centre)) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(p.pos.slice(), 3));
+      g.setIndex(new THREE.BufferAttribute(dataOf(p.def).index, 1));
+      const m = new THREE.Mesh(g, material);
+      m.renderOrder = 10;
+      this.root.add(m);
+      this.glow.push(m);
+    }
+    for (const ps of [...this.wheelParts, ...this.pivotParts])
+      for (const w of ps) {
+        const def = this.wheelDefs.get(w);
+        if (!def || !w.visible || !pick(def, dataOf(def).centre)) continue;
+        const m = new THREE.Mesh(w.geometry.clone(), material);
+        m.renderOrder = 10;
+        w.add(m);
+        this.glow.push(m);
+      }
   }
 
   dispose(): void {

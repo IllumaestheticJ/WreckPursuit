@@ -14,8 +14,8 @@ is a model for layout and flow only; all art, assets and text are our own. Plan 
 
 | Stage | What | Status |
 |---|---|---|
-| 1 | Parts model (`wp_economy::parts`), slot table, wasm exports | this branch |
-| 2 | 3D workshop scene in the testbed | planned |
+| 1 | Parts model (`wp_economy::parts`), slot table, wasm exports | PR #43 |
+| 2 | 3D workshop scene in the testbed | this branch |
 | 3 | Visible cosmetics on every car, vinyl library, more cosmetic parts | planned |
 | 4 | Work on it yourself (DIY repair, paint booth, car info) | planned |
 | 5 | Tuning and polish | planned |
@@ -52,7 +52,25 @@ removed part carries them).
 | `career_remove_part(uid, slot)`, `career_fit_part(uid, slot, part)` | return the workshop JSON; go through the same structure check as mods (a cage cannot go in while the body is dented); fitting a new part repairs that area of the stored lattice and re-records the damage |
 | `career_buy_part(uid, kind, grade)`, `career_sell_part(uid, part)` | `grade = ""` = stock replacement |
 
+| `career_workshop_session(uid, scenario_json)` | installs a paused sandbox session with the car as it is (mods, saved dents, empty slots) and no run, for the 3D workshop; refused during a run or while impounded |
+
 `career_start_run` refuses a car with empty required slots ("the car is missing parts: ...").
+
+### Testbed (`apps/testbed-web`, `apps/ui-kit`)
+- `src/workshop/room.ts`: the garage bay, built in code (concrete floor, block walls, roller door,
+  two-post lift, bench, tool chest, tyre rack, shelving, lights). The car never moves: raising the
+  lift lowers the room.
+- `src/workshop/slotmap.ts`: panel-mesh part (region / kind / name) → slot id in `parts.toml`.
+- `src/workshop/mode.ts`: `WorkshopMode` (open / close, part picking and highlight, empty slots
+  hidden on the car, camera presets overview / engine / under / wheels, rebuild after a change).
+- `render/panels.ts`: `PanelBody.partDefs`, `partAt(ray)`, `hideParts`, `highlightParts`.
+- `scene.ts`: `setWorkshop(on)` hides the flat ground, grid and origin axes.
+- `settings.ts`: `DEBUG_LAYERS` moved here from `main.ts`; `layers.hold(ids)` keeps debug drawing
+  off while the workshop is open, developer mode included.
+- ui-kit `garage/Workshop.tsx`: overlay (top bar with cash / missing parts / Drive, view and lift
+  tools, part card, catalog, part list, inventory strip); `CareerGarage` gets a Workshop button.
+- `e2e/workshop.mjs`: headless browser run (pick, remove, blocker, missing parts, catalog buy,
+  fit, drive). `SHOTS=dir` writes screenshots.
 
 ## Needs
 - Stage 3 needs panel anchor data per car (bumper, roof, wheel arch positions) from
@@ -70,7 +88,9 @@ removed part carries them).
   `DataSources` / `Economy`, the new account fields, `PartRefused` / `UnknownPart` errors, parts
   sync in the mod tree, empty-slot lines in `record_damage`.
 - `crates/wp_wasm/src/career.rs`: `change_mods` returns the closure's value; workshop methods and
-  exports; the missing-parts start check.
+  exports; the missing-parts start check; `car_session` shared by `start_run` and `showroom`.
+- `apps/testbed-web/src/{main,scene,settings,render/panels,wasm/sim}.ts`, `index.html`: workshop
+  wiring (see Testbed above).
 
 ## Perf numbers
 Workshop operations run on a button press, not per frame.
@@ -81,3 +101,5 @@ Workshop operations run on a button press, not per frame.
 - An optional or body slot left empty does not detach the panel when driving yet (stage 4).
 - No workshop hours yet: removing and fitting is free and instant (stage 4).
 - No visible parts yet: mods do not change the car's mesh (stage 3).
+- The workshop part picker only knows parts the car meshes draw; slots with no mesh (gearbox,
+  ECU, fuel pump and similar) are reached through the Part list.
