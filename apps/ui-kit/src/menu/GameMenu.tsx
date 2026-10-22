@@ -24,7 +24,7 @@ import "../ui/theme.css";
 import "./menu.css";
 
 /** What the main menu can start. */
-export type PlayChoice = "chase" | "chaseRain" | "races" | "free" | "garage";
+export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
 
 /** Which screen is showing ("closed" = none). */
 export type MenuScreen = "closed" | "main" | "pause" | "settings";
@@ -462,6 +462,7 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "chase", label: "City chase", hint: "Night in Port Vesper. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
+  { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];

@@ -53,6 +53,7 @@ import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
+import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
@@ -357,6 +358,26 @@ async function main(): Promise<void> {
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
   });
+  // Touge battles: pass picker with the rep-gated wager menu, and the battle panel during one.
+  const tougeEl = document.createElement("div");
+  tougeEl.id = "ui-touge";
+  tougeEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(tougeEl);
+  const tougeView = new TougeView(tougeEl, {
+    list: () => sim.tougeList(),
+    menu: (c) => sim.tougeMenu(c),
+    start: (c, wager) => startTouge(c, wager),
+    setRep: (rep) => {
+      try {
+        sim.tougeDebugSetRep(rep);
+        return null;
+      } catch (e) {
+        return String(e).replace(/^(Error: )?wp_wasm: /, "");
+      }
+    },
+  });
+  /** Last touge battle started ("Race again" replays it with the same wager). */
+  let lastTouge: { choice: TougeChoice; wager: Wager } | null = null;
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
   let statTable: CarStatsTable | null = null;
   try {
@@ -440,12 +461,14 @@ async function main(): Promise<void> {
     const names = new Map<number, string>();
     let course = null;
     if (id) {
-      const card = sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).find((c) => c.id === id);
-      ids.forEach((e, i) => names.set(e, i === 0 ? "You" : (card?.drivers[i - 1]?.name ?? `#${e}`)));
+      const touge = id.startsWith("touge:") ? sim.tougeResult() : null;
+      const card = touge ? undefined : sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).find((c) => c.id === id);
+      ids.forEach((e, i) => names.set(e, i === 0 ? "You" : (touge?.opponent ?? card?.drivers[i - 1]?.name ?? `#${e}`)));
       course = parseCourse(sim.raceCourse());
     }
     raceMarker.setCourse(course);
     raceView.reset(id, names, course);
+    tougeView.reset();
   };
 
   /** Start street race `id` (the picker's "Race" button, `?race=`, "Race again"). */
@@ -455,11 +478,52 @@ async function main(): Promise<void> {
     mode = ($("mode") as HTMLSelectElement).value,
     autopilot = params.get("autopilot") === "1",
   ) => {
+    if (id.startsWith("touge:")) {
+      const [, map, direction, daylight, surface, opponent] = id.split(":");
+      const again = lastTouge?.choice;
+      const choice = { map, direction, daylight, surface, opponent } as TougeChoice;
+      const same = again && JSON.stringify(again) === JSON.stringify(choice);
+      startTouge(choice, same && lastTouge ? lastTouge.wager : { kind: "none" }, car, mode, autopilot);
+      return;
+    }
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
     sim.raceStart(id, car, mode, autopilot);
+    rebuildViews();
+    applyAssistPreset(app.source);
+    rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+  };
+
+  /** Start a touge battle: a career run with the career car when the career box is ticked and
+   * a career exists (a pink slip then moves cars in the career garage), else a plain session. */
+  const startTouge = (
+    choice: TougeChoice,
+    wager: Wager,
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
+    mode = ($("mode") as HTMLSelectElement).value,
+    autopilot = params.get("autopilot") === "1",
+  ) => {
+    lastTouge = { choice, wager };
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    if (($("career") as HTMLInputElement).checked && sim.careerExists()) {
+      try {
+        // The touge locks its own weather (dry / rain), so no withWeather here.
+        sim.careerStartRun(sim.tougeScenarioJson(choice, car, mode, wager, autopilot));
+      } catch (e) {
+        openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+        return;
+      }
+      garage.hide();
+      app.paused = false;
+      persistCareer();
+    } else {
+      sim.tougeStart(choice, car, mode, wager, autopilot);
+    }
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
@@ -488,6 +552,7 @@ async function main(): Promise<void> {
     }
     const report = withReport || raceView.report ? sim.raceResult() : null;
     raceView.update({ info, standings, report, player: pose, others }, performance.now());
+    if (raceView.raceId.startsWith("touge:")) tougeView.update(sim.tougeResult(), performance.now());
     const done = me < 0 || standings[me + RS.status] > 0 || info[RI.phase] === 2;
     const next = done ? -1 : standings[me + RS.nextGate];
     const gates = info[RI.gates];
@@ -851,6 +916,7 @@ async function main(): Promise<void> {
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
+  $("sc-touge").onclick = () => tougeView.openPicker();
   /** Drift lab (owner rows 90 / 91 / 98): flat pad at noon (no traffic or police on the flat
    * world), painted course, live tuning panel. */
   const startDriftLab = () => {
@@ -1154,6 +1220,7 @@ async function main(): Promise<void> {
         else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
         else if (choice === "races") raceView.openPicker();
+        else if (choice === "touge") tougeView.openPicker();
         else openGarage();
       },
       restart: () => restartRun(),

@@ -6,10 +6,14 @@
 //! `gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]` writes Port Vesper v2
 //! (`vesper_v2.road.bin`, `.greybox.glb`, `.greybox.b64.txt`; the JSON dump, ≈ 6 MB of
 //! terrain, only with `--json`).
+//! `gen-city --preset touge_hollow_crown [--out data/city]` (or any id in
+//! `wp_world::touge::TOUGE_IDS`, or `--preset touge` for all four) writes a touge pass the
+//! same way.
 
 use std::path::PathBuf;
 
 use wp_world::procgen::{generate, ProcGenConfig};
+use wp_world::touge;
 use wp_world::vesper::{self, VesperConfig};
 
 fn main() {
@@ -39,11 +43,30 @@ fn main() {
             "-h" | "--help" => {
                 println!("gen-city --grid 12x12 --seed 1 [--spacing 110] [--out data/city]");
                 println!("gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]");
+                println!("gen-city --preset touge|<touge id> [--out data/city] [--json]");
                 return;
             }
             other => panic!("unknown argument {other}"),
         }
         i += 2;
+    }
+    if let Some(p) = preset.as_deref().filter(|p| *p == "touge" || touge::is_touge(p)) {
+        let ids: Vec<&str> = if p == "touge" {
+            touge::TOUGE_IDS.to_vec()
+        } else {
+            vec![p]
+        };
+        for id in ids {
+            let build = touge::generate_builtin(id).expect("touge pass");
+            city_import::write_city_files(&build.net, &out, json).expect("write city files");
+            println!(
+                "{id}: {:.0} m, {} K-rail sections -> {}",
+                build.track.length_m,
+                build.krails.len(),
+                out.display()
+            );
+        }
+        return;
     }
     let net = match preset.as_deref() {
         None => generate(&cfg),
