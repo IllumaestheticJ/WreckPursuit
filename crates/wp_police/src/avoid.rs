@@ -22,6 +22,10 @@ pub const UNIT_HALF_LENGTH_M: f32 = 2.45;
 /// Half width of a police car, m.
 pub const UNIT_HALF_WIDTH_M: f32 = 0.95;
 
+/// A stopped blocker counts toward a standoff when the cosine between its nose and the unit's
+/// way is below this (it faces the unit or crosses its path, ~60° or more off).
+pub const STANDOFF_MAX_FACING: f32 = 0.5;
+
 /// A vehicle police units must not drive into, as reported by `wp_sim`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ObstacleView {
@@ -132,6 +136,10 @@ pub struct AvoidState {
     /// What caps the speed right now: a vehicle's entity id, a police unit id, or none.
     #[serde(default)]
     pub blocked_by: Option<BlockedBy>,
+    /// Seconds held at a standstill by a stopped vehicle that faces the unit or crosses its
+    /// path (a standoff: each waits for the other), s.
+    #[serde(default)]
+    pub standoff_s: f32,
 }
 
 /// What a unit is waiting behind (for views and debugging).
@@ -157,6 +165,7 @@ impl Default for AvoidState {
             yield_s: 0.0,
             unit_wait_s: 0.0,
             blocked_by: None,
+            standoff_s: 0.0,
         }
     }
 }
@@ -211,6 +220,9 @@ pub(crate) struct Blocker {
     pub(crate) speed_mps: f32,
     /// Arc length of its far end on the track, m.
     pub(crate) far_s: f32,
+    /// Cosine between its nose and the unit's way along the track (1 = same way, -1 = facing
+    /// the unit, ~0 = across its path).
+    pub(crate) facing: f32,
 }
 
 /// What a unit is, for the scan.
@@ -288,6 +300,7 @@ pub(crate) fn scan(
                 along_mps: dot(o.vel, me.heading),
                 speed_mps: o.speed(),
                 far_s: me.track_s + along + ext_fwd,
+                facing: dot(o.fwd, me.heading),
             };
             if best.is_none_or(|x| b.gap_m < x.gap_m) {
                 best = Some(b);
@@ -319,6 +332,7 @@ pub(crate) fn scan(
             along_mps: dot(o.vel, t),
             speed_mps: o.speed(),
             far_s: s_o + ext_t,
+            facing: dot(o.fwd, t),
         };
         if best.is_none_or(|x| b.gap_m < x.gap_m) {
             best = Some(b);
@@ -413,6 +427,16 @@ pub(crate) fn update(
     if creeping {
         st.limit_mps = st.limit_mps.min(cfg.pass_creep_mps);
     }
+    // A standoff: held at a standstill by a stopped vehicle that is not in the queue ahead
+    // but faces the unit, crosses its path or overlaps it (tangled after a turn). Each waits
+    // for the other; the driver backs off after `STANDOFF_S` (see
+    // `PoliceSystem::lane_input`).
+    let standoff = v.abs() < 0.5
+        && st.limit_mps <= 0.0
+        && blocker.is_some_and(|b| {
+            b.speed_mps < cfg.stopped_mps && (b.facing < STANDOFF_MAX_FACING || b.gap_m < 0.0)
+        });
+    st.standoff_s = if standoff { st.standoff_s + dt } else { 0.0 };
     st.blocked_by = blocker.map(|b| match (b.unit, b.entity) {
         (Some(u), _) => BlockedBy::Unit(u),
         (None, Some(e)) => BlockedBy::Vehicle(e),
@@ -758,6 +782,31 @@ mod tests {
         }
         assert_eq!(off, 1.75);
         assert_eq!(st.limit_mps, 0.0);
+    }
+
+    #[test]
+    fn standoff_counts_for_a_car_facing_or_tangled_not_a_queue() {
+        let c = cfg();
+        let dt = 1.0 / 240.0;
+        let m = me(0.0, [1.75, 0.0]);
+        let run = |at: [f32; 2], fwd: [f32; 2]| {
+            let obs = [Obstacle::car(Some(EntityId(2)), None, at, [0.0, 0.0], fwd)];
+            let mut st = AvoidState::default();
+            for _ in 0..(240.0 * 3.0) as usize {
+                update(&mut st, &m, &straight(), 1.75, 0.0, false, &obs, &c, dt);
+            }
+            st
+        };
+        // Head-on: each waits for the other.
+        let head_on = run([1.75, 7.5], [0.0, -1.0]);
+        assert_eq!(head_on.limit_mps, 0.0);
+        assert!(head_on.standoff_s > 2.9, "{head_on:?}");
+        // Tangled after a turn: overlapping at an angle.
+        let (s40, c40) = (0.64, 0.77);
+        let tangled = run([2.5, 3.0], [s40, c40]);
+        assert!(tangled.standoff_s > 2.9, "{tangled:?}");
+        // The same way, ahead: a queue, not a standoff.
+        assert_eq!(run([1.75, 7.5], [0.0, 1.0]).standoff_s, 0.0);
     }
 
     #[test]

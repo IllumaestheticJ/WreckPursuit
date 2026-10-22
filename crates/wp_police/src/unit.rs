@@ -394,6 +394,12 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// Lane driving (no lights): seconds left of backing out of a stuck spot, s.
+    #[serde(default)]
+    pub recover_left_s: f32,
+    /// Lane driving: seconds with the throttle on and not moving, s.
+    #[serde(default)]
+    pub wedged_s: f32,
 }
 
 impl Unit {
@@ -443,6 +449,8 @@ impl Unit {
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            recover_left_s: 0.0,
+            wedged_s: 0.0,
         }
     }
 

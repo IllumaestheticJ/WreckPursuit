@@ -248,6 +248,15 @@ impl Default for PoliceSystem {
     }
 }
 
+/// Lane driving: throttle on without moving for this long means wedged, s.
+const WEDGED_S: f32 = 2.0;
+/// Lane driving: a standoff this long makes the unit back off, s.
+const STANDOFF_S: f32 = 8.0;
+/// How long a unit backs out of a stuck spot, s.
+const RECOVER_S: f32 = 2.5;
+/// Brake held to select reverse and back out (as the pro driver does).
+const RECOVER_BRAKE: f32 = 0.7;
+
 impl PoliceSystem {
     /// Police with the built-in tables and **no road network**: heat, wanted levels and the
     /// escape/capture rules work, but no units exist. This is what `wp_sim` uses until
@@ -896,9 +905,36 @@ impl PoliceSystem {
         let acc = (want - v).clamp(-brake, accel);
         let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
         let siren = u.cmd.siren;
-        let ctl = u.controller();
-        let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
-        let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        let steer = u
+            .controller()
+            .steer(pos, heading, [target[0], target[1], 0.0]);
+        // Backing out of a stuck spot: a held brake at a standstill selects reverse, then the
+        // car drives backwards, steering the other way so the nose swings toward the lane.
+        if u.recover_left_s > 0.0 && !disabled {
+            u.recover_left_s -= dt;
+            if u.recover_left_s <= 0.0 {
+                u.controller().resync(0.0);
+            }
+            u.pro = None;
+            return VehicleInput {
+                steer: -steer,
+                brake: RECOVER_BRAKE,
+                siren,
+                headlights: true,
+                ..Default::default()
+            };
+        }
+        let (mut throttle, mut brake) = u.controller().pedals(v, acc, dt, disabled);
+        // Stuck: wedged (throttle on, not moving: a kerb, a wall, a parked car after running
+        // wide) or in a standoff (held by a stopped car facing it or crossing its path, each
+        // waiting for the other). Queues behind traffic going its way are left alone.
+        let wedged = !disabled && !hold && want > 2.0 && throttle > 0.4 && v.abs() < 0.5;
+        u.wedged_s = if wedged { u.wedged_s + dt } else { 0.0 };
+        if u.wedged_s > WEDGED_S || (!disabled && u.avoid.standoff_s > STANDOFF_S) {
+            u.wedged_s = 0.0;
+            u.avoid.standoff_s = 0.0;
+            u.recover_left_s = RECOVER_S;
+        }
         let mut handbrake = 0.0;
         if hold {
             // The shared controller releases the brake below its hold speed; right behind
