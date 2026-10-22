@@ -576,10 +576,14 @@ export const sim = {
   streetRacers: (): Float32Array => wasm.street_racers(),
   /** Levels, roster, challenge hint, open offer, race in progress and latest result; null without street racers. */
   streetStatus: (): StreetStatus | null => JSON.parse(wasm.street_status_json()),
-  /** Plan the open challenge's route from the player to (x, y). Throws when no route. */
-  streetPreview: (x: number, y: number): StreetPreview => JSON.parse(wasm.street_preview(x, y)),
-  /** Accept the open challenge: race to (x, y) for `stake` dollars. Throws if refused. */
-  streetAccept: (x: number, y: number, stake: number): void => wasm.street_accept(x, y, stake),
+  /** Plan the open challenge's route from the player through the waypoints `via` (in order) to
+   * (x, y). Throws when no route. */
+  streetPreview: (x: number, y: number, via: [number, number][] = []): StreetPreview => JSON.parse(wasm.street_preview(x, y, new Float32Array(via.flat()))),
+  /** Accept the open challenge: race through `via` to (x, y) for `stake` dollars; both cars are
+   * reset side by side at the start. Throws if refused (also while the police are after you). */
+  streetAccept: (x: number, y: number, stake: number, via: [number, number][] = []): void => wasm.street_accept(x, y, new Float32Array(via.flat()), stake),
+  /** The street race's gates (waypoints, then B) and route, in `raceCourse()`'s layout. */
+  streetCourse: (): Float32Array => wasm.street_course(),
   /** Decline the open challenge. */
   streetDecline: (): void => wasm.street_decline(),
   /** Drivable lanes for the map: [n, x0, y0, …] per lane; fetch once per session. */
@@ -614,13 +618,15 @@ export interface StreetRacer {
   level_name: string;
   colour: string;
   car: string;
-  mode: "Roam" | "Waiting" | "Racing";
+  mode: "Roam" | "Waiting" | "Racing" | "OffDuty";
+  /** When they are out (row 152): all day, nights only, or nights lapping Loop 9. */
+  shift: "AllDay" | "Night" | "Loop";
   wins: number;
   losses: number;
 }
 
 /** Open challenge (`wp_wasm::street::Offer`). */
-export interface StreetOffer extends Omit<StreetRacer, "mode"> {
+export interface StreetOffer extends Omit<StreetRacer, "mode" | "shift"> {
   bet_min: number;
   bet_max: number;
   cash: number;
@@ -644,6 +650,10 @@ export interface StreetRace {
   racer_left_m: number;
   finish: [number, number];
   start: [number, number];
+  /** Waypoint gates before B, in order. */
+  gates: [number, number][];
+  /** The player's next gate (`gates.length` = on to B). */
+  next_gate: number;
   polyline: [number, number][];
 }
 
@@ -668,6 +678,10 @@ export interface StreetStatus {
   levels: StreetLevel[];
   roster: StreetRacer[];
   hint: StreetRacer | null;
+  /** The police are after the player: no challenges (row 150). */
+  pursued: boolean;
+  /** The racer in honking range while the police are after the player (hint: lose them). */
+  blocked: StreetRacer | null;
   offer: StreetOffer | null;
   race: StreetRace | null;
   result: StreetResult | null;
@@ -679,6 +693,8 @@ export interface StreetPreview {
   reason: string | null;
   length_m: number;
   finish: [number, number];
+  /** The waypoints snapped onto the route, in order. */
+  gates: [number, number][];
   polyline: [number, number][];
 }
 

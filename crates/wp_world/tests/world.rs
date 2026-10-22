@@ -1348,3 +1348,61 @@ fn night_traffic_around_a_player_stays_at_the_curve() {
         "{c_night} vs {c_noon}"
     );
 }
+
+/// Street races through waypoints (owner row 151): `plan_route_via` runs through each
+/// waypoint in order, and with none it is `plan_route`.
+#[test]
+fn route_via_waypoints_passes_them_in_order() {
+    let w = world(TrafficConfig::default(), 12.0, 0.0);
+    let mids: Vec<[f32; 3]> = w
+        .network()
+        .lanes
+        .iter()
+        .filter(|l| l.kind == LaneKind::Through)
+        .map(|l| l.polyline[l.polyline.len() / 2])
+        .collect();
+    let start = mids[0];
+    let near = |r: &wp_world::Route, q: [f32; 3], from: usize| {
+        r.polyline
+            .iter()
+            .skip(from)
+            .position(|p| geom::dist(geom::xy(*p), geom::xy(q)) < 8.0)
+            .map(|i| i + from)
+    };
+    // Waypoints 300–600 m apart that the planner can chain (not every lane reaches every
+    // other one in the grid).
+    let mut checked = 0;
+    for (k, a) in mids.iter().enumerate().step_by(7) {
+        let Some(b) = mids
+            .iter()
+            .skip(k)
+            .find(|b| (300.0..600.0).contains(&geom::dist(geom::xy(*a), geom::xy(**b))))
+        else {
+            continue;
+        };
+        let Some(f) = mids
+            .iter()
+            .skip(k + 3)
+            .find(|f| (300.0..600.0).contains(&geom::dist(geom::xy(*b), geom::xy(**f))))
+        else {
+            continue;
+        };
+        let Some(r) = w.plan_route_via(start, None, &[geom::xy(*a), geom::xy(*b)], *f) else {
+            continue;
+        };
+        let ia = near(&r, *a, 0).expect("passes the first waypoint");
+        let ib = near(&r, *b, ia).expect("then the second");
+        assert!(ia < ib);
+        let d = geom::dist(geom::xy(*r.polyline.last().unwrap()), geom::xy(*f));
+        assert!(d < 8.0, "ends at the finish ({d} m)");
+        checked += 1;
+        if checked >= 5 {
+            break;
+        }
+    }
+    assert!(checked >= 3, "only {checked} waypoint routes planned");
+    let f = mids[mids.len() / 2];
+    let direct = w.plan_route(start, None, f).expect("direct route");
+    let same = w.plan_route_via(start, None, &[], f).expect("no waypoints");
+    assert_eq!(direct.segs, same.segs);
+}
