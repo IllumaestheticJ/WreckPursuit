@@ -153,7 +153,6 @@ export class SceneView {
   readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly garages = new THREE.Group();
-  private readonly garages = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
   private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
