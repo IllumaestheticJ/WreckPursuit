@@ -526,7 +526,7 @@ impl Economy {
             return 0;
         }
         let tier_cap = self.progression.tier_def(self.rep_tier(acct)).max_bet;
-        let cash_cap = (acct.cash as f64 * self.progression.max_bet_cash_frac as f64) as Money;
+        let cash_cap = (acct.cash as f32 * self.progression.max_bet_cash_frac) as Money;
         tier_cap.min(cash_cap)
     }
 
