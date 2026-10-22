@@ -110,7 +110,7 @@ function CarDetail({ car, active }: { car: GarageCar; active: boolean }) {
               {car.mods.length ? car.mods.map((m) => MODS[m]?.name ?? m).join(" · ") : "Stock"}
             </div>
             <BuildStatBars car={car} />
-            {car.sustainedWhileWanted && car.outstanding.lines.length > 0 && <div class="wp-warn">Some of this damage happened while wanted: insurance will not pay for it.</div>}
+            {car.sustainedBeforeCapture && car.outstanding.lines.length > 0 && <div class="wp-warn">This car was caught by the police with this damage: insurance will not pay for it.</div>}
             <div class="wp-row">
               <Button variant="primary" disabled={active || !car.drivable || inImpound} onClick={() => send({ type: "garage.setActive", car: car.uid })}>
                 {active ? "Active car" : "Drive this car"}
@@ -257,7 +257,7 @@ function RepairPanel({ car }: { car: GarageCar }) {
                     <span class="wp-dim2">
                       Insurance — {car.insurance.tier} ({pct(car.insurance.coverage)} after ${car.insurance.deductible} deductible)
                     </span>
-                    {q.insuranceDenied ? <Badge tone="danger">Denied: damage while wanted</Badge> : <Money value={-q.insuranceCovered} signed tone />}
+                    {q.insuranceDenied ? <Badge tone="danger">Denied: damage before capture</Badge> : <Money value={-q.insuranceCovered} signed tone />}
                   </div>
                 )}
               </>
@@ -315,7 +315,7 @@ function InsurancePanel({ car }: { car: GarageCar }) {
         })}
       </div>
       <p class="wp-dim" style={{ fontSize: "0.8em", marginBottom: 0 }}>
-        Damage taken while wanted is never covered. Getting caught while wanted voids the policy. An unpaid premium lapses it.
+        Cover holds during pursuits. Getting caught voids the policy, and damage on the car at the capture is never covered. An unpaid premium lapses it.
       </p>
     </Panel>
   );

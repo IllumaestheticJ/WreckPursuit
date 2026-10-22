@@ -73,6 +73,17 @@ pub enum EconomyError {
     /// Bad argument (unknown tier, empty selection, ...).
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// A workshop operation on a slot was refused.
+    #[error("{slot}: {reason}")]
+    PartRefused {
+        /// Slot (or part kind) concerned.
+        slot: String,
+        /// Why.
+        reason: String,
+    },
+    /// No loose part with this uid in the inventory.
+    #[error("no part {0} in the inventory")]
+    UnknownPart(u32),
     /// Applying mods produced a definition the contract loader rejects.
     #[error("modified definition is invalid: {0}")]
     InvalidResult(String),

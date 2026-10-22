@@ -871,7 +871,7 @@ export class DriftLabWPanel {
         this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
         this.build();
       };
-      // Player rack A/B (physics lead, 2026-10-22; owner rows 147 / 149): only the player's
+      // Player rack A/B (physics lead, 2026-10-22; owner rows 147 / physics-1): only the player's
       // speed-sensitive lock changes; tyres, ride and balance stay as they are. "reference"
       // follows the reference clips' held-key wheel angle vs speedometer (near full lock to
       // ~110 km/h, then easing; docs/integration/physics.md).

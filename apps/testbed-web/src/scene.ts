@@ -1,6 +1,6 @@
 // Scene: renderer, lights, sky colour from TimeOfDay, ground + 10 m grid, the city greybox
 // (data/city/<id>.greybox.glb, prompt 05), police helicopters, barriers, fading contact
-// markers and intent arrows. Traffic and police cars are drawn by render/lod.ts.
+// markers, garage markers and intent arrows. Traffic and police cars are drawn by render/lod.ts.
 // Sim space is +Z up / +Y forward; Three.js is +Y up, so `world` is rotated -90° about X and
 // every sim-space object is parented under it.
 import * as THREE from "three";
@@ -8,7 +8,7 @@ import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { setCarEnvironment } from "./render/panels";
-import type { Barrier, SimEvent } from "./wasm/sim";
+import type { Barrier, GarageSite, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
@@ -30,6 +30,10 @@ interface ContactMarker {
 const CONTACT_LIFETIME_S = 1.5;
 /** Contact markers are pooled (a crash emits dozens of contacts per frame): oldest reused. */
 const MAX_CONTACT_MARKERS = 64;
+/** Garage marker colours: legit (blue) and crooked (amber) shops. */
+const GARAGE_COLOUR = { Legit: 0x3399ff, Crooked: 0xffaa22 } as const;
+/** Height of a garage's light beam, m (visible over the greybox blocks). */
+const GARAGE_BEAM_M = 40;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
 const tmpNormal = new THREE.Vector3();
 const groundRay = new THREE.Raycaster();
@@ -148,6 +152,7 @@ export class SceneView {
   readonly hemi: THREE.HemisphereLight;
   readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
+  private readonly garages = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
   private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
@@ -191,6 +196,11 @@ export class SceneView {
   readonly prewarmRoots: THREE.Object3D[] = [];
 
   private debugGrid!: THREE.GridHelper;
+  /** Axis hint at the sim origin (hidden in the workshop). */
+  private originAxes!: THREE.AxesHelper;
+  /** The flat world's ground plane (hidden inside the garage workshop). */
+  private flatGround!: THREE.Mesh;
+  private workshopOn = false;
   /** The one siren point light (browser perf pass): every point light costs every lit pixel,
    * even at intensity 0, and a changing light count recompiles the lit shaders. It follows
    * the nearest police car with its siren on and is hidden when no siren is on. */
@@ -235,6 +245,7 @@ export class SceneView {
     this.world.rotation.x = -Math.PI / 2;
     this.scene.add(this.world);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), this.groundMaterial);
+    this.flatGround = ground;
     // Below the city's zone ground (-0.05 m) and roads (0 m), so they never z-fight with it.
     ground.position.z = -0.2;
     this.world.add(ground);
@@ -246,9 +257,10 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
+    this.originAxes = axes;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
-    this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.markings.group, this.sirenLight);
+    this.world.add(axes, this.barriers, this.garages, this.tools, this.intentGroup, this.signals.group, this.markings.group, this.sirenLight);
     // One helicopter spotlight exists from the start (hidden) so its two programs are prewarmed,
     // not compiled in the frame the first helicopter switches it on.
     const beam = makeBeam(this.world);
@@ -272,7 +284,7 @@ export class SceneView {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
     this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
-    this.debugGrid.visible = !cityId;
+    this.debugGrid.visible = !cityId && !this.workshopOn;
     if (!cityId || this.cities.has(cityId)) return;
     const holder = new THREE.Group();
     this.cities.set(cityId, holder);
@@ -337,6 +349,14 @@ export class SceneView {
    * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
    * frame per car.
    */
+  /** Garage workshop: hide the flat ground and grid (the bay has its own floor). */
+  setWorkshop(on: boolean): void {
+    this.workshopOn = on;
+    this.flatGround.visible = !on;
+    this.debugGrid.visible = !on && !this.cityShown;
+    this.originAxes.visible = !on;
+  }
+
   groundZ(x: number, y: number): number | null {
     const city = this.cityShown ? this.cities.get(this.cityShown) : null;
     if (!city) return null;
@@ -491,6 +511,40 @@ export class SceneView {
       );
       m.add(stripe);
       this.barriers.add(m);
+    }
+  }
+
+  /** Repair shop markers (`garages_json()`): a ring on the ground at the shop's radius and a
+   * light beam, blue for legit shops, amber for crooked ones. Stop inside the ring to repair. */
+  setGarages(list: GarageSite[]): void {
+    for (const old of this.garages.children) {
+      old.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+      });
+    }
+    this.garages.clear();
+    for (const g of list) {
+      const colour = GARAGE_COLOUR[g.kind] ?? GARAGE_COLOUR.Legit;
+      const holder = new THREE.Group();
+      holder.position.set(...g.pos);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(g.radius_m - 0.6, g.radius_m, 48),
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      ring.position.z = 0.08;
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.5, GARAGE_BEAM_M, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.35, depthWrite: false }),
+      );
+      // CylinderGeometry runs along +Y; the world group is +Z up.
+      beam.rotation.x = Math.PI / 2;
+      beam.position.z = GARAGE_BEAM_M / 2;
+      holder.add(ring, beam);
+      holder.name = `garage:${g.name}`;
+      this.garages.add(holder);
     }
   }
 

@@ -59,9 +59,59 @@ const STAKEOUT_INTO_M: f32 = 15.0;
 /// A shoulder stakeout parks this far outside the road's edge, m.
 const SHOULDER_CLEAR_M: f32 = 2.0;
 
+/// A deck (bridge or viaduct) counts as elevated above this height, m.
+const DECK_ELEVATED_M: f32 = 2.0;
+
+/// A stakeout on an elevated course slides along it in steps of this, m...
+const STAKEOUT_SLIDE_STEP_M: f32 = 10.0;
+
+/// ...at most this many steps either way.
+const STAKEOUT_SLIDE_STEPS: i32 = 15;
+
+/// Another road crossing within this of an elevated stakeout spot runs underneath it (the car
+/// would be put down there, under the deck), m.
+const STAKEOUT_UNDER_ROAD_M: f32 = 15.0;
+
 /// A stakeout ignores racers slower than this (a car parked by the course is not a racer
 /// flying past), m/s.
 const STAKEOUT_MIN_RACER_MPS: f32 = 5.0;
+
+/// Plan footprint of an elevated road deck (bridge, viaduct) from the world's deck slabs
+/// ([`PoliceSystem::set_decks`]): where a car would sit above the ground.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeckFoot {
+    /// Centreline start, m (XY).
+    pub a: [f32; 2],
+    /// Centreline end, m (XY).
+    pub b: [f32; 2],
+    /// Deck height at `a` and `b`, m.
+    pub z: [f32; 2],
+    /// Paved width left / right of the centreline (travelling `a` → `b`), m.
+    pub left_m: f32,
+    /// See `left_m`.
+    pub right_m: f32,
+}
+
+impl DeckFoot {
+    /// The deck's height over `p` when `p` is on it and it is elevated
+    /// (above [`DECK_ELEVATED_M`]).
+    pub fn height_at(&self, p: [f32; 2]) -> Option<f32> {
+        let e = sub(self.b, self.a);
+        let l2 = dot(e, e);
+        if l2 < 1e-6 {
+            return None;
+        }
+        let t = dot(sub(p, self.a), e) / l2;
+        if !(0.0..=1.0).contains(&t) {
+            return None;
+        }
+        let l = l2.sqrt();
+        let right = [e[1] / l, -e[0] / l];
+        let lat = dot(sub(p, self.a), right);
+        let z = self.z[0] + (self.z[1] - self.z[0]) * t;
+        (lat >= -self.left_m - 0.3 && lat <= self.right_m + 0.3 && z > DECK_ELEVATED_M).then_some(z)
+    }
+}
 
 const BUILTIN_RACES: &str = include_str!("../../../data/police/races.toml");
 
@@ -574,9 +624,13 @@ impl PoliceSystem {
         }
         let mut stakeouts = Vec::new();
         for st in &profile.stakeouts {
-            let s = (st.at * total).clamp(0.0, total);
+            // On a viaduct the car goes on the deck, where nothing runs underneath (the sim puts
+            // a spawned car on the lowest road surface): a car parked beside or below the deck
+            // never sees the racers flying past above it.
+            let (s, elevated) = self.stakeout_spot(course, (st.at * total).clamp(0.0, total));
             let side = sides
                 .iter()
+                .filter(|_| !elevated)
                 .filter(|r| (r.s - s).abs() < STAKEOUT_SIDE_ROAD_M && !used_nodes.contains(&r.node))
                 .min_by(|a, b| {
                     (a.s - s)
@@ -589,6 +643,10 @@ impl PoliceSystem {
             // shoulder facing the racing direction.
             let parked = side.and_then(|r| {
                 let (p, dir, _) = self.walk_road(r.node, r.segment, STAKEOUT_INTO_M)?;
+                // Not under a deck (a road passing below the course is no side road of it).
+                if self.deck_at(p).is_some() {
+                    return None;
+                }
                 used_nodes.push(r.node);
                 let face = scale(dir, -1.0);
                 Some((add(p, scale([face[1], -face[0]], LANE_OFFSET_M)), face))
@@ -597,7 +655,16 @@ impl PoliceSystem {
                 let dir = course.dir_at(s);
                 let (centre, hw) = self.road_at(course.point_at(s));
                 let right = [dir[1], -dir[0]];
-                (add(centre, scale(right, hw + SHOULDER_CLEAR_M)), dir)
+                // Elevated: on the deck, just inside its edge.
+                let off = if elevated {
+                    [hw + SHOULDER_CLEAR_M, hw, hw - 1.5]
+                        .into_iter()
+                        .find(|o| self.deck_at(add(centre, scale(right, *o))).is_some())
+                        .unwrap_or(hw - 1.5)
+                } else {
+                    hw + SHOULDER_CLEAR_M
+                };
+                (add(centre, scale(right, off)), dir)
             });
             let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
             let unit = self.units[i].id;
@@ -751,6 +818,42 @@ impl PoliceSystem {
 
     /// Side roads off the course: for every junction on the course, each road leaving it
     /// across the racing direction whose first stretch is not itself part of the course.
+    /// Height of an elevated deck (bridge, viaduct) covering `p`, if any.
+    pub(crate) fn deck_at(&self, p: [f32; 2]) -> Option<f32> {
+        self.decks.iter().find_map(|d| d.height_at(p))
+    }
+
+    /// Where along an elevated course a stakeout can park on the deck: the nearest point to
+    /// `s0` (sliding [`STAKEOUT_SLIDE_STEP_M`] at a time) with no other road crossing
+    /// underneath. Returns the arc length and whether the course is elevated there; an at-grade
+    /// spot is used as is.
+    fn stakeout_spot(&self, course: &RaceCourse, s0: f32) -> (f32, bool) {
+        let total = course.length();
+        if self.deck_at(course.point_at(s0)).is_none() {
+            return (s0, false);
+        }
+        for k in 0..=STAKEOUT_SLIDE_STEPS {
+            for sign in [1.0, -1.0] {
+                let s = (s0 + sign * k as f32 * STAKEOUT_SLIDE_STEP_M).clamp(0.0, total);
+                let p = course.point_at(s);
+                if self.deck_at(p).is_none() {
+                    return (s, false);
+                }
+                let dir = course.dir_at(s);
+                let crossed = self.graph.segments.iter().any(|g| {
+                    let (a, b) = (self.graph.node(g.a).pos, self.graph.node(g.b).pos);
+                    let d = normalize(sub(b, a));
+                    let (_, q) = closest_on_segment(a, b, p);
+                    dist(p, q) < STAKEOUT_UNDER_ROAD_M && crate::graph::dot(d, dir).abs() < 0.7
+                });
+                if !crossed {
+                    return (s, true);
+                }
+            }
+        }
+        (s0, true)
+    }
+
     fn side_roads(&self, course: &RaceCourse) -> Vec<SideRoad> {
         let total = course.length();
         let mut out = Vec::new();
@@ -1016,6 +1119,25 @@ fn spread<T: Copy>(items: &[T], count: usize) -> Vec<T> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deck_footprint_covers_the_deck_only_when_elevated() {
+        let d = super::DeckFoot {
+            a: [0.0, 0.0],
+            b: [0.0, 100.0],
+            z: [8.0, 8.0],
+            left_m: 2.0,
+            right_m: 11.0,
+        };
+        // Travelling +Y, right is +X.
+        assert_eq!(d.height_at([5.0, 50.0]), Some(8.0));
+        assert_eq!(d.height_at([-1.5, 50.0]), Some(8.0));
+        assert_eq!(d.height_at([14.0, 50.0]), None, "past the right edge");
+        assert_eq!(d.height_at([-4.0, 50.0]), None, "past the left edge");
+        assert_eq!(d.height_at([5.0, 120.0]), None, "past the end");
+        let low = super::DeckFoot { z: [0.5, 0.5], ..d };
+        assert_eq!(low.height_at([5.0, 50.0]), None, "at grade");
+    }
+
     use super::*;
     use crate::graph::{District, RoadClass, RoadGraph};
     use crate::{PoliceSetup, RacerView};

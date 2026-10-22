@@ -116,7 +116,7 @@ pub struct RepairQuote {
     pub gross: Money,
     /// Paid by insurance.
     pub insurance_covers: Money,
-    /// Insurance refused (damage sustained while wanted).
+    /// Insurance refused (damage outstanding when the car was captured).
     pub claim_denied: bool,
     /// Paid by the player.
     pub player_pays: Money,
@@ -155,7 +155,8 @@ pub struct DamageReport {
     pub estimate: RepairEstimate,
     /// Opaque lattice state to restore next session.
     pub lattice_state: Vec<u8>,
-    /// The car was wanted at some point during the session.
+    /// The car was wanted at some point during the session. Informational: insurance covers
+    /// damage taken while wanted; only a capture denies the claim.
     pub wanted_during_session: bool,
     /// The car had to be towed off the street (charged as a penalty).
     pub towed: bool,
@@ -411,7 +412,7 @@ impl Economy {
         let mut covers = 0;
         let mut denied = false;
         if let (Some(pol), true) = (&c.insurance, gross > 0) {
-            if c.damage.sustained_while_wanted {
+            if c.damage.sustained_before_capture {
                 denied = true;
             } else {
                 covers = money(pol.coverage * (gross - pol.deductible).max(0) as f32);
@@ -549,16 +550,19 @@ impl Economy {
             let some = Some(report.car);
             let class = {
                 let c = tx.car_mut(report.car)?;
-                let was_wanted =
-                    c.damage.sustained_while_wanted && !report.estimate.lines.is_empty();
+                // A capture flag survives as long as there is unrepaired damage; being wanted
+                // without being caught does not affect insurance.
+                let was_captured =
+                    c.damage.sustained_before_capture && !report.estimate.lines.is_empty();
                 c.damage = DamageSnapshot {
                     health: report.health.clamp(0.0, 1.0),
                     total_loss: report.total_loss,
                     handling: report.handling,
                     outstanding: report.estimate.clone(),
                     lattice_state: report.lattice_state.clone(),
-                    sustained_while_wanted: was_wanted || report.wanted_during_session,
+                    sustained_before_capture: was_captured,
                 };
+                self.strip_empty_slot_lines(c);
                 c.class
             };
             tx.note(

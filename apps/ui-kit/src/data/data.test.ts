@@ -75,11 +75,11 @@ describe("pricing", () => {
     expect(Math.abs(arc.total * 2 - sim.total)).toBeLessThanOrEqual(sim.lines.length);
   });
 
-  it("denies insurance for damage sustained while wanted", () => {
+  it("denies insurance for damage outstanding at a capture", () => {
     const q = quoteRepair(shiro, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
     expect(q.insuranceDenied).toBe(true);
     expect(q.insuranceCovered).toBe(0);
-    const ok = quoteRepair({ ...shiro, sustainedWhileWanted: false }, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
+    const ok = quoteRepair({ ...shiro, sustainedBeforeCapture: false }, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
     expect(ok.insuranceCovered).toBeGreaterThan(0);
     expect(ok.total).toBeLessThan(ok.subtotal);
   });

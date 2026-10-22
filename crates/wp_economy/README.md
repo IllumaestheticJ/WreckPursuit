@@ -81,7 +81,7 @@ the fee and returns the car with exactly the damage it went in with, to be repai
 | `career` | scripted multi-night career used for tuning (the 20-night scenario) |
 
 Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json` (16 packs,
-106 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
+157 mods). The damage mode tables in `data/modes/` are read (not owned) for `repair_cost_scale`.
 
 ## Free car tune
 
@@ -89,6 +89,21 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
 `docs/integration/tune.md`). `Economy::set_tune` is free and writes no ledger line; the car must
 be in the garage (like mod work). The field is `#[serde(default)]` and skipped when stock, so
 career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
+
+## Garage workshop (`parts`)
+
+Parts on a car: `data/economy/parts.toml` lists the slots (front bumper, radiator, the four
+wheels...), the mod lines each takes and the removal order. Taking a part off puts it in
+`PlayerAccount::inventory`; fitting takes it back; the car's `mods` are rebuilt from its fitted
+parts, so the mod tree, preview and the sim need no change. Condition comes from the damage
+snapshot. Details and wasm exports: `docs/integration/garage.md`.
+
+```rust
+let (part, _) = econ.remove_part(&mut acct, car, "front_bumper")?;
+let (new, ev) = econ.buy_part(&mut acct, car, "radiator", Some("cooling_radiator_1"), mode)?;
+let (fit, _) = econ.fit_part(&mut acct, car, "radiator", new[0], mode)?; // fit.restore → lattice
+let view = econ.workshop(&acct, car, mode)?;
+```
 
 ## Economy design
 
@@ -129,7 +144,9 @@ career saves keep version 2. Tests: `cargo test -p wp_economy --test tune`.
   charge normal rates but report cars at wanted level 2+ (`EventReason::ShopReported`).
 - Towing (flat by class) is a penalty charged when the sim reports the car was towed.
 - Insurance (`basic` 50 % / `full` 80 % after deductible, premium per day as a fraction of value)
-  does not pay for damage sustained while wanted and is voided by a capture while wanted. An
+  pays regardless of pursuit status (damage taken while wanted is covered if you get away). Only
+  getting caught matters: a capture voids the policy, and damage outstanding at the capture is
+  never paid, even by a policy bought afterwards. An
   unaffordable premium lapses the policy (it never creates debt).
 
 ### Getting caught
@@ -194,6 +211,8 @@ same line at an equal or higher tier, so upgrading a prerequisite never strands 
 - `Cosmetic { kind, value }` — no gameplay effect, except body-kit pieces produce
   `DetachableRequest`s (existing group if the lattice has one, otherwise a request for prompt
   03's `gen-lattice`).
+- `Cosmetic` mods (and every other mod that can be seen) are drawn by the testbed from
+  `data/cosmetics/visuals.json`; `tests/visuals.rs` keeps that table in step with the catalog.
 - `Tool { kind, tier }` — radar detector, scanner, run-flat, reinforced cooling, fake plates,
   nitrous → `ToolLoadout`.
 

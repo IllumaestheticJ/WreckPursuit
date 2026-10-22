@@ -30,10 +30,7 @@ lock is out of view). Ours already cuts to 65 % at 100 km/h, earlier and harder 
 reference.
 
 ## Touched outside my crates (to compile)
-- `wp_police` (round12 8757f12f did not compile after PR #42 met the row-144 radio tiers):
-  `race.rs` `RadioTier::Critical` → `Escalation` (its documented successor), and
-  `SpikeStrip::new` sets `scripted: false` (as the other constructor). `cargo test -p wp_police`
-  green. The lead should take its own fix over this one if it differs.
+- (none now) The temporary `wp_police` compile fix was dropped in favour of round12 f73d78a2.
 
 ## Rack A/B + lock-fixed re-search (2026-10-22)
 - Tune panel buttons (`?tune=1` / F10): **rack · shipped** (0.75, 113 km/h, p 2), **rack ·
