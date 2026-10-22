@@ -87,6 +87,19 @@ the wakes need no op. Cost (`cost_probe`, 13 `hakone_gt` on the slab): 0.10 ms p
 60 Hz frame idle, 0.12 driving, 0.004 dormant. Street racers off shift sleep in their lockup
 (`wp_wasm::street`). Test: `dormant_car_sleeps_until_a_car_comes_near`.
 
+## Light mode far from the player (SR-3, lead, 2026-10-22)
+`Sim::set_light_when_far(id, true)` lets an AI car drive a light model while it is farther
+than `LIGHT_ON_M` (350 m) from every `VehicleKind::Player` car: its chassis turns kinematic and
+follows the ground under it (`CityMap::ground_height`, pitched and rolled like
+`place_on_ground`), driven by the same inputs through a small-angle bicycle model (throttle /
+brake / coast as accelerations, steer through the wheelbase): no tyre, suspension or drivetrain
+step, no damage motion, no prop wake-ups. Back on full physics within `LIGHT_OFF_M` (250 m), on
+any contact, on a placement / reset, or when the permission is withdrawn (it keeps its speed).
+Deterministic (the switches follow from the state); replays log only the permission
+(`simcli` `OpKind::LightWhenFar`, kind 7). A light car that is neither wanted nor pursued is left
+out of the police's racer views. Street racers have it (a racer racing the player does not).
+Test: `light_mode_far_from_the_player`.
+
 ## Known gaps
 - Traffic AI does not slow in rain or fog yet (needs a `wp_world` hook, request W-D1 in
   `docs/integration/world.md`); police speed caps ignore weather (E, weather.md step 4).

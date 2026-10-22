@@ -43,14 +43,13 @@ sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 tra
 Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world (0.24 vs 0.14 ms,
 1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
 Street racers (`street.rs`, 13 AI cars: 8 out by day, 13 at night, owner row 152), native
-release, city free drive, sim ms per 60 Hz frame without / with them (2026-10-22, after SR-3:
-the 5 off-shift racers sleep in the lockup, `Sim::set_dormant`; before SR-3 in brackets):
-grid noon 4.60 / 6.93 (4.83 / 7.40), grid 23:00 2.09 / 5.20 (2.02 / 5.07), Vesper noon
-5.38 / 8.90 (5.75 / 9.41), Vesper 23:00 2.52 / 7.63 (2.60 / 7.74). The street AI is
-0.25–0.31 ms of it. A car's own vehicle physics is ~0.1 ms per frame (0.004 asleep, wp_sim
-`cost_probe`); the rest of a roaming racer's 0.2–0.4 ms is the city around it (ground rays on
-the city mesh, traffic and police treating it as a racer), so at night, with all 13 driving,
-SR-3 saves nothing: the next lever is far roaming racers, not parked ones.
+release, city free drive, sim ms per 60 Hz frame with them (median of 3, 2026-10-22): grid noon
+5.12, grid 23:00 3.02, Vesper noon 7.57, Vesper 23:00 4.69 (before SR-3: 7.40 / 5.07 / 9.41 /
+7.74). What did it, in order of weight: far roaming racers drive the sim's light model and drop
+out of the police racer views (`Sim::set_light_when_far`; Vesper 23:00 racers' share +5.1 ->
++2.3 ms), the live session hashes the state once per frame instead of every tick
+(`LIVE_HASH_EVERY`, ~0.06 ms per car per frame saved, every session), off-shift racers sleep
+(`Sim::set_dormant`, ~0.1 ms per parked car). The street AI is 0.25–0.35 ms of it.
 `cargo test --release -p wp_wasm --lib street_perf -- --ignored --nocapture --test-threads=1`.
 
 ## Known gaps

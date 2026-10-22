@@ -140,7 +140,33 @@ pub struct SimVehicle {
     ghost_overstay: u32,
     /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
     dormant: bool,
+    /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
+    light_when_far: bool,
+    /// Light mode now: a kinematic road follower instead of full vehicle physics.
+    light: Option<LightState>,
 }
+
+/// A vehicle in light mode ([`Sim::set_light_when_far`]): heading, speed and the chassis
+/// height above the ground it had when it went light.
+#[derive(Clone, Copy, Debug)]
+struct LightState {
+    yaw: f32,
+    speed: f32,
+    ride_z: f32,
+}
+
+/// A light-mode vehicle ([`Sim::set_light_when_far`]) goes light farther than this from every
+/// player car, m.
+pub const LIGHT_ON_M: f32 = 350.0;
+/// ... and back to full physics closer than this, m (hysteresis; far beyond the distance a
+/// car is drawn in detail).
+pub const LIGHT_OFF_M: f32 = 250.0;
+/// Light mode's acceleration at full throttle, m/s².
+const LIGHT_ACCEL_MPS2: f32 = 3.5;
+/// Light mode's deceleration at full brake (or handbrake), m/s².
+const LIGHT_BRAKE_MPS2: f32 = 7.0;
+/// Light mode's rolling resistance and drag, as a deceleration, m/s².
+const LIGHT_COAST_MPS2: f32 = 0.4;
 
 /// A dormant vehicle wakes when an awake vehicle's centre comes this close, m
 /// ([`Sim::set_dormant`]): well before the two can touch at any speed a car reaches in
@@ -359,6 +385,8 @@ impl Sim {
             ghost_overstay: 0,
             player_steering: None,
             dormant: false,
+            light_when_far: false,
+            light: None,
         });
         Ok(id)
     }
@@ -797,9 +825,11 @@ impl Sim {
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let rb = &mut self.physics.bodies[slot.body.body];
-        // A placed car is awake (a reset, a respawn, a move out of the lockup).
-        if slot.dormant {
+        // A placed car is awake and on full physics (a reset, a respawn, a move out of the
+        // lockup).
+        if slot.dormant || slot.light.is_some() {
             slot.dormant = false;
+            slot.light = None;
             rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
         }
         slot.vehicle.place_body(rb, pos, yaw, speed_mps, 0.0);
@@ -924,6 +954,147 @@ impl Sim {
         }
         slot.vehicle.read_body(rb);
         Ok(())
+    }
+
+    /// Let a vehicle drive in light mode far from every player car (`on`), or never. In light
+    /// mode — farther than [`LIGHT_ON_M`] from every `VehicleKind::Player` car, back to full
+    /// physics within [`LIGHT_OFF_M`] or on any contact — the chassis is a kinematic body that
+    /// follows the ground under it (`CityMap::ground_height`), driven by the same inputs through
+    /// a bicycle model (throttle / brake as accelerations, steer through the wheelbase): no
+    /// tyre, suspension or drivetrain step, no damage motion. For AI cars far out of play
+    /// (roaming street racers, SR-3). Deterministic; replays log the setting (`simcli`
+    /// `OpKind::LightWhenFar`), the switches follow from the state.
+    pub fn set_light_when_far(&mut self, id: EntityId, on: bool) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        slot.light_when_far = on;
+        if !on && slot.light.is_some() {
+            Self::leave_light(slot, &mut self.physics.bodies[slot.body.body]);
+        }
+        Ok(())
+    }
+
+    /// The vehicle is in light mode now ([`Sim::set_light_when_far`]).
+    pub fn is_light(&self, id: EntityId) -> Option<bool> {
+        self.vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| v.light.is_some())
+    }
+
+    /// Back to full physics where the light vehicle is, at its speed.
+    fn leave_light(slot: &mut SimVehicle, rb: &mut rapier3d::prelude::RigidBody) {
+        let Some(l) = slot.light.take() else {
+            return;
+        };
+        rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+        let p = rb.translation().to_array();
+        slot.vehicle.place_body(rb, p, l.yaw, l.speed, 0.0);
+    }
+
+    /// Light-mode switches before the vehicle step (see [`Sim::set_light_when_far`]).
+    fn update_light_modes(&mut self) {
+        if !self
+            .vehicles
+            .iter()
+            .any(|v| v.light_when_far || v.light.is_some())
+        {
+            return;
+        }
+        let players: Vec<[f32; 2]> = self
+            .vehicles
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Player)
+            .map(|v| {
+                let t = self.physics.bodies[v.body.body].translation();
+                [t.x, t.y]
+            })
+            .collect();
+        let near = |p: [f32; 2], r: f32| {
+            players.iter().any(|q| {
+                let (dx, dy) = (p[0] - q[0], p[1] - q[1]);
+                dx * dx + dy * dy < r * r
+            })
+        };
+        let map = self.world.map();
+        for slot in &mut self.vehicles {
+            let rb = &mut self.physics.bodies[slot.body.body];
+            let t = rb.translation();
+            let p = [t.x, t.y];
+            match slot.light {
+                Some(_) => {
+                    if !slot.light_when_far || near(p, LIGHT_OFF_M) {
+                        Self::leave_light(slot, rb);
+                    }
+                }
+                None => {
+                    if !slot.light_when_far
+                        || slot.dormant
+                        || slot.ghost_ticks > 0
+                        || players.is_empty()
+                        || near(p, LIGHT_ON_M)
+                    {
+                        continue;
+                    }
+                    // Upright and on the ground only (not mid-crash or airborne).
+                    let st = slot.vehicle.state();
+                    let up = rb.rotation() * rapier3d::math::Vector::Z;
+                    let ground = map.ground_height(p, Some(t.z));
+                    let ride_z = t.z - ground;
+                    if up.z < 0.95 || !(-0.5..1.5).contains(&ride_z) {
+                        continue;
+                    }
+                    let q = st.rot;
+                    let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+                    let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+                    let yaw = wp_math::atan2(-fx, fy);
+                    rb.set_body_type(
+                        rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+                        true,
+                    );
+                    slot.light = Some(LightState {
+                        yaw,
+                        speed: st.speed_mps.max(0.0),
+                        ride_z,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Light-mode vehicles drive one tick: the bicycle model on their inputs, then the next
+    /// kinematic pose on the ground (pitched and rolled to it).
+    fn step_light(&mut self, dt: f32) {
+        let map = self.world.map();
+        for slot in self.vehicles.iter_mut() {
+            let Some(l) = slot.light.as_mut() else {
+                continue;
+            };
+            let def = slot.vehicle.def();
+            let i = &slot.input;
+            let brake = i.brake.max(i.handbrake).clamp(0.0, 1.0);
+            let a = i.throttle.clamp(0.0, 1.0) * LIGHT_ACCEL_MPS2
+                - brake * LIGHT_BRAKE_MPS2
+                - LIGHT_COAST_MPS2;
+            l.speed = (l.speed + a * dt).max(0.0);
+            let steer = i.steer.clamp(-1.0, 1.0) * def.wheels[0].max_steer_rad;
+            // Small-angle bicycle model (steer is small at speed). Steer +1 is full right, a
+            // right turn lowers yaw (0 = +Y, counter-clockwise positive).
+            l.yaw -= l.speed * steer / def.wheelbase_m.max(0.5) * dt;
+            let (s, c) = wp_math::sin_cos(l.yaw);
+            let rb = &mut self.physics.bodies[slot.body.body];
+            let t = rb.translation();
+            let xy = [t.x - s * l.speed * dt, t.y + c * l.speed * dt];
+            let (mut pos, rot) = ground_pose(map, xy, l.yaw, Some(t.z - l.ride_z));
+            pos[2] += l.ride_z;
+            rb.set_next_kinematic_position(rapier3d::prelude::Pose::from_parts(
+                rapier3d::math::Vector::from_array(pos),
+                rot,
+            ));
+        }
     }
 
     /// The vehicle is dormant ([`Sim::set_dormant`]).
@@ -1086,6 +1257,7 @@ impl Sim {
             self.drive_police_units();
         }
         self.wake_dormant_near();
+        self.update_light_modes();
         if sys.vehicle {
             // Weather reaches every wheel through `weather_at` (the plain world without weather).
             let wx = self.weather.as_ref().map(|w| w.query(&self.world));
@@ -1103,7 +1275,11 @@ impl Sim {
                               c: &rapier3d::prelude::Collider| {
                 c.user_data & (physics::GHOST_USER_BIT | physics::PROP_USER_BIT) == 0
             };
-            for slot in self.vehicles.iter_mut().filter(|v| !v.dormant) {
+            for slot in self
+                .vehicles
+                .iter_mut()
+                .filter(|v| !v.dormant && v.light.is_none())
+            {
                 let filter = if slot.ghost_ticks > 0 {
                     QueryFilter::exclude_dynamic()
                         .exclude_rigid_body(slot.body.body)
@@ -1131,10 +1307,15 @@ impl Sim {
                     &mut out,
                 );
             }
-            for slot in self.vehicles.iter().filter(|v| !v.dormant) {
+            for slot in self
+                .vehicles
+                .iter()
+                .filter(|v| !v.dormant && v.light.is_none())
+            {
                 slot.vehicle
                     .write_body(&mut self.physics.bodies[slot.body.body]);
             }
+            self.step_light(dt);
             self.update_sidewalk_filters();
         }
         let infos: Vec<contacts::BodyInfo> = self
@@ -1178,20 +1359,24 @@ impl Sim {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
             }
         }
-        // Anything that touched a dormant car wakes it for the next tick.
+        // Anything that touched a dormant car wakes it for the next tick; a light one goes back
+        // to full physics.
         let touched: Vec<EntityId> = self
             .vehicles
             .iter()
             .zip(&tick_contacts.per_vehicle)
-            .filter(|(v, c)| v.dormant && !c.is_empty())
+            .filter(|(v, c)| (v.dormant || v.light.is_some()) && !c.is_empty())
             .map(|(v, _)| v.id)
             .collect();
         for id in touched {
             let _ = self.set_dormant(id, false);
+            if let Some(slot) = self.vehicles.iter_mut().find(|v| v.id == id) {
+                Self::leave_light(slot, &mut self.physics.bodies[slot.body.body]);
+            }
         }
         if sys.damage {
             for (slot, contacts) in self.vehicles.iter_mut().zip(&tick_contacts.per_vehicle) {
-                if slot.dormant && contacts.is_empty() {
+                if (slot.dormant || slot.light.is_some()) && contacts.is_empty() {
                     continue;
                 }
                 // Hinged panels (workstream R) swing from the chassis motion; no-op without
@@ -1259,9 +1444,11 @@ impl Sim {
                 vel: rb.linvel().to_array(),
             }
         };
+        // Light-mode cars are kinematic far from the player: they never wake (and shove) props.
         let movers: Vec<props::Mover> = self
             .vehicles
             .iter()
+            .filter(|v| v.light.is_none())
             .map(|v| mover(v.body.body))
             .chain(self.debris.iter().map(|h| mover(*h)))
             .collect();
@@ -1809,6 +1996,80 @@ mod tests {
         sim.set_dormant(b, true).unwrap();
         sim.place_vehicle(b, [0.0, 30.0, 0.0], 0.0, 0.0).unwrap();
         assert_eq!(sim.is_dormant(b), Some(false));
+    }
+
+    /// SR-3 light mode: an AI car far from the player drives the light model (moves under
+    /// throttle, a right steer turns it right, stays on the ground), goes back to full physics
+    /// when the player comes within `LIGHT_OFF_M` (moving on at its speed), and the runs are
+    /// deterministic. Without permission it never goes light.
+    #[test]
+    fn light_mode_far_from_the_player() {
+        let run = |allow: bool| {
+            let (mut sim, player, ai) = two_sedan_sim(11);
+            sim.set_vehicle_kind(ai, VehicleKind::AiRacer).unwrap();
+            sim.place_vehicle(ai, [0.0, 600.0, 0.0], 0.0, 15.0).unwrap();
+            if allow {
+                sim.set_light_when_far(ai, true).unwrap();
+            }
+            let drive = VehicleInput {
+                throttle: 0.4,
+                steer: 0.05,
+                ..Default::default()
+            };
+            sim.set_input(ai, drive).unwrap();
+            for _ in 0..2 {
+                sim.step_fixed();
+            }
+            let light_at_start = sim.is_light(ai);
+            let p0 = sim.vehicle_states()[1].1.pos;
+            for _ in 0..(240 * 4) {
+                sim.step_fixed();
+            }
+            let st = sim.vehicle_states()[1].1.clone();
+            // The player drives up: back to full physics within LIGHT_OFF_M.
+            let near = [st.pos[0], st.pos[1] - 200.0];
+            sim.place_vehicle(player, [near[0], near[1], 0.0], 0.0, 0.0)
+                .unwrap();
+            sim.step_fixed();
+            let light_near = sim.is_light(ai);
+            let v_after = sim.vehicle_states()[1].1.speed_mps;
+            (
+                light_at_start,
+                p0,
+                st,
+                light_near,
+                v_after,
+                sim.state_hash(),
+            )
+        };
+        let (light, p0, st, near, v_after, h) = run(true);
+        println!("light {light:?}, moved {:?} -> {:?} at {:.1} m/s, near {near:?}, then {v_after:.1} m/s", p0, st.pos, st.speed_mps);
+        assert_eq!(light, Some(true), "far from the player it drives light");
+        assert!(
+            st.pos[1] - p0[1] > 40.0,
+            "it drove forward: {:?} -> {:?}",
+            p0,
+            st.pos
+        );
+        assert!(
+            st.pos[0] > p0[0] + 1.0,
+            "a right steer turned it right (east): {:?}",
+            st.pos
+        );
+        assert!(st.pos[2].abs() < 1.0, "on the ground: z {}", st.pos[2]);
+        assert!(
+            st.speed_mps > 15.0,
+            "throttle accelerates it: {} m/s",
+            st.speed_mps
+        );
+        assert_eq!(near, Some(false), "full physics again near the player");
+        assert!(
+            (v_after - st.speed_mps).abs() < 2.0,
+            "keeps its speed: {v_after} vs {}",
+            st.speed_mps
+        );
+        assert_eq!(h, run(true).5, "light runs are deterministic");
+        assert_eq!(run(false).0, Some(false), "never light without permission");
     }
 
     /// A ghost whose window ends inside another car stays a ghost until it is clear (capped).

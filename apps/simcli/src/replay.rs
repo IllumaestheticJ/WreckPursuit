@@ -93,6 +93,12 @@ pub enum OpKind {
         /// Sleep (`true`) or wake.
         on: bool,
     },
+    /// `Sim::set_light_when_far` (an AI car far from every player drives a light kinematic
+    /// model; off for a street racer racing the player).
+    LightWhenFar {
+        /// Allowed (`true`) or not.
+        on: bool,
+    },
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -147,7 +153,8 @@ pub struct Replay {
     pub inputs: Vec<InputEvent>,
     /// Ops, ascending by tick (empty for runner recordings and v1 files).
     pub ops: Vec<OpEvent>,
-    /// State hash after every tick.
+    /// State hash after every tick; 0 = not recorded (live testbed sessions hash every 4th
+    /// tick and the last; verifiers skip 0).
     pub tick_hashes: Vec<u64>,
     /// Periodic checkpoints.
     pub checkpoints: Vec<Checkpoint>,
@@ -249,6 +256,10 @@ impl Replay {
                 }
                 OpKind::Dormant { on } => {
                     w.push(6);
+                    w.push(on as u8);
+                }
+                OpKind::LightWhenFar { on } => {
+                    w.push(7);
                     w.push(on as u8);
                 }
             }
@@ -365,6 +376,9 @@ impl Replay {
                         ticks: u16::from_le_bytes(r.take(2)?.try_into().expect("2 bytes")),
                     },
                     6 => OpKind::Dormant {
+                        on: r.take(1)?[0] != 0,
+                    },
+                    7 => OpKind::LightWhenFar {
                         on: r.take(1)?[0] != 0,
                     },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
@@ -539,11 +553,12 @@ pub fn compare(sc: &Scenario, golden: &Replay, now: &Replay) -> ReplayReport {
             .map(|e| e.id.clone())
             .unwrap_or_else(|| format!("#{i}"))
     };
+    // 0 in the recording = not recorded (a live testbed session hashes every 4th tick).
     let first = golden
         .tick_hashes
         .iter()
         .zip(&now.tick_hashes)
-        .position(|(a, b)| a != b);
+        .position(|(a, b)| *a != 0 && a != b);
     let mut report = ReplayReport {
         name: sc.name.clone(),
         matched: first.is_none() && notes.iter().all(|n| n.starts_with("contract")),
@@ -719,6 +734,11 @@ mod tests {
                     tick: 3,
                     entity: 0,
                     op: OpKind::Dormant { on: true },
+                },
+                OpEvent {
+                    tick: 3,
+                    entity: 0,
+                    op: OpKind::LightWhenFar { on: false },
                 },
             ],
             tick_hashes: vec![1, 3],

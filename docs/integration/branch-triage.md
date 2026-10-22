@@ -99,6 +99,13 @@ Browser e2e on the gate-2 head (+ 773e4021):
   lockup. Native sim per 60 Hz frame with racers: grid noon 7.40 → 6.93 ms, Vesper noon 9.41 →
   8.90; night unchanged (all 13 drive). Shader re-resolve every frame fixed (transparent
   DoubleSide materials single pass).
+- **SR-3, far racers** (lead, 2026-10-22): `Sim::set_light_when_far` (op `LightWhenFar`): street
+  racers farther than 350 m from the player drive a kinematic bicycle-model follower (back on
+  full physics within 250 m, on contact or reset; off for the racer the player is racing) and
+  leave the police racer views unless wanted. Live sessions hash every 4th tick (0 = not
+  recorded in `replay.bin`; playback and `simcli replay` skip it; the last tick always hashed).
+  Native sim with racers, before SR-3 → now: grid noon 7.40 → 5.12 ms, grid night 5.07 → 3.02,
+  Vesper noon 9.41 → 7.57, Vesper night 7.74 → 4.69.
 - Found for D: the procedural grid is not strongly connected (≈980 of 4696 segs unreachable
   from a central lane).
 
