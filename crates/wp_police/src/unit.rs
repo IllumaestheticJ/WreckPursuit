@@ -243,6 +243,19 @@ pub enum Tactic {
     Pit,
     /// Slow down in front of the racer.
     RollingBlock,
+    /// Deliberate contact (wanted level 2+): a rear-quarter shunt, a side slam or a hard ram.
+    Ram(RamKind),
+}
+
+/// How a ramming unit hits the racer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RamKind {
+    /// Nose into the racer's rear quarter (L2+).
+    RearQuarter,
+    /// Alongside, steer into its flank (L3+).
+    Side,
+    /// Straight into its tail at a closing speed (L3+).
+    Hard,
 }
 
 /// Box-in slot relative to the racer.
@@ -263,6 +276,9 @@ pub enum UnitRole {
     Pool(District),
     /// Spawned reinforcement.
     Reinforcement,
+    /// Spawned to answer a reckless-driving call (no unit was close enough); despawns out of
+    /// sight once the call is over.
+    Responder,
     /// Parked roadblock / spike unit.
     Tool,
     /// Helicopter.
@@ -278,7 +294,7 @@ pub struct UnitBody {
     pub pos: [f32; 2],
     /// Unit heading vector (XY).
     pub heading: [f32; 2],
-    /// Forward speed, m/s.
+    /// Speed, m/s (negative while rolling backwards faster than 1 m/s).
     pub speed: f32,
     /// Current lateral acceleration, g.
     pub lat_g: f32,
@@ -381,6 +397,18 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Stuck detection and recovery (physical units, [`crate::stuck`]).
+    #[serde(default)]
+    pub unstick: crate::stuck::UnstickState,
+    /// Road route a pursuer is following to the racer (out of its sight), if any.
+    #[serde(default)]
+    pub chase_route: Option<ChaseRoute>,
+    /// Drives as its command says (lights-and-siren driving if `cmd.siren`) but keeps the
+    /// siren itself off: a responder following the reported racer in sight to see who it is.
+    /// Traffic yields to a siren, and the cars round the racer stopping for it held him up
+    /// (lead r13-test-fixes §4). Cleared by every new assignment.
+    #[serde(default)]
+    pub quiet: bool,
     /// Measured velocity of a physical unit (XY; `sync_unit`), m/s. The body keeps speed and
     /// heading only; the pro driver needs the slip between them.
     #[serde(default)]
@@ -394,6 +422,15 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+}
+
+/// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChaseRoute {
+    /// Junction the racer was heading for when the route was planned.
+    pub node: NodeId,
+    /// When it was planned.
+    pub at: SimTime,
 }
 
 impl Unit {
@@ -439,6 +476,9 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            unstick: crate::stuck::UnstickState::default(),
+            chase_route: None,
+            quiet: false,
             vel: [0.0, 0.0],
             feel: crate::pro::UnitFeel::default(),
             limits: None,
@@ -457,6 +497,7 @@ impl Unit {
     /// Available for a new job (not busy with a tool, not out of service).
     pub fn available(&self) -> bool {
         !self.wrecked
+            && !self.unstick.give_up
             && self.kind == UnitKind::Car
             && matches!(
                 self.assignment,
@@ -630,7 +671,8 @@ pub fn step_ground(
         .expect("controller created above")
         .steer(b.pos, b.heading, [target[0], target[1], 0.0]);
     // Target behind: pure pursuit degenerates (lateral offset → 0), so turn at full lock.
-    if dot(b.heading, to) < 0.0 {
+    let turning_round = dot(b.heading, to) < 0.0;
+    if turning_round {
         steer = if cross(b.heading, to) >= 0.0 {
             -1.0
         } else {
@@ -667,8 +709,9 @@ pub fn step_ground(
     b.pos = add(b.pos, scale(b.heading, ds));
 
     // Ran wide: hit the kerb / building.
-    // Behind the start of the track (turning around) is not running wide.
-    if u.on_track && s > 1.0 && lateral > dynm.crash_offset_m && b.speed > 5.0 {
+    // Behind the start of the track or turning round toward a target behind (a full-lock
+    // circle is wider than the crash offset) is not running wide.
+    if u.on_track && s > 1.0 && !turning_round && lateral > dynm.crash_offset_m && b.speed > 5.0 {
         let impact = b.speed * 0.6;
         u.health -= dynm.crash_health_per_kmps2.get(env.mode) * impact * impact / 1000.0;
         rep.crashed = true;

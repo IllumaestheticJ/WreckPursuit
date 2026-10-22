@@ -1,0 +1,70 @@
+// wp_race picker race "Hollins Drive hill sprint" (hollins_sprint): Night street sprint up six hairpins to the Knob Observatory Lot.
+// Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker
+// (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with
+// the player's car. Entity "player" sits on the last grid slot, the AI field ahead.
+// Run standalone, simcli has no race block or AI driver, so the cars wait on the grid
+// for 10 s; crates/wp_race/tests/race_picker.rs races it to the finish with wp_opponent
+// AI in every seat and checks the expectation ranges.
+(
+    name: "race_hollins_sprint",
+    seed: 16,
+    city: preset(
+        name: "vesper_v2",
+        seed: 1,
+    ),
+    time_of_day_h: 23.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.3,
+    police_presence: 1.0,
+    panels: true,
+    entities: [
+        (
+            id: "player",
+            car: "lindwurm_4t",
+            pos: (-424.6047, 879.35706, 22.403357),
+            yaw: 1.4438996,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_mara",
+            car: "hakone_gt",
+            pos: (-437.14102, 875.9159, 22.403357),
+            yaw: 1.4438996,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_vic",
+            car: "kestrel_ts",
+            pos: (-432.54037, 880.3695, 22.403357),
+            yaw: 1.4438996,
+            driver: scripted,
+            inputs: [],
+        ),
+        (
+            id: "ai_juno",
+            car: "shiro_turbo",
+            pos: (-429.20535, 874.90344, 22.403357),
+            yaw: 1.4438996,
+            driver: scripted,
+            inputs: [],
+        ),
+    ],
+    duration_s: 10.0,
+    sample_hz: 60.0,
+    hash_every: 240,
+    expect: [
+        total_loss(
+            entity: "player",
+            expected: false,
+        ),
+        total_loss(
+            entity: "ai_mara",
+            expected: false,
+        ),
+    ],
+    expect_pending: [],
+)

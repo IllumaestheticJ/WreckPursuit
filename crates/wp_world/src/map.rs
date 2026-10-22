@@ -2,6 +2,8 @@
 //! connector curves), connector conflict sets, a uniform-grid spatial index, a zone lookup grid
 //! and the [`WorldQuery`] implementation.
 
+use std::sync::Arc;
+
 use wp_contracts::{SignalState, SurfaceType, TimeOfDay, WorldQuery};
 
 use crate::geom::{self, V2, V3};
@@ -52,6 +54,10 @@ pub struct Segment {
     pub speed_limit: f32,
     /// Width, m.
     pub width: f32,
+    /// Paved width beside the lane's left / right edge that belongs to no other lane: half
+    /// the median of a divided road on the inner side, a highway's shoulder on the outer
+    /// side, m (playtest row 94). 0 for connectors.
+    pub paved_side: [f32; 2],
     /// Civilians may drive here.
     pub drivable: bool,
     /// Successor segments (lane → its connectors; connector → its target lane).
@@ -170,24 +176,36 @@ impl Grid {
 }
 
 /// Runtime city map.
+///
+/// The network, segments and spatial grids never change after [`CityMap::new`] and are
+/// shared (`Arc`), so cloning a map — and a whole `wp_sim::Sim` for crash-replay snapshots —
+/// copies only the small mutable part.
 #[derive(Debug, Clone)]
 pub struct CityMap {
     /// Source network.
-    pub net: RoadNetwork,
+    pub net: Arc<RoadNetwork>,
     /// Lanes (indices `0..lanes.len()`) followed by connectors.
-    pub segs: Vec<Segment>,
+    pub segs: Arc<Vec<Segment>>,
     /// Arrival info per lane (None = lane does not end at a junction).
-    pub approach: Vec<Option<Approach>>,
+    pub approach: Arc<Vec<Option<Approach>>>,
     /// Drivable lane length per zone, km.
     pub zone_lane_km: Vec<f32>,
     /// Physics ticks (`PHYSICS_DT`) the signal controllers have run.
     pub signal_tick: u64,
     /// Current time of day (mirrors the world clock).
     pub time: TimeOfDay,
-    seg_grid: Grid,
-    ix_grid: Grid,
-    zone_grid: Grid,
-    building_grid: Grid,
+    /// The terrain as physics collides with it ([`crate::surface::collision_terrain`]); `None`
+    /// without terrain. Off the roads this is the drawn ground, not `net.terrain`.
+    pub ground: Option<crate::terrain::Heightfield>,
+    seg_grid: Arc<Grid>,
+    ix_grid: Arc<Grid>,
+    zone_grid: Arc<Grid>,
+    building_grid: Arc<Grid>,
+    /// Covered spans (tunnels) ready for queries.
+    pub covers: crate::covered::CoverIndex,
+    /// Whether covered spans block line of sight (default `true`; `false` is the A/B control
+    /// for tunnel scenarios: the geometry stays, only sightlines ignore it).
+    pub covered_los: bool,
     /// Freeway paint derived at build time (dotted taper lines, gore chevrons).
     pub(crate) paint: crate::markings::FreewayPaint,
 }
@@ -206,6 +224,7 @@ impl CityMap {
                 pts: l.polyline.clone(),
                 speed_limit: l.speed_limit_mps,
                 width: l.width_m,
+                paved_side: lane_paved_side(&net, l),
                 drivable: l.kind.drivable(),
                 next: Vec::new(),
                 prev: Vec::new(),
@@ -266,6 +285,7 @@ impl CityMap {
                     length,
                     speed_limit: limit,
                     width: l.width_m.min(to.width_m),
+                    paved_side: [0.0; 2],
                     drivable: l.kind.drivable() && to.kind.drivable(),
                     next: vec![c.to],
                     prev: vec![i as SegId],
@@ -377,17 +397,21 @@ impl CityMap {
         }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
-            net,
-            segs,
-            approach,
+            net: Arc::new(net),
+            segs: Arc::new(segs),
+            approach: Arc::new(approach),
             signal_tick: 0,
             time: TimeOfDay::from_hours(12.0),
-            seg_grid,
-            ix_grid,
-            zone_grid,
-            building_grid,
+            ground: None,
+            seg_grid: Arc::new(seg_grid),
+            ix_grid: Arc::new(ix_grid),
+            zone_grid: Arc::new(zone_grid),
+            building_grid: Arc::new(building_grid),
+            covers: crate::covered::CoverIndex::default(),
+            covered_los: true,
             paint: Default::default(),
         };
+        map.covers = crate::covered::CoverIndex::new(&map.net.covered);
         map.paint = crate::markings::freeway_paint(&map);
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
@@ -404,6 +428,7 @@ impl CityMap {
                 }
             }
         }
+        map.ground = crate::surface::collision_terrain(&map);
         map
     }
 
@@ -511,14 +536,16 @@ impl CityMap {
     }
 
     /// Drivable surface height at `p`: the lane or junction connector under it (the one
-    /// closest to `near_z` when given, else the lowest — grade separation), else the terrain.
+    /// closest to `near_z` when given, else the lowest — grade separation), else the terrain
+    /// physics collides with ([`CityMap::ground`]).
     pub fn ground_height(&self, p: V2, near_z: Option<f32>) -> f32 {
         let mut best: Option<f32> = None;
         let score = |z: f32| near_z.map_or(z, |h| (z - h).abs());
         for &id in self.seg_grid.at(p) {
             let s = &self.segs[id as usize];
             let pr = s.project(p);
-            if pr.dist > s.width * 0.5 + 0.5 {
+            let pad = s.paved_side[usize::from(pr.lateral > 0.0)];
+            if pr.dist > s.width * 0.5 + pad + 0.5 {
                 continue;
             }
             let z = s.point_at(pr.s.clamp(0.0, s.length)).0[2];
@@ -532,13 +559,74 @@ impl CityMap {
                 best = Some(z);
             }
         }
-        best.unwrap_or_else(|| self.net.ground_z(p))
+        best.unwrap_or_else(|| {
+            self.ground
+                .as_ref()
+                .map_or_else(|| self.net.ground_z(p), |g| g.height_on_triangles(p))
+        })
     }
 
     /// Zone district kind at `p`.
     pub fn district_at(&self, p: V2) -> Option<DistrictKind> {
         self.zone_at(p).map(|z| self.net.zones[z as usize].kind)
     }
+}
+
+/// [`Segment::paved_side`] of a lane: the paved surface of its road beyond the lane's left
+/// edge (outermost-left lane only: to the centreline of a two-way road, to the surface edge
+/// of a one-way one) and beyond its right edge (outermost-right lane only), measured at the
+/// lane's middle; at most 4 m.
+fn lane_paved_side(net: &RoadNetwork, l: &Lane) -> [f32; 2] {
+    let Some(sf) = net.surfaces.iter().find(|s| s.road == l.road) else {
+        return [0.0; 2];
+    };
+    let n = l.polyline.len();
+    if n < 2 || sf.centre.len() < 2 {
+        return [0.0; 2];
+    }
+    let mid = geom::xy(l.polyline[n / 2]);
+    let ldir = geom::normalize(geom::sub(
+        geom::xy(l.polyline[(n / 2).max(1)]),
+        geom::xy(l.polyline[(n / 2).max(1) - 1]),
+    ));
+    let cum = geom::cumulative(&sf.centre);
+    let pr = geom::project(&sf.centre, &cum, mid);
+    let (_, cdir) = geom::point_at(
+        &sf.centre,
+        &cum,
+        pr.s.clamp(0.0, *cum.last().unwrap_or(&0.0)),
+    );
+    // Lane frame: +1 when the lane runs a → b along the surface.
+    let sigma = if geom::dot(ldir, cdir) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let off = sigma * pr.lateral;
+    let (lo, hi) = if sigma > 0.0 {
+        (-sf.left_m, sf.right_m)
+    } else {
+        (-sf.right_m, sf.left_m)
+    };
+    let half = l.width_m * 0.5;
+    let two_way = net
+        .lanes
+        .iter()
+        .any(|o| o.road == l.road && o.from_node == l.to_node && o.to_node == l.from_node);
+    let left = if l.left.is_none() && l.kind != LaneKind::Parking {
+        let bound = if two_way { 0.0 } else { lo };
+        (off - half - bound).clamp(0.0, 4.0)
+    } else {
+        0.0
+    };
+    let right = if l.right.is_none() {
+        (hi - (off + half)).clamp(0.0, 4.0)
+    } else {
+        0.0
+    };
+    // Below a few cm it is rounding, not a strip.
+    let tidy = |v: f32| if v < 0.05 { 0.0 } else { v };
+    [tidy(left), tidy(right)]
 }
 
 fn conn_ends(s: &Segment) -> (LaneId, LaneId) {
@@ -707,8 +795,13 @@ impl CityMap {
     /// Buildings are extruded footprints from the ground to their height; the segment is
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
-    /// every 8 m; ends excluded). Roads, parked cars and traffic do not occlude.
+    /// every 8 m; ends excluded). Covered spans (tunnels) block sightlines in and out of them
+    /// ([`crate::covered`]) unless [`CityMap::covered_los`] is off. Roads, parked cars and
+    /// traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
+        if self.covered_los && self.covers.blocks(a, b) {
+            return false;
+        }
         if let Some(t) = &self.net.terrain {
             let len = geom::dist(geom::xy(a), geom::xy(b));
             let n = (len / 8.0).ceil() as u32;
@@ -739,6 +832,14 @@ impl CityMap {
     }
 }
 
+impl CityMap {
+    /// Index into [`RoadNetwork::covered`] of the tunnel / covered road containing `p`, if any
+    /// (independent of [`CityMap::covered_los`]).
+    pub fn covered_at(&self, p: V3) -> Option<usize> {
+        self.covers.covered_at(p)
+    }
+}
+
 impl WorldQuery for CityMap {
     fn surface_at(&self, p: [f32; 3]) -> SurfaceType {
         if self.net.lanes.is_empty() {
@@ -766,7 +867,8 @@ impl WorldQuery for CityMap {
                 continue;
             }
             let half = s.width * 0.5;
-            if pr.dist <= half {
+            // The lane, or the median half / shoulder beside it.
+            if pr.dist <= half + s.paved_side[usize::from(pr.lateral > 0.0)] {
                 let highway = |l: LaneId| self.net.lanes[l as usize].kind == LaneKind::Highway;
                 return match s.kind {
                     SegKind::Lane { lane } if highway(lane) => SurfaceType::Concrete,
@@ -856,11 +958,7 @@ mod tests {
     }
 
     fn block(x0: f32, y0: f32, x1: f32, y1: f32, h: f32) -> Building {
-        Building {
-            footprint: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-            height_m: h,
-            base_z_m: 0.0,
-        }
+        Building::block(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]], h, 0.0)
     }
 
     /// Brute force over every building (reference for the grid walk).
@@ -868,7 +966,7 @@ mod tests {
         !map.net
             .buildings
             .iter()
-            .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.height_m))
+            .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.roof_z()))
     }
 
     #[test]

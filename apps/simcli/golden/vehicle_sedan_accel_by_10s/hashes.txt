@@ -1,11 +1,11 @@
-# simcli hashes scenario=vehicle_sedan_accel_by_10s systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
-240 efc20522a0afecac
-480 a51f502ad82f1fa0
-720 2801b6ad8d910549
-960 bb05bfc21d05a58c
-1200 0c319482fae2ea0d
-1440 52138af4cc17db21
-1680 bebc4440144b9219
-1920 b70358d9ebd282ce
-2160 53031c6bda07b6f4
-2400 38e12a2704ce0e71
+# simcli hashes scenario=vehicle_sedan_accel_by_10s systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+240 1bad30dfbc92df3c
+480 586b4fd1c5dbfb84
+720 9b2da9d148cfa82d
+960 2197a0cc901ae150
+1200 a6f0a21aa82c970e
+1440 631259edb710fc8d
+1680 bb37eecedc7228ce
+1920 aca89f043cc56a5d
+2160 80363f942929cb1e
+2400 0805b9108d8cb470

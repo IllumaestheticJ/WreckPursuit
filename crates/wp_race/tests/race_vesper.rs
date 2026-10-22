@@ -99,7 +99,7 @@ fn run_hill_sprint() -> HillRace {
         entrants.push(AiEntrant {
             racer: *id,
             profile: DriverProfile::default(),
-            capability: CarCapability::geometry_only(car),
+            capability: CarCapability::for_car(car),
         });
     }
     let race = wp_race::bridge::CityRace { route, course };

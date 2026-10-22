@@ -32,29 +32,47 @@ use crate::judge::{RaceJudge, RacePhase};
 use crate::kind::RaceKind;
 use crate::result::DnfReason;
 
+/// How far past the course's half width an AI racer's corridor reaches, m (the old judge
+/// margin of 2 m less half a metre to spare).
+const AI_CORRIDOR_MARGIN_M: f32 = 1.5;
+
 /// The AI corridor runs this far past a point-to-point finish line, m. `wp_opponent` parks
 /// at the end of its corridor; without run-off it would stop short of the judge's finish gate.
 pub const AI_RUN_OFF_M: f32 = 60.0;
 
-/// The race route extended [`AI_RUN_OFF_M`] past the finish (same start and heading), so AI
-/// cars drive through the finish gate. `None` for closed loops or when no such route exists.
+/// The race route extended [`AI_RUN_OFF_M`] past the finish, so AI cars drive through the
+/// finish gate: the race route itself plus a run-off leg planned from the finish onward (the
+/// whole route is never re-planned, so on a grid the AI cannot take a different, equally short
+/// street than the judged one). `None` for closed loops or when no run-off leg exists.
 pub fn run_off_route(world: &World, route: &wp_world::Route) -> Option<wp_world::Route> {
-    if route.closed_loop || route.polyline.len() < 2 {
+    if route.closed_loop || route.polyline.len() < 2 || route.segs.is_empty() {
         return None;
     }
     let p = &route.polyline;
-    let (a, b) = (p[0], p[1]);
     let (y, z) = (p[p.len() - 2], p[p.len() - 1]);
-    let start_dir = v2::norm(v2::sub(v2::xy(b), v2::xy(a)));
     let end_dir = v2::norm(v2::sub(v2::xy(z), v2::xy(y)));
     let beyond = [
         z[0] + end_dir[0] * AI_RUN_OFF_M,
         z[1] + end_dir[1] * AI_RUN_OFF_M,
         z[2],
     ];
-    let ext = world.plan_route(a, Some(start_dir), beyond)?;
-    // Only accept an extension that really continues the race route.
-    (ext.length_m > route.length_m + 0.5 * AI_RUN_OFF_M).then_some(ext)
+    let leg = world.plan_route(z, Some(end_dir), beyond)?;
+    if leg.length_m < 0.5 * AI_RUN_OFF_M || leg.segs.is_empty() {
+        return None;
+    }
+    // Join on the shared segment (the leg starts on the lane the race finishes on).
+    let skip_seg = usize::from(leg.segs.first() == route.segs.last());
+    let skip_lane = usize::from(!leg.lanes.is_empty() && leg.lanes.first() == route.lanes.last());
+    let mut out = route.clone();
+    out.segs.extend_from_slice(&leg.segs[skip_seg..]);
+    out.lanes.extend_from_slice(&leg.lanes[skip_lane..]);
+    out.polyline.extend(
+        leg.polyline
+            .iter()
+            .skip_while(|q| v2::len(v2::sub(v2::xy(**q), v2::xy(z))) < 0.05),
+    );
+    out.length_m = route.length_m + leg.length_m;
+    Some(out)
 }
 
 /// One AI racer to enter.
@@ -64,7 +82,7 @@ pub struct AiEntrant {
     pub racer: EntityId,
     /// Driver personality.
     pub profile: DriverProfile,
-    /// Car limits (`CarCapability::measure` in release, `geometry_only` for quick tests).
+    /// Car limits (`CarCapability::for_car`; `geometry_only` for quick unit tests).
     pub capability: CarCapability,
 }
 
@@ -107,6 +125,9 @@ impl AiEntrants {
                 } else {
                     OpposingLanes::ForOvertaking
                 },
+                // Stay near the course: its half width plus AI_CORRIDOR_MARGIN_M. Leaving it is
+                // no longer a DQ (owner call), but the gates are on it.
+                max_half_width_m: Some(race.course.corridor_half_width_m + AI_CORRIDOR_MARGIN_M),
                 ..CorridorOptions::default()
             },
             ..RaceConfig::default()
@@ -120,6 +141,11 @@ impl AiEntrants {
             })
             .collect();
         let ai_route = run_off_route(world, &race.route).unwrap_or_else(|| race.route.clone());
+        // Past the judged finish (on the run-off leg) the cars are done racing.
+        let config = RaceConfig {
+            finish_m: (!race.route.closed_loop).then_some(race.route.length_m),
+            ..config
+        };
         let field = Field::from_route(world, &ai_route, &specs, config);
         let hold = entrants
             .iter()

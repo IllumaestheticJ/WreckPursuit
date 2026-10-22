@@ -101,6 +101,7 @@ fn city_ground_colliders_are_built() {
     assert!(c.road_triangles > 10_000, "{c:?}");
     assert!(c.buildings > 2000, "{c:?}");
     assert!(c.rails > 10, "{c:?}");
+    assert!(c.tunnel_boxes > 60, "{c:?}");
     assert!(c.barriers > 900, "{c:?}");
     assert!(s.has_terrain());
     // A flat city keeps the slab.
@@ -275,4 +276,100 @@ fn parked_cars_rest_asleep_on_the_road_mesh() {
         sim.prop_count() - sim.resting_prop_count(),
         sim.prop_count()
     );
+}
+
+/// A car driven at a tunnel wall stops at it: the Founders Cut walls are solid, and the car
+/// inside rests on the road under the deck (not on the roof).
+#[test]
+fn tunnel_walls_hold_a_car_inside() {
+    let c = net()
+        .covered
+        .iter()
+        .find(|c| c.name == "Founders Cut")
+        .unwrap();
+    let shape = wp_world::covered::CoverShape::new(c);
+    let (mid, dir) = wp_world::geom::point_at(&c.centre, &shape.cum, shape.length() * 0.5);
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let mut s = sim(true);
+    // Facing the right-hand wall (yaw of the right normal), 4 m from the centreline.
+    let right = [dir[1], -dir[0]];
+    let xy = [mid[0] + right[0] * 4.0, mid[1] + right[1] * 4.0];
+    let yaw = wp_math::atan2(-right[0], right[1]);
+    let id = s.spawn_vehicle(&car, [xy[0], xy[1], 0.0], yaw).unwrap();
+    s.place_on_ground(id, xy, yaw, 0.0, Some(mid[2])).unwrap();
+    s.set_input(
+        id,
+        VehicleInput {
+            throttle: 1.0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut max_lat = 0.0f32;
+    for _ in 0..(4.0 * 240.0) as usize {
+        s.step_fixed();
+        let p = s.vehicle_states()[0].1.pos;
+        max_lat = max_lat.max(shape.locate([p[0], p[1]]).lateral.abs());
+        assert!(
+            p[2] < mid[2] + 3.0,
+            "car on the roof: z {} road {}",
+            p[2],
+            mid[2]
+        );
+    }
+    assert!(
+        max_lat < c.half_width_m,
+        "through the wall: {max_lat} m (wall face at {} m)",
+        c.half_width_m
+    );
+    assert!(
+        max_lat > c.half_width_m - 3.0,
+        "never reached the wall: {max_lat} m"
+    );
+}
+
+/// What you see is what you hit (playtest: crashing into invisible map geometry): off the
+/// roads, rays against the Rapier terrain land on the greybox's drawn terrain, which lies up to
+/// ~10 m below the raw heightfield on slopes; under roads and sidewalks they land on
+/// `CityMap::ground`. Sampled off the grid vertices, so cell triangulation must match too.
+#[test]
+fn solid_terrain_is_the_drawn_terrain() {
+    use rapier3d::prelude::{QueryFilter, Ray, Vector};
+    let map = wp_world::CityMap::new(net().clone());
+    let mut phys = wp_sim::PhysicsWorld::new();
+    phys.set_city_ground(&map);
+    let raw = net().terrain.as_ref().unwrap();
+    let drawn = wp_world::surface::drawn_terrain(&map).unwrap();
+    let ground = map.ground.as_ref().unwrap();
+    let only_terrain = |_, c: &rapier3d::prelude::Collider| c.shape().as_heightfield().is_some();
+    let q = phys.query_pipeline(QueryFilter::default().predicate(&only_terrain));
+    let (lo, hi) = (raw.origin, raw.max_corner());
+    let (mut off_road, mut worst, mut raw_above) = (0, 0.0f32, 0.0f32);
+    let mut y = lo[1] + 1.3;
+    while y < hi[1] {
+        let mut x = lo[0] + 2.9;
+        while x < hi[0] {
+            let ray = Ray::new(Vector::new(x, y, 300.0), Vector::new(0.0, 0.0, -1.0));
+            let (_, toi) = q
+                .cast_ray(&ray, 600.0, true)
+                .expect("terrain under every point");
+            let hit = 300.0 - toi;
+            let want = ground.height_on_triangles([x, y]);
+            assert!(
+                (hit - want).abs() < 0.02,
+                "({x}, {y}): solid {hit}, collision terrain {want}"
+            );
+            let seen = drawn.height_on_triangles([x, y]);
+            if (want - seen).abs() < 1e-3 {
+                off_road += 1;
+                worst = worst.max((hit - seen).abs());
+                raw_above = raw_above.max(raw.height_on_triangles([x, y]) - hit);
+            }
+            x += 7.3;
+        }
+        y += 7.3;
+    }
+    println!("off-road samples {off_road}, worst |solid − drawn| {worst:.4} m, raw terrain up to {raw_above:.1} m above");
+    assert!(off_road > 50_000, "{off_road}");
+    assert!(worst < 0.02, "{worst}");
 }

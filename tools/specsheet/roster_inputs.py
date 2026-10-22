@@ -71,7 +71,7 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open front differential",
             layout="Fwd",
-            gears=[3.23, 1.90, 1.27, 0.97, 0.78], final=4.40, reverse=3.00, shift=0.25,
+            gears=[3.23, 1.90, 1.27, 0.97, 0.78], final=4.40, reverse=3.00, shift=0.45,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="195/55R15", rear="195/55R15", compound="street", unsprung=(18.0, 16.0)),
@@ -135,7 +135,7 @@ CARS = [
         trans=dict(
             desc="6-speed manual, mild clutch-type front LSD (AWD centre coupling is a mod)",
             layout="Fwd",
-            gears=[3.54, 2.13, 1.48, 1.12, 0.89, 0.73], final=4.06, reverse=3.30, shift=0.25,
+            gears=[3.54, 2.13, 1.48, 1.12, 0.89, 0.73], final=4.06, reverse=3.30, shift=0.42,
             diff_f=dict(preload=40.0, power=0.30, coast=0.10), diff_r="Open", clutch_factor=1.35,
         ),
         tires=dict(front="225/45R17", rear="225/45R17", compound="sport", unsprung=(22.0, 20.0)),
@@ -198,7 +198,7 @@ CARS = [
         trans=dict(
             desc="6-speed manual, clutch-type 1.5-way rear LSD",
             layout="Rwd",
-            gears=[3.32, 1.90, 1.31, 1.00, 0.76, 0.66], final=4.08, reverse=3.38, shift=0.22,
+            gears=[3.32, 1.90, 1.31, 1.00, 0.76, 0.66], final=4.08, reverse=3.38, shift=0.42,
             diff_f="Open", diff_r=dict(preload=60.0, power=0.45, coast=0.30), clutch_factor=1.45,
         ),
         tires=dict(front="215/45R17", rear="225/45R17", compound="sport", unsprung=(20.0, 22.0)),
@@ -260,7 +260,7 @@ CARS = [
         trans=dict(
             desc="6-speed manual, clutch-type rear LSD",
             layout="Rwd",
-            gears=[3.83, 2.36, 1.69, 1.31, 1.00, 0.79], final=3.13, reverse=3.28, shift=0.25,
+            gears=[3.83, 2.36, 1.69, 1.31, 1.00, 0.79], final=3.13, reverse=3.28, shift=0.45,
             diff_f="Open", diff_r=dict(preload=80.0, power=0.40, coast=0.25), clutch_factor=1.4,
         ),
         tires=dict(front="235/45R17", rear="255/40R17", compound="sport", unsprung=(24.0, 26.0)),
@@ -323,7 +323,7 @@ CARS = [
         trans=dict(
             desc="6-speed manual, helical-gear-style rear LSD (modelled as clutch LSD)",
             layout="Rwd",
-            gears=[3.66, 2.43, 1.69, 1.32, 1.00, 0.65], final=3.55, reverse=3.53, shift=0.25,
+            gears=[3.66, 2.43, 1.69, 1.32, 1.00, 0.65], final=3.55, reverse=3.53, shift=0.5,
             diff_f="Open", diff_r=dict(preload=50.0, power=0.50, coast=0.35), clutch_factor=1.35,
         ),
         tires=dict(front="255/40R19", rear="275/40R19", compound="sport", unsprung=(26.0, 28.0)),
@@ -386,13 +386,13 @@ CARS = [
         trans=dict(
             desc="3-speed automatic with torque converter, open live rear axle",
             layout="Rwd",
-            gears=[2.45, 1.45, 1.00], final=3.23, reverse=2.20, shift=0.40,
+            gears=[2.45, 1.45, 1.00], final=3.23, reverse=2.20, shift=0.4,
             torque_converter=dict(stall_rpm=2200, ratio=2.1, coupling_rpm=2800),
             diff_f="Open", diff_r="Open", clutch_factor=1.5,
         ),
         tires=dict(front="235/70R15", rear="235/70R15", compound="vintage_bias", unsprung=(30.0, 45.0)),
         susp=dict(hz=(1.10, 1.20), zeta=0.22, travel=(0.20, 0.22), roll_grad_deg_g=6.0,
-                  roll_front_share=0.70, bump_stop=120000.0, preload=0.03),
+                  roll_front_share=0.70, bump_stop=120000.0, preload=(0.11, 0.076)),
         align=dict(camber_deg=(0.25, 0.0), toe_deg=(0.1, 0.0), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=279, pistons_mm=[70], pad_mu=0.30),
@@ -454,7 +454,7 @@ CARS = [
         trans=dict(
             desc="6-speed manual, variable-locking clutch rear LSD",
             layout="Rwd",
-            gears=[4.23, 2.53, 1.67, 1.23, 1.00, 0.83], final=3.62, reverse=3.75, shift=0.22,
+            gears=[4.23, 2.53, 1.67, 1.23, 1.00, 0.83], final=3.62, reverse=3.75, shift=0.42,
             diff_f="Open", diff_r=dict(preload=40.0, power=0.50, coast=0.40), clutch_factor=1.4,
         ),
         tires=dict(front="225/45R18", rear="255/40R18", compound="sport", unsprung=(23.0, 25.0)),
@@ -517,7 +517,7 @@ CARS = [
         trans=dict(
             desc="6-speed dual-clutch, on-demand clutch-pack rear coupling (95 % front until the fronts slip 5 %, then up to 50 % rear), open diffs with brake-based torque vectoring (assist)",
             layout=("AwdOnDemand", 0.95, 0.50, 0.05),
-            gears=[3.46, 2.15, 1.45, 1.10, 0.87, 0.71], final=3.65, reverse=3.00, shift=0.08,
+            gears=[3.46, 2.15, 1.45, 1.10, 0.87, 0.71], final=3.65, reverse=3.00, shift=0.18,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="225/40R18", rear="225/40R18", compound="sport", unsprung=(22.0, 22.0)),
@@ -580,7 +580,7 @@ CARS = [
         trans=dict(
             desc="6-speed manual (open gate), clutch-type rear LSD",
             layout="Rwd",
-            gears=[3.08, 2.16, 1.61, 1.27, 1.03, 0.84], final=4.30, reverse=2.92, shift=0.22,
+            gears=[3.08, 2.16, 1.61, 1.27, 1.03, 0.84], final=4.30, reverse=2.92, shift=0.45,
             diff_f="Open", diff_r=dict(preload=60.0, power=0.50, coast=0.35), clutch_factor=1.4,
         ),
         tires=dict(front="225/40R18", rear="265/40R18", compound="sport", unsprung=(20.0, 24.0)),
@@ -643,7 +643,7 @@ CARS = [
         trans=dict(
             desc="6-speed automatic with lock-up torque converter, automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod",
             layout="Rwd",
-            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.42, reverse=3.06, shift=0.30,
+            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.42, reverse=3.06, shift=0.3,
             torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
             diff_f="Open", diff_r=dict(preload=150.0, power=0.60, coast=0.20), clutch_factor=1.6,
         ),
@@ -712,7 +712,7 @@ CARS = [
         trans=dict(
             desc="5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive)",
             layout="Rwd",
-            gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.07, reverse=3.16, shift=0.30,
+            gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.07, reverse=3.16, shift=0.3,
             torque_converter=dict(stall_rpm=2300, ratio=2.0, coupling_rpm=2700),
             diff_f="Open", diff_r=dict(preload=40.0, power=0.30, coast=0.15), clutch_factor=1.6,
         ),
@@ -784,7 +784,7 @@ CARS = [
         trans=dict(
             desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
             layout=("AwdOnDemand", 0.90, 0.50, 0.02),
-            gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.30,
+            gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.3,
             torque_converter=dict(stall_rpm=2600, ratio=1.9, coupling_rpm=3000),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),
@@ -846,7 +846,7 @@ CARS = [
         trans=dict(
             desc="6-speed automatic with torque converter, open rear diff",
             layout="Rwd",
-            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.08, reverse=3.06, shift=0.30,
+            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.08, reverse=3.06, shift=0.3,
             torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),
@@ -881,12 +881,12 @@ CARS = [
         id="junkyard_beater",
         display_name="Junkyard Beater",
         cls="Beater",
-        analog_of="late-80s compact FF sedan, 1.6 L SOHC I4, high mileage (tired engine, worn dampers)",
+        analog_of="1980s compact FF sedan, 1.6 L SOHC I4, 4-speed manual, high mileage (tired engine, sagging springs, worn dampers, old tyres)",
         era="80s",
         profile="sedan",
-        curb_kg=1000.0,
+        curb_kg=990.0,
         fuel_l=45,
-        front_frac=0.62,
+        front_frac=0.60,
         wheelbase=2.50,
         track_f=1.43,
         track_r=1.42,
@@ -901,23 +901,26 @@ CARS = [
         extra_cda=0.0,
         lift=(0.12, 0.14),
         engine=dict(
-            desc="1.6 L SOHC 8-valve I4, throttle-body injection, worn (≈ 10 % down on its new rating)",
-            curve=[(800, 85), (1200, 98), (1600, 108), (2000, 115), (2500, 120), (3000, 124),
-                   (3500, 125), (4000, 123), (4500, 119), (5000, 114), (5500, 106), (6000, 95),
-                   (6300, 86)],
-            idle=850, redline=6000, limit=6300, inertia=0.11, brake_frac=0.12,
+            desc="1.6 L SOHC 8-valve I4, twin-choke carburettor, worn (≈ 10 % down on its new rating)",
+            curve=[(800, 82), (1200, 94), (1600, 103), (2000, 110), (2500, 116), (3000, 120),
+                   (3500, 123), (4000, 124), (4500, 123), (5000, 121), (5500, 113), (5800, 104),
+                   (6000, 96)],
+            idle=850, redline=5800, limit=6000, inertia=0.12, brake_frac=0.12,
             why="Class-typical late-80s 1.6 SOHC economy engine (~45 kW/L new), derated ~10 % for wear (compression loss) per owner dyno sheets of high-mileage examples.",
         ),
         trans=dict(
-            desc="5-speed manual with a tired synchro (slow shifts), open front differential",
+            desc="4-speed manual with a tired second-gear synchro (slow shifts), open front differential",
             layout="Fwd",
-            gears=[3.25, 1.89, 1.25, 0.92, 0.73], final=4.06, reverse=3.15, shift=0.35,
+            gears=[3.17, 1.84, 1.26, 0.97], final=4.33, reverse=3.17, shift=0.7,
+            efficiency=0.78,
+            efficiency_why=("worn CV joints, tired wheel bearings and dragging front calipers; "
+                            "class-typical 0.85 minus ≈ 8 % for high mileage"),
             diff_f="Open", diff_r="Open", clutch_factor=1.3,
         ),
-        tires=dict(front="175/70R13", rear="175/70R13", compound="street", unsprung=(15.0, 14.0)),
-        susp=dict(hz=(1.30, 1.45), zeta=0.18, travel=(0.15, 0.16), roll_grad_deg_g=5.0,
-                  roll_front_share=0.60, bump_stop=120000.0, preload=0.01),
-        align=dict(camber_deg=(-0.2, -0.5), toe_deg=(0.0, 0.1), caster_deg=2.0),
+        tires=dict(front="175/70R13", rear="175/70R13", compound="vintage_bias", unsprung=(15.0, 14.0)),
+        susp=dict(hz=(1.15, 1.25), zeta=0.18, travel=(0.16, 0.17), roll_grad_deg_g=6.5,
+                  roll_front_share=0.70, bump_stop=120000.0, preload=(0.11, 0.08)),
+        align=dict(camber_deg=(-1.3, 0.0), toe_deg=(0.0, -0.15), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=240, pistons_mm=[51], pad_mu=0.35),
             rear=dict(kind="drum", d_mm=200, wheel_cyl_mm=17.5, brake_factor=1.8),
@@ -927,15 +930,19 @@ CARS = [
         price=3000,
         durability=2,
         note=("The economy floor: always affordable, never fast. Sagging springs and worn "
-              "dampers make it bounce and lean, the tired four needs every one of its 6000 rpm, "
-              "and the slow gearshift punishes hurry. It is what you drive after the impound "
-              "took your real car — and a surprisingly good teacher of weight transfer."),
+              "dampers make it lean hard and bob over every crest, the old hard tyres squeal "
+              "long before they let go, and the tired four needs every one of its 5800 rpm "
+              "through a long-throw 4-speed with a slow shift. Flat out it buzzes on the limiter "
+              "at about 150 km/h. It is what you drive after the impound took your real car — "
+              "slow, but it tells you exactly what the weight is doing, so it is a surprisingly "
+              "good teacher."),
         breaks=("A thin late-80s shell with a weak passenger cell: modest crumple rails and "
                 "light pillars mean a hard frontal reaches the cabin (Simulation lethality is "
                 "high), but panels are cheap and everything bolts back on. Small radiator right "
                 "behind a plastic bumper — nose taps overheat it quickly."),
-        sources=["manufacturer spec-class data for late-80s 1.6 L FF compact sedans",
-                 "owner dyno sheets for high-mileage 1.6 SOHC engines",
+        sources=["manufacturer spec-class data for 1980s 1.6 L FF compact sedans (4-speed manual / 3-speed automatic trims)",
+                 "owner dyno sheets for high-mileage 1.6 SOHC carburettor engines",
+                 "tyre test data for aged (hardened) radials: ≈ 0.85 × new street grip, earlier and louder breakaway",
                  "engineering tables (tire radius, ride frequency, disc/drum brake hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
     ),
@@ -974,12 +981,12 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open front differential",
             layout="Fwd",
-            gears=[3.55, 1.90, 1.28, 0.97, 0.78], final=4.06, reverse=3.31, shift=0.25,
+            gears=[3.55, 1.90, 1.28, 0.97, 0.78], final=4.06, reverse=3.31, shift=0.5,
             diff_f="Open", diff_r="Open", clutch_factor=1.35,
         ),
         tires=dict(front="175/65R14", rear="175/65R14", compound="street", unsprung=(15.0, 14.0)),
         susp=dict(hz=(1.35, 1.50), zeta=0.27, travel=(0.15, 0.16), roll_grad_deg_g=5.5,
-                  roll_front_share=0.62, bump_stop=120000.0, preload=0.01),
+                  roll_front_share=0.62, bump_stop=120000.0, preload=(0.061, 0.031)),
         align=dict(camber_deg=(-0.5, -1.0), toe_deg=(0.0, 0.15), caster_deg=3.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=256, pistons_mm=[54], pad_mu=0.38),
@@ -1042,7 +1049,7 @@ CARS = [
         ),
         tires=dict(front="245/75R16", rear="245/75R16", compound="street", unsprung=(40.0, 60.0)),
         susp=dict(hz=(1.25, 1.55), zeta=0.27, travel=(0.20, 0.22), roll_grad_deg_g=5.5,
-                  roll_front_share=0.70, bump_stop=300000.0, preload=0.03),
+                  roll_front_share=0.70, bump_stop=300000.0, preload=(0.059, 0.03)),
         align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=325, pistons_mm=[57, 57], pad_mu=0.40),
@@ -1100,12 +1107,12 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open rear differential on a leaf-sprung live axle",
             layout="Rwd",
-            gears=[3.83, 2.22, 1.40, 1.00, 0.86], final=4.10, reverse=3.83, shift=0.35,
+            gears=[3.83, 2.22, 1.40, 1.00, 0.86], final=4.10, reverse=3.83, shift=0.65,
             diff_f="Open", diff_r="Open", clutch_factor=1.35,
         ),
         tires=dict(front="215/70R14", rear="215/70R14", compound="street", unsprung=(30.0, 50.0)),
         susp=dict(hz=(1.30, 1.60), zeta=0.25, travel=(0.18, 0.20), roll_grad_deg_g=5.5,
-                  roll_front_share=0.72, bump_stop=200000.0, preload=0.02),
+                  roll_front_share=0.72, bump_stop=200000.0, preload=(0.06, 0.02)),
         align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=3.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=274, pistons_mm=[60], pad_mu=0.38),
@@ -1162,7 +1169,7 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open front differential",
             layout="Fwd",
-            gears=[3.27, 2.13, 1.46, 1.13, 0.89], final=3.94, reverse=3.30, shift=0.25,
+            gears=[3.27, 2.13, 1.46, 1.13, 0.89], final=3.94, reverse=3.30, shift=0.45,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="205/50R15", rear="205/50R15", compound="street", unsprung=(19.0, 16.0)),
@@ -1293,7 +1300,7 @@ CARS = [
         trans=dict(
             desc="5-speed close-ratio manual, permanent AWD (centre differential, 40 % front), open front, clutch LSD rear",
             layout=("Awd", 0.40),
-            gears=[3.17, 1.88, 1.30, 0.97, 0.74], final=4.11, reverse=3.30, shift=0.22,
+            gears=[3.17, 1.88, 1.30, 0.97, 0.74], final=4.11, reverse=3.30, shift=0.42,
             diff_f="Open", diff_r=dict(preload=50.0, power=0.35, coast=0.15), clutch_factor=1.4,
         ),
         tires=dict(front="205/50R16", rear="205/50R16", compound="sport", unsprung=(21.0, 20.0)),
@@ -1356,7 +1363,7 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open front differential, short final drive for payload",
             layout="Fwd",
-            gears=[3.73, 2.05, 1.32, 0.97, 0.76], final=4.53, reverse=3.55, shift=0.35,
+            gears=[3.73, 2.05, 1.32, 0.97, 0.76], final=4.53, reverse=3.55, shift=0.65,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="215/65R16", rear="215/65R16", compound="street", unsprung=(24.0, 30.0)),
@@ -1423,7 +1430,7 @@ CARS = [
         trans=dict(
             desc="7-speed dual-clutch, permanent AWD (fixed 30 % front split, centre coupling modelled as a fixed split), open front diff, clutch-type rear LSD",
             layout=("Awd", 0.30),
-            gears=[3.13, 2.19, 1.68, 1.34, 1.10, 0.92, 0.79], final=4.11, reverse=2.90, shift=0.06,
+            gears=[3.13, 2.19, 1.68, 1.34, 1.10, 0.92, 0.79], final=4.11, reverse=2.90, shift=0.18,
             diff_f="Open", diff_r=dict(preload=60.0, power=0.45, coast=0.30), clutch_factor=1.4,
         ),
         tires=dict(front="245/35R20", rear="305/30R21", compound="sport", unsprung=(22.0, 26.0)),

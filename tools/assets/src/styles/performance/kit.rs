@@ -57,12 +57,13 @@ pub fn sided(k: &PartKey, sx: f32) -> PartKey {
     }
 }
 
-/// The foundation's default head-light key of side `sx` (we append our lamp shapes to it).
+/// The foundation's default head-light key of side `sx` (we append our lamp shapes to it;
+/// frame region: a lens, see `skin::is_lens`).
 pub fn headlight_key(sx: f32) -> PartKey {
     sided(
         &lkey(
             "headlight_l",
-            BodyRegion::FrontLeftFender,
+            BodyRegion::FrameFront,
             MaterialSlot::Headlight,
         ),
         sx,
@@ -74,7 +75,7 @@ pub fn taillight_key(sx: f32) -> PartKey {
     sided(
         &lkey(
             "taillight_l",
-            BodyRegion::RearLeftQuarter,
+            BodyRegion::FrameRear,
             MaterialSlot::Taillight,
         ),
         sx,

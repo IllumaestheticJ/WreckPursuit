@@ -80,7 +80,7 @@ Peak **85 kW @ 5500 rpm**, **176 N·m @ 3000 rpm**. Idle 750 / redline 5800 / li
 
 ## Drivetrain
 
-5-speed manual, open front differential, short final drive for payload. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 250 N·m. Shift time 0.35 s.
+5-speed manual, open front differential, short final drive for payload. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 250 N·m. Shift time 0.65 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -123,7 +123,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2540 N·m/wheel (capacity 1.11×), rear needs 520 N·m/wheel (capacity 1.69×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 580 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.603** → delivered 2830 N·m front / 579 N·m rear per wheel at full pedal. Handbrake 880 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 580 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.603** → delivered 2830 N·m front / 579 N·m rear per wheel at full pedal. Handbrake 1930 N·m per rear wheel.
 
 ## Steering
 
@@ -136,7 +136,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 18.5 s | 146 km/h | 45.3 m | 0.68 g | — |
-| estimate | 16.1 s | 153 km/h | 41.3 m | 0.78 g | 314 |
+| estimate | 16.7 s | 153 km/h | 41.3 m | 0.78 g | 310 |
 
 ## Damage lattice (`data/lattices/satchel_20.json`)
 

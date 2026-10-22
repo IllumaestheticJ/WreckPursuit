@@ -1,0 +1,650 @@
+{
+ "label": "after",
+ "promotionStep": 119,
+ "popIn": {
+  "minAppearM": 358.9,
+  "minVanishM": 462,
+  "appeared": 22,
+  "vanished": 1
+ },
+ "followedCar": [
+  {
+   "step": 106,
+   "simS": 4.033,
+   "distToPlayer": 87.7,
+   "agentPos": [
+    -372.831,
+    193.283,
+    9.954
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -372.8310546875,
+    193.28329467773438,
+    9.954451560974121
+   ],
+   "colour": null
+  },
+  {
+   "step": 107,
+   "simS": 4.05,
+   "distToPlayer": 86.9,
+   "agentPos": [
+    -373.056,
+    193.393,
+    9.955
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -373.0564880371094,
+    193.392578125,
+    9.955302238464355
+   ],
+   "colour": null
+  },
+  {
+   "step": 108,
+   "simS": 4.067,
+   "distToPlayer": 86,
+   "agentPos": [
+    -373.282,
+    193.502,
+    9.956
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -373.2819519042969,
+    193.5018768310547,
+    9.956153869628906
+   ],
+   "colour": null
+  },
+  {
+   "step": 109,
+   "simS": 4.083,
+   "distToPlayer": 85.1,
+   "agentPos": [
+    -373.507,
+    193.611,
+    9.957
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -373.5074768066406,
+    193.61122131347656,
+    9.957005500793457
+   ],
+   "colour": null
+  },
+  {
+   "step": 110,
+   "simS": 4.1,
+   "distToPlayer": 84.2,
+   "agentPos": [
+    -373.733,
+    193.721,
+    9.958
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -373.7330627441406,
+    193.7205810546875,
+    9.957857131958008
+   ],
+   "colour": null
+  },
+  {
+   "step": 111,
+   "simS": 4.117,
+   "distToPlayer": 83.3,
+   "agentPos": [
+    -373.959,
+    193.83,
+    9.959
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -373.9587097167969,
+    193.82997131347656,
+    9.958708763122559
+   ],
+   "colour": null
+  },
+  {
+   "step": 112,
+   "simS": 4.133,
+   "distToPlayer": 82.4,
+   "agentPos": [
+    -374.184,
+    193.939,
+    9.96
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -374.1844177246094,
+    193.93939208984375,
+    9.959561347961426
+   ],
+   "colour": null
+  },
+  {
+   "step": 113,
+   "simS": 4.15,
+   "distToPlayer": 81.6,
+   "agentPos": [
+    -374.41,
+    194.049,
+    9.96
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -374.4101867675781,
+    194.04884338378906,
+    9.960413932800293
+   ],
+   "colour": null
+  },
+  {
+   "step": 114,
+   "simS": 4.167,
+   "distToPlayer": 80.7,
+   "agentPos": [
+    -374.636,
+    194.158,
+    9.961
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -374.635986328125,
+    194.1583251953125,
+    9.96126651763916
+   ],
+   "colour": null
+  },
+  {
+   "step": 115,
+   "simS": 4.183,
+   "distToPlayer": 79.8,
+   "agentPos": [
+    -374.862,
+    194.268,
+    9.962
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -374.86187744140625,
+    194.267822265625,
+    9.962119102478027
+   ],
+   "colour": null
+  },
+  {
+   "step": 116,
+   "simS": 4.2,
+   "distToPlayer": 78.9,
+   "agentPos": [
+    -375.087,
+    194.377,
+    9.963
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -375.0867614746094,
+    194.37686157226562,
+    9.962968826293945
+   ],
+   "colour": null
+  },
+  {
+   "step": 117,
+   "simS": 4.217,
+   "distToPlayer": 78,
+   "agentPos": [
+    -375.31,
+    194.485,
+    9.964
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -375.3096618652344,
+    194.48492431640625,
+    9.963809967041016
+   ],
+   "colour": null
+  },
+  {
+   "step": 118,
+   "simS": 4.233,
+   "distToPlayer": 77.1,
+   "agentPos": [
+    -375.531,
+    194.592,
+    9.965
+   ],
+   "physical": false,
+   "drawer": "instanced full mesh",
+   "key": "t23",
+   "drawnPos": [
+    -375.53057861328125,
+    194.59202575683594,
+    9.964644432067871
+   ],
+   "colour": null
+  },
+  {
+   "step": 119,
+   "simS": 4.25,
+   "distToPlayer": 76.2,
+   "agentPos": [
+    -375.804,
+    194.725,
+    9.966
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -375.8039245605469,
+    194.72459411621094,
+    9.96567153930664
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 120,
+   "simS": 4.267,
+   "distToPlayer": 75.3,
+   "agentPos": [
+    -376.022,
+    194.83,
+    9.966
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -375.96723126031566,
+    194.80397380642376,
+    9.966270473554431
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 121,
+   "simS": 4.283,
+   "distToPlayer": 74.5,
+   "agentPos": [
+    -376.238,
+    194.936,
+    9.967
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -376.184089098399,
+    194.90950356555368,
+    9.967129738492943
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 122,
+   "simS": 4.3,
+   "distToPlayer": 73.6,
+   "agentPos": [
+    -376.452,
+    195.04,
+    9.968
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -376.39874966284924,
+    195.01407201096254,
+    9.96812919343084
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 123,
+   "simS": 4.317,
+   "distToPlayer": 72.7,
+   "agentPos": [
+    -376.664,
+    195.143,
+    9.97
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -376.6109383074754,
+    195.11746552560953,
+    9.969246902482453
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 124,
+   "simS": 4.333,
+   "distToPlayer": 71.8,
+   "agentPos": [
+    -376.873,
+    195.245,
+    9.971
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -376.8207160554216,
+    195.21965359391857,
+    9.970421829991025
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 125,
+   "simS": 4.35,
+   "distToPlayer": 71,
+   "agentPos": [
+    -377.08,
+    195.346,
+    9.972
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -377.02820501303677,
+    195.32060571032366,
+    9.971583402430497
+   ],
+   "colour": "#7a1f1f"
+  },
+  {
+   "step": 126,
+   "simS": 4.367,
+   "distToPlayer": 70.1,
+   "agentPos": [
+    -377.285,
+    195.445,
+    9.973
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "key": "t23",
+   "drawnPos": [
+    -377.2341070605935,
+    195.42059651701175,
+    9.972625763578392
+   ],
+   "colour": "#7a1f1f"
+  }
+ ],
+ "meshFetches": [
+  {
+   "car": "lindwurm_4t",
+   "startMs": 556,
+   "durationMs": 5
+  },
+  {
+   "car": "debug_sedan",
+   "startMs": 1369,
+   "durationMs": 14
+  },
+  {
+   "car": "sentinel_cruiser",
+   "startMs": 1370,
+   "durationMs": 14
+  }
+ ],
+ "lodLog": {
+  "summary": {
+   "frames": 781,
+   "missing": 0,
+   "missingSamples": [],
+   "swaps": 1,
+   "maxSwapJump": 0.3037983405866479,
+   "worstSwaps": [
+    {
+     "key": "t23",
+     "frame": 637,
+     "t": 4.25,
+     "from": "full",
+     "to": "view",
+     "jump": 0.3037983405866479,
+     "rows": [
+      {
+       "frame": 634,
+       "t": 4.233333333333333,
+       "mode": "full",
+       "fallback": false,
+       "entity": 0,
+       "pos": [
+        -375.53057861328125,
+        194.59202575683594,
+        9.964644432067871
+       ]
+      },
+      {
+       "frame": 635,
+       "t": 4.233333333333333,
+       "mode": "full",
+       "fallback": false,
+       "entity": 0,
+       "pos": [
+        -375.53057861328125,
+        194.59202575683594,
+        9.964644432067871
+       ]
+      },
+      {
+       "frame": 636,
+       "t": 4.233333333333333,
+       "mode": "full",
+       "fallback": false,
+       "entity": 0,
+       "pos": [
+        -375.53057861328125,
+        194.59202575683594,
+        9.964644432067871
+       ]
+      },
+      {
+       "frame": 637,
+       "t": 4.25,
+       "mode": "view",
+       "fallback": false,
+       "entity": 7,
+       "pos": [
+        -375.8039245605469,
+        194.72459411621094,
+        9.96567153930664
+       ]
+      },
+      {
+       "frame": 638,
+       "t": 4.25,
+       "mode": "view",
+       "fallback": false,
+       "entity": 7,
+       "pos": [
+        -375.8039245605469,
+        194.72459411621094,
+        9.96567153930664
+       ]
+      },
+      {
+       "frame": 639,
+       "t": 4.25,
+       "mode": "view",
+       "fallback": false,
+       "entity": 7,
+       "pos": [
+        -375.8039245605469,
+        194.72459411621094,
+        9.96567153930664
+       ]
+      },
+      {
+       "frame": 640,
+       "t": 4.25,
+       "mode": "view",
+       "fallback": false,
+       "entity": 7,
+       "pos": [
+        -375.8039245605469,
+        194.72459411621094,
+        9.96567153930664
+       ]
+      }
+     ]
+    }
+   ],
+   "minAppearTraffic": 363.3807677305234,
+   "minVanishTraffic": 379.74420794942375,
+   "minAppearPolice": null,
+   "minVanishPolice": null,
+   "cars": 89,
+   "maxPlaceholderS": 0
+  },
+  "swaps": [
+   {
+    "key": "t23",
+    "frame": 637,
+    "t": 4.25,
+    "from": "full",
+    "to": "view",
+    "jump": 0.3037983405866479,
+    "rows": [
+     {
+      "frame": 634,
+      "t": 4.233333333333333,
+      "mode": "full",
+      "fallback": false,
+      "entity": 0,
+      "pos": [
+       -375.53057861328125,
+       194.59202575683594,
+       9.964644432067871
+      ]
+     },
+     {
+      "frame": 635,
+      "t": 4.233333333333333,
+      "mode": "full",
+      "fallback": false,
+      "entity": 0,
+      "pos": [
+       -375.53057861328125,
+       194.59202575683594,
+       9.964644432067871
+      ]
+     },
+     {
+      "frame": 636,
+      "t": 4.233333333333333,
+      "mode": "full",
+      "fallback": false,
+      "entity": 0,
+      "pos": [
+       -375.53057861328125,
+       194.59202575683594,
+       9.964644432067871
+      ]
+     },
+     {
+      "frame": 637,
+      "t": 4.25,
+      "mode": "view",
+      "fallback": false,
+      "entity": 7,
+      "pos": [
+       -375.8039245605469,
+       194.72459411621094,
+       9.96567153930664
+      ]
+     },
+     {
+      "frame": 638,
+      "t": 4.25,
+      "mode": "view",
+      "fallback": false,
+      "entity": 7,
+      "pos": [
+       -375.8039245605469,
+       194.72459411621094,
+       9.96567153930664
+      ]
+     },
+     {
+      "frame": 639,
+      "t": 4.25,
+      "mode": "view",
+      "fallback": false,
+      "entity": 7,
+      "pos": [
+       -375.8039245605469,
+       194.72459411621094,
+       9.96567153930664
+      ]
+     },
+     {
+      "frame": 640,
+      "t": 4.25,
+      "mode": "view",
+      "fallback": false,
+      "entity": 7,
+      "pos": [
+       -375.8039245605469,
+       194.72459411621094,
+       9.96567153930664
+      ]
+     }
+    ]
+   }
+  ],
+  "meshTimings": {
+   "lindwurm_4t": {
+    "ms": 23,
+    "ok": true
+   },
+   "debug_sedan": {
+    "ms": 443,
+    "ok": true
+   },
+   "sentinel_cruiser": {
+    "ms": 448,
+    "ok": true
+   }
+  }
+ },
+ "errors": []
+}

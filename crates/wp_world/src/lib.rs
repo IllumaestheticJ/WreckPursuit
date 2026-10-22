@@ -12,6 +12,7 @@
 //!   spawning, kinematic/physical LOD).
 //! - [`drive`]: the shared AI driving controller (pure pursuit + PID) used by physical
 //!   traffic, racers (`wp_opponent`) and police.
+//! - [`covered`]: tunnels and covered roads (line of sight in and out is blocked).
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -22,15 +23,18 @@
 
 pub mod builder;
 pub mod clock;
+pub mod covered;
 pub mod density;
 pub mod drive;
 pub mod geom;
 pub mod leader;
+pub mod manoeuvre;
 pub mod map;
 pub mod markings;
 pub mod network;
 pub mod procgen;
 pub mod props;
+pub mod residential;
 pub mod roads;
 pub mod routes;
 pub mod signals;
@@ -104,6 +108,9 @@ pub struct World {
     closed: Vec<bool>,
     cones: Vec<StaticProp>,
     parked: Vec<StaticProp>,
+    /// Display name per source road (`Lane::road` index; empty when the city has none).
+    /// Presentation only (police radio callouts): never read by the simulation or hashed.
+    road_names: Vec<String>,
     /// Physics ticks run (the world's simulation clock).
     tick: u64,
 }
@@ -132,6 +139,8 @@ fn empty_network() -> RoadNetwork {
         buildings: Vec::new(),
         surfaces: Vec::new(),
         terrain: None,
+        covered: Vec::new(),
+        decor: Vec::new(),
     }
 }
 
@@ -154,7 +163,12 @@ impl World {
         map.time = cfg.start_time;
         let traffic = Traffic::new(&map, cfg.traffic.clone(), cfg.seed);
         let parked = if cfg.parked_cars {
-            props::parked_cars(&map, cfg.seed)
+            // Kerbside cars (never across a driveway mouth), then the driveway cars
+            // (residential lots, playtest row 95).
+            let mut cars = props::parked_cars(&map, cfg.seed);
+            cars.retain(|c| !residential::blocks_driveway(&map.net, c.pos));
+            cars.extend(residential::driveway_cars(&map, cfg.seed));
+            cars
         } else {
             Vec::new()
         };
@@ -171,6 +185,7 @@ impl World {
             closed: vec![false; n_lanes],
             cones: Vec::new(),
             parked,
+            road_names: Vec::new(),
             tick: 0,
         }
     }
@@ -191,8 +206,43 @@ impl World {
     }
 
     /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
+    /// Road names come from the generator ([`World::road_names`]).
     pub fn vesper(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
-        Self::new(vesper::generate(vc), cfg)
+        let (net, report) = vesper::generate_with_report(vc);
+        let mut w = Self::new(net, cfg);
+        w.road_names = report.road_names.iter().map(|n| n.to_string()).collect();
+        w
+    }
+
+    /// Display name per source road (`Lane::road` index), e.g. `Harbor Boulevard`. Empty for
+    /// cities without names (the procedural grid, loaded `.road.bin` files). Presentation only.
+    pub fn road_names(&self) -> &[String] {
+        &self.road_names
+    }
+
+    /// Set the display names per source road (tests, cities loaded from files).
+    pub fn set_road_names(&mut self, names: Vec<String>) {
+        self.road_names = names;
+    }
+
+    /// Display name of every road-graph edge (`RoadEdgeId` order, [`World::road_graph`]);
+    /// `""` where the road has no name.
+    pub fn edge_names(&self) -> Vec<String> {
+        roads::edge_roads(&self.map)
+            .into_iter()
+            .map(|r| self.road_names.get(r as usize).cloned().unwrap_or_default())
+            .collect()
+    }
+
+    /// Index of the tunnel / covered road containing `p` (into `network().covered`), if any.
+    pub fn covered_at(&self, p: [f32; 3]) -> Option<usize> {
+        self.map.covered_at(p)
+    }
+
+    /// Turn the line-of-sight effect of covered spans on or off (default on). Off is the
+    /// control run of tunnel scenarios: same geometry, sightlines ignore the cover.
+    pub fn set_covered_los(&mut self, on: bool) {
+        self.map.covered_los = on;
     }
 
     /// Car used for physical (near-LOD) traffic. Without one, traffic stays kinematic.
@@ -483,5 +533,21 @@ mod tests {
         assert_eq!(w.signal_state_ahead([0.0; 3], [0.0, 1.0, 0.0]), None);
         assert_eq!(w.agent_count(), 0);
         assert!(ev.is_empty());
+    }
+
+    #[test]
+    fn vesper_edges_are_named_after_their_roads() {
+        let w = World::vesper(&vesper::VesperConfig::default(), WorldConfig::default());
+        let names = w.edge_names();
+        assert_eq!(names.len(), w.road_graph().edges.len());
+        assert!(
+            names.iter().all(|n| !n.is_empty()),
+            "every Vesper road has a name"
+        );
+        assert!(names.iter().any(|n| n == "Harbor Boulevard"));
+        // The procedural grid has no names: every edge is unnamed.
+        let g = World::procedural(&procgen::ProcGenConfig::small(), WorldConfig::default());
+        assert!(g.edge_names().iter().all(|n| n.is_empty()));
+        assert_eq!(g.edge_names().len(), g.road_graph().edges.len());
     }
 }

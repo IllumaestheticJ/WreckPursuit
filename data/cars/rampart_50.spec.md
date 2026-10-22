@@ -83,7 +83,7 @@ Peak **319 kW @ 6750 rpm**, **529 N·m @ 4250 rpm**. Idle 700 / redline 7000 / l
 
 ## Drivetrain
 
-6-speed manual, helical-gear-style rear LSD (modelled as clutch LSD). Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 50 N·m, power ramp 0.50, coast ramp 0.35. Clutch capacity 1.35 × peak torque = 710 N·m. Shift time 0.25 s.
+6-speed manual, helical-gear-style rear LSD (modelled as clutch LSD). Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 50 N·m, power ramp 0.50, coast ramp 0.35. Clutch capacity 1.35 × peak torque = 710 N·m. Shift time 0.50 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -129,7 +129,7 @@ ABS ceiling: caliper capacity 5456 / 1781 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2072 N·m/wheel (capacity 1.80×), rear needs 809 N·m/wheel (capacity 1.51×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1456 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 3730 N·m front / 1220 N·m rear per wheel at full pedal. Handbrake 1430 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1456 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 3730 N·m front / 1220 N·m rear per wheel at full pedal. Handbrake 2020 N·m per rear wheel.
 
 ## Steering
 
@@ -141,8 +141,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.8 s | 268 km/h | 38.4 m | 0.87 g | — |
-| estimate | 5.4 s | 276 km/h | 36.0 m | 0.96 g | 618 |
+| sim | 6.2 s | 268 km/h | 38.9 m | 0.90 g | — |
+| estimate | 5.6 s | 276 km/h | 36.0 m | 0.96 g | 603 |
 
 ## Damage lattice (`data/lattices/rampart_50.json`)
 

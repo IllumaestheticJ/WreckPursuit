@@ -145,7 +145,8 @@ class Car:
         self.gears = d["gear_ratios"]
         self.fd = d["final_drive"]
         self.shift = d["shift_time_s"]
-        self.eff = DRIVETRAIN_EFF[self.layout]
+        # A car JSON that states its own (worn) efficiency overrides the class default.
+        self.eff = d.get("efficiency") or DRIVETRAIN_EFF[self.layout]
         w = car["wheels"]
         self.rf = w[0]["radius_m"]
         self.rr_ = w[2]["radius_m"]

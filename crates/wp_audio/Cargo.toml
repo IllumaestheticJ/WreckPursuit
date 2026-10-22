@@ -15,9 +15,14 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# Flat-ground rig for the engine-shift trace (tests/support/engine_trace.rs).
+wp_vehicle.workspace = true
 # Real physics output for the determinism test (dev only; wp_audio itself never depends on the sim).
 wp_sim.workspace = true
 # Run the determinism lint over this crate (it is not in lint-determinism's SIM_CRATES yet).
 lint-determinism = { path = "../../tools/lint-determinism" }
 # Reads data/police/tools.toml in a test (scanner delays must match).
 toml.workspace = true
+# Real crashes for the impact renders (examples/impact_trace.rs, owner row 74): scenario format
+# and runner. Dev only.
+simcli = { path = "../../apps/simcli" }

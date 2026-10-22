@@ -1,0 +1,24 @@
+// Round 12b (owner playtest rows 48-49: Arcade cars and police too fragile), workstream 03.
+// Full sim, Arcade, R's panels on as in the browser game. Repeated hits are measured by
+// `cargo run --release -p simcli --example damage_toughness` (table in docs/integration/damage.md).
+// A sports car into a rigid wall at 90 km/h: degraded clearly, still drivable.
+(
+    name: "damage_arcade_sports_frontal_90",
+    seed: 502,
+    mode: Arcade,
+    assists: ai,
+    panels: true,
+    barriers: [(pos: (0.0, 20.0, 0.75), size: (10.0, 1.0, 1.5))],
+    entities: [
+        (id: "car", car: "hakone_gt", speed_mps: 25.0, driver: cruise(target_mps: 25.0, until_s: 0.6)),
+    ],
+    duration_s: 3.0,
+    hash_every: 60,
+    expect: [
+        total_loss(entity: "car", expected: false),
+        metric(entity: "car", name: "final_health", min: 0.35, max: 0.7),
+        components_failed(entity: "car", min: 0, max: 2),
+        metric(entity: "car", name: "wheels_detached", min: 0.0, max: 0.0),
+        crush_depth(entity: "car", min: 0.6, max: 1.6),
+    ],
+)

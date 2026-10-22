@@ -16,6 +16,9 @@ cargo run --release -p car-assets --bin panels-bench # perf, 24 cars
 cargo run --release -p car-assets --example panel_probe -- apps/simcli/scenarios/panels/side_swipe_door.ron
 cargo run -p car-assets --example profile_dump -- [--ring <y>] <car>  # styled anchors, regions, a cross-section
 cargo test -p car-assets                             # every car valid + meshes up to date
+cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame ticks]  # hood/fender/bumper crumple, 30/50/70 km/h
+node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
+node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
 ```
 
 Wave-2 style / mechanical authors: see `docs/design/vehicles/PLAN.md` "Foundation API (for wave 2)".
@@ -61,8 +64,8 @@ built in another worktree with a shared `CARGO_TARGET_DIR` writes into *that* wo
   greenhouse / top / bed) into a body region: bumpers, hood, fenders, doors (door windows ride with
   their door), quarter glass, sills, roof, windshield, rear glass (or cab-back wall), trunk or
   deck, quarters, pillars, open bed floor (`bed_floor`, FrameRear). Plus head / tail lights on the
-  nose / tail faces (proud of the surface; bound to the fenders / quarters so a hanging bumper
-  leaves them), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
+  nose / tail faces (proud of the surface; skinned to the bumper, hood / trunk, fender / quarter
+  and frame nodes of their end, so they crush with it), door mirrors, hood scoop / vents, a minimal interior, the underbody, style
   details, mechanical parts (`mechanical/`: engine bay, suspension, exhaust, frame) and per-wheel
   tire / rim (`wheels/`) / brake disc / caliper / upright parts, all from the resolved
   `mechanical::car_spec` (per-id table + style overrides). The underbody plate stays at floor
@@ -98,6 +101,12 @@ or wheel segments first if traffic details push it over; see `wave2_mechanical.m
 4 nearest nodes of the part's own region, weights ∝ 1/(d² + 1e-4), quantised to 1/255 summing
 to 255. Region-aware: a hood vertex never follows a fender node. Regions with fewer than four
 nodes (glass, 2-door side strips) borrow from their fallback regions (roof/cabin, quarter).
+Light lenses bind to the 4 nearest nodes of their end of the car (bumper, hood/trunk, same-side
+fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids, the
+front fenders and the rear quarters also get a crumple binding (`bind_fold`, mesh format 3): fixed-row → leading-row
+node chords, front-structure lead nodes per chord, a visual gain and per-vertex crease, lift and
+follow weights (see `data/panels/README.md`). `skin::deform` / `skin::deform_detail` and
+`crumple::render_part` are the Rust reference of the browser skinning (tests use them).
 Rigid parts (`rigid: true`) bind every vertex to the candidate node nearest the part centroid
 (weight 255). Writes into the mesh file (not `LatticeDef::skin_binding`, which would bloat the lattices; the
 contract field stays available for hand-made meshes).
@@ -105,7 +114,8 @@ contract field stays available for hand-made meshes).
 ## validate-car-asset (`src/validate.rs`)
 ids and lattice match, format, per-tier triangle budget, rigid parts bound to one node (255),
 wheel-space kinds (`tire rim brake_disc caliper upright`) unskinned with a wheel index, unique lower_snake_case names, index ranges,
-every skinned vertex bound to allowed nodes with weights summing to 255, four wheels with tire and
+every skinned vertex bound to allowed nodes with weights summing to 255, fold chords inside their
+region with 3 weights per vertex, four wheels with tire and
 rim, every exterior region with lattice nodes has a part, every panel in the spec has a painted
 part, glass parts use glass, mesh size within the declared `body_size_m` (pivot/scale check).
 

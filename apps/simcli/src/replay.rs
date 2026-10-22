@@ -21,6 +21,9 @@
 //!                1 assists: u8 flags (1 abs, 2 tcs, 4 esc, 8 auto_gears, 16 auto_clutch),
 //!                  f32 steer_speed_sensitivity, countersteer_help, throttle_filter, brake_filter
 //!                2 mode: u8 (0 Arcade, 1 Simulation)
+//!                3 repair: –
+//!                4 reset at: f32 x, y, yaw, near_z, u8 repair (0/1)
+//!                5 ghost: u16 ticks (0 = solid again)
 //!              Ops apply before the inputs of the same tick, in file order.
 //! tick hashes  u64 count, then per tick (state after tick i+1): u64 state hash
 //! checkpoints  u32 count, then per checkpoint: u64 tick,
@@ -63,6 +66,25 @@ pub enum OpKind {
     Mode(DamageMode),
     /// `Sim::repair_vehicle` (full repair in place, after a paid repair bill).
     Repair,
+    /// Reset in place (testbed R, playtest row 65): `Sim::place_on_ground` at `xy`/`yaw` at
+    /// rest (road nearest `near_z`), then `Sim::repair_vehicle` if `repair`. The testbed picks
+    /// the pose (nearest clear lane); the op carries it so playback needs no road lookup.
+    ResetAt {
+        /// Ground position, world m.
+        xy: [f32; 2],
+        /// Heading, rad about +Z.
+        yaw: f32,
+        /// Height hint: the road nearest this z (bridges, decks).
+        near_z: f32,
+        /// Also repair the car fully (not in a career run).
+        repair: bool,
+    },
+    /// `Sim::set_ghost` (pass through other cars, props and debris for `ticks`; logged right
+    /// after `ResetAt` by the testbed).
+    Ghost {
+        /// Ghost window, physics ticks.
+        ticks: u16,
+    },
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -199,6 +221,22 @@ impl Replay {
                     });
                 }
                 OpKind::Repair => w.push(3),
+                OpKind::ResetAt {
+                    xy,
+                    yaw,
+                    near_z,
+                    repair,
+                } => {
+                    w.push(4);
+                    for f in [xy[0], xy[1], yaw, near_z] {
+                        put_f32(&mut w, f);
+                    }
+                    w.push(repair as u8);
+                }
+                OpKind::Ghost { ticks } => {
+                    w.push(5);
+                    w.extend_from_slice(&ticks.to_le_bytes());
+                }
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -295,6 +333,15 @@ impl Replay {
                         m => return Err(RunError::Replay(format!("bad mode {m}"))),
                     }),
                     3 => OpKind::Repair,
+                    4 => OpKind::ResetAt {
+                        xy: [r.f32()?, r.f32()?],
+                        yaw: r.f32()?,
+                        near_z: r.f32()?,
+                        repair: r.take(1)?[0] != 0,
+                    },
+                    5 => OpKind::Ghost {
+                        ticks: u16::from_le_bytes(r.take(2)?.try_into().expect("2 bytes")),
+                    },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
                 ops.push(OpEvent { tick, entity, op });
@@ -618,6 +665,21 @@ mod tests {
                     tick: 2,
                     entity: 0,
                     op: OpKind::Repair,
+                },
+                OpEvent {
+                    tick: 2,
+                    entity: 0,
+                    op: OpKind::ResetAt {
+                        xy: [12.5, -3.0],
+                        yaw: 1.25,
+                        near_z: 4.0,
+                        repair: true,
+                    },
+                },
+                OpEvent {
+                    tick: 2,
+                    entity: 0,
+                    op: OpKind::Ghost { ticks: 240 },
                 },
             ],
             tick_hashes: vec![1, 3],

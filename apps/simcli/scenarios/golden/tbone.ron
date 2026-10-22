@@ -17,7 +17,9 @@
         // Met since wp_damage's T-bone tuning (struck side takes the full closing-energy share,
         // rail bracing, softer side skin attachments) — promoted from expect_pending.
         crush_depth(entity: "victim", min: 0.15, max: 0.6),
-        components_failed(entity: "victim", min: 1, max: 20),
+        // Round 12b Arcade retune (B): a 50 km/h T-bone no longer fails components in Arcade
+        // (it bent the struck suspension before); tbone_sim keeps the Simulation failures.
+        components_failed(entity: "victim", min: 0, max: 1),
         total_loss(entity: "victim", expected: false),
     ],
 )

@@ -1,0 +1,32 @@
+// Fog pursuit: weather/fog_pursuit_clear.ron in thick fog (visibility ~130 m, so police line of
+// sight is capped at 130 m instead of 260 m). The same speeder on the same road is recognised
+// later. `apps/simcli/tests/scenarios.rs::fog_delays_the_pursuit` compares the two files.
+(
+    name: "weather_fog_pursuit",
+    seed: 108,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    parked_cars: false,
+    assists: keyboard,
+    weather: (kind: Fog, intensity: 1.0),
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            pos: (59.75, -175.0, 0.0),
+            speed_mps: 16.5,
+            police_heat: 15.0,
+            driver: cruise(target_mps: 16.5),
+        ),
+    ],
+    duration_s: 20.0,
+    hash_every: 24,
+    expect: [
+        speed_at(entity: "racer", t_s: 2.0, min: 15.0, max: 18.0),
+        // Measured 2026-10-19: first pursuit at 1.90 s (clear twin: 0.30 s). The racer still
+        // drives into a patrol's 130 m, so it is caught later, not never.
+        pursuit_started_before(t_s: 6.0),
+    ],
+)

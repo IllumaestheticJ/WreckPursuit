@@ -19,15 +19,17 @@ next to the existing cars without copying them:
 | `arashi_t4` | Arashi T4 | Sport | mid-90s AWD 2.0 T rally-homologation saloon, 40/60 permanent AWD, rear LSD | Lindwurm is front-biased on-demand AWD; first roster car on fixed-split `Awd` | 32 000 | 3 |
 | `satchel_20` | Satchel 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody | Drayman is a RWD V8 body-on-frame van | 20 000 | 3 |
 
-**Sim results** (`collect_results.py`; all in their class bands, all 8 barrier tests pass for
-all four):
+**Sim results** (`collect_results.py`, re-collected after merging the row-97 shift times; all 8
+barrier tests pass for all four). Stock shifts follow row 97: Stoat 0.45 s, Arashi 0.42 s,
+Satchel 0.65 s (manuals), Bulwark 0.40 s (converter, kept). That puts the Stoat 0.2 s and the
+Satchel 0.02 s over their 0-100 bands, noted in `VALIDATION.md` like the Vireo and Tansy:
 
 | car | 0-100 s (band) | skidpad g (band) | 100-0 m (band) | Vmax km/h |
 |---|---|---|---|---|
-| stoat_16v | 8.8 (7.8-9.0) | 0.85 (0.82-0.90) | 38.9 (38-44) | 204 |
-| bulwark_400 | 7.9 (7.5-9.0) | 0.72 (0.70-0.80) | 43.3 (42-52) | 201 |
-| arashi_t4 | 5.4 (4.8-5.8) | 0.97 (0.88-0.97) | 36.3 (35-39) | 248 |
-| satchel_20 | 18.5 (15-19) | 0.68 (0.66-0.76) | 45.3 (44-52) | 146 |
+| stoat_16v | 9.2 (7.8-9.0) | 0.86 (0.82-0.90) | 39.9 (38-44) | 204 |
+| bulwark_400 | 7.9 (7.5-9.0) | 0.74 (0.70-0.80) | 44.5 (42-52) | 201 |
+| arashi_t4 | 5.7 (4.8-5.8) | 0.97 (0.88-0.97) | 37.1 (35-39) | 248 |
+| satchel_20 | 19.0 (15-19) | 0.72 (0.66-0.76) | 46.7 (44-52) | 147 |
 
 Pursuit (`pursuit_probe.py --chase`): the cruiser catches the Stoat (11.0 s, +10 % margin) and
 the Satchel (13.2 s) like the other slow cars; it does not catch the Arashi or the Bulwark on a
@@ -64,6 +66,283 @@ Known gaps:
 | lead | A `Van` class (repeat of round 6b): the Satchel and Drayman are `Truck` today and the Truck price band forces a 20 000 minimum on a cheap FWD van. |
 | 03 damage (B) | `gen-lattice --doors 2` for three-door hatches (Stoat, Vireo). |
 | tuning-dash | Add `stoat_16v`, `bulwark_400`, `arashi_t4`, `satchel_20` to `mode_hits_to_total_loss`. |
+
+## Lead helper note (`lead/handling-balance`, playtest row 28) — no car data changed
+
+"All cars understeer too much" was the keyboard/gamepad steering mapping and ESC, not car
+data (fixed in `wp_vehicle`, see `docs/integration/vehicle.md` → "Handling balance"). For the
+record, so H can judge setup changes against measurements (`cargo run --release -p wp_vehicle
+--example handling`, wheel preset = chassis, with A's differentials):
+
+- Chassis understeer gradient at 80 km/h: RWD 0.07–0.35 deg/g, AWD 0.32–0.33, FWD 0.35–0.63
+  (junkyard_beater 1.42), heavy 0.49–1.77. Regression ranges per class are in
+  `crates/wp_vehicle/tests/handling_balance.rs` (a setup change that leaves them fails there).
+- Anti-roll bars are a weak lever here (measured on main before the diffs): front −40 % / rear
+  +40 % on rampart_50, shiro_turbo, hakone_gt (−20/+20 % on kestrel_ts) moved the gradient
+  ≤ 0.01 deg/g and the limit balance (front slip/peak ÷ rear) from 2.09–2.35 to 1.85–2.30. The
+  diff model did more (RWD gradient 0.45–0.61 → 0.07–0.35), so `differentials.toml` is the
+  knob for "RWD rotates at the limit", not bars.
+- VALIDATION skidpad / 0-100 / 100-0 are not changed by this branch (metric runs are
+  bit-identical), so not re-collected here.
+## Lead request (2026-10-20) — stock shift times + shift mods (owner playtest row 97)
+
+Merged `origin/lead/round12` at `517621f`. "The shifting is a little too fast for unmodified cars —
+modifications should make shift speeds faster."
+
+**1. Stock shift times, clutch gearboxes** (`roster_inputs.py` → car JSON; guide in
+`tools/specsheet/README.md`): manual sports 0.42-0.45 s, economy / hot hatch 0.45-0.50, muscle
+0.50, light-truck manual 0.65, beater 0.70, dual-clutch 0.18. Sports manuals sit at the top of
+the lead's 0.35-0.45 guide so that fully modded (×0.28) lands at ≈ 0.12 s. The lead's
+`debug_coupe` / `debug_sedan` are unchanged (lead-owned, pinned by base vehicle scenarios).
+
+**Torque-converter automatics are deliberately NOT re-based yet** (ironside_440, hauler_1500,
+drayman_cargo and the three police units keep 0.30-0.40 s; my proposed values are in the table).
+Reason: a vehicle-model bug, below. With today's converter shift, a longer `shift_time_s` makes an
+automatic *faster* and its shift *inaudible* — the opposite of row 97 on both counts. I measured
+it, tried the proposed values (police 0.40-0.50 s: the cruiser's WOT shift dip falls to 0.8-1.0
+dB, below J's 1.2 dB "audible" floor in `engine_shift.rs`), and reverted those six cars to their
+exact previous data. They get the proposed values as soon as A's fix lands (one line each).
+
+| car | box | stock s | fully modded s | sim 0-100 s before → now | ¼ mile s @ km/h |
+|---|---|---|---|---|---|
+| `vireo_xs` | manual | 0.25 → **0.45** | 0.13 | 9.47 → 9.78 | 17.1 @ 139 |
+| `kestrel_ts` | manual | 0.25 → **0.42** | 0.12 | 7.13 → 7.37 | 15.4 @ 156 |
+| `shiro_turbo` | manual | 0.22 → **0.42** | 0.12 | 6.45 → 6.56 | 14.8 @ 160 |
+| `hakone_gt` | manual | 0.25 → **0.45** | 0.13 | 5.88 → 6.00 | 14.3 @ 169 |
+| `rampart_50` | manual | 0.25 → **0.50** | 0.14 | 5.83 → 6.18 | 14.0 @ 176 |
+| `ironside_440` | auto (converter) | 0.40 (kept; proposed **0.65**) | 0.11 | 8.18 → 8.18 | 16.2 @ 155 |
+| `sperber_32` | manual | 0.22 → **0.42** | 0.12 | 6.05 → 6.33 | 14.3 @ 166 |
+| `lindwurm_4t` | dual-clutch | 0.08 → **0.18** | 0.05 | 5.44 → 5.58 | 13.8 @ 166 |
+| `lucciola_350` | manual | 0.22 → **0.45** | 0.13 | 4.53 → 4.69 | 12.9 @ 182 |
+| `hauler_1500` | auto (converter) | 0.30 (kept; proposed **0.60**) | 0.08 | 8.10 → 8.10 | 16.2 @ 146 |
+| `sentinel_cruiser` | auto (converter) | 0.30 (kept; proposed **0.50**) | 0.08 | 6.40 → 6.40 | 14.7 @ 164 |
+| `sentinel_wolfhound` | auto (converter) | 0.30 (kept; proposed **0.45**) | 0.08 | 5.92 → 5.92 | 14.2 @ 164 |
+| `sentinel_bastion` | auto (converter) | 0.30 (kept; proposed **0.55**) | 0.08 | 7.97 → 7.97 | 16.0 @ 144 |
+| `junkyard_beater` | manual | 0.55 → **0.70** | 0.20 | 15.46 → 15.70 | 20.3 @ 112 |
+| `tansy_13` | manual | 0.25 → **0.50** | 0.14 | 13.40 → 13.79 | 19.3 @ 120 |
+| `drayman_cargo` | auto (converter) | 0.35 (kept; proposed **0.70**) | 0.10 | 10.86 → 10.86 | 17.7 @ 133 |
+| `furrow_24` | manual | 0.35 → **0.65** | 0.18 | 10.82 → 11.26 | 18.1 @ 124 |
+
+**Bug (→ A, 02 vehicle): on torque-converter automatics a longer shift is *faster*.**
+`sentinel_cruiser` 0-100 at shift_time_s 0.1 / 0.3 / 0.5 / 0.8 / 1.2 s = 6.54 / 6.40 / 6.33 /
+6.27 / 6.21 s (manual `vireo_xs`: 9.26 / 9.55 / 9.85 / 10.33 / 10.95 s, correct). Cause: during a
+converter shift there is no torque cut, the lock-up clutch opens and `Gearbox::total_ratio`
+blends the old and new ratios over the whole shift, so the box acts like a CVT holding the
+engine near peak power for longer, and the rpm falls so gently that `wp_audio`'s rate-based
+shift dip barely registers. A real automatic changes ratio in a short inertia phase (≈ 0.15-0.25
+s) with a torque dip. Suggested fix (A's call): blend the ratio only over the last ≈ 30-40 % of
+the shift and reduce engine torque during it, so shift time costs acceleration as it does for
+clutch boxes. Until then the shift mods also make automatics slightly *slower*; G may want shift
+mods to require a clutch gearbox (no such condition in the mod schema yet; `wp_economy` only).
+
+**Where `shift_time_s` applies:** every shift path in `wp_vehicle` — manual paddles, the
+`auto_gears` assist (player automatic and every AI driver: opponents, police, traffic) and the
+converter boxes (`Gearbox::shift(target, def.drivetrain.shift_time_s)` in `vehicle.rs` /
+`drivetrain.rs`); `wp_economy::estimate` uses it; mods scale it (`mods.rs`). **Audio:** J's
+upshift dip and rev-match blip come from the engine's rpm rate and load each frame, and the gear
+clunk fires when the gear actually changes, so they follow the shift time. One exception, fixed
+(J, see below): the turbo **blow-off** stopped firing on WOT upshifts with the slower shifts.
+
+**2. Mods** (`data/mods/drivetrain.json`, G's folder; data-only, the schema already supports
+it). New line `shifter`: tier 1 **Short-shift Kit** (×0.85, 400) and tier 3 **Sequential
+Shifter** (×0.5, 9 500, requires `drivetrain_gears_race`; "expensive and harsh"). Existing
+×0.9 / ×0.8 (clutch line) and ×0.85 / ×0.7 (gearset line) unchanged. Lines multiply, tiers within
+a line replace each other: ×0.85 (kit alone) … ×0.28 (stage-2 clutch + dog-box + sequential); a
+0.42-0.45 s sports manual ends at 0.12-0.13 s, the 0.18 s dual-clutch at 0.05 s. `VALIDATION.md`
+lists stock → fully modded per car (`specsheet.py` reads the factor from the mod file).
+
+**3. Re-measured.** `collect_results.py` now also records the **quarter mile** (402.336 m,
+elapsed time + trap speed, full sim via `simcli`, auto gears, TCS on;
+`pursuit_probe.quarter_mile`), shown in `VALIDATION.md`. Clutch-gearbox cars lost 0.1-0.45 s to
+100 km/h; two moved out of their bands — `vireo_xs` 9.78 s (8.5-9.5) and `tansy_13` 13.79 s
+(11.5-13.5). Bands not widened and cars not tuned back (the owner asked for slower stock
+shifts; the miss notes give before / after; the bands are road tests with real shifts, so the
+remainder is A's conservative TCS launch). Barriers unchanged. Pursuit: the cruiser still
+reaches the day cap before every cheap and traffic car (beater 5.0 s, Tansy 5.3 s, Furrow 5.6 s,
+Vireo 6.1 s, Drayman 6.3 s at the cap).
+
+**Tests and fixes outside my folders** (intent of each test unchanged):
+- `wp_vehicle/tests/gearbox.rs` (A): `street_cars_shift_crisply` →
+  `street_cars_shift_at_believable_stock_speeds` (clutch boxes 0.35-0.55 s, dual-clutch
+  0.12-0.25 s, debug cars exempt; was "≤ 0.25 s", which row 97 overturns);
+  `kickdown_on_full_throttle` waits shift time + 0.15 s (was a fixed 0.4 s);
+  `shifts_are_rev_matched_and_the_torque_gap_is_short` allows 40 % of the shift + 0.04 s
+  re-engagement (measured 0.208 s at 0.45 s; was 45 % flat).
+- `wp_vehicle/tests/differentials.rs` (A): `clutch_lsd_adds_controllable_oversteer_on_corner_exit`
+  pins `shift_time_s` 0.22 for its cars — an upshift inside the 2 s exit masked the diff
+  (Lucciola +1.7° vs the +2° threshold; passes at 0.22 and 0.30).
+- `wp_audio/src/engine.rs` (J): the blow-off detector's lift window 0.15 → **0.35 s**
+  (`BLOWOFF_LIFT_WINDOW_S`). It fires when the throttle falls from above 0.5 to below 0.2 under
+  boost within the window; a clutch shift ramps the throttle out over 40 % of the shift (≈ 0.13 s
+  to below 0.2 at the Shiro's 0.42 s), longer than the old 75 ms, so the Shiro blew off on 0 of 4
+  WOT upshifts. Now on every one; a slow driver lift (> 0.35 s) still does not blow off.
+- `wp_audio/tests/engine_shift.rs` (J): `every_wot_upshift_dips_and_re_rises` skips the re-rise
+  check when the scripted drive lifts the pedal inside its window (the Rampart's 5→6 now ends
+  0.25 s before the script's fixed lift at 31.05 s; the audio is back at full level on
+  re-engagement).
+- No pinned hash changed. Goldens: standalone debug `simcli goldens`, old vs new data — only
+  `cars_beater_accel` and `cars_beater_top_speed` newly fail; re-blessed (`[bless]`). The base's 49
+  golden failures are unchanged with identical range-expectation failures.
+
+**Open (→ L / lead): `wp_race race_picker::hollins_hill_sprint` now fails** ("only 2 of 4
+finished": two AI racers captured at gate 2). Over `WP_RACE_SEED` 1-5: 11 of 20 racers finish
+with the new shift times vs 16 of 20 before, mostly `Dnf(FinishWindow)` — the field spreads out
+more (each car loses a different amount to its slower shifts) and stragglers miss the window
+after the winner. Not tuned away in car data; the finish window or `min_finish` 3 is L's call.
+
+### Changes outside my folders (row 97)
+- `data/mods/drivetrain.json` (G): two new mods in a new `shifter` line (data only).
+- `crates/wp_vehicle/tests/gearbox.rs`, `crates/wp_vehicle/tests/differentials.rs` (A): test
+  adjustments above.
+- `crates/wp_audio/src/engine.rs`, `crates/wp_audio/tests/engine_shift.rs` (J): blow-off lift
+  window constant and the pedal-held guard above.
+
+## Lead follow-up 2 (2026-10-20) — beater after A's ride + countersteer work
+
+Merged `origin/lead/round12` at `7a2f19b`. Lead: `front_drive_cars_understeer_mildly` failed
+(beater 1.602 °/g) on the combined tree. Band unchanged.
+
+**What the merge did to the beater:** A's ride commit edited all 19 car JSONs directly from
+an older checkout. The beater's suspension block came in with its *pre-retune* springs and travel
+(20 900 / 15 500 N/m, 0.15 / 0.16 m) and a preload computed for those, so the soft worn setup
+from my round-12b retune was gone. Running `build_roster.py` would have wiped A's work on
+every car the other way round.
+
+**Fix in the source of truth (`tools/specsheet/`):** `build_roster.py` now applies A's
+round-12b rules (section "Round 12b (A)" below): derived dampers × 1.2 bump / × 1.6 rebound,
+handbrake ≥ 1.5 × the static rear lock torque (`handbrake_nm`), and preload may be a
+`(front, rear)` pair in `roster_inputs.py` (A's measured values on drayman_cargo, furrow_24,
+ironside_440, tansy_13). Regenerating now reproduces A's data **byte-for-byte on all 18 other
+cars**. A's rules are mirrored in the spec sheets and `VALIDATION.md`, as A asked.
+
+**Beater** (`roster_inputs.py`), checked with `cargo run --release -p wp_vehicle --example ride all`:
+
+| Change | Why |
+|---|---|
+| ζ 0.14 → **0.18** (→ 0.21 bump / 0.42 rebound after A's scale) | `tests/ride.rs` floor ζ_bump ≥ 0.2; at 0.14 it flew 0.49 s and rose 0.60 m off the 15 cm kerb at 60 km/h. Still the softest dampers in the roster. |
+| preload 0.01 → **0.11 F / 0.08 R** | it sat on its front bump stops (0 mm free); now 72 / 80 mm = 45 % / 47 % of travel |
+| camber −1.0 / −0.5 → **−1.3 / 0°**, rear toe +0 → **−0.15°** (toe-out), roll split 0.60 → **0.70** (rear bar 0: many 80s economy front-drivers had none) | understeer back to ~1.5 °/g; camber alone moved < 0.05, toe-out −0.08, roll split −0.06 |
+
+Result: **1.52 °/g** (band 0.25–1.6; still the most understeery front-driver), skidpad 0.69 g
+(skidpad gradient +0.08 °/g: no limit oversteer), 0-100 **15.5 s**, Vmax 146 km/h, 100-0 46.5 m,
+roll 6.3 °/g, barriers 8/8. Ride: never airborne on the 10 or 15 cm kerb at 60 km/h (rise 0.088 m),
+no lift on the rounded crest. `wp_vehicle` `ride`, `handling_balance`, `slide_control`,
+`differentials` pass; nameplate, `smoke_sim`, `pursuit_probe` (cruiser catches it in 5.0 s),
+3 `cars/` scenarios pass. `[bless]`: `roster_diff_hashes_are_pinned` junkyard_beater
+`0x72a8eef4cb8c2001 → 0xbe54b8910b0c86e8` (others unchanged) and the three `cars_beater_*` goldens.
+
+**Gate (ws/cars `1af33b4` + this doc):** clippy `-D warnings` ✓, wasm build ✓. `cargo fmt --check`
+fails only on `crates/wp_vehicle/src/lib.rs` (`pub mod ride;` sorted after `presets`), identical
+on `7a2f19b` (A / lead; not touched here). `cargo test --workspace --no-fail-fast`: 145 binaries
+ok; every failure also fails with the base's own beater file (`7a2f19b`) swapped in:
+`wp_audio rev_matched_downshifts_blip` (J), `wp_race race_picker::{loop9_circuit,
+lantern_checkpoint_draws_the_police}` (L / N), `wp_wasm crash_replay_tests::race_crash_replays_…`
+and `tests::simcli_golden_replays_play_back_in_the_browser_core`, and `simcli goldens_match`:
+standalone debug `simcli goldens` lists the **same 49 failures** with either beater, none of
+them `cars_*` (crash, damage, panels, golden, city, race, police, weather: the round-12b ride
+work needs a lead re-bless).
+
+**For A:** the ride rules now live in `build_roster.py`. Next time, change `roster_inputs.py`
+or the constants there (`RIDE_BUMP_SCALE`, `RIDE_REBOUND_SCALE`, `HANDBRAKE_LOCK_MARGIN`)
+instead of the JSON, or tell me and I regenerate.
+
+## Lead follow-up round 12b (2026-10-20) — beater understeer gradient
+
+Gate on `lead/round12`: `wp_vehicle/tests/handling_balance.rs::front_drive_cars_understeer_mildly`
+measured the retuned beater at **1.71 °/g** (band 0.25-1.6). Merged `origin/lead/round12` at
+`c982c82` (fast-forward). **Retuned the car; the test band is unchanged.**
+
+What the gradient responds to (ramp steer, wheel preset, 80 km/h): almost only tyre cornering
+stiffness × axle load. Roll-stiffness split 0.40 / 0.50 / 0.60 / 0.70 gave 1.65 / 1.73 / 1.71 /
+1.61 °/g (no use); newer `street` tyres on the front only gave −2.6 °/g of *limit oversteer* on
+the skidpad (rejected: not readable). What went in (`roster_inputs.py`):
+
+| Change | Why it is honest | Effect |
+|---|---|---|
+| front weight 0.62 → **0.60** | small 1.6 FF four-door with a long boot; 60/40 is mid-class | main lever |
+| front camber −0.2° → **−1.0°** | sagging MacPherson struts gain negative camber | 1.71 → 1.64 alone |
+| rear toe-in 0.10° → **0** | worn rear bushes | small |
+
+Result: **1.50 °/g** (still the most understeery front-driver: Vireo 0.46, Kestrel 0.35), skidpad
+0.72 g, 0-100 14.7 s, Vmax 146 km/h, 100-0 45.0 m, barriers 8/8; tyres (`vintage_bias`), soft
+springs, ζ 0.14 and 6.5 °/g roll unchanged, so it still feels tired. Lattice unchanged (panels fit).
+Re-recorded in a `[bless]` commit: the beater's pinned hash in
+`wp_vehicle/tests/differentials.rs` (→ `0xc8ab6690a927e4c2`) and the three `cars_beater_*`
+goldens. Note for the helper: the comment in `front_drive_cars_understeer_mildly` still says
+"the junkyard beater 1.42"; it is 1.50 now.
+
+**Correction (2026-10-20): there is no debug/release hash split.** An earlier version of this
+section reported that steering scenarios hash differently in debug and release builds. That was
+my measuring error: the release `simcli` binary was stale, built before the `c982c82` merge,
+while the debug one was current. After `cargo build --release -p simcli` on the same commit,
+`vehicle/coupe_slalom`, `smoke/coupe_circle` and all three `cars_beater_*` scenarios hash
+identically in both builds, and release `simcli goldens` fails on exactly the same 33 base
+scenarios as debug (none of them `cars_*`). The `cars_beater_hard_turn` golden is valid for
+both builds and CI's release goldens job.
+*Lead (2026-10-20, `lead/det-debug-release`): resolved — there is no split; the release
+binary was stale (built before the handling-balance merge). Fresh debug and release builds hash
+identically and `cars_beater_hard_turn` passes in both. See harness.md "Lead helper: debug vs
+release hashes".*
+
+**Checks (follow-up, cloud container):** fmt ✓, clippy `-D warnings` ✓, wasm build ✓,
+`handling_balance` 6/6 ✓, `differentials` ✓, nameplate (69 files, 0) ✓, `smoke_sim` ✓,
+`collect_results` / `pursuit_probe` ✓, my 3 scenarios ✓. `cargo test --workspace --no-fail-fast`:
+remaining failures are all on `lead/round12` `c982c82` — each re-run with the pre-retune beater
+files swapped back in gives the same result: `wp_race::race_picker::grid_highway_sprint`,
+`wp_sim::sidewalk::vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+`wp_wasm::race_tests::{short_sprint_with_ai_runs_to_results_and_pays_through_the_economy,
+a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel}` and `simcli`
+`goldens_match` / `all_scenarios_…` (debug `simcli goldens`: the same 33 failures with old and
+new beater data, none of them a `cars_*` scenario; e.g. `city_sidewalk_mount_*` `min_z_m` 2.37 vs
+2.47-2.53, `blocked_parked_player_vesper` turnarounds 0, race picks, weather, police sideswipes).
+
+## Response to lead feedback round 12b (2026-10-19) — junkyard beater (B06)
+Merged `origin/lead/round12` at `05f92f8` into `ws/cars` (not main, per the brief); no conflicts.
+`junkyard_beater` already existed (round 6b, as the economy floor) but missed the new brief
+(sim 0-100 13.8 s, Vmax 164 km/h, 5-speed, new `street` tyres). Retuned in `roster_inputs.py`
+and regenerated (car JSON, spec sheet, lattice), validated, and given scenarios.
+| Item | Done |
+|---|---|
+| 1 Car file | `data/cars/junkyard_beater.json`: 1980s FF 1.6 SOHC carb four-door, **1048 kg** (curb 990), **65 kW @ 5500 / 124 N·m @ 4000** (worn, soft midrange), redline 5800 / limiter 6000, **4-speed manual** (3.17 / 1.84 / 1.26 / 0.97, final 4.33, 0.55 s shift), **open diff**, worn drivetrain `efficiency` 0.78. **Soft worn suspension**: ride 1.15 / 1.25 Hz, ζ 0.14, roll gradient 6.5 °/g, +1 cm travel. **Old tyres**: `vintage_bias` (≈ 0.85 × street grip, strong fall-off past the peak = early, long squeal; see request to A + G for a proper aged-radial compound). Durability 2, base price 3 000 (= `market.toml [floor_car]`, floor price 1 500 untouched; `roster_prices::floor_car_is_in_the_roster_with_matching_data` passes). The 3-speed automatic: one drivetrain per `VehicleDef`, so the car ships as the 4-speed manual and the auto is a request to G (below). Lore line in `docs/design/CARS_LORE.md` (no longer "proposed"/"no car file"). Nameplate check clean. |
+| 2 Lattice + panel mesh | Reused the existing generated sedan body: `gen-lattice --profile sedan`, same dims/strength 0.9. Only node masses changed (car 10 kg lighter): node positions, beams, detachables and skin binding are identical, so R's `data/panels/junkyard_beater.json` and its mesh fit unchanged — no new mesh needed. |
+| 3 Validation band, tests, testbed | `VALIDATION.md` band: 0-100 **14-16 s**, skidpad 0.68-0.78 g, 100-0 42-48 m and a new optional **top-speed band 140-160 km/h** (`specsheet.py`, only the beater uses it). Sim: **0-100 14.7 s ✓, Vmax 146 km/h ✓, 100-0 45.5 m ✓, skidpad 0.72 g ✓**, mild understeer +0.19 °/g; barriers 8/8. Tests: new scenario group `apps/simcli/scenarios/cars/` (`beater_accel` 0-100 between 14 and 16 s, `beater_top_speed` 140-160 km/h, `beater_hard_turn` full lock at 60 km/h: 0.5-0.85 g, never airborne, keeps moving); they run in `cargo test -p simcli`'s scenario suite. **Testbed car list**: nothing to add — `wp_wasm` embeds every `data/cars/*.json` (`build.rs`) and the car dropdown is built from `car_ids()`; `wp_wasm`'s `every_embedded_car_resolves` covers it. |
+Pursuit probe (`pursuit_probe.py --chase`): beater 0-144 km/h 35.5 s; the cruiser catches it in
+5.1 s at the day cap (12.6 s with the +10 % margin). Validation re-collected on the round-12
+base: the other cars moved only at rounding level (A's round-12 vehicle changes), barrier sweep
+unchanged (the known Wolfhound offset near miss).
+Tool changes (`tools/specsheet/`, mine): `build_roster.py` writes an optional
+`drivetrain.efficiency` (and explains it in the spec sheet) when a car states one;
+`estimate.py` uses it; `specsheet.py` checks the optional top-speed band.
+### Changes outside my folders (round 12b)
+- `docs/design/CARS_LORE.md` (P's design docs): the beater entry — the lead asked for the lore line.
+- `apps/simcli/scenarios/cars/` (new group, I's harness folder; CLAUDE.md puts scenario tests there)
+  and their goldens `apps/simcli/golden/cars_beater_*` (new only, `[bless]` commit).
+- `crates/wp_vehicle/tests/differentials.rs` (A): `roster_diff_hashes_are_pinned` pins a
+  `junkyard_beater` hash; re-recorded `0xe9ef92e8d452f551 → 0xb565bf983dfcffda` in a `[bless]`
+  commit (the test says to re-record on a car-data change). The other five cars are unchanged.
+**Checks (round 12b, cloud container):** `cargo fmt --check` ✓, `cargo clippy --workspace -- -D
+warnings` ✓, `cargo build --target wasm32-unknown-unknown -p wp_wasm` ✓, `nameplate_check.py`
+(69 files, 0 problems) ✓, `smoke_sim.py` (17 cars × 2 modes deterministic) ✓,
+`collect_results.py` / `pursuit_probe.py --chase` ✓, my 3 `cars/` scenarios ✓.
+`cargo test --workspace --no-fail-fast`: everything passes **except failures that are already on
+`origin/lead/round12` (05f92f8)**. I proved each one independent of my change by running it with
+the same binary and the old beater files swapped back in: identical result.
+- `simcli` `scenarios::all_scenarios_pass_and_are_deterministic_in_process`:
+  `city/blocked_parked_player_vesper` expects `traffic_turnarounds` ≥ 1, gets 0 (debug_sedan,
+  D's blocked-vehicle traffic work, `c29eeca` / `7f1a3ea`).
+- `simcli` `scenarios::goldens_match`: hash mismatches on `city_blocked_parked_player_{grid,vesper}`,
+  `golden_city_chase`, `golden_night_pursuit_escape`, `panels_frontal_56_hood`,
+  `police_sideswipe_patrol_day`, `weather_{aquaplane_control,aquaplane_puddle,fog_pursuit,
+  fog_pursuit_clear,wet_brake_100_0}` (debug build; the release `simcli goldens` lists 18, the same
+  18 with the old data). None of them spawns the beater. → lead: re-bless after the round-12 merges.
+- `wp_net` `vesper_e2e::four_clients_three_minutes_in_port_vesper`: p0 `Escaped`, expected
+  `Captured` (debug_coupe racer; same with the old data). → F / lead.
+### New requests (round 12b)
+| To | Request |
+|---|---|
+| 02 vehicle (A) + 08 economy (G) | An **`aged_radial`** compound for old, hardened radials (the beater; later traffic/props). `vintage_bias` stands in today but is a 70s bias-ply (half the cornering stiffness, lazy). Proposal: street's shape with lateral `d` 0.82, `e` −0.5 (earlier, louder fall-off), longitudinal `d` 0.95, relaxation 0.40 m, rolling resistance 0.014, wet 0.55, paint 0.93 (peak slips computed from the curves). It needs a `market.tire_grip` row too (`wp_economy`'s `every_tire_file_has_a_grip_factor`), which is why I did not add the file. I switch the beater with one line in `roster_inputs.py` once it exists. |
+| 08 economy (G) | A **3-speed automatic** option for the beater (the brief's "4-speed manual / 3-speed auto"): a gearbox-swap mod, or a second def `junkyard_beater_auto` if you prefer a used-market variant. Data for it: ratios 2.84 / 1.60 / 1.00, final 3.70, torque converter stall 2200 rpm ×2.0, couples 2600 rpm, shift 0.6 s — I add the def on request. |
+| 19 design docs (P) | `FEATURE_BACKLOG.md` B06 can be closed. |
 
 ## Vehicle-models wave 1: roster agent (2026-10-21)
 
@@ -575,3 +854,73 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 
 1. `semi_slick.json`: `treaded: false` (W-4).
 2. Tire data for `PaintedLine`.
+
+## Lead feedback (round 12b, 2026-10-19) — junkyard beater (backlog B06)
+Base: `origin/lead/round12` (round 12's merges; `main` catches up when its gate is green), not main.
+1. Add `data/cars/junkyard_beater.json`: the economy's floor car (G's career already hands it out
+   — see `wp_economy` / `wp_wasm::career` and `docs/integration/economy.md`). A tired 1980s-style
+   compact FWD sedan analogue (no real names): ~1,050 kg, ~65 kW, 4-speed manual/3-speed auto,
+   open diff, soft worn suspension, old tyres (lower grip), low durability, cheap parts. It
+   should be slow but fun and *readable* (body roll, squeal). Lore line in `CARS_LORE.md`.
+2. Its lattice + panel mesh: reuse the closest existing body (coordinate with R's panel pipeline
+   via `docs/integration/panels.md` if a new mesh is needed; a placeholder generated mesh is fine).
+3. Validation band in `data/cars/VALIDATION.md` (0–100 km/h ~14–16 s, top speed ~150 km/h),
+   tests, price consistent with the economy floor. Add it to the testbed car list.
+
+## Request from B (damage, round 12b, 2026-10-20) — police toughness in Arcade (playtest row 48)
+B retuned Arcade (`data/modes/arcade.toml` + Arcade-only `wp_damage` knobs; table and method in
+`docs/integration/damage.md` "Response to round 12b"). In the full sim the cruiser with today's
+police package now stays in the chase through 8 rams / PITs / side-swipes / T-bones at 30–90
+km/h (before: one 50 km/h T-bone or wall hit pulled it over) and outlasts `hakone_gt` on 90 km/h
+wall hits (wrecks on hit 5 vs 4). **No police package change is needed for the playtest item.**
+- **Optional (H's call)**: repeated 70 km/h *rigid-wall* hits end the cruiser on hit 6 (cabin
+  intrusion > Arcade's 0.6 m after ≈ 2.2 m of crush through the long nose and push bar) while
+  the sports car limps on past 8. A slightly stiffer firewall / cabin front (or less crushable
+  length behind the push bar) would make the cruiser tougher in that case too. Measure with
+  `cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`
+  (`WP_KINDS=frontal` for just the wall rows).
+- Sim tables are unchanged by B's work (without panels; with panels a hanging fender no longer
+  counts as a failed suspension in either mode), so `VALIDATION.md` sim columns stay valid.
+## Round 12b (A, 2026-10-20) — ride data changes for "too bouncy / launched too easily"
+Made by A in coordination (lead round 12b feedback to 02, playtest row 54); H owns the files
+and is welcome to retune within the targets. Measured with
+`cargo run --release -p wp_vehicle --example ride all` (see `docs/integration/vehicle.md` →
+"Round 12b response").
+1. **Dampers, all 19 cars:** `damper_bump_ns_per_m` × 1.2, `damper_rebound_ns_per_m` × 1.6
+   (rounded to 10 N·s/m). Damping ratio was 0.17–0.31 bump / 0.26–0.47 rebound; now
+   0.21–0.38 / 0.42–0.75 (rebound ≈ 2× bump, real-car practice). Each car keeps its
+   character relative to the others (the beater and ironside_440 stay the softest). The data
+   values are now the dampers' **low-speed** rates: the model blows off above 0.5 m/s.
+2. **Preload** where a car sat on its bump stops at rest (static bump travel < 35 % of the
+   travel → 45 %): drayman_cargo F 0.03 → 0.059; furrow_24 F 0.02 → 0.06; ironside_440 F 0.03
+   → 0.11, R 0.03 → 0.076; junkyard_beater F 0.01 → 0.071, R 0.01 → 0.039; tansy_13 F 0.01 →
+   0.061, R 0.01 → 0.031. Spring rates and ride height are unchanged (the model places the
+   static point by the hub position); only where the car rests within its travel moves. Bump
+   travel left at rest was 6 mm (beater front), 10 mm (ironside front), 17 mm (tansy front).
+3. No other fields changed. Ride frequencies were already car-like (1.06–2.08 Hz) and the
+   inertia tensors are fine (75–97 % of a solid box of the body size).
+Please mirror these in the `*.spec.md` sheets and `VALIDATION.md` (handling numbers moved
+slightly: understeer gradient −0.37 to +0.04 deg/g, held-key g −0.01 to +0.03; table in
+`vehicle.md`). Rule of thumb for new cars: rebound ≈ 2× bump, bump ≈ 0.35 of critical, ≥ 45 %
+of the travel left to the bump stop at rest; `tests/ride.rs` checks all three for the roster.
+## Rows 56 / 72 (A, 2026-10-20) — handbrake torque
+`brakes.handbrake_rear_nm` raised on 18 of 19 cars to ≥ 1.5 × the static rear lock torque
+(rear corner load × rolling radius), so a pulled handbrake locks the rears on every car (owner
+row 72: "I do see the rear wheels lock" — on most cars they did not: 14–25 rad/s left after a
+0.6 s pull at 60 km/h). Before → after, N·m per wheel: debug_coupe 1500 → 1750, debug_sedan
+1200 → 1310, drayman_cargo 1540 → 2980, furrow_24 870 → 1340, hauler_1500 1620 → 2970,
+ironside_440 600 → 1890, junkyard_beater 600 → 830, kestrel_ts 830 → 1280, lindwurm_4t 1100 →
+1410, lucciola_350 1330 → 1860, rampart_50 1430 → 2020, sentinel_bastion 1620 → 3280,
+sentinel_cruiser 1440 → 2390, sentinel_wolfhound 1440 → 2330, shiro_turbo 1010 → 1330,
+sperber_32 1230 → 1850, tansy_13 600 → 840, vireo_xs 600 → 900 (hakone_gt unchanged, 1780).
+Rule of thumb for new cars: `handbrake_rear_nm ≥ 1.5 × m × (1 − front_weight_frac) / 2 × g ×
+rear radius`. Please mirror in the spec sheets.
+## Request from B (damage, round 13, 2026-10-20) — cruiser driveshaft (playtest row 87)
+B softened Arcade damage consequences ~20–30 % (`docs/integration/damage.md` "Round 13"). The
+cruiser now outlasts `hakone_gt` in every measured row except three 100 km/h hits in a row
+(wall, offset wall, angled wall), where it ends on hit 3 and the sports car on hit 7: its
+**driveshaft** fails (`intrusion_fail_m` 0.10, the civilian value; the police package already
+has radiator / rack thresholds ×1.5). **Request (optional, H's call):** `sentinel_cruiser`
+driveshaft `intrusion_fail_m` 0.10 → ~0.14 (and `intrusion_total_m` to match). The 0.6 m cabin
+case from round 12b is covered: Arcade's limit is now 0.78 m. Measure with
+`WP_KINDS=mixed,wall-angle WP_SPEEDS=100 cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`.

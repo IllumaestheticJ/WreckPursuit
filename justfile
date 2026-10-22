@@ -23,6 +23,11 @@ web: wasm
 web-e2e: wasm
     cd apps/testbed-web && npm run e2e
 
+# Two browser tabs on a local wp-server: both see 2 player cars, a crash deforms both on both.
+web-e2e-net: wasm
+    cargo build --release -p wp_server
+    cd apps/testbed-web && WP_SERVER=../../target/release/wp-server npm run e2e:net
+
 # Native testbed stub window (add `--features window,ffb` manually for an SDL2 FFB wheel).
 native:
     cargo run --release -p testbed-native --features window
@@ -42,6 +47,11 @@ server-bots n="32":
 # Run one headless scenario, e.g. `just sim apps/simcli/scenarios/smoke/straight_line.ron`.
 sim scenario:
     cargo run --release -p simcli -- {{scenario}}
+
+# Reference-game parity suite: measure the owner's keyboard settings on three cars and
+# rewrite the table in docs/reference/wreckfest-parity.md (~3 s release).
+parity:
+    cargo run --release -p wp_vehicle --example parity -- --write
 
 # Regenerate JSON Schemas into schemas/ (integration lead only).
 schemas:
@@ -89,10 +99,16 @@ goldens:
 bless:
     cargo run --release -p simcli -- goldens --bless
 
-# Determinism: twice in-process + fresh process, then native vs wasm32 under Node.
+# Determinism: twice in-process + fresh process, native vs wasm32 under Node, debug vs release.
 determinism:
     cargo run --release -p simcli -- determinism apps/simcli/scenarios
     tools/wasm-determinism/compare.sh
+    tools/profile-determinism/compare.sh
+
+# Debug vs release: rebuild simcli in both profiles and require identical hashes on the steering
+# scenarios (or the given scenario files/dirs).
+det-profiles *targets:
+    tools/profile-determinism/compare.sh {{targets}}
 
 # Grep-based determinism lint over the simulation crates.
 lint-det:

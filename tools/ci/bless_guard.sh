@@ -12,7 +12,10 @@ if [ -z "$blessed" ]; then
   echo "bless-guard: no golden or baseline changes"
   exit 0
 fi
-if git log --format=%B "$base"..HEAD | grep -qF '[bless]'; then
+# Read the whole log before grepping: `git log | grep -q` under pipefail fails when grep exits
+# early and git log dies of SIGPIPE, which happens on long histories (e.g. a big merge).
+messages=$(git log --format=%B "$base"..HEAD)
+if grep -qF '[bless]' <<<"$messages"; then
   echo "bless-guard: goldens changed and a commit is tagged [bless]:"
   sed 's/^/  /' <<<"$blessed"
   exit 0

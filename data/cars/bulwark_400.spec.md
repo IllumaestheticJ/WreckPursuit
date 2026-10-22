@@ -122,7 +122,7 @@ Full-pedal line pressure 65 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2360 N·m/wheel (capacity 1.00×), rear needs 819 N·m/wheel (capacity 0.89×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 822 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2370 N·m front / 730 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 822 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2370 N·m front / 730 N·m rear per wheel at full pedal. Handbrake 2100 N·m per rear wheel.
 
 ## Steering
 

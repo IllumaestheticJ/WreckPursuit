@@ -1,0 +1,21 @@
+// Panels (workstream R, lead feedback round 12b): a sedan hits a parked sedan head-on (full
+// overlap) at 50 km/h in Arcade. The bumper crushes and lets go while the frame barely moves;
+// in the browser the hood still buckles (crumple memory) and its nose follows the crushed
+// bumper instead of floating over it.
+(
+    name: "panels_frontal_50_car_arcade",
+    seed: 2151,
+    mode: Arcade,
+    assists: ai,
+    panels: true,
+    entities: [
+        (id: "car", car: "debug_sedan", speed_mps: 13.89, driver: cruise(target_mps: 13.89, until_s: 0.9)),
+        (id: "parked", car: "debug_sedan", pos: (0.0, 12.0, 0.0), yaw: 3.14159265),
+    ],
+    duration_s: 3.0,
+    hash_every: 24,
+    expect: [
+        metric(entity: "car", name: "panels_hanging", min: 1, max: 8),
+        total_loss(entity: "car", expected: false),
+    ],
+)

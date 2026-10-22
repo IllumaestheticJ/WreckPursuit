@@ -128,6 +128,13 @@ pub struct OwnedCar {
     pub location: CarLocation,
     /// Insurance policy, if any.
     pub insurance: Option<InsurancePolicy>,
+    /// Body price actually paid for the car (the dealer price in the condition it was bought
+    /// in, or what the floor car cost; mods excluded, `0` for a car that was given away).
+    /// Resale and salvage are valued from it, so selling a car never returns more than was
+    /// paid for it ([`crate::Economy::resale_basis`]). `None` only for cars from career saves
+    /// older than profile version 2, which are valued as the cheapest dealer price of the model.
+    #[serde(default)]
+    pub purchase_price: Option<Money>,
 }
 
 impl OwnedCar {

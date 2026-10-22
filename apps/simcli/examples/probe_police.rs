@@ -1,5 +1,5 @@
-//! Print police unit positions and the first entity's distance to the nearest unit once per
-//! second, to aim police scenarios (e.g. `golden_city_chase`) at a patrol:
+//! Print police unit positions, roadblock barriers, spike strips and the first entity's
+//! distance to the nearest unit and its punctures once per second, to aim police scenarios (e.g. `golden_city_chase`) at a patrol:
 //!
 //! ```sh
 //! cargo run --release -p simcli --example probe_police -- apps/simcli/scenarios/golden/city_chase.ron
@@ -46,6 +46,22 @@ fn main() {
             );
         }
         println!("    nearest unit {nearest:.0} m");
+        for b in v.sim.roadblock_barriers() {
+            println!(
+                "    roadblock {} barrier at ({:.1}, {:.1}, {:.1})",
+                b.tool, b.pos[0], b.pos[1], b.pos[2]
+            );
+        }
+        for st in v.sim.spike_strips() {
+            println!(
+                "    spikes {} from ({:.1}, {:.1}) to ({:.1}, {:.1})",
+                st.tool, st.a[0], st.a[1], st.b[0], st.b[1]
+            );
+        }
+        let p = v.sim.spike_puncture(id);
+        if p.iter().any(|x| *x > 0.0) {
+            println!("    {} punctures {p:?}", v.names[0]);
+        }
         Ok(())
     };
     run_with_hook(&sc, &data, &RunOptions::default(), &mut hook).expect("runs");

@@ -1,0 +1,19 @@
+// Playtest row 24: sideswiping a patrol car at 50.0 km/h (12.0:00) is assaulting an officer.
+// At 20 s the racer (no heat, no violations) is put alongside the nearest patrol car, which
+// is paused as at a junction. The hit unit recognises it at once (no recognition window, day
+// or night): pursuit within 1 s, wanted level >= 2 (heat.assault in data/police/heat.toml).
+(
+    name: "police_assault_sideswipe_day_50",
+    seed: 620,
+    time_of_day_h: 12.0,
+    duration_s: 22.0,
+    runs: 3,
+    racers: [(district: Suburb, speed_factor: 1.0, violations: false, hit_unit_at_s: Some(20.0), hit_kmh: 50.0)],
+    expect: [
+        (metric: "hits", min: 3.0, max: 3.0),
+        (metric: "assaults", min: 3.0, max: 6.0),
+        (metric: "hit_to_pursuit_max_s", min: 0.0, max: 1.0),
+        (metric: "max_wanted_level", min: 2.0, max: 5.0),
+        (metric: "pursuits", min: 3.0, max: 3.0),
+    ],
+)

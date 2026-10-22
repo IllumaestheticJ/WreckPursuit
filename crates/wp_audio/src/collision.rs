@@ -210,6 +210,14 @@ pub struct PairState {
     pub point: [f32; 3],
     /// Scrape is metal (else plastic).
     pub metal: bool,
+    /// Sliding (tangential) speed of the latest contacts, m/s (friction synthesis).
+    pub slide_mps: f32,
+    /// Contact pressure 0..1 seen in the current frame's contacts.
+    pub force: f32,
+    /// Contact pressure 0..1 of the last frame with contact.
+    pub frame_force: f32,
+    /// The other side is the static world (road, wall): metal throws sparks.
+    pub world: bool,
 }
 
 impl PairState {

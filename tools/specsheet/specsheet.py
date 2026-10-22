@@ -30,7 +30,8 @@ from roster_inputs import CARS  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 DATA = os.path.join(REPO, "data")
 
-# Class expectations per car: (0-100 s min, max), skidpad g (min, max), 100-0 m (min, max).
+# Class expectations per car: (0-100 s min, max), skidpad g (min, max), 100-0 m (min, max),
+# optional top speed km/h (min, max) where a brief sets one.
 # Ranges are class-typical published road-test figures for the archetype on its stock tires.
 TARGETS = {
     "vireo_xs": dict(t0100=(8.5, 9.5), lat=(0.82, 0.92), brake=(38, 44), why="late-90s 1.6 NA hot hatch road tests"),
@@ -46,7 +47,7 @@ TARGETS = {
     "sentinel_cruiser": dict(t0100=(6.2, 7.2), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD 5.7 V8 police sedans (pursuit package, round 6b)"),
     "sentinel_wolfhound": dict(t0100=(5.5, 6.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for AWD TT V6 pursuit vehicles"),
     "sentinel_bastion": dict(t0100=(7.5, 9.0), lat=(0.72, 0.80), brake=(40, 46), why="fleet evaluation figures for RWD 5.3 V8 police SUVs"),
-    "junkyard_beater": dict(t0100=(12.0, 15.0), lat=(0.75, 0.88), brake=(38, 46), why="period road tests of late-80s 1.6 L economy sedans, derated for wear"),
+    "junkyard_beater": dict(t0100=(14.0, 16.0), lat=(0.68, 0.78), brake=(42, 48), vmax=(140, 160), why="lead brief round 12b (0-100 14-16 s, ~150 km/h); period road tests of 1980s 1.6 L 4-speed economy sedans, derated for wear, on old hard tyres"),
     "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
     "drayman_cargo": dict(t0100=(9.5, 12.0), lat=(0.64, 0.74), brake=(44, 52), why="road tests of 2000s full-size V8 cargo vans (empty)"),
     "furrow_24": dict(t0100=(10.0, 12.5), lat=(0.70, 0.80), brake=(42, 50), why="period road tests of 90s compact 2.4 L pickups (manual)"),
@@ -71,6 +72,26 @@ BARRIERS = [
     ("side (T-bone) 40 km/h", "struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame)"),
     ("rear 40 km/h", "not a total loss; Ironside: rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed"),
 ]
+
+
+def max_shift_scale() -> float:
+    """Smallest `drivetrain.shift_time_scale` product a car can reach: the best tier of each mod
+    line in `data/mods/drivetrain.json` (tiers of one line replace each other, lines multiply)."""
+    with open(os.path.join(DATA, "mods", "drivetrain.json")) as f:
+        mods = json.load(f)["mods"]
+    best: dict = {}
+    for m in mods:
+        for e in m["effects"]:
+            v = e.get("Vehicle", {})
+            if v.get("param") == "drivetrain.shift_time_scale" and v.get("op") == "Mul":
+                best[m["line"]] = min(best.get(m["line"], 1.0), v["value"])
+    out = 1.0
+    for v in best.values():
+        out *= v
+    return out
+
+
+MAX_SHIFT_SCALE = max_shift_scale()
 
 
 def scale_for(car_json: dict, compound: str) -> float:
@@ -170,7 +191,8 @@ def validation_md(rows) -> str:
          "## Performance (sim)",
          ""]
     head = ["Car", "0-100 target s", "sim", "", "Skidpad target g", "sim", "", "100-0 target m",
-            "sim", "", "Vmax km/h", "est. 0-100 / skid / 100-0"]
+            "sim", "", "Vmax km/h", "¼ mile s @ km/h", "shift s stock → max mods",
+            "est. 0-100 / skid / 100-0"]
     o.append("| " + " | ".join(head) + " |")
     o.append("|" + "|".join("---" for _ in head) + "|")
     sim_fails, est_fails = [], []
@@ -203,7 +225,16 @@ def validation_md(rows) -> str:
             if res != "PASS":
                 est_fails.append((j["display_name"], name, res))
         vmax = f"{m['vmax_kmh']:.0f}" if m.get("vmax_kmh") else "pending"
-        cells += [vmax, f"{e['t0100_s']:.1f}{mark} / {e['skidpad_g']:.2f}{mark} / "
+        if t.get("vmax") and m.get("vmax_kmh"):
+            lo, hi = t["vmax"]
+            v_res = "PASS" if lo <= m["vmax_kmh"] <= hi else ("HIGH" if m["vmax_kmh"] > hi else "LOW")
+            vmax += f" ({lo}-{hi} {'✓' if v_res == 'PASS' else v_res})"
+            if v_res != "PASS":
+                sim_fails.append((j["display_name"], "top speed", v_res, f"{m['vmax_kmh']:.0f}"))
+        qm = (f"{m['qm_s']:.1f} @ {m['qm_kmh']:.0f}" if m.get("qm_s") else "pending")
+        st = j["drivetrain"]["shift_time_s"]
+        cells += [vmax, qm, f"{st:.2f} → {st * MAX_SHIFT_SCALE:.2f}",
+                  f"{e['t0100_s']:.1f}{mark} / {e['skidpad_g']:.2f}{mark} / "
                         f"{e['brake_100_0_m']:.1f}{mark}"]
         o.append("| " + " | ".join(cells) + " |")
     o += ["", "Target sources (type): "
@@ -271,13 +302,17 @@ SHARED = {
 }
 
 SIM_NOTES = {
-    ("Rampart 5.0", "0-100"): "A + traction. Measured: final drive 3.73, CG 0.48 m and a stronger LSD each change it by ≤ 0.03 s; semi-slicks only reach 5.5 s; 0.12 s shifts 5.6 s. The prompt-09 band (4.5-5.0) needs 02's launch/TCS to be less conservative.",
+    ("Tansy 1.3", "0-100"): "Row 97 (owner): stock shift times re-based to believable values (5-speed manual 0.25 → 0.50 s): 13.40 → 13.79 s, 0.3 s over. Same reasoning as the Vireo: shared cause A plus the slower stock shift; mods recover it.",
+    ("Stoat 16V", "0-100"): "Row 97 (owner): stock shift time set to the hot-hatch value after merging it (5-speed manual 0.25 → 0.45 s): 8.81 → 9.17 s, 0.2 s over. Same reasoning as the Vireo: shared cause A plus the slower stock shift; mods recover it.",
+    ("Satchel 2.0", "0-100"): "Row 97 (owner): stock shift time set to the light-truck manual value after merging it (5-speed manual 0.35 → 0.65 s): 18.5 → 19.02 s, at the slow edge. Not tuned back: the owner wants slower stock shifts.",
+    ("Vireo XS", "0-100"): "Row 97 (owner): stock shift times re-based to believable values (5-speed manual 0.25 → 0.45 s): 9.47 → 9.78 s. Four shifts cost ≈ 0.3 s; the band is road tests with real shifts, so the remaining 0.3 s is A's conservative TCS launch (shared cause A). Not tuned back: the owner wants slower stock shifts; the short-shift kit / clutch mods recover it.",
+    ("Rampart 5.0", "0-100"): "A + traction. Measured: final drive 3.73, CG 0.48 m and a stronger LSD each change it by ≤ 0.03 s; semi-slicks only reach 5.5 s; 0.12 s shifts 5.6 s. The prompt-09 band (4.5-5.0) needs 02's launch/TCS to be less conservative. Row 97 stock shift 0.25 → 0.50 s: 5.83 → 6.18 s.",
     ("Rampart 5.0", "skidpad"): "C — heavy nose on `sport` tires; semi-slicks give 0.97 g.",
     ("Rampart 5.0", "100-0"): "A — 1 m over. Was 55.6 m in the lead's first run (rear starved by the bias semantics) and 45.6 m with the bias fixed but the full 6-piston caliper torque (ABS cannot modulate it); the ABS ceiling brings it to 39 m.",
-    ("Hakone GT", "0-100"): "A — 0.06 s over.",
+    ("Hakone GT", "0-100"): "A + row 97 (owner): stock shift times re-based to believable values (0.25 → 0.45 s): 5.88 → 6.00 s.",
     ("Hakone GT", "100-0"): "A — 1 m over; heaviest `sport`-tire car after the Rampart.",
-    ("Kestrel TS", "0-100"): "A — 0.02 s over (FWD, torque-limited launch).",
-    ("Sperber 32", "0-100"): "A — high-revving NA six on a TCS launch.",
+    ("Kestrel TS", "0-100"): "A + row 97 (owner): stock shift times re-based to believable values (6-speed manual 0.25 → 0.42 s): 7.13 → 7.37 s (FWD, torque-limited launch).",
+    ("Sperber 32", "0-100"): "A — high-revving NA six on a TCS launch; row 97 (owner): stock shift times re-based to believable values (0.22 → 0.42 s): 6.05 → 6.33 s.",
     ("Sperber 32", "100-0"): "A — 0.7 m over.",
     ("Lindwurm 4T", "100-0"): "A — 0.5 m over.",
     ("Vireo XS", "100-0"): "0.1 m short since round 8: A's faster brake-pedal filter (`880753b`) shortened every stop by ≈ 1-2 m across the roster (Vireo 39.7 → 37.9 m). Light hot hatch on `street` tires; inside rounding of the band, not retuned.",
@@ -286,7 +321,7 @@ SIM_NOTES = {
     ("Hauler 1500", "skidpad"): "C — now on 02's `all_terrain` (≈ 0.9 × street, as requested): 0.63 g vs 0.68-0.76 published for half-tons on all-terrain tires. Joint re-tune with 02 (compound peak or cornering stiffness) rather than a chassis change.",
     ("Ironside 440", "0-100"): "bias-ply traction: on 02's `vintage_bias` (longitudinal D 0.93) the 560 N·m launch spins the rears, so the converter (now simulated) only took it from 8.77 to 8.71 s. A clutch LSD (08 mod) or 02's `drag_radial` is the period fix.",
     ("Ironside 440", "skidpad"): "C — 02's `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, as requested) on a soft, 0.55 m-CG chassis gives 0.62 g; period road tests put the archetype at 0.70-0.75 g. Joint re-tune with 02.",
-    ("Lindwurm 4T", "0-100"): "0.02 s over (5.42 s) after switching to on-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip — the lead's first-cut coupling, which A tunes); the fixed 65/35 split ran 5.37 s.",
+    ("Lindwurm 4T", "0-100"): "On-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip) and row 97 (owner): stock shift times re-based to believable values: dual-clutch 0.08 → 0.18 s, 5.44 → 5.58 s.",
     ("Sentinel Wolfhound", "skidpad"): "C — 0.848 g, 0.002 under the band on `police_pursuit` (rounds to 0.85); on-demand AWD changed it by < 0.01 g.",
     ("Sentinel Wolfhound", "0-100"): "B — converter slip; coupling already set to engage at 2 % front slip.",
     ("Sentinel Cruiser", "skidpad"): "C — 0.02 g under on `police_pursuit`; the V8 pursuit package (round 6b) put 60 kg more on the nose (0.81 → 0.83 g after re-deriving bars for the new mass).",

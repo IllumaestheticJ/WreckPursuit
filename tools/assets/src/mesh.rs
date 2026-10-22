@@ -15,8 +15,9 @@ use crate::style::{style_for, CarStyle, Detail, DetailCtx, HoodScoop, LiveryHint
 use crate::wheels::WheelGeom;
 
 /// Mesh file format version (`CarMesh::format`). 2: new part kinds / materials, `rigid`,
-/// `tints`, `livery`, `atlas`, `wheel_camber_deg`, livery atlas UVs on paint parts.
-pub const MESH_FORMAT: u32 = 2;
+/// `tints`, `livery`, `atlas`, `wheel_camber_deg`, livery atlas UVs on paint parts. 3: crumple
+/// `fold` bindings on hood / trunk lids, front fenders and rear quarters ([`FoldBinding`]).
+pub const MESH_FORMAT: u32 = 3;
 /// Hard overall triangle range of any car (per-tier budgets: [`Tier::tri_budget`]).
 pub const TRI_BUDGET: (u32, u32) = (4000, 20000);
 /// Window margin (pillar half width) around door edges, m.
@@ -181,6 +182,80 @@ pub struct MeshPart {
     /// 4 weights per vertex in 1/255 (`bind-skin`); empty for wheel parts.
     #[serde(default)]
     pub skin_weights: Vec<u8>,
+    /// Sheet buckling of a hood / trunk lid, front fender or rear quarter (`bind-skin`, format 3); `None`
+    /// for every other part. See [`FoldBinding`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fold: Option<FoldBinding>,
+}
+
+/// How a sheet panel crumples in the renderer (visual only; the lattice, hull and repair bill
+/// never see it). The panel runs from a fixed end (a lid hinge row; a side panel door-side row) to a
+/// leading end (the latch row; the fender nose / quarter tail). Per chord (fixed node → leading node):
+/// - the leading end follows the crushed front structure: when the `leads` nodes (bumper,
+///   frame, fender noses next to the leading node) move toward the fixed end further than the
+///   panel's own leading node, the panel's vertices are pulled back by the difference
+///   (weight 3), so the panel never floats over a crushed front;
+/// - the effective shortening, `gain × max(own chord loss, lead push) −` [`FOLD_DEAD_ZONE_M`],
+///   becomes a fold height (`FOLD_SPLIT ×` [`fold_height`], capped at `max_m`) along `dir`,
+///   shaped by the crease weight (weight 1: two ridges with a valley, tented at the centre);
+/// - once the panel is unlatched or hangs, the fixed end bows up by [`FOLD_REAR_LIFT`] of the
+///   fold (weight 2) and the leading edge pops up by `pop_m` (weight 3 squared).
+///
+/// Values between chords are interpolated linearly along the `across` axis (the chords' rest
+/// coordinate on it, from their leading node).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FoldBinding {
+    /// Lattice node pairs fixed end → leading end, sorted by their rest `across` coordinate.
+    pub chords: Vec<[u16; 2]>,
+    /// Per chord: three front-structure nodes (other regions) nearest its leading node.
+    pub leads: Vec<[u16; 3]>,
+    /// Axis the chords are spread along: 0 = x (lids), 2 = z (fenders).
+    pub across: u8,
+    /// Direction the sheet buckles toward, chassis space at rest (unit).
+    pub dir: [f32; 3],
+    /// Visual gain on the shortening (own chord loss or lead push, whichever is larger).
+    pub gain: f32,
+    /// Largest fold height, m.
+    pub max_m: f32,
+    /// Leading-edge pop of an unlatched / hanging lid, m (0 for bolted panels).
+    pub pop_m: f32,
+    /// 3 weights per vertex in 1/255: crease shape, fixed-end lift, leading-end follow.
+    pub weights: Vec<u8>,
+}
+
+/// Lost chord length a panel absorbs in-plane before it buckles, m.
+pub const FOLD_DEAD_ZONE_M: f32 = 0.015;
+/// Largest fold height of a hood / trunk lid, m.
+pub const FOLD_MAX_M: f32 = 0.28;
+/// Largest outward buckle of a front fender or rear quarter, m.
+pub const FENDER_FOLD_MAX_M: f32 = 0.12;
+/// Share of the single-tent height each of the lid's ridges gets (the shortening is split
+/// over two ridges).
+pub const FOLD_SPLIT: f32 = 0.7;
+/// Share of the fold height the fixed (hinge) edge bows up by once the panel is unlatched.
+pub const FOLD_REAR_LIFT: f32 = 0.45;
+/// Leading-edge pop of a lid whose latch let go, m.
+pub const LID_POP_M: f32 = 0.09;
+/// Visual crumple gain on a hood's own chord loss.
+pub const HOOD_CRUMPLE_GAIN: f32 = 1.8;
+/// Visual crumple gain on a trunk lid's own chord loss.
+pub const TRUNK_CRUMPLE_GAIN: f32 = 1.4;
+/// Visual crumple gain on a front fender or rear quarter.
+pub const FENDER_CRUMPLE_GAIN: f32 = 1.5;
+
+/// Fold height (m) of a sheet whose fixed→leading chord measured `rest_m` and is now
+/// effectively `lost_m` shorter: an inextensible strip pushed together rises into a tent of
+/// that height (uncapped; see [`FoldBinding`]). The browser (`render/panels.ts`) uses the same
+/// formula.
+pub fn fold_height(rest_m: f32, lost_m: f32) -> f32 {
+    if rest_m <= 1e-3 {
+        return 0.0;
+    }
+    let lost = (lost_m - FOLD_DEAD_ZONE_M).max(0.0);
+    let c = (lost / rest_m).min(0.5);
+    let k = 1.0 - c;
+    0.5 * rest_m * (1.0 - k * k).sqrt()
 }
 
 impl MeshPart {
@@ -847,8 +922,9 @@ fn underglow(p: &BodyProfile, b: &mut Builder) {
     }
 }
 
-/// Head / tail lights on the nose / tail faces (slightly proud, facing out), bound to the
-/// fenders / quarters so a hanging bumper leaves them; door mirrors on the front doors.
+/// Head / tail lights on the nose / tail faces (slightly proud, facing out), region
+/// `FrameFront` / `FrameRear` so `bind-skin` binds them as lenses (they crush with the end of
+/// the car, see `skin::is_lens`); door mirrors on the front doors.
 fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
     let top_n = p.belt(p.y_nose);
     let top_t = p.belt(p.y_tail);
@@ -858,11 +934,7 @@ fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
         let sx = if right { 1.0 } else { -1.0 };
         let wf = p.half_width(p.y_nose);
         let (x0, x1) = (sx * (wf - 0.07), sx * (wf - 0.38));
-        let (fl, rl) = if right {
-            (BodyRegion::FrontRightFender, BodyRegion::RearRightQuarter)
-        } else {
-            (BodyRegion::FrontLeftFender, BodyRegion::RearLeftQuarter)
-        };
+        let (fl, rl) = (BodyRegion::FrameFront, BodyRegion::FrameRear);
         let side = if right { "r" } else { "l" };
         b.beveled_box(
             &PartKey::body(

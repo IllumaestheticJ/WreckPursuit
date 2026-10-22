@@ -189,8 +189,20 @@ fn manual_gearbox_and_clutch() {
         ..AssistProfile::wheel_default()
     };
     let mut rig = Rig::new(&car("debug_coupe"));
-    // Launch in first with the clutch pedal released: anti-stall slip, car moves.
-    run(&mut rig, throttle(0.6), &manual, 3.0);
+    // Launch in first, letting the clutch pedal up over 1.5 s with 60 % throttle (a manual
+    // clutch has no anti-stall since owner row 59; see tests/clutch.rs).
+    for k in 0..360 {
+        rig.step(
+            &VehicleInput {
+                throttle: 0.6,
+                clutch: (1.0 - k as f32 / 360.0).max(0.0),
+                ..Default::default()
+            },
+            &manual,
+        );
+    }
+    run(&mut rig, throttle(0.6), &manual, 1.5);
+    assert!(!rig.vehicle.telemetry().stalled);
     assert_eq!(rig.state().gear, 1);
     assert!(rig.state().speed_mps > 3.0);
     rig.step(

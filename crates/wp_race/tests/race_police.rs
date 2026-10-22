@@ -48,7 +48,7 @@ fn plan_sprint(world: &World) -> CityRace {
         world,
         [60.55, -437.0 + dy, 0.0],
         [0.0, 1.0],
-        [60.55, -230.0 + dy, 0.0],
+        [60.55, -300.0 + dy, 0.0],
         3.0,
     )
     .expect("arterial sprint route")
@@ -129,8 +129,8 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         entrants.push(AiEntrant {
             racer: *id,
             profile: DriverProfile::default(),
-            // Generic limits keep debug test runs fast; the server measures each car once.
-            capability: CarCapability::geometry_only(car),
+            // The car's real limits (pre-measured table, no rig runs).
+            capability: CarCapability::for_car(car),
         });
     }
     // Open roads (illegal night meet): the AI may only borrow opposing lanes to overtake.
@@ -194,6 +194,30 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         }
         heat.observe(&events);
         let inputs = ai.tick(&judge, tick, sim.world(), &obs(&sim), &events, &heat);
+        if std::env::var("WP_RP_TRACE").is_ok() && tick.is_multiple_of(240) {
+            for (k, e) in ai.racers().iter().enumerate() {
+                let d = ai.field().debug_of(k);
+                let st = sim
+                    .vehicles()
+                    .iter()
+                    .find(|v| v.id == *e)
+                    .unwrap()
+                    .vehicle
+                    .state();
+                eprintln!(
+                    "t={} {e:?} s {:.0} pos ({:.0},{:.0}) v {:.1} tgt {:.1} {:?} {:?} heat {:?}",
+                    tick / 240,
+                    d.s,
+                    st.pos[0],
+                    st.pos[1],
+                    st.speed_mps,
+                    d.v_target,
+                    d.limit,
+                    ai.field().tactic_of(k),
+                    sim.police().racer(*e).map(|r| (r.heat, r.status))
+                );
+            }
+        }
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
         }

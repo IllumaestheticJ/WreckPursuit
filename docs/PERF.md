@@ -93,3 +93,16 @@ stubs and these numbers only prove the harness works.
 | `sim_only/8` | 47.18 µs | 0.0236 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +28.0% |
 | `snapshot/decode_24` | 1.59 µs | 0.0016 ms/snapshot | — | -97.0% |
 | `snapshot/encode_24` | 3.27 µs | 0.0033 ms/snapshot | — | -91.9% |
+
+## 2026-10-19 — weather in the game (lead, `lead/weather-in-game`) @ claude-cloud
+
+Hand measurements (not perf-gate benches). Budgets: weather has no row in `CLAUDE.md`; it rides
+inside the frame next to traffic (2 ms) and police (0.5 ms).
+
+| What | Native (release) | Browser (wasm, headless Chromium) | Notes |
+|---|---|---|---|
+| Weather sim, 12×12 city, golden city-chase layout | ≈ 0.04–0.08 ms / 60 Hz frame (1200 frames: 1.01–1.07 s dry vs 1.09–1.32 s in heavy rain, 3 runs each) | — | grid update every 0.25 s sim + per-wheel `weather_at` |
+| Weather sim, flat world, 1 car, 62 500-cell grid | — | 0.24 ms vs 0.14 ms / frame without weather | was 7.0 ms before hashing per revision (the browser hashes every tick) |
+| K's `weather_bench` (40 000 cells + 400 vehicles) | 0.20 ms per internal update = 0.013 ms / frame | — | `crates/wp_weather/README.md` |
+| `weather_info()` / `weather_grid()` | — | 0.005 ms per frame / 0.8 ms at 1 Hz | `e2e/weather.mjs` |
+| Rain + spray rendering (5000 streaks, ≤ 1500 spray points) | — | SwiftShader 1280×720: `scene.render` 196 ms vs 132–149 ms without (rain only 191, spray only 189, 1 streak 142) | software GPU: fill-rate bound and not representative; the rain is one instanced draw animated on the GPU with no per-frame CPU work, spray one Points draw. Measure on a real GPU at the next owner playtest |

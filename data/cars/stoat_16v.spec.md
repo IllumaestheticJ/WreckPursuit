@@ -82,7 +82,7 @@ Peak **108 kW @ 6500 rpm**, **181 N·m @ 4500 rpm**. Idle 850 / redline 6800 / l
 
 ## Drivetrain
 
-5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 250 N·m. Shift time 0.25 s.
+5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 250 N·m. Shift time 0.45 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -125,7 +125,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1312 N·m/wheel (capacity 1.36×), rear needs 284 N·m/wheel (capacity 2.39×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 388 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.637** → delivered 1790 N·m front / 388 N·m rear per wheel at full pedal. Handbrake 610 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 388 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.637** → delivered 1790 N·m front / 388 N·m rear per wheel at full pedal. Handbrake 910 N·m per rear wheel.
 
 ## Steering
 
@@ -138,7 +138,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 8.8 s | 204 km/h | 38.9 m | 0.85 g | — |
-| estimate | 8.0 s | 210 km/h | 37.7 m | 0.90 g | 472 |
+| estimate | 8.4 s | 210 km/h | 37.7 m | 0.90 g | 461 |
 
 ## Damage lattice (`data/lattices/stoat_16v.json`)
 

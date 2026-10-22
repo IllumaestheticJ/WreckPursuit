@@ -127,7 +127,7 @@ ABS ceiling: caliper capacity 5771 / 1794 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2675 N·m/wheel (capacity 1.71×), rear needs 867 N·m/wheel (capacity 1.64×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1482 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 4570 N·m front / 1420 N·m rear per wheel at full pedal. Handbrake 1440 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1482 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 4570 N·m front / 1420 N·m rear per wheel at full pedal. Handbrake 2330 N·m per rear wheel.
 
 ## Steering
 
@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.5 s | 244 km/h | 39.6 m | 0.85 g | — |
+| sim | 5.9 s | 244 km/h | 39.5 m | 0.87 g | — |
 | estimate | 6.1 s | 255 km/h | 38.1 m | 0.91 g | 558 |
 
 ## Damage lattice (`data/lattices/sentinel_wolfhound.json`)

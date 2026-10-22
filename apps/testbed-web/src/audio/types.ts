@@ -11,6 +11,18 @@ export interface VoiceId {
   slot: number;
 }
 
+/** Per-frame engine state of an `engine/physical` voice (wp_audio::engine_model::EngineFrame). */
+export interface EngineFrame {
+  rpm: number;
+  throttle: number;
+  pedal: number;
+  gear: number;
+  speed_mps: number;
+  boost: number;
+  health: number;
+  blowoffs: number;
+}
+
 /** Final per-frame voice parameters (distance gain and Doppler already applied). */
 export interface VoiceParams {
   gain: number;
@@ -21,6 +33,8 @@ export interface VoiceParams {
   lowpass_hz: number;
   doppler: number;
   pos: [number, number, number];
+  /** Only on the physically modelled engine voice. */
+  engine?: EngineFrame;
 }
 
 export type AudioCommand =
@@ -66,6 +80,37 @@ export interface DirectorStats {
 export interface FrameOut {
   commands: AudioCommand[];
   stats: DirectorStats;
+  /** Siren v2 acoustics (wp_audio::siren_space::SirenSpaceFrame). */
+  siren?: SirenSpaceFrame;
+}
+
+/** Listener surroundings for the siren effects (wp_audio::siren_space::Room). */
+export interface SirenRoom {
+  slap_left_s: number;
+  slap_right_s: number;
+  slap_gain: [number, number];
+  slap_feedback: number;
+  tunnel: number;
+  rt60_s: number;
+  street_m: number;
+}
+
+/** One playing siren's occlusion / interior muffle (wp_audio::siren_space::VoiceSpace). */
+export interface SirenVoiceSpace {
+  entity: number;
+  pattern: string;
+  occlusion: number;
+  gain: number;
+  lowpass_hz: number;
+  interior: boolean;
+}
+
+/** wp_audio::siren_space::SirenSpaceFrame. */
+export interface SirenSpaceFrame {
+  room: SirenRoom;
+  voices: SirenVoiceSpace[];
+  engine_duck: number;
+  radio_duck: number;
 }
 
 export type CueSource =
@@ -82,8 +127,10 @@ export interface CueDef {
 
 export interface SamplePack {
   id: string;
-  kind: "Engine" | "World" | "Siren" | "Radio";
+  kind: "Engine" | "World" | "Siren" | "Radio" | "Model";
   description: string;
+  /** Procedural pack played instead when the user picks the procedural fallback. */
+  fallback?: string;
   cues: Record<string, CueDef>;
 }
 
@@ -93,3 +140,20 @@ export interface AudioLibrary {
 }
 
 export const voiceKey = (v: VoiceId): string => `${v.entity}:${v.slot}`;
+
+/** Where cue audio comes from: recorded samples (default) or the procedural fallback packs. */
+export type SoundSource = "recorded" | "procedural";
+
+/**
+ * How engines are voiced: the physically modelled synthesizer (default; the player and the
+ * nearest cars, others keep layers) or the layers of the sound source for every car.
+ */
+export type EngineVoicing = "modelled" | "layers";
+
+/** Sample loading progress (panel + e2e). */
+export interface SampleStatus {
+  total: number;
+  loaded: number;
+  loading: number;
+  failed: string[];
+}

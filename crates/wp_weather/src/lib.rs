@@ -165,6 +165,7 @@ pub struct WeatherSim {
     last_time: TimeOfDay,
     modifiers: WeatherModifiers,
     changes: Vec<WeatherChange>,
+    revision: u64,
 }
 
 impl WeatherSim {
@@ -239,6 +240,7 @@ impl WeatherSim {
             last_time: TimeOfDay::from_hours(12.0),
             modifiers: WeatherModifiers::NEUTRAL,
             changes: Vec::new(),
+            revision: 0,
         };
         sim.refresh_atmosphere(sim.last_time);
         sim
@@ -259,6 +261,7 @@ impl WeatherSim {
     /// One internal update of `game_dt` in-game seconds (public for tools and tests that want
     /// to skip hours quickly).
     pub fn update(&mut self, game_dt: f32, time: TimeOfDay, vehicles: &[[f32; 3]]) {
+        self.revision += 1;
         self.last_time = time;
         self.advance_schedule(game_dt, time);
         self.refresh_atmosphere(time);
@@ -394,6 +397,7 @@ impl WeatherSim {
     /// Force a regime (scenario setup, debug UI, future captain tool). `immediate` skips the
     /// blend. Does not lock the schedule; see [`WeatherSim::set_locked`].
     pub fn force(&mut self, to: Regime, immediate: bool) {
+        self.revision += 1;
         self.begin_transition(to, immediate, true);
         self.refresh_atmosphere(self.last_time);
         self.refresh_modifiers();
@@ -406,12 +410,30 @@ impl WeatherSim {
 
     /// Set every cell's water (scenario setup: "the road is soaked").
     pub fn set_all_water_mm(&mut self, water_mm: f32) {
+        self.revision += 1;
         self.state.wetness_by_cell.fill(water_mm);
         self.state.mean_road_wetness = self
             .state
             .wetness_by_cell
             .mean_road_wetness(&self.data.surfaces);
         self.refresh_modifiers();
+    }
+
+    /// Flood the cells whose centres lie in the XY box `min..max` with `water_mm` of
+    /// standing water (scenario setup: a puddle to aquaplane on; see
+    /// [`WetnessGrid::flood_rect`]). Returns the number of cells flooded.
+    pub fn flood_rect(&mut self, min: [f32; 2], max: [f32; 2], water_mm: f32) -> usize {
+        self.revision += 1;
+        let n = self
+            .state
+            .wetness_by_cell
+            .flood_rect(min, max, water_mm, &self.data.surfaces);
+        self.state.mean_road_wetness = self
+            .state
+            .wetness_by_cell
+            .mean_road_wetness(&self.data.surfaces);
+        self.refresh_modifiers();
+        n
     }
 
     /// The full state.
@@ -568,6 +590,7 @@ impl WeatherSim {
         if !self.state.wetness_by_cell.apply_water_q8(&snap.water_q8) {
             return false;
         }
+        self.revision += 1;
         let st = &mut self.state;
         st.kind = kind;
         st.intensity = snap.intensity.clamp(0.0, 1.0);
@@ -578,6 +601,14 @@ impl WeatherSim {
         self.refresh_atmosphere(self.last_time);
         self.refresh_modifiers();
         true
+    }
+
+    /// Counts every change to the hashed state except the sub-interval timer: internal updates
+    /// ([`WeatherSim::update`]), `force`, `set_all_water_mm`, `flood_rect`, `apply_snapshot`.
+    /// Between two revisions only the pending-time accumulator moves, so callers that hash every
+    /// tick (the browser replay log) can cache [`WeatherSim::state_hash`] per revision.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Mix the weather state into a determinism hash.

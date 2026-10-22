@@ -5,7 +5,7 @@ _Last updated: lead integration round 8, 2026-10-19. Contract **v0.3.0** (applie
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
 cloud sessions: J audio `ws/audio`, K weather `ws/weather`, L race/crews `ws/race`, M UI kit `ws/ui`,
 N opponent AI `ws/opponent`, O meta services `ws/meta`, P design docs `ws/design-docs`, Q tuning
-dashboard `ws/tuning-dash`).
+dashboard `ws/tuning-dash`); **R = prompt 21** (`ws/panels`), **S = prompt 22** (`ws/onboarding`).
 
 ## Workstreams
 
@@ -21,7 +21,7 @@ dashboard `ws/tuning-dash`).
 | H | 09 | Cars | `ws/cars` | merged | 13 cars drive deterministically | new tires, `gen-lattice` regeneration, VALIDATION sim columns |
 | I | 10 | Harness | `ws/harness` | merged | 17 scenarios, goldens, lint, native-vs-wasm, benches, CI | `barriers`/speed in scenarios, real cities, traffic soak, F codec |
 | J | 13 | Audio | `ws/audio` | merged (run 3–4) | `wp_audio` director crate + procedural packs, playing in the browser testbed | integration doc; hook into testbed |
-| K | 14 | Weather | `ws/weather` | merged (run 3–4) | `wp_weather` crate: schedule, wetness, grip/aquaplaning | integration doc; feed grip to vehicle via contracts |
+| K | 14 | Weather | `ws/weather` | merged (run 3–4); in the game on `lead/weather-in-game` | `wp_weather` in `wp_sim` (per-wheel wet grip, aquaplaning, fog-capped police sight, `WeatherChanged`), simcli `weather:` field + wet/aquaplane/fog scenarios, browser rain/wet roads/spray/fog/wipers/HUD, rainy-night chase | traffic weather hook (D, W-D1), police speed caps (E), race purse multipliers (G), weather on the wire (F) |
 | L | 15 | Race/crews | `ws/race` | merged (run 3–4) | `wp_race` rules, scheduler, stakes, crews; `data/events/` | integration doc |
 | M | 16 | UI kit | `ws/ui` | merged (run 3–4) | `apps/ui-kit` against mock data | integration doc |
 | N | 17 | Opponent AI | `ws/opponent` | merged run 4 | AI racers on D's controller; circuit / traffic scenarios | — |
@@ -29,6 +29,7 @@ dashboard `ws/tuning-dash`).
 | P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
 | Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged (run 3–4) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
 | R | 21 | Car models & panels | `ws/panels` | started 2026-10-19 | — | per-panel meshes, hinged doors/hood/trunk swing, dangling bumpers |
+| S | 22 | Onboarding flow | `ws/onboarding` | prompt written 2026-10-20, not started | — | intro crash → junkyard car → first race → first police chase → garage (backlog B08); best started after L's race-in-city wiring |
 | Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading; contract v0.2.0 | police units as sim vehicles, F's `wp_sim` hooks, physical traffic, v0.3.0 |
 
 ## What you can play right now
@@ -107,7 +108,18 @@ owner's playtest (`docs/design/PLAYTEST.md`).
 Four parallel sessions: weather in the game (`lead/weather-in-game`), races in the city with a race
 menu and AI racers (L), a garage and career that persist between runs (G), and the 4-player test
 with a player cop (F). Real sounds (J2) were already running.
+- Weather (`lead/weather-in-game`, pushed, not merged): weather runs in `wp_sim`; the testbed has
+  a weather selector and a **rainy night** city chase. Wet braking 51.6 m vs 40.0 m dry; fog
+  delays police recognition (1.9 s vs 0.3 s). Open: traffic slowing (D), police speed caps (E).
 
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
 roads and controller; G + lead wire capture/escape → economy.
+
+## Step 2b (2026-10-19, owner said yes)
+Five more sessions: gamepad + rebindable controls (C, `ws/testbed`), junkyard beater car (H,
+`ws/cars`), tunnels / covered roads that break line of sight (`lead/tunnels-los`), quitting while
+wanted = capture after 60 s (`lead/disconnect-capture`), browser performance pass
+(`lead/browser-perf`). Art: low-poly dark chosen (`docs/art/STYLE_DECISION.md`), machine S on
+`ws/art`.
+

@@ -20,3 +20,6 @@ path = "src/bin/city_import.rs"
 [[bin]]
 name = "gen-city"
 path = "src/bin/gen_city.rs"
+
+[dev-dependencies]
+wp_sim.workspace = true
