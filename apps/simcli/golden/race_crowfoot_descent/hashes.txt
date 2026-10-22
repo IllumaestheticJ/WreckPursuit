@@ -1,0 +1,11 @@
+# simcli hashes scenario=race_crowfoot_descent systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+240 c68dd76d3acb61ca
+480 6789ab774a95a07e
+720 b19f866176d61fec
+960 1f7133a36538b9b6
+1200 f07d1870670789b9
+1440 c790314c46e2e626
+1680 4440aac7e07acf18
+1920 7af41205f242b964
+2160 e855176108280319
+2400 dbce4a1fdb6b23d9
