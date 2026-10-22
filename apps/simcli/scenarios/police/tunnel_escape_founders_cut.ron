@@ -37,9 +37,20 @@
 // chase flips to a PIT capture at 70.4 s. Seeds 52-57 are bit-identical with and without that
 // fix, and only seed 56 tells this story there (as only 51 and 56 did before): helicopter at
 // 63.6 s, lost inside the Cut at ≈ 96 s, Escaped at 118.4 s (L3). Re-seeded to 56.
+//
+// Highway port (2026-10-21; release check 2026-10-22): seed 56 no longer tells it. A responder
+// (unit 15) now comes south on Lantern Row and meets him head-on at 49 s (11.7 m/s); the
+// bent car weaves ±3.5 m on Mercer and hits a street tree at (193, 487) at 67 s, sits there
+// 40 s, picks up L4 and reaches the Cut only at ≈ 141 s, so the 30 s escape timer would end
+// at ≈ 171 s, after the run. The tunnel and the lay-by are not involved (the lay-by is the
+// cover's middle, y 995; the cut now spans y 893-1098). Seeds 40-53 swept: 40, 41, 43, 44,
+// 45, 46, 49, 51, 53 tell this story; 51 (and 44-46) cleanly, with no contact, and with the
+// control also passing. Re-seeded to 51: pursuit at 8.5 s, helicopter launched 68.5 s and
+// over him from ≈ 84 s, lost entering the Cut at ≈ 91.6 s, Escaped 113.6 s (L3) with the
+// nearest unit ≈ 140 m away.
 (
     name: "police_tunnel_escape_founders_cut",
-    seed: 56,
+    seed: 51,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
