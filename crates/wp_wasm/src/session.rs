@@ -881,7 +881,8 @@ impl Session {
 
     // ----- garage visits (lead; see `crate::garage_visit`) ------------------------------
 
-    /// The city's repair shops (empty without an economy run or a city).
+    /// The city's repair shops (empty without an economy run or a city, in picker races and in
+    /// career runs).
     pub fn garages(&self) -> &[GarageSite] {
         if self.race.is_some() || self.career {
             return &[];
