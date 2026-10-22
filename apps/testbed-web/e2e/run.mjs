@@ -14,7 +14,8 @@
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
 // pose follows the sim within 0.2 m), crash effects (e2e/crash_fx.mjs: sparks, glass, debris,
 // smoke, skid marks, no steady-state allocation), instant crash replays (e2e/crash_replay.mjs),
-// and (optionally) perf at 1/8/24 cars.
+// street racers (e2e/street.mjs) and traffic colliders (e2e/traffic_bodies.mjs), and
+// (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1158,5 +1159,16 @@ check(tc.status === 0, `touch controls checks (e2e/touch.mjs)${tc.status === 0 ?
 const mn = spawnSync("node", [join(here, "menu.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, MENU_SHOTS: shots ?? "" } });
 process.stdout.write(mn.stdout);
 check(mn.status === 0, `game menu + layout checks (e2e/menu.mjs)${mn.status === 0 ? "" : ": " + (mn.stderr || "").trim().split("\n").pop()}`);
+// 13. Street racers (e2e/street.mjs, its own server and browser; lead, rows 149–154): the
+// roster by day / night, honk to challenge, no challenge while wanted, the A→B picker with
+// waypoints, side-by-side start, a race to the finish (day keyboard + mouse, night gamepad),
+// the city chase's racers, touch. Then no physical traffic car without a collider
+// (e2e/traffic_bodies.mjs, row 149).
+const st = spawnSync("node", [join(here, "street.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, SHOTS: shots ? join(shots, "street") : "" } });
+process.stdout.write(st.stdout);
+check(st.status === 0, `street racer checks (e2e/street.mjs)${st.status === 0 ? "" : ": " + (st.stderr || "").trim().split("\n").pop()}`);
+const tb = spawnSync("node", [join(here, "traffic_bodies.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+process.stdout.write(tb.stdout);
+check(tb.status === 0, `traffic bodies (e2e/traffic_bodies.mjs)${tb.status === 0 ? "" : ": " + (tb.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

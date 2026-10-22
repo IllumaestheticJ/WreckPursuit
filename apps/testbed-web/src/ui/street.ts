@@ -6,7 +6,9 @@
 // racers as level-coloured dots (number = level), the planned / running route with its A / B
 // flags (`MapHud.setExtras`), a "Street racers" legend group, and during a challenge arms the
 // full map's picker (tap / click = B; pad: left stick moves the crosshair, A sets B) with the
-// challenge card in the map's host panel. What stays here: the challenge hint, the race panel
+// challenge card in the map's host panel. After B, further clicks add waypoints (row 151): the
+// route runs through them in order; the card lists them to re-order or remove, and they show on
+// both maps as numbered flags and in the world as gates during the race. What stays here: the challenge hint, the race panel
 // (top-left stack, laid out by ui/layout.ts like the race HUD), the countdown and the result
 // banner. All of it hides while `frame(…, visible = false)` (game menu, photo mode, crash replay).
 import type { MapExtras, MapFlag, MapHud, MapMarker } from "../../../ui-kit/src/live";
@@ -32,6 +34,10 @@ const STYLE = `
 .wp-map-host input[type=range] { width: 100%; }
 .wp-map-host .st-buttons { display: flex; flex-wrap: wrap; gap: 0.5em; margin-top: 0.7em; }
 .wp-map-host .st-buttons .wp-kbd { color: inherit; background: transparent; border-color: currentColor; }
+.wp-map-host .st-wp { display: flex; align-items: center; gap: 0.3em; }
+.wp-map-host .st-wp b { min-width: 1.4em; }
+.wp-map-host .st-wp span { flex: 1; }
+.wp-map-host .st-wp button { padding: 0 0.45em; min-width: 1.8em; }
 `;
 
 const money = (n: number) => (n < 0 ? "−$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US");
@@ -43,7 +49,9 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 const RACER_STRIDE = 6;
 /** Gamepad buttons in the picker (standard mapping). Driving input is paused while the map is
  * open, so A / B / LB / RB / Menu are free there. */
-const PAD = { a: 0, b: 1, lb: 4, rb: 5, menu: 9 } as const;
+const PAD = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, menu: 9 } as const;
+/** Most waypoints a route takes (wp_wasm `street::MAX_WAYPOINTS`). */
+const MAX_WAYPOINTS = 8;
 /** Crosshair speed of the left stick, CSS px per second at full deflection. */
 const PAD_PAN_PX_S = 700;
 
@@ -70,6 +78,12 @@ export class StreetUi {
   preview: StreetPreview | null = null;
   /** Stake chosen for the open challenge, $. */
   stake = 0;
+  /** Finish (B) as picked on the map; null = not yet. */
+  finishPick: [number, number] | null = null;
+  /** Extra waypoints between A and B, in driving order (e2e reads them). */
+  via: [number, number][] = [];
+  /** The next map pick moves B (else it adds a waypoint, once B is set). */
+  private moveB = false;
   private offerEntity = -1;
   /** This UI opened the full map for the open challenge (and closes it with the challenge). */
   private openedMap = false;
@@ -147,15 +161,12 @@ export class StreetUi {
     return st?.levels.find((l) => l.level === level)?.colour ?? "#888888";
   }
 
-  /** Body colour (0xRRGGBB) of a street racer's car, from its level; null for other cars. */
+  /** Body colour (0xRRGGBB) of a street racer's car, from its level (off-shift racers too);
+   * null for other cars. */
   colourFor(entity: number): number | null {
-    if (this.racers.length === 0) this.racers = sim.streetRacers();
-    for (let o = 0; o < this.racers.length; o += RACER_STRIDE) {
-      if (this.racers[o] !== entity) continue;
-      if (!this.status) this.status = sim.streetStatus();
-      return parseInt(this.levelColour(this.racers[o + 1]).slice(1), 16);
-    }
-    return null;
+    if (!this.status) this.status = sim.streetStatus();
+    const r = this.status?.roster.find((x) => x.entity === entity);
+    return r ? parseInt(this.levelColour(r.level).slice(1), 16) : null;
   }
 
   /** Per frame, after the sim step. `visible` = false while something else owns the screen
@@ -169,6 +180,8 @@ export class StreetUi {
     const st = this.status;
     this.roaming.clear();
     const racing = st?.race?.entity ?? -1;
+    // Off-shift racers (in the lockup, not in `racers`) count too: far from every camera.
+    for (const r of st?.roster ?? []) if (r.entity !== racing) this.roaming.add(r.entity);
     for (let o = 0; o < this.racers.length; o += RACER_STRIDE) if (this.racers[o] !== racing) this.roaming.add(this.racers[o]);
     if (!st) {
       if (this.offerEntity >= 0) this.endPicker();
@@ -188,6 +201,9 @@ export class StreetUi {
       this.offerEntity = st.offer.entity;
       this.cardKey = "";
       this.preview = null;
+      this.finishPick = null;
+      this.via = [];
+      this.moveB = false;
       this.error = "";
       this.stake = Math.max(st.offer.bet_min, Math.min(st.offer.bet_max, Math.round((st.offer.bet_min * 2) / 50) * 50));
       this.map.setPicker((x, y) => this.pick(x, y));
@@ -229,6 +245,11 @@ export class StreetUi {
     const flags: MapFlag[] = [];
     const start = race?.start ?? st.offer?.start;
     if (start && this.map.isOpen) flags.push({ x: start[0], y: start[1], label: "A" });
+    const gates = race?.gates ?? (st.offer ? (this.preview?.gates ?? this.via) : []);
+    gates.forEach((g, i) => {
+      // During the race only the gates still ahead.
+      if (!race || i >= race.next_gate) flags.push({ x: g[0], y: g[1], label: String(i + 1) });
+    });
     const finish = race?.finish ?? (st.offer ? this.preview?.finish : undefined);
     if (finish) flags.push({ x: finish[0], y: finish[1], label: "B", finish: true });
     return { markers, route, flags };
@@ -237,6 +258,9 @@ export class StreetUi {
   private endPicker(): void {
     this.offerEntity = -1;
     this.preview = null;
+    this.finishPick = null;
+    this.via = [];
+    this.moveB = false;
     this.error = "";
     this.map.setPicker(null);
     this.padWas = null;
@@ -245,11 +269,30 @@ export class StreetUi {
     this.cardKey = "";
   }
 
-  /** The player picked B (map tap / click, or the pad's crosshair). */
+  /** A map pick (tap / click, or the pad's crosshair): B first (or when moving B), then a
+   * waypoint at the end of the list. */
   private pick(x: number, y: number): void {
     if (!this.status?.offer) return;
+    if (!this.finishPick || this.moveB) {
+      this.finishPick = [x, y];
+      this.moveB = false;
+    } else if (this.via.length < MAX_WAYPOINTS) {
+      this.via.push([x, y]);
+    } else {
+      this.error = `at most ${MAX_WAYPOINTS} waypoints`;
+      this.cardKey = "";
+      if (this.status) this.renderCard(this.status);
+      return;
+    }
+    this.replan();
+  }
+
+  /** Plan the route A → waypoints → B again (after any change to them). */
+  private replan(): void {
+    const b = this.finishPick;
+    if (!b) return;
     try {
-      this.preview = sim.streetPreview(x, y);
+      this.preview = sim.streetPreview(b[0], b[1], this.via);
       this.error = "";
     } catch (err) {
       this.preview = null;
@@ -259,13 +302,36 @@ export class StreetUi {
     if (this.status) this.renderCard(this.status);
   }
 
+  /** The rest-stop meet's Loop 9 lap (row 153): B back at the rest stop, waypoints round the loop. */
+  pickLap(finish: [number, number], via: [number, number][]): void {
+    this.finishPick = [finish[0], finish[1]];
+    this.via = via.map((w) => [w[0], w[1]] as [number, number]);
+    this.moveB = false;
+    this.replan();
+  }
+
+  /** Remove waypoint `i` (the card's ✕, pad X removes the last). */
+  removeWaypoint(i: number): void {
+    if (i < 0 || i >= this.via.length) return;
+    this.via.splice(i, 1);
+    this.replan();
+  }
+
+  /** Move waypoint `i` one place earlier (`dir` −1) or later (+1) in the order. */
+  moveWaypoint(i: number, dir: -1 | 1): void {
+    const j = i + dir;
+    if (i < 0 || j < 0 || i >= this.via.length || j >= this.via.length) return;
+    [this.via[i], this.via[j]] = [this.via[j], this.via[i]];
+    this.replan();
+  }
+
   /** Accept the open challenge with the picked route and stake (Race button, Enter, pad Menu). */
   accept(): void {
     const o = this.status?.offer;
     const p = this.preview;
     if (!o || !p?.ok) return;
     try {
-      sim.streetAccept(p.finish[0], p.finish[1], this.stake);
+      sim.streetAccept(p.finish[0], p.finish[1], this.stake, this.via);
       this.status = sim.streetStatus();
       this.endPicker();
       if (this.map.isOpen) this.map.close();
@@ -301,6 +367,11 @@ export class StreetUi {
     const o = this.status?.offer;
     if (press(PAD.a)) this.map.pickCentre();
     if (press(PAD.b)) return this.decline();
+    if (press(PAD.x)) this.removeWaypoint(this.via.length - 1);
+    if (press(PAD.y) && this.finishPick) {
+      this.moveB = !this.moveB;
+      this.cardKey = "";
+    }
     const dir = (press(PAD.rb) ? 1 : 0) - (press(PAD.lb) ? 1 : 0);
     if (o && dir) {
       this.stake = Math.max(o.bet_min, Math.min(o.bet_max, this.stake + dir * this.stakeStep(o.bet_min)));
@@ -320,7 +391,7 @@ export class StreetUi {
     const p = this.preview;
     if (el.contains(document.activeElement) && document.activeElement?.tagName === "INPUT") return; // not under the slider
     if (!o) {
-      const key = `roster|${st.roster.map((r) => `${r.entity}:${r.mode}:${r.wins}:${r.losses}`).join(",")}`;
+      const key = `roster|${st.pursued}|${st.roster.map((r) => `${r.entity}:${r.mode}:${r.wins}:${r.losses}`).join(",")}`;
       if (key === this.cardKey) return;
       this.cardKey = key;
       el.hidden = false;
@@ -328,10 +399,11 @@ export class StreetUi {
       el.innerHTML =
         `<div class="wp-panel-title"><span>Street racers</span><b>${st.roster.length}</b></div>` +
         `<div class="st-row wp-dim">Drive up to a racer and honk (${this.hornLabel(horn)}) to challenge them. Dot colour and number = driver level.</div>` +
+        (st.pursued ? `<div class="st-row wp-warn">No challenges while the police are after you.</div>` : "") +
         `<ul>${st.roster
           .map(
             (r) =>
-              `<li><i class="st-dot" style="background:${r.colour}"></i>${esc(r.name)} <span class="wp-dim">· Lv ${r.level} · ${esc(r.car)} · you ${r.losses}–${r.wins}${r.mode === "Racing" ? " · racing you" : ""}</span></li>`,
+              `<li><i class="st-dot" style="background:${r.colour}"></i>${esc(r.name)} <span class="wp-dim">· Lv ${r.level} · ${esc(r.car)} · you ${r.losses}–${r.wins}${r.mode === "Racing" ? " · racing you" : ""}${r.shift === "Loop" ? " · laps Loop 9 at night" : r.shift === "Night" ? " · nights only" : ""}${r.mode === "OffDuty" ? " · off until dark" : ""}</span></li>`,
           )
           .join("")}</ul>`;
       return;
@@ -339,7 +411,7 @@ export class StreetUi {
     const canBet = o.affordable && o.bet_max >= o.bet_min;
     this.stake = Math.max(o.bet_min, Math.min(o.bet_max, this.stake));
     const step = this.stakeStep(o.bet_min);
-    const key = `offer|${o.entity}|${p?.finish.join(",")}|${p?.ok}|${this.error}|${this.stake}|${o.cash}|${canBet}`;
+    const key = `offer|${o.entity}|${p?.finish.join(",")}|${p?.ok}|${this.error}|${this.stake}|${o.cash}|${canBet}|${this.via.flat().join(",")}|${this.moveB}`;
     if (key === this.cardKey) return;
     this.cardKey = key;
     el.hidden = false;
@@ -348,7 +420,25 @@ export class StreetUi {
       `<div class="wp-panel-title"><span>Challenge</span><b>Lv ${o.level}</b></div>` +
       `<h3>${esc(o.name)} <span class="st-lv" style="background:${o.colour}">Lv ${o.level} ${esc(o.level_name)}</span></h3>` +
       `<div class="wp-dim st-row">${esc(o.car)} · your record vs them ${o.losses}–${o.wins}</div>` +
-      `<div class="st-row">1. <b>Tap / click the map</b> to set the finish <b>B</b> (A is where you are).<br><span class="wp-dim">Pad: left stick moves the map under the crosshair, A sets B.</span></div>` +
+      (o.rest_stop
+        ? `<div class="st-row">Night meet at <b>${esc(o.rest_stop)}</b>: start side by side on the parking road.</div>` +
+          (o.loop_lap ? `<div class="st-buttons"><button class="wp-btn wp-btn--ghost" id="st-lap">Loop 9 lap back here</button></div>` : "")
+        : "") +
+      (this.finishPick
+        ? `<div class="st-row">${this.moveB ? `<b>Tap the map</b> to move <b>B</b>.` : `<b>Tap the map</b> to add waypoints, driven in order.`} <span class="wp-dim">Pad: A add, X undo, Y move B.</span></div>`
+        : `<div class="st-row">1. <b>Tap / click the map</b> to set the finish <b>B</b> (A is where you are).<br><span class="wp-dim">Pad: left stick moves the map under the crosshair, A sets B.</span></div>`) +
+      (this.via.length
+        ? `<ul>${this.via
+            .map(
+              (w, i) =>
+                `<li class="st-wp"><b>${i + 1}</b><span class="wp-dim wp-mono">${Math.round(w[0])}, ${Math.round(w[1])}</span>` +
+                `<button class="wp-btn wp-btn--ghost" data-wp-up="${i}" ${i === 0 ? "disabled" : ""} title="Earlier">↑</button>` +
+                `<button class="wp-btn wp-btn--ghost" data-wp-down="${i}" ${i === this.via.length - 1 ? "disabled" : ""} title="Later">↓</button>` +
+                `<button class="wp-btn wp-btn--ghost" data-wp-del="${i}" title="Remove">✕</button></li>`,
+            )
+            .join("")}</ul>`
+        : "") +
+
       (p
         ? `<div class="st-row">Route <b>${km(p.length_m)}</b>${p.ok ? "" : ` <span class="wp-warn">${esc(p.reason ?? "")}</span>`}</div>`
         : `<div class="st-row wp-dim">No finish picked yet.</div>`) +
@@ -359,7 +449,9 @@ export class StreetUi {
         : `<div class="st-row wp-warn">${esc(o.name)} races for at least ${money(o.bet_min)}; you have ${money(o.cash)}.</div>`) +
       (this.error ? `<div class="st-row wp-warn">${esc(this.error)}</div>` : "") +
       `<div class="st-buttons"><button class="wp-btn wp-btn--primary" id="st-go" ${ready ? "" : "disabled"}>Race <span class="wp-kbd">Enter</span></button>` +
-      `<button class="wp-btn wp-btn--ghost" id="st-no">Decline <span class="wp-kbd">Esc</span></button></div>` +
+      `<button class="wp-btn wp-btn--ghost" id="st-no">Decline <span class="wp-kbd">Esc</span></button>` +
+      (this.finishPick ? `<button class="wp-btn wp-btn--ghost" id="st-moveb">${this.moveB ? "Add waypoints" : "Move B"}</button>` : "") +
+      `</div>` +
       `<div class="st-row wp-dim">Pad: Menu races, B declines.</div>`;
     const range = el.querySelector<HTMLInputElement>("#st-range");
     if (range) {
@@ -373,6 +465,21 @@ export class StreetUi {
     }
     el.querySelector<HTMLButtonElement>("#st-go")!.onclick = () => this.accept();
     el.querySelector<HTMLButtonElement>("#st-no")!.onclick = () => this.decline();
+    const lapBtn = el.querySelector<HTMLButtonElement>("#st-lap");
+    if (lapBtn && o.loop_lap) {
+      const lap = o.loop_lap;
+      lapBtn.onclick = () => this.pickLap(lap.finish, lap.via);
+    }
+    const moveB = el.querySelector<HTMLButtonElement>("#st-moveb");
+    if (moveB)
+      moveB.onclick = () => {
+        this.moveB = !this.moveB;
+        this.cardKey = "";
+        if (this.status) this.renderCard(this.status);
+      };
+    el.querySelectorAll<HTMLButtonElement>("[data-wp-up]").forEach((b) => (b.onclick = () => this.moveWaypoint(Number(b.dataset.wpUp), -1)));
+    el.querySelectorAll<HTMLButtonElement>("[data-wp-down]").forEach((b) => (b.onclick = () => this.moveWaypoint(Number(b.dataset.wpDown), 1)));
+    el.querySelectorAll<HTMLButtonElement>("[data-wp-del]").forEach((b) => (b.onclick = () => this.removeWaypoint(Number(b.dataset.wpDel))));
   }
 
   private hornLabel(horn = bound("horn")): string {
@@ -391,6 +498,8 @@ export class StreetUi {
       html = `<b>${esc(o.name)}</b> is waiting: open the map (${[m.key && `<span class="wp-kbd">${esc(m.key)}</span>`, m.pad && `pad ${esc(m.pad)}`].filter(Boolean).join(" / ")}) to pick the finish`;
     } else if (h && !o && !st.race) {
       html = `Honk (${this.hornLabel()}) to challenge <b>${esc(h.name)}</b> <span class="st-lv" style="background:${h.colour}">Lv ${h.level} ${esc(h.level_name)}</span>`;
+    } else if (st.blocked && !o && !st.race) {
+      html = `Lose the police first to challenge <b>${esc(st.blocked.name)}</b>`;
     }
     this.hint.classList.toggle("hidden", !html || this.map.isOpen);
     if (html && this.hint.innerHTML !== html) this.hint.innerHTML = html;
@@ -417,7 +526,8 @@ export class StreetUi {
       `<div><div class="wp-dim wp-upper" style="font-size:0.68em">${gap >= 0 ? "Ahead" : "Behind"}</div><div style="font-size:1.2em">${lead}</div></div>` +
       `<div><div class="wp-dim wp-upper" style="font-size:0.68em">You → B</div><div style="font-size:1.2em">${km(r.player_left_m)}</div></div>` +
       `<div><div class="wp-dim wp-upper" style="font-size:0.68em">Them → B</div><div style="font-size:1.2em">${km(r.racer_left_m)}</div></div>` +
-      `</div><div class="wp-dim" style="font-size:0.8em;margin-top:0.3em">${clock(r.time_left_s)} left · route ${km(r.length_m)}</div></section>`;
+      `</div><div class="wp-dim" style="font-size:0.8em;margin-top:0.3em">${clock(r.time_left_s)} left · route ${km(r.length_m)}` +
+      `${r.gates.length ? ` · gate ${Math.min(r.next_gate + 1, r.gates.length)}/${r.gates.length}${r.next_gate >= r.gates.length ? " ✓ on to B" : ""}` : ""}</div></section>`;
   }
 
   private updateResult(st: StreetStatus, now: number): void {

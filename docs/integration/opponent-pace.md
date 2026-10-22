@@ -934,3 +934,22 @@ Grid s50/s95 and Lantern s50/s95 were re-locked by the rule, with reasons in eac
   - `wp_wasm` `race_start` turns the error into its usual `Err(String)` (minimal change outside my crates).
   - Callers in the tests unwrap with "a drivable route".
 - **Test:** `entrants::tests::a_route_with_nothing_to_drive_refuses_the_race` covers a backwards one-segment loop route and an empty route; without the fix it panics in `Field::from_route`. A sprint gets a run-off leg past its finish, which can still give the AI a corridor on a degenerate judged route; a loop gets none.
+
+## Queued follow-up (a): reverse-and-replan when boxed in by standing cars
+
+This is the race_picker Lantern police test, seed 5. It is not the default seed (31). Queued by the lead 2026-10-22, behind highway weaving.
+
+**Situation:** the player car (AI-driven) is boxed in on the narrow downtown street by police captures.
+
+- Captured racer 3 stands 0.5 m ahead.
+- Captured racer 4 stands alongside, overlapping, 2.3 m to the right.
+- The left lane is closed 12 m ahead by parked cars, leaving 1.7 m for a 1.8 m car.
+
+The race is never judged: the player stays `Running`.
+
+**What the AI does:**
+
+- Passes towards racer 4 are refused because it is alongside (`alongside_towards`). It is parked, but it overlaps, so a "parked car behind cannot be cut off" exception does not apply. That exception was tried and reverted.
+- The nosed-up reverse fires (`nosed_up`, 3 s). That backs out about 3 m, which is still beside racer 4, so the car creeps back into the same box.
+
+**Proposed fix:** when boxed by standing cars, keep reversing until clear of the one alongside (its rear plus a car length), then plan the pass from there, around the side away from the parked cars. It needs its own police sweep (Lantern, Hollins, Loop 9).

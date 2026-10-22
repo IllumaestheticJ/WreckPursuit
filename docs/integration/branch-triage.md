@@ -60,6 +60,48 @@ Browser e2e on the gate-2 head (+ 773e4021):
 - `e2e/run.mjs`: 217 PASS, including the mod shop checks (4b) and the helicopter block. FAIL: `perf_check` (see below) and `reset.mjs` "ghost blinks" — reset.mjs passes 9/9 when re-run alone (load).
 - `e2e/perf_check.mjs`, same machine back to back (software GL, low load): round12 39321caf and this branch fail the **same 9 checks** (real-time factor ~0.5, frames over 250 ms, steady allocation > 200 KB/frame). Steady allocation per frame, round12 → this branch: chase 435 → 372 KB, rain 606 → 369 KB, phone 419 → 374 KB (serene-bohr's allocation pass); draw calls / triangles / lights / wasm calls within budget on both.
 
+## Playtest rows 149–154 (2026-10-22)
+
+- **149 "can't hit traffic cars"** (f176846e): the street racers and police used up vehicle
+  slots, so the world promoted more traffic than `Sim::embody_agent` could give a body (6 of 16
+  physical cars had no collider in 0.12.49). `Sim::cap_traffic_promotion` caps
+  `TrafficConfig::max_physical` at the slots left before each world step; `update_lod` demotes the
+  farthest physical cars when the cap shrinks (wp_world, 14 lines, on top of ws/world 612cf270).
+  Tests: wp_wasm `collide_tests`, wp_world `lod_cap_shrinks_to_the_nearest_cars`,
+  `e2e/traffic_bodies.mjs`. `[bless]` 6 goldens (5 from 612cf270, 1 from the cap).
+- **154 freeze starting a street race** (b6bae7d6): a wasm panic, `Field::from_route` on a
+  one-segment route with nothing to drive from a roaming racer's `plan_route`. Street fields are
+  built through `Corridor::try_from_route` (`street::field_on`). Test
+  `street_race_starts_and_runs_30_s`. `wp_race::entrants` still calls `Field::from_route` (fixed
+  picker routes).
+- **150** no challenge while wanted or chased (`PoliceSystem::is_wanted_or_pursued`): a honk
+  does nothing, an open offer lapses, accept is refused; the hint says "Lose the police first".
+  Accepting resets both cars side by side at the start, at rest, facing along the route (two
+  logged `ResetAt` moves; the racer uses the opposing lane on one-lane streets, else goes behind).
+- **151** waypoints: after B, map clicks add up to 8 waypoints (list with ↑ ↓ ✕, "Move B";
+  pad A / X / Y). `World::plan_route_via` (wp_world `routes::plan_route_via`, additive) plans the
+  route through them in order; they show as numbered flags on both maps, as gates in the world
+  (`street_course()`, a second `RaceMarker`), and B counts only after every gate is passed
+  within 20 m, in order.
+- **152** roster: 13 racers (`street::ROSTER`), 8 all day (two per level), 1 night roamer and 4
+  Loop 9 lappers at night (`DayPhase::Night`). Off shift they wait in a lockup past the city's east
+  edge (on the safety floor; the replay format has no spawn / despawn op), and change shift out of
+  the player's sight. Loop racers lap at 27 m/s (25 m/s mean, 0 violations) in Port Vesper; in a
+  city without Loop 9 they roam. Ids carry the shift (`street_3_halo_loop`); old ids are all-day.
+- **153** rest stops (D's `World::rest_stops`, round12 6799200b): at night the loop racers end
+  each lap (one to two laps) in one of the three Loop 9 rest stops and idle there 40–90 s. A
+  challenge within 80 m of a rest stop is a rest-stop meet: the race starts on its parking road,
+  both cars side by side (±2 m of the lane centre, at rest, facing its way), and the card offers
+  "Loop 9 lap back here" (B = the rest stop, 3 waypoints round the loop, ~10.2 km;
+  `RACE_MAX_M` is now 12 km). Bets per the street levels. Debug / e2e:
+  `debug_street_park_at_rest_stop`, `rest_stops_json`.
+- **SR-3** dormant vehicles (`Sim::set_dormant`, op `Dormant`): off-shift racers sleep in the
+  lockup. Native sim per 60 Hz frame with racers: grid noon 7.40 → 6.93 ms, Vesper noon 9.41 →
+  8.90; night unchanged (all 13 drive). Shader re-resolve every frame fixed (transparent
+  DoubleSide materials single pass).
+- Found for D: the procedural grid is not strongly connected (≈980 of 4696 segs unreachable
+  from a central lane).
+
 ## Still open (for the lead)
 
 - **detailed-car-models**: merge after lead/main-sync lands (rename `sentinel_harrier` → `sentinel_vigil`). Note: its meshes are format 2, round12 / this branch are on format 3 (crumple binding), so "regenerate in its format" means regenerating its cars with round12's `tools/assets` (format 3), not downgrading.

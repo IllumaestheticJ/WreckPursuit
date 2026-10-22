@@ -551,6 +551,9 @@ function decalMaterial(text: string, aspect: number, fill: string, stroke: strin
     metalness: 0.1,
     flatShading: true,
     side: THREE.DoubleSide,
+    // Single pass: transparent + DoubleSide is otherwise drawn back then front, flipping `side`
+    // and re-resolving the program twice every frame (perf_check "no shader re-resolve").
+    forceSinglePass: true,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,

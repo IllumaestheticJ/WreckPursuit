@@ -42,14 +42,15 @@ sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 tra
 `docs/integration/testbed.md`.
 Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world (0.24 vs 0.14 ms,
 1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
-Street racers (`street.rs`, 16 roaming AI cars), native release, city free drive, sim with /
-without them: 12×12 grid 1.40 / 0.75 ms per tick (5.60 / 3.02 ms per 60 Hz frame), +0.040 ms
-per racer per tick; Port Vesper 1.83 / 0.82 ms per tick (7.31 / 3.29 ms per frame), +0.063 ms
-per racer per tick. The street AI itself is ~0.07 ms per tick (0.004 ms per racer); the rest is
-the racers' own vehicle + lattice physics, ~0.03 ms per racer per tick even parked (police and
-traffic barely notice them). The slowest single AI tick is 2.1 ms (grid) / 6.2 ms (Vesper): a
-roam route plan plus its line, at most one per tick. Far racers would only get cheap with a
-dormant / kinematic vehicle mode in `wp_sim` (not there yet).
+Street racers (`street.rs`, 13 AI cars: 8 out by day, 13 at night, owner row 152), native
+release, city free drive, sim ms per 60 Hz frame without / with them (2026-10-22, after SR-3:
+the 5 off-shift racers sleep in the lockup, `Sim::set_dormant`; before SR-3 in brackets):
+grid noon 4.60 / 6.93 (4.83 / 7.40), grid 23:00 2.09 / 5.20 (2.02 / 5.07), Vesper noon
+5.38 / 8.90 (5.75 / 9.41), Vesper 23:00 2.52 / 7.63 (2.60 / 7.74). The street AI is
+0.25–0.31 ms of it. A car's own vehicle physics is ~0.1 ms per frame (0.004 asleep, wp_sim
+`cost_probe`); the rest of a roaming racer's 0.2–0.4 ms is the city around it (ground rays on
+the city mesh, traffic and police treating it as a racer), so at night, with all 13 driving,
+SR-3 saves nothing: the next lever is far roaming racers, not parked ones.
 `cargo test --release -p wp_wasm --lib street_perf -- --ignored --nocapture --test-threads=1`.
 
 ## Known gaps
@@ -60,5 +61,6 @@ dormant / kinematic vehicle mode in `wp_sim` (not there yet).
 - Garage shop kind (legit / crooked) comes from the `docs/design/CITY.md` shop list by name, else the district, until the POIs carry it (CITY.md request C3). A legit shop's report of a wanted car is only a `ShopReported` ledger line: police heat does not react yet. Garage visits offer `RepairAll` only (no per-item repair: the sim repairs the whole car).
 - Region energy / strain are proxies until contract request TB-2 lands; `intents()` is empty (TB-5).
 - `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`; race recordings also need the race (AI kinds, meet report) re-applied, which only the browser's playback does.
-- Street racers: their inputs and moves are logged, so recordings (and crash replays) of street sessions verify in the browser's playback; the playback has no street AI, so it shows no offer / race HUD / map icons, and `simcli replay` drifts (city recordings, and it does not mark the racers `AiRacer`, as with picker races). Wagers are `Adjustment` ledger lines (see `docs/integration/testbed.md`, SR-2…3). The log grows ~1 050 input events/s with 16 racers (~36 KB/s of `replay.bin`): every AI steer change is an event.
+- Street racers: their inputs and moves are logged, so recordings (and crash replays) of street sessions verify in the browser's playback; the playback has no street AI, so it shows no offer / race HUD / map icons, and `simcli replay` drifts (city recordings, and it does not mark the racers `AiRacer`, as with picker races). Wagers are `Adjustment` ledger lines (see `docs/integration/testbed.md`, SR-2…3). The log grows ~1 050 input events/s with 16 racers (~36 KB/s of `replay.bin`; fewer with 8–13): every AI steer change is an event.
+- Street racers off shift (row 152) are parked in a lockup on flat terrain away from roads and buildings (`street::lockup_slots`; past the east edge on a flat city): replays have no despawn / spawn op, so the cars stay in the sim, asleep (`Sim::set_dormant`, op `Dormant`) once they stand still with the player > 100 m away.
 - `cargo test -p wp_wasm` takes ~2 min in debug (real physics).

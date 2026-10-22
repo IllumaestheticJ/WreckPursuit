@@ -355,7 +355,11 @@ mod tests {
         use crate::session::Session;
         use std::collections::BTreeMap;
         let sc = crate::scenario::city_chase("lindwurm_4t", wp_contracts::DamageMode::Arcade);
+        // Traffic only: the player drives blind down the road and must not meet a street racer
+        // (with the night roster one sat in its path and the player stopped there).
+        crate::session::set_street_racers_enabled(false);
         let mut s = Session::new(sc, false).unwrap();
+        crate::session::set_street_racers_enabled(true);
         let player = s.entities()[0];
         /// Position, previous position, embodied.
         type Seen = ([f32; 3], Option<[f32; 3]>, bool);

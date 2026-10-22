@@ -23,8 +23,9 @@ struct Ram {
     others: usize,
 }
 
-/// City free drive or the city chase, street racers on or off; after 4 s put the player 25 m behind
-/// the nearest moving traffic agent, on its lane, 12 m/s faster, and drive straight for 4 s.
+/// City free drive or the city chase, street racers on or off; after `warm_s` put the player
+/// 25 m behind the nearest moving traffic agent, on its lane, 12 m/s faster, and drive straight
+/// for 4 s (up to three tries).
 fn ram(chase: bool, street_on: bool, extra: usize, warm_s: u32) -> Ram {
     set_street_racers_enabled(street_on);
     let mut sc = if chase {
@@ -55,63 +56,69 @@ fn ram(chase: bool, street_on: bool, extra: usize, warm_s: u32) -> Ram {
         others = others.max(non_traffic(&s));
     }
     let street = s.street().map_or(0, |st| st.roster().len());
-    // Nearest traffic agent ahead of nothing in particular: the closest one that moves.
-    let pp = s
-        .sim()
-        .vehicle_states()
-        .into_iter()
-        .find(|(e, _)| *e == p)
-        .map(|(_, st)| st.pos)
-        .unwrap();
-    let target = s
-        .sim()
-        .world()
-        .agents()
-        .filter(|a| a.speed_mps > 3.0)
-        .min_by(|a, b| {
-            let da = (a.pos[0] - pp[0]).powi(2) + (a.pos[1] - pp[1]).powi(2);
-            let db = (b.pos[0] - pp[0]).powi(2) + (b.pos[1] - pp[1]).powi(2);
-            da.total_cmp(&db)
-        })
-        .map(|a| (a.id, a.pos, a.yaw, a.speed_mps))
-        .expect("a moving traffic agent");
-    let (agent, pos, yaw, speed) = target;
-    // Behind it along its heading (yaw 0 = +Y).
-    let (sn, cs) = yaw.sin_cos();
-    let back = [pos[0] + sn * 25.0, pos[1] - cs * 25.0];
-    {
-        let sim = s.debug_sim_mut().unwrap();
-        sim.place_on_ground(p, back, yaw, speed + 12.0, Some(pos[2]))
-            .unwrap();
-    }
-    s.drain_events();
+    // Up to three tries, each at the nearest moving traffic car (a car can turn off or stop
+    // before the player reaches it): placed 25 m behind it on its lane, 12 m/s faster.
     let mut promoted = false;
     let mut contact = false;
-    for _ in 0..(240 * 4) {
-        s.set_input(
-            p,
-            VehicleInput {
-                throttle: 0.6,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        s.run_ticks(1);
-        let entity = s
+    for _attempt in 0..3 {
+        let pp = s
             .sim()
-            .vehicles()
-            .iter()
-            .find(|v| v.traffic_agent == Some(agent))
-            .map(|v| v.id);
-        promoted |= entity.is_some();
-        orphans = orphans.max(orphaned(&s));
-        physical = physical.max(physical_count(&s));
-        others = others.max(non_traffic(&s));
-        for e in s.drain_events() {
-            if let SimEvent::Contact { a, b, .. } = e {
-                if entity.is_some_and(|t| (a == p && b == t) || (a == t && b == p)) {
-                    contact = true;
+            .vehicle_states()
+            .into_iter()
+            .find(|(e, _)| *e == p)
+            .map(|(_, st)| st.pos)
+            .unwrap();
+        let (agent, pos, yaw, speed) = s
+            .sim()
+            .world()
+            .agents()
+            .filter(|a| a.speed_mps > 3.0)
+            .min_by(|a, b| {
+                let da = (a.pos[0] - pp[0]).powi(2) + (a.pos[1] - pp[1]).powi(2);
+                let db = (b.pos[0] - pp[0]).powi(2) + (b.pos[1] - pp[1]).powi(2);
+                da.total_cmp(&db)
+            })
+            .map(|a| (a.id, a.pos, a.yaw, a.speed_mps))
+            .expect("a moving traffic agent");
+        // Behind it along its heading (yaw 0 = +Y).
+        let (sn, cs) = yaw.sin_cos();
+        let back = [pos[0] + sn * 25.0, pos[1] - cs * 25.0];
+        {
+            let sim = s.debug_sim_mut().unwrap();
+            sim.place_on_ground(p, back, yaw, speed + 12.0, Some(pos[2]))
+                .unwrap();
+        }
+        s.drain_events();
+        promoted = false;
+        for _ in 0..(240 * 4) {
+            s.set_input(
+                p,
+                VehicleInput {
+                    throttle: 0.6,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            s.run_ticks(1);
+            let entity = s
+                .sim()
+                .vehicles()
+                .iter()
+                .find(|v| v.traffic_agent == Some(agent))
+                .map(|v| v.id);
+            promoted |= entity.is_some();
+            orphans = orphans.max(orphaned(&s));
+            physical = physical.max(physical_count(&s));
+            others = others.max(non_traffic(&s));
+            for e in s.drain_events() {
+                if let SimEvent::Contact { a, b, .. } = e {
+                    if entity.is_some_and(|t| (a == p && b == t) || (a == t && b == p)) {
+                        contact = true;
+                    }
                 }
+            }
+            if contact {
+                break;
             }
         }
         if contact {
@@ -186,10 +193,10 @@ fn player_collides_with_traffic_in_the_city() {
 /// player drives into still gets one.
 #[test]
 fn traffic_near_the_player_keeps_a_body_when_vehicle_slots_run_short() {
-    // Free drive by day has up to 30 non-traffic vehicles (player, 16 street racers, 13
-    // police): 10 slots left for traffic, where 0.12.49 promoted 16. Eight stand-ins more
-    // leave 2, and the car the player drives into must take one of them.
-    let r = ram(false, true, 8, 40);
+    // Free drive by day has up to 27 non-traffic vehicles (player, 13 street racers with 5 in
+    // the lockup, 13 police; 0.12.49 had 30 and promoted 16 traffic cars where 10 had room).
+    // Eleven stand-ins more leave 2, and the car the player drives into must take one.
+    let r = ram(false, true, 11, 40);
     println!("{r:?}");
     assert_eq!(r.orphans, 0, "every physical traffic car has a body: {r:?}");
     assert!(

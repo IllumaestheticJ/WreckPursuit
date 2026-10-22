@@ -302,7 +302,9 @@ impl Session {
                         .entities
                         .first()
                         .map_or([0.0; 2], |e| [e.pos[0], e.pos[1]]);
-                    let roster = crate::street::plan_roster(&world, at, sc.seed);
+                    let night = wp_contracts::TimeOfDay::from_hours(sc.time_of_day_h).phase()
+                        == wp_contracts::DayPhase::Night;
+                    let roster = crate::street::plan_roster(&world, at, sc.seed, night);
                     sc.entities.extend(roster);
                 }
             }
@@ -1092,26 +1094,35 @@ impl Session {
         )
     }
 
-    /// Plan a street race from the player to `finish` (the open challenge's B).
-    pub fn street_preview(&self, finish: [f32; 2]) -> Result<Preview, String> {
+    /// Plan a street race from the player through the waypoints `via` (in order) to
+    /// `finish` (the open challenge's B).
+    pub fn street_preview(&self, finish: [f32; 2], via: &[[f32; 2]]) -> Result<Preview, String> {
         let (street, run) = self
             .street
             .as_ref()
             .zip(self.run.as_ref())
             .ok_or("no street racers in this session")?;
-        street.preview(&self.sim, run.player(), finish)
+        street.preview(&self.sim, run.player(), finish, via)
     }
 
-    /// Accept the open challenge: race to `finish` for `stake` dollars.
-    pub fn street_accept(&mut self, finish: [f32; 2], stake: i64) -> Result<(), String> {
+    /// Accept the open challenge: race through `via` (in order) to `finish` for `stake`
+    /// dollars. Both cars are reset side by side at the start (logged ops).
+    pub fn street_accept(
+        &mut self,
+        finish: [f32; 2],
+        via: &[[f32; 2]],
+        stake: i64,
+    ) -> Result<(), String> {
         self.live_check()?;
         let (street, run) = self
             .street
             .as_mut()
             .zip(self.run.as_mut())
             .ok_or("no street racers in this session")?;
-        let m = street.accept(&self.sim, run, finish, stake)?;
-        self.apply_street_move(m);
+        let moves = street.accept(&self.sim, run, finish, via, stake)?;
+        for m in moves {
+            self.apply_street_move(m);
+        }
         Ok(())
     }
 
@@ -1139,6 +1150,18 @@ impl Session {
                 },
             );
         }
+    }
+
+    /// Debug / e2e: park street racer `entity` idle at rest stop `name` (a logged move).
+    pub fn street_park_at_rest_stop(&mut self, entity: EntityId, name: &str) -> Result<(), String> {
+        self.live_check()?;
+        let street = self
+            .street
+            .as_mut()
+            .ok_or("no street racers in this session")?;
+        let m = street.park_at_rest_stop(&self.sim, entity, name)?;
+        self.apply_street_move(m);
+        Ok(())
     }
 
     /// Decline the open challenge.
@@ -1298,6 +1321,12 @@ impl Session {
             let step = street.before_step(&self.sim, player, horn, over);
             for m in step.moves {
                 self.apply_street_move(m);
+            }
+            for e in step.sleep {
+                if let Some(idx) = self.index(e) {
+                    // Only an unknown entity index fails, and street racers are scenario entities.
+                    let _ = self.log_op(idx, OpKind::Dormant { on: true });
+                }
             }
             for (e, input) in step.inputs {
                 if let Some(idx) = self.index(e) {

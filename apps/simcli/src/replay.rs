@@ -87,6 +87,12 @@ pub enum OpKind {
         /// Ghost window, physics ticks.
         ticks: u16,
     },
+    /// `Sim::set_dormant` (a car out of play sleeps as a fixed body; it wakes by itself when
+    /// a car comes near or touches it, or on a reset; SR-3).
+    Dormant {
+        /// Sleep (`true`) or wake.
+        on: bool,
+    },
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -241,6 +247,10 @@ impl Replay {
                     w.push(5);
                     w.extend_from_slice(&ticks.to_le_bytes());
                 }
+                OpKind::Dormant { on } => {
+                    w.push(6);
+                    w.push(on as u8);
+                }
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -353,6 +363,9 @@ impl Replay {
                     },
                     5 => OpKind::Ghost {
                         ticks: u16::from_le_bytes(r.take(2)?.try_into().expect("2 bytes")),
+                    },
+                    6 => OpKind::Dormant {
+                        on: r.take(1)?[0] != 0,
                     },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
@@ -701,6 +714,11 @@ mod tests {
                     tick: 2,
                     entity: 0,
                     op: OpKind::Ghost { ticks: 240 },
+                },
+                OpEvent {
+                    tick: 3,
+                    entity: 0,
+                    op: OpKind::Dormant { on: true },
                 },
             ],
             tick_hashes: vec![1, 3],

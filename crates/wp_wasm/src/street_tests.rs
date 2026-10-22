@@ -8,7 +8,7 @@ use wp_contracts::{DamageMode, EntityId, SimEvent, VehicleInput, VehicleState};
 use crate::crash_replay::{CrashMark, ImpactSide};
 use crate::scenario::free_drive;
 use crate::session::Session;
-use crate::street::{self, RaceResult, RacerMode, ROSTER_LEVELS};
+use crate::street::{self, RaceResult, RacerMode, Shift, ROSTER};
 
 const PLAYER: EntityId = EntityId(1);
 
@@ -36,6 +36,17 @@ fn city_session_at(hour: f32) -> Session {
     let mut sc = free_drive("debug_sedan", DamageMode::Arcade, true);
     sc.time_of_day_h = hour;
     Session::new(sc, false).unwrap()
+}
+
+/// Racers on shift now (not in the lockup).
+fn on_duty(s: &Session) -> Vec<EntityId> {
+    s.street()
+        .unwrap()
+        .roster()
+        .into_iter()
+        .filter(|r| r.mode != RacerMode::OffDuty)
+        .map(|r| EntityId(r.entity))
+        .collect()
 }
 
 fn city_session() -> Session {
@@ -85,7 +96,7 @@ fn finish_for(s: &Session) -> [f32; 2] {
         if !(300.0..=600.0).contains(&d) {
             continue;
         }
-        if let Ok(pr) = s.street_preview([q[0], q[1]]) {
+        if let Ok(pr) = s.street_preview([q[0], q[1]], &[]) {
             if pr.ok && (400.0..=900.0).contains(&pr.length_m) {
                 return pr.finish;
             }
@@ -104,7 +115,8 @@ fn start_race(s: &mut Session, k: usize) -> EntityId {
     let racer = challenge(s, k);
     let fin = finish_for(s);
     let lv = s.street().unwrap().roster()[k].level;
-    s.street_accept(fin, street::level(lv).bet_min).unwrap();
+    s.street_accept(fin, &[], street::level(lv).bet_min)
+        .unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 2);
     racer
 }
@@ -164,9 +176,12 @@ fn city_session_spawns_the_roster_and_racers_roam_calmly() {
     let mut s = city_session();
     let st = s.street().expect("street racers in a city session");
     let roster = st.roster();
-    assert_eq!(roster.len(), ROSTER_LEVELS.len());
-    for (r, lv) in roster.iter().zip(ROSTER_LEVELS) {
+    assert_eq!(roster.len(), ROSTER.len());
+    for (r, (lv, shift)) in roster.iter().zip(ROSTER) {
         assert_eq!(r.level, lv);
+        assert_eq!(r.shift, shift);
+        // Noon: only the all-day racers are out.
+        assert_eq!(r.mode == RacerMode::OffDuty, shift != Shift::AllDay);
         assert_eq!(r.colour, street::level(lv).colour);
         assert!(street::level(lv).cars.contains(&r.car.as_str()));
     }
@@ -183,6 +198,8 @@ fn city_session_spawns_the_roster_and_racers_roam_calmly() {
         assert_eq!(v.kind, wp_sim::VehicleKind::AiRacer);
         assert!(street::is_street_entity(s.spec(*e).unwrap()));
     }
+    let ids = on_duty(&s);
+    assert_eq!(ids.len(), 8, "8 racers by day (row 152)");
     let start: Vec<_> = ids.iter().map(|e| state(&s, *e).pos).collect();
     let mut violations = Vec::new();
     let (mut top, mut sum, mut n) = (0.0f32, 0.0f32, 0u32);
@@ -263,7 +280,7 @@ fn honk_opens_a_challenge_and_bad_bets_are_refused() {
     s.run_ticks(240 * 2);
     let racer = challenge(&mut s, 2);
     let offer = s.street().unwrap().offer(s.sim(), s.run()).expect("offer");
-    assert_eq!(offer.level, ROSTER_LEVELS[2]);
+    assert_eq!(offer.level, ROSTER[2].0);
     assert!(offer.affordable);
     // The racer pulls over and waits (on the handbrake: it does not creep backwards).
     s.run_ticks(240 * 3);
@@ -275,16 +292,17 @@ fn honk_opens_a_challenge_and_bad_bets_are_refused() {
     let fin = finish_for(&s);
     let before = cash(&s);
     assert!(
-        s.street_accept(fin, offer.bet_min - 1).is_err(),
+        s.street_accept(fin, &[], offer.bet_min - 1).is_err(),
         "under the minimum"
     );
     assert!(
-        s.street_accept(fin, before + 1).is_err(),
+        s.street_accept(fin, &[], before + 1).is_err(),
         "more than the cash"
     );
     let p = state(&s, PLAYER).pos;
     assert!(
-        s.street_accept([p[0] + 1.0, p[1]], offer.bet_min).is_err(),
+        s.street_accept([p[0] + 1.0, p[1]], &[], offer.bet_min)
+            .is_err(),
         "too short"
     );
     assert_eq!(cash(&s), before, "refused bets cost nothing");
@@ -309,9 +327,9 @@ fn challenge_race_result(hour: f32) {
         assert!(s.input(racer).headlights, "waiting racer has its lights on");
     }
     let fin = finish_for(&s);
-    let stake = street::level(ROSTER_LEVELS[0]).bet_min;
+    let stake = street::level(ROSTER[0].0).bet_min;
     let before = cash(&s);
-    s.street_accept(fin, stake).unwrap();
+    s.street_accept(fin, &[], stake).unwrap();
     assert_eq!(cash(&s), before - stake, "stake paid up front");
     assert!(s.held(PLAYER), "countdown holds the player");
     let lined_up = state(&s, PLAYER).pos;
@@ -351,8 +369,8 @@ fn challenge_race_result(hour: f32) {
     challenge(&mut s, 1);
     let fin = finish_for(&s);
     let before = cash(&s);
-    let stake = street::level(ROSTER_LEVELS[1]).bet_min;
-    s.street_accept(fin, stake).unwrap();
+    let stake = street::level(ROSTER[1].0).bet_min;
+    s.street_accept(fin, &[], stake).unwrap();
     s.run_ticks(street::COUNTDOWN_TICKS + 240);
     let z = state(&s, PLAYER).pos[2];
     let ground = s.sim().world().map().ground_height(fin, Some(z));
@@ -530,8 +548,9 @@ fn racers_roam_port_vesper_too() {
         crate::scenario::city_spec("vesper_v2"),
     );
     let mut s = Session::new(sc, false).unwrap();
-    let ids = s.street().expect("street racers in Port Vesper").entities();
-    assert_eq!(ids.len(), ROSTER_LEVELS.len());
+    assert!(s.street().is_some(), "street racers in Port Vesper");
+    let ids = on_duty(&s);
+    assert_eq!(ids.len(), 8, "noon: the 8 all-day racers");
     let start: Vec<_> = ids.iter().map(|e| state(&s, *e).pos).collect();
     s.run_ticks(240 * 40);
     assert_roamed(&s, &ids, &start, "Port Vesper");
@@ -543,24 +562,34 @@ fn racers_roam_port_vesper_too() {
 }
 
 #[test]
-fn sixteen_racers_four_per_level_spawn_apart_on_both_cities() {
-    assert_eq!(ROSTER_LEVELS.len(), 16);
+fn racers_by_shift_spawn_apart_on_both_cities() {
+    // Row 152: 8 by day (two per level), 13 at night, 4 of them on Loop 9.
+    let day: Vec<_> = ROSTER.iter().filter(|r| r.1 == Shift::AllDay).collect();
+    assert_eq!(day.len(), 8);
     for l in &street::LEVELS {
-        assert_eq!(ROSTER_LEVELS.iter().filter(|x| **x == l.level).count(), 4);
+        assert_eq!(day.iter().filter(|r| r.0 == l.level).count(), 2);
     }
+    assert_eq!(ROSTER.len(), 13);
+    assert_eq!(ROSTER.iter().filter(|r| r.1 == Shift::Loop).count(), 4);
     assert!(
         street::LEVELS.iter().all(|l| l.level >= 2),
         "no Rookie level"
     );
-    for city in ["procedural_12x12", "vesper_v2"] {
-        let sc = crate::scenario::free_drive_in(
+    for (city, hour) in [
+        ("procedural_12x12", 12.0),
+        ("vesper_v2", 12.0),
+        ("vesper_v2", 23.0),
+    ] {
+        let mut sc = crate::scenario::free_drive_in(
             "debug_sedan",
             DamageMode::Arcade,
             crate::scenario::city_spec(city),
         );
+        sc.time_of_day_h = hour;
         let s = Session::new(sc, false).unwrap();
-        let ids = s.street().unwrap().entities();
-        assert_eq!(ids.len(), 16, "{city}");
+        assert_eq!(s.street().unwrap().entities().len(), 13, "{city}");
+        let ids = on_duty(&s);
+        assert_eq!(ids.len(), if hour > 20.0 { 13 } else { 8 }, "{city} {hour}");
         let mut pts = vec![state(&s, PLAYER).pos];
         pts.extend(ids.iter().map(|e| state(&s, *e).pos));
         let mut closest = f32::INFINITY;
@@ -570,6 +599,29 @@ fn sixteen_racers_four_per_level_spawn_apart_on_both_cities() {
             }
         }
         eprintln!("{city}: closest pair {closest:.0} m");
+        if hour < 20.0 {
+            // The night shift waits in the lockup: parked on drawn ground, at rest, undamaged,
+            // asleep (no vehicle physics).
+            let mut s = s;
+            s.run_ticks(240 * 3);
+            for r in s.street().unwrap().roster() {
+                if r.mode != RacerMode::OffDuty {
+                    continue;
+                }
+                let st = state(&s, EntityId(r.entity));
+                assert!(
+                    st.speed_mps.abs() < 0.5 && st.health > 0.99 && st.pos[2] > -50.0,
+                    "{city}: {} in the lockup moves or fell: {st:?}",
+                    r.name
+                );
+                assert_eq!(
+                    s.sim().is_dormant(EntityId(r.entity)),
+                    Some(true),
+                    "{city}: {} sleeps in the lockup (SR-3)",
+                    r.name
+                );
+            }
+        }
         assert!(
             closest >= street::SPAWN_SPACING_M - 0.01,
             "{city}: {closest} m"
@@ -586,22 +638,28 @@ fn racer_cars_are_known_before_the_first_tick() {
 }
 
 /// Perf (desktop gate): sim cost per 60 Hz frame (4 ticks) of a city free drive with and
-/// without the 16 street racers, both cities, native release, 30 s after a 5 s warm-up; the
+/// without the street racers (13: noon has 8 out, 5 in the lockup), both cities, native release, 30 s after a 5 s warm-up; the
 /// street AI's own share (`street::perf`), and the cost per racer:
 /// `cargo test --release -p wp_wasm --lib street_perf -- --ignored --nocapture --test-threads=1`.
 #[test]
 #[ignore]
 fn street_perf() {
     const FRAMES: f64 = 60.0 * 30.0;
-    for city in ["procedural_12x12", "vesper_v2"] {
+    for (city, hour) in [
+        ("procedural_12x12", 12.0),
+        ("procedural_12x12", 23.0),
+        ("vesper_v2", 12.0),
+        ("vesper_v2", 23.0),
+    ] {
         let mut off_ms = 0.0;
         for on in [false, true] {
             crate::session::set_street_racers_enabled(on);
-            let sc = crate::scenario::free_drive_in(
+            let mut sc = crate::scenario::free_drive_in(
                 "lindwurm_4t",
                 DamageMode::Arcade,
                 crate::scenario::city_spec(city),
             );
+            sc.time_of_day_h = hour;
             let t0 = std::time::Instant::now();
             let mut s = Session::new(sc, false).unwrap();
             let build = t0.elapsed();
@@ -614,7 +672,7 @@ fn street_perf() {
             let ai_ms = ai_ns as f64 / 1e6 / FRAMES;
             let racers = s.street().map_or(0, |st| st.entities().len());
             eprintln!(
-                "{city}: street racers {on}: {ms:.3} ms per 60 Hz frame, street AI {ai_ms:.3} ms (worst call {:.2} ms), \
+                "{city} {hour}h: street racers {on}: {ms:.3} ms per 60 Hz frame, street AI {ai_ms:.3} ms (worst call {:.2} ms), \
                  {} vehicles ({racers} street racers), {} traffic agents, session build {build:?}",
                 worst_ns as f64 / 1e6,
                 s.sim().vehicles().len(),
@@ -623,7 +681,7 @@ fn street_perf() {
             if on {
                 let per = (ms - off_ms) / racers.max(1) as f64;
                 eprintln!(
-                    "{city}: +{:.3} ms per frame for {racers} racers = {per:.3} ms per racer \
+                    "{city} {hour}h: +{:.3} ms per frame for {racers} racers = {per:.3} ms per racer \
                      (AI {:.4} ms per racer)",
                     ms - off_ms,
                     ai_ms / racers.max(1) as f64
@@ -634,6 +692,325 @@ fn street_perf() {
         }
     }
     crate::session::set_street_racers_enabled(true);
+}
+
+/// Row 152: the night shift (5 racers) comes out of the lockup when night falls, out of the
+/// player's sight and onto lanes in the city; at dawn it goes back. 8 out by day, 13 at night.
+#[test]
+fn night_shift_comes_out_at_dusk_and_goes_home_at_dawn() {
+    // 19:57 at a minute per second: night (20:00) after 3 s.
+    let mut sc = free_drive("debug_sedan", DamageMode::Arcade, true);
+    sc.time_of_day_h = 19.95;
+    sc.time_ratio = 60.0;
+    let mut s = Session::new(sc, false).unwrap();
+    assert_eq!(on_duty(&s).len(), 8, "dusk: 8 out");
+    let night: Vec<EntityId> = s
+        .street()
+        .unwrap()
+        .roster()
+        .into_iter()
+        .filter(|r| r.shift != Shift::AllDay)
+        .map(|r| EntityId(r.entity))
+        .collect();
+    assert_eq!(night.len(), 5);
+    let locked: Vec<_> = night.iter().map(|e| state(&s, *e).pos).collect();
+    let packed = s.street().unwrap().packed(s.sim());
+    assert_eq!(packed.len(), 6 * 8, "the lockup is not on the map");
+    s.run_ticks(240 * 8);
+    assert!(street::is_night(s.sim()));
+    assert_eq!(on_duty(&s).len(), 13, "night: 13 out");
+    let p = state(&s, PLAYER).pos;
+    for (e, was) in night.iter().zip(&locked) {
+        let now = state(&s, *e).pos;
+        assert!(dist2(now, *was) > 300.0, "{e:?} left the lockup");
+        assert!(
+            dist2(now, p) >= 140.0,
+            "{e:?} came out in sight of the player"
+        );
+        let lane = s.sim().world().map().locate(now, None, 3.0, true, true);
+        assert!(lane.is_some(), "{e:?} is on the road ({now:?})");
+    }
+    assert_eq!(s.street().unwrap().packed(s.sim()).len(), 6 * 13);
+
+    // 04:57: back to the lockup after 05:00 (each once out of the player's sight).
+    let mut sc = free_drive("debug_sedan", DamageMode::Arcade, true);
+    sc.time_of_day_h = 4.95;
+    sc.time_ratio = 60.0;
+    let mut s = Session::new(sc, false).unwrap();
+    assert_eq!(on_duty(&s).len(), 13, "before dawn: 13 out");
+    s.run_ticks(240 * 30);
+    assert!(!street::is_night(s.sim()));
+    assert_eq!(on_duty(&s).len(), 8, "after dawn: 8 out");
+}
+
+/// Row 152: in Port Vesper at night four racers lap Loop 9 at highway pace without drawing
+/// the police; the other nine roam the city calmly.
+#[test]
+fn four_racers_lap_loop9_at_night_in_port_vesper() {
+    let mut sc = crate::scenario::free_drive_in(
+        "debug_sedan",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    sc.time_of_day_h = 23.0;
+    let mut s = Session::new(sc, false).unwrap();
+    assert_eq!(on_duty(&s).len(), 13);
+    let roster = s.street().unwrap().roster();
+    let lap: Vec<EntityId> = roster
+        .iter()
+        .filter(|r| r.shift == Shift::Loop)
+        .map(|r| EntityId(r.entity))
+        .collect();
+    let city: Vec<EntityId> = roster
+        .iter()
+        .filter(|r| r.shift != Shift::Loop)
+        .map(|r| EntityId(r.entity))
+        .collect();
+    assert_eq!(lap.len(), 4);
+    let highway = |s: &Session, e: EntityId| {
+        let st = state(s, e);
+        let map = s.sim().world().map();
+        map.locate(st.pos, None, 4.0, true, false).is_some_and(|l| {
+            matches!(map.seg(l.seg).kind, wp_world::map::SegKind::Lane { lane }
+                if s.sim().world().network().lanes[lane as usize].kind
+                    == wp_world::network::LaneKind::Highway)
+        })
+    };
+    for e in &lap {
+        assert!(highway(&s, *e), "{e:?} starts on Loop 9");
+    }
+    let mut violations = Vec::new();
+    let (mut sum, mut n, mut on_hw, mut samples) = (0.0f32, 0u32, 0u32, 0u32);
+    let mut city_top = 0.0f32;
+    for _ in 0..60 {
+        s.run_ticks(240);
+        violations.extend(s.drain_events().into_iter().filter_map(|e| match e {
+            SimEvent::TrafficViolation { vehicle, kind, .. } if lap.contains(&vehicle) => {
+                Some(kind)
+            }
+            _ => None,
+        }));
+        for e in &lap {
+            sum += state(&s, *e).speed_mps;
+            n += 1;
+            samples += 1;
+            on_hw += highway(&s, *e) as u32;
+        }
+        for e in &city {
+            city_top = city_top.max(state(&s, *e).speed_mps);
+        }
+    }
+    let mean = sum / n as f32;
+    eprintln!(
+        "loop racers: mean {mean:.1} m/s, on the highway {on_hw}/{samples}, violations \
+         {violations:?}; city racers top {city_top:.1} m/s"
+    );
+    assert!(mean > 18.0, "loop racers lap at highway pace: {mean} m/s");
+    assert!(
+        4 * on_hw >= 3 * samples,
+        "and stay on the highway: {on_hw}/{samples}"
+    );
+    assert!(violations.is_empty(), "{violations:?}");
+    assert!(city_top < 15.0, "city racers keep to city pace: {city_top}");
+}
+
+/// Row 150: no challenge while the player is wanted (a honk does nothing, an open offer lapses,
+/// accepting is refused); accepting resets both cars side by side at the start, at rest, facing
+/// along the route, as logged moves (the recording replays them).
+#[test]
+fn no_challenge_while_wanted_and_both_cars_start_side_by_side() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 40.0);
+    s.run_ticks(2);
+    assert!(s.sim().police().is_wanted_or_pursued(PLAYER));
+    park_behind(&mut s, 0);
+    assert!(
+        s.street().unwrap().challengeable(s.sim(), PLAYER).is_none(),
+        "no hint while wanted"
+    );
+    assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_some());
+    s.set_input(PLAYER, horn(true)).unwrap();
+    s.run_ticks(2);
+    s.set_input(PLAYER, horn(false)).unwrap();
+    s.run_ticks(2);
+    assert!(
+        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+        "a honk opens no challenge while wanted"
+    );
+    // Clean again: the challenge opens; wanted again: it lapses.
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 0.0);
+    s.run_ticks(2);
+    assert!(!s.sim().police().is_wanted_or_pursued(PLAYER));
+    let racer = challenge(&mut s, 0);
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 40.0);
+    s.run_ticks(2);
+    assert!(
+        s.street().unwrap().offer(s.sim(), s.run()).is_none(),
+        "the offer lapsed"
+    );
+    s.debug_sim_mut()
+        .unwrap()
+        .police_mut()
+        .set_heat(PLAYER, 0.0);
+    s.run_ticks(240 * 21);
+    // Rolling a little and turned off the lane's heading before the accept.
+    challenge(&mut s, 1);
+    let fin = finish_for(&s);
+    let before = state(&s, PLAYER);
+    let wobble = [before.pos[0] + 0.6, before.pos[1] + 0.4];
+    s.place_logged(PLAYER, wobble, yaw_of(before.rot) + 0.35, before.pos[2])
+        .unwrap();
+    let racer1 = s.street().unwrap().entities()[1];
+    let stake = street::level(ROSTER[1].0).bet_min;
+    s.street_accept(fin, &[], stake).unwrap();
+    s.run_ticks(1);
+    let (a, b) = (state(&s, PLAYER), state(&s, racer1));
+    let view = s.street().unwrap().race(s.sim()).unwrap();
+    let route_dir = {
+        let p = &view.polyline;
+        let d = [p[1][0] - p[0][0], p[1][1] - p[0][1]];
+        d[1].atan2(d[0])
+    };
+    let heading = |q: [f32; 4]| {
+        let yaw = yaw_of(q);
+        // yaw 0 = +Y.
+        (yaw.cos()).atan2(-yaw.sin())
+    };
+    let ang = |x: f32, y: f32| {
+        ((x - y + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI)
+            .abs()
+    };
+    eprintln!(
+        "start: player {:?} {:.2} m/s, racer {:?} {:.2} m/s, gap {:.2} m, route dir {route_dir:.2}, \
+         player heading {:.2}, racer heading {:.2}",
+        a.pos,
+        a.speed_mps,
+        b.pos,
+        b.speed_mps,
+        dist2(a.pos, b.pos),
+        heading(a.rot),
+        heading(b.rot)
+    );
+    assert!(
+        a.speed_mps.abs() < 0.3 && b.speed_mps.abs() < 0.3,
+        "both at rest"
+    );
+    assert!((2.5..=7.5).contains(&dist2(a.pos, b.pos)), "side by side");
+    assert!(
+        ang(heading(a.rot), route_dir) < 0.2,
+        "player faces the route"
+    );
+    assert!(
+        ang(heading(b.rot), route_dir) < 0.2,
+        "racer faces the route"
+    );
+    // The forward offset between them is small (beside, not behind).
+    let f = [route_dir.cos(), route_dir.sin()];
+    let along = (b.pos[0] - a.pos[0]) * f[0] + (b.pos[1] - a.pos[1]) * f[1];
+    assert!(
+        along.abs() < 1.5,
+        "beside, not ahead or behind ({along:.2} m)"
+    );
+    let _ = racer;
+}
+
+/// Row 151: a route through waypoints runs through them in order; the gates sit on the route
+/// and B counts only after the last gate.
+#[test]
+fn waypoints_shape_the_route_and_gates_count_in_order() {
+    let mut s = city_session();
+    s.run_ticks(240 * 2);
+    challenge(&mut s, 0);
+    // A finish 400–2500 m of road away and a waypoint well off the direct route to it: a lane point
+    // 120–400 m from the route's middle that makes it at least 100 m longer. (Not every lane
+    // of the procedural grid reaches every other, so some pairs have no route.)
+    let p = state(&s, PLAYER).pos;
+    let lanes: Vec<[f32; 3]> = s
+        .sim()
+        .world()
+        .network()
+        .lanes
+        .iter()
+        .map(|l| l.polyline[l.polyline.len() / 2])
+        .collect();
+    let mut found = None;
+    'search: for f in &lanes {
+        if !(300.0..=900.0).contains(&dist2(*f, p)) {
+            continue;
+        }
+        let Ok(direct) = s.street_preview([f[0], f[1]], &[]) else {
+            continue;
+        };
+        if !(direct.ok && (400.0..=2500.0).contains(&direct.length_m)) {
+            continue;
+        }
+        let mid = direct.polyline[direct.polyline.len() / 2];
+        for q in &lanes {
+            let off = ((q[0] - mid[0]).powi(2) + (q[1] - mid[1]).powi(2)).sqrt();
+            if !(120.0..=400.0).contains(&off) || dist2(*q, p) < 100.0 {
+                continue;
+            }
+            let r = s.street_preview(direct.finish, &[[q[0], q[1]]]);
+            if let Ok(pr) = r {
+                if pr.ok && pr.length_m > direct.length_m + 100.0 {
+                    found = Some((direct, [q[0], q[1]], pr));
+                    break 'search;
+                }
+            }
+        }
+    }
+    let (direct, w, pr) = found.expect("a finish and a waypoint off the direct route");
+    let fin = direct.finish;
+    eprintln!(
+        "direct {:.0} m, via {:?}: {:.0} m, gate {:?}",
+        direct.length_m, w, pr.length_m, pr.gates
+    );
+    assert_eq!(pr.gates.len(), 1);
+    let g = pr.gates[0];
+    assert!(
+        ((g[0] - w[0]).powi(2) + (g[1] - w[1]).powi(2)).sqrt() < 30.0,
+        "gate at the waypoint"
+    );
+    // Too many waypoints are refused.
+    assert!(s
+        .street_preview(fin, &[[w[0], w[1]]; street::MAX_WAYPOINTS + 1])
+        .is_err());
+    // Race with the waypoint: teleporting to B before the gate does not win.
+    let stake = street::level(ROSTER[0].0).bet_min;
+    s.street_accept(fin, &[w], stake).unwrap();
+    s.run_ticks(street::COUNTDOWN_TICKS + 240);
+    let view = s.street().unwrap().race(s.sim()).unwrap();
+    assert_eq!(view.gates.len(), 1);
+    assert_eq!(view.next_gate, 0);
+    let course = s.street().unwrap().course().to_vec();
+    assert_eq!(course[0], 2.0, "course: the gate, then B");
+    let z = state(&s, PLAYER).pos[2];
+    let ground = s.sim().world().map().ground_height(fin, Some(z));
+    s.place_logged(PLAYER, fin, 0.0, ground).unwrap();
+    s.run_ticks(8);
+    assert!(
+        s.street().unwrap().result().is_none(),
+        "B before the gate does not count"
+    );
+    // Through the gate, then B: the player wins.
+    let gz = s.sim().world().map().ground_height(g, Some(z));
+    s.place_logged(PLAYER, g, 0.0, gz).unwrap();
+    s.run_ticks(4);
+    assert_eq!(s.street().unwrap().race(s.sim()).unwrap().next_gate, 1);
+    s.place_logged(PLAYER, fin, 0.0, ground).unwrap();
+    s.run_ticks(4);
+    let r = s.street().unwrap().result().cloned().expect("decided");
+    assert!(r.won, "{r:?}");
 }
 
 /// Row 154 ("the game freezes when I start a street race"): a street race starts and runs 30 s
@@ -660,7 +1037,7 @@ fn street_race_starts_and_runs_30_s() {
         let a = rng.next_f32() * std::f32::consts::TAU;
         let d = 250.0 + rng.next_f32() * 4500.0;
         let q = [p[0] + a.cos() * d, p[1] + a.sin() * d];
-        if let Ok(pr) = s.street_preview(q) {
+        if let Ok(pr) = s.street_preview(q, &[]) {
             if pr.ok {
                 fin = Some(q);
                 break;
@@ -669,7 +1046,7 @@ fn street_race_starts_and_runs_30_s() {
     }
     let fin = fin.expect("a raceable finish");
     let stake = street::level(s.street().unwrap().roster()[5].level).bet_min;
-    s.street_accept(fin, stake).unwrap();
+    s.street_accept(fin, &[], stake).unwrap();
     // The test player does not drive: at the green light it steps out of the racer's way (it
     // may be lined up right behind on a one-lane street).
     s.run_ticks(street::COUNTDOWN_TICKS + 1);
