@@ -177,8 +177,10 @@ export class LodDirector {
         // A promoted car's own view shows the same indicators as its draw record.
         view.setIndicators(ind);
       }
-      const far = !view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
-      const s = this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null, ind);
+      // Beyond the profile's traffic draw distance (low / touch profiles): not drawn on purpose,
+      // so no draw state either (a state with mode "none" reads as a car missing its mesh).
+      if (!view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM) continue;
+      const s = this.draw(key, entity, view, traffic, o, showTraffic ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null, ind);
       states.push(s);
       if (probe) {
         const car = s.mode === "full" || s.mode === "proxy" ? this.fleet.lastAdded.car : null;

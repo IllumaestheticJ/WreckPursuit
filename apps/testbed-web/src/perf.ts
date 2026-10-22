@@ -81,7 +81,7 @@ export class FrameProfiler {
 
 /** Render features the perf report attributes draw calls and raster time to
  * (e2e/frame_profile.mjs walks each drawn object's parents to the first tagged one). */
-export const FEATURES = ["city", "lamps", "sky", "cars", "fleet", "props", "fx", "signals", "weather"] as const;
+export const FEATURES = ["city", "lamps", "sky", "cars", "fleet", "props", "fx", "signals", "weather", "markings"] as const;
 export type Feature = (typeof FEATURES)[number];
 
 /** Tag a scene root with its feature (`userData.perf`); untagged draws count as "other". */

@@ -130,6 +130,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
+    tagFeature(this.markings.group, "markings");
     this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.markings.group, this.sirenLight);
     // The first contact marker exists from the start (hidden), so its shader programs are
     // prewarmed instead of compiled in the frame of the first contact (browser-perf.md 12b).
@@ -486,10 +487,9 @@ export class SceneView {
 
   render(camera: THREE.PerspectiveCamera): void {
     const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
-    if (tiles) {
-      camera.getWorldPosition(this.camPos);
-      tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
-    }
+    camera.getWorldPosition(this.camPos);
+    if (tiles) tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
+    this.markings.update(this.camPos, Math.min(this.cullDistanceM(camera), this.detailDistanceM));
     // Three bakes the number of visible point lights into every lit shader, so the shared siren
     // light turning on (first police lights) used to recompile every lit material mid-chase
     // (~13 programs, seconds under a software rasterizer). A few frames after a session or city

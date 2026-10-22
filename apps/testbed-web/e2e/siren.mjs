@@ -210,7 +210,13 @@ await page.keyboard.up("KeyW");
 // Forced pattern changes on a live unit: each is heard (new loop plays) and the old one fades.
 const unit = await page.evaluate(() => window.__wpAudio.sirens?.last?.voices?.[0]?.entity ?? null);
 const heard = [];
-for (const mode of ["Yelp", "Phaser", "HiLo", "Wail"]) {
+// Start after the unit's current pattern (and end on it): forcing the pattern a unit already
+// plays starts no new loop, so it would never be "heard".
+const current = await page.evaluate((e) => window.__wpAudio.sirens?.last?.voices?.find((x) => x.entity === e)?.pattern ?? null, unit);
+const order = ["Yelp", "Phaser", "HiLo", "Wail"];
+const at = order.indexOf(current);
+const modes = at < 0 ? order : [...order.slice(at + 1), ...order.slice(0, at + 1)];
+for (const mode of modes) {
   if (unit === null) break;
   const before = await page.evaluate((m) => window.__wpAudio.cueCounts[`siren/${m.toLowerCase()}`] ?? 0, mode);
   await page.evaluate(([e, m]) => window.__wpAudio.setSirenFor(e, m), [unit, mode]);
@@ -230,7 +236,7 @@ for (const mode of ["Yelp", "Phaser", "HiLo", "Wail"]) {
   await page.waitForTimeout(400);
 }
 if (unit !== null) await page.evaluate((e) => window.__wpAudio.setSirenFor(e, "Default"), unit);
-check(heard.length === 4, `mode changes heard on unit ${unit}: ${heard.join(", ") || "none"}`);
+check(heard.length === 4, `mode changes heard on unit ${unit} (was ${current}): ${heard.join(", ") || "none"}`);
 const loops = await page.evaluate(() => window.__wpAudio.loopCounts());
 check(loops && Math.abs(loops.backend - loops.director) <= 1, `no stale voices after crossfades (backend ${loops?.backend}, director ${loops?.director})`);
 
