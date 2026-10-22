@@ -1472,6 +1472,67 @@ E (merged value differs from round12 alone, so this bless supersedes E's on a me
 `race_city_sprint_police`, `weather_fog_pursuit{,_clear}`, `world_traffic_soak{,_observer}`;
 E only, left for E — `opponent_circuit_8x5`, `race_lantern_checkpoint`.
 
+### Row 85 follow-ups (2026-10-22): lane changes and tracked vehicles, wrecks across paths
+- **Lead red on round12 67dafbfa** (`blocked::multi_lane_road_changes_lane_around_a_stopped_car`,
+  98 contacts): civilians' lane-change check only saw civilians in the target lane, so a car
+  changed into the lane of a stopped tracked vehicle 25 m ahead at 15 m/s; the old emergency
+  stop had masked it until 7b3762eb narrowed it. The nearest tracked vehicle ahead in the
+  target lane is now a leader there (gap check + incentive). Test re-aimed: go-arounds ≥ 1
+  (was ≥ 2): fewer cars end up behind the stopped car. Goldens moved: `jam_pursuit_{grid,vesper}`,
+  `opponent_flee_police` (blessed; the 67dafbfa merge alone moved none).
+- **Pursuit-melee collisions**, census over the 10 jam runs: 82 → 67. 35 of the 67 are a car
+  shoved by a unit (a speed jump no car makes itself) and most of the rest two physical cars
+  within 10 m of a unit — police contact, not traffic AI. Wrecks: 15 → 0 — a wreck shoved
+  across a neighbouring lane / junction path was invisible to cars on it (only their own
+  segment's list was searched). `Traffic::wreck_in_path`: a wreck lying across a car's segment
+  or the next two of its plan, by position and footprint, is its leader.
+- **`wp_race grid_highway_sprint`** ("nobody drove past the speed trap") is red on lead/round12
+  10d94b4d itself (not ws/world). **`lantern_checkpoint_draws_the_police`** (red on 67dafbfa)
+  passes on ws/world.
+- Main's grid jam gates stay pending (seeds 1–4 + 85: 43–188 s, wreck check on or off is not
+  the difference: 111/86/49/43/115 s without it). The left-turn "sneaker" may now keep its
+  permit through amber / red; letting it start on red (tried) boxed junctions in, reverted.
+
+## Playtest row 149 — "I currently now can't hit traffic cars" (world side)
+**Cause.** Kinematic traffic has no collider: only physical (promoted) cars can be hit. With the
+physical cap (`TrafficConfig::max_physical`, 16) full, cars stayed physical out to 100 m and
+were never demoted to make room, and the street racers' route focus filled the cap with cars
+along their routes — the cars right in front of the player stayed kinematic and the player
+drove through them. Reproduced in a `wp_wasm` session (temporary probe, chaining 20 rams at
+speed): 2 cars overlapping the player for 316 samples with street racers on, at the cap.
+**Fix.** A kinematic car within 40 m of a player (`PLAYER_PRIORITY_RADIUS_M`) takes the place
+of the physical car farthest from any player (if 10 m farther; wrecks and LOD-locked cars are
+not evicted). A kinematic car turning around / reversing within 20 m of a player
+(`LOCKED_PROMOTE_M`) gives the manoeuvre up and is promoted at its manoeuvre pose. After:
+0 pass-throughs with street racers at normal density (the probe's remaining samples are its own
+teleports, before the next 0.25 s LOD update). Test:
+`world::cars_near_the_player_are_physical_with_the_cap_full_elsewhere` (fails without the fix).
+For branch-triage: the street-racer side was not changed; if 0.12.49 still passes through,
+check that the player's vehicle is `VehicleKind::Player` (only players drive the LOD).
+
+## Playtest row 153 — Loop 9 rest stops
+Three pull-offs (the owner chose real highway pull-offs over lots off the existing exits):
+**Hollins Rest Area** beside the outer carriageway on the west (north of Lantern Way),
+**Larkspur Rest Area** and **Harbor Rest Area** beside the inner carriageway on the south (the
+sea starts just past the outer one there). Each: an off-ramp 275 m upstream of its centre, a
+100 m one-way parking road 34 m off the loop centreline (parking on the kerb, always a few
+parked cars, street lamps like every road, no houses; on an embankment where the ground falls
+away), an on-ramp 275 m downstream. No room elsewhere: the north-east stretch only has its
+banked corner (a gore there does not meet the drawn surface — tried, dropped), the other gaps
+are shorter than two ramp spans.
+**API.** `PoiKind::RestStop` POIs (pose = middle of the parking road on its travel lane),
+`World::rest_stops()` / `World::rest_stop(name)`; on the map (`wp_wasm` kind `"RestStop"`,
+ui-kit "P" glyph). Not in `wp_contracts`' POI list (the contract view skips them).
+**Impact.** Loop 9 is cut at six more gores: lane ids and Loop 9 race grids moved (the race
+scenario file `race/pick_loop9_circuit.ron` rewritten with `WP_RACE_WRITE_SCENARIOS=1`); the
+"Hollins Tunnel exit" route point moved from 200 to 120 m past the portal (the Hollins off-ramp
+gore is at 210 m); greybox regenerated (10.04 MB, cap raised to 10.2 MB); Vesper goldens
+re-blessed. wp_race Loop 9 races (`loop9_circuit`, `..._pace_without_police`) and street
+racers in Vesper pass.
+**Changes outside wp_world:** `crates/wp_wasm/src/map.rs` (kind string),
+`apps/ui-kit/src/map/{data,draw}.ts` (type + glyph), `tools/city-import/src/lib.rs` (size cap),
+`data/city/vesper_v2.greybox.*`, `apps/simcli/scenarios/race/pick_loop9_circuit.ron`.
+
 ## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
 **Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to
 the minimum of the 5 m heights around it (so it never pokes through a road), but Rapier

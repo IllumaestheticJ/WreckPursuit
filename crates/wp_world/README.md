@@ -232,6 +232,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   its terminal under an 8 % cap; a second profiling pass holds every terminal within reach of
   its ramps' gores. Interchange crossroads take the old junctions' local roads (Terminal
   Avenue no longer reaches the loop; the port is served by the half diamond).
+  **Rest stops** (playtest row 153): Hollins Rest Area (outer carriageway, west), Larkspur and
+  Harbor Rest Area (inner carriageway, south): an off-ramp 275 m upstream of the stop's
+  centre, a 100 m one-way 20 mph parking road 34 m off the centreline (kerb parking, always a
+  few parked cars, no houses, on an embankment where the ground falls away), an on-ramp 275 m
+  downstream. Named `PoiKind::RestStop` sites, `World::rest_stops()` / `rest_stop(name)`.
 - **Road names:** `World::vesper` keeps the generator's name per source road
   (`World::road_names`; presentation only, not in the road format or the state hash), and
   `World::edge_names()` names every road-graph edge (`RoadEdgeId`) after its road. The police
@@ -257,7 +262,7 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 - **POIs:** race grids `Lantern Run` (first: free drive / city chase spawn), `Loop 9 sprint`,
   `Hollins Ascent`, `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
-  `Knob Observatory Lot`).
+  `Knob Observatory Lot`); 3 rest stops.
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
   through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
@@ -415,6 +420,11 @@ Promotion copies pose and speed; demotion (beyond 100 m) projects the vehicle ba
 path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
 (`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
 removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
+With the cap full, a kinematic car within 40 m of a player takes the place of the physical
+car farthest from any player (playtest row 149: kinematic cars have no collider, the player
+drove through them), and a kinematic car turning around or reversing within 20 m of a player
+gives the manoeuvre up to be promoted. A wreck lying across a car's path (its segment or the
+next two of its plan, by position) is its leader whatever lane the wreck is filed under.
 
 **Parked cars** (`props::parked_cars`, owner row 77): only on parking lanes (collector and
 local streets; arterials, highways, hill roads and service roads have none) and never within
