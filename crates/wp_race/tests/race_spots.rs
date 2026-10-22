@@ -86,9 +86,8 @@ fn spots_do_not_overlap() {
 }
 
 /// Ashpeak County's own races plan on the combined map, start where their spot is and match
-/// their length hints. Needs the district roads (mountains, farms, metro, freeways).
+/// their length hints.
 #[test]
-#[ignore = "needs the Ashpeak districts merged"]
 fn every_ashpeak_race_has_a_spot_and_plans_to_its_length_hint() {
     let spots = race_spots(ashpeak());
     let mut off = Vec::new();

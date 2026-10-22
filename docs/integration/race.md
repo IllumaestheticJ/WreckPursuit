@@ -580,13 +580,23 @@ Vesper and on the new combined map (Port Vesper + Ashpeak County, city id `ashpe
   (`CITY=ashpeak` for the combined map), uses the new e2e helper `debug_place(entity, x, y, yaw,
   speed)`.
 
-### Lead TODO after merging the Ashpeak districts
-1. `cargo test -p wp_race --test race_spots -- --ignored`: lists every Ashpeak race whose
-   planned length is off its `length_hint_m` (they are plan estimates) or that does not plan
-   (POI missing / circuit polygon misses the grid). Tune `length_hint_m` / `METRO_CIRCUIT` /
-   the Grizzly finish point in `catalog.rs`, then drop the `#[ignore]`.
-2. `WP_RACE_WRITE_SCENARIOS=1 cargo test -p wp_wasm --lib -- --ignored ashpeak_race_scenario`
-   writes `apps/simcli/scenarios/race/pick_<id>.ron` for the Ashpeak races; then drop that
-   `#[ignore]` too. `tests/race_picker.rs` does not race them yet (add ids when tuned).
-3. Check the spots don't overlap on `ashpeak` (`spots_do_not_overlap` covers it once the
-   districts exist).
+### Tuned on the merged districts (ws/ashpeak ff783f9)
+Every Ashpeak race plans and the AI field races it to the flag (`tests/race_picker.rs`,
+police presence 0; scenario files `pick_<id>.ron` + goldens written). The lane graph has no
+lane changes, so several finishes had to be put on the lane the start lane actually reaches:
+
+| race | course | length | AI result (seeded) |
+|---|---|---|---|
+| `crowfoot_ascent` | Crowfoot Ascent → Crowfoot Summit, single-file grid | 3543 m | 4/4, ~165 s |
+| `crowfoot_descent` | Summit → beside North Foot on the northbound carriageway, single-file grid (a two-wide grid put a car into roadside geometry: total loss) | 2892 m | 3/4, ~100 s |
+| `harlan_dirt_run` | Harlan Farm Run → the south gravel road short of Harlan Crossing (the AI overshot the turn up to the village) | 3978 m | 3/4, ~266 s |
+| `ashpeak_downtown_checkpoint` | `Points` from Southgate Blvd's inner eastbound lane beside the Ashpeak Downtown grid (its kerb lane only feeds the Crowfoot Interchange) → Foundry St at the Grand Concourse | 1254 m | 4/4, ~42 s |
+| `route7_tunnel_sprint` | Route 7 South → northbound past Northgate (the Route 7 North grid faces south) | 3461 m | 5/5, ~64 s |
+| `grizzly_grade_sprint` | Grizzly Grade → Route 12 northbound at the pass's north foot | 2193 m | 4/4, ~58 s |
+| `waterfront_drag` | 415 m ahead of Ashpeak Waterfront (snaps to ≈ 400 m) | 400 m | 2/2, ~15.7 s |
+| `ashpeak_metro_circuit` | Corwin Ave ↓, Southgate →, Juniper ↑, Union ← (one-block jink near Southgate, lane graph) × 2 laps | 4182 m/lap | 3/6, ~326 s |
+
+`RaceDef::grid` (new) overrides the grid layout; `None` everywhere except the two touge races.
+Known gaps: the Harlan run does not reach Harlan Crossing itself, the downtown run finishes a
+block east of the Spire, and the metro circuit has a jink; all three come from lane
+connectivity in the districts (no lane changes), not from the race code.
