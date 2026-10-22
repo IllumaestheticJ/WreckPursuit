@@ -515,6 +515,21 @@ pub struct StreetRacers {
     cars: BTreeMap<String, LoadedCar>,
 }
 
+/// A field on `route`, or `None` when the route has nothing to drive. `World::plan_route` can
+/// return a one-segment route whose destination projects behind its start; `Field::from_route`
+/// panics on it, and in the browser that panic stopped the game for good (owner row 154: a
+/// roaming racer planning its next route in Port Vesper at night, any tick, often seen at a
+/// race start).
+fn field_on(
+    world: &World,
+    route: &wp_world::Route,
+    specs: &[RacerSpec],
+    config: RaceConfig,
+) -> Option<Field> {
+    let corridor = wp_opponent::Corridor::try_from_route(world.map(), route, &config.corridor)?;
+    Some(Field::new(corridor, specs, config))
+}
+
 /// Horizontal position of a vehicle.
 fn xy_of(sim: &Sim, id: EntityId) -> Option<[f32; 2]> {
     sim.vehicles()
@@ -882,7 +897,8 @@ impl StreetRacers {
             profile: race_profile(&l),
             capability: cap,
         };
-        let field = Field::from_route(sim.world(), &ai_route, &[spec], config);
+        let field = field_on(sim.world(), &ai_route, &[spec], config)
+            .ok_or("no road route to that point")?;
         // Line the racer up beside the player (the roomier side), else behind.
         let pxy = xy_of(sim, player).ok_or("no player car")?;
         let pz = sim
@@ -1119,7 +1135,11 @@ impl StreetRacers {
             profile: roam_profile(),
             capability: cruise_capability(&car, l.cruise_mps),
         };
-        self.racers[k].field = Some(Field::from_route(sim.world(), &route, &[spec], config));
+        match field_on(sim.world(), &route, &[spec], config) {
+            Some(f) => self.racers[k].field = Some(f),
+            // Nothing to drive on that route: another destination a quarter second later.
+            None => self.racers[k].replan_at = tick + 60,
+        }
     }
 
     /// After the sim step: roam routes that ended, and the race (finish, wreck, capture, time
@@ -1468,6 +1488,41 @@ mod tests {
         ] {
             assert_eq!(parse_entity_id(id), None, "{id}");
         }
+    }
+
+    /// Row 154: a route with nothing to drive (one segment, destination behind the start, as
+    /// `World::plan_route` returns for a destination back down the same long segment) gives no
+    /// field instead of a panic.
+    #[test]
+    fn a_route_with_nothing_to_drive_gives_no_field() {
+        let world = World::procedural(
+            &wp_world::procgen::ProcGenConfig::default(),
+            wp_world::WorldConfig::default(),
+        );
+        let map = world.map();
+        let (id, seg) = map
+            .segs
+            .iter()
+            .enumerate()
+            .find(|(_, s)| s.lane().is_some() && s.length > 50.0)
+            .expect("a long lane");
+        let (a, _) = seg.point_at(seg.length * 0.8);
+        let (b, _) = seg.point_at(seg.length * 0.2);
+        let route = wp_world::Route {
+            segs: vec![id as u32],
+            lanes: Vec::new(),
+            polyline: vec![a, b],
+            checkpoints: Vec::new(),
+            length_m: 200.0,
+            closed_loop: false,
+        };
+        let car = simcli::data::load_car(mem_data(), "kestrel_ts").unwrap();
+        let spec = RacerSpec {
+            entity: EntityId(2),
+            profile: roam_profile(),
+            capability: cruise_capability(&car, 12.0),
+        };
+        assert!(field_on(&world, &route, &[spec], RaceConfig::default()).is_none());
     }
 
     #[test]
