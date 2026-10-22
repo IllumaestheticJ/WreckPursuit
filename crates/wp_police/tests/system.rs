@@ -10,7 +10,7 @@ use wp_police::captain::{CaptainCommand, CaptainError, UnitOrder};
 use wp_police::graph::{dist, District, RoadClass, RoadGraph, RoadPath};
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{
-    Assignment, ObstacleView, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
+    Assignment, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
     PursuitStatus, RacerView, SteerGeometry, Tactic, UnitKind, UnitSync, WantedLevel,
 };
 
@@ -1579,79 +1579,4 @@ fn spawns_out_of_view(seed: u64) {
         seen, 0,
         "seed {seed}: {seen} of {checked} spawns in the racer's view within 3 s"
     );
-}
-
-/// With traffic reported by the sim, a violation no unit or camera saw is only called in when a
-/// civilian car is close by: no caller, no heat and no report.
-#[test]
-fn unseen_violation_needs_a_civilian_caller_nearby() {
-    let run = |civilian: bool| {
-        let (graph, map) = city().clone();
-        let setup = PoliceSetup {
-            seed: 8,
-            mode: DamageMode::Arcade,
-            internal_driving: true,
-            hazards: false,
-        };
-        let mut police = PoliceSystem::with_city(PoliceConfig::builtin(), graph, setup);
-        let world = ScenarioWorld {
-            map: Some(map),
-            ..ScenarioWorld::clock(TimeOfDay::from_hours(3.0), 0.0)
-        };
-        // Warm up, then pick the road node farthest from every unit and camera.
-        let mut out = Vec::new();
-        let park = RacerView {
-            entity: RACER,
-            pos: [0.0; 3],
-            vel: [0.0; 3],
-        };
-        police.step(&world, &[park], &[], PHYSICS_DT, &mut out);
-        let g = police.graph();
-        let far = |p: [f32; 2]| {
-            let units = police.units().iter().map(|u| dist(u.body.pos, p));
-            let cams = g
-                .pois_of(wp_police::graph::PoiKind::Camera)
-                .map(|c| dist(c.pos, p));
-            units.chain(cams).fold(f32::MAX, f32::min)
-        };
-        let spot = g
-            .nodes
-            .iter()
-            .map(|n| n.pos)
-            .max_by(|a, b| far(*a).total_cmp(&far(*b)))
-            .unwrap();
-        assert!(far(spot) > 300.0, "no quiet spot: {}", far(spot));
-        let pos = [spot[0], spot[1], 0.0];
-        let view = RacerView {
-            entity: RACER,
-            pos,
-            vel: [0.0; 3],
-        };
-        let mut obstacles = vec![ObstacleView::car(Some(RACER), pos, [0.0; 3], [0.0, 1.0])];
-        if civilian {
-            let c = [spot[0] + 8.0, spot[1], 0.0];
-            obstacles.push(ObstacleView::car(None, c, [0.0; 3], [0.0, 1.0]));
-        }
-        police.set_obstacles(&obstacles);
-        let red = SimEvent::TrafficViolation {
-            vehicle: RACER,
-            kind: ViolationKind::RedLight,
-            pos,
-        };
-        police.step(&world, &[view], &[], PHYSICS_DT, &mut out);
-        police.step(&world, &[view], &[red], PHYSICS_DT, &mut out);
-        let heat = police.racer(RACER).unwrap().heat;
-        (heat, police.incidents().len())
-    };
-    let (heat, incidents) = run(false);
-    assert_eq!(
-        (heat, incidents),
-        (0.0, 0),
-        "violation with nobody around was reported"
-    );
-    let cfg = PoliceConfig::builtin();
-    let (heat, incidents) = run(true);
-    let expected = cfg.heat.heat.violation.red_light * cfg.heat.heat.unseen_factor;
-    assert!((heat - expected).abs() < 0.1, "{heat} vs {expected}");
-    assert_eq!(incidents, 1, "civilian caller opened no report");
 }

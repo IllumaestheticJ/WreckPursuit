@@ -98,14 +98,6 @@ day = 380.0
 dusk = 320.0
 night = 260.0
 
-# A violation no unit or camera saw is only called in (reduced heat + a civilian report) when a
-# civilian car with line of sight is within this range of it. Fewer callers notice at night.
-[heat.caller_range_m]
-dawn = 50.0
-day = 70.0
-dusk = 50.0
-night = 35.0
-
 # A unit with line of sight within this range recognises a wanted car and starts a pursuit (the
 # same range: what it can see it can recognise, given time; was 40-250 m).
 [heat.recognition_range_m]

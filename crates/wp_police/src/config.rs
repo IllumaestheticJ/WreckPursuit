@@ -129,10 +129,6 @@ pub struct HeatConfig {
     pub violation: ViolationWeights,
     /// Range within which a unit with line of sight witnesses a violation, m.
     pub witness_range_m: PhaseTable<f32>,
-    /// A violation no unit or camera saw is only called in (reduced heat plus a civilian
-    /// report) when a civilian car with line of sight is within this range of it, m. Only
-    /// applies once `wp_sim` reports traffic ([`crate::PoliceSystem::set_obstacles`]).
-    pub caller_range_m: PhaseTable<f32>,
     /// Range within which a unit with line of sight recognises a wanted car and starts a
     /// pursuit, m. Much shorter in the dark.
     pub recognition_range_m: PhaseTable<f32>,
