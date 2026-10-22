@@ -35,6 +35,32 @@
 | `3af18fd0`, `6530accb`, `8fa0c8d6`, `85cd1e64` (ws/harness re-aims, race picker, pace lock-in, merge notes on main's layout) | A parallel resolution of the merge round 2 did here (gated, blessed). E.g. harness shortens Founders Cut to 105 m; round 12 keeps 205 m (round 2, all grades in cap); Hollins Tunnel is one tube in both. |
 | Every other conflicting file (main's merge commits `7245e760`, `0eaec919`, detailed-car-models merges): `crates/wp_vehicle`, `crates/wp_police`, `wp_opponent` / `wp_race` (AI racers never give up, pace locks), `data/panels`, `tools/assets`, testbed car rendering (`panels.ts`, `vehicle_view.ts`, `lod.ts`, `fleet.ts`, `props.ts`: format-4 meshes with integrated turn signals and LOD), `data/audio` + `data/cars` (procedural big engines, siren, spike sounds), scenarios, `wp_world` / `wp_sim` / `city-import` merge glue, docs | Round 12's version: these files hold no main-only commit, only main's merge resolutions of content round 12 already has in a newer form. `data/city/*` regenerated: unchanged. |
 
+## Blessed (round 3)
+`2b1a973c`: 12 city goldens, all moved by the freeway paint port alone (each re-run against its
+golden before / after every port: all match before `d90e9824`, the kinematic-police fix moved
+none). Paint is its own tyre surface; the new taper dots and gore chevrons sit where ramps
+leave and join the carriageway. Every other golden matched unchanged.
+
+## Gate (round 3, `2b1a973c`)
+| Step | Exit | Notes |
+|---|---|---|
+| `cargo fmt --check`, `clippy --workspace --all-targets -D warnings` | 0, 0 | |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm`, determinism lint | 0, 0 | lint: 74 findings, 0 errors |
+| `cargo test --workspace --no-fail-fast` | 101 | 2 reds, both identical on round 12 `9b686f76` (below); `goldens_match` green |
+| `opponent_pace pace_scenarios` (release) | 101 | Lantern only, identical on `9b686f76` |
+| testbed `npm run wasm`, `tsc`, `vite build` | 0, 0, 0 | |
+| testbed `npm run e2e` | 1 | 216 PASS. perf_check: phone 330 draw calls / 405 k triangles (`9b686f76`: 332 / 404 k), frame time / allocation as always under software GL. `reset.mjs` ghost-blink check failed once, passed 2 / 2 re-runs (blink frames sampled at ~3 fps) |
+| ui-kit `tsc`, `vitest`, `build` | 0, 1, 0 | `data.test.ts` stock top speed 247.9 vs > 248: red on round 12 before the ui-kit port too |
+
+Reds, none from this merge (all reproduce on round 12 `9b686f76`):
+- `wp_world` `blocked::multi_lane_road_changes_lane_around_a_stopped_car` (98 contacts) —
+  world (D): round 12's traffic changes since `cd6cd320` (`7b3762eb`, `1b3c7441`, `63c8dbfe`, …).
+- `wp_race` `race_picker::lantern_checkpoint_draws_the_police` (a racer ends `Dnf(FinishWindow)`)
+  and `opponent_pace` lantern s50 / s95 (best ratio 2.39 vs 2.27; player 86.8 vs ≥ 87 s) —
+  opponent-pace / E.
+- Testbed phone render budget back over (round 12 after `cd6cd320`) — testbed / lead.
+- ui-kit stat-bar test — ui (data/stats vs the test's hard-coded 248 km/h).
+
 # main → round 12 sync (lead helper)
 
 - **Branch:** `lead/main-sync`, from `origin/lead/round12` @ `95021b5`.
