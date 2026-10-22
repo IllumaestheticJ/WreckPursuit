@@ -43,6 +43,8 @@ use crate::residential;
 use crate::surface::{self, is_elevated, KERB_H_M, LOT_W_M, SIDEWALK_W_M};
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
 
+pub mod ashpeak;
+
 /// City id of this preset (file stem for its data files).
 pub const CITY_ID: &str = "vesper_v2";
 
@@ -121,6 +123,9 @@ const MAP_HI: V2 = [1700.0, 1750.0];
 struct Natural {
     n1: ValueNoise,
     n2: ValueNoise,
+    /// A region generated together with Port Vesper ([`Region`]): its ground from the point
+    /// and Port Vesper's own ground there.
+    ext: Option<Box<dyn Fn(V2, f32) -> f32>>,
 }
 
 impl Natural {
@@ -128,10 +133,20 @@ impl Natural {
         Self {
             n1: ValueNoise::new(rng, MAP_LO, MAP_HI, 420.0),
             n2: ValueNoise::new(rng, MAP_LO, MAP_HI, 150.0),
+            ext: None,
         }
     }
 
     fn z(&self, p: V2) -> f32 {
+        let own = self.vesper_z(p);
+        match &self.ext {
+            Some(f) => f(p, own),
+            None => own,
+        }
+    }
+
+    /// Port Vesper's own ground (inside its map; meaningless far outside).
+    fn vesper_z(&self, p: V2) -> f32 {
         let base = 2.5 + 22.0 * smoothstep(-650.0, 1400.0, p[1]);
         let hill = 88.0 * bump(p, HILL, 560.0);
         let plateau = 26.0 * smoothstep(520.0, 330.0, geom::dist(p, BLUFF));
@@ -157,6 +172,8 @@ struct Style {
     grade: f32,
     /// Superelevate curves (max cross slope).
     bank_max: f32,
+    /// Paving.
+    material: RoadMaterial,
 }
 
 const HIGHWAY: Style = Style {
@@ -167,6 +184,7 @@ const HIGHWAY: Style = Style {
     parking: false,
     grade: 0.06,
     bank_max: 0.06,
+    material: RoadMaterial::Asphalt,
 };
 const ARTERIAL: Style = Style {
     class: RoadClass::Arterial,
@@ -176,6 +194,7 @@ const ARTERIAL: Style = Style {
     parking: false,
     grade: 0.08,
     bank_max: 0.02,
+    material: RoadMaterial::Asphalt,
 };
 const ROUTE: Style = Style {
     speed: 20.1168, // 45 mph
@@ -193,6 +212,7 @@ const COLLECTOR: Style = Style {
     parking: true,
     grade: 0.10,
     bank_max: 0.0,
+    material: RoadMaterial::Asphalt,
 };
 const LOCAL: Style = Style {
     class: RoadClass::Local,
@@ -202,6 +222,7 @@ const LOCAL: Style = Style {
     parking: true,
     grade: 0.10,
     bank_max: 0.0,
+    material: RoadMaterial::Asphalt,
 };
 const SERVICE: Style = Style {
     parking: false,
@@ -225,6 +246,7 @@ const PORT: Style = Style {
     parking: false,
     grade: 0.06,
     bank_max: 0.0,
+    material: RoadMaterial::Asphalt,
 };
 
 /// Loop 9 ramps: one-way, one lane.
@@ -236,6 +258,7 @@ const RAMP: Style = Style {
     parking: false,
     grade: 0.08,
     bank_max: 0.05,
+    material: RoadMaterial::Asphalt,
 };
 /// One Loop 9 carriageway (one-way, three lanes).
 const HIGHWAY_CARRIAGEWAY: Style = Style { bwd: 0, ..HIGHWAY };
@@ -350,6 +373,9 @@ pub struct VesperReport {
 struct Gen {
     rng: Rng,
     nat: Natural,
+    /// Map extent (terrain, building grid, bounds).
+    lo: V2,
+    hi: V2,
     nodes: Vec<NodeSpec>,
     index: BTreeMap<(i64, i64), usize>,
     drafts: Vec<Draft>,
@@ -1607,6 +1633,7 @@ fn profile_roads(
         let mut r = RoadSpec::new(d.a, d.b, d.st.class, d.st.fwd, d.st.bwd);
         r.speed_mps = d.st.speed;
         r.parking = d.st.parking;
+        r.material = d.st.material;
         if linear_dev < 0.25 && d.anchors.is_empty() {
             r.via = d.path[1..d.path.len() - 1].to_vec();
         } else {
@@ -1716,8 +1743,8 @@ fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
 /// Connector. A dipped cover (`dip` m below the lowest natural ground over it) gets an internal
 /// height anchor, so the profile ramps down into it within the grade cap. The plans live on
 /// the drafts.
-fn plan_covers(g: &mut Gen) {
-    let plans: [(&str, V2, V2, V2, f32, CoverKind, &'static str); 2] = [
+fn plan_covers(g: &mut Gen, extra: &[CoverSpec]) {
+    let mut plans: Vec<(&str, V2, V2, V2, f32, CoverKind, &'static str)> = vec![
         // Loop 9 through the Hollins Heights shoulder (it already runs in a cut there).
         (
             "Loop 9",
@@ -1739,6 +1766,11 @@ fn plan_covers(g: &mut Gen) {
             "Founders Cut",
         ),
     ];
+    plans.extend(
+        extra
+            .iter()
+            .map(|c| (c.road, c.probe, c.p0, c.p1, c.dip, c.kind, c.name)),
+    );
     for (road, probe, p0, p1, dip, kind, name) in plans {
         let Some(ri) = (0..g.drafts.len()).find(|k| {
             let d = &g.drafts[*k];
@@ -2750,18 +2782,20 @@ fn zone_kind(zones: &[Zone], p: V2) -> DistrictKind {
 /// Uniform grid of road-surface segments for clearance tests.
 struct SurfaceGrid {
     cell: f32,
+    lo: V2,
     nx: usize,
     ny: usize,
     cells: Vec<Vec<(u32, u32)>>,
 }
 
 impl SurfaceGrid {
-    fn new(built: &Built) -> Self {
+    fn new(built: &Built, lo: V2, hi: V2) -> Self {
         let cell = 40.0;
-        let nx = ((MAP_HI[0] - MAP_LO[0]) / cell).ceil() as usize + 1;
-        let ny = ((MAP_HI[1] - MAP_LO[1]) / cell).ceil() as usize + 1;
+        let nx = ((hi[0] - lo[0]) / cell).ceil() as usize + 1;
+        let ny = ((hi[1] - lo[1]) / cell).ceil() as usize + 1;
         let mut g = Self {
             cell,
+            lo,
             nx,
             ny,
             cells: vec![Vec::new(); nx * ny],
@@ -2783,8 +2817,9 @@ impl SurfaceGrid {
     fn cells_in(&self, lo: V2, hi: V2) -> Vec<usize> {
         let ci =
             |v: f32, o: f32, n: usize| (((v - o) / self.cell).floor().max(0.0) as usize).min(n - 1);
-        let (i0, i1) = (ci(lo[0], MAP_LO[0], self.nx), ci(hi[0], MAP_LO[0], self.nx));
-        let (j0, j1) = (ci(lo[1], MAP_LO[1], self.ny), ci(hi[1], MAP_LO[1], self.ny));
+        let o = self.lo;
+        let (i0, i1) = (ci(lo[0], o[0], self.nx), ci(hi[0], o[0], self.nx));
+        let (j0, j1) = (ci(lo[1], o[1], self.ny), ci(hi[1], o[1], self.ny));
         let mut out = Vec::new();
         for j in j0..=j1 {
             for i in i0..=i1 {
@@ -2855,15 +2890,21 @@ fn surface_z_bank(s: &RoadSurface, cum: &[f32], at: f32) -> (f32, f32) {
 /// instead ([`residential::plan_lot`]): front yards, garages and driveways, fences, hedges
 /// and yard trees, a corner shop or two per district, and street trees on the verge
 /// ([`surface::verge_street`]). Returns the buildings and the decor.
+/// Street-front buildings and yard decor along every non-highway road: clear of `reserved`
+/// (hand-placed buildings) and `reserved_decor`, and only where `allowed`.
+#[allow(clippy::too_many_arguments)]
 fn buildings(
     rng: &mut Rng,
     built: &Built,
+    grid: &SurfaceGrid,
     nodes: &[NodeSpec],
     zones: &[Zone],
     hf: &Heightfield,
     dead_ends: &[V2],
+    reserved: &[Building],
+    reserved_decor: &[Decor],
+    allowed: &dyn Fn(V2) -> bool,
 ) -> (Vec<Building>, Vec<Decor>) {
-    let grid = SurfaceGrid::new(built);
     // Junction / bend areas with the turning paths through them, plus a sidewalk.
     let node_r = node_radii(built, nodes);
     let junctions: Vec<(V2, f32)> = nodes
@@ -2880,6 +2921,17 @@ fn buildings(
         .collect();
     let mut placed = residential::ObbIndex::default();
     let mut solid_decor = residential::ObbIndex::default();
+    for b in reserved {
+        placed.insert(footprint_obb(&b.footprint));
+    }
+    for d in reserved_decor {
+        solid_decor.insert(Obb {
+            c: [d.pos[0], d.pos[1]],
+            f: geom::dir_of_yaw(d.yaw),
+            hl: d.size[1] * 0.5,
+            hw: d.size[0] * 0.5,
+        });
+    }
     let mut shops: BTreeMap<usize, usize> = BTreeMap::new();
     let mut out = Vec::new();
     let mut decor: Vec<Decor> = Vec::new();
@@ -2932,6 +2984,11 @@ fn buildings(
                 let at0 = at;
                 let (p, t) = point_on(&pts, &cum, at);
                 let kind = zone_kind(zones, p);
+                if !allowed(p) {
+                    at += 12.0;
+                    after_skip = true;
+                    continue;
+                }
                 if residential::is_residential(kind) {
                     // A corner shop on the first lot after a crossing, at most two per zone.
                     let zone = zones
@@ -3154,6 +3211,28 @@ fn buildings(
     (out, decor)
 }
 
+/// Oriented box around a footprint, aligned with its first edge.
+fn footprint_obb(fp: &[V2]) -> Obb {
+    let f = if fp.len() >= 2 && geom::dist(fp[0], fp[1]) > 1e-3 {
+        geom::normalize(geom::sub(fp[1], fp[0]))
+    } else {
+        [0.0, 1.0]
+    };
+    let r = geom::right_of(f);
+    let (mut a0, mut a1, mut b0, mut b1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for q in fp {
+        let (a, b) = (geom::dot(*q, f), geom::dot(*q, r));
+        (a0, a1, b0, b1) = (a0.min(a), a1.max(a), b0.min(b), b1.max(b));
+    }
+    let (ca, cb) = (0.5 * (a0 + a1), 0.5 * (b0 + b1));
+    Obb {
+        c: geom::add(geom::scale(f, ca), geom::scale(r, cb)),
+        f,
+        hl: 0.5 * (a1 - a0),
+        hw: 0.5 * (b1 - b0),
+    }
+}
+
 fn signed_area(p: &[V2]) -> f32 {
     let mut a = 0.0;
     for i in 0..p.len() {
@@ -3208,11 +3287,139 @@ pub fn generate(cfg: &VesperConfig) -> RoadNetwork {
 
 /// Generate Port Vesper v2 plus generator diagnostics.
 pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
+    generate_region(cfg, None)
+}
+
+/// A region generated together with Port Vesper as one map (one road network, one terrain):
+/// Port Vesper is laid out first, unchanged, then the region adds its roads around it and
+/// joins them to Port Vesper's edge roads. Implemented by [`ashpeak`].
+trait Region {
+    /// City id of the combined map.
+    fn city_id(&self) -> &'static str;
+    /// Source description of the combined map (`RoadNetwork::source`).
+    fn description(&self, seed: u64) -> String;
+    /// Map extent of the combined map (contains Port Vesper's `MAP_LO..MAP_HI`), m.
+    fn extent(&self) -> (V2, V2);
+    /// Natural ground of the combined map: `f(p, vesper_z)` (`vesper_z` is Port Vesper's own
+    /// ground at `p`, meaningful near and inside its map). Own noise from `seed`.
+    fn terrain(&self, seed: u64) -> Box<dyn Fn(V2, f32) -> f32>;
+    /// Lay out the region's roads (after Port Vesper's layout).
+    fn layout(&self, g: &mut Gen);
+    /// Covered roads (tunnels) on the region's roads.
+    fn covers(&self) -> Vec<CoverSpec> {
+        Vec::new()
+    }
+    /// The region's zones (looked up before Port Vesper's, so they may overlap its catch-all).
+    fn zones(&self) -> Vec<Zone>;
+    /// Whether the generic street-front building pass may build at `p` (farmland and mountains
+    /// place their own buildings, or none).
+    fn generic_buildings_at(&self, _p: V2) -> bool {
+        true
+    }
+    /// Hand-placed buildings and decor (landmarks, farms, construction sites, forests), placed
+    /// before the generic pass, which keeps clear of them.
+    fn extra_buildings(&self, _site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
+        (Vec::new(), Vec::new())
+    }
+    /// The region's points of interest.
+    fn pois(&self, _site: &mut Site) -> Vec<Poi> {
+        Vec::new()
+    }
+}
+
+/// A covered road a [`Region`] plans: `road` is the draft name, `probe` a point within 40 m of
+/// the draft, `p0`/`p1` the portals, `dip` how far the road is pinned below the lowest ground
+/// over the span (0 = the profile is left alone).
+#[derive(Debug, Clone, Copy)]
+struct CoverSpec {
+    road: &'static str,
+    probe: V2,
+    p0: V2,
+    p1: V2,
+    dip: f32,
+    kind: CoverKind,
+    name: &'static str,
+}
+
+/// The built map as a [`Region`] sees it when it places buildings and POIs.
+struct Site<'a> {
+    rng: &'a mut Rng,
+    built: &'a Built,
+    nodes: &'a [NodeSpec],
+    drafts: &'a [Draft],
+    /// Draft index → builder road index (`None` for Loop 9's drafts).
+    remap: &'a [Option<usize>],
+    hf: &'a Heightfield,
+    grid: &'a SurfaceGrid,
+}
+
+impl Site<'_> {
+    /// Smallest distance from `p` to any paved edge, m (negative = on a road; highways count
+    /// 12 m wider).
+    fn clearance(&self, p: V2) -> f32 {
+        self.grid.clearance(self.built, p)
+    }
+
+    /// Ground height (carved terrain) at `p`, m.
+    fn ground(&self, p: V2) -> f32 {
+        self.hf.height_at(p)
+    }
+
+    /// Builder road index of the draft named `name` nearest to `near` (within `reach` m).
+    fn road_named(&self, name: &str, near: V2, reach: f32) -> Option<usize> {
+        let mut best: Option<(f32, usize)> = None;
+        for (k, d) in self.drafts.iter().enumerate() {
+            if d.name != name {
+                continue;
+            }
+            let Some(r) = self.remap.get(k).copied().flatten() else {
+                continue;
+            };
+            let dist = project2(&d.path, &cum2(&d.path), near).1;
+            if dist <= reach && best.is_none_or(|b| dist < b.0) {
+                best = Some((dist, r));
+            }
+        }
+        best.map(|b| b.1)
+    }
+
+    /// A POI on road `road`'s forward kerb lane (`fwd`, else backward) `s` m from its start
+    /// (negative = from its end).
+    fn lane_poi(&self, kind: PoiKind, name: &str, road: usize, s: f32, fwd: bool) -> Option<Poi> {
+        lane_pose(self.built, road, s, fwd).map(|(p, yaw, lane)| Poi {
+            kind,
+            name: name.into(),
+            pos: p,
+            heading_rad: yaw,
+            lane: Some(lane),
+        })
+    }
+
+    /// A POI on the lane nearest to `p` (the "block" POIs: stations, garages, safehouses).
+    fn block_poi(&self, kind: PoiKind, name: &str, p: V2) -> Option<Poi> {
+        nearest_lane(self.built, p).map(|(lane, q, yaw)| Poi {
+            kind,
+            name: name.into(),
+            pos: q,
+            heading_rad: yaw,
+            lane: Some(lane),
+        })
+    }
+}
+
+/// Generate Port Vesper alone (`region = None`) or Port Vesper plus a region as one map.
+fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetwork, VesperReport) {
     let mut rng = Rng::new(cfg.seed);
-    let nat = Natural::new(&mut rng);
+    let mut nat = Natural::new(&mut rng);
+    let (lo, hi) = region.map_or((MAP_LO, MAP_HI), |r| r.extent());
+    if let Some(r) = region {
+        nat.ext = Some(r.terrain(cfg.seed));
+    }
     let mut g = Gen {
         rng: Rng::new(cfg.seed ^ 0x5eed_c17e),
         nat,
+        lo,
+        hi,
         nodes: Vec::new(),
         index: BTreeMap::new(),
         drafts: Vec::new(),
@@ -3221,8 +3428,11 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         ramp_ends: Vec::new(),
     };
     let (loop_drafts, hollins_draft, _knob, _lot, _r40w, _r40n) = g.layout();
+    if let Some(r) = region {
+        r.layout(&mut g);
+    }
     let draft_crossings = plan_crossings(&mut g);
-    plan_covers(&mut g);
+    plan_covers(&mut g, &region.map_or_else(Vec::new, |r| r.covers()));
     let opt = BuildOptions::default();
     // Two passes: the first places the highway, the second holds each interchange terminal
     // within reach of its ramps' gores (the highway itself comes out the same).
@@ -3266,7 +3476,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     let built = builder::build(&g.nodes, &specs, &opt);
 
     // Terrain: natural ground, carved to the roads except bridge decks.
-    let mut hf = Heightfield::flat(MAP_LO, MAP_HI, cfg.terrain_cell_m, 0.0);
+    let mut hf = Heightfield::flat(g.lo, g.hi, cfg.terrain_cell_m, 0.0);
     for j in 0..hf.ny {
         for i in 0..hf.nx {
             let p = hf.vertex_pos(i, j);
@@ -3300,7 +3510,8 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     let covered = covered_spans(&g, &built, &remap, &loop_roads);
     backfill_covers(&mut hf, &g.nat, &covered);
 
-    let zones = zones();
+    let mut zones = region.map_or_else(Vec::new, |r| r.zones());
+    zones.extend(self::zones());
     let mut degree = vec![0usize; g.nodes.len()];
     for r in &specs {
         degree[r.a] += 1;
@@ -3310,8 +3521,34 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .filter(|n| degree[*n] == 1)
         .map(|n| g.nodes[n].pos)
         .collect();
-    let (mut buildings, mut decor) =
-        buildings(&mut g.rng, &built, &g.nodes, &zones, &hf, &dead_ends);
+    let grid = SurfaceGrid::new(&built, g.lo, g.hi);
+    let (extra_b, extra_d) = match region {
+        Some(r) => r.extra_buildings(&mut Site {
+            rng: &mut g.rng,
+            built: &built,
+            nodes: &g.nodes,
+            drafts: &g.drafts,
+            remap: &remap,
+            hf: &hf,
+            grid: &grid,
+        }),
+        None => (Vec::new(), Vec::new()),
+    };
+    let generic_at = |p: V2| region.is_none_or(|r| r.generic_buildings_at(p));
+    let (mut buildings, mut decor) = buildings(
+        &mut g.rng,
+        &built,
+        &grid,
+        &g.nodes,
+        &zones,
+        &hf,
+        &dead_ends,
+        &extra_b,
+        &extra_d,
+        &generic_at,
+    );
+    buildings.extend(extra_b);
+    decor.extend(extra_d);
     let cover_shapes: Vec<CoverShape> = covered.iter().map(CoverShape::new).collect();
     buildings.retain(|b| !in_cover_corridor(&cover_shapes, &b.footprint));
     decor.retain(|d| !in_cover_corridor(&cover_shapes, &[[d.pos[0], d.pos[1]]]));
@@ -3492,23 +3729,33 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         [1000.0, -800.0],
     );
 
-    let mut net = built.into_network(
-        CITY_ID,
-        &format!("procedural port_vesper v2 seed={}", cfg.seed),
-        None,
-        [0.0, -50.0],
-        zones,
-        pois,
-        buildings,
-    );
+    if let Some(r) = region {
+        pois.extend(r.pois(&mut Site {
+            rng: &mut g.rng,
+            built: &built,
+            nodes: &g.nodes,
+            drafts: &g.drafts,
+            remap: &remap,
+            hf: &hf,
+            grid: &grid,
+        }));
+    }
+    let (city_id, source) = match region {
+        Some(r) => (r.city_id(), r.description(cfg.seed)),
+        None => (
+            CITY_ID,
+            format!("procedural port_vesper v2 seed={}", cfg.seed),
+        ),
+    };
+    let mut net = built.into_network(city_id, &source, None, [0.0, -50.0], zones, pois, buildings);
     net.decor = decor;
     net.bounds_min = [
-        net.bounds_min[0].min(MAP_LO[0]),
-        net.bounds_min[1].min(MAP_LO[1]),
+        net.bounds_min[0].min(g.lo[0]),
+        net.bounds_min[1].min(g.lo[1]),
     ];
     net.bounds_max = [
-        net.bounds_max[0].max(MAP_HI[0]),
-        net.bounds_max[1].max(MAP_HI[1]),
+        net.bounds_max[0].max(g.hi[0]),
+        net.bounds_max[1].max(g.hi[1]),
     ];
     net.terrain = Some(hf);
     net.covered = covered;

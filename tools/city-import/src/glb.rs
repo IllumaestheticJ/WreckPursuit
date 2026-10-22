@@ -956,7 +956,12 @@ pub fn build_instanced(map: &CityMap) -> Vec<Instanced> {
     let mut out = Vec::new();
     let trees: Vec<(V3, f32, V3)> = decor
         .iter()
-        .filter(|d| matches!(d.kind, DecorKind::StreetTree | DecorKind::YardTree))
+        .filter(|d| {
+            matches!(
+                d.kind,
+                DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree
+            )
+        })
         .map(|d| (d.pos, d.yaw, [d.size[0], d.size[1], d.size[2]]))
         .collect();
     if !trees.is_empty() {
@@ -970,6 +975,15 @@ pub fn build_instanced(map: &CityMap) -> Vec<Instanced> {
         (DecorKind::Driveway, "driveway", [0.58, 0.57, 0.54, 1.0]),
         (DecorKind::Hedge, "hedge", [0.24, 0.38, 0.22, 1.0]),
         (DecorKind::Fence, "fence", [0.60, 0.55, 0.48, 1.0]),
+        (DecorKind::Crane, "crane", [0.93, 0.71, 0.13, 1.0]),
+        (
+            DecorKind::JerseyBarrier,
+            "jersey_barrier",
+            [0.72, 0.71, 0.68, 1.0],
+        ),
+        (DecorKind::SiteFence, "site_fence", [0.38, 0.45, 0.40, 1.0]),
+        (DecorKind::HayBale, "hay_bale", [0.80, 0.68, 0.36, 1.0]),
+        (DecorKind::Billboard, "billboard", [0.30, 0.32, 0.36, 1.0]),
     ] {
         let boxes: Vec<(V3, f32, V3)> = decor
             .iter()

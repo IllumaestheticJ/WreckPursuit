@@ -62,6 +62,7 @@ pub use traffic::{
     AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
     TrafficStats, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
 };
+pub use vesper::ashpeak;
 pub use violations::{ViolationConfig, ViolationTracker};
 
 use traffic::{Traffic, TrafficInputs};
@@ -209,6 +210,15 @@ impl World {
     /// Road names come from the generator ([`World::road_names`]).
     pub fn vesper(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
         let (net, report) = vesper::generate_with_report(vc);
+        let mut w = Self::new(net, cfg);
+        w.road_names = report.road_names.iter().map(|n| n.to_string()).collect();
+        w
+    }
+
+    /// Generate Port Vesper + Ashpeak County (`ashpeak::CITY_ID`) in memory: Port Vesper with
+    /// the mountains, metro, farmland and freeways around it. Road names as [`World::vesper`].
+    pub fn ashpeak(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
+        let (net, report) = ashpeak::generate_with_report(vc);
         let mut w = Self::new(net, cfg);
         w.road_names = report.road_names.iter().map(|n| n.to_string()).collect();
         w
