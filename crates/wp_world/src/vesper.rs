@@ -44,6 +44,9 @@ use crate::surface::{self, is_elevated, KERB_H_M, LOT_W_M, SIDEWALK_W_M};
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
 
 pub mod ashpeak;
+mod divided;
+
+use divided::*;
 
 /// City id of this preset (file stem for its data files).
 pub const CITY_ID: &str = "vesper_v2";
@@ -368,6 +371,12 @@ pub struct VesperReport {
     pub road_speeds: Vec<f32>,
     /// Grade cap per source road.
     pub road_grades: Vec<f32>,
+    /// Road indices of a region's open-freeway carriageway pieces.
+    pub freeway_roads: Vec<usize>,
+    /// Road indices of a region's open-freeway diamond ramps and links.
+    pub freeway_ramps: Vec<usize>,
+    /// Road indices of the links (freeway-to-freeway ramps; subset of `freeway_ramps`).
+    pub freeway_links: Vec<usize>,
 }
 
 struct Gen {
@@ -384,6 +393,13 @@ struct Gen {
     interchanges: Vec<Interchange>,
     /// Ramps that will end at each node (counted into its junction flat length).
     ramp_ends: Vec<usize>,
+    /// Open divided freeways a region lays out (split by [`divide_freeways`]).
+    freeways: Vec<FreewayPlan>,
+    /// Freeway-to-freeway links (system ramps) between those freeways.
+    links: Vec<LinkPlan>,
+    /// Plan paths of ramps built after profiling: a non-highway road crossing one is dropped
+    /// like one crossing another road at grade.
+    reserved: Vec<Vec<V2>>,
 }
 
 // ------------------------------------------------------------------------------------------
@@ -648,7 +664,10 @@ impl Gen {
         if st.class != RoadClass::Highway {
             let bad = self.drafts.iter().any(|d| {
                 d.st.class != RoadClass::Highway && !path_crossings(&path, &d.path).is_empty()
-            });
+            }) || self
+                .reserved
+                .iter()
+                .any(|r| !path_crossings(&path, r).is_empty());
             if bad {
                 self.skipped += 1;
                 return None;
@@ -1802,12 +1821,13 @@ fn plan_covers(g: &mut Gen, extra: &[CoverSpec]) {
 /// Covered spans on the built road surfaces (portal to portal), one per plan. On divided
 /// Loop 9 one tube spans both carriageways through the stretch: its centreline runs midway
 /// between them and its half width reaches the far paved edge. `remap` maps draft roads to
-/// builder roads (`None` for the Loop 9 drafts, which became `loop_roads`).
+/// builder roads (`None` for divided drafts: Loop 9's and the open freeways', whose
+/// carriageway pieces `divided(draft)` lists).
 fn covered_spans(
     g: &Gen,
     built: &Built,
     remap: &[Option<usize>],
-    loop_roads: &[usize],
+    divided: &dyn Fn(usize) -> Vec<usize>,
 ) -> Vec<CoveredSpan> {
     let mut out = Vec::new();
     for (di, d) in g.drafts.iter().enumerate() {
@@ -1816,9 +1836,8 @@ fn covered_spans(
                 Some(r) => vec![r],
                 // A carriageway passes through the covered stretch when both portals project
                 // onto it (inside its ends) within reach of its centreline.
-                None => loop_roads
-                    .iter()
-                    .copied()
+                None => divided(di)
+                    .into_iter()
                     .filter(|r| {
                         let s = &built.surfaces[*r];
                         let cum = geom::cumulative(&s.centre);
@@ -1962,19 +1981,44 @@ enum DeckRef {
     Ring,
     /// No planned decks (ramps; elevated stretches are still found by height).
     None,
+    /// An open freeway's line decks (its carriageways; index into the freeway lines).
+    Line(usize),
 }
 
 /// Loop 9's profiled centreline as one closed ring (counter-clockwise), the plane of its
 /// cross-section (height + bank) at every point, and its deck ranges.
+/// Also used for an open freeway's centreline (`closed == false`: arc lengths clamp to its
+/// ends, "counter-clockwise" reads "forward").
 struct Ring {
     pts: Vec<V2>,
     z: Vec<f32>,
     bank: Vec<f32>,
     cum: Vec<f32>,
     decks: Vec<(f32, f32)>,
+    closed: bool,
 }
 
 impl Ring {
+    /// An open line from profiled roads (in order, each a → b forward).
+    fn open(g: &Gen, specs: &[RoadSpec], roads: &[usize]) -> Self {
+        let mut r = Self::new(g, specs, roads);
+        r.closed = false;
+        r
+    }
+
+    /// A flat open line along a plan path (layout-time geometry only).
+    fn from_xy(pts: &[V2]) -> Self {
+        let cum = cum2(pts);
+        Self {
+            pts: pts.to_vec(),
+            z: vec![0.0; pts.len()],
+            bank: vec![0.0; pts.len()],
+            cum,
+            decks: Vec::new(),
+            closed: false,
+        }
+    }
+
     /// Build from the loop's profiled roads (in ring order, each a → b counter-clockwise).
     fn new(g: &Gen, specs: &[RoadSpec], loop_roads: &[usize]) -> Self {
         let mut pts: Vec<V2> = Vec::new();
@@ -2015,6 +2059,7 @@ impl Ring {
             bank,
             cum,
             decks: Vec::new(),
+            closed: true,
         };
         for &r in loop_roads {
             let d = &g.drafts[r];
@@ -2039,7 +2084,11 @@ impl Ring {
 
     /// Point, unit tangent, height and bank at arc length `s` (wrapped).
     fn at(&self, s: f32) -> (V2, V2, f32, f32) {
-        let s = s.rem_euclid(self.total());
+        let s = if self.closed {
+            s.rem_euclid(self.total())
+        } else {
+            s.clamp(0.0, self.total())
+        };
         let n = self.pts.len();
         let i = match self.cum.binary_search_by(|c| c.total_cmp(&s)) {
             Ok(i) => i.min(n - 2),
@@ -2117,6 +2166,28 @@ struct RampPath {
 /// off-ramp runs downstream from the gore, an on-ramp upstream (the path is still listed
 /// gore first).
 fn ramp_path(ring: &Ring, gore_s: f32, side: f32, off: bool, terminal: V2) -> Vec<V2> {
+    ramp_path_at(
+        ring,
+        gore_s,
+        side,
+        off,
+        terminal,
+        CARRIAGEWAY_OFFSET_M,
+        RAMP_LANE_OFFSET_M,
+    )
+}
+
+/// [`ramp_path`] for a carriageway centred `offset` m from the line with the ramp lane
+/// `lane_off` m beyond that.
+fn ramp_path_at(
+    ring: &Ring,
+    gore_s: f32,
+    side: f32,
+    off: bool,
+    terminal: V2,
+    offset: f32,
+    lane_off: f32,
+) -> Vec<V2> {
     // Travel along the ring is counter-clockwise on the outer carriageway.
     let dir = side;
     // Away from the gore along the ring: downstream for an off-ramp, upstream for an on-ramp.
@@ -2124,8 +2195,8 @@ fn ramp_path(ring: &Ring, gore_s: f32, side: f32, off: bool, terminal: V2) -> Ve
     let mut path: Vec<V2> = Vec::new();
     let mut u = 0.0;
     while u <= RAMP_PARALLEL_M + 1e-3 {
-        let x = RAMP_LANE_OFFSET_M * smoothstep(0.0, crate::builder::FREEWAY_SETBACK_M, u);
-        let p = ring.offset(gore_s + away * u, side * (CARRIAGEWAY_OFFSET_M + x));
+        let x = lane_off * smoothstep(0.0, crate::builder::FREEWAY_SETBACK_M, u);
+        let p = ring.offset(gore_s + away * u, side * (offset + x));
         path.push(geom::xy(p));
         u += 6.0;
     }
@@ -2311,6 +2382,7 @@ fn divide_loop(
     g: &mut Gen,
     specs: Vec<RoadSpec>,
     loop_roads: &[usize],
+    skip: &[usize],
     opt: &BuildOptions,
 ) -> (
     Vec<RoadSpec>,
@@ -2383,7 +2455,7 @@ fn divide_loop(
     let n_outer = outer_cuts.len();
     let mut remap = vec![None; specs.len()];
     for (i, sp) in specs.into_iter().enumerate() {
-        if loop_roads.contains(&i) {
+        if loop_roads.contains(&i) || skip.contains(&i) {
             continue;
         }
         remap[i] = Some(out.len());
@@ -3351,9 +3423,29 @@ struct Site<'a> {
     remap: &'a [Option<usize>],
     hf: &'a Heightfield,
     grid: &'a SurfaceGrid,
+    /// `(name, side, road)` of every open-freeway carriageway piece (side +1 = forward).
+    divided: &'a [(&'static str, f32, usize)],
 }
 
 impl Site<'_> {
+    /// Builder road of freeway `name`'s carriageway piece on `side` (+1 forward) nearest
+    /// `near`, with its distance from `near`.
+    fn carriageway(&self, name: &str, side: f32, near: V2) -> Option<(usize, f32)> {
+        let mut best: Option<(usize, f32)> = None;
+        for &(n, sd, r) in self.divided {
+            if n != name || sd != side {
+                continue;
+            }
+            let s = &self.built.surfaces[r];
+            let cum = geom::cumulative(&s.centre);
+            let d = geom::project(&s.centre, &cum, near).dist;
+            if best.is_none_or(|b| d < b.1) {
+                best = Some((r, d));
+            }
+        }
+        best
+    }
+
     /// Smallest distance from `p` to any paved edge, m (negative = on a road; highways count
     /// 12 m wider).
     fn clearance(&self, p: V2) -> f32 {
@@ -3426,6 +3518,9 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         skipped: 0,
         interchanges: Vec::new(),
         ramp_ends: Vec::new(),
+        freeways: Vec::new(),
+        links: Vec::new(),
+        reserved: Vec::new(),
     };
     let (loop_drafts, hollins_draft, _knob, _lot, _r40w, _r40n) = g.layout();
     if let Some(r) = region {
@@ -3437,18 +3532,32 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     // Two passes: the first places the highway, the second holds each interchange terminal
     // within reach of its ramps' gores (the highway itself comes out the same).
     let first = profile_roads(&mut g, &opt, &BTreeMap::new());
-    let bounds = terminal_bounds(&g, &first, &loop_drafts, &opt);
+    let mut bounds = terminal_bounds(&g, &first, &loop_drafts, &opt);
+    freeway_bounds(&g, &first, &opt, &mut bounds);
     let profiled = profile_roads(&mut g, &opt, &bounds);
     // Loop 9 is profiled as one road, then split into two carriageways plus ramps; from here
-    // on road indices are builder indices (`remap` maps draft indices).
-    let (specs, infos, ring, remap, loop_roads, ramp_roads) =
-        divide_loop(&mut g, profiled, &loop_drafts, &opt);
-    let road_of = |draft: usize| remap[draft].expect("not a loop draft");
+    // on road indices are builder indices (`remap` maps draft indices). A region's open
+    // freeways are split the same way (their roads follow Loop 9's ramps).
+    let lines = freeway_lines(&g, &profiled);
+    let freeway_drafts: Vec<usize> = g.freeways.iter().flat_map(|f| f.drafts.clone()).collect();
+    let (mut specs, mut infos, ring, remap, loop_roads, ramp_roads) =
+        divide_loop(&mut g, profiled, &loop_drafts, &freeway_drafts, &opt);
+    let fw = divide_freeways(&mut g, lines, &mut specs, &mut infos, &opt);
+    let (specs, infos) = (specs, infos);
+    let divided = |draft: usize| -> Vec<usize> {
+        if loop_drafts.contains(&draft) {
+            loop_roads.clone()
+        } else {
+            fw.pieces_of(&g, draft)
+        }
+    };
+    let is_divided = |draft: usize| remap[draft].is_none();
+    let road_of = |draft: usize| remap[draft].expect("not a divided draft");
     let hollins = road_of(hollins_draft);
     let mut crossings = Vec::new();
     for c in &draft_crossings {
-        let upper_loop = loop_drafts.contains(&c.upper);
-        let lower_loop = loop_drafts.contains(&c.lower);
+        let upper_loop = is_divided(c.upper);
+        let lower_loop = is_divided(c.lower);
         if !upper_loop && !lower_loop {
             crossings.push(Crossing {
                 upper: road_of(c.upper),
@@ -3460,7 +3569,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         // One crossing per carriageway.
         let other = road_of(if upper_loop { c.lower } else { c.upper });
         let op = spec_path(&g.nodes, &specs[other]);
-        for &pc in &loop_roads {
+        for pc in divided(if upper_loop { c.upper } else { c.lower }) {
             for (_, _, p) in path_crossings(&spec_path(&g.nodes, &specs[pc]), &op) {
                 let (upper, lower) = if upper_loop { (pc, other) } else { (other, pc) };
                 crossings.push(Crossing {
@@ -3503,11 +3612,12 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
                 d.decks.iter().any(|(a, b)| s >= *a && s <= *b)
             }
             DeckRef::Ring => ring.in_deck(geom::xy(p)),
+            DeckRef::Line(k) => fw.lines[k].in_deck(geom::xy(p)),
             DeckRef::None => false,
         }
     };
     carve(&mut hf, &built, &g.nodes, &deck);
-    let covered = covered_spans(&g, &built, &remap, &loop_roads);
+    let covered = covered_spans(&g, &built, &remap, &divided);
     backfill_covers(&mut hf, &g.nat, &covered);
 
     let mut zones = region.map_or_else(Vec::new, |r| r.zones());
@@ -3522,6 +3632,11 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         .map(|n| g.nodes[n].pos)
         .collect();
     let grid = SurfaceGrid::new(&built, g.lo, g.hi);
+    let fw_pieces: Vec<(&'static str, f32, usize)> = fw
+        .pieces
+        .iter()
+        .map(|&(k, side, r)| (g.freeways[k].name, side, r))
+        .collect();
     let (extra_b, extra_d) = match region {
         Some(r) => r.extra_buildings(&mut Site {
             rng: &mut g.rng,
@@ -3531,6 +3646,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
             remap: &remap,
             hf: &hf,
             grid: &grid,
+            divided: &fw_pieces,
         }),
         None => (Vec::new(), Vec::new()),
     };
@@ -3738,6 +3854,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
             remap: &remap,
             hf: &hf,
             grid: &grid,
+            divided: &fw_pieces,
         }));
     }
     let (city_id, source) = match region {
@@ -3768,6 +3885,9 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         road_names: infos.iter().map(|i| i.name).collect(),
         road_speeds: infos.iter().map(|i| i.speed).collect(),
         road_grades: infos.iter().map(|i| i.grade).collect(),
+        freeway_roads: fw.pieces.iter().map(|p| p.2).collect(),
+        freeway_ramps: fw.ramps.clone(),
+        freeway_links: fw.links.clone(),
     };
     (net, report)
 }
