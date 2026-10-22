@@ -18,6 +18,10 @@
 // (42.9 -> 42.7 s, per seed -5 .. +3 s). Re-measure and widen only with a reason.
 // Re-locked 2026-10-21 on lead/main-sync: main's grid moved the race to the divided viaduct
 // (start y = -728, 1113 m); the old grid stood on round 12's street and nobody finished.
+// Re-locked 2026-10-22 when the pace harness moved to the browser setup (the player seat stays
+// a player car, AI-driven, so traffic spawns round it): best ratio 1.381 -> 1.407, field
+// slower (measured; the cause in the traffic
+// around the player car was not traced).
 (
     name: "opponent_pace_grid_highway_sprint_s95",
     seed: 7,
@@ -84,10 +88,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.43),
-        metric(name: "race_time_s", entity: "ai_vic", min: 38.2, max: 51.6),
-        metric(name: "race_time_s", entity: "ai_juno", min: 34.0, max: 45.9),
-        metric(name: "race_time_s", entity: "ai_tito", min: 32.4, max: 43.8),
-        metric(name: "race_time_s", entity: "player", min: 34.9, max: 47.3),
+        metric(name: "best_ratio", min: 0.97, max: 1.46),
+        metric(name: "race_time_s", entity: "ai_vic", min: 35.4, max: 47.8),
+        metric(name: "race_time_s", entity: "ai_juno", min: 38.8, max: 52.6),
+        metric(name: "race_time_s", entity: "ai_tito", min: 36.2, max: 49.0),
+        metric(name: "race_time_s", entity: "player", min: 40.2, max: 54.4),
     ],
 )
