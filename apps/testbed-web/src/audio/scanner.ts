@@ -4,9 +4,15 @@
 // radio EQ (mixer.radioIn: band-pass + drive on the Police bus), and the spoken line from the
 // browser's speechSynthesis (owner playtest row 79).
 //
-// Voices: each unit gets its own system voice (English voices preferred, picked by a fixed
-// hash of the unit number), pitch (wp_audio's per-unit pitch) and rate; dispatch (unit 0)
-// always uses the first voice. Limitation: speechSynthesis plays straight to the OS, so the
+// Voices (owner, 2026-10-22): officers are male, dispatch is female. Each unit gets its own
+// male system voice (English preferred, picked by a fixed hash of the unit number), pitch
+// (wp_audio's per-unit pitch, kept low) and rate; dispatch (unit 0) a female voice, pitched up.
+// Browsers do not expose a voice's gender, so it is guessed from the voice name
+// (`voiceGender`); when no voice of that gender exists the pitch carries the difference.
+//
+// Priority tiers (row 144): tier 1 (roadblock / spikes / helicopter / unit ahead) gets a
+// two-tone alert before the voice; tier 3 (impacts, wrecks) is shouted: louder static burst,
+// faster and higher speech. Tiers 4–5 are played only with "Radio: All". Limitation: speechSynthesis plays straight to the OS, so the
 // spoken words cannot pass through the Web Audio radio EQ; the squelch and static do, which
 // sells the effect. Its volume follows master × Police bus. Without speechSynthesis (or with
 // the "Police radio voice" setting off) a line is squelch + static + the radio strip's text.
@@ -20,7 +26,41 @@ export interface RadioLog {
   unit: number;
   text: string;
   priority: RadioPriority;
+  /** Police priority tier, 0 = unknown. */
+  tier: number;
   interrupted: boolean;
+}
+
+const FEMALE = /female|woman|samantha|victoria|karen|moira|tessa|fiona|zira|aria|jenny|susan|serena|allison|ava|kate|libby|sonia|hazel|heera|catherine|veena|joanna|salli|kimberly|emma|amy|nicole|olivia|natasha|clara|michelle|sara|elsa/i;
+const MALE = /\bmale\b|\bman\b|daniel|alex\b|fred|david|mark|guy|george|james|thomas|oliver|arthur|rishi|aaron|tom\b|matthew|joey|justin|brian|russell|ryan|eric|christopher|roger|steffan|william|liam|gordon|lee\b|ralph|bruce/i;
+
+/** Gender guessed from a speech voice's name ("Google UK English Female", "Microsoft David",
+ * "Samantha"); null when the name does not say. "Female" is checked first ("Female" contains
+ * "male"). */
+export function voiceGender(name: string): "female" | "male" | null {
+  if (FEMALE.test(name)) return "female";
+  if (MALE.test(name)) return "male";
+  return null;
+}
+
+/** Voice for a speaker: dispatch (unit 0) female, units male, from `all` (English preferred);
+ * falls back to voices of unknown gender, then to any voice. Pure (unit-tested). */
+export function pickVoice<V extends { name: string; lang: string }>(all: readonly V[], unit: number): V | null {
+  if (!all.length) return null;
+  const en = all.filter((v) => v.lang.toLowerCase().startsWith("en"));
+  const pool = en.length ? en : all;
+  const want = unit === 0 ? "female" : "male";
+  const exact = pool.filter((v) => voiceGender(v.name) === want);
+  const unknown = pool.filter((v) => voiceGender(v.name) === null);
+  const from = exact.length ? exact : unknown.length ? unknown : pool;
+  return unit === 0 ? from[0] : from[hash(unit) % from.length];
+}
+
+/** Speech pitch for a speaker (0..2): dispatch higher, units low (wp_audio's per-unit pitch,
+ * 0.85..1.15, scaled down), shouted tier 3 a little higher still. */
+export function speechPitch(unit: number, unitPitch: number, tier: number): number {
+  const base = unit === 0 ? 1.15 : 0.62 + (unitPitch - 0.85) * 0.5;
+  return Math.min(2, Math.max(0, base + (tier === 3 ? 0.12 : 0)));
 }
 
 /** Fixed integer hash (stable across sessions) for voice / rate picks. */
@@ -39,7 +79,9 @@ export class ScannerPlayer {
   /** speechSynthesis.speak calls made (e2e: speech is attempted when supported). */
   speechAttempts = 0;
   /** Called for every line the scanner says (the radio strip shows it). */
-  onSay: ((unit: number, text: string) => void) | null = null;
+  onSay: ((unit: number, text: string, tier: number) => void) | null = null;
+  /** Alert tones played before tier 1 lines (e2e). */
+  tones = 0;
 
   /** Recorded radio pack when shipped (the pool swaps in its procedural fallback on request). */
   private readonly pack: string;
@@ -53,35 +95,39 @@ export class ScannerPlayer {
     return typeof speechSynthesis !== "undefined" && typeof SpeechSynthesisUtterance !== "undefined";
   }
 
-  /** The system voice for a unit (null = the browser default). */
+  /** The system voice for a unit (null = the browser default): dispatch female, units male. */
   private voiceFor(unit: number): SpeechSynthesisVoice | null {
-    const all = speechSynthesis.getVoices();
-    if (!all.length) return null;
-    const en = all.filter((v) => v.lang.toLowerCase().startsWith("en"));
-    const pool = en.length ? en : all;
-    return unit === 0 ? pool[0] : pool[hash(unit) % pool.length];
+    return pickVoice(speechSynthesis.getVoices(), unit);
   }
 
-  say(line: number, unit: number, text: string, priority: RadioPriority, pitch: number): void {
+  say(line: number, unit: number, text: string, priority: RadioPriority, pitch: number, tier = 0): void {
     this.end(this.current?.line ?? -1, true);
-    this.pool.playLocal(this.pack, "radio/squelch_on", 0.6);
-    const stopStatic = this.pool.playLocal(this.pack, "radio/static", 0.12);
+    this.pool.playLocal(this.pack, "radio/squelch_on", tier === 3 ? 0.9 : 0.6);
+    // Tier 3: a louder, harsher static bed (the chaos comes across); tier 1: a two-tone alert.
+    const stopStatic = this.pool.playLocal(this.pack, "radio/static", tier === 3 ? 0.32 : 0.12);
+    let lead_s = 0;
+    if (tier === 1) {
+      lead_s = this.pool.playRadioTone([1250, 1650], 0.11, 0.18);
+      this.tones++;
+    }
     this.current = { line, stopStatic };
-    this.log.unshift({ line, unit, text, priority, interrupted: false });
+    this.log.unshift({ line, unit, text, priority, tier, interrupted: false });
     this.log.length = Math.min(this.log.length, 8);
-    this.onSay?.(unit, text);
+    this.onSay?.(unit, text, tier);
     if (this.tts && this.volume > 0 && ScannerPlayer.speechSupported()) {
       try {
         const u = new SpeechSynthesisUtterance(text);
         const voice = this.voiceFor(unit);
         if (voice) u.voice = voice;
-        u.pitch = Math.min(2, Math.max(0, pitch * 0.9));
-        // Each unit talks at its own pace; urgent / pursuit traffic a bit faster.
+        u.pitch = speechPitch(unit, pitch, tier);
+        // Each unit talks at its own pace; urgent / pursuit traffic a bit faster, shouted
+        // impact traffic faster still.
         const base = 1.05 + (hash(unit * 7 + 3) % 5) * 0.04;
-        u.rate = priority === "Urgent" || priority === "Pursuit" ? base + 0.12 : base;
-        u.volume = Math.min(1, this.volume);
+        u.rate = tier === 3 ? base + 0.25 : priority === "Urgent" || priority === "Pursuit" ? base + 0.12 : base;
+        u.volume = Math.min(1, this.volume * (tier === 3 ? 1 : 0.9));
         this.speechAttempts++;
-        speechSynthesis.speak(u);
+        if (lead_s > 0) setTimeout(() => speechSynthesis.speak(u), lead_s * 1000);
+        else speechSynthesis.speak(u);
       } catch (e) {
         console.warn("radio voice:", e);
       }

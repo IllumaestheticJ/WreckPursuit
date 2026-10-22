@@ -184,6 +184,7 @@ fn run(scene: &Scene, player: &str) -> serde_json::Value {
                         text: text.into(),
                         priority: RadioPriority::Pursuit,
                         emitted_tick: tick,
+                        tier: 0,
                     });
                 }
             }

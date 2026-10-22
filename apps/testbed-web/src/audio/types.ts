@@ -61,6 +61,8 @@ export type AudioCommand =
         unit: number;
         text: string;
         priority: RadioPriority;
+        /** Police priority tier (row 144): 1 actionable … 5 routine, 0 unknown. */
+        tier?: number;
         duration_s: number;
         voice_pitch: number;
       };

@@ -296,6 +296,8 @@ pub struct AudioDirector {
     sirens: SirenRack,
     mixer: VoiceMixer,
     scanner: Scanner,
+    /// Police radio tiers for this frame's `PoliceEvent::Radio` lines: (unit, text, tier).
+    radio_tiers: Vec<(Option<u32>, String, u8)>,
     rng: Rng,
     seed: u64,
     last_tick: Option<u64>,
@@ -351,6 +353,7 @@ impl AudioDirector {
             sirens: SirenRack::default(),
             mixer: VoiceMixer::default(),
             scanner: Scanner::default(),
+            radio_tiers: Vec::new(),
             rng: Rng::new(seed),
             seed,
             last_tick: None,
@@ -536,6 +539,20 @@ impl AudioDirector {
     /// Scanner tier of the listener.
     pub fn set_scanner_tier(&mut self, tier: ScannerTier) {
         self.scanner.set_tier(tier);
+    }
+
+    /// "Radio: Important only" (true) or "All" (false): see [`Scanner::set_important_only`].
+    pub fn set_radio_important_only(&mut self, on: bool) {
+        self.scanner.set_important_only(on);
+    }
+
+    /// Police priority tiers of the radio lines in the next [`update`](Self::update)'s
+    /// events, as `(unit, text, tier)` (`wp_police::RadioLine::tier`, numbered 1..=5). The
+    /// contract's `PoliceEvent::Radio` has no tier yet (row 144 contract request), so the
+    /// caller, which has the police radio log, passes it here; each entry is used by the first
+    /// matching line and the rest are cleared after the update.
+    pub fn set_police_radio_tiers(&mut self, tiers: Vec<(Option<u32>, String, u8)>) {
+        self.radio_tiers = tiers;
     }
 
     /// Queue a police radio line (until `PoliceEvent::Radio` exists in the contract).
@@ -1576,16 +1593,24 @@ impl AudioDirector {
         let pe = pe.clone();
         match pe {
             PoliceEvent::Radio { unit, text } => {
-                let priority = match unit {
+                let u = unit.map(|u| u.0);
+                let tier = self
+                    .radio_tiers
+                    .iter()
+                    .position(|(tu, tt, _)| *tu == u && *tt == text)
+                    .map(|k| self.radio_tiers.remove(k).2)
+                    .unwrap_or(0);
+                let priority = crate::scanner::priority_for_tier(tier).unwrap_or(match unit {
                     None => RadioPriority::Dispatch,
                     Some(_) if !self.pursuits.is_empty() => RadioPriority::Pursuit,
                     Some(_) => RadioPriority::Routine,
-                };
+                });
                 let line = RadioLine {
-                    unit: unit.map(|u| u.0).unwrap_or(0),
+                    unit: u.unwrap_or(0),
                     text,
                     priority,
                     emitted_tick: tick,
+                    tier,
                 };
                 self.scanner.push(&self.lib.config.scanner, line);
             }
@@ -1615,6 +1640,7 @@ impl AudioDirector {
                         text: text.to_string(),
                         priority: RadioPriority::Pursuit,
                         emitted_tick: tick,
+                        tier: 3,
                     };
                     self.scanner.push(&self.lib.config.scanner, line);
                 }

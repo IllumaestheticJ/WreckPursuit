@@ -166,8 +166,8 @@ async function main(): Promise<void> {
   // Police radio strip (row 79): what the scanner says, in sync with the voice; police events
   // directly while the audio is not running.
   const radioStrip = new RadioStrip(overlay);
-  audio.onRadioSay = (unit, text) => {
-    if (!crash.playing) radioStrip.push(unit || null, text);
+  audio.onRadioSay = (unit, text, tier) => {
+    if (!crash.playing) radioStrip.push(unit || null, text, performance.now(), tier);
   };
   const map = new MapOverlay(overlay);
   // Street racers (wp_wasm::street; src/ui/street.ts): their dots, the route and the challenge
@@ -1268,6 +1268,7 @@ async function main(): Promise<void> {
     weather.rainFraction = scene.quality.rainFraction;
     audio.setMix(next.volumes);
     audio.setRadioVoice(next.radioVoice);
+    audio.setRadioImportantOnly(next.radioFilter === "important");
     map.hud.setUnits(next.units);
     // Assists go through the same overrides as the developer panel's boxes.
     if (!prev || JSON.stringify(prev.assists) !== JSON.stringify(next.assists)) {
@@ -1543,7 +1544,17 @@ async function main(): Promise<void> {
       if (!audio.hearsRadio()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
-          if (r) radioStrip.push(r.unit, r.text);
+          if (!r) continue;
+          // Row 144: the line's priority tier from the police radio log (0 on old builds);
+          // "Radio: Important only" shows tiers 1–3 here too.
+          let tier = 0;
+          try {
+            tier = sim.policeRadioTier?.(r.unit ?? 0, r.text) ?? 0;
+          } catch {
+            tier = 0;
+          }
+          if (audio.radioImportantOnly() && tier >= 4) continue;
+          radioStrip.push(r.unit, r.text, performance.now(), tier);
         }
       }
       prof.lap("ui");

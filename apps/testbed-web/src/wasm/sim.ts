@@ -413,6 +413,9 @@ export const sim = {
   policeUnits: (): Float32Array => wasm.police_units(),
   /** Roadblock barriers and spike strips as oriented boxes (layout.ts TOOL_STRIDE, TL, TOOL_KIND). */
   policeTools: (): Float32Array => wasm.police_tools(),
+  /** Police priority tier of a radio line just spoken (row 144): 1 actionable … 5 routine,
+   * 0 unknown; `unit` 0 = dispatch. */
+  policeRadioTier: (unit: number, text: string): number => wasm.police_radio_tier(unit, text),
   /** Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR), same order as states(). */
   tirePunctures: (): Float32Array => wasm.tire_punctures(),
   /** 4 per vehicle (FL FR RL RR): 1 = a flat tyre on its rim in ground contact. */
