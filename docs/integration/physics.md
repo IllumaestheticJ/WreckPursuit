@@ -34,3 +34,24 @@ reference.
   `race.rs` `RadioTier::Critical` → `Escalation` (its documented successor), and
   `SpikeStrip::new` sets `scripted: false` (as the other constructor). `cargo test -p wp_police`
   green. The lead should take its own fix over this one if it differs.
+
+## Rack A/B + lock-fixed re-search (2026-10-22)
+- Tune panel buttons (`?tune=1` / F10): **rack · shipped** (0.75, 113 km/h, p 2), **rack ·
+  reference** (0.75, 172 km/h, p 4: 98 / 92 / 89 / 75 / 70 % at 60 / 100 / 110 / 140 / 150
+  km/h), **rack · full lock**. Steering only. Replaces the rejected candidate-D button.
+- `held_search` with the rack fixed (`RACK=ref|full`, also forces car-wide lock 1.0):
+
+| rack | held | yaw_ok | taps / 36 | handling fails |
+|---|---|---|---|---|
+| shipped | 2.24 s | 0.35 | 20 | 0 |
+| reference | 2.15 s | 0.33 | 12 | 0 |
+| full lock | 2.13 s | 0.33 | 12 | 0 |
+
+- **Lock-fixed search, reference rack, 4 seeds × 150 (tyres, spin model, relaxation, grip
+  balance, yaw inertia; no lock):** best held 2.68 s, and every candidate above 2.5 s breaks
+  the guard rails (taps 1–7 / 36, handling fails up to 15). The only clean one (cand 136,
+  handling 0) holds 2.59 s with taps 4 / 36. **No lock-preserving tyre / balance / inertia
+  setting gets near 3 s.** The search's old gains came from cutting lock.
+- Next (row 148): the levers the owner named. TCS Half holding the wheelspin and the hands-off
+  countersteer (30 % cap) on the held drift, then front slip-angle behaviour. The bench drives
+  TCS Off today (`reference_assists`).
