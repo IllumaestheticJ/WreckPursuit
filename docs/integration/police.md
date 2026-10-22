@@ -1046,38 +1046,35 @@ once passed.
 - Test: `tests/system.rs::nearby_patrols_sent_as_backup_also_wait_ahead` (default pool; two
   patrol units set up ahead and join facing the racer's way, heading · travel 0.96 / 1.00).
 
-## Stuck patrol cars (playtest row 39)
+## Stuck patrol cars (playtest row 115)
 Patrol cars in the Vesper traffic soak froze for good: nose to nose with traffic, in parked
-cars, tangled after a turn. Three causes, three fixes:
+cars, tangled after a turn. Two route-geometry causes (round 12's `stuck` module recovers
+cars once stuck; these stop them getting there):
 - **Road network centrelines were a lane, not the road centre** (`wp_world::roads`, D's
   crate; see `docs/integration/world.md`). Units add a 1.75 m lane offset to that line, so
   one way they drove in the parking lane and the other way on the centre line, head-on with
-  oncoming traffic.
+  oncoming traffic. Centrelines are also simplified (0.2 m): each interior point is a graph
+  node and a patrol destination.
 - **Routes turn on the spot at junction centres.** A physical car swings wide by its turning
   radius: into the oncoming lane turning right, into the parking lane turning left.
   `unit::round_junction_corners` replaces 25-150° corners with 10 m arcs (`TURN_RADIUS_M`;
   the inside lane path stays ~8 m). Applied in `Unit::set_command` for physically driven
   units without lights only: the pro driver smooths its own line, internal units follow the
   track exactly.
-- **Lane driving had no stuck handling.** `PoliceSystem::lane_input` now backs a physical
-  patrol car out for 2.5 s (held brake selects reverse, steering reversed, as the pro
-  driver does) when it is wedged (throttle on, not moving, 2 s) or in a standoff for 8 s:
-  held at a standstill by a stopped vehicle that faces it, crosses its path or overlaps it
-  (`AvoidState::standoff_s`, `Blocker::facing`). A queue behind a stopped car going the same
-  way is left alone.
 
 Measured on the Vesper traffic soak, seeds 5-12 (police-seconds still for > 5 s while
-wanting to move / units still stuck at the end): main 2935 / 72, now 481 / 4.
+wanting to move / units still stuck at the end), both with the `stuck` module: main 1793 /
+48, with these fixes 1129 / 28.
 
 Tests: `unit::tests::junction_corners_become_drivable_arcs`, `gentle_bends_and_u_turns_stay`,
-`avoid::tests::standoff_counts_for_a_car_facing_or_tangled_not_a_queue`,
 `wp_world/tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane`.
 
-Re-aimed on the corrected graph (reasons in each file): `escape_break_contact` seed 603
-(escapes per 3 runs over seeds 600-607: 1.5 before, 0.6 after; **a balance shift to review**),
-`night_core_speeder` seed 14 (seed 100 was an outlier; main gave 36-51 s on seeds 11-14),
-`wp_opponent` `live_police_chase…` seed 1 (a busted racer stays in its lane; seeds 1-8 failed
-4 of 8 on main and 3 of 8 now).
+Re-aimed on the corrected graph (reasons in each file): `escape_break_contact` seed 604
+(over seeds 600-611 main escapes on 4, this on 3); `response_day_core`
+`call_to_unit_100m_max_s` 15 -> 20 s (main itself 19.0 s on seeds 306-307; here 19.4 s on
+300-307, mean unchanged; **review with the police balance**); `wp_opponent`
+`live_police_chase…` seed 1 (a busted racer stays in its lane; seeds 1-8 failed 4 of 8 on
+main and 3 of 8 with the fix).
 
 Known gaps: a busted racer is left mid-lane and blocks the racers behind it; units queue
 behind traffic jams (correctly) at the soak's 4x density.

@@ -1480,12 +1480,14 @@ p99 0.51 m (max 5.0 m on hillsides right beside cuttings, −2.1 m on sharp ridg
 follows the drawn mesh in both). `vesper_v2.greybox.glb` regenerated (6.82 MB).
 
 
-## Road network centrelines follow the road centre (playtest row 39)
+## Road network centrelines follow the road centre (playtest row 115)
 `RoadNetworkIndex` built each edge's centreline from the node centres plus the interior
 points of the road's first lane. On curved roads (74 % of Port Vesper's edges) that is a
 lane's offset off centre, and users that offset into a lane from it (police units, 1.75 m)
 ended up one lane too far right one way and on the centre line the other way. Edges now use
 the interior points of the road surface's own centreline (`RoadSurface::centre`, oriented
-a -> b), so straight roads stay node-to-node. Test:
+a -> b), so straight roads stay node-to-node, simplified to the points that shape the
+road (Douglas-Peucker, 0.2 m): every interior point is a node in users' graphs (police patrol
+destinations). Test:
 `tests/city_v2.rs::road_network_centrelines_offset_into_the_right_lane` (1918 samples: 937 in
 the wrong lane before, 4 at junction edges after). Police side: `docs/integration/police.md`.
