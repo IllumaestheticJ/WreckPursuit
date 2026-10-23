@@ -783,3 +783,26 @@ fn a_worn_piston_set_costs_the_car_torque_and_the_engine_stand_round_trips() {
         "{worn} vs {want} (stock {stock})"
     );
 }
+
+/// Row 163: a panel torn off in a session is saved as a synthetic detached group (≥ 100),
+/// which only exists once the car's panels are attached. Repairing such a car (insured or
+/// not) used to fail with "detached group 100 not in lattice".
+#[test]
+fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 35.0);
+    let mut snap = c
+        .lattice(uid)
+        .unwrap()
+        .expect("crash stored a lattice blob");
+    snap.snapshot
+        .detached_groups
+        .insert(wp_damage::panels::SYNTHETIC_GROUP_BASE);
+    c.profile_mut()
+        .lattices
+        .insert(uid.0, serde_json::to_string(&snap).unwrap());
+    c.insure(uid, "basic").unwrap();
+    c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
+}

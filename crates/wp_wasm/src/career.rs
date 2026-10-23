@@ -626,6 +626,23 @@ impl Career {
         let loaded = self.loaded_car(car)?;
         let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
         if let Some(snap) = self.lattice(car.uid)? {
+            // A panel torn off in a session is saved as a synthetic detached group
+            // (>= SYNTHETIC_GROUP_BASE), which exists only once the car's panels are attached
+            // (as the session did): attach them before restoring (playtest row 163).
+            if snap
+                .snapshot
+                .detached_groups
+                .iter()
+                .any(|g| *g >= wp_damage::panels::SYNTHETIC_GROUP_BASE)
+            {
+                let files = self.car_files(car)?;
+                let rel = format!("panels/{}.json", car.def_id);
+                let text = simcli::data::DataSource::read(&Overlay { files: &files }, &rel)
+                    .map_err(|e| e.to_string())?;
+                let spec =
+                    wp_damage::PanelSpec::parse(&car.def_id, &text).map_err(|e| e.to_string())?;
+                model.attach_panels(&spec).map_err(|e| e.to_string())?;
+            }
             model.restore_full(&snap)?;
         }
         Ok(model)
@@ -1257,10 +1274,7 @@ impl Career {
         let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         // Build the model before paying, so a broken save cannot take money for nothing.
         let loaded = self.loaded_car(&car)?;
-        let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
-        if let Some(snap) = self.lattice(uid)? {
-            model.restore_full(&snap)?;
-        }
+        let mut model = self.damage_model(&car)?;
         let mut acct = self.profile.account.clone();
         let (order, ev) = self
             .econ
