@@ -323,6 +323,9 @@ pub struct RunMetrics {
     /// Turn-rounds by units after the evader (the pro driver facing away from its line, a
     /// reverse swing or U-turn, or backing out), each from its start to driving on, s.
     pub turn_round_s: Vec<f32>,
+    /// Row 86: active units standing still > 5 s with no reason to, how long each (s), and
+    /// what held them (`ActiveStop::branch`, `ActiveStop::blocked_by`).
+    pub active_stops_s: Vec<(f32, u8, u8)>,
     /// Police cars total-lost without / with racer contact.
     pub self_wrecks: u32,
     /// Police cars wrecked after racer contact.
@@ -527,6 +530,7 @@ pub fn run_one(
         spawns_in_view: 0,
         spawns_far_carriageway: 0,
         turn_round_s: Vec::new(),
+        active_stops_s: Vec::new(),
         searches_reacquired: 0,
         searches_escaped: 0,
         search_units: Vec::new(),
@@ -921,6 +925,10 @@ pub fn run_one(
         .iter()
         .filter(|s| s.in_sight || s.seen_after_s.is_some())
         .count() as u32;
+    m.active_stops_s = st.active_stops[base.active_stops.len()..]
+        .iter()
+        .map(|s| (s.stood_s, s.branch, s.blocked_by))
+        .collect();
     m.spawns_far_carriageway = st.spawns[base.spawns.len()..]
         .iter()
         .filter(|s| {
@@ -998,6 +1006,10 @@ pub struct CellSummary {
     pub reacquire_frac: Option<f32>,
     /// Mean police cars within [`SEARCH_ZONE_M`] of the last known spot while searching.
     pub search_units_mean: Option<f32>,
+    /// Row 86: active-unit stops over 5 s per pursuit minute.
+    pub active_stops_per_min: f32,
+    /// Row 86: their median length, s.
+    pub active_stop_med_s: Option<f32>,
     /// Turn-rounds per pursuit minute.
     pub turns_per_min: f32,
     /// Median turn-round time, s.
@@ -1104,6 +1116,16 @@ pub fn summarize(label: &str, runs: &[&RunMetrics]) -> CellSummary {
                 .collect();
             (!xs.is_empty()).then(|| xs.iter().sum::<u32>() as f32 / xs.len() as f32)
         },
+        active_stops_per_min: if pursuit_min > 0.0 {
+            runs.iter().map(|r| r.active_stops_s.len()).sum::<usize>() as f32 / pursuit_min
+        } else {
+            0.0
+        },
+        active_stop_med_s: median(
+            runs.iter()
+                .flat_map(|r| r.active_stops_s.iter().map(|s| s.0))
+                .collect(),
+        ),
         turns_per_min: if pursuit_min > 0.0 {
             runs.iter().map(|r| r.turn_round_s.len()).sum::<usize>() as f32 / pursuit_min
         } else {
@@ -1175,7 +1197,7 @@ pub const SEARCH_ZONE_M: f32 = 300.0;
 pub const PACE_MIN_MPS: f32 = 25.0;
 
 /// Column headers of [`table`].
-const HEADER: [&str; 25] = [
+const HEADER: [&str; 27] = [
     "cell",
     "runs",
     "engaged",
@@ -1198,12 +1220,14 @@ const HEADER: [&str; 25] = [
     "pop-in/min",
     "re-acquire",
     "search units",
+    "stops>5s/min",
+    "stop s",
     "turns/min",
     "turn s",
     "far-cw/min",
 ];
 
-fn row(s: &CellSummary) -> [String; 25] {
+fn row(s: &CellSummary) -> [String; 27] {
     [
         s.label.clone(),
         s.runs.to_string(),
@@ -1228,6 +1252,9 @@ fn row(s: &CellSummary) -> [String; 25] {
         s.reacquire_frac.map_or("—".to_string(), pct),
         s.search_units_mean
             .map_or("—".to_string(), |x| format!("{x:.1}")),
+        format!("{:.2}", s.active_stops_per_min),
+        s.active_stop_med_s
+            .map_or("—".to_string(), |x| format!("{x:.1}")),
         format!("{:.2}", s.turns_per_min),
         s.turn_med_s.map_or("—".to_string(), |x| format!("{x:.1}")),
         format!("{:.2}", s.far_cw_per_min),
@@ -1236,7 +1263,7 @@ fn row(s: &CellSummary) -> [String; 25] {
 
 /// Plain-text table (terminal).
 pub fn table(rows: &[CellSummary]) -> String {
-    let body: Vec<[String; 25]> = rows.iter().map(row).collect();
+    let body: Vec<[String; 27]> = rows.iter().map(row).collect();
     let mut w = HEADER.map(|h| h.chars().count());
     for r in &body {
         for (k, c) in r.iter().enumerate() {

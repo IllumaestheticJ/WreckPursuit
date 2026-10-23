@@ -422,6 +422,12 @@ pub struct Unit {
     /// The pro driver was turning round last tick (debug: bench turn-round audit).
     #[serde(skip)]
     pub turning_round: bool,
+    /// How long this unit has stood still while on an active job (row 86 audit), s.
+    #[serde(skip)]
+    pub active_stop_s: f32,
+    /// Branch and blocker when that stop began (row 86 audit).
+    #[serde(skip)]
+    pub active_stop_why: (u8, u8),
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -503,6 +509,8 @@ impl Unit {
             branch: 0,
             pro_dbg: (0.0, false),
             turning_round: false,
+            active_stop_s: 0.0,
+            active_stop_why: (0, 0),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],

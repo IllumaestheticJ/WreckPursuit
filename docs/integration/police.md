@@ -1447,6 +1447,40 @@ Re-aims:
 - Founders Cut escape + control re-seeded 51 → 53. The extras moved seed 51's loss to 64.5 s, and he escaped before the helicopter. Over seeds 50–63 the story now holds on 12 of 14, both scenarios on 7.
 - Goldens blessed: the jam pair and the Founders Cut pair.
 
+### Row 86: active units standing still — audit and two levers tried (2026-10-23)
+
+Owner: "cop not moving (stuck in the row-85 jam during an L5 pursuit)". The first part (a chasing unit held behind civilian traffic re-routes round that segment) shipped earlier.
+
+**Audit (19dbe120, kept).** `PoliceStats::active_stops` logs each episode in which an active unit (pursue, intercept, respond) stood under 1 m/s for over 5 s with no reason to. Reasons that excuse a stop: booking an arrest, blocking a junction, or its racer stopped within 40 m. Each record has what held the unit; the bench shows `stops>5s/min` and `stop s`. Baseline on round12 4d086b65, 192 runs: 1.55 stops per pursuit minute, median 6.9 s, 3231 s in all.
+
+| held by | stops | time |
+|---|---:|---:|
+| civilian traffic (kinematic) | 162 | 1216 s |
+| another police unit | 112 | 959 s |
+| nothing recorded | 96 | 728 s |
+| a vehicle | 35 | 323 s |
+
+Traces show these are recovery episodes, not units parked for good. Typical cases:
+- Two units nose to nose. Both back out and re-route; the existing deadlock reset follows after 3 s, plus 2 s if the racer can see them.
+- The queue behind such a pair.
+- Push-through stalls behind traffic (10–17 s).
+- Queues behind traffic even after re-routing.
+
+**Tried and reverted (192 runs each):**
+
+| | stops>5s/min | stop s | crash/min | capture |
+|---|---:|---:|---:|---:|
+| baseline | 1.55 | 6.9 | 1.20 | 82 % |
+| head-on pairs: lower id keeps its route, the other backs out | 1.58 | 6.9 | 1.19 | 82 % |
+| + active-unit reset 8 → 5 s, responders included | 1.31 | 6.2 | 1.54 | 79 % |
+
+The head-on rule changes nothing: the existing deadlock reset already resolves those pairs. The 5 s watchdog cuts long stops by 15 %, but police crashes rise by 28 % and captures drop, so it is not worth it.
+
+Still open in row 86:
+- treating red lights as a yield when under siren;
+- using the opposite lane or the shoulder when queued (an earlier shoulder pass drove a unit into a wall);
+- making push-through recover faster behind traffic.
+
 ### Rows 86, 96, 75 — not started yet.
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 
