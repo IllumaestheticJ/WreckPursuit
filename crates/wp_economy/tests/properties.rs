@@ -1,7 +1,7 @@
 //! Property tests required by prompt 08:
 //! - cash never goes negative except through penalties (fines / bail / towing), and debt blocks
 //!   race entry (except free meets);
-//! - repairing a fully wrecked Simulation car costs >= 60 % of its value;
+//! - repairing a fully wrecked Extreme car costs >= 60 % of its value;
 //! - durability mods always add mass and improve at most one performance stat;
 //! - mod requirements / whitelists / mode restrictions are enforced;
 //! - the class index is monotone in power and in (lower) mass.
@@ -360,7 +360,7 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Full wreck >= 60 % of value (Simulation)
+// Full wreck >= 60 % of value (Extreme; Simulation repairs cost half since v0.4.0)
 // ---------------------------------------------------------------------------------------------
 
 const CIVIL: [VehicleClass; 6] = [
@@ -374,7 +374,7 @@ const CIVIL: [VehicleClass; 6] = [
 
 proptest! {
     #[test]
-    fn full_wreck_in_simulation_costs_at_least_60_percent(
+    fn full_wreck_in_extreme_costs_at_least_60_percent(
         class_i in 0usize..6,
         value_t in 0.0f32..1.0,
         n_mods in 0usize..12,
@@ -405,8 +405,8 @@ proptest! {
         let table = e.price_table_for(&car);
         let all: Vec<(RepairItem, f32)> = ALL_REGIONS.iter().map(|r| (RepairItem::Region(*r), 1.0))
             .chain(ALL_COMPONENTS.iter().map(|c| (RepairItem::Component(*c), 1.0))).collect();
-        let sim = e.mode_table(DamageMode::Simulation).repair_cost_scale;
-        car.damage.outstanding = reference_estimate(&table, sim, &all);
+        let extreme = e.mode_table(DamageMode::Extreme).repair_cost_scale;
+        car.damage.outstanding = reference_estimate(&table, extreme, &all);
         car.damage.total_loss = true;
         car.damage.health = 0.0;
         let value = e.car_value(&car);
@@ -417,7 +417,7 @@ proptest! {
             kind: if crooked { ShopKind::Crooked } else { ShopKind::Legit },
             wanted: WantedLevel::None,
         };
-        let q = e.quote_repair(&a, wp_economy::CarUid(1), &RepairOption::RepairAll, &shop, DamageMode::Simulation).unwrap();
+        let q = e.quote_repair(&a, wp_economy::CarUid(1), &RepairOption::RepairAll, &shop, DamageMode::Extreme).unwrap();
         prop_assert!(q.gross as f32 >= 0.6 * value as f32, "class {class:?} value {value} repair {}", q.gross);
     }
 }

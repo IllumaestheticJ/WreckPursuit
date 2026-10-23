@@ -31,3 +31,6 @@ A spike strip now exists only while a police unit is parked beside it:
 
 ## Known gaps
 - Roadblocks have the same shape (barriers can outlive their units); not changed here.
+- `crates/wp_economy/tests/properties.rs`: the "full wreck costs ≥ 60 % of value" property now
+  runs in Extreme. Since v0.4.0, Simulation repairs cost half (`sim.toml` `repair_cost_scale = 0.5`),
+  so some random inputs failed CI (e.g. Beater at 58 %). The user asked for this fix on this PR.
