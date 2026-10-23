@@ -9,6 +9,7 @@ import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Button, Meter, Money, Panel, severityColor, Stat } from "../ui/kit";
 import { pct, words } from "../ui/format";
+import { CarThumb } from "../ui/CarThumb";
 import type { CareerView, ListingView, LotKind, LotStockView } from "./types";
 import "./garage.css";
 
@@ -152,6 +153,7 @@ function LotScreen({ api }: { api: LotVisitApi }) {
               onClick={() => pick(c.slot)}
               data-slot={c.slot}
             >
+              <CarThumb id={c.def_id} size="md" alt={c.name} />
               <div class="wp-spread">
                 <b class="wp-upper">{c.name}</b>
                 <Money value={c.price} />

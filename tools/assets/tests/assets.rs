@@ -1026,3 +1026,28 @@ fn every_car_has_turn_signals_integrated_into_its_lamps() {
     }
     assert!(parity >= 4, "parity meshes checked: {parity}");
 }
+
+/// Every car has a menu thumbnail and turntable strip (`data/cars/thumbs/`) rendered from its
+/// current mesh (cars audit F26). Regenerate with `cargo run -p car-assets --bin gen-thumbs`.
+#[test]
+fn every_car_has_up_to_date_thumbnails() {
+    use car_assets::thumb::{is_current, thumb_path, thumbnail, turntable, turntable_path, Image};
+    let root = repo_root();
+    for id in car_ids(&root) {
+        let car = load_car(&root, &id).unwrap();
+        let mesh = load_mesh(&mesh_path(&root, &id)).unwrap();
+        for (fresh, path) in [
+            (thumbnail(&mesh, &car.def), thumb_path(&root, &id)),
+            (turntable(&mesh, &car.def), turntable_path(&root, &id)),
+        ] {
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("{id}: {}: {e}; run gen-thumbs", path.display()));
+            let disk = Image::from_png(&bytes).unwrap();
+            assert!(
+                is_current(&disk, &fresh),
+                "{id}: {} is stale; run `cargo run -p car-assets --bin gen-thumbs`",
+                path.display()
+            );
+        }
+    }
+}

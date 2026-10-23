@@ -5,6 +5,7 @@ import type { MarketListing } from "../../model/types";
 import { salePrice } from "../../data/economy";
 import { Badge, Button, CarStatBars, ChoiceField, Money, Panel, ScreenHead, Tabs, useEscape } from "../../ui/kit";
 import { CAR_STATS } from "../../data/catalog";
+import { CarThumb } from "../../ui/CarThumb";
 import { pct, words } from "../../ui/format";
 import "./garage.css";
 
@@ -75,9 +76,14 @@ export function Market() {
               {rows.map((l) => (
                 <tr key={`${l.defId}-${l.condition}`}>
                   <td>
-                    <b>{l.name}</b>
-                    <div class="wp-dim" style={{ fontSize: "0.8em" }}>
-                      {l.analogOf}
+                    <div class="wp-row" style={{ gap: "0.6em" }}>
+                      <CarThumb id={l.defId} alt={l.name} />
+                      <div>
+                        <b>{l.name}</b>
+                        <div class="wp-dim" style={{ fontSize: "0.8em" }}>
+                          {l.analogOf}
+                        </div>
+                      </div>
                     </div>
                   </td>
                   <td>{words(l.class)}</td>
@@ -115,7 +121,7 @@ export function Market() {
               {cars.map((c) => (
                 <tr key={c.uid}>
                   <td>
-                    <b>{c.name}</b> {c.location.kind === "Impound" && <Badge tone="danger">Impound</Badge>} {c.totalLoss && <Badge tone="danger">Total loss</Badge>}
+                    <CarThumb id={c.defId} alt={c.name} /> <b>{c.name}</b> {c.location.kind === "Impound" && <Badge tone="danger">Impound</Badge>} {c.totalLoss && <Badge tone="danger">Total loss</Badge>}
                   </td>
                   <td class="num">{pct(c.health)}</td>
                   <td class="num">{c.mods.length}</td>

@@ -7,7 +7,9 @@
 //!   interior and wheels, skinned to the lattice by [`skin::bind_skin`] (`bind-skin`),
 //! - its mid level of detail `data/panels/meshes/mid/<car>.json` ([`mesh::generate_mid`],
 //!   also `gen-car-mesh`; unskinned, for the browser's instanced far cars),
-//! - checked by [`validate::validate`] (`validate-car-asset`).
+//! - checked by [`validate::validate`] (`validate-car-asset`),
+//! - menu thumbnails and turntable strips `data/cars/thumbs/<car>.png` / `.turn.png`
+//!   ([`thumb`], `gen-thumbs`).
 //!
 //! The body shape, details, wheels and mechanical parts of each car come from its
 //! [`style::CarStyle`] ([`style::style_for`]): per-car style modules in [`styles`], the
@@ -26,6 +28,7 @@ pub mod profile;
 pub mod skin;
 pub mod style;
 pub mod styles;
+pub mod thumb;
 pub mod validate;
 pub mod wheels;
 

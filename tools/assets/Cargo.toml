@@ -12,6 +12,8 @@ wp_math.workspace = true
 wp_damage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Thumbnails (gen-thumbs). Tool crate, not reachable from wp_wasm.
+png = "0.18"
 
 [[bin]]
 name = "gen-car-mesh"
@@ -28,6 +30,10 @@ path = "src/bin/validate_car_asset.rs"
 [[bin]]
 name = "gen-panels"
 path = "src/bin/gen_panels.rs"
+
+[[bin]]
+name = "gen-thumbs"
+path = "src/bin/gen_thumbs.rs"
 
 [[bin]]
 name = "panels-bench"

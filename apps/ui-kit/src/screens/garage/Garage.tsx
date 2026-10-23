@@ -12,6 +12,7 @@ import { MODS } from "../../data/catalog";
 import { statSourceLabel, useBuildStats } from "../../data/measure";
 import { DamageSilhouette } from "../hud/DamageSilhouette";
 import { Badge, Button, CarStatBars, Meter, Money, Panel, ScreenHead, severityColor, Tabs, useEscape } from "../../ui/kit";
+import { CarThumb } from "../../ui/CarThumb";
 import { pct, words } from "../../ui/format";
 import "./garage.css";
 
@@ -88,6 +89,7 @@ function CarDetail({ car, active }: { car: GarageCar; active: boolean }) {
         <div class="wp-garage-hero-grid">
           <DamageSilhouette regions={dmg.regions} detached={dmg.detached} components={dmg.components} totalLoss={car.totalLoss} width="8em" labels />
           <div class="wp-stack">
+            <CarThumb id={car.defId} size="lg" alt={car.name} />
             <div class="wp-grid" style={{ gridTemplateColumns: "repeat(3, auto)", justifyContent: "start", columnGap: "2em" }}>
               <div>
                 <div class="wp-dim wp-mono wp-upper" style={{ fontSize: "0.68em" }}>Condition</div>

@@ -10,6 +10,8 @@ cargo run -p car-assets --bin gen-panels            # data/panels/<car>.json (fi
 cargo run -p car-assets --bin gen-panels -- --check # exit 1 if a spec differs from the derived one
 cargo run -p car-assets --bin gen-car-mesh          # data/panels/meshes/<car>.json (+ bind-skin) and meshes/mid/<car>.json
 cargo run -p car-assets --bin gen-car-mesh -- --check  # exit 1 if a mesh is stale
+cargo run -p car-assets --bin gen-thumbs            # data/cars/thumbs/<car>.png + <car>.turn.png (menu thumbnails, turntable)
+cargo run -p car-assets --bin gen-thumbs -- --check # exit 1 if a thumbnail is missing or stale (re-run after gen-car-mesh)
 cargo run -p car-assets --bin bind-skin -- data/panels/meshes/<car>.json [data/lattices/<id>.json]
 cargo run -p car-assets --bin validate-car-asset [car ...]
 cargo run --release -p car-assets --bin panels-bench # perf, 24 cars

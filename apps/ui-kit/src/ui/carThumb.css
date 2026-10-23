@@ -1,0 +1,42 @@
+/* Car thumbnails (CarThumb.tsx). The turntable strip is 12 frames wide; it slides one frame
+   per step while the thumbnail is hovered / focused (or always with --spin). */
+.wp-carthumb {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  flex: none;
+  vertical-align: middle;
+}
+.wp-carthumb--sm { width: 96px; height: 54px; }
+.wp-carthumb--md { width: 160px; height: 90px; }
+.wp-carthumb--lg { width: 320px; height: 180px; max-width: 100%; }
+.wp-carthumb img { display: block; height: 100%; pointer-events: none; user-select: none; }
+.wp-carthumb-still { width: 100%; object-fit: contain; }
+.wp-carthumb-turn {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(100% * var(--wp-turn-frames, 12));
+  max-width: none;
+  visibility: hidden;
+}
+tr:hover .wp-carthumb-turn,
+button:hover .wp-carthumb-turn,
+button:focus-visible .wp-carthumb-turn,
+.wp-carthumb:hover .wp-carthumb-turn,
+.wp-carthumb--spin .wp-carthumb-turn {
+  visibility: visible;
+  animation: wp-carthumb-turn 3s steps(12) infinite;
+}
+tr:hover .wp-carthumb-still,
+button:hover .wp-carthumb-still,
+button:focus-visible .wp-carthumb-still,
+.wp-carthumb:hover .wp-carthumb-still,
+.wp-carthumb--spin .wp-carthumb-still { visibility: hidden; }
+@keyframes wp-carthumb-turn {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wp-carthumb-turn { display: none; }
+  .wp-carthumb .wp-carthumb-still { visibility: visible !important; }
+}

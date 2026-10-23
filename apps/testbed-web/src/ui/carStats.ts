@@ -21,12 +21,21 @@ export class CarStatBars {
   private readonly fills: HTMLElement[] = [];
   private readonly values: HTMLElement[] = [];
   private readonly name: HTMLElement;
+  /** The car's menu thumbnail (data/cars/thumbs/<car>.png, `car-assets gen-thumbs`). */
+  private readonly thumb: HTMLImageElement;
 
   constructor(
     private readonly el: HTMLElement,
     private readonly table: CarStatsTable,
   ) {
     el.classList.add("car-stats");
+    this.thumb = document.createElement("img");
+    this.thumb.className = "car-stats-thumb";
+    this.thumb.alt = "";
+    this.thumb.width = 160;
+    this.thumb.height = 90;
+    this.thumb.onerror = () => (this.thumb.style.display = "none");
+    el.append(this.thumb);
     this.name = document.createElement("div");
     this.name.className = "car-stats-name";
     el.append(this.name);
@@ -57,6 +66,8 @@ export class CarStatBars {
     this.el.classList.toggle("hidden", !s);
     if (!s) return;
     this.el.dataset.car = carId;
+    this.thumb.style.display = "";
+    this.thumb.src = `data/cars/thumbs/${carId}.png`;
     this.name.textContent = s.display_name;
     BARS.forEach((b, i) => {
       const v = Math.min(1, Math.max(0, s.bars[b.key]));

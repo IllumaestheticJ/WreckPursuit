@@ -455,6 +455,7 @@ dependencies = [
 name = "car-assets"
 version = "0.1.0"
 dependencies = [
+ "png",
  "serde",
  "serde_json",
  "simcli",

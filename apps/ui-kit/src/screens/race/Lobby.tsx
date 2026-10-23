@@ -5,6 +5,7 @@
 import type { Role } from "../../generated/contracts";
 import { useSend, useSlice } from "../../model/GameModel";
 import { CARS } from "../../data/catalog";
+import { CarThumb } from "../../ui/CarThumb";
 import { Badge, Button, Money, Panel, ScreenHead, useEscape } from "../../ui/kit";
 import { words } from "../../ui/format";
 import "./race.css";
@@ -85,7 +86,16 @@ export function Lobby() {
                   <td>
                     <Badge tone={e.role === "Racer" ? "ok" : e.role === "Spectator" ? "dim" : "danger"}>{words(e.role)}</Badge>
                   </td>
-                  <td>{e.car ? CARS[e.car]?.display_name ?? e.car : <span class="wp-dim">—</span>}</td>
+                  <td>
+                    {e.car ? (
+                      <span class="wp-row" style={{ gap: "0.5em" }}>
+                        <CarThumb id={e.car} alt={CARS[e.car]?.display_name ?? e.car} />
+                        {CARS[e.car]?.display_name ?? e.car}
+                      </span>
+                    ) : (
+                      <span class="wp-dim">—</span>
+                    )}
+                  </td>
                   <td class="num">{e.classIndex ?? "—"}</td>
                   <td class="num">{e.ready ? <span class="wp-ok">READY</span> : <span class="wp-dim">…</span>}</td>
                 </tr>

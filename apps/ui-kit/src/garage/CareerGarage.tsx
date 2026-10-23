@@ -15,6 +15,7 @@ import { createContext, render, type ComponentChildren } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Button, Delta, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
+import { CarThumb } from "../ui/CarThumb";
 import type {
   CareerApi,
   CarTune,
@@ -97,6 +98,7 @@ function StatGrid({ now, after }: { now: StatsView; after?: StatsView | null }) 
 function CarCard({ car, selected, onSelect }: { car: CarView; selected: boolean; onSelect: () => void }) {
   return (
     <button type="button" class="wp-cg-card" aria-selected={selected} onClick={onSelect} data-testid={`car-${car.uid}`}>
+      <CarThumb id={car.def_id} size="md" alt={car.name} />
       <div class="wp-spread">
         <b class="wp-upper">{car.name}</b>
         <span class="wp-dim wp-mono">{words(car.class)}</span>
@@ -604,7 +606,10 @@ function DealerTab(props: { view: CareerView; api: CareerApi; run: (f: () => Car
           {view.dealer.map((d) => (
             <tr key={d.def_id} data-car={d.def_id}>
               <td>
-                <b>{d.name}</b>
+                <span class="wp-row" style={{ gap: "0.6em" }}>
+                  <CarThumb id={d.def_id} alt={d.name} />
+                  <b>{d.name}</b>
+                </span>
               </td>
               <td class="wp-dim">{words(d.class)}</td>
               <td class="num">
