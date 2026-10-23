@@ -23,13 +23,13 @@ struct Ram {
     others: usize,
 }
 
-/// City free drive or the city chase, street racers on or off; after `warm_s` put the player
+/// City free drive or the night run, street racers on or off; after `warm_s` put the player
 /// 25 m behind the nearest moving traffic agent, on its lane, 12 m/s faster, and drive straight
 /// for 4 s (up to three tries).
 fn ram(chase: bool, street_on: bool, extra: usize, warm_s: u32) -> Ram {
     set_street_racers_enabled(street_on);
     let mut sc = if chase {
-        crate::scenario::city_chase("debug_sedan", DamageMode::Arcade)
+        crate::scenario::night_run("debug_sedan", DamageMode::Arcade)
     } else {
         free_drive("debug_sedan", DamageMode::Arcade, true)
     };
@@ -174,7 +174,7 @@ fn orphaned(s: &Session) -> usize {
 fn player_collides_with_traffic_in_the_city() {
     for (chase, street) in [(false, false), (false, true), (true, false), (true, true)] {
         let r = ram(chase, street, 0, 4);
-        println!("city chase {chase}, street racers {street}: {r:?}");
+        println!("night run {chase}, street racers {street}: {r:?}");
         assert!(
             r.promoted,
             "the traffic car near the player is physical: {r:?}"

@@ -242,7 +242,7 @@ simcli scenario suite, so I ran it in release.)
 ## City chase in the browser (A, on request; touches C's / M's areas) — reverted by the lead in run 6
 
 Asked for directly by the owner. Additive changes outside my crates:
-- `crates/wp_wasm`: `city_chase_json(car, mode)` preset (procedural city, 23:00, traffic 1.0,
+- `crates/wp_wasm`: `night_run_json(car, mode)` preset (procedural city, 23:00, traffic 1.0,
   police 1.0, player on the race grid at 90 km/h); `live_vehicles()` (`[entity, kind]` for every
   sim vehicle incl. sim-spawned police/traffic); `vehicle_info` works for sim-spawned vehicles and
   reports `kind`; `Session::car()` resolves their cars (cache by car id); debug

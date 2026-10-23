@@ -1,4 +1,4 @@
-// City-chase visual playtest in headless Chromium: drives the chase, screenshots it, reports
+// Night-run visual playtest in headless Chromium: drives the chase, screenshots it, reports
 // overlapping HUD panels, checks every layer key toggles its layer (and that camera keys 1–8
 // pick cameras), and screenshots the F1 help.
 // Usage: node e2e/playtest_chase.mjs [outDir] [viewport WxH]   (needs `npm run wasm`).
@@ -43,7 +43,7 @@ await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
 const shot = (name) => page.screenshot({ path: join(out, name) });
 
-await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 await page.keyboard.down("KeyW");
 // 12 s of sim time (SwiftShader runs the city below real time).
 await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] > 240 * 12, null, { timeout: 180000 });

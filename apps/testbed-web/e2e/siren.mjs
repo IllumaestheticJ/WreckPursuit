@@ -5,7 +5,7 @@
 //    650 → 1600 Hz and back, the yelp sweeps ~3.3 times a second, Doppler moves the hi-lo tones
 //    up for an approaching car and down for a receding one, whoop and air horn sound, and no
 //    pitch curve is ever rejected (the playtest row-30 class of bug; CurvePlan fuzzed too).
-// 2. Live: city chase, player parked in front of a patrol car with heat → the pursuing unit's
+// 2. Live: night run, player parked in front of a patrol car with heat → the pursuing unit's
 //    siren voice plays on the Police bus (cue-driven), forced pattern changes are heard and
 //    crossfade, no page / audio errors, audio frame cost stays small.
 import { spawn } from "node:child_process";
@@ -171,7 +171,7 @@ await page.waitForTimeout(3000);
 await page.keyboard.up("KeyW");
 const baseMs = await page.evaluate(() => window.__wpAudio.frameMs);
 
-await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 const parked = await page
   .waitForFunction(
     () => {

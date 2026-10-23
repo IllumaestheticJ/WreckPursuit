@@ -1,7 +1,7 @@
 //! Street racers (lead): NPC racers who cruise the city in free roam and race the player from
 //! where they meet (A) to a finish the player picks (B), for a bet.
 //!
-//! - **Roster.** A live free-drive or city-chase session in a city gets the [`ROSTER`]: 13
+//! - **Roster.** A live free-drive or night-run session in a city gets the [`ROSTER`]: 13
 //!   racers over the four [`LEVELS`] (2 Street … 5 Legend), each level with its own car pool,
 //!   driver skill and bet range, spawned [`SPAWN_SPACING_M`] apart. By day 8 are out (two per
 //!   level); at night ([`is_night`]) 13, four of them lapping the Loop 9 highway (owner row
@@ -333,7 +333,7 @@ pub fn is_street_entity(spec: &EntitySpec) -> bool {
     parse_entity_id(&spec.id).is_some()
 }
 
-/// A live session of `sc` gets street racers added: a free drive or city chase (any weather)
+/// A live session of `sc` gets street racers added: a free drive or night run (any weather)
 /// in a city, with the default systems, and no street racers in it yet (a scenario saved from
 /// a street session keeps its own). Picker races, menu scenarios and simcli scenario files
 /// never get them.
@@ -341,7 +341,7 @@ pub fn scenario_wants_racers(sc: &Scenario) -> bool {
     sc.city != CitySpec::Flat
         && sc.systems.is_none()
         && sc.expect.is_empty()
-        && (sc.name.starts_with("free_drive") || sc.name.starts_with("city_chase"))
+        && (sc.name.starts_with("free_drive") || sc.name.starts_with("night_run"))
         && !sc.entities.iter().any(is_street_entity)
 }
 

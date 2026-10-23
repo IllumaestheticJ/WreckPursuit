@@ -9,7 +9,7 @@ use wp_economy::{CarLocation, CarUid, Condition, Economy, RepairOption, RunEnd, 
 
 use crate::career::{Career, ShopRequest};
 use crate::run::RunOutcome;
-use crate::scenario::{city_chase_in, free_drive, procedural_city};
+use crate::scenario::{free_drive, night_run_in, procedural_city};
 use crate::session::Session;
 
 fn econ() -> Economy {
@@ -319,9 +319,9 @@ fn economy_floor_always_gives_a_car() {
     assert!(c.floor_car().is_err(), "only with no usable car");
 }
 
-/// A career city chase with the player parked in front of a patrol car at `heat`.
+/// A career night run with the player parked in front of a patrol car at `heat`.
 fn career_chase_parked(c: &mut Career, heat: f32) -> Session {
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = c.start_run(sc).unwrap();
     let id = player(&s);
@@ -441,7 +441,7 @@ fn auction_takes_an_unclaimed_car() {
 #[test]
 fn heat_carries_into_the_next_night() {
     let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = c.start_run(sc).unwrap();
     let id = player(&s);
@@ -455,7 +455,7 @@ fn heat_carries_into_the_next_night() {
         "{}",
         close.carried_heat
     );
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let s = c.start_run(sc).unwrap();
     let heat = s.sim().police().racer(player(&s)).map(|r| r.heat).unwrap();
@@ -566,7 +566,7 @@ fn closing_the_game_when_not_pursued_is_free() {
     c.finish_run(&mut s).unwrap();
 
     // Wanted, nobody chasing: no bust, the heat carries like a free end (40 → 20).
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = c.start_run(sc).unwrap();
     let id = player(&s);
