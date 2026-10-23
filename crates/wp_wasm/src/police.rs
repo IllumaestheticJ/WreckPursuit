@@ -354,6 +354,7 @@ mod tests {
             terrain: None,
             covered: vec![],
             decor: vec![],
+            features: Default::default(),
         }
     }
 

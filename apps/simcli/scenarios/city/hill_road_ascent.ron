@@ -26,7 +26,9 @@
         metric(name: "max_airborne_s", min: 0.0, max: 0.05),
         metric(name: "max_speed_mps", min: 10.0, max: 12.5),
         metric(name: "crush_depth_m", min: 0.0, max: 0.02),
-        metric(name: "path_length_m", min: 900.0, max: 1600.0),
+        // 851 m since the PR #38 port (the Hollins Ascent grid moved east across the Hollins
+        // Gorge Bridge: ≈ 77 m climb); 1.2 km before.
+        metric(name: "path_length_m", min: 800.0, max: 1600.0),
         total_loss(expected: false),
     ],
 )

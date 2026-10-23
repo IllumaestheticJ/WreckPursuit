@@ -182,9 +182,11 @@ fn drawn_terrain_stays_under_roads_and_follows_the_ground() {
     );
     assert!(gaps.len() > 100_000);
     // Measured: p50 0.05 (the 5 cm offset), p95 0.19, p99 0.51 m; the old "lowest ground
-    // within 10 m" mesh had ~10 % of these samples more than 1 m low (up to 10.7 m).
+    // within 10 m" mesh had ~10 % of these samples more than 1 m low (up to 10.7 m). Round 12:
+    // p95 0.23, p99 0.70. With the Vesper River and Calder Canal (PR #38 port; their steep
+    // banks): p95 0.25, p99 0.78.
     assert!(q(0.95) < 0.3, "p95 {}", q(0.95));
-    assert!(q(0.99) < 0.75, "p99 {}", q(0.99));
+    assert!(q(0.99) < 0.85, "p99 {}", q(0.99));
 }
 
 /// A flat terrain field (main gives the procedural grid one under its viaduct) is collided
