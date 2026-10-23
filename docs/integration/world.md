@@ -1834,3 +1834,38 @@ a car in its lane head-on still triggers it.
   `opponent_reverse_grid_2laps`, `race_city_sprint_police`, `world_traffic_soak`; 45/45
   scenarios pass.
 - **Perf:** `surface_at` 0.61 µs/query (0.49 before, same run), markings 0.17 µs (0.13).
+
+### Follow-up: street-race picks stand for the whole road; clearing a start (2026-10-23)
+Owner: "the betting map gets confused on Loop 9 if I don't pick exactly the right lane — make
+the gate cover the whole road" and "in betting mode for free roam pause both cars and clear the
+area out for race start".
+- **Cause:** routes never change lanes mid-road, and Loop 9's three lanes per carriageway are
+  separate lane chains, so `plan_route_via` (which snapped a pick to one nearby lane) found a
+  pick on the "wrong" lane unreachable ("no road route through those waypoints") and a pick on
+  the far carriageway reachable only by lapping the loop (westbound from the north grid, a
+  waypoint 700 m on: 708 m on one lane, no route on two others, 4.9 km on the far side).
+- **`routes::plan_route_via`:** a pick (waypoint or finish) now stands for every lane abreast
+  of it along its road, both directions (`road_lanes_at`: within 22 m beyond the nearest lane,
+  parallel or opposite, same height ±4 m, not end-on across a junction). One bounded
+  multi-target A* (`paths_to_any`, gives up at 2× the quickest + 60 s) per pick; a waypoint
+  takes the lane quickest to reach plus quickest to leave for the next pick, the finish the
+  quickest to reach. With no waypoints the finish also covers the road now (no longer exactly
+  `plan_route`). Only street races call it.
+- **`Traffic::clear_near` / `World::clear_traffic_near` / `Sim::clear_traffic_near`:** despawn
+  every civilian car (wrecks too) within a radius now; physical ones lose their body at once.
+  New replay op `simcli::replay::OpKind::ClearTraffic { xy, radius_m }` (kind byte 8; older
+  replays read unchanged).
+- **`wp_wasm::street` (lead):** a waypoint gate counts on a line across the whole road
+  (`GATE_HALF_SPAN_M` 26 m either side, `GATE_DEPTH_M` 8 m deep) as well as the 20 m radius;
+  the player is held at a halt while an offer is open (the racer already waits), a honk with
+  the map closed calls it off; accepting logs `ClearTraffic` (80 m round the grid) before the
+  start moves.
+  Owner, same day: "the AI got away with winning without hitting all the waypoints": the
+  racer's finish (at B, along-route progress, or the end of its run) ignored the gates. Now the
+  racer passes the same gates in order (`racer_next_gate`); B counts for it only after all of
+  them, a run ended with one missed loses ("they missed a waypoint"), and at the time limit
+  each car's progress is capped at its next unpassed gate.
+- **Tests:** `world.rs` `route_via_waypoint_on_either_loop9_carriageway` (a pick on each of
+  Loop 9's six lanes routes along the near carriageway), `route_via_waypoints_passes_them_in_order`
+  (now: within the road); `street.rs` `a_gate_spans_the_whole_road`, `gates_count_in_order_and_cap_progress`; `street_tests.rs`
+  `betting_holds_both_cars_and_the_start_is_cleared`; replay round trip carries the new op.

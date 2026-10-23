@@ -99,6 +99,14 @@ pub enum OpKind {
         /// Allowed (`true`) or not.
         on: bool,
     },
+    /// `Sim::clear_traffic_near` (a street race start clears its grid of civilian cars; the
+    /// entity index is ignored).
+    ClearTraffic {
+        /// Centre, world m.
+        xy: [f32; 2],
+        /// Radius, m.
+        radius_m: f32,
+    },
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -263,6 +271,12 @@ impl Replay {
                     w.push(7);
                     w.push(on as u8);
                 }
+                OpKind::ClearTraffic { xy, radius_m } => {
+                    w.push(8);
+                    for f in [xy[0], xy[1], radius_m] {
+                        put_f32(&mut w, f);
+                    }
+                }
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -382,6 +396,10 @@ impl Replay {
                     },
                     7 => OpKind::LightWhenFar {
                         on: r.take(1)?[0] != 0,
+                    },
+                    8 => OpKind::ClearTraffic {
+                        xy: [r.f32()?, r.f32()?],
+                        radius_m: r.f32()?,
                     },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
@@ -741,6 +759,14 @@ mod tests {
                     tick: 3,
                     entity: 0,
                     op: OpKind::LightWhenFar { on: false },
+                },
+                OpEvent {
+                    tick: 4,
+                    entity: 0,
+                    op: OpKind::ClearTraffic {
+                        xy: [-40.0, 7.5],
+                        radius_m: 60.0,
+                    },
                 },
             ],
             tick_hashes: vec![1, 3],
