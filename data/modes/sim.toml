@@ -27,7 +27,7 @@ plasticity_scale = 0.8                 # extreme x 0.8   — dents set a little 
 beam_break_scale = 1.5                 # extreme x 1.5   — beams/parts tougher before breaking
 component_damage_scale = 0.24          # extreme x 0.24  — components lose health slower (round 12b: 0.3)
 component_fail_threshold_scale = 4.0   # extreme x 4.0   — components tolerate more intrusion (round 12b: 3.5)
-total_loss_health = 0.1                # extreme 0.25 -> 0.10 — kept (wp_economy career proxy, see docs/integration/damage.md)
+total_loss_health = 0.2                # extreme 0.25 -> 0.20 — just under the ~0.17-0.25 health plateau of a spent structure (B8 fix, 2026-10-23; was 0.10 = never reached)
 cabin_intrusion_total_loss_m = 0.78    # extreme x 3.1   — 0.25 m -> 0.78 m (round 12b: 0.6)
 repair_cost_scale = 0.5                # extreme x 0.5   — cheaper repairs (round 13 proposed 0.4: wp_economy balance, request to G)
 wheel_detach_scale = 0.42              # extreme x 0.42  — wheels stay on ~2.4x as long (round 12b: 0.5)

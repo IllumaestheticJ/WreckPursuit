@@ -1133,10 +1133,12 @@ fn sim_hard_hits_degrade_and_several_wreck_the_car() {
         }
     }
     // Round 13 (owner row 87): about 4–6 hard hits end the car (round 12b: 3, when cabin
-    // intrusion reached the old 0.6 m limit). This damage-only sequence reads 7: the car limps
-    // (failed rack, half the lock) from hit 3 on and crosses the pull-over health on hit 7.
+    // intrusion reached the old 0.6 m limit). Playtest B8 (2026-10-23): `total_loss_health`
+    // 0.10 -> 0.20 so a spent structure is a total loss (the health plateau sat above 0.10 and
+    // no number of hits ever totalled the car); this damage-only sequence now ends on hit 3
+    // (it read 7, at the pull-over health, before).
     assert!(
-        (4..=7).contains(&hits) && (wrecked(&m) || m.health() < 0.15),
+        (3..=5).contains(&hits) && (wrecked(&m) || m.health() < 0.15),
         "80 km/h hits ended the car after {hits}"
     );
     assert!(
@@ -1412,4 +1414,90 @@ fn forgiving_rules_by_mode() {
     assert!(crate::forgiving_rules(DamageMode::Arcade));
     assert!(crate::forgiving_rules(DamageMode::Simulation));
     assert!(!crate::forgiving_rules(DamageMode::Extreme));
+}
+
+/// Hit a fresh sedan `max` times with the same barrier impact (the barrier car is a racer, so
+/// Arcade's `racer_damage_scale` applies as in `run_barrier`), letting the lattice settle after
+/// each hit. Returns the health after every hit and the hit that made the car a total loss.
+fn repeated_hits(
+    mode: &ModeTable,
+    kind: ImpactKind,
+    kmh: f32,
+    max: usize,
+) -> (Vec<f32>, Option<usize>) {
+    let car = sedan();
+    let (lo, hi) = sedan_bounds(&car);
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    let mut out = Vec::new();
+    let mut health = Vec::new();
+    let mut total_at = None;
+    for hit in 1..=max {
+        let (mut c0, mut c1) =
+            crate::barrier::barrier_contacts(lo, hi, kind, kmh / 3.6, car.def.mass_kg, 0.0);
+        crate::scale_racer_contacts(&mut c0, mode);
+        crate::scale_racer_contacts(&mut c1, mode);
+        m.apply_contacts(&c0, mode, PHYSICS_DT, &mut out);
+        m.apply_contacts(&c1, mode, PHYSICS_DT, &mut out);
+        for _ in 0..720 {
+            m.apply_contacts(&[], mode, PHYSICS_DT, &mut out);
+            if !m.is_awake() {
+                break;
+            }
+        }
+        health.push(m.health());
+        if total_at.is_none() && m.is_total_loss() {
+            total_at = Some(hit);
+        }
+    }
+    (health, total_at)
+}
+
+/// Playtest B8 (2026-10-23): the three damage curves on repeated rigid-barrier frontal hits.
+/// - Extreme: one hard hit at speed (>= 80 km/h into a rigid barrier) is a total loss.
+/// - Simulation: one hard hit degrades and stays drivable; a few hard hits end the car
+///   (3-4 at 80 km/h, 2-3 at 100 km/h, 1-2 at 145 km/h); 50 km/h hits take many.
+/// - Arcade (racers take `racer_damage_scale` of the impulse): hard hits only degrade, but
+///   several very hard ones still end the car.
+///
+/// Before the fix Simulation and Arcade could never total by health: once the structure is
+/// spent, health parks on a plateau (~0.17-0.25, 0.3 x the component average) that sat above
+/// `total_loss_health` 0.10, so ten 145 km/h wall hits left a drivable car.
+#[test]
+fn mode_curves_extreme_one_hit_sim_a_few_arcade_several() {
+    let frontal = ImpactKind::Frontal;
+    for kmh in [80.0, 100.0] {
+        let (h, total) = repeated_hits(&extreme_mode(), frontal, kmh, 1);
+        assert_eq!(total, Some(1), "Extreme {kmh} km/h: one hit totals ({h:?})");
+    }
+    let sim = sim_mode();
+    for (kmh, max_hits) in [(80.0, 4), (100.0, 3), (145.0, 2)] {
+        let (h, total) = repeated_hits(&sim, frontal, kmh, 10);
+        assert!(
+            total.is_some_and(|t| t <= max_hits),
+            "Simulation {kmh} km/h: totalled on hit {total:?} (want <= {max_hits}) {h:?}"
+        );
+        if kmh < 145.0 {
+            assert!(
+                total.is_some_and(|t| t >= 2) && h[0] < 0.8,
+                "Simulation {kmh} km/h: the first hit degrades but does not total {h:?}"
+            );
+        }
+    }
+    let (h, total) = repeated_hits(&sim, frontal, 50.0, 5);
+    assert_eq!(
+        total, None,
+        "Simulation 50 km/h: five hits do not end the car {h:?}"
+    );
+    let arcade = arcade_mode();
+    let (h, total) = repeated_hits(&arcade, frontal, 100.0, 5);
+    assert_eq!(
+        total, None,
+        "Arcade 100 km/h: five hits do not end the car {h:?}"
+    );
+    assert!(h[0] < 0.97, "Arcade 100 km/h: one hit degrades {h:?}");
+    let (h, total) = repeated_hits(&arcade, frontal, 145.0, 10);
+    assert!(
+        total.is_some_and(|t| (3..=8).contains(&t)),
+        "Arcade 145 km/h: several hits end the car, totalled on hit {total:?} {h:?}"
+    );
 }
