@@ -542,9 +542,16 @@ impl Session {
 
     /// Set live input. Ignored (`Ok(false)`) while a scripted scenario is running, and when
     /// unchanged. `gear_up`/`gear_down` are one-tick edges (cleared after the next tick).
-    pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
+    pub fn set_input(&mut self, id: EntityId, mut input: VehicleInput) -> Result<bool, String> {
         self.live_check()?;
         let idx = self.idx(id)?;
+        // A gear edge logged this tick that no tick has consumed yet stays on: a frame that
+        // ran no physics tick (refresh rates at or above 240 Hz) must not drop a shift.
+        let prev = self.last_input[idx];
+        if (prev.gear_up || prev.gear_down) && self.edge_pending(idx) {
+            input.gear_up |= prev.gear_up;
+            input.gear_down |= prev.gear_down;
+        }
         if self.race_holds(id) && !self.held(id) {
             // On the grid only the throttle gets through (revving on the line; the grid hold
             // keeps the handbrake on and the clutch down).
@@ -567,6 +574,17 @@ impl Session {
     }
 
     /// The race holds this car's input (the player during the countdown, or on autopilot).
+    /// Entity `idx`'s last logged input was set at the current tick (no tick has run on it).
+    fn edge_pending(&self, idx: usize) -> bool {
+        let now = self.sim.tick();
+        self.log
+            .inputs
+            .iter()
+            .rev()
+            .take_while(|e| e.tick == now)
+            .any(|e| e.entity as usize == idx)
+    }
+
     fn race_holds(&self, id: EntityId) -> bool {
         self.race
             .as_ref()

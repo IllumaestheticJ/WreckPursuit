@@ -149,6 +149,33 @@ fn gear_up_is_a_one_tick_edge() {
     assert!(!s.input(EntityId(1)).gear_up);
 }
 
+/// A frame that runs no physics tick (≥ 240 Hz displays) must not drop a shift: the edge
+/// stays on until a tick has run on it (bughunt F2).
+#[test]
+fn gear_edge_survives_a_frame_without_a_tick() {
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
+    let p = EntityId(1);
+    s.set_input(
+        p,
+        VehicleInput {
+            gear_down: true,
+            ..drive(0.5, 0.0)
+        },
+    )
+    .unwrap();
+    s.step(0.001);
+    assert_eq!(s.tick(), 0, "a frame shorter than a tick runs none");
+    // Next frame: the edge is over on the JS side.
+    s.set_input(p, drive(0.5, 0.1)).unwrap();
+    let held = s.input(p);
+    assert!(held.gear_down, "edge kept until a tick consumed it");
+    assert_eq!(held.steer, 0.1, "the rest of the new input applies");
+    s.run_ticks(1);
+    assert!(!s.input(p).gear_down, "cleared after the tick");
+    s.set_input(p, drive(0.5, 0.2)).unwrap();
+    assert!(!s.input(p).gear_down, "not latched again");
+}
+
 #[test]
 fn scripted_crash_scenarios_match_simcli_and_pass() {
     for rel in [
