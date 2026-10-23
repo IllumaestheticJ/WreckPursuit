@@ -1618,10 +1618,53 @@ Physics uses the smooth row-164 meshes. Tests:
 | procedural_12x12 | 3.02 | 4.02 | |
 | ashpeak | 25.86 | 34.48 | split for the preview by `tools/preview_build.sh` (b0269195) |
 
-**Changes outside my crates:** `crates/wp_sim/src/physics.rs` (structure colliders, edge
-barriers, `BARRIER_USER_DATA`), `crates/wp_sim/src/parked.rs` (`PARK_MAX_TWIST_M`), wp_sim
-tests; `tools/city-import` (greybox features, size check, `ramp_merges` test); simcli
-scenarios and goldens; `data/city` road files and greyboxes.
+**Race files:**
+- `catalog` hollins_sprint length hint is 796 m (941 m before): the Hollins Ascent grid moved across
+  the gorge bridge.
+- `race/pick_*.ron` regenerated (`WP_RACE_WRITE_SCENARIOS=1`).
+- The opponent pace hollins / loop9 files and `race/vesper_hollins_sprint.ron` get spawns
+  re-synced from the picks; pace ranges unchanged.
+
+**Pace** (release, `opponent_pace`):
+
+| Check | Result | Notes |
+|---|---|---|
+| `loop9_traffic_field_finishes` (`just pace-loop9`) | skill 0.5: 46/48 finish, mean 232.7 s; 0.95: 47/48, 242.7 s | measured before the diverge bank fix |
+| Hollins sprint s50 · s95 | best 55.4 · 51.6 s | in range |
+| Loop 9 circuit s50 · s95 | best 204 · 196 s | in range |
+| City sprint, grid highway | | in range |
+| Lantern checkpoint s95 | 47.7 s | in range |
+| Lantern checkpoint s50 | ai_juno 64.09 s (max 64.0), ai_dez 65.84 s (max 65.7); best ratio 1.78 (max 1.53) | **out**: every car logs a rejoin on this course (s50 and s95); likely the new Lantern Bridge on its route. Left to opponent-pace: ranges are theirs, widened only with a reason. |
+
+**Perf** (this container):
+- Native `wp_wasm --example chase_bench hakone_gt 30`: sim 3.21–3.35 ms per 60 Hz frame mean,
+  p95 4.06–4.30 (ashpeak-port's round-12 numbers on the same container class: 3.37–3.65 /
+  4.9–5.6), 21 vehicles, 1891 props.
+- Browser draw calls are not measured (no wasm-pack or testbed npm install here). The Vesper
+  greybox goes from 33 to 37 primitives (river, canopy, steel, edge walls) and from 504.2 k to
+  515.5 k triangles (+2.2 %). Ashpeak-port measured the desktop chase at 437 calls · 329 k
+  triangles against the < 600 · ≤ 400 k gate.
+
+**Gate (merged with round12 cae4f20f):**
+
+| Step | Result |
+|---|---|
+| fmt | 0 |
+| clippy `-D warnings` | 0 |
+| `cargo test --workspace` | 0 after the race-file fixes (the debug run's only failures were those race files) |
+| wasm build | 0 |
+| simcli scenarios | 129/129 |
+| goldens | blessed (two [bless] commits) |
+
+**Changes outside my crates:**
+- `crates/wp_sim/src/physics.rs`: structure colliders, edge barriers, `BARRIER_USER_DATA`.
+- `crates/wp_sim/src/parked.rs`: `PARK_MAX_TWIST_M`.
+- wp_sim tests.
+- `tools/city-import`: greybox features, size check, `ramp_merges` tests.
+- `crates/wp_race/src/catalog.rs`: hint.
+- `crates/wp_wasm/src/police.rs`: test literal.
+- simcli scenarios and goldens.
+- `data/city`: road files and greyboxes.
 
 ## Lead (2026-10-23): `world_traffic_soak` on candidate G handling — 1 civilian collision
 **Cause (traffic driving, not G).** Both cars were kinematic civilians; no racer or police unit
