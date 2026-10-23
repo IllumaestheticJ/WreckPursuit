@@ -255,6 +255,12 @@ const player = await page.evaluate(() => ({ player: document.body.classList.cont
 check(m.screen === "main" && m.visible && m.paused && m.focus === "gm-play-chase", `?menu=1 opens the main menu, paused, Night run focused (${m.screen}, ${m.focus})`);
 check(player.player && player.devPanel === "none", `developer panels off by default there (${JSON.stringify(player)})`);
 await shot("menu_main.png");
+const keys = await page.evaluate(() => document.querySelector('[data-testid="gm-keys"]')?.textContent ?? "");
+const live = await page.evaluate(() => {
+  const b = window.__wp.bindings();
+  return { cam: b.keys.cameraCycle[0], clutch: b.keys.clutch[0] };
+});
+check(/F3 · R · M/.test(keys) && /shift up/.test(keys) && !/^C · /.test(keys), `title key hints follow the bindings (camera ${live.cam}, clutch ${live.clutch}): "${keys}"`);
 await press("Enter");
 await frames(4);
 m = await menu();

@@ -1549,6 +1549,19 @@ async function main(): Promise<void> {
       restart: () => restartRun(),
       garage: () => openGarage(),
       careerRunActive: () => sim.careerRunActive(),
+      // Title key hints from the live keyboard bindings (first key of each action).
+      keyHints: () => {
+        const b = getBindings();
+        const k = (id: ActionId) => (b.keys[id][0] ? keyName(b.keys[id][0]) : "–");
+        return [
+          { keys: `${k("throttle")} / ${k("brake")}`, label: "throttle / brake" },
+          { keys: `${k("steerLeft")} / ${k("steerRight")}`, label: "steer" },
+          { keys: k("handbrake"), label: "handbrake" },
+          { keys: `${k("gearUp")} / ${k("gearDown")}`, label: "shift up / down" },
+          { keys: `${k("cameraCycle")} · ${k("reset")} · ${k("map")}`, label: "camera · reset car · city map" },
+          { keys: "Esc", label: "pause menu · gamepad Start" },
+        ];
+      },
       quitToMain: () => {
         if (sim.careerRunActive()) sim.careerEndRun();
         persistCareer();

@@ -42,6 +42,9 @@ export interface GameMenuHost {
   /** A career run is in progress (Pause → Garage then ends it, and the item says so).
    * Default: false. */
   careerRunActive?(): boolean;
+  /** Key hints under the title menu, from the live bindings (`keys` e.g. "W / S", `label` e.g.
+   * "throttle / brake"). Default: the stock keyboard layout ([`DEFAULT_KEY_HINTS`]). */
+  keyHints?(): KeyHint[];
   /** Pause → Quit to main menu: end the run (the main menu is shown next). */
   quitToMain(): void;
   /** Open the controls (rebinding) panel; the menu hides until `controlsOpen()` turns false. */
@@ -57,6 +60,25 @@ export interface GameMenuHost {
    * game input is blocked by the menu and must not fire any actions. null = nothing to show. */
   inputProbe?(): InputProbe | null;
 }
+
+/** One line of the title menu's key hints. */
+export interface KeyHint {
+  /** Key names, e.g. "W / S". */
+  keys: string;
+  /** What they do, e.g. "throttle / brake". */
+  label: string;
+}
+
+/** Title-menu key hints for the stock keyboard bindings (hosts with rebindable keys pass
+ * `GameMenuHost.keyHints` instead). */
+export const DEFAULT_KEY_HINTS: KeyHint[] = [
+  { keys: "W / S", label: "throttle / brake" },
+  { keys: "A / D", label: "steer" },
+  { keys: "Space", label: "handbrake" },
+  { keys: "Shift / Ctrl", label: "shift up / down" },
+  { keys: "F3 · R · M", label: "camera · reset car · city map" },
+  { keys: "Esc", label: "pause menu · gamepad Start" },
+];
 
 /** Mount options. */
 export interface GameMenuOptions {
@@ -366,6 +388,7 @@ export class GameMenu {
     if (this.screen === "main") {
       body = (
         <MainScreen
+          hints={h.keyHints ? h.keyHints() : DEFAULT_KEY_HINTS}
           play={(c) => this.act(() => h.play(c))}
           settings={() => this.openSettings("main")}
           controls={() => this.controls()}
@@ -478,7 +501,7 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
 
-function MainScreen(props: { play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
+function MainScreen(props: { hints: KeyHint[]; play: (c: PlayChoice) => void; settings: () => void; controls: () => void }) {
   return (
     <div class="wp-gm-card wp-gm-main" role="dialog" aria-label="Main menu">
       <Brand kicker="// PORT VESPER · NIGHT SHIFT" />
@@ -490,24 +513,20 @@ function MainScreen(props: { play: (c: PlayChoice) => void; settings: () => void
         <Item id="gm-settings" label="Settings" hint="Graphics · audio · assists · units" onClick={props.settings} />
         <Item id="gm-controls" label="Controls" hint="Keyboard and gamepad bindings" onClick={props.controls} />
       </nav>
-      <Keys />
+      <Keys hints={props.hints} />
     </div>
   );
 }
 
-function Keys() {
+function Keys(props: { hints: KeyHint[] }) {
   return (
-    <div class="wp-gm-keys">
-      <b>W / S</b>
-      <span>throttle / brake</span>
-      <b>A / D</b>
-      <span>steer</span>
-      <b>Space</b>
-      <span>handbrake</span>
-      <b>C · R · M</b>
-      <span>camera · reset car · city map</span>
-      <b>Esc</b>
-      <span>pause menu · gamepad Start</span>
+    <div class="wp-gm-keys" data-testid="gm-keys">
+      {props.hints.map((h) => (
+        <Fragment key={h.label}>
+          <b>{h.keys}</b>
+          <span>{h.label}</span>
+        </Fragment>
+      ))}
     </div>
   );
 }

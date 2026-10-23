@@ -174,6 +174,26 @@ const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 =
 
 const BET_LABEL = (o: OddsCard) => (o.kind === "win" ? "You win" : o.kind === "podium" ? "You finish top 3" : `You beat ${o.opponent ?? "?"}`);
 
+/** Player-facing names of `wp_economy::Feature` ids, as they appear in lock messages. */
+const FEATURE_NAMES: Record<string, string> = {
+  city_races: "City races",
+  city_betting: "Race betting",
+  touge_races: "Touge battles",
+  touge_betting: "Touge betting",
+  boss_races: "Boss races",
+  pink_slips: "Pink slips",
+  street_betting: "Street-racer betting",
+};
+
+/** Why betting is closed, for players: "city_betting is locked: needs Street (500 rep), have 0
+ * rep" → "betting unlocks at Street (500 rep), you have 0 rep"; any other reason reads
+ * "betting locked: <reason>" with feature ids named. */
+export function betLockText(lock: string): string {
+  const m = /^(\w+) is locked: needs (.+)$/.exec(lock);
+  if (m && m[1] in FEATURE_NAMES) return `betting unlocks at ${m[2].replace(/\), have /, "), you have ")}`;
+  return `betting locked: ${lock.replace(/\b[a-z]+_[a-z_]+\b/g, (id) => FEATURE_NAMES[id] ?? id)}`;
+}
+
 /** Bet slip on a picker card: pick a selection and a stake, or no bet. */
 function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | null; onPick: (p: BetPick | null) => void }) {
   const { card, status, pick } = props;
@@ -184,7 +204,7 @@ function BetSlip(props: { card: RaceCard; status: BetStatus; pick: BetPick | nul
     return (
       <div class="wp-dim" style={{ fontSize: "0.8em", marginTop: "0.3em" }} data-testid="bet-locked">
         Odds on you: win {win?.odds.toFixed(2)}
-        {top3 ? ` · top 3 ${top3.odds.toFixed(2)}` : ""} · betting locked: {status.lock}
+        {top3 ? ` · top 3 ${top3.odds.toFixed(2)}` : ""} · {betLockText(status.lock)}
       </div>
     );
   }

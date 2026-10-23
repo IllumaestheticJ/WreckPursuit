@@ -1,5 +1,5 @@
 /** Game menu: main / pause / settings for players (keyboard + gamepad). See GameMenu.tsx. */
-export { GameMenu, mountGameMenu, type GameMenuHost, type GameMenuOptions, type MenuScreen, type PlayChoice } from "./GameMenu";
+export { DEFAULT_KEY_HINTS, GameMenu, mountGameMenu, type GameMenuHost, type KeyHint, type GameMenuOptions, type MenuScreen, type PlayChoice } from "./GameMenu";
 export {
   DRAW_DISTANCES,
   SETTINGS_KEY,

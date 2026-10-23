@@ -675,6 +675,12 @@ await shot("night_run_greybox_toggle.png");
     await frames();
     out.captured = read();
     out.capturedEnd = window.__wp.ui.lastChaseEnd;
+    // Capture sequence (playtest B5): the banner alone first (2.5 s), then the bill opens and
+    // the banner steps aside while it is open.
+    const t0 = performance.now();
+    while (!read().bill && performance.now() - t0 < 8000) await frames();
+    out.billAfterMs = Math.round(performance.now() - t0);
+    out.billed = read();
     stub({ level: "None", status: "Clear", last_outcome: "Captured", outcome_age_s: 30 });
     await frames();
     out.later = read();
@@ -684,9 +690,12 @@ await shot("night_run_greybox_toggle.png");
   });
   check(
     flow.pursuit.banner === "PURSUIT" && flow.searching.banner === "SEARCHING" && flow.escaped.banner === "ESCAPED" && !flow.escaped.bill &&
-      flow.captured.banner === "CAPTURED" && flow.captured.bill && flow.later.banner === null &&
+      flow.captured.banner === "CAPTURED" && !flow.captured.bill && flow.billed.bill && flow.billed.banner === null && flow.billAfterMs >= 2000 &&
+      flow.later.banner === null &&
       flow.escapedEnd === "escaped" && flow.capturedEnd?.how === "captured" && flow.capturedEnd?.level === "L3",
-    `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} (${flow.escapedEnd}) → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}, chase end ${flow.capturedEnd?.how} at ${flow.capturedEnd?.level}) → ${flow.later.banner ?? "cleared"}`,
+    `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} (${flow.escapedEnd}) → ${flow.captured.banner} alone (bill ${flow.captured.bill ? "already open" : "waits"}), ` +
+      `bill ${flow.billed.bill ? "opened" : "missing"} after ${flow.billAfterMs} ms with the banner ${flow.billed.banner ? "still up" : "hidden"} ` +
+      `(chase end ${flow.capturedEnd?.how} at ${flow.capturedEnd?.level}) → ${flow.later.banner ?? "cleared"}`,
   );
 }
 // End of run (lead): a real capture in the sim (player parked in front of a patrol car at L2) →
@@ -714,6 +723,8 @@ await shot("night_run_greybox_toggle.png");
     .waitForFunction(() => window.__wp.runEnd.open && !!document.querySelector('#ui-run-end [data-testid="run-end"]'), null, { timeout: 240000, polling: 250 })
     .then(() => true)
     .catch(() => false);
+  // Capture sequence (playtest B5): banner 2.5 s → end-of-run card → the bill 1.5 s later.
+  await page.waitForFunction(() => !document.getElementById("ui-bill").classList.contains("hidden"), null, { timeout: 15000, polling: 100 }).catch(() => {});
   const before = await page.evaluate(() => {
     const wp = window.__wp;
     const r = wp.runEnd.report;

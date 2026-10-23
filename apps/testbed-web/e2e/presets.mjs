@@ -86,7 +86,17 @@ for (const [name, want] of Object.entries(expected)) {
 // TCS / ABS selectors (Off / Half / Full): a level reaches the sim, the HUD tag shows it, custom.
 await page.click(`button.preset[data-p="Street"]`);
 await page.selectOption('#assist-row select[data-a="abs"]', "Half");
-await page.waitForTimeout(100);
+// The HUD refreshes its tags every few frames: wait for them (up to 10 s), not a fixed 100 ms.
+await page
+  .waitForFunction(
+    () => {
+      const t = document.querySelector(".hud-main")?.textContent ?? "";
+      return /ABS HALF/.test(t) && /TCS HALF/.test(t);
+    },
+    null,
+    { timeout: 10000, polling: 50 },
+  )
+  .catch(() => {});
 s0 = await state();
 check(s0.sim.abs === "Half" && s0.sim.tcs === "Half" && s0.label === "custom", `ABS Half picked: sim ${s0.sim.abs}/${s0.sim.tcs}, ${s0.label}`);
 check(/ABS HALF/.test(s0.hud) && /TCS HALF/.test(s0.hud), `HUD tags show the levels (${s0.hud.match(/ABS[^A-Z]*\w*|TCS[^A-Z]*\w*/g)})`);
