@@ -178,7 +178,7 @@ mod tests {
     }
 
     fn sim() -> Sim {
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 5,
             mode,

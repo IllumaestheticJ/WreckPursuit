@@ -250,7 +250,7 @@ function insuranceNote(view: CareerView, car: CarView): string {
     const premium = Math.max(1, Math.round(t.premium_per_day_frac * car.value));
     return `${words(t.id)}: pays ${pct(t.coverage)} of the repair bill above $${t.deductible}, $${premium}/night`;
   });
-  return `${tiers.join(". ")}. Nothing for damage taken while wanted.`;
+  return `${tiers.join(". ")}. Covers damage taken while wanted too; only damage still on the car when you are caught is not paid.`;
 }
 
 function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
@@ -268,7 +268,7 @@ function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi;
             key={t.id}
             pressed={car.insurance === t.id}
             onClick={() => car.insurance !== t.id && props.run(() => api.insure(car.uid, t.id))}
-            title={`covers ${pct(t.coverage)} after a ${t.deductible} deductible; not damage taken while wanted`}
+            title={`covers ${pct(t.coverage)} after a ${t.deductible} deductible, chases included; not damage still on the car when you are caught`}
           >
             {words(t.id)} · <Money value={Math.max(1, Math.round(t.premium_per_day_frac * car.value))} />
             /night
@@ -718,8 +718,8 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
   return (
     <Panel title="New career" tag="replaces the current one">
       <p>
-        Arcade: one hard hit degrades, several end the car; repairs at half price. Simulation: one hard hit at speed is a total loss, and a
-        total-loss bust means the car is gone.
+        Arcade: your car and AI racers take 20 % damage; repairs at half price. Simulation: one hard hit degrades, several end the car;
+        repairs at half price. Extreme: one hard hit at speed is a total loss, and a total-loss bust means the car is gone.
       </p>
       <div class="wp-row" style={{ gap: "0.5em" }}>
         <Button size="sm" pressed={mode === "Arcade"} onClick={() => setMode("Arcade")}>
@@ -727,6 +727,9 @@ function NewCareer(props: { api: CareerApi; run: (f: () => CareerView) => void; 
         </Button>
         <Button size="sm" pressed={mode === "Simulation"} onClick={() => setMode("Simulation")}>
           Simulation
+        </Button>
+        <Button size="sm" pressed={mode === "Extreme"} onClick={() => setMode("Extreme")}>
+          Extreme
         </Button>
         <Button variant="danger" onClick={() => (props.run(() => props.api.newCareer(mode)), props.onDone())}>
           Start over in {mode}

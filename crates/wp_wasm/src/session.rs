@@ -579,12 +579,6 @@ impl Session {
         race.place_bet(run, label, stake)
     }
 
-    /// Tests: the session's economy run.
-    #[cfg(test)]
-    pub(crate) fn debug_run_mut(&mut self) -> Option<&mut PlayerRun> {
-        self.run.as_mut()
-    }
-
     /// `(max stake, lock reason)` for picker-race bets (venue `City`) on this session's
     /// account (`(0, Some(..))` without an account). Street-racer challenges have their own
     /// limits (`street_status_json`'s offer).
@@ -756,6 +750,11 @@ impl Session {
         self.run.as_ref()
     }
 
+    /// The run, mutably (testbed debug tools only; not in the replay log).
+    pub fn debug_run_mut(&mut self) -> Option<&mut PlayerRun> {
+        self.run.as_mut()
+    }
+
     /// Take the run (its account carries over to the next session).
     pub fn take_run(&mut self) -> Option<PlayerRun> {
         self.run.take()
@@ -892,6 +891,26 @@ impl Session {
         let xy = [st.pos[0] - sn * ahead_m, st.pos[1] + cs * ahead_m];
         self.sim
             .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
+            .map_err(|e| e.to_string())?;
+        self.relocate_racer(id);
+        self.crash_resnapshot();
+        Ok(())
+    }
+
+    /// Debug / e2e: put vehicle `id` on the ground at `xy` facing `yaw`, rolling forward at
+    /// `speed_mps` (height from the surface nearest `near_z`). Not in the replay log; a race
+    /// (if any) is told the car was moved on purpose.
+    pub fn debug_place(
+        &mut self,
+        id: EntityId,
+        xy: [f32; 2],
+        yaw: f32,
+        speed_mps: f32,
+        near_z: Option<f32>,
+    ) -> Result<(), String> {
+        self.live_check()?;
+        self.sim
+            .place_on_ground(id, xy, yaw, speed_mps, near_z)
             .map_err(|e| e.to_string())?;
         self.relocate_racer(id);
         self.crash_resnapshot();
@@ -1396,7 +1415,7 @@ impl Session {
             }
         }
 
-        // 1c. Free roam (live): put stranded roamers back on the road out of the player's
+        // 1d. Free roam (live): put stranded roamers back on the road out of the player's
         //     sight (replay ops, as the testbed's reset in place), then the roamers drive.
         if self.playback.is_none() {
             let rescues = self

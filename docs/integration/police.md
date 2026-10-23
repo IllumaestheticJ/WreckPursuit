@@ -1594,3 +1594,27 @@ Known gaps: standalone `simcli` runs of the `pick_*` scenarios have no race bloc
 presence applies there; the AI racers (`wp_opponent`) do not see barriers or spikes and drive
 into them; Loop 9's chase is very punishing (no finishers at the default seed) and may want
 tuning after a playtest.
+
+### Row 156: tool levels — roadblocks 3, spikes 4, helicopter 5 (owner decision, 2026-10-23)
+
+`data/police/presence.toml`: `[unlocks] spikes_level` 2 → 4 (`roadblock_level` stays 3) and `[helicopter] min_level` 3 → 5. Every gate reads these:
+- the AI captain's tool planner (`dispatch` roadblock and spike site planning);
+- the player captain's `RequestRoadblock` / `RequestSpikes` (`CaptainError::Locked`);
+- the AI helicopter request;
+- the player captain's `RequestHelicopter`, which was not gated by level at all and now needs `helicopter.min_level` too;
+- the radio, which announces what is placed.
+
+Two places were left alone:
+- **Race profiles' scripted tools** (`data/police/races.toml` `route_blocks` / `side_blocks` / `spikes`): laid out at race start as part of the course, not unlocked by heat, so unchanged. The pursuit-only race still turns every tool off.
+- **Highway roadblocks** (`tools.toml` `highway_max_level = 3`): still level 3 at most, so on a highway at level 4+ only spikes come.
+
+Minimal change outside the crate: the ui-kit captain-tool mock (`apps/ui-kit/src/mock/police.ts` `TOOL_RULES`) mirrors the levels (spikes 4, helicopter 5).
+
+Tests updated to the new levels:
+- `pursuit::tests::helicopter_joins_at_level_5_…` (was `…_level_3_…`): none at L4, one at L5;
+- `divided_tools` spike strips: requested at L4, roadblocks at L3;
+- `system::heat_violation_wanted_pursuit_and_captain_tools`: spikes at L4;
+- `radio_chatter::tool_lines_are_spoken_within_a_second_…` (was `level_three_…`): spikes at L4.
+
+No golden or scenario expectation moved.
+

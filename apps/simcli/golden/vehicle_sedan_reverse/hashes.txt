@@ -1,4 +1,4 @@
-# simcli hashes scenario=vehicle_sedan_reverse systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=vehicle_sedan_reverse systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 240 8b75c0e311977235
 480 3b6da71babef4cfe
 720 1528d380687871f4

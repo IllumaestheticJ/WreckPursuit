@@ -602,13 +602,13 @@ impl Career {
     /// drive `sentinel_*`, traffic `debug_sedan`, and neither is sold).
     pub fn car_files(&self, car: &OwnedCar) -> Result<BTreeMap<String, String>, String> {
         let mut files = BTreeMap::new();
-        if car.mods.is_empty() {
+        if car.mods.is_empty() && self.econ.wear_torque_factor(car) >= 1.0 {
             return Ok(files);
         }
         let base = base_car(&car.def_id)?;
         let p = self
             .econ
-            .preview(&base.def, &base.lattice, &car.mods, Some(self.mode()))
+            .car_preview(&base.def, &base.lattice, car, Some(self.mode()))
             .map_err(e2s)?;
         let v = &p.applied.vehicle;
         let l = &p.applied.lattice;
@@ -643,6 +643,23 @@ impl Career {
         let loaded = self.loaded_car(car)?;
         let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
         if let Some(snap) = self.lattice(car.uid)? {
+            // A panel torn off in a session is saved as a synthetic detached group
+            // (>= SYNTHETIC_GROUP_BASE), which exists only once the car's panels are attached
+            // (as the session did): attach them before restoring (playtest row 163).
+            if snap
+                .snapshot
+                .detached_groups
+                .iter()
+                .any(|g| *g >= wp_damage::panels::SYNTHETIC_GROUP_BASE)
+            {
+                let files = self.car_files(car)?;
+                let rel = format!("panels/{}.json", car.def_id);
+                let text = simcli::data::DataSource::read(&Overlay { files: &files }, &rel)
+                    .map_err(|e| e.to_string())?;
+                let spec =
+                    wp_damage::PanelSpec::parse(&car.def_id, &text).map_err(|e| e.to_string())?;
+                model.attach_panels(&spec).map_err(|e| e.to_string())?;
+            }
             model.restore_full(&snap)?;
         }
         Ok(model)
@@ -1226,6 +1243,29 @@ impl Career {
         Ok(uids)
     }
 
+    /// Engine stand: take the part in `slot` out of loose assembly `assembly` (an engine in
+    /// the inventory). Returns the part's uid.
+    pub fn strip_part(&mut self, assembly: u32, slot: &str) -> Result<u32, String> {
+        self.guard()?;
+        let (uid, ev) = self
+            .econ
+            .strip_part(&mut self.profile.account, assembly, slot)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(uid)
+    }
+
+    /// Engine stand: put inventory part `part` into `slot` of loose assembly `assembly`.
+    pub fn build_part(&mut self, assembly: u32, slot: &str, part: u32) -> Result<(), String> {
+        self.guard()?;
+        let ((), ev) = self
+            .econ
+            .build_part(&mut self.profile.account, assembly, slot, part)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(())
+    }
+
     /// Sell inventory part `part` to the dealer. Returns the price.
     pub fn sell_part(&mut self, part: u32) -> Result<Money, String> {
         self.guard()?;
@@ -1269,10 +1309,7 @@ impl Career {
         let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         // Build the model before paying, so a broken save cannot take money for nothing.
         let loaded = self.loaded_car(&car)?;
-        let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
-        if let Some(snap) = self.lattice(uid)? {
-            model.restore_full(&snap)?;
-        }
+        let mut model = self.damage_model(&car)?;
         let mut acct = self.profile.account.clone();
         let (order, ev) = self
             .econ
@@ -1480,6 +1517,12 @@ impl Career {
             RunEnd::Free
         };
         let mut wanted = false;
+        // A pink slip won in a touge battle: the car's lattice as it finished.
+        let won_lattice = s
+            .race()
+            .and_then(|r| r.touge())
+            .and_then(|t| t.won_lattice())
+            .cloned();
         if let Some(run) = s.end_career() {
             if run.is_over() {
                 end = match run.report().map(|r| r.outcome) {
@@ -1493,6 +1536,11 @@ impl Career {
                 .ledger
                 .extend(ledger.into_iter().filter(|e| e.seq >= start.start_seq));
             self.profile.account = acct;
+            if let Some((uid, json)) = won_lattice {
+                if self.profile.account.car(uid).is_some() {
+                    self.profile.lattices.insert(uid.0, json);
+                }
+            }
         }
         let bounty_cash: Money = self
             .profile
@@ -1593,6 +1641,12 @@ impl Career {
 
 thread_local! {
     static CAREER: RefCell<Option<Career>> = const { RefCell::new(None) };
+}
+
+/// The loaded career's account as saved between runs (`None` without a career): the touge
+/// menu reads rep and cash from it.
+pub(crate) fn career_account() -> Option<wp_economy::PlayerAccount> {
+    CAREER.with(|c| c.borrow().as_ref().map(|c| c.profile.account.clone()))
 }
 
 fn with_career<T>(f: impl FnOnce(&mut Career) -> Result<T, String>) -> Result<T, JsValue> {
@@ -1899,6 +1953,31 @@ pub fn career_buy_part(uid: u32, kind: &str, grade: &str) -> Result<String, JsVa
     with_career(|c| {
         let grade = (!grade.is_empty()).then_some(grade);
         c.buy_part(CarUid(uid), kind, grade)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Engine stand: take the part in `slot` out of loose engine `assembly`. Returns the workshop
+/// JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_strip_part(uid: u32, assembly: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.strip_part(assembly, slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. Returns
+/// the workshop JSON of car `uid`.
+#[wasm_bindgen]
+pub fn career_build_part(
+    uid: u32,
+    assembly: u32,
+    slot: &str,
+    part: u32,
+) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.build_part(assembly, slot, part)?;
         c.workshop(CarUid(uid)).map(|w| json(&w))
     })
 }

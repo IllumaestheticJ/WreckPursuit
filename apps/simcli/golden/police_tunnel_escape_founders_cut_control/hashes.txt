@@ -1,4 +1,4 @@
-# simcli hashes scenario=police_tunnel_escape_founders_cut_control systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=police_tunnel_escape_founders_cut_control systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 240 872990b36cf8f570
 480 f4719dd6273a3376
 720 36665c1232be531a

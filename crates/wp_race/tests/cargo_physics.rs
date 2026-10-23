@@ -19,7 +19,7 @@ fn launch_and_stop(car: &LoadedCar) -> (f32, f32) {
 }
 
 fn sim_with(car: &LoadedCar) -> (Sim, wp_contracts::EntityId) {
-    let mode = load_mode_table(repo().join("data/modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(repo().join("data/modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 3,
         mode,

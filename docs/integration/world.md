@@ -1523,6 +1523,25 @@ on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contac
 failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
 threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
 
+## Playtest row 159 — "overpass 3D models still completely block the highway underneath"
+**Cause (drawn greybox only).** Every interchange crossroad over Loop 9 (Harbor Boulevard west
+and east, Lantern Way, Bluff Road, Uptown Connector: 10 of Port Vesper's 14 grade separations)
+had a solid wall across both carriageways under the bridge: the curtain `build_greybox` hangs
+from the back of a sidewalk without a lot ("bare back") went down to the ground even on the
+deck, so it dropped from the crossroad's sidewalk (≈ 12 m) to the highway surface (≈ 2.3 m)
+along both edges of the bridge. Physics was clear (≥ 7.5 m headroom, no colliders in the
+lanes); the grid's 16 crossings (its viaduct) were clear in both.
+**Fix (`tools/city-import/src/glb.rs`).** `wall_foot`: a wall over the paving of a road below
+(a sidewalk back or edge on an overpass) ends at the deck slab depth (1.2 m, `DECK_SLAB_M`)
+instead of the ground; applies to the sidewalk curtains and the highway retaining walls.
+Vesper greybox regenerated (`just city-v2`; the grid's is byte-identical).
+**Gate.** `tools/city-import/tests/underpass_clearance.rs`: at every grade separation (a road
+≥ 3 m over another) in both cities, over the lower road's lanes (0.8 m inside its edges) from
+8 m before to 8 m past the upper road: ≥ 4.5 m headroom and nothing standing in the lane at
+1 m or 3.5 m, in the drawn greybox and in the physics colliders (`PhysicsWorld::set_city_ground`).
+Fails on the old generator (10 blocked), passes now (Vesper 14, grid 16 checked).
+`rapier3d` added as a city-import dev-dependency (tests only; not reachable from wp_wasm).
+
 ## Playtest row 149 — "I currently now can't hit traffic cars" (world side)
 **Cause.** Kinematic traffic has no collider: only physical (promoted) cars can be hit. With the
 physical cap (`TrafficConfig::max_physical`, 16) full, cars stayed physical out to 100 m and

@@ -24,6 +24,7 @@
 //! | [`live`] | a picker race run next to a live `wp_sim` loop: judge, AI, meet heat, standings with gaps |
 //! | [`roster`] | the city's named regulars (`data/events/racers.toml`), their records and form ratings, meet fields, off-screen results |
 //! | [`betting`] | odds from form ratings, win / podium / head-to-head tickets, settlement (`data/events/betting.toml`) |
+//! | [`touge`] | touge battles on the sealed mountain passes: boss/challenger roster, wall breaches, side bets, pink slips (`data/events/touge.toml`) |
 //! | [`bridge`] | `wp_world` city race planning + race-route activation, POIs/zones; `wp_economy` payout inputs |
 //!
 //! `wp_net` owns the lobby transport; this crate owns the rules. Everything here is
@@ -53,6 +54,7 @@ pub mod schedule;
 pub mod signals;
 pub mod stakes;
 pub mod territory;
+pub mod touge;
 pub mod trace;
 mod trail;
 

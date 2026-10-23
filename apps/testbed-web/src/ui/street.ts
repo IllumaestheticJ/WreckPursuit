@@ -1,5 +1,5 @@
 // Street racers (wp_wasm::street): NPC racers roam the city; honk (the rebindable `horn` action:
-// Q / pad L3 by default, the 📯 touch button) next to one to challenge it, pick the finish (B)
+// Q / pad L3 by default, the 📯 touch button) right behind one to challenge it, pick the finish (B)
 // on the city map and a bet, race from where you are (A).
 //
 // The maps are the UI kit's (src/ui/map.ts MapOverlay → MapHud): this class feeds them the
@@ -192,7 +192,7 @@ export class StreetUi {
     if (!this.legendSet) {
       this.legendSet = true;
       this.map.setLegendExtras(
-        "Street racers (honk next to one; number = level)",
+        "Street racers (honk right behind one; number = level)",
         st.levels.map((l) => ({ colour: l.colour, label: String(l.level), text: `Lv ${l.level} ${l.name} · ${money(l.bet_min)}–${money(l.bet_max)}` })),
       );
     }
@@ -398,7 +398,7 @@ export class StreetUi {
       const horn = bound("horn");
       el.innerHTML =
         `<div class="wp-panel-title"><span>Street racers</span><b>${st.roster.length}</b></div>` +
-        `<div class="st-row wp-dim">Drive up to a racer and honk (${this.hornLabel(horn)}) to challenge them. Dot colour and number = driver level.</div>` +
+        `<div class="st-row wp-dim">Pull up right behind a racer (same lane, same way) and honk (${this.hornLabel(horn)}) to challenge them. Dot colour and number = driver level.</div>` +
         (st.pursued ? `<div class="st-row wp-warn">No challenges while the police are after you.</div>` : "") +
         `<ul>${st.roster
           .map(
@@ -536,7 +536,7 @@ export class StreetUi {
       this.resultSeq = res.seq;
       this.resultUntil = now + 7000;
       this.resultEl.innerHTML =
-        `<b style="color:${res.won ? "#2ecc40" : "#ff4136"}">${res.won ? "YOU WON" : "YOU LOST"} ${res.won ? "+" : ""}${money(res.net)}</b>` +
+        `<b style="color:${res.won ? "#2ecc40" : "#ff4136"}">${res.won ? "YOU WON" : "YOU LOST"} ${res.won ? "+" : ""}${money(res.net)}${res.rep ? ` · +${res.rep} rep` : ""}</b>` +
         `<span>vs ${esc(res.name)} (Lv ${res.level} ${esc(res.level_name)}) · ${esc(res.reason)}` +
         `${res.margin_m > 1 ? ` · by ${km(res.margin_m)}` : ""} · cash ${money(res.cash_after)}</span>`;
     }

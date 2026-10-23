@@ -65,13 +65,15 @@ golden hash is unchanged.
    capped by the tier's `max_bet` and 50 % of cash, use the odds book, and close at the green
    light. The browser docs now say "picker-race betting", not "street-race betting", so the two
    don't get mixed up.
-4. **Street-racer wins give no rep** (round12 unchanged). Rep still comes from picker-race
-   settlement, escapes and captures. *Open question for the lead:* award rep per level on a
-   street win (`award_rep`) so the street racers feed the tier ladder too?
-5. **Tier bonuses are paid where #46 pays them:** career run end, abandoned-run settlement and
-   next night. `PlayerRun` never calls `update_progression`; otherwise the career's end-of-run
-   panel would miss the promotion. Free-drive (non-career) accounts are gated by their current
-   rep but never paid tier bonuses.
+4. **Street-racer wins award rep by level** (round 2, lead's answer): `street::Level::win_rep`
+   Street 40 / Pro 70 / Elite 110 / Legend 160 (a picker-race win is ~100–200), posted with
+   `PlayerRun::award_rep` (`career:rep:street:vs <name> (<level>)`). A loss costs nothing extra.
+   The result JSON and the testbed banner show it (`+N rep`).
+5. **Tier bonuses:** paid at career run end, abandoned-run settlement and next night (#46),
+   and also at once by every `award_rep` (street-racer wins, touge results) and by the
+   testbed's `debug_set_rep` (lead's touge rule). A promotion earned that way mid-run is
+   already booked when the run closes, so the end-of-run panel's `progress` does not show it
+   again (the ledger does).
 6. **The regulars race the picker races only.** Round12's roaming street racers keep their own
    name pool and levels. The name overlap (street racers "Mara" / "Juno" vs regulars Mara
    Lindqvist / Juno Park) was already there in round12; left as is.
@@ -88,11 +90,10 @@ golden hash is unchanged.
    The off-ramp table started at 1.5× presence with two stakeouts, and the police captured the
    whole field on most seeds of round12's longer course. With a profile equal to the default
    police it passes on its seed (8) and on 5 and 11, but not on 3 (see the gaps below).
-9. **PR #41 (main's free roam) comes in with #46's branch.** It stays a separate opt-in scenario
-   (`free_roam`, the "Free roam" button, `?roam=N`) next to round12's street racers (which
-   spawn in free drive / city chase). It has no betting. *Question for the lead:* keep both
-   roaming-racer systems, or retire #41's `free_roam` later? Dropping it here would record a
-   deletion that a later round12 → main merge would carry onto main.
+9. **PR #41 (main's free roam) is dormant, as on round12's main-sync** (round 2): only its own
+   `free_roam` scenario via `?roam=N`, no testbed button, never in a session with the street
+   racers (`docs/integration/main-sync.md`). The round12 merge took main-sync's version of
+   every roam overlap.
 10. **Naming overlap to watch:** the street-racer levels "Street" / "Legend" share words with
     the rep tiers "Street Racer" / "Street Legend". They're not linked; a UI pass may want to
     rename one of them.
@@ -100,6 +101,52 @@ golden hash is unchanged.
     time or unseeded randomness added (odds and tiers are integer / f32 table math); AI
     never-give-up untouched (street races keep `allow_abandon: false`; picker races use
     round12's entrants). The regulars, races and cars use analog names only.
+
+## Round 2 (lead answers; current lead/round12 merged; touge on the career)
+
+Merged `lead/round12` at `5080fa80` (main-sync with contract 0.4.1 and the Arcade / Simulation /
+Extreme modes, the touge port, police heat levels, PR #52 tailing challenges). Conflicts (10):
+
+| File | Resolution |
+|---|---|
+| `wp_economy/src/data.rs` | `progression` + round12's three-mode table (Extreme) |
+| `wp_race/README.md`, `wp_race/src/lib.rs` | both (regulars / betting / picker table + touge); picker table lengths updated to round12's map |
+| `wp_wasm/src/career_tests.rs` | #46's tier test + round12's engine-stand test |
+| `wp_wasm/src/run.rs` | round12's `touge_place` / `touge_settle` / `debug_set_rep` (then switched to the career, below) |
+| `wp_wasm/src/race.rs` | `RaceRun` keeps the betting book and gains `touge`; a touge battle returns before the book is built and settles through its own path (no regulars' form, no picker bets) |
+| `wp_wasm/src/session.rs` | round12's step numbering (1d roam); the duplicate `debug_run_mut` dropped (round12's public one stays) |
+| `wp_wasm/src/lib.rs` | both: touge exports + picker-bet / roster exports, both doc rows |
+| testbed `wasm/sim.ts`, `main.ts` | both: race + touge types; roster save + touge view |
+
+Touge onto the career system (the lead's list; PR #49's own code, `claude/project-thread-rgdat5`,
+ported back with round12's later fixes kept):
+
+- `TougeGates` / `Gate` and `touge.toml [gates]` deleted. `Opponent::feature()` →
+  `Feature::{TougeRaces, BossRaces}`; side bets `Feature::TougeBetting`, pink slips
+  `Feature::PinkSlips` (`Economy::require_unlocked`); stake cap `max_bet(BetVenue::Touge)`.
+- `wager_menu(econ, acct, table, setup)` (tier id from `rep_tier`), `place(econ, acct, setup,
+  wager, car)` takes the stake with `place_bet` (`WagerTicket::bet: Option<BetTicket>`), and
+  `settle` pays it with `settle_bet`, the boss purse with `award_credits`
+  (`career:credits:touge_purse:…`) and rep with `award_rep` (`career:rep:boss|touge:<pass>`; it
+  pays tier rewards; rep still floors at 0 in every transaction).
+- `Economy::touge_result` removed (no callers left; one money path).
+- `PlayerRun::debug_set_rep` also runs `update_progression`.
+- Touge NPCs get `AiDriverDef::id`s `touge_<first name>` (not city regulars) and their
+  `RaceDef` `terrain: Hill`.
+- round12's touge tests kept and moved to the career API (`rep_for(Feature)` from
+  `career.toml`; the side-bet test checks a `bet_stake` ledger note).
+
+Round 2 gate (same env): `cargo fmt` clean; clippy `-D warnings` clean; `cargo test
+--workspace` 1576 passed, 0 failed, 42 ignored; wasm32 `wp_wasm` OK; testbed `npm run wasm` +
+`tsc` OK, ui-kit `tsc` OK; `e2e/street.mjs` 105/105 (the first run failed the two touch-horn
+checks: the 40 × 250 ms "place behind and honk" loop timed out under load; the re-run passed
+all), `e2e/race.mjs` 26/26, `e2e/touge.mjs` 15/15. Goldens: the five new race goldens are
+header-only blessed (contract 0.3.1 → 0.4.1, no tick hash moved). **Three goldens fail on
+`lead/round12` itself** (checked in a clean worktree of `5080fa80`, same hashes): 
+`jam_pursuit_vesper` (first mismatch tick 12000), `police_tunnel_escape_founders_cut` and
+`…_control` (tick 16320; expectation `police_event_before(kind:12, t_s:95)` never). Not
+blessed here: they belong to round12 (the police heat-level change, row 156, is the likely
+cause).
 
 ## Contract change requests
 

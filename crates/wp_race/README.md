@@ -194,16 +194,34 @@ the player may bet (`wp_economy::Economy::max_bet / place_bet / settle_bet`, rep
 | Id | Where | Kind | Terrain | Hour | Length | Field |
 |---|---|---|---|---|---|---|
 | `hollins_sprint` | Port Vesper | Sprint | hill | 23:00 | 1.0 km | Mara, Vic, Juno |
-| `loop9_circuit` | Port Vesper | Circuit ×1 | highway | 01:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
+| `loop9_circuit` | Port Vesper | Circuit ×1 | highway | 23:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito |
 | `lantern_checkpoint` | Port Vesper | Checkpoint (illegal daytime) | downtown | 14:00 | 0.67 km | Juno, Dez, Tito |
-| `grid_highway_sprint` | grid city | Sprint | highway | 23:00 | 0.75 km | Vic, Juno, Tito |
+| `grid_highway_sprint` | grid city | Sprint | highway | 23:00 | 1.1 km | Vic, Juno, Tito |
 | `harbor_dash` | Port Vesper | Sprint | highway | 22:00 | 0.74 km | Sol, Vic, Rafi |
-| `tunnel_run` | Port Vesper | Sprint | highway | 00:30 | 1.3 km | Nina, Augusto, Dez, Vic |
+| `tunnel_run` | Port Vesper | Sprint | highway | 00:30 | 1.27 km | Nina, Augusto, Dez, Vic |
 | `hollins_descent` | Port Vesper | Sprint | hill | 02:00 | 1.35 km | Kaito, Mara, Bex |
-| `offramp_sprint` | Port Vesper | Sprint | downtown | 20:30 | 1.6 km | Juno, Lupe, Rafi, Tito |
+| `offramp_sprint` | Port Vesper | Sprint | downtown | 20:30 | 2.3 km | Juno, Lupe, Rafi, Tito |
 | `grid_arterial_sprint` | grid city | Sprint | downtown | 22:30 | 1.0 km | Bex, Lupe, Dez |
 
 `catalog::betting_market(def, roster, state, rules, car_adjust)` prices any of them.
+### Touge battles (`touge`, `data/events/touge.toml`)
+
+One-on-one sprints on the four `wp_world::touge` passes. `TougeSetup` = pass × uphill/downhill ×
+day (14:00) / night (23:30) × dry / rain × challenger / boss; its scenario name
+`race_touge:<map>:<up|down>:<day|night>:<dry|rain>:<challenger|boss>` round-trips, and
+`race_def` / `plan_course` build a sanctioned single-file sprint (NPC ahead, 12 m gap, no
+traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
+- **Rules:** `Boundary::check` flags a car through the wall line (a K-rail stretch) or fallen
+  well below the road; `TougeBattle::observe` decides the battle at once for the other car
+  (the car through is totaled). Otherwise the first across the line wins.
+- **Gates (career API, `wp_economy::progression`):** racing a challenger needs
+  `Feature::TougeRaces`, a boss `Feature::BossRaces`; side bets need `Feature::TougeBetting`
+  (stake up to `max_bet(BetVenue::Touge)`), pink slips `Feature::PinkSlips`. `wager_menu` lists
+  each line with the locked reason; `place` refuses a locked or oversized wager.
+- **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), boss purse
+  (12 000), rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going through the
+  wall), and pink slips: the winner takes the loser's car **exactly as it finished**
+  (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
 
 ## Tests
 

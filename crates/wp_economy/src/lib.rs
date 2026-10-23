@@ -50,6 +50,7 @@ pub mod repair;
 pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
+pub mod touge;
 pub mod tune;
 pub mod visuals;
 
@@ -66,7 +67,7 @@ pub use ledger::{
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use parts::{
     CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, PartFit, PartGroup, PartView,
-    PartsTable, SlotDef, SlotView, WorkshopView,
+    PartsTable, SlotDef, SlotView, StandFit, StandView, WorkshopView,
 };
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};
@@ -83,6 +84,7 @@ pub use session::{
     Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
     SessionConfig,
 };
+pub use touge::WonCar;
 pub use tune::CarTune;
 pub use visuals::{BuildVisuals, PartKind, PartVisual, VisualPart, WheelVisual};
 pub use wp_contracts::{AccountId, WantedLevel};

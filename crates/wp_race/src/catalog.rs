@@ -43,6 +43,8 @@ pub enum RaceCity {
     Vesper,
     /// The old procedural 12 × 12 grid (`procedural_12x12`).
     Grid,
+    /// A touge pass (`wp_world::touge::TOUGE_IDS`; battles in [`crate::touge`]).
+    Touge(&'static str),
 }
 
 impl RaceCity {
@@ -51,6 +53,7 @@ impl RaceCity {
         match self {
             RaceCity::Vesper => "vesper_v2",
             RaceCity::Grid => "procedural_12x12",
+            RaceCity::Touge(id) => id,
         }
     }
 }
@@ -530,9 +533,15 @@ pub fn race(id: &str) -> Option<RaceDef> {
     races().into_iter().find(|r| r.id == id)
 }
 
-/// The race a scenario name stands for (`race_<id>`, see [`RaceDef::scenario_name`]).
+/// The race a scenario name stands for: a picker race (`race_<id>`, see
+/// [`RaceDef::scenario_name`]) or a touge battle on one of the passes
+/// (`race_touge:<pass>:<up|down>:<day|night>:<dry|rain>:<challenger|boss>`,
+/// [`crate::touge::TougeSetup::scenario_name`]).
 pub fn race_for_scenario(name: &str) -> Option<RaceDef> {
-    races().into_iter().find(|r| r.scenario_name() == name)
+    races()
+        .into_iter()
+        .find(|r| r.scenario_name() == name)
+        .or_else(|| crate::touge::TougeSetup::from_scenario_name(name).map(|t| t.race_def()))
 }
 
 /// The point `d` metres along `polyline` (`None` past either end).

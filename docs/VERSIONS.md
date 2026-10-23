@@ -67,5 +67,7 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.57 | preview | AI racers no longer stall behind a civilian in the next lane (phantom-drift deadband; Loop 9 s95 finishers 90 → 95 of 96); judge ends a race once every racer left has made no progress for 3 min (DnfReason::Stuck, "stuck" in results); Loop 9 pace guarded over 8 seeds |
 | 0.12.58 | preview | Hollins finish 60 m short of the Knob lot (941 m; the lot road is the AI run-off; all 4 AI finish in 64/64 runs per skill); stranded AI racers (off the corridor 20 s) are put back on the course, damage kept (player's picker-race rule unchanged); finishers roll on past a dead-end line; police stopped-while-active audit |
 | 0.12.59 | preview | Police never spawn on parked cars / cones (3 m clearance); a unit on its side or roof for 1.5 s is reset upright out of view (row 75); golden headers stamped contract 0.3.1 |
-| 0.12.60 | preview | (next) |
+| 0.12.60 | preview | Career garage insurance text follows the rule (row 155) |
+| 0.12.61 | preview | Garage repair of a car with a torn-off panel no longer errors (row 163); garage stages 4–5: engine internals, DIY engine rebuild, 3D engine stand (PR #43) |
+| 0.12.62 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |

@@ -52,7 +52,7 @@ export function Lobby() {
             </dd>
             <dt>Damage</dt>
             <dd>
-              <Badge tone={lobby.damageMode === "Simulation" ? "danger" : "warn"}>{lobby.damageMode}</Badge>
+              <Badge tone={lobby.damageMode === "Arcade" ? "warn" : "danger"}>{lobby.damageMode}</Badge>
             </dd>
             <dt>Police</dt>
             <dd>{lobby.policeEnabled ? <Badge tone="danger">Active</Badge> : <Badge>Off</Badge>}</dd>

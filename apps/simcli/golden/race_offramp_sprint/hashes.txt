@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_offramp_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=race_offramp_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 240 6295b2ed2700814b
 480 8ab12340e8fa73b4
 720 aab8d71af8ac4b01

@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_tunnel_run systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=race_tunnel_run systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 240 0ae9aba40a4e78f4
 480 33af0eaef79b7149
 720 5fe35e31b414d15d

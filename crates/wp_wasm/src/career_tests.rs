@@ -727,3 +727,128 @@ fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
     c.next_night().unwrap();
     assert!(c.profile().account.cash <= cash, "no second bonus");
 }
+
+#[test]
+fn a_worn_piston_set_costs_the_car_torque_and_the_engine_stand_round_trips() {
+    let (mut c, uid) = career_with("kestrel_ts", 200_000, DamageMode::Arcade);
+    let base_torque = |c: &Career| {
+        let car = c.profile().account.try_car(uid).unwrap().clone();
+        let loaded = c.loaded_car(&car).unwrap();
+        loaded
+            .def
+            .engine
+            .torque_curve_nm
+            .iter()
+            .map(|p| p.1)
+            .fold(0.0, f32::max)
+    };
+    let stock = base_torque(&c);
+    // Pull the engine whole, strip the pistons on the stand, put a worn set back in.
+    for slot in [
+        "front_bumper",
+        "radiator",
+        "intake",
+        "exhaust",
+        "fuel_system",
+        "driveshaft",
+        "gearbox",
+    ] {
+        c.remove_part(uid, slot)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    let engine = c.remove_part(uid, "engine").unwrap();
+    for slot in [
+        "intake_manifold",
+        "throttle_body",
+        "exhaust_manifold",
+        "valve_cover",
+        "timing",
+        "camshafts",
+        "valvetrain",
+        "cylinder_head",
+        "head_gasket",
+    ] {
+        c.strip_part(engine, slot)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    let pistons = c.strip_part(engine, "pistons").unwrap();
+    let view = c.workshop(uid).unwrap();
+    assert_eq!(view.view.stands.len(), 1);
+    assert!(view.view.missing.iter().any(|m| m == "Engine block"));
+    let mut acct = c.profile().account.clone();
+    acct.inventory
+        .iter_mut()
+        .find(|p| p.uid == pistons)
+        .unwrap()
+        .condition = 0.4;
+    c.profile_mut().account = acct;
+    // Everything goes back in, in reverse order.
+    let loose: Vec<(String, u32)> = c
+        .profile()
+        .account
+        .inventory
+        .iter()
+        .filter(|p| p.uid != engine)
+        .map(|p| (p.kind.clone(), p.uid))
+        .collect();
+    for slot in [
+        "pistons",
+        "head_gasket",
+        "cylinder_head",
+        "valvetrain",
+        "camshafts",
+        "timing",
+        "valve_cover",
+        "exhaust_manifold",
+        "throttle_body",
+        "intake_manifold",
+    ] {
+        let part = loose.iter().find(|(k, _)| k == slot).unwrap().1;
+        c.build_part(engine, slot, part)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    c.fit_part(uid, "engine", engine).unwrap();
+    for slot in [
+        "gearbox",
+        "driveshaft",
+        "fuel_system",
+        "exhaust",
+        "intake",
+        "radiator",
+        "front_bumper",
+    ] {
+        let part = loose.iter().find(|(k, _)| k == slot).unwrap().1;
+        c.fit_part(uid, slot, part)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    assert!(c.start_blocker().is_none());
+    let worn = base_torque(&c);
+    let want = stock * (1.0 - 0.35 * 0.6);
+    assert!(
+        (worn - want).abs() < 1.0,
+        "{worn} vs {want} (stock {stock})"
+    );
+}
+
+/// Row 163: a panel torn off in a session is saved as a synthetic detached group (≥ 100),
+/// which only exists once the car's panels are attached. Repairing such a car (insured or
+/// not) used to fail with "detached group 100 not in lattice".
+#[test]
+fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 35.0);
+    let mut snap = c
+        .lattice(uid)
+        .unwrap()
+        .expect("crash stored a lattice blob");
+    snap.snapshot
+        .detached_groups
+        .insert(wp_damage::panels::SYNTHETIC_GROUP_BASE);
+    c.profile_mut()
+        .lattices
+        .insert(uid.0, serde_json::to_string(&snap).unwrap());
+    c.insure(uid, "basic").unwrap();
+    c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
+}

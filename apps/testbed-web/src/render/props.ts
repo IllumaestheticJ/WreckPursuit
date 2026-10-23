@@ -16,7 +16,8 @@
 //     a bounding sphere, so Three frustum-culls whole chunks. A chunk within PROXY_M of the
 //     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (20 triangles).
 //     Switching a chunk's tier only toggles visibility: both instance sets are always current.
-// Cones are one InstancedMesh of small orange cones. A moved prop rewrites only its own
+// Cones are one InstancedMesh of small orange cones, touge K-rails one InstancedMesh of
+// concrete boxes the size of their colliders. A moved prop rewrites only its own
 // instances. Coordinates: sim space (+Z up), parented under SceneView.world.
 //
 // Dented parked cars (owner playtest 2026-10-21, `parked_wrecks()`): a parked car hit hard
@@ -49,6 +50,9 @@ const SPHERE_PAD_M = 6;
  * dark uses PALETTE.propCone / propConeGlow). */
 const CONE_RGB = 0xff6a14;
 const CONE_GLOW = 0x2a0e00;
+/** K-rail concrete (touge passes) and its faint glow so the barrier line reads at night. */
+const KRAIL_RGB = 0xb9b4a8;
+const KRAIL_GLOW = 0x16140f;
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -202,8 +206,8 @@ function geometryView(src: THREE.BufferGeometry): THREE.BufferGeometry {
  */
 function nearCars(pose: Float32Array, kind: Uint8Array, wrecked: Uint8Array, n: number, cx: number, cy: number, cz: number, maxD: number, dist: Float32Array, near: number[]): void {
   for (let i = 0; i < n; i++) {
-    // Cones, and parked cars replaced by their dented vehicle (drawn by its own panel mesh).
-    if (kind[i] === PROP_KIND.cone || wrecked[i]) continue;
+    // Cones, K-rails, and parked cars replaced by their dented vehicle (drawn by its own panel mesh).
+    if (kind[i] !== PROP_KIND.parkedCar || wrecked[i]) continue;
     const o = i * 7;
     // Not Math.hypot: it allocates its argument list.
     const dx = pose[o] - cx;
@@ -244,9 +248,11 @@ export class PropView {
   private chunks: Chunk[] = [];
   private parkedCount = 0;
   private coneCount = 0;
+  private krailCount = 0;
   private proxyFit: Fit | null = null;
   private full: { car: InstancedCar; fit: Fit } | null = null;
   private cones: THREE.InstancedMesh | null = null;
+  private krails: THREE.InstancedMesh | null = null;
   private farGeo: THREE.BufferGeometry | null = null;
   private proxyGeo: ReturnType<typeof proxyGeoms> | null = null;
   private mats: FleetMaterials | null = null;
@@ -263,6 +269,7 @@ export class PropView {
   private readonly paint = new THREE.Color();
   private readonly tail = new THREE.Color(TAIL.off);
   private readonly coneMat = new THREE.MeshStandardMaterial({ color: CONE_RGB, emissive: CONE_GLOW, flatShading: true, roughness: 0.7 });
+  private readonly krailMat = new THREE.MeshStandardMaterial({ color: KRAIL_RGB, emissive: KRAIL_GLOW, flatShading: true, roughness: 0.95 });
   /** Art-style version the props were built for, and the session inputs to rebuild them. */
   private styleVersion = -1;
   private lastSet: { list: Float32Array; models: SessionModels; mats: FleetMaterials } | null = null;
@@ -317,6 +324,10 @@ export class PropView {
         this.slot[i] = this.coneCount++;
         continue;
       }
+      if (this.kind[i] === PROP_KIND.krail) {
+        this.slot[i] = this.krailCount++;
+        continue;
+      }
       this.parkedCount++;
       if (firstCar < 0) firstCar = i;
       const key = `${Math.floor(this.pose[i * 7] / CHUNK_M)},${Math.floor(this.pose[i * 7 + 1] / CHUNK_M)}`;
@@ -349,6 +360,15 @@ export class PropView {
       this.cones = new THREE.InstancedMesh(geo, this.coneMat, this.coneCount);
       this.cones.frustumCulled = false;
       this.group.add(this.cones);
+    }
+    if (this.krailCount > 0) {
+      // Unit box with a slight taper towards the top, like a jersey barrier's profile.
+      const geo = new THREE.CylinderGeometry(Math.SQRT1_2 * 0.55, Math.SQRT1_2, 1, 4, 1);
+      geo.rotateY(Math.PI / 4);
+      geo.rotateX(Math.PI / 2); // cylinder axis +Y → sim up +Z
+      this.krails = new THREE.InstancedMesh(geo, this.krailMat, this.krailCount);
+      this.krails.frustumCulled = false;
+      this.group.add(this.krails);
     }
     for (let i = 0; i < n; i++) this.writeInstance(i);
     this.flush();
@@ -424,6 +444,17 @@ export class PropView {
       this.s.set(this.half[i * 3], this.half[i * 3 + 1], this.half[i * 3 + 2] * 2);
       this.cones.setMatrixAt(this.slot[i], this.m.compose(this.p, this.q, this.s));
       this.cones.instanceMatrix.needsUpdate = true;
+      return;
+    }
+    if (this.kind[i] === PROP_KIND.krail) {
+      if (!this.krails) return;
+      const o = i * 7;
+      this.p.set(this.pose[o], this.pose[o + 1], this.pose[o + 2]);
+      this.q.set(this.pose[o + 3], this.pose[o + 4], this.pose[o + 5], this.pose[o + 6]);
+      // Unit box → the K-rail's collider box.
+      this.s.set(this.half[i * 3] * 2, this.half[i * 3 + 1] * 2, this.half[i * 3 + 2] * 2);
+      this.krails.setMatrixAt(this.slot[i], this.m.compose(this.p, this.q, this.s));
+      this.krails.instanceMatrix.needsUpdate = true;
       return;
     }
     const ch = this.chunks[this.chunkOf[i]];
@@ -505,7 +536,7 @@ export class PropView {
     const list = sim.parkedWrecks();
     for (let o = 0; o + WRECK_STRIDE <= list.length; o += WRECK_STRIDE) {
       const i = list[o + WK.prop];
-      if (i >= this.n || this.kind[i] === PROP_KIND.cone) continue;
+      if (i >= this.n || this.kind[i] !== PROP_KIND.parkedCar) continue;
       const w = this.wrecks.get(i) ?? this.addWreck(i, list, o);
       const p = i * 7;
       w.root.position.set(this.pose[p], this.pose[p + 1], this.pose[p + 2]);
@@ -649,6 +680,7 @@ export class PropView {
   private drawer(i: number): { mesh: THREE.InstancedMesh; slot: number; fit: Fit | null } | null {
     if (i < 0 || i >= this.n) return null;
     if (this.kind[i] === PROP_KIND.cone) return this.cones ? { mesh: this.cones, slot: this.slot[i], fit: null } : null;
+    if (this.kind[i] === PROP_KIND.krail) return this.krails ? { mesh: this.krails, slot: this.slot[i], fit: null } : null;
     if (this.fullSlot[i] >= 0 && this.full) return { mesh: this.full.car.paint, slot: this.fullSlot[i], fit: this.full.fit };
     const ch = this.chunks[this.chunkOf[i]];
     if (!ch) return null;
@@ -692,7 +724,7 @@ export class PropView {
       const d = this.distTo(i);
       const drawn = this.drawnPose(i) !== null;
       // Parked cars of the instanced tiers (a dented one draws itself; it still counts as drawn).
-      const car = this.kind[i] !== PROP_KIND.cone && !this.wrecked[i];
+      const car = this.kind[i] === PROP_KIND.parkedCar && !this.wrecked[i];
       if (car && drawn && this.fullSlot[i] < 0) {
         if (this.chunks[this.chunkOf[i]]?.near) drawnProxy++;
         else drawnBox++;
@@ -777,9 +809,15 @@ export class PropView {
       this.cones.geometry.dispose();
       this.cones = null;
     }
+    if (this.krails) {
+      this.krails.removeFromParent();
+      this.krails.geometry.dispose();
+      this.krails = null;
+    }
     this.n = 0;
     this.parkedCount = 0;
     this.coneCount = 0;
+    this.krailCount = 0;
     this.fullProps = [];
     this.trafficModel = null;
     this.repicks = 0;

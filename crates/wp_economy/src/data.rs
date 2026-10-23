@@ -54,7 +54,11 @@ pub const ALL_PHASES: [DayPhase; 4] = [
 ];
 
 /// Every damage mode.
-pub const ALL_MODES: [DamageMode; 2] = [DamageMode::Arcade, DamageMode::Simulation];
+pub const ALL_MODES: [DamageMode; 3] = [
+    DamageMode::Arcade,
+    DamageMode::Simulation,
+    DamageMode::Extreme,
+];
 
 /// Every body region.
 pub const ALL_REGIONS: [BodyRegion; 20] = [
@@ -565,6 +569,8 @@ pub struct DataSources {
     pub arcade_mode: String,
     /// `data/modes/sim.toml`.
     pub sim_mode: String,
+    /// `data/modes/extreme.toml`.
+    pub extreme_mode: String,
 }
 
 /// File stems of the embedded mod packs (`data/mods/<stem>.json`).
@@ -629,6 +635,7 @@ impl DataSources {
                 .collect(),
             arcade_mode: data_file!("modes/arcade.toml").to_string(),
             sim_mode: data_file!("modes/sim.toml").to_string(),
+            extreme_mode: data_file!("modes/extreme.toml").to_string(),
         }
     }
 
@@ -671,6 +678,7 @@ impl DataSources {
             mods,
             arcade_mode: read("modes/arcade.toml")?,
             sim_mode: read("modes/sim.toml")?,
+            extreme_mode: read("modes/extreme.toml")?,
         })
     }
 }
@@ -737,6 +745,8 @@ impl Economy {
         let mode_err = |e: wp_contracts::LoadError| invalid("mode table", e.to_string());
         let arcade = parse_mode_table("modes/arcade.toml", &src.arcade_mode).map_err(mode_err)?;
         let sim = parse_mode_table("modes/sim.toml", &src.sim_mode).map_err(mode_err)?;
+        let extreme =
+            parse_mode_table("modes/extreme.toml", &src.extreme_mode).map_err(mode_err)?;
         let mut packs = Vec::new();
         for (name, text) in &src.mods {
             let pack: ModPack = serde_json::from_str(text).map_err(|source| DataError::Json {
@@ -759,9 +769,13 @@ impl Economy {
             catalog: ModCatalog::from_packs(packs)?,
             parts: PartsTable::parse(&src.parts)?,
             progression: parse_toml("economy/career.toml", &src.career)?,
-            modes: [(DamageMode::Arcade, arcade), (DamageMode::Simulation, sim)]
-                .into_iter()
-                .collect(),
+            modes: [
+                (DamageMode::Arcade, arcade),
+                (DamageMode::Simulation, sim),
+                (DamageMode::Extreme, extreme),
+            ]
+            .into_iter()
+            .collect(),
         };
         econ.validate()?;
         Ok(econ)
