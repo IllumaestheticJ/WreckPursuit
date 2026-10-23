@@ -5,7 +5,7 @@ use wp_race::catalog::RaceCity;
 
 use crate::race::{race_city, race_for_scenario, race_scenario_in};
 use crate::race_spots::spot_cards;
-use crate::scenario::{night_run_in, city_spec, free_drive_in};
+use crate::scenario::{city_spec, free_drive_in, night_run_in};
 use crate::session::Session;
 
 const PLAYER: EntityId = EntityId(1);
