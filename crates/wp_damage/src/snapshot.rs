@@ -537,7 +537,7 @@ impl DamageModel {
 
     /// Common tail of restore / repair: node velocities, detachment, derived per-beam
     /// limits, component geometry, hull, sleep state.
-    fn after_bulk_change(&mut self) {
+    pub(crate) fn after_bulk_change(&mut self) {
         self.prev.clone_from(&self.pos);
         self.tick_start.clone_from(&self.pos);
         self.vel.iter_mut().for_each(|v| *v = [0.0; 3]);
