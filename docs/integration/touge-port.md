@@ -76,6 +76,15 @@ goldens were never merged in).
   existing map (they have only cars there).
 - **Dented parked cars:** the testbed's wreck pass skips anything that is not a parked car, so a
   K-rail never gets a car mesh.
+- **Menu account (fix to the PR):** `touge_menu_json` takes `career`: it reads the career's
+  account only when the battle will start as a career run (career box ticked and a career
+  exists), else the session's. The testbed always has a career, so before this the menu showed
+  the career's rep while a plain battle (box unticked) used the session's account, and the
+  "Testbed rep" buttons changed an account the menu did not show.
+- **Early settlement (fix to the PR):** a decided battle settles at once; only a won pink slip
+  waits for the NPC's race to end so its car comes home as it finished. Before, a player who
+  went through the wall waited for the NPC to drive the rest of the pass (minutes) before the
+  side bet and rep settled.
 
 ## Owner rules
 
