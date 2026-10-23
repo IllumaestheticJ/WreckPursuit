@@ -1685,10 +1685,11 @@ damage modes — the owner rule keeps Arcade and Simulation identical outside ca
   racer who then stopped (pulled into the Founders Cut lay-by) took `RollingBlock` and were
   commanded to 0 m/s ahead of him for good, so nobody came within the 15 m capture radius.
   A rolling block now needs the racer moving (≥ `ARREST_RACER_MPS`, 3 m/s, the arrest
-  threshold), and a shadowing unit past a stopped racer goes back to it by the roads
-  (`chase_route`) instead of on along its trail. On merged main with the new cars:
-  `tunnel_escape_founders_cut` Escaped 132.4 s (40 s unseen), control Captured 106.4 s (was:
-  no pursuit end in 190 s).
+  threshold); those units shadow and close in for the arrest instead. (Also routing a unit past
+  a stopped racer back to it by the roads was tried and dropped: it drove into the already
+  arrested car in `wp_wasm` `capture_bills_holds_the_car_and_repair_continue_restores_it`.)
+  On merged main with the new cars both `tunnel_escape_founders_cut` (Escaped 132.4 s, 40 s
+  unseen) and its control (Captured; was: no pursuit end in 190 s) pass.
 - Tests: `wp_vehicle` `class_favours_powerful_rwd` uses `furrow_24` as the slow RWD (the
   Bastion is no longer one); wolfhound diff hash and the simcli goldens re-blessed.
 - **Open (audio, E):** `wp_audio` `every_wot_upshift_dips_and_re_rises` fails for

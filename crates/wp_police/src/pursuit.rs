@@ -1686,9 +1686,6 @@ impl PoliceSystem {
                         // distance: a unit on the cross street can project right next to it
                         // on the trail).
                         let arrest = v_r < ARREST_RACER_MPS && seen;
-                        // Past a stopped racer (it pulled off behind the unit): back to it by
-                        // the roads, not on along its trail.
-                        let past_racer = arrest && gap < 0.0;
                         let want_gap = if arrest { 6.0 } else { mid };
                         let gap = if arrest {
                             gap.max(dist(u.body.pos, rp))
@@ -1714,7 +1711,7 @@ impl PoliceSystem {
                         } else {
                             base_cap.min(lim_here * 1.3)
                         };
-                        let tr = if close && !past_racer {
+                        let tr = if close {
                             track.clone()
                         } else {
                             routed = true;
