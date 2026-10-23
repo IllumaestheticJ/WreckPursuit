@@ -64,6 +64,8 @@ mechanical-spec row; menu stats (`data/stats/cars.json`); AI capability row
 
 ### Changes outside my folders (wave 3)
 
+- `crates/wp_wasm/src/race_spots_tests.rs` (testbed): `city_chase_in` → `night_run_in`. Main
+  did not compile its tests after merging #50 (Ashpeak) and #51 (City chase → Night run rename).
 - `crates/wp_vehicle/tests/gearbox.rs` (02): the fast-shift whitelist gains the seven new
   dual-clutch / automated-manual / sequential ids (0.15-0.22 s, inside its 0.12-0.25 band).
 - `crates/wp_opponent/src/capability_table.rs` (generated, `WP_WRITE_CAPS=1`), `data/stats/cars.json`
