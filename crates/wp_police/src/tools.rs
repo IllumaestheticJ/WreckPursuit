@@ -85,6 +85,20 @@ pub fn plan_site(
     rules: &SiteRules,
     only_road: Option<u32>,
 ) -> Result<ToolSite, SiteError> {
+    plan_site_where(g, racer_pos, racer_vel, rules, only_road, &|_| true)
+}
+
+/// [`plan_site`] with an extra test: the first site that meets the rules and that `accept`
+/// takes (spike strips: one whose car can park out of the racer's view, PR #54 / row 131).
+/// When the rules are met but `accept` turns every such site down: [`SiteError::NoSite`].
+pub fn plan_site_where(
+    g: &RoadGraph,
+    racer_pos: [f32; 2],
+    racer_vel: [f32; 2],
+    rules: &SiteRules,
+    only_road: Option<u32>,
+    accept: &dyn Fn(&ToolSite) -> bool,
+) -> Result<ToolSite, SiteError> {
     let path = g.predict_path(racer_pos, racer_vel, rules.max_ahead_m + 50.0);
     let mut s = rules.min_ahead_m;
     let mut seen_segment = false;
@@ -105,7 +119,7 @@ pub fn plan_site(
         match check_point(g, leg.segment, leg.from_node, d_m, rules) {
             Ok(sight) => {
                 let dir = g.dir_from(leg.segment, leg.from_node);
-                return Ok(ToolSite {
+                let site = ToolSite {
                     segment: leg.segment,
                     from_node: leg.from_node,
                     d_m,
@@ -113,7 +127,11 @@ pub fn plan_site(
                     dir,
                     sight_m: sight,
                     ahead_m: s,
-                });
+                };
+                if accept(&site) {
+                    return Ok(site);
+                }
+                last_err = SiteError::NoSite;
             }
             Err(e) => last_err = e,
         }
@@ -153,6 +171,10 @@ pub struct Roadblock {
     pub barriers: Vec<StaticCollider>,
     /// Removed at.
     pub expires: SimTime,
+    /// Placed by a race profile ([`crate::race`]): stays when the racer's pursuit ends and
+    /// does not count against the AI captain's budget.
+    #[serde(default)]
+    pub scripted: bool,
 }
 
 /// A spike strip: a line across the road.
@@ -168,10 +190,19 @@ pub struct SpikeStrip {
     pub a: [f32; 2],
     /// End B, m.
     pub b: [f32; 2],
-    /// Unit that deployed it.
+    /// Unit that deployed it and stands beside it. A strip only lies on the road while that
+    /// unit is at its post (`None` only for scripted race-profile strips, which have none).
     pub unit: Option<UnitId>,
+    /// Where its unit parked, m: the strip is lifted once the unit is further than
+    /// [`crate::dispatch::SPIKE_UNIT_LEASH_M`] from here.
+    #[serde(default)]
+    pub post: Option<[f32; 2]>,
     /// Removed at.
     pub expires: SimTime,
+    /// Placed by a race profile ([`crate::race`]): stays when the racer's pursuit ends and
+    /// does not count against the AI captain's budget.
+    #[serde(default)]
+    pub scripted: bool,
 }
 
 impl SpikeStrip {
@@ -192,7 +223,32 @@ impl SpikeStrip {
             a: add(site.pos, half),
             b: sub(site.pos, half),
             unit,
+            post: None,
             expires,
+            scripted: false,
+        }
+    }
+
+    /// Strip from `a` to `b` at `site` (a carriageway's width on a divided road, row 133).
+    pub fn between(
+        id: ToolId,
+        racer: EntityId,
+        site: ToolSite,
+        a: [f32; 2],
+        b: [f32; 2],
+        unit: Option<UnitId>,
+        expires: SimTime,
+    ) -> Self {
+        Self {
+            id,
+            racer,
+            site,
+            a,
+            b,
+            unit,
+            post: None,
+            expires,
+            scripted: false,
         }
     }
 
@@ -353,12 +409,16 @@ pub struct HeloView {
     pub unit: UnitId,
     /// World position, m.
     pub pos: [f32; 3],
-    /// Spotlight aim point (ground), m.
+    /// Spotlight aim point: the racer's last known position (where it is while the
+    /// helicopter has visual); z is the racer's current height, m.
     pub spotlight_target: [f32; 3],
     /// Spotlight cone half angle, rad.
     pub cone_half_angle_rad: f32,
     /// Racer being tracked.
     pub target: EntityId,
+    /// The helicopter currently has visual on `target` (spotlight on the car rather than on
+    /// where it was last seen).
+    pub has_visual: bool,
 }
 
 /// Compass word for a direction (radio flavour). Pure comparisons, no trig.

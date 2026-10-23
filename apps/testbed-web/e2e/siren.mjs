@@ -100,7 +100,8 @@ const HILO = { lo_hz: 770, hi_hz: 960, cycle_s: 1.1, rise_frac: 0.5, two_tone: 1
   const model = (t) => {
     const p = (t / WAIL.cycle_s) % 1;
     const r = WAIL.rise_frac;
-    const x = p < r ? 1 - (1 - p / r) ** 2 : (1 - (p - r) / (1 - r)) ** 2;
+    const smooth = (u) => u * u * (3 - 2 * u);
+    const x = p < r ? smooth(p / r) : 1 - smooth((p - r) / (1 - r));
     return WAIL.lo_hz + (WAIL.hi_hz - WAIL.lo_hz) * x;
   };
   const off = track.filter(([t, f]) => Math.abs(f - model(t + 1024 / SR)) > model(t) * 0.04 + 15);
@@ -209,7 +210,15 @@ await page.keyboard.up("KeyW");
 // Forced pattern changes on a live unit: each is heard (new loop plays) and the old one fades.
 const unit = await page.evaluate(() => window.__wpAudio.sirens?.last?.voices?.[0]?.entity ?? null);
 const heard = [];
-for (const mode of ["Yelp", "Phaser", "HiLo", "Wail"]) {
+// Forcing the pattern a unit already plays is no change (nothing new to hear): start from the
+// others (police cues often leave the unit on Yelp already).
+const current = await page.evaluate(
+  (e) => window.__wpAudio.sirens?.last?.voices?.find((x) => x.entity === e)?.pattern ?? null,
+  unit,
+);
+const modes = ["Yelp", "Phaser", "HiLo", "Wail"];
+modes.sort((a, b) => (a === current) - (b === current));
+for (const mode of modes) {
   if (unit === null) break;
   const before = await page.evaluate((m) => window.__wpAudio.cueCounts[`siren/${m.toLowerCase()}`] ?? 0, mode);
   await page.evaluate(([e, m]) => window.__wpAudio.setSirenFor(e, m), [unit, mode]);

@@ -3,9 +3,11 @@
 //! (hood vertices never follow fender nodes), topped up from neighbour regions when its
 //! region has fewer than four nodes (glass, 2-door side strips).
 //!
-//! Light lenses are the exception: they bind to the nearest nodes of the end of the car they
+//! Head / tail lamp lenses (light parts in the `FrameFront` / `FrameRear` regions, see
+//! [`is_end_lamp`]) are the exception: they bind to the nearest nodes of the end of the car they
 //! sit on (bumper, hood / trunk, the fender / quarter on their side, the frame), so they crush
-//! and move with the bumper and hood. Hood and trunk lids, front fenders and rear quarters get a fold
+//! and move with the bumper and hood. Other lamps (fog lamps, DRLs, light bars, markers) keep
+//! their own region like any part. Rigid parts bind every vertex to one node. Hood and trunk lids, front fenders and rear quarters get a fold
 //! binding ([`bind_fold`]) so a crushed panel buckles and follows the crushed front instead of
 //! sliding back flat.
 
@@ -82,10 +84,9 @@ pub fn part_centre(part: &MeshPart) -> [f32; 3] {
     c
 }
 
-/// A head / tail light lens on the nose / tail face: a light part in the front / rear frame
-/// region. Other lights (indicators, markers, fog lamps, light bars on lids …) are skinned to
-/// their own region like any panel detail.
-pub fn is_lens(part: &MeshPart) -> bool {
+/// True for a head / tail lamp lens: a light part in the front / rear frame region (the
+/// generator's `headlight_*` / `taillight_*` and whatever a style kit adds to them).
+pub fn is_end_lamp(part: &MeshPart) -> bool {
     part.kind == PartKind::Light
         && matches!(
             part.region,
@@ -93,13 +94,14 @@ pub fn is_lens(part: &MeshPart) -> bool {
         )
 }
 
-/// Nodes a part may bind to: [`candidates`] of its region, or for a light lens ([`is_lens`])
-/// every node of its [`light_regions`] (not pinned to the chassis, so the lens follows the crush).
+/// Nodes a part may bind to: [`candidates`] of its region, or for a head / tail lamp
+/// ([`is_end_lamp`]) every node of its [`light_regions`] (not pinned to the chassis, so the
+/// lens follows the crush).
 pub fn part_candidates(lattice: &LatticeDef, part: &MeshPart) -> Vec<u16> {
     let Some(region) = part.region else {
         return Vec::new();
     };
-    if is_lens(part) {
+    if is_end_lamp(part) {
         let regions = light_regions(part_centre(part));
         return lattice
             .nodes
@@ -122,14 +124,7 @@ pub fn bind_part(lattice: &LatticeDef, part: &mut MeshPart) {
     let cand = part_candidates(lattice, part);
     if part.rigid {
         // Rigid part: every vertex on the candidate node nearest the part's centroid.
-        let n = part.vertex_count().max(1) as f32;
-        let mut c = [0.0f32; 3];
-        for v in 0..part.vertex_count() {
-            let q = part.vertex(v);
-            for k in 0..3 {
-                c[k] += q[k] / n;
-            }
-        }
+        let c = part_centre(part);
         let node = cand
             .iter()
             .copied()
@@ -145,8 +140,9 @@ pub fn bind_part(lattice: &LatticeDef, part: &mut MeshPart) {
         }
         return;
     }
-    // Lenses pick the nearest of all their candidates; other parts prefer their own region.
-    let own_count = if is_lens(part) {
+    // Head / tail lamps pick the nearest of all their candidates; other parts prefer their
+    // own region.
+    let own_count = if is_end_lamp(part) {
         0
     } else {
         lattice.nodes.iter().filter(|n| n.region == region).count()

@@ -7,6 +7,7 @@ import { useSend, useSlice } from "../../model/GameModel";
 import type { ScannerEntry } from "../../model/types";
 import { Button, Panel, ScreenHead, useEscape } from "../../ui/kit";
 import { mmss } from "../../ui/format";
+import { airCallsign, HeliBadge } from "../hud/HeliIcon";
 import "./police.css";
 
 const CHANNELS: ScannerEntry["channel"][] = ["dispatch", "unit", "civil", "system"];
@@ -54,9 +55,9 @@ export function ScannerFeed() {
         >
           {shown.length === 0 && <li class="wp-dim">Static… nothing on the air yet.</li>}
           {shown.map((e) => (
-            <li key={e.id} data-sev={e.severity} data-ch={e.channel}>
+            <li key={e.id} data-sev={e.severity} data-ch={e.channel} data-air={e.air ? "true" : undefined}>
               <span class="wp-mono wp-dim">{mmss(e.tS)}</span>
-              <span class="wp-scanner-ch">{e.channel.toUpperCase()}</span>
+              <span class="wp-scanner-ch">{e.air ? <HeliBadge text={airCallsign(e.text)} /> : e.channel.toUpperCase()}</span>
               <span>{e.text}</span>
             </li>
           ))}

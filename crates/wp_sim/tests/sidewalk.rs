@@ -480,7 +480,16 @@ fn vesper_cases(map: &CityMap, len: f32) -> Vec<Case> {
             ahead,
             geom::scale(geom::right_of(c.dir), c.side * (c.half + 4.0)),
         );
-        if ramps < 4 && deck(off, c.start[2]) {
+        // The road itself must be at grade over the drive: a deck carries guard rails along
+        // its kerb (main's interchange crossroads climb onto bridges right past a terminal).
+        let elevated = |q: V2| {
+            net.terrain
+                .as_ref()
+                .is_some_and(|t| c.start[2] - t.height_at(q) > 1.5)
+        };
+        let at_grade =
+            !elevated(p) && !elevated(ahead) && !elevated(geom::add(p, geom::scale(c.dir, len)));
+        if ramps < 4 && at_grade && deck(off, c.start[2]) {
             ramps += 1;
             c.label = "beside a fill / deck approach";
             out.push(c);
@@ -615,11 +624,7 @@ fn run_lot_cases(name: &str, net: &RoadNetwork, cases: &[Case]) {
                     tol,
                 );
                 worst = worst.min(d.min_clearance);
-                // -3.5 cm (was -3 cm): after merging main's highway layout the case list picks
-                // a residential verge where the tyre climbing the kerb dips 3.0-3.2 cm below the
-                // road 0.2 m short of the kerb line (15-40 km/h, 15-30°), within the road
-                // collider's own -1.1 cm (surface_match) plus tyre load on the kerb face.
-                let ok = d.min_clearance > -0.035
+                let ok = d.min_clearance > -0.03
                     && d.max_airborne_s < 0.15
                     && d.on_sidewalk
                     && d.end_clearance.abs() < 0.06;

@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_crowfoot_descent systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 3c3107fd475db7ac
-480 a4fedf590f3c45de
-720 02b8bc105dc60ab0
-960 c39e24c53e5fff2f
-1200 bbf7f9764262a299
-1440 5d6d9077e6f1bd9f
-1680 3f869c2c4f34a504
-1920 97a7c22c51728f47
-2160 f93efd975181c87f
-2400 41ca30a730d2597d
+# simcli hashes scenario=race_crowfoot_descent systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 eeff5a493bdb597e
+480 fbee2557059d594e
+720 b94bd85634e222c6
+960 6628844be030a9e4
+1200 2df876119668d80a
+1440 3255c88ad7541045
+1680 1b4b3f68df3328ff
+1920 04be4445508a8123
+2160 f17cd5d9af1374cb
+2400 aac51d8dfdb5012c

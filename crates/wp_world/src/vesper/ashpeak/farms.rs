@@ -950,7 +950,7 @@ fn village_landmarks(site: &mut Site) -> (Vec<Building>, Vec<Decor>) {
             flat,
             0.0,
         ),
-        // Harlan County Sheriff.
+        // Ashpeak Sheriff Harlan Substation.
         (
             rect_fp([-3495.0, 90.0], e, 14.0, 9.0),
             7.0,
@@ -1060,7 +1060,7 @@ pub(super) fn pois(site: &mut Site) -> Vec<Poi> {
     for (kind, name, p) in [
         (
             PoiKind::PoliceStation,
-            "Harlan County Sheriff",
+            "Ashpeak Sheriff Harlan Substation",
             [-3495.0, 120.0],
         ),
         (PoiKind::Garage, "Harlan Feed & Tractor", [-3700.0, 140.0]),
@@ -1280,7 +1280,7 @@ mod tests {
         let lane = &net.lanes[village.lane.unwrap() as usize];
         assert_eq!(rep.road_names[lane.road as usize], HARLAN_ROAD);
         assert!(geom::dist(geom::xy(village.pos), plan::HARLAN_CROSSING) < 300.0);
-        poi("Harlan County Sheriff", PoiKind::PoliceStation);
+        poi("Ashpeak Sheriff Harlan Substation", PoiKind::PoliceStation);
         poi("Harlan Feed & Tractor", PoiKind::Garage);
         poi("Old Mill Barn", PoiKind::SafehouseCandidate);
     }

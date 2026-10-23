@@ -5,8 +5,8 @@
   "type": "object",
   "properties": {
     "abs": {
-      "description": "Anti-lock brakes.",
-      "type": "boolean"
+      "description": "Anti-lock brakes level (legacy bool accepted: true = Full, false = Off).",
+      "$ref": "#/$defs/AbsLevel"
     },
     "auto_clutch": {
       "description": "Automatic clutch (launch, stall prevention, shifts).",
@@ -36,8 +36,8 @@
       "format": "float"
     },
     "tcs": {
-      "description": "Traction control (throttle cut on driven-wheel slip).",
-      "type": "boolean"
+      "description": "Traction control level (throttle cut + brake TC on driven-wheel slip; legacy bool\naccepted: true = Full, false = Off).",
+      "$ref": "#/$defs/TcsLevel"
     },
     "throttle_filter": {
       "description": "Throttle input smoothing strength, 0 (raw) ..= 1 (heavy ramp).",
@@ -55,5 +55,47 @@
     "brake_filter",
     "auto_gears",
     "auto_clutch"
-  ]
+  ],
+  "$defs": {
+    "AbsLevel": {
+      "description": "Anti-lock brake level (reference Off / Half / Full). `Half` lets a wheel slip further\nand lock briefly before releasing, `Full` keeps it near the tyre's peak.",
+      "oneOf": [
+        {
+          "description": "No intervention.",
+          "type": "string",
+          "const": "Off"
+        },
+        {
+          "description": "Partial intervention (the reference game's \"Half\").",
+          "type": "string",
+          "const": "Half"
+        },
+        {
+          "description": "Full intervention.",
+          "type": "string",
+          "const": "Full"
+        }
+      ]
+    },
+    "TcsLevel": {
+      "description": "Traction control level (owner rows 104/105, reference Off / Half / Full).\n`Off` = the throttle the driver presses: no cut, no brake-TC, no pedal filter.\n`Half` lets the driven wheels spin a few times further past the tyre's peak than `Full`\n(visible wheelspin and smoke on a floored launch); `Full` keeps them near the peak.",
+      "oneOf": [
+        {
+          "description": "No intervention.",
+          "type": "string",
+          "const": "Off"
+        },
+        {
+          "description": "Partial intervention (the reference game's \"Half\").",
+          "type": "string",
+          "const": "Half"
+        },
+        {
+          "description": "Full intervention.",
+          "type": "string",
+          "const": "Full"
+        }
+      ]
+    }
+  }
 }

@@ -3,7 +3,7 @@
 //!
 //! - **Downtown core** ([`plan::METRO_CORE_LO`]..[`plan::METRO_CORE_HI`]): a 100 m street grid
 //!   ([`XS`] × [`YS`]) of 2 + 2 avenues, two 3 + 3 grand avenues with bus lanes (Meridian
-//!   Avenue, Grand Concourse), a one-way avenue pair (Bastion northbound, Corwin southbound, two lanes each)
+//!   Avenue, Grand Promenade), a one-way avenue pair (Bastion northbound, Corwin southbound, two lanes each)
 //!   and a one-way street pair (3rd Street eastbound, 4th Street westbound); every other
 //!   street is a collector, so every core junction is signalised. **Meridian Plaza** (two by
 //!   two blocks) holds the **Meridian Spire** (≈ 385 m) and billboards; City Hall faces it,
@@ -130,7 +130,7 @@ fn row(y: f32) -> (Style, &'static str, Flow) {
         4400 => (ONE_WAY, "3rd Street", Flow::Up),
         4500 => (ONE_WAY, "4th Street", Flow::Down),
         4600 => (STREET, "5th Street", Flow::Both),
-        4700 => (GRAND, "Grand Concourse", Flow::Both),
+        4700 => (GRAND, "Grand Promenade", Flow::Both),
         4800 => (STREET, "7th Street", Flow::Both),
         4900 => (STREET, "8th Street", Flow::Both),
         5000 => (STREET, "9th Street", Flow::Both),
@@ -179,7 +179,7 @@ fn seawall_x(y: f32) -> f32 {
 fn waterfront_row(y: f32) -> (Style, &'static str) {
     match y as i32 {
         3900 => (PORT, "Dock Street"),
-        4100 => (PORT, "Cannery Row"),
+        4100 => (PORT, "Cannery Lane"),
         4300 => (STREET, "Tidewater Street"),
         4450 => (AVENUE, "Pier Street"),
         4650 => (STREET, "Marina Street"),

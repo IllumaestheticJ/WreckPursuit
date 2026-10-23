@@ -55,83 +55,115 @@ pub(crate) fn collect(
     let mut per_vehicle = vec![Vec::new(); infos.len()];
     let mut events = Vec::new();
     for (i, me) in infos.iter().enumerate() {
-        let Some(rb) = bodies.get(me.body) else {
+        body_contacts(
+            narrow_phase,
+            bodies,
+            colliders,
+            me,
+            infos,
+            &mut per_vehicle[i],
+            Some(&mut events),
+        );
+    }
+    TickContacts {
+        per_vehicle,
+        events,
+    }
+}
+
+/// Contacts of one body (`me`, collider `me.collider`) after the physics step, in its own
+/// body frame, into `out`. `others` are the bodies whose identity and pre-step velocity are
+/// known (vehicles): a contact with one of them names it and measures closing speed against
+/// it; anything else (static world, props, debris) counts as at rest with `other: None`.
+/// With `events`, a [`SimEvent::Contact`] per touching pair above
+/// [`CONTACT_EVENT_MIN_IMPULSE_NS`] (emitted once per pair, by the lower entity id).
+pub(crate) fn body_contacts(
+    narrow_phase: &NarrowPhase,
+    bodies: &RigidBodySet,
+    colliders: &ColliderSet,
+    me: &BodyInfo,
+    others: &[BodyInfo],
+    out: &mut Vec<ContactImpulse>,
+    mut events: Option<&mut Vec<SimEvent>>,
+) {
+    let Some(rb) = bodies.get(me.body) else {
+        return;
+    };
+    let chassis = *rb.position();
+    for pair in narrow_phase.contact_pairs_with(me.collider) {
+        let PairContacts::Rigid(rigid) = &pair.contacts else {
             continue;
         };
-        let chassis = *rb.position();
-        for pair in narrow_phase.contact_pairs_with(me.collider) {
-            let PairContacts::Rigid(rigid) = &pair.contacts else {
-                continue;
-            };
-            let me_first = pair.collider1 == me.collider;
-            let other_col = if me_first {
-                pair.collider2
-            } else {
-                pair.collider1
-            };
-            let other = infos.iter().find(|o| o.collider == other_col);
-            // Mass of whatever body owns the other collider (vehicle or debris); 0 = static.
-            let other_mass_kg = colliders
-                .get(other_col)
-                .and_then(|c| c.parent())
-                .and_then(|h| bodies.get(h))
-                .filter(|b| b.is_dynamic())
-                .map_or(0.0, |b| b.mass());
-            let Some(col1) = colliders.get(pair.collider1) else {
-                continue;
-            };
-            let pose1 = *col1.position();
-            // Pair aggregate for the event (emitted once, by the lower entity id).
-            let mut sum_impulse = 0.0f32;
-            let mut sum_point = Vector::ZERO;
-            let mut sum_normal = Vector::ZERO;
-            let mut max_closing = 0.0f32;
-            for manifold in rigid.solver_manifolds() {
-                // World normal from collider1 toward collider2. "Into me" = from the other
-                // collider toward me.
-                let n12 = manifold.data.normal;
-                let n_into_me = if me_first { -n12 } else { n12 };
-                for pt in &manifold.points {
-                    let impulse = pt.data.impulse;
-                    if impulse <= 0.0 {
-                        continue;
-                    }
-                    let p_world = pose1.transform_point(pt.local_p1);
-                    let v_me = me.pre_velocity_at(p_world);
-                    let v_other = other.map_or(Vector::ZERO, |o| o.pre_velocity_at(p_world));
-                    let v_rel = v_other - v_me; // other relative to me
-                                                // Closing when the other moves into me along the normal (into me).
-                    let closing = v_rel.dot(n_into_me).max(0.0);
-                    // Friction impulse: Rapier reports it in a solver tangent basis; rebuild
-                    // the world direction from the pre-step sliding velocity (opposes my slip).
-                    let slide = (v_me - v_other) - n_into_me * (v_me - v_other).dot(n_into_me);
-                    let t_mag = pt.data.tangent_impulse.norm();
-                    let t_world = if slide.length_squared() > 1e-8 {
-                        -slide.normalize() * t_mag
-                    } else {
-                        Vector::ZERO
-                    };
-                    let p_local = chassis.inverse_transform_point(p_world);
-                    let n_local = chassis.inverse_transform_vector(n_into_me);
-                    let t_local = chassis.inverse_transform_vector(t_world);
-                    per_vehicle[i].push(ContactImpulse {
-                        point_local_m: p_local.to_array(),
-                        normal_local: n_local.to_array(),
-                        impulse_ns: impulse,
-                        tangent_impulse_local_ns: t_local.to_array(),
-                        rel_speed_mps: closing,
-                        other: other.map(|o| o.id),
-                        other_mass_kg,
-                    });
-                    sum_impulse += impulse;
-                    sum_point += p_world * impulse;
-                    // Event normal convention: from `a` (me) toward `b` (other).
-                    sum_normal -= n_into_me * impulse;
-                    max_closing = max_closing.max(closing);
+        let me_first = pair.collider1 == me.collider;
+        let other_col = if me_first {
+            pair.collider2
+        } else {
+            pair.collider1
+        };
+        let other = others.iter().find(|o| o.collider == other_col);
+        // Mass of whatever body owns the other collider (vehicle or debris); 0 = static.
+        let other_mass_kg = colliders
+            .get(other_col)
+            .and_then(|c| c.parent())
+            .and_then(|h| bodies.get(h))
+            .filter(|b| b.is_dynamic())
+            .map_or(0.0, |b| b.mass());
+        let Some(col1) = colliders.get(pair.collider1) else {
+            continue;
+        };
+        let pose1 = *col1.position();
+        // Pair aggregate for the event (emitted once, by the lower entity id).
+        let mut sum_impulse = 0.0f32;
+        let mut sum_point = Vector::ZERO;
+        let mut sum_normal = Vector::ZERO;
+        let mut max_closing = 0.0f32;
+        for manifold in rigid.solver_manifolds() {
+            // World normal from collider1 toward collider2. "Into me" = from the other
+            // collider toward me.
+            let n12 = manifold.data.normal;
+            let n_into_me = if me_first { -n12 } else { n12 };
+            for pt in &manifold.points {
+                let impulse = pt.data.impulse;
+                if impulse <= 0.0 {
+                    continue;
                 }
+                let p_world = pose1.transform_point(pt.local_p1);
+                let v_me = me.pre_velocity_at(p_world);
+                let v_other = other.map_or(Vector::ZERO, |o| o.pre_velocity_at(p_world));
+                let v_rel = v_other - v_me; // other relative to me
+                                            // Closing when the other moves into me along the normal (into me).
+                let closing = v_rel.dot(n_into_me).max(0.0);
+                // Friction impulse: Rapier reports it in a solver tangent basis; rebuild
+                // the world direction from the pre-step sliding velocity (opposes my slip).
+                let slide = (v_me - v_other) - n_into_me * (v_me - v_other).dot(n_into_me);
+                let t_mag = pt.data.tangent_impulse.norm();
+                let t_world = if slide.length_squared() > 1e-8 {
+                    -slide.normalize() * t_mag
+                } else {
+                    Vector::ZERO
+                };
+                let p_local = chassis.inverse_transform_point(p_world);
+                let n_local = chassis.inverse_transform_vector(n_into_me);
+                let t_local = chassis.inverse_transform_vector(t_world);
+                out.push(ContactImpulse {
+                    point_local_m: p_local.to_array(),
+                    normal_local: n_local.to_array(),
+                    impulse_ns: impulse,
+                    tangent_impulse_local_ns: t_local.to_array(),
+                    rel_speed_mps: closing,
+                    other: other.map(|o| o.id),
+                    other_mass_kg,
+                });
+                sum_impulse += impulse;
+                sum_point += p_world * impulse;
+                // Event normal convention: from `a` (me) toward `b` (other).
+                sum_normal -= n_into_me * impulse;
+                max_closing = max_closing.max(closing);
             }
-            let other_id = other.map_or(WORLD_ENTITY, |o| o.id);
-            let i_emit = other.is_none_or(|o| me.id < o.id);
+        }
+        let other_id = other.map_or(WORLD_ENTITY, |o| o.id);
+        let i_emit = other.is_none_or(|o| me.id < o.id);
+        if let Some(events) = events.as_deref_mut() {
             if i_emit && sum_impulse >= CONTACT_EVENT_MIN_IMPULSE_NS {
                 let n = sum_normal.normalize_or_zero();
                 events.push(SimEvent::Contact {
@@ -144,9 +176,5 @@ pub(crate) fn collect(
                 });
             }
         }
-    }
-    TickContacts {
-        per_vehicle,
-        events,
     }
 }

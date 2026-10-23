@@ -105,8 +105,9 @@ mod tests {
         );
         assert!(
             // 7.5 MB before the residential lots (rows 94–95: houses with pitched roofs,
-            // garages, grass verges; trees, driveways, hedges and fences are instanced).
-            shipped.len() < 10_000_000,
+            // garages, grass verges; trees, driveways, hedges and fences are instanced);
+            // 10.04 MB with the Loop 9 rest stops (row 153: six ramps, three parking roads).
+            shipped.len() < 10_200_000,
             "greybox grew to {} bytes",
             shipped.len()
         );

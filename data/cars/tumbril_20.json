@@ -1,0 +1,157 @@
+{
+  "id": "tumbril_20",
+  "display_name": "Tumbril 2.0",
+  "class": "Truck",
+  "analog_of": "2000s European FWD high-roof panel van, 2.0 L petrol I4, unibody, sliding side door",
+  "body_size_m": [1.92, 4.9, 2.3],
+  "mass_kg": 1845.2,
+  "front_weight_frac": 0.6,
+  "wheelbase_m": 3.2,
+  "track_front_m": 1.62,
+  "track_rear_m": 1.62,
+  "cg_height_m": 0.8,
+  "inertia_kgm2": [1170.0, 4280.0, 4130.0],
+  "drag_cd_a_m2": 1.554,
+  "lift_front": 0.12,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 125],
+      [1200, 140],
+      [1600, 152],
+      [2000, 162],
+      [2500, 170],
+      [3000, 176],
+      [3500, 180],
+      [4000, 178],
+      [4500, 170],
+      [5000, 160],
+      [5500, 148],
+      [6000, 128],
+      [6200, 118]
+    ],
+    "idle_rpm": 750.0,
+    "redline_rpm": 6000.0,
+    "rev_limit_rpm": 6200.0,
+    "inertia_kgm2": 0.14,
+    "engine_brake_nm": 22.0
+  },
+  "drivetrain": {
+    "layout": "Fwd",
+    "gear_ratios": [3.73, 2.05, 1.32, 0.97, 0.76],
+    "final_drive": 4.43,
+    "reverse_ratio": 3.55,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 250.0,
+    "shift_time_s": 0.3
+  },
+  "wheels": [
+    {
+      "position_m": [-0.81, 1.6, 0.329],
+      "radius_m": 0.329,
+      "width_m": 0.215,
+      "mass_kg": 24.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.658,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0087,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [0.81, 1.6, 0.329],
+      "radius_m": 0.329,
+      "width_m": 0.215,
+      "mass_kg": 24.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.658,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0087,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0611
+    },
+    {
+      "position_m": [-0.81, -1.6, 0.329],
+      "radius_m": 0.329,
+      "width_m": 0.215,
+      "mass_kg": 30.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.81, -1.6, 0.329],
+      "radius_m": 0.329,
+      "width_m": 0.215,
+      "mass_kg": 30.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 41000.0,
+      "damper_bump_ns_per_m": 2520.0,
+      "damper_rebound_ns_per_m": 3780.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 10900.0,
+      "bump_stop_n_per_m": 250000.0
+    },
+    {
+      "spring_n_per_m": 41000.0,
+      "damper_bump_ns_per_m": 2520.0,
+      "damper_rebound_ns_per_m": 3780.0,
+      "travel_m": 0.18,
+      "preload_m": 0.03,
+      "arb_n_per_m": 10900.0,
+      "bump_stop_n_per_m": 250000.0
+    },
+    {
+      "spring_n_per_m": 38700.0,
+      "damper_bump_ns_per_m": 1960.0,
+      "damper_rebound_ns_per_m": 2940.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 250000.0
+    },
+    {
+      "spring_n_per_m": 38700.0,
+      "damper_bump_ns_per_m": 1960.0,
+      "damper_rebound_ns_per_m": 2940.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 250000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2830.0,
+    "max_torque_rear_nm": 760.0,
+    "bias_front": 0.603,
+    "handbrake_rear_nm": 760.0
+  },
+  "steering": {
+    "ratio": 17.5,
+    "rack_speed_rad_per_s": 1.1,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "tumbril_20",
+  "base_price": 20000,
+  "durability_class": 3,
+  "fuel_capacity_l": 80.0
+}

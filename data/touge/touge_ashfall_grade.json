@@ -1,0 +1,30 @@
+{
+  "id": "touge_ashfall_grade",
+  "name": "Ashfall Grade",
+  "blurb": "A short, steep climb up an old volcano. Blind crests and a sheer drop on the outside.",
+  "climb_m": 260.0,
+  "lane_width_m": 3.3,
+  "shoulder_m": 0.7,
+  "speed_mps": 22.0,
+  "cliff_drop_m": 40.0,
+  "krail": [[300, 440], [900, 1040], [1500, 1650], [1900, 2040]],
+  "legs": [
+    {"straight": 180},
+    {"turn": -80, "r": 50},
+    {"straight": 200},
+    {"turn": 110, "r": 30},
+    {"straight": 230},
+    {"turn": -176, "r": 15},
+    {"straight": 260},
+    {"turn": 85, "r": 40},
+    {"straight": 160},
+    {"turn": 95, "r": 28},
+    {"straight": 220},
+    {"turn": -178, "r": 14},
+    {"straight": 240},
+    {"turn": 60, "r": 60},
+    {"straight": 160},
+    {"turn": -100, "r": 35},
+    {"straight": 190}
+  ]
+}

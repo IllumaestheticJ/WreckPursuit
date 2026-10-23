@@ -207,7 +207,7 @@ Suburb north/west). Buildings on lots (Core 5–8 storeys, Commercial 2–4, Res
 courtyards, warehouses in the bands). Green-wave offsets along arterial rows (eastbound),
 columns (northbound) and diagonals at 90 % of the limit. POIs: 2 police stations + helipad,
 3 garages, 4 safehouse candidates, 3 race grids (highway, arterial, ring). The 12×12 city has
-1742 lanes, 232 junctions (54 signalised, 8 freeway merges / diverges), 1703 buildings.
+1742 lanes, 232 junctions (54 signalised, 8 freeway merges / diverges), 1068 buildings.
 
 ## Port Vesper v2 (`vesper::generate`, `World::vesper`, `gen-city --preset vesper_v2`)
 After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m terrain cells.
@@ -233,6 +233,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   its terminal under an 8 % cap; a second profiling pass holds every terminal within reach of
   its ramps' gores. Interchange crossroads take the old junctions' local roads (Terminal
   Avenue no longer reaches the loop; the port is served by the half diamond).
+  **Rest stops** (playtest row 153): Hollins Rest Area (outer carriageway, west), Larkspur and
+  Harbor Rest Area (inner carriageway, south): an off-ramp 275 m upstream of the stop's
+  centre, a 100 m one-way 20 mph parking road 34 m off the centreline (kerb parking, always a
+  few parked cars, no houses, on an embankment where the ground falls away), an on-ramp 275 m
+  downstream. Named `PoiKind::RestStop` sites, `World::rest_stops()` / `rest_stop(name)`.
 - **Road names:** `World::vesper` keeps the generator's name per source road
   (`World::road_names`; presentation only, not in the road format or the state hash), and
   `World::edge_names()` names every road-graph edge (`RoadEdgeId`) after its road. The police
@@ -258,14 +263,13 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 - **POIs:** race grids `Lantern Run` (first: free drive / city chase spawn), `Loop 9 sprint`,
   `Hollins Ascent`, `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
-  `Knob Observatory Lot`).
+  `Knob Observatory Lot`); 3 rest stops.
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
-  through the northern shoulder of Hollins Heights, 391 m, one tube over both carriageways, road profile unchanged (it already
+  through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
   ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
-  Uptown Connector dropped 7 m below the lowest natural ground into a 105 m covered trench
-  (an internal profile anchor; ramps ≈ 5 %; 250 m before the merge with main, now ending
-  ≈ 140 m short of the Uptown diamond so its bridge over Loop 9 stays at 10 %), ground backfilled level with the plaza deck.
+  Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
+  (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
   Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
   (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
   shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
@@ -276,9 +280,9 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
   sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
 
-1150 lanes, 182 junctions (31 signalised, 22 freeway merges / diverges), 3796 buildings, 2 covered roads,
+1012 lanes, 159 junctions (31 signalised, 22 freeway merges / diverges), 3395 buildings,
 14 grade separations (Route 40 West / North and five crossroads, each over or under both
-carriageways), 22 ramps, ≈ 10 km of median barrier, terrain
+carriageways), 22 ramps, ≈ 10 km of median barrier, 2 covered roads, terrain
 681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
@@ -323,6 +327,28 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
 - `residential::driveway_cars` parks cars in 60 % of driveways; kerbside cars never stand in
   front of a driveway mouth (`blocks_driveway`). Trunks, hedges and fences are `wp_sim`
   colliders in cities with terrain. Details: `docs/integration/city-residential.md`.
+
+## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
+Four sealed mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json`
+(embedded): Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m),
+Ashfall Grade (≈ 2.3 km, 260 m), Cedar Switchback (≈ 2.3 km, 210 m).
+- **Road:** a turtle path of straights and arcs (`legs`), sampled every 2 m; an elevation
+  profile that flattens the hairpins and both ends; banking from curvature. One 1+1 lane road
+  (`RoadClass::Collector` geometry, lanes tagged `LaneKind::Highway` so the surface code adds no
+  sidewalks, kerbs or guard rails), no traffic (one zone at density 0).
+- **Terrain:** coarse natural ground (16 m) resampled onto a 4 m heightfield, carved under the
+  road with a flat shelf, falling away as a cliff (`cliff_drop_m`) on the low side.
+- **Sealed:** `DecorKind::Fence` walls (0.5 × 1.2 m, solid colliders in `wp_sim`) along both
+  edges and across both ends, everywhere except the `krail` spans.
+- **K-rail spans:** on the outboard (cliff) edge the wall is replaced by loose K-rail props
+  (`PropKind::KRail`, 2 m × 0.6 m × 0.81 m, 600 kg): fixed until a car comes near, then
+  dynamic, so a car that hits them hard enough knocks them over the edge and follows them.
+  Whether a car went through is judged in `wp_race::touge::Boundary`.
+- **POIs:** `<name> base start`, `<name> summit finish`, `<name> summit start`,
+  `<name> base finish` (60 m / 40 m in from the ends) for uphill and downhill courses.
+- Tests (`touge::tests`): every pass parses and validates; long, steep and sealed; the road never
+  comes near itself; terrain stays under the road and falls away behind the K-rails; generation
+  is deterministic.
 
 ## Traffic AI
 
@@ -382,6 +408,25 @@ safe; debris-forced changes go at once. The car slides over at 1.3 m/s and keeps
 old lane until clear. Lane choice before turns is implicit: an agent picks its turn from the
 lane it is in. `TrafficStats::{lane_changes, lane_changes_left}`.
 
+**Turn signals** (`AgentView::turn_signal`, -1 left / 1 right; owner playtest 2026-10-21).
+View-only: computed in `Traffic::views` from the agent state plus two step-counted fields
+updated after the move (`turn_latch`, `lc_signal`), never read by the driving logic and not in
+the state hash (the traffic hash is unchanged by them).
+- Junction turns (Left / Right / UTurn = left): on from `turn_signal_lead_m(v)` = clamp(v × 3 s,
+  30 m, 50 m) before the lane end (≈ 3 s; latched so slowing into a queue does not switch it
+  off), **on through the connector**, off on the exit lane. Straight on: off.
+- Lane changes: on while pending (≥ `LANE_CHANGE_SIGNAL_S` = 0.5 s before the move; 1.5 s was
+  tried and cut lane changes by a third in `traffic_bench`, so the timing is unchanged) and
+  during the whole lateral move until within `LANE_CHANGE_SIGNAL_OFF_M` (0.3 m) of the new lane
+  centre, about 3 s in all.
+- Siren yield: towards the kerb while pulling over / waiting, away from it while merging back,
+  off after. Manoeuvres: pass out left / back right, turn-around left, reverse hazards.
+- Hazards: disabled (indicator suppressed) and emergency braking.
+Tests: `traffic::signal_tests` (onset 30–50 m and off at 80 m, held in the connector, off on the
+exit lane, lane change pending ≥ 0.5 s + move), `tests/siren.rs`
+`pulling_over_and_merging_back_are_indicated`. `traffic_bench` (400 agents, 2 min): avg 0.228 →
+0.238 ms/frame with diagnostics on, identical hash.
+
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
 speed (head-on or crossing); siren units → see **Yielding to sirens** below; debris ahead (`Hazard`,
@@ -398,6 +443,14 @@ Promotion copies pose and speed; demotion (beyond 100 m) projects the vehicle ba
 path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
 (`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
 removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
+With the cap full, a kinematic car within 40 m of a player takes the place of the physical
+car farthest from any player (playtest row 149: kinematic cars have no collider, the player
+drove through them), and a kinematic car turning around or reversing within 20 m of a player
+gives the manoeuvre up to be promoted. A wreck lying across a car's path (its segment or the
+next two of its plan, by position) is its leader whatever lane the wreck is filed under.
+**Priority junction starvation:** a minor-road car that has stood at its line for 25 s
+accepts gaps shrinking to 2.5 s, and slow (≤ 10 m/s) major-road cars that can stop
+comfortably hold at their line for it, so a steady stream cannot hold it indefinitely.
 
 **Parked cars** (`props::parked_cars`, owner row 77): only on parking lanes (collector and
 local streets; arterials, highways, hill roads and service roads have none) and never within
@@ -447,7 +500,10 @@ relative) within 10 s; collision = box overlap with a civilian. Emitted as
 extruded from the ground to `height_m`; a sight line is blocked if any part of it inside a
 footprint is below the roof (checked at both ends of the inside span — height is linear along
 the line). Buildings are indexed in the 32 m grid and only cells the line crosses (2D DDA) are
-tested. Roads, parked cars and traffic do not occlude.
+tested. With terrain the ground occludes, and so do **bridge decks** with at least 3 m under
+them (`surface::deck_slabs`, the deck as a thin plane over its paved width, also gridded): from
+the air the road under an overpass is hidden, which is how a racer breaks a helicopter's sight
+on Port Vesper (police P9). Other road surfaces, parked cars and traffic do not occlude.
 
 **Leader query** (`leader`, for police units and AI racers): `find_leader(own_pos,
 centreline, obstacles, skip, params)` samples the caller's path ahead (any path type — a
@@ -555,6 +611,56 @@ A unit passes yielding traffic hugging the centre line (≥ 2.6 m corridor betwe
 cars of both directions). Tests: `tests/siren.rs` (stand-in unit: 6 queued cars passed in
 5.7–6.9 s, moving traffic passed without slowing, siren-off control, multi-lane, stuck/parked
 unit), simcli `city/siren_traffic_*`.
+
+**Jams** (owner playtest row 85: "massive traffic jam" during an L5 pursuit; `traffic/jam.rs`
+plus rules in `traffic.rs` / `traffic/blocked.rs`).
+- *Measured*: `TrafficStats::{max_stop_s, max_queue, box_stops, jam_recycled}` — longest stop
+  outside red / amber (held, not reset, at a red; also held within 60 m of a standing scene, a
+  tracked vehicle stopped 20 s; wrecks left out), longest queue of stopped cars back from a stop
+  line (followed back through junctions, sampled 1 Hz), stops > 5 s inside a junction box.
+  The stop metric is also held while the car yields to a siren (the law, like a red).
+  simcli metrics `traffic_max_stop_s`, `traffic_max_queue`, `traffic_box_stops`,
+  `traffic_jam_recycled`; scenarios `jam/pursuit_jam_{grid,vesper}.ron` (10 min, L4 → L5, racer
+  restarted after each capture). Gates: max stop ≤ 45 s, max queue ≤ 12 (both met; seed sweep in
+  `docs/integration/world.md`, round 13, row 85).
+- *Junction rules*: reservations are rebuilt every step from what cars hold (a permit, or being
+  in the connector), so none outlive their car. A tracked vehicle in a crossing path holds
+  crossing traffic only while it moves faster than 2.5 m/s (`TV_SWEEP_MPS`); a stationary one
+  blocks only the paths it stands in, and so does a wreck. A car stopped at its line without a
+  permit for 4 s is not "arriving" for the drivers yielding to it (`STALE_ARRIVAL_S`); at an
+  all-way stop, a first-to-stop driver who has not gone in 8 s loses the right of way
+  (`ALLWAY_STALE_S`). After 20 s at the line a driver books its connector (turn-taking: no new
+  permits into crossing movements; never next to a crossing booking; lapses after 10 s unused).
+  A permit held by a car stopped > 6 m short of the line is dropped. Don't-block-the-box (exit
+  room) was already there.
+- *Police in the way*: a tracked vehicle stopped at the line for 6 s (not red) or in the box for
+  3 s is an obstruction, not a car waiting its turn (`TRACKED_AT_LINE_S`, `TRACKED_IN_BOX_S`);
+  so is a box path blocked by one for 6 s. The front car takes another exit if one is free
+  (`reroute_around_box`), else the queue turns around / backs out from the tail and the lane is
+  marked blocked so upstream cars re-route (now on multi-lane roads too when the obstruction is
+  at the line or the wait is long). An obstructed car gives up its permit (no new one for 10 s).
+- *Sirens*: a driver held at the line by a unit heading for the junction goes after 8 s
+  (`SIREN_JUNCTION_HOLD_MAX_S`); a pulled-over driver gives up on a unit that stands or crawls
+  (< 2 m/s) behind it after 8 s (`STALL_S`, was 15 s); with a unit standing beside it
+  (`BESIDE_STANDING_MPS`, with `BESIDE_CLEAR_M` of room) it creeps on along the kerb (≤ 5 m/s)
+  and merges back once past, instead of waiting; a moving one it waits for.
+- *Stuck manoeuvres*: a lane change stalled half-way (car stopped before leaving the old lane)
+  is undone, with no forced lane change for 20 s; a reverse under way that has not moved for
+  8 s and a U-turn that cannot start for 10 s are given up; a reverse never starts with a
+  tracked vehicle within 25 m behind, and the wait for room to reverse is 15 s (was 40 s).
+  Kinematic U-turns also check the pose they leave the turn in, and hold their own lane 8 m
+  back (was 3 m).
+- *Spawning*: never behind a stopped car within 60 m (into a queue); at most one car per 20 m
+  of lane at the daytime peak, scaled with the time-of-day factor. Unseen cars standing 30 s
+  outside a red light are recycled (`TrafficConfig::jam_recycle_s`), also inside a junction box.
+  A wreck shoved out of its lane is re-filed under the lane it now lies in (any road); one on a
+  sidewalk or lot (> 3.5 m off any lane) is not an obstacle in the lane.
+- *Wrecks at an exit*: a wreck within two car lengths of the start of a car's exit lane makes
+  that exit an obstruction for the car held at the line (`exit_wrecked`): it re-routes to
+  another exit or the queue turns around, instead of waiting for room that never comes.
+- *Waiting it out*: an obstructed driver's wait (`blocked_s`) is held, not reset, while the car
+  stands, so a one-step change of class (level-of-detail switch, siren yield) does not restart
+  its patience; turn-taking bookings are not made against the car's own red / amber.
 
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation

@@ -56,6 +56,32 @@ gear_ratios = [2.52, 1.88, 1.46, 1.00]
 final_drive = 3.55
 
 [[car]]
+id = "parity_rwd_e"
+ref = "REF-RWD-E"
+role = "midsize RWD, 348 kW / 578 N·m / 1368 kg, 5-speed (owner keyboard clip 2026-10-21 16:30)"
+base = "rampart_50"
+mass_kg = 1368.0
+power_kw = 348.0
+power_rpm = 7000.0
+torque_nm = 578.0
+torque_rpm = 4600.0
+gear_ratios = [2.95, 1.94, 1.34, 1.00, 0.80]
+final_drive = 3.55
+
+[[car]]
+id = "parity_rwd_f"
+ref = "REF-RWD-F"
+role = "RWD wagon, 323 kW / 525 N·m / 1213 kg, 6-speed (owner keyboard clips 2026-10-21 16:34 / 16:37 / 16:39)"
+base = "lucciola_350"
+mass_kg = 1213.0
+power_kw = 323.0
+power_rpm = 6500.0
+torque_nm = 525.0
+torque_rpm = 4500.0
+gear_ratios = [3.08, 2.16, 1.61, 1.27, 1.03, 0.84]
+final_drive = 3.90
+
+[[car]]
 id = "parity_fwd_c"
 ref = "REF-FWD-C"
 role = "compact FWD touring, 121 kW / 179 N·m / 982 kg, 5-speed (clip 3)"

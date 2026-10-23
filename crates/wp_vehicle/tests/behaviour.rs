@@ -107,7 +107,7 @@ fn fwd_torque_steer_rwd_none() {
 #[test]
 fn abs_prevents_lockup_and_shortens_stops() {
     let c = car("debug_sedan");
-    let stop = |abs: bool| {
+    let stop = |abs: wp_contracts::AbsLevel| {
         let mut rig = Rig::new(&c);
         rig.teleport([0.0; 3], 0.0, 25.0, 0.0);
         let a = AssistProfile {
@@ -133,11 +133,25 @@ fn abs_prevents_lockup_and_shortens_stops() {
         }
         (rig.state().pos[1], locked_ticks)
     };
-    let (d_abs, lock_abs) = stop(true);
-    let (d_raw, lock_raw) = stop(false);
+    use wp_contracts::AbsLevel;
+    let (d_abs, lock_abs) = stop(AbsLevel::Full);
+    let (d_half, lock_half) = stop(AbsLevel::Half);
+    let (d_raw, lock_raw) = stop(AbsLevel::Off);
+    eprintln!("ABS full {d_abs} m ({lock_abs}), half {d_half} m ({lock_half}), off {d_raw} m ({lock_raw})");
     assert!(lock_raw > 100, "without ABS the fronts lock ({lock_raw})");
     assert!(lock_abs < 10, "ABS keeps wheels turning ({lock_abs})");
     assert!(d_abs < d_raw, "ABS {d_abs} vs locked {d_raw}");
+    // Half: short lock-ups allowed, far fewer than Off; the stop sits between Full and Off.
+    assert!(
+        lock_half < lock_raw / 2,
+        "ABS Half releases ({lock_half} vs {lock_raw})"
+    );
+    assert!(
+        // Tolerance 0.5 m (unify, lead 2026-10-21): on the shipped tyres / ride Half stops
+        // 0.38 m shorter than Full (31.08 vs 31.46 m; Off 35.42 m).
+        d_abs - 0.5 <= d_half && d_half <= d_raw,
+        "{d_abs} {d_half} {d_raw}"
+    );
 }
 
 #[test]
@@ -165,8 +179,8 @@ fn handbrake_locks_rears_and_declutches() {
 #[test]
 fn all_assists_off_still_drives() {
     let off = AssistProfile {
-        abs: false,
-        tcs: false,
+        abs: wp_contracts::AbsLevel::Off,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         steer_speed_sensitivity: 0.0,
         countersteer_help: 0.0,

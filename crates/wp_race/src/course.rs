@@ -155,6 +155,12 @@ pub struct Course {
     /// lane (see `catalog::plan_course`).
     #[serde(default)]
     pub grid_layout: Option<GridLayout>,
+    /// Lateral shift of the whole grid from the centreline, m (+ right). Set by the course
+    /// planner so every slot starts inside the drivable lanes (the centreline is the route's
+    /// lane, so a two-wide grid's outer column could otherwise start past the kerb; see
+    /// `catalog::fit_grid`).
+    #[serde(default)]
+    pub grid_shift_m: f32,
 }
 
 impl Course {
@@ -183,6 +189,7 @@ impl Course {
             closed_loop,
             corridor_half_width_m,
             grid_layout: None,
+            grid_shift_m: 0.0,
         }
     }
 
@@ -382,6 +389,7 @@ impl Course {
         let (p0, d) = self.start();
         let r = v2::right(d);
         let at = |back: f32, side: f32| {
+            let side = side + self.grid_shift_m;
             [
                 p0[0] - d[0] * back + r[0] * side,
                 p0[1] - d[1] * back + r[1] * side,

@@ -8,7 +8,8 @@
 import type { MapFrame, MapStatic, MapZone } from "./data";
 import { isWanted, racersToDraw } from "./data";
 import { districtLabels, type DistrictLabel } from "./districts";
-import { drawPoi, drawPlayer, drawRacer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
+import { drawHeliTether, drawPoi, drawPlayer, drawRacer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, heliFollows, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
+import { drawFlag, drawMarker, drawRoute, type MapExtras } from "./extras";
 import { clampCentre, fitBounds, fullMatrix, glyphRotation, pan, worldToFull, zoomAt, type FullView } from "./projection";
 
 /** District tints by kind (low alpha fills). */
@@ -30,6 +31,10 @@ export interface FullMapStats {
   districts: number;
   pois: number;
   pxPerM: number;
+  /** Host markers drawn (`MapHud.setExtras`). */
+  markers: number;
+  /** Host route drawn. */
+  route: boolean;
 }
 
 /** The full map renderer. */
@@ -41,7 +46,11 @@ export class FullMapRenderer {
   private baseKey = "";
   private ctx: CanvasRenderingContext2D | null;
   view: FullView = { cx: 0, cy: 0, pxPerM: 0.2, w: 1, h: 1 };
-  stats: FullMapStats = { units: 0, racers: 0, player: false, districts: 0, pois: 0, pxPerM: 0 };
+  stats: FullMapStats = { units: 0, racers: 0, player: false, districts: 0, pois: 0, pxPerM: 0, markers: 0, route: false };
+  /** Host overlay (street racers, a race route); null = none. */
+  extras: MapExtras | null = null;
+  /** Crosshair at the screen centre (gamepad picking). */
+  crosshair = false;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -199,8 +208,19 @@ export class FullMapRenderer {
       drawSearch(ctx, f, m, k, nowMs, pal);
     }
     for (const t of f.tools) drawTool(ctx, t, m, k, pal);
+    const ex = this.extras;
+    let markers = 0;
+    if (ex?.route && ex.route.length > 1) drawRoute(ctx, ex.route.map(([x, y]) => worldToFull(v, x, y)), 3.5 * dpr);
     let units = 0;
     const us = 7 * dpr;
+    // Who the helicopter is following (PR #32): tether + pulsing ring, under the glyphs.
+    for (const u of f.units) {
+      const at = heliFollows(u, f.player);
+      if (!at) continue;
+      const [hx, hy] = worldToFull(v, u.x, u.y);
+      const [tx, ty] = worldToFull(v, at[0], at[1]);
+      drawHeliTether(ctx, hx, hy, tx, ty, 8 * dpr, nowMs, pal);
+    }
     for (const u of f.units) {
       if (u.wrecked && u.state === "out") continue;
       const [sx, sy] = worldToFull(v, u.x, u.y);
@@ -215,6 +235,35 @@ export class FullMapRenderer {
       drawRacer(ctx, r, sx, sy, glyphRotation(r.yaw, 0), 7 * dpr, pal);
       racers++;
     }
+    if (ex) {
+      for (const mk of ex.markers) {
+        const [sx, sy] = worldToFull(v, mk.x, mk.y);
+        if (sx < -20 || sy < -20 || sx > w + 20 || sy > h + 20) continue;
+        drawMarker(ctx, mk, sx, sy, 8 * dpr);
+        markers++;
+      }
+      for (const fl of ex.flags) {
+        const [sx, sy] = worldToFull(v, fl.x, fl.y);
+        drawFlag(ctx, fl, sx, sy, 20 * dpr);
+      }
+    }
+    if (this.crosshair) {
+      const cx = w / 2;
+      const cy = h / 2;
+      ctx.strokeStyle = pal.ink;
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10 * dpr, 0, Math.PI * 2);
+      ctx.moveTo(cx - 18 * dpr, cy);
+      ctx.lineTo(cx - 4 * dpr, cy);
+      ctx.moveTo(cx + 4 * dpr, cy);
+      ctx.lineTo(cx + 18 * dpr, cy);
+      ctx.moveTo(cx, cy - 18 * dpr);
+      ctx.lineTo(cx, cy - 4 * dpr);
+      ctx.moveTo(cx, cy + 4 * dpr);
+      ctx.lineTo(cx, cy + 18 * dpr);
+      ctx.stroke();
+    }
     if (f.player) {
       const [sx, sy] = worldToFull(v, f.player.x, f.player.y);
       // locator ring so the player is easy to find on the whole-city view
@@ -227,6 +276,6 @@ export class FullMapRenderer {
       ctx.globalAlpha = 1;
       drawPlayer(ctx, sx, sy, glyphRotation(f.player.yaw, 0), 8 * dpr, pal);
     }
-    this.stats = { units, racers, player: !!f.player, districts: this.labels.length, pois: this.map?.pois.length ?? 0, pxPerM: k };
+    this.stats = { units, racers, player: !!f.player, districts: this.labels.length, pois: this.map?.pois.length ?? 0, pxPerM: k, markers, route: !!(ex?.route && ex.route.length > 1) };
   }
 }

@@ -23,7 +23,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (1482.9121, 3777.927, 25.063145),
+            pos: (1480.8091, 3778.727, 25.063145),
             yaw: -0.36350226,
             driver: scripted,
             inputs: [],
@@ -31,7 +31,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (1478.2388, 3779.7048, 25.063145),
+            pos: (1476.1359, 3780.505, 25.063145),
             yaw: -0.36350226,
             driver: scripted,
             inputs: [],

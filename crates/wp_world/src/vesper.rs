@@ -290,6 +290,53 @@ const RAMP_LANE_OFFSET_M: f32 = 2.0 * HW_LANE_M;
 /// Terminal junction distance from the loop centreline at a full interchange, m.
 const FULL_REACH_M: f32 = 150.0;
 
+/// Loop 9 rest stop (playtest row 153): gore distance from its centre along the loop, m.
+const REST_SPAN_M: f32 = 275.0;
+/// Half length of a rest stop's parking road (between its ramp ends), m.
+const REST_HALF_M: f32 = 50.0;
+/// Parking road centreline from the loop centreline, m (beyond the carriageway, its outer
+/// shoulder and the ramp lane).
+const REST_OFFSET_M: f32 = 34.0;
+/// A rest stop's parking road: one-way, one lane, parking on both kerbs, walking pace.
+const REST_ROAD: Style = Style {
+    class: RoadClass::Local,
+    fwd: 1,
+    bwd: 0,
+    speed: 8.9408, // 20 mph
+    parking: true,
+    // The local-street cap: the Hollins one runs across the hill's western slope.
+    grade: 0.10,
+    bank_max: 0.0,
+    material: RoadMaterial::Asphalt,
+};
+
+/// Loop 9 rest stops: (near point on the loop, carriageway side +1 outer / -1 inner, name).
+/// Placed on the stretches long enough for their ramps (clear of the interchanges, Route 40's
+/// crossings and the Hollins Tunnel); the south ones sit on the inner carriageway (the sea
+/// starts just beyond the outer one there). The north-east stretch (Bluff Road to Uptown) only
+/// has room on the banked corner, where a gore does not meet the drawn surface; none there.
+const REST_SITES: [(V2, f32, &str); 3] = [
+    ([-1490.0, 1120.0], 1.0, "Hollins Rest Area"),
+    ([-960.0, -1035.0], -1.0, "Larkspur Rest Area"),
+    ([40.0, -1063.0], -1.0, "Harbor Rest Area"),
+];
+
+/// A Loop 9 rest stop: an off-ramp from one carriageway to its parking road and an on-ramp
+/// back.
+#[derive(Debug, Clone, Copy)]
+struct RestStop {
+    /// Centre on the loop centreline (before profiling), m.
+    centre: V2,
+    /// +1 outer (counter-clockwise) carriageway, -1 inner.
+    side: f32,
+    /// Parking road start (off-ramp end) and end (on-ramp start).
+    t_in: usize,
+    t_out: usize,
+    /// Draft index of the parking road.
+    road: usize,
+    name: &'static str,
+}
+
 /// A Loop 9 interchange: a diamond whose crossroad bridges the highway (full), or a half
 /// diamond with ramps to the inner carriageway only.
 #[derive(Debug, Clone, Copy)]
@@ -391,6 +438,8 @@ struct Gen {
     skipped: usize,
     /// Loop 9 interchanges.
     interchanges: Vec<Interchange>,
+    /// Loop 9 rest stops.
+    rest_stops: Vec<RestStop>,
     /// Ramps that will end at each node (counted into its junction flat length).
     ramp_ends: Vec<usize>,
     /// Open divided freeways a region lays out (split by [`divide_freeways`]).
@@ -967,6 +1016,38 @@ impl Gen {
                 outer,
             });
             terminal.push(inner);
+        }
+        // Rest stops: the parking road runs beside the loop, ramps at either end.
+        for (near, side, name) in REST_SITES {
+            let sc = project2(&closed, &lcum, near).0;
+            // Beside the loop at arc `u` from the centre: outward of the outer carriageway,
+            // inward (city side) of the inner one.
+            let beside = |u: f32| {
+                let (c, d) = point_on(&closed, &lcum, (sc + u).rem_euclid(ltotal));
+                let inward = [-d[1], d[0]];
+                geom::add(c, geom::scale(inward, -side * REST_OFFSET_M))
+            };
+            // Travel runs with the ring on the outer carriageway, against it on the inner.
+            let (u_in, u_out) = (-side * REST_HALF_M, side * REST_HALF_M);
+            let t_in = self.node(beside(u_in));
+            let t_out = self.node(beside(u_out));
+            let n = (2.0 * REST_HALF_M / 6.0).ceil() as usize;
+            let path: Vec<V2> = (0..=n)
+                .map(|k| beside(u_in + (u_out - u_in) * k as f32 / n as f32))
+                .collect();
+            let road = self
+                .road(t_in, t_out, path, REST_ROAD, name)
+                .expect("rest stop road crosses another road");
+            self.ramp_ends.extend([t_in, t_out]);
+            self.rest_stops.push(RestStop {
+                centre: point_on(&closed, &lcum, sc).0,
+                side,
+                t_in,
+                t_out,
+                road,
+                name,
+            });
+            site_s.push(sc);
         }
         // The loop is cut half-way between interchanges (plain bend nodes), but not near
         // where Route 40 West / North cross it (their grade separations need the room).
@@ -1780,10 +1861,10 @@ fn plan_covers(g: &mut Gen, extra: &[CoverSpec]) {
         // The Uptown Connector under a plaza deck.
         (
             "Uptown Connector",
-            [416.0, 1100.0],
-            [418.0, 1005.0],
-            [419.5, 1110.0],
-            7.0,
+            [416.0, 1000.0],
+            [418.0, 905.0],
+            [414.0, 1110.0],
+            6.0,
             CoverKind::CoveredTrench,
             "Founders Cut",
         ),
@@ -1821,19 +1902,30 @@ fn plan_covers(g: &mut Gen, extra: &[CoverSpec]) {
     }
 }
 
-/// Covered spans on the built road surfaces (portal to portal), one per plan. On divided
-/// Loop 9 one tube spans both carriageways through the stretch: its centreline runs midway
-/// between them and its half width reaches the far paved edge. `remap` maps draft roads to
-/// builder roads (`None` for divided drafts: Loop 9's and the open freeways', whose
-/// carriageway pieces `divided(draft)` lists).
+/// Covered spans on the built road surfaces (portal to portal), one per plan. A plan on a
+/// Loop 9 draft covers the divided highway as one span along the loop's shared centreline
+/// ([`loop_cover`]). Any other plan follows its road's surface (`remap`: draft → builder
+/// road); an open freeway's divided draft (Ashpeak County: `remap` is `None`, `divided(draft)`
+/// lists its carriageway pieces) gets one tube spanning both carriageways through the
+/// stretch: its centreline runs midway between them and its half width reaches the far paved
+/// edge.
 fn covered_spans(
     g: &Gen,
     built: &Built,
+    ring: &Ring,
+    loop_drafts: &[usize],
     remap: &[Option<usize>],
     divided: &dyn Fn(usize) -> Vec<usize>,
 ) -> Vec<CoveredSpan> {
     let mut out = Vec::new();
     for (di, d) in g.drafts.iter().enumerate() {
+        if d.covers.is_empty() {
+            continue;
+        }
+        if loop_drafts.contains(&di) {
+            out.extend(d.covers.iter().filter_map(|c| loop_cover(built, ring, c)));
+            continue;
+        }
         for c in &d.covers {
             let roads: Vec<usize> = match remap.get(di).copied().flatten() {
                 Some(r) => vec![r],
@@ -1908,6 +2000,50 @@ fn covered_spans(
         }
     }
     out
+}
+
+/// A cover on Loop 9 (divided highway): one span along the loop's shared centreline between
+/// the portals, wide enough for both carriageways and their outer shoulders (the median
+/// barrier runs on through it). Its `road` is the carriageway piece travelling with the loop
+/// (counter-clockwise, right of the centreline) nearest the span's middle.
+fn loop_cover(built: &Built, ring: &Ring, c: &CoverPlan) -> Option<CoveredSpan> {
+    let (a, b) = (ring.project(c.p0), ring.project(c.p1));
+    let (s0, s1) = (a.min(b), a.max(b));
+    if s1 - s0 < 1.0 || s1 - s0 > ring.total() * 0.5 {
+        return None;
+    }
+    let mut centre = Vec::new();
+    let mut s = s0;
+    loop {
+        let (p, _, z, _) = ring.at(s.min(s1));
+        centre.push([p[0], p[1], z]);
+        if s >= s1 {
+            break;
+        }
+        s += 4.0;
+    }
+    let (mid, dir, _, _) = ring.at(0.5 * (s0 + s1));
+    let probe = geom::add(mid, geom::scale(geom::right_of(dir), CARRIAGEWAY_OFFSET_M));
+    let road = built
+        .surfaces
+        .iter()
+        .enumerate()
+        .filter(|(_, sf)| sf.highway && sf.median_barrier && sf.centre.len() >= 2)
+        .map(|(ri, sf)| {
+            let cum = geom::cumulative(&sf.centre);
+            (ri, geom::project(&sf.centre, &cum, probe).dist)
+        })
+        .min_by(|x, y| x.1.total_cmp(&y.1))?
+        .0;
+    let sf = &built.surfaces[road];
+    Some(CoveredSpan {
+        name: c.name.into(),
+        kind: c.kind,
+        road: road as u32,
+        centre,
+        half_width_m: CARRIAGEWAY_OFFSET_M + sf.right_m + 1.5,
+        clearance_m: TUNNEL_CLEARANCE_HIGHWAY_M,
+    })
 }
 
 /// Fill the ground back over a covered span: beyond the carved shoulder each side, up to the
@@ -2338,6 +2474,24 @@ fn plan_ramps(g: &Gen, ring: &Ring) -> Vec<RampPath> {
                     dir: side,
                 });
             }
+        }
+    }
+    // Rest stops: off-ramp upstream of the centre, on-ramp downstream.
+    for rs in &g.rest_stops {
+        let sc = ring.project(rs.centre);
+        for off in [true, false] {
+            let up = if off { -rs.side } else { rs.side };
+            let gs = (sc + up * REST_SPAN_M).rem_euclid(total);
+            let term = if off { rs.t_in } else { rs.t_out };
+            ramps.push(RampPath {
+                gore: usize::MAX,
+                terminal: term,
+                gore_p: ring.offset(gs, rs.side * CARRIAGEWAY_OFFSET_M),
+                gore_s: gs,
+                off,
+                path: ramp_path(ring, gs, rs.side, off, g.nodes[term].pos),
+                dir: rs.side,
+            });
         }
     }
     ramps
@@ -2965,8 +3119,9 @@ fn surface_z_bank(s: &RoadSurface, cum: &[f32], at: f32) -> (f32, f32) {
 /// instead ([`residential::plan_lot`]): front yards, garages and driveways, fences, hedges
 /// and yard trees, a corner shop or two per district, and street trees on the verge
 /// ([`surface::verge_street`]). Returns the buildings and the decor.
-/// Street-front buildings and yard decor along every non-highway road: clear of `reserved`
-/// (hand-placed buildings) and `reserved_decor`, and only where `allowed`.
+///
+/// Clear of `reserved` (hand-placed buildings, Ashpeak County) and `reserved_decor`, only
+/// where `allowed`, and none along the `no_buildings` roads (the Loop 9 rest stops).
 #[allow(clippy::too_many_arguments)]
 fn buildings(
     rng: &mut Rng,
@@ -2976,6 +3131,7 @@ fn buildings(
     zones: &[Zone],
     hf: &Heightfield,
     dead_ends: &[V2],
+    no_buildings: &[usize],
     reserved: &[Building],
     reserved_decor: &[Decor],
     allowed: &dyn Fn(V2) -> bool,
@@ -3023,7 +3179,8 @@ fn buildings(
                 .any(|q| dead_ends.iter().any(|d| geom::dist(*q, *d) < 20.0))
     };
     for s in &built.surfaces {
-        if s.highway {
+        // Rest stops: a lit parking road, no houses along it.
+        if s.highway || no_buildings.contains(&(s.road as usize)) {
             continue;
         }
         let pts: Vec<V2> = s.centre.iter().map(|p| geom::xy(*p)).collect();
@@ -3335,6 +3492,62 @@ fn lane_pose(built: &Built, road: usize, s: f32, fwd: bool) -> Option<(V3, f32, 
     Some((p, geom::yaw_of(d), lane))
 }
 
+/// Pose on the kerb lane travelling with a Loop 9 cover (`c.centre` runs with the loop),
+/// `dist` m (along the loop) before its first portal (`entry`) or after its last.
+fn loop_cover_pose(
+    built: &Built,
+    ring: &Ring,
+    c: &CoveredSpan,
+    entry: bool,
+    dist: f32,
+) -> Option<(V3, f32, LaneId)> {
+    let n = c.centre.len();
+    let b = if entry { c.centre[0] } else { c.centre[n - 1] };
+    let s = ring.project(geom::xy(b)) + if entry { -dist } else { dist };
+    let (q, dir, z, _) = ring.at(s);
+    let p = geom::add(
+        q,
+        geom::scale(geom::right_of(dir), CARRIAGEWAY_OFFSET_M + HW_LANE_M),
+    );
+    lane_pose_near(built, p, z, dir)
+}
+
+/// Whether the road of cover `c` ends less than 60 m past its last portal (no room for an
+/// "exit" route point on it).
+fn exit_past_road_end(built: &Built, c: &CoveredSpan) -> bool {
+    let s = &built.surfaces[c.road as usize];
+    let n = c.centre.len();
+    geom::dist(
+        geom::xy(s.centre[s.centre.len() - 1]),
+        geom::xy(c.centre[n - 1]),
+    ) < 60.0
+}
+
+/// Pose on the drivable lane nearest `p` (within 8 m) travelling along `dir` at about height
+/// `z` (±3 m: not a road over or under it).
+fn lane_pose_near(built: &Built, p: V2, z: f32, dir: V2) -> Option<(V3, f32, LaneId)> {
+    let mut best: Option<(LaneId, V3, f32, f32)> = None;
+    for (i, l) in built.lanes.iter().enumerate() {
+        if !l.kind.drivable() || l.polyline.len() < 2 {
+            continue;
+        }
+        let cum = geom::cumulative(&l.polyline);
+        let pr = geom::project(&l.polyline, &cum, p);
+        if pr.s < 0.0 || pr.s > cum[cum.len() - 1] {
+            continue;
+        }
+        let (q, d) = geom::point_at(&l.polyline, &cum, pr.s);
+        // Same carriageway level (the loop climbs ≤ 6 %; not a road over or under it).
+        if geom::dot(d, dir) < 0.9 || (q[2] - z).abs() > 3.0 {
+            continue;
+        }
+        if best.as_ref().is_none_or(|x| pr.dist < x.3) {
+            best = Some((i as LaneId, q, geom::yaw_of(d), pr.dist));
+        }
+    }
+    best.filter(|x| x.3 < 8.0).map(|(l, q, yaw, _)| (q, yaw, l))
+}
+
 fn nearest_lane(built: &Built, p: V2) -> Option<(LaneId, V3, f32)> {
     let mut best: Option<(LaneId, V3, f32, f32)> = None;
     for (i, l) in built.lanes.iter().enumerate() {
@@ -3520,6 +3733,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         drafts: Vec::new(),
         skipped: 0,
         interchanges: Vec::new(),
+        rest_stops: Vec::new(),
         ramp_ends: Vec::new(),
         freeways: Vec::new(),
         links: Vec::new(),
@@ -3600,7 +3814,13 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     let drafts = &g.drafts;
     let nat = &g.nat;
     let surfaces = &built.surfaces;
+    // Rest stops' parking roads sit at the highway's level beside it: on an embankment (the
+    // ground is filled up to them), never on a deck.
+    let rest_roads: Vec<usize> = g.rest_stops.iter().map(|r| road_of(r.road)).collect();
     let deck = |road: usize, k: usize| -> bool {
+        if rest_roads.contains(&road) {
+            return false;
+        }
         let s = &surfaces[road];
         let p = s.centre[k];
         if is_elevated(s, k, &|q| nat.z(q), 3.0) {
@@ -3622,7 +3842,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         }
     };
     carve(&mut hf, &built, &g.nodes, &deck);
-    let covered = covered_spans(&g, &built, &remap, &divided);
+    let covered = covered_spans(&g, &built, &ring, &loop_drafts, &remap, &divided);
     backfill_covers(&mut hf, &g.nat, &covered);
 
     let mut zones = region.map_or_else(Vec::new, |r| r.zones());
@@ -3664,6 +3884,7 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
         &zones,
         &hf,
         &dead_ends,
+        &rest_roads,
         &extra_b,
         &extra_d,
         &generic_at,
@@ -3774,42 +3995,77 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
             });
         }
     }
+    // Rest stops: a named site in the middle of each parking road (night meets, bets).
+    for rs in &g.rest_stops {
+        if let Some((p, yaw, lane)) = lane_pose(&built, road_of(rs.road), REST_HALF_M, true) {
+            pois.push(Poi {
+                kind: PoiKind::RestStop,
+                name: rs.name.into(),
+                pos: p,
+                heading_rad: yaw,
+                lane: Some(lane),
+            });
+        }
+    }
     // Route ends either side of each covered road (drive-through and pursuit scenarios):
-    // "<name> entry" sits `before` m before the first portal in the forward direction,
-    // "<name> exit" `after` m past the second (measured from the portals, so they hold on
-    // divided Loop 9, whose carriageway pieces end at the interchanges), "<name> lay-by" in
-    // the middle of the covered stretch (a place to hide from the helicopter). All on the
-    // forward kerb lane of the span's road.
+    // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
+    // after the second.
     let tunnel_ends: [(&str, f32, f32); 2] = [
-        ("Hollins Tunnel", 150.0, 180.0),
-        ("Founders Cut", 40.0, 40.0),
+        // Exit 120 m past the west portal: the Hollins Rest Area's off-ramp gore is ~210 m
+        // past it (row 153).
+        ("Hollins Tunnel", -200.0, 120.0),
+        ("Founders Cut", 40.0, -40.0),
     ];
-    for (name, before, after) in tunnel_ends {
+    for (name, s0, s1) in tunnel_ends {
         let Some(c) = covered.iter().find(|c| c.name == name) else {
             continue;
         };
-        let Some(&lane) = built.road_lanes[c.road as usize].fwd.last() else {
-            continue;
+        // "<name> lay-by": the forward kerb lane in the middle of the covered stretch (a
+        // place to hide from the helicopter).
+        let mid = {
+            let sh = CoverShape::new(c);
+            geom::xy(geom::point_at(&c.centre, &sh.cum, sh.length() * 0.5).0)
         };
-        let pl = &built.lanes[lane as usize].polyline;
-        let cum = geom::cumulative(pl);
-        let total = cum[cum.len() - 1];
-        let along = |p: V3| geom::project(pl, &cum, geom::xy(p)).s;
-        let (a, b) = (along(c.centre[0]), along(c.centre[c.centre.len() - 1]));
-        let (p0, p1) = (a.min(b), a.max(b));
+        let lay_by = built.road_lanes[c.road as usize].fwd.last().map(|l| {
+            let pl = &built.lanes[*l as usize].polyline;
+            geom::project(pl, &geom::cumulative(pl), mid).s
+        });
+        // On Loop 9 (divided, cut into pieces at its gores) the entry and exit sit
+        // `-s0` / `s1` m (as positive distances) before and after the portals on the kerb lane
+        // travelling with the loop; elsewhere `s0` / `s1` are along the road (negative: from
+        // its end).
+        let on_loop = built.surfaces[c.road as usize].median_barrier;
         for (suffix, s) in [
-            ("entry", p0 - before),
-            ("lay-by", 0.5 * (p0 + p1)),
-            ("exit", p1 + after),
+            ("entry", s0),
+            ("lay-by", lay_by.unwrap_or(s0)),
+            ("exit", s1),
         ] {
-            let (p, d) = geom::point_at(pl, &cum, s.clamp(1.0, total - 1.0));
-            pois.push(Poi {
-                kind: PoiKind::RaceStartGrid,
-                name: format!("{name} {suffix}"),
-                pos: p,
-                heading_rad: geom::yaw_of(d),
-                lane: Some(lane),
-            });
+            let pose = if on_loop && suffix != "lay-by" {
+                loop_cover_pose(&built, &ring, c, suffix == "entry", s.abs())
+            } else if suffix == "exit" && exit_past_road_end(&built, c) {
+                // The road ends right past the portal (Founders Cut at main's Uptown
+                // interchange terminal): 40 m past the portal on the lane continuing ahead.
+                let n = c.centre.len();
+                let (a, b) = (c.centre[n - 2], c.centre[n - 1]);
+                let dir = geom::normalize(geom::sub(geom::xy(b), geom::xy(a)));
+                lane_pose_near(
+                    &built,
+                    geom::add(geom::xy(b), geom::scale(dir, 40.0)),
+                    b[2],
+                    dir,
+                )
+            } else {
+                lane_pose(&built, c.road as usize, s, true)
+            };
+            if let Some((p, yaw, lane)) = pose {
+                pois.push(Poi {
+                    kind: PoiKind::RaceStartGrid,
+                    name: format!("{name} {suffix}"),
+                    pos: p,
+                    heading_rad: yaw,
+                    lane: Some(lane),
+                });
+            }
         }
     }
     let mut block_poi = |kind: PoiKind, name: &str, p: V2| {
@@ -4080,6 +4336,87 @@ mod tests {
         }
     }
 
+    /// Playtest row 153: rest stops on Loop 9 — a named site on a lit parking road with parked
+    /// cars, reached from the carriageway by an off-ramp and left by an on-ramp, no houses.
+    #[test]
+    fn loop_rest_stops_pull_off_and_back() {
+        let (net, rep) = city();
+        let map = crate::map::CityMap::new(net.clone());
+        let sites: Vec<&Poi> = net
+            .pois
+            .iter()
+            .filter(|p| p.kind == PoiKind::RestStop)
+            .collect();
+        assert_eq!(sites.len(), REST_SITES.len());
+        let parked = crate::props::parked_cars(&map, 1);
+        let loop_lane = |l: LaneId| {
+            rep.loop_roads
+                .contains(&(net.lanes[l as usize].road as usize))
+        };
+        for site in &sites {
+            let lane = site.lane.expect("site on a lane");
+            let road = net.lanes[lane as usize].road as usize;
+            assert_eq!(rep.road_names[road], site.name.as_str());
+            // Lanes into the parking road come from an off-ramp that leaves the loop; the lane
+            // out of it feeds an on-ramp that joins the loop.
+            let into: Vec<usize> = (0..net.lanes.len())
+                .filter(|i| net.lanes[*i].connections.iter().any(|c| c.to == lane))
+                .collect();
+            assert!(!into.is_empty(), "{}", site.name);
+            for &r in &into {
+                assert!(
+                    rep.ramp_roads.contains(&(net.lanes[r].road as usize)),
+                    "{}",
+                    site.name
+                );
+                let feeds: Vec<usize> = (0..net.lanes.len())
+                    .filter(|i| net.lanes[*i].connections.iter().any(|c| c.to as usize == r))
+                    .collect();
+                assert!(
+                    feeds.iter().any(|f| loop_lane(*f as LaneId)),
+                    "{} off-ramp",
+                    site.name
+                );
+            }
+            let outs = &net.lanes[lane as usize].connections;
+            assert!(!outs.is_empty(), "{}", site.name);
+            for c in outs {
+                let r = &net.lanes[c.to as usize];
+                assert!(rep.ramp_roads.contains(&(r.road as usize)), "{}", site.name);
+                assert!(
+                    r.connections.iter().any(|d| loop_lane(d.to)),
+                    "{} on-ramp",
+                    site.name
+                );
+            }
+            // A couple of parked cars at least; no buildings within 25 m of the site.
+            let q = [site.pos[0], site.pos[1]];
+            let cars = parked
+                .iter()
+                .filter(|p| geom::dist(geom::xy(p.pos), q) < REST_HALF_M + 10.0)
+                .count();
+            assert!(cars >= 2, "{}: {cars} parked cars", site.name);
+            for b in &net.buildings {
+                for c in &b.footprint {
+                    assert!(geom::dist(*c, q) > 25.0, "{}: building at {c:?}", site.name);
+                }
+            }
+            // Near the loop (a pull-off), flat enough to park on.
+            assert!(
+                net.lanes.iter().any(|l| loop_lane_road(rep, l)
+                    && l.polyline
+                        .iter()
+                        .any(|p| geom::dist(geom::xy(*p), q) < 60.0)),
+                "{} beside the loop",
+                site.name
+            );
+        }
+    }
+
+    fn loop_lane_road(rep: &VesperReport, l: &Lane) -> bool {
+        rep.loop_roads.contains(&(l.road as usize))
+    }
+
     #[test]
     fn loop_is_a_divided_highway_with_ramps() {
         let (net, rep) = city();
@@ -4109,9 +4446,9 @@ mod tests {
             }
             assert!(!crate::markings::must_stop(&map, i as LaneId));
         }
-        // 22 ramps: 4 per full diamond, 2 at the port; each diverges from / merges into the
-        // rightmost lane, yields without a stop line and reaches a signalised terminal.
-        assert_eq!(rep.ramp_roads.len(), 22);
+        // 28 ramps: 4 per full diamond, 2 at the port, 2 per rest stop; each diverges from /
+        // merges into the rightmost lane, yields without a stop line and reaches a terminal.
+        assert_eq!(rep.ramp_roads.len(), 22 + 2 * REST_SITES.len());
         let mut merges = 0;
         let mut diverges = 0;
         for &r in &rep.ramp_roads {
@@ -4148,7 +4485,10 @@ mod tests {
             let len = *geom::cumulative(&l.polyline).last().unwrap();
             assert!(len > 180.0, "ramp {r} lane only {len} m");
         }
-        assert_eq!((diverges, merges), (11, 11));
+        assert_eq!(
+            (diverges, merges),
+            (11 + REST_SITES.len(), 11 + REST_SITES.len())
+        );
         // Ramps never cross another road at grade (their crossroad bridges the highway).
         for &r in &rep.ramp_roads {
             let s = &net.surfaces[r];
@@ -4199,6 +4539,48 @@ mod tests {
     }
 
     #[test]
+    fn overpass_decks_hide_the_road_below_from_the_air() {
+        let (net, rep) = city();
+        let map = crate::map::CityMap::new(net.clone());
+        assert!(!map.decks().is_empty());
+        let z_on = |road: usize, p: V2| {
+            let s = &net.surfaces[road];
+            let pts: Vec<V2> = s.centre.iter().map(|q| geom::xy(*q)).collect();
+            let (at, _) = project2(&pts, &cum2(&pts), p);
+            geom::point_at(&s.centre, &geom::cumulative(&s.centre), at).0[2]
+        };
+        for c in &rep.crossings {
+            let (lo, hi) = (z_on(c.lower, c.pos), z_on(c.upper, c.pos));
+            // A helicopter 120 m up, a little off to the side.
+            let heli = [c.pos[0] + 20.0, c.pos[1] + 15.0, hi + 120.0];
+            let under = [c.pos[0], c.pos[1], lo + 1.0];
+            let on_deck = [c.pos[0], c.pos[1], hi + 1.0];
+            assert!(
+                !map.line_of_sight(heli, under),
+                "under the deck at {:?}",
+                c.pos
+            );
+            // ... because of the deck itself, not only the cutting's walls.
+            assert!(map.decks().iter().any(|d| d.blocks(heli, under)));
+            assert!(
+                map.line_of_sight(heli, on_deck),
+                "on the deck at {:?}",
+                c.pos
+            );
+            // Ground level beside the deck is not covered: a car on the lower road 60 m
+            // away is visible from straight above.
+            let s = &net.surfaces[c.lower];
+            let pts: Vec<V2> = s.centre.iter().map(|q| geom::xy(*q)).collect();
+            let cum = cum2(&pts);
+            let (at, _) = project2(&pts, &cum, c.pos);
+            let f = geom::cumulative(&s.centre);
+            let away = geom::point_at(&s.centre, &f, (at + 60.0).min(*f.last().unwrap())).0;
+            let above = [away[0] + 3.0, away[1] + 3.0, away[2] + 120.0];
+            assert!(map.line_of_sight(above, [away[0], away[1], away[2] + 1.0]));
+        }
+    }
+
+    #[test]
     fn terrain_stays_under_roads_and_buildings_sit_on_it() {
         let (net, _) = city();
         let t = net.terrain.as_ref().unwrap();
@@ -4242,8 +4624,7 @@ mod tests {
         for (i, c) in net.covered.iter().enumerate() {
             let sh = CoverShape::new(c);
             let len = sh.length();
-            // Founders Cut is 105 m: main's Uptown diamond needs the climb room north of it.
-            assert!(len > 100.0, "{} only {len} m", c.name);
+            assert!(len > 200.0, "{} only {len} m", c.name);
             let at = |s: f32| eye(geom::point_at(&c.centre, &sh.cum, s).0);
             let (a, b) = (at(30.0), at(len * 0.5));
             assert_eq!(map.covered_at(a), Some(i));

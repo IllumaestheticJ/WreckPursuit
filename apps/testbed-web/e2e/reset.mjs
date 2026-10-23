@@ -110,6 +110,16 @@ const { heat0, r, heat1 } = await page.evaluate(() => {
   const heat0 = wp.sim.policeStatus(wp.app.player)?.heat ?? null;
   const r = wp.sim.resetInPlace(wp.app.player);
   const heat1 = wp.sim.policeStatus(wp.app.player)?.heat ?? null;
+  // Sample the player's drawn visibility every frame from the reset on, while the ghost window
+  // lasts: on a slow machine the whole window is a few frames, gone before a later evaluate.
+  const p = wp.app.player;
+  const seen = (window.__ghostSeen = new Set());
+  const sample = () => {
+    if (wp.sim.ghostTicks(p) === 0) return;
+    seen.add(wp.app.views.get(p).root.visible);
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
   return { heat0, r, heat1 };
 });
 await page.waitForTimeout(300);
@@ -125,15 +135,18 @@ const ghost = await page.evaluate(async () => {
   const wp = window.__wp;
   const p = wp.app.player;
   const at0 = wp.sim.ghostTicks(p);
-  const seen = new Set();
-  for (let i = 0; i < 20; i++) {
+  // Frames sampled since the reset (above) plus a few more while the window lasts.
+  const seen = window.__ghostSeen;
+  for (let i = 0; i < 20 && wp.sim.ghostTicks(p) > 0; i++) {
     await new Promise((r) => requestAnimationFrame(r));
     seen.add(wp.app.views.get(p).root.visible);
   }
   const t0 = performance.now();
   while (wp.sim.ghostTicks(p) > 0 && performance.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 100));
   await new Promise((r) => requestAnimationFrame(r));
-  return { at0, blinked: seen.size === 2, after: wp.sim.ghostTicks(p), visible: wp.app.views.get(p).root.visible };
+  // Blinked = hidden in at least one ghost frame and drawn again afterwards.
+  const visible = wp.app.views.get(p).root.visible;
+  return { at0, blinked: seen.has(false) && visible, after: wp.sim.ghostTicks(p), visible };
 });
 check(
   r.ghost_ticks === 240 && ghost.blinked && ghost.after === 0 && ghost.visible,

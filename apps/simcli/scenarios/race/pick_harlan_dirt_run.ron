@@ -23,7 +23,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (-4320.5786, 1703.5142, 24.13869),
+            pos: (-4320.645, 1701.2651, 24.13869),
             yaw: 1.5413162,
             driver: scripted,
             inputs: [],
@@ -31,7 +31,7 @@
         (
             id: "ai_dez",
             car: "rampart_50",
-            pos: (-4332.721, 1698.8701, 24.13869),
+            pos: (-4332.7544, 1697.746, 24.13869),
             yaw: 1.5413162,
             driver: scripted,
             inputs: [],
@@ -39,7 +39,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (-4328.575, 1703.75, 24.13869),
+            pos: (-4328.6416, 1701.501, 24.13869),
             yaw: 1.5413162,
             driver: scripted,
             inputs: [],
@@ -47,7 +47,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (-4324.7246, 1698.6343, 24.13869),
+            pos: (-4324.758, 1697.5101, 24.13869),
             yaw: 1.5413162,
             driver: scripted,
             inputs: [],

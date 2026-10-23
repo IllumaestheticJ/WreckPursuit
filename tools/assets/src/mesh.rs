@@ -14,10 +14,75 @@ use crate::profile::{BodyProfile, RingPt, Seg, BED_WALL_EPS, RING_POINTS, RING_S
 use crate::style::{style_for, CarStyle, Detail, DetailCtx, HoodScoop, LiveryHint, Shape, Tier};
 use crate::wheels::WheelGeom;
 
-/// Mesh file format version (`CarMesh::format`). 2: new part kinds / materials, `rigid`,
-/// `tints`, `livery`, `atlas`, `wheel_camber_deg`, livery atlas UVs on paint parts. 3: crumple
-/// `fold` bindings on hood / trunk lids, front fenders and rear quarters ([`FoldBinding`]).
-pub const MESH_FORMAT: u32 = 3;
+/// Mesh file format version (`CarMesh::format`).
+///
+/// 4 (current) = the union of two independent extensions of format 1:
+/// - from `claude/detailed-car-models` ("format 2" there): new part kinds / materials,
+///   `MeshPart::rigid`, `CarMesh::tints`, `livery`, `atlas`, `wheel_camber_deg`, livery atlas
+///   UVs on paint parts;
+/// - from `lead/round12` ("format 3" there): `MeshPart::fold` ([`FoldBinding`], sheet
+///   buckling of hoods / trunk lids / front fenders / rear quarters, written by `bind-skin`)
+///   and head / tail lamps in the `FrameFront` / `FrameRear` regions, bound by `bind-skin` to
+///   their end of the car (see [`crate::skin::light_regions`]).
+///
+/// Field names and serde shapes are exactly those of the two sides; only the number changed.
+pub const MESH_FORMAT: u32 = 4;
+/// How far a head / tail lamp lens stands proud of the nose / tail face, m.
+pub const LIGHT_PROUD_M: f32 = 0.014;
+/// How deep a head / tail lamp lens is sunk into the body behind the nose / tail face, m.
+pub const LIGHT_DEPTH_M: f32 = 0.012;
+/// Name prefix reserved for turn-signal lenses. Every car mesh (full and mid LOD) has exactly
+/// `indicator_front_l/_r` and `indicator_rear_l/_r` (kind `light`, in `FrameFront` /
+/// `FrameRear` like the head / tail lamp they are cut out of) and optionally
+/// `indicator_side_l/_r` repeaters (front fender or door mirror); no other part name starts
+/// with it. `_l` is the x < 0 side.
+pub const INDICATOR_PREFIX: &str = "indicator_";
+/// Gap between a turn-signal segment and the rest of its lamp lens (the lens divider), m.
+pub const INDICATOR_SEAM_M: f32 = 0.005;
+
+/// Key of the front turn-signal lens of the left (`right = false`) or right side: an amber
+/// segment of the head-lamp cluster, in `FrameFront` so it binds and crushes like the lamp.
+pub fn indicator_front_key(right: bool) -> PartKey {
+    let name = if right {
+        "indicator_front_r"
+    } else {
+        "indicator_front_l"
+    };
+    PartKey::body(
+        name,
+        BodyRegion::FrameFront,
+        PartKind::Light,
+        MaterialSlot::EmissiveAmber,
+    )
+}
+
+/// Key of the rear turn-signal lens of a side: a section of the tail-lamp cluster in
+/// `FrameRear`, `EmissiveAmber` (amber section) or `Taillight` (red-on-red, blinked red).
+pub fn indicator_rear_key(right: bool, mat: MaterialSlot) -> PartKey {
+    let name = if right {
+        "indicator_rear_r"
+    } else {
+        "indicator_rear_l"
+    };
+    PartKey::body(name, BodyRegion::FrameRear, PartKind::Light, mat)
+}
+
+/// Key of a side repeater (`indicator_side_l/_r`), amber, on `left_region` (a front fender or
+/// a front door for a mirror repeater; given for the left side, mirrored for the right).
+pub fn indicator_side_key(right: bool, left_region: BodyRegion) -> PartKey {
+    let k = PartKey::body(
+        "indicator_side_l",
+        left_region,
+        PartKind::Light,
+        MaterialSlot::EmissiveAmber,
+    );
+    if right {
+        k.mirrored()
+    } else {
+        k
+    }
+}
+
 /// Hard overall triangle range of any car (per-tier budgets: [`Tier::tri_budget`]).
 pub const TRI_BUDGET: (u32, u32) = (4000, 20000);
 /// Window margin (pillar half width) around door edges, m.
@@ -182,7 +247,7 @@ pub struct MeshPart {
     /// 4 weights per vertex in 1/255 (`bind-skin`); empty for wheel parts.
     #[serde(default)]
     pub skin_weights: Vec<u8>,
-    /// Sheet buckling of a hood / trunk lid, front fender or rear quarter (`bind-skin`, format 3); `None`
+    /// Sheet buckling of a hood / trunk lid, front fender or rear quarter (`bind-skin`); `None`
     /// for every other part. See [`FoldBinding`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fold: Option<FoldBinding>,
@@ -646,12 +711,183 @@ pub fn generate(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
 
 /// Generate the mesh for a car with an explicit style.
 pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle) -> CarMesh {
+    generate_lod(def, lattice, style, Lod::Full)
+}
+
+/// Level of detail of a generated mesh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lod {
+    /// The full mesh (`data/panels/meshes/<car>.json`): the style's [`Tier`] loft, every part;
+    /// skinned and fold-bound by `bind-skin`. Drawn by the browser's per-panel `VehicleView`.
+    Full,
+    /// Mid LOD (`data/panels/meshes/mid/<car>.json`, [`generate_mid`]): the same style at the
+    /// coarser [`MID_LOFT_STEPS`] loft and [`MID_WHEEL_SEGMENTS`] wheels, traffic-tier
+    /// mechanical detail, and only the parts that show from outside at 30–150 m (see
+    /// [`keep_in_mid`]). Same livery atlas, atlas UVs, tints and livery hint as the full mesh,
+    /// so it paints identically. Not skinned: the browser's instanced fleet and parked cars
+    /// draw it undeformed.
+    Mid,
+}
+
+/// Loft resolution of the mid LOD: (base station step, fine step near ends / arches), m.
+pub const MID_LOFT_STEPS: (f32, f32) = (0.2, 0.12);
+/// Grid step of automatic-resolution surface patches (stripes, vinyl roofs, decal carriers) in
+/// the mid LOD, m (full meshes: 6 cm).
+pub const MID_PATCH_STEP_M: f32 = 0.16;
+/// Segments around a mid-LOD wheel (tire and rim lathes).
+pub const MID_WHEEL_SEGMENTS: u8 = 12;
+/// Triangle range of every mid-LOD mesh.
+pub const MID_TRI_BUDGET: (u32, u32) = (2000, 6500);
+/// Detail parts smaller than this (largest bounding-box edge, m) are dropped from the mid LOD
+/// (door handles, fuel fillers, plate screws, mirror glass, stripe kicks).
+pub const MID_MIN_DETAIL_M: f32 = 0.2;
+
+/// Whether a part of the full-detail generation is kept in the mid LOD: body panels, glass,
+/// lights, mirrors, light bars, tires and rims, exhaust tips, and style details at least
+/// [`MID_MIN_DETAIL_M`] across. Dropped: interior, engine bay, suspension and exhaust runs,
+/// brake discs / calipers / uprights, decal carriers (unit numbers only show on a promoted
+/// car), underglow strips and small details.
+pub fn keep_in_mid(p: &MeshPart) -> bool {
+    if p.material == MaterialSlot::Underglow {
+        return false;
+    }
+    match p.kind {
+        PartKind::Interior
+        | PartKind::Engine
+        | PartKind::BrakeDisc
+        | PartKind::Caliper
+        | PartKind::Upright
+        | PartKind::DecalCarrier => false,
+        PartKind::Suspension => p.name.starts_with("exhaust_tip"),
+        PartKind::Detail => part_extent_m(p) >= MID_MIN_DETAIL_M,
+        _ => true,
+    }
+}
+
+/// Grid cell of the mid LOD's vertex clustering ([`cluster_part`]), m.
+pub const MID_CLUSTER_M: f32 = 0.035;
+
+/// Whether a mid-LOD part is decimated by vertex clustering ([`cluster_part`]): the style
+/// details, rims, lamps, light bars and mirrors, whose fixed-resolution shapes do not get
+/// coarser with the loft. Body panels, glass and tires are already coarse (loft / wheel
+/// segments) and keep their exact shape and seams.
+pub fn clustered_in_mid(p: &MeshPart) -> bool {
+    matches!(
+        p.kind,
+        PartKind::Detail
+            | PartKind::Rim
+            | PartKind::Light
+            | PartKind::Lightbar
+            | PartKind::Mirror
+            | PartKind::Suspension
+    )
+}
+
+/// Decimate a part by vertex clustering: every vertex snaps to the centre of its `cell_m` grid
+/// cell (split further by a coarse UV bucket, so livery-atlas seams stay apart), triangles
+/// that collapse are dropped and duplicates removed. Snapping to cell centres (not cluster
+/// averages) keeps parts that shared a vertex meeting at the same point. Deterministic.
+pub fn cluster_part(p: &mut MeshPart, cell_m: f32) {
+    let cell = (cell_m * 1000.0).max(1.0);
+    let n = p.vertex_count();
+    let mut index: BTreeMap<([i32; 3], [u16; 2]), u32> = BTreeMap::new();
+    let mut pos: Vec<i32> = Vec::new();
+    let mut uvs: Vec<u16> = Vec::new();
+    let mut remap = vec![0u32; n];
+    for (v, slot) in remap.iter_mut().enumerate() {
+        let c = [0, 1, 2].map(|k| (p.positions_mm[v * 3 + k] as f32 / cell).floor() as i32);
+        let uv = [p.uvs[v * 2], p.uvs[v * 2 + 1]];
+        let key = (c, [uv[0] >> 12, uv[1] >> 12]);
+        *slot = *index.entry(key).or_insert_with(|| {
+            for ck in c {
+                pos.push(((ck as f32 + 0.5) * cell).round() as i32);
+            }
+            uvs.extend_from_slice(&uv);
+            (pos.len() / 3 - 1) as u32
+        });
+    }
+    let mut seen: std::collections::BTreeSet<[u32; 3]> = std::collections::BTreeSet::new();
+    let mut indices = Vec::with_capacity(p.indices.len());
+    for t in p.indices.chunks_exact(3) {
+        let tri = [
+            remap[t[0] as usize],
+            remap[t[1] as usize],
+            remap[t[2] as usize],
+        ];
+        if tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2] {
+            continue;
+        }
+        // Same triangle with the same winding (rotations) only once.
+        let r = (0..3).min_by_key(|&i| tri[i]).unwrap_or(0);
+        let canon = [tri[r], tri[(r + 1) % 3], tri[(r + 2) % 3]];
+        if seen.insert(canon) {
+            indices.extend_from_slice(&tri);
+        }
+    }
+    // Drop vertices no triangle uses any more.
+    let mut used = vec![u32::MAX; pos.len() / 3];
+    let mut out_pos = Vec::new();
+    let mut out_uv = Vec::new();
+    for i in indices.iter_mut() {
+        let v = *i as usize;
+        if used[v] == u32::MAX {
+            used[v] = (out_pos.len() / 3) as u32;
+            out_pos.extend_from_slice(&pos[v * 3..v * 3 + 3]);
+            out_uv.extend_from_slice(&uvs[v * 2..v * 2 + 2]);
+        }
+        *i = used[v];
+    }
+    p.positions_mm = out_pos;
+    p.uvs = out_uv;
+    p.indices = indices;
+    p.skin_nodes.clear();
+    p.skin_weights.clear();
+    p.fold = None;
+}
+
+/// Largest bounding-box edge of a part, m.
+fn part_extent_m(p: &MeshPart) -> f32 {
+    let mut lo = [i32::MAX; 3];
+    let mut hi = [i32::MIN; 3];
+    for v in p.positions_mm.chunks_exact(3) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(v[k]);
+            hi[k] = hi[k].max(v[k]);
+        }
+    }
+    (0..3).map(|k| (hi[k] - lo[k]).max(0)).max().unwrap_or(0) as f32 * 1e-3
+}
+
+/// The mid-LOD mesh of a car with its [`style_for`] style ([`Lod::Mid`]).
+pub fn generate_mid(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
+    generate_lod(def, lattice, &style_for(def), Lod::Mid)
+}
+
+/// Generate the mesh for a car with an explicit style at a level of detail.
+pub fn generate_lod(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle, lod: Lod) -> CarMesh {
+    let mid = lod == Lod::Mid;
+    let mid_style;
+    let style = if mid {
+        let mut s = style.clone();
+        s.wheel.segments = MID_WHEEL_SEGMENTS;
+        mid_style = s;
+        &mid_style
+    } else {
+        style
+    };
     let p = BodyProfile::styled(def, lattice, &style.body);
-    let (base, fine) = loft_steps(style.tier);
+    let (base, fine) = if mid {
+        MID_LOFT_STEPS
+    } else {
+        loft_steps(style.tier)
+    };
     let ys = stations(&p, base, fine);
     let rings: Vec<Vec<RingPt>> = ys.iter().map(|&y| p.ring(y)).collect();
     let win = windows(&p);
     let mut b = Builder::new();
+    if mid {
+        b.patch_step_m = Some(MID_PATCH_STEP_M);
+    }
 
     loft(&p, &win, &ys, &rings, &mut b);
     end_caps(&p, &ys, &rings, &mut b);
@@ -666,7 +902,9 @@ pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle)
     for d in &style.details {
         emit_detail(&ctx, d, &mut b);
     }
-    let car_spec = crate::mechanical::car_spec(def, &style.mechanical, style.tier);
+    // Mid LOD: traffic-tier (coarse) mechanical and wheel detail.
+    let mech_tier = if mid { Tier::Traffic } else { style.tier };
+    let car_spec = crate::mechanical::car_spec(def, &style.mechanical, mech_tier);
     crate::mechanical::parts_with_spec(def, &p, &car_spec, &mut b);
 
     let atlas = LiveryAtlas {
@@ -722,6 +960,13 @@ pub fn generate_styled(def: &VehicleDef, lattice: &LatticeDef, style: &CarStyle)
     }
     for &(slot, c) in &style.tints {
         tints.insert(slot, c);
+    }
+    if mid {
+        parts.retain(keep_in_mid);
+        for q in parts.iter_mut().filter(|q| clustered_in_mid(q)) {
+            cluster_part(q, MID_CLUSTER_M);
+        }
+        parts.retain(|q| !q.indices.is_empty());
     }
     let tri_count = parts.iter().map(|p| p.tri_count() as u32).sum();
     CarMesh {
@@ -922,9 +1167,14 @@ fn underglow(p: &BodyProfile, b: &mut Builder) {
     }
 }
 
-/// Head / tail lights on the nose / tail faces (slightly proud, facing out), region
-/// `FrameFront` / `FrameRear` so `bind-skin` binds them as lenses (they crush with the end of
-/// the car, see `skin::is_lens`); door mirrors on the front doors.
+/// Head / tail lights on the nose / tail faces ([`LIGHT_PROUD_M`] proud, facing out, sunk
+/// [`LIGHT_DEPTH_M`]); their region is the front / rear frame (never a free panel), and
+/// `bind-skin` binds them to the nearest bumper, hood / trunk, fender / quarter and frame nodes
+/// so they crush with the end of the car. Each cluster carries its turn signal as a segment of
+/// the same lens (same depth, proud face and bevel, split by [`INDICATOR_SEAM_M`]): an amber
+/// strip along the bottom of the head lamp, an amber inboard section of the tail lamp. Style
+/// kits reshape both (this default is the police cars' layout). Door mirrors on the front
+/// doors.
 fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
     let top_n = p.belt(p.y_nose);
     let top_t = p.belt(p.y_tail);
@@ -934,30 +1184,50 @@ fn lights_and_mirrors(p: &BodyProfile, b: &mut Builder) {
         let sx = if right { 1.0 } else { -1.0 };
         let wf = p.half_width(p.y_nose);
         let (x0, x1) = (sx * (wf - 0.07), sx * (wf - 0.38));
-        let (fl, rl) = (BodyRegion::FrameFront, BodyRegion::FrameRear);
         let side = if right { "r" } else { "l" };
+        // Head lamp over an amber strip along the lens bottom (4 cm tall).
+        let z_split = hl_z - 0.01;
         b.beveled_box(
             &PartKey::body(
                 &format!("headlight_{side}"),
-                fl,
+                BodyRegion::FrameFront,
                 PartKind::Light,
                 MaterialSlot::Headlight,
             ),
-            [x0.min(x1), p.y_nose - 0.012, hl_z - 0.05],
-            [x0.max(x1), p.y_nose + 0.014, hl_z + 0.045],
+            [
+                x0.min(x1),
+                p.y_nose - LIGHT_DEPTH_M,
+                z_split + INDICATOR_SEAM_M,
+            ],
+            [x0.max(x1), p.y_nose + LIGHT_PROUD_M, hl_z + 0.045],
+            0.008,
+        );
+        b.beveled_box(
+            &indicator_front_key(right),
+            [x0.min(x1), p.y_nose - LIGHT_DEPTH_M, hl_z - 0.05],
+            [x0.max(x1), p.y_nose + LIGHT_PROUD_M, z_split],
             0.008,
         );
         let wt = p.half_width(p.y_tail);
+        // Tail lamp with an amber inboard section (9 cm wide).
         let (t0, t1) = (sx * (wt - 0.05), sx * (wt - 0.36));
+        let ts = sx * (wt - 0.27);
+        let tsr = ts + sx * INDICATOR_SEAM_M;
         b.beveled_box(
             &PartKey::body(
                 &format!("taillight_{side}"),
-                rl,
+                BodyRegion::FrameRear,
                 PartKind::Light,
                 MaterialSlot::Taillight,
             ),
-            [t0.min(t1), p.y_tail - 0.014, tl_z - 0.05],
-            [t0.max(t1), p.y_tail + 0.012, tl_z + 0.05],
+            [t0.min(tsr), p.y_tail - LIGHT_PROUD_M, tl_z - 0.05],
+            [t0.max(tsr), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.05],
+            0.008,
+        );
+        b.beveled_box(
+            &indicator_rear_key(right, MaterialSlot::EmissiveAmber),
+            [t1.min(ts), p.y_tail - LIGHT_PROUD_M, tl_z - 0.05],
+            [t1.max(ts), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.05],
             0.008,
         );
         // Mirror on the front door, just behind its hinge at the belt.
@@ -1251,5 +1521,92 @@ fn assign_uvs(b: &mut Builder, a: &LiveryAtlas) {
             }
         }
         b.set_geometry(&key.name, out_pos, out_uv, out_idx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A flat 1 m × 1 m sheet as an `n` × `n` grid of quads (mm, z = 0).
+    fn sheet(n: usize) -> MeshPart {
+        let mut positions_mm = Vec::new();
+        let mut uvs = Vec::new();
+        for j in 0..=n {
+            for i in 0..=n {
+                positions_mm.extend_from_slice(&[(i * 1000 / n) as i32, (j * 1000 / n) as i32, 0]);
+                // Within one UV bucket (a livery seam would split clusters).
+                uvs.extend_from_slice(&[(i * 30) as u16, (j * 30) as u16]);
+            }
+        }
+        let mut indices = Vec::new();
+        let w = (n + 1) as u32;
+        for j in 0..n as u32 {
+            for i in 0..n as u32 {
+                let a = j * w + i;
+                indices.extend_from_slice(&[a, a + 1, a + w + 1, a, a + w + 1, a + w]);
+            }
+        }
+        MeshPart {
+            name: "sheet".into(),
+            region: None,
+            kind: PartKind::Detail,
+            material: MaterialSlot::Trim,
+            wheel: None,
+            rigid: false,
+            positions_mm,
+            uvs,
+            indices,
+            skin_nodes: Vec::new(),
+            skin_weights: Vec::new(),
+            fold: None,
+        }
+    }
+
+    #[test]
+    fn clustering_decimates_a_dense_sheet_and_keeps_its_extent() {
+        let mut p = sheet(100); // 1 cm quads
+        let before = p.tri_count();
+        cluster_part(&mut p, 0.1);
+        assert!(
+            p.tri_count() * 20 < before,
+            "{} → {}",
+            before,
+            p.tri_count()
+        );
+        assert!(p.tri_count() >= 2);
+        assert_eq!(p.uvs.len(), p.vertex_count() * 2);
+        assert!(p.indices.iter().all(|&i| (i as usize) < p.vertex_count()));
+        let xs: Vec<i32> = p.positions_mm.chunks_exact(3).map(|v| v[0]).collect();
+        let (lo, hi) = (xs.iter().min().unwrap(), xs.iter().max().unwrap());
+        assert!(*lo <= 100 && *hi >= 900, "extent {lo}..{hi}");
+    }
+
+    #[test]
+    fn clustering_leaves_a_coarse_sheet_alone() {
+        let mut p = sheet(4); // 25 cm quads, coarser than the cell
+        let before = p.clone();
+        cluster_part(&mut p, 0.035);
+        assert_eq!(p.tri_count(), before.tri_count());
+    }
+
+    #[test]
+    fn mid_lod_drops_hidden_parts_and_is_much_smaller() {
+        let root = crate::repo_root();
+        let car = crate::load_car(&root, "kestrel_ts").unwrap();
+        let full = generate(&car.def, &car.lattice);
+        let mid = generate_mid(&car.def, &car.lattice);
+        assert!(
+            mid.tri_count * 3 < full.tri_count,
+            "{} vs {}",
+            mid.tri_count,
+            full.tri_count
+        );
+        assert!(mid.parts.iter().all(keep_in_mid));
+        assert!(!mid
+            .parts
+            .iter()
+            .any(|p| p.kind == PartKind::Engine || p.kind == PartKind::Interior));
+        assert_eq!(mid.atlas, full.atlas);
     }
 }

@@ -2,7 +2,7 @@
 
 **Consumers:** wave-2 `style-police` (`tools/assets/src/styles/police.rs`,
 `apps/testbed-web/src/render/{livery,police_units}.ts`), `roster` (new `sentinel_warden`,
-`sentinel_harrier`), `mechanical` (wheels), foundation (UV atlas, `lightbar`/`decal_carrier`).
+`sentinel_vigil`), `mechanical` (wheels), foundation (UV atlas, `lightbar`/`decal_carrier`).
 
 **Naming rule (hard):** no real maker or model names, and no real agency names, crests, seals or
 trademarked liveries. Every scheme below is a mix of generic conventions. Lettering only uses
@@ -30,7 +30,7 @@ Conventions in this doc:
 
 | Source | What reads as "police" at speed | Takeaway for us |
 |---|---|---|
-| Criterion HP-2010 / Rivals (county PD on supercars) | Black-and-white split that follows the body shape, not the doors. Big flat white panels. A thin low LED bar or none (grille, mirror and window strobes). A blue accent stripe on the split line. | The sports patrol (`harrier`) gets a diagonal split and a slicktop. The silhouette does the work. |
+| Criterion HP-2010 / Rivals (county PD on supercars) | Black-and-white split that follows the body shape, not the doors. Big flat white panels. A thin low LED bar or none (grille, mirror and window strobes). A blue accent stripe on the split line. | The sports patrol (`vigil`) gets a diagonal split and a slicktop. The silhouette does the work. |
 | NFS Most Wanted 2005 / Heat | Classic full-size sedans with black body and white doors + roof. The bar is the brightest object at night. The bar sits forward on the roof. | The `cruiser` uses the textbook B/W. The bar's emissive must out-glow headlights. |
 | GTA V (fictional city/county agencies) | Fictional city names + a generic "POLICE". A sheriff scheme in tan/green/brown. A highway scheme with "STATE"-style wording. Unit numbers on the roof and trunk. | Wording works: an invented city name + a generic word is enough. Tan/brown is our highway scheme. |
 | Burnout (Paradise/Revenge) | Exaggerated push bars and huge bars, read as a silhouette at 200 km/h. | Push bars ~10 % oversize vs. real are fine. |
@@ -349,7 +349,7 @@ Dims (existing): 2.04 W × 5.18 L × 1.89 H, wheelbase 2.95, r 0.36 (265/60R17).
     message cells). This is the European colour convention.
   - **K-9 sub-variant:** `K-9` 0.14 m on the rear quarter glass/panel.
 
-### 1.5 `sentinel_harrier`: "sports patrol" (NEW: modern muscle-coupe pursuit car)
+### 1.5 `sentinel_vigil`: "sports patrol" (NEW: modern muscle-coupe pursuit car)
 
 Roster suggestion: 1.93 W × 4.82 L × 1.37 H (body), wheelbase 2.75, 275/40R20 (unloaded r 0.364,
 loaded 0.353), ~1 800 kg, 6.2 L supercharged V8 or a 5.0 L DOHC V8 (the `rampart_50` class
@@ -380,7 +380,7 @@ sign-off from the doctrine owner**: add a row to `POLICE_DOCTRINE.md` §8.1.
 **Equipment**
 | Item | Position | Size |
 |---|---|---|
-| Light bar: **slicktop** (L-SLICK) by default. Variant `harrier_bar`: aero mini-bar | Slicktop: visor bar inside the windshield top, grille LEDs, mirror LEDs, rear-window bar, decklid-spoiler LEDs. Mini-bar: 0.95 × 0.25 × 0.05 at 45 %L | |
+| Light bar: **slicktop** (L-SLICK) by default. Variant `vigil_bar`: aero mini-bar | Slicktop: visor bar inside the windshield top, grille LEDs, mirror LEDs, rear-window bar, decklid-spoiler LEDs. Mini-bar: 0.95 × 0.25 × 0.05 at 45 %L | |
 | Push bar | Compact "PIT bumper": a single horizontal rail z 0.38, plus 2 short uprights to z 0.62, width 0.95 | |
 | Spotlight | Driver A-pillar, black low-profile LED | Ø0.10 |
 | Rear spoiler | Decklid pedestal wing: blade 1.40 × 0.20 × 0.02 at 0.12 above the decklid, 2 pedestals. Carries a 0.80 × 0.025 red/blue LED strip on the trailing edge | `carbon` or body colour |
@@ -517,7 +517,7 @@ function sidePx(side: "L" | "R", pctL: number, z: number, W = 4096, H = 2048) {
 4. Emblem (vector path in a unit circle, drawn at an anchor with a uniform scale and **no flip**).
 5. **Text** last (§3.3). A 0.006 m outline = `strokeText` first (`lineJoin = "round"`,
    `lineWidth = 2·outline_px`), then `fillText`.
-6. Top band: hood/roof/trunk tones and stripes (e.g. harrier twin stripes) in (x, %L) space.
+6. Top band: hood/roof/trunk tones and stripes (e.g. vigil twin stripes) in (x, %L) space.
 7. **Bleed:** extend every region 8 px past the band edges and past region boundaries that meet
    UV seams. Pad 16 px between atlas bands with the base colour so mip levels don't bleed the
    neighbouring band in.
@@ -530,7 +530,7 @@ function sidePx(side: "L" | "R", pctL: number, z: number, W = 4096, H = 2048) {
   reads correctly on both doors.
 - Only *directional graphics* depend on the car's direction: hockey-stick stripe ends, chevrons
   that point forward, italic slant. Build the graphics in car space so the mapping flips them. For
-  **italic text** (harrier), lean the glyph tops **toward the car's front** on both sides so it
+  **italic text** (vigil), lean the glyph tops **toward the car's front** on both sides so it
   looks fast. Apply `ctx.transform(1, 0, c, 1, 0, 0)` after translating to the anchor (canvas
   y points down, so tops move by −c·h). Left side (front = reader's left): `c = +0.16`, tops lean
   left. Right side (front = reader's right): `c = −0.16`, ordinary italic. Use a skew, not
@@ -590,7 +590,7 @@ function sidePx(side: "L" | "R", pctL: number, z: number, W = 4096, H = 2048) {
 | warden | `C-44` (40–59 night blocks) | `C44` | Central-44 |
 | wolfhound | `L-L1` | `LL1` | Loop Lima-1 |
 | bastion | `S-B3` | `SB3` | South Bravo-3 |
-| harrier | `C-H1` | `CH1` | Central Hotel-1 (**proposed**) |
+| vigil | `C-H1` | `CH1` | Central Hotel-1 (**proposed**) |
 | helicopter | `SKYWATCH 1` on the tail boom, 0.40 m; belly `PVPD` | | Skywatch One |
 
 ### 4.4 Emblem

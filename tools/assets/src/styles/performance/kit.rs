@@ -17,7 +17,7 @@
 use wp_contracts::BodyRegion;
 
 use crate::builder::{mirror_name, mirror_region, Builder, PartKey, Patch, PatchBand};
-use crate::mesh::{MaterialSlot, PartKind};
+use crate::mesh::{self, MaterialSlot, PartKind, INDICATOR_SEAM_M};
 use crate::profile::BodyProfile;
 
 use MaterialSlot as M;
@@ -57,8 +57,7 @@ pub fn sided(k: &PartKey, sx: f32) -> PartKey {
     }
 }
 
-/// The foundation's default head-light key of side `sx` (we append our lamp shapes to it;
-/// frame region: a lens, see `skin::is_lens`).
+/// The foundation's default head-light key of side `sx` (we append our lamp shapes to it).
 pub fn headlight_key(sx: f32) -> PartKey {
     sided(
         &lkey(
@@ -80,6 +79,45 @@ pub fn taillight_key(sx: f32) -> PartKey {
         ),
         sx,
     )
+}
+
+/// Front turn-signal key of side `sx` (`indicator_front_l/_r`, amber, `FrameFront`).
+pub fn indicator_front_key(sx: f32) -> PartKey {
+    mesh::indicator_front_key(sx > 0.0)
+}
+
+/// Rear turn-signal key of side `sx` (`indicator_rear_l/_r`, `FrameRear`): `mat` is
+/// `EmissiveAmber` for an amber section, `Taillight` for a red-on-red one.
+pub fn indicator_rear_key(sx: f32, mat: MaterialSlot) -> PartKey {
+    mesh::indicator_rear_key(sx > 0.0, mat)
+}
+
+/// Where a turn-signal segment sits in its lamp lens (see [`Kit::front_cluster`]); the value
+/// is the segment's width (x) or height (z), m.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Seg {
+    /// Outer end of the lens (toward the car's corner).
+    Outboard(f32),
+    /// Inner end of the lens (toward the grille / plate).
+    Inboard(f32),
+    /// Strip along the bottom of the lens.
+    Lower(f32),
+    /// Strip along the top of the lens.
+    Upper(f32),
+}
+
+impl Seg {
+    /// Split a lens rectangle (|x| `xin..xout`, `z0..z1`) into (lamp, signal) rectangles
+    /// `[xin, xout, z0, z1]`, the lamp keeping [`INDICATOR_SEAM_M`] clear of the signal.
+    pub fn split(self, xin: f32, xout: f32, z0: f32, z1: f32) -> ([f32; 4], [f32; 4]) {
+        let g = INDICATOR_SEAM_M;
+        match self {
+            Seg::Outboard(w) => ([xin, xout - w - g, z0, z1], [xout - w, xout, z0, z1]),
+            Seg::Inboard(w) => ([xin + w + g, xout, z0, z1], [xin, xin + w, z0, z1]),
+            Seg::Lower(h) => ([xin, xout, z0 + h + g, z1], [xin, xout, z0, z0 + h]),
+            Seg::Upper(h) => ([xin, xout, z0, z1 - h - g], [xin, xout, z1 - h, z1]),
+        }
+    }
 }
 
 /// The foundation's default door-mirror key of side `sx`.
@@ -154,6 +192,19 @@ pub struct Wing {
     pub gurney: f32,
 }
 
+/// Where a door mirror sits (see [`Kit::mirrors`]): belt height `zb` and side |x| `w` at the
+/// mirror, housing x span `x0 → x1` (signed, inner → outer), housing bottom / top `zl` / `zh`
+/// and its rear (glass) face `ylo`.
+struct MirrorFrame {
+    zb: f32,
+    w: f32,
+    x0: f32,
+    x1: f32,
+    zl: f32,
+    zh: f32,
+    ylo: f32,
+}
+
 /// Body-kit builder: the styled profile plus the part builder.
 pub struct Kit<'a> {
     /// Styled profile of the car.
@@ -167,12 +218,19 @@ pub struct Kit<'a> {
 }
 
 impl<'a> Kit<'a> {
-    /// Wrap a builder; removes the foundation's default head / tail lamps and mirrors (the kit
-    /// re-emits them into the same parts in the car's own shapes).
+    /// Wrap a builder; removes the foundation's default head / tail lamps, turn signals and
+    /// mirrors (the kit re-emits them into the same parts in the car's own shapes).
     pub fn new(p: &'a BodyProfile, b: &'a mut Builder) -> Kit<'a> {
         for sx in SIDES {
             for k in [headlight_key(sx), taillight_key(sx), mirror_key(sx)] {
                 b.set_geometry(&k.name, Vec::new(), Vec::new(), Vec::new());
+            }
+            // The kit's turn signals may use another material (red-on-red): drop the parts.
+            for k in [
+                indicator_front_key(sx),
+                indicator_rear_key(sx, M::EmissiveAmber),
+            ] {
+                b.remove_part(&k.name);
             }
         }
         Kit {
@@ -483,6 +541,21 @@ impl<'a> Kit<'a> {
     /// Head lamp lying on the nose-top curve (side `sx`): lens `y0..y1` × |x| `xin..xout`
     /// on a dark housing `border` m larger all round.
     pub fn top_lamp(&mut self, sx: f32, y0: f32, y1: f32, xin: f32, xout: f32, border: f32) {
+        self.top_lamp_housing(sx, y0, y1, xin, xout, border);
+        let hk = headlight_key(sx);
+        self.patch(
+            &hk,
+            y0,
+            y1,
+            top_band(sx * xin, sx * xout),
+            0.003,
+            0.012,
+            (2, 2),
+        );
+    }
+
+    /// Dark housing of a [`Kit::top_lamp`], `border` m larger than the lens all round.
+    fn top_lamp_housing(&mut self, sx: f32, y0: f32, y1: f32, xin: f32, xout: f32, border: f32) {
         let kh = sided(
             &dkey("headlamp_housing_l", BodyRegion::FrontLeftFender, M::Trim),
             sx,
@@ -497,16 +570,156 @@ impl<'a> Kit<'a> {
             0.007,
             (3, 2),
         );
+    }
+
+    /// [`Kit::top_lamp`] whose lens carries the front turn signal: the same housing, the lens
+    /// split into the head lamp and an amber segment `seg` (`Outboard` / `Inboard` cut across
+    /// x; `Lower` = the leading strip, `Upper` = the rear strip, cut along y), both at the same
+    /// offset and thickness so the signal is flush with the lens.
+    #[allow(clippy::too_many_arguments)]
+    pub fn top_lamp_split(
+        &mut self,
+        sx: f32,
+        y0: f32,
+        y1: f32,
+        xin: f32,
+        xout: f32,
+        border: f32,
+        seg: Seg,
+    ) {
+        self.top_lamp_housing(sx, y0, y1, xin, xout, border);
+        // Rectangles in (|x|, y): the split's "z" is y here.
+        let (lamp, sig) = seg.split(xin, xout, y0, y1);
+        let (lamp, sig) = match seg {
+            // On the sloping nose top the leading (front) strip is the lower one.
+            Seg::Lower(h) => (
+                [xin, xout, y0, y1 - h - INDICATOR_SEAM_M],
+                [xin, xout, y1 - h, y1],
+            ),
+            Seg::Upper(h) => (
+                [xin, xout, y0 + h + INDICATOR_SEAM_M, y1],
+                [xin, xout, y0, y0 + h],
+            ),
+            _ => (lamp, sig),
+        };
         let hk = headlight_key(sx);
         self.patch(
             &hk,
-            y0,
-            y1,
-            top_band(sx * xin, sx * xout),
+            lamp[2],
+            lamp[3],
+            top_band(sx * lamp[0], sx * lamp[1]),
             0.003,
             0.012,
             (2, 2),
         );
+        let ik = indicator_front_key(sx);
+        self.patch(
+            &ik,
+            sig[2],
+            sig[3],
+            top_band(sx * sig[0], sx * sig[1]),
+            0.003,
+            0.012,
+            (2, 1),
+        );
+    }
+
+    /// Nose-face lamp lens (|x| `xin..xout`, `z0..z1`, `proud`, `bevel`, as [`Kit::front_box`])
+    /// with the front turn signal cut out of it: the head lamp and an amber segment `seg` of
+    /// the same lens, same proud face and bevel, split by [`INDICATOR_SEAM_M`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn front_cluster(
+        &mut self,
+        sx: f32,
+        xin: f32,
+        xout: f32,
+        z0: f32,
+        z1: f32,
+        proud: f32,
+        bevel: f32,
+        seg: Seg,
+    ) {
+        let (lamp, sig) = seg.split(xin, xout, z0, z1);
+        let hk = headlight_key(sx);
+        self.front_box(
+            &hk,
+            sx * lamp[0],
+            sx * lamp[1],
+            lamp[2],
+            lamp[3],
+            proud,
+            bevel,
+        );
+        let ik = indicator_front_key(sx);
+        self.front_box(&ik, sx * sig[0], sx * sig[1], sig[2], sig[3], proud, bevel);
+    }
+
+    /// Tail-face lamp lens (as [`Kit::rear_box`]) with the rear turn signal cut out of it:
+    /// the tail lamp and a segment `seg` of the same lens in `mat` (`EmissiveAmber`, or
+    /// `Taillight` for red-on-red).
+    #[allow(clippy::too_many_arguments)]
+    pub fn rear_cluster(
+        &mut self,
+        sx: f32,
+        xin: f32,
+        xout: f32,
+        z0: f32,
+        z1: f32,
+        proud: f32,
+        bevel: f32,
+        seg: Seg,
+        mat: MaterialSlot,
+    ) {
+        let (lamp, sig) = seg.split(xin, xout, z0, z1);
+        let tk = taillight_key(sx);
+        self.rear_box(
+            &tk,
+            sx * lamp[0],
+            sx * lamp[1],
+            lamp[2],
+            lamp[3],
+            proud,
+            bevel,
+        );
+        let ik = indicator_rear_key(sx, mat);
+        self.rear_box(&ik, sx * sig[0], sx * sig[1], sig[2], sig[3], proud, bevel);
+    }
+
+    /// Flush side repeaters (`indicator_side_l/_r`) on both front fenders: a small amber lens
+    /// 1 mm off the fender surface (following it), just behind the front wheel arch near the
+    /// arch-top height. Bound to the fender like any fender part.
+    pub fn fender_repeaters(&mut self) {
+        let (yf, zf, rf) = self.arch(true);
+        let y1 = (yf - rf - 0.05).max(self.p.y_fd_hinge + 0.12);
+        let y0 = y1 - 0.075;
+        let zc = (zf + 0.85 * rf).min(self.p.belt(y1) - 0.06);
+        let kl = mesh::indicator_side_key(false, BodyRegion::FrontLeftFender);
+        for sx in SIDES {
+            self.side_patch(&kl, sx, y0, y1, zc - 0.02, zc + 0.02, 0.001, 0.004, (1, 1));
+        }
+    }
+
+    /// Flush side repeaters (`indicator_side_l/_r`) on the door mirrors of
+    /// [`Kit::mirrors`]`(y_off, size, cap)`: an amber strip over the outer half of the
+    /// housing's front-lower chamfer, 1.5 mm proud of it (of the cap when `cap`). Region and
+    /// binding as the mirror.
+    pub fn mirror_repeaters(&mut self, y_off: f32, size: f32, cap: bool) {
+        for sx in SIDES {
+            let m = self.mirror_frame(sx, y_off, size);
+            let k = sided(&mesh::indicator_side_key(false, BodyRegion::LeftDoorF), sx);
+            // Chamfer edge a → c of the housing profile and its outward (forward-down) normal.
+            let a = [m.ylo + 0.45 * size, m.zl - 0.005];
+            let c = [m.ylo + 0.8 * size, m.zl + 0.2 * size];
+            let (dy, dz) = (c[0] - a[0], c[1] - a[1]);
+            let l = (dy * dy + dz * dz).sqrt().max(1e-6);
+            let n = [dz / l, -dy / l];
+            let off = |q: [f32; 2], d: f32| [q[0] + n[0] * d, q[1] + n[1] * d];
+            let out = if cap { 0.0045 } else { 0.0015 };
+            let prof = [off(a, out), off(c, out), off(c, -0.004), off(a, -0.004)];
+            let xo = m.x1 - sx * 0.008;
+            let xi = m.x1 - sx * 0.55 * (m.x1 - m.x0).abs();
+            self.prism_x(&k, &prof, xi, xo);
+        }
     }
 
     /// Black panel across the tail face (lamp surround), x within ±half, z0..z1.
@@ -969,15 +1182,17 @@ impl<'a> Kit<'a> {
     /// stalk, optional contrast cap (`cap`), `y_off` from the door hinge.
     pub fn mirrors(&mut self, y_off: f32, size: f32, cap: Option<MaterialSlot>) {
         for sx in SIDES {
-            let yh = self.p.y_fd_hinge - y_off;
-            let zb = self.p.belt(yh) + 0.02;
-            let w = self.side_x(yh, zb - 0.06).max(self.p.half_width(yh) - 0.05);
+            let MirrorFrame {
+                zb,
+                w,
+                x0,
+                x1,
+                zl,
+                zh,
+                ylo,
+            } = self.mirror_frame(sx, y_off, size);
             let k = mirror_key(sx);
-            let x0 = sx * (w + 0.05);
-            let x1 = sx * (w + 0.05 + 1.4 * size);
-            let (zl, zh) = (zb + 0.03, zb + 0.03 + 0.75 * size);
             // Housing: a wedge, blunt at the back (mirror glass), rounded front.
-            let ylo = yh - 0.75 * size;
             let prof = [
                 [ylo, zl],
                 [ylo + 0.45 * size, zl - 0.005],
@@ -1012,6 +1227,23 @@ impl<'a> Kit<'a> {
                 ];
                 self.prism_x(&kc, &prof, x0 + sx * 0.005, x1 + sx * 0.004);
             }
+        }
+    }
+
+    /// Placement of the door mirror of side `sx` (see [`Kit::mirrors`]).
+    fn mirror_frame(&self, sx: f32, y_off: f32, size: f32) -> MirrorFrame {
+        let yh = self.p.y_fd_hinge - y_off;
+        let zb = self.p.belt(yh) + 0.02;
+        let w = self.side_x(yh, zb - 0.06).max(self.p.half_width(yh) - 0.05);
+        let zl = zb + 0.03;
+        MirrorFrame {
+            zb,
+            w,
+            x0: sx * (w + 0.05),
+            x1: sx * (w + 0.05 + 1.4 * size),
+            zl,
+            zh: zl + 0.75 * size,
+            ylo: yh - 0.75 * size,
         }
     }
 

@@ -97,3 +97,7 @@
     grid-template-columns: 1fr;
   }
 }
+
+.wp-scanner li[data-air="true"] {
+  color: var(--heli);
+}

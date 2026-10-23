@@ -326,15 +326,24 @@ fn insurance_pays_unless_damage_was_wanted() {
     assert_eq!(q.insurance_covers, expected);
     assert_eq!(q.player_pays, q.gross - expected);
 
-    // Damage sustained while wanted: claim denied.
+    // Damage taken while wanted (an escaped pursuit) is still covered.
     let mut r = damaged_report(&e, &a, car, mode);
     r.wanted_during_session = true;
     e.record_damage(&mut a, &r).unwrap();
     let q = e
         .quote_repair(&a, car, &RepairOption::RepairAll, &shop, mode)
         .unwrap();
+    assert!(!q.claim_denied);
+    assert_eq!(q.insurance_covers, expected);
+
+    // Damage outstanding at a capture: claim denied (even on a policy bought afterwards).
+    a.car_mut(car).unwrap().damage.sustained_before_capture = true;
+    let q = e
+        .quote_repair(&a, car, &RepairOption::RepairAll, &shop, mode)
+        .unwrap();
     assert!(q.claim_denied);
     assert_eq!(q.insurance_covers, 0);
+    a.car_mut(car).unwrap().damage.sustained_before_capture = false;
 
     // Daily premium is charged; lapses when unaffordable.
     let cash0 = a.cash;

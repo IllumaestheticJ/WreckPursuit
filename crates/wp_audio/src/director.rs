@@ -28,7 +28,7 @@ use crate::siren_unit::{
     unit_desires, SirenCue, SirenRack, SirenUnitInput, SirenUnitState, AIRHORN_CUE, WHOOP_CUE,
 };
 use crate::spatial::{dot, len, rotate, sub, world_to_local};
-use crate::tires::{update_tires, TireAudioState};
+use crate::tires::{update_tires, TireAudioState, TirePeak};
 use crate::types::{slot, AudioCommand, Bus, Listener, Priority, VoiceId};
 
 /// Who drives a vehicle (mirrors `wp_sim::VehicleKind`; `wp_audio` does not depend on the sim).
@@ -126,6 +126,8 @@ struct CarAudio {
     cabin: Option<([f32; 3], [f32; 3])>,
     /// Loaded wheel radii FL, FR, RL, RR, m (wheelspin slip speed).
     wheel_radius_m: [f32; 4],
+    /// Peak slip of each wheel's tire FL, FR, RL, RR (squeal normalisation).
+    tire_peaks: [TirePeak; 4],
     /// Gameplay class (exhaust geometry of the physical engine model).
     class: wp_contracts::VehicleClass,
     /// Final drive ratio (differential whine).
@@ -139,6 +141,7 @@ struct CarAudio {
 struct WorldCues {
     squeal: CueRef,
     scrub: CueRef,
+    scrub_grass: CueRef,
     spin: CueRef,
     spin_loose: CueRef,
     surfaces: [CueRef; 8],
@@ -152,6 +155,8 @@ struct WorldCues {
     engine_fail: CueRef,
     steam: CueRef,
     tire_burst: CueRef,
+    /// Flat-tyre flap loop (`tire/flat_flap`, playtest row 132).
+    flat_flap: CueRef,
     rattle: CueRef,
     /// Optional gear-shift clunk (`drivetrain/shift`); silent when the pack lacks it.
     shift: CueRef,
@@ -177,6 +182,7 @@ impl WorldCues {
         Self {
             squeal: t.get(pack, cues::SQUEAL, true),
             scrub: t.get(pack, cues::SCRUB, true),
+            scrub_grass: t.get(pack, cues::SCRUB_GRASS, true),
             spin: t.get(pack, cues::SPIN, true),
             spin_loose: t.get(pack, cues::SPIN_LOOSE, true),
             surfaces: cues::SURFACES.map(|c| t.get(pack, c, true)),
@@ -190,6 +196,7 @@ impl WorldCues {
             engine_fail: t.get(pack, cues::ENGINE_FAIL, false),
             steam: t.get(pack, cues::STEAM_HISS, true),
             tire_burst: t.get(pack, cues::TIRE_BURST, false),
+            flat_flap: t.get(pack, crate::flat_tyre::FLAP_CUE, true),
             rattle: t.get(pack, cues::BODY_RATTLE, true),
             shift: t.get(pack, cues::SHIFT, false),
             body: t.get(pack, cues::IMPACT_BODY, false),
@@ -289,6 +296,8 @@ pub struct AudioDirector {
     sirens: SirenRack,
     mixer: VoiceMixer,
     scanner: Scanner,
+    /// Police radio tiers for this frame's `PoliceEvent::Radio` lines: (unit, text, tier).
+    radio_tiers: Vec<(Option<u32>, String, u8)>,
     rng: Rng,
     seed: u64,
     last_tick: Option<u64>,
@@ -309,6 +318,12 @@ pub struct AudioDirector {
     /// Total plastic energy per vehicle given by the caller this frame
     /// ([`AudioDirector::set_plastic_energy`]), J.
     plastic_in: BTreeMap<EntityId, f32>,
+    /// Per-wheel tyre deflation given by the caller ([`AudioDirector::set_tire_deflation`]).
+    tire_deflation: BTreeMap<EntityId, [f32; 4]>,
+    /// Per-wheel rim-on-the-road flags given by the caller ([`AudioDirector::set_rim_contact`]).
+    rim_contact: BTreeMap<EntityId, [bool; 4]>,
+    /// Spike-hit radio lines spoken (picks the next line text).
+    spike_lines: u32,
     /// Vehicle whose cabin the listener is in this frame (interior camera).
     interior: Option<EntityId>,
 }
@@ -317,7 +332,9 @@ pub struct AudioDirector {
 pub const PHYSICAL_ENGINE_PACK: &str = "engine_physical";
 
 const DEFAULT_WORLD_PACK: &str = "world_proc";
-const DEFAULT_SIREN_PACK: &str = "siren_v2";
+/// Siren pack of a police unit whose car names none: the recorded loops (falling back to the
+/// `siren_v2` synth while they load or in procedural mode).
+const DEFAULT_SIREN_PACK: &str = "siren_rec";
 
 impl AudioDirector {
     /// New director over `lib` with a seed for the (purely cosmetic) pitch variation.
@@ -336,6 +353,7 @@ impl AudioDirector {
             sirens: SirenRack::default(),
             mixer: VoiceMixer::default(),
             scanner: Scanner::default(),
+            radio_tiers: Vec::new(),
             rng: Rng::new(seed),
             seed,
             last_tick: None,
@@ -349,6 +367,9 @@ impl AudioDirector {
             tuned_specs: BTreeMap::new(),
             physical_cue,
             plastic_in: BTreeMap::new(),
+            tire_deflation: BTreeMap::new(),
+            rim_contact: BTreeMap::new(),
+            spike_lines: 0,
             interior: None,
         }
     }
@@ -417,7 +438,7 @@ impl AudioDirector {
             rev_limit_rpm: e.rev_limit_rpm,
         };
         let layers = match self.lib.packs.get(&def.engine_pack) {
-            Some(p) => EngineLayers::resolve(p, e.idle_rpm, e.redline_rpm),
+            Some(p) => EngineLayers::resolve(p, &def.engine, e.idle_rpm, e.redline_rpm),
             None => EngineLayers { layers: Vec::new() },
         };
         let t = &mut self.cues;
@@ -452,6 +473,17 @@ impl AudioDirector {
             mass_kg: car.def.mass_kg,
             cabin: cabin_box(&car.lattice),
             wheel_radius_m: car.def.wheels.each_ref().map(|w| w.radius_m),
+            tire_peaks: car
+                .def
+                .wheels
+                .each_ref()
+                .map(|w| match car.tires.get(&w.tire_id) {
+                    Some(t) => TirePeak {
+                        slip_ratio: t.peak_slip_ratio,
+                        slip_angle_rad: t.peak_slip_angle_rad,
+                    },
+                    None => TirePeak::from_mix(&self.lib.config.tires),
+                }),
             class: car.def.class,
             final_drive: car.def.drivetrain.final_drive,
             physical_stock: BTreeMap::new(),
@@ -509,6 +541,20 @@ impl AudioDirector {
         self.scanner.set_tier(tier);
     }
 
+    /// "Radio: Important only" (true) or "All" (false): see [`Scanner::set_important_only`].
+    pub fn set_radio_important_only(&mut self, on: bool) {
+        self.scanner.set_important_only(on);
+    }
+
+    /// Police priority tiers of the radio lines in the next [`update`](Self::update)'s
+    /// events, as `(unit, text, tier)` (`wp_police::RadioLine::tier`, numbered 1..=5). The
+    /// contract's `PoliceEvent::Radio` has no tier yet (row 144 contract request), so the
+    /// caller, which has the police radio log, passes it here; each entry is used by the first
+    /// matching line and the rest are cleared after the update.
+    pub fn set_police_radio_tiers(&mut self, tiers: Vec<(Option<u32>, String, u8)>) {
+        self.radio_tiers = tiers;
+    }
+
     /// Queue a police radio line (until `PoliceEvent::Radio` exists in the contract).
     pub fn push_radio_line(&mut self, line: RadioLine) {
         self.scanner.push(&self.lib.config.scanner, line);
@@ -521,6 +567,31 @@ impl AudioDirector {
     pub fn set_plastic_energy(&mut self, entity: EntityId, total_plastic_j: f32) {
         if total_plastic_j.is_finite() {
             self.plastic_in.insert(entity, total_plastic_j);
+        }
+    }
+
+    /// Per-wheel tyre deflation (FL, FR, RL, RR; 0 inflated ..= 1 flat) of a vehicle, from
+    /// `HandlingEffects::tire_puncture`: deflated wheels flap at wheel rate, flat ones grind on
+    /// their rims ([`crate::flat_tyre`]). Kept until changed; all zero removes it.
+    pub fn set_tire_deflation(&mut self, entity: EntityId, deflation: [f32; 4]) {
+        if deflation.iter().all(|d| *d <= 0.0 || !d.is_finite()) {
+            self.tire_deflation.remove(&entity);
+        } else {
+            self.tire_deflation.insert(entity, deflation);
+        }
+    }
+
+    /// Which wheels run on their rims right now (`wp_vehicle::Vehicle::rim_contact`, FL, FR, RL,
+    /// RR): those grind. `None` = unknown (e.g. a net client): deflation ≥ `flat_tyre.rim_deflation`
+    /// decides instead.
+    pub fn set_rim_contact(&mut self, entity: EntityId, rim: Option<[bool; 4]>) {
+        match rim {
+            Some(r) => {
+                self.rim_contact.insert(entity, r);
+            }
+            None => {
+                self.rim_contact.remove(&entity);
+            }
         }
     }
 
@@ -542,6 +613,8 @@ impl AudioDirector {
         self.pairs.clear();
         self.pursuits.clear();
         self.sirens.clear();
+        self.tire_deflation.clear();
+        self.rim_contact.clear();
         self.last_tick = None;
         self.one_shot_seq = 0;
         self.rng = Rng::new(self.seed);
@@ -913,6 +986,7 @@ impl AudioDirector {
         let to = update_tires(
             &mut rt.tires,
             &cfg.tires,
+            &car.tire_peaks,
             s,
             car.static_load_n,
             car.wheel_radius_m,
@@ -920,7 +994,7 @@ impl AudioDirector {
             tick,
             dt,
         );
-        if let Some((gain, pitch, k)) = to.squeal {
+        if let Some(sq) = to.squeal {
             let mut d = Desire::new(
                 VoiceId::new(e, slot::SQUEAL),
                 Bus::World,
@@ -929,9 +1003,10 @@ impl AudioDirector {
                 pos,
                 vel,
             );
-            d.gain = gain;
-            d.pitch = pitch;
-            d.load = k;
+            d.gain = sq.gain;
+            d.pitch = sq.pitch;
+            d.load = sq.intensity;
+            d.timbre = sq.timbre;
             out.push(d);
         }
         for (slot_code, cue, spin) in [
@@ -953,18 +1028,23 @@ impl AudioDirector {
                 out.push(d);
             }
         }
-        if let Some((gain, k)) = to.scrub {
-            let mut d = Desire::new(
-                VoiceId::new(e, slot::SCRUB),
-                Bus::World,
-                car.world.scrub,
-                up(Priority::Low),
-                pos,
-                vel,
-            );
-            d.gain = gain;
-            d.load = k;
-            out.push(d);
+        for (slot_code, cue, scrub) in [
+            (slot::SCRUB, car.world.scrub, to.scrub),
+            (slot::SCRUB_GRASS, car.world.scrub_grass, to.grass_scrub),
+        ] {
+            if let Some((gain, k)) = scrub {
+                let mut d = Desire::new(
+                    VoiceId::new(e, slot_code),
+                    Bus::World,
+                    cue,
+                    up(Priority::Low),
+                    pos,
+                    vel,
+                );
+                d.gain = gain;
+                d.load = k;
+                out.push(d);
+            }
         }
         if let Some((idx, gain, frac)) = to.surface {
             let cue = car.world.surfaces[idx];
@@ -1056,6 +1136,41 @@ impl AudioDirector {
                 },
                 out,
             );
+        }
+        // Punctured tyres (playtest row 132): flap per deflated wheel, rim grind when flat.
+        if let Some(defl) = self.tire_deflation.get(&v.entity).copied() {
+            let rim = self.rim_contact.get(&v.entity).copied();
+            for w in crate::flat_tyre::wheels(&cfg.flat_tyre, s, defl, rim, car.wheel_radius_m) {
+                let i = w.wheel as u32;
+                if let Some((gain, rev_hz, d)) = w.flap {
+                    let mut f = Desire::new(
+                        VoiceId::new(e, crate::flat_tyre::FLAP_SLOT + i),
+                        Bus::World,
+                        car.world.flat_flap,
+                        up(Priority::Normal),
+                        pos,
+                        vel,
+                    );
+                    f.gain = gain;
+                    f.freq_hz = rev_hz;
+                    f.load = d;
+                    out.push(f);
+                }
+                if let Some((gain, pitch)) = w.rim {
+                    let mut r = Desire::new(
+                        VoiceId::new(e, crate::flat_tyre::RIM_SLOT + i),
+                        Bus::World,
+                        car.world.scrape_metal,
+                        up(Priority::Normal),
+                        pos,
+                        vel,
+                    );
+                    r.gain = gain;
+                    r.pitch = pitch;
+                    r.load = 1.0;
+                    out.push(r);
+                }
+            }
         }
         let world_thump = car.world.thump;
         let world_land = car.world.land;
@@ -1478,16 +1593,24 @@ impl AudioDirector {
         let pe = pe.clone();
         match pe {
             PoliceEvent::Radio { unit, text } => {
-                let priority = match unit {
+                let u = unit.map(|u| u.0);
+                let tier = self
+                    .radio_tiers
+                    .iter()
+                    .position(|(tu, tt, _)| *tu == u && *tt == text)
+                    .map(|k| self.radio_tiers.remove(k).2)
+                    .unwrap_or(0);
+                let priority = crate::scanner::priority_for_tier(tier).unwrap_or(match unit {
                     None => RadioPriority::Dispatch,
                     Some(_) if !self.pursuits.is_empty() => RadioPriority::Pursuit,
                     Some(_) => RadioPriority::Routine,
-                };
+                });
                 let line = RadioLine {
-                    unit: unit.map(|u| u.0).unwrap_or(0),
+                    unit: u.unwrap_or(0),
                     text,
                     priority,
                     emitted_tick: tick,
+                    tier,
                 };
                 self.scanner.push(&self.lib.config.scanner, line);
             }
@@ -1498,8 +1621,28 @@ impl AudioDirector {
                 self.pursuits.remove(&racer);
             }
             PoliceEvent::SpikeHit { vehicle, wheels } => {
-                for _ in wheels.iter().filter(|w| **w) {
-                    self.vehicle_one_shot(by_id, vehicle, |w| w.tire_burst, 1.0, out);
+                // Playtest row 132: a loud recorded blow-out per punctured wheel, never culled.
+                let ft = self.lib.config.flat_tyre.clone();
+                let hits = wheels.iter().filter(|w| **w).count();
+                for _ in 0..hits {
+                    let n = out.len();
+                    self.vehicle_one_shot(by_id, vehicle, |w| w.tire_burst, ft.pop_gain, out);
+                    if let Some(d) = out.get_mut(n) {
+                        d.priority = Priority::Critical;
+                    }
+                }
+                if ft.radio_line && hits > 0 && by_id.contains_key(&vehicle) {
+                    self.spike_lines = self.spike_lines.wrapping_add(1);
+                    let text = crate::flat_tyre::RADIO_LINES
+                        [self.spike_lines as usize % crate::flat_tyre::RADIO_LINES.len()];
+                    let line = RadioLine {
+                        unit: 0,
+                        text: text.to_string(),
+                        priority: RadioPriority::Pursuit,
+                        emitted_tick: tick,
+                        tier: 3,
+                    };
+                    self.scanner.push(&self.lib.config.scanner, line);
                 }
             }
             _ => {}

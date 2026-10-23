@@ -68,18 +68,22 @@ describe("pricing", () => {
   const [shiro, , ironside] = mockGarage();
   const [legit, crooked] = mockShops();
 
-  it("Arcade bills half of Simulation", () => {
-    const sim = quoteRepair({ ...shiro, insurance: null }, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
-    const arc = quoteRepair({ ...shiro, insurance: null }, { kind: "RepairAll" }, legit, "Arcade", 1e9, false);
-    expect(arc.total).toBeGreaterThan(0);
-    expect(Math.abs(arc.total * 2 - sim.total)).toBeLessThanOrEqual(sim.lines.length);
+  // Contract v0.4.0: Simulation is the old Arcade table (half the repair bill of Extreme, the old
+  // Simulation); the new Arcade only softens racers' damage and bills like Simulation.
+  it("Simulation bills half of Extreme; Arcade bills like Simulation", () => {
+    const quote = (mode: "Arcade" | "Simulation" | "Extreme") =>
+      quoteRepair({ ...shiro, insurance: null }, { kind: "RepairAll" }, legit, mode, 1e9, false);
+    const [arc, sim, ext] = [quote("Arcade"), quote("Simulation"), quote("Extreme")];
+    expect(sim.total).toBeGreaterThan(0);
+    expect(Math.abs(sim.total * 2 - ext.total)).toBeLessThanOrEqual(ext.lines.length);
+    expect(arc.total).toBe(sim.total);
   });
 
-  it("denies insurance for damage sustained while wanted", () => {
+  it("denies insurance for damage outstanding at a capture", () => {
     const q = quoteRepair(shiro, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
     expect(q.insuranceDenied).toBe(true);
     expect(q.insuranceCovered).toBe(0);
-    const ok = quoteRepair({ ...shiro, sustainedWhileWanted: false }, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
+    const ok = quoteRepair({ ...shiro, sustainedBeforeCapture: false }, { kind: "RepairAll" }, legit, "Simulation", 1e9, false);
     expect(ok.insuranceCovered).toBeGreaterThan(0);
     expect(ok.total).toBeLessThan(ok.subtotal);
   });
@@ -113,13 +117,15 @@ describe("build stats", () => {
     expect(stock.source).toBe("measured");
     expect(stock.stats).toEqual(CAR_STATS.kestrel_ts);
     // Same build as wp_wasm's build_stats test, measured on the rig at 6.54 s / 256 km/h /
-    // 1.047 g (stock 7.08 / 248 / 0.93): the estimate must land near the physics.
+    // 1.047 g: the estimate must land near the physics. Top speed is checked against stock (as
+    // wp_wasm's test does): the stock table was re-measured on round 12's physics (248 → 241 km/h,
+    // data/stats/cars.json, 38efca77), so the old fixed 248 asked the estimate to beat a stale stock.
     const b = buildStats("kestrel_ts", ["engine_intake_1", "engine_ecu_2", "tires_semi_slick"])!;
     expect(b.source).toBe("estimated");
     expect(b.stats.zero_to_100_s!).toBeLessThan(stock.stats.zero_to_100_s!);
     expect(b.stats.zero_to_100_s!).toBeGreaterThan(6.54 * 0.92);
     expect(b.stats.zero_to_100_s!).toBeLessThan(6.54 * 1.08);
-    expect(b.stats.top_speed_kmh).toBeGreaterThan(248);
+    expect(b.stats.top_speed_kmh).toBeGreaterThan(stock.stats.top_speed_kmh);
     expect(b.stats.cornering_g).toBeGreaterThan(1.047 * 0.92);
     expect(b.stats.cornering_g).toBeLessThan(1.047 * 1.08);
     expect(b.stats.bars.cornering).toBeGreaterThan(stock.stats.bars.cornering);

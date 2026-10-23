@@ -432,3 +432,161 @@ heads only.
   failure is on `lead/round12` itself (goldens not re-blessed after its own merges); nothing in
   this pass can move a hash. Not re-blessed here (owner rule: goldens must not move from this
   branch). Lead: re-bless on round 12 with a `[bless]` commit after checking the moves.
+
+## Allocation pass (2026-10-20)
+
+- **Who / why:** helper for the integration lead. `e2e/perf_check.mjs` gates steady allocation at
+  ≤ 200 KB/frame; it measured ~620–750 (chase), ~900 (rain), ~640 (phone).
+- **Touched:** `apps/testbed-web` only (TypeScript + the profiler). **No Rust, no `data/`, no
+  `wp_contracts`, no wasm API change**; nothing drawn changes and the sim is untouched.
+- **Result in one line: the 200 KB/frame gate is still not met, and cannot be met by app code on
+  this box.** Three.js's own render path allocates ~190–210 KB/frame here by itself (see
+  "What is left"). What this pass did: it fixed the profiler so it no longer measures its own
+  side effects, and it removed the app's large allocators that fire on a crash. Those were
+  spikes of +50–360 KB/frame whenever a crash deoptimised them inside the measuring window. It
+  also removed several real per-frame object allocations.
+
+### Numbers (this container, headless SwiftShader, 12 s windows, steady KB/frame)
+
+Run-to-run spread is large: ±50 KB, and up to +150 KB when a crash lands in the window. Each
+cell is one run unless it says otherwise. "Before" is `bd0a3e64` (the tree this pass started
+from), run from a copy of that tree with the same wasm and interleaved with the "after" runs.
+
+| Profile | Brief's figures (old profiler, earlier, busier box) | Before, old profiler | After, old profiler | Before, new profiler (2 runs) | After, new profiler (2 runs) | **After, `perf_check` (2 runs)** |
+|---|---|---|---|---|---|---|
+| chase 1280×720 | 620–750 (961 in my first run, skinVertices 356) | 522 | 543 | 459 / 501 (721 in one earlier run: skinVertices 112, crash FX 57) | 483 / 491 | **475 / 460** |
+| rain 1280×720 | ~900 | 614 | 620 | 527 / 616 | 479 / 499 | **507 / 492** |
+| phone 740×360 | ~640 | 489 | 438 | 407 / 413 | 436 / 427 | **— (run did not finish) / 425** |
+
+Read it like this:
+- **The machine sped up.** The same "before" tree with the old profiler went from 961 (my first
+  run, 2.5 fps, while the lead was compiling) to 522 (3.6 fps). Allocation per frame scales with
+  sim steps per frame, and at 2.5 fps more of the frame loop is still unoptimised.
+- **When nothing crashes in the window, before and after are the same within noise.** The
+  pass's biggest wins are allocators that only show up when a crash deoptimises them inside the
+  12 s window (skinVertices 112–356 KB, crash-FX `vehicles` 48–70 KB, `chordFolds` 10–23 KB).
+  After the pass, none of them appears in any run. Before, they appear in some runs and not
+  others.
+- The "new profiler" columns are lower than "old profiler" mostly by the `noiseBuffers`
+  reclassification (37–59 KB in the old-profiler before runs) and the probe fix.
+- `perf_check` with `PERF_MIN_RTF=0.75 PERF_MAX_SLOW=26`, after: chase RTF 0.80 / 0.86, rain
+  0.82 / 0.75, phone 0.90. 0 material bumps. Crash FX 0.24–0.29 ms. **It fails on steady
+  allocation in all three profiles. It also fails "phone draw calls < 300" at 313.** That draw
+  count is not from this pass: the before tree measures 311 / 312 (cars ~77, props ~71, city
+  ~125). In the first `perf_check` run, the phone profile "did not run" (no JSON, empty
+  stderr). Run alone straight after, and in the second `perf_check` run, it ran normally.
+
+### Fixes (biggest first)
+
+1. **Profiler artefacts** (`e2e/frame_profile.mjs`). The wasm call counters (which replace the
+   `sim` / audio bridge functions) and the draw-call probe (which replaces
+   `renderer.render` / `renderBufferDirect`) were installed 5 s into the chase, just before
+   measuring. Replacing a constant method throws away the optimised code of every caller (V8
+   "dependent field type constness changed"), e.g. Three's `renderObject`. The measuring window
+   then measured that code warming up again. Both are now installed before the chase starts. The
+   probe's per-feature counters are typed arrays: before, it stored a heap double per draw.
+   `noiseBuffers` (the audio noise tables, built once per AudioContext on the first impact
+   sound) now counts as one-off, like car-view builds.
+   - New options: `WARMUP_S` (chase time before measuring, default 5), `TOP`
+     (steady top-list length), `PROFILE_OUT` (save the raw sampling profile), `JS_FLAGS` (V8
+     flags, e.g. `--trace-deopt`).
+2. **Panel re-skin** (`render/panels.ts`). `skinVertices` used to read `Frame` matrices and
+   chord-fold objects through null-or-object parameters. Before a crash its fold values are all
+   integers. On the first dent it deoptimised ("Insufficient type feedback", "lost precision") into
+   a tier where every float operation allocates.
+   - It now reads only typed arrays: a packed `skinParams` and a packed chord buffer (the old
+     `foldAt` is inlined).
+   - `chordFolds` became `chordFoldsInto`: the fold JSON is packed once per part model
+     (`FoldPack`), panel states per region are an `Int8Array`, and it allocates no closures,
+     arrays or `Vector3`s.
+   - `fitFrame` / `triFrame` write into a pooled `Frame` per region and use scratch vectors.
+   - `warmSkinVertices` runs both kernels once, through every branch with fractional values,
+     when the first car view is built (25 ms here). V8 then optimises them once and keeps that
+     code.
+   - **Checked bit-exact:** an A/B harness ran the `bd0a3e64` `PanelBody` and this one on the
+     same lattice node streams (head-on, barrier and a 40 s city chase). 2653 re-skins, 79 102
+     part comparisons, folds up to 0.28 m, 113 free-panel frames: 0 differences in positions,
+     maxDisp, maxFold, maxPull or lens state.
+3. **Crash FX per-car pass** (`render/fx/index.ts`). `CrashFx.vehicles` ran once a frame, so V8
+   optimised it only ~10 s into the chase, and any new branch sent it back.
+   - Its float work is now in small kernels: `carFrame`, `wheelFx`, `carPlane`, `engineSmoke`,
+     `radiatorSteam`.
+   - Wheel records are packed per `VehicleInfo` wheel. Wheel JSON of different car models has
+     different shapes, and reading through them caused "wrong map" deopts.
+   - On the first frame, `warmVehicleKernels` runs the kernels through every branch: 20 000
+     iterations, ~50 ms once here. It uses the real argument objects and migrates live `CarFx`
+     objects onto the generalised shape. A skid strength that only ever saw 0 / 1 kept an integer
+     field and deoptimised on the first real skid.
+   - The same arithmetic in the same order: emission counts, random draws and arguments are
+     unchanged.
+   - `e2e/crash_fx.mjs`: 0.41 KB/effects frame (was 0.45–0.6).
+4. **Particle kernels** (`render/fx/pool.ts`): `ballistic` / `spin` are warmed at module load
+   (11 ms).
+5. **Parked-car chunks** (`render/props.ts`).
+   - Every chunk's instanced meshes drew the same geometry object with a different instance
+     matrix. Three keys vertex-array state by geometry + program, so each chunk draw re-bound
+     its attributes and allocated a new attribute cache (`saveCache`, ~15 KB/frame).
+   - Each chunk mesh now gets a `geometryView`: a new geometry object over the same attributes
+     and GPU buffers, disposed with the session.
+   - The near-car scan of `repick` is a typed-array loop (`nearCars`); `distTo` returned a boxed
+     number per prop.
+6. **Fleet colours** (`render/fleet.ts`). `putHex` (per car per frame) wrote colours through
+   `Color.setHex` + `setColorAt`. It now copies memoised Float32 instance-buffer values: the same
+   floats, made by the same calls. The lamp memo is cleared when the art style or night > 0.2
+   changes.
+7. **Audio** (`audio/index.ts`, `audio/voices.ts`).
+   - The listener transform updates the camera / world matrices once and inverts once. Before,
+     `getWorldPosition`, `getWorldDirection`, `getWorldQuaternion` and 3× `worldToLocal` each
+     redid them; the arithmetic is the same.
+   - The audio panel's sample status and engine line are only built while the panel is open. It
+     returned early otherwise, but they were built every frame.
+   - `collect` reaps voices with `Map.forEach` and compacts `dying` in place. Before, it used a
+     `[key, voice]` array per voice and a filtered copy of the list.
+8. **CG / velocity debug layer** (`vehicle_view.ts`): two `Vector3` per car per frame are now
+   scratch.
+
+### What is left (after, new profiler, chase; KB/frame)
+
+- **Three.js render path ~190–210.** Breakdown: `renderObject` 30–40, `copyArray` 20–29,
+  `setValueV3f` 11–15, `painterSortStable` 8–10, `dot` 6–11, `renderBufferDirect` 7–9,
+  `projectObject` 5, plus a long tail. At 3–4 fps these functions reach TurboFan only ~25–35 s
+  after page load: the trace shows `renderObject` / `setProgram` optimised ~30 s in. With
+  `WARMUP_S=25` the steady total is ~376 KB, and the Three entries move to the uniform setters
+  (`setValueM4` / `M3` / `V3f`).
+  - This cannot be fixed from the app without patching Three or rendering faster.
+  - **This part alone is at or over the 200 KB budget.**
+- **Builtins ~70–90** (`next`, `max`, `min`, `sort`, `slice`): iterators and Math calls from
+  frame code still in a baseline tier.
+- **App long tail ~190–215.** No single item is over 15 KB:
+  - `audioBridge.frame` JSON parse 11–14. Needs a binary `audio_frame` from wp_wasm and a new
+    consumer for its commands. Not done: it is a protocol change across the audio code.
+  - Telemetry plot 11–14 and HUD silhouette 5–8: canvas `lineTo` / `fillRect` with float
+    arguments are boxed per call. Snapping to integers would change pixels.
+  - Audio voices / siren scheduling 15–20, LOD director 7, `newContactMarker` 4–8,
+    `asymShaper` 3–6 (a cache fill per new curve), and the frame loop itself.
+- wasm-bindgen arrays are small here: `getArrayF32FromWasm0` ~3 KB/frame.
+
+### Requests
+
+- **Lead:** decide what the steady-allocation gate should mean on a 3–4 fps software-GL box.
+  - With a 5 s warm-up it mostly measures V8 tier-up of Three's render path; even at 25 s it
+    is ~376 KB. Either measure after a longer warm-up (`WARMUP_S`), or gate on the app's own
+    share (the `steadyTop` entries outside the Three chunk), or keep 200 KB for real-GPU runs
+    only.
+  - The phone draw-call limit (< 300) fails at ~311 on the base tree too.
+- **wp_wasm / audio (optional):** a buffer-returning `audio_frame` (commands as a packed
+  `Float32Array` + string table) would remove the per-frame JSON parse (~12 KB/frame here).
+
+### Gates (this pass)
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` | pass |
+| `PERF=0 node e2e/run.mjs` (includes weather, gamepad, reset, crash FX, crash replay, touch, menu) | **181 PASS, 0 FAIL** |
+| `node e2e/crash_fx.mjs` | 14 pass |
+| `node e2e/audio.mjs` / `audio_impacts.mjs` / `audio_engine.mjs` | 12 / 49 / 125 pass |
+| panel re-skin A/B vs `bd0a3e64` (scratch harness, not committed) | 0 differences over 79 102 part comparisons |
+| `PERF_MIN_RTF=0.75 PERF_MAX_SLOW=26 node e2e/perf_check.mjs` | **fails**: steady allocation, all 3 profiles (475–507 / 460–492 / 425 KB); phone draw calls 313 (base 311–312). Every other check passes. |
+
+The audio e2e runs re-render `docs/media/audio/*` (wav / jpg / README numbers move a little from
+run to run). Those files were restored from HEAD; this pass does not change them.

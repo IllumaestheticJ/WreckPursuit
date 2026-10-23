@@ -84,8 +84,8 @@ export function scrapValue(car: Pick<GarageCar, "basePrice" | "health" | "mods">
 
 /**
  * Price a repair decision. `lines` of `RepairSelected` index into `car.outstanding.lines`.
- * Insurance pays `coverage` of the bill above the deductible, unless the damage was sustained
- * while wanted.
+ * Insurance pays `coverage` of the bill above the deductible regardless of pursuit status, unless
+ * the damage was outstanding when the car was captured.
  */
 export function quoteRepair(
   car: GarageCar,
@@ -113,7 +113,7 @@ export function quoteRepair(
   });
   const subtotal = lines.reduce((s, l) => s + l.total, 0);
   let covered = 0;
-  const denied = !!car.insurance && car.sustainedWhileWanted && subtotal > 0;
+  const denied = !!car.insurance && car.sustainedBeforeCapture && subtotal > 0;
   if (car.insurance && !denied && subtotal > car.insurance.deductible) {
     covered = Math.round((subtotal - car.insurance.deductible) * car.insurance.coverage);
   }

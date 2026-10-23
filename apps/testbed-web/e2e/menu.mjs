@@ -156,8 +156,8 @@ check(m.screen === "pause" && m.visible && m.paused && tp2 === tp, `Esc opens th
 check(m.focus === "gm-resume", `Resume has the focus (${m.focus})`);
 await shot("menu_pause.png");
 // Driving keys do nothing while it is open.
-await page.keyboard.down("KeyC");
-await page.keyboard.up("KeyC");
+await page.keyboard.down("F3");
+await page.keyboard.up("F3");
 const camBefore = await page.evaluate(() => window.__wp.rig.mode);
 await press("Escape");
 m = await menu();
@@ -187,6 +187,22 @@ const v0 = await page.evaluate(() => window.__wpAudio.mix().master);
 await press("ArrowLeft", 2);
 const v1 = await page.evaluate(() => [window.__wp.menu.settings.volumes.master, window.__wpAudio.mix().master]);
 check(Math.abs(v1[0] - (v0 - 0.1)) < 1e-6 && v1[1] === v1[0], `← lowers the master volume and it reaches the audio mix (${v0} → ${v1.join(" / ")})`);
+// TCS / ABS are Off / Half / Full cycles (owner rows 104/105): clicking TCS steps Off → Half and
+// reaches the sim; the HUD tag shows the level.
+const tcs0 = await page.evaluate(() => window.__wp.menu.settings.assists.tcs);
+await page.click("#gm-tcs");
+const tcs1 = await page.evaluate(() => ({ menu: window.__wp.menu.settings.assists.tcs, sim: window.__wp.sim.assists(window.__wp.app.player).tcs, sel: document.querySelector('#assist-row select[data-a="tcs"]')?.value }));
+check(tcs0 === "Off" && tcs1.menu === "Half" && tcs1.sim === "Half" && tcs1.sel === "Half", `TCS Off → Half in the menu reaches the sim and the assist row (${tcs0} → ${JSON.stringify(tcs1)})`);
+await page.click("#gm-abs");
+const abs1 = await page.evaluate(() => ({ menu: window.__wp.menu.settings.assists.abs, sim: window.__wp.sim.assists(window.__wp.app.player).abs }));
+check(abs1.menu === "Off" && abs1.sim === "Off", `ABS Full → Off (cycles round) (${JSON.stringify(abs1)})`);
+await page.click("#gm-abs");
+await page.click("#gm-tcs");
+await page.click("#gm-tcs");
+const back = await page.evaluate(() => [window.__wp.menu.settings.assists.abs, window.__wp.menu.settings.assists.tcs]);
+check(back[0] === "Half" && back[1] === "Off", `cycles step through every level (${back})`);
+// Park the mouse: a pointer left over the menu would take the focus of whatever renders there.
+await page.mouse.move(0, 0);
 const cstr = await page.evaluate(() => document.getElementById("gm-cstr")?.disabled);
 check(cstr === false, "countersteer slider enabled (wasm set_countersteer, owner row 57)");
 await shot("menu_settings.png");

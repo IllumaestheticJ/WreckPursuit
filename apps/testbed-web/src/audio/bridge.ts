@@ -9,6 +9,8 @@ export const audioBridge = {
     JSON.parse(wasm.audio_frame(listener, eventsJson, focus)),
   setSiren: (entity: number, mode: string): void => wasm.audio_set_siren(entity, mode),
   setScannerTier: (tier: string): void => wasm.audio_set_scanner_tier(tier),
+  /** "Radio: Important only" (police tiers 1–3) or "All" (row 144). */
+  setRadioImportantOnly: (on: boolean): void => wasm.audio_set_radio_important_only(on),
   radio: (unit: number, priority: RadioPriority, text: string): void => wasm.audio_radio(unit, priority, text),
   reset: (): AudioCommand[] => JSON.parse(wasm.audio_reset()),
   /** "Physical" once the engine synthesizer runs, "Layers" otherwise. */

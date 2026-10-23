@@ -158,8 +158,7 @@ fn kickdown_on_full_throttle() {
 fn street_cars_shift_at_believable_stock_speeds() {
     // Owner playtest row 97 (2026-10-20): stock shifts were "a little too fast"; mods make
     // them faster (`drivetrain.shift_time_scale`, ×0.28 fully modded). Stock street cars with
-    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t and fulmine_v10, 0.18 s)
-    // 0.12-0.25 s;
+    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t 0.18 s, fulmine_v10 0.15 s) 0.12-0.25 s;
     // torque-converter cars, trucks and the beater are exempt. The lead's debug cars keep
     // their old values.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
