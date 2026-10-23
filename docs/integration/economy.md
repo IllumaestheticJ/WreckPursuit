@@ -558,3 +558,11 @@ none of my round 12b commits): the same tests fail there — `simcli goldens_mat
 diverge: city, golden chase/escape, panels, police sideswipe, race picks, weather),
 `wp_race race_picker::grid_highway_sprint`, `wp_sim sidewalk::vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
 and both `wp_wasm` race tests. They are not caused by the economy changes.
+
+## RaceSetup stake scales (2026-10-23, from the race follow-up)
+
+`RaceSetup::{purse_scale, entry_scale}` (serde default 1.0) multiply the winner purse and the
+buy-in. `wp_race::bridge::economy_race` sets them so races from the picker charge and pay the
+stake the lobby advertised (the stake table is flat per kind; the economy prices per km, so a
+short sprint paid 0.27× the advertised purse). Career / street meets leave them at 1.0.
+Details: `docs/integration/race.md`, "R5 follow-up".

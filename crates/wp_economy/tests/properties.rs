@@ -151,6 +151,8 @@ fn run_op(
                     route_length_m: 8000.0,
                     phase: DayPhase::Night,
                     mode,
+                    purse_scale: 1.0,
+                    entry_scale: 1.0,
                 };
                 let fee = e.entry_fee(&setup);
                 let r = e.enter_race(a, &setup, car);

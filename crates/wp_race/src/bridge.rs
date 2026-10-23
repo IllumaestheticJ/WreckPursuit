@@ -195,6 +195,8 @@ pub fn economy_setup(
         route_length_m,
         phase,
         mode,
+        purse_scale: 1.0,
+        entry_scale: 1.0,
     }
 }
 
@@ -207,11 +209,12 @@ pub fn economy_setup(
 /// daytime pays 2.5-4×) are carried by `purse_scale` / `entry_scale`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EconomyRace {
-    /// What `Economy::settle_race` takes today.
+    /// What `Economy::enter_race` / `settle_race` take: carries the scales below, so the
+    /// economy charges and pays the advertised stake.
     pub setup: RaceSetup,
-    /// Multiply the economy's winner purse by this to pay the advertised purse.
+    /// The economy's own winner purse × this = the advertised purse (already in `setup`).
     pub purse_scale: f32,
-    /// Multiply the economy's buy-in by this to charge the advertised entry fee.
+    /// The economy's own buy-in × this = the advertised entry fee (already in `setup`).
     pub entry_scale: f32,
     /// Winner purse the lobby advertises (before placement share, wanted multiplier and
     /// clean bonus, which the economy applies on top), including the economy's damage-mode
@@ -251,9 +254,15 @@ pub fn economy_race(
     };
     let purse_scale = ratio(stake.purse, econ.base_purse(&arcade));
     let entry_scale = ratio(stake.entry_fee, econ.entry_fee(&arcade));
+    // Settling with this setup pays and charges what the lobby advertised.
+    let setup = RaceSetup {
+        purse_scale,
+        entry_scale,
+        ..setup
+    };
     EconomyRace {
-        purse: (econ.base_purse(&setup) as f32 * purse_scale).round() as Money,
-        entry_fee: (econ.entry_fee(&setup) as f32 * entry_scale).round() as Money,
+        purse: econ.base_purse(&setup),
+        entry_fee: econ.entry_fee(&setup),
         setup,
         purse_scale,
         entry_scale,

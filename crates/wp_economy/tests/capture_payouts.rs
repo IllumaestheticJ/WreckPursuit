@@ -278,6 +278,8 @@ fn sprint(class: VehicleClass) -> RaceSetup {
         route_length_m: 9_000.0,
         phase: DayPhase::Night,
         mode: DamageMode::Arcade,
+        purse_scale: 1.0,
+        entry_scale: 1.0,
     }
 }
 

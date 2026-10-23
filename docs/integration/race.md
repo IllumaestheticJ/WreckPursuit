@@ -538,3 +538,23 @@ call. I have not done it.
     triangle count does not depend on the machine (render content: LOD / props / art merges,
     FYI lead / testbed). The frame-time misses are partly the container's software GL.
     `perf_check.mjs` changed on `lead/round12` after db11e64 (now 608a50a), so re-check there.
+
+## R5 follow-up: settle at the advertised stake (2026-10-23)
+
+The round-9 agreement ("G prices kinds and legality itself, so no scale is applied") held only
+where it was tested (Compact / bracket D, 9 km). The lobby's stake (`data/events/stakes.toml`)
+is flat per kind × bracket; the economy pays per km (with a minimum) × class. On a short
+sprint in a quicker car the two part: the browser's grid highway sprint in `lindwurm_4t`
+advertised 5,031 and paid the winner 1,377 (0.27×). Hidden until the opponent change let the
+player seat win `short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`.
+
+Fix (minimal changes outside `wp_race`, listed here):
+- `wp_economy::RaceSetup` gains `purse_scale` / `entry_scale` (serde default 1.0; every
+  existing setup keeps today's numbers). `Economy::base_purse` / `entry_fee` multiply them in,
+  so placement share, wanted multiplier, clean bonus and the Simulation premium still apply
+  on top, as R5 first proposed.
+- `bridge::economy_race` puts its scales into the `setup` it returns (`purse` / `entry_fee`
+  are now just the economy's numbers for that setup).
+- `wp_wasm` race glue enters and settles with the bridge's setup instead of a plain
+  `Economy::race_setup`: the buy-in charged and the purse paid are the advertised ones.
+- Literal `RaceSetup`s in `wp_economy` (career, tests) and `apps/meta` tests set both to 1.0.

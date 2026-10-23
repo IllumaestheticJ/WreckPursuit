@@ -1298,14 +1298,14 @@ fn economy_race_pays_the_advertised_stake() {
                     "{kind:?} {legality:?} {phase:?}"
                 );
                 assert!((r.entry_fee - stake.entry_fee).abs() <= 1, "{kind:?}");
-                // Settling a win with the scale applied reproduces the advertised purse.
+                // Settling a win with the bridge's setup reproduces the advertised purse.
                 let win = EconResult {
                     placement: 1,
                     contacts: 1,
                     violations: ViolationCounts::default(),
                     wanted: WantedLevel::None,
                 };
-                let paid = econ.race_payout(&r.setup, &win).purse as f32 * r.purse_scale;
+                let paid = econ.race_payout(&r.setup, &win).purse as f32;
                 let share = paid / r.purse as f32;
                 assert!(share > 0.0 && share <= 1.001, "{kind:?}: share {share}");
             }

@@ -456,6 +456,8 @@ impl Career<'_> {
                 route_length_m: km * 1000.0,
                 phase: DayPhase::Night,
                 mode: self.cfg.mode,
+                purse_scale: 1.0,
+                entry_scale: 1.0,
             };
             let fee = match self.econ.enter_race(&mut self.acct, &setup, car) {
                 Ok((fee, _)) => fee,

@@ -397,8 +397,7 @@ Other checks:
 - `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`: the player now
   rear-ends a racer that tucked in ahead, not always the parked one; the test accepts any AI
   racer as the other car.
-- **Report to G (economy) / K (race glue)**: `short_sprint_with_ai_runs_to_results_and_pays_
-  through_the_economy` fails: the AI-driven player seat now wins the grid sprint (P2 before,
-  so the winner branch never ran), and the winner's purse is 1,377 against an advertised
-  5,031 (`wp_race::bridge::economy_race` vs `Economy::race_setup`, ratio 0.27, band
-  0.75–1.34). A stake mismatch the old result hid; not changed here.
+- `short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`: the AI-driven player
+  seat now wins the grid sprint (P2 before, so the winner branch never ran) and exposed the
+  winner's purse paying 1,377 against an advertised 5,031. Fixed: settlement now uses the
+  bridge's stake scales (`docs/integration/race.md`, "R5 follow-up").

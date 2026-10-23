@@ -531,6 +531,8 @@ fn race_results_settle_through_the_session() {
         route_length_m: 4_000.0,
         phase: DayPhase::Night,
         mode,
+        purse_scale: 1.0,
+        entry_scale: 1.0,
     };
     let (fee, _) = e.enter_race(&mut a, &setup, car).unwrap();
     let mut s = session_for(mode, &a, car);

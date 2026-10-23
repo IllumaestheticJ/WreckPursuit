@@ -345,17 +345,11 @@ impl RaceRun {
         let player_car = &cars[&sc.entities[0].car];
         let length = live.race().route.length_m;
         let data = RaceData::embedded();
+        // The bridge's setup carries the stake scales: the buy-in charged and the purse paid
+        // are the ones the picker advertised (R5).
         let (setup, adv) = crate::garage::with_economy(|econ| {
-            let setup = econ.race_setup(
-                def.kind,
-                def.legality,
-                player_car.def.class,
-                length,
-                phase_of(def),
-                sc.mode,
-            );
             let adv = advertised(econ, &data, def, player_car, length, sc.mode);
-            (setup, (adv.purse, adv.entry_fee))
+            (adv.setup, (adv.purse, adv.entry_fee))
         });
         let mut me = Self {
             live,

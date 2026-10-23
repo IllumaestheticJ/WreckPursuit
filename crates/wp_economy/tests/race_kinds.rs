@@ -111,6 +111,8 @@ fn kinds_without_a_setup_change_nothing_for_plain_race_types() {
         route_length_m: 9000.0,
         phase: DayPhase::Night,
         mode: DamageMode::Arcade,
+        purse_scale: 1.0,
+        entry_scale: 1.0,
     };
     let kinded = e.race_setup(
         kind("sprint"),

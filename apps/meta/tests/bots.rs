@@ -156,6 +156,8 @@ fn twenty_bots_signup_matchmake_results_leaderboard() {
         route_length_m: 4000.0,
         phase: DayPhase::Night,
         mode,
+        purse_scale: 1.0,
+        entry_scale: 1.0,
     };
     for (n, inst) in [&a1, &a2].iter().enumerate() {
         let racers = inst.players_with_role(Role::Racer);

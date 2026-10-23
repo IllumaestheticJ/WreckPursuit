@@ -81,6 +81,8 @@ fn row(e: &Economy, car: &LoadedCar, mode: DamageMode) -> Row {
         route_length_m: 5_000.0,
         phase: DayPhase::Night,
         mode,
+        purse_scale: 1.0,
+        entry_scale: 1.0,
     };
     let basic = &e.prices.insurance["basic"];
     Row {
