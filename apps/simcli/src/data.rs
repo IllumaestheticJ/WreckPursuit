@@ -241,11 +241,18 @@ pub fn load_world(
             };
             Some(wp_world::World::procedural(&pg, cfg))
         }
+        CitySpec::Preset { name, .. } if wp_world::touge::is_touge(name) => {
+            Some(wp_world::World::touge(name, cfg).expect("built-in touge pass generates"))
+        }
         CitySpec::Preset { name, seed } => {
             if name != wp_world::vesper::CITY_ID {
                 return Err(RunError::Scenario(
                     name.clone(),
-                    format!("unknown city preset (known: {})", wp_world::vesper::CITY_ID),
+                    format!(
+                        "unknown city preset (known: {}, {})",
+                        wp_world::vesper::CITY_ID,
+                        wp_world::touge::TOUGE_IDS.join(", ")
+                    ),
                 ));
             }
             let vc = wp_world::vesper::VesperConfig {

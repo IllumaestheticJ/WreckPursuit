@@ -528,6 +528,20 @@ export const sim = {
   garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
   /** "Leave" the open visit without repairing. */
   garageLeave: (): void => wasm.garage_leave(),
+  /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */
+  tougeList: (): TougeCard[] => JSON.parse(wasm.touge_list_json()),
+  /** Rep-gated wager menu for one battle (career account if loaded, else the session's). Throws on unknown keys. */
+  tougeMenu: (c: TougeChoice): WagerMenu => JSON.parse(wasm.touge_menu_json(c.map, c.direction, c.daylight, c.surface, c.opponent)),
+  /** Touge battle scenario JSON (for `careerStartRun`); remembers `wager` for the next session. */
+  tougeScenarioJson: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): string =>
+    wasm.touge_scenario_json(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot),
+  /** Start a touge battle as a plain session. Returns entity ids, player first. */
+  tougeStart: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): number[] =>
+    Array.from(wasm.touge_start(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot)),
+  /** Battle panel (`wp_wasm::touge::TougeReport`), null outside a touge battle. */
+  tougeResult: (): TougeReport | null => JSON.parse(wasm.touge_result_json()),
+  /** Testbed only: set the plain session's rep (throws during a career or without an account). */
+  tougeDebugSetRep: (rep: number): void => wasm.touge_debug_set_rep(rep),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park street racer `entity` idle at Loop 9 rest stop `name` (logged move). */
@@ -709,6 +723,7 @@ export interface StreetPreview {
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
+import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";

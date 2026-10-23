@@ -650,6 +650,15 @@ impl DamageModel {
         self.total_loss
     }
 
+    /// Declare the vehicle a total loss by a game rule rather than by the lattice (e.g. a
+    /// touge car through the outboard wall, `wp_race::touge`). Health and the lattice are
+    /// unchanged. Returns `true` when it was not a total loss already.
+    pub fn declare_total_loss(&mut self) -> bool {
+        let was = self.total_loss;
+        self.total_loss = true;
+        !was
+    }
+
     /// The lattice definition (rest pose).
     pub fn lattice(&self) -> &LatticeDef {
         &self.def

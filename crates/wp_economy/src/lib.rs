@@ -48,6 +48,7 @@ pub mod repair;
 pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
+pub mod touge;
 pub mod tune;
 pub mod visuals;
 
@@ -77,6 +78,7 @@ pub use session::{
     Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
     SessionConfig,
 };
+pub use touge::WonCar;
 pub use tune::CarTune;
 pub use visuals::{BuildVisuals, PartKind, PartVisual, VisualPart, WheelVisual};
 pub use wp_contracts::{AccountId, WantedLevel};
