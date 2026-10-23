@@ -66,15 +66,15 @@ await page.click("#sc-touge");
 await page.waitForSelector('[data-testid="touge-picker"]', { timeout: 10000 });
 const passes = await page.$$eval("[data-touge]", (els) => els.map((e) => e.getAttribute("data-touge")));
 check(passes.length === 4, `touge picker lists ${passes.length} passes (${passes.join(", ")})`);
-const menu = (choice) => page.evaluate((c) => window.__wp.sim.tougeMenu(c), choice);
+const menu = (choice) => page.evaluate((c) => window.__wp.sim.tougeMenu(c, false), choice);
 const boss = { map: passes[0], direction: "down", daylight: "night", surface: "dry", opponent: "boss" };
-await page.click('[data-testid="touge-set-rep"] button:has-text("0")');
+await page.click('[data-testid="touge-set-rep"] button >> text="0"');
 let m = await menu(boss);
 check(!m.race.unlocked && !m.side_bet.unlocked && !m.pink_slip.unlocked, `rep 0: boss, side bet and pink slip locked (${m.race.locked_reason})`);
-check(await page.$eval('[data-testid="touge-picker"] button.wp-btn-primary:last-of-type, [data-testid="touge-picker"] button:has-text("Battle")', (b) => b.disabled), "Battle button disabled while locked");
+check(await page.$eval('[data-testid="touge-picker"] button:has-text("Battle")', (b) => b.disabled), "Battle button disabled while locked");
 
 // 2. Testbed rep 10000 opens everything.
-await page.click('[data-testid="touge-set-rep"] button:has-text("10000")');
+await page.click('[data-testid="touge-set-rep"] button >> text="10000"');
 m = await menu(boss);
 check(m.race.unlocked && m.side_bet.unlocked && m.pink_slip.unlocked, `rep ${m.rep}: boss, side bet and pink slip open (${m.tier})`);
 check(m.max_stake > 0 && m.max_stake <= m.cash, `side bet capped by cash (max ${m.max_stake}, cash ${m.cash})`);

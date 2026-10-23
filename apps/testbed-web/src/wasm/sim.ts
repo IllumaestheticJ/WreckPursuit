@@ -530,8 +530,10 @@ export const sim = {
   garageLeave: (): void => wasm.garage_leave(),
   /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */
   tougeList: (): TougeCard[] => JSON.parse(wasm.touge_list_json()),
-  /** Rep-gated wager menu for one battle (career account if loaded, else the session's). Throws on unknown keys. */
-  tougeMenu: (c: TougeChoice): WagerMenu => JSON.parse(wasm.touge_menu_json(c.map, c.direction, c.daylight, c.surface, c.opponent)),
+  /** Rep-gated wager menu for one battle, on the account the battle will use (`career`: the
+   * loaded career's, else the session's). Throws on unknown keys. */
+  tougeMenu: (c: TougeChoice, career: boolean): WagerMenu =>
+    JSON.parse(wasm.touge_menu_json(c.map, c.direction, c.daylight, c.surface, c.opponent, career)),
   /** Touge battle scenario JSON (for `careerStartRun`); remembers `wager` for the next session. */
   tougeScenarioJson: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): string =>
     wasm.touge_scenario_json(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot),

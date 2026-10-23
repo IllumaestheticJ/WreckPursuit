@@ -455,9 +455,11 @@ async function main(): Promise<void> {
   overlay.appendChild(tougeEl);
   const tougeView = new TougeView(tougeEl, {
     list: () => sim.tougeList(),
-    menu: (c) => sim.tougeMenu(c),
+    // The battle runs as a career run when the career box is ticked and a career exists.
+    menu: (c) => sim.tougeMenu(c, tougeUsesCareer()),
     start: (c, wager) => startTouge(c, wager),
     setRep: (rep) => {
+      if (tougeUsesCareer()) return "career battles use the career's rep (untick career to test)";
       try {
         sim.tougeDebugSetRep(rep);
         return null;
@@ -466,6 +468,10 @@ async function main(): Promise<void> {
       }
     },
   });
+  /** A touge battle started now would be a career run (see `startTouge`). */
+  function tougeUsesCareer(): boolean {
+    return ($("career") as HTMLInputElement).checked && sim.careerExists();
+  }
   /** Last touge battle started ("Race again" replays it with the same wager). */
   let lastTouge: { choice: TougeChoice; wager: Wager } | null = null;
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
@@ -652,7 +658,7 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    if (($("career") as HTMLInputElement).checked && sim.careerExists()) {
+    if (tougeUsesCareer()) {
       try {
         // The touge locks its own weather (dry / rain), so no withWeather here.
         sim.careerStartRun(sim.tougeScenarioJson(choice, car, mode, wager, autopilot));

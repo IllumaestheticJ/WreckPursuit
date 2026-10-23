@@ -1226,9 +1226,10 @@ pub fn touge_list_json() -> String {
 
 /// The wager menu for one battle as JSON (`wp_race::touge::WagerMenu`): rep and tier, whether
 /// racing this opponent, side bets and pink slips are open (and the rep tier each needs),
-/// the largest stake, payouts and rep. Read from the career's account when a career is
-/// loaded, else from the session's account (fresh accounts start at 0 rep: everything
-/// locked). Keys: `map` (pass id), `up|down`, `day|night`, `dry|rain`, `challenger|boss`.
+/// the largest stake, payouts and rep. Read from the account the battle will use: the career's
+/// when `career` (the battle starts as a career run) and a career is loaded, else the
+/// session's (fresh accounts start at 0 rep: everything locked). Keys: `map` (pass id),
+/// `up|down`, `day|night`, `dry|rain`, `challenger|boss`.
 #[wasm_bindgen]
 pub fn touge_menu_json(
     map: &str,
@@ -1236,9 +1237,15 @@ pub fn touge_menu_json(
     daylight: &str,
     surface: &str,
     opponent: &str,
+    career: bool,
 ) -> Result<String, JsValue> {
     let setup = touge_setup(map, direction, daylight, surface, opponent).map_err(err)?;
-    let acct = match career::career_account() {
+    let career_acct = if career {
+        career::career_account()
+    } else {
+        None
+    };
+    let acct = match career_acct {
         Some(a) => a,
         None => with_session_opt(|s| {
             Ok::<_, JsValue>(s.and_then(|s| s.run().map(|r| r.account().clone())))

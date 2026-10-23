@@ -13,7 +13,8 @@
 //! - captures the NPC's damage the tick its race ends (finish, DNF or breach): that is the car
 //!   a won pink slip brings home, lattice included;
 //! - takes the wager chosen in the menu ([`set_next_wager`]) on the player's account at the
-//!   first tick and settles it once the battle is decided and the NPC's race is over.
+//!   first tick and settles it once the battle is decided (a won pink slip waits for the
+//!   NPC's race to end, to bring its car home as it finished).
 //!
 //! Touge battles charge no buy-in and pay no picker purse: the stakes are the wager, the boss
 //! purse and rep (`data/events/touge.toml`).
@@ -29,8 +30,8 @@ use wp_contracts::{
 use wp_economy::{CarUid, Economy, PlayerAccount};
 use wp_race::live::LiveRace;
 use wp_race::touge::{
-    self, BattleOutcome, OpponentCar, Surface, TougeBattle, TougeSettlement, TougeSetup,
-    TougeTable, Wager, WagerMenu, WagerTicket,
+    self, BattleOutcome, BattleResult, OpponentCar, Surface, TougeBattle, TougeSettlement,
+    TougeSetup, TougeTable, Wager, WagerMenu, WagerTicket,
 };
 use wp_sim::Sim;
 
@@ -260,7 +261,7 @@ impl TougeRun {
     }
 
     /// Economy, once per tick after judging: take the wager at the first chance, settle once
-    /// the battle is decided and the NPC's race is over.
+    /// the battle is decided (a won pink slip also waits for the NPC's race to end).
     pub fn tick_economy(&mut self, run: Option<&mut PlayerRun>) {
         let Some(run) = run else {
             return;
@@ -278,14 +279,28 @@ impl TougeRun {
         if self.settlement.is_some() || self.settle_error.is_some() {
             return;
         }
-        let (Some(outcome), Some(finish), Some(ticket)) =
-            (self.battle.outcome(), &self.npc_finish, &self.ticket)
-        else {
+        let (Some(outcome), Some(ticket)) = (self.battle.outcome(), &self.ticket) else {
             return;
         };
-        match run.touge_settle(&self.table, ticket, outcome, &finish.car) {
+        // Only a won pink slip needs the NPC car as it finished (its race may run on for
+        // minutes after the player is out); everything else settles at once.
+        let wins_car = ticket.wager == Wager::PinkSlip && outcome.result == BattleResult::Won;
+        let npc_car = match (&self.npc_finish, wins_car) {
+            (Some(f), _) => f.car.clone(),
+            (None, false) => OpponentCar {
+                class: self.npc_class,
+                base_price: self.npc_base_price,
+                damage: wp_economy::DamageSnapshot::pristine(),
+            },
+            (None, true) => return,
+        };
+        match run.touge_settle(&self.table, ticket, outcome, &npc_car) {
             Ok((out, lines)) => {
-                if let (Some(uid), Some(l)) = (out.car_won, &finish.lattice_json) {
+                let lattice = self
+                    .npc_finish
+                    .as_ref()
+                    .and_then(|f| f.lattice_json.as_ref());
+                if let (Some(uid), Some(l)) = (out.car_won, lattice) {
                     self.won_lattice = Some((uid, l.clone()));
                 }
                 self.settlement = Some(out);
