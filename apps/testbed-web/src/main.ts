@@ -50,6 +50,7 @@ import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
+import { LotVisitView } from "../../ui-kit/src/garage/LotVisit";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
@@ -300,6 +301,10 @@ async function main(): Promise<void> {
     release: (uid) => act(() => sim.careerRelease(uid)),
     insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
     nextNight: () => act(() => sim.careerNextNight()),
+    lot: (id) => sim.careerLot(id),
+    visitLot: (id) => visitLot(id),
+    buyListing: (id, slot) => act(() => sim.careerBuyListing(id, slot)),
+    replaceTires: (uid, wheels) => act(() => sim.careerReplaceTires(uid, wheels)),
     newCareer: (mode) => act(() => sim.careerNew(mode)),
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
@@ -310,6 +315,45 @@ async function main(): Promise<void> {
     },
   };
   const garage = new CareerGarageView(garageEl, careerApi);
+  // Car lots (dealerships, used lots, junkyards): "Visit" loads the lot itself, today's stock
+  // parked in rows; the overlay browses (camera on the picked car) and buys. Driving input is
+  // off while on a lot: you walk the rows, your own car waits at the gate.
+  const lotEl = document.createElement("div");
+  lotEl.id = "ui-lot";
+  lotEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(lotEl);
+  const lotView = new LotVisitView(lotEl);
+  const visitLot = (lotId: string) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    try {
+      sim.careerVisitLot(lotId);
+    } catch (e) {
+      openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+      return;
+    }
+    garage.hide();
+    app.paused = false;
+    persistCareer();
+    rebuildViews();
+    const visit = sim.lotVisit();
+    if (!visit) return;
+    lotView.show({
+      stock: () => sim.careerLot(lotId),
+      view: () => sim.careerView(),
+      focus: (slot) => {
+        const e = visit.cars.find((c) => c.slot === slot)?.entity;
+        if (e === undefined) return;
+        app.focus = e;
+        // In front of the parked car (it faces the gate), a little above eye height.
+        rig.setMode("orbit", app.views.get(e)?.root, [-3.8, 6.2, 2.2]);
+      },
+      buy: (slot) => act(() => sim.careerBuyListing(lotId, slot)),
+      leave: () => openGarage(),
+    });
+  };
   // Instant crash replay (lead, row 70): offer after a big crash, replay, resume live play.
   const crash = new CrashReplayDirector(
     document.body,
@@ -318,7 +362,7 @@ async function main(): Promise<void> {
     {
       // Not on benches, in the garage, with the full map open or while paused. A wreck's
       // end-of-run panel waits behind the replay (the overlay is hidden while it plays).
-      allowed: () => !app.bench && !app.paused && !garage.open && !map.isOpen,
+      allowed: () => !app.bench && !app.paused && !garage.open && !lotView.open && !map.isOpen,
       sessionSwapped: (entering) => {
         swapSessionViews();
         if (!entering) rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -338,6 +382,7 @@ async function main(): Promise<void> {
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
   const openGarage = (message: string | null = null) => {
+    lotView.hide();
     crash.reset();
     if (sim.careerRunActive()) sim.careerEndRun();
     persistCareer();
@@ -434,6 +479,8 @@ async function main(): Promise<void> {
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
     resetRace(sc, ids);
+    // Any other session leaves the lot.
+    if (lotView.open && !sim.lotVisit()) lotView.hide();
   };
 
   /** Race sessions (scenario `race_<id>`): driver names, the course, the HUD. */
@@ -1275,7 +1322,8 @@ async function main(): Promise<void> {
       if (!app.scenario && !app.bench) applyAssistPreset(source);
     }
     // The full city map pauses driving input (the sim keeps running): coast with light brakes.
-    if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
+    // On a car lot nobody drives (every car sits on its handbrake).
+    if (!replay && !app.bench && !lotView.open) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     prof.lap("input");
     crash.beforeStep(app.paused);

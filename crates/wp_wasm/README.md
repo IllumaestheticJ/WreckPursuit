@@ -16,6 +16,7 @@ canonical `replay.bin` files that `simcli replay` verifies.
 | `pack.rs` | packed typed-array layouts, beam strain, region energy |
 | `run.rs` | the player's economy (lead): drained events → G's `EconomySession`, end-of-run `RunReport`, "Repair & continue"; tests in `run_tests.rs` |
 | `career.rs` | the browser career (machine G): persistent account, garage actions, career runs with the career car's mods and saved lattice damage, `career_*` exports; tests in `career_tests.rs` (see `docs/integration/economy.md`) |
+| `lots.rs` | car lots in the career: lot stock / buy / tyres exports, and the **lot visit** session (`career_visit_lot`: today's stock parked in rows with its wear and tyres, the player's car at the gate, fences and fixtures per lot kind); tests in `lots_tests.rs` |
 | `police.rs` / `garage.rs` / `audio.rs` | police read-outs + siren rule, live repair bill, audio director glue |
 | `data.rs` + `build.rs` | every file in `data/{cars,lattices,tires,materials,modes}` embedded at build time, also as a simcli `MemData` bundle |
 

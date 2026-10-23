@@ -39,6 +39,7 @@ pub mod crash_replay;
 pub mod data;
 pub mod garage;
 pub mod lod;
+pub mod lots;
 pub mod map;
 pub mod pack;
 pub mod police;
@@ -58,6 +59,8 @@ pub mod weather;
 mod career_tests;
 #[cfg(test)]
 mod crash_replay_tests;
+#[cfg(test)]
+mod lots_tests;
 #[cfg(test)]
 mod race_spots_tests;
 #[cfg(test)]

@@ -724,8 +724,22 @@ await shot("city_chase_greybox_toggle.png");
   const fresh = await page.evaluate(() => window.__wp.careerApi.newCareer("Arcade"));
   await page.click("#sc-garage");
   const opened = await page.waitForSelector(G, { timeout: 10000 }).then(() => true).catch(() => false);
-  await page.click(`${G} button[role="tab"]:has-text("Dealer")`);
-  await page.click(`${G} tr[data-car="junkyard_beater"] td:last-child button`);
+  await page.click(`${G} button[role="tab"]:has-text("Car lots")`);
+  // Car lots: visit a junkyard (the lot itself loads, its stock parked in rows), then leave.
+  await page.click(`${G} tr[data-lot="dockside_salvage"] button:has-text("Visit")`);
+  const lot = await page
+    .waitForSelector('[data-testid="lot-visit"]', { timeout: 20000 })
+    .then(() => page.evaluate(() => ({ visit: window.__wp.sim.lotVisit(), stock: window.__wp.sim.careerLot("dockside_salvage") })))
+    .catch(() => null);
+  await shot("career_lot_visit.png");
+  check(
+    !!lot && !!lot.visit && lot.visit.lot === "dockside_salvage" && lot.visit.cars.length === lot.stock.cars.filter((c) => !c.sold).length,
+    `car lots: junkyard visit loads ${lot?.visit?.cars.length ?? 0} parked cars`,
+  );
+  await page.click('[data-testid="lot-visit"] button:has-text("Back to garage")');
+  await page.waitForSelector(G, { timeout: 10000 });
+  await page.click(`${G} button[role="tab"]:has-text("Car lots")`);
+  await page.click(`${G} button:has-text("Street beater")`);
   const bought = await page.evaluate(() => window.__wp.careerApi.view());
   await shot("career_garage_bought.png");
   await page.click(`${G} button:has-text("City chase")`);
@@ -734,7 +748,7 @@ await shot("city_chase_greybox_toggle.png");
     return { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, open: wp.garage.open };
   });
   check(
-    opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - bought.dealer.find((d) => d.def_id === "junkyard_beater").price_worn &&
+    opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - fresh.floor_car[1] &&
       run.active && run.car === "junkyard_beater" && !run.open,
     `career: garage opens, beater bought ($${fresh.cash} → $${bought.cash}), city chase runs the career car (${run.car})`,
   );

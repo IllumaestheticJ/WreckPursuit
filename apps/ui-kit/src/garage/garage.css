@@ -70,3 +70,27 @@
 .wp-cg .wp-table td {
   vertical-align: top;
 }
+/* Lot visit: a side column over the 3D lot (the rest of the screen stays the scene). */
+.wp-cg-lot {
+  position: absolute;
+  top: 1em;
+  left: 1em;
+  bottom: 1em;
+  width: min(26em, calc(100% - 2em));
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+.wp-cg-lot-list {
+  display: grid;
+  gap: 0.4em;
+  margin-top: 0.6em;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.wp-cg-card:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

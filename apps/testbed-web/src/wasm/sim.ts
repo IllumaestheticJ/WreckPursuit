@@ -437,9 +437,17 @@ export const sim = {
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
   careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
+  // ----- car lots (crates/wp_wasm/src/lots.rs) ----------------------------------------------
+  careerLot: (lotId: string): LotStockView => JSON.parse(wasm.career_lot_json(lotId)),
+  careerBuyListing: (lotId: string, slot: number): CareerView => JSON.parse(wasm.career_buy_listing(lotId, slot)),
+  careerReplaceTires: (uid: number, wheels: boolean[]): CareerView => JSON.parse(wasm.career_replace_tires(uid, JSON.stringify(wheels))),
+  /** Load the lot itself (ends a career run first). Returns entity ids like `init`. */
+  careerVisitLot: (lotId: string): number[] => Array.from(wasm.career_visit_lot(lotId)),
+  /** The lot being visited, or null when the session is not a lot visit. */
+  lotVisit: (): LotVisit | null => JSON.parse(wasm.lot_visit_json()),
 };
 
-import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+import type { CareerView, LotStockView, LotVisit, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
