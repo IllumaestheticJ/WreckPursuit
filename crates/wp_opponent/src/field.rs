@@ -656,6 +656,11 @@ const FINISH_CLEAR_MPS: f32 = 5.0;
 /// line, give or take its sampling), m.
 const NO_RUN_OFF_M: f32 = 5.0;
 
+/// Room kept between my body and the edge of the lanes I may use, m. 0.5 since candidate G
+/// (was 0.25): its softer, slower-answering car runs a little wider of its line, and on the
+/// narrow Hollins lanes (±1.45 m) that was the kerb (walls 2 → 124 at s50, 16 seeds).
+const EDGE_MARGIN_M: f32 = 0.5;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
@@ -1955,8 +1960,8 @@ fn decide_racer(
         };
         let line_n = |s: f32| corridor.interp(&line.offset, s);
         let to_limits = |(l, rr): (f32, f32)| {
-            let lo = -l + hw + 0.25;
-            let hi = rr - hw - 0.25;
+            let lo = -l + hw + EDGE_MARGIN_M;
+            let hi = rr - hw - EDGE_MARGIN_M;
             if lo <= hi {
                 (lo, hi)
             } else {
@@ -3234,7 +3239,9 @@ fn decide_racer(
         // Steering looks from where the car will be after its response lag (position and
         // heading 0.2 s on), so lane changes at highway speed don't overshoot and weave; the
         // lookahead stretches above 25 m/s for the same reason.
-        const STEER_LAG_S: f32 = 0.2;
+        // 0.25 s since candidate G (2026-10-23: yaw inertia × 1.35, the car answers the wheel
+        // later; with 0.2 s it ran 0.5 m wide of its line in the Hollins hairpins, into the kerb).
+        const STEER_LAG_S: f32 = 0.25;
         let mut ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0) + v * STEER_LAG_S;
         // Held up and slowing (a car or a light ahead): aim no further than where I stop.
         // A target around the next corner turns the car in early, across the inside lane —
