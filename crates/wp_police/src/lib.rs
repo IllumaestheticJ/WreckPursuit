@@ -318,7 +318,7 @@ pub struct PoliceStats {
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
     /// Built-in driver: near misses, traffic collisions and run-wide crashes by units while
-    /// pursuing or intercepting (what the risk budget and pursuit caps govern).
+    /// pursuing or intercepting (what the risk budget governs).
     pub pursuit_harm: u32,
     /// Built-in driver: seconds pursuing / intercepting units spent cornering above
     /// `pursuit.risk.lateral_g`, summed over units.
