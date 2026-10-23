@@ -103,6 +103,11 @@ pub enum StartError {
 pub const STUCK_LIMIT_S: f32 = 180.0;
 /// Progress along the course that counts as "not stuck", m.
 pub const STUCK_PROGRESS_M: f32 = 5.0;
+/// An AI racer outside the corridor this long is stranded and put back on the course
+/// ([`RaceJudge::set_stranded_reset`]), s. It keeps trying to rejoin until then (Loop 9, s95
+/// seed 13: spun off the embankment and 29 m down the bank, 30 rejoins up a slope it could
+/// not climb).
+pub const STRANDED_GRACE_S: f32 = 20.0;
 
 #[derive(Debug, Clone)]
 struct Track {
@@ -164,6 +169,9 @@ pub struct RaceJudge {
     signals: Vec<RaceSignal>,
     /// Off-course racers are put back on the course instead of disqualified.
     reset_off_course: bool,
+    /// Racers put back on the course after [`STRANDED_GRACE_S`] outside the corridor (AI
+    /// entrants), even with `reset_off_course` off.
+    stranded_reset: Vec<EntityId>,
     resets: Vec<CourseReset>,
 }
 
@@ -209,6 +217,7 @@ impl RaceJudge {
             leader: 0,
             signals: Vec::new(),
             reset_off_course: false,
+            stranded_reset: Vec::new(),
             resets: Vec::new(),
         }
     }
@@ -218,6 +227,14 @@ impl RaceJudge {
     /// (leaving the route is never a DQ).
     pub fn set_reset_off_course(&mut self, on: bool) {
         self.reset_off_course = on;
+    }
+
+    /// Racers (the AI entrants) put back on the course once they have been outside the
+    /// corridor for [`STRANDED_GRACE_S`] (stranded: off a bank they cannot climb, say), with
+    /// the same [`CourseReset`] as [`RaceJudge::set_reset_off_course`]. Independent of that
+    /// option, which keeps its own (shorter) grace for everyone when on.
+    pub fn set_stranded_reset(&mut self, racers: &[EntityId]) {
+        self.stranded_reset = racers.to_vec();
     }
 
     /// Take the resets queued since the last call (see [`RaceJudge::set_reset_off_course`]).
@@ -634,11 +651,20 @@ impl RaceJudge {
         // Off-course resets (round 12): back onto the course after the grace time. Without
         // resets the clock does not run: leaving the route is never a DQ (main's owner call);
         // the gates still have to be driven in order.
-        if self.reset_off_course && self.rules.kind.uses_corridor() {
+        // AI entrants on `stranded_reset` get the same rule with a longer grace even when
+        // resets are off (picker races: the player may take any line, an AI racer 20 s off
+        // the corridor is stranded).
+        let stranded = self.stranded_reset.contains(&t.entry.racer);
+        if (self.reset_off_course || stranded) && self.rules.kind.uses_corridor() {
             let limit = self.course.corridor_half_width_m + self.rules.common.corridor_margin_m;
+            let grace = if self.reset_off_course {
+                self.rules.common.corridor_grace_s
+            } else {
+                STRANDED_GRACE_S
+            };
             if proj.off_m > limit {
                 t.out_ticks += tick - prev_tick;
-                if t.out_ticks > ticks_for(self.rules.common.corridor_grace_s) {
+                if t.out_ticks > ticks_for(grace) {
                     t.out_ticks = 0;
                     let along = t.on_course_m.unwrap_or(proj.along_m);
                     let (pos, dir) = self.course.point_at(along);

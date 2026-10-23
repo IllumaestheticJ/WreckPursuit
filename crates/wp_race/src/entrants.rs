@@ -214,6 +214,12 @@ impl AiEntrants {
         }
     }
 
+    /// The server moved racer `racer` on purpose (a reset back onto the course): its driver
+    /// finds itself on the corridor again and drives on from rest. Ignored for other cars.
+    pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3]) {
+        self.field.relocate(racer, [pos[0], pos[1]]);
+    }
+
     /// AI racer entities, in entrant order.
     pub fn racers(&self) -> &[EntityId] {
         &self.racers
