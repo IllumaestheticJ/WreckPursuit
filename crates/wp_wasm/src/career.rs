@@ -1541,6 +1541,12 @@ impl Career {
         let heat = player
             .and_then(|p| s.sim().police().racer(p))
             .map_or(0.0, |r| r.heat);
+        // B05: ending the run (garage, quit, new city) while the police are on the player is a
+        // bust, as closing the game is; never a free escape.
+        let pursuit = player
+            .and_then(|p| s.sim().police().racer(p))
+            .filter(|r| r.pursued())
+            .map(|r| (r.level, r.heat));
         let driven_ticks = s.tick();
         let wrecked = player
             .and_then(|p| s.vehicle(p))
@@ -1601,8 +1607,30 @@ impl Career {
             }
             None => self.reseat_active(start.car),
         }
-        self.econ
-            .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
+        let abandoned = match pursuit {
+            Some((level, heat))
+                if end == RunEnd::Free && self.profile.account.car(start.car).is_some() =>
+            {
+                Some(wp_economy::AbandonedRun {
+                    car: start.car,
+                    level,
+                    heat,
+                    driven_ticks,
+                })
+            }
+            _ => None,
+        };
+        if let Some(run) = abandoned {
+            self.profile.run_in_pursuit = Some(run);
+            let mut rng = wp_math::Rng::new(
+                CAREER_SEED_SALT ^ ABANDONED_SEED_SALT ^ ((self.profile.account.day as u64) << 32),
+            );
+            let _ = self.econ.settle_abandoned_run(&mut self.profile, &mut rng);
+            end = RunEnd::Captured;
+        } else {
+            self.econ
+                .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
+        }
         let (progress, _) = self.update_progression();
         let ledger = self
             .profile

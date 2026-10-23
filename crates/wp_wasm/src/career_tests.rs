@@ -541,6 +541,41 @@ fn closing_the_game_mid_pursuit_is_a_bust_on_the_next_load() {
     assert_eq!(again.profile().account.heat_history.captures, captures + 1);
 }
 
+/// B05 from the menu (bughunt F1): ending the run (garage, quit, new city / weather) during a
+/// pursuit is a bust like closing the game, never a free escape.
+#[test]
+fn ending_the_run_mid_pursuit_is_a_bust() {
+    let (mut c, uid) = career_with("kestrel_ts", 25_000, DamageMode::Arcade);
+    let mut s = career_chase_parked(&mut c, 30.0);
+    let id = player(&s);
+    let mut pursued = false;
+    for _ in 0..240 * 10 {
+        s.run_ticks(1);
+        if s.sim().police().racer(id).is_some_and(|r| r.pursued()) {
+            pursued = true;
+            break;
+        }
+    }
+    assert!(pursued, "the parked patrol car starts a pursuit");
+    let (cash, day, captures) = {
+        let a = &c.profile().account;
+        (a.cash, a.day, a.heat_history.captures)
+    };
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Captured, "{close:?}");
+    assert_eq!(close.carried_heat, 0.0);
+    assert!(close.ledger.iter().any(|l| l.reason == "Fine"), "{close:?}");
+    let p = c.profile();
+    assert!(p.run_in_pursuit.is_none(), "settled, no marker left");
+    assert!(p.account.cash < cash, "fine charged");
+    assert_eq!(p.account.day, day + 1, "the run closes as one night");
+    assert_eq!(p.account.heat_history.captures, captures + 1);
+    assert!(matches!(
+        p.account.car(uid).unwrap().location,
+        CarLocation::Impound { .. }
+    ));
+}
+
 /// B05 fairness: closing the game when the police are not on the player costs nothing; merely
 /// wanted (no pursuit) it carries the heat a free end would.
 #[test]
