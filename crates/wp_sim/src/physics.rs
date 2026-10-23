@@ -256,11 +256,13 @@ impl PhysicsWorld {
     }
 
     /// Height of the drivable ground (road and sidewalk meshes, terrain: the triangle-mesh and
-    /// heightfield colliders, never buildings, rails, decor or bodies) hit by a ray straight
+    /// heightfield colliders except barrier and rail meshes, never buildings, decor or bodies)
+    /// hit by a ray straight
     /// down from `(xy, from_z)`, at most `max_m` below it. Seats parked cars on what is drawn.
     pub fn drivable_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
         let ground = |_: ColliderHandle, c: &Collider| {
             c.parent().is_none()
+                && c.user_data != BARRIER_USER_DATA
                 && (c.shape().as_trimesh().is_some() || c.shape().as_heightfield().is_some())
         };
         let qp = self.query_pipeline(QueryFilter::default().predicate(&ground));
@@ -567,6 +569,9 @@ pub const BARRIER_HEIGHT_M: f32 = 0.81;
 const BARRIER_FOOT_M: f32 = 0.3;
 /// Friction of barriers and rails: smooth concrete and steel a car slides along (row 164).
 const BARRIER_FRICTION: f32 = 0.3;
+/// `Collider::user_data` of barrier and rail meshes: triangle meshes that are not drivable
+/// ground ([`PhysicsWorld::drivable_ground_z`] skips them).
+pub const BARRIER_USER_DATA: u128 = 0xBA22_1E2;
 
 /// Length of the 2D vector `(x, y)` (plain `sqrt`, which is exactly rounded, not `hypot`).
 fn len2(x: f32, y: f32) -> f32 {
@@ -692,7 +697,12 @@ fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) ->
         idx,
         TriMeshFlags::FIX_INTERNAL_EDGES,
     ) {
-        Ok(b) => Some(b.friction(BARRIER_FRICTION).restitution(0.0).build()),
+        Ok(b) => Some(
+            b.friction(BARRIER_FRICTION)
+                .restitution(0.0)
+                .user_data(BARRIER_USER_DATA)
+                .build(),
+        ),
         Err(e) => {
             eprintln!("barrier trimesh failed: {e:?}");
             None
