@@ -41,8 +41,8 @@ pub use corridor::{
 pub use draft::{drag_scales, DraftBody, DraftParams};
 pub use field::{
     Debug, Field, GridLayout, OpponentEvent, RaceConfig, RacerSpec, RacerStatus, SpeedLimit,
-    Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, RED_LIGHT_RISK, YIELD_AFTER_S,
-    YIELD_RADIUS_M,
+    Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, BLIND_WATCH_M, NEAR_SENSE_M,
+    RED_LIGHT_RISK, SIGHT_MEMORY_S, YIELD_AFTER_S, YIELD_RADIUS_M,
 };
 pub use line::{LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};

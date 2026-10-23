@@ -52,6 +52,11 @@ All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md
   2026-10-23: plans as far as it sees — `plan_ahead_m` 150–400 m, horizon up to
   `plan_horizon_s` 6–15 s; plans are stay-on-line / move over at the latest comfortable
   moment / hold / return; `Debug::planned` (new field) counts the cars planned round.
+- **Line of sight** (2026-10-23): racers only perceive road users they can see
+  (`CityMap::line_of_sight` from `World::map()`; buildings and terrain), with 10 m near sense
+  and 1.5 s memory; blind junctions (cross street hidden) are approached able to stop. New
+  `SpeedLimit::BlindJunction`, pub consts `NEAR_SENSE_M`, `SIGHT_MEMORY_S`, `BLIND_WATCH_M`.
+  No other crate touched.
 
 ## Needs
 1. **Lead (`wp_sim`)**: drive AI racers in the loop. Per tick before `step_fixed`: build

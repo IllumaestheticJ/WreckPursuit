@@ -52,6 +52,21 @@ gap to the player — pace is car capability × how much of it the driver dares 
   - Perception tracks each civilian's corridor position from where it was last seen on the
     corridor (narrow search). First sight, off-corridor or lost → wide search, so a civilian
     entering the road is never missed.
+- **Line of sight — buildings block what a racer can see.** Each racer perceives a car,
+  civilian, police unit or player only if a line from its eyes (1.1 m) to it (0.8 m up) clears
+  every building and the terrain (`CityMap::line_of_sight`: extruded footprints, grid walk).
+  This applies to everything it plans round, brakes for, overtakes, defends against or watches
+  at junctions.
+  - Within `NEAR_SENSE_M` (10 m) everything is sensed (peripheral vision, sound).
+  - Something that went out of sight is still accounted for `SIGHT_MEMORY_S` (1.5 s).
+  - Known road users are re-checked every 8 decisions (7.5 Hz, staggered); new ones at once.
+  - Only what it would use is checked: within its range ahead and its mirrors behind, and
+    junction civilians within the next junction box's radius + 50 m.
+  - **Blind junctions**: one of the next junction's cross streets can't be seen
+    `BLIND_WATCH_M` (30 m) up from its stop line (buildings on the corner). Without a
+    protecting green or the major road's right of way, the racer arrives able to stop at the
+    line, then creeps in at ≤ 4 m/s until it can see (`SpeedLimit::BlindJunction`). Open roads
+    only (`RaceConfig::signals`).
 - **Follow**: racing line + this braking zone's line noise; time-gap following (gap opened at
   most 3 m/s slower than the car ahead), hard braking limit, deceleration demand when a car
   ahead limits me.
@@ -225,6 +240,11 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
   round a stopped car 230 m ahead while still on its line (move comes later), a timid driver
   doesn't see it yet; three cars abreast → brake; the opposing lane is used only when an
   oncoming car leaves room.
+- Line-of-sight unit test (`buildings_block_what_it_can_see`): on an L-shaped road, a stopped
+  car round the corner is planned round in the open but unknown behind a corner block; a car
+  up the racer's own road is still seen. Full-sim open roads (seeds 1–3): blind-junction caution
+  sets the speed in 2.5–4 % of decisions. Sweep with line of sight: 15.9 km, no civilian contact,
+  no AI collision.
 - `wanted_ai_racer_flees_police_through_the_city`: racers that plan round traffic reach more
   lights and speed more, so the sim's own police can make another racer wanted. That racer may
   flee too, but only with its own `Abandoned` event at its flee level.
@@ -241,7 +261,7 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
 |---|---|---|
 | `Field::tick`, 8 racers, closed roads | 0.014 ms per 60 Hz frame (0.002 ms/racer) | — (police: 0.5 ms) |
 | same, open roads with 25 % traffic | 0.11 ms per frame | — |
-| `--example race -- 1 8 25 0 7` (8 racers, 25 % traffic, open roads) | 0.49 ms per frame (0.06 ms/racer) planning out to 150–400 m; 0.29 ms with no route planning, same run | — (police: 0.5 ms) |
+| `--example race -- 1 8 25 0 7` (8 racers, 25 % traffic, open roads) | 0.52 ms per frame (0.065 ms/racer) with line of sight and planning out to 150–400 m; 0.49 ms without line of sight; 0.29 ms with no route planning, same run | — (police: 0.5 ms) |
 | `CarCapability::measure` | ~0.3 s per car (cache it) | load time |
 | Whole sim, 8 cars + city + AI | 0.09 ms per physics tick | — |
 
@@ -250,8 +270,10 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
   inside the horizon is caught by the re-plan (60 Hz) and, failing that, by the last-resort
   stop. Each plan is one lateral offset for one group of cars (it weaves through a sequence by
   re-planning, not in one plan), and doesn't plan round racers (overtake rules apply to them).
-- "Sight" is distance along the road within `plan_ahead_m`: there is no occlusion model, so
-  buildings, crests and corners don't block it.
+- Line of sight is a single ray to one point of each road user: a car half hidden behind a
+  corner counts as hidden until that point clears. Other vehicles, parked cars and props
+  don't block sight (the world's line of sight ignores them). For the 1.5 s memory the racer
+  uses the hidden car's true current state, not an extrapolation.
 - **Same-car passes need the slipstream hook in `wp_sim`** (`Sim::set_drag_scale`, one line;
   patch in `docs/integration/opponent.md`). Until it lands `RaceConfig::draft` must stay off and
   near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car

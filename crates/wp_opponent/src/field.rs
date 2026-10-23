@@ -253,6 +253,17 @@ struct SignalAhead {
     remaining_s: f32,
 }
 
+/// What one racer knows about one thing it might see (an obstacle or a junction watch point).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Sight {
+    /// Line of sight at the last check.
+    visible: bool,
+    /// Decision it was last in line of sight.
+    last_seen: Option<u64>,
+    /// Decision it was last asked about (entries not asked about are dropped).
+    asked: u64,
+}
+
 /// Who an obstacle is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Who {
@@ -279,6 +290,8 @@ struct Obstacle {
     /// for a siren or with its hazards on): a fixed obstacle anyone may pass, using the
     /// opposing lanes where the corridor allows overtaking there.
     parked: bool,
+    /// World position (road level), m — what line of sight is checked against.
+    pos: [f32; 3],
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -418,6 +431,8 @@ pub enum SpeedLimit {
     Mode,
     /// Stopping for a red light (careful drivers on open roads).
     Signal,
+    /// Approaching a junction whose cross street it cannot see (buildings on the corner).
+    BlindJunction,
 }
 
 /// Standing of one racer.
@@ -446,6 +461,9 @@ pub struct Field {
     hints: BTreeMap<EntityId, usize>,
     /// Corridor sample each civilian was last projected to (cheap tracking).
     civ_hints: BTreeMap<u32, usize>,
+    /// Per racer (spec order): what it can see, by sight key ([`who_id`], or a junction
+    /// watch point).
+    sight: Vec<BTreeMap<u32, Sight>>,
     events: Vec<OpponentEvent>,
     outputs: Vec<(EntityId, VehicleInput)>,
     finishers: u32,
@@ -493,6 +511,27 @@ const JUNCTION_DEADLOCK_S: f32 = 3.0;
 const CREEP_MPS: f32 = 2.5;
 /// Gap a creeping racer always keeps to the parked car it is steering round, m.
 const CREEP_STOP_GAP_M: f32 = 1.0;
+/// Driver eye height above the road, m.
+const EYE_HEIGHT_M: f32 = 1.1;
+/// Point of another road user that has to be visible, above its position, m (the upper body
+/// of a car: a car behind a low wall is still seen).
+const TARGET_HEIGHT_M: f32 = 0.8;
+/// Anything this close is sensed without line of sight (peripheral vision, sound), m.
+pub const NEAR_SENSE_M: f32 = 10.0;
+/// A road user that went out of sight is still accounted for this long, s.
+pub const SIGHT_MEMORY_S: f32 = 1.5;
+/// Line of sight to a known road user is re-checked every this many decisions (staggered by
+/// key; new ones are checked at once).
+const SIGHT_REFRESH_DECISIONS: u64 = 8;
+/// Distance up a cross street that has to be visible for a junction not to count as blind, m.
+pub const BLIND_WATCH_M: f32 = 30.0;
+/// Speed a racer may still creep into a blind junction at (it sees in once at the mouth), m/s.
+const BLIND_CREEP_MPS: f32 = 4.0;
+/// Civilians within the next junction box's radius plus this are what junction awareness
+/// looks at, m (its watch radius is at most 45 m).
+const JUNCTION_CIVS_M: f32 = 50.0;
+/// Sight keys of junction watch points (`+ lane id`); other keys are [`who_id`]s.
+const WATCH_KEY_BASE: u32 = 3_000_000_000;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -592,6 +631,7 @@ impl Field {
                 pass_checks: [0; 8],
             });
         }
+        let n_racers = racers.len();
         Self {
             corridor,
             lines,
@@ -600,6 +640,7 @@ impl Field {
             tick: 0,
             hints: BTreeMap::new(),
             civ_hints: BTreeMap::new(),
+            sight: vec![BTreeMap::new(); n_racers],
             events: Vec::new(),
             outputs: Vec::new(),
             finishers: 0,
@@ -801,13 +842,51 @@ impl Field {
             let snapshot = self.perceive_all(world, vehicles);
             let civs = self.civilians_near(world);
             for k in 0..self.racers.len() {
-                let obstacles = match &self.racers[k].flight {
+                let all = match &self.racers[k].flight {
                     None => snapshot.clone(),
                     Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
                 };
+                // Only what this racer can see (buildings block it), within its range ahead
+                // and its mirrors behind (the rest it would ignore anyway: not worth a sight
+                // check).
+                let p = self.racers[k].params;
+                let range = p.perception_ahead_m.max(p.plan_ahead_m) + 20.0;
+                let (me, my_s) = (self.racers[k].pos, self.racers[k].s);
+                let track = self.racers[k]
+                    .flight
+                    .as_ref()
+                    .map_or(&self.corridor, |f| &f.corridor);
+                let ds: Vec<f32> = all.iter().map(|o| track.delta_s(my_s, o.s)).collect();
+                let mut obstacles = Vec::with_capacity(all.len());
+                for (o, ds) in all.into_iter().zip(ds) {
+                    if o.who == Who::Racer(k)
+                        || ds < -p.mirror_range_m - 10.0
+                        || ds > range
+                        || geom::dist(me, geom::xy(o.pos)) > range
+                    {
+                        continue;
+                    }
+                    if self.sees(k, world, who_id(o.who), o.pos) {
+                        obstacles.push(o);
+                    }
+                }
+                // Junction awareness only looks at civilians round the next junction box.
+                let z = self.racer_ground_z(k);
+                let mut seen_civs = Vec::new();
+                if let Some((c_j, radius)) = self.next_junction_centre(k) {
+                    for c in &civs {
+                        if geom::dist(c.1, c_j) < radius + JUNCTION_CIVS_M
+                            && self.sees(k, world, 1_000_000 + c.0, [c.1[0], c.1[1], z])
+                        {
+                            seen_civs.push(*c);
+                        }
+                    }
+                }
                 let signal = self.signal_ahead(k, world);
                 let priority = self.priority_ahead(k, world);
-                self.decide(k, &obstacles, &civs, signal, priority, dt);
+                let blind = self.blind_junction_ahead(k, world);
+                self.prune_sight(k);
+                self.decide(k, &obstacles, &seen_civs, signal, priority, blind, dt);
             }
             self.outputs = self.racers.iter().map(|r| (r.entity, r.input)).collect();
         } else {
@@ -1238,6 +1317,135 @@ impl Field {
     }
 
     /// Step 2 for the shared corridor: every vehicle and nearby civilian as an obstacle.
+    /// Road height under racer `k` (from the track it drives), m.
+    fn racer_ground_z(&self, k: usize) -> f32 {
+        let r = &self.racers[k];
+        let c = r.flight.as_ref().map_or(&self.corridor, |f| &f.corridor);
+        c.samples[r.hint.min(c.samples.len() - 1)].pos[2]
+    }
+
+    /// Whether racer `k` can see `target` (road-level position), keyed by `key` for its sight
+    /// memory: anything within [`NEAR_SENSE_M`]; otherwise a line of sight from its eyes to
+    /// the target that clears every building and the terrain (`CityMap::line_of_sight`),
+    /// or one within the last [`SIGHT_MEMORY_S`]. Checks are refreshed every
+    /// [`SIGHT_REFRESH_DECISIONS`] decisions (new keys at once).
+    fn sees(&mut self, k: usize, world: &World, key: u32, target: [f32; 3]) -> bool {
+        let r = &self.racers[k];
+        let decision = self.tick / self.config.decision_ticks.max(1) as u64;
+        let memory = (SIGHT_MEMORY_S / (self.config.decision_ticks.max(1) as f32 * PHYSICS_DT))
+            .ceil() as u64;
+        let eye = [r.pos[0], r.pos[1], self.racer_ground_z(k) + EYE_HEIGHT_M];
+        let near = geom::dist(r.pos, geom::xy(target)) < NEAR_SENSE_M;
+        let refresh = (decision + key as u64).is_multiple_of(SIGHT_REFRESH_DECISIONS);
+        let entry = self.sight[k].get(&key).copied();
+        let visible = if near {
+            true
+        } else if entry.is_none() || refresh {
+            let to = [target[0], target[1], target[2] + TARGET_HEIGHT_M];
+            world.map().line_of_sight(eye, to)
+        } else {
+            entry.is_some_and(|e| e.visible)
+        };
+        let last_seen = if visible {
+            Some(decision)
+        } else {
+            entry.and_then(|e| e.last_seen)
+        };
+        self.sight[k].insert(
+            key,
+            Sight {
+                visible,
+                last_seen,
+                asked: decision,
+            },
+        );
+        last_seen.is_some_and(|t| decision - t <= memory)
+    }
+
+    /// Centre and radius of the next junction box on racer `k`'s track within the
+    /// junction-awareness horizon (130 m; the box it is in, if any), as `decide_racer`
+    /// measures them.
+    fn next_junction_centre(&self, k: usize) -> Option<(V2, f32)> {
+        let r = &self.racers[k];
+        let c = r.flight.as_ref().map_or(&self.corridor, |f| &f.corridor);
+        let i0 = c.wrap((r.s / CORRIDOR_STEP_M) as isize) as isize;
+        let steps = (130.0 / CORRIDOR_STEP_M) as isize;
+        let j = (0..steps).find(|&j| c.sample(i0 + j).junction)?;
+        let mut j_end = j;
+        while j_end < j + 60 && c.sample(i0 + j_end + 1).junction {
+            j_end += 1;
+        }
+        let radius = ((j_end - j) as f32 * CORRIDOR_STEP_M * 0.5).max(8.0);
+        Some((geom::xy(c.sample(i0 + (j + j_end) / 2).pos), radius))
+    }
+
+    /// Forget sight entries racer `k` was not asked about this decision.
+    fn prune_sight(&mut self, k: usize) {
+        let decision = self.tick / self.config.decision_ticks.max(1) as u64;
+        self.sight[k].retain(|_, e| e.asked == decision);
+    }
+
+    /// Entry distance of the next junction on racer `k`'s track when it is **blind**: one of
+    /// its cross streets cannot be seen [`BLIND_WATCH_M`] up from the stop line (buildings on
+    /// the corner). Open roads only (`RaceConfig::signals`).
+    fn blind_junction_ahead(&mut self, k: usize, world: &World) -> Option<f32> {
+        if !self.config.signals {
+            return None;
+        }
+        let r = &self.racers[k];
+        let corridor = r.flight.as_ref().map_or(&self.corridor, |f| &f.corridor);
+        let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
+        let steps = (SIGNAL_LOOKAHEAD_M / CORRIDOR_STEP_M) as usize;
+        let (ahead, lane) = corridor.next_junction_lane(i0, steps)?;
+        let net = world.network();
+        let my_lane = net.lanes.get(lane as usize)?;
+        let end_dir = |poly: &[[f32; 3]]| {
+            let n = poly.len();
+            let d = geom::sub(geom::xy(poly[n - 1]), geom::xy(poly[n - 2]));
+            geom::scale(d, 1.0 / geom::len(d).max(1e-3))
+        };
+        let my_dir = end_dir(&my_lane.polyline);
+        let centre = geom::xy(net.nodes.get(my_lane.to_node as usize)?.pos);
+        let ix = world.map().intersection_at(centre)?;
+        // Watch points: BLIND_WATCH_M back from the stop line of every crossing approach.
+        let mut watch: Vec<(u32, [f32; 3])> = Vec::new();
+        for inc in &net.intersections[ix as usize].incoming {
+            let Some(l) = net.lanes.get(inc.lane as usize) else {
+                continue;
+            };
+            if inc.lane == lane || l.polyline.len() < 2 {
+                continue;
+            }
+            // Same way as me (a neighbour lane) or straight at me (seen down my own road).
+            if geom::dot(end_dir(&l.polyline), my_dir).abs() > 0.7 {
+                continue;
+            }
+            let mut left = BLIND_WATCH_M;
+            let mut p = l.polyline[l.polyline.len() - 1];
+            for w in l.polyline.windows(2).rev() {
+                let seg = geom::dist(geom::xy(w[0]), geom::xy(w[1]));
+                if seg >= left {
+                    let f = left / seg.max(1e-3);
+                    p = [
+                        w[1][0] + (w[0][0] - w[1][0]) * f,
+                        w[1][1] + (w[0][1] - w[1][1]) * f,
+                        w[1][2] + (w[0][2] - w[1][2]) * f,
+                    ];
+                    break;
+                }
+                left -= seg;
+                p = w[0];
+            }
+            watch.push((WATCH_KEY_BASE.wrapping_add(inc.lane), p));
+        }
+        let mut blind = false;
+        for (key, p) in watch {
+            // Ask about every watch point (keeps their sight memory alive).
+            blind |= !self.sees(k, world, key, p);
+        }
+        blind.then_some(ahead as f32 * CORRIDOR_STEP_M)
+    }
+
     fn perceive_all(&mut self, world: &World, vehicles: &[VehicleObs]) -> Vec<Obstacle> {
         let mut out = Vec::new();
         let range = self.racers.iter().fold(0.0f32, |m, r| {
@@ -1263,6 +1471,7 @@ impl Field {
                             unstable,
                             passing: r.tactic == Tactic::Overtake,
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
+                            pos: [r.pos[0], r.pos[1], self.racer_ground_z(k)],
                         });
                         continue;
                     }
@@ -1393,6 +1602,7 @@ impl Field {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn decide(
         &mut self,
         k: usize,
@@ -1400,6 +1610,7 @@ impl Field {
         civs: &[(u32, V2, V2)],
         signal: Option<SignalAhead>,
         priority: Option<f32>,
+        blind: Option<f32>,
         dt: f32,
     ) {
         // Take the racer's own track data out while it is mutated.
@@ -1423,6 +1634,7 @@ impl Field {
             civs,
             signal,
             priority,
+            blind,
             draft,
             k,
             corridor,
@@ -1479,6 +1691,7 @@ fn decide_racer(
     civs: &[(u32, V2, V2)],
     signal: Option<SignalAhead>,
     priority: Option<f32>,
+    blind: Option<f32>,
     draft: bool,
     k: usize,
     corridor: &Corridor,
@@ -2093,7 +2306,7 @@ fn decide_racer(
         // inside the box count. At a red, careful drivers stop at the line; the rest go
         // through only when nobody is heading in.
         let mut held_by_stopped = false;
-        if !civs.is_empty() || signal.is_some() {
+        if !civs.is_empty() || signal.is_some() || blind.is_some() {
             let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
             let horizon = (v * v / (2.0 * a_brk) + 30.0).min(130.0);
             let steps = (horizon / CORRIDOR_STEP_M) as isize;
@@ -2135,6 +2348,15 @@ fn decide_racer(
                     SignalState::Green => g.remaining_s < t_arrive && can_stop,
                     SignalState::Off => false,
                 });
+                // Blind junction (buildings hide a cross street) without the right of way:
+                // arrive able to stop at the line, creep in until it can see.
+                let blind_here = !in_junction
+                    && blind.is_some_and(|d| (d - d_entry).abs() <= 2.5 * CORRIDOR_STEP_M);
+                if blind_here && !protected && !has_way {
+                    let free = (d_entry - 3.0).max(0.0);
+                    let cap = (2.0 * a_brk * 0.8 * free).sqrt().max(BLIND_CREEP_MPS);
+                    cap_to(&mut v_target, cap, SpeedLimit::BlindJunction);
+                }
                 // Nobody stops for a red with the police behind them.
                 if red_on_arrival && can_stop && !fleeing && r.profile.risk < RED_LIGHT_RISK {
                     let free = (d_entry - 4.0).max(0.0);
@@ -2421,6 +2643,7 @@ fn vehicle_obstacle(
         unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
         passing: false,
         parked: false,
+        pos: v.state.pos,
     })
 }
 
@@ -2491,6 +2714,7 @@ fn civilians_on(
             // Pulled over for a siren (or broken down) and stopped: it stays put while a
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
+            pos: a.pos,
         });
     }
     if let Some(h) = hints {
@@ -3113,7 +3337,7 @@ mod tests {
             &[],
             &NoPolice,
         );
-        f.decide(0, &[], civs, signal, None, 4.0 * PHYSICS_DT);
+        f.decide(0, &[], civs, signal, None, None, 4.0 * PHYSICS_DT);
         f.debug_of(0)
     }
 
@@ -3354,6 +3578,116 @@ mod tests {
         let f = evasion_field(two_lane(), 0.9, 14.0, &[slow, oncoming]);
         assert_ne!(f.tactic_of(0), Tactic::Evade, "{:?}", f.debug_of(0));
         assert_eq!(f.debug_of(0).limit, SpeedLimit::Obstacle(50));
+    }
+
+    /// A road north 100 m, then a 90° right turn east for 300 m (5 m each side).
+    fn corner() -> Corridor {
+        let mut samples: Vec<CorridorSample> = (0..50)
+            .map(|i| CorridorSample {
+                pos: [0.0, i as f32 * CORRIDOR_STEP_M, 0.0],
+                tangent: [0.0, 1.0],
+                left_m: 5.0,
+                left_pass_m: 5.0,
+                right_m: 5.0,
+                junction: false,
+            })
+            .collect();
+        samples.extend((0..150).map(|i| CorridorSample {
+            pos: [i as f32 * CORRIDOR_STEP_M, 100.0, 0.0],
+            tangent: [1.0, 0.0],
+            left_m: 5.0,
+            left_pass_m: 5.0,
+            right_m: 5.0,
+            junction: false,
+        }));
+        let n = samples.len();
+        Corridor {
+            samples,
+            closed: false,
+            length_m: (n - 1) as f32 * CORRIDOR_STEP_M,
+            opposing: OpposingLanes::Never,
+            junction_lanes: Vec::new(),
+        }
+    }
+
+    /// A world whose only content is `buildings`.
+    fn world_with(buildings: Vec<wp_world::network::Building>) -> World {
+        let net = wp_world::network::RoadNetwork {
+            format_version: wp_world::network::ROAD_FORMAT_VERSION,
+            id: "sight".into(),
+            source: "test".into(),
+            attribution: None,
+            bounds_min: [-100.0, -100.0],
+            bounds_max: [400.0, 300.0],
+            core: [0.0; 2],
+            nodes: Vec::new(),
+            lanes: Vec::new(),
+            intersections: Vec::new(),
+            signals: Vec::new(),
+            zones: Vec::new(),
+            pois: Vec::new(),
+            buildings,
+            surfaces: Vec::new(),
+            terrain: None,
+        };
+        World::new(
+            net,
+            wp_world::WorldConfig {
+                start_time: TimeOfDay::from_hours(12.0),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Racer at (0, 40) heading north toward the corner, a stopped car on its racing line
+    /// `car_s` m along the road; returns the racer's debug after ten decisions in `world`.
+    fn corner_decision(world: &World, car_s: f32) -> Debug {
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile {
+                aggression: 1.0,
+                awareness: 1.0,
+                ..DriverProfile::default()
+            },
+            capability: cap(),
+        };
+        let mut f = Field::new(corner(), &[spec], RaceConfig::default());
+        f.racers[0].laps_done = 1;
+        let c = f.corridor();
+        let car = c.point(car_s, c.interp(&f.line_of(0).offset, car_s));
+        let mut stopped = traffic(50, car[0], car[1], 0.0);
+        if car_s > 100.0 {
+            // Facing +X: yaw -90° about +Z.
+            let h = std::f32::consts::FRAC_1_SQRT_2;
+            stopped.state.rot = [0.0, 0.0, -h, h];
+        }
+        let cars = [obs(1, 40.0, 15.0, HandlingEffects::NEUTRAL), stopped];
+        for _ in 0..40 {
+            f.tick(world, &cars, &[], &NoPolice);
+        }
+        f.debug_of(0)
+    }
+
+    #[test]
+    fn buildings_block_what_it_can_see() {
+        // A block filling the inside of the corner (x 6..200, y -50..94).
+        let block = wp_world::network::Building {
+            footprint: vec![[6.0, -50.0], [200.0, -50.0], [200.0, 94.0], [6.0, 94.0]],
+            height_m: 15.0,
+            base_z_m: 0.0,
+        };
+        let open = world_with(Vec::new());
+        let built = world_with(vec![block]);
+        // Round the corner, 60 m down the cross street: seen (and planned round) in the
+        // open, hidden behind the block.
+        let d = corner_decision(&open, 160.0);
+        assert_eq!(d.planned, 1, "open: {d:?}");
+        let d = corner_decision(&built, 160.0);
+        assert_eq!(d.planned, 0, "behind the building: {d:?}");
+        assert_ne!(d.limit, SpeedLimit::Obstacle(50), "{d:?}");
+        // Straight ahead up my own road: the block is beside the road, not in the way.
+        let d = corner_decision(&built, 90.0);
+        assert_ne!(d.planned, 0, "{d:?}");
     }
 
     #[test]
