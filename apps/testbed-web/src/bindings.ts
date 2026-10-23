@@ -29,7 +29,8 @@ export type ActionId =
   | "controls"
   | "mute"
   | "repairBill"
-  | "replayCrash";
+  | "replayCrash"
+  | "debug";
 
 /** How an action is read: `analog` 0..1 every frame, `held` on/off every frame, `edge` once
  * per press. */
@@ -75,7 +76,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "cameraCycle", label: "next camera", kind: "edge" },
   { id: "reset", label: "reset car", kind: "edge" },
   { id: "headlights", label: "headlights", kind: "edge" },
-  { id: "followNext", label: "follow the next car", kind: "edge" },
+  { id: "followNext", label: "follow the next car (debug tools on)", kind: "edge" },
   { id: "map", label: "city map", kind: "edge" },
   { id: "pause", label: "pause", kind: "edge" },
   { id: "help", label: "help", kind: "edge" },
@@ -83,6 +84,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "mute", label: "audio mute", kind: "edge" },
   { id: "repairBill", label: "repair bill", kind: "edge" },
   { id: "replayCrash", label: "crash replay: play / skip", kind: "edge" },
+  { id: "debug", label: "debug tools (developer drawer + overlays)", kind: "edge" },
 ];
 
 /** Defaults. Look-back keeps V (driving); audio mute moved to F8 so the two no longer share V.
@@ -104,7 +106,8 @@ export function defaultBindings(): Bindings {
       cameraCycle: ["F3"],
       reset: ["KeyR"],
       headlights: ["KeyO"],
-      followNext: ["Backquote"],
+      // Backquote is the debug-tools switch (HUD cleanup, 2026-10-23); follow-next moved here.
+      followNext: ["PageDown"],
       map: ["KeyM", "Tab"],
       pause: ["KeyP"],
       help: ["F1", "Slash"],
@@ -112,6 +115,7 @@ export function defaultBindings(): Bindings {
       mute: ["F8"],
       repairBill: ["KeyF"],
       replayCrash: ["Enter", "NumpadEnter"],
+      debug: ["Backquote"],
     },
     // Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 View, 9 Menu, 10 L3, 11 R3,
     // 12–15 d-pad up/down/left/right.
@@ -138,6 +142,7 @@ export function defaultBindings(): Bindings {
       repairBill: [],
       // D-pad up: R2 / RT is the throttle, and one control never drives two actions.
       replayCrash: [{ button: 12 }],
+      debug: [],
     },
     padDeadzone: 0.12,
     padCurve: 1.0,
@@ -180,6 +185,14 @@ export function loadBindings(): Bindings {
   if (sameKeys(saved.keys?.cameraCycle, ["KeyC"]) && sameKeys(saved.keys?.clutch, [])) {
     b.keys.cameraCycle = ["F3"];
     b.keys.clutch = ["KeyC"];
+  }
+  // 2026-10-23: the debug-tools switch took Backquote (follow-next moved to PageDown). A save made
+  // before that has no `debug` entry: follow-next on the old default moves, and the switch never
+  // takes a key the player gave another action.
+  if (!Array.isArray(saved.keys?.debug)) {
+    if (sameKeys(saved.keys?.followNext, ["Backquote"])) b.keys.followNext = ["PageDown"];
+    const used = new Set(ACTIONS.filter((a) => a.id !== "debug").flatMap((a) => b.keys[a.id]));
+    b.keys.debug = b.keys.debug.filter((k) => !used.has(k));
   }
   if (typeof saved.padDeadzone === "number" && saved.padDeadzone >= 0 && saved.padDeadzone <= 0.5) b.padDeadzone = saved.padDeadzone;
   if (typeof saved.padCurve === "number" && saved.padCurve >= 1 && saved.padCurve <= 3) b.padCurve = saved.padCurve;

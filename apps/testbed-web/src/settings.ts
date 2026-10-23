@@ -54,13 +54,31 @@ let hidden: ReadonlySet<string> = new Set();
 /** The debug drawing layers (player mode and the garage workshop hide these). */
 export const DEBUG_LAYERS = ["lattice", "stress", "tireForces", "suspension", "slipColour", "contacts", "cgVelocity", "intents", "components", "regions", "events", "telemetry", "inputs"];
 
+/** Layers that keep their hotkey with the debug tools off (accessibility, not debugging). */
+export const ALWAYS_LIVE_LAYERS = ["reducedFlashing"];
+
+/** The other non-debug layers: with the debug tools off they show their defaults, whatever a
+ * stray hotkey saved (X used to hide all traffic for players, B their own car body). */
+export const PLAYER_PINNED_LAYERS = LAYERS.map((l) => l.id).filter((id) => !DEBUG_LAYERS.includes(id) && !ALWAYS_LIVE_LAYERS.includes(id));
+
+const DEFAULTS: Record<string, boolean> = Object.fromEntries(LAYERS.map((l) => [l.id, l.default]));
+
+/** Layers read at their default instead of their saved toggle (player mode). */
+let pinned = new Set<string>();
+
 /** Layers forced off regardless of their toggle (player mode hides the debug drawing). */
 let suppressed = new Set<string>();
 /** Layers a screen holds off on top of that (the garage workshop). */
 let held = new Set<string>();
 
 export const layers = {
-  on: (id: string): boolean => !suppressed.has(id) && !hidden.has(id) && !held.has(id) && (state[id] ?? false),
+  on: (id: string): boolean => !suppressed.has(id) && !hidden.has(id) && !held.has(id) && ((pinned.has(id) ? DEFAULTS[id] : state[id]) ?? false),
+  /** The saved toggle, whatever player mode / photo mode / screens do with it (layer checkboxes). */
+  saved: (id: string): boolean => state[id] ?? false,
+  /** Read these layers at their defaults (player mode); `[]` lifts it. Toggles keep their state. */
+  pin(ids: Iterable<string>): void {
+    pinned = new Set(ids);
+  },
   /** Hold these layers off while a screen is open (developer mode included); `[]` releases. */
   hold(ids: Iterable<string>): void {
     held = new Set(ids);
