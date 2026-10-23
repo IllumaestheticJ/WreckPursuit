@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_ashpeak_downtown_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=race_ashpeak_downtown_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 240 a82bae4e37dadc4f
 480 3db10072aa9a81f8
 720 9bd7dc3a7c2ac33e

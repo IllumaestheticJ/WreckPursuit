@@ -1,6 +1,6 @@
 //! Honk-to-start race spots in the browser session (`wp_race::spots`).
 //!
-//! In a live free-drive or city-chase session on a city (not a race, replay, scripted menu run
+//! In a live free-drive or night-run session on a city (not a race, replay, scripted menu run
 //! or career run), every picker race that can run on the session's city has a meet spot at its
 //! start. Spots are part of round 12's one challenge system on the horn action
 //! (`crate::street`): the session reads one horn edge per tick and a street racer within

@@ -5,7 +5,7 @@ use wp_race::catalog::RaceCity;
 
 use crate::race::{race_city, race_for_scenario, race_scenario_in};
 use crate::race_spots::spot_cards;
-use crate::scenario::{city_chase_in, city_spec, free_drive_in};
+use crate::scenario::{city_spec, free_drive_in, night_run_in};
 use crate::session::Session;
 
 const PLAYER: EntityId = EntityId(1);
@@ -61,7 +61,7 @@ fn port_vesper_races_have_spots_on_both_maps() {
     let mut vesper = free_drive("vesper_v2");
     crate::session::set_street_racers_enabled(false);
     let mut ashpeak = Session::new(
-        city_chase_in(CAR, DamageMode::Arcade, city_spec("ashpeak")),
+        night_run_in(CAR, DamageMode::Arcade, city_spec("ashpeak")),
         false,
     )
     .unwrap();

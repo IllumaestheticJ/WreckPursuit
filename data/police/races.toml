@@ -253,6 +253,97 @@ rams = true
 name = "Downtown crackdown"
 summary = "Maximum presence downtown in daylight; every tactic allowed and a unit waiting near the last checkpoint."
 presence = 2.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = true
+
+[[ashpeak_downtown_checkpoint.stakeouts]]
+at = 0.8
+trigger_m = 60.0
+
+# Night sprint up Route 7 through the Talon Tunnel. Proposed style: tunnel exit. Rolling
+# blocks and PITs on the open freeway; a unit at the tunnel's north end.
+[route7_tunnel_sprint]
+name = "Tunnel exit"
+summary = "Rolling blocks and PITs on the open freeway, and a unit waiting past the tunnel's north portal."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[route7_tunnel_sprint.tactics]
+roadblocks = false
+spikes = false
+helicopter = true
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = true
+
+[[route7_tunnel_sprint.stakeouts]]
+at = 0.5
+trigger_m = 80.0
+
+# Night sprint over Route 12's Grizzly Grade. Proposed style: pass patrol. The highway patrol
+# works the grade: PITs on the climb, a roadblock allowed over the saddle.
+[grizzly_grade_sprint]
+name = "Pass patrol"
+summary = "Units work the climb with PITs; past the saddle the captain may block the road."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[grizzly_grade_sprint.tactics]
+roadblocks = true
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = false
+
+# Quarter-mile drag on the waterfront. Proposed style: late response. Too short for a chase:
+# units only arrive at the end, no tools.
+[waterfront_drag]
+name = "Late response"
+summary = "Too short to chase: the nearest unit rolls in at the end of the strip."
+presence = 1.0
+backup_scale = 0.5
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[waterfront_drag.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = true
+rolling_block = false
+junction_block = true
+pit = false
+rams = false
+
+# Two night laps of the downtown block grid. Proposed style: block grid. Units cut through the
+# grid to block junctions ahead on the second lap; no spikes between the towers.
+[ashpeak_metro_circuit]
+name = "Block grid"
+summary = "Units cut across the grid to block the junctions ahead; no spikes between the towers."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[ashpeak_metro_circuit.tactics]
+roadblocks = true
+spikes = false
+helicopter = true
+box_in = true
+rolling_block = true
+junction_block = true
+pit = true
+rams = true
 
 # --- The five city races from PR #47 (lead/career-port). Light profiles: stakeouts that join
 # the chase plus each course's tactic style, and no scripted roadblocks or spikes on the
@@ -316,82 +407,15 @@ backup_scale = 1.0
 tool_lifetime_s = 300.0
 recognise_on_sight = true
 
-[[ashpeak_downtown_checkpoint.stakeouts]]
-at = 0.8
-trigger_m = 60.0
-
-# Night sprint up Route 7 through the Talon Tunnel. Proposed style: tunnel exit. Rolling
-# blocks and PITs on the open freeway; a unit at the tunnel's north end.
-[route7_tunnel_sprint]
-name = "Tunnel exit"
-summary = "Rolling blocks and PITs on the open freeway, and a unit waiting past the tunnel's north portal."
-presence = 1.0
-backup_scale = 1.0
-tool_lifetime_s = 300.0
-recognise_on_sight = false
-
-[route7_tunnel_sprint.tactics]
-
 [hollins_descent.tactics]
 roadblocks = false
 spikes = false
 helicopter = true
 box_in = false
-rolling_block = true
-junction_block = false
-pit = true
-rams = true
-
-[[route7_tunnel_sprint.stakeouts]]
-at = 0.5
-trigger_m = 80.0
-
-# Night sprint over Route 12's Grizzly Grade. Proposed style: pass patrol. The highway patrol
-# works the grade: PITs on the climb, a roadblock allowed over the saddle.
-[grizzly_grade_sprint]
-name = "Pass patrol"
-summary = "Units work the climb with PITs; past the saddle the captain may block the road."
-presence = 1.0
-backup_scale = 1.0
-tool_lifetime_s = 300.0
-recognise_on_sight = false
-
-[grizzly_grade_sprint.tactics]
-roadblocks = true
-spikes = false
-helicopter = false
-box_in = false
-rolling_block = true
-junction_block = false
-pit = true
-rams = false
-
-# Quarter-mile drag on the waterfront. Proposed style: late response. Too short for a chase:
-# units only arrive at the end, no tools.
-[waterfront_drag]
-name = "Late response"
-summary = "Too short to chase: the nearest unit rolls in at the end of the strip."
-presence = 1.0
-backup_scale = 0.5
-tool_lifetime_s = 300.0
-recognise_on_sight = false
-
-[waterfront_drag.tactics]
-roadblocks = false
-spikes = false
-helicopter = false
-box_in = true
-
 rolling_block = false
 junction_block = true
 pit = false
 rams = false
-
-# Two night laps of the downtown block grid. Proposed style: block grid. Units cut through the
-# grid to block junctions ahead on the second lap; no spikes between the towers.
-[ashpeak_metro_circuit]
-name = "Block grid"
-summary = "Units cut across the grid to block the junctions ahead; no spikes between the towers."
 
 [[hollins_descent.stakeouts]]
 at = 0.85
@@ -409,16 +433,6 @@ presence = 1.0
 backup_scale = 1.0
 tool_lifetime_s = 300.0
 recognise_on_sight = false
-
-[ashpeak_metro_circuit.tactics]
-roadblocks = true
-spikes = false
-helicopter = true
-box_in = true
-rolling_block = true
-junction_block = true
-pit = true
-rams = true
 
 # Across the grid city's blocks to the highway grid. Style: block patrol, normal presence, a
 # unit at the arterial's midpoint, junction blocks allowed in the grid.

@@ -42,7 +42,7 @@ thread_local! {
     static STREET_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
-/// Add NPC street racers to live free-drive / city-chase sessions in a city started from now
+/// Add NPC street racers to live free-drive / night-run sessions in a city started from now
 /// on (default on; e2e and benchmarks may turn them off). Sessions of a scenario that already
 /// has street racers (a replay, a saved street session) keep them either way.
 pub fn set_street_racers_enabled(on: bool) {

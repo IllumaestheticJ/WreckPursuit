@@ -1292,7 +1292,10 @@ mod tests {
         ] {
             assert!(ashpeak.contains(&id) && !vesper.contains(&id), "{id}");
         }
-        assert_eq!(on("procedural_12x12"), vec!["grid_highway_sprint"]);
+        assert_eq!(
+            on("procedural_12x12"),
+            vec!["grid_highway_sprint", "grid_arterial_sprint"]
+        );
         assert!(on("").is_empty());
     }
 }
