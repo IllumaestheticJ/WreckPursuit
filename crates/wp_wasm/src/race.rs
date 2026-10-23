@@ -70,7 +70,33 @@ pub fn race_scenario(
     mode: DamageMode,
     autopilot: bool,
 ) -> Result<Scenario, String> {
-    let mut sc = free_drive_in(car, mode, city_spec(def.city.id()));
+    race_scenario_in(def, car, mode, autopilot, def.city.id())
+}
+
+/// The city a race started from a session on `current` runs on: the current map when the race
+/// can run there (a Port Vesper race started on the combined `ashpeak` map stays on it, so the
+/// player stays in the same world), else the race's own city.
+pub fn race_city<'a>(def: &RaceDef, current: &'a str) -> &'a str {
+    if def.city.runs_on(current) {
+        current
+    } else {
+        def.city.id()
+    }
+}
+
+/// [`race_scenario`] on city `city_id` (one of `def.city.hosts()`; the course is planned on
+/// that map).
+pub fn race_scenario_in(
+    def: &RaceDef,
+    car: &str,
+    mode: DamageMode,
+    autopilot: bool,
+    city_id: &str,
+) -> Result<Scenario, String> {
+    if !def.city.runs_on(city_id) {
+        return Err(format!("{} does not run on {city_id:?}", def.id));
+    }
+    let mut sc = free_drive_in(car, mode, city_spec(city_id));
     sc.name = def.scenario_name();
     if autopilot {
         sc.name.push_str(AUTOPILOT_SUFFIX);
@@ -86,7 +112,7 @@ pub fn race_scenario(
         .map_err(|e| e.to_string())?
         .ok_or("race city did not load")?;
     let race = catalog::plan_course(&world, def)
-        .ok_or_else(|| format!("{}: no route on {}", def.id, def.city.id()))?;
+        .ok_or_else(|| format!("{}: no route on {city_id}", def.id))?;
     let slots = wp_race::live::grid(def, &race);
     let yaw = |s: &wp_race::GridSlot| wp_world::geom::yaw_of(s.dir);
     let player = slots.last().ok_or("empty grid")?;
@@ -121,7 +147,9 @@ pub struct RaceCard {
     pub blurb: &'static str,
     /// City id.
     pub city: &'static str,
-    /// Kind key (`sprint`, `circuit`, `checkpoint`).
+    /// Every city id it runs on (its own and the maps containing it, e.g. `ashpeak`).
+    pub cities: &'static [&'static str],
+    /// Kind key (`sprint`, `circuit`, `checkpoint`, `drag`).
     pub kind: &'static str,
     /// Laps.
     pub laps: u32,
@@ -164,6 +192,7 @@ pub fn race_cards(car: Option<&LoadedCar>, mode: DamageMode) -> Vec<RaceCard> {
                     name: d.name,
                     blurb: d.blurb,
                     city: d.city.id(),
+                    cities: d.city.hosts(),
                     kind: d.kind.key(),
                     laps: d.laps(),
                     legality: d.legality.key(),

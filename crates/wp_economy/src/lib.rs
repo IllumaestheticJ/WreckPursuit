@@ -64,8 +64,9 @@ pub use ledger::{
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use parts::{
-    CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, PartFit, PartGroup, PartView,
-    PartsTable, SlotDef, SlotView, StandFit, StandView, WorkshopView,
+    CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, MechanicJob, MechanicRates,
+    PartFit, PartGroup, PartSource, PartView, PartsTable, SlotDef, SlotView, StandFit, StandView,
+    WorkshopView,
 };
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};

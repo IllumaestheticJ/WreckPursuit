@@ -177,7 +177,11 @@ fn check(name: &str, map: &CityMap) {
             }
         }
         match visual.top(*q, from) {
-            Some((_, "asphalt" | "highway_concrete" | "ramp_taper" | "parking" | "bus_lane")) => {}
+            Some((
+                _,
+                "asphalt" | "highway_concrete" | "ramp_taper" | "parking" | "bus_lane"
+                | "gravel_road" | "dirt_road",
+            )) => {}
             other => not_paved.push(format!(
                 "node {node} at ({:.2}, {:.2}): greybox {other:?}, path {z:.3}",
                 q[0], q[1]

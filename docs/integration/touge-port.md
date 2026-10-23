@@ -90,8 +90,8 @@ goldens were never merged in).
 
 - AI racers never give up: touge battles run through the picker race path (`allow_abandon`
   off, no police); the NPC is a normal race entrant with round12's box-in escape and stuck
-  judge. A battle is decided by the wall line or the judge; if the judge ends both cars with
-  `DnfReason::Stuck` the player's battle counts as lost (see open questions).
+  judge. A battle is decided by the wall line or the judge (`touge::judge_result`); if the
+  judge ends both cars with `DnfReason::Stuck` it is a `BattleResult::Draw`.
 - No real names: the four passes (Hollow Crown Pass, Mistral Ridge, Ashfall Grade, Cedar
   Switchback), eight drivers and their cars (`shiro_turbo`, `hakone_gt`, `kestrel_ts`,
   `lucciola_350`, `sperber_32`, `lindwurm_4t`, all existing round12 cars) are fictional.
@@ -131,11 +131,13 @@ goldens were never merged in).
   open within its retry loop, so the map tap had no picker); plain round12 passed them, and a
   re-run on this branch passed them too: a timing flake, not reproduced.
 
-## Open questions
+## Lead decisions (2026-10-23, merged into round12 at abea6fe8)
 
-1. Gates: keep the stand-in rep thresholds until career-port lands, or should touge wait for
-   the career and use its tiers directly?
-2. Both cars stuck (judge's `DnfReason::Stuck`): the battle currently counts as lost for the
-   player (stake lost, loss rep). A draw (stake refunded, no rep) may be fairer.
-3. The touge passes are not in the testbed's city picker for free drive (as in the PR); if they
-   were, round12's street racers would try to roam them.
+1. Keep the stand-in `[gates]` until `lead/career-port` lands; its helper switches touge to the
+   career tiers per "Collisions to expect".
+2. Both cars stuck = a **draw**: the side-bet stake is refunded (an `Adjustment` back), no rep
+   and no purse either way, a pink slip keeps both cars. Done in the follow-up commit
+   (`BattleResult::Draw`, `touge::judge_result`, tests
+   `judge_statuses_decide_the_battle_and_both_stuck_is_a_draw`,
+   `draw_refunds_the_stake_pays_no_rep_and_moves_no_car`); the battle panel shows "DRAW".
+3. The passes stay out of the free-drive city picker.

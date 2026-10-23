@@ -18,7 +18,8 @@ and fall off with the panel they are on.
 | Piece | Options | Drawn by |
 |---|---|---|
 | `splitter` | `style`: `lowdrag` | body.ts |
-| `canards`, `lip` (`style`: `aggressive`), `flares` (`axle`), `skirts` (`style`: `wide`), `rear_valance`, `diffuser` | | body.ts |
+| `canards`, `flares` (`axle`), `skirts` (`style`: `wide`), `diffuser` | | body.ts |
+| `bumper` (`end`: `front`, `rear`; `style`: `aggressive`, `wide`, `sport`), `lip` (`style`: `aggressive`), `carbon` (`panel`: `hood`, `trunk`) | replacement panels made from the car's own stock panel mesh (reshaped bumper cover with intakes, honeycomb, lip blade, canards; a lid in clear-coated carbon weave); the stock panel is hidden | shell.ts |
 | `wing` | `style`: `street`, `ducktail`, `gt`, `drift`, `swan` | body.ts |
 | `hood_vents`, `hood_scoop`, `roof_scoop`, `roof_rack`, `roof_led_bar` | | body.ts |
 | `lights` | `style`: `smoked`, `xenon`, `amber`, `halo` | body.ts + vehicle_view.ts lamp colours |
@@ -32,7 +33,7 @@ and fall off with the panel they are on.
 | `hub_guards`, `brakes` (`level`), `springs` (`colour`), `dampers`, `sway_bar` (`axle`) | | wheels.ts |
 | `seats`, `interior` (`colour`), `strip` (`level`), `cage` (`level`), `shifter` (`style`), `hydro_handbrake`, `dash_box`, `nitrous` (`bottles`), `fuel_cell`, `window_net` | | cabin.ts |
 | `radiator` (`style`), `intercooler`, `oil_cooler`, `intake` (`style`), `turbo` (`size`), `blower` (`size`), `engine_dress`, `fuel_rail` | | cabin.ts |
-| `paint` (`finish`: `gloss`, `metallic`, `matte`, `pearl`, `satin`, `chrome`), `vinyl` (`design`), `carbon` (`panel`), `tint` (`style`), `glass` (`style`: `poly`, `shatterproof`) | | cabin.ts → look.ts materials |
+| `paint` (`finish`: `gloss`, `metallic`, `matte`, `pearl`, `satin`, `chrome`), `vinyl` (`design`), `tint` (`style`), `glass` (`style`: `poly`, `shatterproof`) | | cabin.ts → look.ts materials |
 
 Vinyl designs (`vinyl` pieces, `render/cosmetics/vinyls.ts`): `stripes`, `flames`, `tribal`,
 `sponsor_generic`, `side_slash`, `pinstripe`, `race_number`, `checker`, `lightning`, `splatter`,

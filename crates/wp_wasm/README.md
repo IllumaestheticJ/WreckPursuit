@@ -35,7 +35,9 @@ Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_weather`, `wp_rac
 Street races (workstream 15): `race_list`, `race_start`, `race_info`, `race_standings`,
 `race_course`, `race_result_json`; a scenario named `race_<id>` gets a `race::RaceRun` (AI field
 before each tick, judge after it, buy-in/payout on the player's run). See
-`docs/integration/race.md` → Step 2.
+`docs/integration/race.md` → Step 2. Honk-to-start spots: `race_spots()` (JSON) and
+`race_spot_honked()` (`src/race_spots.rs`; the check runs in `Session` after every live tick,
+read-only); `race_start` keeps the current map when the race runs there.
 
 ## Perf
 Real vehicle + damage, headless Chromium (SwiftShader), release wasm: 0.09 / 0.62 / 3.0 ms of

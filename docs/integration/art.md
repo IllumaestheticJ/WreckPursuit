@@ -237,3 +237,39 @@ The owner picked **stylised low-poly dark** (`docs/art/STYLE_DECISION.md`). Base
    "style: greybox / low-poly dark" so the owner can compare.
 5. Screenshots per time of day in `docs/media/art/`; update `docs/art/ART_BIBLE.md` (short).
 6. Don't edit `wp_contracts` or Rust sim crates; requests go here.
+
+## Ashpeak County (2026-10-22, ws/ashpeak visuals worker)
+- **Police livery `acso`** (fictional Ashpeak County Sheriff's Office, `render/livery.ts`):
+  pine green body (`#1D3A2E`), bone band along the doors whose top edge climbs into a
+  mountain ridge over the rear door, brass pinlines and hood/deck stripes, `SHERIFF` on the
+  front door with `ASHPEAK COUNTY` above, a brass six-point star with a snow-capped peak
+  (canvas paths, no seal) on the front fender and the hood, bone roof for the aerial number.
+  Unit decals read `AC-12` / `AC-B3` (bone with green outline). Any police mesh can wear it:
+  heights come from the mesh's door boxes, so sedans and SUVs fit.
+- **Which units wear it**: `wp_wasm::police::Agencies` (only on city `ashpeak`). A unit's home
+  station is the `PoliceStation` POI nearest to where it first appeared
+  (`wp_police::Unit::spawn_pos`, presentation only); units homed outside Port Vesper's extent
+  (`ashpeak::plan::VESPER_LO..VESPER_HI`) are county units. While the map has no station
+  outside Port Vesper, the spawn point itself decides. Data path: flag bit 4 in
+  `police_units()` and `police_draw()` records (`POLICE_DRAW_FLAG.county`) and
+  `vehicle_info().police_county`; the testbed uses it in `PoliceUnitsView`, the instanced
+  fleet (`Fleet.model(car, police, county)`, proxies in `COUNTY_PAINT`) and `VehicleView`.
+  `vesper_v2` and every other city: unchanged. Debug: `?police_skin=county|city` forces it.
+- **Greybox** (`tools/city-import/src/glb.rs`): `gravel_road` (tan-grey) and `dirt_road`
+  (brown) ribbons and junction patches (a patch is unpaved only when every road there is);
+  `wp_world::markings` paints nothing on gravel / dirt roads (highways always count as
+  paved). Buildings: `barn` + `barn_roof` (Farm), `silo` + `silo_cap`, `landmark`,
+  `construction` + `construction_accent` (orange safety bands per ~4 m storey). Decor unit
+  meshes (instanced, each < 400 vertices): `pines` (three stacked cones on a trunk), `cranes`
+  (mast, slewing cab, 14-mast-width jib, counter-jib with counterweight, hook line),
+  `jersey_barriers` (median barrier profile), `site_fences` (panel, posts, top rail),
+  `hay_bales` (octagonal roll), `billboards` (panel on two posts with a walkway).
+- **Low-poly dark**: every new material name has a palette entry
+  (`CITY_MATERIAL_COLOURS`, `PALETTE.gravelRoad` ... `billboardPanel`, `countyPolicePaint`).
+- Shared files touched: `crates/wp_police/src/unit.rs` (one serde-default field),
+  `crates/wp_world/src/markings.rs` (unpaved skip + test), `crates/wp_wasm` (police.rs,
+  lod.rs, lib.rs `vehicle_info`), city-import integration tests' paved material lists,
+  testbed `scene.ts` (polygon offset for the unpaved road materials).
+- Known gaps: crane jib and billboard panel are drawn only (the collider is the decor box);
+  the county rule cannot be seen end to end until the district workers add the Ashpeak
+  police station POIs.

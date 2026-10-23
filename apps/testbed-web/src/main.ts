@@ -67,6 +67,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
+import { RaceSpotsView } from "./race_spots";
 import { CarStatBars, statLine } from "./ui/carStats";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
@@ -84,7 +85,7 @@ import { StreetUi } from "./ui/street";
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
 /** Cities the selector offers (data/city/<id>.greybox.glb); the first is the default. */
-const CITY_IDS = ["vesper_v2", "procedural_12x12"];
+const CITY_IDS = ["vesper_v2", "ashpeak", "procedural_12x12"];
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -436,6 +437,9 @@ async function main(): Promise<void> {
   /** Street race gates (waypoints, then B; row 151) in the world. */
   const streetMarker = new RaceMarker(scene.world);
   let streetCourseKey = "";
+  // Honk-to-start meet spots (race_spots.ts): stop in one and honk to start its race. Same
+  // horn action as a street challenge (the sim reads one horn edge for both).
+  const raceSpots = new RaceSpotsView(scene.world, overlay);
   const raceView = new RaceView(raceEl, {
     start: (id) => startRace(id),
     freeDrive: () => startFreeDrive(undefined, undefined, true),
@@ -618,6 +622,11 @@ async function main(): Promise<void> {
     }
     raceMarker.setCourse(course);
     raceView.reset(id, names, course);
+    const spots = sim.raceSpots();
+    const stakes = new Map(
+      spots.length > 0 ? sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).map((c) => [c.id, { entry_fee: c.entry_fee, purse: c.purse }] as const) : [],
+    );
+    raceSpots.set(spots, stakes);
     tougeView.reset();
   };
 
@@ -1752,6 +1761,24 @@ async function main(): Promise<void> {
       if (r) streetMarker.update(crash.playing ? -1 : r.next_gate, r.next_gate >= r.gates.length, tS);
     }
     if (raceView.raceId && !crash.playing) raceFrame(cur, meta, tS, frameNo % 6 === 0);
+    // Honk-to-start spots: the sim reports a honk in a spot; start that race like the picker.
+    if (!replay && !crash.playing) {
+      const honked = sim.raceSpotHonked();
+      if (honked) {
+        const sc = sim.scenario();
+        startRace(honked, sc.entities[0]?.car ?? DEFAULT_CAR, modeName(), false);
+        prof.end();
+        return void requestAnimationFrame(frame);
+      }
+    }
+    {
+      let pp: [number, number, number] | null = null;
+      let pv = 0;
+      for (let o = 0; o < cur.length; o += STATE_STRIDE)
+        if (cur[o + S.entity] === app.player) [pp, pv] = [[cur[o + S.pos], cur[o + S.pos + 1], cur[o + S.pos + 2]], cur[o + S.speed]];
+      const hk = getBindings().keys.horn[0];
+      raceSpots.update(pp, pv, tS, hk ? keyName(hk) : "horn", replay || crash.playing || !!raceView.raceId);
+    }
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
@@ -2022,6 +2049,8 @@ async function main(): Promise<void> {
     layout,
     /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
     radioStrip,
+    /** Honk-to-start spots view (src/race_spots.ts): `raceSpots.inside`, `raceSpots.group`. */
+    raceSpots,
     ready: true,
     stopRecording,
     loadReplay,
