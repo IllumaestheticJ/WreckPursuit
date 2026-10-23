@@ -1681,15 +1681,17 @@ damage modes — the owner rule keeps Arcade and Simulation identical outside ca
 - Regenerated: car JSON + spec sheets, `validation_results.json`, `ROSTER.md`, `VALIDATION.md`,
   `data/stats/cars.json`, `wp_opponent` capability table; `[pro] default_limits` (Sentinel
   Cruiser) 4.35 → 4.75 m/s², 72.4 → 80.0 m/s.
-- **Rolling-block deadlock fixed** (found merging main, 2026-10-23): units that had passed a
-  racer who then stopped (pulled into the Founders Cut lay-by) took `RollingBlock` and were
-  commanded to 0 m/s ahead of him for good, so nobody came within the 15 m capture radius.
-  A rolling block now needs the racer moving (≥ `ARREST_RACER_MPS`, 3 m/s, the arrest
-  threshold); those units shadow and close in for the arrest instead. (Also routing a unit past
-  a stopped racer back to it by the roads was tried and dropped: it drove into the already
-  arrested car in `wp_wasm` `capture_bills_holds_the_car_and_repair_continue_restores_it`.)
-  On merged main with the new cars both `tunnel_escape_founders_cut` (Escaped 132.4 s, 40 s
-  unseen) and its control (Captured; was: no pursuit end in 190 s) pass.
+- **Known issue, not fixed here: rolling block against a stopped racer.** Units that pass a
+  racer who then stops take `RollingBlock`, which commands 0 m/s once they are more than
+  `rolling_block_lead_m` ahead, so they wait there out of the 15 m capture radius. The faster
+  cars hit this in `tunnel_escape_founders_cut_control` on seed 54 (no pursuit end in 190 s).
+  Two local fixes were tried and both break other tests: no rolling block below 3 m/s
+  (`wp_opponent` `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`: units then
+  shove the busted car at 4.5 m/s) and, on top, routing a unit past a stopped racer back to it by
+  road (`wp_wasm` `capture_bills_holds_the_car_and_repair_continue_restores_it`: it drove into
+  the arrested car). Main's tactics are unchanged; the Founders Cut pair is re-seeded to 58
+  (both pass on seeds 50, 51, 53, 58, 59 of 50-63). Proper fix (police workstream): a unit
+  ahead of a stopped racer turns back and stops within capture range without contact.
 - Tests: `wp_vehicle` `class_favours_powerful_rwd` uses `furrow_24` as the slow RWD (the
   Bastion is no longer one); wolfhound diff hash and the simcli goldens re-blessed.
 - **Open (audio, E):** `wp_audio` `every_wot_upshift_dips_and_re_rises` fails for

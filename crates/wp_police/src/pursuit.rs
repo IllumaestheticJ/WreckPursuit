@@ -130,10 +130,6 @@ const RESPOND_YIELD_CREEP_MPS: f32 = 2.0;
 /// How far further right a yielding responder pulls over, m.
 const RESPOND_YIELD_SHIFT_M: f32 = 1.2;
 
-/// A racer slower than this is stopped for the chase tactics: shadowing units close in for the
-/// arrest and no rolling block is started ahead of it, m/s.
-const ARREST_RACER_MPS: f32 = 3.0;
-
 /// How far ahead a responder looks for a junction to meet a reported racer at, s.
 const RESPOND_HORIZON_S: f32 = 12.0;
 
@@ -1645,14 +1641,7 @@ impl PoliceSystem {
                     Tactic::BoxIn(
                         [BoxSlot::Rear, BoxSlot::FrontLeft, BoxSlot::FrontRight][k.min(2)],
                     )
-                } else if gap < -5.0
-                    && level >= unlocks.rolling_block_level
-                    && has_budget
-                    && seen
-                    && v_r >= ARREST_RACER_MPS
-                {
-                    // A rolling block slows a moving racer; a stopped one is arrested instead
-                    // (a block ahead of it would wait there forever).
+                } else if gap < -5.0 && level >= unlocks.rolling_block_level && has_budget && seen {
                     Tactic::RollingBlock
                 } else {
                     let rank = behind_rank;
@@ -1685,7 +1674,7 @@ impl PoliceSystem {
                         // Close in for the arrest when the racer stops (by straight-line
                         // distance: a unit on the cross street can project right next to it
                         // on the trail).
-                        let arrest = v_r < ARREST_RACER_MPS && seen;
+                        let arrest = v_r < 3.0 && seen;
                         let want_gap = if arrest { 6.0 } else { mid };
                         let gap = if arrest {
                             gap.max(dist(u.body.pos, rp))
