@@ -24,7 +24,7 @@ fn car() -> &'static LoadedCar {
 }
 
 fn sim(net: &RoadNetwork) -> Sim {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 4,
         mode,

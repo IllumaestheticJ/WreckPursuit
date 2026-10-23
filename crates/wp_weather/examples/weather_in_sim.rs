@@ -265,7 +265,7 @@ fn full_brake() -> VehicleInput {
 /// Part 2: the real `Sim`, with a `WeatherLink` stepped at every sim tick beside it.
 fn sim_run(car: &LoadedCar) -> (Stop, [WheelWeather; 4], u64) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
-    let mode = wp_contracts::load_mode_table(root.join("modes/arcade.toml")).expect("mode");
+    let mode = wp_contracts::load_mode_table(root.join("modes/sim.toml")).expect("mode");
     let mut sim = wp_sim::Sim::new(wp_sim::SimConfig {
         seed: 1,
         mode,

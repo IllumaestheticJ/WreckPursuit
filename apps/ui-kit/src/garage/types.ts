@@ -1,7 +1,7 @@
 // Types of the browser career (machine G): the JSON of wp_wasm's `career_*` exports
 // (crates/wp_wasm/src/career.rs). Keep in sync with the Rust structs named in each comment.
 
-export type DamageMode = "Arcade" | "Simulation";
+export type DamageMode = "Arcade" | "Simulation" | "Extreme";
 export type WantedLevel = "None" | "L1" | "L2" | "L3" | "L4" | "L5";
 export type Condition = "New" | "Used" | "Worn";
 export type ShopKind = "Legit" | "Crooked";
@@ -258,12 +258,20 @@ export interface SlotView {
   kind: string;
   /** Assembly slot it lives inside (engine internals: "engine"), or null. */
   parent: string | null;
+  /** Slot of the part it bolts onto (it comes off and goes on with that part), or null. */
+  mount?: string | null;
+  /** Fitted slots whose parts come off with this one (parts bolted onto it). */
+  takes_along?: string[];
   fitted: PartView | null;
   required: boolean;
   /** Fitted slots in the way (empty = the slot can be worked on). */
   blocked_by: string[];
   /** Why the fitted part cannot come off now (null = it can). */
   remove_blocker: string | null;
+  /** Every fitted slot that has to come off first, in removal order (nested ones too). */
+  in_the_way: string[];
+  /** What the mechanic charges to swap the part in this slot. */
+  mechanic_fee: number;
 }
 
 /** A loose part (`LoosePart`). */
@@ -275,7 +283,8 @@ export interface LoosePart {
   condition: number;
   damage: unknown[];
   value: number;
-  /** Parts still inside a loose assembly (an engine's internals); `kind` is their slot. */
+  /** Parts inside a loose assembly (an engine's internals) or bolted onto a loose part (a
+   * bumper's splitter); `kind` is their slot. */
   contents?: LoosePart[];
 }
 
@@ -319,6 +328,8 @@ export interface CatalogEntry {
   price: number;
   count: number;
   reason: string | null;
+  /** What the mechanic charges to fit it (the whole set for a set). */
+  install_fee: number;
 }
 
 /** `career_workshop_json` (`WorkshopScreen`). */
@@ -349,4 +360,26 @@ export interface WorkshopApi {
   strip(assembly: number, slot: string): WorkshopScreen;
   /** Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. */
   build(assembly: number, slot: string, part: number): WorkshopScreen;
+  /** Do it yourself: take off everything in the way of `slot`. */
+  clearWay(slot: string): WorkshopScreen;
+  /** Pay the mechanic to fit a part in `slot` (from the inventory, or bought now). */
+  mechanic(slot: string, source: MechanicSource, sellOld: boolean): MechanicResult;
+}
+
+/** Where the part the mechanic fits comes from. */
+export type MechanicSource = { part: number } | { buy: string | null };
+
+/** `MechanicJob`: what a mechanic job cost and what happened to the old parts. */
+export interface MechanicJob {
+  fee: number;
+  bought: number;
+  sold: number;
+  kept: number[];
+  touched: number;
+}
+
+/** `career_mechanic_install`. */
+export interface MechanicResult {
+  job: MechanicJob;
+  workshop: WorkshopScreen;
 }

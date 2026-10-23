@@ -133,7 +133,7 @@ export interface Barrier {
 export interface Scenario {
   name: string;
   seed: number;
-  mode: "Arcade" | "Simulation";
+  mode: "Arcade" | "Simulation" | "Extreme";
   duration_s: number;
   barriers?: Barrier[];
   entities: { id: string; car: string; pos: number[]; yaw: number; mods?: string[] }[];
@@ -253,6 +253,11 @@ export const sim = {
   /** Free drive / city chase in a city by id ("vesper_v2" | "procedural_12x12"). */
   freeDriveCityJson: (car: string, mode: string, cityId: string): string => wasm.free_drive_city_json(car, mode, cityId),
   cityChaseCityJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_city_json(car, mode, cityId),
+  /** Free roam: free drive plus `roamers` AI street racers (0 = default 10). */
+  freeRoamCityJson: (car: string, mode: string, cityId: string, roamers = 0): string =>
+    wasm.free_roam_city_json(car, mode, cityId, roamers),
+  /** Free-roam status (`null` outside free roam). */
+  roamStatus: (): unknown => JSON.parse(wasm.roam_status_json()),
   /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */
   cityId: (): string => wasm.city_id(),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
@@ -378,7 +383,7 @@ export const sim = {
   assistPresetNamed: (
     name: string,
     source: "Keyboard" | "Gamepad" | "Wheel",
-  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  ): { mode: "Arcade" | "Simulation" | "Extreme"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
   /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
   assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
     wasm.assist_preset_of(entity, source),
@@ -528,6 +533,22 @@ export const sim = {
   garageRepair: (): GarageRepairReport => JSON.parse(wasm.garage_repair()),
   /** "Leave" the open visit without repairing. */
   garageLeave: (): void => wasm.garage_leave(),
+  /** Touge passes with their challenger and boss (`wp_wasm::touge::TougeCard[]`). */
+  tougeList: (): TougeCard[] => JSON.parse(wasm.touge_list_json()),
+  /** Rep-gated wager menu for one battle, on the account the battle will use (`career`: the
+   * loaded career's, else the session's). Throws on unknown keys. */
+  tougeMenu: (c: TougeChoice, career: boolean): WagerMenu =>
+    JSON.parse(wasm.touge_menu_json(c.map, c.direction, c.daylight, c.surface, c.opponent, career)),
+  /** Touge battle scenario JSON (for `careerStartRun`); remembers `wager` for the next session. */
+  tougeScenarioJson: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): string =>
+    wasm.touge_scenario_json(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot),
+  /** Start a touge battle as a plain session. Returns entity ids, player first. */
+  tougeStart: (c: TougeChoice, car: string, mode: string, wager: Wager, autopilot: boolean): number[] =>
+    Array.from(wasm.touge_start(c.map, c.direction, c.daylight, c.surface, c.opponent, car, mode, JSON.stringify(wager), autopilot)),
+  /** Battle panel (`wp_wasm::touge::TougeReport`), null outside a touge battle. */
+  tougeResult: (): TougeReport | null => JSON.parse(wasm.touge_result_json()),
+  /** Testbed only: set the plain session's rep (throws during a career or without an account). */
+  tougeDebugSetRep: (rep: number): void => wasm.touge_debug_set_rep(rep),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park street racer `entity` idle at Loop 9 rest stop `name` (logged move). */
@@ -603,9 +624,13 @@ export const sim = {
   careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
   careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
     JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
+  careerClearWay: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_clear_way(uid, slot)),
+  /** Pay the mechanic: inventory part `part` (0 = buy `grade` now, null = stock). */
+  careerMechanicInstall: (uid: number, slot: string, part: number, grade: string | null, sellOld: boolean): MechanicResult =>
+    JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, MechanicResult, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
@@ -712,6 +737,7 @@ export interface StreetPreview {
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
 import type { RaceCard, RaceReport } from "../ui/race";
+import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";

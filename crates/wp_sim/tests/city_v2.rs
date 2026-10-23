@@ -21,7 +21,7 @@ fn net() -> &'static RoadNetwork {
 }
 
 fn sim(city: bool) -> Sim {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 4,
         mode,
@@ -243,7 +243,7 @@ fn hilly_city_run_is_deterministic() {
 #[test]
 #[ignore = "3800 parked cars in unoptimised Rapier (~80 s): cargo test --release -p wp_sim --test city_v2 -- --ignored"]
 fn parked_cars_rest_asleep_on_the_road_mesh() {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 4,
         mode,

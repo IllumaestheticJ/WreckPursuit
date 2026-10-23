@@ -1,7 +1,7 @@
 // ABS level Half: heavy RWD muscle car at 60 mph (26.8 m/s), brake floored to a stop.
 (
     name: "assists_brake_abs_half",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     assists: custom((abs: "Half", tcs: "Off", esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
     duration_s: 5.0,

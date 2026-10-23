@@ -19,6 +19,7 @@
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
+//! | touge | `touge_list_json()`, `touge_menu_json(map, dir, daylight, surface, opponent)`, `touge_scenario_json(…, car, mode, wager_json, autopilot)`, `touge_start(…)`, `touge_result_json()`, `touge_debug_set_rep(rep)` — see [`touge`] |
 //! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
@@ -53,12 +54,14 @@ pub mod police;
 pub mod props;
 pub mod race;
 pub mod reset;
+pub mod roam;
 pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
 pub mod siren_cue;
 pub mod street;
+pub mod touge;
 pub mod weather;
 
 #[cfg(test)]
@@ -72,9 +75,13 @@ mod police_audio_trace;
 #[cfg(test)]
 mod race_tests;
 #[cfg(test)]
+mod roam_tests;
+#[cfg(test)]
 mod run_tests;
 #[cfg(test)]
 mod street_tests;
+#[cfg(test)]
+mod touge_tests;
 
 use std::cell::RefCell;
 
@@ -200,6 +207,34 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
         mode,
         scenario::city_spec(city_id),
     )))
+}
+
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
+/// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
+#[wasm_bindgen]
+pub fn free_roam_city_json(
+    car: &str,
+    mode: &str,
+    city_id: &str,
+    roamers: u32,
+) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    let n = match roamers {
+        0 => roam::DEFAULT_ROAMERS,
+        n => n as usize,
+    };
+    Ok(json(
+        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+    ))
+}
+
+/// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,
+/// phase, current leg's haunt, full-pace run or not, legs and distance driven; rescues so
+/// far; the last few roamer events.
+#[wasm_bindgen]
+pub fn roam_status_json() -> Result<String, JsValue> {
+    get(|s| json(&s.roam().map(roam::RoamRun::status)))
 }
 
 /// City chase in a chosen city (`city_id` as in [`free_drive_city_json`]).
@@ -728,7 +763,7 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation), replay (0/1),
+/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation / 2 Extreme), replay (0/1),
 /// recording (0/1), city (0/1), scripted (0/1)]`.
 #[wasm_bindgen]
 pub fn world_info() -> Result<Vec<f32>, JsValue> {
@@ -739,7 +774,11 @@ pub fn world_info() -> Result<Vec<f32>, JsValue> {
             s.tick() as f32,
             t.hours(),
             t.night_factor(),
-            b(s.mode() == DamageMode::Simulation),
+            match s.mode() {
+                DamageMode::Arcade => 0.0,
+                DamageMode::Simulation => 1.0,
+                DamageMode::Extreme => 2.0,
+            },
             b(s.playback().is_some()),
             b(s.recording()),
             b(s.has_city()),
@@ -932,6 +971,7 @@ pub fn run_repair_continue() -> Result<String, JsValue> {
 fn parse_mode(mode: &str) -> Result<DamageMode, String> {
     match mode {
         "Simulation" => Ok(DamageMode::Simulation),
+        "Extreme" => Ok(DamageMode::Extreme),
         "Arcade" | "" => Ok(DamageMode::Arcade),
         other => Err(format!("unknown damage mode {other:?}")),
     }
@@ -1197,6 +1237,138 @@ pub fn garage_repair() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn garage_leave() -> Result<(), JsValue> {
     get(|s| s.garage_leave())
+}
+
+// ----- touge battles ------------------------------------------------------------------------
+
+fn touge_setup(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+) -> Result<wp_race::touge::TougeSetup, String> {
+    wp_race::touge::TougeSetup::from_keys(map, direction, daylight, surface, opponent).ok_or_else(
+        || format!("unknown touge battle {map}:{direction}:{daylight}:{surface}:{opponent}"),
+    )
+}
+
+/// The touge menu as JSON ([`touge::TougeCard`] array): the four passes with length, climb,
+/// K-rail stretches and their challenger and boss (name, title, personality, car).
+#[wasm_bindgen]
+pub fn touge_list_json() -> String {
+    json(&touge::touge_cards())
+}
+
+/// The wager menu for one battle as JSON (`wp_race::touge::WagerMenu`): rep and tier, whether
+/// racing this opponent, side bets and pink slips are open (and the rep tier each needs),
+/// the largest stake, payouts and rep. Read from the account the battle will use: the career's
+/// when `career` (the battle starts as a career run) and a career is loaded, else the
+/// session's (fresh accounts start at 0 rep: everything locked). Keys: `map` (pass id),
+/// `up|down`, `day|night`, `dry|rain`, `challenger|boss`.
+#[wasm_bindgen]
+pub fn touge_menu_json(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+    career: bool,
+) -> Result<String, JsValue> {
+    let setup = touge_setup(map, direction, daylight, surface, opponent).map_err(err)?;
+    let career_acct = if career {
+        career::career_account()
+    } else {
+        None
+    };
+    let acct = match career_acct {
+        Some(a) => a,
+        None => with_session_opt(|s| {
+            Ok::<_, JsValue>(s.and_then(|s| s.run().map(|r| r.account().clone())))
+        })?
+        .unwrap_or_else(|| garage::with_economy(|e| e.open_account(run::PLAYER_ACCOUNT).0)),
+    };
+    Ok(json(&touge::menu(&acct, &setup)))
+}
+
+/// Scenario JSON of a touge battle (for `init` or `career_start_run`), and remember `wager`
+/// for it: `{"kind":"none"}`, `{"kind":"side_bet","stake":N}` or `{"kind":"pink_slip"}`
+/// (taken at the first tick on the player's account; refused wagers show in
+/// `touge_result_json`). The player starts behind the NPC.
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn touge_scenario_json(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+    car: &str,
+    mode: &str,
+    wager_json: &str,
+    autopilot: bool,
+) -> Result<String, JsValue> {
+    let setup = touge_setup(map, direction, daylight, surface, opponent).map_err(err)?;
+    let wager: wp_race::touge::Wager = if wager_json.is_empty() {
+        wp_race::touge::Wager::None
+    } else {
+        serde_json::from_str(wager_json).map_err(err)?
+    };
+    let sc = touge::touge_scenario(&setup, car, parse_mode(mode).map_err(err)?, autopilot)
+        .map_err(err)?;
+    touge::set_next_wager(wager);
+    Ok(json(&sc))
+}
+
+/// Start a touge battle as a plain (non-career) session: [`touge_scenario_json`] + `init`.
+/// Returns the entity ids (player first, then the NPC).
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn touge_start(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+    car: &str,
+    mode: &str,
+    wager_json: &str,
+    autopilot: bool,
+) -> Result<Vec<u32>, JsValue> {
+    let sc = touge_scenario_json(
+        map, direction, daylight, surface, opponent, car, mode, wager_json, autopilot,
+    )?;
+    let sc: simcli::Scenario = serde_json::from_str(&sc).map_err(err)?;
+    Ok(install(Session::new(sc, false).map_err(err)?))
+}
+
+/// The touge panel as JSON ([`touge::TougeReport`]): setup, wager taken or refused, the
+/// decision (who won, who went through the wall), the NPC car's condition when its race ended
+/// and the settlement (side bet, purse, rep, car won / lost). `null` outside a touge battle.
+#[wasm_bindgen]
+pub fn touge_result_json() -> Result<String, JsValue> {
+    get(|s| {
+        json(
+            &s.race()
+                .and_then(|r| r.touge())
+                .map(touge::TougeRun::report),
+        )
+    })
+}
+
+/// Testbed only: set the plain session account's rep, to try rep-gated touge battles and
+/// wagers without a career. Not recorded in replays; refused during a career.
+#[wasm_bindgen]
+pub fn touge_debug_set_rep(rep: f64) -> Result<(), JsValue> {
+    with(|s| {
+        if s.is_career() {
+            return Err("not during a career".to_string());
+        }
+        s.debug_run_mut()
+            .ok_or("this session has no account")?
+            .debug_set_rep(rep as i64);
+        Ok(())
+    })
 }
 
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is

@@ -18,6 +18,7 @@ canonical `replay.bin` files that `simcli replay` verifies.
 | `run.rs` | the player's economy (lead): drained events → G's `EconomySession`, end-of-run `RunReport`, "Repair & continue"; tests in `run_tests.rs` |
 | `career.rs` | the browser career (machine G): persistent account, garage actions, career runs with the career car's mods and saved lattice damage, `career_*` exports; tests in `career_tests.rs` (see `docs/integration/economy.md`) |
 | `garage_visit.rs` | garage visits (lead): the city's `Garage` POIs as repair shops (legit / crooked, district); stopping in one holds the car and offers the shop's `RepairAll`; detection in `Session::check_garage`, tests in `run_tests.rs` |
+| `touge.rs` | touge battles: scenario builder (locked weather, rep-gated wager), wall / K-rail breach → total loss, early decision, settlement on the run or career account, pink-slip car (economy snapshot + full lattice) into the career garage; `touge_*` exports; tests in `touge_tests.rs` |
 | `police.rs` / `garage.rs` / `audio.rs` | police read-outs + siren rule, live repair bill, audio director glue |
 | `data.rs` + `build.rs` | every file in `data/{cars,lattices,tires,materials,modes}` embedded at build time, also as a simcli `MemData` bundle |
 

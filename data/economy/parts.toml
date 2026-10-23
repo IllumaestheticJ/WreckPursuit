@@ -16,6 +16,9 @@
 #               damage price table prices the others)
 #   optional    no stock part: the slot is empty on a stock car and only takes aftermarket
 #               parts (a turbo, a wing)
+#   mount       the slot of the part this one bolts onto (a splitter on the front bumper). It can
+#               be worked on while that part is on, is fitted only onto it, and comes off and goes
+#               back on with it, so nothing is left floating. No set, parent or repair item.
 #   parent      the assembly slot this part lives inside (engine internals: parent = "engine").
 #               It leaves with the assembly and can be worked on in the car or on the stand.
 #               Stock internals belong to an engine family (the stock engine's car model, or the
@@ -24,6 +27,10 @@
 #               damage_share x the rise in the assembly's repair-line severity)
 #   torque_loss fraction of engine torque lost when the part is fully worn
 #   wear_limit  most wear the part can have for the assembly to count as rebuilt (default 0.05)
+#
+# [mechanic]  what the garage mechanic charges to install a part for you (wp_economy
+#             `Economy::mechanic_install`): call_out once per job, per_part for every part
+#             taken off and put back (the part itself and everything in its way).
 #
 # Mod lines that are not in any slot (paint, vinyls, tyre width, brake pads, gadgets...) stay plain
 # upgrades bought through the mod tree.
@@ -70,7 +77,7 @@ id = "hood_vent"
 name = "Hood vent"
 group = "Body"
 lines = ["hood_style"]
-blocked_by = ["hood"]
+mount = "hood"
 optional = true
 
 [[slot]]
@@ -166,7 +173,7 @@ id = "front_splitter"
 name = "Front splitter"
 group = "Aero"
 lines = ["front_aero"]
-blocked_by = ["front_bumper"]
+mount = "front_bumper"
 optional = true
 
 [[slot]]
@@ -174,6 +181,7 @@ id = "rear_wing"
 name = "Rear wing"
 group = "Aero"
 lines = ["rear_aero"]
+mount = "trunk_lid"
 optional = true
 
 [[slot]]
@@ -181,7 +189,7 @@ id = "diffuser"
 name = "Rear diffuser"
 group = "Aero"
 lines = ["diffuser"]
-blocked_by = ["rear_bumper"]
+mount = "rear_bumper"
 optional = true
 
 [[slot]]
@@ -561,7 +569,6 @@ set = "wheels"
 repair = { Component = "WheelFL" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_fl"]
 
 [[slot]]
 id = "wheel_fr"
@@ -571,7 +578,6 @@ set = "wheels"
 repair = { Component = "WheelFR" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_fr"]
 
 [[slot]]
 id = "wheel_rl"
@@ -581,7 +587,6 @@ set = "wheels"
 repair = { Component = "WheelRL" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_rl"]
 
 [[slot]]
 id = "wheel_rr"
@@ -591,7 +596,6 @@ set = "wheels"
 repair = { Component = "WheelRR" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_rr"]
 
 [[slot]]
 id = "brake_fl"
@@ -641,7 +645,7 @@ set = "suspension"
 repair = { Component = "SuspensionFL" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_fl"]
+blocked_by = ["wheel_fl"]
 
 [[slot]]
 id = "suspension_fr"
@@ -651,7 +655,7 @@ set = "suspension"
 repair = { Component = "SuspensionFR" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_fr"]
+blocked_by = ["wheel_fr"]
 
 [[slot]]
 id = "suspension_rl"
@@ -661,7 +665,7 @@ set = "suspension"
 repair = { Component = "SuspensionRL" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_rl"]
+blocked_by = ["wheel_rl"]
 
 [[slot]]
 id = "suspension_rr"
@@ -671,7 +675,7 @@ set = "suspension"
 repair = { Component = "SuspensionRR" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_rr"]
+blocked_by = ["wheel_rr"]
 
 [[slot]]
 id = "arb_front"
@@ -707,7 +711,6 @@ id = "push_bar"
 name = "Push bar"
 group = "Protection"
 lines = ["push_bar"]
-blocked_by = ["front_splitter"]
 optional = true
 
 [[slot]]
@@ -732,3 +735,7 @@ name = "Nitrous kit"
 group = "Electronics"
 lines = ["nitrous"]
 optional = true
+
+[mechanic]
+call_out = 60
+per_part = 30

@@ -132,7 +132,7 @@ fn unaffordable_repair_is_refused_without_side_effects() {
 }
 
 #[test]
-fn arcade_repairs_cost_half_of_simulation() {
+fn arcade_and_sim_repairs_cost_half_of_extreme() {
     let e = econ();
     let (mut a, car) = account_with_sedan(&e, 0);
     // Same lines (unscaled estimate) priced in both modes.
@@ -144,19 +144,25 @@ fn arcade_repairs_cost_half_of_simulation() {
     );
     e.record_damage(&mut a, &r).unwrap();
     let shop = ShopContext::legit_default();
-    let sim = e
+    // Since v0.4.0 Arcade and Simulation both bill at half of Extreme.
+    let ext = e
         .quote_repair(
             &a,
             car,
             &RepairOption::RepairAll,
             &shop,
-            DamageMode::Simulation,
+            DamageMode::Extreme,
         )
         .unwrap();
-    let arc = e
-        .quote_repair(&a, car, &RepairOption::RepairAll, &shop, DamageMode::Arcade)
-        .unwrap();
-    assert!((arc.gross as f32 - 0.5 * sim.gross as f32).abs() <= 1.0);
+    for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+        let q = e
+            .quote_repair(&a, car, &RepairOption::RepairAll, &shop, mode)
+            .unwrap();
+        assert!(
+            (q.gross as f32 - 0.5 * ext.gross as f32).abs() <= 1.0,
+            "{mode:?}"
+        );
+    }
 }
 
 #[test]

@@ -10,7 +10,7 @@ use wp_vehicle::VehicleExtras;
 fn rig_matches_sim_bit_for_bit() {
     let data = format!("{}/../../data", env!("CARGO_MANIFEST_DIR"));
     let car = wp_contracts::load_car(format!("{data}/cars/debug_coupe.json")).unwrap();
-    let mode = wp_contracts::load_mode_table(format!("{data}/modes/arcade.toml")).unwrap();
+    let mode = wp_contracts::load_mode_table(format!("{data}/modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 1,
         mode,

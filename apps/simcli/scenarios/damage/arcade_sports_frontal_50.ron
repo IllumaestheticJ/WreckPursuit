@@ -1,3 +1,5 @@
+// Contract v0.4.0: the pre-v0.4.0 Arcade table is now Simulation, so this scenario keeps its
+// name and runs `mode: Simulation` (same behaviour and hashes as before).
 // Round 12b (owner playtest rows 48-49: Arcade cars and police too fragile), workstream 03.
 // Full sim, Arcade, R's panels on as in the browser game. Repeated hits are measured by
 // `cargo run --release -p simcli --example damage_toughness` (table in docs/integration/damage.md).
@@ -5,7 +7,7 @@
 (
     name: "damage_arcade_sports_frontal_50",
     seed: 501,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     panels: true,
     barriers: [(pos: (0.0, 20.0, 0.75), size: (10.0, 1.0, 1.5))],

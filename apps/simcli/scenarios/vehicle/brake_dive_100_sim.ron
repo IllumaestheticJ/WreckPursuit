@@ -9,7 +9,7 @@
 (
     name: "vehicle_brake_dive_100_sim",
     seed: 92,
-    mode: Simulation,
+    mode: Extreme,
     entities: [
         (id: "ironside_440", car: "ironside_440", pos: (-6.0, 0.0, 0.0), speed_mps: 27.78, assists: wheel, inputs: [
             (t_s: 0.0, input: (throttle: 0.3)),

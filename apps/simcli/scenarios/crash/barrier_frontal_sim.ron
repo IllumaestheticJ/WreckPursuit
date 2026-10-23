@@ -1,9 +1,11 @@
+// Contract v0.4.0: the pre-v0.4.0 Simulation table is now Extreme, so this scenario keeps its
+// name and runs `mode: Extreme` (same behaviour and hashes as before).
 // Testbed crash test (workstream 04): debug sedan holds 56 km/h into a rigid barrier, Simulation.
 // The testbed's speed box overrides `target_mps`. Simulation: one hard hit at speed is a total loss.
 (
     name: "crash_barrier_frontal_sim",
     seed: 11,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     barriers: [(pos: (0.0, 45.0, 0.75), size: (8.0, 1.0, 1.5))],
     entities: [

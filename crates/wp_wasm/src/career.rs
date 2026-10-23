@@ -626,6 +626,23 @@ impl Career {
         let loaded = self.loaded_car(car)?;
         let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
         if let Some(snap) = self.lattice(car.uid)? {
+            // A panel torn off in a session is saved as a synthetic detached group
+            // (>= SYNTHETIC_GROUP_BASE), which exists only once the car's panels are attached
+            // (as the session did): attach them before restoring (playtest row 163).
+            if snap
+                .snapshot
+                .detached_groups
+                .iter()
+                .any(|g| *g >= wp_damage::panels::SYNTHETIC_GROUP_BASE)
+            {
+                let files = self.car_files(car)?;
+                let rel = format!("panels/{}.json", car.def_id);
+                let text = simcli::data::DataSource::read(&Overlay { files: &files }, &rel)
+                    .map_err(|e| e.to_string())?;
+                let spec =
+                    wp_damage::PanelSpec::parse(&car.def_id, &text).map_err(|e| e.to_string())?;
+                model.attach_panels(&spec).map_err(|e| e.to_string())?;
+            }
             model.restore_full(&snap)?;
         }
         Ok(model)
@@ -1173,6 +1190,40 @@ impl Career {
         Ok(())
     }
 
+    /// Take everything in the way of `slot` off car `uid` (DIY, free). Returns the uids of
+    /// the parts taken off, in removal order.
+    pub fn clear_way(&mut self, uid: CarUid, slot: &str) -> Result<Vec<u32>, String> {
+        self.guard()?;
+        self.change_mods(uid, |e, acct, _| e.clear_way(acct, uid, slot))
+    }
+
+    /// Pay the mechanic to fit a part in `slot` of car `uid` (see
+    /// [`Economy::mechanic_install`]). New parts restore their area of the stored lattice,
+    /// as [`Self::fit_part`] does.
+    pub fn mechanic_install(
+        &mut self,
+        uid: CarUid,
+        slot: &str,
+        source: &wp_economy::PartSource,
+        sell_old: bool,
+    ) -> Result<wp_economy::MechanicJob, String> {
+        self.guard()?;
+        let job = self.change_mods(uid, |e, acct, mode| {
+            e.mechanic_install(acct, uid, slot, source, sell_old, mode)
+        })?;
+        if job.restore.is_empty() || !self.profile.lattices.contains_key(&uid.0) {
+            return Ok(job);
+        }
+        let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
+        let loaded = self.loaded_car(&car)?;
+        let mut model = self.damage_model(&car)?;
+        model.apply_repair(&job.restore);
+        let wanted = car.damage.sustained_before_capture;
+        let ev = self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
+        self.post(ev);
+        Ok(job)
+    }
+
     /// Buy a part of `kind` for car `uid` into the inventory (`grade` = a mod id, or `None`
     /// for the stock replacement). Returns the new parts' uids.
     pub fn buy_part(
@@ -1257,10 +1308,7 @@ impl Career {
         let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
         // Build the model before paying, so a broken save cannot take money for nothing.
         let loaded = self.loaded_car(&car)?;
-        let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
-        if let Some(snap) = self.lattice(uid)? {
-            model.restore_full(&snap)?;
-        }
+        let mut model = self.damage_model(&car)?;
         let mut acct = self.profile.account.clone();
         let (order, ev) = self
             .econ
@@ -1454,6 +1502,12 @@ impl Career {
             RunEnd::Free
         };
         let mut wanted = false;
+        // A pink slip won in a touge battle: the car's lattice as it finished.
+        let won_lattice = s
+            .race()
+            .and_then(|r| r.touge())
+            .and_then(|t| t.won_lattice())
+            .cloned();
         if let Some(run) = s.end_career() {
             if run.is_over() {
                 end = match run.report().map(|r| r.outcome) {
@@ -1467,6 +1521,11 @@ impl Career {
                 .ledger
                 .extend(ledger.into_iter().filter(|e| e.seq >= start.start_seq));
             self.profile.account = acct;
+            if let Some((uid, json)) = won_lattice {
+                if self.profile.account.car(uid).is_some() {
+                    self.profile.lattices.insert(uid.0, json);
+                }
+            }
         }
         let bounty_cash: Money = self
             .profile
@@ -1565,6 +1624,12 @@ impl Career {
 
 thread_local! {
     static CAREER: RefCell<Option<Career>> = const { RefCell::new(None) };
+}
+
+/// The loaded career's account as saved between runs (`None` without a career): the touge
+/// menu reads rep and cash from it.
+pub(crate) fn career_account() -> Option<wp_economy::PlayerAccount> {
+    CAREER.with(|c| c.borrow().as_ref().map(|c| c.profile.account.clone()))
 }
 
 fn with_career<T>(f: impl FnOnce(&mut Career) -> Result<T, String>) -> Result<T, JsValue> {
@@ -1861,6 +1926,38 @@ pub fn career_fit_part(uid: u32, slot: &str, part: u32) -> Result<String, JsValu
     with_career(|c| {
         c.fit_part(CarUid(uid), slot, part)?;
         c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Take everything in the way of `slot` off car `uid`. Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_clear_way(uid: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.clear_way(CarUid(uid), slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Pay the mechanic to fit a part in `slot` of car `uid`: inventory part `part` when it is
+/// not 0, otherwise one bought now (`grade` = mod id, `""` = stock). The old part is sold when
+/// `sell_old`, kept otherwise. Returns `{"job": MechanicJob, "workshop": WorkshopScreen}`.
+#[wasm_bindgen]
+pub fn career_mechanic_install(
+    uid: u32,
+    slot: &str,
+    part: u32,
+    grade: &str,
+    sell_old: bool,
+) -> Result<String, JsValue> {
+    with_career(|c| {
+        let source = if part != 0 {
+            wp_economy::PartSource::Inventory(part)
+        } else {
+            wp_economy::PartSource::Buy((!grade.is_empty()).then(|| grade.to_string()))
+        };
+        let job = c.mechanic_install(CarUid(uid), slot, &source, sell_old)?;
+        let workshop = c.workshop(CarUid(uid))?;
+        Ok(serde_json::json!({ "job": job, "workshop": workshop }).to_string())
     })
 }
 

@@ -1,10 +1,10 @@
 // A car's cosmetic look: every installed mod drawn on its panel mesh (data/cosmetics/visuals.json
-// → the builders in body.ts, wheels.ts and cabin.ts). Render only: the sim never sees a look.
+// → the builders in body.ts, shell.ts, wheels.ts and cabin.ts). Render only: the sim never sees a look.
 //
 // Bolt-on pieces hang off the vehicle root in chassis space and ride with their body region's
 // lattice (regionShift), so a bull bar follows a crushed bumper and a wing goes when the trunk
 // lid comes off. Wheel pieces sit in the view's wheel groups. Material looks (paint finish,
-// vinyl, carbon, tint, glazing, interior, calipers, tyres) are applied after every art-style
+// vinyl, tint, glazing, interior, calipers, tyres) are applied after every art-style
 // change through `PanelBody.onStyled`, since the style resets those materials.
 import * as THREE from "three";
 import type { VehicleInfo } from "../../wasm/sim";
@@ -14,6 +14,7 @@ import { CABIN_BUILDERS } from "./cabin";
 import type { Builder, LookCtx, Tweaks } from "./context";
 import { CarFrame } from "./frame";
 import { kitMats } from "./kit";
+import { SHELL_BUILDERS } from "./shell";
 import { liveryCanvas } from "./vinyls";
 import { WHEEL_BUILDERS } from "./wheels";
 import { loadVisuals, piecesOf } from "./visuals";
@@ -30,7 +31,7 @@ export interface LookHost {
 }
 
 /** Every builder by piece name. */
-const BUILDERS: Record<string, Builder> = { ...BODY_BUILDERS, ...WHEEL_BUILDERS, ...CABIN_BUILDERS };
+const BUILDERS: Record<string, Builder> = { ...BODY_BUILDERS, ...SHELL_BUILDERS, ...WHEEL_BUILDERS, ...CABIN_BUILDERS };
 
 /** Piece names the builders know (tests / data checks). */
 export const PIECES = Object.keys(BUILDERS);
@@ -62,11 +63,13 @@ export class CarLook {
   private readonly pieces: BodyPiece[] = [];
   private readonly wheelPieces: THREE.Object3D[] = [];
   private readonly lamps: { m: THREE.MeshStandardMaterial; glow: number }[] = [];
-  private readonly tweaks: Tweaks = { carbon: new Set() };
+  private readonly tweaks: Tweaks = {};
   private canvas: HTMLCanvasElement | null = null;
   private texture: THREE.CanvasTexture | null = null;
   private lit: boolean | null = null;
   private disposed = false;
+  /** Regions whose panel is off the car in the workshop: what is bolted to them is not drawn. */
+  private removed: ReadonlySet<string> = new Set();
 
   private constructor(
     private readonly host: LookHost,
@@ -151,8 +154,8 @@ export class CarLook {
     if (fin?.colour !== undefined) paint.color.setHex(fin.colour);
     const body = panels.liveryMaterial === paint ? [paint] : [paint, panels.liveryMaterial];
     if (fin) for (const m of body) Object.assign(m, { roughness: fin.roughness, metalness: fin.metalness });
-    // Livery: vinyl and carbon panels on the body colour.
-    this.canvas = liveryCanvas(this.frame, paint.color, t.vinyl, t.carbon, this.canvas);
+    // Livery: the vinyl on the body colour.
+    this.canvas = liveryCanvas(this.frame, paint.color, t.vinyl, this.canvas);
     if (this.canvas) {
       if (!this.texture) {
         this.texture = new THREE.CanvasTexture(this.canvas);
@@ -199,12 +202,21 @@ export class CarLook {
     }
   }
 
+  /**
+   * Workshop: the panels of these body regions are off the car, so the pieces bolted to them
+   * (a lip on the front bumper, flares on a fender) are not drawn either.
+   */
+  setRemovedRegions(regions: ReadonlySet<string>): void {
+    this.removed = regions;
+    this.update();
+  }
+
   /** Per frame, after the panel mesh re-skinned: pieces ride with their regions. */
   update(): void {
     const panels = this.host.panels;
     for (const p of this.pieces) {
       if (!p.region) continue;
-      p.obj.visible = !panels.regionGone(p.region);
+      p.obj.visible = !panels.regionGone(p.region) && !this.removed.has(p.region);
       p.obj.position.copy(p.base).add(panels.regionShift(p.region, tmp));
     }
   }

@@ -3,7 +3,7 @@
 (
     name: "golden_tbone",
     seed: 104,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     entities: [
         (id: "victim", car: "debug_sedan", pos: (0.0, -16.0, 0.0), speed_mps: 8.0, driver: cruise(target_mps: 8.0)),

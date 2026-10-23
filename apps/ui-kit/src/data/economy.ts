@@ -37,7 +37,7 @@ export const DISTRICT_LABOUR: Record<string, number> = {
 export const SHOP = { crookedMarkup: 1.15, crookedWantedMarkup: 1.6 };
 
 /** `data/modes/*.toml` `repair_cost_scale`. */
-export const MODE_REPAIR_SCALE: Record<DamageMode, number> = { Arcade: 0.5, Simulation: 1.0 };
+export const MODE_REPAIR_SCALE: Record<DamageMode, number> = { Arcade: 0.5, Simulation: 0.5, Extreme: 1.0 };
 
 /** `prices.toml` `[insurance.*]`. */
 export const INSURANCE_TIERS: Record<string, { premiumPerDayFrac: number; coverage: number; deductible: number }> = {
