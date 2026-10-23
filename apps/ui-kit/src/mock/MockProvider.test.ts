@@ -93,14 +93,23 @@ describe("mock provider", () => {
     m.advance(2);
     const after = m.get().captain.units.find((u) => u.id === unit.id)!;
     expect(after.pos).not.toEqual(before.pos);
-    // Spikes: allowed at L3, then cooling down.
+    // Spikes unlock at L4 (row 156): refused at L3; once the chase reaches L4, allowed, then
+    // cooling down.
+    m.send({ type: "captain", command: { RequestSpikes: { target: 1, road: null } } });
+    expect(m.get().notice?.text).toMatch(/Unlocks at wanted level 4/);
+    // Roadblocks unlock at L3: fine now; a second one hits the budget / cooldown.
+    m.send({ type: "captain", command: { RequestRoadblock: { target: 1, road: null } } });
+    expect(m.get().captain.tools.some((t) => t.tool === "Roadblock")).toBe(true);
+    let t = 35;
+    while (!["L4", "L5"].includes(m.get().hud.heat.level) && t < 400) {
+      t += 5;
+      m.send({ type: "replay.seek", tick: t * 240 });
+    }
+    expect(["L4", "L5"]).toContain(m.get().hud.heat.level);
     m.send({ type: "captain", command: { RequestSpikes: { target: 1, road: null } } });
     expect(m.get().captain.readiness.spikes[0]).toBeGreaterThanOrEqual(1);
     m.send({ type: "captain", command: { RequestSpikes: { target: 1, road: null } } });
     expect(m.get().notice?.text).toMatch(/Cooling down/);
-    // Roadblocks unlock at L3: fine now; a second one hits the budget / cooldown.
-    m.send({ type: "captain", command: { RequestRoadblock: { target: 1, road: null } } });
-    expect(m.get().captain.tools.some((t) => t.tool === "Roadblock")).toBe(true);
     m.send({ type: "captain", command: { SetPriorityTarget: { target: 1 } } });
     expect(m.get().captain.priorityTarget).toBe(1);
   });

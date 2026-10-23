@@ -141,6 +141,9 @@ export interface HudState {
   pos: Vec2;
   headingRad: number;
   blips: MapBlip[];
+  /** The host draws its own minimap: the chase HUD keeps its radar hidden and only says when
+   * the helicopter is on the player (PR #32 port). */
+  radarHidden?: boolean;
   race: RaceHud | null;
   assists: AssistProfile;
   damageMode: DamageMode;

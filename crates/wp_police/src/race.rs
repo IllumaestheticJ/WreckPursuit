@@ -1393,6 +1393,43 @@ mod tests {
         assert!(hit.iter().any(|w| *w));
     }
 
+    /// PR #54 port: an unmanned dynamic strip (its car's spot was in view) stays while its
+    /// racer approaches and is lifted once the racer is past it.
+    #[test]
+    fn unmanned_strip_lifted_once_its_racer_passes() {
+        let mut police = system();
+        let racer = EntityId(7);
+        let world = wp_world::World::flat(wp_contracts::TimeOfDay::from_hours(14.0), 1.0);
+        let mut out = Vec::new();
+        let at = |x: f32| {
+            [RacerView {
+                entity: racer,
+                pos: [x, -1.75, 0.0],
+                vel: [25.0, 0.0, 0.0],
+            }]
+        };
+        police.step(&world, &at(100.0), &[], 1.0 / 60.0, &mut out);
+        let tool = police.place_spikes_at(racer, [400.0, -1.75], [1.0, 0.0]);
+        // Unmanned, as when its car's spot was in the racer's view.
+        let k = police.spikes.iter().position(|s| s.id == tool).unwrap();
+        let uid = police.spikes[k].unit.take().unwrap();
+        police.spikes[k].post = None;
+        let i = police.unit_index(uid).unwrap();
+        police.units[i].assignment = Assignment::Idle;
+        police.despawn(i);
+        for _ in 0..60 {
+            police.step(&world, &at(380.0), &[], 1.0 / 60.0, &mut out);
+        }
+        assert_eq!(police.spike_strips().len(), 1, "still ahead of the racer");
+        for _ in 0..60 {
+            police.step(&world, &at(440.0), &[], 1.0 / 60.0, &mut out);
+        }
+        assert!(
+            police.spike_strips().is_empty(),
+            "lifted once the racer is past"
+        );
+    }
+
     #[test]
     fn spread_is_even_and_deterministic() {
         let v: Vec<u32> = (0..10).collect();

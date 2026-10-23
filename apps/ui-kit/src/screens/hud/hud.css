@@ -319,7 +319,7 @@
   gap: 0.3em;
 }
 .wp-chase-radar-note {
-  font-size: 0.7em;
+  margin-left: 0.8em;
   color: var(--heli);
   text-transform: uppercase;
   letter-spacing: 0.08em;

@@ -83,9 +83,14 @@ pub const SPIKE_CAR_SHOULDER_M: f32 = 2.5;
 /// beside it (PR #54), m.
 pub const SPIKE_UNIT_LEASH_M: f32 = 15.0;
 
-/// A roadblock car not spawned yet because its spot is in a racer's view (row 131): it
-/// appears once the spot is hidden, while its tool lasts. (Spike cars never wait: a strip only
-/// lies on the road with its car beside it, PR #54, so both go down together.)
+/// An unmanned spike strip (its car's spot was in a racer's view, row 131 / 158) is lifted
+/// once its racer is this far past it along the road, m.
+pub const SPIKE_PASSED_M: f32 = 25.0;
+
+/// A roadblock or spike-strip car not spawned yet. A roadblock car waits while its spot is in a
+/// racer's view (row 131) and appears once the spot is hidden, while its tool lasts. A spike
+/// car is decided on the next think: spot hidden, it appears beside its strip; in view, it is
+/// dropped and the strip stays unmanned (PR #54 port, lead 2026-10-23).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PendingToolCar {
     /// Tool it belongs to.
@@ -3716,13 +3721,14 @@ impl PoliceSystem {
         self.spikes.push(strip);
     }
 
-    /// Whether strip `s` still has its unit beside it: present, not wrecked, still on this
-    /// strip's post and within [`SPIKE_UNIT_LEASH_M`] of where it parked. Scripted
-    /// race-profile strips without a unit (no race profile stakes one out beside its strip)
-    /// are exempt.
+    /// Whether strip `s` may stay on the road as far as its unit goes. A manned strip needs
+    /// its unit beside it: present, not wrecked, still on this strip's post and within
+    /// [`SPIKE_UNIT_LEASH_M`] of where it parked. Strips without a unit (scripted race-profile
+    /// strips; strips whose car's spot was in view) are exempt here; an unmanned dynamic strip
+    /// goes once its racer has passed it ([`Self::spike_passed`]).
     fn spike_unit_holds(&self, s: &SpikeStrip) -> bool {
         let Some(uid) = s.unit else {
-            return s.scripted;
+            return true;
         };
         let Some(u) = self.units.iter().find(|u| u.id == uid) else {
             return false;
@@ -3730,6 +3736,17 @@ impl PoliceSystem {
         !u.wrecked
             && matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == s.id)
             && dist(u.body.pos, s.post.unwrap_or(s.site.pos)) <= SPIKE_UNIT_LEASH_M
+    }
+
+    /// Whether an unmanned dynamic strip's racer is more than [`SPIKE_PASSED_M`] past it along
+    /// the road (the strip has done its job, or missed).
+    fn spike_passed(&self, s: &SpikeStrip) -> bool {
+        if s.unit.is_some() || s.scripted {
+            return false;
+        }
+        self.racers
+            .get(&s.racer)
+            .is_some_and(|r| dot(sub(xy(r.pos), s.site.pos), s.site.dir) > SPIKE_PASSED_M)
     }
 
     /// Remove strip `tool` from the road (no-op if already gone). Its unit is not touched.
@@ -3805,30 +3822,29 @@ impl PoliceSystem {
         // Row 133: the car parks on the right shoulder of the racer's own carriageway,
         // facing its traffic; on a one-way carriageway (a divided road's half) the strip
         // spans that carriageway, lane edge to median.
-        // PR #54: the car appears with its strip, at once. It does not wait for its spot to
-        // leave the racer's view as roadblock cars do (row 131): a strip may never lie on the
-        // road without its car, and a strip held back until its spot is hidden is never down
-        // in time (police scenarios: spike hits 10 -> 0 and 16 -> 0). Sites are at least
-        // `min_ahead_m` (150 m) ahead.
+        // PR #54 port (lead, 2026-10-23; rows 131 / 158: no police car appears in a racer's
+        // view): the strip goes down now. Its car is decided on the next think
+        // (`maintain_tool_cars`, which has the world for the view check): spot hidden, the car
+        // appears beside the strip; in view, no car and the strip stays unmanned, like a
+        // scripted race strip, until its racer passes it, the pursuit ends or it expires.
         let span = self.tool_span(&site);
         let post = span.at(site.pos, span.outer + SPIKE_CAR_SHOULDER_M);
         let expires = now.plus(lifetime);
-        let mut strip = if span.oneway {
+        let strip = if span.oneway {
             let (a, b) = (span.at(site.pos, span.inner), span.at(site.pos, span.outer));
             SpikeStrip::between(id, racer, site, a, b, None, expires)
         } else {
             SpikeStrip::across(id, racer, site, length, None, expires)
         };
-        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, span.flow);
-        self.assign(
-            i,
-            Assignment::SpikeAt {
+        self.tool_cars.push(PendingToolCar {
+            tool: id,
+            pos: post,
+            heading: span.flow,
+            assignment: Assignment::SpikeAt {
                 segment: site.segment,
                 tool: id,
             },
-        );
-        strip.unit = Some(self.units[i].id);
-        strip.post = Some(post);
+        });
         self.lay_spikes(strip);
         self.captain.spikes_ready = now.plus(cooldown);
         self.stats.spikes += 1;
@@ -3862,29 +3878,41 @@ impl PoliceSystem {
     }
 
     /// Spawn the roadblock cars whose spots are now out of every racer's view, now and along
-    /// its road ahead (row 131); drop those whose roadblock has gone. (Spike cars appear with
-    /// their strip at once: PR #54, see [`Self::place_spikes`].)
+    /// its road ahead (row 131); drop those whose roadblock has gone. A spike car gets one
+    /// chance: spot hidden, it appears beside its strip (which becomes manned); in view, it is
+    /// dropped and the strip stays unmanned (PR #54 port).
     fn maintain_tool_cars(&mut self, world: &dyn WorldQuery) {
         let pending = std::mem::take(&mut self.tool_cars);
         for car in pending {
-            let Some(k) = self.roadblocks.iter().position(|r| r.id == car.tool) else {
-                continue;
-            };
+            let rb = self.roadblocks.iter().position(|r| r.id == car.tool);
+            let sp = self.spikes.iter().position(|s| s.id == car.tool);
             // Row 140: by the time its spot is hidden the racer may have moved on, leaving the
             // spot on the far carriageway of its road now; such a car is not spawned at all.
-            let racer = self.roadblocks[k].racer;
+            let racer = match (rb, sp) {
+                (Some(k), _) => self.roadblocks[k].racer,
+                (None, Some(k)) => self.spikes[k].racer,
+                (None, None) => continue,
+            };
             if self.far_side(&self.racer_corridor(racer), car.pos) {
                 continue;
             }
             if self.warmed_up && self.spawn_in_view(world, car.pos) {
-                self.tool_cars.push(car);
+                if rb.is_some() {
+                    self.tool_cars.push(car);
+                }
                 continue;
             }
             let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, car.pos, car.heading);
             let uid = self.units[i].id;
             self.assign(i, car.assignment);
             self.record_spawn(world, i);
-            self.roadblocks[k].units.push(uid);
+            if let Some(k) = rb {
+                self.roadblocks[k].units.push(uid);
+            }
+            if let Some(k) = sp {
+                self.spikes[k].unit = Some(uid);
+                self.spikes[k].post = Some(car.pos);
+            }
         }
     }
 
@@ -3979,11 +4007,11 @@ impl PoliceSystem {
             keep
         });
         // PR #54: a strip whose unit has left its post (wrecked, shoved or driven away,
-        // reassigned, gone) is lifted.
+        // reassigned, gone) is lifted, and so is an unmanned strip its racer has passed.
         let unmanned: Vec<ToolId> = self
             .spikes
             .iter()
-            .filter(|s| !self.spike_unit_holds(s))
+            .filter(|s| !self.spike_unit_holds(s) || self.spike_passed(s))
             .map(|s| s.id)
             .collect();
         self.spikes.retain(|s| {

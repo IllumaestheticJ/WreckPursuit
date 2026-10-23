@@ -196,10 +196,21 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
     assert!(r.is_ok(), "{r:?}");
     let strip = h.police.spike_strips()[0].clone();
     assert!(strip.site.sight_m >= 120.0);
-    // PR #54: on the road at once with its car beside it (spike cars do not wait for their
-    // spot to leave the racer's view like roadblock cars, row 131).
-    spike_unit(&h, &strip);
+    // PR #54 port: the strip is down at once; its car is decided on the next think, beside
+    // it when the spot is hidden, else none (unmanned strip; no police car appears in view).
+    assert_eq!(strip.unit, None);
+    assert_eq!(h.police.tool_cars_waiting(strip.id).len(), 1);
+    h.run(0.5, &[]);
     assert!(h.police.tool_cars_waiting(strip.id).is_empty());
+    if let Some(s) = h.police.spike_strips().iter().find(|s| s.id == strip.id) {
+        if s.unit.is_some() {
+            spike_unit(&h, s);
+        } else {
+            assert!(h.police.units().iter().all(
+                |u| !matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == strip.id)
+            ));
+        }
+    }
     // Sites remember D's road id; a captain can name roads by it.
     assert!(h.police.graph().segment(strip.site.segment).edge.is_some());
     let err = h

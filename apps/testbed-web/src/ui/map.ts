@@ -7,7 +7,7 @@ import { chaseRadar, decodeMapDynamic } from "../../../ui-kit/src/map/data";
 import type { MapBlip, Vec2 } from "../../../ui-kit/src/model/types";
 
 /** The chase HUD's radar (ChaseHud, PR #32): the player's pose and the blips around them. */
-export type Radar = { pos: Vec2; headingRad: number; blips: MapBlip[] };
+export type Radar = { pos: Vec2; headingRad: number; blips: MapBlip[]; hidden?: boolean };
 import { layers } from "../settings";
 import { W } from "../wasm/layout";
 import { sim } from "../wasm/sim";
@@ -54,7 +54,10 @@ export class MapOverlay {
     // Decoded once for both (the map HUD takes a decoded frame).
     const f = decodeMapDynamic(sim.mapDynamic(player));
     if (this.hud.isOpen || minimap) this.hud.frame(f, nowMs);
-    this.lastRadar = radar ? chaseRadar(f) : null;
+    // The corner minimap already shows all of it: then the chase HUD only keeps its "on you"
+    // note (lead, 2026-10-23).
+    const r = radar ? chaseRadar(f) : null;
+    this.lastRadar = r ? { ...r, hidden: minimap } : null;
   }
 
   /** The chase radar (police cars, racers and the helicopter with its follow tether) from the

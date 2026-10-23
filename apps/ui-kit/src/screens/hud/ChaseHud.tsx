@@ -3,8 +3,9 @@
  * bounty (`HeatPanel`), pursuit status line and the latest police radio (at most three lines,
  * fading out; `feed.ts`; a helicopter pilot's lines carry an AIR badge). Transparent, top centre.
  * While police are around (the host sends a radar), a small radar sits to the right: police
- * cars, racers and the helicopter as its call sign, tethered to whoever it is following
- * (PR #32).
+ * cars, racers and the helicopter as its call sign, tethered to whoever it is following; hidden
+ * when the host shows its own minimap. A helicopter on the player adds "AIR <id> on you" to the
+ * status line (PR #32).
  */
 import { useSlice } from "../../model/GameModel";
 import { visibleFeed } from "./feed";
@@ -37,6 +38,12 @@ export function ChaseHud() {
         <HeatPanel heat={heat} />
         <div class="wp-chase-status wp-mono" data-state={heat.state}>
           {STATUS_TEXT[heat.state]}
+          {/* In the status line, above the radio lines (not beside them). */}
+          {onYou && (
+            <span class="wp-chase-radar-note">
+              <HeliBadge text={onYou.label} /> on you
+            </span>
+          )}
         </div>
         <ul class="wp-hud-alerts">
           {radio.map(({ entry: e, opacity }) => (
@@ -47,14 +54,9 @@ export function ChaseHud() {
           ))}
         </ul>
       </div>
-      {hud.blips.length > 0 && (
+      {hud.blips.length > 0 && !hud.radarHidden && (
         <div class="wp-chase-radar">
           <Minimap map={map} pos={hud.pos} headingRad={hud.headingRad} blips={hud.blips} radiusM={320} size="9em" flashing={heat.state === "pursuit"} />
-          {onYou && (
-            <div class="wp-chase-radar-note wp-mono">
-              <HeliBadge text={onYou.label} /> on you
-            </div>
-          )}
         </div>
       )}
     </div>

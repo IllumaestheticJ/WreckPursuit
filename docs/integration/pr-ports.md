@@ -34,14 +34,14 @@ round12 at the time of the gate, so there was nothing of E's to merge.
 
 Details in `docs/integration/spikes.md`. Conflict resolutions / round12 adaptations:
 
-- **Row 131 (spike cars wait until their spot is out of view) vs. "a strip only exists with its
-  car".** round12 laid the strip at once and held the car back — the reported bug. Holding the
-  strip back with the car keeps both rules but kills spikes: police scenarios `tool_placement`
-  spike hits 10 → 0, `radio_city_chase` 16 → 0 (a site needs ≥ 120 m approach sight, so its
-  spot is in view until the racer has passed). Choosing only sites whose car spot is hidden:
-  also 0. **Chosen:** spike cars are exempt from row 131's wait and appear with the strip,
-  ≥ `min_ahead_m` (150 m) ahead; roadblock cars still wait. Result: 10 → 8 and 16 → 14 hits.
-  Open question for the owner (below).
+- **Row 131 / 158 (no police car appears in a racer's view) vs. "a strip only exists with its
+  car".** round12 laid the strip at once and held the car back until its spot was hidden — the
+  reported bug. Holding the strip back with the car kills spikes (police scenarios: spike hits
+  10 -> 0 and 16 -> 0). First port: spike cars appeared with the strip even in view (hits 8 / 14).
+  **Final (lead, 2026-10-23):** the strip goes down at once; on the next think its car appears
+  beside it if the spot is hidden (counted in the pop-in audit), else no car and the strip stays
+  **unmanned**, lifted once its racer is 25 m past it, the pursuit ends or it expires. Hits:
+  9 / 17. Roadblock cars still wait as before.
 - **Row 75 prop clearance:** the spike car's shoulder spot must pass `spot_clear` (parked cars,
   cones, vehicles); `tools::plan_site_where` takes the first rule-valid site that does.
 - **Row 75 upright reset / shoves:** the strip is lifted when its unit is more than
@@ -49,7 +49,7 @@ Details in `docs/integration/spikes.md`. Conflict resolutions / round12 adaptati
 - **Row 84 search units:** a spike unit pulled into a search (or any reassignment) leaves
   `SpikeAt`, which lifts its strip at once (hook in `assign`, and in `despawn`).
 - **Row 156 (spikes at heat level 4):** unchanged; `place_spikes_at` bypasses rules as before.
-- **Race profiles / `SpikeStrip::scripted`:** **exempt.** Scripted strips have no unit, and no
+- **Race profiles / `SpikeStrip::scripted`:** **exempt** (E agrees). Scripted strips have no unit, and no
   profile has a stakeout beside its strip (only `grid_highway_sprint` has a strip, at 0.85;
   its stakeouts are at 0.3 / 0.55). A scripted strip that is ever given a unit follows the rule.
 - **wp_sim:** `withdraw_unbodied_spike_unit` hook in `reconcile_police_units` (as in the PR).
@@ -83,9 +83,11 @@ architecture (the PR's files did not apply: round12's maps are canvas renderers 
   - minimap / full-map helicopter icon (ui-kit `map/draw.ts`): top-down silhouette in a new
     `--heli` yellow, call sign upright, dashed tether + pulsing ring to whoever it follows
     (the player's own position when it is on the player). `MinimapStats.tethers`.
-  - chase-HUD radar (`ChaseHud`): the SVG minimap with the helicopter icon / tether, and an
-    "AIR <id> on you" note; `map/data.ts` `chaseRadar()` builds it from the map frame the
-    testbed already decodes (`ui/map.ts`), `LiveFrame.radar`.
+  - chase-HUD radar (`ChaseHud`): the SVG minimap with the helicopter icon / tether, shown only
+    while the testbed's corner minimap layer is off (`LiveFrame.radar.hidden`,
+    `HudState.radarHidden`); the "AIR <id> on you" note sits in the chase status line (clear of
+    the radio strip) and shows either way. `map/data.ts` `chaseRadar()` builds it from the map
+    frame the testbed already decodes (`ui/map.ts`).
   - pilot badge: `ScannerEntry.air` (reducer flags "Air <n>…" unit lines), AIR badge in the
     HUD alerts, chase HUD and scanner feed.
   - tests: ui-kit `chaseRadar` and reducer tests; `e2e/helicopter.mjs` air-unit check.
@@ -107,13 +109,13 @@ architecture (the PR's files did not apply: round12's maps are canvas renderers 
 | e2e `audio.mjs`, `audio_mix.mjs`, `audio_engine.mjs`, `audio_roster.mjs`, `audio_samples.mjs` | pass |
 | e2e `audio_impacts.mjs` | 3 FAIL, **pre-existing**: same 3 with round12's own `src/audio` (A/B run): "20 km/h ducks less than 90 km/h", "interior: more body, less air", "90 km/h crash broke the windshield and its tail is heard" |
 
-## Open questions for the lead
+## Lead follow-ups (2026-10-23), done
+1. Spike cars no longer appear in view: unmanned strip fallback (above).
+2. Chase radar only while the corner minimap is off; "on you" note moved into the status line.
+3. The spike car's spawn is counted in the row 131 pop-in audit (`record_spawn`).
+4. ui-kit `MockProvider.test.ts` updated: spikes refused at L3 ("Unlocks at wanted level 4"),
+   allowed once the recorded chase reaches L4, then cooling down.
+5. Merged `origin/lead/round12` b0269195 (Ashpeak); `ws/police` 4ca05ced (row 156) was already
+   in it.
 
-1. **Row 131 vs PR #54 (owner call):** spike cars now appear with their strip at ≥ 150 m, possibly
-   in view. Alternative: spike cars drive in from a hidden spot and lay the strip on arrival
-   (bigger change, fewer strips in time).
-2. **Chase radar next to the corner minimap:** the testbed now shows both while police are
-   around (as the PR did on `main`, which had no corner minimap). Keep, or show the radar only
-   when the minimap layer is off? Its "on you" note sits close to the radio strip at 1400 px.
-3. `audio_impacts.mjs` has 3 failures on round12 itself (above) and `MockProvider.test.ts` 1
-   (spikes unlock level) — not from these ports; owners: audio-impacts / ui-kit.
+`audio_impacts.mjs` keeps its 3 pre-existing failures (left as the lead asked).
