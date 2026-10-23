@@ -122,8 +122,9 @@ export class StreetUi {
     this.hud = div("street-hud", "wp-street-hud");
     this.count = div("street-count", "wp-race-countdown");
     this.resultEl = div("street-result");
-    // Enter / Esc answer the challenge while the picker is open. Capture phase, registered before
-    // the map's own key handler (added when it opens) and the testbed's (Enter = crash replay).
+    // Enter / Esc answer the challenge while the picker is open, Backspace / Delete / Ctrl+Z
+    // remove the last waypoint (pad X). Capture phase, registered before the map's own key
+    // handler (added when it opens) and the testbed's (Enter = crash replay).
     window.addEventListener(
       "keydown",
       (e) => {
@@ -131,6 +132,7 @@ export class StreetUi {
         if ((e.target as HTMLElement)?.tagName === "INPUT" && e.code !== "Enter" && e.code !== "Escape") return;
         if (e.code === "Escape") this.decline();
         else if (e.code === "Enter" || e.code === "NumpadEnter") this.accept();
+        else if (e.code === "Backspace" || e.code === "Delete" || (e.code === "KeyZ" && (e.ctrlKey || e.metaKey))) this.removeWaypoint(this.via.length - 1);
         else return;
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -310,7 +312,7 @@ export class StreetUi {
     this.replan();
   }
 
-  /** Remove waypoint `i` (the card's ✕, pad X removes the last). */
+  /** Remove waypoint `i` (the card's ✕; Backspace / Delete / Ctrl+Z and pad X remove the last). */
   removeWaypoint(i: number): void {
     if (i < 0 || i >= this.via.length) return;
     this.via.splice(i, 1);
@@ -425,7 +427,7 @@ export class StreetUi {
           (o.loop_lap ? `<div class="st-buttons"><button class="wp-btn wp-btn--ghost" id="st-lap">Loop 9 lap back here</button></div>` : "")
         : "") +
       (this.finishPick
-        ? `<div class="st-row">${this.moveB ? `<b>Tap the map</b> to move <b>B</b>.` : `<b>Tap the map</b> to add waypoints, driven in order.`} <span class="wp-dim">Pad: A add, X undo, Y move B.</span></div>`
+        ? `<div class="st-row">${this.moveB ? `<b>Tap the map</b> to move <b>B</b>.` : `<b>Tap the map</b> to add waypoints, driven in order.`} <span class="wp-dim"><span class="wp-kbd">Backspace</span> removes the last waypoint. Pad: A add, X undo, Y move B.</span></div>`
         : `<div class="st-row">1. <b>Tap / click the map</b> to set the finish <b>B</b> (A is where you are).<br><span class="wp-dim">Pad: left stick moves the map under the crosshair, A sets B.</span></div>`) +
       (this.via.length
         ? `<ul>${this.via
