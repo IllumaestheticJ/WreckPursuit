@@ -65,7 +65,7 @@ pub const PARK_MAX_PITCH: f32 = 0.15;
 pub const PARK_MAX_ROLL: f32 = 0.10;
 /// Most the four wheel contact heights may leave the best plane through them, m: more and
 /// the car would straddle a kerb or a crease (one wheel in the air or in the ground).
-pub const PARK_MAX_TWIST_M: f32 = 0.06;
+pub const PARK_MAX_TWIST_M: f32 = 0.05;
 /// Wheel contact points in the prop frame: `(±(half_x − inset), ±half_y × fraction)`.
 const WHEEL_INSET_M: f32 = 0.2;
 const WHEEL_BASE_FRAC: f32 = 0.6;

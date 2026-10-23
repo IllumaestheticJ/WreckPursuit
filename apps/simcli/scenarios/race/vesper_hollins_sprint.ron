@@ -3,7 +3,9 @@
 // course is the city's own "Hollins Ascent -> Knob Observatory Lot" route (the one
 // city/hill_road_ascent.ron drives at 25 mph). Four entrants sit on the judge's staggered grid
 // slots on the climb (row gap 8 m, columns closed up from 5 m so both start inside the lanes:
-// wp_race::catalog::fit_grid_to_road); simcli puts each on the road surface.
+// wp_race::catalog::fit_grid_to_road); simcli puts each on the road surface. Since the PR #38
+// port (2026-10-23) the Hollins Ascent grid stands across the Hollins Gorge Bridge (≈ 0.85 km,
+// ≈ 77 m climb).
 //
 // The race itself is driven and judged by crates/wp_race/tests/race_vesper.rs (wp_opponent AI
 // entrants via wp_race::entrants). Traffic and police are off: this is the hill-course check
@@ -23,10 +25,10 @@
     police_cars: false,
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (-437.299, 874.676, 22.4), yaw: 1.4439),
-        (id: "ai_sedan", car: "debug_sedan", pos: (-432.825, 878.138, 22.4), yaw: 1.4439),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (-429.364, 873.664, 22.4), yaw: 1.4439),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (-424.889, 877.125, 22.4), yaw: 1.4439),
+        (id: "ai_coupe", car: "debug_coupe", pos: (-579.9593, 900.14075, 33.084213), yaw: 1.0645496),
+        (id: "ai_sedan", car: "debug_sedan", pos: (-572.96277, 896.26154, 33.084213), yaw: 1.0645496),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (-565.9662, 892.3824, 33.084213), yaw: 1.0645496),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (-558.9696, 888.5032, 33.084213), yaw: 1.0645496),
     ],
     duration_s: 10.0,
     hash_every: 240,

@@ -106,8 +106,11 @@ mod tests {
         assert!(
             // 7.5 MB before the residential lots (rows 94–95: houses with pitched roofs,
             // garages, grass verges; trees, driveways, hedges and fences are instanced);
-            // 10.04 MB with the Loop 9 rest stops (row 153: six ramps, three parking roads).
-            shipped.len() < 10_200_000,
+            // 10.04 MB with the Loop 9 rest stops (row 153: six ramps, three parking roads);
+            // 10.54 MB with PR #38's river, canal, bridges, landmarks and canopies and the
+            // highway edge barriers (row 160). The base64 preview is 14.05 MB, under the
+            // 15 MB preview cap.
+            shipped.len() < 11_000_000,
             "greybox grew to {} bytes",
             shipped.len()
         );
