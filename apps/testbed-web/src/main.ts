@@ -170,6 +170,10 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  ui.vehicleName = (e) => {
+    const v = app.views.get(e);
+    return v ? (v.info.kind === "Police" ? "a police car" : v.info.display_name) : null;
+  };
   // Police radio strip (row 79): what the scanner says, in sync with the voice; police events
   // directly while the audio is not running.
   const radioStrip = new RadioStrip(overlay);
@@ -248,8 +252,9 @@ async function main(): Promise<void> {
   const runEnd = new RunEndView(runEndEl, {
     repair: () => sim.runRepairContinue(),
     restart: () => restartRun(),
-    onOpen: () => ui.setBill(true),
-    onClose: () => ui.setBill(false),
+    // Capture / wreck: outcome banner, then this card, then the bill (ui/overlay.ts, B5).
+    onOpen: () => ui.runEndOpened(),
+    onClose: () => ui.runEndClosed(),
     garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);

@@ -5,7 +5,8 @@
 //    repair_quote_json), with shop / district / option / insurance / wanted controls.
 //  - pursuit banner (centre): PURSUIT / SEARCHING / ESCAPED / CAPTURED from `police_status()`;
 //    a capture (or a total loss mid-chase) opens the repair bill, as does the end of a scripted
-//    scenario. The chase end comes from the kit's `ChaseEndDetector`: the typed
+//    scenario. A capture / wreck is sequenced (playtest B5): the banner alone for 2.5 s, then
+//    the end-of-run card (career / quick run result, banner hidden), then the bill 1.5 s later. The chase end comes from the kit's `ChaseEndDetector`: the typed
 //    `PoliceEvent::PursuitEnded` (outcome + level before the reset), else the status turning
 //    clear with `police_status().last_outcome`.
 // The kit's live model folds events with the same reducer as its mock provider, so these widgets
@@ -17,6 +18,11 @@ import { bannerFor, toReadout, type Banner, type PoliceStatus } from "../police"
 import { layers } from "../settings";
 import { sim, type SimEvent } from "../wasm/sim";
 import type { Radar } from "./map";
+
+/** End sequence (playtest B5): the CAPTURED / wreck banner alone this long, ms. */
+const END_BANNER_MS = 2500;
+/** Then the end-of-run card alone this long before the repair bill opens, ms. */
+const END_CARD_MS = 1500;
 
 export class UiOverlay {
   readonly model: LiveModel;
@@ -34,14 +40,28 @@ export class UiOverlay {
   private endBillShown = false;
   /** Latest police status of the player (null = no police in this session). */
   status: PoliceStatus | null = null;
+  /** Player-facing name of a simulated car ("a police car", "Lindwurm 4T"); null = unknown
+   * (set by the host, which knows the views). */
+  vehicleName: ((entity: number) => string | null) | null = null;
+  /** The player's entity (latest frame). */
+  private player = -1;
   /** Hide the chase readout while the player is clear (player mode; set by the debug switch). */
   quietWhenClear = false;
+  /** Capture / wreck sequence (playtest B5): the outcome banner alone first, then the
+   * end-of-run card (when the run has one), then the repair bill; never all three at once.
+   * `start`: performance.now() of the end; `card`: the end-of-run card asked to open;
+   * `cardAt`: when it was shown. Null when no sequence is running. */
+  private endSeq: { start: number; card: boolean; cardAt: number | null } | null = null;
+  /** The end-of-run card is up (the outcome banner stays hidden meanwhile). */
+  private cardOpen = false;
 
   constructor(parent: HTMLElement) {
     this.model = createLiveModel({
       quote: (player, request): LiveBillJson | null => (player ? sim.repairQuote(player, billRequestJson(request)) : null),
       onBack: () => this.setBill(false),
-      nameOf: (e) => (sim.entities().includes(e) ? `car #${e}` : e === 4294967295 ? "barrier" : `traffic #${e}`),
+      // Player-facing names (playtest B11): no entity numbers.
+      nameOf: (e) =>
+        e === this.player ? "you" : e === 4294967295 ? "a barrier" : (this.vehicleName?.(e) ?? (sim.entities().includes(e) ? "a car" : "a traffic car")),
     });
     const layer = (id: string) => {
       const el = document.createElement("div");
@@ -63,6 +83,7 @@ export class UiOverlay {
 
   /** Feed one frame (call after draining events). */
   frame(tick: number, player: number, events: SimEvent[], hours: number, mode: string, radar: Radar | null = null): void {
+    this.player = player;
     const chase = layers.on("chase");
     const status = sim.policeStatus(player);
     this.status = status;
@@ -70,14 +91,17 @@ export class UiOverlay {
     // police in the session, or clear with no heat and no fresh outcome). Debug keeps it.
     const quiet = this.quietWhenClear && (!status || (status.status === "Clear" && status.heat <= 0 && bannerFor(status) === null));
     this.chaseEl.classList.toggle("hidden", !chase || quiet);
-    this.showBanner(chase ? bannerFor(status) : null);
+    const now = performance.now();
+    const cardShown = this.sequence(now);
+    // The banner steps aside for the end-of-run card and the bill (it covered the bill's header).
+    this.showBanner(chase && !cardShown && !this.billOpen ? bannerFor(status) : null);
     // A capture or a wreck ends the run: show what the damage costs. (An escape does not: the
     // player is still driving.)
     const fresh = status?.last_outcome && status.outcome_age_s !== null && status.outcome_age_s < 1 ? status.last_outcome : null;
     const end = this.chaseEnd.update(player, status?.status, status?.level ?? "None", events as unknown as KitSimEvent[], fresh);
     if (end) {
       this.lastChaseEnd = { ...end, tick };
-      if ((end.how === "captured" || end.how === "wrecked") && !this.billOpen) this.autoBill();
+      if ((end.how === "captured" || end.how === "wrecked") && !this.billOpen) this.startEnd(now, false);
     }
     this.model.push({
       tick,
@@ -89,6 +113,51 @@ export class UiOverlay {
       // The chase radar only matters once police are around (police cars and the helicopter).
       radar: status ? radar : null,
     });
+  }
+
+  /** Begin (or join) the end sequence: `card` = the end-of-run card wants to open. */
+  private startEnd(now: number, card: boolean): void {
+    if (this.endSeq) this.endSeq.card ||= card;
+    // A card without a chase end (a wreck outside a pursuit) has no banner to wait for.
+    else this.endSeq = { start: card ? now - END_BANNER_MS : now, card, cardAt: null };
+  }
+
+  /** Step the end sequence; true while the end-of-run card is showing. */
+  private sequence(now: number): boolean {
+    const runEnd = document.getElementById("ui-run-end");
+    const seq = this.endSeq;
+    if (!seq) {
+      if (runEnd && runEnd.style.visibility) runEnd.style.visibility = "";
+      return this.cardOpen;
+    }
+    const bannerPhase = now - seq.start < END_BANNER_MS;
+    if (runEnd) runEnd.style.visibility = bannerPhase ? "hidden" : "";
+    if (bannerPhase) return false;
+    if (!seq.card) {
+      // No end-of-run card (a run without a result panel): the bill follows the banner.
+      this.endSeq = null;
+      if (!this.billOpen) this.autoBill();
+      return false;
+    }
+    seq.cardAt ??= now;
+    if (now - seq.cardAt >= END_CARD_MS) {
+      this.endSeq = null;
+      if (!this.billOpen) this.autoBill();
+    }
+    return true;
+  }
+
+  /** The end-of-run card opened (run over): it shows after the outcome banner, the bill after it. */
+  runEndOpened(): void {
+    this.cardOpen = true;
+    this.startEnd(performance.now(), true);
+  }
+
+  /** The end-of-run card closed (repair & continue): its bill closes with it. */
+  runEndClosed(): void {
+    this.cardOpen = false;
+    this.endSeq = null;
+    this.setBill(false);
   }
 
   /** A scripted scenario finished: show the bill once per session. */
@@ -110,6 +179,8 @@ export class UiOverlay {
     this.chaseEnd.reset();
     this.lastChaseEnd = null;
     this.endBillShown = false;
+    this.endSeq = null;
+    this.cardOpen = false;
     this.showBanner(null);
     if (this.billAuto) this.setBill(false);
     else if (this.billOpen) this.model.openBill();
