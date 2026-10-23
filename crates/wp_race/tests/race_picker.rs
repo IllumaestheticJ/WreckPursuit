@@ -251,6 +251,7 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
             let yaw = wp_math::atan2(-r.dir[0], r.dir[1]);
             sim.place_on_ground(r.racer, [r.pos[0], r.pos[1]], yaw, 0.0, Some(r.pos[2]))
                 .unwrap();
+            sim.set_ghost(r.racer, 240).unwrap();
             live.relocate(r.racer, r.pos, sim.tick());
         }
         if !out.reports.is_empty() {

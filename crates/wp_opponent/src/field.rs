@@ -645,6 +645,9 @@ const WEAVE_MIN_SPAN_M: f32 = 3.0;
 /// across still counts.
 const CIV_DRIFT_DEADBAND: f32 = 0.025;
 
+/// How far along the corridor a relocated racer is looked for, either way, m.
+const RELOCATE_WINDOW_M: f32 = 1500.0;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
@@ -1117,6 +1120,42 @@ impl Field {
             }
         }
         self.still = next;
+    }
+
+    /// The server moved racer `entity` on purpose (a reset back onto the course after being
+    /// stranded off it): find it on the corridor again near `pos` (a reset can move it
+    /// hundreds of metres back), count the move in its progress, and drive on from rest.
+    pub fn relocate(&mut self, entity: EntityId, pos: V2) {
+        let Some(k) = self.racer_index(entity) else {
+            return;
+        };
+        if self.racers[k].progress.is_nan() {
+            return;
+        }
+        let corridor = match &self.racers[k].flight {
+            Some(f) => &f.corridor,
+            None => &self.corridor,
+        };
+        let window = (RELOCATE_WINDOW_M / CORRIDOR_STEP_M) as usize;
+        let cp = corridor.project(pos, Some(self.racers[k].hint), window);
+        let ds = corridor.delta_s(self.racers[k].s, cp.s);
+        let r = &mut self.racers[k];
+        if r.flight.is_none() {
+            r.progress += ds;
+        }
+        r.pos = pos;
+        r.s = cp.s;
+        r.n = cp.n;
+        r.n_cmd = cp.n;
+        r.hint = cp.index;
+        r.tactic = Tactic::Follow;
+        r.tactic_ticks = 0;
+        r.stuck_s = 0.0;
+        r.stable_s = 0.0;
+        r.escape = None;
+        r.wants_room = false;
+        r.throttle = 0.0;
+        r.ctrl.resync(0.0);
     }
 
     fn racer_index(&self, e: EntityId) -> Option<usize> {

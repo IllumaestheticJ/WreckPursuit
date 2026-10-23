@@ -1166,3 +1166,53 @@ at s95. A racer hit it (`hit 2`) at about 40 m/s, it spun off to the right (n +1
 rejoined: 30 rejoin and reverse cycles until the window closed, 36 wall contacts. The speed-scaled
 run has the same total; its per-car split was not checked. This is a rejoin problem off the road
 after a spin, not this fix's code. It is a follow-up.
+
+## Stranded AI racers are put back on the course (2026-10-23, lead)
+
+**The case.** On Loop 9 at s95, seed 13, sperber_32 was hit by a racer at about 40 m/s near
+s 1490 on the Hollins hill. It spun off the right edge of the embankment and fell about 29 m
+down the bank (z 57 → 28). For the rest of the race it drove straight back at the road, stalled
+on a slope of about 25° 24 m short of it, and rolled 80 m back down: 30 rejoins.
+
+Its 36 walls were 19 during the crash and 17 bumps at the foot of the bank. Over 16 seeds of
+Loop 9 at both skills, every other car had at most 1 rejoin.
+
+**Tried and dropped (local only).** A climb planner: on a stalled rejoin, aim for the road-edge
+point (300 m back to 300 m ahead) with the gentlest straight-line climb, from the world's ground
+heights. No point along those 600 m was under 0.21 grade; the road sits on a steep embankment
+there. The car still made 36 rejoins.
+
+**Fix (lead's option (b)).** The judge's off-course reset (round 12, row 127: `CourseReset` to the
+last on-course point) now also covers the AI entrants: `RaceJudge::set_stranded_reset`. An AI
+racer outside the corridor (half-width + margin) for `STRANDED_GRACE_S` = 20 s is reset, even
+with resets off. Until then it keeps trying to rejoin.
+
+- **Who:** picker races (`LiveRace::new`) list the AI entrants only. The player's car keeps the
+  owner's picker-race rule: take any line, never a reset, autopilot or not.
+- **Browser:** the session already moves every `CourseReset` with `reset_onto_course` (a clear
+  lane spot, `ResetAt` + `Ghost` ops, damage kept). `LiveRace::relocate` now also tells the AI
+  (`AiEntrants::relocate` → `Field::relocate`: re-projected within 1.5 km, progress adjusted,
+  back to Follow from rest).
+- **Harnesses:** the pace and race_picker harnesses place the car on the ground at the reset
+  point and ghost it for 1 s.
+- **Test:** `a_stranded_ai_racer_is_put_back_after_its_grace_and_the_player_is_not`.
+
+**Measured on round12 984bc3e4 + this branch.**
+
+| | before | after |
+|---|---|---|
+| Loop 9 s95, 16 seeds: finishers | 95/96 | 96/96 |
+| Loop 9 s95, 16 seeds: walls | 39 | 22 |
+| Loop 9 s95, 16 seeds: mean time | 228.9 s | 230.0 s |
+| Loop 9 s50, 16 seeds | 96/96, 238.7 s, 16 walls | identical |
+| most rejoins by one car, Loop 9, 32 races | 30 | 2 |
+| `just pace-loop9` | 48/48, 48/48 | 48/48, 48/48 (means 245.2 / 229.5 s) |
+
+Exactly one reset fired in Loop 9 (seed 13, at t = 70.8 s). sperber_32 now finishes in 278.8 s
+with 19 walls (the crash) and 1 rejoin. City sprint, Grid highway, Hollins and Lantern over
+seeds 1–8: identical, with no resets. Goldens: all 115 unchanged (no reset fires in them),
+so there is nothing to bless.
+
+**Open, not this change.** On Hollins s95 seed 3, shiro_turbo has 17 rejoins and lindwurm_4t
+has 15, and neither finishes. This was already so before; they stay inside the corridor, so no
+reset fires. It is a follow-up.

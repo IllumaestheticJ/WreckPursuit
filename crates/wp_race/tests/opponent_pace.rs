@@ -124,6 +124,8 @@ pub struct CarPace {
     pub rejoins: u32,
     /// Reverse manoeuvres.
     pub reverses: u32,
+    /// Resets back onto the course after being stranded off it.
+    pub resets: u32,
     /// Static-geometry contacts (walls, kerbs, props), ≥ 400 N·s.
     pub wall_hits: u32,
     /// Mean |n − n_cmd| at speed, m.
@@ -344,8 +346,10 @@ pub fn race_pace_in(
     let entrants_profiles: Vec<DriverProfile> = entrants.iter().map(|e| e.profile).collect();
     let mut ai = AiEntrants::new(sim.world(), &race, kind, closed, &entrants, seed)
         .expect("a drivable route");
-    let green = judge.start(sim.tick()).unwrap();
     let racers: Vec<EntityId> = entrants.iter().map(|e| e.racer).collect();
+    // Every seat is AI-driven: stranded cars go back on the course, as in a picker race.
+    judge.set_stranded_reset(&racers);
+    let green = judge.start(sim.tick()).unwrap();
     let k_n = racers.len();
 
     // Ideal profiles (100 % usage on the measured limits) on each car's own line.
@@ -371,6 +375,7 @@ pub fn race_pace_in(
     let mut loss = vec![[0.0f32; BUCKETS.len()]; k_n];
     let mut rejoins = vec![0u32; k_n];
     let mut reverses = vec![0u32; k_n];
+    let mut resets = vec![0u32; k_n];
     let mut walls = vec![0u32; k_n];
     let mut track_err = vec![(0.0f32, 0u32); k_n];
     // Racing ticks, ticks on the opposing lanes, Σn, Σn² (lateral line usage).
@@ -456,6 +461,27 @@ pub fn race_pace_in(
             .collect();
         judge.observe(sim.tick(), &samples, &events);
         ai.report_to(&mut judge, sim.tick());
+        // Stranded AI racers go back on the course at rest, as the browser session does (it
+        // also picks a clear lane spot there; the centreline point is enough here).
+        for r in judge.drain_resets() {
+            let yaw = wp_math::atan2(-r.dir[0], r.dir[1]);
+            sim.place_on_ground(r.racer, [r.pos[0], r.pos[1]], yaw, 0.0, Some(r.pos[2]))
+                .unwrap();
+            sim.set_ghost(r.racer, 240).unwrap();
+            judge.relocate(r.racer, r.pos, sim.tick());
+            ai.relocate(r.racer, r.pos);
+            if let Some(k) = racers.iter().position(|x| *x == r.racer) {
+                resets[k] += 1;
+                if opts.trace == Some(k) {
+                    eprintln!(
+                        "    RESET t={:.2} to ({:.1},{:.1})",
+                        (sim.tick().saturating_sub(green)) as f32 * PHYSICS_DT,
+                        r.pos[0],
+                        r.pos[1]
+                    );
+                }
+            }
+        }
         if tick < green {
             continue;
         }
@@ -698,6 +724,7 @@ pub fn race_pace_in(
                 loss: loss[k],
                 rejoins: rejoins[k],
                 reverses: reverses[k],
+                resets: resets[k],
                 wall_hits: walls[k],
                 track_err_m: track_err[k].0 / track_err[k].1.max(1) as f32,
                 opposing_frac: lateral[k].1 as f32 / lateral[k].0.max(1) as f32,
@@ -786,7 +813,7 @@ fn pace_sweep() {
                     .map(|(b, l)| format!("{b} {l:.1}"))
                     .collect();
                 eprintln!(
-                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} civnear {:.2} {:.2} | {} | {}",
+                    "  {:<14} time {:>7} ideal {:6.1} own {:6.1} ratio {:>5} | rej {} rev {} rst {} wall {} trk {:.2} | opp {:.0}% latsd {:.2} pass/km {:.1} nose {} {:.1}s opp-nose {} civhit {} hit {} split {} splitab {} civnear {:.2} {:.2} | {} | {}",
                     c.car,
                     c.time_s.map_or("-".into(), |t| format!("{t:.1}")),
                     c.ideal_s,
@@ -794,6 +821,7 @@ fn pace_sweep() {
                     ratio.map_or("-".into(), |r| format!("{r:.3}")),
                     c.rejoins,
                     c.reverses,
+                    c.resets,
                     c.wall_hits,
                     c.track_err_m,
                     100.0 * c.opposing_frac,
