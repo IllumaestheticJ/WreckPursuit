@@ -795,7 +795,7 @@ fn lab_overrides_from_env() {
         grip_lab::set_override(Some(merged(&grip_lab::GripBalance::shipped(), &j)));
     }
     if let Ok(j) = std::env::var("WP_PACE_RIDE") {
-        ride_lab::set_override(Some(merged(&ride_lab::RideTune::owner(), &j)));
+        ride_lab::set_override(Some(merged(&ride_lab::RideTune::shipped(), &j)));
     }
 }
 
