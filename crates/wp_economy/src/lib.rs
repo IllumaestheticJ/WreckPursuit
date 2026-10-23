@@ -20,6 +20,7 @@
 //! - [`payouts`] — purses, buy-ins, clean bonus, pink slips, informants.
 //! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
 //! - [`parts`] — the garage workshop: part slots, removal order, inventory, parts catalog.
+//! - [`lots`] — dealerships, used lots and junkyards: daily stock, buying a listed car, tyres.
 //! - [`garage`] — buy/sell, floor car, install/uninstall, preview, valuation, insurance.
 //! - [`estimate`] — performance estimator and class index.
 //! - [`pursuit`] — police pursuit endings → capture / escape settlement; decodes today's
@@ -40,6 +41,7 @@ mod error;
 pub mod estimate;
 pub mod garage;
 pub mod ledger;
+pub mod lots;
 pub mod mods;
 pub mod parts;
 pub mod payouts;
@@ -62,7 +64,10 @@ pub use garage::{CarSpec, Condition, Preview};
 pub use ledger::{
     account_id_of, player_of, AccountStore, CarLocation, CarUid, DamageSnapshot, EconResult,
     EconomyEvent, EventReason, InMemoryStore, Money, OwnedCar, PlayerAccount, StoreError,
-    ViolationCounts,
+    TireState, ViolationCounts,
+};
+pub use lots::{
+    Listing, ListingGrade, ListingWear, LotDef, LotKind, LotTables, RareVariant, TireTables,
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use parts::{
@@ -71,7 +76,9 @@ pub use parts::{
     WorkshopView,
 };
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
-pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};
+pub use profile::{
+    AbandonedRun, CareerProfile, CareerStats, CarryOver, LotSales, ProfileError, RunEnd,
+};
 pub use progression::{
     career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature,
     ProgressUpdate, ProgressionRules, RepTier,

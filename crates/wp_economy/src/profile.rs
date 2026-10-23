@@ -138,6 +138,34 @@ pub struct CareerProfile {
     /// [`AbandonedRun`]); `None` between runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_in_pursuit: Option<AbandonedRun>,
+    /// Lot cars bought on the current day (so a bought car leaves the lot until it restocks).
+    #[serde(default)]
+    pub lot_sales: LotSales,
+}
+
+/// Lot spaces sold on one in-game day (`wp_economy::lots`); stale days count as empty.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct LotSales {
+    /// Day the sales were made.
+    pub day: u32,
+    /// Sold slots by lot id.
+    pub sold: BTreeMap<String, std::collections::BTreeSet<u32>>,
+}
+
+impl LotSales {
+    /// Slot `slot` of `lot` was sold on `day`.
+    pub fn is_sold(&self, day: u32, lot: &str, slot: u32) -> bool {
+        self.day == day && self.sold.get(lot).is_some_and(|s| s.contains(&slot))
+    }
+
+    /// Record a sale on `day` (forgets other days' sales).
+    pub fn record(&mut self, day: u32, lot: &str, slot: u32) {
+        if self.day != day {
+            self.day = day;
+            self.sold.clear();
+        }
+        self.sold.entry(lot.to_string()).or_default().insert(slot);
+    }
 }
 
 impl Economy {
@@ -155,6 +183,7 @@ impl Economy {
             stats: CareerStats::default(),
             lattices: BTreeMap::new(),
             run_in_pursuit: None,
+            lot_sales: LotSales::default(),
         }
     }
 

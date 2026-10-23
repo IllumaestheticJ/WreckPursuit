@@ -38,11 +38,11 @@ use wp_contracts::{
     DamageMode, DamageSim, DistrictId, EntityId, LoadedCar, RepairItem, VehicleClass, VehicleDef,
     WantedLevel,
 };
-use wp_damage::{DamageModel, FullDamageSnapshot};
+use wp_damage::{DamageModel, FullDamageSnapshot, PreownedWear};
 use wp_economy::{
     CarLocation, CarSpec, CarUid, CareerProfile, CareerProgress, Condition, DamageReport, Economy,
-    EconomyError, EconomyEvent, EventReason, ImpoundStatus, Money, OwnedCar, ProgressUpdate,
-    RepTier, RepairOption, RepairQuote, RunEnd, ShopContext, ShopKind,
+    EconomyError, EconomyEvent, EventReason, ImpoundStatus, Listing, ListingGrade, LotKind, Money,
+    OwnedCar, ProgressUpdate, RepTier, RepairOption, RepairQuote, RunEnd, ShopContext, ShopKind,
 };
 
 use crate::data::mem_data;
@@ -55,6 +55,9 @@ const CAREER_SEED_SALT: u64 = 0xCA4E_E400;
 
 /// Extra RNG salt for settling a run abandoned mid-pursuit (`Career::load_json`).
 const ABANDONED_SEED_SALT: u64 = 0xAB_A4D0;
+
+/// Spike-strip deflation at the end of a run at which a tyre stays flat.
+const TIRE_FLAT_PUNCTURE: f32 = 0.5;
 
 /// Ledger lines in the garage view.
 const VIEW_LEDGER_LINES: usize = 25;
@@ -184,6 +187,98 @@ pub struct CarView {
     pub stats: Option<StatsView>,
     /// Some outstanding damage dates from a police capture (insurance will not pay for it).
     pub damage_before_capture: bool,
+    /// Tyres (FL, FR, RL, RR). Repairs never fix them: replace them on their own.
+    pub tires: TireView,
+}
+
+/// A car's tyres in the garage.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TireView {
+    /// Tread 0 (bald) ..= 1 (new), FL, FR, RL, RR.
+    pub tread: [f32; 4],
+    /// Flat.
+    pub flat: [bool; 4],
+    /// Needs replacing (flat or bald).
+    pub worn_out: [bool; 4],
+    /// Grip relative to new tyres.
+    pub grip: [f32; 4],
+    /// Price of one fitted tyre for this car.
+    pub price_each: Money,
+}
+
+/// A lot on the lots list (the garage's "Car lots" tab).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LotSummary {
+    /// Lot id.
+    pub id: String,
+    /// Name.
+    pub name: String,
+    /// `Dealership`, `UsedLot` or `Junkyard`.
+    pub kind: LotKind,
+    /// Tier 1 ..= 3.
+    pub tier: u8,
+    /// District name.
+    pub district: String,
+    /// Classes it carries.
+    pub classes: Vec<VehicleClass>,
+    /// Cars on the lot today (not yet sold).
+    pub in_stock: usize,
+    /// Cheapest car on the lot today.
+    pub from_price: Option<Money>,
+}
+
+/// One car on a lot today. Junkyard cars hide what cannot be seen (`condition`, `runs`,
+/// `tired_parts` are `None` until bought).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ListingView {
+    /// Parking space (what `career_buy_listing` names).
+    pub slot: u32,
+    /// Car id.
+    pub def_id: String,
+    /// Display name (the variant's name for a rare variant).
+    pub name: String,
+    /// Class.
+    pub class: VehicleClass,
+    /// New / used / junk.
+    pub grade: ListingGrade,
+    /// Asking price.
+    pub price: Money,
+    /// A rare variant.
+    pub rare: bool,
+    /// Mods it comes with (names).
+    pub mods: Vec<String>,
+    /// Condition 0..=1: the car's health as the damage model has it (hidden at a junkyard).
+    pub condition: Option<f32>,
+    /// What repairing everything would cost at a legit residential shop, tyres excluded
+    /// (hidden at a junkyard).
+    pub est_repairs: Option<Money>,
+    /// Runs (hidden at a junkyard).
+    pub runs: Option<bool>,
+    /// Worn components with their health (hidden at a junkyard).
+    pub tired_parts: Option<Vec<(String, f32)>>,
+    /// Missing panels (visible).
+    pub missing: Vec<String>,
+    /// Dented panels (visible).
+    pub dents: Vec<String>,
+    /// Tyre tread (visible).
+    pub tread: [f32; 4],
+    /// Flat tyres (visible).
+    pub flat: [bool; 4],
+    /// Performance as built (with the variant's mods).
+    pub stats: Option<StatsView>,
+    /// Sold today.
+    pub sold: bool,
+}
+
+/// One lot's stock today (`career_lot_json`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LotStockView {
+    /// The lot.
+    pub lot: LotSummary,
+    /// In-game day the stock is for (restocks every day).
+    pub day: u32,
+    /// Cars by slot, sold ones included (`sold`).
+    pub cars: Vec<ListingView>,
 }
 
 /// A car the dealer sells.
@@ -266,8 +361,10 @@ pub struct CareerView {
     pub start_blocker: Option<String>,
     /// Owned cars.
     pub cars: Vec<CarView>,
-    /// The dealer.
+    /// The dealer (every roster model; the browser now buys from the lots instead).
     pub dealer: Vec<DealerCar>,
+    /// Dealerships, used lots and junkyards with today's stock counts.
+    pub lots: Vec<LotSummary>,
     /// Economy floor: the beater and its price, offered when no car is usable.
     pub floor_car: Option<(String, Money)>,
     /// Insurance tiers.
@@ -678,6 +775,10 @@ impl Career {
         let car = self.profile.account.try_car(uid).map_err(e2s)?;
         let price = self.econ.price_table_for(car);
         let mode_table = self.econ.mode_table(self.mode()).clone();
+        // A garage model was never stepped: derive its effects (a dead engine reads as dead).
+        let mut model = model.clone();
+        model.refresh_effects(&mode_table);
+        let model = &model;
         let summary = model.summary();
         let report = DamageReport {
             car: uid,
@@ -825,7 +926,251 @@ impl Career {
             impound: self.econ.impound_status(acct, c.uid).ok(),
             stats: self.stats_for(&c.def_id, &c.mods).ok(),
             damage_before_capture: c.damage.sustained_before_capture,
+            tires: self.tire_view(c),
         }
+    }
+
+    fn tire_view(&self, c: &OwnedCar) -> TireView {
+        let (grip, _) = self.econ.tire_effects(&c.tires);
+        TireView {
+            tread: c.tires.tread,
+            flat: c.tires.flat,
+            worn_out: c.tires.worn_out(self.econ.lots.tires.bald_below),
+            grip,
+            price_each: self.econ.tire_quote(c, [true, false, false, false]),
+        }
+    }
+
+    // ----- car lots ------------------------------------------------------------------------
+
+    /// The models the lots stock from: the street roster the dealer sells.
+    fn roster(&mut self) -> Vec<CarSpec> {
+        self.dealer()
+            .iter()
+            .map(|d| CarSpec {
+                def_id: d.def_id.clone(),
+                class: d.class,
+                base_price: d.base_price,
+            })
+            .collect()
+    }
+
+    /// Today's stock of `lot_id` with whether each car was sold today.
+    pub fn lot_stock(&mut self, lot_id: &str) -> Result<Vec<(Listing, bool)>, String> {
+        if self.econ.lot(lot_id).is_none() {
+            return Err(format!("no lot {lot_id:?}"));
+        }
+        let roster = self.roster();
+        let day = self.profile.account.day;
+        let sales = &self.profile.lot_sales;
+        Ok(self
+            .econ
+            .lot_stock(lot_id, day, &roster)
+            .into_iter()
+            .map(|l| {
+                let sold = sales.is_sold(day, lot_id, l.slot);
+                (l, sold)
+            })
+            .collect())
+    }
+
+    fn lot_summary(&mut self, lot_id: &str) -> Result<LotSummary, String> {
+        let stock = self.lot_stock(lot_id)?;
+        let lot = self.econ.lot(lot_id).expect("checked by lot_stock");
+        let open: Vec<&Listing> = stock.iter().filter(|(_, s)| !s).map(|(l, _)| l).collect();
+        Ok(LotSummary {
+            id: lot.id.clone(),
+            name: lot.name.clone(),
+            kind: lot.kind,
+            tier: lot.tier,
+            district: format!("{:?}", lot.district),
+            classes: lot.classes.clone(),
+            in_stock: open.len(),
+            from_price: open.iter().map(|l| l.price).min(),
+        })
+    }
+
+    /// Every lot with today's counts.
+    pub fn lots(&mut self) -> Vec<LotSummary> {
+        let ids: Vec<String> = self.econ.lots.lots.iter().map(|l| l.id.clone()).collect();
+        ids.iter()
+            .filter_map(|id| self.lot_summary(id).ok())
+            .collect()
+    }
+
+    fn listing_view(&self, l: &Listing, sold: bool) -> ListingView {
+        let name = match &l.variant_name {
+            Some(n) => n.clone(),
+            None => base_car(&l.def_id)
+                .map(|c| c.def.display_name)
+                .unwrap_or_else(|_| l.def_id.clone()),
+        };
+        let region = |r: &wp_contracts::BodyRegion| label_of(&RepairItem::Region(*r));
+        let tired: Vec<(String, f32)> = l
+            .wear
+            .components
+            .iter()
+            .map(|(c, h)| (label_of(&RepairItem::Component(*c)), *h))
+            .collect();
+        let shown = !l.hidden;
+        let (health, est) = if shown {
+            self.listing_condition(l).unwrap_or((l.condition, 0))
+        } else {
+            (l.condition, 0)
+        };
+        ListingView {
+            slot: l.slot,
+            def_id: l.def_id.clone(),
+            name,
+            class: l.class,
+            grade: l.grade,
+            price: l.price,
+            rare: l.variant.is_some(),
+            mods: l
+                .mods
+                .iter()
+                .map(|m| {
+                    self.econ
+                        .catalog
+                        .get(m)
+                        .map_or_else(|| m.clone(), |d| d.name.clone())
+                })
+                .collect(),
+            condition: shown.then_some(health),
+            est_repairs: shown.then_some(est),
+            runs: shown.then_some(l.runs),
+            tired_parts: shown.then_some(tired),
+            missing: l.wear.missing.iter().map(region).collect(),
+            dents: l.wear.dents.keys().map(region).collect(),
+            tread: l.tires.tread,
+            flat: l.tires.flat,
+            stats: self.stats_for(&l.def_id, &l.mods).ok(),
+            sold,
+        }
+    }
+
+    /// One lot's stock today.
+    pub fn lot_view(&mut self, lot_id: &str) -> Result<LotStockView, String> {
+        let lot = self.lot_summary(lot_id)?;
+        let stock = self.lot_stock(lot_id)?;
+        Ok(LotStockView {
+            lot,
+            day: self.profile.account.day,
+            cars: stock
+                .iter()
+                .map(|(l, s)| self.listing_view(l, *s))
+                .collect(),
+        })
+    }
+
+    /// The wear a listing's lattice gets (the damage-model form of `ListingWear`).
+    pub fn preowned_wear(l: &Listing) -> PreownedWear {
+        PreownedWear {
+            components: l.wear.components.clone(),
+            missing: l.wear.missing.clone(),
+            dents: l.wear.dents.clone(),
+        }
+    }
+
+    /// Buy the car in `slot` of `lot_id` today: pays, adds the car with the listing's mods and
+    /// tyres, and damages its stored lattice with the listing's wear (so a junkyard car really
+    /// arrives with a dead engine or a missing hood). Becomes the active car if there is none
+    /// usable.
+    pub fn buy_listing(&mut self, lot_id: &str, slot: u32) -> Result<CarUid, String> {
+        self.guard()?;
+        let (listing, sold) = self
+            .lot_stock(lot_id)?
+            .into_iter()
+            .find(|(l, _)| l.slot == slot)
+            .ok_or_else(|| format!("nothing in space {slot} at this lot today"))?;
+        if sold {
+            return Err("already sold today".into());
+        }
+        let had_usable = self.active_usable();
+        let mut acct = self.profile.account.clone();
+        let (uid, ev) = self.econ.buy_listing(&mut acct, &listing).map_err(e2s)?;
+        let car = acct.try_car(uid).map_err(e2s)?.clone();
+        // Build the damaged car before committing, so broken data cannot take money.
+        let loaded = self.loaded_car(&car)?;
+        let mut model = DamageModel::new(&loaded.lattice, &loaded.materials);
+        let wear = Self::preowned_wear(&listing);
+        if !wear.is_empty() {
+            model.apply_preowned_wear(&wear, self.econ.mode_table(self.mode()));
+        }
+        self.profile.account = acct;
+        if !had_usable {
+            self.profile.account.active_car = Some(uid);
+        }
+        self.post(ev);
+        self.store_damage(uid, &model, false, &loaded.lattice, &loaded.materials)?;
+        let day = self.profile.account.day;
+        self.profile.lot_sales.record(day, lot_id, slot);
+        Ok(uid)
+    }
+
+    /// Replace the tyres in `wheels` (FL, FR, RL, RR). Repairs never fix tyres.
+    pub fn replace_tires(&mut self, uid: CarUid, wheels: [bool; 4]) -> Result<Money, String> {
+        self.guard()?;
+        let (paid, ev) = self
+            .econ
+            .replace_tires(&mut self.profile.account, uid, wheels)
+            .map_err(e2s)?;
+        self.post(ev);
+        Ok(paid)
+    }
+
+    /// Grip and deflation of car `uid`'s tyres for the sim.
+    pub fn tire_effects(&self, uid: CarUid) -> Option<([f32; 4], [f32; 4])> {
+        let c = self.profile.account.car(uid)?;
+        Some(self.econ.tire_effects(&c.tires))
+    }
+
+    /// Health and Repair All price (legit residential shop) of a listing once its wear is on
+    /// the lattice: what the buyer of a used car can see on the lot.
+    fn listing_condition(&self, l: &Listing) -> Result<(f32, Money), String> {
+        let wear = Self::preowned_wear(l);
+        if wear.is_empty() {
+            return Ok((1.0, 0));
+        }
+        let base = base_car(&l.def_id)?;
+        let mut model = DamageModel::new(&base.lattice, &base.materials);
+        let mode_table = self.econ.mode_table(self.mode());
+        model.apply_preowned_wear(&wear, mode_table);
+        let car = OwnedCar {
+            uid: CarUid(0),
+            def_id: l.def_id.clone(),
+            class: l.class,
+            base_price: l.base_price,
+            mods: l.mods.clone(),
+            damage: Default::default(),
+            location: CarLocation::Garage,
+            insurance: None,
+            purchase_price: Some(l.price),
+            tune: Default::default(),
+            parts: None,
+            tires: l.tires,
+        };
+        let estimate = model.repair_estimate(mode_table, &self.econ.price_table_for(&car));
+        let (_, gross) = self.econ.price_lines(
+            &car,
+            &estimate.lines,
+            &ShopContext::legit_default(),
+            self.mode(),
+        );
+        Ok((model.health(), gross))
+    }
+
+    /// Lattice snapshot of a listing as it sits on the lot (for the lot visit's parked cars),
+    /// `None` for a pristine car. Mods are not applied (the lot shows the stock body).
+    pub fn listing_damage(&self, l: &Listing) -> Result<Option<FullDamageSnapshot>, String> {
+        let wear = Self::preowned_wear(l);
+        if wear.is_empty() {
+            return Ok(None);
+        }
+        let base = base_car(&l.def_id)?;
+        let mut model = DamageModel::new(&base.lattice, &base.materials);
+        model.apply_preowned_wear(&wear, self.econ.mode_table(self.mode()));
+        Ok(Some(model.save_full()))
     }
 
     /// Why the active car cannot start a run (`None` = it can).
@@ -866,6 +1211,7 @@ impl Career {
     /// The garage screen.
     pub fn view(&mut self) -> CareerView {
         self.dealer();
+        let lots = self.lots();
         let p = &self.profile;
         let a = &p.account;
         let floor = &self.econ.market.floor_car;
@@ -895,6 +1241,7 @@ impl Career {
                     d
                 })
                 .collect(),
+            lots,
             floor_car: (!a.has_usable_car())
                 .then(|| (floor.def_id.clone(), floor.price.min(a.cash.max(0)))),
             insurance: self
@@ -1482,6 +1829,13 @@ impl Career {
                 .map_err(|e| e.to_string())?
                 .restore_full(&snap);
         }
+        // Worn or flat tyres drive like it.
+        if let Some((grip, flat)) = self.tire_effects(uid) {
+            session
+                .sim_before_start_mut()?
+                .set_tire_condition(player, grip, flat)
+                .map_err(|e| e.to_string())?;
+        }
         Ok((session, player))
     }
 
@@ -1590,6 +1944,13 @@ impl Career {
             .filter(|e| matches!(e.reason, EventReason::Escape { .. }))
             .map(|e| e.cash_delta)
             .sum();
+        // Tyres wear with the time driven; spike strips leave them flat.
+        let spiked = player.map_or([0.0; 4], |p| s.sim().police().tire_puncture(p));
+        let hours = driven_ticks as f32 / (240.0 * 3600.0);
+        if let Some(c) = self.profile.account.car_mut(start.car) {
+            self.econ
+                .wear_tires(c, hours, spiked.map(|p| p >= TIRE_FLAT_PUNCTURE));
+        }
         match self.profile.account.car(start.car).cloned() {
             Some(car) => {
                 let vehicle = player.and_then(|p| s.vehicle(p));
@@ -1711,7 +2072,9 @@ pub(crate) fn career_account() -> Option<wp_economy::PlayerAccount> {
     CAREER.with(|c| c.borrow().as_ref().map(|c| c.profile.account.clone()))
 }
 
-fn with_career<T>(f: impl FnOnce(&mut Career) -> Result<T, String>) -> Result<T, JsValue> {
+pub(crate) fn with_career<T>(
+    f: impl FnOnce(&mut Career) -> Result<T, String>,
+) -> Result<T, JsValue> {
     CAREER.with(|c| match c.borrow_mut().as_mut() {
         Some(c) => f(c).map_err(crate::err),
         None => Err(crate::err(
@@ -1757,7 +2120,7 @@ fn view_json(c: &mut Career) -> Result<String, String> {
 }
 
 /// End a live career run in the current session, if there is one.
-fn end_active_run() -> Result<Option<RunClose>, JsValue> {
+pub(crate) fn end_active_run() -> Result<Option<RunClose>, JsValue> {
     let active = CAREER.with(|c| c.borrow().as_ref().is_some_and(Career::run_active));
     if !active {
         return Ok(None);

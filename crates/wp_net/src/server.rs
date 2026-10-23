@@ -1513,6 +1513,7 @@ impl<S: NetSim> ServerInstance<S> {
                     purchase_price: None,
                     tune: Default::default(),
                     parts: None,
+                    tires: Default::default(),
                 });
                 uid
             }

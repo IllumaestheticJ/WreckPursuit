@@ -47,6 +47,7 @@ pub mod drift_lab;
 pub mod garage;
 pub mod garage_visit;
 pub mod lod;
+pub mod lots;
 pub mod map;
 pub mod mod_visuals;
 pub mod pack;
@@ -73,6 +74,8 @@ mod collide_tests;
 mod crash_replay_tests;
 #[cfg(test)]
 mod police_audio_trace;
+#[cfg(test)]
+mod lots_tests;
 #[cfg(test)]
 mod race_spots_tests;
 #[cfg(test)]

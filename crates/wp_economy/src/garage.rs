@@ -510,5 +510,6 @@ fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
         purchase_price: Some(paid),
         tune: Default::default(),
         parts: None,
+        tires: Default::default(),
     }
 }

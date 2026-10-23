@@ -278,6 +278,7 @@ impl PlayerRun {
                     purchase_price: Some(0),
                     tune: Default::default(),
                     parts: None,
+                    tires: Default::default(),
                 });
                 uid
             }

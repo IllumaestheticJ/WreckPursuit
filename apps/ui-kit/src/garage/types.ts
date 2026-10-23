@@ -101,6 +101,69 @@ export interface CarView {
   stats: StatsView | null;
   /** Some outstanding damage dates from a police capture: insurance will not pay for it. */
   damage_before_capture: boolean;
+  /** Tyres: a repair never fixes them; replace them here. */
+  tires: TireView;
+}
+
+/** `career::TireView` (FL, FR, RL, RR). */
+export interface TireView {
+  tread: number[];
+  flat: boolean[];
+  worn_out: boolean[];
+  grip: number[];
+  price_each: number;
+}
+
+export type LotKind = "Dealership" | "UsedLot" | "Junkyard";
+export type ListingGrade = "New" | "Used" | "Junk";
+
+/** `career::LotSummary`. */
+export interface LotSummary {
+  id: string;
+  name: string;
+  kind: LotKind;
+  tier: number;
+  district: string;
+  classes: string[];
+  in_stock: number;
+  from_price: number | null;
+}
+
+/** `career::ListingView`: junkyards hide `condition`, `runs`, `tired_parts` (`null`). */
+export interface ListingView {
+  slot: number;
+  def_id: string;
+  name: string;
+  class: string;
+  grade: ListingGrade;
+  price: number;
+  rare: boolean;
+  mods: string[];
+  condition: number | null;
+  /** Repair All at a legit residential shop, tyres excluded. */
+  est_repairs: number | null;
+  runs: boolean | null;
+  tired_parts: [string, number][] | null;
+  missing: string[];
+  dents: string[];
+  tread: number[];
+  flat: boolean[];
+  stats: StatsView | null;
+  sold: boolean;
+}
+
+/** `career::LotStockView`. */
+export interface LotStockView {
+  lot: LotSummary;
+  day: number;
+  cars: ListingView[];
+}
+
+/** `lots::LotVisit`: which sim entity is which parking space. */
+export interface LotVisit {
+  lot: string;
+  own_car: number | null;
+  cars: { entity: number; slot: number }[];
 }
 
 /** `career::DealerCar`. */
@@ -193,6 +256,8 @@ export interface CareerView {
   start_blocker: string | null;
   cars: CarView[];
   dealer: DealerCar[];
+  /** Dealerships, used lots and junkyards with today's counts. */
+  lots: LotSummary[];
   floor_car: [string, number] | null;
   insurance: { id: string; premium_per_day_frac: number; coverage: number; deductible: number }[];
   districts: { id: string; labour: number }[];
@@ -265,6 +330,14 @@ export interface CareerApi {
   release(uid: number): CareerView;
   insure(uid: number, tier: string): CareerView;
   nextNight(): CareerView;
+  /** Today's stock of a lot. */
+  lot(lotId: string): LotStockView;
+  /** Drive to the lot: leaves the garage and loads the lot itself. */
+  visitLot(lotId: string): void;
+  /** Buy the car in a lot space. */
+  buyListing(lotId: string, slot: number): CareerView;
+  /** Replace tyres (FL, FR, RL, RR); repairs never fix tyres. */
+  replaceTires(uid: number, wheels: boolean[]): CareerView;
   newCareer(mode: DamageMode): CareerView;
   exportSave(): void;
   importSave(text: string): CareerView;

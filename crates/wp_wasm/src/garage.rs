@@ -128,6 +128,7 @@ pub fn repair_quote_json(entity: u32, request_json: &str) -> Result<String, JsVa
                 purchase_price: None,
                 tune: Default::default(),
                 parts: None,
+                tires: Default::default(),
             };
             // A throwaway account holding just this car (cash only pays an optional premium).
             let mut acct = PlayerAccount::empty(PlayerId(1));
