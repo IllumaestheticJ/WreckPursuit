@@ -342,9 +342,12 @@ fn honk_opens_a_challenge_and_bad_bets_are_refused() {
         s.street_accept(fin, &[], before + 1).is_err(),
         "more than the cash"
     );
+    // 30 m ahead on the player's lane (a pick beside or behind the car may route round the
+    // block and back: it covers the whole road).
     let p = state(&s, PLAYER).pos;
+    let (sn, cs) = wp_math::sin_cos(yaw_of(state(&s, PLAYER).rot));
     assert!(
-        s.street_accept([p[0] + 1.0, p[1]], &[], offer.bet_min)
+        s.street_accept([p[0] - sn * 30.0, p[1] + cs * 30.0], &[], offer.bet_min)
             .is_err(),
         "too short"
     );

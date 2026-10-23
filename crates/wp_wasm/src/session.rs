@@ -547,6 +547,19 @@ impl Session {
                 }
             }
         }
+        // Held while betting on a street challenge: the horn still gets through (a honk calls
+        // the challenge off).
+        if self.held(id)
+            && self.last_input[idx].horn != input.horn
+            && self.street.as_ref().is_some_and(|s| s.offer_open())
+        {
+            let held = VehicleInput {
+                horn: input.horn,
+                ..self.last_input[idx]
+            };
+            self.log_input(idx, held);
+            return Ok(true);
+        }
         if self.script_running()
             || self.last_input[idx] == input
             || self.held(id)
@@ -1438,6 +1451,7 @@ impl Session {
                     brake: if moving { 1.0 } else { 0.0 },
                     handbrake: 1.0,
                     headlights: keep.headlights,
+                    horn: keep.horn,
                     ..Default::default()
                 },
             );

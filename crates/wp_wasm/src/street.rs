@@ -1426,6 +1426,11 @@ impl StreetRacers {
         }
     }
 
+    /// A challenge is open (betting: the player is held, only the horn gets through).
+    pub fn offer_open(&self) -> bool {
+        self.offer.is_some()
+    }
+
     /// A challenge is open or a street race is running (no other challenge then: the
     /// session's race spots ignore the horn too).
     pub fn busy(&self) -> bool {
