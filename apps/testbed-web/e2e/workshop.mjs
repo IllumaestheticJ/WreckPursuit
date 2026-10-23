@@ -134,6 +134,13 @@ check(s.missing.length === 0 && (await slot("front_bumper")).fitted, "bumper bac
 const mods = await page.evaluate((u) => window.__wp.sim.careerView().cars.find((c) => c.uid === u).mods, uid);
 check(JSON.stringify(mods).includes("cooling_radiator_1"), "the fitted part counts as an installed mod");
 
+// Every fitted part has a place on the car: mesh, cosmetic piece or workshop hardware.
+await page.waitForFunction(() => window.__wp.workshop.hardwareSlots().length > 0, null, { timeout: 15000 });
+const hw = await page.evaluate(() => window.__wp.workshop.hardwareSlots());
+check(hw.includes("battery") && hw.includes("differential"), `the battery and the diff are drawn (${hw.join(", ")})`);
+const undrawn = await page.evaluate(() => window.__wp.workshop.undrawnSlots());
+check(undrawn.length === 0, `every fitted part is drawn somewhere on the car (missing: ${undrawn.join(", ")})`);
+
 // Underside on the lift.
 await button("Underside").click();
 await settle(2500);

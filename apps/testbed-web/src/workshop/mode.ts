@@ -17,7 +17,11 @@ import type { VehicleView } from "../vehicle_view";
 import { sim } from "../wasm/sim";
 import { buildEngine, buildStand, STAND_CRANK_Z } from "./engine";
 import { GarageRoom, LIFT_HEIGHT_M } from "./room";
-import { slotOfPart } from "./slotmap";
+import { loadCarMesh } from "../render/panels";
+import { loadVisuals } from "../render/cosmetics/visuals";
+import { Bay, buildHardware, HARDWARE_SLOTS, layoutOf } from "./hardware";
+import { partHosts } from "./mounts";
+import { pickSlot, REGION_SLOT, slotOfPart, slotsNeeded } from "./slotmap";
 
 /** What the workshop needs from the testbed. */
 export interface WorkshopDeps {
@@ -44,6 +48,7 @@ export interface WorkshopDeps {
 const CAMS: Record<WorkshopCam, { eye: [number, number, number]; at: [number, number, number]; lift: boolean | null }> = {
   overview: { eye: [-3.3, 4.3, 2.3], at: [0, 0, 0.6], lift: false },
   engine: { eye: [0.3, 4.2, 2.2], at: [0, 1.4, 0.55], lift: false },
+  rear: { eye: [2.3, -4.7, 1.8], at: [0, -1.5, 0.55], lift: false },
   under: { eye: [-2.6, -2.2, -0.3], at: [0, 0.2, 0.15], lift: true },
   wheels: { eye: [-2.7, 3.3, 0.8], at: [-0.8, 1.3, 0.35], lift: null },
   stand: { eye: [2.05, -1.75, 1.85], at: [2.9, -0.65, 0.95], lift: false },
@@ -63,6 +68,11 @@ export class WorkshopMode {
   /** The player view the room / hidden parts were set up for. */
   private placedFor: VehicleView | null = null;
   private highlighted: string[] = [];
+  /** Hidden hardware drawn on the car (hardware.ts), and the look the removed panels were applied to. */
+  private hardware: THREE.Group | null = null;
+  private hardwareGlow: THREE.Mesh[] = [];
+  private lookFor: unknown = null;
+  private removedRegions: ReadonlySet<string> = new Set();
   private liftTarget = 0;
   private liftT = 0;
   private readonly ray = new THREE.Raycaster();
@@ -179,6 +189,12 @@ export class WorkshopMode {
     if (!this.active) return;
     const view = this.deps.playerView();
     if (view && view !== this.placedFor && view.panels.ready) this.place(view);
+    // The cosmetic look is built after the panels: give it the removed panels when it arrives.
+    if (view && view === this.placedFor && view.look && view.look !== this.lookFor) {
+      this.lookFor = view.look;
+      view.look.setRemovedRegions(this.removedRegions);
+      this.highlight(this.highlighted);
+    }
     const k = 1 - Math.exp(-dt * 2.5);
     if (Math.abs(this.liftTarget - this.liftT) > 1e-3) {
       this.liftT += (this.liftTarget - this.liftT) * k;
@@ -213,11 +229,59 @@ export class WorkshopMode {
     this.room.root.position.set(p.x, p.y, 0);
     this.room.root.rotation.set(0, 0, yaw);
     this.room.setLift(this.liftT);
-    const empty = new Set((this.screen?.slots ?? []).filter((s) => !s.fitted).map((s) => s.id));
-    if (empty.size) view.panels.hideParts((def, c) => empty.has(slotOfPart(def, c.x) ?? ""));
+    // Parts of empty slots are not drawn, nor what is bolted to an empty slot's panel: the lamps
+    // set into a bumper leave with it.
+    const fitted = this.fittedSlots();
+    const hosts = this.hostsOf(view);
+    view.panels.hideParts((def, c) => slotsNeeded(def, c.x, hosts.get(def), fitted).some((s) => !fitted.has(s)));
+    // On the lift the flat belly pan comes off, so the drivetrain, tank and rack show from below.
+    view.panels.hideParts((def) => def.name === "underbody");
+    this.removedRegions = new Set(Object.entries(REGION_SLOT).filter(([, slot]) => !fitted.has(slot)).map(([region]) => region));
+    this.lookFor = null;
+    this.hardware = null;
+    this.hardwareGlow = [];
+    void this.placeHardware(view);
     this.highlight(this.highlighted);
     // A rebuilt session resets the camera rig: back to the current preset (the lift stays put).
     this.camera(first ? "overview" : this.lastCam, first);
+  }
+
+  /**
+   * Draw the hardware of the fitted slots nothing else draws on this car (battery, diff, tank...),
+   * so every part has a place to be found, picked and taken off.
+   */
+  private async placeHardware(view: VehicleView): Promise<void> {
+    const id = view.info.car_id;
+    const [mesh, def, visuals] = await Promise.all([loadCarMesh(id), carDef(id), loadVisuals()]);
+    if (!mesh || view !== this.placedFor || !this.active) return;
+    const bay = new Bay(mesh, view.info.wheels);
+    const centre = bay.engine.getCenter(new THREE.Vector3());
+    const lay = layoutOf((def?.drivetrain as { layout?: unknown } | undefined)?.layout, centre.y > 0);
+    const meshSlots = new Set(view.panels.partDefs().map((d) => slotOfPart(d.def, d.centre.x)));
+    const draw = new Set(
+      (this.screen?.slots ?? [])
+        .filter((s) => HARDWARE_SLOTS.includes(s.id) && !s.parent && !meshSlots.has(s.id))
+        // An aftermarket grade with cosmetic pieces is drawn by the look.
+        .filter((s) => {
+          const v = s.fitted?.grade ? visuals?.mods[s.fitted.grade] : undefined;
+          return !(Array.isArray(v) && v.length > 0);
+        })
+        .map((s) => s.id),
+    );
+    const hw = buildHardware(bay, lay, this.screen?.slots ?? [], draw);
+    view.root.add(hw);
+    this.hardware = hw;
+    this.highlight(this.highlighted);
+  }
+
+  /** Slots holding a part now. */
+  private fittedSlots(): Set<string> {
+    return new Set((this.screen?.slots ?? []).filter((s) => s.fitted).map((s) => s.id));
+  }
+
+  /** Host panel of each bolt-on mesh part of the view's model (mounts.ts). */
+  private hostsOf(view: VehicleView) {
+    return partHosts(view.info.car_id, view.panels.partDefs().map((d) => d.def));
   }
 
   /** Put the first loose engine of the screen on the stand (rebuilt when its parts change). */
@@ -249,7 +313,14 @@ export class WorkshopMode {
     if (!view?.panels.ready) return null;
     // Bolt-on cosmetic pieces (bull bar, wing, cage...) in front of the panel hit win.
     const hit = view.panels.partHit(this.ray);
-    const piece = view.look?.slotAt(this.ray);
+    const look = view.look?.slotAt(this.ray);
+    const hw = this.hardware ? this.ray.intersectObject(this.hardware, true).find((h) => h.object.visible && !this.hardwareGlow.includes(h.object as THREE.Mesh)) : undefined;
+    let piece = look;
+    if (hw && (!piece || hw.distance < piece.distance)) {
+      let o: THREE.Object3D | null = hw.object;
+      while (o && !o.userData.slot) o = o.parent;
+      piece = { slot: (o?.userData.slot as string) ?? null, distance: hw.distance };
+    }
     if (onStand && (!hit || onStand.distance < hit.distance) && (!piece || onStand.distance < piece.distance)) {
       let o: THREE.Object3D | null = onStand.object;
       while (o && !o.userData.slot) o = o.parent;
@@ -258,16 +329,32 @@ export class WorkshopMode {
     if (piece && (!hit || piece.distance < hit.distance)) return piece.slot;
     if (!hit) return null;
     const centre = view.panels.partDefs().find((d) => d.def === hit.def)?.centre;
-    return slotOfPart(hit.def, centre?.x ?? 0);
+    return pickSlot(hit.def, centre?.x ?? 0, this.fittedSlots());
   }
 
   private highlight(slots: string[]): void {
     this.highlighted = slots;
     const view = this.deps.playerView();
     if (!view?.panels.ready) return;
+    // A slot lights up with everything that comes off with it (lamps in a bumper, its splitter).
     const set = new Set(slots);
-    view.panels.highlightParts(set.size ? (def, c) => set.has(slotOfPart(def, c.x) ?? "") : null);
+    for (const s of this.screen?.slots ?? []) if (set.has(s.id)) for (const t of s.takes_along ?? []) set.add(t);
+    const fitted = this.fittedSlots();
+    const hosts = this.hostsOf(view);
+    view.panels.highlightParts(set.size ? (def, c) => slotsNeeded(def, c.x, hosts.get(def), fitted).some((s) => set.has(s)) : null);
     view.look?.highlight(set);
+    for (const g of this.hardwareGlow) g.removeFromParent();
+    this.hardwareGlow = [];
+    for (const part of this.hardware?.children ?? []) {
+      if (!set.has(part.userData.slot as string)) continue;
+      part.traverse((o) => {
+        if (!(o instanceof THREE.Mesh) || this.hardwareGlow.includes(o)) return;
+        const g = new THREE.Mesh(o.geometry, this.glowMat);
+        g.renderOrder = 10;
+        o.add(g);
+        this.hardwareGlow.push(g);
+      });
+    }
   }
 
   /** Glow over the stand engine's parts in `slots` (empty = none). */
@@ -316,9 +403,40 @@ export class WorkshopMode {
     this.deps.rig.lookFrom(eye, toSim(c.at));
   }
 
+  /** Automation / review shots: look from `eye` at `at`, both in car space (lift as it is). */
+  lookAt(eye: [number, number, number], at: [number, number, number]): void {
+    const view = this.deps.playerView();
+    if (!view) return;
+    const toSim = (v: [number, number, number]): [number, number, number] => {
+      const w = view.root.localToWorld(new THREE.Vector3(v[0], v[1], v[2]));
+      return [w.x, -w.z, w.y];
+    };
+    this.deps.rig.lookFrom(toSim(eye), toSim(at));
+  }
+
   /** Last preset (automation). */
   get view(): WorkshopCam {
     return this.lastCam;
+  }
+
+  /** Automation: slots drawn as hardware on the car (hardware.ts). */
+  hardwareSlots(): string[] {
+    return (this.hardware?.children ?? []).map((c) => c.userData.slot as string | undefined).filter((s): s is string => !!s);
+  }
+
+  /**
+   * Automation: fitted top-level slots drawn by nothing on the car (no mesh part, look piece or
+   * hardware), so there is nowhere to click them. Should be empty once the hardware is placed.
+   */
+  undrawnSlots(): string[] {
+    const view = this.deps.playerView();
+    if (!view) return [];
+    const drawn = new Set(view.panels.partDefs().map((d) => slotOfPart(d.def, d.centre.x)));
+    view.root.traverse((o) => {
+      if (o.userData.slot) drawn.add(o.userData.slot as string);
+    });
+    for (const s of this.hardwareSlots()) drawn.add(s);
+    return (this.screen?.slots ?? []).filter((s) => s.fitted && !s.parent && !drawn.has(s.id)).map((s) => s.id);
   }
 
   /** Current screen (automation / tests). */
@@ -344,4 +462,18 @@ export class WorkshopMode {
     }
     return null;
   }
+}
+
+const carDefs = new Map<string, Promise<Record<string, unknown> | null>>();
+
+/** The car definition JSON (data/cars/<id>.json), fetched once per model. */
+function carDef(id: string): Promise<Record<string, unknown> | null> {
+  let p = carDefs.get(id);
+  if (!p) {
+    p = fetch(`data/cars/${id}.json`)
+      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : null))
+      .catch(() => null);
+    carDefs.set(id, p);
+  }
+  return p;
 }
