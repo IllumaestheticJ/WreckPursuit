@@ -129,6 +129,22 @@ pub fn turn_follower_stops_short(s: f32, v: f32, turner_s: f32) -> bool {
     s + v * v / (2.0 * TURN_FOLLOWER_DECEL) <= turner_s - CAR_LENGTH_M - TURN_REAR_ROOM_M
 }
 
+/// Where a car turning around at arc length `turner_s` holds its own lane (the entry its
+/// followers stop behind), given the arc lengths of the other cars in that lane:
+/// [`TURN_OWN_HOLD_M`] behind it, or just ahead of a follower already closer than that
+/// (queued behind the car before it turned), so that follower stays put. Otherwise it saw the
+/// turning car itself as its leader and crept up to its standstill gap during the turn, into the
+/// spot the nose swings back over (lead, G-handling soak: a car queued 2.9 m behind a 13 s
+/// turn-around closed to 1.8 m and was touched as the turn ended).
+pub fn turn_own_hold_s(turner_s: f32, lane: impl Iterator<Item = f32>) -> f32 {
+    let closest = lane
+        .filter(|&s| s < turner_s)
+        .fold(f32::NEG_INFINITY, f32::max);
+    (turner_s - TURN_OWN_HOLD_M)
+        .max(closest + CAR_LENGTH_M + TURN_FOLLOWER_HOLD_GAP_M)
+        .min(turner_s)
+}
+
 /// Why an agent is held up (as of its last decision).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Wait {
@@ -237,6 +253,9 @@ pub const REVERSE_TRACKED_CLEAR_M: f32 = 25.0;
 pub const TURN_STALL_S: f32 = 10.0;
 /// A car turning around holds its own lane this far behind it, m.
 pub const TURN_OWN_HOLD_M: f32 = 8.0;
+/// Bumper gap a follower already closer than [`TURN_OWN_HOLD_M`] is held at (its current spot:
+/// less than any standstill gap, so it stays put while the car ahead turns around), m.
+pub const TURN_FOLLOWER_HOLD_GAP_M: f32 = 0.5;
 /// After giving up a junction permit for an obstruction, no new permit for this long, s.
 pub const PERMIT_BLOCK_S: f32 = 10.0;
 
@@ -1279,7 +1298,13 @@ impl Traffic {
         // Followers hold this far back: the turn can end with the nose swung back over the
         // own lane, level with a car that stopped closer (owner row 85 re-gate: a finished
         // U-turn touched the car waiting behind it). Was 3 m.
-        let own_s = a.s - TURN_OWN_HOLD_M;
+        let own_s = turn_own_hold_s(
+            a.s,
+            self.lists[a.seg as usize]
+                .iter()
+                .filter(|e| e.agent as usize != i)
+                .map(|e| e.s),
+        );
         let z = pose.p[2];
         let (kin, drv) = if a.physical.is_some() {
             (None, Some(TurnDriver::new(shape, road, goal, obstacles)))
@@ -1828,5 +1853,23 @@ mod tests {
         assert!(!turn_follower_stops_short(turner - 39.0, 11.0, turner));
         // 60 m back at 14 m/s needs 49 m: too close (the old 40 m window missed it).
         assert!(!turn_follower_stops_short(turner - 60.0, 14.0, turner));
+    }
+
+    #[test]
+    fn a_follower_queued_close_behind_a_turn_is_held_where_it_is() {
+        let turner = 100.0;
+        // Nobody behind, or only far back: the usual hold, 8 m behind.
+        assert_eq!(
+            turn_own_hold_s(turner, [].into_iter()),
+            turner - TURN_OWN_HOLD_M
+        );
+        assert_eq!(turn_own_hold_s(turner, [60.0, 150.0].into_iter()), 92.0);
+        // Queued 7.6 m back (2.9 m bumper gap): held 0.5 m ahead of its bumper, not allowed
+        // to creep up to its 1.8 m standstill gap behind the turning car.
+        let hold = turn_own_hold_s(turner, [92.4, 60.0].into_iter());
+        assert!((hold - (92.4 + CAR_LENGTH_M + TURN_FOLLOWER_HOLD_GAP_M)).abs() < 1e-4);
+        assert!(hold > turner - TURN_OWN_HOLD_M && hold <= turner);
+        // Cars ahead of the turning car do not count.
+        assert_eq!(turn_own_hold_s(turner, [120.0].into_iter()), 92.0);
     }
 }
