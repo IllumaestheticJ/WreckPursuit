@@ -207,7 +207,12 @@ impl BenchCell {
                 pos: [0.0; 3],
                 yaw: 0.0,
                 speed_mps: 0.0,
-                police_heat: LEVEL_HEAT[(self.level.clamp(1, 3) - 1) as usize],
+                // Level 0: a clean start (row 157's heat timeline), otherwise the level's heat.
+                police_heat: if self.level == 0 {
+                    0.0
+                } else {
+                    LEVEL_HEAT[(self.level.clamp(1, 3) - 1) as usize]
+                },
                 assists: None,
                 driver: Driver::Scripted,
                 inputs: Vec::new(),
@@ -344,6 +349,10 @@ pub struct RunMetrics {
     pub evader_plans: u32,
     /// Times the evader reversed out of a stop.
     pub evader_reversals: u32,
+    /// Clean start (cell level 0, row 157): when the evader first had heat, s.
+    pub first_offence_s: Option<f32>,
+    /// ... and when it first reached wanted level 1..=5, s after that first offence.
+    pub level_reached_s: [Option<f32>; 5],
 }
 
 /// Options for [`run_bench`].
@@ -543,6 +552,8 @@ pub fn run_one(
         evader_health: 1.0,
         evader_plans: 0,
         evader_reversals: 0,
+        first_offence_s: None,
+        level_reached_s: [None; 5],
     };
     // Pursuit status on the previous tick (search episodes).
     let mut prev_status: Option<PursuitStatus> = None;
@@ -702,6 +713,18 @@ pub fn run_one(
 
         // Police view of the evader.
         let pol = sim.police();
+        // Heat timeline (row 157): first offence, then each wanted level reached.
+        if let Some(r) = pol.racer(me) {
+            if m.first_offence_s.is_none() && r.heat > 0.0 {
+                m.first_offence_s = Some(t1);
+            }
+            if let Some(t0) = m.first_offence_s {
+                let n = r.level.number() as usize;
+                for l in 1..=n.min(5) {
+                    m.level_reached_s[l - 1].get_or_insert(t1 - t0);
+                }
+            }
+        }
         let mp = [my.pos[0], my.pos[1]];
         let cars_near = |r: f32| -> u32 {
             pol.units()
@@ -1342,6 +1365,37 @@ pub fn markdown_report(label: &str, opts: &BenchOptions, runs: &[RunMetrics]) ->
     let _ = writeln!(out, "\n## Run ends\n");
     for (e, n) in ends {
         let _ = writeln!(out, "- {e:?}: {n}");
+    }
+    out
+}
+
+/// Row 157: median and range of the time from the first offence to each wanted level, over the
+/// runs that reached it (clean-start runs, cell level 0): one markdown table.
+pub fn heat_timeline_table(runs: &[RunMetrics]) -> String {
+    let mut out = String::from(
+        "| level | runs reaching it | median s | p25 s | p75 s |\n|---|---:|---:|---:|---:|\n",
+    );
+    let offended = runs.iter().filter(|r| r.first_offence_s.is_some()).count();
+    for l in 0..5 {
+        let mut v: Vec<f32> = runs.iter().filter_map(|r| r.level_reached_s[l]).collect();
+        v.sort_by(f32::total_cmp);
+        let q = |f: f32| -> String {
+            if v.is_empty() {
+                "-".into()
+            } else {
+                format!("{:.0}", v[((v.len() - 1) as f32 * f).round() as usize])
+            }
+        };
+        let _ = writeln!(
+            out,
+            "| L{} | {}/{} | {} | {} | {} |",
+            l + 1,
+            v.len(),
+            offended,
+            q(0.5),
+            q(0.25),
+            q(0.75)
+        );
     }
     out
 }
