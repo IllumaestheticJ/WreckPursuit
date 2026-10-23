@@ -362,7 +362,7 @@ function Hud(props: { frame: RaceFrame; names: Map<number, string>; map: CityMap
   );
 }
 
-function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () => void; onFree: () => void }) {
+function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () => void; onFree: () => void; onGarage: (() => void) | null }) {
   const r = props.report;
   const me = r.rows[r.player_row];
   const p = r.payout;
@@ -478,13 +478,22 @@ function Results(props: { report: RaceReport; onAgain: () => void; onPicker: () 
         {!p && r.final_results && <p class="wp-dim">Advertised purse <Money value={r.advertised_purse} /> (no account in this session).</p>}
         {r.economy_error && <p class="wp-danger" style={{ fontSize: "0.85em" }}>{r.economy_error}</p>}
         <div style={{ display: "flex", gap: "0.5em", marginTop: "0.8em", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={props.onAgain}>
-            Race again
-          </Button>
-          <Button onClick={props.onPicker}>Races…</Button>
-          <Button variant="ghost" onClick={props.onFree}>
-            Free drive
-          </Button>
+          {props.onGarage ? (
+            // A career race (playtest row 167): the result is booked on the career; back to its garage.
+            <Button variant="primary" onClick={props.onGarage} testid="race-to-garage">
+              Back to garage
+            </Button>
+          ) : (
+            <>
+              <Button variant="primary" onClick={props.onAgain}>
+                Race again
+              </Button>
+              <Button onClick={props.onPicker}>Races…</Button>
+              <Button variant="ghost" onClick={props.onFree}>
+                Free drive
+              </Button>
+            </>
+          )}
         </div>
       </Panel>
     </div>
@@ -514,6 +523,10 @@ export class RaceView {
       freeDrive: () => void;
       list: () => RaceCard[];
       betStatus: () => BetStatus;
+      /** The player closed the picker (the career garage reopens when it opened it). */
+      closed?: () => void;
+      /** During a career run: the results panel's "Back to garage" (null otherwise). */
+      garage?: () => (() => void) | null;
     },
   ) {}
 
@@ -528,6 +541,12 @@ export class RaceView {
   closePicker(): void {
     this.cards = null;
     this.draw();
+  }
+
+  /** The player closed the picker (its close button). */
+  private pickerClosed(): void {
+    this.closePicker();
+    this.actions.closed?.();
   }
 
   /** New session: `raceId` "" when it is not a race; `names` by entity; the race's course. */
@@ -571,9 +590,15 @@ export class RaceView {
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "none" }} data-testid="race-view">
         {this.raceId && f && f.info.length > 0 && !showResults && <Hud frame={f} names={this.names} map={this.map} course={this.course} />}
         {showResults && this.report && (
-          <Results report={this.report} onAgain={() => this.actions.start(this.raceId)} onPicker={() => this.openPicker()} onFree={() => this.actions.freeDrive()} />
+          <Results
+            report={this.report}
+            onAgain={() => this.actions.start(this.raceId)}
+            onPicker={() => this.openPicker()}
+            onFree={() => this.actions.freeDrive()}
+            onGarage={this.actions.garage?.() ?? null}
+          />
         )}
-        {this.cards && <Picker cards={this.cards} status={this.betStatus} onStart={(id, bet) => this.actions.start(id, bet)} onClose={() => this.closePicker()} />}
+        {this.cards && <Picker cards={this.cards} status={this.betStatus} onStart={(id, bet) => this.actions.start(id, bet)} onClose={() => this.pickerClosed()} />}
       </div>,
       this.el,
     );

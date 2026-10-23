@@ -63,7 +63,7 @@ import { WorkshopMode } from "./workshop/mode";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
-import { RaceView, type RaceFrame } from "./ui/race";
+import { RaceView, type BetPick, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
 import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
@@ -343,6 +343,9 @@ async function main(): Promise<void> {
     exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
     importSave: (text) => act(() => sim.careerLoad(text)),
     startRun: (kind) => void startCareerRun(kind),
+    // Playtest row 167: the race and touge pickers straight from the garage, as career runs.
+    races: () => openCareerPicker("races"),
+    touge: () => openCareerPicker("touge"),
     workshop: (uid) => openWorkshop(uid),
     close: () => {
       garage.hide();
@@ -418,6 +421,7 @@ async function main(): Promise<void> {
   onAutoCrashReplayChange((on) => (autoBox.checked = on));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
   const openGarage = (message: string | null = null) => {
+    careerPicker = null;
     workshop.close();
     crash.reset();
     if (sim.careerRunActive()) sim.careerEndRun();
@@ -442,6 +446,7 @@ async function main(): Promise<void> {
   const raceSpots = new RaceSpotsView(scene.world, overlay);
   const raceView = new RaceView(raceEl, {
     start: (id, bet) => {
+      if (careerPicker === "races") return void startCareerRace(id, bet ?? null);
       startRace(id);
       // The countdown is running: bets on yourself are taken until green.
       if (bet) {
@@ -453,14 +458,21 @@ async function main(): Promise<void> {
       }
     },
     freeDrive: () => startFreeDrive(undefined, undefined, true),
-    list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+    // From the career garage: priced for the career car and its damage mode.
+    list: () =>
+      careerPicker === "races"
+        ? sim.raceList(careerCar(), sim.careerView().mode)
+        : sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
     betStatus: () => {
+      if (careerPicker === "races") return careerBetStatus();
       try {
         return sim.raceBetStatus();
       } catch {
         return { max: 0, lock: "no account in this session" };
       }
     },
+    closed: () => careerPickerClosed(),
+    garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
   // Garage visit panel (lead): stop inside a repair shop's ring → quote + "Repair" / "Leave".
   const garageVisitEl = document.createElement("div");
@@ -508,10 +520,13 @@ async function main(): Promise<void> {
         return String(e).replace(/^(Error: )?wp_wasm: /, "");
       }
     },
+    closed: () => careerPickerClosed(),
+    garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
-  /** A touge battle started now would be a career run (see `startTouge`). */
+  /** A touge battle started now would be a career run (see `startTouge`): always from the
+   * career garage's "Touge battles", else when the career box is ticked and a career exists. */
   function tougeUsesCareer(): boolean {
-    return ($("career") as HTMLInputElement).checked && sim.careerExists();
+    return careerPicker === "touge" || (($("career") as HTMLInputElement).checked && sim.careerExists());
   }
   /** Last touge battle started ("Race again" replays it with the same wager). */
   let lastTouge: { choice: TougeChoice; wager: Wager } | null = null;
@@ -701,11 +716,13 @@ async function main(): Promise<void> {
     autopilot = params.get("autopilot") === "1",
   ) => {
     lastTouge = { choice, wager };
+    const career = tougeUsesCareer();
+    careerPicker = null;
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    if (tougeUsesCareer()) {
+    if (career) {
       try {
         // The touge locks its own weather (dry / rain), so no withWeather here.
         sim.careerStartRun(sim.tougeScenarioJson(choice, car, mode, wager, autopilot));
@@ -722,6 +739,74 @@ async function main(): Promise<void> {
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+  };
+
+  // ----- career pickers (playtest row 167) ---------------------------------------------------
+  /** Which picker the career garage opened (its races / battles run as career runs). */
+  let careerPicker: "races" | "touge" | null = null;
+  /** The career's active car (model id). */
+  const careerCar = (): string => {
+    const v = sim.careerView();
+    return v.cars.find((c) => c.uid === v.active_car)?.def_id ?? DEFAULT_CAR;
+  };
+  /** The main menu's remembered map (`wp.menu.map.v1`, lead/ashpeak-port's `MAP_KEY`; agreed
+   * with that branch), when it is a menu map: career races and garage runs start there (Ashpeak
+   * races show up on Ashpeak). Once lead/ashpeak-port lands this becomes
+   * `loadMenuMap(MENU_MAPS)` (same key, same accepted ids). */
+  const careerMap = (): string | null => {
+    const id = store.get("wp.menu.map.v1");
+    return id && ["vesper_v2", "ashpeak"].includes(id) ? id : null;
+  };
+  /** Career betting limits for the picker (`CareerProgress`: city bets need the Street tier). */
+  const careerBetStatus = (): { max: number; lock: string | null } => {
+    const p = sim.careerView().progress;
+    const f = p.features.find((x) => x.feature === "city_betting");
+    const lock = f && !f.unlocked ? `betting on races opens at ${f.needs} (${f.needed_rep} rep; you have ${p.rep})` : null;
+    return { max: lock ? 0 : p.max_bet_city, lock };
+  };
+  /** Open the race or touge picker from the career garage. */
+  const openCareerPicker = (which: "races" | "touge") => {
+    garage.hide();
+    careerPicker = which;
+    const map = careerMap();
+    if (which === "races" && map) citySel.value = map;
+    if (which === "races") raceView.openPicker();
+    else tougeView.openPicker();
+  };
+  /** A career picker was closed without racing: back to the garage. */
+  const careerPickerClosed = () => {
+    if (!careerPicker) return;
+    careerPicker = null;
+    openGarage();
+  };
+  /** Start picker race `id` as a career run with the career car (buy-in, purse, bets, rep on the
+   * career; "Back to garage" on the results), then place `bet` during the countdown. */
+  const startCareerRace = (id: string, bet: BetPick | null) => {
+    careerPicker = null;
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    const v = sim.careerView();
+    try {
+      sim.careerStartRun(sim.raceScenarioJson(id, careerCar(), v.mode, params.get("autopilot") === "1", careerMap() ?? citySel.value));
+    } catch (e) {
+      openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+      return;
+    }
+    garage.hide();
+    app.paused = false;
+    persistCareer();
+    rebuildViews();
+    applyAssistPreset(app.source);
+    rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+    if (bet) {
+      try {
+        sim.raceBet(bet.label, bet.stake);
+      } catch (e) {
+        console.warn("bet refused", e);
+      }
+    }
   };
 
   /** Per-frame race state for the HUD and the gate marker. */
@@ -868,6 +953,9 @@ async function main(): Promise<void> {
   /** A career run: the night run or a free drive (city box) with the career car, its saved
    * damage and mods. Opens the garage instead when the car cannot go out. */
   const startCareerRun = (kind: RunKind): boolean => {
+    // Garage runs follow the main menu's map (row 167; agreed with lead/ashpeak-port).
+    const map = careerMap();
+    if (map) citySel.value = map;
     const json =
       kind === "chase"
         ? sim.nightRunCityJson(DEFAULT_CAR, "Arcade", citySel.value)
@@ -896,6 +984,8 @@ async function main(): Promise<void> {
   /** "Restart" on the end-of-run panel: the same session again (the account carries over). */
   const restartRun = () => {
     const sc = sim.scenario();
+    // A career race or touge battle: back to the garage (its pickers start the next one).
+    if (sim.careerRunActive() && sc.name.startsWith("race_")) return void openGarage();
     if (sim.careerRunActive()) return void startCareerRun(sc.name === "night_run" ? "chase" : "free");
     const car = sc.entities[0]?.car;
     const mods = sc.entities[0]?.mods ?? [];
@@ -1514,7 +1604,9 @@ async function main(): Promise<void> {
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
     host: {
       play: (choice: PlayChoice) => {
-        // Quick play runs outside the career; the career lives behind Garage.
+        // Quick play runs outside the career; the career lives behind Garage (whose own race /
+        // touge entries run as career runs, row 167).
+        careerPicker = null;
         if (choice === "chase") startNightRun();
         else if (choice === "chaseRain") startNightRun(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);

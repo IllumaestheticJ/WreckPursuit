@@ -520,6 +520,10 @@ export const sim = {
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
   raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune): number[] =>
     Array.from(wasm.race_start_tuned(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "")),
+  /** Scenario JSON of race `id` for `careerStartRun` (the career garage's "Street races"); on
+   * `city` when the race runs there, else its own city ("" = its own). */
+  raceScenarioJson: (id: string, car: string, mode: string, autopilot: boolean, city: string): string =>
+    wasm.race_scenario_json(id, car, mode, autopilot, city),
   /** Honk-to-start meet spots on the session's map (`race_spots.ts`); `[]` during a race / replay / career. */
   raceSpots: (): RaceSpot[] => JSON.parse(wasm.race_spots()),
   /** The race the player just honked for in its spot (taken), or "". */
