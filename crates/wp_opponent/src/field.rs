@@ -3249,17 +3249,25 @@ fn decide_racer(
         // 0.25 s since candidate G (2026-10-23: yaw inertia × 1.35, the car answers the wheel
         // later; with 0.2 s it ran 0.5 m wide of its line in the Hollins hairpins, into the kerb).
         const STEER_LAG_S: f32 = 0.25;
-        // Since candidate G another 0.6 s per m/s over 35 on top: with G's slower yaw answer
-        // the steering loop weaved with growing amplitude at 45-50 m/s on Loop 9 (4.7 m off the
-        // commanded line, then a spin; s95 walls 22 -> 52 over 16 seeds). Below 35 m/s (the
-        // fast downtown streets) the look-ahead is as before: a longer one there cut corners
-        // into Lantern's walls.
+        // Since candidate G the stretch is 0.6 s per m/s over 25 on open, gently curving road
+        // (no bend tighter than `STRETCH_MIN_RADIUS_M` ahead): with G's slower yaw answer the
+        // steering loop weaved with growing amplitude at 45-50 m/s on Loop 9 (4.7 m off the
+        // commanded line, then a spin; s95 walls 22 -> 52 over 16 seeds). Into a tighter bend it
+        // stays 0.3: a longer look-ahead there cut corners into Lantern's walls.
         const STRETCH_S: f32 = 0.3;
-        const HIGH_STRETCH_S: f32 = 0.6;
-        let mut ld = r.ctrl.lookahead(v)
-            + STRETCH_S * (v - 25.0).max(0.0)
-            + HIGH_STRETCH_S * (v - 35.0).max(0.0)
-            + v * STEER_LAG_S;
+        const OPEN_STRETCH_S: f32 = 0.6;
+        const STRETCH_MIN_RADIUS_M: f32 = 200.0;
+        let base_ld = r.ctrl.lookahead(v) + v * STEER_LAG_S;
+        let open_ld = base_ld + OPEN_STRETCH_S * (v - 25.0).max(0.0);
+        let i_here = (r.s / CORRIDOR_STEP_M) as isize;
+        let n_ahead = (open_ld / CORRIDOR_STEP_M).ceil() as isize;
+        let open_road = (0..=n_ahead)
+            .all(|j| line.curvature[corridor.wrap(i_here + j)].abs() < 1.0 / STRETCH_MIN_RADIUS_M);
+        let mut ld = if open_road {
+            open_ld
+        } else {
+            base_ld + STRETCH_S * (v - 25.0).max(0.0)
+        };
         // Held up and slowing (a car or a light ahead): aim no further than where I stop.
         // A target around the next corner turns the car in early, across the inside lane —
         // queued at a junction that is the oncoming lane (Lantern Row, round-12 tip: a racer
