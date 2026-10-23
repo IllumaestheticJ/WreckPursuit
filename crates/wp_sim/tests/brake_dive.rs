@@ -156,7 +156,7 @@ fn hard_stop(car_id: &str, mode_file: &str) -> Stop {
 #[test]
 fn hard_stop_from_100_keeps_the_nose_off_the_road_in_both_modes() {
     for id in ROSTER {
-        for mode in ["modes/arcade.toml", "modes/sim.toml"] {
+        for mode in ["modes/sim.toml", "modes/extreme.toml"] {
             let s = hard_stop(id, mode);
             let what = format!(
                 "{id} {mode}: peak {:.2}°, front body {:.3} m, {} contacts",

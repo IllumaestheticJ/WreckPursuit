@@ -2,7 +2,7 @@
 // down at a standstill would engage auto-reverse).
 (
     name: "vehicle_sedan_brake",
-    mode: Simulation,
+    mode: Extreme,
     seed: 3,
     duration_s: 10.0,
     entities: [

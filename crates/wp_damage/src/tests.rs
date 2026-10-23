@@ -16,6 +16,10 @@ fn data(path: &str) -> String {
     format!("{}/../../data/{path}", env!("CARGO_MANIFEST_DIR"))
 }
 
+fn extreme_mode() -> ModeTable {
+    wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap()
+}
+
 fn sim_mode() -> ModeTable {
     wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap()
 }
@@ -86,7 +90,7 @@ fn elastic_below_yield_no_permanent_set() {
     let fy = mat.yield_mpa * 1e6 * area;
     let k = mat.young_mpa * 1e6 * area / 1.0;
     m.set_node_force(1, [0.0, 0.5 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.5);
+    run(&mut m, &extreme_mode(), 0.5);
     let stretch = beam_len(&m) - 1.0;
     let expected = 0.5 * fy / k;
     assert!(
@@ -99,7 +103,7 @@ fn elastic_below_yield_no_permanent_set() {
     );
     assert_eq!(m.total_plastic_energy_j(), 0.0);
     m.set_node_force(1, [0.0; 3]);
-    run(&mut m, &sim_mode(), 0.5);
+    run(&mut m, &extreme_mode(), 0.5);
     assert!((beam_len(&m) - 1.0).abs() < 1e-4, "springs back fully");
 }
 
@@ -110,9 +114,9 @@ fn yield_caps_force_and_leaves_plastic_set_with_hardening() {
     let fy = mat.yield_mpa * 1e6 * area;
     let et_a = mat.plastic_modulus_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, 1.5 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.1);
+    run(&mut m, &extreme_mode(), 0.1);
     m.set_node_force(1, [0.0; 3]);
-    run(&mut m, &sim_mode(), 0.5);
+    run(&mut m, &extreme_mode(), 0.5);
     let (b, hb) = (&m.beams[0], &m.hot[0]);
     let set = hb.rest - b.rest0;
     assert!(set > 0.01, "permanent set {set}");
@@ -136,7 +140,7 @@ fn structural_beam_buckles_in_compression() {
     let (mut m, mat) = one_beam("hss", area);
     let fy = mat.yield_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, -2.0 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.05);
+    run(&mut m, &extreme_mode(), 0.05);
     let (b, hb) = (&m.beams[0], &m.hot[0]);
     assert!(
         b.buckled,
@@ -162,10 +166,10 @@ fn glass_is_brittle_no_plastic_range() {
     let (mut m, mat) = one_beam("glass", area);
     let fy = mat.yield_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, 0.5 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.2);
+    run(&mut m, &extreme_mode(), 0.2);
     assert!(!m.hot[0].broken);
     m.set_node_force(1, [0.0, 3.0 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.2);
+    run(&mut m, &extreme_mode(), 0.2);
     assert!(m.hot[0].broken, "glass breaks instead of yielding");
     assert_eq!(m.total_plastic_energy_j(), 0.0, "no plastic work in glass");
     assert_eq!(m.hot[0].rest, m.beams[0].rest0);
@@ -177,11 +181,11 @@ fn plastic_cover_cracks_when_crushed_or_stretched() {
     let (mut m, mat) = one_beam("pp_bumper", area);
     let fy = mat.yield_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, -6.0 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.3);
+    run(&mut m, &extreme_mode(), 0.3);
     assert!(m.hot[0].broken, "crushed polymer cracks");
     let (mut m, _) = one_beam("pp_bumper", area);
     m.set_node_force(1, [0.0, 6.0 * fy, 0.0]);
-    run(&mut m, &sim_mode(), 0.3);
+    run(&mut m, &extreme_mode(), 0.3);
     assert!(m.hot[0].broken, "stretched polymer tears");
     assert!(
         m.total_plastic_energy_j() > 0.0,
@@ -194,7 +198,7 @@ fn beam_break_scale_toughens_beams() {
     let area = 1.0e-4;
     let mat = material("mild_steel");
     let fy = mat.yield_mpa * 1e6 * area;
-    let mut tough = sim_mode();
+    let mut tough = extreme_mode();
     tough.beam_break_scale = 3.0;
     let (mut a, _) = one_beam("mild_steel", area);
     let (mut b, _) = one_beam("mild_steel", area);
@@ -205,7 +209,7 @@ fn beam_break_scale_toughens_beams() {
     let mut a_broke = None;
     let mut b_broke = None;
     for step in 0..2400 {
-        a.apply_contacts(&[], &sim_mode(), PHYSICS_DT, &mut out);
+        a.apply_contacts(&[], &extreme_mode(), PHYSICS_DT, &mut out);
         b.apply_contacts(&[], &tough, PHYSICS_DT, &mut out);
         if a_broke.is_none() && a.hot[0].broken {
             a_broke = Some(step);
@@ -222,7 +226,7 @@ fn beam_break_scale_toughens_beams() {
 fn no_contacts_is_neutral_and_cheap() {
     let car = sedan();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
-    let ev = run(&mut m, &sim_mode(), 1.0);
+    let ev = run(&mut m, &extreme_mode(), 1.0);
     assert!(ev.is_empty());
     assert_eq!(m.handling_effects(), HandlingEffects::NEUTRAL);
     assert_eq!(m.health(), 1.0);
@@ -230,7 +234,7 @@ fn no_contacts_is_neutral_and_cheap() {
     let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
     assert_eq!(m.node_positions(), &rest[..]);
     assert!(m
-        .repair_estimate(&sim_mode(), &default_price_table())
+        .repair_estimate(&extreme_mode(), &default_price_table())
         .lines
         .is_empty());
 }
@@ -250,7 +254,7 @@ fn slow_contacts_do_not_deform() {
     };
     let mut out = Vec::new();
     for _ in 0..240 {
-        m.apply_contacts(&[resting], &sim_mode(), PHYSICS_DT, &mut out);
+        m.apply_contacts(&[resting], &extreme_mode(), PHYSICS_DT, &mut out);
     }
     assert_eq!(m.total_plastic_energy_j(), 0.0);
     assert_eq!(m.health(), 1.0);
@@ -259,11 +263,11 @@ fn slow_contacts_do_not_deform() {
 #[test]
 fn identical_runs_identical_hashes_and_seeds_only_change_pull() {
     let car = sedan();
-    let (a, ra) = run_barrier(&car, &sim_mode(), ImpactKind::Offset, 50.0, 0.0, 0.5, 7);
-    let (_, rb) = run_barrier(&car, &sim_mode(), ImpactKind::Offset, 50.0, 0.0, 0.5, 7);
+    let (a, ra) = run_barrier(&car, &extreme_mode(), ImpactKind::Offset, 50.0, 0.0, 0.5, 7);
+    let (_, rb) = run_barrier(&car, &extreme_mode(), ImpactKind::Offset, 50.0, 0.0, 0.5, 7);
     assert_eq!(ra.state_hash, rb.state_hash);
     assert_eq!(ra.metrics, rb.metrics);
-    let (c, _) = run_barrier(&car, &sim_mode(), ImpactKind::Offset, 50.0, 0.0, 0.5, 8);
+    let (c, _) = run_barrier(&car, &extreme_mode(), ImpactKind::Offset, 50.0, 0.0, 0.5, 8);
     // The seed only picks the bent rack's pull direction/magnitude, never the deformation.
     assert_eq!(a.node_positions(), c.node_positions());
 }
@@ -271,7 +275,7 @@ fn identical_runs_identical_hashes_and_seeds_only_change_pull() {
 #[test]
 fn nodes_stay_inside_chassis_bounds() {
     let car = sedan();
-    for mode in [sim_mode(), arcade_mode()] {
+    for mode in [extreme_mode(), sim_mode()] {
         for kind in [
             ImpactKind::Frontal,
             ImpactKind::Offset,
@@ -291,7 +295,15 @@ fn nodes_stay_inside_chassis_bounds() {
 #[test]
 fn left_front_hit_bends_left_front_corner_only() {
     let car = sedan();
-    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Side, 40.0, 1400.0, 0.5, 1);
+    let (m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Side,
+        40.0,
+        1400.0,
+        0.5,
+        1,
+    );
     let e = m.handling_effects();
     let fl = wp_contracts::WHEEL_FL;
     let fr = wp_contracts::WHEEL_FR;
@@ -314,7 +326,15 @@ fn left_front_hit_bends_left_front_corner_only() {
 #[test]
 fn frontal_crash_effects_drive_damaged() {
     let car = sedan();
-    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 80.0, 0.0, 0.5, 1);
+    let (m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        80.0,
+        0.0,
+        0.5,
+        1,
+    );
     let e = m.handling_effects();
     assert!(m.is_total_loss());
     assert!(e.engine_dead);
@@ -327,20 +347,28 @@ fn frontal_crash_effects_drive_damaged() {
 #[test]
 fn radiator_failure_overheats_over_time() {
     let car = sedan();
-    let (mut m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 60.0, 0.0, 0.3, 1);
+    let (mut m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        60.0,
+        0.0,
+        0.3,
+        1,
+    );
     assert!(m.component_failed(Component::Radiator));
     let before = m.handling_effects().overheating;
-    run(&mut m, &sim_mode(), 10.0);
+    run(&mut m, &extreme_mode(), 10.0);
     let after = m.handling_effects().overheating;
     assert!(after > before && after <= 1.0, "{before} -> {after}");
 }
 
 #[test]
-fn arcade_is_more_forgiving_than_sim() {
+fn sim_is_more_forgiving_than_extreme() {
     let car = sedan();
     for kind in [ImpactKind::Frontal, ImpactKind::Side] {
-        let (s, rs) = run_barrier(&car, &sim_mode(), kind, 56.0, 1400.0, 0.5, 1);
-        let (a, ra) = run_barrier(&car, &arcade_mode(), kind, 56.0, 1400.0, 0.5, 1);
+        let (s, rs) = run_barrier(&car, &extreme_mode(), kind, 56.0, 1400.0, 0.5, 1);
+        let (a, ra) = run_barrier(&car, &sim_mode(), kind, 56.0, 1400.0, 0.5, 1);
         assert!(a.health() > s.health(), "{kind:?}");
         assert!(ra.metrics["crush_m"] < rs.metrics["crush_m"]);
         assert!(
@@ -366,10 +394,10 @@ fn events_carry_entity_and_are_emitted_once() {
     let (c0, c1) =
         crate::barrier::barrier_contacts(lo, hi, ImpactKind::Frontal, 80.0 / 3.6, 1400.0, 0.0);
     let mut out = Vec::new();
-    m.apply_contacts(&c0, &sim_mode(), PHYSICS_DT, &mut out);
-    m.apply_contacts(&c1, &sim_mode(), PHYSICS_DT, &mut out);
+    m.apply_contacts(&c0, &extreme_mode(), PHYSICS_DT, &mut out);
+    m.apply_contacts(&c1, &extreme_mode(), PHYSICS_DT, &mut out);
     for _ in 0..240 {
-        m.apply_contacts(&[], &sim_mode(), PHYSICS_DT, &mut out);
+        m.apply_contacts(&[], &extreme_mode(), PHYSICS_DT, &mut out);
     }
     let mut total_loss = 0;
     let mut failed = BTreeMap::new();
@@ -398,16 +426,24 @@ fn events_carry_entity_and_are_emitted_once() {
 #[test]
 fn lattice_sleeps_after_a_crash() {
     let car = sedan();
-    let (mut m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.5, 1);
-    run(&mut m, &sim_mode(), 1.5);
+    let (mut m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        56.0,
+        0.0,
+        0.5,
+        1,
+    );
+    run(&mut m, &extreme_mode(), 1.5);
     assert!(!m.is_awake(), "a settled lattice stops solving");
     let h = m.state_hash();
-    run(&mut m, &sim_mode(), 1.0);
+    run(&mut m, &extreme_mode(), 1.0);
     let steady = m.state_hash();
     // Only the call counter changes while asleep.
     assert_ne!(h, steady);
     let p = m.node_positions().to_vec();
-    run(&mut m, &sim_mode(), 1.0);
+    run(&mut m, &extreme_mode(), 1.0);
     assert_eq!(p, m.node_positions());
 }
 
@@ -417,8 +453,16 @@ fn repair_estimate_grows_with_damage_and_scales_with_mode() {
     let prices = default_price_table();
     let mut last = 0.0;
     for speed in [15.0, 30.0, 50.0, 70.0] {
-        let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, speed, 0.0, 0.5, 1);
-        let est = m.repair_estimate(&sim_mode(), &prices);
+        let (m, _) = run_barrier(
+            &car,
+            &extreme_mode(),
+            ImpactKind::Frontal,
+            speed,
+            0.0,
+            0.5,
+            1,
+        );
+        let est = m.repair_estimate(&extreme_mode(), &prices);
         assert!(est.total > last, "{speed} km/h: {} <= {last}", est.total);
         let sum: f32 = est.lines.iter().map(|l| l.total).sum();
         assert!((sum - est.total).abs() < 1e-2 * est.total.max(1.0));
@@ -426,7 +470,7 @@ fn repair_estimate_grows_with_damage_and_scales_with_mode() {
             assert!((0.0..=1.0).contains(&l.severity));
             assert!(l.total >= 0.0);
         }
-        let mut cheap = sim_mode();
+        let mut cheap = extreme_mode();
         cheap.repair_cost_scale = 0.5;
         let half = m.repair_estimate(&cheap, &prices).total;
         assert!((half - 0.5 * est.total).abs() < 1e-2 * est.total);
@@ -437,7 +481,15 @@ fn repair_estimate_grows_with_damage_and_scales_with_mode() {
 #[test]
 fn reset_restores_pristine_state() {
     let car = sedan();
-    let (mut m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.3, 1);
+    let (mut m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        56.0,
+        0.0,
+        0.3,
+        1,
+    );
     m.set_entity(wp_contracts::EntityId(3));
     m.reset();
     let fresh = DamageModel::new(&car.lattice, &car.materials);
@@ -471,7 +523,7 @@ fn hull_updates_are_throttled_and_follow_deformation() {
             1 => &c1,
             _ => &[],
         };
-        m.apply_contacts(c, &sim_mode(), PHYSICS_DT, &mut out);
+        m.apply_contacts(c, &extreme_mode(), PHYSICS_DT, &mut out);
         if *versions.last().unwrap() != m.hull_version() {
             versions.push(m.hull_version());
         }
@@ -492,7 +544,15 @@ fn hull_updates_are_throttled_and_follow_deformation() {
 #[test]
 fn detached_parts_become_debris_bodies() {
     let car = sedan();
-    let (mut m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 80.0, 0.0, 0.5, 1);
+    let (mut m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        80.0,
+        0.0,
+        0.5,
+        1,
+    );
     let parts = m.take_detached_parts();
     assert!(!parts.is_empty());
     assert!(m.take_detached_parts().is_empty(), "drained");
@@ -538,11 +598,27 @@ fn deform_skin_follows_bound_nodes() {
 }
 
 #[test]
-fn mode_tables_load_and_arcade_is_derived_from_sim() {
-    let s = sim_mode();
-    let a = arcade_mode();
-    assert_eq!(s.mode, DamageMode::Simulation);
-    assert_eq!(a.mode, DamageMode::Arcade);
+fn mode_tables_load_and_derive_from_each_other() {
+    // Contract v0.4.0: Simulation = the old Arcade (derived from Extreme, the old Simulation),
+    // Arcade = Simulation + racer_damage_scale.
+    let s = extreme_mode();
+    let a = sim_mode();
+    assert_eq!(s.mode, DamageMode::Extreme);
+    assert_eq!(a.mode, DamageMode::Simulation);
+    assert_eq!(s.racer_damage_scale, 1.0);
+    assert_eq!(a.racer_damage_scale, 1.0);
+    let arcade = arcade_mode();
+    assert_eq!(arcade.mode, DamageMode::Arcade);
+    assert!(arcade.racer_damage_scale > 0.15 && arcade.racer_damage_scale < 0.35);
+    let same = ModeTable {
+        mode: DamageMode::Simulation,
+        racer_damage_scale: 1.0,
+        ..arcade.clone()
+    };
+    assert_eq!(
+        same, a,
+        "Arcade differs from Simulation only by racer_damage_scale"
+    );
     assert!((a.impulse_to_lattice_scale - 0.45 * s.impulse_to_lattice_scale).abs() < 1e-6);
     assert!(
         (a.component_fail_threshold_scale - 4.0 * s.component_fail_threshold_scale).abs() < 1e-6
@@ -565,7 +641,15 @@ fn every_body_profile_crashes_plausibly() {
         let mut car = base.clone();
         car.lattice = generate_lattice(&p);
         car.def.mass_kg = p.car_mass_kg;
-        let (_, front) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.5, 1);
+        let (_, front) = run_barrier(
+            &car,
+            &extreme_mode(),
+            ImpactKind::Frontal,
+            56.0,
+            0.0,
+            0.5,
+            1,
+        );
         let crush = front.metrics["crush_m"];
         assert!(front.contained, "{profile:?}");
         assert!(
@@ -573,7 +657,15 @@ fn every_body_profile_crashes_plausibly() {
             "{profile:?} 56 km/h crush {crush}"
         );
         assert!(front.metrics["total_loss"] > 0.5, "{profile:?}");
-        let (_, side) = run_barrier(&car, &sim_mode(), ImpactKind::Side, 40.0, 1450.0, 0.5, 1);
+        let (_, side) = run_barrier(
+            &car,
+            &extreme_mode(),
+            ImpactKind::Side,
+            40.0,
+            1450.0,
+            0.5,
+            1,
+        );
         let intrusion = side.metrics["cabin_intrusion_m"];
         assert!(
             (0.05..=0.35).contains(&intrusion),
@@ -603,7 +695,12 @@ fn car_to_car_contacts_split_the_energy() {
     let injected = |other_mass_kg: f32| {
         let mut m = DamageModel::new(&car.lattice, &car.materials);
         let mut out = Vec::new();
-        m.apply_contacts(&[contact(other_mass_kg)], &sim_mode(), PHYSICS_DT, &mut out);
+        m.apply_contacts(
+            &[contact(other_mass_kg)],
+            &extreme_mode(),
+            PHYSICS_DT,
+            &mut out,
+        );
         crate::ALL_REGIONS
             .iter()
             .map(|&r| m.region_injected_energy_j(r))
@@ -618,7 +715,15 @@ fn car_to_car_contacts_split_the_energy() {
 #[test]
 fn structural_crush_ignores_cover_and_glass() {
     let car = sedan();
-    let (m, r) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.5, 1);
+    let (m, r) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        56.0,
+        0.0,
+        0.5,
+        1,
+    );
     let s = m.structural_crush_m();
     assert!(
         s >= r.metrics["crush_m"] - 1e-6,
@@ -647,10 +752,10 @@ fn glass_and_region_events_are_emitted_once_per_threshold() {
     let (c0, c1) =
         crate::barrier::barrier_contacts(lo, hi, ImpactKind::Frontal, 70.0 / 3.6, 1400.0, 0.0);
     let mut out = Vec::new();
-    m.apply_contacts(&c0, &sim_mode(), PHYSICS_DT, &mut out);
-    m.apply_contacts(&c1, &sim_mode(), PHYSICS_DT, &mut out);
+    m.apply_contacts(&c0, &extreme_mode(), PHYSICS_DT, &mut out);
+    m.apply_contacts(&c1, &extreme_mode(), PHYSICS_DT, &mut out);
     for _ in 0..240 {
-        m.apply_contacts(&[], &sim_mode(), PHYSICS_DT, &mut out);
+        m.apply_contacts(&[], &extreme_mode(), PHYSICS_DT, &mut out);
     }
     let mut glass = Vec::new();
     let mut last: BTreeMap<BodyRegion, f32> = BTreeMap::new();
@@ -722,7 +827,7 @@ fn crash_and_settle(
 #[test]
 fn save_restore_round_trip_is_bit_exact() {
     let car = sedan();
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let mut a = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut a, &car, ImpactKind::Frontal, 60.0, &mode);
     assert!(!a.is_awake());
@@ -790,7 +895,15 @@ fn summary_counts_damage() {
             wheels_lost: 0
         }
     );
-    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 80.0, 0.0, 0.5, 1);
+    let (m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        80.0,
+        0.0,
+        0.5,
+        1,
+    );
     let s = m.summary();
     assert!(s.total_loss && s.health < 0.5);
     assert!(s.components_failed >= 2, "{s:?}");
@@ -800,7 +913,7 @@ fn summary_counts_damage() {
 #[test]
 fn repairing_every_billed_item_restores_the_car() {
     let car = sedan();
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let prices = default_price_table();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut m, &car, ImpactKind::Frontal, 56.0, &mode);
@@ -835,7 +948,7 @@ fn repairing_every_billed_item_restores_the_car() {
 #[test]
 fn partial_repair_fixes_only_the_paid_items() {
     let car = sedan();
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut m, &car, ImpactKind::Frontal, 40.0, &mode);
     let health = m.health();
@@ -884,7 +997,7 @@ fn partial_repair_fixes_only_the_paid_items() {
 #[test]
 fn glass_breaks_are_readable_for_the_tick_they_happen() {
     let car = sedan();
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     let (lo, hi) = sedan_bounds(&car);
     let (c0, c1) =
@@ -938,7 +1051,7 @@ fn handling_is_neutral_except_drag(e: &HandlingEffects) -> bool {
 }
 
 #[test]
-fn arcade_light_and_medium_hits_are_cosmetic() {
+fn sim_light_and_medium_hits_are_cosmetic() {
     let car = sedan();
     for (kind, kmh) in [
         (ImpactKind::Frontal, 25.0),
@@ -948,7 +1061,7 @@ fn arcade_light_and_medium_hits_are_cosmetic() {
         (ImpactKind::Offset, 40.0),
     ] {
         let mut m = DamageModel::new(&car.lattice, &car.materials);
-        crash_and_settle(&mut m, &car, kind, kmh, &arcade_mode());
+        crash_and_settle(&mut m, &car, kind, kmh, &sim_mode());
         assert!(
             m.structural_crush_m() > 0.03,
             "{kind:?} {kmh}: the car is dented"
@@ -958,14 +1071,10 @@ fn arcade_light_and_medium_hits_are_cosmetic() {
         assert!(m.component_health_map().is_empty(), "{kind:?} {kmh}");
         assert!(m.health() > 0.95, "{kind:?} {kmh}: health {}", m.health());
         // The dent is still billed.
-        assert!(
-            m.repair_estimate(&arcade_mode(), &default_price_table())
-                .total
-                > 0.0
-        );
+        assert!(m.repair_estimate(&sim_mode(), &default_price_table()).total > 0.0);
         // The same hit in Simulation is mechanical.
         let mut s = DamageModel::new(&car.lattice, &car.materials);
-        crash_and_settle(&mut s, &car, kind, kmh, &sim_mode());
+        crash_and_settle(&mut s, &car, kind, kmh, &extreme_mode());
         assert!(
             !handling_is_neutral_except_drag(&s.handling_effects()),
             "{kind:?} {kmh} sim"
@@ -980,12 +1089,12 @@ fn wrecked(m: &DamageModel) -> bool {
 }
 
 #[test]
-fn arcade_hard_hits_degrade_and_several_wreck_the_car() {
+fn sim_hard_hits_degrade_and_several_wreck_the_car() {
     // Round 12b / 13 semantics (owner playtest: Arcade too fragile, then row 87 "still a little
     // too high"): a hard hit degrades clearly but the car stays drivable; it takes about 4–6
     // hard hits to end it.
     let car = sedan();
-    let mode = arcade_mode();
+    let mode = sim_mode();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut m, &car, ImpactKind::Frontal, 56.0, &mode);
     assert!(!m.is_total_loss());
@@ -1037,9 +1146,9 @@ fn arcade_hard_hits_degrade_and_several_wreck_the_car() {
 }
 
 #[test]
-fn arcade_50kmh_hits_never_end_the_car() {
+fn sim_50kmh_hits_never_end_the_car() {
     let car = sedan();
-    let mode = arcade_mode();
+    let mode = sim_mode();
     for kind in [ImpactKind::Frontal, ImpactKind::Side] {
         let mut m = DamageModel::new(&car.lattice, &car.materials);
         for hit in 1..=8 {
@@ -1050,14 +1159,14 @@ fn arcade_50kmh_hits_never_end_the_car() {
 }
 
 #[test]
-fn arcade_alignment_is_scaled_and_sim_is_not() {
+fn sim_alignment_is_scaled_and_extreme_is_not() {
     let car = sedan();
     let (mut a, mut s) = (
         DamageModel::new(&car.lattice, &car.materials),
         DamageModel::new(&car.lattice, &car.materials),
     );
-    crash_and_settle(&mut a, &car, ImpactKind::Side, 80.0, &arcade_mode());
-    crash_and_settle(&mut s, &car, ImpactKind::Side, 80.0, &sim_mode());
+    crash_and_settle(&mut a, &car, ImpactKind::Side, 80.0, &sim_mode());
+    crash_and_settle(&mut s, &car, ImpactKind::Side, 80.0, &extreme_mode());
     let toe = |m: &DamageModel| {
         m.handling_effects()
             .toe_delta
@@ -1071,9 +1180,9 @@ fn arcade_alignment_is_scaled_and_sim_is_not() {
 }
 
 #[test]
-fn arcade_many_light_hits_never_end_the_car() {
+fn sim_many_light_hits_never_end_the_car() {
     let car = sedan();
-    let mode = arcade_mode();
+    let mode = sim_mode();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     for k in [
         ImpactKind::Frontal,
@@ -1091,9 +1200,9 @@ fn arcade_many_light_hits_never_end_the_car() {
 }
 
 #[test]
-fn arcade_limp_mode_settles_partially_and_sim_does_not() {
+fn sim_limp_mode_settles_partially_and_extreme_does_not() {
     let car = sedan();
-    for (mode, settles) in [(arcade_mode(), true), (sim_mode(), false)] {
+    for (mode, settles) in [(sim_mode(), true), (extreme_mode(), false)] {
         let mut m = DamageModel::new(&car.lattice, &car.materials);
         crash_and_settle(&mut m, &car, ImpactKind::Side, 56.0, &mode);
         let toe0: f32 = m.handling_effects().toe_delta.iter().map(|t| t.abs()).sum();
@@ -1115,7 +1224,15 @@ fn arcade_limp_mode_settles_partially_and_sim_does_not() {
 #[test]
 fn snapshot_round_trips_into_a_fresh_model() {
     let car = sedan();
-    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.3, 1);
+    let (m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        56.0,
+        0.0,
+        0.3,
+        1,
+    );
     let s = m.save_state();
     assert!(s.health < 1.0);
     let mut fresh = DamageModel::new(&car.lattice, &car.materials);
@@ -1126,7 +1243,7 @@ fn snapshot_round_trips_into_a_fresh_model() {
     assert!(!fresh.is_awake());
     // A settled restored model stays put when stepped without contacts.
     let before = fresh.node_positions().to_vec();
-    run(&mut fresh, &sim_mode(), 0.5);
+    run(&mut fresh, &extreme_mode(), 0.5);
     assert_eq!(fresh.node_positions(), &before[..]);
     // Another lattice / wrong sizes are refused and leave the model untouched.
     let mut other = s.clone();
@@ -1141,7 +1258,15 @@ fn snapshot_round_trips_into_a_fresh_model() {
 #[test]
 fn summary_counts_failures_and_detachments() {
     let car = sedan();
-    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 80.0, 0.0, 0.5, 1);
+    let (m, _) = run_barrier(
+        &car,
+        &extreme_mode(),
+        ImpactKind::Frontal,
+        80.0,
+        0.0,
+        0.5,
+        1,
+    );
     let sum = m.summary();
     let s = m.save_state();
     assert_eq!(sum.health, m.health());
@@ -1160,7 +1285,7 @@ fn summary_counts_failures_and_detachments() {
 #[test]
 fn cosmetic_state_survives_save_restore_and_repair_clears_it() {
     let car = sedan();
-    let mode = arcade_mode();
+    let mode = sim_mode();
     let mut a = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut a, &car, ImpactKind::Side, 30.0, &mode);
     let snap = a.save_full();
@@ -1200,7 +1325,7 @@ fn contract_only_restore_keeps_health_and_bill() {
     // Older saves / peers without the extension: health, summary, bill and geometry match,
     // and the restored car does not re-emit damage events.
     let car = sedan();
-    let mode = arcade_mode();
+    let mode = sim_mode();
     let prices = default_price_table();
     let mut a = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut a, &car, ImpactKind::Side, 30.0, &mode);
@@ -1222,4 +1347,69 @@ fn contract_only_restore_keeps_health_and_bill() {
         b.apply_contacts(&[], &mode, PHYSICS_DT, &mut events);
     }
     assert!(events.is_empty(), "{events:?}");
+}
+
+/// Contract v0.4.0 (owner 2026-10-22): Arcade racers take about 20 % of Simulation's damage.
+/// The barrier car counts as a racer, so `racer_damage_scale` applies; health lost and plastic
+/// energy of hard hits land near a fifth of Simulation's.
+#[test]
+fn arcade_racers_take_about_a_fifth_of_sim_damage() {
+    let car = sedan();
+    for (kind, other) in [
+        (ImpactKind::Frontal, 0.0),
+        (ImpactKind::Offset, 0.0),
+        (ImpactKind::Side, 1400.0),
+        (ImpactKind::Rear, 0.0),
+    ] {
+        for kmh in [56.0, 80.0] {
+            let (s, rs) = run_barrier(&car, &sim_mode(), kind, kmh, other, 0.5, 1);
+            let (a, ra) = run_barrier(&car, &arcade_mode(), kind, kmh, other, 0.5, 1);
+            let lost = (1.0 - a.health()) / (1.0 - s.health()).max(1e-6);
+            let energy = ra.metrics["plastic_energy_kj"] / rs.metrics["plastic_energy_kj"];
+            assert!(
+                (0.1..=0.3).contains(&lost),
+                "{kind:?} {kmh}: health lost {lost:.2} of Simulation's"
+            );
+            assert!(
+                (0.12..=0.3).contains(&energy),
+                "{kind:?} {kmh}: plastic energy {energy:.2} of Simulation's"
+            );
+            assert!(!a.summary().total_loss, "{kind:?} {kmh}");
+        }
+    }
+}
+
+/// `scale_racer_contacts` scales impulses (normal and friction) but keeps the closing speed, so
+/// the light-hit threshold still sees the real hit; Simulation and Extreme leave contacts alone.
+#[test]
+fn racer_contact_scaling() {
+    let c = ContactImpulse {
+        point_local_m: [0.0, 2.0, 0.5],
+        normal_local: [0.0, -1.0, 0.0],
+        impulse_ns: 1000.0,
+        tangent_impulse_local_ns: [10.0, 0.0, -20.0],
+        rel_speed_mps: 15.0,
+        other: None,
+        other_mass_kg: 0.0,
+    };
+    let arcade = arcade_mode();
+    let mut v = vec![c];
+    crate::scale_racer_contacts(&mut v, &arcade);
+    let s = arcade.racer_damage_scale;
+    assert_eq!(v[0].impulse_ns, 1000.0 * s);
+    assert_eq!(v[0].tangent_impulse_local_ns, [10.0 * s, 0.0, -20.0 * s]);
+    assert_eq!(v[0].rel_speed_mps, 15.0);
+    for mode in [sim_mode(), extreme_mode()] {
+        let mut v = vec![c];
+        crate::scale_racer_contacts(&mut v, &mode);
+        assert_eq!(v[0], c);
+    }
+}
+
+/// Simulation and Arcade use the forgiving rules, Extreme does not.
+#[test]
+fn forgiving_rules_by_mode() {
+    assert!(crate::forgiving_rules(DamageMode::Arcade));
+    assert!(crate::forgiving_rules(DamageMode::Simulation));
+    assert!(!crate::forgiving_rules(DamageMode::Extreme));
 }

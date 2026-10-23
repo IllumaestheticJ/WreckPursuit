@@ -37,7 +37,7 @@ fn police_bench_light() {
         ],
         seeds: vec![1, 2],
         duration_s: 120.0,
-        mode: DamageMode::Arcade,
+        mode: DamageMode::Simulation,
         threads: 0,
         progress: false,
     };
@@ -108,8 +108,8 @@ fn police_bench_light() {
 #[test]
 fn police_bench_run_is_deterministic() {
     let c = cell(BenchCity::Grid, true, false, 2, EvaderSkill::Expert);
-    let a = run_one(&data(), c, 5, DamageMode::Arcade, 30.0).expect("run");
-    let b = run_one(&data(), c, 5, DamageMode::Arcade, 30.0).expect("run");
+    let a = run_one(&data(), c, 5, DamageMode::Simulation, 30.0).expect("run");
+    let b = run_one(&data(), c, 5, DamageMode::Simulation, 30.0).expect("run");
     assert_eq!(a, b);
 }
 

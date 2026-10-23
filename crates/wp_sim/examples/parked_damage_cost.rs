@@ -1,6 +1,6 @@
 //! Per-frame cost of parked-car damage (owner playtest 2026-10-21; numbers in
 //! `docs/integration/parked-signals.md`): `cargo run --release -p wp_sim --example
-//! parked_damage_cost [arcade|sim]`.
+//! parked_damage_cost [arcade|sim|extreme]`.
 //!
 //! 24 debug sedans on the flat world, each driving at 50 km/h into its own parked car (and
 //! side-swiping the one after it), all at once: the worst case of many fresh dents in the same

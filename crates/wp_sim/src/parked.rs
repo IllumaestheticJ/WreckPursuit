@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn untouched_parked_cars_cost_nothing() {
-        let mut sim = row("arcade", 8);
+        let mut sim = row("sim", 8);
         // Drive past the row 5 m to its side at 14 m/s: props wake, nothing is hit.
         drive(&mut sim, [5.0, 0.0, 0.0], 0.0, 14.0, 5.0);
         assert!(sim.parked_wrecks().is_empty());
@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn frontal_hit_dents_the_parked_car_in_both_modes() {
-        for mode in ["arcade", "sim"] {
+        for mode in ["sim", "extreme"] {
             let mut sim = row(mode, 1);
             // 50 km/h into the parked car's tail.
             drive(&mut sim, [0.0, 0.0, 0.0], 0.0, 13.9, 3.0);
@@ -676,7 +676,7 @@ mod tests {
     #[test]
     fn parked_damage_is_deterministic() {
         let run = || {
-            let mut sim = row("sim", 3);
+            let mut sim = row("extreme", 3);
             drive(&mut sim, [-1.0, 0.0, 0.0], -0.05, 13.9, 2.0);
             (sim.state_hash(), sim.parked_wrecks().len())
         };
@@ -691,7 +691,7 @@ mod tests {
     #[test]
     fn parked_car_dents_like_the_same_car_on_its_wheels() {
         let run = |parked: bool| {
-            let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+            let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
             let mut sim = Sim::new(SimConfig {
                 seed: 1,
                 mode,

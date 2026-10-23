@@ -69,6 +69,8 @@ pub struct ModeValue<T> {
     pub arcade: T,
     /// Simulation damage mode.
     pub simulation: T,
+    /// Extreme damage mode.
+    pub extreme: T,
 }
 
 impl<T: Copy> ModeValue<T> {
@@ -77,6 +79,7 @@ impl<T: Copy> ModeValue<T> {
         match mode {
             DamageMode::Arcade => self.arcade,
             DamageMode::Simulation => self.simulation,
+            DamageMode::Extreme => self.extreme,
         }
     }
 }

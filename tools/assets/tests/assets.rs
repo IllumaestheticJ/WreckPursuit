@@ -357,11 +357,11 @@ fn crumple_after(
 #[test]
 fn front_crumples_and_follows_the_crushed_front() {
     for (car, kmh, target, mode, min_fold) in [
-        ("debug_sedan", 50.0, "car", "Arcade", 0.12),
-        ("debug_sedan", 50.0, "barrier", "Arcade", 0.15),
-        ("shiro_turbo", 50.0, "car", "Arcade", 0.12),
-        ("sentinel_cruiser", 50.0, "barrier", "Arcade", 0.15),
-        ("debug_sedan", 56.0, "barrier", "Simulation", 0.2),
+        ("debug_sedan", 50.0, "car", "Simulation", 0.12),
+        ("debug_sedan", 50.0, "barrier", "Simulation", 0.15),
+        ("shiro_turbo", 50.0, "car", "Simulation", 0.12),
+        ("sentinel_cruiser", 50.0, "barrier", "Simulation", 0.15),
+        ("debug_sedan", 56.0, "barrier", "Extreme", 0.2),
     ] {
         let (hood, fl, fr) = crumple_after(car, kmh, target, mode, 8);
         let tag = format!("{car} {kmh} km/h {target} {mode}");
@@ -390,7 +390,7 @@ fn rear_quarters_crumple_and_follow_the_crushed_tail() {
     for car in ["debug_sedan", "sentinel_cruiser", "vireo_xs"] {
         let def = load_car(&root, car).unwrap();
         let mesh = load_mesh(&mesh_path(&root, car)).unwrap();
-        let mut c = crash::rear_ended(car, &def.lattice, &mesh, 50.0, "Arcade", 8);
+        let mut c = crash::rear_ended(car, &def.lattice, &mesh, 50.0, "Simulation", 8);
         let pose = Pose {
             lattice: &def.lattice,
             rest: &c.rest,
@@ -421,8 +421,8 @@ fn rear_quarters_crumple_and_follow_the_crushed_tail() {
 /// between two frames still counts (its hanging pose is rotated back to the crushed one).
 #[test]
 fn crumple_does_not_depend_on_frame_rate() {
-    let (fast, _, _) = crumple_after("debug_sedan", 50.0, "car", "Arcade", 4);
-    let (slow, _, _) = crumple_after("debug_sedan", 50.0, "car", "Arcade", 16);
+    let (fast, _, _) = crumple_after("debug_sedan", 50.0, "car", "Simulation", 4);
+    let (slow, _, _) = crumple_after("debug_sedan", 50.0, "car", "Simulation", 16);
     assert!(
         (fast.max_fold_m - slow.max_fold_m).abs() <= 0.03,
         "{fast:?} vs {slow:?}"
@@ -432,8 +432,8 @@ fn crumple_does_not_depend_on_frame_rate() {
 /// Harder hits crumple more (up to the cap).
 #[test]
 fn harder_hits_crumple_more() {
-    let (soft, _, _) = crumple_after("debug_sedan", 30.0, "car", "Arcade", 4);
-    let (hard, _, _) = crumple_after("debug_sedan", 70.0, "car", "Arcade", 4);
+    let (soft, _, _) = crumple_after("debug_sedan", 30.0, "car", "Simulation", 4);
+    let (hard, _, _) = crumple_after("debug_sedan", 70.0, "car", "Simulation", 4);
     assert!(soft.max_fold_m > 0.02, "{soft:?}");
     assert!(
         hard.max_fold_m > soft.max_fold_m + 0.03,

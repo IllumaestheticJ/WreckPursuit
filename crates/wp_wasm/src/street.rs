@@ -18,8 +18,8 @@
 //!   lanes, no lane-splitting) and a *cruise capability* (top speed and grip capped well below
 //!   the car's) so it keeps to traffic pace and the speed limit, with a stop-line guard for red
 //!   and catchable amber lights. At the end of a route it plans the next one.
-//! - **Challenge.** Honking (horn rising edge) within [`CHALLENGE_RADIUS_M`] of a roaming racer
-//!   stops it and opens an [`Offer`]: the player picks B on the map ([`StreetRacers::preview`]),
+//! - **Challenge.** Honking (horn rising edge) while right behind a roaming racer (same lane and
+//!   heading, at most [`CHALLENGE_BEHIND_M`] back: [`tailing`]) stops it and opens an [`Offer`]: the player picks B on the map ([`StreetRacers::preview`]),
 //!   optionally waypoints the route must run through in order (up to [`MAX_WAYPOINTS`], owner
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
@@ -88,8 +88,16 @@ pub(crate) mod perf {
     }
 }
 
-/// Horn within this distance of a roaming racer challenges it, m.
-pub const CHALLENGE_RADIUS_M: f32 = 30.0;
+/// Horn while right behind a roaming racer challenges it: the player's car centre at most this
+/// far behind the racer's, along the racer's heading (about two car lengths of gap), m (owner
+/// request 2026-10-23: challenges only from right behind the racer).
+pub const CHALLENGE_BEHIND_M: f32 = 15.0;
+/// See [`CHALLENGE_BEHIND_M`]: and at most this far to either side of the racer's centre line
+/// (the same lane), m.
+pub const CHALLENGE_SIDE_M: f32 = 2.5;
+/// See [`CHALLENGE_BEHIND_M`]: and facing the racer's way, the cosine of the most the two
+/// headings may differ (45°).
+pub const CHALLENGE_HEADING_COS: f32 = std::f32::consts::FRAC_1_SQRT_2;
 /// An open offer lapses when the player drives this far from the racer, m.
 pub const OFFER_LEAVE_M: f32 = 70.0;
 /// Reaching this close to B finishes the race, m.
@@ -743,6 +751,29 @@ fn xy_of(sim: &Sim, id: EntityId) -> Option<[f32; 2]> {
         .map(|v| geom::xy(v.vehicle.state().pos))
 }
 
+/// A vehicle's ground position and unit forward direction.
+fn pose_of(sim: &Sim, id: EntityId) -> Option<([f32; 2], [f32; 2])> {
+    sim.vehicles().iter().find(|v| v.id == id).map(|v| {
+        let st = v.vehicle.state();
+        (geom::xy(st.pos), wp_world::drive::forward_of(st.rot))
+    })
+}
+
+/// How far the `player` pose is behind the `racer` pose along the racer's heading, m, when the
+/// player is right behind it (a challenge may open): at most [`CHALLENGE_BEHIND_M`] back, within
+/// [`CHALLENGE_SIDE_M`] of its centre line and facing its way (within 45°,
+/// [`CHALLENGE_HEADING_COS`]). `None` beside, ahead of, too far behind or facing another way.
+fn tailing(player: ([f32; 2], [f32; 2]), racer: ([f32; 2], [f32; 2])) -> Option<f32> {
+    let (p, pf) = player;
+    let (q, qf) = racer;
+    let rel = geom::sub(p, q);
+    let behind = -geom::dot(rel, qf);
+    let side = geom::cross(qf, rel).abs();
+    let facing = geom::dot(pf, qf) >= CHALLENGE_HEADING_COS;
+    (behind > 0.0 && behind <= CHALLENGE_BEHIND_M && side <= CHALLENGE_SIDE_M && facing)
+        .then_some(behind)
+}
+
 fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
     geom::dist(a, b)
 }
@@ -1011,8 +1042,8 @@ impl StreetRacers {
         self.in_reach(sim, player)
     }
 
-    /// Nearest roaming racer in honking range with no challenge or race open, police or not
-    /// (the hint says to lose the police first).
+    /// Nearest roaming racer the player is right behind ([`tailing`]) with no challenge or
+    /// race open, police or not (the hint says to lose the police first).
     pub fn in_reach(&self, sim: &Sim, player: EntityId) -> Option<RosterEntry> {
         if self.offer.is_some() || self.race.is_some() {
             return None;
@@ -1022,14 +1053,13 @@ impl StreetRacers {
     }
 
     fn nearest_roaming(&self, sim: &Sim, player: EntityId) -> Option<usize> {
-        let p = xy_of(sim, player)?;
+        let p = pose_of(sim, player)?;
         let tick = sim.tick();
         self.racers
             .iter()
             .enumerate()
             .filter(|(_, r)| r.mode == RacerMode::Roam && tick >= r.cooldown_until)
-            .filter_map(|(k, r)| xy_of(sim, r.entity).map(|q| (k, dist(p, q))))
-            .filter(|(_, d)| *d <= CHALLENGE_RADIUS_M)
+            .filter_map(|(k, r)| pose_of(sim, r.entity).and_then(|q| Some((k, tailing(p, q)?))))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(k, _)| k)
     }
@@ -2166,6 +2196,34 @@ mod tests {
     use super::*;
     use crate::scenario::free_drive;
     use crate::session::Session;
+
+    /// Only right behind a racer (same lane, same way, close) counts as tailing it.
+    #[test]
+    fn tailing_only_right_behind_the_racer() {
+        // Racer at the origin heading +Y.
+        let racer = ([0.0, 0.0], [0.0, 1.0]);
+        let ahead = [0.0, 1.0];
+        assert_eq!(tailing(([0.0, -9.0], ahead), racer), Some(9.0));
+        assert!(
+            tailing(([1.5, -6.0], ahead), racer).is_some(),
+            "a little off centre"
+        );
+        assert!(
+            tailing(([0.0, -20.0], ahead), racer).is_none(),
+            "too far back"
+        );
+        assert!(tailing(([0.0, 9.0], ahead), racer).is_none(), "in front");
+        assert!(tailing(([3.5, 0.0], ahead), racer).is_none(), "alongside");
+        assert!(tailing(([3.5, -6.0], ahead), racer).is_none(), "next lane");
+        assert!(
+            tailing(([0.0, -9.0], [0.0, -1.0]), racer).is_none(),
+            "facing the other way"
+        );
+        assert!(
+            tailing(([0.0, -9.0], [1.0, 0.0]), racer).is_none(),
+            "across the road"
+        );
+    }
 
     #[test]
     fn entity_ids_round_trip_and_other_ids_are_not_racers() {

@@ -1,4 +1,4 @@
-# simcli hashes scenario=opponent_circuit_8x5 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=opponent_circuit_8x5 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 2400 125dfbd0f53636c7
 4800 e06cf44a01feef61
 7200 31f1b50d1740b62c

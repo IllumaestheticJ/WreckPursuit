@@ -54,6 +54,7 @@ pub mod police;
 pub mod props;
 pub mod race;
 pub mod reset;
+pub mod roam;
 pub mod run;
 pub mod scenario;
 pub mod session;
@@ -73,6 +74,8 @@ mod crash_replay_tests;
 mod police_audio_trace;
 #[cfg(test)]
 mod race_tests;
+#[cfg(test)]
+mod roam_tests;
 #[cfg(test)]
 mod run_tests;
 #[cfg(test)]
@@ -204,6 +207,34 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
         mode,
         scenario::city_spec(city_id),
     )))
+}
+
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
+/// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
+#[wasm_bindgen]
+pub fn free_roam_city_json(
+    car: &str,
+    mode: &str,
+    city_id: &str,
+    roamers: u32,
+) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    let n = match roamers {
+        0 => roam::DEFAULT_ROAMERS,
+        n => n as usize,
+    };
+    Ok(json(
+        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+    ))
+}
+
+/// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,
+/// phase, current leg's haunt, full-pace run or not, legs and distance driven; rescues so
+/// far; the last few roamer events.
+#[wasm_bindgen]
+pub fn roam_status_json() -> Result<String, JsValue> {
+    get(|s| json(&s.roam().map(roam::RoamRun::status)))
 }
 
 /// City chase in a chosen city (`city_id` as in [`free_drive_city_json`]).
@@ -732,7 +763,7 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation), replay (0/1),
+/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation / 2 Extreme), replay (0/1),
 /// recording (0/1), city (0/1), scripted (0/1)]`.
 #[wasm_bindgen]
 pub fn world_info() -> Result<Vec<f32>, JsValue> {
@@ -743,7 +774,11 @@ pub fn world_info() -> Result<Vec<f32>, JsValue> {
             s.tick() as f32,
             t.hours(),
             t.night_factor(),
-            b(s.mode() == DamageMode::Simulation),
+            match s.mode() {
+                DamageMode::Arcade => 0.0,
+                DamageMode::Simulation => 1.0,
+                DamageMode::Extreme => 2.0,
+            },
             b(s.playback().is_some()),
             b(s.recording()),
             b(s.has_city()),
@@ -936,6 +971,7 @@ pub fn run_repair_continue() -> Result<String, JsValue> {
 fn parse_mode(mode: &str) -> Result<DamageMode, String> {
     match mode {
         "Simulation" => Ok(DamageMode::Simulation),
+        "Extreme" => Ok(DamageMode::Extreme),
         "Arcade" | "" => Ok(DamageMode::Arcade),
         other => Err(format!("unknown damage mode {other:?}")),
     }

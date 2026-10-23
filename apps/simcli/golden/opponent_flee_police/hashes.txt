@@ -1,4 +1,4 @@
-# simcli hashes scenario=opponent_flee_police systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.1
+# simcli hashes scenario=opponent_flee_police systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 2400 ff85144f2d1d4307
 4800 6035228f55dcbb63
 7200 37a2cfd25ad749f0

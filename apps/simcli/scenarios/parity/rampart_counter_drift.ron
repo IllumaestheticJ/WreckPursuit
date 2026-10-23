@@ -4,7 +4,7 @@
 // Drift Lab C). expect_pending tracks "no spin": still moving forward at the end, moderate yaw.
 (
     name: "parity_rampart_counter_drift",
-    mode: Arcade,
+    mode: Simulation,
     seed: 4,
     assists: custom((abs: true, tcs: false, esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
     duration_s: 5.0,

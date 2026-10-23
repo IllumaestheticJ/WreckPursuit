@@ -1,7 +1,7 @@
 // FWD debug sedan, full throttle: must reach 100 km/h (27.78 m/s) within 10 s.
 (
     name: "vehicle_sedan_accel_by_10s",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     duration_s: 10.0,
     entities: [
