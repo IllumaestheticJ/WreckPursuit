@@ -129,7 +129,10 @@ export class AudioSystem {
       this.panel.setStatus(`audio unavailable: ${e}`);
       return;
     }
-    this.ctx = new AudioContext({ latencyHint: "interactive" });
+    // "balanced" rather than "interactive": a somewhat larger output buffer rides out a busy
+    // frame's audio-thread spike instead of dropping out (playtest: the whole mix cut in and
+    // out with many cars around). A few ms more latency; impacts still land within a frame.
+    this.ctx = new AudioContext({ latencyHint: "balanced" });
     this.mixer = new AudioMixer(this.ctx);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
     this.pool.source = this.panel.settings.source;
