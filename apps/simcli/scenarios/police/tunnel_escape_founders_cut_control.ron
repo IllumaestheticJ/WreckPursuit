@@ -4,6 +4,8 @@
 // the lay-by, so the escape timer never runs long; ground units arrive and the first pursuit
 // ends in a capture, never an escape. Round 13: police converge faster (rows 63 / 64), so the
 // capture comes sooner, 129.3 s at 25 m/s (was 150.7-168.9 s); the window starts at 115 s.
+// 2026-10-23 (no pursuit speed cap, police power package): the racer drives at 32 m/s like
+// the main scenario (at 25 m/s he was captured at 47 s, before the Cut); still Captured.
 (
     name: "police_tunnel_escape_founders_cut_control",
     seed: 51,
@@ -23,7 +25,7 @@
             car: "debug_coupe",
             police_heat: 50.0,
             speed_mps: 20.0,
-            driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
+            driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 32.0),
         ),
     ],
     duration_s: 190.0,

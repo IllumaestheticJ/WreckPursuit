@@ -153,7 +153,7 @@ mod tests {
         let rwd = slide_class(&car("lucciola_350"));
         let mid = slide_class(&car("hakone_gt"));
         let fwd = slide_class(&car("kestrel_ts"));
-        let slow_rwd = slide_class(&car("sentinel_bastion"));
+        let slow_rwd = slide_class(&car("furrow_24"));
         assert!(rwd > 0.7, "{rwd}");
         assert!(mid > fwd && mid < rwd, "{mid}");
         assert_eq!(fwd, CLASS_FLOOR);

@@ -1072,3 +1072,12 @@ damage modes — the owner rule keeps Arcade and Simulation identical outside ca
 - Regenerated: car JSON + spec sheets, `validation_results.json`, `ROSTER.md`, `VALIDATION.md`,
   `data/stats/cars.json`, `wp_opponent` capability table; `[pro] default_limits` (Sentinel
   Cruiser) 4.35 → 4.68 m/s², 72.4 → 81.5 m/s.
+- Tests: `tunnel_escape_founders_cut` (+ control) racer target 25 → 32 m/s (at 25 m/s he was
+  captured at 47 s, before the Cut; now Escaped 120.1 s after 21.9 s unseen, control
+  Captured); `wp_vehicle` `class_favours_powerful_rwd` uses `furrow_24` as the slow RWD (the
+  Bastion is no longer one); wolfhound diff hash and the simcli goldens re-blessed.
+- **Open (audio, E):** `wp_audio` `every_wot_upshift_dips_and_re_rises` fails for
+  `sentinel_cruiser` 4→5 at 30.28 s (0.4 dB, wants ≥ 1.2). The old car lifted before that
+  shift; the new one makes it flat out at ≈ 5900 rpm, where the converter shift (no torque
+  cut in `wp_vehicle`) drops rpm at only ≈ 3000 rpm/s and layer energy is at its ceiling.
+  Lowering `shift_rate_onset_rpm_s` to 1200 only reaches 0.9 dB.
