@@ -374,6 +374,8 @@ struct Racer {
     /// beside it I am working towards (reverse with the nose swinging out, creep forward,
     /// repeat), and how long I have been at it, s.
     escape: Option<(Who, f32, f32)>,
+    /// Time spent pulling over (rolling on towards the kerb), s.
+    pull_over_s: f32,
     /// Finished where the corridor ends at the line, and rolled clear past its end: parked for
     /// good (never drives on along the corridor again).
     line_cleared: bool,
@@ -663,6 +665,9 @@ const NO_RUN_OFF_M: f32 = 5.0;
 /// (was 0.25): its softer, slower-answering car runs a little wider of its line, and on the
 /// narrow Hollins lanes (±1.45 m) that was the kerb (walls 2 → 124 at s50, 16 seeds).
 const EDGE_MARGIN_M: f32 = 0.5;
+/// A car pulling over (yielding, out of the race) stops after this long rolling towards the
+/// kerb, wherever it is, s.
+const PULL_OVER_MAX_S: f32 = 8.0;
 /// Room kept to the kerb when pulled over (parked, yielding, out of the race), m.
 const PARK_EDGE_MARGIN_M: f32 = 0.25;
 /// Room kept to the edge of the lanes while passing, m (the pre-G racing margin).
@@ -827,6 +832,7 @@ impl Field {
                 pass_blocked_s: 0.0,
                 stuck_s: 0.0,
                 escape: None,
+                pull_over_s: 0.0,
                 line_cleared: false,
                 wants_room: false,
                 stable_s: 0.0,
@@ -2923,6 +2929,15 @@ fn decide_racer(
                     });
                 (r.n - kerb_hi).abs() > 0.5 || near_junction || in_bend
             };
+        // Whatever stops it reaching the kerb (flat tyres from a spike strip, heavy damage), a
+        // car pulling over stops after `PULL_OVER_MAX_S` (row 165: a busted racer on four
+        // deflated tyres rolled on at 6 m/s for the rest of the chase).
+        if pulling_over {
+            r.pull_over_s += dt;
+        } else if !matches!(r.tactic, Tactic::Park | Tactic::Yield) {
+            r.pull_over_s = 0.0;
+        }
+        let pulling_over = pulling_over && r.pull_over_s < PULL_OVER_MAX_S;
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
             // corridor and pointing along it.
