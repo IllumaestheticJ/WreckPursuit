@@ -455,6 +455,19 @@ pub fn race_pace_in(
                                 .find(|x| x.id == racers[k])
                                 .map(|x| x.vehicle.state())
                             {
+                                for pr in sim.world().static_props() {
+                                    let (dx, dy) = (pr.pos[0] - st.pos[0], pr.pos[1] - st.pos[1]);
+                                    if dx * dx + dy * dy < 15.0 * 15.0 {
+                                        eprintln!(
+                                            "      prop {:?} at ({:.1},{:.1},{:.1}) half {:?}",
+                                            pr.kind,
+                                            pr.pos[0],
+                                            pr.pos[1],
+                                            pr.pos[2],
+                                            pr.half_extents
+                                        );
+                                    }
+                                }
                                 eprintln!(
                                     "      pos ({:.1},{:.1},{:.2}) ground {:.2}",
                                     st.pos[0],

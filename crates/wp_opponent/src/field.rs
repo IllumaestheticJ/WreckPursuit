@@ -660,6 +660,8 @@ const NO_RUN_OFF_M: f32 = 5.0;
 /// (was 0.25): its softer, slower-answering car runs a little wider of its line, and on the
 /// narrow Hollins lanes (±1.45 m) that was the kerb (walls 2 → 124 at s50, 16 seeds).
 const EDGE_MARGIN_M: f32 = 0.5;
+/// Room kept to the kerb when pulled over (parked, yielding, out of the race), m.
+const PARK_EDGE_MARGIN_M: f32 = 0.25;
 
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
@@ -2131,6 +2133,9 @@ fn decide_racer(
 
         // ---- Tactical state machine ----
         let (lim_lo, lim_hi) = limits(r.s);
+        // Pulled over (parking, yielding, out of the race): at the kerb, with the old 0.25 m
+        // there rather than the racing edge margin.
+        let kerb_hi = lim_hi + (EDGE_MARGIN_M - PARK_EDGE_MARGIN_M);
         let (pass_lo, pass_hi) = pass_limits(r.s);
         r.tactic_ticks += 1;
         let parked = matches!(r.status, RacerStatus::Retired | RacerStatus::Busted)
@@ -2739,7 +2744,7 @@ fn decide_racer(
             }
             Tactic::Park | Tactic::Yield => {
                 follow_w = 0.0;
-                lim_hi
+                kerb_hi
             }
         };
         let rate = match r.tactic {
@@ -2774,6 +2779,8 @@ fn decide_racer(
                 Some(x) => squeeze_limits((pass_lo, pass_hi), &x.o),
                 None => (pass_lo, pass_hi),
             }
+        } else if matches!(r.tactic, Tactic::Park | Tactic::Yield) {
+            (lim_lo, kerb_hi)
         } else {
             (lim_lo, lim_hi)
         };
@@ -2890,7 +2897,7 @@ fn decide_racer(
                     && (-5..=10).any(|j| {
                         line.curvature[corridor.wrap(i0 + j)].abs() > 1.0 / PARK_MIN_RADIUS_M
                     });
-                (r.n - lim_hi).abs() > 0.5 || near_junction || in_bend
+                (r.n - kerb_hi).abs() > 0.5 || near_junction || in_bend
             };
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
@@ -3242,7 +3249,11 @@ fn decide_racer(
         // 0.25 s since candidate G (2026-10-23: yaw inertia × 1.35, the car answers the wheel
         // later; with 0.2 s it ran 0.5 m wide of its line in the Hollins hairpins, into the kerb).
         const STEER_LAG_S: f32 = 0.25;
-        let mut ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0) + v * STEER_LAG_S;
+        // The stretch is 0.6 s per m/s over 25 since candidate G (was 0.3): with G's slower yaw
+        // answer the steering loop weaved with growing amplitude at 45-50 m/s on Loop 9 (4.7 m
+        // off the commanded line, then a spin; s95 walls 22 -> 52 over 16 seeds).
+        const STRETCH_S: f32 = 0.6;
+        let mut ld = r.ctrl.lookahead(v) + STRETCH_S * (v - 25.0).max(0.0) + v * STEER_LAG_S;
         // Held up and slowing (a car or a light ahead): aim no further than where I stop.
         // A target around the next corner turns the car in early, across the inside lane —
         // queued at a junction that is the oncoming lane (Lantern Row, round-12 tip: a racer
