@@ -26,6 +26,13 @@ use crate::PoliceSystem;
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
 
+/// A spike unit parks this far beyond the road edge, beside its strip, m.
+const SPIKE_UNIT_SHOULDER_M: f32 = 2.5;
+
+/// A spike strip is lifted once its unit is further than this from where it parked (shoved
+/// away, driven off), so a strip never lies on the road without a police car beside it, m.
+pub const SPIKE_UNIT_LEASH_M: f32 = 15.0;
+
 /// A reckless-driving report this close to an open call about another racer joins that call
 /// (a pack of street racers is one call), m.
 const CALL_MERGE_M: f32 = 200.0;
@@ -1125,6 +1132,10 @@ impl PoliceSystem {
         if self.units[i].assignment == a {
             return;
         }
+        // A unit leaving its spike post (wrecked, pulled over, released) takes the strip with it.
+        if let Assignment::SpikeAt { tool, .. } = self.units[i].assignment {
+            self.lift_spikes(tool);
+        }
         let text = self.radio_text(i, &a);
         let now = self.now;
         {
@@ -1283,7 +1294,12 @@ impl PoliceSystem {
                 )
             }
             Assignment::SpikeAt { segment, .. } => {
-                let place = self.segment_place(*segment);
+                // Scenario strips on a roadless world have no real segment: name the spot.
+                let place = if (segment.0 as usize) < self.graph.segments.len() {
+                    self.segment_place(*segment)
+                } else {
+                    self.place_phrase(u.body.pos, [0.0, 0.0])
+                };
                 line(
                     RadioTier::Critical,
                     format!("{callsign} deploying spikes {place}."),
@@ -1406,6 +1422,9 @@ impl PoliceSystem {
     }
 
     pub(crate) fn despawn(&mut self, i: usize) {
+        if let Assignment::SpikeAt { tool, .. } = self.units[i].assignment {
+            self.lift_spikes(tool);
+        }
         let id = self.units[i].id;
         self.units.remove(i);
         self.pending.push(PoliceEvent::UnitDespawned { unit: id });
@@ -2638,8 +2657,9 @@ impl PoliceSystem {
     }
 
     /// Scenario / test placement: a spike strip across the road at `pos`, perpendicular to
-    /// `dir`, attributed to `racer`, without a deploying unit and bypassing every dispatch rule
-    /// (see [`PoliceSystem::place_roadblock_at`]). Any racer crossing it is spiked. Emits
+    /// `dir`, attributed to `racer`, bypassing every dispatch rule (see
+    /// [`PoliceSystem::place_roadblock_at`]). Like every strip it comes with a spike unit parked
+    /// beside it and is lifted when that unit leaves. Any racer crossing it is spiked. Emits
     /// `SpikesPlaced`.
     pub fn place_spikes_at(&mut self, racer: EntityId, pos: [f32; 2], dir: [f32; 2]) -> ToolId {
         let sc = &self.cfg.tools.spikes;
@@ -2647,7 +2667,8 @@ impl PoliceSystem {
         let site = Self::scenario_site(pos, dir);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let strip = SpikeStrip::across(id, racer, site, length, None, self.now.plus(lifetime));
+        let uid = self.spawn_spike_unit(&site, id);
+        let strip = SpikeStrip::across(id, racer, site, length, Some(uid), self.now.plus(lifetime));
         self.pending.push(PoliceEvent::SpikesPlaced {
             tool: id,
             racer,
@@ -2698,19 +2719,7 @@ impl PoliceSystem {
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
-        let side = add(
-            site.pos,
-            scale(perp_left(site.dir), ROAD_HALF_WIDTH_M + 2.5),
-        );
-        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, side, site.dir);
-        let uid = self.units[i].id;
-        self.assign(
-            i,
-            Assignment::SpikeAt {
-                segment: site.segment,
-                tool: id,
-            },
-        );
+        let uid = self.spawn_spike_unit(&site, id);
         let strip = SpikeStrip::across(id, racer, site, length, Some(uid), now.plus(lifetime));
         self.pending.push(PoliceEvent::SpikesPlaced {
             tool: id,
@@ -2724,6 +2733,70 @@ impl PoliceSystem {
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         Ok(id)
+    }
+
+    /// Where the spike unit for a strip at `site` parks: on the shoulder beside it.
+    fn spike_unit_post(site: &ToolSite) -> [f32; 2] {
+        add(
+            site.pos,
+            scale(
+                perp_left(site.dir),
+                ROAD_HALF_WIDTH_M + SPIKE_UNIT_SHOULDER_M,
+            ),
+        )
+    }
+
+    /// Spawn the unit that deploys and mans strip `tool` at `site`.
+    fn spawn_spike_unit(&mut self, site: &ToolSite, tool: ToolId) -> UnitId {
+        let post = Self::spike_unit_post(site);
+        let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, post, site.dir);
+        self.assign(
+            i,
+            Assignment::SpikeAt {
+                segment: site.segment,
+                tool,
+            },
+        );
+        self.units[i].id
+    }
+
+    /// Whether strip `s` still has its unit beside it: present, not wrecked, still on this
+    /// strip's post and within [`SPIKE_UNIT_LEASH_M`] of it.
+    fn spike_unit_holds(&self, s: &SpikeStrip) -> bool {
+        let Some(u) = s
+            .unit
+            .and_then(|uid| self.units.iter().find(|u| u.id == uid))
+        else {
+            return false;
+        };
+        !u.wrecked
+            && matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == s.id)
+            && dist(u.body.pos, Self::spike_unit_post(&s.site)) <= SPIKE_UNIT_LEASH_M
+    }
+
+    /// Remove strip `tool` from the road (no-op if already gone). Its unit is not touched.
+    fn lift_spikes(&mut self, tool: ToolId) {
+        let before = self.spikes.len();
+        self.spikes.retain(|s| s.id != tool);
+        if self.spikes.len() != before {
+            self.pending.push(PoliceEvent::ToolRemoved { tool });
+        }
+    }
+
+    /// The host could not give AI unit `unit` a physical car (vehicle cap, failed spawn). A
+    /// spike unit is then withdrawn and its strip lifted, so no strip lies on the road without a
+    /// visible police car; returns whether that happened. Other units are left as they are.
+    pub fn withdraw_unbodied_spike_unit(&mut self, unit: UnitId) -> bool {
+        let Some(i) = self.unit_index(unit) else {
+            return false;
+        };
+        if !matches!(self.units[i].assignment, Assignment::SpikeAt { .. })
+            || self.units[i].entity.is_some()
+        {
+            return false;
+        }
+        self.despawn(i);
+        true
     }
 
     fn ai_captain_tools(&mut self) {
@@ -2757,8 +2830,14 @@ impl PoliceSystem {
             }
             keep
         });
+        let unmanned: Vec<ToolId> = self
+            .spikes
+            .iter()
+            .filter(|s| !self.spike_unit_holds(s))
+            .map(|s| s.id)
+            .collect();
         self.spikes.retain(|s| {
-            let keep = now < s.expires && racer != Some(s.racer);
+            let keep = now < s.expires && racer != Some(s.racer) && !unmanned.contains(&s.id);
             if !keep {
                 removed.push((s.id, s.unit.into_iter().collect()));
             }

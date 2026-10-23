@@ -1360,3 +1360,108 @@ fn nearby_patrols_sent_as_backup_also_wait_ahead() {
         "heading·racer dir at join: {joined_facing:?}"
     );
 }
+
+/// The spike unit beside `strip` (asserts there is one, manning that strip).
+fn spike_unit(h: &Harness, strip: &wp_police::SpikeStrip) -> wp_police::UnitId {
+    let uid = strip.unit.expect("strip without a unit");
+    let u = h.police.units().iter().find(|u| u.id == uid).unwrap();
+    assert!(matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == strip.id));
+    assert!(dist(u.body.pos, strip.site.pos) <= wp_police::dispatch::SPIKE_UNIT_LEASH_M);
+    uid
+}
+
+/// Every spike strip, scenario-placed ones too, comes with a police unit beside it, and is
+/// lifted the moment that unit is wrecked or pulls over.
+#[test]
+fn spike_strip_never_lies_without_its_unit() {
+    let mut h = Harness::new(12.0, 11);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    let tool = h
+        .police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    assert_eq!(strip.id, tool);
+    let uid = spike_unit(&h, &strip);
+    // Parked: it stays put and so does the strip.
+    h.run(2.0, &[]);
+    assert_eq!(h.police.spike_strips().len(), 1);
+    // Wrecked (total loss): the strip goes with it, at once.
+    h.police
+        .bind_unit_entity(uid, EntityId(902), SteerGeometry::default());
+    let pos = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.id == uid)
+        .unwrap()
+        .body
+        .pos;
+    h.police.sync_unit(
+        uid,
+        UnitSync {
+            pos: [pos[0], pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: strip.site.dir,
+            health: 0.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    h.run(0.5, &[]);
+    assert!(h.police.spike_strips().is_empty());
+    assert!(h
+        .events
+        .iter()
+        .any(|e| matches!(e, PoliceEvent::ToolRemoved { tool: t } if *t == tool)));
+}
+
+/// A spike unit shoved away from its post takes the strip with it.
+#[test]
+fn spike_strip_lifted_when_its_unit_leaves_the_post() {
+    let mut h = Harness::new(12.0, 12);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    h.police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    let uid = spike_unit(&h, &strip);
+    h.police
+        .bind_unit_entity(uid, EntityId(903), SteerGeometry::default());
+    h.police.sync_unit(
+        uid,
+        UnitSync {
+            pos: [strip.site.pos[0] + 60.0, strip.site.pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: strip.site.dir,
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    h.run(0.5, &[]);
+    assert!(h.police.spike_strips().is_empty());
+}
+
+/// A host that cannot give a spike unit a car withdraws it; the strip goes too.
+#[test]
+fn unbodied_spike_unit_is_withdrawn_with_its_strip() {
+    let mut h = Harness::new(12.0, 13);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    h.police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    let uid = spike_unit(&h, &strip);
+    assert!(h.police.withdraw_unbodied_spike_unit(uid));
+    assert!(h.police.spike_strips().is_empty());
+    assert!(h.police.units().iter().all(|u| u.id != uid));
+    // Other units are not touched.
+    let other = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.kind == UnitKind::Car)
+        .map(|u| u.id);
+    if let Some(other) = other {
+        assert!(!h.police.withdraw_unbodied_spike_unit(other));
+    }
+}
