@@ -52,6 +52,20 @@
   mode as a number (round 12's meant the old numbering, so they replayed another table and
   diverged at ticks 268–318).
 - **No wp_vehicle / handling change** (physics freeze): `crates/wp_vehicle` is round 12's.
+- **ui-kit pricing test** (red on main too): "Arcade bills half of Simulation" encoded the
+  pre-0.4 relation; #48 changed ui-kit's `MODE_REPAIR_SCALE` (Arcade 0.5, Simulation 0.5,
+  Extreme 1.0) but not the test. Now "Simulation bills half of Extreme; Arcade bills like
+  Simulation".
+
+**Gate (round 4, `030f0691` + the ui-kit test fix):**
+| Step | Exit |
+|---|---|
+| `cargo fmt --check`, `clippy --workspace --all-targets -D warnings` | 0, 0 |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | 0 |
+| `cargo test --workspace --no-fail-fast` (incl. `goldens_match`, golden replay playback) | 0 |
+| testbed `npm run wasm`, `tsc` | 0, 0 |
+| e2e `street.mjs` (105 PASS), `traffic_bodies.mjs` (8 street racers, 0 orphan bodies) | 0, 0 |
+| ui-kit `tsc`, `vitest` (111 / 111 after the fix; 1 red before) | 0, 0 |
 
 # Round 3: origin/main d39aef63 → lead/main-sync (2026-10-22)
 
