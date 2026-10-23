@@ -1989,11 +1989,16 @@ impl PoliceSystem {
             }
             // In the right-hand lane, not on the centreline.
             let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
-            // Every patrol appears out of every racer's sight, the session-start ones too
-            // (row 158: a patrol placed in view at the start, beside a racer still wanted
-            // from before, started a chase at once). A district short of hidden spots fills
-            // up later through `maintain_pool`.
-            let hidden = !self.spawn_in_view(world, pos);
+            // Every patrol appears out of every racer's sight. At session start only wanted
+            // racers count (row 158: a patrol placed in view at the start, beside a racer
+            // still wanted from before, started a chase at once); one already on screen at
+            // the first frame around a clean racer did not pop in. A district short of hidden
+            // spots fills up later through `maintain_pool`.
+            let hidden = if self.warmed_up {
+                !self.spawn_in_view(world, pos)
+            } else {
+                !self.opening_spawn_in_view(world, pos)
+            };
             if hidden && self.spawn_clear(pos) {
                 let i = self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, dir);
                 self.start_patrol(i, dest);
@@ -2410,6 +2415,25 @@ impl PoliceSystem {
         p: [f32; 2],
         route: bool,
     ) -> bool {
+        self.in_view_of(world, p, route, false)
+    }
+
+    /// Whether the session-start patrol spot `p` is in view of a racer who is already wanted
+    /// (heat above zero). A patrol on screen from the first frame did not pop in; only one that
+    /// would chase at once breaks the rule (row 158). Patrols around a clean racer are the
+    /// living city: they chase only an offence they see.
+    pub(crate) fn opening_spawn_in_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        self.in_view_of(Some(world), p, true, true)
+    }
+
+    /// `in_racer_view_opt`, optionally counting only racers with heat above zero.
+    fn in_view_of(
+        &self,
+        world: Option<&dyn WorldQuery>,
+        p: [f32; 2],
+        route: bool,
+        wanted_only: bool,
+    ) -> bool {
         /// Driver's eye and chase camera above the racer's chassis, camera distance behind
         /// it, and the height of the car body looked at, m.
         const EYE_UP_M: f32 = 1.3;
@@ -2420,6 +2444,9 @@ impl PoliceSystem {
         const LOOK_AHEAD_S: f32 = 1.0;
         let near = self.cfg.presence.response.never_closer_m;
         self.racers.values().any(|r| {
+            if wanted_only && r.heat <= 0.0 {
+                return false;
+            }
             let rp = xy(r.pos);
             if dist(rp, p) < near {
                 return true;
