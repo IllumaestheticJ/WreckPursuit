@@ -597,6 +597,7 @@ fn compact_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     step_bumper(b, p, 0.38, 0.54, 0.13, M::Chrome, false);
     plate_rear(b, p, 0.56);
     bed_rails(b, p, M::Trim);
+    cab_back_window(b, p);
     tall_mirrors(b, p, (0.10, 0.06, 0.18), 0.08);
     mud_flaps(b, p);
     handles(b, p, M::Trim, false);
@@ -644,6 +645,7 @@ fn fullsize_pickup_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     step_bumper(b, p, 0.42, 0.62, 0.14, M::Chrome, true);
     plate_rear(b, p, 0.64);
     bed_rails(b, p, M::Trim);
+    cab_back_window(b, p);
     // Running boards between the arches.
     let rb = key("running_board_l", R::FrameLeft, M::Trim);
     let (ya, yb) = (p.y_quarter.0 + 0.30, p.y_fd_hinge + 0.05);
@@ -1544,6 +1546,43 @@ fn bed_rails(b: &mut Builder, p: &BodyProfile, mat: MaterialSlot) {
 }
 
 /// Rubber mud flaps behind the rear wheels.
+/// Pickup cab back window (cars audit F10): the lattice has no rear glass on a pickup, so the
+/// loft ends the greenhouse in a painted cab-back wall; this sets a glass pane into it, from
+/// just above the belt to just under the roof, 6 mm proud of the wall.
+fn cab_back_window(b: &mut Builder, p: &BodyProfile) {
+    if p.rear_glass {
+        return;
+    }
+    let (ry0, _, rz, _) = p.roof;
+    let (z0, z1) = (p.z_belt + 0.07, rz - 0.07);
+    if z1 - z0 < 0.12 {
+        return;
+    }
+    // Station on the cab back where the top surface reaches height `z` above `x`.
+    let y_at = |z: f32, x: f32| {
+        let (mut lo, mut hi) = (p.y_deck, ry0);
+        for _ in 0..24 {
+            let mid = 0.5 * (lo + hi);
+            if p.top_point(mid, x).0[2] < z {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    let xw = (p.roof_half - 0.14).max(0.2);
+    let k = PartKey::body("cab_back_glass", R::Cabin, PartKind::Glass, M::Glass);
+    let mut c = [[0.0f32; 3]; 8];
+    for (i, q) in c.iter_mut().enumerate() {
+        let x = if i & 1 != 0 { xw } else { -xw };
+        let z = if i & 4 != 0 { z1 } else { z0 };
+        let y = y_at(z, x) + if i & 2 != 0 { 0.002 } else { -0.006 };
+        *q = [x, y, z];
+    }
+    hexa(b, &k, c);
+}
+
 fn mud_flaps(b: &mut Builder, p: &BodyProfile) {
     let Some(&(wy, wz, r)) = p.arches.iter().find(|a| a.0 < 0.0) else {
         return;
