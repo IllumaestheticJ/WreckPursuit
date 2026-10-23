@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_ashpeak_metro_circuit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=race_ashpeak_metro_circuit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 97cbceced9370ddc
 480 40cb82b5253c1a7e
 720 3a7e3cb2835ac0c0
