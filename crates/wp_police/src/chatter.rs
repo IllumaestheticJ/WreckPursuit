@@ -4,19 +4,28 @@
 //! sign and placed on the map ("Unit 12, I've got eyes on him again, northbound on Harbor
 //! Boulevard at Lantern Way."):
 //!
+//! Tiers are the row-144 priority tiers ([`RadioTier`], 1 = most important):
+//!
 //! | Callout | When | Tier |
 //! |---|---|---|
-//! | lost visual + last seen place and heading | pursuit → searching for [`LOST_CONFIRM_S`] | Critical |
-//! | eyes on him again | searching → pursuit after a lost-visual call | Critical (8 s life) |
-//! | requesting backup | a reinforcement request appears for the racer | Tactical (prio 2) |
-//! | on his bumper | a pursuer [`BUMPER_M`] behind a moving racer for [`BUMPER_HOLD_S`] | Tactical (2.5 s life) |
-//! | going for the PIT | a pursuer switches to the PIT tactic | Tactical (2.5 s life) |
-//! | he's spun / he got away | [`PIT_VERDICT_S`] after a PIT contact: racer stopped or turned ≥ 60° | Tactical |
-//! | boxing him in | two or more pursuers in box-in slots | Tactical |
-//! | spikes hit | a racer runs over a strip | Tactical (prio 4) |
-//! | unit down / out of the chase | `UnitDisabled` of a unit that was on a racer | Critical |
-//! | gone into the tunnel | a pursued racer enters a covered road | Tactical (prio 4) |
-//! | dispatch level summary: level, place, units on him, air unit | a pursued racer's level rises | Critical (newer replaces older) |
+//! | "racer #7: roadblock 400 metres ahead, northbound on Lantern Row" | `RoadblockPlaced` / `SpikesPlaced` (the decision, not the arrival) | 1 |
+//! | dispatch level summary: level, place, units on him, air unit, a tougher department / rams authorised | a pursued racer's level rises | 2 (newer replaces older) |
+//! | racer down to level n | a pursued racer's level drops | 2 |
+//! | hit / rammed / lost my front end / I'm done (by impact severity) | a physical unit's contact ([`impact_severity`]) | 3 |
+//! | "Unit 4 is down, unit 4 is down!" / "officer down, need EMS!" | another unit reacting to a wreck | 3 (stacks after the victim) |
+//! | he took out a civilian | a pursued racer's contact with a civilian car | 3 |
+//! | going for the PIT, he's spun / he got away | PIT tactic; [`PIT_VERDICT_S`] after the contact | 3 |
+//! | spikes hit | a racer runs over a strip | 3 |
+//! | unit down / out of the chase | `UnitDisabled` (shouted, by cause) | 3 |
+//! | units responding (once) | a racer's level first rises above 0 with no pursuit yet | 4 |
+//! | lost visual + last seen place and heading | pursuit → searching for [`LOST_CONFIRM_S`] | 4 |
+//! | eyes on him again | searching → pursuit after a lost-visual call | 4 |
+//! | on his bumper | a pursuer [`BUMPER_M`] behind a moving racer for [`BUMPER_HOLD_S`] | 4 |
+//! | boxing him in | two or more pursuers in box-in slots | 4 |
+//! | gone into the tunnel | a pursued racer enters a covered road | 4 |
+//!
+//! The row-79 "requesting backup" call is a deployment line and is no longer spoken (row
+//! 144: deployment lines only when actionable).
 //!
 //! Dispatch's own lines (pursuit start, roadblocks, custody, pursuit
 //! terminated) are raised where they happen and use the same place phrases
@@ -31,7 +40,9 @@
 //!
 //! **Observer only.** Callouts are derived once per police step from the step's police events,
 //! the sim's contacts and (on think ticks) state diffs. Nothing here feeds back into the
-//! simulation, uses the RNG or is hashed. Sim time only.
+//! simulation or is hashed. Line variety (which of several shouted lines) comes from the
+//! chatter's own seeded RNG ([`Chatter::new`]: the police seed, forked), never the
+//! simulation's. Sim time only.
 
 use std::collections::BTreeMap;
 
@@ -41,14 +52,17 @@ use wp_contracts::{EntityId, SimEvent, WorldQuery};
 use crate::events::{DisableCause, PoliceEvent, UnitId, UnitKind};
 use crate::graph::{closest_on_segment, dist, dot, len, normalize, sub, xy, District, NodeId};
 use crate::heat::PursuitStatus;
-use crate::radio::{RadioCue, RadioTier};
+use crate::radio::{ImpactConfig, RadioCue, RadioTier};
 use crate::time::SimTime;
 use crate::tools::compass;
 use crate::unit::{Assignment, Tactic};
 use crate::PoliceSystem;
+use wp_math::Rng;
 
 /// Searching this long before a unit calls "lost visual" (line-of-sight flicker stays quiet), s.
 pub const LOST_CONFIRM_S: f32 = 1.5;
+/// Lost this long, the lost-visual call goes out even within [`SIGHT_CALL_GAP_S`], s.
+pub const LOST_SUSTAINED_S: f32 = 4.5;
 /// At most one lost-visual / eyes-on call per racer per this long, s.
 pub const SIGHT_CALL_GAP_S: f32 = 10.0;
 /// A pursuer this close behind the racer is "on his bumper", m.
@@ -99,11 +113,27 @@ pub enum Callout {
     Tunnel,
     /// Dispatch: "racer #3 is now level 4, … 3 units on him."
     LevelSummary,
+    /// A tougher department / rams authorised, added to a level summary.
+    Takeover,
+    /// Dispatch: "racer #3 down to level 2."
+    LevelDown,
+    /// Dispatch: "units responding" (the one low-heat deployment summary).
+    UnitsResponding,
+    /// Dispatch: "racer #3: roadblock 400 metres ahead, northbound on X."
+    RoadblockAhead,
+    /// Dispatch: "racer #3: spikes 250 metres ahead, northbound on X."
+    SpikesAhead,
+    /// A unit's shouted impact line ("I'm hit!", "I've lost my front end!").
+    Impact,
+    /// Another unit reacting to a wreck ("Unit 4 is down, unit 4 is down!").
+    WreckReaction,
+    /// "He just took out a civilian!"
+    CivilianCrash,
 }
 
 impl Callout {
     /// Every callout, in a fixed order.
-    pub const ALL: [Callout; 12] = [
+    pub const ALL: [Callout; 20] = [
         Callout::EyesOn,
         Callout::LostVisual,
         Callout::BackupRequest,
@@ -116,6 +146,14 @@ impl Callout {
         Callout::UnitDown,
         Callout::Tunnel,
         Callout::LevelSummary,
+        Callout::Takeover,
+        Callout::LevelDown,
+        Callout::UnitsResponding,
+        Callout::RoadblockAhead,
+        Callout::SpikesAhead,
+        Callout::Impact,
+        Callout::WreckReaction,
+        Callout::CivilianCrash,
     ];
 }
 
@@ -124,6 +162,9 @@ impl Callout {
 pub struct ChatterStats {
     /// Raised count per kind.
     pub raised: BTreeMap<Callout, u32>,
+    /// Deployment lines not spoken (row 144: units joining, responding to a known call, backup
+    /// requests, tool cars arriving, intercepts behind the racer).
+    pub deploy_suppressed: u32,
 }
 
 impl ChatterStats {
@@ -172,6 +213,9 @@ struct RacerChat {
     boxers: usize,
     last_backup: Option<SimTime>,
     last_spikes: Option<SimTime>,
+    /// The low-heat "units responding" summary went out for this rise of heat.
+    summarized: bool,
+    last_civilian: Option<SimTime>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -182,6 +226,8 @@ struct UnitChat {
     bumper_since: Option<SimTime>,
     last_bumper: Option<SimTime>,
     last_pit_call: Option<SimTime>,
+    /// Last impact line about this unit: when and how bad.
+    last_impact: Option<(SimTime, ImpactSeverity)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -193,7 +239,7 @@ struct PitWatch {
 }
 
 /// Callout state ([`PoliceSystem`] holds one). See the module docs.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Chatter {
     /// Display name per road-graph edge (`RoadEdgeId`); `""` = unnamed.
     names: Vec<String>,
@@ -204,6 +250,165 @@ pub struct Chatter {
     /// Reinforcement requests already called in: (racer, requested at).
     backups: Vec<(EntityId, SimTime)>,
     stats: ChatterStats,
+    /// Line variety only (which shouted line). Never the simulation's RNG.
+    rng: Rng,
+}
+
+impl Default for Chatter {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl Chatter {
+    /// Empty callout state; `seed` = the police seed (the variety RNG is derived from it, so
+    /// a replay picks the same lines).
+    pub fn new(seed: u64) -> Self {
+        Self {
+            names: Vec::new(),
+            tunnels: Vec::new(),
+            racers: BTreeMap::new(),
+            units: BTreeMap::new(),
+            pits: Vec::new(),
+            backups: Vec::new(),
+            stats: ChatterStats::default(),
+            rng: Rng::new(seed ^ 0x5241_4449_4F5F_3134),
+        }
+    }
+
+    fn pick<'a>(&mut self, pool: &[&'a str]) -> &'a str {
+        pool[self.rng.below(pool.len() as u32) as usize]
+    }
+}
+
+/// How bad a unit's impact was (row 144: the line is picked by severity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ImpactSeverity {
+    /// A light tap: no line.
+    Tap,
+    /// A real hit: "I'm hit! I'm hit!"
+    Hit,
+    /// A hard hit or a badly damaged car: "He rammed me, I've lost my front end!"
+    Heavy,
+    /// The car is wrecked: "I'm done!", and another unit: "Unit 4 is down!"
+    Wreck,
+}
+
+/// Severity of a contact from the sim's energy and the unit's damage: collision energy
+/// `½ · impulse · closing speed` (J, or a nominal [`ImpactConfig::nominal_mass_kg`] car when
+/// the contact carries no impulse) against the config's thresholds, raised to `Heavy` when
+/// the unit's health is at or below `heavy_health`. Only a wrecked unit is a `Wreck`.
+pub fn impact_severity(
+    cfg: &ImpactConfig,
+    rel_speed_mps: f32,
+    impulse_ns: f32,
+    health: f32,
+    wrecked: bool,
+) -> ImpactSeverity {
+    if wrecked {
+        return ImpactSeverity::Wreck;
+    }
+    let v = rel_speed_mps.abs();
+    let energy = if impulse_ns > 0.0 {
+        0.5 * impulse_ns * v
+    } else {
+        0.5 * cfg.nominal_mass_kg * v * v
+    };
+    // Energy alone tops out at Heavy: only a car that is really out (the damage model wrecked
+    // it) may sound like "officer down", or it would say so and then keep driving.
+    let by_energy = if energy >= cfg.heavy_j {
+        ImpactSeverity::Heavy
+    } else if energy >= cfg.hit_j {
+        ImpactSeverity::Hit
+    } else {
+        ImpactSeverity::Tap
+    };
+    if by_energy > ImpactSeverity::Tap && health <= cfg.heavy_health {
+        by_energy.max(ImpactSeverity::Heavy)
+    } else {
+        by_energy
+    }
+}
+
+/// Who an impact line is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImpactRole {
+    /// The racer hit this unit.
+    Victim,
+    /// This unit rammed or PITed its target on purpose.
+    Rammer,
+    /// This unit crashed on its own (a wall, a civilian car).
+    SelfCrash,
+}
+
+/// Shouted impact lines, `{cs}` = call sign, `{place}` = place phrase. `None` for a tap: a
+/// light touch is never on the radio, and only a wreck can be "officer down".
+pub fn impact_lines(sev: ImpactSeverity, role: ImpactRole) -> Option<&'static [&'static str]> {
+    use ImpactRole::*;
+    use ImpactSeverity::*;
+    Some(match (sev, role) {
+        (Tap, _) => return None,
+        (Hit, Victim) => &[
+            "{cs}, I'm hit! I'm hit!",
+            "{cs}, he hit me! I'm still in it!",
+            "{cs}, contact! He slammed into me {place}!",
+        ],
+        (Heavy, Victim) => &[
+            "{cs}, he rammed me, I've lost my front end!",
+            "{cs}, I'm hit hard! Steering's gone, steering's gone!",
+            "{cs}, he took me out {place}! I'm smoking bad!",
+        ],
+        (Hit, Rammer) => &[
+            "{cs}, contact! I'm on him!",
+            "{cs}, I've got him, I tagged him {place}!",
+        ],
+        (Heavy, Rammer) => &[
+            "{cs}, rammed him hard! He's all over the road!",
+            "{cs}, big hit on the suspect {place}! He's sliding!",
+        ],
+        (Hit, SelfCrash) => &[
+            "{cs}, I clipped something, still on him!",
+            "{cs}, whoa! Clipped a car, I'm OK!",
+        ],
+        (Heavy, SelfCrash) => &[
+            "{cs}, I'm into the wall! I'm into the wall!",
+            "{cs}, lost it {place}! I'm hurt bad, unit's hurt bad!",
+        ],
+        (Wreck, _) => &[
+            "{cs}, I'm done! I'm done! Unit's totalled {place}!",
+            "{cs}, I'm wrecked! I'm out, I'm out!",
+            "{cs}, officer down {place}! Need EMS!",
+        ],
+    })
+}
+
+/// Queue priority of both lines of a big wreck (the victim, then the reaction). Above every
+/// other impact line, so a wreck is never crowded out by PIT or bent-wheel calls; both lines
+/// share it, so the older one (the victim) goes first and its reaction right after.
+pub const WRECK_PRIO: u8 = 5;
+
+/// Another unit reacting to a wreck: `{other}` = its call sign, `{cs}` = the wrecked unit's,
+/// `{place}` = where.
+pub const WRECK_REACTIONS: [&str; 3] = [
+    "{other}, {cs} is down, {cs} is down!",
+    "{other}, officer down {place}, need EMS now!",
+    "{other}, {cs} just got wrecked {place}! Get EMS rolling!",
+];
+
+/// Dispatch reacting to a wreck when no other unit is on the racer.
+pub const WRECK_REACTION_DISPATCH: &str = "Dispatch: officer down {place}! EMS rolling, all units!";
+
+/// A pursued racer hitting a civilian car: `{cs}` = the lead unit (or Dispatch).
+pub const CIVILIAN_LINES: [&str; 3] = [
+    "{cs}, he just took out a civilian {place}!",
+    "{cs}, he plowed into a civilian car {place}! Need EMS!",
+    "{cs}, civilian vehicle hit {place}, he's still going!",
+];
+
+/// Spoken distance: nearest 50 m (100 m from a kilometre on).
+pub fn round_m(m: f32) -> u32 {
+    let step = if m >= 1000.0 { 100.0 } else { 50.0 };
+    (((m / step).round() * step) as u32).max(50)
 }
 
 /// Name the roads and tunnels of `world` for callouts (called by [`PoliceSystem::for_world`]).
@@ -320,13 +525,6 @@ impl PoliceSystem {
         format!("{heading}{}", district_words(self.graph.district_at(p)))
     }
 
-    /// Where a road-graph segment is ("on Harbor Boulevard", "downtown").
-    pub(crate) fn segment_place(&self, s: crate::graph::SegmentId) -> String {
-        let seg = self.graph.segment(s);
-        let mid = crate::graph::lerp2(self.graph.node(seg.a).pos, self.graph.node(seg.b).pos, 0.5);
-        self.place_phrase(mid, [0.0, 0.0])
-    }
-
     /// "ETA 40 seconds" for unit `i` driving to `p` (straight line × 1.3 at its road speed),
     /// `None` when it is close (under 150 m) or a helicopter.
     pub(crate) fn eta_phrase(&self, i: usize, p: [f32; 2]) -> Option<String> {
@@ -342,6 +540,28 @@ impl PoliceSystem {
         } else {
             format!("ETA {rounded:.0} seconds")
         })
+    }
+
+    /// What changes for the units when a racer goes from level `from` to `to` (row 144,
+    /// tier 2): the rams sentence from the pursuit config's ram levels, then the highest
+    /// "tougher department" sentence crossed (`radio.toml` `takeover`). Empty if nothing.
+    pub(crate) fn takeover_phrase(&self, from: u8, to: u8) -> String {
+        let ch = &self.cfg.pursuit.chase;
+        let crossed = |l: u8| from < l && to >= l;
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(t) = (from + 1..=to.min(5))
+            .rev()
+            .map(|l| &self.cfg.radio.takeover[l as usize - 1])
+            .find(|t| !t.is_empty())
+        {
+            parts.push(t.clone());
+        }
+        if crossed(ch.hard_ram_level) {
+            parts.push("Hard rams and rolling blocks authorised.".into());
+        } else if crossed(ch.rear_ram_level) {
+            parts.push("Rams authorised.".into());
+        }
+        parts.join(" ")
     }
 
     /// Dispatch's summary when a pursued racer's wanted level rises: level, where, who is on it.
@@ -399,6 +619,269 @@ impl PoliceSystem {
         self.radio(cue);
     }
 
+    /// A deployment line was not spoken (row 144); counted for the bench.
+    pub(crate) fn radio_deploy_suppressed(&mut self) {
+        self.chatter.stats.deploy_suppressed += 1;
+    }
+
+    /// Another code path raised an impact line for `unit` this step (the assault line): no
+    /// second one from its contacts.
+    pub(crate) fn chatter_note_impact_line(&mut self, unit: UnitId) {
+        let now = self.now;
+        let c = self.chatter.units.entry(unit).or_default();
+        c.last_impact = Some((now, ImpactSeverity::Heavy));
+    }
+
+    /// A pursuit started: the low-heat summary is no longer needed for this racer.
+    pub(crate) fn chatter_pursuit_started(&mut self, racer: EntityId) {
+        self.chatter.racers.entry(racer).or_default().summarized = true;
+    }
+
+    /// Fill an impact template.
+    fn fill(&self, t: &str, cs: &str, place: &str) -> String {
+        t.replace("{cs}", cs).replace("{place}", place)
+    }
+
+    /// Tier 1 (row 144): roadblocks and spikes are announced when they are planned, with the
+    /// place and the distance ahead of the racer, so the driver can act on them. Tools planned
+    /// in the same step for the same racer (spikes and a roadblock behind them) share one line:
+    /// the second would otherwise wait behind the first and arrive too late.
+    fn chatter_tools(&mut self, tools: &[(bool, crate::events::ToolId, EntityId)]) {
+        let mut racers: Vec<EntityId> = tools.iter().map(|t| t.2).collect();
+        racers.dedup();
+        for racer in racers {
+            let Some(r) = self.racers.get(&racer) else {
+                continue;
+            };
+            let (rp, rv) = (xy(r.pos), [r.vel[0], r.vel[1]]);
+            let mut parts: Vec<(f32, String)> = Vec::new();
+            let mut kinds: Vec<Callout> = Vec::new();
+            for &(roadblock, tool, _) in tools.iter().filter(|t| t.2 == racer) {
+                let site = if roadblock {
+                    self.roadblocks
+                        .iter()
+                        .find(|r| r.id == tool)
+                        .map(|r| r.site)
+                } else {
+                    self.spikes.iter().find(|s| s.id == tool).map(|s| s.site)
+                };
+                let Some(site) = site else {
+                    continue;
+                };
+                let ahead_m = if site.ahead_m > 0.0 {
+                    site.ahead_m
+                } else {
+                    dist(rp, site.pos)
+                };
+                let ahead = len(rv) < 2.0 || dot(normalize(rv), sub(site.pos, rp)) >= 0.0;
+                let place = self.place_phrase(site.pos, rv);
+                let m = round_m(ahead_m);
+                let rel = if ahead { "ahead" } else { "behind" };
+                let what = if roadblock { "roadblock" } else { "spikes" };
+                parts.push((ahead_m, format!("{what} {m} metres {rel}, {place}")));
+                kinds.push(if roadblock {
+                    Callout::RoadblockAhead
+                } else {
+                    Callout::SpikesAhead
+                });
+            }
+            if parts.is_empty() {
+                continue;
+            }
+            // Nearest first.
+            parts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let nearest = parts[0].0;
+            let list: Vec<String> = parts.into_iter().map(|p| p.1).collect();
+            // Short: the line holds the channel while the racer closes in.
+            let text = format!("Dispatch, racer #{}: {}.", racer.0, list.join("; "));
+            for k in &kinds[1..] {
+                *self.chatter.stats.raised.entry(*k).or_insert(0) += 1;
+            }
+            // Only news while the racer has not reached it: life ≈ time to get there.
+            let eta = nearest / len(rv).max(5.0);
+            let ttl = (eta - 2.0).clamp(2.0, 12.0);
+            self.callout(
+                kinds[0],
+                RadioCue::new(RadioTier::Actionable, None, text)
+                    .prio(crate::radio::TOOL_WARNING_PRIO)
+                    .ttl(ttl),
+            );
+        }
+    }
+
+    /// Tier 3 (row 144): physical units' contacts, worst per unit this step, as shouted lines
+    /// picked by [`impact_severity`]; pursued racers hitting civilian cars.
+    fn chatter_impacts(&mut self, events: &[SimEvent]) {
+        let now = self.now;
+        let icfg = self.cfg.radio.impact.clone();
+        // (unit index, other entity, rel speed, impulse): worst per unit.
+        let mut worst: BTreeMap<UnitId, (usize, EntityId, f32, f32)> = BTreeMap::new();
+        let mut civ: Vec<(EntityId, f32, f32)> = Vec::new();
+        for ev in events {
+            let SimEvent::Contact {
+                a,
+                b,
+                impulse_ns,
+                rel_speed,
+                ..
+            } = ev
+            else {
+                continue;
+            };
+            for (x, y) in [(*a, *b), (*b, *a)] {
+                if let Some(i) = self.unit_index_by_entity(x) {
+                    let u = &self.units[i];
+                    if u.kind != UnitKind::Car || u.player.is_some() {
+                        continue;
+                    }
+                    let e = 0.5 * impulse_ns * rel_speed.abs();
+                    let w = worst.entry(u.id).or_insert((i, y, *rel_speed, *impulse_ns));
+                    if e > 0.5 * w.3 * w.2.abs() {
+                        *w = (i, y, *rel_speed, *impulse_ns);
+                    }
+                } else if self.racers.contains_key(&x)
+                    && y != wp_contracts::WORLD_ENTITY
+                    && !self.racers.contains_key(&y)
+                    && self.unit_index_by_entity(y).is_none()
+                {
+                    civ.push((x, *rel_speed, *impulse_ns));
+                }
+            }
+        }
+        for (id, (i, other, v, imp)) in worst {
+            let u = &self.units[i];
+            let sev = impact_severity(&icfg, v, imp, u.health, u.wrecked);
+            if sev == ImpactSeverity::Tap {
+                continue;
+            }
+            let racer_hit = self.racers.contains_key(&other);
+            let meant = racer_hit
+                && u.assignment.target() == Some(other)
+                && matches!(u.tactic, Tactic::Pit | Tactic::Ram(_));
+            // PIT contacts get their verdict line instead.
+            if meant && u.tactic == Tactic::Pit && sev < ImpactSeverity::Wreck {
+                continue;
+            }
+            let role = if meant {
+                ImpactRole::Rammer
+            } else if racer_hit {
+                ImpactRole::Victim
+            } else {
+                ImpactRole::SelfCrash
+            };
+            // A unit with nobody to chase does not narrate its own scrapes ("still on him!"
+            // after the arrest); a wreck is still called in by `unit_down`.
+            if role == ImpactRole::SelfCrash && u.assignment.target().is_none() {
+                continue;
+            }
+            let last = self.chatter.units.get(&id).and_then(|c| c.last_impact);
+            if last.is_some_and(|(t, s)| now.since(t) < icfg.unit_gap_s && sev <= s) {
+                continue;
+            }
+            self.chatter.units.entry(id).or_default().last_impact = Some((now, sev));
+            let pos = u.body.pos;
+            let target = u.assignment.target();
+            self.impact_callout(id, sev, role, pos, target);
+        }
+        for (racer, v, imp) in civ {
+            let pursued = self.racers.get(&racer).is_some_and(|r| r.pursued());
+            let sev = impact_severity(&icfg, v, imp, 1.0, false);
+            if !pursued || sev == ImpactSeverity::Tap {
+                continue;
+            }
+            let c = self.chatter.racers.entry(racer).or_default();
+            if c.last_civilian
+                .is_some_and(|t| now.since(t) < icfg.civilian_gap_s)
+            {
+                continue;
+            }
+            c.last_civilian = Some(now);
+            let lead = self.lead_unit(racer);
+            let cs = lead.map_or("Dispatch".to_string(), |u| self.callsign(u));
+            let r = &self.racers[&racer];
+            let place = self.place_phrase(xy(r.pos), [r.vel[0], r.vel[1]]);
+            let t = self.chatter.pick(&CIVILIAN_LINES);
+            let text = self.fill(t, &cs, &place);
+            self.callout(
+                Callout::CivilianCrash,
+                RadioCue::new(RadioTier::Impact, lead, text)
+                    .prio(if sev >= ImpactSeverity::Heavy { 3 } else { 1 }),
+            );
+        }
+    }
+
+    /// Raise the impact line for unit `id` (and, for a wreck of a unit on a racer, another
+    /// unit's reaction stacked right after it).
+    fn impact_callout(
+        &mut self,
+        id: UnitId,
+        sev: ImpactSeverity,
+        role: ImpactRole,
+        pos: [f32; 2],
+        target: Option<EntityId>,
+    ) {
+        let Some(pool) = impact_lines(sev, role) else {
+            return;
+        };
+        let cs = self.callsign(id);
+        let place = self.place_phrase(pos, [0.0, 0.0]);
+        let t = self.chatter.pick(pool);
+        let text = self.fill(t, &cs, &place);
+        // A worse impact stays news longer (it may wait behind tier 1–2 traffic).
+        let (prio, ttl) = match sev {
+            ImpactSeverity::Wreck => (WRECK_PRIO, 8.0),
+            ImpactSeverity::Heavy => (3, 6.0),
+            _ => (1, self.cfg.radio.impact_stale_s),
+        };
+        self.callout(
+            Callout::Impact,
+            RadioCue::new(RadioTier::Impact, Some(id), text)
+                .prio(prio)
+                .ttl(ttl),
+        );
+        if sev == ImpactSeverity::Wreck {
+            self.wreck_reaction(id, &cs, &place, target);
+        }
+    }
+
+    /// Another unit (or dispatch) reacts to unit `id`'s wreck: stacked after the victim's line
+    /// when nothing more important waits (short life).
+    fn wreck_reaction(&mut self, id: UnitId, cs: &str, place: &str, target: Option<EntityId>) {
+        let other = target.and_then(|r| {
+            self.units
+                .iter()
+                .filter(|u| {
+                    u.id != id
+                        && u.kind == UnitKind::Car
+                        && !u.wrecked
+                        && u.assignment.target() == Some(r)
+                })
+                .min_by(|a, b| {
+                    let rp = self.racers.get(&r).map_or(a.body.pos, |x| xy(x.pos));
+                    dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp))
+                })
+                .map(|u| u.id)
+        });
+        let text = match other {
+            Some(o) => {
+                let ocs = self.callsign(o);
+                let t = self.chatter.pick(&WRECK_REACTIONS);
+                t.replace("{other}", &ocs)
+                    .replace("{cs}", cs)
+                    .replace("{place}", place)
+            }
+            None => WRECK_REACTION_DISPATCH.replace("{place}", place),
+        };
+        self.callout(
+            Callout::WreckReaction,
+            RadioCue::new(RadioTier::Impact, other, text)
+                .prio(WRECK_PRIO)
+                // It goes after its victim line (and any tier 1 traffic that cuts in), so it
+                // lives longer than the victim line's 8 s.
+                .ttl(12.0),
+        );
+    }
+
     /// Closest in-service ground unit pursuing `racer` (any in-service ground unit on it if
     /// none pursues).
     fn lead_unit(&self, racer: EntityId) -> Option<UnitId> {
@@ -446,6 +929,7 @@ impl PoliceSystem {
         let mut pits: Vec<(UnitId, EntityId)> = Vec::new();
         let mut downs: Vec<(UnitId, DisableCause)> = Vec::new();
         let mut spikes: Vec<EntityId> = Vec::new();
+        let mut tools: Vec<(bool, crate::events::ToolId, EntityId)> = Vec::new();
         for e in &self.pending {
             match e {
                 PoliceEvent::PitAttempt { unit, target } => pits.push((*unit, *target)),
@@ -453,9 +937,15 @@ impl PoliceSystem {
                 PoliceEvent::SpikeHit { vehicle, .. } if self.racers.contains_key(vehicle) => {
                     spikes.push(*vehicle)
                 }
+                PoliceEvent::RoadblockPlaced { tool, racer, .. } => {
+                    tools.push((true, *tool, *racer))
+                }
+                PoliceEvent::SpikesPlaced { tool, racer, .. } => tools.push((false, *tool, *racer)),
                 _ => {}
             }
         }
+        self.chatter_tools(&tools);
+        self.chatter_impacts(events);
         // Physical units: a contact between a unit lining up a PIT and its target.
         for ev in events {
             if let SimEvent::Contact { a, b, .. } = ev {
@@ -508,11 +998,11 @@ impl PoliceSystem {
             self.callout(
                 Callout::SpikesHit,
                 RadioCue::new(
-                    RadioTier::Tactical,
+                    RadioTier::Impact,
                     speaker,
-                    format!("{cs}, spikes hit! He's losing tires {place}."),
+                    format!("{cs}, spikes hit! Spikes hit! He's losing tires {place}!"),
                 )
-                .prio(4)
+                .prio(3)
                 .ttl(5.0),
             );
         }
@@ -546,28 +1036,30 @@ impl PoliceSystem {
                 self.callout(
                     Callout::PitSpun,
                     RadioCue::new(
-                        RadioTier::Tactical,
+                        RadioTier::Impact,
                         Some(w.unit),
-                        format!("{cs}, he's spun! Suspect is spun out {place}."),
+                        format!("{cs}, he's spun! He's spun! Suspect is spun out {place}!"),
                     )
-                    .prio(4)
+                    .prio(3)
                     .ttl(4.0),
                 );
             } else {
                 self.callout(
                     Callout::PitMissed,
                     RadioCue::new(
-                        RadioTier::Tactical,
+                        RadioTier::Impact,
                         Some(w.unit),
                         format!("{cs}, negative on the PIT, he got away {place}."),
                     )
-                    .prio(1)
-                    .ttl(4.0),
+                    .prio(0)
+                    .ttl(3.0),
                 );
             }
         }
     }
 
+    /// A unit is out of action (row 144: shouted, tier 3). A wreck of a unit that was on a
+    /// racer also gets another unit's reaction.
     fn unit_down(&mut self, unit: UnitId, cause: DisableCause) {
         let Some(i) = self.unit_index(unit) else {
             return;
@@ -575,27 +1067,54 @@ impl PoliceSystem {
         if self.units[i].kind != UnitKind::Car {
             return;
         }
-        let target = self.chatter.units.get(&unit).and_then(|c| c.target);
+        let now = self.now;
+        let target = self
+            .chatter
+            .units
+            .get(&unit)
+            .and_then(|c| c.target)
+            .or(self.units[i].assignment.target());
         let cs = self.callsign(unit);
-        let place = self.place_phrase(self.units[i].body.pos, [0.0, 0.0]);
+        let pos = self.units[i].body.pos;
+        let place = self.place_phrase(pos, [0.0, 0.0]);
+        let wreck = matches!(cause, DisableCause::SelfCrash | DisableCause::RacerContact);
+        let last = self.chatter.units.get(&unit).and_then(|c| c.last_impact);
+        let already = last.is_some_and(|(t, s)| {
+            now.since(t) < self.cfg.radio.impact.unit_gap_s && s == ImpactSeverity::Wreck
+        });
+        self.chatter.units.entry(unit).or_default().last_impact =
+            Some((now, ImpactSeverity::Wreck));
+        if wreck {
+            if !already {
+                let pool =
+                    impact_lines(ImpactSeverity::Wreck, ImpactRole::Victim).expect("wreck lines");
+                let t = self.chatter.pick(pool);
+                let text = self.fill(t, &cs, &place);
+                self.callout(
+                    Callout::UnitDown,
+                    RadioCue::new(RadioTier::Impact, Some(unit), text)
+                        .prio(WRECK_PRIO)
+                        .ttl(8.0),
+                );
+                // A big wreck always stacks a second line: the nearest unit on the same
+                // racer, or dispatch.
+                self.wreck_reaction(unit, &cs, &place, target);
+            }
+            return;
+        }
         let why = match cause {
-            DisableCause::SelfCrash | DisableCause::RacerContact => "my unit's wrecked",
-            DisableCause::Damaged => "my unit's too damaged to continue",
-            DisableCause::BentWheel => "I've got a bent wheel",
+            DisableCause::BentWheel => "bent wheel! Bent wheel",
+            _ => "unit's too beat up, I'm losing it",
         };
-        let (tier, text) = match target {
-            Some(_) => (
-                RadioTier::Critical,
-                format!("{cs}, {why} {place}. I'm out of the chase."),
-            ),
-            None => (
-                RadioTier::Routine,
-                format!("{cs}, {why} {place}. Out of service."),
-            ),
+        let text = match target {
+            Some(_) => format!("{cs}, {why}! I'm out of the chase {place}!"),
+            None => format!("{cs}, {why}! Out of service {place}!"),
         };
         self.callout(
             Callout::UnitDown,
-            RadioCue::new(tier, Some(unit), text).prio(3),
+            RadioCue::new(RadioTier::Impact, Some(unit), text)
+                .prio(3)
+                .ttl(6.0),
         );
     }
 
@@ -628,6 +1147,7 @@ impl PoliceSystem {
                 })
                 .count();
             let mut calls: Vec<(Callout, RadioCue)> = Vec::new();
+            let from_level = self.chatter.racers.get(&id).map_or(0, |c| c.level);
             {
                 let c = self.chatter.racers.entry(id).or_default();
                 if seen {
@@ -641,23 +1161,48 @@ impl PoliceSystem {
                 let was_pursued =
                     matches!(c.status, PursuitStatus::Pursuit | PursuitStatus::Searching);
                 let level_up = pursued && was_pursued && level > c.level;
+                let level_down = pursued && was_pursued && level < c.level && level > 0;
                 c.level = level;
                 if level_up {
                     calls.push((
                         Callout::LevelSummary,
-                        RadioCue::new(RadioTier::Critical, None, String::new())
+                        RadioCue::new(RadioTier::Escalation, None, String::new())
+                            .supersedes(format!("level:{}", id.0)),
+                    ));
+                }
+                if level_down {
+                    calls.push((
+                        Callout::LevelDown,
+                        RadioCue::new(RadioTier::Escalation, None, String::new())
+                            .ttl(8.0)
                             .supersedes(format!("level:{}", id.0)),
                     ));
                 }
                 if !pursued {
+                    // Row 144: at L0–L1 with no pursuit, one "units responding" summary when
+                    // heat first rises, then nothing about deployments.
+                    let summarize = level > 0 && !c.summarized;
+                    let summarized = (c.summarized || summarize) && level > 0;
                     *c = RacerChat {
                         status,
                         level,
                         seen_vel: c.seen_vel,
                         last_sight_call: c.last_sight_call,
+                        summarized,
+                        last_civilian: c.last_civilian,
                         ..Default::default()
                     };
-                    continue;
+                    if summarize && from_level == 0 {
+                        calls.push((
+                            Callout::UnitsResponding,
+                            RadioCue::new(RadioTier::Investigation, None, String::new())
+                                .ttl(10.0)
+                                .supersedes(format!("summary:{}", id.0)),
+                        ));
+                    }
+                    if calls.is_empty() {
+                        continue;
+                    }
                 }
                 if status == PursuitStatus::Searching && c.status != PursuitStatus::Searching {
                     c.searching_since = Some(now);
@@ -667,18 +1212,23 @@ impl PoliceSystem {
                     c.last_sight_call
                         .is_none_or(|t| now.since(t) >= SIGHT_CALL_GAP_S)
                 };
-                // Lost visual, confirmed.
+                // Lost visual, confirmed. A loss that lasts [`LOST_SUSTAINED_S`] is called even
+                // inside the gap (on main's rebuilt grid, interceptors on a parallel road saw the
+                // racer on and off; the flicker used up the gap and the real loss was called
+                // 11.5 s late, a moment before the escape).
+                let lost_for = c.searching_since.map_or(0.0, |t| now.since(t));
                 if status == PursuitStatus::Searching
                     && !c.lost_called
-                    && c.searching_since
-                        .is_some_and(|t| now.since(t) >= LOST_CONFIRM_S)
-                    && quiet(c)
+                    && lost_for >= LOST_CONFIRM_S
+                    && (quiet(c) || lost_for >= LOST_SUSTAINED_S)
                 {
                     c.lost_called = true;
                     c.last_sight_call = Some(now);
                     calls.push((
                         Callout::LostVisual,
-                        RadioCue::new(RadioTier::Critical, c.spotter, String::new())
+                        RadioCue::new(RadioTier::Investigation, c.spotter, String::new())
+                            .prio(5)
+                            .ttl(12.0)
                             .supersedes(format!("sight:{}", id.0)),
                     ));
                 }
@@ -691,7 +1241,8 @@ impl PoliceSystem {
                     if !self.radio_director.withdraw(&format!("sight:{}", id.0)) {
                         calls.push((
                             Callout::EyesOn,
-                            RadioCue::new(RadioTier::Critical, spotter, String::new())
+                            RadioCue::new(RadioTier::Investigation, spotter, String::new())
+                                .prio(5)
                                 .ttl(8.0)
                                 .supersedes(format!("sight:{}", id.0)),
                         ));
@@ -704,7 +1255,7 @@ impl PoliceSystem {
                 if tunnel.is_some() && tunnel != c.tunnel {
                     calls.push((
                         Callout::Tunnel,
-                        RadioCue::new(RadioTier::Tactical, c.spotter, String::new())
+                        RadioCue::new(RadioTier::Investigation, c.spotter, String::new())
                             .prio(4)
                             .ttl(5.0),
                     ));
@@ -719,7 +1270,7 @@ impl PoliceSystem {
                     c.last_boxin = Some(now);
                     calls.push((
                         Callout::BoxIn,
-                        RadioCue::new(RadioTier::Tactical, lead, String::new()).ttl(4.0),
+                        RadioCue::new(RadioTier::Investigation, lead, String::new()).ttl(4.0),
                     ));
                 }
                 c.boxers = boxers;
@@ -749,7 +1300,30 @@ impl PoliceSystem {
                     Callout::BoxIn => {
                         format!("{cs}, boxing him in, {}.", self.place_phrase(pos, vel))
                     }
-                    Callout::LevelSummary => self.level_summary(id, level),
+                    Callout::LevelSummary => {
+                        let more = self.takeover_phrase(from_level, level);
+                        if more.is_empty() {
+                            self.level_summary(id, level)
+                        } else {
+                            *self
+                                .chatter
+                                .stats
+                                .raised
+                                .entry(Callout::Takeover)
+                                .or_insert(0) += 1;
+                            format!("{} {more}", self.level_summary(id, level))
+                        }
+                    }
+                    Callout::LevelDown => format!(
+                        "Dispatch, all units: racer #{} down to level {level}, {}.",
+                        id.0,
+                        self.place_phrase(pos, vel)
+                    ),
+                    Callout::UnitsResponding => format!(
+                        "Dispatch: units responding, racer #{} {}.",
+                        id.0,
+                        self.place_phrase(pos, vel)
+                    ),
                     _ => unreachable!("racer callouts only"),
                 };
                 self.callout(kind, cue);
@@ -834,7 +1408,7 @@ impl PoliceSystem {
                     calls.push((
                         Callout::Bumper,
                         RadioCue::new(
-                            RadioTier::Tactical,
+                            RadioTier::Investigation,
                             Some(id),
                             format!("{cs}, I'm on his bumper, {}.", self.place_phrase(rp, rv)),
                         )
@@ -845,11 +1419,11 @@ impl PoliceSystem {
                 Some(Callout::PitLineUp) => calls.push((
                     Callout::PitLineUp,
                     RadioCue::new(
-                        RadioTier::Tactical,
+                        RadioTier::Impact,
                         Some(id),
-                        format!("{cs}, going for the PIT."),
+                        format!("{cs}, going for the PIT!"),
                     )
-                    .prio(2)
+                    .prio(1)
                     .ttl(2.5),
                 )),
                 _ => {}
@@ -890,23 +1464,14 @@ impl PoliceSystem {
                 continue;
             }
             c.last_backup = Some(now);
-            let Some(lead) = self.lead_unit(racer) else {
-                continue;
-            };
-            let Some(r) = self.racers.get(&racer) else {
-                continue;
-            };
-            let place = self.place_phrase(xy(r.pos), [r.vel[0], r.vel[1]]);
-            let cs = self.callsign(lead);
-            self.callout(
-                Callout::BackupRequest,
-                RadioCue::new(
-                    RadioTier::Tactical,
-                    Some(lead),
-                    format!("{cs}, requesting backup, {place}."),
-                )
-                .prio(2),
-            );
+            // Row 144: a deployment line, not spoken (still counted as raised).
+            *self
+                .chatter
+                .stats
+                .raised
+                .entry(Callout::BackupRequest)
+                .or_insert(0) += 1;
+            self.chatter.stats.deploy_suppressed += 1;
         }
     }
 }

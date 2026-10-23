@@ -51,6 +51,15 @@ impl RaceDataError {
     }
 }
 
+/// Why a race could not be set up.
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum RaceSetupError {
+    /// The race route has nothing to drive (no length, or its end lies behind its start), so
+    /// the AI field has no corridor: the race is refused instead of panicking (row 154).
+    #[error("the race route has nothing to drive")]
+    NoDrivableRoute,
+}
+
 /// Why a racer may not enter an event.
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum EntryDenied {

@@ -13,6 +13,11 @@ import { renderOverlay } from "./overlay";
 import { LobbyPanel } from "./rolePicker";
 import { CaptainMap } from "./captainMap";
 
+/** Contract `traffic_flags` bits of a `TrafficAgentSnapshot` (wp_contracts net.rs). */
+const TRAFFIC_FLAG = { hazards: 2, left: 4, right: 8 } as const;
+/** Indicator blink (as the main testbed: 1.5 Hz, 50 % duty, every car in phase). */
+const indicatorOn = (nowMs: number) => ((nowMs / 1000) * 1.5) % 1 < 0.5;
+
 const COLORS: Record<string, number> = {
   racer: 0xd04a2a,
   police: 0x2a5ad0,
@@ -114,6 +119,20 @@ async function main(): Promise<void> {
   const trafficCars = new Map<number, THREE.Mesh>();
   const trafficGeo = new THREE.BoxGeometry(1.8, 4.5, 1.4);
   const trafficMat = new THREE.MeshStandardMaterial({ color: COLORS.traffic });
+  // Indicator lamps on the box corners (children 0, 1 left front / rear, 2, 3 right): lit amber
+  // or dark lens, blinking from the snapshot's LEFT_SIGNAL / RIGHT_SIGNAL / HAZARDS flags.
+  const lampGeo = new THREE.BoxGeometry(0.2, 0.24, 0.14);
+  const lampOn = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffa030).multiplyScalar(1.6) });
+  const lampOff = new THREE.MeshBasicMaterial({ color: 0x3a2a12 });
+  const addLamps = (m: THREE.Mesh): void => {
+    for (const x of [-0.85, 0.85]) {
+      for (const y of [2.18, -2.18]) {
+        const lamp = new THREE.Mesh(lampGeo, lampOff);
+        lamp.position.set(x, y, -0.15);
+        m.add(lamp);
+      }
+    }
+  };
   const radio: string[] = [];
   function onEvent(e: GameEvent): void {
     if ("Police" in e && typeof e.Police === "object" && "Radio" in e.Police) {
@@ -182,11 +201,19 @@ async function main(): Promise<void> {
         let m = trafficCars.get(a.id);
         if (!m) {
           m = new THREE.Mesh(trafficGeo, trafficMat);
+          addLamps(m);
           world.add(m);
           trafficCars.set(a.id, m);
         }
         m.position.set(a.pos[0], a.pos[1], a.pos[2] + 0.7);
         m.rotation.set(0, 0, a.yaw);
+        const blink = indicatorOn(now);
+        const hz = (a.flags & TRAFFIC_FLAG.hazards) !== 0;
+        const left = blink && (hz || (a.flags & TRAFFIC_FLAG.left) !== 0);
+        const right = blink && (hz || (a.flags & TRAFFIC_FLAG.right) !== 0);
+        const lamps = m.children as THREE.Mesh[];
+        lamps[0].material = lamps[1].material = left ? lampOn : lampOff;
+        lamps[2].material = lamps[3].material = right ? lampOn : lampOff;
       }
       for (const [id, m] of trafficCars) {
         if (!live.has(id)) {

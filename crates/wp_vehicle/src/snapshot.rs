@@ -17,9 +17,14 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
 /// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
 /// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
-/// (owner rows 57 / 72). Format 8: plus the drift hold state (owner row 91). Format 9: plus
-/// the highway catch latch (`Vehicle::catch_key`, the high-speed catch port).
-const FORMAT: u8 = 9;
+/// (owner rows 57 / 72). Format 8: plus the drift-assist state (Drift Lab B). Format 9: plus
+/// the drift side and lift-off transition flag (Drift Lab C, row 107). Format 10: plus the
+/// confirmed-slide gate of the steering (row 102). Format 11: plus the keyboard key ramp
+/// (keys arrive raw, Drift Lab C step 6). Format 12: plus the handbrake-held time (pivot aid,
+/// owner row 109; round12 used 9 for that on A's lineage). Format 13: plus the plain keyboard
+/// steering state (lift / reversal / slide-crossing timers, last key and slide side, slip rate
+/// and countersteer timers, rack yield), now part of the shipped player handling (unify, 2026-10-21).
+const FORMAT: u8 = 13;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,11 +241,12 @@ impl Vehicle {
         w.f(self.launch.prev_vz.unwrap_or(0.0));
         w.f(self.launch.lift);
         w.f(self.hb_grace);
-        w.f(self.catch_key);
         w.b(self.stalled);
-        w.f(self.drift_hold.target_slip);
-        w.f(self.drift_hold.steady_s);
-        w.b(self.drift_hold.active);
+        w.fs(&self.drift.to_array());
+        w.fs(&self.slide_gate.to_array());
+        w.f(self.key_steer);
+        w.f(self.hb_held_s);
+        w.fs(&self.plain_state());
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -344,13 +350,21 @@ impl Vehicle {
         let prev_vz = r.f()?;
         let lift = r.f()?;
         let hb_grace = r.f()?;
-        let catch_key = r.f()?;
         let stalled = r.b()?;
-        let drift_hold = crate::drift::DriftHold {
-            target_slip: r.f()?,
-            steady_s: r.f()?,
-            active: r.b()?,
-        };
+        let mut drift = [0.0f32; crate::drift::DriftState::LEN];
+        for d in &mut drift {
+            *d = r.f()?;
+        }
+        let mut gate = [0.0f32; crate::steering::SlideGate::LEN];
+        for g in &mut gate {
+            *g = r.f()?;
+        }
+        let key_steer = r.f()?;
+        let hb_held_s = r.f()?;
+        let mut plain = [0.0f32; Vehicle::PLAIN_STATE_LEN];
+        for p in &mut plain {
+            *p = r.f()?;
+        }
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -391,9 +405,12 @@ impl Vehicle {
             lift,
         };
         self.hb_grace = hb_grace;
-        self.catch_key = catch_key;
         self.stalled = stalled;
-        self.drift_hold = drift_hold;
+        self.drift = crate::drift::DriftState::from_array(drift);
+        self.slide_gate = crate::steering::SlideGate::from_array(gate);
+        self.key_steer = key_steer;
+        self.hb_held_s = hb_held_s;
+        self.set_plain_state(plain);
         Ok(())
     }
 }

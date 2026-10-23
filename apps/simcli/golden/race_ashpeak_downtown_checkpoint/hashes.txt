@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_ashpeak_downtown_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-240 a6c5da86f4525a0e
-480 1e26bfe3fec53bbc
-720 2796ccf784373b59
-960 f4c85d05ae3e62d3
-1200 31c0d4e86adf9634
-1440 050b3876bb3df2fb
-1680 f9af28dc8cc613b0
-1920 2c4aa9c185f3d26a
-2160 22d49c2fb43e4bc9
-2400 325c46fdde61ff8e
+# simcli hashes scenario=race_ashpeak_downtown_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 78596acb1f436336
+480 b3436d70ee6a021f
+720 b9d8f1c279faf65e
+960 7d524b3870dc14cf
+1200 a0b0ac628c1a8179
+1440 01823df6bf587064
+1680 93c02745437756e1
+1920 0ba39b42ee0abef3
+2160 0414965a770c3317
+2400 8d56eae353d641c4

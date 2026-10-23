@@ -56,7 +56,7 @@ they own, so merges do not fight over generated JSON. The lead regenerates every
 | `sentinel_warden` NEW | police: 80s/90s boxy body-on-frame V8 sedan ("old sedan") | police |
 | `sentinel_wolfhound` | police: AWD pursuit sedan, highway-patrol livery ("patrol") | police |
 | `sentinel_bastion` | police: full-size SUV ("SUV") | police |
-| `sentinel_harrier` NEW | police: muscle-coupe pursuit car ("sports patrol") | police |
+| `sentinel_vigil` NEW | police: muscle-coupe pursuit car ("sports patrol") | police |
 
 ## Foundation contract (wave 1 builds it, wave 2 uses it)
 

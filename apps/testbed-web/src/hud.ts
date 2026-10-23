@@ -8,6 +8,11 @@ import { CAMERA_HELP } from "./cameras";
 import { heat, healthColour } from "./vehicle_view";
 import { RTF_WARN } from "./rtf";
 
+/** HUD tag for a TCS / ABS level: "TCS" at Full, "TCS HALF", "TCS OFF". */
+export function levelTag(name: string, level: string): string {
+  return level === "Full" ? name : `${name} ${level.toUpperCase()}`;
+}
+
 /** Region energy (J) shown as fully red in the silhouette / panel. */
 const ENERGY_RED = 5000;
 
@@ -120,18 +125,21 @@ export class Hud {
     this.setControlsHelp([]);
   }
 
-  /** Rebuild the help overlay with the current bindings (one line per action). */
-  setControlsHelp(bindingLines: string[]): void {
+  /** Rebuild the help overlay with the current bindings (one line per action). `street` names
+   * the bound horn and map controls for the street-racer line (`bindingText`). */
+  setControlsHelp(bindingLines: string[], street: { horn: string; map: string } = { horn: "the horn binding", map: "the map binding" }): void {
     this.help.innerHTML =
       `<b>WreckPursuit testbed — controls</b> <span class="dim">(change them in the controls panel: F9 by default, or the “controls” button)</span><br>` +
       `<div class="help-binds">${bindingLines.join("<br>")}</div>` +
       `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
+      `<b>Street racers</b> (city): pull up right behind one and honk (horn — ${street.horn}; 📯 on touch) to challenge · the city map (${street.map}) opens as the finish picker: tap / click sets B (pad: left stick + A), pick the bet (pad LB / RB), Race (Enter / pad Menu) or Decline (Esc / pad B) · dot colour and number = driver level (names and colours in the city map legend)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
-      `. frame step (replay) · [ / ] replay speed<br><br>` +
+      `. frame step (replay) · [ / ] replay speed · − / = indicator left / right (cosmetic, cancels after the turn)<br>` +
+      `<b>Photo mode</b> F7 or the photo button (live or replay): free camera, filters, save / copy PNG — keys listed in its panel<br><br>` +
       `<b>Countersteer help</b> (slider, keyboard/gamepad): in a slide, <i>let go</i> of the steering ` +
       `and the front wheels follow the car's travel (straighten); press <i>against</i> the slide for a ` +
       `fast catch (0 % off, 100 % fastest). It never fights your input, and the handbrake turns the ` +
-      `car freely. Drift lab + tuning: F8.<br><br>` +
+      `car freely. Handling tune panel (debug): F7 or ?tune=1; test pad: ?drift=w.<br><br>` +
       `<b>Debug layers</b><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;
@@ -181,7 +189,7 @@ export class Hud {
       `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a
-        ? `<div>${badge(a.abs, "ABS")}${badge(a.tcs, "TCS")}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
+        ? `<div>${badge(a.abs !== "Off", levelTag("ABS", a.abs))}${badge(a.tcs !== "Off", levelTag("TCS", a.tcs))}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
           `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}${badge(a.auto_clutch, a.auto_clutch ? "A-CLU" : "M-CLU")}</div>`
         : "") +
       `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · views ${f.viewsMs.toFixed(1)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +

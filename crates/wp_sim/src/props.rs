@@ -13,7 +13,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rapier3d::prelude::{RigidBodyHandle, RigidBodySet, RigidBodyType};
+use rapier3d::prelude::{ColliderHandle, RigidBodyHandle, RigidBodySet, RigidBodyType};
+use wp_world::props::PropKind;
 
 /// Grid cell edge, m.
 const CELL_M: f32 = 16.0;
@@ -23,6 +24,8 @@ const WAKE_RADIUS_M: f32 = 6.0;
 const WAKE_LOOKAHEAD_S: f32 = 0.35;
 /// Extra distance before an asleep prop is made fixed again (hysteresis), m.
 const DEMOTE_MARGIN_M: f32 = 6.0;
+/// A dynamic prop faster than this wakes the props around it like a vehicle does, m/s.
+const PUSH_MOVER_MPS: f32 = 1.0;
 
 /// One thing that can push props: position and velocity (world, m and m/s).
 #[derive(Debug, Clone, Copy)]
@@ -42,6 +45,12 @@ impl Mover {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Props {
     pub(crate) bodies: Vec<RigidBodyHandle>,
+    /// The box collider of each prop (parked-car damage rebuilds it from the dented hull).
+    pub(crate) colliders: Vec<ColliderHandle>,
+    /// Kind of each prop.
+    pub(crate) kinds: Vec<PropKind>,
+    /// Half extents of each prop's box as created, m (prop frame: +X right, +Y forward, +Z up).
+    pub(crate) half_extents: Vec<[f32; 3]>,
     /// Bounding-sphere radius per prop, m.
     radius: Vec<f32>,
     /// Grid cell each fixed prop is filed under.
@@ -61,11 +70,24 @@ fn dist2_xy(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 impl Props {
-    /// Register a prop body (created fixed) with its bounding-sphere radius.
-    pub fn add(&mut self, body: RigidBodyHandle, pos: [f32; 3], radius: f32) {
+    /// Register a prop body (created fixed) and its box collider, with its kind and half
+    /// extents (bounding-sphere radius = their length).
+    pub fn add(
+        &mut self,
+        body: RigidBodyHandle,
+        collider: ColliderHandle,
+        pos: [f32; 3],
+        kind: PropKind,
+        half_extents: [f32; 3],
+    ) {
         let idx = self.bodies.len() as u32;
         let c = cell(pos[0], pos[1]);
+        let [hx, hy, hz] = half_extents;
+        let radius = (hx * hx + hy * hy + hz * hz).sqrt();
         self.bodies.push(body);
+        self.colliders.push(collider);
+        self.kinds.push(kind);
+        self.half_extents.push(half_extents);
         self.radius.push(radius);
         self.cell_of.push(c);
         self.grid.entry(c).or_default().push(idx);
@@ -97,6 +119,19 @@ impl Props {
         if self.bodies.is_empty() {
             return;
         }
+        // A prop shoved fast enough pushes its neighbours like a car would (a side-swiped
+        // parked car into the next one in the row): it wakes props in its own reach too.
+        let mut movers = movers.to_vec();
+        for &i in &self.active {
+            let rb = &bodies[self.bodies[i as usize]];
+            if rb.is_dynamic() && !rb.is_sleeping() && rb.linvel().length() > PUSH_MOVER_MPS {
+                movers.push(Mover {
+                    pos: rb.translation().to_array(),
+                    vel: rb.linvel().to_array(),
+                });
+            }
+        }
+        let movers = &movers[..];
         let max_r = self.radius.iter().copied().fold(0.0f32, f32::max);
         for m in movers {
             let reach = m.reach();
@@ -178,7 +213,13 @@ mod tests {
                     .translation(Vector::from_array(pos))
                     .build(),
             );
-            props.add(h, pos, 1.0);
+            props.add(
+                h,
+                ColliderHandle::invalid(),
+                pos,
+                PropKind::Cone,
+                [0.5, 0.5, 0.70710677],
+            );
         }
         (set, props)
     }

@@ -1,13 +1,13 @@
-# simcli hashes scenario=damage_arcade_cruiser_tbone_50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-60 ed8c17c5e5e76305
-120 286ea90bbbefc9e4
-180 2b14cdbf72469d86
-240 8e0a642f06649ef9
-300 5219a2ceb82aa7ab
-360 eff6cae1b27b2eae
-420 dbb5d7966183155e
-480 0db2e425203948ef
-540 2175f6d56ae6f0b3
-600 d2e912a68e432fc3
-660 01d8a97b5250d6f1
-720 fb52c86e75ffc4ce
+# simcli hashes scenario=damage_arcade_cruiser_tbone_50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+60 a54157fe2c71d81a
+120 2466d58b267eac49
+180 c142f0e947a70493
+240 f874d5c1e6c3cab3
+300 ef501c02ebb8df93
+360 895d9fe6464cf9b2
+420 8c2410810263469d
+480 372508aa1b3af0c9
+540 89710b7876ec3308
+600 7b9e7d59604b6512
+660 4175ea9e0be075a4
+720 6cc0b52f1608be55

@@ -259,7 +259,7 @@ pub fn kit(id: &str) -> Kit {
             trunk_number: false,
             ..base
         },
-        "sentinel_harrier" => Kit {
+        "sentinel_vigil" => Kit {
             bar: Bar::Slick,
             push: Some(Push::Bar {
                 width: 0.95,

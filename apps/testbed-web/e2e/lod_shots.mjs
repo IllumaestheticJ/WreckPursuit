@@ -46,10 +46,10 @@ await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 180000 });
 await page.addStyleTag({ content: "#overlay { display: none !important; }" });
 
-// City chase in Port Vesper v2 (night, police, traffic), player already at 30 m/s. Let it run
+// Night run in Port Vesper v2 (night, police, traffic), player already at 30 m/s. Let it run
 // live for a moment, then pause and step the sim by hand so every frame is captured.
 // The testbed's default car (the owner's playtest car); CAR=… overrides.
-await page.evaluate((car) => window.__wp.startCityChase(car, "Arcade"), process.env.CAR ?? "lindwurm_4t");
+await page.evaluate((car) => window.__wp.startNightRun(car, "Arcade"), process.env.CAR ?? "lindwurm_4t");
 await page.waitForFunction(() => (window.__wp.scene.cities.get("vesper_v2")?.children.length ?? 0) > 0, null, { timeout: 90000 });
 await page.keyboard.down("KeyW");
 await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] / 240 > 2, null, { timeout: 120000, polling: 200 });
@@ -61,7 +61,7 @@ await page.evaluate(() => {
   const wp = window.__wp;
   wp.app.paused = true;
   const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  const AG = 5;
+  const AG = 7; // traffic_agents(): [x, y, z, yaw, flags, agentId, model]
   window.__lodShots = {
     async step(ticks) {
       wp.sim.step(ticks / 240);

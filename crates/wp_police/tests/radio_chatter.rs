@@ -5,14 +5,15 @@
 use std::sync::{Arc, OnceLock};
 
 use wp_contracts::{
-    EntityId, SignalState, SimEvent, SurfaceType, TimeOfDay, WorldQuery, PHYSICS_DT,
+    CaptainCommand, EntityId, HandlingEffects, SignalState, SimEvent, SurfaceType, TimeOfDay,
+    WorldQuery, PHYSICS_DT,
 };
 use wp_police::chatter::Callout;
 use wp_police::graph::{dist, District, RoadClass, RoadGraph, RoadPath};
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{
     Assignment, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
-    PursuitStatus, RacerView, RadioLine, RadioTier,
+    PursuitStatus, RacerView, RadioLine, RadioTier, SteerGeometry, UnitKind, UnitSync,
 };
 
 const RACER: EntityId = EntityId(7);
@@ -127,11 +128,18 @@ impl Harness {
         let ticks = (secs / PHYSICS_DT).round() as usize;
         for _ in 0..ticks {
             each(&mut self.police);
+            self.tick(&[]);
+        }
+    }
+
+    /// One tick with these sim events (contacts).
+    fn tick(&mut self, sim_events: &[SimEvent]) {
+        {
             self.s = (self.s + self.speed * PHYSICS_DT).min(self.path.length());
             let v = self.racer_view();
             let mut out = Vec::new();
             self.police
-                .step(&self.world, &[v], &[], PHYSICS_DT, &mut out);
+                .step(&self.world, &[v], sim_events, PHYSICS_DT, &mut out);
             for e in out {
                 if let SimEvent::Police(p) = e {
                     if matches!(p, PoliceEvent::Radio { .. }) {
@@ -163,11 +171,21 @@ impl Harness {
     }
 }
 
-/// No transmission starts before the previous one (plus the minimum silence) is over.
+/// No transmission starts before the previous one (plus the minimum silence: shorter after a
+/// shouted tier 3 line) is over.
 fn assert_one_at_a_time(lines: &[RadioLine], min_gap: f32) {
-    // Emergency traffic (an officer rammed, a captain's order) may cut the line on air.
+    let cfg = PoliceConfig::builtin().radio;
+    // A higher tier or emergency traffic (an officer rammed, a captain's order) may cut the
+    // line on air.
     for w in lines.windows(2).filter(|w| !w[1].cut_in) {
-        let end = w[0].time.secs() + w[0].duration_s + min_gap;
+        let gap = if w[1].tier == RadioTier::Actionable {
+            0.0
+        } else if w[0].tier == RadioTier::Impact {
+            cfg.impact_min_gap_s.min(min_gap)
+        } else {
+            min_gap
+        };
+        let end = w[0].time.secs() + w[0].duration_s + gap;
         assert!(
             w[1].time.secs() + 1e-3 >= end,
             "'{}' at {:.2} s overlaps '{}' ({:.2} s, over at {:.2} s)",
@@ -187,10 +205,7 @@ fn find(lines: &[RadioLine], from: usize, needle: &str) -> Option<usize> {
 
 #[test]
 fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
-    // Seed 11 -> 12 after merging main's highway layout: on main's small grid seed 11's racer
-    // had already escaped (status Wanted) when the lost-visual call came. Seeds 7, 9, 12,
-    // 13 and 17 pass; 3 and 5 fail like 11.
-    let mut h = Harness::new(12);
+    let mut h = Harness::new(11);
     let min_gap = PoliceConfig::builtin().radio.min_gap_s;
     h.speed = 18.0;
     h.run(1.0);
@@ -220,7 +235,7 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
         }
     }
     let lost = lost_at.unwrap_or_else(|| panic!("no lost-visual call: {:#?}", h.texts()));
-    assert_eq!(h.status(), PursuitStatus::Searching, "{:#?}", h.texts());
+    assert_eq!(h.status(), PursuitStatus::Searching);
     let rec = h.police.racer(RACER).unwrap().clone();
     let last_known = rec.last_known.unwrap();
     assert!(
@@ -253,7 +268,7 @@ fn scripted_pursuit_callouts_in_order_with_places_and_no_overlap() {
             .nth(1)
             .unwrap()
     );
-    assert_eq!(h.lines[lost].tier, RadioTier::Critical);
+    assert_eq!(h.lines[lost].tier, RadioTier::Investigation);
 
     // Units intercepting the lost racer use the called place and heading: their intercept
     // points are around the last known position (machine E's search points) or ahead of it
@@ -361,10 +376,10 @@ fn level_one_keeps_the_row_6_rate_limits() {
         "the test pins level 1"
     );
     let hot: Vec<&RadioLine> = h.lines.iter().filter(|l| l.time.secs() > 1.0).collect();
-    // Tactical / routine lines: at least the row-6 L1 gap (8 s) apart, one per unit per 30 s.
+    // Tier 4-5 lines: at least the row-6 L1 gap (8 s) apart, one per unit per 30 s.
     let paced: Vec<&&RadioLine> = hot
         .iter()
-        .filter(|l| l.tier != RadioTier::Critical)
+        .filter(|l| l.tier <= RadioTier::Investigation)
         .collect();
     for w in paced.windows(2) {
         assert!(
@@ -471,4 +486,298 @@ fn port_vesper_places_use_real_street_and_tunnel_names() {
     let c = tunnel.centre[tunnel.centre.len() / 2];
     let inside = police.place_phrase([c[0], c[1]], [0.0, 0.0]);
     assert_eq!(inside, format!("in the {}", tunnel.name));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Owner playtest row 144: priority tiers.
+// ---------------------------------------------------------------------------------------------
+
+/// Words of the deployment lines row 144 keeps off the air (units joining, responding to a known
+/// call, backup, tool cars arriving, intercepts behind the racer).
+const DEPLOY_WORDS: [&str; 7] = [
+    "in pursuit of",
+    "moving to intercept",
+    "responding to",
+    "sending unit",
+    "more units en route",
+    "requesting backup",
+    "setting up a roadblock",
+];
+
+fn deploy_lines(lines: &[RadioLine]) -> Vec<String> {
+    lines
+        .iter()
+        .filter(|l| DEPLOY_WORDS.iter().any(|w| l.text.contains(w)))
+        .map(|l| l.text.clone())
+        .collect()
+}
+
+#[test]
+fn no_deploy_lines_at_low_heat_except_one_summary() {
+    // Level 1 with nobody seeing the racer: no pursuit, units sent to the report.
+    let mut h = Harness::new(21);
+    h.speed = 12.0;
+    h.run(1.0);
+    h.world.blind = true;
+    h.run_with(90.0, |p| p.set_heat(RACER, 15.0));
+    assert_eq!(h.police.wanted_level(RACER).number(), 1);
+    assert!(
+        !h.police.racer(RACER).unwrap().pursued(),
+        "{:#?}",
+        h.texts()
+    );
+    let summaries = h
+        .lines
+        .iter()
+        .filter(|l| l.text.contains("units responding"))
+        .count();
+    assert_eq!(summaries, 1, "{:#?}", h.texts());
+    assert!(deploy_lines(&h.lines).is_empty(), "{:#?}", h.texts());
+    // Back to zero and up again: one more summary for the new rise.
+    h.run_with(2.0, |p| p.set_heat(RACER, 0.0));
+    h.run_with(30.0, |p| p.set_heat(RACER, 15.0));
+    let summaries = h
+        .lines
+        .iter()
+        .filter(|l| l.text.contains("units responding"))
+        .count();
+    assert_eq!(summaries, 2, "{:#?}", h.texts());
+    assert!(deploy_lines(&h.lines).is_empty(), "{:#?}", h.texts());
+}
+
+#[test]
+fn no_deploy_lines_in_a_level_one_pursuit() {
+    let mut h = Harness::new(12);
+    h.speed = 18.0;
+    h.run(1.0);
+    h.run_with(120.0, |p| p.set_heat(RACER, 15.0));
+    assert!(
+        h.events
+            .iter()
+            .any(|e| matches!(e, PoliceEvent::PursuitStarted { .. })),
+        "{:#?}",
+        h.texts()
+    );
+    assert!(deploy_lines(&h.lines).is_empty(), "{:#?}", h.texts());
+    assert!(h.police.chatter_stats().deploy_suppressed > 0);
+}
+
+/// Level 3 pursuit, pinned; returns the harness once a pursuit is on.
+fn level_three_pursuit(seed: u64) -> Harness {
+    let mut h = Harness::new(seed);
+    h.speed = 16.0;
+    h.run(1.0);
+    h.police.set_human_captain(true);
+    let mut t = 0.0;
+    while h.status() != PursuitStatus::Pursuit && t < 40.0 {
+        h.run_with(0.5, |p| p.set_heat(RACER, 55.0));
+        t += 0.5;
+    }
+    assert_eq!(h.status(), PursuitStatus::Pursuit, "{:#?}", h.texts());
+    assert_eq!(h.police.wanted_level(RACER).number(), 3);
+    h
+}
+
+#[test]
+fn tool_lines_are_spoken_within_a_second_even_over_other_traffic() {
+    for (seed, roadblock) in [(31, true), (32, false), (33, true)] {
+        let mut h = level_three_pursuit(seed);
+        // Roadblocks from level 3, spikes from level 4 (owner row 156).
+        let heat = if roadblock { 55.0 } else { 75.0 };
+        // Wait for some lower-tier line on the air, then decide on the tool (retried while the
+        // site planner finds no site ahead yet).
+        let cmd = || {
+            if roadblock {
+                CaptainCommand::RequestRoadblock {
+                    target: RACER,
+                    road: None,
+                }
+            } else {
+                CaptainCommand::RequestSpikes {
+                    target: RACER,
+                    road: None,
+                }
+            }
+        };
+        let mut over = None;
+        let mut t = 0.0;
+        while t < 90.0 && over.is_none() {
+            h.run_with(PHYSICS_DT, |p| p.set_heat(RACER, heat));
+            t += PHYSICS_DT;
+            if let Some(tier) = h.police.radio_on_air() {
+                if tier < RadioTier::Actionable && h.police.captain_command(cmd()).is_ok() {
+                    over = Some(tier);
+                }
+            }
+        }
+        let over = over.unwrap_or_else(|| panic!("seed {seed}: no tool placed: {:#?}", h.texts()));
+        let t0 = h.police.now().secs();
+        let from = h.lines.len();
+        h.run_with(1.5, |p| p.set_heat(RACER, heat));
+        let what = if roadblock { "roadblock" } else { "spikes" };
+        let k = find(&h.lines, from, what)
+            .unwrap_or_else(|| panic!("seed {seed}: no {what:?}: {:#?}", h.texts()));
+        let l = &h.lines[k];
+        assert!(
+            l.time.secs() - t0 <= 1.0,
+            "seed {seed}: {:.2} s",
+            l.time.secs() - t0
+        );
+        assert_eq!(l.tier, RadioTier::Actionable);
+        assert!(l.cut_in, "seed {seed}: should cut the {over:?} line on air");
+        assert!(
+            l.text.contains("racer #7") && l.text.contains("metres ahead"),
+            "{}",
+            l.text
+        );
+        assert!(
+            l.text.contains("on Street ") || l.text.contains("downtown"),
+            "{}",
+            l.text
+        );
+    }
+}
+
+/// Bind the first ground unit to a physical body next to the racer; returns its entity.
+fn bound_unit(h: &mut Harness) -> (wp_police::UnitId, EntityId) {
+    let id = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && !u.wrecked)
+        // A unit on the racer when there is a chase, else any patrol car.
+        .max_by_key(|u| u.assignment.target() == Some(RACER))
+        .unwrap()
+        .id;
+    let e = EntityId(901);
+    h.police.bind_unit_entity(id, e, SteerGeometry::default());
+    let r = h.racer_view();
+    h.police.sync_unit(
+        id,
+        UnitSync {
+            pos: [r.pos[0] + 30.0, r.pos[1] + 30.0, 0.0],
+            vel: [0.0, 0.0, 0.0],
+            heading: [1.0, 0.0],
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    (id, e)
+}
+
+fn wall_hit(e: EntityId, rel_speed: f32, impulse_ns: f32) -> SimEvent {
+    SimEvent::Contact {
+        a: e,
+        b: wp_contracts::WORLD_ENTITY,
+        point: [0.0, 0.0, 0.0],
+        normal: [1.0, 0.0, 0.0],
+        impulse_ns,
+        rel_speed,
+    }
+}
+
+#[test]
+fn impact_lines_are_picked_by_severity() {
+    // A unit with nobody to chase does not narrate its own crash.
+    let mut h = Harness::new(41);
+    h.run(1.0);
+    let (_, e) = bound_unit(&mut h);
+    h.tick(&[wall_hit(e, 22.0, 20_000.0)]);
+    h.run(6.0);
+    assert_eq!(h.police.chatter_stats().count(Callout::Impact), 0);
+    // In a chase, a light tap: nothing on the radio.
+    let mut h = level_three_pursuit(41);
+    let (_, e) = bound_unit(&mut h);
+    let from = h.lines.len();
+    h.tick(&[wall_hit(e, 1.5, 600.0)]);
+    h.run(8.0);
+    assert_eq!(h.police.chatter_stats().count(Callout::Impact), 0);
+    assert!(
+        h.lines[from..].iter().all(|l| l.tier != RadioTier::Impact),
+        "{:#?}",
+        h.texts()
+    );
+    // A big one: shouted, tier 3.
+    h.tick(&[wall_hit(e, 22.0, 20_000.0)]);
+    h.run(6.0);
+    let hit: Vec<&RadioLine> = h.lines[from..]
+        .iter()
+        .filter(|l| l.tier == RadioTier::Impact)
+        .collect();
+    assert!(!hit.is_empty(), "{:#?}", h.texts());
+    assert!(hit.iter().all(|l| l.text.contains('!')), "{hit:#?}");
+}
+
+#[test]
+fn shouted_lines_never_sound_calm_and_taps_are_never_officer_down() {
+    use wp_police::chatter::{impact_lines, impact_severity, ImpactRole, ImpactSeverity};
+    let cfg = PoliceConfig::builtin().radio.impact;
+    // Severity from the sim's energy and damage.
+    assert_eq!(
+        impact_severity(&cfg, 1.0, 800.0, 1.0, false),
+        ImpactSeverity::Tap
+    );
+    assert_eq!(
+        impact_severity(&cfg, 4.0, 4_000.0, 1.0, false),
+        ImpactSeverity::Hit
+    );
+    assert_eq!(
+        impact_severity(&cfg, 9.0, 9_000.0, 1.0, false),
+        ImpactSeverity::Heavy
+    );
+    // A huge hit the car survives is heavy, never "officer down".
+    assert_eq!(
+        impact_severity(&cfg, 20.0, 15_000.0, 1.0, false),
+        ImpactSeverity::Heavy
+    );
+    assert_eq!(
+        impact_severity(&cfg, 4.0, 4_000.0, 0.3, false),
+        ImpactSeverity::Heavy
+    );
+    assert_eq!(
+        impact_severity(&cfg, 1.0, 800.0, 0.0, true),
+        ImpactSeverity::Wreck
+    );
+    for role in [
+        ImpactRole::Victim,
+        ImpactRole::Rammer,
+        ImpactRole::SelfCrash,
+    ] {
+        assert!(impact_lines(ImpactSeverity::Tap, role).is_none());
+        for sev in [ImpactSeverity::Hit, ImpactSeverity::Heavy] {
+            for l in impact_lines(sev, role).unwrap() {
+                assert!(!l.to_lowercase().contains("officer down"), "{l}");
+                assert!(!l.to_lowercase().contains("is down"), "{l}");
+            }
+        }
+        for l in impact_lines(ImpactSeverity::Wreck, role).unwrap() {
+            assert!(l.contains('!'), "a wreck is never a calm line: {l}");
+        }
+    }
+    for l in wp_police::chatter::WRECK_REACTIONS {
+        assert!(l.contains('!'), "{l}");
+    }
+}
+
+#[test]
+fn level_changes_and_takeovers_are_escalation_lines() {
+    let mut h = level_three_pursuit(51);
+    h.run_with(10.0, |p| p.set_heat(RACER, 55.0));
+    // Up to level 4: dispatch's summary plus the tougher department.
+    h.run_with(12.0, |p| p.set_heat(RACER, 75.0));
+    let up = h
+        .lines
+        .iter()
+        .find(|l| l.text.contains("is now level 4"))
+        .unwrap_or_else(|| panic!("{:#?}", h.texts()));
+    assert_eq!(up.tier, RadioTier::Escalation);
+    assert!(up.text.contains("Heavy units authorised"), "{}", up.text);
+    // Back down to level 2.
+    h.run_with(12.0, |p| p.set_heat(RACER, 35.0));
+    let down = h
+        .lines
+        .iter()
+        .find(|l| l.text.contains("down to level 2"))
+        .unwrap_or_else(|| panic!("{:#?}", h.texts()));
+    assert_eq!(down.tier, RadioTier::Escalation);
 }

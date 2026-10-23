@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_harlan_dirt_run systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-240 79a4ad5b69206837
-480 7152c5efd998a0ac
-720 8a23c206dd8c5451
-960 1a646ed80b89fd20
-1200 8cba7be2048eba8b
-1440 4dcf9ed8f68463c2
-1680 c3c177184fd86e39
-1920 6185eabb92404d76
-2160 31ced71628a93c4f
-2400 a004f1ea81625a8f
+# simcli hashes scenario=race_harlan_dirt_run systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 fde61bdeaa48eca5
+480 9865da1219ab2270
+720 7fb6e94d932246d0
+960 60ab61b2a6c0db01
+1200 3c6e414f88a7c09e
+1440 be5a493524faa13d
+1680 e429f4de4d8de8f0
+1920 91cfd8726459e1d6
+2160 39f62bef32a91756
+2400 75bed42e5caea2e5

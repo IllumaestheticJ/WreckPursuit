@@ -1,13 +1,13 @@
-# simcli hashes scenario=damage_arcade_cruiser_ram_90 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
-60 44dbaf5559f8f615
-120 64707da12d7b2c0e
-180 a3bb1797680a0017
-240 73fec82929a3e616
-300 25416ef4c75983fa
-360 17f24b72eeb0e6c0
-420 47048a51f96fe0a5
-480 1b903ccc92682f37
-540 bf07282efaf1b479
-600 bca3b58ada8c072b
-660 2b7f7c153bfa1b68
-720 fbd3661860dab058
+# simcli hashes scenario=damage_arcade_cruiser_ram_90 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+60 40fc1ec860d99521
+120 0ea03825ec9ca583
+180 4ef2c00810d78a6f
+240 977dd4512af76e52
+300 64c430c7204143e8
+360 014a7878a0d4e608
+420 1925e121bdb10a73
+480 e13bcaac5a3df604
+540 771552f99bbfa8d4
+600 8960d3818593c6cd
+660 357fcec5822285a2
+720 e84571b77b2d8df9

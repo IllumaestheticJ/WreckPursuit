@@ -69,6 +69,11 @@ export interface MapBlip {
   kind: "player" | "racer" | "police" | "helicopter" | "traffic" | "checkpoint" | "incident";
   pos: Vec2;
   headingRad?: number;
+  /** Call sign drawn next to the blip ("AIR 9"). */
+  label?: string;
+  /** Ground point the unit is following (a helicopter's target): drawn as a tether line and a
+   * pulsing ring, so it is obvious who it is following. */
+  tracking?: Vec2;
 }
 
 /** One line in the scanner feed / HUD alert stack. */
@@ -85,6 +90,8 @@ export interface ScannerEntry {
   text: string;
   /** Entity the entry is about, if any. */
   entity?: number;
+  /** Spoken by a helicopter pilot ("Air 9: …"): shown with the AIR badge. */
+  air?: boolean;
 }
 
 /** Police heat as the HUD shows it (owner: wp_police). */
@@ -134,6 +141,9 @@ export interface HudState {
   pos: Vec2;
   headingRad: number;
   blips: MapBlip[];
+  /** The host draws its own minimap: the chase HUD keeps its radar hidden and only says when
+   * the helicopter is on the player (PR #32 port). */
+  radarHidden?: boolean;
   race: RaceHud | null;
   assists: AssistProfile;
   damageMode: DamageMode;
@@ -222,7 +232,8 @@ export interface GarageCar {
   insurance: InsuranceView | null;
   /** Repair line items not yet paid. */
   outstanding: RepairEstimate;
-  sustainedWhileWanted: boolean;
+  /** Some outstanding damage dates from a police capture: insurance will not pay for it. */
+  sustainedBeforeCapture: boolean;
   /** Current value (damage + mods), from `Economy::current_value`. */
   value: number;
   /**

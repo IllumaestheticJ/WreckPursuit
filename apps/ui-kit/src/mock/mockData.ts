@@ -63,7 +63,7 @@ function car(
   uid: number,
   defId: string,
   mods: string[],
-  damage: { health: number; totalLoss?: boolean; items?: [RepairItem, number][]; wanted?: boolean },
+  damage: { health: number; totalLoss?: boolean; items?: [RepairItem, number][]; captured?: boolean },
   extra: Partial<GarageCar> = {},
 ): GarageCar {
   const def = CARS[defId];
@@ -81,7 +81,7 @@ function car(
     location: { kind: "Garage" },
     insurance: null,
     outstanding,
-    sustainedWhileWanted: !!damage.wanted,
+    sustainedBeforeCapture: !!damage.captured,
     value: 0,
     ...extra,
   };
@@ -97,7 +97,7 @@ export function mockGarage(): GarageCar[] {
     ["engine_intake_1", "engine_exhaust_1", "engine_ecu_1", "prot_bumper_front"],
     {
       health: 0.71,
-      wanted: true,
+      captured: true,
       items: [
         [{ Region: "FrontBumper" }, 0.72],
         [{ Region: "Hood" }, 0.35],

@@ -8,10 +8,16 @@
 //! sent to the meet. [`report_events`] builds those events; [`deliver`] hands them to a
 //! `PoliceSystem` until `wp_sim` can queue external events for its police step (see
 //! `docs/integration/race.md`, request to the lead).
+//!
+//! [`start_race`] hands the race's own police profile (`data/police/races.toml`) and course to
+//! `wp_police` before the countdown: roadblocks, spike strips and stakeouts go out, and the
+//! profile's tactics apply for the race.
 
 use wp_contracts::{EntityId, SimEvent, ViolationKind, WorldQuery};
 use wp_police::{PoliceSystem, RacerView};
 
+use crate::bridge::CityRace;
+use crate::catalog::RaceDef;
 use crate::course::v2;
 use crate::signals::RaceSignal;
 
@@ -57,6 +63,22 @@ pub fn deliver(
         police.step(world, racers, events, 0.0, &mut out);
     }
     out
+}
+
+/// Set up `police` for race `def` on `race`, raced by `racers`: apply the race's police
+/// profile ([`RaceDef::police_profile`]) and place its scripted roadblocks, spike strips and
+/// stakeouts along the course. Call once, after the sim is built and before the first tick.
+/// `None` (nothing done) for a race without a profile.
+pub fn start_race(
+    police: &mut PoliceSystem,
+    def: &RaceDef,
+    race: &CityRace,
+    racers: &[EntityId],
+) -> Option<wp_police::race::RacePolicePlan> {
+    let profile = def.police_profile()?;
+    let line: Vec<[f32; 2]> = race.course.polyline.iter().map(|p| v2::xy(*p)).collect();
+    let course = wp_police::race::RaceCourse::new(&line);
+    Some(police.start_race(def.id, &profile, &course, racers))
 }
 
 #[cfg(test)]

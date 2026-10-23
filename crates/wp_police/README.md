@@ -106,37 +106,54 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
   an idle unit within 700 m is committed, or a new unit spawns like a responder (fallback: the
   nearest node ≥ `spawn_min_distance_m` away, out of sight).
-  Backup for a moving racer **waits ahead** (`Assignment::Intercept { ambush: true }`), whether it
-  is a committed patrol or a new spawn: it drives in from a side road to a point 25 m past a
-  junction on the racer's predicted path (≤ 900 m ahead, ≥ 6 s of the racer's travel away), stops
-  there facing the racer's direction of travel, and joins the chase as the racer comes by (no
-  turn-around behind it). A new spawn starts on a hidden side-road node; a patrol routes from where
-  it is, unless it is on the racer's road itself. Only planned where the padded route time plus 3 s
-  beats the racer there; one unit per wait point. It joins only once past the junction and facing
-  within ~45° of the racer's line. If the racer stops or leaves the predicted path, it falls back
-  to a plain intercept. With no such spot, or a stopped racer, a patrol intercepts as before and a
-  spawn appears at the nearest hidden node facing the racer.
-- **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
-  It is kinematic, gives line of sight to every unit, and is **not** a weapon.
-- Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
-  `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
+- **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. The AI captain requests
+  it from `min_level` (3). It is kinematic, flies over the racer's last known position at
+  `altitude_m`, gives line of sight to every unit (its sightings keep the last known position
+  fresh, so ground units chase what it sees), and is **not** a weapon. It looks down from
+  altitude: tall buildings, high ground, covered spans (`wp_world::covered`: tunnels, covered
+  trenches) and bridge decks (`wp_world` deck slabs: underpasses) break its sight; its target
+  point is `eye_height_at(z)` like the ground units'. Radio (`dispatch::helo_reports`): "eyes on
+  … Spotlight on." on first sight, a position report every `position_report_s` while it keeps
+  visual, "lost visual" after `lost_visual_after_s` without sight, "reacquired" — the first,
+  lost and reacquired lines are tier 1 (actionable, row 144), position reports tier 4. `helicopters()` →
+  `HeloView { has_visual, spotlight_target, … }` for the renderer's night spotlight.
+- Radio lines are raised by dispatch decisions and callouts; `radio::RadioDirector` paces what
+  is spoken as `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
+- **Priority tiers** (playtest row 144, "filtering between important and unimportant
+  information", `radio::RadioTier`): 1 actionable (roadblock / spikes planned with place and
+  distance — "Dispatch, racer #7: roadblock 400 metres ahead, northbound on Lantern Row." —
+  helicopter launching / arriving / losing the racer, a unit intercepting ahead at L2+), 2
+  escalation (pursuit start / end, level up / down, "Highway Patrol is taking over", "rams
+  authorised", captain orders), 3 impacts (shouted, picked by `chatter::impact_severity` from
+  contact energy and unit damage; a big wreck stacks another unit's "Unit 4 is down!"), 4
+  investigation (calls, searching, lost visual / last seen), 5 routine. Tier 1 cuts anything
+  lower and waits only for the transmission on air (a roadblock / spike warning also cuts other
+  tier 1 traffic); tier 2 cuts tiers 3–5; routine lines are dropped while anything more
+  important waits and thin out as heat rises (`routine_gap_s`). Deployment lines (units joining,
+  responding to a known call, backup, tool cars arriving) are not spoken: at L0–L1 one "units
+  responding" summary when heat first rises. `RadioLine::tier`, `PoliceSystem::radio_tier_of`
+  give bridges the tier (the contract event has none, request R144-1). Bench:
+  `cargo run --release -p wp_police --example radio_bench -- <scenario.ron> [--log N]`.
 - **One transmission at a time** (playtest row 79): a spoken line holds the channel for its
   length (`words / words_per_s + line_pad_s`, the audio scanner's numbers) plus `min_gap_s`
-  (2.5 s); waiting lines are a priority queue (tier, cue `prio`, age), lose their slot when a
+  (2.5 s; 0.8 s after a shouted tier 3 line); waiting lines are a priority queue (tier 1,
+  emergency traffic, tier, cue `prio`, age), lose their slot when a
   newer line supersedes them ("now level 4" replaces a queued "now level 3") and expire
   (`stale_s`, `stale_critical_s`, or the cue's own life). Gaps shrink with the wanted level
   (`global_gap_s` / `unit_gap_s` per L1..L5; L1 keeps the row-6 8 s / 30 s).
 - **Unit-to-unit callouts** (`chatter`, row 79): units call what they see with their call sign
   and a place on the map — "Unit 6, lost visual. Last seen eastbound on Harbor Boulevard at
-  Lantern Way.", "eyes on him again", "requesting backup", "I'm on his bumper", "going for the
-  PIT" / "he's spun" / "he got away", "boxing him in", "spikes hit", "I'm out of the chase",
-  "he's gone into the Hollins Tunnel"; dispatch summarises level rises (place, units on him, air
-  unit) and closes pursuits with the place. Places: street (+ cross street at junctions) from
+  Lantern Way.", "eyes on him again", "I'm on his bumper", "going for the PIT!" / "he's spun!" /
+  "he got away", "boxing him in", "spikes hit!", "he rammed me, I've lost my front end!", "he
+  just took out a civilian!", "he's gone into the Hollins Tunnel"; dispatch summarises level
+  rises and drops (place, units on him, air unit, a tougher department) and closes pursuits
+  with the place. Places: street (+ cross street at junctions) from
   `World::edge_names` (Port Vesper), tunnel names, district otherwise
   (`PoliceSystem::place_phrase`). The lost-visual call reads the racer record's `last_known`,
-  the same position search and interception steer to. Observer only: not hashed, no RNG.
+  the same position search and interception steer to. Observer only: not hashed; line variety
+  from the chatter's own seeded RNG (never the simulation's).
   `chatter_stats()` counts raised callouts. Tests: `tests/radio_chatter.rs`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
@@ -222,7 +239,8 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
   with the unit's **pro driver** (`pro.rs`, below) on top of that controller.
 - **Headless units**: `step_ground` steers with the same controller, then moves a kinematic bicycle
   body. The body keeps right (`LANE_OFFSET_M`), saturates at a grip limit, crashes when it runs
-  wide and has a background traffic-hazard model. Track progress only moves forward
+  wide and has an opt-in background traffic-hazard model (`PoliceSetup::hazards`, off by
+  default; only for runs without real traffic). Track progress only moves forward
   (`Track::project_ahead`), so hairpins and U-turns don't snap back.
 
 Police keep only the speed planning (corner speeds, caps, tactics).
@@ -260,9 +278,16 @@ lane, `patrol_cornering_g`, `unit.brake_mps2`). `ProDriver::drive(ctx, track, ro
   lifts to `slide_throttle`. On the way out of a corner the throttle is capped by the friction
   ellipse from the measured lateral load (`exit_throttle_min` at full load), so the rear stays
   planted. Running `run_wide_m` outside the line in a corner lifts too.
-- **Recovery**: facing away from the lane ahead → turn round at `turn_around_mps`; stuck
-  (throttle on, not moving for `stuck_s`) → reverse at opposite lock until the nose points
-  at the lane (`reverse_min_s`..`reverse_s`).
+- **Recovery**: facing away from the lane ahead → turn round at `turn_around_mps`. The pro
+  driver's own stuck reverse (`stuck_s`) is off inside `PoliceSystem` (set to infinity when the
+  driver is created): round 12's un-sticking (`stuck.rs`) owns recovery there.
+- **With round 12** (merge of `origin/main` into `ws/police`): `unit_input` runs round 12's
+  manoeuvres first for every unit, lights on or off: forward U-turn and reverse swing toward a
+  target behind, give-way to a slow racer, push-through, back-out, holds behind stopped cars and
+  at lines, stuck detection and reset in place. Only the plain drive along the track at the end
+  is the pro driver's (lights on, `PoliceSystem::pro_drive`) or the lane driver's (lights off).
+  The pro driver is asked for the command speed capped by obstacle awareness and the static
+  feelers; a pass or a wall shift is driven as an exact offset (no racing line).
 - **Car limits**: `set_unit_limits(unit, CarLimits)` (`wp_sim::Sim::set_police_car_limits`);
   default `[pro] default_limits` = the Sentinel Cruiser measured with `wp_vehicle::metrics`.
 
@@ -356,6 +381,15 @@ police cars) with `set_obstacles` each tick. Headless, units see the racers and 
 - **Radar detector** `radar(pos, tier)`: units in Patrol/Pursue state within `radar_range_m[tier]`.
 - **Scanner** `scanner(tier, since: Option<SimTime>)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
 
+### Race profiles (`race.rs`)
+Each picker race has its own police (`data/police/races.toml`, keyed by race id):
+`RaceProfile::apply` switches tactics off (unlock level 6) and overrides chase speeds;
+`PoliceSystem::start_race` places scripted roadblocks across the course (with a gap) and on the
+side roads off it, spike strips over part of the course, and stakeout units that join or start a
+chase when a racer passes. Scripted tools outlive a racer's pursuit and do not use the AI
+captain's budget. Styles: Lantern "Downtown lockdown", Loop 9 "Highway interceptors"
+(pursuit only), Hollins "Summit trap", Grid "Speed trap" (see `docs/integration/police.md`).
+
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is
 validated against unlocks (`presence.toml [unlocks]`), cooldowns, budgets and the placement
@@ -372,6 +406,7 @@ Player chase units get `unit_order()` **suggestions** only.
 | `presence.toml` | Patrols per district × phase, reinforcement response times, reckless-driving response (`[response]`: call delays, radius, spawn window, unit cap by heat, despawn distance), helicopter availability, tool/tactic unlock levels, crash scenes |
 | `pursuit.toml` | Think rate, speed factors and caps, cornering g, LOS range, unit dynamics and crash severity per mode, risk budget, traffic hazards, tactic parameters |
 | `tools.toml` | Roadblock, spike strip and helicopter parameters, radar/scanner tiers, captain hold time |
+| `races.toml` | Per-race police profiles (`race.rs`): allowed tactics, speed overrides, scripted roadblocks on/off the course, spike strips and stakeouts, one table per picker race |
 
 The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from disk with
 `PoliceConfig::load(dir)`. A test checks that both copies match.
@@ -444,6 +479,8 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   alongside in the next own-direction lane is not in the line's room. Junction caps
   (`siren_junction_mps` 11 m/s) still hold pursuits back at every junction. Turning round in a
   junction is a full-lock crawl, which can touch a kerb on narrow roads.
+- Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
+  in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game. PITs
   and rams need the lead unit within 35 m of a racer it can see on a fairly straight road; a

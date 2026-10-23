@@ -9,7 +9,7 @@ UI is done the moment the sim exposes the data:
 |---|---|
 | Race | **HUD** (speed / rpm / gear, damage silhouette by `BodyRegion`, component list, heat & wanted meter, minimap, scanner alerts, race position / checkpoints / gaps, assist badges) · **Replay controls** |
 | Menus | Main menu · Pause · **Settings** (full input remapping with keyboard / gamepad / wheel binding flow, assist matrix, damage mode, accessibility: colour-blind palettes, UI scale, reduce motion; rumble / FFB / audio) |
-| Garage | **Garage** (car list, condition, physics-measured stat bars, repair / choose items / drive damaged / scrap with an itemised bill, insurance) · **Mod tree** (slots, lines, tiers, requirements, performance-vs-durability before/after, class index) · Market (buy / sell, accel / top speed / cornering bars per listing) |
+| Garage | **Garage** (car list, condition, physics-measured stat bars, repair / choose items / drive damaged / scrap with an itemised bill, insurance) · **Tune** (career garage `garage/CareerGarage.tsx`: free four 5-step sliders, `garage/tune.ts`; `docs/integration/tune.md`) · **Mod tree** (slots, lines, tiers, requirements, performance-vs-durability before/after, class index) · Market (buy / sell, accel / top speed / cornering bars per listing) |
 | Street | Race lobby / meet (asymmetric roles) · Results + payout breakdown · Impound · Crews & territory map |
 | Police | Police career (rank, unlocks, orders feed) · **Captain map** (2D canvas: roads, units, incidents, heat map, command radial, drag-to-assign) · Scanner feed |
 
@@ -183,7 +183,7 @@ const menu = mountGameMenu(overlayEl, {
   countersteer: false, // slider disabled until the host can set it
   host: { play, restart, garage, quitToMain, openControls, controlsOpen, apply, onOpenChange },
 });
-menu.openMain();   // title screen (City chase, Rainy night, Street races, Free drive, Garage, Settings, Controls)
+menu.openMain();   // title screen (Night run, Rainy night, Street races, Free drive, Garage, Settings, Controls)
 menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main menu
 ```
 

@@ -19,6 +19,7 @@
 //! - [`capture`] — fines, bail, impound, seizure, escapes, the daily tick, cop XP.
 //! - [`payouts`] — purses, buy-ins, clean bonus, pink slips, informants.
 //! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
+//! - [`parts`] — the garage workshop: part slots, removal order, inventory, parts catalog.
 //! - [`garage`] — buy/sell, floor car, install/uninstall, preview, valuation, insurance.
 //! - [`estimate`] — performance estimator and class index.
 //! - [`pursuit`] — police pursuit endings → capture / escape settlement; decodes today's
@@ -27,6 +28,8 @@
 //!   [`RunResult`].
 //! - [`profile`] — the single-player career save (versioned, with carry-over rules).
 //! - [`career`] — scripted multi-night career simulation used for tuning.
+//! - [`visuals`] — what a build looks like: the parts its mods bolt on, for the renderer.
+//! - [`progression`] — rep tiers, feature / dealer unlocks, betting limits, tier rewards.
 
 #![warn(missing_docs)]
 
@@ -38,13 +41,18 @@ pub mod estimate;
 pub mod garage;
 pub mod ledger;
 pub mod mods;
+pub mod parts;
 pub mod payouts;
 pub mod profile;
+pub mod progression;
 pub mod pursuit;
 pub mod repair;
 pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
+pub mod touge;
+pub mod tune;
+pub mod visuals;
 
 pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundStatus};
 pub use data::{CareerRules, DataSources, Economy};
@@ -57,8 +65,17 @@ pub use ledger::{
     ViolationCounts,
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
+pub use parts::{
+    CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, MechanicJob, MechanicRates,
+    PartFit, PartGroup, PartSource, PartView, PartsTable, SlotDef, SlotView, StandFit, StandView,
+    WorkshopView,
+};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};
+pub use progression::{
+    career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature,
+    ProgressUpdate, ProgressionRules, RepTier,
+};
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
 pub use repair::{
     district_from_key, district_key, DamageReport, RepairOption, RepairOrder, RepairQuote,
@@ -68,4 +85,7 @@ pub use session::{
     Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
     SessionConfig,
 };
+pub use touge::WonCar;
+pub use tune::CarTune;
+pub use visuals::{BuildVisuals, PartKind, PartVisual, VisualPart, WheelVisual};
 pub use wp_contracts::{AccountId, WantedLevel};

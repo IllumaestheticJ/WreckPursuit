@@ -1,4 +1,4 @@
-// Art-style perf A/B in the night city chase (machine S). Usage (after `npm run wasm`):
+// Art-style perf A/B in the night night run (machine S). Usage (after `npm run wasm`):
 // node e2e/art_perf.mjs   Env: CHROMIUM, VIEWPORT=WxH (default 1280x720), SECS (default 8).
 // Loads the page fresh in each style (?style=greybox, ?style=lowpoly: the canvas antialiasing
 // depends on the style the page starts in), drives the chase and reports fps / frame ms, then,
@@ -37,7 +37,7 @@ async function run(style) {
   await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
   await page.evaluate(() => {
     document.getElementById("career").checked = false;
-    window.__wp.startCityChase("debug_sedan", "Arcade");
+    window.__wp.startNightRun("debug_sedan", "Arcade");
   });
   await page.waitForFunction(() => (window.__wp.scene.cities.get("vesper_v2")?.children.length ?? 0) > 0, null, { timeout: 90000 });
   await page.keyboard.down("KeyW");

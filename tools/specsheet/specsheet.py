@@ -44,16 +44,24 @@ TARGETS = {
     "lindwurm_4t": dict(t0100=(4.6, 5.4), lat=(0.90, 1.00), brake=(33, 37), why="2010s AWD 2.0 T hot hatch road tests (dual-clutch)"),
     "lucciola_350": dict(t0100=(4.3, 5.0), lat=(1.00, 1.10), brake=(32, 37), why="prompt 09 target (skidpad >= 1.0 g); 90s 3.5 V8 MR road tests"),
     "hauler_1500": dict(t0100=(7.0, 8.0), lat=(0.68, 0.76), brake=(42, 50), why="prompt 09 target (~7.5 s); 2010s half-ton 5.3 V8 pickup tests"),
-    "sentinel_cruiser": dict(t0100=(6.2, 7.2), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD 5.7 V8 police sedans (pursuit package, round 6b)"),
-    "sentinel_wolfhound": dict(t0100=(5.5, 6.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for AWD TT V6 pursuit vehicles"),
-    "sentinel_bastion": dict(t0100=(7.5, 9.0), lat=(0.72, 0.80), brake=(40, 46), why="fleet evaluation figures for RWD 5.3 V8 police SUVs"),
+    "sentinel_cruiser": dict(t0100=(5.3, 6.3), lat=(0.85, 0.92), brake=(38, 43), why="road tests of 2010s 6.2 L supercharged V8 full-size sedans, police mass (pursuit package, 2026-10-23)"),
+    "sentinel_wolfhound": dict(t0100=(4.4, 5.4), lat=(0.85, 0.92), brake=(38, 43), why="road tests of high-output AWD 3.5 TT V6 sedans, police mass (pursuit tune, 2026-10-23)"),
+    "sentinel_bastion": dict(t0100=(6.0, 7.2), lat=(0.72, 0.80), brake=(40, 46), why="road tests of 6.2 L V8 full-size SUVs, police mass (2026-10-23)"),
     "junkyard_beater": dict(t0100=(14.0, 16.0), lat=(0.68, 0.78), brake=(42, 48), vmax=(140, 160), why="lead brief round 12b (0-100 14-16 s, ~150 km/h); period road tests of 1980s 1.6 L 4-speed economy sedans, derated for wear, on old hard tyres"),
     "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
     "drayman_cargo": dict(t0100=(9.5, 12.0), lat=(0.64, 0.74), brake=(44, 52), why="road tests of 2000s full-size V8 cargo vans (empty)"),
     "furrow_24": dict(t0100=(10.0, 12.5), lat=(0.70, 0.80), brake=(42, 50), why="period road tests of 90s compact 2.4 L pickups (manual)"),
+    "stoat_16v": dict(t0100=(7.8, 9.0), lat=(0.82, 0.90), brake=(38, 44), why="period road tests of early-90s 2.0 16-valve FF hot hatches"),
+    "bulwark_400": dict(t0100=(7.5, 9.0), lat=(0.70, 0.80), brake=(42, 52), why="period road tests of early-70s high-output 6.6 L full-size sedans on optional radials (net-rated)"),
+    "arashi_t4": dict(t0100=(4.8, 5.8), lat=(0.88, 0.97), brake=(35, 39), why="road tests of mid-90s AWD 2.0 T homologation saloons"),
+    "satchel_20": dict(t0100=(15.0, 19.0), lat=(0.66, 0.76), brake=(44, 52), why="road tests of 2000s petrol medium panel vans (empty)"),
+    "marten_20": dict(t0100=(7.8, 8.8), lat=(0.82, 0.92), brake=(38, 44), why="road tests of early-90s European 2.0 16-valve hot hatches"),
+    "brigand_400": dict(t0100=(8.0, 10.0), lat=(0.66, 0.76), brake=(46, 62), why="period road tests of mid-70s full-size V8 sedans on period tires (net-rated)"),
+    "talus_20t": dict(t0100=(4.8, 5.6), lat=(0.90, 1.00), brake=(34, 38), why="road tests of late-90s AWD 2.0 T rally-homologation saloons"),
+    "tumbril_20": dict(t0100=(14.0, 18.0), lat=(0.66, 0.76), brake=(42, 50), why="road tests of 2000s petrol high-roof panel vans (empty)"),
     "fulmine_v10": dict(t0100=(3.2, 3.8), lat=(0.95, 1.08), brake=(31, 36), why="road tests of 2010s mid-engine NA V10 AWD supercars (dual-clutch, launch control)"),
-    "sentinel_warden": dict(t0100=(8.0, 10.0), lat=(0.75, 0.85), brake=(39, 46), why="period fleet evaluations of late-80s 5.7 L body-on-frame police sedans"),
-    "sentinel_harrier": dict(t0100=(5.2, 6.2), lat=(0.85, 0.95), brake=(35, 40), why="fleet evaluation figures for 2010s 5.0 V8 muscle-coupe pursuit cars (automatic)"),
+    "sentinel_warden": dict(t0100=(6.3, 7.5), lat=(0.75, 0.85), brake=(39, 46), why="period road tests of big-block (7.4 L) full-size sedans, police mass (2026-10-23)"),
+    "sentinel_vigil": dict(t0100=(4.8, 5.8), lat=(0.85, 0.95), brake=(35, 40), why="road tests of 2010s 5.2 L supercharged V8 muscle coupes (automatic), police mass (2026-10-23)"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade
@@ -65,8 +73,8 @@ BARRIERS = [
     ("frontal 56 km/h", "≈0.6 m frame crush (0.35-1.3 m), TotalLoss in Simulation (durability ≥ 4 may survive), Arcade milder"),
     ("frontal 80 km/h", "TotalLoss in Simulation"),
     ("offset 40% 56 km/h", "struck-side front suspension or wheel mount failed"),
-    ("side (T-bone) 40 km/h", "struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame)"),
-    ("rear 40 km/h", "not a total loss; Ironside: rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed"),
+    ("side (T-bone) 40 km/h", "struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame; vans exempt: the striker footprint ends short of the forward front wheel arch)"),
+    ("rear 40 km/h", "not a total loss; 70s cars (Ironside, Brigand): rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed"),
 ]
 
 
@@ -322,6 +330,7 @@ SIM_NOTES = {
     ("Drayman Cargo", "100-0"): "0.7 m short of the band (shorter since A's round-8 brake-pedal filter): an empty van on car-type `street` tires (no light-truck compound) with the 1.5 × lock-torque ABS ceiling stops slightly better than road tests of laden-sensitive LT tires. Tire-limited; an `lt_highway` compound (02) would land it in band.",
     ("Furrow 2.4", "100-0"): "0.2 m short of the band: same cause as the van — an empty light pickup on car-type `street` tires stops a little better than period road tests on 90s LT tires.",
     ("Sentinel Bastion", "skidpad"): "C — ≤ 0.01 g under; tall body-on-frame SUV.",
+    ("Brigand 400", "skidpad"): "same cause as the Ironside: 02's `vintage_bias` on a soft, two-tonne, 0.56 m-CG chassis gives 0.60 g vs 0.66-0.76 g period figures. Not retuned on the chassis side; the joint `vintage_bias` re-tune with 02 covers both 70s cars.",
 }
 
 BARRIER_NOTES = {
