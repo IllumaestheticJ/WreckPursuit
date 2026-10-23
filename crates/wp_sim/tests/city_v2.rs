@@ -514,3 +514,76 @@ fn the_edge_barrier_keeps_a_car_off_the_verge() {
     }
     assert!(hit, "no contact with the barrier");
 }
+
+/// Row 162: every ramp → carriageway merge (interchange and rest-stop ramps), driven at
+/// 25 m/s from 100 m up the ramp to 120 m along the carriageway: no contact with anything
+/// static (a barrier, rail or wall in the merge path, or a step the body catches) and the car
+/// stays on its line.
+#[test]
+fn ramp_merges_are_driven_at_speed_without_contact() {
+    use wp_world::drive::{DrivePath, FollowParams, PathFollower};
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let map = wp_world::CityMap::new(net().clone());
+    let merges = wp_world::surface::ramp_merges(&map, 100.0, 120.0);
+    assert!(merges.len() >= 10, "{} merges", merges.len());
+    const SPEED: f32 = 25.0;
+    let mut s = sim(true);
+    let mut cars = Vec::new();
+    for m in &merges {
+        let path = &m.path;
+        let p = path[0];
+        let d = wp_world::geom::sub([path[1][0], path[1][1]], [p[0], p[1]]);
+        let yaw = wp_world::geom::yaw_of(wp_world::geom::normalize(d));
+        let id = s.spawn_vehicle(&car, [p[0], p[1], p[2]], yaw).unwrap();
+        s.place_on_ground(id, [p[0], p[1]], yaw, SPEED, Some(p[2]))
+            .unwrap();
+        let follower = PathFollower::for_vehicle(&car.def, FollowParams::PURSUIT, SPEED);
+        cars.push((
+            id,
+            m.connector,
+            DrivePath::new(path, false),
+            follower,
+            0.0f32,
+        ));
+    }
+    let dt = 1.0 / 240.0;
+    // Long enough for the longest path at speed.
+    let longest = merges
+        .iter()
+        .map(|m| *wp_world::geom::cumulative(&m.path).last().unwrap())
+        .fold(0.0f32, f32::max);
+    for _ in 0..((longest / SPEED + 2.0) * 240.0) as usize {
+        let states = s.vehicle_states();
+        for (id, _, path, f, worst) in cars.iter_mut() {
+            let st = &states.iter().find(|(e, _)| e == id).unwrap().1;
+            let out = f.follow(st, path, SPEED, 0.0, dt);
+            *worst = worst.max(out.cross_track_m.abs());
+            s.set_input(*id, out.input).unwrap();
+        }
+        s.step_fixed();
+        for e in s.drain_events() {
+            if let wp_contracts::SimEvent::Contact { a, b, point, .. } = e {
+                if b.0 == u32::MAX || a.0 == u32::MAX {
+                    let c = cars.iter().find(|c| c.0 == a || c.0 == b).map(|c| c.1);
+                    panic!("merge connector {c:?}: static contact at {point:?}");
+                }
+            }
+        }
+    }
+    for (id, connector, path, _, worst) in &cars {
+        let st = &s
+            .vehicle_states()
+            .into_iter()
+            .find(|(e, _)| e == id)
+            .unwrap()
+            .1;
+        let end = path.points().last().copied().unwrap();
+        let left = wp_world::geom::dist([st.pos[0], st.pos[1]], [end[0], end[1]]);
+        assert!(left < 30.0, "connector {connector}: stopped {left} m short");
+        // Pure pursuit cuts the ramps' curves (built for 20 m/s) by up to ~2.2 m at 25 m/s.
+        assert!(
+            *worst < 2.5,
+            "connector {connector}: {worst} m off its line"
+        );
+    }
+}

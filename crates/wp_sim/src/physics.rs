@@ -576,7 +576,7 @@ const BARRIER_FOOT_M: f32 = 0.3;
 const BARRIER_FRICTION: f32 = 0.3;
 /// `Collider::user_data` of barrier and rail meshes: triangle meshes that are not drivable
 /// ground ([`PhysicsWorld::drivable_ground_z`] skips them).
-pub const BARRIER_USER_DATA: u128 = 0xBA22_1E2;
+pub const BARRIER_USER_DATA: u128 = 0x0BA2_21E2;
 
 /// Length of the 2D vector `(x, y)` (plain `sqrt`, which is exactly rounded, not `hypot`).
 fn len2(x: f32, y: f32) -> f32 {

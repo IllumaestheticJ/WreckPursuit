@@ -1718,6 +1718,9 @@ fn max_vertical_curvature(speed: f32) -> f32 {
 /// enough binomial passes that a full grade reversal (crest or sag) bends no tighter than
 /// `kmax` (1/m). During smoothing only the two end samples and the middle of each internal
 /// anchor (decks) stay pinned, so junction approaches round off gently instead of kinking.
+// The three hold kinds (end anchors, internal anchors, floors) are separate on purpose:
+// each is pinned and smoothed differently.
+#[allow(clippy::too_many_arguments)]
 fn profile(
     desired: &[f32],
     ds: f32,
@@ -2708,25 +2711,47 @@ fn profile_ramp(
         .zip(&cum)
         .position(|(_, c)| *c >= par_end)
         .unwrap_or(n - 1);
-    let z_par = ring.plane_z(path[k_par]);
-    let desired: Vec<f32> = (0..n)
-        .map(|i| {
-            if i <= k_par {
-                ring.plane_z(path[i])
-            } else {
-                let t = (cum[i] - cum[k_par]) / (len - cum[k_par]).max(1e-3);
-                z_par + (z_term - z_par) * smoothstep(0.0, 1.0, t)
-            }
-        })
-        .collect();
     let kmax = max_vertical_curvature(RAMP.speed);
     let spread = 2.0 * smoothing_sigma(RAMP.grade, kmax, dsr);
     let fb = ((flat_term + spread) / dsr).ceil() as usize;
     let pb = (flat_term / dsr).ceil() as usize;
+    // Row 162: as long as its paving overlaps the carriageway's (the parallel lane and the
+    // taper beyond it), the ramp lies in the carriageway's plane; it climbs or drops towards
+    // its terminal only after that (a ramp that left the plane at the end of the parallel lane
+    // stood up to 0.7 m below the carriageway's paved edge further along, a wall in its lane).
+    let overlap = |q: V2| {
+        let (p, d, _, _) = ring.at(ring.project(q));
+        let lat = geom::dot(geom::sub(q, p), geom::right_of(d)).abs();
+        lat - RAMP_OVERLAP_HALF_M < CARRIAGEWAY_OFFSET_M + 1.5 * HW_LANE_M + OUTER_SHOULDER_M
+    };
+    let k_flush = path.iter().take_while(|q| overlap(**q)).count();
+    let k_hold = k_par.max(k_flush).min((n - 1).saturating_sub(fb + 1));
+    let z_hold = ring.plane_z(path[k_hold]);
+    let desired: Vec<f32> = (0..n)
+        .map(|i| {
+            if i <= k_hold {
+                ring.plane_z(path[i])
+            } else {
+                let t = (cum[i] - cum[k_hold]) / (len - cum[k_hold]).max(1e-3);
+                z_hold + (z_term - z_hold) * smoothstep(0.0, 1.0, t)
+            }
+        })
+        .collect();
     let anchors = [(0, 0, z_gore), ((n - 1).saturating_sub(fb), n - 1, z_term)];
-    let mut z = profile(&desired, dsr, &anchors, &[], &[], (1, pb), RAMP.grade, kmax);
-    // Beside the carriageway the ramp shares its plane exactly (shoulder overlap).
-    let same = k_par.saturating_sub(4) + 1;
+    // Beside the carriageway the ramp shares its plane exactly (shoulder overlap): pinned
+    // there, so the profile's smoothing rounds off only after it.
+    let same = (k_par.saturating_sub(4) + 1).max(k_flush.min(k_hold));
+    let pinned: Vec<(usize, usize, f32)> = (0..same).map(|i| (i, i, desired[i])).collect();
+    let mut z = profile(
+        &desired,
+        dsr,
+        &anchors,
+        &pinned,
+        &[],
+        (1, pb),
+        RAMP.grade,
+        kmax,
+    );
     z[..same].copy_from_slice(&desired[..same]);
     // Resample to 6 m for the road spec.
     let res = resample(&path, 6.0);
@@ -2767,6 +2792,10 @@ fn profile_ramp(
         .collect();
     (pts, bank)
 }
+
+/// A ramp's paving reaches this far from its centreline towards the carriageway, m (its widest
+/// paved side; [`profile_ramp`] holds it in the carriageway's plane while they overlap).
+const RAMP_OVERLAP_HALF_M: f32 = 3.4;
 
 /// Every interchange ramp (gore nodes not created yet).
 fn plan_ramps(g: &Gen, ring: &Ring) -> Vec<RampPath> {
@@ -3809,7 +3838,7 @@ fn place_landmarks_and_hideouts(
         ),
     ];
     for (name, kind, target, rule) in &landmarks {
-        let Some(lot) = find_lot(&grid, built, hf, nat, &taken, *target, rule) else {
+        let Some(lot) = find_lot(grid, built, hf, nat, &taken, *target, rule) else {
             continue;
         };
         let base = lot.zmin - 0.3;
@@ -3889,7 +3918,7 @@ fn place_landmarks_and_hideouts(
             reach: Some(12.0),
             relief: 2.5,
         };
-        let Some(lot) = find_lot(&grid, built, hf, nat, &taken, target, &rule) else {
+        let Some(lot) = find_lot(grid, built, hf, nat, &taken, target, &rule) else {
             continue;
         };
         let c = lot.obb.c;
@@ -4714,14 +4743,18 @@ fn generate_region(cfg: &VesperConfig, region: Option<&dyn Region>) -> (RoadNetw
     let covered = covered_spans(&g, &built, &ring, &loop_drafts, &remap, &divided);
     backfill_covers(&mut hf, &g.nat, &covered);
     // Bridges and waterways (the Hollins Tunnel is a covered span).
-    let mut features = CityFeatures::default();
-    features.bridges = find_bridges(&built, &infos, &g.nat);
-    for b in &features.bridges {
-        if b.kind == BridgeKind::Truss {
-            features.structures.extend(truss(b));
-        }
-    }
-    features.waterways = g.nat.channels.iter().map(Channel::waterway).collect();
+    let mut features = CityFeatures {
+        bridges: find_bridges(&built, &infos, &g.nat),
+        waterways: g.nat.channels.iter().map(Channel::waterway).collect(),
+        ..Default::default()
+    };
+    let trusses: Vec<Structure> = features
+        .bridges
+        .iter()
+        .filter(|b| b.kind == BridgeKind::Truss)
+        .flat_map(truss)
+        .collect();
+    features.structures.extend(trusses);
 
     let mut zones = region.map_or_else(Vec::new, |r| r.zones());
     zones.extend(self::zones());
@@ -5722,7 +5755,9 @@ mod tests {
             let len = geom::cumulative(&s.centre)[s.centre.len() - 1];
             edges += if s.median_barrier { len } else { 2.0 * len };
         }
-        assert!(walled > 0.7 * edges, "walled {walled} of {edges} m");
+        // Measured 61 %: open at ramp tapers, gores and junctions (and 40 m either side of
+        // them), on decks and in the Hollins Tunnel.
+        assert!(walled > 0.55 * edges, "walled {walled} of {edges} m");
         // Never on any paving (ramp joins stay open), never in a covered span (the Hollins
         // Tunnel's walls; the barrier stops at its portals).
         let covers: Vec<CoverShape> = net.covered.iter().map(CoverShape::new).collect();

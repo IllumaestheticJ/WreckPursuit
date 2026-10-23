@@ -1929,6 +1929,11 @@ pub const BARRIER_HALF_WIDTH_M: f32 = 0.25;
 /// An [`edge_barriers`] line ends this far outside a junction's paved radius, m.
 pub const JUNCTION_BARRIER_GAP_M: f32 = 2.0;
 
+/// An [`edge_barriers`] line stops this far along the edge before and after any other paving
+/// meeting it (a ramp's taper and gore, a junction), m: a car merging off a ramp drifts
+/// across the taper for up to ~60 m and must not meet the barrier's end there (row 162).
+pub const GORE_BARRIER_GAP_M: f32 = 40.0;
+
 /// Concrete barrier lines (at road height) along the outer edges of highways: the right edge
 /// of every divided-highway carriageway and both edges of ramps, so a car cannot leave the
 /// highway for the verge. Left out where another road's paving meets the edge (ramp tapers,
@@ -2005,15 +2010,31 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
         };
         for (side, edge) in sides {
             let line = geom::offset_polyline(edge, side * BARRIER_HALF_WIDTH_M);
-            let keep: Vec<bool> = (0..edge.len())
+            // Openings for other paving (ramp tapers, gores, junctions), widened by
+            // GORE_BARRIER_GAP_M along the edge each way: a merging car still drifting across
+            // the taper meets no blunt barrier end (row 162).
+            let open: Vec<bool> = (0..edge.len())
                 .map(|k| {
                     let p = edge[k];
                     let q = [line[k][0], line[k][1], p[2]];
+                    inside_other_paving(net, si, p)
+                        || inside_other_paving(net, si, q)
+                        || at_junction(q)
+                })
+                .collect();
+            let ecum = geom::cumulative(edge);
+            let opened: Vec<f32> = (0..edge.len())
+                .filter(|k| open[*k])
+                .map(|k| ecum[k])
+                .collect();
+            let keep: Vec<bool> = (0..edge.len())
+                .map(|k| {
+                    let p = edge[k];
                     !is_elevated(s, k, &ground, 1.5)
-                        && !inside_other_paving(net, si, p)
-                        && !inside_other_paving(net, si, q)
                         && !covers.iter().any(|c| c.contains([p[0], p[1], p[2] + 1.0]))
-                        && !at_junction(q)
+                        && !opened
+                            .iter()
+                            .any(|o| (ecum[k] - o).abs() <= GORE_BARRIER_GAP_M)
                 })
                 .collect();
             let mut run: Vec<V3> = Vec::new();
@@ -2031,6 +2052,69 @@ pub fn edge_barriers(map: &CityMap) -> Vec<Vec<V3>> {
                 out.push(run);
             }
         }
+    }
+    out
+}
+
+/// One ramp → carriageway merge: the connector that joins them and the line a car drives
+/// through it (see [`ramp_merges`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RampMerge {
+    /// The merge connector's segment id ([`CityMap::segs`]).
+    pub connector: u32,
+    /// Source road of the ramp and of the carriageway.
+    pub roads: [u32; 2],
+    /// Lane centreline from `before_m` up the ramp lane, through the connector, to `after_m`
+    /// along the carriageway lane it joins, m.
+    pub path: Vec<V3>,
+}
+
+/// Every place a ramp lane (a highway road of one or two lanes: interchange and rest-stop
+/// ramps) joins a carriageway's lane (a highway road of three or more), with the driving line
+/// through it (row 162: ramp merges are flush and clear). In segment order.
+pub fn ramp_merges(map: &CityMap, before_m: f32, after_m: f32) -> Vec<RampMerge> {
+    let net = &map.net;
+    let highway = |road: u32| net.surfaces.iter().any(|s| s.road == road && s.highway);
+    let lanes = |road: u32| {
+        net.lanes
+            .iter()
+            .filter(|l| l.road == road && l.kind.drivable())
+            .count()
+    };
+    // A ramp has one or two lanes, a carriageway (piece) three or more.
+    let ramp = |road: u32| highway(road) && lanes(road) <= 2;
+    let carriageway = |road: u32| highway(road) && lanes(road) >= 3;
+    let mut out = Vec::new();
+    for (ci, c) in map.segs.iter().enumerate() {
+        let SegKind::Connector { from, to, .. } = c.kind else {
+            continue;
+        };
+        let (rf, rt) = (net.lanes[from as usize].road, net.lanes[to as usize].road);
+        if !ramp(rf) || !carriageway(rt) {
+            continue;
+        }
+        let (a, b) = (&map.segs[from as usize], &map.segs[to as usize]);
+        let mut path: Vec<V3> = a
+            .pts
+            .iter()
+            .zip(&a.cum)
+            .filter(|(_, s)| **s >= a.length - before_m)
+            .map(|(p, _)| *p)
+            .collect();
+        path.extend(c.pts.iter().copied());
+        path.extend(
+            b.pts
+                .iter()
+                .zip(&b.cum)
+                .filter(|(_, s)| **s <= after_m)
+                .map(|(p, _)| *p),
+        );
+        path.dedup_by(|x, y| geom::dist(geom::xy(*x), geom::xy(*y)) < 0.05);
+        out.push(RampMerge {
+            connector: ci as u32,
+            roads: [rf, rt],
+            path,
+        });
     }
     out
 }

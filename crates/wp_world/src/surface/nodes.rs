@@ -222,8 +222,38 @@ fn freeway_tapers(map: &CityMap, node: u32) -> TriMesh {
                 continue;
             }
             let half = s.width * 0.5;
-            let l = geom::offset_polyline(&s.pts, -half);
-            let r = geom::offset_polyline(&s.pts, half);
+            let mut l = geom::offset_polyline(&s.pts, -half);
+            let mut r = geom::offset_polyline(&s.pts, half);
+            // Banked like the roads it joins (row 162: a level strip across banked ribbons left
+            // 4-5 cm steps at its edges and a ridge where it lies on the carriageway): the cross
+            // slope of the from lane's road surface at the start blending into the to lane's at
+            // the end, measured under the strip (so a lane running against its surface's
+            // direction gets the sign right).
+            let road_surface = |lane: u32| {
+                let road = net.lanes[lane as usize].road;
+                net.surfaces.iter().find(|x| x.road == road)
+            };
+            let (sa, sb) = (road_surface(from), road_surface(to));
+            for k in 0..s.pts.len() {
+                let f = if s.length > 1e-3 {
+                    s.cum[k] / s.length
+                } else {
+                    0.0
+                };
+                let (_, d) = s.point_at(s.cum[k]);
+                let rr = geom::right_of(d);
+                let c = geom::xy(s.pts[k]);
+                let slope = |x: Option<&crate::network::RoadSurface>| {
+                    x.map_or(0.0, |x| {
+                        let (_, zr) = super::height_under(x, geom::add(c, rr));
+                        let (_, zl) = super::height_under(x, geom::sub(c, rr));
+                        0.5 * (zr - zl)
+                    })
+                };
+                let bank = slope(sa) + (slope(sb) - slope(sa)) * f;
+                l[k][2] = s.pts[k][2] - bank * half;
+                r[k][2] = s.pts[k][2] + bank * half;
+            }
             m.strip(&l, &r);
         }
     }
