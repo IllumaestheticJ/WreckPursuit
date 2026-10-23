@@ -171,3 +171,71 @@ trigger_m = 80.0
 at = 0.85
 length_m = 4.0
 offset_m = 2.5
+
+# Ashpeak County races (main's ws/ashpeak, merged into lead/round12): placeholder profiles
+# that keep the presence each race had before profiles (Street 1.0, illegal daytime 2.0)
+# and add no scripted tools. To be designed per race like the ones above.
+
+[crowfoot_ascent]
+name = "Crowfoot patrol (uphill)"
+summary = "Placeholder: the normal county police on Crowfoot Pass uphill; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[crowfoot_descent]
+name = "Crowfoot patrol (downhill)"
+summary = "Placeholder: the normal county police on Crowfoot Pass downhill; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[harlan_dirt_run]
+name = "Harlan Flats patrol"
+summary = "Placeholder: the normal county police on the Harlan Flats farm roads; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[ashpeak_downtown_checkpoint]
+name = "Ashpeak City daytime patrol"
+summary = "Placeholder: the normal county police on downtown Ashpeak City in daylight; no roadblocks, stakeouts or spikes yet."
+presence = 2.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[route7_tunnel_sprint]
+name = "Route 7 patrol"
+summary = "Placeholder: the normal county police on Route 7 through the Talon Tunnel; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[grizzly_grade_sprint]
+name = "Grizzly Grade patrol"
+summary = "Placeholder: the normal county police on Grizzly Grade; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[waterfront_drag]
+name = "Waterfront patrol"
+summary = "Placeholder: the normal county police on the Ashpeak Waterfront; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
+
+[ashpeak_metro_circuit]
+name = "Ashpeak metro patrol"
+summary = "Placeholder: the normal county police on the downtown core loop; no roadblocks, stakeouts or spikes yet."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = false
