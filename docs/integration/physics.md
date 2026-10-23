@@ -137,3 +137,18 @@ regenerated. Shipped table vs measured: identical (sanity check).
 | V5 spring 1.5 + arb 1.0 | 2.36 s | 21 | 0 |
 Yaw inertia × 1.35 is the essential ingredient; the bars / springs can firm up at a small cost.
 AI pace (measured limits, 4 seeds) for V3 / V4 / V5 / G_firm: running.
+
+AI pace, measured limits, 4 seeds (mean s / wall hits; sum of mean deltas vs shipped):
+| variant | hollins 0.75 | hollins 0.95 | lantern 0.75 | lantern 0.95 | Σ Δ |
+|---|---|---|---|---|---|
+| shipped | 63.7 / 8 | 62.9 / 4 | 63.0 / 0 | 63.1 / 0 | 0 |
+| G | 65.0 / 19 | 62.9 / 16 | 66.9 / 0 | 71.0 / 0 | +13.0 s |
+| V3 arb 1.0 | 64.3 / 16 | 62.4 / 16 | 67.0 / 0 | 68.7 / 0 | +9.6 s |
+| **V4 spring 1.5** | 64.0 / 8 | 63.3 / 16 | 63.1 / 0 | 67.0 / 0 | **+4.7 s** |
+| V5 spring 1.5 arb 1.0 | 63.9 / 10 | 63.3 / 20 | 67.2 / 0 | 68.7 / 0 | +10.5 s |
+| G_firm | 63.9 / 12 | 61.9 / 0 | 69.2 / 0 | 67.2 / 0 | +9.4 s |
+
+Every variant with yaw inertia × 1.35 costs the AI time and wall hits; no near-G variant passes
+the guard. Best compromise V4 (held 2.50 s). Owner decision needed: accept an AI retune (out of
+scope here: wp_opponent / wp_race) for G-type handling, or keep searching for a drift gain
+without the yaw inertia.
