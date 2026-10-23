@@ -555,3 +555,30 @@ fn non_finite_input_is_ignored() {
         "{st:?}"
     );
 }
+
+/// The quick-play account survives watching a replay (a session without an economy run) and
+/// continues in the next session that has one (bughunt F7).
+#[test]
+fn the_account_survives_a_replay_in_between() {
+    use crate::scenario::{night_run_in, procedural_city};
+    let mut sc = night_run_in("debug_sedan", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut first = Session::new(sc.clone(), false).unwrap();
+    first.record_start();
+    first.run_ticks(10);
+    let replay = first.record_stop().unwrap();
+    first
+        .debug_run_mut()
+        .unwrap()
+        .adjust(4321, "test:bonus")
+        .unwrap();
+    let cash = first.run().unwrap().account().cash;
+    crate::install(first);
+    crate::install(Session::from_replay(replay).unwrap());
+    crate::install(Session::new(sc, false).unwrap());
+    let after = crate::with_session_opt(|s| {
+        Ok::<_, String>(s.and_then(|s| s.run()).map(|r| r.account().cash))
+    })
+    .unwrap();
+    assert_eq!(after, Some(cash), "the account carried over the replay");
+}

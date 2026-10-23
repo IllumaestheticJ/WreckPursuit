@@ -100,6 +100,9 @@ thread_local! {
     static PROP_SYNC: RefCell<props::PropSync> = RefCell::new(props::PropSync::default());
     /// The live session while a crash replay plays in `SESSION` (see [`crash_replay`]).
     static PARKED: RefCell<Option<Session>> = const { RefCell::new(None) };
+    /// The quick-play account while a session without an economy run (a replay, a scripted
+    /// scenario) is installed: the next session with a run continues it.
+    static KEPT_ACCOUNT: RefCell<Option<run::PlayerRun>> = const { RefCell::new(None) };
 }
 
 fn err(e: impl std::fmt::Display) -> JsValue {
@@ -140,9 +143,14 @@ fn install(mut session: Session) -> Vec<u32> {
                 career::absorb(prev);
             } else if let Some(run) = prev.take_run() {
                 // The player's account (cash, garage, ledger) carries over a restart.
-                if !session.is_career() {
-                    session.adopt_account(run);
-                }
+                KEPT_ACCOUNT.with(|k| *k.borrow_mut() = Some(run));
+            }
+        }
+        // A session with its own (non-career) run continues the kept account; one without a
+        // run (a replay) keeps it for the next.
+        if session.run().is_some() && !session.is_career() {
+            if let Some(run) = KEPT_ACCOUNT.with(|k| k.borrow_mut().take()) {
+                session.adopt_account(run);
             }
         }
         PROP_SYNC.with(|p| p.borrow_mut().reset(session.sim()));
