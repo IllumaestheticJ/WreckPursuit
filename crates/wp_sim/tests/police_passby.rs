@@ -34,7 +34,7 @@ fn vesper() -> &'static RoadNetwork {
 /// City at `hour` with police cars and no traffic or parked cars, run until a police car is
 /// driving its patrol with ≥ 60 m left on its road segment (so the pass happens on a straight).
 fn city_with_patrol(city: City, hour: f32) -> (Sim, EntityId) {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: 60,
         mode,

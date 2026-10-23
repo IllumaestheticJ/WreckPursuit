@@ -255,7 +255,7 @@ pub struct Sections {
     pub knuckle: f32,
 }
 
-/// Calibrated default sections (see `data/modes/sim.toml` calibration notes).
+/// Calibrated default sections (see `data/modes/extreme.toml` calibration notes).
 pub const DEFAULT_SECTIONS: Sections = Sections {
     cover: 1.2e-4,
     cover_attach: 0.8e-4,

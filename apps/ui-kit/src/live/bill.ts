@@ -73,7 +73,7 @@ export function billFromWasm(b: LiveBillJson, request: BillRequest): RepairBillV
 }
 
 /** Mock bill for a garage car with the UI's TS port of the billing rules. */
-export function mockBill(car: GarageCar, request: BillRequest, mode: "Arcade" | "Simulation", cash: number): RepairBillView {
+export function mockBill(car: GarageCar, request: BillRequest, mode: "Arcade" | "Simulation" | "Extreme", cash: number): RepairBillView {
   const shop: ShopView = {
     id: "mock",
     name: request.shop,

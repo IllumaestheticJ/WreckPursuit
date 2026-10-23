@@ -1,4 +1,4 @@
-# simcli hashes scenario=cars_beater_accel systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=cars_beater_accel systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.0
 240 606b8c0b9190d611
 480 94a0c233db971a30
 720 fa1b629ca2abc82c

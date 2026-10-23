@@ -85,7 +85,8 @@ pub fn expand_file(file: &str) -> Result<String, String> {
                 return match id {
                     "sim" | "simulation" | "Simulation" => Ok("modes/sim.toml".into()),
                     "arcade" | "Arcade" => Ok("modes/arcade.toml".into()),
-                    _ => Err(format!("unknown mode {id:?} (sim | arcade)")),
+                    "extreme" | "Extreme" => Ok("modes/extreme.toml".into()),
+                    _ => Err(format!("unknown mode {id:?} (sim | arcade | extreme)")),
                 }
             }
             _ => return Err(format!("unknown file kind {kind:?} in {file:?}")),

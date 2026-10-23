@@ -47,5 +47,7 @@ fn every_kind_and_mode_is_covered() {
             seen.insert(format!("{:?}/{:?}", sc.impact, sc.mode));
         }
     }
-    assert_eq!(seen.len(), 8, "{seen:?}");
+    // Every impact kind in Simulation and Extreme, plus Arcade (racer scale) frontal.
+    assert_eq!(seen.len(), 9, "{seen:?}");
+    assert!(seen.contains("Frontal/Arcade"), "{seen:?}");
 }

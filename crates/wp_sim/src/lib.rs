@@ -58,7 +58,7 @@ pub enum SimError {
 pub struct SimConfig {
     /// Master RNG seed.
     pub seed: u64,
-    /// Damage mode table (Arcade or Simulation).
+    /// Damage mode table (Arcade, Simulation or Extreme).
     pub mode: ModeTable,
     /// Starting time of day.
     pub time_of_day: TimeOfDay,
@@ -702,7 +702,7 @@ impl Sim {
         self.static_boxes
     }
 
-    /// Swap the damage mode table (Arcade ↔ Simulation) without restarting. Applies from the
+    /// Swap the damage mode table (Arcade / Simulation / Extreme) without restarting. Applies from the
     /// next tick; existing damage is kept. Log it as an input-like op if replays must match.
     pub fn set_mode_table(&mut self, mode: ModeTable) {
         self.config.mode = mode;
@@ -966,6 +966,14 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
+        // Arcade: racers (player and AI) take `racer_damage_scale` of the collision impulse;
+        // traffic and police take it all. Before the filter, so the scaled contacts are the
+        // ones quantised, recorded and replicated.
+        for (slot, contacts) in self.vehicles.iter().zip(&mut tick_contacts.per_vehicle) {
+            if matches!(slot.kind, VehicleKind::Player | VehicleKind::AiRacer) {
+                wp_damage::scale_racer_contacts(contacts, &self.config.mode);
+            }
+        }
         if let Some(filter) = self.contact_filter {
             for c in tick_contacts.per_vehicle.iter_mut().flatten() {
                 filter(c);
@@ -1232,7 +1240,7 @@ mod tests {
 
     fn run(seed: u64) -> (u64, VehicleState) {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed,
             mode,
@@ -1256,10 +1264,77 @@ mod tests {
         (sim.state_hash(), state)
     }
 
+    /// Health of four sedans after each hits its own rigid wall at 56 km/h, one per
+    /// `VehicleKind` (Player, AiRacer, Police, Traffic), with damage table `file`.
+    fn wall_hit_health(file: &str) -> Vec<(VehicleKind, f32)> {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data(file)).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 9,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 1.0,
+        });
+        let kinds = [
+            VehicleKind::Player,
+            VehicleKind::AiRacer,
+            VehicleKind::Police,
+            VehicleKind::Traffic,
+        ];
+        let mut ids = Vec::new();
+        for (i, kind) in kinds.iter().enumerate() {
+            let x = 20.0 * i as f32;
+            sim.add_static_box([x, 20.0, 0.75], [8.0, 1.0, 1.5], 0.0);
+            let id = sim.spawn_vehicle(&car, [x, 0.0, 0.0], 0.0).unwrap();
+            sim.place_vehicle(id, [x, 0.0, 0.0], 0.0, 15.56).unwrap();
+            sim.set_vehicle_kind(id, *kind).unwrap();
+            ids.push(id);
+        }
+        for _ in 0..720 {
+            sim.step_fixed();
+        }
+        sim.vehicles()
+            .iter()
+            .map(|v| (v.kind, v.damage.health()))
+            .collect()
+    }
+
+    /// Contract v0.4.0 (owner, 2026-10-22): in Arcade only racers (player, AI racers) take the
+    /// reduced damage; police and traffic take the same damage as in Simulation. In
+    /// Simulation every kind takes the same damage.
+    #[test]
+    fn arcade_reduces_damage_for_racers_only() {
+        let arcade = wall_hit_health("modes/arcade.toml");
+        let sim = wall_hit_health("modes/sim.toml");
+        let lost = |h: &[(VehicleKind, f32)], k: VehicleKind| {
+            1.0 - h.iter().find(|(kind, _)| *kind == k).unwrap().1
+        };
+        for k in [VehicleKind::Police, VehicleKind::Traffic] {
+            let (a, s) = (lost(&arcade, k), lost(&sim, k));
+            assert!((a - s).abs() < 1e-3, "{k:?} takes full damage: {a} vs {s}");
+        }
+        for k in [VehicleKind::Player, VehicleKind::AiRacer] {
+            let ratio = lost(&arcade, k) / lost(&sim, k);
+            assert!(
+                ratio < 0.4,
+                "{k:?}: Arcade health lost {ratio:.2} of Simulation's"
+            );
+            assert!(
+                lost(&sim, k) > 0.02,
+                "{k:?}: the Simulation hit does damage"
+            );
+        }
+        let sim_lost: Vec<f32> = sim.iter().map(|(_, h)| 1.0 - h).collect();
+        assert!(
+            sim_lost.windows(2).all(|w| (w[0] - w[1]).abs() < 0.05),
+            "Simulation: every kind takes about the same damage {sim_lost:?}"
+        );
+    }
+
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.
     fn head_on_events() -> Vec<SimEvent> {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 3,
             mode,
@@ -1329,7 +1404,7 @@ mod tests {
 
     fn two_sedan_sim(seed: u64) -> (Sim, EntityId, EntityId) {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed,
             mode,
@@ -1450,7 +1525,7 @@ mod tests {
     #[test]
     fn static_barrier_stops_car_and_reports_world_contact() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 4,
             mode,
@@ -1497,7 +1572,7 @@ mod tests {
     #[test]
     fn procedural_city_loads_props_and_steps() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mk = || {
             let mut sim = Sim::new(SimConfig {
                 seed: 9,
@@ -1532,7 +1607,7 @@ mod tests {
     #[test]
     fn props_are_fixed_until_a_car_comes_and_get_knocked() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 9,
             mode,
@@ -1579,7 +1654,7 @@ mod tests {
     #[test]
     fn contact_filter_recording_and_despawn() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 5,
             mode,
@@ -1618,7 +1693,7 @@ mod tests {
     fn police_city_run(ticks: u32) -> Sim {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
         let cop = wp_contracts::load_car(data("cars/sentinel_cruiser.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,
@@ -1674,7 +1749,7 @@ mod tests {
     fn kinematic_police_do_not_roll_phantom_traffic_hazards() {
         // No police car model: every unit stays on wp_police's kinematic driver (low LOD).
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,
@@ -1714,7 +1789,7 @@ mod tests {
     fn traffic_near_the_player_becomes_physical() {
         let run = || {
             let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-            let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+            let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
             let mut sim = Sim::new(SimConfig {
                 seed: 12,
                 mode,
@@ -1768,7 +1843,7 @@ mod tests {
     #[test]
     fn disabled_vehicle_system_freezes_cars() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 1,
             mode,
@@ -1793,7 +1868,7 @@ mod tests {
     #[test]
     fn hash_changes_with_state() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 7,
             mode,

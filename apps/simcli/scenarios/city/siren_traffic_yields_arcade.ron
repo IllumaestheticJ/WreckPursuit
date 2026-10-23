@@ -1,3 +1,5 @@
+// Contract v0.4.0: the pre-v0.4.0 Arcade table is now Simulation, so this scenario keeps its
+// name and runs `mode: Simulation` (same behaviour and hashes as before).
 // Playtest rows 61-62 (traffic gets out of the way of police with sirens on): a police car drives
 // Garage 1 -> Garage 2 on the 12x12 grid (403 m, mostly two-lane streets) through busy civilian
 // traffic, riding the line on the left of its lane (lateral_offset_m -1.55, where a unit passes
@@ -12,7 +14,7 @@
     name: "city_siren_traffic_yields_arcade",
     seed: 8,
     city: file("city/procedural_12x12.road.json"),
-    mode: Arcade,
+    mode: Simulation,
     time_of_day_h: 12.0,
     time_ratio: 1.0,
     traffic_density: 10.0,

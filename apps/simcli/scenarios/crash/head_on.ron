@@ -3,7 +3,7 @@
 (
     name: "crash_head_on",
     seed: 12,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     entities: [
         (id: "sedan", car: "debug_sedan", driver: cruise(target_mps: 13.89)),

@@ -58,7 +58,7 @@ export function MainMenu() {
           RIDE <span class="wp-dim2">{active ? active.name : "none"}</span>
         </div>
         <div class="wp-row" style={{ marginTop: "0.6em" }}>
-          <Badge tone={mode === "Simulation" ? "danger" : "warn"}>{mode} damage</Badge>
+          <Badge tone={mode === "Arcade" ? "warn" : "danger"}>{mode} damage</Badge>
           {impounded > 0 && <Badge tone="danger">{impounded} in impound</Badge>}
           {account.inDebt && <Badge tone="danger" solid>In debt</Badge>}
         </div>
