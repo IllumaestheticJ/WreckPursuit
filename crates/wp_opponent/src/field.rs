@@ -4464,7 +4464,7 @@ mod tests {
         let mut f = field(1);
         let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
         let dt = 4.0 * PHYSICS_DT;
-        let mut at = |f: &mut Field, y: f32, v: f32| {
+        let at = |f: &mut Field, y: f32, v: f32| {
             f.observe(
                 &world,
                 &[obs(1, y, v, HandlingEffects::NEUTRAL)],
