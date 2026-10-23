@@ -339,25 +339,52 @@ export class TougeView {
   constructor(
     private readonly el: HTMLElement,
     private readonly actions: TougeActions,
-  ) {}
+  ) {
+    // Esc closes the picker. Registered at construction (window, capture phase), i.e. before
+    // the host's Esc → pause-menu listener, so the pause menu never opens over the picker.
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.code !== "Escape" || e.repeat || !this.cards) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.dismissPicker();
+      },
+      { capture: true },
+    );
+  }
 
-  /** Open the picker. */
-  openPicker(): void {
+  /** Called when the player closes the picker without starting a battle (set by `openPicker`). */
+  private onDismiss: (() => void) | null = null;
+
+  /** Open the picker. `onDismiss` runs if the player closes it (close button / Esc) without
+   * starting a battle, e.g. to return to the title screen it was opened from. */
+  openPicker(onDismiss: (() => void) | null = null): void {
+    this.onDismiss = onDismiss;
     this.cards = this.actions.list();
     if (!this.choice.map && this.cards.length > 0) this.choice.map = this.cards[0].id;
     this.refreshMenu();
   }
 
-  /** Close the picker. */
+  /** Close the picker (no dismiss callback). */
   closePicker(): void {
+    this.onDismiss = null;
     this.cards = null;
     this.draw();
+  }
+
+  /** The player closed the picker: close it, then run the `openPicker` callback. */
+  dismissPicker(): void {
+    const done = this.onDismiss;
+    this.closePicker();
+    done?.();
   }
 
   /** New session (touge or not): drop the last battle panel. */
   reset(): void {
     this.report = null;
     this.cards = null;
+    this.onDismiss = null;
     this.draw();
   }
 
@@ -415,13 +442,14 @@ export class TougeView {
             onStart={() => {
               const wager = this.wager.kind === "side_bet" ? { kind: "side_bet" as const, stake: this.stake } : this.wager;
               this.cards = null;
+              this.onDismiss = null;
               this.actions.start(this.choice, wager);
             }}
             onSetRep={(rep) => {
               this.repNote = setRep ? setRep(rep) : null;
               this.refreshMenu();
             }}
-            onClose={() => this.closePicker()}
+            onClose={() => this.dismissPicker()}
           />
         )}
       </div>,

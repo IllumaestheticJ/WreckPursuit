@@ -1538,12 +1538,17 @@ async function main(): Promise<void> {
         if (choice === "chase") startNightRun();
         else if (choice === "chaseRain") startNightRun(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
-        else if (choice === "races") raceView.openPicker();
-        else if (choice === "touge") tougeView.openPicker();
-        else openGarage();
+        // Pickers and the garage return to the title when closed without starting anything.
+        else if (choice === "races") raceView.openPicker(() => menu?.openMain());
+        else if (choice === "touge") tougeView.openPicker(() => menu?.openMain());
+        else {
+          openGarage();
+          garage.onClose(() => menu?.openMain());
+        }
       },
       restart: () => restartRun(),
       garage: () => openGarage(),
+      careerRunActive: () => sim.careerRunActive(),
       quitToMain: () => {
         if (sim.careerRunActive()) sim.careerEndRun();
         persistCareer();

@@ -515,19 +515,45 @@ export class RaceView {
       list: () => RaceCard[];
       betStatus: () => BetStatus;
     },
-  ) {}
+  ) {
+    // Esc closes the picker. Registered at construction (window, capture phase), i.e. before
+    // the host's Esc → pause-menu listener, so the pause menu never opens over the picker.
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.code !== "Escape" || e.repeat || !this.cards) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.dismissPicker();
+      },
+      { capture: true },
+    );
+  }
 
-  /** Open the picker. */
-  openPicker(): void {
+  /** Called when the player closes the picker without starting a race (set by `openPicker`). */
+  private onDismiss: (() => void) | null = null;
+
+  /** Open the picker. `onDismiss` runs if the player closes it (close button / Esc) without
+   * starting a race, e.g. to return to the title screen it was opened from. */
+  openPicker(onDismiss: (() => void) | null = null): void {
+    this.onDismiss = onDismiss;
     this.cards = this.actions.list();
     this.betStatus = this.actions.betStatus();
     this.draw();
   }
 
-  /** Close the picker. */
+  /** Close the picker (no dismiss callback). */
   closePicker(): void {
+    this.onDismiss = null;
     this.cards = null;
     this.draw();
+  }
+
+  /** The player closed the picker: close it, then run the `openPicker` callback. */
+  dismissPicker(): void {
+    const done = this.onDismiss;
+    this.closePicker();
+    done?.();
   }
 
   /** New session: `raceId` "" when it is not a race; `names` by entity; the race's course. */
@@ -538,6 +564,7 @@ export class RaceView {
     this.report = null;
     this.frame = null;
     this.cards = null;
+    this.onDismiss = null;
     this.map = course
       ? (() => {
           const xs = course.route.map((p) => p[0]);
@@ -573,7 +600,7 @@ export class RaceView {
         {showResults && this.report && (
           <Results report={this.report} onAgain={() => this.actions.start(this.raceId)} onPicker={() => this.openPicker()} onFree={() => this.actions.freeDrive()} />
         )}
-        {this.cards && <Picker cards={this.cards} status={this.betStatus} onStart={(id, bet) => this.actions.start(id, bet)} onClose={() => this.closePicker()} />}
+        {this.cards && <Picker cards={this.cards} status={this.betStatus} onStart={(id, bet) => this.actions.start(id, bet)} onClose={() => this.dismissPicker()} />}
       </div>,
       this.el,
     );

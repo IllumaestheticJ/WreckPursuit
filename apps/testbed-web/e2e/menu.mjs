@@ -7,7 +7,9 @@
 // and a street race (race HUD); Esc pauses the sim and Esc resumes it; the menu is keyboard
 // navigable (pause → settings → units → back); a setting survives a reload; gamepad Start opens
 // the pause menu and the d-pad / B navigate it; Controls opens the rebinding panel and returns to
-// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase.
+// the menu; ?menu=1 opens the title screen with the developer panels off and starts a chase;
+// pause → Garage only mentions ending a career run during one; the race picker, the touge picker
+// and the garage opened from the title close on Esc and return to the title.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -258,6 +260,33 @@ await frames(4);
 m = await menu();
 const sc = await page.evaluate(() => window.__wp.sim.scenario().name);
 check(m.screen === "closed" && !m.paused && sc === "night_run", `Enter starts the night run (${sc}, menu ${m.screen})`);
+
+// ----- 7. Pause outside a career run; pickers and the garage return to the title -----------------
+await press("Escape");
+const garageHint = await page.evaluate(() => document.querySelector("#gm-garage small")?.textContent ?? "(no Garage item)");
+check(!/ends the current career run/.test(garageHint), `pause → Garage outside a career run does not claim to end one ("${garageHint.trim()}")`);
+await page.click("#gm-quit");
+await frames(3);
+check((await menu()).screen === "main", "Quit to main menu shows the title");
+const picker = () => page.evaluate(() => ({ races: !!window.__wp.raceView.cards, touge: !!document.querySelector('[data-testid="touge-picker"]') }));
+for (const [item, label] of [
+  ["#gm-play-races", "Street races picker"],
+  ["#gm-play-touge", "Touge picker"],
+  ["#gm-play-garage", "garage"],
+]) {
+  await page.click(item);
+  await frames(4);
+  const before = { ...(await menu()), ...(await picker()), garage: await page.evaluate(() => window.__wp.garage.open) };
+  const shown = item === "#gm-play-races" ? before.races : item === "#gm-play-garage" ? before.garage : before.touge;
+  await press("Escape");
+  await frames(4);
+  m = await menu();
+  const after = { ...(await picker()), garage: await page.evaluate(() => window.__wp.garage.open) };
+  check(
+    shown && m.screen === "main" && m.visible && !after.races && !after.touge && !after.garage,
+    `${label} from the title: Esc closes it and returns to the title (shown ${shown}, screen ${m.screen}, pickers ${after.races}/${after.touge}, garage ${after.garage})`,
+  );
+}
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();

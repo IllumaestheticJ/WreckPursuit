@@ -39,6 +39,9 @@ export interface GameMenuHost {
   garage(): void;
   /** Show "Garage" in the pause menu (e.g. only when a career exists). Default: always. */
   canGarage?(): boolean;
+  /** A career run is in progress (Pause → Garage then ends it, and the item says so).
+   * Default: false. */
+  careerRunActive?(): boolean;
   /** Pause → Quit to main menu: end the run (the main menu is shown next). */
   quitToMain(): void;
   /** Open the controls (rebinding) panel; the menu hides until `controlsOpen()` turns false. */
@@ -372,6 +375,7 @@ export class GameMenu {
       body = (
         <PauseScreen
           garage={h.canGarage ? h.canGarage() : true}
+          careerRun={h.careerRunActive ? h.careerRunActive() : false}
           resume={() => this.close()}
           restart={() => this.act(() => h.restart())}
           openGarage={() => this.act(() => h.garage())}
@@ -510,6 +514,8 @@ function Keys() {
 
 function PauseScreen(props: {
   garage: boolean;
+  /** A career run is in progress: going to the garage ends it. */
+  careerRun: boolean;
   resume: () => void;
   restart: () => void;
   openGarage: () => void;
@@ -523,7 +529,9 @@ function PauseScreen(props: {
       <nav class="wp-gm-list" aria-label="Pause menu">
         <Item id="gm-resume" label="Resume" primary onClick={props.resume} />
         <Item id="gm-restart" label="Restart" onClick={props.restart} />
-        {props.garage && <Item id="gm-garage" label="Garage" hint="Career: ends the current career run" onClick={props.openGarage} />}
+        {props.garage && (
+          <Item id="gm-garage" label="Garage" hint={props.careerRun ? "Career: ends the current career run" : "Your career: cars, repairs, mods"} onClick={props.openGarage} />
+        )}
         <Item id="gm-settings" label="Settings" onClick={props.settings} />
         <Item id="gm-controls" label="Controls" onClick={props.controls} />
         <Item id="gm-quit" label="Quit to main menu" danger onClick={props.quit} />

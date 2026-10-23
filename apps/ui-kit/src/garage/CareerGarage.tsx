@@ -851,29 +851,51 @@ export class CareerGarageView {
   /** The garage is showing. */
   open = false;
   private key = 0;
+  /** Runs once when the player closes the garage (Close / Esc); cleared by `hide`. */
+  private onDismiss: (() => void) | null = null;
+  /** The api the screen uses: `close` also runs the dismiss callback. */
+  private readonly screenApi: CareerApi;
 
   constructor(
     private readonly el: HTMLElement,
     private readonly api: CareerApi,
-  ) {}
+  ) {
+    this.screenApi = {
+      ...api,
+      close: () => {
+        const done = this.onDismiss;
+        this.onDismiss = null;
+        api.close();
+        done?.();
+      },
+    };
+  }
 
   /** Show the garage (re-reads the career). `message` is shown at the top (e.g. why a run
-   * could not start). */
+   * could not start). Clears any dismiss callback; set one with `onClose` after showing. */
   show(message: string | null = null): void {
     this.open = true;
+    this.onDismiss = null;
     this.key++;
     const view = this.api.view();
     render(
       <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "auto", zIndex: 80 }}>
-        <GarageScreen key={this.key} api={this.api} initial={view} message={message} />
+        <GarageScreen key={this.key} api={this.screenApi} initial={view} message={message} />
       </div>,
       this.el,
     );
   }
 
+  /** Run `fn` when the player closes the garage now showing (Close / Esc), not when it hides
+   * for another reason (a run starts, the workshop opens). E.g. back to the title screen. */
+  onClose(fn: () => void): void {
+    if (this.open) this.onDismiss = fn;
+  }
+
   /** Hide it. */
   hide(): void {
     this.open = false;
+    this.onDismiss = null;
     render(null, this.el);
   }
 }
