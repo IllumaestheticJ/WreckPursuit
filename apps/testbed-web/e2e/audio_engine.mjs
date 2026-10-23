@@ -436,11 +436,17 @@ for (const c of physical) {
     else if (v !== 0 && Math.abs(v) < 1.1754944e-38) sub++;
     peak = Math.max(peak, Math.abs(v));
   }
-  const cl = clicks(x);
+  // Afterfire pops (overrun, limiter, misfires) are wanted bangs, not clicks: the windows a pop
+  // starts in (worklet onsets, ±1 window for the slot's start offset) are left out.
+  const popAt = (counters.popAt ?? []).map((n) => n / SR);
+  const nearPop = (t) => popAt.some((p) => t > p - 0.06 && t < p + 0.06);
+  const allClicks = clicks(x);
+  const cl = allClicks.filter((t) => !nearPop(t));
   row.peak = peak;
   row.clicks = cl.length;
+  row.popWindows = allClicks.length - cl.length;
   check(bad === 0 && sub === 0, `${name}: finite, no subnormal samples (${bad} NaN, ${sub} subnormal)`);
-  check(cl.length === 0, `${name}: no clicks${cl.length ? ` (at ${cl.slice(0, 8).join(" ")} s)` : ""}`);
+  check(cl.length === 0, `${name}: no clicks outside pops${cl.length ? ` (at ${cl.slice(0, 8).join(" ")} s)` : ""}`);
   check(peak > 0.01 && peak <= 1, `${name}: audible and unclipped (peak ${peak.toFixed(3)})`);
 
   if (c.sweep === "steps") {
@@ -514,6 +520,20 @@ for (const c of physical) {
       // Pops are random (≈ 3–6 expected per lift); each sporty car crackles, ≥ 8 in total below.
       sportyPops += counters.pops ?? 0;
       check((counters.pops ?? 0) >= 1, `${name}: overrun crackle after the lift (${counters.pops ?? 0} pops)`);
+      // ...and is heard: the loudest 10 ms within 30 ms of a pop's onset stand out of the
+      // overrun body (the pops used to die on their first sample: counted, never audible).
+      const bed = bodyOf(x, 1.6, 2.9);
+      const rise = (counters.popAt ?? [])
+        .map((n) => n / SR)
+        .filter((t) => t > 0.8 && t + 0.04 < x.length / SR)
+        .map((t) => {
+          let best = 0;
+          for (let a = Math.round(t * SR); a < Math.round((t + 0.03) * SR); a += Math.round(0.002 * SR)) best = Math.max(best, rmsOf(x, a, a + Math.round(0.01 * SR)));
+          return dB(best) - dB(bed);
+        });
+      if (rise.length) {
+        check(median(rise) >= 7, `${name}: crackle is audible (median ${median(rise).toFixed(1)} dB over the overrun body, ${rise.length} pops)`);
+      }
     } else {
       row.pops = counters.pops ?? 0;
     }
@@ -572,11 +592,91 @@ check(sportyPops >= 2 * sportyLifts, `overrun crackle: ${sportyPops} pops over $
   const dIn = hiShare(xin);
   const dOut = hiShare(xout);
   check(dOut - dIn > 6, `interior is darker than exterior: energy above 1 kHz ${dIn.toFixed(1)} dB vs ${dOut.toFixed(1)} dB (rel. below 1 kHz)`);
-  check(clicks(xin).length === 0, "interior render: no clicks");
+  const popIn = (r.counters[0]?.popAt ?? []).map((n) => n / SR);
+  const clIn = clicks(xin).filter((t) => !popIn.some((p) => t > p - 0.06 && t < p + 0.06));
+  check(clIn.length === 0, `interior render: no clicks outside pops${clIn.length ? ` (at ${clIn.slice(0, 8).join(" ")} s)` : ""}`);
   if (media) {
     writeFileSync(join(mediaDir, "engine_rampart_50_wot_interior.wav"), wav16(xin.subarray(0, Math.round(3.0 * SR))));
   }
   report.push({ car: "rampart_50", sweep: "wot (interior)", what: "interior perspective", hiShareInterior: dIn, hiShareExterior: dOut, files: ["engine_rampart_50_wot_interior.wav"] });
+}
+
+// ----- 2b: the synthesizer alone (Node, no Web Audio) -----------------------------------------------
+// Playtest "engine sounds are bad" (docs/integration/audio.md): the old voice drove V8s / sixes
+// into its tanh soft limit at full throttle, swept firing harmonics through deep pipe-comb notches
+// (level holes while revving), buried the I4's firing order ~10 dB under its harmonics and was
+// perfectly periodic (a buzzer). Each car's EngineDsp, at its own spec, steady frame state:
+{
+  const mod = await build({ entryPoints: [join(root, "src/audio/engine_worklet.ts")], bundle: true, write: false, format: "esm", target: "es2022" });
+  const { engineWorkletMain } = await import("data:text/javascript;base64," + Buffer.from(mod.outputFiles[0].text).toString("base64"));
+  const { EngineDsp } = engineWorkletMain(null);
+  const specOf = (car) => {
+    for (const f of physical.find((k) => k.car === car && k.sweep === "wot").frames)
+      for (const cmd of f.commands) if ("Play" in cmd && cmd.Play.cue === "engine/physical") return cmd.Play.synth;
+    throw new Error(`no engine/physical play for ${car}`);
+  };
+  /** Render `secs` of a linear rpm ramp r0 → r1 at full throttle in 3rd (frames at 60 Hz). */
+  const dsp = (spec, r0, r1, secs) => {
+    const d = new EngineDsp(SR, spec);
+    const n = Math.round(secs * SR);
+    const y = new Float32Array(n);
+    const F = new Float32Array(12);
+    for (let s = 0; s < n; s += 800) {
+      F.set([1, r0 + ((r1 - r0) * s) / n, 1, 1, 1, 3, 20, 0, 1, 0, 1, 0]);
+      d.setFrame(F, 800);
+      for (let j = s; j < Math.min(n, s + 800); j += 128) d.render(y, j, Math.min(128, n - j, s + 800 - j));
+    }
+    return y;
+  };
+  const flat = [];
+  for (const car of [...new Set(physical.map((c) => c.car))]) {
+    const spec = specOf(car);
+    const idle = spec.idle_rpm || 800;
+    const red = spec.redline_rpm || 6500;
+    const cyl = spec.n || 4;
+    // Slow WOT pull idle → redline.
+    const secs = 8;
+    const y = dsp(spec, idle, red, secs);
+    // The voice's soft limit starts at 0.8 × OUT_MAKEUP (2) = 1.6 at the output; a pull that
+    // peaks ≤ 0.8 keeps 6 dB of headroom under it (docs/integration/audio.md "Mix headroom").
+    let knee = 0;
+    for (const v of y) if (Math.abs(v) > 0.8) knee++;
+    check(knee === 0, `${car}: full-throttle pull keeps 6 dB under the synth's soft limit (${knee} samples > 0.8)`);
+    // Level along the pull (100 ms windows) detrended against log rpm, and the firing order's
+    // level against the strongest partial.
+    const lv = [];
+    const fund = [];
+    const win = Math.round(0.1 * SR);
+    for (let s0 = win; s0 + win <= y.length; s0 += win) {
+      const rpm = idle + ((red - idle) * (s0 + win / 2)) / y.length;
+      lv.push([Math.log(rpm), 20 * Math.log10(rmsOf(y, s0, s0 + win) + 1e-12)]);
+      const sp = spectrum(y, s0, s0 + win, 1 << 15);
+      const f = (rpm / 60) * (cyl / 2);
+      const h = [1, 2, 3, 4, 5, 6].map((m) => peakIn(sp, m * f * 0.96, m * f * 1.04).db);
+      fund.push(h[0] - Math.max(...h));
+    }
+    const mx = lv.reduce((a, v) => a + v[0], 0) / lv.length;
+    const my = lv.reduce((a, v) => a + v[1], 0) / lv.length;
+    const k = lv.reduce((a, v) => a + (v[0] - mx) * (v[1] - my), 0) / lv.reduce((a, v) => a + (v[0] - mx) ** 2, 0);
+    const resid = lv.map((v) => v[1] - (my + k * (v[0] - mx)));
+    const sd = Math.sqrt(resid.reduce((a, v) => a + v * v, 0) / resid.length);
+    check(sd <= 1.5, `${car}: WOT pull level follows the rpm without comb holes (detrended ripple ${sd.toFixed(2)} dB ≤ 1.5; was up to 2.8)`);
+    check(median(fund) >= -7, `${car}: firing order within 7 dB of the strongest partial along the pull (median ${median(fund).toFixed(1)} dB; the I4 was -10)`);
+    // Spectral flatness 200 Hz-4 kHz at 40 % of redline, WOT (recordings: -10 to -23 dB).
+    const z = dsp(spec, 0.4 * red, 0.4 * red, 1.5);
+    const sp = spectrum(z, Math.round(0.3 * SR), z.length);
+    let lg = 0;
+    let ar = 0;
+    let cnt = 0;
+    for (let i = Math.ceil(200 / sp.hz); i <= Math.floor(4000 / sp.hz); i++) {
+      lg += (sp.db[i] / 10) * Math.LN10;
+      ar += 10 ** (sp.db[i] / 10);
+      cnt++;
+    }
+    flat.push(10 * Math.log10(Math.exp(lg / cnt) / (ar / cnt)));
+    if (verbose) console.log(`  ${car}: ripple ${sd.toFixed(2)} dB, firing order ${median(fund).toFixed(1)} dB, flatness ${flat[flat.length - 1].toFixed(1)} dB`);
+  }
+  check(median(flat) >= -22, `not a buzzer: median spectral flatness ${median(flat).toFixed(1)} dB ≥ -22 (was ≈ -30; recordings -10 to -23)`);
 }
 
 // ----- 3: budget ----------------------------------------------------------------------------------

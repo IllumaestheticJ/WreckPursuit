@@ -103,5 +103,5 @@ failure.
 
 ## Perf
 
-Building all 14 cars (including 14 gen-lattice runs) takes ≈ 0.8 s; `collect_results.py`
-≈ 15 s; `specsheet.py` < 1 s. Roster lattices: 244-304 nodes and 1539-1988 beams per car.
+Building all 21 cars (including 21 gen-lattice runs) takes ≈ 1 s; `collect_results.py`
+≈ 15 s; `specsheet.py` < 1 s. Roster lattices: 244-332 nodes and 1536-2138 beams per car.

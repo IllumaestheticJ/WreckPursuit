@@ -12,7 +12,7 @@
 | Ironside 440 | `ironside_440` | Muscle | RWD | 1695 | 216 | 127 | 7.7 | 220 | 0.71 | 450 | 4 | 38,000 | vintage_bias |
 | Sperber 32 | `sperber_32` | Sport | RWD | 1602 | 248 | 155 | 5.8 | 279 | 0.99 | 602 | 3 | 36,000 | sport |
 | Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.5 | 259 | 0.97 | 608 | 3 | 34,000 | sport |
-| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.02 | 692 | 1 | 120,000 | sport |
+| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.6 | 297 | 1.03 | 694 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
 | Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
 | Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
@@ -21,9 +21,17 @@
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 12.1 | 176 | 0.90 | 381 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |
 | Furrow 2.4 | `furrow_24` | Truck | RWD | 1373 | 107 | 78 | 10.7 | 183 | 0.83 | 391 | 4 | 21,000 | street |
-| Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.6 | 336 | 0.98 | 816 | 3 | 125,000 | sport |
+| Stoat 16V | `stoat_16v` | Compact | FWD | 1144 | 108 | 94 | 8.3 | 210 | 0.90 | 464 | 2 | 9,500 | street |
+| Bulwark 400 | `bulwark_400` | Muscle | RWD | 1920 | 202 | 105 | 7.6 | 209 | 0.83 | 470 | 4 | 26,000 | street |
+| Arashi T4 | `arashi_t4` | Sport | AWD 40/60 | 1313 | 191 | 145 | 5.3 | 247 | 1.01 | 620 | 3 | 32,000 | sport |
+| Satchel 2.0 | `satchel_20` | Truck | FWD | 1895 | 85 | 45 | 16.1 | 153 | 0.78 | 314 | 3 | 20,000 | street |
+| Marten 2.0 | `marten_20` | Compact | FWD | 1114 | 112 | 101 | 8.1 | 210 | 0.91 | 468 | 2 | 9,500 | street |
+| Brigand 400 | `brigand_400` | Muscle | RWD | 1990 | 176 | 88 | 9.1 | 202 | 0.69 | 403 | 4 | 23,500 | vintage_bias |
+| Talus 2.0T | `talus_20t` | Sport | AWD 45/55 | 1386 | 206 | 149 | 5.6 | 246 | 0.99 | 599 | 3 | 38,000 | sport |
+| Tumbril 2.0 | `tumbril_20` | Truck | FWD | 1845 | 85 | 46 | 15.6 | 147 | 0.78 | 315 | 3 | 20,000 | street |
+| Fulmine V10 | `fulmine_v10` | Exotic | AWD 30/70 | 1634 | 449 | 275 | 3.5 | 336 | 0.98 | 820 | 3 | 125,000 | sport |
 | Sentinel Warden | `sentinel_warden` | PoliceCruiser | RWD | 1873 | 155 | 83 | 8.6 | 207 | 0.91 | 455 | 4 | 26,000 | police_pursuit |
-| Sentinel Harrier | `sentinel_harrier` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
+| Sentinel Vigil | `sentinel_vigil` | PoliceInterceptor | RWD | 1813 | 319 | 176 | 5.7 | 282 | 0.95 | 601 | 4 | 52,000 | sport |
 | Halberd 40 | `halberd_40` | Exotic | RWD | 1488 | 513 | 345 | 3.7 | 354 | 1.15 | 834 | 3 | 125,000 | semi_slick |
 | Ombra V12 | `ombra_v12` | Exotic | AWD 25/75 | 1692 | 517 | 305 | 3.4 | 349 | 0.98 | 845 | 3 | 124,000 | sport |
 | Ostwind 6T | `ostwind_6t` | Exotic | AWD 30/70 | 1690 | 470 | 278 | 3.8 | 342 | 0.97 | 791 | 4 | 110,000 | sport |
@@ -33,7 +41,7 @@
 | Merlo 2.0T | `merlo_20t` | Exotic | FWD | 1238 | 252 | 203 | 4.6 | 248 | 1.18 | 706 | 4 | 100,000 | semi_slick |
 | Mesquite PR | `mesquite_pr` | Truck | RWD | 2758 | 317 | 115 | 8.0 | 211 | 0.71 | 439 | 5 | 32,000 | all_terrain |
 | Erg Hamada | `erg_hamada` | Truck | AWD 50/50 | 2113 | 308 | 146 | 6.0 | 203 | 0.78 | 523 | 5 | 32,000 | all_terrain |
-| Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
+| Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.01 | 668 | 3 | 52,000 | sport |
 | Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.87 | 501 | 3 | 18,000 | street |
 
 Estimates come from `tools/specsheet/estimate.py` (point-mass model; see its docstring).

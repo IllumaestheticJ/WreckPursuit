@@ -1,0 +1,42 @@
+// Playtest row 92 ("headlights clip into the ground under braking", v0.12.12): the three
+// cars that dove deepest (soft muscle boat, police SUV, worn-out beater), wheel preset, full
+// brake from 100 km/h on flat asphalt, then a holding pedal (a full one at a standstill
+// engages auto-reverse). Arcade mode; physics is identical in both (CLAUDE.md), the twin
+// scenario runs the other mode. Expect: stops in a road car's distance, no contact with the
+// road (no crush). Pitch and body clearance are asserted in crates/wp_sim/tests/brake_dive.rs
+// (simcli has no pitch metric); measured peak 2.3–2.5°, front body ≥ 5.7 cm off the road
+// (before: 3.3–3.8°, 0.4–0.7 cm, the bastion's chassis collider on the road).
+(
+    name: "vehicle_brake_dive_100_arcade",
+    seed: 92,
+    mode: Simulation,
+    entities: [
+        (id: "ironside_440", car: "ironside_440", pos: (-6.0, 0.0, 0.0), speed_mps: 27.78, assists: wheel, inputs: [
+            (t_s: 0.0, input: (throttle: 0.3)),
+            (t_s: 1.0, input: (brake: 1.0)),
+            (t_s: 6.0, input: (brake: 0.45)),
+        ]),
+        (id: "sentinel_bastion", car: "sentinel_bastion", pos: (0.0, 0.0, 0.0), speed_mps: 27.78, assists: wheel, inputs: [
+            (t_s: 0.0, input: (throttle: 0.3)),
+            (t_s: 1.0, input: (brake: 1.0)),
+            (t_s: 6.0, input: (brake: 0.45)),
+        ]),
+        (id: "junkyard_beater", car: "junkyard_beater", pos: (6.0, 0.0, 0.0), speed_mps: 27.78, assists: wheel, inputs: [
+            (t_s: 0.0, input: (throttle: 0.3)),
+            (t_s: 1.0, input: (brake: 1.0)),
+            (t_s: 6.0, input: (brake: 0.45)),
+        ]),
+    ],
+    duration_s: 7.5,
+    expect: [
+        speed_at(entity: "ironside_440", t_s: 7.0, min: -0.3, max: 0.3),
+        travel_between(entity: "ironside_440", from_s: 1.0, to_s: 7.0, min: 38.0, max: 65.0),
+        metric(name: "crush_depth_m", entity: "ironside_440", min: 0.0, max: 0.005),
+        speed_at(entity: "sentinel_bastion", t_s: 7.0, min: -0.3, max: 0.3),
+        travel_between(entity: "sentinel_bastion", from_s: 1.0, to_s: 7.0, min: 38.0, max: 65.0),
+        metric(name: "crush_depth_m", entity: "sentinel_bastion", min: 0.0, max: 0.005),
+        speed_at(entity: "junkyard_beater", t_s: 7.0, min: -0.3, max: 0.3),
+        travel_between(entity: "junkyard_beater", from_s: 1.0, to_s: 7.0, min: 38.0, max: 65.0),
+        metric(name: "crush_depth_m", entity: "junkyard_beater", min: 0.0, max: 0.005),
+    ],
+)

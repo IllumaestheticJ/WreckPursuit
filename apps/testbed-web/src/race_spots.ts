@@ -5,6 +5,11 @@
 // the player's car is inside one. Stop in a spot and honk: the sim reports the race and
 // `main.ts` starts it like the picker's "Race" button. Hidden during races (the session lists
 // no spots then).
+//
+// One challenge system (round 12): the honk is the same horn action as a street-racer
+// challenge, and the sim reads one horn edge for both: a street racer within honking range
+// takes it first. The money is the picker race's existing stake (buy-in / purse from
+// `race_list`), shown in the prompt; there is no separate bet.
 import * as THREE from "three";
 
 /** One spot from `race_spots()` (`wp_wasm::race_spots::SpotCard`). */
@@ -55,9 +60,16 @@ export function lengthLabel(s: Pick<RaceSpot, "kind" | "length_m">): string {
   return s.kind === "circuit" ? `${len} lap` : len;
 }
 
-/** The HUD prompt for a spot ("Honk to start: …"). */
-export function promptText(s: RaceSpot, honkKey: string): string {
-  return `Honk (${honkKey}) to start: ${s.name} — ${kindLabel(s)}, ${lengthLabel(s)}`;
+/** The picker's advertised stake of a race for the player's car (`race_list`: buy-in, purse), $. */
+export interface SpotStake {
+  entry_fee: number;
+  purse: number;
+}
+
+/** The HUD prompt for a spot ("Honk to start: …", with the race's buy-in and purse when known). */
+export function promptText(s: RaceSpot, honkKey: string, stake?: SpotStake): string {
+  const money = stake ? ` — buy-in $${stake.entry_fee.toLocaleString("en-US")}, purse $${stake.purse.toLocaleString("en-US")}` : "";
+  return `Honk (${honkKey}) to start: ${s.name} — ${kindLabel(s)}, ${lengthLabel(s)}${money}`;
 }
 
 interface SpotView {
@@ -78,6 +90,8 @@ export class RaceSpotsView {
   private readonly mats = new Map<number, { ring: THREE.MeshBasicMaterial; disc: THREE.MeshBasicMaterial; pillar: THREE.MeshBasicMaterial }>();
   /** Spot the player is in (null outside); e2e reads it. */
   inside: RaceSpot | null = null;
+  /** Stake per race id for the player's car (`set`). */
+  private stakes = new Map<string, SpotStake>();
 
   constructor(parent: THREE.Object3D, overlay: HTMLElement) {
     this.group.name = "race-spots";
@@ -105,8 +119,9 @@ export class RaceSpotsView {
     return m;
   }
 
-  /** Replace the spots (a new session; `[]` hides them all). */
-  set(spots: RaceSpot[]): void {
+  /** Replace the spots (a new session; `[]` hides them all) and their stakes per race id. */
+  set(spots: RaceSpot[], stakes: Map<string, SpotStake> = new Map()): void {
+    this.stakes = stakes;
     for (const v of this.views) {
       this.group.remove(v.root);
       (v.label.material as THREE.SpriteMaterial).map?.dispose();
@@ -164,7 +179,7 @@ export class RaceSpotsView {
       return;
     }
     this.prompt.style.display = "";
-    const text = promptText(this.inside, honkKey);
+    const text = promptText(this.inside, honkKey, this.stakes.get(this.inside.id));
     const slow = speedMps < HONK_MAX_SPEED_MPS;
     const line = slow ? text : `Stop here to start: ${this.inside.name}`;
     if (this.prompt.textContent !== line) this.prompt.textContent = line;

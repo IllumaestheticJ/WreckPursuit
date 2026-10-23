@@ -1,6 +1,10 @@
 // Lead feedback round 12b (owner: "the police spawn too far"): a racer doing 2x the limit
 // through Core at 23:00. Checks the call -> first unit within 100 m time and that no unit appears
 // in a racer's view cone or closer than 120 m.
+// Re-aimed on main's rebuilt grid (#19-#27: divided highway viaduct, diamond ramps) with round
+// 12c's radar and witness pursuits: most runs now start with a witnessed pursuit before any call,
+// so few calls are left to time (day suburb 3 calls in 8 runs) and responders cross the new
+// highway by its ramps. Measured: 25 s reached 6 of 7, mean 15.3 s, max 35.1 s. Flagged to the lead as a regression to look at.
 (
     name: "police_response_night_core",
     seed: 300,
@@ -10,12 +14,9 @@
     racers: [(district: Core, speed_factor: 2.0)],
     expect: [
         (metric: "calls", min: 1.0, max: 10000.0),
-        // Re-measured after merging main's highway layout (was ≥ 0.875 / ≤ 15 s / ≤ 25 s on
-        // round 12's grid): 0.75 / 19.3 s / 40.8 s. Open question in
-        // docs/integration/police.md (responders arrive later on main's grid).
-        (metric: "call_reached_25s_frac", min: 0.5, max: 1.0),
-        (metric: "call_to_unit_100m_s", min: 0.0, max: 23.0),
-        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 48.0),
+        (metric: "call_reached_25s_frac", min: 0.85, max: 1.0),
+        (metric: "call_to_unit_100m_s", min: 0.0, max: 17.0),
+        (metric: "call_to_unit_100m_max_s", min: 0.0, max: 40.0),
         (metric: "responder_spawns", min: 1.0, max: 1000.0),
         (metric: "spawns_in_view", min: 0.0, max: 0.0),
         (metric: "despawns_in_sight", min: 0.0, max: 0.0),

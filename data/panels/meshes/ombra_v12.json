@@ -1,7 +1,7 @@
 {
   "id": "ombra_v12",
   "lattice_id": "ombra_v12",
-  "format": 3,
+  "format": 4,
   "tri_count": 18670,
   "tints": {"paint":[43,45,66],"caliper":[232,122,16],"spring":[232,122,16]},
   "atlas": {"y":[-2.43,2.45],"z":[0.0,1.425],"x_half":1.135},

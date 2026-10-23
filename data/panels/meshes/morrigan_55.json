@@ -1,7 +1,7 @@
 {
   "id": "morrigan_55",
   "lattice_id": "morrigan_55",
-  "format": 3,
+  "format": 4,
   "tri_count": 19136,
   "tints": {"paint":[255,209,0],"caliper":[210,30,30],"spring":[28,28,28],"accent":[244,244,240]},
   "atlas": {"y":[-2.295,2.455],"z":[0.0,1.4499999],"x_half":1.145},

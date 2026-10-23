@@ -1,16 +1,13 @@
 // Owner playtest row 24 ("I sideswiped a cop and a chase didn't start"), noon, 12x12 grid city,
-// no traffic or parked cars. Patrol unit 6 waits at the junction ahead of (-45.2, -53.2), facing
-// west, from about 2 s to 25 s. The racer (no heat) starts parked 55 m behind it in the next
-// lane (the oncoming one: one wrong-way report, 4 heat, stays below L1), cruises at 30 km/h
-// from 1 s and steers slightly right at 8.0 s: a glancing flank swipe at 8.6 s (contacts of
-// 540 + 170 N·s, normal closing 1.4 m/s, 30 km/h relative). wp_police counts it as assaulting
-// an officer: wanted L2 and the pursuit start in the same tick, with the radio line "Unit 6:
-// I've been hit! ...". Before the fix nothing happened at the contact; near-miss and wrong-way
-// reports only made the racer L1 and a pursuit started at 9.2 s, so the 9.0 s bound below
-// separates the two. Re-aim with `examples/probe_police.rs` if police spawning changes.
-// Re-aimed for main's highway layout (merge into ws/harness): unit 6 now drives east along
-// y = -56.8 and slows for the junction at x = -55; the racer starts at x = -8 and steers 0.1
-// left at 8.0 s into its flank.
+// no traffic or parked cars. Re-aimed 2026-10-21 for main's rebuilt grid (divided viaduct at
+// x = 0, ramp terminals at x = ±22): patrol unit 6 now drives east along y = -56.75 toward the
+// junction at x = -55. The racer (no heat) starts at x = -20 just left of the centreline, cruises
+// west at 30 km/h from 1 s and meets it at 7.6 s: a front-corner clip (11 kN·s, 13 m/s closing)
+// then a flank scrape (1.7 kN·s). wp_police counts it as assaulting an officer: wanted L2 and the
+// pursuit start in the same tick, with the radio line "Unit 6, I've been hit! ...". No
+// violation is seen before the contact, so nothing else could start the pursuit by 8.0 s. Half a
+// metre further right the unit dodges and there is no contact. Re-aim with
+// `examples/probe_police.rs` if police spawning changes.
 (
     name: "police_sideswipe_patrol_day",
     seed: 24,
@@ -25,23 +22,20 @@
         (
             id: "racer",
             car: "debug_sedan",
-            pos: (-8.0, -55.6, 0.0),
+            pos: (-20.0, -55.2, 0.0),
             yaw: 1.5708,
             driver: cruise(target_mps: 8.33, from_s: 1.0),
-            inputs: [
-                (t_s: 8.0, input: (steer: -0.1)),
-                (t_s: 8.6, input: ()),
-            ],
+            inputs: [],
         ),
     ],
     duration_s: 10.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "racer", t_s: 8.0, min: 7.5, max: 9.0),
+        speed_at(entity: "racer", t_s: 5.5, min: 7.5, max: 9.0),
         event_count(event: "Contact", entity: "racer", min: 1, max: 20),
-        // Wanted-level change and pursuit within 0.5 s of the 8.6 s contact.
-        police_event_before(kind: 2, t_s: 9.0),
-        pursuit_started_before(t_s: 9.0),
+        // Wanted-level change and pursuit within 0.4 s of the 7.6 s contact.
+        police_event_before(kind: 2, t_s: 8.0),
+        pursuit_started_before(t_s: 8.0),
         metric(entity: "racer", name: "final_health", min: 0.8, max: 1.0),
     ],
 )

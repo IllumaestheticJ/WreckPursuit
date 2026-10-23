@@ -8,9 +8,20 @@
 // builds) and checks them: `finishers` (every car finishes), `best_ratio` (best time over
 // that car's ideal time: its speed profile at 100 % of its measured limits; at most today's
 // + 0.05, never under 0.97), `race_time_s` per car (today's time −15 % .. +15 %, +20 % at
-// skill 0.50). Re-measured 2026-10-21 on ws/harness, after the merge with main's highway
-// layout; re-measure and widen only with a reason (docs/integration/opponent-pace.md,
-// Re-lock after the main merge).
+// skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measured the same day on the
+// round-12 tip (today's grids, residential grid city, police give-way; reasons in
+// docs/integration/opponent-pace.md). Re-locked 2026-10-21 on ws/police 3bccc796 + ws/harness +
+// lead/round12 (one-version handling); reasons in docs/integration/opponent-pace.md.
+// Re-locked 2026-10-22 after the traffic-passing fixes (one clearance for blockers and braking,
+// three-wide on wide roads, overtakes re-plan when held by another car): on this seed ai_vic
+// lost 8 s behind traffic (36.7 -> 44.9 s); over seeds 1-8 the s95 field mean is unchanged
+// (42.9 -> 42.7 s, per seed -5 .. +3 s). Re-measure and widen only with a reason.
+// Re-locked 2026-10-21 on lead/main-sync: main's grid moved the race to the divided viaduct
+// (start y = -728, 1113 m); the old grid stood on round 12's street and nobody finished.
+// Re-locked 2026-10-22 when the pace harness moved to the browser setup (the player seat stays
+// a player car, AI-driven, so traffic spawns round it): best ratio 1.381 -> 1.407, field
+// slower (measured; the cause in the traffic
+// around the player car was not traced).
 (
     name: "opponent_pace_grid_highway_sprint_s95",
     seed: 7,
@@ -32,7 +43,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (13.25, -727.0123, 0.0),
+            pos: (13.25, -728.25024, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -40,7 +51,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (8.25, -715.0123, 0.0),
+            pos: (8.25, -716.25024, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -48,7 +59,7 @@
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (13.25, -719.0123, 0.0),
+            pos: (13.25, -720.25024, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -56,7 +67,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (8.25, -723.0123, 0.0),
+            pos: (8.25, -724.25024, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -77,10 +88,10 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 4, max: 4),
-        metric(name: "best_ratio", min: 0.97, max: 1.30),
-        metric(name: "race_time_s", entity: "ai_vic", min: 31.5, max: 42.6),
-        metric(name: "race_time_s", entity: "ai_juno", min: 33.9, max: 45.9),
-        metric(name: "race_time_s", entity: "ai_tito", min: 34.9, max: 47.2),
-        metric(name: "race_time_s", entity: "player", min: 37.3, max: 50.4),
+        metric(name: "best_ratio", min: 0.97, max: 1.46),
+        metric(name: "race_time_s", entity: "ai_vic", min: 35.4, max: 47.8),
+        metric(name: "race_time_s", entity: "ai_juno", min: 38.8, max: 52.6),
+        metric(name: "race_time_s", entity: "ai_tito", min: 36.2, max: 49.0),
+        metric(name: "race_time_s", entity: "player", min: 40.2, max: 54.4),
     ],
 )

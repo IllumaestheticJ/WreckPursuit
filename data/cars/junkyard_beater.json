@@ -104,8 +104,8 @@
   "suspension": [
     {
       "spring_n_per_m": 15600.0,
-      "damper_bump_ns_per_m": 940.0,
-      "damper_rebound_ns_per_m": 1870.0,
+      "damper_bump_ns_per_m": 1880.0,
+      "damper_rebound_ns_per_m": 3740.0,
       "travel_m": 0.16,
       "preload_m": 0.11,
       "arb_n_per_m": 4700.0,
@@ -113,8 +113,8 @@
     },
     {
       "spring_n_per_m": 15600.0,
-      "damper_bump_ns_per_m": 940.0,
-      "damper_rebound_ns_per_m": 1870.0,
+      "damper_bump_ns_per_m": 1880.0,
+      "damper_rebound_ns_per_m": 3740.0,
       "travel_m": 0.16,
       "preload_m": 0.11,
       "arb_n_per_m": 4700.0,
@@ -122,8 +122,8 @@
     },
     {
       "spring_n_per_m": 12100.0,
-      "damper_bump_ns_per_m": 660.0,
-      "damper_rebound_ns_per_m": 1310.0,
+      "damper_bump_ns_per_m": 1320.0,
+      "damper_rebound_ns_per_m": 3670.0,
       "travel_m": 0.17,
       "preload_m": 0.08,
       "arb_n_per_m": 0.0,
@@ -131,8 +131,8 @@
     },
     {
       "spring_n_per_m": 12100.0,
-      "damper_bump_ns_per_m": 660.0,
-      "damper_rebound_ns_per_m": 1310.0,
+      "damper_bump_ns_per_m": 1320.0,
+      "damper_rebound_ns_per_m": 3670.0,
       "travel_m": 0.17,
       "preload_m": 0.08,
       "arb_n_per_m": 0.0,

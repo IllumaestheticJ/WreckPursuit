@@ -31,6 +31,8 @@
   --police-b: #3b7dff;
   /* race opponents on the map: distinct from police red/blue and the player's scanner green */
   --racer: #c77dff;
+  /* police helicopter (map icon, tether, pilot radio badge): spotlight yellow (PR #32) */
+  --heli: #ffe14d;
   --heat-0: rgba(255, 178, 30, 0);
   --heat-1: rgba(255, 61, 61, 0.55);
 

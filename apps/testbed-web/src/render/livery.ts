@@ -17,7 +17,7 @@
 // scheme, chosen per unit by wasm's county flag); generic words otherwise.
 import * as THREE from "three";
 import type { CarMeshJson, LiverySide, LiveryAtlas, PanelBody } from "./panels";
-import { DEFAULT_ATLAS, liveryPx } from "./panels";
+import { DEFAULT_ATLAS, liveryFlag, liveryPx } from "./panels";
 
 /** Canvas size of a livery (covers atlas U 0–0.5). */
 const W = 2048;
@@ -57,7 +57,7 @@ interface TextOpts {
   strokeM?: number;
   /** Horizontal scale of the glyphs (condensed 0.8, extended 1.25). */
   cond?: number;
-  /** Italic shear, glyph tops toward the car's front (harrier). */
+  /** Italic shear, glyph tops toward the car's front (vigil). */
   lean?: number;
   /** Letter spacing, em. */
   track?: number;
@@ -659,7 +659,7 @@ export function unitNumber(carId: string, id: number): string {
       return `L-L${n(9)}`;
     case "sentinel_bastion":
       return `${precinct}-B${n(9)}`;
-    case "sentinel_harrier":
+    case "sentinel_vigil":
       return `${precinct}-H${n(9)}`;
     default:
       return `${precinct}-${String(n(19)).padStart(2, "0")}`;
@@ -726,6 +726,9 @@ function decalMaterial(text: string, aspect: number, fill: string, stroke: strin
     metalness: 0.1,
     flatShading: true,
     side: THREE.DoubleSide,
+    // Single pass: transparent + DoubleSide is otherwise drawn back then front, flipping `side`
+    // and re-resolving the program twice every frame (perf_check "no shader re-resolve").
+    forceSinglePass: true,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
@@ -785,22 +788,15 @@ export function applyUnitDecals(root: THREE.Object3D, mesh: CarMeshJson, unitId:
 }
 
 /**
- * Give a sim police car's panel mesh its scheme: shared livery texture on the livery parts,
+ * Give a sim police car's panel mesh (render/panels.ts PanelBody: its decal carriers are own
+ * meshes named after their part, the other parts batched) its scheme: shared livery texture on the livery parts,
  * the scheme's base colour on plain paint parts (mirrors), per-unit decals from `unitId`.
  * Skipped when the URL forces a livery (`?livery=grid` debug view) or the mesh has no scheme.
  */
 export function setupPoliceLook(panels: PanelBody, mesh: CarMeshJson, unitId: number, county = false): void {
-  let flag: string | null = null;
-  try {
-    flag = new URLSearchParams(globalThis.location?.search ?? "").get("livery");
-  } catch {
-    flag = null;
-  }
-  if (flag) return;
+  if (liveryFlag()) return;
   const tex = liveryTexture(mesh, 8, county);
   if (!tex) return;
-  panels.setLivery(tex);
-  const base = liveryBaseColour(mesh, county);
-  if (base) panels.paint.color.copy(base);
+  panels.setLivery(tex, liveryBaseColour(mesh, county));
   applyUnitDecals(panels.root, mesh, unitId, county);
 }

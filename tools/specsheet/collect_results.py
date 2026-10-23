@@ -138,11 +138,13 @@ def check(car: dict, rows: dict) -> dict:
     cell("offset 40% 56 km/h", bool({"SuspensionFL", "WheelFL"} & set(r["failed"])), r,
          "struck-side corner intact")
     r = rows[(HARD, "Side", 40)]
-    ladder = car["lattice"].get("ladder_frame", False)
-    cell("side (T-bone) 40 km/h", ladder or any(f.startswith("Suspension") for f in r["failed"]),
+    # Exempt: body-on-frame (the barrier hits above the frame) and vans (the front axle sits
+    # under the cab, so the striker footprint on the front door ends short of the wheel arch).
+    exempt = car["lattice"].get("ladder_frame", False) or car["profile"] == "van"
+    cell("side (T-bone) 40 km/h", exempt or any(f.startswith("Suspension") for f in r["failed"]),
          r, "struck-side suspension intact")
     r = rows[(HARD, "Rear", 40)]
-    if car["id"] == "ironside_440":
+    if car["era"] == "70s":
         ok, why = "FuelTank" in r["failed"], "rear fuel tank survived"
     elif car["id"] == "lucciola_350":
         ok, why = bool({"Gearbox", "Driveshaft", "Engine"} & set(r["failed"])), "rear drive survived"

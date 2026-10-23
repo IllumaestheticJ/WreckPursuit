@@ -10,6 +10,10 @@ use wp_vehicle::rig::{FlatWorld, Rig};
 use wp_vehicle::{FlatGround, SurfaceConditions, Vehicle};
 
 fn main() {
+    // LEGACY=1: the pre-unify stock handling (wp_vehicle::lab_scope), for a cost A/B.
+    if std::env::var_os("LEGACY").is_some() {
+        wp_vehicle::lab_scope::set_legacy(true);
+    }
     let car = wp_contracts::load_car(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../data/cars/debug_coupe.json"

@@ -7,26 +7,34 @@
 //   * its VehicleView (full per-panel mesh), once the sim spawned it and its mesh is ready;
 //   * the instanced fleet (render/fleet.ts) otherwise: same model, same livery, same pose.
 // So a promotion or demotion swaps the drawer on one frame with no gap, jump or recolour.
-// Multi-model sessions (night run: 7 traffic, 5 police models): each record's `model` picks
-// its car model from `sim.sessionCarModels()` (the fleet instances per model); a promoted car's
-// view shows the same model (its vehicle_info().car_id).
+//
+// Models: a draw record's `model` picks the car model it is drawn as — traffic
+// `SessionModels.traffic_models[model]`, police `SessionModels.police_models[model]` (the
+// `car_mix` fleets); -1 / an empty list falls back to the single `traffic` / `police` model.
+// Each model has its own instance sets in the fleet, and the sim promotes the agent / unit to a
+// vehicle of the same model, so the swap keeps the body. Police light bars flash from the
+// model's pattern with a per-unit phase (render/lights.ts), the same as the promoted car's rig.
 //
 // `LodLog` records each car's draw state per frame for automation (e2e/run.mjs,
 // e2e/lod_shots.mjs): frames where a car had no proper mesh, the pose jump on every swap with
 // a few frames either side, and how far from the player cars appear and vanish.
 import * as THREE from "three";
-import { D, DRAW_STRIDE, AGENT_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
+import { D, DRAW_STRIDE, AGENT_FLAG, META_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
 import type { SessionModels } from "../wasm/sim";
 import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
-import { BAR, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
+import { BAR, Fleet, IND, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, indicatorPhaseOn, type DrawMode, type FleetModel } from "./fleet";
+import { unitLevels } from "./lights";
 import { COUNTY_PAINT, countySkin } from "./livery";
 
-/** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
-const VIEW_LOD_BAND_M = 15;
+/** Hysteresis of the view → fleet hand-off (`LodDirector.viewDrawM`): a promoted car goes to
+ * the fleet past `viewDrawM + VIEW_LOD_BAND_M` and comes back to its view within `viewDrawM`, m. */
+export const VIEW_LOD_BAND_M = 10;
 
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
-export type LodMode = "view" | DrawMode | "none";
+/** `culled`: instanced traffic past [`LodDirector.trafficDrawM`], not drawn by design (not a
+ * missing car). */
+export type LodMode = "view" | DrawMode | "none" | "culled";
 
 /** One car's draw state in one frame. */
 export interface DrawState {
@@ -54,16 +62,106 @@ function tailOf(flags: number, t: number): number {
   return flags & AGENT_FLAG.brake ? TAIL.brake : TAIL.off;
 }
 
+/**
+ * Indicator lamps lit at time `t` for traffic draw-record flags (`IND` bits): the turn signal's
+ * side, or both for hazards, in the lit half of the 1.5 Hz blink; 0 otherwise.
+ */
+export function indicatorsOf(flags: number, t: number): number {
+  if (!indicatorPhaseOn(t)) return 0;
+  return indicatorRequest(flags);
+}
+
+/** Lit indicator lamps (`IND` bits) of a `vehicle_meta()` record's flags at time `t` (police
+ * cars indicate from their unit; ported from claude/happy-knuth-g39ogc). */
+export function metaIndicators(flags: number, t: number): number {
+  if (!indicatorPhaseOn(t)) return 0;
+  return (flags & META_FLAG.turnLeft ? IND.left : 0) | (flags & META_FLAG.turnRight ? IND.right : 0);
+}
+
+/** Indicator lamps a traffic car asks for (`IND` bits, ignoring the blink phase). */
+export function indicatorRequest(flags: number): number {
+  if (flags & AGENT_FLAG.hazard) return IND.left | IND.right;
+  return (flags & AGENT_FLAG.turnLeft ? IND.left : 0) | (flags & AGENT_FLAG.turnRight ? IND.right : 0);
+}
+
+/** One traffic car's indicators in the last frame (`LodDirector.indicatorRows`, automation). */
+export interface IndicatorRow {
+  /** Traffic agent id. */
+  id: number;
+  /** Draw-record flags. */
+  flags: number;
+  /** Indicator lamps the flags ask for (`IND` bits, ignoring the blink). */
+  request: number;
+  /** How the car was drawn. */
+  mode: LodMode;
+  /** Lamps actually lit on the drawn car (read back from the fleet instance / view). */
+  left: boolean;
+  right: boolean;
+}
+
 /** Police light bar colour (alternating red / blue while pursuing). */
 function barOf(flags: number, t: number, i: number): number {
   if (!(flags & POLICE_DRAW_FLAG.chasing)) return BAR.off;
   return (t * 2.5 + i * 0.17) % 1 < 0.5 ? BAR.red : BAR.blue;
 }
 
+/** Model of a draw record: `list[model]`, else the session's single model (`fallback`). */
+export function recordModel(list: readonly string[] | undefined, model: number, fallback: string | null): string | null {
+  const i = Math.round(model);
+  return (list && i >= 0 && i < list.length ? list[i] : null) ?? fallback;
+}
+
 export class LodDirector {
   readonly fleet = new Fleet();
   readonly log = new LodLog();
-  models: SessionModels = { cars: [], traffic: [], police: [] };
+  private sessionModels: SessionModels = { cars: [], traffic: null, police: null };
+  /** Fleet model per draw-record `model` index (traffic / police), resolved once per session;
+   * index `list.length` holds the fallback model (record `model` −1). */
+  private tModels: (FleetModel | null | undefined)[] = [];
+  private pModels: (FleetModel | null | undefined)[] = [];
+  /** As `pModels`, in the Ashpeak County Sheriff livery. */
+  private pCountyModels: (FleetModel | null | undefined)[] = [];
+  /** Lens levels scratch (render/lights.ts unitLevels). */
+  private readonly lens = new Float32Array(6);
+
+  /** The session's car models (sim.sessionCarModels(); set at session start). */
+  get models(): SessionModels {
+    return this.sessionModels;
+  }
+  set models(m: SessionModels) {
+    this.sessionModels = m;
+    this.tModels = [];
+    this.pModels = [];
+    this.pCountyModels = [];
+  }
+
+  /** Fleet model of a traffic draw record's `model` (null: the session has no traffic model). */
+  private trafficModel(model: number): FleetModel | null {
+    const list = this.sessionModels.traffic_models ?? [];
+    const i = model >= 0 && model < list.length ? Math.round(model) : list.length;
+    let m = this.tModels[i];
+    if (m === undefined) {
+      const id = recordModel(list, model, this.sessionModels.traffic);
+      this.tModels[i] = m = id ? this.fleet.model(id) : null;
+    }
+    return m;
+  }
+
+  /**
+   * Fleet model of a police draw record's `model` (null: the session has no police model);
+   * `county` is the Ashpeak County Sheriff livery variant.
+   */
+  private policeModel(model: number, county = false): FleetModel | null {
+    const list = this.sessionModels.police_models ?? [];
+    const i = model >= 0 && model < list.length ? Math.round(model) : list.length;
+    const cache = county ? this.pCountyModels : this.pModels;
+    let m = cache[i];
+    if (m === undefined) {
+      const id = recordModel(list, model, this.sessionModels.police);
+      cache[i] = m = id ? this.fleet.model(id, true, county) : null;
+    }
+    return m;
+  }
   /** Draw states of the last frame (pooled: valid until the next update). */
   readonly states: DrawState[] = [];
   private readonly pool: DrawState[] = [];
@@ -80,13 +178,28 @@ export class LodDirector {
    * sim vehicles are always drawn. */
   trafficDrawM = Infinity;
   /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
-   * the fleet (one instanced draw for all of them) instead of their own view (~40 draw calls
-   * each, per panel). Low / touch graphics profiles only; the player and AI racers always use
-   * their view. 10 m of hysteresis so a car on the boundary does not flip drawers every frame. */
+   * the fleet (one instanced draw for all of them, mid-LOD mesh) instead of their own view
+   * (full detailed mesh, ~40 draw calls each, per panel, skinned to the lattice: dents and
+   * crumple show). Every graphics profile sets it (render/quality.ts: ~30 m; 0 on touch =
+   * always the fleet); the player and AI racers always use their view. `VIEW_LOD_BAND_M` of
+   * hysteresis so a car on the boundary does not flip drawers every frame. */
   viewDrawM = Infinity;
+  /** Roaming street racers (AI-racer sim vehicles, src/ui/street.ts): handed to the fleet by
+   * `viewDrawM` like promoted traffic / police, in their level colour and their own model.
+   * Other AI racers (picker-race fields) and the street racer racing the player (not in this
+   * set) keep their view. Set every frame by main. */
+  streetRacers: ReadonlySet<number> = new Set();
+  /** Draw-record scratch for a street racer's pose (D layout). */
+  private readonly rRec = new Float32Array(DRAW_STRIDE);
+  /** `fleet.generation` the model caches were resolved for. */
+  private fleetGen = -1;
   /** Entities currently handed to the fleet by `viewDrawM`. */
   private readonly farViews = new Set<number>();
   private readonly cam = new THREE.Vector3();
+  /** Record `indicatorRows` every frame (automation; off by default, costs nothing then). */
+  indicatorProbe = false;
+  /** Traffic cars' indicator state in the last frame while `indicatorProbe` is on. */
+  readonly indicatorRows: IndicatorRow[] = [];
 
   /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). The map is
    * reused: valid until the next call. */
@@ -125,36 +238,85 @@ export class LodDirector {
     claimed.clear();
     this.fleet.begin();
 
+    const probe = this.indicatorProbe;
+    if (probe) this.indicatorRows.length = 0;
     const showTraffic = layers.on("traffic");
-    const tModels = this.models.traffic;
+    // Fleet models are cleared on an art-style change: resolve them again.
+    if (this.fleet.generation !== this.fleetGen) {
+      this.fleetGen = this.fleet.generation;
+      this.tModels = [];
+      this.pModels = [];
+      this.pCountyModels = [];
+    }
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
-      const tModel = this.fleetModel(tModels, traffic[o + D.model], false);
       const entity = traffic[o + D.entity];
       const flags = traffic[o + D.flags];
       const key = keyOf(this.tKeys, "t", traffic[o + D.id]);
       const view = entity > 0 ? views.get(entity) : undefined;
-      if (view) claimed.add(entity);
+      const ind = indicatorsOf(flags, timeS);
+      if (view) {
+        claimed.add(entity);
+        // A promoted car's own view shows the same indicators as its draw record.
+        view.setIndicators(ind);
+      }
       const far = !view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
-      states.push(this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null));
+      const tModel = showTraffic && !far ? this.trafficModel(traffic[o + D.model]) : null;
+      const s = this.draw(key, entity, view, traffic, o, tModel, trafficPaint(flags), tailOf(flags, timeS), null, ind);
+      // Past the traffic draw distance (main's long highway roads keep cars alive out there).
+      if (far && s.mode === "none") s.mode = "culled";
+      states.push(s);
+      if (probe) {
+        const car = s.mode === "full" || s.mode === "proxy" ? this.fleet.lastAdded.car : null;
+        const lit = s.mode === "view" && view ? view.indicatorsLit() : car ? car.indicatorsLit(this.fleet.lastAdded.i) : { left: false, right: false };
+        this.indicatorRows.push({ id: traffic[o + D.id], flags, request: indicatorRequest(flags), mode: s.mode, left: lit.left, right: lit.right });
+      }
     }
 
-    const pModels = this.models.police;
     let unit = 0;
     for (let o = 0; o < police.length; o += DRAW_STRIDE, unit++) {
       const flags = police[o + D.flags];
       if (flags & POLICE_DRAW_FLAG.helicopter) continue; // SceneView draws helicopters
-      // Ashpeak County Sheriff units: county livery model and green proxy paint.
-      const county = countySkin((flags & POLICE_DRAW_FLAG.county) !== 0);
-      const pModel = this.fleetModel(pModels, police[o + D.model], true, county);
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      states.push(this.draw(keyOf(this.pKeys, "p", police[o + D.id]), entity, view, police, o, pModel, county ? COUNTY_PAINT : POLICE_PAINT, TAIL.off, barOf(flags, timeS, unit)));
+      // Ashpeak County Sheriff units: county livery model and green paint.
+      const county = countySkin((flags & POLICE_DRAW_FLAG.county) !== 0);
+      const pModel = this.policeModel(police[o + D.model], county);
+      const id = police[o + D.id];
+      // Mesh light-bar lenses flash from the model's pattern (the box bar of the proxy / older
+      // meshes alternates red / blue); livery schemes paint their plain paint parts in the base.
+      const lens = pModel?.lensed ? unitLevels(pModel.info.car_id, id, timeS, (flags & POLICE_DRAW_FLAG.chasing) !== 0, this.lens) : null;
+      const paint = pModel?.liveryBase ?? (county ? COUNTY_PAINT : POLICE_PAINT);
+      states.push(this.draw(keyOf(this.pKeys, "p", id), entity, view, police, o, pModel, paint, TAIL.off, barOf(flags, timeS, unit), 0, lens));
+    }
+
+    // Roaming street racers: their view near the camera, the fleet beyond (pose = the view's
+    // interpolated pose, so the hand-off does not jump).
+    for (const id of this.streetRacers) {
+      const v = views.get(id);
+      if (!v || claimed.has(id)) continue;
+      claimed.add(id);
+      const rec = this.rRec;
+      const p = v.root.position;
+      const q = v.root.quaternion;
+      rec[D.entity] = id;
+      setXYZ3(rec, D.pos, p.x, p.y, p.z);
+      rec[D.rot] = q.x;
+      rec[D.rot + 1] = q.y;
+      rec[D.rot + 2] = q.z;
+      rec[D.rot + 3] = q.w;
+      states.push(this.draw(keyOf(this.vKeys, "v", id), id, v, rec, 0, this.fleet.model(v.info.car_id), v.paintHex, TAIL.off, null));
     }
 
     // Player, AI racers and scenario cars: always their own view.
     for (const [id, v] of views) {
       if (claimed.has(id)) continue;
+      // A street racer handed to the fleet while roaming that now races the player (left
+      // `streetRacers`) comes back to its view at once.
+      if (v.lodFar) {
+        v.lodFar = false;
+        v.root.visible = true;
+      }
       const p = v.root.position;
       const s = this.next(keyOf(this.vKeys, "v", id), "view", !v.panels.ready && layers.on("panels") && layers.on("body"), id, this.dist(p.x, p.y, p.z));
       setXYZ(s.pos, p.x, p.y, p.z);
@@ -163,15 +325,6 @@ export class LodDirector {
     }
     this.fleet.end();
     this.log.push(timeS, states, focus);
-  }
-
-  /**
-   * Fleet model of a draw record's `model` index into `ids` (a session model list); an index out
-   * of range falls back to the first model, null when the session has none.
-   */
-  private fleetModel(ids: string[], index: number, police: boolean, county = false): ReturnType<Fleet["model"]> | null {
-    if (ids.length === 0) return null;
-    return this.fleet.model(ids[index] ?? ids[0], police, county);
   }
 
   /** Distance from the camera (sim space), m. */
@@ -201,10 +354,12 @@ export class LodDirector {
     view: VehicleView | undefined,
     rec: Float32Array,
     o: number,
-    model: ReturnType<Fleet["model"]> | null,
+    model: FleetModel | null,
     paint: number,
     tail: number,
     bar: number | null,
+    ind = 0,
+    lens: ArrayLike<number> | null = null,
   ): DrawState {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
@@ -212,13 +367,14 @@ export class LodDirector {
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
-    // Low / touch profiles (`viewDrawM`): a promoted traffic / police car farther than that is
-    // drawn by the fleet (one instanced draw for all) instead of its own view; 10 m of
-    // hysteresis. `lodFar` also lets the view skip its lattice fetch and re-skin meanwhile.
+    // `viewDrawM`: a promoted traffic / police car farther than that is drawn by the fleet (one
+    // instanced draw for all, mid LOD) instead of its own view; VIEW_LOD_BAND_M of hysteresis;
+    // 0 (touch) = always the fleet. `lodFar` also lets the view skip its lattice fetch and
+    // re-skin meanwhile.
     if (view && ready && model && Number.isFinite(this.viewDrawM)) {
       const p = view.root.position;
       const dv = this.dist(p.x, p.y, p.z);
-      view.lodFar = view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + 10;
+      view.lodFar = this.viewDrawM <= 0 || (view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + VIEW_LOD_BAND_M);
       if (view.lodFar) ready = false;
     } else if (view) view.lodFar = false;
     if (view) view.root.visible = ready;
@@ -233,7 +389,7 @@ export class LodDirector {
     let mode: LodMode = "none";
     let fallback = false;
     if (model) {
-      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar);
+      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar, ind, lens);
       fallback = mode === "proxy" && d < this.fleet.fullLodM && !model.full;
     }
     const s = this.next(key, mode, fallback, entity, d);
@@ -241,6 +397,12 @@ export class LodDirector {
     setXYZ(s.truth, x, y, z);
     return s;
   }
+}
+
+function setXYZ3(a: Float32Array, o: number, x: number, y: number, z: number): void {
+  a[o] = x;
+  a[o + 1] = y;
+  a[o + 2] = z;
 }
 
 function setXYZ(a: [number, number, number], x: number, y: number, z: number): void {
@@ -354,7 +516,7 @@ export class LodLog {
       }
       if (s.fallback) tr.placeholderS += dt;
       const prev = tr.rows[tr.rows.length - 1];
-      const drawer = (m: LodMode) => (m === "view" ? "view" : m === "none" ? "none" : "fleet");
+      const drawer = (m: LodMode) => (m === "view" ? "view" : m === "none" || m === "culled" ? "none" : "fleet");
       if (drawer(prev.mode) !== drawer(s.mode)) {
         const off = (r: { pos: number[]; truth: number[] }) => r.pos.map((p, i) => p - r.truth[i]);
         const a = off(prev);

@@ -11,6 +11,7 @@ import type { AssistPreset, Palette } from "../../model/types";
 import { ASSIST_PRESETS } from "../../mock/mockData";
 import { Badge, Button, ChoiceField, Modal, Panel, ScreenHead, SliderField, Tabs, ToggleField, useEscape } from "../../ui/kit";
 import "./settings.css";
+import { ASSIST_LEVELS } from "../../menu/settings";
 
 type Tab = "controls" | "assists" | "damage" | "access" | "feedback";
 
@@ -271,12 +272,12 @@ function CaptureDialog(props: { action: InputAction; device: InputDevice; pads: 
 
 // ------------------------------------------------------------------ assists
 
-const ASSIST_ROWS: { key: keyof AssistProfile; label: string; hint: string; kind: "bool" | "frac" }[] = [
-  { key: "abs", label: "ABS", hint: "Anti-lock brakes", kind: "bool" },
-  { key: "tcs", label: "Traction control", hint: "Cuts power on wheelspin", kind: "bool" },
+const ASSIST_ROWS: { key: keyof AssistProfile; label: string; hint: string; kind: "bool" | "frac" | "level" }[] = [
+  { key: "abs", label: "ABS", hint: "Off / Half (short lock-ups) / Full", kind: "level" },
+  { key: "tcs", label: "Traction control", hint: "Off (raw throttle) / Half (some wheelspin) / Full", kind: "level" },
   { key: "esc", label: "Stability control", hint: "Brakes single wheels to stop spins", kind: "bool" },
   { key: "steer_speed_sensitivity", label: "Speed-sensitive steering", hint: "Less lock at speed", kind: "frac" },
-  { key: "countersteer_help", label: "Countersteer help", hint: "Catches slides for you", kind: "frac" },
+  { key: "countersteer_help", label: "Countersteer help", hint: "Hands off in a slide: the wheels follow it (up to 30 % lock)", kind: "frac" },
   { key: "throttle_filter", label: "Throttle smoothing", hint: "Digital → gradual throttle", kind: "frac" },
   { key: "brake_filter", label: "Brake smoothing", hint: "Digital → gradual brake", kind: "frac" },
   { key: "auto_gears", label: "Automatic gears", hint: "", kind: "bool" },
@@ -285,16 +286,17 @@ const ASSIST_ROWS: { key: keyof AssistProfile; label: string; hint: string; kind
 
 const PRESET_COLS: { id: Exclude<AssistPreset, "custom">; label: string; note: string }[] = [
   { id: "rookie", label: "Rookie", note: "Arcade, all on" },
-  { id: "street", label: "Street", note: "Arcade, ABS + TCS" },
-  { id: "sim", label: "Sim", note: "Simulation, off" },
+  { id: "street", label: "Street", note: "Arcade, ABS Full + TCS Half" },
+  { id: "sim", label: "Sim", note: "Simulation, ABS Half, TCS off" },
 ];
 
 function Assists() {
   const assists = useSlice((s) => s.settings.assists);
   const preset = useSlice((s) => s.settings.assistPreset);
   const send = useSend();
-  const set = (k: keyof AssistProfile, v: boolean | number) => send({ type: "settings.patch", patch: { assists: { ...assists, [k]: v } } });
-  const fmt = (v: boolean | number) => (typeof v === "boolean" ? (v ? "ON" : "—") : v === 0 ? "—" : `${Math.round(v * 100)}%`);
+  const set = (k: keyof AssistProfile, v: boolean | number | string) => send({ type: "settings.patch", patch: { assists: { ...assists, [k]: v } } });
+  const fmt = (v: boolean | number | string) =>
+    typeof v === "string" ? (v === "Off" ? "—" : v.toUpperCase()) : typeof v === "boolean" ? (v ? "ON" : "—") : v === 0 ? "—" : `${Math.round(v * 100)}%`;
   return (
     <Panel title="Assist matrix" tag={preset === "custom" ? "CUSTOM" : preset.toUpperCase()}>
       <p class="wp-dim" style={{ marginTop: 0 }}>
@@ -330,7 +332,15 @@ function Assists() {
                 </td>
               ))}
               <td>
-                {r.kind === "bool" ? (
+                {r.kind === "level" ? (
+                  <select class="wp-select" value={String(assists[r.key])} aria-label={r.label} onChange={(e) => set(r.key, (e.target as HTMLSelectElement).value)}>
+                    {ASSIST_LEVELS.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                ) : r.kind === "bool" ? (
                   <input type="checkbox" class="wp-toggle" checked={assists[r.key] as boolean} aria-label={r.label} onChange={(e) => set(r.key, (e.target as HTMLInputElement).checked)} />
                 ) : (
                   <span class="wp-row">

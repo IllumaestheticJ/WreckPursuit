@@ -141,7 +141,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.2 s | 241 km/h | 34.4 m | 1.10 g | — |
+| sim | 5.1 s | 241 km/h | 32.4 m | 1.12 g | — |
 | estimate | 4.6 s | 248 km/h | 31.0 m | 1.18 g | 706 |
 
 ## Damage lattice (`data/lattices/merlo_20t.json`)

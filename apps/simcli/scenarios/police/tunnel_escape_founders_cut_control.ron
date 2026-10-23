@@ -4,9 +4,26 @@
 // the lay-by, so the escape timer never runs long; ground units arrive and the first pursuit
 // ends in a capture, never an escape. Round 13: police converge faster (rows 63 / 64), so the
 // capture comes sooner, 129.3 s at 25 m/s (was 150.7-168.9 s); the window starts at 115 s.
+// Row 117 (auto clutch stays engaged once moving, revs follow road speed): police units pull
+// through their gears without the old clutch slip, capture at 111.7 s; window starts at 100 s.
+// Row 119: re-seeded to 56 with the escape scenario (see there); captured at 124.7 s.
+// Round 12c: re-seeded to 51 with the escape scenario (see there); captured at 112.1 s.
+// Row 84 (search extras, 2026-10-22): extra units sent to the last known spot shift this chase's
+// timeline (seed 51 lost him on Mercer at 64.5 s and he escaped at 80.4 s, before the helicopter).
+// Seeds 50-63: the escape story holds on 12 of 14, escape and control both on 7 (53-55, 57, 59,
+// 60, 62); re-seeded to 53.
+// World merge 6799200b (D's Loop 9 rest stops add off/on ramps and parking roads to Port Vesper):
+// the new roads change the seeded police spawn spots, and seed 53 diverged at 17.6 s; no unit
+// was near Mercer to re-acquire him at ~72 s, so he escaped at 80.4 s before the helicopter.
+// Seeds 50-63 on the merged tip: escape story on 11 of 14, both scenarios on 4 (54-56, 58); 54
+// and 55 held both before the merge too. Re-seeded to 54.
+// Row 156 (owner decision, 2026-10-23: helicopter from wanted level 5, spikes from 4): from heat
+// 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
+// keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
+// 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
 (
     name: "police_tunnel_escape_founders_cut_control",
-    seed: 51,
+    seed: 54,
     city: preset(name: "vesper_v2", seed: 1),
     time_of_day_h: 12.0,
     time_ratio: 1.0,
@@ -21,7 +38,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            police_heat: 50.0,
+            police_heat: 90.0,
             speed_mps: 20.0,
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),
@@ -30,12 +47,13 @@
     hash_every: 240,
     expect: [
         pursuit_started_before(t_s: 15.0),
-        // wp_police HeloLaunched (kind 12).
-        police_event_before(kind: 12, t_s: 80.0),
+        // wp_police HeloLaunched (kind 12). Turn-round round (crawl 4 -> 5.5 m/s, 2026-10-22): the
+        // helicopter launches at 90.2 s (was < 80), still before he reaches the Cut.
+        police_event_before(kind: 12, t_s: 95.0),
         metric(entity: "racer", name: "route_progress", min: 0.97, max: 1.0),
         // Never out of sight long enough to escape.
         metric(entity: "racer", name: "max_los_lost_s", min: 0.0, max: 16.0),
-        first_pursuit_end(entity: "racer", outcome: "Captured", min_s: 115.0, max_s: 190.0),
+        first_pursuit_end(entity: "racer", outcome: "Captured", min_s: 100.0, max_s: 190.0),
         total_loss(entity: "racer", expected: false),
     ],
 )

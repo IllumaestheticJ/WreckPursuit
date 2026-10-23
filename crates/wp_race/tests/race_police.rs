@@ -48,7 +48,7 @@ fn plan_sprint(world: &World) -> CityRace {
         world,
         [60.55, -437.0 + dy, 0.0],
         [0.0, 1.0],
-        [60.55, -300.0 + dy, 0.0],
+        [60.55, -230.0 + dy, 0.0],
         3.0,
     )
     .expect("arterial sprint route")
@@ -75,6 +75,8 @@ struct PoliceRace {
     signals: Vec<RaceSignal>,
     /// `(tick, racer)` of every pursuit start.
     pursuits: Vec<(u64, EntityId)>,
+    /// `(tick, racer)` of every traffic violation by a racer (speeding, red light, …).
+    violations: Vec<(u64, EntityId)>,
     /// Tick the race finished (judge), if it did.
     finished_tick: Option<u64>,
     green_tick: u64,
@@ -134,7 +136,8 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         });
     }
     // Open roads (illegal night meet): the AI may only borrow opposing lanes to overtake.
-    let mut ai = AiEntrants::new(sim.world(), &race, kind, false, &entrants, 15);
+    let mut ai =
+        AiEntrants::new(sim.world(), &race, kind, false, &entrants, 15).expect("a drivable route");
     let green_tick = judge.start(sim.tick()).unwrap();
 
     // Two earlier meets tonight at this venue: this one makes it hot.
@@ -155,6 +158,7 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
     let mut events: Vec<SimEvent> = Vec::new();
     let mut signals = Vec::new();
     let mut pursuits = Vec::new();
+    let mut violations = Vec::new();
     let mut finished_tick = None;
     let mut heat_after_report = Vec::new();
     let max_ticks = 240 * 120;
@@ -276,6 +280,11 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
             {
                 pursuits.push((tick, racer));
             }
+            if let SimEvent::TrafficViolation { vehicle, .. } = e {
+                if ids.contains(vehicle) {
+                    violations.push((tick, *vehicle));
+                }
+            }
         }
         let police_ids: Vec<EntityId> = sim
             .vehicles()
@@ -283,7 +292,7 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
             .filter(|v| v.kind == VehicleKind::Police)
             .map(|v| v.id)
             .collect();
-        judge.set_police(&police_ids);
+        judge.add_police(&police_ids);
         let samples: Vec<RacerSample> = sim
             .vehicles()
             .iter()
@@ -307,6 +316,7 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         results: judge.results(),
         signals,
         pursuits,
+        violations,
         finished_tick,
         green_tick,
         heat_after_report,
@@ -372,9 +382,12 @@ fn city_sprint_pulls_in_police() {
 #[test]
 fn without_the_meet_report_nobody_is_chased() {
     // Control run: same race, same seed, but nobody calls the hot meet in. The racers still
-    // speed and pick up some heat on top of their starting 3.75, but stay below wanted level 1,
-    // so no pursuit starts in the same window. The meet report is what tips it.
-    // (Tuning-sensitive by design: if police or traffic tuning changes, re-check both runs.)
+    // speed and pick up heat on top of their starting 3.75; the meet report is what tips the
+    // field into pursuits. Since the round-12 merges (side floor, clutch, AI pace) a racer at
+    // race pace can also earn a pursuit of its own (a patrol witnesses it speeding or running
+    // a red light), as in `wanted_ai_racer_flees_police_through_the_city`. So what must hold:
+    // no report, and no pursuit without a violation of that racer's own before it (heat that
+    // came from the report would have none).
     let r = run_police_race(false);
     assert!(r.finished_tick.is_some());
     assert!(
@@ -383,11 +396,18 @@ fn without_the_meet_report_nobody_is_chased() {
             .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })),
         "control run must not call the meet in"
     );
-    assert!(
-        r.pursuits.is_empty(),
-        "pursuits without a report: {:?}",
-        r.pursuits
-    );
+    for (tick, racer) in &r.pursuits {
+        let own = r
+            .violations
+            .iter()
+            .filter(|(t, v)| v == racer && t <= tick)
+            .count();
+        assert!(
+            own >= 1,
+            "pursuit of {racer:?} at tick {tick} without a violation of its own; violations {:?}",
+            r.violations
+        );
+    }
 }
 
 #[test]

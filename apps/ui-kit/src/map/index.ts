@@ -8,3 +8,4 @@ export { districtLabels, districtName, zoneAt, CITY_NAMES, type DistrictLabel } 
 export { MinimapRenderer, type MinimapOptions, type MinimapStats } from "./Minimap";
 export { FullMapRenderer, type FullMapStats } from "./FullMap";
 export { MapHud, mountMapHud, type MapHudOptions, type MapHudStats } from "./mapHud";
+export { drawFlag, drawMarker, drawRoute, ROUTE_COLOUR, type MapExtras, type MapFlag, type MapLegendExtra, type MapMarker } from "./extras";

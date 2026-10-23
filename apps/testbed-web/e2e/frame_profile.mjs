@@ -47,6 +47,8 @@ const browser = await chromium.launch({
     "--enable-unsafe-swiftshader",
     "--ignore-gpu-blocklist",
     "--autoplay-policy=no-user-gesture-required",
+    // JS_FLAGS=<v8 flags>: e.g. "--trace-deopt" to see why a hot loop stays in a boxing tier.
+    ...(process.env.JS_FLAGS ? [`--js-flags=${process.env.JS_FLAGS}`] : []),
   ],
 });
 const [vw, vh] = (process.env.VIEWPORT ?? "1280x720").split("x").map(Number);
@@ -59,13 +61,6 @@ page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
-await page.evaluate((rain) => window.__wp.startNightRun(undefined, "Arcade", rain), which === "rain");
-// The key press also starts the AudioContext (recorded packs load in the warm-up).
-await page.keyboard.down("KeyW");
-await page.waitForTimeout(5000);
-// EVAL=<js>: run in the page before measuring (A/B experiments, e.g. hide a layer).
-if (process.env.EVAL) await page.evaluate(process.env.EVAL);
-
 // Count wasm↔JS calls: wrap every function of the `sim` wrapper and the audio bridge (the only
 // two modules that call the wasm exports; same module instances as the app's).
 await page.evaluate(async () => {
@@ -89,6 +84,100 @@ await page.evaluate(async () => {
   }
 });
 
+// Draw calls / triangles of every rendered frame (renderer.info resets per render). The
+// low-poly post stack (render/post.ts) calls render() several times a frame: every call
+// adds its draws, but only the main scene's render counts as a frame.
+// Installed before the chase starts, like the wasm call counters above: replacing a renderer
+// method (or a `sim` function) changes a constant field, which throws away the optimised code
+// of every caller (renderObject, the frame loop); done just before measuring, the window then
+// measured that code re-warming in a boxing tier (allocation pass 2026-10-20). Counters are
+// typed arrays, so the probe itself does not allocate per draw.
+await page.evaluate(() => {
+  const wp = window.__wp;
+  const r = wp.scene.renderer;
+  const orig = r.render.bind(r);
+  // Per-feature draw calls: every draw goes through renderBufferDirect; the drawn object's
+  // nearest parent tagged with userData.perf (src/perf.ts tagFeature) names the feature.
+  // Draws of other scenes (the post stack's full-screen passes) count as "post".
+  const names = [];
+  const index = new Map();
+  const calls = new Float64Array(64);
+  const tris = new Float64Array(64);
+  const slot = (name) => {
+    let i = index.get(name);
+    if (i === undefined) {
+      i = names.length;
+      names.push(name);
+      index.set(name, i);
+    }
+    return i;
+  };
+  const POST = slot("post");
+  const tagOf = new WeakMap();
+  const featureOf = (o) => {
+    let t = tagOf.get(o);
+    if (t !== undefined) return t;
+    let name = "other";
+    for (let x = o; x; x = x.parent)
+      if (x.userData?.perf) {
+        name = x.userData.perf;
+        break;
+      }
+    t = slot(name);
+    tagOf.set(o, t);
+    return t;
+  };
+  let inMain = false;
+  const totals = new Float64Array(3); // draw calls, triangles, main-scene renders
+  window.__probeFeat = {
+    reset() {
+      calls.fill(0);
+      tris.fill(0);
+      totals.fill(0);
+    },
+    get calls() {
+      return totals[0];
+    },
+    get tris() {
+      return totals[1];
+    },
+    get n() {
+      return totals[2];
+    },
+    feat: () => Object.fromEntries(names.map((k, i) => [k, calls[i]]).filter(([, v]) => v > 0)),
+    featTris: () => Object.fromEntries(names.map((k, i) => [k, tris[i]]).filter(([, v]) => v > 0)),
+  };
+  const origRbd = r.renderBufferDirect.bind(r);
+  r.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
+    const k = inMain ? featureOf(object) : POST;
+    calls[k] += 1;
+    // Triangles (approx.: the draw range ignored): index or vertex count / 3 × instances.
+    const n = geometry.index ? geometry.index.count : (geometry.attributes.position?.count ?? 0);
+    tris[k] += (object.isMesh ? n / 3 : 0) * (object.isInstancedMesh ? object.count : 1);
+    return origRbd(camera, scene, geometry, material, object, group);
+  };
+  r.render = (s, c) => {
+    inMain = s === wp.scene.scene;
+    orig(s, c);
+    inMain = false;
+    totals[0] += r.info.render.calls;
+    totals[1] += r.info.render.triangles;
+    if (s === wp.scene.scene) totals[2] += 1;
+  };
+  window.__probeRestore = () => {
+    r.render = orig;
+    r.renderBufferDirect = origRbd;
+  };
+});
+await page.evaluate((rain) => window.__wp.startNightRun(undefined, "Arcade", rain), which === "rain");
+// The key press also starts the AudioContext (recorded packs load in the warm-up).
+await page.keyboard.down("KeyW");
+// WARMUP_S=<s>: chase time before measuring (default 5). At 3–4 fps much of the JIT warm-up of the
+// frame loop (Three's render path, the app's per-car loops) is still going on after 5 s.
+await page.waitForTimeout(Number(process.env.WARMUP_S ?? 5) * 1000);
+// EVAL=<js>: run in the page before measuring (A/B experiments, e.g. hide a layer).
+if (process.env.EVAL) await page.evaluate(process.env.EVAL);
+
 const cdp = await page.context().newCDPSession(page);
 if (Number(process.env.CPU_THROTTLE) > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.CPU_THROTTLE) });
 await cdp.send("HeapProfiler.enable");
@@ -98,53 +187,8 @@ await page.evaluate(() => {
   for (const k of Object.keys(window.__wasmCalls)) delete window.__wasmCalls[k];
   wp.app.prof.resetAcc();
   const PB = [...wp.app.views.values()][0]?.panels.constructor;
-  window.__probe = { PB, reskins0: PB?.reskins ?? 0, views0: wp.app.views.size, tick0: wp.sim.worldInfo()[0], t0: performance.now(), calls: 0, tris: 0, n: 0, voices0: window.__wpAudio?.pool?.created ?? 0 };
-  // Draw calls / triangles of every rendered frame (renderer.info resets per render). The
-  // low-poly post stack (render/post.ts) calls render() several times a frame: every call
-  // adds its draws, but only the main scene's render counts as a frame.
-  const r = wp.scene.renderer;
-  const orig = r.render.bind(r);
-  // Per-feature draw calls: every draw goes through renderBufferDirect; the drawn object's
-  // nearest parent tagged with userData.perf (src/perf.ts tagFeature) names the feature.
-  // Draws of other scenes (the post stack's full-screen passes) count as "post".
-  const feat = (window.__probe.feat = {});
-  const featTris = (window.__probe.featTris = {});
-  const tagOf = new WeakMap();
-  const featureOf = (o) => {
-    let t = tagOf.get(o);
-    if (t !== undefined) return t;
-    t = "other";
-    for (let x = o; x; x = x.parent)
-      if (x.userData?.perf) {
-        t = x.userData.perf;
-        break;
-      }
-    tagOf.set(o, t);
-    return t;
-  };
-  let inMain = false;
-  const origRbd = r.renderBufferDirect.bind(r);
-  r.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
-    const k = inMain ? featureOf(object) : "post";
-    feat[k] = (feat[k] ?? 0) + 1;
-    // Triangles (approx.: the draw range ignored): index or vertex count / 3 × instances.
-    const n = geometry.index ? geometry.index.count : (geometry.attributes.position?.count ?? 0);
-    featTris[k] = (featTris[k] ?? 0) + ((object.isMesh ? n / 3 : 0) * (object.isInstancedMesh ? object.count : 1));
-    return origRbd(camera, scene, geometry, material, object, group);
-  };
-  r.render = (s, c) => {
-    inMain = s === wp.scene.scene;
-    orig(s, c);
-    inMain = false;
-    const p = window.__probe;
-    p.calls += r.info.render.calls;
-    p.tris += r.info.render.triangles;
-    if (s === wp.scene.scene) p.n++;
-  };
-  window.__probe.restore = () => {
-    r.render = orig;
-    r.renderBufferDirect = origRbd;
-  };
+  window.__probe = { PB, reskins0: PB?.reskins ?? 0, views0: wp.app.views.size, tick0: wp.sim.worldInfo()[0], t0: performance.now(), voices0: window.__wpAudio?.pool?.created ?? 0 };
+  window.__probeFeat.reset();
   // Wall frame intervals (rAF), for the distribution: frames over 250 ms lose sim time.
   const ivs = (window.__probe.intervals = []);
   let last = performance.now();
@@ -162,10 +206,13 @@ await cdp.send("HeapProfiler.startSampling", {
 });
 await page.waitForTimeout(Number(secs) * 1000);
 const { profile } = await cdp.send("HeapProfiler.stopSampling");
+// PROFILE_OUT=<file>: also save the raw sampling heap profile (offline analysis).
+if (process.env.PROFILE_OUT) (await import("node:fs")).writeFileSync(process.env.PROFILE_OUT, JSON.stringify(profile));
 const r = await page.evaluate(() => {
   const wp = window.__wp;
   const p = window.__probe;
-  p.restore();
+  window.__probeRestore();
+  const pf = window.__probeFeat;
   const wall = (performance.now() - p.t0) / 1000;
   const iv = p.intervals.slice(1).sort((a, b) => a - b);
   p.intervals = null;
@@ -268,12 +315,12 @@ const r = await page.evaluate(() => {
     sectionsSum: sum,
     rasterWaitMs: (wall * 1000) / frames - sum,
     syncedRenderMs: ts[1],
-    drawCalls: p.calls / Math.max(p.n, 1),
+    drawCalls: pf.calls / Math.max(pf.n, 1),
     // Draw calls per frame by feature (incl. the post passes) and raster ms per feature (A/B).
-    featureCalls: Object.fromEntries(Object.entries(p.feat).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / Math.max(p.n, 1)).toFixed(1)])),
-    featureKTris: Object.fromEntries(Object.entries(p.featTris).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / Math.max(p.n, 1) / 1000).toFixed(1)])),
+    featureCalls: Object.fromEntries(Object.entries(pf.feat()).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / Math.max(pf.n, 1)).toFixed(1)])),
+    featureKTris: Object.fromEntries(Object.entries(pf.featTris()).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / Math.max(pf.n, 1) / 1000).toFixed(1)])),
     featureMs: Object.fromEntries(Object.entries(featureMs).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +v.toFixed(1)])),
-    triangles: p.tris / Math.max(p.n, 1),
+    triangles: pf.tris / Math.max(pf.n, 1),
     programs: ren.info.programs?.length ?? 0,
     geometries: ren.info.memory.geometries,
     wasmCallsPerFrame: totalCalls / frames,
@@ -281,7 +328,7 @@ const r = await page.evaluate(() => {
     vehicles: wp.sim.vehicleMeta().length / 3,
     gfx: wp.scene.quality?.label() ?? "pre-pass (MSAA, native res)",
     structure,
-    agents: wp.sim.trafficAgents().length / 5,
+    agents: wp.sim.trafficAgents().length / 7,
     audioRunning: window.__wpAudio?.ctx?.state === "running",
     audioVoicesPerS: ((window.__wpAudio?.pool?.created ?? 0) - p.voices0) / wall,
     audioStripsReused: window.__wpAudio?.pool?.stripsReused ?? 0,
@@ -294,8 +341,9 @@ const r = await page.evaluate(() => {
 // Allocation profile: total sampled bytes and the top allocating functions (self). Bytes under
 // one-off work are counted apart as "transient": building a car view when traffic / police are
 // promoted (the VehicleView constructor), and a material's first shader-program binding or compile (getProgram,
-// prewarm). The rest is the steady per-frame cost of the loop.
-const TRANSIENT = new Set(["VehicleView", "getProgram", "prewarm", "acquireProgram", "onFirstUse"]);
+// prewarm), the audio noise tables (once per AudioContext). The rest is the steady per-frame cost of the loop.
+// noiseBuffers: the audio noise tables, built once per AudioContext on the first impact sound.
+const TRANSIENT = new Set(["VehicleView", "getProgram", "prewarm", "acquireProgram", "onFirstUse", "noiseBuffers"]);
 let total = 0;
 let transient = 0;
 const byFn = new Map();
@@ -328,7 +376,8 @@ if (process.env.STACKS) {
 }
 const kbPerFrame = total / 1024 / r.frames;
 const steadyKBPerFrame = (total - transient) / 1024 / r.frames;
-const steadyTop = [...steadyByFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [k, +(v / 1024 / r.frames).toFixed(1)]);
+// TOP=<n>: length of the steady top list (default 12).
+const steadyTop = [...steadyByFn].sort((a, b) => b[1] - a[1]).slice(0, Number(process.env.TOP ?? 12)).map(([k, v]) => [k, +(v / 1024 / r.frames).toFixed(1)]);
 const allocTop = [...byFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [k, +(v / 1024 / r.frames).toFixed(1)]);
 const out = { which, viewport: `${vw}x${vh}`, ...r, allocKBPerFrame: kbPerFrame, steadyAllocKBPerFrame: steadyKBPerFrame, allocTop, steadyTop, errors: errors.slice(0, 3) };
 if (jsonOnly) console.log(JSON.stringify(out));

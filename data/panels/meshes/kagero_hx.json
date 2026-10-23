@@ -1,7 +1,7 @@
 {
   "id": "kagero_hx",
   "lattice_id": "kagero_hx",
-  "format": 3,
+  "format": 4,
   "tri_count": 17626,
   "tints": {"paint":[217,221,226],"caliper":[30,111,217],"accent":[30,140,255]},
   "atlas": {"y":[-2.2449996,2.345],"z":[0.0,1.5],"x_half":1.09},

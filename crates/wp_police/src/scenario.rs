@@ -270,6 +270,7 @@ struct RunNumbers {
     pursuit_start_s: Option<f32>,
     pursuit_end_s: Option<f32>,
     reinforcement_delays: Vec<f32>,
+    first_backup_delays: Vec<f32>,
     escapes: u32,
     safehouse: u32,
     captures: u32,
@@ -666,6 +667,7 @@ fn run_once(
     }
     nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end).map(|t| t.secs());
     nums.reinforcement_delays = st.reinforcement_delays_s.clone();
+    nums.first_backup_delays = st.first_backup_delays_s.clone();
     for p in &st.pursuits {
         match p.outcome {
             Some(crate::PursuitOutcome::Escaped) => nums.escapes += 1,
@@ -759,6 +761,11 @@ pub fn run_scenario_with_hook(
         mean(&delays).unwrap_or(-1.0),
     );
     m.insert("reinforcements".to_string(), delays.len() as f32);
+    let firsts: Vec<f32> = runs
+        .iter()
+        .flat_map(|r| r.first_backup_delays.iter().copied())
+        .collect();
+    m.insert("first_backup_s".to_string(), mean(&firsts).unwrap_or(-1.0));
     let sum = |f: &dyn Fn(&RunNumbers) -> u32| runs.iter().map(f).sum::<u32>() as f32;
     m.insert("escapes".to_string(), sum(&|r| r.escapes));
     m.insert("safehouse_escapes".to_string(), sum(&|r| r.safehouse));

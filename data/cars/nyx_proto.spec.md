@@ -141,7 +141,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 4.0 s | 311 km/h | 31.9 m | 1.37 g | — |
+| sim | 3.9 s | 308 km/h | 34.2 m | 1.33 g | — |
 | estimate | 3.6 s | 317 km/h | 28.8 m | 1.25 g | 852 |
 
 ## Damage lattice (`data/lattices/nyx_proto.json`)

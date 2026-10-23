@@ -1,7 +1,7 @@
 {
   "id": "halberd_40",
   "lattice_id": "halberd_40",
-  "format": 3,
+  "format": 4,
   "tri_count": 18586,
   "tints": {"paint":[255,106,19],"caliper":[255,106,19],"spring":[28,28,30]},
   "atlas": {"y":[-2.2749999,2.365],"z":[0.0,1.49],"x_half":1.0849999},

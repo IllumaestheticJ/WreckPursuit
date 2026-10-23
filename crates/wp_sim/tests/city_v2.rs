@@ -327,7 +327,6 @@ fn tunnel_walls_hold_a_car_inside() {
         "never reached the wall: {max_lat} m"
     );
 }
-
 /// What you see is what you hit (playtest: crashing into invisible map geometry): off the
 /// roads, rays against the Rapier terrain land on the greybox's drawn terrain, which lies up to
 /// ~10 m below the raw heightfield on slopes; under roads and sidewalks they land on

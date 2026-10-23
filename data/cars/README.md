@@ -77,9 +77,13 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `tansy_13` | Tansy 1.3 | Compact | 2000s FF 1.3 supermini hatch — traffic / parked |
 | `drayman_cargo` | Drayman Cargo | Truck | 2000s RWD 4.8 V8 full-size cargo van, body-on-frame — traffic / parked |
 | `furrow_24` | Furrow 2.4 | Truck | 90s RWD 2.4 I4 compact pickup, body-on-frame — traffic / parked |
+| `stoat_16v` | Stoat 16V | Compact | early-90s FF 2.0 16V NA hot hatch — torquey, lift-off happy |
+| `bulwark_400` | Bulwark 400 | Muscle | early-70s 6.6 L HO V8 four-door sedan, clutch-LSD live axle, early radials |
+| `arashi_t4` | Arashi T4 | Sport | mid-90s AWD 2.0 T rally-homologation saloon, 40/60 centre diff, rear LSD |
+| `satchel_20` | Satchel 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody — delivery traffic / parked |
 | `fulmine_v10` | Fulmine V10 | Exotic | 2010s mid-engine 5.2 NA V10, permanent AWD (30 % front), dual-clutch — top of the market |
 | `sentinel_warden` | Sentinel Warden | PoliceCruiser | late-80s RWD 5.7 V8 body-on-frame police sedan, 4-speed auto, push bar — low-heat old fleet |
-| `sentinel_harrier` | Sentinel Harrier | PoliceInterceptor | 2010s RWD 5.0 V8 muscle-coupe pursuit car, push bar — high-heat (L4–L5) unit |
+| `sentinel_vigil` | Sentinel Vigil | PoliceInterceptor | 2010s RWD 5.0 V8 muscle-coupe pursuit car, push bar — high-heat (L4–L5) unit |
 | `halberd_40` | Halberd 40 | Exotic | 2020s mid-engine 4.0 TT flat-plane V8, carbon tub, RWD, dual-clutch, active wing, factory track tyres |
 | `ombra_v12` | Ombra V12 | Exotic | 2010s mid-engine 6.5 NA V12 flagship, AWD 25 % front, single-clutch automated manual |
 | `ostwind_6t` | Ostwind 6T | Exotic | 2020s rear-engine 3.8 TT flat-six, AWD 30 % front, 8-speed dual-clutch — toughest supercar (dur. 4) |
@@ -96,8 +100,17 @@ against the Exotic market. Race cars and the two off-roaders are **wave 3** (202
 the build knobs `downforce`, lattice `cell_scale` (roll cage / composite tub) and `nose_scale`
 (crash nose) described in `tools/specsheet/README.md`.
 
-`tansy_13`, `drayman_cargo` and `furrow_24` are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
-There is no `Van`/`Civilian` class yet, so the van and pickup use `Truck` (requested in
+`tansy_13`, `drayman_cargo` and `furrow_24` are civilian traffic cars (round 6b); `satchel_20` joins
+them as a delivery van: cheap, slow, validated like the rest.
+There is no `Van`/`Civilian` class yet, so the vans and pickup use `Truck` (requested in
 `docs/integration/cars.md`).
+| `marten_20` | Marten 2.0 | Compact | early-90s FF 2.0 16V NA hot hatch — torquey alternative to the Vireo |
+| `brigand_400` | Brigand 400 | Muscle | mid-70s 6.6 L V8 full-size four-door, live axle, LSD, period brakes |
+| `talus_20t` | Talus 2.0T | Sport | late-90s AWD 2.0 T rally-homologation saloon, fixed 45/55 split, front + rear LSD |
+| `tumbril_20` | Tumbril 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody — delivery / traffic |
+
+The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
+There is no `Van`/`Civilian` class yet, so the vans and the pickup use `Truck` (requested in
+`docs/integration/cars.md`). The last four were added in round 9.
 
 Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

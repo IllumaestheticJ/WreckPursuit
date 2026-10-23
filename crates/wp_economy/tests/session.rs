@@ -85,15 +85,19 @@ fn record_police_run(mode: DamageMode, wreck: bool) -> Vec<SimEvent> {
     for tick in 0..240 * 300 {
         world.time = world.time.advanced(PHYSICS_DT * world.ratio);
         let mut inputs = Vec::new();
+        // After the first second: the session-start patrols are placed by then. This city has
+        // no buildings, so no spot is hidden from a parked racer, and a racer already wanted
+        // when they are placed would get none (wp_police row 158: no cop appears in view of a
+        // wanted racer).
         match tick {
-            1 => inputs.push(red.clone()),
-            2 => inputs.push(speeding.clone()),
-            3 => police.set_heat(RACER, 30.0),
+            241 => inputs.push(red.clone()),
+            242 => inputs.push(speeding.clone()),
+            243 => police.set_heat(RACER, 30.0),
             _ => {}
         }
         // Nobody sees a parked racer, so its heat decays long before the night-time responder
         // arrives. Keep offending (one violation every 4 s) until a unit starts the pursuit.
-        if pursued_at.is_none() && tick > 3 && tick % 960 == 0 {
+        if pursued_at.is_none() && tick > 243 && tick % 960 == 0 {
             inputs.push(speeding.clone());
         }
         if wreck && pursued_at.is_some_and(|t| tick == t + 40) {
@@ -368,10 +372,10 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
         .events
         .iter()
         .any(|ev| matches!(ev.reason, EventReason::CarImpounded)));
-    // Damage was recorded before the impound and is flagged as sustained while wanted.
+    // Damage was recorded before the impound and is flagged as outstanding at a capture.
     let stored = a.car(car).unwrap().damage.clone();
     assert_eq!(stored.lattice_state, report.lattice_state);
-    assert!(stored.sustained_while_wanted);
+    assert!(stored.sustained_before_capture);
 
     // Two nights in the pound: the fee grows by the class rate per day.
     e.end_of_day(&mut a).unwrap();

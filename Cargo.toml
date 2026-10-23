@@ -15,6 +15,7 @@ members = [
     "crates/wp_audio",
     "crates/wp_race",
     "crates/wp_wasm",
+    "crates/wp_render",
     "apps/server",
     "apps/simcli",
     "apps/meta",

@@ -140,7 +140,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 4.3 s | 291 km/h | 32.1 m | 1.21 g | — |
+| sim | 4.3 s | 292 km/h | 32.3 m | 1.15 g | — |
 | estimate | 3.9 s | 300 km/h | 29.8 m | 1.21 g | 797 |
 
 ## Damage lattice (`data/lattices/morrigan_55.json`)

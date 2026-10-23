@@ -1,7 +1,7 @@
 {
   "id": "nyx_proto",
   "lattice_id": "nyx_proto",
-  "format": 3,
+  "format": 4,
   "tri_count": 18388,
   "tints": {"paint":[27,31,59],"caliper":[255,90,31],"spring":[255,90,31],"accent":[255,90,31]},
   "atlas": {"y":[-2.28,2.58],"z":[0.0,1.3199999],"x_half":1.0699999},

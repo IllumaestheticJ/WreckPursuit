@@ -28,6 +28,8 @@ use wp_economy::{
 };
 use wp_math::Rng;
 
+use crate::garage_visit::GarageRepairReport;
+
 /// Ledger account of the browser player.
 pub const PLAYER_ACCOUNT: PlayerId = PlayerId(1);
 
@@ -274,6 +276,8 @@ impl PlayerRun {
                     insurance: None,
                     // Handed out by the demo for free: resale is valued from what was paid.
                     purchase_price: Some(0),
+                    tune: Default::default(),
+                    parts: None,
                 });
                 uid
             }
@@ -360,6 +364,53 @@ impl PlayerRun {
         &self.ledger
     }
 
+    /// Largest stake the account may bet at `venue` now (the career economy's `max_bet`: 0
+    /// when that betting is locked by rep tier, the player is broke or in debt).
+    pub fn max_bet(&self, venue: wp_economy::BetVenue) -> i64 {
+        self.econ.max_bet(&self.acct, venue)
+    }
+
+    /// Why betting at `venue` is locked for this account (`None` when it is open).
+    pub fn bet_lock(&self, venue: wp_economy::BetVenue) -> Option<String> {
+        self.econ
+            .require_unlocked(&self.acct, venue.feature())
+            .err()
+            .map(|e| e.to_string())
+    }
+
+    /// Take a bet's stake from the account (the career economy's `place_bet`: tier gate,
+    /// cap, debt; ledger note `bet:stake:<venue>:<label>`). The one betting wallet: street
+    /// racer challenges and picker-race bets both go through here. Nothing changes on an error.
+    pub fn place_bet(
+        &mut self,
+        venue: wp_economy::BetVenue,
+        stake: i64,
+        label: &str,
+    ) -> Result<wp_economy::BetTicket, String> {
+        let (ticket, ev) = self
+            .econ
+            .place_bet(&mut self.acct, venue, stake, label)
+            .map_err(|e| e.to_string())?;
+        self.ledger.extend(ev);
+        Ok(ticket)
+    }
+
+    /// Award `rep` (career `award_rep`: ledger note `career:rep:<label>`; pays any first-time
+    /// tier reward it reaches at once, as touge results do).
+    pub fn award_rep(&mut self, rep: i64, label: &str) {
+        if let Ok((_, ev)) = self.econ.award_rep(&mut self.acct, rep, label) {
+            self.ledger.extend(ev);
+        }
+    }
+
+    /// Pay a bet back: `gross` includes the stake (0 = lost, nothing posted; ledger note
+    /// `bet:payout:<venue>:<label>`).
+    pub fn settle_bet(&mut self, ticket: &wp_economy::BetTicket, gross: i64) {
+        if let Ok((_, ev)) = self.econ.settle_bet(&mut self.acct, ticket, gross) {
+            self.ledger.extend(ev);
+        }
+    }
+
     /// The latest settlement, if any.
     pub fn report(&self) -> Option<&RunReport> {
         self.report.as_ref()
@@ -430,26 +481,8 @@ impl PlayerRun {
         outcome: RunOutcome,
         damage: Option<(&dyn DamageSim, &ModeTable)>,
     ) -> Result<&RunReport, String> {
-        let owned = self.acct.try_car(self.car).map_err(|e| e.to_string())?;
-        let price = self.econ.price_table_for(owned);
-        let (health, total_loss) = damage.map_or((1.0, false), |(d, _)| {
-            let s = d.summary();
-            (s.health, s.total_loss)
-        });
-        let report = DamageReport {
-            car: self.car,
-            health,
-            total_loss,
-            handling: damage
-                .map(|(d, _)| d.handling_effects())
-                .unwrap_or_default(),
-            estimate: damage
-                .map(|(d, mt)| d.repair_estimate(mt, &price))
-                .unwrap_or_default(),
-            lattice_state: Vec::new(),
-            wanted_during_session: false,
-            towed: outcome == RunOutcome::TotalLoss,
-        };
+        let report = self.damage_report(damage, outcome == RunOutcome::TotalLoss)?;
+        let (health, total_loss) = (report.health, report.total_loss);
         let level = self.session.wanted_level(self.player);
         let r = self
             .session
@@ -517,6 +550,96 @@ impl PlayerRun {
         Ok(self.report.as_ref().expect("just set"))
     }
 
+    /// The player's car's damage as the economy records it (`None` = pristine).
+    fn damage_report(
+        &self,
+        damage: Option<(&dyn DamageSim, &ModeTable)>,
+        towed: bool,
+    ) -> Result<DamageReport, String> {
+        let owned = self.acct.try_car(self.car).map_err(|e| e.to_string())?;
+        let price = self.econ.price_table_for(owned);
+        let (health, total_loss) = damage.map_or((1.0, false), |(d, _)| {
+            let s = d.summary();
+            (s.health, s.total_loss)
+        });
+        Ok(DamageReport {
+            car: self.car,
+            health,
+            total_loss,
+            handling: damage
+                .map(|(d, _)| d.handling_effects())
+                .unwrap_or_default(),
+            estimate: damage
+                .map(|(d, mt)| d.repair_estimate(mt, &price))
+                .unwrap_or_default(),
+            lattice_state: Vec::new(),
+            wanted_during_session: false,
+            towed,
+        })
+    }
+
+    /// G's `RepairAll` quote at `shop` for the car's damage right now (quoted on a copy of the
+    /// account with that damage recorded; nothing changes).
+    pub fn garage_quote(
+        &self,
+        shop: &ShopContext,
+        damage: Option<(&dyn DamageSim, &ModeTable)>,
+    ) -> Result<RepairQuote, EconomyError> {
+        let report = self
+            .damage_report(damage, false)
+            .map_err(EconomyError::InvalidInput)?;
+        let mut probe = self.acct.clone();
+        self.econ.record_damage(&mut probe, &report)?;
+        self.econ
+            .quote_repair(&probe, self.car, &RepairOption::RepairAll, shop, self.mode)
+    }
+
+    /// Repair the car at a garage: record its damage now, then G's `repair` (`RepairAll` at
+    /// `shop`), all or nothing. On success the caller repairs the sim vehicle
+    /// (`Sim::repair_vehicle`). Refused while the run is over (that is "Repair & continue").
+    pub fn garage_repair(
+        &mut self,
+        shop_name: &str,
+        shop: &ShopContext,
+        damage: Option<(&dyn DamageSim, &ModeTable)>,
+    ) -> Result<GarageRepairReport, String> {
+        if self.over {
+            return Err("the run is over; use Repair & continue".into());
+        }
+        let report = self.damage_report(damage, false)?;
+        let mut work = self.acct.clone();
+        let ((), mut events) = self
+            .econ
+            .record_damage(&mut work, &report)
+            .map_err(|e| e.to_string())?;
+        let quote = self
+            .econ
+            .quote_repair(&work, self.car, &RepairOption::RepairAll, shop, self.mode)
+            .map_err(|e| e.to_string())?;
+        let (_order, ev) = self
+            .econ
+            .repair(
+                &mut work,
+                self.car,
+                &RepairOption::RepairAll,
+                shop,
+                self.mode,
+            )
+            .map_err(|e| e.to_string())?;
+        events.extend(ev);
+        let report = GarageRepairReport {
+            shop: shop_name.to_string(),
+            paid: quote.player_pays,
+            insurance_covers: quote.insurance_covers,
+            reported_to_police: quote.reports_to_police,
+            cash_after: work.cash,
+            ledger: events.iter().map(LedgerLine::of).collect(),
+        };
+        self.acct = work;
+        self.ledger.extend(events);
+        Ok(report)
+    }
+
     /// The `RepairAll` quote the car will get once out of the pound (quoted on a copy).
     fn quote_after_release(&self) -> Option<RepairQuote> {
         let mut probe = self.acct.clone();
@@ -558,6 +681,55 @@ impl PlayerRun {
         Ok((fee, lines))
     }
 
+    /// Take a touge wager on this account (`wp_race::touge::place`: career rep tiers, side-bet
+    /// stake taken now through `place_bet`, venue Touge, the one betting wallet) with the run's
+    /// car on the line.
+    pub fn touge_place(
+        &mut self,
+        setup: wp_race::touge::TougeSetup,
+        wager: wp_race::touge::Wager,
+    ) -> Result<(wp_race::touge::WagerTicket, Vec<LedgerLine>), String> {
+        let (ticket, ev) =
+            wp_race::touge::place(&self.econ, &mut self.acct, setup, wager, self.car)
+                .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((ticket, lines))
+    }
+
+    /// Pay out a decided touge battle on this account (`wp_race::touge::settle`).
+    pub fn touge_settle(
+        &mut self,
+        table: &wp_race::touge::TougeTable,
+        ticket: &wp_race::touge::WagerTicket,
+        outcome: &wp_race::touge::BattleOutcome,
+        opponent: &wp_race::touge::OpponentCar,
+    ) -> Result<(wp_race::touge::TougeSettlement, Vec<LedgerLine>), String> {
+        let (out, ev) = wp_race::touge::settle(
+            &self.econ,
+            &mut self.acct,
+            table,
+            ticket,
+            outcome,
+            self.player,
+            opponent,
+        )
+        .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((out, lines))
+    }
+
+    /// Testbed only: set the account's rep (to try rep-gated touge battles outside a career),
+    /// then settle progression at it (tier bookkeeping and any first-time tier rewards, as a
+    /// career would at the end of a run).
+    pub fn debug_set_rep(&mut self, rep: i64) {
+        self.acct.rep = rep.max(0);
+        if let Ok((_, ev)) = self.econ.update_progression(&mut self.acct) {
+            self.ledger.extend(ev);
+        }
+    }
+
     /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,
     /// bounty while wanted). `entry` = what [`PlayerRun::enter_race`] charged, for the report.
     pub fn settle_race(
@@ -582,6 +754,18 @@ impl PlayerRun {
             cash_after: self.acct.cash,
             ledger,
         })
+    }
+
+    /// A cash adjustment on the account (G's `Economy::adjust`, posted as `Adjustment {note}`);
+    /// returns its ledger lines. Used by the race glue to pay the advertised stake.
+    pub fn adjust(&mut self, cash: i64, note: &str) -> Result<Vec<LedgerLine>, String> {
+        let ((), ev) = self
+            .econ
+            .adjust(&mut self.acct, cash, note)
+            .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok(lines)
     }
 
     /// "Repair & continue" after the run ended: pay the impound fee (if impounded), then

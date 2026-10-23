@@ -3,7 +3,10 @@
 // not depend on dispatch AI), then brakes hard at 3 s. wp_police detects each wheel crossing
 // the strip; the punctures go into the vehicle's handling (`tire_puncture`: 30 % smaller
 // rolling radius, half the grip), so the flat tyres stop the car later. The same run without
-// spikes is at 6.0 m/s at 5 s and stops at 5.65 s; spiked it is at 8.2 m/s and stops at 6.23 s.
+// spikes is at 6.0 m/s at 5 s and stops at 5.65 s. Spiked, with the tyres deflating over 1 s
+// (data/police/tools.toml deflate_s, row 132: the car drops soon after the hit) it is on its
+// rims when it brakes at 3 s: about 0.37 g, 16.3 m/s at 5 s and 9.1 m/s at 7 s (it was
+// 8.2 m/s at 5 s, stopped at 6.23 s, while deflate_s was 5 s).
 (
     name: "golden_spike_strip",
     seed: 105,
@@ -27,7 +30,7 @@
         police_event_before(kind: 11, t_s: 3.0),
         metric(entity: "racer", name: "spiked_wheels", min: 4.0, max: 4.0),
         metric(entity: "racer", name: "max_spike_puncture", min: 0.9, max: 1.0),
-        // Half the grip: still well above the unspiked 6.0 m/s two seconds into the stop.
-        speed_at(entity: "racer", t_s: 5.0, min: 7.0, max: 11.0),
+        // On its rims: far above the unspiked 6.0 m/s two seconds into the stop.
+        speed_at(entity: "racer", t_s: 5.0, min: 13.0, max: 20.0),
     ],
 )

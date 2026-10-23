@@ -42,7 +42,7 @@ check(Math.abs((await help()) - 0.85) < 1e-6, `sim countersteer_help = ${await h
 check((await page.textContent("#cstr-val")).trim() === "85%", "label shows 85%");
 const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("wp.assistOverrides") ?? "{}"));
 check(saved.countersteer_help === 0.85, `saved in wp.assistOverrides (${JSON.stringify(saved)})`);
-check(saved.tcs === undefined || typeof saved.tcs === "boolean", "checkbox overrides untouched");
+check(saved.tcs === undefined || typeof saved.tcs === "string", "assist-level overrides untouched");
 await page.reload();
 await ready();
 check(Math.abs((await help()) - 0.85) < 1e-6, `kept after a reload (${await help()})`);

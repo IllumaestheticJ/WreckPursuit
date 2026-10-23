@@ -18,6 +18,8 @@ cargo run -p simcli -- hashes X.ron                               # hashes.txt t
 cargo run -p simcli -- --fuzz --minutes 5 [--seed S]              # soak; repro → out/fuzz/*.ron
 cargo run -p simcli -- bundle > bundle.json                       # data root for the WASM runner
 cargo run --release -p simcli -- car-stats [--check]              # menu stat bars → data/stats/cars.json
+
+cargo run --release -p simcli -- police-bench [--full] [--seeds N]  # police competency benchmark
 ```
 
 `simcli <file.ron>` without a subcommand means `run`. `--data DIR` picks the data root (default
@@ -37,6 +39,7 @@ cargo run --release -p simcli -- car-stats [--check]              # menu stat ba
 | `src/determinism.rs` | in-process repeat check |
 | `src/fuzz.rs` | random cases + invariants (NaN, node bounds, below ground, event floods) |
 | `src/data.rs` | one loader path for disk and in-memory (WASM) data |
+| `src/police_bench.rs` | police competency benchmark (`police-bench`): matrix, runs, metrics, report ([`docs/integration/police-bench.md`](../../docs/integration/police-bench.md)) |
 | `scenarios/` | scenario library (`smoke/`, `regression/`, `vehicle/`, `golden/`, `soak/`) |
 | `golden/` | `<name>/hashes.txt` for every scenario, `<name>.replay.bin` for `scenarios/golden/*` |
 
@@ -53,6 +56,17 @@ fuzz. `cargo test --workspace` therefore fails when a change alters any golden.
 `tests/car_stats.rs` re-measures every car (about 2 s) and fails when `data/stats/cars.json` (the
 car picker's stat bars) drifts from the physics by more than 0.1 s 0–100, 2 km/h or 0.01 g, or a
 car is added / removed / renamed: run `just car-stats` and commit the table.
+
+### Police benchmark
+
+`just police-bench` (= `simcli police-bench`) runs a scripted escapee (`wp_opponent::Evader`)
+against the police: 12 default cells × 8 seeds (≈ 11 min release on 4 cores), `--full` for all
+72 cells. Filters: `--city vesper,grid --phase day,night --weather clear,rain --level 1,2,3
+--skill casual,good,expert`; `--seeds N`, `--duration S` (default 300), `--threads N`,
+`--label TEXT`, `--out FILE.md` (default `docs/integration/police-bench-results.md`) or
+`--no-write`, `--json FILE` (every run's metrics). `WP_BENCH_TRACE=<ticks>` prints the evader's
+state on stderr every N ticks. `tests/police_bench.rs` is the CI-light subset (3 cells × 2 seeds,
+2 min each, generous ranges) plus a determinism check.
 
 ## Perf (harness overhead)
 

@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_route7_tunnel_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 16557720c6fe04be
-480 2410eaa9720d7740
-720 1032d998d1310e72
-960 fbbb5a3ef960d574
-1200 96211cce6e0373b7
-1440 46e1b5f8845af339
-1680 ba878b98fdbab74e
-1920 42f7b8e49f1df0fb
-2160 6abade53b21b6f98
-2400 bc2d1f6612dec751
+# simcli hashes scenario=race_route7_tunnel_sprint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 4895b663a2bb43bc
+480 d6b389b6b02b8c36
+720 19bd919310c87d46
+960 0bb59dc2e59de389
+1200 4f902c75e45b298f
+1440 0f47cb2353d4b045
+1680 4364db59241c4e4c
+1920 cc892c8b11ea1994
+2160 52507bd83d8026e6
+2400 9e2dcdb8a248a311

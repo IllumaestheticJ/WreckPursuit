@@ -1,7 +1,7 @@
 {
   "id": "mesquite_pr",
   "lattice_id": "mesquite_pr",
-  "format": 3,
+  "format": 4,
   "tri_count": 19527,
   "tints": {"paint":[201,183,156],"caliper":[30,30,32],"spring":[242,106,27],"accent":[242,106,27]},
   "atlas": {"y":[-3.1049998,2.885],"z":[0.0,2.33],"x_half":1.215},

@@ -232,6 +232,47 @@ fn reconnect_within_the_grace_resumes_the_same_pursuit() {
     assert_eq!(h.peers[0].client.player(), Some(PlayerId(player.0)));
 }
 
+/// Events that happen while a player is reconnecting are sent once they are back: a
+/// spectator drops, a racer becomes wanted meanwhile, and after the reconnect the spectator
+/// has the wanted-level change (and the racer's wanted level) like everyone who stayed.
+#[test]
+fn reconnect_receives_events_missed_while_away() {
+    let (mut h, car) = racer();
+    h.add_peer("watcher", ideal(), ideal());
+    h.wait_joined();
+    h.run_secs(0.5);
+    let token = h.peers[1].client.token();
+
+    h.drop_link(1);
+    h.peers[1].client.game_events.clear();
+    h.peers[1].client.wanted.clear();
+    h.server
+        .sim_mut()
+        .sim_mut()
+        .police_mut()
+        .set_heat(car, HEAT);
+    h.run_secs(2.0);
+    let level_now = level(&h, car);
+    assert_ne!(
+        level_now,
+        WantedLevel::None,
+        "racer became wanted while away"
+    );
+
+    h.connect(1, token);
+    h.run_secs(1.0);
+    let c = &h.peers[1].client;
+    assert!(
+        c.game_events.iter().any(|e| matches!(
+            e,
+            SimEvent::Police(PoliceEvent::WantedLevelChanged { racer, .. }) if *racer == car
+        )),
+        "missed WantedLevelChanged delivered on reconnect: {:?}",
+        c.game_events
+    );
+    assert_eq!(c.wanted.get(&car.0), Some(&level_now));
+}
+
 #[test]
 fn bye_while_wanted_is_an_immediate_capture() {
     let (mut h, car) = wanted_racer();

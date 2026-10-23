@@ -1,7 +1,7 @@
 {
   "id": "merlo_20t",
   "lattice_id": "merlo_20t",
-  "format": 3,
+  "format": 4,
   "tri_count": 18156,
   "tints": {"paint":[0,166,214],"caliper":[232,232,232],"spring":[242,242,242],"accent":[246,246,246]},
   "atlas": {"y":[-2.26,2.34],"z":[0.0,1.64],"x_half":1.095},
