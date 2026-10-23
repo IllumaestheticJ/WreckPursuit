@@ -1,3 +1,58 @@
+# Round 4: origin/main 55a42f7a → lead/main-sync (2026-10-23)
+
+- **Base:** `lead/main-sync` = `origin/lead/round12` @ `db0035d9`, then `origin/main` @ `55a42f7a`:
+  9 commits merged by the owner into main (PR #48 damage modes / contract v0.4.0, #45 career time
+  progression, #41 ws/roam free-roam racers). Their base is old main `d39aef63`, which round 3
+  already merged, so a normal merge (`5ab6928c`) applies exactly those 9 commits' changes: 8 code
+  conflicts and 112 goldens.
+- **Contract → 0.4.1.** Round 12's v0.3.1 (`DnfReason::Stuck`) + main's v0.4.0
+  (`DamageMode::Extreme`, `ModeTable::racer_damage_scale`), both kept as written; one
+  `CONTRACT_CHANGELOG` entry. Schemas regenerated (unchanged from main's). ui-kit's
+  `src/generated/contracts.ts` and runtime schemas regenerated with `npm run gen:types`
+  (node_modules present, so no hand edit was needed).
+- **Damage modes, #48 as merged.** `data/modes/*.toml` are main's byte for byte. Check of the
+  lead's ask: round 12's arcade table (component ×0.24, fail ×4.0, cabin 0.78 m, wheels ×0.42)
+  was identical to old main's, so #48's new `sim.toml` *is* round 12's arcade table (header and
+  `mode` line aside), `extreme.toml` is round 12's old `sim.toml`, and the new `arcade.toml` is
+  that Simulation table plus `racer_damage_scale = 0.25` (player and AI racers only; police and
+  traffic full damage).
+  - **Round 12's own fixtures in old names.** #48 renamed every simcli scenario and every test
+    that loads a mode file (old Arcade → Simulation, old Simulation → Extreme) so they behave bit
+    for bit, but it could not see files that exist only on round 12. Same rename applied to: 14
+    scenarios new on round 12 (`assists/*` ×6, `jam/pursuit_jam_{grid,vesper}`,
+    `parked/{frontal_50,swipe_row_50}_{arcade,sim}`, `vehicle/brake_dive_100_{arcade,sim}`;
+    scenario names kept, as #48 kept names except the barrier ones); wp_sim's parked-car,
+    brake-dive, parked-ground and cost-probe tests and round 12's tuned-spawn test; the simcli
+    police bench (default `--mode simulation`, the table its baselines were measured in;
+    `--mode extreme` added; `police-bench.md` updated). Proof: no state hash moved in any of them.
+  - **Kept as "Arcade"** (now the owner's gentler Arcade), as #48 did on main: testbed / career
+    defaults, wp_wasm session tests, e2e scripts, economy tests (the new Arcade equals Simulation
+    for anything without a racer collision: same repair scale, same tables).
+- **Free-roam racers: round 12's street racers are the system.** `wp_wasm::street` (day / night
+  shifts, Loop 9, horn challenge, A→B with waypoints, bets, rest-stop meets, dormant / light
+  modes, stranded reset) drives the player flow in free drive and city chase. main's ws/roam
+  (`wp_opponent::roam`, `wp_wasm::roam`) is merged but **dormant**: roamers exist only in its own
+  `free_roam` scenario, and street racers are only added to `free_drive*` / `city_chase*`
+  scenarios (`street::scenario_wants_racers`), so the two populations never share a session.
+  Reachable only through `?roam=N` (dev); the testbed's "free roam" button is removed. Not folded
+  in yet: what ws/roam has that round 12 lacks is haunt classification (highway / touge / dirt /
+  downtown / rural roads) and chained legs around a haunt; its rescue overlaps round 12's
+  stranded reset. Folding haunts into the street racers' roaming is a follow-up for the racer
+  owner, not a merge job.
+- **Career time progression (#45)** merged as is: a standalone `wp_world::progression`, not
+  wired into a session on main either. Composes with round 12: its night window (20–04) is all
+  `DayPhase::Night` and its day window (08–18) all `DayPhase::Day`, which is what switches the
+  street racers' night shifts (test `career_time_shifts_line_up_with_the_street_racers_day_and_night`);
+  `Activity::Repair { labour_hours }` takes the summed `RepairLine::labour_hours` round 12's
+  workshop quotes already produce; insurance (per-day premium) and the career are untouched. Name
+  clash to know about: `wp_world::Shift` (Day / Night career shift) vs
+  `wp_wasm::street::Shift` (a racer's AllDay / Night / Loop shift).
+- **Goldens** (`030f0691`, `[bless]`): 115 `hashes.txt` change only their `contract=` header
+  (0.3.1 → 0.4.1), zero state-hash lines; 11 golden replays re-recorded because they store the
+  mode as a number (round 12's meant the old numbering, so they replayed another table and
+  diverged at ticks 268–318).
+- **No wp_vehicle / handling change** (physics freeze): `crates/wp_vehicle` is round 12's.
+
 # Round 3: origin/main d39aef63 → lead/main-sync (2026-10-22)
 
 - **Base:** `lead/main-sync` fast-forwarded to `origin/lead/round12` @ `9b686f76`, then
