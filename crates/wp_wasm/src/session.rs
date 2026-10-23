@@ -1334,6 +1334,9 @@ impl Session {
     pub fn garage_repair(&mut self) -> Result<GarageRepairReport, String> {
         self.live_check()?;
         let offer = self.visit.as_ref().ok_or("not in a garage")?;
+        if offer.career {
+            return Err("career runs repair in the career garage (\"Enter garage\")".into());
+        }
         let (name, shop) = (offer.site.name.clone(), offer.site.shop(offer.wanted));
         let run = self.run.as_mut().ok_or("no economy run in this session")?;
         let player = run.player();
@@ -1383,9 +1386,6 @@ impl Session {
         self.log_op(
             idx,
             OpKind::ResetAt {
-        if offer.career {
-            return Err("career runs repair in the career garage (\"Enter garage\")".into());
-        }
                 xy,
                 yaw,
                 near_z,
