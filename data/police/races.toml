@@ -171,3 +171,106 @@ trigger_m = 80.0
 at = 0.85
 length_m = 4.0
 offset_m = 2.5
+
+# --- The five city races from PR #47 (lead/career-port). Light profiles: stakeouts that join
+# the chase plus each course's tactic style, and no scripted roadblocks or spikes on the
+# course, so a box-in can never stall the field (row 154). Tune per race like the four above.
+
+# Short, flat boulevard onto the Loop 9 on-ramp. Style: on-ramp radar. Units on the shoulder
+# recognise the field as it flies past; PIT and rams on the straight, nothing on the road.
+[harbor_dash]
+name = "On-ramp radar"
+summary = "Radar units on the boulevard and the ramp pick you up at once. Nothing on the road, but they chase hard."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = true
+
+[harbor_dash.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = true
+junction_block = false
+pit = true
+rams = true
+
+[[harbor_dash.stakeouts]]
+at = 0.5
+trigger_m = 80.0
+
+# Loop 9 north through the Hollins Tunnel. Style: the Loop 9 interceptors (no tools; no
+# helicopter in the tunnel), one unit waiting before the tunnel mouth.
+[tunnel_run]
+name = "Tunnel interceptors"
+summary = "Highway interceptors only: no roadblocks, no spikes, no helicopter in the tunnel. One unit waits at the mouth."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 0.0
+recognise_on_sight = true
+
+[tunnel_run.tactics]
+roadblocks = false
+spikes = false
+helicopter = false
+box_in = false
+rolling_block = false
+junction_block = false
+pit = true
+rams = true
+
+[[tunnel_run.stakeouts]]
+at = 0.45
+trigger_m = 120.0
+
+# Back down the Hollins hairpins. Style: the summit trap's mirror. No rams or PITs on the hill
+# (deadly on hairpins); a unit waits near the bottom and side roads may be sealed there.
+[hollins_descent]
+name = "Bottom of the hill"
+summary = "They let you come down, then wait at the bottom: junction blocks and a unit near Mercer. No rams on the hill."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = true
+
+[hollins_descent.tactics]
+roadblocks = false
+spikes = false
+helicopter = true
+box_in = false
+rolling_block = false
+junction_block = true
+pit = false
+rams = false
+
+[[hollins_descent.stakeouts]]
+at = 0.85
+trigger_m = 50.0
+
+# Off Loop 9 at dusk and through town's lights ("cops patrol here"). Style: patrolled streets:
+# the normal night's patrols and every dynamic tactic, nothing scripted. On lead/round12's map
+# the course is 2.3 km of signals (1.6 km on main's), and stakeouts or more patrols on top had
+# the police capture the whole field on most seeds (race_picker offramp_sprint), so this table
+# stays at the normal level: the red lights draw the patrols by themselves.
+[offramp_sprint]
+name = "Patrolled streets"
+summary = "A patrol zone: run the red lights and the units on the beat come for you. Every tactic is on the table."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+# Across the grid city's blocks to the highway grid. Style: block patrol, normal presence, a
+# unit at the arterial's midpoint, junction blocks allowed in the grid.
+[grid_arterial_sprint]
+name = "Block patrol"
+summary = "A normal night in the grid: one unit watching the arterial, junction blocks if it turns into a chase."
+presence = 1.0
+backup_scale = 1.0
+tool_lifetime_s = 300.0
+recognise_on_sight = false
+
+[[grid_arterial_sprint.stakeouts]]
+at = 0.5
+trigger_m = 60.0

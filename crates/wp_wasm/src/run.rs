@@ -673,6 +673,12 @@ impl PlayerRun {
         Ok((fee, lines))
     }
 
+    /// Tests: set the account's rep (betting unlocks by rep tier).
+    #[cfg(test)]
+    pub(crate) fn debug_set_rep(&mut self, rep: i64) {
+        self.acct.rep = rep;
+    }
+
     /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,
     /// bounty while wanted). `entry` = what [`PlayerRun::enter_race`] charged, for the report.
     pub fn settle_race(

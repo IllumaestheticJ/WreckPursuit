@@ -10,6 +10,8 @@ data. Design write-up: `crates/wp_race/README.md`.
 | `stakes.toml` | `StakeTable` | purse, entry fee, heat and police presence keyed by race kind, `DayPhase`, class bracket and legality; `risk_curve` makes purse monotone in risk |
 | `schedule.toml` | `ScheduleRules` | sanctioned day events, night meets, rare illegal daytime races, bracket weights, venue gap, meet heat |
 | `progression.toml` | `ProgressionTable` | class brackets (must match `data/economy/market.toml`), licence tiers by clean races |
+| `racers.toml` | `roster::Roster` | the city's twelve named regulars: car, home turf, specialty, tier, starting form rating, `DriverProfile` (every picker driver comes from here) |
+| `betting.toml` | `betting::BettingRules` | house margins per market, odds bounds and step, minimum stake, tickets per race; rating K, specialty bonus, floor, player car adjustment |
 | `crews.toml` | `CrewConfig`, `TerritoryConfig` | crew size, bank cut, rep share; territory points, control threshold, weekly decay, heat-decay bonus |
 
 Keys: race kinds use `RaceKind::key()` (`sprint`, `circuit`, `outrun`, `checkpoint`,

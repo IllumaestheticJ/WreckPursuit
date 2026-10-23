@@ -523,6 +523,16 @@ export const sim = {
   raceStandings: (): Float32Array => wasm.race_standings(),
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
+  /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
+  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  /** Picker-race betting (venue City) on the current account: max stake and why it is locked (null = open). */
+  raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
+  /** The city's regulars with their records, strongest first. */
+  rosterList: (): RegularCard[] => JSON.parse(wasm.roster_json()),
+  /** The regulars' records as text (local save). */
+  rosterSave: (): string => wasm.roster_state(),
+  /** Restore the regulars' records from `rosterSave()` output. Throws if unreadable. */
+  rosterLoad: (text: string): void => wasm.roster_state_load(text),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
@@ -713,7 +723,7 @@ export interface StreetPreview {
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
-import type { RaceCard, RaceReport } from "../ui/race";
+import type { BetCard, RaceCard, RaceReport, RegularCard } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
