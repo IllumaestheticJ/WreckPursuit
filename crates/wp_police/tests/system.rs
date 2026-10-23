@@ -1446,6 +1446,9 @@ fn ambush_chase(
     let pu = h
         .police
         .add_player_unit(PlayerId(1), EntityId(900), [p[0], p[1], 0.0], d);
+    // Wanted once the session-start patrols are out (row 158: none is placed in view of a
+    // racer who is already wanted).
+    h.run(0.5, &[]);
     h.police.set_heat(RACER, 80.0);
     let mut ambushers = std::collections::BTreeMap::new();
     let mut joined_facing = std::collections::BTreeMap::new();

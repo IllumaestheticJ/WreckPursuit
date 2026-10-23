@@ -27,6 +27,9 @@
         speed_at(entity: "racer", t_s: 2.0, min: 15.0, max: 18.0),
         // Measured 2026-10-19: first pursuit at 1.90 s (clear twin: 0.30 s). The racer still
         // drives into a patrol's 130 m, so it is caught later, not never.
-        pursuit_started_before(t_s: 6.0),
+        // Re-aimed 2026-10-23 (wp_police row 158): the racer is wanted from the start, so no
+        // session-start patrol may be placed in its view; the patrol that recognises it now
+        // drives into view later. Measured 11.70 s (clear twin: 7.00 s).
+        pursuit_started_before(t_s: 14.0),
     ],
 )

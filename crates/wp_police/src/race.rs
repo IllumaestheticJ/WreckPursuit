@@ -666,6 +666,11 @@ impl PoliceSystem {
                 };
                 (add(centre, scale(right, off)), dir)
             });
+            // Row 158: no stakeout car appears where a racer can see it (now or along its road
+            // ahead); that post stays empty.
+            if self.warmed_up && self.in_racer_view_opt(None, pos, true) {
+                continue;
+            }
             let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
             let unit = self.units[i].id;
             plan.stakeouts.push(unit);
@@ -965,15 +970,24 @@ impl PoliceSystem {
             .collect();
         let mut ids = Vec::new();
         for (pos, heading) in spots {
+            let assignment = Assignment::RoadblockAt {
+                segment: site.segment,
+                tool: id,
+            };
+            // Row 158: a car a racer could see (now or round the corner ahead) waits out of
+            // view and appears once hidden, like the AI captain's tool cars (row 131).
+            if self.warmed_up && self.in_racer_view_opt(None, pos, true) {
+                self.tool_cars.push(crate::dispatch::PendingToolCar {
+                    tool: id,
+                    pos,
+                    heading,
+                    assignment,
+                });
+                continue;
+            }
             let i = self.spawn_unit(UnitKind::Car, UnitRole::Tool, pos, heading);
             ids.push(self.units[i].id);
-            self.assign(
-                i,
-                Assignment::RoadblockAt {
-                    segment: site.segment,
-                    tool: id,
-                },
-            );
+            self.assign(i, assignment);
         }
         self.roadblocks.push(Roadblock {
             id,
