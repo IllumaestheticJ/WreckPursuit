@@ -21,6 +21,12 @@
 # (arcade_structural_health_scale; 0.5 in round 12b), a failed steering rack keeps half the lock
 # (arcade_failed_steer_ratio 0.5 vs 0.3). The visible deformation (impulse/plasticity/beam
 # break scales) is unchanged since round 12b.
+# Total loss (playtest B8, 2026-10-23): health = 0.7 structural + 0.3 components; a spent
+# structure leaves health on a plateau of ~0.17-0.25, so total_loss_health 0.10 was never
+# reached (ten 145 km/h wall hits left a drivable car). At 0.20 a spent structure totals:
+# full sim, rigid wall, sedan/sports car: 80 km/h ends the car on hit 3, 100 km/h on hit 2,
+# 145 km/h on hit 1; police cruiser 80/100 km/h on hit 6/2 (tables in docs/integration/damage.md).
+# "One hard hit at speed is a total loss" is Extreme (extreme.toml), not this table.
 mode = "Simulation"
 impulse_to_lattice_scale = 0.45        # extreme x 0.45  — 45 % of the collision energy deforms the car
 plasticity_scale = 0.8                 # extreme x 0.8   — dents set a little less (more springback)

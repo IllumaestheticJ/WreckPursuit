@@ -12,6 +12,8 @@
 # 56 / 80 km/h: health lost frontal 22 % / 20 %, offset 21 % / 19 %, side 16 % / 20 %, rear
 # 12 % / 19 %; plastic (crumple) energy 18-23 %. At 0.2 it was only 12-16 %. Light-hit and
 # limp-mode rules are the same as Simulation.
+# total_loss_health 0.20 like Simulation (playtest B8, 2026-10-23): racers rarely get there
+# (sedan: six 145 km/h wall hits), traffic and police total like in Simulation.
 mode = "Arcade"
 racer_damage_scale = 0.25              # racers take ~20 % of the damage; traffic/police full
 impulse_to_lattice_scale = 0.45

@@ -912,3 +912,106 @@ three-column mode table). `wp_vehicle::AssistPreset::Sim` still selects Simulati
   should stay at the old Simulation values (they did not move with the damage table).
 - Lead: `apps/ui-kit/src/generated/contracts.ts` was hand-edited (no node_modules here);
   re-run `npm run gen:types` to confirm.
+
+## Playtest B8 (2026-10-23): "Simulation survives very hard hits" — damage agent
+
+**Report** (browser playtest at HEAD): Simulation, 103 km/h → 0 into a wall: health 0.52, still
+drivable; 145 km/h T-bone of a traffic car (551 kJ): 0.735; Arcade 100–140 km/h car hits 0.986 /
+0.955.
+
+**Root cause — two separate things.**
+1. *Expectation (no code bug).* CLAUDE.md's "Simulation — one hard hit at speed is a total loss"
+   predates contract v0.4.0. Since the owner request of 2026-10-22 that behaviour is **Extreme**
+   (`extreme.toml` = the old Simulation, bit for bit); Simulation = the old Arcade ("punishing but
+   survivable, about 4–6 hard hits end a car"), Arcade = Simulation with racers taking ~20 %.
+   The reported single-hit numbers match these curves (full sim, rigid wall, sedan: Sim 100 km/h
+   h1 0.54 vs the reported 0.52; Arcade ≈ 1/5 of the loss). HUD "health" is
+   `DamageModel::health()`, the same number `TotalLoss` uses; contacts reach the model normally in
+   the browser (same `wp_sim` path, racer scaling only in Arcade). Extreme does total on one hard
+   hit (table below: every rigid-wall hit ≥ 80 km/h, every car-to-car ≥ 100 km/h, all three cars).
+2. *Real bug: Simulation and Arcade could never total a car by health.* Health = 0.7 structural +
+   0.3 components. Once the structure is spent (2–3 hard hits) health parks on a plateau of
+   ~0.17–0.25 (the components degrade slowly under the forgiving rules), and `total_loss_health`
+   was 0.10 — below the plateau. Measured before the fix: **ten** 145 km/h rigid-wall hits in a
+   row left the sedan, the sports car and the cruiser at 0.17–0.22 health and drivable (wreck
+   column ">10" everywhere except one side-impact row). That contradicts "several hard hits end
+   the car" (sim.toml header, PLAYTEST_LOG rows 10/87).
+
+**Fix:** `total_loss_health` 0.10 → **0.20** in `sim.toml` and `arcade.toml` (Extreme stays
+0.25). A spent structure is now a total loss. Threshold for the record (full sim, rigid wall,
+1400 kg-class sedan / sports car): Simulation totals on hit 3 at 80 km/h, hit 2 at 100 km/h,
+hit 1 at 145 km/h; the cruiser (row 12, tougher) at hit 6 / 2 / 6. Car-to-car rear-ending a parked
+sedan totals only at ≥ 100 km/h after 3–8 hits; T-bones (struck car) never total in Simulation
+(side structure has low health weight) — design question below. `wp_economy`'s career proxy no
+longer blocks this (round 12's reason for keeping 0.10): `cargo test -p wp_economy` passes.
+Physics untouched; only the mode tables changed.
+
+**Before → after** (`WP_KINDS=wall-front,car-front,car-side WP_SPEEDS=50,80,100,145 cargo run
+--release -p simcli --example damage_toughness -- <mode> debug_sedan hakone_gt
+sentinel_cruiser`; medians of three impact points; h1 = health after the first hit, unchanged by
+the fix; wreck = hit on which the car is undrivable or a total loss, `>10` = never in 10 hits):
+| car | crash | km/h | Sim h1 | Sim wreck | Arcade h1 | Arcade wreck | Extreme h1 / wreck (unchanged) |
+|---|---|---|---|---|---|---|---|
+| sedan | wall-front | 50 | 0.91 | >10 → **9** | 0.99 | >10 | 0.26 / 2 |
+| sedan | wall-front | 80 | 0.69 | >10 → **3** | 0.95 | >10 | 0.09 / 1 |
+| sedan | wall-front | 100 | 0.54 | >10 → **2** | 0.92 | >10 | 0.09 / 1 |
+| sedan | wall-front | 145 | 0.19 | >10 → **1** | 0.84 | >10 | 0.11 / 1 |
+| sedan | car-front | 50 | 0.98 | >10 | 1.00 | >10 | 0.85 / 5 |
+| sedan | car-front | 80 | 0.93 | >10 | 0.99 | >10 | 0.49 / 2 |
+| sedan | car-front | 100 | 0.90 | >10 → **7** | 0.99 | >10 | 0.23 / 1 |
+| sedan | car-front | 145 | 0.77 | >10 → **4** | 0.96 | >10 | 0.11 / 1 |
+| sedan | car-side | 50 | 0.94 | >10 | 0.99 | >10 | 0.61 / 1 |
+| sedan | car-side | 80 | 0.84 | >10 | 0.96 | >10 | 0.42 / 1 |
+| sedan | car-side | 100 | 0.80 | >10 | 0.95 | >10 | 0.44 / 1 |
+| sedan | car-side | 145 | 0.75 | 8 | 0.90 | >10 | 0.21 / 1 |
+| sports | wall-front | 50 | 0.90 | >10 | 0.99 | >10 | 0.20 / 1 |
+| sports | wall-front | 80 | 0.64 | >10 → **3** | 0.93 | >10 | 0.09 / 1 |
+| sports | wall-front | 100 | 0.47 | >10 → **2** | 0.91 | >10 | 0.09 / 1 |
+| sports | wall-front | 145 | 0.17 | >10 → **1** | 0.81 | >10 → **4** | 0.09 / 1 |
+| sports | car-front | 50 | 0.98 | >10 | 1.00 | >10 | 0.85 / 4 |
+| sports | car-front | 80 | 0.92 | >10 | 0.99 | >10 | 0.43 / 2 |
+| sports | car-front | 100 | 0.90 | >10 → **8** | 0.99 | >10 | 0.20 / 1 |
+| sports | car-front | 145 | 0.75 | >10 → **3** | 0.96 | >10 | 0.11 / 1 |
+| sports | car-side | 50 | 0.94 | >10 | 0.99 | >10 | 0.59 / 1 |
+| sports | car-side | 80 | 0.83 | >10 | 0.96 | >10 | 0.25 / 1 |
+| sports | car-side | 100 | 0.77 | >10 | 0.95 | >10 | 0.26 / 1 |
+| sports | car-side | 145 | 0.70 | >10 | 0.90 | >10 | 0.17 / 1 |
+| cruiser | wall-front | 50 | 0.92 | >10 | 0.99 | >10 | 0.40 / 2 |
+| cruiser | wall-front | 80 | 0.75 | >10 → **6** | 0.95 | >10 | 0.11 / 1 |
+| cruiser | wall-front | 100 | 0.61 | >10 → **2** | 0.91 | >10 | 0.09 / 1 |
+| cruiser | wall-front | 145 | 0.24 | >10 → **6** | 0.84 | >10 | 0.10 / 1 |
+| cruiser | car-front | 50 | 0.99 | >10 | 1.00 | >10 | 0.88 / 10 |
+| cruiser | car-front | 80 | 0.95 | >10 | 1.00 | >10 | 0.67 / 3 |
+| cruiser | car-front | 100 | 0.93 | >10 | 0.99 | >10 | 0.53 / 2 |
+| cruiser | car-front | 145 | 0.84 | >10 → **10** | 0.97 | >10 | 0.13 / 1 |
+| cruiser | car-side | 50 | 0.96 | >10 | 0.99 | >10 | 0.69 / 1 |
+| cruiser | car-side | 80 | 0.88 | >10 | 0.98 | >10 | 0.34 / 1 |
+| cruiser | car-side | 100 | 0.84 | >10 | 0.97 | >10 | 0.32 / 1 |
+| cruiser | car-side | 145 | 0.73 | >10 | 0.93 | >10 | 0.23 / 1 |
+Mixed sequence after the fix (wall-front, wall-offset, wall-angle, car-front, car-offset,
+car-side cycling), Simulation: sedan / sports car end on hit 3 at 80 km/h and hit 2 at 100,
+cruiser on hit 5 / 3; Arcade: only at 145 km/h (sedan hit 7, sports car hit 6, cruiser >10).
+
+**Tests:** new `mode_curves_extreme_one_hit_sim_a_few_arcade_several` (wp_damage, rigid
+barrier, sedan): Extreme totals on the first 80/100 km/h hit; Simulation's first 80/100 km/h hit
+degrades without totalling, and it totals within 4 / 3 / 2 hits at 80 / 100 / 145 km/h; five
+50 km/h hits do not end it; Arcade survives five 100 km/h hits and totals on hit 3–8 at 145.
+`sim_hard_hits_degrade_and_several_wreck_the_car` range 4–7 → 3–5 (the 80 km/h damage-only
+cycle now ends on hit 3 by TotalLoss instead of on hit 7 by the pull-over health).
+
+### Changes outside my crates
+None (data/modes only, plus `crates/wp_damage/src/tests.rs`).
+
+### Questions for the owner
+1. CLAUDE.md still says "Simulation — one hard hit at speed is a total loss"; since v0.4.0 that
+   is Extreme. Should CLAUDE.md's mode semantics list three modes (lead edit)? Playtest reports
+   keep reading Simulation against the old wording.
+2. Simulation now ends a car after 2–3 hard rigid-wall hits at 80–100 km/h (the plateau makes the
+   threshold binary: just under it totals a spent structure, just above it never totals). The
+   round-13 target was 4–6. If 2–3 is too harsh, the lever is structural health per joule
+   (`DamageTuning::arcade_structural_health_scale` 0.42 → ~0.30 gives 4–5 hits at 80 km/h but
+   softens every single hit, e.g. 145 km/h first-hit health 0.21 → 0.34).
+3. Side impacts (the struck car of a T-bone) and rear-ending a car never total in Simulation even
+   at 145 km/h; Extreme totals them on the first hit. Wanted?
+4. Arcade per CLAUDE.md is "one hard hit degrades, several end the car"; with the owner's 20 %
+   (v0.4.0) a racer needs six or more 145 km/h wall hits to end. Keep?
