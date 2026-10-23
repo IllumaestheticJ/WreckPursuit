@@ -637,10 +637,13 @@ const WEAVE_GAIN_M: f32 = 20.0;
 /// one lane of mine), m.
 const WEAVE_MIN_SPAN_M: f32 = 3.0;
 
-/// A civilian's speed across the corridor below this is read as keeping its lane (no drift
-/// look-ahead): Loop 9 at 23:00, a civilian in the next lane reading ±0.37 m/s across the
-/// corridor held racers at its speed for 50 s, a metre of phantom drift over 3 s, m/s.
-const CIV_DRIFT_DEADBAND_MPS: f32 = 0.6;
+/// A civilian whose speed across the corridor is below this fraction of its speed along it
+/// (about 1.4°) is read as keeping its lane (no drift look-ahead): the corridor's sampled
+/// direction differs from its lane's by about that much. Loop 9 at 23:00: a civilian in the
+/// next lane reading ±0.37 m/s across the corridor at 27 m/s held racers at its speed for
+/// 50 s, a metre of phantom drift over 3 s. Scaled with speed, so a slow city car pulling
+/// across still counts.
+const CIV_DRIFT_DEADBAND: f32 = 0.025;
 
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
@@ -2362,7 +2365,9 @@ fn decide_racer(
             // A civilian keeping its lane reads a few tenths of a m/s across the corridor
             // (the corridor's sampled direction against its lane's); over the 3 s look-ahead
             // that is a metre of phantom drift into the next lane.
-            let v_n = if matches!(o.who, Who::Civilian(_)) && o.v_n.abs() < CIV_DRIFT_DEADBAND_MPS {
+            let v_n = if matches!(o.who, Who::Civilian(_))
+                && o.v_n.abs() < CIV_DRIFT_DEADBAND * o.v_s.abs()
+            {
                 0.0
             } else {
                 o.v_n
