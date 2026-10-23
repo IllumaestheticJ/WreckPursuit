@@ -1,7 +1,7 @@
 //! Street racers (lead): NPC racers who cruise the city in free roam and race the player from
 //! where they meet (A) to a finish the player picks (B), for a bet.
 //!
-//! - **Roster.** A live free-drive or city-chase session in a city gets the [`ROSTER`]: 13
+//! - **Roster.** A live free-drive or night-run session in a city gets the [`ROSTER`]: 13
 //!   racers over the four [`LEVELS`] (2 Street … 5 Legend), each level with its own car pool,
 //!   driver skill and bet range, spawned [`SPAWN_SPACING_M`] apart. By day 8 are out (two per
 //!   level); at night ([`is_night`]) 13, four of them lapping the Loop 9 highway (owner row
@@ -24,7 +24,9 @@
 //!   row 151; gates the player passes within [`GATE_RADIUS_M`] before B counts), and a stake
 //!   inside the level's range (capped by their cash), then accepts. Not while the player is
 //!   wanted or chased (owner row 150): a honk does nothing and an open offer lapses.
-//! - **Race.** Accepting pays the stake (a ledger line), resets both cars side by side at the
+//! - **Race.** Accepting pays the stake (a betting ticket on the one career wallet:
+//!   `wp_economy` `place_bet`, venue `Street`, open from the start and capped only by cash and
+//!   the level's range; ledger note `bet:stake:street:…`), resets both cars side by side at the
 //!   start, at rest, facing along the route (logged moves, owner row 150),
 //!   holds both for a 3 s countdown, then the racer drives a full-pace `Field` like a picker
 //!   race's AI ([`wp_race::entrants`]): its level's [`DriverProfile`], the car's real
@@ -33,7 +35,8 @@
 //!   police until it finishes, is wrecked or is actually captured). First within
 //!   [`FINISH_RADIUS_M`] of B wins, by any path (shortcuts are fair); a wreck or a capture
 //!   decides it early; at the time limit the one further along the route wins. A win pays back
-//!   twice the stake (even money).
+//!   twice the stake (even money, `settle_bet`, `bet:payout:street:…`) and the level's
+//!   `win_rep` (`award_rep`, so street wins climb the career's rep tiers).
 //! - **Police.** Street racers are `VehicleKind::AiRacer` for the whole session (the kind is
 //!   not a replay op, so it cannot change mid-session): the police treat them as racers, as
 //!   they treat a picker race's AI. Roaming ones keep to the law, so they draw no heat; a
@@ -53,6 +56,7 @@ use serde::Serialize;
 use simcli::scenario::{AssistSpec, CitySpec, EntitySpec};
 use simcli::Scenario;
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, VehicleInput, VehicleSim};
+use wp_economy::{BetTicket, BetVenue};
 use wp_math::Rng;
 use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, Field, OpposingLanes, RaceConfig, RacerSpec,
@@ -202,6 +206,9 @@ pub struct Level {
     pub bet_min: i64,
     /// Largest bet the racer takes, $.
     pub bet_max: i64,
+    /// Rep for beating a racer of this level (`wp_economy` `award_rep`: the career tier
+    /// ladder sees street wins; a picker-race win is ~100-200). A loss costs no rep.
+    pub win_rep: i64,
 }
 
 /// The four levels, in order (owner, 2026-10-22: the slowest level, Rookie, was dropped; the
@@ -219,6 +226,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 12.0,
         bet_min: 250,
         bet_max: 1_200,
+        win_rep: 40,
     },
     Level {
         level: 3,
@@ -232,6 +240,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 12.5,
         bet_min: 500,
         bet_max: 2_500,
+        win_rep: 70,
     },
     Level {
         level: 4,
@@ -245,6 +254,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 13.0,
         bet_min: 1_000,
         bet_max: 5_000,
+        win_rep: 110,
     },
     Level {
         level: 5,
@@ -258,6 +268,7 @@ pub const LEVELS: [Level; 4] = [
         cruise_mps: 13.3,
         bet_min: 2_000,
         bet_max: 10_000,
+        win_rep: 160,
     },
 ];
 
@@ -464,6 +475,8 @@ pub struct StreetStep {
     /// Light-model permission changes (`Sim::set_light_when_far`, logged as
     /// `OpKind::LightWhenFar`): off for a racer racing the player, on again after.
     pub light: Vec<(EntityId, bool)>,
+    /// This tick's honk opened a challenge (the session's race spots then ignore it).
+    pub challenged: bool,
 }
 
 /// One NPC street racer.
@@ -610,6 +623,8 @@ pub struct RaceResult {
     pub stake: i64,
     /// Cash change from the race (+stake on a win, -stake on a loss), $.
     pub net: i64,
+    /// Rep earned (the level's `win_rep` on a win, 0 on a loss).
+    pub rep: i64,
     /// Cash after, $.
     pub cash_after: i64,
     /// Race time of the winner (or of the race when decided early), s.
@@ -634,6 +649,8 @@ struct Race {
     course: Vec<f32>,
     length_m: f32,
     stake: i64,
+    /// The stake's betting ticket (career economy, venue Street).
+    ticket: BetTicket,
     go_tick: u64,
     limit_tick: u64,
     /// Player's progress along the route, m.
@@ -648,7 +665,6 @@ pub struct StreetRacers {
     race: Option<Race>,
     result: Option<RaceResult>,
     seq: u32,
-    horn_was: bool,
     /// Tick the open offer was made.
     offer_tick: u64,
     /// Last tick's sim events (contacts and police events for the fields).
@@ -861,7 +877,6 @@ impl StreetRacers {
             race: None,
             result: None,
             seq: 0,
-            horn_was: false,
             offer_tick: 0,
             events: Vec::new(),
             cars: BTreeMap::new(),
@@ -1242,9 +1257,12 @@ impl StreetRacers {
             }
             None => (pos, yaw),
         };
-        run.wager(
-            -stake,
-            &format!("street race stake vs {} ({})", self.racers[k].name, l.name),
+        // The one betting wallet (career economy, venue Street): open from the start, the
+        // level's range was checked above and cash covers it.
+        let ticket = run.place_bet(
+            BetVenue::Street,
+            stake,
+            &format!("vs {} ({})", self.racers[k].name, l.name),
         )?;
         let tick = sim.tick();
         let go_tick = tick + COUNTDOWN_TICKS;
@@ -1268,6 +1286,7 @@ impl StreetRacers {
             course: course_packed(&route.polyline, via),
             length_m: route.length_m,
             stake,
+            ticket,
             go_tick,
             limit_tick,
             player_s: 0.0,
@@ -1323,30 +1342,36 @@ impl StreetRacers {
         }
     }
 
+    /// A challenge is open or a street race is running (no other challenge then: the
+    /// session's race spots ignore the horn too).
+    pub fn busy(&self) -> bool {
+        self.offer.is_some() || self.race.is_some()
+    }
+
     /// Before the sim step: horn challenges, offers lapsing, roam routes, and every racer's
-    /// input and move for this tick. Reads the sim only; the session logs and applies the
-    /// result.
+    /// input and move for this tick. `honk` is the horn's rising edge this tick (the session
+    /// owns the one horn edge every challenge reads). Reads the sim only; the session logs
+    /// and applies the result.
     pub fn before_step(
         &mut self,
         sim: &Sim,
         player: EntityId,
-        horn: bool,
+        honk: bool,
         run_over: bool,
     ) -> StreetStep {
         #[cfg(test)]
         let t0 = std::time::Instant::now();
         let tick = sim.tick();
         let mut out = StreetStep::default();
-        let edge = horn && !self.horn_was;
-        self.horn_was = horn;
         let chased = pursued(sim, player);
-        if edge && !run_over && !chased && self.offer.is_none() && self.race.is_none() {
+        if honk && !run_over && !chased && self.offer.is_none() && self.race.is_none() {
             if let Some(k) = self.nearest_roaming(sim, player) {
                 let r = &mut self.racers[k];
                 r.mode = RacerMode::Waiting;
                 r.field = None;
                 self.offer = Some(k);
                 self.offer_tick = tick;
+                out.challenged = true;
             }
         }
         if let Some(k) = self.offer {
@@ -1725,6 +1750,7 @@ impl StreetRacers {
             return;
         };
         let stake = race.stake;
+        let ticket = race.ticket.clone();
         let margin_m = if won {
             race.length_m - racer_s
         } else {
@@ -1736,13 +1762,13 @@ impl StreetRacers {
         let r = &mut self.racers[k];
         self.pending_light.push((r.entity, true));
         let l = level(r.level);
+        let mut rep = 0;
         if won {
             r.losses += 1;
             // Even money: the stake back plus the racer's.
-            let _ = run.wager(
-                2 * stake,
-                &format!("street race won vs {} ({})", r.name, l.name),
-            );
+            run.settle_bet(&ticket, 2 * stake);
+            rep = l.win_rep;
+            run.award_rep(rep, &format!("street:vs {} ({})", r.name, l.name));
         } else {
             r.wins += 1;
         }
@@ -1761,6 +1787,7 @@ impl StreetRacers {
             colour: l.colour,
             stake,
             net: if won { stake } else { -stake },
+            rep,
             cash_after: run.account().cash,
             time_s: elapsed,
             margin_m,

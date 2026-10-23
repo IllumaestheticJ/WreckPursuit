@@ -1904,10 +1904,11 @@ fn plan_covers(g: &mut Gen, extra: &[CoverSpec]) {
 
 /// Covered spans on the built road surfaces (portal to portal), one per plan. A plan on a
 /// Loop 9 draft covers the divided highway as one span along the loop's shared centreline
-/// ([`loop_cover`]). Any other plan follows its road's surface: `remap` maps draft roads to
-/// builder roads (`None` for the open freeways' divided drafts, whose carriageway pieces
-/// `divided(draft)` lists; one tube then spans every carriageway through the stretch, its
-/// centreline midway between them).
+/// ([`loop_cover`]). Any other plan follows its road's surface (`remap`: draft → builder
+/// road); an open freeway's divided draft (Ashpeak County: `remap` is `None`, `divided(draft)`
+/// lists its carriageway pieces) gets one tube spanning both carriageways through the
+/// stretch: its centreline runs midway between them and its half width reaches the far paved
+/// edge.
 fn covered_spans(
     g: &Gen,
     built: &Built,
@@ -1918,6 +1919,9 @@ fn covered_spans(
 ) -> Vec<CoveredSpan> {
     let mut out = Vec::new();
     for (di, d) in g.drafts.iter().enumerate() {
+        if d.covers.is_empty() {
+            continue;
+        }
         if loop_drafts.contains(&di) {
             out.extend(d.covers.iter().filter_map(|c| loop_cover(built, ring, c)));
             continue;
@@ -3115,9 +3119,9 @@ fn surface_z_bank(s: &RoadSurface, cum: &[f32], at: f32) -> (f32, f32) {
 /// instead ([`residential::plan_lot`]): front yards, garages and driveways, fences, hedges
 /// and yard trees, a corner shop or two per district, and street trees on the verge
 /// ([`surface::verge_street`]). Returns the buildings and the decor.
-/// Street-front buildings and yard decor along every non-highway road outside `no_buildings`
-/// (builder roads): clear of `reserved` (hand-placed buildings) and `reserved_decor`, and only
-/// where `allowed`.
+///
+/// Clear of `reserved` (hand-placed buildings, Ashpeak County) and `reserved_decor`, only
+/// where `allowed`, and none along the `no_buildings` roads (the Loop 9 rest stops).
 #[allow(clippy::too_many_arguments)]
 fn buildings(
     rng: &mut Rng,

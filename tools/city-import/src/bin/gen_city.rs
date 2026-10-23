@@ -43,8 +43,8 @@ fn main() {
             "-h" | "--help" => {
                 println!("gen-city --grid 12x12 --seed 1 [--spacing 110] [--out data/city]");
                 println!("gen-city --preset vesper_v2 [--seed 1] [--out data/city] [--json]");
-                println!("gen-city --preset touge|<touge id> [--out data/city] [--json]");
                 println!("gen-city --preset ashpeak [--seed 1] [--out data/city] [--json]");
+                println!("gen-city --preset touge|<touge id> [--out data/city] [--json]");
                 return;
             }
             other => panic!("unknown argument {other}"),

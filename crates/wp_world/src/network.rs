@@ -22,7 +22,8 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// v4 (residential streets, playtest rows 94–95): building kind and roof
 /// ([`Building::kind`], [`Building::roof`], [`Building::roof_rise_m`]) and street / yard
 /// furniture ([`RoadNetwork::decor`]).
-/// v5 (divided highways, merged on lead/main-sync): `RoadSurface::median_barrier`.
+/// v5 (main's divided highways, merged on lead/main-sync): `RoadSurface::median_barrier`
+/// (main's own v3).
 /// v6 (Ashpeak County): road material ([`RoadSurface::material`]: gravel and dirt roads),
 /// farm / landmark / construction building kinds and construction, farm and forest decor.
 pub const ROAD_FORMAT_VERSION: u32 = 6;

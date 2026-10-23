@@ -9,7 +9,8 @@
 //!   off the edge) is declared a total loss (`DamageModel::declare_total_loss` + a
 //!   `SimEvent::TotalLoss`, so the judge DNFs it and the player's economy run sees the wreck)
 //!   and the battle is decided for the other car at once;
-//! - otherwise decides from the judge: first across the line wins, a DNF loses;
+//! - otherwise decides from the judge (`wp_race::touge::judge_result`): first across the line
+//!   wins, a DNF loses, both ended as stuck by the judge is a draw (stakes refunded, no rep);
 //! - captures the NPC's damage the tick its race ends (finish, DNF or breach): that is the car
 //!   a won pink slip brings home, lattice included;
 //! - takes the wager chosen in the menu ([`set_next_wager`]) on the player's account at the
@@ -247,15 +248,8 @@ impl TougeRun {
             });
         }
         if self.battle.outcome().is_none() {
-            let tick = sim.tick();
-            match (status(me), status(npc)) {
-                (RacerStatus::Finished, _) => self.battle.decide(tick, true),
-                (_, RacerStatus::Finished) => self.battle.decide(tick, false),
-                (RacerStatus::Running, RacerStatus::Dnf(_) | RacerStatus::Dq(_)) => {
-                    self.battle.decide(tick, true)
-                }
-                (RacerStatus::Dnf(_) | RacerStatus::Dq(_), _) => self.battle.decide(tick, false),
-                _ => {}
+            if let Some(result) = touge::judge_result(status(me), status(npc)) {
+                self.battle.decide_as(sim.tick(), result);
             }
         }
     }
@@ -268,7 +262,7 @@ impl TougeRun {
         };
         if !self.placed {
             self.placed = true;
-            match run.touge_place(&TougeTable::embedded(), self.battle.setup, self.wager) {
+            match run.touge_place(self.battle.setup, self.wager) {
                 Ok((ticket, lines)) => {
                     self.ticket = Some(ticket);
                     self.ledger.extend(lines);
@@ -443,7 +437,9 @@ pub fn touge_cards() -> Vec<TougeCard> {
         .collect()
 }
 
-/// The wager menu for `setup` on `acct`.
+/// The wager menu for `setup` on `acct` (the career rep tiers decide what is open).
 pub fn menu(acct: &PlayerAccount, setup: &TougeSetup) -> WagerMenu {
-    touge::wager_menu(acct, &TougeTable::embedded(), setup)
+    crate::garage::with_economy(|econ| {
+        touge::wager_menu(econ, acct, &TougeTable::embedded(), setup)
+    })
 }

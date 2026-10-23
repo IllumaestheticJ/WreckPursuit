@@ -7,8 +7,9 @@
 //!   not plan (a POI or road missing) gets no spot.
 //! - [`spot_at`] is the spot a car is standing in (horizontal radius, small height window so a
 //!   car on an overpass does not trigger the spot below it).
-//! - [`HonkTrigger`] turns the horn into a one-shot start request: rising edge only, inside a
-//!   spot, nearly stopped. A held horn never retriggers.
+//! - [`honk_spot`] is the spot a honk starts: the one the car stands in, nearly stopped. The
+//!   horn edge itself belongs to the caller's one challenge system (`wp_wasm::session`: a
+//!   street racer in honking range takes a honk first).
 //!
 //! Pure, deterministic functions of the world and the car's state; nothing here touches the
 //! simulation (starting the race is the caller's job, see `wp_wasm::session`).
@@ -88,40 +89,13 @@ pub fn spot_at(spots: &[RaceSpot], pos: [f32; 3]) -> Option<&RaceSpot> {
     })
 }
 
-/// Horn → race start request. Feed it the player's horn every tick; it fires once per press.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct HonkTrigger {
-    horn_was_down: bool,
-}
-
-impl HonkTrigger {
-    /// The horn's state last tick.
-    pub fn horn_was_down(&self) -> bool {
-        self.horn_was_down
+/// The spot a honk by a car at `pos` moving at `speed_mps` starts: the spot it stands in
+/// ([`spot_at`]) when slower than [`HONK_MAX_SPEED_MPS`].
+pub fn honk_spot(spots: &[RaceSpot], pos: [f32; 3], speed_mps: f32) -> Option<&RaceSpot> {
+    if speed_mps >= HONK_MAX_SPEED_MPS {
+        return None;
     }
-
-    /// The horn was pressed this tick (rising edge). Updates the edge state.
-    pub fn pressed(&mut self, horn: bool) -> bool {
-        let edge = horn && !self.horn_was_down;
-        self.horn_was_down = horn;
-        edge
-    }
-
-    /// One tick: the race to start, if the horn was just pressed (rising edge) by a car at
-    /// `pos` moving at `speed_mps` inside one of `spots` and slower than
-    /// [`HONK_MAX_SPEED_MPS`]. `spots` is only called on a press (planning them is not free).
-    pub fn update<'a>(
-        &mut self,
-        horn: bool,
-        pos: [f32; 3],
-        speed_mps: f32,
-        spots: impl FnOnce() -> &'a [RaceSpot],
-    ) -> Option<&'static str> {
-        if !self.pressed(horn) || speed_mps >= HONK_MAX_SPEED_MPS {
-            return None;
-        }
-        spot_at(spots(), pos).map(|s| s.race_id)
-    }
+    spot_at(spots, pos)
 }
 
 #[cfg(test)]
@@ -157,42 +131,22 @@ mod tests {
     }
 
     #[test]
-    fn honk_fires_once_per_press_inside_a_spot_when_stopped() {
+    fn honk_starts_the_spot_only_when_stopped_inside() {
         let spots = vec![spot("a", [0.0; 3])];
-        let mut t = HonkTrigger::default();
-        let tick = |t: &mut HonkTrigger, horn, pos, v| t.update(horn, pos, v, || &spots);
         // Outside the spot: nothing.
-        assert_eq!(tick(&mut t, true, [50.0, 0.0, 0.0], 0.0), None);
-        assert_eq!(tick(&mut t, false, [50.0, 0.0, 0.0], 0.0), None);
-        // Inside but moving: nothing, and holding the horn while slowing down does not fire.
-        assert_eq!(tick(&mut t, true, [1.0, 0.0, 0.0], 8.0), None);
-        assert_eq!(tick(&mut t, true, [1.0, 0.0, 0.0], 0.5), None);
-        assert_eq!(tick(&mut t, false, [1.0, 0.0, 0.0], 0.5), None);
-        // A fresh press while stopped inside: fires once, held horn does not retrigger.
-        assert_eq!(tick(&mut t, true, [1.0, 0.0, 0.0], 0.5), Some("a"));
-        for _ in 0..100 {
-            assert_eq!(tick(&mut t, true, [1.0, 0.0, 0.0], 0.0), None);
-        }
-        assert_eq!(tick(&mut t, false, [1.0, 0.0, 0.0], 0.0), None);
-        assert_eq!(tick(&mut t, true, [1.0, 0.0, 0.0], 0.0), Some("a"));
+        assert!(honk_spot(&spots, [50.0, 0.0, 0.0], 0.0).is_none());
+        // Inside but moving: nothing.
+        assert!(honk_spot(&spots, [1.0, 0.0, 0.0], 8.0).is_none());
+        assert!(honk_spot(&spots, [1.0, 0.0, 0.0], HONK_MAX_SPEED_MPS).is_none());
+        // Inside, nearly stopped: the spot.
+        assert_eq!(
+            honk_spot(&spots, [1.0, 0.0, 0.0], 0.5).map(|s| s.race_id),
+            Some("a")
+        );
     }
 
     #[test]
-    fn spots_are_only_planned_on_a_press() {
-        let mut t = HonkTrigger::default();
-        let mut calls = 0;
-        let empty: Vec<RaceSpot> = Vec::new();
-        for horn in [false, true, true, false, false, true] {
-            t.update(horn, [0.0; 3], 0.0, || {
-                calls += 1;
-                &empty
-            });
-        }
-        assert_eq!(calls, 2);
-    }
-
-    #[test]
-    fn grid_city_has_its_race_spot_at_the_pole() {
+    fn grid_city_has_its_race_spots_at_the_pole() {
         let world = World::procedural(
             &wp_world::procgen::ProcGenConfig::default(),
             wp_world::WorldConfig::default(),
@@ -200,7 +154,7 @@ mod tests {
         let spots = race_spots(&world);
         assert_eq!(
             spots.iter().map(|s| s.race_id).collect::<Vec<_>>(),
-            vec!["grid_highway_sprint"]
+            vec!["grid_highway_sprint", "grid_arterial_sprint"]
         );
         let def = catalog::race("grid_highway_sprint").unwrap();
         let race = catalog::plan_course(&world, &def).unwrap();

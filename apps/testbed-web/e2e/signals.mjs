@@ -1,7 +1,7 @@
 // Turn signals (owner playtest 2026-10-21, "traffic doesn't use turn signals"), headless Chromium
 // (Playwright). `npm run e2e:signals` (needs `npm run wasm` first). Env: CHROMIUM=/path/to/chrome.
 //
-// Checks, in the city chase preset with the player parked: some traffic car's draw record asks
+// Checks, in the night run preset with the player parked: some traffic car's draw record asks
 // for its right indicator, and its right-side lamps are lit in one frame and unlit in another
 // (the 1.5 Hz blink) while its left-side lamps stay dark; the same for a left signal; hazards
 // light both sides. Lamp state is read back from the drawn car (fleet instance colours or the

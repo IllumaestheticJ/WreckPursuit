@@ -530,6 +530,16 @@ export const sim = {
   raceStandings: (): Float32Array => wasm.race_standings(),
   /** Gates + route of the race (race_marker.ts parseCourse). */
   raceCourse: (): Float32Array => wasm.race_course(),
+  /** Bet on yourself during the countdown (`odds[].label` from the picker). Throws if refused. */
+  raceBet: (label: string, stake: number): BetCard => JSON.parse(wasm.race_bet(label, stake)),
+  /** Picker-race betting (venue City) on the current account: max stake and why it is locked (null = open). */
+  raceBetStatus: (): { max: number; lock: string | null } => JSON.parse(wasm.race_bet_status()),
+  /** The city's regulars with their records, strongest first. */
+  rosterList: (): RegularCard[] => JSON.parse(wasm.roster_json()),
+  /** The regulars' records as text (local save). */
+  rosterSave: (): string => wasm.roster_state(),
+  /** Restore the regulars' records from `rosterSave()` output. Throws if unreadable. */
+  rosterLoad: (text: string): void => wasm.roster_state_load(text),
   /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
   raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** The city's repair shops (`wp_wasm::garage_visit::GarageSite`); fetch once per session. */
@@ -564,8 +574,6 @@ export const sim = {
   restStops: (): { name: string; pos: [number, number, number]; heading_rad: number }[] => JSON.parse(wasm.rest_stops_json()),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
-  /** Debug / e2e: put `entity` on the ground at (x, y) facing `yaw`, rolling at `speed` m/s. */
-  debugPlace: (entity: number, x: number, y: number, yaw: number, speed: number): void => wasm.debug_place(entity, x, y, yaw, speed),
   /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
   debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
@@ -600,6 +608,8 @@ export const sim = {
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
   /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
   debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
+  /** Debug / e2e: put `entity` on the ground at [x, y], facing `yaw`, at `speedMps` (not recorded in replays). */
+  debugPlace: (entity: number, x: number, y: number, yaw: number, speedMps: number): void => wasm.debug_place(entity, x, y, yaw, speedMps),
   /** Debug / e2e: put `entity` stopped at (x, y) facing `yaw` (not recorded in replays). */
   debugPlaceVehicle: (entity: number, x: number, y: number, yaw: number): void => wasm.debug_place_vehicle(entity, x, y, yaw),
   /** Spawn NPC street racers in city sessions started after this call (default on). */
@@ -631,9 +641,13 @@ export const sim = {
   careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
   careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
     JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
+  careerClearWay: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_clear_way(uid, slot)),
+  /** Pay the mechanic: inventory part `part` (0 = buy `grade` now, null = stock). */
+  careerMechanicInstall: (uid: number, slot: string, part: number, grade: string | null, sellOld: boolean): MechanicResult =>
+    JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, MechanicResult, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 /** A street-racer level (`wp_wasm::street::Level`). */
 export interface StreetLevel {
@@ -643,6 +657,8 @@ export interface StreetLevel {
   cars: string[];
   bet_min: number;
   bet_max: number;
+  /** Rep for beating a racer of this level. */
+  win_rep: number;
 }
 
 /** One street racer (`wp_wasm::street::RosterEntry`). */
@@ -707,6 +723,8 @@ export interface StreetResult {
   colour: string;
   stake: number;
   net: number;
+  /** Rep earned (the level's win_rep on a win, 0 on a loss). */
+  rep: number;
   cash_after: number;
   time_s: number;
   margin_m: number;
@@ -739,9 +757,9 @@ export interface StreetPreview {
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
-import type { RaceCard, RaceReport } from "../ui/race";
-import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
+import type { BetCard, RaceCard, RaceReport, RegularCard } from "../ui/race";
 import type { RaceSpot } from "../race_spots";
+import type { TougeCard, TougeChoice, TougeReport, Wager, WagerMenu } from "../ui/touge";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";
 import type { GarageOffer, GarageRepairReport, GarageSite } from "../ui/garageVisit";

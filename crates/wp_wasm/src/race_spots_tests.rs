@@ -11,7 +11,10 @@ use crate::session::Session;
 const PLAYER: EntityId = EntityId(1);
 const CAR: &str = "lindwurm_4t";
 
+/// A free drive without street racers (a racer in honking range would take the honk first;
+/// see [`street_racer_in_reach_takes_the_honk_first`]).
 fn free_drive(city: &str) -> Session {
+    crate::session::set_street_racers_enabled(false);
     Session::new(
         free_drive_in(CAR, DamageMode::Arcade, city_spec(city)),
         false,
@@ -56,6 +59,7 @@ fn hold(s: &mut Session, ticks: u64, horn: bool, brake: f32) -> Vec<&'static str
 #[test]
 fn port_vesper_races_have_spots_on_both_maps() {
     let mut vesper = free_drive("vesper_v2");
+    crate::session::set_street_racers_enabled(false);
     let mut ashpeak = Session::new(
         night_run_in(CAR, DamageMode::Arcade, city_spec("ashpeak")),
         false,
@@ -170,6 +174,76 @@ fn race_city_keeps_the_map_only_when_the_race_runs_there() {
     assert_eq!(race_city(&hollins, ""), "vesper_v2");
     assert_eq!(race_city(&grid, "ashpeak"), "procedural_12x12");
     assert!(race_scenario_in(&grid, CAR, DamageMode::Arcade, false, "vesper_v2").is_err());
+}
+
+/// One challenge system on the horn: with the player right behind a roaming street racer in
+/// a spot, a honk opens the street challenge and does not request the spot's race; the next
+/// honk with the challenge still open does nothing either. Declined, a honk with no racer in
+/// reach starts the spot's race.
+#[test]
+fn street_racer_in_reach_takes_the_honk_first() {
+    crate::session::set_street_racers_enabled(true);
+    let mut s = Session::new(
+        free_drive_in(CAR, DamageMode::Arcade, city_spec("vesper_v2")),
+        false,
+    )
+    .unwrap();
+    crate::session::set_street_racers_enabled(false);
+    let spot = s
+        .race_spots()
+        .iter()
+        .find(|p| p.race_id == "hollins_sprint")
+        .cloned()
+        .expect("hollins spot");
+    // Player stopped in the spot, right behind a roaming racer parked 9 m ahead (round 12:
+    // a challenge only from right behind the racer).
+    s.debug_sim_mut()
+        .unwrap()
+        .place_on_ground(
+            PLAYER,
+            [spot.pos[0], spot.pos[1]],
+            spot.heading_rad,
+            0.0,
+            Some(spot.pos[2]),
+        )
+        .unwrap();
+    let (sn, cs) = wp_math::sin_cos(spot.heading_rad);
+    let racer = s
+        .street()
+        .expect("street racers")
+        .roster()
+        .iter()
+        .find(|r| r.mode == crate::street::RacerMode::Roam)
+        .expect("a roaming racer")
+        .entity;
+    s.debug_sim_mut()
+        .unwrap()
+        .place_on_ground(
+            EntityId(racer),
+            [spot.pos[0] - sn * 9.0, spot.pos[1] + cs * 9.0],
+            spot.heading_rad,
+            0.0,
+            Some(spot.pos[2]),
+        )
+        .unwrap();
+    hold(&mut s, 30, false, 1.0);
+    assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_some());
+    assert!(
+        hold(&mut s, 5, true, 1.0).is_empty(),
+        "the racer takes the honk"
+    );
+    assert!(s.street().unwrap().busy(), "street challenge open");
+    hold(&mut s, 5, false, 1.0);
+    assert!(
+        hold(&mut s, 5, true, 1.0).is_empty(),
+        "challenge open: no spot"
+    );
+    // Decline; the racer is on its re-challenge cooldown, so it is not in reach: the spot's
+    // race starts.
+    s.street_decline();
+    hold(&mut s, 5, false, 1.0);
+    assert!(s.street().unwrap().in_reach(s.sim(), PLAYER).is_none());
+    assert_eq!(hold(&mut s, 5, true, 1.0), vec!["hollins_sprint"]);
 }
 
 /// Off-city free drive has no spots and a honk does nothing.

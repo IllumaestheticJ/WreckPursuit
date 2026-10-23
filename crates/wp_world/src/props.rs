@@ -157,6 +157,8 @@ pub(crate) fn clear_of_decor(map: &CityMap, p: V2, f: V2) -> bool {
             DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
                 (crate::residential::TRUNK_R_M, crate::residential::TRUNK_R_M)
             }
+            // Solid boxes, as `wp_sim::physics::decor_collider` builds them (Ashpeak County
+            // adds cranes, barriers, site fences, hay bales and billboards).
             DecorKind::Hedge
             | DecorKind::Fence
             | DecorKind::Crane

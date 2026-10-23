@@ -29,6 +29,7 @@
 //! - [`profile`] — the single-player career save (versioned, with carry-over rules).
 //! - [`career`] — scripted multi-night career simulation used for tuning.
 //! - [`visuals`] — what a build looks like: the parts its mods bolt on, for the renderer.
+//! - [`progression`] — rep tiers, feature / dealer unlocks, betting limits, tier rewards.
 
 #![warn(missing_docs)]
 
@@ -43,6 +44,7 @@ pub mod mods;
 pub mod parts;
 pub mod payouts;
 pub mod profile;
+pub mod progression;
 pub mod pursuit;
 pub mod repair;
 pub mod session;
@@ -64,11 +66,16 @@ pub use ledger::{
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use parts::{
-    CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, PartFit, PartGroup, PartView,
-    PartsTable, SlotDef, SlotView, StandFit, StandView, WorkshopView,
+    CarParts, CatalogEntry, FittedPart, InventoryView, LoosePart, MechanicJob, MechanicRates,
+    PartFit, PartGroup, PartSource, PartView, PartsTable, SlotDef, SlotView, StandFit, StandView,
+    WorkshopView,
 };
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};
+pub use progression::{
+    career_note, BetTicket, BetVenue, CareerProgress, CareerState, Credits, Feature,
+    ProgressUpdate, ProgressionRules, RepTier,
+};
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
 pub use repair::{
     district_from_key, district_key, DamageReport, RepairOption, RepairOrder, RepairQuote,

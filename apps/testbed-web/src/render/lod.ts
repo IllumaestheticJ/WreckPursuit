@@ -8,7 +8,6 @@
 //   * the instanced fleet (render/fleet.ts) otherwise: same model, same livery, same pose.
 // So a promotion or demotion swaps the drawer on one frame with no gap, jump or recolour.
 //
-// Ashpeak County Sheriff units (police flag 4) use the county livery models.
 // Models: a draw record's `model` picks the car model it is drawn as — traffic
 // `SessionModels.traffic_models[model]`, police `SessionModels.police_models[model]` (the
 // `car_mix` fleets); -1 / an empty list falls back to the single `traffic` / `police` model.
@@ -120,8 +119,8 @@ export class LodDirector {
    * index `list.length` holds the fallback model (record `model` −1). */
   private tModels: (FleetModel | null | undefined)[] = [];
   private pModels: (FleetModel | null | undefined)[] = [];
-  /** `pModels` in the Ashpeak County Sheriff livery. */
-  private cModels: (FleetModel | null | undefined)[] = [];
+  /** As `pModels`, in the Ashpeak County Sheriff livery. */
+  private pCountyModels: (FleetModel | null | undefined)[] = [];
   /** Lens levels scratch (render/lights.ts unitLevels). */
   private readonly lens = new Float32Array(6);
 
@@ -133,7 +132,7 @@ export class LodDirector {
     this.sessionModels = m;
     this.tModels = [];
     this.pModels = [];
-    this.cModels = [];
+    this.pCountyModels = [];
   }
 
   /** Fleet model of a traffic draw record's `model` (null: the session has no traffic model). */
@@ -150,12 +149,12 @@ export class LodDirector {
 
   /**
    * Fleet model of a police draw record's `model` (null: the session has no police model);
-   * `county`: in the Ashpeak County Sheriff livery.
+   * `county` is the Ashpeak County Sheriff livery variant.
    */
-  private policeModel(model: number, county: boolean): FleetModel | null {
+  private policeModel(model: number, county = false): FleetModel | null {
     const list = this.sessionModels.police_models ?? [];
     const i = model >= 0 && model < list.length ? Math.round(model) : list.length;
-    const cache = county ? this.cModels : this.pModels;
+    const cache = county ? this.pCountyModels : this.pModels;
     let m = cache[i];
     if (m === undefined) {
       const id = recordModel(list, model, this.sessionModels.police);
@@ -247,7 +246,7 @@ export class LodDirector {
       this.fleetGen = this.fleet.generation;
       this.tModels = [];
       this.pModels = [];
-      this.cModels = [];
+      this.pCountyModels = [];
     }
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
       const entity = traffic[o + D.entity];
@@ -280,7 +279,7 @@ export class LodDirector {
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      // Ashpeak County Sheriff units: county livery model and green proxy paint.
+      // Ashpeak County Sheriff units: county livery model and green paint.
       const county = countySkin((flags & POLICE_DRAW_FLAG.county) !== 0);
       const pModel = this.policeModel(police[o + D.model], county);
       const id = police[o + D.id];

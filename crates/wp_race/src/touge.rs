@@ -13,18 +13,20 @@
 //!   well below the road) is **totaled** and the battle is over: the other car wins at once
 //!   ([`Boundary`], [`TougeBattle`]).
 //! - **Stakes:** who may race a challenger, a boss, bet or put up a pink slip is decided by
-//!   the player's rep against `touge.toml [gates]` ([`TougeGates`], a stand-in for the
-//!   career's rep tiers until they land); [`wager_menu`] shows what is open and why not.
-//!   Side bets are cash adjustments on the account's ledger, the same wallet as the street
-//!   racers' wagers. Payouts and rep are in `data/events/touge.toml` ([`TougeTable`]). A won
-//!   pink slip puts the NPC's car in the player's garage exactly as it finished ([`settle`]).
+//!   the rep tiers of `wp_economy::progression` (`Feature::TougeRaces`, `BossRaces`,
+//!   `TougeBetting`, `PinkSlips`); [`wager_menu`] shows what is open and why not. Payouts and
+//!   rep are in `data/events/touge.toml` ([`TougeTable`]). A won pink slip puts the NPC's car
+//!   in the player's garage exactly as it finished ([`settle`]).
 //!
 //! Pure rules: the browser glue (`wp_wasm::race`) feeds positions, applies the total loss to
 //! the damage model and keeps the lattice state of a won car.
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{EntityId, Legality, RaceKind, VehicleClass};
-use wp_economy::{CarUid, Economy, EconomyError, EconomyEvent, Money, PlayerAccount, WonCar};
+use wp_contracts::{DnfReason, EntityId, Legality, RaceKind, RacerStatus, VehicleClass};
+use wp_economy::{
+    BetTicket, BetVenue, CarUid, Economy, EconomyError, EconomyEvent, Feature, Money,
+    PlayerAccount, WonCar,
+};
 use wp_opponent::DriverProfile;
 use wp_world::geom::{self, V3};
 use wp_world::World;
@@ -32,6 +34,7 @@ use wp_world::World;
 use crate::bridge::CityRace;
 use crate::catalog::{self, AiDriverDef, CourseSpec, RaceCity, RaceDef};
 use crate::course::GridLayout;
+use crate::roster::Specialty;
 
 /// Embedded `data/events/touge.toml`.
 pub const TOUGE_TOML: &str = include_str!("../../../data/events/touge.toml");
@@ -147,9 +150,9 @@ pub enum Surface {
 /// Who the player races.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Opponent {
-    /// The pass's regular ([`Gate::Challenger`]).
+    /// The pass's regular (`Feature::TougeRaces`).
     Challenger,
-    /// The pass's boss ([`Gate::Boss`]).
+    /// The pass's boss (`Feature::BossRaces`).
     Boss,
 }
 
@@ -200,11 +203,11 @@ impl Opponent {
         }
     }
 
-    /// The rep gate that opens racing this opponent.
-    pub fn gate(self) -> Gate {
+    /// The rep-tier feature that opens racing this opponent.
+    pub fn feature(self) -> Feature {
         match self {
-            Opponent::Challenger => Gate::Challenger,
-            Opponent::Boss => Gate::Boss,
+            Opponent::Challenger => Feature::TougeRaces,
+            Opponent::Boss => Feature::BossRaces,
         }
     }
 }
@@ -218,11 +221,13 @@ pub struct TougeRacer {
     pub title: &'static str,
 }
 
-/// The pass's two NPCs, in [`MAPS`] order: `(challenger, boss)`.
+/// The pass's two NPCs, in [`MAPS`] order: `(challenger, boss)`. Their `id`s (`touge_<first
+/// name>`) are not city regulars (`data/events/racers.toml`): touge NPCs keep no form record.
 pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
     (
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_mako",
                 name: "Mako Sato",
                 style: "clean and patient: waits for your mistake in the hairpins",
                 car: "shiro_turbo",
@@ -232,6 +237,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
         },
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_kaito",
                 name: "Kaito Arai",
                 style: "late on the brakes, never gives the inside",
                 car: "hakone_gt",
@@ -243,6 +249,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
     (
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_lena",
                 name: "Lena Vos",
                 style: "flat out on the sweepers, nervous near the drop",
                 car: "kestrel_ts",
@@ -252,6 +259,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
         },
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_dario",
                 name: "Dario Conti",
                 style: "carries terrifying speed, uses every centimetre of road",
                 car: "lucciola_350",
@@ -263,6 +271,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
     (
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_theo",
                 name: "Theo Brandt",
                 style: "power merchant: fast up the straights, ragged on the crests",
                 car: "sperber_32",
@@ -272,6 +281,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
         },
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_yuna",
                 name: "Yuna Kurosawa",
                 style: "all-wheel grip and no fear of the rain",
                 car: "lindwurm_4t",
@@ -283,6 +293,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
     (
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_cole",
                 name: "Cole Hartley",
                 style: "smooth rhythm through the esses, loses time on the brakes",
                 car: "kestrel_ts",
@@ -292,6 +303,7 @@ pub static ROSTER: [(TougeRacer, TougeRacer); 4] = [
         },
         TougeRacer {
             driver: AiDriverDef {
+                id: "touge_gus",
                 name: "Gus Lindqvist",
                 style: "the old fox: perfect lines, blocks every move",
                 car: "shiro_turbo",
@@ -431,6 +443,7 @@ impl TougeSetup {
             blurb: m.blurb,
             city: RaceCity::Touge(m.id),
             kind: RaceKind::Sprint,
+            terrain: Specialty::Hill,
             legality: Legality::Sanctioned,
             time_of_day_h: self.daylight.hour(),
             traffic_density: 0.0,
@@ -444,7 +457,7 @@ impl TougeSetup {
             ai: std::slice::from_ref(&self.racer().driver),
             seed: self.seed(),
             prior_meets: 0,
-            // Laid out single file by `plan_course` (NPC ahead).
+            // Touge lays out its own single-file grid ([`plan_course`]); no picker override.
             grid: None,
         }
     }
@@ -525,6 +538,24 @@ pub enum BattleResult {
     Won,
     /// The NPC won.
     Lost,
+    /// Neither: the judge ended both cars as stuck (`DnfReason::Stuck`). Stakes are refunded,
+    /// no rep either way, a pink slip keeps both cars.
+    Draw,
+}
+
+/// The battle's result from the judge's statuses of the player and the NPC when nobody went
+/// through a wall: the first across the line wins; a DNF or DQ while the other still runs
+/// loses; both ended as stuck by the judge is a [`BattleResult::Draw`]. `None` while undecided.
+pub fn judge_result(player: RacerStatus, npc: RacerStatus) -> Option<BattleResult> {
+    use RacerStatus::{Dnf, Dq, Finished, Running};
+    match (player, npc) {
+        (Finished, _) => Some(BattleResult::Won),
+        (_, Finished) => Some(BattleResult::Lost),
+        (Dnf(DnfReason::Stuck), Dnf(DnfReason::Stuck)) => Some(BattleResult::Draw),
+        (Running, Dnf(_) | Dq(_)) => Some(BattleResult::Won),
+        (Dnf(_) | Dq(_), _) => Some(BattleResult::Lost),
+        _ => None,
+    }
 }
 
 /// The decided battle.
@@ -610,13 +641,21 @@ impl TougeBattle {
     /// Decide from the judge when nobody went through a wall: `player_won` = the player
     /// finished ahead (or the NPC did not finish). Ignored once decided.
     pub fn decide(&mut self, tick: u64, player_won: bool) {
+        self.decide_as(
+            tick,
+            if player_won {
+                BattleResult::Won
+            } else {
+                BattleResult::Lost
+            },
+        );
+    }
+
+    /// Decide with `result` (e.g. from [`judge_result`]). Ignored once decided.
+    pub fn decide_as(&mut self, tick: u64, result: BattleResult) {
         if self.outcome.is_none() {
             self.outcome = Some(BattleOutcome {
-                result: if player_won {
-                    BattleResult::Won
-                } else {
-                    BattleResult::Lost
-                },
+                result,
                 tick,
                 totaled: None,
                 breach: None,
@@ -651,89 +690,6 @@ pub struct PinkSlipStakes {
     pub loss_rep: i64,
 }
 
-/// Rep needed for each touge feature, and the side-bet cap (`touge.toml [gates]`).
-///
-/// A stand-in for the career's rep tiers (`wp_economy::progression` on `lead/career-port`):
-/// the numbers mirror that branch's `career.toml` (`touge_races` = Known, `boss_races` and
-/// `touge_betting` = Respected, `pink_slips` = Feared). When the career lands, these checks
-/// become `Economy::require_unlocked` / `max_bet` and this table goes away.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TougeGates {
-    /// Rep to race a pass's challenger.
-    pub challenger_rep: i64,
-    /// Rep to race a pass's boss.
-    pub boss_rep: i64,
-    /// Rep to place a side bet.
-    pub side_bet_rep: i64,
-    /// Rep to put up a pink slip.
-    pub pink_slip_rep: i64,
-    /// Largest single stake, $.
-    pub max_stake: Money,
-    /// A stake is also capped at this fraction of the cash on hand.
-    pub max_stake_cash_frac: f32,
-}
-
-/// What a gate controls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Gate {
-    /// Racing this pass's challenger.
-    Challenger,
-    /// Racing this pass's boss.
-    Boss,
-    /// Side bets.
-    SideBet,
-    /// Pink slips.
-    PinkSlip,
-}
-
-impl Gate {
-    /// Menu wording.
-    pub fn label(self) -> &'static str {
-        match self {
-            Gate::Challenger => "touge races",
-            Gate::Boss => "boss races",
-            Gate::SideBet => "touge side bets",
-            Gate::PinkSlip => "pink slips",
-        }
-    }
-}
-
-impl TougeGates {
-    /// Rep that opens `g`.
-    pub fn rep_for(&self, g: Gate) -> i64 {
-        match g {
-            Gate::Challenger => self.challenger_rep,
-            Gate::Boss => self.boss_rep,
-            Gate::SideBet => self.side_bet_rep,
-            Gate::PinkSlip => self.pink_slip_rep,
-        }
-    }
-
-    /// `Ok` when `acct` has the rep for `g`, else why not.
-    pub fn check(&self, acct: &PlayerAccount, g: Gate) -> Result<(), String> {
-        let need = self.rep_for(g);
-        if acct.rep >= need {
-            Ok(())
-        } else {
-            Err(format!(
-                "{} need {need} rep (you have {})",
-                g.label(),
-                acct.rep
-            ))
-        }
-    }
-
-    /// Largest side-bet stake for `acct` now (0 while in debt).
-    pub fn max_stake(&self, acct: &PlayerAccount) -> Money {
-        if acct.cash <= 0 {
-            return 0;
-        }
-        let frac = (acct.cash as f32 * self.max_stake_cash_frac).floor() as Money;
-        self.max_stake.min(frac).max(0)
-    }
-}
-
 /// `data/events/touge.toml`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -744,8 +700,6 @@ pub struct TougeTable {
     pub boss: OpponentStakes,
     /// Pink slips.
     pub pink_slip: PinkSlipStakes,
-    /// Who may race, bet and put up pink slips.
-    pub gates: TougeGates,
     /// Extra rep when your own car went through the wall (≤ 0).
     pub totaled_rep: i64,
 }
@@ -766,16 +720,6 @@ impl TougeTable {
         }
         if t.pink_slip.win_rep < 0 || t.pink_slip.loss_rep > 0 || t.totaled_rep > 0 {
             return Err("touge.toml: pink_slip / totaled_rep signs".into());
-        }
-        let g = t.gates;
-        if g.challenger_rep < 0
-            || g.boss_rep < g.challenger_rep
-            || g.side_bet_rep < 0
-            || g.pink_slip_rep < 0
-            || g.max_stake <= 0
-            || !(g.max_stake_cash_frac > 0.0 && g.max_stake_cash_frac <= 1.0)
-        {
-            return Err("touge.toml [gates]: bad values".into());
         }
         Ok(t)
     }
@@ -809,7 +753,7 @@ pub enum Wager {
 pub struct MenuLine {
     /// Open now.
     pub unlocked: bool,
-    /// Why not (rep needed), `None` when open.
+    /// Why not (`EconomyError::Locked` text: tier needed, rep needed), `None` when open.
     pub locked_reason: Option<String>,
 }
 
@@ -818,7 +762,7 @@ pub struct MenuLine {
 pub struct WagerMenu {
     /// Player's rep.
     pub rep: i64,
-    /// What the player's rep opens, in words (`locked`, `challengers`, `bosses`, `pink slips`).
+    /// Player's tier id (`known`, `respected`…).
     pub tier: &'static str,
     /// Player's cash.
     pub cash: Money,
@@ -842,24 +786,28 @@ pub struct WagerMenu {
     pub opponent_car: &'static str,
 }
 
-fn line(r: Result<(), String>) -> MenuLine {
-    match r {
+fn line(econ: &Economy, acct: &PlayerAccount, f: Feature) -> MenuLine {
+    match econ.require_unlocked(acct, f) {
         Ok(()) => MenuLine {
             unlocked: true,
             locked_reason: None,
         },
         Err(e) => MenuLine {
             unlocked: false,
-            locked_reason: Some(e),
+            locked_reason: Some(e.to_string()),
         },
     }
 }
 
-/// What the player may put on `setup` with `acct` (the rep gates decide; see module docs).
+/// What the player may put on `setup` with `acct` (the rep tiers decide; see module docs).
 /// Betting and pink slips are only offered once racing this opponent is open.
-pub fn wager_menu(acct: &PlayerAccount, table: &TougeTable, setup: &TougeSetup) -> WagerMenu {
-    let g = &table.gates;
-    let race = line(g.check(acct, setup.opponent.gate()));
+pub fn wager_menu(
+    econ: &Economy,
+    acct: &PlayerAccount,
+    table: &TougeTable,
+    setup: &TougeSetup,
+) -> WagerMenu {
+    let race = line(econ, acct, setup.opponent.feature());
     let gate = |l: MenuLine| {
         if race.unlocked {
             l
@@ -870,24 +818,15 @@ pub fn wager_menu(acct: &PlayerAccount, table: &TougeTable, setup: &TougeSetup) 
             }
         }
     };
-    let side_bet = gate(line(g.check(acct, Gate::SideBet)));
-    let pink_slip = gate(line(g.check(acct, Gate::PinkSlip)));
+    let side_bet = gate(line(econ, acct, Feature::TougeBetting));
+    let pink_slip = gate(line(econ, acct, Feature::PinkSlips));
     let stakes = table.for_opponent(setup.opponent);
-    let tier = if acct.rep >= g.pink_slip_rep {
-        "pink slips"
-    } else if acct.rep >= g.boss_rep {
-        "bosses"
-    } else if acct.rep >= g.challenger_rep {
-        "challengers"
-    } else {
-        "locked"
-    };
     WagerMenu {
         rep: acct.rep,
-        tier,
+        tier: econ.rep_tier(acct).id(),
         cash: acct.cash,
         max_stake: if side_bet.unlocked {
-            g.max_stake(acct)
+            econ.max_bet(acct, BetVenue::Touge)
         } else {
             0
         },
@@ -909,82 +848,41 @@ pub struct WagerTicket {
     pub setup: TougeSetup,
     /// What was put up.
     pub wager: Wager,
-    /// The side-bet stake taken (0 = none).
-    pub stake: Money,
+    /// The side-bet stake as taken by the economy.
+    pub bet: Option<BetTicket>,
     /// The player's car on the line (pink slip) / racing.
     pub player_car: CarUid,
 }
 
-/// Why a wager was refused.
-#[derive(Debug, Clone, PartialEq)]
-pub enum WagerError {
-    /// Not enough rep, or a stake out of range.
-    Refused(String),
-    /// The economy refused (unknown car, not enough cash).
-    Economy(EconomyError),
-}
-
-impl std::fmt::Display for WagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WagerError::Refused(s) => f.write_str(s),
-            WagerError::Economy(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for WagerError {}
-
-impl From<EconomyError> for WagerError {
-    fn from(e: EconomyError) -> Self {
-        WagerError::Economy(e)
-    }
-}
-
-/// Ledger note of a touge side bet (an `Adjustment`, as the street racers' wagers).
-fn bet_note(setup: &TougeSetup, what: &str) -> String {
-    format!("touge side bet {what}: {}", setup.scenario_name())
-}
-
-/// Check the gates and take the wager: racing this opponent must be open; a side bet needs
-/// the rep for it, a stake in `1..=max_stake` and is taken now (`Economy::adjust`, the same
-/// cash ledger as the street racers' wagers); a pink slip needs the rep and the player's car
-/// in the garage. The account is untouched on refusal.
+/// Check the gates and take the wager: racing this opponent must be open; a side bet goes
+/// through `Economy::place_bet` (stake taken now); a pink slip needs `Feature::PinkSlips` and
+/// the player's car in the garage. The account is untouched on refusal.
 pub fn place(
     econ: &Economy,
     acct: &mut PlayerAccount,
-    table: &TougeTable,
     setup: TougeSetup,
     wager: Wager,
     player_car: CarUid,
-) -> Result<(WagerTicket, Vec<EconomyEvent>), WagerError> {
-    let g = &table.gates;
-    g.check(acct, setup.opponent.gate())
-        .map_err(WagerError::Refused)?;
+) -> Result<(WagerTicket, Vec<EconomyEvent>), EconomyError> {
+    econ.require_unlocked(acct, setup.opponent.feature())?;
     acct.try_car(player_car)?;
-    let (stake, events) = match wager {
-        Wager::None => (0, Vec::new()),
+    let (bet, events) = match wager {
+        Wager::None => (None, Vec::new()),
         Wager::SideBet { stake } => {
-            g.check(acct, Gate::SideBet).map_err(WagerError::Refused)?;
-            let max = g.max_stake(acct);
-            if stake <= 0 || stake > max {
-                return Err(WagerError::Refused(format!(
-                    "side bets are $1 to ${max} now"
-                )));
-            }
-            let ((), ev) = econ.adjust(acct, -stake, &bet_note(&setup, "placed"))?;
-            (stake, ev)
+            let label = setup.scenario_name();
+            let (t, ev) = econ.place_bet(acct, BetVenue::Touge, stake, &label)?;
+            (Some(t), ev)
         }
         Wager::PinkSlip => {
-            g.check(acct, Gate::PinkSlip).map_err(WagerError::Refused)?;
-            (0, Vec::new())
+            econ.require_unlocked(acct, Feature::PinkSlips)?;
+            (None, Vec::new())
         }
     };
     Ok((
         WagerTicket {
             setup,
             wager,
-            stake,
+            bet,
             player_car,
         },
         events,
@@ -1025,9 +923,9 @@ pub struct TougeSettlement {
     pub car_lost: Option<CarUid>,
 }
 
-/// Pay out a decided battle on the player's account: side bet (a cash adjustment), boss
-/// purse and rep (`Economy::touge_result`), and the pink slip (the NPC's car arrives with
-/// `opponent.damage`, exactly as it finished; the player's goes to the NPC). All or nothing.
+/// Pay out a decided battle on the player's account: side bet, boss purse, rep (through
+/// `Economy::award_rep`, which pays any tier reward reached), and the pink slip (the NPC's car
+/// arrives with `opponent.damage`, exactly as it finished; the player's goes to the NPC).
 #[allow(clippy::too_many_arguments)]
 pub fn settle(
     econ: &Economy,
@@ -1056,18 +954,33 @@ pub fn settle(
         car_won_id: None,
         car_lost: None,
     };
-    if ticket.stake > 0 {
+    if outcome.result == BattleResult::Draw {
+        // Both stuck: the stake comes back, no rep, no purse, every car stays where it is.
+        if let Some(bet) = &ticket.bet {
+            let (net, ev) = econ.settle_bet(&mut work, bet, bet.stake)?;
+            events.extend(ev);
+            out.bet_payout = bet.stake;
+            out.bet_net = net;
+        }
+        *acct = work;
+        return Ok((out, events));
+    }
+    if let Some(bet) = &ticket.bet {
         let payout = if won {
-            (ticket.stake as f32 * stakes.side_bet_payout).round() as Money
+            (bet.stake as f32 * stakes.side_bet_payout).round() as Money
         } else {
             0
         };
-        if payout > 0 {
-            let ((), ev) = econ.adjust(&mut work, payout, &bet_note(setup, "won"))?;
-            events.extend(ev);
-        }
+        let (net, ev) = econ.settle_bet(&mut work, bet, payout)?;
+        events.extend(ev);
         out.bet_payout = payout;
-        out.bet_net = payout - ticket.stake;
+        out.bet_net = net;
+    }
+    if won && stakes.purse > 0 {
+        let label = format!("touge_purse:{}", setup.scenario_name());
+        let ((), ev) = econ.award_credits(&mut work, stakes.purse, &label)?;
+        events.extend(ev);
+        out.purse = stakes.purse;
     }
     if ticket.wager == Wager::PinkSlip {
         if won {
@@ -1094,19 +1007,17 @@ pub fn settle(
     if player_totaled {
         out.rep += table.totaled_rep;
     }
-    let purse = if won { stakes.purse } else { 0 };
-    let race = format!(
+    let label = format!(
         "{}:{}",
         if setup.opponent == Opponent::Boss {
-            "touge_boss"
+            "boss"
         } else {
             "touge"
         },
         setup.map().id
     );
-    let ((), ev) = econ.touge_result(&mut work, &race, won, out.rep, purse)?;
+    let (_, ev) = econ.award_rep(&mut work, out.rep, &label)?;
     events.extend(ev);
-    out.purse = purse;
     *acct = work;
     Ok((out, events))
 }
@@ -1250,24 +1161,25 @@ mod tests {
         assert!(Boundary::from_world(&w).is_none());
     }
 
-    /// Rep that opens `g` in the shipped table.
-    fn rep_for(g: Gate) -> i64 {
-        TougeTable::embedded().gates.rep_for(g)
+    /// Rep that opens `f` in the shipped career tiers (tuning lives in `career.toml`).
+    fn rep_for(f: Feature) -> i64 {
+        let p = &Economy::embedded().progression;
+        p.tier_def(p.feature_tier(f)).min_rep
     }
 
     /// Rep to race challengers only.
     fn known() -> i64 {
-        rep_for(Gate::Challenger)
+        rep_for(Feature::TougeRaces)
     }
 
     /// Rep to race bosses and bet, not yet pink slips.
     fn respected() -> i64 {
-        rep_for(Gate::Boss).max(rep_for(Gate::SideBet))
+        rep_for(Feature::BossRaces).max(rep_for(Feature::TougeBetting))
     }
 
     /// Rep for everything, pink slips included.
     fn feared() -> i64 {
-        rep_for(Gate::PinkSlip)
+        rep_for(Feature::PinkSlips)
     }
 
     fn account(rep: i64, cash: Money) -> (Economy, PlayerAccount, CarUid) {
@@ -1286,6 +1198,8 @@ mod tests {
                 },
             )
             .unwrap();
+        // Settle progression at this rep so later awards only pay new tiers.
+        econ.update_progression(&mut acct).unwrap();
         acct.cash = cash;
         (econ, acct, uid)
     }
@@ -1296,48 +1210,39 @@ mod tests {
         let ch = setup(0, Direction::Uphill, Opponent::Challenger);
         let boss = setup(0, Direction::Uphill, Opponent::Boss);
 
-        let (_, rookie, _) = account(0, 10_000);
-        let m = wager_menu(&rookie, &table, &ch);
+        let (econ, rookie, _) = account(0, 10_000);
+        let m = wager_menu(&econ, &rookie, &table, &ch);
         assert!(!m.race.unlocked && !m.side_bet.unlocked && !m.pink_slip.unlocked);
         assert!(m.race.locked_reason.is_some());
         assert_eq!(m.max_stake, 0);
 
-        let (_, known, _) = account(known(), 10_000);
-        let m = wager_menu(&known, &table, &ch);
+        let (econ, known, _) = account(known(), 10_000);
+        let m = wager_menu(&econ, &known, &table, &ch);
         assert!(m.race.unlocked && !m.side_bet.unlocked && !m.pink_slip.unlocked);
-        assert!(!wager_menu(&known, &table, &boss).race.unlocked);
+        assert!(!wager_menu(&econ, &known, &table, &boss).race.unlocked);
 
-        let (_, respected, _) = account(respected(), 10_000);
-        let m = wager_menu(&respected, &table, &boss);
+        let (econ, respected, _) = account(respected(), 10_000);
+        let m = wager_menu(&econ, &respected, &table, &boss);
         assert!(m.race.unlocked && m.side_bet.unlocked && !m.pink_slip.unlocked);
         assert!(m.max_stake > 0);
 
-        let (_, feared, _) = account(feared(), 10_000);
-        let m = wager_menu(&feared, &table, &boss);
+        let (econ, feared, _) = account(feared(), 10_000);
+        let m = wager_menu(&econ, &feared, &table, &boss);
         assert!(m.race.unlocked && m.side_bet.unlocked && m.pink_slip.unlocked);
         assert_eq!(m.opponent_car, "hakone_gt");
     }
 
     #[test]
     fn locked_wagers_are_refused_without_touching_the_account() {
-        let table = TougeTable::embedded();
         let (econ, mut acct, car) = account(known(), 10_000);
         let before = acct.clone();
         let s = setup(0, Direction::Uphill, Opponent::Challenger);
-        assert!(place(
-            &econ,
-            &mut acct,
-            &table,
-            s,
-            Wager::SideBet { stake: 500 },
-            car
-        )
-        .is_err());
-        assert!(place(&econ, &mut acct, &table, s, Wager::PinkSlip, car).is_err());
+        assert!(place(&econ, &mut acct, s, Wager::SideBet { stake: 500 }, car).is_err());
+        assert!(place(&econ, &mut acct, s, Wager::PinkSlip, car).is_err());
         let boss = setup(0, Direction::Uphill, Opponent::Boss);
-        assert!(place(&econ, &mut acct, &table, boss, Wager::None, car).is_err());
+        assert!(place(&econ, &mut acct, boss, Wager::None, car).is_err());
         assert_eq!(acct, before);
-        assert!(place(&econ, &mut acct, &table, s, Wager::None, car).is_ok());
+        assert!(place(&econ, &mut acct, s, Wager::None, car).is_ok());
     }
 
     #[test]
@@ -1347,15 +1252,8 @@ mod tests {
         for won in [true, false] {
             let (econ, mut acct, car) = account(respected(), 20_000);
             let rep0 = acct.rep;
-            let (ticket, _) = place(
-                &econ,
-                &mut acct,
-                &table,
-                s,
-                Wager::SideBet { stake: 2_000 },
-                car,
-            )
-            .unwrap();
+            let (ticket, _) =
+                place(&econ, &mut acct, s, Wager::SideBet { stake: 2_000 }, car).unwrap();
             assert_eq!(acct.cash, 18_000);
             let outcome = BattleOutcome {
                 result: if won {
@@ -1401,7 +1299,7 @@ mod tests {
         let table = TougeTable::embedded();
         let s = setup(1, Direction::Downhill, Opponent::Boss);
         let (econ, mut acct, car) = account(feared(), 20_000);
-        let (ticket, _) = place(&econ, &mut acct, &table, s, Wager::PinkSlip, car).unwrap();
+        let (ticket, _) = place(&econ, &mut acct, s, Wager::PinkSlip, car).unwrap();
         let mut damage = wp_economy::DamageSnapshot::pristine();
         damage.health = 0.41;
         damage.total_loss = true;
@@ -1439,7 +1337,7 @@ mod tests {
         let s = setup(3, Direction::Uphill, Opponent::Challenger);
         let (econ, mut acct, car) = account(feared(), 20_000);
         let rep0 = acct.rep;
-        let (ticket, _) = place(&econ, &mut acct, &table, s, Wager::PinkSlip, car).unwrap();
+        let (ticket, _) = place(&econ, &mut acct, s, Wager::PinkSlip, car).unwrap();
         let outcome = BattleOutcome {
             result: BattleResult::Lost,
             tick: 900,
@@ -1481,51 +1379,92 @@ mod tests {
     }
 
     #[test]
-    fn side_bets_are_capped_and_cash_only_moves_through_the_ledger() {
+    fn side_bets_are_capped_and_go_through_the_career_wallet() {
         let table = TougeTable::embedded();
         let s = setup(0, Direction::Uphill, Opponent::Boss);
         let (econ, mut acct, car) = account(respected(), 6_000);
-        // Half the cash on hand (3 000) is below the table's cap.
-        let m = wager_menu(&acct, &table, &s);
+        // Half the cash on hand (3 000) is below the Respected tier's cap (career.toml).
+        let m = wager_menu(&econ, &acct, &table, &s);
         assert_eq!(m.max_stake, 3_000);
         let before = acct.clone();
-        assert!(place(
-            &econ,
-            &mut acct,
-            &table,
-            s,
-            Wager::SideBet { stake: 3_001 },
-            car
-        )
-        .is_err());
-        assert!(place(
-            &econ,
-            &mut acct,
-            &table,
-            s,
-            Wager::SideBet { stake: 0 },
-            car
-        )
-        .is_err());
+        assert!(place(&econ, &mut acct, s, Wager::SideBet { stake: 3_001 }, car).is_err());
+        assert!(place(&econ, &mut acct, s, Wager::SideBet { stake: 0 }, car).is_err());
         assert_eq!(acct, before);
-        let (ticket, ev) = place(
-            &econ,
-            &mut acct,
-            &table,
-            s,
-            Wager::SideBet { stake: 3_000 },
-            car,
-        )
-        .unwrap();
-        assert_eq!(ticket.stake, 3_000);
+        let (ticket, ev) =
+            place(&econ, &mut acct, s, Wager::SideBet { stake: 3_000 }, car).unwrap();
+        assert_eq!(ticket.bet.as_ref().map(|b| b.stake), Some(3_000));
         assert_eq!(acct.cash, 3_000);
-        assert!(matches!(
-            ev[0].reason,
-            wp_economy::EventReason::Adjustment { .. }
-        ));
+        assert_eq!(
+            wp_economy::career_note(&ev[0].reason).map(|(k, _)| k),
+            Some("bet_stake")
+        );
         // In debt: no betting at all.
         acct.cash = -10;
-        assert_eq!(wager_menu(&acct, &table, &s).max_stake, 0);
+        assert_eq!(wager_menu(&econ, &acct, &table, &s).max_stake, 0);
+    }
+
+    #[test]
+    fn judge_statuses_decide_the_battle_and_both_stuck_is_a_draw() {
+        use RacerStatus::{Dnf, Finished, Running};
+        let stuck = Dnf(DnfReason::Stuck);
+        assert_eq!(judge_result(Running, Running), None);
+        assert_eq!(judge_result(Finished, Running), Some(BattleResult::Won));
+        assert_eq!(judge_result(Finished, stuck), Some(BattleResult::Won));
+        assert_eq!(judge_result(stuck, Finished), Some(BattleResult::Lost));
+        assert_eq!(
+            judge_result(Running, Dnf(DnfReason::TotalLoss)),
+            Some(BattleResult::Won)
+        );
+        assert_eq!(
+            judge_result(Dnf(DnfReason::TotalLoss), Running),
+            Some(BattleResult::Lost)
+        );
+        assert_eq!(judge_result(stuck, stuck), Some(BattleResult::Draw));
+        // Only both stuck is a draw.
+        assert_eq!(
+            judge_result(Dnf(DnfReason::TotalLoss), stuck),
+            Some(BattleResult::Lost)
+        );
+    }
+
+    #[test]
+    fn draw_refunds_the_stake_pays_no_rep_and_moves_no_car() {
+        let table = TougeTable::embedded();
+        let draw = BattleOutcome {
+            result: BattleResult::Draw,
+            tick: 240 * 180,
+            totaled: None,
+            breach: None,
+        };
+        let opp = OpponentCar {
+            class: VehicleClass::Sport,
+            base_price: 34_000,
+            damage: wp_economy::DamageSnapshot::pristine(),
+        };
+        // Side bet on a boss: stake back, no purse, no rep.
+        let s = setup(2, Direction::Uphill, Opponent::Boss);
+        let (econ, mut acct, car) = account(feared(), 20_000);
+        let rep0 = acct.rep;
+        let (ticket, _) = place(&econ, &mut acct, s, Wager::SideBet { stake: 2_000 }, car).unwrap();
+        assert_eq!(acct.cash, 18_000);
+        let (out, _) = settle(&econ, &mut acct, &table, &ticket, &draw, EntityId(1), &opp).unwrap();
+        assert_eq!(out.result, BattleResult::Draw);
+        assert_eq!(
+            (out.bet_payout, out.bet_net, out.purse, out.rep),
+            (2_000, 0, 0, 0)
+        );
+        assert_eq!(acct.cash, 20_000);
+        assert_eq!(acct.rep, rep0);
+        // Pink slip: both cars stay put.
+        let (econ, mut acct, car) = account(feared(), 20_000);
+        let garage = acct.garage.clone();
+        let (ticket, _) = place(&econ, &mut acct, s, Wager::PinkSlip, car).unwrap();
+        let (out, ev) =
+            settle(&econ, &mut acct, &table, &ticket, &draw, EntityId(1), &opp).unwrap();
+        assert!(ev.is_empty(), "nothing posted: {ev:?}");
+        assert_eq!((out.car_won, out.car_lost), (None, None));
+        assert_eq!(acct.garage, garage);
+        assert_eq!(acct.rep, feared());
     }
 
     #[test]

@@ -771,7 +771,7 @@ export class FleetModel {
     private readonly group: THREE.Group,
     private readonly mats: FleetMaterials,
     readonly police: boolean,
-    /** Ashpeak County Sheriff livery (police models only). */
+    /** Ashpeak County Sheriff livery on a police model. */
     readonly county = false,
   ) {
     this.info = sim.carModelInfo(carId);

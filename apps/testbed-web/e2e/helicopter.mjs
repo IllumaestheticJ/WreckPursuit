@@ -130,6 +130,64 @@ await ready();
     `helicopter: launched ${launched}, ${heli.n} tracking with visual ${heli.visual}, ${heli.alt.toFixed(0)} m above the car, spotlight ${heli.aimOff.toFixed(1)} m off it, ${heli.lit} lit`,
   );
 }
+
+// Air unit UI (PR #32 port): the helicopter tracking the player is drawn as a helicopter with
+// its call sign ("AIR <id>", the radio's "Air <id>") and a follow tether on the corner minimap;
+// the chase HUD's status line says it is on you, and its pilot lines are flagged for the AIR
+// badge. The chase HUD's own radar shows only while the corner minimap is off (lead,
+// 2026-10-23). Same chase as above (debug-launched helicopter with visual on the player).
+{
+  const probe = () => {
+    const wp = window.__wp;
+    const radar = document.querySelector("#ui-chase .wp-chase-radar");
+    const labels = Array.from(radar?.querySelectorAll("text") ?? []).map((t) => t.textContent ?? "");
+    return {
+      radar: !!radar,
+      label: labels.find((t) => /^AIR \d+$/.test(t)) ?? null,
+      tether: !!radar?.querySelector(".wp-minimap-track line"),
+      note: document.querySelector("#ui-chase .wp-chase-status .wp-chase-radar-note")?.textContent ?? null,
+      minimapTethers: wp.map.hud.stats().minimap.tethers ?? 0,
+      pilot: wp.ui.model.get().scanner.find((e) => e.air)?.text ?? null,
+      car: wp.ui.model.get().scanner.some((e) => e.air && !/^Air \d+/.test(e.text)),
+    };
+  };
+  const withMinimap = await page
+    .waitForFunction((src) => {
+      const o = new Function(`return (${src})()`)();
+      return o.note && o.minimapTethers > 0 && o.pilot ? o : false;
+    }, probe.toString(), { timeout: 60000, polling: 250 })
+    .then((h) => h.jsonValue())
+    .catch(() => null);
+  await shot("helicopter_air_unit_hud.png");
+  check(
+    !!withMinimap && !withMinimap.radar && /on you/i.test(withMinimap.note ?? "") && !withMinimap.car,
+    withMinimap
+      ? `air unit, minimap on: chase radar hidden ${!withMinimap.radar}, note "${withMinimap.note}", minimap tethers ${withMinimap.minimapTethers}, pilot line flagged "${withMinimap.pilot}"`
+      : "air unit: no on-you note / minimap tether / pilot line within 60 s",
+  );
+  await page.evaluate(async () => {
+    const { layers } = await import("/src/settings.ts");
+    if (layers.on("minimap")) layers.toggle("minimap");
+  });
+  const noMinimap = await page
+    .waitForFunction((src) => {
+      const o = new Function(`return (${src})()`)();
+      return o.radar && o.label && o.tether ? o : false;
+    }, probe.toString(), { timeout: 30000, polling: 250 })
+    .then((h) => h.jsonValue())
+    .catch(() => null);
+  await shot("helicopter_air_unit_radar.png");
+  await page.evaluate(async () => {
+    const { layers } = await import("/src/settings.ts");
+    if (!layers.on("minimap")) layers.toggle("minimap");
+  });
+  check(
+    !!noMinimap && /on you/i.test(noMinimap.note ?? ""),
+    noMinimap
+      ? `air unit, minimap off: chase radar icon "${noMinimap.label}", tether ${noMinimap.tether}, note "${noMinimap.note}"`
+      : "air unit, minimap off: no chase radar icon / tether within 30 s",
+  );
+}
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
 stopServer();

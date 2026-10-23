@@ -42,7 +42,7 @@ thread_local! {
     static STREET_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
-/// Add NPC street racers to live free-drive / city-chase sessions in a city started from now
+/// Add NPC street racers to live free-drive / night-run sessions in a city started from now
 /// on (default on; e2e and benchmarks may turn them off). Sessions of a scenario that already
 /// has street racers (a replay, a saved street session) keep them either way.
 pub fn set_street_racers_enabled(on: bool) {
@@ -134,6 +134,10 @@ pub struct Session {
     race: Option<RaceRun>,
     /// Honk-to-start race spots (see [`crate::race_spots`]).
     meet_spots: MeetSpots,
+    /// The player's horn last tick. The one horn edge every challenge reads (owner: one
+    /// challenge system on the horn action): a street racer in reach first, else the race
+    /// spot the player stands in (see [`Session::observe_horn`]).
+    horn_was: bool,
     /// Free-roam street racers (scenario entities `roam_*`; see [`crate::roam`]). Driven
     /// only live; in playback the log supplies their inputs.
     roam: Option<RoamRun>,
@@ -250,6 +254,7 @@ impl Session {
             crash,
             race,
             meet_spots: MeetSpots::default(),
+            horn_was: false,
             roam,
             run,
             career: false,
@@ -570,6 +575,32 @@ impl Session {
         self.roam.as_ref()
     }
 
+    /// Bet on yourself in this session's race while the countdown runs (see
+    /// [`crate::race::RaceRun::place_bet`]). Not recorded in replays: bets move money, not
+    /// cars.
+    pub fn race_place_bet(
+        &mut self,
+        label: &str,
+        stake: i64,
+    ) -> Result<crate::race::BetCard, String> {
+        let race = self.race.as_mut().ok_or("no race in this session")?;
+        let run = self.run.as_mut().ok_or("no account in this session")?;
+        race.place_bet(run, label, stake)
+    }
+
+    /// `(max stake, lock reason)` for picker-race bets (venue `City`) on this session's
+    /// account (`(0, Some(..))` without an account). Street-racer challenges have their own
+    /// limits (`street_status_json`'s offer).
+    pub fn bet_status(&self) -> (i64, Option<String>) {
+        match &self.run {
+            Some(run) => (
+                run.max_bet(wp_economy::BetVenue::City),
+                run.bet_lock(wp_economy::BetVenue::City),
+            ),
+            None => (0, Some("no account in this session".into())),
+        }
+    }
+
     /// The race's results panel (once the player is no longer racing).
     pub fn race_report(&self) -> Option<crate::race::RaceReport> {
         let over = self.run.as_ref().is_some_and(PlayerRun::is_over);
@@ -602,14 +633,21 @@ impl Session {
         self.meet_spots.take_honked()
     }
 
-    /// The honk check after a tick: the player's horn edge, position and speed.
-    fn observe_horn(&mut self) {
+    /// A honk (`honk`: the horn's rising edge this tick) the street racers did not take: when
+    /// the player stands nearly stopped in a race spot, record its race for the testbed
+    /// (`race_spot_honked()`). The same rules as a street challenge (owner row 150): not while
+    /// the player is wanted or chased, not with a street challenge or street race open, not
+    /// with the run over. Reads the sim only (no writes), before the step.
+    fn observe_horn(&mut self, honk: bool) {
+        if !honk || !self.race_spots_active() {
+            return;
+        }
         let Some(&player) = self.ids.first() else {
             return;
         };
-        let horn = self.last_input[0].horn;
-        if !self.race_spots_active() {
-            self.meet_spots.track_horn(horn);
+        if self.sim.police().is_wanted_or_pursued(player)
+            || self.street.as_ref().is_some_and(|s| s.busy())
+        {
             return;
         }
         let Some(v) = self.sim.vehicles().iter().find(|v| v.id == player) else {
@@ -617,7 +655,7 @@ impl Session {
         };
         let st = v.vehicle.state();
         let speed = (st.lin_vel[0].powi(2) + st.lin_vel[1].powi(2) + st.lin_vel[2].powi(2)).sqrt();
-        self.meet_spots.tick(self.sim.world(), horn, st.pos, speed);
+        self.meet_spots.honk(self.sim.world(), st.pos, speed);
     }
 
     fn script_running(&self) -> bool {
@@ -1410,12 +1448,17 @@ impl Session {
             }
         }
 
-        // 1c. Street racers (live only: playback has no street AI): their moves (logged ops)
+        // 1c. The horn: one rising edge for every challenge (street racers, then race spots).
+        let horn = self.last_input.first().is_some_and(|i| i.horn);
+        let honk = horn && !self.horn_was;
+        self.horn_was = horn;
+        let mut honk_taken = false;
+        // 1d. Street racers (live only: playback has no street AI): their moves (logged ops)
         //     and inputs (logged like a race's AI), so recordings replay them.
         if let (Some(street), Some(&player)) = (&mut self.street, self.ids.first()) {
-            let horn = self.last_input[0].horn;
             let over = self.run.as_ref().is_some_and(|r| r.is_over());
-            let step = street.before_step(&self.sim, player, horn, over);
+            let step = street.before_step(&self.sim, player, honk, over);
+            honk_taken = step.challenged;
             for m in step.moves {
                 self.apply_street_move(m);
             }
@@ -1437,7 +1480,9 @@ impl Session {
             }
         }
 
-        // 1d. Free roam (live): put stranded roamers back on the road out of the player's
+        // 1e. Race spots: a honk no street racer took (reads the sim only).
+        self.observe_horn(honk && !honk_taken);
+        // 1f. Free roam (live): put stranded roamers back on the road out of the player's
         //     sight (replay ops, as the testbed's reset in place), then the roamers drive.
         if self.playback.is_none() {
             let rescues = self
@@ -1525,8 +1570,6 @@ impl Session {
             }
             self.check_garage();
         }
-        // Honk-to-start race spots: reads the stepped state only (no sim writes).
-        self.observe_horn();
         if self.playback.is_none() {
             if let Some(p) = player {
                 self.observe_crash(p, player_before.as_ref(), &drained);
@@ -1908,6 +1951,7 @@ impl Session {
             career: false,
             race: snap.race.clone(),
             meet_spots: MeetSpots::default(),
+            horn_was: false,
             roam: None,
             crash: CrashRecorder::off(),
         };

@@ -88,11 +88,11 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
 }
 
 /// Speed the night-run player starts at, m/s (~110 km/h: well over the city limits).
-pub const NIGHT_RUN_SPEED_MPS: f32 = 30.0;
+pub const CITY_CHASE_SPEED_MPS: f32 = 30.0;
 
 /// "Night run" preset: Port Vesper v2 (hills, curves, highway loop) at 23:00 with full
 /// police presence and traffic; the live player starts on the race grid (Loop 9) already
-/// speeding ([`NIGHT_RUN_SPEED_MPS`]), which the world reports as violations and the police
+/// speeding ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police
 /// turn into heat. Same seed every time, so chases are reproducible and replayable.
 pub fn night_run(car: &str, mode: DamageMode) -> Scenario {
     night_run_in(car, mode, CitySpec::vesper())
@@ -107,7 +107,7 @@ pub fn night_run_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
     sc.police_presence = Some(1.0);
     // All five police versions (by heat) and seven civilian models (simcli `car_mix`).
     sc.car_mix = true;
-    sc.entities[0].speed_mps = NIGHT_RUN_SPEED_MPS;
+    sc.entities[0].speed_mps = CITY_CHASE_SPEED_MPS;
     sc
 }
 

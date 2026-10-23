@@ -17,6 +17,10 @@
 // was near Mercer to re-acquire him at ~72 s, so he escaped at 80.4 s before the helicopter.
 // Seeds 50-63 on the merged tip: escape story on 11 of 14, both scenarios on 4 (54-56, 58); 54
 // and 55 held both before the merge too. Re-seeded to 54.
+// Row 156 (owner decision, 2026-10-23: helicopter from wanted level 5, spikes from 4): from heat
+// 50 (L3) the run never reached L5 and the helicopter never launched. Heat 90 (the bottom of L5)
+// keeps the story: pursuit at 9.8 s, helicopter at 72.2 s, lost inside the Cut, Escaped at
+// 133.8 s after 40 s unseen (the L5 day escape time); control Captured at 125.8 s.
 (
     name: "police_tunnel_escape_founders_cut_control",
     seed: 54,
@@ -34,7 +38,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            police_heat: 50.0,
+            police_heat: 90.0,
             speed_mps: 20.0,
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),

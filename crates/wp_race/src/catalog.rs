@@ -19,8 +19,10 @@ use wp_opponent::DriverProfile;
 use wp_world::ashpeak::plan as ap;
 use wp_world::World;
 
+use crate::betting::{BettingRules, Market, MarketEntrant};
 use crate::bridge::{course_from_route, CityRace};
 use crate::course::{v2, Course, GridLayout};
+use crate::roster::{specialty_bonus, Roster, RosterState, Specialty, PLAYER_KEY};
 use crate::RaceData;
 
 /// Corridor margin added to half the widest carriageway, m (same as the city sprints).
@@ -46,11 +48,11 @@ pub enum RaceCity {
     Vesper,
     /// The old procedural 12 × 12 grid (`procedural_12x12`).
     Grid,
-    /// A touge pass (`wp_world::touge::TOUGE_IDS`; battles in [`crate::touge`]).
-    Touge(&'static str),
     /// Port Vesper + Ashpeak County (`ashpeak`): races on Ashpeak County's roads (the
     /// mountains, farmland, freeways and Ashpeak City around Port Vesper).
     Ashpeak,
+    /// A touge pass (`wp_world::touge::TOUGE_IDS`; battles in [`crate::touge`]).
+    Touge(&'static str),
 }
 
 impl RaceCity {
@@ -59,20 +61,24 @@ impl RaceCity {
         match self {
             RaceCity::Vesper => "vesper_v2",
             RaceCity::Grid => "procedural_12x12",
-            RaceCity::Touge(id) => id,
             RaceCity::Ashpeak => "ashpeak",
+            RaceCity::Touge(id) => id,
         }
     }
 
     /// Every city id this race can run on: its own city and every map that contains it.
     /// Port Vesper is laid out unchanged inside the combined `ashpeak` map (same coordinates,
     /// same POIs), so Port Vesper's races also run there.
-    pub fn hosts(&self) -> Vec<&'static str> {
+    pub fn hosts(&self) -> &'static [&'static str] {
         match self {
-            RaceCity::Vesper => vec!["vesper_v2", "ashpeak"],
-            RaceCity::Grid => vec!["procedural_12x12"],
-            RaceCity::Touge(id) => vec![*id],
-            RaceCity::Ashpeak => vec!["ashpeak"],
+            RaceCity::Vesper => &["vesper_v2", "ashpeak"],
+            RaceCity::Grid => &["procedural_12x12"],
+            RaceCity::Ashpeak => &["ashpeak"],
+            // A touge pass is its own map (a slice of the static id list).
+            RaceCity::Touge(id) => match TOUGE_HOSTS.iter().position(|t| t == id) {
+                Some(i) => &TOUGE_HOSTS[i..=i],
+                None => &[],
+            },
         }
     }
 
@@ -81,6 +87,9 @@ impl RaceCity {
         self.hosts().contains(&city_id)
     }
 }
+
+/// The touge pass ids as a static ([`RaceCity::hosts`] hands out one-element slices of it).
+static TOUGE_HOSTS: [&str; wp_world::touge::TOUGE_IDS.len()] = wp_world::touge::TOUGE_IDS;
 
 /// How the course is laid on the city's roads.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -128,9 +137,12 @@ pub enum CourseSpec {
     },
 }
 
-/// One named AI driver: personality and car.
+/// One named AI driver: personality and car. Every driver is a regular from
+/// `data/events/racers.toml` ([`crate::roster`]); the tests check the two agree.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AiDriverDef {
+    /// Roster id (`data/events/racers.toml`): their record, form rating and odds.
+    pub id: &'static str,
     /// Display name.
     pub name: &'static str,
     /// One-line personality shown in the picker.
@@ -154,6 +166,9 @@ pub struct RaceDef {
     pub city: RaceCity,
     /// Race kind (laps live in `Circuit`).
     pub kind: RaceKind,
+    /// Course character (hill, highway, downtown, mixed): specialists get a rating bonus in
+    /// the betting market.
+    pub terrain: Specialty,
     /// Legality (stake row, police presence).
     pub legality: Legality,
     /// In-game start hour.
@@ -249,6 +264,7 @@ const fn profile(
 
 /// Vic "Redline" Marlowe: fast and pushy, takes gaps others would not.
 const VIC: AiDriverDef = AiDriverDef {
+    id: "vic",
     name: "Vic Marlowe",
     style: "aggressive: dives for gaps, leans on you",
     car: "kestrel_ts",
@@ -256,6 +272,7 @@ const VIC: AiDriverDef = AiDriverDef {
 };
 /// Juno Park: smooth, clean, careful around traffic and police.
 const JUNO: AiDriverDef = AiDriverDef {
+    id: "juno",
     name: "Juno Park",
     style: "clean: smooth lines, backs off from cops",
     car: "shiro_turbo",
@@ -263,6 +280,7 @@ const JUNO: AiDriverDef = AiDriverDef {
 };
 /// Dez Okafor: hot-headed, inconsistent, runs from the police at the first siren.
 const DEZ: AiDriverDef = AiDriverDef {
+    id: "dez",
     name: "Dez Okafor",
     style: "hothead: fast, sloppy, runs from sirens",
     car: "rampart_50",
@@ -270,6 +288,7 @@ const DEZ: AiDriverDef = AiDriverDef {
 };
 /// Mara Lindqvist: the veteran, quick and patient.
 const MARA: AiDriverDef = AiDriverDef {
+    id: "mara",
     name: "Mara Lindqvist",
     style: "veteran: quick, patient, rarely errs",
     car: "hakone_gt",
@@ -277,10 +296,68 @@ const MARA: AiDriverDef = AiDriverDef {
 };
 /// Tito Ruiz: the rookie in a borrowed car.
 const TITO: AiDriverDef = AiDriverDef {
+    id: "tito",
     name: "Tito Ruiz",
     style: "rookie: brakes early, gives way",
     car: "sperber_32",
     profile: profile(0.45, 0.35, 0.6, 0.3, 0.6),
+};
+
+/// Sol "Big Sol" Abernathy: owns the straights, parks it in the bends.
+const SOL: AiDriverDef = AiDriverDef {
+    id: "sol",
+    name: "Sol Abernathy",
+    style: "bully: owns the straights, parks it in the bends",
+    car: "ironside_440",
+    profile: profile(0.6, 0.75, 0.6, 0.6, 0.5),
+};
+/// Rafi "Pocket" Haddad: tiny car, threads traffic.
+const RAFI: AiDriverDef = AiDriverDef {
+    id: "rafi",
+    name: "Rafi Haddad",
+    style: "giant-killer: tiny car, threads traffic, never lifts",
+    car: "vireo_xs",
+    profile: profile(0.6, 0.4, 0.75, 0.35, 0.8),
+};
+/// Bex "Coinflip" Thornton: either wins or bins it.
+const BEX: AiDriverDef = AiDriverDef {
+    id: "bex",
+    name: "Bex Thornton",
+    style: "wildcard: brave, messy, either wins or bins it",
+    car: "tansy_13",
+    profile: profile(0.4, 0.6, 0.4, 0.7, 0.45),
+};
+/// Lupe "Scrap" Varga: nothing to lose.
+const LUPE: AiDriverDef = AiDriverDef {
+    id: "lupe",
+    name: "Lupe Varga",
+    style: "dirty: nothing to lose, will put you in the wall",
+    car: "junkyard_beater",
+    profile: profile(0.5, 0.95, 0.5, 0.8, 0.4),
+};
+/// Augusto "The Count" Ferro: the fastest car in town.
+const AUGUSTO: AiDriverDef = AiDriverDef {
+    id: "augusto",
+    name: "Augusto Ferro",
+    style: "money: the fastest car in town, not the fastest driver",
+    car: "fulmine_v10",
+    profile: profile(0.62, 0.55, 0.65, 0.5, 0.65),
+};
+/// Kaito "Switchback" Sena: hill specialist.
+const KAITO: AiDriverDef = AiDriverDef {
+    id: "kaito",
+    name: "Kaito Sena",
+    style: "hill specialist: late on the brakes, never wide",
+    car: "lindwurm_4t",
+    profile: profile(0.78, 0.4, 0.85, 0.55, 0.75),
+};
+/// Nina "Static" Castellanos: the one to beat.
+const NINA: AiDriverDef = AiDriverDef {
+    id: "nina",
+    name: "Nina Castellanos",
+    style: "the one to beat: cold, precise, untouchable on a good night",
+    car: "lucciola_350",
+    profile: profile(0.88, 0.45, 0.85, 0.45, 0.85),
 };
 
 /// Loop 9 counter-clockwise (the direction of the "Loop 9 sprint" grid), from the grid on
@@ -308,6 +385,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Night street sprint up six hairpins to the Knob Observatory Lot.",
             city: RaceCity::Vesper,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Hill,
             legality: Legality::Street,
             time_of_day_h: 23.0,
             traffic_density: 0.3,
@@ -332,6 +410,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "One flat-out lap of the Loop 9 highway, through late-night traffic.",
             city: RaceCity::Vesper,
             kind: RaceKind::Circuit { laps: 1 },
+            terrain: Specialty::Highway,
             legality: Legality::Street,
             // Owner row 139 ("there should be SOME traffic in the loop9 race"): at 01:00 with
             // 0.3 the night curve left nobody near the player. 23:00 at 2.0 puts a civilian
@@ -352,6 +431,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Illegal daytime zig-zag through downtown: big purse, every cop in town.",
             city: RaceCity::Vesper,
             kind: RaceKind::Checkpoint,
+            terrain: Specialty::Downtown,
             legality: Legality::IllegalDaytime,
             time_of_day_h: 14.0,
             // Daytime downtown at higher densities gridlocks the junction boxes.
@@ -375,6 +455,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Short drag-and-dodge up the grid city's central highway.",
             city: RaceCity::Grid,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Highway,
             legality: Legality::Street,
             time_of_day_h: 23.0,
             traffic_density: 0.3,
@@ -397,12 +478,14 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Midnight touge up Crowfoot Pass Road's hairpins to the saddle.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Hill,
             legality: Legality::Street,
             time_of_day_h: 0.0,
             traffic_density: 0.2,
             course: CourseSpec::PoiRoute {
                 start: ap::POI_CROWFOOT_ASCENT,
                 finish: ap::POI_CROWFOOT_SUMMIT,
+                // The saddle is a through road (the descent starts there): finish at it.
                 finish_back_m: 0.0,
             },
             length_hint_m: 3543.0,
@@ -417,6 +500,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "From the Crowfoot saddle down the north side, brakes glowing.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Hill,
             legality: Legality::Street,
             time_of_day_h: 2.0,
             traffic_density: 0.2,
@@ -438,6 +522,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Dusk sprint over Harlan Flats' gravel section roads towards Harlan Crossing.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Mixed,
             legality: Legality::Street,
             time_of_day_h: 19.5,
             traffic_density: 0.2,
@@ -459,13 +544,14 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Illegal daytime run through the downtown towers to the Meridian Spire's block.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Checkpoint,
+            terrain: Specialty::Downtown,
             legality: Legality::IllegalDaytime,
             time_of_day_h: 13.0,
             // Busy downtown: keep it below gridlock, like the Lantern Row run.
             traffic_density: 0.2,
             // From beside the Ashpeak Downtown grid in Southgate Boulevard's inner eastbound
             // lane (the grid's kerb lane only leads onto the Crowfoot Interchange), then north
-            // up Foundry Street to the Grand Concourse, a block east of the Spire. (Finishing at
+            // up Foundry Street to the Grand Promenade, a block east of the Spire. (Finishing at
             // the Spire's own grid adds a turn across the Concourse where the field jams.)
             course: CourseSpec::Points {
                 start: [-1274.0, 4198.0, 0.0],
@@ -484,6 +570,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Flat out north on Route 7: through the Talon Tunnel, over the Silver Gorge.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Highway,
             legality: Legality::Street,
             time_of_day_h: 1.0,
             traffic_density: 0.3,
@@ -505,6 +592,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Night sprint up Route 12's mountain pass and over the Grizzly saddle.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Sprint,
+            terrain: Specialty::Hill,
             legality: Legality::Street,
             time_of_day_h: 22.0,
             traffic_density: 0.3,
@@ -526,6 +614,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Quarter-mile grudge drag down the waterfront boulevard, one on one.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Drag,
+            terrain: Specialty::Highway,
             legality: Legality::Street,
             time_of_day_h: 1.5,
             traffic_density: 0.1,
@@ -547,6 +636,7 @@ pub fn races() -> Vec<RaceDef> {
             blurb: "Two laps round the downtown block grid, under the towers at night.",
             city: RaceCity::Ashpeak,
             kind: RaceKind::Circuit { laps: 2 },
+            terrain: Specialty::Downtown,
             legality: Legality::Street,
             time_of_day_h: 23.5,
             traffic_density: 0.3,
@@ -557,6 +647,114 @@ pub fn races() -> Vec<RaceDef> {
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
             seed: 48,
             prior_meets: 2,
+            grid: None,
+        },
+        RaceDef {
+            id: "harbor_dash",
+            name: "Harbor Boulevard dash",
+            blurb: "Short, flat and stupid fast: the boulevard onto the Loop 9 on-ramp.",
+            city: RaceCity::Vesper,
+            kind: RaceKind::Sprint,
+            terrain: Specialty::Highway,
+            legality: Legality::Street,
+            time_of_day_h: 22.0,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiRoute {
+                start: "Harbor Boulevard drag",
+                finish: "Loop 9 sprint",
+                finish_back_m: 0.0,
+            },
+            length_hint_m: 737.0,
+            ai: &[SOL, VIC, RAFI],
+            seed: 41,
+            prior_meets: 0,
+            grid: None,
+        },
+        RaceDef {
+            id: "tunnel_run",
+            name: "Hollins Tunnel run",
+            blurb: "Loop 9 north, flat out through the Hollins Tunnel. Nina Castellanos is here.",
+            city: RaceCity::Vesper,
+            kind: RaceKind::Sprint,
+            terrain: Specialty::Highway,
+            legality: Legality::Street,
+            time_of_day_h: 0.5,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiRoute {
+                start: "Loop 9 north",
+                finish: "Hollins Tunnel exit",
+                finish_back_m: 0.0,
+            },
+            // 1267 m on lead/round12's map (1323 on main's, PR #47).
+            length_hint_m: 1267.0,
+            ai: &[NINA, AUGUSTO, DEZ, VIC],
+            seed: 52,
+            prior_meets: 0,
+            grid: None,
+        },
+        RaceDef {
+            id: "hollins_descent",
+            name: "Hollins Drive descent",
+            blurb: "Back down the hairpins from the top of Hollins Heights to Mercer.",
+            city: RaceCity::Vesper,
+            kind: RaceKind::Sprint,
+            terrain: Specialty::Hill,
+            legality: Legality::Street,
+            time_of_day_h: 2.0,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiRoute {
+                start: "Hollins Descent",
+                finish: "Mercer Wash-n-Fold Lot",
+                finish_back_m: 0.0,
+            },
+            length_hint_m: 1353.0,
+            ai: &[KAITO, MARA, BEX],
+            seed: 23,
+            prior_meets: 0,
+            grid: None,
+        },
+        RaceDef {
+            id: "offramp_sprint",
+            name: "Loop 9 off-ramp sprint",
+            blurb: "Off the highway at dusk and through town's red lights to Sal's Paint & Panel. Cops patrol here.",
+            city: RaceCity::Vesper,
+            kind: RaceKind::Sprint,
+            terrain: Specialty::Downtown,
+            legality: Legality::Street,
+            time_of_day_h: 20.5,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiRoute {
+                start: "Loop 9 west",
+                finish: "Sal's Paint & Panel",
+                finish_back_m: 0.0,
+            },
+            // 2304 m on lead/round12's map: its off-ramp route to Sal's runs longer than on
+            // main's (1623 m, PR #47).
+            length_hint_m: 2304.0,
+            ai: &[JUNO, LUPE, RAFI, TITO],
+            seed: 8,
+            prior_meets: 0,
+            grid: None,
+        },
+        RaceDef {
+            id: "grid_arterial_sprint",
+            name: "Grid arterial sprint",
+            blurb: "Across the grid city's blocks from the arterial to the highway grid.",
+            city: RaceCity::Grid,
+            kind: RaceKind::Sprint,
+            terrain: Specialty::Downtown,
+            legality: Legality::Street,
+            time_of_day_h: 22.5,
+            traffic_density: 0.3,
+            course: CourseSpec::PoiRoute {
+                start: "Arterial drag",
+                finish: "Highway sprint",
+                finish_back_m: 0.0,
+            },
+            length_hint_m: 1037.0,
+            ai: &[BEX, LUPE, DEZ],
+            seed: 12,
+            prior_meets: 0,
             grid: None,
         },
     ]
@@ -621,6 +819,50 @@ fn point_along(polyline: &[[f32; 3]], d: f32) -> Option<[f32; 3]> {
     None
 }
 
+/// The betting market for race `def` ([`crate::betting`]): the AI field priced at each
+/// regular's current form rating (`state`) plus their specialty bonus on this course, and the
+/// player at their own rating plus `player_car_adjust` (see
+/// [`crate::roster::RatingConfig::car_adjust`]). Drivers missing from `roster` are priced at
+/// their record's rating with no bonus (the tests keep the picker and the roster in step).
+pub fn betting_market(
+    def: &RaceDef,
+    roster: &Roster,
+    state: &RosterState,
+    rules: &BettingRules,
+    player_car_adjust: i32,
+) -> Market {
+    let mut entrants: Vec<MarketEntrant> = def
+        .ai
+        .iter()
+        .map(|d| {
+            let bonus = roster
+                .get(d.id)
+                .map_or(0, |r| specialty_bonus(r, def.terrain, &rules.rating));
+            MarketEntrant {
+                key: d.id.to_string(),
+                name: d.name.to_string(),
+                entity: None,
+                rating: state.rating(d.id) + bonus,
+            }
+        })
+        .collect();
+    entrants.push(MarketEntrant {
+        key: PLAYER_KEY.to_string(),
+        name: "You".to_string(),
+        entity: None,
+        rating: state.rating(PLAYER_KEY) + player_car_adjust,
+    });
+    Market::new(def.id, entrants, &rules.book)
+}
+
+/// The roster key of the racer called `name` in race `def` ([`PLAYER_KEY`] for "You").
+pub fn roster_key_of(def: &RaceDef, name: &str) -> Option<&'static str> {
+    if name == "You" {
+        return Some(PLAYER_KEY);
+    }
+    def.ai.iter().find(|d| d.name == name).map(|d| d.id)
+}
+
 fn poi(world: &World, name: &str) -> Option<usize> {
     world.network().pois.iter().position(|p| p.name == name)
 }
@@ -678,6 +920,8 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
     for g in &mut course.gates {
         g.width_m = g.width_m.max(span);
     }
+    // A race's own grid (Ashpeak's single-file touge grids) wins over the street layout;
+    // round12's fit then closes it up or lines it up where the road is narrower.
     course.grid_layout = def.grid.or_else(|| street_grid_layout(world, &course, def));
     fit_grid(world, &mut course, def);
     Some(CityRace { route, course })
@@ -938,7 +1182,7 @@ mod tests {
                 r.id
             );
         }
-        assert!(race_for_scenario("night_run").is_none());
+        assert!(race_for_scenario("city_chase").is_none());
     }
 
     #[test]
@@ -953,6 +1197,62 @@ mod tests {
         assert!(has(&|r| r.city == RaceCity::Grid));
         assert!(has(&|r| r.legality == Legality::IllegalDaytime));
         assert!(all.iter().all(|r| r.legality != Legality::Sanctioned));
+        for t in [Specialty::Hill, Specialty::Highway, Specialty::Downtown] {
+            assert!(all.iter().filter(|r| r.terrain == t).count() >= 2, "{t:?}");
+        }
+    }
+
+    #[test]
+    fn every_picker_driver_is_a_roster_regular() {
+        let roster = Roster::embedded();
+        for r in races() {
+            for d in r.ai {
+                let n = roster
+                    .get(d.id)
+                    .unwrap_or_else(|| panic!("{}: {} not in racers.toml", r.id, d.id));
+                assert_eq!(n.name, d.name, "{}", d.id);
+                assert_eq!(n.car, d.car, "{}", d.id);
+                assert_eq!(n.style, d.style, "{}", d.id);
+                assert_eq!(n.profile, d.profile, "{}", d.id);
+            }
+            // Scenario entity ids (`ai_<first name>`) stay unique within a race.
+            let mut firsts: Vec<&str> =
+                r.ai.iter()
+                    .map(|d| d.name.split(' ').next().unwrap())
+                    .collect();
+            firsts.sort();
+            firsts.dedup();
+            assert_eq!(firsts.len(), r.ai.len(), "{}", r.id);
+        }
+        // Every regular races somewhere in the picker.
+        for n in &roster.racers {
+            assert!(
+                races().iter().any(|r| r.ai.iter().any(|d| d.id == n.id)),
+                "{} never races",
+                n.id
+            );
+        }
+    }
+
+    #[test]
+    fn markets_price_every_race_with_specialists_shorter() {
+        let roster = Roster::embedded();
+        let state = RosterState::new(&roster);
+        let rules = BettingRules::embedded();
+        for r in races() {
+            let m = betting_market(&r, &roster, &state, &rules, 0);
+            assert_eq!(m.entrants.len(), r.entrants());
+            assert_eq!(m.entrants.last().unwrap().key, PLAYER_KEY);
+            assert_eq!(roster_key_of(&r, "You"), Some(PLAYER_KEY));
+            for d in r.ai {
+                assert_eq!(roster_key_of(&r, d.name), Some(d.id));
+            }
+        }
+        // Kaito (hill specialist) is priced above his base rating on the descent.
+        let d = race("hollins_descent").unwrap();
+        let m = betting_market(&d, &roster, &state, &rules, 0);
+        let k = m.entrants.iter().find(|e| e.key == "kaito").unwrap();
+        assert_eq!(k.rating, 1200 + rules.rating.specialty_bonus);
     }
 
     #[test]
@@ -992,7 +1292,10 @@ mod tests {
         ] {
             assert!(ashpeak.contains(&id) && !vesper.contains(&id), "{id}");
         }
-        assert_eq!(on("procedural_12x12"), vec!["grid_highway_sprint"]);
+        assert_eq!(
+            on("procedural_12x12"),
+            vec!["grid_highway_sprint", "grid_arterial_sprint"]
+        );
         assert!(on("").is_empty());
     }
 }

@@ -45,7 +45,7 @@ npm run typecheck
 
 Cities: the "city" box (free drive) and the night run use the city selector — Port Vesper v2
 (`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=vesper_v2` or
-`?city=procedural_12x12` opens free drive in that city (ticks the box), `?chase=1` the night run.
+`?city=procedural_12x12` opens free drive in that city (ticks the box), `?chase=1` the chase.
 The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback `.greybox.b64.txt` on the
 published build; a failed load is retried on the next session in that city). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.

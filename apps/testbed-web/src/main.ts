@@ -17,7 +17,7 @@
 // ?mods=wheels_forged,aero_wing_1 installs mods on the player car (else the build saved for that
 // car in the mod shop).
 // ?roam=N opens main's free roam (wp_opponent::roam, N roamers; dev only and dormant: the
-// street racers of free drive / city chase are the game's racer population, main-sync.md).
+// street racers of free drive / night run are the game's racer population, main-sync.md).
 import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
@@ -437,12 +437,30 @@ async function main(): Promise<void> {
   /** Street race gates (waypoints, then B; row 151) in the world. */
   const streetMarker = new RaceMarker(scene.world);
   let streetCourseKey = "";
-  // Honk-to-start meet spots (race_spots.ts): stop in one and honk to start its race.
+  // Honk-to-start meet spots (race_spots.ts): stop in one and honk to start its race. Same
+  // horn action as a street challenge (the sim reads one horn edge for both).
   const raceSpots = new RaceSpotsView(scene.world, overlay);
   const raceView = new RaceView(raceEl, {
-    start: (id) => startRace(id),
+    start: (id, bet) => {
+      startRace(id);
+      // The countdown is running: bets on yourself are taken until green.
+      if (bet) {
+        try {
+          sim.raceBet(bet.label, bet.stake);
+        } catch (e) {
+          console.warn("bet refused", e);
+        }
+      }
+    },
     freeDrive: () => startFreeDrive(undefined, undefined, true),
     list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+    betStatus: () => {
+      try {
+        return sim.raceBetStatus();
+      } catch {
+        return { max: 0, lock: "no account in this session" };
+      }
+    },
   });
   // Garage visit panel (lead): stop inside a repair shop's ring → quote + "Repair" / "Leave".
   const garageVisitEl = document.createElement("div");
@@ -453,6 +471,24 @@ async function main(): Promise<void> {
     repair: () => sim.garageRepair(),
     leave: () => sim.garageLeave(),
   });
+  // The city's regulars remember their results between visits (wp_race::roster records).
+  const ROSTER_KEY = "wp.roster.v1";
+  try {
+    const saved = localStorage.getItem(ROSTER_KEY);
+    if (saved) sim.rosterLoad(saved);
+  } catch (e) {
+    console.warn("roster save unreadable; starting fresh records", e);
+  }
+  /** This race's final results were saved (reset with each race session). */
+  let rosterSaved = false;
+  const persistRoster = () => {
+    rosterSaved = true;
+    try {
+      localStorage.setItem(ROSTER_KEY, sim.rosterSave());
+    } catch (e) {
+      console.warn("roster not saved", e);
+    }
+  };
   // Touge battles: pass picker with the rep-gated wager menu, and the battle panel during one.
   const tougeEl = document.createElement("div");
   tougeEl.id = "ui-touge";
@@ -620,9 +656,14 @@ async function main(): Promise<void> {
       course = parseCourse(sim.raceCourse());
     }
     raceMarker.setCourse(course);
+    rosterSaved = false;
     raceView.reset(id, names, course);
+    const spots = sim.raceSpots();
+    const stakes = new Map(
+      spots.length > 0 ? sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).map((c) => [c.id, { entry_fee: c.entry_fee, purse: c.purse }] as const) : [],
+    );
+    raceSpots.set(spots, stakes);
     tougeView.reset();
-    raceSpots.set(sim.raceSpots());
   };
 
   /** Start street race `id` (the picker's "Race" button, `?race=`, "Race again"). */
@@ -706,6 +747,7 @@ async function main(): Promise<void> {
     }
     const report = withReport || raceView.report ? sim.raceResult() : null;
     raceView.update({ info, standings, report, player: pose, others }, performance.now());
+    if (report?.final_results && !rosterSaved) persistRoster();
     if (raceView.raceId.startsWith("touge:")) tougeView.update(sim.tougeResult(), performance.now());
     const done = me < 0 || standings[me + RS.status] > 0 || info[RI.phase] === 2;
     const next = done ? -1 : standings[me + RS.nextGate];
@@ -1709,7 +1751,7 @@ async function main(): Promise<void> {
     prof.lap("fx");
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
-      ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade");
+      ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade", map.radar());
       if (!audio.hearsRadio()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
@@ -1777,7 +1819,10 @@ async function main(): Promise<void> {
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
-    scene.updateHelicopterBeams(sim.policeHelicopters(), wi[W.night]);
+    const helis = sim.policeHelicopters();
+    scene.updateHelicopterBeams(helis, wi[W.night]);
+    // The rotor in the world (PR #32): same rows, no extra wasm call.
+    audio.setHelicopters(helis);
     scene.updatePoliceTools(sim.policeTools(), tS);
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);

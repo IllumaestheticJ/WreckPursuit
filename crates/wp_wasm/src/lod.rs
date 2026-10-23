@@ -350,7 +350,7 @@ mod tests {
         }
     }
 
-    /// City chase, stepped tick by tick: every traffic draw record moves continuously, through
+    /// Night run, stepped tick by tick: every traffic draw record moves continuously, through
     /// promotions (kinematic → sim vehicle) and demotions, and between traffic steps.
     #[test]
     fn traffic_draw_poses_are_continuous_through_promotions() {
@@ -409,14 +409,14 @@ mod tests {
         println!(
             "{swaps} swaps, worst swap error {worst_swap:.3} m, worst step error {worst_step:.3} m"
         );
-        assert!(swaps > 0, "no promotion in 12 s of city chase");
+        assert!(swaps > 0, "no promotion in 12 s of night run");
         assert!(worst_swap < 0.5, "swap jump {worst_swap} m");
     }
 
     #[test]
     fn session_models_list_traffic_and_police_once() {
         let sc = crate::scenario::night_run("debug_sedan", wp_contracts::DamageMode::Arcade);
-        // The city chase uses the mixed fleets (`car_mix`): every traffic and police model once.
+        // The night run uses the mixed fleets (`car_mix`): every traffic and police model once.
         assert!(sc.car_mix);
         let m = session_car_models(&sc, true);
         let traffic: Vec<&str> = simcli::run::CAR_MIX_TRAFFIC.to_vec();

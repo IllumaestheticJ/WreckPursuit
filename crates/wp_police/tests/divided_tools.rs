@@ -165,24 +165,27 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
         let median = [0.5 * (far[0] + site.pos[0]), 0.5 * (far[1] + site.pos[1])];
         let side = right_of(median, flow, site.pos).signum();
         let ours = |p: [f32; 2]| right_of(median, flow, p) * side > 0.0;
-        // The car: spawned, or waiting out of view (row 131).
-        let (pos, heading) = match strip.unit {
+        // The car: spawned, or waiting for the next think (PR #54 port); none when its spot
+        // was in the racer's view (the strip is unmanned, rows 131 / 158).
+        let car = match strip.unit {
             Some(u) => {
                 let u = police.units().iter().find(|x| x.id == u).unwrap();
-                (u.body.pos, u.body.heading)
+                Some((u.body.pos, u.body.heading))
             }
-            None => police.tool_cars_waiting(strip.id)[0],
+            None => police.tool_cars_waiting(strip.id).first().copied(),
         };
-        let cos = dot(heading, flow) / (dot(heading, heading).sqrt());
-        assert!(
-            cos >= 30f32.to_radians().cos(),
-            "{name}: spike car faces against its carriageway (cos {cos:.2}) at {pos:?}"
-        );
-        assert!(
-            ours(pos),
-            "{name}: spike car {pos:?} across the median (site {:?}, far {far:?})",
-            site.pos
-        );
+        if let Some((pos, heading)) = car {
+            let cos = dot(heading, flow) / (dot(heading, heading).sqrt());
+            assert!(
+                cos >= 30f32.to_radians().cos(),
+                "{name}: spike car faces against its carriageway (cos {cos:.2}) at {pos:?}"
+            );
+            assert!(
+                ours(pos),
+                "{name}: spike car {pos:?} across the median (site {:?}, far {far:?})",
+                site.pos
+            );
+        }
         assert!(
             ours(strip.a) && ours(strip.b),
             "{name}: strip {:?}–{:?} crosses the median (far {far:?})",

@@ -342,7 +342,7 @@ for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo"
   sc = await sim();
   check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === car, `selector → ${car}`);
 }
-// Unify (lead, 2026-10-21): the W handling is the game's handling. Free drive, city chase and
+// Unify (lead, 2026-10-21): the W handling is the game's handling. Free drive, night run and
 // races run it with no panel and no saved overrides: shipped physics on every car, the plain
 // steering on the player's car only. The tune panel is hidden (F10 / ?tune=1).
 const freeDrive = async (q = "") => {
@@ -429,7 +429,7 @@ await page.getByText("Free drive", { exact: true }).first().waitFor({ timeout: 1
   const cEntries = await page.getByText(/drift lab c/i).count();
   check(wEntries === 0 && cEntries === 0, `menu: no Drift Lab W (${wEntries}) / C (${cEntries}) entries`);
 }
-// City chase: the same physics on every car; the steering aids only on the player's car.
+// Night run: the same physics on every car; the steering aids only on the player's car.
 {
   await page.goto(`http://localhost:${PORT}/?chase=1`);
   await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "night_run", null, { timeout: 90000 }).catch(() => {});

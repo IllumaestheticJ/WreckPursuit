@@ -503,7 +503,7 @@ await shot("night_run_greybox_toggle.png");
     const r = el?.getBoundingClientRect();
     return { ...s.minimap, err: window.__mapParkError ?? null, city: s.city, district: s.district, visible: !!r && r.width > 100 && !el.hidden, total: window.__wp.sim.mapDynamic(window.__wp.app.player)[1] };
   });
-  await shot("map_minimap_night_run.png");
+  await shot("map_minimap_city_chase.png");
   check(
     parked && mini.visible && mini.player && mini.units >= 1 && mini.city === "vesper_v2",
     `minimap${parked ? "" : ` (park near police failed: ${mini.err})`}: player + ${mini.units} police dot(s) of ${mini.total} units (${mini.blinking} blinking), radius ${mini.radiusM.toFixed(0)} m, district ${mini.district ?? "?"}`,
@@ -974,7 +974,7 @@ await page.waitForTimeout(1500);
     `garage: ${placed.count} shops / ${placed.markers} markers; stopping in ${placed.name} opens the panel (${visit.shop}), input ${visit.held ? "held" : "live"}`,
   );
   check(!left.offer && !left.panel && left.live, `garage "Leave": panel closed, input ${left.live ? "live" : "held"}`);
-  // Back to the city chase: the selector check below restarts the current mode.
+  // Back to the night run: the selector check below restarts the current mode.
   await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 }
 // The selector keeps the old flat grid: the chase restarts there.
@@ -1162,7 +1162,7 @@ check(mn.status === 0, `game menu + layout checks (e2e/menu.mjs)${mn.status === 
 // 13. Street racers (e2e/street.mjs, its own server and browser; lead, rows 149–154): the
 // roster by day / night, honk to challenge, no challenge while wanted, the A→B picker with
 // waypoints, side-by-side start, a race to the finish (day keyboard + mouse, night gamepad),
-// the city chase's racers, touch. Then no physical traffic car without a collider
+// the night run's racers, touch. Then no physical traffic car without a collider
 // (e2e/traffic_bodies.mjs, row 149).
 const st = spawnSync("node", [join(here, "street.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, SHOTS: shots ? join(shots, "street") : "" } });
 process.stdout.write(st.stdout);

@@ -22,6 +22,8 @@ export interface MapPalette {
   policeB: string;
   /** Race opponents (not police red / blue, not the player's scanner green). */
   racer: string;
+  /** Police helicopter: spotlight yellow, apart from the red / blue cars (PR #32). */
+  heli: string;
   edge: string;
   edgeHot: string;
 }
@@ -38,6 +40,7 @@ const FALLBACK: MapPalette = {
   policeA: "#ff2e55",
   policeB: "#3b7dff",
   racer: "#c77dff",
+  heli: "#ffe14d",
   edge: "#233029",
   edgeHot: "#3a5246",
 };
@@ -59,6 +62,7 @@ export function readPalette(el: Element | null): MapPalette {
     policeA: v("--police-a", FALLBACK.policeA),
     policeB: v("--police-b", FALLBACK.policeB),
     racer: v("--racer", FALLBACK.racer),
+    heli: v("--heli", FALLBACK.heli),
     edge: v("--edge", FALLBACK.edge),
     edgeHot: v("--edge-hot", FALLBACK.edgeHot),
   };
@@ -185,20 +189,9 @@ export function drawUnit(ctx: Ctx, u: MapUnit, x: number, y: number, rot: number
   ctx.lineWidth = Math.max(1, s * 0.15);
   ctx.globalAlpha = u.wrecked ? 0.5 : blink ? 1 : 0.8;
   if (u.heli) {
-    ctx.beginPath();
-    ctx.moveTo(0, -s);
-    ctx.lineTo(s * 0.7, 0);
-    ctx.lineTo(0, s);
-    ctx.lineTo(-s * 0.7, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.globalAlpha = 0.7;
-    ctx.strokeStyle = col;
-    ctx.lineWidth = Math.max(1, s * 0.12);
-    ctx.beginPath();
-    ctx.arc(0, 0, s * 1.6, 0, Math.PI * 2);
-    ctx.stroke();
+    // A top-down helicopter (rotor disc, blades, fuselage, tail boom and rotor) in the
+    // helicopter yellow, apart from the red / blue car dots (PR #32).
+    drawHeliShape(ctx, s * 1.25, u.wrecked ? pal.ink3 : pal.heli);
   } else {
     ctx.beginPath();
     ctx.arc(0, 0, s * 0.62, 0, Math.PI * 2);
@@ -213,6 +206,101 @@ export function drawUnit(ctx: Ctx, u: MapUnit, x: number, y: number, rot: number
     ctx.fill();
   }
   ctx.restore();
+  // Its call sign, kept upright: "AIR 9" for the radio's "Air 9" (wp_police numbers air units
+  // by unit id).
+  if (u.heli && !u.wrecked) {
+    ctx.save();
+    ctx.font = `bold ${Math.round(s * 1.5)}px ui-monospace, monospace`;
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = Math.max(2, s * 0.35);
+    ctx.strokeStyle = "#000";
+    ctx.fillStyle = pal.heli;
+    const label = heliLabel(u.id);
+    ctx.strokeText(label, x + s * 1.9, y - s * 1.3);
+    ctx.fillText(label, x + s * 1.9, y - s * 1.3);
+    ctx.restore();
+  }
+}
+
+/** Map label of a helicopter: "AIR 9" (the radio's call sign "Air 9", upper case). */
+export function heliLabel(unitId: number): string {
+  return `AIR ${unitId}`;
+}
+
+/**
+ * Top-down helicopter centred at the origin, nose up (-y), rotor radius `s` px, in `col`.
+ * Shared by the minimap and the full map.
+ */
+export function drawHeliShape(ctx: Ctx, s: number, col: string): void {
+  ctx.save();
+  ctx.strokeStyle = col;
+  ctx.fillStyle = col;
+  // rotor disc and blades
+  ctx.globalAlpha = 0.18;
+  ctx.beginPath();
+  ctx.arc(0, 0, s, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.9;
+  ctx.lineWidth = Math.max(1, s * 0.08);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-s, 0);
+  ctx.lineTo(s, 0);
+  ctx.moveTo(0, -s);
+  ctx.lineTo(0, s);
+  ctx.stroke();
+  // fuselage, tail boom, tail rotor
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = Math.max(1, s * 0.06);
+  ctx.beginPath();
+  ctx.ellipse(0, -s * 0.1, s * 0.32, s * 0.45, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  const w = s * 0.16;
+  ctx.fillRect(-w / 2, s * 0.3, w, s * 0.95);
+  ctx.strokeStyle = col;
+  ctx.lineWidth = Math.max(1, s * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.3, s * 1.25);
+  ctx.lineTo(s * 0.3, s * 1.25);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Who a helicopter is following (PR #32): a dashed tether from the helicopter at `(hx, hy)` to
+ * the spot it watches `(tx, ty)` (screen px) and a pulsing ring there, `s` = ring size px.
+ */
+export function drawHeliTether(ctx: Ctx, hx: number, hy: number, tx: number, ty: number, s: number, nowMs: number, pal: MapPalette): void {
+  ctx.save();
+  ctx.strokeStyle = pal.heli;
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = Math.max(1, s * 0.18);
+  ctx.setLineDash([s * 0.6, s * 0.45]);
+  ctx.beginPath();
+  ctx.moveTo(hx, hy);
+  ctx.lineTo(tx, ty);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const pulse = 0.5 + 0.5 * Math.sin((nowMs / 1200) * Math.PI * 2);
+  const r = s * (1 + 0.6 * pulse);
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = pal.heli;
+  ctx.beginPath();
+  ctx.arc(tx, ty, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.8;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** The spot helicopter `u` is following, world m: the player when it is on the player (the
+ * tether reads "following you" even while its spotlight lags), else its tracked spot. */
+export function heliFollows(u: MapUnit, player: { x: number; y: number } | null): [number, number] | null {
+  if (!u.heli || u.wrecked || u.state !== "track") return null;
+  if (u.onPlayer && player) return [player.x, player.y];
+  return u.target;
 }
 
 /** The player arrow at `(x, y)`, rotated by `rot`, size `s` px. */

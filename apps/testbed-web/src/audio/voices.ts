@@ -9,7 +9,7 @@
 // automated (new coefficients every sample). `setTargetAtTime` never finishes, so one call per
 // frame kept every voice on that path for good. Positions and the air-absorption low-pass are
 // therefore plain `.value` writes (applied per 128-sample block); only gain and pitch, which
-// are cheap per sample and audible when stepped, keep their short glides. A busy city chase
+// are cheap per sample and audible when stepped, keep their short glides. A busy night run
 // renders ~40 % cheaper (offline: 1.00× → 0.61× real time on the test container).
 
 import type { EngineSynthHost } from "./engine_host";

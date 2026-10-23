@@ -299,7 +299,7 @@ export class SceneView {
       try {
         gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
       } catch {
-        const b64 = await (await fetch(`data/city/${cityId}.greybox.b64.txt`)).text();
+        const b64 = await fetchGreyboxB64(cityId);
         const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
         gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
       }
@@ -823,4 +823,29 @@ function prewarmStandIn(o: THREE.Object3D, m: THREE.Material, kind: number): THR
       return new THREE.Points(geo, m);
   }
   return null;
+}
+
+/**
+ * Fetches a city greybox as base64 text. The published build caps each file at 15 MB, so
+ * `tools/preview_build.sh` splits larger greyboxes into `<id>.greybox.b64.partN.txt` files
+ * listed in `<id>.greybox.b64.parts.txt` (one line: the part count). Those are joined in order.
+ */
+async function fetchGreyboxB64(cityId: string): Promise<string> {
+  const base = `data/city/${cityId}.greybox.b64`;
+  const whole = await fetch(`${base}.txt`);
+  if (whole.ok) {
+    const text = await whole.text();
+    if (!text.trimStart().startsWith("<")) return text;
+  }
+  const manifest = await fetch(`${base}.parts.txt`);
+  if (!manifest.ok) throw new Error(`greybox ${cityId}: no .b64.txt and no parts manifest`);
+  const count = parseInt((await manifest.text()).trim(), 10);
+  if (!(count > 0)) throw new Error(`greybox ${cityId}: bad parts manifest`);
+  const parts: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const r = await fetch(`${base}.part${i}.txt`);
+    if (!r.ok) throw new Error(`greybox ${cityId}: missing part ${i}`);
+    parts.push((await r.text()).trim());
+  }
+  return parts.join("");
 }
