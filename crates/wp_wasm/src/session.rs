@@ -1251,11 +1251,16 @@ impl Session {
             .last_tip_tick
             .is_some_and(|t| self.sim.tick() < t + TIP_COOLDOWN_TICKS)
         {
-            return (Vec::new(), Some("the informants are lying low (a tip in the last 5 minutes)".into()));
+            return (
+                Vec::new(),
+                Some("the informants are lying low (a tip in the last 5 minutes)".into()),
+            );
         }
         let (Some(run), Some(rec)) = (
             self.run.as_ref(),
-            self.run.as_ref().and_then(|r| self.sim.police().racer(r.player())),
+            self.run
+                .as_ref()
+                .and_then(|r| self.sim.police().racer(r.player())),
         ) else {
             return (Vec::new(), None);
         };
@@ -1288,11 +1293,7 @@ impl Session {
         }
         let run = self.run.as_mut().ok_or("no economy run in this session")?;
         let player = run.player();
-        let heat_before = self
-            .sim
-            .police()
-            .racer(player)
-            .map_or(0.0, |r| r.heat);
+        let heat_before = self.sim.police().racer(player).map_or(0.0, |r| r.heat);
         let (cut, ledger, cash_after) = run.buy_informant_tip(tier)?;
         let heat_after = heat_after_tip(
             heat_before,
@@ -1306,7 +1307,10 @@ impl Session {
             v.tips.clear();
             v.tip_note = Some("you already paid an informant here".into());
             v.cash = cash_after;
-            v.can_repair = v.can_repair && v.quote.as_ref().is_some_and(|q| q.player_pays <= cash_after);
+            v.can_repair = v.can_repair
+                && v.quote
+                    .as_ref()
+                    .is_some_and(|q| q.player_pays <= cash_after);
         }
         Ok(TipReport {
             tier: tier.to_string(),
