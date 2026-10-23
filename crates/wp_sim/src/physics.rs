@@ -35,13 +35,15 @@ pub struct CityColliders {
     pub sidewalk_triangles: usize,
     /// Static building colliders.
     pub buildings: usize,
-    /// Guard-rail boxes along bridge decks.
+    /// Guard-rail segments along bridge decks and bare sidewalk backs (one smooth mesh
+    /// collider per chained run).
     pub rails: usize,
     /// Wall and roof boxes of covered roads (tunnels).
     pub tunnel_boxes: usize,
     /// Tree trunks, hedges and fences (residential lots, playtest row 95).
     pub decor: usize,
-    /// Median barrier boxes between divided-highway carriageways.
+    /// Median barrier segments between divided-highway carriageways (one smooth mesh collider
+    /// per barrier line).
     pub barriers: usize,
 }
 
@@ -406,30 +408,28 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
         }
     }
 
-    // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge.
-    for (a, b) in wp_world::surface::deck_rails(net) {
-        if let Some(col) = rail_collider(a, b, 0.0) {
-            added.push(col);
-            out.rails += 1;
-        }
+    // Guard rails along decks: 0.3 m wide, 0.9 m tall on each paved edge, one smooth mesh per
+    // chained run of rail segments (row 164: no seams for a scraping car to catch).
+    for run in chain_segments(&wp_world::surface::deck_rails(net)) {
+        added.extend(barrier_colliders(&run, 0.0, RAIL_HALF_W_M, RAIL_HEIGHT_M));
+        out.rails += run.len() - 1;
     }
-    // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete
-    // boxes on the barrier line.
+    // Median barriers between divided-highway carriageways: 0.5 m wide, 0.81 m tall concrete,
+    // one smooth mesh per barrier line.
     for line in wp_world::surface::median_barriers(net) {
-        for w in line.windows(2) {
-            if let Some(col) = box_collider(w[0], w[1], 0.0, 0.25, 0.405) {
-                added.push(col);
-                out.barriers += 1;
-            }
-        }
+        added.extend(barrier_colliders(
+            &line,
+            0.0,
+            BARRIER_HALF_W_M,
+            BARRIER_HEIGHT_M,
+        ));
+        out.barriers += line.len() - 1;
     }
     // And just outside the back edge of every sidewalk without a lot behind it (decks and
     // their approaches: the ground falls away there).
-    for &(a, b) in &walks.bare_backs {
-        if let Some(col) = rail_collider(a, b, 0.15) {
-            added.push(col);
-            out.rails += 1;
-        }
+    for run in chain_segments(&walks.bare_backs) {
+        added.extend(barrier_colliders(&run, 0.15, RAIL_HALF_W_M, RAIL_HEIGHT_M));
+        out.rails += run.len() - 1;
     }
 
     // Covered roads: a wall box along each side (inner face at the span's half width, from
@@ -532,44 +532,152 @@ pub fn decor_collider(d: &wp_world::network::Decor) -> Option<Collider> {
     }
 }
 
-/// A guard rail along `a → b` (at its foot height): a 0.3 m wide, 0.9 m tall box, its centre
-/// line `right` metres to the right of the line. `None` for a degenerate segment.
-fn rail_collider(a: [f32; 3], b: [f32; 3], right: f32) -> Option<Collider> {
-    box_collider(a, b, right, 0.15, 0.45)
+/// Guard rail half width, m (0.3 m wide).
+pub const RAIL_HALF_W_M: f32 = 0.15;
+/// Guard rail height above its foot line, m.
+pub const RAIL_HEIGHT_M: f32 = 0.9;
+/// Median barrier half width, m (0.5 m wide concrete).
+pub const BARRIER_HALF_W_M: f32 = 0.25;
+/// Median barrier height above the road edge, m.
+pub const BARRIER_HEIGHT_M: f32 = 0.81;
+/// How far a barrier or rail mesh reaches below its foot line, m (closes the gap to a banked or
+/// sloped surface under it).
+const BARRIER_FOOT_M: f32 = 0.3;
+/// Friction of barriers and rails: smooth concrete and steel a car slides along (row 164).
+const BARRIER_FRICTION: f32 = 0.3;
+
+/// Chain `segs` (`a → b` pieces, in order) into polylines: a piece starting exactly where an
+/// open run ends extends it. Deterministic (runs keyed by their end point's bits).
+fn chain_segments(segs: &[([f32; 3], [f32; 3])]) -> Vec<Vec<[f32; 3]>> {
+    let key = |p: [f32; 3]| (p[0].to_bits(), p[1].to_bits(), p[2].to_bits());
+    let mut runs: Vec<Vec<[f32; 3]>> = Vec::new();
+    let mut open: std::collections::BTreeMap<(u32, u32, u32), usize> =
+        std::collections::BTreeMap::new();
+    for &(a, b) in segs {
+        match open.remove(&key(a)) {
+            Some(i) => {
+                runs[i].push(b);
+                open.insert(key(b), i);
+            }
+            None => {
+                runs.push(vec![a, b]);
+                open.insert(key(b), runs.len() - 1);
+            }
+        }
+    }
+    runs
 }
 
-/// A static box along `a`–`b` (shifted `right` m to its right), `half_w` m half wide and
-/// standing `2 · half_h` m tall on the line: deck guard rails (0.15 / 0.45) and median
-/// barriers (0.25 / 0.405).
-fn box_collider(
-    a: [f32; 3],
-    b: [f32; 3],
-    right: f32,
-    half_w: f32,
-    half_h: f32,
-) -> Option<Collider> {
-    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
-    if len < 0.05 {
-        return None;
+/// Static colliders of a barrier along the polyline `line` (its foot, shifted `right` m to its
+/// right), `2 · half_w` m wide and `height` m tall (row 164: a car glancing into it slides
+/// along). Two triangle meshes:
+///
+/// - the two side faces and the end caps, mitered at every joint and facing outward, with
+///   [`TriMeshFlags::FIX_INTERNAL_EDGES`]: a car scraping along meets one continuous face, with
+///   no box corners at segment joints (per-segment boxes spun a scraping car at 100+ °/s);
+/// - the top, 2 cm inside the side faces and 1 cm below their top edge, so a scraping body
+///   never touches its edges. Sharing the top edge in one mesh let the internal-edge fix tilt
+///   the contact normal up there and roll a scraping car onto the barrier.
+///
+/// Deck guard rails, sidewalk bare-back rails and median barriers. Empty for a degenerate line.
+fn barrier_colliders(line: &[[f32; 3]], right: f32, half_w: f32, height: f32) -> Vec<Collider> {
+    // Drop repeated points, then a unit direction per segment.
+    let mut pts: Vec<[f32; 3]> = Vec::with_capacity(line.len());
+    for &p in line {
+        if pts
+            .last()
+            .is_none_or(|q: &[f32; 3]| (p[0] - q[0]).hypot(p[1] - q[1]) >= 0.05)
+        {
+            pts.push(p);
+        }
     }
-    let yaw = wp_math::atan2(-d[0], d[1]);
-    let (s, c) = wp_math::sin_cos(yaw * 0.5);
-    let (rx, ry) = (d[1] / len * right, -d[0] / len * right);
-    let mid = Vector::new(
-        (a[0] + b[0]) * 0.5 + rx,
-        (a[1] + b[1]) * 0.5 + ry,
-        (a[2] + b[2]) * 0.5 + half_h,
-    );
-    Some(
-        ColliderBuilder::cuboid(half_w, len * 0.5 + 0.05, half_h + d[2].abs() * 0.5)
-            .position(Pose::from_parts(
-                mid,
-                rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
-            ))
-            .friction(0.4)
-            .build(),
-    )
+    if pts.len() < 2 {
+        return Vec::new();
+    }
+    let dirs: Vec<[f32; 2]> = pts
+        .windows(2)
+        .map(|w| {
+            let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+            let l = dx.hypot(dy);
+            [dx / l, dy / l]
+        })
+        .collect();
+    let right_of = |d: [f32; 2]| [d[1], -d[0]];
+    let n = pts.len();
+    // Per point: the centre of the section and its mitered right normal, scaled so offsets
+    // along it stay perpendicular distances from both neighbouring segments.
+    let sections: Vec<([f32; 2], [f32; 2], f32)> = pts
+        .iter()
+        .enumerate()
+        .map(|(k, p)| {
+            let (ri, ro) = (
+                right_of(dirs[k.saturating_sub(1)]),
+                right_of(dirs[k.min(n - 2)]),
+            );
+            let m = [ri[0] + ro[0], ri[1] + ro[1]];
+            let ml = m[0].hypot(m[1]).max(1e-6);
+            let m = [m[0] / ml, m[1] / ml];
+            let scale = 1.0 / (m[0] * ri[0] + m[1] * ri[1]).max(0.35);
+            let c = [p[0] + m[0] * right * scale, p[1] + m[1] * right * scale];
+            (c, m, scale)
+        })
+        .collect();
+    // 4 vertices per point (`inset` m inside the faces, top `drop` m lower): left foot, left
+    // top, right top, right foot.
+    let ring = |inset: f32, drop: f32| -> Vec<Vector> {
+        let mut v = Vec::with_capacity(n * 4);
+        for (p, (c, m, scale)) in pts.iter().zip(&sections) {
+            let w = (half_w - inset) * scale;
+            let (z0, z1) = (p[2] - BARRIER_FOOT_M, p[2] + height - drop);
+            let (l, r) = (
+                [c[0] - m[0] * w, c[1] - m[1] * w],
+                [c[0] + m[0] * w, c[1] + m[1] * w],
+            );
+            v.push(Vector::new(l[0], l[1], z0));
+            v.push(Vector::new(l[0], l[1], z1));
+            v.push(Vector::new(r[0], r[1], z1));
+            v.push(Vector::new(r[0], r[1], z0));
+        }
+        v
+    };
+    // The quad between ring edge `j → j + 1` at point k and k + 1, wound outward
+    // (counter-clockwise seen from outside): j = 0 left face, 1 top, 2 right face.
+    let quads = |j: u32| -> Vec<[u32; 3]> {
+        (0..n - 1)
+            .flat_map(|k| {
+                let (a, b) = ((k * 4) as u32, (k * 4 + 4) as u32);
+                let (j0, j1) = (j, (j + 1) % 4);
+                [[a + j0, b + j1, b + j0], [a + j0, a + j1, b + j1]]
+            })
+            .collect()
+    };
+    let last = ((n - 1) * 4) as u32;
+    let mut sides = quads(0);
+    sides.extend(quads(2));
+    sides.extend([
+        [0, 2, 1],
+        [0, 3, 2],
+        [last, last + 1, last + 2],
+        [last, last + 2, last + 3],
+    ]);
+    let mesh = |v: Vec<Vector>, idx: Vec<[u32; 3]>| match ColliderBuilder::trimesh_with_flags(
+        v,
+        idx,
+        TriMeshFlags::FIX_INTERNAL_EDGES,
+    ) {
+        Ok(b) => Some(b.friction(BARRIER_FRICTION).restitution(0.0).build()),
+        Err(e) => {
+            eprintln!("barrier trimesh failed: {e:?}");
+            None
+        }
+    };
+    [
+        mesh(ring(0.0, 0.0), sides),
+        mesh(ring(0.02, 0.01), quads(1)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Sidewalk top, lot, skirt and kerb face colliders of `map`

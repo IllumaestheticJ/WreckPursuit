@@ -13,7 +13,10 @@
     police_cars: true,
     assists: ai,
     entities: [
-        (id: "observer", car: "debug_sedan", pos: (0.0, 0.0, 0.0)),
+        // Inside a core block, ≥ 25 m from every road (row 164: the origin is the viaduct's
+        // median barrier since main's grid viaduct; the car balanced on the old barrier box
+        // and slid off the smooth one).
+        (id: "observer", car: "debug_sedan", pos: (100.0, 27.5, 0.0)),
     ],
     duration_s: 60.0,
     expect: [
