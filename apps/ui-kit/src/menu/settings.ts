@@ -89,9 +89,14 @@ export interface GameSettings {
   city: string;
   /** How much in-game HUD: everything, speed + prompts, or prompts only (recording). */
   hudPreset: HudPreset;
+  /** Which crashes offer an instant replay (feature F43): none, big ones only (default), all. */
+  crashReplays: CrashReplays;
   /** Input shaping per device (dead zones, saturation, sensitivity; see `controls.ts`). */
   controls: Record<ControlDevice, DeviceControls>;
 }
+
+/** Settings → Crash replays: which crashes offer the instant replay. */
+export type CrashReplays = "off" | "big" | "all";
 
 /** HUD presets (Settings → HUD): "full", "minimal" (speed + prompts), "off" (prompts only). */
 export type HudPreset = "full" | "minimal" | "off";
@@ -118,6 +123,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     developer,
     city: "",
     hudPreset: "full",
+    crashReplays: "big",
     controls: defaultControls(),
   };
 }
@@ -177,6 +183,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
     developer: bool(r.developer, base.developer),
     city: typeof r.city === "string" && r.city.length < 40 ? r.city : base.city,
     hudPreset: oneOf(r.hudPreset, ["full", "minimal", "off"] as const, base.hudPreset),
+    crashReplays: oneOf(r.crashReplays, ["off", "big", "all"] as const, base.crashReplays),
     controls: normalizeControls(r.controls, base.controls),
   };
 }

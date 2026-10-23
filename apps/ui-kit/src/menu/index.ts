@@ -25,6 +25,7 @@ export {
   type AssistSettings,
   type GameSettings,
   type GfxLevel,
+  type CrashReplays,
   type HudPreset,
   type SettingsStorage,
   type SpeedUnits,

@@ -17,7 +17,7 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type HudPreset, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type CrashReplays, type GameSettings, type HudPreset, type RadioFilter, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
 import "../ui/theme.css";
@@ -496,6 +496,12 @@ export class GameMenu {
 /** Mount the game menu into `parent` (a positioned element). Closed until `openMain` / `openPause`. */
 
 /** One-line hint per HUD preset. */
+const CRASH_REPLAY_HINT: Record<CrashReplays, string> = {
+  big: "Offer an instant replay after a big crash",
+  all: "Offer it after every crash, bumps included",
+  off: "Never offer crash replays",
+};
+
 const HUD_HINT: Record<HudPreset, string> = {
   full: "Speed, minimap, police, race and radio",
   minimal: "Speed and prompts only",
@@ -890,6 +896,19 @@ function SettingsScreen(props: {
             onChange={(hudPreset) => change({ ...s, hudPreset })}
           />
         </Row>
+        <Row label="Crash replays" hint={CRASH_REPLAY_HINT[s.crashReplays]}>
+          <Cycle
+            id="gm-crash-replays"
+            label="Crash replays"
+            value={s.crashReplays}
+            options={[
+              { id: "big", label: "Big crashes" },
+              { id: "all", label: "All crashes" },
+              { id: "off", label: "Off" },
+            ]}
+            onChange={(crashReplays) => change({ ...s, crashReplays })}
+          />
+        </Row>
         <Row label="Speed units">
           <Cycle
             id="gm-units"
@@ -903,7 +922,7 @@ function SettingsScreen(props: {
           />
         </Row>
         <h3>Camera</h3>
-        <Row label="Default camera" hint="C changes it while driving">
+        <Row label="Default camera" hint="F3 (next camera) changes it while driving">
           <Cycle id="gm-camera" label="Default camera" value={s.camera} options={cams} onChange={(camera) => change({ ...s, camera })} />
         </Row>
         <h3>Developer</h3>

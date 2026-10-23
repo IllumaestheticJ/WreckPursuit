@@ -475,7 +475,11 @@ async function main(): Promise<void> {
   const offerSel = $("rp-crash-offer") as HTMLSelectElement;
   offerSel.value = crashReplayOffer();
   offerSel.onchange = () => setCrashReplayOffer(offerSel.value as CrashReplayOffer);
-  onCrashReplayOfferChange((m) => (offerSel.value = m));
+  onCrashReplayOfferChange((m) => {
+    offerSel.value = m;
+    // Keep the game menu's Settings → Crash replays in step with the developer selector.
+    if (menu && menu.settings.crashReplays !== m) menu.update({ crashReplays: m });
+  });
   /** Garage: ends a career run in progress (its result goes into the career), pauses. `shop`:
    * the city shop the player drove into (garage visit "Enter garage"): repairs are priced there
    * and closing the garage drives out of that shop. Closing the garage after it ended a run
@@ -1577,6 +1581,7 @@ async function main(): Promise<void> {
     d.assists = { ...d.assists, abs: assistLevel(o.abs ?? a.abs), tcs: assistLevel(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
     d.volumes = audio.mix();
     d.radioVoice = audio.radioVoice();
+    d.crashReplays = crashReplayOffer();
     d.gfx = gfxMode();
     return d;
   };
@@ -1594,6 +1599,7 @@ async function main(): Promise<void> {
     weather.rainFraction = scene.quality.rainFraction;
     audio.setMix(next.volumes);
     audio.setRadioVoice(next.radioVoice);
+    if (crashReplayOffer() !== next.crashReplays) setCrashReplayOffer(next.crashReplays);
     audio.setRadioImportantOnly(next.radioFilter === "important");
     map.hud.setUnits(next.units);
     // Assists go through the same overrides as the developer panel's boxes.
