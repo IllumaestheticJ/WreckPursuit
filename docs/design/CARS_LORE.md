@@ -121,7 +121,7 @@ owners expect. The heavy steel doors hold up in side hits.
 - **Scene role:** touge and technical-route specialist; clean racer's car.
 - **Best routes:** R04, R05, R13.
 
-### Lindwurm 4T — `lindwurm_4t` · Sport · AWD (65/35, clutch-pack) · 34 000
+### Lindwurm 4T — `lindwurm_4t` · Sport · AWD (on-demand clutch-pack, front-biased, up to 50 % rear) · 34 000
 A 2010s Falkenrath hot hatch with a turbo four, a dual-clutch gearbox and all-wheel drive that
 makes it the quickest thing off a Lantern Row light and the most forgiving fast car in Port
 Vesper. It's what you drive when it's raining, when you don't trust yourself, or when the race
@@ -160,7 +160,7 @@ rollover goes straight into the cab.
 
 ### Sentinel Cruiser — `sentinel_cruiser` · PoliceCruiser · RWD · 30 000
 The everyday patrol car of the Port Vesper Police Department, built by Sentinel Fleet Systems on a
-full-size rear-drive sedan with a V6, pursuit tires, big brakes and a push bar bolted through to
+full-size rear-drive sedan with a V8, pursuit tires, big brakes and a push bar bolted through to
 the front rails. Every precinct runs a fleet of them, and most of the city's stops start with one
 in the mirror. It cannot outrun a sports car on a straight and is not supposed to: its job is
 shadowing, boxing in, the PIT below the speed ceiling and holding the perimeter (see
@@ -170,7 +170,7 @@ in rear-enders. Retired Cruisers end up at the police auction, and some come bac
 - **Scene role (police):** patrol, perimeter, box-in.
 - **Typical ground:** every district; Central and South Precincts run the most.
 
-### Sentinel Wolfhound — `sentinel_wolfhound` · PoliceInterceptor · AWD (55/45) · 45 000
+### Sentinel Wolfhound — `sentinel_wolfhound` · PoliceInterceptor · AWD (on-demand, front-biased, up to 50 % rear) · 45 000
 The pursuit specialist: twin-turbo V6, all-wheel drive, the same reinforced front as the
 Cruiser on a modern cell. Highway Patrol Post 9 runs them on the Loop and Central Precinct keeps a
 pair downtown. A Wolfhound's driver does not try to win a top-speed race. They stay on your bumper
@@ -191,6 +191,153 @@ because the terminal's trucks don't care about anything smaller.
 - **Scene role (police):** roadblocks, box-in anchor, port and suburb patrol.
 - **Typical ground:** river crossings, Port districts, Dunmore.
 
+### Tansy 1.3 — `tansy_13` · Compact · FWD · 7 000
+The city's most common car: a 2000s five-door supermini with a 1.3 L four that fills every
+traffic queue on Meridian Avenue and every parking bay in Dunmore. Light, upright and lazy above
+100 km/h, it leans hard and understeers safely, which is why driving schools and pizza places buy
+them by the dozen. In the scene it is a moving obstacle rather than a rival, and the default
+civilian you thread past on Lantern Row. There is very little car ahead of the cabin: frontals
+reach the firewall early, a heavier car's nose goes deep into its doors, and the plastic bumpers
+crumple at parking-lot speeds.
+- **Scene role:** traffic; the cheapest five-door ride home.
+- **Best routes:** R10.
+
+### Drayman Cargo — `drayman_cargo` · Truck · RWD · 20 000
+A 2000s full-size cargo van with a pushrod V8 on a separate frame, always double-parked outside a
+Port District warehouse. It leans like a boat, brakes long and runs out of breath above 150 km/h,
+but at city speeds it is a two-and-a-half-tonne wall that wins most shoves. The frame rails take
+frontal and rear hits, so the bumpers and short nose crumple while the frame stays straight. The
+cargo box behind the seat partition is thin sheet on light hoops: side and rear hits dent it deep
+without touching the cab, and the high centre of gravity tips it in a hard swerve.
+- **Scene role:** traffic; Delivery runs for crews who need the space.
+- **Best routes:** R15, R09.
+
+### Furrow 2.4 — `furrow_24` · Truck · RWD · 21 000
+A 90s compact pickup with a 2.4 L four, a regular cab and a leaf-sprung live axle: the tradesman's
+truck parked in every other driveway in the suburbs. It is slow, honest and cheap, with a light
+rear end that steps out in the wet and a gearbox that likes to be rowed. The ladder frame and steel
+bumpers shrug off low-speed knocks and the bed is just bent sheet, but the 90s cab is the weak
+point: thin pillars and almost no crumple zone ahead of the short nose, so a hard frontal or
+anything above frame height goes into the cab.
+- **Scene role:** traffic; a cheap, hard-to-kill first truck.
+- **Best routes:** R10, R15.
+
+### Stoat 16V — `stoat_16v` · Compact · FWD · 9 500
+An early-90s European three-door hot hatch with a torquey 2.0 L sixteen-valve four: the other
+answer to the Vireo. It pulls cleanly from 2 500 rpm and turns in hard, and the short wheelbase and
+a stiff rear bar make it lift-off happy, so trailing the brakes into a corner brings the tail
+round to meet you. Mercer regulars argue Stoat versus Vireo the way their parents argued football.
+There is very little crumple zone ahead of the transverse engine, so the cooling pack goes early in
+any frontal, and the long, heavy doors and thin B-pillars make a T-bone nasty. Bumpers and the
+steel hood are cheap to replace.
+- **Scene role:** first real car for drivers who want torque, not revs.
+- **Best routes:** R10, R13, R04.
+
+### Marten 2.0 — `marten_20` · Compact · FWD · 9 500
+The original-recipe hot hatch: an early-90s European hatch with a big, torquey 2.0 L in a small
+shell. Where the Vireo needs revs, the Marten pulls from 3 000 rpm in any gear, so it is quicker
+away from Lantern Row's lights and easier to drive fast, at the price of torque steer in the low
+gears. A soft front and a stiff rear bar make it tuck in and rotate on a lift. Short crumple rails
+put a moderate nose hit straight into the radiator and engine, and in Simulation one committed
+frontal at speed ends it; the doors have no real intrusion beams. Every panel is cheap and bolts
+back on.
+- **Scene role:** budget junction-sprinter; the Mercer Meet regular's daily.
+- **Best routes:** R02, R10, R13.
+
+### Bulwark 400 — `bulwark_400` · Muscle · RWD · 26 000
+An early-70s Ostrander four-door with the high-output 6.6 L V8: the family car with a grudge. Two
+tonnes on a lazy three-speed, but the torque arrives early and the limited-slip axle on steel
+radials lays it down, so it lights up both rear tyres on demand and holds a slide like a barge
+holds a course. Soft, slow steering and period brakes make every move a plan. Thick mild-steel
+panels and chrome bumpers barely mark in low-speed hits and the long nose gives crush room, but
+the cabin is a 70s mild-steel cell, four doors are four soft spots in a T-bone, and a rear hit
+tears the leaf-spring hangers out.
+- **Scene role:** crew car that carries four; drag and Canal Street nights.
+- **Best routes:** R07, R08, R12.
+
+### Brigand 400 — `brigand_400` · Muscle · RWD · 23 500
+A mid-70s Ostrander full-size four-door with a four-barrel 6.6 L V8 — the getaway car of every
+crime film of its decade. It lays two black lines off the line and keeps pulling to 160 km/h, but
+soft springs, slow steering and period brakes on bias-ply tyres make every corner a negotiation.
+Slower and heavier than the Ironside, cheaper, and it carries four. It barges through light
+traffic on its chrome bumpers, but there is no real crumple zone and the pillars are mild steel, so
+a hard frontal goes into the cabin; the leaf hangers tear out in rear hits and the tank behind the
+axle makes a hard rear-ender a fire risk.
+- **Scene role:** cheap V8 drag car; crew getaway.
+- **Best routes:** R07, R08.
+
+### Arashi T4 — `arashi_t4` · Sport · AWD (40/60 permanent) · 32 000
+A mid-90s Tsurugi rally-homologation saloon: a turbo 2.0 four, permanent all-wheel drive with a
+rear-biased centre diff and a rear limited-slip. It launches like the modern AWD hatch but rotates
+on the throttle like a rear-driver — keep the turbo above 3 000 rpm and steer with your right foot.
+Long-travel suspension shrugs off Old Harbor cobbles and kerbs that unsettle the low sports cars.
+The nose crumples readily and the front intercooler is the first casualty of any frontal; the prop
+shaft and centre diff under the floor make sill and kerb strikes expensive.
+- **Scene role:** rough-road and wet-night weapon; checkpoint runs.
+- **Best routes:** R14, R11, R05.
+
+### Talus 2.0T — `talus_20t` · Sport · AWD (45/55 permanent) · 38 000
+A late-90s Tsurugi rally-homologation four-door with a hard-hitting turbo four, short gearing and
+limited-slips front and rear: the fastest thing in Port Vesper out of a slow corner, in the wet or
+over a kerb. It understeers on a trailing throttle, so the old heads brake late, flick it and drive
+it out on the power. The cell is no stronger than any saloon of its era, the big intercooler and
+radiator sit right behind a thin bumper so nose hits overheat it early, and heavy sill or kerb
+strikes can take out drive to the rear.
+- **Scene role:** Arashi's harder, dearer sibling; touge and checkpoint specialist.
+- **Best routes:** R04, R05, R14.
+
+### Satchel 2.0 — `satchel_20` · Truck · FWD · 20 000
+A 2000s European front-drive high-roof panel van with a 2.0 L petrol four: the parcel van on every
+corner. Tall and gutless, with a short first gear for pulling away loaded and not much after that;
+empty, it is light at the back, so it understeers safely until a sudden lift lets the rear step
+out, and the slab sides catch every crosswind and every shove. The car-style unibody nose crumples
+like a hatchback's, the cargo box is thin sheet that dents deep without reaching the cab, and the
+high centre of gravity tips it in a hard swerve.
+- **Scene role:** traffic; the cheapest Delivery van.
+- **Best routes:** R15, R09.
+
+### Tumbril 2.0 — `tumbril_20` · Truck · FWD · 20 000
+The Satchel's rival from the other parcel company: a 2000s front-drive high-roof van with a sliding
+side door and a little petrol four geared short for stop-start rounds. Slow everywhere and a
+crosswind on wheels above 120 km/h, it leans hard and understeers safely, and its empty rear goes
+light under hard braking. Smaller, lighter and much slower than the Drayman. With no frame rails
+under the cargo box it is softer than the Drayman in every direction; frontals reach the cab
+early and the tall flat sides tip it in a hard swerve or a hit at the wheels.
+- **Scene role:** traffic; delivery rounds in Dunmore and the Port.
+- **Best routes:** R15, R10.
+
+### Fulmine V10 — `fulmine_v10` · Exotic · AWD (30/70 permanent, mid-engine) · 125 000
+A 2010s Benvenuti mid-engine supercar with a naturally aspirated 5.2 L V10 that shrieks to
+8 500 rpm, a seven-speed dual-clutch and permanent all-wheel drive: the top of the market. It is
+the quickest car off the line in any weather and keeps pulling where the Lucciola runs out of
+breath, but it is still light at the front and rotates hard on a lift. Wins pay like nothing else;
+a crash costs a small house. The bonded aluminium and carbon cell takes a frontal like a modern
+car, but everything behind the bulkhead is sacrificial — rear hits kill drive — and the panels
+crack and tear rather than dent.
+- **Scene role:** endgame flagship; the car the Feared tier exists for.
+- **Best routes:** R01, R12, R06.
+
+### Sentinel Warden — `sentinel_warden` · PoliceCruiser · RWD · 26 000
+The old workhorse still in service: a late-80s Sentinel body-on-frame sedan with a 5.7 L V8 and a
+four-speed automatic. It leans, floats and squats like a boat, its drum rear brakes fade after a
+few hard stops, and it has nothing for a sports car beyond 120 km/h — but it is a full-length steel
+frame on wheels, and nobody wants it in their door. Low-heat patrols in Dunmore and Southmoor still
+run them. The frame and steel bumpers shrug off shunts that fold a modern unibody; the 80s cabin is
+the weak point, so hits above the frame rail reach the officers, and the long overhangs swing wide
+in a spin.
+- **Scene role (police):** low-heat patrol (levels 1–2), traffic stops.
+- **Typical ground:** suburbs and the older precincts.
+
+### Sentinel Vigil — `sentinel_vigil` · PoliceInterceptor · RWD · 52 000
+The highway-patrol hammer, sent when nothing else can keep up: a 2010s muscle coupe with a 5.0 L
+DOHC V8, performance tyres, big brakes and a push bar, upfitted by Sentinel as a slicktop with
+visor and rear-window light bars. It runs with the modern sports cars to pursuit speed and brakes
+later than any other unit, but two doors, a heavy nose and rear drive make it a handful in the wet
+and useless for boxing in a truck. The reinforced bar and doubled bumper beam survive PIT contact;
+the long doors and low sills are weak in side hits, and the cooling pack goes once the bar is gone.
+- **Scene role (police):** top-heat interceptor (levels 4–5).
+- **Typical ground:** Loop 9, the Westline Viaduct, Route 40.
+
 ### Debug cars — excluded from the fiction
 `debug_sedan` and `debug_coupe` are integration-lead test fixtures, not part of the world. In the
 fiction they don't exist. If they ever appear in a player-facing build, call them "test mule"
@@ -203,12 +350,12 @@ too-similar name, rename it here first.
 
 | House | Origin | Cars | Identity |
 |---|---|---|---|
-| **Tsurugi Motor Co.** | Japan | Vireo XS, Kestrel TS, Shiro Turbo, Hakone GT | Engineering-led, high-revving fours and sixes; the scene's backbone. |
-| **Ostrander Motor Works** | USA (Midwest) | Rampart 5.0, Ironside 440 | V8s since forever; heritage plus horsepower. |
+| **Tsurugi Motor Co.** | Japan | Vireo XS, Kestrel TS, Shiro Turbo, Hakone GT, Arashi T4, Talus 2.0T | Engineering-led, high-revving fours and sixes; the scene's backbone. |
+| **Ostrander Motor Works** | USA (Midwest) | Rampart 5.0, Ironside 440, Bulwark 400, Brigand 400 | V8s since forever; heritage plus horsepower. |
 | **Falkenrath Fahrzeugbau** | Germany | Sperber 32, Lindwurm 4T | Precise, expensive to fix, beloved by the clean-racing crowd. |
-| **Benvenuti** | Italy | Lucciola 350 | Small-volume exotics; parts arrive slowly. |
+| **Benvenuti** | Italy | Lucciola 350, Fulmine V10 | Small-volume exotics; parts arrive slowly. |
 | **Ridgeback Truck Co.** | USA | Hauler 1500 | Work trucks for the port and the farms beyond Route 40. |
-| **Sentinel Fleet Systems** | USA | Sentinel Cruiser, Wolfhound, Bastion | Fleet upfitter building police packages; the push bar is their signature. |
+| **Sentinel Fleet Systems** | USA | Sentinel Cruiser, Wolfhound, Bastion, Warden, Vigil | Fleet upfitter building police packages; the push bar is their signature. |
 
 Badges, grilles and logos for these houses are art direction's (11) job: simple geometric marks,
 never a modified real logo.

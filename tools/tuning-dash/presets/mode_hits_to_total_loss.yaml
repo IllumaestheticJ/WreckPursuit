@@ -7,12 +7,42 @@
 # Checks: Arcade frontal 56 degrades (health <= 0.9) and ends in 2-6 hits; Simulation frontal
 # 56 ends in 1. Side impacts are reported, not checked. No data is changed.
 # Generated variant list: one per car x mode x impact (class in the name). Round 8 added H's
-# drayman_cargo, furrow_24 and tansy_13.
+# drayman_cargo, furrow_24 and tansy_13; the cars audit (2026-10-23) the eleven later cars.
 description: Hits to total loss and single-hit total-loss speed, every car, Arcade vs Simulation, frontal and side
 probe:
   kind: survival
   speeds_kmh: [25, 40, 56, 80]
 variants:
+  - name: arashi_t4 (Sport) arc frontal
+    probe: {car: arashi_t4, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: arashi_t4 (Sport) arc side
+    probe: {car: arashi_t4, mode: Arcade, impact: Side}
+  - name: arashi_t4 (Sport) sim frontal
+    probe: {car: arashi_t4, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: arashi_t4 (Sport) sim side
+    probe: {car: arashi_t4, mode: Simulation, impact: Side}
+  - name: brigand_400 (Muscle) arc frontal
+    probe: {car: brigand_400, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: brigand_400 (Muscle) arc side
+    probe: {car: brigand_400, mode: Arcade, impact: Side}
+  - name: brigand_400 (Muscle) sim frontal
+    probe: {car: brigand_400, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: brigand_400 (Muscle) sim side
+    probe: {car: brigand_400, mode: Simulation, impact: Side}
+  - name: bulwark_400 (Muscle) arc frontal
+    probe: {car: bulwark_400, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: bulwark_400 (Muscle) arc side
+    probe: {car: bulwark_400, mode: Arcade, impact: Side}
+  - name: bulwark_400 (Muscle) sim frontal
+    probe: {car: bulwark_400, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: bulwark_400 (Muscle) sim side
+    probe: {car: bulwark_400, mode: Simulation, impact: Side}
   - name: debug_coupe (Sport) arc frontal
     probe: {car: debug_coupe, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -33,6 +63,36 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: debug_sedan (Compact) sim side
     probe: {car: debug_sedan, mode: Simulation, impact: Side}
+  - name: drayman_cargo (Truck) arc frontal
+    probe: {car: drayman_cargo, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: drayman_cargo (Truck) arc side
+    probe: {car: drayman_cargo, mode: Arcade, impact: Side}
+  - name: drayman_cargo (Truck) sim frontal
+    probe: {car: drayman_cargo, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: drayman_cargo (Truck) sim side
+    probe: {car: drayman_cargo, mode: Simulation, impact: Side}
+  - name: fulmine_v10 (Exotic) arc frontal
+    probe: {car: fulmine_v10, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: fulmine_v10 (Exotic) arc side
+    probe: {car: fulmine_v10, mode: Arcade, impact: Side}
+  - name: fulmine_v10 (Exotic) sim frontal
+    probe: {car: fulmine_v10, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: fulmine_v10 (Exotic) sim side
+    probe: {car: fulmine_v10, mode: Simulation, impact: Side}
+  - name: furrow_24 (Truck) arc frontal
+    probe: {car: furrow_24, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: furrow_24 (Truck) arc side
+    probe: {car: furrow_24, mode: Arcade, impact: Side}
+  - name: furrow_24 (Truck) sim frontal
+    probe: {car: furrow_24, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: furrow_24 (Truck) sim side
+    probe: {car: furrow_24, mode: Simulation, impact: Side}
   - name: hakone_gt (Sport) arc frontal
     probe: {car: hakone_gt, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -103,6 +163,16 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: lucciola_350 (Exotic) sim side
     probe: {car: lucciola_350, mode: Simulation, impact: Side}
+  - name: marten_20 (Compact) arc frontal
+    probe: {car: marten_20, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: marten_20 (Compact) arc side
+    probe: {car: marten_20, mode: Arcade, impact: Side}
+  - name: marten_20 (Compact) sim frontal
+    probe: {car: marten_20, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: marten_20 (Compact) sim side
+    probe: {car: marten_20, mode: Simulation, impact: Side}
   - name: rampart_50 (Muscle) arc frontal
     probe: {car: rampart_50, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -113,6 +183,16 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: rampart_50 (Muscle) sim side
     probe: {car: rampart_50, mode: Simulation, impact: Side}
+  - name: satchel_20 (Truck) arc frontal
+    probe: {car: satchel_20, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: satchel_20 (Truck) arc side
+    probe: {car: satchel_20, mode: Arcade, impact: Side}
+  - name: satchel_20 (Truck) sim frontal
+    probe: {car: satchel_20, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: satchel_20 (Truck) sim side
+    probe: {car: satchel_20, mode: Simulation, impact: Side}
   - name: sentinel_bastion (PoliceSuv) arc frontal
     probe: {car: sentinel_bastion, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -133,6 +213,26 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: sentinel_cruiser (PoliceCruiser) sim side
     probe: {car: sentinel_cruiser, mode: Simulation, impact: Side}
+  - name: sentinel_vigil (PoliceInterceptor) arc frontal
+    probe: {car: sentinel_vigil, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: sentinel_vigil (PoliceInterceptor) arc side
+    probe: {car: sentinel_vigil, mode: Arcade, impact: Side}
+  - name: sentinel_vigil (PoliceInterceptor) sim frontal
+    probe: {car: sentinel_vigil, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: sentinel_vigil (PoliceInterceptor) sim side
+    probe: {car: sentinel_vigil, mode: Simulation, impact: Side}
+  - name: sentinel_warden (PoliceCruiser) arc frontal
+    probe: {car: sentinel_warden, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: sentinel_warden (PoliceCruiser) arc side
+    probe: {car: sentinel_warden, mode: Arcade, impact: Side}
+  - name: sentinel_warden (PoliceCruiser) sim frontal
+    probe: {car: sentinel_warden, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: sentinel_warden (PoliceCruiser) sim side
+    probe: {car: sentinel_warden, mode: Simulation, impact: Side}
   - name: sentinel_wolfhound (PoliceInterceptor) arc frontal
     probe: {car: sentinel_wolfhound, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -163,36 +263,26 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: sperber_32 (Sport) sim side
     probe: {car: sperber_32, mode: Simulation, impact: Side}
-  - name: vireo_xs (Compact) arc frontal
-    probe: {car: vireo_xs, mode: Arcade, impact: Frontal}
+  - name: stoat_16v (Compact) arc frontal
+    probe: {car: stoat_16v, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
-  - name: vireo_xs (Compact) arc side
-    probe: {car: vireo_xs, mode: Arcade, impact: Side}
-  - name: vireo_xs (Compact) sim frontal
-    probe: {car: vireo_xs, mode: Simulation, impact: Frontal}
+  - name: stoat_16v (Compact) arc side
+    probe: {car: stoat_16v, mode: Arcade, impact: Side}
+  - name: stoat_16v (Compact) sim frontal
+    probe: {car: stoat_16v, mode: Simulation, impact: Frontal}
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
-  - name: vireo_xs (Compact) sim side
-    probe: {car: vireo_xs, mode: Simulation, impact: Side}
-  - name: drayman_cargo (Truck) arc frontal
-    probe: {car: drayman_cargo, mode: Arcade, impact: Frontal}
+  - name: stoat_16v (Compact) sim side
+    probe: {car: stoat_16v, mode: Simulation, impact: Side}
+  - name: talus_20t (Sport) arc frontal
+    probe: {car: talus_20t, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
-  - name: drayman_cargo (Truck) arc side
-    probe: {car: drayman_cargo, mode: Arcade, impact: Side}
-  - name: drayman_cargo (Truck) sim frontal
-    probe: {car: drayman_cargo, mode: Simulation, impact: Frontal}
+  - name: talus_20t (Sport) arc side
+    probe: {car: talus_20t, mode: Arcade, impact: Side}
+  - name: talus_20t (Sport) sim frontal
+    probe: {car: talus_20t, mode: Simulation, impact: Frontal}
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
-  - name: drayman_cargo (Truck) sim side
-    probe: {car: drayman_cargo, mode: Simulation, impact: Side}
-  - name: furrow_24 (Truck) arc frontal
-    probe: {car: furrow_24, mode: Arcade, impact: Frontal}
-    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
-  - name: furrow_24 (Truck) arc side
-    probe: {car: furrow_24, mode: Arcade, impact: Side}
-  - name: furrow_24 (Truck) sim frontal
-    probe: {car: furrow_24, mode: Simulation, impact: Frontal}
-    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
-  - name: furrow_24 (Truck) sim side
-    probe: {car: furrow_24, mode: Simulation, impact: Side}
+  - name: talus_20t (Sport) sim side
+    probe: {car: talus_20t, mode: Simulation, impact: Side}
   - name: tansy_13 (Compact) arc frontal
     probe: {car: tansy_13, mode: Arcade, impact: Frontal}
     expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
@@ -203,5 +293,25 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: tansy_13 (Compact) sim side
     probe: {car: tansy_13, mode: Simulation, impact: Side}
+  - name: tumbril_20 (Truck) arc frontal
+    probe: {car: tumbril_20, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: tumbril_20 (Truck) arc side
+    probe: {car: tumbril_20, mode: Arcade, impact: Side}
+  - name: tumbril_20 (Truck) sim frontal
+    probe: {car: tumbril_20, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: tumbril_20 (Truck) sim side
+    probe: {car: tumbril_20, mode: Simulation, impact: Side}
+  - name: vireo_xs (Compact) arc frontal
+    probe: {car: vireo_xs, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: vireo_xs (Compact) arc side
+    probe: {car: vireo_xs, mode: Arcade, impact: Side}
+  - name: vireo_xs (Compact) sim frontal
+    probe: {car: vireo_xs, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: vireo_xs (Compact) sim side
+    probe: {car: vireo_xs, mode: Simulation, impact: Side}
 workers: 4
 plots: ["hits_to_total_loss@56", "hits_to_total_loss@80", "health_after_1@56", total_loss_speed_kmh]
