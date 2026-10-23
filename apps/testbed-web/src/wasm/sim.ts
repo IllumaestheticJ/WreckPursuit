@@ -434,9 +434,13 @@ export const sim = {
   careerStripPart: (uid: number, assembly: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_strip_part(uid, assembly, slot)),
   careerBuildPart: (uid: number, assembly: number, slot: string, part: number): WorkshopScreen =>
     JSON.parse(wasm.career_build_part(uid, assembly, slot, part)),
+  careerClearWay: (uid: number, slot: string): WorkshopScreen => JSON.parse(wasm.career_clear_way(uid, slot)),
+  /** Pay the mechanic: inventory part `part` (0 = buy `grade` now, null = stock). */
+  careerMechanicInstall: (uid: number, slot: string, part: number, grade: string | null, sellOld: boolean): MechanicResult =>
+    JSON.parse(wasm.career_mechanic_install(uid, slot, part, grade ?? "", sellOld)),
 };
 
-import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
+import type { CareerView, MechanicResult, ModTreeView, RepairQuote, RunClose, ShopRequest, WorkshopScreen } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";

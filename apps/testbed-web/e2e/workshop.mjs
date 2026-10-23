@@ -112,7 +112,7 @@ await shot("workshop_parts_off.png");
 // Buy an aftermarket radiator through the catalog, fit it from the inventory strip.
 await button("Catalog").click();
 await page.locator('[data-testid="ws-catalog"] [role="tab"]', { hasText: "Cooling" }).click();
-await page.locator('[data-testid="ws-catrow"][data-grade="cooling_radiator_1"] button').click();
+await page.locator('[data-testid="ws-catrow"][data-grade="cooling_radiator_1"] button', { hasText: "Buy" }).click();
 await page.locator('[data-testid="ws-catalog"] button', { hasText: "Close" }).click();
 s = await screen();
 const bought = s.inventory.find((p) => p.part.grade === "cooling_radiator_1");
