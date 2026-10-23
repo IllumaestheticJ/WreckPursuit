@@ -3,7 +3,7 @@
 (
     name: "regression_grid_24",
     seed: 24,
-    mode: Simulation,
+    mode: Extreme,
     entities: [
         (id: "s0",  car: "debug_sedan", pos: (0.0, 0.0, 0.0),   assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 1.0))]),
         (id: "s1",  car: "debug_sedan", pos: (6.0, 0.0, 0.0),   assists: keyboard, inputs: [(t_s: 0.0, input: (throttle: 0.8, steer: 0.1))]),

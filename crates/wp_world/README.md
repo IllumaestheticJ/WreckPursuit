@@ -25,6 +25,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `routes` | Lane-legal race routes, circuits, checkpoints, closures |
 | `props` | Parked cars (rules from `data/city/parking.json`, `ParkingTable`) and cones (static colliders) |
 | `clock` | `WorldClock`, `sun_direction` |
+| `progression` | Career time budget: `TimeProgression` (day free-roam / night racing shifts, activity costs, dusk/dawn transitions, carry-over), drives `WorldClock` via `apply` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
 | `leader` | Leader / obstacle query (`find_leader`) + shared IDM (`CarFollowing`) so police and racers follow and stop behind vehicles like traffic does |
@@ -232,6 +233,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   its terminal under an 8 % cap; a second profiling pass holds every terminal within reach of
   its ramps' gores. Interchange crossroads take the old junctions' local roads (Terminal
   Avenue no longer reaches the loop; the port is served by the half diamond).
+  **Rest stops** (playtest row 153): Hollins Rest Area (outer carriageway, west), Larkspur and
+  Harbor Rest Area (inner carriageway, south): an off-ramp 275 m upstream of the stop's
+  centre, a 100 m one-way 20 mph parking road 34 m off the centreline (kerb parking, always a
+  few parked cars, no houses, on an embankment where the ground falls away), an on-ramp 275 m
+  downstream. Named `PoiKind::RestStop` sites, `World::rest_stops()` / `rest_stop(name)`.
 - **Road names:** `World::vesper` keeps the generator's name per source road
   (`World::road_names`; presentation only, not in the road format or the state hash), and
   `World::edge_names()` names every road-graph edge (`RoadEdgeId`) after its road. The police
@@ -257,7 +263,7 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 - **POIs:** race grids `Lantern Run` (first: free drive / city chase spawn), `Loop 9 sprint`,
   `Hollins Ascent`, `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
-  `Knob Observatory Lot`).
+  `Knob Observatory Lot`); 3 rest stops.
 
 - **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
   through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
@@ -321,6 +327,28 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
 - `residential::driveway_cars` parks cars in 60 % of driveways; kerbside cars never stand in
   front of a driveway mouth (`blocks_driveway`). Trunks, hedges and fences are `wp_sim`
   colliders in cities with terrain. Details: `docs/integration/city-residential.md`.
+
+## Touge passes (`touge::generate`, `World::touge`, `gen-city --preset touge`)
+Four sealed mountain roads for one-on-one touge battles, specs in `data/touge/<id>.json`
+(embedded): Hollow Crown Pass (≈ 2.8 km, 280 m climb), Mistral Ridge (≈ 3.0 km, 200 m),
+Ashfall Grade (≈ 2.3 km, 260 m), Cedar Switchback (≈ 2.3 km, 210 m).
+- **Road:** a turtle path of straights and arcs (`legs`), sampled every 2 m; an elevation
+  profile that flattens the hairpins and both ends; banking from curvature. One 1+1 lane road
+  (`RoadClass::Collector` geometry, lanes tagged `LaneKind::Highway` so the surface code adds no
+  sidewalks, kerbs or guard rails), no traffic (one zone at density 0).
+- **Terrain:** coarse natural ground (16 m) resampled onto a 4 m heightfield, carved under the
+  road with a flat shelf, falling away as a cliff (`cliff_drop_m`) on the low side.
+- **Sealed:** `DecorKind::Fence` walls (0.5 × 1.2 m, solid colliders in `wp_sim`) along both
+  edges and across both ends, everywhere except the `krail` spans.
+- **K-rail spans:** on the outboard (cliff) edge the wall is replaced by loose K-rail props
+  (`PropKind::KRail`, 2 m × 0.6 m × 0.81 m, 600 kg): fixed until a car comes near, then
+  dynamic, so a car that hits them hard enough knocks them over the edge and follows them.
+  Whether a car went through is judged in `wp_race::touge::Boundary`.
+- **POIs:** `<name> base start`, `<name> summit finish`, `<name> summit start`,
+  `<name> base finish` (60 m / 40 m in from the ends) for uphill and downhill courses.
+- Tests (`touge::tests`): every pass parses and validates; long, steep and sealed; the road never
+  comes near itself; terrain stays under the road and falls away behind the K-rails; generation
+  is deterministic.
 
 ## Traffic AI
 
@@ -415,6 +443,14 @@ Promotion copies pose and speed; demotion (beyond 100 m) projects the vehicle ba
 path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
 (`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
 removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
+With the cap full, a kinematic car within 40 m of a player takes the place of the physical
+car farthest from any player (playtest row 149: kinematic cars have no collider, the player
+drove through them), and a kinematic car turning around or reversing within 20 m of a player
+gives the manoeuvre up to be promoted. A wreck lying across a car's path (its segment or the
+next two of its plan, by position) is its leader whatever lane the wreck is filed under.
+**Priority junction starvation:** a minor-road car that has stood at its line for 25 s
+accepts gaps shrinking to 2.5 s, and slow (≤ 10 m/s) major-road cars that can stop
+comfortably hold at their line for it, so a steady stream cannot hold it indefinitely.
 
 **Parked cars** (`props::parked_cars`, owner row 77): only on parking lanes (collector and
 local streets; arterials, highways, hill roads and service roads have none) and never within

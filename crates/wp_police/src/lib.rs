@@ -169,6 +169,24 @@ pub struct CallRecord {
     pub spawned: bool,
 }
 
+/// An active unit standing still (row 86 audit, `PoliceStats::active_stops`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ActiveStop {
+    /// Unit.
+    pub unit: UnitId,
+    /// When it stopped.
+    pub at: SimTime,
+    /// How long it stood, s.
+    pub stood_s: f32,
+    /// Where, m.
+    pub pos: [f32; 2],
+    /// What held it when it stopped (diagnosis): its `drive_input` branch, and what capped its
+    /// speed (0 nothing, 1 a vehicle, 2 a police unit, 3 kinematic traffic, 4 its racer).
+    pub branch: u8,
+    /// See `branch`.
+    pub blocked_by: u8,
+}
+
 /// One ground unit appearing after the session start, for statistics: how close to (and
 /// whether in sight of) a racer it popped in.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -347,6 +365,12 @@ pub struct PoliceStats {
     pub spawns: Vec<SpawnRecord>,
     /// Physical units that got stuck, why, and what was done ([`stuck`]).
     pub stuck: Vec<stuck::StuckRecord>,
+    /// Row 86 audit: an active unit (pursuit, intercept, response) standing still with no
+    /// reason to (not arresting, not waiting in an ambush, not blocking a junction) for more
+    /// than [`dispatch::ACTIVE_STOP_S`]: one entry per episode, when it started moving again
+    /// or its job ended.
+    #[serde(default)]
+    pub active_stops: Vec<ActiveStop>,
     /// Physical units touching static geometry (walls, buildings, rails, parked props): one
     /// entry per contact episode (owner playtest row 66).
     #[serde(default)]
@@ -1096,8 +1120,10 @@ impl PoliceSystem {
         self.decks = decks;
     }
 
-    /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet: still in a racer's
-    /// view (row 131); each appears there once hidden.
+    /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet. Roadblock cars wait
+    /// while their spot is in a racer's view (row 131) and appear once it is hidden; a spike
+    /// car is decided on the next think (hidden: it appears, in view: dropped, the strip stays
+    /// unmanned; PR #54 port).
     pub fn tool_cars_waiting(&self, tool: ToolId) -> Vec<([f32; 2], [f32; 2])> {
         self.tool_cars
             .iter()
@@ -1310,6 +1336,23 @@ impl PoliceSystem {
     pub fn sync_unit_feel(&mut self, unit: UnitId, feel: pro::UnitFeel) {
         if let Some(i) = self.unit_index(unit) {
             self.units[i].feel = feel;
+        }
+    }
+
+    /// Report how upright an externally driven unit is (row 75): `up_z` is the world Z of the
+    /// chassis up axis (1 upright, 0 on its side, -1 on its roof), after
+    /// [`PoliceSystem::sync_unit`]. A unit on its side or roof for
+    /// [`stuck::FLIPPED_RESET_S`] is reset upright in its lane (once no racer sees it).
+    /// Optional: without it a unit counts as upright.
+    pub fn sync_unit_upright(&mut self, unit: UnitId, up_z: f32) {
+        let now = self.now;
+        if let Some(i) = self.unit_index(unit) {
+            let u = &mut self.units[i];
+            if up_z < stuck::FLIPPED_UP_Z {
+                u.flipped_since.get_or_insert(now);
+            } else {
+                u.flipped_since = None;
+            }
         }
     }
 

@@ -119,11 +119,12 @@ pub fn car_stats() -> Result<&'static simcli::car_stats::CarStatsTable, String> 
         .map_err(Clone::clone)
 }
 
-/// Parse the embedded mode table for `mode` (`data/modes/arcade.toml` or `sim.toml`).
+/// Parse the embedded mode table for `mode` (`data/modes/{arcade,sim,extreme}.toml`).
 pub fn mode_table(mode: DamageMode) -> Result<ModeTable, String> {
     let stem = match mode {
         DamageMode::Arcade => "arcade",
         DamageMode::Simulation => "sim",
+        DamageMode::Extreme => "extreme",
     };
     let (_, text) = files("modes")
         .find(|(id, _)| *id == stem)
@@ -131,13 +132,14 @@ pub fn mode_table(mode: DamageMode) -> Result<ModeTable, String> {
     wp_contracts::parse_mode_table(stem, text).map_err(|e| e.to_string())
 }
 
-/// Parse a damage mode name: `"Arcade"`/`"arcade"` or `"Simulation"`/`"Sim"`/`"sim"`.
+/// Parse a damage mode name (any case): `"Arcade"`, `"Simulation"`/`"Sim"` or `"Extreme"`.
 pub fn parse_mode(name: &str) -> Result<DamageMode, String> {
     match name.to_ascii_lowercase().as_str() {
         "arcade" => Ok(DamageMode::Arcade),
         "simulation" | "sim" => Ok(DamageMode::Simulation),
+        "extreme" => Ok(DamageMode::Extreme),
         other => Err(format!(
-            "unknown damage mode {other:?} (Arcade | Simulation)"
+            "unknown damage mode {other:?} (Arcade | Simulation | Extreme)"
         )),
     }
 }

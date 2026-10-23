@@ -104,6 +104,11 @@ pub const DEADLOCK_NEAR_M: f32 = 20.0;
 /// [`GIVE_WAY_M`]: a unit backing out of a racer's way and nosing back in again, over and over,
 /// is standing (Hollins seed 6: a unit cycled in front of a busted racer for a minute).
 pub const STAND_M: f32 = 8.0;
+/// A unit whose chassis up axis points below this (world Z) is on its side or roof (row 75)...
+pub const FLIPPED_UP_Z: f32 = 0.3;
+/// ...and after this long it is reset upright, s.
+pub const FLIPPED_RESET_S: f32 = 1.5;
+
 /// Reset in place (owner row 78), like the player's R: an un-wrecked AI unit that has stood
 /// within [`STAND_M`] this long while it wants to drive (not at a red light, not holding a
 /// block, not arresting a stopped racer it is after) snaps to a clear spot in its lane within
@@ -443,6 +448,15 @@ impl PropIndex {
         self.boxes.is_empty()
     }
 
+    /// Whether `p` is more than `margin_m` from every box (row 75: a unit spawned on a parked
+    /// car was thrown over by the physics, upside down in the road).
+    pub fn clear_of(&self, p: [f32; 2], margin_m: f32) -> bool {
+        let mut near = Vec::new();
+        self.around(p, &mut near);
+        near.iter()
+            .all(|&k| self.boxes[k as usize].distance(p) > margin_m)
+    }
+
     /// Indices of props in the grid cells around `p` (everything within one cell, ≥ 25 m),
     /// ascending.
     pub fn around(&self, p: [f32; 2], out: &mut Vec<u32>) {
@@ -533,6 +547,23 @@ pub(crate) fn classify(c: &ClassifyInput) -> (StuckCause, Option<f32>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prop_clearance_for_spawns() {
+        // A parked car 4.6 x 1.8 m at the origin, along +Y.
+        let idx = PropIndex::new(vec![PropBox {
+            pos: [0.0, 0.0],
+            half: [0.9, 2.3],
+            rot: [0.0, 1.0],
+        }]);
+        assert!(!idx.clear_of([0.0, 0.0], 3.0), "on top of it");
+        assert!(
+            !idx.clear_of([2.5, 0.0], 3.0),
+            "alongside, 1.6 m off its side"
+        );
+        assert!(idx.clear_of([0.0, 8.0], 3.0), "5.7 m ahead of its nose");
+        assert!(idx.clear_of([20.0, 0.0], 3.0));
+    }
+
     use super::*;
 
     #[test]

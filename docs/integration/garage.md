@@ -17,15 +17,24 @@ is a model for layout and flow only; all art, assets and text are our own. Plan 
 | 1 | Parts model (`wp_economy::parts`), slot table, wasm exports | PR #43 |
 | 2 | 3D workshop scene in the testbed | PR #43 |
 | 3 | Visible cosmetics on every car, vinyl library, more cosmetic parts | PR #43 |
-| 4 | Work on it yourself (DIY repair, paint booth, car info) | planned |
-| 5 | Tuning and polish | planned |
+| 4 | Engine internals: parts inside the engine, engine stand, wear and DIY rebuild | PR #43 |
+| 5 | Engine stand in the 3D workshop (strip and build part by part) | PR #43 |
+| 6 | Work on it yourself (DIY repair, paint booth, car info; time cost from `wp_world::progression`, PR #45) | planned |
+| 7 | Tuning and polish | planned |
+
+Owner decision (2026-10-22): part depth is whole assemblies **plus engine internals**. The engine
+comes out whole with its internals inside, or is stripped part by part in the car or on the stand.
 
 ## Exposes
 
 ### `wp_economy::parts` (methods on `Economy`)
 | Call | Notes |
 |---|---|
-| `econ.parts: PartsTable` | `data/economy/parts.toml`: 66 slots (`SlotDef { id, name, group, set, repair, puncture, lines, required, blocked_by, stock_price, optional }`), validated against the mod catalog (lines exist, one kind per line, `blocked_by` is a DAG) |
+| `econ.parts: PartsTable` | `data/economy/parts.toml`: 79 slots (`SlotDef { id, name, group, set, repair, puncture, lines, required, blocked_by, stock_price, optional, parent, damage_share, torque_loss, wear_limit }`), validated against the mod catalog (lines exist, one kind per line, `blocked_by` is a DAG, parents are plain top-level slots not blocked by their own parts) |
+| `parts.children(id)`, `is_assembly`, `assembly_of` | the 16 slots inside `engine` (manifolds, throttle body, valve cover, timing, cams, valves, head, gasket, oil pan and pump, pistons, rods, crank, clutch, flywheel) |
+| `strip_part(acct, assembly_uid, slot)` / `build_part(acct, assembly_uid, slot, part_uid)` | engine stand on a loose engine; same removal order among its parts; a part goes on only over the required parts its removal frees (head over gasket); a stock part only into its own engine family |
+| `wear_torque_factor(&OwnedCar)` | `Π(1 − torque_loss × wear)` over engine members, 1 while the engine's repair line is open |
+| `car_preview(vehicle, lattice, &OwnedCar, mode)` (garage.rs) | `preview` of the car's mods with the wear factor on the torque curve; what a session should load |
 | `car_parts(&OwnedCar) -> CarParts` | stored state, or derived from `mods` (stock everywhere, optional slots empty) |
 | `derive_mods(&mods, &CarParts)` | the mod list the parts amount to; a set line (four wheels) only when all four match |
 | `slot_condition(&car, &slot)` | `1 - severity` of the slot's repair line, `1 - puncture` for a tyre |
@@ -55,6 +64,74 @@ removed part carries them).
 | `career_workshop_session(uid, scenario_json)` | installs a paused sandbox session with the car as it is (mods, saved dents, empty slots) and no run, for the 3D workshop; refused during a run or while impounded |
 
 `career_start_run` refuses a car with empty required slots ("the car is missing parts: ...").
+
+### Engine internals (stage 4)
+- **Assemblies.** `parent = "engine"` slots come out with the engine as `LoosePart::contents` and go
+  back with it. With the engine in the car they come off one by one in removal order.
+- **Engine families.** Stock internals carry `model` = the stock engine's car model, or the swap
+  engine's mod id; they fit only that engine. A new engine (stock or swap) comes complete.
+- **Wear.** `FittedPart::wear` (assembly members only). A damage report that raises the engine
+  line's severity by `d` adds `d × damage_share` wear to each member (a repeated report adds
+  nothing). Condition shown = `1 − wear`. A shop repair of the engine line sets all wear to 0.
+- **DIY rebuild.** When every member is within its `wear_limit` (internals 0.05, block 0.5), the
+  engine line is cleared and `Component::Engine` comes back in `PartFit::restore` (in the car), or
+  the loose engine's damage is cleared (on the stand; fitting it then restores the lattice).
+- **Power.** With no engine line open, worn members cost torque through `car_preview`
+  (`wp_wasm::Career::car_files` uses it). While the line is open the damage sim's component
+  health already takes the power.
+- **18 new mods** (`data/mods/engine.json`): intake manifolds, big throttle body, headers, cam
+  gears, street / race cams, stiff / titanium valvetrain, ported / race head, MLS head gasket,
+  high-volume oil pump, forged / titanium rods, light / stroker crank. `engine_internals_1..3`
+  keep their ids (saves) but are now piston sets on the `pistons` slot (hypereutectic, forged,
+  high-compression), priced and tuned as one part of the engine instead of a whole rebuild.
+- wasm: `career_strip_part(uid, assembly, slot)`, `career_build_part(uid, assembly, slot, part)`;
+  `WorkshopScreen` gains `stands`, `torque_factor`, `SlotView.parent`, `InventoryView.stand_fits`.
+- ui-kit: Engine stand modal (strip / fit / buy per internal), part list shows internals under the
+  engine only while it is fitted, worn-engine badge in the top bar. `e2e/engine.mjs` pulls the
+  engine, strips it to the crank on the stand and builds it back.
+
+### 3D engine stand (stage 5)
+- `src/workshop/engine.ts`: `buildEngine(StandView, grade)` draws the loose engine from its
+  internals (inline four; V8 for the swap engine): open-deck block with liners, crank, rods,
+  pistons, gasket, head, valves, cams, valve cover, timing cover, intake runners and plenum,
+  throttle body, headers, oil pan and pump, flywheel, clutch. Each internal is a group with
+  `userData.slot`; parts out of the engine are not drawn, so stripping shows what is under them.
+  Aftermarket parts are anodised by tier; parts under 60 % condition look rusted.
+  `buildStand()` is the stand on casters.
+- `mode.ts`: the stand stands in the bay beside the car (`STAND_AT`), the first loose engine
+  bolted to it and rebuilt when its parts change; picking includes the stand engine
+  (`stand:<slot>` → `WorkshopState.standSelected`), `highlightStand`, camera preset `stand`,
+  `pointOfStandPart(slot)` for automation.
+- ui-kit: the stand parts panel sits at the side (the engine stays in view); a part clicked in 3D
+  opens it at that row; hovering a row lights the part up. `e2e/engine.mjs` clicks the valve
+  cover in 3D and checks that stripped parts disappear from the model.
+
+### Easier workshop: mechanic, simpler removal order, sorting
+Owner feedback (2026-10-23): installs were confusing (tyre off before the wheel), wanted a paid
+mechanic with the old part sold or kept, and sortable part lists.
+- `parts.toml` removal order keeps only real dependencies: a wheel comes off with its tyre on;
+  brakes and suspension only need the wheel off (suspension no longer waits for the brake); the
+  push bar no longer waits for the splitter. New `[mechanic]` table: `call_out` (60) per job,
+  `per_part` (30) per part handled.
+- `Economy::in_the_way(parts, slot)`: every fitted slot that must come off first, nested ones
+  too, in removal order. `SlotView.in_the_way`, `SlotView.mechanic_fee`,
+  `CatalogEntry.install_fee` (the whole set's fee for a set).
+- `Economy::clear_way(acct, car, slot)`: DIY, free, takes off everything in the way.
+- `Economy::mechanic_install(acct, car, slot, &PartSource, sell_old, mode) -> MechanicJob`:
+  the new part comes from the inventory or is bought now (an aftermarket set goes on every slot
+  of the set); what is in the way comes off and goes back on; labour is charged as
+  `EventReason::RepairPaid`; the old parts are sold or kept. All or nothing.
+- wasm: `career_clear_way(uid, slot)`, `career_mechanic_install(uid, slot, part, grade,
+  sell_old)` (`part` 0 = buy `grade`, `""` = stock) → `{job, workshop}`. New parts restore their
+  lattice area like `fit_part`.
+- ui-kit: the part card splits into "Do it yourself" (take off what's in the way, remove, fit)
+  and "Mechanic" (install an inventory part, new stock part, catalog / upgrades) with an
+  "Old part: keep / sell" choice; catalog rows get "Fit for me"; the part list (group / name /
+  worst first), inventory (newest / name / condition / value / fits) and catalog (tier / price /
+  name) sort. Choices persist in `localStorage` (`wp.workshop.*`). `Button` gained an optional
+  `testid` prop. `e2e/mechanic.mjs` covers it.
+- Later (stage 6): the mechanic's labour should also cost game time through
+  `wp_world::progression` (`Activity::ModInstall { labour_hours }`).
 
 ### Testbed (`apps/testbed-web`, `apps/ui-kit`)
 - `src/workshop/room.ts`: the garage bay, built in code (concrete floor, block walls, roller door,
@@ -91,6 +168,31 @@ removed part carries them).
   painted in car metres into the livery atlas). Bolt-ons ride with their region's lattice and
   vanish when the region detaches; pieces are clickable in the workshop (`slotAt`).
 - `e2e/cosmetics.mjs`: every visible mod on four models, four themed builds, lamps, vinyl gallery.
+
+### Mounted parts, hardware and replacement panels (stage 6)
+- `parts.toml` slots take `mount = "<slot>"`: a top-level part bolted to another one (front
+  splitter → front bumper, hood vent → hood, rear wing → trunk lid, diffuser → rear bumper).
+  Removing the host takes the mounted parts along in the loose part's `contents` (sold and
+  refitted with it); a mounted part cannot go on while its host is off ("no front bumper
+  fitted"). `PartsTable::mounted`, `carried`; `SlotView.mount` and `takes_along` (the part card
+  says "on the front bumper" and "comes off with it: ...").
+- `src/workshop/mounts.ts`: every lamp / trim / mirror mesh part gets a host panel from the mesh
+  geometry (nearest touching bolt-on panel, unless the welded shell is as close), so the tail
+  lamps set into a rear bumper leave with it. `slotmap.slotsNeeded` = own slot, region panel,
+  host; a part is drawn only while all are fitted.
+- `src/workshop/hardware.ts`: slots no mesh part or look piece draws (battery, ECU, intake, fuel
+  pump, gearbox, shafts, diff, transfer case, tank, steering rack, shifter, bumper beams,
+  radiator on mid-engined cars, cab back glass on pickups) are built in the workshop from the
+  car's layout (engine place, driven axles), tier-coloured when aftermarket, clickable and
+  highlighted like mesh parts. The belly pan is hidden on the lift so the underside shows.
+  `workshop.undrawnSlots()` (automation) lists fitted slots drawn by nothing; `e2e/workshop.mjs`
+  checks it is empty. A "Rear" camera preset joins the views.
+- `render/cosmetics/shell.ts`: aftermarket bumpers (front aggressive / widebody, rear sport /
+  widebody), the front lip and carbon hood / trunk are new panels made from the car's own stock
+  panel mesh (reshaped; intakes with honeycomb; lip blade; canards; clear-coat twill weave) and
+  hide the stock cover. The old livery-painted carbon and black-box lip / valance are gone.
+- `e2e/workshop_mounts_shots.mjs`: review shots per car (`CARS`, `INSTALL`, `REMOVE`, `CAMS`,
+  `VIEWS`), printing the hardware and any undrawn slots.
 
 ## Port onto lead/round12 (two cosmetic renderers)
 round12 already draws mods on cars: `wp_economy::visuals` (`PartKind`, mod `visuals` lists) →
@@ -144,7 +246,14 @@ Workshop operations run on a button press, not per frame.
 - No workshop hours yet: removing and fitting is free and instant (stage 4).
 - Bolt-ons move rigidly with their region's mean displacement; they do not bend with the dent.
 - Stock parts a look hides (rims under aftermarket rims) stay hidden until the view rebuilds.
-- Paint colour is still the car's stock colour; the paint booth is stage 4.
+- Paint colour is still the car's stock colour; the paint booth is stage 6.
+- Only the first loose engine stands on the stand; others are worked on from the list.
+- The engine in the car's bay is still the car's panel mesh (no internals drawn there).
+- Buying a stock internal uses the family of the engine in the car; stock parts for a loose
+  swap engine with no swap in the car must come out of another engine of that family.
+- Internals wear only from crash damage, not from over-revving or mileage yet.
+- Gearbox internals are not modelled (the gearbox is one part).
 - AI and remote cars show no look yet; only the player's career car does.
-- The workshop part picker only knows parts the car meshes draw; slots with no mesh (gearbox,
-  ECU, fuel pump and similar) are reached through the Part list.
+- Workshop hardware (battery, diff, tank...) is drawn in the workshop only, not while driving.
+- Replacement bumpers hide the stock grille and indicators; the new cover draws its own intakes
+  and LED strips.

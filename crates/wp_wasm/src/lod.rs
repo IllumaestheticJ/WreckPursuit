@@ -178,7 +178,8 @@ pub fn traffic_draw(sim: &Sim) -> Vec<f32> {
 /// One draw record per police unit (cars and helicopters, bound or not, in unit order),
 /// [`DRAW_STRIDE`] floats each:
 /// `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags, model]` with flags
-/// 1 helicopter, 2 pursuing / intercepting; `model` indexes [`SessionModels::police_models`]
+/// 1 helicopter, 2 pursuing / intercepting, 4 Ashpeak County unit
+/// ([`crate::police::FLAG_COUNTY`]); `model` indexes [`SessionModels::police_models`]
 /// (`Sim::police_fleet`, the `car_mix` fleet), -1 with a single police model. Bound units report their vehicle's
 /// state; unbound cars sit on the ground like a fresh police spawn; helicopters fly level at
 /// their altitude above the ground.
@@ -187,6 +188,7 @@ pub fn police_draw(sim: &Sim) -> Vec<f32> {
     let map = world.map();
     let terrain = sim.has_terrain();
     let poses = vehicle_poses(sim);
+    let agencies = crate::police::Agencies::of(Some(world.network()));
     let mut out = Vec::new();
     for u in sim.police().units() {
         let b = &u.body;
@@ -209,7 +211,7 @@ pub fn police_draw(sim: &Sim) -> Vec<f32> {
             }
             None => ([b.pos[0], b.pos[1], 0.0], yaw_quat(yaw)),
         };
-        let flags = heli as u32 | (chasing as u32) << 1;
+        let flags = heli as u32 | (chasing as u32) << 1 | agencies.flag(u);
         let model = sim.police_unit_model(u.id).map_or(-1.0, |m| m as f32);
         out.extend_from_slice(&[
             u.id.0 as f32,
@@ -348,14 +350,18 @@ mod tests {
         }
     }
 
-    /// City chase, stepped tick by tick: every traffic draw record moves continuously, through
+    /// Night run, stepped tick by tick: every traffic draw record moves continuously, through
     /// promotions (kinematic → sim vehicle) and demotions, and between traffic steps.
     #[test]
     fn traffic_draw_poses_are_continuous_through_promotions() {
         use crate::session::Session;
         use std::collections::BTreeMap;
-        let sc = crate::scenario::city_chase("lindwurm_4t", wp_contracts::DamageMode::Arcade);
+        let sc = crate::scenario::night_run("lindwurm_4t", wp_contracts::DamageMode::Arcade);
+        // Traffic only: the player drives blind down the road and must not meet a street racer
+        // (with the night roster one sat in its path and the player stopped there).
+        crate::session::set_street_racers_enabled(false);
         let mut s = Session::new(sc, false).unwrap();
+        crate::session::set_street_racers_enabled(true);
         let player = s.entities()[0];
         /// Position, previous position, embodied.
         type Seen = ([f32; 3], Option<[f32; 3]>, bool);
@@ -403,14 +409,14 @@ mod tests {
         println!(
             "{swaps} swaps, worst swap error {worst_swap:.3} m, worst step error {worst_step:.3} m"
         );
-        assert!(swaps > 0, "no promotion in 12 s of city chase");
+        assert!(swaps > 0, "no promotion in 12 s of night run");
         assert!(worst_swap < 0.5, "swap jump {worst_swap} m");
     }
 
     #[test]
     fn session_models_list_traffic_and_police_once() {
-        let sc = crate::scenario::city_chase("debug_sedan", wp_contracts::DamageMode::Arcade);
-        // The city chase uses the mixed fleets (`car_mix`): every traffic and police model once.
+        let sc = crate::scenario::night_run("debug_sedan", wp_contracts::DamageMode::Arcade);
+        // The night run uses the mixed fleets (`car_mix`): every traffic and police model once.
         assert!(sc.car_mix);
         let m = session_car_models(&sc, true);
         let traffic: Vec<&str> = simcli::run::CAR_MIX_TRAFFIC.to_vec();

@@ -8,7 +8,7 @@ import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody, carMeshNow, type CarMeshJson } from "./render/panels";
-import { hasPoliceLivery, setupPoliceLook } from "./render/livery";
+import { COUNTY_PAINT, countySkin, hasPoliceLivery, setupPoliceLook } from "./render/livery";
 import { LightRig, patternFor, phaseFor, wigwag } from "./render/lights";
 import { fitBuild, type BuildVisuals, type FittedBuild } from "./render/mod_parts";
 import { CarLook, type LookHost } from "./render/cosmetics/look";
@@ -156,6 +156,8 @@ export class VehicleView {
   /** Police light kit (bar, siren, wig-wag): police units and police models driven by anyone
    * (free drive in a `sentinel_*` car). */
   private readonly lightKit: boolean;
+  /** Ashpeak County Sheriff unit (vehicle_info police_county): ACSO livery and green paint. */
+  private readonly county: boolean;
   /** Stable id for unit numbers and flash phase: the wp_police unit id, else the entity (the
    * fleet draws an unbound unit with the same id, so a promotion keeps its phase). */
   readonly unitId: number;
@@ -227,6 +229,8 @@ export class VehicleView {
     const police = this.info.kind === "Police" || this.info.car_id.startsWith("sentinel_");
     this.lightKit = police;
     this.unitId = this.info.police_unit ?? entity;
+    this.county = police && countySkin(this.info.police_county === true);
+    if (this.county) colour = COUNTY_PAINT;
     this.greyPaint = new THREE.Color(colour);
     this.background = this.info.kind === "Police" || this.info.kind === "Traffic";
 
@@ -783,7 +787,7 @@ export class VehicleView {
 
   /** Police panel mesh: livery + unit decals, and flash the mesh's light bar instead of the box bar. */
   private setupPolice(mesh: CarMeshJson): void {
-    setupPoliceLook(this.panels, mesh, this.unitId);
+    setupPoliceLook(this.panels, mesh, this.unitId, this.county);
     const { left, right } = this.panels.lightbarAnchors;
     if (!left && !right) return;
     this.rig = new LightRig(

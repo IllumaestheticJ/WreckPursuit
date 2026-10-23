@@ -64,8 +64,9 @@ Not in the browser yet (see Known gaps).
   - `--full` (all 72 cells), `--seeds N` (default 8), `--duration S` (default 300),
     `--threads N` (default: all cores);
   - filters `--city vesper,grid`, `--phase day,night`, `--weather clear,rain`, `--level 1,2,3`,
-    `--skill casual,good,expert`; `--mode arcade|simulation` (default Arcade; police AI is the
-    same in both, only damage differs);
+    `--skill casual,good,expert`; `--mode arcade|simulation|extreme` (default Simulation, which
+    is the table the baselines were measured in: the old Arcade, renamed by contract v0.4.0;
+    police AI is the same in every mode, only damage differs);
   - `--label TEXT` (report title), `--out FILE.md` (default
     `docs/integration/police-bench-results.md`) or `--no-write`, `--json FILE` (every run's
     `RunMetrics`).
@@ -110,6 +111,10 @@ or commercial districts picked by the seed, at 15 m/s. Nothing else is set up.
 | `pace` | keep-up: that unit's speed ÷ the evader's, 1 Hz while police see it and it drives faster than 25 m/s (~90 km/h); 1.0 = matching it | median of all samples |
 | `pop-in/min` | police cars (any role, tool cars included) that appeared where a racer had line of sight to them, or whose spot a racer saw within 3 s of them appearing (row 131), per minute of run | rate |
 | `far-cw/min` | pursuit cars (responders, backup, roadblock and spike cars) that appeared on the far carriageway of the pursued racer's divided road: within 30 m of its road ahead or behind, on a one-way road running the other way (row 140), per minute of run | rate |
+| `re-acquire` | search episodes (pursuit → searching) that ended with the evader seen again, the rest ended in its escape (row 84) | share |
+| `search units` | police cars within 300 m of the last known position, 1 Hz while searching (row 84) | mean |
+| `stops>5s/min` | active units (pursuing, intercepting, responding) standing still more than 5 s with no reason to (not arresting or booking, not blocking a junction, the racer not stopped beside them), per pursuit minute (row 86) | rate |
+| `stop s` | how long each of those stood | median |
 | `turns/min` | turn-rounds by units after the evader (the pro driver facing more than ~73 deg away from its line, a reverse swing or U-turn, or backing out), per pursuit minute | rate |
 | `turn s` | how long each of those turn-rounds took, start to driving on | median |
 | `capture` | pursuit ended `Captured` / `CapturedTotalLoss` | share of runs |
@@ -168,8 +173,9 @@ the first pursuit end, or after `--duration` (`TimeoutInPursuit` / `NeverEngaged
   civilians stopped for sirens) are where most stops happen; a player could do better there.
 - **The start is cold** (wanted, unseen, central). Response time is therefore measured from
   "already wanted somewhere in the core" and not from a specific offence.
-- **One car each way** (evader `debug_coupe`, police `sentinel_cruiser`), Arcade damage by
-  default. `--mode simulation` exists but was not baselined.
+- **One car each way** (evader `debug_coupe`, police `sentinel_cruiser`), Simulation damage by
+  default (the old Arcade table, contract v0.4.0). `--mode extreme` (the old Simulation) and the
+  new `--mode arcade` exist but were not baselined.
 - **`stuck/min` counts unstick records**, not stuck episodes; compare it only with itself.
 - **Pre-existing failure, not from this branch:** on `lead/round12`,
   `apps/simcli/scenarios/police/tunnel_escape_founders_cut.ron` fails (`Captured at 136.4 s`

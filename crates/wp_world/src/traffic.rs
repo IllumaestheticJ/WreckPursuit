@@ -124,6 +124,17 @@ pub const TV_SWEEP_MPS: f32 = 2.5;
 /// still one collision in [`TrafficStats::civilian_collisions`] (cars that bump, part and
 /// bump again counted twice).
 pub const RETOUCH_STEPS: u64 = 120;
+/// With the physical cap full, a kinematic car this close to a player takes the place of the
+/// physical car farthest from any player ([`TrafficConfig::max_physical`]), m.
+pub const PLAYER_PRIORITY_RADIUS_M: f32 = 40.0;
+/// ... if that one is at least this much farther from the player, m (no swapping back and
+/// forth between two cars at nearly the same distance).
+pub const PLAYER_PRIORITY_MARGIN_M: f32 = 10.0;
+/// A kinematic car in a U-turn or reverse (LOD-locked) this close to a player gives the
+/// manoeuvre up and is promoted, so the player can hit it, m.
+pub const LOCKED_PROMOTE_M: f32 = 20.0;
+/// A wreck closer than this to a car's path (on top of both half widths) is in its way, m.
+pub const WRECK_PATH_MARGIN_M: f32 = 0.3;
 /// A unit beside a car that is merging back after a siren yield counts as standing (the car
 /// creeps on past it along the kerb) below this speed, m/s; a moving one is waited for.
 pub const BESIDE_STANDING_MPS: f32 = 1.0;
@@ -826,6 +837,8 @@ pub struct Traffic {
     /// Pairs that stopped overlapping recently, with the traffic step it ended: a re-touch
     /// within [`RETOUCH_STEPS`] is the same incident, not a new collision.
     overlap_ended: BTreeMap<(u32, u32), u64>,
+    /// Indices of wrecked agents this step (`Traffic::leader` checks them by position).
+    wrecks: Vec<u32>,
     /// Car models for physical agents; agent `id` uses `cars[traffic_model_index(id, len)]`.
     cars: Vec<(VehicleDef, TireDb)>,
     /// Seed for per-driver values derived from the id (patience).
@@ -1012,6 +1025,7 @@ impl Traffic {
             lod_changes: Vec::new(),
             overlaps: BTreeSet::new(),
             overlap_ended: BTreeMap::new(),
+            wrecks: Vec::new(),
             cars: Vec::new(),
             seed,
             opposite,
@@ -1233,6 +1247,12 @@ impl Traffic {
         self.rebuild_reservations(map);
         self.sample_queues(map);
         self.compute_poses(map);
+        self.wrecks.clear();
+        for (j, a) in self.agents.iter().enumerate() {
+            if a.disabled && !a.despawn {
+                self.wrecks.push(j as u32);
+            }
+        }
         self.compute_tv_blocks(map, inp.tracked, inp.hazards);
         self.decide(map, inp);
         self.resolve_blocks(map, inp);
@@ -1630,6 +1650,66 @@ impl Traffic {
     /// Nearest car ahead: `(gap, speed, agent index)`. Entries on the own segment at or before
     /// `skip_own` (a cluster being passed) are ignored.
     fn leader(&self, map: &CityMap, i: usize, skip_own: f32) -> (f32, f32, Option<u32>) {
+        let found = self.leader_in_lists(map, i, skip_own);
+        match self.wreck_in_path(map, i) {
+            Some((g, j)) if g < found.0 => (g, 0.0, Some(j)),
+            _ => found,
+        }
+    }
+
+    /// A wreck lying across agent `i`'s path (its segment and the next two of its plan) by
+    /// position, whatever segment it is filed under: a wreck shoved over from the next lane or
+    /// junction path is in the way too, and was hit by car after car (owner row 85,
+    /// pursuit melee). Gap to it and its index.
+    fn wreck_in_path(&self, map: &CityMap, i: usize) -> Option<(f32, u32)> {
+        if self.wrecks.is_empty() {
+            return None;
+        }
+        let a = &self.agents[i];
+        let q = self.poses[i].p;
+        let mut best: Option<(f32, u32)> = None;
+        for &j in &self.wrecks {
+            if j as usize == i {
+                continue;
+            }
+            let wp = self.poses[j as usize];
+            if (wp.p[2] - q[2]).abs() > 3.0 || geom::dist(geom::xy(wp.p), geom::xy(q)) > 80.0 {
+                continue;
+            }
+            let w = geom::xy(wp.p);
+            let mut base = -a.s;
+            for sg_id in [a.seg, a.plan[0], a.plan[1]] {
+                if sg_id == NONE {
+                    break;
+                }
+                let sg = map.seg(sg_id);
+                let pr = sg.project(w);
+                if pr.s > 0.0 && pr.s < sg.length {
+                    let (_, t) = sg.point_at(pr.s);
+                    // Half-width of the wreck across this path, as it lies.
+                    let ext = HALF_L * geom::dot(wp.f, geom::right_of(t)).abs()
+                        + CAR_WIDTH_M * 0.5 * geom::dot(wp.f, t).abs();
+                    if pr.dist < CAR_WIDTH_M * 0.5 + ext + WRECK_PATH_MARGIN_M {
+                        let along = base + pr.s;
+                        if along > 0.0 {
+                            // Its half-length along the path, as it lies.
+                            let len = HALF_L * geom::dot(wp.f, t).abs()
+                                + CAR_WIDTH_M * 0.5 * geom::dot(wp.f, geom::right_of(t)).abs();
+                            let g = along - HALF_L - len;
+                            if best.is_none_or(|b| g < b.0) {
+                                best = Some((g, j));
+                            }
+                        }
+                        break;
+                    }
+                }
+                base += sg.length;
+            }
+        }
+        best
+    }
+
+    fn leader_in_lists(&self, map: &CityMap, i: usize, skip_own: f32) -> (f32, f32, Option<u32>) {
         let a = &self.agents[i];
         let seg = map.seg(a.seg);
         let l = &self.lists[a.seg as usize];
@@ -1781,6 +1861,54 @@ impl Traffic {
         best
     }
 
+    /// Whether a conflicting movement of `conn` starts at a Priority junction's minor approach
+    /// whose front car has stood at the line for [`STARVE_AFTER_S`], is headed into that
+    /// movement and could go if the box were clear (room beyond it, no tracked vehicle in it).
+    fn starved_minor_conflict(&self, map: &CityMap, conn: SegId) -> bool {
+        map.seg(conn).conflicts.iter().any(|&c| {
+            let SegKind::Connector { from, .. } = map.seg(c).kind else {
+                return false;
+            };
+            if !matches!(
+                map.lane_control(from),
+                Some((IntersectionControl::Priority, ap, _)) if !ap.major
+            ) || self.tv_block[c as usize]
+            {
+                return false;
+            }
+            let Some(e) = self.lists[from as usize].iter().rev().find(|e| !e.ghost) else {
+                return false;
+            };
+            let j = e.agent as usize;
+            let o = &self.agents[j];
+            let d_line = map.seg(from).length - o.s - HALF_L;
+            if o.plan[0] != c || o.v >= 0.5 || d_line > 3.5 || self.stopped_for(j) < STARVE_AFTER_S
+            {
+                return false;
+            }
+            let target = map.seg(c).next[0];
+            match self.lists[target as usize].first() {
+                Some(t) => t.v >= 3.0 || t.s - HALF_L >= CAR_LENGTH_M + 2.0,
+                None => true,
+            }
+        })
+    }
+
+    /// Whether the front car on the lane feeding `conn` stands without a permit for it: the
+    /// cars behind it cannot come through before it does.
+    fn lane_holds_for(&self, map: &CityMap, conn: SegId) -> bool {
+        let SegKind::Connector { from, .. } = map.seg(conn).kind else {
+            return false;
+        };
+        match self.lists[from as usize].iter().rev().find(|e| !e.ghost) {
+            Some(e) => {
+                let o = &self.agents[e.agent as usize];
+                o.v < 0.5 && o.permit != conn
+            }
+            None => false,
+        }
+    }
+
     fn stopped_for(&self, i: usize) -> f32 {
         self.agents[i]
             .stopped_since
@@ -1915,6 +2043,17 @@ impl Traffic {
             }
             Some((IntersectionControl::Priority, ap, _)) => {
                 if ap.major {
+                    // Courtesy (lead, jam_pursuit_vesper): in a slow major-road stream that
+                    // keeps the box occupied, a car that can stop comfortably holds at its line
+                    // for a minor-road car that has waited long.
+                    let merging = map.net.intersections[ap.intersection as usize].radius_m <= 0.0;
+                    if !merging
+                        && v <= COURTESY_MAX_V
+                        && need <= p.comfort_decel
+                        && self.starved_minor_conflict(map, conn)
+                    {
+                        return false;
+                    }
                     2
                 } else {
                     // A freeway on-ramp (minor approach at a radius-0 merge junction) merges on
@@ -1964,8 +2103,16 @@ impl Traffic {
         }
         // Yield to higher-ranked conflicting movements (not once it has booked its turn).
         let booked = self.reservations[conn as usize] == a.id;
+        let gap_s = if my_rank == 0 {
+            starved_gap_s(p.gap_accept_s, self.stopped_for(i))
+        } else {
+            p.gap_accept_s
+        };
         for &c in cs.conflicts.iter().filter(|_| !booked) {
-            if self.rank_of(map, c) > my_rank && self.arrival_time(map, c) < p.gap_accept_s {
+            if self.rank_of(map, c) > my_rank
+                && !(gap_s < p.gap_accept_s && self.lane_holds_for(map, c))
+                && self.arrival_time(map, c) < gap_s
+            {
                 return false;
             }
         }
@@ -3259,11 +3406,20 @@ impl Traffic {
     }
 
     fn promote(&mut self, map: &CityMap, i: usize) {
+        // Promoted at its manoeuvre pose (if any); a physical car drives it out of a U-turn or
+        // reverse as an ordinary car from there.
+        let (p, f) = self.pose_of(map, &self.agents[i]);
+        if self.agents[i].manoeuvre.is_some() {
+            let a = &mut self.agents[i];
+            a.manoeuvre = None;
+            a.lat_target = 0.0;
+            a.retry_s = 5.0;
+            a.blocked_s = 0.0;
+        }
         let a = &self.agents[i];
         let Some((def, tires)) = self.cars.get(traffic_model_index(a.id, self.cars.len())) else {
             return;
         };
-        let (p, f) = self.pose_of(map, a);
         let yaw = geom::yaw_of(f);
         let mut vehicle = Vehicle::new(def, tires, p, yaw);
         vehicle.set_pose_and_speed(p, yaw, a.v);
@@ -3317,12 +3473,27 @@ impl Traffic {
             best
         };
         let mut cands: Vec<(f32, u32)> = Vec::new();
+        // Physical agents that may be demoted, with their distance (cap shrink, below).
+        let mut kept: Vec<(f32, u32)> = Vec::new();
         let mut physical = 0usize;
         for i in 0..self.agents.len() {
             let d = near(geom::xy(self.poses[i].p));
             if self.lod_locked(i) {
                 if self.agents[i].physical.is_some() {
                     physical += 1;
+                    continue;
+                }
+                // A kinematic car turning around or reversing has no collider: with a player
+                // about to hit it, it gives the manoeuvre up and takes a body where it stands
+                // (it is promoted at its manoeuvre pose below; owner row 149).
+                let dp = inp
+                    .tracked
+                    .iter()
+                    .filter(|t| t.player)
+                    .map(|t| geom::dist(geom::xy(self.poses[i].p), geom::xy(t.pos)))
+                    .fold(f32::INFINITY, f32::min);
+                if dp < LOCKED_PROMOTE_M && !self.cars.is_empty() {
+                    cands.push((d, i as u32));
                 }
                 continue;
             }
@@ -3338,18 +3509,68 @@ impl Traffic {
                     self.demote(map, i);
                 } else {
                     physical += 1;
+                    if !a.disabled {
+                        kept.push((d, i as u32));
+                    }
                 }
             } else if d < r && !self.cars.is_empty() {
                 cands.push((d, i as u32));
             }
         }
+        // `max_physical` can shrink (wp_sim caps it at the vehicle slots it has left, row 149):
+        // the farthest physical cars over the cap demote, so none is physical without a body.
+        if physical > self.config.max_physical {
+            kept.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+            for &(_, i) in kept.iter().take(physical - self.config.max_physical) {
+                self.demote(map, i as usize);
+                physical -= 1;
+            }
+        }
         cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        for (_, i) in cands {
+        let mut left = Vec::new();
+        for (d, i) in cands {
             if physical >= self.config.max_physical {
-                break;
+                left.push((d, i));
+                continue;
             }
             self.promote(map, i as usize);
             physical += 1;
+        }
+        // Cap full: a car close to a player still gets a body, in place of the physical car
+        // farthest from any player (owner row 149, "can't hit traffic cars": with street racers
+        // the cap filled with cars along their routes and the cars right in front of the player
+        // stayed kinematic, without a collider).
+        let player_d = |q: V2| -> f32 {
+            inp.tracked
+                .iter()
+                .filter(|t| t.player)
+                .map(|t| geom::dist(q, geom::xy(t.pos)))
+                .fold(f32::INFINITY, f32::min)
+        };
+        let mut near_player: Vec<(f32, u32)> = left
+            .into_iter()
+            .map(|(_, i)| (player_d(geom::xy(self.poses[i as usize].p)), i))
+            .filter(|(d, _)| *d < PLAYER_PRIORITY_RADIUS_M)
+            .collect();
+        if near_player.is_empty() {
+            return;
+        }
+        near_player.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut evictable: Vec<(f32, u32)> = (0..self.agents.len())
+            .filter(|&j| {
+                let a = &self.agents[j];
+                a.physical.is_some() && !a.disabled && !self.lod_locked(j)
+            })
+            .map(|j| (player_d(geom::xy(self.poses[j].p)), j as u32))
+            .collect();
+        // Farthest first.
+        evictable.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        for ((d, i), (de, j)) in near_player.into_iter().zip(evictable) {
+            if de < d + PLAYER_PRIORITY_MARGIN_M {
+                break;
+            }
+            self.demote(map, j as usize);
+            self.promote(map, i as usize);
         }
     }
 
@@ -3904,4 +4125,44 @@ mod model_tests {
     }
 
     const PINNED: [usize; 8] = [2, 4, 2, 6, 3, 3, 2, 4];
+}
+
+/// A minor-road car at a Priority junction that has stood at its line this long starts to
+/// accept shorter gaps in the major-road stream (lead, jam_pursuit_vesper: a car waited 50 s
+/// for a gap in a steady stream slowed by police yielding).
+pub(crate) const STARVE_AFTER_S: f32 = 25.0;
+/// Fastest a major-road car may be going to hold at its line for a starved minor-road car
+/// (courtesy happens in slow streams; free-flowing traffic has gaps).
+pub(crate) const COURTESY_MAX_V: f32 = 10.0;
+/// Seconds over which the accepted gap shrinks from the driver's own to [`STARVE_GAP_S`].
+pub(crate) const STARVE_RAMP_S: f32 = 10.0;
+/// Shortest gap a starved minor-road car accepts (the box and crossing paths must still be
+/// clear and unreserved).
+pub(crate) const STARVE_GAP_S: f32 = 2.5;
+
+/// Gap a minor-road car accepts after `stopped_s` at its line.
+pub(crate) fn starved_gap_s(gap_accept_s: f32, stopped_s: f32) -> f32 {
+    let t = ((stopped_s - STARVE_AFTER_S) / STARVE_RAMP_S).clamp(0.0, 1.0);
+    let floor = STARVE_GAP_S.min(gap_accept_s);
+    gap_accept_s + (floor - gap_accept_s) * t
+}
+
+#[cfg(test)]
+mod starve_tests {
+    use super::*;
+
+    #[test]
+    fn starved_minor_road_cars_accept_shorter_gaps_after_a_long_wait() {
+        assert_eq!(starved_gap_s(4.5, 0.0), 4.5);
+        assert_eq!(starved_gap_s(4.5, STARVE_AFTER_S), 4.5);
+        let mid = starved_gap_s(4.5, STARVE_AFTER_S + STARVE_RAMP_S / 2.0);
+        assert!((mid - 3.5).abs() < 1e-4, "{mid}");
+        assert_eq!(
+            starved_gap_s(4.5, STARVE_AFTER_S + STARVE_RAMP_S),
+            STARVE_GAP_S
+        );
+        assert_eq!(starved_gap_s(4.5, 1000.0), STARVE_GAP_S);
+        // A driver who already takes short gaps keeps their own.
+        assert_eq!(starved_gap_s(2.0, 1000.0), 2.0);
+    }
 }

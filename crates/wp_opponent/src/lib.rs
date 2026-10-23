@@ -16,6 +16,8 @@
 //!   loop to apply.
 //! - [`evader`]: scripted escapee for the police benchmark (`simcli police-bench`): flees
 //!   police it can see on the road graph, three skills.
+//! - [`roam`]: free-roam street racers that chain legs around their haunt (highway, touge,
+//!   dirt, downtown, rural) on open roads, each leg driven by a one-car [`Field`].
 //! - [`pursuit`]: police awareness ([`PoliceQuery`]; [`EventHeat`] tracks wanted levels and
 //!   police sightings from `wp_police` events).
 //!
@@ -37,8 +39,9 @@ pub mod field;
 pub mod line;
 pub mod profile;
 pub mod pursuit;
+pub mod roam;
 
-pub use capability::CarCapability;
+pub use capability::{CarCapability, LooseGrip};
 pub use corridor::{
     Corridor, CorridorOptions, CorridorPos, CorridorSample, OpposingLanes, CORRIDOR_STEP_M,
 };
@@ -54,3 +57,8 @@ pub use field::{
 pub use line::{drive_accel, LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};
 pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery, SimPolice};
+pub use roam::{
+    haunt_by_name, haunt_cars, roster_seed, spawn_slots, stock_profile, stock_roster, Haunt,
+    HauntMap, HauntParams, RoamConfig, RoamEvent, RoamPhase, RoamerSpec, Roamers, RosterEntry,
+    SpawnSlot,
+};

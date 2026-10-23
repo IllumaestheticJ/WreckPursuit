@@ -308,6 +308,9 @@ impl Sim {
         self.vehicles
             .iter()
             .filter(|v| matches!(v.kind, VehicleKind::Player | VehicleKind::AiRacer))
+            // A racer driving light far from every player and wanted by nobody is out of the
+            // police's picture (SR-3): it rejoins as soon as it nears the player or is wanted.
+            .filter(|v| v.light.is_none() || self.police.is_wanted_or_pursued(v.id))
             .map(|v| {
                 let s = v.vehicle.state();
                 wp_police::RacerView {
@@ -362,6 +365,7 @@ impl Sim {
             self.police_car.clone()
         };
         if multi || single.is_some() {
+            let unbodied: Vec<UnitId> = wanted.iter().map(|w| w.0).collect();
             for (unit, pos, heading, speed) in wanted {
                 let (car, model_limits) = if multi {
                     let m = self.police_unit_models.get(&unit).copied().unwrap_or(0);
@@ -401,6 +405,18 @@ impl Sim {
                     self.police.set_unit_limits(unit, limits);
                 }
             }
+            // PR #54: a spike unit that got no car (vehicle cap, failed spawn) would leave an
+            // unattended strip on the road: withdraw it, strip and all.
+            for unit in unbodied {
+                let bodied = self
+                    .police
+                    .units()
+                    .iter()
+                    .any(|u| u.id == unit && u.entity.is_some());
+                if !bodied {
+                    self.police.withdraw_unbodied_spike_unit(unit);
+                }
+            }
         }
 
         // Units the police system reset in place (owner row 78): to the new spot, upright,
@@ -436,6 +452,10 @@ impl Sim {
                     effects: slot.damage.handling_effects(),
                 },
             );
+            // How upright it is (police row 75: a unit on its side or roof is reset upright):
+            // world Z of the chassis up axis.
+            self.police
+                .sync_unit_upright(unit, 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1]));
             // What the driver feels: yaw rate (slides) and the grip the road leaves (weather).
             self.police.sync_unit_feel(
                 unit,
@@ -506,7 +526,7 @@ mod tests {
 
     fn city_run(fleet: Option<Vec<PoliceModel>>, ticks: u32) -> Sim {
         let player = car("debug_sedan");
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,

@@ -2,7 +2,7 @@
 // Together with sedan_accel_by_10s this brackets 0-100 km/h in 8-10 s (prompt 02).
 (
     name: "vehicle_sedan_accel_before_8s",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     duration_s: 8.0,
     entities: [

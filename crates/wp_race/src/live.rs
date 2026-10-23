@@ -31,6 +31,7 @@ use crate::bridge::CityRace;
 use crate::catalog::{venue_pos, RaceDef};
 use crate::data::RaceData;
 use crate::entrants::{AiEntrant, AiEntrants};
+use crate::error::RaceSetupError;
 use crate::judge::{CourseReset, RaceJudge, RacePhase, RacerEntry, RacerSample};
 use crate::kind::{ClassBracket, EventId, VenueId};
 use crate::result::{DnfReason, RacerResult, RacerStatus};
@@ -66,8 +67,8 @@ pub struct StepOut {
     /// Heat to add per racer (the stake's heat for illegal races, at the green light).
     pub add_heat: Vec<(EntityId, f32)>,
     /// Racers that stayed off the course too long: move each car to the reset pose (on the
-    /// route, at rest) and call [`LiveRace::relocate`]. Empty while the judge's reset option
-    /// is off (it is, for picker races).
+    /// route, at rest) and call [`LiveRace::relocate`]. In picker races only AI entrants
+    /// stranded off the course ([`crate::judge::STRANDED_GRACE_S`]).
     pub resets: Vec<CourseReset>,
 }
 
@@ -145,6 +146,8 @@ impl LiveRace {
     /// Set up the race and start its countdown at `tick`. `ai` are the AI cars in
     /// `def.ai` order (pole first), `player` starts behind them. `abs_s`: in-game time of
     /// the start, s (meet heat). `autopilot`: the AI drives the player's car too.
+    /// [`RaceSetupError::NoDrivableRoute`] when the route has nothing to drive: the race is
+    /// refused (never a panic, which froze the browser — row 154).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         def: &RaceDef,
@@ -155,7 +158,7 @@ impl LiveRace {
         tick: u64,
         abs_s: u64,
         autopilot: bool,
-    ) -> LiveRace {
+    ) -> Result<LiveRace, RaceSetupError> {
         let data = RaceData::embedded();
         let mut judge = RaceJudge::new(
             EventId(def.seed as u32),
@@ -164,7 +167,9 @@ impl LiveRace {
         );
         // Off route is never a DQ and never a reset in a picker race (owner, 2026-10-21): take
         // any line, the gates still have to be driven through in order. The judge's reset
-        // option stays off, so `StepOut::resets` is always empty here.
+        // option stays off. The AI entrants alone are put back on the course once stranded
+        // outside the corridor for `STRANDED_GRACE_S` (a bank they cannot climb; lead,
+        // 2026-10-23): those are the only `StepOut::resets` here.
         let mut order = Vec::new();
         for e in ai.iter().chain(std::iter::once(&player)) {
             judge
@@ -192,7 +197,10 @@ impl LiveRace {
             });
         }
         let closed = def.legality == Legality::Sanctioned;
-        let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed);
+        let field = AiEntrants::new(world, &race, def.kind, closed, &drivers, def.seed)?;
+        // AI entrants only: the player's car keeps "never a reset", autopilot or not.
+        let ai_ids: Vec<EntityId> = ai.iter().map(|e| e.entity).collect();
+        judge.set_stranded_reset(&ai_ids);
         judge.start(tick).expect("enough racers");
 
         let venue = Venue {
@@ -218,7 +226,7 @@ impl LiveRace {
             .iter()
             .map(|e| (*e, if closed_loop { 1 } else { 0 }))
             .collect();
-        LiveRace {
+        Ok(LiveRace {
             def: def.clone(),
             race,
             judge,
@@ -236,7 +244,7 @@ impl LiveRace {
             next_gate,
             final_results: None,
             last_tick: tick,
-        }
+        })
     }
 
     /// The race definition.
@@ -323,6 +331,7 @@ impl LiveRace {
     /// The server moved a racer on purpose (reset, respawn): not judged as a teleport.
     pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
         self.judge.relocate(racer, pos, tick);
+        self.ai.relocate(racer, pos);
     }
 
     /// The race has not gone green yet at `tick` (cars must stay on the grid).
@@ -513,7 +522,8 @@ mod tests {
         };
         def.prior_meets = 2;
         let ai: Vec<LiveEntrant> = (2..=def.entrants() as u32).map(entrant).collect();
-        let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false);
+        let mut live = LiveRace::new(&def, &world, race, &ai, entrant(1), 0, 23 * 3600, false)
+            .expect("a drivable route");
         // The player is held through the countdown.
         let held = live.pre_step(0, &world, &[], &[], &wp_opponent::NoPolice);
         assert!(held.iter().any(|(e, i)| *e == EntityId(1)

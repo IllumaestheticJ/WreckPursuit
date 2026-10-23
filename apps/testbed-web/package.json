@@ -22,7 +22,9 @@
     "e2e:weather": "node e2e/weather.mjs",
     "e2e:net": "node e2e/net_two_tabs.mjs",
     "e2e:race": "node e2e/race.mjs",
+    "e2e:touge": "node e2e/touge.mjs",
     "e2e:tune": "node e2e/tune.mjs",
+    "e2e:race-spots": "node e2e/race_spots.mjs",
     "e2e:crash-replay": "node e2e/crash_replay.mjs",
     "e2e:perf": "node e2e/perf_check.mjs",
     "e2e:fx": "node e2e/crash_fx.mjs",
@@ -36,7 +38,8 @@
     "e2e:controls": "node e2e/controls_settings.mjs",
     "e2e:police": "node e2e/police_tools.mjs",
     "e2e:brake-dive": "node e2e/brake_dive.mjs",
-    "e2e:signals": "node e2e/signals.mjs"
+    "e2e:signals": "node e2e/signals.mjs",
+    "e2e:traffic-bodies": "node e2e/traffic_bodies.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

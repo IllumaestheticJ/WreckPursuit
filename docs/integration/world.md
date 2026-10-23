@@ -204,6 +204,9 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 - `crates/wp_vehicle/src/lib.rs`: added `Vehicle::set_pose_and_speed(pos, yaw, speed_mps)`
   (Lead: the stub this went into was replaced by 02's real model; the method now lives in `wp_vehicle/src/vehicle.rs`, same signature.)
   (7 lines, `reset` + speed) for LOD promotion — see contract request 1.
+- `crates/wp_sim/src/physics.rs` + `crates/wp_sim/tests/barrier_scrape.rs` (lead-owned; row 164,
+  assigned by the lead): barrier and rail colliders are mitered triangle meshes
+  (`barrier_colliders`, `chain_segments`) instead of per-segment boxes. See "Playtest row 164".
 - `apps/testbed-web`: **photo mode** (owner request, 2026-10-20; branch `claude/fervent-cerf-ft2h9h`,
   not `ws/world`). Testbed-only, no Rust changes. Full notes and the list of touched files are in
   `docs/integration/testbed.md` → "Photo mode" (C to review).
@@ -559,7 +562,7 @@ when convenient.
   1.1 MB → 0.47 MB). `vesper_v2.road.bin` is generated in memory and not committed.
 - **Testbed:** the city chase and the free-drive "city" box use the city selector (default
   Port Vesper v2, "grid 12×12" keeps the old city); `?city=procedural_12x12`, `?chase=1`;
-  wasm `free_drive_city_json`, `city_chase_city_json`, `city_id`; police units drawn on the
+  wasm `free_drive_city_json`, `night_run_city_json`, `city_id`; police units drawn on the
   ground; `__wp.lookAt(from, to)` for docs shots (`e2e/city_v2_shots.mjs` →
   `docs/media/city-v2/`).
 **Checks (this branch)**
@@ -1471,6 +1474,187 @@ E (merged value differs from round12 alone, so this bless supersedes E's on a me
 `golden_city_chase`, `golden_night_pursuit_escape` (+ replays), `opponent_flee_police`,
 `race_city_sprint_police`, `weather_fog_pursuit{,_clear}`, `world_traffic_soak{,_observer}`;
 E only, left for E — `opponent_circuit_8x5`, `race_lantern_checkpoint`.
+
+### Row 85 follow-ups (2026-10-22): lane changes and tracked vehicles, wrecks across paths
+- **Lead red on round12 67dafbfa** (`blocked::multi_lane_road_changes_lane_around_a_stopped_car`,
+  98 contacts): civilians' lane-change check only saw civilians in the target lane, so a car
+  changed into the lane of a stopped tracked vehicle 25 m ahead at 15 m/s; the old emergency
+  stop had masked it until 7b3762eb narrowed it. The nearest tracked vehicle ahead in the
+  target lane is now a leader there (gap check + incentive). Test re-aimed: go-arounds ≥ 1
+  (was ≥ 2): fewer cars end up behind the stopped car. Goldens moved: `jam_pursuit_{grid,vesper}`,
+  `opponent_flee_police` (blessed; the 67dafbfa merge alone moved none).
+- **Pursuit-melee collisions**, census over the 10 jam runs: 82 → 67. 35 of the 67 are a car
+  shoved by a unit (a speed jump no car makes itself) and most of the rest two physical cars
+  within 10 m of a unit — police contact, not traffic AI. Wrecks: 15 → 0 — a wreck shoved
+  across a neighbouring lane / junction path was invisible to cars on it (only their own
+  segment's list was searched). `Traffic::wreck_in_path`: a wreck lying across a car's segment
+  or the next two of its plan, by position and footprint, is its leader.
+- **`wp_race grid_highway_sprint`** ("nobody drove past the speed trap") is red on lead/round12
+  10d94b4d itself (not ws/world). **`lantern_checkpoint_draws_the_police`** (red on 67dafbfa)
+  passes on ws/world.
+- Main's grid jam gates stay pending (seeds 1–4 + 85: 43–188 s, wreck check on or off is not
+  the difference: 111/86/49/43/115 s without it). The left-turn "sneaker" may now keep its
+  permit through amber / red; letting it start on red (tried) boxed junctions in, reverted.
+
+### Row 85 follow-up (2026-10-22, lead): minor-road starvation at Priority junctions
+**Case.** `jam_pursuit_vesper` on lead/round12 (after the police search extras): a minor-road
+car stood 50.5 s at a Priority junction (E re-aimed the gate 45 → 55 s). Probed: the car was
+never refused by gap acceptance but by the crossing paths themselves — the slow major-road
+stream (≈ 4.5 m/s, densified by siren yielding) always had a car in the box or a reservation
+on it. ("Agent 146" is a slot index; the agents vector is reordered, so it names different
+cars over time.)
+**Fix (`traffic.rs`).**
+- *Courtesy:* a major-road car at a Priority junction (not a radius-0 freeway merge) going
+  ≤ 10 m/s (`COURTESY_MAX_V`) that can stop comfortably does not take a permit while a
+  conflicting minor approach's front car has stood at its line ≥ 25 s (`STARVE_AFTER_S`),
+  is headed into that movement and has room beyond the box. The box clears and the minor car
+  goes; its stop timer resets once it moves.
+- *Shorter gaps:* the starved car's accepted gap shrinks from its own (3.5–5 s) to 2.5 s
+  (`STARVE_GAP_S`) over 10 s, and it ignores a major lane whose front car stands without a
+  permit (the courtesy hold: nobody on that lane comes through first).
+**Gate** back to 45 s. Measured (seeds 1–4 + 85, worst stop outside a red, base → new):
+lead/round12 seed 85 50.5 → ≤ 45 (pass); ws/world Vesper seed 2 81.8 → ≤ 45 (the other seeds
+were already ≤ 45; seed 4 fails `pursuit_started_before` both ways, police side); grid
+(gate pending) 0 / 81.8 / 97.4 / 107.6 / 96.7 → 0 / 0 / 58.9 / 64.0 / 119.1 s — better on
+three seeds, worse on 85 (its worst stop is a different car; the grid's remaining stops are
+blocked boxes at short-green signals, not Priority junctions). Test:
+`starve_tests::starved_minor_road_cars_accept_shorter_gaps_after_a_long_wait`; the scenario is
+the behaviour gate.
+
+**`blocked::multi_lane_road_changes_lane_around_a_stopped_car` (lead, 2026-10-22).** Passes
+on lead/round12 353744ec and on ws/world (debug and release: 1 go-around, contacts 0). The
+failure opponent-pace saw on 0e84a9f7 predates a779ad57 (the fix and the re-aimed ≥ 1
+threshold are not in that commit), so it is not a regression. The margin is thin (exactly 1).
+
+## Lead (2026-10-23): `world_traffic_soak` on candidate G handling — 1 civilian collision
+**Cause (traffic driving, not G).** Both cars were kinematic civilians; no racer or police unit
+was involved. G only changed the timing.
+- Agent 241 began a 13 s kinematic turn-around with agent 420 queued 2.9 m behind it (bumper
+  gap). The turn-around holds its own lane at `TURN_OWN_HOLD_M` (8 m) behind the turner, but
+  420 was already closer than that.
+- So 420 never saw the hold. It saw the turning car's own entry as its leader and crept up to
+  its 1.8 m standstill gap during the turn.
+- The turn ends with the car lined up with the opposite lane, its nose swung back over the
+  own lane. That end pose cleared 420 by 0.29 m when the turn was planned; after the creep it
+  overlapped 420 by about 0.1 m.
+
+**Fix (`traffic/blocked.rs`).** `turn_own_hold_s`: the hold sits 8 m behind the turner, or
+0.5 m ahead of a follower already closer than that (`TURN_FOLLOWER_HOLD_GAP_M`), so that
+follower stays where it is until the turn ends. Unit test
+`a_follower_queued_close_behind_a_turn_is_held_where_it_is`.
+**Measured on `lead/opponent-pace` (0274348d, G).** `world_traffic_soak`: 0 civilian
+collisions on seeds 5–9. With the fix, 113 of 115 scenarios pass on G. The other two,
+`police_tunnel_escape_founders_cut*`, fail identically without it (same hashes), so they
+are G-side; they are not on physics.md's red list.
+
+## Playtest row 164 — barriers: a glancing scrape slides the car along
+**Cause (physics only; the drawn barrier is already one swept profile).** Median barriers,
+deck guard rails and bare-sidewalk-back rails were one yaw-only box per segment
+(`box_collider`). A car scraping along caught the next box's end corner at a joint: on a
+straight Loop 9 barrier, at 30 m/s and 10°, the contact normal tilted 23°, there was an 8.7 kN·s impulse,
+the car spun at 140°/s and was thrown 5.3 m/s away from the barrier.
+**Fix (`crates/wp_sim/src/physics.rs`: outside D's crates, assigned by the lead).**
+`barrier_colliders`: per barrier line (median barriers) or per chained run of rail segments
+(`chain_segments`: deck rails, bare backs) the colliders are two triangle meshes:
+- side faces plus end caps, mitered at every joint and facing outward, with
+  `TriMeshFlags::FIX_INTERNAL_EDGES`;
+- the top, 2 cm inside and 1 cm below the side faces' top edge.
+
+One closed mesh with the top included let the internal-edge fix tilt the normal up at the
+shared top edge, which rolled a scraping car onto the barrier on a right bend. The plain mesh
+(no edge fix) kept the joint kicks.
+
+Friction 0.3 (was 0.4) and restitution 0 (the chassis' Min rule already made it 0). Sizes are
+unchanged (barrier 0.5 × 0.81 m; rails 0.3 × 0.9 m; feet 0.3 m below the line). The
+`CityColliders::{rails, barriers}` counts are still segments, so there are now far fewer
+colliders (one or two meshes per line instead of a box per segment).
+**Gate.** `crates/wp_sim/tests/barrier_scrape.rs`, Port Vesper. 30 m/s at 10° into the median
+barrier, then held lightly against it (bend feed-forward, aimed 5 cm into the face), checked
+for 2 s after the first contact:
+
+| Stretch | Max gap (m) | Max speed away (m/s) | Scrape yaw (°/s) | End speed (m/s) |
+|---|---|---|---|---|
+| Straight | 0.09 | 0.39 | 10 | 27.5 |
+| Bending away, 16° over 110 m (convex face) | 0.28 | 0.75 | 6 | 29.2 |
+| Bending in, 4° (concave face; Vesper's sharpest right-hand barrier bend) | 0.47 | 0.83 | 24 | 28.3 |
+
+Limits are 1.5 m, 3 m/s and 60°/s; no spin past 15° off the barrier. On the old boxes, the
+straight stretch fails (gap 4.1 m, 5.3 m/s away, 140°/s).
+
+The first 0.25 s (the impact itself) yaws the car 85–98°/s on every collider shape. That is
+the rigid-body minimum for the box chassis' front corner taking a 5.2 m/s closing speed:
+Δω = m_eff·v·arm/I_z ≈ 96°/s for the debug sedan. So that window has its own limit
+(110°/s), and the 60°/s limit applies after it. Softening the impact itself would need a
+chassis or contact change in wp_vehicle (physics is frozen).
+
+**Scenario fix.** `soak/traffic_soak_observer.ron`'s observer was parked at the grid origin.
+Since main's grid viaduct, that point is the viaduct's median barrier, so the car spent the
+run balanced on the old barrier box (contacts at deck + 0.81 m). On the smooth barrier it
+slid off (1.17 m against the 0.5 m limit). It now parks inside a core block ≥ 25 m from every
+road (100, 27.5).
+
+**Goldens [bless].** jam_pursuit_grid, opponent_circuit_8x5, opponent_flee_police and
+world_traffic_soak_observer moved: new barrier/rail colliders (collider set and contact
+order), plus the observer's new spot.
+
+## Playtest row 159 — "overpass 3D models still completely block the highway underneath"
+**Cause (drawn greybox only).** Every interchange crossroad over Loop 9 (Harbor Boulevard west
+and east, Lantern Way, Bluff Road, Uptown Connector: 10 of Port Vesper's 14 grade separations)
+had a solid wall across both carriageways under the bridge: the curtain `build_greybox` hangs
+from the back of a sidewalk without a lot ("bare back") went down to the ground even on the
+deck, so it dropped from the crossroad's sidewalk (≈ 12 m) to the highway surface (≈ 2.3 m)
+along both edges of the bridge. Physics was clear (≥ 7.5 m headroom, no colliders in the
+lanes); the grid's 16 crossings (its viaduct) were clear in both.
+**Fix (`tools/city-import/src/glb.rs`).** `wall_foot`: a wall over the paving of a road below
+(a sidewalk back or edge on an overpass) ends at the deck slab depth (1.2 m, `DECK_SLAB_M`)
+instead of the ground; applies to the sidewalk curtains and the highway retaining walls.
+Vesper greybox regenerated (`just city-v2`; the grid's is byte-identical).
+**Gate.** `tools/city-import/tests/underpass_clearance.rs`: at every grade separation (a road
+≥ 3 m over another) in both cities, over the lower road's lanes (0.8 m inside its edges) from
+8 m before to 8 m past the upper road: ≥ 4.5 m headroom and nothing standing in the lane at
+1 m or 3.5 m, in the drawn greybox and in the physics colliders (`PhysicsWorld::set_city_ground`).
+Fails on the old generator (10 blocked), passes now (Vesper 14, grid 16 checked).
+`rapier3d` added as a city-import dev-dependency (tests only; not reachable from wp_wasm).
+
+## Playtest row 149 — "I currently now can't hit traffic cars" (world side)
+**Cause.** Kinematic traffic has no collider: only physical (promoted) cars can be hit. With the
+physical cap (`TrafficConfig::max_physical`, 16) full, cars stayed physical out to 100 m and
+were never demoted to make room, and the street racers' route focus filled the cap with cars
+along their routes — the cars right in front of the player stayed kinematic and the player
+drove through them. Reproduced in a `wp_wasm` session (temporary probe, chaining 20 rams at
+speed): 2 cars overlapping the player for 316 samples with street racers on, at the cap.
+**Fix.** A kinematic car within 40 m of a player (`PLAYER_PRIORITY_RADIUS_M`) takes the place
+of the physical car farthest from any player (if 10 m farther; wrecks and LOD-locked cars are
+not evicted). A kinematic car turning around / reversing within 20 m of a player
+(`LOCKED_PROMOTE_M`) gives the manoeuvre up and is promoted at its manoeuvre pose. After:
+0 pass-throughs with street racers at normal density (the probe's remaining samples are its own
+teleports, before the next 0.25 s LOD update). Test:
+`world::cars_near_the_player_are_physical_with_the_cap_full_elsewhere` (fails without the fix).
+For branch-triage: the street-racer side was not changed; if 0.12.49 still passes through,
+check that the player's vehicle is `VehicleKind::Player` (only players drive the LOD).
+
+## Playtest row 153 — Loop 9 rest stops
+Three pull-offs (the owner chose real highway pull-offs over lots off the existing exits):
+**Hollins Rest Area** beside the outer carriageway on the west (north of Lantern Way),
+**Larkspur Rest Area** and **Harbor Rest Area** beside the inner carriageway on the south (the
+sea starts just past the outer one there). Each: an off-ramp 275 m upstream of its centre, a
+100 m one-way parking road 34 m off the loop centreline (parking on the kerb, always a few
+parked cars, street lamps like every road, no houses; on an embankment where the ground falls
+away), an on-ramp 275 m downstream. No room elsewhere: the north-east stretch only has its
+banked corner (a gore there does not meet the drawn surface — tried, dropped), the other gaps
+are shorter than two ramp spans.
+**API.** `PoiKind::RestStop` POIs (pose = middle of the parking road on its travel lane),
+`World::rest_stops()` / `World::rest_stop(name)`; on the map (`wp_wasm` kind `"RestStop"`,
+ui-kit "P" glyph). Not in `wp_contracts`' POI list (the contract view skips them).
+**Impact.** Loop 9 is cut at six more gores: lane ids and Loop 9 race grids moved (the race
+scenario file `race/pick_loop9_circuit.ron` rewritten with `WP_RACE_WRITE_SCENARIOS=1`); the
+"Hollins Tunnel exit" route point moved from 200 to 120 m past the portal (the Hollins off-ramp
+gore is at 210 m); greybox regenerated (10.04 MB, cap raised to 10.2 MB); Vesper goldens
+re-blessed. wp_race Loop 9 races (`loop9_circuit`, `..._pace_without_police`) and street
+racers in Vesper pass.
+**Changes outside wp_world:** `crates/wp_wasm/src/map.rs` (kind string),
+`apps/ui-kit/src/map/{data,draw}.ts` (type + glyph), `tools/city-import/src/lib.rs` (size cap),
+`data/city/vesper_v2.greybox.*`, `apps/simcli/scenarios/race/pick_loop9_circuit.ron`.
 
 ## Solid terrain = drawn terrain (playtest row 119: "hitting invisible objects / crashing into the map geometry")
 **Cause.** The greybox draws Port Vesper's terrain on a 10 m grid with each vertex lowered to

@@ -210,6 +210,7 @@ pub fn load_mode(src: &dyn DataSource, mode: DamageMode) -> Result<ModeTable, Ru
     let rel = match mode {
         DamageMode::Arcade => "modes/arcade.toml",
         DamageMode::Simulation => "modes/sim.toml",
+        DamageMode::Extreme => "modes/extreme.toml",
     };
     Ok(wp_contracts::parse_mode_table(rel, &src.read(rel)?)?)
 }
@@ -241,11 +242,26 @@ pub fn load_world(
             };
             Some(wp_world::World::procedural(&pg, cfg))
         }
+        CitySpec::Preset { name, .. } if wp_world::touge::is_touge(name) => {
+            Some(wp_world::World::touge(name, cfg).expect("built-in touge pass generates"))
+        }
         CitySpec::Preset { name, seed } => {
+            if name == wp_world::ashpeak::CITY_ID {
+                let vc = wp_world::vesper::VesperConfig {
+                    seed: *seed,
+                    ..wp_world::ashpeak::default_config()
+                };
+                return Ok(Some(wp_world::World::ashpeak(&vc, cfg)));
+            }
             if name != wp_world::vesper::CITY_ID {
                 return Err(RunError::Scenario(
                     name.clone(),
-                    format!("unknown city preset (known: {})", wp_world::vesper::CITY_ID),
+                    format!(
+                        "unknown city preset (known: {}, {}, {})",
+                        wp_world::vesper::CITY_ID,
+                        wp_world::ashpeak::CITY_ID,
+                        wp_world::touge::TOUGE_IDS.join(", ")
+                    ),
                 ));
             }
             let vc = wp_world::vesper::VesperConfig {

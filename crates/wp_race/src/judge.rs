@@ -98,6 +98,17 @@ pub enum StartError {
     AlreadyStarted,
 }
 
+/// The judge ends a race in which every racer still running has made no course progress
+/// (at least [`STUCK_PROGRESS_M`]) for this long, s: they are `Dnf(Stuck)`.
+pub const STUCK_LIMIT_S: f32 = 180.0;
+/// Progress along the course that counts as "not stuck", m.
+pub const STUCK_PROGRESS_M: f32 = 5.0;
+/// An AI racer outside the corridor this long is stranded and put back on the course
+/// ([`RaceJudge::set_stranded_reset`]), s. It keeps trying to rejoin until then (Loop 9, s95
+/// seed 13: spun off the embankment and 29 m down the bank, 30 rejoins up a slope it could
+/// not climb).
+pub const STRANDED_GRACE_S: f32 = 20.0;
+
 #[derive(Debug, Clone)]
 struct Track {
     entry: RacerEntry,
@@ -116,6 +127,10 @@ struct Track {
     elapsed: Option<u64>,
     seg_hint: Option<usize>,
     progress_m: f32,
+    /// Furthest progress counted towards "not stuck", m, and the tick it was reached (see
+    /// [`STUCK_LIMIT_S`]).
+    best_progress_m: f32,
+    progress_tick: u64,
     out_ticks: u64,
     /// Course distance (within the lap) of the last sample inside the corridor, m.
     on_course_m: Option<f32>,
@@ -154,6 +169,9 @@ pub struct RaceJudge {
     signals: Vec<RaceSignal>,
     /// Off-course racers are put back on the course instead of disqualified.
     reset_off_course: bool,
+    /// Racers put back on the course after [`STRANDED_GRACE_S`] outside the corridor (AI
+    /// entrants), even with `reset_off_course` off.
+    stranded_reset: Vec<EntityId>,
     resets: Vec<CourseReset>,
 }
 
@@ -199,6 +217,7 @@ impl RaceJudge {
             leader: 0,
             signals: Vec::new(),
             reset_off_course: false,
+            stranded_reset: Vec::new(),
             resets: Vec::new(),
         }
     }
@@ -208,6 +227,14 @@ impl RaceJudge {
     /// (leaving the route is never a DQ).
     pub fn set_reset_off_course(&mut self, on: bool) {
         self.reset_off_course = on;
+    }
+
+    /// Racers (the AI entrants) put back on the course once they have been outside the
+    /// corridor for [`STRANDED_GRACE_S`] (stranded: off a bank they cannot climb, say), with
+    /// the same [`CourseReset`] as [`RaceJudge::set_reset_off_course`]. Independent of that
+    /// option, which keeps its own (shorter) grace for everyone when on.
+    pub fn set_stranded_reset(&mut self, racers: &[EntityId]) {
+        self.stranded_reset = racers.to_vec();
     }
 
     /// Take the resets queued since the last call (see [`RaceJudge::set_reset_off_course`]).
@@ -289,6 +316,8 @@ impl RaceJudge {
             elapsed: None,
             seg_hint: None,
             progress_m: 0.0,
+            best_progress_m: 0.0,
+            progress_tick: 0,
             out_ticks: 0,
             on_course_m: None,
             contacts: 0,
@@ -466,6 +495,7 @@ impl RaceJudge {
                         t.start_subtick = Some(green_tick * SUBTICKS_PER_TICK);
                     }
                     t.lap_start_subtick = green_tick * SUBTICKS_PER_TICK;
+                    t.progress_tick = green_tick;
                 }
             }
             _ => {}
@@ -609,14 +639,32 @@ impl RaceJudge {
         } else {
             proj.along_m
         };
+        // (A drop of more than half a lap is a wrap, not going backwards: a grid just behind the
+        // start line of a loop reads almost a full lap until the cars cross it — Loop 9 had
+        // every racer `Stuck` at 180 s while they raced.)
+        if t.progress_m > t.best_progress_m + STUCK_PROGRESS_M
+            || t.progress_m < t.best_progress_m - 0.5 * len
+        {
+            t.best_progress_m = t.progress_m;
+            t.progress_tick = tick;
+        }
         // Off-course resets (round 12): back onto the course after the grace time. Without
         // resets the clock does not run: leaving the route is never a DQ (main's owner call);
         // the gates still have to be driven in order.
-        if self.reset_off_course && self.rules.kind.uses_corridor() {
+        // AI entrants on `stranded_reset` get the same rule with a longer grace even when
+        // resets are off (picker races: the player may take any line, an AI racer 20 s off
+        // the corridor is stranded).
+        let stranded = self.stranded_reset.contains(&t.entry.racer);
+        if (self.reset_off_course || stranded) && self.rules.kind.uses_corridor() {
             let limit = self.course.corridor_half_width_m + self.rules.common.corridor_margin_m;
+            let grace = if self.reset_off_course {
+                self.rules.common.corridor_grace_s
+            } else {
+                STRANDED_GRACE_S
+            };
             if proj.off_m > limit {
                 t.out_ticks += tick - prev_tick;
-                if t.out_ticks > ticks_for(self.rules.common.corridor_grace_s) {
+                if t.out_ticks > ticks_for(grace) {
                     t.out_ticks = 0;
                     let along = t.on_course_m.unwrap_or(proj.along_m);
                     let (pos, dir) = self.course.point_at(along);
@@ -814,6 +862,24 @@ impl RaceJudge {
             };
             for i in 0..self.tracks.len() {
                 self.set_status(i, RacerStatus::Dnf(reason), tick);
+            }
+        }
+        // Safety net (lead, 2026-10-22): every racer still running has made no progress for
+        // `STUCK_LIMIT_S` (boxed in by standing cars, say), so the race could not end before
+        // its time limit: the judge ends it, each of them `Dnf(Stuck)` (a `RacerDnf` signal
+        // each). Not a racer giving up: racers never give up (owner).
+        let stuck_after = ticks_for(STUCK_LIMIT_S);
+        let running: Vec<usize> = (0..self.tracks.len())
+            .filter(|i| self.tracks[*i].running())
+            .collect();
+        let all_stuck = !running.is_empty()
+            && !matches!(self.rules.kind, RaceKind::Outrun { .. })
+            && running
+                .iter()
+                .all(|i| tick >= self.tracks[*i].progress_tick + stuck_after);
+        if all_stuck {
+            for i in running {
+                self.set_status(i, RacerStatus::Dnf(DnfReason::Stuck), tick);
             }
         }
         if self.tracks.iter().all(|t| !t.running()) {

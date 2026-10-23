@@ -7,6 +7,7 @@
 //! opposing lanes of the same road when the event closes the road ([`CorridorOptions`]).
 //! Inside junctions (connectors) the bounds blend from the arriving lane to the leaving lane.
 
+use wp_contracts::{SurfaceType, WorldQuery};
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
 use wp_world::Route;
@@ -65,6 +66,9 @@ pub struct CorridorSample {
     pub right_m: f32,
     /// Inside a junction box.
     pub junction: bool,
+    /// Road surface under the centreline (`WorldQuery::surface_at`): the speed profile scales
+    /// the car's grip by [`crate::CarCapability::surface_grip`] on it.
+    pub surface: SurfaceType,
 }
 
 impl CorridorSample {
@@ -325,6 +329,7 @@ impl Corridor {
                 left_pass_m: cap(lp),
                 right_m: cap(r),
                 junction: j,
+                surface: map.surface_at(pos),
             })
             .collect();
         let length_m = if closed {
@@ -595,6 +600,7 @@ mod tests {
                 left_pass_m: 3.0,
                 right_m: 3.0,
                 junction: false,
+                surface: SurfaceType::Asphalt,
             })
             .collect::<Vec<_>>();
         Corridor {

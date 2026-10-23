@@ -75,6 +75,8 @@ export const INPUT_FLAG = {
 
 /** world_info() offsets. */
 export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5, city: 6, scripted: 7 } as const;
+/** world_info()[W.mode] value (0 / 1 / 2) to the damage mode name. */
+export const MODE_NAMES = ["Arcade", "Simulation", "Extreme"] as const;
 
 /** Floats per head in signal_heads() (crates/wp_wasm/src/signals.rs). */
 export const SIGNAL_HEAD_STRIDE = 10;
@@ -112,7 +114,7 @@ export const DRAW_STRIDE = 11;
  */
 export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9, model: 10 } as const;
 /** police_draw() flag bits. */
-export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2 } as const;
+export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2, county: 4 } as const;
 
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;
@@ -122,7 +124,8 @@ export const POLICE_UNIT_STRIDE = 8;
 /**
  * Offsets inside one police_units() record. `unitId` is the stable wp_police unit id (hash it
  * for light-bar phase); `model` indexes sim.policeModels() (-1 = none: helicopter or
- * single-model session). Flags: 1 helicopter, 2 pursuing.
+ * single-model session). Flags: 1 helicopter, 2 pursuing, 4 Ashpeak County unit (ACSO livery;
+ * wp_wasm police::Agencies).
  */
 export const PU = { x: 0, y: 1, z: 2, yaw: 3, speed: 4, flags: 5, unitId: 6, model: 7 } as const;
 
@@ -180,7 +183,7 @@ export const PROP_STRIDE = 11;
 /** Offsets inside one props_static() record: kind, box-centre pos xyz, rot quaternion xyzw, half extents xyz. */
 export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 /** props_static() kind codes. */
-export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
+export const PROP_KIND = { parkedCar: 0, cone: 1, krail: 2 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
 /** Floats per record in parked_wrecks() (crates/wp_wasm/src/props.rs). */

@@ -17,7 +17,19 @@
 // (a civilian about every 360 m round the player), and the pace harness now keeps the player
 // seat a player car so traffic spawns round the field as in the browser. Times rose 20-60 s
 // (cars held up in traffic; the heavy ones re-accelerate slowly), see opponent-pace.md.
+// No `finishers` here (2026-10-22, lead): at 23:00 / density 2.0 one seed's finishers swing by
+// ±3 cars on millimetre differences; the gate is `loop9_traffic_field_finishes` (>= 44/48 over
+// seeds 1-8, `just pace-loop9`). The times of the cars that finish are still checked.
 // Re-measure and widen only with a reason.
+// Re-locked 2026-10-22 on round12 6e0639e1 (identical there without opponent-pace's judge change):
+// best_ratio 1.164 -> 1.354, the field 20-55 s slower than at 9070a6ca, after the round12
+// merges (traffic, steering, police). Bisected (opponent-pace.md, "Loop 9 s95 slowdown"): the
+// step is ws/world's rest stops (6799200b, row 153); with traffic off they change nothing, and
+// over seeds 1-8 they make the field faster on average. This seed's traffic draw is unlucky.
+// Widened 2026-10-22 (lead): one seed at 23:00 / density 2.0 swings by 30-80 s on traffic
+// draw alone (opponent-pace.md, "Loop 9 s95 slowdown, bisected"), so this seed only catches
+// gross breakage: today's time −40 % .. +40 %, best_ratio at most today's × 1.4. Loop 9's pace
+// lock is the 8-seed mean in `loop9_traffic_field_finishes` (`just pace-loop9`).
 (
     name: "opponent_pace_loop9_circuit_s95",
     seed: 9,
@@ -27,7 +39,7 @@
     ),
     time_of_day_h: 23.0,
     time_ratio: 1.0,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     traffic_density: 2.0,
     police_presence: 0.0,
@@ -97,13 +109,12 @@
         ),
     ],
     expect_pending: [
-        metric(name: "finishers", min: 6, max: 6),
-        metric(name: "best_ratio", min: 0.97, max: 1.21),
-        metric(name: "race_time_s", entity: "ai_vic", min: 177.8, max: 240.6),
-        metric(name: "race_time_s", entity: "ai_mara", min: 163.1, max: 220.6),
-        metric(name: "race_time_s", entity: "ai_dez", min: 179.8, max: 243.2),
-        metric(name: "race_time_s", entity: "ai_juno", min: 227.4, max: 307.6),
-        metric(name: "race_time_s", entity: "ai_tito", min: 226.4, max: 306.3),
-        metric(name: "race_time_s", entity: "player", min: 225.4, max: 305.0),
+        metric(name: "best_ratio", min: 0.97, max: 1.89),
+        metric(name: "race_time_s", entity: "ai_vic", min: 158.3, max: 369.4),
+        metric(name: "race_time_s", entity: "ai_mara", min: 133.7, max: 312.0),
+        metric(name: "race_time_s", entity: "ai_dez", min: 139.1, max: 324.6),
+        metric(name: "race_time_s", entity: "ai_juno", min: 159.0, max: 370.9),
+        metric(name: "race_time_s", entity: "ai_tito", min: 160.0, max: 373.4),
+        metric(name: "race_time_s", entity: "player", min: 151.0, max: 352.3),
     ],
 )

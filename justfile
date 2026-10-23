@@ -65,6 +65,10 @@ city:
 city-v2:
     cargo run --release -p city-import --bin gen-city -- --preset vesper_v2 --seed 1 --out data/city
 
+# Regenerate Port Vesper + Ashpeak County's greybox (data/city/ashpeak.greybox.{glb,b64.txt}).
+city-ashpeak:
+    cargo run --release -p city-import --bin gen-city -- --preset ashpeak --seed 1 --out data/city
+
 # Traffic benchmark / soak: `just traffic-bench 10` (minutes, 400 agents, noon).
 traffic-bench minutes="2":
     cargo run --release -p wp_world --example traffic_bench -- {{minutes}} 400 12
@@ -153,3 +157,8 @@ tune-dash port="8765":
 tune-test:
     cargo test -p tuning-probe
     python3 -m unittest discover -s tools/tuning-dash/tests
+
+# Loop 9 at 23:00 with traffic: >= 44/48 AI cars finish per skill over seeds 1-8 and their
+# mean time holds its pace range (~20 min, release). Part of the lead's main-track gate (docs/LEAD_AUTOMATION.md).
+pace-loop9:
+    cargo test --release -p wp_race --test opponent_pace loop9_traffic_field_finishes -- --ignored --nocapture

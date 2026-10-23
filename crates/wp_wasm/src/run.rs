@@ -364,15 +364,51 @@ impl PlayerRun {
         &self.ledger
     }
 
-    /// Street-race wager (`crate::street`): post `cash` (negative = stake paid, positive =
-    /// winnings) as a ledger line with `note`. A stake the account cannot cover is refused.
-    pub fn wager(&mut self, cash: i64, note: &str) -> Result<(), String> {
-        let (_, events) = self
+    /// Largest stake the account may bet at `venue` now (the career economy's `max_bet`: 0
+    /// when that betting is locked by rep tier, the player is broke or in debt).
+    pub fn max_bet(&self, venue: wp_economy::BetVenue) -> i64 {
+        self.econ.max_bet(&self.acct, venue)
+    }
+
+    /// Why betting at `venue` is locked for this account (`None` when it is open).
+    pub fn bet_lock(&self, venue: wp_economy::BetVenue) -> Option<String> {
+        self.econ
+            .require_unlocked(&self.acct, venue.feature())
+            .err()
+            .map(|e| e.to_string())
+    }
+
+    /// Take a bet's stake from the account (the career economy's `place_bet`: tier gate,
+    /// cap, debt; ledger note `bet:stake:<venue>:<label>`). The one betting wallet: street
+    /// racer challenges and picker-race bets both go through here. Nothing changes on an error.
+    pub fn place_bet(
+        &mut self,
+        venue: wp_economy::BetVenue,
+        stake: i64,
+        label: &str,
+    ) -> Result<wp_economy::BetTicket, String> {
+        let (ticket, ev) = self
             .econ
-            .adjust(&mut self.acct, cash, note)
+            .place_bet(&mut self.acct, venue, stake, label)
             .map_err(|e| e.to_string())?;
-        self.ledger.extend(events);
-        Ok(())
+        self.ledger.extend(ev);
+        Ok(ticket)
+    }
+
+    /// Award `rep` (career `award_rep`: ledger note `career:rep:<label>`; pays any first-time
+    /// tier reward it reaches at once, as touge results do).
+    pub fn award_rep(&mut self, rep: i64, label: &str) {
+        if let Ok((_, ev)) = self.econ.award_rep(&mut self.acct, rep, label) {
+            self.ledger.extend(ev);
+        }
+    }
+
+    /// Pay a bet back: `gross` includes the stake (0 = lost, nothing posted; ledger note
+    /// `bet:payout:<venue>:<label>`).
+    pub fn settle_bet(&mut self, ticket: &wp_economy::BetTicket, gross: i64) {
+        if let Ok((_, ev)) = self.econ.settle_bet(&mut self.acct, ticket, gross) {
+            self.ledger.extend(ev);
+        }
     }
 
     /// The latest settlement, if any.
@@ -643,6 +679,55 @@ impl PlayerRun {
         let lines = ev.iter().map(LedgerLine::of).collect();
         self.ledger.extend(ev);
         Ok((fee, lines))
+    }
+
+    /// Take a touge wager on this account (`wp_race::touge::place`: career rep tiers, side-bet
+    /// stake taken now through `place_bet`, venue Touge, the one betting wallet) with the run's
+    /// car on the line.
+    pub fn touge_place(
+        &mut self,
+        setup: wp_race::touge::TougeSetup,
+        wager: wp_race::touge::Wager,
+    ) -> Result<(wp_race::touge::WagerTicket, Vec<LedgerLine>), String> {
+        let (ticket, ev) =
+            wp_race::touge::place(&self.econ, &mut self.acct, setup, wager, self.car)
+                .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((ticket, lines))
+    }
+
+    /// Pay out a decided touge battle on this account (`wp_race::touge::settle`).
+    pub fn touge_settle(
+        &mut self,
+        table: &wp_race::touge::TougeTable,
+        ticket: &wp_race::touge::WagerTicket,
+        outcome: &wp_race::touge::BattleOutcome,
+        opponent: &wp_race::touge::OpponentCar,
+    ) -> Result<(wp_race::touge::TougeSettlement, Vec<LedgerLine>), String> {
+        let (out, ev) = wp_race::touge::settle(
+            &self.econ,
+            &mut self.acct,
+            table,
+            ticket,
+            outcome,
+            self.player,
+            opponent,
+        )
+        .map_err(|e| e.to_string())?;
+        let lines = ev.iter().map(LedgerLine::of).collect();
+        self.ledger.extend(ev);
+        Ok((out, lines))
+    }
+
+    /// Testbed only: set the account's rep (to try rep-gated touge battles outside a career),
+    /// then settle progression at it (tier bookkeeping and any first-time tier rewards, as a
+    /// career would at the end of a run).
+    pub fn debug_set_rep(&mut self, rep: i64) {
+        self.acct.rep = rep.max(0);
+        if let Ok((_, ev)) = self.econ.update_progression(&mut self.acct) {
+            self.ledger.extend(ev);
+        }
     }
 
     /// Pay out a race result (G's `Economy::settle_race`: purse share, clean bonus, rep,

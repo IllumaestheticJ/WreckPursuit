@@ -2,15 +2,19 @@
 // Usage: node e2e/street.mjs (needs the wasm package). Env: SHOTS=dir for screenshots,
 // CITY=vesper_v2|procedural_12x12 (default vesper_v2), CHROMIUM=/path/to/chrome.
 // Checks, by day (13:00 free drive; keyboard + mouse) and by night (23:00 free drive; gamepad):
-// the roster spawns 16 racers in 4 levels (colours from street_status().levels), drawn as level-coloured markers on the UI kit's
+// the roster has 13 racers in 4 levels (colours from street_status().levels), 8 out by day and 13
+// at night (row 152; the rest in the lockup, off the map), drawn as level-coloured markers on the UI kit's
 // minimap and full city map (with a legend group) and wearing their level colour on their car;
-// honking (the rebindable horn: Q / pad L3) next to a racer opens the map as the finish picker;
+// honking (the rebindable horn: Q / pad L3) right behind a racer opens the map as the finish picker;
 // picking B on the map (mouse click / pad crosshair + A) previews a raceable route; the bet
-// slider / pad LB-RB sets the stake; Race (Enter / pad Menu) pays it and counts down with the
+// slider / pad LB-RB sets the stake; by day extra waypoints are added, re-ordered and removed on the
+// map (row 151: numbered flags, the route through them, gates in the world); a wanted player cannot
+// challenge (row 150); Race (Enter / pad Menu) pays it, puts both cars side by side at rest
+// (row 150) and counts down with the
 // race panel up and the route on the minimap; the street UI hides in photo mode, under the
 // game menu and during a crash replay; reaching B wins even money and shows the result. Roaming
 // racers are fleet-drawn past ~40 m and get their hero view near the camera; the opponent keeps
-// its view while racing. (Draw calls / triangles: e2e/perf_check.mjs, city chase incl. racers.) Then the late-night city chase
+// its view while racing. (Draw calls / triangles: e2e/perf_check.mjs, night run incl. racers.) Then the late-night night run
 // has its racers, and on touch (?touch=1) the 📯 button challenges and the picker takes taps.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -26,8 +30,14 @@ const shots = process.env.SHOTS;
 const CITY = process.env.CITY ?? "vesper_v2";
 const CAR = "lindwurm_4t";
 if (shots) mkdirSync(shots, { recursive: true });
-const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
-process.on("exit", () => server.kill("SIGTERM"));
+// Own process group: the exit handler stops vite itself, not just npx (a leftover server on
+// the port would serve the next run stale code).
+const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe", detached: true });
+process.on("exit", () => {
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {}
+});
 for (let i = 0; i < 100; i++) {
   try {
     if ((await fetch(URL)).ok) break;
@@ -185,8 +195,10 @@ const lodOf = (p, target = -1) =>
  * keyboard / mouse. */
 async function race(label, pad) {
   const st = await status(page);
-  const N = st?.roster.length ?? 0;
-  check(N === 16, `${label}: 16 street racers (${N})`);
+  const night = label === "night";
+  const N = st?.roster.filter((r) => r.mode !== "OffDuty").length ?? 0;
+  check(st?.roster.length === 13, `${label}: 13 street racers in the roster (${st?.roster.length})`);
+  check(N === (night ? 13 : 8), `${label}: ${night ? 13 : 8} out (${N})`);
   check(st && st.levels.length === 4 && new Set(st.levels.map((l) => l.colour)).size === 4 && new Set(st.roster.map((r) => r.level)).size === 4, `${label}: 4 levels, 4 colours (${st?.levels.map((l) => l.name).join(", ")})`);
   check(st && st.roster.every((r) => st.levels.find((l) => l.level === r.level)?.colour === r.colour), `${label}: every racer in its level's colour`);
   // Map markers in level colours: minimap (always on) and the full map.
@@ -300,6 +312,57 @@ async function race(label, pad) {
   const pv = await page.evaluate(() => window.__wp.street.preview);
   check(pv?.ok === true && !(await page.evaluate(() => document.querySelector("#st-go")?.disabled)), `${label}: picking B previews a raceable route (${pv ? Math.round(pv.length_m) : "?"} m)`);
   check((await mapStats(page)).full.route, `${label}: route drawn on the map`);
+  let gates = 0;
+  if (!pad && pt) {
+    // Waypoints (row 151): clicks after B add them; ↓ re-orders, ✕ removes; numbered flags.
+    const wps = await page.evaluate(({ x, y }) => {
+      const wp = window.__wp;
+      const st = wp.sim.states();
+      const [px, py] = [st[1], st[2]];
+      const panel = document.querySelector(".wp-map-host").getBoundingClientRect();
+      const legend = document.querySelector(".wp-map-legend").getBoundingClientRect();
+      const out = [];
+      for (const f of [0.35, 0.65, 0.5, 0.25, 0.75]) {
+        for (const side of [250, -250, 400, -400]) {
+          const [dx, dy] = [x - px, y - py];
+          const n = Math.hypot(dx, dy);
+          const q = [px + dx * f - (dy / n) * side, py + dy * f + (dx / n) * side];
+          const c = wp.map.hud.clientAt(q[0], q[1]);
+          if (!c || c[0] < panel.right + 10 || c[0] > legend.left - 10 || c[1] < 60 || c[1] > innerHeight - 20) continue;
+          try {
+            const r = wp.sim.streetPreview(x, y, [...out.map((o) => o.q), q]);
+            if (!r.ok) continue;
+          } catch {
+            continue;
+          }
+          out.push({ q, cx: c[0], cy: c[1] });
+          if (out.length === 2) return out;
+          break;
+        }
+      }
+      return out;
+    }, pt);
+    check(wps.length === 2, `${label}: two waypoints on the map that make a raceable route (${wps.length})`);
+    for (const w of wps) {
+      await page.mouse.click(w.cx, w.cy);
+      await frames(page, 2);
+    }
+    const s1 = await page.evaluate(() => ({ via: window.__wp.street.via, pv: window.__wp.street.preview, items: document.querySelectorAll(".wp-map-host .st-wp").length }));
+    check(s1.via.length === 2 && s1.items === 2 && s1.pv?.gates.length === 2, `${label}: clicks after B add waypoints (${s1.via.length} listed ${s1.items}, gates ${s1.pv?.gates.length})`);
+    check(s1.pv && s1.pv.length_m > pv.length_m, `${label}: the route runs through them (${Math.round(pv.length_m)} → ${Math.round(s1.pv?.length_m ?? 0)} m)`);
+    const flags = await page.evaluate(() => window.__wp.map.hud.stats().full.flags ?? null);
+    if (flags !== null) check(flags >= 4, `${label}: A, 1, 2 and B flags on the map (${flags})`);
+    await page.click('.wp-map-host [data-wp-down="0"]');
+    await frames(page, 2);
+    const s2 = await page.evaluate(() => window.__wp.street.via);
+    check(s2[0][0] === s1.via[1][0] && s2[1][0] === s1.via[0][0], `${label}: ↓ swaps the waypoint order`);
+    await page.click('.wp-map-host [data-wp-del="1"]');
+    await frames(page, 2);
+    const s3 = await page.evaluate(() => ({ via: window.__wp.street.via, pv: window.__wp.street.preview }));
+    check(s3.via.length === 1 && s3.pv?.ok && s3.pv.gates.length === 1, `${label}: ✕ removes a waypoint (${s3.via.length} left, route ${Math.round(s3.pv?.length_m ?? 0)} m)`);
+    gates = s3.via.length;
+    await shot(page, `street_${label}_3b_waypoints.png`);
+  }
 
   // Bet.
   const o = (await status(page)).offer;
@@ -336,6 +399,20 @@ async function race(label, pad) {
   check(!(await page.evaluate(() => window.__wp.map.isOpen)), `${label}: picker closed`);
   check(!pad || !(await page.evaluate(() => window.__wp.menu.isOpen)), `${label}: pad Menu did not open the pause menu`);
   check(pad || (await page.evaluate(() => window.__wp.crash.phase)) === crashBefore, `${label}: Enter did not trigger the crash replay`);
+  const lineup = await page.evaluate((e) => {
+    const wp = window.__wp;
+    const st = wp.sim.states();
+    const meta = wp.sim.vehicleMeta();
+    const stride = st.length / (meta.length / 3);
+    const at = (id) => {
+      for (let o = 0; o < st.length; o += stride) if (st[o] === id) return [st[o + 1], st[o + 2]];
+      return null;
+    };
+    const a = at(wp.app.player);
+    const b = at(e);
+    return a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : -1;
+  }, r?.entity);
+  check(lineup > 2 && lineup < 8, `${label}: both cars side by side at the start (${lineup.toFixed(1)} m apart)`);
   const cash1 = await page.evaluate(() => window.__wp.sim.runAccount().cash);
   check(r && r.stake === want && cash1 === cash0 - r.stake, `${label}: stake ${r?.stake} paid (${cash0} → ${cash1})`);
   await page.waitForFunction(() => window.__wp.map.hud.stats().minimap.route, null, { timeout: 10000 }).catch(() => {});
@@ -372,6 +449,17 @@ async function race(label, pad) {
     await page.evaluate(() => window.__wp.menu.close());
     await frames(page, 2);
   }
+  if (gates) {
+    const g = await page.evaluate(() => ({ shown: window.__wp.streetMarker.shown, visible: window.__wp.streetMarker.group.visible, gates: window.__wp.sim.streetStatus().race.gates }));
+    check(g.visible && g.shown === 0, `${label}: the waypoint shows as a gate in the world (gate ${g.shown})`);
+    // B before the gate does not count; through the gate, then B wins.
+    await page.evaluate(([x, y]) => window.__wp.sim.debugPlaceVehicle(window.__wp.app.player, x, y, 0), r.finish);
+    await wait(page, 1500);
+    check(!(await status(page))?.result, `${label}: B before the gate does not finish`);
+    await page.evaluate(([x, y]) => window.__wp.sim.debugPlaceVehicle(window.__wp.app.player, x, y, 0), g.gates[0]);
+    await page.waitForFunction(() => window.__wp.sim.streetStatus()?.race?.next_gate === 1, null, { timeout: 30000 }).catch(() => {});
+    check((await status(page))?.race?.next_gate === 1, `${label}: passing the gate counts it`);
+  }
   // Teleport to B: win.
   await page.evaluate(([x, y]) => window.__wp.sim.debugPlaceVehicle(window.__wp.app.player, x, y, 0), r.finish);
   await page.waitForFunction(() => window.__wp.sim.streetStatus()?.result, null, { timeout: 60000 }).catch(() => {});
@@ -400,6 +488,23 @@ async function race(label, pad) {
   }
   await frames(page, 3);
   check(!(await page.evaluate(() => document.getElementById("street-ui").classList.contains("hidden"))), `${label}: street UI back after the replay`);
+  if (!pad) {
+    // Last: wanted, a honk challenges nobody and the hint says to lose the police (row 150).
+    await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 40));
+    await page.keyboard.down(hornKey);
+    let blocked = null;
+    for (let i = 0; i < 12; i++) {
+      await placeBehind(page, st.roster[1].entity);
+      await wait(page, 250);
+      blocked = (await status(page))?.blocked ?? blocked;
+    }
+    await page.keyboard.up(hornKey);
+    const ws = await status(page);
+    const hint = await page.evaluate(() => document.querySelector("#street-hint")?.textContent ?? "");
+    check(ws.pursued && !ws.offer && !!blocked, `${label}: wanted, a honk opens no challenge (blocked: ${blocked?.name})`);
+    check(/Lose the police/.test(hint), `${label}: hint says to lose the police first ("${hint.trim()}")`);
+    // (The pursuit outlives the heat; the session ends here.)
+  }
 }
 
 // Day: 13:00 free drive, keyboard + mouse.
@@ -423,15 +528,67 @@ check(hours >= 22.9 || hours < 1, `night session (${hours.toFixed(2)} h)`);
 await race("night", true);
 await page.evaluate(() => window.__pad.connect(false));
 
-// Late-night city chase: racers roam there too and show on the map.
-await page.evaluate((car) => window.__wp.startCityChase(car, "Arcade"), CAR);
+// Row 153: a night loop racer idling at a Loop 9 rest stop takes a challenge there; the card
+// offers a Loop 9 lap back to it; the race starts side by side on the parking road.
+if (CITY === "vesper_v2") {
+  await page.evaluate((car) => window.__wp.startFreeDrive(car, "Arcade", true, 23), CAR);
+  await wait(page, 3000);
+  const stops = await page.evaluate(() => window.__wp.sim.restStops());
+  check(stops.length === 3, `rest stops on Loop 9 (${stops.map((s) => s.name).join(", ")})`);
+  const rs = stops[0];
+  const lr = (await status(page)).roster.find((r) => r.shift === "Loop" && r.mode === "Roam");
+  check(!!lr, `a loop racer out at night (${lr?.name})`);
+  if (rs && lr) {
+    await page.evaluate(([e, n]) => window.__wp.sim.debugStreetParkAtRestStop(e, n), [lr.entity, rs.name]);
+    await wait(page, 1500);
+    const hornKey = await page.evaluate(() => window.__wp.bindings().keys.horn[0]);
+    await page.keyboard.down(hornKey);
+    for (let i = 0; i < 30; i++) {
+      await placeBehind(page, lr.entity);
+      await wait(page, 250);
+      if ((await status(page))?.offer) break;
+    }
+    await page.keyboard.up(hornKey);
+    await page.waitForFunction(() => window.__wp.map.isOpen, null, { timeout: 15000 }).catch(() => {});
+    const o = (await status(page))?.offer;
+    check(o?.entity === lr.entity && o?.rest_stop === rs.name && !!o?.loop_lap, `challenge at ${rs.name}: rest-stop meet with a Loop 9 lap (${o?.rest_stop})`);
+    await page.waitForSelector("#st-lap", { timeout: 10000 }).catch(() => {});
+    await page.click("#st-lap").catch(() => {});
+    await frames(page, 2);
+    const pv = await page.evaluate(() => window.__wp.street.preview);
+    check(pv?.ok && pv.length_m > 9000, `"Loop 9 lap back here" plans the lap (${Math.round(pv?.length_m ?? 0)} m)`);
+    await shot(page, "street_reststop_offer.png");
+    await page.keyboard.press("Enter");
+    await frames(page, 2);
+    const race = (await status(page))?.race;
+    const gap = await page.evaluate((e) => {
+      const wp = window.__wp;
+      const st = wp.sim.states();
+      const meta = wp.sim.vehicleMeta();
+      const stride = st.length / (meta.length / 3);
+      const at = (id) => {
+        for (let o = 0; o < st.length; o += stride) if (st[o] === id) return [st[o + 1], st[o + 2]];
+        return null;
+      };
+      const a = at(wp.app.player);
+      const b = at(e);
+      return a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : -1;
+    }, lr.entity);
+    check(race && race.countdown_s > 0 && gap > 3.5 && gap < 4.5, `rest-stop start: countdown, side by side ${gap.toFixed(1)} m apart`);
+    await shot(page, "street_reststop_start.png");
+  }
+}
+
+// Late-night night run: racers roam there too and show on the map.
+await page.evaluate((car) => window.__wp.startNightRun(car, "Arcade"), CAR);
 await wait(page, 4000);
 const chase = await status(page);
-check(chase?.roster.length === 16, `city chase (23:00): 16 street racers (${chase?.roster.length})`);
+check(chase?.roster.length === 13 && chase.roster.every((r) => r.mode !== "OffDuty"), `night run (23:00): all 13 street racers out (${chase?.roster.length})`);
+check(chase?.roster.filter((r) => r.shift === "Loop").length === 4, "night run: 4 of them lap Loop 9");
 await page.waitForFunction(() => window.__wp.map.hud.stats().minimap.markers > 0, null, { timeout: 30000 }).catch(() => {});
-check((await mapStats(page)).minimap.markers === 16, "city chase: racer markers on the minimap");
+check((await mapStats(page)).minimap.markers === 13, "night run: racer markers on the minimap");
 const cl = await lodOf(page);
-check(cl.farOnView === 0, `city chase: far racers fleet-drawn (${cl.views} hero views, ${JSON.stringify(cl.modes)})`);
+check(cl.farOnView === 0, `night run: far racers fleet-drawn (${cl.views} hero views, ${JSON.stringify(cl.modes)})`);
 await page.keyboard.press("KeyM");
 await frames(page, 3);
 await shot(page, "street_chase_citymap.png");

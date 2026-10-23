@@ -30,7 +30,7 @@ export interface MapZone {
 
 /** Point of interest. */
 export interface MapPoi {
-  kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid";
+  kind: "Safehouse" | "Garage" | "PoliceStation" | "Helipad" | "RaceStartGrid" | "RestStop";
   name: string;
   pos: [number, number];
 }
@@ -232,4 +232,45 @@ export function racersToDraw(f: MapFrame): MapRacer[] {
 /** The player is wanted (sight areas and search zone are drawn). */
 export function isWanted(f: MapFrame): boolean {
   return f.status !== "clear";
+}
+
+/** A chase radar blip (the `MapBlip` shape of `model/types`, kept local to stay import-free). */
+export interface RadarBlip {
+  id: number;
+  kind: "racer" | "police" | "helicopter";
+  pos: [number, number];
+  /** Clockwise from north, rad (the SVG minimap's convention). */
+  headingRad: number;
+  /** Call sign ("AIR 9", the radio's "Air 9"). */
+  label?: string;
+  /** Spot the helicopter is following: the player's position when it is on the player. */
+  tracking?: [number, number];
+}
+
+/**
+ * Chase radar for the HUD (PR #32) from a `map_dynamic()` frame: the player's pose and every
+ * police unit and race opponent around them; helicopters carry their call sign and, while
+ * tracking, the spot they follow (the player's own position when it is on the player, so the
+ * tether reads "following you" even while the spotlight lags). Null without a player or when
+ * there is nothing to show.
+ */
+export function chaseRadar(f: MapFrame): { pos: [number, number]; headingRad: number; blips: RadarBlip[] } | null {
+  const p = f.player;
+  if (!p) return null;
+  const me: [number, number] = [p.x, p.y];
+  const blips: RadarBlip[] = [];
+  for (const u of f.units) {
+    if (u.wrecked || u.state === "out") continue;
+    // map_dynamic yaw is counter-clockwise from +Y; the radar's heading is clockwise.
+    const pos: [number, number] = [u.x, u.y];
+    if (u.heli) {
+      const tracking = u.state === "track" ? (u.onPlayer ? me : (u.target ?? undefined)) : undefined;
+      blips.push({ id: u.id, kind: "helicopter", pos, headingRad: -u.yaw, label: `AIR ${u.id}`, tracking });
+    } else {
+      blips.push({ id: u.id, kind: "police", pos, headingRad: -u.yaw });
+    }
+  }
+  for (const r of racersToDraw(f)) blips.push({ id: r.id, kind: "racer", pos: [r.x, r.y], headingRad: -r.yaw });
+  if (!blips.length) return null;
+  return { pos: me, headingRad: -p.yaw, blips };
 }

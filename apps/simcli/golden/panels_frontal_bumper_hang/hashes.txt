@@ -1,4 +1,4 @@
-# simcli hashes scenario=panels_frontal_bumper_hang systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+# simcli hashes scenario=panels_frontal_bumper_hang systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
 24 460dbe817adf8db9
 48 8e605fd2660a2f1e
 72 bae429b21744eb03

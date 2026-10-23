@@ -923,3 +923,332 @@ The pace harness keeps seat 0 a `VehicleKind::Player` car, driven by the AI, in 
 - **city_sprint** is not a picker race.
 
 Grid s50/s95 and Lantern s50/s95 were re-locked by the rule, with reasons in each RON. Hollins still holds its ranges.
+
+## Race setup never panics on a route with nothing to drive (row 154 hardening, 2026-10-22)
+
+- **The bug:** `Field::from_route` panics ("route with no length") on a route with no length, or on a one-segment route whose end lies behind its start. In the browser a wasm panic froze the game; branch-triage b6bae7d6 fixed the street-race path in `wp_wasm` street.rs.
+- **The same path in wp_race:** `AiEntrants::new`, reached from `LiveRace::new` and the picker's `race_start`.
+- **The fix:**
+  - New `wp_opponent::Field::try_from_route` returns `None` instead of panicking. `from_route` keeps its panic, documented.
+  - `AiEntrants::new` and `LiveRace::new` now return `Result<_, RaceSetupError>`. `RaceSetupError::NoDrivableRoute` refuses the race.
+  - `wp_wasm` `race_start` turns the error into its usual `Err(String)` (minimal change outside my crates).
+  - Callers in the tests unwrap with "a drivable route".
+- **Test:** `entrants::tests::a_route_with_nothing_to_drive_refuses_the_race` covers a backwards one-segment loop route and an empty route; without the fix it panics in `Field::from_route`. A sprint gets a run-off leg past its finish, which can still give the AI a corridor on a degenerate judged route; a loop gets none.
+
+## Queued follow-up (a): reverse-and-replan when boxed in by standing cars
+
+This is the race_picker Lantern police test, seed 5. It is not the default seed (31). Queued by the lead 2026-10-22, behind highway weaving.
+
+**Situation:** the player car (AI-driven) is boxed in on the narrow downtown street by police captures.
+
+- Captured racer 3 stands 0.5 m ahead.
+- Captured racer 4 stands alongside, overlapping, 2.3 m to the right.
+- The left lane is closed 12 m ahead by parked cars, leaving 1.7 m for a 1.8 m car.
+
+The race is never judged: the player stays `Running`.
+
+**What the AI does:**
+
+- Passes towards racer 4 are refused because it is alongside (`alongside_towards`). It is parked, but it overlaps, so a "parked car behind cannot be cut off" exception does not apply. That exception was tried and reverted.
+- The nosed-up reverse fires (`nosed_up`, 3 s). That backs out about 3 m, which is still beside racer 4, so the car creeps back into the same box.
+
+**Proposed fix:** when boxed by standing cars, keep reversing until clear of the one alongside (its rear plus a car length), then plan the pass from there, around the side away from the parked cars. It needs its own police sweep (Lantern, Hollins, Loop 9).
+
+## Physical traffic cars seen once, as traffic + Loop 9 finishers over 8 seeds (2026-10-22)
+
+**The fix.** Every physical traffic car near the player was perceived twice: as a civilian (its world agent) and as a plain `Who::Vehicle` (its sim body at the same spot). The plain copy set the limit with a 0.5 s drift horizon, racer margins and racer headway. A non-racer sim vehicle within 1 m of a Physical-LOD agent is now skipped (`TRAFFIC_BODY_MATCH_M`).
+
+**Sweep, vs 0e84a9f7.**
+
+| case | result |
+|---|---|
+| no traffic | identical |
+| city, Hollins | identical |
+| grid, mean | +0.4 / +0.1 s |
+| Lantern s50, mean | 80.2 → 74.6 s |
+| Lantern s95, finishers | 30 → 31 /32 |
+| Loop 9 s50, seeds 1–16 | 91 → 96 /96 |
+| Loop 9 s95, seeds 1–16 | 89 → 90 /96 |
+| civilian contacts | 0 → 1 in 192 runs |
+
+**Loop 9 finishers check.** At 23:00 with density 2.0, one seed's finishers swing by ±3 cars on millimetre grid differences. The pace RONs (seed 9) went from passing to 3/6 and 4/6, while seed 9 in the sweep finishes 6/6.
+
+- The Loop 9 pace RONs no longer have `finishers`. The times of the cars that finish are still checked.
+- The finishers gate is `loop9_traffic_field_finishes`: at least 44 of 48 per skill over seeds 1–8. It is release-only and ignored, takes about 20 min, runs via `just pace-loop9`, and is listed in the lead's main-track gate (docs/LEAD_AUTOMATION.md). Measured: 48/48 at s50, 47/48 at s95.
+- grid s50 `best_ratio` was re-locked 1.59 → 1.64 (today 1.593).
+
+**TEMPORARY: `lantern_checkpoint_draws_the_police` runs on seed 1.** With this fix, seed 31 (default) and seed 5 end with the last racer boxed in between captured cars, so the race never finishes and is never judged. The other seeds:
+
+- 1 and 4: everyone finishes.
+- 2, 3, 6, 7 and 8: everyone is captured.
+
+Seed 31 comes back with follow-up (a).
+
+**Next, in order (lead):**
+
+1. Follow-up (a): the multi-point reverse-and-turn. Restore seed 31 and check seed 5.
+2. A judge safety net: a race in which every remaining racer has made no progress for 3 min ends, and they are DNF Stuck (logged).
+3. Weaving v2 aimed at the pack.
+
+## Follow-up (a) done: escape from a box-in by standing cars (2026-10-22)
+
+When a racer is nosed up to a car standing for good (parked, or out of the race and standing) — or has stood still for 3 s behind one with no pass that fits — it picks the side with more room beside that car and keeps working towards it. The racer:
+
+- reverses with the nose swinging to that side;
+- creeps forward round the car;
+- repeats until past it, giving up after 30 s.
+
+Reversing keeps 1 m to a car standing behind for good (4 m to anything else). The creep logic treats a standing out-of-race car like a parked one. The constants are `ESCAPE_CLEAR_M`, `ESCAPE_AFTER_S`, `ESCAPE_MAX_S` and `REVERSE_STANDING_GAP_M`.
+
+`lantern_checkpoint_draws_the_police` is back on the catalog seed 31.
+
+**Lantern police test, seeds 1–8 and 31:**
+
+- Before: seeds 5 and 31 never finish (a racer stays Running).
+- After: all 9 seeds end.
+
+**Sweeps, seeds 1–8, before df9a2cb4 → after.** With police:
+
+| race | skill | seeds | run | finishers | mean s | walls | passes/km | civ contacts | all contacts 
+|---|---|---|---|---|---|---|---|---|---
+| hollins_sprint | 0.5 | 1-8 | before | 1/32 | 116.8 | 0 | 0.25 | 30 | 0 
+| hollins_sprint | 0.5 | 1-8 | after | 0/32 | 0.0 | 0 | 0.12 | 22 | 0 
+| hollins_sprint | 0.95 | 1-8 | before | 0/32 | 0.0 | 24 | 1.50 | 54 | 12 
+| hollins_sprint | 0.95 | 1-8 | after | 0/32 | 0.0 | 23 | 1.38 | 38 | 12 
+| lantern_checkpoint | 0.5 | 1-8 | before | 18/32 | 73.8 | 4 | 2.25 | 24 | 0 
+| lantern_checkpoint | 0.5 | 1-8 | after | 18/32 | 71.3 | 2 | 2.44 | 18 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | before | 9/32 | 59.5 | 0 | 0.75 | 2 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | after | 11/32 | 73.8 | 0 | 0.75 | 4 | 0 
+| loop9_circuit | 0.5 | 1-8 | before | 39/48 | 256.1 | 85 | 1.23 | 2 | 15 
+| loop9_circuit | 0.5 | 1-8 | after | 39/48 | 256.1 | 85 | 1.23 | 2 | 15 
+| loop9_circuit | 0.95 | 1-8 | before | 27/48 | 228.6 | 336 | 1.10 | 13 | 65 
+| loop9_circuit | 0.95 | 1-8 | after | 27/48 | 228.6 | 336 | 1.10 | 12 | 65 
+
+Without police:
+
+| race | skill | seeds | run | finishers | mean s | walls | passes/km | civ contacts | all contacts 
+|---|---|---|---|---|---|---|---|---|---
+| city_sprint | 0.5 | 1-8 | before | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| city_sprint | 0.5 | 1-8 | after | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| city_sprint | 0.95 | 1-8 | before | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| city_sprint | 0.95 | 1-8 | after | 32/32 | 11.0 | 0 | 0.60 | 0 | 0 
+| grid_highway_sprint | 0.5 | 1-8 | before | 32/32 | 43.4 | 0 | 0.68 | 0 | 0 
+| grid_highway_sprint | 0.5 | 1-8 | after | 32/32 | 43.4 | 0 | 0.68 | 0 | 0 
+| grid_highway_sprint | 0.95 | 1-8 | before | 32/32 | 43.5 | 0 | 1.46 | 0 | 0 
+| grid_highway_sprint | 0.95 | 1-8 | after | 32/32 | 43.5 | 0 | 1.46 | 0 | 0 
+| hollins_sprint | 0.5 | 1-8 | before | 32/32 | 66.8 | 0 | 0.00 | 0 | 0 
+| hollins_sprint | 0.5 | 1-8 | after | 32/32 | 66.8 | 0 | 0.00 | 0 | 0 
+| hollins_sprint | 0.95 | 1-8 | before | 32/32 | 62.5 | 8 | 0.00 | 0 | 8 
+| hollins_sprint | 0.95 | 1-8 | after | 32/32 | 62.5 | 8 | 0.00 | 0 | 8 
+| lantern_checkpoint | 0.5 | 1-8 | before | 32/32 | 74.6 | 0 | 0.38 | 1 | 0 
+| lantern_checkpoint | 0.5 | 1-8 | after | 32/32 | 72.6 | 0 | 0.38 | 1 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | before | 31/32 | 67.3 | 0 | 0.94 | 0 | 0 
+| lantern_checkpoint | 0.95 | 1-8 | after | 31/32 | 69.9 | 2 | 0.75 | 0 | 2 
+| loop9_circuit | 0.5 | 1-8 | before | 48/48 | 255.0 | 0 | 1.21 | 0 | 0 
+| loop9_circuit | 0.5 | 1-8 | after | 48/48 | 255.0 | 0 | 1.21 | 0 | 0 
+| loop9_circuit | 0.95 | 1-8 | before | 47/48 | 243.3 | 0 | 1.20 | 0 | 0 
+| loop9_circuit | 0.95 | 1-8 | after | 47/48 | 243.3 | 0 | 1.20 | 0 | 0 
+
+- With police, the police decide the result (Hollins: nearly everyone is captured either way). Lantern s95 finishers go 9 → 11, and Lantern s50 civilian contacts go 24 → 18.
+- Without police, every race is identical except Lantern: s50 is 2 s faster, and s95 is 2.6 s slower with 2 walls in 32 runs.
+
+## Contract change requests
+
+- **`wp_contracts::DnfReason::Stuck`** (2026-10-22, for the lead's judge safety net (iii)): "made no progress for `stuck_limit_s`". `wp_race::RaceJudge` would end a race once every racer still running has made no course progress for 3 min (generous; logged as a signal), marking them `Dnf(Stuck)`. This is not a racer giving up (owner rule): the judge calls it. Until the variant exists there is no good existing reason: `TimeLimit` and `FinishWindow` mean something else.
+
+## Judge safety net: `Dnf(Stuck)` (2026-10-22)
+
+The lead added `wp_contracts::DnfReason::Stuck` (0.3.1, round12 6e0639e1).
+
+- **The rule:** `RaceJudge::check_limits` ends a race once every racer still running has made no course progress for `STUCK_LIMIT_S` = 180 s. Progress counts in steps of `STUCK_PROGRESS_M` = 5 m, timed from green. Each of them is `Dnf(Stuck)`, and gets a `RacerDnf` signal, which is the log.
+- **Scope:**
+  - Outrun keeps its own rule.
+  - The time limit and the finish window still take precedence.
+  - Every kind already has a time limit (420–1800 s), so this only shortens a race that would otherwise hang until it.
+- **Not a racer giving up:** the judge calls it.
+- **Constants, not rules.toml:** they are constants in `judge.rs`; say if you want them in `data/events/rules.toml`.
+- **UI:** the testbed race results show reason `Stuck` as "stuck", lowercase like the other labels ("busted", "too slow").
+- **Tests:**
+  - `a_race_where_everyone_left_is_stuck_ends_after_the_stuck_limit`: a lone stopped racer ends at 182 s as Stuck; with one racer still crawling, nobody is Stuck.
+  - `time_limit_and_finish_window` now uses a crawling racer for the time-limit case. A stopped one is now Stuck.
+
+## Weaving v2, step A: tried, dropped (2026-10-22)
+
+This was "no defensive move with a civilian within 100 m ahead". On Loop 9, 16 seeds, against 9070a6ca:
+
+| skill | finishers before → after | mean time |
+|---|---|---|
+| s50 | 96 → 95 /96 | 2.8 s faster |
+| s95 | 90 → 86 /96 | 4.6 s faster |
+
+That is fewer finishers, so it is not kept.
+
+## Loop 9 s95 slowdown, bisected (2026-10-22, lead)
+
+The s95 re-lock on round12 6e0639e1 (best ratio 1.164 → 1.354, the field 20–55 s slower than
+at 9070a6ca) is **not a regression**. It is this one scenario seed meeting less lucky traffic
+after ws/world's Loop 9 rest stops.
+
+**Bisect** (`pace_loop9_circuit_s95`, seed 9). Times in s, in the order vic / mara / dez / juno /
+tito / player:
+
+| commit | times |
+|---|---|
+| 9070a6ca (opponent-pace) | 209.2 / 191.8 / 211.5 / DNF / DNF / 272.0 |
+| 12a721ca (round12, opponent-pace 0e84a9f7 merged) | 209.3 / 191.8 / 211.7 / 261.9 / 262.0 / 253.6 |
+| **6799200b** (ws/world 5558ac04: rest stops, row 153) | 241.8 / 218.3 / 221.9 / DNF / 307.6 / 299.0 |
+| e473c597, c81ecd99 | identical to 6799200b |
+| b20e07b2 (opponent-pace merge), f5a9cd38, 41a7e401, 6e0639e1 | 263.9 / 222.8 / 231.9 / 265.0 / 266.8 / 251.6 |
+
+The lead's three suspects (c81ecd99, f5a9cd38, 41a7e401) change nothing. The ws/world range in
+6799200b is only the rest-stop commits: six more gores on Loop 9, so lane ids and the grid moved
+and traffic spawns and merges differently.
+
+**Traffic off** (`WP_PACE_DENSITY=0`, 12a721ca vs today's tip): every car within 1 s (kestrel_ts
+196.2 vs 196.1). The rest stops do not change the road the racers drive.
+
+**Seeds 1–8 with traffic** (`pace_sweep`, 12a721ca vs 6799200b, the same AI and harness):
+
+| skill | finishers before / after | mean time before / after (s) |
+|---|---|---|
+| 0.50 | 49/54 / 54/54 | 253.4 / 240.4 |
+| 0.95 | 51/54 / 49/54 | 242.2 / 224.6 |
+
+On average the field is 13–18 s faster with the rest stops. A single seed swings by 30–80 s
+either way, both before and after (for example seed 9, s95: vic 205 → 234 s, but dez 216 → 197 s).
+Seed 3 at s95 has 4 cars that do not finish; the 8-seed gate (`just pace-loop9`) covers that.
+
+**Decision.** Keep the s95 re-lock; its RON comment now names the cause. Nothing goes to ws/world.
+The b20e07b2 step on this seed (the front three 5–22 s slower, but all six finish) is the
+traffic-body fix and the box-in escape. They were measured over several seeds when they landed.
+
+## Loop 9 pace lock on seeds 1–8 (2026-10-22, lead)
+
+- **8-seed mean time.** `loop9_traffic_field_finishes` (`just pace-loop9`) now also checks the
+  mean time of the cars that finish, per skill, over seeds 1–8 against `LOOP9_MEAN_TIME_S`. The
+  range is the pace RON rule applied to the mean: today −15 % .. +15 % (+20 % at s50).
+- **Measured on round12 6e0639e1 + 55058973:** s50 48/48 finished, mean 242.0 s; s95 44/48
+  finished, mean 220.0 s. Caveat: s95 sits exactly on the 44/48 floor. It was 47/48 on 9070a6ca,
+  before the round12 merges, and the rest stops reshuffle the traffic draw per seed.
+- **Single-seed RONs widened.** `pace_loop9_circuit_s50/s95` now allow today's times −40 % .. +40 %
+  and best_ratio up to today's × 1.4. They only catch gross breakage; the RON comments point at
+  the 8-seed check.
+
+## Weaving v2, step 1: no phantom drift from a civilian holding its lane (2026-10-23)
+
+**Cause of most s95 Loop 9 DNFs.** On seed 1 at s95, three cars ran out of the finish window
+(`Dnf(FinishWindow)`), each losing 33–74 s behind civilians. A trace showed the cause. A
+civilian keeping its lane reads a few tenths of a m/s across the corridor (±0.37 m/s at
+27 m/s): the corridor's sampled direction differs from its lane's by about 0.8°. The 3 s
+civilian drift look-ahead in `overlaps` turned that into about a metre of drift into the next
+lane. A racer one lane over, even at the road edge (n −7.7 against a civilian at −3.6), was
+held at the civilian's speed for 50 s, and its overtakes never cleared it.
+
+**Fix.** A civilian whose speed across the corridor is below 2.5 % of its speed along it
+(`CIV_DRIFT_DEADBAND`, about 1.4°) gets no drift look-ahead. A fixed 0.6 m/s deadband was
+tried first and dropped: it also hid slow city cars pulling across, and Lantern s95 got 17 s
+slower on its pace seed. Test: `a_civilian_keeping_its_lane_next_to_mine_does_not_hold_me_up`
+fails without the fix.
+
+**Measured on round12 984bc3e4.**
+
+| race | skill | seeds | finishers before → after | mean time before → after (s) | walls |
+|---|---|---|---|---|---|
+| Loop 9 | 0.50 | 1–16 | 96/96 → 96/96 | 239.1 → 238.7 | 16 → 16 |
+| Loop 9 | 0.95 | 1–16 | 90/96 → 95/96 | 229.4 → 228.9 | 18 → 39 |
+| Loop 9 (`just pace-loop9`) | 0.50 / 0.95 | 1–8 | 48/48, 44/48 → 48/48, 48/48 | 242.0 / 220.0 → 245.2 / 229.5 | |
+
+City sprint, Grid highway, Hollins and Lantern, seeds 1–8 at s50 and s95: unchanged (Lantern
+s50 within 0.1 s). The s95 floor criterion (≥ 46/48 over seeds 1–8) is met: 48/48.
+
+**Caveat: walls.** With the fixed deadband, the extra walls were one car, sperber_32 on seed 13
+at s95. A racer hit it (`hit 2`) at about 40 m/s, it spun off to the right (n +16) and never
+rejoined: 30 rejoin and reverse cycles until the window closed, 36 wall contacts. The speed-scaled
+run has the same total; its per-car split was not checked. This is a rejoin problem off the road
+after a spin, not this fix's code. It is a follow-up.
+
+## Stranded AI racers are put back on the course (2026-10-23, lead)
+
+**The case.** On Loop 9 at s95, seed 13, sperber_32 was hit by a racer at about 40 m/s near
+s 1490 on the Hollins hill. It spun off the right edge of the embankment and fell about 29 m
+down the bank (z 57 → 28). For the rest of the race it drove straight back at the road, stalled
+on a slope of about 25° 24 m short of it, and rolled 80 m back down: 30 rejoins.
+
+Its 36 walls were 19 during the crash and 17 bumps at the foot of the bank. Over 16 seeds of
+Loop 9 at both skills, every other car had at most 1 rejoin.
+
+**Tried and dropped (local only).** A climb planner: on a stalled rejoin, aim for the road-edge
+point (300 m back to 300 m ahead) with the gentlest straight-line climb, from the world's ground
+heights. No point along those 600 m was under 0.21 grade; the road sits on a steep embankment
+there. The car still made 36 rejoins.
+
+**Fix (lead's option (b)).** The judge's off-course reset (round 12, row 127: `CourseReset` to the
+last on-course point) now also covers the AI entrants: `RaceJudge::set_stranded_reset`. An AI
+racer outside the corridor (half-width + margin) for `STRANDED_GRACE_S` = 20 s is reset, even
+with resets off. Until then it keeps trying to rejoin.
+
+- **Who:** picker races (`LiveRace::new`) list the AI entrants only. The player's car keeps the
+  owner's picker-race rule: take any line, never a reset, autopilot or not.
+- **Browser:** the session already moves every `CourseReset` with `reset_onto_course` (a clear
+  lane spot, `ResetAt` + `Ghost` ops, damage kept). `LiveRace::relocate` now also tells the AI
+  (`AiEntrants::relocate` → `Field::relocate`: re-projected within 1.5 km, progress adjusted,
+  back to Follow from rest).
+- **Harnesses:** the pace and race_picker harnesses place the car on the ground at the reset
+  point and ghost it for 1 s.
+- **Test:** `a_stranded_ai_racer_is_put_back_after_its_grace_and_the_player_is_not`.
+
+**Measured on round12 984bc3e4 + this branch.**
+
+| | before | after |
+|---|---|---|
+| Loop 9 s95, 16 seeds: finishers | 95/96 | 96/96 |
+| Loop 9 s95, 16 seeds: walls | 39 | 22 |
+| Loop 9 s95, 16 seeds: mean time | 228.9 s | 230.0 s |
+| Loop 9 s50, 16 seeds | 96/96, 238.7 s, 16 walls | identical |
+| most rejoins by one car, Loop 9, 32 races | 30 | 2 |
+| `just pace-loop9` | 48/48, 48/48 | 48/48, 48/48 (means 245.2 / 229.5 s) |
+
+Exactly one reset fired in Loop 9 (seed 13, at t = 70.8 s). sperber_32 now finishes in 278.8 s
+with 19 walls (the crash) and 1 rejoin. City sprint, Grid highway, Hollins and Lantern over
+seeds 1–8: identical, with no resets. Goldens: all 115 unchanged (no reset fires in them),
+so there is nothing to bless.
+
+**Open, not this change.** On Hollins s95 seed 3, shiro_turbo has 17 rejoins and lindwurm_4t
+has 15, and neither finishes. This was already so before; they stay inside the corridor, so no
+reset fires. It is a follow-up.
+
+## Hollins rejoin loops: no run-off past the finish (2026-10-23, lead)
+
+**Cause.** Hollins was the only picker race with no AI run-off. Its route ended at the Knob
+Observatory Lot, 8 m before the end of a dead-end lane. `run_off_route` found nothing straight on,
+and nothing round a corner within 200 m. wp_opponent parks a finisher in the last 25 m of its
+corridor, so the winner stopped on the finish line itself, in the lot entrance where parked cars
+with hazard lights stand.
+
+The cars behind stopped 0.5–2 m short of the line, looped through rejoin and reverse cycles
+(14–17 each) and were DNF on the finish window. This hit s95 seeds 3 and 12, and s50 seed 12.
+
+**Fix 1: the layout (lead-approved, PLAYTEST_LOG "lead 2026-10-23").** The judged Hollins finish is
+now 60 m short of the lot (`CourseSpec::PoiRoute { finish_back_m: 60 }`; the course is 941 m, was
+1001 m). The road into the lot is the AI run-off (86 m), as every other race has. The race scenario
+file is unchanged (same grid). `length_hint_m` is 941. The Hollins pace RONs are re-locked by the
+rule (times about 3–4 s shorter, best_ratio unchanged).
+
+**Fix 2: safety net (wp_opponent, 610f5b0d).** A finisher whose corridor ends at the finish line
+(no run-off) rolls on 15 m past the end at up to 5 m/s, towards the kerb, before pulling over. It
+does not "rejoin" back to the corridor. Test:
+`a_finisher_rolls_on_past_a_corridor_that_ends_at_the_line_before_parking`.
+
+**Tried and dropped.** Giving a finisher a run-off round a corner (no short one exists; a 2.2 km
+detour broke the race). Letting a finisher go round anything standing (worse).
+
+**Measured** (Hollins, 16 seeds per skill, against f46ea8be):
+
+| skill | finishers before → after | mean time before → after (s) | walls | most rejoins by one car |
+|---|---|---|---|---|
+| 0.50 | 61/64 → 64/64 | 66.9 → 64.7 | 0 → 2 | 18 → ≤ 3 |
+| 0.95 | 59/64 → 64/64 | 63.4 → 61.2 | 19 → 16 | 17 → 4 |
+
+The times are shorter because the course is 60 m shorter. City sprint, Grid highway, Lantern and
+Loop 9 over seeds 1–8 are identical. Goldens: all 115 unchanged (the race scenario file only holds
+the grid), so there is nothing to bless. Gate clean.

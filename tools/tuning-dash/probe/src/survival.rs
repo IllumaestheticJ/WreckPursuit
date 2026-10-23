@@ -191,13 +191,19 @@ mod tests {
     }
 
     #[test]
-    fn simulation_totals_at_or_below_arcade_speed() {
+    fn extreme_totals_at_or_below_simulation_and_arcade_speed() {
         let car = sedan();
+        let ext =
+            single_hit_total_loss_kmh(&car, &mode(wp_contracts::DamageMode::Extreme), &FRONTAL);
         let sim =
             single_hit_total_loss_kmh(&car, &mode(wp_contracts::DamageMode::Simulation), &FRONTAL);
         let arc =
             single_hit_total_loss_kmh(&car, &mode(wp_contracts::DamageMode::Arcade), &FRONTAL);
-        let sim = sim.expect("a rigid barrier totals the sedan in Simulation below 200 km/h");
-        assert!(arc.is_none_or(|a| a >= sim), "sim {sim} arcade {arc:?}");
+        let ext = ext.expect("a rigid barrier totals the sedan in Extreme below 200 km/h");
+        assert!(sim.is_none_or(|s| s >= ext), "extreme {ext} sim {sim:?}");
+        assert!(arc.is_none_or(|a| a >= ext), "extreme {ext} arcade {arc:?}");
+        if let (Some(s), Some(a)) = (sim, arc) {
+            assert!(a >= s, "sim {s} arcade {a}");
+        }
     }
 }

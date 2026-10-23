@@ -92,6 +92,17 @@ const PORTAL_HOLD_M: f32 = 30.0;
 
 /// A searching unit moves on to the next junction around the last known position this often, s.
 const SEARCH_SWEEP_S: f32 = 10.0;
+/// Search area (row 84): junctions this far from the last known position from the start...
+const SEARCH_REACH_MIN_M: f32 = 150.0;
+/// ...growing with the time unseen at this share of its last known speed (at least
+/// [`SEARCH_REACH_MIN_MPS`]: a racer that stopped can drive off again)...
+const SEARCH_REACH_FRAC: f32 = 0.5;
+/// See [`SEARCH_REACH_FRAC`], m/s.
+const SEARCH_REACH_MIN_MPS: f32 = 12.0;
+/// ...up to this, m.
+const SEARCH_REACH_MAX_M: f32 = 700.0;
+/// Search points handed out (predicted exits first, then nearest junctions).
+const SEARCH_MAX_POINTS: usize = 16;
 
 /// Braking a shadowing unit plans with when closing on its gap behind the racer, m/s².
 const SHADOW_CLOSE_DECEL_MPS2: f32 = 4.0;
@@ -887,18 +898,37 @@ impl PoliceSystem {
         let mut nodes = vec![first];
         let v = rec.last_known_vel;
         let speed = crate::graph::len(v);
+        let sweep = (rec.los_lost_s / SEARCH_SWEEP_S) as usize;
+        // Row 84, a growing sweep: the area it can have reached grows with the time unseen
+        // (stepped every SEARCH_SWEEP_S, so units are not re-routed every tick).
+        let reach = (SEARCH_REACH_MIN_M
+            + speed.max(SEARCH_REACH_MIN_MPS)
+                * SEARCH_REACH_FRAC
+                * (sweep as f32 * SEARCH_SWEEP_S))
+            .min(SEARCH_REACH_MAX_M);
+        // Its likely exits first: the junctions along its predicted road...
         if speed > STOPPED_RACER_MPS {
-            let path = self.graph.predict_path(p, v, (speed * 12.0).max(120.0));
-            for leg in path.legs.iter().take(4) {
+            let path = self
+                .graph
+                .predict_path(p, v, reach.max(speed * 12.0).max(120.0));
+            for leg in path.legs.iter().take(8) {
                 nodes.push(self.graph.other_end(leg.segment, leg.from_node));
             }
         }
         for &(_, n) in self.graph.outgoing(first) {
             nodes.push(n);
         }
+        // ...then every junction within reach, nearest first.
+        let mut around: Vec<(f32, u32)> = (0..self.graph.nodes.len() as u32)
+            .filter(|&n| self.graph.nodes[n as usize].junction)
+            .map(|n| (dist(self.graph.nodes[n as usize].pos, p), n))
+            .filter(|(d, _)| *d <= reach)
+            .collect();
+        around.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        nodes.extend(around.into_iter().map(|(_, n)| NodeId(n)));
         let mut seen = std::collections::BTreeSet::new();
         nodes.retain(|n| seen.insert(*n));
-        let sweep = (rec.los_lost_s / SEARCH_SWEEP_S) as usize;
+        nodes.truncate(SEARCH_MAX_POINTS);
         let n = nodes[(ordinal + sweep) % nodes.len()];
         Some((n, self.graph.node(n).pos))
     }
@@ -1986,7 +2016,7 @@ mod tests {
     }
 
     #[test]
-    fn helicopter_joins_at_level_3_keeps_visual_and_loses_it_under_an_overpass() {
+    fn helicopter_joins_at_level_5_keeps_visual_and_loses_it_under_an_overpass() {
         // Both grade separations: the overpass and the underpass (in a cutting).
         for crossing in 0..2 {
             helicopter_over_crossing(crossing);
@@ -2019,15 +2049,15 @@ mod tests {
             }
         };
         run(&mut p, open, 0.5);
-        // Wanted level 2 with a pursuit on: no helicopter.
-        p.set_heat(racer, 30.0);
-        assert_eq!(p.wanted_level(racer), WantedLevel::L2);
+        // Wanted level 4 with a pursuit on: no helicopter (it joins at level 5, owner row 156).
+        p.set_heat(racer, 75.0);
+        assert_eq!(p.wanted_level(racer), WantedLevel::L4);
         p.start_pursuit(racer, UnitId(999));
         run(&mut p, open, 3.0);
         assert!(p.helicopters().is_empty());
-        // Level 3: the AI captain calls it in; it flies over and has visual.
-        p.set_heat(racer, 60.0);
-        assert_eq!(p.wanted_level(racer), WantedLevel::L3);
+        // Level 5: the AI captain calls it in; it flies over and has visual.
+        p.set_heat(racer, 95.0);
+        assert_eq!(p.wanted_level(racer), WantedLevel::L5);
         run(&mut p, open, 6.0);
         let h = p.helicopters();
         assert_eq!(h.len(), 1, "{:?}", p.stats());
@@ -2040,7 +2070,7 @@ mod tests {
         let said = |p: &PoliceSystem, what: &str| p.radio_log().any(|l| l.text.contains(what));
         let log = |p: &PoliceSystem| p.radio_log().map(|l| l.text.clone()).collect::<Vec<_>>();
         // The radio speaks one line at a time, so the helicopter's lines may wait for the
-        // channel (the level-3 call is still on the air); critical lines are never dropped.
+        // channel (the level-5 call is still on the air); critical lines are never dropped.
         // `go(p, at, secs, what)`: `secs` at `at`, then on until `what` is said (<= 20 s).
         let mut go = |p: &mut PoliceSystem, at: [f32; 3], secs: f32, what: &str| {
             run(p, at, secs);

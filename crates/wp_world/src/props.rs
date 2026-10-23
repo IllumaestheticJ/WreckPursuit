@@ -10,7 +10,7 @@ use wp_math::Rng;
 
 use crate::geom::{self, V2, V3};
 use crate::map::CityMap;
-use crate::network::{DecorKind, DistrictKind, LaneKind};
+use crate::network::{DecorKind, DistrictKind, LaneKind, PoiKind};
 
 /// Kind of static prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -19,6 +19,9 @@ pub enum PropKind {
     ParkedCar,
     /// A traffic cone (light, knockable).
     Cone,
+    /// A precast concrete K-rail section (touge outboard barrier: heavy, shoved aside by a hard
+    /// hit).
+    KRail,
 }
 
 /// A static prop.
@@ -112,12 +115,10 @@ impl ParkingTable {
 /// (everything except the lane-end clearance, which the caller applies along the lane).
 fn parking_allowed(map: &CityMap, t: &ParkingTable, p: V3) -> bool {
     let q = geom::xy(p);
-    if map
-        .net
-        .pois
-        .iter()
-        .any(|poi| geom::dist(geom::xy(poi.pos), q) < t.poi_clear_m)
-    {
+    // A rest stop is a place to park (its site sits on the parking road's travel lane).
+    if map.net.pois.iter().any(|poi| {
+        poi.kind != PoiKind::RestStop && geom::dist(geom::xy(poi.pos), q) < t.poi_clear_m
+    }) {
         return false;
     }
     if map.covered_at(p).is_some() {
@@ -153,10 +154,18 @@ pub(crate) fn clear_of_decor(map: &CityMap, p: V2, f: V2) -> bool {
     !map.net.decor.iter().any(|d| {
         let (hl, hw) = match d.kind {
             DecorKind::Driveway => return false,
-            DecorKind::StreetTree | DecorKind::YardTree => {
+            DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => {
                 (crate::residential::TRUNK_R_M, crate::residential::TRUNK_R_M)
             }
-            DecorKind::Hedge | DecorKind::Fence => (d.size[1] * 0.5, d.size[0] * 0.5),
+            // Solid boxes, as `wp_sim::physics::decor_collider` builds them (Ashpeak County
+            // adds cranes, barriers, site fences, hay bales and billboards).
+            DecorKind::Hedge
+            | DecorKind::Fence
+            | DecorKind::Crane
+            | DecorKind::JerseyBarrier
+            | DecorKind::SiteFence
+            | DecorKind::HayBale
+            | DecorKind::Billboard => (d.size[1] * 0.5, d.size[0] * 0.5),
         };
         let c = [d.pos[0], d.pos[1]];
         geom::dist(c, p) < hl + 3.0
@@ -184,10 +193,19 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
     let mut rng = Rng::new(seed ^ 0x9A2C_ED00);
     let mut out = Vec::new();
     let half = table.car_length_m * 0.5;
+    // Rest stops (their site's road): a cluster always starts, so each has a few cars.
+    let rest_roads: Vec<u32> = map
+        .net
+        .pois
+        .iter()
+        .filter(|p| p.kind == PoiKind::RestStop)
+        .filter_map(|p| p.lane.map(|l| map.net.lanes[l as usize].road))
+        .collect();
     for (i, l) in map.net.lanes.iter().enumerate() {
         if l.kind != LaneKind::Parking || l.speed_limit_mps > table.max_speed_mps {
             continue;
         }
+        let rest = rest_roads.contains(&l.road);
         let seg = &map.segs[i];
         let lo = table.junction_clear_m + half;
         let hi = seg.length - table.junction_clear_m - half;
@@ -201,7 +219,7 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
         while s <= hi {
             let (p, _) = seg.point_at(s);
             let d = table.district(map.district_at(geom::xy(p)));
-            if !rng.chance(d.start * scale) {
+            if !rest && !rng.chance(d.start * scale) {
                 s += table.slot_m;
                 continue;
             }
@@ -389,7 +407,8 @@ mod tests {
         }
         for c in &cars {
             let q = geom::xy(c.pos);
-            for poi in &map.net.pois {
+            // Rest stops are places to park (row 153).
+            for poi in map.net.pois.iter().filter(|p| p.kind != PoiKind::RestStop) {
                 assert!(geom::dist(geom::xy(poi.pos), q) >= t.poi_clear_m, "{poi:?}");
             }
             assert!(map

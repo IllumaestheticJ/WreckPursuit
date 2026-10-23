@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_lantern_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 a050a9e8c19375a2
-480 39a0ee6128acfbae
-720 a69a7848b9fc9844
-960 462d71aae7d6fe61
-1200 d7460b5d76bc8729
-1440 b6402254d0ae61c9
-1680 18ab07f02da12c93
-1920 e64dc14f200da405
-2160 2d07aebac1d9ae07
-2400 19fe29ca4fc16249
+# simcli hashes scenario=race_lantern_checkpoint systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 f27987a6a31263bc
+480 f84803b93ddd6057
+720 244153c99c77434e
+960 9a05a6edfc774ec4
+1200 0f1b314de3057388
+1440 ccd3abb4ddac47da
+1680 6f0a5f29f80ab26d
+1920 f1b438703e19b88e
+2160 ca7fd95f3165ed6c
+2400 e7e6f6051b027750

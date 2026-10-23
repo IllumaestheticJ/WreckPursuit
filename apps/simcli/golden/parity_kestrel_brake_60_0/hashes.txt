@@ -1,6 +1,6 @@
-# simcli hashes scenario=parity_kestrel_brake_60_0 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 c7165cf6c08a16e3
-480 f44fd34eaec42d55
-720 8206e65369d98b58
-960 9478b8451b7e7587
-1200 fb195180b2fd818f
+# simcli hashes scenario=parity_kestrel_brake_60_0 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.4.1
+240 d3fd55d77d4496f5
+480 b6af9e9bd945a5b0
+720 7d1b3e562f993e9d
+960 0ca36c32d76a3ec8
+1200 c19d2eabae79fd14

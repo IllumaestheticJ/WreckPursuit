@@ -20,7 +20,7 @@ changes, the data file wins; update this page.
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| Entry point | **city chase** button in the testbed's scenario panel | `apps/testbed-web/src/main.ts` `startCityChase` → `wp_wasm::city_chase_json` |
+| Entry point | **night run** button in the testbed's scenario panel | `apps/testbed-web/src/main.ts` `startNightRun` → `wp_wasm::night_run_json` |
 | City | `procedural_12x12`: a 12 × 12 grid, 110 m blocks, about 1.5 × 1.5 km of streets | `data/city/procedural_12x12.*` |
 | Start | City centre, on the north–south highway, facing north, **already doing 108 km/h** (30 m/s) | `wp_wasm::scenario::city_chase` (`pos = [0,0,0]`, `CITY_CHASE_SPEED_MPS`) |
 | Clock | 23:00, running 10× (five real minutes ≈ 50 game minutes, so night the whole demo) | `city_chase`: `time_of_day_h = 23`, `time_ratio = 10` |

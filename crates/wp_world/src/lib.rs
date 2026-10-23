@@ -13,6 +13,8 @@
 //! - [`drive`]: the shared AI driving controller (pure pursuit + PID) used by physical
 //!   traffic, racers (`wp_opponent`) and police.
 //! - [`covered`]: tunnels and covered roads (line of sight in and out is blocked).
+//! - [`progression`]: career time budget — day free roam / night racing shifts, activity
+//!   time costs (garage, repairs), dusk/dawn transitions driving the [`clock`].
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -33,6 +35,7 @@ pub mod map;
 pub mod markings;
 pub mod network;
 pub mod procgen;
+pub mod progression;
 pub mod props;
 pub mod residential;
 pub mod roads;
@@ -40,6 +43,7 @@ pub mod routes;
 pub mod signals;
 pub mod surface;
 pub mod terrain;
+pub mod touge;
 pub mod traffic;
 pub mod vesper;
 pub mod violations;
@@ -55,6 +59,7 @@ use wp_math::StateHasher;
 pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
 pub use map::{CityMap, SegId};
 pub use network::{RoadError, RoadNetwork};
+pub use progression::{Activity, Shift, TimeEvent, TimeProgression, TimeRules};
 pub use props::{PropKind, StaticProp};
 pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
@@ -62,6 +67,7 @@ pub use traffic::{
     AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
     TrafficStats, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
 };
+pub use vesper::ashpeak;
 pub use violations::{ViolationConfig, ViolationTracker};
 
 use traffic::{Traffic, TrafficInputs};
@@ -205,10 +211,29 @@ impl World {
         Self::new(procgen::generate(pg), cfg)
     }
 
+    /// Generate built-in touge pass `id` (`touge::TOUGE_IDS`) in memory: one sealed mountain
+    /// road with its terrain, walls and destructible K-rail props. `None` for an unknown id.
+    pub fn touge(id: &str, cfg: WorldConfig) -> Option<Self> {
+        let build = touge::generate_builtin(id)?;
+        let mut w = Self::new(build.net, cfg);
+        w.road_names = vec![build.track.name.clone()];
+        w.parked.extend(build.krails);
+        Some(w)
+    }
+
     /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
     /// Road names come from the generator ([`World::road_names`]).
     pub fn vesper(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
         let (net, report) = vesper::generate_with_report(vc);
+        let mut w = Self::new(net, cfg);
+        w.road_names = report.road_names.iter().map(|n| n.to_string()).collect();
+        w
+    }
+
+    /// Generate Port Vesper + Ashpeak County (`ashpeak::CITY_ID`) in memory: Port Vesper with
+    /// the mountains, metro, farmland and freeways around it. Road names as [`World::vesper`].
+    pub fn ashpeak(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
+        let (net, report) = ashpeak::generate_with_report(vc);
         let mut w = Self::new(net, cfg);
         w.road_names = report.road_names.iter().map(|n| n.to_string()).collect();
         w
@@ -379,6 +404,22 @@ impl World {
         &self.map.net
     }
 
+    /// Highway rest stops (Port Vesper's Loop 9 pull-offs, playtest row 153): named sites in
+    /// the middle of each lit parking road, for night meets and races. Pose = on the parking
+    /// lane, facing its travel direction; `lane` is that lane. Empty on maps without any.
+    pub fn rest_stops(&self) -> impl Iterator<Item = &network::Poi> + '_ {
+        self.map
+            .net
+            .pois
+            .iter()
+            .filter(|p| p.kind == network::PoiKind::RestStop)
+    }
+
+    /// The rest stop named `name` ([`World::rest_stops`]).
+    pub fn rest_stop(&self, name: &str) -> Option<&network::Poi> {
+        self.rest_stops().find(|p| p.name == name)
+    }
+
     /// Road-level graph (nodes, roads with class/limit/one-way/district, POIs, building
     /// bounds) for police routing and minimaps. Built on each call; cache it.
     pub fn road_graph(&self) -> RoadGraphView {
@@ -434,8 +475,17 @@ impl World {
     /// dropped the spots where a car cannot stand (`wp_sim::Sim::set_world` on a city with
     /// terrain). Every reader of [`World::static_props`] (police obstacles, resets) then sees
     /// exactly the cars the sim has. Scenario setup, before the first tick.
+    /// Other props in the parked list (touge K-rails, [`World::touge`]) are kept, after the
+    /// cars, in their order (the sim inserts them after the parked cars as well).
     pub fn set_parked_cars(&mut self, cars: Vec<StaticProp>) {
+        let others: Vec<StaticProp> = self
+            .parked
+            .iter()
+            .filter(|p| p.kind != PropKind::ParkedCar)
+            .copied()
+            .collect();
         self.parked = cars;
+        self.parked.extend(others);
     }
 
     /// Active routes.
@@ -485,6 +535,18 @@ impl World {
         finish: [f32; 3],
     ) -> Option<Route> {
         routes::plan_route(&self.map, start, heading, finish)
+    }
+
+    /// Plan a lane-legal route from `start` through the waypoints `via` in order to `finish`
+    /// ([`routes::plan_route_via`]).
+    pub fn plan_route_via(
+        &self,
+        start: [f32; 3],
+        heading: Option<[f32; 2]>,
+        via: &[[f32; 2]],
+        finish: [f32; 3],
+    ) -> Option<Route> {
+        routes::plan_route_via(&self.map, start, heading, via, finish)
     }
 
     /// Plan a closed circuit through polygon vertices.

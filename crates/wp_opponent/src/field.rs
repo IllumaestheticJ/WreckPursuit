@@ -370,6 +370,10 @@ struct Racer {
     /// Time an overtake has been held below pace by a car other than its target, s.
     pass_blocked_s: f32,
     stuck_s: f32,
+    /// Boxed in nose-to-tail against a car standing for good: the car, the lateral position
+    /// beside it I am working towards (reverse with the nose swinging out, creep forward,
+    /// repeat), and how long I have been at it, s.
+    escape: Option<(Who, f32, f32)>,
     /// Stuck and wanting to back out, but something stands right behind me (the car there
     /// backs off for me).
     wants_room: bool,
@@ -633,6 +637,25 @@ const WEAVE_GAIN_M: f32 = 20.0;
 /// one lane of mine), m.
 const WEAVE_MIN_SPAN_M: f32 = 3.0;
 
+/// A civilian whose speed across the corridor is below this fraction of its speed along it
+/// (about 1.4°) is read as keeping its lane (no drift look-ahead): the corridor's sampled
+/// direction differs from its lane's by about that much. Loop 9 at 23:00: a civilian in the
+/// next lane reading ±0.37 m/s across the corridor at 27 m/s held racers at its speed for
+/// 50 s, a metre of phantom drift over 3 s. Scaled with speed, so a slow city car pulling
+/// across still counts.
+const CIV_DRIFT_DEADBAND: f32 = 0.025;
+
+/// How far along the corridor a relocated racer is looked for, either way, m.
+const RELOCATE_WINDOW_M: f32 = 1500.0;
+
+/// A finished racer whose corridor ends at the finish line rolls on this far past it before
+/// pulling over, m, at most this fast, m/s.
+const FINISH_CLEAR_M: f32 = 15.0;
+const FINISH_CLEAR_MPS: f32 = 5.0;
+/// A corridor that runs on less than this past the finish has no run-off leg (it ends at the
+/// line, give or take its sampling), m.
+const NO_RUN_OFF_M: f32 = 5.0;
+
 /// Lateral step between the pass positions tried beside a car (about a lane), m.
 const PASS_LANE_STEP_M: f32 = 3.5;
 
@@ -642,6 +665,19 @@ const THREE_WIDE_MIN_ROAD_M: f32 = 10.0;
 
 /// An overtake held below pace by a car other than its target this long ends (re-plan), s.
 const OVERTAKE_BLOCKED_S: f32 = 1.0;
+
+/// A sim vehicle this close to a physical traffic agent is that agent's body, m.
+const TRAFFIC_BODY_MATCH_M: f32 = 1.0;
+
+/// Gap a reversing racer keeps to a car standing behind it for good (parked or out of the
+/// race), m.
+const REVERSE_STANDING_GAP_M: f32 = 1.0;
+/// Escape from a box-in: lateral clearance to the standing car aimed for beside it, m.
+const ESCAPE_CLEAR_M: f32 = 0.4;
+/// Escape from a box-in: held at a standstill behind a car standing for good this long, s.
+const ESCAPE_AFTER_S: f32 = 3.0;
+/// Escape from a box-in: given up (back to normal driving) after this long, s.
+const ESCAPE_MAX_S: f32 = 30.0;
 
 /// Lane-splitting: room needed between two cars abreast beyond my own width, m (0.4 m a
 /// side).
@@ -778,6 +814,7 @@ impl Field {
                 blocked_s: 0.0,
                 pass_blocked_s: 0.0,
                 stuck_s: 0.0,
+                escape: None,
                 wants_room: false,
                 stable_s: 0.0,
                 defended: false,
@@ -826,15 +863,28 @@ impl Field {
         }
     }
 
-    /// Build a field on a `wp_world` route.
+    /// Build a field on a `wp_world` route. Panics on a route with nothing to drive (see
+    /// [`Field::try_from_route`]).
     pub fn from_route(
         world: &World,
         route: &wp_world::Route,
         specs: &[RacerSpec],
         config: RaceConfig,
     ) -> Self {
-        let corridor = Corridor::from_route(world.map(), route, &config.corridor);
-        Self::new(corridor, specs, config)
+        Self::try_from_route(world, route, specs, config).expect("route with no length")
+    }
+
+    /// Build a field on a `wp_world` route, or `None` when the route has nothing to drive
+    /// (no length, or a one-segment route whose end lies behind its start: row 154, where the
+    /// panic froze the browser).
+    pub fn try_from_route(
+        world: &World,
+        route: &wp_world::Route,
+        specs: &[RacerSpec],
+        config: RaceConfig,
+    ) -> Option<Self> {
+        let corridor = Corridor::try_from_route(world.map(), route, &config.corridor)?;
+        Some(Self::new(corridor, specs, config))
     }
 
     /// The race corridor.
@@ -1078,6 +1128,42 @@ impl Field {
             }
         }
         self.still = next;
+    }
+
+    /// The server moved racer `entity` on purpose (a reset back onto the course after being
+    /// stranded off it): find it on the corridor again near `pos` (a reset can move it
+    /// hundreds of metres back), count the move in its progress, and drive on from rest.
+    pub fn relocate(&mut self, entity: EntityId, pos: V2) {
+        let Some(k) = self.racer_index(entity) else {
+            return;
+        };
+        if self.racers[k].progress.is_nan() {
+            return;
+        }
+        let corridor = match &self.racers[k].flight {
+            Some(f) => &f.corridor,
+            None => &self.corridor,
+        };
+        let window = (RELOCATE_WINDOW_M / CORRIDOR_STEP_M) as usize;
+        let cp = corridor.project(pos, Some(self.racers[k].hint), window);
+        let ds = corridor.delta_s(self.racers[k].s, cp.s);
+        let r = &mut self.racers[k];
+        if r.flight.is_none() {
+            r.progress += ds;
+        }
+        r.pos = pos;
+        r.s = cp.s;
+        r.n = cp.n;
+        r.n_cmd = cp.n;
+        r.hint = cp.index;
+        r.tactic = Tactic::Follow;
+        r.tactic_ticks = 0;
+        r.stuck_s = 0.0;
+        r.stable_s = 0.0;
+        r.escape = None;
+        r.wants_room = false;
+        r.throttle = 0.0;
+        r.ctrl.resync(0.0);
     }
 
     fn racer_index(&self, e: EntityId) -> Option<usize> {
@@ -1529,7 +1615,11 @@ impl Field {
     fn perceive_all(&mut self, world: &World, vehicles: &[VehicleObs]) -> Vec<Obstacle> {
         let mut out = Vec::new();
         let range = self.racers.iter().fold(0.0f32, |m, r| m.max(r.ahead_m())) + 20.0;
+        let bodies = traffic_bodies(world);
         for v in vehicles {
+            if self.racer_index(v.entity).is_none() && is_traffic_body(&bodies, v) {
+                continue;
+            }
             let who = match self.racer_index(v.entity) {
                 Some(k) => {
                     let r = &self.racers[k];
@@ -1596,8 +1686,11 @@ impl Field {
     ) -> Vec<Obstacle> {
         let me = &self.racers[k];
         let mut out = Vec::new();
+        let bodies = traffic_bodies(world);
         for v in vehicles {
-            if v.entity == me.entity {
+            if v.entity == me.entity
+                || (self.racer_index(v.entity).is_none() && is_traffic_body(&bodies, v))
+            {
                 continue;
             }
             let pos = geom::xy(v.state.pos);
@@ -1828,6 +1921,15 @@ fn decide_racer(
             r.status,
             RacerStatus::Finished { .. } | RacerStatus::Disqualified
         );
+        // Finished where the corridor ends at the finish line itself (no run-off leg: Hollins
+        // finishes in the Knob Observatory Lot): roll on straight past the end into the space
+        // beyond before pulling over. Stopped on the line, the winner held the three behind it
+        // short of it until the finish window closed (s95 seed 3, 15-17 rejoins each).
+        let no_run_off =
+            !corridor.closed && finish_m.is_none_or(|f| f >= corridor.length_m - NO_RUN_OFF_M);
+        let clearing_line = matches!(r.status, RacerStatus::Finished { .. })
+            && no_run_off
+            && r.s_rel < corridor.length_m + FINISH_CLEAR_M;
         r.wide_on = match wide {
             Some((wl, wp)) if !fleeing && !finished_or_dq && r.flight.is_none() => {
                 let a_brk = wp.a_brake.max(3.0);
@@ -2046,8 +2148,14 @@ fn decide_racer(
             let on_grid = r.laps_done == 0 && r.progress < 30.0;
             let off =
                 !on_grid && (r.n < road_lo.min(pass_lo) - 1.0 || r.n > road_hi.max(pass_hi) + 1.0);
+            // Finished and past the open end of the corridor (clearing the finish line): that
+            // is meant to be off it, not a reason to drive back to it.
+            let past_end = matches!(r.status, RacerStatus::Finished { .. })
+                && !corridor.closed
+                && r.s_rel > corridor.length_m - 1.0;
             if r.tactic != Tactic::Reverse
                 && r.tactic != Tactic::Rejoin
+                && !past_end
                 && (off || heading_cos < 0.5)
             {
                 r.tactic = Tactic::Rejoin;
@@ -2058,7 +2166,7 @@ fn decide_racer(
             if v > 1.0 {
                 r.wants_room = false;
             }
-            let wants_to_move = v_line(r.s) > 3.0;
+            let wants_to_move = v_line(r.s) > 3.0 || clearing_line;
             let held_by_car = rel
                 .iter()
                 .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
@@ -2080,13 +2188,14 @@ fn decide_racer(
             // 0.9 m behind a busted car and waited there for the rest of the race).
             // A racer out of the race standing there is as good as parked (Loop 9 with police:
             // a racer nosed up to a captured one waited behind it for the rest of the race).
-            let nosed_up = rel.iter().any(|x| {
+            let nosed_to = rel.iter().find(|x| {
                 let standing_out = x.o.out_of_race && x.o.v_s.abs() < 0.5;
                 x.ds > 0.0
                     && (x.o.parked || standing_out)
                     && x.gap < CREEP_STOP_GAP_M + if standing_out { 1.5 } else { 0.5 }
                     && (x.o.n - r.n).abs() < hw + x.o.half_w + if standing_out { 0.5 } else { 0.0 }
             });
+            let nosed_up = nosed_to.is_some();
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
                 && wants_to_move
@@ -2103,6 +2212,35 @@ fn decide_racer(
                 // Nose to nose, or nosed up to a parked car: back out far enough to steer
                 // round it (a car needs ~5 m of travel to move 1.5 m sideways).
                 r.reverse_s = if head_on || nosed_up { 3.0 } else { 1.6 };
+                // Nosed up to a car standing for good: pick the side with more room beside it
+                // and work towards it over as many reverse / creep cycles as it takes (Lantern
+                // police, seeds 5 and 31: boxed in between captured cars, 0.4 m ahead and
+                // 2.4 m behind, a straight reverse and back to the line went nowhere).
+                if let Some(x) = nosed_to {
+                    r.escape = escape_beside(r, x, hw, &pass_limits);
+                }
+            }
+            // Held at a standstill behind a car standing for good, with no pass that fits (a
+            // pass wants its full margin): squeeze past it with the escape clearance instead
+            // (Lantern police seed 31: 3.4 m behind one captured car with another alongside,
+            // 12 000 passes refused for room).
+            if r.escape.is_none() && v.abs() < 1.0 && r.blocked_s > ESCAPE_AFTER_S {
+                if let Some(x) = rel.iter().find(|x| {
+                    x.ds > 0.0
+                        && x.gap < 8.0
+                        && standing_for_good(&x.o)
+                        && r.debug.limit == SpeedLimit::Obstacle(who_id(x.o.who))
+                }) {
+                    r.escape = escape_beside(r, x, hw, &pass_limits);
+                }
+            }
+            // An escape ends once I am past that car (or it has gone, or it is taking long).
+            if let Some((who, n, age)) = r.escape {
+                let past = rel
+                    .iter()
+                    .find(|x| x.o.who == who)
+                    .is_none_or(|x| x.ds < -(hl + x.o.half_len));
+                r.escape = (!past && age < ESCAPE_MAX_S).then_some((who, n, age + dt));
             }
             // The car right in front of me is stuck and cannot back out because I stand
             // behind it: back off for it (otherwise both wait for good).
@@ -2236,9 +2374,18 @@ fn decide_racer(
             Tactic::Reverse => {
                 // Never back into anything: stop reversing when something is close behind in
                 // the band I occupy.
+                // A car standing behind for good (parked, or out of the race) will not move into
+                // me: back up to a metre from it (boxed in between captured cars with 2.4 m
+                // behind, a 4 m rule left no reverse at all).
                 let blocked_behind = rel.iter().any(|x| {
+                    let standing = (x.o.parked || x.o.out_of_race) && x.o.v_s.abs() < 0.5;
+                    let keep = if standing {
+                        REVERSE_STANDING_GAP_M
+                    } else {
+                        4.0
+                    };
                     x.ds < 0.0
-                        && x.gap < 4.0 + 1.0 * (-v).max(0.0)
+                        && x.gap < keep + 1.0 * (-v).max(0.0)
                         && (x.o.n - r.n).abs() < hw + x.o.half_w + 1.2
                 });
                 // Cut short by something behind me: ask it for room.
@@ -2277,7 +2424,17 @@ fn decide_racer(
             } else {
                 0.5
             };
-            let drift = o.v_n * t_reach.min(horizon);
+            // A civilian keeping its lane reads a few tenths of a m/s across the corridor
+            // (the corridor's sampled direction against its lane's); over the 3 s look-ahead
+            // that is a metre of phantom drift into the next lane.
+            let v_n = if matches!(o.who, Who::Civilian(_))
+                && o.v_n.abs() < CIV_DRIFT_DEADBAND * o.v_s.abs()
+            {
+                0.0
+            } else {
+                o.v_n
+            };
+            let drift = v_n * t_reach.min(horizon);
             let lo = o.n.min(o.n + drift) - o.half_w - margin;
             let hi = o.n.max(o.n + drift) + o.half_w + margin;
             band.0 < hi && band.1 > lo
@@ -2549,6 +2706,10 @@ fn decide_racer(
                 follow_w = 0.0;
                 r.start_n
             }
+            Tactic::Follow | Tactic::Rejoin | Tactic::Reverse if r.escape.is_some() => {
+                follow_w = 0.0;
+                r.escape.map_or(r.n, |e| e.1)
+            }
             Tactic::Follow => match tuck {
                 Some(n) => {
                     follow_w = 0.0;
@@ -2675,6 +2836,10 @@ fn decide_racer(
 
         // ---- Longitudinal target ----
         let mut v_target = v_line(r.s + v * (0.15 + p.early_brake_s + r.brake_err_s));
+        if clearing_line {
+            // The profile stops at the corridor's end; roll on past it.
+            v_target = FINISH_CLEAR_MPS;
+        }
         let mut limit = SpeedLimit::Profile;
         let mut cap_to = |v_target: &mut f32, cap: f32, why: SpeedLimit| {
             if cap < *v_target {
@@ -2687,8 +2852,11 @@ fn decide_racer(
             r.tactic = Tactic::Park;
         }
         // Done with a point-to-point race: pull over before the corridor runs out (past its
-        // end there is only whatever the road leads into — a car park wall, a dead end).
-        if matches!(r.status, RacerStatus::Finished { .. })
+        // end there is only whatever the road leads into — a car park wall, a dead end), or
+        // once past its end where it ends at the finish line (`clearing_line`).
+        if clearing_line {
+            cap_to(&mut v_target, FINISH_CLEAR_MPS, SpeedLimit::Mode);
+        } else if matches!(r.status, RacerStatus::Finished { .. })
             && !corridor.closed
             && r.s > corridor.length_m - 25.0
         {
@@ -2961,7 +3129,7 @@ fn decide_racer(
             // Steering out round a parked car (pulled over, or standing for good): once the
             // lane I am heading for is clear of it, creep instead of standing still behind it
             // (a stopped car cannot move sideways), never closer than the stop gap.
-            let steering_round = o.parked
+            let steering_round = standing_for_good(o)
                 && (r.tactic != Tactic::Overtake || r.pass_target == Some(o.who))
                 && !overlaps(my_band(n_cmd, n_cmd), o, margin, 0.0);
             if steering_round && x.gap > CREEP_STOP_GAP_M {
@@ -3090,7 +3258,19 @@ fn decide_racer(
         let inside = (k_mid * l_t * l_t / 8.0).clamp(-1.5, 1.5);
         let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)) + inside)
             .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd));
-        let target = corridor.point(s_t, n_t);
+        let mut target = corridor.point(s_t, n_t);
+        // Clearing the finish line past the end of the corridor: straight on along its last
+        // direction.
+        if clearing_line && r.s_rel + ld > corridor.length_m {
+            // Towards the kerb on my side as I roll on, round whatever stands at the end of
+            // the road straight ahead (the Knob lot: a broken-down car in the entrance).
+            let (_, kerb) = limits(corridor.length_m);
+            let end = corridor.point(corridor.length_m, kerb);
+            let t = corridor.samples[corridor.samples.len() - 1].tangent;
+            // From where I am past the end (`s` stops at the end; `s_rel` runs on).
+            let past = r.s_rel + ld - corridor.length_m;
+            target = [end[0] + t[0] * past, end[1] + t[1] * past, end[2]];
+        }
         let pos_lag = geom::add(r.pos, geom::scale(r.vel, STEER_LAG_S));
         let (sn, cs) = wp_math::sin_cos(r.yaw_rate * STEER_LAG_S);
         let fwd_lag = [r.fwd[0] * cs - r.fwd[1] * sn, r.fwd[0] * sn + r.fwd[1] * cs];
@@ -3238,6 +3418,26 @@ fn vehicle_obstacle(
         out_of_race: false,
         wants_room: false,
     })
+}
+
+/// Positions of the traffic agents that have a physical body in the sim (near a player).
+fn traffic_bodies(world: &World) -> Vec<V2> {
+    world
+        .agents()
+        .filter(|a| a.lod == wp_world::Lod::Physical)
+        .map(|a| geom::xy(a.pos))
+        .collect()
+}
+
+/// The sim vehicle `v` is the body of a physical traffic agent. That car is already seen as
+/// a civilian (its agent), with the civilian rules: 3 s drift look-ahead, civilian margins and
+/// headway. Seen a second time as a plain vehicle, those did not apply (Loop 9 at 23:00: a
+/// racer hit a traffic car changing lanes next to the player, its limit set by the body).
+fn is_traffic_body(bodies: &[V2], v: &VehicleObs) -> bool {
+    let p = geom::xy(v.state.pos);
+    bodies
+        .iter()
+        .any(|b| geom::dist(*b, p) < TRAFFIC_BODY_MATCH_M)
 }
 
 fn civilians_on(
@@ -3430,6 +3630,31 @@ fn squeeze_limits((lo, hi): (f32, f32), o: &Obstacle) -> (f32, f32) {
     } else {
         (lo, hi)
     }
+}
+
+/// A car that will not move: parked (stood still for long), or out of the race and standing.
+fn standing_for_good(o: &Obstacle) -> bool {
+    o.parked || (o.out_of_race && o.v_s.abs() < 0.5)
+}
+
+/// Escape target beside the standing car `x`: the side with more room, with
+/// [`ESCAPE_CLEAR_M`] to its body (keeps an escape already under way round the same car).
+/// `None` when neither side has room for my car.
+fn escape_beside(
+    r: &Racer,
+    x: &Rel,
+    hw: f32,
+    pass_limits: &dyn Fn(f32) -> (f32, f32),
+) -> Option<(Who, f32, f32)> {
+    if let Some(e) = r.escape.filter(|e| e.0 == x.o.who) {
+        return Some(e);
+    }
+    let (lo, hi) = squeeze_limits(pass_limits(r.s + x.ds), &x.o);
+    let beside = x.o.half_w + hw + ESCAPE_CLEAR_M;
+    let up = (x.o.n + beside, hi - (x.o.n + beside));
+    let down = (x.o.n - beside, (x.o.n - beside) - lo);
+    let (n, room) = if up.1 >= down.1 { up } else { down };
+    (room >= 0.0).then_some((x.o.who, n, 0.0))
 }
 
 /// Choose a passing lateral position beside `target`, or None if no side is clear far
@@ -3825,6 +4050,7 @@ mod tests {
                     left_pass_m: 5.0,
                     right_m: 5.0,
                     junction: false,
+                    surface: wp_contracts::SurfaceType::Asphalt,
                 })
                 .collect(),
             closed: false,
@@ -3844,6 +4070,7 @@ mod tests {
             max_steer_rad: 0.6,
             length_m: 4.6,
             width_m: 1.8,
+            loose: Default::default(),
         }
     }
 
@@ -4180,6 +4407,89 @@ mod tests {
             .drain_events()
             .iter()
             .any(|e| matches!(e, OpponentEvent::Retired { .. })));
+    }
+
+    /// The speed limit of a racer at 30 m/s on the centreline with a civilian doing 20 m/s
+    /// 60 m ahead in the next lane (3.8 m to the right) moving across the corridor at `v_n`.
+    fn next_lane_civ_limit(v_n: f32) -> SpeedLimit {
+        let mut f = Field::new(
+            straight(),
+            &[RacerSpec {
+                entity: EntityId(1),
+                profile: DriverProfile::default(),
+                capability: cap(),
+            }],
+            RaceConfig::default(),
+        );
+        f.racers[0].laps_done = 1;
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let dt = 4.0 * PHYSICS_DT;
+        f.observe(
+            &world,
+            &[obs(1, 40.0, 30.0, HandlingEffects::NEUTRAL)],
+            &NoPolice,
+            dt,
+        );
+        let civ = Obstacle {
+            who: Who::Civilian(1),
+            s: 100.0,
+            n: 3.8,
+            v_s: 20.0,
+            v_n,
+            half_len: 2.3,
+            half_w: 0.9,
+            unstable: false,
+            passing: false,
+            parked: false,
+            facing: 1.0,
+            out_of_race: false,
+            wants_room: false,
+        };
+        f.decide(0, &[civ], &[], None, None, dt);
+        f.debug_of(0).limit
+    }
+
+    #[test]
+    fn a_civilian_keeping_its_lane_next_to_mine_does_not_hold_me_up() {
+        // Holding its lane, with the few tenths of a m/s across the corridor a lane reads
+        // against the corridor's sampled direction: not in my way.
+        assert_ne!(next_lane_civ_limit(0.0), SpeedLimit::Obstacle(1_000_001));
+        assert_ne!(next_lane_civ_limit(-0.4), SpeedLimit::Obstacle(1_000_001));
+        // Changing lanes into mine: braked for.
+        assert_eq!(next_lane_civ_limit(-1.5), SpeedLimit::Obstacle(1_000_001));
+    }
+
+    #[test]
+    fn a_finisher_rolls_on_past_a_corridor_that_ends_at_the_line_before_parking() {
+        // `straight()` ends at 398 m and the config has no run-off (`finish_m` unset): the
+        // finish line is the end of the corridor.
+        let mut f = field(1);
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let dt = 4.0 * PHYSICS_DT;
+        let at = |f: &mut Field, y: f32, v: f32| {
+            f.observe(
+                &world,
+                &[obs(1, y, v, HandlingEffects::NEUTRAL)],
+                &NoPolice,
+                dt,
+            );
+            f.decide(0, &[], &[], None, None, dt);
+            (f.debug_of(0), f.tactic_of(0))
+        };
+        at(&mut f, 380.0, 10.0);
+        at(&mut f, 397.8, 8.0);
+        assert!(
+            matches!(f.racers[0].status, RacerStatus::Finished { .. }),
+            "{:?}",
+            f.racers[0].status
+        );
+        // 4 m past the line: still rolling on, not parked on it.
+        let (d, tac) = at(&mut f, 402.0, 4.0);
+        assert_ne!(tac, Tactic::Park);
+        assert!(d.v_target >= FINISH_CLEAR_MPS - 1e-3, "{d:?}");
+        // Clear of it: pull over.
+        let (_, tac) = at(&mut f, 398.0 + FINISH_CLEAR_M + 2.0, 4.0);
+        assert_eq!(tac, Tactic::Park);
     }
 
     #[test]

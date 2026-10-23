@@ -177,9 +177,9 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         })
         .unwrap_err();
     assert!(matches!(err, CaptainError::Locked { .. }), "{err:?}");
-    // Raise heat: spikes unlock, a second request hits the cooldown.
-    h.police.set_heat(RACER, 45.0);
-    assert!(h.police.wanted_level(RACER) >= WantedLevel::L2);
+    // Raise heat: spikes unlock (level 4, owner row 156), a second request hits the cooldown.
+    h.police.set_heat(RACER, 75.0);
+    assert!(h.police.wanted_level(RACER) >= WantedLevel::L4);
     // A valid site (straight approach ≥ 120 m) comes up as the racer drives on.
     let mut r = Err(CaptainError::Budget);
     for _ in 0..40 {
@@ -196,6 +196,21 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
     assert!(r.is_ok(), "{r:?}");
     let strip = h.police.spike_strips()[0].clone();
     assert!(strip.site.sight_m >= 120.0);
+    // PR #54 port: the strip is down at once; its car is decided on the next think, beside
+    // it when the spot is hidden, else none (unmanned strip; no police car appears in view).
+    assert_eq!(strip.unit, None);
+    assert_eq!(h.police.tool_cars_waiting(strip.id).len(), 1);
+    h.run(0.5, &[]);
+    assert!(h.police.tool_cars_waiting(strip.id).is_empty());
+    if let Some(s) = h.police.spike_strips().iter().find(|s| s.id == strip.id) {
+        if s.unit.is_some() {
+            spike_unit(&h, s);
+        } else {
+            assert!(h.police.units().iter().all(
+                |u| !matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == strip.id)
+            ));
+        }
+    }
     // Sites remember D's road id; a captain can name roads by it.
     assert!(h.police.graph().segment(strip.site.segment).edge.is_some());
     let err = h
@@ -411,13 +426,15 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
 }
 
 /// Lead round 8: Arcade health levels off around 0.2–0.3 under repeated hits, so an Arcade
-/// unit at 0.3 stays in service while a Simulation unit at the same health pulls over.
+/// unit at 0.3 stays in service while an Extreme (pre-v0.4.0 Simulation) unit pulls over.
+/// Police take full damage in every mode, so Simulation matches Arcade.
 #[test]
 fn disengage_health_depends_on_damage_mode() {
     for (mode, health, out) in [
         (DamageMode::Arcade, 0.3, false),
         (DamageMode::Arcade, 0.1, true),
-        (DamageMode::Simulation, 0.3, true),
+        (DamageMode::Simulation, 0.3, false),
+        (DamageMode::Extreme, 0.3, true),
     ] {
         let mut h = Harness::with_mode(12.0, 7, mode);
         h.run(0.5, &[]);
@@ -1053,6 +1070,78 @@ fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
     assert!(gone < 12.0, "despawned at {gone} s");
 }
 
+/// Row 75: a physical unit the sim reports on its roof (chassis up axis pointing down) is
+/// reset upright in its lane within a few seconds once no racer sees it, damage kept.
+#[test]
+fn unit_on_its_roof_is_reset_upright() {
+    let mut h = Harness::new(12.0, 7);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(951);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let mut taken = Vec::new();
+    for _ in 0..(6.0 / PHYSICS_DT) as u32 {
+        if !h.police.stats().resets.iter().any(|r| r.unit == id) {
+            // On its roof where it lies until it is reset.
+            h.police.sync_unit(
+                id,
+                UnitSync {
+                    pos: [pos[0], pos[1], 0.5],
+                    vel: [0.0; 3],
+                    heading,
+                    health: 0.7,
+                    effects: HandlingEffects::NEUTRAL,
+                },
+            );
+            h.police.sync_unit_upright(id, -1.0);
+        } else {
+            h.police.sync_unit_upright(id, 1.0);
+        }
+        let _ = h.police.unit_input(id, PHYSICS_DT);
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &[], PHYSICS_DT, &mut out);
+        taken.extend(h.police.take_unit_resets());
+    }
+    let rec = *h
+        .police
+        .stats()
+        .resets
+        .iter()
+        .find(|r| r.unit == id)
+        .unwrap_or_else(|| {
+            panic!(
+                "never reset: {:?}",
+                h.police.units().iter().find(|u| u.id == id)
+            )
+        });
+    let at = rec.at.secs() - 1.0;
+    assert!(at <= 3.0, "reset {at} s after it rolled over");
+    assert!(!rec.in_view, "{rec:?}");
+    assert!(dist(rec.to, pos) <= 15.0, "{rec:?}");
+    assert!(
+        taken
+            .iter()
+            .any(|r| r.unit == id && r.entity == Some(entity)),
+        "wp_sim was told"
+    );
+    let u = h.police.units().iter().find(|u| u.id == id).unwrap();
+    assert!(
+        !u.wrecked && (u.health - 0.7).abs() < 1e-3,
+        "damage kept, not written off"
+    );
+}
+
 /// Reset in place (owner row 78): an un-wrecked unit that stands stuck while it wants to
 /// drive (here behind a car stopped across the road) is put on a clear spot in its lane within
 /// 15 m, keeps its damage, and `wp_sim` is told to place its car there as a ghost for a
@@ -1357,6 +1446,9 @@ fn ambush_chase(
     let pu = h
         .police
         .add_player_unit(PlayerId(1), EntityId(900), [p[0], p[1], 0.0], d);
+    // Wanted once the session-start patrols are out (row 158: none is placed in view of a
+    // racer who is already wanted).
+    h.run(0.5, &[]);
     h.police.set_heat(RACER, 80.0);
     let mut ambushers = std::collections::BTreeMap::new();
     let mut joined_facing = std::collections::BTreeMap::new();
@@ -1579,4 +1671,112 @@ fn spawns_out_of_view(seed: u64) {
         seen, 0,
         "seed {seed}: {seen} of {checked} spawns in the racer's view within 3 s"
     );
+}
+
+// --- PR #54 (ported onto round12): spike strips only exist while their unit is beside them.
+
+/// The spike unit beside `strip` (asserts there is one, manning that strip at its post).
+fn spike_unit(h: &Harness, strip: &wp_police::SpikeStrip) -> wp_police::UnitId {
+    let uid = strip.unit.expect("strip without a unit");
+    let u = h.police.units().iter().find(|u| u.id == uid).unwrap();
+    assert!(matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == strip.id));
+    let post = strip.post.expect("strip without a post");
+    assert!(dist(u.body.pos, post) <= wp_police::dispatch::SPIKE_UNIT_LEASH_M);
+    uid
+}
+
+/// Every spike strip, scenario-placed ones too, comes with a police unit beside it, and is
+/// lifted the moment that unit is wrecked.
+#[test]
+fn spike_strip_never_lies_without_its_unit() {
+    let mut h = Harness::new(12.0, 11);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    let tool = h
+        .police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    assert_eq!(strip.id, tool);
+    let uid = spike_unit(&h, &strip);
+    // Parked: it stays put and so does the strip.
+    h.run(2.0, &[]);
+    assert_eq!(h.police.spike_strips().len(), 1);
+    // Wrecked (total loss): the strip goes with it.
+    h.police
+        .bind_unit_entity(uid, EntityId(902), SteerGeometry::default());
+    let pos = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.id == uid)
+        .unwrap()
+        .body
+        .pos;
+    h.police.sync_unit(
+        uid,
+        UnitSync {
+            pos: [pos[0], pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: strip.site.dir,
+            health: 0.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    h.run(0.5, &[]);
+    assert!(h.police.spike_strips().is_empty());
+    assert!(h
+        .events
+        .iter()
+        .any(|e| matches!(e, PoliceEvent::ToolRemoved { tool: t } if *t == tool)));
+}
+
+/// A spike unit shoved away from its post takes the strip with it.
+#[test]
+fn spike_strip_lifted_when_its_unit_leaves_the_post() {
+    let mut h = Harness::new(12.0, 12);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    h.police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    let uid = spike_unit(&h, &strip);
+    h.police
+        .bind_unit_entity(uid, EntityId(903), SteerGeometry::default());
+    h.police.sync_unit(
+        uid,
+        UnitSync {
+            pos: [strip.site.pos[0] + 60.0, strip.site.pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: strip.site.dir,
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    h.run(0.5, &[]);
+    assert!(h.police.spike_strips().is_empty());
+}
+
+/// A host that cannot give a spike unit a car withdraws it; the strip goes too.
+#[test]
+fn unbodied_spike_unit_is_withdrawn_with_its_strip() {
+    let mut h = Harness::new(12.0, 13);
+    h.run(1.0, &[]);
+    let p = h.racer_view().pos;
+    h.police
+        .place_spikes_at(RACER, [p[0], p[1] + 80.0], [0.0, 1.0]);
+    let strip = h.police.spike_strips()[0].clone();
+    let uid = spike_unit(&h, &strip);
+    assert!(h.police.withdraw_unbodied_spike_unit(uid));
+    assert!(h.police.spike_strips().is_empty());
+    assert!(h.police.units().iter().all(|u| u.id != uid));
+    // Other units are not touched.
+    let other = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.kind == UnitKind::Car)
+        .map(|u| u.id);
+    if let Some(other) = other {
+        assert!(!h.police.withdraw_unbodied_spike_unit(other));
+    }
 }

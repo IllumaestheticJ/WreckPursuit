@@ -2,7 +2,7 @@
 // Together with coupe_accel_by_6s this brackets 0-100 km/h in 5-6 s (prompt 02).
 (
     name: "vehicle_coupe_accel_before_5s",
-    mode: Arcade,
+    mode: Simulation,
     seed: 1,
     duration_s: 5.0,
     entities: [

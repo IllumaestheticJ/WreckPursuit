@@ -422,6 +422,15 @@ pub struct Unit {
     /// The pro driver was turning round last tick (debug: bench turn-round audit).
     #[serde(skip)]
     pub turning_round: bool,
+    /// How long this unit has stood still while on an active job (row 86 audit), s.
+    #[serde(skip)]
+    pub active_stop_s: f32,
+    /// Since when the sim has reported this unit on its side or roof (row 75), if it is.
+    #[serde(default)]
+    pub flipped_since: Option<SimTime>,
+    /// Branch and blocker when that stop began (row 86 audit).
+    #[serde(skip)]
+    pub active_stop_why: (u8, u8),
     /// Road route a pursuer is following to the racer (out of its sight), if any.
     #[serde(default)]
     pub chase_route: Option<ChaseRoute>,
@@ -444,6 +453,10 @@ pub struct Unit {
     /// Pro driver of a physical unit, created on first use.
     #[serde(skip)]
     pub pro: Option<crate::pro::ProDriver>,
+    /// Where the unit first appeared (XY, m). Presentation uses it to pick the unit's home
+    /// station (agency livery); the AI never reads it.
+    #[serde(default)]
+    pub spawn_pos: [f32; 2],
 }
 
 /// A pursuer's road route to the racer (see `PoliceSystem::chase_route`).
@@ -503,12 +516,16 @@ impl Unit {
             branch: 0,
             pro_dbg: (0.0, false),
             turning_round: false,
+            active_stop_s: 0.0,
+            flipped_since: None,
+            active_stop_why: (0, 0),
             chase_route: None,
             quiet: false,
             vel: [0.0, 0.0],
             feel: crate::pro::UnitFeel::default(),
             limits: None,
             pro: None,
+            spawn_pos: pos,
         }
     }
 

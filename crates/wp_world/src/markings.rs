@@ -15,7 +15,8 @@
 //! | Dotted line | between a carriageway's right lane and a ramp: along the taper through a freeway merge / diverge and the auxiliary lane beside it | [`DOTTED_W`] | [`DOT_M`] on, [`DOT_GAP_M`] off |
 //! | Gore chevrons | paved gore where a ramp and its carriageway split (or meet), up to where the paving ends | bars [`CHEVRON_BAR_M`] every [`CHEVRON_PERIOD_M`] | V pointing at the gore's narrow end |
 //!
-//! Alleys and parking strips carry no markings; highways get centre, lane and edge lines.
+//! Alleys, parking strips and unpaved roads ([`RoadMaterial::Gravel`] / [`RoadMaterial::Dirt`]
+//! surfaces, except highways) carry no markings; highways get centre, lane and edge lines.
 //! Through a freeway merge / diverge (a radius-0 junction) the main road's lane and median
 //! edge lines continue along its connectors, the taper connector carries the outer edge line,
 //! and the carriageway's outer edge becomes the dotted line; see [`FreewayPaint`].
@@ -28,7 +29,7 @@
 
 use crate::geom::{self, V2, V3};
 use crate::map::{CityMap, SegKind, Segment};
-use crate::network::{IntersectionControl, Lane, LaneId, LaneKind, RoadSurface};
+use crate::network::{IntersectionControl, Lane, LaneId, LaneKind, RoadMaterial, RoadSurface};
 use crate::surface::TriMesh;
 
 /// Width of each of the two centre lines, m.
@@ -113,7 +114,7 @@ pub fn marking_at(map: &CityMap, p: V3) -> Option<MarkingKind> {
         let m = match seg.kind {
             SegKind::Lane { lane } => {
                 let l = &net.lanes[lane as usize];
-                if matches!(l.kind, LaneKind::Parking | LaneKind::Alley) {
+                if matches!(l.kind, LaneKind::Parking | LaneKind::Alley) || unpaved(map, lane) {
                     continue;
                 }
                 let pr = seg.project(q);
@@ -151,6 +152,12 @@ pub fn marking_at(map: &CityMap, p: V3) -> Option<MarkingKind> {
             .map(|_| MarkingKind::GoreChevron);
     }
     found
+}
+
+/// Whether lane `id` lies on a gravel or dirt road (no paint; highways always count as paved).
+pub fn unpaved(map: &CityMap, id: LaneId) -> bool {
+    map.net.lanes[id as usize].kind != LaneKind::Highway
+        && map.lane_material(id) != RoadMaterial::Asphalt
 }
 
 /// Whether `p` is on a painted marking (what `WorldQuery::surface_at` reports as
@@ -950,7 +957,10 @@ fn paint_lane(map: &CityMap, i: usize, out: &mut MarkingMesh) {
     let net = &map.net;
     let l = &net.lanes[i];
     {
-        if matches!(l.kind, LaneKind::Parking | LaneKind::Alley) || l.polyline.len() < 2 {
+        if matches!(l.kind, LaneKind::Parking | LaneKind::Alley)
+            || l.polyline.len() < 2
+            || unpaved(map, i as LaneId)
+        {
             return;
         }
         let id = i as LaneId;
@@ -1480,7 +1490,8 @@ mod tests {
         let vesper = CityMap::new(crate::vesper::generate(
             &crate::vesper::VesperConfig::default(),
         ));
-        for (name, map, ramps) in [("grid", &grid, 4), ("vesper", &vesper, 22)] {
+        // Vesper: 22 interchange ramps + 2 per rest stop (row 153).
+        for (name, map, ramps) in [("grid", &grid, 4), ("vesper", &vesper, 28)] {
             // One dotted stretch and one gore per ramp.
             let ramp_lanes = lanes_where(map, |_, l| {
                 l.kind == LaneKind::Highway && map.paint.road_lanes[l.road as usize] == 1
@@ -1579,5 +1590,82 @@ mod tests {
                 .wrapping_add(marking_at(&b, p).map_or(0, |m| m as u64 + 1));
         }
         assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn unpaved_roads_carry_no_paint() {
+        let mut net = generate(&ProcGenConfig::small());
+        let paved = CityMap::new(net.clone());
+        // Every other road is gravel or dirt.
+        let unpaved_road = |road: u32| road % 2 == 1;
+        for s in &mut net.surfaces {
+            if unpaved_road(s.road) {
+                s.material = if s.road % 4 == 1 {
+                    RoadMaterial::Gravel
+                } else {
+                    RoadMaterial::Dirt
+                };
+            }
+        }
+        let map = CityMap::new(net);
+        let mut was_painted = 0;
+        let mut kept = 0;
+        for (i, l) in map.net.lanes.iter().enumerate() {
+            let seg = &map.segs[i];
+            if seg.length < 20.0 || matches!(l.kind, LaneKind::Parking | LaneKind::Alley) {
+                continue;
+            }
+            let half = seg.width * 0.5;
+            let id = i as LaneId;
+            // Highways stay concrete (and painted) whatever their material says.
+            let highway = l.kind == LaneKind::Highway;
+            assert_eq!(
+                unpaved(&map, id),
+                unpaved_road(l.road) && !highway,
+                "lane {i}"
+            );
+            if highway {
+                continue;
+            }
+            // Along the lane's edges (centre / edge lines) and the stop line.
+            for (s, lat) in [
+                (seg.length * 0.5, -half + 0.08),
+                (seg.length * 0.5, half - 0.05),
+                (seg.length - 0.2, 0.0),
+            ] {
+                let p = lane_point(&map, id, s, lat);
+                if marking_at(&paved, p).is_none() {
+                    continue;
+                }
+                if unpaved_road(l.road) {
+                    was_painted += 1;
+                    // Another (paved) lane may own a seam point; this lane paints nothing.
+                    if map.intersection_at(geom::xy(p)).is_none() {
+                        assert_ne!(
+                            map.surface_at(p),
+                            SurfaceType::PaintedLine,
+                            "lane {i} at s={s} lat={lat}"
+                        );
+                    }
+                } else if marking_at(&map, p).is_some() {
+                    kept += 1;
+                }
+            }
+        }
+        assert!(was_painted > 20, "{was_painted}");
+        assert!(kept > 20, "{kept}");
+        // The render mesh only has the paved roads' paint.
+        let before = marking_mesh(&paved);
+        let after = marking_mesh(&map);
+        assert!(after.white.indices.len() < before.white.indices.len());
+        assert!(!after.white.indices.is_empty());
+        // Gravel and dirt lanes report their own surface.
+        let dirt = (0..map.net.lanes.len() as LaneId)
+            .find(|&l| {
+                map.lane_material(l) == RoadMaterial::Dirt && map.segs[l as usize].length > 30.0
+            })
+            .expect("a dirt lane");
+        let mid = lane_point(&map, dirt, map.segs[dirt as usize].length * 0.5, 0.0);
+        assert_eq!(map.surface_at(mid), SurfaceType::Dirt);
     }
 }

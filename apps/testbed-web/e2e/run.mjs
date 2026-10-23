@@ -5,7 +5,7 @@
 // Checks: the car drives from keyboard input, every debug layer toggles without errors, a
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
-// selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
+// selector) loads with traffic, signals (day/night, lamps change over time) and the night run,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
 // within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), touch controls
@@ -14,7 +14,8 @@
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
 // pose follows the sim within 0.2 m), crash effects (e2e/crash_fx.mjs: sparks, glass, debris,
 // smoke, skid marks, no steady-state allocation), instant crash replays (e2e/crash_replay.mjs),
-// and (optionally) perf at 1/8/24 cars.
+// street racers (e2e/street.mjs) and traffic colliders (e2e/traffic_bodies.mjs), and
+// (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -378,11 +379,11 @@ check(
   }
   await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
 }
-// City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
+// Night run preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 // Waits for the state the check needs (no fixed sleep): under SwiftShader the city runs well below
 // real time, so a wall-clock wait is either too short (flaky) or wastes minutes. Violations are
 // counted per session (`app.eventCounts`), not read from the 12-line feed, which can scroll them out.
-await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 await page.keyboard.down("KeyW");
 const chaseReady = () => {
   const wp = window.__wp;
@@ -411,10 +412,10 @@ const chase = await page.evaluate(() => ({
   inFeed: document.querySelector(".feed")?.textContent?.includes("TrafficViolation") ?? false,
   simS: window.__wp.sim.worldInfo()[0] / 240,
 }));
-await shot("city_chase.png");
+await shot("night_run.png");
 check(
   chaseWait === "ready" && chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.panels === 1 && chase.violations > 0,
-  `city chase: ${chase.hour.toFixed(2)} h, ${chase.panels} heat panel(s) "${chase.panel}", heat ${chase.status?.heat.toFixed(2)} (${chase.status?.status}), ` +
+  `night run: ${chase.hour.toFixed(2)} h, ${chase.panels} heat panel(s) "${chase.panel}", heat ${chase.status?.heat.toFixed(2)} (${chase.status?.status}), ` +
     `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, ` +
     `${chase.violations} violation event(s) (in feed: ${chase.inFeed}) after ${chase.simS.toFixed(1)} s sim; wait ${chaseWait}`,
 );
@@ -469,7 +470,7 @@ check(
   art.cones.low && art.cones.grey && art.cones.back && art.cones.propsKept && art.cones.props > 0,
   `art style on props: cone material = PALETTE.propCone (${art.cones.n} cones in this session) (greybox orange when switched, palette again after), ${art.cones.props} props rebuilt in place across the switch: ${art.cones.propsKept}`,
 );
-await shot("city_chase_greybox_toggle.png");
+await shot("night_run_greybox_toggle.png");
 
 // City map HUD (workstream 16): the corner minimap shows the player and the police near them;
 // M / Tab open the full city map, M / Tab / Esc close it. The player is parked in front of a
@@ -534,7 +535,7 @@ await shot("city_chase_greybox_toggle.png");
 // within 300 m of the player.
 {
   await page.evaluate(() => {
-    window.__wp.startCityChase("debug_sedan", "Arcade");
+    window.__wp.startNightRun("debug_sedan", "Arcade");
     window.__wp.lod.log.start(0);
   });
   await page.keyboard.down("KeyW");
@@ -570,14 +571,14 @@ await shot("city_chase_greybox_toggle.png");
   );
 }
 // Props (playtest row 50 "hitting invisible objects"): every parked car / cone is a physical
-// body in the sim, so every one must be drawn. In a city chase: the instanced props match the
+// body in the sim, so every one must be drawn. In a night run: the instanced props match the
 // sim's prop list (each parked car drawn exactly once; every prop within 150 m of the camera
 // drawn; parked cars within 150 m use the full traffic mesh), and a parked car knocked by the
 // player is drawn where the sim has it (instance matrix read back vs prop_pose, every frame,
 // < 0.2 m) while it moves. Owner playtest 2026-10-21 "parked cars don't take damage": the
 // 43 km/h knock dents it, and the dent is drawn (its own panel mesh, skinned from its lattice).
 {
-  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
   await page
     .waitForFunction(() => window.__wp.props.count > 0 && window.__wp.sim.worldInfo()[0] > 240, null, { timeout: 120000, polling: 200 })
     .catch(() => {});
@@ -690,7 +691,7 @@ await shot("city_chase_greybox_toggle.png");
 // End of run (lead): a real capture in the sim (player parked in front of a patrol car at L2) →
 // end-of-run panel + repair bill → "Repair & continue" pays from the ledger and restores the car.
 {
-  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
   const parked = await page
     .waitForFunction(
       () => {
@@ -757,7 +758,7 @@ await shot("city_chase_greybox_toggle.png");
 // 23:00) it is drawn as an airframe with a spotlight on the car. The real launch takes 120 s at
 // night, so the e2e puts one up with the debug hook once the pursuit is on.
 {
-  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
   const parked = await page
     .waitForFunction(
       () => {
@@ -831,7 +832,7 @@ await shot("city_chase_greybox_toggle.png");
     `helicopter: launched ${launched}, ${heli.n} tracking with visual ${heli.visual}, ${heli.alt.toFixed(0)} m above the car, spotlight ${heli.aimOff.toFixed(1)} m off it, ${heli.lit} lit`,
   );
 }
-// Career (machine G): garage → buy a beater → city chase with the career car → busted → garage
+// Career (machine G): garage → buy a beater → night run with the career car → busted → garage
 // (car in the pound, saved to localStorage) → reload (the career survives) → release → repair
 // all → a new run uses the repaired car.
 {
@@ -843,7 +844,7 @@ await shot("city_chase_greybox_toggle.png");
   await page.click(`${G} tr[data-car="junkyard_beater"] td:last-child button`);
   const bought = await page.evaluate(() => window.__wp.careerApi.view());
   await shot("career_garage_bought.png");
-  await page.click(`${G} button:has-text("City chase")`);
+  await page.click(`${G} button:has-text("Night run")`);
   const run = await page.evaluate(() => {
     const wp = window.__wp;
     return { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, open: wp.garage.open };
@@ -851,7 +852,7 @@ await shot("city_chase_greybox_toggle.png");
   check(
     opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - bought.dealer.find((d) => d.def_id === "junkyard_beater").price_worn &&
       run.active && run.car === "junkyard_beater" && !run.open,
-    `career: garage opens, beater bought ($${fresh.cash} → $${bought.cash}), city chase runs the career car (${run.car})`,
+    `career: garage opens, beater bought ($${fresh.cash} → $${bought.cash}), night run runs the career car (${run.car})`,
   );
   const parked = await page
     .waitForFunction(
@@ -924,7 +925,7 @@ await shot("city_chase_greybox_toggle.png");
   await page.evaluate(() => window.__wp.careerApi.close());
 }
 // The selector keeps the old flat grid: the chase restarts there. Start a plain (non-career)
-// city chase first: the career checks above leave a career free-drive run active.
+// night run first: the career checks above leave a career free-drive run active.
 await page.evaluate(() => {
   const career = document.getElementById("career");
   if (career && career.checked) career.click();
@@ -973,8 +974,8 @@ await page.waitForTimeout(1500);
     `garage: ${placed.count} shops / ${placed.markers} markers; stopping in ${placed.name} opens the panel (${visit.shop}), input ${visit.held ? "held" : "live"}`,
   );
   check(!left.offer && !left.panel && left.live, `garage "Leave": panel closed, input ${left.live ? "live" : "held"}`);
-  // Back to the city chase: the selector check below restarts the current mode.
-  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  // Back to the night run: the selector check below restarts the current mode.
+  await page.evaluate(() => window.__wp.startNightRun("debug_sedan", "Arcade"));
 }
 // The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
@@ -984,7 +985,7 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(1500);
 const grid = await page.evaluate(() => ({ id: window.__wp.sim.cityId(), name: window.__wp.sim.scenario().name }));
-check(grid.id === "procedural_12x12" && grid.name === "city_chase", `city selector: chase restarted in ${grid.id}`);
+check(grid.id === "procedural_12x12" && grid.name === "night_run", `city selector: chase restarted in ${grid.id}`);
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");
   sel.value = "vesper_v2";
@@ -1098,7 +1099,7 @@ const wx = spawnSync("node", [join(here, "weather.mjs")], {
 process.stdout.write(wx.stdout);
 check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
 
-// 7. Browser perf (browser perf pass): city chase + rainy-night chase at 1280×720 must keep
+// 7. Browser perf (browser perf pass): night run + rainy-night chase at 1280×720 must keep
 // near real time and stay within generous draw-call / triangle / allocation budgets
 // (e2e/perf_check.mjs; PERF=0 skips it).
 if (process.env.PERF !== "0") {
@@ -1118,7 +1119,7 @@ process.stdout.write(gp.stdout);
 check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
 
 // 8. Reset in place (e2e/reset.mjs, its own server and browser): R after a crash → upright,
-// within 15 m, repaired, replayable; city chase keeps heat; career run does not repair.
+// within 15 m, repaired, replayable; night run keeps heat; career run does not repair.
 const rs = spawnSync("node", [join(here, "reset.mjs")], { cwd: root, encoding: "utf8", env: process.env });
 process.stdout.write(rs.stdout);
 check(rs.status === 0, `reset-in-place checks (e2e/reset.mjs)${rs.status === 0 ? "" : ": " + (rs.stderr || "").trim().split("\n").pop()}`);
@@ -1158,5 +1159,16 @@ check(tc.status === 0, `touch controls checks (e2e/touch.mjs)${tc.status === 0 ?
 const mn = spawnSync("node", [join(here, "menu.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, MENU_SHOTS: shots ?? "" } });
 process.stdout.write(mn.stdout);
 check(mn.status === 0, `game menu + layout checks (e2e/menu.mjs)${mn.status === 0 ? "" : ": " + (mn.stderr || "").trim().split("\n").pop()}`);
+// 13. Street racers (e2e/street.mjs, its own server and browser; lead, rows 149–154): the
+// roster by day / night, honk to challenge, no challenge while wanted, the A→B picker with
+// waypoints, side-by-side start, a race to the finish (day keyboard + mouse, night gamepad),
+// the night run's racers, touch. Then no physical traffic car without a collider
+// (e2e/traffic_bodies.mjs, row 149).
+const st = spawnSync("node", [join(here, "street.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, SHOTS: shots ? join(shots, "street") : "" } });
+process.stdout.write(st.stdout);
+check(st.status === 0, `street racer checks (e2e/street.mjs)${st.status === 0 ? "" : ": " + (st.stderr || "").trim().split("\n").pop()}`);
+const tb = spawnSync("node", [join(here, "traffic_bodies.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+process.stdout.write(tb.stdout);
+check(tb.status === 0, `traffic bodies (e2e/traffic_bodies.mjs)${tb.status === 0 ? "" : ": " + (tb.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

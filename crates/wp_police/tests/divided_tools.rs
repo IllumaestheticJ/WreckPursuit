@@ -12,9 +12,11 @@ use wp_world::World;
 const RACER: EntityId = EntityId(7);
 /// Racer speed, m/s (a fast run down the highway).
 const SPEED: f32 = 40.0;
-/// Heat for wanted level 3 (`data/police/heat.toml`): spikes, and roadblocks still allowed
-/// on highways (`highway_max_level`).
+/// Heat for wanted level 3 (`data/police/heat.toml`): roadblocks, still allowed on highways
+/// (`highway_max_level`).
 const HEAT: f32 = 60.0;
+/// Heat for wanted level 4: spike strips (owner row 156: spikes from level 4).
+const SPIKE_HEAT: f32 = 75.0;
 
 fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
     a[0] * b[0] + a[1] * b[1]
@@ -105,14 +107,14 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
             }
         };
         step(&mut police, &mut at, 0.5);
-        // L3: spikes and roadblocks, both allowed on highways.
+        // Spikes at L4, roadblocks at L3 (no highway roadblocks above it).
         police.set_heat(RACER, HEAT);
         police.begin_pursuit(RACER);
         let mut placed = None;
         let mut block = None;
         for _ in 0..40 {
             step(&mut police, &mut at, 0.25);
-            police.set_heat(RACER, HEAT);
+            police.set_heat(RACER, SPIKE_HEAT);
             if placed.is_none()
                 && police
                     .captain_command(CaptainCommand::RequestSpikes {
@@ -123,6 +125,7 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
             {
                 placed = police.spike_strips().last().cloned();
             }
+            police.set_heat(RACER, HEAT);
             if block.is_none()
                 && police
                     .captain_command(CaptainCommand::RequestRoadblock {
@@ -162,24 +165,27 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
         let median = [0.5 * (far[0] + site.pos[0]), 0.5 * (far[1] + site.pos[1])];
         let side = right_of(median, flow, site.pos).signum();
         let ours = |p: [f32; 2]| right_of(median, flow, p) * side > 0.0;
-        // The car: spawned, or waiting out of view (row 131).
-        let (pos, heading) = match strip.unit {
+        // The car: spawned, or waiting for the next think (PR #54 port); none when its spot
+        // was in the racer's view (the strip is unmanned, rows 131 / 158).
+        let car = match strip.unit {
             Some(u) => {
                 let u = police.units().iter().find(|x| x.id == u).unwrap();
-                (u.body.pos, u.body.heading)
+                Some((u.body.pos, u.body.heading))
             }
-            None => police.tool_cars_waiting(strip.id)[0],
+            None => police.tool_cars_waiting(strip.id).first().copied(),
         };
-        let cos = dot(heading, flow) / (dot(heading, heading).sqrt());
-        assert!(
-            cos >= 30f32.to_radians().cos(),
-            "{name}: spike car faces against its carriageway (cos {cos:.2}) at {pos:?}"
-        );
-        assert!(
-            ours(pos),
-            "{name}: spike car {pos:?} across the median (site {:?}, far {far:?})",
-            site.pos
-        );
+        if let Some((pos, heading)) = car {
+            let cos = dot(heading, flow) / (dot(heading, heading).sqrt());
+            assert!(
+                cos >= 30f32.to_radians().cos(),
+                "{name}: spike car faces against its carriageway (cos {cos:.2}) at {pos:?}"
+            );
+            assert!(
+                ours(pos),
+                "{name}: spike car {pos:?} across the median (site {:?}, far {far:?})",
+                site.pos
+            );
+        }
         assert!(
             ours(strip.a) && ours(strip.b),
             "{name}: strip {:?}–{:?} crosses the median (far {far:?})",

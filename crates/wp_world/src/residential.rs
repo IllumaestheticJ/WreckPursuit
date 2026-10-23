@@ -613,12 +613,19 @@ pub fn blocks_driveway(net: &RoadNetwork, p: V3) -> bool {
     })
 }
 
-/// Ground footprint of a solid piece of decor (hedge, fence, tree trunk), grown by `margin`;
+/// Ground footprint of a solid piece of decor (hedge, fence, tree trunk, crane mast, barrier,
+/// bale, billboard), grown by `margin`;
 /// `None` for flush decor (driveways).
 pub fn solid_footprint(d: &Decor, margin: f32) -> Option<[V2; 4]> {
     let (hw, hl) = match d.kind {
-        DecorKind::Hedge | DecorKind::Fence => (d.size[0] * 0.5, d.size[1] * 0.5),
-        DecorKind::StreetTree | DecorKind::YardTree => (TRUNK_R_M, TRUNK_R_M),
+        DecorKind::Hedge
+        | DecorKind::Fence
+        | DecorKind::Crane
+        | DecorKind::JerseyBarrier
+        | DecorKind::SiteFence
+        | DecorKind::HayBale
+        | DecorKind::Billboard => (d.size[0] * 0.5, d.size[1] * 0.5),
+        DecorKind::StreetTree | DecorKind::YardTree | DecorKind::PineTree => (TRUNK_R_M, TRUNK_R_M),
         DecorKind::Driveway => return None,
     };
     let f = geom::dir_of_yaw(d.yaw);

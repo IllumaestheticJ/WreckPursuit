@@ -136,7 +136,8 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         });
     }
     // Open roads (illegal night meet): the AI may only borrow opposing lanes to overtake.
-    let mut ai = AiEntrants::new(sim.world(), &race, kind, false, &entrants, 15);
+    let mut ai =
+        AiEntrants::new(sim.world(), &race, kind, false, &entrants, 15).expect("a drivable route");
     let green_tick = judge.start(sim.tick()).unwrap();
 
     // Two earlier meets tonight at this venue: this one makes it hot.

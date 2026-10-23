@@ -11,8 +11,8 @@ fn data(path: &str) -> String {
     format!("{}/../../data/{path}", env!("CARGO_MANIFEST_DIR"))
 }
 
-fn sim_mode() -> ModeTable {
-    wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap()
+fn extreme_mode() -> ModeTable {
+    wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap()
 }
 
 fn car(id: &str) -> LoadedCar {
@@ -68,7 +68,7 @@ fn crash(
     seconds: f32,
 ) -> (DamageModel, Vec<wp_contracts::SimEvent>) {
     let mut m = model_with_panels(car);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let mut lo = [f32::MAX; 3];
     let mut hi = [f32::MIN; 3];
     for n in &car.lattice.nodes {
@@ -152,14 +152,14 @@ fn validation_rejects_bad_specs() {
 fn no_panels_means_no_change() {
     let c = car("debug_sedan");
     let (a, _) =
-        crate::barrier::run_barrier(&c, &sim_mode(), ImpactKind::Side, 30.0, 1400.0, 0.4, 1);
+        crate::barrier::run_barrier(&c, &extreme_mode(), ImpactKind::Side, 30.0, 1400.0, 0.4, 1);
     let (b, _) =
-        crate::barrier::run_barrier(&c, &sim_mode(), ImpactKind::Side, 30.0, 1400.0, 0.4, 1);
+        crate::barrier::run_barrier(&c, &extreme_mode(), ImpactKind::Side, 30.0, 1400.0, 0.4, 1);
     assert_eq!(a.state_hash(), b.state_hash());
     assert!(a.panel_states().is_empty());
     // Attaching panels to a car that is never hit changes nothing either.
     let mut idle = model_with_panels(&c);
-    step(&mut idle, &sim_mode(), 1.0);
+    step(&mut idle, &extreme_mode(), 1.0);
     assert!(idle
         .panel_states()
         .iter()
@@ -174,7 +174,7 @@ fn swing_period_matches_pendulum() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
     assert!(m.unlatch_panel(BodyRegion::LeftDoorF));
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let a = 6.0;
     let eq: f32 = 0.6;
     // The open door's centre-of-mass direction at angle θ is R(θ)·com_dir0; put the field
@@ -221,7 +221,7 @@ fn stop_bounce_reverses_with_restitution_and_loads_the_hinge() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
     assert!(m.unlatch_panel(BodyRegion::LeftDoorF));
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let e = {
         let p = rt(&mut m, BodyRegion::LeftDoorF);
         p.def.damping_per_s = 0.0;
@@ -258,7 +258,7 @@ fn stop_bounce_reverses_with_restitution_and_loads_the_hinge() {
 fn hard_braking_opens_a_door_only_once_unlatched() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     let braking = [0.0, 9.0, -9.81]; // g − a with a = −9 m/s² along +Y
     m.set_panel_feel(braking, [0.0; 3]);
     step(&mut m, &mode, 1.0);
@@ -301,7 +301,7 @@ fn hard_braking_opens_a_door_only_once_unlatched() {
 fn airflow_pushes_an_open_door_shut() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     assert!(m.unlatch_panel(BodyRegion::RightDoorF));
     rt(&mut m, BodyRegion::RightDoorF).angle = 0.9;
     rt(&mut m, BodyRegion::RightDoorF).omega = 0.0;
@@ -348,7 +348,7 @@ fn frontal_hit_leaves_the_bumper_hanging() {
 fn hanging_bumper_sags_under_gravity_and_rests_on_its_limit() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     assert!(m.unlatch_panel(BodyRegion::FrontBumper));
     let lim = rt(&mut m, BodyRegion::FrontBumper).def.hang_limit_rad;
     step(&mut m, &mode, 3.0);
@@ -380,7 +380,7 @@ fn hanging_bumper_sags_under_gravity_and_rests_on_its_limit() {
 fn repeated_slams_tear_the_panel_off_with_its_swing_velocity() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     assert!(m.unlatch_panel(BodyRegion::Hood));
     let mut out = Vec::new();
     let mut parts = Vec::new();
@@ -443,7 +443,7 @@ fn fenders_are_synthetic_groups_that_can_detach() {
     assert!(!m.groups[gi].attach_beams.is_empty());
     let mut out = Vec::new();
     m.detach_group(gi, &mut out);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     step(&mut m, &mode, 0.1);
     assert_eq!(
         status(&m, BodyRegion::FrontLeftFender).state,
@@ -494,7 +494,7 @@ fn panel_crashes_are_deterministic() {
     let run = || {
         let (mut m, ev) = crash(&c, ImpactKind::Side, 40.0, 1400.0, 1.0);
         m.set_panel_feel([0.0, 7.0, -9.81], [0.0, -15.0, 0.0]);
-        step(&mut m, &sim_mode(), 1.0);
+        step(&mut m, &extreme_mode(), 1.0);
         (m.state_hash(), ev.len(), m.panel_states())
     };
     let (h1, e1, s1) = run();
@@ -514,7 +514,7 @@ fn reset_keeps_the_spec_and_restores_panels() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
     m.unlatch_panel(BodyRegion::Trunk);
-    step(&mut m, &sim_mode(), 0.2);
+    step(&mut m, &extreme_mode(), 0.2);
     m.reset();
     assert!(m.panel_spec().is_some());
     assert!(m
@@ -534,7 +534,7 @@ fn reset_keeps_the_spec_and_restores_panels() {
 fn contact_on_an_open_door_swings_it() {
     let c = car("debug_sedan");
     let mut m = model_with_panels(&c);
-    let mode = sim_mode();
+    let mode = extreme_mode();
     assert!(m.unlatch_panel(BodyRegion::LeftDoorF));
     rt(&mut m, BodyRegion::LeftDoorF).angle = 1.0;
     rt(&mut m, BodyRegion::LeftDoorF).omega = 0.0;

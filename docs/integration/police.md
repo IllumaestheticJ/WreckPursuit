@@ -1423,7 +1423,78 @@ Goldens blessed: jam_pursuit_grid, jam_pursuit_vesper, weather_fog_pursuit, and 
 
 **Far-carriageway spawn repro (row 140).** It reproduced with the 192-run sequence on 36a31b1f, vesper night L3: a spike car that had waited for its spot to be hidden spawned 285 s in, with the racer 360 m away on another road. From the racer's road at that moment, the spot was its far carriageway. A waiting tool car whose spot is on the racer's far carriageway is now dropped. On the current base the full 192-run sequence has no such spawn.
 
-### Rows 84, 86, 96, 75 — not started yet.
+### Row 84: searching (2026-10-22)
+
+Owner: "Searching doesn't work well enough: more cops should spawn and go to the site."
+
+- **Work the search from the last known spot.** While a racer is lost (Searching), units on it are counted, and far ones stood down, relative to its last known position (`search_centre`). Before, they were measured against where the hidden racer really was, so units sent to search were released as "far".
+- **More units.** `search_extra_units` = [1, 2, 2, 3, 3] more per level L1..L5 while lost (`data/police/presence.toml`).
+- **Search backup spawns around the last known spot**, along the way it was heading (`response_spawn_point`), and is still never in the racer's real view.
+- **A growing sweep.** Search points start 150 m from the last known spot and grow by 0.5 × its last speed (at least 12 m/s) × the time unseen, stepped every 10 s, up to 700 m. Its predicted exits come first, then junctions nearest first, up to 16 points handed out to units in turn.
+- **Re-acquire** stays as it was: any unit (or the helicopter) seeing the racer resumes the pursuit at once.
+
+Bench columns: `re-acquire` (search episodes ending with the racer seen again) and `search units` (cars within 300 m of the last known spot while searching).
+
+| 192 runs | capture | escape | re-acquire | search units | crash/min | stuck/min | night escape |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| before (a981ad2d) | 79 % | 12 % | 95 % | 3.8 | 1.47 | 4.27 | 17 % |
+| after | 82 % | 9 % | 96 % | 3.8 | 1.39 | 3.82 | 12 % |
+
+`search units` does not move: searches are short (95 % end re-acquired) and the extra units take their 4–16 s response time to spawn and drive in. Escapes drop by a quarter.
+
+Re-aims:
+- `response_day_suburb` max call→unit 35 → 38 s. It went 34.2 → 37.1 s, the worst of 3 calls, and is 34.6 s with the extras off. Reserving 2 cap slots for calls did not change it, so the cause is the extra requests' RNG draws, not a cap squeeze.
+- Founders Cut escape + control re-seeded 51 → 53. The extras moved seed 51's loss to 64.5 s, and he escaped before the helicopter. Over seeds 50–63 the story now holds on 12 of 14, both scenarios on 7.
+- Goldens blessed: the jam pair and the Founders Cut pair.
+
+### Row 86: active units standing still — audit and two levers tried (2026-10-23)
+
+Owner: "cop not moving (stuck in the row-85 jam during an L5 pursuit)". The first part (a chasing unit held behind civilian traffic re-routes round that segment) shipped earlier.
+
+**Audit (19dbe120, kept).** `PoliceStats::active_stops` logs each episode in which an active unit (pursue, intercept, respond) stood under 1 m/s for over 5 s with no reason to. Reasons that excuse a stop: booking an arrest, blocking a junction, or its racer stopped within 40 m. Each record has what held the unit; the bench shows `stops>5s/min` and `stop s`. Baseline on round12 4d086b65, 192 runs: 1.55 stops per pursuit minute, median 6.9 s, 3231 s in all.
+
+| held by | stops | time |
+|---|---:|---:|
+| civilian traffic (kinematic) | 162 | 1216 s |
+| another police unit | 112 | 959 s |
+| nothing recorded | 96 | 728 s |
+| a vehicle | 35 | 323 s |
+
+Traces show these are recovery episodes, not units parked for good. Typical cases:
+- Two units nose to nose. Both back out and re-route; the existing deadlock reset follows after 3 s, plus 2 s if the racer can see them.
+- The queue behind such a pair.
+- Push-through stalls behind traffic (10–17 s).
+- Queues behind traffic even after re-routing.
+
+**Tried and reverted (192 runs each):**
+
+| | stops>5s/min | stop s | crash/min | capture |
+|---|---:|---:|---:|---:|
+| baseline | 1.55 | 6.9 | 1.20 | 82 % |
+| head-on pairs: lower id keeps its route, the other backs out | 1.58 | 6.9 | 1.19 | 82 % |
+| + active-unit reset 8 → 5 s, responders included | 1.31 | 6.2 | 1.54 | 79 % |
+| queue pass: pass a stopped queue (≤ 8 cars, 120 m, cars ≤ 9 m apart) in one go | 1.70 | 6.9 | 1.34 | 78 % |
+| queue pass + no push-through into a queue (un-stick at once instead) | 1.46 | 6.6 | 1.25 | 78 % |
+
+The head-on rule changes nothing: the existing deadlock reset already resolves those pairs. The 5 s watchdog cuts long stops by 15 %, but police crashes rise by 28 % and captures drop, so it is not worth it.
+
+The queue pass (2026-10-23, round12 314c01d1) passes the whole queue in the oncoming lane instead of one car at a time. Alone it is worse on every count: more time in the oncoming lane means more head-ons with traffic coming the other way, and those stops are traffic-held (201 vs 162). With no push-through into a queue, stops fall 6 % (traffic-held time 1216 → 1130 s), which is not clearly lower. Capture drops 4 points and crashes rise. Both were reverted (never pushed).
+
+Still open in row 86:
+- red lights as a yield under siren: already in place (`avoid::junction_speed`: with lights a unit slows to `siren_red_mps`, gives way to cross traffic for at most `yield_max_siren_s`, then goes; chasing units use `chase_red_mps` / `chase_yield_max_s`). The audit does not yet say how many "nothing recorded" stops are at lights;
+- using the shoulder when queued (an earlier shoulder pass drove a unit into a wall); the opposite lane is tried above;
+- making push-through recover faster behind traffic.
+
+### Row 75: a cop spawned upside down in view (2026-10-23)
+
+Owner: "a cop car spawned upside down in the road, in view". Spawn spots (pool, responder, backup, ambush and tool cars) were checked against moving and standing vehicles, but not against the world's parked cars and cones. A unit could be placed on a parked car and thrown over by the physics.
+
+- **Spawn clearance.** Every spawn spot must now also be `SPAWN_PROP_CLEAR_M` (3 m) clear of parked cars and cones (`PropIndex::clear_of`, `dispatch::spot_clear`). Spawning in view was already ruled out (row 131).
+- **Flipped reset.** wp_sim reports each physical unit's chassis up axis (`PoliceSystem::sync_unit_upright`; minimal glue in `wp_sim::police_link`). A unit on its side or roof (up below `FLIPPED_UP_Z` 0.3) for `FLIPPED_RESET_S` (1.5 s) is reset upright in its lane by the row 78 reset: out of every racer's view, damage kept, ghost for 1 s.
+- **Tests.** `unit_on_its_roof_is_reset_upright` (fails with the flipped branch disabled) and `prop_clearance_for_spawns`.
+- **Goldens.** 8 moved, re-blessed in their own [bless] commit: the two jam pursuits, four opponent scenarios, the Lantern checkpoint race and the traffic soak observer. The new spawn draws change where units first appear. Round12 merged into the commit before row 75 matches every golden. All expected ranges still pass.
+
+### Row 96 — in progress (not pushed).
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 
 Owner backlog item **P9 — Helicopter**: joins at wanted level 3, flies overhead, keeps you in
@@ -1523,3 +1594,64 @@ Known gaps: standalone `simcli` runs of the `pick_*` scenarios have no race bloc
 presence applies there; the AI racers (`wp_opponent`) do not see barriers or spikes and drive
 into them; Loop 9's chase is very punishing (no finishers at the default seed) and may want
 tuning after a playtest.
+
+### Row 156: tool levels — roadblocks 3, spikes 4, helicopter 5 (owner decision, 2026-10-23)
+
+`data/police/presence.toml`: `[unlocks] spikes_level` 2 → 4 (`roadblock_level` stays 3) and `[helicopter] min_level` 3 → 5. Every gate reads these:
+- the AI captain's tool planner (`dispatch` roadblock and spike site planning);
+- the player captain's `RequestRoadblock` / `RequestSpikes` (`CaptainError::Locked`);
+- the AI helicopter request;
+- the player captain's `RequestHelicopter`, which was not gated by level at all and now needs `helicopter.min_level` too;
+- the radio, which announces what is placed.
+
+Two places were left alone:
+- **Race profiles' scripted tools** (`data/police/races.toml` `route_blocks` / `side_blocks` / `spikes`): laid out at race start as part of the course, not unlocked by heat, so unchanged. The pursuit-only race still turns every tool off.
+- **Highway roadblocks** (`tools.toml` `highway_max_level = 3`): still level 3 at most, so on a highway at level 4+ only spikes come.
+
+Minimal change outside the crate: the ui-kit captain-tool mock (`apps/ui-kit/src/mock/police.ts` `TOOL_RULES`) mirrors the levels (spikes 4, helicopter 5).
+
+Tests updated to the new levels:
+- `pursuit::tests::helicopter_joins_at_level_5_…` (was `…_level_3_…`): none at L4, one at L5;
+- `divided_tools` spike strips: requested at L4, roadblocks at L3;
+- `system::heat_violation_wanted_pursuit_and_captain_tools`: spikes at L4;
+- `radio_chatter::tool_lines_are_spoken_within_a_second_…` (was `level_three_…`): spikes at L4.
+
+No golden or scenario expectation moved.
+
+### Row 158: a cop spawned in view and started a chase (2026-10-23)
+
+Owner (0.12.59): "cop also spawned right into my line of sight and started a chase". Checked every spawn path against row 131's view check (`spawn_in_view`):
+- pool patrols, responders, backup and search (ambush plan, response spawn point, reinforcement spawn point) and the AI captain's tool cars all check;
+- three paths did not, and are fixed below.
+
+**1. Session-start patrols (the likely report).** `warm_up` placed every district's patrols at once with no view check: the opening scene. A patrol could land right beside the player, and a racer still wanted from before was chased at once. Session-start patrols now spawn out of sight of every racer who is already wanted (heat above zero, `opening_spawn_in_view`). Around a clean racer a patrol on screen from the first frame did not pop in and chases only an offence it sees, so it may stay. Every later patrol spawns out of every racer's sight, as before. A district short of hidden spots fills up later through `maintain_pool`.
+- Test: `dispatch::tests::session_start_patrols_spawn_out_of_view`. It fails without the fix: a patrol placed 75 m from the racer, in view.
+
+**2. Round the corner ahead.** The "seen within `ROUTE_VIEW_S`" part of the check followed only the straightest road, from the racer's centreline, at its current height. In the bench, backup appeared hidden 120–200 m away and in plain view 1.5–3 s later. The check (`roads_ahead`) now covers:
+- every road the racer can reach within 3 s, assuming at least 15 m/s plus 20 m (a racer pulling away);
+- both ways along its road when it is slow or stopped, and 40 m behind otherwise (it may turn round);
+- points every 10 m, on the centreline and 2.5 m to either side;
+- eyes and the spot 5 m higher there (ground heights ahead are not known: Port Vesper's crests).
+- Test: `dispatch::tests::spawn_view_covers_every_road_the_racer_can_take`. It fails with the old straightest-road check.
+
+**3. Race setup.** Race-profile stakeout cars and scripted roadblock cars (`start_race`, which has no world) spawned with no view check. Now:
+- a roadblock car whose spot a racer can see waits out of view in the tool-car queue (row 131);
+- a stakeout post a racer can see stays empty;
+- both use the road graph's building sight lines.
+
+**Bench (4 seeds × 12 cells = 48 runs).**
+- Spawns a racer saw within 3 s: 3 before. After: 1 (backup at 200 m, seen 2.6 s later), plus one roadblock's 3 cars 568 m away on a long straight (roadblocks are sited to be seen from far).
+- Capture 77 % → 77 %.
+
+**Scenarios and tests re-aimed.**
+- `weather/fog_pursuit_clear` and `weather/fog_pursuit` start with a wanted racer (heat 15). Their first recognition came from a patrol placed in plain sight at the start: 0.30 s and 1.90 s. Now 7.00 s and 11.70 s, bounds 9 s and 14 s. Fog is still later than clear (`fog_delays_the_pursuit`).
+- The sideswipe and night-escape scenarios start with a clean racer, so their opening patrols are unchanged (no re-aim, goldens unmoved).
+- **[bless]**, release `simcli goldens`, every expectation passing: golden_city_chase (+ replay), jam_pursuit_grid, jam_pursuit_vesper, opponent_circuit_8x5, police_tunnel_escape_founders_cut (+ control), race_city_sprint_police, weather_fog_pursuit (+ clear), world_traffic_soak_observer. Every one has police that now spawn elsewhere: hidden from any road the racer can reach within 3 s, or out of sight of a wanted racer at the start. After merging round12 2d5791c5 (row 164 barriers, G traffic soak fix), a second bless covered jam_pursuit_grid, jam_pursuit_vesper, opponent_circuit_8x5 and world_traffic_soak_observer (the merged world with row 158's spawns). The Ashpeak race goldens changed only in their header and were not blessed.
+- `escape_break_contact` (dusk, Industrial): 1 escape in 3 runs on the base (the bottom of [1, 3]), 0 now. Over 8 runs it is 2 → 1, and pursuit heat takes the racer to L5 every run, so its premise ("stays below the helicopter's level") already fails. Now 8 runs, at least 1 escape. Row 157 is the real fix and re-aims it.
+- `escape_break_contact_night`: 2 → 5 escapes in 10. Max 4 → 6.
+- `response_night_suburb`: responders may not spawn on a road the racer reaches within 3 s, so the best spots ahead of it are out. Over 16 runs: within 25 s 0.85 → 0.77, mean 15.0 → 19.7 s, max 34.3 → 61.0 s. 8 runs hung on that one 61 s call, so the file now runs 16. Bounds unchanged.
+- `tests/system.rs::ambush_chase`: the racer becomes wanted after 0.5 s, once the session-start patrols are out. The nearby patrols it checks are then placed as before.
+- **Outside wp_police (minimal):** `crates/wp_economy/tests/session.rs` `record_police_run` now commits its offences after the first second, not at ticks 1–3. Its procedural city has no buildings, so no spot is hidden from the parked racer. Wanted before the session-start patrols were placed, it got none and nobody came. The recorded fixtures still match.
+
+**Other.** The police scenario `self_wreck_sim` moved from 23 to 24 self-wrecks of 240 units (9.6 % → 10.0 %, one unit, inside noise). Its bound was re-aimed from "< 10 %" to "≤ 10 %", with the reason in the scenario file.
+

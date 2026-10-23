@@ -9,7 +9,7 @@ use wp_economy::{CarLocation, CarUid, Condition, Economy, RepairOption, RunEnd, 
 
 use crate::career::{Career, ShopRequest};
 use crate::run::RunOutcome;
-use crate::scenario::{city_chase_in, free_drive, procedural_city};
+use crate::scenario::{free_drive, night_run_in, procedural_city};
 use crate::session::Session;
 
 fn econ() -> Economy {
@@ -20,7 +20,10 @@ fn econ() -> Economy {
 fn career_with(def_id: &str, cash: i64, mode: DamageMode) -> (Career, CarUid) {
     let mut c = Career::new(econ(), mode);
     c.profile_mut().account.cash = cash;
+    // Any class: lift the career's dealer gate for the purchase only.
+    c.profile_mut().account.rep = 1_000_000;
     let uid = c.buy_car(def_id, Condition::Used).unwrap();
+    c.profile_mut().account.rep = 0;
     c.set_active(uid).unwrap();
     (c, uid)
 }
@@ -316,9 +319,9 @@ fn economy_floor_always_gives_a_car() {
     assert!(c.floor_car().is_err(), "only with no usable car");
 }
 
-/// A career city chase with the player parked in front of a patrol car at `heat`.
+/// A career night run with the player parked in front of a patrol car at `heat`.
 fn career_chase_parked(c: &mut Career, heat: f32) -> Session {
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = c.start_run(sc).unwrap();
     let id = player(&s);
@@ -438,7 +441,7 @@ fn auction_takes_an_unclaimed_car() {
 #[test]
 fn heat_carries_into_the_next_night() {
     let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = c.start_run(sc).unwrap();
     let id = player(&s);
@@ -452,7 +455,7 @@ fn heat_carries_into_the_next_night() {
         "{}",
         close.carried_heat
     );
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let s = c.start_run(sc).unwrap();
     let heat = s.sim().police().racer(player(&s)).map(|r| r.heat).unwrap();
@@ -563,7 +566,7 @@ fn closing_the_game_when_not_pursued_is_free() {
     c.finish_run(&mut s).unwrap();
 
     // Wanted, nobody chasing: no bust, the heat carries like a free end (40 → 20).
-    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    let mut sc = night_run_in("ignored", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = c.start_run(sc).unwrap();
     let id = player(&s);
@@ -680,4 +683,234 @@ fn the_workshop_shows_the_car_as_it_is_even_with_parts_missing() {
         "saved dents are shown"
     );
     assert!(!c.run_active(), "the workshop is not a run");
+}
+
+#[test]
+fn rep_tiers_gate_the_dealer_and_pay_their_bonus_once() {
+    let mut c = Career::new(econ(), DamageMode::Arcade);
+    c.profile_mut().account.cash = 500_000;
+    let view = c.view();
+    assert_eq!(view.progress.tier, wp_economy::RepTier::Unknown);
+    let exotic = view
+        .dealer
+        .iter()
+        .find(|d| d.class == wp_contracts::VehicleClass::Exotic)
+        .unwrap()
+        .clone();
+    assert!(exotic.locked);
+    assert!(view.dealer.iter().any(|d| !d.locked));
+    let err = c.buy_car(&exotic.def_id, Condition::New).unwrap_err();
+    assert!(err.contains("locked"), "{err}");
+
+    // Rep earned on the night pays each tier's bonus the first time only.
+    let feared = econ()
+        .progression
+        .tier_def(wp_economy::RepTier::Feared)
+        .min_rep;
+    c.profile_mut().account.rep = feared;
+    let cash = c.profile().account.cash;
+    c.next_night().unwrap();
+    let paid = c.profile().account.cash - cash;
+    let bonuses: i64 = econ().progression.tiers[1..=4]
+        .iter()
+        .map(|t| t.reward)
+        .sum();
+    assert!(paid >= bonuses - 1_000, "paid {paid}, bonuses {bonuses}");
+    let view = c.view();
+    assert_eq!(view.progress.tier, wp_economy::RepTier::Feared);
+    assert!(!view
+        .dealer
+        .iter()
+        .any(|d| d.def_id == exotic.def_id && d.locked));
+    c.buy_car(&exotic.def_id, Condition::Worn).unwrap();
+    let cash = c.profile().account.cash;
+    c.next_night().unwrap();
+    assert!(c.profile().account.cash <= cash, "no second bonus");
+}
+
+#[test]
+fn a_worn_piston_set_costs_the_car_torque_and_the_engine_stand_round_trips() {
+    let (mut c, uid) = career_with("kestrel_ts", 200_000, DamageMode::Arcade);
+    let base_torque = |c: &Career| {
+        let car = c.profile().account.try_car(uid).unwrap().clone();
+        let loaded = c.loaded_car(&car).unwrap();
+        loaded
+            .def
+            .engine
+            .torque_curve_nm
+            .iter()
+            .map(|p| p.1)
+            .fold(0.0, f32::max)
+    };
+    let stock = base_torque(&c);
+    // Pull the engine whole, strip the pistons on the stand, put a worn set back in.
+    for slot in [
+        "front_bumper",
+        "radiator",
+        "intake",
+        "exhaust",
+        "fuel_system",
+        "driveshaft",
+        "gearbox",
+    ] {
+        c.remove_part(uid, slot)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    let engine = c.remove_part(uid, "engine").unwrap();
+    for slot in [
+        "intake_manifold",
+        "throttle_body",
+        "exhaust_manifold",
+        "valve_cover",
+        "timing",
+        "camshafts",
+        "valvetrain",
+        "cylinder_head",
+        "head_gasket",
+    ] {
+        c.strip_part(engine, slot)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    let pistons = c.strip_part(engine, "pistons").unwrap();
+    let view = c.workshop(uid).unwrap();
+    assert_eq!(view.view.stands.len(), 1);
+    assert!(view.view.missing.iter().any(|m| m == "Engine block"));
+    let mut acct = c.profile().account.clone();
+    acct.inventory
+        .iter_mut()
+        .find(|p| p.uid == pistons)
+        .unwrap()
+        .condition = 0.4;
+    c.profile_mut().account = acct;
+    // Everything goes back in, in reverse order.
+    let loose: Vec<(String, u32)> = c
+        .profile()
+        .account
+        .inventory
+        .iter()
+        .filter(|p| p.uid != engine)
+        .map(|p| (p.kind.clone(), p.uid))
+        .collect();
+    for slot in [
+        "pistons",
+        "head_gasket",
+        "cylinder_head",
+        "valvetrain",
+        "camshafts",
+        "timing",
+        "valve_cover",
+        "exhaust_manifold",
+        "throttle_body",
+        "intake_manifold",
+    ] {
+        let part = loose.iter().find(|(k, _)| k == slot).unwrap().1;
+        c.build_part(engine, slot, part)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    c.fit_part(uid, "engine", engine).unwrap();
+    for slot in [
+        "gearbox",
+        "driveshaft",
+        "fuel_system",
+        "exhaust",
+        "intake",
+        "radiator",
+        "front_bumper",
+    ] {
+        let part = loose.iter().find(|(k, _)| k == slot).unwrap().1;
+        c.fit_part(uid, slot, part)
+            .unwrap_or_else(|e| panic!("{slot}: {e}"));
+    }
+    assert!(c.start_blocker().is_none());
+    let worn = base_torque(&c);
+    let want = stock * (1.0 - 0.35 * 0.6);
+    assert!(
+        (worn - want).abs() < 1.0,
+        "{worn} vs {want} (stock {stock})"
+    );
+}
+
+/// Row 163: a panel torn off in a session is saved as a synthetic detached group (≥ 100),
+/// which only exists once the car's panels are attached. Repairing such a car (insured or
+/// not) used to fail with "detached group 100 not in lattice".
+#[test]
+fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 35.0);
+    let mut snap = c
+        .lattice(uid)
+        .unwrap()
+        .expect("crash stored a lattice blob");
+    snap.snapshot
+        .detached_groups
+        .insert(wp_damage::panels::SYNTHETIC_GROUP_BASE);
+    c.profile_mut()
+        .lattices
+        .insert(uid.0, serde_json::to_string(&snap).unwrap());
+    c.insure(uid, "basic").unwrap();
+    c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
+}
+
+/// Row 163 with mounted parts (PR #55): a car whose save has a torn-off panel (a synthetic
+/// detached group, which needs the car's panels attached) and parts mounted on its bumper and
+/// trunk lid can be shown in the workshop, have its host panel taken off and refitted with the
+/// mounted part, and be quoted and repaired.
+#[test]
+fn a_car_with_a_torn_off_panel_and_mounted_parts_can_be_quoted_repaired_and_worked_on() {
+    let (mut c, uid) = career_with("kestrel_ts", 80_000, DamageMode::Arcade);
+    c.install_mod(uid, "aero_splitter").unwrap();
+    c.install_mod(uid, "aero_wing_1").unwrap();
+    drive_and_crash(&mut c, 35.0);
+    let mut snap = c
+        .lattice(uid)
+        .unwrap()
+        .expect("crash stored a lattice blob");
+    snap.snapshot
+        .detached_groups
+        .insert(wp_damage::panels::SYNTHETIC_GROUP_BASE);
+    c.profile_mut()
+        .lattices
+        .insert(uid.0, serde_json::to_string(&snap).unwrap());
+
+    // The workshop shows the mounts.
+    let w = c.workshop(uid).unwrap();
+    let bumper = w
+        .view
+        .slots
+        .iter()
+        .find(|s| s.id == "front_bumper")
+        .unwrap();
+    assert_eq!(bumper.takes_along, vec!["front_splitter".to_string()]);
+    let wing = w.view.slots.iter().find(|s| s.id == "rear_wing").unwrap();
+    assert_eq!(wing.mount.as_deref(), Some("trunk_lid"));
+    // The 3D workshop session shows the car with its saved damage.
+    let s = c
+        .showroom(uid, free_drive("ignored", DamageMode::Arcade, false))
+        .unwrap();
+    assert!(
+        player_damage(&s).summary().health < 1.0,
+        "saved dents are shown"
+    );
+    drop(s);
+
+    // Host panel off and on again: the splitter leaves and comes back with it (fitting
+    // restores the bumper area of the stored lattice through the career damage model).
+    let b = c.remove_part(uid, "front_bumper").unwrap();
+    let mods = &c.profile().account.car(uid).unwrap().mods;
+    assert!(!mods.contains(&"aero_splitter".to_string()), "{mods:?}");
+    c.fit_part(uid, "front_bumper", b).unwrap();
+    let mods = &c.profile().account.car(uid).unwrap().mods;
+    assert!(mods.contains(&"aero_splitter".to_string()), "{mods:?}");
+
+    // Quote and repair: the car comes back pristine with its mounted parts on.
+    c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    let car = c.profile().account.car(uid).unwrap();
+    assert!(car.damage.is_pristine());
+    assert!(car.mods.contains(&"aero_splitter".to_string()));
+    assert!(car.mods.contains(&"aero_wing_1".to_string()));
+    assert!(c.workshop(uid).unwrap().view.missing.is_empty());
+    assert!(c.start_blocker().is_none());
 }

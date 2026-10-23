@@ -11,7 +11,7 @@
 //!
 //! | group | functions |
 //! |---|---|
-//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
+//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `night_run_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()`, `car_stats_json()`, `car_stats_build_json(car, mods, mode)` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `set_countersteer(entity, %)` / `countersteer(entity)`, `set_clutch_mode(entity, "auto"|"manual")` / `clutch_mode(entity)`, `engine_stalled(entity)`, `assist_presets()`, `assist_preset_named(name, source)`, `assist_preset_of(entity, source)`, `reset_vehicle(entity)` |
 //! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `traffic_models()`, `police_models()`, `signal_heads()`, `signal_states()`, `road_markings(yellow)` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
@@ -19,12 +19,13 @@
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
-//! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
+//! | touge | `touge_list_json()`, `touge_menu_json(map, dir, daylight, surface, opponent)`, `touge_scenario_json(…, car, mode, wager_json, autopilot)`, `touge_start(…)`, `touge_result_json()`, `touge_debug_set_rep(rep)` — see [`touge`] |
+//! | race (19) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_spots()`, `race_spot_honked()`, `debug_place(entity, x, y, yaw, speed)`, `race_bet(label, stake)`, `race_bet_status()`, `roster_json()`, `roster_state()` / `roster_state_load(text)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | parked-car damage (lead) | `parked_wrecks()` per frame, `parked_wreck_stride()`, `parked_entity_base()`, `parked_wreck_shattered(entity)`; a wreck's entity works with the `lattice_*` / `vehicle_info` calls — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
-//! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
+//! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `night_run_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | drift lab B (lead) | `drift_tuning_json()`, `drift_tuning_defaults_json()`, `drift_tuning_set(json)`, `drift_readout(entity)` — see [`drift_lab`] |
 //! | mods | `mod_catalog_json(car)`, `build_visuals_json(car, mods)`, `entity_visuals_json(entity)` — see [`mod_visuals`]; install with `EntitySpec::mods` in the scenario |
@@ -52,27 +53,38 @@ pub mod pack;
 pub mod police;
 pub mod props;
 pub mod race;
+pub mod race_spots;
 pub mod reset;
+pub mod roam;
 pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
 pub mod siren_cue;
 pub mod street;
+pub mod touge;
 pub mod weather;
 
 #[cfg(test)]
 mod career_tests;
 #[cfg(test)]
+mod collide_tests;
+#[cfg(test)]
 mod crash_replay_tests;
 #[cfg(test)]
 mod police_audio_trace;
 #[cfg(test)]
+mod race_spots_tests;
+#[cfg(test)]
 mod race_tests;
+#[cfg(test)]
+mod roam_tests;
 #[cfg(test)]
 mod run_tests;
 #[cfg(test)]
 mod street_tests;
+#[cfg(test)]
+mod touge_tests;
 
 use std::cell::RefCell;
 
@@ -180,12 +192,12 @@ pub fn free_drive_json(car: &str, mode: &str, city: bool) -> Result<String, JsVa
     Ok(json(&scenario::free_drive(car, mode, city)))
 }
 
-/// "City chase" preset JSON (live): Port Vesper v2 at night, full police presence, traffic,
+/// "Night run" preset JSON (live): Port Vesper v2 at night, full police presence, traffic,
 /// the player already speeding on the race grid.
 #[wasm_bindgen]
-pub fn city_chase_json(car: &str, mode: &str) -> Result<String, JsValue> {
+pub fn night_run_json(car: &str, mode: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
-    Ok(json(&scenario::city_chase(car, mode)))
+    Ok(json(&scenario::night_run(car, mode)))
 }
 
 /// Free drive in a chosen city: `city_id` = `"vesper_v2"` (Port Vesper v2) or
@@ -200,11 +212,39 @@ pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<Stri
     )))
 }
 
-/// City chase in a chosen city (`city_id` as in [`free_drive_city_json`]).
+/// Free roam in a chosen city (`city_id` as in [`free_drive_city_json`]): free drive plus
+/// `roamers` AI street racers (0 = the default 10, at most 24) roaming the city's highways,
+/// touge, dirt roads, downtown and countryside. Start it with `init` like any scenario.
 #[wasm_bindgen]
-pub fn city_chase_city_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+pub fn free_roam_city_json(
+    car: &str,
+    mode: &str,
+    city_id: &str,
+    roamers: u32,
+) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
-    Ok(json(&scenario::city_chase_in(
+    let n = match roamers {
+        0 => roam::DEFAULT_ROAMERS,
+        n => n as usize,
+    };
+    Ok(json(
+        &roam::free_roam_in(car, mode, city_id, n).map_err(err)?,
+    ))
+}
+
+/// Free-roam status JSON (`null` outside free roam): every roamer's entity id, home haunt,
+/// phase, current leg's haunt, full-pace run or not, legs and distance driven; rescues so
+/// far; the last few roamer events.
+#[wasm_bindgen]
+pub fn roam_status_json() -> Result<String, JsValue> {
+    get(|s| json(&s.roam().map(roam::RoamRun::status)))
+}
+
+/// Night run in a chosen city (`city_id` as in [`free_drive_city_json`]).
+#[wasm_bindgen]
+pub fn night_run_city_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    Ok(json(&scenario::night_run_in(
         car,
         mode,
         scenario::city_spec(city_id),
@@ -553,6 +593,9 @@ struct VehicleInfo {
     /// `wp_police` unit id of a sim police vehicle (the `unit_id` of `police_units()`), so a
     /// unit keeps its number when it becomes a sim vehicle; `None` for other vehicles.
     police_unit: Option<u32>,
+    /// The police vehicle belongs to the Ashpeak County Sheriff's Office (county livery; see
+    /// [`police::Agencies`]); false for every other vehicle and outside the `ashpeak` map.
+    police_county: bool,
     /// `wp_world` agent id of promoted traffic (the `agent_id` of `traffic_agents()`), so the
     /// physical car can be painted like its instanced twin; `None` for other vehicles.
     traffic_agent: Option<u32>,
@@ -669,6 +712,7 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .vehicle(EntityId(entity))
                 .and_then(|v| v.police_unit)
                 .map(|u| u.0),
+            police_county: police::vehicle_county(s.sim(), EntityId(entity)),
             traffic_agent: s.vehicle(EntityId(entity)).and_then(|v| v.traffic_agent),
         }))
     })
@@ -726,7 +770,7 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation), replay (0/1),
+/// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation / 2 Extreme), replay (0/1),
 /// recording (0/1), city (0/1), scripted (0/1)]`.
 #[wasm_bindgen]
 pub fn world_info() -> Result<Vec<f32>, JsValue> {
@@ -737,7 +781,11 @@ pub fn world_info() -> Result<Vec<f32>, JsValue> {
             s.tick() as f32,
             t.hours(),
             t.night_factor(),
-            b(s.mode() == DamageMode::Simulation),
+            match s.mode() {
+                DamageMode::Arcade => 0.0,
+                DamageMode::Simulation => 1.0,
+                DamageMode::Extreme => 2.0,
+            },
             b(s.playback().is_some()),
             b(s.recording()),
             b(s.has_city()),
@@ -770,11 +818,11 @@ pub fn scenario_weather_choice(scenario_json: &str) -> Result<String, JsValue> {
     Ok(weather::choice_of(&sc).to_string())
 }
 
-/// "Rainy night" city chase JSON: [`city_chase_city_json`] in a held downpour on a soaked road.
+/// "Rainy night" night run JSON: [`night_run_city_json`] in a held downpour on a soaked road.
 #[wasm_bindgen]
-pub fn city_chase_rain_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+pub fn night_run_rain_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
-    Ok(json(&weather::rainy_night(scenario::city_chase_in(
+    Ok(json(&weather::rainy_night(scenario::night_run_in(
         car,
         mode,
         scenario::city_spec(city_id),
@@ -830,7 +878,8 @@ pub fn police_status(entity: u32) -> Result<String, JsValue> {
 }
 
 /// Police units that are not sim vehicles (internally driven cars, helicopters), 8 floats
-/// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing;
+/// each: `[x, y, z, yaw, speed_mps, flags, unit_id, model]` (flags 1 helicopter, 2 pursuing,
+/// 4 Ashpeak County unit: county livery, see [`police::Agencies`];
 /// `unit_id` is the stable `wp_police` unit id; `model` indexes `police_models()`, -1 for
 /// helicopters, single-model sessions and units not yet reconciled). A unit keeps its model
 /// when it later becomes a sim vehicle of kind Police (`vehicle_states()` / `vehicle_meta()`,
@@ -844,6 +893,7 @@ pub fn police_units() -> Result<Vec<f32>, JsValue> {
             sim.police(),
             &|p| world.map().ground_height(p, None),
             &|u| sim.police_unit_model(u).map_or(-1.0, |m| m as f32),
+            &police::Agencies::of(Some(world.network())),
         )
     })
 }
@@ -930,6 +980,7 @@ pub fn run_repair_continue() -> Result<String, JsValue> {
 fn parse_mode(mode: &str) -> Result<DamageMode, String> {
     match mode {
         "Simulation" => Ok(DamageMode::Simulation),
+        "Extreme" => Ok(DamageMode::Extreme),
         "Arcade" | "" => Ok(DamageMode::Arcade),
         other => Err(format!("unknown damage mode {other:?}")),
     }
@@ -948,7 +999,9 @@ pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
 /// Start race `id` with the player in `car` (`mode` `"Arcade"` | `"Simulation"`): a new live
 /// session on the race's grid, countdown running, AI field on the slots ahead. `autopilot`
 /// hands the player's car to the AI (tests / e2e). The account carries over like a restart.
-/// Returns the entity ids (player first).
+/// The race runs on the current session's map when it can run there (a Port Vesper race
+/// started on the combined `ashpeak` map stays on it; "Race again" keeps the map), else on its
+/// own city ([`race::race_city`]). Returns the entity ids (player first).
 #[wasm_bindgen]
 pub fn race_start(id: &str, car: &str, mode: &str, autopilot: bool) -> Result<Vec<u32>, JsValue> {
     race_start_tuned(id, car, mode, autopilot, "")
@@ -965,8 +1018,16 @@ pub fn race_start_tuned(
     tune_json: &str,
 ) -> Result<Vec<u32>, JsValue> {
     let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
-    let mut sc =
-        race::race_scenario(&def, car, parse_mode(mode).map_err(err)?, autopilot).map_err(err)?;
+    let current = with_session_opt(|s| {
+        Ok::<_, ()>(
+            s.filter(|s| s.has_city())
+                .map_or(String::new(), |s| s.sim().world().network().id.clone()),
+        )
+    })
+    .unwrap_or_default();
+    let city = race::race_city(&def, &current);
+    let mut sc = race::race_scenario_in(&def, car, parse_mode(mode).map_err(err)?, autopilot, city)
+        .map_err(err)?;
     if !tune_json.is_empty() {
         let tune: wp_vehicle::CarTune =
             serde_json::from_str(tune_json).map_err(|e| err(format!("bad tune: {e}")))?;
@@ -975,6 +1036,22 @@ pub fn race_start_tuned(
         }
     }
     Ok(install(Session::new(sc, false).map_err(err)?))
+}
+
+/// Honk-to-start race spots of the current session's map as JSON
+/// ([`race_spots::SpotCard`] array: `id, name, kind, laps, legality, x, y, z, heading, radius,
+/// length_m`); `[]` during a race, a replay, a scripted or career run, or off-city. Planned on
+/// the first call per session.
+#[wasm_bindgen]
+pub fn race_spots() -> Result<String, JsValue> {
+    get(|s| json(&race_spots::spot_cards(s.race_spots())))
+}
+
+/// The race the player just honked for (stopped in its spot, horn pressed), or `""`: taken,
+/// so the next call returns `""`. The testbed then calls `race_start(id, car, mode, false)`.
+#[wasm_bindgen]
+pub fn race_spot_honked() -> Result<String, JsValue> {
+    get(|s| s.take_race_spot_honked().unwrap_or_default().to_string())
 }
 
 /// Live race state, or an empty array without a race: see [`race::RaceRun::info`]
@@ -1023,8 +1100,8 @@ pub fn race_result_json() -> Result<String, JsValue> {
 
 // ----- street racers (src/street.rs) -------------------------------------------------------
 
-/// Add the 16 NPC street racers to live free-drive / city-chase city sessions started after
-/// this call (default on). They are scenario entities (`street_<level>_<name>`, after the
+/// Add the NPC street racers (8 by day, 13 at night, [`street::ROSTER`]) to live free-drive /
+/// night-run city sessions started after this call (default on). They are scenario entities (`street_<level>_<name>`, after the
 /// player in `entities()`), so recordings and replays carry them.
 #[wasm_bindgen]
 pub fn set_street_racers(on: bool) {
@@ -1033,15 +1110,18 @@ pub fn set_street_racers(on: bool) {
 
 /// Street racers for the map, 6 floats each: `[entity, level, x, y, yaw, mode]` (`level` as in
 /// [`street::LEVELS`]: 2..=5, there is no level 1; mode
-/// 0 roaming, 1 waiting on a challenge, 2 racing the player). Empty without street racers.
+/// 0 roaming, 1 waiting on a challenge, 2 racing the player). Off-shift racers (in the lockup)
+/// are left out. Empty without street racers.
 #[wasm_bindgen]
 pub fn street_racers() -> Result<Vec<f32>, JsValue> {
     get(|s| s.street().map(|st| st.packed(s.sim())).unwrap_or_default())
 }
 
-/// Street-race state as JSON: `{ levels, roster, hint, offer, race, result }` — the level
-/// table ([`street::LEVELS`]), every racer ([`street::RosterEntry`]), the racer a honk would
-/// challenge now (`hint`), the open challenge ([`street::Offer`]), the race in progress
+/// Street-race state as JSON: `{ levels, roster, hint, pursued, blocked, offer, race, result }`
+/// — the level table ([`street::LEVELS`]), every racer ([`street::RosterEntry`]), the racer a
+/// honk would challenge now (`hint`), whether the police are after the player (no challenges
+/// then) and the racer in reach they block (`blocked`),
+/// the open challenge ([`street::Offer`]), the race in progress
 /// ([`street::RaceView`]) and the latest result ([`street::RaceResult`], `seq` grows). `null`
 /// without street racers.
 #[wasm_bindgen]
@@ -1055,6 +1135,12 @@ pub fn street_status_json() -> Result<String, JsValue> {
             "levels": street::LEVELS,
             "roster": st.roster(),
             "hint": player.and_then(|p| st.challengeable(s.sim(), p)),
+            // Wanted or chased: no challenges (owner row 150); `blocked` = the racer a honk
+            // would challenge without the police.
+            "pursued": player.is_some_and(|p| s.sim().police().is_wanted_or_pursued(p)),
+            "blocked": player
+                .filter(|p| s.sim().police().is_wanted_or_pursued(*p))
+                .and_then(|p| st.in_reach(s.sim(), p)),
             "offer": st.offer(s.sim(), s.run()),
             "race": st.race(s.sim()),
             "result": st.result(),
@@ -1062,18 +1148,37 @@ pub fn street_status_json() -> Result<String, JsValue> {
     })
 }
 
-/// Plan the open challenge's route from the player to `(x, y)` ([`street::Preview`] JSON:
-/// length, snapped finish, centreline, whether it is raceable).
-#[wasm_bindgen]
-pub fn street_preview(x: f32, y: f32) -> Result<String, JsValue> {
-    with(|s| s.street_preview([x, y]).map(|p| json(&p)))
+/// Waypoints from a flat `[x0, y0, x1, y1, …]` array.
+fn waypoints(via: &[f32]) -> Vec<[f32; 2]> {
+    via.chunks_exact(2).map(|c| [c[0], c[1]]).collect()
 }
 
-/// Accept the open challenge: race to `(x, y)` for `stake` dollars (paid now; a win pays
-/// twice the stake). Errors (nothing changed) on a bad stake, no route, or no open challenge.
+/// Plan the open challenge's route from the player through the waypoints `via` (flat
+/// `[x0, y0, x1, y1, …]`, in order; may be empty) to `(x, y)` ([`street::Preview`] JSON:
+/// length, snapped finish and gates, centreline, whether it is raceable).
 #[wasm_bindgen]
-pub fn street_accept(x: f32, y: f32, stake: f64) -> Result<(), JsValue> {
-    with(|s| s.street_accept([x, y], stake.round() as i64))
+pub fn street_preview(x: f32, y: f32, via: Vec<f32>) -> Result<String, JsValue> {
+    with(|s| s.street_preview([x, y], &waypoints(&via)).map(|p| json(&p)))
+}
+
+/// Accept the open challenge: race through the waypoints `via` (as in [`street_preview`]) to
+/// `(x, y)` for `stake` dollars (paid now; a win pays twice the stake). Both cars are reset
+/// side by side at the start. Errors (nothing changed) on a bad stake, no route, no open
+/// challenge, or while the police are after the player.
+#[wasm_bindgen]
+pub fn street_accept(x: f32, y: f32, via: Vec<f32>, stake: f64) -> Result<(), JsValue> {
+    with(|s| s.street_accept([x, y], &waypoints(&via), stake.round() as i64))
+}
+
+/// The street race's gates (waypoints, then B) and route, as [`race_course`] lays them out:
+/// `[gates, (x, y, z, dx, dy, width) × gates, (x, y, z) × points]`. Empty without a street race.
+#[wasm_bindgen]
+pub fn street_course() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.street()
+            .map(|st| st.course().to_vec())
+            .unwrap_or_default()
+    })
 }
 
 /// Decline the open challenge (the racer drives off).
@@ -1116,6 +1221,28 @@ pub fn debug_place_vehicle(entity: u32, x: f32, y: f32, yaw: f32) -> Result<(), 
     })
 }
 
+/// Debug / e2e: park street racer `entity` idle at the Loop 9 rest stop `name` (as between
+/// laps, two minutes; a logged move). Errors without street racers, for an unknown rest stop or a
+/// racer that is not roaming.
+#[wasm_bindgen]
+pub fn debug_street_park_at_rest_stop(entity: u32, name: &str) -> Result<(), JsValue> {
+    with(|s| s.street_park_at_rest_stop(EntityId(entity), name))
+}
+
+/// The Loop 9 rest stops as JSON: `[{ name, pos, heading_rad }]` (`[]` on maps without them).
+#[wasm_bindgen]
+pub fn rest_stops_json() -> Result<String, JsValue> {
+    get(|s| {
+        let v: Vec<_> = s
+            .sim()
+            .world()
+            .rest_stops()
+            .map(|p| serde_json::json!({ "name": p.name, "pos": p.pos, "heading_rad": p.heading_rad }))
+            .collect();
+        json(&v)
+    })
+}
+
 /// The city's repair shops as JSON ([`garage_visit::GarageSite`] array: name, position,
 /// radius, `Legit` / `Crooked`, district). `[]` without a city or an economy run.
 #[wasm_bindgen]
@@ -1145,6 +1272,176 @@ pub fn garage_repair() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn garage_leave() -> Result<(), JsValue> {
     get(|s| s.garage_leave())
+}
+
+/// Bet on yourself in the current race while the countdown runs: `label` from the picker's
+/// `odds[].label` (`win:player`, `podium:player`, `h2h:player>vic`), `stake` in credits. The
+/// career economy takes the stake (rep tier cap, cash, debt). Returns the ticket
+/// ([`race::BetCard`]) as JSON; an error when betting is locked, closed or the stake is out of
+/// bounds.
+#[wasm_bindgen]
+pub fn race_bet(label: &str, stake: f64) -> Result<String, JsValue> {
+    with(|s| s.race_place_bet(label, stake as i64).map(|t| json(&t)))
+}
+
+/// Picker-race betting (venue `City`) on the current session's account: `{"max": credits,
+/// "lock": reason or null}`. Street-racer challenge stakes are in `street_status_json`.
+#[wasm_bindgen]
+pub fn race_bet_status() -> Result<String, JsValue> {
+    get(|s| {
+        let (max, lock) = s.bet_status();
+        json(&serde_json::json!({ "max": max, "lock": lock }))
+    })
+}
+
+/// The city's regulars with their records ([`race::RegularCard`] array), strongest first.
+#[wasm_bindgen]
+pub fn roster_json() -> String {
+    json(&race::regular_cards())
+}
+
+/// The regulars' records as text, for the testbed's local save.
+#[wasm_bindgen]
+pub fn roster_state() -> String {
+    race::roster_state_text()
+}
+
+/// Restore the regulars' records saved with `roster_state()`.
+#[wasm_bindgen]
+pub fn roster_state_load(text: &str) -> Result<(), JsValue> {
+    race::roster_state_load(text).map_err(err)
+}
+
+// ----- touge battles ------------------------------------------------------------------------
+
+fn touge_setup(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+) -> Result<wp_race::touge::TougeSetup, String> {
+    wp_race::touge::TougeSetup::from_keys(map, direction, daylight, surface, opponent).ok_or_else(
+        || format!("unknown touge battle {map}:{direction}:{daylight}:{surface}:{opponent}"),
+    )
+}
+
+/// The touge menu as JSON ([`touge::TougeCard`] array): the four passes with length, climb,
+/// K-rail stretches and their challenger and boss (name, title, personality, car).
+#[wasm_bindgen]
+pub fn touge_list_json() -> String {
+    json(&touge::touge_cards())
+}
+
+/// The wager menu for one battle as JSON (`wp_race::touge::WagerMenu`): rep and tier, whether
+/// racing this opponent, side bets and pink slips are open (and the rep tier each needs),
+/// the largest stake, payouts and rep. Read from the account the battle will use: the career's
+/// when `career` (the battle starts as a career run) and a career is loaded, else the
+/// session's (fresh accounts start at 0 rep: everything locked). Keys: `map` (pass id),
+/// `up|down`, `day|night`, `dry|rain`, `challenger|boss`.
+#[wasm_bindgen]
+pub fn touge_menu_json(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+    career: bool,
+) -> Result<String, JsValue> {
+    let setup = touge_setup(map, direction, daylight, surface, opponent).map_err(err)?;
+    let career_acct = if career {
+        career::career_account()
+    } else {
+        None
+    };
+    let acct = match career_acct {
+        Some(a) => a,
+        None => with_session_opt(|s| {
+            Ok::<_, JsValue>(s.and_then(|s| s.run().map(|r| r.account().clone())))
+        })?
+        .unwrap_or_else(|| garage::with_economy(|e| e.open_account(run::PLAYER_ACCOUNT).0)),
+    };
+    Ok(json(&touge::menu(&acct, &setup)))
+}
+
+/// Scenario JSON of a touge battle (for `init` or `career_start_run`), and remember `wager`
+/// for it: `{"kind":"none"}`, `{"kind":"side_bet","stake":N}` or `{"kind":"pink_slip"}`
+/// (taken at the first tick on the player's account; refused wagers show in
+/// `touge_result_json`). The player starts behind the NPC.
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn touge_scenario_json(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+    car: &str,
+    mode: &str,
+    wager_json: &str,
+    autopilot: bool,
+) -> Result<String, JsValue> {
+    let setup = touge_setup(map, direction, daylight, surface, opponent).map_err(err)?;
+    let wager: wp_race::touge::Wager = if wager_json.is_empty() {
+        wp_race::touge::Wager::None
+    } else {
+        serde_json::from_str(wager_json).map_err(err)?
+    };
+    let sc = touge::touge_scenario(&setup, car, parse_mode(mode).map_err(err)?, autopilot)
+        .map_err(err)?;
+    touge::set_next_wager(wager);
+    Ok(json(&sc))
+}
+
+/// Start a touge battle as a plain (non-career) session: [`touge_scenario_json`] + `init`.
+/// Returns the entity ids (player first, then the NPC).
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn touge_start(
+    map: &str,
+    direction: &str,
+    daylight: &str,
+    surface: &str,
+    opponent: &str,
+    car: &str,
+    mode: &str,
+    wager_json: &str,
+    autopilot: bool,
+) -> Result<Vec<u32>, JsValue> {
+    let sc = touge_scenario_json(
+        map, direction, daylight, surface, opponent, car, mode, wager_json, autopilot,
+    )?;
+    let sc: simcli::Scenario = serde_json::from_str(&sc).map_err(err)?;
+    Ok(install(Session::new(sc, false).map_err(err)?))
+}
+
+/// The touge panel as JSON ([`touge::TougeReport`]): setup, wager taken or refused, the
+/// decision (who won, who went through the wall), the NPC car's condition when its race ended
+/// and the settlement (side bet, purse, rep, car won / lost). `null` outside a touge battle.
+#[wasm_bindgen]
+pub fn touge_result_json() -> Result<String, JsValue> {
+    get(|s| {
+        json(
+            &s.race()
+                .and_then(|r| r.touge())
+                .map(touge::TougeRun::report),
+        )
+    })
+}
+
+/// Testbed only: set the plain session account's rep, to try rep-gated touge battles and
+/// wagers without a career. Not recorded in replays; refused during a career.
+#[wasm_bindgen]
+pub fn touge_debug_set_rep(rep: f64) -> Result<(), JsValue> {
+    with(|s| {
+        if s.is_career() {
+            return Err("not during a career".to_string());
+        }
+        s.debug_run_mut()
+            .ok_or("this session has no account")?
+            .debug_set_rep(rep as i64);
+        Ok(())
+    })
 }
 
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is
@@ -1196,7 +1493,8 @@ pub fn debug_knock_prop(entity: u32, prop: i32, speed_mps: f32) -> Result<u32, J
 }
 
 /// Debug / e2e: put `entity` on the ground at `[x, y]` facing `yaw` (0 = +Y) at `speed_mps`
-/// (e.g. inside a garage from `garages_json()`). Not recorded in replays.
+/// (e.g. inside a garage from `garages_json()`, or a honk-to-start spot). Not recorded in
+/// replays.
 #[wasm_bindgen]
 pub fn debug_place(entity: u32, x: f32, y: f32, yaw: f32, speed_mps: f32) -> Result<(), JsValue> {
     with(|s| {
@@ -1437,7 +1735,7 @@ pub fn session_car_models() -> Result<String, JsValue> {
 }
 
 /// Car ids of the physical traffic models as a JSON array, in model-index order (the
-/// `model` of `traffic_agents()`); `[]` when traffic stays kinematic. The city-chase preset
+/// `model` of `traffic_agents()`); `[]` when traffic stays kinematic. The night-run preset
 /// uses simcli's `CAR_MIX_TRAFFIC`. Fetch once per session.
 #[wasm_bindgen]
 pub fn traffic_models() -> Result<String, JsValue> {

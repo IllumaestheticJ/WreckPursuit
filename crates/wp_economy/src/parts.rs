@@ -23,6 +23,22 @@
 //!   the damage system applies to the stored lattice (`DamageSim::apply_repair`).
 //! - **Stock parts fit their model only;** aftermarket parts fit any car the mod allows
 //!   (class whitelist, damage mode, requirements).
+//! - **Assemblies.** A slot with a `parent` lives inside that assembly slot (engine internals
+//!   inside the engine). Removing the assembly takes its fitted children with it as the loose
+//!   part's [`LoosePart::contents`]; fitting it puts them back. Children can be worked on in the
+//!   car, in removal order, or on the **engine stand** ([`Economy::strip_part`],
+//!   [`Economy::build_part`]) while the assembly is loose. Stock children belong to an engine
+//!   family (the stock engine's car model, or the swap engine's mod id) and fit only it.
+//! - **Mounted parts.** A slot with a `mount` holds a part bolted onto the part in that slot
+//!   (a splitter on the front bumper, a wing on the trunk lid). It can be worked on while its
+//!   host is on, needs the host on to be fitted, and comes off with the host (in the loose
+//!   host's [`LoosePart::contents`]) and goes back on with it: nothing is left floating.
+//! - **Wear.** Assembly members (the block and its children) carry wear 0..=1 instead of reading
+//!   their condition from a repair line. When a damage report raises the assembly's repair-line
+//!   severity by `d`, each member's wear rises by `d × damage_share`. A shop repair of that line
+//!   rebuilds the assembly (all wear 0). Doing it yourself: once every member is within its
+//!   `wear_limit`, the line is cleared and the lattice item restored ([`PartFit::restore`]).
+//!   While no line is open, worn members cost torque ([`Economy::wear_torque_factor`]).
 //! - Cars saved before the workshop have no parts state: [`Economy::car_parts`] derives one
 //!   from the mod list (stock parts everywhere, optional slots empty), and the first workshop
 //!   operation stores it.
@@ -114,12 +130,36 @@ pub struct SlotDef {
     /// No stock part: empty on a stock car, takes aftermarket parts only.
     #[serde(default)]
     pub optional: bool,
+    /// Assembly slot this part lives inside (engine internals: `engine`).
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// Slot of the part this one bolts onto (`front_splitter` on `front_bumper`): it comes off
+    /// and goes back on with that part (see the module docs).
+    #[serde(default)]
+    pub mount: Option<String>,
+    /// Share of the assembly's damage this part takes as wear (see the module docs).
+    #[serde(default)]
+    pub damage_share: f32,
+    /// Fraction of engine torque lost when the part is fully worn.
+    #[serde(default)]
+    pub torque_loss: f32,
+    /// Most wear the part may have for its assembly to count as rebuilt (default 0.05).
+    #[serde(default)]
+    pub wear_limit: Option<f32>,
 }
+
+/// Default [`SlotDef::wear_limit`].
+pub const DEFAULT_WEAR_LIMIT: f32 = 0.05;
 
 impl SlotDef {
     /// Kind of part the slot takes: the set id, or the slot id.
     pub fn kind(&self) -> &str {
         self.set.as_deref().unwrap_or(&self.id)
+    }
+
+    /// Most wear the part may have for its assembly to count as rebuilt.
+    pub fn wear_limit(&self) -> f32 {
+        self.wear_limit.unwrap_or(DEFAULT_WEAR_LIMIT)
     }
 
     /// True when `item` is this slot's repair line (a detached panel counts for its region).
@@ -136,6 +176,27 @@ impl SlotDef {
 #[serde(deny_unknown_fields)]
 struct PartsFile {
     slot: Vec<SlotDef>,
+    #[serde(default)]
+    mechanic: MechanicRates,
+}
+
+/// What the garage mechanic charges (`[mechanic]` in `parts.toml`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MechanicRates {
+    /// Once per job.
+    pub call_out: u32,
+    /// Per part taken off and put back (the part itself and everything in its way).
+    pub per_part: u32,
+}
+
+impl Default for MechanicRates {
+    fn default() -> Self {
+        Self {
+            call_out: 60,
+            per_part: 30,
+        }
+    }
 }
 
 /// All slots, in file order (`data/economy/parts.toml`).
@@ -143,6 +204,8 @@ struct PartsFile {
 pub struct PartsTable {
     /// Slots in display order.
     pub slots: Vec<SlotDef>,
+    /// Mechanic labour rates.
+    pub mechanic: MechanicRates,
 }
 
 impl PartsTable {
@@ -152,7 +215,10 @@ impl PartsTable {
             name: "economy/parts.toml".into(),
             source,
         })?;
-        Ok(Self { slots: f.slot })
+        Ok(Self {
+            slots: f.slot,
+            mechanic: f.mechanic,
+        })
     }
 
     /// Slot by id.
@@ -170,6 +236,40 @@ impl PartsTable {
         self.slots
             .iter()
             .find(|s| s.lines.iter().any(|l| l == line))
+    }
+
+    /// Slots inside assembly `parent`, in table order.
+    pub fn children<'a>(&'a self, parent: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.slots
+            .iter()
+            .filter(move |s| s.parent.as_deref() == Some(parent))
+    }
+
+    /// True when other slots live inside `id` (the engine).
+    pub fn is_assembly(&self, id: &str) -> bool {
+        self.children(id).next().is_some()
+    }
+
+    /// Slots bolted onto the part in `host`, in table order.
+    pub fn mounted<'a>(&'a self, host: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.slots
+            .iter()
+            .filter(move |s| s.mount.as_deref() == Some(host))
+    }
+
+    /// Slots whose parts leave the car with the part in `id`: an assembly's internals and the
+    /// parts mounted on it.
+    pub fn carried<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a SlotDef> + 'a {
+        self.children(id).chain(self.mounted(id))
+    }
+
+    /// The assembly `slot` belongs to: its parent, itself if it is an assembly, else `None`.
+    pub fn assembly_of<'a>(&'a self, slot: &'a SlotDef) -> Option<&'a SlotDef> {
+        match &slot.parent {
+            Some(p) => self.slot(p),
+            None if self.is_assembly(&slot.id) => Some(slot),
+            None => None,
+        }
     }
 
     /// Every mod line that lives in a slot.
@@ -208,6 +308,59 @@ impl PartsTable {
                 return Err(invalid(
                     w,
                     "a stock part needs a repair item or a stock_price",
+                ));
+            }
+            for (name, v) in [
+                ("damage_share", s.damage_share),
+                ("torque_loss", s.torque_loss),
+                ("wear_limit", s.wear_limit()),
+            ] {
+                if !(0.0..=2.0).contains(&v) || (name != "damage_share" && v > 1.0) {
+                    return Err(invalid(&w, format!("{name} out of range")));
+                }
+            }
+        }
+        for s in &self.slots {
+            let Some(p) = &s.parent else { continue };
+            let w = format!("economy/parts.toml slot {}", s.id);
+            let Some(parent) = self.slot(p) else {
+                return Err(invalid(w, format!("parent {p:?} is not a slot")));
+            };
+            if parent.parent.is_some() || parent.set.is_some() {
+                return Err(invalid(w, "the parent must be a plain top-level slot"));
+            }
+            if s.set.is_some() || s.optional || s.repair.is_some() {
+                return Err(invalid(
+                    w,
+                    "a part inside an assembly has no set, repair item or optional flag",
+                ));
+            }
+            if parent.blocked_by.contains(&s.id) {
+                return Err(invalid(
+                    w,
+                    "the assembly cannot be blocked by its own parts (they come out with it)",
+                ));
+            }
+        }
+        for s in &self.slots {
+            let Some(m) = &s.mount else { continue };
+            let w = format!("economy/parts.toml slot {}", s.id);
+            let Some(host) = self.slot(m) else {
+                return Err(invalid(w, format!("mount {m:?} is not a slot")));
+            };
+            if host.parent.is_some() || host.mount.is_some() || host.set.is_some() {
+                return Err(invalid(w, "the mount must be a plain top-level slot"));
+            }
+            if s.parent.is_some() || s.set.is_some() || s.repair.is_some() {
+                return Err(invalid(
+                    w,
+                    "a mounted part has no parent, set or repair item",
+                ));
+            }
+            if host.blocked_by.contains(&s.id) || s.blocked_by.contains(&host.id) {
+                return Err(invalid(
+                    w,
+                    "a mounted part and its host do not block each other (they move together)",
                 ));
             }
         }
@@ -273,16 +426,28 @@ impl PartsTable {
 // ---------------------------------------------------------------------------------------------
 
 /// A part fitted in a slot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FittedPart {
     /// Mod id of an aftermarket part; `None` = the car's stock part.
     pub grade: Option<String>,
+    /// Wear 0 (new) ..= 1 (destroyed); only assembly members (engine and internals) wear.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub wear: f32,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 impl FittedPart {
     /// The stock part.
     pub fn stock() -> Self {
-        Self { grade: None }
+        Self::grade(None)
+    }
+
+    /// A new part of `grade` (`None` = stock).
+    pub fn grade(grade: Option<String>) -> Self {
+        Self { grade, wear: 0.0 }
     }
 }
 
@@ -319,6 +484,17 @@ pub struct LoosePart {
     pub damage: Vec<RepairLine>,
     /// What the part is worth new (resale is a fraction of it, scaled by condition).
     pub value: Money,
+    /// Parts still inside an assembly (a loose engine's internals); each one's `kind` is its
+    /// slot id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contents: Vec<LoosePart>,
+}
+
+impl LoosePart {
+    /// The part inside this assembly in `slot`, if fitted.
+    pub fn content(&self, slot: &str) -> Option<&LoosePart> {
+        self.contents.iter().find(|c| c.kind == slot)
+    }
 }
 
 /// Result of [`Economy::fit_part`].
@@ -343,6 +519,15 @@ pub struct SlotView {
     pub group: PartGroup,
     /// Kind of part it takes.
     pub kind: String,
+    /// Assembly slot it lives inside (engine internals), if any.
+    pub parent: Option<String>,
+    /// Slot of the part it bolts onto (comes off and goes on with it), if any.
+    #[serde(default)]
+    pub mount: Option<String>,
+    /// Fitted slots whose parts come off with this one (mounted parts; an assembly's internals
+    /// are listed on the stand instead).
+    #[serde(default)]
+    pub takes_along: Vec<String>,
     /// Fitted part (`None` = empty).
     pub fitted: Option<PartView>,
     /// The car cannot leave while the slot is empty.
@@ -351,6 +536,11 @@ pub struct SlotView {
     pub blocked_by: Vec<String>,
     /// Why the fitted part cannot come off now (`None` = it can).
     pub remove_blocker: Option<String>,
+    /// Fitted parts that have to come off first, all the way down (what "take off what's in
+    /// the way" removes), in removal order.
+    pub in_the_way: Vec<String>,
+    /// What the mechanic charges to install one part here now.
+    pub mechanic_fee: Money,
 }
 
 /// A part as the workshop shows it (fitted or loose).
@@ -375,10 +565,36 @@ pub struct InventoryView {
     pub name: String,
     /// Empty slots of the car that take it with nothing in the way.
     pub fits: Vec<String>,
+    /// Empty slots of loose assemblies on the stand that take it.
+    pub stand_fits: Vec<StandFit>,
     /// Why it fits nowhere on this car (`None` when `fits` is not empty).
     pub reason: Option<String>,
     /// Dealer price for it now.
     pub sale_price: Money,
+}
+
+/// An empty slot of a loose assembly a part can go into.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StandFit {
+    /// The assembly's inventory uid.
+    pub assembly: u32,
+    /// The slot inside it.
+    pub slot: String,
+}
+
+/// A loose assembly (an engine) on the engine stand.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StandView {
+    /// The assembly's inventory uid.
+    pub uid: u32,
+    /// Display name.
+    pub name: String,
+    /// Assembly slot id (`engine`).
+    pub slot: String,
+    /// Its internals, in table order.
+    pub slots: Vec<SlotView>,
+    /// Names of internals it is missing.
+    pub missing: Vec<String>,
 }
 
 /// One line of the parts catalog for a car.
@@ -402,6 +618,35 @@ pub struct CatalogEntry {
     pub count: u32,
     /// `None` = can be bought for this car, else why not.
     pub reason: Option<String>,
+    /// What the mechanic charges to fit what one purchase brings (every slot of a set).
+    pub install_fee: Money,
+}
+
+/// Where the part the mechanic fits comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PartSource {
+    /// A part already in the inventory.
+    Inventory(u32),
+    /// Bought now: a mod id, or `None` for the stock part. An aftermarket set (wheels) is
+    /// bought and fitted on every slot of the set.
+    Buy(Option<String>),
+}
+
+/// Result of [`Economy::mechanic_install`].
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct MechanicJob {
+    /// Labour charged.
+    pub fee: Money,
+    /// Price of the new parts bought for the job.
+    pub bought: Money,
+    /// What the old parts sold for (0 when kept or there were none).
+    pub sold: Money,
+    /// Inventory uids of the old parts kept.
+    pub kept: Vec<u32>,
+    /// Parts taken off and put back.
+    pub touched: u32,
+    /// Repair items the damage system must restore on the stored lattice (new parts).
+    pub restore: Vec<RepairItem>,
 }
 
 /// The whole workshop screen for one car.
@@ -417,6 +662,10 @@ pub struct WorkshopView {
     pub upgrades: Vec<String>,
     /// The account's inventory, with where each part fits on this car.
     pub inventory: Vec<InventoryView>,
+    /// Loose assemblies (engines) in the inventory, as the engine stand shows them.
+    pub stands: Vec<StandView>,
+    /// Engine torque left after wear (1 = none lost; see [`Economy::wear_torque_factor`]).
+    pub torque_factor: f32,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -448,7 +697,82 @@ impl Economy {
             };
             out.slots.insert(s.id.clone(), content);
         }
+        // Parts inside an empty assembly are not on the car.
+        for s in &self.parts.slots {
+            if let Some(p) = &s.parent {
+                if out.fitted(p).is_none() {
+                    out.slots.insert(s.id.clone(), None);
+                }
+            }
+        }
+        // A car without a parts state has never had its assembly damage spread as wear.
+        if car.parts.is_none() {
+            for a in self
+                .parts
+                .slots
+                .iter()
+                .filter(|s| self.parts.is_assembly(&s.id))
+            {
+                let sev = self.line_severity(&car.damage.outstanding.lines, a);
+                if sev > 0.0 {
+                    self.add_wear(&mut out, a, sev);
+                }
+            }
+        }
         out
+    }
+
+    /// Severity of `slot`'s outstanding repair line in `lines` (0 = none).
+    fn line_severity(&self, lines: &[RepairLine], slot: &SlotDef) -> f32 {
+        lines
+            .iter()
+            .filter(|l| slot.owns_line(&l.item))
+            .map(|l| l.severity)
+            .fold(0.0, f32::max)
+            .clamp(0.0, 1.0)
+    }
+
+    /// Wear every fitted member of `assembly` by `rise × damage_share`.
+    fn add_wear(&self, parts: &mut CarParts, assembly: &SlotDef, rise: f32) {
+        let members = std::iter::once(assembly).chain(self.parts.children(&assembly.id));
+        for m in members {
+            if let Some(Some(f)) = parts.slots.get_mut(&m.id) {
+                f.wear = (f.wear + rise * m.damage_share).clamp(0.0, 1.0);
+            }
+        }
+    }
+
+    /// The engine family stock internals of the assembly fitted in `assembly` belong to: the
+    /// swap engine's mod id, or the car's model for the stock engine.
+    fn family(&self, car: &OwnedCar, parts: &CarParts, assembly: &str) -> String {
+        parts
+            .fitted(assembly)
+            .and_then(|f| f.grade.clone())
+            .unwrap_or_else(|| car.def_id.clone())
+    }
+
+    /// Engine torque left after the wear of assembly members, `Π (1 − torque_loss × wear)`,
+    /// at least 0.2. 1 while an assembly's repair line is open: the damage sim's component
+    /// health already takes that power away.
+    pub fn wear_torque_factor(&self, car: &OwnedCar) -> f32 {
+        let parts = self.car_parts(car);
+        let mut f = 1.0f32;
+        for a in self
+            .parts
+            .slots
+            .iter()
+            .filter(|s| self.parts.is_assembly(&s.id))
+        {
+            if self.line_severity(&car.damage.outstanding.lines, a) > 0.0 {
+                continue;
+            }
+            for m in std::iter::once(a).chain(self.parts.children(&a.id)) {
+                if let Some(p) = parts.fitted(&m.id) {
+                    f *= 1.0 - m.torque_loss * p.wear;
+                }
+            }
+        }
+        f.max(0.2)
     }
 
     fn default_part(&self, s: &SlotDef, mods: &[String]) -> Option<FittedPart> {
@@ -458,9 +782,7 @@ impl Economy {
                 .is_some_and(|d| s.lines.contains(&d.line))
         });
         match grade {
-            Some(g) => Some(FittedPart {
-                grade: Some(g.clone()),
-            }),
+            Some(g) => Some(FittedPart::grade(Some(g.clone()))),
             None if s.optional => None,
             None => Some(FittedPart::stock()),
         }
@@ -503,6 +825,10 @@ impl Economy {
 
     /// Condition 0..=1 of whatever is fitted in `slot` on `car`, read from its damage.
     pub fn slot_condition(&self, car: &OwnedCar, slot: &SlotDef) -> f32 {
+        if self.parts.assembly_of(slot).is_some() {
+            let parts = self.car_parts(car);
+            return parts.fitted(&slot.id).map_or(1.0, |f| 1.0 - f.wear);
+        }
         if let Some(c) = slot.puncture {
             return 1.0 - car.damage.handling.tire_puncture[c as usize].clamp(0.0, 1.0);
         }
@@ -618,6 +944,7 @@ impl Economy {
             .slots
             .iter()
             .filter(|s| s.required && parts.fitted(&s.id).is_none())
+            .filter(|s| s.parent.as_ref().is_none_or(|p| parts.fitted(p).is_some()))
             .map(|s| s.name.clone())
             .collect()
     }
@@ -637,16 +964,60 @@ impl Economy {
         if parts.fitted(&slot.id).is_some() {
             return Some("the slot is not empty".into());
         }
+        if let Some(holder) = slot.parent.as_ref().or(slot.mount.as_ref()) {
+            if parts.fitted(holder).is_none() {
+                let name = self.parts.slot(holder).map_or(holder.as_str(), |s| &s.name);
+                return Some(format!("no {} fitted", name.to_lowercase()));
+            }
+        }
         let blockers = self.blockers(parts, slot);
         if !blockers.is_empty() {
             return Some(self.blocker_reason(&blockers));
         }
+        // What comes with the part goes back where it was: those slots must be free.
+        let taken: Vec<String> = p
+            .contents
+            .iter()
+            .filter(|q| parts.fitted(&q.kind).is_some())
+            .map(|q| q.kind.clone())
+            .collect();
+        if !taken.is_empty() {
+            return Some(self.blocker_reason(&taken));
+        }
+        if let Some(why) = self.underneath_reason(slot, |id| parts.fitted(id).is_some()) {
+            return Some(why);
+        }
+        let family = match &slot.parent {
+            Some(parent) => self.family(car, parts, parent),
+            None => car.def_id.clone(),
+        };
+        std::iter::once(p)
+            .chain(p.contents.iter())
+            .find_map(|q| self.grade_blocker(q, slot, &family, car.class, mode))
+    }
+
+    /// Why loose part `p` cannot be fitted for its grade: a stock part of another model or
+    /// engine family (`family`), or an aftermarket part the car's class or mode does not allow.
+    /// Parts inside an assembly were checked when they went in; only their grade is checked.
+    fn grade_blocker(
+        &self,
+        p: &LoosePart,
+        slot: &SlotDef,
+        family: &str,
+        class: wp_contracts::VehicleClass,
+        mode: DamageMode,
+    ) -> Option<String> {
         match &p.grade {
             None => {
-                if p.model.as_deref() != Some(car.def_id.as_str()) {
-                    return Some("a stock part of another model".into());
+                let own = p.kind == slot.kind();
+                if own && p.model.as_deref() != Some(family) {
+                    return Some(if slot.parent.is_some() {
+                        "a stock part of another engine".into()
+                    } else {
+                        "a stock part of another model".into()
+                    });
                 }
-                if slot.optional {
+                if own && slot.optional {
                     return Some("no stock part goes here".into());
                 }
             }
@@ -654,11 +1025,11 @@ impl Economy {
                 let Some(m) = self.catalog.get(g) else {
                     return Some(format!("unknown mod {g:?}"));
                 };
-                if !m.allows_class(car.class) {
-                    return Some(format!("not for class {:?}", car.class));
+                if !m.allows_class(class) {
+                    return Some(format!("{} is not for class {class:?}", m.name));
                 }
                 if !m.allows_mode(mode) {
-                    return Some(format!("not available in {mode:?} mode"));
+                    return Some(format!("{} is not available in {mode:?} mode", m.name));
                 }
             }
         }
@@ -699,15 +1070,26 @@ impl Economy {
                         Err(e) => Some(e.to_string()),
                     },
                 };
+                let in_the_way = self.in_the_way(&parts, s);
                 SlotView {
                     id: s.id.clone(),
                     name: s.name.clone(),
                     group: s.group,
                     kind: s.kind().to_string(),
+                    parent: s.parent.clone(),
+                    mount: s.mount.clone(),
+                    takes_along: self
+                        .parts
+                        .mounted(&s.id)
+                        .filter(|k| parts.fitted(&k.id).is_some())
+                        .map(|k| k.id.clone())
+                        .collect(),
                     fitted,
                     required: s.required,
                     blocked_by,
                     remove_blocker,
+                    mechanic_fee: self.mechanic_fee(in_the_way.len()),
+                    in_the_way,
                 }
             })
             .collect();
@@ -740,15 +1122,36 @@ impl Economy {
                 } else {
                     None
                 };
-                let (name, _) = self.part_name(p.grade.as_deref());
+                let stand_fits: Vec<StandFit> = acct
+                    .inventory
+                    .iter()
+                    .filter(|a| a.uid != p.uid)
+                    .filter(|a| self.stand_blocker(a, &p.kind, p).is_none())
+                    .map(|a| StandFit {
+                        assembly: a.uid,
+                        slot: p.kind.clone(),
+                    })
+                    .collect();
+                let reason = if fits.is_empty() && stand_fits.is_empty() {
+                    reason
+                } else {
+                    None
+                };
                 InventoryView {
                     part: p.clone(),
-                    name,
+                    name: self.loose_name(p),
                     fits,
+                    stand_fits,
                     reason,
                     sale_price: self.part_sale_price(p),
                 }
             })
+            .collect();
+        let stands = acct
+            .inventory
+            .iter()
+            .filter(|p| self.parts.is_assembly(&p.kind))
+            .map(|p| self.stand_view(p))
             .collect();
         Ok(WorkshopView {
             car,
@@ -756,7 +1159,129 @@ impl Economy {
             missing: self.missing_parts(c),
             upgrades,
             inventory,
+            stands,
+            torque_factor: self.wear_torque_factor(c),
         })
+    }
+
+    /// Display name of a loose part: the mod's name, or "Stock <slot name>".
+    fn loose_name(&self, p: &LoosePart) -> String {
+        match p.grade.as_deref().and_then(|g| self.catalog.get(g)) {
+            Some(m) => m.name.clone(),
+            None => {
+                let slot = self.parts.slots_of_kind(&p.kind).next();
+                match slot {
+                    Some(s) if s.set.is_none() => format!("Stock {}", s.name.to_lowercase()),
+                    _ => "Stock".into(),
+                }
+            }
+        }
+    }
+
+    /// Loose assembly `a` as the engine stand shows it.
+    fn stand_view(&self, a: &LoosePart) -> StandView {
+        let slots = self
+            .parts
+            .children(&a.kind)
+            .map(|s| {
+                let inner = a.content(&s.id);
+                let fitted = inner.map(|q| {
+                    let (name, tier) = self.part_name(q.grade.as_deref());
+                    PartView {
+                        grade: q.grade.clone(),
+                        name,
+                        tier,
+                        condition: q.condition,
+                    }
+                });
+                let blocked_by = self.stand_blockers(a, s);
+                let remove_blocker = match inner {
+                    None => Some("nothing fitted".into()),
+                    Some(_) if !blocked_by.is_empty() => Some(self.blocker_reason(&blocked_by)),
+                    Some(_) => None,
+                };
+                SlotView {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    group: s.group,
+                    kind: s.kind().to_string(),
+                    parent: s.parent.clone(),
+                    mount: None,
+                    takes_along: Vec::new(),
+                    fitted,
+                    required: s.required,
+                    in_the_way: blocked_by.clone(),
+                    blocked_by,
+                    remove_blocker,
+                    mechanic_fee: 0,
+                }
+            })
+            .collect();
+        StandView {
+            uid: a.uid,
+            name: self.loose_name(a),
+            slot: a.kind.clone(),
+            slots,
+            missing: self
+                .parts
+                .children(&a.kind)
+                .filter(|s| s.required && a.content(&s.id).is_none())
+                .map(|s| s.name.clone())
+                .collect(),
+        }
+    }
+
+    /// Inside an assembly a part goes on top of the required parts its removal frees (the head
+    /// on the head gasket): why `slot` cannot be fitted while one of them is missing.
+    fn underneath_reason(&self, slot: &SlotDef, present: impl Fn(&str) -> bool) -> Option<String> {
+        let parent = slot.parent.as_deref()?;
+        let names: Vec<&str> = self
+            .parts
+            .children(parent)
+            .filter(|k| k.required && k.blocked_by.contains(&slot.id) && !present(&k.id))
+            .map(|k| k.name.as_str())
+            .collect();
+        (!names.is_empty()).then(|| format!("fit first: {}", names.join(", ")))
+    }
+
+    /// Siblings in `slot`'s `blocked_by` list still inside loose assembly `a` (slots outside
+    /// the assembly, like the intake, are not on the stand).
+    fn stand_blockers(&self, a: &LoosePart, slot: &SlotDef) -> Vec<String> {
+        slot.blocked_by
+            .iter()
+            .filter(|b| a.content(b).is_some())
+            .cloned()
+            .collect()
+    }
+
+    /// Why loose part `p` cannot go into `slot` of loose assembly `a` (`None` = it can).
+    fn stand_blocker(&self, a: &LoosePart, slot: &str, p: &LoosePart) -> Option<String> {
+        let Some(s) = self.parts.slot(slot) else {
+            return Some("no such slot".into());
+        };
+        if s.parent.as_deref() != Some(a.kind.as_str()) {
+            return Some("does not go inside this part".into());
+        }
+        if p.kind != s.id {
+            return Some("wrong kind of part".into());
+        }
+        if a.content(slot).is_some() {
+            return Some("the slot is not empty".into());
+        }
+        let blockers = self.stand_blockers(a, s);
+        if !blockers.is_empty() {
+            return Some(self.blocker_reason(&blockers));
+        }
+        if let Some(why) = self.underneath_reason(s, |id| a.content(id).is_some()) {
+            return Some(why);
+        }
+        if p.grade.is_none() {
+            let family = a.grade.as_ref().or(a.model.as_ref());
+            if p.model.as_ref() != family {
+                return Some("a stock part of another engine".into());
+            }
+        }
+        None
     }
 
     fn check_remove(
@@ -774,6 +1299,9 @@ impl Economy {
         }
         let mut next = parts.clone();
         next.slots.insert(slot.id.clone(), None);
+        for k in self.parts.carried(&slot.id) {
+            next.slots.insert(k.id.clone(), None);
+        }
         let next_mods = self.derive_mods(&car.mods, &next);
         self.check_mods(car, &slot.id, &car.mods, &next_mods)
     }
@@ -793,9 +1321,45 @@ impl Economy {
         let fitted = parts.fitted(slot).cloned().expect("checked");
         let condition = self.slot_condition(c, s);
         let value = self.new_part_value(c, s, fitted.grade.as_deref());
+        let model = match &s.parent {
+            Some(parent) => self.family(c, &parts, parent),
+            None => c.def_id.clone(),
+        };
+        // An assembly takes its fitted internals with it (stock ones of its engine family, worn
+        // as they were); a host takes the parts mounted on it (stock ones of the car's model).
+        let family = fitted.grade.clone().unwrap_or_else(|| c.def_id.clone());
+        let inner: Vec<(String, FittedPart, Money, String, f32)> = self
+            .parts
+            .carried(slot)
+            .filter_map(|k| {
+                let f = parts.fitted(&k.id)?.clone();
+                let v = self.new_part_value(c, k, f.grade.as_deref());
+                let (model, condition) = if k.parent.is_some() {
+                    (family.clone(), 1.0 - f.wear)
+                } else {
+                    (c.def_id.clone(), self.slot_condition(c, k))
+                };
+                Some((k.id.clone(), f, v, model, condition))
+            })
+            .collect();
         transact(acct, |tx| {
             let uid = tx.acct.next_part_uid.max(1);
             tx.acct.next_part_uid = uid + 1;
+            let mut contents = Vec::new();
+            for (kind, f, value, model, condition) in &inner {
+                let cuid = tx.acct.next_part_uid;
+                tx.acct.next_part_uid += 1;
+                contents.push(LoosePart {
+                    uid: cuid,
+                    kind: kind.clone(),
+                    model: f.grade.is_none().then(|| model.clone()),
+                    grade: f.grade.clone(),
+                    condition: *condition,
+                    damage: Vec::new(),
+                    value: *value,
+                    contents: Vec::new(),
+                });
+            }
             let c = tx.car_mut(car)?;
             let (damage, keep): (Vec<RepairLine>, Vec<RepairLine>) = c
                 .damage
@@ -810,17 +1374,20 @@ impl Economy {
             }
             let mut next = parts.clone();
             next.slots.insert(slot.to_string(), None);
+            for (kind, ..) in &inner {
+                next.slots.insert(kind.clone(), None);
+            }
             c.mods = self.derive_mods(&c.mods, &next);
             c.parts = Some(next);
-            let model = fitted.grade.is_none().then(|| c.def_id.clone());
             tx.acct.inventory.push(LoosePart {
                 uid,
                 kind: s.kind().to_string(),
+                model: fitted.grade.is_none().then_some(model),
                 grade: fitted.grade,
-                model,
                 condition,
                 damage,
                 value,
+                contents,
             });
             Ok(uid)
         })
@@ -849,25 +1416,46 @@ impl Economy {
         if let Some(why) = self.fit_blocker(c, &parts, s, &p, mode) {
             return Err(refuse(slot, why));
         }
+        let wear = |q: &LoosePart| (1.0 - q.condition).clamp(0.0, 1.0);
         let mut next = parts.clone();
-        next.slots.insert(
-            slot.to_string(),
-            Some(FittedPart {
-                grade: p.grade.clone(),
-            }),
-        );
+        let mut fitted = FittedPart::grade(p.grade.clone());
+        let member = self.parts.assembly_of(s).is_some();
+        if member {
+            fitted.wear = wear(&p);
+        }
+        next.slots.insert(slot.to_string(), Some(fitted));
+        for q in &p.contents {
+            let mut f = FittedPart::grade(q.grade.clone());
+            if member {
+                f.wear = wear(q);
+            }
+            next.slots.insert(q.kind.clone(), Some(f));
+        }
         let next_mods = self.derive_mods(&c.mods, &next);
         self.check_mods(c, slot, &c.mods, &next_mods)?;
+        // A part inside an assembly may finish a rebuild: every member within its limit.
+        let rebuilt = match &s.parent {
+            Some(parent) => self.parts.slot(parent).filter(|a| {
+                self.line_severity(&c.damage.outstanding.lines, a) > 0.0
+                    && self.rebuilt(a, |id| next.fitted(id).map(|f| f.wear))
+            }),
+            None => None,
+        };
         transact(acct, |tx| {
             tx.acct.inventory.retain(|x| x.uid != part);
             let c = tx.car_mut(car)?;
-            let fresh = p.damage.is_empty() && p.condition >= 1.0;
+            // An assembly with its damage line gone (rebuilt on the stand) is fresh too.
+            let fresh = p.damage.is_empty() && (member || p.condition >= 1.0);
             let mut restore = Vec::new();
             if fresh {
                 c.damage.outstanding.lines.retain(|l| !s.owns_line(&l.item));
                 restore.extend(s.repair);
             } else {
                 c.damage.outstanding.lines.extend(p.damage.iter().cloned());
+            }
+            if let Some(a) = rebuilt {
+                c.damage.outstanding.lines.retain(|l| !a.owns_line(&l.item));
+                restore.extend(a.repair);
             }
             c.damage.outstanding.total = c.damage.outstanding.lines.iter().map(|l| l.total).sum();
             if let Some(corner) = s.puncture {
@@ -880,6 +1468,251 @@ impl Economy {
         })
     }
 
+    /// True when assembly `a` has every required part and every member is within its wear
+    /// limit; `wear(slot)` is the wear of the part in a slot (`None` = empty).
+    fn rebuilt(&self, a: &SlotDef, wear: impl Fn(&str) -> Option<f32>) -> bool {
+        std::iter::once(a)
+            .chain(self.parts.children(&a.id))
+            .all(|m| match wear(&m.id) {
+                Some(w) => w <= m.wear_limit(),
+                None => !m.required,
+            })
+    }
+
+    /// Fitted parts that must come off before `slot` can be worked on, all the way down, in
+    /// removal order (the bumper before the radiator guard before the radiator).
+    pub fn in_the_way(&self, parts: &CarParts, slot: &SlotDef) -> Vec<String> {
+        fn walk(e: &Economy, parts: &CarParts, slot: &SlotDef, out: &mut Vec<String>) {
+            for b in &slot.blocked_by {
+                if parts.fitted(b).is_none() || out.contains(b) {
+                    continue;
+                }
+                if let Some(bs) = e.parts.slot(b) {
+                    walk(e, parts, bs, out);
+                }
+                if !out.contains(b) {
+                    out.push(b.clone());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, parts, slot, &mut out);
+        out
+    }
+
+    /// Mechanic's labour for one part with `in_the_way` parts to take off and put back.
+    pub fn mechanic_fee(&self, in_the_way: usize) -> Money {
+        let r = self.parts.mechanic;
+        (r.call_out + r.per_part * (in_the_way as u32 + 1)) as Money
+    }
+
+    /// Do it yourself: take off everything in the way of `slot` (not `slot` itself) into the
+    /// inventory, in removal order. Returns the removed parts' uids. No cash changes.
+    pub fn clear_way(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        slot: &str,
+    ) -> EconResult<Vec<u32>> {
+        let c = self.workshop_car(acct, car)?;
+        let s = self.try_slot(slot)?;
+        let way = self.in_the_way(&self.car_parts(c), s);
+        let mut a = acct.clone();
+        let mut events = Vec::new();
+        let mut uids = Vec::new();
+        for b in &way {
+            let (uid, ev) = self.remove_part(&mut a, car, b)?;
+            events.extend(ev);
+            uids.push(uid);
+        }
+        *acct = a;
+        Ok((uids, events))
+    }
+
+    /// Pay the mechanic to fit a part in `slot` of `car`: take off what is in the way, swap
+    /// the part, put everything back. The new part comes from the inventory or is bought now
+    /// (an aftermarket set is bought and fitted on every slot of the set). The old parts are
+    /// sold to the dealer (`sell_old`) or kept in the inventory. All or nothing: the job is
+    /// refused if the cash does not cover parts and labour.
+    pub fn mechanic_install(
+        &self,
+        acct: &mut PlayerAccount,
+        car: CarUid,
+        slot: &str,
+        source: &PartSource,
+        sell_old: bool,
+        mode: DamageMode,
+    ) -> EconResult<MechanicJob> {
+        self.workshop_car(acct, car)?;
+        let s = self.try_slot(slot)?;
+        let mut a = acct.clone();
+        let mut events = Vec::new();
+        let mut job = MechanicJob::default();
+        let cash_before = a.cash;
+        // The new parts and the slots they go in.
+        let (news, targets): (Vec<u32>, Vec<String>) = match source {
+            PartSource::Inventory(uid) => (vec![*uid], vec![slot.to_string()]),
+            PartSource::Buy(grade) => {
+                let (uids, ev) = self.buy_part(&mut a, car, s.kind(), grade.as_deref(), mode)?;
+                events.extend(ev);
+                let targets = if uids.len() > 1 {
+                    self.parts
+                        .slots_of_kind(s.kind())
+                        .map(|x| x.id.clone())
+                        .collect()
+                } else {
+                    vec![slot.to_string()]
+                };
+                (uids, targets)
+            }
+        };
+        job.bought = cash_before - a.cash;
+        let mut olds = Vec::new();
+        for (t, new) in targets.iter().zip(&news) {
+            let ts = self.try_slot(t)?;
+            let way = self.in_the_way(&self.car_parts(a.try_car(car)?), ts);
+            let mut off = Vec::new();
+            for b in &way {
+                let (uid, ev) = self.remove_part(&mut a, car, b)?;
+                events.extend(ev);
+                off.push((b.clone(), uid));
+            }
+            if self.car_parts(a.try_car(car)?).fitted(t).is_some() {
+                let (uid, ev) = self.remove_part(&mut a, car, t)?;
+                events.extend(ev);
+                olds.push(uid);
+            }
+            let (fit, ev) = self.fit_part(&mut a, car, t, *new, mode)?;
+            events.extend(ev);
+            job.restore.extend(fit.restore);
+            for (b, uid) in off.iter().rev() {
+                let (fit, ev) = self.fit_part(&mut a, car, b, *uid, mode)?;
+                events.extend(ev);
+                job.restore.extend(fit.restore);
+            }
+            job.touched += way.len() as u32 + 1;
+        }
+        let r = self.parts.mechanic;
+        job.fee = (r.call_out + r.per_part * job.touched) as Money;
+        let ((), ev) = transact(&mut a, |tx| {
+            tx.spend(
+                job.fee,
+                EventReason::RepairPaid {
+                    lines: job.touched,
+                    labour_multiplier: 1.0,
+                },
+                Some(car),
+            )
+        })?;
+        events.extend(ev);
+        for uid in olds {
+            if sell_old {
+                let (price, ev) = self.sell_part(&mut a, uid)?;
+                events.extend(ev);
+                job.sold += price;
+            } else {
+                job.kept.push(uid);
+            }
+        }
+        *acct = a;
+        Ok((job, events))
+    }
+
+    /// Engine stand: take the part in `slot` out of loose assembly `assembly` into the
+    /// inventory, in removal order. Returns the part's uid. No cash changes.
+    pub fn strip_part(
+        &self,
+        acct: &mut PlayerAccount,
+        assembly: u32,
+        slot: &str,
+    ) -> EconResult<u32> {
+        let a = acct
+            .inventory
+            .iter()
+            .find(|p| p.uid == assembly)
+            .ok_or(EconomyError::UnknownPart(assembly))?;
+        let s = self.try_slot(slot)?;
+        if s.parent.as_deref() != Some(a.kind.as_str()) {
+            return Err(refuse(slot, "does not go inside this part"));
+        }
+        let Some(inner) = a.content(slot).cloned() else {
+            return Err(refuse(slot, "nothing fitted"));
+        };
+        let blockers = self.stand_blockers(a, s);
+        if !blockers.is_empty() {
+            return Err(refuse(slot, self.blocker_reason(&blockers)));
+        }
+        transact(acct, |tx| {
+            let a = tx
+                .acct
+                .inventory
+                .iter_mut()
+                .find(|p| p.uid == assembly)
+                .expect("checked");
+            a.contents.retain(|c| c.kind != slot);
+            tx.acct.inventory.push(inner.clone());
+            Ok(inner.uid)
+        })
+    }
+
+    /// Engine stand: put inventory part `part` into the empty `slot` of loose assembly
+    /// `assembly`. When that completes a rebuild (every member within its wear limit), the
+    /// assembly's damage lines are cleared: fitted to a car, it restores its lattice item.
+    pub fn build_part(
+        &self,
+        acct: &mut PlayerAccount,
+        assembly: u32,
+        slot: &str,
+        part: u32,
+    ) -> EconResult<()> {
+        let a = acct
+            .inventory
+            .iter()
+            .find(|p| p.uid == assembly)
+            .ok_or(EconomyError::UnknownPart(assembly))?;
+        let p = acct
+            .inventory
+            .iter()
+            .find(|p| p.uid == part && p.uid != assembly)
+            .ok_or(EconomyError::UnknownPart(part))?
+            .clone();
+        if let Some(why) = self.stand_blocker(a, slot, &p) {
+            return Err(refuse(slot, why));
+        }
+        let asm = self.try_slot(&a.kind)?;
+        let mut next = a.clone();
+        next.contents.push(p.clone());
+        let order: Vec<&str> = self
+            .parts
+            .children(&a.kind)
+            .map(|s| s.id.as_str())
+            .collect();
+        next.contents
+            .sort_by_key(|c| order.iter().position(|k| *k == c.kind));
+        let rebuilt = !next.damage.is_empty()
+            && self.rebuilt(asm, |id| {
+                if id == asm.id {
+                    Some(1.0 - next.condition)
+                } else {
+                    next.content(id).map(|q| 1.0 - q.condition)
+                }
+            });
+        if rebuilt {
+            next.damage.clear();
+        }
+        transact(acct, |tx| {
+            tx.acct.inventory.retain(|x| x.uid != part);
+            let a = tx
+                .acct
+                .inventory
+                .iter_mut()
+                .find(|x| x.uid == assembly)
+                .expect("checked");
+            *a = next.clone();
+            Ok(())
+        })
+    }
+
     /// The parts catalog for `car`: a stock replacement for every non-optional kind, and every
     /// aftermarket grade of the kind's mod lines, with the reason it cannot be bought.
     pub fn part_catalog(
@@ -889,6 +1722,7 @@ impl Economy {
         mode: DamageMode,
     ) -> Result<Vec<CatalogEntry>, EconomyError> {
         let c = acct.try_car(car)?;
+        let parts = self.car_parts(c);
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
         for s in &self.parts.slots {
@@ -899,6 +1733,16 @@ impl Economy {
             let slot_name = match &s.set {
                 Some(set) => set.replace('_', " "),
                 None => s.name.clone(),
+            };
+            let one_fee = self.mechanic_fee(self.in_the_way(&parts, s).len());
+            let set_fee = {
+                let r = self.parts.mechanic;
+                let n: usize = self
+                    .parts
+                    .slots_of_kind(s.kind())
+                    .map(|x| self.in_the_way(&parts, x).len() + 1)
+                    .sum();
+                (r.call_out + r.per_part * n as u32) as Money
             };
             if !s.optional {
                 out.push(CatalogEntry {
@@ -911,6 +1755,7 @@ impl Economy {
                     price: self.new_part_value(c, s, None),
                     count: 1,
                     reason: None,
+                    install_fee: one_fee,
                 });
             }
             let mut grades: Vec<_> = self
@@ -937,6 +1782,7 @@ impl Economy {
                     price: m.price as Money,
                     count,
                     reason,
+                    install_fee: if count > 1 { set_fee } else { one_fee },
                 });
             }
         }
@@ -995,13 +1841,41 @@ impl Economy {
             }
         };
         let value = self.new_part_value(c, s, grade);
-        let model = grade.is_none().then(|| c.def_id.clone());
+        // Stock internals belong to the engine in the car; a new engine comes complete with
+        // stock internals of its own family.
+        let parts = self.car_parts(c);
+        let model = grade.is_none().then(|| match &s.parent {
+            Some(parent) => self.family(c, &parts, parent),
+            None => c.def_id.clone(),
+        });
+        let family = grade.map_or_else(|| c.def_id.clone(), str::to_string);
+        let inner: Vec<(String, Money)> = self
+            .parts
+            .children(kind)
+            .filter(|k| !k.optional)
+            .map(|k| (k.id.clone(), self.new_part_value(c, k, None)))
+            .collect();
         transact(acct, |tx| {
             tx.spend(price, reason, Some(car))?;
             let mut uids = Vec::new();
             for _ in 0..count {
                 let uid = tx.acct.next_part_uid.max(1);
                 tx.acct.next_part_uid = uid + 1;
+                let mut contents = Vec::new();
+                for (k, v) in &inner {
+                    let cuid = tx.acct.next_part_uid;
+                    tx.acct.next_part_uid += 1;
+                    contents.push(LoosePart {
+                        uid: cuid,
+                        kind: k.clone(),
+                        grade: None,
+                        model: Some(family.clone()),
+                        condition: 1.0,
+                        damage: Vec::new(),
+                        value: *v,
+                        contents: Vec::new(),
+                    });
+                }
                 tx.acct.inventory.push(LoosePart {
                     uid,
                     kind: kind.to_string(),
@@ -1010,6 +1884,7 @@ impl Economy {
                     condition: 1.0,
                     damage: Vec::new(),
                     value,
+                    contents,
                 });
                 uids.push(uid);
             }
@@ -1017,9 +1892,15 @@ impl Economy {
         })
     }
 
-    /// What the dealer pays for a loose part: `mod_resale_frac × value × condition`.
+    /// What the dealer pays for a loose part: `mod_resale_frac × value × condition`, plus the
+    /// parts inside it.
     pub fn part_sale_price(&self, p: &LoosePart) -> Money {
-        round(self.market.mod_resale_frac * p.value as f32 * p.condition.clamp(0.0, 1.0))
+        let own = round(self.market.mod_resale_frac * p.value as f32 * p.condition.clamp(0.0, 1.0));
+        own + p
+            .contents
+            .iter()
+            .map(|c| self.part_sale_price(c))
+            .sum::<Money>()
     }
 
     /// Sell (or scrap, at condition 0) a part from the inventory. Returns the price.
@@ -1052,6 +1933,9 @@ impl Economy {
         };
         let mut next = parts.clone();
         for s in &self.parts.slots {
+            if s.parent.as_ref().is_some_and(|p| next.fitted(p).is_none()) {
+                continue;
+            }
             let want = self.default_part(s, &car.mods);
             let have = parts.slots.get(&s.id).cloned().flatten();
             let have_grade = have.as_ref().and_then(|f| f.grade.as_deref());
@@ -1087,6 +1971,62 @@ impl Economy {
         o.lines
             .retain(|l| !empty.iter().any(|s| s.owns_line(&l.item)));
         o.total = o.lines.iter().map(|l| l.total).sum();
+    }
+
+    /// Spread the rise of each fitted assembly's repair-line severity (`before` → the car's
+    /// new estimate) as wear over its members (see the module docs).
+    pub(crate) fn wear_from_damage(&self, car: &mut OwnedCar, before: &[RepairLine]) {
+        // A car without a parts state derives its wear from its damage: from the old damage
+        // here, or the rise would count twice.
+        let mut parts = if car.parts.is_none() {
+            let mut old = car.clone();
+            old.damage.outstanding.lines = before.to_vec();
+            self.car_parts(&old)
+        } else {
+            self.car_parts(car)
+        };
+        let mut changed = false;
+        for a in self
+            .parts
+            .slots
+            .iter()
+            .filter(|s| self.parts.is_assembly(&s.id))
+        {
+            if parts.fitted(&a.id).is_none() {
+                continue;
+            }
+            let rise = self.line_severity(&car.damage.outstanding.lines, a)
+                - self.line_severity(before, a);
+            if rise > 0.0 {
+                self.add_wear(&mut parts, a, rise);
+                changed = true;
+            }
+        }
+        if changed {
+            car.parts = Some(parts);
+        }
+    }
+
+    /// A shop repaired `items`: an assembly whose line was repaired is rebuilt (no wear).
+    pub(crate) fn rebuild_repaired(&self, car: &mut OwnedCar, items: &[RepairItem]) {
+        let Some(parts) = car.parts.as_mut() else {
+            return;
+        };
+        for a in self
+            .parts
+            .slots
+            .iter()
+            .filter(|s| self.parts.is_assembly(&s.id))
+        {
+            if !items.iter().any(|i| a.owns_line(i)) {
+                continue;
+            }
+            for m in std::iter::once(a).chain(self.parts.children(&a.id)) {
+                if let Some(Some(f)) = parts.slots.get_mut(&m.id) {
+                    f.wear = 0.0;
+                }
+            }
+        }
     }
 
     fn set_mixed(&self, parts: &CarParts, s: &SlotDef) -> bool {

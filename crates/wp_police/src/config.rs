@@ -69,6 +69,8 @@ pub struct ModeValue<T> {
     pub arcade: T,
     /// Simulation damage mode.
     pub simulation: T,
+    /// Extreme damage mode.
+    pub extreme: T,
 }
 
 impl<T: Copy> ModeValue<T> {
@@ -77,6 +79,7 @@ impl<T: Copy> ModeValue<T> {
         match mode {
             DamageMode::Arcade => self.arcade,
             DamageMode::Simulation => self.simulation,
+            DamageMode::Extreme => self.extreme,
         }
     }
 }
@@ -332,6 +335,10 @@ pub struct HeatFile {
 // presence.toml
 // ---------------------------------------------------------------------------------------------
 
+fn default_search_extra_units() -> [u32; 5] {
+    [1, 2, 2, 3, 3]
+}
+
 /// Reinforcement dispatch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -357,6 +364,10 @@ pub struct ReinforcementConfig {
     /// Fallback spawn for a reinforcement when [`ResponseConfig`] finds no hidden spot in its
     /// window: the nearest node at least this far from the racer, out of its sight, m.
     pub spawn_min_distance_m: f32,
+    /// Extra units on a racer while it is lost (Searching), on top of `units_per_level`,
+    /// per level L1..L5 (owner playtest row 84: "more cops should spawn and go to the site").
+    #[serde(default = "default_search_extra_units")]
+    pub search_extra_units: [u32; 5],
 }
 
 /// Dispatch-driven response to reckless-driving calls (owner playtest 2026-10-20: "spawn them

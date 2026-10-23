@@ -66,7 +66,7 @@ pub enum SimError {
 pub struct SimConfig {
     /// Master RNG seed.
     pub seed: u64,
-    /// Damage mode table (Arcade or Simulation).
+    /// Damage mode table (Arcade, Simulation or Extreme).
     pub mode: ModeTable,
     /// Starting time of day.
     pub time_of_day: TimeOfDay,
@@ -138,7 +138,42 @@ pub struct SimVehicle {
     player_steering: Option<bool>,
     /// Ticks the ghost was extended because the car still overlapped another car.
     ghost_overstay: u32,
+    /// Dormant ([`Sim::set_dormant`]): a fixed body, no vehicle or damage-motion step.
+    dormant: bool,
+    /// May drive in light mode far from every player ([`Sim::set_light_when_far`]).
+    light_when_far: bool,
+    /// Light mode now: a kinematic road follower instead of full vehicle physics.
+    light: Option<LightState>,
 }
+
+/// A vehicle in light mode ([`Sim::set_light_when_far`]): heading, speed and the chassis
+/// height above the ground it had when it went light.
+#[derive(Clone, Copy, Debug)]
+struct LightState {
+    yaw: f32,
+    speed: f32,
+    ride_z: f32,
+}
+
+/// A light-mode vehicle ([`Sim::set_light_when_far`]) goes light farther than this from every
+/// player car, m.
+pub const LIGHT_ON_M: f32 = 350.0;
+/// ... and back to full physics closer than this, m (hysteresis; far beyond the distance a
+/// car is drawn in detail).
+pub const LIGHT_OFF_M: f32 = 250.0;
+/// Light mode's acceleration at full throttle, m/s².
+const LIGHT_ACCEL_MPS2: f32 = 3.5;
+/// Light mode's deceleration at full brake (or handbrake), m/s².
+const LIGHT_BRAKE_MPS2: f32 = 7.0;
+/// Light mode's rolling resistance and drag, as a deceleration, m/s².
+const LIGHT_COAST_MPS2: f32 = 0.4;
+
+/// A dormant vehicle wakes when an awake vehicle's centre comes this close, m
+/// ([`Sim::set_dormant`]): well before the two can touch at any speed a car reaches in
+/// `DORMANT_WAKE_M / speed` seconds, so a collision always finds it dynamic.
+pub const DORMANT_WAKE_M: f32 = 40.0;
+/// Only an awake vehicle faster than this wakes dormant ones nearby, m/s.
+pub const DORMANT_WAKE_MIN_SPEED_MPS: f32 = 0.5;
 
 /// Longest a ghost is extended past its window while it still overlaps another car (3 s).
 pub const GHOST_MAX_OVERSTAY_TICKS: u32 = 3 * 240;
@@ -205,6 +240,9 @@ pub struct Sim {
     police_unit_models: std::collections::BTreeMap<wp_police::UnitId, usize>,
     /// Physical traffic models ([`Sim::set_traffic_cars`]); agent → `wp_world` model index.
     traffic_cars: Vec<LoadedCar>,
+    /// `TrafficConfig::max_physical` as configured, before [`Sim::cap_traffic_promotion`] caps
+    /// it to the vehicle slots left (`None` until the first capped step).
+    traffic_physical_base: Option<usize>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
@@ -248,6 +286,7 @@ impl Sim {
             police_fleet: Vec::new(),
             police_unit_models: std::collections::BTreeMap::new(),
             traffic_cars: Vec::new(),
+            traffic_physical_base: None,
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
@@ -345,6 +384,9 @@ impl Sim {
             ghost_ticks: 0,
             ghost_overstay: 0,
             player_steering: None,
+            dormant: false,
+            light_when_far: false,
+            light: None,
         });
         Ok(id)
     }
@@ -783,6 +825,13 @@ impl Sim {
             .find(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let rb = &mut self.physics.bodies[slot.body.body];
+        // A placed car is awake and on full physics (a reset, a respawn, a move out of the
+        // lockup).
+        if slot.dormant || slot.light.is_some() {
+            slot.dormant = false;
+            slot.light = None;
+            rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+        }
         slot.vehicle.place_body(rb, pos, yaw, speed_mps, 0.0);
         Ok(())
     }
@@ -810,7 +859,7 @@ impl Sim {
         self.static_boxes
     }
 
-    /// Swap the damage mode table (Arcade ↔ Simulation) without restarting. Applies from the
+    /// Swap the damage mode table (Arcade / Simulation / Extreme) without restarting. Applies from the
     /// next tick; existing damage is kept. Log it as an input-like op if replays must match.
     pub fn set_mode_table(&mut self, mode: ModeTable) {
         self.config.mode = mode;
@@ -873,6 +922,221 @@ impl Sim {
         slot.vehicle.place_body(rb, pos, yaw, 0.0, 0.0);
         slot.damage.reset();
         Ok(())
+    }
+
+    /// Put a vehicle to sleep (`on`) or wake it. A dormant vehicle's chassis becomes a fixed
+    /// body where it stands, at rest: no tyre, suspension or drivetrain step, no forces, no
+    /// damage chassis motion, but its collider stays, so other cars and debris still hit it
+    /// (as a parked car). It wakes by itself, deterministically, when a moving vehicle comes
+    /// within [`DORMANT_WAKE_M`], when anything touches it, and when it is placed or reset.
+    /// For cars that wait out of play (off-shift street racers in their lockup, SR-3); callers
+    /// that record replays log it (`simcli` `OpKind::Dormant`).
+    pub fn set_dormant(&mut self, id: EntityId, on: bool) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        if slot.dormant == on {
+            return Ok(());
+        }
+        slot.dormant = on;
+        let rb = &mut self.physics.bodies[slot.body.body];
+        use rapier3d::prelude::{RigidBodyType, Vector};
+        if on {
+            rb.set_body_type(RigidBodyType::Fixed, true);
+            rb.set_linvel(Vector::ZERO, false);
+            rb.set_angvel(Vector::ZERO, false);
+            rb.reset_forces(false);
+            rb.reset_torques(false);
+        } else {
+            rb.set_body_type(RigidBodyType::Dynamic, true);
+        }
+        slot.vehicle.read_body(rb);
+        Ok(())
+    }
+
+    /// Let a vehicle drive in light mode far from every player car (`on`), or never. In light
+    /// mode — farther than [`LIGHT_ON_M`] from every `VehicleKind::Player` car, back to full
+    /// physics within [`LIGHT_OFF_M`] or on any contact — the chassis is a kinematic body that
+    /// follows the ground under it (`CityMap::ground_height`), driven by the same inputs through
+    /// a bicycle model (throttle / brake as accelerations, steer through the wheelbase): no
+    /// tyre, suspension or drivetrain step, no damage motion. For AI cars far out of play
+    /// (roaming street racers, SR-3). Deterministic; replays log the setting (`simcli`
+    /// `OpKind::LightWhenFar`), the switches follow from the state.
+    pub fn set_light_when_far(&mut self, id: EntityId, on: bool) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        slot.light_when_far = on;
+        if !on && slot.light.is_some() {
+            Self::leave_light(slot, &mut self.physics.bodies[slot.body.body]);
+        }
+        Ok(())
+    }
+
+    /// The vehicle is in light mode now ([`Sim::set_light_when_far`]).
+    pub fn is_light(&self, id: EntityId) -> Option<bool> {
+        self.vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| v.light.is_some())
+    }
+
+    /// Back to full physics where the light vehicle is, at its speed.
+    fn leave_light(slot: &mut SimVehicle, rb: &mut rapier3d::prelude::RigidBody) {
+        let Some(l) = slot.light.take() else {
+            return;
+        };
+        rb.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+        let p = rb.translation().to_array();
+        slot.vehicle.place_body(rb, p, l.yaw, l.speed, 0.0);
+    }
+
+    /// Light-mode switches before the vehicle step (see [`Sim::set_light_when_far`]).
+    fn update_light_modes(&mut self) {
+        if !self
+            .vehicles
+            .iter()
+            .any(|v| v.light_when_far || v.light.is_some())
+        {
+            return;
+        }
+        let players: Vec<[f32; 2]> = self
+            .vehicles
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Player)
+            .map(|v| {
+                let t = self.physics.bodies[v.body.body].translation();
+                [t.x, t.y]
+            })
+            .collect();
+        let near = |p: [f32; 2], r: f32| {
+            players.iter().any(|q| {
+                let (dx, dy) = (p[0] - q[0], p[1] - q[1]);
+                dx * dx + dy * dy < r * r
+            })
+        };
+        let map = self.world.map();
+        for slot in &mut self.vehicles {
+            let rb = &mut self.physics.bodies[slot.body.body];
+            let t = rb.translation();
+            let p = [t.x, t.y];
+            match slot.light {
+                Some(_) => {
+                    if !slot.light_when_far || near(p, LIGHT_OFF_M) {
+                        Self::leave_light(slot, rb);
+                    }
+                }
+                None => {
+                    if !slot.light_when_far
+                        || slot.dormant
+                        || slot.ghost_ticks > 0
+                        || players.is_empty()
+                        || near(p, LIGHT_ON_M)
+                    {
+                        continue;
+                    }
+                    // Upright and on the ground only (not mid-crash or airborne).
+                    let st = slot.vehicle.state();
+                    let up = rb.rotation() * rapier3d::math::Vector::Z;
+                    let ground = map.ground_height(p, Some(t.z));
+                    let ride_z = t.z - ground;
+                    if up.z < 0.95 || !(-0.5..1.5).contains(&ride_z) {
+                        continue;
+                    }
+                    let q = st.rot;
+                    let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+                    let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+                    let yaw = wp_math::atan2(-fx, fy);
+                    rb.set_body_type(
+                        rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+                        true,
+                    );
+                    slot.light = Some(LightState {
+                        yaw,
+                        speed: st.speed_mps.max(0.0),
+                        ride_z,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Light-mode vehicles drive one tick: the bicycle model on their inputs, then the next
+    /// kinematic pose on the ground (pitched and rolled to it).
+    fn step_light(&mut self, dt: f32) {
+        let map = self.world.map();
+        for slot in self.vehicles.iter_mut() {
+            let Some(l) = slot.light.as_mut() else {
+                continue;
+            };
+            let def = slot.vehicle.def();
+            let i = &slot.input;
+            let brake = i.brake.max(i.handbrake).clamp(0.0, 1.0);
+            let a = i.throttle.clamp(0.0, 1.0) * LIGHT_ACCEL_MPS2
+                - brake * LIGHT_BRAKE_MPS2
+                - LIGHT_COAST_MPS2;
+            l.speed = (l.speed + a * dt).max(0.0);
+            let steer = i.steer.clamp(-1.0, 1.0) * def.wheels[0].max_steer_rad;
+            // Small-angle bicycle model (steer is small at speed). Steer +1 is full right, a
+            // right turn lowers yaw (0 = +Y, counter-clockwise positive).
+            l.yaw -= l.speed * steer / def.wheelbase_m.max(0.5) * dt;
+            let (s, c) = wp_math::sin_cos(l.yaw);
+            let rb = &mut self.physics.bodies[slot.body.body];
+            let t = rb.translation();
+            let xy = [t.x - s * l.speed * dt, t.y + c * l.speed * dt];
+            let (mut pos, rot) = ground_pose(map, xy, l.yaw, Some(t.z - l.ride_z));
+            pos[2] += l.ride_z;
+            rb.set_next_kinematic_position(rapier3d::prelude::Pose::from_parts(
+                rapier3d::math::Vector::from_array(pos),
+                rot,
+            ));
+        }
+    }
+
+    /// The vehicle is dormant ([`Sim::set_dormant`]).
+    pub fn is_dormant(&self, id: EntityId) -> Option<bool> {
+        self.vehicles.iter().find(|v| v.id == id).map(|v| v.dormant)
+    }
+
+    /// Wake dormant vehicles an awake vehicle has come near (before the physics step).
+    fn wake_dormant_near(&mut self) {
+        if !self.vehicles.iter().any(|v| v.dormant) {
+            return;
+        }
+        // Moving cars only: two cars parked side by side would wake each other (a standing car
+        // that starts off nearby wakes it within a few ticks, or on contact).
+        let awake: Vec<[f32; 3]> = self
+            .vehicles
+            .iter()
+            .filter(|v| !v.dormant)
+            .map(|v| &self.physics.bodies[v.body.body])
+            .filter(|rb| {
+                rb.linvel().length_squared()
+                    > DORMANT_WAKE_MIN_SPEED_MPS * DORMANT_WAKE_MIN_SPEED_MPS
+            })
+            .map(|rb| rb.translation().to_array())
+            .collect();
+        let r2 = DORMANT_WAKE_M * DORMANT_WAKE_M;
+        let wake: Vec<EntityId> = self
+            .vehicles
+            .iter()
+            .filter(|v| v.dormant)
+            .filter(|v| {
+                let p = self.physics.bodies[v.body.body].translation().to_array();
+                awake.iter().any(|q| {
+                    let (dx, dy, dz) = (p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+                    dx * dx + dy * dy + dz * dz < r2
+                })
+            })
+            .map(|v| v.id)
+            .collect();
+        for id in wake {
+            let _ = self.set_dormant(id, false);
+        }
     }
 
     /// Make a vehicle a ghost for `ticks` physics ticks (0 = solid again now): its chassis
@@ -982,6 +1246,7 @@ impl Sim {
                 })
                 .collect();
             self.world.set_tracked_vehicles(&tracked);
+            self.cap_traffic_promotion();
             self.world.step(dt, &mut out);
             self.apply_traffic_lod();
             self.drive_traffic();
@@ -991,6 +1256,8 @@ impl Sim {
         if sys.police {
             self.drive_police_units();
         }
+        self.wake_dormant_near();
+        self.update_light_modes();
         if sys.vehicle {
             // Weather reaches every wheel through `weather_at` (the plain world without weather).
             let wx = self.weather.as_ref().map(|w| w.query(&self.world));
@@ -1008,7 +1275,11 @@ impl Sim {
                               c: &rapier3d::prelude::Collider| {
                 c.user_data & (physics::GHOST_USER_BIT | physics::PROP_USER_BIT) == 0
             };
-            for slot in &mut self.vehicles {
+            for slot in self
+                .vehicles
+                .iter_mut()
+                .filter(|v| !v.dormant && v.light.is_none())
+            {
                 let filter = if slot.ghost_ticks > 0 {
                     QueryFilter::exclude_dynamic()
                         .exclude_rigid_body(slot.body.body)
@@ -1036,10 +1307,15 @@ impl Sim {
                     &mut out,
                 );
             }
-            for slot in &self.vehicles {
+            for slot in self
+                .vehicles
+                .iter()
+                .filter(|v| !v.dormant && v.light.is_none())
+            {
                 slot.vehicle
                     .write_body(&mut self.physics.bodies[slot.body.body]);
             }
+            self.step_light(dt);
             self.update_sidewalk_filters();
         }
         let infos: Vec<contacts::BodyInfo> = self
@@ -1073,18 +1349,44 @@ impl Sim {
             &infos,
         );
         out.extend(std::mem::take(&mut tick_contacts.events));
+        // Arcade: racers (player and AI) take `racer_damage_scale` of the collision impulse;
+        // traffic and police take it all. Before the filter, so the scaled contacts are the
+        // ones quantised, recorded and replicated.
+        for (slot, contacts) in self.vehicles.iter().zip(&mut tick_contacts.per_vehicle) {
+            if matches!(slot.kind, VehicleKind::Player | VehicleKind::AiRacer) {
+                wp_damage::scale_racer_contacts(contacts, &self.config.mode);
+            }
+        }
         if let Some(filter) = self.contact_filter {
             for c in tick_contacts.per_vehicle.iter_mut().flatten() {
                 filter(c);
             }
         }
         if sys.vehicle {
-            for slot in &mut self.vehicles {
+            for slot in self.vehicles.iter_mut().filter(|v| !v.dormant) {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
+            }
+        }
+        // Anything that touched a dormant car wakes it for the next tick; a light one goes back
+        // to full physics.
+        let touched: Vec<EntityId> = self
+            .vehicles
+            .iter()
+            .zip(&tick_contacts.per_vehicle)
+            .filter(|(v, c)| (v.dormant || v.light.is_some()) && !c.is_empty())
+            .map(|(v, _)| v.id)
+            .collect();
+        for id in touched {
+            let _ = self.set_dormant(id, false);
+            if let Some(slot) = self.vehicles.iter_mut().find(|v| v.id == id) {
+                Self::leave_light(slot, &mut self.physics.bodies[slot.body.body]);
             }
         }
         if sys.damage {
             for (slot, contacts) in self.vehicles.iter_mut().zip(&tick_contacts.per_vehicle) {
+                if (slot.dormant || slot.light.is_some()) && contacts.is_empty() {
+                    continue;
+                }
                 // Hinged panels (workstream R) swing from the chassis motion; no-op without
                 // panels attached.
                 let rb = &self.physics.bodies[slot.body.body];
@@ -1150,9 +1452,11 @@ impl Sim {
                 vel: rb.linvel().to_array(),
             }
         };
+        // Light-mode cars are kinematic far from the player: they never wake (and shove) props.
         let movers: Vec<props::Mover> = self
             .vehicles
             .iter()
+            .filter(|v| v.light.is_none())
             .map(|v| mover(v.body.body))
             .chain(self.debris.iter().map(|h| mover(*h)))
             .collect();
@@ -1362,7 +1666,7 @@ mod tests {
 
     fn run(seed: u64) -> (u64, VehicleState) {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed,
             mode,
@@ -1391,7 +1695,7 @@ mod tests {
     #[test]
     fn tuned_spawn_applies_the_tune() {
         let car = wp_contracts::load_car(data("cars/rampart_50.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let drive = |tune: CarTune| {
             let mut sim = Sim::new(SimConfig {
                 seed: 7,
@@ -1456,10 +1760,77 @@ mod tests {
         assert_ne!(tuned_hash, hash);
     }
 
+    /// Health of four sedans after each hits its own rigid wall at 56 km/h, one per
+    /// `VehicleKind` (Player, AiRacer, Police, Traffic), with damage table `file`.
+    fn wall_hit_health(file: &str) -> Vec<(VehicleKind, f32)> {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data(file)).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 9,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 1.0,
+        });
+        let kinds = [
+            VehicleKind::Player,
+            VehicleKind::AiRacer,
+            VehicleKind::Police,
+            VehicleKind::Traffic,
+        ];
+        let mut ids = Vec::new();
+        for (i, kind) in kinds.iter().enumerate() {
+            let x = 20.0 * i as f32;
+            sim.add_static_box([x, 20.0, 0.75], [8.0, 1.0, 1.5], 0.0);
+            let id = sim.spawn_vehicle(&car, [x, 0.0, 0.0], 0.0).unwrap();
+            sim.place_vehicle(id, [x, 0.0, 0.0], 0.0, 15.56).unwrap();
+            sim.set_vehicle_kind(id, *kind).unwrap();
+            ids.push(id);
+        }
+        for _ in 0..720 {
+            sim.step_fixed();
+        }
+        sim.vehicles()
+            .iter()
+            .map(|v| (v.kind, v.damage.health()))
+            .collect()
+    }
+
+    /// Contract v0.4.0 (owner, 2026-10-22): in Arcade only racers (player, AI racers) take the
+    /// reduced damage; police and traffic take the same damage as in Simulation. In
+    /// Simulation every kind takes the same damage.
+    #[test]
+    fn arcade_reduces_damage_for_racers_only() {
+        let arcade = wall_hit_health("modes/arcade.toml");
+        let sim = wall_hit_health("modes/sim.toml");
+        let lost = |h: &[(VehicleKind, f32)], k: VehicleKind| {
+            1.0 - h.iter().find(|(kind, _)| *kind == k).unwrap().1
+        };
+        for k in [VehicleKind::Police, VehicleKind::Traffic] {
+            let (a, s) = (lost(&arcade, k), lost(&sim, k));
+            assert!((a - s).abs() < 1e-3, "{k:?} takes full damage: {a} vs {s}");
+        }
+        for k in [VehicleKind::Player, VehicleKind::AiRacer] {
+            let ratio = lost(&arcade, k) / lost(&sim, k);
+            assert!(
+                ratio < 0.4,
+                "{k:?}: Arcade health lost {ratio:.2} of Simulation's"
+            );
+            assert!(
+                lost(&sim, k) > 0.02,
+                "{k:?}: the Simulation hit does damage"
+            );
+        }
+        let sim_lost: Vec<f32> = sim.iter().map(|(_, h)| 1.0 - h).collect();
+        assert!(
+            sim_lost.windows(2).all(|w| (w[0] - w[1]).abs() < 0.05),
+            "Simulation: every kind takes about the same damage {sim_lost:?}"
+        );
+    }
+
     /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.
     fn head_on_events() -> Vec<SimEvent> {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 3,
             mode,
@@ -1529,7 +1900,7 @@ mod tests {
 
     fn two_sedan_sim(seed: u64) -> (Sim, EntityId, EntityId) {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed,
             mode,
@@ -1614,6 +1985,168 @@ mod tests {
         assert!(y < 20.0, "a ghost still hits a barrier: y = {y}");
     }
 
+    /// SR-3: a dormant car is a fixed body at rest (throttle does nothing); a moving car that
+    /// comes near wakes it before they touch, and the crash then goes as with a car that never
+    /// slept; a placed car is awake; the runs are deterministic.
+    #[test]
+    fn dormant_car_sleeps_until_a_car_comes_near() {
+        let run = |sleep: bool| {
+            let (mut sim, a, b) = two_sedan_sim(7);
+            // Settle on the ground, then b sleeps (with throttle held: it must not drive).
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            if sleep {
+                sim.set_dormant(b, true).unwrap();
+                assert_eq!(sim.is_dormant(b), Some(true));
+            }
+            sim.set_input(
+                b,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            let b_still = sim.vehicle_states()[1].1.pos;
+            let asleep_after_1s = sim.is_dormant(b);
+            sim.set_input(b, VehicleInput::default()).unwrap();
+            // a drives into b from 70 m back at 15 m/s.
+            sim.place_vehicle(a, [0.0, -58.0, 0.0], 0.0, 15.0).unwrap();
+            sim.set_input(
+                a,
+                VehicleInput {
+                    throttle: 0.3,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut woke_at_gap = None;
+            for _ in 0..(240 * 6) {
+                sim.step_fixed();
+                if woke_at_gap.is_none() && sim.is_dormant(b) == Some(false) {
+                    let st = sim.vehicle_states();
+                    woke_at_gap = Some(st[1].1.pos[1] - st[0].1.pos[1]);
+                }
+            }
+            let contacts = sim
+                .drain_events()
+                .iter()
+                .filter(|e| matches!(e, SimEvent::Contact { b, .. } if *b != wp_contracts::WORLD_ENTITY))
+                .count();
+            (
+                b_still,
+                asleep_after_1s,
+                woke_at_gap,
+                contacts,
+                sim.vehicle_states()[1].1.pos,
+                sim.state_hash(),
+            )
+        };
+        let (still, asleep, gap, contacts, b_end, h) = run(true);
+        println!("asleep {asleep:?}, still at {still:?}, woke {gap:?} m ahead, {contacts} contacts, b ends at {b_end:?}");
+        assert_eq!(
+            asleep,
+            Some(true),
+            "full throttle does not wake a dormant car"
+        );
+        assert!(
+            (still[1] - 12.0).abs() < 0.05,
+            "a dormant car does not drive: y = {}",
+            still[1]
+        );
+        let gap = gap.expect("the approaching car woke it");
+        assert!(gap > 20.0, "woken well before contact ({gap} m)");
+        assert!(
+            contacts > 0 && b_end[1] > 12.5,
+            "then it is hit and shoved like any car: y = {}",
+            b_end[1]
+        );
+        assert_eq!(h, run(true).5, "dormant runs are deterministic");
+        // A placed (reset) car is awake.
+        let (mut sim, _, b) = two_sedan_sim(9);
+        sim.set_dormant(b, true).unwrap();
+        sim.place_vehicle(b, [0.0, 30.0, 0.0], 0.0, 0.0).unwrap();
+        assert_eq!(sim.is_dormant(b), Some(false));
+    }
+
+    /// SR-3 light mode: an AI car far from the player drives the light model (moves under
+    /// throttle, a right steer turns it right, stays on the ground), goes back to full physics
+    /// when the player comes within `LIGHT_OFF_M` (moving on at its speed), and the runs are
+    /// deterministic. Without permission it never goes light.
+    #[test]
+    fn light_mode_far_from_the_player() {
+        let run = |allow: bool| {
+            let (mut sim, player, ai) = two_sedan_sim(11);
+            sim.set_vehicle_kind(ai, VehicleKind::AiRacer).unwrap();
+            sim.place_vehicle(ai, [0.0, 600.0, 0.0], 0.0, 15.0).unwrap();
+            if allow {
+                sim.set_light_when_far(ai, true).unwrap();
+            }
+            let drive = VehicleInput {
+                throttle: 0.4,
+                steer: 0.05,
+                ..Default::default()
+            };
+            sim.set_input(ai, drive).unwrap();
+            for _ in 0..2 {
+                sim.step_fixed();
+            }
+            let light_at_start = sim.is_light(ai);
+            let p0 = sim.vehicle_states()[1].1.pos;
+            for _ in 0..(240 * 4) {
+                sim.step_fixed();
+            }
+            let st = sim.vehicle_states()[1].1.clone();
+            // The player drives up: back to full physics within LIGHT_OFF_M.
+            let near = [st.pos[0], st.pos[1] - 200.0];
+            sim.place_vehicle(player, [near[0], near[1], 0.0], 0.0, 0.0)
+                .unwrap();
+            sim.step_fixed();
+            let light_near = sim.is_light(ai);
+            let v_after = sim.vehicle_states()[1].1.speed_mps;
+            (
+                light_at_start,
+                p0,
+                st,
+                light_near,
+                v_after,
+                sim.state_hash(),
+            )
+        };
+        let (light, p0, st, near, v_after, h) = run(true);
+        println!("light {light:?}, moved {:?} -> {:?} at {:.1} m/s, near {near:?}, then {v_after:.1} m/s", p0, st.pos, st.speed_mps);
+        assert_eq!(light, Some(true), "far from the player it drives light");
+        assert!(
+            st.pos[1] - p0[1] > 40.0,
+            "it drove forward: {:?} -> {:?}",
+            p0,
+            st.pos
+        );
+        assert!(
+            st.pos[0] > p0[0] + 1.0,
+            "a right steer turned it right (east): {:?}",
+            st.pos
+        );
+        assert!(st.pos[2].abs() < 1.0, "on the ground: z {}", st.pos[2]);
+        assert!(
+            st.speed_mps > 15.0,
+            "throttle accelerates it: {} m/s",
+            st.speed_mps
+        );
+        assert_eq!(near, Some(false), "full physics again near the player");
+        assert!(
+            (v_after - st.speed_mps).abs() < 2.0,
+            "keeps its speed: {v_after} vs {}",
+            st.speed_mps
+        );
+        assert_eq!(h, run(true).5, "light runs are deterministic");
+        assert_eq!(run(false).0, Some(false), "never light without permission");
+    }
+
     /// A ghost whose window ends inside another car stays a ghost until it is clear (capped).
     #[test]
     fn ghost_overstays_while_overlapping() {
@@ -1650,7 +2183,7 @@ mod tests {
     #[test]
     fn static_barrier_stops_car_and_reports_world_contact() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 4,
             mode,
@@ -1697,7 +2230,7 @@ mod tests {
     #[test]
     fn procedural_city_loads_props_and_steps() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mk = || {
             let mut sim = Sim::new(SimConfig {
                 seed: 9,
@@ -1732,7 +2265,7 @@ mod tests {
     #[test]
     fn props_are_fixed_until_a_car_comes_and_get_knocked() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 9,
             mode,
@@ -1788,7 +2321,7 @@ mod tests {
     #[test]
     fn contact_filter_recording_and_despawn() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/extreme.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 5,
             mode,
@@ -1827,7 +2360,7 @@ mod tests {
     fn police_city_run(ticks: u32) -> Sim {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
         let cop = wp_contracts::load_car(data("cars/sentinel_cruiser.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,
@@ -1883,7 +2416,7 @@ mod tests {
     fn kinematic_police_do_not_roll_phantom_traffic_hazards() {
         // No police car model: every unit stays on wp_police's kinematic driver (low LOD).
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 11,
             mode,
@@ -1923,7 +2456,7 @@ mod tests {
     fn traffic_near_the_player_becomes_physical() {
         let run = || {
             let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-            let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+            let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
             let mut sim = Sim::new(SimConfig {
                 seed: 12,
                 mode,
@@ -1977,7 +2510,7 @@ mod tests {
     #[test]
     fn disabled_vehicle_system_freezes_cars() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 1,
             mode,
@@ -2002,7 +2535,7 @@ mod tests {
     #[test]
     fn hash_changes_with_state() {
         let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
-        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
         let mut sim = Sim::new(SimConfig {
             seed: 7,
             mode,
@@ -2022,5 +2555,70 @@ mod tests {
         let (_, s) = run(1);
         assert!(s.speed_mps > 5.0);
         assert_eq!(s.health, 1.0);
+    }
+}
+#[cfg(test)]
+mod cost_probe {
+    use super::*;
+    /// Probe: ms per 60 Hz frame for 13 cars on the flat slab, idle / driving / dormant, with and
+    /// without damage. `cargo test --release -p wp_sim --lib cost_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn cost_probe() {
+        let data = |p: &str| format!("{}/../../data/{p}", env!("CARGO_MANIFEST_DIR"));
+        let car = wp_contracts::load_car(data("cars/hakone_gt.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        for (label, drive, dormant, damage) in [
+            ("idle", false, false, true),
+            ("driving", true, false, true),
+            ("driving, no damage", true, false, false),
+            ("dormant", false, true, true),
+        ] {
+            let mut sim = Sim::new(SimConfig {
+                seed: 1,
+                mode: mode.clone(),
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let mut ids = Vec::new();
+            for k in 0..13 {
+                ids.push(
+                    sim.spawn_vehicle(&car, [k as f32 * 30.0, 0.0, 0.0], 0.0)
+                        .unwrap(),
+                );
+            }
+            let mut sys = sim.systems();
+            sys.damage = damage;
+            sim.set_systems(sys);
+            for _ in 0..240 {
+                sim.step_fixed();
+            }
+            for id in &ids {
+                if drive {
+                    sim.set_input(
+                        *id,
+                        VehicleInput {
+                            throttle: 0.3,
+                            steer: 0.2,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                }
+                if dormant {
+                    sim.set_dormant(*id, true).unwrap();
+                }
+            }
+            let t0 = std::time::Instant::now();
+            let n = 240 * 10;
+            for _ in 0..n {
+                sim.step_fixed();
+            }
+            let ms = t0.elapsed().as_secs_f64() * 1000.0 / (n as f64 / 4.0);
+            println!(
+                "13 cars {label}: {ms:.3} ms per 60 Hz frame ({:.3} per car)",
+                ms / 13.0
+            );
+        }
     }
 }

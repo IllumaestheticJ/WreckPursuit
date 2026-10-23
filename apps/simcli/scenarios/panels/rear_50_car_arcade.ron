@@ -1,10 +1,12 @@
+// Contract v0.4.0: the pre-v0.4.0 Arcade table is now Simulation, so this scenario keeps its
+// name and runs `mode: Simulation` (same behaviour and hashes as before).
 // Panels (workstream R): a parked sedan is rear-ended by a sedan at 50 km/h in Arcade. Browser:
 // the rear quarters buckle outward and their tail edges follow the crushed rear bumper/frame,
 // the trunk lid folds (tools/assets/panels_shots.mjs, docs/media/panels/crumple_*_rear_50_car_*).
 (
     name: "panels_rear_50_car_arcade",
     seed: 2152,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     panels: true,
     entities: [

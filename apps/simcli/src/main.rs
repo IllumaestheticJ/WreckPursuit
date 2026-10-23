@@ -26,7 +26,7 @@ USAGE:
   simcli car-stats [--check] [--data DIR]                         measure every car, write stats/cars.json
   simcli police-bench [--full] [--seeds N] [--duration S] [--threads N] [--label TEXT]
                 [--city vesper,grid] [--phase day,night] [--weather clear,rain]
-                [--level 1,2,3] [--skill casual,good,expert] [--mode arcade|simulation]
+                [--level 1,2,3] [--skill casual,good,expert] [--mode arcade|simulation|extreme]
                 [--out FILE.md | --no-write] [--json FILE]       police competency benchmark
 
 LIST is comma-separated from vehicle,damage,world,police,net (or `all`).
@@ -554,10 +554,13 @@ fn cmd_police_bench(args: &Args) -> Result<bool, String> {
         return Err("no benchmark cells match the filters".into());
     }
     let seeds: u64 = args.num("--seeds")?.unwrap_or(8);
-    let mode = match args.get("--mode").unwrap_or("arcade") {
+    // Default Simulation: the police bench's published numbers were measured in the old Arcade
+    // table, which is Simulation since contract v0.4.0 (main-sync round 4).
+    let mode = match args.get("--mode").unwrap_or("simulation") {
         "arcade" => wp_contracts::DamageMode::Arcade,
         "simulation" => wp_contracts::DamageMode::Simulation,
-        m => return Err(format!("--mode: unknown {m:?} (arcade|simulation)")),
+        "extreme" => wp_contracts::DamageMode::Extreme,
+        m => return Err(format!("--mode: unknown {m:?} (arcade|simulation|extreme)")),
     };
     let opts = BenchOptions {
         cells,

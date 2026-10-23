@@ -5,12 +5,13 @@
 import { useMemo } from "preact/hooks";
 import type { CityMap, MapBlip, Vec2 } from "../../model/types";
 import { headingDeg, roadsPath } from "../../ui/mapGeometry";
+import { heliShape } from "./HeliIcon";
 
 const BLIP_COLOR: Record<MapBlip["kind"], string> = {
   player: "var(--scan)",
   racer: "var(--warn)",
   police: "var(--police-b)",
-  helicopter: "var(--police-a)",
+  helicopter: "var(--heli)",
   traffic: "var(--ink-3)",
   checkpoint: "var(--cash)",
   incident: "var(--danger)",
@@ -33,9 +34,34 @@ export function Minimap(props: { map: CityMap; pos: Vec2; headingRad: number; bl
       <g clip-path="url(#wp-minimap-clip)">
         <g transform={`rotate(${rot}) translate(${-px} ${py})`}>
           <path d={roads} fill="none" stroke="rgba(230,239,233,0.22)" stroke-width={R * 0.035} stroke-linecap="round" stroke-linejoin="round" />
-          {props.blips.map((b) => {
+          {/* Who the helicopter is following: dashed tether + pulsing ring, under every blip. */}
+          {props.blips.map((b) =>
+            b.tracking ? (
+              <g key={`t${b.kind}${b.id}`} class="wp-minimap-track">
+                <line x1={b.pos[0]} y1={-b.pos[1]} x2={b.tracking[0]} y2={-b.tracking[1]} stroke="var(--heli)" stroke-width={R * 0.012} stroke-dasharray={`${R * 0.04} ${R * 0.03}`} />
+                <circle cx={b.tracking[0]} cy={-b.tracking[1]} r={R * 0.09} fill="var(--heli)" fill-opacity={0.15} stroke="var(--heli)" stroke-width={R * 0.012}>
+                  <animate attributeName="r" values={`${R * 0.07};${R * 0.12};${R * 0.07}`} dur="1.2s" repeatCount="indefinite" />
+                </circle>
+              </g>
+            ) : null,
+          )}
+          {[...props.blips].sort((a, b) => Number(a.kind === "helicopter") - Number(b.kind === "helicopter")).map((b) => {
             const color = BLIP_COLOR[b.kind];
             const [x, y] = [b.pos[0], -b.pos[1]];
+            if (b.kind === "helicopter") {
+              // Distinct from the car triangles: a top-down helicopter, drawn on top, with its
+              // call sign kept upright against the map's rotation.
+              return (
+                <g key={`h${b.id}`} transform={`translate(${x} ${y})`}>
+                  <g transform={`rotate(${headingDeg(b.headingRad ?? 0)})`}>{heliShape(R * 0.1, color)}</g>
+                  {b.label && (
+                    <text transform={`rotate(${-rot})`} x={R * 0.13} y={-R * 0.1} font-size={R * 0.075} fill={color} stroke="#000" stroke-width={R * 0.01} paint-order="stroke" font-family="var(--font-mono)" font-weight="bold">
+                      {b.label}
+                    </text>
+                  )}
+                </g>
+              );
+            }
             if (b.kind === "checkpoint") {
               return <circle key={`c${b.id}`} cx={x} cy={y} r={R * 0.05} fill="none" stroke={color} stroke-width={R * 0.015} />;
             }

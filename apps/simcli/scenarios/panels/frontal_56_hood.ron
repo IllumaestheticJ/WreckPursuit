@@ -4,7 +4,7 @@
 (
     name: "panels_frontal_56_hood",
     seed: 2131,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     panels: true,
     barriers: [(pos: (0.0, 8.0, 0.75), size: (6.0, 1.0, 1.5))],
