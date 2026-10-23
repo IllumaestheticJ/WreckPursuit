@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { chromiumPath } from "./chromium.mjs";
+import { startRaceById } from "./quick_race.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -69,7 +70,9 @@ const betRows = await page.$$eval('[data-testid="bet-locked"], [data-testid="bet
 check(betRows.length === cards.length && betRows.every((t) => /\d\.\d\d/.test(t)), `every race card shows odds on the player (${betRows[0] ?? "none"})`);
 await shot("race_picker.png");
 
-// 2. Pick the grid highway sprint from the menu: a race session with countdown and HUD.
+// 2. Pick the grid highway sprint from the menu: a race session with countdown and HUD (a quick
+// race: with the "career" box ticked a race is a career run, which needs a career car).
+await page.evaluate(() => (document.getElementById("career").checked = false));
 await page.click('[data-race="grid_highway_sprint"] button');
 await page.waitForFunction(() => window.__wp.raceView.raceId === "grid_highway_sprint", null, { timeout: 30000 });
 const scName = await page.evaluate(() => window.__wp.sim.scenario().name);
@@ -119,8 +122,10 @@ await page.close();
 const page2 = await context.newPage();
 page2.on("pageerror", (e) => errors.push(String(e) + (process.env.E2E_STACK ? `\n${e.stack}` : "")));
 page2.on("console", (m) => (m.type() === "error" && errors.push(m.text())) || (m.text().startsWith("THROW") && console.log(m.text())));
-await page2.goto(`${URL}?race=grid_highway_sprint&autopilot=1`);
-await page2.waitForFunction(() => window.__wp?.ready === true && window.__wp.raceView.raceId !== "", null, { timeout: 30000 });
+await page2.goto(`${URL}?autopilot=1`);
+await page2.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
+await startRaceById(page2, "grid_highway_sprint", "lindwurm_4t");
+await page2.waitForFunction(() => window.__wp.raceView.raceId !== "", null, { timeout: 30000 });
 if (process.env.E2E_STACK)
   await page2.evaluate(() => {
     const s = window.__wp.sim;

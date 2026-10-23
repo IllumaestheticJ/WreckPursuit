@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { chromiumPath } from "./chromium.mjs";
+import { startQuickRace } from "./quick_race.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -151,13 +152,9 @@ await ready();
     rowOk && stored[car]?.gearing === 5 && stored[car]?.diff === 1 && free.car === car && free.tune?.gearing === 5 && free.tune?.diff === 1,
     `dev row: ${car} tune stored per viewer and used by free drive (${JSON.stringify(free.tune)})`,
   );
-  const race = await page.evaluate((c) => {
-    const wp = window.__wp;
-    const id = wp.sim.raceList(c, "Arcade")[0]?.id;
-    if (!id) return null;
-    wp.startRace(id, c);
-    return { id, e: wp.sim.scenario().entities[0] };
-  }, car);
+  // The first race this car may enter, outside the career (e2e/quick_race.mjs).
+  const raceId = await startQuickRace(page, car);
+  const race = raceId ? { id: raceId, e: await page.evaluate(() => window.__wp.sim.scenario().entities[0]) } : null;
   check(race && race.e.tune?.gearing === 5, `race ${race?.id}: player entity carries the quick tune`);
   await shot("tune_dev_row.png");
   await page.click("#tune-row button:has-text('stock')");

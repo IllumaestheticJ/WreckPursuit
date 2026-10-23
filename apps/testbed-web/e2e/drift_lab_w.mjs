@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { chromiumPath } from "./chromium.mjs";
+import { startRaceById } from "./quick_race.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 5198;
@@ -439,8 +440,9 @@ await page.getByText("Free drive", { exact: true }).first().waitFor({ timeout: 1
   check(c.name === "night_run" && c.plain && c.spin && c.firm && c.player, `chase: shipped handling on the player (${JSON.stringify(c)})`);
   check(c.others === 0 || c.othersPlayer === 0, `chase: ${c.others} police / traffic cars without the player steering aids (${c.othersPlayer})`);
   // A street race: AI racers drive the same physics with their own steering.
-  await page.goto(`http://localhost:${PORT}/?race=grid_highway_sprint`);
-  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name.startsWith("race_"), null, { timeout: 90000 }).catch(() => {});
+  await page.goto(`http://localhost:${PORT}/`);
+  await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 }).catch(() => {});
+  await startRaceById(page, "grid_highway_sprint", "lindwurm_4t");
   await page.waitForTimeout(1500);
   const r = await handling();
   check(r.name.startsWith("race_") && r.player && r.others > 0, `race: player steering aids on the player (${JSON.stringify(r)})`);

@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { chromiumPath } from "./chromium.mjs";
 import { hudBoxes, overlaps } from "./hud_layout.mjs";
+import { startQuickRace } from "./quick_race.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -195,15 +196,7 @@ for (const [w, h] of [[1280, 720], [1920, 1080]]) {
   const bad = overlaps(await hudBoxes(page), w, h);
   check(bad.length === 0, `player free drive ${w}×${h}: no overlaps${bad.length ? " — " + bad.join("; ") : ""}`);
 }
-await page.evaluate(() => {
-  const w = window.__wp;
-  // A quick (non-career) race the car may enter: races refuse cars outside their entry band.
-  document.getElementById("career").checked = false;
-  for (const r of w.sim.raceList("lindwurm_4t", "Arcade")) {
-    w.startRace(r.id);
-    if (w.sim.scenario().name.startsWith("race_")) break;
-  }
-});
+await startQuickRace(page, "lindwurm_4t");
 await page.waitForFunction(() => !!document.querySelector(".wp-race-hud"), null, { timeout: 30000 });
 for (const [w, h] of [[1280, 720], [1920, 1080]]) {
   await page.setViewportSize({ width: w, height: h });
