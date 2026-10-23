@@ -361,7 +361,14 @@ async function race(label, pad) {
     await frames(page, 2);
     const s3 = await page.evaluate(() => ({ via: window.__wp.street.via, pv: window.__wp.street.preview }));
     check(s3.via.length === 1 && s3.pv?.ok && s3.pv.gates.length === 1, `${label}: ✕ removes a waypoint (${s3.via.length} left, route ${Math.round(s3.pv?.length_m ?? 0)} m)`);
-    gates = s3.via.length;
+    await page.keyboard.press("Backspace");
+    await frames(page, 2);
+    const s4 = await page.evaluate(() => ({ via: window.__wp.street.via, pv: window.__wp.street.preview }));
+    check(s4.via.length === 0 && s4.pv?.ok && s4.pv.gates.length === 0, `${label}: Backspace removes the last waypoint (${s4.via.length} left)`);
+    await page.mouse.click(wps[1].cx, wps[1].cy); // back to the one waypoint left above
+    await frames(page, 2);
+    gates = (await page.evaluate(() => window.__wp.street.via)).length;
+    check(gates === 1, `${label}: a click adds the waypoint back (${gates})`);
     await shot(page, `street_${label}_3b_waypoints.png`);
   }
 
