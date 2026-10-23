@@ -111,6 +111,8 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 | Front | 663 kg | 1.25 Hz | 40900 N/m | 2920 N·s/m | 4380 N·s/m | 0.22 m |
 | Rear | 570 kg | 1.35 Hz | 41000 N/m | 2710 N·s/m | 4060 N·s/m | 0.24 m |
 
+Round 12b ride rule (A): the file carries the derived dampers × 1.2 bump / × 1.6 rebound (rebound ≈ 2 × bump), after any tunes below: **4550 / 12620 N·s/m F, 4220 / 13000 N·s/m R** (bump / rebound).
+
 Anti-roll bars from a roll-gradient target of 4.5°/g with 70% of roll stiffness at the front. Roll arm h − h_rc = 0.641 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 211314 N·m/rad; springs give k·t²/2 = 61219 F / 60669 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **29000 F / 900 R N/m** (clamped at ≥ 0). Resulting gradient 4.5°/g, front share 70%. Bump stops 300000 N/m.
 
 Alignment: camber -0.3° F / +0.0° R, toe +0.10° F / +0.00° R (+ = in), caster 4.5°.
@@ -125,6 +127,15 @@ Full-pedal line pressure 100 bar.
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 3637 N·m/wheel (capacity 1.56×), rear needs 1021 N·m/wheel (capacity 2.65×).
 
 `wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1594 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.629** → delivered 5680 N·m front / 1593 N·m rear per wheel at full pedal. Handbrake 3280 N·m per rear wheel.
+
+## Measured tunes (applied after the derivation)
+
+Changes made on the integrated build by other workstreams and carried here so the file regenerates byte-for-byte (`tunes=` in `roster_inputs.py`):
+
+- `suspension[F].damper_bump_ns_per_m` × 1.3 — brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)
+- `suspension[F].damper_rebound_ns_per_m` × 1.8 — brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)
+- `suspension[R].damper_bump_ns_per_m` × 1.3 — brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)
+- `suspension[R].damper_rebound_ns_per_m` × 2.0 — brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)
 
 ## Steering
 

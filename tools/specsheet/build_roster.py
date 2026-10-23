@@ -11,6 +11,7 @@ Usage (from the repo root):
 
     cargo build --release -p wp_damage --bin gen-lattice
     python3 tools/specsheet/build_roster.py [--only <id>]
+    python3 tools/specsheet/build_roster.py --check   # drift gate: inputs vs data/cars, no writes
 
 Deterministic: same inputs → byte-identical outputs. Tire assignment: each car names an
 intended compound; if `data/tires/<compound>.json` exists it is used, otherwise `street`
@@ -378,7 +379,43 @@ def derive(c: dict) -> tuple[dict, dict]:
         "durability_class": int(c["durability"]),
         "fuel_capacity_l": r(c["fuel_l"], 1),
     }
+    d["tunes"] = apply_tunes(j, c.get("tunes", []))
     return j, d
+
+
+def _tune_targets(j: dict, path: str) -> list[tuple[dict, str]]:
+    """Resolve a tune path to (container, key) pairs. Paths are dotted keys with one optional
+    index: `[F]` = both front corners, `[R]` = both rear corners, `[n]` = element n
+    (e.g. `suspension[R].spring_n_per_m`, `inertia_kgm2[2]`)."""
+    m = re.fullmatch(r"([a-z0-9_]+)(?:\[(F|R|\d+)\])?(?:\.([a-z0-9_]+))?", path)
+    if not m:
+        raise ValueError(f"bad tune path {path!r}")
+    head, idx, tail = m.groups()
+    if idx is None:
+        return [(j, head)] if tail is None else [(j[head], tail)]
+    seq = j[head]
+    picks = [0, 1] if idx == "F" else [2, 3] if idx == "R" else [int(idx)]
+    if tail is None:
+        return [(seq, i) for i in picks]
+    return [(seq[i], tail) for i in picks]
+
+
+def apply_tunes(j: dict, tunes: list[dict]) -> list[str]:
+    """Measured post-derivation tunes (`tunes=[...]` in `roster_inputs.py`), applied last so
+    the data stays reproducible: `{"path", "mul"|"set", "step" (rounding for mul, default 10),
+    "why"}`. Returns one spec-sheet line per tune."""
+    log = []
+    for t in tunes:
+        for obj, key in _tune_targets(j, t["path"]):
+            before = obj[key]
+            if "mul" in t:
+                after = rr(before * t["mul"], t.get("step", 10.0))
+            else:
+                after = t["set"]
+            obj[key] = r(after, 4) if isinstance(after, float) and abs(after) < 10 else after
+        how = f"× {t['mul']}" if "mul" in t else f"= {t['set']}"
+        log.append(f"`{t['path']}` {how} — {t['why']}")
+    return log
 
 
 # ----------------------------------------------------------------------------- lattice
@@ -935,6 +972,12 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
         ["Front", f"{sd['ms_f']:.0f} kg", f"{s['hz'][0]:.2f} Hz", f"{sd['k_f']:.0f} N/m", f"{sd['cb_f']:.0f} N·s/m", f"{rr(1.5 * sd['cb_f'], 10):.0f} N·s/m", f"{s['travel'][0]:.2f} m"],
         ["Rear", f"{sd['ms_r']:.0f} kg", f"{s['hz'][1]:.2f} Hz", f"{sd['k_r']:.0f} N/m", f"{sd['cb_r']:.0f} N·s/m", f"{rr(1.5 * sd['cb_r'], 10):.0f} N·s/m", f"{s['travel'][1]:.2f} m"],
     ]))
+    sj = j["suspension"]
+    o.append(f"\nRound 12b ride rule (A): the file carries the derived dampers × {RIDE_BUMP_SCALE} bump "
+             f"/ × {RIDE_REBOUND_SCALE} rebound (rebound ≈ 2 × bump), after any tunes below: "
+             f"**{sj[0]['damper_bump_ns_per_m']:.0f} / {sj[0]['damper_rebound_ns_per_m']:.0f} N·s/m F, "
+             f"{sj[2]['damper_bump_ns_per_m']:.0f} / {sj[2]['damper_rebound_ns_per_m']:.0f} N·s/m R** "
+             f"(bump / rebound).")
     o.append(f"\nAnti-roll bars from a roll-gradient target of {s['roll_grad_deg_g']:.1f}°/g with "
              f"{s['roll_front_share']:.0%} of roll stiffness at the front. Roll arm "
              f"h − h_rc = {sd['h_arm']:.3f} m (roll centres 0.08 m F / 0.12 m R). Required total "
@@ -975,6 +1018,13 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
              + f" → delivered {b['tf']:.0f} N·m front / {b['rear_delivered']:.0f} N·m rear per "
              f"wheel at full pedal. Handbrake {b['hb']:.0f} N·m per rear wheel.\n")
 
+    if d.get("tunes"):
+        o.append("## Measured tunes (applied after the derivation)\n")
+        o.append("Changes made on the integrated build by other workstreams and carried here so the "
+                 "file regenerates byte-for-byte (`tunes=` in `roster_inputs.py`):\n")
+        o += [f"- {x}" for x in d["tunes"]]
+        o.append("")
+
     o.append("## Steering\n")
     o.append(f"Ratio {c['steer']['ratio']:.1f}:1. Kerb-to-kerb turning circle "
              f"{c['steer']['turn_circle_m']:.1f} m → outer-front path radius "
@@ -1008,7 +1058,45 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
 # ----------------------------------------------------------------------------- main
 
 
+def check() -> int:
+    """`--check`: derive every car and compare with `data/cars/<id>.json` without writing
+    anything (no generator needed). Exit 1 and list the fields when a file drifted from
+    `roster_inputs.py` (a hand edit that would be lost on the next regenerate)."""
+    bad = 0
+    for c in CARS:
+        j, _ = derive(c)
+        path = os.path.join(DATA, "cars", c["id"] + ".json")
+        with open(path) as f:
+            disk = f.read()
+        if compact_json(j) == disk:
+            continue
+        bad += 1
+        a, b = flat_fields(j), flat_fields(json.loads(disk))
+        diffs = [k for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+        print(f"{c['id']}: {len(diffs)} field(s) differ from roster_inputs.py")
+        for k in diffs[:20]:
+            print(f"    {k}: generated {a.get(k, '<none>')} / on disk {b.get(k, '<none>')}")
+    print(f"build_roster --check: {len(CARS) - bad} of {len(CARS)} cars match their inputs")
+    return 1 if bad else 0
+
+
+def flat_fields(o, p: str = "") -> dict:
+    """Flatten nested JSON to `{"a.b[0].c": value}` for drift reports."""
+    out = {}
+    if isinstance(o, dict):
+        for k, v in o.items():
+            out.update(flat_fields(v, f"{p}.{k}" if p else k))
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            out.update(flat_fields(v, f"{p}[{i}]"))
+    else:
+        out[p] = o
+    return out
+
+
 def main(argv):
+    if "--check" in argv:
+        sys.exit(check())
     only = None
     if "--only" in argv:
         only = argv[argv.index("--only") + 1]

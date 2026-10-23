@@ -114,6 +114,8 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 | Front | 262 kg | 2.00 Hz | 41400 N/m | 2110 N·s/m | 3160 N·s/m | 0.12 m |
 | Rear | 366 kg | 2.15 Hz | 66800 N/m | 3160 N·s/m | 4740 N·s/m | 0.13 m |
 
+Round 12b ride rule (A): the file carries the derived dampers × 1.2 bump / × 1.6 rebound (rebound ≈ 2 × bump), after any tunes below: **2530 / 5060 N·s/m F, 3790 / 7580 N·s/m R** (bump / rebound).
+
 Anti-roll bars from a roll-gradient target of 1.6°/g with 50% of roll stiffness at the front. Roll arm h − h_rc = 0.307 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 144902 N·m/rad; springs give k·t²/2 = 47228 F / 87077 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **11100 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 1.5°/g, front share 45%. Bump stops 200000 N/m.
 
 Alignment: camber -1.0° F / -1.8° R, toe +0.00° F / +0.25° R (+ = in), caster 7.5°.
@@ -131,6 +133,14 @@ Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1197 N·m/whe
 
 `wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1586 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2150 N·m front / 1510 N·m rear per wheel at full pedal. Handbrake 1860 N·m per rear wheel.
 
+## Measured tunes (applied after the derivation)
+
+Changes made on the integrated build by other workstreams and carried here so the file regenerates byte-for-byte (`tunes=` in `roster_inputs.py`):
+
+- `suspension[R].spring_n_per_m` × 0.65 — grip-balance per-car fix (lead-authorized, `docs/integration/grip-balance.md`)
+- `suspension[R].preload_m` = 0.0508 — grip-balance: keeps the 0.0373 m static compression at 3825 N per rear corner with the softer spring
+- `inertia_kgm2[2]` × 1.2 — grip-balance: yaw inertia × 1.2 (calmer rotation)
+
 ## Steering
 
 Ratio 16.0:1. Kerb-to-kerb turning circle 10.5 m → outer-front path radius 5.14 m, rear-axle-centre radius 3.76 m → mean road-wheel lock δ = atan(L/R) = **0.577 rad (33.1°)** (outer 28.5°, inner 39.2° at full Ackermann; `ackermann_frac` 0.50). Rack speed 1.6 rad/s.
@@ -142,7 +152,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 4.7 s | 290 km/h | 36.2 m | 0.99 g | — |
-| estimate | 4.6 s | 297 km/h | 33.9 m | 1.02 g | 692 |
+| estimate | 4.6 s | 297 km/h | 33.9 m | 1.03 g | 694 |
 
 ## Damage lattice (`data/lattices/lucciola_350.json`)
 

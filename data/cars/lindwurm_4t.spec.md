@@ -112,6 +112,8 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 | Front | 444 kg | 1.80 Hz | 56800 N/m | 3020 N·s/m | 4530 N·s/m | 0.15 m |
 | Rear | 289 kg | 1.90 Hz | 41200 N/m | 2070 N·s/m | 3100 N·s/m | 0.16 m |
 
+Round 12b ride rule (A): the file carries the derived dampers × 1.2 bump / × 1.6 rebound (rebound ≈ 2 × bump), after any tunes below: **3620 / 7250 N·s/m F, 2480 / 4960 N·s/m R** (bump / rebound).
+
 Anti-roll bars from a roll-gradient target of 2.2°/g with 55% of roll stiffness at the front. Roll arm h − h_rc = 0.424 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 168395 N·m/rad; springs give k·t²/2 = 66961 F / 46940 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **10900 F / 12600 R N/m** (clamped at ≥ 0). Resulting gradient 2.2°/g, front share 55%. Bump stops 170000 N/m.
 
 Alignment: camber -0.8° F / -1.3° R, toe +0.00° F / +0.20° R (+ = in), caster 7.0°.
@@ -128,6 +130,12 @@ ABS ceiling: caliper capacity 3444 / 1373 N·m exceeds 1.5 × the front lock tor
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1880 N·m/wheel (capacity 1.80×), rear needs 477 N·m/wheel (capacity 2.83×).
 
 `wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 857 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.612** → delivered 3380 N·m front / 856 N·m rear per wheel at full pedal. Handbrake 1410 N·m per rear wheel.
+
+## Measured tunes (applied after the derivation)
+
+Changes made on the integrated build by other workstreams and carried here so the file regenerates byte-for-byte (`tunes=` in `roster_inputs.py`):
+
+- `suspension[F].travel_m` = 0.135 — brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer): bump stop 1.5 cm earlier, body 3 cm off the road on the stops
 
 ## Steering
 

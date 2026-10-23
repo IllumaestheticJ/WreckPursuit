@@ -89,3 +89,56 @@ reason = "traffic cargo van: open"
 [cars.furrow_24]
 rear = { type = "open" }
 reason = "traffic compact pickup: open"
+
+# Round 9 / vehicle-models wave 1 cars (added in the cars audit, 2026-10-23). Same setups as
+# their car files (no behaviour change), written out so every roster car has a reason here.
+
+[cars.stoat_16v]
+front = { type = "open" }
+reason = "early-90s FF 16V hot hatch: open front, period-correct; a plate LSD is a garage upgrade"
+
+[cars.marten_20]
+front = { type = "open" }
+reason = "early-90s FF 2.0 16V hatch: open front like its rivals of the time"
+
+[cars.satchel_20]
+front = { type = "open" }
+reason = "2000s FWD panel van: open front, brake-based TC"
+
+[cars.tumbril_20]
+front = { type = "open" }
+reason = "2000s FWD high-roof van: open front, brake-based TC"
+
+[cars.bulwark_400]
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.35, decel = 0.20 }
+reason = "early-70s HO V8 sedan: optional clutch-type limited-slip live axle"
+
+[cars.brigand_400]
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.40, decel = 0.20 }
+reason = "mid-70s full-size V8: clutch-type limited-slip live axle option"
+
+[cars.arashi_t4]
+front = { type = "open" }
+rear = { type = "clutch", preload_nm = 50.0, accel = 0.35, decel = 0.15 }
+centre = { type = "default" }
+reason = "mid-90s AWD rally-homologation saloon: 40/60 centre diff, open front, plate LSD rear"
+
+[cars.talus_20t]
+front = { type = "clutch", preload_nm = 30.0, accel = 0.25, decel = 0.10 }
+rear = { type = "clutch", preload_nm = 80.0, accel = 0.50, decel = 0.30 }
+centre = { type = "default" }
+reason = "late-90s AWD rally-homologation saloon: fixed 45/55 split, plate LSDs front and rear"
+
+[cars.fulmine_v10]
+front = { type = "open" }
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.45, decel = 0.30 }
+centre = { type = "default" }
+reason = "2010s mid-engine V10: permanent AWD (30 % front), open front, clutch-type rear LSD"
+
+[cars.sentinel_warden]
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.40, decel = 0.20 }
+reason = "late-80s body-on-frame police sedan: limited-slip rear from the police package"
+
+[cars.sentinel_vigil]
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.50, decel = 0.35 }
+reason = "2010s V8 pursuit coupe: factory clutch LSD (performance package)"

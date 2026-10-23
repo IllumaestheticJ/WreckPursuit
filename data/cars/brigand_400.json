@@ -113,37 +113,37 @@
   "suspension": [
     {
       "spring_n_per_m": 27400.0,
-      "damper_bump_ns_per_m": 1750.0,
-      "damper_rebound_ns_per_m": 2620.0,
+      "damper_bump_ns_per_m": 2100.0,
+      "damper_rebound_ns_per_m": 4190.0,
       "travel_m": 0.2,
-      "preload_m": 0.03,
+      "preload_m": 0.09,
       "arb_n_per_m": 8000.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
       "spring_n_per_m": 27400.0,
-      "damper_bump_ns_per_m": 1750.0,
-      "damper_rebound_ns_per_m": 2620.0,
+      "damper_bump_ns_per_m": 2100.0,
+      "damper_rebound_ns_per_m": 4190.0,
       "travel_m": 0.2,
-      "preload_m": 0.03,
+      "preload_m": 0.09,
       "arb_n_per_m": 8000.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
       "spring_n_per_m": 23900.0,
-      "damper_bump_ns_per_m": 1400.0,
-      "damper_rebound_ns_per_m": 2100.0,
+      "damper_bump_ns_per_m": 1680.0,
+      "damper_rebound_ns_per_m": 3360.0,
       "travel_m": 0.22,
-      "preload_m": 0.03,
+      "preload_m": 0.059,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
       "spring_n_per_m": 23900.0,
-      "damper_bump_ns_per_m": 1400.0,
-      "damper_rebound_ns_per_m": 2100.0,
+      "damper_bump_ns_per_m": 1680.0,
+      "damper_rebound_ns_per_m": 3360.0,
       "travel_m": 0.22,
-      "preload_m": 0.03,
+      "preload_m": 0.059,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 120000.0
     }
@@ -152,7 +152,7 @@
     "max_torque_front_nm": 2190.0,
     "max_torque_rear_nm": 730.0,
     "bias_front": 0.5,
-    "handbrake_rear_nm": 600.0
+    "handbrake_rear_nm": 2240.0
   },
   "steering": {
     "ratio": 19.5,

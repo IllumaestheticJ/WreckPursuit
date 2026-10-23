@@ -108,6 +108,8 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 | Front | 525 kg | 1.15 Hz | 27400 N/m | 1750 N·s/m | 2620 N·s/m | 0.20 m |
 | Rear | 388 kg | 1.25 Hz | 23900 N/m | 1400 N·s/m | 2100 N·s/m | 0.22 m |
 
+Round 12b ride rule (A): the file carries the derived dampers × 1.2 bump / × 1.6 rebound (rebound ≈ 2 × bump), after any tunes below: **2100 / 4190 N·s/m F, 1680 / 3360 N·s/m R** (bump / rebound).
+
 Anti-roll bars from a roll-gradient target of 6.5°/g with 70% of roll stiffness at the front. Roll arm h − h_rc = 0.462 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 79554 N·m/rad; springs give k·t²/2 = 35091 F / 30613 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **8000 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 6.0°/g, front share 65%. Bump stops 120000 N/m.
 
 Alignment: camber +0.2° F / +0.0° R, toe +0.10° F / +0.00° R (+ = in), caster 2.5°.
@@ -121,7 +123,7 @@ Full-pedal line pressure 65 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2525 N·m/wheel (capacity 0.87×), rear needs 876 N·m/wheel (capacity 0.83×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 760 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2190 N·m front / 730 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 760 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2190 N·m front / 730 N·m rear per wheel at full pedal. Handbrake 2240 N·m per rear wheel.
 
 ## Steering
 

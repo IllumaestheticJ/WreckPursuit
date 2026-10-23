@@ -111,6 +111,8 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 | Front | 537 kg | 1.45 Hz | 44600 N/m | 3130 N·s/m | 4700 N·s/m | 0.17 m |
 | Rear | 433 kg | 1.55 Hz | 41100 N/m | 2700 N·s/m | 4050 N·s/m | 0.18 m |
 
+Round 12b ride rule (A): the file carries the derived dampers × 1.2 bump / × 1.6 rebound (rebound ≈ 2 × bump), after any tunes below: **3760 / 7520 N·s/m F, 3240 / 6480 N·s/m R** (bump / rebound).
+
 Anti-roll bars from a roll-gradient target of 3.2°/g with 57% of roll stiffness at the front. Roll arm h − h_rc = 0.432 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 155415 N·m/rad; springs give k·t²/2 = 57080 F / 53871 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **12300 F / 4900 R N/m** (clamped at ≥ 0). Resulting gradient 3.2°/g, front share 57%. Bump stops 190000 N/m.
 
 Alignment: camber -1.0° F / -0.8° R, toe +0.00° F / +0.15° R (+ = in), caster 6.0°.

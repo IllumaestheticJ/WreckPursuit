@@ -82,7 +82,7 @@ Peak **112 kW @ 6500 rpm**, **180 N·m @ 4600 rpm**. Idle 850 / redline 6800 / l
 
 ## Drivetrain
 
-5-speed close-ratio manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 250 N·m. Shift time 0.25 s.
+5-speed close-ratio manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 250 N·m. Shift time 0.40 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -112,6 +112,8 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 | Front | 327 kg | 1.60 Hz | 33100 N/m | 1980 N·s/m | 2970 N·s/m | 0.15 m |
 | Rear | 196 kg | 1.75 Hz | 23700 N/m | 1290 N·s/m | 1940 N·s/m | 0.16 m |
 
+Round 12b ride rule (A): the file carries the derived dampers × 1.2 bump / × 1.6 rebound (rebound ≈ 2 × bump), after any tunes below: **2380 / 4750 N·s/m F, 1550 / 3100 N·s/m R** (bump / rebound).
+
 Anti-roll bars from a roll-gradient target of 2.8°/g with 45% of roll stiffness at the front. Roll arm h − h_rc = 0.395 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 88327 N·m/rad; springs give k·t²/2 = 33842 F / 23862 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **2900 F / 12300 R N/m** (clamped at ≥ 0). Resulting gradient 2.8°/g, front share 45%. Bump stops 150000 N/m.
 
 Alignment: camber -0.8° F / -1.0° R, toe +0.00° F / +0.15° R (+ = in), caster 3.5°.
@@ -125,7 +127,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1250 N·m/wheel (capacity 1.60×), rear needs 277 N·m/wheel (capacity 2.42×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 444 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.602** → delivered 2000 N·m front / 443 N·m rear per wheel at full pedal. Handbrake 610 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 444 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.602** → delivered 2000 N·m front / 443 N·m rear per wheel at full pedal. Handbrake 870 N·m per rear wheel.
 
 ## Steering
 
@@ -137,7 +139,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| estimate | 7.8 s | 210 km/h | 37.5 m | 0.91 g | 477 |
+| sim | 8.6 s | 206 km/h | 38.0 m | 0.86 g | — |
+| estimate | 8.1 s | 210 km/h | 37.5 m | 0.91 g | 468 |
 
 ## Damage lattice (`data/lattices/marten_20.json`)
 

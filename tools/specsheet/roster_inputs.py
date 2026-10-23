@@ -17,7 +17,12 @@ id, display_name, cls, analog_of, era ('70s' | '80s' | '90s' | '2000s' | '2010s'
 track_f, track_r, body (w, l, h), fuel_l (tank, L), clearance, front_overhang (front axle → bumper face, m), cg (m), cg_why, inertia_k (roll, pitch, yaw
 scale on the box formula), cd, area_k (frontal area = area_k·w·h), extra_cda (lightbar etc.),
 lift (front, rear Cl·A), engine{...}, trans{...}, tires{...}, susp{...}, align{...},
-brakes{...}, steer{...}, price, durability, note, breaks, sources, lattice{...}.
+brakes{...}, steer{...}, price, durability, note, breaks, sources, lattice{...}, and optional
+tunes=[...] (measured post-derivation changes from other workstreams, applied last by
+`build_roster.apply_tunes`: {path, mul | set, step, why}; listed in the spec sheet).
+
+`python3 tools/specsheet/build_roster.py --check` fails when a car file no longer matches these
+inputs: never hand-edit `data/cars/<id>.json`, add a tune here instead.
 
 lattice{...}: mass_frac, bumper ('plastic' | 'steel'), hood ('steel' | 'aluminum'), pushbar, and
 the optional flags ladder_frame (body-on-frame), cargo_box (van: cabin ends at the seat
@@ -354,6 +359,12 @@ CARS = [
     # ------------------------------------------------------------------ 6
     dict(
         id="ironside_440",
+        tunes=[
+            dict(path="suspension[F].damper_bump_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[F].damper_rebound_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_bump_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_rebound_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+        ],
         display_name="Ironside 440",
         cls="Muscle",
         analog_of="early-70s American big-block muscle coupe, 7.2 L pushrod V8, live rear axle",
@@ -485,6 +496,9 @@ CARS = [
     # ------------------------------------------------------------------ 8
     dict(
         id="lindwurm_4t",
+        tunes=[
+            dict(path="suspension[F].travel_m", set=0.135, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer): bump stop 1.5 cm earlier, body 3 cm off the road on the stops"),
+        ],
         display_name="Lindwurm 4T",
         cls="Sport",
         analog_of="2010s German AWD hot hatch, 2.0 L turbocharged I4, on-demand clutch-pack AWD, dual-clutch gearbox",
@@ -548,6 +562,11 @@ CARS = [
     # ------------------------------------------------------------------ 9
     dict(
         id="lucciola_350",
+        tunes=[
+            dict(path="suspension[R].spring_n_per_m", mul=0.65, why="grip-balance per-car fix (lead-authorized, `docs/integration/grip-balance.md`)"),
+            dict(path="suspension[R].preload_m", set=0.0508, why="grip-balance: keeps the 0.0373 m static compression at 3825 N per rear corner with the softer spring"),
+            dict(path="inertia_kgm2[2]", mul=1.2, step=1.0, why="grip-balance: yaw inertia × 1.2 (calmer rotation)"),
+        ],
         display_name="Lucciola 350",
         cls="Exotic",
         analog_of="90s Italian mid-engine exotic coupe, 3.5 L flat-plane V8, transverse-mounted gearbox behind the engine",
@@ -815,6 +834,12 @@ CARS = [
     # ------------------------------------------------------------------ 13
     dict(
         id="sentinel_bastion",
+        tunes=[
+            dict(path="suspension[F].damper_bump_ns_per_m", mul=1.3, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[F].damper_rebound_ns_per_m", mul=1.8, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_bump_ns_per_m", mul=1.3, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_rebound_ns_per_m", mul=2.0, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+        ],
         display_name="Sentinel Bastion",
         cls="PoliceSuv",
         analog_of="2010s American full-size police SUV, 5.3 L pushrod V8, body-on-frame, RWD",
@@ -879,6 +904,12 @@ CARS = [
     # ------------------------------------------------------------------ 14 (economy floor)
     dict(
         id="junkyard_beater",
+        tunes=[
+            dict(path="suspension[F].damper_bump_ns_per_m", mul=2.0, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[F].damper_rebound_ns_per_m", mul=2.0, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_bump_ns_per_m", mul=2.0, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_rebound_ns_per_m", mul=2.8, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+        ],
         display_name="Junkyard Beater",
         cls="Beater",
         analog_of="1980s compact FF sedan, 1.6 L SOHC I4, 4-speed manual, high mileage (tired engine, sagging springs, worn dampers, old tyres)",
@@ -949,6 +980,12 @@ CARS = [
     # ------------------------------------------------------------------ 15 (traffic)
     dict(
         id="tansy_13",
+        tunes=[
+            dict(path="suspension[F].damper_bump_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[F].damper_rebound_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_bump_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_rebound_ns_per_m", mul=1.8, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+        ],
         display_name="Tansy 1.3",
         cls="Compact",
         analog_of="2000s European/Japanese FF supermini hatch, 1.3 L DOHC I4, five-door",
@@ -1076,6 +1113,12 @@ CARS = [
     # ------------------------------------------------------------------ 17 (traffic)
     dict(
         id="furrow_24",
+        tunes=[
+            dict(path="suspension[F].damper_bump_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[F].damper_rebound_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_bump_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+            dict(path="suspension[R].damper_rebound_ns_per_m", mul=1.35, why="brake-dive pass (lead, `docs/integration/brake-dive.md`: more damping, not stiffer)"),
+        ],
         display_name="Furrow 2.4",
         cls="Truck",
         analog_of="90s compact RWD pickup, 2.4 L SOHC I4, regular cab, body-on-frame, leaf-sprung live axle",
@@ -1169,12 +1212,14 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open front differential",
             layout="Fwd",
-            gears=[3.27, 2.13, 1.46, 1.13, 0.89], final=3.94, reverse=3.30, shift=0.25,
+            gears=[3.27, 2.13, 1.46, 1.13, 0.89], final=3.94, reverse=3.30, shift=0.40,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="205/50R15", rear="205/50R15", compound="street", unsprung=(19.0, 16.0)),
+        # Cars audit (2026-10-23): preload (front, rear) for >= 45 % of the travel free at rest (A's round-12b
+        # rule, ride.rs / brake_dive.rs); it sat on or near its bump stops under braking before.
         susp=dict(hz=(1.50, 1.65), zeta=0.30, travel=(0.16, 0.17), roll_grad_deg_g=3.2,
-                  roll_front_share=0.45, bump_stop=150000.0, preload=0.02),
+                  roll_front_share=0.45, bump_stop=150000.0, preload=(0.029, 0.02)),
         align=dict(camber_deg=(-0.7, -1.0), toe_deg=(0.0, 0.15), caster_deg=3.5),
         brakes=dict(
             front=dict(kind="disc", d_mm=256, pistons_mm=[54], pad_mu=0.38),
@@ -1237,8 +1282,10 @@ CARS = [
             diff_f="Open", diff_r=dict(preload=60.0, power=0.35, coast=0.20), clutch_factor=1.5,
         ),
         tires=dict(front="225/70R15", rear="225/70R15", compound="street", unsprung=(32.0, 48.0)),
+        # Cars audit (2026-10-23): preload (front, rear) for >= 45 % of the travel free at rest (A's round-12b
+        # rule, ride.rs / brake_dive.rs); it sat on or near its bump stops under braking before.
         susp=dict(hz=(1.05, 1.15), zeta=0.22, travel=(0.20, 0.22), roll_grad_deg_g=6.5,
-                  roll_front_share=0.60, bump_stop=120000.0, preload=0.03),
+                  roll_front_share=0.60, bump_stop=120000.0, preload=(0.13, 0.092)),
         align=dict(camber_deg=(0.25, 0.0), toe_deg=(0.1, 0.0), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=298, pistons_mm=[79], pad_mu=0.30),
@@ -1300,11 +1347,13 @@ CARS = [
         trans=dict(
             desc="5-speed close-ratio manual, permanent AWD (centre differential, 40 % front), open front, clutch LSD rear",
             layout=("Awd", 0.40),
-            gears=[3.17, 1.88, 1.30, 0.97, 0.74], final=4.11, reverse=3.30, shift=0.22,
+            gears=[3.17, 1.88, 1.30, 0.97, 0.74], final=4.11, reverse=3.30, shift=0.38,
             diff_f="Open", diff_r=dict(preload=50.0, power=0.35, coast=0.15), clutch_factor=1.4,
         ),
         tires=dict(front="205/50R16", rear="205/50R16", compound="sport", unsprung=(21.0, 20.0)),
-        susp=dict(hz=(1.70, 1.80), zeta=0.30, travel=(0.18, 0.19), roll_grad_deg_g=2.6,
+        # Cars audit (2026-10-23): front travel 0.18 → 0.165 so the body stays > 1 cm off the road with both
+        # front struts on their bump stops (brake_dive.rs; was 0.3 cm), as on the Lindwurm.
+        susp=dict(hz=(1.70, 1.80), zeta=0.30, travel=(0.165, 0.19), roll_grad_deg_g=2.6,
                   roll_front_share=0.52, bump_stop=160000.0, preload=0.02),
         align=dict(camber_deg=(-0.8, -1.0), toe_deg=(0.0, 0.15), caster_deg=4.0),
         brakes=dict(
@@ -1367,8 +1416,10 @@ CARS = [
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="215/65R16", rear="215/65R16", compound="street", unsprung=(24.0, 30.0)),
+        # Cars audit (2026-10-23): preload (front, rear) for >= 45 % of the travel free at rest (A's round-12b
+        # rule, ride.rs / brake_dive.rs); it sat on or near its bump stops under braking before.
         susp=dict(hz=(1.25, 1.50), zeta=0.27, travel=(0.18, 0.20), roll_grad_deg_g=5.0,
-                  roll_front_share=0.65, bump_stop=250000.0, preload=0.03),
+                  roll_front_share=0.65, bump_stop=250000.0, preload=(0.068, 0.03)),
         align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.0, 0.1), caster_deg=3.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=300, pistons_mm=[60], pad_mu=0.40),
@@ -1427,7 +1478,7 @@ CARS = [
         trans=dict(
             desc="5-speed close-ratio manual, open front differential",
             layout="Fwd",
-            gears=[3.45, 2.13, 1.48, 1.12, 0.89], final=3.94, reverse=3.39, shift=0.25,
+            gears=[3.45, 2.13, 1.48, 1.12, 0.89], final=3.94, reverse=3.39, shift=0.40,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="195/50R15", rear="195/50R15", compound="street", unsprung=(18.0, 16.0)),
@@ -1496,8 +1547,10 @@ CARS = [
             diff_f="Open", diff_r=dict(preload=60.0, power=0.40, coast=0.20), clutch_factor=1.5,
         ),
         tires=dict(front="225/75R15", rear="225/75R15", compound="vintage_bias", unsprung=(32.0, 50.0)),
+        # Cars audit (2026-10-23): preload (front, rear) for >= 45 % of the travel free at rest (A's round-12b
+        # rule, ride.rs / brake_dive.rs); it sat on or near its bump stops under braking before.
         susp=dict(hz=(1.15, 1.25), zeta=0.23, travel=(0.20, 0.22), roll_grad_deg_g=6.5,
-                  roll_front_share=0.70, bump_stop=120000.0, preload=0.03),
+                  roll_front_share=0.70, bump_stop=120000.0, preload=(0.09, 0.059)),
         align=dict(camber_deg=(0.25, 0.0), toe_deg=(0.1, 0.0), caster_deg=2.5),
         brakes=dict(
             front=dict(kind="disc", d_mm=298, pistons_mm=[76], pad_mu=0.30),
@@ -1558,7 +1611,7 @@ CARS = [
         trans=dict(
             desc="5-speed close-ratio manual, permanent AWD with a fixed 45/55 centre split (viscous-locked centre diff), helical-style front LSD (modelled as clutch LSD), clutch-type rear LSD",
             layout=("Awd", 0.45),
-            gears=[2.79, 1.95, 1.41, 1.03, 0.76], final=4.53, reverse=3.42, shift=0.22,
+            gears=[2.79, 1.95, 1.41, 1.03, 0.76], final=4.53, reverse=3.42, shift=0.38,
             diff_f=dict(preload=30.0, power=0.25, coast=0.10),
             diff_r=dict(preload=80.0, power=0.50, coast=0.30), clutch_factor=1.45,
         ),
@@ -1628,8 +1681,10 @@ CARS = [
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
         tires=dict(front="215/65R16", rear="215/65R16", compound="street", unsprung=(24.0, 30.0)),
+        # Cars audit (2026-10-23): preload (front, rear) for >= 45 % of the travel free at rest (A's round-12b
+        # rule, ride.rs / brake_dive.rs); it sat on or near its bump stops under braking before.
         susp=dict(hz=(1.40, 1.70), zeta=0.27, travel=(0.18, 0.20), roll_grad_deg_g=5.5,
-                  roll_front_share=0.62, bump_stop=250000.0, preload=0.03),
+                  roll_front_share=0.62, bump_stop=250000.0, preload=(0.034, 0.03)),
         align=dict(camber_deg=(-0.5, 0.0), toe_deg=(0.1, 0.0), caster_deg=3.5),
         brakes=dict(
             front=dict(kind="disc", d_mm=300, pistons_mm=[60], pad_mu=0.40),
@@ -1766,8 +1821,10 @@ CARS = [
             diff_f="Open", diff_r=dict(preload=60.0, power=0.40, coast=0.20), clutch_factor=1.6,
         ),
         tires=dict(front="225/70R15", rear="225/70R15", compound="police_pursuit", unsprung=(32.0, 48.0)),
+        # Cars audit (2026-10-23): preload (front, rear) for >= 45 % of the travel free at rest (A's round-12b
+        # rule, ride.rs / brake_dive.rs); it sat on or near its bump stops under braking before.
         susp=dict(hz=(1.30, 1.45), zeta=0.28, travel=(0.20, 0.21), roll_grad_deg_g=4.2,
-                  roll_front_share=0.65, bump_stop=220000.0, preload=0.02),
+                  roll_front_share=0.65, bump_stop=220000.0, preload=(0.047, 0.02)),
         align=dict(camber_deg=(-0.3, 0.0), toe_deg=(0.1, 0.0), caster_deg=3.5),
         brakes=dict(
             front=dict(kind="disc", d_mm=302, pistons_mm=[72], pad_mu=0.40),
