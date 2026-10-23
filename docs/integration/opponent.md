@@ -49,6 +49,9 @@ All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md
   oncoming_buffer_s}`, all driven by `DriverProfile::aggression` (the aggression slider sets how
   far ahead and how well the AI plans before it slows). Racers brake for a non-racer only when
   no lateral line stays clear of everyone's predicted motion. No contract changes.
+  2026-10-23: plans as far as it sees — `plan_ahead_m` 150–400 m, horizon up to
+  `plan_horizon_s` 6–15 s; plans are stay-on-line / move over at the latest comfortable
+  moment / hold / return; `Debug::planned` (new field) counts the cars planned round.
 
 ## Needs
 1. **Lead (`wp_sim`)**: drive AI racers in the loop. Per tick before `step_fixed`: build

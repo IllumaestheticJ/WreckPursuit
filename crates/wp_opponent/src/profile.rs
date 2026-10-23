@@ -73,8 +73,8 @@ impl DriverProfile {
             side_by_side_s: lerp(0.5, 3.0, p.aggression),
             defends: p.aggression >= 0.3,
             overtake_patience_s: lerp(2.5, 0.6, p.aggression),
-            plan_ahead_m: lerp(35.0, 140.0, p.aggression),
-            plan_horizon_s: lerp(1.2, 4.0, p.aggression),
+            plan_ahead_m: lerp(150.0, 400.0, p.aggression),
+            plan_horizon_s: lerp(6.0, 15.0, p.aggression),
             plan_step_m: lerp(0.9, 0.25, p.aggression),
             evade_rate_mps: lerp(1.3, 2.6, p.aggression),
             oncoming_buffer_s: lerp(2.5, 1.0, p.aggression),
@@ -113,11 +113,11 @@ pub struct DriverParams {
     pub defends: bool,
     /// Time stuck behind a slower car before an overtake is considered, s (aggression).
     pub overtake_patience_s: f32,
-    /// Range ahead in which traffic, police and players are planned around instead of braked
-    /// for, m (aggression).
+    /// How far ahead the driver sees and plans a route round traffic, police and players
+    /// instead of braking for them, m (aggression). The planner uses all of it.
     pub plan_ahead_m: f32,
-    /// How far into the future the route round them is checked against everyone's predicted
-    /// motion, s (aggression).
+    /// Longest prediction horizon, s (aggression): the planner predicts far enough to reach
+    /// the edge of sight at its speed (`plan_ahead_m / v`, at least 3 s), up to this.
     pub plan_horizon_s: f32,
     /// Spacing of the lateral positions the planner tries, m (aggression: finer = finds
     /// narrower gaps).

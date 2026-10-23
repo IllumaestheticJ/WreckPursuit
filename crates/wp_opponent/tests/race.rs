@@ -333,11 +333,21 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         "{:?}",
         fled.status
     );
+    // The others keep racing — unless the sim's own police made them wanted at their own flee
+    // level (racers that plan round traffic instead of queueing reach more lights and speed
+    // more, so heat is earned on the way): then they must have abandoned for that reason.
+    let flee_level = eight_drivers()[0].params().flee_wanted_level;
     for s in st.iter().filter(|s| s.entity != EntityId(1)) {
+        let abandoned_wanted = events.iter().any(|e| {
+            matches!(e, OpponentEvent::Abandoned { entity, wanted_level }
+                if *entity == s.entity && *wanted_level >= flee_level)
+        });
         assert!(
-            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted),
-            "{:?}",
-            s.status
+            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted)
+                || (s.status == RacerStatus::Fled && abandoned_wanted),
+            "{:?} {:?}",
+            s.status,
+            events
         );
     }
     // Its flight route ends far from the unit, and it made real progress along it (traffic

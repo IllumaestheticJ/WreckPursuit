@@ -396,6 +396,8 @@ pub struct Debug {
     /// Pass evaluations so far: [accepted, no run, too late, no room, slower line, lane
     /// taken ahead, lane taken behind, target busy passing someone].
     pub pass_checks: [u32; 8],
+    /// Cars / civilians currently planned round (not braked for) by the route planner.
+    pub planned: u8,
 }
 
 /// What limits a racer's speed target.
@@ -442,6 +444,8 @@ pub struct Field {
     config: RaceConfig,
     tick: u64,
     hints: BTreeMap<EntityId, usize>,
+    /// Corridor sample each civilian was last projected to (cheap tracking).
+    civ_hints: BTreeMap<u32, usize>,
     events: Vec<OpponentEvent>,
     outputs: Vec<(EntityId, VehicleInput)>,
     finishers: u32,
@@ -595,6 +599,7 @@ impl Field {
             config,
             tick: 0,
             hints: BTreeMap::new(),
+            civ_hints: BTreeMap::new(),
             events: Vec::new(),
             outputs: Vec::new(),
             finishers: 0,
@@ -1275,7 +1280,14 @@ impl Field {
                 out.push(o);
             }
         }
-        let mut civ = civilians_on(&self.corridor, &self.racers, world, range, false);
+        let mut civ = civilians_on(
+            &self.corridor,
+            &self.racers,
+            world,
+            range,
+            false,
+            Some(&mut self.civ_hints),
+        );
         out.append(&mut civ);
         out
     }
@@ -1309,8 +1321,9 @@ impl Field {
             corridor,
             only_me,
             world,
-            me.params.perception_ahead_m + 20.0,
+            me.params.perception_ahead_m.max(me.params.plan_ahead_m) + 20.0,
             true,
+            None,
         ));
         out
     }
@@ -1752,15 +1765,19 @@ fn decide_racer(
         // etiquette below.
         let mut cleared: Vec<Who> = Vec::new();
         if matches!(r.tactic, Tactic::Follow | Tactic::Evade) {
-            let n_line = if start_phase {
-                r.start_n
-            } else {
-                line_n(r.s) + r.line_noise
+            let noise = r.line_noise;
+            let start_n = r.start_n;
+            let line_at = |s: f32| {
+                if start_phase {
+                    start_n
+                } else {
+                    line_n(s) + noise
+                }
             };
             let ctx = EvadeCtx {
                 v,
                 v_want: v_line(r.s).max(v),
-                n_line,
+                line_at: &line_at,
             };
             match plan_evasion(r, &rel, &ctx, &limits, &evade_limits, &margin_for) {
                 Evasion::NotNeeded | Evasion::Blocked => {
@@ -1769,7 +1786,24 @@ fn decide_racer(
                         r.tactic_ticks = 0;
                     }
                 }
-                Evasion::Steer { n, threats } => {
+                // Planned, but the move comes later: keep racing the line (and the racers
+                // round me) without braking for them.
+                Evasion::Steer {
+                    threats,
+                    wait: true,
+                    ..
+                } => {
+                    if r.tactic == Tactic::Evade {
+                        r.tactic = Tactic::Follow;
+                        r.tactic_ticks = 0;
+                    }
+                    cleared = threats;
+                }
+                Evasion::Steer {
+                    n,
+                    threats,
+                    wait: false,
+                } => {
                     if r.tactic != Tactic::Evade {
                         r.tactic = Tactic::Evade;
                         r.tactic_ticks = 0;
@@ -2171,7 +2205,12 @@ fn decide_racer(
                 let free = x.gap - min_gap;
                 let lat_left = hw + o.half_w + margin_for(o) - (r.n - o.n).abs();
                 let t_lat = lat_left.max(0.0) / evade_rate(p.evade_rate_mps, v) + 0.2;
-                let t_reach = free.max(0.0) / (v - o.v_s).max(0.1);
+                // Still accelerating toward my target: judge the closing speed I will have.
+                let a_acc = r.cap_now.accel_mps2 * p.usage.accel;
+                let v_reach = (v * v + 2.0 * a_acc * free.max(0.0))
+                    .sqrt()
+                    .min(v_target.max(v));
+                let t_reach = free.max(0.0) / (0.5 * (v + v_reach) - o.v_s).max(0.1);
                 if lat_left > 0.0 && t_lat > t_reach {
                     let cap = if free <= 0.0 {
                         vo.min(v - 2.0).max(0.0)
@@ -2339,6 +2378,7 @@ fn decide_racer(
             n: r.n,
             brake_dist,
             pass_checks: r.pass_checks,
+            planned: cleared.len().min(u8::MAX as usize) as u8,
         };
     }
 }
@@ -2384,14 +2424,20 @@ fn vehicle_obstacle(
     })
 }
 
+/// Civilians within `range` of a racer, as obstacles on `c`. With `hints` (the shared race
+/// corridor), each civilian is tracked from where it was last projected (a narrow search)
+/// instead of searched for around the nearest racer every decision; hints of civilians that
+/// left the range are dropped.
 fn civilians_on(
     c: &Corridor,
     racers: &[Racer],
     world: &World,
     range: f32,
     private: bool,
+    mut hints: Option<&mut BTreeMap<u32, usize>>,
 ) -> Vec<Obstacle> {
     let mut out = Vec::new();
+    let mut seen: Vec<u32> = Vec::new();
     for a in world.agents() {
         let p = geom::xy(a.pos);
         let mut near: Option<(f32, usize)> = None;
@@ -2405,10 +2451,27 @@ fn civilians_on(
             }
         }
         let Some((_, hint)) = near else { continue };
-        let cp = c.project(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5);
-        let (l, rr) = c.bounds(cp.s);
-        if cp.n < -l - 4.0 || cp.n > rr + 4.0 {
+        let on_corridor = |cp: &crate::corridor::CorridorPos| {
+            let (l, rr) = c.bounds(cp.s);
+            cp.n >= -l - 4.0 && cp.n <= rr + 4.0
+        };
+        // Track it from where it was last seen on the corridor; anything else (first sight,
+        // off the corridor, lost by the narrow search) gets the wide search.
+        let tracked = hints
+            .as_ref()
+            .and_then(|h| h.get(&a.id).copied())
+            .map(|h| c.project(p, Some(h), 30))
+            .filter(|cp| on_corridor(cp));
+        let cp = match tracked {
+            Some(cp) => cp,
+            None => c.project(p, Some(hint), (range / CORRIDOR_STEP_M) as usize + 5),
+        };
+        if !on_corridor(&cp) {
             continue;
+        }
+        if let Some(h) = hints.as_mut() {
+            h.insert(a.id, cp.index);
+            seen.push(a.id);
         }
         let t = c.samples[cp.index].tangent;
         let f = geom::dir_of_yaw(a.yaw);
@@ -2429,6 +2492,10 @@ fn civilians_on(
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
         });
+    }
+    if let Some(h) = hints {
+        seen.sort_unstable();
+        h.retain(|id, _| seen.binary_search(id).is_ok());
     }
     out
 }
@@ -2583,31 +2650,43 @@ fn plan_pass(
 /// What [`plan_evasion`] found.
 #[derive(Debug, Clone, PartialEq)]
 enum Evasion {
-    /// Nobody but racers stands in my line within the plan.
+    /// Nobody but racers stands in my line within sight.
     NotNeeded,
-    /// Someone does and no lateral line stays clear of everyone: brake for them.
+    /// Someone does and no lateral line stays clear of everyone: brake for them when they
+    /// get close (the follow caps only bite near them).
     Blocked,
-    /// Steer to lateral position `n`; that line clears `threats` (the cars and civilians that
-    /// would otherwise be braked for).
-    Steer { n: f32, threats: Vec<Who> },
+    /// A route round `threats` (the cars and civilians that would otherwise be braked for)
+    /// exists: steer to lateral position `n` now, or (`wait`) stay on the line for now — the
+    /// move comes later, at the latest comfortable moment.
+    Steer {
+        n: f32,
+        threats: Vec<Who>,
+        wait: bool,
+    },
 }
 
 /// Context for [`plan_evasion`].
-struct EvadeCtx {
+struct EvadeCtx<'a> {
     /// Current speed, m/s.
     v: f32,
     /// Speed I want to carry (my profile here, never below the current speed), m/s.
     v_want: f32,
-    /// Lateral position I would drive without anyone in the way.
-    n_line: f32,
+    /// Lateral position I would drive at arc length `s` without anyone in the way.
+    line_at: &'a dyn Fn(f32) -> f32,
 }
 
-/// Time step of the evasion planner's prediction, s.
-const EVADE_DT_S: f32 = 0.1;
+/// Time step of the evasion planner's prediction, s (segments between steps are swept, so
+/// nothing tunnels through at high closing speeds).
+const EVADE_DT_S: f32 = 0.2;
 /// Delay before a commanded lateral move shows (rate limit + steering lag), s.
 const EVADE_REACT_S: f32 = 0.35;
-/// Acceleration assumed when the plan wants more speed than I have, m/s².
-const EVADE_ACCEL_MPS2: f32 = 2.0;
+/// Civilians are planned round only above this speed, m/s: pulling away from a crawl the
+/// car is hard to predict, and touching one is a disqualification — it waits instead.
+const EVADE_CIVILIAN_MIN_MPS: f32 = 5.0;
+/// A planned move starts this long before it is strictly needed, s.
+const EVADE_LEAD_S: f32 = 1.0;
+/// Shortest prediction horizon, s.
+const EVADE_MIN_HORIZON_S: f32 = 3.0;
 /// Most lateral positions tried per plan (the step widens on very wide roads).
 const EVADE_MAX_CANDIDATES: usize = 48;
 /// Oncoming speed assumed for cars not yet seen when judging whether the opposing lanes are
@@ -2620,17 +2699,41 @@ fn evade_rate(rate_mps: f32, v: f32) -> f32 {
     rate_mps.min(0.3 * v.max(1.0))
 }
 
-/// Route planning round traffic, police and players. Every obstacle is extrapolated along
-/// its own direction of travel (`v_s`, `v_n`; lateral drift for 1 s, civilians 3 s) and my
-/// own motion is modelled as a lateral move toward a candidate offset at
-/// [`evade_rate`] after [`EVADE_REACT_S`], at the speed I want to carry. A candidate is clear
-/// if it stays inside the corridor and no predicted overlap appears within
-/// `plan_horizon_s` (oncoming cars: `+ oncoming_buffer_s`). Cars already in line behind me
-/// are theirs to avoid; cars already overlapping only count if we get closer.
+/// One obstacle as the planner sees it: when it is level with me (candidate-independent,
+/// since my own progress along the road is the same for every lateral candidate).
+struct Track<'a> {
+    x: &'a Rel,
+    /// Lateral clearance needed, m.
+    need_n: f32,
+    /// Seconds its lateral drift is extrapolated for.
+    lat_h: f32,
+    /// Steps `i` whose segment `[i-1, i]` brings it longitudinally level with me.
+    level: Vec<usize>,
+    /// Leading steps it is already level with me from the start (only getting closer
+    /// counts there).
+    level_from_start: usize,
+    /// First step at which I am past it with room to pull back in front.
+    passed_at: Option<usize>,
+}
+
+/// Route planning round traffic, police and players, **as far ahead as the driver can see**
+/// (`plan_ahead_m`). Every obstacle is extrapolated along its own direction of travel (`v_s`,
+/// `v_n`; lateral drift for 1 s, civilians 3 s); my own progress is the speed I want to
+/// carry (never braking: that is what the plan avoids), long enough to reach the edge of
+/// sight (`plan_ahead_m / v`, between 3 s and `plan_horizon_s`).
 ///
-/// Only non-racers within `plan_ahead_m` that block my current line trigger a plan; the
-/// cheapest clear candidate wins (close to my line, small moves, own-direction lanes, the
-/// current plan). Deterministic: candidates in ascending order, strict improvement only.
+/// A plan is a three-part path: stay on my line, move over to a candidate offset at
+/// [`evade_rate`] (after [`EVADE_REACT_S`]) at the latest comfortable moment
+/// ([`EVADE_LEAD_S`] before the nearest threat), hold it until past the threats it is for,
+/// then move back to the line. It is clear if the moved-over part stays inside the corridor
+/// and no predicted overlap appears until I am back on the line (oncoming cars:
+/// `oncoming_buffer_s` longer). Threats further on are the next plan's job (re-planned every
+/// decision). Cars already in line behind me are theirs to avoid; cars already level with me
+/// only count if we get closer.
+///
+/// Only non-racers that my line would meet trigger a plan; the cheapest clear candidate wins
+/// (close to my line, small moves, own-direction lanes, the current plan). Deterministic:
+/// candidates in ascending order, strict improvement only.
 fn plan_evasion(
     r: &Racer,
     rel: &[Rel],
@@ -2643,95 +2746,176 @@ fn plan_evasion(
     let hw = 0.5 * r.cap.width_m;
     let hl = 0.5 * r.cap.length_m;
     let rate = evade_rate(p.evade_rate_mps, ctx.v);
-    let horizon = p.plan_horizon_s;
+    let horizon = (p.plan_ahead_m / ctx.v_want.max(10.0)).clamp(
+        EVADE_MIN_HORIZON_S,
+        p.plan_horizon_s.max(EVADE_MIN_HORIZON_S),
+    );
     let steps = ((horizon + p.oncoming_buffer_s) / EVADE_DT_S).ceil() as usize;
-    // My distance travelled at each step: accelerate toward the wanted speed, never assume
-    // braking (that is what the plan tries to avoid).
-    let t_acc = (ctx.v_want - ctx.v).max(0.0) / EVADE_ACCEL_MPS2;
+    let last = steps;
+    let t_of = |i: usize| i as f32 * EVADE_DT_S;
+    // My distance travelled at each step: accelerate toward the wanted speed.
+    // My real acceleration: arriving sooner than predicted would be the dangerous error.
+    let accel = r.cap_now.accel_mps2 * p.usage.accel;
+    let t_acc = (ctx.v_want - ctx.v).max(0.0) / accel;
     let my_s: Vec<f32> = (0..=steps)
         .map(|i| {
-            let t = i as f32 * EVADE_DT_S;
+            let t = t_of(i);
             let ta = t.min(t_acc);
-            ctx.v * ta + 0.5 * EVADE_ACCEL_MPS2 * ta * ta + ctx.v_want * (t - ta)
+            ctx.v * ta + 0.5 * accel * ta * ta + ctx.v_want * (t - ta)
         })
         .collect();
-    let path_n = |n_target: f32, t: f32| {
-        let reach = rate * (t - EVADE_REACT_S).max(0.0);
-        r.n + (n_target - r.n).clamp(-reach, reach)
-    };
-    let hit = |n_target: f32, x: &Rel| -> bool {
-        let o = &x.o;
-        let civ = matches!(o.who, Who::Civilian(_));
-        let need_n = hw + o.half_w + margin_for(o) + 0.25;
-        let need_s = hl + o.half_len + if civ { MIN_GAP_M + 2.0 } else { MIN_GAP_M };
-        let sep0 = (r.n - o.n).abs();
-        // In line behind me: it is the follower's job to avoid me.
-        if x.ds < 0.0 && sep0 < need_n {
-            return false;
-        }
-        let lat_h = if civ { 3.0 } else { 1.0 };
-        let t_end = if o.v_s < -1.0 {
-            horizon + p.oncoming_buffer_s
+    // Corridor room and my line along my predicted path (candidate-independent).
+    let room: Vec<(f32, f32)> = my_s.iter().map(|d| limits(r.s + d)).collect();
+    let line: Vec<f32> = my_s
+        .iter()
+        .zip(&room)
+        .map(|(d, &(lo, hi))| (ctx.line_at)(r.s + d).clamp(lo, hi.max(lo)))
+        .collect();
+
+    // When is each obstacle level with me?
+    let tracks: Vec<Track> = rel
+        .iter()
+        .filter_map(|x| {
+            let o = &x.o;
+            let civ = matches!(o.who, Who::Civilian(_));
+            let need_n = hw + o.half_w + margin_for(o) + 0.25;
+            let need_s = hl + o.half_len + if civ { MIN_GAP_M + 2.0 } else { MIN_GAP_M };
+            // In line behind me: it is the follower's job to avoid me.
+            if x.ds < 0.0 && (r.n - o.n).abs() < need_n {
+                return None;
+            }
+            // Never level with me within the horizon (far ahead and pulling away, or far
+            // behind and slower): skip it cheaply.
+            let t_end = t_of(steps);
+            if x.ds + (o.v_s * t_end).min(0.0) - my_s[steps] > need_s
+                || x.ds + (o.v_s * t_end).max(0.0) - my_s[steps].min(0.0) < -need_s
+            {
+                return None;
+            }
+            let lat_h = if civ { 3.0 } else { 1.0 };
+            let ds_at = |i: usize| x.ds + o.v_s * t_of(i) - my_s[i];
+            let mut level = Vec::new();
+            let mut level_from_start = 0;
+            for i in 0..=steps {
+                let is_level = if i == 0 {
+                    ds_at(0).abs() < need_s
+                } else {
+                    let (a, b) = (ds_at(i - 1), ds_at(i));
+                    a.min(b) < need_s && a.max(b) > -need_s
+                };
+                if is_level {
+                    if level_from_start == i {
+                        level_from_start = i + 1;
+                    }
+                    level.push(i);
+                }
+            }
+            if level.is_empty() {
+                return None;
+            }
+            // First step from which I stay past it for good.
+            let mut passed_at = None;
+            for i in (0..=steps).rev() {
+                if ds_at(i) < -need_s {
+                    passed_at = Some(i);
+                } else {
+                    break;
+                }
+            }
+            Some(Track {
+                x,
+                need_n,
+                lat_h,
+                level,
+                level_from_start,
+                passed_at,
+            })
+        })
+        .collect();
+
+    // Does a path (lateral position per step) run into a track before step `until`?
+    let hits = |path: &[f32], tr: &Track, until: usize| -> Option<usize> {
+        let o = &tr.x.o;
+        let until = if o.v_s < -1.0 {
+            (until + (p.oncoming_buffer_s / EVADE_DT_S).ceil() as usize).min(last)
         } else {
-            horizon
+            until.min(last)
         };
-        let mut from_start = true;
-        for (i, s_me) in my_s.iter().enumerate() {
-            let t = i as f32 * EVADE_DT_S;
-            if t > t_end + 1e-4 {
+        let sep0 = (r.n - o.n).abs();
+        let n_at = |i: usize| o.n + o.v_n * t_of(i).min(tr.lat_h);
+        for &i in &tr.level {
+            if i > until {
                 break;
             }
-            let ds = x.ds + o.v_s * t - s_me;
-            let sep = (path_n(n_target, t) - (o.n + o.v_n * t.min(lat_h))).abs();
-            if ds.abs() < need_s && sep < need_n {
-                // Overlapping from the start: only getting closer counts.
-                if !from_start || sep < sep0 - 0.05 || ds.abs() < x.ds.abs() - 0.05 {
-                    return true;
-                }
+            let sep_i = (path[i] - n_at(i)).abs();
+            let sep = if i == 0 {
+                sep_i
             } else {
-                from_start = false;
+                sep_i.min((path[i - 1] - n_at(i - 1)).abs())
+            };
+            if sep >= tr.need_n {
+                continue;
             }
+            // Level from the start: only getting closer counts.
+            if i < tr.level_from_start
+                && sep >= sep0 - 0.05
+                && (tr.x.ds + o.v_s * t_of(i) - my_s[i]).abs() >= tr.x.ds.abs() - 0.05
+            {
+                continue;
+            }
+            return Some(i);
         }
-        false
+        None
+    };
+    // A path toward `target(i)` from where I am, at my lateral rate, after the reaction time.
+    let path_to = |target: &dyn Fn(usize) -> f32| -> Vec<f32> {
+        let mut n = r.n;
+        (0..=steps)
+            .map(|i| {
+                if t_of(i) > EVADE_REACT_S {
+                    n = approach(n, target(i), rate * EVADE_DT_S);
+                }
+                n
+            })
+            .collect()
     };
 
-    let (lo, hi) = limits(r.s);
-    let n_line = ctx.n_line.clamp(lo, hi.max(lo));
-    let threats: Vec<Who> = rel
+    // Who would my line meet within sight, and when?
+    let line_path = path_to(&|i| line[i]);
+    let mut threats: Vec<(usize, &Track)> = tracks
         .iter()
-        .filter(|x| {
-            !matches!(x.o.who, Who::Racer(_))
-                && x.ds > 0.0
-                && x.ds < p.plan_ahead_m
-                && hit(n_line, x)
+        .filter(|tr| {
+            !matches!(tr.x.o.who, Who::Racer(_)) && tr.x.ds > 0.0 && tr.x.ds < p.plan_ahead_m
         })
-        .map(|x| x.o.who)
+        .filter_map(|tr| hits(&line_path, tr, last).map(|i| (i, tr)))
         .collect();
     if threats.is_empty() {
         return Evasion::NotNeeded;
     }
+    if ctx.v < EVADE_CIVILIAN_MIN_MPS
+        && threats
+            .iter()
+            .any(|(_, tr)| matches!(tr.x.o.who, Who::Civilian(_)))
+    {
+        return Evasion::Blocked;
+    }
+    threats.sort_by_key(|(i, _)| *i);
+    // Plan round the nearest one and everyone met before I'm past it (a group).
+    let first_hit = threats[0].0;
+    let mut ret = threats[0].1.passed_at.unwrap_or(last);
+    let mut group: Vec<Who> = Vec::new();
+    for (i, tr) in &threats {
+        if *i <= ret {
+            ret = ret.max(tr.passed_at.unwrap_or(last));
+            group.push(tr.x.o.who);
+        }
+    }
 
-    // Corridor room along my predicted path (independent of the candidate).
-    let bounds: Vec<(f32, f32)> = my_s
-        .iter()
-        .take((horizon / EVADE_DT_S) as usize + 1)
-        .map(|ds| limits(r.s + ds))
-        .collect();
     // Opposing lanes only when I can see far enough down them: a car not yet seen must not
-    // be able to reach me before I am past the nearest threat.
+    // reach me before I am back on my side.
     let own_lo = own_limits(r.s).0;
     let view = p.perception_ahead_m.max(p.plan_ahead_m);
-    let nearest = rel
-        .iter()
-        .filter(|x| threats.contains(&x.o.who))
-        .min_by(|a, b| a.ds.total_cmp(&b.ds))
-        .expect("threats are in rel");
-    let clear_s = hl + nearest.o.half_len + MIN_GAP_M;
-    let i_pass = (0..bounds.len())
-        .find(|&i| nearest.ds + nearest.o.v_s * i as f32 * EVADE_DT_S - my_s[i] < -clear_s)
-        .unwrap_or(bounds.len() - 1);
-    let t_pass = i_pass as f32 * EVADE_DT_S;
-    let see_oncoming = my_s[i_pass] + EVADE_UNSEEN_ONCOMING_MPS * t_pass <= view;
+    let (lo, hi) = room[0];
     let step = p
         .plan_step_m
         .max((hi - lo) / (EVADE_MAX_CANDIDATES - 1) as f32);
@@ -2741,31 +2925,51 @@ fn plan_evasion(
     if r.tactic == Tactic::Evade {
         cands.push(r.n_goal.clamp(lo, hi.max(lo)));
     }
-    let mut best: Option<(f32, f32)> = None;
+    let mut best: Option<(f32, f32, bool)> = None;
     for &n in &cands {
         let opposing = n < own_lo - 0.05;
-        if opposing && !see_oncoming {
-            continue;
-        }
-        if bounds.iter().any(|&(l, h)| n < l - 0.05 || n > h + 0.05) {
-            continue;
-        }
-        if rel.iter().any(|x| hit(n, x)) {
-            continue;
-        }
-        let mut cost = (n - n_line).abs() + 0.3 * (n - r.n).abs();
-        if opposing {
-            cost += 1.5;
-        }
-        if r.tactic == Tactic::Evade && (n - r.n_goal).abs() < step {
-            cost -= 0.3;
-        }
-        if best.is_none_or(|(c, _)| cost < c) {
-            best = Some((cost, n));
+        // Latest comfortable start, then (if that is blocked) right away.
+        let move_s = (n - r.n).abs() / rate + EVADE_REACT_S + EVADE_LEAD_S;
+        let late = ((t_of(first_hit) - move_s) / EVADE_DT_S).floor().max(0.0) as usize;
+        for start in [late, 0] {
+            let path = path_to(&|i| if i >= start && i < ret { n } else { line[i] });
+            // Back on my line (or the end of the horizon).
+            let back = (ret..=last)
+                .find(|&i| (path[i] - line[i]).abs() < 0.05)
+                .unwrap_or(last);
+            if opposing && my_s[back] + EVADE_UNSEEN_ONCOMING_MPS * t_of(back) > view {
+                break;
+            }
+            // The moved-over part stays inside the corridor.
+            let off_line = (start..back).filter(|&i| (path[i] - line[i]).abs() > 0.05);
+            if off_line
+                .clone()
+                .any(|i| path[i] < room[i].0 - 0.05 || path[i] > room[i].1 + 0.05)
+            {
+                continue;
+            }
+            if tracks.iter().any(|tr| hits(&path, tr, back).is_some()) {
+                continue;
+            }
+            let mut cost = (n - line[0]).abs() + 0.3 * (n - r.n).abs();
+            if opposing {
+                cost += 1.5;
+            }
+            if r.tactic == Tactic::Evade && (n - r.n_goal).abs() < step {
+                cost -= 0.3;
+            }
+            if best.is_none_or(|(c, _, _)| cost < c) {
+                best = Some((cost, n, start > 0));
+            }
+            break;
         }
     }
     match best {
-        Some((_, n)) => Evasion::Steer { n, threats },
+        Some((_, n, wait)) => Evasion::Steer {
+            n,
+            threats: group,
+            wait,
+        },
         None => Evasion::Blocked,
     }
 }
@@ -3093,10 +3297,24 @@ mod tests {
         let d = f.debug_of(0);
         assert!(d.v_target >= 20.0, "braking although a route exists: {d:?}");
         assert!(d.n_cmd.abs() > 0.2, "not steering round it: {d:?}");
-        // A timid driver plans too short (aggression sets the horizon) and brakes for it.
-        let f = evasion_field(straight(), 0.0, 20.0, &slow);
-        assert_ne!(f.tactic_of(0), Tactic::Evade);
-        assert_eq!(f.debug_of(0).limit, SpeedLimit::Obstacle(50));
+    }
+
+    #[test]
+    fn plans_as_far_as_it_can_see_and_aggression_sets_how_far() {
+        // A stopped car 230 m ahead in my lane: within an aggressive driver's 400 m of sight,
+        // beyond a timid driver's 150 m.
+        let far = [traffic(50, 0.0, 300.0, 0.0)];
+        let f = evasion_field(straight(), 1.0, 20.0, &far);
+        let d = f.debug_of(0);
+        assert_eq!(
+            d.planned, 1,
+            "aggressive driver did not plan round it: {d:?}"
+        );
+        // Far away: the move waits for the latest comfortable moment, on the line meanwhile.
+        assert_eq!(f.tactic_of(0), Tactic::Follow, "{d:?}");
+        assert!(d.n_cmd.abs() < 0.2, "moved over 230 m early: {d:?}");
+        let f = evasion_field(straight(), 0.0, 20.0, &far);
+        assert_eq!(f.debug_of(0).planned, 0, "{:?}", f.debug_of(0));
     }
 
     #[test]

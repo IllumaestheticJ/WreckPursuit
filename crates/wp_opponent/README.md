@@ -18,26 +18,40 @@ gap to the player — pace is car capability × how much of it the driver dares 
 | Race | `field::Field` | Per tick: observe (corridor position, laps, damage, heat, civilian DQ) → perceive (racers, other vehicles, civilians as obstacles in corridor coordinates) → decide (tactics, lateral target with hard side constraints, speed target) → track with `wp_world::drive::DriveController` (machine D's pure pursuit + PID, shared with physical traffic). Decisions at 60 Hz. |
 
 ### Tactics
-- **Evade — route planning round traffic, police and players** (`plan_evasion`, every
-  decision, before any braking for them): every non-racer ahead within `plan_ahead_m` is
+- **Evade — route planning round traffic, police and players, as far as the driver can see**
+  (`plan_evasion`, every decision, before any braking for them). Sight is `plan_ahead_m`
+  (150–400 m, aggression); the planner uses all of it. Every car and civilian in sight is
   extrapolated along its own direction of travel (`v_s`, `v_n`; lateral drift 1 s, civilians
-  3 s) and checked against my own predicted path (lateral move at `evade_rate_mps` after a
-  0.35 s reaction, at the speed I want to carry). If my line would meet one within
-  `plan_horizon_s`, the planner tries lateral positions every `plan_step_m` across the road and
-  takes the cheapest one that stays in the corridor and clear of **everyone** (racers too) for
-  the whole horizon — oncoming cars for `oncoming_buffer_s` longer. Cost: distance from my line,
-  size of the move, +1.5 for the opposing lanes, −0.3 for keeping the current plan. Found →
-  `Tactic::Evade`, no time-gap braking for the cars it goes round; only a last-resort stop when
-  the car can no longer get sideways out of the way before reaching it. Nothing clear →
-  `Follow` and brake as before. Re-planned at 60 Hz (receding horizon). Opposing lanes (open
-  roads, `OpposingLanes::ForOvertaking`): for whoever may overtake there, and for aggression ≥
-  0.5 when no junction lies inside the plan, and only if I can see far enough down them that an
-  unseen car (12 m/s) can't reach me before I'm past. Cars in line behind me are theirs to
-  avoid; racers ahead keep the overtake etiquette below. **Aggression is the planning slider**:
-  how far ahead it looks, how far into the future it predicts, how finely it searches, how fast
-  it moves over and how tight a gap to oncoming traffic it accepts (table below). A timid
-  driver sees the car late, finds no route that is clear in its short horizon and brakes; an
-  aggressive one is already moving over.
+  3 s); my own progress is the speed I want to carry at the car's real acceleration, for long
+  enough to reach the edge of sight (`plan_ahead_m / v`, 3 s to `plan_horizon_s`). Steps are
+  0.2 s, swept, so nothing tunnels through at high closing speeds.
+  - **Threats**: non-racers my line would meet within sight. The plan is for the nearest one
+    and everyone else met before I'm past it; cars further on are the next plan's job.
+  - **A plan is a path**: stay on my line, move over to a candidate offset (every `plan_step_m`
+    across the road, at `evade_rate_mps` ≤ 0.3·v after a 0.35 s reaction) at the latest
+    comfortable moment (1 s before needed), hold it until past the group, move back. It is
+    clear if the moved-over part stays in the corridor and nobody (racers included) is predicted
+    to overlap until I'm back on my line; oncoming cars must stay clear `oncoming_buffer_s`
+    longer. If the late start is blocked, the same offset is tried starting now. Cost: distance
+    from my line, size of the move, +1.5 for the opposing lanes, −0.3 for keeping the current plan.
+  - **Found** → no time-gap braking for the group (`Debug::planned` counts them). The move is
+    later → stay `Follow` on the line; move now → `Tactic::Evade`. Only a last-resort stop
+    remains: when the car can no longer get sideways out of the way before reaching it,
+    judging the closing speed it will have while still accelerating. **Nothing clear** →
+    `Follow` and brake as before; the follow caps only bite once it is close.
+  - Civilians are planned round only above 5 m/s: pulling away from a crawl the car is hard to
+    predict, and a touch is a disqualification, so it waits instead.
+  - Opposing lanes (open roads, `OpposingLanes::ForOvertaking`): allowed for whoever may
+    overtake there, and for aggression ≥ 0.5 when no junction lies inside the plan. Only if I see
+    far enough down them that an unseen car (12 m/s) can't reach me before I'm back on my side.
+  - Cars in line behind me are theirs to avoid; racers ahead keep the overtake etiquette below.
+  - **Aggression is the planning slider**: how far it sees and plans, how far into the future it
+    predicts, how finely it searches, how fast it moves over, how tight a gap to oncoming traffic
+    it accepts (table below). A timid driver doesn't see a car 200 m down the road and deals with
+    it later; an aggressive one already has its route round it.
+  - Perception tracks each civilian's corridor position from where it was last seen on the
+    corridor (narrow search). First sight, off-corridor or lost → wide search, so a civilian
+    entering the road is never missed.
 - **Follow**: racing line + this braking zone's line noise; time-gap following (gap opened at
   most 3 m/s slower than the car ahead), hard braking limit, deceleration demand when a car
   ahead limits me.
@@ -126,8 +140,8 @@ gap to the player — pace is car capability × how much of it the driver dares 
 | `side_by_side_s` | 0.5 → 3.0 s into a braking zone | aggression |
 | `defends` | aggression ≥ 0.3 | aggression |
 | `overtake_patience_s` | 2.5 → 0.6 s | aggression |
-| `plan_ahead_m` (traffic planned round, not braked for) | 35 → 140 m | aggression |
-| `plan_horizon_s` (prediction horizon) | 1.2 → 4.0 s | aggression |
+| `plan_ahead_m` (how far it sees and plans round traffic instead of braking) | 150 → 400 m | aggression |
+| `plan_horizon_s` (longest prediction; uses `plan_ahead_m / v`, ≥ 3 s, up to this) | 6 → 15 s | aggression |
 | `plan_step_m` (lateral search resolution) | 0.9 → 0.25 m | aggression |
 | `evade_rate_mps` (lateral speed of the move, ≤ 0.3·v) | 1.3 → 2.6 m/s | aggression |
 | `oncoming_buffer_s` (extra clear time to oncoming cars) | 2.5 → 1.0 s | aggression |
@@ -204,13 +218,16 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
   zero AI contacts.
 - Ignored sweep `sweep_open_roads_progress` (8 seeds): reading signals raised total open-road
   progress from 15.9 km to 18.0 km (+13 %), no civilian contact, no AI collision.
-  Route planning round traffic (Evade): 15.1 → 17.0 km (+12.5 %, same machine, 2026-10-21),
-  no civilian contact; seed 7 now has two low-speed racer–racer nudges in a junction queue
-  (both cars in `Follow`, the follower cutting the inside at 1–3 m/s — the known jam nudge,
-  surfaced by the changed traffic timing).
-- Evasion unit tests: an aggressive driver steers round slow traffic without braking while a
-  timid one brakes; three cars abreast → brake; the opposing lane is used only when an
+  Route planning round traffic, planning as far as it sees (2026-10-23): 15.1 → 16.2 km
+  (+7 %, same machine), no civilian contact, no AI collision on any seed. (The first, 140 m
+  version reached 17.0 km but had two low-speed racer nudges on seed 7.)
+- Evasion unit tests: an aggressive driver steers round slow traffic without braking; it plans
+  round a stopped car 230 m ahead while still on its line (move comes later), a timid driver
+  doesn't see it yet; three cars abreast → brake; the opposing lane is used only when an
   oncoming car leaves room.
+- `wanted_ai_racer_flees_police_through_the_city`: racers that plan round traffic reach more
+  lights and speed more, so the sim's own police can make another racer wanted. That racer may
+  flee too, but only with its own `Abandoned` event at its flee level.
 
 Debugging: `WP_TRACE=<grid index>` prints that racer 4× per second (position, speed, speed
 target, what limits it, tactic, lateral position / command, gap ahead).
@@ -224,15 +241,17 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
 |---|---|---|
 | `Field::tick`, 8 racers, closed roads | 0.014 ms per 60 Hz frame (0.002 ms/racer) | — (police: 0.5 ms) |
 | same, open roads with 25 % traffic | 0.11 ms per frame | — |
-| `--example race -- 1 8 25 0 7` (8 racers, 25 % traffic, open roads) | 0.32 ms per frame with route planning (0.29 ms without, same run) | — |
+| `--example race -- 1 8 25 0 7` (8 racers, 25 % traffic, open roads) | 0.49 ms per frame (0.06 ms/racer) planning out to 150–400 m; 0.29 ms with no route planning, same run | — (police: 0.5 ms) |
 | `CarCapability::measure` | ~0.3 s per car (cache it) | load time |
 | Whole sim, 8 cars + city + AI | 0.09 ms per physics tick | — |
 
 ## Known gaps
-- Route planning predicts constant velocities: a car that brakes or turns inside the horizon
-  is caught by the re-plan and, failing that, by the last-resort stop. It plans one lateral
-  offset at a time (no weaving between two cars in one plan), and doesn't plan round racers
-  (overtake rules apply to them).
+- Route planning predicts constant velocities over up to 15 s: a car that brakes or turns
+  inside the horizon is caught by the re-plan (60 Hz) and, failing that, by the last-resort
+  stop. Each plan is one lateral offset for one group of cars (it weaves through a sequence by
+  re-planning, not in one plan), and doesn't plan round racers (overtake rules apply to them).
+- "Sight" is distance along the road within `plan_ahead_m`: there is no occlusion model, so
+  buildings, crests and corners don't block it.
 - **Same-car passes need the slipstream hook in `wp_sim`** (`Sim::set_drag_scale`, one line;
   patch in `docs/integration/opponent.md`). Until it lands `RaceConfig::draft` must stay off and
   near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car
