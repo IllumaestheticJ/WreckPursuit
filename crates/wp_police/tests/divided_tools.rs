@@ -123,7 +123,12 @@ fn spikes_stay_on_the_racers_carriageway(name: &str, world: &World) -> usize {
                     })
                     .is_ok()
             {
-                placed = police.spike_strips().last().cloned();
+                // Row 165: on its way until its car stands at the post.
+                placed = police
+                    .spike_strips_pending()
+                    .last()
+                    .map(|s| (*s).clone())
+                    .or_else(|| police.spike_strips().last().cloned());
             }
             police.set_heat(RACER, HEAT);
             if block.is_none()

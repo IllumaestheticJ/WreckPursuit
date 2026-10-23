@@ -194,23 +194,24 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         assert!(matches!(r, Err(CaptainError::Site(_))), "{r:?}");
     }
     assert!(r.is_ok(), "{r:?}");
-    let strip = h.police.spike_strips()[0].clone();
-    assert!(strip.site.sight_m >= 120.0);
-    // PR #54 port: the strip is down at once; its car is decided on the next think, beside
-    // it when the spot is hidden, else none (unmanned strip; no police car appears in view).
-    assert_eq!(strip.unit, None);
-    assert_eq!(h.police.tool_cars_waiting(strip.id).len(), 1);
-    h.run(0.5, &[]);
-    assert!(h.police.tool_cars_waiting(strip.id).is_empty());
-    if let Some(s) = h.police.spike_strips().iter().find(|s| s.id == strip.id) {
-        if s.unit.is_some() {
+    // Row 165: nothing on the road yet; the strip waits for its car (spike run).
+    assert!(h.police.spike_strips().is_empty());
+    let pending = h.police.spike_strips_pending()[0].clone();
+    assert!(pending.site.sight_m >= 120.0);
+    assert_eq!(h.police.tool_cars_waiting(pending.id).len(), 1);
+    // It goes down only with its car beside it: the car appears at a hidden post or drives in.
+    let mut strip = None;
+    for _ in 0..200 {
+        h.run(0.05, &[]);
+        for s in h.police.spike_strips() {
             spike_unit(&h, s);
-        } else {
-            assert!(h.police.units().iter().all(
-                |u| !matches!(u.assignment, Assignment::SpikeAt { tool, .. } if tool == strip.id)
-            ));
+        }
+        if let Some(s) = h.police.spike_strips().iter().find(|s| s.id == pending.id) {
+            strip = Some(s.clone());
+            break;
         }
     }
+    let strip = strip.expect("requested strip never laid with its car");
     // Sites remember D's road id; a captain can name roads by it.
     assert!(h.police.graph().segment(strip.site.segment).edge.is_some());
     let err = h
@@ -1779,4 +1780,45 @@ fn unbodied_spike_unit_is_withdrawn_with_its_strip() {
     if let Some(other) = other {
         assert!(!h.police.withdraw_unbodied_spike_unit(other));
     }
+}
+
+/// Row 165 measurement: a racer driving its road (the harness's straight-most path) at chase
+/// speed with the AI captain on it. Its strips are laid only with their car beside it (here
+/// every spike car's post is in view, so each drives in from out of sight); across seeds,
+/// count how often a strip ends up in front of the racer and hits it within 40 s.
+#[test]
+fn ai_spikes_hit_a_racer_that_keeps_its_road() {
+    let mut hits = 0;
+    for seed in 1..=12u64 {
+        let mut h = Harness::new(12.0, 100 + seed);
+        h.speed = 30.0;
+        h.run(1.0, &[]);
+        h.police.begin_pursuit(RACER);
+        let mut hit = false;
+        for _ in 0..160 {
+            h.police.set_heat(RACER, 75.0);
+            h.run(0.25, &[]);
+            for s in h.police.spike_strips() {
+                spike_unit(&h, s);
+            }
+            if h.events
+                .iter()
+                .any(|e| matches!(e, PoliceEvent::SpikeHit { vehicle, .. } if *vehicle == RACER))
+            {
+                hit = true;
+                break;
+            }
+        }
+        hits += hit as u32;
+        let st = h.police.stats();
+        eprintln!(
+            "seed {seed}: hit {hit}; strips requested {}, drive-ins {}, given up {}",
+            st.spikes, st.spike_drive_ins, st.spikes_given_up
+        );
+    }
+    eprintln!("racer keeping its road: {hits} / 12 hit");
+    assert!(
+        hits >= 6,
+        "only {hits} / 12 seeds hit a racer keeping its road"
+    );
 }

@@ -301,6 +301,13 @@ pub struct PoliceStats {
     pub spikes: u32,
     /// Spike hits.
     pub spike_hits: u32,
+    /// Spike strips requested but given up without a strip (row 165: no car could be beside it
+    /// in time without appearing in a racer's view, or the pursuit ended).
+    #[serde(default)]
+    pub spikes_given_up: u32,
+    /// Spike cars that appeared out of view and drove in to their post (row 165).
+    #[serde(default)]
+    pub spike_drive_ins: u32,
     /// PIT attempts.
     pub pit_attempts: u32,
     /// Helicopter launches.
@@ -500,6 +507,14 @@ pub struct PoliceSystem {
     pub(crate) spikes: Vec<SpikeStrip>,
     /// Tool cars waiting for their spot to leave every racer's view (row 131).
     pub(crate) tool_cars: Vec<dispatch::PendingToolCar>,
+    /// Spike strips on their way: each laid only together with its car (row 165).
+    pub(crate) spike_runs: Vec<dispatch::SpikeRun>,
+    /// Spike strips decided this step, for the radio's "spikes N metres ahead" line (said at
+    /// the decision; the strip itself is laid when its car stands at its post, row 165).
+    pub(crate) spikes_decided: Vec<(ToolId, EntityId)>,
+    /// Spike strips already announced at their decision (their later `SpikesPlaced` is not
+    /// announced again).
+    pub(crate) spikes_announced: BTreeSet<ToolId>,
     /// Indices into `stats.spawns` still watched for being seen soon after (pop-in audit).
     pub(crate) spawn_watch: Vec<usize>,
     /// Elevated road decks (race stakeouts park on the deck, not under it).
@@ -678,6 +693,9 @@ impl PoliceSystem {
             helo_sight: BTreeMap::new(),
             roadblocks: Vec::new(),
             tool_cars: Vec::new(),
+            spike_runs: Vec::new(),
+            spikes_decided: Vec::new(),
+            spikes_announced: BTreeSet::new(),
             spawn_watch: Vec::new(),
             decks: Vec::new(),
             spikes: Vec::new(),
@@ -731,6 +749,8 @@ impl PoliceSystem {
         self.process_events(world, events);
         self.rebuild_obstacles();
         self.drive_units(world, dt);
+        // Row 165: every tick, not only at think rate: no strip outlives its unit's leash.
+        self.lift_unmanned_spikes();
         self.think_accum += dt;
         let thought = self.think_accum >= 1.0 / self.cfg.pursuit.think_hz;
         if thought {
@@ -1120,16 +1140,28 @@ impl PoliceSystem {
         self.decks = decks;
     }
 
-    /// Spots `(position, heading)` of tool `tool`'s cars not spawned yet. Roadblock cars wait
-    /// while their spot is in a racer's view (row 131) and appear once it is hidden; a spike
-    /// car is decided on the next think (hidden: it appears, in view: dropped, the strip stays
-    /// unmanned; PR #54 port).
+    /// Spots `(position, heading)` of tool `tool`'s cars not parked yet: roadblock cars waiting
+    /// while their spot is in a racer's view (row 131), each appearing once it is hidden, and a
+    /// spike strip's car post while the strip is on its way (row 165: laid only when its car
+    /// stands there).
     pub fn tool_cars_waiting(&self, tool: ToolId) -> Vec<([f32; 2], [f32; 2])> {
         self.tool_cars
             .iter()
             .filter(|c| c.tool == tool)
             .map(|c| (c.pos, c.heading))
+            .chain(
+                self.spike_runs
+                    .iter()
+                    .filter(|r| r.strip.id == tool)
+                    .map(|r| (r.post, r.heading)),
+            )
             .collect()
+    }
+
+    /// Spike strips requested but not on the road yet: each waits for its car, which appears
+    /// at its post out of view or drives in to it, and is laid only then (row 165).
+    pub fn spike_strips_pending(&self) -> Vec<&SpikeStrip> {
+        self.spike_runs.iter().map(|r| &r.strip).collect()
     }
 
     /// Spike strips in place (line colliders).
