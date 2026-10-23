@@ -8,7 +8,7 @@
 //!
 //! Each car has its own body kit and its own night identifier (tail-lamp pattern):
 //! - Halberd: one hair-thin full-width LED line over an exposed black rear mesh.
-//! - Ombra: a Y-shaped lamp at each corner in an angular black housing.
+//! - Ombra: a sideways-Y lamp at each corner in an angular black housing.
 //! - Ostwind: a full-width red bar through a black band, four square brake dots per side.
 //! - Kagero: a thin full-width bar whose ends fold down into a Z at each corner.
 
@@ -543,7 +543,7 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
     let fb = BodyRegion::FrontBumper;
     let hood = BodyRegion::Hood;
 
-    // --- Angular lamps on the nose top with a Y-shaped DRL.
+    // --- Angular lamps on the nose top with a two-stroke chevron DRL.
     for sx in SIDES {
         let (y0, y1) = (yn - 0.30, yn - 0.05);
         let (xi, xo) = (0.52, wn - 0.06);
@@ -576,7 +576,6 @@ fn ombra_kit(ctx: &DetailCtx, _key: &PartKey, b: &mut Builder) {
         );
         let j = [sx * (xi + 0.20), 0.5 * (y0 + y1)];
         top_stroke(&mut k, &kd, [sx * xi, j[1] - 0.02], j, 0.018, 0.016);
-        top_stroke(&mut k, &kd, j, [sx * (xo - 0.02), y1 - 0.01], 0.018, 0.016);
         top_stroke(&mut k, &kd, j, [sx * (xo - 0.04), y0 + 0.01], 0.018, 0.016);
     }
     // --- Huge trapezoid intakes with a diamond ("hex") mesh, narrow centre slot, splitter.

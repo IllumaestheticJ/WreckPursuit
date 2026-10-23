@@ -785,7 +785,7 @@ pub fn table(id: &str) -> Option<CarSpec> {
                 Mount::Mid,
                 Susp::Coilover,
                 Susp::Coilover,
-                exhaust(Tips::HighCentre, 0.045, 0.034, true),
+                exhaust(Tips::QuadHigh, 0.05, 0.036, true),
             )
         },
         "ombra_v12" => CarSpec {
