@@ -67,6 +67,48 @@
       body.wp-dev-folded #controls > :not(.dev-head) { display: none !important; }
       body.wp-dev-folded #controls .dev-head { margin-bottom: -6px; border-bottom: 0; }
       #layer-row label { white-space: nowrap; }
+      #pin-row label { white-space: nowrap; }
+      /* RPM arc + shift light (F46, src/ui/rpm_gauge.ts): the player cluster; debug keeps the bar. */
+      .hud-gauge { display: none; }
+      html:not(.wp-touch) body.wp-player .hud-gauge { display: block; width: 220px; height: 54px; margin: 6px auto 0; }
+      html:not(.wp-touch) body.wp-player .hud-main .hud-rpm { display: none; }
+      /* Pinned debug readouts (F48): only with the debug tools off, left of the ⚙ corner. */
+      #dbg-pins { position: absolute; top: 8px; right: 44px; z-index: 6; font: 11px/1.35 ui-monospace, monospace; color: #9fd; pointer-events: none; padding: 3px 6px; }
+      body:not(.wp-player) #dbg-pins { display: none; }
+      /* HUD presets (F47, src/ui/hud_prefs.ts): player mode only; prompts never hide. */
+      body.wp-player.wp-hud-minimal .wp-minimap, body.wp-player.wp-hud-minimal #ui-chase, body.wp-player.wp-hud-minimal #radio-strip,
+      body.wp-player.wp-hud-minimal #weather-hud, body.wp-player.wp-hud-minimal .hud-car, body.wp-player.wp-hud-minimal #crash-toast,
+      body.wp-player.wp-hud-off .left-col, body.wp-player.wp-hud-off .right-col, body.wp-player.wp-hud-off .wp-minimap,
+      body.wp-player.wp-hud-off #ui-chase, body.wp-player.wp-hud-off #radio-strip, body.wp-player.wp-hud-off #weather-hud,
+      body.wp-player.wp-hud-off #crash-toast, body.wp-player.wp-hud-off #pursuit-banner, body.wp-player.wp-hud-off .wp-race-hud,
+      body.wp-player.wp-hud-off #street-hud, body.wp-player.wp-hud-off #dbg-pins { display: none !important; }
+      /* Condensed pursuit banner (F44): after 3 s a chip right of the chase readout. */
+      #pursuit-banner.chip { top: 14px; left: calc(50% + 124px); transform: none; text-align: left; padding: 4px 10px; border-radius: 6px; background: rgba(8, 12, 18, 0.72); }
+      #pursuit-banner.chip b { font-size: 15px; letter-spacing: 0.1em; }
+      #pursuit-banner.chip span { margin-top: 1px; font-size: 11px; }
+      /* Crash report toast (F2, src/ui/crash_toast.ts). */
+      #crash-toast { position: absolute; right: 16px; top: 30%; width: 260px; z-index: 8; padding: 8px 12px; border-radius: 8px; border-left: 4px solid #ff9a2e; background: rgba(8, 12, 18, 0.82); color: #eef2f6; font: 13px/1.4 system-ui, sans-serif; pointer-events: none; }
+      #crash-toast b { display: block; font: 800 15px/1.2 system-ui, sans-serif; letter-spacing: 0.08em; color: #ff9a2e; }
+      #crash-toast[data-kind="total"] { border-left-color: #ff3b30; }
+      #crash-toast[data-kind="total"] b { color: #ff3b30; }
+      body:not(.wp-player) #crash-toast { right: 400px; }
+      /* Loading screen (F5, src/ui/loading.ts). */
+      #wp-loading { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 40%, #1a2230, #07090d 70%); }
+      #wp-loading .wp-loading-card { width: min(520px, calc(100vw - 32px)); color: #eef2f6; font: 14px/1.45 system-ui, sans-serif; }
+      #wp-loading h2 { margin: 0 0 10px; font: 800 26px/1.1 system-ui, sans-serif; letter-spacing: 0.04em; }
+      #wp-loading .wp-loading-stage { color: #9aa4b2; margin-bottom: 8px; }
+      #wp-loading .wp-loading-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+      #wp-loading .wp-loading-bar i { display: block; height: 100%; width: 0; background: #2ee59d; transition: width 0.25s; }
+      #wp-loading .wp-loading-tip { margin-top: 18px; color: #cfd6df; }
+      @media (prefers-reduced-motion: reduce) { #wp-loading .wp-loading-bar i { transition: none; } }
+      /* First-run onboarding card (F5, src/ui/onboarding.ts). */
+      #wp-onboarding { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); pointer-events: auto; }
+      #wp-onboarding .wp-onboarding-card { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 18px 22px; border-radius: 10px; background: #0f141b; border: 1px solid #2a3442; color: #eef2f6; font: 14px/1.45 system-ui, sans-serif; }
+      #wp-onboarding h2 { margin: 2px 0 10px; font: 800 24px/1.1 system-ui, sans-serif; }
+      #wp-onboarding .wp-onboarding-kicker { color: #2ee59d; font-size: 11px; letter-spacing: 0.14em; }
+      #wp-onboarding dl { display: grid; grid-template-columns: 70px 1fr; gap: 8px 12px; margin: 0 0 14px; }
+      #wp-onboarding dt { font-weight: 700; color: #ffd23f; }
+      #wp-onboarding dd { margin: 0; }
       #pursuit-banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
       #pursuit-banner b { display: block; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
       #pursuit-banner span { display: block; margin-top: 4px; font-size: 13px; color: #ddd; }

@@ -23,6 +23,8 @@ import type { Radar } from "./map";
 const END_BANNER_MS = 2500;
 /** Then the end-of-run card alone this long before the repair bill opens, ms. */
 const END_CARD_MS = 1500;
+/** An ongoing pursuit / search banner shrinks to a corner chip after this long, ms (F44). */
+const BANNER_CHIP_MS = 3000;
 
 export class UiOverlay {
   readonly model: LiveModel;
@@ -54,6 +56,9 @@ export class UiOverlay {
   private endSeq: { start: number; card: boolean; cardAt: number | null } | null = null;
   /** The end-of-run card is up (the outcome banner stays hidden meanwhile). */
   private cardOpen = false;
+  /** Banner kind showing ("" none) and since when (performance.now ms), for the chip (F44). */
+  private bannerKind = "";
+  private bannerSince = 0;
 
   constructor(parent: HTMLElement) {
     this.model = createLiveModel({
@@ -94,7 +99,16 @@ export class UiOverlay {
     const now = performance.now();
     const cardShown = this.sequence(now);
     // The banner steps aside for the end-of-run card and the bill (it covered the bill's header).
-    this.showBanner(chase && !cardShown && !this.billOpen ? bannerFor(status) : null);
+    const banner = chase && !cardShown && !this.billOpen ? bannerFor(status) : null;
+    this.showBanner(banner);
+    // F44: an ongoing PURSUIT / SEARCHING banner condenses to a chip after 3 s (outcomes stay big).
+    const kind = banner?.kind ?? "";
+    if (kind !== this.bannerKind) {
+      this.bannerKind = kind;
+      this.bannerSince = now;
+    }
+    const chip = (kind === "pursuit" || kind === "searching") && now - this.bannerSince > BANNER_CHIP_MS;
+    if (this.bannerEl.classList.contains("chip") !== chip) this.bannerEl.classList.toggle("chip", chip);
     // A capture or a wreck ends the run: show what the damage costs. (An escape does not: the
     // player is still driving.)
     const fresh = status?.last_outcome && status.outcome_age_s !== null && status.outcome_age_s < 1 ? status.last_outcome : null;

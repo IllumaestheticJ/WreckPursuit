@@ -7,6 +7,8 @@ import { layers, LAYERS } from "./settings";
 import { CAMERA_HELP } from "./cameras";
 import { heat, healthColour } from "./vehicle_view";
 import { RTF_WARN } from "./rtf";
+import { pins, type PinId } from "./ui/hud_prefs";
+import { drawRpmGauge, shiftLight } from "./ui/rpm_gauge";
 
 /** HUD tag for a TCS / ABS level: "TCS" at Full, "TCS HALF", "TCS OFF". */
 export function levelTag(name: string, level: string): string {
@@ -117,6 +119,10 @@ export class Hud {
   private readonly silhouette: HTMLCanvasElement;
   /** Small damage silhouette in the player cluster. */
   private readonly miniSil: HTMLCanvasElement;
+  /** Player cluster rpm arc + shift light (F46). */
+  private readonly gauge: HTMLCanvasElement;
+  /** Pinned debug readout lines shown with the debug tools off (F48). */
+  private readonly pinned: HTMLElement;
   /** Last mode + assist summary shown (a change pops the toast); "" before the first frame. */
   private lastSetup = "";
   private toastUntil = 0;
@@ -127,6 +133,11 @@ export class Hud {
     const left = el("div", "left-col", root);
     this.main = el("div", "panel hud-main", left);
     this.speedEl = el("div", "speed", this.main);
+    this.gauge = document.createElement("canvas");
+    this.gauge.className = "hud-gauge";
+    this.gauge.width = 220;
+    this.gauge.height = 54;
+    this.main.appendChild(this.gauge);
     this.rpmEl = el("div", "hud-rpm", this.main);
     const car = el("div", "hud-car", this.main);
     this.miniSil = document.createElement("canvas");
@@ -149,6 +160,8 @@ export class Hud {
     this.feed = el("div", "panel feed", right);
     this.inputs = el("div", "panel inputs", left);
     this.help = el("div", "panel help hidden", root);
+    this.pinned = el("div", "panel", root);
+    this.pinned.id = "dbg-pins";
     this.setControlsHelp([]);
   }
 
@@ -219,6 +232,9 @@ export class Hud {
     const mm = Math.floor((f.hours - hh) * 60);
     this.speedEl.innerHTML = `${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span>`;
     this.rpmEl.innerHTML = `<span class="hud-rpm-txt">rpm ${rpm.toFixed(0)}</span> ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}`;
+    const light = shiftLight(rpm, redline, f.assists?.auto_gears ?? false);
+    drawRpmGauge(this.gauge, rpm, redline, limit, light, performance.now());
+    this.main.dataset.shift = String(light);
     // Player car line: health and only the assists a player would want to know are reduced.
     const health = t ? Math.round(t[T.health] * 100) : null;
     const reduced = a ? [a.abs !== "Full" ? levelTag("ABS", a.abs) : "", a.tcs !== "Full" && a.tcs !== "Off" ? levelTag("TCS", a.tcs) : ""].filter(Boolean) : [];
@@ -253,6 +269,17 @@ export class Hud {
       (f.gfx ? `<div class="dim">gfx ${f.gfx}</div>` : "") +
       `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
       `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
+    // Pinned readouts (F48): shown by CSS only with the debug tools off.
+    const pinLine: Record<PinId, string> = {
+      perf: `${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · render ${f.renderMs.toFixed(2)} ms`,
+      rtf: `real time ${f.rtf.toFixed(2)}×`,
+      tick: `tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · hash ${f.hash}`,
+      gfx: `gfx ${f.gfx ?? "–"}`,
+      cam: `cam ${f.camera}`,
+    };
+    const lines = (Object.keys(pinLine) as PinId[]).filter((id) => pins.has(id)).map((id) => `<div data-pin="${id}">${pinLine[id]}</div>`);
+    this.pinned.innerHTML = lines.join("");
+    this.pinned.classList.toggle("hidden", lines.length === 0);
 
     this.drawSilhouette(f, this.silhouette, true);
     this.drawSilhouette(f, this.miniSil, false);

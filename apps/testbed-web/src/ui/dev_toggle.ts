@@ -22,6 +22,7 @@
 import { SETTINGS_KEY } from "../../../ui-kit/src/live";
 import { DEBUG_LAYERS, LAYERS, PLAYER_PINNED_LAYERS, layers, store } from "../settings";
 import { keyName } from "../bindings";
+import { mountPinRow } from "./hud_prefs";
 
 /** localStorage: the drawer is folded to its header. */
 const FOLD_KEY = "wp.testbed.devFolded.v1";
@@ -228,6 +229,8 @@ export class DevSwitch {
     const replayRow = rowOf("rec");
     if (replayRow) drawer.insertBefore(row, replayRow);
     else drawer.append(row);
+    // Pinned readouts (F48): lines that stay up with the debug tools off.
+    mountPinRow(drawer, replayRow ?? null);
     this.setFolded(store.get(FOLD_KEY) === "1");
   }
 

@@ -55,7 +55,7 @@ import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
 import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
-import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
+import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice, type PlayOptions } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { ModShop } from "./ui/modShop";
@@ -83,6 +83,11 @@ import { PhotoMode, PHOTO_HIDDEN_LAYERS } from "./photo";
 import { IndicatorStalk } from "./indicator_stalk";
 import { StreetUi } from "./ui/street";
 import { DevSwitch, resetStoredDeveloperOnce } from "./ui/dev_toggle";
+import { CITIES, careerSummary, cityLabel, sessionSteps } from "./ui/front_door";
+import { LoadingScreen } from "./ui/loading";
+import { Onboarding } from "./ui/onboarding";
+import { CrashToast, quoteFromSim } from "./ui/crash_toast";
+import { applyHudPreset } from "./ui/hud_prefs";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -1542,6 +1547,25 @@ async function main(): Promise<void> {
     },
   });
   const devDefault = devSwitch.defaultOn;
+  // Title front door (F5): loading screen for session starts, first-run onboarding card; crash
+  // report toast (F2). All in src/ui/*; main only wires them.
+  const loading = new LoadingScreen(document.body);
+  const onboarding = new Onboarding(
+    overlay,
+    {
+      keys: (a) => bindingText(getBindings(), a),
+      autoGears: () => !!gameSettings?.assists.autoGears,
+      setAutoGears: () => menu?.update({ assists: { ...menu.settings.assists, autoGears: true } }),
+      pause: (on) => {
+        app.paused = on;
+        setInputBlocked(on);
+      },
+    },
+    params,
+  );
+  const crashToast = new CrashToast(overlay, (e) => quoteFromSim(sim.repairQuote, e));
+  /** Start a session from the title behind the loading screen. */
+  const startLoading = (title: string, start: () => void) => void loading.run(title, sessionSteps(start, () => preloadCarMeshes(lod.models.cars)));
   // First run: seed the menu from what this browser already chose (assist boxes, audio panel, gfx).
   const seed = (): GameSettings => {
     const d = defaultGameSettings(devDefault);
@@ -1561,6 +1585,8 @@ async function main(): Promise<void> {
     setDeviceControls(next.controls);
     controls.refreshShaping();
     devSwitch.apply(next.developer);
+    applyHudPreset(next.hudPreset);
+    if (next.city && CITIES.some((c) => c.id === next.city) && (!prev || prev.city !== next.city)) citySel.value = next.city;
     // Graphics (an explicit ?gfx= wins on load).
     if (prev || !params.get("gfx")) scene.quality.setMode(next.gfx);
     const drawParam = Number(params.get("draw"));
@@ -1606,11 +1632,14 @@ async function main(): Promise<void> {
     countersteer: true,
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
     host: {
-      play: (choice: PlayChoice) => {
-        // Quick play runs outside the career; the career lives behind Garage.
-        if (choice === "chase") startNightRun();
-        else if (choice === "chaseRain") startNightRun(undefined, undefined, true);
-        else if (choice === "free") startFreeDrive(undefined, undefined, true);
+      play: (choice: PlayChoice, opts?: PlayOptions) => {
+        // Quick play runs outside the career; the career lives behind Garage. Free roam picks
+        // the city (title → Free roam) and starts behind the loading screen.
+        if (opts?.city) citySel.value = opts.city;
+        const where = cityLabel(citySel.value);
+        if (choice === "chase") startLoading(`Night run · ${where}`, () => startNightRun());
+        else if (choice === "chaseRain") startLoading(`Rainy night · ${where}`, () => startNightRun(undefined, undefined, true));
+        else if (choice === "free") startLoading(`Free drive · ${where}`, () => startFreeDrive(undefined, undefined, true));
         // Pickers and the garage return to the title when closed without starting anything.
         else if (choice === "races") raceView.openPicker(() => menu?.openMain());
         else if (choice === "touge") tougeView.openPicker(() => menu?.openMain());
@@ -1622,6 +1651,14 @@ async function main(): Promise<void> {
       restart: () => restartRun(),
       garage: () => openGarage(),
       careerRunActive: () => sim.careerRunActive(),
+      cities: () => CITIES,
+      career: () => {
+        try {
+          return careerSummary(sim.careerView());
+        } catch {
+          return null;
+        }
+      },
       // Title key hints from the live keyboard bindings (first key of each action).
       keyHints: () => {
         const b = getBindings();
@@ -1754,6 +1791,8 @@ async function main(): Promise<void> {
     touch?.setCovered(covered);
     // Player HUD hides under menus; the ⚙ button fades with the mouse (src/ui/dev_toggle.ts).
     devSwitch.frame(now, covered || !!tougeView.cards);
+    // First-run card (F5) once the player drives in player mode.
+    onboarding.frame(!devSwitch.on && !covered && !loading.active && !menu?.isOpen && !isReplay());
     // Player mode: one minimap in a picker race (the race panel's own).
     map.minimapHeld = !devSwitch.on && !!raceView.raceId;
     touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
@@ -1869,6 +1908,7 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade", map.radar());
+      crashToast.frame(events, app.player, wi[W.tick], now, gameSettings?.units);
       if (!audio.hearsRadio()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
@@ -2207,6 +2247,10 @@ async function main(): Promise<void> {
     layout,
     /** Debug tools switch (src/ui/dev_toggle.ts). */
     devSwitch,
+    /** Title loading screen, onboarding card, crash report toast (src/ui/*). */
+    loading,
+    onboarding,
+    crashToast,
     /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
     radioStrip,
     /** Honk-to-start spots view (src/race_spots.ts): `raceSpots.inside`, `raceSpots.group`. */
