@@ -375,7 +375,6 @@ const CANAL: [V2; 4] = [
     [-1240.0, -820.0],
 ];
 
-
 /// Road style.
 #[derive(Debug, Clone, Copy)]
 struct Style {
@@ -575,6 +574,9 @@ struct Draft {
     dips: bool,
     /// Internal height anchors `(s0, s1, z)` (grade separations).
     anchors: Vec<(f32, f32, f32)>,
+    /// Internal minimum heights `(s0, s1, z)` (bridges over water: the deck clears the banks
+    /// and the water, and may stand higher where the road's line wants it).
+    floors: Vec<(f32, f32, f32)>,
     /// Arc ranges that are bridge decks (no terrain carving).
     decks: Vec<(f32, f32)>,
     /// Covered stretches (tunnels) on this road.
@@ -943,6 +945,7 @@ impl Gen {
             name,
             dips: false,
             anchors: Vec::new(),
+            floors: Vec::new(),
             decks: Vec::new(),
             covers: Vec::new(),
             over: false,
@@ -1710,7 +1713,8 @@ fn max_vertical_curvature(speed: f32) -> f32 {
 }
 
 /// Profile `z(s)` on uniform samples `ds` apart: follows `desired`, holds `anchors`
-/// (sample ranges with fixed heights) and is never steeper than `grade`; then smoothed with
+/// (sample ranges with fixed heights), stays on or above `floors` (sample ranges with minimum
+/// heights) and is never steeper than `grade`; then smoothed with
 /// enough binomial passes that a full grade reversal (crest or sag) bends no tighter than
 /// `kmax` (1/m). During smoothing only the two end samples and the middle of each internal
 /// anchor (decks) stay pinned, so junction approaches round off gently instead of kinking.
@@ -1719,6 +1723,7 @@ fn profile(
     ds: f32,
     anchors: &[(usize, usize, f32)],
     internal: &[(usize, usize, f32)],
+    floors: &[(usize, usize, f32)],
     pins: (usize, usize),
     grade: f32,
     kmax: f32,
@@ -1746,6 +1751,18 @@ fn profile(
             };
             lo[i] = lo[i].max(z - g * d);
             hi[i] = hi[i].min(z + g * d);
+        }
+    }
+    for &(i0, i1, z) in floors {
+        for (i, l) in lo.iter_mut().enumerate() {
+            let d = if i < i0 {
+                (i0 - i) as f32
+            } else if i > i1 {
+                (i - i1) as f32
+            } else {
+                0.0
+            };
+            *l = l.max(z - g * d);
         }
     }
     let mut z: Vec<f32> = (0..n)
@@ -1791,12 +1808,27 @@ fn profile(
             *p = true;
         }
     }
+    // A floor that holds the profile up (a deck over water) stays pinned where it does, so
+    // the approaches round off outside the deck.
+    for &(i0, i1, f) in floors {
+        for i in i0..=i1.min(n - 1) {
+            if z[i] <= f + 0.01 {
+                pin[i] = true;
+            }
+        }
+    }
     for _ in 0..passes {
         let prev = z.clone();
         for i in 1..n - 1 {
             if !pin[i] {
                 z[i] = 0.25 * prev[i - 1] + 0.5 * prev[i] + 0.25 * prev[i + 1];
             }
+        }
+    }
+    // Safety: nothing inside a floor range ends up under it.
+    for &(i0, i1, f) in floors {
+        for v in z.iter_mut().take(i1.min(n - 1) + 1).skip(i0) {
+            *v = v.max(f);
         }
     }
     z
@@ -1868,6 +1900,20 @@ fn profile_roads(
                 g.nodes[d.b].z += step * 0.5;
                 moved = true;
             }
+            // Floors: lift an end node that could not climb onto one.
+            for &(s0, s1, z) in &d.floors {
+                for (n, room) in [
+                    (d.a, s0 - flat[d.a] - spread),
+                    (d.b, len - s1 - flat[d.b] - spread),
+                ] {
+                    let allow = d.st.grade * room.max(len * 0.05) * 0.85;
+                    let lack = z - allow - g.nodes[n].z;
+                    if lack > 0.01 {
+                        g.nodes[n].z += lack;
+                        moved = true;
+                    }
+                }
+            }
             // Anchors are fixed: pull the end nodes into reach of them.
             for &(s0, s1, z) in &d.anchors {
                 for (n, room) in [
@@ -1931,8 +1977,19 @@ fn profile_roads(
                 )
             })
             .collect();
+        let floors: Vec<(usize, usize, f32)> = d
+            .floors
+            .iter()
+            .map(|&(s0, s1, z)| {
+                (
+                    (s0 / dsr).floor().max(0.0) as usize,
+                    ((s1 / dsr).ceil() as usize).min(n - 1),
+                    z,
+                )
+            })
+            .collect();
         let short = fa + fb + 3 >= n;
-        let z = if short && d.anchors.is_empty() {
+        let z = if short && d.anchors.is_empty() && d.floors.is_empty() {
             (0..n)
                 .map(|i| za + (zb - za) * i as f32 / (n - 1) as f32)
                 .collect()
@@ -1942,6 +1999,7 @@ fn profile_roads(
                 dsr,
                 &anchors,
                 &internal,
+                &floors,
                 (pa, pb),
                 d.st.grade,
                 kmax,
@@ -1957,7 +2015,7 @@ fn profile_roads(
         // 3 + 3 arterials (Ashpeak City's grand avenues; Port Vesper has none) carry a bus
         // lane each way.
         r.bus_lane = d.st.class == RoadClass::Arterial && d.st.fwd >= 3 && d.st.bwd >= 3;
-        if linear_dev < 0.25 && d.anchors.is_empty() {
+        if linear_dev < 0.25 && d.anchors.is_empty() && d.floors.is_empty() {
             r.via = d.path[1..d.path.len() - 1].to_vec();
         } else {
             let step = if d.st.class == RoadClass::Highway {
@@ -2003,9 +2061,11 @@ fn profile_roads(
     out
 }
 
-/// Bridge every road over the river and the canal: the road is held at deck height across
-/// the channel (water + banks) and that stretch is a deck (not carved). Deck height: the
-/// banks' mean, but at least the clearance above the water.
+/// Bridge every road over the river and the canal: across the channel (water + banks) the
+/// road stays at or above deck height and that stretch is a deck (not carved). Deck height:
+/// just over the lower bank, but at least the clearance above the water. A floor, not a hold
+/// (PR #38 held it there): a road whose line passes higher keeps it, so Ridge Road and the
+/// Hollins Descent still climb onto Hollins Knob instead of cutting 26 m into it.
 fn plan_water_crossings(g: &mut Gen) {
     for di in 0..g.drafts.len() {
         let path = g.drafts[di].path.clone();
@@ -2035,7 +2095,7 @@ fn plan_water_crossings(g: &mut Gen) {
                 };
                 let deck = (za.min(zb) + 0.3).max(zw + clear);
                 let d = &mut g.drafts[di];
-                d.anchors.push((s0, s1, deck));
+                d.floors.push((s0, s1, deck));
                 d.decks.push((s0 - 3.0, s1 + 3.0));
             }
         }
@@ -2664,7 +2724,7 @@ fn profile_ramp(
     let fb = ((flat_term + spread) / dsr).ceil() as usize;
     let pb = (flat_term / dsr).ceil() as usize;
     let anchors = [(0, 0, z_gore), ((n - 1).saturating_sub(fb), n - 1, z_term)];
-    let mut z = profile(&desired, dsr, &anchors, &[], (1, pb), RAMP.grade, kmax);
+    let mut z = profile(&desired, dsr, &anchors, &[], &[], (1, pb), RAMP.grade, kmax);
     // Beside the carriageway the ramp shares its plane exactly (shoulder overlap).
     let same = k_par.saturating_sub(4) + 1;
     z[..same].copy_from_slice(&desired[..same]);
@@ -5017,7 +5077,7 @@ mod tests {
             .map(|i| if (40..60).contains(&i) { 30.0 } else { 0.0 })
             .collect();
         let anchors = [(0, 3, 0.0), (97, 100, 0.0)];
-        let z = profile(&desired, ds, &anchors, &[], (2, 2), 0.1, 0.02);
+        let z = profile(&desired, ds, &anchors, &[], &[], (2, 2), 0.1, 0.02);
         for w in z.windows(2) {
             assert!(((w[1] - w[0]) / ds).abs() <= 0.1 + 1e-4);
         }
