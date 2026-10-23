@@ -5,7 +5,7 @@
 (
     name: "parked_frontal_50_arcade",
     seed: 2110,
-    mode: Arcade,
+    mode: Simulation,
     assists: ai,
     parked: [(pos: (0.0, 30.0, 0.0), yaw: 0.0)],
     entities: [

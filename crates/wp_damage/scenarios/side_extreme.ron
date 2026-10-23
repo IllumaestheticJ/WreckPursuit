@@ -1,0 +1,23 @@
+// T-bone: a 1400 kg car strikes the left front door / B-pillar (floor-to-roof manifold, like
+// simcli's golden_tbone). Extreme (pre-v0.4.0 Simulation) calibration target (prompt 03): 40 km/h kills the
+// struck-side suspension and the door. The struck side takes the full closing-energy share
+// (DamageTuning::dynamic_closing_share_side) because a door is far softer than a nose.
+(
+    name: "side_extreme",
+    car: "debug_sedan",
+    mode: Extreme,
+    impact: Side,
+    other_mass_kg: 1400.0,
+    duration_s: 0.5,
+    seed: 1,
+    monotone: ["crush_m", "cabin_intrusion_m", "plastic_energy_kj", "damage"],
+    runs: [
+        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.0, max: 0.08)], intact: [SuspensionFL, SteeringRack], total_loss: Some(false)),
+        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.04, max: 0.18)], intact: [SuspensionFR], total_loss: Some(false)),
+        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.1, max: 0.3), (metric: "severity:LeftDoorF", min: 0.5, max: 1.0)],
+            failed: [SuspensionFL], intact: [SuspensionFR, SuspensionRR], total_loss: Some(false)),
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.18, max: 0.45), (metric: "severity:LeftDoorF", min: 0.9, max: 1.0)],
+            failed: [SuspensionFL], intact: [SuspensionFR]),
+        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.3, max: 0.7)], failed: [SuspensionFL], intact: [SuspensionFR], total_loss: Some(true)),
+    ],
+)

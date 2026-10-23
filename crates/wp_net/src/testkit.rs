@@ -296,8 +296,8 @@ pub const AI_POLICE_CAR: &str = "sentinel_cruiser";
 pub const TRAFFIC_CAR: &str = "debug_sedan";
 
 /// Load the cars and mode tables the net layer uses from a `data/` directory:
-/// `debug_sedan` (racers, traffic), `debug_coupe` (police seats), [`AI_POLICE_CAR`], `arcade`
-/// and `sim` modes.
+/// `debug_sedan` (racers, traffic), `debug_coupe` (police seats), [`AI_POLICE_CAR`], `arcade`,
+/// `sim` and `extreme` modes.
 pub fn load_data(data_dir: &std::path::Path) -> Result<GameData, wp_contracts::LoadError> {
     let mut cars = BTreeMap::new();
     for id in ["debug_sedan", "debug_coupe", AI_POLICE_CAR] {
@@ -305,7 +305,7 @@ pub fn load_data(data_dir: &std::path::Path) -> Result<GameData, wp_contracts::L
         cars.insert(id.to_string(), car);
     }
     let mut modes = BTreeMap::new();
-    for name in ["arcade", "sim"] {
+    for name in ["arcade", "sim", "extreme"] {
         let m = wp_contracts::load_mode_table(data_dir.join(format!("modes/{name}.toml")))?;
         modes.insert(m.mode, m);
     }

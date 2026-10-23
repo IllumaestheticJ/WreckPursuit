@@ -85,10 +85,10 @@ fn detail(car_id: &str, mode_name: &str, kind: &str, speed: f32) {
     let root = data_root();
     let car = wp_contracts::load_car(root.join("cars").join(format!("{car_id}.json")))
         .expect("car loads");
-    let file = if mode_name == "arcade" {
-        "arcade.toml"
-    } else {
-        "sim.toml"
+    let file = match mode_name {
+        "arcade" => "arcade.toml",
+        "extreme" => "extreme.toml",
+        _ => "sim.toml",
     };
     let mode = wp_contracts::load_mode_table(root.join("modes").join(file)).expect("mode loads");
     let (kind, other) = match kind {
@@ -160,7 +160,11 @@ fn sweep(car_id: &str, metrics: &[String]) {
     let root = data_root();
     let car = wp_contracts::load_car(root.join("cars").join(format!("{car_id}.json")))
         .expect("car loads");
-    for (mode_name, file) in [("sim", "sim.toml"), ("arcade", "arcade.toml")] {
+    for (mode_name, file) in [
+        ("extreme", "extreme.toml"),
+        ("sim", "sim.toml"),
+        ("arcade", "arcade.toml"),
+    ] {
         let mode =
             wp_contracts::load_mode_table(root.join("modes").join(file)).expect("mode loads");
         for (kind, other) in [

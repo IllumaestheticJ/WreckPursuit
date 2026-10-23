@@ -691,6 +691,7 @@ pub fn mode_str(mode: DamageMode) -> &'static str {
     match mode {
         DamageMode::Arcade => "arcade",
         DamageMode::Simulation => "simulation",
+        DamageMode::Extreme => "extreme",
     }
 }
 
@@ -699,6 +700,7 @@ pub fn parse_mode(s: &str) -> Option<DamageMode> {
     match s {
         "arcade" => Some(DamageMode::Arcade),
         "simulation" => Some(DamageMode::Simulation),
+        "extreme" => Some(DamageMode::Extreme),
         _ => None,
     }
 }

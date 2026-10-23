@@ -36,8 +36,8 @@ fn city(c: &mut Criterion) {
 
 fn lattice(c: &mut Criterion) {
     let car = wp_bench::car("debug_sedan");
-    let mode =
-        wp_contracts::load_mode_table(wp_bench::data_root().join("modes/sim.toml")).expect("mode");
+    let mode = wp_contracts::load_mode_table(wp_bench::data_root().join("modes/extreme.toml"))
+        .expect("mode");
     let mut dm = wp_damage::DamageModel::new(&car.lattice, &car.materials);
     let contacts = wp_bench::frontal_contacts(8);
     let mut out = Vec::new();

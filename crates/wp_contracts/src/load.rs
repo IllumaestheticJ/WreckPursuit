@@ -564,6 +564,7 @@ pub fn validate_mode_table(t: &ModeTable) -> Result<(), LoadError> {
         ),
         ("repair_cost_scale", t.repair_cost_scale),
         ("wheel_detach_scale", t.wheel_detach_scale),
+        ("racer_damage_scale", t.racer_damage_scale),
     ] {
         check_positive(w, field, v)?;
     }

@@ -75,6 +75,8 @@ export const INPUT_FLAG = {
 
 /** world_info() offsets. */
 export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5, city: 6, scripted: 7 } as const;
+/** world_info()[W.mode] value (0 / 1 / 2) to the damage mode name. */
+export const MODE_NAMES = ["Arcade", "Simulation", "Extreme"] as const;
 
 /** Floats per head in signal_heads() (crates/wp_wasm/src/signals.rs). */
 export const SIGNAL_HEAD_STRIDE = 10;

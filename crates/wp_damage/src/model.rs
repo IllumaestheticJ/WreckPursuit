@@ -12,15 +12,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use wp_contracts::{
-    BodyRegion, Component, ContactImpulse, DamageMode, DamageSim, DamageSnapshot, DamageSummary,
-    EntityId, HandlingEffects, LatticeDef, MaterialDef, MaterialKind, ModeTable, PriceTable,
-    RepairEstimate, RepairItem, SimEvent,
+    BodyRegion, Component, ContactImpulse, DamageSim, DamageSnapshot, DamageSummary, EntityId,
+    HandlingEffects, LatticeDef, MaterialDef, MaterialKind, ModeTable, PriceTable, RepairEstimate,
+    RepairItem, SimEvent,
 };
 use wp_math::{Rng, StateHasher};
 
 use crate::contact::Impactor;
 use crate::debris::{DetachedKind, DetachedPart};
-use crate::tuning::DamageTuning;
+use crate::tuning::{forgiving_rules, DamageTuning};
 use crate::vec3::{self, V3};
 
 /// Number of [`BodyRegion`] variants (regions index arrays via `region as usize`).
@@ -1324,9 +1324,9 @@ impl DamageModel {
         }
     }
 
-    /// Arcade limp-mode settle fraction now (0 in Simulation and during a crash episode).
+    /// Limp-mode settle fraction now (0 in Extreme and during a crash episode).
     fn settle_fraction(&self, mode: &ModeTable) -> f32 {
-        if mode.mode != DamageMode::Arcade || self.episode_active {
+        if !forgiving_rules(mode.mode) || self.episode_active {
             return 0.0;
         }
         let t = self.tuning.arcade_settle_s.max(1e-3);
@@ -1336,9 +1336,10 @@ impl DamageModel {
 
     /// Mechanical threshold of `mode` (closing speed, m/s): 0 = every hit is mechanical.
     pub(crate) fn mechanical_min_closing(&self, mode: &ModeTable) -> f32 {
-        match mode.mode {
-            DamageMode::Arcade => self.tuning.arcade_mechanical_min_closing_mps,
-            DamageMode::Simulation => 0.0,
+        if forgiving_rules(mode.mode) {
+            self.tuning.arcade_mechanical_min_closing_mps
+        } else {
+            0.0
         }
     }
 
@@ -1407,7 +1408,7 @@ impl DamageModel {
     pub(crate) fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
         let raw = self.raw_health(
             mode.global_health_from_intrusion,
-            mode.mode == DamageMode::Arcade,
+            forgiving_rules(mode.mode),
         );
         if raw < self.health {
             self.health = raw.max(0.0);
@@ -1428,7 +1429,7 @@ impl DamageModel {
         let mut e = HandlingEffects::NEUTRAL;
         let mut power = 1.0f32;
         let settle = self.settle_fraction(mode);
-        let arcade = mode.mode == DamageMode::Arcade;
+        let arcade = forgiving_rules(mode.mode);
         let align = if arcade {
             self.tuning.arcade_alignment_scale
         } else {

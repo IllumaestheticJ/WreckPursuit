@@ -232,8 +232,8 @@ function AssistBadges({ hud }: { hud: HudState }) {
           {k}
         </Badge>
       ))}
-      <Badge tone={hud.damageMode === "Simulation" ? "danger" : "warn"} title="Damage mode">
-        {hud.damageMode === "Simulation" ? "SIM DMG" : "ARCADE DMG"}
+      <Badge tone={hud.damageMode === "Arcade" ? "warn" : "danger"} title="Damage mode">
+        {{ Arcade: "ARCADE DMG", Simulation: "SIM DMG", Extreme: "EXTREME DMG" }[hud.damageMode]}
       </Badge>
     </div>
   );

@@ -409,7 +409,11 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
 #[test]
 fn recorded_total_loss_capture_by_mode() {
     let e = econ();
-    for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+    for mode in [
+        DamageMode::Arcade,
+        DamageMode::Simulation,
+        DamageMode::Extreme,
+    ] {
         let (mut a, car) = account_with_sedan(&e, 5_000);
         let mut s = session_for(mode, &a, car);
         replay(&mut s, &fixture("capture_total_loss"));
@@ -427,7 +431,7 @@ fn recorded_total_loss_capture_by_mode() {
                 e.retrieve_from_impound(&mut a, car).unwrap();
                 assert!(!a.car(car).unwrap().is_usable());
             }
-            DamageMode::Simulation => {
+            DamageMode::Simulation | DamageMode::Extreme => {
                 assert_eq!(r.cars[0].status, CarStatus::Destroyed);
                 assert!(a.car(car).is_none());
                 assert!(r

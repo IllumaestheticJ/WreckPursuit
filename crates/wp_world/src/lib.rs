@@ -13,6 +13,8 @@
 //! - [`drive`]: the shared AI driving controller (pure pursuit + PID) used by physical
 //!   traffic, racers (`wp_opponent`) and police.
 //! - [`covered`]: tunnels and covered roads (line of sight in and out is blocked).
+//! - [`progression`]: career time budget — day free roam / night racing shifts, activity
+//!   time costs (garage, repairs), dusk/dawn transitions driving the [`clock`].
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -33,6 +35,7 @@ pub mod map;
 pub mod markings;
 pub mod network;
 pub mod procgen;
+pub mod progression;
 pub mod props;
 pub mod residential;
 pub mod roads;
@@ -56,6 +59,7 @@ use wp_math::StateHasher;
 pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
 pub use map::{CityMap, SegId};
 pub use network::{RoadError, RoadNetwork};
+pub use progression::{Activity, Shift, TimeEvent, TimeProgression, TimeRules};
 pub use props::{PropKind, StaticProp};
 pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};

@@ -235,6 +235,7 @@ impl Replay {
                     w.push(match m {
                         DamageMode::Arcade => 0,
                         DamageMode::Simulation => 1,
+                        DamageMode::Extreme => 2,
                     });
                 }
                 OpKind::Repair => w.push(3),
@@ -363,6 +364,7 @@ impl Replay {
                     2 => OpKind::Mode(match r.take(1)?[0] {
                         0 => DamageMode::Arcade,
                         1 => DamageMode::Simulation,
+                        2 => DamageMode::Extreme,
                         m => return Err(RunError::Replay(format!("bad mode {m}"))),
                     }),
                     3 => OpKind::Repair,

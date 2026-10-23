@@ -6,8 +6,18 @@ lattices), `data/materials/`, `data/modes/` and `crates/wp_damage/scenarios/`.
 Semi-soft-body damage: a rigid chassis (Rapier, owned by `wp_sim`) carries a deformable lattice
 of mass nodes and plastic beams. Real contact impulses crumple it permanently, tear parts off,
 fail mechanical components by intrusion and come out as `HandlingEffects`, so a damaged car
-drives damaged. One code path; Arcade and Simulation differ only by `ModeTable`
-(`data/modes/{arcade,sim}.toml`). Deterministic and bit-identical on native and WASM.
+drives damaged. One code path; Arcade, Simulation and Extreme differ only by `ModeTable`
+(`data/modes/{arcade,sim,extreme}.toml`). Deterministic and bit-identical on native and WASM.
+
+**Modes since contract v0.4.0 (owner request 2026-10-22).** Extreme is the calibrated reference
+(the old Simulation table). Simulation is the old Arcade table, including the forgiving
+`arcade_*` rules below ([`forgiving_rules`] is true for Arcade and Simulation). Arcade is the
+Simulation table plus `racer_damage_scale = 0.25`: [`scale_racer_contacts`] scales the contact
+impulses of racer cars (the player's racer, AI racers) to 25 %, which leaves about 20 % of the
+damage (health lost, plastic energy; `data/modes/arcade.toml` has the sweep), before
+`apply_contacts`, which
+`wp_sim` does per `VehicleKind`; traffic and police cars take full (Simulation) damage. The
+barrier harness treats its car as a racer.
 
 ```rust
 let mut dm = DamageModel::new(&car.lattice, &car.materials); // implements DamageSim
@@ -124,7 +134,11 @@ weigh 1.0, panels 0.6, bumpers 0.3, glass 0.1). `TotalLoss` when health <
 `total_loss_health` or cabin intrusion (worst non-pinned `Cabin` node) >
 `cabin_intrusion_total_loss_m`; with `engine_kill_on_total_loss` the engine dies.
 
-### Arcade cosmetic vs mechanical damage
+### Arcade / Simulation cosmetic vs mechanical damage
+
+The knobs are still named `arcade_*`; since v0.4.0 they apply to Arcade and Simulation, and what
+this section calls "Simulation" is now Extreme.
+
 A crash episode (wake → sleep) whose contacts all close below
 `DamageTuning::arcade_mechanical_min_closing_mps` (11.5 m/s) is cosmetic in Arcade: nodes dent
 as usual, but component health/failures and alignment are frozen during it and its deformation
@@ -143,8 +157,9 @@ dents alone: `arcade.toml` components × 0.24 damage, × 4.0 fail threshold, 0.7
 wheels × 0.42 (bills stay × 0.5, wp_economy balance). A 50 km/h wall hit is cosmetic or minor for every measured car, a
 70 km/h hit minor and drivable; the sports car is ended after ~4.5 hard (70–100 km/h) hits on
 average (round 12b: 2.7), the cruiser after ~8.7. Full tables: `docs/integration/damage.md`;
-measure with `cargo run --release -p simcli --example damage_toughness -- [chase] [arcade|sim]
-[car …]`.
+measure with `cargo run --release -p simcli --example damage_toughness -- [chase]
+[arcade|sim|extreme] [car …]` (round 12b/13 numbers above were measured as "arcade", which is
+`sim` now).
 
 Nodes of a panel that is no longer latched (workstream R) are ignored for component intrusion,
 alignment and "part detached → failed": the front fender carries the strut-top node, and a
