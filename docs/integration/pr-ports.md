@@ -92,7 +92,7 @@ architecture (the PR's files did not apply: round12's maps are canvas renderers 
     HUD alerts, chase HUD and scanner feed.
   - tests: ui-kit `chaseRadar` and reducer tests; `e2e/helicopter.mjs` air-unit check.
 
-## Gate (on the merged head; env CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0)
+## Gate (re-run after the lead follow-ups on round12 b0269195; env CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0)
 
 | Step | Result |
 |---|---|
@@ -102,8 +102,8 @@ architecture (the PR's files did not apply: round12's maps are canvas renderers 
 | `simcli goldens` (golden set) | pass after the `golden_spike_strip` bless (only golden that moved) |
 | `cargo build --target wasm32-unknown-unknown -p wp_wasm` | ok |
 | `npm run wasm && npx tsc --noEmit -p .` (testbed-web) | ok |
-| ui-kit `tsc --noEmit`, `vitest run` | tsc ok; 113 / 114 — `MockProvider.test.ts` "toy captain follows wp_police rules" fails the same on round12 without these ports (it expects spikes at L3; row 156 moved them to L4) |
-| e2e `helicopter.mjs` | pass (incl. the new air-unit check) |
+| ui-kit `tsc --noEmit`, `vitest run` | tsc ok; 114 / 114 (`MockProvider.test.ts` updated for spikes at L4) |
+| e2e `helicopter.mjs` | pass (air unit: minimap on → radar hidden + on-you note; minimap off → radar icon + tether) |
 | e2e `police_tools.mjs` | pass (golden_spike_strip live = simcli) |
 | e2e `radio.mjs` | pass |
 | e2e `audio.mjs`, `audio_mix.mjs`, `audio_engine.mjs`, `audio_roster.mjs`, `audio_samples.mjs` | pass |
