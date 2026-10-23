@@ -1148,6 +1148,40 @@ impl Career {
         Ok(())
     }
 
+    /// Take everything in the way of `slot` off car `uid` (DIY, free). Returns the uids of
+    /// the parts taken off, in removal order.
+    pub fn clear_way(&mut self, uid: CarUid, slot: &str) -> Result<Vec<u32>, String> {
+        self.guard()?;
+        self.change_mods(uid, |e, acct, _| e.clear_way(acct, uid, slot))
+    }
+
+    /// Pay the mechanic to fit a part in `slot` of car `uid` (see
+    /// [`Economy::mechanic_install`]). New parts restore their area of the stored lattice,
+    /// as [`Self::fit_part`] does.
+    pub fn mechanic_install(
+        &mut self,
+        uid: CarUid,
+        slot: &str,
+        source: &wp_economy::PartSource,
+        sell_old: bool,
+    ) -> Result<wp_economy::MechanicJob, String> {
+        self.guard()?;
+        let job = self.change_mods(uid, |e, acct, mode| {
+            e.mechanic_install(acct, uid, slot, source, sell_old, mode)
+        })?;
+        if job.restore.is_empty() || !self.profile.lattices.contains_key(&uid.0) {
+            return Ok(job);
+        }
+        let car = self.profile.account.try_car(uid).map_err(e2s)?.clone();
+        let loaded = self.loaded_car(&car)?;
+        let mut model = self.damage_model(&car)?;
+        model.apply_repair(&job.restore);
+        let wanted = car.damage.sustained_while_wanted;
+        let ev = self.store_damage(uid, &model, wanted, &loaded.lattice, &loaded.materials)?;
+        self.post(ev);
+        Ok(job)
+    }
+
     /// Buy a part of `kind` for car `uid` into the inventory (`grade` = a mod id, or `None`
     /// for the stock replacement). Returns the new parts' uids.
     pub fn buy_part(
@@ -1807,6 +1841,38 @@ pub fn career_fit_part(uid: u32, slot: &str, part: u32) -> Result<String, JsValu
     with_career(|c| {
         c.fit_part(CarUid(uid), slot, part)?;
         c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Take everything in the way of `slot` off car `uid`. Returns the workshop JSON.
+#[wasm_bindgen]
+pub fn career_clear_way(uid: u32, slot: &str) -> Result<String, JsValue> {
+    with_career(|c| {
+        c.clear_way(CarUid(uid), slot)?;
+        c.workshop(CarUid(uid)).map(|w| json(&w))
+    })
+}
+
+/// Pay the mechanic to fit a part in `slot` of car `uid`: inventory part `part` when it is
+/// not 0, otherwise one bought now (`grade` = mod id, `""` = stock). The old part is sold when
+/// `sell_old`, kept otherwise. Returns `{"job": MechanicJob, "workshop": WorkshopScreen}`.
+#[wasm_bindgen]
+pub fn career_mechanic_install(
+    uid: u32,
+    slot: &str,
+    part: u32,
+    grade: &str,
+    sell_old: bool,
+) -> Result<String, JsValue> {
+    with_career(|c| {
+        let source = if part != 0 {
+            wp_economy::PartSource::Inventory(part)
+        } else {
+            wp_economy::PartSource::Buy((!grade.is_empty()).then(|| grade.to_string()))
+        };
+        let job = c.mechanic_install(CarUid(uid), slot, &source, sell_old)?;
+        let workshop = c.workshop(CarUid(uid))?;
+        Ok(serde_json::json!({ "job": job, "workshop": workshop }).to_string())
     })
 }
 

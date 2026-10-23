@@ -92,7 +92,9 @@ parts, so the mod tree, preview and the sim need no change. Condition comes from
 snapshot. The engine is an **assembly**: 16 internals (`parent = "engine"`) come out with it,
 or one by one in order, or on the engine stand (`strip_part` / `build_part`) once it is out.
 Engine damage wears the internals by their `damage_share`; replacing the worn ones rebuilds the
-engine yourself (the shop rebuild resets all wear). Details and wasm exports:
+engine yourself (the shop rebuild resets all wear). `clear_way` takes off whatever is in the
+way of a slot in one go; `mechanic_install` pays the mechanic to swap a part (inventory or
+bought now) and put everything back, selling or keeping the old one. Details and wasm exports:
 `docs/integration/garage.md`.
 
 ```rust
@@ -100,6 +102,7 @@ let (part, _) = econ.remove_part(&mut acct, car, "front_bumper")?;
 let (new, ev) = econ.buy_part(&mut acct, car, "radiator", Some("cooling_radiator_1"), mode)?;
 let (fit, _) = econ.fit_part(&mut acct, car, "radiator", new[0], mode)?; // fit.restore → lattice
 let view = econ.workshop(&acct, car, mode)?;
+let (job, _) = econ.mechanic_install(&mut acct, car, "radiator", &PartSource::Buy(None), true, mode)?;
 ```
 
 ## Economy design

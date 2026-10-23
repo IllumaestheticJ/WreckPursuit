@@ -28,6 +28,10 @@
 #   torque_loss fraction of engine torque lost when the part is fully worn
 #   wear_limit  most wear the part can have for the assembly to count as rebuilt (default 0.05)
 #
+# [mechanic]  what the garage mechanic charges to install a part for you (wp_economy
+#             `Economy::mechanic_install`): call_out once per job, per_part for every part
+#             taken off and put back (the part itself and everything in its way).
+#
 # Mod lines that are not in any slot (paint, vinyls, tyre width, brake pads, gadgets...) stay plain
 # upgrades bought through the mod tree.
 
@@ -565,7 +569,6 @@ set = "wheels"
 repair = { Component = "WheelFL" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_fl"]
 
 [[slot]]
 id = "wheel_fr"
@@ -575,7 +578,6 @@ set = "wheels"
 repair = { Component = "WheelFR" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_fr"]
 
 [[slot]]
 id = "wheel_rl"
@@ -585,7 +587,6 @@ set = "wheels"
 repair = { Component = "WheelRL" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_rl"]
 
 [[slot]]
 id = "wheel_rr"
@@ -595,7 +596,6 @@ set = "wheels"
 repair = { Component = "WheelRR" }
 lines = ["rims"]
 required = true
-blocked_by = ["tyre_rr"]
 
 [[slot]]
 id = "brake_fl"
@@ -645,7 +645,7 @@ set = "suspension"
 repair = { Component = "SuspensionFL" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_fl"]
+blocked_by = ["wheel_fl"]
 
 [[slot]]
 id = "suspension_fr"
@@ -655,7 +655,7 @@ set = "suspension"
 repair = { Component = "SuspensionFR" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_fr"]
+blocked_by = ["wheel_fr"]
 
 [[slot]]
 id = "suspension_rl"
@@ -665,7 +665,7 @@ set = "suspension"
 repair = { Component = "SuspensionRL" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_rl"]
+blocked_by = ["wheel_rl"]
 
 [[slot]]
 id = "suspension_rr"
@@ -675,7 +675,7 @@ set = "suspension"
 repair = { Component = "SuspensionRR" }
 lines = ["springs"]
 required = true
-blocked_by = ["brake_rr"]
+blocked_by = ["wheel_rr"]
 
 [[slot]]
 id = "arb_front"
@@ -711,7 +711,6 @@ id = "push_bar"
 name = "Push bar"
 group = "Protection"
 lines = ["push_bar"]
-blocked_by = ["front_splitter"]
 optional = true
 
 [[slot]]
@@ -736,3 +735,7 @@ name = "Nitrous kit"
 group = "Electronics"
 lines = ["nitrous"]
 optional = true
+
+[mechanic]
+call_out = 60
+per_part = 30

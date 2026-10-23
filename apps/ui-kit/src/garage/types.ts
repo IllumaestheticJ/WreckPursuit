@@ -251,6 +251,10 @@ export interface SlotView {
   blocked_by: string[];
   /** Why the fitted part cannot come off now (null = it can). */
   remove_blocker: string | null;
+  /** Every fitted slot that has to come off first, in removal order (nested ones too). */
+  in_the_way: string[];
+  /** What the mechanic charges to swap the part in this slot. */
+  mechanic_fee: number;
 }
 
 /** A loose part (`LoosePart`). */
@@ -307,6 +311,8 @@ export interface CatalogEntry {
   price: number;
   count: number;
   reason: string | null;
+  /** What the mechanic charges to fit it (the whole set for a set). */
+  install_fee: number;
 }
 
 /** `career_workshop_json` (`WorkshopScreen`). */
@@ -337,4 +343,26 @@ export interface WorkshopApi {
   strip(assembly: number, slot: string): WorkshopScreen;
   /** Engine stand: put inventory part `part` into `slot` of loose engine `assembly`. */
   build(assembly: number, slot: string, part: number): WorkshopScreen;
+  /** Do it yourself: take off everything in the way of `slot`. */
+  clearWay(slot: string): WorkshopScreen;
+  /** Pay the mechanic to fit a part in `slot` (from the inventory, or bought now). */
+  mechanic(slot: string, source: MechanicSource, sellOld: boolean): MechanicResult;
+}
+
+/** Where the part the mechanic fits comes from. */
+export type MechanicSource = { part: number } | { buy: string | null };
+
+/** `MechanicJob`: what a mechanic job cost and what happened to the old parts. */
+export interface MechanicJob {
+  fee: number;
+  bought: number;
+  sold: number;
+  kept: number[];
+  touched: number;
+}
+
+/** `career_mechanic_install`. */
+export interface MechanicResult {
+  job: MechanicJob;
+  workshop: WorkshopScreen;
 }

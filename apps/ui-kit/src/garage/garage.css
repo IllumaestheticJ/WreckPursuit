@@ -226,7 +226,7 @@
 }
 .wp-ws-catrow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 0.5em;
   align-items: center;
 }
@@ -270,4 +270,42 @@
   .wp-ws-modal {
     inset: 0;
   }
+}
+
+/* Part card sections: do it yourself / mechanic. */
+.wp-ws-section {
+  border-top: 1px solid var(--edge);
+  padding-top: 0.4em;
+  margin-top: 0.2em;
+  font-size: 0.8em;
+}
+.wp-ws-mech {
+  display: flex;
+  gap: 0.4em;
+  flex-wrap: wrap;
+}
+.wp-ws-oldparts {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.wp-ws-notice {
+  margin: 0 0 0.5em;
+  padding: 0.4em 0.6em;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-left: 3px solid currentColor;
+}
+.wp-ws-sort {
+  display: inline-flex;
+  gap: 0.4em;
+  align-items: center;
+  font-size: 0.8em;
+}
+.wp-ws-sort select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  padding: 0.1em 0.3em;
+  pointer-events: auto;
 }

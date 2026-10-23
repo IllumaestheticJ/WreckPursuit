@@ -31,11 +31,13 @@ export function Button(props: {
   pressed?: boolean;
   title?: string;
   hotkey?: string;
+  /** `data-testid` for e2e tests. */
+  testid?: string;
   children?: ComponentChildren;
 }) {
   const cls = ["wp-btn", props.variant && `wp-btn--${props.variant}`, props.size && `wp-btn--${props.size}`].filter(Boolean).join(" ");
   return (
-    <button type="button" class={cls} onClick={props.onClick} disabled={props.disabled} aria-pressed={props.pressed} title={props.title}>
+    <button type="button" class={cls} onClick={props.onClick} disabled={props.disabled} aria-pressed={props.pressed} title={props.title} data-testid={props.testid}>
       {props.children}
       {props.hotkey && <span class="wp-kbd">{props.hotkey}</span>}
     </button>

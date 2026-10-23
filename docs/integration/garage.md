@@ -106,6 +106,33 @@ removed part carries them).
   opens it at that row; hovering a row lights the part up. `e2e/engine.mjs` clicks the valve
   cover in 3D and checks that stripped parts disappear from the model.
 
+### Easier workshop: mechanic, simpler removal order, sorting
+Owner feedback (2026-10-23): installs were confusing (tyre off before the wheel), wanted a paid
+mechanic with the old part sold or kept, and sortable part lists.
+- `parts.toml` removal order keeps only real dependencies: a wheel comes off with its tyre on;
+  brakes and suspension only need the wheel off (suspension no longer waits for the brake); the
+  push bar no longer waits for the splitter. New `[mechanic]` table: `call_out` (60) per job,
+  `per_part` (30) per part handled.
+- `Economy::in_the_way(parts, slot)`: every fitted slot that must come off first, nested ones
+  too, in removal order. `SlotView.in_the_way`, `SlotView.mechanic_fee`,
+  `CatalogEntry.install_fee` (the whole set's fee for a set).
+- `Economy::clear_way(acct, car, slot)`: DIY, free, takes off everything in the way.
+- `Economy::mechanic_install(acct, car, slot, &PartSource, sell_old, mode) -> MechanicJob`:
+  the new part comes from the inventory or is bought now (an aftermarket set goes on every slot
+  of the set); what is in the way comes off and goes back on; labour is charged as
+  `EventReason::RepairPaid`; the old parts are sold or kept. All or nothing.
+- wasm: `career_clear_way(uid, slot)`, `career_mechanic_install(uid, slot, part, grade,
+  sell_old)` (`part` 0 = buy `grade`, `""` = stock) → `{job, workshop}`. New parts restore their
+  lattice area like `fit_part`.
+- ui-kit: the part card splits into "Do it yourself" (take off what's in the way, remove, fit)
+  and "Mechanic" (install an inventory part, new stock part, catalog / upgrades) with an
+  "Old part: keep / sell" choice; catalog rows get "Fit for me"; the part list (group / name /
+  worst first), inventory (newest / name / condition / value / fits) and catalog (tier / price /
+  name) sort. Choices persist in `localStorage` (`wp.workshop.*`). `Button` gained an optional
+  `testid` prop. `e2e/mechanic.mjs` covers it.
+- Later (stage 6): the mechanic's labour should also cost game time through
+  `wp_world::progression` (`Activity::ModInstall { labour_hours }`).
+
 ### Testbed (`apps/testbed-web`, `apps/ui-kit`)
 - `src/workshop/room.ts`: the garage bay, built in code (concrete floor, block walls, roller door,
   two-post lift, bench, tool chest, tyre rack, shelving, lights). The car never moves: raising the
