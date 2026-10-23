@@ -23,6 +23,7 @@
 //! | [`catalog`] | the browser's race picker: courses on Port Vesper, Ashpeak County and the grid city, named AI drivers |
 //! | [`spots`] | honk-to-start meet spots at each race's start, horn edge trigger |
 //! | [`live`] | a picker race run next to a live `wp_sim` loop: judge, AI, meet heat, standings with gaps |
+//! | [`touge`] | touge battles on the sealed mountain passes: boss/challenger roster, wall breaches, side bets, pink slips (`data/events/touge.toml`) |
 //! | [`bridge`] | `wp_world` city race planning + race-route activation, POIs/zones; `wp_economy` payout inputs |
 //!
 //! `wp_net` owns the lobby transport; this crate owns the rules. Everything here is
@@ -51,6 +52,7 @@ pub mod signals;
 pub mod spots;
 pub mod stakes;
 pub mod territory;
+pub mod touge;
 pub mod trace;
 mod trail;
 

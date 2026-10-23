@@ -120,7 +120,7 @@ fn engine_layer_selection_is_monotone_in_rpm_for_every_car() {
 /// Head-on crash between two cars plus a police car with its siren on, on real physics.
 /// Returns the hash of the whole command stream and some counters.
 fn run_crash(seed: u64) -> (u64, usize, BTreeMap<String, usize>) {
-    let mode = load_mode_table(repo().join("data/modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(repo().join("data/modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed,
         mode,

@@ -176,8 +176,8 @@ fn race_city_keeps_the_map_only_when_the_race_runs_there() {
     assert!(race_scenario_in(&grid, CAR, DamageMode::Arcade, false, "vesper_v2").is_err());
 }
 
-/// One challenge system on the horn: with a roaming street racer within honking range of a
-/// spot, a honk opens the street challenge and does not request the spot's race; the next
+/// One challenge system on the horn: with the player right behind a roaming street racer in
+/// a spot, a honk opens the street challenge and does not request the spot's race; the next
 /// honk with the challenge still open does nothing either. Declined, a honk with no racer in
 /// reach starts the spot's race.
 #[test]
@@ -195,7 +195,8 @@ fn street_racer_in_reach_takes_the_honk_first() {
         .find(|p| p.race_id == "hollins_sprint")
         .cloned()
         .expect("hollins spot");
-    // Player stopped in the spot; a roaming racer parked 10 m behind it.
+    // Player stopped in the spot, right behind a roaming racer parked 9 m ahead (round 12:
+    // a challenge only from right behind the racer).
     s.debug_sim_mut()
         .unwrap()
         .place_on_ground(
@@ -219,7 +220,7 @@ fn street_racer_in_reach_takes_the_honk_first() {
         .unwrap()
         .place_on_ground(
             EntityId(racer),
-            [spot.pos[0] + sn * 10.0, spot.pos[1] - cs * 10.0],
+            [spot.pos[0] - sn * 9.0, spot.pos[1] + cs * 9.0],
             spot.heading_rad,
             0.0,
             Some(spot.pos[2]),

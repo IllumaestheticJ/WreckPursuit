@@ -22,6 +22,7 @@
     "e2e:weather": "node e2e/weather.mjs",
     "e2e:net": "node e2e/net_two_tabs.mjs",
     "e2e:race": "node e2e/race.mjs",
+    "e2e:touge": "node e2e/touge.mjs",
     "e2e:tune": "node e2e/tune.mjs",
     "e2e:race-spots": "node e2e/race_spots.mjs",
     "e2e:crash-replay": "node e2e/crash_replay.mjs",

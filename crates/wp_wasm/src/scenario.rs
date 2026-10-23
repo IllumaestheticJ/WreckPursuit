@@ -23,13 +23,17 @@ pub fn procedural_city() -> CitySpec {
 }
 
 /// City by id for the testbed's selector: `"vesper_v2"` (Port Vesper v2, the default city),
-/// `"ashpeak"` (Port Vesper + Ashpeak County),
-/// `"procedural_12x12"` (the old grid); anything else is the flat world.
+/// `"ashpeak"` (Port Vesper + Ashpeak County), `"procedural_12x12"` (the old grid), a touge
+/// pass (`"touge_*"`); anything else is the flat world.
 pub fn city_spec(city_id: &str) -> CitySpec {
     match city_id {
         wp_world::vesper::CITY_ID => CitySpec::vesper(),
         wp_world::ashpeak::CITY_ID => CitySpec::ashpeak(),
         "procedural_12x12" => procedural_city(),
+        id if wp_world::touge::is_touge(id) => CitySpec::Preset {
+            name: id.to_string(),
+            seed: 1,
+        },
         _ => CitySpec::Flat,
     }
 }

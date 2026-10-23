@@ -159,6 +159,25 @@ existing stake (advertised buy-in / purse).
 Ashpeak County's races (`RaceCity::Ashpeak`) run on the combined `ashpeak` map only
 (`tests/race_spots.rs`).
 
+### Touge battles (`touge`, `data/events/touge.toml`)
+
+One-on-one sprints on the four `wp_world::touge` passes. `TougeSetup` = pass × uphill/downhill ×
+day (14:00) / night (23:30) × dry / rain × challenger / boss; its scenario name
+`race_touge:<map>:<up|down>:<day|night>:<dry|rain>:<challenger|boss>` round-trips, and
+`race_def` / `plan_course` build a sanctioned single-file sprint (NPC ahead, 12 m gap, no
+traffic, no police). Every pass has a fixed challenger and boss (`ROSTER`).
+- **Rules:** `Boundary::check` flags a car through the wall line (a K-rail stretch) or fallen
+  well below the road; `TougeBattle::observe` decides the battle at once for the other car
+  (the car through is totaled). Otherwise the first across the line wins.
+- **Gates (career API, `wp_economy::progression`):** racing a challenger needs
+  `Feature::TougeRaces`, a boss `Feature::BossRaces`; side bets need `Feature::TougeBetting`
+  (stake up to `max_bet(BetVenue::Touge)`), pink slips `Feature::PinkSlips`. `wager_menu` lists
+  each line with the locked reason; `place` refuses a locked or oversized wager.
+- **Settlement (`settle`):** side bet via `settle_bet` (challenger 2.0×, boss 2.5×), boss purse
+  (12 000), rep via `award_rep` (`boss:<map>` / `touge:<map>`; −100 extra for going through the
+  wall), and pink slips: the winner takes the loser's car **exactly as it finished**
+  (`Economy::take_pink_slip_car` with the NPC's damage snapshot; `lose_pink_slip_car`).
+
 ## Tests
 
 ```sh

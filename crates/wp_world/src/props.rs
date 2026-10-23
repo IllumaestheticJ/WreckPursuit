@@ -19,6 +19,9 @@ pub enum PropKind {
     ParkedCar,
     /// A traffic cone (light, knockable).
     Cone,
+    /// A precast concrete K-rail section (touge outboard barrier: heavy, shoved aside by a hard
+    /// hit).
+    KRail,
 }
 
 /// A static prop.

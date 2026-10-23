@@ -112,7 +112,9 @@ suburb = 450.0
 industrial = 500.0
 
 [helicopter]
-min_level = 3
+# Owner decision (playtest row 156, 2026-10-23): roadblocks from wanted level 3, spike strips
+# from 4, the helicopter from 5.
+min_level = 5
 [helicopter.count]
 dawn = 1
 day = 1
@@ -131,7 +133,7 @@ night = 0.25
 
 # Wanted level (1..=5) at which tools / tactics unlock.
 [unlocks]
-spikes_level = 2
+spikes_level = 4
 roadblock_level = 3
 pit_level = 2
 boxin_level = 1

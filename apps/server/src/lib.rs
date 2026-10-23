@@ -34,7 +34,7 @@ use wp_sim::SimConfig;
 pub const USAGE: &str = "\
 usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
                  [--max-players N] [--city FILE] [--seed N] [--time-ratio X]
-                 [--time-of-day H] [--mode arcade|sim] [--bots N] [--arena RADIUS_M]
+                 [--time-of-day H] [--mode arcade|sim|extreme] [--bots N] [--arena RADIUS_M]
                  [--weather KIND] [--data DIR]
 
   --port         websocket port (default 8080; 0 = any)
@@ -160,7 +160,8 @@ impl AppConfig {
         match self.mode.as_str() {
             "arcade" => Ok(DamageMode::Arcade),
             "sim" | "simulation" => Ok(DamageMode::Simulation),
-            m => Err(format!("unknown mode {m} (arcade|sim)")),
+            "extreme" => Ok(DamageMode::Extreme),
+            m => Err(format!("unknown mode {m} (arcade|sim|extreme)")),
         }
     }
 }

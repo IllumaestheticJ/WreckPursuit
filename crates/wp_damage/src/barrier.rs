@@ -8,7 +8,8 @@
 //! (`other_mass_kg = 0`) or another body (`M`) at closing speed `v` transfers `J = μ·v` with
 //! `μ = m` (barrier) or `μ = m·M/(m+M)`. `J` is split evenly over the contact points of the
 //! impact footprint and delivered over two physics steps (70 % / 30 %), as Rapier spreads a
-//! hard contact over its first steps.
+//! hard contact over its first steps. The car counts as a racer, so the table's
+//! `racer_damage_scale` (Arcade 0.2) scales `J`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -260,7 +261,10 @@ pub fn run_barrier(
         }
     }
     let v = speed_kmh / 3.6;
-    let (c0, c1) = barrier_contacts(lo, hi, kind, v, car.def.mass_kg, other_mass_kg);
+    let (mut c0, mut c1) = barrier_contacts(lo, hi, kind, v, car.def.mass_kg, other_mass_kg);
+    // The barrier car is a racer: Arcade's `racer_damage_scale` applies.
+    crate::scale_racer_contacts(&mut c0, mode);
+    crate::scale_racer_contacts(&mut c1, mode);
     let steps = (duration_s / PHYSICS_DT).round() as usize;
     let mut events = Vec::new();
     for step in 0..steps.max(2) {
@@ -376,6 +380,7 @@ pub fn run_scenario(sc: &BarrierScenario, data_root: &Path) -> Result<ScenarioRe
     let mode_file = match sc.mode {
         DamageMode::Arcade => "arcade.toml",
         DamageMode::Simulation => "sim.toml",
+        DamageMode::Extreme => "extreme.toml",
     };
     let mode = wp_contracts::load_mode_table(data_root.join("modes").join(mode_file))
         .map_err(|e| e.to_string())?;

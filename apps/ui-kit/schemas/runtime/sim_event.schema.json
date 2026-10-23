@@ -772,6 +772,11 @@
           "description": "Abandoned the race to run from the police (AI entrants).",
           "type": "string",
           "const": "Fled"
+        },
+        {
+          "description": "Made no course progress for the judge's stuck limit while every other racer still\nrunning was stuck too, so the judge ended the race (a safety net against a race that\ncan never finish, e.g. boxed in by standing cars; not a racer giving up).",
+          "type": "string",
+          "const": "Stuck"
         }
       ]
     },

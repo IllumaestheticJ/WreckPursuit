@@ -5,7 +5,7 @@
 (
     name: "parked_frontal_50_sim",
     seed: 2110,
-    mode: Simulation,
+    mode: Extreme,
     assists: ai,
     parked: [(pos: (0.0, 30.0, 0.0), yaw: 0.0)],
     entities: [

@@ -41,7 +41,7 @@ fn city_with_patrol(city: City, hour: f32) -> (Sim, EntityId) {
 
 /// [`city_with_patrol`] with another sim seed (other patrols, other streets).
 fn city_with_patrol_seeded(city: City, hour: f32, seed: u64) -> (Sim, EntityId) {
-    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mode = load_mode_table(data("modes/sim.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed,
         mode,

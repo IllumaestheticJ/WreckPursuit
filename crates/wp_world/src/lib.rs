@@ -13,6 +13,8 @@
 //! - [`drive`]: the shared AI driving controller (pure pursuit + PID) used by physical
 //!   traffic, racers (`wp_opponent`) and police.
 //! - [`covered`]: tunnels and covered roads (line of sight in and out is blocked).
+//! - [`progression`]: career time budget — day free roam / night racing shifts, activity
+//!   time costs (garage, repairs), dusk/dawn transitions driving the [`clock`].
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -33,6 +35,7 @@ pub mod map;
 pub mod markings;
 pub mod network;
 pub mod procgen;
+pub mod progression;
 pub mod props;
 pub mod residential;
 pub mod roads;
@@ -40,6 +43,7 @@ pub mod routes;
 pub mod signals;
 pub mod surface;
 pub mod terrain;
+pub mod touge;
 pub mod traffic;
 pub mod vesper;
 pub mod violations;
@@ -55,6 +59,7 @@ use wp_math::StateHasher;
 pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
 pub use map::{CityMap, SegId};
 pub use network::{RoadError, RoadNetwork};
+pub use progression::{Activity, Shift, TimeEvent, TimeProgression, TimeRules};
 pub use props::{PropKind, StaticProp};
 pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
@@ -204,6 +209,16 @@ impl World {
     /// Generate the procedural city in memory.
     pub fn procedural(pg: &procgen::ProcGenConfig, cfg: WorldConfig) -> Self {
         Self::new(procgen::generate(pg), cfg)
+    }
+
+    /// Generate built-in touge pass `id` (`touge::TOUGE_IDS`) in memory: one sealed mountain
+    /// road with its terrain, walls and destructible K-rail props. `None` for an unknown id.
+    pub fn touge(id: &str, cfg: WorldConfig) -> Option<Self> {
+        let build = touge::generate_builtin(id)?;
+        let mut w = Self::new(build.net, cfg);
+        w.road_names = vec![build.track.name.clone()];
+        w.parked.extend(build.krails);
+        Some(w)
     }
 
     /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
@@ -460,8 +475,17 @@ impl World {
     /// dropped the spots where a car cannot stand (`wp_sim::Sim::set_world` on a city with
     /// terrain). Every reader of [`World::static_props`] (police obstacles, resets) then sees
     /// exactly the cars the sim has. Scenario setup, before the first tick.
+    /// Other props in the parked list (touge K-rails, [`World::touge`]) are kept, after the
+    /// cars, in their order (the sim inserts them after the parked cars as well).
     pub fn set_parked_cars(&mut self, cars: Vec<StaticProp>) {
+        let others: Vec<StaticProp> = self
+            .parked
+            .iter()
+            .filter(|p| p.kind != PropKind::ParkedCar)
+            .copied()
+            .collect();
         self.parked = cars;
+        self.parked.extend(others);
     }
 
     /// Active routes.

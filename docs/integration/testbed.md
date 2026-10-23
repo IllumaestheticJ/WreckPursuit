@@ -1125,7 +1125,8 @@ met), bet on it; several driver levels, the map icon colour shows the level.
   point 300–1 200 m away, with a *cruise capability* (top speed 11.5–13.3 m/s, under the speeding threshold of a 25 mph street, plus a stop-line guard for red and catchable amber lights, 0.4 g, 0.45 g braking)
   and a calm, low-risk profile, so it keeps traffic pace, follows cars, stops at reds and plans a
   new route at the end. At most one route is planned per tick.
-- **Challenge**: a horn rising edge (the rebindable `horn` action: Q / pad L3 / the touch 📯) within 30 m of a roaming racer stops it and opens
+- **Challenge**: a horn rising edge (the rebindable `horn` action: Q / pad L3 / the touch 📯) right behind a roaming racer (at most 15 m back, within 2.5 m of
+  its centre line, facing its way within 45°: `street::tailing`, owner request 2026-10-23) stops it and opens
   an `Offer`. It lapses when the player drives 70 m away, after 2 min, or when the run ends.
 - **Race**: `street_accept(x, y, stake)` checks the stake (level range, cash) and the route
   (250 m – 6 km, `World::plan_route` from the player's pose), posts the stake as a ledger line

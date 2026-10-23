@@ -23,7 +23,7 @@ pub struct Crash {
 }
 
 /// `car` drives at `kmh` into a full-width rigid barrier (`target = "barrier"`) or head-on
-/// into a parked sedan (`"car"`), in `mode` (`Arcade` / `Simulation`), for `duration_s`; the
+/// into a parked sedan (`"car"`), in `mode` (`Arcade` / `Simulation` / `Extreme`), for `duration_s`; the
 /// renderer's crumple memory sees every `frame_ticks`-th tick.
 #[allow(clippy::too_many_arguments)]
 pub fn frontal(

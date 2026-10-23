@@ -1,32 +1,27 @@
-# Arcade damage table = Simulation (sim.toml) x the multipliers noted on each line.
+# Arcade damage table = Simulation (sim.toml) with racer cars taking 20 % of the damage.
 # Same code path, different numbers. Owned by workstream 03 (damage) for tuning.
 #
-# Target (CLAUDE.md; owner playtest round 12b, then row 87 "still a little too high"): punishing
-# but survivable. A 50 km/h wall hit is cosmetic plus minor mechanical; a 70 km/h hit degrades
-# but stays drivable; about 4-6 hard hits end a car; police cars at least as tough as a sports
-# car. Round 13 made the consequences ~20-30 % softer than round 12b (components, failure
-# thresholds, cabin limit, wheels, structural health) and left the dents alone; the repair price
-# scale stays 0.5 (wp_economy balance, request to G in docs/integration/damage.md).
-# Measured in the full sim (`cargo run --release -p simcli --example damage_toughness`, tables
-# in docs/integration/damage.md): sports car (hakone_gt) ended after 4.5 hard hits on average
-# (was 2.7), the police cruiser after 8.7 (was 5.0).
-# Light hits (closing speed < ~41 km/h) are cosmetic: dents and a bill, no mechanical damage
-# (wp_damage DamageTuning::arcade_mechanical_min_closing_mps = 11.5 m/s). After a hard hit 30 %
-# of the lost handling comes back over 20 s ("limp-mode settle").
-# Also Arcade-only in wp_damage::DamageTuning until ModeTable has the fields (contract request
-# #10): toe/camber x 0.09 (arcade_alignment_scale), structural health from plastic energy x 0.42
-# (arcade_structural_health_scale; 0.5 in round 12b), a failed steering rack keeps half the lock
-# (arcade_failed_steer_ratio 0.5 vs 0.3). The visible deformation (impulse/plasticity/beam
-# break scales) is unchanged since round 12b.
+# Owner request 2026-10-22: "make arcade damage 20% of what it is now ... for the player and AI
+# drivers only. Traffic and police vehicles still receive full damage." Every line below is
+# identical to sim.toml (which holds the previous Arcade numbers), so traffic and police cars
+# behave exactly as in Simulation. The only difference is racer_damage_scale: wp_sim scales the
+# contact impulses reaching the damage model of the player's racer and AI racers by it.
+# 0.25, not 0.2: the lattice takes the first part of a hit elastically, so a quarter of the
+# impulse leaves about a fifth of the damage. Measured (debug_sedan barrier sweep, `cargo run
+# --release -p wp_damage --bin damage-barrier -- --sweep`), Arcade as a share of Simulation at
+# 56 / 80 km/h: health lost frontal 22 % / 20 %, offset 21 % / 19 %, side 16 % / 20 %, rear
+# 12 % / 19 %; plastic (crumple) energy 18-23 %. At 0.2 it was only 12-16 %. Light-hit and
+# limp-mode rules are the same as Simulation.
 mode = "Arcade"
-impulse_to_lattice_scale = 0.45        # sim x 0.45  — 45 % of the collision energy deforms the car
-plasticity_scale = 0.8                 # sim x 0.8   — dents set a little less (more springback)
-beam_break_scale = 1.5                 # sim x 1.5   — beams/parts tougher before breaking
-component_damage_scale = 0.24          # sim x 0.24  — components lose health slower (round 12b: 0.3)
-component_fail_threshold_scale = 4.0   # sim x 4.0   — components tolerate more intrusion (round 12b: 3.5)
-total_loss_health = 0.1                # sim 0.25 -> 0.10 — kept (wp_economy career proxy, see docs/integration/damage.md)
-cabin_intrusion_total_loss_m = 0.78    # sim x 3.1   — 0.25 m -> 0.78 m (round 12b: 0.6)
-repair_cost_scale = 0.5                # sim x 0.5   — cheaper repairs (round 13 proposed 0.4: wp_economy balance, request to G)
-wheel_detach_scale = 0.42              # sim x 0.42  — wheels stay on ~2.4x as long (round 12b: 0.5)
-engine_kill_on_total_loss = true       # same
-global_health_from_intrusion = true    # same
+racer_damage_scale = 0.25              # racers take ~20 % of the damage; traffic/police full
+impulse_to_lattice_scale = 0.45
+plasticity_scale = 0.8
+beam_break_scale = 1.5
+component_damage_scale = 0.24
+component_fail_threshold_scale = 4.0
+total_loss_health = 0.1
+cabin_intrusion_total_loss_m = 0.78
+repair_cost_scale = 0.5
+wheel_detach_scale = 0.42
+engine_kill_on_total_loss = true
+global_health_from_intrusion = true

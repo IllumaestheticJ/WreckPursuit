@@ -24,7 +24,7 @@ import "../ui/theme.css";
 import "./menu.css";
 
 /** What the main menu can start. */
-export type PlayChoice = "chase" | "chaseRain" | "races" | "free" | "garage";
+export type PlayChoice = "chase" | "chaseRain" | "races" | "touge" | "free" | "garage";
 
 /** Which screen is showing ("closed" = none). */
 export type MenuScreen = "closed" | "main" | "pause" | "settings";
@@ -417,6 +417,13 @@ export class GameMenu {
 }
 
 /** Mount the game menu into `parent` (a positioned element). Closed until `openMain` / `openPause`. */
+
+/** One-line hint per damage mode (Settings has the full table). */
+const DAMAGE_HINT: Record<"Arcade" | "Simulation" | "Extreme", string> = {
+  Arcade: "Forgiving: racers take 20 % damage; traffic and police take full damage",
+  Simulation: "Punishing but survivable",
+  Extreme: "One hard hit at speed is a total loss",
+};
 export function mountGameMenu(parent: HTMLElement, opts: GameMenuOptions): GameMenu {
   return new GameMenu(parent, opts);
 }
@@ -462,6 +469,7 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "chase", label: "City chase", hint: "Night in Port Vesper. You're speeding; the police will come." },
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
+  { id: "touge", label: "Touge battles", hint: "One-on-one down sealed mountain passes. Bets and pink slips with rep" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
@@ -715,7 +723,7 @@ function SettingsScreen(props: {
           setTestInput={props.setTestInput}
         />
         <h3>Gameplay</h3>
-        <Row label="Damage" hint={s.damageMode === "Simulation" ? "One hard hit at speed is a total loss" : "Punishing but survivable"}>
+        <Row label="Damage" hint={DAMAGE_HINT[s.damageMode]}>
           <Cycle
             id="gm-mode"
             label="Damage mode"
@@ -723,6 +731,7 @@ function SettingsScreen(props: {
             options={[
               { id: "Arcade", label: "Arcade" },
               { id: "Simulation", label: "Simulation" },
+              { id: "Extreme", label: "Extreme" },
             ]}
             onChange={(damageMode) => change({ ...s, damageMode })}
           />

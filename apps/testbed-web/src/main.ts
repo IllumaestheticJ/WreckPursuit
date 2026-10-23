@@ -16,8 +16,10 @@
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 // ?mods=wheels_forged,aero_wing_1 installs mods on the player car (else the build saved for that
 // car in the mod shop).
+// ?roam=N opens main's free roam (wp_opponent::roam, N roamers; dev only and dormant: the
+// street racers of free drive / city chase are the game's racer population, main-sync.md).
 import { assistLevel, loadWasm, sim, type AssistProfile, type CarStatsTable, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { DRAW_STRIDE, META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { DRAW_STRIDE, META_STRIDE, MODE_NAMES, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import {
   actionHeld,
@@ -63,6 +65,7 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RaceView, type RaceFrame } from "./ui/race";
 import { GarageVisitView } from "./ui/garageVisit";
+import { TougeView, type TougeChoice, type Wager } from "./ui/touge";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RaceSpotsView } from "./race_spots";
 import { CarStatBars, statLine } from "./ui/carStats";
@@ -451,6 +454,32 @@ async function main(): Promise<void> {
     repair: () => sim.garageRepair(),
     leave: () => sim.garageLeave(),
   });
+  // Touge battles: pass picker with the rep-gated wager menu, and the battle panel during one.
+  const tougeEl = document.createElement("div");
+  tougeEl.id = "ui-touge";
+  tougeEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(tougeEl);
+  const tougeView = new TougeView(tougeEl, {
+    list: () => sim.tougeList(),
+    // The battle runs as a career run when the career box is ticked and a career exists.
+    menu: (c) => sim.tougeMenu(c, tougeUsesCareer()),
+    start: (c, wager) => startTouge(c, wager),
+    setRep: (rep) => {
+      if (tougeUsesCareer()) return "career battles use the career's rep (untick career to test)";
+      try {
+        sim.tougeDebugSetRep(rep);
+        return null;
+      } catch (e) {
+        return String(e).replace(/^(Error: )?wp_wasm: /, "");
+      }
+    },
+  });
+  /** A touge battle started now would be a career run (see `startTouge`). */
+  function tougeUsesCareer(): boolean {
+    return ($("career") as HTMLInputElement).checked && sim.careerExists();
+  }
+  /** Last touge battle started ("Race again" replays it with the same wager). */
+  let lastTouge: { choice: TougeChoice; wager: Wager } | null = null;
   // Stat bars under the car picker (physics-measured, see ui/carStats.ts).
   let statTable: CarStatsTable | null = null;
   try {
@@ -586,8 +615,9 @@ async function main(): Promise<void> {
     const names = new Map<number, string>();
     let course = null;
     if (id) {
-      const card = sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).find((c) => c.id === id);
-      ids.forEach((e, i) => names.set(e, i === 0 ? "You" : (card?.drivers[i - 1]?.name ?? `#${e}`)));
+      const touge = id.startsWith("touge:") ? sim.tougeResult() : null;
+      const card = touge ? undefined : sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).find((c) => c.id === id);
+      ids.forEach((e, i) => names.set(e, i === 0 ? "You" : (touge?.opponent ?? card?.drivers[i - 1]?.name ?? `#${e}`)));
       course = parseCourse(sim.raceCourse());
     }
     raceMarker.setCourse(course);
@@ -597,6 +627,7 @@ async function main(): Promise<void> {
       spots.length > 0 ? sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).map((c) => [c.id, { entry_fee: c.entry_fee, purse: c.purse }] as const) : [],
     );
     raceSpots.set(spots, stakes);
+    tougeView.reset();
   };
 
   /** Start street race `id` (the picker's "Race" button, `?race=`, "Race again"). */
@@ -606,11 +637,52 @@ async function main(): Promise<void> {
     mode = ($("mode") as HTMLSelectElement).value,
     autopilot = params.get("autopilot") === "1",
   ) => {
+    if (id.startsWith("touge:")) {
+      const [, map, direction, daylight, surface, opponent] = id.split(":");
+      const again = lastTouge?.choice;
+      const choice = { map, direction, daylight, surface, opponent } as TougeChoice;
+      const same = again && JSON.stringify(again) === JSON.stringify(choice);
+      startTouge(choice, same && lastTouge ? lastTouge.wager : { kind: "none" }, car, mode, autopilot);
+      return;
+    }
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
     sim.raceStart(id, car, mode, autopilot, quickTune(car));
+    rebuildViews();
+    applyAssistPreset(app.source);
+    rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+  };
+
+  /** Start a touge battle: a career run with the career car when the career box is ticked and
+   * a career exists (a pink slip then moves cars in the career garage), else a plain session. */
+  const startTouge = (
+    choice: TougeChoice,
+    wager: Wager,
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
+    mode = ($("mode") as HTMLSelectElement).value,
+    autopilot = params.get("autopilot") === "1",
+  ) => {
+    lastTouge = { choice, wager };
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    if (tougeUsesCareer()) {
+      try {
+        // The touge locks its own weather (dry / rain), so no withWeather here.
+        sim.careerStartRun(sim.tougeScenarioJson(choice, car, mode, wager, autopilot));
+      } catch (e) {
+        openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+        return;
+      }
+      garage.hide();
+      app.paused = false;
+      persistCareer();
+    } else {
+      sim.tougeStart(choice, car, mode, wager, autopilot);
+    }
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
@@ -639,6 +711,7 @@ async function main(): Promise<void> {
     }
     const report = withReport || raceView.report ? sim.raceResult() : null;
     raceView.update({ info, standings, report, player: pose, others }, performance.now());
+    if (raceView.raceId.startsWith("touge:")) tougeView.update(sim.tougeResult(), performance.now());
     const done = me < 0 || standings[me + RS.status] > 0 || info[RI.phase] === 2;
     const next = done ? -1 : standings[me + RS.nextGate];
     const gates = info[RI.gates];
@@ -683,7 +756,7 @@ async function main(): Promise<void> {
   };
 
   const isReplay = () => sim.worldInfo()[W.replay] > 0.5;
-  const modeName = () => (sim.worldInfo()[W.mode] > 0.5 ? "Simulation" : "Arcade");
+  const modeName = () => MODE_NAMES[Math.round(sim.worldInfo()[W.mode])] ?? "Arcade";
 
   const startFreeDrive = (
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
@@ -739,6 +812,22 @@ async function main(): Promise<void> {
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
   };
 
+  /** Free roam: free drive in the selected city with AI street racers roaming its highways,
+   * touge, dirt roads, downtown and countryside (`roamers` 0 = the default 10). */
+  const startFreeRoam = (
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
+    mode = ($("mode") as HTMLSelectElement).value,
+    roamers = 0,
+  ) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    sim.init(0, withWeather(sim.freeRoamCityJson(car, mode, citySel.value, roamers)), false);
+    rebuildViews();
+    applyAssistPreset(app.source);
+  };
+
   /** A career run: the city chase or a free drive (city box) with the career car, its saved
    * damage and mods. Opens the garage instead when the car cannot go out. */
   const startCareerRun = (kind: RunKind): boolean => {
@@ -775,6 +864,7 @@ async function main(): Promise<void> {
     const mods = sc.entities[0]?.mods ?? [];
     if (sc.name === "city_chase") startCityChase(car, sc.mode, false, mods);
     else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true, mods);
+    else if (sc.name === "free_roam") startFreeRoam(car, sc.mode);
     else if (raceView.raceId) startRace(raceView.raceId, car, sc.mode);
     else startFreeDrive(car, sc.mode, undefined, undefined, mods);
   };
@@ -1019,6 +1109,7 @@ async function main(): Promise<void> {
     } else if (app.scenarioFile) void runScenario(app.scenarioFile);
     else if (name === "city_chase") startCityChase();
     else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
+    else if (name === "free_roam") startFreeRoam();
     else startFreeDrive();
   };
   const careerOn = () => ($("career") as HTMLInputElement).checked;
@@ -1027,6 +1118,7 @@ async function main(): Promise<void> {
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
+  $("sc-touge").onclick = () => tougeView.openPicker();
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     // A career run keeps the career's mode (pick it with "New career" in the garage).
@@ -1390,6 +1482,7 @@ async function main(): Promise<void> {
         else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
         else if (choice === "races") raceView.openPicker();
+        else if (choice === "touge") tougeView.openPicker();
         else openGarage();
       },
       restart: () => restartRun(),
@@ -1458,6 +1551,8 @@ async function main(): Promise<void> {
     startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
+  } else if (params.get("roam")) {
+    startFreeRoam(DEFAULT_CAR, undefined, Number(params.get("roam")) || 0);
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
@@ -1619,7 +1714,7 @@ async function main(): Promise<void> {
     prof.lap("fx");
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
-      ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
+      ui.frame(wi[W.tick], app.player, events, wi[W.hours], MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade");
       if (!audio.hearsRadio()) {
         for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
           const r = ev.Police?.Radio;
@@ -1794,7 +1889,7 @@ async function main(): Promise<void> {
           : app.input,
         source: replay ? "replay" : app.source,
         assists: replay ? null : sim.assists(app.player),
-        mode: wi[W.mode] > 0.5 ? "Simulation" : "Arcade",
+        mode: MODE_NAMES[Math.round(wi[W.mode])] ?? "Arcade",
         rack: focusView ? sim.ffb(app.focus)[0] : 0,
         fps,
         simMs,

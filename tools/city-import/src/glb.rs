@@ -543,6 +543,22 @@ pub fn deck_piers(net: &RoadNetwork) -> Vec<([V2; 4], f32, f32)> {
     out
 }
 
+/// Depth of a bridge deck's slab below its road surface, m (the slab sides, and how far a
+/// wall on a deck edge may hang).
+const DECK_SLAB_M: f32 = 1.2;
+
+/// Foot height of a wall whose top is at `top`: `foot` (down to the ground), except over the
+/// paving of a road below (an overpass's sidewalk back or edge over the road it crosses),
+/// where it ends at the deck slab's depth, clear of the traffic underneath (owner row 159:
+/// sidewalk-back walls on the interchange crossroads hung down onto Loop 9).
+fn wall_foot(net: &RoadNetwork, top: V3, foot: f32) -> f32 {
+    if top[2] - foot > DECK_SLAB_M && on_paving_below(net, usize::MAX, geom::xy(top), top[2]) {
+        top[2] - DECK_SLAB_M
+    } else {
+        foot
+    }
+}
+
 /// Whether `q` lies on (or within 1.5 m of) the paving of a road other than surface `si`, or
 /// a junction box, more than 1 m below height `z` (where a bridge pier must not stand).
 fn on_paving_below(net: &RoadNetwork, si: usize, q: V2, z: f32) -> bool {
@@ -745,7 +761,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                         if *d {
                             p[2]
                         } else {
-                            (ground_z(geom::xy(*p)) - foot_m).min(p[2])
+                            wall_foot(net, *p, (ground_z(geom::xy(*p)) - foot_m).min(p[2]))
                         }
                     })
                     .collect();
@@ -767,7 +783,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
                     {
                         continue;
                     }
-                    bridge.curtain(&seg, &[seg[0][2] - 1.2, seg[1][2] - 1.2], side > 0.0);
+                    bridge.curtain(
+                        &seg,
+                        &[seg[0][2] - DECK_SLAB_M, seg[1][2] - DECK_SLAB_M],
+                        side > 0.0,
+                    );
                     let top = [
                         [seg[0][0], seg[0][1], seg[0][2] + 0.9],
                         [seg[1][0], seg[1][1], seg[1][2] + 0.9],
@@ -795,7 +815,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         for line in chain_segments(feet.iter().chain(&walks.bare_backs)) {
             let bottom: Vec<f32> = line
                 .iter()
-                .map(|p| (ground_z(geom::xy(*p)) - foot_m).min(p[2]))
+                .map(|p| wall_foot(net, *p, (ground_z(geom::xy(*p)) - foot_m).min(p[2])))
                 .collect();
             wall.curtain(&line, &bottom, true);
         }

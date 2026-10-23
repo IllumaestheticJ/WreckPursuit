@@ -32,6 +32,7 @@ use crate::data::mem_data;
 use crate::garage_visit::{GarageOffer, GarageRepairReport, GarageSite, GARAGE_ENTER_SPEED_MPS};
 use crate::race::RaceRun;
 use crate::race_spots::MeetSpots;
+use crate::roam::RoamRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
 use crate::street::{Preview, StreetRacers};
@@ -137,6 +138,9 @@ pub struct Session {
     /// challenge system on the horn action): a street racer in reach first, else the race
     /// spot the player stands in (see [`Session::observe_horn`]).
     horn_was: bool,
+    /// Free-roam street racers (scenario entities `roam_*`; see [`crate::roam`]). Driven
+    /// only live; in playback the log supplies their inputs.
+    roam: Option<RoamRun>,
     /// Rolling snapshot buffer + big-crash detector (live sessions; see [`crate::crash_replay`]).
     crash: CrashRecorder,
     /// The street AI (live sessions whose scenario has street racers; see [`crate::street`]).
@@ -229,6 +233,12 @@ impl Session {
             )?),
             _ => None,
         };
+        // Free roam: built in playback too (it marks the roamers' cars as AI racers).
+        let roam = if scripted {
+            None
+        } else {
+            RoamRun::new(&mut sim, &ids, &cars, &sc)?
+        };
         let crash = if playback.is_some() {
             CrashRecorder::off()
         } else {
@@ -245,6 +255,7 @@ impl Session {
             race,
             meet_spots: MeetSpots::default(),
             horn_was: false,
+            roam,
             run,
             career: false,
             garages,
@@ -559,6 +570,11 @@ impl Session {
         self.race.as_ref()
     }
 
+    /// The free-roam street racers attached to this session, if any.
+    pub fn roam(&self) -> Option<&RoamRun> {
+        self.roam.as_ref()
+    }
+
     /// The race's results panel (once the player is no longer racing).
     pub fn race_report(&self) -> Option<crate::race::RaceReport> {
         let over = self.run.as_ref().is_some_and(PlayerRun::is_over);
@@ -768,6 +784,11 @@ impl Session {
         self.run.as_ref()
     }
 
+    /// The run, mutably (testbed debug tools only; not in the replay log).
+    pub fn debug_run_mut(&mut self) -> Option<&mut PlayerRun> {
+        self.run.as_mut()
+    }
+
     /// Take the run (its account carries over to the next session).
     pub fn take_run(&mut self) -> Option<PlayerRun> {
         self.run.take()
@@ -904,6 +925,26 @@ impl Session {
         let xy = [st.pos[0] - sn * ahead_m, st.pos[1] + cs * ahead_m];
         self.sim
             .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
+            .map_err(|e| e.to_string())?;
+        self.relocate_racer(id);
+        self.crash_resnapshot();
+        Ok(())
+    }
+
+    /// Debug / e2e: put vehicle `id` on the ground at `xy` facing `yaw`, rolling forward at
+    /// `speed_mps` (height from the surface nearest `near_z`). Not in the replay log; a race
+    /// (if any) is told the car was moved on purpose.
+    pub fn debug_place(
+        &mut self,
+        id: EntityId,
+        xy: [f32; 2],
+        yaw: f32,
+        speed_mps: f32,
+        near_z: Option<f32>,
+    ) -> Result<(), String> {
+        self.live_check()?;
+        self.sim
+            .place_on_ground(id, xy, yaw, speed_mps, near_z)
             .map_err(|e| e.to_string())?;
         self.relocate_racer(id);
         self.crash_resnapshot();
@@ -1415,6 +1456,47 @@ impl Session {
 
         // 1e. Race spots: a honk no street racer took (reads the sim only).
         self.observe_horn(honk && !honk_taken);
+        // 1f. Free roam (live): put stranded roamers back on the road out of the player's
+        //     sight (replay ops, as the testbed's reset in place), then the roamers drive.
+        if self.playback.is_none() {
+            let rescues = self
+                .roam
+                .as_ref()
+                .map(|r| r.rescues(&self.sim, self.ids.first().copied()))
+                .unwrap_or_default();
+            for r in rescues {
+                let placed = self
+                    .log_op(
+                        r.idx,
+                        OpKind::ResetAt {
+                            xy: [r.slot.pos[0], r.slot.pos[1]],
+                            yaw: r.slot.yaw,
+                            near_z: r.slot.pos[2],
+                            repair: true,
+                        },
+                    )
+                    .and_then(|_| {
+                        self.log_op(
+                            r.idx,
+                            OpKind::Ghost {
+                                ticks: crate::reset::GHOST_TICKS,
+                            },
+                        )
+                    });
+                if placed.is_ok() {
+                    if let Some(roam) = &mut self.roam {
+                        roam.rescued(&r);
+                    }
+                }
+            }
+            if let Some(inputs) = self.roam.as_mut().map(|r| r.pre_step(&self.sim)) {
+                for (e, input) in inputs {
+                    if let Some(idx) = self.index(e) {
+                        self.log_input(idx, input);
+                    }
+                }
+            }
+        }
 
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
         // All sim vehicles (city police / traffic cars are drawn and interpolated too);
@@ -1436,6 +1518,9 @@ impl Session {
         self.sync_cars();
         let drained = self.sim.drain_events();
         self.observe_run(&drained);
+        if let Some(roam) = &mut self.roam {
+            roam.post_step(&drained);
+        }
         // Race judging, outside the step: SimEvent::Race signals (and the police events of a
         // delivered meet report) join this tick's events.
         let extra = match &mut self.race {
@@ -1841,6 +1926,7 @@ impl Session {
             race: snap.race.clone(),
             meet_spots: MeetSpots::default(),
             horn_was: false,
+            roam: None,
             crash: CrashRecorder::off(),
         };
         s.run_ticks(start - snap.tick);

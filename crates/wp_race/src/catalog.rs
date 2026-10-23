@@ -49,6 +49,8 @@ pub enum RaceCity {
     /// Port Vesper + Ashpeak County (`ashpeak`): races on Ashpeak County's roads (the
     /// mountains, farmland, freeways and Ashpeak City around Port Vesper).
     Ashpeak,
+    /// A touge pass (`wp_world::touge::TOUGE_IDS`; battles in [`crate::touge`]).
+    Touge(&'static str),
 }
 
 impl RaceCity {
@@ -58,6 +60,7 @@ impl RaceCity {
             RaceCity::Vesper => "vesper_v2",
             RaceCity::Grid => "procedural_12x12",
             RaceCity::Ashpeak => "ashpeak",
+            RaceCity::Touge(id) => id,
         }
     }
 
@@ -69,6 +72,11 @@ impl RaceCity {
             RaceCity::Vesper => &["vesper_v2", "ashpeak"],
             RaceCity::Grid => &["procedural_12x12"],
             RaceCity::Ashpeak => &["ashpeak"],
+            // A touge pass is its own map (a slice of the static id list).
+            RaceCity::Touge(id) => match TOUGE_HOSTS.iter().position(|t| t == id) {
+                Some(i) => &TOUGE_HOSTS[i..=i],
+                None => &[],
+            },
         }
     }
 
@@ -77,6 +85,9 @@ impl RaceCity {
         self.hosts().contains(&city_id)
     }
 }
+
+/// The touge pass ids as a static ([`RaceCity::hosts`] hands out one-element slices of it).
+static TOUGE_HOSTS: [&str; wp_world::touge::TOUGE_IDS.len()] = wp_world::touge::TOUGE_IDS;
 
 /// How the course is laid on the city's roads.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -585,9 +596,15 @@ pub fn race(id: &str) -> Option<RaceDef> {
     races().into_iter().find(|r| r.id == id)
 }
 
-/// The race a scenario name stands for (`race_<id>`, see [`RaceDef::scenario_name`]).
+/// The race a scenario name stands for: a picker race (`race_<id>`, see
+/// [`RaceDef::scenario_name`]) or a touge battle on one of the passes
+/// (`race_touge:<pass>:<up|down>:<day|night>:<dry|rain>:<challenger|boss>`,
+/// [`crate::touge::TougeSetup::scenario_name`]).
 pub fn race_for_scenario(name: &str) -> Option<RaceDef> {
-    races().into_iter().find(|r| r.scenario_name() == name)
+    races()
+        .into_iter()
+        .find(|r| r.scenario_name() == name)
+        .or_else(|| crate::touge::TougeSetup::from_scenario_name(name).map(|t| t.race_def()))
 }
 
 /// The point `d` metres along `polyline` (`None` past either end).
