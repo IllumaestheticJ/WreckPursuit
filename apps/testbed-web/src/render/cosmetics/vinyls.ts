@@ -1,4 +1,4 @@
-// The vinyl library and the car's livery canvas: base paint, bare carbon panels and one vinyl
+// The vinyl library and the car's livery canvas: base paint and one vinyl
 // design, drawn into the livery atlas of the car's panel mesh (layout: data/panels/README.md
 // "Livery atlas"). Designs draw in car metres through `Painter`, so one design fits every
 // model. All designs are our own: shapes, made-up words, no real brands or logos.
@@ -545,23 +545,6 @@ const DESIGNS: Record<string, Design> = {
 /** Ids of the vinyl designs. */
 export const VINYL_IDS = Object.keys(DESIGNS);
 
-/** Carbon weave tile (pixel space). */
-function carbonPattern(g: CanvasRenderingContext2D): CanvasPattern | string {
-  const c = document.createElement("canvas");
-  c.width = c.height = 8;
-  const t = c.getContext("2d");
-  if (!t) return "#202326";
-  t.fillStyle = "#1b1d20";
-  t.fillRect(0, 0, 8, 8);
-  t.fillStyle = "#34383d";
-  t.fillRect(0, 0, 4, 4);
-  t.fillRect(4, 4, 4, 4);
-  t.fillStyle = "#2a2d31";
-  t.fillRect(0, 1, 4, 1);
-  t.fillRect(4, 5, 4, 1);
-  return g.createPattern(c, "repeat") ?? "#202326";
-}
-
 /** Contrast inks for a paint colour. */
 export function inksFor(paint: THREE.Color): Inks {
   const lum = 0.2126 * paint.r + 0.7152 * paint.g + 0.0722 * paint.b;
@@ -571,12 +554,12 @@ export function inksFor(paint: THREE.Color): Inks {
 }
 
 /**
- * The livery canvas of a look: base paint, carbon panels, the vinyl. Null when there is nothing
+ * The livery canvas of a look: base paint and the vinyl. Null when there is nothing
  * to draw (plain paint needs no texture).
  */
-export function liveryCanvas(frame: CarFrame, paint: THREE.Color, vinyl: string | undefined, carbon: Set<"hood" | "trunk">, old: HTMLCanvasElement | null): HTMLCanvasElement | null {
+export function liveryCanvas(frame: CarFrame, paint: THREE.Color, vinyl: string | undefined, old: HTMLCanvasElement | null): HTMLCanvasElement | null {
   const design = vinyl ? DESIGNS[vinyl] : undefined;
-  if (!design && carbon.size === 0) return null;
+  if (!design) return null;
   const cv = old ?? document.createElement("canvas");
   cv.width = W;
   cv.height = H;
@@ -587,10 +570,6 @@ export function liveryCanvas(frame: CarFrame, paint: THREE.Color, vinyl: string 
   g.fillRect(0, 0, W, H);
   const doors = frame.region("LeftDoorF") ?? frame.region("RightDoorF");
   const p = new Painter(g, frame.atlas, frame.body.min.z + 0.03, doors?.max.z ?? frame.body.min.z + 0.7);
-  for (const panel of carbon) {
-    const b = panel === "hood" ? frame.hood : frame.trunk;
-    p.fillPx("top", b.min.y, b.min.x, b.max.y, b.max.x, carbonPattern(g));
-  }
   design?.(p, inksFor(paint));
   g.setTransform(1, 0, 0, 1, 0, 0);
   return cv;

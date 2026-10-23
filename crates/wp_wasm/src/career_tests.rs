@@ -806,3 +806,65 @@ fn a_car_with_a_torn_off_panel_can_be_quoted_and_repaired() {
     c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
     assert!(c.profile().account.car(uid).unwrap().damage.is_pristine());
 }
+
+/// Row 163 with mounted parts (PR #55): a car whose save has a torn-off panel (a synthetic
+/// detached group, which needs the car's panels attached) and parts mounted on its bumper and
+/// trunk lid can be shown in the workshop, have its host panel taken off and refitted with the
+/// mounted part, and be quoted and repaired.
+#[test]
+fn a_car_with_a_torn_off_panel_and_mounted_parts_can_be_quoted_repaired_and_worked_on() {
+    let (mut c, uid) = career_with("kestrel_ts", 80_000, DamageMode::Arcade);
+    c.install_mod(uid, "aero_splitter").unwrap();
+    c.install_mod(uid, "aero_wing_1").unwrap();
+    drive_and_crash(&mut c, 35.0);
+    let mut snap = c
+        .lattice(uid)
+        .unwrap()
+        .expect("crash stored a lattice blob");
+    snap.snapshot
+        .detached_groups
+        .insert(wp_damage::panels::SYNTHETIC_GROUP_BASE);
+    c.profile_mut()
+        .lattices
+        .insert(uid.0, serde_json::to_string(&snap).unwrap());
+
+    // The workshop shows the mounts.
+    let w = c.workshop(uid).unwrap();
+    let bumper = w
+        .view
+        .slots
+        .iter()
+        .find(|s| s.id == "front_bumper")
+        .unwrap();
+    assert_eq!(bumper.takes_along, vec!["front_splitter".to_string()]);
+    let wing = w.view.slots.iter().find(|s| s.id == "rear_wing").unwrap();
+    assert_eq!(wing.mount.as_deref(), Some("trunk_lid"));
+    // The 3D workshop session shows the car with its saved damage.
+    let s = c
+        .showroom(uid, free_drive("ignored", DamageMode::Arcade, false))
+        .unwrap();
+    assert!(
+        player_damage(&s).summary().health < 1.0,
+        "saved dents are shown"
+    );
+    drop(s);
+
+    // Host panel off and on again: the splitter leaves and comes back with it (fitting
+    // restores the bumper area of the stored lattice through the career damage model).
+    let b = c.remove_part(uid, "front_bumper").unwrap();
+    let mods = &c.profile().account.car(uid).unwrap().mods;
+    assert!(!mods.contains(&"aero_splitter".to_string()), "{mods:?}");
+    c.fit_part(uid, "front_bumper", b).unwrap();
+    let mods = &c.profile().account.car(uid).unwrap().mods;
+    assert!(mods.contains(&"aero_splitter".to_string()), "{mods:?}");
+
+    // Quote and repair: the car comes back pristine with its mounted parts on.
+    c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    let car = c.profile().account.car(uid).unwrap();
+    assert!(car.damage.is_pristine());
+    assert!(car.mods.contains(&"aero_splitter".to_string()));
+    assert!(car.mods.contains(&"aero_wing_1".to_string()));
+    assert!(c.workshop(uid).unwrap().view.missing.is_empty());
+    assert!(c.start_blocker().is_none());
+}
