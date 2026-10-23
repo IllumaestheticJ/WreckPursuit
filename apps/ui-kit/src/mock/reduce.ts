@@ -154,7 +154,14 @@ function hitRegion(p: Playback, region: BodyRegion, severity: number, spill = 0.
 const split = (s: string) => s.replace(/([a-z])([A-Z])/g, "$1 $2");
 
 function say(p: Playback, line: EventLine, channel: ScannerEntry["channel"], severity: ScannerEntry["severity"], text: string, entity?: number): void {
-  p.scanner = [...p.scanner, { id: p.nextId++, tick: line.tick, tS: line.t_s, channel, severity, text, entity }];
+  const e: ScannerEntry = { id: p.nextId++, tick: line.tick, tS: line.t_s, channel, severity, text, entity };
+  if (channel === "unit" && isAirLine(text)) e.air = true;
+  p.scanner = [...p.scanner, e];
+}
+
+/** A line spoken by a helicopter pilot: `wp_police` starts each with its call sign "Air <n>". */
+export function isAirLine(text: string): boolean {
+  return /^Air \d+\b/.test(text);
 }
 
 function incident(p: Playback, line: EventLine, kind: Incident["kind"], pos: Vec2, suspect: number | null): void {

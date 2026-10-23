@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
+import { HeliAudio } from "./heli";
 import { ScannerPlayer } from "./scanner";
 import { EngineSynthHost } from "./engine_host";
 import { renderFlap } from "./flat_tyre";
@@ -41,6 +42,11 @@ export class AudioSystem {
   private mixer: AudioMixer | null = null;
   private pool: VoicePool | null = null;
   private scanner: ScannerPlayer | null = null;
+  /** Helicopter pilot radio and in-world rotor (heli.ts, PR #32). */
+  private heli: HeliAudio | null = null;
+  /** Helicopters this frame: police_helicopters() rows (`setHelicopters`). */
+  private helis: ArrayLike<number> = [];
+  private heliStride = 8;
   /** Siren v2 sub-bus and acoustics (null before the AudioContext starts). */
   sirens: SirenRack | null = null;
   /** Siren lab in the audio panel. */
@@ -141,14 +147,18 @@ export class AudioSystem {
       this.panel.setStatus(`audio unavailable: ${e}`);
       return;
     }
-    this.ctx = new AudioContext({ latencyHint: "interactive" });
+    // "balanced" rather than "interactive": a somewhat larger output buffer rides out a busy
+    // frame's audio-thread spike instead of dropping out (playtest: the whole mix cut in and
+    // out with many cars around). A few ms more latency; impacts still land within a frame.
+    this.ctx = new AudioContext({ latencyHint: "balanced" });
     this.mixer = new AudioMixer(this.ctx, this.lib.config.master);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
     this.pool.source = this.panel.settings.source;
     this.sirens = new SirenRack(this.ctx, this.mixer, this.lib);
     this.pool.router = this.sirens;
     this.pool.impacts.enabled = this.panel.settings.impacts !== "recorded";
-    this.scanner = new ScannerPlayer(this.pool);
+    this.heli = new HeliAudio(this.ctx, this.mixer);
+    this.scanner = new ScannerPlayer(this.pool, this.heli);
     this.scanner.onSay = (unit, text, tier) => this.onRadioSay?.(unit, text, tier);
     const s = this.panel.settings;
     this.mixer.master.gain.value = this.ducked ? 0 : s.master;
@@ -411,6 +421,18 @@ export class AudioSystem {
     this.safe(() => audioBridge.radio(12 + (this.lineNo % 3), p, text));
   }
 
+  /** Helicopters this frame for the in-world rotor: police_helicopters() rows ([x, y, z, …]
+   * every `stride` floats, sim space). */
+  setHelicopters(helis: ArrayLike<number>, stride = 8): void {
+    this.helis = helis;
+    this.heliStride = stride;
+  }
+
+  /** Helicopter audio counters (e2e): pilot lines spoken, mic key-ups. */
+  heliStats(): { airLines: number; keyUps: number } {
+    return { airLines: this.scanner?.airLines ?? 0, keyUps: this.heli?.keyUps ?? 0 };
+  }
+
   /** Per-frame update. `events` = this frame's drained SimEvents: decoded, or the JSON text the
    * sim produced (`sim.lastEventsJson()`, passed through without a re-stringify). */
   update(camera: THREE.Camera, events: unknown[] | string, dt: number, focus: number, cameraMode?: string): void {
@@ -446,6 +468,7 @@ export class AudioSystem {
     const a = this.listenerArr;
     a.set([pos.x, pos.y, pos.z, this.vel.x, this.vel.y, this.vel.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z]);
     setListener(ctx, [pos.x, pos.y, pos.z], [fwd.x, fwd.y, fwd.z], [up.x, up.y, up.z]);
+    this.heli?.updateWorld(this.helis, this.heliStride, [pos.x, pos.y, pos.z]);
 
     const t0 = performance.now();
     let out;
