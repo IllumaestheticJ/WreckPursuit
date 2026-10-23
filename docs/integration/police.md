@@ -1473,15 +1473,28 @@ Traces show these are recovery episodes, not units parked for good. Typical case
 | baseline | 1.55 | 6.9 | 1.20 | 82 % |
 | head-on pairs: lower id keeps its route, the other backs out | 1.58 | 6.9 | 1.19 | 82 % |
 | + active-unit reset 8 → 5 s, responders included | 1.31 | 6.2 | 1.54 | 79 % |
+| queue pass: pass a stopped queue (≤ 8 cars, 120 m, cars ≤ 9 m apart) in one go | 1.70 | 6.9 | 1.34 | 78 % |
+| queue pass + no push-through into a queue (un-stick at once instead) | 1.46 | 6.6 | 1.25 | 78 % |
 
 The head-on rule changes nothing: the existing deadlock reset already resolves those pairs. The 5 s watchdog cuts long stops by 15 %, but police crashes rise by 28 % and captures drop, so it is not worth it.
 
+The queue pass (2026-10-23, round12 314c01d1) passes the whole queue in the oncoming lane instead of one car at a time. Alone it is worse on every count: more time in the oncoming lane means more head-ons with traffic coming the other way, and those stops are traffic-held (201 vs 162). With no push-through into a queue, stops fall 6 % (traffic-held time 1216 → 1130 s), which is not clearly lower. Capture drops 4 points and crashes rise. Both were reverted (never pushed).
+
 Still open in row 86:
-- treating red lights as a yield when under siren;
-- using the opposite lane or the shoulder when queued (an earlier shoulder pass drove a unit into a wall);
+- red lights as a yield under siren: already in place (`avoid::junction_speed`: with lights a unit slows to `siren_red_mps`, gives way to cross traffic for at most `yield_max_siren_s`, then goes; chasing units use `chase_red_mps` / `chase_yield_max_s`). The audit does not yet say how many "nothing recorded" stops are at lights;
+- using the shoulder when queued (an earlier shoulder pass drove a unit into a wall); the opposite lane is tried above;
 - making push-through recover faster behind traffic.
 
-### Rows 86, 96, 75 — not started yet.
+### Row 75: a cop spawned upside down in view (2026-10-23)
+
+Owner: "a cop car spawned upside down in the road, in view". Spawn spots (pool, responder, backup, ambush and tool cars) were checked against moving and standing vehicles, but not against the world's parked cars and cones. A unit could be placed on a parked car and thrown over by the physics.
+
+- **Spawn clearance.** Every spawn spot must now also be `SPAWN_PROP_CLEAR_M` (3 m) clear of parked cars and cones (`PropIndex::clear_of`, `dispatch::spot_clear`). Spawning in view was already ruled out (row 131).
+- **Flipped reset.** wp_sim reports each physical unit's chassis up axis (`PoliceSystem::sync_unit_upright`; minimal glue in `wp_sim::police_link`). A unit on its side or roof (up below `FLIPPED_UP_Z` 0.3) for `FLIPPED_RESET_S` (1.5 s) is reset upright in its lane by the row 78 reset: out of every racer's view, damage kept, ghost for 1 s.
+- **Tests.** `unit_on_its_roof_is_reset_upright` (fails with the flipped branch disabled) and `prop_clearance_for_spawns`.
+- **Goldens.** 8 moved, re-blessed in their own [bless] commit: the two jam pursuits, four opponent scenarios, the Lantern checkpoint race and the traffic soak observer. The new spawn draws change where units first appear. Round12 merged into the commit before row 75 matches every golden. All expected ranges still pass.
+
+### Row 96 — in progress (not pushed).
 ## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`; merged 2026-10-21 by `triage/helicopter`)
 
 Owner backlog item **P9 — Helicopter**: joins at wanted level 3, flies overhead, keeps you in
